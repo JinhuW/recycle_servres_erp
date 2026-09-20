@@ -1,5 +1,5 @@
-// Seeding the book from shipping history, and the purchase-order link that
-// makes "what they sold us" derive itself.
+// Seeding the book from tracked-package history, and the purchase-order link
+// that makes "what they sold us" derive itself.
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
@@ -7,14 +7,11 @@ import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS, PRIYA } from './helpers/auth';
 
 type Sugg = {
-  matchKey: string; name: string; poCount: number; spend: number;
-  city: string | null; zip: string | null; phone: string | null;
-  street1: string | null; source: string;
+  matchKey: string; name: string; poCount: number; spend: number; source: string;
 };
 
 async function seedHistory(email: string, opts: {
-  order: string; seller: string; zip?: string; street?: string; cost: number;
-  viaPackage?: boolean; tracking?: string;
+  order: string; seller: string; cost: number; tracking?: string;
 }) {
   const sql = getTestDb();
   const [{ id: userId }] = await sql<{ id: string }[]>`SELECT id FROM users WHERE email = ${email}`;
@@ -22,23 +19,15 @@ async function seedHistory(email: string, opts: {
   await sql`
     INSERT INTO orders (id, user_id, category, warehouse_id, lifecycle, total_cost, created_at)
     VALUES (${opts.order}, ${userId}, 'RAM', ${whId}, 'done', ${opts.cost}, NOW() - INTERVAL '20 days')`;
-  if (opts.viaPackage) {
-    await sql`
-      INSERT INTO packages (tracking_number, carrier, order_id, seller_name)
-      VALUES (${opts.tracking ?? opts.order}, 'UPS', ${opts.order}, ${opts.seller})`;
-  } else {
-    await sql`
-      INSERT INTO shipments (order_id, from_name, from_phone, from_street1, from_city,
-                             from_state, from_zip, weight_oz, length_in, width_in, height_in, provider)
-      VALUES (${opts.order}, ${opts.seller}, '303-555-0142', ${opts.street ?? '1 Main St'},
-              'Aurora', 'CO', ${opts.zip ?? '80012'}, 10, 1, 1, 1, 'stub')`;
-  }
+  await sql`
+    INSERT INTO packages (tracking_number, carrier, order_id, seller_name)
+    VALUES (${opts.tracking ?? opts.order}, 'UPS', ${opts.order}, ${opts.seller})`;
 }
 
 describe('suggestions', () => {
   beforeEach(async () => { await resetDb(); });
 
-  it('offers sellers you have shipped with, with their history attached', async () => {
+  it('offers sellers whose boxes you have tracked, with their history attached', async () => {
     await seedHistory(MARCUS, { order: 'PO-S001', seller: 'Denver Datacenter Liquidators', cost: 8400 });
     await seedHistory(MARCUS, { order: 'PO-S002', seller: "denver datacenter liquidators!", cost: 3000 });
     const marcus = await loginAs(MARCUS);
@@ -47,8 +36,7 @@ describe('suggestions', () => {
     // two spellings collapse to one suggestion carrying both orders
     expect(hit.poCount).toBe(2);
     expect(hit.spend).toBe(11400);
-    expect(hit.phone).toBe('303-555-0142');
-    expect(hit.source).toBe('shipping');
+    expect(hit.source).toBe('package');
   });
 
   it("never offers another purchaser's sellers", async () => {
@@ -118,9 +106,9 @@ describe('adopt', () => {
     expect(d.body.timeline[0].body).toMatch(/2 past purchase orders linked/);
   });
 
-  it('links a package-only seller by name, since a package carries no address', async () => {
+  it('links a seller by name, since a package carries no address', async () => {
     await seedHistory(MARCUS, { order: 'PO-A010', seller: 'Mike Trujillo', cost: 340,
-      viaPackage: true, tracking: '1Z999AA10123456784' });
+      tracking: '1Z999AA10123456784' });
     const marcus = await loginAs(MARCUS);
     const s = (await api<{ items: Sugg[] }>('GET', '/api/suppliers/suggestions',
       { token: marcus.token })).body.items[0];

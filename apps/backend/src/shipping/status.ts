@@ -1,21 +1,17 @@
-// Shipment status machine — the single allowed-transition table, shared by the
-// routes (buy/void/delete guards) and the tracking poll (carrier-driven
-// moves). Terminal states have empty sets.
+// Package status machine — the single allowed-transition table for the
+// carrier-driven moves applied by the tracking poll and the webhook.
+// Terminal states have empty sets.
 
-import type { ShipmentStatus } from './types';
+import type { PackageStatus } from './types';
 
-export const ALLOWED_TRANSITIONS: Record<ShipmentStatus, ReadonlySet<ShipmentStatus>> = {
-  draft: new Set(['quoted']),
-  // quoted → quoted is a re-quote after editing nothing rate-relevant.
-  quoted: new Set(['quoted', 'purchased']),
-  purchased: new Set(['in_transit', 'delivered', 'voided', 'exception']),
-  in_transit: new Set(['delivered', 'voided', 'exception']),
-  // Carrier exceptions recover (address fixed, redelivery) or end the shipment.
-  exception: new Set(['in_transit', 'delivered', 'voided']),
+export const ALLOWED_TRANSITIONS: Record<PackageStatus, ReadonlySet<PackageStatus>> = {
+  purchased: new Set(['in_transit', 'delivered', 'exception']),
+  in_transit: new Set(['delivered', 'exception']),
+  // Carrier exceptions recover (address fixed, redelivery) or end the trip.
+  exception: new Set(['in_transit', 'delivered']),
   delivered: new Set([]),
-  voided: new Set([]),
 };
 
-export function canTransition(from: ShipmentStatus, to: ShipmentStatus): boolean {
+export function canTransition(from: PackageStatus, to: PackageStatus): boolean {
   return ALLOWED_TRANSITIONS[from]?.has(to) ?? false;
 }

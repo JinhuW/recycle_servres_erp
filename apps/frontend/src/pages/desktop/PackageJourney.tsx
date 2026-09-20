@@ -13,7 +13,7 @@ import { StepTimeline } from './StepTimeline';
 type Props = { pkg: OrderPackage };
 
 // Tracking added → in transit → delivered. An exception is a badge state, not
-// a step on the way — same rule as the prepaid-label timeline.
+// a step on the way.
 const STEP_POS: Record<PackageStatus, number> = {
   purchased: 0, in_transit: 1, delivered: 2, exception: 1,
 };

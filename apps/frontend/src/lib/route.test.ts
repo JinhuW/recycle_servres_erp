@@ -1,29 +1,19 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { hrefFor, navigate, navigateBack, onLinkClick, parseShippingRoute, pathToDesktopView, readSafeNext, type LinkClick } from './route';
 
-// `/shipping/new` shares a shape with `/shipping/:orderId`, so the parser's
-// check order is what keeps the wizard from being read as a PO id.
 describe('parseShippingRoute', () => {
-  it('distinguishes the wizard from an order id', () => {
-    expect(parseShippingRoute('/shipping/new')).toEqual({ kind: 'wizardNew' });
-    expect(parseShippingRoute('/shipping/PO-1372')).toEqual({ kind: 'focus', orderId: 'PO-1372' });
-  });
-
-  it('parses the dashboard and the per-PO wizard routes', () => {
+  it('parses the dashboard and the add-label routes', () => {
     expect(parseShippingRoute('/shipping')).toEqual({ kind: 'dashboard' });
-    expect(parseShippingRoute('/shipping/PO-1372/label'))
-      .toEqual({ kind: 'wizardPo', orderId: 'PO-1372', sid: null });
-    expect(parseShippingRoute('/shipping/PO-1372/label/sh_9'))
-      .toEqual({ kind: 'wizardPo', orderId: 'PO-1372', sid: 'sh_9' });
+    expect(parseShippingRoute('/shipping/add')).toEqual({ kind: 'addLabel' });
   });
 
   it('returns null off the shipping tree', () => {
     expect(parseShippingRoute('/purchase-orders/PO-1372')).toBeNull();
-    expect(parseShippingRoute('/shipping/PO-1372/other')).toBeNull();
+    expect(parseShippingRoute('/shipping/PO-1372')).toBeNull();
   });
 
   it('keeps every shipping shape on the shipping view', () => {
-    for (const p of ['/shipping', '/shipping/new', '/shipping/PO-1372', '/shipping/PO-1372/label', '/shipping/PO-1372/label/sh_9']) {
+    for (const p of ['/shipping', '/shipping/add']) {
       expect(pathToDesktopView(p)).toBe('shipping');
     }
   });

@@ -4,12 +4,12 @@ import { Icon } from '../components/Icon';
 import { PhHeader } from '../components/PhHeader';
 import { PhoneListSkeleton } from '../components/Skeleton';
 import { SnScanner } from '../components/SnScanner';
-import { ApiError, api, listShipments } from '../lib/api';
+import { ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { CARRIERS, extractTrackingFromBarcode } from '../lib/carrierDetect';
 import { FMT_HINT_KEY, useAddPackageForm } from '../lib/useAddPackageForm';
 import { handleFetchError } from '../lib/errorToast';
-import { fmtDateShort, fmtMoney } from '../lib/format';
+import { fmtDateShort } from '../lib/format';
 import { useT } from '../lib/i18n';
 import {
   createPoFromPackage, listPackages, lookupPackage, refreshPackage,
@@ -18,18 +18,13 @@ import {
 import { PACKAGE_SOURCES, packageSourceLabelKey } from '../lib/packageSource';
 import { navigate, navigateBack, type ShippingRoute } from '../lib/route';
 import { RouteLink } from '../components/RouteLink';
-import { shareOrCopy } from '../lib/shareOrCopy';
-import { STATUS_CHIP, fmtEta, mergeInbound, type InboundRow, type ShipOrder } from '../lib/shippingList';
-import { canCreatePo, groupInbound, inboundAction, journeyPos, needsCompletePo, type InboundAction } from '../lib/shippingInbound';
+import { STATUS_CHIP, fmtEta, mergeInbound, type InboundRow } from '../lib/shippingList';
+import { canCreatePo, groupInbound, inboundAction, journeyPos, type InboundAction } from '../lib/shippingInbound';
 import { usePhScrolled } from '../lib/usePhScrolled';
-import type { Order, Shipment } from '../lib/types';
 
 // Mobile shipping: the desktop table is a ledger; the phone is a glance.
 // One screen groups the same rows by what the user should do about them
-// (act / wait / done), the add screen pastes a tracking number, and the
-// focus screen shows one PO's labels. Buying labels stays a desktop task —
-// cards that reach that step hand off honestly instead of half-porting the
-// wizard.
+// (act / wait / done), and the add screen pastes a tracking number.
 
 type ToastKind = 'success' | 'error';
 
@@ -44,8 +39,6 @@ type Props = {
 
 export function MobileShipping({ route, showToast, onCreatedPo }: Props) {
   if (route.kind === 'addLabel') return <AddPackageScreen showToast={showToast} />;
-  if (route.kind === 'focus') return <PoShippingScreen orderId={route.orderId} showToast={showToast} />;
-  if (route.kind === 'wizardNew' || route.kind === 'wizardPo') return <WizardHandoffScreen />;
   return <InboundListScreen showToast={showToast} onCreatedPo={onCreatedPo} />;
 }
 
@@ -60,7 +53,6 @@ function InboundListScreen({ showToast, onCreatedPo }: Omit<Props, 'route'>) {
   const { t } = useT();
   const { user } = useAuth();
   const [rows, setRows] = useState<InboundRow[] | null>(null);
-  const [showVoided, setShowVoided] = useState(false);
   const [scan, setScan] = useState<ScanState | null>(null);
   const [poBusy, setPoBusy] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -106,18 +98,12 @@ function InboundListScreen({ showToast, onCreatedPo }: Omit<Props, 'route'>) {
     let alive = true;
     let loadedOnce = false;
     const load = () =>
-      Promise.all([
-        // Personal surface: always my own rows, managers included.
-        api.get<{ items: (Shipment & { order: ShipOrder })[] }>('/api/shipments?limit=200&mine=true'),
-        listPackages({ mine: true }),
-      ])
-        .then(([shipments, packages]) => {
+      // Personal surface: always my own rows, managers included.
+      listPackages({ mine: true })
+        .then((packages) => {
           if (!alive) return;
           loadedOnce = true;
-          setRows(mergeInbound(
-            shipments.items.map(({ order, ...shipment }) => ({ order, shipment })),
-            packages.items,
-          ));
+          setRows(mergeInbound(packages.items));
         })
         // A failed refresh tick keeps showing the last good list.
         .catch((e) => { if (alive && !loadedOnce) handleFetchError(e); });
@@ -203,19 +189,13 @@ function InboundListScreen({ showToast, onCreatedPo }: Omit<Props, 'route'>) {
             {groups.arrived.map(r => <InboundCard key={rowKey(r)} row={r} showToast={showToast} onCreatedPo={onCreatedPo} onRefreshed={() => reload.current()} />)}
           </>
         )}
-        {groups.voided.length > 0 && (
-          <button className="ph-ship-voided-toggle" onClick={() => setShowVoided(v => !v)}>
-            {showVoided ? t('shipMobHideVoided') : t('shipMobShowVoided', { n: groups.voided.length })}
-          </button>
-        )}
-        {showVoided && groups.voided.map(r => <InboundCard key={rowKey(r)} row={r} showToast={showToast} onCreatedPo={onCreatedPo} onRefreshed={() => reload.current()} />)}
       </div>
     </>
   );
 }
 
 function rowKey(r: InboundRow): string {
-  return r.kind === 'package' ? `p:${r.pkg.id}` : `s:${r.shipment.id}`;
+  return `p:${r.pkg.id}`;
 }
 
 // ── Scan result sheets ───────────────────────────────────────────────────────
@@ -345,33 +325,28 @@ function InboundCard({ row, showToast, onCreatedPo, onRefreshed }: {
   const [busy, setBusy] = useState(false);
   const action = inboundAction(row, user?.role === 'manager');
 
-  const status = row.kind === 'package' ? row.pkg.status : row.shipment.status;
+  const { pkg } = row;
+  const status = pkg.status;
   const chip = STATUS_CHIP[status];
-  const eta = fmtEta(row.kind === 'package' ? row.pkg.trackingEta : row.shipment.trackingEta, locale);
-  const tracking = row.kind === 'package' ? row.pkg.trackingNumber : row.shipment.trackingNumber;
-  const carrier = row.kind === 'package' ? row.pkg.carrier : row.shipment.carrier;
-  const trackUrl = row.kind === 'package'
-    ? row.pkg.trackingUrl
-    : row.shipment.trackingUrl;
-  const poId = row.kind === 'package' ? row.pkg.orderId : row.order.id;
-  const who = row.kind === 'package'
-    ? (row.pkg.sellerName || null)
-    : (row.shipment.from.name || null);
-  const when = fmtDateShort(row.kind === 'package' ? row.pkg.createdAt : row.shipment.createdAt, locale);
+  const eta = fmtEta(pkg.trackingEta, locale);
+  const tracking = pkg.trackingNumber;
+  const carrier = pkg.carrier;
+  const trackUrl = pkg.trackingUrl;
+  const poId = pkg.orderId;
+  const who = pkg.sellerName || null;
+  const when = fmtDateShort(pkg.createdAt, locale);
 
   // The headline answers the glance: an arrival day while it moves, the
   // situation once it needs a decision.
   const headline =
     status === 'in_transit' || status === 'purchased'
       ? (eta ? t('shipMobArrives', { eta }) : t(chip.key))
-      : action?.kind === 'reshare-link' ? t('shipWaitingSeller')
-      : action?.kind === 'buy-desktop' ? t('shipMobAddrIn')
       : t(chip.key);
 
-  const tone = status === 'exception' ? 'warn' : status === 'voided' ? 'muted' : status === 'delivered' ? 'done' : 'ok';
+  const tone = status === 'exception' ? 'warn' : status === 'delivered' ? 'done' : 'ok';
 
   const createPo = async () => {
-    if (row.kind !== 'package' || busy) return;
+    if (busy) return;
     setBusy(true);
     try {
       const { orderId } = await createPoFromPackage(row.pkg);
@@ -386,23 +361,13 @@ function InboundCard({ row, showToast, onCreatedPo, onRefreshed }: {
     }
   };
 
-  const shareLink = (tok: string) => shareOrCopy({
-    url: `${window.location.origin}/s/${tok}`,
-    title: t('sellerFillTitle'),
-    copiedMsg: t('shipLinkCopied'),
-    failedMsg: t('shipMobShareFailed'),
-    onToast: showToast,
-  });
-
   const copyTracking = (tn: string) => {
     navigator.clipboard?.writeText(tn)
       .then(() => showToast(t('shipCopied')))
       .catch(() => { /* the visible number is selectable */ });
   };
 
-  // Only packages can be asked directly: a shipment's label is the provider's
-  // own and moves on the poll.
-  const refresh = row.kind === 'package' ? async () => {
+  const refresh = async () => {
     setBusy(true);
     try {
       await refreshPackage(row.pkg.id);
@@ -416,12 +381,10 @@ function InboundCard({ row, showToast, onCreatedPo, onRefreshed }: {
     } finally {
       setBusy(false);
     }
-  } : undefined;
-
-  const openFocus = row.kind === 'shipment' ? () => navigate(`/shipping/${row.order.id}`) : undefined;
+  };
 
   return (
-    <div className={'ph-ship-card' + (openFocus ? ' tappable' : '')} onClick={openFocus}>
+    <div className="ph-ship-card">
       <div className="ph-ship-head">
         <span className={'ph-ship-headline' + (tone === 'warn' ? ' warn' : '')}>{headline}</span>
         {/* The chip restates the status; skip it when the headline already is it. */}
@@ -430,17 +393,14 @@ function InboundCard({ row, showToast, onCreatedPo, onRefreshed }: {
       <JourneyStrip pos={journeyPos(row)} tone={tone} />
       <div className="ph-ship-sub">
         {who && <span className="ph-ship-who">{who}</span>}
-        {row.kind === 'package' && row.pkg.source && (
-          <span className="chip muted">{t(packageSourceLabelKey(row.pkg.source))}</span>
+        {pkg.source && (
+          <span className="chip muted">{t(packageSourceLabelKey(pkg.source))}</span>
         )}
         {poId
           ? <RouteLink to={`/purchase-orders/${poId}`} className="ship-po-pill">{poId}</RouteLink>
           : <span className="chip muted">{t('shipColNoPo')}</span>}
         <span className="ph-ship-when">{when}</span>
       </div>
-      {row.kind === 'shipment' && row.shipment.status === 'exception' && row.shipment.trackingStatus && (
-        <div className="ph-ship-exc">{t('shipExceptionNote', { status: row.shipment.trackingStatus })}</div>
-      )}
       {tracking && (
         <div className="ph-ship-track" onClick={(e) => e.stopPropagation()}>
           {carrier && <span className="ship-carrier-chip">{carrier}</span>}
@@ -451,55 +411,34 @@ function InboundCard({ row, showToast, onCreatedPo, onRefreshed }: {
           {trackUrl && (
             <a href={trackUrl} target="_blank" rel="noreferrer" className="ph-ship-out" aria-label={t('shipTrackOnCarrier', { carrier: carrier ?? '' })}>↗</a>
           )}
-          {refresh && row.kind === 'package' && row.pkg.status !== 'delivered' && (
+          {status !== 'delivered' && (
             <button className="btn ghost sm" disabled={busy} onClick={() => void refresh()}>
               {t('shipRefresh')}
             </button>
           )}
         </div>
       )}
-      <CardCta action={action} busy={busy} onCreatePo={createPo} onShare={shareLink} />
+      <CardCta action={action} busy={busy} onCreatePo={createPo} />
     </div>
   );
 }
 
-function CardCta({ action, busy, onCreatePo, onShare }: {
+function CardCta({ action, busy, onCreatePo }: {
   action: InboundAction;
   busy: boolean;
   onCreatePo: () => void;
-  onShare: (token: string) => void;
 }) {
   const { t } = useT();
   if (!action) return null;
-  const stopClick = (e: { stopPropagation: () => void }) => e.stopPropagation();
-  switch (action.kind) {
-    case 'create-po':
-      return (
-        <button className="ph-ship-cta accent" disabled={busy} onClick={(e) => { stopClick(e); onCreatePo(); }}>
-          {busy ? '…' : t('shipCreatePo')}
-        </button>
-      );
-    case 'complete-po':
-      return (
-        <RouteLink to={`/purchase-orders/${action.orderId}`} className="ph-ship-cta accent">
-          {t('shipCompletePo')}
-        </RouteLink>
-      );
-    case 'reshare-link':
-      return (
-        <button className="ph-ship-cta" onClick={(e) => { stopClick(e); onShare(action.token); }}>
-          <Icon name="mail" size={14} /> {t('shipMobShareLink')}
-        </button>
-      );
-    case 'buy-desktop':
-      return <div className="ph-ship-hint">{t('shipMobBuyDesktop')}</div>;
-    case 'finish-desktop':
-      return <div className="ph-ship-hint">{t('shipMobFinishDesktop')}</div>;
-  }
+  return (
+    <button className="ph-ship-cta accent" disabled={busy} onClick={onCreatePo}>
+      {busy ? '…' : t('shipCreatePo')}
+    </button>
+  );
 }
 
 // The desktop timeline compressed to a strip: created → label → moving → here.
-function JourneyStrip({ pos, tone }: { pos: number; tone: 'ok' | 'warn' | 'muted' | 'done' }) {
+function JourneyStrip({ pos, tone }: { pos: number; tone: 'ok' | 'warn' | 'done' }) {
   return (
     <div className={'ph-ship-strip ' + tone} aria-hidden="true">
       {[0, 1, 2, 3].map(i => (
@@ -653,165 +592,6 @@ function AddPackageScreen({ showToast }: { showToast: (msg: string, kind?: Toast
         <button className="ph-btn accent" disabled={!f.canSubmit} onClick={() => void f.submit()}>
           {f.busy ? '…' : t('shipAddSubmit')}
         </button>
-      </div>
-    </>
-  );
-}
-
-// ── /shipping/:orderId — one PO's labels ─────────────────────────────────────
-
-function PoShippingScreen({ orderId, showToast }: { orderId: string; showToast: (msg: string, kind?: ToastKind) => void }) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
-  const [order, setOrder] = useState<Order | null>(null);
-  const [items, setItems] = useState<Shipment[] | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    let alive = true;
-    Promise.all([api.get<{ order: Order }>(`/api/orders/${orderId}`), listShipments(orderId)])
-      .then(([o, list]) => { if (alive) { setOrder(o.order); setItems(list.items); } })
-      .catch((e) => { if (alive) { setFailed(true); handleFetchError(e); } });
-    return () => { alive = false; };
-  }, [orderId]);
-
-  const shareLink = (tok: string) => shareOrCopy({
-    url: `${window.location.origin}/s/${tok}`,
-    title: t('sellerFillTitle'),
-    copiedMsg: t('shipLinkCopied'),
-    failedMsg: t('shipMobShareFailed'),
-    onToast: showToast,
-  });
-
-  const copyTracking = (tn: string) => {
-    navigator.clipboard?.writeText(tn)
-      .then(() => showToast(t('shipCopied')))
-      .catch(() => { /* selectable */ });
-  };
-
-  return (
-    <>
-      <PhHeader
-        title={orderId}
-        sub={t('shipPanelTitle')}
-        leading={
-          <button className="ph-icon-btn" onClick={() => navigateBack('/shipping')} aria-label={t('back')}>
-            <Icon name="chevronLeft" size={17} />
-          </button>
-        }
-        trailing={
-          <RouteLink to={`/purchase-orders/${orderId}`} className="ph-icon-btn" aria-label={t('shipMobViewPo')}>
-            <Icon name="box" size={15} />
-          </RouteLink>
-        }
-      />
-      <div className="ph-scroll">
-        {failed && <div className="ph-ship-empty"><div className="ph-ship-empty-title">{t('shipPageOrderMissing')}</div></div>}
-        {!failed && items === null && <PhoneListSkeleton rows={3} />}
-        {items?.length === 0 && (
-          <div className="ph-ship-empty">
-            <Icon name="label" size={24} />
-            <div className="ph-ship-empty-body">{t('shipEmptyHint')}</div>
-          </div>
-        )}
-        {order && items?.map((s) => {
-          const row: InboundRow = {
-            kind: 'shipment',
-            order: { id: order.id, userName: '', lifecycle: order.lifecycle, paypalTxnId: order.paypalTxnId, warehouse: order.warehouse ?? null },
-            shipment: s,
-          };
-          const chip = STATUS_CHIP[s.status];
-          const eta = fmtEta(s.trackingEta, locale);
-          const tone = s.status === 'exception' ? 'warn' : s.status === 'voided' ? 'muted' : s.status === 'delivered' ? 'done' : 'ok';
-          const waiting = (s.status === 'draft' || s.status === 'quoted') && !s.complete && !!s.sellerToken;
-          const headline = s.from.name ? t('shipBoxFrom', { name: s.from.name })
-            : waiting ? t('shipWaitingSeller')
-            : t(chip.key);
-          return (
-            <div key={s.id} className="ph-ship-card">
-              <div className="ph-ship-head">
-                <span className="ph-ship-headline">{headline}</span>
-                {headline !== t(chip.key) && <span className={'chip dot ' + chip.cls}>{t(chip.key)}</span>}
-              </div>
-              <JourneyStrip pos={journeyPos(row)} tone={tone} />
-              <div className="ph-ship-sub">
-                {(s.from.city || s.from.state) && (
-                  <span className="ph-ship-who">{[s.from.city, s.from.state].filter(Boolean).join(', ')}</span>
-                )}
-                {order.warehouse && <span className="ph-ship-who">→ {order.warehouse.short}</span>}
-                <span className="ph-ship-when">{fmtDateShort(s.createdAt, locale)}</span>
-              </div>
-              {s.status === 'exception' && s.trackingStatus && (
-                <div className="ph-ship-exc">{t('shipExceptionNote', { status: s.trackingStatus })}</div>
-              )}
-              {(s.carrier || s.labelCost != null || eta) && (
-                <div className="ph-ship-meta">
-                  {s.carrier && <span className="ship-carrier-chip">{s.carrier}</span>}
-                  {s.service && <span>{s.service}</span>}
-                  {s.labelCost != null && <span className="mono">{fmtMoney(s.labelCost, s.rateCurrency)}</span>}
-                  {eta && s.status !== 'delivered' && s.status !== 'voided' && <span>{t('shipEstDelivery', { eta })}</span>}
-                  {s.provider === 'stub' && s.status !== 'draft' && s.status !== 'quoted' && (
-                    <span className="chip muted" style={{ fontSize: 10 }}>{t('shipDemoTag')}</span>
-                  )}
-                </div>
-              )}
-              {s.trackingNumber && (
-                <div className="ph-ship-track">
-                  <button className="ph-ship-tn mono" onClick={() => copyTracking(s.trackingNumber!)} title={t('shipCopyTracking')}>
-                    {s.trackingNumber}
-                    <span className="ph-ship-copy">{t('shipCopy')}</span>
-                  </button>
-                  {s.trackingUrl && (
-                    <a href={s.trackingUrl} target="_blank" rel="noreferrer" className="ph-ship-out" aria-label={t('shipTrackOnCarrier', { carrier: s.carrier ?? '' })}>↗</a>
-                  )}
-                </div>
-              )}
-              {s.labelUrl && (
-                <a className="ph-ship-cta" href={s.labelUrl} target="_blank" rel="noreferrer">
-                  <Icon name="download" size={14} /> {t('shipDownloadLabel')}
-                </a>
-              )}
-              {s.sellerToken && !s.complete && (s.status === 'draft' || s.status === 'quoted') && (
-                <button className="ph-ship-cta" onClick={() => shareLink(s.sellerToken!)}>
-                  <Icon name="mail" size={14} /> {t('shipMobShareLink')}
-                </button>
-              )}
-              {needsCompletePo(s.status, order.lifecycle) && (
-                <RouteLink to={`/purchase-orders/${order.id}`} className="ph-ship-cta accent">
-                  {t('shipCompletePo')}
-                </RouteLink>
-              )}
-              {s.complete && (s.status === 'draft' || s.status === 'quoted') && (
-                <div className="ph-ship-hint">{t('shipMobBuyDesktop')}</div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </>
-  );
-}
-
-// ── /shipping/new & /shipping/:po/label — desktop wizard deep links ──────────
-
-function WizardHandoffScreen() {
-  const { t } = useT();
-  return (
-    <>
-      <PhHeader
-        title={t('shipWizTitle')}
-        leading={
-          <button className="ph-icon-btn" onClick={() => navigate('/shipping')} aria-label={t('back')}>
-            <Icon name="chevronLeft" size={17} />
-          </button>
-        }
-      />
-      <div className="ph-scroll">
-        <div className="ph-ship-empty">
-          <Icon name="label" size={26} />
-          <div className="ph-ship-empty-title">{t('shipMobWizDesktopTitle')}</div>
-          <div className="ph-ship-empty-body">{t('shipMobWizDesktopBody')}</div>
-        </div>
       </div>
     </>
   );

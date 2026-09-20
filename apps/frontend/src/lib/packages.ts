@@ -7,9 +7,7 @@ import type { PackageSource } from './packageSource';
 // Server-side since v1.77.0 (migration 0094, apps/backend/routes/packages.ts).
 // Tracking moves these rows server-side (shipping/track.ts) through the shared
 // status guard: Shippo pushes carrier scans in by webhook, a slow poll sweeps
-// as the backstop, and refreshPackage asks on demand. Statuses reuse the
-// shipment vocabulary subset so the rail, chips, and filters serve both row
-// kinds.
+// as the backstop, and refreshPackage asks on demand.
 
 export type PackageStatus = 'purchased' | 'in_transit' | 'delivered' | 'exception';
 
@@ -27,15 +25,15 @@ export type TrackedPackage = {
   paypalTxnId: string | null;
   paymentScreenshotUrl: string | null;
   orderId: string | null;
-  // Server-built carrier deep link, same as shipments.trackingUrl — the
-  // carrier→URL table lives once, in the backend.
+  // Server-built carrier deep link — the carrier→URL table lives once, in the
+  // backend.
   trackingUrl: string | null;
   /** Who tracked the box — null only for rows whose user has been removed. */
   creatorName: string | null;
   createdAt: string;
 };
 
-/** `mine` pins a manager to their own rows, mirroring GET /api/shipments. */
+/** `mine` pins a manager to their own rows. */
 export async function listPackages(opts?: { mine?: boolean }): Promise<{ items: TrackedPackage[] }> {
   return api.get<{ items: TrackedPackage[] }>(`/api/packages${opts?.mine ? '?mine=true' : ''}`);
 }

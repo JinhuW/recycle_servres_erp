@@ -1,7 +1,7 @@
-// Standalone tracked packages (/api/packages): external labels with no PO
-// behind them yet. The agreed flow is "standalone package, PO on delivery" —
-// the draft PO is minted by create-po once the box arrives, and the tracking
-// poll (shipping/track.ts) moves these rows exactly like shipments.
+// Tracked packages (/api/packages): external labels with no PO behind them
+// yet. The agreed flow is "standalone package, PO on delivery" — the draft PO
+// is minted by create-po once the box arrives, and the tracking poll
+// (shipping/track.ts) moves these rows.
 
 import { Hono } from 'hono';
 import {
@@ -12,16 +12,13 @@ import type { Env, User } from '../types';
 import { getDb } from '../db';
 import { effectiveRole } from '../lib/role';
 import { insertDraftOrderTx } from '../services/orderDraft';
-import { carrierTrackingUrl, pickTrackingClient } from '../shipping';
+import { carrierTrackingUrl, pickTrackingClient, type PackageStatus } from '../shipping';
 import { log } from '../lib/log';
 
 const pkgLog = log.child({ module: 'packages' });
 import { applyPackageTracking, registerPackageTracking } from '../shipping/track';
 
 const packages = new Hono<{ Bindings: Env; Variables: { user: User } }>();
-
-// The tracked subset of the shipment vocabulary — enforced by the table CHECK.
-type PackageStatus = 'purchased' | 'in_transit' | 'delivered' | 'exception';
 
 const SOURCES = new Set<string>(PACKAGE_SOURCES);
 
@@ -66,17 +63,15 @@ function toApi(r: PackageRow, creatorName: string | null) {
     // The R2 key stays internal; clients only ever need the public URL.
     paymentScreenshotUrl: r.payment_screenshot_url,
     orderId: r.order_id,
-    // Server-built like shipments.tracking_url, so the carrier→URL table
-    // lives once (shipping/types.ts) instead of per client.
+    // Server-built so the carrier→URL table lives once (shipping/types.ts).
     trackingUrl: carrierTrackingUrl(r.carrier, r.tracking_number),
-    // Who tracked the box — the shipping table's answer to "whose is this?",
-    // the same question order.userName answers for a shipment row.
+    // Who tracked the box — the shipping table's answer to "whose is this?".
     creatorName,
     createdAt: r.created_at,
   };
 }
 
-// Same predicate as shipments: the row's creator or a manager.
+// The row's creator or a manager.
 function canMutate(u: User, row: PackageRow): boolean {
   return u.role === 'manager' || row.created_by === u.id;
 }
@@ -85,9 +80,8 @@ function canMutate(u: User, row: PackageRow): boolean {
 packages.get('/', async (c) => {
   const u = c.var.user;
   const sql = getDb(c.env);
-  // `mine` pins a manager to their own rows, mirroring GET /api/shipments —
-  // without it the desktop Mine scope and the phone's personal glance would
-  // narrow shipments but still merge in everyone's packages.
+  // `mine` pins a manager to their own rows — the desktop Mine scope and the
+  // phone's personal glance.
   const mineOnly = c.req.query('mine') === 'true';
   const scopeFrag = effectiveRole(u) === 'manager' && !mineOnly ? sql`TRUE` : sql`created_by = ${u.id}`;
   const rows = (await sql`
@@ -98,6 +92,30 @@ packages.get('/', async (c) => {
     ORDER BY created_at DESC
   `) as unknown as (PackageRow & { creator_name: string | null })[];
   return c.json({ items: rows.map(r => toApi(r, r.creator_name)) });
+});
+
+// Two integers for the home-screen inbound card, so it stops downloading the
+// whole list to render a badge. The buckets mirror groupInbound() in
+// apps/frontend/src/lib/shippingInbound.ts and must stay in lockstep with it
+// (tests/packages-inbound-counts.test.ts pins them): counting is
+// manager-blind, like the grouping — the early manager create-PO CTA rides on
+// the card without moving its row into "needs".
+packages.get('/inbound-counts', async (c) => {
+  const u = c.var.user;
+  const sql = getDb(c.env);
+  const mineOnly = c.req.query('mine') === 'true';
+  const scopeFrag = effectiveRole(u) === 'manager' && !mineOnly ? sql`TRUE` : sql`created_by = ${u.id}`;
+  const [row] = (await sql`
+    SELECT
+      COUNT(*) FILTER (WHERE status IN ('purchased', 'in_transit'))::int AS moving,
+      COUNT(*) FILTER (
+        WHERE status = 'exception'
+           OR (status = 'delivered' AND order_id IS NULL)
+      )::int AS needs
+    FROM packages
+    WHERE ${scopeFrag}
+  `) as unknown as { moving: number; needs: number }[];
+  return c.json({ moving: row.moving, needs: row.needs });
 });
 
 // ── Lookup by scanned barcode ────────────────────────────────────────────────

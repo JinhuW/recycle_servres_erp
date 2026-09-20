@@ -25,10 +25,10 @@ const BOOT_ENDPOINTS = ['/api/me', '/api/lookups', '/api/workspace'];
 const PHONE_BREAKPOINT = 720;
 
 const source = (desktop: string[], mobile: string[]): string => `(function () {
-  // The vendor and seller portals are different shells reached by URL token,
-  // and they talk to /api/public/*. Preloading a shell they will not render and
-  // calling endpoints they cannot use would be pure waste.
-  if (/^\\/(v|s)\\//.test(location.pathname)) return;
+  // The vendor portal is a different shell reached by URL token, and it talks
+  // to /api/public/*. Preloading a shell it will not render and calling
+  // endpoints it cannot use would be pure waste.
+  if (/^\\/v\\//.test(location.pathname)) return;
 
   var shell = window.innerWidth < ${PHONE_BREAKPOINT}
     ? ${JSON.stringify(mobile)}

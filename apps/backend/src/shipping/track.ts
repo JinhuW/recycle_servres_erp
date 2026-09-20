@@ -7,12 +7,10 @@
 
 import type { Sql } from 'postgres';
 import type { Env } from '../types';
-import type { ShipmentStatus, TrackingInfo, TrackingSource } from './types';
+import type { PackageStatus, TrackingInfo, TrackingSource } from './types';
 import { canTransition } from './status';
-import { pickShippingClient, pickTrackingClient } from './index';
+import { pickTrackingClient } from './index';
 import type { ShippoClient } from './shippo';
-import { advanceOrderTx } from '../services/orderAdvance';
-import { voidShipmentTx } from '../services/shipmentVoid';
 import { notify } from '../lib/notify';
 import { log } from '../lib/log';
 
@@ -20,17 +18,9 @@ const shipLog = log.child({ module: 'shipping' });
 
 const REFRESH_INTERVAL_MS = 45 * 60 * 1000;
 
-export type TrackedShipmentRow = {
-  id: string;
-  order_id: string;
-  status: ShipmentStatus;
-  tracking_number: string;
-  carrier: string | null;
-};
-
 export type TrackedPackageRow = {
   id: string;
-  status: ShipmentStatus;
+  status: PackageStatus;
   tracking_number: string;
   carrier: string;
   created_by: string | null;
@@ -38,104 +28,36 @@ export type TrackedPackageRow = {
 
 // 'purchased' from the carrier means "no movement yet" — refresh the metadata
 // but never regress the status machine.
-function nextStatus(current: ShipmentStatus, info: TrackingInfo): ShipmentStatus | null {
+function nextStatus(current: PackageStatus, info: TrackingInfo): PackageStatus | null {
   return info.normalized !== current && canTransition(current, info.normalized)
     ? info.normalized
     : null;
 }
 
-// Both writers below COALESCE the two metadata columns rather than assigning
-// them: a push can carry a tracking number and nothing else (routine for USPS,
+// The writer COALESCEs the two metadata columns rather than assigning them: a push can carry a tracking number and nothing else (routine for USPS,
 // and what Shippo's "send test webhook" emits), and writing that straight
 // through would blank an "Out for delivery" headline and its ETA.
 //
 // The row is re-read under a lock rather than trusted from the caller. Three
-// writers land here now — the webhook push, the bench's manual refresh, and the
+// writers land here — the webhook push, the bench's manual refresh, and the
 // poll — and a transition computed from a snapshot taken seconds ago would write
 // a stale status back over a fresher one, bypassing canTransition entirely.
 //
 // Status move and its consequences commit together: a transition the metadata
-// UPDATE persisted but whose PO advance / fee reversal failed would never be
-// retried — `next` is null on every later tick.
-export async function applyShipmentTracking(
-  sql: Sql,
-  row: Pick<TrackedShipmentRow, 'id'>,
-  info: TrackingInfo,
-): Promise<ShipmentStatus | null> {
-  return sql.begin(async (tx): Promise<ShipmentStatus | null> => {
-    const cur = (await tx`
-      SELECT id, order_id, status, tracking_number, carrier
-      FROM shipments WHERE id = ${row.id} LIMIT 1 FOR UPDATE
-    `)[0] as TrackedShipmentRow | undefined;
-    // Gone between the caller's read and this lock.
-    if (!cur) return null;
-    const next = nextStatus(cur.status, info);
-
-    if (next === 'voided') {
-      // Label cancelled outside the app (e.g. the ShipSaving dashboard):
-      // marking the row voided makes our /void route unreachable, so the
-      // fee reversal has to ride along here or the label cost stays baked
-      // into the PO's other_fees forever.
-      await voidShipmentTx(tx, {
-        orderId: cur.order_id,
-        sid: cur.id,
-        trackingNumber: cur.tracking_number,
-        carrier: cur.carrier,
-        actor: null,
-      });
-    }
-    await tx`
-      UPDATE shipments SET
-        status          = ${next ?? cur.status},
-        tracking_status = COALESCE(NULLIF(${info.raw}, ''), tracking_status),
-        tracking_eta    = COALESCE(${info.eta}, tracking_eta),
-        last_tracked_at = NOW()
-      WHERE id = ${cur.id}
-    `;
-    // The confirmed business rule, applied server-side: carrier movement
-    // moves a Draft PO to In Transit. The system actor is held to exactly
-    // that one transition, so a PO in any later stage is a quiet no-op.
-    if (next === 'in_transit' || next === 'delivered') {
-      const outcome = await advanceOrderTx(tx, cur.order_id, null);
-      // A stage this actor may not drive is the quiet no-op above. A missing
-      // transaction id is not: the goods moved, the PO cannot follow them, and
-      // only a human adding the id un-sticks it. Unlogged, the rule looks like
-      // it simply stopped applying.
-      if (outcome.kind === 'missingTxnId' || outcome.kind === 'unknownTxnId'
-          || outcome.kind === 'missingChatShot' || outcome.kind === 'missingCashShot'
-          || outcome.kind === 'noCost') {
-        const missing = outcome.kind === 'missingTxnId' ? 'transaction id'
-          : outcome.kind === 'unknownTxnId' ? 'a transaction id our PayPal account knows'
-          : outcome.kind === 'missingChatShot' ? 'chat screenshot'
-          : outcome.kind === 'missingCashShot' ? 'cash screenshot'
-          : 'cost';
-        log.warn('carrier movement could not advance the PO', {
-          orderId: cur.order_id,
-          shipmentId: cur.id,
-          trackingNumber: cur.tracking_number,
-          status: next,
-          missing,
-        });
-      }
-    }
-    return next;
-  });
-}
-
+// UPDATE persisted but whose notification failed would never be retried —
+// `next` is null on every later tick.
 export async function applyPackageTracking(
   sql: Sql,
   row: Pick<TrackedPackageRow, 'id'>,
   info: TrackingInfo,
-): Promise<ShipmentStatus | null> {
-  return sql.begin(async (tx): Promise<ShipmentStatus | null> => {
+): Promise<PackageStatus | null> {
+  return sql.begin(async (tx): Promise<PackageStatus | null> => {
     const cur = (await tx`
       SELECT id, status, tracking_number, carrier, created_by
       FROM packages WHERE id = ${row.id} LIMIT 1 FOR UPDATE
     `)[0] as TrackedPackageRow | undefined;
     if (!cur) return null;
-    // Externally-voided doesn't exist for a package row (its CHECK holds the
-    // 4-value tracked vocabulary) — treat it as no movement.
-    const next = info.normalized === 'voided' ? null : nextStatus(cur.status, info);
+    const next = nextStatus(cur.status, info);
 
     await tx`
       UPDATE packages SET
@@ -161,35 +83,8 @@ export async function applyPackageTracking(
   });
 }
 
-export async function refreshShipmentTracking(
-  sql: Sql,
-  client: TrackingSource,
-): Promise<{ checked: number; updated: number }> {
-  // provider='shipsaving' only: stub-bought demo labels carry numbers no
-  // carrier has ever heard of, and asking about them is pure noise.
-  const rows = await sql<TrackedShipmentRow[]>`
-    SELECT id, order_id, status, tracking_number, carrier
-    FROM shipments
-    WHERE status IN ('purchased','in_transit','exception')
-      AND tracking_number IS NOT NULL
-      AND provider = 'shipsaving'
-  `;
-  let updated = 0;
-  for (const row of rows) {
-    try {
-      const info = await client.getShipment(row.tracking_number, row.carrier);
-      if (await applyShipmentTracking(sql, row, info)) updated++;
-    } catch (err) {
-      shipLog.child({ shipmentId: row.id })
-        .warn('tracking refresh failed; keeping previous state', err);
-    }
-  }
-  return { checked: rows.length, updated };
-}
-
-// Standalone packages carry externally-bought labels, so every active row is
-// polled through whatever client is configured — there is no provider column
-// to filter on.
+// Packages carry externally-bought labels, so every active row is polled
+// through whatever client is configured.
 export async function refreshPackageTracking(
   sql: Sql,
   client: TrackingSource,
@@ -262,16 +157,9 @@ export async function registerUntrackedPackages(
   return done;
 }
 
-export function startShipmentTrackingLoop(sql: Sql, env: Env): { stop: () => void } {
+export function startPackageTrackingLoop(sql: Sql, env: Env): { stop: () => void } {
   const tracking = pickTrackingClient(env);
-  // Shipments carry the label provider's own numbers and its own vocabulary —
-  // notably 'voided', which no Shippo status maps to. Asking Shippo about them
-  // would make an externally-cancelled label unrecognisable, and its cost would
-  // stay in the PO's other_fees forever. Packages are the opposite case: nobody
-  // here bought those labels, so they go through whatever can track a stranger's
-  // number.
-  const labels = pickShippingClient(env);
-  if (tracking.provider === 'stub' && labels.provider === 'stub') return { stop: () => {} };
+  if (tracking.provider === 'stub') return { stop: () => {} };
 
   let stopped = false;
   // Ticks must not overlap: two passes reading the same `tracking_registered_at
@@ -284,8 +172,7 @@ export function startShipmentTrackingLoop(sql: Sql, env: Env): { stop: () => voi
       // Registration first: a box subscribed on this tick starts getting
       // pushes immediately instead of waiting out another interval.
       if (tracking.register) await registerUntrackedPackages(sql, tracking.register);
-      if (labels.provider !== 'stub') await refreshShipmentTracking(sql, labels);
-      if (tracking.provider !== 'stub') await refreshPackageTracking(sql, tracking.source);
+      await refreshPackageTracking(sql, tracking.source);
     } catch (err) {
       shipLog.warn('tracking refresh pass failed', err);
     } finally {

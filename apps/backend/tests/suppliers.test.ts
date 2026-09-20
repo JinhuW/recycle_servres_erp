@@ -372,7 +372,7 @@ describe('owner changes go through /reassign only', () => {
 describe('the suggestion rail counts orders, not boxes', () => {
   beforeEach(async () => { await resetDb(); });
 
-  it('a PO shipped in three cartons plus a package is one PO, counted once', async () => {
+  it('a PO shipped in three cartons is one PO, counted once', async () => {
     const marcus = await loginAs(MARCUS);
     const sql = getTestDb();
     const [wh] = await sql<{ id: string }[]>`SELECT id FROM warehouses LIMIT 1`;
@@ -380,26 +380,19 @@ describe('the suggestion rail counts orders, not boxes', () => {
     await sql`
       INSERT INTO orders (id, user_id, category, warehouse_id, lifecycle, total_cost, created_at)
       VALUES ('PO-BOXES1', ${marcus.user.id}, 'RAM', ${wh.id}, 'done', 12000, NOW())`;
-    // Three boxes on ONE order — shipments is one row per box.
+    // Three boxes on ONE order — packages is one row per box.
     for (const n of [1, 2, 3]) {
       await sql`
-        INSERT INTO shipments (order_id, from_name, from_street1, from_city, from_state,
-                               from_zip, weight_oz, length_in, width_in, height_in,
-                               provider, created_at)
-        VALUES ('PO-BOXES1', 'Cartonly Liquidators', ${'10' + n + ' Dock St'}, 'Aurora',
-                'CO', '80012', 10, 1, 1, 1, 'stub', NOW())`;
+        INSERT INTO packages (tracking_number, carrier, order_id, seller_name, created_at)
+        VALUES (${'1ZBOXES00000000' + n}, 'UPS', 'PO-BOXES1', 'Cartonly Liquidators', NOW())`;
     }
-    // and a tracked package for the same seller on the same order
-    await sql`
-      INSERT INTO packages (tracking_number, carrier, order_id, seller_name, created_at)
-      VALUES ('1ZBOXES000000001', 'UPS', 'PO-BOXES1', 'Cartonly Liquidators', NOW())`;
 
     const r = await api<{ items: { name: string; poCount: number; spend: number }[] }>(
       'GET', '/api/suppliers/suggestions', { token: marcus.token });
     expect(r.status).toBe(200);
     const row = r.body.items.find(i => i.name === 'Cartonly Liquidators');
     expect(row, 'the seller should be suggested').toBeTruthy();
-    // Was 4 (three shipment rows + one package row) and $48,000 before the fix.
+    // Was 3 rows and $36,000 before the per-order dedup.
     expect(row!.poCount).toBe(1);
     expect(row!.spend).toBe(12000);
   });

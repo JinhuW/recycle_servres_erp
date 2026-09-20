@@ -98,7 +98,7 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
 - **Ready to Pay sits between Reviewing and Done** (v1.132.0): the review is
   finished and the purchaser's commission is owed; Done means it was paid.
   The book closes at Ready to Pay — lines, costs, payment reference and
-  ownership freeze, notes still append, shipments and line goods edits refuse
+  ownership freeze, notes still append, line goods edits refuse
   — and the PO's lines read Done for every stock and sellable bucket. Managers
   and the owner are notified when a PO reaches it. The stage is a PO stage
   only: it can't be written as a line status.
@@ -342,10 +342,11 @@ log and `orders.supplier_id`.
   the client's tier cadence — doing nothing is the correct action. A logging
   flow that costs more produces calls nobody logs, and a follow-up list that
   lies.
-- Buying a shipping label **creates nothing**; sellers surface in a suggestion
-  rail, which counts purchase orders rather than parcels — `shipments` is one
+- Tracking a package **creates nothing**; sellers surface in a suggestion
+  rail, which counts purchase orders rather than parcels — `packages` is one
   row per box, so a PO shipped in three cartons is one PO, not three
-  (v1.114.1).
+  (v1.114.1; the prepaid-label source of suggestions went with the label flow
+  in v1.157.0).
 - Attributing a PO to a client is bookkeeping, not a material edit: it is
   audited but does **not** bounce a submitted PO back to Draft. The client must
   be one of yours — a purchaser cannot attach a PO to someone else's book, and a
@@ -428,12 +429,20 @@ Transit, and a line's qty can never be 0. Lines of an archived PO sit at the
 
 ## Shipping
 
-- **Shipments table and a full-page label wizard** in ShipStation's shape
-  (v1.71.0), with a previous-sellers address book (v1.72.0) and a
-  seller-contacts rail beside the wizard (v1.73.0).
-- Prepaid labels via ShipSaving (v1.68.0, v2 client in v1.79.0).
+The Shipping page is a ledger of **inbound packages**: tracking numbers for
+boxes sellers have shipped, moved by Shippo, each becoming a purchase order
+when it arrives.  The system never buys a label.
+
+- **Prepaid-label purchase was removed** (v1.157.0).  The ShipSaving-backed
+  flow — rate quotes, buy, void, the label wizard, the per-PO *Shipping
+  labels* panel, the seller-fill link (`/s/<token>`) and the label cost folded
+  into a PO's other fees — never left the stub provider in production and is
+  gone: routes, tables' readers, UI, i18n.  The `shipments` table stays in
+  Postgres, unread.  `/api/health` reports `providers.tracking` only.
 - **External labels** can be added with carrier detection, and a delivered
-  package flows into creating a PO (v1.75.0).
+  package flows into creating a PO (v1.75.0).  The desktop page lists
+  packages only — Order · Seller · Carrier · Tracking — and exports the same
+  columns to CSV.
 - **Adding a package requires its PayPal transaction ID** (v1.116.0). It is not
   paperwork: the ID carries onto the PO minted from the delivered box, and
   reconciliation auto-links a bank row to that PO on exactly this value — so a
@@ -441,29 +450,21 @@ Transit, and a line's qty can never be 0. Lines of an archived PO sit at the
   Submitting without it is blocked by a dialog that names the one route a
   purchaser has, since the Payments page is manager-only: ask the manager who
   paid for the order. Dropping the payment screenshot still fills it for you.
-- **Tracking is Shippo, driven by webhooks**, independent of whichever provider
-  printed the label (v1.102.0). A Shippo *test* token only tracks carrier
-  `shippo`.
+- **Tracking is Shippo, driven by webhooks** (v1.102.0). A Shippo *test* token
+  only tracks carrier `shippo`.
 - Mobile label scan: look up, note, create a PO; managers get a Shipping tab
   (v1.95.0).
 - **The Shipping page is unlisted** (v1.142.0): it left the desktop sidebar and
   the phone tab bar, because a tracking number is now pasted in the PO's own
   In Transit dialog, which creates the package already linked. The page still
-  answers at `#/shipping`, the prepaid-label wizard is still reached from the
-  PO page's *Shipping labels* button, and a PO minted from a delivered package
-  now inherits the package's source.  The purchaser's slot in the phone tab
-  bar went back to Market in v1.145.0 (it had been Market until v1.80.0);
-  managers keep Home · Orders · Capture · Profile.
+  answers at `#/shipping`, and a PO minted from a delivered package inherits
+  the package's source.  The purchaser's slot in the phone tab bar went back
+  to Market in v1.145.0 (it had been Market until v1.80.0); managers keep
+  Home · Orders · Capture · Profile.
+- The phone Home card counts inbound packages from
+  `GET /api/packages/inbound-counts` (v1.157.0; was `/api/shipments/…`).
 - Owners get a default warehouse, and managers can create a package PO at any
   status (v1.85.0).
-
-- **Demo labels cost nothing and say so up front** (v1.120.0). Without
-  ShipSaving keys the label wizard quotes the stub provider's canned prices.
-  Those are sample data, so buying one adds nothing to the PO's other fees and
-  records no `label_cost`; voiding it subtracts nothing. The rates step marks
-  every demo rate, replaces the charge line with "No charge", and offers *Make
-  demo label* instead of *Buy label* — the older `Demo` chip only appeared on
-  the shipment afterwards, once the choice had been made.
 
 - **A package Refresh explains itself when tracking is off** (v1.125.0). It used
   to raise a blocking "Something went wrong" dialog carrying the backend's own
@@ -471,10 +472,9 @@ Transit, and a line's qty can never be 0. Lines of an archived PO sit at the
   that automatic tracking isn't switched on yet and the package won't update on
   its own.
 
-> Both shipping providers ship **dark until their keys are set** —
-> `SHIPPO_API_TOKEN` / `SHIPPO_WEBHOOK_SECRET` for tracking, ShipSaving portal
-> keys for labels. `/api/health` reports provider modes so this state is
-> visible from outside (v1.105.0).
+> Tracking ships **dark until its keys are set** — `SHIPPO_API_TOKEN` /
+> `SHIPPO_WEBHOOK_SECRET`. `/api/health` reports the provider mode so this
+> state is visible from outside (v1.105.0).
 
 ## Payments and reconciliation
 

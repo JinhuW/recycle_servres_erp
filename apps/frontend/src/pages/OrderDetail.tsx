@@ -101,10 +101,6 @@ export function OrderDetail({
   const isOwnerOrManager = !isPurchaser || order.userId === user?.id;
   const canAnnotate = !orderLocked && isOwnerOrManager;
 
-  // Shipping quick link — count only; the labels themselves live on /shipping,
-  // so the detail payload carries the number instead of a second fetch.
-  const shipmentCount = order.shipmentCount;
-
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   // What the server says the order's meta is, as one comparable string. The
   // backend rebuilds `statusMeta` as a fresh object on every response, so its
@@ -725,22 +721,6 @@ export function OrderDetail({
           </div>
           <Icon name="chevronRight" size={15} className="arrow" />
         </button>
-
-        {shipmentCount > 0 && (
-          <button
-            className="ph-row"
-            onClick={() => navigate(`/shipping/${order.id}`)}
-            style={{ width: '100%', marginTop: 12, fontFamily: 'inherit', textAlign: 'left', cursor: 'pointer' }}
-          >
-            <div className="ph-inv-thumb" style={{ width: 34, height: 34 }}>
-              <Icon name="truck" size={15} />
-            </div>
-            <div style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>
-              {t('shipPanelTitle')} <span className="mono" style={{ color: 'var(--fg-subtle)' }}>· {shipmentCount}</span>
-            </div>
-            <Icon name="chevronRight" size={15} className="arrow" />
-          </button>
-        )}
 
         {/* The money comes right after the products row it is computed from;
             the order's warehouse and payment type were answered once and are
