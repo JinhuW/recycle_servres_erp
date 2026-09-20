@@ -92,7 +92,9 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   the hand-off dialog **and** the aside each live under one tab. Tabs carry an
   **amber dot** while a Draft still needs something under them and a **blue
   dot** for unsaved edits; the open tab rides in the URL
-  (`#/purchase-orders/PO-1?tab=payment`) so a link lands on it. A sticky
+  (`#/purchase-orders/PO-1?tab=payment`) so a link lands on it, and the
+  stage suggests one otherwise — Delivery while In Transit, Commission at
+  Ready to Pay — until the user picks another (v1.161.1). A sticky
   footer holds the total cost, what the purchaser earns, *Unsaved edits: …*,
   Discard and Save. **Delivery facts are the page's to edit until Ready to
   Pay**: source, pickup or label, collector and tracking number save through
