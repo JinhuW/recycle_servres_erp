@@ -10,7 +10,7 @@ import { ArchiveConflictList } from '../../components/ArchiveConflictList';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { fmtUSD, fmtDateShort } from '../../lib/format';
 import {
-  ORDER_STATUSES, LIFECYCLE_STATUS, isClosedBook, warehouseGateLockedStatuses,
+  ORDER_STATUSES, LIFECYCLE_STATUS, isClosedBook, spineStatus, warehouseGateLockedStatuses,
 } from '../../lib/status';
 import { poEffectiveCost, parseFeeInput, feeEq, readStoredGoodsTotal } from '../../lib/poTotals';
 import type { Category, Order, OrderLine, Warehouse } from '../../lib/types';
@@ -146,8 +146,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // Reviewing (the backend guards lines committed to sell orders).
   // Everything else stays read-only until such a move lands.
   const canReopen = !isPurchaser && orderLocked && !isArchived;
+  // Sold is never a right-hand value: the backend alone writes it.
   const REOPEN_TARGETS: Record<string, string[]> = {
     'Done': ['Reviewing', 'Ready to Pay'],
+    'Sold': ['Reviewing', 'Ready to Pay'],
     'Ready to Pay': ['Reviewing', 'Done'],
   };
   const [status, setStatus] = useState(effectiveStatus);
@@ -1005,7 +1007,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     : (l.condition ?? '');
 
   // ── The status section's model ──────────────────────────────────────────
-  const currentIdx = ORDER_STATUSES.indexOf(status as typeof ORDER_STATUSES[number]);
+  const currentIdx = ORDER_STATUSES.indexOf(spineStatus(status) as typeof ORDER_STATUSES[number]);
   const viewStageId = view === null ? null
     : (Object.keys(LIFECYCLE_STATUS).find(k => LIFECYCLE_STATUS[k] === view) as StageId | undefined) ?? null;
   // On a closed order every move is off except the manager's ways out of it
@@ -1394,7 +1396,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
           </SectionHead>
           <div className="so-stepper">
             {ORDER_STATUSES.map((s, i) => {
-              const active = s === status;
+              const active = s === spineStatus(status);
+              // A sold order sits on Done's step under its own name.
+              const label = active && status === 'Sold' ? 'Sold' : s;
               const reached = currentIdx >= 0 && i < currentIdx;
               const isNext = i === currentIdx + 1;
               const movable = !stepDisabled(s);
@@ -1408,7 +1412,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                   <button
                     type="button"
                     className={'so-step' + (active ? ' active' : '') + (reached ? ' reached' : '')
-                      + (locked ? ' locked' : '') + (viewingThis ? ' viewing' : '')}
+                      + (locked ? ' locked' : '') + (viewingThis ? ' viewing' : '')
+                      + (active && status === 'Sold' ? ' sold' : '')}
                     onClick={() => {
                       if (reached) { setView(s); return; }
                       if (active) { setView(null); return; }
@@ -1428,7 +1433,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                     <span className="so-step-dot">
                       {reached ? <Icon name="check" size={10} stroke={3} /> : locked && !movable && isNext ? <Icon name="lock" size={10} /> : (i + 1)}
                     </span>
-                    <span className="so-step-label">{s}</span>
+                    <span className="so-step-label">{label}</span>
                   </button>
                   {i < ORDER_STATUSES.length - 1 && (
                     <span className={'so-step-bar' + (i < currentIdx ? ' reached' : '')} />

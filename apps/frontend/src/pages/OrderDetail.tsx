@@ -41,7 +41,7 @@ import { PaymentFields } from '../components/PaymentFields';
 import { useCommissionPayment } from '../lib/useCommissionPayment';
 import { CommissionPaymentFields } from '../components/CommissionPaymentFields';
 import {
-  ORDER_STATUSES, LIFECYCLE_STATUS, statusTone, isClosedBook, warehouseGateLockedStatuses,
+  ORDER_STATUSES, LIFECYCLE_STATUS, statusTone, spineStatus, isClosedBook, warehouseGateLockedStatuses,
 } from '../lib/status';
 import { addableCategories, categoryTone } from '../lib/lookups';
 import type { Category, Order, Warehouse } from '../lib/types';
@@ -433,7 +433,7 @@ export function OrderDetail({
     if (isArchived) return null;
     if (effectiveStatus === 'Draft') return 'In Transit';
     if (isPurchaser) return null;
-    const i = ORDER_STATUSES.indexOf(effectiveStatus as typeof ORDER_STATUSES[number]);
+    const i = ORDER_STATUSES.indexOf(spineStatus(effectiveStatus) as typeof ORDER_STATUSES[number]);
     const next = i >= 0 ? ORDER_STATUSES[i + 1] ?? null : null;
     return next && !gateLocked.includes(next) ? next : null;
   })();
@@ -662,7 +662,7 @@ export function OrderDetail({
   // dock too, and a single docked row cannot wrap to hold it.
   const cats = addableCategories();
 
-  const currentIdx = ORDER_STATUSES.indexOf(effectiveStatus as typeof ORDER_STATUSES[number]);
+  const currentIdx = ORDER_STATUSES.indexOf(spineStatus(effectiveStatus) as typeof ORDER_STATUSES[number]);
   // The furthest dot this user could reach: purchasers stop at In Transit,
   // a manager held by the warehouse gate stops just short of it.
   const canReachIdx = isPurchaser
@@ -783,10 +783,12 @@ export function OrderDetail({
             {ORDER_STATUSES.map((s, i) => {
               const reached = currentIdx >= 0 && i <= currentIdx;
               const active = i === currentIdx;
-              const tone = statusTone(s);
+              // A sold order sits on Done's step under its own name.
+              const label = active && effectiveStatus === 'Sold' ? 'Sold' : s;
+              const tone = statusTone(label);
               const locked = i > canReachIdx;
               const dotColor = active
-                ? `var(--${tone === 'warn' ? 'warn' : tone === 'pos' ? 'pos' : tone === 'info' ? 'info-strong, var(--info)' : tone === 'accent' ? 'accent' : 'fg'})`
+                ? `var(--${tone === 'warn' ? 'warn' : tone === 'pos' ? 'pos' : tone === 'info' ? 'info-strong, var(--info)' : tone === 'accent' ? 'accent' : tone === 'cool' ? 'cool' : 'fg'})`
                 : reached
                   ? 'var(--fg)'
                   : 'var(--border-strong)';
@@ -823,7 +825,7 @@ export function OrderDetail({
                     fontSize: 10.5, fontWeight: active ? 600 : 500,
                     color: active ? 'var(--fg)' : 'var(--fg-subtle)',
                     textAlign: 'center', lineHeight: 1.1,
-                  }}>{s}</span>
+                  }}>{label}</span>
                 </div>
               );
             })}
@@ -854,6 +856,7 @@ export function OrderDetail({
                         case 'handoffLabel':
                           return <div key={i}>{t('acHandoffLabel')} <span className="mono" style={{ color: 'var(--fg-subtle)' }}>· {[f.carrier, f.trackingNumber].filter(Boolean).join(' ')}</span></div>;
                         case 'advanced':
+                          if (f.to === 'sold') return <div key={i}>{t('eoLookbackSoldOut', { when: fmtDate(f.when, locale) })}</div>;
                           return <div key={i}>{t('eoLookbackAdvanced', { who: f.who ?? t('eoSomeone'), when: fmtDate(f.when, locale), to: LIFECYCLE_LABEL[f.to] ?? f.to })}</div>;
                         case 'doneNote':
                           return <div key={i} style={{ whiteSpace: 'pre-wrap' }}>{f.note}</div>;
@@ -944,7 +947,8 @@ export function OrderDetail({
               border: '1px solid var(--border)',
             }}>
               <Icon name="lock" size={12} />
-              {effectiveStatus === 'Ready to Pay' ? t('lifecycleReadyToPayNote') : t('lifecycleDoneNote')}
+              {effectiveStatus === 'Ready to Pay' ? t('lifecycleReadyToPayNote')
+                : effectiveStatus === 'Sold' ? t('lifecycleSoldNote') : t('lifecycleDoneNote')}
             </div>
           )}
           {!nextStatus && !orderLocked && !isPurchaser && gateLocked.length > 0 && (

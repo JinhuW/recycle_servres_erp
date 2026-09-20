@@ -40,7 +40,8 @@ reach a portal through a URL token.
 ## Purchase orders
 
 The core object. A PO is a purchase from a vendor, built line by line, that
-moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done.
+moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done, and
+on to Sold once every line has sold (v1.164.0).
 
 - **One PO can hold several categories** (v1.54.0), with its lines grouped by
   category and a per-category cost breakdown (v1.55.0).
@@ -175,6 +176,19 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   — and the PO's lines read Done for every stock and sellable bucket. Managers
   and the owner are notified when a PO reaches it. The stage is a PO stage
   only: it can't be written as a line status.
+- **Sold is Done with every line sold** (v1.164.0). Nobody picks it: a PO
+  lands on it when a manager marks it Done and every line already sits at the
+  `Sold` line status, or when a sell order reaching Done consumes the last
+  unsold line of a PO already at Done. A fully-sold PO still at Ready to Pay
+  waits for the commission to be paid. Managers see it as its own chip in the
+  PO list (hidden with Done by default) and on the PO page, where it sits on
+  Done's step under the Sold label with a "Sold out" panel; purchasers — and a
+  manager previewing as one — see the same PO as Done, in the list, the
+  filters, the detail and the activity log. A manager can reopen it to
+  Reviewing or Ready to Pay like Done; the way back to Done re-settles it.
+  The inventory editor refuses to walk a line off Sold while its PO is sold.
+  Existing Done POs that had already sold out were backfilled with an
+  activity row.
 - **Only the warehouse's manager takes a PO into Reviewing or Ready to Pay**
   (v1.132.0): the manager linked to the PO's warehouse in Settings, including
   stage-jumps that pass through either stage. Both shells lock the step for
@@ -442,7 +456,8 @@ log and `orders.supplier_id`.
 ## Inventory
 
 There is **no inventory table**. Stock is `order_lines` whose PO is Done or In
-Transit, and a line's qty can never be 0. Lines of an archived PO sit at the
+Transit, and a line's qty can never be 0. A PO whose every line has sold reads
+Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an archived PO sit at the
 `Archived` status and are out of every stock view until the PO is unarchived
 (v1.137.0); like Sold, they are reachable through an explicit status filter.
 
@@ -799,7 +814,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   on a toggle, by the commission those POs earned (`?lb=cost|commission` on
   `GET /api/dashboard`, cost by default; v1.141.0, ranked by projected profit
   from v1.0.1). Both lenses count a PO from Ready to Pay on, when its
-  commission becomes owed (v1.132.0). A purchaser sees every peer's rank but
+  commission becomes owed (v1.132.0), Sold included (v1.164.0). A purchaser sees every peer's rank but
   only their own money, so the ranking is computed server-side.
 
 ## Oversight extras

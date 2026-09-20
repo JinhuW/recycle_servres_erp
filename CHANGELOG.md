@@ -17,6 +17,33 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.164.0] - 2026-09-20
+
+### Features
+
+- **A PO whose every line has sold is *Sold*** (RS-085). The lifecycle ran
+  Draft → In Transit → Reviewing → Ready to Pay → Done and stopped at
+  "commission paid"; whether the goods had all gone was only visible line by
+  line, or through the manager's Realized meter. `sold` is now a sixth
+  lifecycle value with one rule — the PO is Done, has at least one line, and
+  no line is anything but `Sold` — and one writer, `services/orderSold.ts`,
+  which settles it inside the two transactions that can make the rule true:
+  a sell order reaching Done that consumes a PO's last unsold line, and a
+  manager marking Done a PO whose lines have all sold (it lands on Sold in
+  that one step). Nobody picks it — `toStage: sold` is refused — and a
+  fully-sold PO still at Ready to Pay waits for the purchaser to be paid.
+  Managers get a Sold chip in the PO list (desktop rail and phone scroller,
+  hidden with Done by default) and, on the PO page, Sold on Done's step with
+  a "Sold out" panel; a reopen to Reviewing or Ready to Pay works as it does
+  from Done, and the way back re-settles. Purchasers, and a manager
+  previewing as one, are shown Done: the label, the `?status=Done` filter,
+  the detail, the spreadsheet and the activity log are all masked. The
+  dashboard, contributions and leaderboard count Sold as they count Done.
+  The inventory editor refuses to walk a line off Sold while its PO is sold.
+  Migration 0130 backfills Done POs that had already sold out, with a
+  system-authored activity row. `excludeStatus` on `GET /api/orders` now
+  takes repeated values.
+
 ## [1.163.0] - 2026-09-20
 
 ### Features

@@ -1159,6 +1159,14 @@ html.desktop, body.desktop, .desktop #root {
 }
 .so-step.reached .so-step-dot { background: var(--fg-muted); color: var(--bg-elev); }
 .so-step.active .so-step-dot { background: var(--accent); color: white; }
+/* A sold order sits on Done's step in the chip's own colour. */
+.so-step.active.sold {
+  border-color: var(--cool);
+  background: var(--cool-soft);
+  color: oklch(0.45 0.16 295);
+  box-shadow: 0 0 0 3px var(--cool-soft);
+}
+.so-step.active.sold .so-step-dot { background: var(--cool); }
 .so-step-label { font-size: 12px; }
 .so-step-bar {
   flex: 1 1 auto;
