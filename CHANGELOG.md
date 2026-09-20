@@ -17,6 +17,19 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.161.1] - 2026-09-20
+
+### Fixes
+
+- **The PO page opens the tab the stage is about** (RS-081). Staging or
+  landing on In Transit opens Delivery; Ready to Pay opens Commission. Draft,
+  Reviewing and Done leave the tab alone, a tab the user picks stays until
+  the stage changes again, and a `?tab=` link still wins on load.
+- **The tab strip is no longer a scroll box.** It was `overflow-x: auto` and
+  the tabs' one-pixel underline overlap made it overflow, so a scrollbar
+  track showed under the tabs. It wraps instead, and the active underline is
+  the tab's own.
+
 ## [1.161.0] - 2026-09-20
 
 The phone half of RS-080, closing the ticket: the same stage panel and the

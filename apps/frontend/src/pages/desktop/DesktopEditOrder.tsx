@@ -79,6 +79,13 @@ const SectionHead = ({ icon, children }: { icon: IconName; children: ReactNode }
   </div>
 );
 
+// The tab whose facts a stage is about. Draft keeps Delivery (its readiness
+// rows already jump wherever they need to); Reviewing and Done suggest nothing.
+const STAGE_TAB: Partial<Record<string, TabId>> = {
+  'In Transit': 'delivery',
+  'Ready to Pay': 'commission',
+};
+
 type Props = {
   order: Order;
   onCancel: () => void;
@@ -318,11 +325,13 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // stage change snaps it back — a staged or committed move is the news.
   const [view, setView] = useState<string | null>(null);
   // The open tab, kept in the route's query so a readiness row, a reload and
-  // a copied link all land on the same section.
+  // a copied link all land on the same section. A copied link wins; otherwise
+  // the stage suggests the tab its facts live under — the box while In
+  // Transit, the commission once it is owed — and the user may pick another.
   const [tab, setTabState] = useState<TabId>(() => {
     const q = readHashQuery().get('tab');
     return (['delivery', 'payment', 'commission', 'notes', 'activity'] as TabId[]).includes(q as TabId)
-      ? (q as TabId) : 'delivery';
+      ? (q as TabId) : STAGE_TAB[status] ?? 'delivery';
   });
   const setTab = (next: TabId) => {
     setTabState(next);
@@ -331,7 +340,19 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     replaceHashQuery(q);
   };
   const events = useOrderEvents(order.id, activityKey);
-  useEffect(() => { setView(null); }, [status]);
+  // A stage change — staged from the panel or the stepper, or an Undo — snaps
+  // the look-back shut and re-suggests the tab. Judged against the stage the
+  // page last saw, not "first run": the deep link above has had its say, and
+  // React's dev double-mount must not read as a change.
+  const seenStatus = useRef(status);
+  useEffect(() => {
+    setView(null);
+    if (seenStatus.current === status) return;
+    seenStatus.current = status;
+    const suggested = STAGE_TAB[status];
+    if (suggested) setTab(suggested);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status]);
   // Default to 0% when no rate has been set on the order yet, so the field
   // and the side commission summary show a concrete value out of the gate
   // instead of a blank input. Saving 0 against a still-null DB rate is
