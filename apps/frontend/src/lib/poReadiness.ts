@@ -61,6 +61,23 @@ export const SERVER_BLOCKER_KEY: Record<string, string> = {
   missingCashShot: 'hoNeedCashShot',
 };
 
+/** A few words per blocker, for a list that names several at once. The
+ *  full sentences (the keys themselves) stay for the checkpoint's footer. */
+export const NEED_SHORT_KEY: Record<string, string> = {
+  poReadyNoProducts: 'rdNoProducts',
+  poReadyNoCost: 'rdNoCost',
+  hoNeedSource: 'rdSource',
+  hoNeedDelivery: 'rdDelivery',
+  hoNeedTracking: 'rdTracking',
+  hoNeedCarrier: 'rdCarrier',
+  hoNeedMethod: 'rdMethod',
+  poTxnRequired: 'rdTxn',
+  poTxnUnknown: 'rdTxnUnknown',
+  hoNeedCashShot: 'rdCashShot',
+  hoNeedChatShot: 'rdChatShot',
+  poReadyCommissionUnset: 'rdRate',
+};
+
 const TABS: ReadinessTab[] = ['products', 'delivery', 'payment'];
 
 export function poReadiness(input: ReadinessInput): ReadinessItem[] {

@@ -60,6 +60,45 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   the other, unsaved fields survive the round trip, and the "back to Draft"
   warning is asked once per visit. Desktop keeps its single edit page; a
   products link opened there lands on the PO.
+- **The desktop PO page is built around its status, with one home per fact**
+  (v1.160.0). The page head and the items card with its cost-breakdown tape
+  are unchanged. Under them, *Order status* is its own card: the stepper, and
+  beneath it a **stage panel** whose body follows the stage — a Draft shows
+  the *Before you submit* list (each unmet row a link to the section that
+  fixes it, each met row reading back its answer) beside the one next step;
+  In Transit shows the **linked package's Shippo state** — status chip,
+  carrier · tracking number, the journey, the arrival date, when the carrier
+  last reported — with a **Refresh** button that asks the carrier now (the
+  message when tracking is not switched on appears inline), or *Collected by
+  ‹name›* for a local pickup; Reviewing, Ready to Pay and Done show what the
+  stage is about and the next move. **Every finished step is clickable**: it
+  shows what that stage recorded — who submitted and how it was handed off,
+  the final journey, who moved it on and when, the Done note and files — read
+  from the activity log, read-only, with *Back to ‹current›*; a manager also
+  gets *Move back to ‹stage›* there when the order allows it. The next step is
+  the only forward click; a stage beyond it stays locked (a manager stages one
+  move at a time now, and Save commits it — the footer's button reads *Save ·
+  Mark as ‹stage›* while one is pending). After a stage move the page **stays
+  put** on the new stage's panel instead of returning to the list. Below the
+  status card, **five tabs**: *Delivery* (source, receiving warehouse, shipping
+  label or local pickup, tracking number with the carrier recognised from its
+  shape, or who collected it, plus a one-line live tracking state), *Payment*
+  (paid by, method, transaction ID, proof files, and the manager's
+  bank-payments ledger), *Commission* (purchaser, rate, and what the purchaser
+  earns — the maths that used to sit in an aside titled "Payment detail"),
+  *Notes & files* (notes and Submission receipts; proof of payment is not
+  repeated here), *Activity*. No fact has an input in two places any more: the
+  warehouse, purchaser, rate and paid-by that appeared in *Order details*,
+  the hand-off dialog **and** the aside each live under one tab. Tabs carry an
+  **amber dot** while a Draft still needs something under them and a **blue
+  dot** for unsaved edits; the open tab rides in the URL
+  (`#/purchase-orders/PO-1?tab=payment`) so a link lands on it. A sticky
+  footer holds the total cost, what the purchaser earns, *Unsaved edits: …*,
+  Discard and Save. **Delivery facts are the page's to edit until Ready to
+  Pay**: source, pickup or label, collector and tracking number save through
+  the order like any other field; a purchaser's change past Draft is
+  material — back to Draft for the manager's change-review — and a new
+  tracking number moves the linked package rather than minting a second one.
 - **The desktop list opens on the orders card** (v1.147.2). The four KPI
   tiles and the subtitle that sat above it since the first release are gone:
   they were computed in the browser over whatever the stage and category
@@ -130,9 +169,13 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   once a PayPal account has synced into the environment, so a dev box
   without keys is unaffected; a linked, ignored, pending or reversed row
   still counts as existing, and Mercury legs do not.
-- **Leaving Draft is a hand-off, asked in one dialog** (v1.142.0). Clicking
-  In Transit on a Draft — the desktop stepper or the phone's advance button —
-  opens *Mark as In Transit*: the receiving warehouse, the order's **source**
+- **Leaving Draft is a hand-off, asked in one dialog** (v1.142.0; a
+  *checkpoint* since v1.159.0 — each section the order already answers folds
+  to a ✓ row with a *Change* button, only the unmet ones open, and a page that
+  holds everything is one click; the body may omit any field and the server
+  fills it from the order). Clicking In Transit on a Draft — the desktop
+  stepper or the phone's advance button — opens *Mark as In Transit*: the
+  receiving warehouse, the order's **source**
   (Facebook / Local / Reddit / Other, the same set tracked packages use), and
   how the goods get here: **Local pickup** (who collected it, from a member
   picker) or **Shipping label** (paste the tracking number; the carrier is
@@ -169,9 +212,11 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   Tracking added → In transit → Delivered timeline (a delivery exception
   stops the bar with the carrier's words under it), the arrival date, the
   carrier link, and when the carrier last reported. It comes from Shippo's
-  webhook and the 45-minute poll; there is no Refresh here — the Shipping
-  page keeps that. A local pickup, or a PO that left Draft before the
-  hand-off existed, shows no block.
+  webhook and the 45-minute poll. Since v1.160.0 it lives inside the status
+  card's stage panel and carries a **Refresh** that asks the carrier now (the
+  PO's owner may call it, not only the box's creator); a local pickup shows
+  who collected it instead, and a PO that left Draft before the hand-off
+  existed says so and points at the Delivery tab.
 - **The desktop list has a Total cost column** (v1.156.0), after QTY: the
   goods figure the dashboard uses (the stored total, else the line sum on
   what was bought) plus other fees, with `incl. $12 fees` under it when fees
@@ -309,14 +354,14 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
 - **Both desktop PO pages hold together in a narrow window** (v1.134.0).
   Under 1100px the list's toolbar wraps inside its card with the search box
   giving up width first, the KPI tiles stay in one row while four fit, and
-  the order ID is pinned at the left while the table scrolls sideways. The
-  edit page goes to one column — items, then status/details/Save, then
-  payment detail, ledger and activity — the item table scrolls inside its
-  card, the editable fee's inputs drop under their label, the Order-details
-  fields go two-up, and the status stepper keeps every stage as a numbered
-  dot and names only the current one (each dot names itself on hover). The
-  order ID never wraps at any width, and the Notes box stays inside its card
-  at every width (it used to overhang at 1400px).
+  The edit page is one column at every width since v1.160.0 — items, status,
+  tabs, footer — so under 1100px only the details change: the item table
+  scrolls inside its card, the editable fee's inputs drop under their label,
+  the tab fields go two-up, the stage panel stacks its two boxes, and the
+  status stepper keeps every stage as a numbered dot and names only the
+  current one (each dot names itself on hover). The order ID never wraps at
+  any width, and the Notes box stays inside its card at every width (it used
+  to overhang at 1400px).
 
 ## Clients (the people we buy from)
 
