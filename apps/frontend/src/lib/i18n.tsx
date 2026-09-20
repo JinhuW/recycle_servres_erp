@@ -1635,6 +1635,15 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     poReadyNoProducts: 'Add the products you bought',
     poReadyNoCost: 'Products need a cost',
     poReadyFiles: '{n} attached',
+    // The readiness list's sections — one per tab that can still block the
+    // hand-off — shared by the phone's list, the desktop's status panel and
+    // the checkpoint. The commission row asks; it never blocks.
+    poReadyProducts: 'Products & cost',
+    poReadyDelivery: 'How the goods get here',
+    poReadyPayment: 'Payment',
+    poReadyCommission: 'Commission',
+    poReadyCommissionUnset: 'No commission rate set yet.',
+    poTxnUnknown: "The PayPal transaction ID isn't in our account yet — check it, or wait for PayPal to report it.",
     poProductsRowEmpty: 'Nothing added yet',
     poProductsEmpty: 'No products yet — add one with the buttons below.',
     poProductsNone: 'This order has no products.',
@@ -1836,6 +1845,9 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     hoNeedMethod: 'Say how the company paid — PayPal or cash.',
     hoNeedCashShot: 'Attach a screenshot showing the total amount paid in cash.',
     hoSaveFirst: 'Save your changes first, then mark the order as In Transit.',
+    hoChange: 'Change',
+    hoAllSet: 'Everything is on the order — confirm to hand it off.',
+    hoNeedsN: '{n} still to fill in — the rest is already on the order.',
     hoConfirm: 'Mark as In Transit',
     hoWorking: 'Marking…',
     hoDone: '{id} is In Transit',

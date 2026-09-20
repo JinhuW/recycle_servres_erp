@@ -17,6 +17,45 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.159.0] - 2026-09-20
+
+The shared frontend half of RS-080: one readiness rule for every surface, and
+a hand-off dialog that asks only for what the page does not already hold. No
+layout changes yet — the desktop page restructure follows.
+
+### Features
+
+- **The hand-off is a checkpoint.** *Mark as In Transit* now opens with a ✓
+  row for each section the order already answers — *Products & cost*, *How
+  the goods get here*, *Payment*, and *Commission* for a manager — and expands
+  only the ones it doesn't, seeded from the page and from the linked package.
+  A PO that holds everything is one click; a *Change* button opens a met
+  section for anyone who wants to look. The subtitle counts what is left
+  ("1 still to fill in — the rest is already on the order"). Same on the
+  phone's sheet.
+- **One readiness rule** (`lib/poReadiness.ts`) feeds the phone's *Before you
+  submit* list and the checkpoint, and will feed the desktop's status panel:
+  it wraps the per-field hand-off rule plus the products/cost rule the two
+  shells each carried, routes every blocker to the section that fixes it, and
+  prefers the server's own `blockers` list for anything not edited since it
+  was saved. The desktop's private `txnBlocked` / `cashShotBlocked` copies go
+  in the next release with the page.
+- **A route may carry a page-local query** — `#/purchase-orders/PO-1?tab=payment`
+  — read with `readHashQuery()` and rewritten in place with
+  `replaceHashQuery()`; `navigate()` compares paths only, so a page changing
+  its own query never re-routes.
+
+### Internal
+
+- `lib/orderLookback.ts` turns the audit log into what each finished stage
+  recorded (last match wins, so a reverted-and-resubmitted order shows its
+  latest pass); `lib/useOrderEvents.ts` fetches the log once per page and
+  `OrderActivityLog` accepts it as a prop instead of fetching its own.
+- `lib/useTrackingInput.ts` is the pasted-number → carrier recipe lifted out
+  of the hand-off form, for the Delivery section to share.
+- `POST /api/packages/:id/refresh` now returns `trackingStatus`, the same
+  shape `GET /api/orders/:id` reads for the journey.
+
 ## [1.158.0] - 2026-09-20
 
 The backend half of RS-080, the purchase-order page redesign: the facts the

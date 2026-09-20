@@ -1,21 +1,27 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from './api';
-import { detectCarriers, isValidTracking, normalizeTracking, type Carrier } from './carrierDetect';
+import type { Carrier } from './carrierDetect';
 import { handleFetchError } from './errorToast';
-import { buildHandoffBody, handoffBlockerKeys, type HandoffDelivery, type HandoffMethod } from './handoff';
+import { buildHandoffBody, type HandoffDelivery, type HandoffMethod } from './handoff';
 import type { PackageSource } from './packageSource';
 import { normalizePaypalTxnInput } from './paypalTxn';
+import { poEffectiveCost } from './poTotals';
+import { poReadiness, readinessBlockerKeys } from './poReadiness';
 import type { Order, Warehouse } from './types';
 import type { PaymentProof } from './usePaymentProof';
+import { useTrackingInput } from './useTrackingInput';
 import { loadWarehouses } from './warehouses';
 
-// The hand-off dialog's whole non-JSX state, shared by the desktop dialog and
-// the phone sheet so the two shells can't drift on what a complete hand-off is.
-// Each shell keeps only its markup. Tracking detection follows
-// useAddPackageForm exactly; the payment proof is the page's own
-// usePaymentProof instance, handed in — a second copy seeded from the `order`
-// prop went stale the moment the page uploaded a file, and the dialog then
-// asked for a screenshot that was already on file.
+// The hand-off checkpoint's whole non-JSX state, shared by the desktop dialog
+// and the phone sheet so the two shells can't drift on what a complete
+// hand-off is. Each shell keeps only its markup. Seeded from what the page
+// already holds — the saved facts, the linked package's number — so a section
+// the order has answered folds to a ✓ row and only the missing ones open.
+// Tracking detection is lib/useTrackingInput.ts, the same as the Delivery
+// section's; the payment proof is the page's own usePaymentProof instance,
+// handed in — a second copy seeded from the `order` prop went stale the moment
+// the page uploaded a file, and the dialog then asked for a screenshot that
+// was already on file.
 
 export type HandoffInit = {
   order: Order;
@@ -41,8 +47,10 @@ export function useHandoffForm(init: HandoffInit, onDone: (r: { packageId: strin
   const [source, setSource] = useState<PackageSource | null>(order.source ?? null);
   const [delivery, setDelivery] = useState<HandoffDelivery | null>(order.handoffMethod ?? null);
   const [byUserId, setByUserId] = useState(order.handoffBy?.id ?? init.currentUser.id);
-  const [raw, setRawState] = useState('');
-  const [pick, setPick] = useState<Carrier | null>(null);
+  const tracking = useTrackingInput(
+    order.handoffMethod === 'label' ? order.package?.trackingNumber ?? '' : '',
+    order.handoffMethod === 'label' ? (order.package?.carrier as Carrier | undefined) ?? null : null,
+  );
   const [paidBy, setPaidBy] = useState<'company' | 'self'>(init.payment);
   // A company order that was never asked stays null and the dialog asks —
   // defaulting to PayPal here is how a cash deal ended up chasing an id.
@@ -70,33 +78,31 @@ export function useHandoffForm(init: HandoffInit, onDone: (r: { packageId: strin
     return () => { alive = false; };
   }, []);
 
-  // ── Tracking, as useAddPackageForm does it ───────────────────────────────
-  const tn = normalizeTracking(raw);
-  const detected = useMemo(() => detectCarriers(raw), [raw]);
-  const carrier = pick ?? (detected.length === 1 ? detected[0] : null);
-  const unknownShape = tn.length >= 10 && detected.length === 0;
-  const invalidShape = tn.length >= 8 && !isValidTracking(tn);
-  const hintKey =
-    invalidShape ? 'shipAddTrackingInvalid'
-    : carrier != null && detected.length === 1 && !pick ? 'shipAddCarrierAuto'
-    : detected.length > 1 && !pick ? 'shipAddCarrierPick'
-    : unknownShape && !pick ? 'shipAddCarrierUnknown'
-    : null;
-  // A new paste clears the manual pick: the number, not the last click, decides.
-  const setRaw = (v: string) => { setRawState(v); setPick(null); };
+  const { raw, setRaw, pick, setPick, tn, detected, carrier, hintKey } = tracking;
 
   const setTxnId = (v: string) => setTxnIdState(normalizePaypalTxnInput(v));
 
-  // ── Blockers and submit ──────────────────────────────────────────────────
-  const blockerKeys = handoffBlockerKeys({
-    source, delivery, trackingValid: isValidTracking(tn), carrier, paidBy, method, txnId,
-    chatAttachmentCount: proof.chatAtts.length,
-    proofAttachmentCount: proof.proofAtts.length,
-    saved: {
-      payment: order.payment, paymentMethod: order.paymentMethod, txnRequired: order.txnRequired,
-      chatShotRequired: order.chatShotRequired, cashShotRequired: order.cashShotRequired,
+  // ── Readiness and submit ─────────────────────────────────────────────────
+  // Judged from the form: everything here is the user's live answer, and the
+  // server's list is what the page showed before the dialog opened.
+  const goods = poEffectiveCost({
+    lineSubtotal: order.lines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.unitCost) || 0), 0),
+    totalCostOverride: order.totalCost,
+  }).goods;
+  const readiness = poReadiness({
+    rules: {
+      source, delivery, trackingValid: tracking.valid, carrier, paidBy, method, txnId,
+      chatAttachmentCount: proof.chatAtts.length,
+      proofAttachmentCount: proof.proofAtts.length,
+      saved: {
+        payment: order.payment, paymentMethod: order.paymentMethod, txnRequired: order.txnRequired,
+        chatShotRequired: order.chatShotRequired, cashShotRequired: order.cashShotRequired,
+      },
     },
+    lines: { count: order.lines.length, goods, everSubmitted: order.everSubmitted === true },
+    commission: init.isManager ? { rate: commissionPct.trim() === '' ? null : Number(commissionPct) } : null,
   });
+  const blockerKeys = readinessBlockerKeys(readiness);
   const canSubmit = blockerKeys.length === 0 && !busy && !proof.busy;
 
   const submitting = useRef(false);
@@ -126,6 +132,7 @@ export function useHandoffForm(init: HandoffInit, onDone: (r: { packageId: strin
   };
 
   return {
+    order,
     warehouseId, setWarehouseId, warehouses,
     source, setSource,
     delivery, setDelivery,
@@ -134,7 +141,7 @@ export function useHandoffForm(init: HandoffInit, onDone: (r: { packageId: strin
     paidBy, setPaidBy, method, setMethod,
     txnId, setTxnId, proof,
     ownerId, setOwnerId, commissionPct, setCommissionPct,
-    blockerKeys, canSubmit, busy, submit,
+    readiness, blockerKeys, canSubmit, busy, submit,
   };
 }
 

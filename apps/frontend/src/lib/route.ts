@@ -7,10 +7,19 @@ import type { ActivityArea } from '@recycle-erp/shared';
  * Both mobile and desktop shells subscribe to this and react to changes.
  */
 
+// A hash route may carry a query — `#/purchase-orders/PO-1/?tab=payment` — for
+// page-local state a link should land on (the open tab). The path is what the
+// router matches; the query never reaches it.
+export function splitHash(hash: string): { path: string; query: string } {
+  const raw = hash.startsWith('#') ? hash.slice(1) : hash;
+  const q = raw.indexOf('?');
+  return q < 0 ? { path: raw, query: '' } : { path: raw.slice(0, q), query: raw.slice(q + 1) };
+}
+
 function readPath(): string {
   if (typeof window === 'undefined') return '/';
   const h = window.location.hash || '';
-  if (h.startsWith('#')) return h.slice(1) || '/';
+  if (h.startsWith('#')) return splitHash(h).path || '/';
   // OAuth consent lands on `/authorize?req=…` as a real path, not a hash
   // route — the backend redirects there from `/oauth/authorize`. Fall back to
   // pathname so the SPA can recognise that route on the cold load.
@@ -32,13 +41,31 @@ function historyDepth(): number {
 export function navigate(path: string): void {
   const target = path.startsWith('/') ? path : '/' + path;
   // Avoid setting the same hash twice — that would emit a redundant
-  // hashchange event and cause downstream effects to fire pointlessly.
-  if (window.location.hash === '#' + target) return;
+  // hashchange event and cause downstream effects to fire pointlessly. The
+  // path decides: a page that only changed its own query is still that page.
+  if (splitHash(window.location.hash).path === splitHash(target).path) return;
   const depth = historyDepth() + 1;
   window.location.hash = target;
   // The hash assignment has already pushed the entry, so this stamps the one
   // we just landed on, not the one we left.
   window.history.replaceState({ ...(window.history.state ?? {}), erpDepth: depth }, '');
+}
+
+/** The current route's query, e.g. `tab=payment`. */
+export function readHashQuery(): URLSearchParams {
+  if (typeof window === 'undefined') return new URLSearchParams();
+  return new URLSearchParams(splitHash(window.location.hash).query);
+}
+
+/** Rewrites the route's query in place — no history entry, no hashchange
+ *  the shells react to — so page-local state such as the open tab survives a
+ *  reload and travels in a copied link. Empty params drop the `?`. */
+export function replaceHashQuery(params: URLSearchParams): void {
+  const { path } = splitHash(window.location.hash);
+  const q = params.toString();
+  const next = '#' + path + (q ? '?' + q : '');
+  if (next === window.location.hash) return;
+  window.history.replaceState(window.history.state, '', next);
 }
 
 /** Back to wherever the user came from, or `fallback` when that's off-site. */
