@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-080](./RS-080-purchase-order-page-status-as-the-spine-one-home-per.md) | in-progress | story | P2 | Purchase-order page: status as the spine, one home per fact | — |
 | [RS-079](./RS-079-paypal-pull-failures-are-reported-and-throttled.md) | done | bug | P2 | PayPal pull failures are reported and throttled; the phone scan keeps concurrent edits | 1.157.1 |
 | [RS-078](./RS-078-remove-the-prepaid-label-shipsaving-flow-keep-packag.md) | done | chore | P2 | Remove the prepaid-label (ShipSaving) flow; keep package tracking | 1.157.0 |
 | [RS-077](./RS-077-in-transit-shows-the-package-journey-eta-and-trackin.md) | done | story | P2 | In Transit shows the package journey, ETA and tracking number; the PO list gets a Total cost column | 1.156.0 |
