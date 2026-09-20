@@ -1893,6 +1893,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     eoSaveAndStage: 'Save · Mark as {s}',
     poDeliveryHow: 'How it gets here',
     poCollectorPick: 'Who collected it',
+    poDeliveryUnset: 'Not set yet',
     poCollectedBy: 'Collected by {name}',
     poPkgRefresh: 'Refresh',
     poPkgRefreshing: 'Asking the carrier…',

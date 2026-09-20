@@ -17,6 +17,34 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.161.0] - 2026-09-20
+
+The phone half of RS-080, closing the ticket: the same stage panel and the
+same editable delivery facts as the desktop, in the phone's own shape.
+
+### Features
+
+- **The phone's status card shows the stage, not only the dots.** While In
+  Transit it carries the linked package's Shippo journey with **Refresh** (the
+  "not switched on" message inline), or *Collected by ‹name›* for a pickup.
+  A finished dot, tapped, swaps the card body for what that stage recorded —
+  who submitted and how it was handed off, who moved it on — with *Back to
+  ‹current›*; the dot shows a ✓ so it reads as done.
+- **A Delivery fold above the Payment fold.** Source, shipping label or local
+  pickup, the collector, and the tracking number with carrier chips — the
+  checkpoint's fields — folded behind a header that reads back the answer.
+  They save with the page, count as material for a purchaser past Draft,
+  and the *Before you submit* list gains a *How the goods get here* row that
+  opens the fold. The list now reads the server's `blockers` for anything
+  not edited since it was saved, like the desktop.
+
+### Internal
+
+- `OrderMetaDraft` gains `source`, `delivery`, `byUserId` and a raw
+  `tracking` with its carrier pick; `resolveTracking()` is the pure half of
+  `useTrackingInput` for state that lives in the shell. The phone's activity
+  log shares one fetch with the look-back.
+
 ## [1.160.0] - 2026-09-20
 
 The desktop half of RS-080: the purchase-order page rebuilt around its status,
