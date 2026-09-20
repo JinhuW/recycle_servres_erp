@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-081](./RS-081-po-page-opens-the-tab-the-stage-is-about.md) | in-progress | task | P2 | PO page opens the tab the stage is about | — |
+| [RS-082](./RS-082-payment-tab-is-two-columns.md) | in-progress | task | P3 | Payment tab is two columns | — |
+| [RS-081](./RS-081-po-page-opens-the-tab-the-stage-is-about.md) | done | task | P2 | PO page opens the tab the stage is about | 1.161.1 |
 | [RS-080](./RS-080-purchase-order-page-status-as-the-spine-one-home-per.md) | done | story | P2 | Purchase-order page: status as the spine, one home per fact | 1.161.0 |
 | [RS-079](./RS-079-paypal-pull-failures-are-reported-and-throttled.md) | done | bug | P2 | PayPal pull failures are reported and throttled; the phone scan keeps concurrent edits | 1.157.1 |
 | [RS-078](./RS-078-remove-the-prepaid-label-shipsaving-flow-keep-packag.md) | done | chore | P2 | Remove the prepaid-label (ShipSaving) flow; keep package tracking | 1.157.0 |
