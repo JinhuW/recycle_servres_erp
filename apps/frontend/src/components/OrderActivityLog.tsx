@@ -1,7 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Icon, type IconName } from './Icon';
-import { api } from '../lib/api';
-import { handleFetchError } from '../lib/errorToast';
 import { fmtDate, relTime, fmtUSD } from '../lib/format';
 import { useT } from '../lib/i18n';
 import {
@@ -9,6 +7,7 @@ import {
   LIFECYCLE_LABEL, type Translate,
 } from '../lib/orderPresentation';
 import type { OrderEvent, OrderEventChange } from '../lib/types';
+import { useOrderEvents, type OrderEvents } from '../lib/useOrderEvents';
 
 type Props = {
   orderId: string;
@@ -22,6 +21,9 @@ type Props = {
   // fetch lands, and it has a conditional sibling above it, so no positional
   // selector can name it reliably.
   className?: string;
+  // The host's copy of the log, when it already fetched one (the desktop page
+  // shares a single fetch between this tab and the status look-back).
+  events?: OrderEvents;
 };
 
 const KIND_ICON: Record<OrderEvent['kind'], IconName> = {
@@ -189,21 +191,15 @@ function summary(ev: OrderEvent, locale: string, t: Translate): { title: string;
   }
 }
 
-export function OrderActivityLog({ orderId, refreshKey = 0, defaultOpen = true, className }: Props) {
+export function OrderActivityLog({ orderId, refreshKey = 0, defaultOpen = true, className, events: given }: Props) {
   const { t, lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
-  const [events, setEvents] = useState<OrderEvent[]>([]);
-  const [loaded, setLoaded] = useState(false);
+  // A host that already holds the events (the desktop page shares one fetch
+  // with its look-back) hands them in; otherwise this fetches its own.
+  const own = useOrderEvents(given ? null : orderId, refreshKey);
+  const events = given?.events ?? own.events;
+  const loaded = given ? given.loaded : own.loaded;
   const [open, setOpen] = useState(defaultOpen);
-
-  useEffect(() => {
-    let alive = true;
-    api.get<{ events: OrderEvent[] }>(`/api/orders/${orderId}/events`)
-      .then(r => { if (alive) setEvents(r.events); })
-      .catch(handleFetchError)
-      .finally(() => { if (alive) setLoaded(true); });
-    return () => { alive = false; };
-  }, [orderId, refreshKey]);
 
   // Newest first feels right for a long-lived order; show in reverse-chrono
   // without mutating the server's natural ASC order.

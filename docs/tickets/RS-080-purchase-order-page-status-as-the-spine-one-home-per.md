@@ -7,7 +7,7 @@ priority: P2
 created: 2026-09-20
 reporter: jinhu
 branch: feat/po-page-spine
-pr: 369
+pr: 369, 370
 version:
 related: [RS-050, RS-071, RS-077, RS-078]
 ---
@@ -86,9 +86,9 @@ Backend (PR-A)
       package.
 
 Frontend, shared (PR-B1)
-- [ ] One `poReadiness` helper feeds the phone's *Before you submit* list, the
+- [x] One `poReadiness` helper feeds the phone's *Before you submit* list, the
       desktop's readiness rows and tab dots, and the hand-off checkpoint.
-- [ ] The hand-off dialog shows ✓ summary rows for what the order already
+- [x] The hand-off dialog shows ✓ summary rows for what the order already
       holds and inputs only for what is missing; confirming still writes and
       advances in one transaction.
 

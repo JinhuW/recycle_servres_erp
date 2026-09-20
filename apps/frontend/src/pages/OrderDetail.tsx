@@ -21,7 +21,8 @@ import { fmtUSD, fmtUSD0 } from '../lib/format';
 import { profitTone } from '../lib/orderPresentation';
 import { isPricedSellPrice } from '@recycle-erp/shared';
 import { poEffectiveCost, parseFeeInput } from '../lib/poTotals';
-import { handoffBlockerKeys, type HandoffMethod } from '../lib/handoff';
+import type { HandoffMethod } from '../lib/handoff';
+import { poReadiness } from '../lib/poReadiness';
 import { usePaymentProof, type ProofAttachment } from '../lib/usePaymentProof';
 import { PaymentFields } from '../components/PaymentFields';
 import {
@@ -409,26 +410,31 @@ export function OrderDetail({
     : orderLocked ? `${effectiveStatus} · ${t('poLockedShort')}` : `${effectiveStatus} · ${itemsUnits}`;
   const unpricedCount = order.lines.filter(l => !isPricedSellPrice(l.sellPrice)).length;
 
-  // What still stands between a Draft and Submit, from the same rule the
-  // hand-off sheet runs so the two can never disagree. The sheet's own
-  // questions (how the goods arrive) are stubbed as answered: only the
-  // payment keys can fire here. Reads the fields as typed, not as saved.
+  // What still stands between a Draft and Submit, from the one readiness
+  // rule every surface shares (lib/poReadiness.ts) so this list, the desktop
+  // panel and the checkpoint can never disagree. The sheet's own questions
+  // (how the goods arrive) are stubbed as answered here: this screen has no
+  // delivery fields yet, so only the products and payment sections can fire.
+  // Reads the fields as typed, not as saved.
   const readiness: { key: string; met: boolean; label: string; target: 'products' | 'payment' }[] =
     effectiveStatus === 'Draft' && !isArchived ? (() => {
-      const blockers = new Set(handoffBlockerKeys({
-        source: 'other', delivery: 'pickup', trackingValid: true, carrier: null,
-        paidBy: payment, method: paymentMethod, txnId: paypalTxnId,
-        chatAttachmentCount: proof.chatAtts.length,
-        proofAttachmentCount: proof.proofAtts.length,
-        saved: order,
-      }));
-      const noLines = order.lines.length === 0;
-      const noCost = !noLines && !(cost.goods > 0) && !order.everSubmitted;
+      const items = poReadiness({
+        rules: {
+          source: 'other', delivery: 'pickup', trackingValid: true, carrier: null,
+          paidBy: payment, method: paymentMethod, txnId: paypalTxnId,
+          chatAttachmentCount: proof.chatAtts.length,
+          proofAttachmentCount: proof.proofAtts.length,
+          saved: order,
+        },
+        lines: { count: order.lines.length, goods: cost.goods, everSubmitted: order.everSubmitted === true },
+      });
+      const products = items.find(i => i.tab === 'products')!;
+      const blockers = new Set(items.find(i => i.tab === 'payment')!.needKeys);
       const rows: typeof readiness = [{
-        key: 'products', met: !noLines && !noCost, target: 'products',
-        label: noLines ? t('poReadyNoProducts')
-          : noCost ? t('poReadyNoCost')
-          : `${order.lines.length} ${order.lines.length === 1 ? t('item') : t('items')} · ${fmtUSD(cost.goods, locale)}`,
+        key: 'products', met: products.ok, target: 'products',
+        label: products.ok
+          ? `${order.lines.length} ${order.lines.length === 1 ? t('item') : t('items')} · ${fmtUSD(cost.goods, locale)}`
+          : t(products.needKeys[0]),
       }];
       // A rule the saved order is exempt from (pre-cutoff) with nothing on
       // file is neither met nor missing — it has no row.

@@ -54,6 +54,9 @@ function toApi(r: PackageRow, creatorName: string | null) {
     trackingNumber: r.tracking_number,
     carrier: r.carrier,
     status: r.status,
+    // The carrier's own words for the last scan, as the PO page's journey
+    // shows them; a manual refresh hands back the same shape GET /orders reads.
+    trackingStatus: r.tracking_status,
     trackingEta: r.tracking_eta,
     lastTrackedAt: r.last_tracked_at,
     sellerName: r.seller_name,

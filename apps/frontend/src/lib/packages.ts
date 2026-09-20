@@ -16,6 +16,8 @@ export type TrackedPackage = {
   trackingNumber: string;
   carrier: Carrier;
   status: PackageStatus;
+  /** The carrier's headline for the last scan. Optional for deploy skew. */
+  trackingStatus?: string | null;
   trackingEta: string | null;
   lastTrackedAt: string | null;
   sellerName: string | null;

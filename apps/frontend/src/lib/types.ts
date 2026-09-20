@@ -140,9 +140,17 @@ export type OrderSummary = {
   // The cash twin: whether a screenshot of the amount paid (a Payment
   // attachment) must be on file before a company-cash PO leaves Draft.
   cashShotRequired?: boolean;
-  // The hand-off, written when the PO leaves Draft through the In Transit
-  // dialog. All optional for the deploy-skew reason above; null on orders that
-  // predate it.
+  // Everything still between a Draft and In Transit, in display order, as the
+  // server's own advance would refuse it (`noCost`, `missingSource`,
+  // `missingDelivery`, `missingTracking`, `missingMethod`, `missingTxnId`,
+  // `unknownTxnId`, `missingChatShot`, `missingCashShot`). Empty past Draft.
+  // Optional for the deploy-skew reason above — undefined means "judge from
+  // the form"; see lib/poReadiness.ts.
+  blockers?: string[];
+  // The hand-off facts — where the goods came from, how they travel, who
+  // collected them. Written by the In Transit checkpoint and editable on the
+  // page until Ready to Pay. All optional for the deploy-skew reason above;
+  // null on orders that predate it.
   source?: PackageSource | null;
   paymentMethod?: 'paypal' | 'cash' | null;
   handoffMethod?: 'pickup' | 'label' | null;
@@ -186,7 +194,7 @@ export type OrderStatusMeta = Record<string, {
 // until Shippo's first update.
 export type OrderPackage =
   Pick<TrackedPackage, 'id' | 'carrier' | 'trackingNumber' | 'trackingUrl' | 'status' | 'trackingEta' | 'lastTrackedAt'>
-  & { trackingStatus: string | null };
+  & { trackingStatus: string | null; source?: PackageSource | null };
 
 // The list's slice of it. `status` and `trackingEta` arrived later than the
 // first three and are optional for the deploy-skew reason.
