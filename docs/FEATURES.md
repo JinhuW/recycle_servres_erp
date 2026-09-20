@@ -99,6 +99,17 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   the order like any other field; a purchaser's change past Draft is
   material — back to Draft for the manager's change-review — and a new
   tracking number moves the linked package rather than minting a second one.
+- **The phone PO page carries the same stage panel and a Delivery fold**
+  (v1.161.0). Its status card keeps the two-screen structure of v1.154.0;
+  under the dots, In Transit shows the linked package's Shippo journey with
+  **Refresh** (or who collected a local pickup), and a finished dot, tapped,
+  swaps the card body for what that stage recorded, with a way back. The
+  *Before you submit* list gains a *How the goods get here* row. Under *Order
+  details* a folded **Delivery** card sits above the folded Payment card, its
+  header reading back *source · label or pickup · tracking or collector*; its
+  fields are the checkpoint's (the carrier recognised from the number's
+  shape) and save through the order with the rest of the page, material for
+  a purchaser past Draft.
 - **The desktop list opens on the orders card** (v1.147.2). The four KPI
   tiles and the subtitle that sat above it since the first release are gone:
   they were computed in the browser over whatever the stage and category

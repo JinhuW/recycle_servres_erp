@@ -7,8 +7,8 @@ priority: P2
 created: 2026-09-20
 reporter: jinhu
 branch: feat/po-page-spine
-pr: 369, 370, 371
-version:
+pr: 369, 370, 371, 372
+version: 1.161.0
 related: [RS-050, RS-071, RS-077, RS-078]
 ---
 
@@ -112,7 +112,7 @@ Desktop (PR-B2)
       count, Discard and Save. A stage move stays on the page.
 
 Phone (PR-C)
-- [ ] The status card carries the same stage panel (Shippo state + Refresh,
+- [x] The status card carries the same stage panel (Shippo state + Refresh,
       look-back on a finished step) and a folded Delivery card whose header
       reads back the answer.
 

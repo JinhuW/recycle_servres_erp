@@ -1461,6 +1461,7 @@ const zh: Record<string, string> = {
   eoSaveAndStage: '保存 · 标记为{s}',
   poDeliveryHow: '如何送达',
   poCollectorPick: '由谁取货',
+  poDeliveryUnset: '尚未填写',
   poCollectedBy: '由 {name} 取货',
   poPkgRefresh: '刷新',
   poPkgRefreshing: '正在查询承运商…',
