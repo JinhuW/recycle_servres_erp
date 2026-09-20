@@ -4,9 +4,8 @@ import { handleFetchError, showErrorDialog } from './errorToast';
 import { useT } from './i18n';
 import { blobToDataUrl, compressForUpload } from './image-compress';
 import { scanPaymentScreenshot } from './packages';
-import { normalizePaypalTxnInput } from './paypalTxn';
+import { readPaypalScan } from './paypalTxn';
 import { scanErrorBanner, type ScanErrorBanner } from './scanError';
-import { AI_CONFIDENCE_FLOOR, AI_UNREADABLE_FLOOR } from './status';
 import type { PaymentShot } from './useAddPackageForm';
 
 // The proof half of a PO's payment: the PayPal screenshot scan, the chat with
@@ -57,13 +56,9 @@ export function usePaymentProof(init: PaymentProofInit) {
     try {
       const r = await scanPaymentScreenshot(local.compressed, file.name);
       setScreenshot({ key: r.storageKey, url: r.deliveryUrl, preview: local.preview });
-      if (r.txnId && r.confidence >= AI_UNREADABLE_FLOOR) {
-        setTxnId(normalizePaypalTxnInput(r.txnId));
-        setScanNoticeKey(r.provider === 'stub' ? 'stubScanWarn'
-          : r.confidence < AI_CONFIDENCE_FLOOR ? 'shipPayVerifyTxn' : 'hoShotRead');
-      } else {
-        setScanNoticeKey('shipPayNoTxnFound');
-      }
+      const read = readPaypalScan(r);
+      if (read.txnId) setTxnId(read.txnId);
+      setScanNoticeKey(read.noticeKey);
     } catch (e) {
       setScanError(scanErrorBanner(e));
     } finally {

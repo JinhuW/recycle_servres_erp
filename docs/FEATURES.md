@@ -82,10 +82,18 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   put** on the new stage's panel instead of returning to the list. Below the
   status card, **five tabs**: *Delivery* (source, receiving warehouse, shipping
   label or local pickup, tracking number with the carrier recognised from its
-  shape, or who collected it, plus a one-line live tracking state), *Payment*
-  (paid by, method, transaction ID, proof files, and the manager's
-  bank-payments ledger), *Commission* (purchaser, rate, and what the purchaser
-  earns — the maths that used to sit in an aside titled "Payment detail"),
+  shape, or who collected it, plus a one-line live tracking state), *Cost
+  Payment* (paid by, method, transaction ID, proof files, and the manager's
+  bank-payments ledger — named *Payment* until v1.163.0, when the second
+  payment below got a home), *Commission* (purchaser, rate, and what the
+  purchaser earns — the maths that used to sit in an aside titled "Payment
+  detail" — and, since v1.163.0, a **Commission payment** block: PayPal or
+  Cash with PayPal preselected, a PayPal transaction ID and a screenshot drop
+  box, recording how the purchaser was paid. A dropped PayPal screenshot is
+  kept under the order and read for its ID, which fills an empty box; an ID
+  already typed is kept. Managers record it at any stage, closed book
+  included — it saves as it is used, not through the page's Save — and
+  purchasers see it read-only. Optional: nothing there gates Done),
   *Notes & files* (notes and Submission receipts; proof of payment is not
   repeated here), *Activity*. No fact has an input in two places any more: the
   warehouse, purchaser, rate and paid-by that appeared in *Order details*,
@@ -109,7 +117,9 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   *Before you submit* list gains a *How the goods get here* row.
 - **The phone's *Order details* are the desktop's five tabs, as folds**
   (v1.162.0): Delivery (source, warehouse, label or pickup, tracking),
-  Payment, **Commission**, Notes & files, Activity — same order, same names.
+  Cost Payment, **Commission** (with the commission-payment block since
+  v1.163.0, one column, under the maths), Notes & files, Activity — same
+  order, same names.
   Each is one card (`PhFold`): closed, the title with its answer read back;
   open, a tinted header ruled off from the fields in the same card. An amber
   mark means the next step is waiting on the section, a blue one that it has

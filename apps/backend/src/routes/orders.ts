@@ -42,7 +42,7 @@ import {
   type SerialIssue, type Carrier, type PackageSource,
 } from '@recycle-erp/shared';
 import type { Env, LineCategory, User } from '../types';
-import { PAYPAL_TXN_STRICT } from '../ai/paypal';
+import { PAYPAL_TXN_STRICT, extractPaypalTxn, type PaypalTxnScan } from '../ai/paypal';
 import { maybeRenameReceipt } from '../ai/receipt';
 import { shrinkImageToFit } from '../lib/image-shrink';
 import { log } from '../lib/log';
@@ -590,6 +590,7 @@ orders.get('/:id', async (c) => {
            o.other_fees_note,
            o.paypal_txn_id,
            o.source, o.handoff_method, o.handoff_by, o.payment_method,
+           o.commission_method, o.commission_txn_id,
            hb.name AS handoff_by_name,
            o.supplier_id, sup.name AS supplier_name,
            o.commission_rate::float AS commission_rate,
@@ -767,6 +768,8 @@ orders.get('/:id', async (c) => {
         ? { id: order.supplier_id, name: order.supplier_name }
         : null,
       commissionRate: order.commission_rate,
+      commissionMethod: order.commission_method,
+      commissionTxnId: order.commission_txn_id,
       realized: isManager ? realizedFromRow({
         sold_qty: order.sold_qty, bought_qty: order.bought_qty,
         revenue: order.rz_revenue, cost: order.rz_cost,
@@ -2494,11 +2497,11 @@ orders.post('/:id/unarchive', c => setArchived(c, false));
 // directly here, so files survive a cancelled status change. Statuses are a
 // hardcoded map (no needs_meta table like sell orders), so the valid set is
 // a constant.
-const PO_META_STATUSES = new Set(['Submission', 'Done', 'Payment']);
+const PO_META_STATUSES = new Set(['Submission', 'Done', 'Payment', 'Commission']);
 
 // Submission evidence (receipts attached at submit time) is owner-editable: the
 // purchaser who owns the order may add/remove files while it is still a Draft.
-// Every other meta status (Done) remains manager-only.
+// Every other meta status (Done, Commission) remains manager-only.
 function canWriteMeta(u: User, status: string, order: { user_id: string; lifecycle: string }): boolean {
   if (effectiveRole(u) === 'manager') return true;
   // Submission evidence belongs to the purchaser who raised the PO and stays
@@ -2581,9 +2584,12 @@ orders.post('/:id/status-meta/:status/attachments', async (c) => {
     return c.json({ error: `file too large (max ${maxBytes} bytes)` }, 413);
   }
 
-  // Both PO meta statuses (Submission, Done) hold payment receipts, so the
-  // AI rename applies unconditionally — no per-status gate like sell orders.
-  const stored = await maybeRenameReceipt(c.env, fitted);
+  // Submission, Done and Payment hold payment receipts, so the AI rename
+  // applies to them all. A Commission screenshot gets a different read below —
+  // the transaction id off it — and not the rename on top: two vision calls
+  // for one file.
+  const commission = status === 'Commission';
+  const stored = commission ? fitted : await maybeRenameReceipt(c.env, fitted);
 
   // R2 upload happens outside the transaction — it's the slow part. If the
   // INSERT below fails the object is orphaned in R2; r2.ts treats orphans as
@@ -2591,6 +2597,21 @@ orders.post('/:id/status-meta/:status/attachments', async (c) => {
   const uploaded = await uploadAttachment(c.env, stored, `orders/${id}/${status}`)
     .catch(e => { log.error('attachment upload', e); return null; });
   if (!uploaded) return c.json({ error: 'upload failed' }, 502);
+
+  // A commission screenshot is read for its PayPal transaction id, the way
+  // /api/scan/payment reads a cost-payment shot. Returned, never written: the
+  // client fills an empty id from it and saves through /commission-payment,
+  // so what the record says is always what someone chose to keep. A failed
+  // read is not a failed upload — the screenshot is the proof, the id a
+  // convenience — and the model's output is not logged.
+  let scan: PaypalTxnScan | null = null;
+  if (commission && stored.type.startsWith('image/')) {
+    try {
+      scan = await extractPaypalTxn(c.env, await stored.arrayBuffer());
+    } catch (e) {
+      log.warn('commission screenshot ocr failed', { error: e instanceof Error ? e.message : String(e) });
+    }
+  }
 
   const row = await sql.begin(async (tx) => {
     const r = (await tx`
@@ -2618,6 +2639,59 @@ orders.post('/:id/status-meta/:status/attachments', async (c) => {
       url: row.delivery_url,
       uploadedAt: row.uploaded_at,
     },
+    ...(commission ? { scan } : {}),
+  });
+});
+
+// How the purchaser was paid their commission: PayPal or cash, and the PayPal
+// transaction id. Manager-only and open at every stage — the commission is
+// paid once the PO is a closed book, exactly where PATCH refuses to write and
+// the pages disable Save — so it is its own live-saved endpoint, like the
+// evidence above. Switching to cash keeps the id: nothing is lost by a
+// mis-tap, and the client simply stops showing it.
+orders.put('/:id/commission-payment', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const id = c.req.param('id');
+  const body = (await c.req.json().catch(() => null)) as
+    | { method?: unknown; txnId?: unknown } | null;
+  if (!body || (body.method === undefined && body.txnId === undefined)) {
+    return c.json({ error: 'method or txnId is required' }, 400);
+  }
+  if (body.method !== undefined && (body.method === null || !isPaymentMethod(body.method))) {
+    return c.json({ error: 'method must be paypal or cash' }, 400);
+  }
+  if (body.txnId !== undefined && body.txnId !== null && typeof body.txnId !== 'string') {
+    return c.json({ error: 'txnId must be a string' }, 400);
+  }
+  const txnId = typeof body.txnId === 'string'
+    ? body.txnId.replace(/\s+/g, '').toUpperCase() || null
+    : body.txnId;
+  if (txnId && txnId.length > 64) return c.json({ error: 'PayPal transaction ID is too long' }, 400);
+
+  const sql = getDb(c.env);
+  const FIELDS = ['commission_method', 'commission_txn_id'] as const;
+  const after = await sql.begin(async (tx) => {
+    const before = (await tx`
+      SELECT commission_method, commission_txn_id FROM orders WHERE id = ${id} FOR UPDATE
+    `)[0] as Record<string, unknown> | undefined;
+    if (!before) return null;
+    const row = (await tx`
+      UPDATE orders SET
+        commission_method = CASE WHEN ${body.method !== undefined}::boolean THEN ${(body.method as string | undefined) ?? null} ELSE commission_method END,
+        commission_txn_id = CASE WHEN ${txnId !== undefined}::boolean THEN ${txnId ?? null} ELSE commission_txn_id END
+      WHERE id = ${id}
+      RETURNING commission_method, commission_txn_id
+    `)[0] as Record<string, unknown>;
+    const changes = diff(before, row, FIELDS);
+    if (changes.length) await writeOrderEvent(tx, id, u.id, 'meta_changed', { changes });
+    return row;
+  });
+  if (!after) return c.json({ error: 'Not found' }, 404);
+  return c.json({
+    ok: true,
+    commissionMethod: after.commission_method as 'paypal' | 'cash' | null,
+    commissionTxnId: after.commission_txn_id as string | null,
   });
 });
 

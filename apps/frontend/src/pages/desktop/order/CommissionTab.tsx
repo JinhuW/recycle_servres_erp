@@ -1,5 +1,8 @@
+import { CommissionPaymentFields } from '../../../components/CommissionPaymentFields';
+import { Icon } from '../../../components/Icon';
 import { fmtUSD } from '../../../lib/format';
 import { useT } from '../../../lib/i18n';
+import type { CommissionPayment } from '../../../lib/useCommissionPayment';
 
 // Who the order is for and what they earn from it. The purchaser and rate
 // inputs used to sit under "Order details" and the maths in an aside titled
@@ -26,6 +29,9 @@ type Props = {
   pricedCount: number;
   firstName: string;
   locale: string;
+  /** How the purchaser was paid — live-saved, a manager's at any stage. */
+  commissionPayment: CommissionPayment;
+  canEditCommissionPayment: boolean;
 };
 
 export function CommissionTab(p: Props) {
@@ -163,6 +169,22 @@ export function CommissionTab(p: Props) {
             </div>
           )}
         </div>
+      </div>
+
+      {/* The second payment on the order: what the purchaser was paid, as
+          opposed to what the supplier was (the Cost Payment tab). */}
+      <div style={{ marginTop: 20 }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
+          textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4,
+        }}>
+          <Icon name="paperclip" size={12} /> {t('cpTitle')}
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--fg-subtle)', marginBottom: 10 }}>
+          {t('cpHint', { name: p.firstName })}
+        </div>
+        <CommissionPaymentFields cp={p.commissionPayment} editable={p.canEditCommissionPayment} idPrefix="eo-cp" />
       </div>
     </div>
   );
