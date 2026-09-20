@@ -7,7 +7,7 @@ priority: P2
 created: 2026-09-19
 reporter: jinhu
 branch: feat/remove-shipsaving
-pr:
+pr: 365
 version:
 related: [RS-013, RS-050, RS-075, RS-077]
 ---
