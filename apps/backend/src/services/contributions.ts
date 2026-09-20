@@ -13,6 +13,7 @@
 // are projections from reviewed POs; its spend follows the same past-Draft rule.
 
 import type postgres from 'postgres';
+import { REVIEWED_LIFECYCLES } from './orderAdvance';
 import type { Sql, TransactionSql } from 'postgres';
 import { effUnitCost, poFeeBasis } from '../lib/po-cost';
 import type { Role } from '../types';
@@ -66,7 +67,7 @@ export async function contributions(
   const feeBasis = poFeeBasis(sql);
   const eff = effUnitCost(sql);
   const headerCost = sql`COALESCE(po.total_cost, fee.goods) + po.other_fees`;
-  const reviewed = sql`po.lifecycle IN ('ready_to_pay', 'done')
+  const reviewed = sql`po.lifecycle = ANY(${REVIEWED_LIFECYCLES}::text[])
                        AND po.created_at >= ${start} AND po.created_at < ${end}`;
   const spend = sql`po.lifecycle <> 'draft'
                     AND po.created_at >= ${start} AND po.created_at < ${end}`;

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  ORDER_STATUSES, LINE_STATUSES, LIFECYCLE_STATUS, isClosedBook, isCompleted,
-  warehouseGateLockedStatuses,
+  ORDER_STATUSES, PO_STATUSES, LINE_STATUSES, LIFECYCLE_STATUS, WORKFLOW_STAGES, spineStatus,
+  isClosedBook, isCompleted, warehouseGateLockedStatuses,
 } from './status';
 import type { Warehouse } from './types';
 
@@ -15,12 +15,24 @@ describe('stage vocabulary', () => {
     expect([...LINE_STATUSES]).not.toContain('Ready to Pay');
   });
 
-  it('the book closes at Ready to Pay, but only Done counts as completed', () => {
+  it('the book closes at Ready to Pay, but only Done and Sold count as completed', () => {
     expect(isClosedBook('Ready to Pay')).toBe(true);
     expect(isClosedBook('Done')).toBe(true);
+    expect(isClosedBook('Sold')).toBe(true);
     expect(isClosedBook('Reviewing')).toBe(false);
     expect(isCompleted('Ready to Pay')).toBe(false);
     expect(isCompleted('Done')).toBe(true);
+    expect(isCompleted('Sold')).toBe(true);
+  });
+
+  it('Sold is a PO status that shares Done\'s step rather than a stage of its own', () => {
+    expect(ORDER_STATUSES).not.toContain('Sold');
+    expect(PO_STATUSES).toEqual([...ORDER_STATUSES, 'Sold']);
+    expect(LIFECYCLE_STATUS.sold).toBe('Sold');
+    expect(WORKFLOW_STAGES.at(-1)).toEqual({ id: 'sold', label: 'Sold' });
+    expect(spineStatus('Sold')).toBe('Done');
+    for (const s of ORDER_STATUSES) expect(spineStatus(s)).toBe(s);
+    expect(ORDER_STATUSES.indexOf(spineStatus('Sold') as typeof ORDER_STATUSES[number])).toBe(4);
   });
 });
 
@@ -40,5 +52,7 @@ describe('warehouseGateLockedStatuses', () => {
   it('opens up once the order is past the last gate, so Done and the reopens are anyone\'s', () => {
     expect(warehouseGateLockedStatuses('Ready to Pay', wh('u1'), 'u2')).toEqual([]);
     expect(warehouseGateLockedStatuses('Done', wh('u1'), 'u2')).toEqual([]);
+    // Not on the spine, so an unmapped index would read as "before every gate".
+    expect(warehouseGateLockedStatuses('Sold', wh('u1'), 'u2')).toEqual([]);
   });
 });

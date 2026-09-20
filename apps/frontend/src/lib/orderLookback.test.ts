@@ -53,6 +53,19 @@ describe('lookbackFacts', () => {
     expect(lookbackFacts('done', events).map(f => f.kind)).toEqual(['advanced', 'doneNote', 'doneFile']);
   });
 
+  it('a sell-out is Done\'s last fact and the system\'s, not anyone\'s', () => {
+    const events = [
+      ev('advanced', { from: 'ready_to_pay', to: 'done' }, 'Alex'),
+      ev('status_meta_changed', { status: 'Done', field: 'note', to: 'Paid' }),
+      ev('advanced', { from: 'done', to: 'sold' }, null),
+    ];
+    expect(lookbackFacts('done', events).map(f => f.kind)).toEqual(['advanced', 'doneNote', 'advanced']);
+    expect(lookbackFacts('done', events).at(-1)).toMatchObject({ kind: 'advanced', to: 'sold', who: null });
+    expect(lookbackFacts('sold', events)).toEqual([
+      expect.objectContaining({ kind: 'advanced', from: 'done', to: 'sold', who: null }),
+    ]);
+  });
+
   it('a stage the order jumped over, or a log from before the events, has nothing', () => {
     expect(lookbackFacts('reviewing', [ev('submitted', {}), ev('advanced', { from: 'in_transit', to: 'ready_to_pay' })]))
       .toEqual([]);

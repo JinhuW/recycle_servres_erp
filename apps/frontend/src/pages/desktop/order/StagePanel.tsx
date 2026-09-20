@@ -130,6 +130,14 @@ export function StagePanel(p: Props) {
         <div className="muted" style={{ fontSize: 12 }}>{t('eoOwedHint')}</div>
       </div>
     );
+  } else if (p.status === 'Sold') {
+    left = (
+      <div className="oe-box">
+        <div className="oe-box-h"><span>{t('eoStageSold')}</span></div>
+        <div className="oe-box-lead">{t('eoSoldLead', { n: o.realized?.soldQty ?? 0, name: o.userName })}</div>
+        {p.doneEvidence}
+      </div>
+    );
   } else {
     left = (
       <div className="oe-box">
@@ -151,7 +159,8 @@ export function StagePanel(p: Props) {
             p.status === 'Draft' ? 'eoNextDraft'
             : p.status === 'In Transit' ? 'eoNextInTransit'
             : p.status === 'Reviewing' ? 'eoNextReviewing'
-            : p.status === 'Ready to Pay' ? 'eoNextReadyToPay' : 'eoNextDone',
+            : p.status === 'Ready to Pay' ? 'eoNextReadyToPay'
+            : p.status === 'Sold' ? 'eoNextSold' : 'eoNextDone',
             { wh, name: o.userName, date: fmtDateShort(o.createdAt, p.locale) },
           )}</div>
           {p.next && (

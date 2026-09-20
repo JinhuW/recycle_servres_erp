@@ -7,7 +7,7 @@
 
 import type { OrderEvent } from './types';
 
-export type StageId = 'draft' | 'in_transit' | 'reviewing' | 'ready_to_pay' | 'done';
+export type StageId = 'draft' | 'in_transit' | 'reviewing' | 'ready_to_pay' | 'done' | 'sold';
 
 export type LookbackFact =
   | { kind: 'submitted'; who: string | null; when: string; lineCount: number; qty: number; totalCost: number }
@@ -81,7 +81,12 @@ export function lookbackFacts(stage: StageId, events: OrderEvent[]): LookbackFac
           out.push({ kind: 'doneFile', filename: e.detail.filename, when: e.createdAt });
         }
       }
+      // Sold shares Done's step, so its settle is Done's last fact.
+      pushAdvance(last(events, e => e.kind === 'advanced' && e.detail.from === 'done' && e.detail.to === 'sold'));
       return out;
     }
+    case 'sold':
+      pushAdvance(advancedTo('sold'));
+      return out;
   }
 }

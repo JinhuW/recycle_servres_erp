@@ -28,6 +28,7 @@ const TONE_VAR: Record<string, string> = {
   warn:   'var(--warn)',
   accent: 'var(--accent)',
   pos:    'var(--pos)',
+  cool:   'var(--cool)',
 };
 
 // Commission = order profit × the manager-set per-order rate (null = not yet set = $0).

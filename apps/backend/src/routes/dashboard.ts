@@ -5,6 +5,7 @@ import { effectiveRole } from '../lib/role';
 import { effUnitCost, poFeeBasis } from '../lib/po-cost';
 import { parseReportingWindow, windowBounds } from '../lib/reporting-window';
 import { contributions } from '../services/contributions';
+import { REVIEWED_LIFECYCLES } from '../services/orderAdvance';
 import type { Env, User } from '../types';
 
 const dashboard = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -53,9 +54,9 @@ dashboard.get('/', async (c) => {
   const saleDateWin = sql`so.status = 'Done' AND so.updated_at >= ${start} AND so.updated_at < ${end}`;
   const salePrevWin = sql`so.status = 'Done' AND so.updated_at >= ${prevStart} AND so.updated_at < ${prevEnd}`;
   // Projected windows key off the PO's own created_at; only the purchaser's reviewed POs count.
-  const projDateWin = sql`po.lifecycle IN ('ready_to_pay', 'done') AND po.user_id = ${u.id}
+  const projDateWin = sql`po.lifecycle = ANY(${REVIEWED_LIFECYCLES}::text[]) AND po.user_id = ${u.id}
                           AND po.created_at >= ${start} AND po.created_at < ${end}`;
-  const projPrevWin = sql`po.lifecycle IN ('ready_to_pay', 'done') AND po.user_id = ${u.id}
+  const projPrevWin = sql`po.lifecycle = ANY(${REVIEWED_LIFECYCLES}::text[]) AND po.user_id = ${u.id}
                           AND po.created_at >= ${prevStart} AND po.created_at < ${prevEnd}`;
   // Spend — what the PO pages call "Total cost" — over every PO past Draft in
   // the window, scoped to the caller for the purchaser lens. Money is committed
@@ -242,7 +243,7 @@ dashboard.get('/', async (c) => {
                  COALESCE(SUM(${headerCost}), 0)::float AS cost
           FROM orders po
           ${feeBasis}
-          WHERE po.lifecycle IN ('ready_to_pay', 'done') AND po.created_at >= ${start} AND po.created_at < ${end}
+          WHERE po.lifecycle = ANY(${REVIEWED_LIFECYCLES}::text[]) AND po.created_at >= ${start} AND po.created_at < ${end}
           GROUP BY po.user_id
         ), per_line AS (
           SELECT po.user_id,
@@ -253,7 +254,7 @@ dashboard.get('/', async (c) => {
           FROM order_lines ol
           JOIN orders po ON po.id = ol.order_id
           ${feeBasis}
-          WHERE po.lifecycle IN ('ready_to_pay', 'done') AND po.created_at >= ${start} AND po.created_at < ${end}
+          WHERE po.lifecycle = ANY(${REVIEWED_LIFECYCLES}::text[]) AND po.created_at >= ${start} AND po.created_at < ${end}
           GROUP BY po.user_id
         )
         SELECT u.id, u.name, u.initials, u.email, u.role,

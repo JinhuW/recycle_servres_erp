@@ -12,6 +12,7 @@ import {
 } from '../lib/categoryColumns';
 import { UNTYPED_ITEM, normSellPrice, SPEC_FIELD_TO_DB_COL } from '@recycle-erp/shared';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
+import { settleSoldTx } from '../services/orderSold';
 import type { Env, User } from '../types';
 import { isClosedBook, LINE_STATUS_FOR_LIFECYCLE, ARCHIVED_LINE_STATUS } from '../services/orderAdvance';
 
@@ -1153,6 +1154,7 @@ inventory.patch('/:id', async (c) => {
     | { kind: 'notFound' }
     | { kind: 'committed' }
     | { kind: 'doneLocked' }
+    | { kind: 'soldLocked' }
     | { kind: 'archived' }
     | { kind: 'ok'; before: Record<string, unknown> };
   const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
@@ -1195,6 +1197,13 @@ inventory.patch('/:id', async (c) => {
     // stay editable: that is the ordinary post-Done inventory workflow, and
     // none of them feed the goods total.
     if (touchesGoods && parent && isClosedBook(parent.lifecycle)) return { kind: 'doneLocked' };
+    // A sold order's lines are its sales record: this is the one writer that
+    // can walk a line off Sold (a Done sell order never reopens), and doing so
+    // under a sold order would leave it sold with stock. Reopen the order to
+    // Ready to Pay first — Reviewing would re-cross the warehouse gate.
+    if (parent?.lifecycle === 'sold' && body.status !== undefined && body.status !== 'Sold') {
+      return { kind: 'soldLocked' };
+    }
 
     // The mirror verdict has to be taken before qty/unit_cost move — afterwards
     // a stale mirror and a real negotiated price are indistinguishable and the
@@ -1266,6 +1275,8 @@ inventory.patch('/:id', async (c) => {
       `;
     }
     if (touchesGoods) await syncOrderGoodsTotal(tx, orderId, goodsFollowsLines);
+    // A hand-set Sold on the last unsold line settles the order like a sale.
+    if (body.status === 'Sold') await settleSoldTx(tx, orderId, u.id);
     return { kind: 'ok', before };
   });
 
@@ -1275,6 +1286,9 @@ inventory.patch('/:id', async (c) => {
   }
   if (outcome.kind === 'doneLocked') {
     return c.json({ error: 'the purchase order is past review; move it back to Reviewing before changing qty or unit cost' }, 409);
+  }
+  if (outcome.kind === 'soldLocked') {
+    return c.json({ error: 'the purchase order is fully sold; move it back to Ready to Pay before changing a line status' }, 409);
   }
   if (outcome.kind === 'archived') {
     return c.json({ error: 'the purchase order is archived; unarchive it before editing its lines' }, 409);

@@ -17,7 +17,8 @@ import {
 } from '../lib/categoryColumns';
 import {
   advanceOrderTx, revertOrderToDraftTx, archiveOrderLinesTx, unarchiveOrderLinesTx,
-  LINE_STATUS_FOR_LIFECYCLE, LIFECYCLE_LABEL, isClosedBook, type ArchiveSellOrderConflict,
+  LINE_STATUS_FOR_LIFECYCLE, LIFECYCLE_LABEL, isClosedBook, lifecyclesForLabel, visibleLifecycle,
+  type ArchiveSellOrderConflict,
 } from '../services/orderAdvance';
 import { txnRequiredFor, chatShotRequiredFor, cashShotRequiredFor, companyPayTxnUnknown } from '../services/orderTxnRule';
 import { syncOrderCategory, deriveCategory, sortCategories } from '../services/orderCategory';
@@ -362,7 +363,8 @@ orders.get('/', async (c) => {
   const sql = getDb(c.env);
   // A manager in rolePreview=as_purchaser mode is scoped to their own POs,
   // matching what the FE shows so the two layers can't disagree.
-  const isManager = effectiveRole(u) === 'manager';
+  const role = effectiveRole(u);
+  const isManager = role === 'manager';
 
   // The mobile capture flow's draft picker asks for `mine` so a manager only
   // ever appends scanned items to their own POs, not someone else's draft.
@@ -394,24 +396,23 @@ orders.get('/', async (c) => {
   const categoryFrag = category
     ? sql`EXISTS (SELECT 1 FROM order_lines ocf WHERE ocf.order_id = o.id AND ocf.category = ${category})`
     : sql`TRUE`;
-  // The mobile filter chip sends the order's stage label — map to lifecycle.
-  // Filtering on per-line status (an earlier design) silently hid empty drafts
-  // and drafts whose lines had already advanced past 'Draft'.
-  const STATUS_TO_LIFECYCLE: Record<string, string> = Object.fromEntries(
-    Object.entries(LIFECYCLE_LABEL).map(([id, label]) => [label, id]),
-  );
-  const statusFrag = status
-    ? (STATUS_TO_LIFECYCLE[status]
-        ? sql`o.lifecycle = ${STATUS_TO_LIFECYCLE[status]}`
-        : sql`FALSE`)
-    : sql`TRUE`;
-  // The org-wide default view drowns in finished POs, so clients can carve a
-  // stage out (mobile sends excludeStatus=Done unless the Done chip is
-  // active). An unknown label excludes nothing — the mirror of `status`,
-  // where an unknown label matches nothing.
-  const excludeStatus = c.req.query('excludeStatus');
-  const excludeFrag = excludeStatus && STATUS_TO_LIFECYCLE[excludeStatus]
-    ? sql`o.lifecycle <> ${STATUS_TO_LIFECYCLE[excludeStatus]}`
+  // The mobile filter chip sends the order's stage label — map to lifecycle,
+  // per reader: a purchaser's Done is done and sold together. Filtering on
+  // per-line status (an earlier design) silently hid empty drafts and drafts
+  // whose lines had already advanced past 'Draft'.
+  const statusSlugs = status ? lifecyclesForLabel(status, role) : null;
+  const statusFrag = statusSlugs === null
+    ? sql`TRUE`
+    : statusSlugs.length
+      ? sql`o.lifecycle = ANY(${statusSlugs}::text[])`
+      : sql`FALSE`;
+  // The org-wide default view drowns in finished POs, so clients can carve
+  // stages out (mobile sends excludeStatus=Done&excludeStatus=Sold unless a
+  // chip is active). An unknown label excludes nothing — the mirror of
+  // `status`, where an unknown label matches nothing.
+  const excludeSlugs = (c.req.queries('excludeStatus') ?? []).flatMap((l) => lifecyclesForLabel(l, role));
+  const excludeFrag = excludeSlugs.length
+    ? sql`o.lifecycle <> ALL(${excludeSlugs}::text[])`
     : sql`TRUE`;
   // Archived orders drop out of the default view; clients opt in to see them.
   const archivedFrag = includeArchived ? sql`TRUE` : sql`o.archived_at IS NULL`;
@@ -536,7 +537,7 @@ orders.get('/', async (c) => {
       categories: sortCategories((r.categories as string[] | null) ?? []),
       payment: r.payment,
       notes: r.notes,
-      lifecycle: r.lifecycle,
+      lifecycle: visibleLifecycle(r.lifecycle as string, role),
       archivedAt: r.archived_at,
       createdAt: r.created_at,
       totalCost: r.total_cost,
@@ -569,7 +570,7 @@ orders.get('/', async (c) => {
       // PO status is authoritative — derive from o.lifecycle, not from line
       // aggregation. Per-line `Sold` (set when inventory ships out via a sell
       // order) is intentional divergence and must not surface as "Mixed".
-      status: LIFECYCLE_LABEL[r.lifecycle as string] ?? r.lifecycle,
+      status: LIFECYCLE_LABEL[visibleLifecycle(r.lifecycle as string, role)] ?? r.lifecycle,
     })),
     nextCursor,
   });
@@ -640,7 +641,8 @@ orders.get('/:id', async (c) => {
     ORDER BY ol.position ASC
   `;
 
-  const status = LIFECYCLE_LABEL[order.lifecycle as string] ?? order.lifecycle as string;
+  const lifecycle = visibleLifecycle(order.lifecycle as string, effectiveRole(u));
+  const status = LIFECYCLE_LABEL[lifecycle] ?? lifecycle;
 
   // Per-status evidence (note + attachments) — currently captured only for
   // Done. Same response shape as sell orders' statusMeta.
@@ -743,7 +745,7 @@ orders.get('/:id', async (c) => {
       categories: sortCategories([...new Set(lines.map(l => l.category as string).filter(Boolean))]),
       payment: order.payment,
       notes: order.notes,
-      lifecycle: order.lifecycle,
+      lifecycle,
       archivedAt: order.archived_at,
       status,
       statusMeta,
@@ -828,7 +830,8 @@ orders.get('/:id/events', async (c) => {
   const owner = (await sql`SELECT user_id FROM orders WHERE id = ${id} LIMIT 1`)[0] as
     | { user_id: string } | undefined;
   if (!owner) return c.json({ error: 'Not found' }, 404);
-  if (effectiveRole(u) !== 'manager' && owner.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
+  const role = effectiveRole(u);
+  if (role !== 'manager' && owner.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
 
   const rows = await sql`
     SELECT e.id, e.kind, e.detail, e.created_at,
@@ -847,8 +850,19 @@ orders.get('/:id/events', async (c) => {
     actor_initials: string | null;
   }>;
 
+  // A purchaser is shown Done for Sold everywhere else, so here the settle
+  // row is dropped rather than shown as Done → Done, and a reopen from Sold
+  // reads as a reopen from Done.
+  const visible = role === 'manager' ? rows : rows.flatMap((r) => {
+    if (r.kind !== 'advanced') return [r];
+    const d = r.detail as { from?: string; to?: string };
+    if (d.from === 'done' && d.to === 'sold') return [];
+    if (d.from !== 'sold' && d.to !== 'sold') return [r];
+    return [{ ...r, detail: { ...d, from: visibleLifecycle(d.from ?? '', role), to: visibleLifecycle(d.to ?? '', role) } }];
+  });
+
   return c.json({
-    events: rows.map(r => ({
+    events: visible.map(r => ({
       id: r.id,
       kind: r.kind,
       detail: r.detail,
@@ -1022,7 +1036,7 @@ orders.get('/:id/spreadsheet', async (c) => {
   const paymentRows = [
     { field: 'PO ID',                 value: String(order.id) },
     { field: 'Date',                  value: fmtTs(order.created_at).slice(0, 10) },
-    { field: 'Status',                value: LIFECYCLE_LABEL[String(order.lifecycle)] ?? String(order.lifecycle) },
+    { field: 'Status',                value: LIFECYCLE_LABEL[visibleLifecycle(String(order.lifecycle), effectiveRole(u))] ?? String(order.lifecycle) },
     { field: 'Buyer',                 value: String(order.user_name ?? '') },
     { field: 'Category',              value: lineCats.length > 1 ? lineCats.join(' · ') : String(order.category ?? '') },
     { field: 'Warehouse',             value: warehouse },
@@ -2987,6 +3001,10 @@ function advanceRefusedResponse(
     case 'badStage': return c.json({ error: outcome.msg }, 400);
     case 'archived': return c.json({ error: 'Order is archived — unarchive it first' }, 409);
     case 'finalStage': return c.json({ error: 'Already at the final stage' }, 409);
+    case 'soldIsAutomatic':
+      return c.json({ error: 'Sold is not a stage you can choose — an order becomes Sold on its own once it is Done and every line has sold.' }, 409);
+    case 'alreadySold':
+      return c.json({ error: 'This order is Done and every line has sold. To reopen it, move it back to Reviewing or Ready to Pay.' }, 409);
     case 'committedLines':
       return c.json({
         error: `Lines committed to ${describeSellOrders(outcome.sellOrderIds)} — cancel those sell orders first.`,
@@ -3185,7 +3203,7 @@ orders.post('/:id/handoff', async (c) => {
       case 'forbidden': return c.json({ error: 'Forbidden' }, 403);
       case 'archived': return c.json({ error: 'Order is archived — unarchive it first' }, 409);
       case 'notDraft':
-        return c.json({ error: `Order is already ${LIFECYCLE_LABEL[r.lifecycle] ?? r.lifecycle}` }, 409);
+        return c.json({ error: `Order is already ${LIFECYCLE_LABEL[visibleLifecycle(r.lifecycle, effectiveRole(u))] ?? r.lifecycle}` }, 409);
       case 'trackingTaken':
         return c.json({ error: trackingTakenMsg(r.otherOrderId), otherOrderId: r.otherOrderId }, 409);
       case 'advance': return advanceRefusedResponse(c, r.outcome, pullError);
