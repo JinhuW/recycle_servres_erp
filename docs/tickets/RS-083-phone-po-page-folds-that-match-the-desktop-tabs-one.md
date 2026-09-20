@@ -2,13 +2,13 @@
 id: RS-083
 title: phone PO page: folds that match the desktop tabs, one sheet per stage
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-20
 reporter: jinhu
 branch: feat/rs-083-phone-folds
-pr:
-version:
+pr: 376
+version: 1.162.0
 related: [RS-080, RS-081]
 ---
 
@@ -49,23 +49,23 @@ confirmation at all on the phone.
 
 ## Acceptance criteria
 
-- [ ] Every foldable section on the phone PO page is the same `PhFold` card:
+- [x] Every foldable section on the phone PO page is the same `PhFold` card:
       closed = title, read-back summary, chevron in a disc; open = tinted
       header with a rule under it, rotated chevron, fields inside the card.
-- [ ] The sections are Delivery (incl. warehouse), Payment, Commission,
+- [x] The sections are Delivery (incl. warehouse), Payment, Commission,
       Notes & files, Activity — the desktop tab names and order.
-- [ ] Amber mark = the next step needs this section; blue mark = unsaved
+- [x] Amber mark = the next step needs this section; blue mark = unsaved
       edit here. The Cost card no longer shows the commission rate or the
       PayPal transaction id.
-- [ ] Commission is editable by managers until Ready to Pay (sourced by,
+- [x] Commission is editable by managers until Ready to Pay (sourced by,
       rate), read-only for everyone else.
-- [ ] The stage opens its fold: Draft → first amber fold, In Transit →
+- [x] The stage opens its fold: Draft → first amber fold, In Transit →
       Delivery, Ready to Pay → Commission; the user can still open any fold.
-- [ ] Draft → In Transit asks Products / Delivery / Payment only (desktop
+- [x] Draft → In Transit asks Products / Delivery / Payment only (desktop
       dialog too). Reviewing → Ready to Pay (manager) opens a Commission
       sheet that saves the commission and advances. Done keeps its evidence
       dialog.
-- [ ] The "Review order" step uses the same folds (Delivery = warehouse,
+- [x] The "Review order" step uses the same folds (Delivery = warehouse,
       Payment, Notes) and the white cost card; its payload is unchanged.
 
 ## Out of scope
