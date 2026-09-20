@@ -24,15 +24,8 @@ export type Env = {
   // Optional: without them the proxy still works against an unguarded URL.
   COORDINATOR_ACCESS_CLIENT_ID?: string;
   COORDINATOR_ACCESS_CLIENT_SECRET?: string;
-  // ShipSaving prepaid-label API. Either unset → deterministic stub provider
-  // (demo rates/labels, no real purchases) and the tracking poll stays off.
-  // ShipSaving v2 (docs.shipsaving.com/v2): OAuth client credentials.
-  // API_URL overrides the default https://x-api.shipsaving.com.
-  SHIPSAVING_API_URL?: string;
-  SHIPSAVING_APP_KEY?: string;
-  SHIPSAVING_APP_SECRET?: string;
   // Shippo tracking (tracking only — never buys labels). Unset means tracking
-  // falls back to ShipSaving, and then to a stub that never ticks.
+  // is a stub that never ticks.
   SHIPPO_API_URL?: string;
   SHIPPO_API_TOKEN?: string;
   // The credential in the webhook URL. Unset makes the receiver answer 404.

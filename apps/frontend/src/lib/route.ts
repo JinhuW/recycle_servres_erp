@@ -102,26 +102,15 @@ export function match(template: string, path: string): Record<string, string> | 
   return params;
 }
 
-// Shipping sub-routes. Parsed here (not ad-hoc in the shell) because
-// `/shipping/new` would otherwise be captured by the `/shipping/:orderId`
-// template as an order id — order of the checks is load-bearing.
+// Shipping sub-routes. Parsed here (not ad-hoc in the shell) so the two
+// shells agree on which paths belong to the Shipping page.
 export type ShippingRoute =
   | { kind: 'dashboard' }
-  | { kind: 'wizardNew' }
-  | { kind: 'addLabel' }
-  | { kind: 'wizardPo'; orderId: string; sid: string | null }
-  | { kind: 'focus'; orderId: string };
+  | { kind: 'addLabel' };
 
 export function parseShippingRoute(path: string): ShippingRoute | null {
   if (path === '/shipping') return { kind: 'dashboard' };
-  if (path === '/shipping/new') return { kind: 'wizardNew' };
   if (path === '/shipping/add') return { kind: 'addLabel' };
-  const cont = match('/shipping/:orderId/label/:sid', path);
-  if (cont) return { kind: 'wizardPo', orderId: cont.orderId!, sid: cont.sid! };
-  const fresh = match('/shipping/:orderId/label', path);
-  if (fresh) return { kind: 'wizardPo', orderId: fresh.orderId!, sid: null };
-  const focus = match('/shipping/:orderId', path);
-  if (focus) return { kind: 'focus', orderId: focus.orderId! };
   return null;
 }
 

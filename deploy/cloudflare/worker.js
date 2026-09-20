@@ -45,7 +45,7 @@ export default {
         });
       }
       // Every other path is a client-side route — the app is hash-routed, so in
-      // practice `/`, the vendor and seller portals (/v/, /s/), /authorize, and
+      // practice `/`, the vendor portal (/v/), /authorize, and
       // the PWA manifest shortcuts. Same bytes index.html always served, with
       // the no-cache it carries in _headers, which does not apply to a response
       // built here.

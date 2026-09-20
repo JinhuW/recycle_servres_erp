@@ -10,8 +10,6 @@ const BODY = {
   paypalTxnId: 'TESTPAYTXN0000001', category: 'RAM', warehouseId: 'WH-LA1',
   lines: [{ category: 'RAM', qty: 2, unitCost: 10, condition: 'New', sellPrice: 40 }],
 };
-const FROM = { name: 'Jordan Rivera', street1: '2210 E Speedway Blvd', city: 'Tucson', state: 'AZ', zip: '85719' };
-const PKG = { weightOz: 32, lengthIn: 10, widthIn: 8, heightIn: 6 };
 
 type Order = { lifecycle: string; status: string; lines: { id: string; status: string }[] };
 
@@ -195,11 +193,8 @@ describe('the book closes at Ready to Pay', () => {
     expect((await api('PATCH', `/api/orders/${id}`, { token: alex.token, body: { onBehalfOfUserId: marcus.user.id } })).status).toBe(409);
   });
 
-  it('shipments and goods edits on the lines refuse', async () => {
+  it('goods edits on the lines refuse', async () => {
     const { id, alex } = await orderAt('ready_to_pay');
-    const ship = await api('POST', `/api/orders/${id}/shipments`, { token: alex.token, body: { from: FROM, package: PKG } });
-    expect(ship.status).toBe(409);
-
     const line = (await getOrder(alex.token, id)).lines[0];
     const qty = await api<{ error: string }>('PATCH', `/api/inventory/${line.id}`, { token: alex.token, body: { qty: 5 } });
     expect(qty.status).toBe(409);

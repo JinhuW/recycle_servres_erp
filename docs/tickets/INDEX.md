@@ -5,7 +5,9 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-077](./RS-077-in-transit-shows-the-package-journey-eta-and-trackin.md) | done | story | P2 | In Transit shows the package journey, ETA and tracking number; the PO list gets a Total cost column | — |
+| [RS-079](./RS-079-paypal-pull-failures-are-reported-and-throttled.md) | done | bug | P2 | PayPal pull failures are reported and throttled; the phone scan keeps concurrent edits | 1.157.1 |
+| [RS-078](./RS-078-remove-the-prepaid-label-shipsaving-flow-keep-packag.md) | done | chore | P2 | Remove the prepaid-label (ShipSaving) flow; keep package tracking | 1.157.0 |
+| [RS-077](./RS-077-in-transit-shows-the-package-journey-eta-and-trackin.md) | done | story | P2 | In Transit shows the package journey, ETA and tracking number; the PO list gets a Total cost column | 1.156.0 |
 | [RS-076](./RS-076-dev-to-main-review-findings-before-the-prod-cut.md) | done | bug | P2 | Dev-to-main review findings before the prod cut | 1.155.1 |
 | [RS-075](./RS-075-in-transit-chip-names-the-carrier-and-links-its-trac.md) | done | story | P2 | In Transit chip names the carrier and links its tracking page | 1.155.0 |
 | [RS-074](./RS-074-split-the-phone-po-page-into-general-info-and-produc.md) | done | story | P2 | Split the phone PO page into general info and products; list rows open instead of expanding | 1.154.0 |

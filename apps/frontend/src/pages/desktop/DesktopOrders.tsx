@@ -66,7 +66,7 @@ const SORT_KEYS: Record<string, (o: OrderSummary) => string | number> = {
   warehouse:  o => o.warehouse?.short ?? '',
   lines:      o => o.lineCount,
   qty:        o => o.qty,
-  cost:       o => totalCostFor(o),
+  cost:       totalCostFor,
   revenue:    o => o.revenue,
   profit:     o => o.profit,
   // Unsold POs sort below every realized figure, loss or gain.
@@ -631,36 +631,25 @@ export function DesktopOrders({ onToast }: Props) {
                           const cls = 'chip dot ' + statusTone(o.status);
                           if (!d) return <span className={cls}>{o.status}</span>;
                           const trk = o.tracking;
-                          if (!d.href || !trk) return <span className={cls}>{o.status} | {d.text}</span>;
+                          if (!trk?.trackingUrl) return <span className={cls}>{o.status} | {d.text}</span>;
                           // The row's own click toggles the line drawer, hence
                           // the stop — same as the payment chip-link beside it.
+                          const link = {
+                            href: trk.trackingUrl, target: '_blank', rel: 'noopener noreferrer',
+                            onClick: (e: { stopPropagation(): void }) => e.stopPropagation(),
+                          };
                           const note = trackingNote(trk, t, locale);
                           return (
                             <>
-                              <a
-                                className={cls + ' chip-link'}
-                                href={d.href}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                title={t('shipTrackOnCarrier', { carrier: d.text })}
-                                onClick={e => e.stopPropagation()}
-                              >
+                              <a className={cls + ' chip-link'} {...link} title={t('shipTrackOnCarrier', { carrier: d.text })}>
                                 {o.status} | {d.text}
                               </a>
                               {/* The number itself, and where the box stands:
                                   the ETA, or delivered / failed once the
                                   carrier says so. */}
                               <div className="muted" style={{ fontSize: 10.5, fontWeight: 500, marginTop: 3, whiteSpace: 'nowrap' }}>
-                                <a
-                                  className="mono"
-                                  href={d.href}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  onClick={e => e.stopPropagation()}
-                                >
-                                  {trk.trackingNumber}
-                                </a>
-                                {note && <> · {note}</>}
+                                <a className="mono" {...link}>{trk.trackingNumber}</a>
+                                {note && ` · ${note}`}
                               </div>
                             </>
                           );

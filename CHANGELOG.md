@@ -17,6 +17,85 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.157.1] - 2026-09-20
+
+### Fixes
+
+- **A PayPal outage no longer reads as a typo** (RS-079). The pull that
+  `/advance` and `/handoff` make for an unknown transaction ID swallowed its
+  own failure: with PayPal down or the key expired, every company-card
+  submit was refused with "isn't in our PayPal account — check the ID", and
+  nothing reached the log from that path. The refusal now says PayPal could
+  not be reached and carries `pullFailed: true`, and the pass is reported
+  the way the six-hourly loop's is, so an expired key shows up as one line
+  instead of a run of "typos".
+- **The on-demand pull is rate-limited per user** — three a minute. Past
+  that the guard judges the synced table as it stands and gives its usual
+  "try again later"; a purchaser retrying Submit sees the rule, never a
+  429. Any purchaser with a Draft and an invented 17-character ID could
+  otherwise trigger a Transaction Search plus dispute list per request.
+- **The phone PO page keeps what you typed while a screenshot was being
+  read.** The PayPal scan wrote its ID through the draft the render had
+  captured, so notes or a warehouse changed during the seconds it took were
+  reverted when it landed. Every draft edit on that page now merges into
+  the draft as it stands.
+
+## [1.157.0] - 2026-09-19
+
+### Removed
+
+- **The prepaid-label flow is gone** (RS-078). ShipSaving was the provider
+  behind buying shipping labels for sellers — rate quotes, buy, void, the
+  full-page label wizard, the per-PO *Shipping labels* panel, the seller-fill
+  link at `/s/<token>`, and the label cost folded into a PO's other fees. It
+  never left the stub provider in production, and no labels will be bought
+  from the system, so the routes (`/api/orders/:id/shipments/*`,
+  `/api/shipments`, `/api/shipping/contacts`, `/api/public/shipping/:token`),
+  the `SHIPSAVING_*` environment variables, the stub label provider, the
+  activity-log event kinds, ~90 translation keys and the matching CSS are
+  removed. The `shipments` table stays in Postgres, unread; a PO delete no
+  longer refuses on purchased labels, and the PO cost tape has no
+  *Shipping labels* row.
+
+### Changed
+
+- **The Shipping page is an inbound-packages ledger.** Desktop and phone now
+  list tracked packages only (Order · Seller · Carrier · Tracking), export
+  those columns to CSV, and keep *Add a label* for an externally bought
+  tracking number. The phone Home card reads
+  `GET /api/packages/inbound-counts` (was `/api/shipments/inbound-counts`).
+- Client suggestions come from tracked packages' seller names alone; the
+  shipments address branch is gone.
+- `/api/health` reports `providers.tracking` only — `labels` is no longer a
+  mode.
+
+## [1.156.1] - 2026-09-19
+
+### Fixes
+
+- **RS-077 cleanup, no behaviour change.** The step timeline that
+  `PackageJourney` had copied from the prepaid-label panel is now one
+  `StepTimeline` component both render, with the labels driven from the same
+  step list instead of a second hand-coded row; "Carrier update {when}" on
+  the PO page's Shipment block reads through `relTime` like every other
+  last-seen line instead of its own date format; the chip sub-line on the PO
+  list reads the tracking object once rather than testing the same link
+  twice; the delivered / exception wording under the chip comes from
+  `STATUS_CHIP` so the status→label map stays single; the PO page's three
+  identical uppercase section headings share one `SectionHead`; and the
+  package types are declared the right way round (`OrderPackage` is the full
+  shape, picked from `TrackedPackage`; the list's `PackageTracking` is its
+  skew-tolerant slice).
+- **One "newest package" lookup in `GET /api/orders` and `/:id`.** The two
+  LATERAL joins that each selected a different column set under a different
+  alias prefix are one `json_build_object` subquery in the SELECT list, with
+  one mapper. The list's rows therefore carry the same `tracking` fields the
+  PO page's `package` does (`id`, `trackingStatus`, `lastTrackedAt` join the
+  five it had), the package columns leave the list's GROUP BY, and the
+  lookup runs once per returned row rather than once per filtered one. The
+  two timestamps travel in Postgres' JSON ISO form (`…T00:00:00+00:00`) as
+  `pair_legs.postedAt` already does; every reader parses both.
+
 ## [1.156.0] - 2026-09-19
 
 ### Features

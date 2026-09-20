@@ -1,7 +1,7 @@
 // Mercury bank API client — docs.mercury.com/reference. Simple bearer token,
 // GET /api/v1/accounts then per-account GET /api/v1/account/:id/transactions.
-// Wire shapes declared from the docs; every number passes through num() (the
-// ShipSaving lesson: providers wire numbers as strings).
+// Wire shapes declared from the docs; every number passes through num()
+// (providers wire numbers as strings).
 
 import type { Env } from '../types';
 import { PAYPAL_TXN_STRICT } from '../ai/paypal';

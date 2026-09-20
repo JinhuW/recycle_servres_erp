@@ -6,96 +6,45 @@ import type { InboundRow } from './shippingList';
 // the classification and ordering rules are testable.
 
 /** The one thing a card can ask of the user, or null when it's just news. */
-export type InboundAction =
-  | { kind: 'create-po' }
-  | { kind: 'complete-po'; orderId: string }
-  | { kind: 'reshare-link'; orderId: string; sid: string; token: string }
-  | { kind: 'buy-desktop' }
-  | { kind: 'finish-desktop' }
-  | null;
+export type InboundAction = { kind: 'create-po' } | null;
 
-// The three per-row decisions below are shared with the desktop surfaces
-// (DesktopShipping, ShippingPanel), which present them differently — chip vs
-// CTA — but must agree on when they apply.
-
-/** A standalone package can grow its PO: delivered normally, any status for a
- *  manager — a carrier can go quiet or a number can be unregistrable, so a
- *  package can still stall before "delivered" and the server holds the same
- *  line. */
+/** A package can grow its PO: delivered normally, any status for a manager —
+ *  a carrier can go quiet or a number can be unregistrable, so a package can
+ *  still stall before "delivered" and the server holds the same line. Shared
+ *  with the desktop table, which presents it as a CTA rather than a card. */
 export function canCreatePo(
   pkg: { orderId: string | null; status: string }, manager: boolean,
 ): boolean {
   return !pkg.orderId && (pkg.status === 'delivered' || manager);
 }
 
-/** The PO's book is closed: review finished (Ready to Pay) or paid out (Done). */
-export function bookClosed(orderLifecycle: string | null | undefined): boolean {
-  return orderLifecycle === 'ready_to_pay' || orderLifecycle === 'done';
-}
-
-/** A delivered label asks for the PO to be completed until its book closes. */
-export function needsCompletePo(
-  status: string, orderLifecycle: string | null | undefined,
-): boolean {
-  return status === 'delivered' && orderLifecycle != null && !bookClosed(orderLifecycle);
-}
-
-/** The seller link is out and the seller hasn't finished the form. */
-export function waitingSeller(
-  s: { status: string; complete: boolean; sellerToken: string | null },
-): boolean {
-  return (s.status === 'draft' || s.status === 'quoted') && !s.complete && !!s.sellerToken;
-}
-
 export function inboundAction(row: InboundRow, manager = false): InboundAction {
-  if (row.kind === 'package') {
-    // Grouping stays manager-blind — an undelivered package is still "moving",
-    // the early manager CTA just rides along on its card.
-    return canCreatePo(row.pkg, manager) ? { kind: 'create-po' } : null;
-  }
-  const s = row.shipment;
-  if (s.status === 'delivered') {
-    return needsCompletePo(s.status, row.order.lifecycle)
-      ? { kind: 'complete-po', orderId: row.order.id }
-      : null;
-  }
-  if (s.status === 'draft' || s.status === 'quoted') {
-    // Buying happens on desktop; the phone's job is the honest handoff.
-    if (s.complete) return { kind: 'buy-desktop' };
-    if (s.sellerToken) return { kind: 'reshare-link', orderId: row.order.id, sid: s.id, token: s.sellerToken };
-    return { kind: 'finish-desktop' };
-  }
-  return null;
+  // Grouping stays manager-blind — an undelivered package is still "moving",
+  // the early manager CTA just rides along on its card.
+  return canCreatePo(row.pkg, manager) ? { kind: 'create-po' } : null;
 }
 
 export type InboundGroups = {
   needs: InboundRow[];
   moving: InboundRow[];
   arrived: InboundRow[];
-  voided: InboundRow[];
 };
 
-const status = (r: InboundRow) => (r.kind === 'package' ? r.pkg.status : r.shipment.status);
-const createdAt = (r: InboundRow) => (r.kind === 'package' ? r.pkg.createdAt : r.shipment.createdAt);
-const eta = (r: InboundRow) => (r.kind === 'package' ? r.pkg.trackingEta : r.shipment.trackingEta);
+const status = (r: InboundRow) => r.pkg.status;
+const createdAt = (r: InboundRow) => r.pkg.createdAt;
+const eta = (r: InboundRow) => r.pkg.trackingEta;
 
-// Within Needs You, problems outrank arrivals, arrivals outrank desktop handoffs.
-const NEEDS_RANK: Record<string, number> = {
-  'exception': 0, 'create-po': 1, 'complete-po': 2, 'buy-desktop': 3, 'reshare-link': 4, 'finish-desktop': 5,
-};
-
+// Within Needs You, problems outrank arrivals.
 function needsRank(r: InboundRow): number {
-  if (status(r) === 'exception') return NEEDS_RANK['exception'];
-  const a = inboundAction(r);
-  return a ? NEEDS_RANK[a.kind] : 9;
+  if (status(r) === 'exception') return 0;
+  return inboundAction(r) ? 1 : 9;
 }
 
 export function groupInbound(rows: InboundRow[]): InboundGroups {
-  const g: InboundGroups = { needs: [], moving: [], arrived: [], voided: [] };
+  const g: InboundGroups = { needs: [], moving: [], arrived: [] };
   for (const r of rows) {
     const s = status(r);
-    if (s === 'voided') g.voided.push(r);
-    else if (s === 'exception' || inboundAction(r) !== null) g.needs.push(r);
+    if (s === 'exception' || inboundAction(r) !== null) g.needs.push(r);
     else if (s === 'in_transit' || s === 'purchased') g.moving.push(r);
     else g.arrived.push(r);
   }
@@ -109,14 +58,13 @@ export function groupInbound(rows: InboundRow[]): InboundGroups {
     return newestFirst(a, b);
   });
   g.arrived.sort(newestFirst);
-  g.voided.sort(newestFirst);
   return g;
 }
 
 /** Live counts for a loaded row set. The home-screen card doesn't call this —
- *  it reads GET /api/shipments/inbound-counts, whose SQL buckets mirror
+ *  it reads GET /api/packages/inbound-counts, whose SQL buckets mirror
  *  groupInbound above; a membership change here must be mirrored there
- *  (backend tests/shipments-inbound-counts.test.ts pins the truth table). */
+ *  (backend tests/packages-inbound-counts.test.ts pins the truth table). */
 export function inboundSummary(rows: InboundRow[]): { moving: number; needs: number } {
   const g = groupInbound(rows);
   return { moving: g.moving.length, needs: g.needs.length };

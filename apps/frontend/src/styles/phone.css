@@ -1006,7 +1006,7 @@
 /* ===== Mobile shipping =====
    The desktop table's rows regrouped as glance cards. The journey strip is
    the desktop timeline compressed to 4 segments; its tone carries the state
-   (info = moving, pos = arrived, warn = exception, subtle = voided). */
+   (info = moving, pos = arrived, warn = exception). */
 .ph-ship-card {
   background: var(--bg-elev);
   border: 1px solid var(--border);
@@ -1017,8 +1017,6 @@
   gap: 8px;
 }
 .ph-ship-card + .ph-ship-card { margin-top: 10px; }
-.ph-ship-card.tappable { cursor: pointer; }
-.ph-ship-card.tappable:active { background: var(--bg-soft); }
 
 .ph-ship-head {
   display: flex;
@@ -1044,7 +1042,6 @@
 }
 .ph-ship-strip.done  { --strip-fill: var(--pos); }
 .ph-ship-strip.warn  { --strip-fill: var(--warn); }
-.ph-ship-strip.muted { --strip-fill: var(--fg-subtle); }
 .ph-ship-strip .seg {
   flex: 1;
   height: 3px;
@@ -1088,14 +1085,6 @@
   font-variant-numeric: tabular-nums;
 }
 .ph-ship-sub .chip { font-size: 10px; flex-shrink: 0; }
-
-.ph-ship-exc {
-  font-size: 12px;
-  color: var(--warn);
-  background: color-mix(in oklch, var(--warn) 10%, transparent);
-  border-radius: 8px;
-  padding: 7px 10px;
-}
 
 /* Tracking number: one big tap target that copies; the ↗ opens the carrier. */
 .ph-ship-track {
@@ -1143,15 +1132,6 @@
   font-size: 14px;
 }
 
-.ph-ship-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  font-size: 12px;
-  color: var(--fg-muted);
-}
-
 .ph-ship-cta {
   display: flex;
   align-items: center;
@@ -1176,26 +1156,6 @@
   border-color: var(--accent);
   color: white;
   box-shadow: 0 4px 12px color-mix(in oklch, var(--accent) 26%, transparent);
-}
-.ph-ship-hint {
-  font-size: 12px;
-  color: var(--fg-subtle);
-  background: var(--bg-soft);
-  border-radius: 8px;
-  padding: 7px 10px;
-}
-
-.ph-ship-voided-toggle {
-  width: 100%;
-  margin-top: 14px;
-  padding: 10px;
-  border: none;
-  background: transparent;
-  color: var(--fg-subtle);
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
 }
 
 .ph-ship-empty {

@@ -2,10 +2,10 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS, PRIYA } from './helpers/auth';
-import { refreshPackageTracking, registerUntrackedPackages, startShipmentTrackingLoop } from '../src/shipping/track';
+import { refreshPackageTracking, registerUntrackedPackages, startPackageTrackingLoop } from '../src/shipping/track';
 import { pickTrackingClient } from '../src/shipping';
-import { stubShippingClient } from '../src/shipping/stub';
-import type { ShippingClient } from '../src/shipping/types';
+import { stubTrackingSource } from '../src/shipping/stub';
+import type { TrackingSource } from '../src/shipping/types';
 
 type Pkg = {
   id: string;
@@ -87,7 +87,7 @@ describe('packages — add and list', () => {
     expect(all.body.items[0].creatorName).toBe(name);
   });
 
-  it('mine=true pins a manager to their own rows, mirroring GET /api/shipments', async () => {
+  it('mine=true pins a manager to their own rows', async () => {
     const marcus = await loginAs(MARCUS);
     const mgr = await loginAs(ALEX);
     await addPackage(marcus.token);
@@ -126,7 +126,7 @@ describe('packages — add and list', () => {
     }
   });
 
-  it('serves the carrier tracking link server-side, like shipments.trackingUrl', async () => {
+  it('serves the carrier tracking link server-side', async () => {
     const { token } = await loginAs(MARCUS);
     const pkg = await addPackage(token) as Pkg & { trackingUrl: string | null };
     expect(pkg.trackingUrl).toBe(`https://www.ups.com/track?tracknum=${TN}`);
@@ -387,7 +387,7 @@ describe('packages — tracking refresh', () => {
     const pkg = await addPackage(token);
     const sql = getTestDb();
 
-    const res = await refreshPackageTracking(sql, stubShippingClient);
+    const res = await refreshPackageTracking(sql, stubTrackingSource);
     expect(res.checked).toBe(1);
     expect(res.updated).toBe(1);
     const row = (await sql`
@@ -399,7 +399,7 @@ describe('packages — tracking refresh', () => {
 
     // Delivered rows leave the poll's working set.
     await sql`UPDATE packages SET status = 'delivered' WHERE id = ${pkg.id}`;
-    const res2 = await refreshPackageTracking(sql, stubShippingClient);
+    const res2 = await refreshPackageTracking(sql, stubTrackingSource);
     expect(res2.checked).toBe(0);
   });
 
@@ -408,8 +408,8 @@ describe('packages — tracking refresh', () => {
     const pkg = await addPackage(token);
     const sql = getTestDb();
 
-    const delivering: ShippingClient = {
-      ...stubShippingClient,
+    const delivering: TrackingSource = {
+      ...stubTrackingSource,
       getShipment: async () => ({ raw: 'DELIVERED', normalized: 'delivered', eta: null }),
     };
     const res = await refreshPackageTracking(sql, delivering);
@@ -535,27 +535,18 @@ describe('packages — webhook registration', () => {
 describe('shipping — which tracking provider is in play', () => {
   beforeEach(async () => { await resetDb(); });
 
-  it('prefers Shippo, falls back to ShipSaving, then stubs', () => {
+  it('picks Shippo on a token, otherwise stubs', () => {
     expect(pickTrackingClient({ SHIPPO_API_TOKEN: 'x' } as never).provider).toBe('shippo');
-    expect(pickTrackingClient({
-      SHIPSAVING_APP_KEY: 'k', SHIPSAVING_APP_SECRET: 's',
-    } as never).provider).toBe('shipsaving');
-    // Shippo wins even with ShipSaving present: it tracks any carrier's number.
-    expect(pickTrackingClient({
-      SHIPPO_API_TOKEN: 'x', SHIPSAVING_APP_KEY: 'k', SHIPSAVING_APP_SECRET: 's',
-    } as never).provider).toBe('shippo');
     expect(pickTrackingClient({} as never).provider).toBe('stub');
   });
 
-  it('ticks on a Shippo token with ShipSaving absent, and stays dark with neither', () => {
+  it('ticks on a Shippo token and stays dark without one', () => {
     const sql = getTestDb();
-    // The regression this whole change exists to prevent: labels on the stub
-    // used to mean tracking never ran at all.
-    const live = startShipmentTrackingLoop(sql, { SHIPPO_API_TOKEN: 'x', SHIPPO_API_URL: 'http://127.0.0.1:9' } as never);
+    const live = startPackageTrackingLoop(sql, { SHIPPO_API_TOKEN: 'x', SHIPPO_API_URL: 'http://127.0.0.1:9' } as never);
     expect(live.stop).toBeTypeOf('function');
     live.stop();
 
-    const dark = startShipmentTrackingLoop(sql, {} as never);
+    const dark = startPackageTrackingLoop(sql, {} as never);
     dark.stop();
   });
 });

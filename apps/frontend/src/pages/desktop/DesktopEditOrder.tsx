@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import { Icon } from '../../components/Icon';
+import type { ReactNode } from 'react';
+import { Icon, type IconName } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { useAuth } from '../../lib/auth';
 import { useEffectiveUser } from '../../lib/tweaks';
@@ -39,24 +40,6 @@ import type { HandoffMethod } from '../../lib/handoff';
 import { usePaymentProof } from '../../lib/usePaymentProof';
 import { navigate, paymentsForOrderPath } from '../../lib/route';
 import { RouteLink } from '../../components/RouteLink';
-import { listShipments } from '../../lib/api';
-
-// The backend folds prepaid-label costs into orders.other_fees and appends
-// "Shipping label <tracking>" entries to its note (a dedicated column is
-// pending the backend phase). The UI un-folds them: label spend renders as its
-// own read-only Shipping row, the editable Other-fees cell holds only the
-// user's remainder, and saves re-attach the shipping parts so the stored
-// column round-trips unchanged.
-const SHIP_NOTE_RE = /^(Shipping label |Label voided )/;
-function splitFeeNote(note: string | null): { userNote: string; shipNotes: string[] } {
-  const segs = (note ?? '').split(' | ').map(s => s.trim()).filter(Boolean);
-  return {
-    userNote: segs.filter(s => !SHIP_NOTE_RE.test(s)).join(' | '),
-    shipNotes: segs.filter(s => SHIP_NOTE_RE.test(s)),
-  };
-}
-// Voided labels were already subtracted server-side; these still count.
-const LIVE_LABEL_STATUSES = new Set(['purchased', 'in_transit', 'delivered', 'exception']);
 import { StatusChangeDialog, type StatusAttachment } from '../../components/StatusChangeDialog';
 import { AttachmentChip } from '../../components/AttachmentChip';
 import { AttachmentDropzone } from '../../components/AttachmentDropzone';
@@ -71,6 +54,18 @@ import { loadWarehouses } from '../../lib/warehouses';
 // authoritative stage (see orders.ts), so derive the canonical status from it
 // (LIFECYCLE_STATUS) and only fall back to the derived string for unknown
 // lifecycles.
+
+// The uppercase heading over each block of the action card.
+const SectionHead = ({ icon, children }: { icon: IconName; children: ReactNode }) => (
+  <div style={{
+    display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+    fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
+    textTransform: 'uppercase', letterSpacing: '0.06em',
+    marginBottom: 10,
+  }}>
+    <Icon name={icon} size={12} /> {children}
+  </div>
+);
 
 type Props = {
   order: Order;
@@ -278,32 +273,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     order.otherFees > 0 ? order.otherFees.toFixed(2) : '',
   );
   const [otherFeesNote, setOtherFeesNote] = useState<string>(order.otherFeesNote ?? '');
-  // null until the PO's shipments load; the fee inputs then re-seed to the
-  // user-only remainder. Clamped to the stored column so the tape's rows
-  // always sum to exactly what the server holds, even after manual fee edits.
-  const [shipSplit, setShipSplit] = useState<{ fees: number; notes: string[] } | null>(null);
-  useEffect(() => {
-    let alive = true;
-    listShipments(order.id)
-      .then(({ items }) => {
-        if (!alive) return;
-        const raw = items
-          .filter(s => LIVE_LABEL_STATUSES.has(s.status) && s.labelCost != null)
-          .reduce((sum, s) => sum + (s.labelCost ?? 0), 0);
-        const fees = Math.min(raw, order.otherFees);
-        const { userNote, shipNotes } = splitFeeNote(order.otherFeesNote);
-        setShipSplit({ fees, notes: shipNotes });
-        if (fees > 0 || shipNotes.length) {
-          const remainder = order.otherFees - fees;
-          setOtherFeesInput(remainder > 0 ? remainder.toFixed(2) : '');
-          setOtherFeesNote(userNote);
-        }
-      })
-      .catch(() => { if (alive) setShipSplit({ fees: 0, notes: [] }); });
-    return () => { alive = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [order.id]);
-  const shipFees = shipSplit?.fees ?? 0;
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
@@ -530,21 +499,13 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     commissionValid && (commissionRateValue ?? 0) !== (order.commissionRate ?? 0);
   // Non-numeric intermediate input ("5e") must not read as a change.
   const parsedOtherFees = parseFeeInput(otherFeesInput);
-  // Compare against the user-only part once the split is known; before that
-  // the inputs still hold the raw column values, so the raw baseline applies.
   // Compared in cents, not as raw floats: the input is seeded from
-  // `(order.otherFees - fees).toFixed(2)` while the baseline is the unrounded
-  // subtraction, so `250.30 - 12.10` is 238.20000000000002 against an input of
-  // "238.20" and a plain !== calls every labelled order dirty on mount — which
-  // now costs a purchaser the stage for opening the page. The column is
-  // NUMERIC(12,2); that is the precision a change has to show up at.
-  const otherFeesDirty = !feeEq(
-    parsedOtherFees,
-    shipSplit ? order.otherFees - shipSplit.fees : order.otherFees,
-  );
-  const otherFeesNoteDirty = shipSplit
-    ? otherFeesNote.trim() !== splitFeeNote(order.otherFeesNote).userNote
-    : otherFeesNote.trim() !== (order.otherFeesNote ?? '');
+  // `toFixed(2)` and a plain !== on floats would call an untouched order
+  // dirty on mount — which costs a purchaser the stage for opening the page.
+  // The column is NUMERIC(12,2); that is the precision a change has to show
+  // up at.
+  const otherFeesDirty = !feeEq(parsedOtherFees, order.otherFees);
+  const otherFeesNoteDirty = otherFeesNote.trim() !== (order.otherFeesNote ?? '');
   const paypalDirty = paypalTxn !== (order.paypalTxnId ?? '');
 
   // The goods total is no longer editable here: it is the sum of the lines, and
@@ -582,7 +543,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const cost = poEffectiveCost({
     lineSubtotal: totals.cost,
     totalCostOverride: storedGoods.override,
-    otherFees: parsedOtherFees + shipFees,
+    otherFees: parsedOtherFees,
   });
   const effectiveTotalCost = cost.total;
   const effectiveProfit = totals.revenue - effectiveTotalCost;
@@ -728,10 +689,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
         commissionRate: commissionDirty ? commissionRateValue : undefined,
         paypalTxnId:   paypalDirty     ? (paypalTxn || null)   : undefined,
         onBehalfOfUserId: ownerDirty ? ownerId : undefined,
-        otherFees:     otherFeesDirty ? parsedOtherFees + shipFees : undefined,
-        otherFeesNote: otherFeesNoteDirty
-          ? ([otherFeesNote.trim(), ...(shipSplit?.notes ?? [])].filter(Boolean).join(' | ') || null)
-          : undefined,
+        otherFees:     otherFeesDirty ? parsedOtherFees : undefined,
+        otherFeesNote: otherFeesNoteDirty ? (otherFeesNote.trim() || null) : undefined,
         lines: lines
           .filter(l => l._id && (l._dirty || statusDirty))
           .map(l => editLineToPatch(l, statusDirty ? status : undefined)),
@@ -1137,7 +1096,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             units={totals.qty}
             goods={cost.goods}
             fees={parsedOtherFees}
-            shippingFees={shipFees}
             total={effectiveTotalCost}
             revenue={totals.revenue}
             pricedCost={totals.pricedCost}
@@ -1311,17 +1269,12 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
 
       <div className="card oe-action-card" style={{ zIndex: 5, boxShadow: '0 -8px 24px rgba(15,23,42,0.06)' }}>
         <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-            fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
-            textTransform: 'uppercase', letterSpacing: '0.06em',
-            marginBottom: 10,
-          }}>
-            <Icon name="flag" size={12} /> {t('orderStatus')}
+          <SectionHead icon="flag">
+            {t('orderStatus')}
             <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
               {t('advanceAsProgresses')}
             </span>
-          </div>
+          </SectionHead>
           <div className="so-stepper">
             {ORDER_STATUSES.map((s, i) => {
               const active = s === status;
@@ -1480,27 +1433,13 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
         {/* The hand-off's box, while it is the reason the PO is In Transit. */}
         {order.lifecycle === 'in_transit' && order.package && (
           <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-              fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
-              textTransform: 'uppercase', letterSpacing: '0.06em',
-              marginBottom: 10,
-            }}>
-              <Icon name="truck" size={12} /> {t('orderShipment')}
-            </div>
+            <SectionHead icon="truck">{t('orderShipment')}</SectionHead>
             <PackageJourney pkg={order.package} />
           </div>
         )}
 
         <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-            fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
-            textTransform: 'uppercase', letterSpacing: '0.06em',
-            marginBottom: 10,
-          }}>
-            <Icon name="warehouse" size={12} /> {t('orderDetails')}
-          </div>
+          <SectionHead icon="warehouse">{t('orderDetails')}</SectionHead>
           <div className="oe-fields">
             <div className="field" style={{ marginBottom: 0 }}>
               <label className="label">{t('warehouse')}</label>
@@ -1616,13 +1555,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
         </div>
 
         <div className="oe-foot">
-          {/* Shipping lives on its own page — this is the way in. */}
-          <button
-            className="btn"
-            onClick={() => navigate(`/shipping/${order.id}`)}
-          >
-            <Icon name="truck" size={14} /> {t('shipLabelsBtn')}
-          </button>
           <div className="oe-foot-stat">
             <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{t('lines')}</div>
             <div className="mono" style={{ fontWeight: 600, fontSize: 17 }}>{lines.length}</div>
