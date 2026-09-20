@@ -417,6 +417,66 @@ describe('no-op edits leave the stage alone', () => {
   });
 });
 
+// The hand-off facts follow the page's one rule: a purchaser's change past
+// Draft is material, a manager's is not, and the closed book refuses the
+// purchaser outright.
+describe('hand-off facts are material edits', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('a purchaser changing the source or the tracking number goes back to Draft, naming the field', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const { token: mgr } = await loginAs(ALEX);
+    const { id } = await createSubmitted(pur);
+
+    const r = await api<{ lifecycle: string }>('PATCH', `/api/orders/${id}`, {
+      token: pur, body: { source: 'reddit' },
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.lifecycle).toBe('draft');
+    let pending = (await get(id, mgr)).body.order.pendingRevert!;
+    expect(pending[0].detail.fields.map(f => f.field)).toEqual(['source']);
+
+    expect((await api('POST', `/api/orders/${id}/advance`, { token: mgr, body: {} })).status).toBe(200);
+    const t = await api<{ lifecycle: string }>('PATCH', `/api/orders/${id}`, {
+      token: pur, body: { handoffMethod: 'label', trackingNumber: '1Z999AA10123456784', carrier: 'UPS' },
+    });
+    expect(t.status).toBe(200);
+    expect(t.body.lifecycle).toBe('draft');
+    pending = (await get(id, mgr)).body.order.pendingRevert!;
+    const fields = pending[0].detail.fields.map(f => f.field).sort();
+    expect(fields).toEqual(['carrier', 'handoff_method', 'tracking_number']);
+  });
+
+  it('re-saving the facts the order already holds leaves the stage alone', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const { token: mgr } = await loginAs(ALEX);
+    const { id } = await createSubmitted(pur);
+    const sql = getTestDb();
+    await sql`UPDATE orders SET source = 'facebook', handoff_method = 'label' WHERE id = ${id}`;
+    await sql`INSERT INTO packages (tracking_number, carrier, source, order_id) VALUES ('1Z999AA10123456784', 'UPS', 'facebook', ${id})`;
+
+    const r = await api<{ lifecycle: string }>('PATCH', `/api/orders/${id}`, {
+      token: pur,
+      body: { source: 'facebook', handoffMethod: 'label', trackingNumber: '1Z 999 AA1 01 2345 6784', carrier: 'UPS' },
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.lifecycle).toBe('in_transit');
+    expect((await get(id, mgr)).body.order.pendingRevert ?? []).toHaveLength(0);
+  });
+
+  it('managers edit the facts at Ready to Pay; purchasers are refused there', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const { token: mgr } = await loginAs(ALEX);
+    const { id } = await createSubmitted(pur);
+    expect((await api('POST', `/api/orders/${id}/advance`, { token: mgr, body: { toStage: 'ready_to_pay' } })).status).toBe(200);
+
+    expect((await api('PATCH', `/api/orders/${id}`, { token: pur, body: { source: 'reddit' } })).status).toBe(403);
+    const ok = await api<{ lifecycle: string }>('PATCH', `/api/orders/${id}`, { token: mgr, body: { source: 'reddit' } });
+    expect(ok.status).toBe(200);
+    expect(ok.body.lifecycle).toBe('ready_to_pay');
+  });
+});
+
 describe('revert acknowledgement is by event id, not timestamp', () => {
   beforeEach(async () => { await resetDb(); });
 

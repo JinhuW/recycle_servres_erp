@@ -233,11 +233,14 @@ packages.post('/:id/refresh', async (c) => {
 
   const row = (await sql`
     SELECT ${PACKAGE_COLS(sql)},
-           (SELECT name FROM users us WHERE us.id = created_by) AS creator_name
+           (SELECT name FROM users us WHERE us.id = created_by) AS creator_name,
+           (SELECT o.user_id FROM orders o WHERE o.id = packages.order_id) AS order_owner_id
     FROM packages WHERE id = ${id} LIMIT 1
-  `)[0] as (PackageRow & { creator_name: string | null }) | undefined;
+  `)[0] as (PackageRow & { creator_name: string | null; order_owner_id: string | null }) | undefined;
   if (!row) return c.json({ error: 'Not found' }, 404);
-  if (!canMutate(u, row)) return c.json({ error: 'Forbidden' }, 403);
+  // Also the linked PO's owner: the box may have been added by a manager
+  // handing the order off on their behalf, and the PO page's Refresh is theirs.
+  if (!canMutate(u, row) && row.order_owner_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
 
   const tracking = pickTrackingClient(c.env);
   if (tracking.provider === 'stub') {
