@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-084](./RS-084-commission-tab-records-how-the-commission-was-paid-a.md) | done | story | P2 | Commission tab records how the commission was paid, and the Payment tab is Cost Payment | — |
+| [RS-084](./RS-084-commission-tab-records-how-the-commission-was-paid-a.md) | done | story | P2 | Commission tab records how the commission was paid, and the Payment tab is Cost Payment | 1.163.0 |
 | [RS-083](./RS-083-phone-po-page-folds-that-match-the-desktop-tabs-one.md) | done | story | P2 | phone PO page: folds that match the desktop tabs, one sheet per stage | 1.162.0 |
 | [RS-082](./RS-082-payment-tab-is-two-columns.md) | done | task | P3 | Payment tab is two columns | 1.161.2 |
 | [RS-081](./RS-081-po-page-opens-the-tab-the-stage-is-about.md) | done | task | P2 | PO page opens the tab the stage is about | 1.161.1 |

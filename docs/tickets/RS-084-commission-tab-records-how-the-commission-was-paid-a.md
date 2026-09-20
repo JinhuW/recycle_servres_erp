@@ -7,7 +7,7 @@ priority: P2
 created: 2026-09-20
 reporter: jinhu
 branch: feat/rs-084-commission-payment
-pr:
+pr: 378
 version: 1.163.0
 related: [RS-080, RS-083, RS-071]
 ---
