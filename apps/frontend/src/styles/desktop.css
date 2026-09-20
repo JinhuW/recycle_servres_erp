@@ -3435,6 +3435,15 @@ html.desktop, body.desktop, .desktop #root {
 .pay-fields.compact .pay-row { grid-template-columns: max-content max-content; gap: 12px; }
 .pay-fields.compact .ho-seg { width: auto; }
 .pay-fields.compact .ho-seg button { flex: 0 0 auto; padding: 7px 14px; }
+/* The PO page's Payment tab: the choices on the left, the proof the chosen
+   path needs on the right. The component stays one column everywhere else
+   (the phone, the checkpoint dialog, the create page). */
+.oe-pay .pay-fields {
+  display: grid; grid-template-columns: minmax(260px, 2fr) minmax(0, 3fr);
+  gap: 20px; align-items: start;
+}
+.oe-pay .pay-row { grid-template-columns: 1fr; }
+@media (max-width: 1100px) { .oe-pay .pay-fields { grid-template-columns: 1fr; } }
 .pay-proof {
   display: flex; flex-direction: column; gap: 10px;
   padding: 12px 14px 12px 16px;

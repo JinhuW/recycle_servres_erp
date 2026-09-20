@@ -17,6 +17,15 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.161.2] - 2026-09-20
+
+### Fixes
+
+- **The Payment tab is two columns** (RS-082): *Paid by* over *Method* on
+  the left, the proof the chosen path needs on the right, so the short file
+  list no longer stretches across the whole tab. One column again under
+  1100px; the phone, the checkpoint and the create page are unchanged.
+
 ## [1.161.1] - 2026-09-20
 
 ### Fixes

@@ -1537,7 +1537,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
             />
           ),
           payment: (
-            <div className="oe-tabpad">
+            <div className="oe-tabpad oe-pay">
               <PaymentFields
                 paidBy={payment} onPaidBy={setPayment}
                 method={paymentMethod} onMethod={setPaymentMethod}
