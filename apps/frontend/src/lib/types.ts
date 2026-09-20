@@ -4,7 +4,7 @@
 // here because OrderLine carries one.
 import type { LinePhoto } from './linePhotos';
 import type { PackageSource } from './packageSource';
-import type { PackageStatus } from './packages';
+import type { TrackedPackage } from './packages';
 export type { LinePhoto };
 
 export type Role = 'manager' | 'purchaser';
@@ -227,25 +227,18 @@ export type OrderStatusMeta = Record<string, {
   }[];
 }>;
 
-// A PO's package as the list reports it. `status` and `trackingEta` arrived
-// later than the first three and are optional for the deploy-skew reason.
-export type PackageTracking = {
-  carrier: string;
-  trackingNumber: string;
-  trackingUrl: string | null;
-  status?: PackageStatus;
-  trackingEta?: string | null;
-};
+// The newest package linked to a PO, as the PO page reads it: the tracked
+// package's own fields plus the carrier's words for the last scan. Null
+// until Shippo's first update.
+export type OrderPackage =
+  Pick<TrackedPackage, 'id' | 'carrier' | 'trackingNumber' | 'trackingUrl' | 'status' | 'trackingEta' | 'lastTrackedAt'>
+  & { trackingStatus: string | null };
 
-// The same package as the PO page reads it: the carrier's own words for the
-// last scan, and when that was. Null until Shippo's first update.
-export type OrderPackage = PackageTracking & {
-  id: string;
-  status: PackageStatus;
-  trackingStatus: string | null;
-  trackingEta: string | null;
-  lastTrackedAt: string | null;
-};
+// The list's slice of it. `status` and `trackingEta` arrived later than the
+// first three and are optional for the deploy-skew reason.
+export type PackageTracking =
+  Pick<OrderPackage, 'carrier' | 'trackingNumber' | 'trackingUrl'>
+  & Partial<Pick<OrderPackage, 'status' | 'trackingEta'>>;
 
 // The per-order aggregates are computed by the list query's GROUP BY; reading
 // one order on its own returns the lines themselves and none of the rollups,

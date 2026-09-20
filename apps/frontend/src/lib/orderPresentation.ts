@@ -4,7 +4,7 @@
 // inside one of them the other drifts and the same PO reads two ways.
 
 import { fmtUSD, fmtUSD0 } from './format';
-import { fmtEta } from './shippingList';
+import { STATUS_CHIP, fmtEta } from './shippingList';
 import { LIFECYCLE_STATUS } from './status';
 import type { OrderEventChange, OrderSummary, PackageTracking } from './types';
 
@@ -42,8 +42,7 @@ export function inTransitDetail(
 export function trackingNote(
   trk: Pick<PackageTracking, 'status' | 'trackingEta'>, t: Translate, locale: string,
 ): string | null {
-  if (trk.status === 'delivered') return t('shipStatusDelivered');
-  if (trk.status === 'exception') return t('shipStatusException');
+  if (trk.status === 'delivered' || trk.status === 'exception') return t(STATUS_CHIP[trk.status].key);
   const eta = fmtEta(trk.trackingEta ?? null, locale);
   return eta ? t('shipEstDelivery', { eta }) : null;
 }

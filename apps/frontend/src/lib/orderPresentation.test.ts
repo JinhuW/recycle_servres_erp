@@ -5,6 +5,7 @@ import {
   createdEventParts, inTransitDetail, linePhotoEventDetail, ownerChangedLine, profitTone,
   signedUSD0, trackingNote,
 } from './orderPresentation';
+import type { PackageTracking } from './types';
 
 // Stands in for useT: names the key it was asked for and the count it was
 // given, which is what these assertions are actually about.
@@ -105,7 +106,7 @@ describe('linePhotoEventDetail', () => {
 });
 
 describe('inTransitDetail', () => {
-  const ups = {
+  const ups: PackageTracking = {
     carrier: 'UPS', trackingNumber: '1Z999AA10123456784',
     trackingUrl: 'https://www.ups.com/track?tracknum=1Z999AA10123456784',
   };
