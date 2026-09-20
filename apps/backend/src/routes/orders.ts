@@ -2770,6 +2770,16 @@ function advanceRefusedResponse(
       return c.json({
         error: 'This PO has no cost — enter the unit cost on its lines before submitting it.',
       }, 409);
+    case 'missingSource':
+      return c.json({ error: 'Say where this order came from before submitting it.' }, 409);
+    case 'missingDelivery':
+      return c.json({
+        error: 'Say how the goods get here — a shipping label, or who is collecting them — before submitting it.',
+      }, 409);
+    case 'missingTracking':
+      return c.json({ error: 'Add the tracking number from the shipping label before submitting it.' }, 409);
+    case 'missingMethod':
+      return c.json({ error: 'Say how the company paid — PayPal or cash — before submitting it.' }, 409);
     // Hono lets a handler return nothing, so without this a new outcome kind
     // would fall out of the switch as an implicit undefined and a 200.
     default: {

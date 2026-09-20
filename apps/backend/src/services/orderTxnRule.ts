@@ -1,8 +1,15 @@
-// The proof a PO must carry before it can leave Draft. One implementation,
-// two readers each: the advance guard enforces it, and GET /api/orders/:id
-// reports it as `txnRequired` / `chatShotRequired` so both shells can refuse
-// before the round-trip. Split out because a second copy of a predicate is
-// how the client ends up blocking an order the server would have let through.
+// What a PO must carry before it can leave Draft. One implementation, two
+// readers: the advance guard enforces it, and GET /api/orders/:id reports the
+// full list as `blockers` (and the older `txnRequired` / `chatShotRequired` /
+// `cashShotRequired` flags) so both shells can refuse before the round-trip.
+// Split out because a second copy of a predicate is how the client ends up
+// blocking an order the server would have let through.
+//
+// Two kinds of blocker live here. The *facts* — where the goods came from,
+// how they travel, who collected them or which box carries them, how the
+// company paid — are the hand-off's to collect, so only the hand-off refuses
+// on them (`leaveDraftBlockers` + `ENFORCED_EVERYWHERE`). The *proof* rules
+// below are held against every door, a manager stage-jump included.
 //
 // Three rules, by who paid and how:
 //   company card — the PayPal transaction id, unless the seller was paid in
@@ -21,6 +28,7 @@
 //                  commission, not matched against the bank.
 
 import { getWorkspaceSetting } from '../lib/settings';
+import { wasEverSubmitted } from './orderAudit';
 import type { SqlLike } from './orderAudit';
 
 // Stamped as NOW() by migrations 0115 / 0126 / 0128, so every environment
@@ -126,4 +134,58 @@ export async function companyCashShotMissing(
     WHERE order_id = ${order.id} AND status = 'Payment' LIMIT 1
   `;
   return rows.length === 0;
+}
+
+export type LeaveDraftBlocker =
+  | { kind: 'noCost' }
+  | { kind: 'missingSource' }
+  | { kind: 'missingDelivery' }
+  | { kind: 'missingTracking' }
+  | { kind: 'missingMethod' }
+  | { kind: 'missingTxnId' }
+  | { kind: 'unknownTxnId'; paypalTxnId: string }
+  | { kind: 'missingChatShot' }
+  | { kind: 'missingCashShot' };
+
+export type LeaveDraftOrder = TxnRuleOrder & {
+  id: string;
+  paypal_txn_id: string | null;
+  total_cost: number | null;
+  source: string | null;
+  handoff_method: string | null;
+  handoff_by: string | null;
+  has_package: boolean;
+};
+
+/** The blockers every door refuses on. The facts are the hand-off's to
+ *  collect: `/advance` and a manager stage-jump ignore them, so a Draft from
+ *  before the hand-off existed (NULL source, NULL method) is never stuck. */
+export const ENFORCED_EVERYWHERE: ReadonlySet<LeaveDraftBlocker['kind']> =
+  new Set(['noCost', 'missingTxnId', 'unknownTxnId', 'missingChatShot', 'missingCashShot']);
+
+/** Every reason this Draft cannot leave, in the order the page lists them.
+ *  Local reads only — never calls PayPal; the routes pull once before the
+ *  advance when the id is unknown, so GET can report this list freely.
+ *
+ *  `noCost` is per order, not per line — a $0 line inside a priced lot is
+ *  legitimate — and fees don't count: freight on free goods is still a PO
+ *  without a cost. No cutoff, unlike the proof rules: a cost can always be
+ *  added to an old Draft. First submission only: a PO back in Draft after a
+ *  purchaser's edit re-submits as it was accepted, and the manager's
+ *  change-review is where that edit is judged. The history read only runs
+ *  for a $0 Draft, so the common advance pays nothing for it. */
+export async function leaveDraftBlockers(tx: SqlLike, o: LeaveDraftOrder): Promise<LeaveDraftBlocker[]> {
+  const out: LeaveDraftBlocker[] = [];
+  if (!(Number(o.total_cost) > 0) && !(await wasEverSubmitted(tx, o.id))) out.push({ kind: 'noCost' });
+  if (o.source === null) out.push({ kind: 'missingSource' });
+  if (o.handoff_method === null || (o.handoff_method === 'pickup' && o.handoff_by === null)) {
+    out.push({ kind: 'missingDelivery' });
+  }
+  if (o.handoff_method === 'label' && !o.has_package) out.push({ kind: 'missingTracking' });
+  if (o.payment === 'company' && o.payment_method === null) out.push({ kind: 'missingMethod' });
+  if (await companyPayTxnMissing(tx, o)) out.push({ kind: 'missingTxnId' });
+  if (await companyPayTxnUnknown(tx, o)) out.push({ kind: 'unknownTxnId', paypalTxnId: o.paypal_txn_id!.trim() });
+  if (await selfPayChatMissing(tx, o)) out.push({ kind: 'missingChatShot' });
+  if (await companyCashShotMissing(tx, o)) out.push({ kind: 'missingCashShot' });
+  return out;
 }

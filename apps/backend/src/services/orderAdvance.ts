@@ -1,15 +1,15 @@
-// The PO lifecycle advance, extracted from POST /api/orders/:id/advance so the
-// shipping tracking poll can apply the confirmed business rule — carrier
-// movement moves a Draft PO to In Transit — through the exact same guards,
-// audit events, and line-status cascade as the route.
+// The PO lifecycle advance, shared by POST /api/orders/:id/advance and the
+// Draft → In Transit hand-off (services/orderHandoff.ts) so both doors apply
+// the same guards, audit events, and line-status cascade. The tracking poll
+// used to be a third caller; carrier movement no longer moves a PO.
 //
 // Must run inside the caller's transaction: the lifecycle read, every guard,
 // and all writes happen under one FOR UPDATE lock on the orders row.
 
-import { writeOrderEvent, wasEverSubmitted } from './orderAudit';
+import { writeOrderEvent } from './orderAudit';
 import { writeSellOrderEvent } from './sellOrderAudit';
 import { notify, notifyManagers } from '../lib/notify';
-import { companyCashShotMissing, companyPayTxnMissing, companyPayTxnUnknown, selfPayChatMissing } from './orderTxnRule';
+import { ENFORCED_EVERYWHERE, leaveDraftBlockers, type LeaveDraftBlocker } from './orderTxnRule';
 import type { SqlLike } from './orderAudit';
 import type { SOLineSnap } from './sellOrderLineMatch';
 import { committedSellStatuses, isSellableLineStatus, openSellStatuses } from '../lib/sellCommitment';
@@ -83,12 +83,14 @@ export type AdvanceOutcome =
   | { kind: 'finalStage' }
   | { kind: 'committedLines'; offendingLineIds: string[]; sellOrderIds: string[] }
   | { kind: 'transferClaimed'; offendingLineIds: string[] }
-  | { kind: 'missingTxnId' }
-  | { kind: 'unknownTxnId'; paypalTxnId: string }
-  | { kind: 'missingChatShot' }
-  | { kind: 'missingCashShot' }
-  | { kind: 'noCost' }
+  | LeaveDraftBlocker
   | { kind: 'ok'; nextStageId: string };
+
+// Which leave-Draft blockers a door refuses on. 'rules' is the default and
+// what /advance uses: the proof-of-payment and cost rules only. The hand-off
+// passes 'all' — it is the door that collects the facts, so it is the one
+// that may refuse for want of them.
+export type AdvanceOptions = { enforce?: 'rules' | 'all' };
 
 // Line statuses in lifecycle order, so a cascade can tell which lines it would
 // move BACKWARDS. A committed line may never go backwards — not even from Done
@@ -386,16 +388,21 @@ export async function advanceOrderTx(
   id: string,
   actor: AdvanceActor,
   toStage?: string,
+  opts: AdvanceOptions = {},
 ): Promise<AdvanceOutcome> {
   const stages = Object.keys(LINE_STATUS_FOR_LIFECYCLE);
 
   const cur = (await tx`
     SELECT id, user_id, lifecycle, payment, payment_method, paypal_txn_id, created_at,
-           warehouse_id, archived_at, total_cost::float AS total_cost
+           warehouse_id, archived_at, total_cost::float AS total_cost,
+           source, handoff_method, handoff_by,
+           EXISTS (SELECT 1 FROM packages p WHERE p.order_id = orders.id) AS has_package
     FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE`)[0] as
     | { id: string; user_id: string; lifecycle: string; payment: string;
         payment_method: string | null; paypal_txn_id: string | null; created_at: Date;
-        warehouse_id: string | null; archived_at: Date | null; total_cost: number | null }
+        warehouse_id: string | null; archived_at: Date | null; total_cost: number | null;
+        source: string | null; handoff_method: string | null; handoff_by: string | null;
+        has_package: boolean }
     | undefined;
   if (!cur) return { kind: 'notFound' };
   // The lines sit at 'Archived'; a cascade here would put them back in stock
@@ -441,52 +448,20 @@ export async function advanceOrderTx(
     }
   }
 
-  // Guard: a PO leaves Draft only once its goods cost something. total_cost is
-  // the figure every line write re-derives (or the negotiated lot price), so
-  // reading it covers both; NULL is the empty draft shell. Per order, not per
-  // line — a $0 line thrown in with a priced lot is legitimate — and fees don't
-  // count: freight on free goods is still a PO without a cost. No cutoff,
-  // unlike the two rules below: a cost can always be added to an old Draft.
-  //
-  // First submission only. A PO that has left Draft before is back here
-  // because a purchaser edited it (or the carrier poll is about to pull it
-  // forward again), and the manager's change-review dialog is where that edit
-  // is judged — holding a $0 PO that was accepted months ago to a rule that
-  // did not exist then leaves it stuck behind a 409 and a warning on every
-  // scan. The history read only runs for a $0 Draft, so the common advance
-  // pays nothing for it.
-  if (cur.lifecycle === 'draft' && nextStageId !== 'draft' && !(Number(cur.total_cost) > 0)
-      && !(await wasEverSubmitted(tx, id))) {
-    return { kind: 'noCost' };
-  }
-  // Guard: a company-paid PO leaves Draft only once it names the payment that
-  // funded it. Held against every actor — a manager stage-jump and the carrier
-  // poll included — because a rule the two commonest paths can route around is
-  // not a rule. The id is also what auto-link matches on, so filling it is what
-  // makes the PO reconcile itself later.
-  if (cur.lifecycle === 'draft' && nextStageId !== 'draft'
-      && await companyPayTxnMissing(tx, cur)) {
-    return { kind: 'missingTxnId' };
-  }
-  // And the id has to be a payment our PayPal account actually made: a typo
-  // or an invented id links nothing and the PO never reconciles. The routes
-  // pull PayPal once before this tx when the id is unknown, so a payment
-  // PayPal already reports does not wait for the six-hourly sync.
-  if (cur.lifecycle === 'draft' && nextStageId !== 'draft'
-      && await companyPayTxnUnknown(tx, cur)) {
-    return { kind: 'unknownTxnId', paypalTxnId: cur.paypal_txn_id!.trim() };
-  }
-  // Its self-paid twin: the chat with the seller is what the reimbursement is
-  // checked against, so a self-paid PO leaves Draft only once it is attached.
-  if (cur.lifecycle === 'draft' && nextStageId !== 'draft'
-      && await selfPayChatMissing(tx, cur)) {
-    return { kind: 'missingChatShot' };
-  }
-  // And the cash twin: cash lifts the transaction-id rule, so the screenshot
-  // of the amount handed over is the only record of what the company paid.
-  if (cur.lifecycle === 'draft' && nextStageId !== 'draft'
-      && await companyCashShotMissing(tx, cur)) {
-    return { kind: 'missingCashShot' };
+  // Guard: what a PO must carry to leave Draft — one list, services/
+  // orderTxnRule.ts, the same one GET reports as `blockers`. The proof rules
+  // (cost, transaction id, chat / cash screenshot) are held against every
+  // actor — a manager stage-jump included — because a rule the commonest path
+  // can route around is not a rule. The facts (source, delivery, tracking,
+  // method) are refused only by the hand-off, the door that collects them.
+  // The first blocker in display order is the refusal, so the message names
+  // the thing the page lists first.
+  if (cur.lifecycle === 'draft' && nextStageId !== 'draft') {
+    const blockers = await leaveDraftBlockers(tx, cur);
+    const first = opts.enforce === 'all'
+      ? blockers[0]
+      : blockers.find((b) => ENFORCED_EVERYWHERE.has(b.kind));
+    if (first) return first;
   }
 
   // Guard: a cascade that moves lines off a sellable status breaks any sell
