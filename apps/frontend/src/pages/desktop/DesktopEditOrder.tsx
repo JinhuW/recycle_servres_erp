@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import { Icon } from '../../components/Icon';
+import type { ReactNode } from 'react';
+import { Icon, type IconName } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { useAuth } from '../../lib/auth';
 import { useEffectiveUser } from '../../lib/tweaks';
@@ -71,6 +72,18 @@ import { loadWarehouses } from '../../lib/warehouses';
 // authoritative stage (see orders.ts), so derive the canonical status from it
 // (LIFECYCLE_STATUS) and only fall back to the derived string for unknown
 // lifecycles.
+
+// The uppercase heading over each block of the action card.
+const SectionHead = ({ icon, children }: { icon: IconName; children: ReactNode }) => (
+  <div style={{
+    display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+    fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
+    textTransform: 'uppercase', letterSpacing: '0.06em',
+    marginBottom: 10,
+  }}>
+    <Icon name={icon} size={12} /> {children}
+  </div>
+);
 
 type Props = {
   order: Order;
@@ -1311,17 +1324,12 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
 
       <div className="card oe-action-card" style={{ zIndex: 5, boxShadow: '0 -8px 24px rgba(15,23,42,0.06)' }}>
         <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-            fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
-            textTransform: 'uppercase', letterSpacing: '0.06em',
-            marginBottom: 10,
-          }}>
-            <Icon name="flag" size={12} /> {t('orderStatus')}
+          <SectionHead icon="flag">
+            {t('orderStatus')}
             <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
               {t('advanceAsProgresses')}
             </span>
-          </div>
+          </SectionHead>
           <div className="so-stepper">
             {ORDER_STATUSES.map((s, i) => {
               const active = s === status;
@@ -1480,27 +1488,13 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
         {/* The hand-off's box, while it is the reason the PO is In Transit. */}
         {order.lifecycle === 'in_transit' && order.package && (
           <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-              fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
-              textTransform: 'uppercase', letterSpacing: '0.06em',
-              marginBottom: 10,
-            }}>
-              <Icon name="truck" size={12} /> {t('orderShipment')}
-            </div>
+            <SectionHead icon="truck">{t('orderShipment')}</SectionHead>
             <PackageJourney pkg={order.package} />
           </div>
         )}
 
         <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-            fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
-            textTransform: 'uppercase', letterSpacing: '0.06em',
-            marginBottom: 10,
-          }}>
-            <Icon name="warehouse" size={12} /> {t('orderDetails')}
-          </div>
+          <SectionHead icon="warehouse">{t('orderDetails')}</SectionHead>
           <div className="oe-fields">
             <div className="field" style={{ marginBottom: 0 }}>
               <label className="label">{t('warehouse')}</label>

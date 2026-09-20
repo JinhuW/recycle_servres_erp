@@ -17,6 +17,33 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.156.1] - 2026-09-19
+
+### Fixes
+
+- **RS-077 cleanup, no behaviour change.** The step timeline that
+  `PackageJourney` had copied from the prepaid-label panel is now one
+  `StepTimeline` component both render, with the labels driven from the same
+  step list instead of a second hand-coded row; "Carrier update {when}" on
+  the PO page's Shipment block reads through `relTime` like every other
+  last-seen line instead of its own date format; the chip sub-line on the PO
+  list reads the tracking object once rather than testing the same link
+  twice; the delivered / exception wording under the chip comes from
+  `STATUS_CHIP` so the status→label map stays single; the PO page's three
+  identical uppercase section headings share one `SectionHead`; and the
+  package types are declared the right way round (`OrderPackage` is the full
+  shape, picked from `TrackedPackage`; the list's `PackageTracking` is its
+  skew-tolerant slice).
+- **One "newest package" lookup in `GET /api/orders` and `/:id`.** The two
+  LATERAL joins that each selected a different column set under a different
+  alias prefix are one `json_build_object` subquery in the SELECT list, with
+  one mapper. The list's rows therefore carry the same `tracking` fields the
+  PO page's `package` does (`id`, `trackingStatus`, `lastTrackedAt` join the
+  five it had), the package columns leave the list's GROUP BY, and the
+  lookup runs once per returned row rather than once per filtered one. The
+  two timestamps travel in Postgres' JSON ISO form (`…T00:00:00+00:00`) as
+  `pair_legs.postedAt` already does; every reader parses both.
+
 ## [1.156.0] - 2026-09-19
 
 ### Features

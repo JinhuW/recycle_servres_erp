@@ -9,6 +9,7 @@ import { RouteLink } from '../../components/RouteLink';
 import { needsCompletePo, waitingSeller } from '../../lib/shippingInbound';
 import { STATUS_CHIP, fmtEta } from '../../lib/shippingList';
 import type { Shipment, ShipmentStatus } from '../../lib/types';
+import { StepTimeline } from './StepTimeline';
 
 // Prepaid labels for the seller, one shipment per box. Creation and continue
 // live on the full-page wizard (/shipping/:orderId/label); purchased shipments
@@ -23,8 +24,8 @@ type Props = {
   orderLifecycle?: string;
 };
 
-const TIMELINE: ShipmentStatus[] = ['draft', 'purchased', 'in_transit', 'delivered'];
-// voided / exception render as badge states, not timeline steps.
+// Created → label → moving → here; voided / exception render as badge states,
+// not timeline steps.
 const TIMELINE_POS: Partial<Record<ShipmentStatus, number>> = {
   draft: 0, quoted: 0, purchased: 1, in_transit: 2, delivered: 3,
 };
@@ -174,30 +175,15 @@ export function ShippingPanel({ orderId, canEdit, onMutated, orderLifecycle }: P
             </div>
 
             {pos !== undefined && pos >= 1 && (
-              <div>
-                <div className="ship-timeline">
-                  {TIMELINE.map((step, i) => {
-                    const done = i < pos || (i === pos && step === 'delivered');
-                    const now = i === pos && step !== 'delivered';
-                    return (
-                      <div key={step} className={'ship-tl-seg' + (i === TIMELINE.length - 1 ? ' last' : '')}>
-                        <div className={'ship-tl-node' + (done ? ' done' : now ? ' now' : '')}>
-                          {done ? '✓' : now ? '●' : ''}
-                        </div>
-                        {i < TIMELINE.length - 1 && (
-                          <div className={'ship-tl-bar' + (i < pos ? ' done' : '')} />
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-                <div className="ship-tl-labels">
-                  <span>{t('shipStepCreated')}</span>
-                  <span className={pos === 1 ? 'now' : ''}>{t('shipStatusPurchased')}</span>
-                  <span className={pos === 2 ? 'now' : ''}>{t('shipStatusInTransit')}</span>
-                  <span className={pos === 3 ? 'done' : ''}>{t('shipStatusDelivered')}</span>
-                </div>
-              </div>
+              <StepTimeline
+                pos={pos}
+                steps={[
+                  { key: 'draft', label: t('shipStepCreated') },
+                  { key: 'purchased', label: t('shipStatusPurchased') },
+                  { key: 'in_transit', label: t('shipStatusInTransit') },
+                  { key: 'delivered', label: t('shipStatusDelivered') },
+                ]}
+              />
             )}
 
             {s.status === 'exception' && s.trackingStatus && (
