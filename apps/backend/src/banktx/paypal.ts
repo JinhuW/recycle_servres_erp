@@ -1,8 +1,8 @@
 // PayPal clients — Transaction Search (developer.paypal.com/docs/api/transaction-search/v1)
 // for the money, Customer Disputes (…/customer-disputes/v1) for the cases we
 // open against sellers. One OAuth client-credentials token covers both, cached
-// and single-flighted (the ShipSaving shape). Transaction Search caps each
-// request at a 31-day window, so a long range is fetched in chunks.
+// and single-flighted. Transaction Search caps each request at a 31-day
+// window, so a long range is fetched in chunks.
 //
 // Disputes sit behind a separate app permission ("Disputes" under App feature
 // options): a token minted without it carries no scope for them and every call

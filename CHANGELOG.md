@@ -17,6 +17,35 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.157.0] - 2026-09-19
+
+### Removed
+
+- **The prepaid-label flow is gone** (RS-078). ShipSaving was the provider
+  behind buying shipping labels for sellers — rate quotes, buy, void, the
+  full-page label wizard, the per-PO *Shipping labels* panel, the seller-fill
+  link at `/s/<token>`, and the label cost folded into a PO's other fees. It
+  never left the stub provider in production, and no labels will be bought
+  from the system, so the routes (`/api/orders/:id/shipments/*`,
+  `/api/shipments`, `/api/shipping/contacts`, `/api/public/shipping/:token`),
+  the `SHIPSAVING_*` environment variables, the stub label provider, the
+  activity-log event kinds, ~90 translation keys and the matching CSS are
+  removed. The `shipments` table stays in Postgres, unread; a PO delete no
+  longer refuses on purchased labels, and the PO cost tape has no
+  *Shipping labels* row.
+
+### Changed
+
+- **The Shipping page is an inbound-packages ledger.** Desktop and phone now
+  list tracked packages only (Order · Seller · Carrier · Tracking), export
+  those columns to CSV, and keep *Add a label* for an externally bought
+  tracking number. The phone Home card reads
+  `GET /api/packages/inbound-counts` (was `/api/shipments/inbound-counts`).
+- Client suggestions come from tracked packages' seller names alone; the
+  shipments address branch is gone.
+- `/api/health` reports `providers.tracking` only — `labels` is no longer a
+  mode.
+
 ## [1.156.1] - 2026-09-19
 
 ### Fixes

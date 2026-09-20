@@ -62,7 +62,7 @@ export function DesktopApp() {
   // /inventory/:id opens the edit page; otherwise no item is being edited.
   // /inventory/analysis is the Analysis tab, not an item id — exclude it.
   const editingItemId = path === '/inventory/analysis' ? null : (match('/inventory/:id', path)?.id ?? null);
-  // Dashboard / label wizard / one PO's labels — the parser owns the shapes.
+  // Dashboard / add-label — the parser owns the shapes.
   const shippingRoute = parseShippingRoute(path);
 
   // Sync editingOrder with the URL hash. Loading the app at

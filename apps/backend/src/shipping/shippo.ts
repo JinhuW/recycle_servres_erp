@@ -1,8 +1,7 @@
 // Shippo Tracking API client — docs.goshippo.com, api.goshippo.com.
 //
 // Tracking only. Shippo tracks any carrier's number without owning the label,
-// which is the whole point of it here: packages keep moving while labels are
-// still on the stub. Rates, purchase and void stay with the ShippingClient.
+// which is the whole point of it here: every package was bought elsewhere.
 //
 // Endpoint map:
 //   register  POST /tracks/                        (carrier + tracking_number)
@@ -44,11 +43,10 @@ async function call<T>(
   return res.json() as Promise<T>;
 }
 
-// packages.carrier is held to three values by its CHECK, but shipments.carrier
-// carries whatever the label provider called it ('DHL', or a raw ShipSaving
-// carrier_code). An exhaustive map would throw on those every tick forever, so
-// anything unmapped goes through lowercased — which is also how the `shippo`
-// test carrier is reachable.
+// packages.carrier is held to three values by its CHECK, but the map stays
+// lenient: an exhaustive one would throw on any future carrier every tick
+// forever, and passing unmapped names through lowercased is also how the
+// `shippo` test carrier is reachable.
 const CARRIER_TOKEN: Record<string, string> = {
   ups: 'ups',
   fedex: 'fedex',
@@ -105,8 +103,7 @@ export interface ShippoClient extends TrackingSource {
 }
 
 // An empty token would build `/tracks//1Z999…`, which 404s on every tick
-// forever behind the callers' per-row catch. Fail loudly instead — the same
-// contract the ShipSaving client states for the same input.
+// forever behind the callers' per-row catch. Fail loudly instead.
 function requireCarrier(carrier: string | null): string {
   const token = carrierToken(carrier);
   if (!token) throw new Error(`shippo tracking needs a carrier, got ${JSON.stringify(carrier)}`);

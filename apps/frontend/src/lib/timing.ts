@@ -63,11 +63,10 @@ function report(): void {
 /** Start observing, and arrange to report once. Call once, after render. */
 export function installTiming(): void {
   if (typeof window === 'undefined' || typeof performance === 'undefined') return;
-  // The vendor and seller portals are token-URL shells that talk to
-  // /api/public/* and never log anyone in — same guard the boot script uses.
-  // A report from one can only 401, and would then wait for a session that is
-  // never coming.
-  if (/^\/(v|s)\//.test(location.pathname)) return;
+  // The vendor portal is a token-URL shell that talks to /api/public/* and
+  // never logs anyone in — same guard the boot script uses. A report from it
+  // can only 401, and would then wait for a session that is never coming.
+  if (/^\/v\//.test(location.pathname)) return;
   observeLcp();
 
   // LCP is not final until the user interacts or the page is hidden, so waiting

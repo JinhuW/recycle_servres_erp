@@ -30,8 +30,8 @@ export interface FxLookup {
 
 const REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const FRANKFURTER_URL = 'https://api.frankfurter.dev/v1/latest';
-// The house standard every other outbound client uses (Mercury, PayPal, Shippo,
-// ShipSaving).
+// The house standard every other outbound client uses (Mercury, PayPal,
+// Shippo).
 const FETCH_TIMEOUT_MS = 20_000;
 
 export function listSupportedCurrencies(): readonly SupportedCurrency[] {

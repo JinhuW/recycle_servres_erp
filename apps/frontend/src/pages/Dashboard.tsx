@@ -57,7 +57,7 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
   const [inbound, setInbound] = useState<{ moving: number; needs: number } | null>(null);
   useEffect(() => {
     let alive = true;
-    api.get<{ moving: number; needs: number }>('/api/shipments/inbound-counts?mine=true')
+    api.get<{ moving: number; needs: number }>('/api/packages/inbound-counts?mine=true')
       .then(r => { if (alive) setInbound(r); })
       .catch(() => {});
     return () => { alive = false; };

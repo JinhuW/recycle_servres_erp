@@ -17,7 +17,7 @@ type SqlClient = ReturnType<typeof getDb>;
 //
 // The pool window is wide on purpose: routes/packages.ts mints a draft PO when
 // a box is *delivered*, so for those the distance from the payment is the
-// shipment's transit time. A narrow pool doesn't rank those low, it hides them.
+// package's transit time. A narrow pool doesn't rank those low, it hides them.
 export const MATCH_WINDOW_DAYS = 90;
 export const STRONG_WINDOW_DAYS = 7;
 

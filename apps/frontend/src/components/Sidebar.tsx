@@ -18,9 +18,8 @@ const NAV: { tKey: string; items: NavItem[] }[] = [
       { id: 'dashboard',  tKey: 'nav_dashboard',  icon: 'dashboard',  roles: ['manager', 'purchaser'] },
       { id: 'submit',     tKey: 'nav_submit',     icon: 'submit',     roles: ['manager', 'purchaser'], badge: '+' },
       { id: 'history',    tKey: 'nav_history',    icon: 'history',    roles: ['manager', 'purchaser'] },
-      // Shipping is unlisted for now: labels are handed off from the PO itself
-      // (the In Transit dialog), and the prepaid-label wizard is reached from
-      // the PO page. The routes still resolve by URL.
+      // Shipping is unlisted for now: tracking numbers are handed off from the
+      // PO itself (the In Transit dialog). The routes still resolve by URL.
       { id: 'clients',    tKey: 'nav_clients',    icon: 'book',       roles: ['manager', 'purchaser'] },
       { id: 'market',     tKey: 'nav_market',     icon: 'tag',        roles: ['manager', 'purchaser'] },
       { id: 'inventory',  tKey: 'nav_inventory',  icon: 'inventory',  roles: ['manager'] },

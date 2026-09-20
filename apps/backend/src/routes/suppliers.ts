@@ -3,9 +3,9 @@
 // Chinese).
 //
 // Reads are owner-scoped: a purchaser works their own book, a manager sees
-// everyone's. That is not decoration — seller addresses arrive from shipments,
-// which are already scoped to the ordering purchaser, so a shared book would
-// widen who can read them.
+// everyone's. That is not decoration — seller names arrive from tracked
+// packages, which are already scoped to the ordering purchaser, so a shared
+// book would widen who can read them.
 //
 // Tier, health and the follow-up date are computed per read from purchase-order
 // history (services/supplierCrm.ts). Nothing here caches or stores them.
@@ -252,41 +252,29 @@ suppliers.get('/suggestions', async (c) => {
   const rows = await sql`
     WITH seen AS (
       SELECT o.user_id AS owner_id,
-             ${sql.unsafe(COMPRESS('sh.from_name'))} AS ck,
-             regexp_replace(btrim(sh.from_name), '[[:space:]]+', ' ', 'g') AS name,
-             sh.from_city AS city, sh.from_state AS state, sh.from_zip AS zip,
-             sh.from_phone AS phone, sh.from_street1 AS street1, sh.from_street2 AS street2,
-             sh.from_country AS country, o.id AS order_id, o.total_cost, sh.created_at
-      FROM shipments sh
-      JOIN orders o ON o.id = sh.order_id
-      WHERE ${scope} AND sh.from_name IS NOT NULL AND btrim(sh.from_name) <> ''
-        AND sh.from_street1 IS NOT NULL AND sh.from_city IS NOT NULL
-        AND sh.from_state IS NOT NULL AND sh.from_zip IS NOT NULL
-      UNION ALL
-      SELECT o.user_id,
-             ${sql.unsafe(COMPRESS('p.seller_name'))},
-             regexp_replace(btrim(p.seller_name), '[[:space:]]+', ' ', 'g'),
-             NULL, NULL, NULL, NULL, NULL, NULL, NULL, o.id, o.total_cost, p.created_at
+             ${sql.unsafe(COMPRESS('p.seller_name'))} AS ck,
+             regexp_replace(btrim(p.seller_name), '[[:space:]]+', ' ', 'g') AS name,
+             o.id AS order_id, o.total_cost, p.created_at
       FROM packages p
       JOIN orders o ON o.id = p.order_id
       WHERE ${scope} AND p.seller_name IS NOT NULL AND btrim(p.seller_name) <> ''
     ), dedup AS (
-      -- One row per ORDER, not per box. "seen" emits a row per shipment and per
-      -- package, and shipments are one row per box, so a PO shipped in three
-      -- cartons counted three times and added its total_cost three times — the
-      -- rail advertised "3 POs · $36,000" for one $12,000 order and then ranked
-      -- it above genuinely bigger sellers, since ORDER BY spend decides which 25
-      -- suggestions survive. Postgres has no COUNT(DISTINCT ...) OVER (), hence a
-      -- CTE rather than a tweak to the window.
+      -- One row per ORDER, not per box. "seen" emits a row per package, so a PO
+      -- shipped in three cartons would count three times and add its
+      -- total_cost three times — the rail would advertise "3 POs · $36,000"
+      -- for one $12,000 order and rank it above genuinely bigger sellers,
+      -- since ORDER BY spend decides which 25 suggestions survive. Postgres has
+      -- no COUNT(DISTINCT ...) OVER (), hence a CTE rather than a tweak to the
+      -- window.
       --
-      -- Keeps the newest row per order so the contact details and the name below
-      -- are chosen exactly as before.
+      -- Keeps the newest row per order so the name below is chosen from the
+      -- latest box.
       SELECT DISTINCT ON (owner_id, ck, order_id) *
       FROM seen
       ORDER BY owner_id, ck, order_id, created_at DESC
     ), agg AS (
       SELECT DISTINCT ON (owner_id, ck)
-        owner_id, ck, name, city, state, zip, phone, street1, street2, country,
+        owner_id, ck, name,
         COUNT(*)          OVER (PARTITION BY owner_id, ck)::int  AS po_count,
         SUM(COALESCE(total_cost,0)) OVER (PARTITION BY owner_id, ck)::float AS spend,
         MAX(created_at)   OVER (PARTITION BY owner_id, ck)        AS last_seen
@@ -307,10 +295,8 @@ suppliers.get('/suggestions', async (c) => {
   return c.json({
     items: rows.map((r) => ({
       matchKey: r.ck, name: r.name, ownerId: r.owner_id,
-      city: r.city, state: r.state, zip: r.zip, phone: r.phone,
-      street1: r.street1, street2: r.street2, country: r.country,
       poCount: r.po_count, spend: r.spend, lastSeen: r.last_seen,
-      source: r.street1 ? 'shipping' : 'package',
+      source: 'package',
     })),
   });
 });
@@ -372,18 +358,8 @@ suppliers.post('/adopt', async (c) => {
       `;
       const id = ins[0].id as string;
 
-      // Same two-pass match as the 0114 backfill: shipments by name+zip, then
-      // packages by name alone (a package carries no address to match on).
-      const byShip = await tx`
-        UPDATE orders o SET supplier_id = ${id}
-        WHERE o.supplier_id IS NULL
-          AND o.user_id IS NOT DISTINCT FROM ${ownerId}
-          AND EXISTS (
-            SELECT 1 FROM shipments sh
-            WHERE sh.order_id = o.id AND sh.from_zip IS NOT NULL
-              AND ${sql.unsafe(COMPRESS('sh.from_name'))} || '|' || sh.from_zip = ${ins[0].match_key})
-        RETURNING o.id
-      `;
+      // Packages match by name alone (a package carries no address to match
+      // on); the match_key's zip half is empty for them.
       const compressed = (ins[0].match_key as string).split('|')[0];
       const byPkg = await tx`
         UPDATE orders o SET supplier_id = ${id}
@@ -395,7 +371,7 @@ suppliers.post('/adopt', async (c) => {
               AND ${sql.unsafe(COMPRESS('p.seller_name'))} = ${compressed})
         RETURNING o.id
       `;
-      const linked = byShip.length + byPkg.length;
+      const linked = byPkg.length;
 
       // Seed the schedule from real history so an adopted client lands in the
       // rail with a sensible date instead of no date at all.

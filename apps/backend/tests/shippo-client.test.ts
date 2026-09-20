@@ -32,8 +32,7 @@ describe('shippo — carrier tokens', () => {
   });
 
   it('passes anything else through lowercased', () => {
-    // shipments.carrier is not held to the package vocabulary; an exhaustive
-    // map would throw on these forever.
+    // An exhaustive map would throw on a future carrier forever.
     expect(carrierToken('DHL')).toBe('dhl_express');
     expect(carrierToken('OnTrac')).toBe('ontrac');
     // The test carrier has to stay reachable for wiring checks.

@@ -226,10 +226,8 @@ export type RevertOutcome =
 // The `reverted` audit event is NOT written here — only the caller, after its
 // own writes, knows both sides of the change set the event carries.
 //
-// A live shipment can pull the order straight back to In Transit on the next
-// tracking poll (shipping/track.ts). That's intended: carrier movement is
-// ground truth, the edits survive it, and the manager's review dialog keys off
-// the event rather than the stage.
+// The manager's review dialog keys off the event rather than the stage, so
+// a later stage move never hides an edit that needs reviewing.
 // `fromLifecycle` comes from the caller's own locked read rather than a
 // re-SELECT here: the caller has it, and re-reading forced a "missing order"
 // branch that could only report itself as a committed-line conflict.

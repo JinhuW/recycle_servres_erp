@@ -51,9 +51,7 @@ shippoWebhook.post('/:secret', async (c) => {
   if (!trackingNumber) return c.json({ ok: true, applied: false });
 
   const sql = getDb(c.env);
-  // Packages only. Shippo pushes for numbers we registered with it, and only
-  // packages are registered — shipments carry ShipSaving's own labels and stay
-  // on the poll.
+  // Shippo pushes for numbers we registered with it.
   //
   // Matched both ways round. POST /api/packages stores the normalized form, so
   // a payload echoing the carrier's own rendering (lowercase, hyphens intact)

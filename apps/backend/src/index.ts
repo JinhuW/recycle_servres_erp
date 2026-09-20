@@ -21,10 +21,7 @@ import authRoutes from './routes/auth';
 import meRoutes from './routes/me';
 import dashboardRoutes from './routes/dashboard';
 import ordersRoutes from './routes/orders';
-import shipmentsRoutes from './routes/shipments';
-import { shipmentsList as shipmentsListRoutes, shippingContacts as shippingContactsRoutes } from './routes/shipmentsGlobal';
 import packagesRoutes from './routes/packages';
-import shippingPublicRoutes from './routes/shippingPublic';
 import shippoWebhookRoutes from './routes/shippoWebhook';
 import marketRoutes from './routes/market';
 import scanRoutes from './routes/scan';
@@ -286,7 +283,6 @@ app.use('*', async (c, next) => {
 // ── Public ──────────────────────────────────────────────────────────────────
 app.route('/api/auth', authRoutes);
 app.route('/api/public/vendor', vendorPublicRoutes);
-app.route('/api/public/shipping', shippingPublicRoutes);
 app.route('/api/public/shippo', shippoWebhookRoutes);
 app.route('/.well-known', wellKnown);
 app.route('/oauth', oauthRoutes);
@@ -336,12 +332,7 @@ app.use('/api/client-errors/*', authMiddleware);
 // to the prefix root, which `/*` alone does not match.
 app.use('/api/client-timings', authMiddleware);
 app.use('/api/client-timings/*', authMiddleware);
-// Bare paths matter here too: the shipments list and packages list live at
-// the prefix root. /api/public/shipping stays public — /api/shipping/* does
-// not match it.
-app.use('/api/shipments', authMiddleware);
-app.use('/api/shipments/*', authMiddleware);
-app.use('/api/shipping/*', authMiddleware);
+// Bare path matters here too: the packages list lives at the prefix root.
 app.use('/api/packages', authMiddleware);
 app.use('/api/packages/*', authMiddleware);
 // Both spellings: GET /api/suppliers has no trailing segment to match the
@@ -352,10 +343,6 @@ app.use('/api/suppliers/*', authMiddleware);
 app.route('/api/me', meRoutes);
 app.route('/api/dashboard', dashboardRoutes);
 app.route('/api/orders', ordersRoutes);
-// Second sub-app on the same prefix: /api/orders/:orderId/shipments/*.
-app.route('/api/orders', shipmentsRoutes);
-app.route('/api/shipments', shipmentsListRoutes);
-app.route('/api/shipping', shippingContactsRoutes);
 app.route('/api/packages', packagesRoutes);
 app.route('/api/market', marketRoutes);
 app.route('/api/scan', scanRoutes);

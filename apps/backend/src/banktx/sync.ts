@@ -82,7 +82,7 @@ export function reportSyncResult(result: SyncResult): void {
   }
 }
 
-// Background freshness (same shape as startShipmentTrackingLoop). Volumes are
+// Background freshness (same shape as startPackageTrackingLoop). Volumes are
 // tiny and the page has a Sync-now button, so a slow cadence is plenty. Never
 // starts when nothing is configured.
 const SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;

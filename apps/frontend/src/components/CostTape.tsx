@@ -40,11 +40,6 @@ type Props = {
   feeField?: ReactNode;
   feeNoteField?: ReactNode;
   /**
-   * Prepaid-label spend, shown as its own read-only row so it never squats in
-   * the editable Other-fees cell. Omit (or 0) to hide the row.
-   */
-  shippingFees?: number;
-  /**
    * Marker rendered beside the goods label when `goods` is a stored total
    * rather than the sum of `groups` — without it the itemised rows above read
    * as an addition that doesn't come out.
@@ -80,7 +75,7 @@ function Row({
 export function CostTape({
   groups, grouped, lineCount, units, goods, fees, total,
   revenue, pricedCost, pricedProfit, pricedCount,
-  locale, feeField, feeNoteField, goodsNote, shippingFees = 0,
+  locale, feeField, feeNoteField, goodsNote,
   showRealized = false, realized = null, commissionRate = null,
 }: Props) {
   const { t } = useT();
@@ -115,10 +110,6 @@ export function CostTape({
         ))}
 
         <Row cls="sum" label={<>{t('goodsTotal')}{goodsNote}</>} value={fmtUSD(goods, locale)} />
-
-        {shippingFees > 0 && (
-          <Row label={t('tapeShipping')} value={fmtUSD(shippingFees, locale)} />
-        )}
 
         <Row label={t('otherFees')}>
           <span className="tape-edit">

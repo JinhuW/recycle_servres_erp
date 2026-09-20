@@ -146,10 +146,10 @@ async function resolveOrderOwner(
   };
 }
 
-// A client that sends warehouseId at all must name a real warehouse — the
-// label wizard once sent "" before a destination was picked, which sailed
-// past `?? null` into the FK and 500ed. Every endpoint that writes the
-// column shares this boundary check.
+// A client that sends warehouseId at all must name a real warehouse — a form
+// once sent "" before a destination was picked, which sailed past `?? null`
+// into the FK and 500ed. Every endpoint that writes the column shares this
+// boundary check.
 async function warehouseErr(
   sql: ReturnType<typeof getDb>,
   warehouseId: string | null,
@@ -545,7 +545,6 @@ orders.get('/:id', async (c) => {
            o.commission_rate::float AS commission_rate,
            u.name AS user_name, u.initials AS user_initials,
            w.id AS warehouse_id, w.short AS warehouse_short, w.region AS warehouse_region,
-           (SELECT COUNT(*) FROM shipments s WHERE s.order_id = o.id)::int AS shipment_count,
            ${newestPackageJson(sql)} AS pkg,
            rz.sold_qty, rz.bought_qty, rz.revenue AS rz_revenue, rz.cost AS rz_cost,
            rz.projected_profit
@@ -714,7 +713,6 @@ orders.get('/:id', async (c) => {
         : null,
       // Count only — the mobile detail page renders a nav badge and shouldn't
       // have to download the labels themselves (those live on /shipping).
-      shipmentCount: order.shipment_count,
       // Optional and additive: a stale SPA that never reads it is unaffected.
       package: packageFromJson(order.pkg),
       lines: lines.map(l => ({
@@ -2153,7 +2151,6 @@ orders.delete('/:id', async (c) => {
     | { kind: 'notDraft' }
     | { kind: 'wasSubmitted' }
     | { kind: 'sold' }
-    | { kind: 'hasLabels' }
     | { kind: 'ok'; scanned: { k: string }[] };
 
   const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
@@ -2177,15 +2174,6 @@ orders.delete('/:id', async (c) => {
     `)[0];
     if (sold) return { kind: 'sold' };
 
-    // A bought label is real money on the books; the shipments CASCADE may
-    // only ever sweep draft/quoted/voided rows.
-    const labeled = (await tx`
-      SELECT 1 FROM shipments
-      WHERE order_id = ${id} AND status IN ('purchased','in_transit','delivered')
-      LIMIT 1
-    `)[0];
-    if (labeled) return { kind: 'hasLabels' };
-
     // Both R2 sources for this order: label scans and explicit line photos.
     const scanned = await tx`
       SELECT scan_image_id AS k FROM order_lines
@@ -2206,9 +2194,6 @@ orders.delete('/:id', async (c) => {
   }
   if (outcome.kind === 'sold') {
     return c.json({ error: 'A line in this order is referenced by a sell-order and cannot be deleted' }, 409);
-  }
-  if (outcome.kind === 'hasLabels') {
-    return c.json({ error: 'This order has purchased shipping labels — void them first' }, 409);
   }
 
   // Best-effort: drop the images from R2 too (after the commit). One PO can
