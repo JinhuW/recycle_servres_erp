@@ -2,13 +2,13 @@
 id: RS-079
 title: PayPal pull failures are reported and throttled; the phone scan keeps concurrent edits
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-19
 reporter: jinhu
 branch: session/20260918-202813
-pr:
-version:
+pr: 366
+version: 1.157.1
 related: [RS-069, RS-076]
 ---
 
