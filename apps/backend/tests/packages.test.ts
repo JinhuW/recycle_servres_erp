@@ -468,6 +468,25 @@ describe('packages — ask the carrier now', () => {
       const r = await api('POST', `/api/packages/${pkg.id}/refresh`, { token: t, env: shippoEnv });
       expect(r.status).toBe(502);
     }
+
+    // …and the linked PO's owner, once the box belongs to their order: the PO
+    // page's Refresh is theirs even when a manager added the box for them.
+    const sql = getTestDb();
+    const po = await api<{ id: string }>('POST', '/api/orders', {
+      token: other.token,
+      body: {
+        category: 'RAM', warehouseId: 'WH-LA1', payment: 'self',
+        lines: [{
+          category: 'RAM', brand: 'Samsung', capacity: '32GB', type: 'DDR4',
+          classification: 'RDIMM', speed: '3200', partNumber: 'M393A4K40DB3-CWE',
+          condition: 'Pulled — Tested', qty: 1, unitCost: 10,
+        }],
+      },
+    });
+    expect(po.status).toBe(201);
+    await sql`UPDATE packages SET order_id = ${po.body.id} WHERE id = ${pkg.id}`;
+    const owner = await api('POST', `/api/packages/${pkg.id}/refresh`, { token: other.token, env: shippoEnv });
+    expect(owner.status).toBe(502);
   });
 
   it('404s on a package that does not exist', async () => {

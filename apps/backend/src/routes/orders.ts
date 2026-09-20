@@ -23,8 +23,10 @@ import { txnRequiredFor, chatShotRequiredFor, cashShotRequiredFor, companyPayTxn
 import { syncOrderCategory, deriveCategory, sortCategories } from '../services/orderCategory';
 import { insertDraftOrderTx } from '../services/orderDraft';
 import {
-  handoffOrderTx, activeMember, HandoffRefused, type HandoffInput,
+  handoffOrderTx, activeMember, nameHandoffByChange, setOrderPackageTx, unlinkOrderPackagesTx,
+  packageChanges, HandoffRefused, type HandoffInput, type HandoffPackage,
 } from '../services/orderHandoff';
+import { leaveDraftBlockers } from '../services/orderTxnRule';
 import { pickTrackingClient, carrierTrackingUrl } from '../shipping';
 import { registerPackageTracking } from '../shipping/track';
 import { pickBankProviders } from '../banktx';
@@ -242,6 +244,51 @@ function isPaymentMethod(v: unknown): v is 'paypal' | 'cash' | null | undefined 
   return v === undefined || v === null || v === 'paypal' || v === 'cash';
 }
 
+// The hand-off facts, validated the same way whichever door writes them —
+// the checkpoint (POST /handoff) or the page (PATCH). Each returns the 400
+// message or null.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function sourceErr(v: unknown): string | null {
+  if (v === undefined || v === null) return null;
+  return PACKAGE_SOURCES.includes(v as PackageSource) ? null : 'source must be facebook, local, reddit, or other';
+}
+
+// Same boundary as POST /api/packages: the unique index is what keeps one row
+// per box, so the number must collide there, not mint a twin.
+function trackingErr(tn: string, carrier: unknown): string | null {
+  if (tn.length < 8) return 'A tracking number is required';
+  if (!isValidTracking(tn)) return 'A tracking number is letters and digits, at most 30 characters';
+  if (!CARRIERS.includes(carrier as Carrier)) return 'carrier must be UPS, FedEx, or USPS';
+  return null;
+}
+
+async function handoffByErr(
+  sql: SqlLike, v: unknown,
+): Promise<{ member: { id: string; name: string } } | { error: string }> {
+  if (typeof v !== 'string' || !UUID_RE.test(v)) return { error: 'handoff.byUserId must be a user id' };
+  const member = await activeMember(sql, v);
+  return member ? { member } : { error: 'handoff.byUserId must name an active member' };
+}
+
+function trackingTakenMsg(otherOrderId: string | null): string {
+  return otherOrderId
+    ? `This tracking number is already being tracked on ${otherOrderId}`
+    : 'This tracking number is already being tracked';
+}
+
+// Detached on purpose, as POST /api/packages does: the row is committed and
+// the registration carries its own timeout; the sweep covers what this misses.
+// Only a box Shippo isn't pushing for yet — a re-typed number, a fresh row —
+// is worth the call; the same number again is already registered.
+function registerIfNeeded(
+  env: Env, sql: ReturnType<typeof getDb>, pkg: HandoffPackage | null, needsRegister: boolean,
+): void {
+  if (!pkg || !needsRegister) return;
+  const tracking = pickTrackingClient(env);
+  if (tracking.register) void registerPackageTracking(sql, tracking.register, pkg);
+}
+
 // A `reverted` event stays pending until a `revert_ack` names its id. A
 // timestamp watermark loses any revert whose PATCH commits after the ack:
 // order_events.created_at is transaction-START time, and the ack cannot see
@@ -268,13 +315,15 @@ function newestPackageJson(sql: SqlLike) {
     (SELECT json_build_object(
        'id', p.id, 'carrier', p.carrier, 'trackingNumber', p.tracking_number,
        'status', p.status, 'trackingStatus', p.tracking_status,
-       'trackingEta', p.tracking_eta, 'lastTrackedAt', p.last_tracked_at)
+       'trackingEta', p.tracking_eta, 'lastTrackedAt', p.last_tracked_at,
+       'source', p.source)
      FROM packages p WHERE p.order_id = o.id
      ORDER BY p.created_at DESC, p.id DESC LIMIT 1)`;
 }
 type PackageJson = {
   id: string; carrier: string; trackingNumber: string; status: string;
   trackingStatus: string | null; trackingEta: string | null; lastTrackedAt: string | null;
+  source: string | null;
 };
 const packageFromJson = (p: PackageJson | null) => p && {
   ...p, trackingUrl: carrierTrackingUrl(p.carrier, p.trackingNumber),
@@ -631,6 +680,19 @@ orders.get('/:id', async (c) => {
     sql, order as { payment: string; created_at: Date });
   const cashShotRequired = await cashShotRequiredFor(
     sql, order as { payment: string; payment_method: string | null; created_at: Date });
+  // Everything still between this Draft and In Transit, in display order —
+  // the same list the hand-off refuses on, read locally (no PayPal pull). A
+  // non-Draft has nothing between it and anywhere.
+  const blockers = order.lifecycle === 'draft' && !order.archived_at
+    ? (await leaveDraftBlockers(sql, {
+      id: order.id as string, payment: order.payment as string,
+      payment_method: order.payment_method as string | null,
+      paypal_txn_id: order.paypal_txn_id as string | null,
+      created_at: order.created_at as Date, total_cost: order.total_cost as number | null,
+      source: order.source as string | null, handoff_method: order.handoff_method as string | null,
+      handoff_by: order.handoff_by as string | null, has_package: order.pkg != null,
+    })).map((b) => b.kind)
+    : [];
 
   // Changes a purchaser made after submitting, that no manager has looked at
   // yet — the edit page opens a review dialog on them. Managers only: the
@@ -694,6 +756,7 @@ orders.get('/:id', async (c) => {
       txnRequired,
       chatShotRequired,
       cashShotRequired,
+      blockers,
       source: order.source,
       paymentMethod: order.payment_method,
       handoffMethod: order.handoff_method,
@@ -1216,14 +1279,33 @@ function sameStoredValue(before: unknown, after: unknown): boolean {
 
 const LINE_FIELD_SET: ReadonlySet<string> = new Set(LINE_FIELDS);
 
+// The hand-off facts a PATCH may write, in their after-state: the collector
+// is NULLed unless the method is (or becomes) pickup, the way payment_method
+// is NULLed on self — so a method flip is judged and written the same way.
+type HandoffFactsBefore = {
+  source: string | null; handoff_method: string | null; handoff_by: string | null;
+  pkg: { trackingNumber: string; carrier: string } | null;
+};
+function handoffFactsAfter(
+  body: { source?: string | null; handoffMethod?: 'pickup' | 'label' | null; handoffBy?: string | null },
+  before: HandoffFactsBefore,
+) {
+  const method = body.handoffMethod === undefined ? before.handoff_method : body.handoffMethod;
+  const by = method !== 'pickup' ? null
+    : body.handoffBy === undefined ? before.handoff_by : body.handoffBy;
+  return { method, by };
+}
+
 function changesMaterialField(
   body: {
     lines?: LinePatch[]; addLines?: unknown[]; removeLineIds?: string[];
     totalCost?: number | null; otherFees?: number | null; otherFeesNote?: string | null;
     warehouseId?: string | null; payment?: string; paymentMethod?: string | null;
     paypalTxnId?: string | null;
+    source?: string | null; handoffMethod?: 'pickup' | 'label' | null; handoffBy?: string | null;
+    trackingNumber?: string; carrier?: string;
   },
-  before: Record<string, unknown>,
+  before: Record<string, unknown> & HandoffFactsBefore,
   linesBefore: Map<string, Record<string, unknown>>,
 ): boolean {
   if (body.addLines?.length) return true;
@@ -1263,6 +1345,21 @@ function changesMaterialField(
       : null;
     if (!sameStoredValue(before.paypal_txn_id, norm)) return true;
   }
+  if (body.source !== undefined && !sameStoredValue(before.source, body.source)) return true;
+  if (body.handoffMethod !== undefined || body.handoffBy !== undefined) {
+    const after = handoffFactsAfter(body, before);
+    if (!sameStoredValue(before.handoff_method, after.method)) return true;
+    if (!sameStoredValue(before.handoff_by, after.by)) return true;
+  }
+  if (body.trackingNumber !== undefined) {
+    const tn = normalizeTracking(body.trackingNumber);
+    if (!sameStoredValue(before.pkg?.trackingNumber ?? null, tn)) return true;
+    if (!sameStoredValue(before.pkg?.carrier ?? null, body.carrier ?? null)) return true;
+  }
+  // A flip away from label parts with the box; that is a change even when
+  // nothing else in the body is.
+  if (body.handoffMethod !== undefined && body.handoffMethod !== 'label'
+      && before.handoff_method === 'label' && before.pkg) return true;
   return false;
 }
 
@@ -1306,11 +1403,35 @@ orders.patch('/:id', async (c) => {
         commissionRate?: number | null;
         paypalTxnId?: string | null;
         onBehalfOfUserId?: string | null;
+        source?: PackageSource | null;
+        handoffMethod?: 'pickup' | 'label' | null;
+        handoffBy?: string | null;
+        trackingNumber?: string;
+        carrier?: Carrier;
       }
     | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
   if (!isPaymentMethod(body.paymentMethod)) {
     return c.json({ error: 'paymentMethod must be paypal or cash' }, 400);
+  }
+  // The hand-off facts, now the page's to edit. Same validators as the
+  // checkpoint; the collector is resolved here so the audit can name them.
+  const srcErr = sourceErr(body.source);
+  if (srcErr) return c.json({ error: srcErr }, 400);
+  if (body.handoffMethod !== undefined && body.handoffMethod !== null
+      && body.handoffMethod !== 'pickup' && body.handoffMethod !== 'label') {
+    return c.json({ error: 'handoffMethod must be pickup or label' }, 400);
+  }
+  if (body.handoffBy !== undefined && body.handoffBy !== null) {
+    const by = await handoffByErr(sql, body.handoffBy);
+    if ('error' in by) return c.json({ error: by.error }, 400);
+  }
+  let tracking: { trackingNumber: string; carrier: Carrier } | undefined;
+  if (body.trackingNumber !== undefined || body.carrier !== undefined) {
+    const tn = typeof body.trackingNumber === 'string' ? normalizeTracking(body.trackingNumber) : '';
+    const err = trackingErr(tn, body.carrier);
+    if (err) return c.json({ error: err }, 400);
+    tracking = { trackingNumber: tn, carrier: body.carrier as Carrier };
   }
 
   const existing = (await sql`SELECT user_id, category, lifecycle FROM orders WHERE id = ${id} LIMIT 1`)[0];
@@ -1328,7 +1449,9 @@ orders.patch('/:id', async (c) => {
     body.totalCost !== undefined || body.otherFees !== undefined ||
     body.otherFeesNote !== undefined || body.warehouseId !== undefined ||
     body.payment !== undefined || body.paymentMethod !== undefined ||
-    body.paypalTxnId !== undefined;
+    body.paypalTxnId !== undefined || body.source !== undefined ||
+    body.handoffMethod !== undefined || body.handoffBy !== undefined ||
+    tracking !== undefined;
   if (u.role !== 'manager' && existing.lifecycle !== 'draft') {
     // Past review the PO is a closed book to the purchaser, note included.
     if (isClosedBook(existing.lifecycle)) {
@@ -1517,6 +1640,11 @@ orders.patch('/:id', async (c) => {
   let paymentsLinked = 0;
   let committedLineIds: string[] = [];
   let blockingSellOrderIds: string[] = [];
+  // The linked box's move, audited with the fields; the row to register with
+  // Shippo once the tx has committed; the PO already tracking a pasted number.
+  let packageChanged: AuditChange[] = [];
+  let packageToRegister: HandoffPackage | null = null;
+  let trackingTakenBy: string | null = null;
 
   try {
     await sql.begin(async (tx) => {
@@ -1524,22 +1652,32 @@ orders.patch('/:id', async (c) => {
       // a concurrent advance from changing lifecycle between our pre/post
       // snapshots, so the diff describes one settled state transition.
       const orderBefore = (await tx`
-        SELECT id, user_id, lifecycle, notes, warehouse_id, payment, payment_method,
-               total_cost::float AS total_cost,
-               commission_rate::float AS commission_rate,
-               other_fees::float AS other_fees,
-               other_fees_note,
-               paypal_txn_id,
-               supplier_id,
-               archived_at
-        FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE
+        SELECT o.id, o.user_id, o.lifecycle, o.notes, o.warehouse_id, o.payment, o.payment_method,
+               o.total_cost::float AS total_cost,
+               o.commission_rate::float AS commission_rate,
+               o.other_fees::float AS other_fees,
+               o.other_fees_note,
+               o.paypal_txn_id,
+               o.supplier_id,
+               o.archived_at,
+               o.source, o.handoff_method, o.handoff_by,
+               sup.name AS supplier_name,
+               (SELECT json_build_object('trackingNumber', p.tracking_number, 'carrier', p.carrier)
+                FROM packages p WHERE p.order_id = o.id
+                ORDER BY p.created_at DESC, p.id DESC LIMIT 1) AS pkg
+        FROM orders o
+        LEFT JOIN suppliers sup ON sup.id = o.supplier_id
+        WHERE o.id = ${id} LIMIT 1 FOR UPDATE OF o
       `)[0] as
         | { id: string; user_id: string; lifecycle: string; notes: string | null;
             warehouse_id: string | null;
             payment: string; payment_method: string | null;
             total_cost: number | null; commission_rate: number | null;
             other_fees: number; other_fees_note: string | null; paypal_txn_id: string | null;
-            supplier_id: string | null; archived_at: Date | null }
+            supplier_id: string | null; archived_at: Date | null;
+            source: string | null; handoff_method: string | null; handoff_by: string | null;
+            supplier_name: string | null;
+            pkg: { trackingNumber: string; carrier: string } | null }
         | undefined;
       if (!orderBefore) throw new Error('order disappeared mid-edit');
       // An archived order's lines sit at 'Archived'; a purchaser edit would
@@ -1625,7 +1763,7 @@ orders.patch('/:id', async (c) => {
       // guards inside run against the pre-edit lines, so the ids they report
       // are the ones the client can see.
       if (u.role !== 'manager' && orderBefore.lifecycle !== 'draft' && materialEdit
-          && changesMaterialField(body, orderBefore as unknown as Record<string, unknown>, beforeMap)) {
+          && changesMaterialField(body, orderBefore as unknown as Record<string, unknown> & typeof orderBefore, beforeMap)) {
         const outcome = await revertOrderToDraftTx(tx, id, u, orderBefore.lifecycle);
         if (outcome.kind === 'committedLines') {
           committedLineIds = outcome.offendingLineIds;
@@ -1652,7 +1790,13 @@ orders.patch('/:id', async (c) => {
         body.paymentMethod !== undefined ||
         body.commissionRate !== undefined ||
         body.paypalTxnId !== undefined ||
-        body.supplierId !== undefined;
+        body.supplierId !== undefined ||
+        body.source !== undefined ||
+        body.handoffMethod !== undefined ||
+        body.handoffBy !== undefined;
+      // The collector follows the method the way payment_method follows
+      // payment: NULL unless the after-state is pickup.
+      const facts = handoffFactsAfter(body, orderBefore);
       if (touchesOrder) {
         // Nullable fields use a CASE WHEN sentinel so the client can clear
         // them by sending `null`; bare COALESCE would treat null as "no
@@ -1666,6 +1810,9 @@ orders.patch('/:id', async (c) => {
         const setFeesNote  = body.otherFeesNote !== undefined ? 1 : 0;
         const setPaypal    = body.paypalTxnId   !== undefined ? 1 : 0;
         const setSupplier  = body.supplierId    !== undefined ? 1 : 0;
+        const setSource    = body.source        !== undefined ? 1 : 0;
+        const setMethodHo  = body.handoffMethod !== undefined ? 1 : 0;
+        const setBy        = body.handoffMethod !== undefined || body.handoffBy !== undefined ? 1 : 0;
         // A self-paid order has no method: flipping to self clears it whether
         // or not the request said so, and a method sent alongside is dropped.
         const paymentAfter = body.payment ?? orderBefore.payment;
@@ -1691,7 +1838,10 @@ orders.patch('/:id', async (c) => {
             other_fees      = CASE WHEN ${setOtherFees}::int = 1 THEN ${Number(body.otherFees ?? 0)}    ELSE other_fees      END,
             other_fees_note = CASE WHEN ${setFeesNote}::int  = 1 THEN ${normFeeNote(body.otherFeesNote)} ELSE other_fees_note END,
             payment      = COALESCE(${body.payment ?? null}, payment),
-            payment_method = CASE WHEN ${setMethod}::int = 1 THEN ${newMethod} ELSE payment_method END
+            payment_method = CASE WHEN ${setMethod}::int = 1 THEN ${newMethod} ELSE payment_method END,
+            source         = CASE WHEN ${setSource}::int = 1 THEN ${body.source ?? null} ELSE source END,
+            handoff_method = CASE WHEN ${setMethodHo}::int = 1 THEN ${facts.method} ELSE handoff_method END,
+            handoff_by     = CASE WHEN ${setBy}::int = 1 THEN ${facts.by}::uuid ELSE handoff_by END
           WHERE id = ${id}
         `;
         // The id names a payment that has very likely already synced, so link
@@ -1718,6 +1868,29 @@ orders.patch('/:id', async (c) => {
           toUserId: newOwner.ownerId,
           to: newOwner.ownerName ?? u.name,
         });
+      }
+      // The box, under the same lock as the fields that describe it. A
+      // tracking number only makes sense on a label; a flip away from label
+      // parts with the box (unlinked, not deleted — see the helper).
+      if (tracking) {
+        if (facts.method !== 'label') throw new Error('__TRACKING_NEEDS_LABEL__');
+        const set = await setOrderPackageTx(tx, id, u.id, {
+          source: body.source !== undefined ? body.source : orderBefore.source,
+          supplier_name: orderBefore.supplier_name,
+          paypal_txn_id: body.paypalTxnId !== undefined
+            ? (typeof body.paypalTxnId === 'string' ? body.paypalTxnId.replace(/\s+/g, '').toUpperCase() || null : null)
+            : orderBefore.paypal_txn_id,
+        }, tracking);
+        if (set.kind === 'taken') {
+          trackingTakenBy = set.otherOrderId;
+          throw new Error('__TRACKING_TAKEN__');
+        }
+        packageChanged = packageChanges(set.prev, set.package);
+        packageToRegister = set.needsRegister ? set.package : null;
+      } else if (body.handoffMethod !== undefined && facts.method !== 'label'
+                 && orderBefore.handoff_method === 'label') {
+        const gone = await unlinkOrderPackagesTx(tx, id);
+        if (gone.length) packageChanged = packageChanges(gone[0], null);
       }
       if (Array.isArray(body.removeLineIds) && body.removeLineIds.length) {
         const doomed = await tx`
@@ -1947,12 +2120,12 @@ orders.patch('/:id', async (c) => {
       const revertFields: AuditChange[] = [];
       const revertLinesEdited: Array<Record<string, unknown>> = [];
 
-      if (touchesOrder || touchesLines) {
+      if (touchesOrder || touchesLines || packageChanged.length) {
         const orderAfter = (await tx`
           SELECT notes, warehouse_id, payment, payment_method, total_cost::float AS total_cost,
                  commission_rate::float AS commission_rate,
                  other_fees::float AS other_fees, other_fees_note, paypal_txn_id,
-                 supplier_id
+                 supplier_id, source, handoff_method, handoff_by
           FROM orders WHERE id = ${id} LIMIT 1
         `)[0] as Record<string, unknown>;
         const metaChanges = diff(
@@ -1960,6 +2133,10 @@ orders.patch('/:id', async (c) => {
           orderAfter,
           META_FIELDS,
         );
+        await nameHandoffByChange(tx, metaChanges);
+        // The box's move rides the same event as the fields, so the timeline
+        // and the change-review show one edit, not a field and a package.
+        metaChanges.push(...packageChanged);
         if (metaChanges.length) {
           await writeOrderEvent(tx, id, u.id, 'meta_changed', { changes: metaChanges });
           revertFields.push(...metaChanges);
@@ -2066,6 +2243,12 @@ orders.patch('/:id', async (c) => {
     if (msg.includes('__ORDER_WOULD_BE_EMPTY__')) {
       return c.json({ error: 'An order must keep at least one line. Delete the order instead.' }, 409);
     }
+    if (msg.includes('__TRACKING_NEEDS_LABEL__')) {
+      return c.json({ error: 'A tracking number belongs to a shipping label — set handoffMethod to label' }, 400);
+    }
+    if (msg.includes('__TRACKING_TAKEN__')) {
+      return c.json({ error: trackingTakenMsg(trackingTakenBy), otherOrderId: trackingTakenBy }, 409);
+    }
     if (msg.includes('__REMOVE_REFERENCED__')) {
       return c.json({
         error: `A line you tried to remove is on ${describeSellOrders(blockingSellOrderIds)} and cannot be deleted. Archive or cancel those sell orders first.`,
@@ -2086,6 +2269,7 @@ orders.patch('/:id', async (c) => {
   // response still open, and a wide removal used to mean one round trip per key.
   const unswept = await deleteAttachments(c.env, removedScanKeys);
   if (unswept.length) log.error('r2 delete (line removed)', unswept);
+  registerIfNeeded(c.env, sql, packageToRegister, packageToRegister !== null);
 
   return c.json({ ok: true, addedLineIds, lifecycle: lifecycleAfter, paymentsLinked });
 });
@@ -2481,8 +2665,7 @@ orders.delete('/:id/status-meta/:status/attachments/:attachmentId', async (c) =>
 // picker stops at the same number this route enforces.
 
 // order_lines.id is uuid-typed, so a mangled id would make Postgres throw and
-// 500 the route rather than 404 cleanly.
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// 500 the route rather than 404 cleanly — the routes below check UUID_RE first.
 
 // The purchaser who raised the PO photographs the goods, and pictures keep
 // arriving after it has moved to In Transit — so ownership lasts until the
@@ -2770,6 +2953,16 @@ function advanceRefusedResponse(
       return c.json({
         error: 'This PO has no cost — enter the unit cost on its lines before submitting it.',
       }, 409);
+    case 'missingSource':
+      return c.json({ error: 'Say where this order came from before submitting it.' }, 409);
+    case 'missingDelivery':
+      return c.json({
+        error: 'Say how the goods get here — a shipping label, or who is collecting them — before submitting it.',
+      }, 409);
+    case 'missingTracking':
+      return c.json({ error: 'Add the tracking number from the shipping label before submitting it.' }, 409);
+    case 'missingMethod':
+      return c.json({ error: 'Say how the company paid — PayPal or cash — before submitting it.' }, 409);
     // Hono lets a handler return nothing, so without this a new outcome kind
     // would fall out of the switch as an implicit undefined and a 200.
     default: {
@@ -2796,55 +2989,66 @@ orders.post('/:id/handoff', async (c) => {
   } | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
 
-  if (typeof body.warehouseId !== 'string' || !body.warehouseId) {
-    return c.json({ error: 'warehouseId is required' }, 400);
+  // Every field is optional — the checkpoint sends what the page lacks and
+  // the transaction fills the rest from the row. Present-but-invalid is
+  // still a 400; only absence means "keep what the order holds".
+  if (body.warehouseId !== undefined) {
+    if (typeof body.warehouseId !== 'string' || !body.warehouseId) {
+      return c.json({ error: 'warehouseId is required' }, 400);
+    }
+    const whErr = await warehouseErr(sql, body.warehouseId);
+    if (whErr) return c.json({ error: whErr }, 400);
   }
-  const whErr = await warehouseErr(sql, body.warehouseId);
-  if (whErr) return c.json({ error: whErr }, 400);
-  if (!PACKAGE_SOURCES.includes(body.source as PackageSource)) {
-    return c.json({ error: 'source must be facebook, local, reddit, or other' }, 400);
+  if (body.source !== undefined) {
+    const err = sourceErr(body.source);
+    if (err || body.source === null) return c.json({ error: err ?? 'source must be facebook, local, reddit, or other' }, 400);
   }
-  if (body.payment !== 'company' && body.payment !== 'self') {
+  if (body.payment !== undefined && body.payment !== 'company' && body.payment !== 'self') {
     return c.json({ error: 'payment must be company or self' }, 400);
   }
   // A self-paid order has no method: it is reimbursed from commission. The
   // company card names one, and cash is what lifts the transaction-id rule.
-  let paymentMethod: 'paypal' | 'cash' | null = null;
-  if (body.payment === 'company') {
-    if (body.paymentMethod !== 'paypal' && body.paymentMethod !== 'cash') {
+  // Absent means the row's; the advance refuses a company row with none.
+  let paymentMethod: 'paypal' | 'cash' | null | undefined;
+  if (body.paymentMethod !== undefined) {
+    if (!isPaymentMethod(body.paymentMethod)) {
       return c.json({ error: 'paymentMethod must be paypal or cash' }, 400);
     }
     paymentMethod = body.paymentMethod;
   }
-  const paypalTxnId = typeof body.paypalTxnId === 'string'
-    ? body.paypalTxnId.replace(/\s+/g, '').toUpperCase() || null
-    : null;
-  if (paypalTxnId && paypalTxnId.length > 64) {
-    return c.json({ error: 'PayPal transaction ID is too long' }, 400);
+  if (body.payment === 'self') paymentMethod = null;
+  let paypalTxnId: string | null | undefined;
+  if (body.paypalTxnId !== undefined) {
+    paypalTxnId = typeof body.paypalTxnId === 'string'
+      ? body.paypalTxnId.replace(/\s+/g, '').toUpperCase() || null
+      : null;
+    if (paypalTxnId && paypalTxnId.length > 64) {
+      return c.json({ error: 'PayPal transaction ID is too long' }, 400);
+    }
   }
   const opt = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null);
 
   const h = body.handoff;
   let handoff: HandoffInput['handoff'];
-  if (h?.method === 'pickup') {
-    if (typeof h.byUserId !== 'string' || !UUID_RE.test(h.byUserId)) {
-      return c.json({ error: 'handoff.byUserId must be a user id' }, 400);
+  if (h === undefined || h === null) {
+    handoff = undefined;
+  } else if (h.method === 'pickup') {
+    if (h.byUserId !== undefined) {
+      const by = await handoffByErr(sql, h.byUserId);
+      if ('error' in by) return c.json({ error: by.error }, 400);
+      handoff = { method: 'pickup', byUserId: by.member.id };
+    } else {
+      handoff = { method: 'pickup' };
     }
-    const member = await activeMember(sql, h.byUserId);
-    if (!member) return c.json({ error: 'handoff.byUserId must name an active member' }, 400);
-    handoff = { method: 'pickup', byUserId: member.id, byName: member.name };
-  } else if (h?.method === 'label') {
-    // Same boundary as POST /api/packages: the unique index is what keeps one
-    // row per box, so the number must collide there, not mint a twin.
-    const tn = typeof h.trackingNumber === 'string' ? normalizeTracking(h.trackingNumber) : '';
-    if (tn.length < 8) return c.json({ error: 'A tracking number is required' }, 400);
-    if (!isValidTracking(tn)) {
-      return c.json({ error: 'A tracking number is letters and digits, at most 30 characters' }, 400);
+  } else if (h.method === 'label') {
+    if (h.trackingNumber !== undefined || h.carrier !== undefined) {
+      const tn = typeof h.trackingNumber === 'string' ? normalizeTracking(h.trackingNumber) : '';
+      const err = trackingErr(tn, h.carrier);
+      if (err) return c.json({ error: err }, 400);
+      handoff = { method: 'label', trackingNumber: tn, carrier: h.carrier as Carrier };
+    } else {
+      handoff = { method: 'label' };
     }
-    if (!CARRIERS.includes(h.carrier as Carrier)) {
-      return c.json({ error: 'carrier must be UPS, FedEx, or USPS' }, 400);
-    }
-    handoff = { method: 'label', trackingNumber: tn, carrier: h.carrier as Carrier };
   } else {
     return c.json({ error: 'handoff.method must be pickup or label' }, 400);
   }
@@ -2871,10 +3075,10 @@ orders.post('/:id/handoff', async (c) => {
   }
 
   const input: HandoffInput = {
-    warehouseId: body.warehouseId,
-    source: body.source as PackageSource,
+    warehouseId: body.warehouseId as string | undefined,
+    source: body.source as PackageSource | undefined,
     handoff,
-    payment: body.payment,
+    payment: body.payment as 'company' | 'self' | undefined,
     paymentMethod,
     paypalTxnId,
     paymentScreenshotKey: opt(body.paymentScreenshotKey),
@@ -2883,15 +3087,17 @@ orders.post('/:id/handoff', async (c) => {
     commissionRate,
   };
   // What the hand-off is about to write is what the advance inside it judges,
-  // so the pull reads the request, not the row — only the cutoff is the row's.
-  const [rule] = await sql<Pick<TxnRuleRow, 'created_at'>[]>`
-    SELECT created_at FROM orders WHERE id = ${id}`;
-  const pullError = rule
-    ? await pullPaypalIfUnknown(c.env, sql, u.id, {
-      payment: body.payment, payment_method: paymentMethod, paypal_txn_id: paypalTxnId,
-      created_at: rule.created_at,
-    })
-    : null;
+  // so the pull reads the request merged over the row — an id saved earlier
+  // from the page is pulled for just the same.
+  const [rule] = await sql<TxnRuleRow[]>`
+    SELECT payment, payment_method, paypal_txn_id, created_at FROM orders WHERE id = ${id}`;
+  const merged = rule && {
+    payment: input.payment ?? rule.payment,
+    payment_method: paymentMethod !== undefined ? paymentMethod : rule.payment_method,
+    paypal_txn_id: paypalTxnId !== undefined ? paypalTxnId : rule.paypal_txn_id,
+    created_at: rule.created_at,
+  };
+  const pullError = merged ? await pullPaypalIfUnknown(c.env, sql, u.id, merged) : null;
 
   let result: Awaited<ReturnType<typeof handoffOrderTx>>;
   try {
@@ -2907,16 +3113,11 @@ orders.post('/:id/handoff', async (c) => {
       case 'notDraft':
         return c.json({ error: `Order is already ${LIFECYCLE_LABEL[r.lifecycle] ?? r.lifecycle}` }, 409);
       case 'trackingTaken':
-        return c.json({ error: 'This tracking number is already being tracked' }, 409);
+        return c.json({ error: trackingTakenMsg(r.otherOrderId), otherOrderId: r.otherOrderId }, 409);
       case 'advance': return advanceRefusedResponse(c, r.outcome, pullError);
     }
   }
-  // Detached on purpose, as POST /api/packages does: the row is committed and
-  // the registration carries its own timeout; the sweep covers what this misses.
-  if (result.package) {
-    const tracking = pickTrackingClient(c.env);
-    if (tracking.register) void registerPackageTracking(sql, tracking.register, result.package);
-  }
+  registerIfNeeded(c.env, sql, result.package, result.needsRegister);
   return c.json({
     ok: true,
     lifecycle: 'in_transit',

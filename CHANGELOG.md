@@ -17,6 +17,60 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.158.0] - 2026-09-20
+
+The backend half of RS-080, the purchase-order page redesign: the facts the
+Draft → In Transit hand-off collects stop being frozen the moment the dialog
+closes and become ordinary fields of the order.
+
+### Features
+
+- **`PATCH /api/orders/:id` accepts the hand-off facts** — `source`,
+  `handoffMethod` (`pickup` | `label`), `handoffBy`, and `trackingNumber` +
+  `carrier` — with the same validation the hand-off applies. The collector is
+  cleared unless the method is pickup, the way `payment_method` follows
+  `payment`. They are audited under `meta_changed` (the collector by name), and
+  for a purchaser they are material: changing one after submission sends the
+  order back to Draft for the manager's change-review, and a re-save of the
+  values the order already holds does not. Managers may still edit them at
+  Ready to Pay; they are logistics, not the frozen book.
+- **A tracking number edit moves the box, not a copy of it.** The same number
+  is a no-op; a different one updates the linked package in place with its
+  tracking state reset and re-registers it with Shippo, so a typo fix leaves no
+  phantom row on the Shipping page. A number already tracked on another PO is
+  refused with a 409 that names the PO; a number on a standalone package adopts
+  that package; switching to pickup unlinks the box rather than deleting it,
+  and a PO minted from a package now hands off with the package's own number
+  instead of colliding with itself.
+- **`GET /api/orders/:id` reports `blockers`** — every reason a Draft cannot
+  leave yet, in display order (`noCost`, `missingSource`, `missingDelivery`,
+  `missingTracking`, `missingMethod`, `missingTxnId`, `unknownTxnId`,
+  `missingChatShot`, `missingCashShot`), computed by the one function the
+  advance refuses on. It reads locally and never calls PayPal. `package.source`
+  rides along; the older `txnRequired` / `chatShotRequired` /
+  `cashShotRequired` flags stay for shells that still read them.
+- **The hand-off takes a partial body.** Whatever the checkpoint omits is read
+  off the order under the same lock, so a page that already holds everything
+  hands off with `{}`. The hand-off refuses on every blocker; `/advance` and a
+  manager stage-jump keep refusing only on the cost and proof-of-payment rules,
+  so a legacy Draft with no recorded source is never stuck. One consequence: a
+  company card with no method is now a 409 `missingMethod` judged on the merged
+  row rather than a 400 on the body.
+- **The linked PO's owner may refresh the package's tracking**
+  (`POST /api/packages/:id/refresh`), not only the box's creator or a manager —
+  a manager handing an order off on someone's behalf creates the box, and the
+  PO page's Refresh is the owner's.
+
+### Internal
+
+- `advanceOrderTx`'s five leave-Draft guards are one `leaveDraftBlockers()`
+  list in `services/orderTxnRule.ts`; the enforced set is unchanged for
+  `/advance`. Its header no longer claims the tracking poll as a caller.
+- `services/orderHandoff.ts` gains `setOrderPackageTx`,
+  `unlinkOrderPackagesTx`, `packageChanges` and `nameHandoffByChange`, shared by
+  the hand-off and PATCH; the route-level validators (`sourceErr`,
+  `trackingErr`, `handoffByErr`) are shared the same way.
+
 ## [1.157.1] - 2026-09-20
 
 ### Fixes
