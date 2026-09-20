@@ -2,13 +2,13 @@
 id: RS-078
 title: Remove the prepaid-label (ShipSaving) flow; keep package tracking
 type: chore
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-19
 reporter: jinhu
 branch: feat/remove-shipsaving
 pr: 365
-version:
+version: 1.157.0
 related: [RS-013, RS-050, RS-075, RS-077]
 ---
 
@@ -42,26 +42,26 @@ Decisions (session 2026-09-19):
 
 ## Acceptance criteria
 
-- [ ] `apps/backend/src/shipping/shipsaving.ts`, `routes/shipments.ts`,
+- [x] `apps/backend/src/shipping/shipsaving.ts`, `routes/shipments.ts`,
       `routes/shipmentsGlobal.ts`, `routes/shippingPublic.ts`,
       `services/shipmentVoid.ts` are gone; `grep -rn shipments apps/*/src`
       returns nothing.
-- [ ] `SHIPSAVING_*` env vars are gone from `env.ts`, `types.ts`,
+- [x] `SHIPSAVING_*` env vars are gone from `env.ts`, `types.ts`,
       `.env.example`.
-- [ ] `/api/health` `providers` reports `tracking` and `ocr` only.
-- [ ] `GET /api/packages/inbound-counts` serves the phone Dashboard card
+- [x] `/api/health` `providers` reports `tracking` and `ocr` only.
+- [x] `GET /api/packages/inbound-counts` serves the phone Dashboard card
       (packages only, same `moving` / `needs` buckets, same scoping).
-- [ ] The Shipping page (desktop `#/shipping`, phone inbound list) lists
+- [x] The Shipping page (desktop `#/shipping`, phone inbound list) lists
       tracked packages only; *Add label* still works; the label wizard,
       per-PO shipping panel, seller portal and `Shipping labels` PO button
       no longer exist.
-- [ ] PO delete no longer refuses on purchased labels; PO detail no longer
+- [x] PO delete no longer refuses on purchased labels; PO detail no longer
       shows a shipment count or a label-cost split in the cost tape.
-- [ ] Package tracking is unchanged: Shippo webhook, 45-minute poll, PO
+- [x] Package tracking is unchanged: Shippo webhook, 45-minute poll, PO
       In Transit journey, carrier link, ETA.
-- [ ] Backend and frontend suites green; `pnpm typecheck` clean; i18n
+- [x] Backend and frontend suites green; `pnpm typecheck` clean; i18n
       coverage + parity tests pass with the orphaned keys removed.
-- [ ] `docs/FEATURES.md` Shipping section describes package tracking only and
+- [x] `docs/FEATURES.md` Shipping section describes package tracking only and
       cites the removal version.
 
 ## Out of scope
