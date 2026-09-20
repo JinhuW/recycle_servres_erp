@@ -209,46 +209,6 @@ export function HandoffFields({ f, phone = false }: { f: Form; phone?: boolean }
   );
 }
 
-export function HandoffManagerFields({ f, phone = false }: { f: Form; phone?: boolean }) {
-  const { t } = useT();
-  const selectCls = phone ? 'input' : 'select';
-  const owner = f.members.find(m => m.id === f.ownerId)?.name ?? f.order.userName;
-  const pct = f.commissionPct.trim();
-  return (
-    <div className="ho-body ho-body-manager">
-      <HandoffSection
-        item={itemFor(f, 'commission')}
-        title={`${t('poReadyCommission')} · ${t('hoManagerOnly')}`}
-        summary={[owner, pct !== '' ? `${pct}%` : null].filter(Boolean).join(' · ')}
-        phone={phone}
-      >
-        <div className="ho-row">
-          <div className="field">
-            <label className="label" htmlFor="ho-owner">{t('poOnBehalfLabel')}</label>
-            <select id="ho-owner" className={selectCls} value={f.ownerId} onChange={e => f.setOwnerId(e.target.value)}>
-              {!f.members.some(m => m.id === f.ownerId) && <option value={f.ownerId}>…</option>}
-              {f.members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-            </select>
-          </div>
-          <div className="field">
-            <label className="label" htmlFor="ho-rate">{t('commissionRate')}</label>
-            <input
-              id="ho-rate"
-              className="input tabular"
-              type="number"
-              min={0}
-              max={100}
-              step="0.1"
-              value={f.commissionPct}
-              onChange={e => f.setCommissionPct(e.target.value)}
-            />
-          </div>
-        </div>
-      </HandoffSection>
-    </div>
-  );
-}
-
 export function HandoffBlockers({ keys }: { keys: string[] }) {
   const { t } = useT();
   if (!keys.length) return null;
@@ -281,7 +241,6 @@ export function HandoffDialog({ init, onCancel, onDone }: Props) {
         </div>
         <div className="modal-body">
           <HandoffFields f={f} />
-          {init.isManager && <HandoffManagerFields f={f} />}
         </div>
         <div className="modal-foot ho-foot">
           <HandoffBlockers keys={f.blockerKeys} />

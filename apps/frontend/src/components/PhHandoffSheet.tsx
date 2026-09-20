@@ -1,4 +1,4 @@
-import { HandoffBlockers, HandoffFields, HandoffManagerFields } from './HandoffDialog';
+import { HandoffBlockers, HandoffFields } from './HandoffDialog';
 import { useT } from '../lib/i18n';
 import { useHandoffForm, type HandoffInit } from '../lib/useHandoffForm';
 
@@ -27,7 +27,6 @@ export function PhHandoffSheet({ init, onClose, onDone }: Props) {
           <button type="button" className="ph-ho-close" onClick={onClose} disabled={f.busy}>{t('cancel')}</button>
         </div>
         <HandoffFields f={f} phone />
-        {init.isManager && <HandoffManagerFields f={f} phone />}
         <HandoffBlockers keys={f.blockerKeys} />
         <button
           type="button"

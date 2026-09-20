@@ -1915,10 +1915,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
             paymentMethod,
             paypalTxnId: paypalTxn,
             proof,
-            // The saved rate, not the input's display value: the page shows
-            // 0% for an unset rate, and sending that would log null → 0.
-            ...(isPurchaser ? {} : { ownerId, commissionRate: order.commissionRate }),
-            isManager: !isPurchaser,
             currentUser: { id: user.id, name: user.name },
           }}
           onCancel={() => setHandoffOpen(false)}

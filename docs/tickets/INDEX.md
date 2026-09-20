@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-083](./RS-083-phone-po-page-folds-that-match-the-desktop-tabs-one.md) | in-progress | story | P2 | phone PO page: folds that match the desktop tabs, one sheet per stage | — |
 | [RS-082](./RS-082-payment-tab-is-two-columns.md) | in-progress | task | P3 | Payment tab is two columns | — |
 | [RS-081](./RS-081-po-page-opens-the-tab-the-stage-is-about.md) | done | task | P2 | PO page opens the tab the stage is about | 1.161.1 |
 | [RS-080](./RS-080-purchase-order-page-status-as-the-spine-one-home-per.md) | done | story | P2 | Purchase-order page: status as the spine, one home per fact | 1.161.0 |
