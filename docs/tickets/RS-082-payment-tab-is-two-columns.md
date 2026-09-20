@@ -2,13 +2,13 @@
 id: RS-082
 title: Payment tab is two columns
 type: task
-status: in-progress
+status: done
 priority: P3
 created: 2026-09-20
 reporter: jinhu
 branch: feat/rs-082-payment-columns
-pr:
-version:
+pr: 375
+version: 1.161.2
 related: [RS-080]
 ---
 

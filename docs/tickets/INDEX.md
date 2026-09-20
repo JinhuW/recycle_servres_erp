@@ -5,8 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-083](./RS-083-phone-po-page-folds-that-match-the-desktop-tabs-one.md) | in-progress | story | P2 | phone PO page: folds that match the desktop tabs, one sheet per stage | — |
-| [RS-082](./RS-082-payment-tab-is-two-columns.md) | in-progress | task | P3 | Payment tab is two columns | — |
+| [RS-083](./RS-083-phone-po-page-folds-that-match-the-desktop-tabs-one.md) | done | story | P2 | phone PO page: folds that match the desktop tabs, one sheet per stage | 1.162.0 |
+| [RS-082](./RS-082-payment-tab-is-two-columns.md) | done | task | P3 | Payment tab is two columns | 1.161.2 |
 | [RS-081](./RS-081-po-page-opens-the-tab-the-stage-is-about.md) | done | task | P2 | PO page opens the tab the stage is about | 1.161.1 |
 | [RS-080](./RS-080-purchase-order-page-status-as-the-spine-one-home-per.md) | done | story | P2 | Purchase-order page: status as the spine, one home per fact | 1.161.0 |
 | [RS-079](./RS-079-paypal-pull-failures-are-reported-and-throttled.md) | done | bug | P2 | PayPal pull failures are reported and throttled; the phone scan keeps concurrent edits | 1.157.1 |
