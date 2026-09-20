@@ -17,6 +17,29 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.157.1] - 2026-09-20
+
+### Fixes
+
+- **A PayPal outage no longer reads as a typo** (RS-079). The pull that
+  `/advance` and `/handoff` make for an unknown transaction ID swallowed its
+  own failure: with PayPal down or the key expired, every company-card
+  submit was refused with "isn't in our PayPal account — check the ID", and
+  nothing reached the log from that path. The refusal now says PayPal could
+  not be reached and carries `pullFailed: true`, and the pass is reported
+  the way the six-hourly loop's is, so an expired key shows up as one line
+  instead of a run of "typos".
+- **The on-demand pull is rate-limited per user** — three a minute. Past
+  that the guard judges the synced table as it stands and gives its usual
+  "try again later"; a purchaser retrying Submit sees the rule, never a
+  429. Any purchaser with a Draft and an invented 17-character ID could
+  otherwise trigger a Transaction Search plus dispute list per request.
+- **The phone PO page keeps what you typed while a screenshot was being
+  read.** The PayPal scan wrote its ID through the draft the render had
+  captured, so notes or a warehouse changed during the seconds it took were
+  reverted when it landed. Every draft edit on that page now merges into
+  the draft as it stands.
+
 ## [1.157.0] - 2026-09-19
 
 ### Removed

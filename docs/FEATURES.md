@@ -123,10 +123,13 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   payment PayPal already reports does not wait for the six-hourly sync; a
   placeholder such as `CASH` is refused at once, without the round-trip
   (v1.155.1). PayPal itself reports a payment up to three hours late, and
-  the refusal says so. The check is live only once a
-  PayPal account has synced into the environment, so a dev box without keys
-  is unaffected; a linked, ignored, pending or reversed row still counts as
-  existing, and Mercury legs do not.
+  the refusal says so. When the pull itself fails — PayPal down, key
+  expired — the refusal says PayPal could not be reached rather than
+  blaming the ID, and each user gets three pulls a minute before the guard
+  judges the synced table as it stands (v1.157.1). The check is live only
+  once a PayPal account has synced into the environment, so a dev box
+  without keys is unaffected; a linked, ignored, pending or reversed row
+  still counts as existing, and Mercury legs do not.
 - **Leaving Draft is a hand-off, asked in one dialog** (v1.142.0). Clicking
   In Transit on a Draft — the desktop stepper or the phone's advance button —
   opens *Mark as In Transit*: the receiving warehouse, the order's **source**

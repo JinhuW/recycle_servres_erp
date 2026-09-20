@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import { Icon } from '../components/Icon';
 import { PhHeader } from '../components/PhHeader';
 import { ImageLightbox } from '../components/ImageLightbox';
@@ -58,7 +58,7 @@ type Props = {
   section: PoScreen;
   /** Unsaved order-level edits carried across trips into the line form. */
   meta: OrderMetaDraft | null;
-  onMetaChange: (meta: OrderMetaDraft) => void;
+  onMetaChange: Dispatch<SetStateAction<OrderMetaDraft | null>>;
   onCancel: () => void;
   onSaved: (msg: string) => void;
   onDeleted: () => void;
@@ -120,20 +120,26 @@ export function OrderDetail({
   ]);
   // Edits made against an older server state are stale: the order moved on, so
   // the fields show what it now holds.
-  const meta: OrderMetaDraft = metaDraft?.version === serverVersion ? metaDraft : {
-    version: serverVersion,
-    warehouseId: order.warehouse?.id ?? '',
-    payment: order.payment,
-    paymentMethod: order.paymentMethod ?? null,
-    paypalTxnId: order.paypalTxnId ?? '',
-    notes: order.notes ?? '',
-    fees: {
-      amount: order.otherFees ? order.otherFees.toFixed(2) : '',
-      note: order.otherFeesNote ?? '',
-    },
-  };
+  const currentMeta = (draft: OrderMetaDraft | null): OrderMetaDraft =>
+    draft?.version === serverVersion ? draft : {
+      version: serverVersion,
+      warehouseId: order.warehouse?.id ?? '',
+      payment: order.payment,
+      paymentMethod: order.paymentMethod ?? null,
+      paypalTxnId: order.paypalTxnId ?? '',
+      notes: order.notes ?? '',
+      fees: {
+        amount: order.otherFees ? order.otherFees.toFixed(2) : '',
+        note: order.otherFeesNote ?? '',
+      },
+    };
+  const meta = currentMeta(metaDraft);
   const { warehouseId, payment, paymentMethod, paypalTxnId, notes, fees } = meta;
-  const setMeta = (patch: Partial<OrderMetaDraft>) => onMetaChange({ ...meta, ...patch });
+  // Merged into the draft as it stands, not the one this render saw: the
+  // PayPal screenshot scan writes its id seconds later, and notes typed in
+  // the meantime would otherwise be reverted by it.
+  const setMeta = (patch: Partial<OrderMetaDraft>) =>
+    onMetaChange(prev => ({ ...currentMeta(prev), ...patch }));
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   // Which lines have their whole photo row open. Collapsed, a line shows the
   // first few and says how many more there are.

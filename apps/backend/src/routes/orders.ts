@@ -28,7 +28,8 @@ import {
 import { pickTrackingClient, carrierTrackingUrl } from '../shipping';
 import { registerPackageTracking } from '../shipping/track';
 import { pickBankProviders } from '../banktx';
-import { linkPaypalTxnToOrder, syncBankTransactions } from '../banktx/sync';
+import { linkPaypalTxnToOrder, reportSyncResult, syncBankTransactions } from '../banktx/sync';
+import { createRateLimiter } from '../lib/rate-limit';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { poRealizedLateral } from '../lib/po-cost';
 import { realizedFromRow } from '../services/poRealized';
@@ -2652,23 +2653,37 @@ orders.delete('/:id/lines/:lineId/photos/:photoId', async (c) => {
 // the sync is single-flighted per process, so a miss during the six-hourly
 // run joins that run — which may have queried PayPal before the payment
 // landed, in which case the guard refuses and the next attempt pulls again;
-// and a miss costs one Transaction Search plus the dispute list, with no
-// throttle beyond that single flight. PayPal itself reports a payment up to
-// three hours late, which no pull can shorten. Only an id in PayPal's own
-// 17-character shape is worth the trip: a placeholder (`CASH`, `WAIT`) can
-// never match, so the guard's refusal stands without asking PayPal, and a
-// real id in some other shape waits for the scheduled sync — the refusal
-// already says to try again later.
+// and a miss costs one Transaction Search plus the dispute list, so each
+// user gets a few pulls a minute and past that the guard reads the table as
+// it stands — its refusal already says to try again later, and a purchaser
+// retrying Submit should see the rule, not a rate-limit error. PayPal itself
+// reports a payment up to three hours late, which no pull can shorten. Only
+// an id in PayPal's own 17-character shape is worth the trip: a placeholder
+// (`CASH`, `WAIT`) can never match, so the guard's refusal stands without
+// asking PayPal, and a real id in some other shape waits for the scheduled
+// sync.
+//
+// Returns the provider's error when the pull itself failed. The guard will
+// refuse just the same — the table never got the row — but "check the ID" is
+// the wrong thing to tell someone whose id was never looked up, so the
+// refusal names the outage instead. The pass is reported like the loop's, or
+// an expired key looks like a run of typos.
+const pullRateLimited = createRateLimiter(60_000, 3);
+
 async function pullPaypalIfUnknown(
   env: Env,
   sql: ReturnType<typeof getDb>,
+  userId: string,
   order: Parameters<typeof companyPayTxnUnknown>[1],
-): Promise<void> {
+): Promise<string | null> {
   const paypal = pickBankProviders(env).providers.find((p) => p.source === 'paypal');
-  if (!paypal) return;
-  if (!PAYPAL_TXN_STRICT.test((order.paypal_txn_id ?? '').trim())) return;
-  if (!await companyPayTxnUnknown(sql, order)) return;
-  await syncBankTransactions(env, [paypal]);
+  if (!paypal) return null;
+  if (!PAYPAL_TXN_STRICT.test((order.paypal_txn_id ?? '').trim())) return null;
+  if (!await companyPayTxnUnknown(sql, order)) return null;
+  if (pullRateLimited(userId) !== null) return null;
+  const result = await syncBankTransactions(env, [paypal]);
+  reportSyncResult(result);
+  return result.perSource.paypal?.error ?? null;
 }
 
 type TxnRuleRow = {
@@ -2686,7 +2701,9 @@ orders.post('/:id/advance', async (c) => {
   const [rule] = await sql<(TxnRuleRow & { lifecycle: string; archived_at: Date | null })[]>`
     SELECT lifecycle, archived_at, payment, payment_method, paypal_txn_id, created_at
     FROM orders WHERE id = ${id}`;
-  if (rule?.lifecycle === 'draft' && !rule.archived_at) await pullPaypalIfUnknown(c.env, sql, rule);
+  const pullError = rule?.lifecycle === 'draft' && !rule.archived_at
+    ? await pullPaypalIfUnknown(c.env, sql, u.id, rule)
+    : null;
 
   // The lifecycle read, all stage guards and the writes run inside one tx
   // with the orders row locked FOR UPDATE (see services/orderAdvance.ts —
@@ -2696,7 +2713,7 @@ orders.post('/:id/advance', async (c) => {
   const outcome = await sql.begin(async (tx) =>
     advanceOrderTx(tx, id, { id: u.id, name: u.name, role: u.role }, body?.toStage));
 
-  if (outcome.kind !== 'ok') return advanceRefusedResponse(c, outcome);
+  if (outcome.kind !== 'ok') return advanceRefusedResponse(c, outcome, pullError);
   return c.json({ ok: true, lifecycle: outcome.nextStageId });
 });
 
@@ -2705,6 +2722,7 @@ orders.post('/:id/advance', async (c) => {
 function advanceRefusedResponse(
   c: Context<{ Bindings: Env; Variables: { user: User } }>,
   outcome: Exclude<Awaited<ReturnType<typeof advanceOrderTx>>, { kind: 'ok' }>,
+  pullError: string | null = null,
 ) {
   switch (outcome.kind) {
     case 'notFound': return c.json({ error: 'Not found' }, 404);
@@ -2728,6 +2746,13 @@ function advanceRefusedResponse(
         error: 'This PO was paid by the company — add the payment transaction ID before submitting it.',
       }, 409);
     case 'unknownTxnId':
+      if (pullError !== null) {
+        return c.json({
+          error: `Couldn't reach PayPal to check transaction ${outcome.paypalTxnId} — try again in a minute.`,
+          paypalTxnId: outcome.paypalTxnId,
+          pullFailed: true,
+        }, 409);
+      }
       return c.json({
         error: `PayPal transaction ${outcome.paypalTxnId} isn't in our PayPal account — check the ID. `
           + 'PayPal reports a new payment up to 3 hours late; if it was just sent, try again later.',
@@ -2861,12 +2886,12 @@ orders.post('/:id/handoff', async (c) => {
   // so the pull reads the request, not the row — only the cutoff is the row's.
   const [rule] = await sql<Pick<TxnRuleRow, 'created_at'>[]>`
     SELECT created_at FROM orders WHERE id = ${id}`;
-  if (rule) {
-    await pullPaypalIfUnknown(c.env, sql, {
+  const pullError = rule
+    ? await pullPaypalIfUnknown(c.env, sql, u.id, {
       payment: body.payment, payment_method: paymentMethod, paypal_txn_id: paypalTxnId,
       created_at: rule.created_at,
-    });
-  }
+    })
+    : null;
 
   let result: Awaited<ReturnType<typeof handoffOrderTx>>;
   try {
@@ -2883,7 +2908,7 @@ orders.post('/:id/handoff', async (c) => {
         return c.json({ error: `Order is already ${LIFECYCLE_LABEL[r.lifecycle] ?? r.lifecycle}` }, 409);
       case 'trackingTaken':
         return c.json({ error: 'This tracking number is already being tracked' }, 409);
-      case 'advance': return advanceRefusedResponse(c, r.outcome);
+      case 'advance': return advanceRefusedResponse(c, r.outcome, pullError);
     }
   }
   // Detached on purpose, as POST /api/packages does: the row is committed and
