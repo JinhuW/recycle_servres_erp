@@ -38,8 +38,7 @@ import { useOrderEvents } from '../lib/useOrderEvents';
 import { ApiError } from '../lib/api';
 import { usePaymentProof, type ProofAttachment } from '../lib/usePaymentProof';
 import { PaymentFields } from '../components/PaymentFields';
-import { useCommissionPayment } from '../lib/useCommissionPayment';
-import { CommissionPaymentFields } from '../components/CommissionPaymentFields';
+import { CommissionPaymentFields, type CommissionShots } from '../components/CommissionPaymentFields';
 import {
   ORDER_STATUSES, LIFECYCLE_STATUS, statusTone, spineStatus, isClosedBook, warehouseGateLockedStatuses,
 } from '../lib/status';
@@ -152,8 +151,6 @@ export function OrderDetail({
     order.package?.trackingNumber ?? '',
     order.userId,
     order.commissionRate ?? '',
-    order.commissionMethod ?? '',
-    order.commissionTxnId ?? '',
     ...(order.statusMeta?.['Submission']?.attachments ?? []).map(a => a.id),
     ...(order.statusMeta?.['Payment']?.attachments ?? []).map(a => a.id),
     ...(order.statusMeta?.['Commission']?.attachments ?? []).map(a => a.id),
@@ -217,24 +214,26 @@ export function OrderDetail({
   const [showDelete, setShowDelete] = useState(false);
   const [typedId, setTypedId] = useState('');
   const [deleting, setDeleting] = useState(false);
-  // The payment proof — chat (Submission) and cash screenshot (Payment)
-  // attachments plus the PayPal scan — shared with the hand-off sheet.
+  // The payment proof — chat (Submission), cash screenshot (Payment) and
+  // commission screenshot (Commission) attachments plus the PayPal scan —
+  // shared with the hand-off sheet.
   const proof = usePaymentProof({
     orderId: order.id,
     chatAtts: order.statusMeta?.['Submission']?.attachments ?? [],
     proofAtts: order.statusMeta?.['Payment']?.attachments ?? [],
+    commissionAtts: order.statusMeta?.['Commission']?.attachments ?? [],
     setTxnId: v => setMeta({ paypalTxnId: v }),
   });
   const submissionAtts = proof.chatAtts;
-  // How the purchaser was paid their commission — live-saved, so it sits
-  // outside the meta draft and its dirty flags.
-  const commissionPayment = useCommissionPayment({
-    orderId: order.id,
-    method: order.commissionMethod ?? null,
-    txnId: order.commissionTxnId ?? '',
-    atts: order.statusMeta?.['Commission']?.attachments ?? [],
-    onMutated: () => setActivityRefreshKey(k => k + 1),
-  });
+  // The commission screenshot as the fold and the Done dialog both see it —
+  // one store, so a file attached in either shows in the other. Writes
+  // through, so it sits outside the meta draft and its dirty flags.
+  const commissionShots: CommissionShots = {
+    atts: proof.commissionAtts,
+    uploading: proof.commissionUploading,
+    add: files => void proof.addCommissionFiles(files).then(() => setActivityRefreshKey(k => k + 1)),
+    remove: att => void proof.removeCommissionAtt(att).then(() => setActivityRefreshKey(k => k + 1)),
+  };
 
   // Archive (mobile): owner-or-manager, non-Draft. No type-to-confirm —
   // archive is reversible so we keep the gesture short, matching the
@@ -256,10 +255,6 @@ export function OrderDetail({
     proof.sync(
       order.statusMeta?.['Submission']?.attachments ?? [],
       order.statusMeta?.['Payment']?.attachments ?? [],
-    );
-    commissionPayment.sync(
-      order.commissionMethod ?? null,
-      order.commissionTxnId ?? '',
       order.statusMeta?.['Commission']?.attachments ?? [],
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -472,9 +467,10 @@ export function OrderDetail({
     // Ready to Pay fixes the commission, so the manager confirms it on the
     // way in — the sheet saves the fields and then advances.
     if (nextStatus === 'Ready to Pay') { setCommissionOpen(true); return; }
-    // Moving to Done first offers the optional evidence dialog (note +
-    // attachments); confirming there fires the actual advance.
-    if (nextStatus === 'Done') { setDoneDialogOpen(true); return; }
+    // Done asks for the commission screenshot first — unless one is already
+    // on file, in which case the move is as plain as any other. Confirming in
+    // the dialog fires the actual advance.
+    if (nextStatus === 'Done' && proof.commissionAtts.length === 0) { setDoneDialogOpen(true); return; }
     await doAdvance();
   };
 
@@ -641,8 +637,7 @@ export function OrderDetail({
   const commissionSummary = [
     ownerOptions.find(o => o.id === ownerId)?.name ?? order.userName,
     commissionPct.trim() === '' ? null : `${commissionPct}%`,
-    // Once the payment is on record, how it was made.
-    commissionPayment.onFile ? t(commissionPayment.method === 'cash' ? 'hoMethodCash' : 'hoMethodPaypal') : null,
+    proof.commissionAtts.length > 0 ? t('cpPaid') : null,
   ].filter(Boolean).join(' · ');
   const notesSummary = [
     notes.trim() ? notes.trim().split('\n')[0] : t('phNoNotes'),
@@ -1303,11 +1298,10 @@ export function OrderDetail({
             note={isPurchaser ? t('phCommissionByManager') : canEditOrder ? t('phCommissionEditableUntil') : t('phCommissionFixed')}
           />
           {/* The payment itself, under the maths. Its own .ph-pay wrapper:
-              the phone rules for the picker and labels hang off that class,
-              and the fold body is shared with the fields above. */}
+              the phone rules for the labels hang off that class, and the fold
+              body is shared with the fields above. */}
           <div className="ph-pay">
-            <div style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--fg-muted)', marginBottom: 6 }}>{t('cpTitle')}</div>
-            <CommissionPaymentFields cp={commissionPayment} editable={!isPurchaser} phone idPrefix="ph-cp" />
+            <CommissionPaymentFields shots={commissionShots} editable={!isPurchaser} phone />
           </div>
         </PhFold>
 
@@ -1709,10 +1703,11 @@ export function OrderDetail({
           currentStatus={effectiveStatus}
           initialNote={doneMeta?.note ?? ''}
           initialAttachments={doneMeta?.attachments ?? []}
+          attachments={commissionShots}
           apiBase="/api/orders"
           variant="purchase"
-          // Evidence live-saves inside the dialog, so a cancel still needs a
-          // refetch for the read-only block to reflect what was uploaded.
+          // The note live-saves inside the dialog, so a cancel still needs a
+          // refetch for the read-only block to reflect it.
           onCancel={() => { setDoneDialogOpen(false); refetchOrder(); }}
           onConfirm={async () => { setDoneDialogOpen(false); await doAdvance(); }}
           onMutated={() => setActivityRefreshKey(k => k + 1)}

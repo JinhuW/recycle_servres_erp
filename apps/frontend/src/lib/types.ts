@@ -154,10 +154,6 @@ export type OrderSummary = {
   source?: PackageSource | null;
   paymentMethod?: 'paypal' | 'cash' | null;
   handoffMethod?: 'pickup' | 'label' | null;
-  // How the purchaser was paid their commission, recorded by a manager once
-  // it is paid. Null until then; the picker shows PayPal in the meantime.
-  commissionMethod?: 'paypal' | 'cash' | null;
-  commissionTxnId?: string | null;
   handoffBy?: { id: string; name: string } | null;
   // The hand-off's package — what the In Transit chip links. Only the list
   // endpoint reports it; null on a pickup or a pre-hand-off order.

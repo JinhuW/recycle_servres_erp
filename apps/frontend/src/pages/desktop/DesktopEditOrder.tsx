@@ -37,7 +37,6 @@ import { HandoffDialog } from '../../components/HandoffDialog';
 import { PaymentFields } from '../../components/PaymentFields';
 import type { HandoffDelivery, HandoffMethod } from '../../lib/handoff';
 import { usePaymentProof } from '../../lib/usePaymentProof';
-import { useCommissionPayment } from '../../lib/useCommissionPayment';
 import { navigate, readHashQuery, replaceHashQuery } from '../../lib/route';
 import { poReadiness, type ReadinessTab } from '../../lib/poReadiness';
 import { useOrderEvents } from '../../lib/useOrderEvents';
@@ -54,6 +53,7 @@ import { StageLookback } from './order/StageLookback';
 import { OrderFooter } from './order/OrderFooter';
 import { PoPaymentsLedger } from './order/PoPaymentsLedger';
 import { StatusChangeDialog, type StatusAttachment } from '../../components/StatusChangeDialog';
+import type { CommissionShots } from '../../components/CommissionPaymentFields';
 import { AttachmentChip } from '../../components/AttachmentChip';
 import { AttachmentDropzone } from '../../components/AttachmentDropzone';
 import { loadWarehouses } from '../../lib/warehouses';
@@ -201,25 +201,27 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // Kept in the server's canon (uppercase, no spaces) so dirty-compare is
   // exact against what a save round-trips.
   const [paypalTxn, setPaypalTxn] = useState<string>(order.paypalTxnId ?? '');
-  // The payment proof — chat (Submission) and cash screenshot (Payment)
-  // attachments plus the PayPal scan — shared with the hand-off dialog.
+  // The payment proof — chat (Submission), cash screenshot (Payment) and
+  // commission screenshot (Commission) attachments plus the PayPal scan —
+  // shared with the hand-off dialog.
   const proof = usePaymentProof({
     orderId: order.id,
     chatAtts: order.statusMeta?.['Submission']?.attachments ?? [],
     proofAtts: order.statusMeta?.['Payment']?.attachments ?? [],
+    commissionAtts: order.statusMeta?.['Commission']?.attachments ?? [],
     setTxnId: setPaypalTxn,
   });
   const submissionAtts = proof.chatAtts;
-  // How the purchaser was paid their commission. Live-saved — it is recorded
-  // once the PO is a closed book, where Save is off — so it is not in the
-  // page's draft or its dirty count.
-  const commissionPayment = useCommissionPayment({
-    orderId: order.id,
-    method: order.commissionMethod ?? null,
-    txnId: order.commissionTxnId ?? '',
-    atts: order.statusMeta?.['Commission']?.attachments ?? [],
-    onMutated: () => setActivityKey(k => k + 1),
-  });
+  // The commission screenshot, as the Commission tab and the Done dialog both
+  // see it: one store, so a file attached in either shows in the other. Not
+  // in the page's draft — it writes through, the order being a closed book by
+  // the time the commission is paid.
+  const commissionShots: CommissionShots = {
+    atts: proof.commissionAtts,
+    uploading: proof.commissionUploading,
+    add: files => void proof.addCommissionFiles(files).then(() => setActivityKey(k => k + 1)),
+    remove: att => void proof.removeCommissionAtt(att).then(() => setActivityKey(k => k + 1)),
+  };
 
   // Done evidence stays editable after the transition — the dialog only opens
   // on the way into Done, so without this a wrong photo was stuck forever.
@@ -1016,11 +1018,16 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     !allowedStatuses.includes(s)
     || (orderLocked && !(canReopen && REOPEN_TARGETS[savedStatus]?.includes(s)));
   // The move to a stage — the panel's button and the stepper's next step call
-  // the same thing. Done gets the evidence dialog first; leaving Draft is the
-  // checkpoint's job; everything else is staged and Save commits it.
+  // the same thing. Done asks for the commission screenshot first, unless one
+  // is already on file; leaving Draft is the checkpoint's job; everything
+  // else is staged and Save commits it.
   const advanceTo = (s: string) => {
     if (stepDisabled(s)) return;
-    if (s === 'Done') { setDoneDialogOpen(true); return; }
+    if (s === 'Done') {
+      if (proof.commissionAtts.length > 0) setStatus('Done');
+      else setDoneDialogOpen(true);
+      return;
+    }
     if (s === 'In Transit' && savedStatus === 'Draft') {
       // The checkpoint writes its own fields and advances in one call, so
       // unsaved page edits would be left behind — ask for the save first.
@@ -1587,7 +1594,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
               pricedCount={totals.pricedCount}
               firstName={order.userName.split(' ')[0]}
               locale={locale}
-              commissionPayment={commissionPayment}
+              commissionShots={commissionShots}
               canEditCommissionPayment={!isPurchaser}
             />
           ),
@@ -1960,12 +1967,12 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
           currentStatus={effectiveStatus}
           initialNote={doneNote}
           initialAttachments={doneAttachments}
+          attachments={commissionShots}
           apiBase="/api/orders"
           variant="purchase"
           onCancel={() => setDoneDialogOpen(false)}
-          onConfirm={({ note, attachments }) => {
+          onConfirm={({ note }) => {
             setDoneNote(note);
-            setDoneAttachments(attachments);
             setDoneDialogOpen(false);
             setStatus('Done');
           }}

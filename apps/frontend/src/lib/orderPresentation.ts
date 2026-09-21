@@ -125,8 +125,6 @@ export const FIELD_LABEL: Record<string, string> = {
   handoff_method:  'Delivery',
   handoff_by:      'Picked up by',
   payment_method:  'Payment method',
-  commission_method: 'Commission method',
-  commission_txn_id: 'Commission transaction ID',
 };
 
 const MONEY_FIELDS = new Set(['sell_price', 'unit_cost', 'total_cost', 'other_fees']);
