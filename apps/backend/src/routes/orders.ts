@@ -43,7 +43,7 @@ import {
   type SerialIssue, type Carrier, type PackageSource,
 } from '@recycle-erp/shared';
 import type { Env, LineCategory, User } from '../types';
-import { PAYPAL_TXN_STRICT } from '../ai/paypal';
+import { PAYPAL_TXN_STRICT, extractPaypalTxn, type PaypalTxnScan } from '../ai/paypal';
 import { maybeRenameReceipt } from '../ai/receipt';
 import { shrinkImageToFit } from '../lib/image-shrink';
 import { log } from '../lib/log';
@@ -2564,11 +2564,18 @@ orders.put('/:id/status-meta/:status', async (c) => {
 });
 
 // Upload one attachment for (order, status). Multipart with field `file`.
+// `?scan=paypal` on the Payment bucket also reads the PayPal transaction id
+// off the image and returns it beside the attachment, so the cost-payment
+// screenshot is stored and read in one upload instead of a scan call whose
+// object nothing ever recorded. The read is best-effort: a failed OCR keeps
+// the file and answers `scan: null`. No scan rate limit here, on the same
+// footing as the receipt rename below (one model call per upload already).
 orders.post('/:id/status-meta/:status/attachments', async (c) => {
   const u = c.var.user;
   const id = c.req.param('id');
   const status = c.req.param('status');
   if (!PO_META_STATUSES.has(status)) return c.json({ error: 'invalid status' }, 400);
+  const scanPaypal = status === 'Payment' && c.req.query('scan') === 'paypal';
 
   const sql = getDb(c.env);
   const existing = (await sql`SELECT user_id, lifecycle FROM orders WHERE id = ${id} LIMIT 1`)[0] as
@@ -2623,16 +2630,24 @@ orders.post('/:id/status-meta/:status/attachments', async (c) => {
     return r;
   });
 
-  return c.json({
-    attachment: {
-      id: row.id,
-      filename: row.filename,
-      size: row.size_bytes,
-      mime: row.mime_type,
-      url: row.delivery_url,
-      uploadedAt: row.uploaded_at,
-    },
-  });
+  const attachment = {
+    id: row.id,
+    filename: row.filename,
+    size: row.size_bytes,
+    mime: row.mime_type,
+    url: row.delivery_url,
+    uploadedAt: row.uploaded_at,
+  };
+  if (!scanPaypal || !stored.type.startsWith('image/')) return c.json({ attachment });
+  // After the row exists: the screenshot is the record, the id read off it is
+  // a convenience the user can type themselves.
+  let scan: PaypalTxnScan | null = null;
+  try {
+    scan = await extractPaypalTxn(c.env, await stored.arrayBuffer());
+  } catch (e) {
+    log.warn('paypal scan on payment attachment failed', e);
+  }
+  return c.json({ attachment, scan });
 });
 
 // Remove a single attachment.

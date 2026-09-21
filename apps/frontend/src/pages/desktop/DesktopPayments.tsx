@@ -6,7 +6,7 @@ import { handleFetchError } from '../../lib/errorToast';
 import { fmtDate, fmtDateShort, fmtMoney, fmtUSD, relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { usePersisted } from '../../lib/listMemory';
-import { match, useRoute } from '../../lib/route';
+import { match, readHashQuery, useRoute } from '../../lib/route';
 import { RouteLink } from '../../components/RouteLink';
 import { PAYMENT_NOTE_MAX } from '@recycle-erp/shared';
 import { placePopover } from './popoverPlacement';
@@ -398,8 +398,9 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
   useEffect(() => { setFeed(null); reload(); }, [reload]);
   useEffect(() => { refreshStats(); }, [refreshStats]);
 
-  // Landing on a PO's payments opens its group without a click. The first
-  // row, not "the only" one: a payment plus its refund is two rows. Once per
+  // Landing on a PO's payments opens its group without a click. The row the
+  // link named (`?txn=`, from the PO's ledger) when it is here, else the first
+  // — not "the only" one: a payment plus its refund is two rows. Once per
   // focus, so a row the manager then collapses stays collapsed across the
   // reload every mutation triggers.
   const expandedFor = useRef<string | null>(null);
@@ -408,7 +409,8 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
     if (!focusOrder) { expandedFor.current = null; return; }
     if (!feed || expandedFor.current === focusOrder) return;
     expandedFor.current = focusOrder;
-    setOpenId(feed.rows[0]?.id ?? null);
+    const want = readHashQuery().get('txn');
+    setOpenId((want && feed.rows.some(r => r.id === want) ? want : feed.rows[0]?.id) ?? null);
   }, [focusOrder, feed]);
 
   const loadMore = useCallback(() => {

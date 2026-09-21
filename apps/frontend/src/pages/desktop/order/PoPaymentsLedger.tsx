@@ -59,10 +59,18 @@ export function PoPaymentsLedger({ orderId, locale }: { orderId: string; locale:
                   : p.settleStatus === 'reversed' ? 'paySettleReversed' : 'paySettleFailed')}
               </span>
             )}
-            <span className="muted">{fmtDateShort(p.postedAt, locale)}</span>
-            <span className="muted" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {/* Each row is the way back to its transaction: the Payments page
+                pinned to this PO, that row open. */}
+            <RouteLink
+              to={paymentsForOrderPath(orderId, p.id)}
+              className="muted rec-link"
+              title={t('payLedgerOpen')}
+              style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            >
+              {fmtDateShort(p.postedAt, locale)}
+              {' '}
               {p.counterparty ?? (p.source === 'paired' ? 'PayPal + Mercury' : p.source)}
-            </span>
+            </RouteLink>
             <span className="mono" style={{ marginLeft: 'auto', color: p.amount > 0 ? 'var(--pos)' : undefined }}>
               {(p.amount < 0 ? '−' : '+') + fmtUSD(Math.abs(p.amount), locale)}
             </span>

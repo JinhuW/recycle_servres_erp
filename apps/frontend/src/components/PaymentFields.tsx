@@ -139,18 +139,20 @@ function ProofPanel({
           />
           <div className="ship-add-hint">{txnLooksOdd ? t('shipPayTxnFormatHint') : t('hoTxnHint')}</div>
         </div>
-        {canEdit && (
+        {/* The screenshot is a Payment attachment like the cash one, so what
+            is on file shows even read-only; only adding and removing is
+            gated. Dropping one also reads the transaction id into the field. */}
+        {(canEdit || proof.proofAtts.length > 0) && (
           <div className="field">
             <span className="label">{t('hoShotLabel')} <span className="ho-optional">{t('hoOptional')}</span></span>
-            {proof.screenshot ? (
-              <div className="ship-pay-shot">
-                <img src={proof.screenshot.preview} alt={t('hoShotLabel')} />
-                <div className="ho-shot-side">
-                  {proof.scanNoticeKey && <div className="ship-add-hint" role="status">{t(proof.scanNoticeKey)}</div>}
-                  <button type="button" className="btn ghost sm" onClick={proof.removeScreenshot}>{t('shipPayRemoveShot')}</button>
-                </div>
+            {proof.proofAtts.length > 0 && (
+              <div className="ho-chips">
+                {proof.proofAtts.map(a => (
+                  <AttachmentChip key={a.id} a={a} onRemove={canEdit ? () => void proof.removeProofAtt(a) : undefined} />
+                ))}
               </div>
-            ) : (
+            )}
+            {canEdit && proof.canAttach && (
               <AttachmentDropzone
                 onFiles={files => void proof.handlePaymentFile(files)}
                 uploading={proof.scanBusy}
@@ -161,6 +163,7 @@ function ProofPanel({
                 boxHint={t('hoShotHint')}
               />
             )}
+            {proof.scanNoticeKey && <div className="ship-add-hint" role="status">{t(proof.scanNoticeKey)}</div>}
             {proof.scanError && (
               <div className="ship-add-hint" role="alert">
                 {'text' in proof.scanError ? proof.scanError.text : t(proof.scanError.key)}
