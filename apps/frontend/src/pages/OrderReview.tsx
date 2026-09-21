@@ -25,6 +25,10 @@ type Props = {
   } | null;
   /** Called with the kind of line to add — the add row always names one. */
   onAddItem: (cat: Category) => void;
+  // A draft reopened from the camera button asks which kind of item is going
+  // in before showing anything else: the user pressed a camera, not a list.
+  askCategory?: boolean;
+  onDismissCategory: () => void;
   // Fees live in the session, not this component: it unmounts every time the
   // user steps into a line form, and an existing order opens carrying the fee
   // it was saved with — which a blank field would silently zero on save.
@@ -39,9 +43,40 @@ type Props = {
   onCancel: () => void;
 };
 
+// One target per category. A single "Add another RAM" button would put the
+// old category lock back in the user's head — the PO is not in a mode, and
+// every kind has to look equally available.
+function CategoryGrid({ onPick }: { onPick: (cat: Category) => void }) {
+  const { t } = useT();
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 7 }}>
+      {addableCategories().map(cat => (
+        <button
+          key={cat}
+          onClick={() => onPick(cat as Category)}
+          aria-label={t('subAddCatLine', { cat })}
+          style={{
+            minHeight: 54, borderRadius: 13,
+            // The dash is a fill and may stay `tone`; the label is read,
+            // so it takes the tone that clears contrast against the card.
+            border: '1.5px dashed ' + categoryTone(cat).tone,
+            background: 'var(--bg-elev)', color: categoryTone(cat).strong,
+            fontFamily: 'inherit', fontSize: 12.5, fontWeight: 650,
+            display: 'grid', placeItems: 'center', alignContent: 'center', gap: 1,
+            padding: '6px 2px', cursor: 'pointer',
+          }}
+        >
+          <span style={{ fontSize: 15, lineHeight: 1, opacity: 0.75 }}>+</span>
+          <span>{cat}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function OrderReview({
   lines, initialMeta,
-  onAddItem, onEditLine, onRemoveLine,
+  onAddItem, askCategory, onDismissCategory, onEditLine, onRemoveLine,
   fees, onFeesChange,
   onSubmit, onCancel,
 }: Props) {
@@ -189,9 +224,6 @@ export function OrderReview({
           ))}
         </div>
 
-        {/* One target per category. A single "Add another RAM" button would put
-            the old category lock back in the user's head — the PO is not in a
-            mode, and every kind has to look equally available. */}
         <div style={{ marginTop: 14 }}>
           <div style={{
             fontSize: 10, fontWeight: 700, letterSpacing: '0.09em',
@@ -199,28 +231,7 @@ export function OrderReview({
           }}>
             {t('addToThisOrder')}
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 7 }}>
-            {addableCategories().map(cat => (
-              <button
-                key={cat}
-                onClick={() => onAddItem(cat as Category)}
-                aria-label={t('subAddCatLine', { cat })}
-                style={{
-                  minHeight: 54, borderRadius: 13,
-                  // The dash is a fill and may stay `tone`; the label is read,
-                  // so it takes the tone that clears contrast against the card.
-                  border: '1.5px dashed ' + categoryTone(cat).tone,
-                  background: 'var(--bg-elev)', color: categoryTone(cat).strong,
-                  fontFamily: 'inherit', fontSize: 12.5, fontWeight: 650,
-                  display: 'grid', placeItems: 'center', alignContent: 'center', gap: 1,
-                  padding: '6px 2px', cursor: 'pointer',
-                }}
-              >
-                <span style={{ fontSize: 15, lineHeight: 1, opacity: 0.75 }}>+</span>
-                <span>{cat}</span>
-              </button>
-            ))}
-          </div>
+          <CategoryGrid onPick={onAddItem} />
         </div>
 
         {/* The card adds up downward: goods (the line sum), then whatever the
@@ -355,6 +366,22 @@ export function OrderReview({
           <Icon name="check" size={16} /> {submitting ? '…' : t('submitOrder')}
         </button>
       </div>
+
+      {askCategory && (
+        <>
+          <div className="ph-sheet-backdrop" onClick={onDismissCategory} />
+          <div className="ph-sheet">
+            <div className="ph-sheet-grabber" />
+            <div style={{ fontSize: 11, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600, padding: '0 4px 4px' }}>
+              {t('addToThisOrder')}
+            </div>
+            <div style={{ fontSize: 12.5, color: 'var(--fg-muted)', padding: '0 4px 12px' }}>
+              {t('pickCategoryHint')}
+            </div>
+            <CategoryGrid onPick={onAddItem} />
+          </div>
+        </>
+      )}
     </div>
   );
 }

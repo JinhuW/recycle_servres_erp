@@ -45,6 +45,11 @@ on to Sold once every line has sold (v1.164.0).
 
 - **One PO can hold several categories** (v1.54.0), with its lines grouped by
   category and a per-category cost breakdown (v1.55.0).
+- **A new PO starts at a 50% commission rate** (v1.166.0). The column
+  defaults to `0.5`, so a PO made anywhere — desktop form, phone capture, a
+  package turned into a PO — carries 50% until a manager changes it. POs
+  that existed with no rate keep NULL (read as 0%), and a manager clearing
+  the rate still lands on NULL.
 - **On the phone a PO is two screens** (v1.154.0). The Orders list no longer
   unfolds a row in place: tapping the card, or the pencil on its right (an
   eye once the PO is Ready to Pay, Done or archived), opens
@@ -59,7 +64,12 @@ on to Sold once every line has sold (v1.164.0).
   cards, the add-category dock and the goods total; the line form opens from
   there and returns there. A line removed on one screen is already gone on
   the other, unsaved fields survive the round trip, and the "back to Draft"
-  warning is asked once per visit. Desktop keeps its single edit page; a
+  warning is asked once per visit. The camera button's *Continue a draft?*
+  list opens the picked draft's Review screen under a sheet asking *Which
+  kind of item is going in?* — RAM / SSD / HDD / Other straight into the
+  line form (v1.166.0); dismissing it leaves Review as it was. Submit on
+  Review opens the PO's own page, not the Orders list (v1.166.0). Desktop
+  keeps its single edit page; a
   products link opened there lands on the PO.
 - **The desktop PO page is built around its status, with one home per fact**
   (v1.160.0). The page head and the items card with its cost-breakdown tape

@@ -57,7 +57,10 @@ type CaptureState =
   // It only ever holds a NEW order; an existing one never enters this phase.
   // `originalLineIds` is what a RESUMED draft already had on the server, so
   // submit can name the ones deleted since.
-  | { phase: 'review';  detected: ScanResponse | null; lines: DraftLine[]; originalLineIds?: string[]; draftId?: string };
+  // `askCategory` is set when the draft was reopened from the camera button:
+  // the review screen then opens with the kind-of-item sheet up, and the
+  // flag goes with the phase once a line form is entered.
+  | { phase: 'review';  detected: ScanResponse | null; lines: DraftLine[]; originalLineIds?: string[]; draftId?: string; askCategory?: true };
 
 type Toast = { msg: string; kind: 'success' | 'error' | 'warn' };
 
@@ -372,7 +375,7 @@ function Shell() {
   // into the same PO instead of a fresh one.
   // Accepts anything carrying the order id — the draft picker hands a full
   // OrderSummary, the shipping screen just the id the create-po call returned.
-  const resumeDraft = async (summary: { id: string }) => {
+  const resumeDraft = async (summary: { id: string }, opts?: { askCategory?: boolean }) => {
     try {
       const { order } = await api.get<{ order: Order }>(`/api/orders/${summary.id}`);
       seedPhotos(order);
@@ -392,6 +395,7 @@ function Shell() {
         draftId: order.id,
         originalLineIds: order.lines.map(l => l.id),
         lines: order.lines.map(toDraftLine),
+        askCategory: opts?.askCategory || undefined,
       });
     } catch {
       showToast(t('draftOpenFailed'), 'error');
@@ -699,10 +703,17 @@ function Shell() {
       return;
     }
     try {
-      if (req.kind === 'create') await api.post(req.url, req.body);
-      else await api.patch(req.url, req.body);
+      // The order just submitted is where the user goes next, not the list
+      // it sits in. A PATCH only exists for a draft, so its id is known.
+      let id: string;
+      if (req.kind === 'create') {
+        id = (await api.post<{ id: string }>(req.url, req.body)).id;
+      } else {
+        await api.patch(req.url, req.body);
+        id = capture.draftId!;
+      }
       setCapture({ phase: 'idle' });
-      setView('history');
+      navigate('/purchase-orders/' + id);
       showToast(t('orderSubmitted'));
     } catch (e) {
       showToast(e instanceof Error ? e.message : t('subSubmitFailed'), 'error');
@@ -800,6 +811,8 @@ function Shell() {
           lines={capture.lines}
           initialMeta={reviewMeta}
           onAddItem={addAnotherItem}
+          askCategory={capture.askCategory === true}
+          onDismissCategory={() => setCapture(c => c.phase === 'review' ? { ...c, askCategory: undefined } : c)}
           fees={orderFees}
           onFeesChange={setOrderFees}
           onEditLine={editLine}
@@ -870,7 +883,7 @@ function Shell() {
       {capture.phase === 'draftPicker' && (
         <PhDraftPickerSheet
           drafts={capture.drafts}
-          onResume={resumeDraft}
+          onResume={d => void resumeDraft(d, { askCategory: true })}
           onStartNew={startNewDraft}
           onClose={cancelCapture}
         />
