@@ -2,13 +2,35 @@ import { Icon } from '../components/Icon';
 import { LineSpecChips, lineHasSpecChips } from '../components/LineSpecChips';
 import { SerialNumbers } from '../components/SerialNumbers';
 import { useT } from '../lib/i18n';
-import { linePhotos } from '../lib/linePhotos';
+import { linePhotos, type LinePhoto } from '../lib/linePhotos';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
 import type { Order, OrderLine } from '../lib/types';
 
-// How many of a line's photos the row shows before it offers the rest. Four
+// How many of a line's photos the strip shows before it offers the rest. Four
 // 44px tiles is what fits next to the line's controls on a small phone.
 const PHOTOS_COLLAPSED = 4;
+
+// A tap stops here: the card around it opens the editor.
+function PhotoTile({ photo, label, onOpen }: { photo: LinePhoto; label: string; onOpen: (url: string) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={e => { e.stopPropagation(); onOpen(photo.url); }}
+      title={photo.filename ?? label}
+      style={{
+        width: 44, height: 44, borderRadius: 8, flexShrink: 0,
+        border: '1px solid var(--border)', overflow: 'hidden',
+        padding: 0, background: 'var(--bg-soft)', cursor: 'pointer',
+      }}
+    >
+      <img
+        src={photo.url}
+        alt={label}
+        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+      />
+    </button>
+  );
+}
 
 export const itemLabel = (l: OrderLine) =>
     l.category === 'RAM' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.generation ?? ''}`.trim()
@@ -52,9 +74,9 @@ export function OrderProductsBody({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {order.lines.map((l, i) => {
-        const shots = linePhotos(l);
-        const shown = expandedPhotos.has(l.id) ? shots : shots.slice(0, PHOTOS_COLLAPSED);
-        const hidden = shots.length - shown.length;
+        const [lead, ...rest] = linePhotos(l);
+        const shown = expandedPhotos.has(l.id) ? rest : rest.slice(0, PHOTOS_COLLAPSED);
+        const hidden = rest.length - shown.length;
         return (
         <div
           key={l.id}
@@ -64,6 +86,8 @@ export function OrderProductsBody({
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span className="lb-rank" style={{ width: 22, height: 22, fontSize: 11 }}>{i + 1}</span>
+            {/* The photo is what the line is recognised by, so it leads. */}
+            {lead && <PhotoTile photo={lead} label={t('linePhotos')} onOpen={onOpenPhoto} />}
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}>
                 {l.category === 'Other' && !!(l.itemType ?? '').trim() && (
@@ -105,29 +129,13 @@ export function OrderProductsBody({
               </>
             )}
           </div>
-          {/* Every picture the line carries, not just the first — the
+          {/* The rest of the line's pictures, not just the first — the
               phone is where they are taken, so it is where they are
-              checked. Taps stop here: the card itself opens the editor. */}
-          {shots.length > 0 && (
+              checked. */}
+          {rest.length > 0 && (
             <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
               {shown.map(p => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={e => { e.stopPropagation(); onOpenPhoto(p.url); }}
-                  title={p.filename ?? t('linePhotos')}
-                  style={{
-                    width: 44, height: 44, borderRadius: 8, flexShrink: 0,
-                    border: '1px solid var(--border)', overflow: 'hidden',
-                    padding: 0, background: 'var(--bg-soft)', cursor: 'pointer',
-                  }}
-                >
-                  <img
-                    src={p.url}
-                    alt={t('linePhotos')}
-                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                  />
-                </button>
+                <PhotoTile key={p.id} photo={p} label={t('linePhotos')} onOpen={onOpenPhoto} />
               ))}
               {hidden > 0 && (
                 <button

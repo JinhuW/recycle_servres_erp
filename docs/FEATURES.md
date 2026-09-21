@@ -61,8 +61,9 @@ on to Sold once every line has sold (v1.164.0).
   row, shipping, the cost card, warehouse, the **payment fields folded behind
   a header that reads back the answer**, notes, attachments and the activity
   log. The *Products* row opens `/purchase-orders/:id/products`: the line
-  cards, the add-category dock and the goods total; the line form opens from
-  there and returns there. A line removed on one screen is already gone on
+  cards — each leading with the line's first photo beside its number, the
+  rest in a strip under the chips (v1.170.1) — the add-category dock and
+  the goods total; the line form opens from there and returns there. A line removed on one screen is already gone on
   the other, unsaved fields survive the round trip, and the "back to Draft"
   warning is asked once per visit. The capture flow's **Review screen is
   the product list and nothing else** (v1.169.0): header, the line cards or

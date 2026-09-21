@@ -17,6 +17,20 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.170.1] - 2026-09-20
+
+### Fixes
+
+- **The line's first photo leads its card on the phone products screen**
+  (RS-092). Since v1.154.0 the card put the rank badge, the title and the
+  spec chips on the first row and every photo underneath in a strip of its
+  own, so the eye read the text before reaching the one thing a purchaser
+  recognises the line by. The first photo now sits between the badge and
+  the title as a 44px tile; a line with more photos keeps the strip under
+  the chips for the rest, folded four-then-`+n` as before, and a tap on
+  the leading tile opens the lightbox rather than the line editor. A line
+  without a photo looks as it did.
+
 ## [1.170.0] - 2026-09-20
 
 ### Features
