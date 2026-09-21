@@ -1,11 +1,10 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Icon } from './Icon';
 import { PaymentFields } from './PaymentFields';
 import { fmtUSD } from '../lib/format';
 import { useT } from '../lib/i18n';
 import { PACKAGE_SOURCES, packageSourceLabelKey } from '../lib/packageSource';
 import { CARRIERS } from '../lib/carrierDetect';
-import { poEffectiveCost } from '../lib/poTotals';
 import type { ReadinessItem, ReadinessTab } from '../lib/poReadiness';
 import { FMT_HINT_KEY } from '../lib/useAddPackageForm';
 import { useHandoffForm, type HandoffInit } from '../lib/useHandoffForm';
@@ -30,15 +29,17 @@ function itemFor(f: Form, tab: ReadinessTab): ReadinessItem | undefined {
   return f.readiness.find(r => r.tab === tab);
 }
 
-/** A section that is a ✓ row while met and a form while not. Once someone
- *  opens a met section it stays open — a fold that snaps shut mid-edit
- *  because the answer became valid would be maddening. */
+/** A section that is a ✓ row while met and a form while not. Once open —
+ *  because it was unmet, or because someone pressed Change — it stays open:
+ *  a fold that snaps shut the moment the answer becomes valid cuts a typed
+ *  id off at its first character and a 15-digit number at its 12th. */
 function HandoffSection({ item, title, summary, children, phone }: {
   item: ReadinessItem | undefined; title: string; summary: string; children: ReactNode; phone: boolean;
 }) {
   const { t } = useT();
-  const [opened, setOpened] = useState(false);
   const ok = item?.ok ?? false;
+  const [opened, setOpened] = useState(!ok);
+  useEffect(() => { if (!ok) setOpened(true); }, [ok]);
   const open = !ok || opened;
   return (
     <section className={'ho-sec' + (ok ? ' ho-sec-met' : '')} data-tab={item?.tab}>
@@ -67,11 +68,7 @@ export function HandoffFields({ f, phone = false }: { f: Form; phone?: boolean }
   const selectCls = phone ? 'input' : 'select';
   const order = f.order;
 
-  const units = order.lines.reduce((s, l) => s + (Number(l.qty) || 0), 0);
-  const goods = poEffectiveCost({
-    lineSubtotal: order.lines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.unitCost) || 0), 0),
-    totalCostOverride: order.totalCost,
-  }).goods;
+  const { units, goods } = f.lines;
   const products = itemFor(f, 'products');
 
   const wh = f.warehouses.find(w => w.id === f.warehouseId);
@@ -114,7 +111,10 @@ export function HandoffFields({ f, phone = false }: { f: Form; phone?: boolean }
           <div className="field">
             <label className="label" htmlFor="ho-warehouse">{t('hoWarehouse')}</label>
             <select id="ho-warehouse" className={selectCls} value={f.warehouseId} onChange={e => f.setWarehouseId(e.target.value)}>
-              {f.warehouses.length === 0 && <option value={f.warehouseId}>{f.warehouseId || '—'}</option>}
+              {/* An unset warehouse must not borrow the first option's name. */}
+              {(f.warehouses.length === 0 || !f.warehouseId) && (
+                <option value={f.warehouseId} disabled={!f.warehouseId}>{f.warehouseId || t('hoWarehousePick')}</option>
+              )}
               {f.warehouses.map(w => <option key={w.id} value={w.id}>{w.short} — {w.region}</option>)}
             </select>
           </div>
@@ -148,7 +148,9 @@ export function HandoffFields({ f, phone = false }: { f: Form; phone?: boolean }
           <div className="field">
             <label className="label" htmlFor="ho-by">{t('hoPickedBy')}</label>
             <select id="ho-by" className={selectCls} value={f.byUserId} onChange={e => f.setByUserId(e.target.value)}>
-              {f.members.length === 0 && <option value={f.byUserId}>…</option>}
+              {f.members.length === 0
+                ? <option value={f.byUserId}>…</option>
+                : <option value="">{t('poCollectorPick')}</option>}
               {f.members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
             </select>
           </div>

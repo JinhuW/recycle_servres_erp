@@ -259,7 +259,15 @@ on to Sold once every line has sold (v1.164.0).
   collector or the package. The chat rule is enforced in the advance itself,
   so a manager stage-jump and the carrier poll hold to it too, and it is
   grandfathered by a cutoff stamped when the release reached the environment,
-  exactly like the transaction-ID rule.
+  exactly like the transaction-ID rule. Since v1.171.1 the **receiving
+  warehouse is a blocker** too (`missingWarehouse`, first in the list, held
+  against every door — a PO with no warehouse is stock with no location),
+  a pickup needs its collector on the page as well as on the server, a
+  section of the checkpoint that was ever open stays open (no more folding
+  mid-typing), the transaction id follows the method (handing off, or
+  saving, as Self or Cash clears a saved PayPal id), and both shells ask for
+  unsaved page edits to be saved before the checkpoint or any other stage
+  move (the phone used to open the sheet over them and lose them).
 - **The desktop list's In Transit chip says how the goods are coming**
   (v1.155.0). A PO in transit by carrier reads `In Transit | UPS` (FedEx,
   USPS) and the chip links the carrier's tracking page for the hand-off's
@@ -280,7 +288,14 @@ on to Sold once every line has sold (v1.164.0).
   card's stage panel and carries a **Refresh** that asks the carrier now (the
   PO's owner may call it, not only the box's creator); a local pickup shows
   who collected it instead, and a PO that left Draft before the hand-off
-  existed says so and points at the Delivery tab.
+  existed says so and points at the Delivery tab. The box is the order's
+  for good once the carrier marks it delivered (v1.171.1): a flip to pickup
+  or a re-typed number is refused with a 409 rather than putting a delivered
+  box back on the Shipping page's *Needs you* (where Create PO would mint a
+  second PO for the same goods). A number that sits on another member's
+  standalone box is refused too — one's own, the PO owner's, or a manager's
+  pull still links it — and a PO minted from a tracked box is born knowing
+  it came by label.
 - **The desktop list has a Total cost column** (v1.156.0), after QTY: the
   goods figure the dashboard uses (the stored total, else the line sum on
   what was bought) plus other fees, with `incl. $12 fees` under it when fees

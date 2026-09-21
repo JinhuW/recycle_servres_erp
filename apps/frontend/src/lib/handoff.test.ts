@@ -2,8 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { buildHandoffBody, handoffBlockerKeys, type HandoffRules } from './handoff';
 
 const base: HandoffRules = {
+  warehouseId: 'WH-LA1',
   source: 'facebook',
   delivery: 'pickup',
+  byUserId: 'u-1',
   trackingValid: false,
   carrier: null,
   paidBy: 'company',
@@ -22,6 +24,13 @@ describe('handoffBlockerKeys', () => {
   it('asks for a source and a delivery choice first', () => {
     expect(handoffBlockerKeys({ ...base, source: null, delivery: null }))
       .toEqual(['hoNeedSource', 'hoNeedDelivery']);
+  });
+
+  it('a warehouse comes before everything, and a pickup names its collector', () => {
+    expect(handoffBlockerKeys({ ...base, warehouseId: '', source: null }))
+      .toEqual(['hoNeedWarehouse', 'hoNeedSource']);
+    expect(handoffBlockerKeys({ ...base, byUserId: '' })).toEqual(['hoNeedCollector']);
+    expect(handoffBlockerKeys({ ...base, delivery: 'label', byUserId: '', trackingValid: true, carrier: 'UPS' })).toEqual([]);
   });
 
   it('a label needs a valid tracking number, then a resolved carrier', () => {

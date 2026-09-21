@@ -19,6 +19,7 @@ describe('GET /api/dashboard manager rolePreview=as_purchaser scoping', () => {
     const created = await api<{ id: string }>('POST', '/api/orders', {
       token,
       body: {
+        warehouseId: 'WH-LA1',
         paypalTxnId: 'TESTPAYTXN0000001', category: 'RAM', lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }] },
     });
     expect(created.status).toBe(201);

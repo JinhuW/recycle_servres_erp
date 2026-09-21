@@ -157,8 +157,8 @@ function summary(ev: OrderEvent, locale: string, t: Translate): { title: string;
     case 'status_meta_changed': {
       // The Payment and Commission buckets are not stages the way Submission
       // and Done are.
-      const status = d.status === 'Payment' ? 'Payment proof'
-        : d.status === 'Commission' ? 'Commission payment proof'
+      const status = d.status === 'Payment' ? t('acPaymentProof')
+        : d.status === 'Commission' ? t('acCommissionProof')
         : String(d.status ?? '');
       const field = String(d.field);
       if (field === 'note') {

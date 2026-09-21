@@ -315,6 +315,9 @@ export function OrderDetail({
   const byUserDirty = delivery === 'pickup' && byUserId !== (order.handoffBy?.id ?? '');
   const trackingDirty = delivery === 'label' && tracking.tn !== ''
     && (tracking.tn !== (order.package?.trackingNumber ?? '') || (tracking.carrier ?? '') !== (order.package?.carrier ?? ''));
+  // A number the page cannot send yet — bad shape, or an ambiguous one with
+  // no carrier picked. Save must not report success and drop it on the floor.
+  const trackingIncomplete = trackingDirty && (!tracking.valid || !tracking.carrier);
   const facts = sourceDirty || deliveryDirty || byUserDirty || trackingDirty;
   // Manager-only fields; a purchaser's copy never counts as a change. A
   // blank rate and a saved null are the same thing, as on the desktop page.
@@ -365,6 +368,10 @@ export function OrderDetail({
 
   const save = async () => {
     if (!canAnnotate) return;
+    if (trackingIncomplete) {
+      showErrorDialog(t(tracking.valid ? 'hoNeedCarrier' : 'hoNeedTracking'), undefined, t('errCantSaveTitle'));
+      return;
+    }
     // A note is not a change to the order itself and leaves the stage alone.
     const material = warehouseDirty || paymentDirty || methodDirty || paypalDirty || feesDirty || facts || commission;
     if (material && !(await askRevert())) return;
@@ -444,10 +451,23 @@ export function OrderDetail({
 
   const advance = async () => {
     if (!canAdvance) return;
+    // Named before the save-first dialog, or the user is sent to Save only to
+    // be told the same thing there.
+    if (trackingIncomplete) {
+      showErrorDialog(t(tracking.valid ? 'hoNeedCarrier' : 'hoNeedTracking'), undefined, t('errCantSubmitTitle'));
+      return;
+    }
+    // Every move refetches the order, and a refetch that changes the server
+    // version rebuilds the draft from it — so anything typed but not saved
+    // would vanish. Same rule as the desktop: save first. The commission
+    // sheet writes its own two fields, so those alone do not hold it.
+    const unsavedOutsideSheet = notesDirty || warehouseDirty || paymentDirty || methodDirty || paypalDirty || feesDirty || facts;
+    const unsaved = nextStatus === 'Ready to Pay' ? unsavedOutsideSheet : dirty;
     // Leaving Draft is the hand-off sheet's job: how the goods get here and
-    // who paid, saved and advanced in one call. It is seeded from the fields
-    // on screen, so an edit typed here is what it writes.
+    // who paid, saved and advanced in one call. It is seeded from the saved
+    // order — which, once the page is clean, is what is on screen.
     if (effectiveStatus === 'Draft') {
+      if (dirty) { showErrorDialog(t('hoSaveFirst')); return; }
       // The cost lives on this page, not in the sheet, so it is asked for
       // here; the server refuses a $0 PO as well. Only on the first
       // submission: a PO an edit sent back to Draft re-submits as it was
@@ -459,6 +479,7 @@ export function OrderDetail({
       setHandoffOpen(true);
       return;
     }
+    if (unsaved) { showErrorDialog(t('phSaveFirst')); return; }
     // Ready to Pay fixes the commission, so the manager confirms it on the
     // way in — the sheet saves the fields and then advances.
     if (nextStatus === 'Ready to Pay') { setCommissionOpen(true); return; }
@@ -544,9 +565,15 @@ export function OrderDetail({
   // Reads the fields as typed, not as saved.
   const readiness: { key: string; met: boolean; label: string; target: 'products' | 'delivery' | 'payment' }[] =
     effectiveStatus === 'Draft' && !isArchived ? (() => {
+      // A screenshot dropped through the proof hook is already on file but
+      // `order.blockers` predates it, so the form speaks for the payment
+      // section until the next read.
+      const proofChanged =
+        proof.chatAtts.length !== (order.statusMeta?.['Submission']?.attachments ?? []).length
+        || proof.proofAtts.length !== (order.statusMeta?.['Payment']?.attachments ?? []).length;
       const items = poReadiness({
         rules: {
-          source, delivery, trackingValid: tracking.valid, carrier: tracking.carrier,
+          warehouseId, source, delivery, byUserId, trackingValid: tracking.valid, carrier: tracking.carrier,
           paidBy: payment, method: paymentMethod, txnId: paypalTxnId,
           chatAttachmentCount: proof.chatAtts.length,
           proofAttachmentCount: proof.proofAtts.length,
@@ -554,7 +581,7 @@ export function OrderDetail({
         },
         lines: { count: order.lines.length, goods: cost.goods, everSubmitted: order.everSubmitted === true },
         serverBlockers: order.blockers,
-        dirty: { delivery: warehouseDirty || facts, payment: paymentDirty || methodDirty || paypalDirty },
+        dirty: { delivery: warehouseDirty || facts, payment: paymentDirty || methodDirty || paypalDirty || proofChanged },
       });
       const products = items.find(i => i.tab === 'products')!;
       const deliveryItem = items.find(i => i.tab === 'delivery')!;
@@ -575,6 +602,7 @@ export function OrderDetail({
       const paymentRow = (key: string, metLabel: string | null) => {
         if (blockers.has(key)) rows.push({ key, met: false, target: 'payment', label: t(key) });
         else if (metLabel) rows.push({ key, met: true, target: 'payment', label: metLabel });
+        blockers.delete(key);
       };
       const files = (n: number) => n > 0 ? t('poReadyFiles', { n }) : null;
       if (payment === 'company') {
@@ -584,6 +612,10 @@ export function OrderDetail({
       } else {
         paymentRow('hoNeedChatShot', files(proof.chatAtts.length));
       }
+      // Whatever the server still holds against the payment that no row above
+      // names — an id PayPal has not reported, today — is a row too, or the
+      // list says ✓ and Confirm ends in a 409.
+      for (const key of blockers) rows.push({ key, met: false, target: 'payment', label: t(key) });
       return rows;
     })() : [];
   // Which fold is open. The stage picks one to start with — the twin of the
@@ -1644,6 +1676,7 @@ export function OrderDetail({
         <PhHandoffSheet
           init={{
             order,
+            lines: { count: order.lines.length, units: totals.qty, goods: cost.goods },
             warehouseId: warehouseId || (order.warehouse?.id ?? ''),
             payment,
             paymentMethod,

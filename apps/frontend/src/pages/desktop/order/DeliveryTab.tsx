@@ -64,7 +64,10 @@ export function DeliveryTab(p: Props) {
               disabled={p.disabled}
               style={{ paddingLeft: 30, width: '100%' }}
             >
-              {p.warehouses.length === 0 && <option value={p.warehouseId}>{p.warehouseFallback}</option>}
+              {/* An unset warehouse must not borrow the first option's name. */}
+              {p.warehouses.length === 0
+                ? <option value={p.warehouseId}>{p.warehouseFallback}</option>
+                : !p.warehouseId && <option value="" disabled>{t('hoWarehousePick')}</option>}
               {p.warehouses.map(w => <option key={w.id} value={w.id}>{w.name ?? w.short}</option>)}
             </select>
           </div>
