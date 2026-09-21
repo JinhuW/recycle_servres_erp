@@ -45,6 +45,15 @@ on to Sold once every line has sold (v1.164.0).
 
 - **One PO can hold several categories** (v1.54.0), with its lines grouped by
   category and a per-category cost breakdown (v1.55.0).
+- **A PO can also arrive from the public sell form** (v1.172.0). cash4ram.com
+  posts a seller's lot to `POST /api/public/intake` — no login, no CSRF
+  header, five lots a minute per address — and it lands as a Draft PO owned
+  by `INTAKE_OWNER_USER_ID` (else the oldest active manager): lines at cost 0
+  with the seller's label photos on them, CPUs filed as *Other · CPU*, RAM
+  with its DIMM class and derived tier, PayPal as the payment method, no
+  commission, the channel from the form's `?src=`. Staff price it in the PO
+  screen like any other draft; the PO id is the reference the seller sees.
+  Managers are notified on every submission.
 - **A new PO starts at a 50% commission rate** (v1.166.0). The column
   defaults to `0.5`, so a PO made anywhere — desktop form, phone capture, a
   package turned into a PO — carries 50% until a manager changes it. POs
@@ -459,6 +468,11 @@ strings. Now `suppliers` (**Clients** in the UI; 供货商, because 客户 is al
 the sell-side customers) carries an owner, structured preferences, a contact
 log and `orders.supplier_id`.
 
+- **Sellers who come through the public sell form are filed as house-account
+  clients** (v1.172.0): no owner, source `web` (or `facebook` / `reddit` when
+  the form's `?src=` said so), standing *prospect*, named by their PayPal
+  email until someone renames them. One row per seller, reused on their next
+  lot, with every PO they send attached.
 - **Standing is stored; tier, health and the follow-up date are derived** per
   read from order history — the same discipline `orders.category` and
   `total_cost` follow, because a stored status goes stale (v1.108.0).

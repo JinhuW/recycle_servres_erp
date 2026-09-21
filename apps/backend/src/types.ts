@@ -30,6 +30,9 @@ export type Env = {
   SHIPPO_API_TOKEN?: string;
   // The credential in the webhook URL. Unset makes the receiver answer 404.
   SHIPPO_WEBHOOK_SECRET?: string;
+  // Owner of POs filed by the public sell form (/api/public/intake). Unset
+  // falls back to the oldest active manager.
+  INTAKE_OWNER_USER_ID?: string;
   // Bank-transaction sync (manager Payments page). A source with no keys is
   // reported as "not configured" — there is NO silent stub fallback here.
   // BANKTX_STUB=1 explicitly opts into deterministic canned data for dev.
