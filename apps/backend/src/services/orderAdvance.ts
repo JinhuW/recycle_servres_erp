@@ -98,16 +98,6 @@ export function lifecyclesForLabel(label: string, role: Role): string[] {
 // unarchive puts each line back where it was.
 export const ARCHIVED_LINE_STATUS = 'Archived';
 
-// Stages whose entry belongs to the PO's warehouse manager. A move from an
-// earlier stage into one of these — or past it in a stage-jump — is theirs
-// alone; once the order sits at or beyond it, any manager may continue, and
-// backward moves are never gated. Gating another stage is one entry here.
-const WAREHOUSE_MANAGER_GATED = new Set(['reviewing', 'ready_to_pay']);
-
-function crossesGatedStage(stages: string[], fromIdx: number, toIdx: number): boolean {
-  return stages.some((s, g) => WAREHOUSE_MANAGER_GATED.has(s) && fromIdx < g && toIdx >= g);
-}
-
 // null actor = the system (tracking poll). It is held to the purchaser rule:
 // only Draft → In Transit, never a stage jump.
 export type AdvanceActor = { id: string; name: string; role: string } | null;
@@ -433,13 +423,13 @@ export async function advanceOrderTx(
 
   const cur = (await tx`
     SELECT id, user_id, lifecycle, payment, payment_method, paypal_txn_id, created_at,
-           warehouse_id, archived_at, total_cost::float AS total_cost,
+           archived_at, total_cost::float AS total_cost,
            source, handoff_method, handoff_by,
            EXISTS (SELECT 1 FROM packages p WHERE p.order_id = orders.id) AS has_package
     FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE`)[0] as
     | { id: string; user_id: string; lifecycle: string; payment: string;
         payment_method: string | null; paypal_txn_id: string | null; created_at: Date;
-        warehouse_id: string | null; archived_at: Date | null; total_cost: number | null;
+        archived_at: Date | null; total_cost: number | null;
         source: string | null; handoff_method: string | null; handoff_by: string | null;
         has_package: boolean }
     | undefined;
@@ -468,27 +458,6 @@ export async function advanceOrderTx(
   // submits the order. Every other transition stays manager-only.
   if (actor?.role !== 'manager' && !(cur.lifecycle === 'draft' && nextStageId === 'in_transit')) {
     return { kind: 'forbidden', msg: 'Purchasers can only advance Draft to In Transit' };
-  }
-
-  // Only the warehouse's own manager takes the order into review, and on to
-  // Ready to Pay: they are the one who saw the goods. No warehouse, or a
-  // warehouse whose manager is unassigned, demoted or deactivated, leaves the
-  // move to any manager — a gate nobody can pass is a stuck order, not a rule.
-  // The message names the stage that was asked for, not the gate that tripped.
-  if (cur.warehouse_id && crossesGatedStage(stages, curIdx, stages.indexOf(nextStageId))) {
-    const wh = (await tx`
-      SELECT w.short, w.manager_user_id, mu.name AS manager_name
-      FROM warehouses w
-      LEFT JOIN users mu ON mu.id = w.manager_user_id
-                        AND mu.role = 'manager' AND COALESCE(mu.active, TRUE)
-      WHERE w.id = ${cur.warehouse_id} LIMIT 1
-    `)[0] as { short: string; manager_user_id: string | null; manager_name: string | null } | undefined;
-    if (wh?.manager_name && wh.manager_user_id !== actor?.id) {
-      return {
-        kind: 'forbidden',
-        msg: `Only ${wh.manager_name} (${wh.short} manager) can move this order to ${LIFECYCLE_LABEL[nextStageId]}`,
-      };
-    }
   }
 
   // Guard: what a PO must carry to leave Draft — one list, services/

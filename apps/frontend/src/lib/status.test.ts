@@ -1,12 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   ORDER_STATUSES, PO_STATUSES, LINE_STATUSES, LIFECYCLE_STATUS, WORKFLOW_STAGES, spineStatus,
-  isClosedBook, isCompleted, warehouseGateLockedStatuses,
+  isClosedBook, isCompleted,
 } from './status';
-import type { Warehouse } from './types';
-
-const wh = (managerUserId: string | null): Warehouse =>
-  ({ id: 'WH-BOS', name: 'Boston', short: 'BOS', region: 'US-East', managerUserId }) as Warehouse;
 
 describe('stage vocabulary', () => {
   it('Ready to Pay sits between Reviewing and Done, and is a stage, not a line status', () => {
@@ -33,26 +29,5 @@ describe('stage vocabulary', () => {
     expect(spineStatus('Sold')).toBe('Done');
     for (const s of ORDER_STATUSES) expect(spineStatus(s)).toBe(s);
     expect(ORDER_STATUSES.indexOf(spineStatus('Sold') as typeof ORDER_STATUSES[number])).toBe(4);
-  });
-});
-
-describe('warehouseGateLockedStatuses', () => {
-  it('locks nothing without an assigned manager, or for that manager', () => {
-    expect(warehouseGateLockedStatuses('In Transit', undefined, 'u1')).toEqual([]);
-    expect(warehouseGateLockedStatuses('In Transit', wh(null), 'u1')).toEqual([]);
-    expect(warehouseGateLockedStatuses('In Transit', wh('u1'), 'u1')).toEqual([]);
-  });
-
-  it('holds another manager off the next gate and everything past it', () => {
-    expect(warehouseGateLockedStatuses('Draft', wh('u1'), 'u2')).toEqual(['Reviewing', 'Ready to Pay', 'Done']);
-    expect(warehouseGateLockedStatuses('In Transit', wh('u1'), 'u2')).toEqual(['Reviewing', 'Ready to Pay', 'Done']);
-    expect(warehouseGateLockedStatuses('Reviewing', wh('u1'), 'u2')).toEqual(['Ready to Pay', 'Done']);
-  });
-
-  it('opens up once the order is past the last gate, so Done and the reopens are anyone\'s', () => {
-    expect(warehouseGateLockedStatuses('Ready to Pay', wh('u1'), 'u2')).toEqual([]);
-    expect(warehouseGateLockedStatuses('Done', wh('u1'), 'u2')).toEqual([]);
-    // Not on the spine, so an unmapped index would read as "before every gate".
-    expect(warehouseGateLockedStatuses('Sold', wh('u1'), 'u2')).toEqual([]);
   });
 });

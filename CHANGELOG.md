@@ -17,6 +17,23 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.168.0] - 2026-09-20
+
+### Features
+
+- **Any manager takes a PO into Reviewing and Ready to Pay, whatever its
+  warehouse** (RS-089). Since v1.132.0 (RS-031) those two moves — and any
+  stage-jump across them — belonged to the manager linked to the PO's
+  warehouse in Settings; every other manager got a 403 naming who could, and
+  both PO pages locked the step with the same sentence. Jinhu asked for the
+  rule to go: whichever warehouse a PO is for, all managers review and move
+  it. `POST /api/orders/:id/advance` no longer reads the warehouse's manager,
+  the desktop stepper and the phone's advance button no longer lock those
+  steps, and the "only {name} can move…" banner and tooltip are gone from
+  both shells. The Ready to Pay stage itself (RS-032) is unchanged, purchasers
+  still stop at Draft → In Transit, and Settings → Warehouses keeps its
+  manager field as a contact.
+
 ## [1.167.0] - 2026-09-20
 
 ### Fixes
