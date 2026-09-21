@@ -17,6 +17,28 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.172.0] - 2026-09-21
+
+### Features
+
+- **The public sell form on cash4ram.com files straight into the ERP**
+  (RS-095). `POST /api/public/intake` takes a seller's lot — RAM, SSD and CPU
+  lines with whatever spec fields and label photos they gave, a PayPal email
+  and a note — and turns it into an ordinary Draft PO: lines at cost 0 with
+  the photos on them, owned by `INTAKE_OWNER_USER_ID` (or the oldest active
+  manager), `payment_method` PayPal, no commission, the buying channel taken
+  from the form's `?src=` (Facebook and Reddit kept, anything else *other*).
+  The seller is filed once as a house-account client with the new
+  `web` source (migration 0133) and reused on their next lot, and every
+  manager gets a notification with the new PO's id — which is also the
+  reference the seller is shown. There is no credential, so the endpoint
+  leans on the same gates the rest of the public tree does plus its own:
+  strict field validation, five submissions a minute per address with
+  `Retry-After` readable cross-origin, a honeypot that answers 200 and
+  writes nothing, images only through the workspace upload cap, and no
+  `autoTrackParts` — an anonymous part number never seeds the market
+  catalog.
+
 ## [1.171.2] - 2026-09-21
 
 ### Fixes

@@ -84,7 +84,8 @@ secret values.
 | `DATABASE_URL` | Railway reference variable `${{Postgres.DATABASE_URL}}` — add via the "Reference" button, not plain text |
 | `NODE_ENV` | `production` |
 | `ENABLE_DEMO_ACCOUNTS` | `false` |
-| `CORS_ALLOWED_ORIGINS` | the Worker URL (see [URL wiring order](#url-wiring-order)) |
+| `CORS_ALLOWED_ORIGINS` | the Worker URL (see [URL wiring order](#url-wiring-order)). Sites that post to `/api/public/intake` (`https://cash4ram.com,https://www.cash4ram.com`) are **appended** after it — `allow[0]` is the OAuth issuer fallback, so the Worker host stays first |
+| `INTAKE_OWNER_USER_ID` | optional — the user who owns POs filed by the public sell form; unset falls back to the oldest active manager |
 | `JWT_SECRET` | generate fresh: `openssl rand -base64 48` — do not reuse prod value, do not commit |
 | `ADMIN_PASSWORD` | generate and record out-of-band — do not commit; the seeded admin is internet-reachable |
 | `OPENROUTER_API_KEY` | copy from repo-root `.env` |

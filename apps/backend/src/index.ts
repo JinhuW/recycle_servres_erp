@@ -43,6 +43,7 @@ import attachmentsRoutes from './routes/attachments';
 import workspaceRoutes from './routes/workspace';
 import { fxRates as fxRatesRoutes } from './routes/fxRates';
 import vendorPublicRoutes from './routes/vendorPublic';
+import intakeRoutes from './routes/intake';
 import vendorBidsRoutes from './routes/vendorBids';
 import activityRoutes from './routes/activity';
 import clientErrorRoutes from './routes/clientErrors';
@@ -184,7 +185,8 @@ app.use(
     ],
     // Without this an in-browser client can't read the WWW-Authenticate
     // challenge and so can't discover where to start the OAuth flow.
-    exposeHeaders: ['WWW-Authenticate', 'X-Request-Id'],
+    // Retry-After: the public sell form shows the 429 wait to the seller.
+    exposeHeaders: ['WWW-Authenticate', 'X-Request-Id', 'Retry-After'],
     credentials: true,
   }),
 );
@@ -241,6 +243,8 @@ const uploadBodyLimit = bodyLimit({ maxSize: UPLOAD_HARD_CAP_BYTES });
 const isUploadPath = (path: string): boolean =>
   path === '/api/scan/label' ||
   path === '/api/scan/payment' ||
+  // The public sell form sends label photos with its payload.
+  path === '/api/public/intake' ||
   path === '/api/attachments' ||
   /^\/api\/(orders|sell-orders)\/[^/]+\/status-meta\/[^/]+\/attachments$/.test(path) ||
   // A line photo comes straight off a phone camera at several MB, uncompressed.
@@ -283,6 +287,7 @@ app.use('*', async (c, next) => {
 // ── Public ──────────────────────────────────────────────────────────────────
 app.route('/api/auth', authRoutes);
 app.route('/api/public/vendor', vendorPublicRoutes);
+app.route('/api/public/intake', intakeRoutes);
 app.route('/api/public/shippo', shippoWebhookRoutes);
 app.route('/.well-known', wellKnown);
 app.route('/oauth', oauthRoutes);
