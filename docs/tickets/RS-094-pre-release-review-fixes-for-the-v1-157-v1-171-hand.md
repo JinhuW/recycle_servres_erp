@@ -2,13 +2,13 @@
 id: RS-094
 title: Pre-release review fixes for the v1.157–v1.171 hand-off, package and Sold changes
 type: bug
-status: in-progress
+status: done
 priority: P1
 created: 2026-09-21
 reporter: jinhu
 branch: fix/prerelease-review-2026-09-21
-pr:
-version:
+pr: https://github.com/JinhuW/recycle_servres_erp/pull/388
+version: 1.171.1
 related: [RS-080, RS-083, RS-085, RS-089, RS-090]
 ---
 
@@ -52,20 +52,20 @@ What the review found (file → defect):
 
 ## Acceptance criteria
 
-- [ ] A checkpoint section that was ever unmet stays open while the dialog is up; only a met one folds and opens on *Change*.
-- [ ] Handing off as Self or Cash writes `paypal_txn_id = NULL` and links no bank transaction; a PATCH that sends `payment: 'self'` or `paymentMethod: 'cash'` clears it the same way (a notes-only PATCH does not touch it).
-- [ ] A standalone box created by another purchaser is refused with a message that names the Shipping page, not adopted; one created by the actor, the PO's owner, nobody, or adopted by a manager still links; adoption under a different carrier re-registers.
-- [ ] A PO whose linked box is `delivered` refuses a flip away from label and a re-typed number with a 409 on both PATCH and the hand-off; the package row is untouched.
-- [ ] GET lists `missingWarehouse` for a NULL-warehouse Draft; `/advance` and `/handoff` refuse on it for every actor; the checkpoint and both PO pages show "Pick the receiving warehouse" with a placeholder option instead of borrowing the first warehouse's name.
-- [ ] The phone refuses to open the hand-off or commission sheet, or to advance, while the page holds unsaved edits (the desktop's existing rule).
-- [ ] A tracking number without a resolved carrier blocks Save on both shells with "Pick the carrier" (or the invalid-number hint).
-- [ ] The checkpoint's Products row reads the page's live lines; a screenshot upload or Confirm line flips the readiness row without a reload; an empty Draft says it needs products.
-- [ ] The phone renders `poTxnUnknown` as an unmet payment row.
-- [ ] Done evidence renders on the desktop at Reviewing and Ready to Pay too.
-- [ ] A deactivated saved collector is cleared client-side (the section opens with the picker) and server-side (`/handoff {}` refuses with `missingDelivery`).
-- [ ] A failed reload after the hand-off surfaces an error dialog.
-- [ ] create-po writes `handoff_method='label'`; the new PO's blockers hold neither `missingDelivery` nor `missingTracking`.
-- [ ] The low items above are fixed; frontend and backend suites green; typecheck clean.
+- [x] A checkpoint section that was ever unmet stays open while the dialog is up; only a met one folds and opens on *Change*.
+- [x] Handing off as Self or Cash writes `paypal_txn_id = NULL` and links no bank transaction; a PATCH that sends `payment: 'self'` or `paymentMethod: 'cash'` clears it the same way (a notes-only PATCH does not touch it).
+- [x] A standalone box created by another purchaser is refused with a message that names the Shipping page, not adopted; one created by the actor, the PO's owner, nobody, or adopted by a manager still links; adoption under a different carrier re-registers.
+- [x] A PO whose linked box is `delivered` refuses a flip away from label and a re-typed number with a 409 on both PATCH and the hand-off; the package row is untouched.
+- [x] GET lists `missingWarehouse` for a NULL-warehouse Draft; `/advance` and `/handoff` refuse on it for every actor; the checkpoint and both PO pages show "Pick the receiving warehouse" with a placeholder option instead of borrowing the first warehouse's name.
+- [x] The phone refuses to open the hand-off or commission sheet, or to advance, while the page holds unsaved edits (the desktop's existing rule).
+- [x] A tracking number without a resolved carrier blocks Save on both shells with "Pick the carrier" (or the invalid-number hint).
+- [x] The checkpoint's Products row reads the page's live lines; a screenshot upload or Confirm line flips the readiness row without a reload; an empty Draft says it needs products.
+- [x] The phone renders `poTxnUnknown` as an unmet payment row.
+- [x] Done evidence renders on the desktop at Reviewing and Ready to Pay too.
+- [x] A deactivated saved collector is cleared client-side (the section opens with the picker) and server-side (`/handoff {}` refuses with `missingDelivery`).
+- [x] A failed reload after the hand-off surfaces an error dialog.
+- [x] create-po writes `handoff_method='label'`; the new PO's blockers hold neither `missingDelivery` nor `missingTracking`.
+- [x] The low items above are fixed; frontend and backend suites green; typecheck clean.
 
 ## Out of scope
 
