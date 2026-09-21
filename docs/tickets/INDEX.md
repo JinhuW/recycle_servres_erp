@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-090](./RS-090-review-screen-shows-only-the-products-the-add-row-do.md) | done | story | P2 | Review screen shows only the products; the add row docks at the bottom | 1.169.0 |
 | [RS-089](./RS-089-any-manager-reviews-and-moves-a-po-whatever-its-ware.md) | done | story | P2 | Any manager reviews and moves a PO, whatever its warehouse | 1.168.0 |
 | [RS-088](./RS-088-cost-payment-keeps-the-paypal-screenshot-on-the-po-a.md) | done | bug | P2 | Cost Payment keeps the PayPal screenshot on the PO, and each bank payment links back | 1.167.0 |
 | [RS-087](./RS-087-new-pos-start-at-50-commission-the-camera-picker-ask.md) | done | story | P2 | New POs start at 50% commission; the camera picker asks which item to add; Submit opens the PO | 1.166.0 |

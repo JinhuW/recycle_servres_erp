@@ -241,7 +241,6 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     units2: 'units',
     perUnit: 'unit',
     reviewNoLinesHint: 'Add at least one item before submitting.',
-    reviewWarehousesLoadingHint: 'Warehouses are still loading — try again in a moment.',
     reviewPickWarehouseHint: 'Pick a warehouse before submitting.',
     transferPickDestinationHint: 'Pick a destination warehouse before transferring.',
     transferQtyOutOfRangeHint: 'One or more lines has an invalid quantity (must be ≥ 1 and ≤ stock).',
@@ -1623,7 +1622,6 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     subAddCatLine: 'Add a {cat} line',
     subAddLineGroup: 'Add a line',
     addToThisOrder: 'Add to this order',
-    pickCategoryHint: 'Which kind of item is going in?',
     products: 'Products',
     // The phone PO's two screens: the order itself, and its products.
     poLockedShort: 'locked',

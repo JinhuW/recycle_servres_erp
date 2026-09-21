@@ -64,11 +64,13 @@ on to Sold once every line has sold (v1.164.0).
   cards, the add-category dock and the goods total; the line form opens from
   there and returns there. A line removed on one screen is already gone on
   the other, unsaved fields survive the round trip, and the "back to Draft"
-  warning is asked once per visit. The camera button's *Continue a draft?*
-  list opens the picked draft's Review screen under a sheet asking *Which
-  kind of item is going in?* — RAM / SSD / HDD / Other straight into the
-  line form (v1.166.0); dismissing it leaves Review as it was. Submit on
-  Review opens the PO's own page, not the Orders list (v1.166.0). Desktop
+  warning is asked once per visit. The capture flow's **Review screen is
+  the product list and nothing else** (v1.169.0): header, the line cards or
+  the empty state, and the RAM / SSD / HDD / Other targets docked above
+  Cancel / Submit so they stay put as the list grows — no cost card, no
+  folds (v1.166.0's kind-of-item sheet came and went). Submit sends the
+  lines only and opens the PO's own page, not the Orders list (v1.166.0),
+  whose folds own warehouse, payment, notes and fees. Desktop
   keeps its single edit page; a
   products link opened there lands on the PO.
 - **The desktop PO page is built around its status, with one home per fact**
@@ -141,9 +143,9 @@ on to Sold once every line has sold (v1.164.0).
   read-only for everyone else, with the projected earnings under it; the
   Cost card no longer repeats the rate or the PayPal id. The stage opens its
   fold (Draft → the first amber one, In Transit → Delivery, Ready to Pay →
-  Commission) and any fold can be opened by hand. The **Review order** step
-  of the capture flow uses the same folds (Delivery = warehouse, Payment,
-  Notes) and the same white Cost card. On the phone, a manager's Reviewing →
+  Commission) and any fold can be opened by hand. (The **Review order** step
+  of the capture flow carried the same folds and Cost card from v1.162.0 to
+  v1.169.0; it is products-only now.) On the phone, a manager's Reviewing →
   Ready to Pay opens a **Commission sheet** — Delivery and Payment read back
   as ✓ rows, purchaser and rate to confirm — that saves and advances in one
   tap.
