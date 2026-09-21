@@ -1216,6 +1216,7 @@ const zh: Record<string, string> = {
   subAddCatLine: '添加 {cat} 明细',
   subAddLineGroup: '添加明细',
   addToThisOrder: '添加到本订单',
+  pickCategoryHint: '要添加哪一类物品？',
   products: '产品',
   poLockedShort: '已锁定',
   poReadyTitle: '提交前',

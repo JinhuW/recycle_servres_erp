@@ -17,6 +17,34 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.166.0] - 2026-09-20
+
+### Features
+
+- **A new PO starts at a 50% commission rate** (RS-087). Since the
+  per-order rate arrived (migration 0030, v0.1.1) a PO was born with no
+  rate at all — NULL,
+  read as 0% by the dashboard, `/api/me` and realized profit — and the
+  desktop edit page seeded its field with 0, the phone with a blank. Now
+  `orders.commission_rate` defaults to `0.5` (migration 0132), so every PO
+  created from here on — the desktop form, the phone's capture flow, a
+  package turned into a PO — carries 50% until a manager changes it. It is
+  a column default, not a backfill: the POs that already exist without a
+  rate keep it that way, and a manager who clears the rate still gets NULL.
+- **The phone's camera button asks which item is going in** (RS-087).
+  Picking a Draft from the *Continue a draft?* list used to open the Review
+  screen — the line list, then Delivery and Payment folded open — and left
+  the user to find the add row below the lines. The camera was pressed to
+  add something, so the Review screen now opens with a sheet over it asking
+  *Which kind of item is going in?* — the same RAM / SSD / HDD / Other
+  targets as the add row — and the chosen kind opens the line form at once.
+  Dismissing the sheet leaves Review as it was; Shipping's *Create PO*, which
+  reopens a draft for its details rather than to add a line, still opens
+  Review with no sheet.
+- **Submit on the Review screen opens the PO it just submitted** (RS-087),
+  `#/purchase-orders/<id>`, instead of the whole Orders list — for the draft
+  that was PATCHed and the order that was POSTed alike.
+
 ## [1.165.0] - 2026-09-20
 
 ### Features

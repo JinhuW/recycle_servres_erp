@@ -35,6 +35,22 @@ describe('POST /api/orders defaults', () => {
     expect(got.body.order.lines[0].status).toBe('Draft');
   });
 
+  it('starts at the 50% commission rate', async () => {
+    const { token } = await loginAs(MARCUS);
+    const r = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: {
+        paypalTxnId: 'TESTPAYTXN0000001', category: 'RAM',
+        lines: [{ qty: 1, unitCost: 10, condition: 'New' }],
+      },
+    });
+    expect(r.status).toBe(201);
+    const got = await api<{ order: { commissionRate: number | null } }>(
+      'GET', '/api/orders/' + r.body.id, { token },
+    );
+    expect(got.body.order.commissionRate).toBeCloseTo(0.5);
+  });
+
   // Deriving `category` from the lines — sole category, 'Mixed', and the
   // `categories` array — lives in orders-mixed-category.test.ts.
 
@@ -868,6 +884,18 @@ describe('orders.commission_rate column', () => {
     expect(rows.length).toBeGreaterThan(0);
     expect(rows.some(r => r.commission_rate !== null)).toBe(true);
     expect(rows.some(r => r.commission_rate === null)).toBe(true);
+  });
+
+  it('defaults a new draft to 0.5; the seed writes NULL on purpose', async () => {
+    const { token } = await loginAs(MARCUS);
+    const draft = await api<{ id: string }>('POST', '/api/orders/draft', {
+      token, body: { category: 'RAM' },
+    });
+    expect(draft.status).toBe(201);
+    const got = await api<{ order: { commissionRate: number | null } }>(
+      'GET', '/api/orders/' + draft.body.id, { token },
+    );
+    expect(got.body.order.commissionRate).toBeCloseTo(0.5);
   });
 });
 

@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-087](./RS-087-new-pos-start-at-50-commission-the-camera-picker-ask.md) | done | story | P2 | New POs start at 50% commission; the camera picker asks which item to add; Submit opens the PO | 1.166.0 |
 | [RS-086](./RS-086-commission-payment-is-the-screenshot-alone-done-asks.md) | done | story | P2 | Commission payment is the screenshot alone; Done asks for it only when missing | 1.165.0 |
 | [RS-085](./RS-085-po-lifecycle-sold-a-done-po-whose-every-line-has-sol.md) | done | story | P2 | PO lifecycle Sold: a Done PO whose every line has sold | 1.164.0 |
 | [RS-084](./RS-084-commission-tab-records-how-the-commission-was-paid-a.md) | done | story | P2 | Commission tab records how the commission was paid, and the Payment tab is Cost Payment | 1.163.0 |
