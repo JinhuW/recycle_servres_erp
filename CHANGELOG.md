@@ -17,6 +17,21 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.170.0] - 2026-09-20
+
+### Features
+
+- **The Cost Payment screenshot's file name carries the PayPal transaction
+  ID** (RS-091). The receipt rename gave the screenshot a
+  `<date>-paypal-<amount>.jpg` name, which said how much but not which
+  payment — matching a chip in the attachment list to a row in the Bank
+  payments ledger meant opening the image. The transaction ID is now read
+  before the file is stored and appended to the name
+  (`2026-09-21-paypal-1400.00-8XY12345AB678901C.jpg`); when the receipt
+  rename has nothing to say, the ID still goes onto the original name. The
+  two OCR reads run side by side, so the upload is no slower than before,
+  and a failed read keeps the file under its plain name as it did.
+
 ## [1.169.0] - 2026-09-20
 
 ### Features

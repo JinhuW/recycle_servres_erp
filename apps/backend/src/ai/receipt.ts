@@ -80,6 +80,14 @@ export function buildReceiptName(
   return `${date}-${method}-${amount}.${ext}`;
 }
 
+// `a-b.jpg` + `X` → `a-b-X.jpg`. The suffix is the caller's problem to keep
+// filename-safe; the one caller passes a normalised PayPal id ([A-Z0-9]+).
+export function suffixFilename(name: string, suffix: string): string {
+  const dot = name.lastIndexOf('.');
+  if (dot <= 0) return `${name}-${suffix}`;
+  return `${name.slice(0, dot)}-${suffix}${name.slice(dot)}`;
+}
+
 export async function maybeRenameReceipt(env: Env, file: File): Promise<File> {
   if (!env.OPENROUTER_API_KEY) return file;
   // Images only, as a positive check — the upload allowlist now carries

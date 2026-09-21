@@ -293,7 +293,9 @@ on to Sold once every line has sold (v1.164.0).
   transaction ID plus the optional screenshot that reads it (since v1.167.0
   that screenshot is itself a `Payment` attachment on the PO — listed as a
   chip beside the drop box, still there after a reload, shown read-only when
-  the PO is locked, and the ID is read off it in the same upload); a
+  the PO is locked, and the ID is read off it in the same upload — and since
+  v1.170.0 appended to the stored file name, so a chip reads
+  `<date>-paypal-<amount>-<TXNID>.jpg` and matches its ledger row on sight); a
   **screenshot of the total amount handed over** for cash (the receipt, the
   counted cash, or the chat where the amount was agreed); the chat with the
   seller for a self-paid order. A company PO whose method was never asked is asked in the
