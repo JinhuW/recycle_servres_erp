@@ -2,13 +2,13 @@
 id: RS-098
 title: Phone file drop boxes offer the photo library and files, not only the camera
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-21
 reporter: jinhu
 branch: feat/file-drop-photo-library
-pr:
-version:
+pr: https://github.com/JinhuW/recycle_servres_erp/pull/393
+version: 1.172.2
 related: [RS-071, RS-084, RS-088]
 ---
 
