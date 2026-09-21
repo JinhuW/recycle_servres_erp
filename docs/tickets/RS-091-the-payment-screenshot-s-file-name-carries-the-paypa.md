@@ -2,13 +2,13 @@
 id: RS-091
 title: The Payment screenshot's file name carries the PayPal transaction ID
 type: story
-status: in-progress
+status: done
 priority: P3
 created: 2026-09-20
 reporter: jinhu
 branch: feat/rs-091-paypal-txn-in-filename
-pr:
-version:
+pr: 385
+version: 1.170.0
 related: [RS-088]
 ---
 

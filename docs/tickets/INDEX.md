@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-091](./RS-091-the-payment-screenshot-s-file-name-carries-the-paypa.md) | in-progress | story | P3 | The Payment screenshot's file name carries the PayPal transaction ID | — |
+| [RS-091](./RS-091-the-payment-screenshot-s-file-name-carries-the-paypa.md) | done | story | P3 | The Payment screenshot's file name carries the PayPal transaction ID | 1.170.0 |
 | [RS-090](./RS-090-review-screen-shows-only-the-products-the-add-row-do.md) | done | story | P2 | Review screen shows only the products; the add row docks at the bottom | 1.169.0 |
 | [RS-089](./RS-089-any-manager-reviews-and-moves-a-po-whatever-its-ware.md) | done | story | P2 | Any manager reviews and moves a PO, whatever its warehouse | 1.168.0 |
 | [RS-088](./RS-088-cost-payment-keeps-the-paypal-screenshot-on-the-po-a.md) | done | bug | P2 | Cost Payment keeps the PayPal screenshot on the PO, and each bank payment links back | 1.167.0 |
