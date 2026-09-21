@@ -1,35 +1,22 @@
 // Builds the request for finalizing a NEW purchase order from the review
-// screen. An order that already exists is edited on its detail screen, which
-// owns warehouse/payment/notes and sends only what the user actually changed.
+// screen. The screen holds the product lines and nothing else: warehouse,
+// payment, notes and fees are the PO page's folds' to ask, and the server
+// gives a new PO its owner's default warehouse and Company payment. Sending
+// any of that from here would restate an answer the user never gave — and
+// did, once: a "first warehouse in the list" default written over the
+// purchaser's own.
 //
-// That split is the point: `metaBody` below states all five meta fields
-// unconditionally, which is only safe when the user has just answered for them.
-// Routing an existing order through here re-asked those questions with blank
-// defaults and then wrote the answers back over the saved ones.
-//
-// Two cases:
-//   - Finalizing a new draft (`draftId` set): PATCH the draft, appending the
-//     lines that weren't already autosaved and dropping the ones that were
-//     autosaved and then deleted.
+// Three cases:
+//   - Finalizing a draft (`draftId` set): PATCH it, appending the lines that
+//     weren't already autosaved and dropping the ones that were autosaved and
+//     then deleted. With neither there is nothing to send — a PATCH moves no
+//     lifecycle, so the caller just lands on the PO.
 //   - No order yet: POST the whole thing. The draft row is only created by the
 //     first line that can be persisted, so a session whose lines were all
 //     held back (incomplete when saved) reaches submit with nothing to PATCH.
 //     One atomic create is also the only shape that cannot leave an empty PO
 //     behind when the lines turn out to be invalid.
 import type { DraftLine } from './types';
-
-export type SubmitMeta = {
-  warehouseId: string;
-  payment: 'company' | 'self';
-  paymentMethod: 'paypal' | 'cash' | null;
-  notes: string;
-  // No goods total. It is the sum of the lines, and the backend derives it from
-  // them on every write that moves them (services/orderGoodsTotal) — a figure
-  // sent from here could only ever restate that, and would be taken for a
-  // negotiated lot price and pin the column at a value the lines have left.
-  otherFees: number;
-  otherFeesNote: string | null;
-};
 
 export type SubmitState = {
   draftId?: string;
@@ -44,6 +31,7 @@ export type SubmitState = {
 export type OrderSubmitRequest =
   | { kind: 'patch'; url: string; body: Record<string, unknown> }
   | { kind: 'create'; url: string; body: Record<string, unknown> }
+  | { kind: 'noop' }
   | { kind: 'error'; message: string };
 
 // New rows (and the new-draft path) carry status 'In Transit'.
@@ -76,19 +64,7 @@ const toAddLine = (l: DraftLine) => ({
   scanConfidence: l.scanConfidence ?? null,
 });
 
-export function buildOrderSubmit(
-  state: SubmitState,
-  meta: SubmitMeta,
-): OrderSubmitRequest {
-  const metaBody = {
-    warehouseId: meta.warehouseId,
-    payment: meta.payment,
-    paymentMethod: meta.payment === 'company' ? meta.paymentMethod : null,
-    notes: meta.notes || null,
-    otherFees: meta.otherFees,
-    otherFeesNote: meta.otherFeesNote,
-  };
-
+export function buildOrderSubmit(state: SubmitState): OrderSubmitRequest {
   if (!state.draftId) {
     if (!state.lines.length) {
       return { kind: 'error', message: 'Add at least one item before submitting.' };
@@ -96,7 +72,7 @@ export function buildOrderSubmit(
     return {
       kind: 'create',
       url: '/api/orders',
-      body: { ...metaBody, lines: state.lines.map(toAddLine) },
+      body: { lines: state.lines.map(toAddLine) },
     };
   }
   // Only send lines that weren't already autosaved to the draft (confirmed
@@ -106,11 +82,11 @@ export function buildOrderSubmit(
   const unconfirmed = state.lines.filter(l => !l._confirmed);
   const survivingIds = new Set(state.lines.filter(l => l.id).map(l => l.id));
   const removed = (state.originalLineIds ?? []).filter(id => !survivingIds.has(id));
+  if (!unconfirmed.length && !removed.length) return { kind: 'noop' };
   return {
     kind: 'patch',
     url: '/api/orders/' + state.draftId,
     body: {
-      ...metaBody,
       ...(unconfirmed.length ? { addLines: unconfirmed.map(toAddLine) } : {}),
       ...(removed.length ? { removeLineIds: removed } : {}),
     },

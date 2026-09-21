@@ -17,6 +17,27 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.169.0] - 2026-09-20
+
+### Features
+
+- **The phone's Review screen is the product list and nothing else, with
+  the add row docked at the bottom** (RS-090). Since v1.162.0 the last step
+  of the capture flow carried the Cost breakdown card and the Delivery /
+  Payment / Notes folds under the lines, and Submit sent all of that —
+  including a "first warehouse in the list" default written over the
+  purchaser's own. Jinhu's screenshot blurred everything below *Add to this
+  order*: the purchaser is scanning items, and the screen should stay out
+  of the way of that. It now shows the header, the products (empty state or
+  line cards) and the four RAM / SSD / HDD / Other targets docked above
+  Cancel / Submit, where they stay as the list grows. Submit sends the lines
+  and nothing else — a draft that has nothing new to add or remove sends no
+  request at all — and opens the PO's own page (the v1.166.0 landing),
+  whose folds own warehouse, payment, notes and fees; a new PO gets its
+  owner's default warehouse and Company payment from the server. This
+  reverses v1.166.0's kind-of-item sheet, which read "focus on submit
+  products" as "open the line form".
+
 ## [1.168.0] - 2026-09-20
 
 ### Features
