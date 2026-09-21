@@ -2,12 +2,12 @@
 id: RS-095
 title: Public sell intake endpoint for cash4ram.com
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-09-21
 reporter: jinhu
 branch: feat/public-intake
-pr:
+pr: https://github.com/JinhuW/recycle_servres_erp/pull/391
 version: 1.172.0
 related: []
 ---
