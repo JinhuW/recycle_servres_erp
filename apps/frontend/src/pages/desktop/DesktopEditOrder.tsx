@@ -10,7 +10,7 @@ import { ArchiveConflictList } from '../../components/ArchiveConflictList';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { fmtUSD, fmtDateShort } from '../../lib/format';
 import {
-  ORDER_STATUSES, LIFECYCLE_STATUS, isClosedBook, spineStatus, warehouseGateLockedStatuses,
+  ORDER_STATUSES, LIFECYCLE_STATUS, isClosedBook, spineStatus,
 } from '../../lib/status';
 import { poEffectiveCost, parseFeeInput, feeEq, readStoredGoodsTotal } from '../../lib/poTotals';
 import type { Category, Order, OrderLine, Warehouse } from '../../lib/types';
@@ -157,34 +157,20 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // save that has to keep the user here (a photo upload that failed) has
   // already advanced the order — re-sending it would step it on again.
   const [savedStatus, setSavedStatus] = useState(effectiveStatus);
-  // Declared up here because the stepper gate below reads the selected
-  // warehouse; the field itself renders with the rest of the order details.
   const [warehouseId, setWarehouseId] = useState<string>(order.warehouse?.id ?? '');
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   // Submitting is the one stage move a purchaser makes. Everything after it is
-  // the manager's, and a purchaser edit moves the stage on its own — so past
-  // Draft the stepper offers nothing to pick.
+  // the manager's — any manager, whichever warehouse the order is for — and a
+  // purchaser edit moves the stage on its own, so past Draft the stepper
+  // offers nothing to pick.
   //
   // Keyed off `savedStatus`, not the `order` prop: an edit that sent the order
   // back to Draft has already moved the stage, and the prop does not refetch
   // while this page is open. Reading the prop leaves the purchaser told to
   // "submit it again" with only the stage they just left on offer.
-  //
-  // A manager who is not the warehouse's manager is held off Reviewing and
-  // Ready to Pay (and any jump past them). The gate follows the warehouse
-  // *selected* in the form — Save writes it before it advances — so picking
-  // another warehouse can lock or unlock the steps on the spot.
-  const gateWarehouse = warehouses.find(w => w.id === warehouseId);
-  const gateLocked = useMemo(
-    () => (isPurchaser ? [] : warehouseGateLockedStatuses(savedStatus, gateWarehouse, user?.id)),
-    [isPurchaser, savedStatus, gateWarehouse, user?.id],
-  );
-  const allowedStatuses = isPurchaser
+  const allowedStatuses: string[] = isPurchaser
     ? savedStatus === 'Draft' ? ['Draft', 'In Transit'] : [savedStatus]
-    : ORDER_STATUSES.filter(s => !gateLocked.includes(s));
-  useEffect(() => {
-    if (gateLocked.includes(status as typeof gateLocked[number])) setStatus(savedStatus);
-  }, [gateLocked, status, savedStatus]);
+    : [...ORDER_STATUSES];
   // Optional Done evidence (note + attachments). The dialog live-saves to the
   // backend; these mirror its latest confirmed state for the read-only block.
   const [doneDialogOpen, setDoneDialogOpen] = useState(false);
@@ -1013,7 +999,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   const viewStageId = view === null ? null
     : (Object.keys(LIFECYCLE_STATUS).find(k => LIFECYCLE_STATUS[k] === view) as StageId | undefined) ?? null;
   // On a closed order every move is off except the manager's ways out of it
-  // (REOPEN_TARGETS); the warehouse gate holds the two review stages.
+  // (REOPEN_TARGETS).
   const stepDisabled = (s: string) =>
     !allowedStatuses.includes(s)
     || (orderLocked && !(canReopen && REOPEN_TARGETS[savedStatus]?.includes(s)));
@@ -1050,10 +1036,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     onClick: () => advanceTo(nextStage),
     disabled: stepDisabled(nextStage),
     hint: stepDisabled(nextStage)
-      ? (isPurchaser ? t('eoStepLockedTooltip')
-        : gateLocked.includes(nextStage as typeof gateLocked[number])
-          ? t('eoStepWarehouseMgrTooltip', { name: gateWarehouse?.manager ?? '', wh: gateWarehouse?.short ?? '', stage: nextStage })
-          : null)
+      ? (isPurchaser ? t('eoStepLockedTooltip') : null)
       : nextStage === 'In Transit' ? t('eoNextInTransitHint') : null,
   } : null;
   // What each met readiness row reads back — the page's live values, so a
@@ -1063,7 +1046,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     products: t('subUnitsCost', { n: totals.qty, cost: fmtUSD(cost.goods, locale) }),
     delivery: [
       source ? t(packageSourceLabelKey(source)) : null,
-      gateWarehouse?.short ?? order.warehouse?.short ?? null,
+      warehouses.find(w => w.id === warehouseId)?.short ?? order.warehouse?.short ?? null,
       delivery === 'pickup' ? [t('hoPickup'), collectorName].filter(Boolean).join(' · ')
         : delivery === 'label' ? [tracking.carrier, tracking.tn].filter(Boolean).join(' ') : null,
     ].filter(Boolean).join(' · '),
@@ -1429,12 +1412,11 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                     disabled={locked}
                     title={reached ? t('eoLookbackTip', { s })
                       : active ? t('eoCurrentStage')
+                      // A manager's next step is off only on an archived
+                      // order; Ready to Pay → Done is a reopen target and
+                      // Done has no next step.
                       : !movable
-                        ? (isPurchaser
-                          ? t('eoStepLockedTooltip')
-                          : t('eoStepWarehouseMgrTooltip', {
-                            name: gateWarehouse?.manager ?? '', wh: gateWarehouse?.short ?? '', stage: gateLocked[0] ?? s,
-                          }))
+                        ? (isPurchaser ? t('eoStepLockedTooltip') : t('saveBlockedArchived'))
                         : isNext ? t('eoSetStatusTo', { s }) : t('eoStepLater')}
                   >
                     <span className="so-step-dot">
@@ -1505,14 +1487,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
               <div className="oe-banner">
                 <Icon name="lock" size={13} />
                 {effectiveStatus === 'Ready to Pay' ? t('eoReadyToPayNote') : t('eoReviewedByMgr')}
-              </div>
-            )}
-            {!isPurchaser && gateLocked.length > 0 && (
-              <div className="oe-banner">
-                <Icon name="lock" size={13} />
-                {t('eoWarehouseMgrOnly', {
-                  name: gateWarehouse?.manager ?? '', wh: gateWarehouse?.short ?? '', stage: gateLocked[0],
-                })}
               </div>
             )}
             {revertOnSave && (

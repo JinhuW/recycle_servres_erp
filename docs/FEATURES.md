@@ -202,13 +202,10 @@ on to Sold once every line has sold (v1.164.0).
   The inventory editor refuses to walk a line off Sold while its PO is sold.
   Existing Done POs that had already sold out were backfilled with an
   activity row.
-- **Only the warehouse's manager takes a PO into Reviewing or Ready to Pay**
-  (v1.132.0): the manager linked to the PO's warehouse in Settings, including
-  stage-jumps that pass through either stage. Both shells lock the step for
-  everyone else and say who can; the desktop lock follows the warehouse
-  selected in the form. A PO with no warehouse, or a warehouse with no usable
-  manager, is open to any manager. Ready to Pay → Done and every backward
-  move stay open to every manager.
+- **Any manager takes a PO into Reviewing and Ready to Pay, whatever its
+  warehouse** (v1.168.0). The v1.132.0 rule that reserved those two moves for
+  the manager linked to the PO's warehouse is gone, on both shells and in the
+  API; the warehouse's manager in Settings is a contact, not a gate.
 - **A company-paid PO names the payment that funded it before it leaves
   Draft** (v1.115.0) — the transaction ID is required, and the advance is
   refused without it for every actor, a manager stage-jump and carrier movement

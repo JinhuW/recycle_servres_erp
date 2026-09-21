@@ -6,8 +6,6 @@
 //   (review finished, commission owed) → Done (commission paid) → Sold (every
 //   line sold; set by the system, shown to managers only).
 
-import type { Warehouse } from './types';
-
 export type OrderStatus = 'Draft' | 'In Transit' | 'Reviewing' | 'Ready to Pay' | 'Done' | 'Sold';
 
 // The stepper spine: the stages someone drives. Sold is not one — the backend
@@ -71,27 +69,6 @@ export const isCompleted = (s: string) => s === 'Done' || s === 'Sold';
 // The book closes when the review does: from Ready to Pay on, lines, costs
 // and ownership are read-only for everyone (managers keep the stage moves).
 export const isClosedBook = (s: string) => s === 'Ready to Pay' || isCompleted(s);
-
-// Stages only the PO's warehouse manager may take the order into. Mirrors
-// WAREHOUSE_MANAGER_GATED in the backend's services/orderAdvance.ts.
-export const WAREHOUSE_MANAGER_GATED: OrderStatus[] = ['Reviewing', 'Ready to Pay'];
-
-/**
- * The stages a manager who is not `warehouse`'s manager may NOT pick while the
- * order sits at `savedStatus`: everything from the next gated stage on, since
- * a jump past it crosses it too. Empty when the warehouse has no manager, when
- * the list has not loaded (the backend still refuses), when the user is that
- * manager, or once the order is already past the last gate.
- */
-export function warehouseGateLockedStatuses(
-  savedStatus: string, warehouse: Warehouse | undefined, userId: string | undefined,
-): OrderStatus[] {
-  const mgr = warehouse?.managerUserId;
-  if (!mgr || mgr === userId) return [];
-  const from = ORDER_STATUSES.indexOf(spineStatus(savedStatus) as OrderStatus);
-  const gates = WAREHOUSE_MANAGER_GATED.map(s => ORDER_STATUSES.indexOf(s)).filter(g => g > from);
-  return gates.length ? ORDER_STATUSES.slice(Math.min(...gates)) : [];
-}
 
 // Keep in sync with backend ai.ts CONFIDENCE_FLOOR. Lowered from 0.6 → 0.5
 // alongside the prompt rubric recalibration in ai/prompts.ts so that clean

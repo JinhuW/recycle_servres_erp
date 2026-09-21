@@ -40,7 +40,7 @@ import { usePaymentProof, type ProofAttachment } from '../lib/usePaymentProof';
 import { PaymentFields } from '../components/PaymentFields';
 import { CommissionPaymentFields, type CommissionShots } from '../components/CommissionPaymentFields';
 import {
-  ORDER_STATUSES, LIFECYCLE_STATUS, statusTone, spineStatus, isClosedBook, warehouseGateLockedStatuses,
+  ORDER_STATUSES, LIFECYCLE_STATUS, statusTone, spineStatus, isClosedBook,
 } from '../lib/status';
 import { addableCategories, categoryTone } from '../lib/lookups';
 import type { Category, Order, Warehouse } from '../lib/types';
@@ -419,18 +419,13 @@ export function OrderDetail({
   };
 
   // Submitting is the purchaser's one stage move — everything past it belongs
-  // to the manager, and the backend rejects the rest from them anyway. Into
-  // Reviewing and Ready to Pay it has to be the warehouse's own manager; the
-  // button here posts against the saved warehouse, so the gate reads that.
-  const gateWarehouse = warehouses.find(w => w.id === order.warehouse?.id);
-  const gateLocked = isPurchaser ? [] : warehouseGateLockedStatuses(effectiveStatus, gateWarehouse, user?.id);
+  // to any manager, and the backend rejects the rest from them anyway.
   const nextStatus: string | null = (() => {
     if (isArchived) return null;
     if (effectiveStatus === 'Draft') return 'In Transit';
     if (isPurchaser) return null;
     const i = ORDER_STATUSES.indexOf(spineStatus(effectiveStatus) as typeof ORDER_STATUSES[number]);
-    const next = i >= 0 ? ORDER_STATUSES[i + 1] ?? null : null;
-    return next && !gateLocked.includes(next) ? next : null;
+    return i >= 0 ? ORDER_STATUSES[i + 1] ?? null : null;
   })();
   const canAdvance = !!nextStatus && !advancing && !saving;
 
@@ -658,11 +653,10 @@ export function OrderDetail({
   const cats = addableCategories();
 
   const currentIdx = ORDER_STATUSES.indexOf(spineStatus(effectiveStatus) as typeof ORDER_STATUSES[number]);
-  // The furthest dot this user could reach: purchasers stop at In Transit,
-  // a manager held by the warehouse gate stops just short of it.
+  // The furthest dot this user could reach: purchasers stop at In Transit.
   const canReachIdx = isPurchaser
     ? (effectiveStatus === 'Draft' ? ORDER_STATUSES.indexOf('In Transit') : currentIdx)
-    : gateLocked.length ? ORDER_STATUSES.indexOf(gateLocked[0]) - 1 : ORDER_STATUSES.length - 1;
+    : ORDER_STATUSES.length - 1;
   // A finished dot, tapped, swaps the card's body for what that stage
   // recorded; the stage moving snaps it back.
   const [view, setView] = useState<string | null>(null);
@@ -944,19 +938,6 @@ export function OrderDetail({
               <Icon name="lock" size={12} />
               {effectiveStatus === 'Ready to Pay' ? t('lifecycleReadyToPayNote')
                 : effectiveStatus === 'Sold' ? t('lifecycleSoldNote') : t('lifecycleDoneNote')}
-            </div>
-          )}
-          {!nextStatus && !orderLocked && !isPurchaser && gateLocked.length > 0 && (
-            <div style={{
-              marginTop: 12, padding: '8px 12px', borderRadius: 10,
-              background: 'var(--bg-soft)', color: 'var(--fg-subtle)',
-              fontSize: 12, display: 'flex', alignItems: 'center', gap: 8,
-              border: '1px solid var(--border)',
-            }}>
-              <Icon name="lock" size={12} />
-              {t('lifecycleWarehouseMgrLock', {
-                name: gateWarehouse?.manager ?? '', wh: gateWarehouse?.short ?? '', stage: gateLocked[0],
-              })}
             </div>
           )}
           {!nextStatus && !orderLocked && isPurchaser && effectiveStatus === 'Reviewing' && (
