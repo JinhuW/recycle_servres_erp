@@ -17,6 +17,23 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.172.1] - 2026-09-21
+
+### Fixes
+
+- **The desktop PO page's Delivery tab lays its facts one per row**
+  (RS-097). The tab put Source, Receiving warehouse and How it gets here
+  across one three-column row and the field the delivery choice needs —
+  *Picked up by*, or the tracking number and carrier chips — on the row
+  below, where on a wide window it landed under Source and read as if it
+  belonged there. Source now has the first row to itself, Receiving
+  warehouse the second, and the third holds the delivery switch beside
+  what that choice needs, with a hairline between the rows (the checkpoint
+  dialog's own device). The controls keep the column Source and Warehouse
+  share, so a lone select no longer stretches across the whole card; under
+  1100px the carrier strip spans the row beneath the switch and the
+  tracking number.
+
 ## [1.171.2] - 2026-09-21
 
 ### Fixes

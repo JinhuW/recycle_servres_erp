@@ -96,7 +96,9 @@ on to Sold once every line has sold (v1.164.0).
   put** on the new stage's panel instead of returning to the list. Below the
   status card, **five tabs**: *Delivery* (source, receiving warehouse, shipping
   label or local pickup, tracking number with the carrier recognised from its
-  shape, or who collected it, plus a one-line live tracking state), *Cost
+  shape, or who collected it, plus a one-line live tracking state — laid out
+  one fact per row since v1.172.1: source, then warehouse, then the delivery
+  switch beside what that choice needs, a hairline between them), *Cost
   Payment* (paid by, method, transaction ID, proof files, and the manager's
   bank-payments ledger — named *Payment* until v1.163.0, when the second
   payment below got a home), *Commission* (purchaser, rate, and what the
