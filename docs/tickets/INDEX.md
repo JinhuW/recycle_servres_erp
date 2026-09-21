@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-086](./RS-086-commission-payment-is-the-screenshot-alone-done-asks.md) | done | story | P2 | Commission payment is the screenshot alone; Done asks for it only when missing | — |
 | [RS-085](./RS-085-po-lifecycle-sold-a-done-po-whose-every-line-has-sol.md) | done | story | P2 | PO lifecycle Sold: a Done PO whose every line has sold | 1.164.0 |
 | [RS-084](./RS-084-commission-tab-records-how-the-commission-was-paid-a.md) | done | story | P2 | Commission tab records how the commission was paid, and the Payment tab is Cost Payment | 1.163.0 |
 | [RS-083](./RS-083-phone-po-page-folds-that-match-the-desktop-tabs-one.md) | done | story | P2 | phone PO page: folds that match the desktop tabs, one sheet per stage | 1.162.0 |

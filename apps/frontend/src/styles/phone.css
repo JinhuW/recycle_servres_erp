@@ -1259,9 +1259,5 @@
    field label weight, same as the rest of the sheet. */
 .ph-ho-sheet .pay-row, .ph-pay .pay-row { grid-template-columns: 1fr; }
 .ph-pay .label { font-size: 12px; font-weight: 500; color: var(--fg-muted); }
-/* The commission payment stacks in its fold too; its read-back pairs are the
-   fold's, so they keep the fold's field spacing. */
-.ph-pay .cp-grid { grid-template-columns: 1fr; gap: 12px; }
-.ph-pay .cp-fields .ph-fold-ro .ph-field { margin-top: 0; }
 .ph-ho-sheet .ho-blockers { margin-top: 12px; }
 .ph-ho-sheet .label { font-size: 12px; font-weight: 500; color: var(--fg-muted); }

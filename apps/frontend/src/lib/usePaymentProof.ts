@@ -8,22 +8,25 @@ import { readPaypalScan } from './paypalTxn';
 import { scanErrorBanner, type ScanErrorBanner } from './scanError';
 import type { PaymentShot } from './useAddPackageForm';
 
-// The proof half of a PO's payment: the PayPal screenshot scan, the chat with
-// the seller (Submission attachments) and the cash screenshot (Payment
-// attachments). One hook behind every PaymentFields — the hand-off dialog, the
-// phone sheet and both PO pages — so what counts as "on file" cannot drift
-// between them. The picker half (paid by / method / id) stays with whoever
-// owns the form: the pages keep it in their own draft state.
+// The proof half of a PO's payments: the PayPal screenshot scan, the chat with
+// the seller (Submission attachments), the cash screenshot (Payment
+// attachments) and the commission-payment screenshot (Commission attachments
+// — the second payment on the order, what the purchaser was paid). One hook
+// behind every PaymentFields — the hand-off dialog, the phone sheet and both
+// PO pages — so what counts as "on file" cannot drift between them. The
+// picker half (paid by / method / id) stays with whoever owns the form: the
+// pages keep it in their own draft state.
 
 export type ProofAttachment = { id: string; filename: string; size: number; mime: string; url: string };
 
-export type ProofBucket = 'Submission' | 'Payment';
+export type ProofBucket = 'Submission' | 'Payment' | 'Commission';
 
 export type PaymentProofInit = {
   /** Null on the create pages: nothing can be attached before the order exists. */
   orderId: string | null;
   chatAtts?: ProofAttachment[];
   proofAtts?: ProofAttachment[];
+  commissionAtts?: ProofAttachment[];
   /** Where a transaction id read off a PayPal screenshot goes. */
   setTxnId: (v: string) => void;
 };
@@ -70,9 +73,11 @@ export function usePaymentProof(init: PaymentProofInit) {
   // ── The two attachment buckets ───────────────────────────────────────────
   const [chatAtts, setChatAtts] = useState<ProofAttachment[]>(init.chatAtts ?? []);
   const [proofAtts, setProofAtts] = useState<ProofAttachment[]>(init.proofAtts ?? []);
+  const [commissionAtts, setCommissionAtts] = useState<ProofAttachment[]>(init.commissionAtts ?? []);
   const [uploading, setUploading] = useState<ProofBucket | null>(null);
 
-  const setterFor = (bucket: ProofBucket) => (bucket === 'Submission' ? setChatAtts : setProofAtts);
+  const setterFor = (bucket: ProofBucket) =>
+    bucket === 'Submission' ? setChatAtts : bucket === 'Payment' ? setProofAtts : setCommissionAtts;
 
   const addFiles = async (bucket: ProofBucket, fl: FileList | File[] | null) => {
     const files = Array.from(fl ?? []);
@@ -104,12 +109,13 @@ export function usePaymentProof(init: PaymentProofInit) {
     }
   };
 
-  /** Re-seed both lists from a fresh server read. The pages call this when
+  /** Re-seed the lists from a fresh server read. The pages call this when
    *  the order's version moves — never on a mere refetch that returned the
    *  same thing, which would wipe an upload still settling. */
-  const sync = (chat: ProofAttachment[], proof: ProofAttachment[]) => {
+  const sync = (chat: ProofAttachment[], proof: ProofAttachment[], commission: ProofAttachment[]) => {
     setChatAtts(chat);
     setProofAtts(proof);
+    setCommissionAtts(commission);
   };
 
   return {
@@ -122,7 +128,13 @@ export function usePaymentProof(init: PaymentProofInit) {
     removeChatAtt: (att: ProofAttachment) => removeAtt('Submission', att),
     addProofFiles: (fl: FileList | File[] | null) => addFiles('Payment', fl),
     removeProofAtt: (att: ProofAttachment) => removeAtt('Payment', att),
-    busy: scanBusy || uploading !== null,
+    commissionAtts,
+    commissionUploading: uploading === 'Commission',
+    addCommissionFiles: (fl: FileList | File[] | null) => addFiles('Commission', fl),
+    removeCommissionAtt: (att: ProofAttachment) => removeAtt('Commission', att),
+    // The hand-off's "is anything still settling" — the commission screenshot
+    // is not the hand-off's business, so it does not hold its Confirm.
+    busy: scanBusy || (uploading !== null && uploading !== 'Commission'),
     sync,
   };
 }

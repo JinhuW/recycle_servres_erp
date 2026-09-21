@@ -88,13 +88,15 @@ on to Sold once every line has sold (v1.164.0).
   bank-payments ledger — named *Payment* until v1.163.0, when the second
   payment below got a home), *Commission* (purchaser, rate, and what the
   purchaser earns — the maths that used to sit in an aside titled "Payment
-  detail" — and, since v1.163.0, a **Commission payment** block: PayPal or
-  Cash with PayPal preselected, a PayPal transaction ID and a screenshot drop
-  box, recording how the purchaser was paid. A dropped PayPal screenshot is
-  kept under the order and read for its ID, which fills an empty box; an ID
-  already typed is kept. Managers record it at any stage, closed book
-  included — it saves as it is used, not through the page's Save — and
-  purchasers see it read-only. Optional: nothing there gates Done),
+  detail" — and a **Commission payment** drop box for the screenshot that
+  shows the purchaser was paid (v1.163.0 shipped it with a PayPal/Cash picker
+  and an OCR-filled transaction ID; v1.165.0 cut it to the screenshot alone).
+  Files write through as they are dropped — managers at any stage, closed
+  book included — and purchasers see the list read-only. **Ready to Pay →
+  Done asks for it only when it is missing** (v1.165.0): with a screenshot
+  on file the move is as plain as any other; without one the *Mark order as
+  Done* dialog opens, and a file attached there is the same file the tab
+  shows. The dialog is a prompt, not a gate — Confirm works without one),
   *Notes & files* (notes and Submission receipts; proof of payment is not
   repeated here), *Activity*. No fact has an input in two places any more: the
   warehouse, purchaser, rate and paid-by that appeared in *Order details*,
@@ -118,9 +120,10 @@ on to Sold once every line has sold (v1.164.0).
   *Before you submit* list gains a *How the goods get here* row.
 - **The phone's *Order details* are the desktop's five tabs, as folds**
   (v1.162.0): Delivery (source, warehouse, label or pickup, tracking),
-  Cost Payment, **Commission** (with the commission-payment block since
-  v1.163.0, one column, under the maths), Notes & files, Activity — same
-  order, same names.
+  Cost Payment, **Commission** (with the commission-payment screenshot box
+  under the maths since v1.163.0, screenshot-only since v1.165.0; the fold's
+  summary reads *· Paid* once one is on file), Notes & files, Activity —
+  same order, same names.
   Each is one card (`PhFold`): closed, the title with its answer read back;
   open, a tinted header ruled off from the fields in the same card. An amber
   mark means the next step is waiting on the section, a blue one that it has

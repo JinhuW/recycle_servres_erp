@@ -17,6 +17,29 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.165.0] - 2026-09-20
+
+### Features
+
+- **The commission payment is the screenshot alone, and Done asks for it
+  only when it is missing** (RS-086). v1.163.0's Commission-payment block
+  carried a PayPal | Cash picker and a transaction ID read off the
+  screenshot; neither was wanted. The desktop Commission tab and the phone
+  fold now hold one thing: the drop box for the screenshot that shows the
+  purchaser was paid, with no panel around it, and purchasers see the list
+  read-only. **Ready to Pay → Done checks for it first**: with a screenshot
+  on file the move is as plain as any other stage (the desktop stages it for
+  Save, the phone advances); without one the *Mark order as Done* dialog
+  opens and asks for it — its uploads land in the same Commission bucket the
+  tab shows, so a file attached in either place appears in the other. The
+  dialog is a prompt, not a gate: Confirm still works with nothing attached,
+  and `/advance` refuses nothing. Gone with the picker: `orders.commission_method`
+  and `commission_txn_id` (migration 0131), `PUT /api/orders/:id/commission-payment`,
+  and the `scan` the Commission upload used to answer. One consequence,
+  stated on the ticket: a PO that already has a screenshot never shows the
+  Done dialog again, so its closing note — only ever typed there — is no
+  longer reachable.
+
 ## [1.164.0] - 2026-09-20
 
 ### Features

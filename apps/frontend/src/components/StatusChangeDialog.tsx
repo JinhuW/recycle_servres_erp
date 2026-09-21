@@ -92,16 +92,29 @@ type Props = {
   // (and variant 'purchase' for PO-flavored copy); sell orders are the default.
   apiBase?: string;
   variant?: 'sell' | 'purchase';
+  // An attachment list owned by the page instead of this dialog. The PO pages
+  // hand over the order's commission-screenshot store, so a file attached
+  // here is the same file the Commission tab shows — a private copy would
+  // leave a Cancel-after-upload invisible on the tab. Only the note still
+  // goes to `status-meta/<to>`; `initialAttachments` is ignored.
+  attachments?: {
+    atts: StatusAttachment[];
+    add: (files: FileList | null) => void;
+    remove: (att: StatusAttachment) => void;
+    uploading: boolean;
+  };
 };
 
 export function StatusChangeDialog({
   orderId, to, currentStatus, initialNote, initialAttachments, onCancel, onConfirm, onMutated,
-  apiBase = '/api/sell-orders', variant = 'sell',
+  apiBase = '/api/sell-orders', variant = 'sell', attachments: store,
 }: Props) {
   const { t } = useT();
   const [note, setNote] = useState(initialNote);
-  const [attachments, setAttachments] = useState<StatusAttachment[]>(initialAttachments);
-  const [uploading, setUploading] = useState(false);
+  const [ownAttachments, setAttachments] = useState<StatusAttachment[]>(initialAttachments);
+  const [ownUploading, setUploading] = useState(false);
+  const attachments = store ? store.atts : ownAttachments;
+  const uploading = store ? store.uploading : ownUploading;
   const [error, setError] = useState<string | null>(null);
   const cfg = variant === 'purchase' ? poDonePreset(t) : presetsFor(t)[to];
 
@@ -222,7 +235,9 @@ export function StatusChangeDialog({
               label={t('attachmentsLabel')}
               acceptHint={cfg.acceptHint}
               uploading={uploading}
-              onFiles={addFiles}
+              onFiles={store ? store.add : addFiles}
+              accept={store ? 'image/*' : undefined}
+              boxHint={store ? t('cpShotHint') : undefined}
             />
 
             {uploading && (
@@ -239,7 +254,7 @@ export function StatusChangeDialog({
             {attachments.length > 0 && (
               <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {attachments.map(a => (
-                  <AttachmentChip key={a.id} a={a} onRemove={() => removeAttachment(a)} />
+                  <AttachmentChip key={a.id} a={a} onRemove={() => (store ? store.remove(a) : removeAttachment(a))} />
                 ))}
               </div>
             )}

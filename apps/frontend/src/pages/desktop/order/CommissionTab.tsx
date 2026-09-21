@@ -1,8 +1,7 @@
-import { CommissionPaymentFields } from '../../../components/CommissionPaymentFields';
+import { CommissionPaymentFields, type CommissionShots } from '../../../components/CommissionPaymentFields';
 import { Icon } from '../../../components/Icon';
 import { fmtUSD } from '../../../lib/format';
 import { useT } from '../../../lib/i18n';
-import type { CommissionPayment } from '../../../lib/useCommissionPayment';
 
 // Who the order is for and what they earn from it. The purchaser and rate
 // inputs used to sit under "Order details" and the maths in an aside titled
@@ -29,8 +28,8 @@ type Props = {
   pricedCount: number;
   firstName: string;
   locale: string;
-  /** How the purchaser was paid — live-saved, a manager's at any stage. */
-  commissionPayment: CommissionPayment;
+  /** The commission-payment screenshot — writes through, a manager's at any stage. */
+  commissionShots: CommissionShots;
   canEditCommissionPayment: boolean;
 };
 
@@ -184,7 +183,7 @@ export function CommissionTab(p: Props) {
         <div style={{ fontSize: 12, color: 'var(--fg-subtle)', marginBottom: 10 }}>
           {t('cpHint', { name: p.firstName })}
         </div>
-        <CommissionPaymentFields cp={p.commissionPayment} editable={p.canEditCommissionPayment} idPrefix="eo-cp" />
+        <CommissionPaymentFields shots={p.commissionShots} editable={p.canEditCommissionPayment} />
       </div>
     </div>
   );

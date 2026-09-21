@@ -76,7 +76,6 @@ const FIELD_LABEL: Record<string, string> = {
   payment: 'Payment', total_cost: 'Goods total', commission_rate: 'Commission rate',
   other_fees: 'Other fees', other_fees_note: 'Other fees note',
   paypal_txn_id: 'PayPal transaction ID',
-  commission_method: 'Commission method', commission_txn_id: 'Commission transaction ID',
   customer_id: 'Customer', currency_code: 'Currency', payment_received_by: 'Payment received by',
   label: 'Label', sub_label: 'Sub-label', inventory_id: 'Inventory item', status: 'Status',
 };
