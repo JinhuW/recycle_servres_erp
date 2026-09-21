@@ -6,7 +6,8 @@ import { loginAs, MARCUS } from './helpers/auth';
 // POST /api/orders/:id/status-meta/Payment/attachments?scan=paypal — the
 // cost-payment screenshot is stored as a Payment attachment and the PayPal
 // transaction id read off it in the same upload. The file is the record; the
-// read is a convenience that may fail without losing it.
+// read is a convenience that may fail without losing it. When it succeeds the
+// id is appended to the stored name so the chip identifies the payment.
 
 const LINE = {
   category: 'RAM', brand: 'Samsung', capacity: '32GB', type: 'DDR4',
@@ -44,9 +45,12 @@ describe('Payment attachment with ?scan=paypal', () => {
     expect(body.attachment.id).toBeTruthy();
     expect(body.scan?.provider).toBe('stub');
     expect(body.scan?.txnId).toBe('7AB12345CD678901E');
+    // No key → the receipt rename is a no-op, so the id lands on the original.
+    expect(body.attachment.filename).toBe('paypal-7AB12345CD678901E.png');
     const rows = await getTestDb()`
-      SELECT id FROM order_status_attachments WHERE order_id = ${id} AND status = 'Payment'`;
+      SELECT filename FROM order_status_attachments WHERE order_id = ${id} AND status = 'Payment'`;
     expect(rows).toHaveLength(1);
+    expect(rows[0].filename).toBe('paypal-7AB12345CD678901E.png');
   });
 
   it('keeps the file and answers scan: null when the OCR fails', async () => {
@@ -59,6 +63,7 @@ describe('Payment attachment with ?scan=paypal', () => {
     const body = r.body as Upload;
     expect(body.attachment.id).toBeTruthy();
     expect(body.scan).toBeNull();
+    expect(body.attachment.filename).toBe('paypal.png');
     const rows = await getTestDb()`
       SELECT id FROM order_status_attachments WHERE order_id = ${id} AND status = 'Payment'`;
     expect(rows).toHaveLength(1);
@@ -71,9 +76,11 @@ describe('Payment attachment with ?scan=paypal', () => {
       { file: PNG() }, { token });
     expect(plain.status).toBe(200);
     expect('scan' in (plain.body as Upload)).toBe(false);
+    expect((plain.body as Upload).attachment.filename).toBe('paypal.png');
     const chat = await multipart(`/api/orders/${id}/status-meta/Submission/attachments?scan=paypal`,
       { file: PNG() }, { token });
     expect(chat.status).toBe(200);
     expect('scan' in (chat.body as Upload)).toBe(false);
+    expect((chat.body as Upload).attachment.filename).toBe('paypal.png');
   });
 });

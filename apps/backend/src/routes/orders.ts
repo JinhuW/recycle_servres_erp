@@ -43,8 +43,8 @@ import {
   type SerialIssue, type Carrier, type PackageSource,
 } from '@recycle-erp/shared';
 import type { Env, LineCategory, User } from '../types';
-import { PAYPAL_TXN_STRICT, extractPaypalTxn, type PaypalTxnScan } from '../ai/paypal';
-import { maybeRenameReceipt } from '../ai/receipt';
+import { PAYPAL_TXN_STRICT, extractPaypalTxn } from '../ai/paypal';
+import { maybeRenameReceipt, suffixFilename } from '../ai/receipt';
 import { shrinkImageToFit } from '../lib/image-shrink';
 import { log } from '../lib/log';
 
@@ -2567,9 +2567,12 @@ orders.put('/:id/status-meta/:status', async (c) => {
 // `?scan=paypal` on the Payment bucket also reads the PayPal transaction id
 // off the image and returns it beside the attachment, so the cost-payment
 // screenshot is stored and read in one upload instead of a scan call whose
-// object nothing ever recorded. The read is best-effort: a failed OCR keeps
-// the file and answers `scan: null`. No scan rate limit here, on the same
-// footing as the receipt rename below (one model call per upload already).
+// object nothing ever recorded. The id is read before the file is stored so
+// the stored name carries it (`<date>-paypal-<amount>-<TXNID>.jpg`) and a
+// chip in the attachment list matches a ledger row without opening the
+// image. The read is best-effort: a failed OCR keeps the file under its plain
+// name and answers `scan: null`. No scan rate limit here, on the same footing
+// as the receipt rename (one model call per upload already).
 orders.post('/:id/status-meta/:status/attachments', async (c) => {
   const u = c.var.user;
   const id = c.req.param('id');
@@ -2604,7 +2607,21 @@ orders.post('/:id/status-meta/:status/attachments', async (c) => {
 
   // Every PO meta status holds a payment receipt of some kind, so the AI
   // rename applies unconditionally — no per-status gate like sell orders.
-  const stored = await maybeRenameReceipt(c.env, fitted);
+  // The PayPal read is a second model call on the same bytes, so it runs
+  // alongside rather than after.
+  const wantScan = scanPaypal && fitted.type.startsWith('image/');
+  const [renamed, scan] = await Promise.all([
+    maybeRenameReceipt(c.env, fitted),
+    wantScan
+      ? extractPaypalTxn(c.env, await fitted.arrayBuffer()).catch((e): null => {
+          log.warn('paypal scan on payment attachment failed', e);
+          return null;
+        })
+      : null,
+  ]);
+  const stored = scan?.txnId
+    ? new File([renamed], suffixFilename(renamed.name, scan.txnId), { type: renamed.type })
+    : renamed;
 
   // R2 upload happens outside the transaction — it's the slow part. If the
   // INSERT below fails the object is orphaned in R2; r2.ts treats orphans as
@@ -2638,16 +2655,7 @@ orders.post('/:id/status-meta/:status/attachments', async (c) => {
     url: row.delivery_url,
     uploadedAt: row.uploaded_at,
   };
-  if (!scanPaypal || !stored.type.startsWith('image/')) return c.json({ attachment });
-  // After the row exists: the screenshot is the record, the id read off it is
-  // a convenience the user can type themselves.
-  let scan: PaypalTxnScan | null = null;
-  try {
-    scan = await extractPaypalTxn(c.env, await stored.arrayBuffer());
-  } catch (e) {
-    log.warn('paypal scan on payment attachment failed', e);
-  }
-  return c.json({ attachment, scan });
+  return c.json(wantScan ? { attachment, scan } : { attachment });
 });
 
 // Remove a single attachment.
