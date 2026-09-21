@@ -2,13 +2,13 @@
 id: RS-073
 title: PayPal screenshot from the hand-off dialog is kept on the order
 type: bug
-status: backlog
+status: done
 priority: P3
 created: 2026-09-18
 reporter: Claude (dev→main review, 2026-09-14)
-branch:
-pr:
-version:
+branch: fix/rs-088-paypal-shot-persists
+pr: 382
+version: 1.167.0
 related: [RS-050, RS-071]
 ---
 
@@ -39,9 +39,9 @@ Two things stopped RS-071 from doing it in passing:
 
 ## Acceptance criteria
 
-- [ ] A PayPal screenshot given to the hand-off dialog is on the order afterwards as a `Payment` attachment, for pickup and label hand-offs alike.
-- [ ] Removing that attachment cannot delete an R2 object the order's own upload route did not create, and does not blank a package's screenshot.
-- [ ] The dialog's scan still fills the transaction ID as today.
+- [x] A PayPal screenshot given to the hand-off dialog is on the order afterwards as a `Payment` attachment, for pickup and label hand-offs alike.
+- [x] Removing that attachment cannot delete an R2 object the order's own upload route did not create, and does not blank a package's screenshot.
+- [x] The dialog's scan still fills the transaction ID as today.
 
 ## Out of scope
 
@@ -51,3 +51,7 @@ Two things stopped RS-071 from doing it in passing:
 
 - Origin: `~/.claude/projects/…/memory/dev-to-main-review-2026-09-14-handoff-findings.md`
   ("pickup screenshot orphaned").
+- Closed by RS-088 (v1.167.0): the dialog uploads the screenshot into the
+  order's `Payment` bucket through the status-meta route (`?scan=paypal`), so
+  the object is minted under `orders/<id>/Payment` and the hand-off body no
+  longer sends a key.

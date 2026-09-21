@@ -37,7 +37,7 @@ import {
   MOBILE_VIEW_TO_PATH, pathToMobileView, readSafeNext,
 } from './lib/route';
 import type { Category, DraftLine, Notification, Order, OrderLine, OrderSummary, ScanResponse } from './lib/types';
-import { buildOrderSubmit, type SubmitMeta } from './lib/orderSubmit';
+import { buildOrderSubmit } from './lib/orderSubmit';
 import { findDuplicateLine } from './lib/dupParts';
 
 // Where a line form goes when it closes. 'detail' is an existing order: the
@@ -60,8 +60,6 @@ type CaptureState =
   | { phase: 'review';  detected: ScanResponse | null; lines: DraftLine[]; originalLineIds?: string[]; draftId?: string };
 
 type Toast = { msg: string; kind: 'success' | 'error' | 'warn' };
-
-type ReviewMeta = { warehouseId: string; payment: 'company' | 'self'; paymentMethod: 'paypal' | 'cash' | null; notes: string };
 
 // An order's line as the capture form wants it. Shared by the draft-resume
 // path and the detail screen's line edits so the two can't drift.
@@ -124,12 +122,10 @@ function Shell() {
   // Order-level fees, held here rather than in OrderReview: that screen
   // unmounts on every trip into a line form, and an order opened for edit
   // arrives carrying the fee it was saved with.
-  const [orderFees, setOrderFees] = useState({ amount: '', note: '' });
   // Same reason as the fees above: a resumed draft was saved with a warehouse,
   // a payment type and notes, and the review screen unmounts on every trip
   // into a line form. Left to its own defaults it would offer `warehouses[0]`
   // and blank notes, then write those back over what the draft already had.
-  const [reviewMeta, setReviewMeta] = useState<ReviewMeta | null>(null);
   // The draft order is created on demand by `ensureDraftId`, and its id lands
   // in `capture` a round trip later. Hold the in-flight POST here so a second
   // save awaits the same one instead of opening a second order.
@@ -337,9 +333,7 @@ function Shell() {
   // of thing is going in. Nothing is written until there's a line to write.
   const startNewDraft = () => {
     setCapture({ phase: 'review', detected: null, lines: [] });
-    setOrderFees({ amount: '', note: '' });
     captureGen.current++;
-    setReviewMeta(null);
     draftIdPromise.current = null;
   };
 
@@ -376,16 +370,6 @@ function Shell() {
     try {
       const { order } = await api.get<{ order: Order }>(`/api/orders/${summary.id}`);
       seedPhotos(order);
-      setOrderFees({
-        amount: order.otherFees ? order.otherFees.toFixed(2) : '',
-        note: order.otherFeesNote ?? '',
-      });
-      setReviewMeta({
-        warehouseId: order.warehouse?.id ?? '',
-        payment: order.payment,
-        paymentMethod: order.paymentMethod ?? null,
-        notes: order.notes ?? '',
-      });
       setCapture({
         phase: 'review',
         detected: null,
@@ -677,7 +661,7 @@ function Shell() {
     setCapture(c => c.phase === 'review' ? { ...c, lines: c.lines.filter((_, i) => i !== idx) } : c);
   };
 
-  const submitOrder = async (meta: SubmitMeta) => {
+  const submitOrder = async () => {
     if (capture.phase !== 'review') return;
 
     // A line whose sync was refused stays on the list unconfirmed and would
@@ -692,17 +676,23 @@ function Shell() {
     // invalid line 400s without leaving an empty PO behind.
     const req = buildOrderSubmit(
       { draftId: capture.draftId, lines: capture.lines, originalLineIds: capture.originalLineIds },
-      meta,
     );
     if (req.kind === 'error') {
       showToast(req.message, 'error');
       return;
     }
     try {
-      if (req.kind === 'create') await api.post(req.url, req.body);
-      else await api.patch(req.url, req.body);
+      // The order just submitted is where the user goes next, not the list
+      // it sits in. Only a draft reaches PATCH or noop, so its id is known.
+      let id: string;
+      if (req.kind === 'create') {
+        id = (await api.post<{ id: string }>(req.url, req.body)).id;
+      } else {
+        if (req.kind === 'patch') await api.patch(req.url, req.body);
+        id = capture.draftId!;
+      }
       setCapture({ phase: 'idle' });
-      setView('history');
+      navigate('/purchase-orders/' + id);
       showToast(t('orderSubmitted'));
     } catch (e) {
       showToast(e instanceof Error ? e.message : t('subSubmitFailed'), 'error');
@@ -798,10 +788,7 @@ function Shell() {
       <>
         <OrderReview
           lines={capture.lines}
-          initialMeta={reviewMeta}
           onAddItem={addAnotherItem}
-          fees={orderFees}
-          onFeesChange={setOrderFees}
           onEditLine={editLine}
           onRemoveLine={removeLine}
           onSubmit={submitOrder}

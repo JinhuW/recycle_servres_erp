@@ -1,7 +1,20 @@
 import { describe, it, expect } from 'vitest';
 import {
   pathToDesktopView, pathToMobileView, matchPurchaseOrder, poProductsPath, match, activityRecordHref,
+  splitHash,
 } from '../src/lib/route';
+
+describe('splitHash — a route may carry a page-local query', () => {
+  it('separates the path the router matches from the query it ignores', () => {
+    expect(splitHash('#/purchase-orders/PO-1?tab=payment')).toEqual({ path: '/purchase-orders/PO-1', query: 'tab=payment' });
+    expect(matchPurchaseOrder(splitHash('#/purchase-orders/PO-1?tab=payment').path)).toEqual({ id: 'PO-1', screen: 'info' });
+  });
+  it('a route without a query is unchanged, with or without the hash mark', () => {
+    expect(splitHash('#/purchase-orders')).toEqual({ path: '/purchase-orders', query: '' });
+    expect(splitHash('/purchase-orders')).toEqual({ path: '/purchase-orders', query: '' });
+    expect(splitHash('')).toEqual({ path: '', query: '' });
+  });
+});
 
 describe('match', () => {
   it('matches a single param segment', () => {

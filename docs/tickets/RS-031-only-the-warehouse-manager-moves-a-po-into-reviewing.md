@@ -9,7 +9,7 @@ reporter: Jinhu
 branch: feat/ready-to-pay-stage
 pr: 285
 version: 1.132.0
-related: []
+related: [RS-089]
 ---
 
 ## Ask
@@ -58,3 +58,5 @@ order, not a rule.
   the order payload did not grow. A cache that has not loaded yet leaves the
   step open — the backend still refuses.
 - Seed warehouses carry no manager, which is why no existing test moved.
+- Reverted by RS-089 (v1.168.0): any manager moves a PO into Reviewing and
+  Ready to Pay again, whatever its warehouse.

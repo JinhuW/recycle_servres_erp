@@ -54,6 +54,9 @@ function toApi(r: PackageRow, creatorName: string | null) {
     trackingNumber: r.tracking_number,
     carrier: r.carrier,
     status: r.status,
+    // The carrier's own words for the last scan, as the PO page's journey
+    // shows them; a manual refresh hands back the same shape GET /orders reads.
+    trackingStatus: r.tracking_status,
     trackingEta: r.tracking_eta,
     lastTrackedAt: r.last_tracked_at,
     sellerName: r.seller_name,
@@ -233,11 +236,14 @@ packages.post('/:id/refresh', async (c) => {
 
   const row = (await sql`
     SELECT ${PACKAGE_COLS(sql)},
-           (SELECT name FROM users us WHERE us.id = created_by) AS creator_name
+           (SELECT name FROM users us WHERE us.id = created_by) AS creator_name,
+           (SELECT o.user_id FROM orders o WHERE o.id = packages.order_id) AS order_owner_id
     FROM packages WHERE id = ${id} LIMIT 1
-  `)[0] as (PackageRow & { creator_name: string | null }) | undefined;
+  `)[0] as (PackageRow & { creator_name: string | null; order_owner_id: string | null }) | undefined;
   if (!row) return c.json({ error: 'Not found' }, 404);
-  if (!canMutate(u, row)) return c.json({ error: 'Forbidden' }, 403);
+  // Also the linked PO's owner: the box may have been added by a manager
+  // handing the order off on their behalf, and the PO page's Refresh is theirs.
+  if (!canMutate(u, row) && row.order_owner_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
 
   const tracking = pickTrackingClient(c.env);
   if (tracking.provider === 'stub') {
@@ -331,6 +337,7 @@ packages.post('/:id/create-po', async (c) => {
       notes,
       paypalTxnId: row.paypal_txn_id,
       source: row.source,
+      handoffMethod: 'label',
       supplierId: client?.id ?? null,
       onBehalfOfName: ownerRow?.name ?? null,
     });

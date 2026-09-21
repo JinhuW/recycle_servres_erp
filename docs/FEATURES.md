@@ -40,10 +40,16 @@ reach a portal through a URL token.
 ## Purchase orders
 
 The core object. A PO is a purchase from a vendor, built line by line, that
-moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done.
+moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done, and
+on to Sold once every line has sold (v1.164.0).
 
 - **One PO can hold several categories** (v1.54.0), with its lines grouped by
   category and a per-category cost breakdown (v1.55.0).
+- **A new PO starts at a 50% commission rate** (v1.166.0). The column
+  defaults to `0.5`, so a PO made anywhere — desktop form, phone capture, a
+  package turned into a PO — carries 50% until a manager changes it. POs
+  that existed with no rate keep NULL (read as 0%), and a manager clearing
+  the rate still lands on NULL.
 - **On the phone a PO is two screens** (v1.154.0). The Orders list no longer
   unfolds a row in place: tapping the card, or the pencil on its right (an
   eye once the PO is Ready to Pay, Done or archived), opens
@@ -55,11 +61,95 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   row, shipping, the cost card, warehouse, the **payment fields folded behind
   a header that reads back the answer**, notes, attachments and the activity
   log. The *Products* row opens `/purchase-orders/:id/products`: the line
-  cards, the add-category dock and the goods total; the line form opens from
-  there and returns there. A line removed on one screen is already gone on
+  cards — each leading with the line's first photo beside its number, the
+  rest in a strip under the chips (v1.170.1) — the add-category dock and
+  the goods total; the line form opens from there and returns there. A line removed on one screen is already gone on
   the other, unsaved fields survive the round trip, and the "back to Draft"
-  warning is asked once per visit. Desktop keeps its single edit page; a
+  warning is asked once per visit. The capture flow's **Review screen is
+  the product list and nothing else** (v1.169.0): header, the line cards or
+  the empty state, and the RAM / SSD / HDD / Other targets docked above
+  Cancel / Submit so they stay put as the list grows — no cost card, no
+  folds (v1.166.0's kind-of-item sheet came and went). Submit sends the
+  lines only and opens the PO's own page, not the Orders list (v1.166.0),
+  whose folds own warehouse, payment, notes and fees. Desktop
+  keeps its single edit page; a
   products link opened there lands on the PO.
+- **The desktop PO page is built around its status, with one home per fact**
+  (v1.160.0). The page head and the items card with its cost-breakdown tape
+  are unchanged. Under them, *Order status* is its own card: the stepper, and
+  beneath it a **stage panel** whose body follows the stage — a Draft shows
+  the *Before you submit* list (each unmet row a link to the section that
+  fixes it, each met row reading back its answer) beside the one next step;
+  In Transit shows the **linked package's Shippo state** — status chip,
+  carrier · tracking number, the journey, the arrival date, when the carrier
+  last reported — with a **Refresh** button that asks the carrier now (the
+  message when tracking is not switched on appears inline), or *Collected by
+  ‹name›* for a local pickup; Reviewing, Ready to Pay and Done show what the
+  stage is about and the next move. **Every finished step is clickable**: it
+  shows what that stage recorded — who submitted and how it was handed off,
+  the final journey, who moved it on and when, the Done note and files — read
+  from the activity log, read-only, with *Back to ‹current›*; a manager also
+  gets *Move back to ‹stage›* there when the order allows it. The next step is
+  the only forward click; a stage beyond it stays locked (a manager stages one
+  move at a time now, and Save commits it — the footer's button reads *Save ·
+  Mark as ‹stage›* while one is pending). After a stage move the page **stays
+  put** on the new stage's panel instead of returning to the list. Below the
+  status card, **five tabs**: *Delivery* (source, receiving warehouse, shipping
+  label or local pickup, tracking number with the carrier recognised from its
+  shape, or who collected it, plus a one-line live tracking state), *Cost
+  Payment* (paid by, method, transaction ID, proof files, and the manager's
+  bank-payments ledger — named *Payment* until v1.163.0, when the second
+  payment below got a home), *Commission* (purchaser, rate, and what the
+  purchaser earns — the maths that used to sit in an aside titled "Payment
+  detail" — and a **Commission payment** drop box for the screenshot that
+  shows the purchaser was paid (v1.163.0 shipped it with a PayPal/Cash picker
+  and an OCR-filled transaction ID; v1.165.0 cut it to the screenshot alone).
+  Files write through as they are dropped — managers at any stage, closed
+  book included — and purchasers see the list read-only. **Ready to Pay →
+  Done asks for it only when it is missing** (v1.165.0): with a screenshot
+  on file the move is as plain as any other; without one the *Mark order as
+  Done* dialog opens, and a file attached there is the same file the tab
+  shows. The dialog is a prompt, not a gate — Confirm works without one),
+  *Notes & files* (notes and Submission receipts; proof of payment is not
+  repeated here), *Activity*. No fact has an input in two places any more: the
+  warehouse, purchaser, rate and paid-by that appeared in *Order details*,
+  the hand-off dialog **and** the aside each live under one tab. Tabs carry an
+  **amber dot** while a Draft still needs something under them and a **blue
+  dot** for unsaved edits; the open tab rides in the URL
+  (`#/purchase-orders/PO-1?tab=payment`) so a link lands on it, and the
+  stage suggests one otherwise — Delivery while In Transit, Commission at
+  Ready to Pay — until the user picks another (v1.161.1). A sticky
+  footer holds the total cost, what the purchaser earns, *Unsaved edits: …*,
+  Discard and Save. **Delivery facts are the page's to edit until Ready to
+  Pay**: source, pickup or label, collector and tracking number save through
+  the order like any other field; a purchaser's change past Draft is
+  material — back to Draft for the manager's change-review — and a new
+  tracking number moves the linked package rather than minting a second one.
+- **The phone PO page carries the same stage panel and a Delivery fold**
+  (v1.161.0). Its status card keeps the two-screen structure of v1.154.0;
+  under the dots, In Transit shows the linked package's Shippo journey with
+  **Refresh** (or who collected a local pickup), and a finished dot, tapped,
+  swaps the card body for what that stage recorded, with a way back. The
+  *Before you submit* list gains a *How the goods get here* row.
+- **The phone's *Order details* are the desktop's five tabs, as folds**
+  (v1.162.0): Delivery (source, warehouse, label or pickup, tracking),
+  Cost Payment, **Commission** (with the commission-payment screenshot box
+  under the maths since v1.163.0, screenshot-only since v1.165.0; the fold's
+  summary reads *· Paid* once one is on file), Notes & files, Activity —
+  same order, same names.
+  Each is one card (`PhFold`): closed, the title with its answer read back;
+  open, a tinted header ruled off from the fields in the same card. An amber
+  mark means the next step is waiting on the section, a blue one that it has
+  unsaved edits. Commission is a manager's to edit until Ready to Pay and
+  read-only for everyone else, with the projected earnings under it; the
+  Cost card no longer repeats the rate or the PayPal id. The stage opens its
+  fold (Draft → the first amber one, In Transit → Delivery, Ready to Pay →
+  Commission) and any fold can be opened by hand. (The **Review order** step
+  of the capture flow carried the same folds and Cost card from v1.162.0 to
+  v1.169.0; it is products-only now.) On the phone, a manager's Reviewing →
+  Ready to Pay opens a **Commission sheet** — Delivery and Payment read back
+  as ✓ rows, purchaser and rate to confirm — that saves and advances in one
+  tap.
 - **The desktop list opens on the orders card** (v1.147.2). The four KPI
   tiles and the subtitle that sat above it since the first release are gone:
   they were computed in the browser over whatever the stage and category
@@ -77,8 +167,10 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   lines, on the PO as bought and clamped at zero (v1.149.4 — an unpriced line
   contributes nothing to it, cost included); null until something sells, so
   a partly sold PO reads low until the rest goes and says so with a sold
-  count. Desktop list:
-  the Profit column toggle shows the pair. PO edit page: a realized block on
+  count. Desktop list: Unrealized rides the Profit column toggle; Realized
+  has its own **Realized profit** toggle in the Columns picker (v1.171.0),
+  on by default and offered to managers only — until then it hid with
+  Profit. PO edit page: a realized block on
   the cost tape with a sold meter. Phone: the money card carries both and the
   list row a Realized line. Purchasers and a manager previewing as purchaser
   get none of it. Other fees amortize over the PO as bought (`qty_purchased`)
@@ -102,13 +194,23 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   — and the PO's lines read Done for every stock and sellable bucket. Managers
   and the owner are notified when a PO reaches it. The stage is a PO stage
   only: it can't be written as a line status.
-- **Only the warehouse's manager takes a PO into Reviewing or Ready to Pay**
-  (v1.132.0): the manager linked to the PO's warehouse in Settings, including
-  stage-jumps that pass through either stage. Both shells lock the step for
-  everyone else and say who can; the desktop lock follows the warehouse
-  selected in the form. A PO with no warehouse, or a warehouse with no usable
-  manager, is open to any manager. Ready to Pay → Done and every backward
-  move stay open to every manager.
+- **Sold is Done with every line sold** (v1.164.0). Nobody picks it: a PO
+  lands on it when a manager marks it Done and every line already sits at the
+  `Sold` line status, or when a sell order reaching Done consumes the last
+  unsold line of a PO already at Done. A fully-sold PO still at Ready to Pay
+  waits for the commission to be paid. Managers see it as its own chip in the
+  PO list (hidden with Done by default) and on the PO page, where it sits on
+  Done's step under the Sold label with a "Sold out" panel; purchasers — and a
+  manager previewing as one — see the same PO as Done, in the list, the
+  filters, the detail and the activity log. A manager can reopen it to
+  Reviewing or Ready to Pay like Done; the way back to Done re-settles it.
+  The inventory editor refuses to walk a line off Sold while its PO is sold.
+  Existing Done POs that had already sold out were backfilled with an
+  activity row.
+- **Any manager takes a PO into Reviewing and Ready to Pay, whatever its
+  warehouse** (v1.168.0). The v1.132.0 rule that reserved those two moves for
+  the manager linked to the PO's warehouse is gone, on both shells and in the
+  API; the warehouse's manager in Settings is a contact, not a gate.
 - **A company-paid PO names the payment that funded it before it leaves
   Draft** (v1.115.0) — the transaction ID is required, and the advance is
   refused without it for every actor, a manager stage-jump and carrier movement
@@ -130,9 +232,13 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   once a PayPal account has synced into the environment, so a dev box
   without keys is unaffected; a linked, ignored, pending or reversed row
   still counts as existing, and Mercury legs do not.
-- **Leaving Draft is a hand-off, asked in one dialog** (v1.142.0). Clicking
-  In Transit on a Draft — the desktop stepper or the phone's advance button —
-  opens *Mark as In Transit*: the receiving warehouse, the order's **source**
+- **Leaving Draft is a hand-off, asked in one dialog** (v1.142.0; a
+  *checkpoint* since v1.159.0 — each section the order already answers folds
+  to a ✓ row with a *Change* button, only the unmet ones open, and a page that
+  holds everything is one click; the body may omit any field and the server
+  fills it from the order). Clicking In Transit on a Draft — the desktop
+  stepper or the phone's advance button — opens *Mark as In Transit*: the
+  receiving warehouse, the order's **source**
   (Facebook / Local / Reddit / Other, the same set tracked packages use), and
   how the goods get here: **Local pickup** (who collected it, from a member
   picker) or **Shipping label** (paste the tracking number; the carrier is
@@ -142,8 +248,9 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   but needs its own proof (v1.153.0, below). **Self-paid** asks for no method
   and no ID — it is reimbursed from commission, not matched against the bank
   — but **requires the chat with the seller** as a Submission attachment (any
-  Submission file on the order counts). Managers also see the purchaser and
-  commission rate in the dialog.
+  Submission file on the order counts). The dialog asks for nothing else —
+  the purchaser and commission rate left it in v1.162.0 for the Commission
+  tab / fold and the phone's Ready-to-Pay sheet.
   Confirming writes everything, creates the tracked package for a label
   (linked to the PO, carrying its source), and advances, in one transaction —
   a refusal leaves nothing behind. The hand-off is the owner's or a manager's;
@@ -152,7 +259,15 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   collector or the package. The chat rule is enforced in the advance itself,
   so a manager stage-jump and the carrier poll hold to it too, and it is
   grandfathered by a cutoff stamped when the release reached the environment,
-  exactly like the transaction-ID rule.
+  exactly like the transaction-ID rule. Since v1.171.1 the **receiving
+  warehouse is a blocker** too (`missingWarehouse`, first in the list, held
+  against every door — a PO with no warehouse is stock with no location),
+  a pickup needs its collector on the page as well as on the server, a
+  section of the checkpoint that was ever open stays open (no more folding
+  mid-typing), the transaction id follows the method (handing off, or
+  saving, as Self or Cash clears a saved PayPal id), and both shells ask for
+  unsaved page edits to be saved before the checkpoint or any other stage
+  move (the phone used to open the sheet over them and lose them).
 - **The desktop list's In Transit chip says how the goods are coming**
   (v1.155.0). A PO in transit by carrier reads `In Transit | UPS` (FedEx,
   USPS) and the chip links the carrier's tracking page for the hand-off's
@@ -169,9 +284,18 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   Tracking added → In transit → Delivered timeline (a delivery exception
   stops the bar with the carrier's words under it), the arrival date, the
   carrier link, and when the carrier last reported. It comes from Shippo's
-  webhook and the 45-minute poll; there is no Refresh here — the Shipping
-  page keeps that. A local pickup, or a PO that left Draft before the
-  hand-off existed, shows no block.
+  webhook and the 45-minute poll. Since v1.160.0 it lives inside the status
+  card's stage panel and carries a **Refresh** that asks the carrier now (the
+  PO's owner may call it, not only the box's creator); a local pickup shows
+  who collected it instead, and a PO that left Draft before the hand-off
+  existed says so and points at the Delivery tab. The box is the order's
+  for good once the carrier marks it delivered (v1.171.1): a flip to pickup
+  or a re-typed number is refused with a 409 rather than putting a delivered
+  box back on the Shipping page's *Needs you* (where Create PO would mint a
+  second PO for the same goods). A number that sits on another member's
+  standalone box is refused too — one's own, the PO owner's, or a manager's
+  pull still links it — and a PO minted from a tracked box is born knowing
+  it came by label.
 - **The desktop list has a Total cost column** (v1.156.0), after QTY: the
   goods figure the dashboard uses (the stored total, else the line sum on
   what was bought) plus other fees, with `incl. $12 fees` under it when fees
@@ -184,10 +308,15 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   all share one component: *Paid by* (Company card / Self-paid), then, under
   Company card, *Method* (PayPal / Cash), then a proof panel whose heading
   states what the chosen path needs before anything is typed — the
-  transaction ID plus the optional screenshot that reads it; a **screenshot
-  of the total amount handed over** for cash (the receipt, the counted cash,
-  or the chat where the amount was agreed); the chat with the seller for a
-  self-paid order. A company PO whose method was never asked is asked in the
+  transaction ID plus the optional screenshot that reads it (since v1.167.0
+  that screenshot is itself a `Payment` attachment on the PO — listed as a
+  chip beside the drop box, still there after a reload, shown read-only when
+  the PO is locked, and the ID is read off it in the same upload — and since
+  v1.170.0 appended to the stored file name, so a chip reads
+  `<date>-paypal-<amount>-<TXNID>.jpg` and matches its ledger row on sight); a
+  **screenshot of the total amount handed over** for cash (the receipt, the
+  counted cash, or the chat where the amount was agreed); the chat with the
+  seller for a self-paid order. A company PO whose method was never asked is asked in the
   hand-off rather than assumed to be PayPal. The cash screenshot is the third
   proof-of-payment rule: a company-cash PO created after the release refuses
   to leave Draft — hand-off, manager stage-jump, carrier poll — until one is
@@ -226,7 +355,10 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   on every PO with linked payments — the ledger's net, refunds subtracted,
   failed and reversed left out — and clicking it opens the Payments page
   focused on that PO. A PO nothing is linked to keeps the plain chip, and so
-  does every purchaser, since the page it opens is manager-only.
+  does every purchaser, since the page it opens is manager-only. On the PO
+  page itself, each row of the Cost Payment tab's *Bank payments* ledger is a
+  link to that transaction — the Payments page pinned to the PO with that row
+  open (v1.167.0).
 - **The desktop list holds every PO in scope** (v1.140.1). It used to stop
   silently at the API's first page — the newest 50 — so older orders were
   unreachable and the stage counts, KPI cards, search and sort all ran over
@@ -309,14 +441,14 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
 - **Both desktop PO pages hold together in a narrow window** (v1.134.0).
   Under 1100px the list's toolbar wraps inside its card with the search box
   giving up width first, the KPI tiles stay in one row while four fit, and
-  the order ID is pinned at the left while the table scrolls sideways. The
-  edit page goes to one column — items, then status/details/Save, then
-  payment detail, ledger and activity — the item table scrolls inside its
-  card, the editable fee's inputs drop under their label, the Order-details
-  fields go two-up, and the status stepper keeps every stage as a numbered
-  dot and names only the current one (each dot names itself on hover). The
-  order ID never wraps at any width, and the Notes box stays inside its card
-  at every width (it used to overhang at 1400px).
+  The edit page is one column at every width since v1.160.0 — items, status,
+  tabs, footer — so under 1100px only the details change: the item table
+  scrolls inside its card, the editable fee's inputs drop under their label,
+  the tab fields go two-up, the stage panel stacks its two boxes, and the
+  status stepper keeps every stage as a numbered dot and names only the
+  current one (each dot names itself on hover). The order ID never wraps at
+  any width, and the Notes box stays inside its card at every width (it used
+  to overhang at 1400px).
 
 ## Clients (the people we buy from)
 
@@ -362,7 +494,8 @@ log and `orders.supplier_id`.
 ## Inventory
 
 There is **no inventory table**. Stock is `order_lines` whose PO is Done or In
-Transit, and a line's qty can never be 0. Lines of an archived PO sit at the
+Transit, and a line's qty can never be 0. A PO whose every line has sold reads
+Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an archived PO sit at the
 `Archived` status and are out of every stock view until the PO is unarchived
 (v1.137.0); like Sold, they are reachable through an explicit status filter.
 
@@ -719,7 +852,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   on a toggle, by the commission those POs earned (`?lb=cost|commission` on
   `GET /api/dashboard`, cost by default; v1.141.0, ranked by projected profit
   from v1.0.1). Both lenses count a PO from Ready to Pay on, when its
-  commission becomes owed (v1.132.0). A purchaser sees every peer's rank but
+  commission becomes owed (v1.132.0), Sold included (v1.164.0). A purchaser sees every peer's rank but
   only their own money, so the ranking is computed server-side.
 
 ## Oversight extras

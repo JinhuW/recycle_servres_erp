@@ -124,6 +124,8 @@ export const FIELD_LABEL: Record<string, string> = {
   source:          'Source',
   handoff_method:  'Delivery',
   handoff_by:      'Picked up by',
+  tracking_number: 'Tracking number',
+  carrier:         'Carrier',
   payment_method:  'Payment method',
 };
 

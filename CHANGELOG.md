@@ -17,6 +17,529 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.171.2] - 2026-09-21
+
+### Fixes
+
+- **The activity log no longer shows one PO's events under another for a
+  moment** (RS-094 follow-up). The phone swaps one order for another in place
+  rather than remounting, and `useOrderEvents` kept the previous order's
+  events — and its "loaded" state — until the new request landed, so the
+  activity count, the timeline and the stage look-back could briefly show
+  the wrong PO's audit trail. The held events are now tagged with the order
+  they belong to and an order they don't belong to gets an empty, unloaded
+  list; a refresh of the same order still keeps the list up while it
+  reloads.
+
+## [1.171.1] - 2026-09-21
+
+### Fixes
+
+- **Pre-release review of everything since v1.157.0** (RS-094). Before the
+  span v1.157–v1.171 (the PO status spine, the phone folds, commission and
+  Sold, the hand-off facts on the page) went to production, a review of the
+  whole diff turned up fifteen defects in the new hand-off, package and
+  readiness code, none yet met by a user. All are fixed here.
+
+  *The checkpoint.* A section folded to its ✓ row the instant its rule was
+  met — the PayPal id field vanished after the first character and a
+  15-digit FedEx number folded at 12 digits, submitting the prefix. A
+  section that was ever open now stays open. The Products row read the
+  page-load lines, so a $0 Draft priced through the drawer's *Confirm line*
+  still showed "needs a cost" with Confirm disabled; it now reads the page's
+  live lines. A saved collector who has since been deactivated no longer
+  folds Delivery to ✓ and 400s on Confirm: the picker opens and asks.
+  A Draft with no warehouse — routine since the phone's Review screen POSTs
+  lines only — passed every readiness rule and dead-ended on Confirm with a
+  raw `warehouseId is required`; **the warehouse is now a blocker like the
+  rest** (`missingWarehouse`, first in the list, held against every door
+  including a manager's stage-jump, since nothing past Draft asks for it
+  again and stock needs a location), and the three warehouse selects show
+  *Pick a warehouse* instead of borrowing the first warehouse's name.
+  Pickup with no collector is a blocker on the page as it was on the server.
+
+  *The hand-off's writes.* Handing off a Draft saved as company/PayPal as
+  **Self** or **Cash** kept the saved transaction id and then linked the
+  company's PayPal payment to a PO the company never paid for; the id now
+  follows the method (a PATCH that flips to Self or Cash clears it too — a
+  later notes-only save on a self-paid PO leaves alone whatever create-po
+  scanned). A number already on **another member's standalone box** was
+  adopted onto the caller's PO with no ownership check; it is now refused
+  with a message naming the Shipping page (one's own box, the PO owner's, a
+  creator-less row, or a manager's pull still adopt, and adoption under a new
+  carrier re-registers with Shippo). A box the carrier already marked
+  **delivered** was unlinked on a label→pickup flip — back into the Shipping
+  page's *Needs you*, whose Create PO minted a second PO for goods already
+  received — or rewritten to `purchased` on a re-typed number; both are now
+  a 409 that says the box has been delivered. A PO minted from a tracked box
+  now records `handoff_method = label`, so it no longer reports
+  *missingDelivery* and asks for the number it already carries.
+
+  *The PO pages.* The phone opened the hand-off and commission sheets over
+  unsaved edits, which the sheet either re-asked or silently replaced and
+  the refetch afterwards discarded (a typed note or fee vanished); it now
+  asks for a save first, as the desktop does. A tracking number with no
+  resolved carrier marked the page dirty, and Save returned 200 and dropped
+  it — both shells now refuse with *Pick the carrier*. A screenshot dropped
+  through the proof hook, or a line priced through *Confirm line*, left the
+  readiness row saying the thing was still missing until a reload; the row
+  now reads the page's own state for those sections. The phone never showed
+  the server's *unknownTxnId* blocker (its rows were built from four fixed
+  keys), so a PayPal id the account had not reported read ✓ and 409'd on
+  Confirm; it is a row now. Done evidence (note and files) rendered only at
+  Done/Sold, so a reopened PO's receipt was unreachable and un-removable on
+  the desktop; it shows at Reviewing and Ready to Pay too. A failed re-read
+  after the hand-off was swallowed; it surfaces. Small ones: the empty-Draft
+  row says it needs products, not a cost; the timeline names *Tracking
+  number* / *Carrier* instead of raw column names; a manager's move back out
+  of a stage is no longer reported as that stage's closing fact; the
+  commission-rate input is disabled on a closed book like the owner select;
+  the phone's Commission fold and sheet no longer share input ids; the
+  activity log's payment-proof labels are translated; and a backend that
+  never ran a PayPal scan no longer shows the "could not read" banner.
+
+  Not changed: the one-time window during a release where an already-open
+  old tab meets the new backend's `Sold` status. It clears on reload, and
+  the Worker deploys before Railway does.
+
+## [1.171.0] - 2026-09-20
+
+### Features
+
+- **Realized profit has its own column toggle on the desktop PO list**
+  (RS-093). The manager-only Realized column (v1.149.0) rode on the Profit
+  toggle: hide Profit to keep the list compact and Realized vanished with it,
+  and the Columns picker had no entry to bring it back alone. It is now its
+  own **Realized profit** entry in the picker — on by default, offered to
+  managers only (a purchaser, or a manager previewing as one, never receives
+  the figure, so the picker leaves it out and counts only their columns).
+  A manager who customised Columns before this release ticks it once.
+
+## [1.170.1] - 2026-09-20
+
+### Fixes
+
+- **The line's first photo leads its card on the phone products screen**
+  (RS-092). Since v1.154.0 the card put the rank badge, the title and the
+  spec chips on the first row and every photo underneath in a strip of its
+  own, so the eye read the text before reaching the one thing a purchaser
+  recognises the line by. The first photo now sits between the badge and
+  the title as a 44px tile; a line with more photos keeps the strip under
+  the chips for the rest, folded four-then-`+n` as before, and a tap on
+  the leading tile opens the lightbox rather than the line editor. A line
+  without a photo looks as it did.
+
+## [1.170.0] - 2026-09-20
+
+### Features
+
+- **The Cost Payment screenshot's file name carries the PayPal transaction
+  ID** (RS-091). The receipt rename gave the screenshot a
+  `<date>-paypal-<amount>.jpg` name, which said how much but not which
+  payment — matching a chip in the attachment list to a row in the Bank
+  payments ledger meant opening the image. The transaction ID is now read
+  before the file is stored and appended to the name
+  (`2026-09-21-paypal-1400.00-8XY12345AB678901C.jpg`); when the receipt
+  rename has nothing to say, the ID still goes onto the original name. The
+  two OCR reads run side by side, so the upload is no slower than before,
+  and a failed read keeps the file under its plain name as it did.
+
+## [1.169.0] - 2026-09-20
+
+### Features
+
+- **The phone's Review screen is the product list and nothing else, with
+  the add row docked at the bottom** (RS-090). Since v1.162.0 the last step
+  of the capture flow carried the Cost breakdown card and the Delivery /
+  Payment / Notes folds under the lines, and Submit sent all of that —
+  including a "first warehouse in the list" default written over the
+  purchaser's own. Jinhu's screenshot blurred everything below *Add to this
+  order*: the purchaser is scanning items, and the screen should stay out
+  of the way of that. It now shows the header, the products (empty state or
+  line cards) and the four RAM / SSD / HDD / Other targets docked above
+  Cancel / Submit, where they stay as the list grows. Submit sends the lines
+  and nothing else — a draft that has nothing new to add or remove sends no
+  request at all — and opens the PO's own page (the v1.166.0 landing),
+  whose folds own warehouse, payment, notes and fees; a new PO gets its
+  owner's default warehouse and Company payment from the server. This
+  reverses v1.166.0's kind-of-item sheet, which read "focus on submit
+  products" as "open the line form".
+
+## [1.168.0] - 2026-09-20
+
+### Features
+
+- **Any manager takes a PO into Reviewing and Ready to Pay, whatever its
+  warehouse** (RS-089). Since v1.132.0 (RS-031) those two moves — and any
+  stage-jump across them — belonged to the manager linked to the PO's
+  warehouse in Settings; every other manager got a 403 naming who could, and
+  both PO pages locked the step with the same sentence. Jinhu asked for the
+  rule to go: whichever warehouse a PO is for, all managers review and move
+  it. `POST /api/orders/:id/advance` no longer reads the warehouse's manager,
+  the desktop stepper and the phone's advance button no longer lock those
+  steps, and the "only {name} can move…" banner and tooltip are gone from
+  both shells. The Ready to Pay stage itself (RS-032) is unchanged, purchasers
+  still stop at Draft → In Transit, and Settings → Warehouses keeps its
+  manager field as a contact.
+
+## [1.167.0] - 2026-09-20
+
+### Fixes
+
+- **The Cost Payment tab keeps the PayPal screenshot, and shows it on
+  reopen** (RS-088). Dropping a PayPal screenshot on the desktop or phone PO
+  page, or in the hand-off dialog, used to send it through the scan endpoint
+  for the transaction ID and hold the image in page state only — reopen the
+  PO and it was gone. It is now a `Payment` attachment on the order, the same
+  bucket as the cash screenshot: the status-meta upload route takes
+  `?scan=paypal` and reads the ID off the file in the same round trip
+  (`{ attachment, scan }`; a failed read keeps the file and answers
+  `scan: null`, and the field says to type it). The panel lists what is on
+  file as chips beside the drop box, read-only when the viewer cannot edit
+  the PO, and removing one deletes only the order's own R2 object. The
+  hand-off body no longer carries a client-supplied screenshot key, which
+  closes RS-073 (a pickup hand-off orphaned the upload).
+
+### Features
+
+- **Each bank payment on a PO links back to its transaction.** The *Bank
+  payments* rows on the Cost Payment tab open the Payments page pinned to
+  the PO with that row expanded (`#/payments/po/<id>?txn=<id>`); the header's
+  *Open Payments* button still opens the first.
+
+## [1.166.0] - 2026-09-20
+
+### Features
+
+- **A new PO starts at a 50% commission rate** (RS-087). Since the
+  per-order rate arrived (migration 0030, v0.1.1) a PO was born with no
+  rate at all — NULL,
+  read as 0% by the dashboard, `/api/me` and realized profit — and the
+  desktop edit page seeded its field with 0, the phone with a blank. Now
+  `orders.commission_rate` defaults to `0.5` (migration 0132), so every PO
+  created from here on — the desktop form, the phone's capture flow, a
+  package turned into a PO — carries 50% until a manager changes it. It is
+  a column default, not a backfill: the POs that already exist without a
+  rate keep it that way, and a manager who clears the rate still gets NULL.
+- **The phone's camera button asks which item is going in** (RS-087).
+  Picking a Draft from the *Continue a draft?* list used to open the Review
+  screen — the line list, then Delivery and Payment folded open — and left
+  the user to find the add row below the lines. The camera was pressed to
+  add something, so the Review screen now opens with a sheet over it asking
+  *Which kind of item is going in?* — the same RAM / SSD / HDD / Other
+  targets as the add row — and the chosen kind opens the line form at once.
+  Dismissing the sheet leaves Review as it was; Shipping's *Create PO*, which
+  reopens a draft for its details rather than to add a line, still opens
+  Review with no sheet.
+- **Submit on the Review screen opens the PO it just submitted** (RS-087),
+  `#/purchase-orders/<id>`, instead of the whole Orders list — for the draft
+  that was PATCHed and the order that was POSTed alike.
+
+## [1.165.0] - 2026-09-20
+
+### Features
+
+- **The commission payment is the screenshot alone, and Done asks for it
+  only when it is missing** (RS-086). v1.163.0's Commission-payment block
+  carried a PayPal | Cash picker and a transaction ID read off the
+  screenshot; neither was wanted. The desktop Commission tab and the phone
+  fold now hold one thing: the drop box for the screenshot that shows the
+  purchaser was paid, with no panel around it, and purchasers see the list
+  read-only. **Ready to Pay → Done checks for it first**: with a screenshot
+  on file the move is as plain as any other stage (the desktop stages it for
+  Save, the phone advances); without one the *Mark order as Done* dialog
+  opens and asks for it — its uploads land in the same Commission bucket the
+  tab shows, so a file attached in either place appears in the other. The
+  dialog is a prompt, not a gate: Confirm still works with nothing attached,
+  and `/advance` refuses nothing. Gone with the picker: `orders.commission_method`
+  and `commission_txn_id` (migration 0131), `PUT /api/orders/:id/commission-payment`,
+  and the `scan` the Commission upload used to answer. One consequence,
+  stated on the ticket: a PO that already has a screenshot never shows the
+  Done dialog again, so its closing note — only ever typed there — is no
+  longer reachable.
+
+## [1.164.0] - 2026-09-20
+
+### Features
+
+- **A PO whose every line has sold is *Sold*** (RS-085). The lifecycle ran
+  Draft → In Transit → Reviewing → Ready to Pay → Done and stopped at
+  "commission paid"; whether the goods had all gone was only visible line by
+  line, or through the manager's Realized meter. `sold` is now a sixth
+  lifecycle value with one rule — the PO is Done, has at least one line, and
+  no line is anything but `Sold` — and one writer, `services/orderSold.ts`,
+  which settles it inside the two transactions that can make the rule true:
+  a sell order reaching Done that consumes a PO's last unsold line, and a
+  manager marking Done a PO whose lines have all sold (it lands on Sold in
+  that one step). Nobody picks it — `toStage: sold` is refused — and a
+  fully-sold PO still at Ready to Pay waits for the purchaser to be paid.
+  Managers get a Sold chip in the PO list (desktop rail and phone scroller,
+  hidden with Done by default) and, on the PO page, Sold on Done's step with
+  a "Sold out" panel; a reopen to Reviewing or Ready to Pay works as it does
+  from Done, and the way back re-settles. Purchasers, and a manager
+  previewing as one, are shown Done: the label, the `?status=Done` filter,
+  the detail, the spreadsheet and the activity log are all masked. The
+  dashboard, contributions and leaderboard count Sold as they count Done.
+  The inventory editor refuses to walk a line off Sold while its PO is sold.
+  Migration 0130 backfills Done POs that had already sold out, with a
+  system-authored activity row. `excludeStatus` on `GET /api/orders` now
+  takes repeated values.
+
+## [1.163.0] - 2026-09-20
+
+### Features
+
+- **The Commission tab records how the commission was paid, and the Payment
+  tab is now *Cost Payment*** (RS-084). A PO carries two payments — what the
+  supplier was paid for the goods, and what the purchaser was paid on it —
+  and until now only the first had a home, under a tab that just said
+  *Payment*. That tab (and the phone fold, the Review step and the checkpoint
+  section that share its name) is now *Cost Payment*, and the Commission tab
+  on desktop and the Commission fold on the phone gain a **Commission
+  payment** block beneath the maths: PayPal or Cash, PayPal preselected, a
+  PayPal transaction ID, and a screenshot drop box. A dropped PayPal
+  screenshot is stored under the order and read for its transaction ID the
+  way the cost payment's screenshot already is; an empty ID is filled from
+  it, an ID already typed is kept and the reader says so. Managers record it
+  at any stage — the commission is paid once the PO is a closed book, so the
+  block saves as it is used rather than through the page's Save, and
+  purchasers see it read-only ("was I paid"). Every change lands on the
+  Activity log. Nothing here gates Ready to Pay → Done; the record is
+  optional. New: `orders.commission_method` / `commission_txn_id`, the
+  `Commission` status-meta bucket (manager-only), `PUT
+  /api/orders/:id/commission-payment`, and a `scan` field on Commission
+  uploads (migration 0129).
+
+## [1.162.0] - 2026-09-20
+
+### Features
+
+- **The phone PO page's sections are the desktop's tabs, as folds** (RS-083).
+  Delivery, Payment, Commission, Notes & files and Activity — the same five,
+  in the same order — are each one card (`PhFold`): closed, a white row with
+  the title and the answer read back; open, a tinted header ruled off from
+  the fields inside the same card, so it is never unclear whether a section
+  is open or which fields belong to it. An amber mark says the next step is
+  waiting on that section, a blue one that it holds unsaved edits — the
+  desktop tabs' two dots. Warehouse moves into Delivery; the Cost card drops
+  the commission-rate and PayPal rows, which now appear once, in their folds.
+  **Commission is new on the phone**: a manager edits the purchaser and rate
+  there until Ready to Pay, everyone else reads them with the projected
+  earnings. The stage opens its fold — Draft the first section the hand-off
+  is missing, In Transit Delivery, Ready to Pay Commission — and any fold can
+  still be opened by hand.
+- **One sheet per stage, asking only that stage's data.** Draft → In Transit
+  asks Products, Delivery and Payment; the Commission section is gone from
+  that checkpoint on both shells. Reviewing → Ready to Pay now opens a
+  **Commission sheet** for the manager on the phone — Delivery and Payment
+  read back as ✓ rows, the purchaser and rate to confirm, *Confirm & mark
+  Ready to Pay* saves them and advances. Done keeps its evidence dialog.
+- **The phone's *Review order* step uses the same folds** — Delivery
+  (warehouse), Payment and Notes, the first two open — and the PO page's white
+  Cost card instead of its own green one, so a new order and an existing one
+  read the same way.
+
+## [1.161.2] - 2026-09-20
+
+### Fixes
+
+- **The Payment tab is two columns** (RS-082): *Paid by* over *Method* on
+  the left, the proof the chosen path needs on the right, so the short file
+  list no longer stretches across the whole tab. One column again under
+  1100px; the phone, the checkpoint and the create page are unchanged.
+
+## [1.161.1] - 2026-09-20
+
+### Fixes
+
+- **The PO page opens the tab the stage is about** (RS-081). Staging or
+  landing on In Transit opens Delivery; Ready to Pay opens Commission. Draft,
+  Reviewing and Done leave the tab alone, a tab the user picks stays until
+  the stage changes again, and a `?tab=` link still wins on load.
+- **The tab strip is no longer a scroll box.** It was `overflow-x: auto` and
+  the tabs' one-pixel underline overlap made it overflow, so a scrollbar
+  track showed under the tabs. It wraps instead, and the active underline is
+  the tab's own.
+
+## [1.161.0] - 2026-09-20
+
+The phone half of RS-080, closing the ticket: the same stage panel and the
+same editable delivery facts as the desktop, in the phone's own shape.
+
+### Features
+
+- **The phone's status card shows the stage, not only the dots.** While In
+  Transit it carries the linked package's Shippo journey with **Refresh** (the
+  "not switched on" message inline), or *Collected by ‹name›* for a pickup.
+  A finished dot, tapped, swaps the card body for what that stage recorded —
+  who submitted and how it was handed off, who moved it on — with *Back to
+  ‹current›*; the dot shows a ✓ so it reads as done.
+- **A Delivery fold above the Payment fold.** Source, shipping label or local
+  pickup, the collector, and the tracking number with carrier chips — the
+  checkpoint's fields — folded behind a header that reads back the answer.
+  They save with the page, count as material for a purchaser past Draft,
+  and the *Before you submit* list gains a *How the goods get here* row that
+  opens the fold. The list now reads the server's `blockers` for anything
+  not edited since it was saved, like the desktop.
+
+### Internal
+
+- `OrderMetaDraft` gains `source`, `delivery`, `byUserId` and a raw
+  `tracking` with its carrier pick; `resolveTracking()` is the pure half of
+  `useTrackingInput` for state that lives in the shell. The phone's activity
+  log shares one fetch with the look-back.
+
+## [1.160.0] - 2026-09-20
+
+The desktop half of RS-080: the purchase-order page rebuilt around its status,
+with one home per fact. The page head and the items card with its cost
+breakdown are exactly as they were; everything under them changed.
+
+### Features
+
+- **Order status is its own card, with a stage panel under the stepper.** A
+  Draft shows the *Before you submit* list — each unmet row links to the
+  section that fixes it and names what is missing in a few words, each met
+  row reads back its answer — beside the one next step. In Transit shows the
+  linked package's Shippo state with a **Refresh** that asks the carrier now
+  (the "tracking is not switched on" message appears inline), or who collected
+  a local pickup. Reviewing, Ready to Pay and Done say what the stage is
+  about and offer the next move. The existing lock, gate, revert and pending
+  banners sit between the stepper and the panel.
+- **Look back at a finished stage.** Every reached step is clickable and shows
+  what that stage recorded, from the activity log: who submitted and how it
+  was handed off, the final journey, who moved it on and when, the Done note
+  and files. Read-only, with *Back to ‹current›*; a manager also gets *Move
+  back to ‹stage›* where the order allows it. The next step is the only
+  forward click — a manager now stages one move at a time (the two-stage jump
+  is gone), and Save commits it: the footer's button reads *Save · Mark as
+  ‹stage›* while a move is pending, with Undo beside it.
+- **Stage moves stay on the page.** After the hand-off or a Save that moved
+  the stage, the page re-reads the order and lands on the new stage's panel
+  instead of returning to the list. A plain save returns to the list as
+  before.
+- **Five tabs, one fact each** — Delivery, Payment, Commission, Notes &
+  files, Activity. The aside is gone: its "Payment detail" card (which was
+  commission maths) is the Commission tab, the bank-payments ledger sits under
+  Payment, the activity log is a tab. Warehouse, purchaser, rate and paid-by
+  each have one input now. Tabs carry an amber dot while a Draft still needs
+  something under them and a blue dot for unsaved edits; the open tab rides
+  in the URL (`?tab=payment`). All panels stay mounted, so typing never loses
+  focus when the readiness list recomputes.
+- **Delivery is editable on the page until Ready to Pay.** Source, shipping
+  label or local pickup, the collector, and the tracking number (carrier
+  recognised from its shape, as in the checkpoint) save through the order.
+  A purchaser's change past Draft is material — back to Draft for the
+  manager's change-review; a new number moves the linked package rather than
+  minting a second one. A one-line live tracking state sits under the fields.
+- **A sticky footer** holds the total cost, what the purchaser earns,
+  *Unsaved edits: Products, Payment…*, Discard and Save. The line and unit
+  counts that sat there are the items card's head.
+
+### Internal
+
+- `DesktopEditOrder` keeps every guard, dirty flag, the save path and the
+  modals; the new pieces are render-only under `pages/desktop/order/`
+  (`StagePanel`, `StageLookback`, `OrderTabs`, `DeliveryTab`, `CommissionTab`,
+  `OrderFooter`, `PoPaymentsLedger`). Its private `txnBlocked` /
+  `cashShotBlocked` copies are gone; `lib/poReadiness.ts` is the one rule.
+- `DesktopApp` mounts the page with an `onReload` that refetches the order and
+  remounts on it. `.oe-body` is a column; the `oe-side*` rules and six
+  now-unused i18n keys are removed.
+
+## [1.159.0] - 2026-09-20
+
+The shared frontend half of RS-080: one readiness rule for every surface, and
+a hand-off dialog that asks only for what the page does not already hold. No
+layout changes yet — the desktop page restructure follows.
+
+### Features
+
+- **The hand-off is a checkpoint.** *Mark as In Transit* now opens with a ✓
+  row for each section the order already answers — *Products & cost*, *How
+  the goods get here*, *Payment*, and *Commission* for a manager — and expands
+  only the ones it doesn't, seeded from the page and from the linked package.
+  A PO that holds everything is one click; a *Change* button opens a met
+  section for anyone who wants to look. The subtitle counts what is left
+  ("1 still to fill in — the rest is already on the order"). Same on the
+  phone's sheet.
+- **One readiness rule** (`lib/poReadiness.ts`) feeds the phone's *Before you
+  submit* list and the checkpoint, and will feed the desktop's status panel:
+  it wraps the per-field hand-off rule plus the products/cost rule the two
+  shells each carried, routes every blocker to the section that fixes it, and
+  prefers the server's own `blockers` list for anything not edited since it
+  was saved. The desktop's private `txnBlocked` / `cashShotBlocked` copies go
+  in the next release with the page.
+- **A route may carry a page-local query** — `#/purchase-orders/PO-1?tab=payment`
+  — read with `readHashQuery()` and rewritten in place with
+  `replaceHashQuery()`; `navigate()` compares paths only, so a page changing
+  its own query never re-routes.
+
+### Internal
+
+- `lib/orderLookback.ts` turns the audit log into what each finished stage
+  recorded (last match wins, so a reverted-and-resubmitted order shows its
+  latest pass); `lib/useOrderEvents.ts` fetches the log once per page and
+  `OrderActivityLog` accepts it as a prop instead of fetching its own.
+- `lib/useTrackingInput.ts` is the pasted-number → carrier recipe lifted out
+  of the hand-off form, for the Delivery section to share.
+- `POST /api/packages/:id/refresh` now returns `trackingStatus`, the same
+  shape `GET /api/orders/:id` reads for the journey.
+
+## [1.158.0] - 2026-09-20
+
+The backend half of RS-080, the purchase-order page redesign: the facts the
+Draft → In Transit hand-off collects stop being frozen the moment the dialog
+closes and become ordinary fields of the order.
+
+### Features
+
+- **`PATCH /api/orders/:id` accepts the hand-off facts** — `source`,
+  `handoffMethod` (`pickup` | `label`), `handoffBy`, and `trackingNumber` +
+  `carrier` — with the same validation the hand-off applies. The collector is
+  cleared unless the method is pickup, the way `payment_method` follows
+  `payment`. They are audited under `meta_changed` (the collector by name), and
+  for a purchaser they are material: changing one after submission sends the
+  order back to Draft for the manager's change-review, and a re-save of the
+  values the order already holds does not. Managers may still edit them at
+  Ready to Pay; they are logistics, not the frozen book.
+- **A tracking number edit moves the box, not a copy of it.** The same number
+  is a no-op; a different one updates the linked package in place with its
+  tracking state reset and re-registers it with Shippo, so a typo fix leaves no
+  phantom row on the Shipping page. A number already tracked on another PO is
+  refused with a 409 that names the PO; a number on a standalone package adopts
+  that package; switching to pickup unlinks the box rather than deleting it,
+  and a PO minted from a package now hands off with the package's own number
+  instead of colliding with itself.
+- **`GET /api/orders/:id` reports `blockers`** — every reason a Draft cannot
+  leave yet, in display order (`noCost`, `missingSource`, `missingDelivery`,
+  `missingTracking`, `missingMethod`, `missingTxnId`, `unknownTxnId`,
+  `missingChatShot`, `missingCashShot`), computed by the one function the
+  advance refuses on. It reads locally and never calls PayPal. `package.source`
+  rides along; the older `txnRequired` / `chatShotRequired` /
+  `cashShotRequired` flags stay for shells that still read them.
+- **The hand-off takes a partial body.** Whatever the checkpoint omits is read
+  off the order under the same lock, so a page that already holds everything
+  hands off with `{}`. The hand-off refuses on every blocker; `/advance` and a
+  manager stage-jump keep refusing only on the cost and proof-of-payment rules,
+  so a legacy Draft with no recorded source is never stuck. One consequence: a
+  company card with no method is now a 409 `missingMethod` judged on the merged
+  row rather than a 400 on the body.
+- **The linked PO's owner may refresh the package's tracking**
+  (`POST /api/packages/:id/refresh`), not only the box's creator or a manager —
+  a manager handing an order off on someone's behalf creates the box, and the
+  PO page's Refresh is the owner's.
+
+### Internal
+
+- `advanceOrderTx`'s five leave-Draft guards are one `leaveDraftBlockers()`
+  list in `services/orderTxnRule.ts`; the enforced set is unchanged for
+  `/advance`. Its header no longer claims the tracking poll as a caller.
+- `services/orderHandoff.ts` gains `setOrderPackageTx`,
+  `unlinkOrderPackagesTx`, `packageChanges` and `nameHandoffByChange`, shared by
+  the hand-off and PATCH; the route-level validators (`sourceErr`,
+  `trackingErr`, `handoffByErr`) are shared the same way.
+
 ## [1.157.1] - 2026-09-20
 
 ### Fixes

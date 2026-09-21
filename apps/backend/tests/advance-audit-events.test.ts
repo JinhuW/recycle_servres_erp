@@ -19,6 +19,7 @@ describe('POST /api/orders/:id/advance — writes status audit events', () => {
     const created = await api<{ id: string }>('POST', '/api/orders', {
       token,
       body: {
+        warehouseId: 'WH-LA1',
         paypalTxnId: 'TESTPAYTXN0000001',
         category: 'RAM',
         lines: [{

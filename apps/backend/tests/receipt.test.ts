@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { normalizeAmount, buildReceiptName, maybeRenameReceipt } from '../src/ai/receipt';
+import { normalizeAmount, buildReceiptName, suffixFilename, maybeRenameReceipt } from '../src/ai/receipt';
 import type { Env } from '../src/types';
 
 describe('normalizeAmount', () => {
@@ -44,6 +44,21 @@ describe('buildReceiptName', () => {
   it('falls back to the MIME map when the name has no extension', () => {
     expect(buildReceiptName('bank', '42.00', 'receipt', 'image/webp', now))
       .toBe('2026-07-06-bank-42.00.webp');
+  });
+});
+
+describe('suffixFilename', () => {
+  it('slots the suffix in ahead of the extension', () => {
+    expect(suffixFilename('2026-07-06-paypal-1400.00.jpg', '8XY12345AB678901C'))
+      .toBe('2026-07-06-paypal-1400.00-8XY12345AB678901C.jpg');
+  });
+
+  it('appends when there is no extension', () => {
+    expect(suffixFilename('receipt', 'ABC')).toBe('receipt-ABC');
+  });
+
+  it('leaves the extension as it was', () => {
+    expect(suffixFilename('IMG_2041.PNG', 'ABC')).toBe('IMG_2041-ABC.PNG');
   });
 });
 

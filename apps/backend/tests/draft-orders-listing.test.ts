@@ -89,6 +89,9 @@ describe('GET /api/orders draft visibility', () => {
       body: {
         paypalTxnId: 'TESTPAYTXN0000001',
         category: 'RAM',
+        // The seeded purchaser has no default warehouse, and a PO cannot
+        // leave Draft without one.
+        warehouseId: 'WH-LA1',
         lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }],
       },
     });

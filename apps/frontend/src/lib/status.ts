@@ -3,13 +3,21 @@
 // here as a static constant rather than a manager-editable table.
 //
 //   Draft (purchaser is preparing) → In Transit → Reviewing → Ready to Pay
-//   (review finished, commission owed) → Done (commission paid).
+//   (review finished, commission owed) → Done (commission paid) → Sold (every
+//   line sold; set by the system, shown to managers only).
 
-import type { Warehouse } from './types';
+export type OrderStatus = 'Draft' | 'In Transit' | 'Reviewing' | 'Ready to Pay' | 'Done' | 'Sold';
 
-export type OrderStatus = 'Draft' | 'In Transit' | 'Reviewing' | 'Ready to Pay' | 'Done';
-
+// The stepper spine: the stages someone drives. Sold is not one — the backend
+// writes it once a Done order has no unsold line — so it is absent here, and
+// every stepper shows a sold order on Done's step under the Sold label.
 export const ORDER_STATUSES: OrderStatus[] = ['Draft', 'In Transit', 'Reviewing', 'Ready to Pay', 'Done'];
+
+// Every status a PO can carry, for filter chips.
+export const PO_STATUSES: OrderStatus[] = [...ORDER_STATUSES, 'Sold'];
+
+// The step a status sits on, for index math over ORDER_STATUSES.
+export const spineStatus = (s: string): string => (s === 'Sold' ? 'Done' : s);
 
 // What a *line* can be. Ready to Pay is a PO stage only: its lines read Done,
 // because the stock and sellable buckets key on line status and review has
@@ -30,6 +38,7 @@ export const WORKFLOW_STAGES: WorkflowStage[] = [
   { id: 'reviewing',    label: 'Reviewing' },
   { id: 'ready_to_pay', label: 'Ready to Pay' },
   { id: 'done',         label: 'Done' },
+  { id: 'sold',         label: 'Sold' },
 ];
 
 // lifecycle slug → stage label. `order.status` can collapse to 'Mixed' when a
@@ -39,13 +48,13 @@ export const LIFECYCLE_STATUS: Record<string, string> = Object.fromEntries(
   WORKFLOW_STAGES.map(s => [s.id, s.label]),
 );
 
-const TONE: Record<string, 'info' | 'warn' | 'pos' | 'accent' | 'muted'> = {
+const TONE: Record<string, 'info' | 'warn' | 'pos' | 'accent' | 'muted' | 'cool'> = {
   'Draft':        'muted',
   'In Transit':   'info',
   'Reviewing':    'warn',
   'Ready to Pay': 'accent',
   'Done':         'pos',
-  'Sold':         'muted',
+  'Sold':         'cool',
   'Archived':     'muted',
   'Mixed':        'muted',
   'Pending':      'warn',
@@ -53,33 +62,13 @@ const TONE: Record<string, 'info' | 'warn' | 'pos' | 'accent' | 'muted'> = {
 };
 
 export const statusTone = (s: string) => TONE[s] ?? 'info';
-// "Done" is the terminal state — the "hide Done" filters and the view/edit
-// icon key on it. A Ready to Pay order is still on the manager's plate.
-export const isCompleted = (s: string) => s === 'Done';
+// Done and Sold are the finished states — the "hide Done" filters and the
+// view/edit icon key on them. A Ready to Pay order is still on the manager's
+// plate.
+export const isCompleted = (s: string) => s === 'Done' || s === 'Sold';
 // The book closes when the review does: from Ready to Pay on, lines, costs
 // and ownership are read-only for everyone (managers keep the stage moves).
-export const isClosedBook = (s: string) => s === 'Ready to Pay' || s === 'Done';
-
-// Stages only the PO's warehouse manager may take the order into. Mirrors
-// WAREHOUSE_MANAGER_GATED in the backend's services/orderAdvance.ts.
-export const WAREHOUSE_MANAGER_GATED: OrderStatus[] = ['Reviewing', 'Ready to Pay'];
-
-/**
- * The stages a manager who is not `warehouse`'s manager may NOT pick while the
- * order sits at `savedStatus`: everything from the next gated stage on, since
- * a jump past it crosses it too. Empty when the warehouse has no manager, when
- * the list has not loaded (the backend still refuses), when the user is that
- * manager, or once the order is already past the last gate.
- */
-export function warehouseGateLockedStatuses(
-  savedStatus: string, warehouse: Warehouse | undefined, userId: string | undefined,
-): OrderStatus[] {
-  const mgr = warehouse?.managerUserId;
-  if (!mgr || mgr === userId) return [];
-  const from = ORDER_STATUSES.indexOf(savedStatus as OrderStatus);
-  const gates = WAREHOUSE_MANAGER_GATED.map(s => ORDER_STATUSES.indexOf(s)).filter(g => g > from);
-  return gates.length ? ORDER_STATUSES.slice(Math.min(...gates)) : [];
-}
+export const isClosedBook = (s: string) => s === 'Ready to Pay' || isCompleted(s);
 
 // Keep in sync with backend ai.ts CONFIDENCE_FLOOR. Lowered from 0.6 → 0.5
 // alongside the prompt rubric recalibration in ai/prompts.ts so that clean

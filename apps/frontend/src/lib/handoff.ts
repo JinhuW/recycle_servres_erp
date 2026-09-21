@@ -10,8 +10,13 @@ export type HandoffDelivery = 'pickup' | 'label';
 export type HandoffMethod = 'paypal' | 'cash';
 
 export type HandoffRules = {
+  /** Empty when the order has none — routine for a PO the phone's Review
+   *  screen minted, which POSTs lines only. */
+  warehouseId: string;
   source: PackageSource | null;
   delivery: HandoffDelivery | null;
+  /** Empty when no collector is picked; only judged on a pickup. */
+  byUserId: string;
   trackingValid: boolean;
   carrier: Carrier | null;
   paidBy: 'company' | 'self';
@@ -19,7 +24,7 @@ export type HandoffRules = {
   method: HandoffMethod | null;
   txnId: string;
   chatAttachmentCount: number;
-  /** Payment-bucket attachments: the cash screenshot(s). */
+  /** Payment-bucket attachments: the cash (or PayPal) screenshot(s). */
   proofAttachmentCount: number;
   /** What the server said about the *saved* order. Each verdict was computed
    *  for the saved paid-by and method — `txnRequired` on the company /
@@ -39,8 +44,10 @@ export type HandoffRules = {
 /** i18n keys of everything still blocking the hand-off, in display order. */
 export function handoffBlockerKeys(r: HandoffRules): string[] {
   const out: string[] = [];
+  if (!r.warehouseId) out.push('hoNeedWarehouse');
   if (!r.source) out.push('hoNeedSource');
   if (r.delivery === null) out.push('hoNeedDelivery');
+  if (r.delivery === 'pickup' && !r.byUserId) out.push('hoNeedCollector');
   if (r.delivery === 'label') {
     if (!r.trackingValid) out.push('hoNeedTracking');
     else if (!r.carrier) out.push('hoNeedCarrier');
@@ -72,8 +79,6 @@ export type HandoffBody = {
   payment: 'company' | 'self';
   paymentMethod?: HandoffMethod;
   paypalTxnId?: string;
-  paymentScreenshotKey?: string;
-  paymentScreenshotUrl?: string;
   onBehalfOfUserId?: string;
   commissionRate?: number | null;
 };
@@ -89,7 +94,6 @@ export type HandoffDraft = {
   /** Non-null for a company order by the time submit is allowed (blocker). */
   method: HandoffMethod | null;
   txnId: string;
-  screenshot: { key: string; url: string } | null;
   /** Manager-only; undefined leaves the owner / rate untouched. */
   ownerId?: string;
   commissionRate?: number | null;
@@ -108,13 +112,9 @@ export function buildHandoffBody(d: HandoffDraft): HandoffBody {
   };
   if (d.paidBy === 'company' && d.method) {
     body.paymentMethod = d.method;
-    if (d.method === 'paypal') {
-      if (d.txnId.trim()) body.paypalTxnId = d.txnId.trim();
-      if (d.screenshot) {
-        body.paymentScreenshotKey = d.screenshot.key;
-        body.paymentScreenshotUrl = d.screenshot.url;
-      }
-    }
+    // The PayPal screenshot is not in the body: it was uploaded as a Payment
+    // attachment the moment it was dropped.
+    if (d.method === 'paypal' && d.txnId.trim()) body.paypalTxnId = d.txnId.trim();
   }
   if (d.ownerId !== undefined) body.onBehalfOfUserId = d.ownerId;
   if (d.commissionRate !== undefined) body.commissionRate = d.commissionRate;

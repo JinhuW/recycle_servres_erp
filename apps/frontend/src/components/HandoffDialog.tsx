@@ -1,15 +1,21 @@
+import { useEffect, useState, type ReactNode } from 'react';
 import { Icon } from './Icon';
 import { PaymentFields } from './PaymentFields';
+import { fmtUSD } from '../lib/format';
 import { useT } from '../lib/i18n';
 import { PACKAGE_SOURCES, packageSourceLabelKey } from '../lib/packageSource';
 import { CARRIERS } from '../lib/carrierDetect';
+import type { ReadinessItem, ReadinessTab } from '../lib/poReadiness';
 import { FMT_HINT_KEY } from '../lib/useAddPackageForm';
 import { useHandoffForm, type HandoffInit } from '../lib/useHandoffForm';
 import { useEscapeKey } from '../lib/useEscapeKey';
 
-// The Draft → In Transit hand-off. One body (`HandoffFields`) for both shells,
-// wrapped here in the desktop modal and in PhHandoffSheet on the phone. Every
-// rule lives in lib/handoff.ts + lib/useHandoffForm.ts; this file is markup.
+// The Draft → In Transit checkpoint. One body (`HandoffFields`) for both
+// shells, wrapped here in the desktop modal and in PhHandoffSheet on the phone.
+// Each section folds to a ✓ row when the order already answers it and opens
+// only when it doesn't — a page that holds everything is one click — with a
+// "Change" affordance for the person who wants to look anyway. Every rule
+// lives in lib/poReadiness.ts + lib/useHandoffForm.ts; this file is markup.
 
 type Props = {
   init: HandoffInit;
@@ -17,18 +23,98 @@ type Props = {
   onDone: (r: { packageId: string | null }) => void;
 };
 
-export function HandoffFields({ f, phone = false }: { f: ReturnType<typeof useHandoffForm>; phone?: boolean }) {
+type Form = ReturnType<typeof useHandoffForm>;
+
+function itemFor(f: Form, tab: ReadinessTab): ReadinessItem | undefined {
+  return f.readiness.find(r => r.tab === tab);
+}
+
+/** A section that is a ✓ row while met and a form while not. Once open —
+ *  because it was unmet, or because someone pressed Change — it stays open:
+ *  a fold that snaps shut the moment the answer becomes valid cuts a typed
+ *  id off at its first character and a 15-digit number at its 12th. */
+function HandoffSection({ item, title, summary, children, phone }: {
+  item: ReadinessItem | undefined; title: string; summary: string; children: ReactNode; phone: boolean;
+}) {
   const { t } = useT();
+  const ok = item?.ok ?? false;
+  const [opened, setOpened] = useState(!ok);
+  useEffect(() => { if (!ok) setOpened(true); }, [ok]);
+  const open = !ok || opened;
+  return (
+    <section className={'ho-sec' + (ok ? ' ho-sec-met' : '')} data-tab={item?.tab}>
+      <div className="ho-sec-head">
+        <span className={'ho-check ' + (ok ? 'ok' : item?.blocking === false ? 'soft' : 'miss')} aria-hidden="true">
+          {ok ? <Icon name="check" size={11} /> : '!'}
+        </span>
+        <span className="ho-sec-title">{title}</span>
+        {/* An unmet section's fields are open right below and the footer names
+            what is missing; saying it a third time here only crowds a phone. */}
+        {ok && <span className="ho-sec-sum">{summary}</span>}
+        {ok && !opened && (
+          <button type="button" className={phone ? 'ph-btn ghost' : 'btn ghost sm'} onClick={() => setOpened(true)}>
+            {t('hoChange')}
+          </button>
+        )}
+      </div>
+      {open && children}
+    </section>
+  );
+}
+
+export function HandoffFields({ f, phone = false }: { f: Form; phone?: boolean }) {
+  const { t, lang } = useT();
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const selectCls = phone ? 'input' : 'select';
+  const order = f.order;
+
+  const { units, goods } = f.lines;
+  const products = itemFor(f, 'products');
+
+  const wh = f.warehouses.find(w => w.id === f.warehouseId);
+  const collector = f.members.find(m => m.id === f.byUserId)?.name ?? order.handoffBy?.name ?? null;
+  const deliverySummary = [
+    f.source ? t(packageSourceLabelKey(f.source)) : null,
+    wh?.short ?? null,
+    f.delivery === 'pickup' ? [t('hoPickup'), collector].filter(Boolean).join(' · ')
+      : f.delivery === 'label' ? [f.carrier, f.tn].filter(Boolean).join(' ') : null,
+  ].filter(Boolean).join(' · ');
+  const proofN = f.paidBy === 'self' ? f.proof.chatAtts.length
+    : f.method === 'cash' || f.method === 'paypal' ? f.proof.proofAtts.length : 0;
+  const paymentSummary = [
+    f.paidBy === 'self' ? t('paySelfShort') : t('payCompanyShort'),
+    f.paidBy === 'company' ? (f.method === 'cash' ? t('hoMethodCash') : f.method === 'paypal' ? t('hoMethodPaypal') : null) : null,
+    f.paidBy === 'company' && f.method === 'paypal' ? f.txnId.trim() || null : null,
+    proofN > 0 ? t('payProofOnFile', { n: proofN }) : null,
+  ].filter(Boolean).join(' · ');
 
   return (
     <div className="ho-body">
-      <section className="ho-sec">
+      {/* Products are the page's, not the checkpoint's: a row that says so,
+          never a form. */}
+      <section className={'ho-sec' + (products?.ok ? ' ho-sec-met' : '')} data-tab="products">
+        <div className="ho-sec-head">
+          <span className={'ho-check ' + (products?.ok ? 'ok' : 'miss')} aria-hidden="true">
+            {products?.ok ? <Icon name="check" size={11} /> : '!'}
+          </span>
+          <span className="ho-sec-title">{t('poReadyProducts')}</span>
+          <span className={'ho-sec-sum' + (products?.ok ? '' : ' miss')}>
+            {products?.ok
+              ? t('subUnitsCost', { n: units, cost: fmtUSD(goods, locale) })
+              : (products?.needKeys ?? []).map(k => t(k)).join(' ')}
+          </span>
+        </div>
+      </section>
+
+      <HandoffSection item={itemFor(f, 'delivery')} title={t('poReadyDelivery')} summary={deliverySummary} phone={phone}>
         <div className="ho-row">
           <div className="field">
             <label className="label" htmlFor="ho-warehouse">{t('hoWarehouse')}</label>
             <select id="ho-warehouse" className={selectCls} value={f.warehouseId} onChange={e => f.setWarehouseId(e.target.value)}>
-              {f.warehouses.length === 0 && <option value={f.warehouseId}>{f.warehouseId || '—'}</option>}
+              {/* An unset warehouse must not borrow the first option's name. */}
+              {(f.warehouses.length === 0 || !f.warehouseId) && (
+                <option value={f.warehouseId} disabled={!f.warehouseId}>{f.warehouseId || t('hoWarehousePick')}</option>
+              )}
               {f.warehouses.map(w => <option key={w.id} value={w.id}>{w.short} — {w.region}</option>)}
             </select>
           </div>
@@ -40,10 +126,7 @@ export function HandoffFields({ f, phone = false }: { f: ReturnType<typeof useHa
             </select>
           </div>
         </div>
-      </section>
 
-      <section className="ho-sec">
-        <div className="ho-sec-title">{t('hoDelivery')}</div>
         <div className="ho-tiles" role="radiogroup" aria-label={t('hoDelivery')}>
           {(['pickup', 'label'] as const).map(d => (
             <button
@@ -65,7 +148,9 @@ export function HandoffFields({ f, phone = false }: { f: ReturnType<typeof useHa
           <div className="field">
             <label className="label" htmlFor="ho-by">{t('hoPickedBy')}</label>
             <select id="ho-by" className={selectCls} value={f.byUserId} onChange={e => f.setByUserId(e.target.value)}>
-              {f.members.length === 0 && <option value={f.byUserId}>…</option>}
+              {f.members.length === 0
+                ? <option value={f.byUserId}>…</option>
+                : <option value="">{t('poCollectorPick')}</option>}
               {f.members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
             </select>
           </div>
@@ -109,10 +194,9 @@ export function HandoffFields({ f, phone = false }: { f: ReturnType<typeof useHa
             <div className="ship-add-hint" aria-live="polite">{f.hintKey ? t(f.hintKey) : ' '}</div>
           </>
         )}
-      </section>
+      </HandoffSection>
 
-      <section className="ho-sec">
-        <div className="ho-sec-title">{t('hoPayment')}</div>
+      <HandoffSection item={itemFor(f, 'payment')} title={t('hoPayment')} summary={paymentSummary} phone={phone}>
         <PaymentFields
           paidBy={f.paidBy} onPaidBy={f.setPaidBy}
           method={f.method} onMethod={f.setMethod}
@@ -122,40 +206,8 @@ export function HandoffFields({ f, phone = false }: { f: ReturnType<typeof useHa
           proof={f.proof}
           idPrefix="ho"
         />
-      </section>
+      </HandoffSection>
     </div>
-  );
-}
-
-export function HandoffManagerFields({ f, phone = false }: { f: ReturnType<typeof useHandoffForm>; phone?: boolean }) {
-  const { t } = useT();
-  const selectCls = phone ? 'input' : 'select';
-  return (
-    <section className="ho-sec">
-      <div className="ho-sec-title">{t('hoManager')} <small>{t('hoManagerOnly')}</small></div>
-      <div className="ho-row">
-        <div className="field">
-          <label className="label" htmlFor="ho-owner">{t('poOnBehalfLabel')}</label>
-          <select id="ho-owner" className={selectCls} value={f.ownerId} onChange={e => f.setOwnerId(e.target.value)}>
-            {!f.members.some(m => m.id === f.ownerId) && <option value={f.ownerId}>…</option>}
-            {f.members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-          </select>
-        </div>
-        <div className="field">
-          <label className="label" htmlFor="ho-rate">{t('commissionRate')}</label>
-          <input
-            id="ho-rate"
-            className="input tabular"
-            type="number"
-            min={0}
-            max={100}
-            step="0.1"
-            value={f.commissionPct}
-            onChange={e => f.setCommissionPct(e.target.value)}
-          />
-        </div>
-      </div>
-    </section>
   );
 }
 
@@ -175,6 +227,7 @@ export function HandoffDialog({ init, onCancel, onDone }: Props) {
   const { t } = useT();
   const f = useHandoffForm(init, onDone);
   useEscapeKey(onCancel, !f.busy);
+  const missing = f.blockerKeys.length;
 
   return (
     <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget && !f.busy) onCancel(); }}>
@@ -182,7 +235,7 @@ export function HandoffDialog({ init, onCancel, onDone }: Props) {
         <div className="modal-head">
           <div>
             <div className="modal-title" id="ho-title">{t('hoTitle')}</div>
-            <div className="modal-sub">{t('hoSub')}</div>
+            <div className="modal-sub">{missing ? t('hoNeedsN', { n: missing }) : t('hoAllSet')}</div>
           </div>
           <button type="button" className="btn ghost sm" onClick={onCancel} disabled={f.busy} aria-label={t('cancel')}>
             <Icon name="x" size={14} />
@@ -190,7 +243,6 @@ export function HandoffDialog({ init, onCancel, onDone }: Props) {
         </div>
         <div className="modal-body">
           <HandoffFields f={f} />
-          {init.isManager && <HandoffManagerFields f={f} />}
         </div>
         <div className="modal-foot ho-foot">
           <HandoffBlockers keys={f.blockerKeys} />

@@ -1,15 +1,17 @@
-// The PO lifecycle advance, extracted from POST /api/orders/:id/advance so the
-// shipping tracking poll can apply the confirmed business rule — carrier
-// movement moves a Draft PO to In Transit — through the exact same guards,
-// audit events, and line-status cascade as the route.
+// The PO lifecycle advance, shared by POST /api/orders/:id/advance and the
+// Draft → In Transit hand-off (services/orderHandoff.ts) so both doors apply
+// the same guards, audit events, and line-status cascade. The tracking poll
+// used to be a third caller; carrier movement no longer moves a PO.
 //
 // Must run inside the caller's transaction: the lifecycle read, every guard,
 // and all writes happen under one FOR UPDATE lock on the orders row.
 
-import { writeOrderEvent, wasEverSubmitted } from './orderAudit';
+import { writeOrderEvent } from './orderAudit';
+import { settleSoldTx } from './orderSold';
+import type { Role } from '../types';
 import { writeSellOrderEvent } from './sellOrderAudit';
 import { notify, notifyManagers } from '../lib/notify';
-import { companyCashShotMissing, companyPayTxnMissing, companyPayTxnUnknown, selfPayChatMissing } from './orderTxnRule';
+import { ENFORCED_EVERYWHERE, leaveDraftBlockers, type LeaveDraftBlocker } from './orderTxnRule';
 import type { SqlLike } from './orderAudit';
 import type { SOLineSnap } from './sellOrderLineMatch';
 import { committedSellStatuses, isSellableLineStatus, openSellStatuses } from '../lib/sellCommitment';
@@ -39,12 +41,47 @@ export const LIFECYCLE_LABEL: Record<string, string> = {
   reviewing: 'Reviewing',
   ready_to_pay: 'Ready to Pay',
   done: 'Done',
+  sold: 'Sold',
 };
 
+// 'sold' is Done with every line sold — settled by services/orderSold.ts,
+// never chosen. It is deliberately absent from LINE_STATUS_FOR_LIFECYCLE: that
+// map's key order is the stages a manager drives, and a stage there gets a
+// line cascade, which a sale must remain the only writer of. For stage
+// arithmetic a sold order IS at Done: same index, same gates, nothing further
+// to advance to.
+const stageOf = (lifecycle: string): string => (lifecycle === 'sold' ? 'done' : lifecycle);
+
 // The book closes when the review does: from Ready to Pay on, the figure is
-// what the purchaser gets paid on, so lines, costs and ownership freeze.
+// what the purchaser gets paid on, so lines, costs and ownership freeze. The
+// same set is "commission owed" for the dashboard and leaderboard. A plain
+// string[] so postgres.js binds it as an array parameter.
+export const REVIEWED_LIFECYCLES: string[] = ['ready_to_pay', 'done', 'sold'];
+
 export function isClosedBook(lifecycle: string): boolean {
-  return lifecycle === 'ready_to_pay' || lifecycle === 'done';
+  return REVIEWED_LIFECYCLES.includes(lifecycle);
+}
+
+// Purchasers are told Done, not Sold: the sale is the manager's book. Read
+// paths pass effectiveRole() so a manager previewing as a purchaser sees what
+// the purchaser sees.
+export function visibleLifecycle(lifecycle: string, role: Role): string {
+  return lifecycle === 'sold' && role !== 'manager' ? 'done' : lifecycle;
+}
+
+const LABEL_TO_LIFECYCLE: Record<string, string> = Object.fromEntries(
+  Object.entries(LIFECYCLE_LABEL).map(([id, label]) => [label, id]),
+);
+
+// The stages a status label names for this reader. A purchaser's "Done" is
+// done and sold together, and "Sold" is not a word they are shown; an unknown
+// label names nothing.
+export function lifecyclesForLabel(label: string, role: Role): string[] {
+  const slug = LABEL_TO_LIFECYCLE[label];
+  if (!slug) return [];
+  if (role === 'manager') return [slug];
+  if (slug === 'sold') return [];
+  return slug === 'done' ? ['done', 'sold'] : [slug];
 }
 
 // An archived PO's goods are gone from the business, so its lines leave every
@@ -61,16 +98,6 @@ export function isClosedBook(lifecycle: string): boolean {
 // unarchive puts each line back where it was.
 export const ARCHIVED_LINE_STATUS = 'Archived';
 
-// Stages whose entry belongs to the PO's warehouse manager. A move from an
-// earlier stage into one of these — or past it in a stage-jump — is theirs
-// alone; once the order sits at or beyond it, any manager may continue, and
-// backward moves are never gated. Gating another stage is one entry here.
-const WAREHOUSE_MANAGER_GATED = new Set(['reviewing', 'ready_to_pay']);
-
-function crossesGatedStage(stages: string[], fromIdx: number, toIdx: number): boolean {
-  return stages.some((s, g) => WAREHOUSE_MANAGER_GATED.has(s) && fromIdx < g && toIdx >= g);
-}
-
 // null actor = the system (tracking poll). It is held to the purchaser rule:
 // only Draft → In Transit, never a stage jump.
 export type AdvanceActor = { id: string; name: string; role: string } | null;
@@ -81,14 +108,18 @@ export type AdvanceOutcome =
   | { kind: 'badStage'; msg: string }
   | { kind: 'archived' }
   | { kind: 'finalStage' }
+  | { kind: 'soldIsAutomatic' }
+  | { kind: 'alreadySold' }
   | { kind: 'committedLines'; offendingLineIds: string[]; sellOrderIds: string[] }
   | { kind: 'transferClaimed'; offendingLineIds: string[] }
-  | { kind: 'missingTxnId' }
-  | { kind: 'unknownTxnId'; paypalTxnId: string }
-  | { kind: 'missingChatShot' }
-  | { kind: 'missingCashShot' }
-  | { kind: 'noCost' }
+  | LeaveDraftBlocker
   | { kind: 'ok'; nextStageId: string };
+
+// Which leave-Draft blockers a door refuses on. 'rules' is the default and
+// what /advance uses: the proof-of-payment and cost rules only. The hand-off
+// passes 'all' — it is the door that collects the facts, so it is the one
+// that may refuse for want of them.
+export type AdvanceOptions = { enforce?: 'rules' | 'all' };
 
 // Line statuses in lifecycle order, so a cascade can tell which lines it would
 // move BACKWARDS. A committed line may never go backwards — not even from Done
@@ -386,16 +417,21 @@ export async function advanceOrderTx(
   id: string,
   actor: AdvanceActor,
   toStage?: string,
+  opts: AdvanceOptions = {},
 ): Promise<AdvanceOutcome> {
   const stages = Object.keys(LINE_STATUS_FOR_LIFECYCLE);
 
   const cur = (await tx`
     SELECT id, user_id, lifecycle, payment, payment_method, paypal_txn_id, created_at,
-           warehouse_id, archived_at, total_cost::float AS total_cost
+           archived_at, total_cost::float AS total_cost,
+           warehouse_id, source, handoff_method, handoff_by,
+           EXISTS (SELECT 1 FROM packages p WHERE p.order_id = orders.id) AS has_package
     FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE`)[0] as
     | { id: string; user_id: string; lifecycle: string; payment: string;
         payment_method: string | null; paypal_txn_id: string | null; created_at: Date;
-        warehouse_id: string | null; archived_at: Date | null; total_cost: number | null }
+        archived_at: Date | null; total_cost: number | null; warehouse_id: string | null;
+        source: string | null; handoff_method: string | null; handoff_by: string | null;
+        has_package: boolean }
     | undefined;
   if (!cur) return { kind: 'notFound' };
   // The lines sit at 'Archived'; a cascade here would put them back in stock
@@ -403,16 +439,20 @@ export async function advanceOrderTx(
   // this like any other stage it may not drive.
   if (cur.archived_at) return { kind: 'archived' };
 
-  const curIdx = stages.indexOf(cur.lifecycle);
+  const curIdx = stages.indexOf(stageOf(cur.lifecycle));
   let nextStageId: string;
   if (toStage) {
     if (actor?.role !== 'manager') return { kind: 'forbidden', msg: 'Only managers can jump stages' };
+    if (toStage === 'sold') return { kind: 'soldIsAutomatic' };
     if (!stages.includes(toStage)) return { kind: 'badStage', msg: 'Unknown stage' };
     nextStageId = toStage;
   } else {
     if (curIdx < 0 || curIdx >= stages.length - 1) return { kind: 'finalStage' };
     nextStageId = stages[curIdx + 1];
   }
+  // A sold order asked for Done is already there; reopening means Reviewing
+  // or Ready to Pay, and the way back to Done re-settles it.
+  if (cur.lifecycle === 'sold' && nextStageId === 'done') return { kind: 'alreadySold' };
   // Purchaser (and the system) can only advance Draft → in_transit — but ANY
   // purchaser may, not just the PO's creator: whoever handles the goods
   // submits the order. Every other transition stays manager-only.
@@ -420,73 +460,20 @@ export async function advanceOrderTx(
     return { kind: 'forbidden', msg: 'Purchasers can only advance Draft to In Transit' };
   }
 
-  // Only the warehouse's own manager takes the order into review, and on to
-  // Ready to Pay: they are the one who saw the goods. No warehouse, or a
-  // warehouse whose manager is unassigned, demoted or deactivated, leaves the
-  // move to any manager — a gate nobody can pass is a stuck order, not a rule.
-  // The message names the stage that was asked for, not the gate that tripped.
-  if (cur.warehouse_id && crossesGatedStage(stages, curIdx, stages.indexOf(nextStageId))) {
-    const wh = (await tx`
-      SELECT w.short, w.manager_user_id, mu.name AS manager_name
-      FROM warehouses w
-      LEFT JOIN users mu ON mu.id = w.manager_user_id
-                        AND mu.role = 'manager' AND COALESCE(mu.active, TRUE)
-      WHERE w.id = ${cur.warehouse_id} LIMIT 1
-    `)[0] as { short: string; manager_user_id: string | null; manager_name: string | null } | undefined;
-    if (wh?.manager_name && wh.manager_user_id !== actor?.id) {
-      return {
-        kind: 'forbidden',
-        msg: `Only ${wh.manager_name} (${wh.short} manager) can move this order to ${LIFECYCLE_LABEL[nextStageId]}`,
-      };
-    }
-  }
-
-  // Guard: a PO leaves Draft only once its goods cost something. total_cost is
-  // the figure every line write re-derives (or the negotiated lot price), so
-  // reading it covers both; NULL is the empty draft shell. Per order, not per
-  // line — a $0 line thrown in with a priced lot is legitimate — and fees don't
-  // count: freight on free goods is still a PO without a cost. No cutoff,
-  // unlike the two rules below: a cost can always be added to an old Draft.
-  //
-  // First submission only. A PO that has left Draft before is back here
-  // because a purchaser edited it (or the carrier poll is about to pull it
-  // forward again), and the manager's change-review dialog is where that edit
-  // is judged — holding a $0 PO that was accepted months ago to a rule that
-  // did not exist then leaves it stuck behind a 409 and a warning on every
-  // scan. The history read only runs for a $0 Draft, so the common advance
-  // pays nothing for it.
-  if (cur.lifecycle === 'draft' && nextStageId !== 'draft' && !(Number(cur.total_cost) > 0)
-      && !(await wasEverSubmitted(tx, id))) {
-    return { kind: 'noCost' };
-  }
-  // Guard: a company-paid PO leaves Draft only once it names the payment that
-  // funded it. Held against every actor — a manager stage-jump and the carrier
-  // poll included — because a rule the two commonest paths can route around is
-  // not a rule. The id is also what auto-link matches on, so filling it is what
-  // makes the PO reconcile itself later.
-  if (cur.lifecycle === 'draft' && nextStageId !== 'draft'
-      && await companyPayTxnMissing(tx, cur)) {
-    return { kind: 'missingTxnId' };
-  }
-  // And the id has to be a payment our PayPal account actually made: a typo
-  // or an invented id links nothing and the PO never reconciles. The routes
-  // pull PayPal once before this tx when the id is unknown, so a payment
-  // PayPal already reports does not wait for the six-hourly sync.
-  if (cur.lifecycle === 'draft' && nextStageId !== 'draft'
-      && await companyPayTxnUnknown(tx, cur)) {
-    return { kind: 'unknownTxnId', paypalTxnId: cur.paypal_txn_id!.trim() };
-  }
-  // Its self-paid twin: the chat with the seller is what the reimbursement is
-  // checked against, so a self-paid PO leaves Draft only once it is attached.
-  if (cur.lifecycle === 'draft' && nextStageId !== 'draft'
-      && await selfPayChatMissing(tx, cur)) {
-    return { kind: 'missingChatShot' };
-  }
-  // And the cash twin: cash lifts the transaction-id rule, so the screenshot
-  // of the amount handed over is the only record of what the company paid.
-  if (cur.lifecycle === 'draft' && nextStageId !== 'draft'
-      && await companyCashShotMissing(tx, cur)) {
-    return { kind: 'missingCashShot' };
+  // Guard: what a PO must carry to leave Draft — one list, services/
+  // orderTxnRule.ts, the same one GET reports as `blockers`. The proof rules
+  // (cost, transaction id, chat / cash screenshot) are held against every
+  // actor — a manager stage-jump included — because a rule the commonest path
+  // can route around is not a rule. The facts (source, delivery, tracking,
+  // method) are refused only by the hand-off, the door that collects them.
+  // The first blocker in display order is the refusal, so the message names
+  // the thing the page lists first.
+  if (cur.lifecycle === 'draft' && nextStageId !== 'draft') {
+    const blockers = await leaveDraftBlockers(tx, cur);
+    const first = opts.enforce === 'all'
+      ? blockers[0]
+      : blockers.find((b) => ENFORCED_EVERYWHERE.has(b.kind));
+    if (first) return first;
   }
 
   // Guard: a cascade that moves lines off a sellable status breaks any sell
@@ -554,6 +541,10 @@ export async function advanceOrderTx(
     };
     await notifyManagers(tx, n);
     await notify(tx, { userId: cur.user_id, ...n });
+  }
+  // Landing on Done with nothing left to sell settles straight through.
+  if (nextStageId === 'done' && await settleSoldTx(tx, id, actor?.id ?? null)) {
+    return { kind: 'ok', nextStageId: 'sold' };
   }
   return { kind: 'ok', nextStageId };
 }

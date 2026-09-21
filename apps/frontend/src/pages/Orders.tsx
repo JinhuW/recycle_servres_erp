@@ -8,7 +8,7 @@ import { useEffectiveUser } from '../lib/tweaks';
 import { shareOrCopy } from '../lib/shareOrCopy';
 import { fmtUSD0, fmtDateShort } from '../lib/format';
 import { profitTone, signedUSD0 } from '../lib/orderPresentation';
-import { ORDER_STATUSES, isCompleted, isClosedBook, statusTone } from '../lib/status';
+import { ORDER_STATUSES, PO_STATUSES, isCompleted, isClosedBook, statusTone } from '../lib/status';
 import { categoryFilterOptions } from '../lib/lookups';
 import { usePhScrolled } from '../lib/usePhScrolled';
 import { navigate } from '../lib/route';
@@ -56,9 +56,9 @@ export function Orders({ onToast }: Props) {
     if (!isManager) params.set('mine', 'true');
     if (filter !== 'all') params.set('category', filter);
     if (statusFilter !== 'all') params.set('status', statusFilter);
-    // Org-wide, the default view would drown in finished POs — hide Done
-    // until the Done chip asks for them explicitly.
-    else if (isManager) params.set('excludeStatus', 'Done');
+    // Org-wide, the default view would drown in finished POs — hide Done and
+    // Sold until their chips ask for them explicitly.
+    else if (isManager) { params.append('excludeStatus', 'Done'); params.append('excludeStatus', 'Sold'); }
     if (showArchived) params.set('includeArchived', 'true');
     api.get<{ orders: OrderSummary[] }>(`/api/orders?${params}`)
       .then(r => { if (alive) setOrders(r.orders); })
@@ -115,7 +115,7 @@ export function Orders({ onToast }: Props) {
           <button className={'ph-chip-btn ' + (statusFilter === 'all' ? 'active' : '')} onClick={() => setStatusFilter('all')}>
             {t('anyStatus')}
           </button>
-          {ORDER_STATUSES.map(s => (
+          {(effRole === 'manager' ? PO_STATUSES : ORDER_STATUSES).map(s => (
             <button key={s} className={'ph-chip-btn ' + (statusFilter === s ? 'active' : '')} onClick={() => setStatusFilter(s)}>
               {s}
             </button>

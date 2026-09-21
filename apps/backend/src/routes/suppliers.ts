@@ -14,6 +14,7 @@ import { Hono } from 'hono';
 import { getDb } from '../db';
 import { clampLimit } from '../lib/pagination';
 import { effectiveRole } from '../lib/role';
+import { visibleLifecycle } from '../services/orderAdvance';
 import type { Env, User } from '../types';
 import {
   loadCrmSettings, tierFor, cadenceFor, healthFor, effectiveGap, dueStateFor,
@@ -490,7 +491,9 @@ suppliers.get('/:id', async (c) => {
   return c.json({
     ...toApi(rows[0], s),
     canEdit: canWrite(u, rows[0].owner_id),
-    timeline, orders, sold,
+    timeline,
+    orders: orders.map((o) => ({ ...o, lifecycle: visibleLifecycle(o.lifecycle as string, effectiveRole(u)) })),
+    sold,
   });
 });
 

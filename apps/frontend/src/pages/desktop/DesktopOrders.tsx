@@ -28,6 +28,7 @@ const TONE_VAR: Record<string, string> = {
   warn:   'var(--warn)',
   accent: 'var(--accent)',
   pos:    'var(--pos)',
+  cool:   'var(--cool)',
 };
 
 // Commission = order profit × the manager-set per-order rate (null = not yet set = $0).
@@ -51,12 +52,16 @@ const TOGGLEABLE_COLS = [
   { id: 'cost',       tKey: 'totalCost' },
   { id: 'revenue',    tKey: 'revenue' },
   { id: 'profit',     tKey: 'profit' },
+  { id: 'realized',   tKey: 'realizedProfit' },
   { id: 'commission', tKey: 'commission' },
   { id: 'payment',    tKey: 'payment' },
   { id: 'status',     tKey: 'status' },
 ] as const;
 type ColId = typeof TOGGLEABLE_COLS[number]['id'];
 const DEFAULT_ORDERS_COLS: ColId[] = TOGGLEABLE_COLS.map(c => c.id);
+// Purchasers never receive `realized` from the list endpoint, so the toggle
+// would only drive an empty column; the picker leaves it out for them.
+const MANAGER_ONLY_COLS: ReadonlySet<ColId> = new Set<ColId>(['realized']);
 
 const SORT_KEYS: Record<string, (o: OrderSummary) => string | number> = {
   id:         o => o.id,
@@ -149,6 +154,10 @@ export function DesktopOrders({ onToast }: Props) {
   // the canonical array; we project it to a Set for cheap membership checks.
   const [colsList, setColsList] = usePreference('orders.cols', DEFAULT_ORDERS_COLS);
   const visibleCols = useMemo(() => new Set(colsList as ColId[]), [colsList]);
+  // The columns this role can pick from. A manager-only id can linger in the
+  // stored list after a role preview, so counts go through this list too.
+  const cols = TOGGLEABLE_COLS.filter(c => isManager || !MANAGER_ONLY_COLS.has(c.id));
+  const visibleCount = cols.filter(c => visibleCols.has(c.id)).length;
   const isVis = (id: ColId) => visibleCols.has(id);
   const toggleCol = (id: ColId) => {
     const next = new Set(visibleCols);
@@ -277,11 +286,10 @@ export function DesktopOrders({ onToast }: Props) {
     return m;
   }, [visible, stages]);
 
-  // colSpan for the expanded row — covers chevron + every toggleable col + actions,
-  // regardless of which are currently hidden via display:none.
-  // chevron + toggleable + submitter + actions, plus the manager's Realized
-  // column, which rides on the Profit toggle rather than owning one.
-  const totalCols = 1 + TOGGLEABLE_COLS.length + 1 + 1 + (isManager ? 1 : 0);
+  // colSpan for the expanded row — chevron + every column this role can
+  // toggle + submitter + actions, regardless of which are currently hidden
+  // via display:none.
+  const totalCols = 1 + cols.length + 1 + 1;
 
   return (
     <>
@@ -359,7 +367,7 @@ export function DesktopOrders({ onToast }: Props) {
                 <span className="mono" style={{
                   fontSize: 10.5, fontWeight: 600, padding: '1px 6px', borderRadius: 999,
                   background: 'var(--bg-soft)', color: 'var(--fg-subtle)', border: '1px solid var(--border)',
-                }}>{visibleCols.size}/{TOGGLEABLE_COLS.length}</span>
+                }}>{visibleCount}/{cols.length}</span>
               </button>
               {colsMenuOpen && (
                 <div style={{
@@ -379,7 +387,7 @@ export function DesktopOrders({ onToast }: Props) {
                       <button
                         className="btn sm ghost"
                         style={{ fontSize: 11, padding: '2px 6px' }}
-                        onClick={() => setColsList([...TOGGLEABLE_COLS.map(c => c.id)] as string[])}
+                        onClick={() => setColsList(cols.map(c => c.id) as string[])}
                       >{t('all')}</button>
                       <button
                         className="btn sm ghost"
@@ -389,7 +397,7 @@ export function DesktopOrders({ onToast }: Props) {
                     </div>
                   </div>
                   <div style={{ maxHeight: 320, overflowY: 'auto', padding: 4 }}>
-                    {TOGGLEABLE_COLS.map(c => {
+                    {cols.map(c => {
                       const on = visibleCols.has(c.id);
                       return (
                         <button
@@ -487,7 +495,7 @@ export function DesktopOrders({ onToast }: Props) {
                     what the units actually earned. A purchaser has only the
                     projection, so it keeps its plain name. */}
                 {isVis('profit') && <SortTh col="profit" sort={sort} onSort={cycleSort} align="right">{isManager ? t('unrealizedShort') : t('profit')}</SortTh>}
-                {isVis('profit') && isManager && <SortTh col="realized" sort={sort} onSort={cycleSort} align="right">{t('realizedShort')}</SortTh>}
+                {isManager && isVis('realized') && <SortTh col="realized" sort={sort} onSort={cycleSort} align="right">{t('realizedShort')}</SortTh>}
                 {isVis('commission') && <SortTh col="commission" sort={sort} onSort={cycleSort} align="right">{t('commission')}</SortTh>}
                 {isVis('payment') && <SortTh col="payment" sort={sort} onSort={cycleSort}>{t('payment')}</SortTh>}
                 {isVis('status') && <SortTh col="status" sort={sort} onSort={cycleSort}>{t('status')}</SortTh>}
@@ -600,7 +608,7 @@ export function DesktopOrders({ onToast }: Props) {
                       </td>
                       <td className={'num mono ' + profitTone(o.profit)} style={{ display: isVis('profit') ? undefined : 'none' }}>{fmtUSD0(o.profit, locale)}</td>
                       {isManager && (
-                        <td className={'num mono' + (o.realized ? ' ' + profitTone(o.realized.profit) : ' muted')} style={{ display: isVis('profit') ? undefined : 'none' }}>
+                        <td className={'num mono' + (o.realized ? ' ' + profitTone(o.realized.profit) : ' muted')} style={{ display: isVis('realized') ? undefined : 'none' }}>
                           {o.realized ? fmtUSD0(o.realized.profit, locale) : '—'}
                           {/* A partial figure says how much of the PO it speaks for. */}
                           {o.realized && o.realized.soldQty !== o.realized.boughtQty && (

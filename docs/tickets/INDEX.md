@@ -5,13 +5,28 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-094](./RS-094-pre-release-review-fixes-for-the-v1-157-v1-171-hand.md) | done | bug | P1 | Pre-release review fixes for the v1.157–v1.171 hand-off, package and Sold changes | — |
+| [RS-093](./RS-093-realized-profit-has-its-own-column-toggle-on-the-des.md) | done | story | P2 | Realized profit has its own column toggle on the desktop PO list | 1.171.0 |
+| [RS-092](./RS-092-the-line-s-first-photo-leads-its-card-on-the-phone-p.md) | done | story | P2 | The line's first photo leads its card on the phone products screen | 1.170.1 |
+| [RS-091](./RS-091-the-payment-screenshot-s-file-name-carries-the-paypa.md) | done | story | P3 | The Payment screenshot's file name carries the PayPal transaction ID | 1.170.0 |
+| [RS-090](./RS-090-review-screen-shows-only-the-products-the-add-row-do.md) | done | story | P2 | Review screen shows only the products; the add row docks at the bottom | 1.169.0 |
+| [RS-089](./RS-089-any-manager-reviews-and-moves-a-po-whatever-its-ware.md) | done | story | P2 | Any manager reviews and moves a PO, whatever its warehouse | 1.168.0 |
+| [RS-088](./RS-088-cost-payment-keeps-the-paypal-screenshot-on-the-po-a.md) | done | bug | P2 | Cost Payment keeps the PayPal screenshot on the PO, and each bank payment links back | 1.167.0 |
+| [RS-087](./RS-087-new-pos-start-at-50-commission-the-camera-picker-ask.md) | done | story | P2 | New POs start at 50% commission; the camera picker asks which item to add; Submit opens the PO | 1.166.0 |
+| [RS-086](./RS-086-commission-payment-is-the-screenshot-alone-done-asks.md) | done | story | P2 | Commission payment is the screenshot alone; Done asks for it only when missing | 1.165.0 |
+| [RS-085](./RS-085-po-lifecycle-sold-a-done-po-whose-every-line-has-sol.md) | done | story | P2 | PO lifecycle Sold: a Done PO whose every line has sold | 1.164.0 |
+| [RS-084](./RS-084-commission-tab-records-how-the-commission-was-paid-a.md) | done | story | P2 | Commission tab records how the commission was paid, and the Payment tab is Cost Payment | 1.163.0 |
+| [RS-083](./RS-083-phone-po-page-folds-that-match-the-desktop-tabs-one.md) | done | story | P2 | phone PO page: folds that match the desktop tabs, one sheet per stage | 1.162.0 |
+| [RS-082](./RS-082-payment-tab-is-two-columns.md) | done | task | P3 | Payment tab is two columns | 1.161.2 |
+| [RS-081](./RS-081-po-page-opens-the-tab-the-stage-is-about.md) | done | task | P2 | PO page opens the tab the stage is about | 1.161.1 |
+| [RS-080](./RS-080-purchase-order-page-status-as-the-spine-one-home-per.md) | done | story | P2 | Purchase-order page: status as the spine, one home per fact | 1.161.0 |
 | [RS-079](./RS-079-paypal-pull-failures-are-reported-and-throttled.md) | done | bug | P2 | PayPal pull failures are reported and throttled; the phone scan keeps concurrent edits | 1.157.1 |
 | [RS-078](./RS-078-remove-the-prepaid-label-shipsaving-flow-keep-packag.md) | done | chore | P2 | Remove the prepaid-label (ShipSaving) flow; keep package tracking | 1.157.0 |
 | [RS-077](./RS-077-in-transit-shows-the-package-journey-eta-and-trackin.md) | done | story | P2 | In Transit shows the package journey, ETA and tracking number; the PO list gets a Total cost column | 1.156.0 |
 | [RS-076](./RS-076-dev-to-main-review-findings-before-the-prod-cut.md) | done | bug | P2 | Dev-to-main review findings before the prod cut | 1.155.1 |
 | [RS-075](./RS-075-in-transit-chip-names-the-carrier-and-links-its-trac.md) | done | story | P2 | In Transit chip names the carrier and links its tracking page | 1.155.0 |
 | [RS-074](./RS-074-split-the-phone-po-page-into-general-info-and-produc.md) | done | story | P2 | Split the phone PO page into general info and products; list rows open instead of expanding | 1.154.0 |
-| [RS-073](./RS-073-paypal-screenshot-from-the-hand-off-dialog-is-kept-o.md) | backlog | bug | P3 | PayPal screenshot from the hand-off dialog is kept on the order | — |
+| [RS-073](./RS-073-paypal-screenshot-from-the-hand-off-dialog-is-kept-o.md) | done | bug | P3 | PayPal screenshot from the hand-off dialog is kept on the order | 1.167.0 |
 | [RS-072](./RS-072-unit-cost-is-required-when-a-product-line-is-saved.md) | done | story | P2 | Unit cost is required when a product line is saved | 1.152.0 |
 | [RS-071](./RS-071-company-pay-asks-paypal-or-cash-cash-needs-a-screens.md) | done | story | P2 | Company pay asks PayPal or Cash; cash needs a screenshot of the amount paid | 1.153.0 |
 | [RS-070](./RS-070-po-suggestions-honour-the-payment-s-owner.md) | done | story | P2 | PO suggestions honour the payment's owner | 1.151.0 |

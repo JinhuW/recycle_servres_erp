@@ -23,6 +23,10 @@ export async function insertDraftOrderTx(tx: SqlLike, opts: {
   paypalTxnId?: string | null;
   /** The buying channel, carried over from the tracked package that knew it. */
   source?: string | null;
+  /** 'label' when the PO is minted from a tracked box: the box is linked as
+   *  the order's, so the hand-off must not ask for the number it already
+   *  carries. */
+  handoffMethod?: 'label';
   /** The client this was bought from, when a tracked package's seller name
    *  already matches one. Keeps the package -> PO path attributed. */
   supplierId?: string | null;
@@ -31,11 +35,11 @@ export async function insertDraftOrderTx(tx: SqlLike, opts: {
 }): Promise<string> {
   const orderId = await nextHumanId(tx, 'PO', 'PO');
   await tx`
-    INSERT INTO orders (id, user_id, category, warehouse_id, payment, notes, total_cost, lifecycle, paypal_txn_id, supplier_id, source)
+    INSERT INTO orders (id, user_id, category, warehouse_id, payment, notes, total_cost, lifecycle, paypal_txn_id, supplier_id, source, handoff_method)
     VALUES (
       ${orderId}, ${opts.ownerId}, ${opts.category ?? 'Mixed'}, ${opts.warehouseId},
       ${opts.payment ?? 'company'}, ${opts.notes ?? null}, ${null}, 'draft', ${opts.paypalTxnId ?? null},
-      ${opts.supplierId ?? null}, ${opts.source ?? null}
+      ${opts.supplierId ?? null}, ${opts.source ?? null}, ${opts.handoffMethod ?? null}
     )
   `;
   await writeOrderEvent(tx, orderId, opts.actorId, 'created', {

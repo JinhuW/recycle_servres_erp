@@ -13,6 +13,7 @@ async function createOrder(token: string, opts: { advance?: boolean } = {}): Pro
   const r = await api<{ id: string }>('POST', '/api/orders', {
     token,
     body: {
+      warehouseId: 'WH-LA1',
       paypalTxnId: 'TESTPAYTXN0000001',
       category: 'RAM',
       lines: [{
