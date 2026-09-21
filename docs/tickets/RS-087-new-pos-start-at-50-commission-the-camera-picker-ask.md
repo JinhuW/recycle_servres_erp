@@ -2,12 +2,12 @@
 id: RS-087
 title: New POs start at 50% commission; the camera picker asks which item to add; Submit opens the PO
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-20
 reporter: jinhu
 branch: feat/rs-087-commission-default-capture-focus
-pr:
+pr: 381
 version: 1.166.0
 related: [RS-060, RS-083]
 ---
