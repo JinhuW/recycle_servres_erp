@@ -53,6 +53,17 @@ describe('lookbackFacts', () => {
     expect(lookbackFacts('done', events).map(f => f.kind)).toEqual(['advanced', 'doneNote', 'doneFile']);
   });
 
+  it('a move back out of a stage is not what closed it', () => {
+    const events = [
+      ev('advanced', { from: 'in_transit', to: 'reviewing' }, 'Alex'),
+      ev('advanced', { from: 'reviewing', to: 'in_transit' }, 'Alex'),
+    ];
+    expect(lookbackFacts('reviewing', events)).toEqual([]);
+    expect(lookbackFacts('in_transit', events)).toEqual([
+      expect.objectContaining({ kind: 'advanced', from: 'in_transit', to: 'reviewing' }),
+    ]);
+  });
+
   it('a sell-out is Done\'s last fact and the system\'s, not anyone\'s', () => {
     const events = [
       ev('advanced', { from: 'ready_to_pay', to: 'done' }, 'Alex'),

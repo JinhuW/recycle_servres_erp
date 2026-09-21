@@ -3,8 +3,10 @@ import { handoffBlockerKeys, type HandoffRules } from './handoff';
 import { BLOCKER_TAB, SERVER_BLOCKER_KEY, poReadiness, readinessBlockerKeys } from './poReadiness';
 
 const rules: HandoffRules = {
+  warehouseId: 'WH-LA1',
   source: 'facebook',
   delivery: 'pickup',
+  byUserId: 'u-1',
   trackingValid: false,
   carrier: null,
   paidBy: 'company',
@@ -34,6 +36,10 @@ describe('poReadiness', () => {
     // Re-submitting as accepted: the cost rule is first-submission only.
     expect(byTab(poReadiness({ rules, lines: { count: 2, goods: 0, everSubmitted: true } })).products)
       .toEqual([]);
+    // The server calls an empty Draft `noCost`; the row still says products.
+    expect(byTab(poReadiness({
+      rules, lines: { count: 0, goods: 0, everSubmitted: false }, serverBlockers: ['noCost'],
+    })).products).toEqual(['poReadyNoProducts']);
   });
 
   it('routes each hand-off key to the section that fixes it', () => {

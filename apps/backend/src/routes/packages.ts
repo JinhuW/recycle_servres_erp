@@ -337,6 +337,7 @@ packages.post('/:id/create-po', async (c) => {
       notes,
       paypalTxnId: row.paypal_txn_id,
       source: row.source,
+      handoffMethod: 'label',
       supplierId: client?.id ?? null,
       onBehalfOfName: ownerRow?.name ?? null,
     });

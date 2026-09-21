@@ -37,8 +37,10 @@ export type ReadinessInput = {
 export const BLOCKER_TAB: Record<string, ReadinessTab> = {
   poReadyNoProducts: 'products',
   poReadyNoCost: 'products',
+  hoNeedWarehouse: 'delivery',
   hoNeedSource: 'delivery',
   hoNeedDelivery: 'delivery',
+  hoNeedCollector: 'delivery',
   hoNeedTracking: 'delivery',
   hoNeedCarrier: 'delivery',
   hoNeedMethod: 'payment',
@@ -51,6 +53,7 @@ export const BLOCKER_TAB: Record<string, ReadinessTab> = {
 /** The server's blocker kinds, spelled as the i18n key the shells show. */
 export const SERVER_BLOCKER_KEY: Record<string, string> = {
   noCost: 'poReadyNoCost',
+  missingWarehouse: 'hoNeedWarehouse',
   missingSource: 'hoNeedSource',
   missingDelivery: 'hoNeedDelivery',
   missingTracking: 'hoNeedTracking',
@@ -66,8 +69,10 @@ export const SERVER_BLOCKER_KEY: Record<string, string> = {
 export const NEED_SHORT_KEY: Record<string, string> = {
   poReadyNoProducts: 'rdNoProducts',
   poReadyNoCost: 'rdNoCost',
+  hoNeedWarehouse: 'rdWarehouse',
   hoNeedSource: 'rdSource',
   hoNeedDelivery: 'rdDelivery',
+  hoNeedCollector: 'rdCollector',
   hoNeedTracking: 'rdTracking',
   hoNeedCarrier: 'rdCarrier',
   hoNeedMethod: 'rdMethod',
@@ -91,7 +96,11 @@ export function poReadiness(input: ReadinessInput): ReadinessItem[] {
     : null;
 
   const items: ReadinessItem[] = TABS.map(tab => {
-    const useServer = server !== null && !input.dirty?.[tab];
+    // The server has no "no products" kind — an empty Draft is `noCost` to
+    // it — so the products row is the form's whenever there is nothing to
+    // cost.
+    const useServer = server !== null && !input.dirty?.[tab]
+      && !(tab === 'products' && input.lines.count === 0);
     const from = useServer ? server : local;
     const needKeys = from.filter(k => BLOCKER_TAB[k] === tab);
     return { tab, ok: needKeys.length === 0, blocking: true, needKeys };

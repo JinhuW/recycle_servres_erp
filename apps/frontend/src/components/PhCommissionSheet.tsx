@@ -25,6 +25,9 @@ type FieldsProps = {
   locale: string;
   /** Under the fields: why they are read-only, or what editing costs. */
   note?: string;
+  /** The fold and the sheet are mounted at once (the fold only hides), so
+   *  their inputs need distinct ids or a label focuses the wrong one. */
+  idPrefix?: string;
 };
 
 export function commissionPreview(pct: string, m: CommissionMath) {
@@ -37,6 +40,7 @@ export function commissionPreview(pct: string, m: CommissionMath) {
 
 export function PhCommissionFields(p: FieldsProps) {
   const { t } = useT();
+  const idp = p.idPrefix ?? 'ph';
   const owner = p.ownerOptions.find(o => o.id === p.ownerId)?.name ?? '—';
   const pv = commissionPreview(p.commissionPct, p.math);
   const row = (k: string, v: string, strong = false) => (
@@ -50,15 +54,15 @@ export function PhCommissionFields(p: FieldsProps) {
       {p.editable ? (
         <div className="ph-fold-ro">
           <div className="ph-field">
-            <label htmlFor="ph-owner">{t('poOnBehalfLabel')}</label>
-            <select id="ph-owner" className="select" value={p.ownerId} onChange={e => p.onOwner(e.target.value)}>
+            <label htmlFor={`${idp}-owner`}>{t('poOnBehalfLabel')}</label>
+            <select id={`${idp}-owner`} className="select" value={p.ownerId} onChange={e => p.onOwner(e.target.value)}>
               {p.ownerOptions.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
             </select>
           </div>
           <div className="ph-field">
-            <label htmlFor="ph-rate">{t('commissionRate')}</label>
+            <label htmlFor={`${idp}-rate`}>{t('commissionRate')}</label>
             <input
-              id="ph-rate"
+              id={`${idp}-rate`}
               className="input mono"
               type="number"
               min={0}
@@ -136,7 +140,7 @@ export function PhCommissionSheet(p: SheetProps) {
               <span className="ho-sec-title">{t('poReadyCommission')}</span>
             </div>
             <div style={{ display: 'grid', gap: 12, paddingTop: 10 }}>
-              <PhCommissionFields {...p} />
+              <PhCommissionFields {...p} idPrefix="phs" />
             </div>
           </div>
         </div>

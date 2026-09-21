@@ -106,7 +106,10 @@ export function usePaymentProof(init: PaymentProofInit) {
         scan?: { txnId: string | null; confidence: number; provider: string } | null;
       }>(`/api/orders/${orderId}/status-meta/Payment/attachments?scan=paypal`, form);
       setProofAtts(prev => [...prev, r.attachment]);
-      if (!r.scan) { setScanError({ key: 'shipPayScanFailed' }); return; }
+      // Absent (a backend that never ran a scan) is not a failed read: only
+      // an explicit null means the OCR threw.
+      if (r.scan === undefined) return;
+      if (r.scan === null) { setScanError({ key: 'shipPayScanFailed' }); return; }
       const read = readPaypalScan(r.scan);
       if (read.txnId) setTxnId(read.txnId);
       setScanNoticeKey(read.noticeKey);

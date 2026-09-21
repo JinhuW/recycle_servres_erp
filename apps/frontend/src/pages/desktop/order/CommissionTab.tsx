@@ -69,7 +69,9 @@ export function CommissionTab(p: Props) {
             min={0}
             max={100}
             step="0.1"
-            disabled={p.isPurchaser}
+            // The rate is part of the closed book; the server refuses it
+            // there, so the input must not invite the edit.
+            disabled={p.isPurchaser || p.orderLocked}
             value={p.commissionPct}
             placeholder={p.isPurchaser ? '—' : t('eoSetRate')}
             onChange={e => p.onCommissionPct(e.target.value)}

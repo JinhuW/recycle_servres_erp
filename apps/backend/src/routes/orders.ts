@@ -277,6 +277,10 @@ function trackingTakenMsg(otherOrderId: string | null): string {
     ? `This tracking number is already being tracked on ${otherOrderId}`
     : 'This tracking number is already being tracked';
 }
+const TRACKING_TAKEN_STANDALONE_MSG =
+  'This tracking number is already on the Shipping page under another member — ask a manager to link it.';
+const PACKAGE_DELIVERED_MSG =
+  "This order's box has already been delivered — its delivery can't be changed.";
 
 // Detached on purpose, as POST /api/packages does: the row is committed and
 // the registration carries its own timeout; the sweep covers what this misses.
@@ -691,6 +695,7 @@ orders.get('/:id', async (c) => {
       payment_method: order.payment_method as string | null,
       paypal_txn_id: order.paypal_txn_id as string | null,
       created_at: order.created_at as Date, total_cost: order.total_cost as number | null,
+      warehouse_id: order.warehouse_id as string | null,
       source: order.source as string | null, handoff_method: order.handoff_method as string | null,
       handoff_by: order.handoff_by as string | null, has_package: order.pkg != null,
     })).map((b) => b.kind)
@@ -1822,7 +1827,12 @@ orders.patch('/:id', async (c) => {
         const setCommission = body.commissionRate !== undefined ? 1 : 0;
         const setOtherFees = body.otherFees     !== undefined ? 1 : 0;
         const setFeesNote  = body.otherFeesNote !== undefined ? 1 : 0;
-        const setPaypal    = body.paypalTxnId   !== undefined ? 1 : 0;
+        // The id follows the method the way the method follows the payment:
+        // a request that flips to Self or Cash clears it, sent or not. Only
+        // the flip — a later notes-only save on a self-paid PO leaves alone
+        // whatever create-po carried over from a scanned screenshot.
+        const clearPaypal  = body.payment === 'self' || body.paymentMethod === 'cash';
+        const setPaypal    = body.paypalTxnId   !== undefined || clearPaypal ? 1 : 0;
         const setSupplier  = body.supplierId    !== undefined ? 1 : 0;
         const setSource    = body.source        !== undefined ? 1 : 0;
         const setMethodHo  = body.handoffMethod !== undefined ? 1 : 0;
@@ -1834,7 +1844,7 @@ orders.patch('/:id', async (c) => {
         const newMethod    = paymentAfter === 'self' ? null : (body.paymentMethod ?? null);
         // Same canon as the add-package boundary — a pasted id with spaces or
         // lowercase must diff clean against the AI-extracted value.
-        const normPaypal = typeof body.paypalTxnId === 'string'
+        const normPaypal = !clearPaypal && typeof body.paypalTxnId === 'string'
           ? body.paypalTxnId.replace(/\s+/g, '').toUpperCase() || null
           : null;
         await tx`
@@ -1888,7 +1898,8 @@ orders.patch('/:id', async (c) => {
       // parts with the box (unlinked, not deleted — see the helper).
       if (tracking) {
         if (facts.method !== 'label') throw new Error('__TRACKING_NEEDS_LABEL__');
-        const set = await setOrderPackageTx(tx, id, u.id, {
+        const set = await setOrderPackageTx(tx, id, { id: u.id, role: u.role }, {
+          user_id: orderBefore.user_id,
           source: body.source !== undefined ? body.source : orderBefore.source,
           supplier_name: orderBefore.supplier_name,
           paypal_txn_id: body.paypalTxnId !== undefined
@@ -1899,12 +1910,15 @@ orders.patch('/:id', async (c) => {
           trackingTakenBy = set.otherOrderId;
           throw new Error('__TRACKING_TAKEN__');
         }
+        if (set.kind === 'takenStandalone') throw new Error('__TRACKING_TAKEN_STANDALONE__');
+        if (set.kind === 'delivered') throw new Error('__PACKAGE_DELIVERED__');
         packageChanged = packageChanges(set.prev, set.package);
         packageToRegister = set.needsRegister ? set.package : null;
       } else if (body.handoffMethod !== undefined && facts.method !== 'label'
                  && orderBefore.handoff_method === 'label') {
-        const gone = await unlinkOrderPackagesTx(tx, id);
-        if (gone.length) packageChanged = packageChanges(gone[0], null);
+        const unlinked = await unlinkOrderPackagesTx(tx, id);
+        if (unlinked.kind === 'delivered') throw new Error('__PACKAGE_DELIVERED__');
+        if (unlinked.gone.length) packageChanged = packageChanges(unlinked.gone[0], null);
       }
       if (Array.isArray(body.removeLineIds) && body.removeLineIds.length) {
         const doomed = await tx`
@@ -2262,6 +2276,12 @@ orders.patch('/:id', async (c) => {
     }
     if (msg.includes('__TRACKING_TAKEN__')) {
       return c.json({ error: trackingTakenMsg(trackingTakenBy), otherOrderId: trackingTakenBy }, 409);
+    }
+    if (msg.includes('__TRACKING_TAKEN_STANDALONE__')) {
+      return c.json({ error: TRACKING_TAKEN_STANDALONE_MSG }, 409);
+    }
+    if (msg.includes('__PACKAGE_DELIVERED__')) {
+      return c.json({ error: PACKAGE_DELIVERED_MSG }, 409);
     }
     if (msg.includes('__REMOVE_REFERENCED__')) {
       return c.json({
@@ -2994,6 +3014,8 @@ function advanceRefusedResponse(
       return c.json({
         error: 'This PO has no cost — enter the unit cost on its lines before submitting it.',
       }, 409);
+    case 'missingWarehouse':
+      return c.json({ error: 'Pick the receiving warehouse before submitting it.' }, 409);
     case 'missingSource':
       return c.json({ error: 'Say where this order came from before submitting it.' }, 409);
     case 'missingDelivery':
@@ -3155,7 +3177,15 @@ orders.post('/:id/handoff', async (c) => {
         return c.json({ error: `Order is already ${LIFECYCLE_LABEL[visibleLifecycle(r.lifecycle, effectiveRole(u))] ?? r.lifecycle}` }, 409);
       case 'trackingTaken':
         return c.json({ error: trackingTakenMsg(r.otherOrderId), otherOrderId: r.otherOrderId }, 409);
+      case 'trackingTakenStandalone': return c.json({ error: TRACKING_TAKEN_STANDALONE_MSG }, 409);
+      case 'packageDelivered': return c.json({ error: PACKAGE_DELIVERED_MSG }, 409);
       case 'advance': return advanceRefusedResponse(c, r.outcome, pullError);
+      // Same guard as advanceRefusedResponse: a new kind must not fall out of
+      // the switch as an implicit 200.
+      default: {
+        const exhaustive: never = r;
+        return exhaustive;
+      }
     }
   }
   registerIfNeeded(c.env, sql, result.package, result.needsRegister);

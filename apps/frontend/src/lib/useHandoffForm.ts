@@ -5,7 +5,6 @@ import { handleFetchError } from './errorToast';
 import { buildHandoffBody, type HandoffDelivery, type HandoffMethod } from './handoff';
 import type { PackageSource } from './packageSource';
 import { normalizePaypalTxnInput } from './paypalTxn';
-import { poEffectiveCost } from './poTotals';
 import { poReadiness, readinessBlockerKeys } from './poReadiness';
 import type { Order, Warehouse } from './types';
 import type { PaymentProof } from './usePaymentProof';
@@ -25,8 +24,12 @@ import { loadWarehouses } from './warehouses';
 
 export type HandoffInit = {
   order: Order;
+  /** The page's live lines — not `order.lines`, which on the desktop is the
+   *  page-load snapshot: a line the drawer priced through Confirm line is in
+   *  the page's state (and the row's total) but not there. */
+  lines: { count: number; units: number; goods: number };
   /** Seeded from the page's current values, which equal the saved order when
-   *  the page is clean (the desktop asks for a save first otherwise). */
+   *  the page is clean (both shells ask for a save first otherwise). */
   warehouseId: string;
   payment: 'company' | 'self';
   paymentMethod: HandoffMethod | null;
@@ -69,6 +72,13 @@ export function useHandoffForm(init: HandoffInit, onDone: (r: { packageId: strin
       .catch(handleFetchError);
     return () => { alive = false; };
   }, []);
+  // The saved collector may have been deactivated since: the list is active
+  // members only, and the server refuses a stale id. Cleared rather than
+  // swapped for someone else — the section opens and asks.
+  useEffect(() => {
+    if (members.length && byUserId && !members.some(m => m.id === byUserId)) setByUserId('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [members]);
 
   const { raw, setRaw, pick, setPick, tn, detected, carrier, hintKey } = tracking;
 
@@ -77,13 +87,9 @@ export function useHandoffForm(init: HandoffInit, onDone: (r: { packageId: strin
   // ── Readiness and submit ─────────────────────────────────────────────────
   // Judged from the form: everything here is the user's live answer, and the
   // server's list is what the page showed before the dialog opened.
-  const goods = poEffectiveCost({
-    lineSubtotal: order.lines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.unitCost) || 0), 0),
-    totalCostOverride: order.totalCost,
-  }).goods;
   const readiness = poReadiness({
     rules: {
-      source, delivery, trackingValid: tracking.valid, carrier, paidBy, method, txnId,
+      warehouseId, source, delivery, byUserId, trackingValid: tracking.valid, carrier, paidBy, method, txnId,
       chatAttachmentCount: proof.chatAtts.length,
       proofAttachmentCount: proof.proofAtts.length,
       saved: {
@@ -91,7 +97,7 @@ export function useHandoffForm(init: HandoffInit, onDone: (r: { packageId: strin
         chatShotRequired: order.chatShotRequired, cashShotRequired: order.cashShotRequired,
       },
     },
-    lines: { count: order.lines.length, goods, everSubmitted: order.everSubmitted === true },
+    lines: { count: init.lines.count, goods: init.lines.goods, everSubmitted: order.everSubmitted === true },
   });
   const blockerKeys = readinessBlockerKeys(readiness);
   const canSubmit = blockerKeys.length === 0 && !busy && !proof.busy;
@@ -118,6 +124,7 @@ export function useHandoffForm(init: HandoffInit, onDone: (r: { packageId: strin
 
   return {
     order,
+    lines: init.lines,
     warehouseId, setWarehouseId, warehouses,
     source, setSource,
     delivery, setDelivery,

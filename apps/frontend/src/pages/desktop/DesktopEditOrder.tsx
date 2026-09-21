@@ -608,6 +608,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   const byUserDirty = delivery === 'pickup' && byUserId !== (order.handoffBy?.id ?? '');
   const trackingDirty = delivery === 'label' && tracking.tn !== ''
     && (tracking.tn !== (pkg?.trackingNumber ?? '') || (tracking.carrier ?? '') !== (pkg?.carrier ?? ''));
+  // A number the page cannot send yet — bad shape, or an ambiguous one with
+  // no carrier picked. Save must not report success and drop it on the floor.
+  const trackingIncomplete = trackingDirty && (!tracking.valid || !tracking.carrier);
 
   // The goods total is no longer editable here: it is the sum of the lines, and
   // anything paid on top of the goods is the fee — so line costs + fee is what
@@ -671,10 +674,18 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
 
   // What still stands between this Draft and In Transit — the one rule every
   // surface shares (lib/poReadiness.ts), the form's values overlaid on the
-  // server's list for the sections the user has touched.
+  // server's list for the sections the user has touched. "Touched" is wider
+  // than the Save dirt: a screenshot dropped through the proof hook and a
+  // line priced through the drawer's Confirm line are already written, so
+  // the page is clean, but `order.blockers` predates them — the form has to
+  // speak for those sections or the row keeps asking for what is on file.
+  const proofChanged =
+    proof.chatAtts.length !== (order.statusMeta?.['Submission']?.attachments ?? []).length
+    || proof.proofAtts.length !== (order.statusMeta?.['Payment']?.attachments ?? []).length;
+  const linesDiverged = lines.length !== order.lines.length || totals.cost !== loadedLineSubtotal;
   const readiness = poReadiness({
     rules: {
-      source, delivery, trackingValid: tracking.valid, carrier: tracking.carrier,
+      warehouseId, source, delivery, byUserId, trackingValid: tracking.valid, carrier: tracking.carrier,
       paidBy: payment, method: paymentMethod, txnId: paypalTxn,
       chatAttachmentCount: proof.chatAtts.length,
       proofAttachmentCount: proof.proofAtts.length,
@@ -683,7 +694,11 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     lines: { count: lines.length, goods: cost.goods, everSubmitted: order.everSubmitted === true },
     commission: isPurchaser ? null : { rate: commissionRateValue },
     serverBlockers: savedStatus === 'Draft' ? order.blockers : null,
-    dirty: dirtyBy,
+    dirty: {
+      ...dirtyBy,
+      products: dirtyBy.products || linesDiverged,
+      payment: dirtyBy.payment || proofChanged,
+    },
   });
 
   // A company-paid PO names the payment that funded it before it leaves Draft.
@@ -718,7 +733,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // save sends none, so an incomplete legacy line must not block it — the
   // purchaser can't fix that line at this stage anyway.
   const canSave =
-    dirty && !saving && !txnBlocked && !cashShotBlocked && (!orderLocked || (canReopen && statusDirty))
+    dirty && !saving && !txnBlocked && !cashShotBlocked && !trackingIncomplete
+    && (!orderLocked || (canReopen && statusDirty))
     && (!canEditOrder || !(linesDirty || statusDirty) || lines.every(lineReady));
 
   // Localized "Brand, Quantity" list of what a line is still waiting on. The
@@ -759,6 +775,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   : orderLocked        ? [t('saveBlockedLocked')]
   : !dirty             ? [t('saveBlockedNoChanges')]
   : proofBlockedKey    ? [t(proofBlockedKey)]
+  : trackingIncomplete ? [t(tracking.valid ? 'hoNeedCarrier' : 'hoNeedTracking')]
   : lines.flatMap((l, i) => {
       if (brandConfirmPending(l)) {
         return [lines.length === 1
@@ -1909,6 +1926,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
         <HandoffDialog
           init={{
             order,
+            lines: { count: lines.length, units: totals.qty, goods: cost.goods },
             warehouseId,
             payment,
             paymentMethod,
@@ -1927,7 +1945,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
             // back on the list.
             if (onReload) {
               window.__showToast?.(t('hoDone', { id: order.id }), 'success');
-              void onReload();
+              // The order moved; a failed re-read must say so, not leave the
+              // In Transit panel drawn over the Draft's props.
+              onReload().catch(handleFetchError);
               return;
             }
             onSaved(t('hoDone', { id: order.id }));

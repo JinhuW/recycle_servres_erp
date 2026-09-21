@@ -424,12 +424,12 @@ export async function advanceOrderTx(
   const cur = (await tx`
     SELECT id, user_id, lifecycle, payment, payment_method, paypal_txn_id, created_at,
            archived_at, total_cost::float AS total_cost,
-           source, handoff_method, handoff_by,
+           warehouse_id, source, handoff_method, handoff_by,
            EXISTS (SELECT 1 FROM packages p WHERE p.order_id = orders.id) AS has_package
     FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE`)[0] as
     | { id: string; user_id: string; lifecycle: string; payment: string;
         payment_method: string | null; paypal_txn_id: string | null; created_at: Date;
-        archived_at: Date | null; total_cost: number | null;
+        archived_at: Date | null; total_cost: number | null; warehouse_id: string | null;
         source: string | null; handoff_method: string | null; handoff_by: string | null;
         has_package: boolean }
     | undefined;

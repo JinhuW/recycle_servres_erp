@@ -10,8 +10,13 @@ export type HandoffDelivery = 'pickup' | 'label';
 export type HandoffMethod = 'paypal' | 'cash';
 
 export type HandoffRules = {
+  /** Empty when the order has none — routine for a PO the phone's Review
+   *  screen minted, which POSTs lines only. */
+  warehouseId: string;
   source: PackageSource | null;
   delivery: HandoffDelivery | null;
+  /** Empty when no collector is picked; only judged on a pickup. */
+  byUserId: string;
   trackingValid: boolean;
   carrier: Carrier | null;
   paidBy: 'company' | 'self';
@@ -39,8 +44,10 @@ export type HandoffRules = {
 /** i18n keys of everything still blocking the hand-off, in display order. */
 export function handoffBlockerKeys(r: HandoffRules): string[] {
   const out: string[] = [];
+  if (!r.warehouseId) out.push('hoNeedWarehouse');
   if (!r.source) out.push('hoNeedSource');
   if (r.delivery === null) out.push('hoNeedDelivery');
+  if (r.delivery === 'pickup' && !r.byUserId) out.push('hoNeedCollector');
   if (r.delivery === 'label') {
     if (!r.trackingValid) out.push('hoNeedTracking');
     else if (!r.carrier) out.push('hoNeedCarrier');

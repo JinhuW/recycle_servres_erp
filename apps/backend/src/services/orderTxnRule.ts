@@ -138,6 +138,7 @@ export async function companyCashShotMissing(
 
 export type LeaveDraftBlocker =
   | { kind: 'noCost' }
+  | { kind: 'missingWarehouse' }
   | { kind: 'missingSource' }
   | { kind: 'missingDelivery' }
   | { kind: 'missingTracking' }
@@ -151,6 +152,7 @@ export type LeaveDraftOrder = TxnRuleOrder & {
   id: string;
   paypal_txn_id: string | null;
   total_cost: number | null;
+  warehouse_id: string | null;
   source: string | null;
   handoff_method: string | null;
   handoff_by: string | null;
@@ -159,9 +161,11 @@ export type LeaveDraftOrder = TxnRuleOrder & {
 
 /** The blockers every door refuses on. The facts are the hand-off's to
  *  collect: `/advance` and a manager stage-jump ignore them, so a Draft from
- *  before the hand-off existed (NULL source, NULL method) is never stuck. */
+ *  before the hand-off existed (NULL source, NULL method) is never stuck. The
+ *  warehouse is not a hand-off question but where the stock lands, and nothing
+ *  past Draft asks for it again — so it is held against every door. */
 export const ENFORCED_EVERYWHERE: ReadonlySet<LeaveDraftBlocker['kind']> =
-  new Set(['noCost', 'missingTxnId', 'unknownTxnId', 'missingChatShot', 'missingCashShot']);
+  new Set(['noCost', 'missingWarehouse', 'missingTxnId', 'unknownTxnId', 'missingChatShot', 'missingCashShot']);
 
 /** Every reason this Draft cannot leave, in the order the page lists them.
  *  Local reads only — never calls PayPal; the routes pull once before the
@@ -177,6 +181,7 @@ export const ENFORCED_EVERYWHERE: ReadonlySet<LeaveDraftBlocker['kind']> =
 export async function leaveDraftBlockers(tx: SqlLike, o: LeaveDraftOrder): Promise<LeaveDraftBlocker[]> {
   const out: LeaveDraftBlocker[] = [];
   if (!(Number(o.total_cost) > 0) && !(await wasEverSubmitted(tx, o.id))) out.push({ kind: 'noCost' });
+  if (o.warehouse_id === null) out.push({ kind: 'missingWarehouse' });
   if (o.source === null) out.push({ kind: 'missingSource' });
   if (o.handoff_method === null || (o.handoff_method === 'pickup' && o.handoff_by === null)) {
     out.push({ kind: 'missingDelivery' });

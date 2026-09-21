@@ -120,6 +120,9 @@ export function StagePanel(p: Props) {
         <div className="oe-box-h"><span>{t('eoStageReview')}</span></div>
         <div className="oe-box-lead">{t('eoReviewLead', { wh })}</div>
         <div className="muted" style={{ fontSize: 12 }}>{t('eoReviewHint')}</div>
+        {/* A reopened Done PO keeps its note and files; they must stay
+            reachable (and removable) here, not only once it is Done again. */}
+        {p.doneEvidence}
       </div>
     );
   } else if (p.status === 'Ready to Pay') {
@@ -128,6 +131,7 @@ export function StagePanel(p: Props) {
         <div className="oe-box-h"><span>{t('eoStageOwed')}</span></div>
         <div className="oe-box-lead">{t('eoOwedLead', { name: o.userName })}</div>
         <div className="muted" style={{ fontSize: 12 }}>{t('eoOwedHint')}</div>
+        {p.doneEvidence}
       </div>
     );
   } else if (p.status === 'Sold') {

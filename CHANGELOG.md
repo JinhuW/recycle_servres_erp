@@ -17,6 +17,77 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.171.1] - 2026-09-21
+
+### Fixes
+
+- **Pre-release review of everything since v1.157.0** (RS-094). Before the
+  span v1.157–v1.171 (the PO status spine, the phone folds, commission and
+  Sold, the hand-off facts on the page) went to production, a review of the
+  whole diff turned up fifteen defects in the new hand-off, package and
+  readiness code, none yet met by a user. All are fixed here.
+
+  *The checkpoint.* A section folded to its ✓ row the instant its rule was
+  met — the PayPal id field vanished after the first character and a
+  15-digit FedEx number folded at 12 digits, submitting the prefix. A
+  section that was ever open now stays open. The Products row read the
+  page-load lines, so a $0 Draft priced through the drawer's *Confirm line*
+  still showed "needs a cost" with Confirm disabled; it now reads the page's
+  live lines. A saved collector who has since been deactivated no longer
+  folds Delivery to ✓ and 400s on Confirm: the picker opens and asks.
+  A Draft with no warehouse — routine since the phone's Review screen POSTs
+  lines only — passed every readiness rule and dead-ended on Confirm with a
+  raw `warehouseId is required`; **the warehouse is now a blocker like the
+  rest** (`missingWarehouse`, first in the list, held against every door
+  including a manager's stage-jump, since nothing past Draft asks for it
+  again and stock needs a location), and the three warehouse selects show
+  *Pick a warehouse* instead of borrowing the first warehouse's name.
+  Pickup with no collector is a blocker on the page as it was on the server.
+
+  *The hand-off's writes.* Handing off a Draft saved as company/PayPal as
+  **Self** or **Cash** kept the saved transaction id and then linked the
+  company's PayPal payment to a PO the company never paid for; the id now
+  follows the method (a PATCH that flips to Self or Cash clears it too — a
+  later notes-only save on a self-paid PO leaves alone whatever create-po
+  scanned). A number already on **another member's standalone box** was
+  adopted onto the caller's PO with no ownership check; it is now refused
+  with a message naming the Shipping page (one's own box, the PO owner's, a
+  creator-less row, or a manager's pull still adopt, and adoption under a new
+  carrier re-registers with Shippo). A box the carrier already marked
+  **delivered** was unlinked on a label→pickup flip — back into the Shipping
+  page's *Needs you*, whose Create PO minted a second PO for goods already
+  received — or rewritten to `purchased` on a re-typed number; both are now
+  a 409 that says the box has been delivered. A PO minted from a tracked box
+  now records `handoff_method = label`, so it no longer reports
+  *missingDelivery* and asks for the number it already carries.
+
+  *The PO pages.* The phone opened the hand-off and commission sheets over
+  unsaved edits, which the sheet either re-asked or silently replaced and
+  the refetch afterwards discarded (a typed note or fee vanished); it now
+  asks for a save first, as the desktop does. A tracking number with no
+  resolved carrier marked the page dirty, and Save returned 200 and dropped
+  it — both shells now refuse with *Pick the carrier*. A screenshot dropped
+  through the proof hook, or a line priced through *Confirm line*, left the
+  readiness row saying the thing was still missing until a reload; the row
+  now reads the page's own state for those sections. The phone never showed
+  the server's *unknownTxnId* blocker (its rows were built from four fixed
+  keys), so a PayPal id the account had not reported read ✓ and 409'd on
+  Confirm; it is a row now. Done evidence (note and files) rendered only at
+  Done/Sold, so a reopened PO's receipt was unreachable and un-removable on
+  the desktop; it shows at Reviewing and Ready to Pay too. A failed re-read
+  after the hand-off was swallowed; it surfaces. Small ones: the empty-Draft
+  row says it needs products, not a cost; the timeline names *Tracking
+  number* / *Carrier* instead of raw column names; a manager's move back out
+  of a stage is no longer reported as that stage's closing fact; the
+  commission-rate input is disabled on a closed book like the owner select;
+  the phone's Commission fold and sheet no longer share input ids; the
+  activity log's payment-proof labels are translated; and a backend that
+  never ran a PayPal scan no longer shows the "could not read" banner.
+
+  Not changed: the one-time window during a release where an already-open
+  old tab meets the new backend's `Sold` status. It clears on reload, and
+  the Worker deploys before Railway does.
+
 ## [1.171.0] - 2026-09-20
 
 ### Features

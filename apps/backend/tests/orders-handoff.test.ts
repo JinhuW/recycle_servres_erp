@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api, multipart, testEnv } from './helpers/app';
-import { loginAs, ALEX, MARCUS } from './helpers/auth';
+import { loginAs, ALEX, MARCUS, PRIYA } from './helpers/auth';
 import { syncBankTransactions } from '../src/banktx/sync';
 import { stubPaypalProvider } from '../src/banktx/stub';
 
@@ -549,5 +549,173 @@ describe('hand-off facts on the page', () => {
     });
     expect(r.status).toBe(200);
     expect(r.body.packageId).toBe(solo.body.package.id);
+  });
+});
+
+describe('hand-off — the pre-release review fixes', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  const patch = (token: string, id: string, body: Record<string, unknown>) =>
+    api<{ error?: string; lifecycle: string }>('PATCH', `/api/orders/${id}`, { token, body });
+
+  it('handing off as Self or Cash drops a saved PayPal id and links nothing', async () => {
+    const { token, user } = await loginAs(MARCUS);
+    const sql = getTestDb();
+    // Saved as company/PayPal with an id, then handed off as self-paid.
+    const selfId = await createOrder(token, 'company');
+    expect((await patch(token, selfId, { paymentMethod: 'paypal', paypalTxnId: '7AB12345CD678901E' })).status).toBe(200);
+    await attachChat(token, selfId);
+    const r = await api<{ paymentsLinked: number }>('POST', `/api/orders/${selfId}/handoff`, {
+      token, body: { warehouseId: 'WH-LA1', source: 'other', handoff: pickup(user.id), payment: 'self' },
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.paymentsLinked).toBe(0);
+    const o = await readOrder(token, selfId);
+    expect(o.lifecycle).toBe('in_transit');
+    expect(o.paypalTxnId).toBeNull();
+    expect((await sql`SELECT 1 FROM bank_transactions WHERE order_id = ${selfId}`).length).toBe(0);
+
+    // Same for cash: the id belongs to the PayPal method only.
+    const cashId = await createOrder(token, 'company');
+    expect((await patch(token, cashId, { paymentMethod: 'paypal', paypalTxnId: '7AB12345CD678901E' })).status).toBe(200);
+    await attachPaymentShot(token, cashId);
+    expect((await api('POST', `/api/orders/${cashId}/handoff`, {
+      token, body: { warehouseId: 'WH-LA1', source: 'other', handoff: pickup(user.id), payment: 'company', paymentMethod: 'cash' },
+    })).status).toBe(200);
+    expect((await readOrder(token, cashId)).paypalTxnId).toBeNull();
+  });
+
+  it('PATCH clears the PayPal id on a flip to Self or Cash, and only on the flip', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await createOrder(token, 'company');
+    expect((await patch(token, id, { paymentMethod: 'paypal', paypalTxnId: '7AB12345CD678901E' })).status).toBe(200);
+    expect((await patch(token, id, { payment: 'self' })).status).toBe(200);
+    expect((await readOrder(token, id)).paypalTxnId).toBeNull();
+
+    // A self-paid PO can carry an id create-po scanned off a screenshot; a
+    // later save that says nothing about the payment leaves it alone.
+    const sql = getTestDb();
+    await sql`UPDATE orders SET paypal_txn_id = 'SCANNED000000001' WHERE id = ${id}`;
+    expect((await patch(token, id, { notes: 'still here' })).status).toBe(200);
+    expect((await readOrder(token, id)).paypalTxnId).toBe('SCANNED000000001');
+    expect((await patch(token, id, { payment: 'company', paymentMethod: 'cash' })).status).toBe(200);
+    expect((await readOrder(token, id)).paypalTxnId).toBeNull();
+  });
+
+  it('a deactivated saved collector is no collector: the empty-body hand-off refuses', async () => {
+    const { token, user } = await loginAs(MARCUS);
+    const { user: priya } = await loginAs(PRIYA);
+    const id = await createOrder(token, 'self');
+    await attachChat(token, id);
+    expect((await patch(token, id, { source: 'local', handoffMethod: 'pickup', handoffBy: priya.id })).status).toBe(200);
+    expect((await readOrder(token, id)).blockers).toEqual([]);
+    const sql = getTestDb();
+    await sql`UPDATE users SET active = FALSE WHERE id = ${priya.id}`;
+
+    const refused = await api<{ error: string }>('POST', `/api/orders/${id}/handoff`, { token, body: {} });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toMatch(/who is collecting/i);
+    const o = await readOrder(token, id);
+    expect(o.lifecycle).toBe('draft');
+    expect(o.handoffBy?.id).toBe(priya.id);
+    // Naming a live collector recovers it.
+    expect((await api('POST', `/api/orders/${id}/handoff`, { token, body: { handoff: pickup(user.id) } })).status).toBe(200);
+    expect((await events(id)).find(e => e.kind === 'handoff')?.detail).toMatchObject({ byUserId: user.id, byName: user.name });
+  });
+
+  it('another member\'s standalone box is not adopted; a manager\'s pull still is, re-registering on a new carrier', async () => {
+    const { token: marcus } = await loginAs(MARCUS);
+    const { token: priya } = await loginAs(PRIYA);
+    const { token: alex } = await loginAs(ALEX);
+    const sql = getTestDb();
+    const solo = await api<{ package: { id: string } }>('POST', '/api/packages', {
+      token: priya, body: { trackingNumber: '9400111899223197428490', carrier: 'USPS', source: 'other' },
+    });
+    expect(solo.status).toBe(201);
+
+    const mine = await createOrder(marcus, 'self');
+    const grab = await patch(marcus, mine, { handoffMethod: 'label', trackingNumber: '9400111899223197428490', carrier: 'USPS' });
+    expect(grab.status).toBe(409);
+    expect(grab.body.error).toMatch(/Shipping page/);
+    expect(grab.body.error).not.toMatch(/PO-/);
+    expect((await sql`SELECT order_id FROM packages WHERE id = ${solo.body.package.id}`)[0].order_id).toBeNull();
+
+    await sql`UPDATE packages SET tracking_registered_at = NOW() WHERE id = ${solo.body.package.id}`;
+    const theirs = await createOrder(priya, 'self');
+    expect((await patch(alex, theirs, { handoffMethod: 'label', trackingNumber: '9400111899223197428490', carrier: 'UPS' })).status).toBe(200);
+    const [row] = await sql`SELECT order_id, carrier, tracking_registered_at FROM packages WHERE id = ${solo.body.package.id}`;
+    expect(row).toMatchObject({ order_id: theirs, carrier: 'UPS', tracking_registered_at: null });
+  });
+
+  it('a delivered box is history: no flip away from label, no re-typed number', async () => {
+    const { token, user } = await loginAs(MARCUS);
+    const { token: alex } = await loginAs(ALEX);
+    const id = await createOrder(token, 'self');
+    expect((await patch(token, id, { source: 'facebook', handoffMethod: 'label', ...label })).status).toBe(200);
+    const pkgId = (await readOrder(token, id)).package!.id;
+    const sql = getTestDb();
+    await sql`UPDATE packages SET status = 'delivered', tracking_status = 'delivered' WHERE id = ${pkgId}`;
+
+    const flip = await patch(alex, id, { handoffMethod: 'pickup' });
+    expect(flip.status).toBe(409);
+    expect(flip.body.error).toMatch(/already been delivered/);
+    const retype = await patch(alex, id, { trackingNumber: '1Z999AA10123456791', carrier: 'UPS' });
+    expect(retype.status).toBe(409);
+    const [row] = await sql`SELECT order_id, status, tracking_number FROM packages WHERE id = ${pkgId}`;
+    expect(row).toMatchObject({ order_id: id, status: 'delivered', tracking_number: '1Z999AA10123456784' });
+    expect((await readOrder(token, id)).handoffMethod).toBe('label');
+
+    // The hand-off's own flip is refused the same way.
+    await attachChat(token, id);
+    const ho = await api<{ error: string }>('POST', `/api/orders/${id}/handoff`, {
+      token, body: { warehouseId: 'WH-LA1', handoff: pickup(user.id), payment: 'self' },
+    });
+    expect(ho.status).toBe(409);
+    expect(ho.body.error).toMatch(/already been delivered/);
+    expect((await readOrder(token, id)).lifecycle).toBe('draft');
+  });
+
+  it('a Draft with no warehouse lists it as a blocker and no door lets it out until one is set', async () => {
+    const { token, user } = await loginAs(MARCUS);
+    const { token: alex } = await loginAs(ALEX);
+    const sql = getTestDb();
+    const id = await createOrder(token, 'self');
+    await attachChat(token, id);
+    await sql`UPDATE orders SET warehouse_id = NULL WHERE id = ${id}`;
+    expect((await readOrder(token, id)).blockers).toEqual(['missingWarehouse', 'missingSource', 'missingDelivery']);
+
+    const refused = await api<{ error: string }>('POST', `/api/orders/${id}/handoff`, {
+      token, body: { source: 'other', handoff: pickup(user.id), payment: 'self' },
+    });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toMatch(/receiving warehouse/i);
+    // Not a hand-off nicety: a manager stage-jump is held to it too.
+    const jumped = await api<{ error: string }>('POST', `/api/orders/${id}/advance`, { token: alex, body: {} });
+    expect(jumped.status).toBe(409);
+    expect(jumped.body.error).toMatch(/receiving warehouse/i);
+    expect((await readOrder(token, id)).lifecycle).toBe('draft');
+
+    expect((await api('POST', `/api/orders/${id}/handoff`, {
+      token, body: { warehouseId: 'WH-LA1', source: 'other', handoff: pickup(user.id), payment: 'self' },
+    })).status).toBe(200);
+    expect((await readOrder(token, id)).warehouse?.id).toBe('WH-LA1');
+  });
+
+  it('a PO minted from a box already knows it came by label', async () => {
+    const { token } = await loginAs(MARCUS);
+    const solo = await api<{ package: { id: string } }>('POST', '/api/packages', {
+      token, body: { trackingNumber: '1Z999AA10123456784', carrier: 'UPS', source: 'facebook' },
+    });
+    expect(solo.status).toBe(201);
+    const { token: alex } = await loginAs(ALEX);
+    const made = await api<{ orderId: string }>('POST', `/api/packages/${solo.body.package.id}/create-po`, { token: alex, body: {} });
+    expect(made.status).toBe(201);
+    const o = await readOrder(token, made.body.orderId);
+    expect(o.handoffMethod).toBe('label');
+    expect(o.package?.id).toBe(solo.body.package.id);
+    // The seeded owner has no default warehouse, so that is what is left.
+    expect(o.blockers).not.toContain('missingDelivery');
+    expect(o.blockers).not.toContain('missingTracking');
+    expect(o.blockers).toContain('missingWarehouse');
   });
 });

@@ -9,6 +9,11 @@ import type { OrderEvent } from './types';
 
 export type StageId = 'draft' | 'in_transit' | 'reviewing' | 'ready_to_pay' | 'done' | 'sold';
 
+const STAGE_ORDER: StageId[] = ['draft', 'in_transit', 'reviewing', 'ready_to_pay', 'done', 'sold'];
+const isForward = (from: unknown, to: unknown) =>
+  STAGE_ORDER.indexOf(from as StageId) >= 0
+  && STAGE_ORDER.indexOf(to as StageId) > STAGE_ORDER.indexOf(from as StageId);
+
 export type LookbackFact =
   | { kind: 'submitted'; who: string | null; when: string; lineCount: number; qty: number; totalCost: number }
   | { kind: 'handoffPickup'; who: string | null; when: string; byName: string | null }
@@ -27,8 +32,11 @@ const who = (e: OrderEvent) => e.actor?.name ?? null;
  *  nothing for it (a stage jumped over, or an order older than the events). */
 export function lookbackFacts(stage: StageId, events: OrderEvent[]): LookbackFact[] {
   const out: LookbackFact[] = [];
+  // A stage's closing fact is the move onwards from it. A manager's move
+  // back out of it (reviewing → in_transit) leaves from the same stage but
+  // closes nothing.
   const advancedFrom = (from: StageId) =>
-    last(events, e => e.kind === 'advanced' && e.detail.from === from);
+    last(events, e => e.kind === 'advanced' && e.detail.from === from && isForward(from, e.detail.to));
   const advancedTo = (to: StageId) =>
     last(events, e => e.kind === 'advanced' && e.detail.to === to);
   const pushAdvance = (e: OrderEvent | undefined) => {

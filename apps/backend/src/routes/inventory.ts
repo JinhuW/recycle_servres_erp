@@ -1200,7 +1200,7 @@ inventory.patch('/:id', async (c) => {
     // A sold order's lines are its sales record: this is the one writer that
     // can walk a line off Sold (a Done sell order never reopens), and doing so
     // under a sold order would leave it sold with stock. Reopen the order to
-    // Ready to Pay first — Reviewing would re-cross the warehouse gate.
+    // Ready to Pay first — the reopen target that keeps the lines at Done.
     if (parent?.lifecycle === 'sold' && body.status !== undefined && body.status !== 'Sold') {
       return { kind: 'soldLocked' };
     }

@@ -44,6 +44,8 @@ export type HandoffRefusal =
   | { kind: 'archived' }
   | { kind: 'notDraft'; lifecycle: string }
   | { kind: 'trackingTaken'; otherOrderId: string | null }
+  | { kind: 'trackingTakenStandalone' }
+  | { kind: 'packageDelivered' }
   | { kind: 'advance'; outcome: Exclude<AdvanceOutcome, { kind: 'ok' }> };
 
 // Thrown from inside sql.begin so the transaction unwinds; the route turns it
@@ -96,15 +98,31 @@ export async function nameHandoffByChange(tx: SqlLike, changes: AuditChange[]): 
 
 export type PackageSet =
   | { kind: 'ok'; package: HandoffPackage; prev: HandoffPackage | null; needsRegister: boolean }
-  | { kind: 'taken'; packageId: string; otherOrderId: string | null };
+  | { kind: 'taken'; packageId: string; otherOrderId: string | null }
+  /** The number sits on a standalone box another member is tracking. */
+  | { kind: 'takenStandalone'; packageId: string }
+  /** The order's box has already arrived; its record is history now. */
+  | { kind: 'delivered' };
 
 export type PackageOrderFacts = {
+  user_id: string;
   source: string | null;
   supplier_name: string | null;
   paypal_txn_id: string | null;
   payment_screenshot_key?: string | null;
   payment_screenshot_url?: string | null;
 };
+
+export type PackageActor = { id: string; role: string };
+
+// A standalone box is somebody's: the person who pasted it on the Shipping
+// page. Only they, the PO's owner, or a manager may pull it onto a PO — a
+// purchaser typing a number they saw must not walk off with another member's
+// box and the seller / payment facts on it. A creator-less row (older data)
+// is nobody's to protect.
+function mayAdopt(actor: PackageActor, ownerId: string, createdBy: string | null): boolean {
+  return actor.role === 'manager' || createdBy === null || createdBy === actor.id || createdBy === ownerId;
+}
 
 /** The box the order's tracking number names, made so. Newest linked package
  *  first (FOR UPDATE): the same number is a no-op; a different number updates
@@ -113,38 +131,53 @@ export type PackageOrderFacts = {
  *  adopts that row (unlinking the old one) so label → pickup → label on one
  *  PO cannot dead-end; a number on another PO is `taken`; no package yet →
  *  the insert the hand-off always made. Adoption keeps the caller's carrier —
- *  the person typing the number is looking at the label. Re-registration is
- *  the caller's: Shippo has no unregister, and a push for the old number
- *  simply matches no row and is dropped. */
+ *  the person typing the number is looking at the label — and a carrier
+ *  change is a fresh registration, as it is on the same-row branch.
+ *  Re-registration is the caller's: Shippo has no unregister, and a push for
+ *  the old number simply matches no row and is dropped.
+ *
+ *  A box the carrier already marked delivered is never rewritten: resetting it
+ *  to `purchased` destroys the delivery record, and (via unlink) a delivered
+ *  standalone box re-enters the Shipping page's "Needs you" with a Create PO
+ *  button that mints a second PO for goods this one already received. */
 export async function setOrderPackageTx(
   tx: SqlLike,
   orderId: string,
-  actorId: string,
+  actor: PackageActor,
   order: PackageOrderFacts,
   want: { trackingNumber: string; carrier: Carrier },
 ): Promise<PackageSet> {
-  const cur = (await tx`
-    SELECT id, tracking_number, carrier FROM packages
+  const curRow = (await tx`
+    SELECT id, tracking_number, carrier, status FROM packages
     WHERE order_id = ${orderId}
     ORDER BY created_at DESC, id DESC LIMIT 1
     FOR UPDATE
-  `)[0] as HandoffPackage | undefined;
+  `)[0] as (HandoffPackage & { status: string }) | undefined;
+  const cur: HandoffPackage | undefined = curRow
+    && { id: curRow.id, tracking_number: curRow.tracking_number, carrier: curRow.carrier };
   if (cur && cur.tracking_number === want.trackingNumber) {
     if (cur.carrier === want.carrier) return { kind: 'ok', package: cur, prev: cur, needsRegister: false };
     await tx`UPDATE packages SET carrier = ${want.carrier}, tracking_registered_at = NULL WHERE id = ${cur.id}`;
     return { kind: 'ok', package: { ...cur, carrier: want.carrier }, prev: cur, needsRegister: true };
   }
+  if (curRow?.status === 'delivered') return { kind: 'delivered' };
 
   const other = (await tx`
-    SELECT id, order_id, tracking_registered_at FROM packages
+    SELECT id, order_id, carrier, created_by, tracking_registered_at FROM packages
     WHERE tracking_number = ${want.trackingNumber} AND id IS DISTINCT FROM ${cur?.id ?? null}
     LIMIT 1 FOR UPDATE
-  `)[0] as { id: string; order_id: string | null; tracking_registered_at: Date | null } | undefined;
+  `)[0] as {
+    id: string; order_id: string | null; carrier: string; created_by: string | null;
+    tracking_registered_at: Date | null;
+  } | undefined;
   if (other) {
     if (other.order_id !== null) return { kind: 'taken', packageId: other.id, otherOrderId: other.order_id };
+    if (!mayAdopt(actor, order.user_id, other.created_by)) return { kind: 'takenStandalone', packageId: other.id };
+    const needsRegister = other.tracking_registered_at === null || other.carrier !== want.carrier;
     await tx`
       UPDATE packages SET order_id = ${orderId}, carrier = ${want.carrier},
-                          source = COALESCE(source, ${order.source})
+                          source = COALESCE(source, ${order.source}),
+                          tracking_registered_at = CASE WHEN ${needsRegister}::boolean THEN NULL ELSE tracking_registered_at END
       WHERE id = ${other.id}
     `;
     if (cur) await tx`UPDATE packages SET order_id = NULL WHERE id = ${cur.id}`;
@@ -152,7 +185,7 @@ export async function setOrderPackageTx(
       kind: 'ok',
       package: { id: other.id, tracking_number: want.trackingNumber, carrier: want.carrier },
       prev: cur ?? null,
-      needsRegister: other.tracking_registered_at === null,
+      needsRegister,
     };
   }
 
@@ -185,7 +218,7 @@ export async function setOrderPackageTx(
     VALUES (
       ${want.trackingNumber}, ${want.carrier}, ${order.supplier_name}, ${order.source},
       ${order.paypal_txn_id}, ${order.payment_screenshot_key ?? null},
-      ${order.payment_screenshot_url ?? null}, ${orderId}, ${actorId}
+      ${order.payment_screenshot_url ?? null}, ${orderId}, ${actor.id}
     )
     ON CONFLICT (tracking_number) DO NOTHING
     RETURNING id, tracking_number, carrier
@@ -199,14 +232,26 @@ export async function setOrderPackageTx(
   return { kind: 'ok', package: inserted[0], prev: null, needsRegister: true };
 }
 
+export type PackageUnlink =
+  | { kind: 'ok'; gone: HandoffPackage[] }
+  | { kind: 'delivered' };
+
 /** Label → pickup: the box is no longer this order's. Unlinked, not deleted —
  *  migration 0094's own rule for the order's deletion, and DELETE /api/packages
- *  can still remove the row from the Shipping page if it is noise. */
-export async function unlinkOrderPackagesTx(tx: SqlLike, orderId: string): Promise<HandoffPackage[]> {
-  return (await tx`
+ *  can still remove the row from the Shipping page if it is noise. Refused
+ *  once the box has arrived: a delivered standalone row lands back in the
+ *  Shipping page's "Needs you" bucket, whose Create PO mints a second PO for
+ *  goods this order already received. */
+export async function unlinkOrderPackagesTx(tx: SqlLike, orderId: string): Promise<PackageUnlink> {
+  const delivered = await tx`
+    SELECT 1 FROM packages WHERE order_id = ${orderId} AND status = 'delivered' LIMIT 1
+  `;
+  if (delivered.length) return { kind: 'delivered' };
+  const gone = (await tx`
     UPDATE packages SET order_id = NULL WHERE order_id = ${orderId}
     RETURNING id, tracking_number, carrier
   `) as unknown as HandoffPackage[];
+  return { kind: 'ok', gone };
 }
 
 /** The audit entries a package move produces, in META_FIELDS' shape. */
@@ -255,14 +300,24 @@ export async function handoffOrderTx(
   const warehouseId = input.warehouseId ?? before.warehouse_id;
   const source = input.source ?? before.source;
   const method = input.handoff?.method ?? before.handoff_method;
-  const handoffBy = method === 'pickup'
+  // The row's collector was active when it was saved; it may not be any more.
+  // A deactivated one is no collector, and the advance below says so.
+  const wantedBy = method === 'pickup'
     ? (input.handoff?.method === 'pickup' && input.handoff.byUserId) || before.handoff_by
     : null;
+  const collector = wantedBy ? await activeMember(tx, wantedBy) : null;
+  const handoffBy = collector?.id ?? null;
   const payment = input.payment ?? before.payment;
   const paymentMethod = payment === 'self'
     ? null
     : (input.paymentMethod !== undefined ? input.paymentMethod : before.payment_method);
-  const paypalTxnId = input.paypalTxnId !== undefined ? input.paypalTxnId : before.paypal_txn_id;
+  // The id follows the method the way the method follows the payment: only a
+  // PayPal payment has one. A Draft saved as PayPal and handed off as Self or
+  // Cash must not keep the id — the link below would file a company payment
+  // against a PO the company never paid for.
+  const paypalTxnId = paymentMethod !== 'paypal'
+    ? null
+    : (input.paypalTxnId !== undefined ? input.paypalTxnId : before.paypal_txn_id);
   const setCommission = input.commissionRate !== undefined;
   await tx`
     UPDATE orders SET
@@ -291,14 +346,16 @@ export async function handoffOrderTx(
       ? { trackingNumber: input.handoff.trackingNumber, carrier: input.handoff.carrier }
       : null;
     if (want) {
-      const set = await setOrderPackageTx(tx, id, actor.id, {
-        source, supplier_name: before.supplier_name, paypal_txn_id: paypalTxnId,
+      const set = await setOrderPackageTx(tx, id, { id: actor.id, role: actor.role }, {
+        user_id: before.user_id, source, supplier_name: before.supplier_name, paypal_txn_id: paypalTxnId,
         payment_screenshot_key: input.paymentScreenshotKey ?? null,
         payment_screenshot_url: input.paymentScreenshotUrl ?? null,
       }, want);
       if (set.kind === 'taken') {
         throw new HandoffRefused({ kind: 'trackingTaken', otherOrderId: set.otherOrderId });
       }
+      if (set.kind === 'takenStandalone') throw new HandoffRefused({ kind: 'trackingTakenStandalone' });
+      if (set.kind === 'delivered') throw new HandoffRefused({ kind: 'packageDelivered' });
       pkg = set.package;
       needsRegister = set.needsRegister;
       changes.push(...packageChanges(set.prev, set.package));
@@ -310,8 +367,9 @@ export async function handoffOrderTx(
       `)[0] as HandoffPackage | undefined ?? null;
     }
   } else if (before.handoff_method === 'label') {
-    const gone = await unlinkOrderPackagesTx(tx, id);
-    if (gone.length) changes.push(...packageChanges(gone[0], null));
+    const unlinked = await unlinkOrderPackagesTx(tx, id);
+    if (unlinked.kind === 'delivered') throw new HandoffRefused({ kind: 'packageDelivered' });
+    if (unlinked.gone.length) changes.push(...packageChanges(unlinked.gone[0], null));
   }
 
   if (changes.length) {
@@ -340,10 +398,9 @@ export async function handoffOrderTx(
   // Written before the advance's `submitted` so the timeline reads "handed
   // off, then submitted". A label with no box, or a pickup with no collector,
   // writes nothing here: the advance below refuses it and unwinds the rest.
-  if (method === 'pickup' && handoffBy) {
-    const by = await activeMember(tx, handoffBy);
+  if (method === 'pickup' && collector) {
     await writeOrderEvent(tx, id, actor.id, 'handoff', {
-      method, byUserId: handoffBy, byName: by?.name ?? null,
+      method, byUserId: collector.id, byName: collector.name,
     });
   } else if (method === 'label' && pkg) {
     await writeOrderEvent(tx, id, actor.id, 'handoff', {
