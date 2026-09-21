@@ -474,6 +474,13 @@ html.desktop, body.desktop, .desktop #root {
 .oe-tabpanel[hidden] { display: none; }
 .oe-tabpad { padding: 16px; }
 .oe-tab-note { margin-top: 14px; font-size: 12px; color: var(--fg-subtle); line-height: 1.5; }
+/* Delivery tab: one fact per row — source, warehouse, then how it gets here
+   beside what that choice needs — with the checkpoint's hairline between
+   them, so the dependent field can't read as the row above's. */
+.oe-dl-row { padding: 14px 0; }
+.oe-dl-row:first-child { padding-top: 0; }
+.oe-dl-row:last-child { padding-bottom: 0; }
+.oe-dl-row + .oe-dl-row { border-top: 1px solid var(--border); }
 .oe-pkg-line {
   margin-top: 14px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
   background: var(--bg-soft); display: flex; align-items: center; gap: 8px; font-size: 12.5px; flex-wrap: wrap;
@@ -517,6 +524,9 @@ html.desktop, body.desktop, .desktop #root {
   .page.page-order-edit .so-step { padding: 6px 8px; }
   .page.page-order-edit .so-step:not(.active):not(.viewing) .so-step-label { display: none; }
   .oe-fields, .oe-fields-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* Two tracks: the carrier strip spans the line under the switch and the
+     tracking number rather than tucking under the switch alone. */
+  .oe-dl-row > .field:nth-child(3) { grid-column: 1 / -1; }
   .oe-stage-cols { grid-template-columns: minmax(0, 1fr); }
   .oe-foot { display: flex; flex-wrap: wrap; gap: 12px 18px; }
   .oe-foot-actions { margin-left: auto; }
