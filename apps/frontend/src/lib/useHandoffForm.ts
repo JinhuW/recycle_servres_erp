@@ -105,7 +105,6 @@ export function useHandoffForm(init: HandoffInit, onDone: (r: { packageId: strin
       const body = buildHandoffBody({
         warehouseId, source: source!, delivery: delivery!, byUserId, trackingNumber: tn, carrier,
         paidBy, method, txnId,
-        screenshot: proof.screenshot ? { key: proof.screenshot.key, url: proof.screenshot.url } : null,
       });
       const r = await api.post<{ ok: true; packageId: string | null }>(`/api/orders/${order.id}/handoff`, body);
       onDone({ packageId: r.packageId });

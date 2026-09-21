@@ -83,7 +83,7 @@ export function HandoffFields({ f, phone = false }: { f: Form; phone?: boolean }
       : f.delivery === 'label' ? [f.carrier, f.tn].filter(Boolean).join(' ') : null,
   ].filter(Boolean).join(' · ');
   const proofN = f.paidBy === 'self' ? f.proof.chatAtts.length
-    : f.method === 'cash' ? f.proof.proofAtts.length : (f.proof.screenshot ? 1 : 0);
+    : f.method === 'cash' || f.method === 'paypal' ? f.proof.proofAtts.length : 0;
   const paymentSummary = [
     f.paidBy === 'self' ? t('paySelfShort') : t('payCompanyShort'),
     f.paidBy === 'company' ? (f.method === 'cash' ? t('hoMethodCash') : f.method === 'paypal' ? t('hoMethodPaypal') : null) : null,

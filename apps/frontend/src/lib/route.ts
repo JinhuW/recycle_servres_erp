@@ -190,8 +190,10 @@ export function pathToDesktopView(path: string): DesktopViewId {
 
 // The Payments page focused on one PO's linked payments. A path for
 // navigate(); the page reads the id back with match('/payments/po/:id').
-export function paymentsForOrderPath(orderId: string): string {
-  return `/payments/po/${encodeURIComponent(orderId)}`;
+// With a transaction id the page opens that row instead of the first.
+export function paymentsForOrderPath(orderId: string, txnId?: string): string {
+  const base = `/payments/po/${encodeURIComponent(orderId)}`;
+  return txnId ? `${base}?txn=${encodeURIComponent(txnId)}` : base;
 }
 
 // An in-app anchor's href. Anchors — unlike navigate() — need the `#` written

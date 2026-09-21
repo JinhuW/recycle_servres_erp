@@ -17,6 +17,31 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.167.0] - 2026-09-20
+
+### Fixes
+
+- **The Cost Payment tab keeps the PayPal screenshot, and shows it on
+  reopen** (RS-088). Dropping a PayPal screenshot on the desktop or phone PO
+  page, or in the hand-off dialog, used to send it through the scan endpoint
+  for the transaction ID and hold the image in page state only — reopen the
+  PO and it was gone. It is now a `Payment` attachment on the order, the same
+  bucket as the cash screenshot: the status-meta upload route takes
+  `?scan=paypal` and reads the ID off the file in the same round trip
+  (`{ attachment, scan }`; a failed read keeps the file and answers
+  `scan: null`, and the field says to type it). The panel lists what is on
+  file as chips beside the drop box, read-only when the viewer cannot edit
+  the PO, and removing one deletes only the order's own R2 object. The
+  hand-off body no longer carries a client-supplied screenshot key, which
+  closes RS-073 (a pickup hand-off orphaned the upload).
+
+### Features
+
+- **Each bank payment on a PO links back to its transaction.** The *Bank
+  payments* rows on the Cost Payment tab open the Payments page pinned to
+  the PO with that row expanded (`#/payments/po/<id>?txn=<id>`); the header's
+  *Open Payments* button still opens the first.
+
 ## [1.166.0] - 2026-09-20
 
 ### Features

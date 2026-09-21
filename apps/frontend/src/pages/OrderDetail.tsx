@@ -1673,9 +1673,6 @@ export function OrderDetail({
           onClose={() => setHandoffOpen(false)}
           onDone={async () => {
             setHandoffOpen(false);
-            // The scan preview belongs to the hand-off that just consumed it;
-            // this page stays mounted, so it would linger in the PayPal panel.
-            proof.removeScreenshot();
             await refetchOrder();
             setActivityRefreshKey(k => k + 1);
           }}

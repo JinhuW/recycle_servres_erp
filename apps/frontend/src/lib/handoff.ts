@@ -19,7 +19,7 @@ export type HandoffRules = {
   method: HandoffMethod | null;
   txnId: string;
   chatAttachmentCount: number;
-  /** Payment-bucket attachments: the cash screenshot(s). */
+  /** Payment-bucket attachments: the cash (or PayPal) screenshot(s). */
   proofAttachmentCount: number;
   /** What the server said about the *saved* order. Each verdict was computed
    *  for the saved paid-by and method — `txnRequired` on the company /
@@ -72,8 +72,6 @@ export type HandoffBody = {
   payment: 'company' | 'self';
   paymentMethod?: HandoffMethod;
   paypalTxnId?: string;
-  paymentScreenshotKey?: string;
-  paymentScreenshotUrl?: string;
   onBehalfOfUserId?: string;
   commissionRate?: number | null;
 };
@@ -89,7 +87,6 @@ export type HandoffDraft = {
   /** Non-null for a company order by the time submit is allowed (blocker). */
   method: HandoffMethod | null;
   txnId: string;
-  screenshot: { key: string; url: string } | null;
   /** Manager-only; undefined leaves the owner / rate untouched. */
   ownerId?: string;
   commissionRate?: number | null;
@@ -108,13 +105,9 @@ export function buildHandoffBody(d: HandoffDraft): HandoffBody {
   };
   if (d.paidBy === 'company' && d.method) {
     body.paymentMethod = d.method;
-    if (d.method === 'paypal') {
-      if (d.txnId.trim()) body.paypalTxnId = d.txnId.trim();
-      if (d.screenshot) {
-        body.paymentScreenshotKey = d.screenshot.key;
-        body.paymentScreenshotUrl = d.screenshot.url;
-      }
-    }
+    // The PayPal screenshot is not in the body: it was uploaded as a Payment
+    // attachment the moment it was dropped.
+    if (d.method === 'paypal' && d.txnId.trim()) body.paypalTxnId = d.txnId.trim();
   }
   if (d.ownerId !== undefined) body.onBehalfOfUserId = d.ownerId;
   if (d.commissionRate !== undefined) body.commissionRate = d.commissionRate;

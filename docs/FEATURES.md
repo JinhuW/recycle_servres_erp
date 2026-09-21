@@ -291,10 +291,13 @@ on to Sold once every line has sold (v1.164.0).
   all share one component: *Paid by* (Company card / Self-paid), then, under
   Company card, *Method* (PayPal / Cash), then a proof panel whose heading
   states what the chosen path needs before anything is typed — the
-  transaction ID plus the optional screenshot that reads it; a **screenshot
-  of the total amount handed over** for cash (the receipt, the counted cash,
-  or the chat where the amount was agreed); the chat with the seller for a
-  self-paid order. A company PO whose method was never asked is asked in the
+  transaction ID plus the optional screenshot that reads it (since v1.167.0
+  that screenshot is itself a `Payment` attachment on the PO — listed as a
+  chip beside the drop box, still there after a reload, shown read-only when
+  the PO is locked, and the ID is read off it in the same upload); a
+  **screenshot of the total amount handed over** for cash (the receipt, the
+  counted cash, or the chat where the amount was agreed); the chat with the
+  seller for a self-paid order. A company PO whose method was never asked is asked in the
   hand-off rather than assumed to be PayPal. The cash screenshot is the third
   proof-of-payment rule: a company-cash PO created after the release refuses
   to leave Draft — hand-off, manager stage-jump, carrier poll — until one is
@@ -333,7 +336,10 @@ on to Sold once every line has sold (v1.164.0).
   on every PO with linked payments — the ledger's net, refunds subtracted,
   failed and reversed left out — and clicking it opens the Payments page
   focused on that PO. A PO nothing is linked to keeps the plain chip, and so
-  does every purchaser, since the page it opens is manager-only.
+  does every purchaser, since the page it opens is manager-only. On the PO
+  page itself, each row of the Cost Payment tab's *Bank payments* ledger is a
+  link to that transaction — the Payments page pinned to the PO with that row
+  open (v1.167.0).
 - **The desktop list holds every PO in scope** (v1.140.1). It used to stop
   silently at the API's first page — the newest 50 — so older orders were
   unreachable and the stage counts, KPI cards, search and sort all ran over

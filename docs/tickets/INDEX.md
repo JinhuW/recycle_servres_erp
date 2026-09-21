@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-088](./RS-088-cost-payment-keeps-the-paypal-screenshot-on-the-po-a.md) | done | bug | P2 | Cost Payment keeps the PayPal screenshot on the PO, and each bank payment links back | — |
 | [RS-087](./RS-087-new-pos-start-at-50-commission-the-camera-picker-ask.md) | done | story | P2 | New POs start at 50% commission; the camera picker asks which item to add; Submit opens the PO | 1.166.0 |
 | [RS-086](./RS-086-commission-payment-is-the-screenshot-alone-done-asks.md) | done | story | P2 | Commission payment is the screenshot alone; Done asks for it only when missing | 1.165.0 |
 | [RS-085](./RS-085-po-lifecycle-sold-a-done-po-whose-every-line-has-sol.md) | done | story | P2 | PO lifecycle Sold: a Done PO whose every line has sold | 1.164.0 |
@@ -19,7 +20,7 @@ See [README.md](./README.md) for what the fields mean.
 | [RS-076](./RS-076-dev-to-main-review-findings-before-the-prod-cut.md) | done | bug | P2 | Dev-to-main review findings before the prod cut | 1.155.1 |
 | [RS-075](./RS-075-in-transit-chip-names-the-carrier-and-links-its-trac.md) | done | story | P2 | In Transit chip names the carrier and links its tracking page | 1.155.0 |
 | [RS-074](./RS-074-split-the-phone-po-page-into-general-info-and-produc.md) | done | story | P2 | Split the phone PO page into general info and products; list rows open instead of expanding | 1.154.0 |
-| [RS-073](./RS-073-paypal-screenshot-from-the-hand-off-dialog-is-kept-o.md) | backlog | bug | P3 | PayPal screenshot from the hand-off dialog is kept on the order | — |
+| [RS-073](./RS-073-paypal-screenshot-from-the-hand-off-dialog-is-kept-o.md) | done | bug | P3 | PayPal screenshot from the hand-off dialog is kept on the order | — |
 | [RS-072](./RS-072-unit-cost-is-required-when-a-product-line-is-saved.md) | done | story | P2 | Unit cost is required when a product line is saved | 1.152.0 |
 | [RS-071](./RS-071-company-pay-asks-paypal-or-cash-cash-needs-a-screens.md) | done | story | P2 | Company pay asks PayPal or Cash; cash needs a screenshot of the amount paid | 1.153.0 |
 | [RS-070](./RS-070-po-suggestions-honour-the-payment-s-owner.md) | done | story | P2 | PO suggestions honour the payment's owner | 1.151.0 |

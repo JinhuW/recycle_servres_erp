@@ -99,24 +99,22 @@ describe('buildHandoffBody', () => {
   const draft = {
     warehouseId: 'WH-LA1', source: 'reddit' as const, delivery: 'pickup' as const, byUserId: 'u1',
     trackingNumber: '', carrier: null, paidBy: 'self' as const, method: 'paypal' as const,
-    txnId: '8XY12345AB678901C', screenshot: { key: 'k', url: 'https://x/k' },
+    txnId: '8XY12345AB678901C',
   };
 
-  it('sends no method, id or screenshot for a self-paid order', () => {
+  it('sends no method or id for a self-paid order', () => {
     expect(buildHandoffBody(draft)).toEqual({
       warehouseId: 'WH-LA1', source: 'reddit', handoff: { method: 'pickup', byUserId: 'u1' }, payment: 'self',
     });
   });
 
-  it('sends the method, and the id + screenshot only for PayPal', () => {
+  it('sends the method, and the id only for PayPal', () => {
     expect(buildHandoffBody({ ...draft, paidBy: 'company' })).toMatchObject({
       payment: 'company', paymentMethod: 'paypal', paypalTxnId: '8XY12345AB678901C',
-      paymentScreenshotKey: 'k', paymentScreenshotUrl: 'https://x/k',
     });
     const cash = buildHandoffBody({ ...draft, paidBy: 'company', method: 'cash' });
     expect(cash.paymentMethod).toBe('cash');
     expect(cash).not.toHaveProperty('paypalTxnId');
-    expect(cash).not.toHaveProperty('paymentScreenshotKey');
   });
 
   it('shapes a label hand-off and the manager-only fields', () => {
