@@ -17,6 +17,20 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.171.2] - 2026-09-21
+
+### Fixes
+
+- **The activity log no longer shows one PO's events under another for a
+  moment** (RS-094 follow-up). The phone swaps one order for another in place
+  rather than remounting, and `useOrderEvents` kept the previous order's
+  events — and its "loaded" state — until the new request landed, so the
+  activity count, the timeline and the stage look-back could briefly show
+  the wrong PO's audit trail. The held events are now tagged with the order
+  they belong to and an order they don't belong to gets an empty, unloaded
+  list; a refresh of the same order still keeps the list up while it
+  reloads.
+
 ## [1.171.1] - 2026-09-21
 
 ### Fixes
