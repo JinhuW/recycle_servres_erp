@@ -98,7 +98,6 @@ export function LinePhotoStrip({
               type="file"
               accept="image/*"
               multiple
-              capture="environment"
               style={{ display: 'none' }}
               onChange={e => { onAdd(e.target.files); e.target.value = ''; }}
             />

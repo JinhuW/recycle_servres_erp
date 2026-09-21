@@ -17,6 +17,40 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.172.2] - 2026-09-21
+
+### Fixes
+
+- **The phone's file drop boxes offer the photo library and Files, not the
+  camera alone** (RS-098). The Cost Payment and Commission screenshot boxes,
+  the same box inside the hand-off dialog, and the "+" tile on the line-photo
+  strip sat on a file input carrying `capture="environment"`, which on iOS
+  Safari and Android Chrome skips the OS chooser and opens the rear camera
+  straight away — so a screenshot already on the phone could not be attached
+  from the phone. The attribute is gone: tapping any of those boxes now
+  brings up the native "Take Photo / Photo Library / Choose File" sheet, and
+  the line-photo tile lets several library photos be picked at once. Desktop
+  browsers ignored the attribute and are unchanged. `AttachmentDropzone`
+  loses its `capture` prop and `PaymentFields` / `CommissionPaymentFields`
+  the `phone` prop whose only job was to set it.
+
+## [1.172.1] - 2026-09-21
+
+### Fixes
+
+- **The desktop PO page's Delivery tab lays its facts one per row**
+  (RS-097). The tab put Source, Receiving warehouse and How it gets here
+  across one three-column row and the field the delivery choice needs —
+  *Picked up by*, or the tracking number and carrier chips — on the row
+  below, where on a wide window it landed under Source and read as if it
+  belonged there. Source now has the first row to itself, Receiving
+  warehouse the second, and the third holds the delivery switch beside
+  what that choice needs, with a hairline between the rows (the checkpoint
+  dialog's own device). The controls keep the column Source and Warehouse
+  share, so a lone select no longer stretches across the whole card; under
+  1100px the carrier strip spans the row beneath the switch and the
+  tracking number.
+
 ## [1.171.2] - 2026-09-21
 
 ### Fixes

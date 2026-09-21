@@ -25,7 +25,6 @@ type Props = {
    *  what the server said about the saved order. */
   txnRequired?: boolean;
   disabled?: boolean;
-  phone?: boolean;
   /** Short option labels for a narrow grid cell. */
   compact?: boolean;
   proof?: PaymentProof;
@@ -38,7 +37,7 @@ type Props = {
 
 export function PaymentFields({
   paidBy, onPaidBy, method, onMethod, txnId, onTxnId,
-  txnRequired = false, disabled = false, phone = false, compact = false,
+  txnRequired = false, disabled = false, compact = false,
   proof, canEditProof = true, idPrefix = 'pay',
 }: Props) {
   const { t } = useT();
@@ -77,7 +76,7 @@ export function PaymentFields({
       {proof && (
         <ProofPanel
           paidBy={paidBy} method={method} txnId={txnId} onTxnId={onTxnId}
-          txnRequired={txnRequired} disabled={disabled} phone={phone}
+          txnRequired={txnRequired} disabled={disabled}
           proof={proof} canEdit={canEditProof && !disabled} idPrefix={p}
         />
       )}
@@ -86,7 +85,7 @@ export function PaymentFields({
 }
 
 function ProofPanel({
-  paidBy, method, txnId, onTxnId, txnRequired, disabled, phone, proof, canEdit, idPrefix: p,
+  paidBy, method, txnId, onTxnId, txnRequired, disabled, proof, canEdit, idPrefix: p,
 }: {
   paidBy: 'company' | 'self';
   method: HandoffMethod | null;
@@ -94,7 +93,6 @@ function ProofPanel({
   onTxnId: (v: string) => void;
   txnRequired: boolean;
   disabled: boolean;
-  phone: boolean;
   proof: PaymentProof;
   canEdit: boolean;
   idPrefix: string;
@@ -158,7 +156,6 @@ function ProofPanel({
                 uploading={proof.scanBusy}
                 accept="image/*"
                 multiple={false}
-                capture={phone ? 'environment' : undefined}
                 compact
                 boxHint={t('hoShotHint')}
               />
@@ -197,7 +194,6 @@ function ProofPanel({
           onFiles={files => void add(files)}
           uploading={uploading}
           accept={cash ? 'image/*' : 'image/*,application/pdf'}
-          capture={phone ? 'environment' : undefined}
           compact
           boxHint={t(cash ? 'payProofCashDrop' : 'payProofChatDrop')}
         />
