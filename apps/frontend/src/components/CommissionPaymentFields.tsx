@@ -22,10 +22,9 @@ type Props = {
   shots: CommissionShots;
   /** Managers edit; everyone else reads what is on file. */
   editable: boolean;
-  phone?: boolean;
 };
 
-export function CommissionPaymentFields({ shots, editable, phone = false }: Props) {
+export function CommissionPaymentFields({ shots, editable }: Props) {
   const { t } = useT();
 
   if (!editable) {
@@ -55,7 +54,6 @@ export function CommissionPaymentFields({ shots, editable, phone = false }: Prop
         onFiles={shots.add}
         uploading={shots.uploading}
         accept="image/*"
-        capture={phone ? 'environment' : undefined}
         compact
         boxHint={t('cpShotHint')}
       />

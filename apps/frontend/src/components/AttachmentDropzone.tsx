@@ -13,7 +13,6 @@ export function AttachmentDropzone({
   boxHint,
   accept = '.pdf,.png,.jpg,.jpeg,image/*,application/pdf',
   multiple = true,
-  capture,
   compact = false,
 }: {
   onFiles: (files: FileList | null) => void;
@@ -24,9 +23,6 @@ export function AttachmentDropzone({
   boxHint?: string;
   accept?: string;
   multiple?: boolean;
-  // 'environment' asks a phone to open the rear camera rather than the photo
-  // library. A hint, not a guarantee — desktop browsers ignore it.
-  capture?: 'environment' | 'user';
   // Same box, half the height. For surfaces where the full-size zone costs more
   // room than the attachments are worth — a sticky footer above all.
   compact?: boolean;
@@ -69,7 +65,6 @@ export function AttachmentDropzone({
           type="file"
           multiple={multiple}
           accept={accept}
-          {...(capture ? { capture } : {})}
           style={{ display: 'none' }}
           onChange={e => { onFiles(e.target.files); e.target.value = ''; }}
         />

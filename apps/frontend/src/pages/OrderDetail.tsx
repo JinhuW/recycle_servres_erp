@@ -1286,7 +1286,6 @@ export function OrderDetail({
             txnId={paypalTxnId} onTxnId={v => canEditOrder && setMeta({ paypalTxnId: v })}
             txnRequired={order.txnRequired === true}
             disabled={!canEditOrder}
-            phone
             proof={proof}
             canEditProof={canAnnotate}
             idPrefix="ph"
@@ -1314,7 +1313,7 @@ export function OrderDetail({
               the phone rules for the labels hang off that class, and the fold
               body is shared with the fields above. */}
           <div className="ph-pay">
-            <CommissionPaymentFields shots={commissionShots} editable={!isPurchaser} phone />
+            <CommissionPaymentFields shots={commissionShots} editable={!isPurchaser} />
           </div>
         </PhFold>
 

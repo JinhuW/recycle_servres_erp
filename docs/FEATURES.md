@@ -397,6 +397,11 @@ on to Sold once every line has sold (v1.164.0).
   (v1.101.0).
 - Lines carry photos (v1.54.0). Submission attachments accept receipts and
   spreadsheets (`.xlsx`, `.csv`); `.xls` and `.xlsm` stay refused (v1.34.0).
+- **On a phone, every file drop box opens the OS chooser — camera, photo
+  library or Files** (v1.172.2). The payment and commission screenshot boxes
+  and the line-photo "+" tile used to jump straight into the rear camera, so
+  a screenshot already on the phone could not be attached from it; the
+  line-photo tile now also takes several library photos at once.
 - The PO list hides Done orders by default with a toggle (v1.89.0); mobile
   managers see the whole org's POs (v1.88.0). The stage filter lives in the
   table toolbar as status chips (v1.39.0).
