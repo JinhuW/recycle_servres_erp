@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-093](./RS-093-realized-profit-has-its-own-column-toggle-on-the-des.md) | done | story | P2 | Realized profit has its own column toggle on the desktop PO list | 1.171.0 |
 | [RS-092](./RS-092-the-line-s-first-photo-leads-its-card-on-the-phone-p.md) | done | story | P2 | The line's first photo leads its card on the phone products screen | 1.170.1 |
 | [RS-091](./RS-091-the-payment-screenshot-s-file-name-carries-the-paypa.md) | done | story | P3 | The Payment screenshot's file name carries the PayPal transaction ID | 1.170.0 |
 | [RS-090](./RS-090-review-screen-shows-only-the-products-the-add-row-do.md) | done | story | P2 | Review screen shows only the products; the add row docks at the bottom | 1.169.0 |

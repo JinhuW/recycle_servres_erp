@@ -167,8 +167,10 @@ on to Sold once every line has sold (v1.164.0).
   lines, on the PO as bought and clamped at zero (v1.149.4 — an unpriced line
   contributes nothing to it, cost included); null until something sells, so
   a partly sold PO reads low until the rest goes and says so with a sold
-  count. Desktop list:
-  the Profit column toggle shows the pair. PO edit page: a realized block on
+  count. Desktop list: Unrealized rides the Profit column toggle; Realized
+  has its own **Realized profit** toggle in the Columns picker (v1.171.0),
+  on by default and offered to managers only — until then it hid with
+  Profit. PO edit page: a realized block on
   the cost tape with a sold meter. Phone: the money card carries both and the
   list row a Realized line. Purchasers and a manager previewing as purchaser
   get none of it. Other fees amortize over the PO as bought (`qty_purchased`)

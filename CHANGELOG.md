@@ -17,6 +17,19 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.171.0] - 2026-09-20
+
+### Features
+
+- **Realized profit has its own column toggle on the desktop PO list**
+  (RS-093). The manager-only Realized column (v1.149.0) rode on the Profit
+  toggle: hide Profit to keep the list compact and Realized vanished with it,
+  and the Columns picker had no entry to bring it back alone. It is now its
+  own **Realized profit** entry in the picker — on by default, offered to
+  managers only (a purchaser, or a manager previewing as one, never receives
+  the figure, so the picker leaves it out and counts only their columns).
+  A manager who customised Columns before this release ticks it once.
+
 ## [1.170.1] - 2026-09-20
 
 ### Fixes
