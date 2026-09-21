@@ -17,6 +17,23 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.172.2] - 2026-09-21
+
+### Fixes
+
+- **The phone's file drop boxes offer the photo library and Files, not the
+  camera alone** (RS-098). The Cost Payment and Commission screenshot boxes,
+  the same box inside the hand-off dialog, and the "+" tile on the line-photo
+  strip sat on a file input carrying `capture="environment"`, which on iOS
+  Safari and Android Chrome skips the OS chooser and opens the rear camera
+  straight away — so a screenshot already on the phone could not be attached
+  from the phone. The attribute is gone: tapping any of those boxes now
+  brings up the native "Take Photo / Photo Library / Choose File" sheet, and
+  the line-photo tile lets several library photos be picked at once. Desktop
+  browsers ignored the attribute and are unchanged. `AttachmentDropzone`
+  loses its `capture` prop and `PaymentFields` / `CommissionPaymentFields`
+  the `phone` prop whose only job was to set it.
+
 ## [1.172.1] - 2026-09-21
 
 ### Fixes

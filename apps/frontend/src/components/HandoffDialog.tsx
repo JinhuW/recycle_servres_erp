@@ -202,7 +202,6 @@ export function HandoffFields({ f, phone = false }: { f: Form; phone?: boolean }
           method={f.method} onMethod={f.setMethod}
           txnId={f.txnId} onTxnId={f.setTxnId}
           txnRequired
-          phone={phone}
           proof={f.proof}
           idPrefix="ho"
         />
