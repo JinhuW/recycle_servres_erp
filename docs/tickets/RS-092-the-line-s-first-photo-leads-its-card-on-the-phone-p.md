@@ -2,13 +2,13 @@
 id: RS-092
 title: The line's first photo leads its card on the phone products screen
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-09-20
 reporter: jinhu
 branch: feat/rs-092-line-photo-leads
-pr:
-version:
+pr: 387
+version: 1.170.1
 related: [RS-074]
 ---
 
