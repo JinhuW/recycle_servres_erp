@@ -2,13 +2,13 @@
 id: RS-097
 title: Delivery tab lays its facts one per row
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-21
 reporter: jinhu
 branch: fix/rs-097-delivery-tab-rows
-pr:
-version:
+pr: https://github.com/JinhuW/recycle_servres_erp/pull/392
+version: 1.172.1
 related: [RS-080, RS-094]
 ---
 

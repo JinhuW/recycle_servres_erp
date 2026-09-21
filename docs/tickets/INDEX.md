@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-097](./RS-097-delivery-tab-lays-its-facts-one-per-row.md) | in-progress | story | P2 | Delivery tab lays its facts one per row | — |
+| [RS-097](./RS-097-delivery-tab-lays-its-facts-one-per-row.md) | done | story | P2 | Delivery tab lays its facts one per row | 1.172.1 |
 | [RS-094](./RS-094-pre-release-review-fixes-for-the-v1-157-v1-171-hand.md) | done | bug | P1 | Pre-release review fixes for the v1.157–v1.171 hand-off, package and Sold changes | 1.171.1 |
 | [RS-093](./RS-093-realized-profit-has-its-own-column-toggle-on-the-des.md) | done | story | P2 | Realized profit has its own column toggle on the desktop PO list | 1.171.0 |
 | [RS-092](./RS-092-the-line-s-first-photo-leads-its-card-on-the-phone-p.md) | done | story | P2 | The line's first photo leads its card on the phone products screen | 1.170.1 |
