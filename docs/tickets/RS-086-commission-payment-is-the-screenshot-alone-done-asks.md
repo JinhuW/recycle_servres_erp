@@ -7,7 +7,7 @@ priority: P2
 created: 2026-09-20
 reporter: jinhu
 branch: feat/rs-085-commission-screenshot
-pr:
+pr: 380
 version: 1.165.0
 related: [RS-084]
 ---
