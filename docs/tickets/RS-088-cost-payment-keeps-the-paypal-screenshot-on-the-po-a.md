@@ -7,7 +7,7 @@ priority: P2
 created: 2026-09-20
 reporter: jinhu
 branch: fix/rs-088-paypal-shot-persists
-pr:
+pr: 382
 version: 1.167.0
 related: [RS-071, RS-073]
 ---
