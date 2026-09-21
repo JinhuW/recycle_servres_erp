@@ -2,12 +2,12 @@
 id: RS-090
 title: Review screen shows only the products; the add row docks at the bottom
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-20
 reporter: jinhu
 branch: feat/rs-090-review-products-only
-pr:
+pr: 384
 version: 1.169.0
 related: [RS-087, RS-083]
 ---
