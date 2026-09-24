@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import {
   StatusChangeDialog, type MetaStatus, type StatusAttachment,
@@ -84,6 +84,8 @@ type SellOrderLine = {
   position: number;
   inventoryId: string | null;
   warehouseId: string | null;
+  // The PO the line's inventory came from; null for a free-typed line.
+  sourceOrderId?: string | null;
   maxQty: number;
 };
 
@@ -130,6 +132,35 @@ const toEditLine = (l: SellOrderLine): EditLine => ({
   warehouse:   l.warehouse,
   condition:   l.condition,
 });
+
+// The same product can sit in several warehouses; price is a per-product
+// figure, keyed on (part, label, condition).
+const productKey = (l: { partNumber: string | null; label: string; condition: string | null }) =>
+  `${l.partNumber ?? ''}|${l.label}|${l.condition ?? ''}`;
+
+// Picked sellable lots as new lines. Price follows the per-product rule: reuse
+// the unit price the order already carries for that product, else 0 for the
+// user to fill in. Lots already on the draft are skipped (the server only
+// excludes lots on *saved* open orders, not session-local adds).
+function appendSellable(lines: EditLine[], picked: SellableItem[]): EditLine[] {
+  const have = new Set(lines.map(l => l.inventoryId).filter(Boolean));
+  return picked
+    .filter(it => !have.has(it.inventoryId))
+    .map(it => ({
+      _cid:        crypto.randomUUID(),
+      inventoryId: it.inventoryId,
+      category:    it.category as EditLine['category'],
+      label:       it.label,
+      subLabel:    it.subLabel,
+      partNumber:  it.partNumber,
+      qty:         it.availableQty,
+      maxQty:      it.availableQty,
+      unitPrice:   lines.find(l => productKey(l) === productKey(it))?.unitPrice ?? 0,
+      warehouseId: it.warehouseId,
+      warehouse:   it.warehouseName,
+      condition:   it.condition,
+    }));
+}
 
 // Stable signature for change detection — order matters (position = index).
 const linesSig = (ls: EditLine[]) =>
@@ -547,8 +578,8 @@ function DownloadMenu({ orderId }: { orderId: string }) {
 // View mode is read-only. Edit mode is the full builder (same as a new sell
 // order): re-pick the customer, edit line qty / unit price, drop lines, plus
 // advance the status and edit internal notes. Saved via PATCH /sell-orders/:id.
-function SellOrderDetail({
-  id, mode, onClose, onSaved, onSwitchToEdit, onAdjusted,
+export function SellOrderDetail({
+  id, mode, onClose, onSaved, onSwitchToEdit, onAdjusted, prefill,
 }: {
   id: string;
   mode: 'view' | 'edit';
@@ -558,6 +589,10 @@ function SellOrderDetail({
   // Price adjustment keeps the modal open (unlike onSaved, which navigates
   // away); this only refreshes the list behind it.
   onAdjusted?: () => void;
+  // Lots to append once the order loads — the Inventory "Add to sell order"
+  // path. The caller only wants a line save out of this, so the lifecycle
+  // exits (Archive / Discard / Unarchive), which also fire onSaved, are hidden.
+  prefill?: SellableItem[];
 }) {
   const { lang, t } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
@@ -609,6 +644,8 @@ function SellOrderDetail({
   const [adjustSaving, setAdjustSaving] = useState(false);
   const [receiverSaving, setReceiverSaving] = useState(false);
   const [pendingAdjust, setPendingAdjust] = useState<number | null>(null);
+  const prefilled = useRef(false);
+  const [prefillAllPresent, setPrefillAllPresent] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -617,13 +654,23 @@ function SellOrderDetail({
         if (!alive) return;
         setOrder(r.order);
         setStatusMeta(r.order.statusMeta);
+        const lines = r.order.lines.map(toEditLine);
+        // Marked here, past the `alive` check, not when the effect starts:
+        // StrictMode's discarded first run would otherwise eat the prefill.
+        const canPrefill = !!prefill && !prefilled.current && mode === 'edit'
+          && r.order.status !== 'Done' && r.order.status !== 'Closed';
+        const fresh = canPrefill ? appendSellable(lines, prefill) : [];
+        if (canPrefill) {
+          prefilled.current = true;
+          setPrefillAllPresent(fresh.length === 0);
+        }
         setDraft({
           status: r.order.status,
           notes: r.order.notes ?? '',
           customerId: r.order.customer.id,
           paymentReceivedBy: r.order.paymentReceivedBy?.id ?? '',
           currency: r.order.currency,
-          lines: r.order.lines.map(toEditLine),
+          lines: [...lines, ...fresh],
           bidParts: [],
         });
         setPendingAdjust(null);
@@ -818,45 +865,15 @@ function SellOrderDetail({
 
   const setLine = (idx: number, patch: Partial<EditLine>) =>
     setDraft(d => d && { ...d, lines: d.lines.map((l, i) => (i === idx ? { ...l, ...patch } : l)) });
-  // The same product can sit in several warehouses; price is a per-product
-  // figure, so a unit-price edit applies to every line of that product at once
-  // — the user shouldn't have to retype it per warehouse.
-  const productKey = (l: EditLine) => `${l.partNumber ?? ''}|${l.label}|${l.condition ?? ''}`;
+  // A unit-price edit applies to every line of that product at once — the
+  // user shouldn't have to retype it per warehouse.
   const setPrice = (key: string, unitPrice: number) =>
     setDraft(d => d && { ...d, lines: d.lines.map(l => (productKey(l) === key ? { ...l, unitPrice } : l)) });
   const removeLine = (idx: number) =>
     setDraft(d => d && { ...d, lines: d.lines.filter((_, i) => i !== idx) });
 
-  // Append picked sellable lots as new lines. Price follows the per-product rule:
-  // if the order already carries that product, reuse its unit price; else 0 for
-  // the user to fill in. Dedupe against lots already on the draft (the server
-  // only excludes lots on *saved* open orders, not session-local adds).
   const addLines = (picked: SellableItem[]) =>
-    setDraft(d => {
-      if (!d) return d;
-      const have = new Set(d.lines.map(l => l.inventoryId).filter(Boolean));
-      const priceFor = (it: SellableItem) => {
-        const key = `${it.partNumber ?? ''}|${it.label}|${it.condition ?? ''}`;
-        return d.lines.find(l => productKey(l) === key)?.unitPrice ?? 0;
-      };
-      const fresh: EditLine[] = picked
-        .filter(it => !have.has(it.inventoryId))
-        .map(it => ({
-          _cid:        crypto.randomUUID(),
-          inventoryId: it.inventoryId,
-          category:    it.category as EditLine['category'],
-          label:       it.label,
-          subLabel:    it.subLabel,
-          partNumber:  it.partNumber,
-          qty:         it.availableQty,
-          maxQty:      it.availableQty,
-          unitPrice:   priceFor(it),
-          warehouseId: it.warehouseId,
-          warehouse:   it.warehouseName,
-          condition:   it.condition,
-        }));
-      return { ...d, lines: [...d.lines, ...fresh] };
-    });
+    setDraft(d => d && { ...d, lines: [...d.lines, ...appendSellable(d.lines, picked)] });
 
   const save = async () => {
     if (!order || !draft) return;
@@ -1167,6 +1184,10 @@ function SellOrderDetail({
                               <div style={{ fontSize: 11, color: 'var(--fg-subtle)', display: 'flex', gap: 8, alignItems: 'center', marginTop: 2 }}>
                                 <span className="mono">{l.partNumber ?? '—'}</span>
                                 {l.condition && (<><span>·</span><span>{l.condition}</span></>)}
+                                {l.sourceOrderId && (<><span>·</span>
+                                  <RouteLink to={'/purchase-orders/' + l.sourceOrderId} className="mono rec-link">
+                                    {t('sodFromPO', { po: l.sourceOrderId })}
+                                  </RouteLink></>)}
                               </div>
                             </td>
                             <td className="num mono">{l.qty}</td>
@@ -1254,6 +1275,11 @@ function SellOrderDetail({
                   </table>
                 )}
 
+                {editable && prefillAllPresent && (
+                  <div className="help" style={{ marginTop: 10 }}>
+                    {t('soPrefillAllPresent', { id: order.id })}
+                  </div>
+                )}
                 {editable && (
                   <button
                     className="btn sm"
@@ -1494,7 +1520,7 @@ function SellOrderDetail({
             </span>
             <div style={{ display: 'flex', gap: 8 }}>
               <DownloadMenu orderId={order.id} />
-              {editable && order.status !== 'Draft' && order.archivedAt === null && (
+              {editable && !prefill && order.status !== 'Draft' && order.archivedAt === null && (
                 <button
                   className="btn"
                   onClick={() => setConfirmArchive(true)}
@@ -1504,7 +1530,7 @@ function SellOrderDetail({
                   <Icon name="box" size={14} /> Archive
                 </button>
               )}
-              {editable && order.archivedAt !== null && (
+              {editable && !prefill && order.archivedAt !== null && (
                 <button
                   className="btn"
                   disabled={unarchiving}
@@ -1528,7 +1554,7 @@ function SellOrderDetail({
                   Done (terminal) and Closed (already closed → use Reopen
                   instead). Manager-only surface is enforced at the page level
                   so no extra role check. */}
-              {editable && order.status !== 'Done' && (
+              {editable && !prefill && order.status !== 'Done' && (
                 <button
                   className="btn"
                   onClick={() => setShowCloseDialog(true)}

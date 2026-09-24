@@ -17,6 +17,66 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.175.1] - 2026-09-24
+
+### Fixed
+
+- **The Inventory "Add to sell order" picker lists every open sell order.** It
+  used to read only the newest 200 orders of every status, then keep the open
+  ones. So once the list grew past 200, an older Draft, Shipped or
+  Awaiting-payment order was silently missing. It now follows the list's
+  cursor to the end, showing the first page while the rest load. [RS-102]
+
+## [1.175.0] - 2026-09-24
+
+### Features
+
+- **Inventory lots can be added to a sell order that already exists** (RS-100).
+  The Inventory selection bar could only start a new sell order, so topping
+  up an open one meant opening it, clicking Add inventory and finding the
+  same lots again in its picker. "Add to sell order" now sits beside Create
+  sell order. It opens a picker of open orders (Draft, Shipped, Awaiting
+  payment), then that order's edit modal with the selected lots already
+  appended, and Save goes through the usual `PATCH`, which re-checks
+  sellability. Lots already on the order are not duplicated. When every
+  selected lot is already there, a notice says so instead of an empty change.
+  New lines reuse the order's price for the same product, else 0, rather than
+  Create sell order's `sell price × 1.35`, because the order may be quoted in
+  CNY. The floating bar now sizes to its content: `left: 50%` had left it half
+  the viewport, and with four actions every label wrapped. No backend change.
+## [1.174.1] - 2026-09-24
+
+### Fixes
+
+- **The inventory selection keeps lots picked under an earlier search** (RS-101).
+  Picking 7 lots under one PO's search and then 5 under another's left the
+  selection bar at 5. The picked ids were all still held, but they were turned
+  into rows only through what the current search had loaded, and that list is
+  capped at 200. So the earlier lots also dropped out of the totals, Create
+  sell order, Transfer and Export selected, even after the search was cleared.
+  The page now snapshots each selected row when it loads and falls back to that
+  snapshot (`lib/inventorySelection.ts`). Fresh data still wins, and bulk
+  drafts list lots in the order they were picked.
+
+## [1.174.0] - 2026-09-24
+
+### Features
+
+- **A sold PO and the sell orders that sold it link to each other** (RS-099).
+  The PO page used to say "Sold out" without saying who bought the units,
+  and a sell order's lines didn't say which PO they came from, so tracing a
+  sale back to its purchase meant reading part numbers across two screens.
+  `GET /api/orders/:id` now returns `sellOrders`: the Done sell orders naming
+  any of the PO's lines, with the customer and units each took. It is for
+  managers only, like the final sell price; everyone else gets `null`. On
+  desktop the Sold panel lists them as links, and so does the Done panel
+  once part of the PO has sold. The phone shows the same ids as text beside
+  the sold count, because the phone has no sell-order page. In the other
+  direction, each sell-order line carries `sourceOrderId`, and the sell order
+  view shows it as a "From PO-…" link. Only Done orders count, which is the
+  set the final sell price and Realized profit already read. An archived
+  Done order stays listed, since it still sold the units.
+
 ## [1.172.2] - 2026-09-21
 
 ### Fixes

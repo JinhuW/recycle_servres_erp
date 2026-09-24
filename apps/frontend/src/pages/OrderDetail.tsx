@@ -1138,6 +1138,14 @@ export function OrderDetail({
                     <span style={{ fontVariantNumeric: 'tabular-nums' }}>{t('soldOfUnits', { n: rz.soldQty, of: rz.boughtQty })}</span>
                   </div>
                 )}
+                {order.sellOrders?.length ? (
+                  <div style={{ marginTop: 6, fontSize: 11, color: 'var(--fg-subtle)' }}>
+                    {t('eoSoldOn')}{' '}
+                    <span className="mono">
+                      {order.sellOrders.map(so => `${so.id} · ${so.customer} ×${so.qty}`).join(', ')}
+                    </span>
+                  </div>
+                ) : null}
               </>
             );
           })()}

@@ -235,13 +235,14 @@ sellOrders.get('/:id', async (c) => {
     source_unit_price: number | null;
     condition: string | null; position: number; warehouse_short: string | null;
     inventory_id: string | null; warehouse_id: string | null;
+    source_order_id: string | null;
     inventory_qty: number | null;
   }[]>`
     SELECT sol.id, sol.category, sol.label, sol.sub_label, sol.part_number,
            sol.qty, sol.unit_price::float AS unit_price,
            sol.source_unit_price::float AS source_unit_price,
            sol.condition, sol.position,
-           sol.inventory_id, sol.warehouse_id,
+           sol.inventory_id, sol.warehouse_id, ol.order_id AS source_order_id,
            w.short AS warehouse_short,
            -- What this order may still grow its line to: the lot less the units
            -- other committed orders hold. Its own claim is excluded, so editing
@@ -330,6 +331,7 @@ sellOrders.get('/:id', async (c) => {
         condition: l.condition, position: l.position,
         warehouse: l.warehouse_short,
         inventoryId: l.inventory_id, warehouseId: l.warehouse_id,
+        sourceOrderId: l.source_order_id,
         maxQty: l.inventory_qty ?? l.qty,
         lineTotal: +(l.qty * l.unit_price).toFixed(2),
       })),

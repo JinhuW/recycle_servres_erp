@@ -15,11 +15,15 @@ import type { Warehouse } from '../../lib/types';
 import { DesktopSellOrderDraft, type DraftItem } from './DesktopSellOrderDraft';
 import { DesktopInventoryTransfer, type TransferItem } from './DesktopInventoryTransfer';
 import { DesktopActivityDrawer } from './DesktopActivityDrawer';
+import { SellOrderDetail } from './DesktopSellOrders';
+import { SellOrderPickerDialog } from '../../components/SellOrderPickerDialog';
+import type { SellableItem } from '../../components/AddInventoryPicker';
 import { TableSkeleton } from '../../components/Skeleton';
 import { SerialNumbers } from '../../components/SerialNumbers';
 import { InventoryProductTable } from './InventoryProductTable';
 import type { ProductGroup } from './InventoryProductTable';
 import { loadWarehouses } from '../../lib/warehouses';
+import { rememberSelectedRows, resolveSelectedRows } from '../../lib/inventorySelection';
 
 type InventoryRow = {
   id: string;
@@ -134,6 +138,8 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   const [warehouseFilter, setWarehouseFilter] = usePersisted<string>('desktop.inventory.warehouseFilter', 'all');
   const [search, setSearch] = usePersisted<string>('desktop.inventory.search', '');
   const [selected, setSelected] = usePersisted<Set<string>>('desktop.inventory.selected', new Set());
+  const [selectedRows, setSelectedRows] =
+    usePersisted<Map<string, InventoryRow>>('desktop.inventory.selectedRows', new Map());
 
   // Persisted column visibility
   const ALL_COLS: { id: ColId; label: string; managerOnly?: boolean }[] = useMemo(() => ([
@@ -372,21 +378,21 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     return m;
   }, [products]);
 
-  // Flat rows first (preserve existing behaviour); then any selected lot that
-  // only exists in the grouped view.
-  const selectedItems = useMemo(() => {
-    const out: InventoryRow[] = [];
-    const seen = new Set<string>();
-    for (const r of items) {
-      if (selected.has(r.id)) { out.push(r); seen.add(r.id); }
-    }
-    for (const id of selected) {
-      if (seen.has(id)) continue;
-      const g = groupedRowsById.get(id);
-      if (g) out.push(g);
-    }
-    return out;
-  }, [items, selected, groupedRowsById]);
+  // The flat row wins over the synthesised grouped one — it carries more.
+  const freshRowsById = useMemo(() => {
+    const m = new Map(groupedRowsById);
+    for (const r of items) m.set(r.id, r);
+    return m;
+  }, [items, groupedRowsById]);
+  // Both lists hold only what the current search returns, so a lot picked
+  // under an earlier search resolves from the snapshot taken when it loaded.
+  useEffect(() => {
+    setSelectedRows(prev => rememberSelectedRows(selected, freshRowsById, prev));
+  }, [selected, freshRowsById, setSelectedRows]);
+  const selectedItems = useMemo(
+    () => resolveSelectedRows(selected, freshRowsById, selectedRows),
+    [selected, freshRowsById, selectedRows],
+  );
   const selectedTotals = useMemo(() => {
     const lines = selectedItems.length;
     const qty   = selectedItems.reduce((a, r) => a + r.qty, 0);
@@ -441,6 +447,11 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   // the table don't mutate what's in the modal.
   const [draftItems, setDraftItems] = useState<DraftItem[] | null>(null);
   const [transferItems, setTransferItems] = useState<TransferItem[] | null>(null);
+  // "Add to sell order": the picker, then that order's edit modal with the
+  // selection (snapshotted at click time, like draftItems) appended.
+  const [addToOrder, setAddToOrder] = useState<
+    { items: SellableItem[]; orderId: string | null } | null
+  >(null);
   const [showActivity, setShowActivity] = useState(false);
   const [quickView, setQuickView] = useState<InventoryRow | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -490,6 +501,27 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     warehouseId: r.warehouse_id,
     warehouseShort: r.warehouse_short,
   }));
+
+  // qty is the raw lot qty, not net of units other open orders hold — the
+  // save is re-validated server-side, same as Create sell order.
+  const buildSellableItems = (rows: InventoryRow[]): SellableItem[] => rows.map(r => ({
+    inventoryId: r.id,
+    category: r.category,
+    label: itemLabel(r) || r.id.slice(0, 8),
+    subLabel: itemSpec(r) || null,
+    partNumber: r.part_number,
+    condition: r.condition,
+    warehouseId: r.warehouse_id,
+    warehouseName: r.warehouse_short,
+    availableQty: r.qty,
+    sellPrice: r.sell_price,
+    draftCount: 0,
+  }));
+
+  const openAddToOrder = () => {
+    if (!selectedItems.length) return;
+    setAddToOrder({ items: buildSellableItems(selectedItems), orderId: null });
+  };
 
   const openSellOrderDraft = () => {
     if (!selectedItems.length) return;
@@ -569,6 +601,15 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
                   fontSize: 11, fontWeight: 600,
                 }}>{selectedItems.length}</span>
               )}
+            </button>
+          )}
+          {isManager && (
+            <button
+              className="btn"
+              disabled={selectedItems.length === 0}
+              onClick={openAddToOrder}
+            >
+              <Icon name="plus" size={14} /> {t('invAddToSo')}
             </button>
           )}
           {isManager && (
@@ -930,6 +971,9 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
             <button className="btn" onClick={openTransferModal}>
               <Icon name="truck" size={14} /> {t('transfer')}
             </button>
+            <button className="btn" onClick={openAddToOrder}>
+              <Icon name="plus" size={14} /> {t('invAddToSo')}
+            </button>
             <button className="btn accent" onClick={openSellOrderDraft}>
               <Icon name="tag" size={14} /> Create sell order
             </button>
@@ -945,6 +989,32 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
             setDraftItems(null);
             clearSelection();
             showToast?.(`Sell order ${id} saved as draft`, 'success');
+          }}
+        />
+      )}
+
+      {addToOrder && addToOrder.orderId === null && (
+        <SellOrderPickerDialog
+          lineCount={addToOrder.items.length}
+          locale={locale}
+          onClose={() => setAddToOrder(null)}
+          onPick={id => setAddToOrder({ ...addToOrder, orderId: id })}
+        />
+      )}
+
+      {addToOrder?.orderId && (
+        <SellOrderDetail
+          id={addToOrder.orderId}
+          mode="edit"
+          prefill={addToOrder.items}
+          onSwitchToEdit={() => {}}
+          onClose={() => setAddToOrder(null)}
+          onSaved={() => {
+            const id = addToOrder.orderId ?? '';
+            setAddToOrder(null);
+            clearSelection();
+            refetchInventory();
+            showToast?.(t('invAddToSoSavedToast', { id }), 'success');
           }}
         />
       )}

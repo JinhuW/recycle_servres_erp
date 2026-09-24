@@ -149,3 +149,46 @@ describe('final sell price on PO lines', () => {
     expect(previewing.finalSoldQty).toBeNull();
   });
 });
+
+type SoRef = { id: string; customer: string; qty: number };
+type SoDetail = { order: { lines: { inventoryId: string | null; sourceOrderId: string | null }[] } };
+
+describe('a PO and the sell orders that sold it link to each other', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('lists the Done sell orders naming its lines, managers only', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const { token: mgr } = await loginAs(ALEX);
+    const { id, lineIds } = await createReviewing(pur, mgr);
+
+    const done = await createSellOrderOn(mgr, lineIds[0], 1, 90);
+    await moveSellOrder(mgr, done, 'Done');
+    const other = await createSellOrderOn(mgr, lineIds[1], 2, 60);
+    await moveSellOrder(mgr, other, 'Done');
+    // Draft and Shipped orders only claim units; they have not sold them.
+    await createSellOrderOn(mgr, lineIds[0], 1, 95);
+    const shipped = await createSellOrderOn(mgr, lineIds[0], 1, 99);
+    await moveSellOrder(mgr, shipped, 'Shipped');
+
+    const asManager = await api<{ order: { sellOrders: SoRef[] | null } }>('GET', `/api/orders/${id}`, { token: mgr });
+    const refs = asManager.body.order.sellOrders!;
+    expect(refs.map(r => r.id).sort()).toEqual([done, other].sort());
+    expect(refs.find(r => r.id === other)!.qty).toBe(2);
+    expect(typeof refs[0].customer).toBe('string');
+
+    const asOwner = await api<{ order: { sellOrders: SoRef[] | null } }>('GET', `/api/orders/${id}`, { token: pur });
+    expect(asOwner.body.order.sellOrders).toBeNull();
+  });
+
+  it('names each sell order line\'s source PO', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const { token: mgr } = await loginAs(ALEX);
+    const { id, lineIds } = await createReviewing(pur, mgr);
+    const soId = await createSellOrderOn(mgr, lineIds[0], 1, 90);
+
+    const so = await api<SoDetail>('GET', `/api/sell-orders/${soId}`, { token: mgr });
+    expect(so.status).toBe(200);
+    expect(so.body.order.lines[0].inventoryId).toBe(lineIds[0]);
+    expect(so.body.order.lines[0].sourceOrderId).toBe(id);
+  });
+});

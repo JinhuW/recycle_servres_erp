@@ -209,6 +209,11 @@ on to Sold once every line has sold (v1.164.0).
   The inventory editor refuses to walk a line off Sold while its PO is sold.
   Existing Done POs that had already sold out were backfilled with an
   activity row.
+  **The Sold panel names the sell orders that sold it** (v1.174.0): each Done
+  sell order naming one of the PO's lines is shown with its customer and
+  units, and on desktop it links to the sell order. The Done panel shows the
+  same list once part of the PO has sold, and the phone lists the ids beside
+  the sold count. Managers only.
 - **Any manager takes a PO into Reviewing and Ready to Pay, whatever its
   warehouse** (v1.168.0). The v1.132.0 rule that reserved those two moves for
   the manager linked to the PO's warehouse is gone, on both shells and in the
@@ -532,6 +537,17 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
 
 ## Sell orders and the vendor portal
 
+- **Inventory lots can be added to an existing sell order** (v1.175.0). The
+  desktop Inventory selection bar and toolbar offer "Add to sell order" beside
+  Create sell order. It lists the open orders (Draft, Shipped, Awaiting
+  payment; not archived), searchable by order number or customer, and opens
+  the chosen one's edit modal with the selection appended. Lots already on the
+  order are skipped, with a notice when that is all of them. A new line takes
+  the price the order already has for that product, else 0. Saving clears the
+  selection. The modal offers no Archive or Discard on this path.
+- **Each line links back to its PO** (v1.174.0). The sell order view shows a
+  "From PO-…" link under a line that was picked from inventory. A free-typed
+  line has no PO.
 - A **draft sell order is a proposal**; inventory is claimed only on promotion
   (v1.41.0). Drafts can move straight to Awaiting payment (v1.13.0).
 - Orders carry a payment receiver, creator-only reopen (v1.15.0) and a receiver
