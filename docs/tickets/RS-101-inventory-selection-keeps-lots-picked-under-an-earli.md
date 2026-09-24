@@ -2,13 +2,13 @@
 id: RS-101
 title: Inventory selection keeps lots picked under an earlier search
 type: bug
-status: in-review
+status: done
 priority: P2
 created: 2026-09-24
 reporter: Jinhu
 branch: fix/inventory-selection-across-searches
-pr:
-version:
+pr: "#396"
+version: 1.174.1
 related: []
 ---
 
