@@ -6,6 +6,7 @@ See [README.md](./README.md) for what the fields mean.
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
 | [RS-101](./RS-101-inventory-selection-keeps-lots-picked-under-an-earli.md) | done | bug | P2 | Inventory selection keeps lots picked under an earlier search | 1.174.1 |
+| [RS-100](./RS-100-add-inventory-selection-to-an-existing-sell-order.md) | in-progress | story | P2 | Add inventory selection to an existing sell order | — |
 | [RS-099](./RS-099-sold-po-and-its-sell-orders-link-to-each-other.md) | done | story | P2 | Sold PO and its sell orders link to each other | 1.174.0 |
 | [RS-098](./RS-098-phone-file-drop-boxes-offer-the-photo-library-and-fi.md) | done | bug | P2 | Phone file drop boxes offer the photo library and files, not only the camera | 1.172.2 |
 | [RS-097](./RS-097-delivery-tab-lays-its-facts-one-per-row.md) | done | story | P2 | Delivery tab lays its facts one per row | 1.172.1 |

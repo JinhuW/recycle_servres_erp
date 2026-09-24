@@ -15,6 +15,9 @@ import type { Warehouse } from '../../lib/types';
 import { DesktopSellOrderDraft, type DraftItem } from './DesktopSellOrderDraft';
 import { DesktopInventoryTransfer, type TransferItem } from './DesktopInventoryTransfer';
 import { DesktopActivityDrawer } from './DesktopActivityDrawer';
+import { SellOrderDetail } from './DesktopSellOrders';
+import { SellOrderPickerDialog } from '../../components/SellOrderPickerDialog';
+import type { SellableItem } from '../../components/AddInventoryPicker';
 import { TableSkeleton } from '../../components/Skeleton';
 import { SerialNumbers } from '../../components/SerialNumbers';
 import { InventoryProductTable } from './InventoryProductTable';
@@ -444,6 +447,11 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   // the table don't mutate what's in the modal.
   const [draftItems, setDraftItems] = useState<DraftItem[] | null>(null);
   const [transferItems, setTransferItems] = useState<TransferItem[] | null>(null);
+  // "Add to sell order": the picker, then that order's edit modal with the
+  // selection (snapshotted at click time, like draftItems) appended.
+  const [addToOrder, setAddToOrder] = useState<
+    { items: SellableItem[]; orderId: string | null } | null
+  >(null);
   const [showActivity, setShowActivity] = useState(false);
   const [quickView, setQuickView] = useState<InventoryRow | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -493,6 +501,27 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     warehouseId: r.warehouse_id,
     warehouseShort: r.warehouse_short,
   }));
+
+  // qty is the raw lot qty, not net of units other open orders hold — the
+  // save is re-validated server-side, same as Create sell order.
+  const buildSellableItems = (rows: InventoryRow[]): SellableItem[] => rows.map(r => ({
+    inventoryId: r.id,
+    category: r.category,
+    label: itemLabel(r) || r.id.slice(0, 8),
+    subLabel: itemSpec(r) || null,
+    partNumber: r.part_number,
+    condition: r.condition,
+    warehouseId: r.warehouse_id,
+    warehouseName: r.warehouse_short,
+    availableQty: r.qty,
+    sellPrice: r.sell_price,
+    draftCount: 0,
+  }));
+
+  const openAddToOrder = () => {
+    if (!selectedItems.length) return;
+    setAddToOrder({ items: buildSellableItems(selectedItems), orderId: null });
+  };
 
   const openSellOrderDraft = () => {
     if (!selectedItems.length) return;
@@ -572,6 +601,15 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
                   fontSize: 11, fontWeight: 600,
                 }}>{selectedItems.length}</span>
               )}
+            </button>
+          )}
+          {isManager && (
+            <button
+              className="btn"
+              disabled={selectedItems.length === 0}
+              onClick={openAddToOrder}
+            >
+              <Icon name="plus" size={14} /> {t('invAddToSo')}
             </button>
           )}
           {isManager && (
@@ -933,6 +971,9 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
             <button className="btn" onClick={openTransferModal}>
               <Icon name="truck" size={14} /> {t('transfer')}
             </button>
+            <button className="btn" onClick={openAddToOrder}>
+              <Icon name="plus" size={14} /> {t('invAddToSo')}
+            </button>
             <button className="btn accent" onClick={openSellOrderDraft}>
               <Icon name="tag" size={14} /> Create sell order
             </button>
@@ -948,6 +989,32 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
             setDraftItems(null);
             clearSelection();
             showToast?.(`Sell order ${id} saved as draft`, 'success');
+          }}
+        />
+      )}
+
+      {addToOrder && addToOrder.orderId === null && (
+        <SellOrderPickerDialog
+          lineCount={addToOrder.items.length}
+          locale={locale}
+          onClose={() => setAddToOrder(null)}
+          onPick={id => setAddToOrder({ ...addToOrder, orderId: id })}
+        />
+      )}
+
+      {addToOrder?.orderId && (
+        <SellOrderDetail
+          id={addToOrder.orderId}
+          mode="edit"
+          prefill={addToOrder.items}
+          onSwitchToEdit={() => {}}
+          onClose={() => setAddToOrder(null)}
+          onSaved={() => {
+            const id = addToOrder.orderId ?? '';
+            setAddToOrder(null);
+            clearSelection();
+            refetchInventory();
+            showToast?.(t('invAddToSoSavedToast', { id }), 'success');
           }}
         />
       )}

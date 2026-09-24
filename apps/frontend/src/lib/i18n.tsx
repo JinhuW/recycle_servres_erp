@@ -2197,6 +2197,15 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     invSelectAllFilter: 'Select all ({n})',
     invUnselectAllFilter: 'Unselect all',
     invSelectAllFilterTip: 'Select all sellable lots matching the current filters',
+    invAddToSo: 'Add to sell order',
+    invAddToSoTitle: 'Add to an existing sell order',
+    invAddToSoSub: '{n} selected line(s) will be appended; you set prices before saving',
+    invAddToSoSearch: 'Search by order number or customer…',
+    invAddToSoLoading: 'Loading sell orders…',
+    invAddToSoEmpty: 'No open sell orders (Draft, Shipped or Awaiting payment)',
+    invAddToSoMeta: '{lines} lines · {units} units',
+    invAddToSoSavedToast: '{id} updated',
+    soPrefillAllPresent: 'Every selected lot is already on {id} — nothing new was added.',
 
     // DesktopSellOrders remaining
     soColOrder: 'Order',
