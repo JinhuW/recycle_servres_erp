@@ -17,6 +17,23 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.175.0] - 2026-09-24
+
+### Features
+
+- **Inventory lots can be added to a sell order that already exists** (RS-100).
+  The Inventory selection bar could only start a new sell order, so topping
+  up an open one meant opening it, clicking Add inventory and finding the
+  same lots again in its picker. "Add to sell order" now sits beside Create
+  sell order. It opens a picker of open orders (Draft, Shipped, Awaiting
+  payment), then that order's edit modal with the selected lots already
+  appended, and Save goes through the usual `PATCH`, which re-checks
+  sellability. Lots already on the order are not duplicated. When every
+  selected lot is already there, a notice says so instead of an empty change.
+  New lines reuse the order's price for the same product, else 0, rather than
+  Create sell order's `sell price × 1.35`, because the order may be quoted in
+  CNY. The floating bar now sizes to its content: `left: 50%` had left it half
+  the viewport, and with four actions every label wrapped. No backend change.
 ## [1.174.1] - 2026-09-24
 
 ### Fixes
