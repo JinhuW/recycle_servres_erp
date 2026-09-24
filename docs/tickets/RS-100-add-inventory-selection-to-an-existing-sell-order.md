@@ -2,13 +2,13 @@
 id: RS-100
 title: Add inventory selection to an existing sell order
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-24
 reporter: jinhu
 branch: feat/add-to-existing-sell-order
-pr:
-version:
+pr: "#397"
+version: 1.175.0
 related: []
 ---
 
