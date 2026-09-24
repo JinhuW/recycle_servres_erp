@@ -17,6 +17,16 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.175.1] - 2026-09-24
+
+### Fixed
+
+- **The Inventory "Add to sell order" picker lists every open sell order.** It
+  used to read only the newest 200 orders of every status, then keep the open
+  ones. So once the list grew past 200, an older Draft, Shipped or
+  Awaiting-payment order was silently missing. It now follows the list's
+  cursor to the end, showing the first page while the rest load. [RS-102]
+
 ## [1.175.0] - 2026-09-24
 
 ### Features
