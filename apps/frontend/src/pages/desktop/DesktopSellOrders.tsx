@@ -84,6 +84,8 @@ type SellOrderLine = {
   position: number;
   inventoryId: string | null;
   warehouseId: string | null;
+  // The PO the line's inventory came from; null for a free-typed line.
+  sourceOrderId?: string | null;
   maxQty: number;
 };
 
@@ -1167,6 +1169,10 @@ function SellOrderDetail({
                               <div style={{ fontSize: 11, color: 'var(--fg-subtle)', display: 'flex', gap: 8, alignItems: 'center', marginTop: 2 }}>
                                 <span className="mono">{l.partNumber ?? '—'}</span>
                                 {l.condition && (<><span>·</span><span>{l.condition}</span></>)}
+                                {l.sourceOrderId && (<><span>·</span>
+                                  <RouteLink to={'/purchase-orders/' + l.sourceOrderId} className="mono rec-link">
+                                    {t('sodFromPO', { po: l.sourceOrderId })}
+                                  </RouteLink></>)}
                               </div>
                             </td>
                             <td className="num mono">{l.qty}</td>

@@ -17,6 +17,25 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.174.0] - 2026-09-24
+
+### Features
+
+- **A sold PO and the sell orders that sold it link to each other** (RS-099).
+  The PO page used to say "Sold out" without saying who bought the units,
+  and a sell order's lines didn't say which PO they came from, so tracing a
+  sale back to its purchase meant reading part numbers across two screens.
+  `GET /api/orders/:id` now returns `sellOrders`: the Done sell orders naming
+  any of the PO's lines, with the customer and units each took. It is for
+  managers only, like the final sell price; everyone else gets `null`. On
+  desktop the Sold panel lists them as links, and so does the Done panel
+  once part of the PO has sold. The phone shows the same ids as text beside
+  the sold count, because the phone has no sell-order page. In the other
+  direction, each sell-order line carries `sourceOrderId`, and the sell order
+  view shows it as a "From PO-…" link. Only Done orders count, which is the
+  set the final sell price and Realized profit already read. An archived
+  Done order stays listed, since it still sold the units.
+
 ## [1.172.2] - 2026-09-21
 
 ### Fixes

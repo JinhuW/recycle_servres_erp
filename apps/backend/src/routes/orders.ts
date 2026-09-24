@@ -644,6 +644,19 @@ orders.get('/:id', async (c) => {
     ORDER BY ol.position ASC
   `;
 
+  // The sell orders that sold this PO's units — Done only, the same set the
+  // final sell price reads. An archived Done order still sold them, so it stays.
+  const sellOrders = isManager ? await sql<{ id: string; customer: string; qty: number }[]>`
+    SELECT so.id, COALESCE(c.short_name, c.name) AS customer, SUM(sol.qty)::int AS qty
+    FROM sell_order_lines sol
+    JOIN order_lines ol ON ol.id = sol.inventory_id
+    JOIN sell_orders so ON so.id = sol.sell_order_id
+    JOIN customers c ON c.id = so.customer_id
+    WHERE ol.order_id = ${id} AND so.status = 'Done'
+    GROUP BY so.id, c.short_name, c.name
+    ORDER BY so.id
+  ` : null;
+
   const lifecycle = visibleLifecycle(order.lifecycle as string, effectiveRole(u));
   const status = LIFECYCLE_LABEL[lifecycle] ?? lifecycle;
 
@@ -786,6 +799,7 @@ orders.get('/:id', async (c) => {
       // have to download the labels themselves (those live on /shipping).
       // Optional and additive: a stale SPA that never reads it is unaffected.
       package: packageFromJson(order.pkg),
+      sellOrders,
       lines: lines.map(l => ({
         id: l.id,
         category: l.category,
