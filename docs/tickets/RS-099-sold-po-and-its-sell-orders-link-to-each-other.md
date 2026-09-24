@@ -2,13 +2,13 @@
 id: RS-099
 title: Sold PO and its sell orders link to each other
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-09-24
 reporter: jinhu
 branch: feat/po-sell-order-links
-pr:
-version:
+pr: https://github.com/JinhuW/recycle_servres_erp/pull/395
+version: 1.174.0
 related: [RS-060, RS-064, RS-085]
 ---
 
