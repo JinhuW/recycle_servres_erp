@@ -11,6 +11,7 @@ import { useT } from '../lib/i18n';
 import { fmtUSD0, fmtDateShort } from '../lib/format';
 import { sellOrderStatuses } from '../lib/lookups';
 import { openSellOrders, type SellOrderPick } from '../lib/openSellOrders';
+import { forEachKeysetPage } from '../lib/keysetPages';
 
 type Props = {
   lineCount: number;
@@ -29,10 +30,17 @@ export function SellOrderPickerDialog({ lineCount, locale, onClose, onPick }: Pr
 
   useEffect(() => {
     let alive = true;
-    // The endpoint's page cap; open orders are a small slice of that.
-    api.get<{ items: SellOrderPick[] }>('/api/sell-orders?limit=200')
-      .then(r => { if (alive) setRows(r.items); })
-      .catch(e => { if (alive) { setRows([]); handleFetchError(e); } });
+    // A page is the newest orders of every status, so the open ones can sit
+    // past any single page — walk them all.
+    forEachKeysetPage<SellOrderPick>(
+      cursor => api.get<{ items: SellOrderPick[]; nextCursor: string | null }>(
+        `/api/sell-orders?limit=200${cursor ? '&cursor=' + encodeURIComponent(cursor) : ''}`,
+      ),
+      (items, { first }) => {
+        if (!alive) return false;
+        setRows(prev => (first || !prev ? items : [...prev, ...items]));
+      },
+    ).catch(e => { if (alive) { setRows(prev => prev ?? []); handleFetchError(e); } });
     return () => { alive = false; };
   }, []);
 
