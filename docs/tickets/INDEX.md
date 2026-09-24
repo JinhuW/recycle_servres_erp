@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-102](./RS-102-the-sell-order-picker-lists-every-open-order-not-jus.md) | done | bug | P2 | The sell-order picker lists every open order, not just those in the newest 200 | 1.175.1 |
 | [RS-101](./RS-101-inventory-selection-keeps-lots-picked-under-an-earli.md) | done | bug | P2 | Inventory selection keeps lots picked under an earlier search | 1.174.1 |
 | [RS-100](./RS-100-add-inventory-selection-to-an-existing-sell-order.md) | done | story | P2 | Add inventory selection to an existing sell order | 1.175.0 |
 | [RS-099](./RS-099-sold-po-and-its-sell-orders-link-to-each-other.md) | done | story | P2 | Sold PO and its sell orders link to each other | 1.174.0 |

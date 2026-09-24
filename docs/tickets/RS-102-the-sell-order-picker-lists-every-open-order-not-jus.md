@@ -2,13 +2,13 @@
 id: RS-102
 title: The sell-order picker lists every open order, not just those in the newest 200
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-24
 reporter: jinhu
 branch: fix/so-picker-all-pages
-pr:
-version:
+pr: "#398"
+version: 1.175.1
 related: [RS-100]
 ---
 
@@ -27,9 +27,9 @@ so.
 
 ## Acceptance criteria
 
-- [ ] The picker follows `nextCursor` until the list is exhausted, so every
+- [x] The picker follows `nextCursor` until the list is exhausted, so every
       open, non-archived sell order can be picked.
-- [ ] The first page renders before the rest arrive; closing the dialog stops
+- [x] The first page renders before the rest arrive; closing the dialog stops
       the fetching.
 
 ## Out of scope
