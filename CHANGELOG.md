@@ -17,6 +17,20 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.174.1] - 2026-09-24
+
+### Fixes
+
+- **The inventory selection keeps lots picked under an earlier search** (RS-101).
+  Picking 7 lots under one PO's search and then 5 under another's left the
+  selection bar at 5. The picked ids were all still held, but they were turned
+  into rows only through what the current search had loaded, and that list is
+  capped at 200. So the earlier lots also dropped out of the totals, Create
+  sell order, Transfer and Export selected, even after the search was cleared.
+  The page now snapshots each selected row when it loads and falls back to that
+  snapshot (`lib/inventorySelection.ts`). Fresh data still wins, and bulk
+  drafts list lots in the order they were picked.
+
 ## [1.174.0] - 2026-09-24
 
 ### Features
