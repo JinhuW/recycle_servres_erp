@@ -2,13 +2,13 @@
 id: RS-103
 title: Sync Mercury credit-card transactions, pending ones included
 type: bug
-status: in-review
+status: done
 priority: P2
 created: 2026-09-24
 reporter: jinhu
 branch: feat/mercury-pending-payments
-pr:
-version:
+pr: "#400"
+version: 1.176.0
 related: []
 ---
 
@@ -36,14 +36,14 @@ charges ingested, they would count the same spend twice.
 
 ## Acceptance criteria
 
-- [ ] The Mercury sync fetches every active credit account from `/credit`
+- [x] The Mercury sync fetches every active credit account from `/credit`
       through the same per-account transactions loop, pending charges
       included and badged.
-- [ ] A failure of `/credit` is logged and leaves the checking/savings sync
+- [x] A failure of `/credit` is logged and leaves the checking/savings sync
       intact.
-- [ ] A Mercury row whose counterparty is one of our own Mercury accounts
+- [x] A Mercury row whose counterparty is one of our own Mercury accounts
       (the card payoff, on either side) is a `transfer`.
-- [ ] The first sync after deploy backfills the card from 2026-01-01.
+- [x] The first sync after deploy backfills the card from 2026-01-01.
 
 ## Out of scope
 
