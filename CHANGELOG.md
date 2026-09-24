@@ -17,6 +17,28 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.176.0] - 2026-09-24
+
+### Added
+
+- **Mercury credit-card (IO) charges reach the Payments page, pending ones
+  included.** The sync only read Mercury's checking and savings accounts
+  (`/accounts`). The IO card sits behind a separate `/credit` endpoint, so
+  none of its charges had ever been synced. That was 50 posted charges since
+  June, plus the pending one that prompted the ask. The card is now walked
+  like any other account, and a pending charge is badged "Pending since…".
+  If `/credit` fails, it is logged and checking/savings keep syncing. A
+  one-off migration rewinds the Mercury cursors, so the first sync after
+  deploy backfills the card from January. [RS-103]
+
+### Changed
+
+- **A Mercury row whose counterparty is one of our own Mercury accounts is a
+  transfer.** The card payoff ("Mercury Credit", `IO AUTOPAY` / `IO PAYMENT`)
+  used to land in the unlinked queue as money out. With the card's own
+  charges synced, counting the payoff too would count that spend twice.
+  [RS-103]
+
 ## [1.175.1] - 2026-09-24
 
 ### Fixed

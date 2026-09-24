@@ -5,6 +5,7 @@
 
 import type { Env } from '../types';
 import { PAYPAL_TXN_STRICT } from '../ai/paypal';
+import { log } from '../lib/log';
 import type {
   BankAccountInfo, BankFetch, BankProvider, BankTxnCategory, NormalizedTxn, SettleStatus,
 } from './types';
@@ -14,6 +15,9 @@ const TIMEOUT_MS = 20_000;
 const PAGE_SIZE = 500;
 
 type WireAccount = { id: string; name?: string | null; nickname?: string | null };
+// The IO card is not in /accounts — /credit lists it, unnamed, and its
+// transactions come from the same per-account endpoint.
+type WireCreditAccount = { id: string; status?: string };
 type WireTxn = {
   id: string;
   amount: number | string;
@@ -21,6 +25,7 @@ type WireTxn = {
   status?: string;
   createdAt?: string;
   postedAt?: string | null;
+  counterpartyId?: string | null;
   counterpartyName?: string | null;
   counterpartyNickname?: string | null;
   bankDescription?: string | null;
@@ -55,8 +60,18 @@ export function paypalTxnFromDescription(text: string | null): string | null {
 // says it is elsewhere.
 export const PAYPAL_ACH_DESCRIPTOR = /^PAYPAL;/;
 
-export function mercuryTxnCategory(kind: string | undefined, description: string | null): BankTxnCategory {
+// A counterparty that is one of our own Mercury accounts is internal too. The
+// IO card payoff is kind 'other' on both sides (checking pays "Mercury
+// Credit", the card receives from checking); once the card's own charges are
+// synced, counting the payoff as well would count that spend twice.
+export function mercuryTxnCategory(
+  kind: string | undefined,
+  description: string | null,
+  counterpartyId?: string | null,
+  ownAccountIds?: ReadonlySet<string>,
+): BankTxnCategory {
   if (kind === 'internalTransfer' || kind === 'treasuryTransfer') return 'transfer';
+  if (counterpartyId && ownAccountIds?.has(counterpartyId)) return 'transfer';
   return description && PAYPAL_ACH_DESCRIPTOR.test(description) ? 'transfer' : 'external';
 }
 
@@ -95,14 +110,25 @@ export function mercuryProvider(env: Env): BankProvider {
         externalId: a.id,
         name: a.nickname ?? a.name ?? null,
       }));
+      // Card spend must not cost us the bank feed: a token without credit
+      // access (or a /credit outage) fails only this part.
+      try {
+        const { accounts: credit } = await call<{ accounts: WireCreditAccount[] }>(env, '/api/v1/credit', {});
+        for (const a of credit ?? []) {
+          if (a.status === 'active') accounts.push({ externalId: a.id, name: 'Mercury Credit' });
+        }
+      } catch (e) {
+        log.warn('mercury credit accounts unavailable', { module: 'banktx', error: e instanceof Error ? e.message : String(e) });
+      }
+      const ownIds = new Set(accounts.map((a) => a.externalId));
 
       const start = sinceIso.slice(0, 10); // Mercury filters by date
       const txns: NormalizedTxn[] = [];
-      for (const account of wireAccounts) {
+      for (const account of accounts) {
         for (let offset = 0; ; offset += PAGE_SIZE) {
           const page = await call<{ transactions: WireTxn[] }>(
             env,
-            `/api/v1/account/${encodeURIComponent(account.id)}/transactions`,
+            `/api/v1/account/${encodeURIComponent(account.externalId)}/transactions`,
             { start, limit: String(PAGE_SIZE), offset: String(offset), order: 'desc' },
           );
           const rows = page.transactions ?? [];
@@ -117,7 +143,7 @@ export function mercuryProvider(env: Env): BankProvider {
             txns.push({
               source: 'mercury',
               externalId: t.id,
-              accountExternalId: account.id,
+              accountExternalId: account.externalId,
               postedAt: new Date(when),
               amount,
               counterparty: t.counterpartyName ?? t.counterpartyNickname ?? null,
@@ -125,7 +151,7 @@ export function mercuryProvider(env: Env): BankProvider {
               paypalTxnId: paypalTxnFromDescription(
                 [t.counterpartyName, description].filter(Boolean).join(' ') || null,
               ),
-              category: mercuryTxnCategory(t.kind, description),
+              category: mercuryTxnCategory(t.kind, description, t.counterpartyId, ownIds),
               settleStatus: mercurySettleStatus(t.status),
               raw: t,
             });

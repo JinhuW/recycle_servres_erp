@@ -643,6 +643,10 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
   loop behind a manager-only API (v1.91.0), and a Payments page (v1.92.0).
 - **Internal Mercury↔PayPal transfers are classified out of the unlinked
   queue** (v1.93.0) by counterparty and Mercury kind rules (v1.94.0).
+- **The Mercury IO credit card is synced alongside checking and savings**
+  (v1.176.0), so card charges appear, pending ones included. The card payoff
+  from checking, like any move between our own Mercury accounts, is a transfer.
+  The page does not show which account a row came from.
 - Unlinked transactions get **suggested matching POs** (v1.99.0).
 - The queue **opens on money out**, and the Unlinked and Suggested tiles take
   the same direction lens as the rows beneath them, so the count and the list
