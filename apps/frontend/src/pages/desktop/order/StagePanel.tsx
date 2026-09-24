@@ -5,6 +5,7 @@ import { useT } from '../../../lib/i18n';
 import { NEED_SHORT_KEY, type ReadinessItem, type ReadinessTab } from '../../../lib/poReadiness';
 import type { Order, OrderPackage } from '../../../lib/types';
 import { PackageJourney } from '../PackageJourney';
+import { RouteLink } from '../../../components/RouteLink';
 
 // What the status section says under the stepper for the order's *current*
 // stage: on the left what the stage is about — the Draft's readiness list,
@@ -35,6 +36,19 @@ export function StagePanel(p: Props) {
   const { t } = useT();
   const o = p.order;
   const wh = o.warehouse?.short ?? '';
+
+  // A Done PO can have sold part of its units already, so the list shows on
+  // Done as well as Sold — wherever there is something to link to.
+  const soldOn = o.sellOrders?.length ? (
+    <div className="oe-sold-on">
+      <span className="muted">{t('eoSoldOn')}</span>
+      {o.sellOrders.map(so => (
+        <RouteLink key={so.id} to={'/sell-orders/' + so.id} className="ship-po-pill" title={so.customer}>
+          {so.id} · {so.customer} ×{so.qty}
+        </RouteLink>
+      ))}
+    </div>
+  ) : null;
 
   let left: ReactNode;
   if (p.status === 'Draft') {
@@ -139,6 +153,7 @@ export function StagePanel(p: Props) {
       <div className="oe-box">
         <div className="oe-box-h"><span>{t('eoStageSold')}</span></div>
         <div className="oe-box-lead">{t('eoSoldLead', { n: o.realized?.soldQty ?? 0, name: o.userName })}</div>
+        {soldOn}
         {p.doneEvidence}
       </div>
     );
@@ -147,6 +162,7 @@ export function StagePanel(p: Props) {
       <div className="oe-box">
         <div className="oe-box-h"><span>{t('eoStageDone')}</span></div>
         <div className="oe-box-lead">{t('eoDoneLead', { name: o.userName })}</div>
+        {soldOn}
         {p.doneEvidence}
       </div>
     );

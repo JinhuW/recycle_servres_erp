@@ -217,6 +217,9 @@ export type Order =
     // An order sent back to Draft by an edit is a draft that has already been
     // submitted — deletable only while this is false.
     everSubmitted?: boolean;
+    // Managers only: the Done sell orders that sold this PO's units, with the
+    // units each took. Optional for the deploy-skew reason.
+    sellOrders?: { id: string; customer: string; qty: number }[] | null;
   };
 
 export type RevertLineSnapshot = {
