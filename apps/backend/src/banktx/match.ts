@@ -7,6 +7,7 @@
 // transaction, so scoring in TS keeps the rules readable and unit-testable
 // without a database — and one ORDER BY doesn't have to encode all of them.
 
+import type { TransactionSql } from 'postgres';
 import { getDb } from '../db';
 
 type SqlClient = ReturnType<typeof getDb>;
@@ -189,7 +190,8 @@ function sellerNameFrag(sql: SqlClient, legAlias: string, orderAlias = 'o') {
 // `hasMatch` toggle, the stats tile and the rows that get a `match` payload
 // cannot drift apart — they did, and the toggle then returned linked rows
 // carrying no match at all.
-export function openRowFrag(sql: SqlClient, legAlias: string) {
+// Also runs inside a sync transaction (banktx/ignoreRules.ts), hence the union.
+export function openRowFrag(sql: SqlClient | TransactionSql, legAlias: string) {
   const a = sql(legAlias);
   return sql`${a}.order_id IS NULL AND NOT ${a}.ignored AND ${a}.category = 'external'
     -- A denied or reversed payment is a record, not a task: there is nothing

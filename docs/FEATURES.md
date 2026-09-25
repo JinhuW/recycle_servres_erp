@@ -643,6 +643,16 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
   loop behind a manager-only API (v1.91.0), and a Payments page (v1.92.0).
 - **Internal Mercury↔PayPal transfers are classified out of the unlinked
   queue** (v1.93.0) by counterparty and Mercury kind rules (v1.94.0).
+- **Ignore rules** (v1.177.0). *Ignore rules* in the page header keeps a
+  manager-edited list: a case-insensitive "contains" match on counterparty or
+  description, optionally pinned to one source, with a label. A saved rule
+  ignores every open matching row now (the editor previews the count and a
+  sample first) and every sync re-applies the set. Rule-ignored rows read
+  `Ignored · <label>`; deleting or editing a rule gives its rows back unless
+  another rule matches them; a hand Unignore on a rule-ignored row sticks. A
+  rule-ignored PayPal charge still pairs with its trailing Mercury settlement,
+  which is then ignored with it. Everything still unlinked from before
+  2026-08-01 was ignored once, by migration, in the same release.
 - **The Mercury IO credit card is synced alongside checking and savings**
   (v1.176.0), so card charges appear, pending ones included. The card payoff
   from checking, like any move between our own Mercury accounts, is a transfer.

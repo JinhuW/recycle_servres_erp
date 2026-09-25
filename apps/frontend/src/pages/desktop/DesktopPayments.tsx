@@ -9,6 +9,7 @@ import { usePersisted } from '../../lib/listMemory';
 import { match, readHashQuery, useRoute } from '../../lib/route';
 import { RouteLink } from '../../components/RouteLink';
 import { PAYMENT_NOTE_MAX } from '@recycle-erp/shared';
+import { PaymentIgnoreRules } from './PaymentIgnoreRules';
 import { placePopover } from './popoverPlacement';
 
 // Manager-only reconciliation of Mercury/PayPal transactions against POs.
@@ -185,6 +186,10 @@ type PaymentRow = Omit<Leg, 'source'> & {
   linkedAt: string | null;
   linkedByName: string | null;
   ignored: boolean;
+  // The rule that ignored it (its label, or its pattern when unlabelled); null
+  // when a human did. Added in v1.177.0, optional for the same deploy-skew
+  // reason as Stats.suggested below.
+  ignoreRuleLabel?: string | null;
   category: 'external' | 'transfer';
   // The PayPal case(s) opened on this payment, newest first. A list because one
   // payment can carry a claim and a card chargeback at once. Added in v1.124.0,
@@ -480,6 +485,8 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
 
   const disputeError = (stats?.sources ?? []).find(s => s.disputeError)?.disputeError ?? null;
 
+  const [rulesOpen, setRulesOpen] = useState(false);
+
   type TileKey = StatusFilter | 'refunds' | 'suggested' | 'disputed';
   const tiles: { key: TileKey; label: string; count: number; sub: string; tone: string }[] = stats ? [
     { key: 'unlinked', label: t('payTileUnlinked'), count: stats.unlinked.count, sub: fmtUSD(stats.unlinked.amount, locale), tone: 'warn' },
@@ -531,6 +538,10 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
             <Icon name="book" size={13} />
             {t('payIntOpen')}
           </RouteLink>
+          <button type="button" className="btn ghost" onClick={() => setRulesOpen(true)}>
+            <Icon name="filter" size={13} />
+            {t('payIgnoreRules')}
+          </button>
           <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
             {lastSynced ? t('payLastSynced', { when: relTime(lastSynced, locale) }) : t('payNeverSynced')}
           </span>
@@ -749,6 +760,9 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
           </div>
         )}
       </div>
+      {rulesOpen && (
+        <PaymentIgnoreRules onClose={() => setRulesOpen(false)} onChanged={afterMutation} onToast={onToast} />
+      )}
     </>
   );
 }
@@ -894,7 +908,9 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh
                 {row.linkAuto && <span className="chip info" style={{ fontSize: 10.5 }}>{t('payAuto')}</span>}
               </>
             ) : row.ignored ? (
-              <span className="muted">{t('payStatusIgnored')}</span>
+              <span className="muted">
+                {row.ignoreRuleLabel ? t('payStatusIgnoredBy', { label: row.ignoreRuleLabel }) : t('payStatusIgnored')}
+              </span>
             ) : (
               <>
                 {/* A transfer can still carry a candidate, so the classification

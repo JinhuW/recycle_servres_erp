@@ -8,6 +8,7 @@ import type { Sql, TransactionSql } from 'postgres';
 import { getDb } from '../db';
 import { log } from '../lib/log';
 import type { Env } from '../types';
+import { applyIgnoreRules } from './ignoreRules';
 import { pickBankProviders } from './index';
 import { PAYPAL_ACH_DESCRIPTOR } from './mercury';
 import type { BankProvider, BankSource, NormalizedDispute, NormalizedTxn } from './types';
@@ -55,6 +56,7 @@ type LegRow = {
   linked_by: string | null;
   linked_at: Date | null;
   settle_status: string;
+  ignored: boolean;
 };
 
 // Two concurrent "Sync now" clicks (or a click racing the interval) join the
@@ -276,6 +278,12 @@ async function syncOne(sql: ReturnType<typeof getDb>, provider: BankProvider): P
 
     const paired = await autoPair(tx);
     const autoLinked = await autoLink(tx);
+    // Last, not before pairing: autoPair skips ignored rows, so a rule that
+    // matched a PayPal charge first would strand its Mercury settlement leg
+    // (which reads "PAYPAL …" and matches nothing) in the very queue the rule
+    // exists to empty. After pairing, the rule takes both legs.
+    const ruleIgnored = await applyIgnoreRules(tx);
+    if (ruleIgnored > 0) bankLog.info('ignore rules applied', { source, rows: ruleIgnored });
     return { inserted, updated, paired, autoLinked, disputes: disputeHits, disputeError };
   });
 }
@@ -304,9 +312,14 @@ async function autoPair(tx: Tx): Promise<number> {
   const legs = await tx<LegRow[]>`
     SELECT id, source, external_id, amount::text AS amount, posted_at, paypal_txn_id, description,
            category, category_manual, order_id, link_kind, link_auto, linked_by, linked_at,
-           settle_status
+           settle_status, ignored
     FROM bank_transactions
-    WHERE pair_id IS NULL AND NOT no_auto_pair AND NOT ignored
+    -- A human's Ignore is a verdict on the row and takes it out of pairing. A
+    -- rule's is not: the PayPal charge a rule dismissed still has a Mercury
+    -- settlement on its way, and if the two don't pair the settlement leg sits
+    -- in the queue reading "PAYPAL …", which no rule matches. Paired, the rule
+    -- pass takes it along with its sibling.
+    WHERE pair_id IS NULL AND NOT no_auto_pair AND (NOT ignored OR ignore_rule_id IS NOT NULL)
       -- Pairing is a claim that two legs are one payment. A pending leg is
       -- one: Mercury reports the pull days before it posts, and holding the
       -- pair back until then left one payment showing as two unlinked rows.
@@ -364,6 +377,9 @@ async function autoPair(tx: Tx): Promise<number> {
     // conflicting links mean the match is wrong — leave it to a human.
     const linked = [m, p].filter((l) => l.order_id);
     if (linked.length === 2 && m.order_id !== p.order_id) continue;
+    // Spreading a link onto a rule-ignored leg would make a row that is both
+    // linked and ignored — the state /ignore and /link each refuse to create.
+    if (linked.length === 1 && (m.ignored || p.ignored)) continue;
     const pairId = crypto.randomUUID();
     await tx`UPDATE bank_transactions SET pair_id = ${pairId} WHERE id IN (${m.id}, ${p.id})`;
     await copyNoteAcrossPair(tx, pairId);
@@ -379,7 +395,8 @@ async function autoPair(tx: Tx): Promise<number> {
 
   // Transfers stay settled-only: the counterparty rule and mark-transfer both
   // refuse to reclassify a pending row, and pairing here would do it anyway.
-  const transferPairs = await transferPair(tx, legs.filter((l) => l.settle_status === 'settled'), taken);
+  // Ignored legs were let in only for payment pairing above.
+  const transferPairs = await transferPair(tx, legs.filter((l) => l.settle_status === 'settled' && !l.ignored), taken);
   return pairs.length + transferPairs;
 }
 
