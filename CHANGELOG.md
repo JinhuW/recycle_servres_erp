@@ -17,6 +17,30 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.177.0] - 2026-09-24
+
+### Added
+
+- **Ignore rules on the Payments page** (RS-105). The unlinked queue on prod
+  was mostly recurring card spend — gas stations, meals, Uber, shipping labels,
+  rent — dismissed by hand after every sync. A manager can now open *Ignore
+  rules* from the page header and keep a list: a case-insensitive "contains"
+  match on the counterparty or description, optionally pinned to Mercury or
+  PayPal, with a label. Saving a rule ignores every open matching row at once
+  (the editor previews the count and a sample before you commit), and every
+  sync re-applies the set so new matches never reach the queue. Rule-ignored
+  rows read `Ignored · <label>` so they stay distinguishable from a human's
+  dismissal; deleting or editing a rule gives its rows back unless another
+  rule still matches them; un-ignoring a rule-ignored row by hand leaves a
+  tombstone so no rule takes it again. A rule-ignored PayPal charge still
+  pairs with the Mercury settlement that trails it, and the settlement is
+  ignored along with it — otherwise that leg, which reads `PAYPAL …` and
+  matches nothing, would sit in the very queue the rule was written to empty.
+- **One-off: everything still unlinked from before 2026-08-01 is ignored**
+  (migration 0136). 180 external rows on prod predated the reconciliation
+  practice and were never going to be linked. Pairs straddling the boundary go
+  whole; failed and reversed rows, already off the queue, are left alone.
+
 ## [1.176.1] - 2026-09-24
 
 ### Fixed

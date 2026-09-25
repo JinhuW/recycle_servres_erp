@@ -8,12 +8,14 @@
 // the group atomically so the legs never disagree about link state.
 
 import { Hono } from 'hono';
+import type { TransactionSql } from 'postgres';
 import { authMiddleware } from '../auth';
 import {
   fetchCandidates, groupSettleFrag, hasMatchFrag, matchSummaries, openRowFrag, pairCandidatesBatch,
   PAIR_AUTO_WINDOW_DAYS, PAIR_PICK_WINDOW_DAYS,
   type MatchLeg, type PairCandidate, type PairLeg,
 } from '../banktx/match';
+import { applyIgnoreRules, ignoreRuleMatchFrag, revertIgnoreRule } from '../banktx/ignoreRules';
 import { syncBankTransactions } from '../banktx/sync';
 import { getDb } from '../db';
 import { writeOrderEvent } from '../services/orderAudit';
@@ -202,6 +204,7 @@ bankTx.get('/', async (c) => {
            bt.internal_txn_id, it.title AS internal_txn_title,
            bt.assignee_id, au.name AS assignee_name, au.initials AS assignee_initials,
            bt.note, bt.note_at, nu.name AS note_by_name,
+           COALESCE(NULLIF(ir.label, ''), ir.pattern) AS ignore_rule_label,
            (SELECT json_agg(json_build_object(
               'id', l.id, 'source', l.source, 'externalId', l.external_id,
               'postedAt', l.posted_at, 'amount', l.amount::float,
@@ -216,6 +219,7 @@ bankTx.get('/', async (c) => {
     LEFT JOIN users au ON au.id = bt.assignee_id
     LEFT JOIN internal_transactions it ON it.id = bt.internal_txn_id
     LEFT JOIN users nu ON nu.id = bt.note_by
+    LEFT JOIN bank_ignore_rules ir ON ir.id = bt.ignore_rule_id
     WHERE (bt.pair_id IS NULL OR bt.source = 'paypal')
       AND ${statusFrag} AND ${sourceFrag} AND ${directionFrag} AND ${qFrag}
       AND ${orderId ? sql`bt.order_id = ${orderId}` : sql`TRUE`}
@@ -286,6 +290,7 @@ bankTx.get('/', async (c) => {
       linkedAt: r.linked_at,
       linkedByName: r.linked_by_name ?? null,
       ignored: r.ignored,
+      ignoreRuleLabel: r.ignore_rule_label ?? null,
       category: r.category,
       settleStatus: r.settle_status,
       // The whole case, timeline included: it is a few entries on a handful of
@@ -612,10 +617,150 @@ bankTx.post('/:id/unignore', async (c) => {
   const sql = getDb(c.env);
   const group = await groupOf(sql, c.req.param('id'));
   if (group.length === 0) return c.json({ error: 'Not found' }, 404);
+  // Giving back a rule-ignored row is a verdict on the row, not the rule: the
+  // tombstone keeps every later sync from re-ignoring it while the rule stays.
+  // A row a human ignored and restored carries no tombstone — it was never a
+  // rule's, and stays eligible for one.
   await sql`
-    UPDATE bank_transactions SET ignored = FALSE
+    UPDATE bank_transactions
+    SET ignored = FALSE, no_auto_ignore = (ignore_rule_id IS NOT NULL), ignore_rule_id = NULL
     WHERE id IN ${sql(group.map((l) => l.id))}`;
   return c.json({ ok: true });
+});
+
+// ─── Ignore rules ────────────────────────────────────────────────────────────
+// The taught form of Ignore: a contains-match on counterparty or description,
+// applied now and by every sync (banktx/ignoreRules.ts). Rows keep the rule's
+// id so retracting it hands them back — unless another rule still wants them,
+// which is why every write re-runs the whole set rather than the one rule.
+
+const RULE_SOURCES = ['mercury', 'paypal'] as const;
+const RULE_PATTERN_MAX = 120;
+const RULE_LABEL_MAX = 60;
+
+type RuleBody = { source?: unknown; pattern?: unknown; label?: unknown };
+
+function parseRuleBody(body: RuleBody):
+  | { ok: true; source: 'mercury' | 'paypal' | null; pattern: string; label: string }
+  | { ok: false; error: string } {
+  const pattern = typeof body.pattern === 'string' ? body.pattern.trim() : '';
+  if (!pattern) return { ok: false, error: 'pattern is required' };
+  if (pattern.length > RULE_PATTERN_MAX) return { ok: false, error: `pattern must be at most ${RULE_PATTERN_MAX} characters` };
+  const label = typeof body.label === 'string' ? body.label.trim() : '';
+  if (label.length > RULE_LABEL_MAX) return { ok: false, error: `label must be at most ${RULE_LABEL_MAX} characters` };
+  const source = body.source == null || body.source === '' ? null : body.source;
+  if (source !== null && !RULE_SOURCES.includes(source as never)) {
+    return { ok: false, error: `source must be one of ${RULE_SOURCES.join(', ')}` };
+  }
+  return { ok: true, source: source as 'mercury' | 'paypal' | null, pattern, label };
+}
+
+type RuleRow = {
+  id: string; source: string | null; pattern: string; label: string;
+  created_at: Date; created_by_name: string | null; matched: number;
+};
+
+function shapeRule(r: RuleRow) {
+  return {
+    id: r.id, source: r.source, pattern: r.pattern, label: r.label,
+    createdAt: r.created_at, createdByName: r.created_by_name, matched: r.matched,
+  };
+}
+
+function rulesQuery(sql: SqlClient | TransactionSql, id?: string) {
+  return sql<RuleRow[]>`
+    SELECT r.id, r.source, r.pattern, r.label, r.created_at, u.name AS created_by_name,
+           (SELECT COUNT(*) FROM bank_transactions bt WHERE bt.ignore_rule_id = r.id)::int AS matched
+    FROM bank_ignore_rules r
+    LEFT JOIN users u ON u.id = r.created_by
+    WHERE ${id ? sql`r.id = ${id}` : sql`TRUE`}
+    ORDER BY r.created_at DESC, r.id DESC`;
+}
+
+bankTx.get('/ignore-rules', async (c) => {
+  const rules = await rulesQuery(getDb(c.env));
+  return c.json({ rules: rules.map(shapeRule) });
+});
+
+// What a rule would take, before it exists. Same predicate as the apply pass
+// minus the pair spread, so the count reads as logical payments.
+bankTx.get('/ignore-rules/preview', async (c) => {
+  const sql = getDb(c.env);
+  const parsed = parseRuleBody({ source: c.req.query('source'), pattern: c.req.query('pattern') });
+  if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+  const rule = { source: parsed.source, pattern: parsed.pattern };
+  const [agg] = await sql<{ count: number }[]>`
+    SELECT COUNT(*)::int AS count FROM bank_transactions bt
+    WHERE ${ignoreRuleMatchFrag(sql, 'bt', rule)} AND ${openRowFrag(sql, 'bt')} AND NOT bt.no_auto_ignore
+      AND (bt.pair_id IS NULL OR bt.source = 'paypal')`;
+  const sample = await sql`
+    SELECT bt.id, bt.source, bt.posted_at, bt.amount::float AS amount, bt.counterparty, bt.description
+    FROM bank_transactions bt
+    WHERE ${ignoreRuleMatchFrag(sql, 'bt', rule)} AND ${openRowFrag(sql, 'bt')} AND NOT bt.no_auto_ignore
+      AND (bt.pair_id IS NULL OR bt.source = 'paypal')
+    ORDER BY bt.posted_at DESC, bt.id DESC
+    LIMIT 5`;
+  return c.json({
+    count: agg.count,
+    sample: sample.map((r) => ({
+      id: r.id, source: r.source, postedAt: r.posted_at, amount: r.amount,
+      counterparty: r.counterparty, description: r.description,
+    })),
+  });
+});
+
+bankTx.post('/ignore-rules', async (c) => {
+  const sql = getDb(c.env);
+  const parsed = parseRuleBody(await c.req.json<RuleBody>().catch(() => ({})));
+  if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+  const rule = await sql.begin(async (tx) => {
+    const [row] = await tx<{ id: string }[]>`
+      INSERT INTO bank_ignore_rules (source, pattern, label, created_by)
+      VALUES (${parsed.source}, ${parsed.pattern}, ${parsed.label}, ${c.var.user.id})
+      RETURNING id`;
+    await applyIgnoreRules(tx);
+    const [r] = await rulesQuery(tx, row.id);
+    return r;
+  });
+  return c.json({ rule: shapeRule(rule), ignored: rule.matched }, 201);
+});
+
+bankTx.patch('/ignore-rules/:id', async (c) => {
+  const sql = getDb(c.env);
+  const id = c.req.param('id');
+  if (!UUID_RE.test(id)) return c.json({ error: 'Not found' }, 404);
+  const parsed = parseRuleBody(await c.req.json<RuleBody>().catch(() => ({})));
+  if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+  const rule = await sql.begin(async (tx) => {
+    const updated = await tx`
+      UPDATE bank_ignore_rules
+      SET source = ${parsed.source}, pattern = ${parsed.pattern}, label = ${parsed.label}
+      WHERE id = ${id}`;
+    if (updated.count === 0) return null;
+    // Its old rows go back and the whole set runs again: what the new pattern
+    // matches it takes, what only the old one matched another rule may claim.
+    await revertIgnoreRule(tx, id);
+    await applyIgnoreRules(tx);
+    const [r] = await rulesQuery(tx, id);
+    return r;
+  });
+  if (!rule) return c.json({ error: 'Not found' }, 404);
+  return c.json({ rule: shapeRule(rule), ignored: rule.matched });
+});
+
+bankTx.delete('/ignore-rules/:id', async (c) => {
+  const sql = getDb(c.env);
+  const id = c.req.param('id');
+  if (!UUID_RE.test(id)) return c.json({ error: 'Not found' }, 404);
+  const result = await sql.begin(async (tx) => {
+    const reverted = await revertIgnoreRule(tx, id);
+    const del = await tx`DELETE FROM bank_ignore_rules WHERE id = ${id}`;
+    if (del.count === 0) return null;
+    const reclaimed = await applyIgnoreRules(tx);
+    return { restored: Math.max(0, reverted - reclaimed) };
+  });
+  if (!result) return c.json({ error: 'Not found' }, 404);
+  return c.json({ ok: true, restored: result.restored });
 });
 
 // ─── Mark / unmark transfer ──────────────────────────────────────────────────
