@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-107](./RS-107-manager-only-data-is-absent-from-every-non-manager-a.md) | in-progress | bug | P2 | Manager-only data is absent from every non-manager API response | — |
+| [RS-107](./RS-107-manager-only-data-is-absent-from-every-non-manager-a.md) | in-review | bug | P2 | Manager-only data is absent from every non-manager API response | 1.177.2 |
 | [RS-106](./RS-106-manager-only-po-fields-are-absent-not-null-for-purch.md) | done | bug | P2 | Manager-only PO fields are absent, not null, for purchasers | 1.177.1 |
 | [RS-105](./RS-105-ignore-rules-for-bank-transactions.md) | done | story | P2 | Ignore rules for bank transactions | 1.177.0 |
 | [RS-104](./RS-104-mercury-card-sync-survives-a-credit-failure.md) | done | bug | P1 | Mercury card sync survives a /credit failure | 1.176.1 |

@@ -2,13 +2,13 @@
 id: RS-107
 title: Manager-only data is absent from every non-manager API response
 type: bug
-status: in-progress
+status: in-review
 priority: P2
 created: 2026-09-25
 reporter: Jinhu
 branch: fix/manager-only-api-sweep
-pr:
-version:
+pr: "#405"
+version: 1.177.2
 related: [RS-106, RS-060, RS-064]
 ---
 
