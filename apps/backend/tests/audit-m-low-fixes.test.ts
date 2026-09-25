@@ -37,14 +37,14 @@ describe('Low: PATCH /api/customers/:id 404s an unknown id', () => {
 describe('Low: dashboard leaderboard masks other purchasers\' email', () => {
   beforeEach(async () => { await resetDb(); });
 
-  it('nulls email for rows that are not the requesting purchaser', async () => {
+  it('leaves email out of rows that are not the requesting purchaser', async () => {
     const { token, user } = await loginAs(MARCUS);
-    const r = await api<{ leaderboard: { id: string; email: string | null }[] }>(
+    const r = await api<{ leaderboard: { id: string; email?: string | null }[] }>(
       'GET', '/api/dashboard?range=90d', { token });
     expect(r.status).toBe(200);
     const others = r.body.leaderboard.filter(row => row.id !== user.id);
     expect(others.length).toBeGreaterThan(0);
-    for (const row of others) expect(row.email).toBeNull();
+    for (const row of others) expect(row).not.toHaveProperty('email');
   });
 });
 

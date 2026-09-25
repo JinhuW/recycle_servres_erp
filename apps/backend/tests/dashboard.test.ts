@@ -20,13 +20,13 @@ describe('GET /api/dashboard', () => {
     const { token, user } = await loginAs(MARCUS);
     const r = await api<{
       kpis: { revenue: number };
-      leaderboard: { id: string; cost: number | null; commission: number | null }[];
+      leaderboard: { id: string; cost?: number | null; commission?: number | null }[];
     }>('GET', '/api/dashboard', { token });
     expect(r.status).toBe(200);
     for (const row of r.body.leaderboard) {
       if (row.id !== user.id) {
-        expect(row.commission == null).toBe(true);
-        expect(row.cost == null).toBe(true);
+        expect(row).not.toHaveProperty('commission');
+        expect(row).not.toHaveProperty('cost');
       }
     }
   });

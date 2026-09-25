@@ -548,7 +548,9 @@ orders.get('/', async (c) => {
       otherFees: r.other_fees,
       otherFeesNote: r.other_fees_note,
       paypalTxnId: r.paypal_txn_id,
-      linkedPaid: r.linked_paid,
+      // Managers only, and left out rather than nulled: the key alone would
+      // name the Payments page it links to.
+      ...(isManager ? { linkedPaid: r.linked_paid } : {}),
       handoffMethod: r.handoff_method,
       // Optional and additive, like handoffMethod: a stale SPA renders the
       // plain status chip.
@@ -720,8 +722,9 @@ orders.get('/:id', async (c) => {
 
   // Changes a purchaser made after submitting, that no manager has looked at
   // yet — the edit page opens a review dialog on them. Managers only: the
-  // purchaser is the one who made the changes.
-  const pendingRevert = effectiveRole(u) === 'manager'
+  // purchaser is the one who made the changes, and the key is left out rather
+  // than nulled so the response doesn't name the review at all.
+  const pendingRevert = isManager
     ? (await sql`
         SELECT e.id, e.detail, e.created_at,
                act.id AS actor_id, act.name AS actor_name, act.initials AS actor_initials
@@ -738,7 +741,7 @@ orders.get('/:id', async (c) => {
           ? { id: r.actor_id, name: r.actor_name ?? '', initials: r.actor_initials ?? '' }
           : null,
       }))
-    : null;
+    : undefined;
 
   const statusMeta: Record<string, {
     note: string | null; when: string;
@@ -770,7 +773,7 @@ orders.get('/:id', async (c) => {
       archivedAt: order.archived_at,
       status,
       statusMeta,
-      pendingRevert,
+      ...(pendingRevert ? { pendingRevert } : {}),
       everSubmitted,
       createdAt: order.created_at,
       totalCost: order.total_cost,
@@ -876,7 +879,13 @@ orders.get('/:id/events', async (c) => {
   // A purchaser is shown Done for Sold everywhere else, so here the settle
   // row is dropped rather than shown as Done → Done, and a reopen from Sold
   // reads as a reopen from Done.
+  // Sell orders are a manager's: the archive refusal names none to a
+  // purchaser, so the archive event mustn't count them either.
   const visible = role === 'manager' ? rows : rows.flatMap((r) => {
+    if (r.kind === 'archived') {
+      const { removedSellOrderLines: _dropped, ...rest } = r.detail;
+      return [{ ...r, detail: rest }];
+    }
     if (r.kind !== 'advanced') return [r];
     const d = r.detail as { from?: string; to?: string };
     if (d.from === 'done' && d.to === 'sold') return [];
@@ -2276,11 +2285,17 @@ orders.patch('/:id', async (c) => {
     if (msg.includes('__PURCHASER_DONE__')) {
       return c.json({ error: 'Only managers can edit an order after submission' }, 403);
     }
+    // Which sell orders block is a manager's to see — a purchaser gets the
+    // lines and a plain refusal, as on archive.
+    const namesSellOrders = effectiveRole(u) === 'manager';
     if (msg.includes('__REVERT_COMMITTED__')) {
-      return c.json({
+      return c.json(namesSellOrders ? {
         error: `Lines in this order are committed to ${describeSellOrders(blockingSellOrderIds)}. Cancel those sell orders before editing it.`,
         offendingLineIds: committedLineIds,
         sellOrderIds: blockingSellOrderIds,
+      } : {
+        error: 'Lines in this order are on open sell orders — a manager has to make this change.',
+        offendingLineIds: committedLineIds,
       }, 409);
     }
     if (msg.includes('__REVERT_TRANSFER__')) {
@@ -2305,10 +2320,13 @@ orders.patch('/:id', async (c) => {
       return c.json({ error: PACKAGE_DELIVERED_MSG }, 409);
     }
     if (msg.includes('__REMOVE_REFERENCED__')) {
-      return c.json({
+      return c.json(namesSellOrders ? {
         error: `A line you tried to remove is on ${describeSellOrders(blockingSellOrderIds)} and cannot be deleted. Archive or cancel those sell orders first.`,
         offendingLineIds: committedLineIds,
         sellOrderIds: blockingSellOrderIds,
+      } : {
+        error: 'A line you tried to remove is on an open sell order — a manager has to remove it.',
+        offendingLineIds: committedLineIds,
       }, 409);
     }
     // Sell orders are handled above; the only other NO ACTION FK into

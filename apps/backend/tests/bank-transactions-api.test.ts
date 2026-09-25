@@ -322,7 +322,7 @@ describe('bank transactions API', () => {
       expect(r.status).toBe(200);
     }
 
-    type Row = { id: string; linkedPaid: number | null };
+    type Row = { id: string; linkedPaid?: number | null };
     const asManager = await api<{ orders: Row[] }>('GET', '/api/orders', { token: manager });
     expect(asManager.status).toBe(200);
     const byId = new Map(asManager.body.orders.map((o) => [o.id, o.linkedPaid]));
@@ -333,7 +333,7 @@ describe('bank transactions API', () => {
     const asPurchaser = await api<{ orders: Row[] }>('GET', '/api/orders', { token: purchaser });
     const own = asPurchaser.body.orders.find((o) => o.id === paid);
     expect(own).toBeDefined();
-    expect(own?.linkedPaid).toBeNull();
+    expect(own).not.toHaveProperty('linkedPaid');
 
     // The deep link's feed filter is exact: this PO's two groups, nothing else.
     const feed = await api<{ rows: { orderId: string | null }[] }>(

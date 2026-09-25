@@ -17,6 +17,33 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.177.2] - 2026-09-25
+
+### Fixed
+
+- **Every manager-only figure is now absent from a non-manager's API
+  response, not just hidden by the UI** (RS-107). RS-106 fixed the PO reads;
+  this is the sweep across the rest. Every manager-only surface — desktop,
+  phone, vendor portal, MCP tools, exports — was traced to the endpoint behind
+  it. The whole-endpoint manager features already refused a non-manager, and
+  the shared reads were already row-scoped, but seven places still let a
+  purchaser learn about a manager feature by name: the PO list sent
+  `linkedPaid: null` (the bank-linked total behind the Payments link), the
+  PO detail sent `pendingRevert: null` (the manager's change-review dialog),
+  the PO activity log counted "lines removed from sell orders" on an archive,
+  an edit refused for sell-order-committed lines named the sell orders in the
+  body and the message, the dashboard leaderboard nulled peers' `email`,
+  `cost`, `revenue`, `profit` and `commission`, the warehouse list nulled
+  `managerPhone` and `managerEmail`, and the inventory line's "Linked sell
+  orders" read answered the line's owner with sell-order ids, customer names
+  and sale prices. The keys are now left out for anyone whose effective role
+  isn't manager — a manager previewing as purchaser gets the purchaser shape
+  — and the linked-sell-orders read is a manager's, like every other
+  sell-order route. The refusal a purchaser sees on a blocked edit now reads
+  like the archive one: the lines that block, and "a manager has to make this
+  change". Managers see exactly what they saw before. The SPA already read
+  every key as optional, so only the leaderboard type changed.
+
 ## [1.177.1] - 2026-09-25
 
 ### Fixed
