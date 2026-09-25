@@ -3,8 +3,8 @@
 // price when the header states one, else its unit cost, plus the fee share —
 // net of the commission actually paid: the purchaser's projected commission
 // on the PO as bought, over priced lines, as the dashboard shows it. Managers
-// only; null until something sells. The projection (`profit`) is untouched by
-// any of it.
+// only, and absent — not null — for anyone else; null until something sells.
+// The projection (`profit`) is untouched by any of it.
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb } from './helpers/db';
@@ -15,7 +15,7 @@ type Realized = {
   soldQty: number; boughtQty: number; revenue: number; cost: number;
   grossProfit: number; commission: number; profit: number;
 };
-type Detail = { order: { id: string; profit?: number; realized: Realized | null; lines: { id: string; qty: number }[] } };
+type Detail = { order: { id: string; profit?: number; realized?: Realized | null; lines: { id: string; qty: number }[] } };
 type List = { orders: { id: string; profit: number; realized?: Realized | null }[] };
 
 const PN = 'RZP-TEST-PN';
@@ -228,15 +228,15 @@ describe('realized profit on POs', () => {
     expect((await listed(id, mgr)).realized).toEqual(r);
   });
 
-  it('is null for the owning purchaser and for a manager previewing as purchaser', async () => {
+  it('is absent for the owning purchaser and for a manager previewing as purchaser', async () => {
     const { token: pur } = await loginAs(MARCUS);
     const { token: mgr } = await loginAs(ALEX);
     const { id, lineIds } = await createReviewing(pur, mgr);
     await moveSellOrder(mgr, await createSellOrderOn(mgr, lineIds[1], 2, 55), 'Done');
 
     expect((await detail(id, mgr)).realized).not.toBeNull();
-    expect((await detail(id, pur)).realized).toBeNull();
-    expect((await listed(id, pur)).realized).toBeNull();
+    expect(await detail(id, pur)).not.toHaveProperty('realized');
+    expect(await listed(id, pur)).not.toHaveProperty('realized');
 
     // Previewing as purchaser also narrows reads to the manager's own POs,
     // so the preview case needs a PO the manager owns.
@@ -247,7 +247,7 @@ describe('realized profit on POs', () => {
     expect((await api('PATCH', '/api/me/preferences', {
       token: mgr, body: { 'tweaks.rolePreview': 'as_purchaser' },
     })).status).toBe(200);
-    expect((await detail(own.id, mgr)).realized).toBeNull();
-    expect((await listed(own.id, mgr)).realized).toBeNull();
+    expect(await detail(own.id, mgr)).not.toHaveProperty('realized');
+    expect(await listed(own.id, mgr)).not.toHaveProperty('realized');
   });
 });

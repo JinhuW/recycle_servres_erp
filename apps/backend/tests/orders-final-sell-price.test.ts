@@ -2,7 +2,7 @@
 // the Done sell orders that name it — the price the units actually sold for,
 // distinct from the projected `sellPrice` that feeds commission. Managers
 // only: everyone else, including the PO's owner and a manager previewing as
-// purchaser, gets null.
+// purchaser, gets no key at all — a null would still name the feature.
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb } from './helpers/db';
@@ -11,7 +11,7 @@ import { loginAs, ALEX, MARCUS } from './helpers/auth';
 
 type Line = {
   id: string; status: string; qty: number;
-  finalSellPrice: number | null; finalSoldQty: number | null;
+  finalSellPrice?: number | null; finalSoldQty?: number | null;
 };
 type Detail = { order: { lines: Line[] } };
 
@@ -119,7 +119,7 @@ describe('final sell price on PO lines', () => {
     expect(other.finalSoldQty).toBeNull();
   });
 
-  it('is null for the owning purchaser and for a manager previewing as purchaser', async () => {
+  it('is absent for the owning purchaser and for a manager previewing as purchaser', async () => {
     const { token: pur } = await loginAs(MARCUS);
     const { token: mgr } = await loginAs(ALEX);
     const { id, lineIds } = await createReviewing(pur, mgr);
@@ -131,8 +131,8 @@ describe('final sell price on PO lines', () => {
     expect(asManager.status).toBe('Sold');
 
     const asOwner = await lineOf(id, pur, lineIds[1]);
-    expect(asOwner.finalSellPrice).toBeNull();
-    expect(asOwner.finalSoldQty).toBeNull();
+    expect(asOwner).not.toHaveProperty('finalSellPrice');
+    expect(asOwner).not.toHaveProperty('finalSoldQty');
 
     // Previewing as purchaser also narrows reads to the manager's own POs,
     // so the preview case needs a PO the manager owns.
@@ -145,8 +145,8 @@ describe('final sell price on PO lines', () => {
       token: mgr, body: { 'tweaks.rolePreview': 'as_purchaser' },
     })).status).toBe(200);
     const previewing = await lineOf(own.id, mgr, own.lineIds[0]);
-    expect(previewing.finalSellPrice).toBeNull();
-    expect(previewing.finalSoldQty).toBeNull();
+    expect(previewing).not.toHaveProperty('finalSellPrice');
+    expect(previewing).not.toHaveProperty('finalSoldQty');
   });
 });
 
@@ -176,8 +176,8 @@ describe('a PO and the sell orders that sold it link to each other', () => {
     expect(refs.find(r => r.id === other)!.qty).toBe(2);
     expect(typeof refs[0].customer).toBe('string');
 
-    const asOwner = await api<{ order: { sellOrders: SoRef[] | null } }>('GET', `/api/orders/${id}`, { token: pur });
-    expect(asOwner.body.order.sellOrders).toBeNull();
+    const asOwner = await api<{ order: { sellOrders?: SoRef[] | null } }>('GET', `/api/orders/${id}`, { token: pur });
+    expect(asOwner.body.order).not.toHaveProperty('sellOrders');
   });
 
   it('names each sell order line\'s source PO', async () => {

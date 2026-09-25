@@ -17,6 +17,21 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.177.1] - 2026-09-25
+
+### Fixed
+
+- **Purchaser PO reads no longer carry the manager-only keys** (RS-106).
+  `GET /api/orders/:id` and `GET /api/orders` had always hidden the values
+  from purchasers and from a manager previewing as purchaser, but sent the
+  keys anyway — `finalSellPrice: null`, `finalSoldQty: null`,
+  `realized: null`, `sellOrders: null` — which named a feature the caller
+  isn't meant to know about. The keys are now left out of the response for
+  anyone who isn't a manager, the way `/api/inventory` and `/api/dashboard`
+  already treated theirs. For a manager nothing changes: `null` on those keys
+  still means nothing has sold yet. The UI already read all four as
+  optional, so no frontend change was needed.
+
 ## [1.177.0] - 2026-09-24
 
 ### Added
