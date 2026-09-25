@@ -73,8 +73,9 @@ export type OrderLine = {
   sellPrice: number | null;
   // What the units actually sold for: the qty-weighted unit price over Done
   // sell orders naming this line, and how many units that covers (a partial
-  // sale leaves the remainder in `qty`). Null when nothing has sold or the
-  // caller is not a manager. Optional for deploy skew, like `linkedPaid`.
+  // sale leaves the remainder in `qty`). Null when nothing has sold; absent
+  // when the caller is not a manager. Optional for deploy skew too, like
+  // `linkedPaid`.
   finalSellPrice?: number | null;
   finalSoldQty?: number | null;
   status: string;
@@ -105,7 +106,7 @@ export type OrderSummary = {
   userName: string;
   userInitials: string;
   commissionRate: number | null;
-  // Optional for deploy skew, like `linkedPaid`; null for non-managers and
+  // Absent for non-managers (and for deploy skew, like `linkedPaid`); null
   // for a PO nothing has sold from.
   realized?: OrderRealized | null;
   // Derived from the lines: the sole category when they agree, 'Mixed' when
@@ -217,8 +218,8 @@ export type Order =
     // An order sent back to Draft by an edit is a draft that has already been
     // submitted — deletable only while this is false.
     everSubmitted?: boolean;
-    // Managers only: the Done sell orders that sold this PO's units, with the
-    // units each took. Optional for the deploy-skew reason.
+    // Managers only — absent for everyone else: the Done sell orders that
+    // sold this PO's units, with the units each took.
     sellOrders?: { id: string; customer: string; qty: number }[] | null;
   };
 

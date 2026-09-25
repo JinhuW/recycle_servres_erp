@@ -175,14 +175,18 @@ on to Sold once every line has sold (v1.164.0).
   Profit. PO edit page: a realized block on
   the cost tape with a sold meter. Phone: the money card carries both and the
   list row a Realized line. Purchasers and a manager previewing as purchaser
-  get none of it. Other fees amortize over the PO as bought (`qty_purchased`)
+  get none of it — since v1.177.1 the API leaves the `realized` and
+  `sellOrders` keys out of their responses rather than sending null.
+  Other fees amortize over the PO as bought (`qty_purchased`)
   from the same release, so a partial sale no longer moves the fee share.
 - **Managers see each line's final sell price** (v1.147.0): the qty-weighted
   unit price over the Done sell orders that name the line, with the sold
   count after it when a partial sale left units on the PO. It sits beside
   "Sell / Unit", which stays the projection that feeds commission. Computed
   on read from sell orders, never stored or editable; purchasers and a
-  manager previewing as purchaser get neither the column nor the value.
+  manager previewing as purchaser get neither the column nor the value, and
+  since v1.177.1 not even the `finalSellPrice` / `finalSoldQty` keys in the
+  API response.
 - **Purchasers edit until the review closes.** A material edit sends the PO
   back to Draft and raises a change-review dialog for the manager, showing the
   full field and line diff (v1.97.0). Notes, photos and attachments don't

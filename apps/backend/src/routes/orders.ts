@@ -564,11 +564,15 @@ orders.get('/', async (c) => {
       revenue: r.revenue,
       profit: r.profit,
       // What the units earned on Done sell orders, net of the commission paid
-      // — managers only, null until something sells. Optional and additive.
-      realized: isManager ? realizedFromRow({
-        sold_qty: r.sold_qty, bought_qty: r.bought_qty, revenue: r.rz_revenue, cost: r.rz_cost,
-        projected_profit: r.projected_profit,
-      }, { commission_rate: r.commission_rate }) : null,
+      // — null until something sells. Managers only: the key is left out for
+      // everyone else, since even a null would name the feature. Optional and
+      // additive.
+      ...(isManager ? {
+        realized: realizedFromRow({
+          sold_qty: r.sold_qty, bought_qty: r.bought_qty, revenue: r.rz_revenue, cost: r.rz_cost,
+          projected_profit: r.projected_profit,
+        }, { commission_rate: r.commission_rate }),
+      } : {}),
       lineCount: r.line_count,
       unpricedLineCount: r.unpriced_line_count,
       // PO status is authoritative — derive from o.lifecycle, not from line
@@ -787,11 +791,16 @@ orders.get('/:id', async (c) => {
         ? { id: order.supplier_id, name: order.supplier_name }
         : null,
       commissionRate: order.commission_rate,
-      realized: isManager ? realizedFromRow({
-        sold_qty: order.sold_qty, bought_qty: order.bought_qty,
-        revenue: order.rz_revenue, cost: order.rz_cost,
-        projected_profit: order.projected_profit,
-      }, { commission_rate: order.commission_rate }) : null,
+      // Manager-only keys are left out, not nulled, for everyone else — the
+      // key alone would name the feature. Same rule as the list above.
+      ...(isManager ? {
+        realized: realizedFromRow({
+          sold_qty: order.sold_qty, bought_qty: order.bought_qty,
+          revenue: order.rz_revenue, cost: order.rz_cost,
+          projected_profit: order.projected_profit,
+        }, { commission_rate: order.commission_rate }),
+        sellOrders,
+      } : {}),
       warehouse: order.warehouse_id
         ? { id: order.warehouse_id, short: order.warehouse_short, region: order.warehouse_region }
         : null,
@@ -799,7 +808,6 @@ orders.get('/:id', async (c) => {
       // have to download the labels themselves (those live on /shipping).
       // Optional and additive: a stale SPA that never reads it is unaffected.
       package: packageFromJson(order.pkg),
-      sellOrders,
       lines: lines.map(l => ({
         id: l.id,
         category: l.category,
@@ -822,8 +830,7 @@ orders.get('/:id', async (c) => {
         qty: l.qty,
         unitCost: l.unit_cost,
         sellPrice: l.sell_price,
-        finalSellPrice: isManager ? l.final_sell_price : null,
-        finalSoldQty: isManager ? l.sold_qty : null,
+        ...(isManager ? { finalSellPrice: l.final_sell_price, finalSoldQty: l.sold_qty } : {}),
         status: l.status,
         scanImageId: l.scan_image_id,
         scanConfidence: l.scan_confidence,
