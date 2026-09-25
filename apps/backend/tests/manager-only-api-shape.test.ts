@@ -138,7 +138,9 @@ describe('GET /api/orders/:id/events — archived.removedSellOrderLines', () => 
     };
 
     expect(await archivedFor(mgr, id)).toHaveProperty('removedSellOrderLines', 1);
-    expect(await archivedFor(pur, id)).not.toHaveProperty('removedSellOrderLines');
+    const forOwner = await archivedFor(pur, id);
+    expect(forOwner).not.toHaveProperty('removedSellOrderLines');
+    expect(forOwner).toHaveProperty('lines', 2);   // the rest of the event survives the strip
 
     // Preview scopes reads to the manager's own POs: archive one of those the
     // same way, then read its log in preview.
@@ -149,7 +151,9 @@ describe('GET /api/orders/:id/events — archived.removedSellOrderLines', () => 
     })).status).toBe(200);
     expect(await archivedFor(mgr, own.id)).toHaveProperty('removedSellOrderLines', 1);
     await setPreview(mgr, 'as_purchaser');
-    expect(await archivedFor(mgr, own.id)).not.toHaveProperty('removedSellOrderLines');
+    const inPreview = await archivedFor(mgr, own.id);
+    expect(inPreview).not.toHaveProperty('removedSellOrderLines');
+    expect(inPreview).toHaveProperty('lines', 2);
   });
 });
 
@@ -279,5 +283,81 @@ describe('GET /api/inventory/:id/sell-orders', () => {
     // convenience, and the page this feeds is already bounced in preview.
     await setPreview(mgr, 'as_purchaser');
     expect((await list(mgr)).status).toBe(200);
+  });
+});
+
+describe('PATCH /api/orders/:id and /handoff — paymentsLinked', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('is absent for a purchaser and a preview manager, a count for a manager', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const { token: mgr } = await loginAs(ALEX);
+    const { id } = await createSubmitted(pur);
+    const save = (token: string, poId: string) =>
+      api<{ ok: boolean; paymentsLinked?: number }>('PATCH', `/api/orders/${poId}`, { token, body: { notes: 'shape' } });
+
+    const asPurchaser = await save(pur, id);
+    expect(asPurchaser.status).toBe(200);
+    expect(asPurchaser.body).not.toHaveProperty('paymentsLinked');
+
+    const asManager = await save(mgr, id);
+    expect(asManager.status).toBe(200);
+    expect(asManager.body.paymentsLinked).toBe(0);
+
+    const own = await createSubmitted(mgr);
+    await setPreview(mgr, 'as_purchaser');
+    const inPreview = await save(mgr, own.id);
+    expect(inPreview.status).toBe(200);
+    expect(inPreview.body).not.toHaveProperty('paymentsLinked');
+  });
+});
+
+describe('POST /api/orders/:id/advance — sell-order conflict body', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  // Only a manager can move a PO backwards, so the plain body is reachable
+  // only by a manager previewing as purchaser — the refusal still has to
+  // agree with the PATCH one for the same caller.
+  it('names the sell order to a manager, but not in preview', async () => {
+    const { token: mgr } = await loginAs(ALEX);
+    const { id, lineIds } = await createReviewing(mgr, mgr);
+    const soId = await createSellOrderOn(mgr, lineIds[0]);
+    const back = () => api<Conflict>('POST', `/api/orders/${id}/advance`, {
+      token: mgr, body: { toStage: 'in_transit' },
+    });
+
+    const asManager = await back();
+    expect(asManager.status).toBe(409);
+    expect(asManager.body.sellOrderIds).toEqual([soId]);
+    expect(asManager.body.error).toContain(soId);
+
+    await setPreview(mgr, 'as_purchaser');
+    const inPreview = await back();
+    expect(inPreview.status).toBe(409);
+    expect(inPreview.body.offendingLineIds).toEqual([lineIds[0]]);
+    expect(inPreview.body).not.toHaveProperty('sellOrderIds');
+    expect(inPreview.body.error).not.toContain(soId);
+    await setPreview(mgr, 'actual');
+  });
+});
+
+describe('PATCH /api/warehouses/:id — manager contact', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('the write response follows the same gate as the list', async () => {
+    const mgr = await loginAs(ALEX);
+    const link = () => api<{ id: string; managerEmail?: string | null; managerPhone?: string | null }>(
+      'PATCH', '/api/warehouses/WH-HK', { token: mgr.token, body: { managerUserId: mgr.user.id } });
+
+    const asManager = await link();
+    expect(asManager.status).toBe(200);
+    expect(asManager.body.managerEmail).toBe(mgr.user.email);
+
+    await setPreview(mgr.token, 'as_purchaser');
+    const inPreview = await link();
+    expect(inPreview.status).toBe(200);
+    expect(inPreview.body).not.toHaveProperty('managerEmail');
+    expect(inPreview.body).not.toHaveProperty('managerPhone');
+    await setPreview(mgr.token, 'actual');
   });
 });

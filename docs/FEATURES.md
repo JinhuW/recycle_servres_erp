@@ -35,9 +35,15 @@ reach a portal through a URL token.
   `sellOrders` (v1.177.1), and the linked-payment total, the pending
   change-review, the leaderboard peers' money and email, the warehouse
   manager's contact, and the sell-order ids in an edit refusal and the
-  archive log line (v1.177.2). "Non-manager" is the *effective* role, so a
-  manager previewing as purchaser gets the purchaser shape; the 403s gate on
-  the real role, since the preview is a viewing convenience.
+  archive log line (v1.177.2), and the bank-link count on a saved or handed-off
+  PO (v1.177.3 — a purchaser who saves a matching PayPal id now sees a plain
+  "Saved", not "its bank payment is now linked"). "Non-manager" is the
+  *effective* role, so a manager previewing as purchaser gets the purchaser
+  shape — including on the advance and warehouse write responses (v1.177.3).
+  Two deliberate exceptions: the 403s gate on the real role, since the
+  preview is a viewing convenience, and the inventory reads (`/api/inventory`,
+  `/products`, `/:id`, `/events/*`, `/export`) scope rows and strip cost on the
+  real role too, so a previewing manager keeps the whole inventory.
 - Auth is httpOnly cookies — a 60-minute `at` JWT plus a rotating `rt` refresh
   family (the access token was 15 minutes until v1.122.0, which made four out
   of five app loads open with a 401, a refresh and a retry before painting).

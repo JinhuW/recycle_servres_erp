@@ -17,6 +17,28 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.177.3] - 2026-09-25
+
+### Fixed
+
+- **The review follow-up to the manager-only sweep** (RS-107). A code review
+  of v1.177.2, with the purchaser, manager and preview-manager UI checked in
+  a browser, found six loose ends of the same kind. Saving or handing off a
+  PO returned `paymentsLinked` — the bank-link count behind the manager-only
+  Payments page — to every caller; the key is now managers-only, so a
+  purchaser who saves a matching PayPal id sees a plain "Saved" rather than
+  "its bank payment is now linked". The advance and hand-off refusal for
+  lines on an open sell order named the sell orders with no role gate; only
+  a manager can move a PO backwards, so this reached a manager previewing as
+  purchaser rather than a purchaser, and it now sends the same plain body the
+  edit refusal does. The manager variant of the purchaser-edit revert
+  refusal could never run and is gone. Warehouse create and update responses
+  follow the same contact-key gate as the list. `docs/FEATURES.md` had
+  overclaimed that every read follows the effective role — the inventory
+  reads scope on the real role by design, and now say so — and three
+  comments that still described the keys as null say absent. The archived
+  event test also checks that the rest of the event survives the strip.
+
 ## [1.177.2] - 2026-09-25
 
 ### Fixed
