@@ -17,6 +17,50 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.176.1] - 2026-09-24
+
+### Fixed
+
+- **A failed `/credit` call no longer undoes the card sync.** The pre-release
+  review of 1.176.0 found three ways one bad call could break it:
+  - The set of our own accounts was built only from what that run fetched, so
+    a `/credit` outage turned every card payoff in the window back into money
+    out, and the spend counted twice again.
+  - The January backfill worked only if `/credit` succeeded on the very first
+    sync after deploy.
+  - A card left out of a run pinned the sync window for the whole source,
+    because every account shared one cursor.
+
+  Now each Mercury account syncs from its own cursor, and every account the
+  database already holds counts as ours. An account seen for the first time
+  reaches back as far as anything the source holds or is fetching. A card
+  whose transactions fail is skipped for that run and retried next time, and
+  checking and savings are never held back by it. A known card that freezes or
+  closes keeps syncing, so its pending charges still resolve. `/accounts` and
+  `/credit` are now fetched in parallel. [RS-104]
+
+## [1.176.0] - 2026-09-24
+
+### Added
+
+- **Mercury credit-card (IO) charges reach the Payments page, pending ones
+  included.** The sync only read Mercury's checking and savings accounts
+  (`/accounts`). The IO card sits behind a separate `/credit` endpoint, so
+  none of its charges had ever been synced. That was 50 posted charges since
+  June, plus the pending one that prompted the ask. The card is now walked
+  like any other account, and a pending charge is badged "Pending since…".
+  If `/credit` fails, it is logged and checking/savings keep syncing. A
+  one-off migration rewinds the Mercury cursors, so the first sync after
+  deploy backfills the card from January. [RS-103]
+
+### Changed
+
+- **A Mercury row whose counterparty is one of our own Mercury accounts is a
+  transfer.** The card payoff ("Mercury Credit", `IO AUTOPAY` / `IO PAYMENT`)
+  used to land in the unlinked queue as money out. With the card's own
+  charges synced, counting the payoff too would count that spend twice.
+  [RS-103]
+
 ## [1.175.1] - 2026-09-24
 
 ### Fixed

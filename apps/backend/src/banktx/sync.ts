@@ -132,24 +132,35 @@ async function doSync(env: Env, providersOverride?: BankProvider[]): Promise<Syn
 
 async function syncOne(sql: ReturnType<typeof getDb>, provider: BankProvider): Promise<SyncCounts> {
   const source = provider.source;
-  const cursors = await sql<{ min: string | null }[]>`
-    SELECT MIN(sync_cursor) AS min FROM bank_accounts WHERE source = ${source}`;
-  const cursorMs = cursors[0]?.min ? new Date(cursors[0].min).getTime() : NaN;
-  // A row we are still holding as pending has to stay inside the window until
-  // it resolves, however long that takes — otherwise its badge is frozen at
-  // whatever it said the day it fell out. The overlap alone is not enough: a
-  // PayPal payment can sit pending for weeks, and a Mercury pending row is
-  // dated by creation because it has no posted date at all.
-  const [oldest] = await sql<{ min: Date | null }[]>`
-    SELECT MIN(posted_at) AS min FROM bank_transactions
-    WHERE source = ${source} AND settle_status = 'pending'`;
-  const sinceMs = Math.min(
-    Number.isFinite(cursorMs) ? cursorMs - OVERLAP_MS : Date.now() - BACKFILL_MS,
-    oldest?.min ? oldest.min.getTime() : Infinity,
-  );
+  // A row we are still holding as pending has to stay inside its account's
+  // window until it resolves, however long that takes — otherwise its badge is
+  // frozen at whatever it said the day it fell out. The overlap alone is not
+  // enough: a PayPal payment can sit pending for weeks, and a Mercury pending
+  // row is dated by creation because it has no posted date at all.
+  const known = await sql<{ external_id: string; sync_cursor: string | null; oldest_pending: Date | null }[]>`
+    SELECT a.external_id, a.sync_cursor,
+           (SELECT MIN(t.posted_at) FROM bank_transactions t
+            WHERE t.account_id = a.id AND t.settle_status = 'pending') AS oldest_pending
+    FROM bank_accounts a WHERE a.source = ${source}`;
+  const backfillMs = Date.now() - BACKFILL_MS;
+  const since = new Map(known.map((a) => [a.external_id, Math.min(
+    a.sync_cursor ? new Date(a.sync_cursor).getTime() - OVERLAP_MS : backfillMs,
+    a.oldest_pending ? a.oldest_pending.getTime() : Infinity,
+  )]));
+  const sinceMs = since.size ? Math.min(...since.values()) : backfillMs;
+  // An account appearing for the first time — the IO card, first listed by a
+  // run after the one that rewound the cursors for it — reaches back as far as
+  // anything the source is fetching or already holds, so a run that failed to
+  // list it costs nothing but a retry.
+  const [oldestRow] = await sql<{ min: Date | null }[]>`
+    SELECT MIN(posted_at) AS min FROM bank_transactions WHERE source = ${source}`;
+  const newSinceMs = Math.min(sinceMs, backfillMs, oldestRow?.min ? oldestRow.min.getTime() : Infinity);
   const runStartIso = new Date().toISOString();
 
-  const { accounts, txns } = await provider.fetchSince(new Date(sinceMs).toISOString());
+  const { accounts, txns } = await provider.fetchSince(new Date(sinceMs).toISOString(), {
+    since: new Map([...since].map(([id, ms]) => [id, new Date(ms).toISOString()])),
+    newSince: new Date(newSinceMs).toISOString(),
+  });
 
   // Disputes are a second API behind a second app permission, so this failing
   // must leave the money feed alone. The message is *stored*, not merely

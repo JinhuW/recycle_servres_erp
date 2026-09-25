@@ -5,6 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-104](./RS-104-mercury-card-sync-survives-a-credit-failure.md) | done | bug | P1 | Mercury card sync survives a /credit failure | 1.176.1 |
+| [RS-103](./RS-103-sync-mercury-credit-card-transactions-pending-ones-i.md) | done | bug | P2 | Sync Mercury credit-card transactions, pending ones included | 1.176.0 |
 | [RS-102](./RS-102-the-sell-order-picker-lists-every-open-order-not-jus.md) | done | bug | P2 | The sell-order picker lists every open order, not just those in the newest 200 | 1.175.1 |
 | [RS-101](./RS-101-inventory-selection-keeps-lots-picked-under-an-earli.md) | done | bug | P2 | Inventory selection keeps lots picked under an earlier search | 1.174.1 |
 | [RS-100](./RS-100-add-inventory-selection-to-an-existing-sell-order.md) | done | story | P2 | Add inventory selection to an existing sell order | 1.175.0 |

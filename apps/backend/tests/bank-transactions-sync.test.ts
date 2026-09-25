@@ -1,11 +1,12 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api, testEnv } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
 import { syncBankTransactions } from '../src/banktx/sync';
-import { mercuryTxnCategory } from '../src/banktx/mercury';
+import { mercuryProvider, mercuryTxnCategory } from '../src/banktx/mercury';
 import { paypalTxnCategory } from '../src/banktx/paypal';
-import type { BankProvider, BankSource, NormalizedTxn } from '../src/banktx/types';
+import type { BankProvider, BankSource, KnownAccounts, NormalizedTxn } from '../src/banktx/types';
+import type { Env } from '../src/types';
 
 const NOW = Date.now();
 const DAY = 24 * 60 * 60 * 1000;
@@ -494,5 +495,99 @@ describe('bank transaction sync', () => {
     ]);
     expect(result.perSource.paypal?.error).toContain('paypal down');
     expect(result.perSource.mercury).toMatchObject({ inserted: 1 });
+  });
+});
+
+// The IO card lives behind a second Mercury endpoint that can fail on its own.
+// Its payoff from checking is only an internal move while the sync knows the
+// card is ours, and the card's history has to arrive even if the first run
+// after it appears is the one that fails.
+describe('bank transaction sync: Mercury accounts', () => {
+  beforeEach(async () => { await resetDb(); });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
+    status, headers: { 'Content-Type': 'application/json' },
+  });
+
+  it('keeps a card payoff a transfer when /credit fails on a later run', async () => {
+    let creditUp = true;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const path = new URL(url).pathname;
+      if (path === '/api/v1/accounts') return json({ accounts: [{ id: 'chk', name: 'Checking' }] });
+      if (path === '/api/v1/credit') {
+        return creditUp ? json({ accounts: [{ id: 'cc', status: 'active' }] }) : json({}, 503);
+      }
+      if (path === '/api/v1/account/chk/transactions') {
+        return json({ transactions: [{
+          id: 'payoff-out', amount: -1577.42, kind: 'other', status: 'sent',
+          createdAt: new Date(NOW - DAY).toISOString(), postedAt: new Date(NOW - DAY).toISOString(),
+          counterpartyId: 'cc', counterpartyName: 'Mercury Credit', bankDescription: 'IO AUTOPAY',
+        }] });
+      }
+      return json({ transactions: [] });
+    }));
+    const env = { ...testEnv, MERCURY_API_TOKEN: 'tok', MERCURY_API_URL: 'https://mercury.test' } as Env;
+
+    await syncBankTransactions(testEnv, [mercuryProvider(env)]);
+    expect((await legs()).get('payoff-out')?.category).toBe('transfer');
+
+    creditUp = false;
+    const second = await syncBankTransactions(testEnv, [mercuryProvider(env)]);
+    expect(second.perSource.mercury).toMatchObject({ updated: 1 });
+    expect((await legs()).get('payoff-out')?.category).toBe('transfer');
+  });
+
+  function recorder(runs: string[][]) {
+    const seen: KnownAccounts[] = [];
+    let run = 0;
+    const provider: BankProvider = {
+      source: 'mercury',
+      async fetchSince(_sinceIso, known) {
+        seen.push(known!);
+        const ids = runs[run++];
+        return { accounts: ids.map((id) => ({ externalId: id, name: id })), txns: [] };
+      },
+    };
+    return { provider, seen };
+  }
+
+  it('starts an account it has never seen from the oldest row the source holds', async () => {
+    await syncBankTransactions(testEnv, [
+      fakeProvider('mercury', [{ externalId: 'old', amount: -5, postedAt: new Date(NOW - 200 * DAY) }]),
+    ]);
+    const { provider, seen } = recorder([['mercury-acct', 'cc']]);
+
+    await syncBankTransactions(testEnv, [provider]);
+
+    expect(seen[0].since.has('mercury-acct')).toBe(true);
+    expect(seen[0].since.has('cc')).toBe(false);
+    expect(new Date(seen[0].newSince).getTime()).toBe(NOW - 200 * DAY);
+  });
+
+  it('reaches a new account back to the oldest existing cursor', async () => {
+    const { provider, seen } = recorder([['chk'], ['chk', 'cc']]);
+    await syncBankTransactions(testEnv, [provider]);
+    await getTestDb()`UPDATE bank_accounts SET sync_cursor = '2026-01-01T00:00:00Z'`;
+
+    await syncBankTransactions(testEnv, [provider]);
+
+    expect(seen[1].newSince).toBe('2025-12-27T00:00:00.000Z');
+    expect(seen[1].since.get('chk')).toBe('2025-12-27T00:00:00.000Z');
+  });
+
+  it('holds a missing card cursor without holding back checking', async () => {
+    const { provider, seen } = recorder([['chk', 'cc'], ['chk'], ['chk']]);
+    await syncBankTransactions(testEnv, [provider]);
+    await getTestDb()`UPDATE bank_accounts SET sync_cursor = '2026-06-01T00:00:00Z' WHERE external_id = 'cc'`;
+
+    await syncBankTransactions(testEnv, [provider]);
+    await syncBankTransactions(testEnv, [provider]);
+
+    const [cc] = await getTestDb()<{ sync_cursor: string }[]>`
+      SELECT sync_cursor FROM bank_accounts WHERE external_id = 'cc'`;
+    expect(new Date(cc.sync_cursor).toISOString()).toBe('2026-06-01T00:00:00.000Z');
+    expect(seen[2].since.get('cc')).toBe('2026-05-27T00:00:00.000Z');
+    expect(new Date(seen[2].since.get('chk')!).getTime()).toBeGreaterThan(NOW - 6 * DAY);
   });
 });

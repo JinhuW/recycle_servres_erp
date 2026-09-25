@@ -27,7 +27,10 @@ export function stubMercuryProvider(): BankProvider {
     source: 'mercury',
     async fetchSince(): Promise<BankFetch> {
       return {
-        accounts: [{ externalId: 'stub-checking', name: 'Mercury Checking (stub)' }],
+        accounts: [
+          { externalId: 'stub-checking', name: 'Mercury Checking (stub)' },
+          { externalId: 'stub-credit', name: 'Mercury Credit' },
+        ],
         txns: [
           // Settlement leg of the PayPal payment below (reference match).
           txn({
@@ -67,6 +70,19 @@ export function stubMercuryProvider(): BankProvider {
             postedAt: new Date(anchor - 6 * DAY_MS), amount: -1875,
             counterparty: 'Rack & Stack Ltd', description: 'ACH to seller', paypalTxnId: null,
             settleStatus: 'pending',
+          }),
+          // IO card spend — a separate Mercury account, charges pending
+          // for days before they post.
+          txn({
+            source: 'mercury', externalId: 'stub-m-cc-1', accountExternalId: 'stub-credit',
+            postedAt: new Date(anchor - 1 * DAY_MS), amount: -2150.4,
+            counterparty: 'Data Destruction', description: 'DATA DESTRUCTION', paypalTxnId: null,
+            settleStatus: 'pending',
+          }),
+          txn({
+            source: 'mercury', externalId: 'stub-m-cc-2', accountExternalId: 'stub-credit',
+            postedAt: new Date(anchor - 7 * DAY_MS), amount: -86.99,
+            counterparty: 'Uline', description: 'ULINE', paypalTxnId: null,
           }),
         ],
       };

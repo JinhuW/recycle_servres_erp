@@ -5,8 +5,9 @@
 
 import type { Env } from '../types';
 import { PAYPAL_TXN_STRICT } from '../ai/paypal';
+import { log } from '../lib/log';
 import type {
-  BankAccountInfo, BankFetch, BankProvider, BankTxnCategory, NormalizedTxn, SettleStatus,
+  BankAccountInfo, BankFetch, BankProvider, BankTxnCategory, KnownAccounts, NormalizedTxn, SettleStatus,
 } from './types';
 
 const DEFAULT_BASE = 'https://api.mercury.com';
@@ -14,6 +15,9 @@ const TIMEOUT_MS = 20_000;
 const PAGE_SIZE = 500;
 
 type WireAccount = { id: string; name?: string | null; nickname?: string | null };
+// The IO card is not in /accounts — /credit lists it, unnamed, and its
+// transactions come from the same per-account endpoint.
+type WireCreditAccount = { id: string; status?: string };
 type WireTxn = {
   id: string;
   amount: number | string;
@@ -21,6 +25,7 @@ type WireTxn = {
   status?: string;
   createdAt?: string;
   postedAt?: string | null;
+  counterpartyId?: string | null;
   counterpartyName?: string | null;
   counterpartyNickname?: string | null;
   bankDescription?: string | null;
@@ -55,8 +60,18 @@ export function paypalTxnFromDescription(text: string | null): string | null {
 // says it is elsewhere.
 export const PAYPAL_ACH_DESCRIPTOR = /^PAYPAL;/;
 
-export function mercuryTxnCategory(kind: string | undefined, description: string | null): BankTxnCategory {
+// A counterparty that is one of our own Mercury accounts is internal too. The
+// IO card payoff is kind 'other' on both sides (checking pays "Mercury
+// Credit", the card receives from checking); once the card's own charges are
+// synced, counting the payoff as well would count that spend twice.
+export function mercuryTxnCategory(
+  kind: string | undefined,
+  description: string | null,
+  counterpartyId?: string | null,
+  ownAccountIds?: ReadonlySet<string>,
+): BankTxnCategory {
   if (kind === 'internalTransfer' || kind === 'treasuryTransfer') return 'transfer';
+  if (counterpartyId && ownAccountIds?.has(counterpartyId)) return 'transfer';
   return description && PAYPAL_ACH_DESCRIPTOR.test(description) ? 'transfer' : 'external';
 }
 
@@ -71,6 +86,10 @@ export function mercurySettleStatus(status: string | undefined): SettleStatus {
     : status === 'cancelled' || status === 'failed' || status === 'blocked' ? 'failed'
     : status === 'reversed' ? 'reversed'
     : 'pending';
+}
+
+function errorText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
 }
 
 async function call<T>(env: Env, path: string, query: Record<string, string>): Promise<T> {
@@ -89,20 +108,44 @@ async function call<T>(env: Env, path: string, query: Record<string, string>): P
 export function mercuryProvider(env: Env): BankProvider {
   return {
     source: 'mercury',
-    async fetchSince(sinceIso: string): Promise<BankFetch> {
-      const { accounts: wireAccounts } = await call<{ accounts: WireAccount[] }>(env, '/api/v1/accounts', {});
-      const accounts: BankAccountInfo[] = wireAccounts.map((a) => ({
+    async fetchSince(sinceIso: string, known?: KnownAccounts): Promise<BankFetch> {
+      // Card spend must not cost us the bank feed: a token without credit
+      // access (or a /credit outage) fails only this part.
+      const [{ accounts: wireAccounts }, credit] = await Promise.all([
+        call<{ accounts: WireAccount[] }>(env, '/api/v1/accounts', {}),
+        call<{ accounts: WireCreditAccount[] }>(env, '/api/v1/credit', {}).then(
+          (r) => r.accounts ?? [],
+          (e: unknown) => {
+            log.warn('mercury credit accounts unavailable', { module: 'banktx', error: errorText(e) });
+            return [];
+          },
+        ),
+      ]);
+      const bankAccounts: BankAccountInfo[] = wireAccounts.map((a) => ({
         externalId: a.id,
         name: a.nickname ?? a.name ?? null,
       }));
+      // A card we already hold keeps syncing once it is frozen or closed: its
+      // pending charges still have to resolve. One never active is not ours
+      // to start on.
+      const cards: BankAccountInfo[] = credit
+        .filter((a) => a.status === 'active' || known?.since.has(a.id))
+        .map((a) => ({ externalId: a.id, name: 'Mercury Credit' }));
+      // Known accounts count as ours even when this run could not list them,
+      // or a /credit blip would turn every payoff in the window back into
+      // money out.
+      const ownIds = new Set([
+        ...bankAccounts.map((a) => a.externalId), ...cards.map((a) => a.externalId), ...(known?.since.keys() ?? []),
+      ]);
 
-      const start = sinceIso.slice(0, 10); // Mercury filters by date
-      const txns: NormalizedTxn[] = [];
-      for (const account of wireAccounts) {
+      const fetchAccount = async (account: BankAccountInfo): Promise<NormalizedTxn[]> => {
+        const since = known ? known.since.get(account.externalId) ?? known.newSince : sinceIso;
+        const start = since.slice(0, 10); // Mercury filters by date
+        const txns: NormalizedTxn[] = [];
         for (let offset = 0; ; offset += PAGE_SIZE) {
           const page = await call<{ transactions: WireTxn[] }>(
             env,
-            `/api/v1/account/${encodeURIComponent(account.id)}/transactions`,
+            `/api/v1/account/${encodeURIComponent(account.externalId)}/transactions`,
             { start, limit: String(PAGE_SIZE), offset: String(offset), order: 'desc' },
           );
           const rows = page.transactions ?? [];
@@ -117,7 +160,7 @@ export function mercuryProvider(env: Env): BankProvider {
             txns.push({
               source: 'mercury',
               externalId: t.id,
-              accountExternalId: account.id,
+              accountExternalId: account.externalId,
               postedAt: new Date(when),
               amount,
               counterparty: t.counterpartyName ?? t.counterpartyNickname ?? null,
@@ -125,12 +168,27 @@ export function mercuryProvider(env: Env): BankProvider {
               paypalTxnId: paypalTxnFromDescription(
                 [t.counterpartyName, description].filter(Boolean).join(' ') || null,
               ),
-              category: mercuryTxnCategory(t.kind, description),
+              category: mercuryTxnCategory(t.kind, description, t.counterpartyId, ownIds),
               settleStatus: mercurySettleStatus(t.status),
               raw: t,
             });
           }
           if (rows.length < PAGE_SIZE) break;
+        }
+        return txns;
+      };
+
+      const accounts = [...bankAccounts];
+      const txns: NormalizedTxn[] = [];
+      for (const account of bankAccounts) txns.push(...await fetchAccount(account));
+      // A card that fails is left out whole — rows and account — so its cursor
+      // stays put and the next run retries the same window.
+      for (const card of cards) {
+        try {
+          txns.push(...await fetchAccount(card));
+          accounts.push(card);
+        } catch (e) {
+          log.warn('mercury credit transactions unavailable', { module: 'banktx', account: card.externalId, error: errorText(e) });
         }
       }
       return { accounts, txns };
