@@ -7,7 +7,7 @@ import type { Env } from '../types';
 import { PAYPAL_TXN_STRICT } from '../ai/paypal';
 import { log } from '../lib/log';
 import type {
-  BankAccountInfo, BankFetch, BankProvider, BankTxnCategory, NormalizedTxn, SettleStatus,
+  BankAccountInfo, BankFetch, BankProvider, BankTxnCategory, KnownAccounts, NormalizedTxn, SettleStatus,
 } from './types';
 
 const DEFAULT_BASE = 'https://api.mercury.com';
@@ -88,6 +88,10 @@ export function mercurySettleStatus(status: string | undefined): SettleStatus {
     : 'pending';
 }
 
+function errorText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
 async function call<T>(env: Env, path: string, query: Record<string, string>): Promise<T> {
   const base = (env.MERCURY_API_URL ?? DEFAULT_BASE).replace(/\/$/, '');
   const qs = Object.keys(query).length ? `?${new URLSearchParams(query)}` : '';
@@ -104,27 +108,40 @@ async function call<T>(env: Env, path: string, query: Record<string, string>): P
 export function mercuryProvider(env: Env): BankProvider {
   return {
     source: 'mercury',
-    async fetchSince(sinceIso: string): Promise<BankFetch> {
-      const { accounts: wireAccounts } = await call<{ accounts: WireAccount[] }>(env, '/api/v1/accounts', {});
-      const accounts: BankAccountInfo[] = wireAccounts.map((a) => ({
+    async fetchSince(sinceIso: string, known?: KnownAccounts): Promise<BankFetch> {
+      // Card spend must not cost us the bank feed: a token without credit
+      // access (or a /credit outage) fails only this part.
+      const [{ accounts: wireAccounts }, credit] = await Promise.all([
+        call<{ accounts: WireAccount[] }>(env, '/api/v1/accounts', {}),
+        call<{ accounts: WireCreditAccount[] }>(env, '/api/v1/credit', {}).then(
+          (r) => r.accounts ?? [],
+          (e: unknown) => {
+            log.warn('mercury credit accounts unavailable', { module: 'banktx', error: errorText(e) });
+            return [];
+          },
+        ),
+      ]);
+      const bankAccounts: BankAccountInfo[] = wireAccounts.map((a) => ({
         externalId: a.id,
         name: a.nickname ?? a.name ?? null,
       }));
-      // Card spend must not cost us the bank feed: a token without credit
-      // access (or a /credit outage) fails only this part.
-      try {
-        const { accounts: credit } = await call<{ accounts: WireCreditAccount[] }>(env, '/api/v1/credit', {});
-        for (const a of credit ?? []) {
-          if (a.status === 'active') accounts.push({ externalId: a.id, name: 'Mercury Credit' });
-        }
-      } catch (e) {
-        log.warn('mercury credit accounts unavailable', { module: 'banktx', error: e instanceof Error ? e.message : String(e) });
-      }
-      const ownIds = new Set(accounts.map((a) => a.externalId));
+      // A card we already hold keeps syncing once it is frozen or closed: its
+      // pending charges still have to resolve. One never active is not ours
+      // to start on.
+      const cards: BankAccountInfo[] = credit
+        .filter((a) => a.status === 'active' || known?.since.has(a.id))
+        .map((a) => ({ externalId: a.id, name: 'Mercury Credit' }));
+      // Known accounts count as ours even when this run could not list them,
+      // or a /credit blip would turn every payoff in the window back into
+      // money out.
+      const ownIds = new Set([
+        ...bankAccounts.map((a) => a.externalId), ...cards.map((a) => a.externalId), ...(known?.since.keys() ?? []),
+      ]);
 
-      const start = sinceIso.slice(0, 10); // Mercury filters by date
-      const txns: NormalizedTxn[] = [];
-      for (const account of accounts) {
+      const fetchAccount = async (account: BankAccountInfo): Promise<NormalizedTxn[]> => {
+        const since = known ? known.since.get(account.externalId) ?? known.newSince : sinceIso;
+        const start = since.slice(0, 10); // Mercury filters by date
+        const txns: NormalizedTxn[] = [];
         for (let offset = 0; ; offset += PAGE_SIZE) {
           const page = await call<{ transactions: WireTxn[] }>(
             env,
@@ -157,6 +174,21 @@ export function mercuryProvider(env: Env): BankProvider {
             });
           }
           if (rows.length < PAGE_SIZE) break;
+        }
+        return txns;
+      };
+
+      const accounts = [...bankAccounts];
+      const txns: NormalizedTxn[] = [];
+      for (const account of bankAccounts) txns.push(...await fetchAccount(account));
+      // A card that fails is left out whole — rows and account — so its cursor
+      // stays put and the next run retries the same window.
+      for (const card of cards) {
+        try {
+          txns.push(...await fetchAccount(card));
+          accounts.push(card);
+        } catch (e) {
+          log.warn('mercury credit transactions unavailable', { module: 'banktx', account: card.externalId, error: errorText(e) });
         }
       }
       return { accounts, txns };

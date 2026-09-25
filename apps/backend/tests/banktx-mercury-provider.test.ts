@@ -16,10 +16,16 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
   status, headers: { 'Content-Type': 'application/json' },
 });
 
-function stub(opts: { credit?: () => Response; txns: Record<string, unknown[]> }) {
+function stub(opts: {
+  credit?: () => Response;
+  txns: Record<string, unknown[]>;
+  fail?: Record<string, number>;
+}) {
   const txnCalls: string[] = [];
+  const starts: Record<string, string | null> = {};
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-    const path = new URL(url).pathname;
+    const u = new URL(url);
+    const path = u.pathname;
     if (path === '/api/v1/accounts') {
       return json({ accounts: [{ id: CHECKING, name: 'Mercury Checking ••7562' }] });
     }
@@ -29,11 +35,14 @@ function stub(opts: { credit?: () => Response; txns: Record<string, unknown[]> }
     const m = path.match(/^\/api\/v1\/account\/([^/]+)\/transactions$/);
     if (m) {
       txnCalls.push(m[1]);
+      starts[m[1]] = u.searchParams.get('start');
+      const failWith = opts.fail?.[m[1]];
+      if (failWith) return json({ error: 'nope' }, failWith);
       return json({ transactions: opts.txns[m[1]] ?? [] });
     }
     return json({ error: 'unexpected' }, 404);
   }));
-  return { txnCalls };
+  return { txnCalls, starts };
 }
 
 afterEach(() => { vi.unstubAllGlobals(); });
@@ -91,7 +100,7 @@ describe('mercury provider: credit accounts', () => {
     expect(txns.find((t) => t.externalId === 'payoff-in')?.category).toBe('transfer');
   });
 
-  it('skips a credit account that is not active', async () => {
+  it('skips a card it has never seen that is not active', async () => {
     const { txnCalls } = stub({
       credit: () => json({ accounts: [{ id: CREDIT, status: 'archived' }] }),
       txns: {},
@@ -101,6 +110,76 @@ describe('mercury provider: credit accounts', () => {
 
     expect(accounts.map((a) => a.externalId)).toEqual([CHECKING]);
     expect(txnCalls).toEqual([CHECKING]);
+  });
+
+  it('keeps fetching a known card after it stops being active', async () => {
+    const { txnCalls } = stub({
+      credit: () => json({ accounts: [{ id: CREDIT, status: 'frozen' }] }),
+      txns: {},
+    });
+
+    const { accounts } = await mercuryProvider(env).fetchSince('2026-09-01T00:00:00Z', {
+      since: new Map([[CHECKING, '2026-09-01T00:00:00Z'], [CREDIT, '2026-09-01T00:00:00Z']]),
+      newSince: '2026-09-01T00:00:00Z',
+    });
+
+    expect(accounts.map((a) => a.externalId)).toEqual([CHECKING, CREDIT]);
+    expect(txnCalls).toEqual([CHECKING, CREDIT]);
+  });
+
+  it('keeps a payoff a transfer when /credit fails, from the accounts already known', async () => {
+    stub({
+      credit: () => json({ error: 'unavailable' }, 503),
+      txns: {
+        [CHECKING]: [{
+          id: 'payoff-out', amount: -1577.42, kind: 'other', status: 'sent',
+          createdAt: '2026-09-20T00:21:02Z', postedAt: '2026-09-20T00:21:05Z',
+          counterpartyId: CREDIT, counterpartyName: 'Mercury Credit', bankDescription: 'IO AUTOPAY',
+        }],
+      },
+    });
+
+    const { accounts, txns } = await mercuryProvider(env).fetchSince('2026-09-01T00:00:00Z', {
+      since: new Map([[CHECKING, '2026-09-15T00:00:00Z'], [CREDIT, '2026-09-15T00:00:00Z']]),
+      newSince: '2026-01-01T00:00:00Z',
+    });
+
+    expect(accounts.map((a) => a.externalId)).toEqual([CHECKING]);
+    expect(txns.find((t) => t.externalId === 'payoff-out')?.category).toBe('transfer');
+  });
+
+  it('fetches each account from its own start, a new one from newSince', async () => {
+    const { starts } = stub({ txns: {} });
+
+    await mercuryProvider(env).fetchSince('2026-09-01T00:00:00Z', {
+      since: new Map([[CHECKING, '2026-09-19T06:00:00Z']]),
+      newSince: '2025-12-27T00:00:00Z',
+    });
+
+    expect(starts).toEqual({ [CHECKING]: '2026-09-19', [CREDIT]: '2025-12-27' });
+  });
+
+  it('drops a card whose transactions fail, keeping the bank feed', async () => {
+    stub({
+      fail: { [CREDIT]: 500 },
+      txns: {
+        [CHECKING]: [{
+          id: 'wire-1', amount: -560, kind: 'outgoingPayment', status: 'sent',
+          createdAt: '2026-09-18T13:02:24Z', postedAt: '2026-09-18T13:02:25Z', counterpartyName: 'Seller LLC',
+        }],
+      },
+    });
+
+    const { accounts, txns } = await mercuryProvider(env).fetchSince('2026-09-01T00:00:00Z');
+
+    expect(accounts.map((a) => a.externalId)).toEqual([CHECKING]);
+    expect(txns.map((t) => t.externalId)).toEqual(['wire-1']);
+  });
+
+  it('still fails the sync when a bank account fetch fails', async () => {
+    stub({ fail: { [CHECKING]: 500 }, txns: {} });
+
+    await expect(mercuryProvider(env).fetchSince('2026-09-01T00:00:00Z')).rejects.toThrow(/HTTP 500/);
   });
 
   it('keeps the bank feed when /credit fails', async () => {
