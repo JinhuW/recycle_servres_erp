@@ -29,8 +29,8 @@ dashboard.get('/', async (c) => {
   const bucket = win.bucket;
 
   // The leaderboard's ranking metric. It has to be chosen here, not in the
-  // client: a purchaser receives every peer row's money as null, so the SPA
-  // cannot re-sort. Column aliases only — the query value never reaches SQL.
+  // client: a purchaser's peer rows carry no money keys, so the SPA cannot
+  // re-sort. Column aliases only — the query value never reaches SQL.
   const lbSort = c.req.query('lb') === 'commission' ? 'commission' : 'cost';
   const lbOrder = lbSort === 'commission'
     ? sql`commission DESC, cost DESC, u.name`
@@ -326,17 +326,20 @@ dashboard.get('/', async (c) => {
   const cnt = cntRows[0].n;
 
   // Top contributors (purchasers only). A purchaser sees everyone's rank but
-  // only their own financials (PRD §6.8).
+  // only their own financials (PRD §6.8) — the peers' keys are left out, not
+  // nulled, so a row never names a figure its reader can't have.
   const leaderboard = leaderboardRaw.map(row => {
     const showFinancials = isManager || row.id === u.id;
     return {
-      id: row.id, name: row.name, initials: row.initials,
-      email: showFinancials ? row.email : null, role: row.role,
+      id: row.id, name: row.name, initials: row.initials, role: row.role,
       count: row.count,
-      cost: showFinancials ? r2dp(row.cost) : null,
-      revenue: showFinancials ? r2dp(row.revenue) : null,
-      profit: showFinancials ? r2dp(row.profit) : null,
-      commission: showFinancials ? r2dp(row.commission) : null,
+      ...(showFinancials ? {
+        email: row.email,
+        cost: r2dp(row.cost),
+        revenue: r2dp(row.revenue),
+        profit: r2dp(row.profit),
+        commission: r2dp(row.commission),
+      } : {}),
     };
   });
 

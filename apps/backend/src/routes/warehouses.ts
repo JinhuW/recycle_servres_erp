@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { getDb } from '../db';
 import { clampLimit } from '../lib/pagination';
+import { effectiveRole } from '../lib/role';
 import type { SqlLike } from '../services/orderAudit';
 import type { Env, User } from '../types';
 
@@ -149,6 +150,13 @@ const toApi = (r: WhRow) => ({
   shipCountry:     r.ship_country      ?? null,
 });
 
+// The linked manager's contact is a manager's to see; the name stays. The keys
+// are left out for everyone else, not nulled.
+const toApiFor = (u: User, r: WhRow) => {
+  const { managerPhone, managerEmail, ...rest } = toApi(r);
+  return effectiveRole(u) === 'manager' ? { ...rest, managerPhone, managerEmail } : rest;
+};
+
 // Single source for the warehouse projection: manager name/phone/email are
 // derived from the linked users row, never stored on the warehouse.
 async function fetchWarehouse(
@@ -171,7 +179,6 @@ async function fetchWarehouse(
 
 warehouses.get('/', async (c) => {
   const sql = getDb(c.env);
-  const isManager = c.var.user.role === 'manager';
   const limit = clampLimit(c.req.query('limit'), 200, 500);
   const rows = await sql`
     SELECT w.id, w.name, w.short, w.region, w.address,
@@ -186,14 +193,7 @@ warehouses.get('/', async (c) => {
     LIMIT ${limit}
   `;
   return c.json({
-    items: rows.map((r) => {
-      const item = toApi(r as WhRow);
-      if (!isManager) {
-        item.managerPhone = null;
-        item.managerEmail = null;
-      }
-      return item;
-    }),
+    items: rows.map((r) => toApiFor(c.var.user, r as WhRow)),
   });
 });
 
@@ -242,7 +242,7 @@ warehouses.post('/', async (c) => {
       return created;
     });
     const row = await fetchWarehouse(sql, newId);
-    return c.json(toApi(row as WhRow), 201);
+    return c.json(toApiFor(c.var.user, row as WhRow), 201);
   } catch (e) {
     const msg = (e as { message?: string })?.message ?? '';
     if (/duplicate|unique/i.test(msg)) {
@@ -310,7 +310,7 @@ warehouses.patch('/:id', async (c) => {
   });
   if (updated === 0) return c.json({ error: 'not found' }, 404);
   const row = await fetchWarehouse(sql, id);
-  return c.json(toApi(row as WhRow));
+  return c.json(toApiFor(c.var.user, row as WhRow));
 });
 
 // DELETE /:id[?transferTo=<warehouseId>]

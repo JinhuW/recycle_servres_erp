@@ -1042,21 +1042,16 @@ inventory.get('/:id', async (c) => {
 });
 
 // Sell orders that reference this inventory line as a source.
-// Used by the "Linked sell orders" card on the inventory-edit page.
+// Used by the "Linked sell orders" card on the inventory-edit page. Sell
+// orders are a manager's — every /api/sell-orders route 403s a purchaser, and
+// so does this one, the line's owner included.
 inventory.get('/:id/sell-orders', async (c) => {
-  const u = c.var.user;
+  if (c.var.user.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const id = c.req.param('id');
   const sql = getDb(c.env);
 
-  // Scope check: purchasers can only see their own lines.
-  const line = (await sql`
-    SELECT o.user_id FROM order_lines l JOIN orders o ON o.id = l.order_id
-    WHERE l.id = ${id} LIMIT 1
-  `)[0];
+  const line = (await sql`SELECT 1 FROM order_lines WHERE id = ${id} LIMIT 1`)[0];
   if (!line) return c.json({ error: 'Not found' }, 404);
-  if (u.role !== 'manager' && line.user_id !== u.id) {
-    return c.json({ error: 'Forbidden' }, 403);
-  }
 
   const rows = await sql`
     SELECT so.id, so.status, so.created_at,

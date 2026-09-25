@@ -5,6 +5,9 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-107](./RS-107-manager-only-data-is-absent-from-every-non-manager-a.md) | done | bug | P2 | Manager-only data is absent from every non-manager API response | 1.177.2 |
+| [RS-106](./RS-106-manager-only-po-fields-are-absent-not-null-for-purch.md) | done | bug | P2 | Manager-only PO fields are absent, not null, for purchasers | 1.177.1 |
+| [RS-105](./RS-105-ignore-rules-for-bank-transactions.md) | done | story | P2 | Ignore rules for bank transactions | 1.177.0 |
 | [RS-104](./RS-104-mercury-card-sync-survives-a-credit-failure.md) | done | bug | P1 | Mercury card sync survives a /credit failure | 1.176.1 |
 | [RS-103](./RS-103-sync-mercury-credit-card-transactions-pending-ones-i.md) | done | bug | P2 | Sync Mercury credit-card transactions, pending ones included | 1.176.0 |
 | [RS-102](./RS-102-the-sell-order-picker-lists-every-open-order-not-jus.md) | done | bug | P2 | The sell-order picker lists every open order, not just those in the newest 200 | 1.175.1 |

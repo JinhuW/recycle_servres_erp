@@ -17,6 +17,94 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.177.3] - 2026-09-25
+
+### Fixed
+
+- **The review follow-up to the manager-only sweep** (RS-107). A code review
+  of v1.177.2, with the purchaser, manager and preview-manager UI checked in
+  a browser, found six loose ends of the same kind. Saving or handing off a
+  PO returned `paymentsLinked` — the bank-link count behind the manager-only
+  Payments page — to every caller; the key is now managers-only, so a
+  purchaser who saves a matching PayPal id sees a plain "Saved" rather than
+  "its bank payment is now linked". The advance and hand-off refusal for
+  lines on an open sell order named the sell orders with no role gate; only
+  a manager can move a PO backwards, so this reached a manager previewing as
+  purchaser rather than a purchaser, and it now sends the same plain body the
+  edit refusal does. The manager variant of the purchaser-edit revert
+  refusal could never run and is gone. Warehouse create and update responses
+  follow the same contact-key gate as the list. `docs/FEATURES.md` had
+  overclaimed that every read follows the effective role — the inventory
+  reads scope on the real role by design, and now say so — and three
+  comments that still described the keys as null say absent. The archived
+  event test also checks that the rest of the event survives the strip.
+
+## [1.177.2] - 2026-09-25
+
+### Fixed
+
+- **Every manager-only figure is now absent from a non-manager's API
+  response, not just hidden by the UI** (RS-107). RS-106 fixed the PO reads;
+  this is the sweep across the rest. Every manager-only surface — desktop,
+  phone, vendor portal, MCP tools, exports — was traced to the endpoint behind
+  it. The whole-endpoint manager features already refused a non-manager, and
+  the shared reads were already row-scoped, but seven places still let a
+  purchaser learn about a manager feature by name: the PO list sent
+  `linkedPaid: null` (the bank-linked total behind the Payments link), the
+  PO detail sent `pendingRevert: null` (the manager's change-review dialog),
+  the PO activity log counted "lines removed from sell orders" on an archive,
+  an edit refused for sell-order-committed lines named the sell orders in the
+  body and the message, the dashboard leaderboard nulled peers' `email`,
+  `cost`, `revenue`, `profit` and `commission`, the warehouse list nulled
+  `managerPhone` and `managerEmail`, and the inventory line's "Linked sell
+  orders" read answered the line's owner with sell-order ids, customer names
+  and sale prices. The keys are now left out for anyone whose effective role
+  isn't manager — a manager previewing as purchaser gets the purchaser shape
+  — and the linked-sell-orders read is a manager's, like every other
+  sell-order route. The refusal a purchaser sees on a blocked edit now reads
+  like the archive one: the lines that block, and "a manager has to make this
+  change". Managers see exactly what they saw before. The SPA already read
+  every key as optional, so only the leaderboard type changed.
+
+## [1.177.1] - 2026-09-25
+
+### Fixed
+
+- **Purchaser PO reads no longer carry the manager-only keys** (RS-106).
+  `GET /api/orders/:id` and `GET /api/orders` had always hidden the values
+  from purchasers and from a manager previewing as purchaser, but sent the
+  keys anyway — `finalSellPrice: null`, `finalSoldQty: null`,
+  `realized: null`, `sellOrders: null` — which named a feature the caller
+  isn't meant to know about. The keys are now left out of the response for
+  anyone who isn't a manager, the way `/api/inventory` and `/api/dashboard`
+  already treated theirs. For a manager nothing changes: `null` on those keys
+  still means nothing has sold yet. The UI already read all four as
+  optional, so no frontend change was needed.
+
+## [1.177.0] - 2026-09-24
+
+### Added
+
+- **Ignore rules on the Payments page** (RS-105). The unlinked queue on prod
+  was mostly recurring card spend — gas stations, meals, Uber, shipping labels,
+  rent — dismissed by hand after every sync. A manager can now open *Ignore
+  rules* from the page header and keep a list: a case-insensitive "contains"
+  match on the counterparty or description, optionally pinned to Mercury or
+  PayPal, with a label. Saving a rule ignores every open matching row at once
+  (the editor previews the count and a sample before you commit), and every
+  sync re-applies the set so new matches never reach the queue. Rule-ignored
+  rows read `Ignored · <label>` so they stay distinguishable from a human's
+  dismissal; deleting or editing a rule gives its rows back unless another
+  rule still matches them; un-ignoring a rule-ignored row by hand leaves a
+  tombstone so no rule takes it again. A rule-ignored PayPal charge still
+  pairs with the Mercury settlement that trails it, and the settlement is
+  ignored along with it — otherwise that leg, which reads `PAYPAL …` and
+  matches nothing, would sit in the very queue the rule was written to empty.
+- **One-off: everything still unlinked from before 2026-08-01 is ignored**
+  (migration 0136). 180 external rows on prod predated the reconciliation
+  practice and were never going to be linked. Pairs straddling the boundary go
+  whole; failed and reversed rows, already off the queue, are left alone.
+
 ## [1.176.1] - 2026-09-24
 
 ### Fixed

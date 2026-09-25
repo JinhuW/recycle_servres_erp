@@ -134,7 +134,7 @@ describe('pendingRevert + revert-ack handshake', () => {
 
     expect((await get(id, mgr)).body.order.pendingRevert).toHaveLength(1);
     // The purchaser who made the change is never shown the review dialog.
-    expect((await get(id, pur)).body.order.pendingRevert ?? null).toBeNull();
+    expect((await get(id, pur)).body.order).not.toHaveProperty('pendingRevert');
   });
 
   it('clears for every manager once one acknowledges', async () => {
@@ -231,12 +231,14 @@ describe('revert guards', () => {
 
     // The revert lands the line at Draft, which a sell order cannot hold —
     // so even a Draft sell order blocks it, unlike a move back to Reviewing.
-    const blocked = await api<{ error: string; offendingLineIds: string[]; sellOrderIds: string[] }>(
+    // The purchaser is told which of their lines block, never which sell
+    // orders — those are a manager's to see.
+    const blocked = await api<{ error: string; offendingLineIds: string[]; sellOrderIds?: string[] }>(
       'PATCH', `/api/orders/${id}`, { token: pur, body: { lines: [{ id: lineId, qty: 6 }] } });
     expect(blocked.status).toBe(409);
     expect(blocked.body.offendingLineIds).toContain(lineId);
-    expect(blocked.body.sellOrderIds).toEqual([so.body.id]);
-    expect(blocked.body.error).toContain(so.body.id);
+    expect(blocked.body).not.toHaveProperty('sellOrderIds');
+    expect(blocked.body.error).not.toContain(so.body.id);
 
     // Nothing moved: the order is still Reviewing with its original qty.
     const after = await api<{ order: { lifecycle: string; lines: { qty: number }[] } }>(

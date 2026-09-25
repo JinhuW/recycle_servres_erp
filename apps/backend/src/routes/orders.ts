@@ -79,6 +79,18 @@ function describeSellOrders(ids: string[]): string {
   return `sell order${ids.length === 1 ? '' : 's'} ${ids.join(', ')}`;
 }
 
+// Which sell orders block is a manager's to see — every /api/sell-orders route
+// 403s a purchaser — so a non-manager, a previewing manager included, gets
+// their lines and a plain refusal. The archive conflict keeps its own richer,
+// raw-role shape.
+function committedLinesBody(
+  u: User, offendingLineIds: string[], sellOrderIds: string[], named: string, plain: string,
+) {
+  return effectiveRole(u) === 'manager'
+    ? { error: named, offendingLineIds, sellOrderIds }
+    : { error: plain, offendingLineIds };
+}
+
 // Serial rules (shared with the frontend forms via @recycle-erp/shared):
 // DDR5 RAM must carry serials, and any entered serials must match qty.
 // Enforced here too so no client can write a violating line.
@@ -548,7 +560,9 @@ orders.get('/', async (c) => {
       otherFees: r.other_fees,
       otherFeesNote: r.other_fees_note,
       paypalTxnId: r.paypal_txn_id,
-      linkedPaid: r.linked_paid,
+      // Managers only, and left out rather than nulled: the key alone would
+      // name the Payments page it links to.
+      ...(isManager ? { linkedPaid: r.linked_paid } : {}),
       handoffMethod: r.handoff_method,
       // Optional and additive, like handoffMethod: a stale SPA renders the
       // plain status chip.
@@ -564,11 +578,15 @@ orders.get('/', async (c) => {
       revenue: r.revenue,
       profit: r.profit,
       // What the units earned on Done sell orders, net of the commission paid
-      // — managers only, null until something sells. Optional and additive.
-      realized: isManager ? realizedFromRow({
-        sold_qty: r.sold_qty, bought_qty: r.bought_qty, revenue: r.rz_revenue, cost: r.rz_cost,
-        projected_profit: r.projected_profit,
-      }, { commission_rate: r.commission_rate }) : null,
+      // — null until something sells. Managers only: the key is left out for
+      // everyone else, since even a null would name the feature. Optional and
+      // additive.
+      ...(isManager ? {
+        realized: realizedFromRow({
+          sold_qty: r.sold_qty, bought_qty: r.bought_qty, revenue: r.rz_revenue, cost: r.rz_cost,
+          projected_profit: r.projected_profit,
+        }, { commission_rate: r.commission_rate }),
+      } : {}),
       lineCount: r.line_count,
       unpricedLineCount: r.unpriced_line_count,
       // PO status is authoritative — derive from o.lifecycle, not from line
@@ -716,8 +734,9 @@ orders.get('/:id', async (c) => {
 
   // Changes a purchaser made after submitting, that no manager has looked at
   // yet — the edit page opens a review dialog on them. Managers only: the
-  // purchaser is the one who made the changes.
-  const pendingRevert = effectiveRole(u) === 'manager'
+  // purchaser is the one who made the changes, and the key is left out rather
+  // than nulled so the response doesn't name the review at all.
+  const pendingRevert = isManager
     ? (await sql`
         SELECT e.id, e.detail, e.created_at,
                act.id AS actor_id, act.name AS actor_name, act.initials AS actor_initials
@@ -734,7 +753,7 @@ orders.get('/:id', async (c) => {
           ? { id: r.actor_id, name: r.actor_name ?? '', initials: r.actor_initials ?? '' }
           : null,
       }))
-    : null;
+    : undefined;
 
   const statusMeta: Record<string, {
     note: string | null; when: string;
@@ -766,7 +785,7 @@ orders.get('/:id', async (c) => {
       archivedAt: order.archived_at,
       status,
       statusMeta,
-      pendingRevert,
+      ...(pendingRevert ? { pendingRevert } : {}),
       everSubmitted,
       createdAt: order.created_at,
       totalCost: order.total_cost,
@@ -787,11 +806,16 @@ orders.get('/:id', async (c) => {
         ? { id: order.supplier_id, name: order.supplier_name }
         : null,
       commissionRate: order.commission_rate,
-      realized: isManager ? realizedFromRow({
-        sold_qty: order.sold_qty, bought_qty: order.bought_qty,
-        revenue: order.rz_revenue, cost: order.rz_cost,
-        projected_profit: order.projected_profit,
-      }, { commission_rate: order.commission_rate }) : null,
+      // Manager-only keys are left out, not nulled, for everyone else — the
+      // key alone would name the feature. Same rule as the list above.
+      ...(isManager ? {
+        realized: realizedFromRow({
+          sold_qty: order.sold_qty, bought_qty: order.bought_qty,
+          revenue: order.rz_revenue, cost: order.rz_cost,
+          projected_profit: order.projected_profit,
+        }, { commission_rate: order.commission_rate }),
+        sellOrders,
+      } : {}),
       warehouse: order.warehouse_id
         ? { id: order.warehouse_id, short: order.warehouse_short, region: order.warehouse_region }
         : null,
@@ -799,7 +823,6 @@ orders.get('/:id', async (c) => {
       // have to download the labels themselves (those live on /shipping).
       // Optional and additive: a stale SPA that never reads it is unaffected.
       package: packageFromJson(order.pkg),
-      sellOrders,
       lines: lines.map(l => ({
         id: l.id,
         category: l.category,
@@ -822,8 +845,7 @@ orders.get('/:id', async (c) => {
         qty: l.qty,
         unitCost: l.unit_cost,
         sellPrice: l.sell_price,
-        finalSellPrice: isManager ? l.final_sell_price : null,
-        finalSoldQty: isManager ? l.sold_qty : null,
+        ...(isManager ? { finalSellPrice: l.final_sell_price, finalSoldQty: l.sold_qty } : {}),
         status: l.status,
         scanImageId: l.scan_image_id,
         scanConfidence: l.scan_confidence,
@@ -869,7 +891,13 @@ orders.get('/:id/events', async (c) => {
   // A purchaser is shown Done for Sold everywhere else, so here the settle
   // row is dropped rather than shown as Done → Done, and a reopen from Sold
   // reads as a reopen from Done.
+  // Sell orders are a manager's: the archive refusal names none to a
+  // purchaser, so the archive event mustn't count them either.
   const visible = role === 'manager' ? rows : rows.flatMap((r) => {
+    if (r.kind === 'archived') {
+      const { removedSellOrderLines: _dropped, ...rest } = r.detail;
+      return [{ ...r, detail: rest }];
+    }
     if (r.kind !== 'advanced') return [r];
     const d = r.detail as { from?: string; to?: string };
     if (d.from === 'done' && d.to === 'sold') return [];
@@ -1800,7 +1828,6 @@ orders.patch('/:id', async (c) => {
         const outcome = await revertOrderToDraftTx(tx, id, u, orderBefore.lifecycle);
         if (outcome.kind === 'committedLines') {
           committedLineIds = outcome.offendingLineIds;
-          blockingSellOrderIds = outcome.sellOrderIds;
           throw new Error('__REVERT_COMMITTED__');
         }
         if (outcome.kind === 'transferClaimed') {
@@ -2269,11 +2296,12 @@ orders.patch('/:id', async (c) => {
     if (msg.includes('__PURCHASER_DONE__')) {
       return c.json({ error: 'Only managers can edit an order after submission' }, 403);
     }
+    // The revert is a purchaser's edit, so there is no manager variant of
+    // this refusal: the lines that block, and no sell order named.
     if (msg.includes('__REVERT_COMMITTED__')) {
       return c.json({
-        error: `Lines in this order are committed to ${describeSellOrders(blockingSellOrderIds)}. Cancel those sell orders before editing it.`,
+        error: 'Lines in this order are on open sell orders — a manager has to make this change.',
         offendingLineIds: committedLineIds,
-        sellOrderIds: blockingSellOrderIds,
       }, 409);
     }
     if (msg.includes('__REVERT_TRANSFER__')) {
@@ -2298,11 +2326,9 @@ orders.patch('/:id', async (c) => {
       return c.json({ error: PACKAGE_DELIVERED_MSG }, 409);
     }
     if (msg.includes('__REMOVE_REFERENCED__')) {
-      return c.json({
-        error: `A line you tried to remove is on ${describeSellOrders(blockingSellOrderIds)} and cannot be deleted. Archive or cancel those sell orders first.`,
-        offendingLineIds: committedLineIds,
-        sellOrderIds: blockingSellOrderIds,
-      }, 409);
+      return c.json(committedLinesBody(u, committedLineIds, blockingSellOrderIds,
+        `A line you tried to remove is on ${describeSellOrders(blockingSellOrderIds)} and cannot be deleted. Archive or cancel those sell orders first.`,
+        'A line you tried to remove is on an open sell order — a manager has to remove it.'), 409);
     }
     // Sell orders are handled above; the only other NO ACTION FK into
     // order_lines is vendor_bid_lines.inventory_id.
@@ -2319,7 +2345,12 @@ orders.patch('/:id', async (c) => {
   if (unswept.length) log.error('r2 delete (line removed)', unswept);
   registerIfNeeded(c.env, sql, packageToRegister, packageToRegister !== null);
 
-  return c.json({ ok: true, addedLineIds, lifecycle: lifecycleAfter, paymentsLinked });
+  // The link count is the Payments page's figure — managers only, and left
+  // out rather than zeroed for everyone else.
+  return c.json({
+    ok: true, addedLineIds, lifecycle: lifecycleAfter,
+    ...(effectiveRole(u) === 'manager' ? { paymentsLinked } : {}),
+  });
 });
 
 // ── Create an empty Draft order so the submit screen can autosave lines as
@@ -2989,11 +3020,9 @@ function advanceRefusedResponse(
     case 'alreadySold':
       return c.json({ error: 'This order is Done and every line has sold. To reopen it, move it back to Reviewing or Ready to Pay.' }, 409);
     case 'committedLines':
-      return c.json({
-        error: `Lines committed to ${describeSellOrders(outcome.sellOrderIds)} — cancel those sell orders first.`,
-        offendingLineIds: outcome.offendingLineIds,
-        sellOrderIds: outcome.sellOrderIds,
-      }, 409);
+      return c.json(committedLinesBody(c.var.user, outcome.offendingLineIds, outcome.sellOrderIds,
+        `Lines committed to ${describeSellOrders(outcome.sellOrderIds)} — cancel those sell orders first.`,
+        'Lines in this order are on open sell orders — a manager has to move it.'), 409);
     case 'transferClaimed':
       return c.json({
         error: 'Lines are out on an open transfer order — receive or discard that transfer first.',
@@ -3207,7 +3236,7 @@ orders.post('/:id/handoff', async (c) => {
     ok: true,
     lifecycle: 'in_transit',
     packageId: result.package?.id ?? null,
-    paymentsLinked: result.paymentsLinked,
+    ...(effectiveRole(u) === 'manager' ? { paymentsLinked: result.paymentsLinked } : {}),
   });
 });
 

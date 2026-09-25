@@ -24,6 +24,26 @@ reach a portal through a URL token.
 - Desktop role gating is three-layered: the sidebar's `roles` list, a
   `DesktopApp` view bounce, and in-page filters. Missing one leaves the view
   invisible rather than forbidden.
+- **The API enforces every manager-only view, not just the UI.** A
+  non-manager's JSON never carries a manager-only key — not even as `null`,
+  since the name alone would advertise the feature. Whole-endpoint manager
+  features (sell orders, customers, vendor bids, transfers, activity, members,
+  bank and internal transactions, tracker, coordinator, connectors, FX rates,
+  inventory export and analysis, a line's linked sell orders) answer 403;
+  shared reads are scoped to the caller's own rows and leave the manager-only
+  fields out: the PO figures `finalSellPrice`, `finalSoldQty`, `realized` and
+  `sellOrders` (v1.177.1), and the linked-payment total, the pending
+  change-review, the leaderboard peers' money and email, the warehouse
+  manager's contact, and the sell-order ids in an edit refusal and the
+  archive log line (v1.177.2), and the bank-link count on a saved or handed-off
+  PO (v1.177.3 — a purchaser who saves a matching PayPal id now sees a plain
+  "Saved", not "its bank payment is now linked"). "Non-manager" is the
+  *effective* role, so a manager previewing as purchaser gets the purchaser
+  shape — including on the advance and warehouse write responses (v1.177.3).
+  Two deliberate exceptions: the 403s gate on the real role, since the
+  preview is a viewing convenience, and the inventory reads (`/api/inventory`,
+  `/products`, `/:id`, `/events/*`, `/export`) scope rows and strip cost on the
+  real role too, so a previewing manager keeps the whole inventory.
 - Auth is httpOnly cookies — a 60-minute `at` JWT plus a rotating `rt` refresh
   family (the access token was 15 minutes until v1.122.0, which made four out
   of five app loads open with a 401, a refresh and a retry before painting).
@@ -175,14 +195,18 @@ on to Sold once every line has sold (v1.164.0).
   Profit. PO edit page: a realized block on
   the cost tape with a sold meter. Phone: the money card carries both and the
   list row a Realized line. Purchasers and a manager previewing as purchaser
-  get none of it. Other fees amortize over the PO as bought (`qty_purchased`)
+  get none of it — since v1.177.1 the API leaves the `realized` and
+  `sellOrders` keys out of their responses rather than sending null.
+  Other fees amortize over the PO as bought (`qty_purchased`)
   from the same release, so a partial sale no longer moves the fee share.
 - **Managers see each line's final sell price** (v1.147.0): the qty-weighted
   unit price over the Done sell orders that name the line, with the sold
   count after it when a partial sale left units on the PO. It sits beside
   "Sell / Unit", which stays the projection that feeds commission. Computed
   on read from sell orders, never stored or editable; purchasers and a
-  manager previewing as purchaser get neither the column nor the value.
+  manager previewing as purchaser get neither the column nor the value, and
+  since v1.177.1 not even the `finalSellPrice` / `finalSoldQty` keys in the
+  API response.
 - **Purchasers edit until the review closes.** A material edit sends the PO
   back to Draft and raises a change-review dialog for the manager, showing the
   full field and line diff (v1.97.0). Notes, photos and attachments don't
@@ -643,6 +667,16 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
   loop behind a manager-only API (v1.91.0), and a Payments page (v1.92.0).
 - **Internal Mercury↔PayPal transfers are classified out of the unlinked
   queue** (v1.93.0) by counterparty and Mercury kind rules (v1.94.0).
+- **Ignore rules** (v1.177.0). *Ignore rules* in the page header keeps a
+  manager-edited list: a case-insensitive "contains" match on counterparty or
+  description, optionally pinned to one source, with a label. A saved rule
+  ignores every open matching row now (the editor previews the count and a
+  sample first) and every sync re-applies the set. Rule-ignored rows read
+  `Ignored · <label>`; deleting or editing a rule gives its rows back unless
+  another rule matches them; a hand Unignore on a rule-ignored row sticks. A
+  rule-ignored PayPal charge still pairs with its trailing Mercury settlement,
+  which is then ignored with it. Everything still unlinked from before
+  2026-08-01 was ignored once, by migration, in the same release.
 - **The Mercury IO credit card is synced alongside checking and savings**
   (v1.176.0), so card charges appear, pending ones included. The card payoff
   from checking, like any move between our own Mercury accounts, is a transfer.

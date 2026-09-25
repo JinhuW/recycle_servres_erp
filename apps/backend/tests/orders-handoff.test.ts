@@ -569,7 +569,10 @@ describe('hand-off — the pre-release review fixes', () => {
       token, body: { warehouseId: 'WH-LA1', source: 'other', handoff: pickup(user.id), payment: 'self' },
     });
     expect(r.status).toBe(200);
-    expect(r.body.paymentsLinked).toBe(0);
+    // The link count is a manager's figure: a purchaser's response has no key
+    // at all, so prove "links nothing" on the ledger instead.
+    expect(r.body).not.toHaveProperty('paymentsLinked');
+    expect((await sql`SELECT 1 FROM bank_transactions WHERE order_id = ${selfId}`).length).toBe(0);
     const o = await readOrder(token, selfId);
     expect(o.lifecycle).toBe('in_transit');
     expect(o.paypalTxnId).toBeNull();
