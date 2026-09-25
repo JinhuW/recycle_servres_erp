@@ -2,13 +2,13 @@
 id: RS-105
 title: Ignore rules for bank transactions
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-09-24
 reporter: jinhu
 branch: feat/bank-ignore-rules
-pr:
-version:
+pr: "#403"
+version: 1.177.0
 related: []
 ---
 
