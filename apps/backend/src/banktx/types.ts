@@ -79,10 +79,21 @@ export type NormalizedDispute = {
   timeline: DisputeTimelineEntry[];
 };
 
+// What the database already knows about a source's accounts, for a provider
+// that walks several of them. Each known account has its own start, so one
+// account falling behind cannot drag the others' windows back with it; one
+// seen for the first time starts at `newSince`. `since`'s keys double as the
+// set of accounts that are ours, which outlives a run that failed to list them.
+export type KnownAccounts = {
+  since: ReadonlyMap<string, string>;
+  newSince: string;
+};
+
 export type BankProvider = {
   source: BankSource;
   // sinceIso already includes the sync overlap window; providers just fetch.
-  fetchSince(sinceIso: string): Promise<BankFetch>;
+  // It is the earliest of `known`'s starts, for a provider with one account.
+  fetchSince(sinceIso: string, known?: KnownAccounts): Promise<BankFetch>;
   // PayPal only, and kept off `fetchSince` on purpose: disputes are a second
   // API behind a second app permission, so they have to be able to fail without
   // taking the transaction feed with them.

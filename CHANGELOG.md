@@ -17,6 +17,28 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.176.1] - 2026-09-24
+
+### Fixed
+
+- **A failed `/credit` call no longer undoes the card sync.** The pre-release
+  review of 1.176.0 found three ways one bad call could break it:
+  - The set of our own accounts was built only from what that run fetched, so
+    a `/credit` outage turned every card payoff in the window back into money
+    out, and the spend counted twice again.
+  - The January backfill worked only if `/credit` succeeded on the very first
+    sync after deploy.
+  - A card left out of a run pinned the sync window for the whole source,
+    because every account shared one cursor.
+
+  Now each Mercury account syncs from its own cursor, and every account the
+  database already holds counts as ours. An account seen for the first time
+  reaches back as far as anything the source holds or is fetching. A card
+  whose transactions fail is skipped for that run and retried next time, and
+  checking and savings are never held back by it. A known card that freezes or
+  closes keeps syncing, so its pending charges still resolve. `/accounts` and
+  `/credit` are now fetched in parallel. [RS-104]
+
 ## [1.176.0] - 2026-09-24
 
 ### Added
