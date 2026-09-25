@@ -429,12 +429,12 @@ export type DashboardData = {
   // bucket holds only the window's rows, so the series sums to the tiles.
   series: { start: string; revenue: number; cost: number; profit: number }[];
   contrib: Record<ContribMetric, ContribMetricData>;
-  // Money fields are null on every row but the caller's own for a purchaser
-  // (PRD §6.8); a manager sees them all.
+  // Money fields (and email) are absent — not null — on every row but the
+  // caller's own for a purchaser (PRD §6.8); a manager sees them all.
   leaderboard: {
-    id: string; name: string; initials: string; email: string | null; role: Role;
+    id: string; name: string; initials: string; email?: string | null; role: Role;
     count: number;
-    cost: number | null; revenue: number | null; profit: number | null; commission: number | null;
+    cost?: number | null; revenue?: number | null; profit?: number | null; commission?: number | null;
   }[];
   byCat: Record<Category, { count: number; revenue: number; profit: number }>;
   recent: {

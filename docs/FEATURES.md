@@ -24,6 +24,20 @@ reach a portal through a URL token.
 - Desktop role gating is three-layered: the sidebar's `roles` list, a
   `DesktopApp` view bounce, and in-page filters. Missing one leaves the view
   invisible rather than forbidden.
+- **The API enforces every manager-only view, not just the UI.** A
+  non-manager's JSON never carries a manager-only key — not even as `null`,
+  since the name alone would advertise the feature. Whole-endpoint manager
+  features (sell orders, customers, vendor bids, transfers, activity, members,
+  bank and internal transactions, tracker, coordinator, connectors, FX rates,
+  inventory export and analysis, a line's linked sell orders) answer 403;
+  shared reads are scoped to the caller's own rows and leave the manager-only
+  fields out: the PO figures `finalSellPrice`, `finalSoldQty`, `realized` and
+  `sellOrders` (v1.177.1), and the linked-payment total, the pending
+  change-review, the leaderboard peers' money and email, the warehouse
+  manager's contact, and the sell-order ids in an edit refusal and the
+  archive log line (v1.177.2). "Non-manager" is the *effective* role, so a
+  manager previewing as purchaser gets the purchaser shape; the 403s gate on
+  the real role, since the preview is a viewing convenience.
 - Auth is httpOnly cookies — a 60-minute `at` JWT plus a rotating `rt` refresh
   family (the access token was 15 minutes until v1.122.0, which made four out
   of five app loads open with a 401, a refresh and a retry before painting).

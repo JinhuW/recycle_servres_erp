@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { getDb } from '../db';
 import { clampLimit } from '../lib/pagination';
+import { effectiveRole } from '../lib/role';
 import type { SqlLike } from '../services/orderAudit';
 import type { Env, User } from '../types';
 
@@ -171,7 +172,7 @@ async function fetchWarehouse(
 
 warehouses.get('/', async (c) => {
   const sql = getDb(c.env);
-  const isManager = c.var.user.role === 'manager';
+  const isManager = effectiveRole(c.var.user) === 'manager';
   const limit = clampLimit(c.req.query('limit'), 200, 500);
   const rows = await sql`
     SELECT w.id, w.name, w.short, w.region, w.address,
@@ -186,13 +187,11 @@ warehouses.get('/', async (c) => {
     LIMIT ${limit}
   `;
   return c.json({
+    // The manager's contact is a manager's to see; the name stays. The keys
+    // are left out for everyone else, not nulled.
     items: rows.map((r) => {
-      const item = toApi(r as WhRow);
-      if (!isManager) {
-        item.managerPhone = null;
-        item.managerEmail = null;
-      }
-      return item;
+      const { managerPhone, managerEmail, ...rest } = toApi(r as WhRow);
+      return isManager ? { ...rest, managerPhone, managerEmail } : rest;
     }),
   });
 });

@@ -55,8 +55,8 @@ describe('Warehouse active/archive', () => {
 type WhMgr = {
   id: string;
   manager: string | null;
-  managerPhone: string | null;
-  managerEmail: string | null;
+  managerPhone?: string | null;
+  managerEmail?: string | null;
   managerUserId: string | null;
 };
 
@@ -124,7 +124,7 @@ describe('Warehouse PII: purchasers cannot see manager email/phone', () => {
     expect(hk.managerEmail).toBeTruthy();
   });
 
-  it('purchaser sees null for managerEmail and managerPhone even when a user is linked', async () => {
+  it('purchaser gets no managerEmail or managerPhone key even when a user is linked', async () => {
     const mgr = await loginAs(ALEX);
     await api('PATCH', '/api/warehouses/WH-HK', {
       token: mgr.token, body: { managerUserId: mgr.user.id },
@@ -135,8 +135,8 @@ describe('Warehouse PII: purchasers cannot see manager email/phone', () => {
     expect(list.status).toBe(200);
     const hk = list.body.items.find(w => w.id === 'WH-HK')!;
     expect(hk).toBeDefined();
-    expect(hk.managerEmail).toBeNull();
-    expect(hk.managerPhone).toBeNull();
+    expect(hk).not.toHaveProperty('managerEmail');
+    expect(hk).not.toHaveProperty('managerPhone');
     // name is still visible
     expect(typeof hk.manager).toBe('string');
   });
