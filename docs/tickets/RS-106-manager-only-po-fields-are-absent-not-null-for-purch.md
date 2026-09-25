@@ -2,13 +2,13 @@
 id: RS-106
 title: Manager-only PO fields are absent, not null, for purchasers
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-25
 reporter: Jinhu
 branch: fix/manager-only-fields-absent
-pr:
-version:
+pr: "#404"
+version: 1.177.1
 related: [RS-060, RS-064, RS-099]
 ---
 
