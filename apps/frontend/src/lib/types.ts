@@ -164,8 +164,8 @@ export type OrderSummary = {
   goodsTotal?: number;
   // Net of the bank payments linked to this PO on the Payments page (refunds
   // subtract, failed/reversed excluded) — the ledger's "Net paid". Null when
-  // nothing is linked or the caller is not a manager; either way there is no
-  // link to draw. Optional for the same deploy-skew reason as `txnRequired`.
+  // nothing is linked; absent altogether for a non-manager. Either way there
+  // is no link to draw. Optional for the same deploy-skew reason as `txnRequired`.
   linkedPaid?: number | null;
   warehouse: Warehouse | null;
   qty: number;
@@ -212,7 +212,7 @@ export type Order =
     lines: OrderLine[]; statusMeta?: OrderStatusMeta;
     // The newest package linked to the PO; optional for the deploy-skew reason.
     package?: OrderPackage | null;
-    // Managers only, and null for everyone else: the purchaser's changes since
+    // Managers only — absent for everyone else: the purchaser's changes since
     // the last time a manager acknowledged them.
     pendingRevert?: PendingRevert[] | null;
     // An order sent back to Draft by an edit is a draft that has already been

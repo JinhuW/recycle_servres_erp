@@ -79,6 +79,18 @@ function describeSellOrders(ids: string[]): string {
   return `sell order${ids.length === 1 ? '' : 's'} ${ids.join(', ')}`;
 }
 
+// Which sell orders block is a manager's to see — every /api/sell-orders route
+// 403s a purchaser — so a non-manager, a previewing manager included, gets
+// their lines and a plain refusal. The archive conflict keeps its own richer,
+// raw-role shape.
+function committedLinesBody(
+  u: User, offendingLineIds: string[], sellOrderIds: string[], named: string, plain: string,
+) {
+  return effectiveRole(u) === 'manager'
+    ? { error: named, offendingLineIds, sellOrderIds }
+    : { error: plain, offendingLineIds };
+}
+
 // Serial rules (shared with the frontend forms via @recycle-erp/shared):
 // DDR5 RAM must carry serials, and any entered serials must match qty.
 // Enforced here too so no client can write a violating line.
@@ -1816,7 +1828,6 @@ orders.patch('/:id', async (c) => {
         const outcome = await revertOrderToDraftTx(tx, id, u, orderBefore.lifecycle);
         if (outcome.kind === 'committedLines') {
           committedLineIds = outcome.offendingLineIds;
-          blockingSellOrderIds = outcome.sellOrderIds;
           throw new Error('__REVERT_COMMITTED__');
         }
         if (outcome.kind === 'transferClaimed') {
@@ -2285,15 +2296,10 @@ orders.patch('/:id', async (c) => {
     if (msg.includes('__PURCHASER_DONE__')) {
       return c.json({ error: 'Only managers can edit an order after submission' }, 403);
     }
-    // Which sell orders block is a manager's to see — a purchaser gets the
-    // lines and a plain refusal, as on archive.
-    const namesSellOrders = effectiveRole(u) === 'manager';
+    // The revert is a purchaser's edit, so there is no manager variant of
+    // this refusal: the lines that block, and no sell order named.
     if (msg.includes('__REVERT_COMMITTED__')) {
-      return c.json(namesSellOrders ? {
-        error: `Lines in this order are committed to ${describeSellOrders(blockingSellOrderIds)}. Cancel those sell orders before editing it.`,
-        offendingLineIds: committedLineIds,
-        sellOrderIds: blockingSellOrderIds,
-      } : {
+      return c.json({
         error: 'Lines in this order are on open sell orders — a manager has to make this change.',
         offendingLineIds: committedLineIds,
       }, 409);
@@ -2320,14 +2326,9 @@ orders.patch('/:id', async (c) => {
       return c.json({ error: PACKAGE_DELIVERED_MSG }, 409);
     }
     if (msg.includes('__REMOVE_REFERENCED__')) {
-      return c.json(namesSellOrders ? {
-        error: `A line you tried to remove is on ${describeSellOrders(blockingSellOrderIds)} and cannot be deleted. Archive or cancel those sell orders first.`,
-        offendingLineIds: committedLineIds,
-        sellOrderIds: blockingSellOrderIds,
-      } : {
-        error: 'A line you tried to remove is on an open sell order — a manager has to remove it.',
-        offendingLineIds: committedLineIds,
-      }, 409);
+      return c.json(committedLinesBody(u, committedLineIds, blockingSellOrderIds,
+        `A line you tried to remove is on ${describeSellOrders(blockingSellOrderIds)} and cannot be deleted. Archive or cancel those sell orders first.`,
+        'A line you tried to remove is on an open sell order — a manager has to remove it.'), 409);
     }
     // Sell orders are handled above; the only other NO ACTION FK into
     // order_lines is vendor_bid_lines.inventory_id.
@@ -2344,7 +2345,12 @@ orders.patch('/:id', async (c) => {
   if (unswept.length) log.error('r2 delete (line removed)', unswept);
   registerIfNeeded(c.env, sql, packageToRegister, packageToRegister !== null);
 
-  return c.json({ ok: true, addedLineIds, lifecycle: lifecycleAfter, paymentsLinked });
+  // The link count is the Payments page's figure — managers only, and left
+  // out rather than zeroed for everyone else.
+  return c.json({
+    ok: true, addedLineIds, lifecycle: lifecycleAfter,
+    ...(effectiveRole(u) === 'manager' ? { paymentsLinked } : {}),
+  });
 });
 
 // ── Create an empty Draft order so the submit screen can autosave lines as
@@ -3014,11 +3020,9 @@ function advanceRefusedResponse(
     case 'alreadySold':
       return c.json({ error: 'This order is Done and every line has sold. To reopen it, move it back to Reviewing or Ready to Pay.' }, 409);
     case 'committedLines':
-      return c.json({
-        error: `Lines committed to ${describeSellOrders(outcome.sellOrderIds)} — cancel those sell orders first.`,
-        offendingLineIds: outcome.offendingLineIds,
-        sellOrderIds: outcome.sellOrderIds,
-      }, 409);
+      return c.json(committedLinesBody(c.var.user, outcome.offendingLineIds, outcome.sellOrderIds,
+        `Lines committed to ${describeSellOrders(outcome.sellOrderIds)} — cancel those sell orders first.`,
+        'Lines in this order are on open sell orders — a manager has to move it.'), 409);
     case 'transferClaimed':
       return c.json({
         error: 'Lines are out on an open transfer order — receive or discard that transfer first.',
@@ -3232,7 +3236,7 @@ orders.post('/:id/handoff', async (c) => {
     ok: true,
     lifecycle: 'in_transit',
     packageId: result.package?.id ?? null,
-    paymentsLinked: result.paymentsLinked,
+    ...(effectiveRole(u) === 'manager' ? { paymentsLinked: result.paymentsLinked } : {}),
   });
 });
 

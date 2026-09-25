@@ -29,8 +29,8 @@ dashboard.get('/', async (c) => {
   const bucket = win.bucket;
 
   // The leaderboard's ranking metric. It has to be chosen here, not in the
-  // client: a purchaser receives every peer row's money as null, so the SPA
-  // cannot re-sort. Column aliases only — the query value never reaches SQL.
+  // client: a purchaser's peer rows carry no money keys, so the SPA cannot
+  // re-sort. Column aliases only — the query value never reaches SQL.
   const lbSort = c.req.query('lb') === 'commission' ? 'commission' : 'cost';
   const lbOrder = lbSort === 'commission'
     ? sql`commission DESC, cost DESC, u.name`
