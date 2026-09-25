@@ -2,13 +2,13 @@
 id: RS-104
 title: Mercury card sync survives a /credit failure
 type: bug
-status: in-progress
+status: done
 priority: P1
 created: 2026-09-24
 reporter: Jinhu
 branch: fix/mercury-credit-review
-pr:
-version:
+pr: "#401"
+version: 1.176.1
 related: [RS-103]
 ---
 
