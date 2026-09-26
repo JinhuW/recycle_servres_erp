@@ -17,6 +17,15 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.178.1] - 2026-09-26
+
+- Each purchaser now has a home warehouse, the closest existing warehouse to where
+  they live, so a PO filed without one ships to the right place. Tim, Cynthia
+  (Phoenix) and Stefen (Minneapolis) go to Denver; Harrison (Watertown) and Chris
+  (Chicago) go to Boston. Jinhu and Yuxing already had theirs. Migration 0137 fills
+  these in by email, only where none is set, and does nothing on databases without
+  the prod warehouses. [RS-113]
+
 ## [1.178.0] - 2026-09-26
 
 ### Added
