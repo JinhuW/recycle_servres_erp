@@ -996,6 +996,15 @@ inventory search, sell-order draft creation.
   - Purchasers set qty and cost, with an apply-to-all cost. Identical part
     numbers combine into one line. The lines arrive unconfirmed, with their
     scan image, so the usual blockers name anything the label couldn't supply.
+  - **The dialog shows each stage live** (v1.180.0, RS-114).
+    - A step row runs Connect → Scan page → Find sticks → Read labels.
+    - While the printer works, the page sweeps and the dialog shows elapsed
+      seconds and an estimate bar. Each stick's outline pulses while its label
+      is read, and its row fills in from a placeholder.
+    - **Cancel scan** deletes the printer's job.
+    - Failures say what to do: bridge not running, printer asleep, scanner busy.
+    - Clicking a stick's picture (or its box on the page) opens it full size.
+    - The chip re-checks a stopped bridge on its own every 5 s.
 
 > Provider selection is silent: OpenRouter (Gemma 3 27B) when
 > `OPENROUTER_API_KEY` is set, otherwise a deterministic stub. A prod deploy

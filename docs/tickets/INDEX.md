@@ -5,8 +5,9 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-114](./RS-114-scan-from-printer-does-nothing-on-click-and-shows-no.md) | done | bug | P1 | Scan from printer does nothing on click, and shows no progress while it works | 1.180.0 |
 | [RS-113](./RS-113-set-each-purchaser-s-home-warehouse-to-the-closest-w.md) | done | task | P2 | Set each purchaser's home warehouse to the closest warehouse | 1.178.1 |
-| [RS-111](./RS-111-parallel-reads-batched-writes-shared-modal-search-de.md) | done | story | P2 | Parallel reads, batched writes, shared modal, search debounce, inventory reload | — |
+| [RS-111](./RS-111-parallel-reads-batched-writes-shared-modal-search-de.md) | done | story | P2 | Parallel reads, batched writes, shared modal, search debounce, inventory reload | 1.179.0 |
 | [RS-109](./RS-109-scan-a-sheet-of-ram-sticks-on-the-flatbed-and-add-on.md) | done | story | P2 | Scan a sheet of RAM sticks on the flatbed and add one line per stick | 1.178.0 |
 | [RS-108](./RS-108-behaviour-preserving-cleanup-across-the-repo.md) | done | chore | P2 | Behaviour-preserving cleanup across the repo | 1.177.4 |
 | [RS-107](./RS-107-manager-only-data-is-absent-from-every-non-manager-a.md) | done | bug | P2 | Manager-only data is absent from every non-manager API response | 1.177.2 |

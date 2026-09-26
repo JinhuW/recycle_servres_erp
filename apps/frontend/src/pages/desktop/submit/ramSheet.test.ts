@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { ApiError } from '../../../lib/api';
 import type { ScanResponse } from '../../../lib/types';
 import { blankLine } from './line';
-import { buildRamLinePatches, isPristineLine, runPool, withRateLimitRetry } from './ramSheet';
+import { buildRamLinePatches, isPristineLine, runPool, stepStates, withRateLimitRetry } from './ramSheet';
 
 const scan = (partNumber: string | undefined, imageId: string): ScanResponse => ({
   imageId,
@@ -101,5 +101,37 @@ describe('isPristineLine', () => {
     expect(isPristineLine({ ...blankLine('RAM'), qty: 2 })).toBe(false);
     expect(isPristineLine({ ...blankLine('RAM'), brand: 'Samsung' })).toBe(false);
     expect(isPristineLine({ ...blankLine('RAM'), _confirmed: true })).toBe(false);
+  });
+});
+
+describe('stepStates', () => {
+  it('is all pending before anything starts', () => {
+    expect(stepStates('idle', 'printer')).toEqual({
+      connect: 'pending', scan: 'pending', split: 'pending', read: 'pending',
+    });
+  });
+
+  it('marks earlier steps done and the current one active', () => {
+    expect(stepStates('split', 'printer')).toEqual({
+      connect: 'done', scan: 'done', split: 'active', read: 'pending',
+    });
+  });
+
+  it('marks the failed step as the error and leaves later steps pending', () => {
+    expect(stepStates('scan', 'printer', 'scan')).toEqual({
+      connect: 'done', scan: 'error', split: 'pending', read: 'pending',
+    });
+  });
+
+  it('skips the printer steps for an uploaded image', () => {
+    expect(stepStates('read', 'upload')).toEqual({
+      connect: 'skipped', scan: 'skipped', split: 'done', read: 'active',
+    });
+  });
+
+  it('is all done (or skipped) on review', () => {
+    expect(stepStates('review', 'printer')).toEqual({
+      connect: 'done', scan: 'done', split: 'done', read: 'done',
+    });
   });
 });

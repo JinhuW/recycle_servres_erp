@@ -101,3 +101,35 @@ export function isPristineLine(l: Line): boolean {
     && (l.unitCost === '' || l.unitCost == null)
     && !(l.photos?.length);
 }
+
+/** Where the sheet flow is. `idle` = nothing started, `review` = all done. */
+export type SheetStage = 'idle' | 'connect' | 'scan' | 'split' | 'read' | 'review';
+
+/** The steps the dialog shows, in order. */
+export const SHEET_STEPS = ['connect', 'scan', 'split', 'read'] as const;
+export type SheetStep = (typeof SHEET_STEPS)[number];
+export type StepState = 'pending' | 'active' | 'done' | 'error' | 'skipped';
+
+/**
+ * Each step's state for the step row. An uploaded image never touches the
+ * printer, so its first two steps are `skipped` rather than falsely `done`.
+ * `failedAt` marks the step that failed; work stops there.
+ */
+export function stepStates(
+  stage: SheetStage,
+  source: 'printer' | 'upload',
+  failedAt?: SheetStep,
+): Record<SheetStep, StepState> {
+  const at = stage === 'idle' ? -1
+    : stage === 'review' ? SHEET_STEPS.length
+    : SHEET_STEPS.indexOf(stage);
+  const out = {} as Record<SheetStep, StepState>;
+  SHEET_STEPS.forEach((step, i) => {
+    out[step] = source === 'upload' && (step === 'connect' || step === 'scan') ? 'skipped'
+      : i < at ? 'done'
+      : i > at ? 'pending'
+      : failedAt === step ? 'error'
+      : 'active';
+  });
+  return out;
+}

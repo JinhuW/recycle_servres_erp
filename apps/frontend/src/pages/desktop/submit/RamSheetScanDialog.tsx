@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ImageLightbox } from '../../../components/ImageLightbox';
 import { Modal } from '../../../components/Modal';
 import { api } from '../../../lib/api';
 import { useT } from '../../../lib/i18n';
@@ -10,18 +11,34 @@ import { AI_CONFIDENCE_FLOOR, AI_UNREADABLE_FLOOR } from '../../../lib/status';
 import type { ScanResponse } from '../../../lib/types';
 import type { SheetBox } from '@recycle-erp/shared';
 import type { Line } from './line';
-import { buildRamLinePatches, runPool, withRateLimitRetry } from './ramSheet';
+import {
+  buildRamLinePatches, runPool, SHEET_STEPS, stepStates, withRateLimitRetry,
+  type SheetStage, type SheetStep,
+} from './ramSheet';
 
 // "Scan RAM sheet" (RS-109): one flatbed page of several sticks → one crop per
 // stick → the existing /api/scan/label RAM pipeline per crop → reviewed rows
 // → RAM lines on the PO. The page comes from the local scanner bridge or an
 // uploaded image; the split runs here in the browser.
+//
+// RS-114: every stage shows itself while it runs (step row, sweeping page,
+// elapsed time, progress bars, per-stick pulses), a scan can be cancelled,
+// and failures say what to do. The action buttons deliberately do NOT live in
+// an .ai-dropzone: that class makes its children pointer-events: none, which
+// is what left "Scan from printer" dead to the mouse in RS-109.
 
 // Three labels in flight keeps a 10-stick sheet to a few seconds without
 // tripping the 20-a-minute scan limit on a normal sheet.
 const READ_CONCURRENCY = 3;
+// While the bridge is down the chip re-checks on its own, so starting it
+// turns the dialog green without a click.
+const BRIDGE_POLL_MS = 5000;
+const SCAN_DPI = 300;
 
-type Phase = 'idle' | 'scanning' | 'splitting' | 'review';
+// How long the last scan took, for the estimate bar. Module-level on purpose:
+// it is a property of this Mac and printer, not of the user, so it doesn't
+// belong in the synced preferences. A fresh page starts from a typical pass.
+let lastScanMs = 12_000;
 
 type Row = {
   id: number;
@@ -36,6 +53,9 @@ type Row = {
   unitCost: string;
 };
 
+type FailureKind = 'down' | 'printer' | 'busy' | 'cancelled' | 'none' | 'image';
+type Failure = { step: SheetStep; kind: FailureKind; detail?: string };
+
 export function RamSheetScanDialog({
   onClose,
   onAddLines,
@@ -45,14 +65,31 @@ export function RamSheetScanDialog({
 }) {
   const { t, lang } = useT();
   const [health, setHealth] = useState<BridgeHealth | null | 'checking'>('checking');
-  const [phase, setPhase] = useState<Phase>('idle');
-  const [error, setError] = useState<string | null>(null);
+  const [stage, setStage] = useState<SheetStage>('idle');
+  const [source, setSource] = useState<'printer' | 'upload'>('printer');
+  const [failure, setFailure] = useState<Failure | null>(null);
+  const [scanStartedAt, setScanStartedAt] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
   const [sheet, setSheet] = useState<{ url: string; width: number; height: number } | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
   const [costAll, setCostAll] = useState('');
   const [combine, setCombine] = useState(true);
   const [dragOver, setDragOver] = useState(false);
+  // Full-screen view of one stick's crop, or the whole scanned sheet.
+  const [zoom, setZoom] = useState<{ url: string; alt: string } | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+
+  // One run = one scan or upload. A newer run, a cancel or closing the dialog
+  // bumps the id, and every async step checks it before touching state — the
+  // label reads can't be aborted mid-flight, so their late results are
+  // dropped instead of landing on the next run's rows.
+  const runRef = useRef(0);
+  const scanCtrl = useRef<AbortController | null>(null);
+  useEffect(() => () => {
+    runRef.current++;
+    scanCtrl.current?.abort();
+  }, []);
+
   // Object URLs made for this dialog, revoked on unmount — a rescan replaces
   // the rows but the old thumbnails may still be painting.
   const urls = useRef<string[]>([]);
@@ -63,17 +100,48 @@ export function RamSheetScanDialog({
     return u;
   };
 
-  const checkBridge = useCallback(() => {
-    setHealth('checking');
-    void bridgeHealth().then(setHealth);
+  const checkBridge = useCallback(async (): Promise<BridgeHealth | null> => {
+    const h = await bridgeHealth();
+    setHealth(h);
+    return h;
   }, []);
-  useEffect(checkBridge, [checkBridge]);
+  useEffect(() => { void checkBridge(); }, [checkBridge]);
 
-  const patchRow = (id: number, patch: Partial<Row>) =>
+  // Poll only while the bridge is known to be down; the interval dies the
+  // moment it answers, and a focus back on the window checks right away.
+  useEffect(() => {
+    if (health !== null) return;
+    const id = window.setInterval(() => { void checkBridge(); }, BRIDGE_POLL_MS);
+    const onFocus = () => { void checkBridge(); };
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [health, checkBridge]);
+
+  // The elapsed-seconds tick runs only while the printer is scanning.
+  useEffect(() => {
+    if (stage !== 'scan') return;
+    const id = window.setInterval(() => setNow(Date.now()), 250);
+    return () => window.clearInterval(id);
+  }, [stage]);
+
+  const patchRow = (run: number, id: number, patch: Partial<Row>) => {
+    if (run !== runRef.current) return;
     setRows(rs => rs.map(r => (r.id === id ? { ...r, ...patch } : r)));
+  };
 
-  const readLabel = async (row: Pick<Row, 'id' | 'crop' | 'box'>) => {
-    patchRow(row.id, { status: 'reading', error: undefined });
+  const fail = (run: number, step: SheetStep, kind: FailureKind, detail?: string) => {
+    if (run !== runRef.current) return;
+    setFailure({ step, kind, detail });
+    // A cancel is the user's choice, not a failure: reset the steps rather
+    // than paint the scan step red.
+    setStage(kind === 'cancelled' ? 'idle' : step);
+  };
+
+  const readLabel = async (run: number, row: Pick<Row, 'id' | 'crop' | 'box'>) => {
+    patchRow(run, row.id, { status: 'reading', error: undefined });
     try {
       const scan = await withRateLimitRetry(() => {
         const form = new FormData();
@@ -81,22 +149,21 @@ export function RamSheetScanDialog({
         form.append('category', 'RAM');
         return api.upload<ScanResponse>('/api/scan/label', form);
       });
-      patchRow(row.id, { status: 'done', scan, include: !row.box.maybeMerged });
+      patchRow(run, row.id, { status: 'done', scan, include: !row.box.maybeMerged });
     } catch (e) {
-      patchRow(row.id, { status: 'error', error: scanErrorMessage(e, t), include: false });
+      patchRow(run, row.id, { status: 'error', error: scanErrorMessage(e, t), include: false });
     }
   };
 
-  const processSheet = async (page: Blob) => {
-    setError(null);
-    setPhase('splitting');
+  const processSheet = async (run: number, page: Blob) => {
+    setStage('split');
+    setRows([]);
     try {
       const split = await splitSheet(page);
+      if (run !== runRef.current) return;
       setSheet({ url: objectUrl(page), width: split.width, height: split.height });
       if (!split.crops.length) {
-        setRows([]);
-        setError(t('rsheetNoneFound'));
-        setPhase('idle');
+        fail(run, 'split', 'none');
         return;
       }
       const fresh: Row[] = split.crops.map((c, i) => ({
@@ -110,38 +177,72 @@ export function RamSheetScanDialog({
         unitCost: costAll,
       }));
       setRows(fresh);
-      setPhase('review');
-      await runPool(fresh.map(r => () => readLabel(r)), READ_CONCURRENCY);
+      setStage('read');
+      await runPool(fresh.map(r => () => readLabel(run, r)), READ_CONCURRENCY);
+      if (run === runRef.current) setStage('review');
     } catch (e) {
       console.error('[ram-sheet] split failed', e);
-      setError(t('rsheetImageFailed'));
-      setPhase('idle');
+      fail(run, 'split', 'image');
     }
   };
 
+  const startRun = (from: 'printer' | 'upload'): number => {
+    scanCtrl.current?.abort();
+    const run = ++runRef.current;
+    setSource(from);
+    setFailure(null);
+    setSheet(null);
+    setRows([]);
+    return run;
+  };
+
+  // Never disabled because an earlier check said the bridge was down: the
+  // click itself re-checks, so starting the bridge and clicking just works.
   const scanFromPrinter = async () => {
-    setError(null);
-    setPhase('scanning');
+    const run = startRun('printer');
+    setStage('connect');
+    const h = await checkBridge();
+    if (run !== runRef.current) return;
+    if (!h) {
+      fail(run, 'connect', 'down');
+      return;
+    }
+    const ctrl = new AbortController();
+    scanCtrl.current = ctrl;
+    const started = Date.now();
+    setScanStartedAt(started);
+    setNow(started);
+    setStage('scan');
     try {
-      const page = await bridgeScan();
-      await processSheet(page);
+      const page = await bridgeScan(ctrl.signal);
+      if (run !== runRef.current) return;
+      lastScanMs = Date.now() - started;
+      await processSheet(run, page);
     } catch (e) {
-      setPhase('idle');
-      if (e instanceof BridgeError && e.status === 0) {
-        setHealth(null);
-        setError(t('rsheetBridgeDown'));
-      } else {
-        setError(t('rsheetScanFailed', { error: e instanceof Error ? e.message : String(e) }));
-      }
+      const kind: FailureKind = e instanceof BridgeError ? e.kind : 'printer';
+      if (kind === 'down') setHealth(null);
+      fail(run, 'scan', kind, e instanceof Error ? e.message : String(e));
     }
   };
+
+  // Cancel keeps the run id, so the aborted fetch's "cancelled" failure is
+  // the one that shows.
+  const cancelScan = () => scanCtrl.current?.abort();
 
   const takeFiles = (files: File[]) => {
     const f = files.find(x => x.type.startsWith('image/'));
-    if (f) void processSheet(f);
-    else if (files.length) setError(t('aiOnlyImages'));
+    if (!f) {
+      if (files.length) {
+        const run = startRun('upload');
+        fail(run, 'split', 'image');
+      }
+      return;
+    }
+    const run = startRun('upload');
+    void processSheet(run, f);
   };
 
+  const retryRow = (r: Row) => void readLabel(runRef.current, r);
   const applyCostAll = () => setRows(rs => rs.map(r => ({ ...r, unitCost: costAll })));
 
   const included = rows.filter(r => r.include && r.status === 'done' && r.scan);
@@ -152,38 +253,50 @@ export function RamSheetScanDialog({
     { combineByPn: combine },
   );
   const canAdd = included.length > 0 && !incomplete && reading === 0;
-
-  const busy = phase === 'scanning' || phase === 'splitting';
-  const bridgeUp = health !== 'checking' && health !== null;
+  const working = !failure && (stage === 'connect' || stage === 'scan' || stage === 'split');
+  const steps = stepStates(stage, source, failure?.kind === 'cancelled' ? undefined : failure?.step);
+  const showSteps = stage !== 'idle' || !!failure;
 
   return (
-    <Modal onClose={onClose} shellStyle={{ maxWidth: 980, width: 'calc(100vw - 80px)' }} ariaLabel={t('rsheetTitle')}>
+    <Modal
+      onClose={onClose}
+      shellStyle={{ maxWidth: 980, width: 'calc(100vw - 80px)' }}
+      ariaLabel={t('rsheetTitle')}
+      // Esc belongs to the lightbox while it is open (as in BrandConfirmDialog).
+      closeOnEscape={!zoom}
+    >
       <div className="modal-head" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <div className="modal-title">{t('rsheetTitle')}</div>
-        <BridgeChip health={health} onRecheck={checkBridge} />
+        <BridgeChip health={health} onRecheck={() => { setHealth('checking'); void checkBridge(); }} />
       </div>
 
-      <div className="modal-body" style={{ padding: 20, maxHeight: '68vh', overflowY: 'auto' }}>
-        {health === null && (
-          <div className="field-hint" style={{ marginBottom: 12 }}>{t('rsheetBridgeHowTo')}</div>
-        )}
+      <div
+        className={`modal-body rsheet-body${dragOver ? ' is-dragover' : ''}`}
+        style={{ padding: 20, maxHeight: '68vh', overflowY: 'auto' }}
+        onDragOver={e => { e.preventDefault(); if (!working) setDragOver(true); }}
+        onDragLeave={e => { if (e.currentTarget === e.target) setDragOver(false); }}
+        onDrop={e => {
+          e.preventDefault();
+          setDragOver(false);
+          if (!working) takeFiles(Array.from(e.dataTransfer.files));
+        }}
+      >
+        {showSteps && <StepRow steps={steps} />}
 
-        <div
-          className={`ai-dropzone${dragOver ? ' drag' : ''}`}
-          style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: 14 }}
-          onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={e => { e.preventDefault(); setDragOver(false); if (!busy) takeFiles(Array.from(e.dataTransfer.files)); }}
-        >
-          <button
-            type="button"
-            className="btn accent"
-            disabled={busy || !bridgeUp}
-            onClick={() => void scanFromPrinter()}
-          >
-            {rows.length ? t('rsheetRescan') : t('rsheetScanPrinter')}
-          </button>
-          <button type="button" className="btn" disabled={busy} onClick={() => fileRef.current?.click()}>
+        <div className="rsheet-actions">
+          {stage === 'scan' && !failure ? (
+            <button type="button" className="btn" onClick={cancelScan}>{t('rsheetCancelScan')}</button>
+          ) : (
+            <button
+              type="button"
+              className="btn accent"
+              disabled={working}
+              onClick={() => void scanFromPrinter()}
+            >
+              {rows.length || failure ? t('rsheetRescan') : t('rsheetScanPrinter')}
+            </button>
+          )}
+          <button type="button" className="btn" disabled={working} onClick={() => fileRef.current?.click()}>
             {t('rsheetUpload')}
           </button>
           <input
@@ -198,27 +311,46 @@ export function RamSheetScanDialog({
               takeFiles(picked);
             }}
           />
-          <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
-            {phase === 'scanning' ? t('rsheetScanning')
-              : phase === 'splitting' ? t('rsheetSplitting')
-              : reading ? t('rsheetReading', { done: rows.length - reading, total: rows.length })
-              : t('rsheetHint')}
-          </span>
+          <span className="rsheet-hint">{t('rsheetHint')}</span>
         </div>
 
-        {error && (
-          <div className="chip neg" style={{ marginTop: 12, whiteSpace: 'normal', height: 'auto', padding: '6px 10px' }}>
-            {error}
+        {failure && (
+          <FailureCard
+            failure={failure}
+            onRetry={() => (source === 'upload' ? fileRef.current?.click() : void scanFromPrinter())}
+          />
+        )}
+
+        {!failure && (stage === 'connect' || stage === 'scan' || (stage === 'split' && !sheet)) && (
+          <div className="rsheet-stage">
+            <div className={`rsheet-page${stage === 'connect' ? ' is-connecting' : ''}`}>
+              {stage === 'scan' && <div className="scan-line" />}
+              {stage === 'connect' && <span className="ai-dot" />}
+            </div>
+            <WorkingStatus stage={stage} elapsedMs={now - scanStartedAt} />
           </div>
         )}
 
         {sheet && rows.length > 0 && (
-          <div style={{ display: 'flex', gap: 16, marginTop: 16, alignItems: 'flex-start' }}>
-            <SheetPreview sheet={sheet} rows={rows} />
+          <div className="rsheet-stage">
+            <SheetPreview
+              sheet={sheet}
+              rows={rows}
+              onZoomSheet={() => setZoom({ url: sheet.url, alt: t('rsheetSheetAlt') })}
+              onZoomStick={r => setZoom({ url: r.cropUrl, alt: t('rsheetStick', { n: r.id + 1 }) })}
+            />
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
-                {t('rsheetFound', { n: rows.length })}
-              </div>
+              {stage === 'read' ? (
+                <ProgressLine
+                  title={t('rsheetReading', { done: rows.length - reading, total: rows.length })}
+                  sub={t('rsheetReadingSub')}
+                  pct={(100 * (rows.length - reading)) / rows.length}
+                />
+              ) : (
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+                  {t('rsheetFound', { n: rows.length })}
+                </div>
+              )}
               <table className="table">
                 <thead>
                   <tr>
@@ -231,13 +363,14 @@ export function RamSheetScanDialog({
                 <tbody>
                   {rows.map(r => (
                     <StickRow
-                      key={r.id}
+                      key={`${runRef.current}-${r.id}`}
                       row={r}
                       lang={lang}
-                      onToggle={() => patchRow(r.id, { include: !r.include })}
-                      onQty={v => patchRow(r.id, { qty: v })}
-                      onCost={v => patchRow(r.id, { unitCost: v })}
-                      onRetry={() => void readLabel(r)}
+                      onToggle={() => patchRow(runRef.current, r.id, { include: !r.include })}
+                      onQty={v => patchRow(runRef.current, r.id, { qty: v })}
+                      onCost={v => patchRow(runRef.current, r.id, { unitCost: v })}
+                      onRetry={() => retryRow(r)}
+                      onZoom={() => setZoom({ url: r.cropUrl, alt: t('rsheetStick', { n: r.id + 1 }) })}
                     />
                   ))}
                 </tbody>
@@ -284,7 +417,93 @@ export function RamSheetScanDialog({
           </button>
         )}
       </div>
+      {zoom && <ImageLightbox url={zoom.url} alt={zoom.alt} zIndex={200} onClose={() => setZoom(null)} />}
     </Modal>
+  );
+}
+
+const STEP_LABEL: Record<SheetStep, string> = {
+  connect: 'rsheetStepConnect',
+  scan: 'rsheetStepScan',
+  split: 'rsheetStepFind',
+  read: 'rsheetStepRead',
+};
+
+function StepRow({ steps }: { steps: ReturnType<typeof stepStates> }) {
+  const { t } = useT();
+  return (
+    <ol className="rsheet-steps" aria-label={t('rsheetProgress')}>
+      {SHEET_STEPS.map((s, i) => (
+        <li key={s} className={`rsheet-step is-${steps[s]}`} aria-current={steps[s] === 'active' ? 'step' : undefined}>
+          <span className="rsheet-step-icon" aria-hidden>
+            {steps[s] === 'done' ? '✓' : steps[s] === 'error' ? '!' : steps[s] === 'active' ? <span className="ai-dot" /> : i + 1}
+          </span>
+          {t(STEP_LABEL[s])}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function WorkingStatus({ stage, elapsedMs }: { stage: SheetStage; elapsedMs: number }) {
+  const { t } = useT();
+  if (stage === 'connect') return <ProgressLine title={t('rsheetConnecting')} />;
+  if (stage === 'split') return <ProgressLine title={t('rsheetSplitting')} />;
+  const s = Math.max(0, Math.floor(elapsedMs / 1000));
+  // An estimate, never a promise: capped short of full until the page lands.
+  const pct = Math.min(95, (100 * elapsedMs) / lastScanMs);
+  return (
+    <ProgressLine
+      title={t('rsheetScanningAt', { dpi: SCAN_DPI })}
+      sub={t('rsheetScanElapsed', { s, est: Math.round(lastScanMs / 1000) })}
+      note={t('rsheetKeepLid')}
+      pct={pct}
+    />
+  );
+}
+
+function ProgressLine({ title, sub, note, pct }: { title: string; sub?: string; note?: string; pct?: number }) {
+  return (
+    <div className="rsheet-status" role="status" aria-live="polite">
+      <div className="rsheet-status-title">{title}</div>
+      {pct != null && (
+        <div className="rsheet-bar" aria-hidden>
+          <span style={{ width: `${pct}%` }} />
+        </div>
+      )}
+      {sub && <div className="rsheet-status-sub">{sub}</div>}
+      {note && <div className="rsheet-status-sub">{note}</div>}
+    </div>
+  );
+}
+
+const FAILURE_TEXT: Record<FailureKind, { title: string; body: string }> = {
+  down: { title: 'rsheetErrDownTitle', body: 'rsheetBridgeHowTo' },
+  printer: { title: 'rsheetErrPrinterTitle', body: 'rsheetErrPrinterBody' },
+  busy: { title: 'rsheetErrBusyTitle', body: 'rsheetErrBusyBody' },
+  cancelled: { title: 'rsheetErrCancelledTitle', body: 'rsheetErrCancelledBody' },
+  none: { title: 'rsheetErrNoneTitle', body: 'rsheetNoneFound' },
+  image: { title: 'rsheetErrImageTitle', body: 'rsheetImageFailed' },
+};
+
+function FailureCard({ failure, onRetry }: { failure: Failure; onRetry: () => void }) {
+  const { t } = useT();
+  const text = FAILURE_TEXT[failure.kind];
+  const quiet = failure.kind === 'cancelled';
+  return (
+    <div className={`rsheet-error${quiet ? ' is-quiet' : ''}`} role="alert">
+      <span className="rsheet-error-icon" aria-hidden>{quiet ? '■' : '!'}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="rsheet-error-title">{t(text.title)}</div>
+        <div className="rsheet-error-body">{t(text.body)}</div>
+        {failure.detail && failure.kind === 'printer' && (
+          <div className="rsheet-error-body mono">{t('rsheetErrDetail', { msg: failure.detail })}</div>
+        )}
+      </div>
+      <button type="button" className="btn sm" onClick={onRetry}>
+        {quiet ? t('rsheetRescan') : t('rsheetRetry')}
+      </button>
+    </div>
   );
 }
 
@@ -311,36 +530,52 @@ function BridgeChip({ health, onRecheck }: { health: BridgeHealth | null | 'chec
 }
 
 // The page with a numbered outline per detected stick, so a wrong split
-// (two sticks as one, a stick missed) is visible at a glance.
-function SheetPreview({ sheet, rows }: { sheet: { url: string; width: number; height: number }; rows: Row[] }) {
+// (two sticks as one, a stick missed) is visible at a glance. Each outline
+// pulses while its label is read and settles to ✓ or ! with the result.
+function SheetPreview({
+  sheet, rows, onZoomSheet, onZoomStick,
+}: {
+  sheet: { url: string; width: number; height: number };
+  rows: Row[];
+  onZoomSheet: () => void;
+  onZoomStick: (r: Row) => void;
+}) {
+  const { t } = useT();
   const w = 180;
   const h = Math.round((w * sheet.height) / sheet.width);
   return (
-    <div style={{ position: 'relative', width: w, height: h, flexShrink: 0, border: '1px solid var(--border)', borderRadius: 4, overflow: 'hidden' }}>
-      <img src={sheet.url} alt="" style={{ width: w, height: h, display: 'block' }} />
-      {rows.map(r => (
-        <div
-          key={r.id}
-          style={{
-            position: 'absolute',
-            left: `${r.box.x * 100}%`, top: `${r.box.y * 100}%`,
-            width: `${r.box.w * 100}%`, height: `${r.box.h * 100}%`,
-            border: `2px solid ${r.box.maybeMerged ? 'var(--warn, #d97706)' : 'var(--accent, #2563eb)'}`,
-            borderRadius: 2,
-          }}
-        >
-          <span style={{
-            position: 'absolute', top: -1, left: -1, fontSize: 10, fontWeight: 700, lineHeight: '14px',
-            padding: '0 4px', color: '#fff', background: r.box.maybeMerged ? 'var(--warn, #d97706)' : 'var(--accent, #2563eb)',
-          }}>{r.id + 1}</span>
-        </div>
-      ))}
+    <div className="rsheet-page" style={{ width: w, height: h, aspectRatio: 'auto' }}>
+      <button type="button" className="rsheet-zoom" onClick={onZoomSheet} aria-label={t('rsheetZoomSheet')} title={t('rsheetZoomSheet')}>
+        <img src={sheet.url} alt="" style={{ width: w, height: h, display: 'block' }} />
+      </button>
+      {rows.map(r => {
+        const state = r.status === 'reading' ? 'is-reading'
+          : r.status === 'error' ? 'is-error'
+          : r.box.maybeMerged ? 'is-warn'
+          : 'is-done';
+        return (
+          <button
+            type="button"
+            key={r.id}
+            className={`rsheet-box ${state}`}
+            onClick={() => onZoomStick(r)}
+            aria-label={t('rsheetZoomStick', { n: r.id + 1 })}
+            title={t('rsheetZoomStick', { n: r.id + 1 })}
+            style={{
+              left: `${r.box.x * 100}%`, top: `${r.box.y * 100}%`,
+              width: `${r.box.w * 100}%`, height: `${r.box.h * 100}%`,
+            }}
+          >
+            <span className="rsheet-box-tag">{r.id + 1}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
 
 function StickRow({
-  row: r, lang, onToggle, onQty, onCost, onRetry,
+  row: r, lang, onToggle, onQty, onCost, onRetry, onZoom,
 }: {
   row: Row;
   lang: string;
@@ -348,6 +583,7 @@ function StickRow({
   onQty: (v: string) => void;
   onCost: (v: string) => void;
   onRetry: () => void;
+  onZoom: () => void;
 }) {
   const { t } = useT();
   const f = r.scan?.extracted ?? {};
@@ -356,16 +592,30 @@ function StickRow({
   const specs = [f.brand, f.capacity, f.generation, f.classification, f.rank, f.speed && `${f.speed}`]
     .filter(Boolean).join(' · ');
   return (
-    <tr style={{ opacity: r.include ? 1 : 0.5, verticalAlign: 'top' }}>
+    <tr style={{ opacity: r.include || r.status === 'reading' ? 1 : 0.5, verticalAlign: 'top' }}>
       <td>
         <input type="checkbox" checked={r.include} disabled={r.status !== 'done'} onChange={onToggle} aria-label={t('rsheetStick', { n: r.id + 1 })} />
       </td>
       <td>
         <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
           <span className="chip mono" style={{ flexShrink: 0 }}>{r.id + 1}</span>
-          <img src={r.cropUrl} alt={t('rsheetStick', { n: r.id + 1 })} style={{ width: 200, maxHeight: 70, objectFit: 'contain', borderRadius: 3, background: 'var(--bg-sunken, #f4f4f5)', flexShrink: 0 }} />
-          <div style={{ minWidth: 0, fontSize: 12, display: 'grid', gap: 3 }}>
-            {r.status === 'reading' && <span className="ai-dot" style={{ color: 'var(--fg-subtle)' }}>{t('rsheetReadingOne')}</span>}
+          <button
+            type="button"
+            className="rsheet-zoom rsheet-thumb"
+            onClick={onZoom}
+            aria-label={t('rsheetZoomStick', { n: r.id + 1 })}
+            title={t('rsheetZoomStick', { n: r.id + 1 })}
+          >
+            <img src={r.cropUrl} alt={t('rsheetStick', { n: r.id + 1 })} />
+          </button>
+          <div style={{ minWidth: 0, flex: 1, fontSize: 12, display: 'grid', gap: 3 }}>
+            {r.status === 'reading' && (
+              <div className="rsheet-skel" aria-label={t('rsheetReadingOne')}>
+                <span className="skeleton" style={{ width: '80%' }} />
+                <span className="skeleton" style={{ width: '55%' }} />
+                <span className="skeleton" style={{ width: '30%' }} />
+              </div>
+            )}
             {r.status === 'error' && (
               <span style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                 <span className="chip neg" style={{ whiteSpace: 'normal', height: 'auto' }}>{r.error}</span>
