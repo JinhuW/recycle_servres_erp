@@ -37,8 +37,7 @@ function relTime(iso: string, locale = 'en-US') {
 }
 
 export function PhNotificationsSheet({ items, onClose, onMarkAllRead }: Props) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const unreadCount = items.filter(n => n.unread).length;
   return (
     <PhSheet onBackdrop={onClose} style={{ maxHeight: '78%', display: 'flex', flexDirection: 'column', paddingBottom: 12 }}>

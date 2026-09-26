@@ -121,8 +121,7 @@ const aiDefaults = (category: Category, scan: ScanResponse): DraftLine => {
 };
 
 export function SubmitForm({ category, detected, lineCount, editingLineIdx, existingLine, onSaveLine, onCancel, onBack, onRescan, rescanDraft, photoCtx }: Props) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, lang, locale } = useT();
   const isEditing = editingLineIdx != null;
   const aiFilled = !!detected;
   const isFirst = lineCount === 0 && !isEditing;

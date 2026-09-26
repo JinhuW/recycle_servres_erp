@@ -24,7 +24,7 @@ export type UploadResult = {
 // getUploadLimits before calling here, and none special-cases this class — if a
 // new caller forgets to gate, the upload fails like any other storage error
 // rather than forwarding a hostile Content-Type to a public bucket.
-export class UnsafeMimeError extends Error {
+class UnsafeMimeError extends Error {
   constructor(public readonly mime: string) {
     super(`unsupported file type: ${mime || 'unknown'}`);
     this.name = 'UnsafeMimeError';

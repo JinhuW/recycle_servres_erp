@@ -212,8 +212,7 @@ type SellOrdersProps = {
 };
 
 export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersProps = {}) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const [orders, setOrders] = useState<SellOrderSummary[]>([]);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [statusFilter, setStatusFilter] = useState<'all' | SellStatusId>('all');
@@ -251,15 +250,15 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
     : null;
 
   const reload = () => {
-    api.get<{ items: SellOrderSummary[] }>(`/api/sell-orders?${listQuery}`)
-      .then(r => setOrders(r.items))
+    api.get<{ rows: SellOrderSummary[] }>(`/api/sell-orders?${listQuery}`)
+      .then(r => setOrders(r.rows))
       .catch(handleFetchError)
       .finally(() => setLoadedOnce(true));
   };
   useEffect(() => {
     let alive = true;
-    api.get<{ items: SellOrderSummary[] }>(`/api/sell-orders?${listQuery}`)
-      .then(r => { if (alive) setOrders(r.items); })
+    api.get<{ rows: SellOrderSummary[] }>(`/api/sell-orders?${listQuery}`)
+      .then(r => { if (alive) setOrders(r.rows); })
       .catch(handleFetchError)
       .finally(() => { if (alive) setLoadedOnce(true); });
     return () => { alive = false; };
@@ -592,8 +591,7 @@ export function SellOrderDetail({
   // exits (Archive / Discard / Unarchive), which also fire onSaved, are hidden.
   prefill?: SellableItem[];
 }) {
-  const { lang, t } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const { user } = useAuth();
   const [order, setOrder] = useState<SellOrderDetailType | null>(null);
   const [draft, setDraft] = useState<{

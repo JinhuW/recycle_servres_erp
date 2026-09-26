@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono';
 import { getDb } from '../db';
 import { uploadAttachment, deleteAttachment, deleteAttachments } from '../r2';
-import { clampLimit, decodeCursor, encodeCursor, parseSort } from '../lib/pagination';
+import { clampLimit, decodeCursor, encodeCursor, parseSort, UUID_RE } from '../lib/pagination';
 import { nextHumanId } from '../lib/id-seq';
 import {
   diff, writeOrderEvent, wasEverSubmitted, META_FIELDS, LINE_FIELDS, type AuditChange, type SqlLike,
@@ -120,8 +120,6 @@ async function assertCategoriesEnabled(
   }
   return null;
 }
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Managers may file a PO for another member (`onBehalfOfUserId`) — a manager
 // as readily as a purchaser, since managers own the POs they file themselves.

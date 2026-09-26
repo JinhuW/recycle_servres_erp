@@ -31,7 +31,7 @@ type FieldsProps = {
   idPrefix?: string;
 };
 
-export function commissionPreview(pct: string, m: CommissionMath) {
+function commissionPreview(pct: string, m: CommissionMath) {
   const parsed = pct.trim() === '' ? null : Number(pct);
   const rate = parsed !== null && Number.isFinite(parsed) ? parsed / 100 : 0;
   const profit = m.revenue - m.totalCost;

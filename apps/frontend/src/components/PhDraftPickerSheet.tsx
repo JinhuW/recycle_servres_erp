@@ -17,8 +17,7 @@ type Props = {
 // next line — nothing is filtered by kind. "Start a new order" is there for
 // when they really do want a clean slate.
 export function PhDraftPickerSheet({ drafts, onResume, onStartNew, onClose }: Props) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
 
   return (
     <PhSheet onBackdrop={onClose}>

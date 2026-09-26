@@ -21,7 +21,7 @@ import { syncBankTransactions } from '../banktx/sync';
 import { SETTLE_DEAD, isDead } from '../banktx/types';
 import { getDb } from '../db';
 import { writeOrderEvent } from '../services/orderAudit';
-import { clampLimit, decodeCursor, encodeCursor, escapeLike } from '../lib/pagination';
+import { clampLimit, decodeCursor, encodeCursor, escapeLike, UUID_RE } from '../lib/pagination';
 import type { Env, User } from '../types';
 import { PAYMENT_NOTE_MAX } from '@recycle-erp/shared';
 
@@ -30,10 +30,6 @@ const bankTx = new Hono<{ Bindings: Env; Variables: { user: User } }>()
   .use('*', requireManager);
 
 type SqlClient = ReturnType<typeof getDb>;
-
-// A bad ?assignee= reaches Postgres as a ::uuid cast, which errors as a 500
-// rather than the 400 the caller earned.
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const SETTLE_FILTERS = ['all', 'settled', 'pending', 'failed', 'reversed'];
 

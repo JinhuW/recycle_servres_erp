@@ -13,7 +13,7 @@ export type PriceFilePrecheck =
   | { ok: false; reason: 'not-xlsx' | 'too-large' | 'no-rows' }
   | { ok: false; reason: 'columns-missing'; missing: ('part' | 'price')[] };
 
-export const PRICE_FILE_MAX_BYTES = 8 * 1024 * 1024;
+const PRICE_FILE_MAX_BYTES = 8 * 1024 * 1024;
 
 const normHeader = (s: string) =>
   s.toLowerCase().replace(/[^a-z0-9一-鿿#]/g, '');

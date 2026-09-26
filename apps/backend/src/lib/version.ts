@@ -10,7 +10,7 @@ export function readPackageVersion(): string {
 
 // When the running image was built — what the UI shows in place of a commit
 // sha. Stamped into the image by the Dockerfile rather than handed in as a
-// build arg: release.sh could supply one, but Railway builds every prod deploy
+// build arg: Railway builds every prod deploy
 // and passes no args, nor does it inject a build timestamp of its own. Null on
 // a host `pnpm dev` run, where no image exists.
 let buildTimeCache: string | null | undefined;

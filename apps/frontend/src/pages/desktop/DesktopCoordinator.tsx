@@ -122,8 +122,7 @@ where:
 type Props = { showToast?: (msg: string, kind?: 'success' | 'error') => void };
 
 export function DesktopCoordinator({ showToast }: Props) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
 
   const [fleet, setFleet] = useState<FleetDoc | null>(null);
   // The fleet document needs a facade that knows /v1/fleet. An older facade

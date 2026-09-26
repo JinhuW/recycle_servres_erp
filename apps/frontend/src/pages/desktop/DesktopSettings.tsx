@@ -40,8 +40,7 @@ const SECTIONS: { id: SectionId; labelKey: string; subKey: string; icon: IconNam
 ];
 
 export function DesktopSettings({ showToast }: { showToast?: (msg: string, kind?: 'success' | 'error') => void }) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const { user } = useAuth();
   const [section, setSection] = useState<SectionId>('account');
   const sections = SECTIONS.filter(s => !s.managerOnly || user?.role === 'manager');

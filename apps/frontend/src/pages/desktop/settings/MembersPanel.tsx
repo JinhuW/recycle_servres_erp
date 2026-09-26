@@ -14,8 +14,7 @@ import { useT } from '../../../lib/i18n';
 
 // ─── Members ──────────────────────────────────────────────────────────────────
 export function MembersPanel({ showToast }: { showToast: ToastFn }) {
-  const { lang, t } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const [members, setMembers] = useState<Member[]>([]);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const { user: currentUser } = useAuth();
@@ -468,8 +467,7 @@ function InviteMemberModal({
 }
 
 function MemberEditModal({ member, onClose, onSaved }: { member: Member; onClose: () => void; onSaved: () => void }) {
-  const { lang, t } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const [draft, setDraft] = useState<Partial<Member>>({});
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);

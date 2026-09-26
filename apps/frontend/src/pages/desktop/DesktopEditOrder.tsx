@@ -26,7 +26,7 @@ import {
   linePhotos, deleteLinePhoto, uploadedPhotoCount, useLinePhotoBuffer,
   type LinePhoto, type PendingPhoto,
 } from '../../lib/linePhotos';
-import { groupLines, shouldGroup, displayRows, catTone, pricedTotals } from '../../lib/lineGroups';
+import { groupLines, shouldGroup, displayRows, catTone, pricedTotals, lineSpecLabel } from '../../lib/lineGroups';
 import { CostTape } from '../../components/CostTape';
 import { useMarketLookup } from '../../lib/useMarketLookup';
 import { ImageLightbox } from '../../components/ImageLightbox';
@@ -113,8 +113,7 @@ type EditLine = Line & { _id?: string; _dirty?: boolean };
 // move it through any stage and edit prices/qty. Once an order reaches "Done"
 // the whole page becomes read-only.
 export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, lang, locale } = useT();
   const { user } = useAuth();
   const isPurchaser = user?.role !== 'manager';
   // The final-sell column follows the role-preview tweak (the API nulls the
@@ -962,10 +961,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   };
 
   const itemType = (l: EditLine) =>
-      l.category === 'RAM' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.generation ?? ''}`.trim()
-    : l.category === 'SSD' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.interface ?? ''}`.trim()
-    : l.category === 'HDD' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.rpm ? l.rpm + 'rpm' : ''}`.trim()
-    : (l.description ?? '—');
+      lineSpecLabel(l) ?? (l.description ?? '—');
   const itemSpec = (l: EditLine) =>
       l.category === 'RAM' ? [l.classification, l.rank, l.speed && (l.speed + 'MHz')].filter(Boolean).join(' · ')
     : l.category === 'SSD' ? [l.formFactor, l.health != null && (l.health + '%'), l.condition].filter(Boolean).join(' · ')

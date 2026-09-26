@@ -58,8 +58,7 @@ const SOURCE_LABEL: Record<Member['source'], string> = {
 };
 
 export function DesktopInternalTxns({ onToast }: { onToast: (msg: string) => void }) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
 
   const [q, setQ] = usePersisted('desktop.internaltx.q', '');
   const [openId, setOpenId] = usePersisted<string | null>('desktop.internaltx.open', null);

@@ -312,8 +312,7 @@ const REASON_TKEY: Record<Suggestion['reason'], string | null> = {
 };
 
 export function DesktopPayments({ onToast }: { onToast: (msg: string) => void }) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
 
   const [status, setStatus] = usePersisted<StatusFilter>('desktop.payments.status', 'unlinked');
   const [source, setSource] = usePersisted('desktop.payments.source', 'all');

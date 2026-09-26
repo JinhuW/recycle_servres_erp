@@ -11,7 +11,7 @@ import { log } from '../lib/log';
 
 const aiLog = log.child({ module: 'ai' });
 
-export const RECEIPT_METHODS = [
+const RECEIPT_METHODS = [
   'alipay', 'weixinpay', 'bank', 'zelle', 'paypal', 'venmo', 'cash', 'other',
 ] as const;
 export type ReceiptMethod = (typeof RECEIPT_METHODS)[number];

@@ -10,7 +10,7 @@ import bcrypt from 'bcryptjs';
 import type { Context, MiddlewareHandler } from 'hono';
 import { setCookie, deleteCookie, getCookie } from 'hono/cookie';
 import type postgres from 'postgres';
-import { getDb } from './db';
+import { getDb, type SqlLike } from './db';
 import { addLogContext } from './lib/log';
 import type { Env, User } from './types';
 
@@ -113,7 +113,7 @@ export const authMiddleware: MiddlewareHandler<{
 // Opaque random tokens stored hashed; rotated on each use. Reusing an already
 // rotated token revokes the whole family (token-theft detection).
 
-type AnySql = postgres.Sql | postgres.TransactionSql;
+type AnySql = SqlLike;
 
 const REFRESH_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 export const sha256hex = (s: string): string => createHash('sha256').update(s).digest('hex');

@@ -93,8 +93,7 @@ const COL_SORTS = {
 type ColKey = keyof typeof COL_SORTS;
 
 export function DesktopMarket() {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const { user } = useAuth();
   const isManager = user?.role === 'manager';
   const [filter, setFilter] = useState<string>('all');
@@ -526,8 +525,7 @@ export function DesktopMarket() {
 function DetailExpand({
   row, sellHistory, targetMargin,
 }: { row: RefPrice; sellHistory: number[]; targetMargin: number }) {
-  const { lang, t } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   // Cost series is still synthetic — out of scope for this slice.
   const buyHistory = (row.recentPrices ?? []).map(p => +(p.price * 0.7).toFixed(2));
   return (

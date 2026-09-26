@@ -11,7 +11,7 @@ COPY apps/frontend apps/frontend
 RUN pnpm --filter recycle-erp-frontend build
 
 FROM caddy:2-alpine
-# Build provenance (see scripts/release.sh). Re-declared here because ARGs
+# Build provenance (see apps/backend/Dockerfile). Re-declared here because ARGs
 # don't cross stage boundaries; defaults keep a plain `docker build` working.
 # The footer reads the version at runtime from /api/health, so the static
 # bundle needs no version baked in — these are just OCI labels for `docker

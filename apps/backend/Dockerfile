@@ -22,9 +22,9 @@ COPY apps/backend apps/backend
 RUN date -u +%Y-%m-%dT%H:%M:%SZ > /app/BUILD_TIME
 
 WORKDIR /app/apps/backend
-# Build provenance, supplied by scripts/release.sh via --build-arg. Default to
-# dev/unknown so a plain `docker build` with no args still succeeds; the
-# release path overrides them and they surface at /api/health and as OCI
+# Build provenance, optionally supplied via --build-arg. Default to
+# dev/unknown so a plain `docker build` with no args still succeeds; a tagged
+# build overrides them and they surface at /api/health and as OCI
 # image labels. Defaults are EMPTY on purpose: a build that doesn't pass them
 # (Railway) must leave the env falsy so /api/health falls back to the root
 # package.json version + RAILWAY_GIT_COMMIT_SHA instead of freezing on a

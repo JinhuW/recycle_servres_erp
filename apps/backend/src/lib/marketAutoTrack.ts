@@ -7,10 +7,9 @@
 //
 // Must run inside a sql.begin tx so a failed insert rolls back the order.
 
-import type { Sql, TransactionSql } from 'postgres';
+import type { SqlLike } from '../db';
 import { canonPartCol, canonPartNumberJs } from './part-number';
 
-type SqlLike = Sql | TransactionSql;
 
 export type TrackablePart = {
   category: string;

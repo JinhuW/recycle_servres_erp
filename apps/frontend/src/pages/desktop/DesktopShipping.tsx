@@ -53,8 +53,7 @@ export function DesktopShipping({ route, showToast }: Props) {
 // ── /shipping — the packages table ───────────────────────────────────────────
 
 function GlobalShipping({ showToast }: { showToast: (msg: string, kind?: ToastKind) => void }) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const user = useEffectiveUser();
   const isManager = user?.role === 'manager';
   const [pkgs, setPkgs] = useState<TrackedPackage[]>([]);

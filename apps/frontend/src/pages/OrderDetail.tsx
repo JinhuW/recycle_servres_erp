@@ -102,8 +102,7 @@ export function OrderDetail({
   order: initialOrder, section, meta: metaDraft, onMetaChange,
   onCancel, onSaved, onDeleted, onEditLine, onAddLine,
 }: Props) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const { user } = useAuth();
   const [order, setOrder] = useState<Order>(initialOrder);
   useEffect(() => { setOrder(initialOrder); }, [initialOrder]);
@@ -1380,7 +1379,7 @@ export function OrderDetail({
           onToggle={() => toggleFold('activity')}
         >
           <div style={{ margin: '-12px -14px -14px' }}>
-            <OrderActivityLog orderId={order.id} refreshKey={activityRefreshKey} bare events={events} />
+            <OrderActivityLog bare events={events} />
           </div>
         </PhFold>
 

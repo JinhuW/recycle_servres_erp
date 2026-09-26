@@ -76,8 +76,7 @@ type VendorBidsProps = {
 };
 
 export function DesktopVendorBids({ onToast, onOpenSellOrder }: VendorBidsProps = {}) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const [bids, setBids] = useState<VbSummary[]>([]);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [statusFilter, setStatusFilter] = useState<'all' | VbStatus>('all');
@@ -292,8 +291,7 @@ function VendorBidDetail({
   onOpenSellOrder?: (sellOrderId: string) => void;
   onChanged: () => void;
 }) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const [bid, setBid] = useState<VbDetail | null>(null);
   const [draft, setDraft] = useState<Record<string, DraftLine>>({});
   const [saving, setSaving] = useState(false);
@@ -683,8 +681,7 @@ function VendorLinksManager({
   onClose: () => void;
   onToast?: (msg: string, kind?: 'success' | 'error') => void;
 }) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const [rows, setRows] = useState<VendorLinkRow[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [search, setSearch] = useState('');

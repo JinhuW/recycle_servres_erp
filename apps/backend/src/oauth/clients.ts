@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import type postgres from 'postgres';
+import type { SqlLike } from '../db';
 import { revokeRefreshFamily } from './tokens';
 
 export type OAuthClientRow = {
@@ -16,7 +17,7 @@ export type OAuthClientRow = {
   revoked_at: Date | null;
 };
 
-type AnySql = postgres.Sql | postgres.TransactionSql;
+type AnySql = SqlLike;
 
 const newClientId = () => randomBytes(16).toString('hex');                  // 32 hex chars
 const newClientSecret = () => randomBytes(32).toString('base64url');        // ~43 chars

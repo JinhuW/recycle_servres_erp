@@ -57,8 +57,7 @@ function CategoryGrid({ onPick }: { onPick: (cat: Category) => void }) {
 export function OrderReview({
   lines, onAddItem, onEditLine, onRemoveLine, onSubmit, onCancel,
 }: Props) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const [submitting, setSubmitting] = useState(false);
   const totalQty = lines.reduce((a, l) => a + l.qty, 0);
 

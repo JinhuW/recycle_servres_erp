@@ -8,14 +8,13 @@
 // to parse is a 400, because a caller that sends dates meant them.
 
 import type postgres from 'postgres';
-import type { Sql, TransactionSql } from 'postgres';
+import type { SqlLike } from '../db';
 import {
   REPORTING_TZ, isIsoDate, isRangePreset, isBucket, todayIn, resolvePreset,
   previousWindow, autoBucket, addDays, diffDays,
   type IsoDate, type Bucket,
 } from '@recycle-erp/shared';
 
-type SqlLike = Sql | TransactionSql;
 
 export type ReportingWindow = {
   from: IsoDate;
@@ -66,7 +65,7 @@ export function parseReportingWindow(
 }
 
 /** The instant a business-zone calendar day begins, as a timestamptz. */
-export function dayStart(sql: SqlLike, d: IsoDate, tz: string): postgres.Fragment {
+function dayStart(sql: SqlLike, d: IsoDate, tz: string): postgres.Fragment {
   return sql`(${d}::date::timestamp AT TIME ZONE ${tz})`;
 }
 

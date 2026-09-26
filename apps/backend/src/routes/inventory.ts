@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { getDb } from '../db';
+import { UUID_RE } from '../lib/pagination';
 import { notify } from '../lib/notify';
 import { getWorkspaceSetting } from '../lib/settings';
 import { nextHumanId } from '../lib/id-seq';
@@ -300,7 +301,6 @@ inventory.get('/export', async (c) => {
   // id would otherwise make Postgres throw and 500 the export. A selection
   // that yields NO valid id is a 400 — silently exporting the full set on a
   // corrupted link would be worse than failing.
-  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const rawIds = (c.req.query('ids') ?? '').split(',').filter(Boolean);
   const ids = [...new Set(rawIds.filter((id) => UUID_RE.test(id)))].slice(0, 1000);
   if (rawIds.length > 0 && ids.length === 0) {

@@ -39,6 +39,7 @@ import {
 import type { Category, DraftLine, Notification, Order, OrderLine, OrderSummary, ScanResponse } from './lib/types';
 import { buildOrderSubmit, toAddLine } from './lib/orderSubmit';
 import { findDuplicateLine } from './lib/dupParts';
+import { lineSpecLabel } from './lib/lineGroups';
 
 // Where a line form goes when it closes. 'detail' is an existing order: the
 // form was opened from its detail screen, which owns the order, so the trip
@@ -108,10 +109,7 @@ const toDraftLine = (l: OrderLine): DraftLine => ({
   scanImageUrl: l.scanImageUrl,
   health: l.health,
   rpm: l.rpm,
-  label: l.category === 'RAM' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.generation ?? ''}`.trim()
-       : l.category === 'SSD' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.interface ?? ''}`.trim()
-       : l.category === 'HDD' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.rpm ? l.rpm + 'rpm' : ''}`.trim()
-       : ((l.description ?? '').trim() || (l.partNumber ?? '').trim() || 'Item'),
+  label: lineSpecLabel(l) ?? ((l.description ?? '').trim() || (l.partNumber ?? '').trim() || 'Item'),
 });
 
 function Shell() {

@@ -11,10 +11,10 @@ type Props = {
 const SUPPORT_EMAIL = 'support@recycleservers.io';
 
 export function PhAboutSheet({ onClose }: Props) {
-  const { t, lang } = useT();
+  const { t, locale } = useT();
   const build = useAppVersion();
   const version = build ? `v${build.version}` : '…';
-  const updated = build ? (build.builtAt ? fmtDate(build.builtAt, lang === 'zh' ? 'zh-CN' : 'en-US') : '—') : '…';
+  const updated = build ? (build.builtAt ? fmtDate(build.builtAt, locale) : '—') : '…';
   return (
     <PhSheet onBackdrop={onClose} style={{ paddingBottom: 24 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px 14px' }}>

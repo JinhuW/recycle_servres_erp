@@ -209,8 +209,7 @@ function PackageSheet({ pkg, busy, canCreate, onCreatePo, onClose }: {
   onCreatePo: (pkg: TrackedPackage) => void;
   onClose: () => void;
 }) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const chip = STATUS_CHIP[pkg.status];
   return (
     <PhSheet onBackdrop={onClose}>
@@ -312,9 +311,8 @@ function InboundCard({ row, showToast, onCreatedPo, onRefreshed }: {
   onCreatedPo: (orderId: string) => void;
   onRefreshed: () => void;
 }) {
-  const { t, lang } = useT();
+  const { t, locale } = useT();
   const { user } = useAuth();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [busy, setBusy] = useState(false);
   const action = inboundAction(row, user?.role === 'manager');
 

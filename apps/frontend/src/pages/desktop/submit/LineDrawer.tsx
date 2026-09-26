@@ -66,8 +66,7 @@ export function LineDrawer({
     busy?: boolean;
   };
 }) {
-  const { lang, t } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { lang, t, locale } = useT();
   const [confirming, setConfirming] = useState(false);
   // The toast is centred and this panel is anchored right, so below ~1520px
   // they overlap. Marking the document lets the stylesheet move the toast only

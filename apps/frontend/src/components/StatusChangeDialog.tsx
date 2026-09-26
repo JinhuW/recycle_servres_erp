@@ -6,7 +6,7 @@
 
 import { useState } from 'react';
 import { Icon, type IconName } from './Icon';
-import { api } from '../lib/api';
+import { api, MAX_UPLOAD_BYTES } from '../lib/api';
 import { useEscapeKey } from '../lib/useEscapeKey';
 import { useT } from '../lib/i18n';
 import { AttachmentChip } from './AttachmentChip';
@@ -122,7 +122,7 @@ export function StatusChangeDialog({
         // Matches the server's 50 MiB hard cap; oversized images are shrunk
         // server-side to the workspace limit, so the old 10 MiB client reject
         // would block uploads the backend now accepts.
-        if (f.size > 50 * 1024 * 1024) {
+        if (f.size > MAX_UPLOAD_BYTES) {
           setError(t('fileTooLarge', { name: f.name }));
           continue;
         }

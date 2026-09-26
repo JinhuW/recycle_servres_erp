@@ -2,10 +2,10 @@
 // prototype.
 //
 // All formatters accept an optional `locale` string (e.g. 'zh-CN' or 'en-US').
-// Call sites obtain the locale via `useT().lang` from i18n.tsx and convert with
-// `lang === 'zh' ? 'zh-CN' : 'en-US'`. Defaults to 'en-US' when omitted.
+// Call sites obtain it via `useT().locale` from i18n.tsx. Defaults to 'en-US'
+// when omitted.
 
-export const fmt = (n: number | null | undefined, locale = 'en-US') =>
+const fmt = (n: number | null | undefined, locale = 'en-US') =>
   n == null
     ? '—'
     : n.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });

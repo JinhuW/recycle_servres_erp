@@ -14,9 +14,8 @@
 // are pure identifiers — so they are safe to interpolate more than once in the
 // same query and cannot carry user input.
 
-import type { Sql, TransactionSql } from 'postgres';
+import type { SqlLike } from '../db';
 
-type SqlLike = Sql | TransactionSql;
 
 // Allocation basis for one PO. Must appear after the join that introduces `po`.
 //
@@ -67,7 +66,7 @@ export function effUnitCost(sql: SqlLike) {
 // `effUnitCost` exactly. `> 0`, not `IS NOT NULL`: a header pinned at $0 over
 // priced lines exists in production, and reading it as the price would zero
 // the cost of everything sold from it.
-export function paidUnitCost(sql: SqlLike) {
+function paidUnitCost(sql: SqlLike) {
   return sql`(CASE
       WHEN COALESCE(fee.goods, 0) > 0 THEN
         (CASE WHEN po.total_cost > 0 THEN po.total_cost ELSE fee.goods END + po.other_fees)

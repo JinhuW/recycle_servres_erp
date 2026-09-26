@@ -15,7 +15,7 @@ const TONES: Tone[] = [
   { color: 'var(--pos)',  labelKey: 'excellent' },
 ];
 
-export function scorePassword(password: string): { score: number; tone: Tone } {
+function scorePassword(password: string): { score: number; tone: Tone } {
   const checks = [
     password.length >= 8,
     /[A-Z]/.test(password) && /[a-z]/.test(password),

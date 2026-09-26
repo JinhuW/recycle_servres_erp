@@ -2,10 +2,11 @@ import { createPrivateKey, createPublicKey, randomBytes, type KeyObject } from '
 import { exportPKCS8, generateKeyPair, jwtVerify, SignJWT } from 'jose';
 import type postgres from 'postgres';
 import { sha256hex } from '../auth';
+import type { SqlLike } from '../db';
 import type { Env, OAuthScope } from '../types';
 import { oauthRefreshRevocationsTotal } from '../metrics';
 
-type AnySql = postgres.Sql | postgres.TransactionSql;
+type AnySql = SqlLike;
 
 const sec = (n?: string, d?: number) => Number.parseInt(n ?? String(d), 10) || (d ?? 0);
 
@@ -47,7 +48,7 @@ function loadPublicKey(b64: string): KeyObject {
 
 // Deterministic short kid derived from the key bytes; lets the verifier pick
 // the matching key from the ring without exposing the key itself.
-export function keyKid(b64: string): string {
+function keyKid(b64: string): string {
   return sha256hex(b64).slice(0, 16);
 }
 

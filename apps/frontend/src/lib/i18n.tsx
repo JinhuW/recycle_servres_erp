@@ -2621,7 +2621,7 @@ const LOADERS: Record<string, () => Promise<Record<string, string>>> = {
 
 // Resolves once `lang`'s table is readable from I18N. Safe to call repeatedly:
 // the dynamic import is cached by the module system, and 'en' is already there.
-export function loadDictionary(lang: Lang): Promise<void> {
+function loadDictionary(lang: Lang): Promise<void> {
   if (I18N[lang]) return Promise.resolve();
   const load = LOADERS[lang];
   if (!load) return Promise.resolve();

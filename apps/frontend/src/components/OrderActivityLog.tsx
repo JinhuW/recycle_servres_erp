@@ -10,10 +10,6 @@ import type { OrderEvent, OrderEventChange } from '../lib/types';
 import type { OrderEvents } from '../lib/useOrderEvents';
 
 type Props = {
-  /** Unused: the host owns the fetch. */
-  orderId?: string;
-  /** Unused: the host owns the fetch. */
-  refreshKey?: number;
   // Lets a host lay the card out by class rather than by position. The desktop
   // order-edit side column needs that: this component renders nothing until the
   // log loads, and it has a conditional sibling above it, so no positional
@@ -196,8 +192,7 @@ function summary(ev: OrderEvent, locale: string, t: Translate): { title: string;
 }
 
 export function OrderActivityLog({ className, bare = false, events: { events, loaded } }: Props) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const [open, setOpen] = useState(true);
 
   // Newest first feels right for a long-lived order; show in reverse-chrono

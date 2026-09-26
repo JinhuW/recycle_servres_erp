@@ -7,7 +7,7 @@ import { itemLabel } from './vendor';
 // via backend query params.
 export type AttrSpec = { key: string; label: string; format?: (v: string) => string };
 
-export const VENDOR_ATTR_SCHEMA: Record<string, AttrSpec[]> = {
+const VENDOR_ATTR_SCHEMA: Record<string, AttrSpec[]> = {
   RAM: [
     { key: 'generation',     label: 'Generation' },
     { key: 'speed',          label: 'Speed', format: v => `${v} MHz` },

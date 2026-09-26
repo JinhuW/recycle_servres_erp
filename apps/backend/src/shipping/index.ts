@@ -8,7 +8,7 @@ import { log } from '../lib/log';
 const shipLog = log.child({ module: 'shipping' });
 
 export type { PackageStatus, TrackingInfo, TrackingSource } from './types';
-export { carrierTrackingUrl, parseEta } from './types';
+export { carrierTrackingUrl } from './types';
 
 // Unlike OCR there is no prod boot-refusal: credentials may lag deploys and
 // deploys must not block on them. A deployment without a token simply never

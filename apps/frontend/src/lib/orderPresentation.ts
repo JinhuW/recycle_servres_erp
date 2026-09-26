@@ -93,7 +93,7 @@ export const LIFECYCLE_LABEL: Record<string, string> = LIFECYCLE_STATUS;
 // Friendly labels for the fields we surface on line_edited / meta_changed
 // events and in the revert-review dialog. Anything not listed falls back to
 // the raw db column name.
-export const FIELD_LABEL: Record<string, string> = {
+const FIELD_LABEL: Record<string, string> = {
   sell_price:      'Sell price',
   qty:             'Qty',
   unit_cost:       'Unit cost',

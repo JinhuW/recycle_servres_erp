@@ -157,8 +157,7 @@ const AREA_ICON: Record<ActivityArea, IconName> = {
 };
 
 export function DesktopActivity() {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
 
   const [area, setArea] = useState<'all' | ActivityArea>('all');
   const [action, setAction] = useState<'' | ActivityAction>('');

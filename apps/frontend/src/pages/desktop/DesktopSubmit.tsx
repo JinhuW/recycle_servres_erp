@@ -5,7 +5,7 @@ import { AttachmentDropzone } from '../../components/AttachmentDropzone';
 import { PaymentFields } from '../../components/PaymentFields';
 import type { HandoffMethod } from '../../lib/handoff';
 import { useT } from '../../lib/i18n';
-import { api, createOrder, deleteOrder } from '../../lib/api';
+import { api, createOrder, deleteOrder, MAX_UPLOAD_BYTES } from '../../lib/api';
 import { handleFetchError, showErrorDialog, showWarnToast } from '../../lib/errorToast';
 import { fmtUSD, fmtDateShort } from '../../lib/format';
 import { poEffectiveCost, parseFeeInput } from '../../lib/poTotals';
@@ -21,7 +21,7 @@ import {
 } from './submit/line';
 import { usePreference } from '../../lib/preferences';
 import { useMarketLookup } from '../../lib/useMarketLookup';
-import { groupLines, shouldGroup, pricedTotals } from '../../lib/lineGroups';
+import { groupLines, shouldGroup, pricedTotals, lineSpecLabel } from '../../lib/lineGroups';
 import { CostTape } from '../../components/CostTape';
 import { useAuth } from '../../lib/auth';
 import { synthesizePartNumber, serialIssue } from '@recycle-erp/shared';
@@ -89,9 +89,8 @@ function OrderForm({
 }: {
   onDone: (toast?: { msg: string; kind?: 'success' | 'error' }) => void;
 }) {
-  const { t, lang } = useT();
+  const { t, lang, locale } = useT();
   const { user } = useAuth();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   useEffect(() => {
     loadWarehouses()
@@ -188,7 +187,7 @@ function OrderForm({
   const addEvidenceFiles = (fl: FileList | null) => {
     const picked = Array.from(fl || []).filter(f => {
       // 50 MiB server hard cap; oversized images are shrunk server-side.
-      if (f.size > 50 * 1024 * 1024) { showErrorDialog(t('fileTooLarge', { name: f.name })); return false; }
+      if (f.size > MAX_UPLOAD_BYTES) { showErrorDialog(t('fileTooLarge', { name: f.name })); return false; }
       return true;
     });
     if (picked.length) setEvidenceFiles(prev => [...prev, ...picked]);
@@ -762,9 +761,7 @@ function OrderForm({
                     {filled ? (
                       <div>
                         <div style={{ fontWeight: 500 }}>
-                          {l.category === 'RAM' && `${l.brand ?? ''} ${l.capacity ?? ''} ${l.generation ?? ''}`.trim()}
-                          {l.category === 'SSD' && `${l.brand ?? ''} ${l.capacity ?? ''} ${l.interface ?? ''}`.trim()}
-                          {l.category === 'HDD' && `${l.brand ?? ''} ${l.capacity ?? ''} ${l.rpm ? l.rpm + 'rpm' : ''}`.trim()}
+                          {lineSpecLabel(l)}
                           {l.category === 'Other' && (
                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                               {!!(l.itemType ?? '').trim() && <span className="chip">{l.itemType}</span>}

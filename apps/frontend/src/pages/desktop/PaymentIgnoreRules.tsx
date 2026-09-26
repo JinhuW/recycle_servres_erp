@@ -41,8 +41,7 @@ export function PaymentIgnoreRules({ onClose, onChanged, onToast }: {
   onChanged: () => void;
   onToast: (msg: string) => void;
 }) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const [rules, setRules] = useState<Rule[] | null>(null);
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [preview, setPreview] = useState<Preview | null>(null);

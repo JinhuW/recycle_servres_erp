@@ -4,13 +4,12 @@
 // keeps the notify INSERT inside the caller's transaction so we don't notify
 // for events that ultimately roll back.
 
-import type { Sql, TransactionSql } from 'postgres';
+import type { SqlLike } from '../db';
 
 // Accept either the top-level `sql` client or a transaction handle from
 // `sql.begin(async (tx) => …)`. Both expose the same template-tag call shape,
 // but their TS types differ. Routes pass `tx` to keep the INSERT inside their
 // outer transaction.
-type SqlLike = Sql | TransactionSql;
 
 export type NotifyInput = {
   userId: string;
