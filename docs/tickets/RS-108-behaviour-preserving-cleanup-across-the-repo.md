@@ -2,13 +2,13 @@
 id: RS-108
 title: Behaviour-preserving cleanup across the repo
 type: chore
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-25
 reporter: jinhu
 branch: refactor/repo-cleanup
-pr:
-version:
+pr: "#408"
+version: 1.177.4
 related: []
 ---
 
@@ -30,9 +30,9 @@ came back; only the behaviour-identical ones are in scope. Plan:
 
 ## Acceptance criteria
 
-- [ ] No API response shape, error string, status code or UI output changes.
-- [ ] `pnpm typecheck`, `pnpm build`, the backend suite and the frontend suite pass.
-- [ ] Duplicated helpers are replaced by one shared copy; dead code is removed.
+- [x] No API response shape, error string, status code or UI output changes.
+- [x] `pnpm typecheck`, `pnpm build`, the backend suite and the frontend suite pass.
+- [x] Duplicated helpers are replaced by one shared copy; dead code is removed.
 
 ## Out of scope
 
