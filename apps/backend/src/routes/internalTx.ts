@@ -12,16 +12,15 @@
 
 import { Hono } from 'hono';
 import { authMiddleware } from '../auth';
+import { requireManager } from '../lib/role';
 import { getDb } from '../db';
+import { isDead } from '../banktx/types';
 import { clampLimit, decodeCursor, encodeCursor, escapeLike } from '../lib/pagination';
 import type { Env, User } from '../types';
 
 const internalTx = new Hono<{ Bindings: Env; Variables: { user: User } }>()
   .use('*', authMiddleware)
-  .use('*', async (c, next) => {
-    if (c.var.user.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
-    return next();
-  });
+  .use('*', requireManager);
 
 type SqlClient = ReturnType<typeof getDb>;
 
@@ -197,7 +196,7 @@ async function addMembers(
   }
   // A record groups the legs of one real movement. A payment that never left,
   // or came back, has no leg to group.
-  if (legs.some((l) => l.settle_status === 'failed' || l.settle_status === 'reversed')) {
+  if (legs.some(isDead)) {
     return { error: 'This payment did not settle' };
   }
   const other = legs.find((l) => l.internal_txn_id && l.internal_txn_id !== recordId);

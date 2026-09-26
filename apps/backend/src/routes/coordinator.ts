@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { authMiddleware } from '../auth';
+import { requireManager } from '../lib/role';
 import type { Env, User } from '../types';
 
 // ─── Facebook worker control-plane proxy ──────────────────────────────────────
@@ -21,10 +22,7 @@ const UNREACHABLE = 'The worker control plane is unreachable';
 
 const coordinator = new Hono<{ Bindings: Env; Variables: { user: User } }>()
   .use('*', authMiddleware)
-  .use('*', async (c, next) => {
-    if (c.var.user.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
-    return next();
-  });
+  .use('*', requireManager);
 
 function upstream(env: Env): { base: string; headers: Record<string, string> } | null {
   const base = env.COORDINATOR_API_URL?.replace(/\/+$/, '');
