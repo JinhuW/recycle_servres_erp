@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-113](./RS-113-set-each-purchaser-s-home-warehouse-to-the-closest-w.md) | done | task | P2 | Set each purchaser's home warehouse to the closest warehouse | — |
 | [RS-109](./RS-109-scan-a-sheet-of-ram-sticks-on-the-flatbed-and-add-on.md) | done | story | P2 | Scan a sheet of RAM sticks on the flatbed and add one line per stick | 1.178.0 |
 | [RS-108](./RS-108-behaviour-preserving-cleanup-across-the-repo.md) | done | chore | P2 | Behaviour-preserving cleanup across the repo | 1.177.4 |
 | [RS-107](./RS-107-manager-only-data-is-absent-from-every-non-manager-a.md) | done | bug | P2 | Manager-only data is absent from every non-manager API response | 1.177.2 |

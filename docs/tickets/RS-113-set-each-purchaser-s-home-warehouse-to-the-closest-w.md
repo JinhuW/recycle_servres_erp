@@ -2,13 +2,13 @@
 id: RS-113
 title: Set each purchaser's home warehouse to the closest warehouse
 type: task
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-26
 reporter: Jinhu
 branch: feat/purchaser-home-warehouses
-pr:
-version:
+pr: "#411"
+version: 1.178.1
 related: []
 ---
 
@@ -43,9 +43,9 @@ existing ones, WH-BOSTON (ships from Framingham), WH-DEN (Broomfield) and WH-ERF
 
 ## Acceptance criteria
 
-- [ ] Prod: Tim, Cynthia and Stefen → WH-DEN; Harrison and Chris → WH-BOSTON.
-- [ ] Jinhu (WH-BOSTON) and Yuxing (WH-ERF) are already correct and are left untouched.
-- [ ] A home warehouse someone has already chosen is never overwritten.
+- [ ] Prod (lands with the next dev→main release): Tim, Cynthia and Stefen → WH-DEN; Harrison and Chris → WH-BOSTON.
+- [x] Jinhu (WH-BOSTON) and Yuxing (WH-ERF) are already correct and are left untouched.
+- [x] A home warehouse someone has already chosen is never overwritten.
 
 ## Out of scope
 
