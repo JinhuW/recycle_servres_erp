@@ -10,10 +10,15 @@ import { handleFetchError, showErrorDialog, showWarnToast } from '../../lib/erro
 import { fmtUSD, fmtDateShort } from '../../lib/format';
 import { poEffectiveCost, parseFeeInput } from '../../lib/poTotals';
 import { useEscapeKey } from '../../lib/useEscapeKey';
-import type { Category, ScanResponse, Warehouse, OrderSummary } from '../../lib/types';
+import type { Category, Warehouse, OrderSummary } from '../../lib/types';
 import { LineDrawer } from './submit/LineDrawer';
 import { AddLineMenu } from './submit/AddLineMenu';
 import { eligibleDraftTargets } from './submit/eligibleTargets';
+import { DupPartDialog } from './submit/DupPartDialog';
+import {
+  blankLine, brandConfirmPending, duplicatesByIndex, findDuplicatePartNumbers,
+  lineBlockerMessages, type DuplicatePartGroup, type Line,
+} from './submit/line';
 import { usePreference } from '../../lib/preferences';
 import { useMarketLookup } from '../../lib/useMarketLookup';
 import { groupLines, shouldGroup, pricedTotals } from '../../lib/lineGroups';
@@ -21,13 +26,12 @@ import { CostTape } from '../../components/CostTape';
 import { useAuth } from '../../lib/auth';
 import { synthesizePartNumber, serialIssue } from '@recycle-erp/shared';
 import { lineRequirements, missingFieldNames } from '../../lib/lineRequirements';
-import { ramBrandNeedsConfirm } from '../../lib/scanValidation';
 import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
 import { loadWarehouses } from '../../lib/warehouses';
 import {
   deleteLinePhoto, planPhotoCarry, photoSourceFile, uploadLinePhoto,
   uploadedPhotoCount, useLinePhotoBuffer,
-  type LinePhoto, type LineCarryPlan, type PendingPhoto,
+  type LineCarryPlan, type PendingPhoto,
 } from '../../lib/linePhotos';
 
 // ─── Public component ────────────────────────────────────────────────────────
@@ -59,48 +63,6 @@ export function DesktopSubmit({ onDone }: Props) {
   );
 }
 
-// ─── OrderForm ───────────────────────────────────────────────────────────────
-// Exported so DesktopEditOrder can reuse the same line-drawer pattern (table
-// row → right-side drawer with full per-category fields) without duplicating
-// the components.
-export type Line = {
-  category: Category;
-  brand?: string;
-  capacity?: string;
-  generation?: string;
-  type?: string;
-  classification?: string;
-  rank?: string;
-  speed?: string;
-  interface?: string;
-  formFactor?: string;
-  description?: string;
-  itemType?: string;
-  partNumber?: string;
-  serialNumber?: string;
-  chipNumber?: string;
-  condition: string;
-  qty: number | string;
-  unitCost: number | string;
-  sellPrice?: number | string;
-  health?: number | null;
-  rpm?: number | null;
-  totalCost?: string;            // user-typed override (string-typed to allow blank)
-  scanImageId?: string | null;
-  scanConfidence?: number | null;
-  scanImageUrl?: string | null;
-  _confirmed?: boolean;
-  // Set by a scan whose brand the AI couldn't name; cleared when the purchaser
-  // confirms it against the photo. Lives on the line, not in drawer state, so
-  // closing and reopening the drawer can't shake the question off.
-  _brandNeedsConfirm?: boolean;
-  _cid: string;                  // stable client id for React keys (never sent to the API)
-  // DB id, once the line has been persisted. Null before that — which is why
-  // photos are buffered rather than uploaded as they're picked.
-  _dbId?: string | null;
-  photos?: LinePhoto[];
-};
-
 // Extensions and MIME types both: Safari populates neither consistently on
 // drag-and-drop, and Windows file dialogs filter on the extension.
 const SUBMIT_ATTACH_ACCEPT = [
@@ -121,85 +83,7 @@ type OrderMeta = {
   otherFeesNote: string;
 };
 
-
-export function blankLine(cat: Category): Line {
-  return {
-    _cid: crypto.randomUUID(),
-    category: cat, qty: '', unitCost: '',
-    condition: '',
-    scanImageUrl: null,
-  };
-}
-
-export type DuplicatePartGroup = { partNumber: string; lineNums: number[] };
-
-// Two lines sharing a part number on the same PO is almost always a paste-error
-// or a forgotten-already-added — surface it so the user can merge or confirm.
-// Comparison is case-insensitive and trims whitespace; blanks are ignored. The
-// returned `partNumber` carries the first-seen casing for display.
-export function findDuplicatePartNumbers(
-  lines: ReadonlyArray<{ partNumber?: string | null }>,
-): DuplicatePartGroup[] {
-  const groups = new Map<string, DuplicatePartGroup>();
-  lines.forEach((l, i) => {
-    const raw = (l.partNumber ?? '').trim();
-    if (!raw) return;
-    const key = raw.toLowerCase();
-    const g = groups.get(key);
-    if (g) g.lineNums.push(i + 1);
-    else groups.set(key, { partNumber: raw, lineNums: [i + 1] });
-  });
-  return [...groups.values()].filter(g => g.lineNums.length >= 2);
-}
-
-// Build a Line patch from an AI scan response — mirrors the mobile aiDefaults
-// in SubmitForm.tsx so all flows share the same field-mapping. Returned as a
-// Partial so callers can either spread it onto blankLine() (new line) or pass
-// it through onChange() (live edit in the drawer).
-// Low-confidence extractions are still prefilled (a rough draft beats an empty
-// form); scanConfidence rides along so the drawer can flag it for review.
-export function scanToLinePatch(scan: ScanResponse, category?: Category): Partial<Line> {
-  const f = scan.extracted ?? {};
-  return {
-    scanImageId: scan.imageId ?? null,
-    _brandNeedsConfirm: category === 'RAM' && ramBrandNeedsConfirm(f),
-    scanConfidence: scan.confidence ?? null,
-    scanImageUrl: scan.deliveryUrl ?? null,
-    ...(f.brand        ? { brand: f.brand }               : {}),
-    ...(f.capacity     ? { capacity: f.capacity }         : {}),
-    ...(f.generation   ? { generation: f.generation }     : {}),
-    ...(f.type         ? { type: f.type }                 : {}),
-    ...(f.classification ? { classification: f.classification } : {}),
-    ...(f.rank         ? { rank: f.rank }                 : {}),
-    ...(f.speed        ? { speed: f.speed }               : {}),
-    ...(f.interface    ? { interface: f.interface }       : {}),
-    ...(f.formFactor   ? { formFactor: f.formFactor }     : {}),
-    ...(f.description  ? { description: f.description }   : {}),
-    ...(f.rpm          ? { rpm: Number(f.rpm) }           : {}),
-    ...(f.partNumber   ? { partNumber: f.partNumber }     : {}),
-  };
-}
-
-/**
- * Whether this line still owes a brand the purchaser has checked against the
- * scan photo. Every path that persists a line asks this — the drawer's confirm
- * button is only one of four. The category test matters: switching a scanned
- * RAM line to another category leaves the flag behind, and an SSD line must
- * not be asked a RAM question.
- *
- * The second test re-runs the same rule against the line's *own* brand, so
- * picking a real one in the Brand select answers the question as well as the
- * dialog does — being asked to re-pick what you just picked reads as a bug.
- * `Other` and off-catalog values still prompt: `Other` is the catalog's "I
- * don't know", which is precisely what the dialog is for. Note the flag itself
- * stays `true` on a line settled this way — only the dialog's confirm clears
- * it — but nothing else reads it and it never reaches the API.
- */
-export const brandConfirmPending = (l: Line): boolean =>
-  l.category === 'RAM'
-  && !!l._brandNeedsConfirm
-  && ramBrandNeedsConfirm({ brand: l.brand ?? '' });
-
+// ─── OrderForm ───────────────────────────────────────────────────────────────
 function OrderForm({
   onDone,
 }: {
@@ -400,11 +284,6 @@ function OrderForm({
     otherFees: parseFeeInput(meta.otherFees),
   });
 
-  // No goods-total override on capture: the goods total is the sum of the
-  // lines, and anything paid on top of the goods is the fee — so line costs
-  // plus fee is what the purchaser actually paid, with no second field to
-  // reconcile against the first.
-
   // One batched lookup for every part number on the form, so the drawer can
   // show what the part is worth while the buy price is still being decided.
   const marketFor = useMarketLookup(lines.map(l => l.partNumber));
@@ -415,15 +294,7 @@ function OrderForm({
   const priced = useMemo(() => pricedTotals(lines), [lines]);
 
   const dupGroups = useMemo(() => findDuplicatePartNumbers(lines), [lines]);
-  const dupByIdx = useMemo(() => {
-    const m = new Map<number, number[]>();
-    for (const g of dupGroups) {
-      for (const ln of g.lineNums) {
-        m.set(ln - 1, g.lineNums.filter(n => n !== ln));
-      }
-    }
-    return m;
-  }, [dupGroups]);
+  const dupByIdx = useMemo(() => duplicatesByIndex(dupGroups), [dupGroups]);
   const [dupConfirm, setDupConfirm] = useState<DuplicatePartGroup[] | null>(null);
   // When the dup-part warning is reached via "add to existing", remember which
   // target to merge into so confirming the warning doesn't fall back to new-PO.
@@ -816,21 +687,7 @@ function OrderForm({
     submitting              ? []
   : warehouses.length === 0 ? [t('subWarehousesNotLoaded')]
   : !meta.warehouseId       ? [t('reviewPickWarehouseHint')]
-  : lines.flatMap((l, i) => {
-      if (brandConfirmPending(l)) {
-        return [lines.length === 1
-          ? t('subConfirmBrandThis')
-          : t('subConfirmBrandLine', { n: i + 1 })];
-      }
-      if (lineReady(l)) return [];
-      const fields = missingNamesFor(l);
-      if (fields) {
-        return [lines.length === 1
-          ? t('subMissingFieldsThis', { fields })
-          : t('subMissingFieldsLine', { n: i + 1, fields })];
-      }
-      return [lines.length === 1 ? t('subFillThisLine') : t('subFillLineN', { n: i + 1 })];
-    });
+  : lineBlockerMessages(lines, t, lineReady, missingNamesFor);
 
   const onSubmitClick = () => {
     if (submitBlockers.length) {
@@ -1260,54 +1117,20 @@ function OrderForm({
       )}
 
       {dupConfirm && (
-        <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget && !submitting) setDupConfirm(null); }}>
-          <div className="modal-shell" style={{ maxWidth: 480 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-head">
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                <div style={{
-                  width: 36, height: 36, borderRadius: 8,
-                  background: 'var(--warn-soft, #fef3c7)', color: 'var(--warn-strong, #92400e)',
-                  display: 'grid', placeItems: 'center', flexShrink: 0,
-                }}>
-                  <Icon name="alert" size={18} />
-                </div>
-                <div>
-                  <div className="modal-title">{t('dupPartModalTitle')}</div>
-                  <div className="modal-sub">{t('dupPartModalSub')}</div>
-                </div>
-              </div>
-            </div>
-            <div className="modal-body">
-              <ul style={{ margin: 0, padding: '0 0 0 18px', display: 'grid', gap: 6, fontSize: 13 }}>
-                {dupConfirm.map(g => (
-                  <li key={g.partNumber.toLowerCase()}>
-                    {(g.lineNums.length === 1 ? t('dupPartModalRowOne') : t('dupPartModalRowMany'))
-                      .replace('{pn}', g.partNumber)
-                      .replace('{nums}', g.lineNums.join(', '))}
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div className="modal-foot">
-              <button className="btn" onClick={() => setDupConfirm(null)} disabled={submitting}>
-                {t('dupPartReview')}
-              </button>
-              <button
-                className="btn accent"
-                disabled={submitting}
-                onClick={async () => {
-                  setDupConfirm(null);
-                  const target = pendingTargetId ? targets.find(o => o.id === pendingTargetId) : null;
-                  setPendingTargetId(null);
-                  if (target) await doSubmitToExisting(target);
-                  else await doSubmit();
-                }}
-              >
-                {submitting ? '…' : t('dupPartSubmitAnyway')}
-              </button>
-            </div>
-          </div>
-        </div>
+        <DupPartDialog
+          groups={dupConfirm}
+          busy={submitting}
+          confirmTone="accent"
+          confirmLabel={t('dupPartSubmitAnyway')}
+          onClose={() => setDupConfirm(null)}
+          onConfirm={async () => {
+            setDupConfirm(null);
+            const target = pendingTargetId ? targets.find(o => o.id === pendingTargetId) : null;
+            setPendingTargetId(null);
+            if (target) await doSubmitToExisting(target);
+            else await doSubmit();
+          }}
+        />
       )}
 
       {pnConfirm && (
@@ -1364,7 +1187,3 @@ function OrderForm({
   );
 }
 
-// LineDrawer + the per-category field groups (RamFields/SsdFields/HddFields/
-// OtherFields/CatSelect) were extracted verbatim into ./submit/* — re-exported
-// here so external importers (DesktopEditOrder) keep their existing import path.
-export { LineDrawer };

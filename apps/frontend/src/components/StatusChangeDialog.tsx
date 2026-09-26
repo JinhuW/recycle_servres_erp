@@ -11,14 +11,10 @@ import { useEscapeKey } from '../lib/useEscapeKey';
 import { useT } from '../lib/i18n';
 import { AttachmentChip } from './AttachmentChip';
 import { AttachmentDropzone } from './AttachmentDropzone';
+import type { CommissionShots } from './CommissionPaymentFields';
+import type { ProofAttachment } from '../lib/usePaymentProof';
 
-export type StatusAttachment = {
-  id: string;
-  filename: string;
-  size: number;
-  mime: string;
-  url: string;
-};
+export type StatusAttachment = ProofAttachment;
 
 export type MetaStatus = 'Shipped' | 'Awaiting payment' | 'Done';
 
@@ -97,12 +93,7 @@ type Props = {
   // here is the same file the Commission tab shows — a private copy would
   // leave a Cancel-after-upload invisible on the tab. Only the note still
   // goes to `status-meta/<to>`; `initialAttachments` is ignored.
-  attachments?: {
-    atts: StatusAttachment[];
-    add: (files: FileList | null) => void;
-    remove: (att: StatusAttachment) => void;
-    uploading: boolean;
-  };
+  attachments?: CommissionShots;
 };
 
 export function StatusChangeDialog({

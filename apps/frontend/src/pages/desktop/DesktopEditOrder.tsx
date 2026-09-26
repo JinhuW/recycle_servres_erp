@@ -4,20 +4,22 @@ import { Icon, type IconName } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { useAuth } from '../../lib/auth';
 import { useEffectiveUser } from '../../lib/tweaks';
-import { api, deleteOrder, archiveOrder, unarchiveOrder } from '../../lib/api';
+import { api, deleteOrder, archiveOrder, unarchiveOrder, ApiError } from '../../lib/api';
 import { readArchiveConflict, type ArchiveConflict } from '../../lib/archiveConflict';
 import { ArchiveConflictList } from '../../components/ArchiveConflictList';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { fmtUSD, fmtDateShort } from '../../lib/format';
 import {
-  ORDER_STATUSES, LIFECYCLE_STATUS, isClosedBook, spineStatus,
+  ORDER_STATUSES, LIFECYCLE_STATUS, isClosedBook, lifecycleOf, spineStatus,
 } from '../../lib/status';
 import { poEffectiveCost, parseFeeInput, feeEq, readStoredGoodsTotal } from '../../lib/poTotals';
 import type { Category, Order, OrderLine, Warehouse } from '../../lib/types';
+import { LineDrawer } from './submit/LineDrawer';
 import {
-  LineDrawer, blankLine, findDuplicatePartNumbers, brandConfirmPending,
-  type Line, type DuplicatePartGroup,
-} from './DesktopSubmit';
+  blankLine, brandConfirmPending, duplicatesByIndex, findDuplicatePartNumbers, lineBlockerMessages,
+  type DuplicatePartGroup, type Line,
+} from './submit/line';
+import { DupPartDialog } from './submit/DupPartDialog';
 import { AddLineMenu } from './submit/AddLineMenu';
 import { OrderCategoryChips } from '../../components/OrderCategoryChips';
 import {
@@ -28,7 +30,7 @@ import { groupLines, shouldGroup, displayRows, catTone, pricedTotals } from '../
 import { CostTape } from '../../components/CostTape';
 import { useMarketLookup } from '../../lib/useMarketLookup';
 import { ImageLightbox } from '../../components/ImageLightbox';
-import { serialIssue, isPricedSellPrice } from '@recycle-erp/shared';
+import { serialIssue } from '@recycle-erp/shared';
 import { lineRequirements, missingFieldNames } from '../../lib/lineRequirements';
 import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
 import { OrderActivityLog } from '../../components/OrderActivityLog';
@@ -44,8 +46,7 @@ import type { StageId } from '../../lib/orderLookback';
 import { useTrackingInput } from '../../lib/useTrackingInput';
 import { packageSourceLabelKey, type PackageSource } from '../../lib/packageSource';
 import { refreshPackage } from '../../lib/packages';
-import { ApiError } from '../../lib/api';
-import { OrderTabs, type TabId } from './order/OrderTabs';
+import { OrderTabs, TAB_IDS, type TabId } from './order/OrderTabs';
 import { DeliveryTab } from './order/DeliveryTab';
 import { CommissionTab } from './order/CommissionTab';
 import { StagePanel, type RefreshState } from './order/StagePanel';
@@ -57,16 +58,6 @@ import type { CommissionShots } from '../../components/CommissionPaymentFields';
 import { AttachmentChip } from '../../components/AttachmentChip';
 import { AttachmentDropzone } from '../../components/AttachmentDropzone';
 import { loadWarehouses } from '../../lib/warehouses';
-
-
-
-// `order.status` is derived from the SET of line statuses and collapses to
-// 'Mixed' when a (still-open) order's lines disagree — e.g. a draft whose
-// lines were autosaved as 'In Transit'. Gating edit-access on that ambiguous
-// string locked purchasers out of their own draft. `lifecycle` is the
-// authoritative stage (see orders.ts), so derive the canonical status from it
-// (LIFECYCLE_STATUS) and only fall back to the derived string for unknown
-// lifecycles.
 
 // The uppercase heading over each block of the action card.
 const SectionHead = ({ icon, children }: { icon: IconName; children: ReactNode }) => (
@@ -87,6 +78,16 @@ const STAGE_TAB: Partial<Record<string, TabId>> = {
   'Ready to Pay': 'commission',
 };
 
+// Sold is never a right-hand value: the backend alone writes it.
+const REOPEN_TARGETS: Record<string, string[]> = {
+  'Done': ['Reviewing', 'Ready to Pay'],
+  'Sold': ['Reviewing', 'Ready to Pay'],
+  'Ready to Pay': ['Reviewing', 'Done'],
+};
+
+// The payment-tab readiness keys that are proof rules, as opposed to facts.
+const PROOF_KEYS = new Set(['poTxnRequired', 'hoNeedCashShot', 'hoNeedChatShot']);
+
 type Props = {
   order: Order;
   onCancel: () => void;
@@ -98,9 +99,8 @@ type Props = {
 };
 
 // Internal line state — the shared `Line` plus the original DB id (when the
-// line came from the server), the line's persisted status, and a dirty
-// marker so we can scope the PATCH.
-type EditLine = Line & { _id?: string; _status?: string; _dirty?: boolean };
+// line came from the server) and a dirty marker so we can scope the PATCH.
+type EditLine = Line & { _id?: string; _dirty?: boolean };
 
 // Edit-order page lifted from design/dashboard.jsx#EditOrderPage. Table is
 // read-only summary rows; clicking a row opens the right-side LineDrawer
@@ -132,8 +132,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // The purchaser keeps their order until the review closes it. Editing it
   // after submission is allowed and costs them the stage: the backend sends it
   // back to Draft, so `revertOnSave` warns before the first such save.
-  const purchaserCanEdit = !isPurchaser || !orderLocked;
-  const canEditOrder = purchaserCanEdit && !orderLocked;
+  const canEditOrder = !orderLocked;
   const revertOnSave = isPurchaser && !orderLocked && effectiveStatus !== 'Draft';
   // Notes and submission evidence outlive the purchaser's edit window: the
   // manager owns pricing from Reviewing on, but whoever raised the PO can keep
@@ -146,12 +145,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // Reviewing (the backend guards lines committed to sell orders).
   // Everything else stays read-only until such a move lands.
   const canReopen = !isPurchaser && orderLocked && !isArchived;
-  // Sold is never a right-hand value: the backend alone writes it.
-  const REOPEN_TARGETS: Record<string, string[]> = {
-    'Done': ['Reviewing', 'Ready to Pay'],
-    'Sold': ['Reviewing', 'Ready to Pay'],
-    'Ready to Pay': ['Reviewing', 'Done'],
-  };
   const [status, setStatus] = useState(effectiveStatus);
   // The stage as last written. Normally the one the page opened with, but a
   // save that has to keep the user here (a photo upload that failed) has
@@ -181,9 +174,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   const [doneAttachments, setDoneAttachments] = useState<StatusAttachment[]>(
     order.statusMeta?.['Done']?.attachments ?? [],
   );
-  // Owner may edit until the order is Done; managers always. Mirrors the
-  // backend gate.
-  const canEditSubmission = canAnnotate;
   // Kept in the server's canon (uppercase, no spaces) so dirty-compare is
   // exact against what a save round-trips.
   const [paypalTxn, setPaypalTxn] = useState<string>(order.paypalTxnId ?? '');
@@ -331,7 +321,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // Transit, the commission once it is owed — and the user may pick another.
   const [tab, setTabState] = useState<TabId>(() => {
     const q = readHashQuery().get('tab');
-    return (['delivery', 'payment', 'commission', 'notes', 'activity'] as TabId[]).includes(q as TabId)
+    return TAB_IDS.includes(q as TabId)
       ? (q as TabId) : STAGE_TAB[status] ?? 'delivery';
   });
   const setTab = (next: TabId) => {
@@ -538,33 +528,21 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   const dupGroups = useMemo(() => findDuplicatePartNumbers(lines), [lines]);
   // Lookup table keyed by line index → other 1-based line numbers sharing its
   // part #. Drives the inline drawer warning.
-  const dupByIdx = useMemo(() => {
-    const m = new Map<number, number[]>();
-    for (const g of dupGroups) {
-      for (const ln of g.lineNums) {
-        m.set(ln - 1, g.lineNums.filter(n => n !== ln));
-      }
-    }
-    return m;
-  }, [dupGroups]);
+  const dupByIdx = useMemo(() => duplicatesByIndex(dupGroups), [dupGroups]);
 
   const totals = useMemo(() => {
-    let qty = 0, cost = 0, revenue = 0, profit = 0;
+    // An unpriced line still costs what it cost; it just earns nothing yet.
+    let qty = 0, cost = 0;
     for (const l of lines) {
       const q = Number(l.qty) || 0;
-      const c = Number(l.unitCost) || 0;
-      // An unpriced line still costs what it cost; it just earns nothing yet.
-      const sp = isPricedSellPrice(l.sellPrice) ? Number(l.sellPrice) : 0;
       qty += q;
-      cost += q * c;
-      revenue += q * sp;
-      profit += q * (sp - c);
+      cost += q * (Number(l.unitCost) || 0);
     }
     // The priced subset — what can actually contribute to a realised
     // commission — through the rule the capture screen and the cost tape use.
     const priced = pricedTotals(lines);
     return {
-      qty, cost, revenue, profit,
+      qty, cost, revenue: priced.revenue,
       pricedCount: priced.count, pricedProfit: priced.profit, pricedCost: priced.cost,
     };
   }, [lines]);
@@ -714,7 +692,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // are the checkpoint's to collect, and a manager's stage-jump through Save
   // is not held to them — exactly what the server enforces on /advance.
   const leavingDraft = statusDirty && status !== 'Draft';
-  const PROOF_KEYS = new Set(['poTxnRequired', 'hoNeedCashShot', 'hoNeedChatShot']);
   const proofBlockedKey = leavingDraft
     ? readiness.find(r => r.tab === 'payment')?.needKeys.find(k => PROOF_KEYS.has(k)) ?? null
     : null;
@@ -727,8 +704,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // one would lock those orders against any edit.
   const costRequired = (l: EditLine) => !l._id || !!l._dirty;
   const lineReady = (l: EditLine) => lineRequirements(l, { requireCost: costRequired(l) }).ready;
-  // A note-only save (purchaser past In Transit) sends no lines, so an
-  // incomplete legacy line must not block it — they can't fix it at that stage.
   // Line readiness gates only the saves that actually write lines. A note-only
   // save sends none, so an incomplete legacy line must not block it — the
   // purchaser can't fix that line at this stage anyway.
@@ -776,21 +751,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   : !dirty             ? [t('saveBlockedNoChanges')]
   : proofBlockedKey    ? [t(proofBlockedKey)]
   : trackingIncomplete ? [t(tracking.valid ? 'hoNeedCarrier' : 'hoNeedTracking')]
-  : lines.flatMap((l, i) => {
-      if (brandConfirmPending(l)) {
-        return [lines.length === 1
-          ? t('subConfirmBrandThis')
-          : t('subConfirmBrandLine', { n: i + 1 })];
-      }
-      if (lineReady(l)) return [];
-      const fields = missingNamesFor(l);
-      if (fields) {
-        return [lines.length === 1
-          ? t('subMissingFieldsThis', { fields })
-          : t('subMissingFieldsLine', { n: i + 1, fields })];
-      }
-      return [lines.length === 1 ? t('subFillThisLine') : t('subFillLineN', { n: i + 1 })];
-    });
+  : lineBlockerMessages(lines, t, lineReady, missingNamesFor);
 
   const attemptSave = () => {
     if (saveBlockers.length) {
@@ -811,7 +772,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
         // accepts. /advance cascades line statuses server-side, so no line
         // patch is needed alongside it.
         if (statusDirty && !isPurchaser) {
-          const toStage = Object.keys(LIFECYCLE_STATUS).find(k => LIFECYCLE_STATUS[k] === status);
+          const toStage = lifecycleOf(status);
           await api.post(`/api/orders/${order.id}/advance`, { toStage });
           setSavedStatus(status);
           if (onReload) {
@@ -879,7 +840,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       // them, so send an empty body to advance one stage.
       let movedStage = false;
       if (statusDirty) {
-        const toStage = Object.keys(LIFECYCLE_STATUS).find(k => LIFECYCLE_STATUS[k] === status);
+        const toStage = lifecycleOf(status);
         await api.post(`/api/orders/${order.id}/advance`, isPurchaser ? {} : { toStage });
         setSavedStatus(status);
         movedStage = true;
@@ -1014,7 +975,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // ── The status section's model ──────────────────────────────────────────
   const currentIdx = ORDER_STATUSES.indexOf(spineStatus(status) as typeof ORDER_STATUSES[number]);
   const viewStageId = view === null ? null
-    : (Object.keys(LIFECYCLE_STATUS).find(k => LIFECYCLE_STATUS[k] === view) as StageId | undefined) ?? null;
+    : (lifecycleOf(view) as StageId | undefined) ?? null;
   // On a closed order every move is off except the manager's ways out of it
   // (REOPEN_TARGETS).
   const stepDisabled = (s: string) =>
@@ -1500,7 +1461,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
             )}
             locale={locale}
           >
-            {isPurchaser && !purchaserCanEdit && (
+            {isPurchaser && orderLocked && (
               <div className="oe-banner">
                 <Icon name="lock" size={13} />
                 {effectiveStatus === 'Ready to Pay' ? t('eoReadyToPayNote') : t('eoReviewedByMgr')}
@@ -1559,7 +1520,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                 txnRequired={order.txnRequired === true}
                 disabled={!canEditOrder}
                 proof={proof}
-                canEditProof={canEditSubmission}
+                canEditProof={canAnnotate}
                 idPrefix="eo"
               />
               {/* Bank payments linked to this PO on the Payments page. Manager-only
@@ -1604,7 +1565,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                   style={{ width: '100%', resize: 'vertical', minHeight: 64, fontFamily: 'inherit', lineHeight: 1.5 }}
                 />
               </div>
-              {(submissionAtts.length > 0 || canEditSubmission) && (
+              {(submissionAtts.length > 0 || canAnnotate) && (
                 <div className="field" style={{ marginBottom: 0 }}>
                   <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <Icon name="paperclip" size={12} /> {t('poSubmissionEvidenceTitle')}
@@ -1615,10 +1576,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                       <AttachmentChip
                         key={a.id}
                         a={a}
-                        onRemove={canEditSubmission ? () => void proof.removeChatAtt(a) : undefined}
+                        onRemove={canAnnotate ? () => void proof.removeChatAtt(a) : undefined}
                       />
                     ))}
-                    {canEditSubmission && (
+                    {canAnnotate && (
                       <AttachmentDropzone
                         boxHint={t('poSubmitAttachHint')}
                         uploading={proof.chatUploading}
@@ -1631,7 +1592,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
             </div>
           ),
           activity: (
-            <OrderActivityLog orderId={order.id} refreshKey={activityKey} events={events} className="oe-activity-tab" />
+            <OrderActivityLog events={events} className="oe-activity-tab" />
           ),
         }}
       </OrderTabs>
@@ -1833,52 +1794,18 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       )}
 
       {dupConfirm && (
-        <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget && !saving) setDupConfirm(null); }}>
-          <div className="modal-shell" style={{ maxWidth: 480 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-head">
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                <div style={{
-                  width: 36, height: 36, borderRadius: 8,
-                  background: 'var(--warn-soft, #fef3c7)', color: 'var(--warn-strong, #92400e)',
-                  display: 'grid', placeItems: 'center', flexShrink: 0,
-                }}>
-                  <Icon name="alert" size={18} />
-                </div>
-                <div>
-                  <div className="modal-title">{t('dupPartModalTitle')}</div>
-                  <div className="modal-sub">{t('dupPartModalSub')}</div>
-                </div>
-              </div>
-            </div>
-            <div className="modal-body">
-              <ul style={{ margin: 0, padding: '0 0 0 18px', display: 'grid', gap: 6, fontSize: 13 }}>
-                {dupConfirm.map(g => (
-                  <li key={g.partNumber.toLowerCase()}>
-                    {(g.lineNums.length === 1 ? t('dupPartModalRowOne') : t('dupPartModalRowMany'))
-                      .replace('{pn}', g.partNumber)
-                      .replace('{nums}', g.lineNums.join(', '))}
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div className="modal-foot">
-              <button className="btn" onClick={() => setDupConfirm(null)} disabled={saving}>
-                {t('dupPartReview')}
-              </button>
-              <button
-                className="btn primary"
-                disabled={saving}
-                onClick={async () => {
-                  setDupConfirm(null);
-                  if (!(await askRevert(materialDirty))) return;
-                  await doSave();
-                }}
-              >
-                {saving ? '…' : t('dupPartSaveAnyway')}
-              </button>
-            </div>
-          </div>
-        </div>
+        <DupPartDialog
+          groups={dupConfirm}
+          busy={saving}
+          confirmTone="primary"
+          confirmLabel={t('dupPartSaveAnyway')}
+          onClose={() => setDupConfirm(null)}
+          onConfirm={async () => {
+            setDupConfirm(null);
+            if (!(await askRevert(materialDirty))) return;
+            await doSave();
+          }}
+        />
       )}
 
       {revertConfirm && (
@@ -1982,7 +1909,6 @@ function orderLineToEditLine(l: OrderLine): EditLine {
   return {
     _cid:           crypto.randomUUID(),
     _id:            l.id,
-    _status:        l.status,
     category:       l.category,
     photos:         l.photos ?? [],
     brand:          l.brand ?? undefined,
