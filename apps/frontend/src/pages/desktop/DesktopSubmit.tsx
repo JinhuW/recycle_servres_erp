@@ -13,6 +13,9 @@ import { useEscapeKey } from '../../lib/useEscapeKey';
 import type { Category, Warehouse, OrderSummary } from '../../lib/types';
 import { LineDrawer } from './submit/LineDrawer';
 import { AddLineMenu } from './submit/AddLineMenu';
+import { RamSheetScanDialog } from './submit/RamSheetScanDialog';
+import { isPristineLine } from './submit/ramSheet';
+import { addableCategories, aiCaptureEnabled } from '../../lib/lookups';
 import { eligibleDraftTargets } from './submit/eligibleTargets';
 import { DupPartDialog } from './submit/DupPartDialog';
 import {
@@ -313,30 +316,59 @@ function OrderForm({
   // so they don't lose work by forgetting to press Confirm. If the active line
   // isn't ready yet, surface the reason and don't append — otherwise the user
   // ends up with a silent half-saved row.
-  const addLine = async (cat: Category) => {
-    if (activeIdx != null) {
-      const cur = lines[activeIdx];
-      if (cur && !cur._confirmed) {
-        if (brandConfirmPending(cur)) {
-          showWarnToast(t('subConfirmBrandThis'));
-          return;
-        }
-        if (!lineReady(cur)) {
-          const fields = missingNamesFor(cur);
-          showWarnToast(fields ? t('drawerStillNeeded', { fields }) : t('subFillThisLine'));
-          return;
-        }
-        try {
-          await handleConfirmLine(activeIdx);
-        } catch (e) {
-          showErrorDialog(e instanceof Error ? e.message : t('subSubmitFailed'));
-          return;
-        }
-      }
+  // Saves the line open in the drawer before anything is appended after it.
+  // False when it can't be saved yet — the reason has already been shown.
+  // `skipPristine` lets the sheet scan pass over the untouched opening line,
+  // which it replaces rather than saves.
+  const settleActiveLine = async ({ skipPristine = false } = {}): Promise<boolean> => {
+    if (activeIdx == null) return true;
+    const cur = lines[activeIdx];
+    if (!cur || cur._confirmed) return true;
+    if (skipPristine && isPristineLine(cur)) return true;
+    if (brandConfirmPending(cur)) {
+      showWarnToast(t('subConfirmBrandThis'));
+      return false;
     }
+    if (!lineReady(cur)) {
+      const fields = missingNamesFor(cur);
+      showWarnToast(fields ? t('drawerStillNeeded', { fields }) : t('subFillThisLine'));
+      return false;
+    }
+    try {
+      await handleConfirmLine(activeIdx);
+    } catch (e) {
+      showErrorDialog(e instanceof Error ? e.message : t('subSubmitFailed'));
+      return false;
+    }
+    return true;
+  };
+
+  const addLine = async (cat: Category) => {
+    if (!(await settleActiveLine())) return;
     setLastCat(cat);
     setLines(ls => [...ls, blankLine(cat)]);
     setActiveIdx(lines.length);
+  };
+
+  // "Scan RAM sheet" (RS-109): a flatbed page of sticks becomes one RAM line
+  // per stick (or per part number). The lines arrive unconfirmed, like any
+  // new line: whatever the label couldn't supply (speed, a Micron chip #) is
+  // named by the usual blockers and filled in the drawer.
+  const canScanSheet = aiCaptureEnabled('RAM') && addableCategories().includes('RAM');
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const openSheetScan = async () => {
+    if (!(await settleActiveLine({ skipPristine: true }))) return;
+    setActiveIdx(null);
+    setSheetOpen(true);
+  };
+  const addScannedLines = (patches: Partial<Line>[]) => {
+    if (!patches.length) return;
+    setLastCat('RAM');
+    setLines(ls => [
+      ...(ls.length === 1 && isPristineLine(ls[0]) ? [] : ls),
+      ...patches.map(p => ({ ...blankLine('RAM'), ...p })),
+    ]);
+    setActiveIdx(null);
   };
 
   const removeLine = (i: number) => {
@@ -725,6 +757,17 @@ function OrderForm({
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span className="chip mono">{t('subUnitsCost', { n: totals.units, cost: fmtUSD(totals.cost, locale) })}</span>
+            {canScanSheet && (
+              <button
+                type="button"
+                className="btn sm"
+                title={t('rsheetOpenTitle')}
+                onClick={() => void openSheetScan()}
+              >
+                <Icon name="scan" size={13} />
+                {t('rsheetOpen')}
+              </button>
+            )}
             <AddLineMenu onAdd={addLine} />
           </div>
         </div>
@@ -1109,6 +1152,9 @@ function OrderForm({
         </div>
       )}
 
+      {sheetOpen && (
+        <RamSheetScanDialog onClose={() => setSheetOpen(false)} onAddLines={addScannedLines} />
+      )}
       {serialIssues && (
         <SerialCheckDialog issues={serialIssues} onClose={() => setSerialIssues(null)} />
       )}
