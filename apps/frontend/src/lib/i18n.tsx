@@ -2640,12 +2640,15 @@ type Vars = Record<string, string | number>;
 
 type LangCtx = {
   lang: Lang;
+  /** BCP 47 tag for Intl / toLocale*String, derived from `lang`. */
+  locale: 'zh-CN' | 'en-US';
   setLang: (l: Lang) => void;
   t: (key: string, vars?: Vars) => string;
 };
 
 const Ctx = createContext<LangCtx>({
   lang: 'en',
+  locale: 'en-US',
   setLang: () => {},
   t: (k) => k,
 });
@@ -2693,7 +2696,8 @@ export function LangProvider({ children }: { children: ReactNode }) {
     }
   }, [lang]);
 
-  return <Ctx.Provider value={{ lang, setLang, t }}>{children}</Ctx.Provider>;
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  return <Ctx.Provider value={{ lang, locale, setLang, t }}>{children}</Ctx.Provider>;
 }
 
 export function useT() {

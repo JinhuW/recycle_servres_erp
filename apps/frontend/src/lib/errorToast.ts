@@ -55,11 +55,6 @@ const REPORT_CAP = 5;
 let reported = 0;
 const seen = new Set<string>();
 
-export function _resetErrorReportingForTests(): void {
-  reported = 0;
-  seen.clear();
-}
-
 /**
  * Send a browser-side failure to the backend so it lands in the operator's log.
  *

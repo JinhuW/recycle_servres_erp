@@ -24,7 +24,6 @@ import { useAuth } from './auth';
 // ── Schema ─────────────────────────────────────────────────────────────────
 
 export type PrefMap = {
-  'language': 'en' | 'zh';
   'tweaks.density': 'comfortable' | 'compact';
   'tweaks.rolePreview': 'actual' | 'as_purchaser';
   'inventory.cols.manager': string[];
@@ -73,37 +72,22 @@ function writeCache(bag: PrefBag): void {
 // server the first time PreferencesProvider runs against a user whose server
 // blob is empty for the corresponding key. Runs once per browser per key.
 
+function arrayTo(key: PrefKey): (raw: string) => Partial<PrefBag> | null {
+  return (raw) => {
+    try {
+      const v = JSON.parse(raw);
+      return Array.isArray(v) ? { [key]: v } : null;
+    } catch { return null; }
+  };
+}
+
 const LEGACY_KEYS: Array<{
   legacy: string;
   parse: (raw: string) => Partial<PrefBag> | null;
 }> = [
-  {
-    legacy: 'rs.orders.cols.v1',
-    parse: (raw) => {
-      try {
-        const v = JSON.parse(raw);
-        return Array.isArray(v) ? { 'orders.cols': v } : null;
-      } catch { return null; }
-    },
-  },
-  {
-    legacy: 'rs.inventory.cols.v1',
-    parse: (raw) => {
-      try {
-        const v = JSON.parse(raw);
-        return Array.isArray(v) ? { 'inventory.cols.manager': v } : null;
-      } catch { return null; }
-    },
-  },
-  {
-    legacy: 'rs.inventory.cols.purchaser.v1',
-    parse: (raw) => {
-      try {
-        const v = JSON.parse(raw);
-        return Array.isArray(v) ? { 'inventory.cols.purchaser': v } : null;
-      } catch { return null; }
-    },
-  },
+  { legacy: 'rs.orders.cols.v1', parse: arrayTo('orders.cols') },
+  { legacy: 'rs.inventory.cols.v1', parse: arrayTo('inventory.cols.manager') },
+  { legacy: 'rs.inventory.cols.purchaser.v1', parse: arrayTo('inventory.cols.purchaser') },
   {
     legacy: 'rs.tweaks.v1',
     parse: (raw) => {
@@ -138,17 +122,14 @@ function collectLegacyMigration(server: PrefBag): {
       legacyKeysToClear.push(legacy);
       continue;
     }
-    let contributedSomething = false;
     for (const [k, v] of Object.entries(parsed)) {
       if (server[k] === undefined && patch[k] === undefined) {
         patch[k] = v;
-        contributedSomething = true;
       }
     }
     // Clear regardless — the server (or another legacy key) already has this
     // value; the localStorage cache will be repopulated from the new bag.
     legacyKeysToClear.push(legacy);
-    void contributedSomething;
   }
   return { patch, legacyKeysToClear };
 }

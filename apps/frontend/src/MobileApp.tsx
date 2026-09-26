@@ -37,7 +37,7 @@ import {
   MOBILE_VIEW_TO_PATH, pathToMobileView, readSafeNext,
 } from './lib/route';
 import type { Category, DraftLine, Notification, Order, OrderLine, OrderSummary, ScanResponse } from './lib/types';
-import { buildOrderSubmit } from './lib/orderSubmit';
+import { buildOrderSubmit, toAddLine } from './lib/orderSubmit';
 import { findDuplicateLine } from './lib/dupParts';
 
 // Where a line form goes when it closes. 'detail' is an existing order: the
@@ -46,11 +46,24 @@ import { findDuplicateLine } from './lib/dupParts';
 // order's warehouse/payment/notes.
 type ReturnTo = 'idle' | 'review' | 'detail';
 
+// The one line `camera` and `form` are working on, and the order around it.
+type LineEdit = {
+  category: Category;
+  detected: ScanResponse | null;
+  lines: DraftLine[];
+  editingId?: string | null;
+  originalLineIds?: string[];
+  editingLineIdx?: number | null;
+  returnTo: ReturnTo;
+  draftId?: string;
+  rescanDraft?: DraftLine | null;
+};
+
 type CaptureState =
   | { phase: 'idle' }
   | { phase: 'draftPicker'; drafts: OrderSummary[] }
-  | { phase: 'camera';  category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; originalLineIds?: string[]; editingLineIdx?: number | null; returnTo: ReturnTo; draftId?: string; rescanDraft?: DraftLine | null }
-  | { phase: 'form';    category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; originalLineIds?: string[]; editingLineIdx?: number | null; returnTo: ReturnTo; draftId?: string; rescanDraft?: DraftLine | null }
+  | ({ phase: 'camera' } & LineEdit)
+  | ({ phase: 'form' } & LineEdit)
   // Review holds a heterogeneous list, so it has no single category — each
   // line carries its own. `camera` and `form` keep theirs: they edit ONE line,
   // and both the scan endpoint and the field groups need to know which kind.
@@ -119,13 +132,6 @@ function Shell() {
     return () => { document.body.classList.remove('phone-mode'); };
   }, []);
   const [capture, setCapture] = useState<CaptureState>({ phase: 'idle' });
-  // Order-level fees, held here rather than in OrderReview: that screen
-  // unmounts on every trip into a line form, and an order opened for edit
-  // arrives carrying the fee it was saved with.
-  // Same reason as the fees above: a resumed draft was saved with a warehouse,
-  // a payment type and notes, and the review screen unmounts on every trip
-  // into a line form. Left to its own defaults it would offer `warehouses[0]`
-  // and blank notes, then write those back over what the draft already had.
   // The draft order is created on demand by `ensureDraftId`, and its id lands
   // in `capture` a round trip later. Hold the in-flight POST here so a second
   // save awaits the same one instead of opening a second order.
@@ -225,12 +231,8 @@ function Shell() {
   // lib/errorToast.ts can surface errors from anywhere without prop-drilling.
   useEffect(() => {
     window.__showErrorDialog = (msg, details, title) => pushErrorDialog({ msg, details, title });
-    window.__showToast = (msg, kind) => {
-      if (kind === 'error') { pushErrorDialog({ msg }); return; }
-      setToast({ msg, kind: kind === 'warn' ? 'warn' : 'success' });
-      if (toastTimer.current) clearTimeout(toastTimer.current);
-      toastTimer.current = setTimeout(() => setToast(null), kind === 'warn' ? 4500 : 2600);
-    };
+    // showToast reads only pushErrorDialog (the dep) plus stable setters/refs.
+    window.__showToast = (msg, kind) => showToast(msg, kind);
     return () => { delete window.__showToast; delete window.__showErrorDialog; };
   }, [pushErrorDialog]);
 
@@ -395,35 +397,6 @@ function Shell() {
     setCapture(c => c.phase === 'camera' ? { ...c, phase: 'form', detected: s } : c);
   };
 
-  // Maps a DraftLine to the wire shape for PATCH /api/orders/:id addLines.
-  const toWireLine = (l: DraftLine) => ({
-    category: l.category,
-    sellPrice: l.sellPrice == null ? null : Number(l.sellPrice),
-    brand: l.brand ?? null,
-    capacity: l.capacity ?? null,
-    type: l.type ?? null,
-    generation: l.generation ?? null,
-    classification: l.classification ?? null,
-    rank: l.rank ?? null,
-    speed: l.speed ?? null,
-    interface: l.interface ?? null,
-    formFactor: l.formFactor ?? null,
-    description: l.description ?? null,
-    // Required on an Other line — omitting it 400'd every autosave of one.
-    itemType: l.itemType ?? null,
-    partNumber: l.partNumber ?? null,
-    serialNumber: l.serialNumber ?? null,
-    chipNumber: l.chipNumber ?? null,
-    condition: l.condition ?? 'Pulled — Tested',
-    qty: Number(l.qty) || 1,
-    unitCost: Number(l.unitCost) || 0,
-    health: l.health ?? null,
-    rpm: l.rpm ?? null,
-    status: 'In Transit' as const,
-    scanImageId: l.scanImageId ?? null,
-    scanConfidence: l.scanConfidence ?? null,
-  });
-
   // The backstop before a line is written to the server. The form gates on the
   // same shared rule first, so reaching this with something missing means the
   // line arrived from somewhere else — a resumed draft, or a category switch
@@ -485,7 +458,7 @@ function Shell() {
       try {
         // Omit status: the backend COALESCEs it, so leaving it out preserves
         // the line's lifecycle (Done, etc.) instead of forcing In Transit.
-        const { status, ...fields } = toWireLine(line);
+        const { status, ...fields } = toAddLine(line);
         void status;
         await api.patch('/api/orders/' + orderId, { lines: [{ id: line.id, ...fields }] });
         await flushLinePhotos(line, orderId, line.id);
@@ -527,7 +500,7 @@ function Shell() {
       // Capture the inserted row's id so a later re-edit UPDATEs it in place
       // (and the final submit updates rather than inserting a duplicate).
       const res = await api.patch<{ addedLineIds?: string[] }>(
-        '/api/orders/' + targetId, { addLines: [toWireLine(line)] },
+        '/api/orders/' + targetId, { addLines: [toAddLine(line)] },
       );
       const newId = res.addedLineIds?.[0];
       if (newId) await flushLinePhotos(line, targetId, newId);
@@ -598,31 +571,21 @@ function Shell() {
   // Both open the line form directly. There is no review step: the order has
   // already answered for its warehouse, payment and notes, and its detail
   // screen is what owns them.
-  const startEditLine = (order: Order, idx: number) => {
+  const openOrderLineForm = (order: Order, category: Category, editingLineIdx: number | null) => {
     seedPhotos(order);
     setCapture({
       phase: 'form',
-      category: (order.lines[idx]?.category as Category) ?? 'RAM',
+      category,
       detected: null,
       lines: order.lines.map(toDraftLine),
       editingId: order.id,
-      editingLineIdx: idx,
+      editingLineIdx,
       returnTo: 'detail',
     });
   };
-
-  const startAddLine = (order: Order, cat: Category) => {
-    seedPhotos(order);
-    setCapture({
-      phase: 'form',
-      category: cat,
-      detected: null,
-      lines: order.lines.map(toDraftLine),
-      editingId: order.id,
-      editingLineIdx: null,
-      returnTo: 'detail',
-    });
-  };
+  const startEditLine = (order: Order, idx: number) =>
+    openOrderLineForm(order, (order.lines[idx]?.category as Category) ?? 'RAM', idx);
+  const startAddLine = (order: Order, cat: Category) => openOrderLineForm(order, cat, null);
 
   const goBack = () => {
     if (

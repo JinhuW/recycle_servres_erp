@@ -1,6 +1,7 @@
 // Runtime cache for DB-backed lookup data (dropdown options, price sources,
-// sell-order + order statuses). main.tsx awaits `loadLookups()`
-// before rendering the app, so every consumer can read these as plain values.
+// sell-order + order statuses). AuthProvider (lib/auth.tsx) awaits
+// `loadLookups()` before it resolves the session, so every authenticated page
+// can read these as plain values.
 //
 // Types stay as string-literal unions because the DB CHECK constraints in
 // sell_orders.status (and the order_lines.status convention) make the set of

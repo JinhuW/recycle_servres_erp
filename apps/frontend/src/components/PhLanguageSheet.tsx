@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Icon } from './Icon';
 import { useT } from '../lib/i18n';
 import type { Lang } from '../lib/types';
+import { PhSheet } from './PhSheet';
 
 type Props = { onClose: (picked: Lang | null) => void };
 
@@ -56,83 +57,78 @@ export function PhLanguageSheet({ onClose }: Props) {
   ];
 
   return (
-    <>
-      <div className="ph-sheet-backdrop" onClick={() => onClose(null)} />
-      <div className="ph-sheet ph-lang-sheet">
-        <div className="ph-sheet-grabber" />
-
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px 6px' }}>
-          <button
-            onClick={() => onClose(null)}
-            style={{ background: 'transparent', border: 'none', color: 'var(--fg-muted)', fontSize: 14, fontFamily: 'inherit', padding: 4, cursor: 'pointer' }}
-          >
-            {t('cancel')}
-          </button>
-          <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.01em' }}>{t('langTitle')}</div>
-          <button
-            onClick={apply}
-            disabled={!followSystem && draft === lang}
-            style={{
-              background: 'transparent', border: 'none',
-              color: (!followSystem && draft === lang) ? 'var(--fg-subtle)' : 'var(--accent-strong)',
-              fontSize: 14, fontWeight: 600, fontFamily: 'inherit', padding: 4,
-              cursor: (!followSystem && draft === lang) ? 'default' : 'pointer',
-            }}
-          >
-            {t('langDone')}
-          </button>
-        </div>
-
-        <div style={{ fontSize: 12, color: 'var(--fg-subtle)', padding: '0 4px 14px', lineHeight: 1.5 }}>
-          {t('langSubtitle')}
-        </div>
-
-        <div className="ph-lang-row" style={{ marginBottom: 12 }}>
-          <div style={{ width: 38, height: 38, borderRadius: 10, background: 'var(--bg-soft)', display: 'grid', placeItems: 'center', color: 'var(--fg-muted)', flexShrink: 0 }}>
-            <Icon name="settings" size={16} />
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 14, fontWeight: 500 }}>{t('langSystem')}</div>
-            <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', marginTop: 2 }}>{t('langSystemSub')}</div>
-          </div>
-          <button
-            onClick={() => setFollowSystem(!followSystem)}
-            className={'ph-switch ' + (followSystem ? 'on' : '')}
-            aria-label={t('langSystem')}
-          >
-            <span className="ph-switch-knob" />
-          </button>
-        </div>
-
-        <div className={'ph-lang-list' + (followSystem ? ' disabled' : '')}>
-          {options.map((o, i) => {
-            const selected = draft === o.id;
-            return (
-              <button
-                key={o.id}
-                disabled={followSystem}
-                onClick={() => setDraft(o.id)}
-                className={'ph-lang-row option' + (selected ? ' selected' : '')}
-                style={{ borderBottom: i < options.length - 1 ? '1px solid var(--border)' : 'none' }}
-              >
-                <div className="ph-lang-flag">{o.flag}</div>
-                <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                  <div style={{ fontSize: 15, fontWeight: 500, letterSpacing: '-0.005em' }}>{o.title}</div>
-                  <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', marginTop: 2 }}>{o.sub}</div>
-                </div>
-                <div className={'ph-lang-radio' + (selected ? ' on' : '')}>
-                  {selected && <Icon name="check" size={13} />}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 14, padding: '0 4px', fontSize: 11.5, color: 'var(--fg-subtle)', lineHeight: 1.5 }}>
-          <Icon name="info" size={13} style={{ marginTop: 2, flexShrink: 0, color: 'var(--fg-subtle)' }} />
-          <span>{t('langApplyNote')}</span>
-        </div>
+    <PhSheet onBackdrop={() => onClose(null)} className="ph-lang-sheet">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px 6px' }}>
+        <button
+          onClick={() => onClose(null)}
+          style={{ background: 'transparent', border: 'none', color: 'var(--fg-muted)', fontSize: 14, fontFamily: 'inherit', padding: 4, cursor: 'pointer' }}
+        >
+          {t('cancel')}
+        </button>
+        <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.01em' }}>{t('langTitle')}</div>
+        <button
+          onClick={apply}
+          disabled={!followSystem && draft === lang}
+          style={{
+            background: 'transparent', border: 'none',
+            color: (!followSystem && draft === lang) ? 'var(--fg-subtle)' : 'var(--accent-strong)',
+            fontSize: 14, fontWeight: 600, fontFamily: 'inherit', padding: 4,
+            cursor: (!followSystem && draft === lang) ? 'default' : 'pointer',
+          }}
+        >
+          {t('langDone')}
+        </button>
       </div>
-    </>
+
+      <div style={{ fontSize: 12, color: 'var(--fg-subtle)', padding: '0 4px 14px', lineHeight: 1.5 }}>
+        {t('langSubtitle')}
+      </div>
+
+      <div className="ph-lang-row" style={{ marginBottom: 12 }}>
+        <div style={{ width: 38, height: 38, borderRadius: 10, background: 'var(--bg-soft)', display: 'grid', placeItems: 'center', color: 'var(--fg-muted)', flexShrink: 0 }}>
+          <Icon name="settings" size={16} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 500 }}>{t('langSystem')}</div>
+          <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', marginTop: 2 }}>{t('langSystemSub')}</div>
+        </div>
+        <button
+          onClick={() => setFollowSystem(!followSystem)}
+          className={'ph-switch ' + (followSystem ? 'on' : '')}
+          aria-label={t('langSystem')}
+        >
+          <span className="ph-switch-knob" />
+        </button>
+      </div>
+
+      <div className={'ph-lang-list' + (followSystem ? ' disabled' : '')}>
+        {options.map((o, i) => {
+          const selected = draft === o.id;
+          return (
+            <button
+              key={o.id}
+              disabled={followSystem}
+              onClick={() => setDraft(o.id)}
+              className={'ph-lang-row option' + (selected ? ' selected' : '')}
+              style={{ borderBottom: i < options.length - 1 ? '1px solid var(--border)' : 'none' }}
+            >
+              <div className="ph-lang-flag">{o.flag}</div>
+              <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                <div style={{ fontSize: 15, fontWeight: 500, letterSpacing: '-0.005em' }}>{o.title}</div>
+                <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', marginTop: 2 }}>{o.sub}</div>
+              </div>
+              <div className={'ph-lang-radio' + (selected ? ' on' : '')}>
+                {selected && <Icon name="check" size={13} />}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 14, padding: '0 4px', fontSize: 11.5, color: 'var(--fg-subtle)', lineHeight: 1.5 }}>
+        <Icon name="info" size={13} style={{ marginTop: 2, flexShrink: 0, color: 'var(--fg-subtle)' }} />
+        <span>{t('langApplyNote')}</span>
+      </div>
+    </PhSheet>
   );
 }

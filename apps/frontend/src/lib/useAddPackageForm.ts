@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState } from 'react';
-import { detectCarriers, isValidTracking, normalizeTracking, type Carrier } from './carrierDetect';
+import { useRef, useState } from 'react';
+import type { Carrier } from './carrierDetect';
 import { handleFetchError, showErrorDialog } from './errorToast';
 import { useT } from './i18n';
 import { blobToDataUrl, compressForUpload } from './image-compress';
@@ -8,6 +8,7 @@ import type { PackageSource } from './packageSource';
 import { normalizePaypalTxnInput, isStrictPaypalTxnId } from './paypalTxn';
 import { scanErrorBanner, type ScanErrorBanner } from './scanError';
 import { AI_CONFIDENCE_FLOOR, AI_UNREADABLE_FLOOR } from './status';
+import { useTrackingInput } from './useTrackingInput';
 
 // The add-package form's whole non-JSX state machine, shared by the desktop
 // page and the phone screen so the two shells can't drift on what a valid
@@ -24,8 +25,7 @@ export type PaymentShot = { key: string; url: string; preview: string };
 
 export function useAddPackageForm(onAdded: (added: { carrier: Carrier; tn: string }) => void) {
   const { t } = useT();
-  const [raw, setRawState] = useState('');
-  const [pick, setPick] = useState<Carrier | null>(null);
+  const { raw, setRaw, pick, setPick, tn, detected, carrier, valid, hintKey } = useTrackingInput();
   const [sellerName, setSellerName] = useState('');
   const [note, setNote] = useState('');
   const [source, setSource] = useState<PackageSource | null>(null);
@@ -37,28 +37,8 @@ export function useAddPackageForm(onAdded: (added: { carrier: Carrier; tn: strin
   const [scanNoticeKey, setScanNoticeKey] = useState<string | null>(null);
   const [scanError, setScanError] = useState<ScanErrorBanner | null>(null);
 
-  const tn = normalizeTracking(raw);
-  const detected = useMemo(() => detectCarriers(raw), [raw]);
-  // A single detection selects itself; ambiguity or no match leaves the pick
-  // to the user. A manual pick always wins.
-  const carrier = pick ?? (detected.length === 1 ? detected[0] : null);
-  const unknownShape = tn.length >= 10 && detected.length === 0;
-  // Long enough to be a submit attempt, but not storable: junk characters or
-  // a whole-barcode dump. Mirrors the server's isValidTracking rejection.
-  const invalidShape = tn.length >= 8 && !isValidTracking(tn);
   // A mid-scan submit would race the screenshot reference; wait it out.
-  const canSubmit = isValidTracking(tn) && carrier != null && source != null && !busy && !scanBusy;
-
-  /** i18n key for the live hint line, or null for the quiet placeholder. */
-  const hintKey =
-    invalidShape ? 'shipAddTrackingInvalid'
-    : carrier != null && detected.length === 1 && !pick ? 'shipAddCarrierAuto'
-    : detected.length > 1 && !pick ? 'shipAddCarrierPick'
-    : unknownShape && !pick ? 'shipAddCarrierUnknown'
-    : null;
-
-  // A new paste invalidates the manual pick — the shape rules re-decide.
-  const setRaw = (v: string) => { setRawState(v); setPick(null); };
+  const canSubmit = valid && carrier != null && source != null && !busy && !scanBusy;
 
   // Typing keeps the server's canon live in the input, so what the user reads
   // is exactly what submit sends and the PO later diffs against.
@@ -136,7 +116,7 @@ export function useAddPackageForm(onAdded: (added: { carrier: Carrier; tn: strin
     try {
       await addPackage({
         trackingNumber: tn, carrier, source, sellerName, note,
-        ...(paypalTxnId ? { paypalTxnId } : {}),
+        paypalTxnId,
         ...(screenshot ? { paymentScreenshotKey: screenshot.key, paymentScreenshotUrl: screenshot.url } : {}),
       });
       onAdded({ carrier, tn });
