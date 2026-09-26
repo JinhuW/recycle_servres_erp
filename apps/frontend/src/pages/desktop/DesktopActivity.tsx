@@ -8,8 +8,9 @@ import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { fmtDate, fmtUSD } from '../../lib/format';
 import { useT } from '../../lib/i18n';
-import { createdEventParts, linePhotoEventDetail } from '../../lib/orderPresentation';
+import { createdEventParts, linePhotoEventDetail, type Translate } from '../../lib/orderPresentation';
 import { activityRecordHref, onLinkClick } from '../../lib/route';
+import { useSentinel } from '../../lib/useSentinel';
 
 // The global audit register — every change made across all four ledgers, in
 // one record. Read-only; the source tables are append-only by trigger.
@@ -90,11 +91,9 @@ function renderValue(field: string, v: unknown, locale: string): string {
   return String(v);
 }
 
-type T = (key: string, vars?: Record<string, string | number>) => string;
-
 // Reduce an event to the one line the Change lane shows. Returns either a
 // field diff (rendered as struck-old → solid-new) or a plain sentence.
-function summarise(e: Event, locale: string, t: T): { diff?: Change; note?: string; plain?: string } {
+function summarise(e: Event, locale: string, t: Translate): { diff?: Change; note?: string; plain?: string } {
   const d = e.detail;
   const changes = Array.isArray(d.changes) ? (d.changes as Change[]) : null;
   if (changes?.length) {
@@ -232,17 +231,8 @@ export function DesktopActivity() {
   // Auto-load the next page when the end of the list scrolls into the
   // register. rootMargin starts the fetch a screenful early so the rows are
   // usually already there by the time you reach the bottom.
-  useEffect(() => {
-    const el = sentinelRef.current;
-    const root = scrollRef.current;
-    if (!el || !root || !feed?.nextCursor) return;
-    const io = new IntersectionObserver(
-      entries => { if (entries[0].isIntersecting) loadMore(); },
-      { root, rootMargin: '400px 0px' },
-    );
-    io.observe(el);
-    return () => io.disconnect();
-  }, [loadMore, feed?.nextCursor]);
+  useSentinel(
+    sentinelRef, loadMore, !!feed?.nextCursor, { root: scrollRef, rootMargin: '400px 0px' });
 
   const reset = () => {
     setArea('all'); setAction(''); setActor(''); setDays(0); setSearch('');

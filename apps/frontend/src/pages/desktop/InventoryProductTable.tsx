@@ -61,7 +61,7 @@ export type ProductGroup = {
 // Subset of the flat-view column toggles that have a grouped-view analogue.
 // Columns with no analogue (id/date/profit/margin/submitter) are lot-level
 // only and simply aren't part of the grouped table.
-export type GroupedColVis = {
+type GroupedColVis = {
   category: boolean;
   partNumber: boolean;
   qty: boolean;

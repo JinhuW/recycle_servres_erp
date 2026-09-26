@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon, type IconName } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
+import { useSentinel } from '../../lib/useSentinel';
 import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { handleFetchError } from '../../lib/errorToast';
@@ -198,17 +199,7 @@ export function DesktopMarket() {
 
   // Fetch the next page when the sentinel row scrolls into the table viewport.
   // Re-armed on every loadMore identity change; the sentinel unmounts at the end.
-  useEffect(() => {
-    const sentinel = sentinelRef.current;
-    const root = scrollRef.current;
-    if (!sentinel || !root) return;
-    const io = new IntersectionObserver(
-      (entries) => { if (entries[0].isIntersecting) loadMore(); },
-      { root, rootMargin: '300px' },
-    );
-    io.observe(sentinel);
-    return () => io.disconnect();
-  }, [loadMore]);
+  useSentinel(sentinelRef, loadMore, true, { root: scrollRef, rootMargin: '300px' });
 
   return (
     <>

@@ -24,6 +24,17 @@ export const fmt0 = (n: number | null | undefined, locale = 'en-US') =>
 export const fmtUSD0 = (n: number | null | undefined, locale = 'en-US') =>
   n == null ? '—' : signed(Math.round(n), '$', fmt0(Math.abs(n), locale));
 
+// Signed money for bank ledgers, where the sign carries meaning (out vs back
+// in), so a plus is rendered too — fmtUSD shows only a minus.
+export function fmtSigned(n: number, locale: string): string {
+  return (n < 0 ? '−' : '+') + fmtUSD(Math.abs(n), locale);
+}
+
+export const fmtBytes = (n: number): string =>
+  n < 1024 ? `${n} B`
+  : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB`
+  : `${(n / 1024 / 1024).toFixed(1)} MB`;
+
 export const CURRENCY_SYMBOL: Record<string, string> = { USD: '$', CNY: '¥' };
 
 export const fmtMoney = (

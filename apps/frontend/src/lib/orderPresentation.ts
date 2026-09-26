@@ -3,7 +3,7 @@
 // timeline and the global register render the same event — when the rule lives
 // inside one of them the other drifts and the same PO reads two ways.
 
-import { fmtUSD, fmtUSD0 } from './format';
+import { fmtBytes, fmtUSD, fmtUSD0 } from './format';
 import { STATUS_CHIP, fmtEta } from './shippingList';
 import { LIFECYCLE_STATUS } from './status';
 import type { OrderEventChange, OrderSummary, PackageTracking } from './types';
@@ -153,11 +153,6 @@ export function changeLine(c: OrderEventChange, locale: string): string {
   const label = FIELD_LABEL[c.field] ?? c.field;
   return `${label}: ${renderValue(c.field, c.from, locale)} → ${renderValue(c.field, c.to, locale)}`;
 }
-
-const fmtBytes = (n: number): string =>
-  n < 1024 ? `${n} B`
-  : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB`
-  : `${(n / 1024 / 1024).toFixed(1)} MB`;
 
 /**
  * The detail line behind a line-photo event: what was attached, how big, and

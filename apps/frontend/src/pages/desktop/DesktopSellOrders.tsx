@@ -225,14 +225,18 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
   const [exporting, setExporting] = useState(false);
   const { path } = useRoute();
 
+  const listQuery = useMemo(() => {
+    const p = new URLSearchParams();
+    if (statusFilter !== 'all') p.set('status', statusFilter);
+    if (showClosedDone) p.set('includeArchived', 'true');
+    return p.toString();
+  }, [statusFilter, showClosedDone]);
+
   const runExport = async () => {
     if (exporting) return;
     setExporting(true);
     try {
-      const p = new URLSearchParams();
-      if (statusFilter !== 'all') p.set('status', statusFilter);
-      if (showClosedDone) p.set('includeArchived', 'true');
-      await api.download(`/api/sell-orders/export?${p}`, 'sell-orders.xlsx');
+      await api.download(`/api/sell-orders/export?${listQuery}`, 'sell-orders.xlsx');
     } catch (e) {
       handleFetchError(e);
     } finally {
@@ -247,25 +251,19 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
     : null;
 
   const reload = () => {
-    const p = new URLSearchParams();
-    if (statusFilter !== 'all') p.set('status', statusFilter);
-    if (showClosedDone) p.set('includeArchived', 'true');
-    api.get<{ items: SellOrderSummary[] }>(`/api/sell-orders?${p}`)
+    api.get<{ items: SellOrderSummary[] }>(`/api/sell-orders?${listQuery}`)
       .then(r => setOrders(r.items))
       .catch(handleFetchError)
       .finally(() => setLoadedOnce(true));
   };
   useEffect(() => {
     let alive = true;
-    const p = new URLSearchParams();
-    if (statusFilter !== 'all') p.set('status', statusFilter);
-    if (showClosedDone) p.set('includeArchived', 'true');
-    api.get<{ items: SellOrderSummary[] }>(`/api/sell-orders?${p}`)
+    api.get<{ items: SellOrderSummary[] }>(`/api/sell-orders?${listQuery}`)
       .then(r => { if (alive) setOrders(r.items); })
       .catch(handleFetchError)
       .finally(() => { if (alive) setLoadedOnce(true); });
     return () => { alive = false; };
-  }, [statusFilter, showClosedDone]);
+  }, [listQuery]);
 
   const visible = useMemo(() => {
     let list = orders;
