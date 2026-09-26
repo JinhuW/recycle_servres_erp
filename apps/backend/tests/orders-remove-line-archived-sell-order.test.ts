@@ -8,6 +8,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
+import { createSellOrderOn } from './helpers/fixtures';
 
 type Line = { id: string; status: string; qty: number };
 type Detail = { order: { lines: Line[] } };
@@ -41,19 +42,6 @@ async function createReviewing(pur: string, mgr: string): Promise<{ id: string; 
 
 const get = (id: string, token: string) => api<Detail>('GET', `/api/orders/${id}`, { token });
 
-async function createSellOrderOn(mgr: string, lineId: string, qty = 1): Promise<string> {
-  const customers = await api<{ items: { id: string }[] }>('GET', '/api/customers', { token: mgr });
-  const so = await api<{ id: string }>('POST', '/api/sell-orders', {
-    token: mgr,
-    body: {
-      customerId: customers.body.items[0].id,
-      lines: [{ inventoryId: lineId, category: 'RAM', label: 'x', partNumber: PN, qty, unitPrice: 90 }],
-    },
-  });
-  expect(so.status).toBe(201);
-  return so.body.id;
-}
-
 async function moveSellOrder(mgr: string, soId: string, to: string): Promise<void> {
   // Closing needs a structured reason; every other move takes just a note.
   const body = to === 'Closed' ? { to, note: 'x', closeReasonId: 'customer_cancelled' } : { to, note: 'x' };
@@ -73,7 +61,7 @@ describe('removing a PO line named by a sell order', () => {
     const { token: pur } = await loginAs(MARCUS);
     const { token: mgr } = await loginAs(ALEX);
     const { id, lineIds } = await createReviewing(pur, mgr);
-    const soId = await createSellOrderOn(mgr, lineIds[0]);
+    const soId = await createSellOrderOn(mgr, lineIds[0], PN);
     await moveSellOrder(mgr, soId, 'Shipped');
     expect((await api('POST', `/api/sell-orders/${soId}/archive`, { token: mgr })).status).toBe(200);
 
@@ -88,7 +76,7 @@ describe('removing a PO line named by a sell order', () => {
     const { token: pur } = await loginAs(MARCUS);
     const { token: mgr } = await loginAs(ALEX);
     const { id, lineIds } = await createReviewing(pur, mgr);
-    const soId = await createSellOrderOn(mgr, lineIds[0]);
+    const soId = await createSellOrderOn(mgr, lineIds[0], PN);
     await moveSellOrder(mgr, soId, 'Shipped');
 
     const res = await api<Conflict>('PATCH', `/api/orders/${id}`, { token: mgr, body: { removeLineIds: [lineIds[0]] } });
@@ -105,7 +93,7 @@ describe('removing a PO line named by a sell order', () => {
     const { token: pur } = await loginAs(MARCUS);
     const { token: mgr } = await loginAs(ALEX);
     const { id, lineIds } = await createReviewing(pur, mgr);
-    const soId = await createSellOrderOn(mgr, lineIds[1], 2);
+    const soId = await createSellOrderOn(mgr, lineIds[1], PN, 2);
     await moveSellOrder(mgr, soId, 'Done');
     const sold = (await get(id, mgr)).body.order.lines.find(l => l.id === lineIds[1]);
     expect(sold?.status).toBe('Sold');
@@ -121,7 +109,7 @@ describe('removing a PO line named by a sell order', () => {
     const { token: pur } = await loginAs(MARCUS);
     const { token: mgr } = await loginAs(ALEX);
     const { id, lineIds } = await createReviewing(pur, mgr);
-    const soId = await createSellOrderOn(mgr, lineIds[0]);
+    const soId = await createSellOrderOn(mgr, lineIds[0], PN);
     await moveSellOrder(mgr, soId, 'Shipped');
     await moveSellOrder(mgr, soId, 'Closed');
 
@@ -136,7 +124,7 @@ describe('removing a PO line named by a sell order', () => {
     const { token: pur } = await loginAs(MARCUS);
     const { token: mgr } = await loginAs(ALEX);
     const { id, lineIds } = await createReviewing(pur, mgr);
-    const soId = await createSellOrderOn(mgr, lineIds[0]);
+    const soId = await createSellOrderOn(mgr, lineIds[0], PN);
 
     const res = await api<Conflict>('PATCH', `/api/orders/${id}`, { token: mgr, body: { removeLineIds: [lineIds[0]] } });
     expect(res.status).toBe(409);

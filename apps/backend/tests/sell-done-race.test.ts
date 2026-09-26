@@ -3,17 +3,13 @@ import { resetDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
+import { firstCustomerId } from './helpers/fixtures';
 
 // C2 regression: the status read + idempotency guard ran OUTSIDE the
 // transaction, so two concurrent POST /:id/status {to:'Done'} (double
 // submit / network retry) both passed the guard, both entered sql.begin,
 // and stock was consumed twice. The guard must be re-evaluated inside the
 // transaction under a row lock so the second request is a true no-op.
-
-async function firstCustomerId(token: string): Promise<string> {
-  const r = await api<{ items: { id: string }[] }>('GET', '/api/customers', { token });
-  return r.body.items[0].id;
-}
 
 describe('POST /api/sell-orders/:id/status — Done is idempotent under concurrency', () => {
   beforeEach(async () => { await resetDb(); });

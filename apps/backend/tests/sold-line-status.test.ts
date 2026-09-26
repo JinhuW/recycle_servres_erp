@@ -3,11 +3,7 @@ import { resetDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
-
-async function firstCustomerId(token: string): Promise<string> {
-  const r = await api<{ items: { id: string }[] }>('GET', '/api/customers', { token });
-  return r.body.items[0].id;
-}
+import { firstCustomerId } from './helpers/fixtures';
 
 async function lineStatus(token: string, id: string): Promise<string> {
   const r = await api<{ item: { status: string } }>('GET', `/api/inventory/${id}`, { token });

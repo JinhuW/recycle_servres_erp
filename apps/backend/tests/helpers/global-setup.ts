@@ -2,21 +2,22 @@ import postgres from 'postgres';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { adminUrl } from './pg-urls';
 
-// Give each `vitest run` its OWN ephemeral database.
+// Give each `vitest run` its OWN ephemeral databases.
 //
-// The suite resets the schema per-test (resetDb → drop-all + migrate + seed).
 // When two runs shared ONE database (a release's gate racing a dev's local
-// run, or CI racing a local run), one run's drop-all dropped tables out from
+// run, or CI racing a local run), one run's reset dropped tables out from
 // under the other run's in-flight queries → "relation \"users\" does not
-// exist" and a cascade of login 500s. resetDb's advisory lock only serialises
-// reset-vs-reset within a process; it can't stop another process dropping the
-// shared schema mid-query. A private database per run removes the shared
-// state entirely, so concurrent runs can't collide.
+// exist" and a cascade of login 500s. So this only mints a run-scoped name
+// prefix and hands it to the workers via TEST_DATABASE_URL; nothing is shared
+// between runs.
 //
-// This is the durable replacement for the shared-DB + advisory-lock scheme.
-// The lock stays in resetDb (harmless, guards intra-run edge cases); this just
-// makes sure no two runs ever point at the same database.
+// Each worker then owns `<run>_w<poolId>` plus a migrated + seeded
+// `<run>_w<poolId>_tmpl` template (db.ts → ensureWorkerDb), and resetDb
+// re-clones the working DB from that template per test. A worker runs its
+// files sequentially, so resetDb takes no lock; the only advisory lock left
+// serialises template migrations across workers on one cluster.
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..', '..', '..', '..');
@@ -29,14 +30,6 @@ function baseUrl(): string {
     if (m) return m[1];
   }
   throw new Error('TEST_DATABASE_URL not set — add it to the repo-root .env');
-}
-
-// CREATE/DROP DATABASE can't target the DB you're connected to, so run them
-// from the always-present `postgres` maintenance database on the same cluster.
-function adminUrl(base: string): string {
-  const u = new URL(base);
-  u.pathname = '/postgres';
-  return u.toString();
 }
 
 export default async function setup() {

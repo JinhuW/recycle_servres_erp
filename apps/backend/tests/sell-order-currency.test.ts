@@ -3,6 +3,8 @@ import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
+import { firstCustomerId } from './helpers/fixtures';
+import { mockFrankfurter } from './helpers/fx';
 
 // Per-order currency on sell orders (migration 0065). USD line values still
 // live in sell_order_lines.unit_price; native facts live in the source_*
@@ -10,23 +12,6 @@ import { freeSellableLine } from './helpers/inventory';
 
 const RATE_USD_CNY = 7.2154;            // 1 USD = 7.2154 CNY
 const RATE_TO_USD = 1 / RATE_USD_CNY;   // multiplier native→USD (~0.138583)
-
-function mockFrankfurter(rate = RATE_USD_CNY, date = '2026-06-07') {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async () =>
-      new Response(
-        JSON.stringify({ amount: 1, base: 'USD', date, rates: { CNY: rate } }),
-        { status: 200 },
-      ),
-    ),
-  );
-}
-
-async function firstCustomerId(token: string): Promise<string> {
-  const r = await api<{ items: { id: string }[] }>('GET', '/api/customers', { token });
-  return r.body.items[0].id;
-}
 
 type SODetail = {
   order: {
@@ -39,7 +24,7 @@ type SODetail = {
 describe('sell orders — per-order currency', () => {
   beforeEach(async () => {
     await resetDb();
-    mockFrankfurter();
+    mockFrankfurter(RATE_USD_CNY, '2026-06-07');
   });
   afterEach(() => { vi.unstubAllGlobals(); });
 

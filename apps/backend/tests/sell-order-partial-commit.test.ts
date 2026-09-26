@@ -3,6 +3,7 @@ import { resetDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
+import { firstCustomerId } from './helpers/fixtures';
 
 // A committed sell order reserves the QUANTITY it names, not the whole lot.
 // Selling 20 of a 100-piece line has to leave 80 on the shelf for the next
@@ -13,11 +14,6 @@ type SellableItem = { inventoryId: string; availableQty: number };
 
 const getSellable = (token: string) =>
   api<{ items: SellableItem[] }>('GET', '/api/sell-orders/sellable', { token });
-
-async function firstCustomerId(token: string): Promise<string> {
-  const r = await api<{ items: { id: string }[] }>('GET', '/api/customers', { token });
-  return r.body.items[0].id;
-}
 
 async function draftFor(token: string, inventoryId: string, qty: number, price: number) {
   const customerId = await firstCustomerId(token);

@@ -6,13 +6,9 @@ import { api, multipart } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
 import { eventsOf } from './helpers/sellOrderEvents';
+import { firstCustomerId } from './helpers/fixtures';
 
 const pdf = join(__dirname, 'fixtures', 'invoice.pdf');
-
-async function firstCustomerId(token: string): Promise<string> {
-  const r = await api<{ items: { id: string }[] }>('GET', '/api/customers', { token });
-  return r.body.items[0].id;
-}
 
 describe('sell-order audit events', () => {
   beforeEach(async () => { await resetDb(); });

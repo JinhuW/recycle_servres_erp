@@ -3,6 +3,7 @@ import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
+import { firstCustomerId } from './helpers/fixtures';
 
 // `?hidePending=1` drops inventory lines already claimed by non-terminal sell
 // orders (Draft / Shipped / Awaiting payment) so a new sell order can't re-pick
@@ -10,11 +11,6 @@ import { freeSellableLine } from './helpers/inventory';
 // cover the whole lot. Done/Closed release the claim.
 describe('GET /api/inventory — hidePending filter', () => {
   beforeEach(async () => { await resetDb(); });
-
-  async function firstCustomerId(token: string): Promise<string> {
-    const r = await api<{ items: { id: string }[] }>('GET', '/api/customers', { token });
-    return r.body.items[0].id;
-  }
 
   async function draftSellOrderOn(
     token: string, line: { id: string; qty: number; sell_price: number },

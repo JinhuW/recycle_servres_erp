@@ -2,41 +2,15 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api, testEnv } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
+import { NOW, DAY, fakeProvider } from './helpers/bankProvider';
 import { syncBankTransactions } from '../src/banktx/sync';
 import { mercuryProvider, mercuryTxnCategory } from '../src/banktx/mercury';
 import { paypalTxnCategory } from '../src/banktx/paypal';
-import type { BankProvider, BankSource, KnownAccounts, NormalizedTxn } from '../src/banktx/types';
+import type { BankProvider, KnownAccounts } from '../src/banktx/types';
 import type { Env } from '../src/types';
 
-const NOW = Date.now();
-const DAY = 24 * 60 * 60 * 1000;
 const TXN_A = '7AB12345CD678901E';
 const TXN_B = '9XY98765ZW432109F';
-
-type TxnSpec = Partial<NormalizedTxn> & { externalId: string; amount: number };
-
-function fakeProvider(source: BankSource, txns: TxnSpec[]): BankProvider {
-  return {
-    source,
-    async fetchSince() {
-      return {
-        accounts: [{ externalId: `${source}-acct`, name: `${source} acct` }],
-        txns: txns.map((t) => ({
-          source,
-          accountExternalId: `${source}-acct`,
-          postedAt: new Date(NOW - DAY),
-          counterparty: null,
-          description: null,
-          paypalTxnId: source === 'paypal' ? t.externalId : null,
-          category: 'external' as const,
-          settleStatus: 'settled' as const,
-          raw: { id: t.externalId },
-          ...t,
-        })),
-      };
-    },
-  };
-}
 
 type LegRow = {
   external_id: string;
