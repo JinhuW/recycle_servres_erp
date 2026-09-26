@@ -17,6 +17,36 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.177.4] - 2026-09-26
+
+### Changed
+
+- **A behaviour-preserving cleanup across the whole repo** (RS-108). Eight
+  reviewers read the backend orders domain, the other routes, the backend
+  infrastructure, the frontend lib, both sets of desktop pages, the phone and
+  vendor shells, and the test tooling. Only changes that leave API responses,
+  error strings, status codes and the screens exactly as they were are in.
+  Copies that had to be kept in step by hand now share one helper: the PayPal
+  transaction-id canon, the PO owner change, the sell-order line insert, the
+  manager-only route guard, the OAuth scope list, the MCP tool registry,
+  `sha256hex`, `SqlLike`, `UUID_RE`, the line spec label, the phone bottom
+  sheet, the Payments popovers, the infinite-scroll sentinel, and 55 copies of
+  the locale ternary (now `useT().locale`). Dead code went: the null-actor
+  path in `orderAdvance`, a second `readRootVersion`, `OrderActivityLog`'s
+  never-used fetch, unused props, fields and exports. The PO submit helpers
+  moved out of `DesktopSubmit`, which ends its import cycle with
+  `LineDrawer`. Backend tests share fixtures for customers, sell orders, the
+  fake bank provider and the FX mock.
+- **Legacy code removed.** The retired Docker release flow is gone:
+  `scripts/release.sh`, `scripts/deploy.sh` and the `pnpm release` aliases.
+  `docker compose up -d --build` still works for self-hosting. The one-off
+  `legacy-ram-po.sql` data script and the May 2026 localStorage-to-server
+  preference migration are removed too. A browser that hasn't opened the app
+  since May starts with default column choices. The desktop sell-order inbox
+  and the sell-order picker now read `rows` from the list endpoint; the
+  backend still sends the `items` alias until a later release, so a stale
+  bundle keeps working during the deploy.
+
 ## [1.177.3] - 2026-09-25
 
 ### Fixed

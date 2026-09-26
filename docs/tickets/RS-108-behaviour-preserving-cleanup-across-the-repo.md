@@ -18,6 +18,8 @@ related: []
 
 > Fan out agents to reiew all different modules.
 
+> clean up all legacy code and unsued code.
+
 ## Context
 
 Eight read-only reviewers covered the backend orders domain, the other backend
@@ -40,3 +42,11 @@ the inventory refetch filters, the access-token TTL parse, router-level
 `requireManager` on sell orders/customers, deleting release scripts, CI changes.
 Untranslated OrderActivityLog strings and a possible stale `__genericErrorMessage`
 are real issues but not cleanups; they need their own tickets.
+
+## Notes
+
+The third ask came as the argument to `/ultrareview`, which didn't run (free
+ultrareviews used up); it was folded into this ticket after a `knip` scan.
+Follow-up, not done here: drop the `items` alias from `GET /api/sell-orders`
+one release after v1.177.4 has reached every client. The backend tests
+`sell-orders.test.ts` and `pagination.test.ts` still read it.
