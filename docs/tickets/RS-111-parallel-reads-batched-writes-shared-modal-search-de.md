@@ -2,13 +2,13 @@
 id: RS-111
 title: Parallel reads, batched writes, shared modal, search debounce, inventory reload
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-26
 reporter: jinhu
 branch: feat/rs-111-skipped-items
-pr:
-version:
+pr: "#413"
+version: 1.179.0
 related: []
 ---
 
