@@ -45,27 +45,53 @@ export type TxnRuleOrder = {
   created_at: Date;
 };
 
-async function afterCutoff(tx: SqlLike, key: string, createdAt: Date): Promise<boolean> {
-  const cutoff = await getWorkspaceSetting<string | null>(tx, key, null);
+/** The three cutoffs, read in one round-trip. Null means the rule is off,
+ *  exactly as `getWorkspaceSetting` treats an absent key or a JSON null. */
+export type Cutoffs = Readonly<Record<CutoffKey, string | null>>;
+type CutoffKey = typeof TXN_CUTOFF_KEY | typeof CHAT_CUTOFF_KEY | typeof CASH_CUTOFF_KEY;
+
+export async function readCutoffs(sql: SqlLike): Promise<Cutoffs> {
+  const rows = await sql<{ key: string; value: unknown }[]>`
+    SELECT key, value FROM workspace_settings
+    WHERE key = ANY(${[TXN_CUTOFF_KEY, CHAT_CUTOFF_KEY, CASH_CUTOFF_KEY]})
+  `;
+  const byKey = new Map(rows.map((r) => [r.key, r.value]));
+  const pick = (k: CutoffKey): string | null => (byKey.get(k) ?? null) as string | null;
+  return {
+    [TXN_CUTOFF_KEY]: pick(TXN_CUTOFF_KEY),
+    [CHAT_CUTOFF_KEY]: pick(CHAT_CUTOFF_KEY),
+    [CASH_CUTOFF_KEY]: pick(CASH_CUTOFF_KEY),
+  };
+}
+
+async function afterCutoff(
+  tx: SqlLike, key: CutoffKey, createdAt: Date, cutoffs?: Cutoffs,
+): Promise<boolean> {
+  const cutoff = cutoffs
+    ? cutoffs[key]
+    : await getWorkspaceSetting<string | null>(tx, key, null);
   return cutoff !== null && createdAt >= new Date(cutoff);
 }
 
 /** Whether the transaction-id rule governs this order at all. */
-export async function txnRequiredFor(tx: SqlLike, order: TxnRuleOrder): Promise<boolean> {
+export async function txnRequiredFor(
+  tx: SqlLike, order: TxnRuleOrder, cutoffs?: Cutoffs,
+): Promise<boolean> {
   if (order.payment !== 'company' || order.payment_method === 'cash') return false;
-  return afterCutoff(tx, TXN_CUTOFF_KEY, order.created_at);
+  return afterCutoff(tx, TXN_CUTOFF_KEY, order.created_at, cutoffs);
 }
 
 /** Whether this order is governed by the rule AND still fails it. */
 async function companyPayTxnMissing(
   tx: SqlLike,
   order: TxnRuleOrder & { paypal_txn_id: string | null },
+  cutoffs?: Cutoffs,
 ): Promise<boolean> {
   // Cheapest test first: the cutoff lookup only runs for an order that would
   // actually be blocked by it, so the common advance costs no extra query.
   if (order.payment !== 'company' || order.payment_method === 'cash') return false;
   if ((order.paypal_txn_id ?? '').trim() !== '') return false;
-  return afterCutoff(tx, TXN_CUTOFF_KEY, order.created_at);
+  return afterCutoff(tx, TXN_CUTOFF_KEY, order.created_at, cutoffs);
 }
 
 /** Whether this order is governed by the rule, names an id, and that id is
@@ -77,11 +103,12 @@ async function companyPayTxnMissing(
 export async function companyPayTxnUnknown(
   tx: SqlLike,
   order: TxnRuleOrder & { paypal_txn_id: string | null },
+  cutoffs?: Cutoffs,
 ): Promise<boolean> {
   if (order.payment !== 'company' || order.payment_method === 'cash') return false;
   const id = (order.paypal_txn_id ?? '').trim();
   if (id === '') return false;
-  if (!await afterCutoff(tx, TXN_CUTOFF_KEY, order.created_at)) return false;
+  if (!await afterCutoff(tx, TXN_CUTOFF_KEY, order.created_at, cutoffs)) return false;
   const synced = await tx`SELECT 1 FROM bank_accounts WHERE source = 'paypal' LIMIT 1`;
   if (synced.length === 0) return false;
   const hit = await tx`
@@ -93,9 +120,11 @@ export async function companyPayTxnUnknown(
 export type ChatRuleOrder = { payment: string; created_at: Date };
 
 /** Whether the chat-history rule governs this order at all. */
-export async function chatShotRequiredFor(tx: SqlLike, order: ChatRuleOrder): Promise<boolean> {
+export async function chatShotRequiredFor(
+  tx: SqlLike, order: ChatRuleOrder, cutoffs?: Cutoffs,
+): Promise<boolean> {
   if (order.payment !== 'self') return false;
-  return afterCutoff(tx, CHAT_CUTOFF_KEY, order.created_at);
+  return afterCutoff(tx, CHAT_CUTOFF_KEY, order.created_at, cutoffs);
 }
 
 /** Whether this order is governed by the chat rule AND still fails it. Any
@@ -104,9 +133,10 @@ export async function chatShotRequiredFor(tx: SqlLike, order: ChatRuleOrder): Pr
 async function selfPayChatMissing(
   tx: SqlLike,
   order: ChatRuleOrder & { id: string },
+  cutoffs?: Cutoffs,
 ): Promise<boolean> {
   if (order.payment !== 'self') return false;
-  if (!await afterCutoff(tx, CHAT_CUTOFF_KEY, order.created_at)) return false;
+  if (!await afterCutoff(tx, CHAT_CUTOFF_KEY, order.created_at, cutoffs)) return false;
   const rows = await tx`
     SELECT 1 FROM order_status_attachments
     WHERE order_id = ${order.id} AND status = 'Submission' LIMIT 1
@@ -117,18 +147,21 @@ async function selfPayChatMissing(
 export type CashRuleOrder = { payment: string; payment_method: string | null; created_at: Date };
 
 /** Whether the cash-screenshot rule governs this order at all. */
-export async function cashShotRequiredFor(tx: SqlLike, order: CashRuleOrder): Promise<boolean> {
+export async function cashShotRequiredFor(
+  tx: SqlLike, order: CashRuleOrder, cutoffs?: Cutoffs,
+): Promise<boolean> {
   if (order.payment !== 'company' || order.payment_method !== 'cash') return false;
-  return afterCutoff(tx, CASH_CUTOFF_KEY, order.created_at);
+  return afterCutoff(tx, CASH_CUTOFF_KEY, order.created_at, cutoffs);
 }
 
 /** Whether this order is governed by the cash rule AND still fails it. */
 async function companyCashShotMissing(
   tx: SqlLike,
   order: CashRuleOrder & { id: string },
+  cutoffs?: Cutoffs,
 ): Promise<boolean> {
   if (order.payment !== 'company' || order.payment_method !== 'cash') return false;
-  if (!await afterCutoff(tx, CASH_CUTOFF_KEY, order.created_at)) return false;
+  if (!await afterCutoff(tx, CASH_CUTOFF_KEY, order.created_at, cutoffs)) return false;
   const rows = await tx`
     SELECT 1 FROM order_status_attachments
     WHERE order_id = ${order.id} AND status = 'Payment' LIMIT 1
@@ -177,10 +210,20 @@ export const ENFORCED_EVERYWHERE: ReadonlySet<LeaveDraftBlocker['kind']> =
  *  added to an old Draft. First submission only: a PO back in Draft after a
  *  purchaser's edit re-submits as it was accepted, and the manager's
  *  change-review is where that edit is judged. The history read only runs
- *  for a $0 Draft, so the common advance pays nothing for it. */
-export async function leaveDraftBlockers(tx: SqlLike, o: LeaveDraftOrder): Promise<LeaveDraftBlocker[]> {
+ *  for a $0 Draft, so the common advance pays nothing for it.
+ *
+ *  `pre` hands in reads a caller already made (GET needs both for its own
+ *  response); left out, each is read here, from `tx`. */
+export async function leaveDraftBlockers(
+  tx: SqlLike,
+  o: LeaveDraftOrder,
+  pre: { cutoffs?: Cutoffs; everSubmitted?: boolean } = {},
+): Promise<LeaveDraftBlocker[]> {
+  const { cutoffs } = pre;
   const out: LeaveDraftBlocker[] = [];
-  if (!(Number(o.total_cost) > 0) && !(await wasEverSubmitted(tx, o.id))) out.push({ kind: 'noCost' });
+  if (!(Number(o.total_cost) > 0) && !(pre.everSubmitted ?? await wasEverSubmitted(tx, o.id))) {
+    out.push({ kind: 'noCost' });
+  }
   if (o.warehouse_id === null) out.push({ kind: 'missingWarehouse' });
   if (o.source === null) out.push({ kind: 'missingSource' });
   if (o.handoff_method === null || (o.handoff_method === 'pickup' && o.handoff_by === null)) {
@@ -188,9 +231,11 @@ export async function leaveDraftBlockers(tx: SqlLike, o: LeaveDraftOrder): Promi
   }
   if (o.handoff_method === 'label' && !o.has_package) out.push({ kind: 'missingTracking' });
   if (o.payment === 'company' && o.payment_method === null) out.push({ kind: 'missingMethod' });
-  if (await companyPayTxnMissing(tx, o)) out.push({ kind: 'missingTxnId' });
-  if (await companyPayTxnUnknown(tx, o)) out.push({ kind: 'unknownTxnId', paypalTxnId: o.paypal_txn_id!.trim() });
-  if (await selfPayChatMissing(tx, o)) out.push({ kind: 'missingChatShot' });
-  if (await companyCashShotMissing(tx, o)) out.push({ kind: 'missingCashShot' });
+  if (await companyPayTxnMissing(tx, o, cutoffs)) out.push({ kind: 'missingTxnId' });
+  if (await companyPayTxnUnknown(tx, o, cutoffs)) {
+    out.push({ kind: 'unknownTxnId', paypalTxnId: o.paypal_txn_id!.trim() });
+  }
+  if (await selfPayChatMissing(tx, o, cutoffs)) out.push({ kind: 'missingChatShot' });
+  if (await companyCashShotMissing(tx, o, cutoffs)) out.push({ kind: 'missingCashShot' });
   return out;
 }

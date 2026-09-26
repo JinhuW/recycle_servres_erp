@@ -5,6 +5,7 @@ import { getDb } from '../db';
 import { uploadAttachment, deleteAttachment } from '../r2';
 import { notify } from '../lib/notify';
 import { getUploadLimits } from '../lib/settings';
+import { allLimited } from '../lib/concurrency';
 import { log } from '../lib/log';
 import { clampLimit, decodeCursor, encodeCursor } from '../lib/pagination';
 import {
@@ -49,6 +50,18 @@ type SqlClient = ReturnType<typeof getDb>;
 async function loadMetaStatuses(sql: SqlClient): Promise<Set<string>> {
   const rows = await sql`SELECT id FROM sell_order_statuses WHERE needs_meta = TRUE`;
   return new Set(rows.map(r => r.id as string));
+}
+
+// Both reads at once; the caller still checks the status before the order,
+// so an unknown status answers 400 even for a missing order.
+async function metaStatusAndOrder(
+  sql: SqlClient, id: string,
+): Promise<[Set<string>, boolean]> {
+  const [metaStatusSet, rows] = await allLimited([
+    () => loadMetaStatuses(sql),
+    () => sql`SELECT 1 FROM sell_orders WHERE id = ${id} LIMIT 1`,
+  ] as const);
+  return [metaStatusSet, rows.length > 0];
 }
 
 // Payment receivers are managers only — purchasers never handle customer money.
@@ -231,7 +244,7 @@ sellOrders.get('/:id', async (c) => {
   `)[0];
   if (!head) return c.json({ error: 'Not found' }, 404);
 
-  const lines = await sql<{
+  const linesQuery = () => sql<{
     id: string; category: string; label: string; sub_label: string | null;
     part_number: string | null; qty: number; unit_price: number;
     source_unit_price: number | null;
@@ -264,6 +277,22 @@ sellOrders.get('/:id', async (c) => {
     WHERE sol.sell_order_id = ${id}
     ORDER BY sol.position
   `;
+  const [lines, metaRows, attRows, metaStatusSet] = await allLimited([
+    linesQuery,
+    // Per-status evidence (notes + attachments). The frontend expects a map
+    // keyed by status with both fields flattened together.
+    () => sql`
+      SELECT status, note, set_at FROM sell_order_status_meta
+      WHERE sell_order_id = ${id}
+    `,
+    () => sql`
+      SELECT id, status, filename, size_bytes, mime_type, delivery_url, uploaded_at
+      FROM sell_order_status_attachments
+      WHERE sell_order_id = ${id}
+      ORDER BY uploaded_at
+    `,
+    () => loadMetaStatuses(sql),
+  ] as const);
   // unit_price is always USD; source_unit_price holds the native price for
   // foreign-currency orders (null on USD orders, where native == USD).
   const subtotal = lines.reduce((a, l) => a + l.qty * l.unit_price, 0);
@@ -271,20 +300,7 @@ sellOrders.get('/:id', async (c) => {
     (a, l) => a + l.qty * (l.source_unit_price ?? l.unit_price), 0,
   );
 
-  // Pull per-status evidence (notes + attachments). The frontend expects a
-  // map keyed by status with both fields flattened together.
-  const metaRows = await sql`
-    SELECT status, note, set_at FROM sell_order_status_meta
-    WHERE sell_order_id = ${id}
-  `;
-  const attRows = await sql`
-    SELECT id, status, filename, size_bytes, mime_type, delivery_url, uploaded_at
-    FROM sell_order_status_attachments
-    WHERE sell_order_id = ${id}
-    ORDER BY uploaded_at
-  `;
   const statusMeta: Record<string, { note: string | null; when: string | null; attachments: unknown[] }> = {};
-  const metaStatusSet = await loadMetaStatuses(sql);
   for (const s of metaStatusSet) statusMeta[s] = { note: null, when: null, attachments: [] };
   // Seed on demand as well as from needs_meta: a status can carry a meta row or
   // an attachment without being flagged needs_meta (the writer keys off the
@@ -850,11 +866,9 @@ sellOrders.put('/:id/status-meta/:status', async (c) => {
   const body = (await c.req.json().catch(() => null)) as { note?: string | null } | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
   const sql = getDb(c.env);
-  const metaStatusSet = await loadMetaStatuses(sql);
-  if (!metaStatusSet.has(status)) return c.json({ error: 'invalid status' }, 400);
-
   // Ensure the order exists; otherwise the FK upsert silently inserts.
-  const exists = (await sql`SELECT 1 FROM sell_orders WHERE id = ${id} LIMIT 1`)[0];
+  const [metaStatusSet, exists] = await metaStatusAndOrder(sql, id);
+  if (!metaStatusSet.has(status)) return c.json({ error: 'invalid status' }, 400);
   if (!exists) return c.json({ error: 'Not found' }, 404);
 
   const note = (body.note ?? '').trim() || null;
@@ -891,9 +905,8 @@ sellOrders.post('/:id/status-meta/:status/attachments', async (c) => {
   const status = c.req.param('status');
 
   const sql = getDb(c.env);
-  const metaStatusSet = await loadMetaStatuses(sql);
+  const [metaStatusSet, exists] = await metaStatusAndOrder(sql, id);
   if (!metaStatusSet.has(status)) return c.json({ error: 'invalid status' }, 400);
-  const exists = (await sql`SELECT 1 FROM sell_orders WHERE id = ${id} LIMIT 1`)[0];
   if (!exists) return c.json({ error: 'Not found' }, 404);
 
   const form = await c.req.formData().catch(() => null);
@@ -1094,17 +1107,17 @@ sellOrders.post('/:id/adjust-price', async (c) => {
     // Non-USD lines re-derive the USD value at the header's frozen rate; the
     // source_* columns keep carrying the native negotiation truth.
     const isNonUsd = cur.currency_code !== 'USD';
-    for (let i = 0; i < lines.length; i++) {
-      const usd = isNonUsd
-        ? convertToUsd(prices[i], cur.fx_rate_to_usd)
-        : prices[i];
-      await tx`
-        UPDATE sell_order_lines
-        SET unit_price = ${usd},
-            source_unit_price = ${isNonUsd ? prices[i] : null}
-        WHERE id = ${lines[i].id}
-      `;
-    }
+    const usdPrices = prices.map((p) => isNonUsd ? convertToUsd(p, cur.fx_rate_to_usd) : p);
+    const nativePrices = prices.map((p) => isNonUsd ? p : null);
+    // The array casts are load-bearing: on a USD order the native array is all
+    // nulls, which carries no type of its own.
+    await tx`
+      UPDATE sell_order_lines sol
+      SET unit_price = v.usd, source_unit_price = v.native
+      FROM unnest(${lines.map((l) => l.id)}::uuid[], ${usdPrices}::numeric[],
+                  ${nativePrices}::numeric[]) AS v(id, usd, native)
+      WHERE sol.id = v.id
+    `;
 
     // Baseline is the first pre-negotiation total; later adjustments only move
     // adjusted_at/by so the badge always compares first-quoted vs current.
@@ -1307,34 +1320,37 @@ sellOrders.post('/:id/status', async (c) => {
         goodsFollowsLines.set(o.order_id, await goodsTotalIsMirror(tx, o.order_id));
       }
 
-      const sold = await tx<{ line_id: string; remaining: number; sold: number }[]>`
-        UPDATE order_lines ol
-           SET qty    = CASE WHEN ol.qty - s.q <= 0 THEN ol.qty ELSE ol.qty - s.q END,
-               status = CASE WHEN ol.qty - s.q <= 0 THEN 'Sold' ELSE ol.status END,
-               -- A partial sale is the moment qty stops meaning "how many were
-               -- bought", so the PO's goods total needs that number kept here
-               -- before the decrement below overwrites it. Selling a line out
-               -- leaves qty alone, so it still speaks for both.
-               qty_purchased = CASE WHEN ol.qty - s.q <= 0 THEN ol.qty_purchased
-                                    ELSE COALESCE(ol.qty_purchased, ol.qty) END
-          FROM (
-            SELECT inventory_id, SUM(qty)::int AS q
-            FROM sell_order_lines
-            WHERE sell_order_id = ${id} AND inventory_id IS NOT NULL
-            GROUP BY inventory_id
-          ) s
-         WHERE s.inventory_id = ol.id
-        RETURNING ol.id AS line_id,
-                  CASE WHEN ol.status = 'Sold' THEN 0 ELSE ol.qty END AS remaining,
-                  s.q AS sold
+      // The decrement and its audit rows are one statement: `sold` feeds the
+      // inserts directly, with the same detail keys each row used to be
+      // written with one at a time.
+      await tx`
+        WITH sold AS (
+          UPDATE order_lines ol
+             SET qty    = CASE WHEN ol.qty - s.q <= 0 THEN ol.qty ELSE ol.qty - s.q END,
+                 status = CASE WHEN ol.qty - s.q <= 0 THEN 'Sold' ELSE ol.status END,
+                 -- A partial sale is the moment qty stops meaning "how many were
+                 -- bought", so the PO's goods total needs that number kept here
+                 -- before the decrement below overwrites it. Selling a line out
+                 -- leaves qty alone, so it still speaks for both.
+                 qty_purchased = CASE WHEN ol.qty - s.q <= 0 THEN ol.qty_purchased
+                                      ELSE COALESCE(ol.qty_purchased, ol.qty) END
+            FROM (
+              SELECT inventory_id, SUM(qty)::int AS q
+              FROM sell_order_lines
+              WHERE sell_order_id = ${id} AND inventory_id IS NOT NULL
+              GROUP BY inventory_id
+            ) s
+           WHERE s.inventory_id = ol.id
+          RETURNING ol.id AS line_id,
+                    CASE WHEN ol.status = 'Sold' THEN 0 ELSE ol.qty END AS remaining,
+                    s.q AS sold
+        )
+        INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
+        SELECT r.line_id, ${u.id}::uuid, 'sold',
+               jsonb_build_object('soldQty', r.sold, 'remainingQty', r.remaining,
+                                  'sellOrder', ${id}::text)
+        FROM sold r
       `;
-      for (const r of sold) {
-        await tx`
-          INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
-          VALUES (${r.line_id}, ${u.id}, 'sold',
-                  ${tx.json({ soldQty: r.sold, remainingQty: r.remaining, sellOrder: id })})
-        `;
-      }
       for (const [orderId, isMirror] of goodsFollowsLines) {
         await syncOrderGoodsTotal(tx, orderId, isMirror);
       }

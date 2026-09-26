@@ -707,9 +707,10 @@ export const oauthAdmin = new Hono<{ Bindings: Env; Variables: { user: User } }>
     // only, so a healthy scraper has no refresh token to show for itself.
     // The hour of grace protects a connector that has registered but not
     // finished its consent yet; without it, cleaning up mid-setup silently
-    // breaks the flow the user is in.
+    // breaks the flow the user is in. The predicate already excludes every
+    // client with a live family, so there is nothing to cascade.
     const stale = await sql<{ id: string }[]>`
-      SELECT id FROM oauth_clients c
+      UPDATE oauth_clients c SET revoked_at = NOW()
       WHERE c.revoked_at IS NULL
         AND c.created_at < NOW() - INTERVAL '1 hour'
         AND NOT ('client_credentials' = ANY(c.grant_types))
@@ -717,8 +718,8 @@ export const oauthAdmin = new Hono<{ Bindings: Env; Variables: { user: User } }>
           SELECT 1 FROM oauth_refresh_tokens rt
           WHERE rt.client_id = c.id AND rt.revoked_at IS NULL
         )
+      RETURNING c.id
     `;
-    for (const { id } of stale) await revokeOAuthClient(sql, id);
     return c.json({ revoked: stale.length });
   })
   .delete('/:id', async (c) => {

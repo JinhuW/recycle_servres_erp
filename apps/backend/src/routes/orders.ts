@@ -20,7 +20,10 @@ import {
   LINE_STATUS_FOR_LIFECYCLE, LIFECYCLE_LABEL, isClosedBook, lifecyclesForLabel, visibleLifecycle,
   type ArchiveSellOrderConflict,
 } from '../services/orderAdvance';
-import { txnRequiredFor, chatShotRequiredFor, cashShotRequiredFor, companyPayTxnUnknown } from '../services/orderTxnRule';
+import {
+  txnRequiredFor, chatShotRequiredFor, cashShotRequiredFor, companyPayTxnUnknown, readCutoffs,
+} from '../services/orderTxnRule';
+import { allLimited } from '../lib/concurrency';
 import { syncOrderCategory, deriveCategory, sortCategories } from '../services/orderCategory';
 import { insertDraftOrderTx } from '../services/orderDraft';
 import {
@@ -644,64 +647,117 @@ orders.get('/:id', async (c) => {
   if (!order) return c.json({ error: 'Not found' }, 404);
   if (!isManager && order.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
 
-  // `fs` is what the units actually sold for — the qty-weighted unit price
-  // over Done sell orders naming the line — as opposed to `sell_price`, the
-  // projection that feeds commission. A partial sale leaves the remainder in
-  // `qty`, so the sold count travels with the price.
-  const lines = await sql`
-    SELECT ol.id, ol.category, ol.brand, ol.capacity, ol.generation, ol.type, ol.classification,
-           ol.rank, ol.speed, ol.interface, ol.form_factor, ol.description, ol.item_type,
-           ol.part_number, ol.serial_number, ol.chip_number, ol.condition, ol.qty,
-           ol.unit_cost::float AS unit_cost, ol.sell_price::float AS sell_price,
-           ol.status, ol.scan_image_id, ol.scan_confidence, ol.position,
-           ol.health::float AS health, ol.rpm,
-           ls.delivery_url AS scan_image_url,
-           fs.final_sell_price, fs.sold_qty
-    FROM order_lines ol
-    LEFT JOIN label_scans ls ON ls.cf_image_id = ol.scan_image_id
-    LEFT JOIN LATERAL (
-      SELECT SUM(sol.qty)::int AS sold_qty,
-             (SUM(sol.qty * sol.unit_price) / SUM(sol.qty))::float AS final_sell_price
-      FROM sell_order_lines sol
-      JOIN sell_orders so ON so.id = sol.sell_order_id
-      WHERE sol.inventory_id = ol.id AND so.status = 'Done'
-    ) fs ON TRUE
-    WHERE ol.order_id = ${id}
-    ORDER BY ol.position ASC
-  `;
-
-  // The sell orders that sold this PO's units — Done only, the same set the
-  // final sell price reads. An archived Done order still sold them, so it stays.
-  const sellOrders = isManager ? await sql<{ id: string; customer: string; qty: number }[]>`
-    SELECT so.id, COALESCE(c.short_name, c.name) AS customer, SUM(sol.qty)::int AS qty
-    FROM sell_order_lines sol
-    JOIN order_lines ol ON ol.id = sol.inventory_id
-    JOIN sell_orders so ON so.id = sol.sell_order_id
-    JOIN customers c ON c.id = so.customer_id
-    WHERE ol.order_id = ${id} AND so.status = 'Done'
-    GROUP BY so.id, c.short_name, c.name
-    ORDER BY so.id
-  ` : null;
-
   const lifecycle = visibleLifecycle(order.lifecycle as string, role);
   const status = LIFECYCLE_LABEL[lifecycle] ?? lifecycle;
 
-  // Per-status evidence (note + attachments) — currently captured only for
-  // Done. Same response shape as sell orders' statusMeta.
-  const metaRows = await sql`
-    SELECT status, note, set_at FROM order_status_meta WHERE order_id = ${id}
-  `;
-  const attRows = await sql`
-    SELECT id, status, filename, size_bytes, mime_type, delivery_url, uploaded_at
-    FROM order_status_attachments WHERE order_id = ${id} ORDER BY uploaded_at
-  `;
-  // One flat select stitched in JS rather than a lateral per line — same shape
-  // as the status-meta rows above.
-  const photoRows = await sql`
-    SELECT id, order_line_id, filename, size_bytes, mime_type, delivery_url, uploaded_at
-    FROM order_line_photos WHERE order_id = ${id}
-    ORDER BY order_line_id, position, uploaded_at
-  `;
+  // Both feed several reads below, so each is read once up front.
+  const [cutoffs, everSubmitted] = await allLimited([
+    () => readCutoffs(sql),
+    () => wasEverSubmitted(sql, id),
+  ] as const);
+
+  const [lines, sellOrders, metaRows, attRows, photoRows,
+    txnRequired, chatShotRequired, cashShotRequired, blockers, pendingRevert] = await allLimited([
+    // `fs` is what the units actually sold for — the qty-weighted unit price
+    // over Done sell orders naming the line — as opposed to `sell_price`, the
+    // projection that feeds commission. A partial sale leaves the remainder in
+    // `qty`, so the sold count travels with the price.
+    () => sql`
+      SELECT ol.id, ol.category, ol.brand, ol.capacity, ol.generation, ol.type, ol.classification,
+             ol.rank, ol.speed, ol.interface, ol.form_factor, ol.description, ol.item_type,
+             ol.part_number, ol.serial_number, ol.chip_number, ol.condition, ol.qty,
+             ol.unit_cost::float AS unit_cost, ol.sell_price::float AS sell_price,
+             ol.status, ol.scan_image_id, ol.scan_confidence, ol.position,
+             ol.health::float AS health, ol.rpm,
+             ls.delivery_url AS scan_image_url,
+             fs.final_sell_price, fs.sold_qty
+      FROM order_lines ol
+      LEFT JOIN label_scans ls ON ls.cf_image_id = ol.scan_image_id
+      LEFT JOIN LATERAL (
+        SELECT SUM(sol.qty)::int AS sold_qty,
+               (SUM(sol.qty * sol.unit_price) / SUM(sol.qty))::float AS final_sell_price
+        FROM sell_order_lines sol
+        JOIN sell_orders so ON so.id = sol.sell_order_id
+        WHERE sol.inventory_id = ol.id AND so.status = 'Done'
+      ) fs ON TRUE
+      WHERE ol.order_id = ${id}
+      ORDER BY ol.position ASC
+    `,
+    // The sell orders that sold this PO's units — Done only, the same set the
+    // final sell price reads. An archived Done order still sold them, so it stays.
+    async () => isManager ? await sql<{ id: string; customer: string; qty: number }[]>`
+      SELECT so.id, COALESCE(c.short_name, c.name) AS customer, SUM(sol.qty)::int AS qty
+      FROM sell_order_lines sol
+      JOIN order_lines ol ON ol.id = sol.inventory_id
+      JOIN sell_orders so ON so.id = sol.sell_order_id
+      JOIN customers c ON c.id = so.customer_id
+      WHERE ol.order_id = ${id} AND so.status = 'Done'
+      GROUP BY so.id, c.short_name, c.name
+      ORDER BY so.id
+    ` : null,
+    // Per-status evidence (note + attachments) — currently captured only for
+    // Done. Same response shape as sell orders' statusMeta.
+    () => sql`
+      SELECT status, note, set_at FROM order_status_meta WHERE order_id = ${id}
+    `,
+    () => sql`
+      SELECT id, status, filename, size_bytes, mime_type, delivery_url, uploaded_at
+      FROM order_status_attachments WHERE order_id = ${id} ORDER BY uploaded_at
+    `,
+    // One flat select stitched in JS rather than a lateral per line — same shape
+    // as the status-meta rows above.
+    () => sql`
+      SELECT id, order_line_id, filename, size_bytes, mime_type, delivery_url, uploaded_at
+      FROM order_line_photos WHERE order_id = ${id}
+      ORDER BY order_line_id, position, uploaded_at
+    `,
+    // Whether the company-pay transaction-id rule governs this order. The cutoff
+    // it depends on lives in the DB, so a shell that decided for itself would
+    // block exactly the pre-cutoff drafts the rule exempts.
+    () => txnRequiredFor(
+      sql, order as { payment: string; payment_method: string | null; created_at: Date }, cutoffs),
+    () => chatShotRequiredFor(
+      sql, order as { payment: string; created_at: Date }, cutoffs),
+    () => cashShotRequiredFor(
+      sql, order as { payment: string; payment_method: string | null; created_at: Date }, cutoffs),
+    // Everything still between this Draft and In Transit, in display order —
+    // the same list the hand-off refuses on, read locally (no PayPal pull). A
+    // non-Draft has nothing between it and anywhere.
+    async () => order.lifecycle === 'draft' && !order.archived_at
+      ? (await leaveDraftBlockers(sql, {
+        id: order.id as string, payment: order.payment as string,
+        payment_method: order.payment_method as string | null,
+        paypal_txn_id: order.paypal_txn_id as string | null,
+        created_at: order.created_at as Date, total_cost: order.total_cost as number | null,
+        warehouse_id: order.warehouse_id as string | null,
+        source: order.source as string | null, handoff_method: order.handoff_method as string | null,
+        handoff_by: order.handoff_by as string | null, has_package: order.pkg != null,
+      }, { cutoffs, everSubmitted })).map((b) => b.kind)
+      : [],
+    // Changes a purchaser made after submitting, that no manager has looked at
+    // yet — the edit page opens a review dialog on them. Managers only: the
+    // purchaser is the one who made the changes, and the key is left out rather
+    // than nulled so the response doesn't name the review at all.
+    async () => isManager
+      ? (await sql`
+          SELECT e.id, e.detail, e.created_at,
+                 act.id AS actor_id, act.name AS actor_name, act.initials AS actor_initials
+          FROM order_events e
+          LEFT JOIN users act ON act.id = e.actor_id
+          WHERE e.order_id = ${id} AND e.kind = 'reverted'
+            AND ${unackedRevertFrag(sql, id)}
+          ORDER BY e.created_at DESC, e.id DESC
+        `).map(r => ({
+          id: r.id,
+          createdAt: r.created_at,
+          detail: r.detail,
+          actor: r.actor_id
+            ? { id: r.actor_id, name: r.actor_name ?? '', initials: r.actor_initials ?? '' }
+            : null,
+        }))
+      : undefined,
+  ] as const);
+
   const photosByLine = new Map<string, LinePhoto[]>();
   for (const p of photoRows) {
     const key = p.order_line_id as string;
@@ -715,53 +771,6 @@ orders.get('/:id', async (c) => {
       uploadedAt: String(p.uploaded_at),
     });
   }
-  const everSubmitted = await wasEverSubmitted(sql, id);
-  // Whether the company-pay transaction-id rule governs this order. The cutoff
-  // it depends on lives in the DB, so a shell that decided for itself would
-  // block exactly the pre-cutoff drafts the rule exempts.
-  const txnRequired = await txnRequiredFor(
-    sql, order as { payment: string; payment_method: string | null; created_at: Date });
-  const chatShotRequired = await chatShotRequiredFor(
-    sql, order as { payment: string; created_at: Date });
-  const cashShotRequired = await cashShotRequiredFor(
-    sql, order as { payment: string; payment_method: string | null; created_at: Date });
-  // Everything still between this Draft and In Transit, in display order —
-  // the same list the hand-off refuses on, read locally (no PayPal pull). A
-  // non-Draft has nothing between it and anywhere.
-  const blockers = order.lifecycle === 'draft' && !order.archived_at
-    ? (await leaveDraftBlockers(sql, {
-      id: order.id as string, payment: order.payment as string,
-      payment_method: order.payment_method as string | null,
-      paypal_txn_id: order.paypal_txn_id as string | null,
-      created_at: order.created_at as Date, total_cost: order.total_cost as number | null,
-      warehouse_id: order.warehouse_id as string | null,
-      source: order.source as string | null, handoff_method: order.handoff_method as string | null,
-      handoff_by: order.handoff_by as string | null, has_package: order.pkg != null,
-    })).map((b) => b.kind)
-    : [];
-
-  // Changes a purchaser made after submitting, that no manager has looked at
-  // yet — the edit page opens a review dialog on them. Managers only: the
-  // purchaser is the one who made the changes, and the key is left out rather
-  // than nulled so the response doesn't name the review at all.
-  const pendingRevert = isManager
-    ? (await sql`
-        SELECT e.id, e.detail, e.created_at,
-               act.id AS actor_id, act.name AS actor_name, act.initials AS actor_initials
-        FROM order_events e
-        LEFT JOIN users act ON act.id = e.actor_id
-        WHERE e.order_id = ${id} AND e.kind = 'reverted'
-          AND ${unackedRevertFrag(sql, id)}
-        ORDER BY e.created_at DESC, e.id DESC
-      `).map(r => ({
-        id: r.id,
-        createdAt: r.created_at,
-        detail: r.detail,
-        actor: r.actor_id
-          ? { id: r.actor_id, name: r.actor_name ?? '', initials: r.actor_initials ?? '' }
-          : null,
-      }))
-    : undefined;
 
   const statusMeta: Record<string, {
     note: string | null; when: string;
@@ -1216,27 +1225,14 @@ orders.post('/', async (c) => {
         ${body.supplierId ?? null}, ${newPaypalTxnId}
       )
     `;
-    for (let i = 0; i < body.lines.length; i++) {
-      const l = body.lines[i];
-      const inserted = await tx`
-        INSERT INTO order_lines (
-          order_id, category, brand, capacity, generation, type, classification, rank, speed,
-          interface, form_factor, description, item_type, part_number, serial_number, chip_number, condition, qty,
-          unit_cost, sell_price, status, scan_image_id, scan_confidence, position,
-          health, rpm
-        ) VALUES (
-          ${newId}, ${lineCats[i]}, ${l.brand ?? null}, ${l.capacity ?? null}, ${l.generation ?? null}, ${l.type ?? null},
-          ${l.classification ?? null}, ${l.rank ?? null}, ${l.speed ?? null},
-          ${l.interface ?? null}, ${l.formFactor ?? null}, ${l.description ?? null}, ${l.itemType?.trim() || null},
-          ${resolvePartNumber(lineCats[i], l)}, ${l.serialNumber ?? null}, ${canonChipNumber(l.chipNumber)}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty},
-          ${l.unitCost}, ${normSellPrice(l.sellPrice)}, 'Draft',
-          ${l.scanImageId ?? null}, ${l.scanConfidence ?? null}, ${i},
-          ${l.health ?? null}, ${l.rpm ?? null}
-        )
-        RETURNING id
-      ` as { id: string }[];
-      newLineIds.push(inserted[0].id);
-    }
+    const lineRows = body.lines.map((l, i) => newLineRow(newId, lineCats[i], l, {
+      qty: l.qty, unitCost: l.unitCost, status: 'Draft', position: i,
+    }));
+    // RETURNING carries no promise about row order; position is the request's.
+    const inserted = await tx<{ id: string; position: number }[]>`
+      INSERT INTO order_lines ${tx(lineRows)} RETURNING id, position
+    `;
+    for (const r of [...inserted].sort((a, b) => a.position - b.position)) newLineIds.push(r.id);
     await autoTrackParts(tx, body.lines.map((l, i) => trackInput(l, lineCats[i])));
 
     // Written before the event so `created` carries the value the order
@@ -1312,6 +1308,30 @@ type LineFields = {
 };
 type LinePatch = LineFields & { id: string };
 type LineInput = LineFields & { qty: number; unitCost: number };
+
+// One new order_lines row for a multi-row insert. POST and PATCH's addLines
+// differ only in the defaults they hand in. Optional fields are nulled here
+// because postgres.js refuses an undefined value; qty and unit cost are passed
+// through as each route has always sent them.
+function newLineRow(
+  orderId: string,
+  cat: string,
+  l: LineFields,
+  d: { qty: number | undefined; unitCost: number | undefined; status: string; position: number },
+) {
+  return {
+    order_id: orderId, category: cat,
+    brand: l.brand ?? null, capacity: l.capacity ?? null, generation: l.generation ?? null,
+    type: l.type ?? null, classification: l.classification ?? null, rank: l.rank ?? null,
+    speed: l.speed ?? null, interface: l.interface ?? null, form_factor: l.formFactor ?? null,
+    description: l.description ?? null, item_type: l.itemType?.trim() || null,
+    part_number: resolvePartNumber(cat, l), serial_number: l.serialNumber ?? null,
+    chip_number: canonChipNumber(l.chipNumber), condition: l.condition ?? 'Pulled — Tested',
+    qty: d.qty, unit_cost: d.unitCost, sell_price: normSellPrice(l.sellPrice), status: d.status,
+    scan_image_id: l.scanImageId ?? null, scan_confidence: l.scanConfidence ?? null,
+    position: d.position, health: l.health ?? null, rpm: l.rpm ?? null,
+  };
+}
 
 // What market tracking learns from a line as it is created.
 function trackInput(l: LineFields, cat: string): TrackablePart {
@@ -2094,32 +2114,19 @@ orders.patch('/:id', async (c) => {
         // New lines default to the order's category. Position appends after
         // current max so they sort to the end.
         const posRow = (await tx`SELECT COALESCE(MAX(position), -1) AS p FROM order_lines WHERE order_id = ${id}`)[0] as { p: number };
-        let pos = posRow.p + 1;
-        for (let i = 0; i < body.addLines.length; i++) {
-          const l = body.addLines[i];
-          const cat = addCats[i];
-          const inserted = await tx`
-            INSERT INTO order_lines (
-              order_id, category, brand, capacity, generation, type, classification, rank, speed,
-              interface, form_factor, description, item_type, part_number, serial_number, chip_number, condition, qty,
-              unit_cost, sell_price, status, scan_image_id, scan_confidence, position,
-              health, rpm
-            ) VALUES (
-              ${id}, ${cat},
-              ${l.brand ?? null}, ${l.capacity ?? null}, ${l.generation ?? null}, ${l.type ?? null},
-              ${l.classification ?? null}, ${l.rank ?? null}, ${l.speed ?? null},
-              ${l.interface ?? null}, ${l.formFactor ?? null}, ${l.description ?? null}, ${l.itemType?.trim() || null},
-              ${resolvePartNumber(cat, l)}, ${l.serialNumber ?? null}, ${canonChipNumber(l.chipNumber)}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty ?? 1},
-              ${l.unitCost ?? 0}, ${normSellPrice(l.sellPrice)},
-              ${LINE_STATUS_FOR_LIFECYCLE[lifecycleAfter] ?? 'In Transit'},
-              ${l.scanImageId ?? null}, ${l.scanConfidence ?? null}, ${pos++},
-              ${l.health ?? null}, ${l.rpm ?? null}
-            )
-            RETURNING id, category, part_number, qty, unit_cost::float AS unit_cost
-          ` as LineSnapRow[];
-          addedRows.push(inserted[0]);
-          addedLineIds.push(inserted[0].id);
-        }
+        const status = LINE_STATUS_FOR_LIFECYCLE[lifecycleAfter] ?? 'In Transit';
+        const lineRows = body.addLines.map((l, i) => newLineRow(id, addCats[i], l, {
+          qty: l.qty ?? 1, unitCost: l.unitCost ?? 0, status, position: posRow.p + 1 + i,
+        }));
+        // Re-sorted so addedLineIds lines up 1:1 with the request's addLines.
+        const inserted = await tx<(LineSnapRow & { position: number })[]>`
+          INSERT INTO order_lines ${tx(lineRows)}
+          RETURNING id, category, part_number, qty, unit_cost::float AS unit_cost, position
+        `;
+        addedRows = [...inserted]
+          .sort((a, b) => a.position - b.position)
+          .map(({ position: _position, ...row }) => row);
+        for (const r of addedRows) addedLineIds.push(r.id);
         await autoTrackParts(tx, body.addLines.map((l, i) => trackInput(l, addCats[i])));
       }
 
