@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Icon } from '../../components/Icon';
+import { Modal } from '../../components/Modal';
 import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { fmtUSD } from '../../lib/format';
 import { useT } from '../../lib/i18n';
-import { useEscapeKey } from '../../lib/useEscapeKey';
 import { ConfirmDialog } from './settings/dialogs';
 
 // The taught form of Ignore. A rule is a case-insensitive "contains" on the
@@ -47,7 +47,6 @@ export function PaymentIgnoreRules({ onClose, onChanged, onToast }: {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<Rule | null>(null);
-  useEscapeKey(onClose, !deleting);
 
   const load = useCallback(() => {
     api.get<{ rules: Rule[] }>('/api/bank-transactions/ignore-rules')
@@ -108,8 +107,8 @@ export function PaymentIgnoreRules({ onClose, onChanged, onToast }: {
   const edit = (rule: Rule) => setDraft({ id: rule.id, label: rule.label, source: rule.source, pattern: rule.pattern });
 
   return (
-    <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="modal-shell" style={{ maxWidth: 720 }}>
+    <>
+      <Modal onClose={() => { if (!deleting) onClose(); }} shellStyle={{ maxWidth: 720 }}>
         <div className="modal-head">
           <div>
             <div className="modal-title">{t('payIgnoreRules')}</div>
@@ -205,7 +204,7 @@ export function PaymentIgnoreRules({ onClose, onChanged, onToast }: {
         <div className="modal-foot">
           <button type="button" className="btn" onClick={onClose}>{t('close')}</button>
         </div>
-      </div>
+      </Modal>
       {deleting && (
         <ConfirmDialog
           title={t('payRuleDeleteTitle')}
@@ -216,6 +215,6 @@ export function PaymentIgnoreRules({ onClose, onChanged, onToast }: {
           onConfirm={() => void remove(deleting)}
         />
       )}
-    </div>
+    </>
   );
 }

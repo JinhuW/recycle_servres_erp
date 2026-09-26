@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
+import { Modal } from '../../components/Modal';
 import {
   StatusChangeDialog, type MetaStatus, type StatusAttachment,
 } from '../../components/StatusChangeDialog';
@@ -11,7 +12,6 @@ import { api, archiveSellOrder, unarchiveSellOrder } from '../../lib/api';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { useRoute, navigate, match } from '../../lib/route';
 import { RouteLink } from '../../components/RouteLink';
-import { useEscapeKey } from '../../lib/useEscapeKey';
 import { shareOrCopy } from '../../lib/shareOrCopy';
 import { fmtUSD, fmtUSD0, fmtMoney, fmtDate, fmtDateShort, CURRENCY_SYMBOL } from '../../lib/format';
 import { fetchRateToUsd, type FxInfo } from '../../lib/fxRate';
@@ -707,8 +707,6 @@ export function SellOrderDetail({
     return () => { alive = false; };
   }, []);
 
-  useEscapeKey(onClose);
-
   // "locked" = no structural edits or status moves allowed. Done is the
   // terminal happy path; Closed is the off-ramp (line set + customer + status
   // are all frozen until the order is Reopened). Both the list-page edit
@@ -959,638 +957,639 @@ export function SellOrderDetail({
 
   return (
     <>
-    <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="modal-shell" style={{ maxWidth: editable ? 1100 : 760, width: 'calc(100vw - 80px)' }}>
-        <div style={{ padding: '18px 24px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            {order && (
-              <>
-                <div style={{ fontSize: 11, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4, display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <span className="mono">{order.id}</span>
-                  <span className={'chip dot ' + toneFor(order.status)}>{order.status}</span>
-                  {order.currency !== 'USD' && (
-                    <span
-                      className="chip muted"
-                      style={{ fontSize: 10 }}
-                      title={t('soFxRateNote', { rate: (1 / order.fxRateToUsd).toFixed(4), currency: order.currency, source: order.fxSource })}
-                    >
-                      {order.currency}
-                    </span>
-                  )}
-                  {editable && <span className="chip accent" style={{ fontSize: 10 }}>Editing</span>}
-                </div>
-                <h2 style={{ fontSize: 19, fontWeight: 600, margin: 0 }}>{order.customer.name}</h2>
-                <div style={{ fontSize: 12, color: 'var(--fg-subtle)', marginTop: 4 }}>
-                  {t('soColCreated')} {fmtDate(order.createdAt, locale)} · {t('soColUpdated')} {fmtDate(order.updatedAt, locale)} · {order.customer.region}
-                </div>
-              </>
-            )}
-            {!order && (
-            <div style={{ flex: 1, minWidth: 280 }}>
-              <div style={{ marginBottom: 6 }}>
-                <span className="skeleton" style={{ width: 90, height: 10, borderRadius: 4, display: 'inline-block' }} aria-hidden />
-              </div>
-              <span className="skeleton" style={{ width: 220, height: 22, borderRadius: 6, display: 'inline-block', marginBottom: 6 }} aria-hidden />
-              <div>
-                <span className="skeleton" style={{ width: 180, height: 11, borderRadius: 4, display: 'inline-block' }} aria-hidden />
-              </div>
-            </div>
-          )}
-          </div>
-          <button className="btn icon" onClick={onClose}><Icon name="x" size={16} /></button>
-        </div>
-
-        <div style={{ padding: '18px 24px', overflowY: 'auto', flex: 1, maxHeight: '70vh' }}>
-          {!order ? (
-            <FormSkeleton fields={6} withHeader={false} />
-          ) : order && draft ? (
+    <Modal
+      onClose={() => { if (!saving && !unarchiving) onClose(); }}
+      shellStyle={{ maxWidth: editable ? 1100 : 760, width: 'calc(100vw - 80px)' }}
+    >
+      <div style={{ padding: '18px 24px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          {order && (
             <>
-              {order.status === 'Closed' && (
+              <div style={{ fontSize: 11, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4, display: 'flex', gap: 8, alignItems: 'center' }}>
+                <span className="mono">{order.id}</span>
+                <span className={'chip dot ' + toneFor(order.status)}>{order.status}</span>
+                {order.currency !== 'USD' && (
+                  <span
+                    className="chip muted"
+                    style={{ fontSize: 10 }}
+                    title={t('soFxRateNote', { rate: (1 / order.fxRateToUsd).toFixed(4), currency: order.currency, source: order.fxSource })}
+                  >
+                    {order.currency}
+                  </span>
+                )}
+                {editable && <span className="chip accent" style={{ fontSize: 10 }}>Editing</span>}
+              </div>
+              <h2 style={{ fontSize: 19, fontWeight: 600, margin: 0 }}>{order.customer.name}</h2>
+              <div style={{ fontSize: 12, color: 'var(--fg-subtle)', marginTop: 4 }}>
+                {t('soColCreated')} {fmtDate(order.createdAt, locale)} · {t('soColUpdated')} {fmtDate(order.updatedAt, locale)} · {order.customer.region}
+              </div>
+            </>
+          )}
+          {!order && (
+          <div style={{ flex: 1, minWidth: 280 }}>
+            <div style={{ marginBottom: 6 }}>
+              <span className="skeleton" style={{ width: 90, height: 10, borderRadius: 4, display: 'inline-block' }} aria-hidden />
+            </div>
+            <span className="skeleton" style={{ width: 220, height: 22, borderRadius: 6, display: 'inline-block', marginBottom: 6 }} aria-hidden />
+            <div>
+              <span className="skeleton" style={{ width: 180, height: 11, borderRadius: 4, display: 'inline-block' }} aria-hidden />
+            </div>
+          </div>
+        )}
+        </div>
+        <button className="btn icon" onClick={onClose}><Icon name="x" size={16} /></button>
+      </div>
+
+      <div style={{ padding: '18px 24px', overflowY: 'auto', flex: 1, maxHeight: '70vh' }}>
+        {!order ? (
+          <FormSkeleton fields={6} withHeader={false} />
+        ) : order && draft ? (
+          <>
+            {order.status === 'Closed' && (
+              <div style={{
+                marginBottom: 18, padding: '10px 14px', borderRadius: 8,
+                background: 'var(--bg-soft)', border: '1px solid var(--border)',
+                fontSize: 12.5, color: 'var(--fg-muted)',
+                display: 'flex', alignItems: 'flex-start', gap: 8,
+              }}>
+                <Icon name="x" size={13} style={{ marginTop: 2, color: 'var(--fg-subtle)' }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, color: 'var(--fg)' }}>
+                    Closed{closeReasonLabel ? ` — ${closeReasonLabel}` : ''}
+                  </div>
+                  {closedNote && (
+                    <div style={{ marginTop: 2, color: 'var(--fg-subtle)' }}>{closedNote}</div>
+                  )}
+                </div>
+              </div>
+            )}
+            {editable && (
+              <div style={{ marginBottom: 18 }}>
                 <div style={{
-                  marginBottom: 18, padding: '10px 14px', borderRadius: 8,
-                  background: 'var(--bg-soft)', border: '1px solid var(--border)',
-                  fontSize: 12.5, color: 'var(--fg-muted)',
-                  display: 'flex', alignItems: 'flex-start', gap: 8,
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
+                  textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10,
                 }}>
-                  <Icon name="x" size={13} style={{ marginTop: 2, color: 'var(--fg-subtle)' }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, color: 'var(--fg)' }}>
-                      Closed{closeReasonLabel ? ` — ${closeReasonLabel}` : ''}
-                    </div>
-                    {closedNote && (
-                      <div style={{ marginTop: 2, color: 'var(--fg-subtle)' }}>{closedNote}</div>
-                    )}
-                  </div>
-                </div>
-              )}
-              {editable && (
-                <div style={{ marginBottom: 18 }}>
-                  <div style={{
-                    display: 'flex', alignItems: 'center', gap: 8,
-                    fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
-                    textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10,
-                  }}>
-                    <Icon name="flag" size={12} /> Order status
-                    <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
-                      Manually advance as the deal progresses
-                    </span>
-                  </div>
-                  <div className="so-stepper">
-                    {stepperStatuses.map(({ id: s }, i) => {
-                      const currentIdx = stepperStatuses.findIndex(o => o.id === draft.status);
-                      const active = s === draft.status;
-                      const reached = currentIdx >= 0 && i <= currentIdx;
-                      const meta = needsDialog(s) ? statusMeta?.[s] : null;
-                      const hasMeta = !!meta && (!!meta.note || meta.attachments.length > 0);
-                      const dialog = needsDialog(s);
-                      return (
-                        <Fragment key={s}>
-                          <button
-                            type="button"
-                            className={'so-step' + (active ? ' active' : '') + (reached ? ' reached' : '')}
-                            onClick={() => {
-                              // Re-open the dialog even on the current status so the
-                              // user can come back and add more notes / attachments.
-                              if (dialog) setPending(s);
-                              else setDraft({ ...draft, status: s });
-                            }}
-                            title={dialog
-                              ? (s === draft.status
-                                  ? `Edit tracking note / attachments for ${s}`
-                                  : `Advance to ${s} (add tracking note / attachments)`)
-                              : `Set status to ${s}`}
-                          >
-                            <span className="so-step-dot">{i + 1}</span>
-                            <span className="so-step-label">
-                              {s}
-                              {hasMeta && (
-                                <span
-                                  title={t('soTrackingRecorded')}
-                                  style={{
-                                    marginLeft: 6, display: 'inline-flex',
-                                    alignItems: 'center', color: 'var(--accent-strong)',
-                                  }}
-                                >
-                                  <Icon name="paperclip" size={11} />
-                                </span>
-                              )}
-                            </span>
-                          </button>
-                          {i < stepperStatuses.length - 1 && (
-                            <span className={'so-step-bar' + (i < currentIdx ? ' reached' : '')} />
-                          )}
-                        </Fragment>
-                      );
-                    })}
-                  </div>
-                  {draft.status !== order.status && (
-                    <div style={{
-                      marginTop: 10, padding: '8px 12px', borderRadius: 8,
-                      background: 'var(--accent-soft)', color: 'var(--accent-strong)',
-                      fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 8,
-                    }}>
-                      <Icon name="info" size={13} />
-                      Status will change from <strong>{order.status}</strong> to <strong>{draft.status}</strong> when you save.
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {editable && (
-                <div style={{ marginBottom: 18 }}>
-                  <div style={{
-                    display: 'flex', alignItems: 'center', gap: 8,
-                    fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
-                    textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10,
-                  }}>
-                    <Icon name="user" size={12} /> Customer
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
-                    <div style={{ flex: '0 1 340px', minWidth: 240 }}>
-                      <CustomerPicker
-                        customers={customers.length ? customers : [{
-                          id: order.customer.id, name: order.customer.name,
-                          short_name: order.customer.short, region: order.customer.region,
-                        }]}
-                        value={draft.customerId}
-                        onChange={id => setDraft({ ...draft, customerId: id })}
-                        onCreated={c => { setCustomers(prev => [...prev, c]); setDraft({ ...draft, customerId: c.id }); }}
-                      />
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>{t('currency.label')}</span>
-                      <CurrencyPicker
-                        value={draft.currency}
-                        onChange={cur => setDraft({ ...draft, currency: cur })}
-                        t={t}
-                      />
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <span style={{ fontSize: 12, color: 'var(--fg-subtle)', whiteSpace: 'nowrap' }}>{t('paymentReceiverLabel')}</span>
-                      <ReceiverSelect
-                        value={draft.paymentReceivedBy}
-                        current={order.paymentReceivedBy}
-                        members={members}
-                        onChange={id => setDraft({ ...draft, paymentReceivedBy: id })}
-                      />
-                    </div>
-                  </div>
-                  {currencyChanged && (
-                    <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--fg-subtle)' }}>
-                      {t('soFxRateNote', { rate: fx ? fx.oneUsdInQuote.toFixed(4) : '…', currency: draft.currency, source: fx?.source ?? '…' })}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Line items — warehouse-grouped cards, mirrors the draft builder */}
-              <div className="so-section">
-                <div className="so-section-head">
-                  <Icon name="inventory" size={14} /> {t('sodLineItems')}
-                  <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 400 }}>
-                    {t('sodLineSummary', {
-                      units: (editable ? draft.lines : order.lines).reduce((a, l) => a + l.qty, 0),
-                      lines: (editable ? draft.lines : order.lines).length,
-                      whs: editable ? editGroups.length : viewGroups.length,
-                    })}
+                  <Icon name="flag" size={12} /> Order status
+                  <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
+                    Manually advance as the deal progresses
                   </span>
                 </div>
-
-                {!editable && viewGroups.map((g, gi) => (
-                  <div key={(g.warehouse ?? '__none') + gi} style={{ marginBottom: 14 }}>
-                    <div className="so-wh-head">
-                      <Icon name="warehouse" size={12} />
-                      <span>{g.warehouse ?? t('sodNoWarehouse')}</span>
-                      <span className="so-wh-count">{g.lines.length}</span>
-                    </div>
-                    <table className="so-line-table">
-                      <thead>
-                        <tr>
-                          <th style={{ width: '44%' }}>{t('item')}</th>
-                          <th className="num" style={{ width: 110 }}>{t('qty')}</th>
-                          <th className="num" style={{ width: 140 }}>{t('fieldUnitPrice')}</th>
-                          <th className="num" style={{ width: 120 }}>{t('sodLineTotal')}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {g.lines.map(l => (
-                          <tr key={l.id}>
-                            <td>
-                              <div style={{ fontWeight: 500, fontSize: 13 }}>{l.label}</div>
-                              <div style={{ fontSize: 11, color: 'var(--fg-subtle)', display: 'flex', gap: 8, alignItems: 'center', marginTop: 2 }}>
-                                <span className="mono">{l.partNumber ?? '—'}</span>
-                                {l.condition && (<><span>·</span><span>{l.condition}</span></>)}
-                                {l.sourceOrderId && (<><span>·</span>
-                                  <RouteLink to={'/purchase-orders/' + l.sourceOrderId} className="mono rec-link">
-                                    {t('sodFromPO', { po: l.sourceOrderId })}
-                                  </RouteLink></>)}
-                              </div>
-                            </td>
-                            <td className="num mono">{l.qty}</td>
-                            <td className="num mono">{fmtMoney(l.nativeUnitPrice, order.currency, locale)}</td>
-                            <td className="num mono" style={{ fontWeight: 500 }}>
-                              {fmtMoney(l.qty * l.nativeUnitPrice, order.currency, locale)}
-                              {order.currency !== 'USD' && (
-                                <div style={{ fontSize: 10.5, color: 'var(--fg-subtle)', fontWeight: 400 }}>
-                                  {t('soUsdEquiv', { usd: fmtUSD(l.lineTotal, locale) })}
-                                </div>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                <div className="so-stepper">
+                  {stepperStatuses.map(({ id: s }, i) => {
+                    const currentIdx = stepperStatuses.findIndex(o => o.id === draft.status);
+                    const active = s === draft.status;
+                    const reached = currentIdx >= 0 && i <= currentIdx;
+                    const meta = needsDialog(s) ? statusMeta?.[s] : null;
+                    const hasMeta = !!meta && (!!meta.note || meta.attachments.length > 0);
+                    const dialog = needsDialog(s);
+                    return (
+                      <Fragment key={s}>
+                        <button
+                          type="button"
+                          className={'so-step' + (active ? ' active' : '') + (reached ? ' reached' : '')}
+                          onClick={() => {
+                            // Re-open the dialog even on the current status so the
+                            // user can come back and add more notes / attachments.
+                            if (dialog) setPending(s);
+                            else setDraft({ ...draft, status: s });
+                          }}
+                          title={dialog
+                            ? (s === draft.status
+                                ? `Edit tracking note / attachments for ${s}`
+                                : `Advance to ${s} (add tracking note / attachments)`)
+                            : `Set status to ${s}`}
+                        >
+                          <span className="so-step-dot">{i + 1}</span>
+                          <span className="so-step-label">
+                            {s}
+                            {hasMeta && (
+                              <span
+                                title={t('soTrackingRecorded')}
+                                style={{
+                                  marginLeft: 6, display: 'inline-flex',
+                                  alignItems: 'center', color: 'var(--accent-strong)',
+                                }}
+                              >
+                                <Icon name="paperclip" size={11} />
+                              </span>
+                            )}
+                          </span>
+                        </button>
+                        {i < stepperStatuses.length - 1 && (
+                          <span className={'so-step-bar' + (i < currentIdx ? ' reached' : '')} />
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                </div>
+                {draft.status !== order.status && (
+                  <div style={{
+                    marginTop: 10, padding: '8px 12px', borderRadius: 8,
+                    background: 'var(--accent-soft)', color: 'var(--accent-strong)',
+                    fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 8,
+                  }}>
+                    <Icon name="info" size={13} />
+                    Status will change from <strong>{order.status}</strong> to <strong>{draft.status}</strong> when you save.
                   </div>
-                ))}
+                )}
+              </div>
+            )}
 
-                {editable && (
+            {editable && (
+              <div style={{ marginBottom: 18 }}>
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
+                  textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10,
+                }}>
+                  <Icon name="user" size={12} /> Customer
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
+                  <div style={{ flex: '0 1 340px', minWidth: 240 }}>
+                    <CustomerPicker
+                      customers={customers.length ? customers : [{
+                        id: order.customer.id, name: order.customer.name,
+                        short_name: order.customer.short, region: order.customer.region,
+                      }]}
+                      value={draft.customerId}
+                      onChange={id => setDraft({ ...draft, customerId: id })}
+                      onCreated={c => { setCustomers(prev => [...prev, c]); setDraft({ ...draft, customerId: c.id }); }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>{t('currency.label')}</span>
+                    <CurrencyPicker
+                      value={draft.currency}
+                      onChange={cur => setDraft({ ...draft, currency: cur })}
+                      t={t}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 12, color: 'var(--fg-subtle)', whiteSpace: 'nowrap' }}>{t('paymentReceiverLabel')}</span>
+                    <ReceiverSelect
+                      value={draft.paymentReceivedBy}
+                      current={order.paymentReceivedBy}
+                      members={members}
+                      onChange={id => setDraft({ ...draft, paymentReceivedBy: id })}
+                    />
+                  </div>
+                </div>
+                {currencyChanged && (
+                  <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--fg-subtle)' }}>
+                    {t('soFxRateNote', { rate: fx ? fx.oneUsdInQuote.toFixed(4) : '…', currency: draft.currency, source: fx?.source ?? '…' })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Line items — warehouse-grouped cards, mirrors the draft builder */}
+            <div className="so-section">
+              <div className="so-section-head">
+                <Icon name="inventory" size={14} /> {t('sodLineItems')}
+                <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 400 }}>
+                  {t('sodLineSummary', {
+                    units: (editable ? draft.lines : order.lines).reduce((a, l) => a + l.qty, 0),
+                    lines: (editable ? draft.lines : order.lines).length,
+                    whs: editable ? editGroups.length : viewGroups.length,
+                  })}
+                </span>
+              </div>
+
+              {!editable && viewGroups.map((g, gi) => (
+                <div key={(g.warehouse ?? '__none') + gi} style={{ marginBottom: 14 }}>
+                  <div className="so-wh-head">
+                    <Icon name="warehouse" size={12} />
+                    <span>{g.warehouse ?? t('sodNoWarehouse')}</span>
+                    <span className="so-wh-count">{g.lines.length}</span>
+                  </div>
                   <table className="so-line-table">
                     <thead>
                       <tr>
-                        <th style={{ width: '34%' }}>{t('item')}</th>
-                        <th>{t('warehouse')}</th>
+                        <th style={{ width: '44%' }}>{t('item')}</th>
                         <th className="num" style={{ width: 110 }}>{t('qty')}</th>
-                        <th className="num" style={{ width: 130 }}>{t('fieldUnitPrice')}</th>
-                        <th className="num" style={{ width: 110 }}>{t('sodLineTotal')}</th>
-                        <th style={{ width: 36 }}></th>
+                        <th className="num" style={{ width: 140 }}>{t('fieldUnitPrice')}</th>
+                        <th className="num" style={{ width: 120 }}>{t('sodLineTotal')}</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {draft.lines.map((l, idx) => (
-                        <tr key={l._cid}>
+                      {g.lines.map(l => (
+                        <tr key={l.id}>
                           <td>
                             <div style={{ fontWeight: 500, fontSize: 13 }}>{l.label}</div>
                             <div style={{ fontSize: 11, color: 'var(--fg-subtle)', display: 'flex', gap: 8, alignItems: 'center', marginTop: 2 }}>
                               <span className="mono">{l.partNumber ?? '—'}</span>
                               {l.condition && (<><span>·</span><span>{l.condition}</span></>)}
+                              {l.sourceOrderId && (<><span>·</span>
+                                <RouteLink to={'/purchase-orders/' + l.sourceOrderId} className="mono rec-link">
+                                  {t('sodFromPO', { po: l.sourceOrderId })}
+                                </RouteLink></>)}
                             </div>
                           </td>
-                          <td style={{ fontSize: 12 }}>{l.warehouse ?? t('sodNoWarehouse')}</td>
-                          <td className="num">
-                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
-                              <input
-                                className="so-mini-input"
-                                type="number"
-                                min={1}
-                                max={l.maxQty}
-                                value={l.qty}
-                                onChange={e => setLine(idx, {
-                                  qty: Math.max(1, Math.min(l.maxQty, Number(e.target.value) || 0)),
-                                })}
-                                style={{ width: 64 }}
-                              />
-                              <span style={{ fontSize: 10.5, color: 'var(--fg-subtle)', whiteSpace: 'nowrap' }}>
-                                / {l.maxQty}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="num">
-                            <input
-                              className="so-mini-input"
-                              type="number"
-                              step="0.01"
-                              value={l.unitPrice}
-                              onChange={e => setPrice(productKey(l), Number(e.target.value) || 0)}
-                              style={{ width: 90 }}
-                            />
-                          </td>
-                          <td className="num mono" style={{ fontWeight: 500 }}>{fmtMoney(l.qty * l.unitPrice, draft.currency, locale)}</td>
-                          <td>
-                            <button
-                              className="btn icon sm"
-                              title={t('soRemoveLineTooltip')}
-                              disabled={draft.lines.length === 1}
-                              onClick={() => removeLine(idx)}
-                            >
-                              <Icon name="x" size={12} />
-                            </button>
+                          <td className="num mono">{l.qty}</td>
+                          <td className="num mono">{fmtMoney(l.nativeUnitPrice, order.currency, locale)}</td>
+                          <td className="num mono" style={{ fontWeight: 500 }}>
+                            {fmtMoney(l.qty * l.nativeUnitPrice, order.currency, locale)}
+                            {order.currency !== 'USD' && (
+                              <div style={{ fontSize: 10.5, color: 'var(--fg-subtle)', fontWeight: 400 }}>
+                                {t('soUsdEquiv', { usd: fmtUSD(l.lineTotal, locale) })}
+                              </div>
+                            )}
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
-                )}
+                </div>
+              ))}
 
-                {editable && prefillAllPresent && (
-                  <div className="help" style={{ marginTop: 10 }}>
-                    {t('soPrefillAllPresent', { id: order.id })}
-                  </div>
-                )}
-                {editable && (
+              {editable && (
+                <table className="so-line-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: '34%' }}>{t('item')}</th>
+                      <th>{t('warehouse')}</th>
+                      <th className="num" style={{ width: 110 }}>{t('qty')}</th>
+                      <th className="num" style={{ width: 130 }}>{t('fieldUnitPrice')}</th>
+                      <th className="num" style={{ width: 110 }}>{t('sodLineTotal')}</th>
+                      <th style={{ width: 36 }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {draft.lines.map((l, idx) => (
+                      <tr key={l._cid}>
+                        <td>
+                          <div style={{ fontWeight: 500, fontSize: 13 }}>{l.label}</div>
+                          <div style={{ fontSize: 11, color: 'var(--fg-subtle)', display: 'flex', gap: 8, alignItems: 'center', marginTop: 2 }}>
+                            <span className="mono">{l.partNumber ?? '—'}</span>
+                            {l.condition && (<><span>·</span><span>{l.condition}</span></>)}
+                          </div>
+                        </td>
+                        <td style={{ fontSize: 12 }}>{l.warehouse ?? t('sodNoWarehouse')}</td>
+                        <td className="num">
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
+                            <input
+                              className="so-mini-input"
+                              type="number"
+                              min={1}
+                              max={l.maxQty}
+                              value={l.qty}
+                              onChange={e => setLine(idx, {
+                                qty: Math.max(1, Math.min(l.maxQty, Number(e.target.value) || 0)),
+                              })}
+                              style={{ width: 64 }}
+                            />
+                            <span style={{ fontSize: 10.5, color: 'var(--fg-subtle)', whiteSpace: 'nowrap' }}>
+                              / {l.maxQty}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="num">
+                          <input
+                            className="so-mini-input"
+                            type="number"
+                            step="0.01"
+                            value={l.unitPrice}
+                            onChange={e => setPrice(productKey(l), Number(e.target.value) || 0)}
+                            style={{ width: 90 }}
+                          />
+                        </td>
+                        <td className="num mono" style={{ fontWeight: 500 }}>{fmtMoney(l.qty * l.unitPrice, draft.currency, locale)}</td>
+                        <td>
+                          <button
+                            className="btn icon sm"
+                            title={t('soRemoveLineTooltip')}
+                            disabled={draft.lines.length === 1}
+                            onClick={() => removeLine(idx)}
+                          >
+                            <Icon name="x" size={12} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+
+              {editable && prefillAllPresent && (
+                <div className="help" style={{ marginTop: 10 }}>
+                  {t('soPrefillAllPresent', { id: order.id })}
+                </div>
+              )}
+              {editable && (
+                <button
+                  className="btn sm"
+                  onClick={() => setAdding(true)}
+                  style={{ marginTop: 10 }}
+                >
+                  <Icon name="plus" size={13} /> {t('soAddInventory')}
+                </button>
+              )}
+            </div>
+
+            {editable && (
+              <div className="help" style={{ marginTop: 8 }}>
+                {t('soEditReplacesHint')}
+              </div>
+            )}
+
+            {editable && (
+              <PriceImportSection
+                orderId={order.id}
+                currency={draft.currency}
+                locale={locale}
+                onApply={rows =>
+                  setDraft(d => d && {
+                    ...d,
+                    lines: applyPriceRows(d.lines, rows),
+                    bidParts: mergeBidParts(d.bidParts, rows),
+                  })}
+              />
+            )}
+
+            {summary && (
+            <div className="so-summary" style={{ marginTop: 20, marginLeft: 'auto', maxWidth: 340 }}>
+              <div
+                className="so-summary-head"
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}
+              >
+                <span>{t('soOrderSummary')}</span>
+                {!locked && !adjusting && (
                   <button
-                    className="btn sm"
-                    onClick={() => setAdding(true)}
-                    style={{ marginTop: 10 }}
+                    className="btn ghost sm"
+                    style={{ padding: '2px 8px', fontSize: 11, color: 'var(--fg-muted)' }}
+                    onClick={() => {
+                      setAdjustInput(String(summary.total));
+                      setAdjusting(true);
+                    }}
                   >
-                    <Icon name="plus" size={13} /> {t('soAddInventory')}
+                    <Icon name="edit" size={11} /> {t('soAdjustTotal')}
                   </button>
                 )}
               </div>
 
-              {editable && (
-                <div className="help" style={{ marginTop: 8 }}>
-                  {t('soEditReplacesHint')}
+              {summary.subtotal != null && (
+                <div className="so-row muted">
+                  <span>{t('soSubtotalRow')}</span>
+                  <span className="mono">{fmtMoney(summary.subtotal, draftCurrency, locale)}</span>
                 </div>
               )}
-
-              {editable && (
-                <PriceImportSection
-                  orderId={order.id}
-                  currency={draft.currency}
-                  locale={locale}
-                  onApply={rows =>
-                    setDraft(d => d && {
-                      ...d,
-                      lines: applyPriceRows(d.lines, rows),
-                      bidParts: mergeBidParts(d.bidParts, rows),
-                    })}
-                />
-              )}
-
-              {summary && (
-              <div className="so-summary" style={{ marginTop: 20, marginLeft: 'auto', maxWidth: 340 }}>
+              {adjustDelta != null && (
                 <div
-                  className="so-summary-head"
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}
+                  className="so-row"
+                  title={!summary.pending && order.priceAdjustment
+                    ? t('soAdjustedTooltip', {
+                        name: order.priceAdjustment.adjustedBy?.name ?? '—',
+                        when: fmtDate(order.priceAdjustment.adjustedAt, locale),
+                      })
+                    : undefined}
                 >
-                  <span>{t('soOrderSummary')}</span>
-                  {!locked && !adjusting && (
-                    <button
-                      className="btn ghost sm"
-                      style={{ padding: '2px 8px', fontSize: 11, color: 'var(--fg-muted)' }}
-                      onClick={() => {
-                        setAdjustInput(String(summary.total));
-                        setAdjusting(true);
-                      }}
+                  <span>
+                    {t('soAdjustmentRow')}
+                    <span
+                      className={'chip ' + (adjustDelta <= 0 ? 'neg' : 'pos')}
+                      style={{ fontSize: 10, marginLeft: 6, padding: '1px 6px' }}
                     >
-                      <Icon name="edit" size={11} /> {t('soAdjustTotal')}
+                      {adjustPctLabel}
+                    </span>
+                  </span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    <span
+                      className="mono"
+                      style={{ color: adjustDelta <= 0 ? 'var(--neg)' : 'var(--accent-strong)' }}
+                    >
+                      {adjustDelta >= 0 ? '+' : '−'}
+                      {fmtMoney(Math.abs(adjustDelta), draftCurrency, locale)}
+                    </span>
+                    {summary.pending && (
+                      <button
+                        className="btn icon sm"
+                        title={t('soAdjustRemove')}
+                        aria-label={t('soAdjustRemove')}
+                        style={{ padding: 2 }}
+                        onClick={() => setPendingAdjust(null)}
+                      >
+                        <Icon name="x" size={10} />
+                      </button>
+                    )}
+                  </span>
+                </div>
+              )}
+
+              <div className="so-row total">
+                <span>{t('eoTotal')}</span>
+                {adjusting ? (
+                  <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                    <span className="mono" style={{ fontSize: 13, color: 'var(--fg-subtle)' }}>
+                      {CURRENCY_SYMBOL[draftCurrency] ?? draftCurrency}
+                    </span>
+                    <input
+                      className="mono so-mini-input"
+                      type="number"
+                      min={0.01}
+                      step={0.01}
+                      autoFocus
+                      value={adjustInput}
+                      disabled={adjustSaving}
+                      onChange={e => setAdjustInput(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') void applyAdjust();
+                        if (e.key === 'Escape') { e.stopPropagation(); setAdjusting(false); }
+                      }}
+                      style={{ width: 110, textAlign: 'right' }}
+                    />
+                    <button
+                      className="btn icon sm"
+                      title={t('soAdjustApply')}
+                      disabled={adjustSaving}
+                      onClick={() => void applyAdjust()}
+                    >
+                      <Icon name="check" size={12} />
                     </button>
-                  )}
-                </div>
-
-                {summary.subtotal != null && (
-                  <div className="so-row muted">
-                    <span>{t('soSubtotalRow')}</span>
-                    <span className="mono">{fmtMoney(summary.subtotal, draftCurrency, locale)}</span>
-                  </div>
-                )}
-                {adjustDelta != null && (
-                  <div
-                    className="so-row"
-                    title={!summary.pending && order.priceAdjustment
-                      ? t('soAdjustedTooltip', {
-                          name: order.priceAdjustment.adjustedBy?.name ?? '—',
-                          when: fmtDate(order.priceAdjustment.adjustedAt, locale),
-                        })
-                      : undefined}
-                  >
-                    <span>
-                      {t('soAdjustmentRow')}
-                      <span
-                        className={'chip ' + (adjustDelta <= 0 ? 'neg' : 'pos')}
-                        style={{ fontSize: 10, marginLeft: 6, padding: '1px 6px' }}
-                      >
-                        {adjustPctLabel}
-                      </span>
-                    </span>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                      <span
-                        className="mono"
-                        style={{ color: adjustDelta <= 0 ? 'var(--neg)' : 'var(--accent-strong)' }}
-                      >
-                        {adjustDelta >= 0 ? '+' : '−'}
-                        {fmtMoney(Math.abs(adjustDelta), draftCurrency, locale)}
-                      </span>
-                      {summary.pending && (
-                        <button
-                          className="btn icon sm"
-                          title={t('soAdjustRemove')}
-                          aria-label={t('soAdjustRemove')}
-                          style={{ padding: 2 }}
-                          onClick={() => setPendingAdjust(null)}
-                        >
-                          <Icon name="x" size={10} />
-                        </button>
-                      )}
-                    </span>
-                  </div>
-                )}
-
-                <div className="so-row total">
-                  <span>{t('eoTotal')}</span>
-                  {adjusting ? (
-                    <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
-                      <span className="mono" style={{ fontSize: 13, color: 'var(--fg-subtle)' }}>
-                        {CURRENCY_SYMBOL[draftCurrency] ?? draftCurrency}
-                      </span>
-                      <input
-                        className="mono so-mini-input"
-                        type="number"
-                        min={0.01}
-                        step={0.01}
-                        autoFocus
-                        value={adjustInput}
-                        disabled={adjustSaving}
-                        onChange={e => setAdjustInput(e.target.value)}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter') void applyAdjust();
-                          if (e.key === 'Escape') { e.stopPropagation(); setAdjusting(false); }
-                        }}
-                        style={{ width: 110, textAlign: 'right' }}
-                      />
-                      <button
-                        className="btn icon sm"
-                        title={t('soAdjustApply')}
-                        disabled={adjustSaving}
-                        onClick={() => void applyAdjust()}
-                      >
-                        <Icon name="check" size={12} />
-                      </button>
-                      <button
-                        className="btn icon sm"
-                        title={t('cancel')}
-                        disabled={adjustSaving}
-                        onClick={() => setAdjusting(false)}
-                      >
-                        <Icon name="x" size={12} />
-                      </button>
-                    </span>
-                  ) : (
-                    <span className="mono">{fmtMoney(summary.total, draftCurrency, locale)}</span>
-                  )}
-                </div>
-                {draftCurrency !== 'USD' && (
-                  <div className="so-row muted" style={{ fontSize: 11.5, paddingTop: 0 }}>
-                    <span />
-                    <span className="mono">{t('soUsdEquiv', { usd: fmtUSD(summaryUsd, locale) })}</span>
-                  </div>
-                )}
-                {summary.pending && (
-                  <div style={{ textAlign: 'right', fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2 }}>
-                    {t('soAdjustAppliesOnSave')}
-                  </div>
-                )}
-              </div>
-              )}
-
-              {/* Tracking & evidence — read-only view of the per-status notes and
-                  attachments. Edit mode reaches these via the stepper dialog; view
-                  mode has no stepper, so this is the only place to open the files. */}
-              {!editable && evidenceEntries(statusMeta).length > 0 && (
-                <div className="so-section" style={{ marginTop: 24 }}>
-                  <div className="so-section-head"><Icon name="paperclip" size={14} /> {t('soEvidenceSection')}</div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                    {evidenceEntries(statusMeta).map(([status, m]) => (
-                      <div key={status}>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-subtle)', marginBottom: 6 }}>{status}</div>
-                        {m.note && (
-                          <div style={{ fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap', marginBottom: m.attachments.length ? 8 : 0 }}>
-                            {m.note}
-                          </div>
-                        )}
-                        {m.attachments.length > 0 && (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                            {m.attachments.map(a => (
-                              <AttachmentChip key={a.id} a={a} />
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Payment receiver — live picker in view mode, Done and Closed
-                  included: who took the money is often only known after the
-                  deal is closed. Edit mode has the select up in the Customer
-                  block, saved with the rest of the form. */}
-              {!editable && (
-                <div className="so-section" style={{ marginTop: 24 }}>
-                  <div className="so-section-head"><Icon name="user" size={14} /> {t('paymentReceiverLabel')}</div>
-                  <ReceiverSelect
-                    value={order.paymentReceivedBy?.id ?? ''}
-                    current={order.paymentReceivedBy}
-                    members={members}
-                    disabled={receiverSaving}
-                    onChange={saveReceiver}
-                  />
-                </div>
-              )}
-
-              {/* Internal notes — section in both modes; read-only text when viewing */}
-              <div className="so-section" style={{ marginTop: 24 }}>
-                <div className="so-section-head"><Icon name="edit" size={14} /> {t('ieInternalNotes')}</div>
-                {editable ? (
-                  <textarea
-                    className="input"
-                    rows={3}
-                    value={draft.notes}
-                    onChange={e => setDraft({ ...draft, notes: e.target.value })}
-                    placeholder={t('soTrackingPlaceholder')}
-                    style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
-                  />
+                    <button
+                      className="btn icon sm"
+                      title={t('cancel')}
+                      disabled={adjustSaving}
+                      onClick={() => setAdjusting(false)}
+                    >
+                      <Icon name="x" size={12} />
+                    </button>
+                  </span>
                 ) : (
-                  <div style={{ fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap', color: order.notes ? 'var(--fg)' : 'var(--fg-subtle)' }}>
-                    {order.notes || t('none')}
-                  </div>
+                  <span className="mono">{fmtMoney(summary.total, draftCurrency, locale)}</span>
                 )}
               </div>
-
-              <details open style={{ marginTop: 24 }}>
-                <summary style={{ cursor: 'pointer', fontWeight: 600, padding: '8px 0' }}>
-                  History
-                </summary>
-                <div style={{ marginTop: 12 }}>
-                  <SellOrderHistory sellOrderId={order.id} refreshKey={historyKey} />
+              {draftCurrency !== 'USD' && (
+                <div className="so-row muted" style={{ fontSize: 11.5, paddingTop: 0 }}>
+                  <span />
+                  <span className="mono">{t('soUsdEquiv', { usd: fmtUSD(summaryUsd, locale) })}</span>
                 </div>
-              </details>
-            </>
-          ) : null}
-        </div>
-
-        {order && draft && (
-          <div className="so-footer">
-            <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
-              {editable && (dirty ? 'Unsaved changes' : 'No changes')}
-            </span>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <DownloadMenu orderId={order.id} />
-              {editable && !prefill && order.status !== 'Draft' && order.archivedAt === null && (
-                <button
-                  className="btn"
-                  onClick={() => setConfirmArchive(true)}
-                  title={t('soArchiveTooltip')}
-                  style={{ color: 'var(--neg, #c0392b)', borderColor: 'var(--neg, #c0392b)' }}
-                >
-                  <Icon name="box" size={14} /> Archive
-                </button>
               )}
-              {editable && !prefill && order.archivedAt !== null && (
-                <button
-                  className="btn"
-                  disabled={unarchiving}
-                  onClick={async () => {
-                    setUnarchiving(true);
-                    try {
-                      await unarchiveSellOrder(order.id);
-                      setHistoryKey(k => k + 1);
-                      onSaved();
-                      onClose();
-                    } catch (e) {
-                      handleFetchError(e);
-                      setUnarchiving(false);
-                    }
-                  }}
-                >
-                  <Icon name="box" size={14} /> {unarchiving ? 'Unarchiving…' : 'Unarchive'}
-                </button>
-              )}
-              {/* Close as off-ramp: available in edit mode, everywhere except
-                  Done (terminal) and Closed (already closed → use Reopen
-                  instead). Manager-only surface is enforced at the page level
-                  so no extra role check. */}
-              {editable && !prefill && order.status !== 'Done' && (
-                <button
-                  className="btn"
-                  onClick={() => setShowCloseDialog(true)}
-                  title={t('soDiscardTooltip')}
-                  style={{ color: 'var(--neg, #c0392b)', borderColor: 'var(--border-strong)' }}
-                >
-                  Discard
-                </button>
-              )}
-              {/* Reopen is creator-only (backend 403s anyone else). Orders with
-                  no creator (MCP-created) stay reopenable by any manager. */}
-              {order.status === 'Closed'
-                && (order.createdBy === null || order.createdBy === user?.id) && (
-                <button
-                  className="btn accent"
-                  onClick={() => setShowReopenDialog(true)}
-                  title={t('soReopenTooltip')}
-                >
-                  <Icon name="edit" size={14} /> Reopen
-                </button>
-              )}
-              {!editable && !locked && (
-                <button className="btn accent" onClick={onSwitchToEdit}>
-                  <Icon name="edit" size={14} /> Edit order
-                </button>
-              )}
-              {editable && (
-                <button
-                  className="btn accent"
-                  onClick={save}
-                  disabled={!dirty || saving || (draftCurrency !== 'USD' && draftRateToUsd == null)}
-                >
-                  <Icon name="check2" size={14} /> {saving ? 'Saving…' : 'Save changes'}
-                </button>
+              {summary.pending && (
+                <div style={{ textAlign: 'right', fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2 }}>
+                  {t('soAdjustAppliesOnSave')}
+                </div>
               )}
             </div>
-          </div>
-        )}
+            )}
+
+            {/* Tracking & evidence — read-only view of the per-status notes and
+                attachments. Edit mode reaches these via the stepper dialog; view
+                mode has no stepper, so this is the only place to open the files. */}
+            {!editable && evidenceEntries(statusMeta).length > 0 && (
+              <div className="so-section" style={{ marginTop: 24 }}>
+                <div className="so-section-head"><Icon name="paperclip" size={14} /> {t('soEvidenceSection')}</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  {evidenceEntries(statusMeta).map(([status, m]) => (
+                    <div key={status}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-subtle)', marginBottom: 6 }}>{status}</div>
+                      {m.note && (
+                        <div style={{ fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap', marginBottom: m.attachments.length ? 8 : 0 }}>
+                          {m.note}
+                        </div>
+                      )}
+                      {m.attachments.length > 0 && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {m.attachments.map(a => (
+                            <AttachmentChip key={a.id} a={a} />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Payment receiver — live picker in view mode, Done and Closed
+                included: who took the money is often only known after the
+                deal is closed. Edit mode has the select up in the Customer
+                block, saved with the rest of the form. */}
+            {!editable && (
+              <div className="so-section" style={{ marginTop: 24 }}>
+                <div className="so-section-head"><Icon name="user" size={14} /> {t('paymentReceiverLabel')}</div>
+                <ReceiverSelect
+                  value={order.paymentReceivedBy?.id ?? ''}
+                  current={order.paymentReceivedBy}
+                  members={members}
+                  disabled={receiverSaving}
+                  onChange={saveReceiver}
+                />
+              </div>
+            )}
+
+            {/* Internal notes — section in both modes; read-only text when viewing */}
+            <div className="so-section" style={{ marginTop: 24 }}>
+              <div className="so-section-head"><Icon name="edit" size={14} /> {t('ieInternalNotes')}</div>
+              {editable ? (
+                <textarea
+                  className="input"
+                  rows={3}
+                  value={draft.notes}
+                  onChange={e => setDraft({ ...draft, notes: e.target.value })}
+                  placeholder={t('soTrackingPlaceholder')}
+                  style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
+                />
+              ) : (
+                <div style={{ fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap', color: order.notes ? 'var(--fg)' : 'var(--fg-subtle)' }}>
+                  {order.notes || t('none')}
+                </div>
+              )}
+            </div>
+
+            <details open style={{ marginTop: 24 }}>
+              <summary style={{ cursor: 'pointer', fontWeight: 600, padding: '8px 0' }}>
+                History
+              </summary>
+              <div style={{ marginTop: 12 }}>
+                <SellOrderHistory sellOrderId={order.id} refreshKey={historyKey} />
+              </div>
+            </details>
+          </>
+        ) : null}
       </div>
-    </div>
+
+      {order && draft && (
+        <div className="so-footer">
+          <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
+            {editable && (dirty ? 'Unsaved changes' : 'No changes')}
+          </span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <DownloadMenu orderId={order.id} />
+            {editable && !prefill && order.status !== 'Draft' && order.archivedAt === null && (
+              <button
+                className="btn"
+                onClick={() => setConfirmArchive(true)}
+                title={t('soArchiveTooltip')}
+                style={{ color: 'var(--neg, #c0392b)', borderColor: 'var(--neg, #c0392b)' }}
+              >
+                <Icon name="box" size={14} /> Archive
+              </button>
+            )}
+            {editable && !prefill && order.archivedAt !== null && (
+              <button
+                className="btn"
+                disabled={unarchiving}
+                onClick={async () => {
+                  setUnarchiving(true);
+                  try {
+                    await unarchiveSellOrder(order.id);
+                    setHistoryKey(k => k + 1);
+                    onSaved();
+                    onClose();
+                  } catch (e) {
+                    handleFetchError(e);
+                    setUnarchiving(false);
+                  }
+                }}
+              >
+                <Icon name="box" size={14} /> {unarchiving ? 'Unarchiving…' : 'Unarchive'}
+              </button>
+            )}
+            {/* Close as off-ramp: available in edit mode, everywhere except
+                Done (terminal) and Closed (already closed → use Reopen
+                instead). Manager-only surface is enforced at the page level
+                so no extra role check. */}
+            {editable && !prefill && order.status !== 'Done' && (
+              <button
+                className="btn"
+                onClick={() => setShowCloseDialog(true)}
+                title={t('soDiscardTooltip')}
+                style={{ color: 'var(--neg, #c0392b)', borderColor: 'var(--border-strong)' }}
+              >
+                Discard
+              </button>
+            )}
+            {/* Reopen is creator-only (backend 403s anyone else). Orders with
+                no creator (MCP-created) stay reopenable by any manager. */}
+            {order.status === 'Closed'
+              && (order.createdBy === null || order.createdBy === user?.id) && (
+              <button
+                className="btn accent"
+                onClick={() => setShowReopenDialog(true)}
+                title={t('soReopenTooltip')}
+              >
+                <Icon name="edit" size={14} /> Reopen
+              </button>
+            )}
+            {!editable && !locked && (
+              <button className="btn accent" onClick={onSwitchToEdit}>
+                <Icon name="edit" size={14} /> Edit order
+              </button>
+            )}
+            {editable && (
+              <button
+                className="btn accent"
+                onClick={save}
+                disabled={!dirty || saving || (draftCurrency !== 'USD' && draftRateToUsd == null)}
+              >
+                <Icon name="check2" size={14} /> {saving ? 'Saving…' : 'Save changes'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </Modal>
     {pending && order && draft && statusMeta && (
       <StatusChangeDialog
         orderId={order.id}
@@ -1670,7 +1669,6 @@ function ArchiveSellOrderDialog({
   const [typed, setTyped] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useEscapeKey(onCancel);
 
   const matches = typed.trim() === orderId;
 
@@ -1689,46 +1687,44 @@ function ArchiveSellOrderDialog({
   };
 
   return (
-    <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) onCancel(); }}>
-      <div className="modal-shell" style={{ maxWidth: 460, width: 'calc(100vw - 80px)' }}>
-        <div className="modal-head">
-          <div className="modal-title">Archive sell order</div>
-        </div>
-        <div className="modal-body" style={{ padding: 20 }}>
-          <p style={{ marginTop: 0, fontSize: 13.5 }}>
-            Archiving hides this sell order from the default list. It stays in the
-            database with its lines, commissions, and audit history intact, and can
-            be unarchived later.
-          </p>
-          <label className="label" style={{ marginTop: 12 }}>
-            Type <span className="mono" style={{ fontWeight: 600 }}>{orderId}</span> to confirm
-          </label>
-          <input
-            className="input mono"
-            autoFocus
-            value={typed}
-            onChange={e => setTyped(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter' && matches) submit(); }}
-            placeholder={orderId}
-          />
-          {error && (
-            <div role="alert" style={{ marginTop: 10, color: 'var(--neg, #c0392b)', fontSize: 13 }}>
-              {error}
-            </div>
-          )}
-        </div>
-        <div className="modal-foot">
-          <button className="btn" onClick={onCancel} disabled={busy}>Cancel</button>
-          <button
-            className="btn danger"
-            onClick={submit}
-            disabled={!matches || busy}
-            style={{ background: 'var(--neg, #c0392b)', color: '#fff', borderColor: 'transparent' }}
-          >
-            {busy ? 'Archiving…' : 'Archive'}
-          </button>
-        </div>
+    <Modal onClose={() => { if (!busy) onCancel(); }} shellStyle={{ maxWidth: 460, width: 'calc(100vw - 80px)' }}>
+      <div className="modal-head">
+        <div className="modal-title">Archive sell order</div>
       </div>
-    </div>
+      <div className="modal-body" style={{ padding: 20 }}>
+        <p style={{ marginTop: 0, fontSize: 13.5 }}>
+          Archiving hides this sell order from the default list. It stays in the
+          database with its lines, commissions, and audit history intact, and can
+          be unarchived later.
+        </p>
+        <label className="label" style={{ marginTop: 12 }}>
+          Type <span className="mono" style={{ fontWeight: 600 }}>{orderId}</span> to confirm
+        </label>
+        <input
+          className="input mono"
+          autoFocus
+          value={typed}
+          onChange={e => setTyped(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && matches) submit(); }}
+          placeholder={orderId}
+        />
+        {error && (
+          <div role="alert" style={{ marginTop: 10, color: 'var(--neg, #c0392b)', fontSize: 13 }}>
+            {error}
+          </div>
+        )}
+      </div>
+      <div className="modal-foot">
+        <button className="btn" onClick={onCancel} disabled={busy}>Cancel</button>
+        <button
+          className="btn danger"
+          onClick={submit}
+          disabled={!matches || busy}
+          style={{ background: 'var(--neg, #c0392b)', color: '#fff', borderColor: 'transparent' }}
+        >
+          {busy ? 'Archiving…' : 'Archive'}
+        </button>
+      </div>
+    </Modal>
   );
 }

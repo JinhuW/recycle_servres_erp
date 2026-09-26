@@ -4,9 +4,9 @@ import { useT } from '../../lib/i18n';
 import { fmtMoney } from '../../lib/format';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { precheckPriceFile } from '../../lib/priceFilePrecheck';
-import { useEscapeKey } from '../../lib/useEscapeKey';
 import { AttachmentDropzone } from '../../components/AttachmentDropzone';
 import { Icon } from '../../components/Icon';
+import { Modal } from '../../components/Modal';
 import type { PriceApplyRow } from '../../lib/priceImport';
 
 // Vendor price round-trip inside the sell-order edit modal: download the bid
@@ -193,7 +193,6 @@ function PriceImportPreviewDialog({
   onConfirm: (rows: PriceApplyRow[]) => void;
 }) {
   const { t } = useT();
-  useEscapeKey(onCancel);
 
   const matched = preview.rows.filter(r => r.status === 'matched');
   const warnings = preview.rows.filter(r => r.status !== 'matched');
@@ -220,93 +219,91 @@ function PriceImportPreviewDialog({
     n == null ? '—' : fmtMoney(n, currency, locale);
 
   return (
-    <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) onCancel(); }}>
-      <div className="modal-shell" style={{ maxWidth: 680, width: 'calc(100vw - 80px)' }}>
-        <div className="modal-head">
-          <div className="modal-title">{t('soPriceImportPreviewTitle')}</div>
-        </div>
-        <div className="modal-body" style={{ padding: 20, maxHeight: '60vh', overflowY: 'auto' }}>
-          {matched.length === 0 && (
-            <div style={{ fontSize: 13.5, color: 'var(--fg-subtle)' }}>
-              {t('soPriceImportEmpty')}
-            </div>
-          )}
-          {matched.length > 0 && (
-            <table className="so-line-table">
-              <thead>
-                <tr>
-                  <th style={{ width: 30 }}></th>
-                  <th>{t('item')}</th>
-                  <th className="num" style={{ width: 60 }}>{t('qty')}</th>
-                  <th className="num" style={{ width: 110 }}>{t('soPriceImportOldPrice')}</th>
-                  <th className="num" style={{ width: 110 }}>{t('soPriceImportNewPrice')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {matched.map(r => (
-                  <tr key={rowKey(r)} style={{ opacity: excluded.has(rowKey(r)) ? 0.45 : 1 }}>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={!excluded.has(rowKey(r))}
-                        onChange={() => toggle(rowKey(r))}
-                      />
-                    </td>
-                    <td>
-                      <div style={{ fontWeight: 500, fontSize: 13 }}>{r.label}</div>
-                      <div style={{ fontSize: 11, color: 'var(--fg-subtle)', display: 'flex', gap: 8, marginTop: 2 }}>
-                        <span className="mono">{r.partNumber ?? '—'}</span>
-                        {r.condition && <span>{r.condition}</span>}
-                        {(r.lineCount ?? 1) > 1 && (
-                          <span>{t('soPriceImportAppliesTo', { n: String(r.lineCount) })}</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="num mono">{r.qty}</td>
-                    <td className="num mono" style={{ color: 'var(--fg-subtle)' }}>{money(r.oldPrice)}</td>
-                    <td className="num mono" style={{ fontWeight: 600 }}>{money(r.price)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-
-          {(warnings.length > 0 || preview.unmatchedProducts.length > 0 || preview.manualProducts.length > 0) && (
-            <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {warnings.map(r => (
-                <div key={`w${rowKey(r)}`} style={{ fontSize: 12.5, color: 'var(--fg-subtle)', display: 'flex', gap: 8, alignItems: 'baseline' }}>
-                  <Icon name="alert" size={12} style={{ flexShrink: 0, transform: 'translateY(1px)' }} />
-                  <span>
-                    <span className="mono">{r.rawPart}</span>
-                    {' — '}{t(WARNING_LABEL_KEY[r.status as Exclude<PreviewRowStatus, 'matched'>])}
-                  </span>
-                </div>
-              ))}
-              {preview.unmatchedProducts.map((p, i) => (
-                <div key={`u${i}`} style={{ fontSize: 12.5, color: 'var(--fg-subtle)', display: 'flex', gap: 8, alignItems: 'baseline' }}>
-                  <Icon name="alert" size={12} style={{ flexShrink: 0, transform: 'translateY(1px)' }} />
-                  <span>
-                    <span className="mono">{p.partNumber ?? p.label}</span>
-                    {' — '}{t('soPriceImportUnpriced')}
-                  </span>
-                </div>
-              ))}
-              {preview.manualProducts.map((p, i) => (
-                <div key={`m${i}`} style={{ fontSize: 12.5, color: 'var(--fg-subtle)', display: 'flex', gap: 8, alignItems: 'baseline' }}>
-                  <Icon name="alert" size={12} style={{ flexShrink: 0, transform: 'translateY(1px)' }} />
-                  <span>{p.label}{' — '}{t('soPriceImportManual')}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="modal-foot">
-          <button className="btn" onClick={onCancel}>{t('cancel')}</button>
-          <button className="btn accent" onClick={confirm} disabled={included.length === 0}>
-            {t('soPriceImportConfirm', { n: String(included.length) })}
-          </button>
-        </div>
+    <Modal onClose={onCancel} shellStyle={{ maxWidth: 680, width: 'calc(100vw - 80px)' }}>
+      <div className="modal-head">
+        <div className="modal-title">{t('soPriceImportPreviewTitle')}</div>
       </div>
-    </div>
+      <div className="modal-body" style={{ padding: 20, maxHeight: '60vh', overflowY: 'auto' }}>
+        {matched.length === 0 && (
+          <div style={{ fontSize: 13.5, color: 'var(--fg-subtle)' }}>
+            {t('soPriceImportEmpty')}
+          </div>
+        )}
+        {matched.length > 0 && (
+          <table className="so-line-table">
+            <thead>
+              <tr>
+                <th style={{ width: 30 }}></th>
+                <th>{t('item')}</th>
+                <th className="num" style={{ width: 60 }}>{t('qty')}</th>
+                <th className="num" style={{ width: 110 }}>{t('soPriceImportOldPrice')}</th>
+                <th className="num" style={{ width: 110 }}>{t('soPriceImportNewPrice')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {matched.map(r => (
+                <tr key={rowKey(r)} style={{ opacity: excluded.has(rowKey(r)) ? 0.45 : 1 }}>
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={!excluded.has(rowKey(r))}
+                      onChange={() => toggle(rowKey(r))}
+                    />
+                  </td>
+                  <td>
+                    <div style={{ fontWeight: 500, fontSize: 13 }}>{r.label}</div>
+                    <div style={{ fontSize: 11, color: 'var(--fg-subtle)', display: 'flex', gap: 8, marginTop: 2 }}>
+                      <span className="mono">{r.partNumber ?? '—'}</span>
+                      {r.condition && <span>{r.condition}</span>}
+                      {(r.lineCount ?? 1) > 1 && (
+                        <span>{t('soPriceImportAppliesTo', { n: String(r.lineCount) })}</span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="num mono">{r.qty}</td>
+                  <td className="num mono" style={{ color: 'var(--fg-subtle)' }}>{money(r.oldPrice)}</td>
+                  <td className="num mono" style={{ fontWeight: 600 }}>{money(r.price)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+
+        {(warnings.length > 0 || preview.unmatchedProducts.length > 0 || preview.manualProducts.length > 0) && (
+          <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {warnings.map(r => (
+              <div key={`w${rowKey(r)}`} style={{ fontSize: 12.5, color: 'var(--fg-subtle)', display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                <Icon name="alert" size={12} style={{ flexShrink: 0, transform: 'translateY(1px)' }} />
+                <span>
+                  <span className="mono">{r.rawPart}</span>
+                  {' — '}{t(WARNING_LABEL_KEY[r.status as Exclude<PreviewRowStatus, 'matched'>])}
+                </span>
+              </div>
+            ))}
+            {preview.unmatchedProducts.map((p, i) => (
+              <div key={`u${i}`} style={{ fontSize: 12.5, color: 'var(--fg-subtle)', display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                <Icon name="alert" size={12} style={{ flexShrink: 0, transform: 'translateY(1px)' }} />
+                <span>
+                  <span className="mono">{p.partNumber ?? p.label}</span>
+                  {' — '}{t('soPriceImportUnpriced')}
+                </span>
+              </div>
+            ))}
+            {preview.manualProducts.map((p, i) => (
+              <div key={`m${i}`} style={{ fontSize: 12.5, color: 'var(--fg-subtle)', display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                <Icon name="alert" size={12} style={{ flexShrink: 0, transform: 'translateY(1px)' }} />
+                <span>{p.label}{' — '}{t('soPriceImportManual')}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="modal-foot">
+        <button className="btn" onClick={onCancel}>{t('cancel')}</button>
+        <button className="btn accent" onClick={confirm} disabled={included.length === 0}>
+          {t('soPriceImportConfirm', { n: String(included.length) })}
+        </button>
+      </div>
+    </Modal>
   );
 }

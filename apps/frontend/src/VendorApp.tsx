@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useT } from './lib/i18n';
 import { Icon, type IconName } from './components/Icon';
 import { ImageLightbox } from './components/ImageLightbox';
+import { Modal } from './components/Modal';
 import { PhHeader } from './components/PhHeader';
 import { PhoneListSkeleton, TableSkeleton } from './components/Skeleton';
 import { usePhScrolled } from './lib/usePhScrolled';
@@ -1055,118 +1056,116 @@ function DesktopReviewModal({ vm, onClose }: { vm: VM; onClose: () => void }) {
   const subtotal = basketTotal(basket);
 
   return (
-    <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="modal-shell" style={{ maxWidth: 640 }}>
-        <div className="modal-head">
-          <div>
-            <div className="modal-title">{t('vendorReview')}</div>
-            <div className="modal-sub">{t('vendorNonBinding')}</div>
-          </div>
-          <button className="btn ghost icon-only sm" onClick={onClose} aria-label={t('closeBtn')}>
-            <Icon name="x" size={15} />
-          </button>
+    <Modal onClose={() => { if (!busy) onClose(); }} shellStyle={{ maxWidth: 640 }}>
+      <div className="modal-head">
+        <div>
+          <div className="modal-title">{t('vendorReview')}</div>
+          <div className="modal-sub">{t('vendorNonBinding')}</div>
         </div>
-
-        <div className="modal-body" style={{ padding: 20, overflowY: 'auto' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 18, marginBottom: 14 }}>
-            <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--fg-muted)' }}>
-              {t('currency.label')}
-            </span>
-            <div role="radiogroup" style={{ display: 'flex', gap: 16 }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
-                <input type="radio" name="bid-currency-desktop" value="USD"
-                  checked={currency === 'USD'} onChange={() => setCurrency('USD')} />
-                {t('currency.usd')}
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
-                <input type="radio" name="bid-currency-desktop" value="CNY"
-                  checked={currency === 'CNY'} onChange={() => setCurrency('CNY')} />
-                {t('currency.cny')}
-              </label>
-            </div>
-          </div>
-
-          <div className="table-scroll">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>{t('vendorTableItem')}</th>
-                  <th className="num">{t('vendorQty')}</th>
-                  <th className="num">{t('vendorTableUnit')}</th>
-                  <th className="num">{t('vendorTableTotal')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {basket.map(l => (
-                  <tr key={l.inventoryId}>
-                    <td>{l.label}</td>
-                    <td className="num mono">{l.qty}</td>
-                    <td className="num mono">{fmtMoney(l.unitPrice, currency)}</td>
-                    <td className="num mono">{fmtMoney(l.qty * l.unitPrice, currency)}</td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr>
-                  <td colSpan={3} style={{ fontWeight: 700 }}>
-                    {t('bid.in_currency', { currency })}
-                  </td>
-                  <td className="num mono" style={{ fontWeight: 700 }}>
-                    {fmtMoney(subtotal, currency)}
-                  </td>
-                </tr>
-                {currency === 'CNY' && fxUsdCny != null && (
-                  <tr>
-                    <td colSpan={4} className="num mono"
-                      style={{ fontSize: 12, color: 'var(--fg-muted)', fontWeight: 400 }}>
-                      {t('bid.usd_equivalent', {
-                        usd: fmtMoney(subtotal / fxUsdCny, 'USD'),
-                        rate: fxUsdCny.toFixed(4),
-                        date: (fxFetchedAt ?? new Date().toISOString()).slice(0, 10),
-                      })}
-                    </td>
-                  </tr>
-                )}
-              </tfoot>
-            </table>
-          </div>
-
-          <div style={{ display: 'grid', gap: 12, marginTop: 18 }}>
-            <label style={{ display: 'grid', gap: 5 }}>
-              <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--fg-muted)' }}>
-                {t('vendorContactName')}
-              </span>
-              <input className="input" value={name} onChange={e => setName(e.target.value)} />
-            </label>
-            <label style={{ display: 'grid', gap: 5 }}>
-              <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--fg-muted)' }}>
-                {t('vendorNote')}
-              </span>
-              <textarea className="textarea" rows={3} value={note}
-                onChange={e => setNote(e.target.value)} />
-            </label>
-          </div>
-
-          {err && (
-            <div style={{
-              marginTop: 12, padding: '10px 12px', borderRadius: 8,
-              background: 'var(--neg-soft)', color: 'var(--neg)', fontSize: 12.5,
-            }}>
-              {err}
-            </div>
-          )}
-        </div>
-
-        <div className="so-footer">
-          <button className="btn ghost" onClick={onClose} disabled={busy}>
-            {t('vendorBack')}
-          </button>
-          <button className="btn accent" disabled={!name || busy} onClick={submit}>
-            {t('vendorSubmit')}
-          </button>
-        </div>
+        <button className="btn ghost icon-only sm" onClick={onClose} aria-label={t('closeBtn')}>
+          <Icon name="x" size={15} />
+        </button>
       </div>
-    </div>
+
+      <div className="modal-body" style={{ padding: 20, overflowY: 'auto' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 18, marginBottom: 14 }}>
+          <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--fg-muted)' }}>
+            {t('currency.label')}
+          </span>
+          <div role="radiogroup" style={{ display: 'flex', gap: 16 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+              <input type="radio" name="bid-currency-desktop" value="USD"
+                checked={currency === 'USD'} onChange={() => setCurrency('USD')} />
+              {t('currency.usd')}
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+              <input type="radio" name="bid-currency-desktop" value="CNY"
+                checked={currency === 'CNY'} onChange={() => setCurrency('CNY')} />
+              {t('currency.cny')}
+            </label>
+          </div>
+        </div>
+
+        <div className="table-scroll">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>{t('vendorTableItem')}</th>
+                <th className="num">{t('vendorQty')}</th>
+                <th className="num">{t('vendorTableUnit')}</th>
+                <th className="num">{t('vendorTableTotal')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {basket.map(l => (
+                <tr key={l.inventoryId}>
+                  <td>{l.label}</td>
+                  <td className="num mono">{l.qty}</td>
+                  <td className="num mono">{fmtMoney(l.unitPrice, currency)}</td>
+                  <td className="num mono">{fmtMoney(l.qty * l.unitPrice, currency)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colSpan={3} style={{ fontWeight: 700 }}>
+                  {t('bid.in_currency', { currency })}
+                </td>
+                <td className="num mono" style={{ fontWeight: 700 }}>
+                  {fmtMoney(subtotal, currency)}
+                </td>
+              </tr>
+              {currency === 'CNY' && fxUsdCny != null && (
+                <tr>
+                  <td colSpan={4} className="num mono"
+                    style={{ fontSize: 12, color: 'var(--fg-muted)', fontWeight: 400 }}>
+                    {t('bid.usd_equivalent', {
+                      usd: fmtMoney(subtotal / fxUsdCny, 'USD'),
+                      rate: fxUsdCny.toFixed(4),
+                      date: (fxFetchedAt ?? new Date().toISOString()).slice(0, 10),
+                    })}
+                  </td>
+                </tr>
+              )}
+            </tfoot>
+          </table>
+        </div>
+
+        <div style={{ display: 'grid', gap: 12, marginTop: 18 }}>
+          <label style={{ display: 'grid', gap: 5 }}>
+            <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--fg-muted)' }}>
+              {t('vendorContactName')}
+            </span>
+            <input className="input" value={name} onChange={e => setName(e.target.value)} />
+          </label>
+          <label style={{ display: 'grid', gap: 5 }}>
+            <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--fg-muted)' }}>
+              {t('vendorNote')}
+            </span>
+            <textarea className="textarea" rows={3} value={note}
+              onChange={e => setNote(e.target.value)} />
+          </label>
+        </div>
+
+        {err && (
+          <div style={{
+            marginTop: 12, padding: '10px 12px', borderRadius: 8,
+            background: 'var(--neg-soft)', color: 'var(--neg)', fontSize: 12.5,
+          }}>
+            {err}
+          </div>
+        )}
+      </div>
+
+      <div className="so-footer">
+        <button className="btn ghost" onClick={onClose} disabled={busy}>
+          {t('vendorBack')}
+        </button>
+        <button className="btn accent" disabled={!name || busy} onClick={submit}>
+          {t('vendorSubmit')}
+        </button>
+      </div>
+    </Modal>
   );
 }
 

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Icon } from '../../../components/Icon';
+import { Modal } from '../../../components/Modal';
 import { api } from '../../../lib/api';
 import { handleFetchError } from '../../../lib/errorToast';
 import { useT } from '../../../lib/i18n';
@@ -287,211 +288,209 @@ function WarehouseEditModal({
   };
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-shell" style={{ maxWidth: 560 }} onClick={e => e.stopPropagation()}>
-        <div className="modal-head">
-          <div className="modal-title">{isNew ? t('whNewTitle') : t('whEditTitle')}</div>
-          <button className="btn icon" onClick={onClose}><Icon name="x" size={14} /></button>
+    <Modal onClose={() => { if (!saving && !deleting) onClose(); }} shellStyle={{ maxWidth: 560 }}>
+      <div className="modal-head">
+        <div className="modal-title">{isNew ? t('whNewTitle') : t('whEditTitle')}</div>
+        <button className="btn icon" onClick={onClose}><Icon name="x" size={14} /></button>
+      </div>
+      <div className="modal-body">
+        <div className="field-row">
+          <div className="field">
+            <label className="label">{t('whFieldName')}</label>
+            <input className="input" value={draft.name} onChange={e => set('name', e.target.value)} />
+          </div>
         </div>
-        <div className="modal-body">
+        <div className="field-row">
+          <div className="field">
+            <label className="label">{t('whFieldShortCode')}</label>
+            <input
+              className="input mono"
+              value={draft.short}
+              onChange={e => set('short', e.target.value.toUpperCase())}
+              placeholder={t('whShortCodePh')}
+            />
+          </div>
+          <div className="field">
+            <label className="label">{t('whFieldRegion')}</label>
+            <input className="input" value={draft.region} onChange={e => set('region', e.target.value)} placeholder={t('whRegionPh')} />
+          </div>
+        </div>
+        {/* The only address on a warehouse. Carriers read these fields, and
+            the display line shown on cards is derived from them server-side. */}
+        <div style={{ margin: '14px 0 4px', fontSize: 12, fontWeight: 650, color: 'var(--fg-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          {t('whShipAddrTitle')}
+        </div>
+        <div className="field-hint" style={{ marginBottom: 8 }}>{t('whShipAddrHint')}</div>
+        <div className="field-row">
+          <div className="field">
+            <label className="label">{t('whShipContact')}</label>
+            <input className="input" value={draft.shipContactName} onChange={e => set('shipContactName', e.target.value)} />
+          </div>
+          <div className="field">
+            <label className="label">{t('whShipPhone')}</label>
+            <input className="input" value={draft.shipPhone} onChange={e => set('shipPhone', e.target.value)} />
+          </div>
+        </div>
+        <div className="field-row">
+          <div className="field">
+            <label className="label">{t('whShipStreet1')}</label>
+            <input className="input" value={draft.shipStreet1} onChange={e => set('shipStreet1', e.target.value)} />
+          </div>
+        </div>
+        <div className="field-row">
+          <div className="field">
+            <label className="label">{t('whShipStreet2')}</label>
+            <input className="input" value={draft.shipStreet2} onChange={e => set('shipStreet2', e.target.value)} />
+          </div>
+        </div>
+        <div className="field-row">
+          <div className="field">
+            <label className="label">{t('whShipCity')}</label>
+            <input className="input" value={draft.shipCity} onChange={e => set('shipCity', e.target.value)} />
+          </div>
+          <div className="field">
+            <label className="label">{t('whShipState')}</label>
+            <input className="input" value={draft.shipState} onChange={e => set('shipState', e.target.value)} />
+          </div>
+          <div className="field">
+            <label className="label">{t('whShipZip')}</label>
+            <input className="input" value={draft.shipZip} onChange={e => set('shipZip', e.target.value)} />
+          </div>
+        </div>
+        <div className="field-row">
+          <div className="field">
+            <label className="label">{t('whShipCountry')}</label>
+            <input className="input" value={draft.shipCountry} onChange={e => set('shipCountry', e.target.value.toUpperCase())} placeholder="US" />
+          </div>
+        </div>
+        <div className="field-row">
+          <div className="field">
+            <label className="label">{t('whManager')}</label>
+            <select
+              className="input"
+              value={draft.managerUserId}
+              onChange={e => set('managerUserId', e.target.value)}
+            >
+              <option value="">{t('whNoManager')}</option>
+              {managers.map(m => (
+                <option key={m.id} value={m.id}>{m.name}</option>
+              ))}
+              {draft.managerUserId && !managers.some(m => m.id === draft.managerUserId) && (
+                <option value={draft.managerUserId}>
+                  {warehouse?.manager ?? t('whCurrentManager')}
+                </option>
+              )}
+            </select>
+          </div>
+        </div>
+        {/* Contact details are derived from the selected manager's user
+            record — read-only, single source of truth in the DB. */}
+        <div className="field-row">
+          <div className="field">
+            <label className="label">{t('whManagerPhone')}</label>
+            <input className="input" value={selectedMgr?.phone ?? '—'} readOnly disabled />
+          </div>
+          <div className="field">
+            <label className="label">{t('whManagerEmail')}</label>
+            <input className="input" value={selectedMgr?.email ?? '—'} readOnly disabled />
+          </div>
+        </div>
+        <div className="field-row">
+          <div className="field">
+            <label className="label">{t('whTimezone')}</label>
+            <select
+              className="input"
+              value={draft.timezone}
+              onChange={e => set('timezone', e.target.value)}
+            >
+              <option value="">{t('whNone')}</option>
+              {timezones.map(tz => (
+                <option key={tz} value={tz}>{tz}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        {!isNew && (
           <div className="field-row">
             <div className="field">
-              <label className="label">{t('whFieldName')}</label>
-              <input className="input" value={draft.name} onChange={e => set('name', e.target.value)} />
+              <label className="label">{t('whFieldId')}</label>
+              <input className="input mono" value={warehouse!.id} disabled />
             </div>
           </div>
-          <div className="field-row">
-            <div className="field">
-              <label className="label">{t('whFieldShortCode')}</label>
-              <input
-                className="input mono"
-                value={draft.short}
-                onChange={e => set('short', e.target.value.toUpperCase())}
-                placeholder={t('whShortCodePh')}
-              />
+        )}
+        {!isNew && confirmingDelete && (
+          <div
+            style={{
+              marginTop: 12, padding: 12, borderRadius: 6,
+              border: '1px solid var(--neg)', background: 'var(--bg-elev)',
+            }}
+          >
+            <div style={{ fontWeight: 600, marginBottom: 6 }}>
+              {t('whDeleteConfirmTitle', { name: warehouse!.name ?? warehouse!.short })}
+            </div>
+            <div style={{ fontSize: 12.5, color: 'var(--fg-subtle)', marginBottom: 10 }}>
+              {t('whDeleteConfirmSub')}
             </div>
             <div className="field">
-              <label className="label">{t('whFieldRegion')}</label>
-              <input className="input" value={draft.region} onChange={e => set('region', e.target.value)} placeholder={t('whRegionPh')} />
-            </div>
-          </div>
-          {/* The only address on a warehouse. Carriers read these fields, and
-              the display line shown on cards is derived from them server-side. */}
-          <div style={{ margin: '14px 0 4px', fontSize: 12, fontWeight: 650, color: 'var(--fg-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-            {t('whShipAddrTitle')}
-          </div>
-          <div className="field-hint" style={{ marginBottom: 8 }}>{t('whShipAddrHint')}</div>
-          <div className="field-row">
-            <div className="field">
-              <label className="label">{t('whShipContact')}</label>
-              <input className="input" value={draft.shipContactName} onChange={e => set('shipContactName', e.target.value)} />
-            </div>
-            <div className="field">
-              <label className="label">{t('whShipPhone')}</label>
-              <input className="input" value={draft.shipPhone} onChange={e => set('shipPhone', e.target.value)} />
-            </div>
-          </div>
-          <div className="field-row">
-            <div className="field">
-              <label className="label">{t('whShipStreet1')}</label>
-              <input className="input" value={draft.shipStreet1} onChange={e => set('shipStreet1', e.target.value)} />
-            </div>
-          </div>
-          <div className="field-row">
-            <div className="field">
-              <label className="label">{t('whShipStreet2')}</label>
-              <input className="input" value={draft.shipStreet2} onChange={e => set('shipStreet2', e.target.value)} />
-            </div>
-          </div>
-          <div className="field-row">
-            <div className="field">
-              <label className="label">{t('whShipCity')}</label>
-              <input className="input" value={draft.shipCity} onChange={e => set('shipCity', e.target.value)} />
-            </div>
-            <div className="field">
-              <label className="label">{t('whShipState')}</label>
-              <input className="input" value={draft.shipState} onChange={e => set('shipState', e.target.value)} />
-            </div>
-            <div className="field">
-              <label className="label">{t('whShipZip')}</label>
-              <input className="input" value={draft.shipZip} onChange={e => set('shipZip', e.target.value)} />
-            </div>
-          </div>
-          <div className="field-row">
-            <div className="field">
-              <label className="label">{t('whShipCountry')}</label>
-              <input className="input" value={draft.shipCountry} onChange={e => set('shipCountry', e.target.value.toUpperCase())} placeholder="US" />
-            </div>
-          </div>
-          <div className="field-row">
-            <div className="field">
-              <label className="label">{t('whManager')}</label>
+              <label className="label">{t('whMoveInventoryTo')}</label>
               <select
                 className="input"
-                value={draft.managerUserId}
-                onChange={e => set('managerUserId', e.target.value)}
+                value={transferTo}
+                onChange={(e) => setTransferTo(e.target.value)}
               >
-                <option value="">{t('whNoManager')}</option>
-                {managers.map(m => (
-                  <option key={m.id} value={m.id}>{m.name}</option>
-                ))}
-                {draft.managerUserId && !managers.some(m => m.id === draft.managerUserId) && (
-                  <option value={draft.managerUserId}>
-                    {warehouse?.manager ?? t('whCurrentManager')}
+                <option value="">{t('whMoveInventoryClear')}</option>
+                {others.map(w => (
+                  <option key={w.id} value={w.id}>
+                    {w.name ?? w.short} · {w.region}
                   </option>
-                )}
-              </select>
-            </div>
-          </div>
-          {/* Contact details are derived from the selected manager's user
-              record — read-only, single source of truth in the DB. */}
-          <div className="field-row">
-            <div className="field">
-              <label className="label">{t('whManagerPhone')}</label>
-              <input className="input" value={selectedMgr?.phone ?? '—'} readOnly disabled />
-            </div>
-            <div className="field">
-              <label className="label">{t('whManagerEmail')}</label>
-              <input className="input" value={selectedMgr?.email ?? '—'} readOnly disabled />
-            </div>
-          </div>
-          <div className="field-row">
-            <div className="field">
-              <label className="label">{t('whTimezone')}</label>
-              <select
-                className="input"
-                value={draft.timezone}
-                onChange={e => set('timezone', e.target.value)}
-              >
-                <option value="">{t('whNone')}</option>
-                {timezones.map(tz => (
-                  <option key={tz} value={tz}>{tz}</option>
                 ))}
               </select>
             </div>
           </div>
-          {!isNew && (
-            <div className="field-row">
-              <div className="field">
-                <label className="label">{t('whFieldId')}</label>
-                <input className="input mono" value={warehouse!.id} disabled />
-              </div>
-            </div>
+        )}
+      </div>
+      <div className="modal-foot" style={{ justifyContent: 'space-between' }}>
+        <div>
+          {!isNew && !confirmingDelete && (
+            <button
+              className="btn"
+              onClick={() => setConfirmingDelete(true)}
+              disabled={deleting || saving}
+              style={{ color: 'var(--neg)', borderColor: 'var(--neg)' }}
+            >
+              {t('delete')}
+            </button>
           )}
           {!isNew && confirmingDelete && (
-            <div
-              style={{
-                marginTop: 12, padding: 12, borderRadius: 6,
-                border: '1px solid var(--neg)', background: 'var(--bg-elev)',
-              }}
+            <button
+              className="btn"
+              onClick={() => { setConfirmingDelete(false); setTransferTo(''); }}
+              disabled={deleting}
             >
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>
-                {t('whDeleteConfirmTitle', { name: warehouse!.name ?? warehouse!.short })}
-              </div>
-              <div style={{ fontSize: 12.5, color: 'var(--fg-subtle)', marginBottom: 10 }}>
-                {t('whDeleteConfirmSub')}
-              </div>
-              <div className="field">
-                <label className="label">{t('whMoveInventoryTo')}</label>
-                <select
-                  className="input"
-                  value={transferTo}
-                  onChange={(e) => setTransferTo(e.target.value)}
-                >
-                  <option value="">{t('whMoveInventoryClear')}</option>
-                  {others.map(w => (
-                    <option key={w.id} value={w.id}>
-                      {w.name ?? w.short} · {w.region}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
+              {t('back')}
+            </button>
           )}
         </div>
-        <div className="modal-foot" style={{ justifyContent: 'space-between' }}>
-          <div>
-            {!isNew && !confirmingDelete && (
-              <button
-                className="btn"
-                onClick={() => setConfirmingDelete(true)}
-                disabled={deleting || saving}
-                style={{ color: 'var(--neg)', borderColor: 'var(--neg)' }}
-              >
-                {t('delete')}
+        <div style={{ display: 'flex', gap: 8 }}>
+          {confirmingDelete ? (
+            <button
+              className="btn primary"
+              onClick={remove}
+              disabled={deleting}
+              style={{ background: 'var(--neg)', borderColor: 'var(--neg)' }}
+            >
+              {deleting ? '…' : t('whConfirmDelete')}
+            </button>
+          ) : (
+            <>
+              <button className="btn" onClick={onClose}>{t('cancel')}</button>
+              <button className="btn primary" onClick={save} disabled={saving || deleting || !canSave}>
+                {saving ? '…' : t('save')}
               </button>
-            )}
-            {!isNew && confirmingDelete && (
-              <button
-                className="btn"
-                onClick={() => { setConfirmingDelete(false); setTransferTo(''); }}
-                disabled={deleting}
-              >
-                {t('back')}
-              </button>
-            )}
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            {confirmingDelete ? (
-              <button
-                className="btn primary"
-                onClick={remove}
-                disabled={deleting}
-                style={{ background: 'var(--neg)', borderColor: 'var(--neg)' }}
-              >
-                {deleting ? '…' : t('whConfirmDelete')}
-              </button>
-            ) : (
-              <>
-                <button className="btn" onClick={onClose}>{t('cancel')}</button>
-                <button className="btn primary" onClick={save} disabled={saving || deleting || !canSave}>
-                  {saving ? '…' : t('save')}
-                </button>
-              </>
-            )}
-          </div>
+            </>
+          )}
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

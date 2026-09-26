@@ -8,6 +8,7 @@ import { useT } from '../../lib/i18n';
 import type { Translate } from '../../lib/orderPresentation';
 import { usePersisted } from '../../lib/listMemory';
 import { match, readHashQuery, useRoute } from '../../lib/route';
+import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { useSentinel } from '../../lib/useSentinel';
 import { RouteLink } from '../../components/RouteLink';
 import { PAYMENT_NOTE_MAX } from '@recycle-erp/shared';
@@ -318,6 +319,9 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
   const [source, setSource] = usePersisted('desktop.payments.source', 'all');
   const [direction, setDirection] = usePersisted<Direction>('desktop.payments.direction', DEFAULT_DIRECTION);
   const [q, setQ] = usePersisted('desktop.payments.q', '');
+  // Only the typed text waits; the chips, the deep link and mutations reload
+  // at once, and reqId still drops any response a later request overtook.
+  const settledQ = useDebouncedValue(q);
   const [hasMatch, setHasMatch] = usePersisted('desktop.payments.hasMatch', false);
   const [disputed, setDisputed] = usePersisted('desktop.payments.disputed', false);
   const [settle, setSettle] = usePersisted('desktop.payments.settle', 'all');
@@ -359,7 +363,7 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
       if (status !== 'all') p.set('status', status);
       if (source !== 'all') p.set('source', source);
       if (direction !== 'all') p.set('direction', direction);
-      if (q.trim()) p.set('q', q.trim());
+      if (settledQ.trim()) p.set('q', settledQ.trim());
       if (hasMatch) p.set('hasMatch', '1');
       if (disputed) p.set('dispute', '1');
       if (settle !== 'all') p.set('settle', settle);
@@ -367,7 +371,7 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
     }
     if (cursor) p.set('cursor', cursor);
     return p.toString();
-  }, [focusOrder, status, source, direction, q, hasMatch, disputed, settle, assignee]);
+  }, [focusOrder, status, source, direction, settledQ, hasMatch, disputed, settle, assignee]);
 
   // The owner picker and the filter share one list; the page is manager-only,
   // so /api/members is readable here.

@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Icon, type IconName } from '../../components/Icon';
+import { Modal } from '../../components/Modal';
 import { useT } from '../../lib/i18n';
 import { useAuth } from '../../lib/auth';
 import { useEffectiveUser } from '../../lib/tweaks';
@@ -29,6 +30,7 @@ import {
 import { groupLines, shouldGroup, displayRows, catTone, pricedTotals, lineSpecLabel } from '../../lib/lineGroups';
 import { CostTape } from '../../components/CostTape';
 import { useMarketLookup } from '../../lib/useMarketLookup';
+import { useEscapeKey } from '../../lib/useEscapeKey';
 import { ImageLightbox } from '../../components/ImageLightbox';
 import { serialIssue } from '@recycle-erp/shared';
 import { lineRequirements, missingFieldNames } from '../../lib/lineRequirements';
@@ -427,26 +429,13 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     return opts;
   }, [members, order.userId, order.userName, user?.id, user?.name]);
 
-  // Escape closes the drawer; if none open, closes the page.
-  // When the delete modal is open, Escape dismisses it (if not mid-delete)
-  // and does NOT fall through to the page-close / drawer-close logic.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      if (showDelete) {
-        if (!deleting) setShowDelete(false);
-        return;
-      }
-      if (showArchive) {
-        if (!archiving) setShowArchive(false);
-        return;
-      }
-      if (activeIdx !== null) setActiveIdx(null);
-      else onCancel();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [activeIdx, onCancel, showDelete, deleting, showArchive, archiving]);
+  // Escape closes the drawer; if none open, closes the page. The page mounts
+  // before any of its dialogs, so each one sits above this on the Escape stack
+  // and a press inside a dialog never reaches the page.
+  useEscapeKey(() => {
+    if (activeIdx !== null) setActiveIdx(null);
+    else onCancel();
+  });
 
   const updateLine = (i: number, patch: Partial<EditLine>) =>
     setLines(ls => ls.map((l, j) => (j === i ? { ...l, ...patch, _dirty: true } : l)));
@@ -1654,135 +1643,134 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       )}
 
       {showDelete && (
-        <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget && !deleting) setShowDelete(false); }}>
-          <div className="modal-shell" style={{ maxWidth: 460 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-head">
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                <div style={{
-                  width: 36, height: 36, borderRadius: 8,
-                  background: 'var(--neg-soft)', color: 'var(--neg)',
-                  display: 'grid', placeItems: 'center', flexShrink: 0,
-                }}>
-                  <Icon name="trash" size={18} />
-                </div>
-                <div>
-                  <div className="modal-title">{t('deleteOrderTitle', { id: order.id })}</div>
-                  <div className="modal-sub">
-                    {t('eoDeleteSubFull')}
-                  </div>
+        <Modal onClose={() => { if (!deleting) setShowDelete(false); }} shellStyle={{ maxWidth: 460 }}>
+          <div className="modal-head">
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+              <div style={{
+                width: 36, height: 36, borderRadius: 8,
+                background: 'var(--neg-soft)', color: 'var(--neg)',
+                display: 'grid', placeItems: 'center', flexShrink: 0,
+              }}>
+                <Icon name="trash" size={18} />
+              </div>
+              <div>
+                <div className="modal-title">{t('deleteOrderTitle', { id: order.id })}</div>
+                <div className="modal-sub">
+                  {t('eoDeleteSubFull')}
                 </div>
               </div>
-            </div>
-            <div className="modal-body">
-              <div className="field">
-                <label className="label">
-                  {t('dangerTypeToConfirmPrefix')} <span className="mono">{order.id}</span> {t('dangerTypeToConfirmSuffix')}
-                </label>
-                <input
-                  className="input mono"
-                  value={typedId}
-                  onChange={e => setTypedId(e.target.value)}
-                  placeholder={order.id}
-                  autoFocus
-                  disabled={deleting}
-                />
-              </div>
-            </div>
-            <div className="modal-foot">
-              <button
-                className="btn"
-                onClick={() => setShowDelete(false)}
-                disabled={deleting}
-              >
-                {t('cancel')}
-              </button>
-              <button
-                className="btn"
-                style={{
-                  background: 'var(--neg)', color: 'white', borderColor: 'var(--neg)',
-                  opacity: deleting || typedId !== order.id ? 0.5 : 1,
-                }}
-                disabled={deleting || typedId !== order.id}
-                onClick={async () => {
-                  setDeleting(true);
-                  try {
-                    await deleteOrder(order.id);
-                    onCancel();
-                  } catch (e) {
-                    handleFetchError(e);
-                    setDeleting(false);
-                  }
-                }}
-              >
-                {deleting ? '…' : t('deleteOrder')}
-              </button>
             </div>
           </div>
-        </div>
+          <div className="modal-body">
+            <div className="field">
+              <label className="label">
+                {t('dangerTypeToConfirmPrefix')} <span className="mono">{order.id}</span> {t('dangerTypeToConfirmSuffix')}
+              </label>
+              <input
+                className="input mono"
+                value={typedId}
+                onChange={e => setTypedId(e.target.value)}
+                placeholder={order.id}
+                autoFocus
+                disabled={deleting}
+              />
+            </div>
+          </div>
+          <div className="modal-foot">
+            <button
+              className="btn"
+              onClick={() => setShowDelete(false)}
+              disabled={deleting}
+            >
+              {t('cancel')}
+            </button>
+            <button
+              className="btn"
+              style={{
+                background: 'var(--neg)', color: 'white', borderColor: 'var(--neg)',
+                opacity: deleting || typedId !== order.id ? 0.5 : 1,
+              }}
+              disabled={deleting || typedId !== order.id}
+              onClick={async () => {
+                setDeleting(true);
+                try {
+                  await deleteOrder(order.id);
+                  onCancel();
+                } catch (e) {
+                  handleFetchError(e);
+                  setDeleting(false);
+                }
+              }}
+            >
+              {deleting ? '…' : t('deleteOrder')}
+            </button>
+          </div>
+        </Modal>
       )}
 
       {showArchive && (
-        <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget && !archiving) { setShowArchive(false); setArchiveConflict(null); } }}>
-          <div className="modal-shell" style={{ maxWidth: archiveConflict ? 560 : 460 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-head">
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                <div style={{
-                  width: 36, height: 36, borderRadius: 8,
-                  // Cool/violet tone — deliberately distinct from the destructive
-                  // red of Delete. Archive is reversible; the colour should not
-                  // alarm.
-                  background: 'oklch(0.96 0.04 295)', color: 'oklch(0.45 0.16 295)',
-                  display: 'grid', placeItems: 'center', flexShrink: 0,
-                }}>
-                  <Icon name="box" size={18} />
+        <Modal
+          onClose={() => { if (!archiving) { setShowArchive(false); setArchiveConflict(null); } }}
+          shellStyle={{ maxWidth: archiveConflict ? 560 : 460 }}
+        >
+          <div className="modal-head">
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+              <div style={{
+                width: 36, height: 36, borderRadius: 8,
+                // Cool/violet tone — deliberately distinct from the destructive
+                // red of Delete. Archive is reversible; the colour should not
+                // alarm.
+                background: 'oklch(0.96 0.04 295)', color: 'oklch(0.45 0.16 295)',
+                display: 'grid', placeItems: 'center', flexShrink: 0,
+              }}>
+                <Icon name="box" size={18} />
+              </div>
+              <div>
+                <div className="modal-title">
+                  {archiveConflict ? t('archiveConflictTitle') : t('eoArchiveModalTitle', { id: order.id })}
                 </div>
-                <div>
-                  <div className="modal-title">
-                    {archiveConflict ? t('archiveConflictTitle') : t('eoArchiveModalTitle', { id: order.id })}
-                  </div>
-                  <div className="modal-sub">
-                    {archiveConflict ? t('archiveConflictIntro', { id: order.id }) : t('eoArchiveModalBody')}
-                  </div>
+                <div className="modal-sub">
+                  {archiveConflict ? t('archiveConflictIntro', { id: order.id }) : t('eoArchiveModalBody')}
                 </div>
               </div>
             </div>
-            {archiveConflict && (
-                <div className="modal-body" style={{ paddingTop: 0 }}>
-                  <ArchiveConflictList conflict={archiveConflict} linkSellOrders />
-                </div>
-            )}
-            <div className="modal-foot">
-              <button
-                className="btn"
-                onClick={() => { setShowArchive(false); setArchiveConflict(null); }}
-                disabled={archiving}
-              >
-                {t('cancel')}
-              </button>
-              <button
-                className={archiveConflict ? 'btn' : 'btn accent'}
-                style={archiveConflict ? { color: 'var(--neg)', borderColor: 'var(--neg)' } : undefined}
-                disabled={archiving}
-                onClick={async () => {
-                  setArchiving(true);
-                  try {
-                    await archiveOrder(order.id, { removeFromSellOrders: !!archiveConflict });
-                    onSaved(t('orderArchivedToast'));
-                  } catch (e) {
-                    const conflict = readArchiveConflict(e);
-                    setArchiving(false);
-                    if (conflict) { setArchiveConflict(conflict); return; }
-                    handleFetchError(e);
-                    setShowArchive(false);
-                    setArchiveConflict(null);
-                  }
-                }}
-              >
-                {archiving ? '…' : archiveConflict ? t('archiveConflictConfirm') : t('archiveOrder')}
-              </button>
-            </div>
           </div>
-        </div>
+          {archiveConflict && (
+              <div className="modal-body" style={{ paddingTop: 0 }}>
+                <ArchiveConflictList conflict={archiveConflict} linkSellOrders />
+              </div>
+          )}
+          <div className="modal-foot">
+            <button
+              className="btn"
+              onClick={() => { setShowArchive(false); setArchiveConflict(null); }}
+              disabled={archiving}
+            >
+              {t('cancel')}
+            </button>
+            <button
+              className={archiveConflict ? 'btn' : 'btn accent'}
+              style={archiveConflict ? { color: 'var(--neg)', borderColor: 'var(--neg)' } : undefined}
+              disabled={archiving}
+              onClick={async () => {
+                setArchiving(true);
+                try {
+                  await archiveOrder(order.id, { removeFromSellOrders: !!archiveConflict });
+                  onSaved(t('orderArchivedToast'));
+                } catch (e) {
+                  const conflict = readArchiveConflict(e);
+                  setArchiving(false);
+                  if (conflict) { setArchiveConflict(conflict); return; }
+                  handleFetchError(e);
+                  setShowArchive(false);
+                  setArchiveConflict(null);
+                }
+              }}
+            >
+              {archiving ? '…' : archiveConflict ? t('archiveConflictConfirm') : t('archiveOrder')}
+            </button>
+          </div>
+        </Modal>
       )}
 
       {serialIssues && (
@@ -1805,31 +1793,29 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       )}
 
       {revertConfirm && (
-        <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) revertConfirm(false); }}>
-          <div className="modal-shell" style={{ maxWidth: 460 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-head">
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                <div style={{
-                  width: 36, height: 36, borderRadius: 8,
-                  background: 'var(--warn-soft, #fef3c7)', color: 'var(--warn-strong, #92400e)',
-                  display: 'grid', placeItems: 'center', flexShrink: 0,
-                }}>
-                  <Icon name="rotate" size={18} />
-                </div>
-                <div>
-                  <div className="modal-title">{t('revertWarnTitle')}</div>
-                  <div className="modal-sub">{t('revertWarnBody')}</div>
-                </div>
+        <Modal onClose={() => revertConfirm(false)} shellStyle={{ maxWidth: 460 }}>
+          <div className="modal-head">
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+              <div style={{
+                width: 36, height: 36, borderRadius: 8,
+                background: 'var(--warn-soft, #fef3c7)', color: 'var(--warn-strong, #92400e)',
+                display: 'grid', placeItems: 'center', flexShrink: 0,
+              }}>
+                <Icon name="rotate" size={18} />
+              </div>
+              <div>
+                <div className="modal-title">{t('revertWarnTitle')}</div>
+                <div className="modal-sub">{t('revertWarnBody')}</div>
               </div>
             </div>
-            <div className="modal-foot">
-              <button className="btn" onClick={() => revertConfirm(false)}>{t('cancel')}</button>
-              <button className="btn primary" onClick={() => revertConfirm(true)}>
-                {t('revertWarnConfirm')}
-              </button>
-            </div>
           </div>
-        </div>
+          <div className="modal-foot">
+            <button className="btn" onClick={() => revertConfirm(false)}>{t('cancel')}</button>
+            <button className="btn primary" onClick={() => revertConfirm(true)}>
+              {t('revertWarnConfirm')}
+            </button>
+          </div>
+        </Modal>
       )}
 
       {pendingRevert.length > 0 && (
