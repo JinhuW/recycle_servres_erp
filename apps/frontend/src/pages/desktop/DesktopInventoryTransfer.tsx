@@ -41,7 +41,7 @@ export function DesktopInventoryTransfer({ items, warehouses, onClose, onSaved }
   const [submitting, setSubmitting] = useState(false);
 
   // Esc closes the modal (ignored mid-submit).
-  useEscapeKey(onClose, !submitting);
+  useEscapeKey(() => { if (!submitting) onClose(); });
 
   // Destination picker excludes any warehouse that is already a source on at
   // least one of the selected lines — moving to "self" is a no-op.

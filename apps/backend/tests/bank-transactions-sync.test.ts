@@ -470,6 +470,48 @@ describe('bank transaction sync', () => {
     expect(result.perSource.paypal?.error).toContain('paypal down');
     expect(result.perSource.mercury).toMatchObject({ inserted: 1 });
   });
+
+  // The upsert is one statement per chunk, and Postgres refuses to touch one
+  // row twice in a statement — so a feed repeating an id has to be folded
+  // first, without moving the counts a row-at-a-time upsert reported.
+  it('folds a repeated id in one batch: last copy wins, counts unchanged', async () => {
+    const batch = [
+      { externalId: 'dup', amount: -10, description: 'first' },
+      { externalId: 'solo', amount: -20, description: 'solo' },
+      { externalId: 'dup', amount: -11, description: 'second' },
+    ];
+    const first = await syncBankTransactions(testEnv, [fakeProvider('mercury', batch)]);
+    expect(first.perSource.mercury).toMatchObject({ inserted: 2, updated: 1 });
+    expect(first.perSource.mercury?.error).toBeUndefined();
+
+    const db = getTestDb();
+    const [row] = await db<{ amount: string; description: string; raw_kind: string }[]>`
+      SELECT amount::text AS amount, description, jsonb_typeof(raw) AS raw_kind
+      FROM bank_transactions WHERE external_id = 'dup'`;
+    expect(row).toMatchObject({ amount: '-11.00', description: 'second', raw_kind: 'object' });
+
+    const again = await syncBankTransactions(testEnv, [fakeProvider('mercury', batch)]);
+    expect(again.perSource.mercury).toMatchObject({ inserted: 0, updated: 3 });
+  });
+
+  it('a repeated id whose last copy names an unknown account keeps the known copy', async () => {
+    const result = await syncBankTransactions(testEnv, [fakeProvider('mercury', [
+      { externalId: 'dup', amount: -10, description: 'known' },
+      { externalId: 'dup', amount: -99, description: 'ghost', accountExternalId: 'not-listed' },
+    ])]);
+    expect(result.perSource.mercury).toMatchObject({ inserted: 1, updated: 0 });
+    const rows = await getTestDb()<{ description: string }[]>`
+      SELECT description FROM bank_transactions WHERE external_id = 'dup'`;
+    expect(rows).toEqual([{ description: 'known' }]);
+  });
+
+  it('upserts a batch larger than one statement chunk', async () => {
+    const batch = Array.from({ length: 1203 }, (_, i) => ({ externalId: `bulk-${i}`, amount: -(i + 1) }));
+    const first = await syncBankTransactions(testEnv, [fakeProvider('mercury', batch)]);
+    expect(first.perSource.mercury).toMatchObject({ inserted: 1203, updated: 0 });
+    const again = await syncBankTransactions(testEnv, [fakeProvider('mercury', batch)]);
+    expect(again.perSource.mercury).toMatchObject({ inserted: 0, updated: 1203 });
+  });
 });
 
 // The IO card lives behind a second Mercury endpoint that can fail on its own.

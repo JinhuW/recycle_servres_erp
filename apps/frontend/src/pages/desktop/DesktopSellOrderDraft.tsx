@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
+import { Modal } from '../../components/Modal';
 import { api } from '../../lib/api';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { fmtUSD, fmtMoney, fmtDate } from '../../lib/format';
 import { fetchRateToUsd, type FxInfo } from '../../lib/fxRate';
-import { useEscapeKey } from '../../lib/useEscapeKey';
 import { useT } from '../../lib/i18n';
 
 type Currency = 'USD' | 'CNY';
@@ -119,9 +119,6 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
       .catch(handleFetchError);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Escape closes.
-  useEscapeKey(onClose);
-
   // rateToUsd multiplies a native amount to USD. For CNY it's null until the
   // FX snapshot loads, which is why the USD-derived figures are nullable.
   const rateToUsd = currency === 'USD' ? 1 : (fx?.rateToUsd ?? null);
@@ -211,249 +208,247 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
   };
 
   return (
-    <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div
-        className="modal-shell"
-        style={{ maxWidth: 1100, width: 'calc(100vw - 80px)', maxHeight: 'calc(100vh - 60px)' }}
-      >
-        {/* Header */}
-        <div style={{
-          padding: '18px 24px', borderBottom: '1px solid var(--border)',
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
-        }}>
-          <div>
-            <div style={{
-              fontSize: 11, color: 'var(--fg-subtle)',
-              textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4,
-            }}>
-              {t('sodNewDraftOverline')}
-            </div>
-            <h2 style={{ fontSize: 19, fontWeight: 600, letterSpacing: '-0.01em', margin: 0 }}>
-              {t('sodItemsFromInventory', { n: lines.length })}
-            </h2>
+    <Modal
+      onClose={() => { if (!saving) onClose(); }}
+      shellStyle={{ maxWidth: 1100, width: 'calc(100vw - 80px)', maxHeight: 'calc(100vh - 60px)' }}
+    >
+      {/* Header */}
+      <div style={{
+        padding: '18px 24px', borderBottom: '1px solid var(--border)',
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
+      }}>
+        <div>
+          <div style={{
+            fontSize: 11, color: 'var(--fg-subtle)',
+            textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4,
+          }}>
+            {t('sodNewDraftOverline')}
           </div>
-          <button className="btn icon" onClick={onClose} title={t('closeBtn')}>
-            <Icon name="x" size={16} />
-          </button>
+          <h2 style={{ fontSize: 19, fontWeight: 600, letterSpacing: '-0.01em', margin: 0 }}>
+            {t('sodItemsFromInventory', { n: lines.length })}
+          </h2>
         </div>
+        <button className="btn icon" onClick={onClose} title={t('closeBtn')}>
+          <Icon name="x" size={16} />
+        </button>
+      </div>
 
-        {/* Body — two columns */}
-        <div className="so-body">
-          <div className="so-main">
-            {/* Customer */}
-            <div className="so-section">
-              <div className="so-section-head">
-                <Icon name="user" size={14} /> {t('fieldCustomer')}
-              </div>
-              <div>
-                <label className="so-label">{t('fieldCustomer')}</label>
-                <CustomerPicker
-                  customers={customers}
-                  value={customerId}
-                  onChange={(id) => {
-                    setCustomerId(id);
-                  }}
-                  onCreated={(c) => {
-                    setCustomers((prev) => [...prev, c]);
-                  }}
-                />
-              </div>
-              <div style={{ marginTop: 12 }}>
-                <label className="so-label">{t('currency.label')}</label>
-                <CurrencyPicker value={currency} onChange={setCurrency} t={t} />
-              </div>
-              <div style={{ marginTop: 12 }}>
-                <label className="so-label">{t('paymentReceiverLabel')}</label>
-                <select
-                  className="select"
-                  value={paymentReceivedBy}
-                  onChange={e => setPaymentReceivedBy(e.target.value)}
-                >
-                  <option value="">{t('paymentReceiverNone')}</option>
-                  {members.map(m => (
-                    <option key={m.id} value={m.id}>{m.name}</option>
-                  ))}
-                </select>
-              </div>
+      {/* Body — two columns */}
+      <div className="so-body">
+        <div className="so-main">
+          {/* Customer */}
+          <div className="so-section">
+            <div className="so-section-head">
+              <Icon name="user" size={14} /> {t('fieldCustomer')}
+            </div>
+            <div>
+              <label className="so-label">{t('fieldCustomer')}</label>
+              <CustomerPicker
+                customers={customers}
+                value={customerId}
+                onChange={(id) => {
+                  setCustomerId(id);
+                }}
+                onCreated={(c) => {
+                  setCustomers((prev) => [...prev, c]);
+                }}
+              />
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <label className="so-label">{t('currency.label')}</label>
+              <CurrencyPicker value={currency} onChange={setCurrency} t={t} />
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <label className="so-label">{t('paymentReceiverLabel')}</label>
+              <select
+                className="select"
+                value={paymentReceivedBy}
+                onChange={e => setPaymentReceivedBy(e.target.value)}
+              >
+                <option value="">{t('paymentReceiverNone')}</option>
+                {members.map(m => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Line items */}
+          <div className="so-section">
+            <div className="so-section-head">
+              <Icon name="inventory" size={14} /> {t('sodLineItems')}
+              <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 400 }}>
+                {t('sodLineSummary', { units: totals.units, lines: lines.length, whs: grouped.length })}
+              </span>
             </div>
 
-            {/* Line items */}
-            <div className="so-section">
-              <div className="so-section-head">
-                <Icon name="inventory" size={14} /> {t('sodLineItems')}
-                <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 400 }}>
-                  {t('sodLineSummary', { units: totals.units, lines: lines.length, whs: grouped.length })}
-                </span>
-              </div>
-
-              {grouped.map((g, gi) => (
-                <div key={(g.warehouseShort ?? '__none') + gi} style={{ marginBottom: 14 }}>
-                  <div className="so-wh-head">
-                    <Icon name="warehouse" size={12} />
-                    <span>{g.warehouseShort ?? t('sodNoWarehouse')}</span>
-                    <span className="so-wh-count">{g.items.length}</span>
-                  </div>
-                  <table className="so-line-table">
-                    <thead>
-                      <tr>
-                        <th style={{ width: '44%' }}>{t('item')}</th>
-                        <th className="num" style={{ width: 110 }}>{t('qty')}</th>
-                        <th className="num" style={{ width: 130 }}>{t('fieldUnitPrice')}</th>
-                        <th className="num" style={{ width: 110 }}>{t('sodLineTotal')}</th>
-                        <th style={{ width: 36 }}></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {g.items.map(l => {
-                        const idx = l._idx;
-                        const lineTotal = l.qty * l.unitPrice;
-                        // listPrice is a USD suggestion, so the "adjusted"
-                        // warning only makes sense for USD orders.
-                        const adjusted = currency === 'USD'
-                          && l.unitPrice.toFixed(2) !== l.listPrice.toFixed(2);
-                        return (
-                          <tr key={l.inventoryId}>
-                            <td>
-                              <div style={{ fontWeight: 500, fontSize: 13 }}>{l.label}</div>
-                              <div style={{ fontSize: 11, color: 'var(--fg-subtle)', display: 'flex', gap: 8, alignItems: 'center', marginTop: 2 }}>
-                                <span className="mono">{l.partNumber ?? '—'}</span>
-                                <span>·</span>
-                                <span>{l.condition}</span>
-                              </div>
-                            </td>
-                            <td className="num">
-                              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
-                                <input
-                                  className="so-mini-input"
-                                  type="number"
-                                  min={1}
-                                  max={l.maxQty}
-                                  value={l.qty}
-                                  onChange={e => setLine(idx, {
-                                    qty: Math.max(1, Math.min(l.maxQty, Number(e.target.value) || 0)),
-                                  })}
-                                  style={{ width: 64 }}
-                                />
-                                <span style={{ fontSize: 10.5, color: 'var(--fg-subtle)', whiteSpace: 'nowrap' }}>
-                                  / {l.maxQty}
-                                </span>
-                              </div>
-                            </td>
-                            <td className="num">
+            {grouped.map((g, gi) => (
+              <div key={(g.warehouseShort ?? '__none') + gi} style={{ marginBottom: 14 }}>
+                <div className="so-wh-head">
+                  <Icon name="warehouse" size={12} />
+                  <span>{g.warehouseShort ?? t('sodNoWarehouse')}</span>
+                  <span className="so-wh-count">{g.items.length}</span>
+                </div>
+                <table className="so-line-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: '44%' }}>{t('item')}</th>
+                      <th className="num" style={{ width: 110 }}>{t('qty')}</th>
+                      <th className="num" style={{ width: 130 }}>{t('fieldUnitPrice')}</th>
+                      <th className="num" style={{ width: 110 }}>{t('sodLineTotal')}</th>
+                      <th style={{ width: 36 }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {g.items.map(l => {
+                      const idx = l._idx;
+                      const lineTotal = l.qty * l.unitPrice;
+                      // listPrice is a USD suggestion, so the "adjusted"
+                      // warning only makes sense for USD orders.
+                      const adjusted = currency === 'USD'
+                        && l.unitPrice.toFixed(2) !== l.listPrice.toFixed(2);
+                      return (
+                        <tr key={l.inventoryId}>
+                          <td>
+                            <div style={{ fontWeight: 500, fontSize: 13 }}>{l.label}</div>
+                            <div style={{ fontSize: 11, color: 'var(--fg-subtle)', display: 'flex', gap: 8, alignItems: 'center', marginTop: 2 }}>
+                              <span className="mono">{l.partNumber ?? '—'}</span>
+                              <span>·</span>
+                              <span>{l.condition}</span>
+                            </div>
+                          </td>
+                          <td className="num">
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
                               <input
                                 className="so-mini-input"
                                 type="number"
-                                step="0.01"
-                                value={l.unitPrice}
-                                onChange={e => setLine(idx, { unitPrice: Number(e.target.value) || 0 })}
-                                style={adjusted ? { borderColor: 'var(--warn)', background: 'var(--warn-soft)' } : undefined}
-                                title={adjusted ? t('sodListPriceTooltip', { price: fmtUSD(l.listPrice, locale) }) : undefined}
+                                min={1}
+                                max={l.maxQty}
+                                value={l.qty}
+                                onChange={e => setLine(idx, {
+                                  qty: Math.max(1, Math.min(l.maxQty, Number(e.target.value) || 0)),
+                                })}
+                                style={{ width: 64 }}
                               />
-                            </td>
-                            <td className="num mono" style={{ fontWeight: 500 }}>
-                              {fmtMoney(lineTotal, currency, locale)}
-                            </td>
-                            <td>
-                              <button
-                                className="btn icon sm"
-                                title={t('remove')}
-                                onClick={() => removeLine(idx)}
-                              >
-                                <Icon name="x" size={12} />
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              ))}
+                              <span style={{ fontSize: 10.5, color: 'var(--fg-subtle)', whiteSpace: 'nowrap' }}>
+                                / {l.maxQty}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="num">
+                            <input
+                              className="so-mini-input"
+                              type="number"
+                              step="0.01"
+                              value={l.unitPrice}
+                              onChange={e => setLine(idx, { unitPrice: Number(e.target.value) || 0 })}
+                              style={adjusted ? { borderColor: 'var(--warn)', background: 'var(--warn-soft)' } : undefined}
+                              title={adjusted ? t('sodListPriceTooltip', { price: fmtUSD(l.listPrice, locale) }) : undefined}
+                            />
+                          </td>
+                          <td className="num mono" style={{ fontWeight: 500 }}>
+                            {fmtMoney(lineTotal, currency, locale)}
+                          </td>
+                          <td>
+                            <button
+                              className="btn icon sm"
+                              title={t('remove')}
+                              onClick={() => removeLine(idx)}
+                            >
+                              <Icon name="x" size={12} />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ))}
 
-              {lines.length === 0 && (
-                <div style={{ padding: 32, textAlign: 'center', color: 'var(--fg-subtle)', fontSize: 13 }}>
-                  {t('sodAllItemsRemoved')}
-                </div>
-              )}
-            </div>
-
-            {/* Notes */}
-            <div className="so-section">
-              <div className="so-section-head"><Icon name="edit" size={14} /> {t('ieInternalNotes')}</div>
-              <textarea
-                className="input"
-                placeholder={t('sodInternalNotesPh')}
-                value={notes}
-                onChange={e => setNotes(e.target.value)}
-                rows={3}
-                style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
-              />
-            </div>
-
+            {lines.length === 0 && (
+              <div style={{ padding: 32, textAlign: 'center', color: 'var(--fg-subtle)', fontSize: 13 }}>
+                {t('sodAllItemsRemoved')}
+              </div>
+            )}
           </div>
 
-          {/* Right column — totals */}
-          <aside className="so-aside">
-            <div className="so-summary">
-              <div className="so-summary-head">{t('sodOrderSummary')}</div>
+          {/* Notes */}
+          <div className="so-section">
+            <div className="so-section-head"><Icon name="edit" size={14} /> {t('ieInternalNotes')}</div>
+            <textarea
+              className="input"
+              placeholder={t('sodInternalNotesPh')}
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              rows={3}
+              style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
+            />
+          </div>
 
-              <div className="so-row muted"><span>{t('sodUnits')}</span><span className="mono">{totals.units}</span></div>
-
-              <div className="so-row total">
-                <span>{t('sodCustomerTotal')}</span>
-                <span className="mono">{fmtMoney(totals.subtotalNative, currency, locale)}</span>
-              </div>
-              {currency !== 'USD' && (
-                <div className="so-row muted" style={{ fontSize: 11.5 }}>
-                  <span />
-                  <span className="mono">{t('soUsdEquiv', { usd: fmtUSD(totals.subtotalUsd, locale) })}</span>
-                </div>
-              )}
-
-              <div className="so-divider" />
-
-              <div className="so-row muted"><span>{t('sodCostBasis')}</span><span className="mono">{fmtUSD(totals.cost, locale)}</span></div>
-              <div className="so-row" style={{ color: 'var(--pos)' }}>
-                <span>{t('profit')}</span>
-                <span className="mono" style={{ fontWeight: 600 }}>{fmtUSD(totals.profit, locale)}</span>
-              </div>
-              <div className="so-row muted"><span>{t('margin')}</span><span className="mono">{totals.margin == null ? '—' : totals.margin.toFixed(1) + '%'}</span></div>
-              {currency !== 'USD' && fx && (
-                <div className="so-row muted" style={{ fontSize: 11, marginTop: 4 }}>
-                  <span />
-                  <span className="mono">{t('soFxRateNote', { rate: fx.oneUsdInQuote.toFixed(4), currency, source: fx.source })}</span>
-                </div>
-              )}
-            </div>
-
-            <div className="so-tip">
-              <Icon name="info" size={13} />
-              <div>
-                {t('sodDraftTipPre')}<strong>{t('lifecycleDraft')}</strong>{t('sodDraftTipPost')}
-              </div>
-            </div>
-          </aside>
         </div>
 
-        {/* Footer */}
-        <div className="so-footer">
-          <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
-            {t('lifecycleDraft')} · {fmtDate(new Date(), locale)}
+        {/* Right column — totals */}
+        <aside className="so-aside">
+          <div className="so-summary">
+            <div className="so-summary-head">{t('sodOrderSummary')}</div>
+
+            <div className="so-row muted"><span>{t('sodUnits')}</span><span className="mono">{totals.units}</span></div>
+
+            <div className="so-row total">
+              <span>{t('sodCustomerTotal')}</span>
+              <span className="mono">{fmtMoney(totals.subtotalNative, currency, locale)}</span>
+            </div>
+            {currency !== 'USD' && (
+              <div className="so-row muted" style={{ fontSize: 11.5 }}>
+                <span />
+                <span className="mono">{t('soUsdEquiv', { usd: fmtUSD(totals.subtotalUsd, locale) })}</span>
+              </div>
+            )}
+
+            <div className="so-divider" />
+
+            <div className="so-row muted"><span>{t('sodCostBasis')}</span><span className="mono">{fmtUSD(totals.cost, locale)}</span></div>
+            <div className="so-row" style={{ color: 'var(--pos)' }}>
+              <span>{t('profit')}</span>
+              <span className="mono" style={{ fontWeight: 600 }}>{fmtUSD(totals.profit, locale)}</span>
+            </div>
+            <div className="so-row muted"><span>{t('margin')}</span><span className="mono">{totals.margin == null ? '—' : totals.margin.toFixed(1) + '%'}</span></div>
+            {currency !== 'USD' && fx && (
+              <div className="so-row muted" style={{ fontSize: 11, marginTop: 4 }}>
+                <span />
+                <span className="mono">{t('soFxRateNote', { rate: fx.oneUsdInQuote.toFixed(4), currency, source: fx.source })}</span>
+              </div>
+            )}
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn" onClick={onClose}>{t('cancel')}</button>
-            <button
-              className="btn accent"
-              disabled={saving}
-              title={saveBlockers[0]}
-              onClick={onSaveClick}
-            >
-              <Icon name="check2" size={14} /> {saving ? t('vbSaving') : t('sodSaveDraft')}
-            </button>
+
+          <div className="so-tip">
+            <Icon name="info" size={13} />
+            <div>
+              {t('sodDraftTipPre')}<strong>{t('lifecycleDraft')}</strong>{t('sodDraftTipPost')}
+            </div>
           </div>
+        </aside>
+      </div>
+
+      {/* Footer */}
+      <div className="so-footer">
+        <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
+          {t('lifecycleDraft')} · {fmtDate(new Date(), locale)}
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn" onClick={onClose}>{t('cancel')}</button>
+          <button
+            className="btn accent"
+            disabled={saving}
+            title={saveBlockers[0]}
+            onClick={onSaveClick}
+          >
+            <Icon name="check2" size={14} /> {saving ? t('vbSaving') : t('sodSaveDraft')}
+          </button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 

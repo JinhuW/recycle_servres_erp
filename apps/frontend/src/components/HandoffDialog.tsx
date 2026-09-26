@@ -224,7 +224,7 @@ export function HandoffBlockers({ keys }: { keys: string[] }) {
 export function HandoffDialog({ init, onCancel, onDone }: Props) {
   const { t } = useT();
   const f = useHandoffForm(init, onDone);
-  useEscapeKey(onCancel, !f.busy);
+  useEscapeKey(() => { if (!f.busy) onCancel(); });
   const missing = f.blockerKeys.length;
 
   return (

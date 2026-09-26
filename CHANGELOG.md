@@ -17,6 +17,40 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.179.0] - 2026-09-26
+
+### Changed
+
+- **Dialogs share one Modal, and Escape closes only the top one** (RS-111).
+  The Warehouse, Customer and Member edit dialogs, the member invite, the
+  sell-order detail and archive dialogs, the vendor-bid detail and links
+  manager, the ignore-rules and price-import dialogs, the vendor review, the
+  sell-order draft and the PO page's delete, archive, revert and duplicate-part
+  dialogs now use the shared Modal. Escape dismisses only the dialog on top,
+  so pressing it in a confirm no longer also closes the page or dialog under
+  it, and the PO page no longer closes when Escape is pressed in its revert or
+  duplicate-part dialog. Escape is ignored while a dialog is saving, and the
+  Warehouse, Customer, Member edit and vendor review dialogs gain it. An
+  autofocused field keeps focus instead of losing it to the panel, which
+  already affected the add-client, brand-confirm and transfer dialogs. Escape
+  on the invite's success step now refreshes the member list, as its backdrop
+  did.
+- **Payments and internal-transaction search waits until typing stops.**
+  Each keystroke used to send a request and blank the list. The search text
+  now settles for 200 ms first, as Activity, Market and Inventory already did.
+  Filter chips still apply at once.
+- **The inventory list keeps every filter after a transfer or add-to-order.**
+  The reload used to drop Show sold, Hide pending and the attribute chips, so
+  the list briefly showed rows outside the active filters. It now reloads the
+  list and the product facets with the full filter.
+- **Faster detail pages and large saves.** A PO or sell-order detail reads its
+  parts in parallel, at most four at a time so one page can't take the
+  database pool, and reads the three payment-cutoff settings once. Adding
+  lines, adjusting a sell order's total, marking one Done, syncing bank
+  transactions and revoking an OAuth client each write in one statement
+  instead of one per row. The bank sync now folds a transaction repeated
+  within one batch before writing it; a repeat like that would otherwise
+  abort the whole statement. Counts and returned ids are unchanged.
 ## [1.178.1] - 2026-09-26
 
 - Each purchaser now has a home warehouse, the closest existing warehouse to where

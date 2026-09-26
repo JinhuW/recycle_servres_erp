@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Icon } from '../../../components/Icon';
+import { Modal } from '../../../components/Modal';
 import { api } from '../../../lib/api';
 import { handleFetchError } from '../../../lib/errorToast';
 import { fmtUSD0 } from '../../../lib/format';
@@ -267,61 +268,59 @@ function CustomerEditModal({ customer, showToast, onClose, onSaved }: { customer
   };
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-shell" style={{ maxWidth: 580 }} onClick={e => e.stopPropagation()}>
-        <div className="modal-head">
-          <div className="modal-title">{isNew ? t('custNewTitle') : t('custEditTitle')}</div>
-          <button className="btn icon" onClick={onClose}><Icon name="x" size={14} /></button>
-        </div>
-        <div className="modal-body">
-          <div className="field-row">
-            <div className="field">
-              <label className="label">{t('whFieldName')}</label>
-              <input className="input" value={String(draft.name ?? '')} onChange={e => set('name', e.target.value)} />
-            </div>
-            <div className="field">
-              <label className="label">{t('custFieldShortName')}</label>
-              <input className="input" value={String(draft.short_name ?? '')} onChange={e => set('short_name', e.target.value)} />
-            </div>
-            <div className="field">
-              <label className="label">{t('whFieldRegion')}</label>
-              <input className="input" value={String(draft.region ?? '')} onChange={e => set('region', e.target.value)} />
-            </div>
-            <div className="field">
-              <label className="label">{t('custFieldCountry')}</label>
-              <input className="input" value={String(draft.country ?? '')} onChange={e => set('country', e.target.value)} />
-            </div>
-            <div className="field">
-              <label className="label">{t('custFieldContactName')}</label>
-              <input className="input" value={String(draft.contact_name ?? '')} onChange={e => set('contact_name', e.target.value)} />
-            </div>
-            <div className="field">
-              <label className="label">{t('custFieldContactEmail')}</label>
-              <input className="input" value={String(draft.contact_email ?? '')} onChange={e => set('contact_email', e.target.value)} />
-            </div>
-            <div className="field">
-              <label className="label">{t('custFieldContactPhone')}</label>
-              <input className="input" value={String(draft.contact_phone ?? '')} onChange={e => set('contact_phone', e.target.value)} />
-            </div>
+    <Modal onClose={() => { if (!saving) onClose(); }} shellStyle={{ maxWidth: 580 }}>
+      <div className="modal-head">
+        <div className="modal-title">{isNew ? t('custNewTitle') : t('custEditTitle')}</div>
+        <button className="btn icon" onClick={onClose}><Icon name="x" size={14} /></button>
+      </div>
+      <div className="modal-body">
+        <div className="field-row">
+          <div className="field">
+            <label className="label">{t('whFieldName')}</label>
+            <input className="input" value={String(draft.name ?? '')} onChange={e => set('name', e.target.value)} />
           </div>
           <div className="field">
-            <label className="label">{t('whAddress')}</label>
-            <textarea className="input" rows={2} value={String(draft.address ?? '')} onChange={e => set('address', e.target.value)} />
+            <label className="label">{t('custFieldShortName')}</label>
+            <input className="input" value={String(draft.short_name ?? '')} onChange={e => set('short_name', e.target.value)} />
           </div>
           <div className="field">
-            <label className="label">{t('custFieldNotes')}</label>
-            <textarea className="input" rows={3} value={String(draft.notes ?? '')} onChange={e => set('notes', e.target.value)} />
+            <label className="label">{t('whFieldRegion')}</label>
+            <input className="input" value={String(draft.region ?? '')} onChange={e => set('region', e.target.value)} />
           </div>
-          <div className="toggle-row">
-            <span>{t('whActive')}</span>
-            <Toggle checked={Boolean(draft.active ?? true)} onChange={v => set('active', v)} />
+          <div className="field">
+            <label className="label">{t('custFieldCountry')}</label>
+            <input className="input" value={String(draft.country ?? '')} onChange={e => set('country', e.target.value)} />
+          </div>
+          <div className="field">
+            <label className="label">{t('custFieldContactName')}</label>
+            <input className="input" value={String(draft.contact_name ?? '')} onChange={e => set('contact_name', e.target.value)} />
+          </div>
+          <div className="field">
+            <label className="label">{t('custFieldContactEmail')}</label>
+            <input className="input" value={String(draft.contact_email ?? '')} onChange={e => set('contact_email', e.target.value)} />
+          </div>
+          <div className="field">
+            <label className="label">{t('custFieldContactPhone')}</label>
+            <input className="input" value={String(draft.contact_phone ?? '')} onChange={e => set('contact_phone', e.target.value)} />
           </div>
         </div>
-        <div className="modal-foot">
-          <button className="btn" onClick={onClose}>{t('cancel')}</button>
-          <button className="btn primary" onClick={save} disabled={saving || !draft.name}>{saving ? '…' : t('save')}</button>
+        <div className="field">
+          <label className="label">{t('whAddress')}</label>
+          <textarea className="input" rows={2} value={String(draft.address ?? '')} onChange={e => set('address', e.target.value)} />
+        </div>
+        <div className="field">
+          <label className="label">{t('custFieldNotes')}</label>
+          <textarea className="input" rows={3} value={String(draft.notes ?? '')} onChange={e => set('notes', e.target.value)} />
+        </div>
+        <div className="toggle-row">
+          <span>{t('whActive')}</span>
+          <Toggle checked={Boolean(draft.active ?? true)} onChange={v => set('active', v)} />
         </div>
       </div>
-    </div>
+      <div className="modal-foot">
+        <button className="btn" onClick={onClose}>{t('cancel')}</button>
+        <button className="btn primary" onClick={save} disabled={saving || !draft.name}>{saving ? '…' : t('save')}</button>
+      </div>
+    </Modal>
   );
 }
