@@ -544,6 +544,9 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   everywhere — the API does not send them to purchasers.
 - Search matches part number, serial number, brand, description and item type
   (v1.42.0), and the PO number, whole or partial (v1.143.0).
+- After a transfer or add-to-order, the list and its facets reload with every
+  active filter, including Show sold, Hide pending and the attribute chips
+  (v1.179.0).
 - Export honours the row selection, one worksheet per category, with designed
   workbook styling (v1.30.0, v1.31.0). Select/unselect all lots in the current
   filter (v1.19.0).
@@ -665,6 +668,8 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
 
 - Transaction ingest with auto-pair and auto-link (v1.90.0), a background sync
   loop behind a manager-only API (v1.91.0), and a Payments page (v1.92.0).
+  Search waits 200 ms after typing stops; filter chips apply at once
+  (v1.179.0).
 - **Internal Mercury↔PayPal transfers are classified out of the unlinked
   queue** (v1.93.0) by counterparty and Mercury kind rules (v1.94.0).
 - **Ignore rules** (v1.177.0). *Ignore rules* in the page header keeps a
@@ -1025,6 +1030,10 @@ One bundle, three lazy-loaded shells chosen in `App.tsx`: a vendor token in
   past every item already on the order — the screen reopens at the top after
   each line, which made the in-flow row recede a little further with every use.
 - All strings go through `useT()`; the app ships English and Chinese.
+- **Escape closes only the top dialog** (v1.179.0). Desktop dialogs share one
+  Modal. Escape dismisses the dialog on top and leaves the one or the page
+  under it open, is ignored while a dialog is saving, and an autofocused field
+  keeps focus when a dialog opens.
 - User preferences (theme, list-view modes) flow through `lib/preferences.tsx`
   and persist server-side.
 - **A deploy no longer breaks tabs that were already open** (v1.121.1). A

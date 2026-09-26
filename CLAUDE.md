@@ -165,6 +165,12 @@ switches the branch out from under the first.
   raw English in JSX.
 - User preferences (theme, list-view modes, etc.) flow through
   `lib/preferences.tsx`.  Add new keys there, not in component-local state.
+- Dialogs use `components/Modal.tsx`.  Escape is a stack (`lib/escapeStack.ts`)
+  where only the top entry fires, so **never turn Escape off with
+  `useEscapeKey(fn, !busy)` while a dialog is open** — the key would fall
+  through to the layer under it.  Guard inside the handler instead; `active`
+  is only for something mounted but hidden, like a closed drawer.  Nested
+  dialogs render as siblings of the `<Modal>`, not children.
 
 ## Backend
 
@@ -204,6 +210,11 @@ switches the branch out from under the first.
   Do not new-up `postgres()` clients inline; call `getDb(env)`.  The historical
   per-request pool design caused connection exhaustion under load — don't
   bring it back.
+- **Fan out per-request reads with `allLimited` (`lib/concurrency.ts`), at
+  most 4 at a time.**  The prod pool is `max: 10` and postgres.js pipelines
+  past it onto busy connections, so an unbounded `Promise.all` on a hot page
+  queues other requests behind it.  Never use it inside `sql.begin` — a
+  transaction is one connection.
 - **Transactions use `sql.begin(async (tx) => …)`** (postgres.js).  Multi-table
   writes that have to be atomic (notably anywhere `notify` is involved — see
   `lib/notify.ts`) must run inside `sql.begin` and pass `tx` down, not a

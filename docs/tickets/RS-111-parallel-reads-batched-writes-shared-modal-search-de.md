@@ -30,12 +30,12 @@ Plan: `~/.claude/plans/rustling-fluttering-island.md`.
 
 ## Acceptance criteria
 
-- [ ] PO and sell-order detail reads run at most 4 at a time; response JSON is unchanged.
-- [ ] Line inserts, price adjustments, sold events, bank-sync upserts and OAuth revokes are one statement each; returned ids and counts are unchanged.
-- [ ] A duplicate transaction id inside one bank-sync batch no longer risks aborting the sync.
-- [ ] After a transfer, the inventory list keeps every active filter.
-- [ ] Payments and Internal transactions search waits 200 ms after typing; filter chips stay instant.
-- [ ] The listed dialogs use the shared Modal; Escape closes only the top dialog and is ignored while saving; autofocused fields keep focus.
+- [x] PO and sell-order detail reads run at most 4 at a time; response JSON is unchanged.
+- [x] Line inserts, price adjustments, sold events, bank-sync upserts and OAuth revokes are one statement each; returned ids and counts are unchanged.
+- [x] A duplicate transaction id inside one bank-sync batch no longer risks aborting the sync.
+- [x] After a transfer, the inventory list keeps every active filter.
+- [x] Payments and Internal transactions search waits 200 ms after typing; filter chips stay instant.
+- [x] The listed dialogs use the shared Modal; Escape closes only the top dialog and is ignored while saving; autofocused fields keep focus.
 
 ## Out of scope
 
