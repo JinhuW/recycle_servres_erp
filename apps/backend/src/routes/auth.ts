@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { Hono } from 'hono';
 import { getCookie } from 'hono/cookie';
 import { getDb } from '../db';
@@ -10,6 +9,7 @@ import {
   revokeFamily,
   setAuthCookies,
   clearAuthCookies,
+  sha256hex,
 } from '../auth';
 import { log } from '../lib/log';
 import type { Env } from '../types';
@@ -149,7 +149,7 @@ auth.post('/logout', async (c) => {
   const raw = getCookie(c, 'rt');
   if (raw) {
     const sql = getDb(c.env);
-    const hash = createHash('sha256').update(raw).digest('hex');
+    const hash = sha256hex(raw);
     const row = (await sql<{ family_id: string }[]>`
       SELECT family_id FROM refresh_tokens WHERE token_hash = ${hash} LIMIT 1
     `)[0];

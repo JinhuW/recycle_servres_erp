@@ -63,8 +63,7 @@ function HandoffSection({ item, title, summary, children, phone }: {
 }
 
 export function HandoffFields({ f, phone = false }: { f: Form; phone?: boolean }) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const selectCls = phone ? 'input' : 'select';
   const order = f.order;
 

@@ -2621,7 +2621,7 @@ const LOADERS: Record<string, () => Promise<Record<string, string>>> = {
 
 // Resolves once `lang`'s table is readable from I18N. Safe to call repeatedly:
 // the dynamic import is cached by the module system, and 'en' is already there.
-export function loadDictionary(lang: Lang): Promise<void> {
+function loadDictionary(lang: Lang): Promise<void> {
   if (I18N[lang]) return Promise.resolve();
   const load = LOADERS[lang];
   if (!load) return Promise.resolve();
@@ -2640,12 +2640,15 @@ type Vars = Record<string, string | number>;
 
 type LangCtx = {
   lang: Lang;
+  /** BCP 47 tag for Intl / toLocale*String, derived from `lang`. */
+  locale: 'zh-CN' | 'en-US';
   setLang: (l: Lang) => void;
   t: (key: string, vars?: Vars) => string;
 };
 
 const Ctx = createContext<LangCtx>({
   lang: 'en',
+  locale: 'en-US',
   setLang: () => {},
   t: (k) => k,
 });
@@ -2693,7 +2696,8 @@ export function LangProvider({ children }: { children: ReactNode }) {
     }
   }, [lang]);
 
-  return <Ctx.Provider value={{ lang, setLang, t }}>{children}</Ctx.Provider>;
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  return <Ctx.Provider value={{ lang, locale, setLang, t }}>{children}</Ctx.Provider>;
 }
 
 export function useT() {

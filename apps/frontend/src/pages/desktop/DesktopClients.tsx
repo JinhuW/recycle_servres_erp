@@ -25,10 +25,9 @@ import { AddClientModal } from './clients/AddClientModal';
 type Filter = 'due' | 'soon' | 'quiet' | 'all';
 
 export function DesktopClients({ showToast }: { showToast: (m: string, k?: 'success' | 'error' | 'warn') => void }) {
-  const { t, lang } = useT();
+  const { t, locale } = useT();
   const { user } = useAuth();
   const isManager = user?.role === 'manager';
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
 
   const [data, setData] = useState<ClientList | null>(null);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);

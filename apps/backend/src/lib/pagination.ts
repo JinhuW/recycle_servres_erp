@@ -5,6 +5,10 @@
 // skip/duplicate rows.
 export type Cursor = { ts: string | number; id: string };
 
+// uuid-typed columns make Postgres throw on a malformed id, so routes check
+// this first and answer 400/404 instead of a 500.
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // base64url is base64 with URL-safe chars and no padding. We use btoa/atob so
 // this works on both Cloudflare Workers and Node — no Buffer dependency.
 function toBase64Url(s: string): string {

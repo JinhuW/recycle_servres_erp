@@ -64,8 +64,7 @@ type Props = {
 };
 
 export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
-  const { lang, t } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [customerId, setCustomerId] = useState<string>('');
   const [members, setMembers] = useState<MemberOption[]>([]);

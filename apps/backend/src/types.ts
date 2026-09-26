@@ -86,11 +86,16 @@ export type User = {
 
 export type LineCategory = 'RAM' | 'SSD' | 'HDD' | 'Other';
 
-export type OAuthScope =
-  | 'market:read'
-  | 'market:write'
-  | 'sellorder:read'
-  | 'sellorder:write';
+// Order is wire-visible: discovery's scopes_supported and the default grant
+// when a client registers without asking for any.
+export const OAUTH_SCOPES = [
+  'market:read',
+  'market:write',
+  'sellorder:read',
+  'sellorder:write',
+] as const;
+
+export type OAuthScope = typeof OAUTH_SCOPES[number];
 
 export type OAuthCtx = {
   clientId: string;

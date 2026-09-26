@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { Icon } from '../../components/Icon';
 import type {
   AlertHitRow, Challenge, FleetAccount, FleetCity, FleetDoc, FleetFilter, WorkerState,
@@ -10,6 +10,7 @@ import {
 } from '../../lib/fleetView';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
+import type { Translate } from '../../lib/orderPresentation';
 
 // ─── Fleet accounts ───────────────────────────────────────────────────────────
 // The cards that answer "which account is searching which cities for which
@@ -20,8 +21,6 @@ import { useT } from '../../lib/i18n';
 // filters accounts, cities and phrases at once, with matches highlighted.
 
 export const HITS_DAYS = 7;
-
-type T = (k: string, vars?: Record<string, string | number>) => string;
 
 // A run of text with the search terms wrapped in <mark>.
 function Hi({ text, terms }: { text: string; terms: readonly string[] }) {
@@ -55,13 +54,13 @@ const STATE_CHIP: Record<WorkerState, string> = {
 
 // The control plane can add states faster than this UI ships, so an unknown
 // one falls back to its raw name rather than a blank cell.
-function stateLabel(t: T, state: WorkerState): string {
+function stateLabel(t: Translate, state: WorkerState): string {
   const key = `fbcState_${state}`;
   const label = t(key);
   return label === key ? state : label;
 }
 
-function fmtDays(t: T, days: number | null): string {
+function fmtDays(t: Translate, days: number | null): string {
   if (days === null) return '—';
   if (days <= 0) return t('fbcSessionExpired');
   if (days < 1) return t('fbcHoursLeft', { n: Math.round(days * 24) });
@@ -90,7 +89,7 @@ export function FleetKpis({ fleet, challenges, locale }: {
   locale: string;
 }) {
   const { t } = useT();
-  const fmt = new Intl.NumberFormat(locale);
+  const fmt = useMemo(() => new Intl.NumberFormat(locale), [locale]);
   const workers = fleet?.workers ?? [];
   const configured = workers.filter(w => w.source !== 'unconfigured');
   const live = workers.filter(w => liveness(w) === 'live');

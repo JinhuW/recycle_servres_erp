@@ -131,14 +131,9 @@ export function DesktopApp() {
   // lib/errorToast.ts can surface errors from anywhere without prop-drilling.
   useEffect(() => {
     window.__showErrorDialog = (msg, details, title) => pushErrorDialog({ msg, details, title });
-    window.__showToast = (msg, kind) => {
-      if (kind === 'error') { pushErrorDialog({ msg }); return; }
-      setToast({ msg, kind: kind === 'warn' ? 'warn' : 'success' });
-      if (toastTimer.current) clearTimeout(toastTimer.current);
-      toastTimer.current = setTimeout(() => setToast(null), kind === 'warn' ? 4500 : 2600);
-    };
+    window.__showToast = (msg, kind) => showToast(msg, kind ?? 'success');
     return () => { delete window.__showToast; delete window.__showErrorDialog; };
-  }, [pushErrorDialog]);
+  }, [pushErrorDialog, showToast]);
 
   // Resume an OAuth authorize that bounced through the login screen. Must be a
   // real navigation, not navigate(), because the target is a backend route.

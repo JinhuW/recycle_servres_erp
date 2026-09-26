@@ -21,6 +21,7 @@ import { RouteLink } from '../components/RouteLink';
 import { STATUS_CHIP, fmtEta, mergeInbound, type InboundRow } from '../lib/shippingList';
 import { canCreatePo, groupInbound, inboundAction, journeyPos, type InboundAction } from '../lib/shippingInbound';
 import { usePhScrolled } from '../lib/usePhScrolled';
+import { PhSheet } from '../components/PhSheet';
 
 // Mobile shipping: the desktop table is a ledger; the phone is a glance.
 // One screen groups the same rows by what the user should do about them
@@ -208,66 +209,61 @@ function PackageSheet({ pkg, busy, canCreate, onCreatePo, onClose }: {
   onCreatePo: (pkg: TrackedPackage) => void;
   onClose: () => void;
 }) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const chip = STATUS_CHIP[pkg.status];
   return (
-    <>
-      <div className="ph-sheet-backdrop" onClick={onClose} />
-      <div className="ph-sheet">
-        <div className="ph-sheet-grabber" />
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 4px 12px' }}>
-          {pkg.carrier && <span className="ship-carrier-chip">{pkg.carrier}</span>}
-          <span className={'chip dot ' + chip.cls}>{t(chip.key)}</span>
-          <span style={{ flex: 1 }} />
-          <button
-            onClick={onClose}
-            style={{ background: 'transparent', border: 'none', color: 'var(--accent-strong)', fontSize: 14, fontWeight: 600, fontFamily: 'inherit', padding: 4, cursor: 'pointer' }}
-          >
-            {t('cancel')}
+    <PhSheet onBackdrop={onClose}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 4px 12px' }}>
+        {pkg.carrier && <span className="ship-carrier-chip">{pkg.carrier}</span>}
+        <span className={'chip dot ' + chip.cls}>{t(chip.key)}</span>
+        <span style={{ flex: 1 }} />
+        <button
+          onClick={onClose}
+          style={{ background: 'transparent', border: 'none', color: 'var(--accent-strong)', fontSize: 14, fontWeight: 600, fontFamily: 'inherit', padding: 4, cursor: 'pointer' }}
+        >
+          {t('cancel')}
+        </button>
+      </div>
+
+      <div className="mono" style={{ fontSize: 15, fontWeight: 600, padding: '0 4px', overflowWrap: 'anywhere' }}>
+        {pkg.trackingNumber}
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--fg-subtle)', padding: '4px 4px 0' }}>
+        {[
+          pkg.creatorName ? t('shipScanTrackedBy', { name: pkg.creatorName }) : null,
+          fmtDateShort(pkg.createdAt, locale),
+          pkg.sellerName,
+          pkg.source ? t(packageSourceLabelKey(pkg.source)) : null,
+        ].filter(Boolean).join(' · ')}
+      </div>
+
+      {/* The purchaser's note is what the receiver came for — box contents,
+          dock instructions — so it gets the card, not a footnote. */}
+      {pkg.note && (
+        <div className="ph-card" style={{ marginTop: 12, padding: 14 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
+            {t('shipScanNoteLabel')}
+          </div>
+          <div style={{ fontSize: 14, whiteSpace: 'pre-wrap' }}>{pkg.note}</div>
+        </div>
+      )}
+
+      <div style={{ marginTop: 16 }}>
+        {pkg.orderId ? (
+          <RouteLink to={`/purchase-orders/${pkg.orderId}`} onNavigate={onClose} className="ph-btn" style={{ width: '100%' }}>
+            {pkg.orderId} →
+          </RouteLink>
+        ) : canCreate ? (
+          <button className="ph-btn accent" style={{ width: '100%' }} disabled={busy} onClick={() => onCreatePo(pkg)}>
+            {busy ? '…' : t('shipCreatePo')}
           </button>
-        </div>
-
-        <div className="mono" style={{ fontSize: 15, fontWeight: 600, padding: '0 4px', overflowWrap: 'anywhere' }}>
-          {pkg.trackingNumber}
-        </div>
-        <div style={{ fontSize: 12, color: 'var(--fg-subtle)', padding: '4px 4px 0' }}>
-          {[
-            pkg.creatorName ? t('shipScanTrackedBy', { name: pkg.creatorName }) : null,
-            fmtDateShort(pkg.createdAt, locale),
-            pkg.sellerName,
-            pkg.source ? t(packageSourceLabelKey(pkg.source)) : null,
-          ].filter(Boolean).join(' · ')}
-        </div>
-
-        {/* The purchaser's note is what the receiver came for — box contents,
-            dock instructions — so it gets the card, not a footnote. */}
-        {pkg.note && (
-          <div className="ph-card" style={{ marginTop: 12, padding: 14 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
-              {t('shipScanNoteLabel')}
-            </div>
-            <div style={{ fontSize: 14, whiteSpace: 'pre-wrap' }}>{pkg.note}</div>
+        ) : (
+          <div style={{ fontSize: 13, color: 'var(--fg-muted)', textAlign: 'center', padding: '4px 4px 0' }}>
+            {t('shipScanPoAfterDelivery')}
           </div>
         )}
-
-        <div style={{ marginTop: 16 }}>
-          {pkg.orderId ? (
-            <RouteLink to={`/purchase-orders/${pkg.orderId}`} onNavigate={onClose} className="ph-btn" style={{ width: '100%' }}>
-              {pkg.orderId} →
-            </RouteLink>
-          ) : canCreate ? (
-            <button className="ph-btn accent" style={{ width: '100%' }} disabled={busy} onClick={() => onCreatePo(pkg)}>
-              {busy ? '…' : t('shipCreatePo')}
-            </button>
-          ) : (
-            <div style={{ fontSize: 13, color: 'var(--fg-muted)', textAlign: 'center', padding: '4px 4px 0' }}>
-              {t('shipScanPoAfterDelivery')}
-            </div>
-          )}
-        </div>
       </div>
-    </>
+    </PhSheet>
   );
 }
 
@@ -277,37 +273,33 @@ function ScanNotFoundSheet({ code, onClose }: { code: string; onClose: () => voi
   // twice they could drift.
   const extracted = extractTrackingFromBarcode(code);
   return (
-    <>
-      <div className="ph-sheet-backdrop" onClick={onClose} />
-      <div className="ph-sheet">
-        <div className="ph-sheet-grabber" />
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px 10px' }}>
-          <div style={{ fontSize: 17, fontWeight: 600, letterSpacing: '-0.01em' }}>{t('shipScanNotFoundTitle')}</div>
-          <button
-            onClick={onClose}
-            style={{ background: 'transparent', border: 'none', color: 'var(--accent-strong)', fontSize: 14, fontWeight: 600, fontFamily: 'inherit', padding: 4, cursor: 'pointer' }}
-          >
-            {t('cancel')}
-          </button>
-        </div>
-        <div style={{ fontSize: 13, color: 'var(--fg-muted)', padding: '0 4px' }}>{t('shipScanNotFoundBody')}</div>
-        <div className="mono" style={{ fontSize: 13, padding: '10px 4px 0', overflowWrap: 'anywhere', color: 'var(--fg-subtle)' }}>
-          {extracted}
-        </div>
-        <div style={{ marginTop: 16 }}>
-          <button
-            className="ph-btn accent"
-            style={{ width: '100%' }}
-            onClick={() => {
-              try { sessionStorage.setItem(SCANNED_TN_KEY, extracted); } catch { /* storage may be unavailable */ }
-              navigate('/shipping/add');
-            }}
-          >
-            <Icon name="plus" size={15} /> {t('shipScanAddBtn')}
-          </button>
-        </div>
+    <PhSheet onBackdrop={onClose}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px 10px' }}>
+        <div style={{ fontSize: 17, fontWeight: 600, letterSpacing: '-0.01em' }}>{t('shipScanNotFoundTitle')}</div>
+        <button
+          onClick={onClose}
+          style={{ background: 'transparent', border: 'none', color: 'var(--accent-strong)', fontSize: 14, fontWeight: 600, fontFamily: 'inherit', padding: 4, cursor: 'pointer' }}
+        >
+          {t('cancel')}
+        </button>
       </div>
-    </>
+      <div style={{ fontSize: 13, color: 'var(--fg-muted)', padding: '0 4px' }}>{t('shipScanNotFoundBody')}</div>
+      <div className="mono" style={{ fontSize: 13, padding: '10px 4px 0', overflowWrap: 'anywhere', color: 'var(--fg-subtle)' }}>
+        {extracted}
+      </div>
+      <div style={{ marginTop: 16 }}>
+        <button
+          className="ph-btn accent"
+          style={{ width: '100%' }}
+          onClick={() => {
+            try { sessionStorage.setItem(SCANNED_TN_KEY, extracted); } catch { /* storage may be unavailable */ }
+            navigate('/shipping/add');
+          }}
+        >
+          <Icon name="plus" size={15} /> {t('shipScanAddBtn')}
+        </button>
+      </div>
+    </PhSheet>
   );
 }
 
@@ -319,9 +311,8 @@ function InboundCard({ row, showToast, onCreatedPo, onRefreshed }: {
   onCreatedPo: (orderId: string) => void;
   onRefreshed: () => void;
 }) {
-  const { t, lang } = useT();
+  const { t, locale } = useT();
   const { user } = useAuth();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [busy, setBusy] = useState(false);
   const action = inboundAction(row, user?.role === 'manager');
 

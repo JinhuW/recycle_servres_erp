@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon, type IconName } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
+import { useSentinel } from '../../lib/useSentinel';
 import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { handleFetchError } from '../../lib/errorToast';
@@ -92,8 +93,7 @@ const COL_SORTS = {
 type ColKey = keyof typeof COL_SORTS;
 
 export function DesktopMarket() {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const { user } = useAuth();
   const isManager = user?.role === 'manager';
   const [filter, setFilter] = useState<string>('all');
@@ -198,17 +198,7 @@ export function DesktopMarket() {
 
   // Fetch the next page when the sentinel row scrolls into the table viewport.
   // Re-armed on every loadMore identity change; the sentinel unmounts at the end.
-  useEffect(() => {
-    const sentinel = sentinelRef.current;
-    const root = scrollRef.current;
-    if (!sentinel || !root) return;
-    const io = new IntersectionObserver(
-      (entries) => { if (entries[0].isIntersecting) loadMore(); },
-      { root, rootMargin: '300px' },
-    );
-    io.observe(sentinel);
-    return () => io.disconnect();
-  }, [loadMore]);
+  useSentinel(sentinelRef, loadMore, true, { root: scrollRef, rootMargin: '300px' });
 
   return (
     <>
@@ -535,8 +525,7 @@ export function DesktopMarket() {
 function DetailExpand({
   row, sellHistory, targetMargin,
 }: { row: RefPrice; sellHistory: number[]; targetMargin: number }) {
-  const { lang, t } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   // Cost series is still synthetic — out of scope for this slice.
   const buyHistory = (row.recentPrices ?? []).map(p => +(p.price * 0.7).toFixed(2));
   return (

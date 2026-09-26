@@ -3,7 +3,7 @@ import { Icon } from '../../components/Icon';
 import { ListSkeleton } from '../../components/Skeleton';
 import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
-import { fmtDate, fmtDateShort, fmtUSD } from '../../lib/format';
+import { fmtDate, fmtDateShort, fmtSigned } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { usePersisted } from '../../lib/listMemory';
 import { RouteLink } from '../../components/RouteLink';
@@ -57,15 +57,8 @@ const SOURCE_LABEL: Record<Member['source'], string> = {
   paired: 'PayPal + Mercury',
 };
 
-// The sign carries meaning here (out of one account, into another), so a plus
-// is rendered too, where fmtUSD shows only a minus.
-function fmtSigned(n: number, locale: string): string {
-  return (n < 0 ? '−' : '+') + fmtUSD(Math.abs(n), locale);
-}
-
 export function DesktopInternalTxns({ onToast }: { onToast: (msg: string) => void }) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
 
   const [q, setQ] = usePersisted('desktop.internaltx.q', '');
   const [openId, setOpenId] = usePersisted<string | null>('desktop.internaltx.open', null);

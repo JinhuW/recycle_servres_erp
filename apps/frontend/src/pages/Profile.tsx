@@ -22,8 +22,7 @@ type Props = {
 };
 
 export function Profile({ onOpenLanguage, onOpenNotifications, onOpenAbout, onOpenSecurity }: Props) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, lang, locale } = useT();
   const { user, logout, setDefaultWarehouse } = useAuth();
   const { rolePreview, setRolePreview } = useTweaks();
   const [stats, setStats] = useState<Stats | null>(null);

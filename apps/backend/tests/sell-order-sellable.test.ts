@@ -3,6 +3,7 @@ import { resetDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
+import { firstCustomerId } from './helpers/fixtures';
 
 type SellableItem = {
   inventoryId: string;
@@ -17,11 +18,6 @@ type SellableItem = {
 
 const getSellable = (token: string, qs = '') =>
   api<{ items: SellableItem[] }>('GET', `/api/sell-orders/sellable${qs}`, { token });
-
-async function firstCustomerId(token: string): Promise<string> {
-  const r = await api<{ items: { id: string }[] }>('GET', '/api/customers', { token });
-  return r.body.items[0].id;
-}
 
 describe('GET /api/sell-orders/sellable', () => {
   beforeEach(async () => { await resetDb(); });

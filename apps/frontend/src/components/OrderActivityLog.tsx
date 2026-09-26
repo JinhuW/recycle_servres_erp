@@ -7,26 +7,20 @@ import {
   LIFECYCLE_LABEL, type Translate,
 } from '../lib/orderPresentation';
 import type { OrderEvent, OrderEventChange } from '../lib/types';
-import { useOrderEvents, type OrderEvents } from '../lib/useOrderEvents';
+import type { OrderEvents } from '../lib/useOrderEvents';
 
 type Props = {
-  orderId: string;
-  // Bump this to force a refresh after a save commits new events.
-  refreshKey?: number;
-  // The phone opens it closed: it is the longest block on a screen that is
-  // already tall, and the header carries the event count either way.
-  defaultOpen?: boolean;
   // Lets a host lay the card out by class rather than by position. The desktop
-  // order-edit side column needs that: this component renders nothing until its
-  // fetch lands, and it has a conditional sibling above it, so no positional
+  // order-edit side column needs that: this component renders nothing until the
+  // log loads, and it has a conditional sibling above it, so no positional
   // selector can name it reliably.
   className?: string;
   // The timeline alone, no card and no header: the phone puts it inside a
   // fold that already has both.
   bare?: boolean;
-  // The host's copy of the log, when it already fetched one (the desktop page
-  // shares a single fetch between this tab and the status look-back).
-  events?: OrderEvents;
+  // The host's copy of the log (the desktop page shares a single fetch between
+  // this tab and the status look-back).
+  events: OrderEvents;
 };
 
 const KIND_ICON: Record<OrderEvent['kind'], IconName> = {
@@ -197,15 +191,9 @@ function summary(ev: OrderEvent, locale: string, t: Translate): { title: string;
   }
 }
 
-export function OrderActivityLog({ orderId, refreshKey = 0, defaultOpen = true, className, bare = false, events: given }: Props) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
-  // A host that already holds the events (the desktop page shares one fetch
-  // with its look-back) hands them in; otherwise this fetches its own.
-  const own = useOrderEvents(given ? null : orderId, refreshKey);
-  const events = given?.events ?? own.events;
-  const loaded = given ? given.loaded : own.loaded;
-  const [open, setOpen] = useState(defaultOpen);
+export function OrderActivityLog({ className, bare = false, events: { events, loaded } }: Props) {
+  const { t, locale } = useT();
+  const [open, setOpen] = useState(true);
 
   // Newest first feels right for a long-lived order; show in reverse-chrono
   // without mutating the server's natural ASC order.

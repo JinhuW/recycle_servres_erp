@@ -6,6 +6,7 @@ import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { isPricedSellPrice, REPORTING_TZ, resolvePreset, todayIn } from '@recycle-erp/shared';
 import { fmtUSD0, relTime } from '../../lib/format';
+import { lineSpecLabel } from '../../lib/lineGroups';
 import type { Bucket, Category, DashboardData } from '../../lib/types';
 import { DashboardSkeleton } from '../../components/Skeleton';
 import { RangeBrush, RangeChip, fmtRange, type RangeValue } from './DashboardRange';
@@ -22,8 +23,7 @@ const CAT_COLOR: Record<Category, string> = {
 const BUCKET_KEY: Record<Bucket, string> = { day: 'bucketDay', week: 'bucketWeek', month: 'bucketMonth' };
 
 export function DesktopDashboard() {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const user = useEffectiveUser();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -177,13 +177,7 @@ export function DesktopDashboard() {
               </thead>
               <tbody>
                 {(data?.recent ?? []).map(r => {
-                  const label = r.category === 'RAM'
-                    ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.generation ?? ''}`.trim()
-                    : r.category === 'SSD'
-                      ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.interface ?? ''}`.trim()
-                      : r.category === 'HDD'
-                        ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.rpm ? r.rpm + 'rpm' : ''}`.trim()
-                        : (r.description ?? 'Item');
+                  const label = lineSpecLabel(r) ?? (r.description ?? 'Item');
                   // An unpriced line has no projected margin — the KPI tiles
                   // above don't count it, so this row can't state one. Em-dash,
                   // the same as the orders list's line rows.

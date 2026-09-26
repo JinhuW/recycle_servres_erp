@@ -82,6 +82,10 @@ function offerTone(status: string): string {
     : 'accent';
 }
 
+function offerBadges(t: T): Record<string, string> {
+  return { pending: t('vendorPending'), accepted: t('vendorAccepted'), declined: t('vendorDeclined') };
+}
+
 async function postBid(
   base: string, basket: BasketLine[], name: string, note: string,
   currency: Currency, t: T,
@@ -130,6 +134,35 @@ function useMyOffers(base: string) {
     bids, loaded, err,
     reload: () => { setLoaded(false); setKey(k => k + 1); },
   };
+}
+
+// The review step's contact form and submit, shared by the phone screen and
+// the desktop modal. `onSubmitted` closes whichever of the two is showing.
+function useBidForm(vm: VM, onSubmitted: () => void) {
+  const { t, base, basket, setTab, clearBasket, currency } = vm;
+  const [name, setName] = useState('');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  async function submit() {
+    setBusy(true); setErr('');
+    const res = await postBid(base, basket, name, note, currency, t);
+    setBusy(false);
+    if (res.ok) { clearBasket(); onSubmitted(); setTab('mine'); return; }
+    setErr(res.msg);
+  }
+
+  return { name, setName, note, setNote, busy, err, submit };
+}
+
+// One catalog row's offer being typed: qty clamped to 1..available, price as
+// the raw input string. Seeded from the basket line when the row already has one.
+function useOfferDraft(it: CatalogItem, existing: BasketLine | undefined) {
+  const [qty, setQtyState] = useState(existing?.qty ?? 1);
+  const [price, setPrice] = useState(existing ? String(existing.unitPrice) : '');
+  const setQty = (raw: string) => setQtyState(Math.max(1, Math.min(+raw || 1, it.qty)));
+  return { qty, setQty, price, setPrice };
 }
 
 type VM = {
@@ -625,8 +658,7 @@ function OfferEditor({ it, t, existing, currency, onSave, onRemove }: {
   currency: Currency;
   onSave: (qty: number, price: number) => void; onRemove: () => void;
 }) {
-  const [qty, setQty] = useState(existing?.qty ?? 1);
-  const [price, setPrice] = useState(existing ? String(existing.unitPrice) : '');
+  const { qty, setQty, price, setPrice } = useOfferDraft(it, existing);
   return (
     <div style={{
       background: 'var(--bg-soft)', border: '1px solid var(--border)',
@@ -636,7 +668,7 @@ function OfferEditor({ it, t, existing, currency, onSave, onRemove }: {
         <div className="ph-field" style={{ marginTop: 0 }}>
           <label>{t('vendorQty')} (≤{it.qty})</label>
           <input type="number" min={1} max={it.qty} value={qty} className="input"
-            onChange={e => setQty(Math.max(1, Math.min(+e.target.value || 1, it.qty)))} />
+            onChange={e => setQty(e.target.value)} />
         </div>
         <div className="ph-field" style={{ marginTop: 0 }}>
           <label>{t('vendorYourOffer')}</label>
@@ -662,22 +694,8 @@ function OfferEditor({ it, t, existing, currency, onSave, onRemove }: {
 }
 
 function MobileReview({ vm }: { vm: VM }) {
-  const {
-    t, base, basket, setReview, setTab, clearBasket,
-    currency, setCurrency, fxUsdCny, fxFetchedAt,
-  } = vm;
-  const [name, setName] = useState('');
-  const [note, setNote] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
-
-  async function submit() {
-    setBusy(true); setErr('');
-    const res = await postBid(base, basket, name, note, currency, t);
-    setBusy(false);
-    if (res.ok) { clearBasket(); setReview(false); setTab('mine'); return; }
-    setErr(res.msg);
-  }
+  const { t, basket, setReview, currency, setCurrency, fxUsdCny, fxFetchedAt } = vm;
+  const { name, setName, note, setNote, busy, err, submit } = useBidForm(vm, () => setReview(false));
 
   const subtotal = basketTotal(basket);
 
@@ -770,9 +788,7 @@ function MobileReview({ vm }: { vm: VM }) {
 function MobileMyOffers({ vm }: { vm: VM }) {
   const { t, base } = vm;
   const { bids, loaded, err, reload } = useMyOffers(base);
-  const badge: Record<string, string> = {
-    pending: t('vendorPending'), accepted: t('vendorAccepted'), declined: t('vendorDeclined'),
-  };
+  const badge = offerBadges(t);
 
   if (!loaded && !err) return <div style={{ marginTop: 14 }}><PhoneListSkeleton rows={5} /></div>;
 
@@ -989,8 +1005,7 @@ function DesktopBrowseRow({ it, t, existing, currency, onAdd, onRemove, onZoom }
   onRemove: () => void;
   onZoom: (url: string) => void;
 }) {
-  const [qty, setQty] = useState(existing?.qty ?? 1);
-  const [price, setPrice] = useState(existing ? String(existing.unitPrice) : '');
+  const { qty, setQty, price, setPrice } = useOfferDraft(it, existing);
   const added = !!existing;
   return (
     <tr style={added ? { background: 'var(--accent-soft)' } : undefined}>
@@ -1009,7 +1024,7 @@ function DesktopBrowseRow({ it, t, existing, currency, onAdd, onRemove, onZoom }
       <td className="num mono">{it.qty}</td>
       <td className="num">
         <input type="number" min={1} max={it.qty} value={qty} className="so-mini-input"
-          onChange={e => setQty(Math.max(1, Math.min(+e.target.value || 1, it.qty)))} />
+          onChange={e => setQty(e.target.value)} />
       </td>
       <td className="num">
         <input type="number" min={0} step="0.01" value={price} className="so-mini-input"
@@ -1034,22 +1049,8 @@ function DesktopBrowseRow({ it, t, existing, currency, onAdd, onRemove, onZoom }
 }
 
 function DesktopReviewModal({ vm, onClose }: { vm: VM; onClose: () => void }) {
-  const {
-    t, base, basket, setTab, clearBasket,
-    currency, setCurrency, fxUsdCny, fxFetchedAt,
-  } = vm;
-  const [name, setName] = useState('');
-  const [note, setNote] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
-
-  async function submit() {
-    setBusy(true); setErr('');
-    const res = await postBid(base, basket, name, note, currency, t);
-    setBusy(false);
-    if (res.ok) { clearBasket(); onClose(); setTab('mine'); return; }
-    setErr(res.msg);
-  }
+  const { t, basket, currency, setCurrency, fxUsdCny, fxFetchedAt } = vm;
+  const { name, setName, note, setNote, busy, err, submit } = useBidForm(vm, onClose);
 
   const subtotal = basketTotal(basket);
 
@@ -1172,9 +1173,7 @@ function DesktopReviewModal({ vm, onClose }: { vm: VM; onClose: () => void }) {
 function DesktopMyOffers({ vm }: { vm: VM }) {
   const { t, base } = vm;
   const { bids, loaded, err, reload } = useMyOffers(base);
-  const badge: Record<string, string> = {
-    pending: t('vendorPending'), accepted: t('vendorAccepted'), declined: t('vendorDeclined'),
-  };
+  const badge = offerBadges(t);
 
   return (
     <>

@@ -19,8 +19,7 @@ const STEP_POS: Record<PackageStatus, number> = {
 };
 
 export function PackageJourney({ pkg }: Props) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const pos = STEP_POS[pkg.status];
   const eta = fmtEta(pkg.trackingEta, locale);
   const exception = pkg.status === 'exception';

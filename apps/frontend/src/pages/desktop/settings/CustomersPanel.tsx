@@ -25,8 +25,7 @@ function deriveCustomerSeed(c: Customer) {
 }
 
 export function CustomersPanel({ showToast }: { showToast: ToastFn }) {
-  const { lang, t } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [editing, setEditing] = useState<Customer | null>(null);

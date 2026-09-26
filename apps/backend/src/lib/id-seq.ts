@@ -1,6 +1,5 @@
-import type { Sql, TransactionSql } from 'postgres';
+import type { SqlLike } from '../db';
 
-type SqlLike = Sql | TransactionSql;
 
 // Atomically allocate the next human-friendly id (e.g. PO-1289). The single
 // `UPDATE ... RETURNING` takes a row lock on the counter, so concurrent

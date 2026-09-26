@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { authMiddleware } from '../auth';
+import { requireManager } from '../lib/role';
 import type { Env, User } from '../types';
 
 // ─── Reddit tracker proxy ─────────────────────────────────────────────────────
@@ -14,10 +15,7 @@ const TIMEOUT_MS = 10_000;
 
 const tracker = new Hono<{ Bindings: Env; Variables: { user: User } }>()
   .use('*', authMiddleware)
-  .use('*', async (c, next) => {
-    if (c.var.user.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
-    return next();
-  });
+  .use('*', requireManager);
 
 async function forward(
   c: { env: Env; req: { json(): Promise<unknown> }; json: (body: unknown, status?: number) => Response },

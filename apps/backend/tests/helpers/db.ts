@@ -4,27 +4,12 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { closeSharedDb } from '../../src/db';
+import { adminUrl } from './pg-urls';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const backendRoot = join(here, '..', '..');
-const repoRoot = join(backendRoot, '..', '..');
 const migrationsDir = join(backendRoot, 'migrations');
 const seedScript = join(backendRoot, 'scripts', 'seed.mjs');
-
-// Load TEST_DATABASE_URL from the repo-root .env if not already in the
-// environment (vitest runs as a plain Node process, so process.env isn't
-// auto-populated).
-function loadDevVars(): void {
-  if (process.env.TEST_DATABASE_URL) return;
-  try {
-    const raw = readFileSync(join(repoRoot, '.env'), 'utf8');
-    for (const line of raw.split(/\r?\n/)) {
-      const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
-      if (m && !process.env[m[1]]) process.env[m[1]] = m[2];
-    }
-  } catch (_) { /* ok */ }
-}
-loadDevVars();
 
 // Each vitest worker (fork) gets its OWN database so test FILES can run in
 // parallel without sharing schema/data. global-setup hands every worker the
@@ -46,12 +31,6 @@ function resolveWorkerUrl(): string {
 }
 
 export const TEST_DATABASE_URL = resolveWorkerUrl();
-
-function adminUrl(base: string): string {
-  const u = new URL(base);
-  u.pathname = '/postgres'; // CREATE/DROP DATABASE must run from another DB
-  return u.toString();
-}
 
 const workerDbName = new URL(TEST_DATABASE_URL).pathname.replace(/^\//, '');
 const templateDbName = `${workerDbName}_tmpl`;

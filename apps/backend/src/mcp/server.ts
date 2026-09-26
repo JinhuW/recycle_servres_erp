@@ -3,6 +3,7 @@
 // don't emit server-initiated messages (no SSE upgrade needed).
 
 import type { Context } from 'hono';
+import type { Sql } from 'postgres';
 import { getDb } from '../db';
 import { log } from '../lib/log';
 import { readPackageVersion } from '../lib/version';
@@ -28,16 +29,34 @@ const SUPPORTED_PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 
 const ALL_TOOLS = [...TOOL_DEFS, ...SELL_ORDER_TOOL_DEFS];
 
+type ToolCall = (sql: Sql, args: any, ctx: OAuthCtx) => Promise<unknown>;
+const writeCtx = (ctx: OAuthCtx) => ({ source: `mcp:${ctx.clientId}`, actorUserId: ctx.userId });
+
 // Single source of truth for which scope each tool requires. Drives both
 // tools/list visibility and the tools/call gate, so a token only ever sees and
 // invokes the tools its scopes permit.
-const TOOL_SCOPES: Record<string, OAuthScope> = {
-  list_market_values: 'market:read',
-  get_market_value: 'market:read',
-  set_market_price: 'market:write',
-  search_sellable_inventory: 'sellorder:read',
-  create_sell_order_draft: 'sellorder:write',
+const TOOLS: Record<string, { scope: OAuthScope; call: ToolCall }> = {
+  list_market_values: { scope: 'market:read', call: (sql, args) => callListMarketValues(sql, args) },
+  get_market_value: { scope: 'market:read', call: (sql, args) => callGetMarketValue(sql, args) },
+  set_market_price: {
+    scope: 'market:write',
+    call: (sql, args, ctx) => callSetMarketPrice(sql, args, writeCtx(ctx)),
+  },
+  search_sellable_inventory: {
+    scope: 'sellorder:read',
+    call: (sql, args) => callSearchSellableInventory(sql, args),
+  },
+  create_sell_order_draft: {
+    scope: 'sellorder:write',
+    call: (sql, args, ctx) => callCreateSellOrderDraft(sql, args, writeCtx(ctx)),
+  },
 };
+
+// A plain object on purpose: a name like `toString` resolves to an inherited
+// member and takes the insufficient_scope path, which clients already see.
+const TOOL_SCOPES: Record<string, OAuthScope> = Object.fromEntries(
+  Object.entries(TOOLS).map(([name, t]) => [name, t.scope]),
+);
 
 function rpcOk(id: number | string, result: unknown) {
   return { jsonrpc: '2.0', id, result };
@@ -102,20 +121,9 @@ export async function handleMcp(c: Context<{ Bindings: Env; Variables: any }>): 
           mcpToolCallsTotal.inc({ tool: toolLabel, status: 'error' });
           return c.json(rpcErr(req.id, -32001, `insufficient_scope: ${required} required`));
         }
-        let payload: unknown;
-        if (name === 'list_market_values') payload = await callListMarketValues(sql, args);
-        else if (name === 'get_market_value') payload = await callGetMarketValue(sql, args);
-        else if (name === 'set_market_price') {
-          payload = await callSetMarketPrice(sql, args, {
-            source: `mcp:${ctx!.clientId}`, actorUserId: ctx!.userId,
-          });
-        }
-        else if (name === 'search_sellable_inventory') payload = await callSearchSellableInventory(sql, args);
-        else if (name === 'create_sell_order_draft') {
-          payload = await callCreateSellOrderDraft(sql, args, {
-            source: `mcp:${ctx!.clientId}`, actorUserId: ctx!.userId,
-          });
-        }
+        // A non-string `name` (e.g. a one-element array) can pass the scope
+        // lookup by key coercion; it has never run a tool, so it still doesn't.
+        const payload = typeof name === 'string' ? await TOOLS[name].call(sql, args, ctx!) : undefined;
         mcpToolCallsTotal.inc({ tool: toolLabel, status: 'ok' });
         return c.json(rpcOk(req.id, {
           content: [{ type: 'text', text: JSON.stringify(payload) }],

@@ -6,6 +6,7 @@ import { api, multipart } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
 import { getTestDb } from './helpers/db';
+import { eventsOf } from './helpers/sellOrderEvents';
 
 const pdf = join(__dirname, 'fixtures', 'invoice.pdf');
 
@@ -389,13 +390,7 @@ describe('POST /api/sell-orders/:id/archive (+/unarchive)', () => {
     await api('POST', `/api/sell-orders/${id}/archive`,   { token });
     await api('POST', `/api/sell-orders/${id}/unarchive`, { token });
 
-    const sql = getTestDb();
-    const evts = await sql<{ kind: string }[]>`
-      SELECT kind FROM sell_order_events
-      WHERE sell_order_id = ${id}
-      ORDER BY created_at ASC
-    `;
-    const kinds = evts.map(e => e.kind);
+    const kinds = (await eventsOf(id)).map(e => e.kind);
     expect(kinds).toContain('archived');
     expect(kinds).toContain('unarchived');
   });
@@ -546,11 +541,7 @@ describe('sell-order payment receiver', () => {
     row = (await sql`SELECT payment_received_by FROM sell_orders WHERE id = ${id}`)[0];
     expect(row.payment_received_by).toBeNull();
 
-    const events = await sql`
-      SELECT detail FROM sell_order_events
-      WHERE sell_order_id = ${id} AND kind = 'meta_changed'
-      ORDER BY created_at
-    `;
+    const events = (await eventsOf(id)).filter(e => e.kind === 'meta_changed');
     const receiverChanges = events.flatMap(e =>
       (e.detail.changes as { field: string; from: unknown; to: unknown }[])
         .filter(ch => ch.field === 'payment_received_by'));

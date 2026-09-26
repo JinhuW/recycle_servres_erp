@@ -6,19 +6,15 @@
 
 import { useState } from 'react';
 import { Icon, type IconName } from './Icon';
-import { api } from '../lib/api';
+import { api, MAX_UPLOAD_BYTES } from '../lib/api';
 import { useEscapeKey } from '../lib/useEscapeKey';
 import { useT } from '../lib/i18n';
 import { AttachmentChip } from './AttachmentChip';
 import { AttachmentDropzone } from './AttachmentDropzone';
+import type { CommissionShots } from './CommissionPaymentFields';
+import type { ProofAttachment } from '../lib/usePaymentProof';
 
-export type StatusAttachment = {
-  id: string;
-  filename: string;
-  size: number;
-  mime: string;
-  url: string;
-};
+export type StatusAttachment = ProofAttachment;
 
 export type MetaStatus = 'Shipped' | 'Awaiting payment' | 'Done';
 
@@ -97,12 +93,7 @@ type Props = {
   // here is the same file the Commission tab shows — a private copy would
   // leave a Cancel-after-upload invisible on the tab. Only the note still
   // goes to `status-meta/<to>`; `initialAttachments` is ignored.
-  attachments?: {
-    atts: StatusAttachment[];
-    add: (files: FileList | null) => void;
-    remove: (att: StatusAttachment) => void;
-    uploading: boolean;
-  };
+  attachments?: CommissionShots;
 };
 
 export function StatusChangeDialog({
@@ -131,7 +122,7 @@ export function StatusChangeDialog({
         // Matches the server's 50 MiB hard cap; oversized images are shrunk
         // server-side to the workspace limit, so the old 10 MiB client reject
         // would block uploads the backend now accepts.
-        if (f.size > 50 * 1024 * 1024) {
+        if (f.size > MAX_UPLOAD_BYTES) {
           setError(t('fileTooLarge', { name: f.name }));
           continue;
         }

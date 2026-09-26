@@ -57,7 +57,7 @@ export async function txnRequiredFor(tx: SqlLike, order: TxnRuleOrder): Promise<
 }
 
 /** Whether this order is governed by the rule AND still fails it. */
-export async function companyPayTxnMissing(
+async function companyPayTxnMissing(
   tx: SqlLike,
   order: TxnRuleOrder & { paypal_txn_id: string | null },
 ): Promise<boolean> {
@@ -101,7 +101,7 @@ export async function chatShotRequiredFor(tx: SqlLike, order: ChatRuleOrder): Pr
 /** Whether this order is governed by the chat rule AND still fails it. Any
  *  Submission attachment satisfies it: that status has no finer purpose, and
  *  a receipt left there is still the purchaser's evidence for the deal. */
-export async function selfPayChatMissing(
+async function selfPayChatMissing(
   tx: SqlLike,
   order: ChatRuleOrder & { id: string },
 ): Promise<boolean> {
@@ -123,7 +123,7 @@ export async function cashShotRequiredFor(tx: SqlLike, order: CashRuleOrder): Pr
 }
 
 /** Whether this order is governed by the cash rule AND still fails it. */
-export async function companyCashShotMissing(
+async function companyCashShotMissing(
   tx: SqlLike,
   order: CashRuleOrder & { id: string },
 ): Promise<boolean> {

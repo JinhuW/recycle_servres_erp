@@ -69,8 +69,6 @@ Three things worth knowing:
 - `scripts/changelog.sh backfill` rebuilds the whole file from the tag list and
   is idempotent.  It preserves hand-written sections verbatim, so running it
   is safe — but it is a repair tool, not part of the release flow.
-  `scripts/release.sh` has its own, older generator for the retired
-  Docker/`main` flow; don't extend that one.
 
 ## Session isolation (one branch per Claude Code session)
 
@@ -248,7 +246,8 @@ switches the branch out from under the first.
 
 - `/api/mcp` is **Bearer-only and CSRF-exempt**, mounted with
   `bearerGuard({ scopes: [] })` — it requires a *valid* token, nothing more.
-  Per-tool gating lives in `TOOL_SCOPES` (`src/mcp/server.ts`) and filters both
+  Per-tool gating lives in the `TOOLS` registry (`src/mcp/server.ts`; each
+  entry pairs a tool's scope with its handler) and filters both
   `tools/list` and `tools/call`.  A connector that seems to be missing tools is
   a scope problem, not a missing-tool one.
 - **The public origin in every OAuth document comes from `resolvePublicOrigin`**

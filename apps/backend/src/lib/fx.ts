@@ -9,13 +9,12 @@
 // (base, quote, effective_date) so the loop is safe to call repeatedly
 // within the same UTC day.
 
-import type { Sql, TransactionSql } from 'postgres';
+import type { Sql } from 'postgres';
+import type { SqlLike } from '../db';
 
 import { log } from './log';
 
 const fxLog = log.child({ module: 'fx' });
-
-type SqlLike = Sql<{}> | TransactionSql<{}>;
 
 export const SUPPORTED_CURRENCIES = ['USD', 'CNY'] as const;
 export type SupportedCurrency = (typeof SUPPORTED_CURRENCIES)[number];

@@ -1,11 +1,9 @@
 // Shared row→DTO mapping for the Market Value surface. The HTTP route and
 // MCP tool both go through formatRefPrice so their payloads stay aligned.
 
-import postgres, { type TransactionSql } from 'postgres';
+import postgres from 'postgres';
+import type { SqlLike } from '../db';
 import { canonPartCol } from './part-number';
-
-type Sql = ReturnType<typeof postgres>;
-type SqlLike = Sql | TransactionSql;
 
 export type MarketValueRow = {
   id: string;

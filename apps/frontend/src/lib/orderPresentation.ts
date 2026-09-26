@@ -3,7 +3,7 @@
 // timeline and the global register render the same event — when the rule lives
 // inside one of them the other drifts and the same PO reads two ways.
 
-import { fmtUSD, fmtUSD0 } from './format';
+import { fmtBytes, fmtUSD, fmtUSD0 } from './format';
 import { STATUS_CHIP, fmtEta } from './shippingList';
 import { LIFECYCLE_STATUS } from './status';
 import type { OrderEventChange, OrderSummary, PackageTracking } from './types';
@@ -93,7 +93,7 @@ export const LIFECYCLE_LABEL: Record<string, string> = LIFECYCLE_STATUS;
 // Friendly labels for the fields we surface on line_edited / meta_changed
 // events and in the revert-review dialog. Anything not listed falls back to
 // the raw db column name.
-export const FIELD_LABEL: Record<string, string> = {
+const FIELD_LABEL: Record<string, string> = {
   sell_price:      'Sell price',
   qty:             'Qty',
   unit_cost:       'Unit cost',
@@ -153,11 +153,6 @@ export function changeLine(c: OrderEventChange, locale: string): string {
   const label = FIELD_LABEL[c.field] ?? c.field;
   return `${label}: ${renderValue(c.field, c.from, locale)} → ${renderValue(c.field, c.to, locale)}`;
 }
-
-const fmtBytes = (n: number): string =>
-  n < 1024 ? `${n} B`
-  : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB`
-  : `${(n / 1024 / 1024).toFixed(1)} MB`;
 
 /**
  * The detail line behind a line-photo event: what was attached, how big, and

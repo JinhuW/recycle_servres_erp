@@ -8,9 +8,7 @@
 #
 # The release flow this file serves is: push to `dev` → version-check.yml
 # demands a bumped version *and* a matching `## [X.Y.Z]` section → CI tags
-# `v<version>`. One tag, one section, forever. `scripts/release.sh` had its own
-# generator for the retired Docker/`main` flow; this is the one that matches how
-# releases actually happen.
+# `v<version>`. One tag, one section, forever.
 #
 # `backfill` is a rebuild, not an append: it re-emits the whole file from the
 # tag list, reusing any hand-written section verbatim and generating one from
@@ -73,7 +71,7 @@ generate_section() {
   local subj
   # tformat (not format) terminates every line, including the last — with
   # `format:` the `while read` loop silently drops the oldest commit in the
-  # range. Same trap release.sh documents.
+  # range.
   while IFS= read -r subj; do
     [[ -z "$subj" ]] && continue
     case "$subj" in

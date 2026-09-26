@@ -14,11 +14,10 @@
 
 import type postgres from 'postgres';
 import { REVIEWED_LIFECYCLES } from './orderAdvance';
-import type { Sql, TransactionSql } from 'postgres';
+import type { SqlLike } from '../db';
 import { effUnitCost, poFeeBasis } from '../lib/po-cost';
 import type { Role } from '../types';
 
-type SqlLike = Sql | TransactionSql;
 type Frag = postgres.Fragment;
 
 export type ContribRow = { id: string | null; name: string | null; amount: number; count: number };

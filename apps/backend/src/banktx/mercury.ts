@@ -42,7 +42,7 @@ function num(v: unknown): number | null {
 // transaction id in the bank description. Only trust a 17-char token when the
 // text actually mentions PayPal — bare alphanumeric runs false-positive on
 // ACH trace numbers.
-export function paypalTxnFromDescription(text: string | null): string | null {
+function paypalTxnFromDescription(text: string | null): string | null {
   if (!text || !/paypal/i.test(text)) return null;
   const m = text.toUpperCase().match(/\b[A-Z0-9]{17}\b/);
   return m && PAYPAL_TXN_STRICT.test(m[0]) ? m[0] : null;

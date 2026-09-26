@@ -9,6 +9,7 @@ import { api } from '../lib/api';
 import { handleFetchError } from '../lib/errorToast';
 import { fmtUSD0 } from '../lib/format';
 import { relTime } from '../lib/format';
+import { lineSpecLabel } from '../lib/lineGroups';
 import { RouteLink } from '../components/RouteLink';
 import type { DashboardData, LeaderboardSort } from '../lib/types';
 import { Skeleton, PhoneKpiSkeleton, PhoneListSkeleton } from '../components/Skeleton';
@@ -21,8 +22,7 @@ type Props = {
 };
 
 export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCount }: Props) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const user = useEffectiveUser();
   const [data, setData] = useState<DashboardData | null>(null);
   const [lbSort, setLbSort] = useState<LeaderboardSort>('cost');
@@ -297,10 +297,7 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
         </div>
         {!data && <PhoneListSkeleton rows={4} />}
         {(data?.recent ?? []).map(r => {
-          const label = r.category === 'RAM'   ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.generation ?? ''}`.trim()
-                      : r.category === 'SSD'   ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.interface ?? ''}`.trim()
-                      : r.category === 'HDD'   ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.rpm ? r.rpm + 'rpm' : ''}`.trim()
-                      : (r.description ?? 'Item');
+          const label = lineSpecLabel(r) ?? (r.description ?? 'Item');
           // An unpriced line has no projected margin — the profit tile above
           // doesn't count it, so this row can't state one. Em-dash, the same as
           // the orders list's line rows.

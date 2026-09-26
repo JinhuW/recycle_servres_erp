@@ -118,8 +118,7 @@ function sortAttrValues(key: string, values: string[]): string[] {
 }
 
 export function DesktopInventory({ onEditItem, showToast }: Props) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const { user } = useAuth();
   const isManager = user?.role === 'manager';
 
@@ -1063,8 +1062,7 @@ function InventoryQuickView({
   onClose: () => void;
   onEdit: () => void;
 }) {
-  const { lang, t } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   useEscapeKey(onClose);
 
   // Merged change log: union of inventory_events across every PO line sharing

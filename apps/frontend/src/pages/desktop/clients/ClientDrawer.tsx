@@ -23,8 +23,7 @@ export function ClientDrawer({ id, onClose, onChanged, showToast }: {
   onChanged: () => void;
   showToast: (m: string, k?: 'success' | 'error' | 'warn') => void;
 }) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const [c, setC] = useState<ClientDetail | null>(null);
   const [editing, setEditing] = useState(false);
 

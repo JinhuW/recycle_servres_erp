@@ -11,7 +11,7 @@ import { synthesizePartNumber } from '@recycle-erp/shared';
 import { Combobox } from '../../../components/Combobox';
 import { PartNumberField } from '../../../components/PartNumberField';
 import { ItemTypePicker } from '../../../components/ItemTypePicker';
-import type { Line } from '../DesktopSubmit';
+import type { Line } from './line';
 
 // ─── Field groups ────────────────────────────────────────────────────────────
 // `missing` carries the i18n label keys lib/lineRequirements reports blank, so

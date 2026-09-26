@@ -2,21 +2,11 @@ import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
+import { mockFrankfurter } from './helpers/fx';
 
 // Mirror fx-routes.test.ts: vi.stubGlobal('fetch', ...) returning the
 // Frankfurter response shape. The token-only public endpoints have no
 // cookie/CSRF surface so the existing `api` helper is fine.
-function mockFrankfurter(rate: number, date = '2026-05-26') {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async () =>
-      new Response(
-        JSON.stringify({ amount: 1, base: 'USD', date, rates: { CNY: rate } }),
-        { status: 200 },
-      ),
-    ),
-  );
-}
 
 async function seedLink(): Promise<{ token: string; mgr: string }> {
   const { token: mgr } = await loginAs(ALEX);
@@ -38,7 +28,7 @@ async function anInStockLine(mgr: string, minQty = 1): Promise<{ id: string; qty
 describe('vendor public — bid currency', () => {
   beforeEach(async () => {
     await resetDb();
-    mockFrankfurter(7.2154);
+    mockFrankfurter(7.2154, '2026-05-26');
   });
 
   afterEach(() => {

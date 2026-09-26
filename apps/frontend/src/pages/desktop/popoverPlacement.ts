@@ -6,12 +6,14 @@
 // back to `auto` — so the popover has to leave the scroll container, which
 // means placing it by hand.
 //
-// Pure on purpose: the callers own the rect and the listeners, this owns only
-// the arithmetic, and the arithmetic is the part that breaks silently.
+// `placePopover` is pure on purpose: the arithmetic is the part that breaks
+// silently, so it stays testable apart from the listeners `useFixedPopover` owns.
+
+import { useEffect, useLayoutEffect, useState, type RefObject } from 'react';
 
 export type Align = 'left' | 'right';
 
-export interface PlaceArgs {
+interface PlaceArgs {
   /** The anchor's viewport rect — a DOMRect, or anything with these four. */
   anchor: { top: number; bottom: number; left: number; right: number };
   width: number;
@@ -39,4 +41,50 @@ export function placePopover({
   const left = Math.max(gap, Math.min(start, viewport.width - width - gap));
 
   return { top, left };
+}
+
+/**
+ * Keeps a fixed popover placed against its anchor while anything scrolls or
+ * the window resizes, and closes it on a mousedown outside `panel`.
+ */
+export function useFixedPopover(
+  anchor: RefObject<HTMLElement | null>,
+  panel: RefObject<HTMLElement | null>,
+  { width, height, align, gap }: { width: number; height: number; align: Align; gap: number },
+  onClose: () => void,
+): { top: number; left: number } | null {
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const place = () => {
+      const el = anchor.current;
+      if (!el) return;
+      setPos(placePopover({
+        anchor: el.getBoundingClientRect(),
+        width,
+        height,
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        align,
+        gap,
+      }));
+    };
+    place();
+    // Capture phase so the inner table scroller is heard, not just the page.
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    return () => {
+      window.removeEventListener('scroll', place, true);
+      window.removeEventListener('resize', place);
+    };
+  }, [anchor, width, height, align, gap]);
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      if (panel.current && !panel.current.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [panel, onClose]);
+
+  return pos;
 }

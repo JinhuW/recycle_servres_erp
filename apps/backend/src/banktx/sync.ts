@@ -10,6 +10,7 @@ import { log } from '../lib/log';
 import type { Env } from '../types';
 import { applyIgnoreRules } from './ignoreRules';
 import { pickBankProviders } from './index';
+import { PAIR_AUTO_WINDOW_DAYS } from './match';
 import { PAYPAL_ACH_DESCRIPTOR } from './mercury';
 import type { BankProvider, BankSource, NormalizedDispute, NormalizedTxn } from './types';
 
@@ -17,8 +18,9 @@ const bankLog = log.child({ module: 'banktx' });
 
 const OVERLAP_MS = 5 * 24 * 60 * 60 * 1000;
 const BACKFILL_MS = 90 * 24 * 60 * 60 * 1000;
-// A settlement can trail its PayPal charge by a weekend + holidays.
-const PAIR_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
+// A settlement can trail its PayPal charge by a weekend + holidays. Shared with
+// the read-time pair suggestion so the two never disagree.
+const PAIR_WINDOW_MS = PAIR_AUTO_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 
 export type SyncCounts = {
   inserted: number;

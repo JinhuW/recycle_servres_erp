@@ -207,7 +207,7 @@ app.get('/api/health', async (c) => {
   // Build provenance — resolved through the same helpers every log line uses,
   // so the health payload and the logs can never disagree about which build is
   // running. They carry the APP_VERSION/GIT_SHA handling: those are
-  // release-time Docker build args (scripts/release.sh), Railway never passes
+  // optional Docker build args for a tagged self-host build, Railway never passes
   // them and the Dockerfile bakes them as EMPTY env strings, hence || not ??.
   const version = releaseVersion();
   const commit = releaseCommit();

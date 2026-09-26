@@ -45,6 +45,7 @@ import {
 import { addableCategories, categoryTone } from '../lib/lookups';
 import type { Category, Order, Warehouse } from '../lib/types';
 import { loadWarehouses } from '../lib/warehouses';
+import { pricedTotals } from '../lib/lineGroups';
 
 /**
  * The order-level edits in flight on this screen. They live in the shell, not
@@ -101,8 +102,7 @@ export function OrderDetail({
   order: initialOrder, section, meta: metaDraft, onMetaChange,
   onCancel, onSaved, onDeleted, onEditLine, onAddLine,
 }: Props) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const { user } = useAuth();
   const [order, setOrder] = useState<Order>(initialOrder);
   useEffect(() => { setOrder(initialOrder); }, [initialOrder]);
@@ -132,6 +132,7 @@ export function OrderDetail({
   const canAnnotate = !orderLocked && isOwnerOrManager;
 
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const metaAtts = (k: string) => order.statusMeta?.[k]?.attachments ?? [];
   // What the server says the order's meta is, as one comparable string. The
   // backend rebuilds `statusMeta` as a fresh object on every response, so its
   // identity changes when nothing did — keying anything on it wiped the fields
@@ -151,9 +152,9 @@ export function OrderDetail({
     order.package?.trackingNumber ?? '',
     order.userId,
     order.commissionRate ?? '',
-    ...(order.statusMeta?.['Submission']?.attachments ?? []).map(a => a.id),
-    ...(order.statusMeta?.['Payment']?.attachments ?? []).map(a => a.id),
-    ...(order.statusMeta?.['Commission']?.attachments ?? []).map(a => a.id),
+    ...metaAtts('Submission').map(a => a.id),
+    ...metaAtts('Payment').map(a => a.id),
+    ...metaAtts('Commission').map(a => a.id),
   ]);
   // Edits made against an older server state are stale: the order moved on, so
   // the fields show what it now holds.
@@ -219,9 +220,9 @@ export function OrderDetail({
   // shared with the hand-off sheet.
   const proof = usePaymentProof({
     orderId: order.id,
-    chatAtts: order.statusMeta?.['Submission']?.attachments ?? [],
-    proofAtts: order.statusMeta?.['Payment']?.attachments ?? [],
-    commissionAtts: order.statusMeta?.['Commission']?.attachments ?? [],
+    chatAtts: metaAtts('Submission'),
+    proofAtts: metaAtts('Payment'),
+    commissionAtts: metaAtts('Commission'),
     setTxnId: v => setMeta({ paypalTxnId: v }),
   });
   const submissionAtts = proof.chatAtts;
@@ -253,9 +254,9 @@ export function OrderDetail({
   // never on a mere refetch that returned the same thing.
   useEffect(() => {
     proof.sync(
-      order.statusMeta?.['Submission']?.attachments ?? [],
-      order.statusMeta?.['Payment']?.attachments ?? [],
-      order.statusMeta?.['Commission']?.attachments ?? [],
+      metaAtts('Submission'),
+      metaAtts('Payment'),
+      metaAtts('Commission'),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverVersion]);
@@ -278,18 +279,17 @@ export function OrderDetail({
   }, []);
 
   const totals = useMemo(() => {
-    let qty = 0, cost = 0, margin = 0, revenue = 0, priced = 0;
+    let qty = 0, cost = 0, margin = 0;
     for (const l of order.lines) {
       qty += l.qty;
       cost += l.qty * l.unitCost;
-      // Priced lines only, the way the PO list's Profit column counts it.
-      if (isPricedSellPrice(l.sellPrice)) {
-        priced += 1;
-        revenue += l.qty * Number(l.sellPrice);
-        margin += l.qty * (Number(l.sellPrice) - l.unitCost);
-      }
+      // Summed per line rather than taken as pricedTotals' revenue − cost: the
+      // two round differently in floating point.
+      if (isPricedSellPrice(l.sellPrice)) margin += l.qty * (Number(l.sellPrice) - l.unitCost);
     }
-    return { qty, cost, margin, revenue, priced };
+    // Priced lines only, the way the PO list's Profit column counts it.
+    const priced = pricedTotals(order.lines);
+    return { qty, cost, margin, revenue: priced.revenue, priced: priced.count };
   }, [order.lines]);
 
   // Reads the fee being typed, not the saved one, so the total tracks the box.
@@ -544,7 +544,7 @@ export function OrderDetail({
   const headerSub = section === 'products'
     ? `${order.id} · ${totals.qty} ${totals.qty === 1 ? t('unit') : t('units2')}`
     : orderLocked ? `${effectiveStatus} · ${t('poLockedShort')}` : `${effectiveStatus} · ${itemsUnits}`;
-  const unpricedCount = order.lines.filter(l => !isPricedSellPrice(l.sellPrice)).length;
+  const unpricedCount = order.lines.length - totals.priced;
 
   // What the Delivery fold reads back when closed, and what the readiness
   // row says when it is met.
@@ -569,8 +569,8 @@ export function OrderDetail({
       // `order.blockers` predates it, so the form speaks for the payment
       // section until the next read.
       const proofChanged =
-        proof.chatAtts.length !== (order.statusMeta?.['Submission']?.attachments ?? []).length
-        || proof.proofAtts.length !== (order.statusMeta?.['Payment']?.attachments ?? []).length;
+        proof.chatAtts.length !== metaAtts('Submission').length
+        || proof.proofAtts.length !== metaAtts('Payment').length;
       const items = poReadiness({
         rules: {
           warehouseId, source, delivery, byUserId, trackingValid: tracking.valid, carrier: tracking.carrier,
@@ -1379,7 +1379,7 @@ export function OrderDetail({
           onToggle={() => toggleFold('activity')}
         >
           <div style={{ margin: '-12px -14px -14px' }}>
-            <OrderActivityLog orderId={order.id} refreshKey={activityRefreshKey} bare events={events} />
+            <OrderActivityLog bare events={events} />
           </div>
         </PhFold>
 

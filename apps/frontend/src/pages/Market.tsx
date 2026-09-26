@@ -11,8 +11,7 @@ import type { RefPrice } from '../lib/types';
 import { PhoneListSkeleton } from '../components/Skeleton';
 
 export function Market() {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const [filter, setFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
   const [items, setItems] = useState<RefPrice[]>([]);

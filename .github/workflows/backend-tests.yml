@@ -3,8 +3,8 @@
 # The backend tests are integration tests by design — they exercise the actual
 # SQL, migrations, FK rules and status guards — so CI has to provide a database.
 # Until this workflow existed, no backend test ran in CI at all: the only gates
-# were a developer remembering to run vitest, and scripts/release.sh, which
-# SKIPS the suite when 127.0.0.1:5432 doesn't answer. That made every guard in
+# were a developer remembering to run vitest, and the old Docker release script,
+# which SKIPPED the suite when 127.0.0.1:5432 didn't answer. That made every guard in
 # the suite advisory, including the one that keeps the container's boot scripts
 # importable (tests/log-import-purity.test.ts).
 #

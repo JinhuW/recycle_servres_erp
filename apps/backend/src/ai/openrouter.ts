@@ -38,15 +38,6 @@ function sniffMime(b: Uint8Array): string {
   return 'image/jpeg';
 }
 
-function toBase64(bytes: Uint8Array): string {
-  let binary = '';
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return btoa(binary);
-}
-
 // Generic image→JSON transport: send one image plus a prompt, get back the
 // parsed JSON object. Shared by the label scanner and the receipt renamer so
 // timeout/model/retry tuning stays in one place. Throws on missing key, HTTP
@@ -60,7 +51,7 @@ export async function openRouterImageJson(
   if (!apiKey) throw new Error('OPENROUTER_API_KEY is not set');
 
   const bytes = new Uint8Array(imageBytes);
-  const dataUrl = `data:${sniffMime(bytes)};base64,${toBase64(bytes)}`;
+  const dataUrl = `data:${sniffMime(bytes)};base64,${Buffer.from(bytes).toString('base64')}`;
 
   type ChatMessage = { role: 'user' | 'assistant'; content: string | Array<Record<string, unknown>> };
 

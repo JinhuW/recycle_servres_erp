@@ -4,15 +4,13 @@
 
 import { catalog } from './lookups';
 
-export { categories, categoryFilterOptions, type CategoryInfo } from './lookups';
-
 export const RAM_BRANDS    = catalog.RAM_BRAND;
 export const RAM_GENERATIONS = catalog.RAM_TYPE; // DDR3/DDR4/DDR5
 export const RAM_DEVICE_TYPES = ['Desktop', 'Server', 'Laptop'] as const;
 export const RAM_CLASS     = catalog.RAM_CLASS;
 export const RAM_RANK      = catalog.RAM_RANK;
 export const RAM_CAP       = catalog.RAM_CAP;
-export const RAM_SPEED     = catalog.RAM_SPEED;
+const RAM_SPEED     = catalog.RAM_SPEED;
 export const SSD_BRANDS    = catalog.SSD_BRAND;
 export const SSD_INTERFACE = catalog.SSD_INTERFACE;
 export const SSD_FORM      = catalog.SSD_FORM;
