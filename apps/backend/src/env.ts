@@ -20,13 +20,14 @@ export function buildEnv(src: NodeJS.ProcessEnv = process.env): Env {
   if (src.NODE_ENV === 'production') {
     // The compose file falls back to the documented dev password when
     // POSTGRES_PASSWORD is unset; don't let that combination reach prod.
+    let password: string | undefined;
     try {
-      if (new URL(src.DATABASE_URL).password === 'recycle') {
-        throw new Error('DATABASE_URL uses the default dev password in production');
-      }
-    } catch (e) {
-      if (e instanceof Error && e.message.includes('default dev password')) throw e;
+      password = new URL(src.DATABASE_URL).password;
+    } catch {
       // unparseable URL: let the DB driver surface it
+    }
+    if (password === 'recycle') {
+      throw new Error('DATABASE_URL uses the default dev password in production');
     }
   }
   if (src.NODE_ENV === 'production' && !src.CORS_ALLOWED_ORIGINS) {

@@ -1,12 +1,12 @@
-import { createHash, createPrivateKey, createPublicKey, randomBytes, type KeyObject } from 'node:crypto';
+import { createPrivateKey, createPublicKey, randomBytes, type KeyObject } from 'node:crypto';
 import { exportPKCS8, generateKeyPair, jwtVerify, SignJWT } from 'jose';
 import type postgres from 'postgres';
+import { sha256hex } from '../auth';
 import type { Env, OAuthScope } from '../types';
 import { oauthRefreshRevocationsTotal } from '../metrics';
 
 type AnySql = postgres.Sql | postgres.TransactionSql;
 
-const sha256hex = (s: string): string => createHash('sha256').update(s).digest('hex');
 const sec = (n?: string, d?: number) => Number.parseInt(n ?? String(d), 10) || (d ?? 0);
 
 // Operator stores Ed25519 private keys in env as base64-encoded PKCS#8 PEM so
@@ -20,13 +20,29 @@ export async function generateSigningKey(): Promise<string> {
 // jose's importPKCS8 only yields a "private" CryptoKey, which can sign but not
 // verify. Round-tripping through node's KeyObject lets us derive the matching
 // public key for verification from the same env-stored secret.
+//
+// Parsed keys are cached per env value because every bearer request verifies
+// a token. Only successful parses are stored, so a malformed key keeps
+// throwing on every call exactly as it would uncached.
+const privateKeyCache = new Map<string, KeyObject>();
+const publicKeyCache = new Map<string, KeyObject>();
+
 function loadPrivateKey(b64: string): KeyObject {
-  const pem = Buffer.from(b64, 'base64').toString('utf8');
-  return createPrivateKey(pem);
+  let key = privateKeyCache.get(b64);
+  if (!key) {
+    key = createPrivateKey(Buffer.from(b64, 'base64').toString('utf8'));
+    privateKeyCache.set(b64, key);
+  }
+  return key;
 }
 
 function loadPublicKey(b64: string): KeyObject {
-  return createPublicKey(loadPrivateKey(b64));
+  let key = publicKeyCache.get(b64);
+  if (!key) {
+    key = createPublicKey(loadPrivateKey(b64));
+    publicKeyCache.set(b64, key);
+  }
+  return key;
 }
 
 // Deterministic short kid derived from the key bytes; lets the verifier pick

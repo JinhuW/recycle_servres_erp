@@ -1,11 +1,9 @@
-import type { Env } from '../types';
+import { OAUTH_SCOPES, type Env } from '../types';
 
 // Structural shape of the bits of a Hono Context this reads. Typing it this way
 // (rather than Context<{ Bindings: Env }>) sidesteps Hono's invariant Variables
 // generic, so callers with any Variables shape can pass their context through.
 type OriginCtx = { env: Env; req: { header(name: string): string | undefined } };
-
-const SCOPES = ['market:read', 'market:write', 'sellorder:read', 'sellorder:write'] as const;
 
 const hostOf = (host: string) => host.split(':')[0];
 const isLoopback = (host: string) => {
@@ -94,7 +92,7 @@ export function authorizationServerMetadata(iss: string, opts: { dcr: boolean })
     response_modes_supported: ['query'],
     grant_types_supported: ['authorization_code', 'refresh_token', 'client_credentials'],
     token_endpoint_auth_methods_supported: ['client_secret_basic', 'client_secret_post', 'none'],
-    scopes_supported: [...SCOPES],
+    scopes_supported: [...OAUTH_SCOPES],
     code_challenge_methods_supported: ['S256'],
     token_endpoint_auth_signing_alg_values_supported: ['EdDSA'],
   };
@@ -105,7 +103,7 @@ export function protectedResourceMetadata(iss: string) {
     resource: `${iss}/api/mcp`,
     resource_name: 'Recycle Servers ERP',
     authorization_servers: [iss],
-    scopes_supported: [...SCOPES],
+    scopes_supported: [...OAUTH_SCOPES],
     bearer_methods_supported: ['header'],
   };
 }

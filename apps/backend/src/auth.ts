@@ -116,7 +116,7 @@ export const authMiddleware: MiddlewareHandler<{
 type AnySql = postgres.Sql | postgres.TransactionSql;
 
 const REFRESH_TTL_MS = 14 * 24 * 60 * 60 * 1000;
-const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex');
+export const sha256hex = (s: string): string => createHash('sha256').update(s).digest('hex');
 
 export async function issueRefresh(
   sql: AnySql,
@@ -127,7 +127,7 @@ export async function issueRefresh(
   const fam = familyId ?? crypto.randomUUID();
   const expires = new Date(Date.now() + REFRESH_TTL_MS);
   await sql`INSERT INTO refresh_tokens (user_id, token_hash, family_id, expires_at)
-            VALUES (${userId}, ${sha256(raw)}, ${fam}, ${expires})`;
+            VALUES (${userId}, ${sha256hex(raw)}, ${fam}, ${expires})`;
   return { raw, familyId: fam };
 }
 
@@ -156,7 +156,7 @@ export async function rotateRefresh(sql: postgres.Sql, raw: string): Promise<Rot
       SELECT rt.id, rt.user_id, rt.family_id, rt.revoked_at,
              (rt.expires_at <= NOW()) AS expired, u.active AS active
       FROM refresh_tokens rt JOIN users u ON u.id = rt.user_id
-      WHERE rt.token_hash = ${sha256(raw)}
+      WHERE rt.token_hash = ${sha256hex(raw)}
       FOR UPDATE OF rt
       LIMIT 1`)[0];
     if (!row) return { ok: false };

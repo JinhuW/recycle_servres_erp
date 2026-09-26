@@ -20,10 +20,10 @@ export type UploadResult = {
 };
 
 // Thrown by uploadAttachment if the file's declared MIME isn't on the safe
-// allowlist. Routes catch this and convert to a 415. Defence-in-depth: the
-// route layer already runs the same check via getUploadLimits, but if a new
-// caller forgets to gate, the storage layer still refuses to forward a
-// hostile Content-Type to a public bucket.
+// allowlist. Defence-in-depth only: routes refuse the type themselves via
+// getUploadLimits before calling here, and none special-cases this class — if a
+// new caller forgets to gate, the upload fails like any other storage error
+// rather than forwarding a hostile Content-Type to a public bucket.
 export class UnsafeMimeError extends Error {
   constructor(public readonly mime: string) {
     super(`unsupported file type: ${mime || 'unknown'}`);

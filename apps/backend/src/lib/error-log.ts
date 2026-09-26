@@ -44,8 +44,11 @@ export interface ErrorRecord {
 // Not anchored: this also runs over preformatted request lines, where the path
 // sits mid-string. Lives here rather than beside app.onError because every
 // writer into this sink needs it, not just the unhandled-500 path.
+const PUBLIC_SECRET_PREFIX = String.raw`(\/api\/public\/(?:vendor|shippo|shipping)\/)`;
+const PUBLIC_SECRET_PATH_RE = new RegExp(String.raw`${PUBLIC_SECRET_PREFIX}[^/\s?]+`);
+
 export function redactSensitivePath(pathname: string): string {
-  return pathname.replace(/(\/api\/public\/(?:vendor|shippo|shipping)\/)[^/\s?]+/, '$1<redacted>');
+  return pathname.replace(PUBLIC_SECRET_PATH_RE, '$1<redacted>');
 }
 
 const SENSITIVE_QUERY_KEYS = new Set([
@@ -65,6 +68,8 @@ const SENSITIVE_QUERY_KEYS = new Set([
 // Redacts the portal tokens the SPA carries in its own path (/v/<t>, /s/<t> —
 // see App.tsx and lib/vendor.ts) as well as the API routes above, and sweeps
 // sensitive query keys anywhere in the string, including inside the fragment.
+// Stops at `#` too, unlike the path form: an href carries a fragment.
+const PUBLIC_SECRET_HREF_RE = new RegExp(String.raw`${PUBLIC_SECRET_PREFIX}[^/?#\s]+`, 'g');
 const PORTAL_PATH_RE = /(\/[vs]\/)[^/?#\s]+/g;
 const SENSITIVE_QUERY_RE = new RegExp(
   `([?&#](?:${[...SENSITIVE_QUERY_KEYS].join('|')})=)[^&#\\s]*`,
@@ -73,7 +78,7 @@ const SENSITIVE_QUERY_RE = new RegExp(
 
 export function redactSensitiveHref(raw: string): string {
   return raw
-    .replace(/(\/api\/public\/(?:vendor|shippo|shipping)\/)[^/?#\s]+/g, '$1<redacted>')
+    .replace(PUBLIC_SECRET_HREF_RE, '$1<redacted>')
     .replace(PORTAL_PATH_RE, '$1<redacted>')
     .replace(SENSITIVE_QUERY_RE, '$1<redacted>');
 }

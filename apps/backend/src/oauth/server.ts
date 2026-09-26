@@ -1,20 +1,19 @@
 import { Hono } from 'hono';
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { getCookie } from 'hono/cookie';
 import type { Context } from 'hono';
-import type { Env, OAuthScope, User } from '../types';
+import { OAUTH_SCOPES, type Env, type OAuthScope, type User } from '../types';
 import { authorizationServerMetadata, protectedResourceMetadata, resolvePublicOrigin, dcrEnabled } from './metadata';
 import { getDb } from '../db';
-import { authMiddleware, verifyToken } from '../auth';
+import { authMiddleware, sha256hex, verifyToken } from '../auth';
 import { createOAuthClient, findOAuthClient, verifyClientSecret, listOAuthClients, revokeOAuthClient } from './clients';
 import { verifyChallenge } from './pkce';
 import { signAccessToken, issueRefreshToken, rotateRefreshToken, revokeRefreshFamily, restrictScopesToRole } from './tokens';
 import { oauthGrantsTotal } from '../metrics';
 
 const CODE_TTL_SEC = 600;
-const sha256hex = (s: string) => createHash('sha256').update(s).digest('hex');
 
-const KNOWN_SCOPES = new Set<string>(['market:read', 'market:write', 'sellorder:read', 'sellorder:write']);
+const KNOWN_SCOPES = new Set<string>(OAUTH_SCOPES);
 // The interactive code flow is role-ceilinged: a manager's consent can grant
 // any scope; a non-manager's yields market:read only (price lookup — their MCP
 // use case; sell-order data stays manager-only). Service clients still get any
@@ -234,11 +233,7 @@ oauth.get('/authorize', async (c) => {
     : requestedRaw.filter(s => client.scopes.includes(s));
   if (requested.length === 0) return redirectWithError('invalid_scope');
   const at = getCookie(c, 'at');
-  if (!at) {
-    const next = encodeURIComponent('/oauth/authorize?' + new URLSearchParams(q).toString());
-    return c.redirect(`/login?next=${next}`, 302);
-  }
-  const payload = await verifyToken(c.env, at);
+  const payload = at ? await verifyToken(c.env, at) : null;
   if (!payload) {
     const next = encodeURIComponent('/oauth/authorize?' + new URLSearchParams(q).toString());
     return c.redirect(`/login?next=${next}`, 302);
@@ -258,6 +253,24 @@ oauth.get('/authorize', async (c) => {
   `;
   return c.redirect(`/authorize?req=${req}`, 302);
 });
+
+// The SPA asks for JSON so it can navigate itself; anything else gets the
+// redirect.
+function finishRedirect(
+  c: Context<{ Bindings: Env; Variables: { user: User } }>,
+  redirectUri: string,
+  param: [name: string, value: string],
+  state: string | null,
+) {
+  const url = new URL(redirectUri);
+  url.searchParams.set(...param);
+  if (state) url.searchParams.set('state', state);
+  const target = url.toString();
+  if ((c.req.header('accept') ?? '').includes('application/json')) {
+    return c.json({ redirectUri: target });
+  }
+  return c.redirect(target, 302);
+}
 
 oauth.post('/authorize/consent', authMiddleware, async (c) => {
   const body = (await c.req.json().catch(() => null)) as null | { req?: string; scopes?: string[] };
@@ -315,14 +328,7 @@ oauth.post('/authorize/consent', authMiddleware, async (c) => {
     return { ok: true, redirectUri: row.redirect_uri, code, state: row.state };
   });
   if (!result.ok) return c.json({ error: result.error }, result.status);
-  const url = new URL(result.redirectUri);
-  url.searchParams.set('code', result.code);
-  if (result.state) url.searchParams.set('state', result.state);
-  const target = url.toString();
-  if ((c.req.header('accept') ?? '').includes('application/json')) {
-    return c.json({ redirectUri: target });
-  }
-  return c.redirect(target, 302);
+  return finishRedirect(c, result.redirectUri, ['code', result.code], result.state);
 });
 
 // RFC 6749 §4.1.2.1 access_denied: explicit deny path so the OAuth client sees
@@ -358,14 +364,7 @@ oauth.post('/authorize/deny', authMiddleware, async (c) => {
     return { ok: true, redirectUri: row.redirect_uri, state: row.state };
   });
   if (!result.ok) return c.json({ error: result.error }, result.status);
-  const url = new URL(result.redirectUri);
-  url.searchParams.set('error', 'access_denied');
-  if (result.state) url.searchParams.set('state', result.state);
-  const target = url.toString();
-  if ((c.req.header('accept') ?? '').includes('application/json')) {
-    return c.json({ redirectUri: target });
-  }
-  return c.redirect(target, 302);
+  return finishRedirect(c, result.redirectUri, ['error', 'access_denied'], result.state);
 });
 
 // ── /oauth/token helpers ────────────────────────────────────────────────────
@@ -413,21 +412,22 @@ oauth.post('/token', async (c) => {
   // 'unknown' for top-of-handler rejects (no client/secret means we never
   // got far enough to commit to a particular grant flow).
   const labelGrant = (form.grant_type || 'unknown') as string;
+  const fail = (grantType: string, body: Record<string, string>, status: 400 | 401) => {
+    oauthGrantsTotal.inc({ grant_type: grantType, status: 'error' });
+    return c.json(body, status);
+  };
   if (!creds) {
-    oauthGrantsTotal.inc({ grant_type: labelGrant, status: 'error' });
-    return c.json({ error: 'invalid_client' }, 401);
+    return fail(labelGrant, { error: 'invalid_client' }, 401);
   }
 
   const client = await findOAuthClient(sql, creds.id);
   if (!client) {
-    oauthGrantsTotal.inc({ grant_type: labelGrant, status: 'error' });
-    return c.json({ error: 'invalid_client' }, 401);
+    return fail(labelGrant, { error: 'invalid_client' }, 401);
   }
 
   if (client.secret_hash) {
     if (!creds.secret || !(await verifyClientSecret(client, creds.secret))) {
-      oauthGrantsTotal.inc({ grant_type: labelGrant, status: 'error' });
-      return c.json({ error: 'invalid_client' }, 401);
+      return fail(labelGrant, { error: 'invalid_client' }, 401);
     }
   }
 
@@ -435,13 +435,11 @@ oauth.post('/token', async (c) => {
 
   if (grant === 'authorization_code') {
     if (!client.grant_types.includes('authorization_code')) {
-      oauthGrantsTotal.inc({ grant_type: 'authorization_code', status: 'error' });
-      return c.json({ error: 'unauthorized_client' }, 400);
+      return fail('authorization_code', { error: 'unauthorized_client' }, 400);
     }
     const { code, code_verifier, redirect_uri } = form;
     if (!code || !code_verifier || !redirect_uri) {
-      oauthGrantsTotal.inc({ grant_type: 'authorization_code', status: 'error' });
-      return c.json({ error: 'invalid_request' }, 400);
+      return fail('authorization_code', { error: 'invalid_request' }, 400);
     }
     type CodeRow = {
       client_id: string; user_id: string; redirect_uri: string;
@@ -480,8 +478,7 @@ oauth.post('/token', async (c) => {
       };
     });
     if (!row) {
-      oauthGrantsTotal.inc({ grant_type: 'authorization_code', status: 'error' });
-      return c.json({ error: 'invalid_grant' }, 400);
+      return fail('authorization_code', { error: 'invalid_grant' }, 400);
     }
     const at = await signAccessToken(env, {
       clientId: client.id, userId: row.user_id, scopes: row.scopes,
@@ -503,22 +500,18 @@ oauth.post('/token', async (c) => {
 
   if (grant === 'refresh_token') {
     if (!client.grant_types.includes('refresh_token')) {
-      oauthGrantsTotal.inc({ grant_type: 'refresh_token', status: 'error' });
-      return c.json({ error: 'unauthorized_client' }, 400);
+      return fail('refresh_token', { error: 'unauthorized_client' }, 400);
     }
     const raw = form.refresh_token;
     if (!raw) {
-      oauthGrantsTotal.inc({ grant_type: 'refresh_token', status: 'error' });
-      return c.json({ error: 'invalid_request' }, 400);
+      return fail('refresh_token', { error: 'invalid_request' }, 400);
     }
     const res = await rotateRefreshToken(sql, env, raw);
     if (!res.ok) {
-      oauthGrantsTotal.inc({ grant_type: 'refresh_token', status: 'error' });
-      return c.json({ error: 'invalid_grant' }, 400);
+      return fail('refresh_token', { error: 'invalid_grant' }, 400);
     }
     if (res.clientId !== client.id) {
-      oauthGrantsTotal.inc({ grant_type: 'refresh_token', status: 'error' });
-      return c.json({ error: 'invalid_grant' }, 400);
+      return fail('refresh_token', { error: 'invalid_grant' }, 400);
     }
     const at = await signAccessToken(env, {
       clientId: client.id, userId: res.userId, scopes: res.scopes,
@@ -535,22 +528,18 @@ oauth.post('/token', async (c) => {
 
   if (grant === 'client_credentials') {
     if (!client.grant_types.includes('client_credentials')) {
-      oauthGrantsTotal.inc({ grant_type: 'client_credentials', status: 'error' });
-      return c.json({ error: 'unauthorized_client' }, 400);
+      return fail('client_credentials', { error: 'unauthorized_client' }, 400);
     }
     if (!client.secret_hash) {
-      oauthGrantsTotal.inc({ grant_type: 'client_credentials', status: 'error' });
-      return c.json({ error: 'invalid_client', detail: 'client_credentials requires a confidential client' }, 401);
+      return fail('client_credentials', { error: 'invalid_client', detail: 'client_credentials requires a confidential client' }, 401);
     }
     const requested = (form.scope ?? '').split(' ').filter(Boolean);
     if (requested.length === 0) {
-      oauthGrantsTotal.inc({ grant_type: 'client_credentials', status: 'error' });
-      return c.json({ error: 'invalid_scope' }, 400);
+      return fail('client_credentials', { error: 'invalid_scope' }, 400);
     }
     for (const s of requested) {
       if (!client.scopes.includes(s)) {
-        oauthGrantsTotal.inc({ grant_type: 'client_credentials', status: 'error' });
-        return c.json({ error: 'invalid_scope' }, 400);
+        return fail('client_credentials', { error: 'invalid_scope' }, 400);
       }
     }
     const at = await signAccessToken(env, {
@@ -624,7 +613,6 @@ oauth.get('/authorize/pending/:req', authMiddleware, async (c) => {
 // scraper) or revoke existing ones. The mutating verbs go through csrfGuard
 // like every other /api/* route — this surface is NOT exempt.
 const VALID_GRANT_TYPES = ['authorization_code', 'refresh_token', 'client_credentials'] as const;
-const VALID_SCOPES = ['market:read', 'market:write', 'sellorder:read', 'sellorder:write'] as const;
 
 export const oauthAdmin = new Hono<{ Bindings: Env; Variables: { user: User } }>()
   .use('*', authMiddleware)
@@ -682,7 +670,7 @@ export const oauthAdmin = new Hono<{ Bindings: Env; Variables: { user: User } }>
       }
     }
     for (const s of scopes) {
-      if (!VALID_SCOPES.includes(s as typeof VALID_SCOPES[number])) {
+      if (!OAUTH_SCOPES.includes(s as OAuthScope)) {
         return c.json({ error: `invalid scope: ${s}` }, 400);
       }
     }
