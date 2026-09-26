@@ -7,7 +7,7 @@ priority: P2
 created: 2026-09-26
 reporter: jinhu
 branch: feat/ram-sheet-scan
-pr:
+pr: "#410"
 version: 1.178.0
 related: []
 ---
