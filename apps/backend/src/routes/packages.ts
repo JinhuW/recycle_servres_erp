@@ -14,6 +14,7 @@ import { effectiveRole } from '../lib/role';
 import { insertDraftOrderTx } from '../services/orderDraft';
 import { carrierTrackingUrl, pickTrackingClient, type PackageStatus } from '../shipping';
 import { log } from '../lib/log';
+import { normPaypalTxnId } from '../ai/paypal';
 
 const pkgLog = log.child({ module: 'packages' });
 import { applyPackageTracking, registerPackageTracking } from '../shipping/track';
@@ -188,7 +189,7 @@ packages.post('/', async (c) => {
   const opt = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null);
   // Same uppercase-no-spaces canon as the AI extractor, but lenient on shape:
   // a hand-typed id the user swears by must not bounce the whole package.
-  const paypalTxnId = opt(body?.paypalTxnId)?.replace(/\s+/g, '').toUpperCase() ?? null;
+  const paypalTxnId = normPaypalTxnId(body?.paypalTxnId);
   if (paypalTxnId !== null && paypalTxnId.length > 64) {
     return c.json({ error: 'PayPal transaction ID is too long' }, 400);
   }

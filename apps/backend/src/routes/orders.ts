@@ -6,7 +6,7 @@ import { nextHumanId } from '../lib/id-seq';
 import {
   diff, writeOrderEvent, wasEverSubmitted, META_FIELDS, LINE_FIELDS, type AuditChange, type SqlLike,
 } from '../services/orderAudit';
-import { autoTrackParts } from '../lib/marketAutoTrack';
+import { autoTrackParts, type TrackablePart } from '../lib/marketAutoTrack';
 import { effectiveRole } from '../lib/role';
 import { openSellStatuses } from '../lib/sellCommitment';
 import { getUploadLimits } from '../lib/settings';
@@ -25,7 +25,7 @@ import { syncOrderCategory, deriveCategory, sortCategories } from '../services/o
 import { insertDraftOrderTx } from '../services/orderDraft';
 import {
   handoffOrderTx, activeMember, nameHandoffByChange, setOrderPackageTx, unlinkOrderPackagesTx,
-  packageChanges, HandoffRefused, type HandoffInput, type HandoffPackage,
+  packageChanges, changeOrderOwnerTx, HandoffRefused, type HandoffInput, type HandoffPackage,
 } from '../services/orderHandoff';
 import { leaveDraftBlockers } from '../services/orderTxnRule';
 import { pickTrackingClient, carrierTrackingUrl } from '../shipping';
@@ -43,7 +43,7 @@ import {
   type SerialIssue, type Carrier, type PackageSource,
 } from '@recycle-erp/shared';
 import type { Env, LineCategory, User } from '../types';
-import { PAYPAL_TXN_STRICT, extractPaypalTxn } from '../ai/paypal';
+import { PAYPAL_TXN_STRICT, extractPaypalTxn, normPaypalTxnId } from '../ai/paypal';
 import { maybeRenameReceipt, suffixFilename } from '../ai/receipt';
 import { shrinkImageToFit } from '../lib/image-shrink';
 import { log } from '../lib/log';
@@ -121,6 +121,8 @@ async function assertCategoriesEnabled(
   return null;
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // Managers may file a PO for another member (`onBehalfOfUserId`) — a manager
 // as readily as a purchaser, since managers own the POs they file themselves.
 // The raw role is checked — not effectiveRole — so a manager previewing as
@@ -141,7 +143,7 @@ async function resolveOrderOwner(
   // The format gate matters, not just the lookup: users.id is uuid, so a
   // malformed string would make the SELECT itself 22P02 into a 500.
   if (typeof onBehalfOfUserId !== 'string'
-    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(onBehalfOfUserId)) {
+    || !UUID_RE.test(onBehalfOfUserId)) {
     return { error: 'onBehalfOfUserId must be a user id', status: 400 };
   }
   if (u.role !== 'manager') {
@@ -246,6 +248,16 @@ function badFees(b: { otherFees?: unknown; otherFeesNote?: unknown }): string | 
   return null;
 }
 
+// Shared by PATCH and the hand-off, which each keep their own manager-only 403
+// ahead of it. undefined leaves the rate alone, null clears it, and anything
+// else is clamped into [0, 1] rather than refused.
+function parseCommissionRate(v: unknown): { rate: number | null | undefined } | { error: string } {
+  if (v !== undefined && v !== null && !Number.isFinite(Number(v))) {
+    return { error: 'commissionRate must be a number or null' };
+  }
+  return { rate: v === undefined ? undefined : v === null ? null : Math.min(1, Math.max(0, Number(v))) };
+}
+
 // '' means the user cleared the box — the edit forms echo every field back on
 // save — so store NULL rather than an empty string.
 function normFeeNote(v: string | null | undefined): string | null {
@@ -260,8 +272,6 @@ function isPaymentMethod(v: unknown): v is 'paypal' | 'cash' | null | undefined 
 // The hand-off facts, validated the same way whichever door writes them —
 // the checkpoint (POST /handoff) or the page (PATCH). Each returns the 400
 // message or null.
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 function sourceErr(v: unknown): string | null {
   if (v === undefined || v === null) return null;
   return PACKAGE_SOURCES.includes(v as PackageSource) ? null : 'source must be facebook, local, reddit, or other';
@@ -346,32 +356,31 @@ const packageFromJson = (p: PackageJson | null) => p && {
   ...p, trackingUrl: carrierTrackingUrl(p.carrier, p.trackingNumber),
 };
 
+// The columns the audit diffs a line on, read the same way before and after a
+// PATCH writes it. NUMERIC is cast to float so the diff compares numbers, not
+// "120.00" string forms.
+function lineAuditCols(sql: SqlLike) {
+  return sql`
+    id, status, qty, category, brand, capacity, type, generation, classification,
+    rank, speed, interface, form_factor, description, item_type, part_number,
+    serial_number, chip_number, condition, rpm,
+    unit_cost::float AS unit_cost,
+    sell_price::float AS sell_price,
+    health::float AS health`;
+}
 
-type LineInput = {
-  category?: LineCategory;
-  brand?: string | null;
-  capacity?: string | null;
-  type?: string | null;
-  generation?: string | null;
-  classification?: string | null;
-  rank?: string | null;
-  speed?: string | null;
-  interface?: string | null;
-  formFactor?: string | null;
-  description?: string | null;
-  itemType?: string | null;
-  partNumber?: string | null;
-  serialNumber?: string | null;
-  chipNumber?: string | null;
-  condition?: string;
-  qty: number;
-  unitCost: number;
-  sellPrice?: number | null;
-  scanImageId?: string | null;
-  scanConfidence?: number | null;
-  health?: number | null;
-  rpm?: number | null;
-};
+// A line as the added / removed / reverted events snapshot it.
+type LineSnapRow = { id: string; category: string; part_number: string | null; qty: number; unit_cost: number };
+
+function lineSnapshot(r: LineSnapRow) {
+  return {
+    lineId: r.id,
+    category: r.category,
+    partNumber: r.part_number,
+    qty: r.qty,
+    unitCost: r.unit_cost,
+  };
+}
 
 // ── List orders for the signed-in purchaser (or all, if manager).
 orders.get('/', async (c) => {
@@ -603,7 +612,8 @@ orders.get('/:id', async (c) => {
   const u = c.var.user;
   const id = c.req.param('id');
   const sql = getDb(c.env);
-  const isManager = effectiveRole(u) === 'manager';
+  const role = effectiveRole(u);
+  const isManager = role === 'manager';
 
   const order = (await sql`
     SELECT o.id, o.user_id, o.category, o.payment, o.notes, o.lifecycle, o.created_at,
@@ -675,7 +685,7 @@ orders.get('/:id', async (c) => {
     ORDER BY so.id
   ` : null;
 
-  const lifecycle = visibleLifecycle(order.lifecycle as string, effectiveRole(u));
+  const lifecycle = visibleLifecycle(order.lifecycle as string, role);
   const status = LIFECYCLE_LABEL[lifecycle] ?? lifecycle;
 
   // Per-status evidence (note + attachments) — currently captured only for
@@ -1151,9 +1161,7 @@ orders.post('/', async (c) => {
   if (typeof body.paypalTxnId === 'string' && body.paypalTxnId.replace(/\s+/g, '').length > 64) {
     return c.json({ error: 'paypalTxnId is too long' }, 400);
   }
-  const newPaypalTxnId = typeof body.paypalTxnId === 'string'
-    ? body.paypalTxnId.replace(/\s+/g, '').toUpperCase() || null
-    : null;
+  const newPaypalTxnId = normPaypalTxnId(body.paypalTxnId);
   if (!isPaymentMethod(body.paymentMethod)) {
     return c.json({ error: 'paymentMethod must be paypal or cash' }, 400);
   }
@@ -1231,21 +1239,7 @@ orders.post('/', async (c) => {
       ` as { id: string }[];
       newLineIds.push(inserted[0].id);
     }
-    await autoTrackParts(tx, body.lines.map((l, i) => ({
-      category: lineCats[i],
-      partNumber: resolvePartNumber(lineCats[i], l),
-      brand: l.brand,
-      capacity: l.capacity,
-      type: l.type,
-      classification: l.classification,
-      rank: l.rank,
-      speed: l.speed,
-      interface: l.interface,
-      formFactor: l.formFactor,
-      description: l.description,
-      health: l.health,
-      rpm: l.rpm,
-    })));
+    await autoTrackParts(tx, body.lines.map((l, i) => trackInput(l, lineCats[i])));
 
     // Written before the event so `created` carries the value the order
     // actually ended up with rather than whatever the client proposed.
@@ -1319,6 +1313,26 @@ type LineFields = {
   scanConfidence?: number | null;
 };
 type LinePatch = LineFields & { id: string };
+type LineInput = LineFields & { qty: number; unitCost: number };
+
+// What market tracking learns from a line as it is created.
+function trackInput(l: LineFields, cat: string): TrackablePart {
+  return {
+    category: cat,
+    partNumber: resolvePartNumber(cat, l),
+    brand: l.brand,
+    capacity: l.capacity,
+    type: l.type,
+    classification: l.classification,
+    rank: l.rank,
+    speed: l.speed,
+    interface: l.interface,
+    formFactor: l.formFactor,
+    description: l.description,
+    health: l.health,
+    rpm: l.rpm,
+  };
+}
 
 // `materialEdit` below says the request *carries* a field the manager review is
 // about. These say it actually *changes* one, compared under the same
@@ -1401,10 +1415,7 @@ function changesMaterialField(
   if (body.paymentMethod !== undefined
       && !sameStoredValue(before.payment_method, body.paymentMethod)) return true;
   if (body.paypalTxnId !== undefined) {
-    const norm = typeof body.paypalTxnId === 'string'
-      ? body.paypalTxnId.replace(/\s+/g, '').toUpperCase() || null
-      : null;
-    if (!sameStoredValue(before.paypal_txn_id, norm)) return true;
+    if (!sameStoredValue(before.paypal_txn_id, normPaypalTxnId(body.paypalTxnId))) return true;
   }
   if (body.source !== undefined && !sameStoredValue(before.source, body.source)) return true;
   if (body.handoffMethod !== undefined || body.handoffBy !== undefined) {
@@ -1442,6 +1453,11 @@ type StoredLine = {
   speed: string | null;
   rpm: number | null;
 };
+function storedLineCols(sql: SqlLike) {
+  return sql`
+    id, category, generation, qty, serial_number, item_type, part_number,
+    brand, capacity, interface, form_factor, speed, rpm`;
+}
 
 orders.patch('/:id', async (c) => {
   const u = c.var.user;
@@ -1540,17 +1556,9 @@ orders.patch('/:id', async (c) => {
   if (typeof body.paypalTxnId === 'string' && body.paypalTxnId.replace(/\s+/g, '').length > 64) {
     return c.json({ error: 'PayPal transaction ID is too long' }, 400);
   }
-  if (
-    body.commissionRate !== undefined &&
-    body.commissionRate !== null &&
-    !Number.isFinite(Number(body.commissionRate))
-  ) {
-    return c.json({ error: 'commissionRate must be a number or null' }, 400);
-  }
-  const clampedRate =
-    body.commissionRate === undefined ? undefined
-    : body.commissionRate === null ? null
-    : Math.min(1, Math.max(0, Number(body.commissionRate)));
+  const rate = parseCommissionRate(body.commissionRate);
+  if ('error' in rate) return c.json({ error: rate.error }, 400);
+  const clampedRate = rate.rate;
 
   const feeErr = badFees(body);
   if (feeErr) return c.json({ error: feeErr }, 400);
@@ -1624,8 +1632,7 @@ orders.patch('/:id', async (c) => {
   const storedById = new Map<string, StoredLine>();
   if (patchIds.length) {
     const rows = await sql`
-      SELECT id, category, generation, qty, serial_number, item_type, part_number,
-             brand, capacity, interface, form_factor, speed, rpm
+      SELECT ${storedLineCols(sql)}
       FROM order_lines
       WHERE order_id = ${id} AND id = ANY(${patchIds}::uuid[])
     ` as StoredLine[];
@@ -1796,8 +1803,6 @@ orders.patch('/:id', async (c) => {
         : false;
 
       // Snapshot the lines we'll edit / remove so we can diff after the writes.
-      // NUMERIC columns come back as strings from postgres.js by default; cast
-      // to float so the diff compares numbers, not "120.00" string forms.
       // The ids being removed ride along so the no-op check below can tell a
       // real removal from a replay naming rows that are already gone.
       const editIds = [
@@ -1806,12 +1811,7 @@ orders.patch('/:id', async (c) => {
       ];
       const linesBefore = editIds.length
         ? await tx`
-            SELECT id, status, qty, category, brand, capacity, type, generation, classification,
-                   rank, speed, interface, form_factor, description, item_type, part_number,
-                   serial_number, chip_number, condition, rpm,
-                   unit_cost::float AS unit_cost,
-                   sell_price::float AS sell_price,
-                   health::float AS health
+            SELECT ${lineAuditCols(tx)}
             FROM order_lines WHERE order_id = ${id} AND id = ANY(${editIds}::uuid[])`
         : [];
       const beforeMap = new Map<string, Record<string, unknown>>(
@@ -1838,7 +1838,7 @@ orders.patch('/:id', async (c) => {
         lifecycleAfter = 'draft';
       }
 
-      let removedSnapshots: Array<{ id: string; category: string; part_number: string | null; qty: number; unit_cost: number }> = [];
+      let removedSnapshots: LineSnapRow[] = [];
 
       const touchesOrder =
         body.totalCost !== undefined ||
@@ -1885,9 +1885,7 @@ orders.patch('/:id', async (c) => {
         const newMethod    = paymentAfter === 'self' ? null : (body.paymentMethod ?? null);
         // Same canon as the add-package boundary — a pasted id with spaces or
         // lowercase must diff clean against the AI-extracted value.
-        const normPaypal = !clearPaypal && typeof body.paypalTxnId === 'string'
-          ? body.paypalTxnId.replace(/\s+/g, '').toUpperCase() || null
-          : null;
+        const normPaypal = clearPaypal ? null : normPaypalTxnId(body.paypalTxnId);
         await tx`
           UPDATE orders SET
             total_cost   = CASE WHEN ${setTotalCost}::int = 1 THEN ${statedGoods ?? null}      ELSE total_cost   END,
@@ -1918,21 +1916,9 @@ orders.patch('/:id', async (c) => {
           paymentsLinked = await linkPaypalTxnToOrder(tx, normPaypal, id, u.id);
         }
       }
-      // Owner moves under the same lock as the meta fields, with its own
-      // event kind: user_id isn't a META_FIELD (the timeline names people,
-      // not a uuid diff), and both names are snapshotted here because events
-      // render without joining users on the owner.
+      // Owner moves under the same lock as the meta fields.
       if (newOwner && newOwner.ownerId !== orderBefore.user_id) {
-        const prev = (await tx`
-          SELECT name FROM users WHERE id = ${orderBefore.user_id} LIMIT 1
-        `)[0] as { name: string } | undefined;
-        await tx`UPDATE orders SET user_id = ${newOwner.ownerId} WHERE id = ${id}`;
-        await writeOrderEvent(tx, id, u.id, 'owner_changed', {
-          fromUserId: orderBefore.user_id,
-          from: prev?.name ?? null,
-          toUserId: newOwner.ownerId,
-          to: newOwner.ownerName ?? u.name,
-        });
+        await changeOrderOwnerTx(tx, id, u, orderBefore.user_id, newOwner);
       }
       // The box, under the same lock as the fields that describe it. A
       // tracking number only makes sense on a label; a flip away from label
@@ -1944,7 +1930,7 @@ orders.patch('/:id', async (c) => {
           source: body.source !== undefined ? body.source : orderBefore.source,
           supplier_name: orderBefore.supplier_name,
           paypal_txn_id: body.paypalTxnId !== undefined
-            ? (typeof body.paypalTxnId === 'string' ? body.paypalTxnId.replace(/\s+/g, '').toUpperCase() || null : null)
+            ? normPaypalTxnId(body.paypalTxnId)
             : orderBefore.paypal_txn_id,
         }, tracking);
         if (set.kind === 'taken') {
@@ -1965,7 +1951,7 @@ orders.patch('/:id', async (c) => {
         const doomed = await tx`
           SELECT id, category, scan_image_id, part_number, qty, unit_cost::float AS unit_cost FROM order_lines
           WHERE order_id = ${id} AND id = ANY(${body.removeLineIds}::uuid[])
-        ` as { id: string; category: string; scan_image_id: string | null; part_number: string | null; qty: number; unit_cost: number }[];
+        ` as (LineSnapRow & { scan_image_id: string | null })[];
         removedSnapshots = doomed.map(r => ({ id: r.id, category: r.category, part_number: r.part_number, qty: r.qty, unit_cost: r.unit_cost }));
         // Read before the DELETE cascades the rows away. Same list as the scan
         // keys, so the existing post-commit sweep covers both.
@@ -2023,8 +2009,7 @@ orders.patch('/:id', async (c) => {
         // category it now holds does not own.
         const lockedById = new Map<string, StoredLine>();
         const lockedRows = await tx`
-          SELECT id, category, generation, qty, serial_number, item_type, part_number,
-                 brand, capacity, interface, form_factor, speed, rpm
+          SELECT ${storedLineCols(tx)}
           FROM order_lines
           WHERE order_id = ${id} AND id = ANY(${body.lines.map(l => l.id)}::uuid[])
         ` as StoredLine[];
@@ -2106,7 +2091,7 @@ orders.patch('/:id', async (c) => {
           `;
         }
       }
-      let addedRows: Array<{ id: string; category: string; part_number: string | null; qty: number; unit_cost: number }> = [];
+      let addedRows: LineSnapRow[] = [];
       if (Array.isArray(body.addLines) && body.addLines.length) {
         // New lines default to the order's category. Position appends after
         // current max so they sort to the end.
@@ -2133,25 +2118,11 @@ orders.patch('/:id', async (c) => {
               ${l.health ?? null}, ${l.rpm ?? null}
             )
             RETURNING id, category, part_number, qty, unit_cost::float AS unit_cost
-          ` as { id: string; category: string; part_number: string | null; qty: number; unit_cost: number }[];
+          ` as LineSnapRow[];
           addedRows.push(inserted[0]);
           addedLineIds.push(inserted[0].id);
         }
-        await autoTrackParts(tx, body.addLines.map((l, i) => ({
-          category: addCats[i],
-          partNumber: resolvePartNumber(addCats[i], l),
-          brand: l.brand,
-          capacity: l.capacity,
-          type: l.type,
-          classification: l.classification,
-          rank: l.rank,
-          speed: l.speed,
-          interface: l.interface,
-          formFactor: l.formFactor,
-          description: l.description,
-          health: l.health,
-          rpm: l.rpm,
-        })));
+        await autoTrackParts(tx, body.addLines.map((l, i) => trackInput(l, addCats[i])));
       }
 
       // A PO that HAD lines may not be left with none. Both clients block it,
@@ -2219,12 +2190,7 @@ orders.patch('/:id', async (c) => {
       if (patches.length > 0) {
         const patchIds = patches.map(p => p.id);
         const afters = (await tx`
-          SELECT id, status, qty, category, brand, capacity, type, generation, classification,
-                 rank, speed, interface, form_factor, description, item_type, part_number,
-                 serial_number, chip_number, condition, rpm,
-                 unit_cost::float AS unit_cost,
-                 sell_price::float AS sell_price,
-                 health::float AS health
+          SELECT ${lineAuditCols(tx)}
           FROM order_lines WHERE id = ANY(${patchIds}::uuid[])
         `) as Record<string, unknown>[];
         const afterMap = new Map<string, Record<string, unknown>>(
@@ -2247,31 +2213,12 @@ orders.patch('/:id', async (c) => {
         }
       }
       for (const r of addedRows) {
-        await writeOrderEvent(tx, id, u.id, 'line_added', {
-          lineId: r.id,
-          category: r.category,
-          partNumber: r.part_number,
-          qty: r.qty,
-          unitCost: r.unit_cost,
-        });
+        await writeOrderEvent(tx, id, u.id, 'line_added', lineSnapshot(r));
       }
       for (const r of removedSnapshots) {
-        await writeOrderEvent(tx, id, u.id, 'line_removed', {
-          lineId: r.id,
-          category: r.category,
-          partNumber: r.part_number,
-          qty: r.qty,
-          unitCost: r.unit_cost,
-        });
+        await writeOrderEvent(tx, id, u.id, 'line_removed', lineSnapshot(r));
       }
 
-      const lineSnapshot = (r: { id: string; category: string; part_number: string | null; qty: number; unit_cost: number }) => ({
-        lineId: r.id,
-        category: r.category,
-        partNumber: r.part_number,
-        qty: r.qty,
-        unitCost: r.unit_cost,
-      });
       if (revertedFrom) {
         await writeOrderEvent(tx, id, u.id, 'reverted', {
           from: revertedFrom,
@@ -2590,6 +2537,14 @@ function canWriteMeta(u: User, status: string, order: { user_id: string; lifecyc
     && order.user_id === u.id && !isClosedBook(order.lifecycle);
 }
 
+type OrderAccess = { user_id: string; lifecycle: string };
+
+// The unlocked read the evidence routes judge permission on.
+async function loadOrderAccess(sql: SqlLike, id: string): Promise<OrderAccess | undefined> {
+  return (await sql`SELECT user_id, lifecycle FROM orders WHERE id = ${id} LIMIT 1`)[0] as
+    | OrderAccess | undefined;
+}
+
 // Upsert the text note for a single (order, status).
 orders.put('/:id/status-meta/:status', async (c) => {
   const u = c.var.user;
@@ -2601,8 +2556,7 @@ orders.put('/:id/status-meta/:status', async (c) => {
   const sql = getDb(c.env);
 
   // Ensure the order exists; otherwise the FK upsert silently inserts.
-  const existing = (await sql`SELECT user_id, lifecycle FROM orders WHERE id = ${id} LIMIT 1`)[0] as
-    | { user_id: string; lifecycle: string } | undefined;
+  const existing = await loadOrderAccess(sql, id);
   if (!existing) return c.json({ error: 'Not found' }, 404);
   if (!canWriteMeta(u, status, existing)) return c.json({ error: 'Forbidden' }, 403);
 
@@ -2646,8 +2600,7 @@ orders.post('/:id/status-meta/:status/attachments', async (c) => {
   const scanPaypal = status === 'Payment' && c.req.query('scan') === 'paypal';
 
   const sql = getDb(c.env);
-  const existing = (await sql`SELECT user_id, lifecycle FROM orders WHERE id = ${id} LIMIT 1`)[0] as
-    | { user_id: string; lifecycle: string } | undefined;
+  const existing = await loadOrderAccess(sql, id);
   if (!existing) return c.json({ error: 'Not found' }, 404);
   if (!canWriteMeta(u, status, existing)) return c.json({ error: 'Forbidden' }, 403);
 
@@ -2732,8 +2685,7 @@ orders.delete('/:id/status-meta/:status/attachments/:attachmentId', async (c) =>
   if (!PO_META_STATUSES.has(status)) return c.json({ error: 'invalid status' }, 400);
 
   const sql = getDb(c.env);
-  const existing = (await sql`SELECT user_id, lifecycle FROM orders WHERE id = ${id} LIMIT 1`)[0] as
-    | { user_id: string; lifecycle: string } | undefined;
+  const existing = await loadOrderAccess(sql, id);
   if (!existing) return c.json({ error: 'Not found' }, 404);
   if (!canWriteMeta(u, status, existing)) return c.json({ error: 'Forbidden' }, 403);
 
@@ -2783,15 +2735,15 @@ async function loadPhotoTarget(
   sql: ReturnType<typeof getDb>,
   orderId: string,
   lineId: string,
-): Promise<{ user_id: string; lifecycle: string } | null> {
+): Promise<OrderAccess | null> {
   if (!UUID_RE.test(lineId)) return null;
-  const order = (await sql`SELECT user_id, lifecycle FROM orders WHERE id = ${orderId} LIMIT 1`)[0] as
-    | { user_id: string; lifecycle: string } | undefined;
-  if (!order) return null;
-  const line = (await sql`
-    SELECT 1 FROM order_lines WHERE id = ${lineId}::uuid AND order_id = ${orderId} LIMIT 1
-  `)[0];
-  return line ? order : null;
+  const row = (await sql`
+    SELECT o.user_id, o.lifecycle,
+           EXISTS (SELECT 1 FROM order_lines ol
+                   WHERE ol.id = ${lineId}::uuid AND ol.order_id = o.id) AS has_line
+    FROM orders o WHERE o.id = ${orderId} LIMIT 1
+  `)[0] as (OrderAccess & { has_line: boolean }) | undefined;
+  return row?.has_line ? { user_id: row.user_id, lifecycle: row.lifecycle } : null;
 }
 
 orders.post('/:id/lines/:lineId/photos', async (c) => {
@@ -3005,7 +2957,7 @@ orders.post('/:id/advance', async (c) => {
 // One response per refusal, shared by /advance and /handoff so a rule reads
 // the same whichever door the order came through.
 function advanceRefusedResponse(
-  c: Context<{ Bindings: Env; Variables: { user: User } }>,
+  c: OrderCtx,
   outcome: Exclude<Awaited<ReturnType<typeof advanceOrderTx>>, { kind: 'ok' }>,
   pullError: string | null = null,
 ) {
@@ -3125,9 +3077,7 @@ orders.post('/:id/handoff', async (c) => {
   if (body.payment === 'self') paymentMethod = null;
   let paypalTxnId: string | null | undefined;
   if (body.paypalTxnId !== undefined) {
-    paypalTxnId = typeof body.paypalTxnId === 'string'
-      ? body.paypalTxnId.replace(/\s+/g, '').toUpperCase() || null
-      : null;
+    paypalTxnId = normPaypalTxnId(body.paypalTxnId);
     if (paypalTxnId && paypalTxnId.length > 64) {
       return c.json({ error: 'PayPal transaction ID is too long' }, 400);
     }
@@ -3162,14 +3112,9 @@ orders.post('/:id/handoff', async (c) => {
   if (body.commissionRate !== undefined && u.role !== 'manager') {
     return c.json({ error: 'Only managers can set the commission rate' }, 403);
   }
-  if (body.commissionRate !== undefined && body.commissionRate !== null
-      && !Number.isFinite(Number(body.commissionRate))) {
-    return c.json({ error: 'commissionRate must be a number or null' }, 400);
-  }
-  const commissionRate =
-    body.commissionRate === undefined ? undefined
-    : body.commissionRate === null ? null
-    : Math.min(1, Math.max(0, Number(body.commissionRate)));
+  const rate = parseCommissionRate(body.commissionRate);
+  if ('error' in rate) return c.json({ error: rate.error }, 400);
+  const commissionRate = rate.rate;
   if (body.onBehalfOfUserId !== undefined && u.role !== 'manager') {
     return c.json({ error: 'Only managers can change the order owner' }, 403);
   }
