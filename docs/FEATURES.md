@@ -978,6 +978,19 @@ inventory search, sell-order draft creation.
   and the human re-shot the same label. Only timeouts retry; an error from the
   model still fails immediately. Every attempt on one scan shares a single
   45-second budget, so a scan cannot spend two full timeouts on the model.
+- **Scan a whole sheet of RAM at once** (v1.178.0, RS-109). **New order →
+  Scan RAM sheet** takes one flatbed page of sticks, either from the office
+  Canon through the local scanner bridge (`auto_ram_scanner`, loopback
+  `127.0.0.1:47811`) or from an uploaded image.
+  - The page is split into one crop per stick in the browser
+    (`segmentRamSheet` in `@recycle-erp/shared`), and each crop goes through the
+    same `/api/scan/label` RAM pipeline as a single photo.
+  - The dialog shows the page with numbered outlines, and each stick with its
+    fields, confidence and whatever is still missing. Sticks lying against each
+    other are flagged rather than silently read as one.
+  - Purchasers set qty and cost, with an apply-to-all cost. Identical part
+    numbers combine into one line. The lines arrive unconfirmed, with their
+    scan image, so the usual blockers name anything the label couldn't supply.
 
 > Provider selection is silent: OpenRouter (Gemma 3 27B) when
 > `OPENROUTER_API_KEY` is set, otherwise a deterministic stub. A prod deploy

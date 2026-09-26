@@ -17,6 +17,27 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.178.0] - 2026-09-26
+
+### Added
+
+- **Scan RAM sheet: one flatbed scan becomes one PO line per stick** (RS-109).
+  Reading RAM labels meant one photo per stick. The new-order page now has a
+  **Scan RAM sheet** button. It pulls a page from the office Canon MF460 II
+  through a small local bridge (the separate `auto_ram_scanner` repo, since the
+  cloud backend can't reach the office LAN), or takes an uploaded scan image.
+  - A pure segmenter in `@recycle-erp/shared` (`segmentRamSheet`) finds each
+    stick on the page. It skips dust and the scanner's lid-edge lines,
+    re-joins a stick that a full-width label would cut in two, and flags
+    touching sticks. Sticks come back in reading order, turned upright.
+  - Each crop goes through the existing `/api/scan/label` RAM pipeline, three at
+    a time, and waits out the per-user rate limit instead of failing.
+  - Purchasers review each stick with its thumbnail and AI read, set qty and
+    cost, optionally combine identical part numbers, and add the lines in one
+    step.
+  - There is no new backend route. The segmenter is pinned by tests against
+    the real sample scan and a live 300 dpi scan.
+
 ## [1.177.4] - 2026-09-26
 
 ### Changed

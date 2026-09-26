@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-108](./RS-108-behaviour-preserving-cleanup-across-the-repo.md) | done | chore | P2 | Behaviour-preserving cleanup across the repo | — |
+| [RS-109](./RS-109-scan-a-sheet-of-ram-sticks-on-the-flatbed-and-add-on.md) | done | story | P2 | Scan a sheet of RAM sticks on the flatbed and add one line per stick | 1.178.0 |
+| [RS-108](./RS-108-behaviour-preserving-cleanup-across-the-repo.md) | done | chore | P2 | Behaviour-preserving cleanup across the repo | 1.177.4 |
 | [RS-107](./RS-107-manager-only-data-is-absent-from-every-non-manager-a.md) | done | bug | P2 | Manager-only data is absent from every non-manager API response | 1.177.2 |
 | [RS-106](./RS-106-manager-only-po-fields-are-absent-not-null-for-purch.md) | done | bug | P2 | Manager-only PO fields are absent, not null, for purchasers | 1.177.1 |
 | [RS-105](./RS-105-ignore-rules-for-bank-transactions.md) | done | story | P2 | Ignore rules for bank transactions | 1.177.0 |
