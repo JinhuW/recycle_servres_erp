@@ -7,7 +7,7 @@ priority: P1
 created: 2026-09-26
 reporter: jinhu
 branch: feat/ram-sheet-scan-progress
-pr:
+pr: "#415"
 version: 1.180.0
 related: [RS-109]
 ---
