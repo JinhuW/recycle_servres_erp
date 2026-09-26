@@ -17,6 +17,33 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.180.0] - 2026-09-26
+
+### Fixed
+
+- **Scan from printer did nothing when clicked** (RS-114). The Scan RAM sheet
+  dialog put its **Scan from printer** and **Upload scan image** buttons inside
+  an `.ai-dropzone`. That class makes its children `pointer-events: none`, so a
+  real mouse click landed on the box around them. The RS-109 smoke clicked
+  through JavaScript, which ignores that, so it passed. The buttons now sit in
+  their own row, and drag-and-drop moved to the whole dialog.
+
+### Changed
+
+- **Scan from printer shows its work while it runs** (RS-114).
+  - A step row (Connect → Scan page → Find sticks → Read labels) shows where it
+    is. While the printer scans, the page sweeps and the dialog shows elapsed
+    seconds and an estimate bar. Each stick's outline pulses while the AI reads
+    its label, and its row fills in from a placeholder.
+  - **Cancel scan** stops the printer. The bridge in `auto_ram_scanner` now
+    deletes the job when the page drops the request.
+  - Failures show a card that says what to do: bridge not running, printer
+    asleep, scanner busy.
+  - The button re-checks the bridge on click instead of trusting the check made
+    when the dialog opened. A stopped bridge is re-checked every 5 s, so starting
+    it turns the chip green on its own.
+  - Clicking a stick's picture, or its box on the page, opens it full size.
+
 ## [1.179.0] - 2026-09-26
 
 ### Changed
