@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-120](./RS-120-desk-scanner-uploads-the-whole-frame-instead-of-just.md) | in-progress | bug | P1 | Desk scanner crops the RAM stick out of the camera frame | — |
+| [RS-120](./RS-120-desk-scanner-uploads-the-whole-frame-instead-of-just.md) | done | bug | P1 | Desk scanner crops the RAM stick out of the camera frame | 1.184.1 |
 | [RS-119](./RS-119-desk-scanner-continuity-camera-auto-captures-a-ram-l.md) | done | story | P2 | Desk scanner: Continuity Camera auto-captures a RAM label into the line drawer | 1.184.0 |
 | [RS-117](./RS-117-new-po-items-table-shows-the-scanned-label-photo-cli.md) | in-review | story | P2 | New PO items table shows the scanned label photo, click to zoom | 1.183.0 |
 | [RS-116](./RS-116-scanned-ram-lines-auto-save-to-the-po-like-confirmed.md) | done | bug | P1 | Scanned RAM lines auto-save to the PO like confirmed lines, and scans run at the scanner's highest resolution | 1.182.0 |

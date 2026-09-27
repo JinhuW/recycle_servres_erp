@@ -2,13 +2,13 @@
 id: RS-120
 title: Desk scanner crops the RAM stick out of the camera frame
 type: bug
-status: in-progress
+status: done
 priority: P1
 created: 2026-09-27
 reporter: jinhu
 branch: fix/desk-scanner-box
-pr:
-version:
+pr: "#420"
+version: 1.184.1
 related: [RS-119, RS-109]
 ---
 
@@ -35,11 +35,11 @@ hand too. The PCB's green is what tells a stick apart from a desk.
 
 ## Acceptance criteria
 
-- [ ] A capture finds the green PCB anywhere in the frame and uploads a crop of
+- [x] A capture finds the green PCB anywhere in the frame and uploads a crop of
       just the stick, padded so the gold fingers and label edges survive.
-- [ ] A portrait stick is turned so its label reads left-to-right.
-- [ ] A label spanning the stick's full height doesn't split it into two crops.
-- [ ] No green stick found (other PCB colours, a steeply tilted stick) → the
+- [x] A portrait stick is turned so its label reads left-to-right.
+- [x] A label spanning the stick's full height doesn't split it into two crops.
+- [x] No green stick found (other PCB colours, a steeply tilted stick) → the
       full frame is uploaded, as before.
 
 ## Out of scope
