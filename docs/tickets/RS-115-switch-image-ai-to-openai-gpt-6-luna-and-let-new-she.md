@@ -7,7 +7,7 @@ priority: P2
 created: 2026-09-26
 reporter: jinhu
 branch: feat/openai-image-ai-and-append-scans
-pr:
+pr: "#416"
 version: 1.181.0
 related: [RS-109, RS-114]
 ---
