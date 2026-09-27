@@ -140,6 +140,112 @@ export function padSheetBox(
   };
 }
 
+// ── One stick in a desk-camera frame ────────────────────────────────────────
+//
+// The desk scanner (RS-119) sees a stick on whatever is on the desk — cloth,
+// wood, a hand — so "not paper" marks everything. What sets a stick apart
+// there is the PCB's green: wood and skin sit at 10–40° hue, dark cloth has no
+// value, paper no saturation. Gold fingers (~50°) and the white label fall
+// outside the mask; the close fills the label and padStickBox brings the
+// fingers back.
+const PCB_MIN_HUE = 70;
+const PCB_MAX_HUE = 170;
+const PCB_MIN_SATURATION = 0.2;
+const PCB_MIN_VALUE = 40;
+const PHOTO_CLOSE_FRACTION = 0.015;
+const PHOTO_MIN_AREA_FRACTION = 0.003;
+// A DIMM is ~4.3:1, a SODIMM ~2.3:1; anything squarer isn't a stick lying
+// flat (or is tilted too far for an axis-aligned crop to be worth it).
+const PHOTO_MIN_ASPECT = 1.8;
+// A sheet packs sticks a few mm apart, so it only rejoins halves across a
+// narrow gap. On a desk there's one stick, and a DIMM label is often wider
+// than the stick is tall — the gap it leaves in the green can be 1.5× that.
+const PHOTO_MERGE_MAX_GAP_OF_SHORT = 1.5;
+
+/**
+ * The largest green-PCB stick in a camera frame, in fractions of the frame,
+ * or null when there's none (non-green PCB, steep tilt, nothing there).
+ * Downsample to about SEGMENT_TARGET_LONG_SIDE first, like segmentRamSheet.
+ */
+export function findRamStickInPhoto(img: RasterImage): SheetBox | null {
+  const { width: w, height: h } = img;
+  if (w < 8 || h < 8) return null;
+  const short = Math.min(w, h);
+
+  const r = Math.max(1, Math.round(short * PHOTO_CLOSE_FRACTION));
+  const mask = erode(dilate(buildPcbMask(img), w, h, r), w, h, r);
+  const minArea = PHOTO_MIN_AREA_FRACTION * w * h;
+  // A label as tall as the stick cuts its green rims in two; the sheet's
+  // merge rule rejoins halves that line up along the long axis.
+  const boxes = mergeAligned(
+    components(mask, w, h).filter((c) => c.area >= minArea),
+    PHOTO_MERGE_MAX_GAP_OF_SHORT,
+  )
+    .filter((b) => {
+      const bw = b.x1 - b.x0;
+      const bh = b.y1 - b.y0;
+      return area(b) >= minArea && Math.max(bw, bh) / Math.min(bw, bh) >= PHOTO_MIN_ASPECT;
+    });
+  if (!boxes.length) return null;
+
+  const b = boxes.reduce((best, c) => (area(c) > area(best) ? c : best));
+  const bw = b.x1 - b.x0;
+  const bh = b.y1 - b.y0;
+  return {
+    x: b.x0 / w,
+    y: b.y0 / h,
+    w: bw / w,
+    h: bh / h,
+    rotate: bh > bw ? 90 : 0,
+    maybeMerged: false,
+  };
+}
+
+/**
+ * Pads a photo stick box by the larger of 4% of the frame's short side and a
+ * quarter of the stick's own thickness, clamped to the frame. The mask stops
+ * at the green, and the gold fingers below it are ~12% of the stick's height —
+ * a frame-relative pad alone cuts them when the stick fills the frame.
+ */
+export function padStickBox(box: SheetBox, frameWidth: number, frameHeight: number): SheetBox {
+  const stickShortPx = Math.min(box.w * frameWidth, box.h * frameHeight);
+  const padPx = Math.max(0.04 * Math.min(frameWidth, frameHeight), 0.25 * stickShortPx);
+  const px = padPx / frameWidth;
+  const py = padPx / frameHeight;
+  const x = Math.max(0, box.x - px);
+  const y = Math.max(0, box.y - py);
+  return {
+    ...box,
+    x,
+    y,
+    w: Math.min(1, box.x + box.w + px) - x,
+    h: Math.min(1, box.y + box.h + py) - y,
+  };
+}
+
+function buildPcbMask(img: RasterImage): Uint8Array {
+  const { data, width: w, height: h } = img;
+  const ch = img.channels ?? 4;
+  const mask = new Uint8Array(w * h);
+  for (let i = 0, p = 0; i < w * h; i++, p += ch) {
+    const r = data[p];
+    const g = data[p + 1];
+    const b = data[p + 2];
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    if (max < PCB_MIN_VALUE || max === min) continue;
+    if ((max - min) / max < PCB_MIN_SATURATION) continue;
+    const d = max - min;
+    let hue: number;
+    if (max === r) hue = 60 * (((g - b) / d) % 6);
+    else if (max === g) hue = 60 * ((b - r) / d + 2);
+    else hue = 60 * ((r - g) / d + 4);
+    if (hue < 0) hue += 360;
+    if (hue >= PCB_MIN_HUE && hue <= PCB_MAX_HUE) mask[i] = 1;
+  }
+  return mask;
+}
+
 function buildMask(img: RasterImage): Uint8Array {
   const { data, width: w, height: h } = img;
   const ch = img.channels ?? 4;
@@ -252,14 +358,14 @@ function components(
   return out;
 }
 
-function mergeAligned(input: PxBox[]): PxBox[] {
+function mergeAligned(input: PxBox[], maxGapOfShort = MERGE_MAX_GAP_OF_SHORT): PxBox[] {
   const boxes = input.map((b) => ({ ...b }));
   let merged = true;
   while (merged) {
     merged = false;
     outer: for (let i = 0; i < boxes.length; i++) {
       for (let j = i + 1; j < boxes.length; j++) {
-        if (shouldMerge(boxes[i], boxes[j])) {
+        if (shouldMerge(boxes[i], boxes[j], maxGapOfShort)) {
           const a = boxes[i];
           const b = boxes[j];
           boxes[i] = {
@@ -278,7 +384,7 @@ function mergeAligned(input: PxBox[]): PxBox[] {
   return boxes;
 }
 
-function shouldMerge(a: PxBox, b: PxBox): boolean {
+function shouldMerge(a: PxBox, b: PxBox, maxGapOfShort: number): boolean {
   const ox = overlap(a.x0, a.x1, b.x0, b.x1);
   const oy = overlap(a.y0, a.y1, b.y0, b.y1);
   if (ox > 0 && oy > 0) return true; // boxes intersect
@@ -287,7 +393,7 @@ function shouldMerge(a: PxBox, b: PxBox): boolean {
   const vGap = Math.max(a.y0, b.y0) - Math.min(a.y1, b.y1);
   if (
     ox / Math.min(a.x1 - a.x0, b.x1 - b.x0) > MERGE_MIN_OVERLAP &&
-    vGap < minShort * MERGE_MAX_GAP_OF_SHORT
+    vGap < minShort * maxGapOfShort
   ) {
     return true;
   }
@@ -295,7 +401,7 @@ function shouldMerge(a: PxBox, b: PxBox): boolean {
   const hGap = Math.max(a.x0, b.x0) - Math.min(a.x1, b.x1);
   return (
     oy / Math.min(a.y1 - a.y0, b.y1 - b.y0) > MERGE_MIN_OVERLAP &&
-    hGap < minShort * MERGE_MAX_GAP_OF_SHORT &&
+    hGap < minShort * maxGapOfShort &&
     // Only when both halves are thin in the direction of travel — two
     // portrait sticks lying side by side must stay separate.
     a.y1 - a.y0 < a.x1 - a.x0 &&

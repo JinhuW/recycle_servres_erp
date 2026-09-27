@@ -17,6 +17,24 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.184.1] - 2026-09-27
+
+### Fixed
+
+- **The desk scanner sends just the RAM stick, not the whole desk** (RS-120).
+  The first real Continuity Camera run uploaded the full frame: a small stick
+  surrounded by cloth, a wooden desk, paper and a hand.
+  - A capture now finds the stick by its green PCB anywhere in the frame
+    (`findRamStickInPhoto`, next to the sheet segmenter). It crops just the
+    stick, padded by a quarter of the stick's thickness so the gold fingers and
+    label edges survive, and turns a vertical stick upright.
+  - A label spanning the stick's full height no longer splits it in two: the
+    sheet's merge rule takes a wider gap for the one-stick photo case.
+  - No green stick found (other PCB colours, a steeply tilted stick) → the full
+    frame goes up, as before.
+  - The sheet flow's crop-and-rotate moved into a shared `cropToBox`; its
+    behaviour is unchanged.
+
 ## [1.184.0] - 2026-09-27
 
 ### Added

@@ -1048,6 +1048,12 @@ inventory search, sell-order draft creation.
     needs the scene to change (stick lifted, or a new one). Captures are at
     least 3 s apart. So a failed scan never loops on the same frame and burns
     the 20/min scan limit.
+  - **Only the stick is sent** (v1.184.1, RS-120). The captured frame is
+    searched for the green PCB (`findRamStickInPhoto` in
+    `@recycle-erp/shared`), and just the stick — padded so the gold fingers
+    survive, turned upright if it lies vertically — is scanned and becomes the
+    line's scan photo. Desk, cloth and hands are left out. A non-green PCB or a
+    steeply tilted stick isn't found, and the whole frame goes up instead.
   - A readable scan closes the camera, so swapping sticks can't overwrite the
     line; an unreadable one leaves it open to re-seat the stick. Brand-confirm
     **Retake** reopens the camera when the scan came from it.

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { findRamStickInPhoto, padStickBox, SEGMENT_TARGET_LONG_SIDE } from '@recycle-erp/shared';
 import { Icon } from '../../../components/Icon';
 import { compressForUpload } from '../../../lib/image-compress';
+import { cropToBox } from '../../../lib/sheetImage';
 import {
   SAMPLE_INTERVAL_MS, analyzeFrame, initialAutoCapture, pickCamera, stepAutoCapture,
   type AutoCaptureState, type CameraDevice,
@@ -148,7 +150,24 @@ export function DeskCamera({ busy, onCapture, onClose }: {
     setFlash(true);
     window.setTimeout(() => setFlash(false), 180);
     beep();
-    const raw = await new Promise<Blob | null>(res => canvas.toBlob(b => res(b), 'image/jpeg', 0.92));
+    // Send just the stick, found by its green PCB anywhere in the frame. Crop
+    // the frame just drawn, not the <video>, so the crop matches what was
+    // segmented. No green stick (other PCB colours, steep tilt) → whole frame.
+    const w = canvas.width;
+    const h = canvas.height;
+    const k = Math.min(1, SEGMENT_TARGET_LONG_SIDE / Math.max(w, h));
+    const small = document.createElement('canvas');
+    small.width = Math.max(1, Math.round(w * k));
+    small.height = Math.max(1, Math.round(h * k));
+    const sctx = small.getContext('2d', { willReadFrequently: true });
+    let out = canvas;
+    if (sctx) {
+      sctx.drawImage(canvas, 0, 0, small.width, small.height);
+      const img = sctx.getImageData(0, 0, small.width, small.height);
+      const stick = findRamStickInPhoto({ data: img.data, width: img.width, height: img.height });
+      if (stick) out = cropToBox(canvas, w, h, padStickBox(stick, w, h));
+    }
+    const raw = await new Promise<Blob | null>(res => out.toBlob(b => res(b), 'image/jpeg', 0.92));
     if (!raw) return;
     const blob = await compressForUpload(raw);
     onCaptureRef.current(new File([blob], 'desk-scan.jpg', { type: blob.type || 'image/jpeg' }));

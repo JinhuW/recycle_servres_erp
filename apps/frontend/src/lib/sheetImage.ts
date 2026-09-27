@@ -37,29 +37,42 @@ export async function splitSheet(file: Blob): Promise<SplitSheet> {
 
     const crops: SheetCrop[] = [];
     for (const box of boxes) {
-      const b = padSheetBox(box, width, height);
-      const sx = Math.round(b.x * width);
-      const sy = Math.round(b.y * height);
-      const sw = Math.round(b.w * width);
-      const sh = Math.round(b.h * height);
-      const k = Math.min(1, MAX_CROP_LONG_SIDE / Math.max(sw, sh));
-      const dw = Math.round(sw * k);
-      const dh = Math.round(sh * k);
-      const turned = box.rotate === 90;
-      const c = canvas(turned ? dh : dw, turned ? dw : dh);
-      const ctx = c.getContext('2d')!;
-      if (turned) {
-        // Clockwise quarter turn: source (x, y) lands at (dh - y, x).
-        ctx.translate(dh, 0);
-        ctx.rotate(Math.PI / 2);
-      }
-      ctx.drawImage(bmp, sx, sy, sw, sh, 0, 0, dw, dh);
+      const c = cropToBox(bmp, width, height, padSheetBox(box, width, height));
       crops.push({ box, blob: await toJpeg(c) });
     }
     return { crops, width, height };
   } finally {
     bmp.close();
   }
+}
+
+// Cuts an already-padded box out of `source` (width × height px) onto a new
+// canvas, upright: a `rotate: 90` box is turned clockwise so its label reads
+// left to right.
+export function cropToBox(
+  source: CanvasImageSource,
+  width: number,
+  height: number,
+  b: SheetBox,
+  maxLongSide = MAX_CROP_LONG_SIDE,
+): HTMLCanvasElement {
+  const sx = Math.round(b.x * width);
+  const sy = Math.round(b.y * height);
+  const sw = Math.round(b.w * width);
+  const sh = Math.round(b.h * height);
+  const k = Math.min(1, maxLongSide / Math.max(sw, sh));
+  const dw = Math.round(sw * k);
+  const dh = Math.round(sh * k);
+  const turned = b.rotate === 90;
+  const c = canvas(turned ? dh : dw, turned ? dw : dh);
+  const ctx = c.getContext('2d')!;
+  if (turned) {
+    // Clockwise quarter turn: source (x, y) lands at (dh - y, x).
+    ctx.translate(dh, 0);
+    ctx.rotate(Math.PI / 2);
+  }
+  ctx.drawImage(source, sx, sy, sw, sh, 0, 0, dw, dh);
+  return c;
 }
 
 function canvas(w: number, h: number): HTMLCanvasElement {
