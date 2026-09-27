@@ -17,6 +17,18 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.183.0] - 2026-09-26
+
+### Added
+
+- **The new-order items table shows each line's label photo** (RS-117). A
+  scanned line's crop (or its first saved photo, with `+N` for more) sits as a
+  40px thumbnail after the item name, as it already does on Edit order.
+  Clicking it opens the full-screen viewer without selecting the row, so a
+  purchaser can check a Scan RAM sheet row against its sticker at a glance.
+  Rows the label couldn't fill still show it; rows without a photo are
+  unchanged.
+
 ## [1.182.0] - 2026-09-26
 
 ### Fixed
