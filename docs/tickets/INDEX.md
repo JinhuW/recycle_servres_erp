@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-116](./RS-116-scanned-ram-lines-auto-save-to-the-po-like-confirmed.md) | done | bug | P1 | Scanned RAM lines auto-save to the PO like confirmed lines, and scans run at the scanner's highest resolution | 1.182.0 |
 | [RS-115](./RS-115-switch-image-ai-to-openai-gpt-6-luna-and-let-new-she.md) | done | story | P2 | Switch image AI to OpenAI gpt-6-luna, and let new sheet scans append to the table | 1.181.0 |
 | [RS-114](./RS-114-scan-from-printer-does-nothing-on-click-and-shows-no.md) | done | bug | P1 | Scan from printer does nothing on click, and shows no progress while it works | 1.180.0 |
 | [RS-113](./RS-113-set-each-purchaser-s-home-warehouse-to-the-closest-w.md) | done | task | P2 | Set each purchaser's home warehouse to the closest warehouse | 1.178.1 |

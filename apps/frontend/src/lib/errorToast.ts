@@ -48,6 +48,16 @@ export function showWarnToast(msg: string): void {
   }
 }
 
+// Something worked and the user should know where it went (e.g. "Saved 3
+// lines to PO-1402"). Clears itself.
+export function showSuccessToast(msg: string): void {
+  if (typeof window !== 'undefined' && typeof window.__showToast === 'function') {
+    window.__showToast(msg, 'success');
+  } else {
+    console.info('[success]', msg);
+  }
+}
+
 // Reporting budget for one page load. A component that throws on every render
 // would otherwise post as fast as it can paint, and the code that would throttle
 // it is the code that just proved it was broken.

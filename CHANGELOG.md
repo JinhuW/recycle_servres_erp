@@ -17,6 +17,33 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.182.0] - 2026-09-26
+
+### Fixed
+
+- **Scanned RAM sticks now save to the PO like confirmed lines** (RS-116).
+  Adding sticks from Scan RAM sheet only put them on the page, so nothing
+  reached the PO until Submit, and leaving the page lost them.
+  - **Save on Add.** Every scanned stick that passes the same rule as Confirm is
+    saved straight away, all in one save. That rule is now one shared function:
+    required fields including qty and cost, brand confirmation, and DDR5
+    serials. The first save creates the draft PO.
+  - **Unfinished sticks stay on the page**, marked **Not saved**. A message says
+    how many were saved and what the rest still need, serial numbers included.
+    Saved lines show **Saved**.
+  - **Deleting a saved line now removes it from the PO.** Before, the trash icon
+    only hid it on the page; that was already true for hand-confirmed lines.
+  - **Saves are serialised.** A Confirm, a second scan or a Submit that starts
+    while an auto-save is running waits for it, so there is never a second PO or
+    duplicate rows. Submit says "still saving" until the save finishes.
+
+### Changed
+
+- **The scan dialog shows the resolution actually used.** The scanner bridge
+  (`auto_ram_scanner` 0.2.0) now scans at the scanner's highest flatbed
+  resolution, read from its eSCL capabilities and capped by `MAX_SCAN_DPI`
+  (300 dpi on the office MF460 II), and reports it on `/health`.
+
 ## [1.181.0] - 2026-09-26
 
 ### Changed

@@ -1,5 +1,7 @@
 import type { Category, ScanResponse } from '../../../lib/types';
 import type { LinePhoto } from '../../../lib/linePhotos';
+import { serialIssue } from '@recycle-erp/shared';
+import { lineRequirements } from '../../../lib/lineRequirements';
 import { ramBrandNeedsConfirm } from '../../../lib/scanValidation';
 
 type Translate = (key: string, vars?: Record<string, string | number>) => string;
@@ -161,4 +163,22 @@ export function lineBlockerMessages<L extends Line>(
     }
     return [lines.length === 1 ? t('subFillThisLine') : t('subFillLineN', { n: i + 1 })];
   });
+}
+
+/** Why a line can't be saved to the PO yet. */
+export type SaveBlock = 'brand' | 'fields' | 'serials';
+
+/**
+ * The one rule for "can this line go onto the PO now", in the order Confirm
+ * checks it: a brand the AI couldn't name, then required fields (qty and cost
+ * included), then the serial rules the server also enforces (DDR5 needs
+ * serials; a serial count must match qty). Confirm and the Scan RAM sheet
+ * auto-save both ask this, so a scanned line saves exactly when a hand-entered
+ * one would. Null = saveable.
+ */
+export function lineSaveBlock(l: Line): SaveBlock | null {
+  if (brandConfirmPending(l)) return 'brand';
+  if (!lineRequirements(l).ready) return 'fields';
+  if (serialIssue(l)) return 'serials';
+  return null;
 }

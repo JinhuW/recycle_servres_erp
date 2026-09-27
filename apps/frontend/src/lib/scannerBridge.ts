@@ -10,6 +10,8 @@ export const BRIDGE_URL = 'http://127.0.0.1:47811';
 export type BridgeHealth = {
   ok: boolean;
   version: string;
+  /** The resolution the next scan uses; null until the bridge has read it. */
+  dpi?: number | null;
   scanner: { url: string; state?: string; error?: string };
 };
 
@@ -41,7 +43,9 @@ export class BridgeError extends Error {
 }
 
 /**
- * Scans one flatbed page through the bridge. A 300 dpi page takes ~10 s.
+ * Scans one flatbed page through the bridge, at the scanner's highest flatbed
+ * resolution (the bridge reads it from the scanner). A 300 dpi letter page
+ * takes ~10 s on the office MF460 II.
  * Aborting `signal` cancels it: the bridge sees the request go away and
  * deletes the printer's job.
  */
