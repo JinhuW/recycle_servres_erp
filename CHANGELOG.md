@@ -17,6 +17,24 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.185.0] - 2026-09-27
+
+### Changed
+
+- **The desk camera's box follows the RAM stick** (RS-121). It was a fixed
+  centre crop, so a stick placed off-centre or longer than the box ran past it,
+  and focus and stillness were judged mostly on the paper around it.
+  - The box now snaps around the stick found by its green PCB and glides with
+    it (solid border). With no stick found it falls back to a wide dashed box.
+  - Focus and stillness are judged inside that box, at native resolution — the
+    same stick the capture crops and sends.
+  - Detection jitter on a still stick doesn't move the box (2 % hysteresis),
+    and a missed detection or two doesn't make it flicker (~2 s grace).
+  - Moving the stick or swapping in the next one reads as motion, which is
+    what re-arms the trigger for another scan.
+  - Detection runs every other sample to keep each 1920×1440 sample tick
+    around 10–20 ms.
+
 ## [1.184.1] - 2026-09-27
 
 ### Fixed

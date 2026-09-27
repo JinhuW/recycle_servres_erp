@@ -1039,11 +1039,15 @@ inventory search, sell-order draft creation.
     iPhone camera is picked by itself (its separate Desk View device is
     skipped); another can be chosen, and the choice is remembered by device
     label (`scan.cameraLabel`).
-  - **No click to capture.** Four times a second the browser checks a
-    native-resolution centre crop (outlined on the feed): text-like edges in
-    view, nothing moving, and focus at its peak. Three such samples in a row
-    (~¾ s) capture one full-resolution frame, flash, beep, and scan it through
-    the same path as a dropped photo (`lib/deskScan.ts`).
+  - **The box follows the stick** (v1.185.0, RS-121). It snaps around the
+    stick found by its green PCB and glides with it (solid border); with no
+    stick found it's a wide dashed default box. Small detection jitter doesn't
+    move it, and a missed detection or two doesn't make it flicker.
+  - **No click to capture.** Four times a second the browser checks the inside
+    of the box at native resolution: text-like edges in view, nothing moving,
+    and focus at its peak. Three such samples in a row (~¾ s) capture one
+    full-resolution frame, flash, beep, and scan it through the same path as a
+    dropped photo (`lib/deskScan.ts`).
   - **One scan per placement.** A still scene fires once; the next capture
     needs the scene to change (stick lifted, or a new one). Captures are at
     least 3 s apart. So a failed scan never loops on the same frame and burns

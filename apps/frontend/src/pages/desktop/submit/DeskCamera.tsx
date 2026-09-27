@@ -1,23 +1,41 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { findRamStickInPhoto, padStickBox, SEGMENT_TARGET_LONG_SIDE } from '@recycle-erp/shared';
+import {
+  findRamStickInPhoto, padStickBox, SEGMENT_TARGET_LONG_SIDE, type SheetBox,
+} from '@recycle-erp/shared';
 import { Icon } from '../../../components/Icon';
 import { compressForUpload } from '../../../lib/image-compress';
 import { cropToBox } from '../../../lib/sheetImage';
 import {
-  SAMPLE_INTERVAL_MS, analyzeFrame, initialAutoCapture, pickCamera, stepAutoCapture,
-  type AutoCaptureState, type CameraDevice,
+  SAMPLE_INTERVAL_MS, analyzeFrame, initialAutoCapture, initialBoxTrack, pickCamera, sampleRect,
+  stepAutoCapture, trackBox,
+  type AutoCaptureState, type BoxTrack, type CameraDevice, type FrameBox,
 } from '../../../lib/deskScan';
 import { useT } from '../../../lib/i18n';
 import { usePreference } from '../../../lib/preferences';
 
-// Largest centre crop the sampler reads, in native video pixels. Native, not
-// downscaled: scaling a frame down hides exactly the defocus the sharpness
-// gate is there to catch.
-const CROP_W = 960;
-const CROP_H = 540;
 // The preference validator caps strings at 64; a longer label would 400 the
 // whole preferences batch, so such a camera just isn't remembered.
 const MAX_LABEL = 64;
+
+// The green-PCB stick in a w×h source, padded so the gold fingers survive, or
+// null. Detection runs on an ~800-px copy drawn into `scratch`.
+function detectStick(
+  src: CanvasImageSource, w: number, h: number, scratch: HTMLCanvasElement,
+): SheetBox | null {
+  const k = Math.min(1, SEGMENT_TARGET_LONG_SIDE / Math.max(w, h));
+  const dw = Math.max(1, Math.round(w * k));
+  const dh = Math.max(1, Math.round(h * k));
+  if (scratch.width !== dw || scratch.height !== dh) {
+    scratch.width = dw;
+    scratch.height = dh;
+  }
+  const ctx = scratch.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return null;
+  ctx.drawImage(src, 0, 0, dw, dh);
+  const img = ctx.getImageData(0, 0, dw, dh);
+  const stick = findRamStickInPhoto({ data: img.data, width: dw, height: dh });
+  return stick ? padStickBox(stick, w, h) : null;
+}
 
 // Live camera for the line drawer's label scan — meant for an iPhone mounted
 // over the desk as the Mac's Continuity Camera. Watches the feed and, once a
@@ -38,6 +56,12 @@ export function DeskCamera({ busy, onCapture, onClose }: {
   const [progress, setProgress] = useState(0);
   const [flash, setFlash] = useState(false);
   const [frame, setFrame] = useState<{ w: number; h: number } | null>(null);
+  // The box on screen: the tracked stick, or the default when none is found.
+  const [shown, setShown] = useState<{ box: FrameBox; locked: boolean }>(() => {
+    const t = initialBoxTrack();
+    return { box: t.box, locked: t.locked };
+  });
+  const trackRef = useRef<BoxTrack>(initialBoxTrack());
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const onCaptureRef = useRef(onCapture);
   onCaptureRef.current = onCapture;
@@ -150,23 +174,18 @@ export function DeskCamera({ busy, onCapture, onClose }: {
     setFlash(true);
     window.setTimeout(() => setFlash(false), 180);
     beep();
-    // Send just the stick, found by its green PCB anywhere in the frame. Crop
-    // the frame just drawn, not the <video>, so the crop matches what was
-    // segmented. No green stick (other PCB colours, steep tilt) → whole frame.
+    // Send just the stick. Detect afresh on this exact frame — the tracked box
+    // can trail a stick that just settled by up to BOX_JITTER, enough to clip
+    // the gold fingers — then fall back to the tracked box, then the whole
+    // frame (a non-green PCB, a steep tilt).
     const w = canvas.width;
     const h = canvas.height;
-    const k = Math.min(1, SEGMENT_TARGET_LONG_SIDE / Math.max(w, h));
-    const small = document.createElement('canvas');
-    small.width = Math.max(1, Math.round(w * k));
-    small.height = Math.max(1, Math.round(h * k));
-    const sctx = small.getContext('2d', { willReadFrequently: true });
-    let out = canvas;
-    if (sctx) {
-      sctx.drawImage(canvas, 0, 0, small.width, small.height);
-      const img = sctx.getImageData(0, 0, small.width, small.height);
-      const stick = findRamStickInPhoto({ data: img.data, width: img.width, height: img.height });
-      if (stick) out = cropToBox(canvas, w, h, padStickBox(stick, w, h));
-    }
+    const held = trackRef.current;
+    const stick = detectStick(canvas, w, h, document.createElement('canvas'))
+      ?? (held.locked
+        ? { ...held.box, rotate: held.box.h * h > held.box.w * w ? 90 : 0, maybeMerged: false } as SheetBox
+        : null);
+    const out = stick ? cropToBox(canvas, w, h, stick) : canvas;
     const raw = await new Promise<Blob | null>(res => out.toBlob(b => res(b), 'image/jpeg', 0.92));
     if (!raw) return;
     const blob = await compressForUpload(raw);
@@ -179,25 +198,44 @@ export function DeskCamera({ busy, onCapture, onClose }: {
     if (!stream || busy) return;
     const crop = document.createElement('canvas');
     const ctx = crop.getContext('2d', { willReadFrequently: true });
+    const detect = document.createElement('canvas');
     if (!ctx) return;
+    // Kept across box changes on purpose: a moved or resized sample rect then
+    // reads as motion (a size change as Infinity), which is also what re-arms
+    // the trigger for the next stick. Clearing it would leave a fired trigger
+    // with no motion to re-arm on.
     let prev: Uint8Array | null = null;
+    let tick = 0;
     const id = window.setInterval(() => {
       const v = videoRef.current;
       if (!v || !v.videoWidth) return;
-      const w = Math.min(CROP_W, v.videoWidth);
-      const h = Math.min(CROP_H, v.videoHeight);
-      if (crop.width !== w || crop.height !== h) {
-        crop.width = w;
-        crop.height = h;
-        prev = null;
+      performance.mark('desk-cam-tick');
+      const w = v.videoWidth;
+      const h = v.videoHeight;
+      const before = trackRef.current;
+      // Finding the stick is the costly half of a tick at 1920×1440 (~20 ms),
+      // so it runs every other tick; the held box carries the ones between.
+      const next = tick++ % 2 === 0 ? trackBox(before, detectStick(v, w, h, detect)) : before;
+      trackRef.current = next;
+      if (next.box !== before.box || next.locked !== before.locked) {
+        setShown({ box: next.box, locked: next.locked });
       }
-      ctx.drawImage(v, (v.videoWidth - w) / 2, (v.videoHeight - h) / 2, w, h, 0, 0, w, h);
-      const { gray, sample } = analyzeFrame(ctx.getImageData(0, 0, w, h).data, w, h, prev);
+      const r = sampleRect(next.box, w, h);
+      if (crop.width !== r.w || crop.height !== r.h) {
+        crop.width = r.w;
+        crop.height = r.h;
+      }
+      ctx.drawImage(v, r.x, r.y, r.w, r.h, 0, 0, r.w, r.h);
+      const { gray, sample } = analyzeFrame(ctx.getImageData(0, 0, r.w, r.h).data, r.w, r.h, prev);
       prev = gray;
-      const r = stepAutoCapture(autoRef.current, sample, Date.now());
-      autoRef.current = r.state;
-      setProgress(p => (p === r.progress ? p : r.progress));
-      if (r.fire) void capture(v);
+      const step = stepAutoCapture(autoRef.current, sample, Date.now());
+      autoRef.current = step.state;
+      setProgress(p => (p === step.progress ? p : step.progress));
+      // Keep only the latest, so a long session doesn't fill the buffer.
+      performance.clearMeasures('desk-cam-tick');
+      performance.measure('desk-cam-tick', 'desk-cam-tick');
+      performance.clearMarks('desk-cam-tick');
+      if (step.fire) void capture(v);
     }, SAMPLE_INTERVAL_MS);
     return () => window.clearInterval(id);
   }, [stream, busy, capture]);
@@ -233,16 +271,16 @@ export function DeskCamera({ busy, onCapture, onClose }: {
           </div>
         ) : (
           <>
-            {/* Outlines the centre crop the sampler judges, so the label goes
-                where focus and stillness are actually measured. */}
+            {/* The box follows the stick: it is what the trigger judges and
+                what gets cropped. Dashed while nothing is locked on. */}
             {frame && frame.w > 0 && (
               <div
-                className="desk-cam-corners"
+                className={'desk-cam-corners' + (shown.locked ? ' is-locked' : '')}
                 style={{
-                  left: `${(50 * (1 - Math.min(CROP_W, frame.w) / frame.w)).toFixed(1)}%`,
-                  right: `${(50 * (1 - Math.min(CROP_W, frame.w) / frame.w)).toFixed(1)}%`,
-                  top: `${(50 * (1 - Math.min(CROP_H, frame.h) / frame.h)).toFixed(1)}%`,
-                  bottom: `${(50 * (1 - Math.min(CROP_H, frame.h) / frame.h)).toFixed(1)}%`,
+                  left: `${(shown.box.x * 100).toFixed(2)}%`,
+                  top: `${(shown.box.y * 100).toFixed(2)}%`,
+                  width: `${(shown.box.w * 100).toFixed(2)}%`,
+                  height: `${(shown.box.h * 100).toFixed(2)}%`,
                 }}
               />
             )}

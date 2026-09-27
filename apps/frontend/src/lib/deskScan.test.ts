@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   EMPTY_EDGES, MIN_EDGES, MIN_FIRE_GAP_MS, MIN_SHARPNESS, SAMPLE_INTERVAL_MS, STEADY_SAMPLES,
-  edgeDensity, initialAutoCapture, motion, pickCamera, sharpness, stepAutoCapture,
+  MAX_SAMPLE_H, MAX_SAMPLE_W, MISS_TICKS,
+  defaultBox, edgeDensity, initialAutoCapture, initialBoxTrack, motion, pickCamera, sampleRect,
+  sharpness, stepAutoCapture, trackBox,
   type AutoCaptureState, type FrameSample,
 } from './deskScan';
 
@@ -151,6 +153,65 @@ describe('stepAutoCapture', () => {
     expect(early.fired).toEqual([]);
     const late = run(frames, fired, MIN_FIRE_GAP_MS);
     expect(late.fired.length).toBe(1);
+  });
+});
+
+describe('the box that follows the stick', () => {
+  const stick = { x: 0.2, y: 0.4, w: 0.55, h: 0.18 };
+
+  it('defaults to a wide centred box inside the frame', () => {
+    const b = defaultBox();
+    expect(b.x + b.w / 2).toBeCloseTo(0.5, 5);
+    expect(b.y + b.h / 2).toBeCloseTo(0.5, 5);
+    expect(b.x).toBeGreaterThanOrEqual(0);
+    expect(b.y + b.h).toBeLessThanOrEqual(1);
+  });
+
+  it('locks onto the first detection', () => {
+    const t = trackBox(initialBoxTrack(), stick);
+    expect(t.locked).toBe(true);
+    expect(t.box).toEqual(stick);
+  });
+
+  it('ignores detection jitter but follows a real move', () => {
+    const t = trackBox(initialBoxTrack(), stick);
+    const jitter = trackBox(t, { ...stick, x: stick.x + 0.01 });
+    expect(jitter.box).toBe(t.box);
+    const moved = trackBox(t, { ...stick, x: stick.x + 0.05 });
+    expect(moved.box.x).toBeCloseTo(stick.x + 0.05, 5);
+  });
+
+  it('holds the stick box through a few missed detections, then falls back', () => {
+    let t = trackBox(initialBoxTrack(), stick);
+    for (let i = 0; i < MISS_TICKS - 1; i++) {
+      t = trackBox(t, null);
+      expect(t.locked).toBe(true);
+      expect(t.box).toEqual(stick);
+    }
+    t = trackBox(t, null);
+    expect(t.locked).toBe(false);
+    expect(t.box).toEqual(defaultBox());
+  });
+
+  it('samples the whole box on a 1920 feed and caps it on 4K, never scaling', () => {
+    const small = sampleRect(stick, 1920, 1440);
+    expect(small.w).toBe(Math.round(0.55 * 1920));
+    expect(small.h).toBe(Math.round(0.18 * 1440));
+    const big = sampleRect({ x: 0.05, y: 0.3, w: 0.9, h: 0.4 }, 3840, 2160);
+    expect(big.w).toBe(MAX_SAMPLE_W);
+    expect(big.h).toBe(MAX_SAMPLE_H);
+    // Centred in the box, inside the frame.
+    expect(big.x + big.w / 2).toBeCloseTo((0.05 + 0.45) * 3840, 0);
+    expect(big.x).toBeGreaterThanOrEqual(0);
+    expect(big.y + big.h).toBeLessThanOrEqual(2160);
+  });
+
+  it('re-arms after a fire when the box changes size (motion reads as Infinity)', () => {
+    const fired = { phase: 'fired', count: 0, bestSharpness: 0, lastFireAt: 0 } as const;
+    const prev = new Uint8Array(100);
+    const cur = new Uint8Array(120);
+    const r = stepAutoCapture(fired, { motion: motion(prev, cur), edges: 0.05, sharpness: 2 }, 10_000);
+    expect(r.state.phase).toBe('armed');
   });
 });
 
