@@ -7,7 +7,7 @@ priority: P1
 created: 2026-09-26
 reporter: jinhu
 branch: feat/ram-sheet-autosave
-pr:
+pr: "#417"
 version: 1.182.0
 related: [RS-109, RS-115]
 ---
