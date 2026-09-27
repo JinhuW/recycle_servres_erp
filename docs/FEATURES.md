@@ -1032,6 +1032,29 @@ inventory search, sell-order draft creation.
       same sheet twice, because combining identical part numbers would
       double the qty.
 
+- **Desk scanner: a live camera in the desktop line drawer** (v1.184.0,
+  RS-119). Meant for an iPhone on an overhead arm used as the Mac's webcam
+  through **Continuity Camera**; any webcam works.
+  - **Camera** under the AI label dropzone swaps it for the live feed. The
+    iPhone camera is picked by itself (its separate Desk View device is
+    skipped); another can be chosen, and the choice is remembered by device
+    label (`scan.cameraLabel`).
+  - **No click to capture.** Four times a second the browser checks a
+    native-resolution centre crop (outlined on the feed): text-like edges in
+    view, nothing moving, and focus at its peak. Three such samples in a row
+    (~¾ s) capture one full-resolution frame, flash, beep, and scan it through
+    the same path as a dropped photo (`lib/deskScan.ts`).
+  - **One scan per placement.** A still scene fires once; the next capture
+    needs the scene to change (stick lifted, or a new one). Captures are at
+    least 3 s apart. So a failed scan never loops on the same frame and burns
+    the 20/min scan limit.
+  - A readable scan closes the camera, so swapping sticks can't overwrite the
+    line; an unreadable one leaves it open to re-seat the stick. Brand-confirm
+    **Retake** reopens the camera when the scan came from it.
+  - **Open camera automatically** (`scan.deskCamera`) starts every scanless
+    line's drawer with the camera live, so a pallet goes stick → fields →
+    Confirm → next line.
+
 > Provider selection is silent: OpenRouter when `OPENROUTER_API_KEY` is set,
 > otherwise a deterministic stub. A prod deploy missing the key looks healthy
 > and quietly stubs. The model is **`openai/gpt-6-luna`** for every image-AI

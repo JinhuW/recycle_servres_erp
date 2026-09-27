@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-119](./RS-119-desk-scanner-continuity-camera-auto-captures-a-ram-l.md) | in-progress | story | P2 | Desk scanner: Continuity Camera auto-captures a RAM label into the line drawer | — |
 | [RS-117](./RS-117-new-po-items-table-shows-the-scanned-label-photo-cli.md) | in-review | story | P2 | New PO items table shows the scanned label photo, click to zoom | 1.183.0 |
 | [RS-116](./RS-116-scanned-ram-lines-auto-save-to-the-po-like-confirmed.md) | done | bug | P1 | Scanned RAM lines auto-save to the PO like confirmed lines, and scans run at the scanner's highest resolution | 1.182.0 |
 | [RS-115](./RS-115-switch-image-ai-to-openai-gpt-6-luna-and-let-new-she.md) | done | story | P2 | Switch image AI to OpenAI gpt-6-luna, and let new sheet scans append to the table | 1.181.0 |
