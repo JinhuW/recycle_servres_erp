@@ -2,13 +2,13 @@
 id: RS-121
 title: Desk camera box follows the RAM stick
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-27
 reporter: jinhu
 branch: feat/desk-cam-follow-box
-pr:
-version:
+pr: "#421"
+version: 1.185.0
 related: [RS-119, RS-120]
 ---
 
@@ -32,12 +32,12 @@ off-centre or longer than the box was judged mostly on paper.
 
 ## Acceptance criteria
 
-- [ ] The box wraps the detected stick live (solid border) and glides with it.
-- [ ] With no stick found, a large dashed default box shows instead.
-- [ ] Focus and stillness are judged inside the box the user sees.
-- [ ] A still stick is scanned once; moving it to a new spot, or swapping in
+- [x] The box wraps the detected stick live (solid border) and glides with it.
+- [x] With no stick found, a large dashed default box shows instead.
+- [x] Focus and stillness are judged inside the box the user sees.
+- [x] A still stick is scanned once; moving it to a new spot, or swapping in
       the next stick, re-arms the trigger.
-- [ ] Detection that misses a frame or two doesn't make the box flicker.
+- [x] Detection that misses a frame or two doesn't make the box flicker.
 
 ## Out of scope
 
