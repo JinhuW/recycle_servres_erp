@@ -133,3 +133,15 @@ export function stepStates(
   });
   return out;
 }
+
+/**
+ * Whether a new scan read only part numbers an earlier scan already has —
+ * almost always the same sheet scanned twice. Worth a warning because
+ * combining identical part numbers would silently double the qty. Blank or
+ * unread part numbers don't count either way.
+ */
+export function samePartsAsEarlier(newPns: readonly string[], earlierPns: readonly string[]): boolean {
+  const earlier = new Set(earlierPns.map(canonicalPartNumber).filter(Boolean));
+  const fresh = newPns.map(canonicalPartNumber).filter(Boolean);
+  return earlier.size > 0 && fresh.length > 0 && fresh.every(pn => earlier.has(pn));
+}

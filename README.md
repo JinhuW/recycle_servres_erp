@@ -48,7 +48,7 @@ shell, so each ships its own chunk):
 - **Storage** — Cloudflare R2 via S3 API.  Label scans + sell-order
   attachments live under `recycle-erp-attachments`, public-served at
   `https://static.recycleservers.com/recycle-erp-attachments/`.
-- **OCR** — OpenRouter (Gemma 3 27B by default).  Falls back to a
+- **OCR** — OpenRouter (`openai/gpt-6-luna` by default; `OPENROUTER_OCR_MODEL` overrides).  Falls back to a
   deterministic stub when `OPENROUTER_API_KEY` is unset so dev and CI run
   offline.
 - **Edge** — Caddy serves the built SPA and reverse-proxies `/api/*` to the

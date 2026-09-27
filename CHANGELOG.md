@@ -17,6 +17,37 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.181.0] - 2026-09-26
+
+### Changed
+
+- **Image AI now runs on OpenAI `gpt-6-luna`** (RS-115). This covers RAM, SSD and
+  HDD label scans, receipt renaming, and PayPal-screenshot reading. It was
+  `google/gemini-2.5-flash`.
+  - **Benchmark.** Several OpenAI vision models were tested on real RAM label
+    crops with the ERP's own prompt and normaliser. luna read every field right
+    on 300 dpi flatbed scans at about a third of Gemini's cost (~$0.21 against
+    $0.70 per 1,000 images). The cheaper OpenAI models misread capacity, DDR
+    generation or part numbers.
+  - **Tuning.** OpenAI models only read small label text well with high image
+    detail, need a little reasoning, and reject `temperature`. The request is
+    now tuned per model family, and a model that spends its budget thinking
+    and answers with nothing is asked once more.
+  - **Checked before shipping.** Alipay and Zelle receipts and a PayPal
+    screenshot read correctly.
+  - **Known weakness.** luna is weaker than Gemini on blurry or low-resolution
+    images.
+  - **Rollback.** Set `OPENROUTER_OCR_MODEL=google/gemini-2.5-flash` on Railway.
+    No deploy is needed, and a non-OpenAI model gets the old request.
+- **New scans add to the Scan RAM sheet table instead of replacing it**
+  (RS-115).
+  - Each scan or upload gets its own "Scan N" group, and stick numbers carry on
+    from the last one.
+  - The button reads **Scan next page** once there are sticks.
+  - Groups can be removed and the table cleared.
+  - A scan whose part numbers were all read before is flagged as possibly the
+    same sheet twice.
+
 ## [1.180.0] - 2026-09-26
 
 ### Fixed

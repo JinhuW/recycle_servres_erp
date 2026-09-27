@@ -1005,10 +1005,24 @@ inventory search, sell-order draft creation.
     - Failures say what to do: bridge not running, printer asleep, scanner busy.
     - Clicking a stick's picture (or its box on the page) opens it full size.
     - The chip re-checks a stopped bridge on its own every 5 s.
+  - **Scans add up** (v1.181.0, RS-115).
+    - Each new scan or upload adds its sticks under its own "Scan N" group,
+      numbered on from the last stick. **Scan next page** continues the pallet.
+    - A group can be removed, and **Clear all** empties the table.
+    - A scan whose part numbers were all read before is flagged as possibly the
+      same sheet twice, because combining identical part numbers would
+      double the qty.
 
-> Provider selection is silent: OpenRouter (Gemma 3 27B) when
-> `OPENROUTER_API_KEY` is set, otherwise a deterministic stub. A prod deploy
-> missing the key looks healthy and quietly stubs.
+> Provider selection is silent: OpenRouter when `OPENROUTER_API_KEY` is set,
+> otherwise a deterministic stub. A prod deploy missing the key looks healthy
+> and quietly stubs. The model is **`openai/gpt-6-luna`** for every image-AI
+> call — labels, receipts, PayPal screenshots (v1.181.0, RS-115; it was
+> `google/gemini-2.5-flash` before, not the Gemma this note used to name). It
+> is tuned for OpenAI: high image detail, minimal reasoning, JSON mode, and
+> an empty answer is asked again once. It reads 300 dpi flatbed scans reliably
+> but is weaker than Gemini on blurry/low-resolution images. Roll back without
+> a deploy by setting `OPENROUTER_OCR_MODEL=google/gemini-2.5-flash` on
+> Railway; a non-OpenAI model gets the old request.
 
 ## The three shells
 

@@ -3777,6 +3777,14 @@ html.desktop, body.desktop, .desktop #root {
   }
 }
 
+.rsheet-group td {
+  background: var(--bg-soft);
+  padding-top: 6px; padding-bottom: 6px;
+}
+.rsheet-group td > * { vertical-align: middle; }
+.rsheet-group-title { font-size: 12px; font-weight: 600; color: var(--fg-muted); margin-right: 8px; }
+.rsheet-group .btn { float: right; }
+
 .rsheet-skel { display: grid; gap: 6px; padding-top: 2px; }
 .rsheet-skel .skeleton { display: block; height: 10px; border-radius: 4px; }
 

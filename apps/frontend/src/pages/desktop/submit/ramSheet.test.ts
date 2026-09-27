@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { ApiError } from '../../../lib/api';
 import type { ScanResponse } from '../../../lib/types';
 import { blankLine } from './line';
-import { buildRamLinePatches, isPristineLine, runPool, stepStates, withRateLimitRetry } from './ramSheet';
+import {
+  buildRamLinePatches, isPristineLine, runPool, samePartsAsEarlier, stepStates, withRateLimitRetry,
+} from './ramSheet';
 
 const scan = (partNumber: string | undefined, imageId: string): ScanResponse => ({
   imageId,
@@ -133,5 +135,21 @@ describe('stepStates', () => {
     expect(stepStates('review', 'printer')).toEqual({
       connect: 'done', scan: 'done', split: 'done', read: 'done',
     });
+  });
+});
+
+describe('samePartsAsEarlier', () => {
+  it('flags a scan whose every part number was already scanned (canonical match)', () => {
+    expect(samePartsAsEarlier(['m471a4g43mb1ctd', 'MTA36ASF4G72PZ-2G6D1QI'],
+      ['M471A4G43MB1-CTD', 'MTA36ASF4G72PZ-2G6D1QI', 'X'])).toBe(true);
+  });
+
+  it('does not flag a scan with any new part number', () => {
+    expect(samePartsAsEarlier(['M471A4G43MB1-CTD', 'NEW-PN'], ['M471A4G43MB1-CTD'])).toBe(false);
+  });
+
+  it('does not flag when nothing was scanned before, or nothing was read', () => {
+    expect(samePartsAsEarlier(['M471A4G43MB1-CTD'], [])).toBe(false);
+    expect(samePartsAsEarlier(['', '  '], ['M471A4G43MB1-CTD'])).toBe(false);
   });
 });
