@@ -335,7 +335,8 @@ switches the branch out from under the first.
 - **Don't reintroduce Cloudflare Images** — it's paywalled (error 5453); we
   migrated everything to R2 attachments.  See [cloudflare_images_unpaid_stubbed][2].
 - **OCR provider selection** lives in `apps/backend/src/ai/`.  OpenRouter
-  (Gemma 3 27B) when `OPENROUTER_API_KEY` is present; otherwise a
+  (`openai/gpt-6-luna`, overridable with `OPENROUTER_OCR_MODEL`) when
+  `OPENROUTER_API_KEY` is present; otherwise a
   deterministic stub.  **The fallback is silent** — a prod deploy missing
   the key looks healthy and quietly stubs.  Verify the secret is set when
   cutting a release.

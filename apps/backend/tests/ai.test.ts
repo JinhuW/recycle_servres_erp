@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { parseModelJson, PROMPT_BY_CATEGORY } from '../src/ai/prompts';
 import { stubScan } from '../src/ai/stub';
-import { openRouterScan } from '../src/ai/openrouter';
+import { openRouterImageJson, openRouterScan, requestTuning } from '../src/ai/openrouter';
 import { pickProvider } from '../src/ai/index';
 import type { Env } from '../src/types';
 
@@ -154,6 +154,68 @@ describe('openRouterScan', () => {
     const r = await openRouterScan({ OPENROUTER_API_KEY: 'k' } as Env, 'RAM', img);
     expect(r.fields.brand).toBe('Crucial');
     expect(calls.length).toBe(0);
+  });
+});
+
+// RS-115: the image-AI request is tuned per model family. OpenAI models only
+// read small label text reliably with detail:"high", need a little reasoning
+// room, and reject temperature; everything else keeps the pre-RS-115 request,
+// so an OPENROUTER_OCR_MODEL rollback to Gemini changes nothing but the model.
+describe('openRouterImageJson request', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const img = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]).buffer;
+  const ok = (content: string, finish = 'stop') =>
+    new Response(JSON.stringify({ choices: [{ message: { content }, finish_reason: finish }] }), { status: 200 });
+
+  function captureFetch(...responses: Response[]) {
+    const fn = vi.fn(async () => responses.shift() ?? ok('{"brand":"Samsung"}'));
+    vi.stubGlobal('fetch', fn);
+    return () => fn.mock.calls.map(c => JSON.parse((c as unknown as [string, RequestInit])[1].body as string));
+  }
+
+  it('defaults to openai/gpt-6-luna with high detail, minimal reasoning, JSON mode and no temperature', async () => {
+    const bodies = captureFetch(ok('{"brand":"Samsung"}'));
+    await openRouterImageJson({ OPENROUTER_API_KEY: 'k' } as Env, 'prompt', img);
+    const [body] = bodies();
+    expect(body.model).toBe('openai/gpt-6-luna');
+    expect(body.max_tokens).toBe(4096);
+    expect(body.reasoning).toEqual({ effort: 'minimal', exclude: true });
+    expect(body.response_format).toEqual({ type: 'json_object' });
+    expect('temperature' in body).toBe(false);
+    expect(body.messages[0].content[1].image_url.detail).toBe('high');
+  });
+
+  it('sends the pre-RS-115 request (plus room) when overridden to a non-OpenAI model', async () => {
+    const bodies = captureFetch(ok('{"brand":"Samsung"}'));
+    await openRouterImageJson(
+      { OPENROUTER_API_KEY: 'k', OPENROUTER_OCR_MODEL: 'google/gemini-2.5-flash' } as Env, 'prompt', img);
+    const [body] = bodies();
+    expect(body.model).toBe('google/gemini-2.5-flash');
+    expect(body.temperature).toBe(0);
+    expect(body.max_tokens).toBe(4096);
+    expect('reasoning' in body).toBe(false);
+    expect('response_format' in body).toBe(false);
+    expect('detail' in body.messages[0].content[1].image_url).toBe(false);
+  });
+
+  it('asks again once when the model returns no content (budget spent thinking)', async () => {
+    const bodies = captureFetch(ok('', 'length'), ok('{"brand":"Micron"}'));
+    const json = await openRouterImageJson({ OPENROUTER_API_KEY: 'k' } as Env, 'prompt', img);
+    expect(json).toEqual({ brand: 'Micron' });
+    expect(bodies()).toHaveLength(2);
+  });
+
+  it('gives up after the second empty answer', async () => {
+    captureFetch(ok('', 'length'), ok('', 'length'));
+    await expect(openRouterImageJson({ OPENROUTER_API_KEY: 'k' } as Env, 'prompt', img))
+      .rejects.toThrow(/no content/);
+  });
+
+  it('requestTuning keys only on the openai/ prefix', () => {
+    expect(requestTuning('openai/gpt-6-luna').body).toHaveProperty('reasoning');
+    expect(requestTuning('anthropic/claude-x').body).toEqual({ temperature: 0 });
+    expect(requestTuning('anthropic/claude-x').imageDetail).toBeUndefined();
   });
 });
 

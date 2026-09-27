@@ -12,7 +12,7 @@ import type { ScanResponse } from '../../../lib/types';
 import type { SheetBox } from '@recycle-erp/shared';
 import type { Line } from './line';
 import {
-  buildRamLinePatches, runPool, SHEET_STEPS, stepStates, withRateLimitRetry,
+  buildRamLinePatches, runPool, samePartsAsEarlier, SHEET_STEPS, stepStates, withRateLimitRetry,
   type SheetStage, type SheetStep,
 } from './ramSheet';
 
@@ -26,6 +26,10 @@ import {
 // and failures say what to do. The action buttons deliberately do NOT live in
 // an .ai-dropzone: that class makes its children pointer-events: none, which
 // is what left "Scan from printer" dead to the mouse in RS-109.
+//
+// RS-115: scans accumulate. Each scan or upload adds its sticks under their
+// own "Scan N" group, numbered on from the last stick; a group can be removed
+// (e.g. the same sheet scanned twice) and the whole table cleared.
 
 // Three labels in flight keeps a 10-stick sheet to a few seconds without
 // tripping the 20-a-minute scan limit on a normal sheet.
@@ -41,7 +45,9 @@ const SCAN_DPI = 300;
 let lastScanMs = 12_000;
 
 type Row = {
+  /** Never reused within the dialog; the stick number shown is id + 1. */
   id: number;
+  sheetId: number;
   box: SheetBox;
   crop: Blob;
   cropUrl: string;
@@ -52,6 +58,8 @@ type Row = {
   qty: string;
   unitCost: string;
 };
+
+type Sheet = { id: number; url: string; width: number; height: number };
 
 type FailureKind = 'down' | 'printer' | 'busy' | 'cancelled' | 'none' | 'image';
 type Failure = { step: SheetStep; kind: FailureKind; detail?: string };
@@ -70,7 +78,7 @@ export function RamSheetScanDialog({
   const [failure, setFailure] = useState<Failure | null>(null);
   const [scanStartedAt, setScanStartedAt] = useState(0);
   const [now, setNow] = useState(() => Date.now());
-  const [sheet, setSheet] = useState<{ url: string; width: number; height: number } | null>(null);
+  const [sheets, setSheets] = useState<Sheet[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
   const [costAll, setCostAll] = useState('');
   const [combine, setCombine] = useState(true);
@@ -79,25 +87,41 @@ export function RamSheetScanDialog({
   const [zoom, setZoom] = useState<{ url: string; alt: string } | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
-  // One run = one scan or upload. A newer run, a cancel or closing the dialog
-  // bumps the id, and every async step checks it before touching state — the
-  // label reads can't be aborted mid-flight, so their late results are
-  // dropped instead of landing on the next run's rows.
+  // One run = one scan or upload. A newer run or closing the dialog bumps the
+  // id; the stage, failure and new-sheet updates check it, so an older run
+  // can't move the dialog while a newer one is working. Label results don't
+  // need it: every stick has its own never-reused id, so a late result can
+  // only ever land on its own row (or on nothing, once removed).
   const runRef = useRef(0);
+  const nextStickId = useRef(0);
+  const nextSheetId = useRef(0);
+  const removed = useRef(new Set<number>());
+  const mounted = useRef(true);
   const scanCtrl = useRef<AbortController | null>(null);
-  useEffect(() => () => {
-    runRef.current++;
-    scanCtrl.current?.abort();
+  useEffect(() => {
+    // Set on every mount, not just initialised: StrictMode (dev) mounts,
+    // cleans up and mounts again, and a guard left false after that first
+    // cleanup silently skipped every label read.
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      runRef.current++;
+      scanCtrl.current?.abort();
+    };
   }, []);
 
-  // Object URLs made for this dialog, revoked on unmount — a rescan replaces
-  // the rows but the old thumbnails may still be painting.
-  const urls = useRef<string[]>([]);
+  // Object URLs made for this dialog: revoked when their scan is removed or
+  // cleared, and whatever is left on unmount.
+  const urls = useRef(new Set<string>());
   useEffect(() => () => urls.current.forEach(u => URL.revokeObjectURL(u)), []);
   const objectUrl = (b: Blob) => {
     const u = URL.createObjectURL(b);
-    urls.current.push(u);
+    urls.current.add(u);
     return u;
+  };
+  const revoke = (u: string) => {
+    URL.revokeObjectURL(u);
+    urls.current.delete(u);
   };
 
   const checkBridge = useCallback(async (): Promise<BridgeHealth | null> => {
@@ -127,8 +151,8 @@ export function RamSheetScanDialog({
     return () => window.clearInterval(id);
   }, [stage]);
 
-  const patchRow = (run: number, id: number, patch: Partial<Row>) => {
-    if (run !== runRef.current) return;
+  const patchRow = (id: number, patch: Partial<Row>) => {
+    if (!mounted.current) return;
     setRows(rs => rs.map(r => (r.id === id ? { ...r, ...patch } : r)));
   };
 
@@ -140,8 +164,11 @@ export function RamSheetScanDialog({
     setStage(kind === 'cancelled' ? 'idle' : step);
   };
 
-  const readLabel = async (run: number, row: Pick<Row, 'id' | 'crop' | 'box'>) => {
-    patchRow(run, row.id, { status: 'reading', error: undefined });
+  const readLabel = async (row: Pick<Row, 'id' | 'crop' | 'box'>) => {
+    // A removed scan's queued sticks never reach the model: each read is a
+    // billed call and counts against the 20-a-minute scan limit.
+    if (removed.current.has(row.id) || !mounted.current) return;
+    patchRow(row.id, { status: 'reading', error: undefined });
     try {
       const scan = await withRateLimitRetry(() => {
         const form = new FormData();
@@ -149,25 +176,26 @@ export function RamSheetScanDialog({
         form.append('category', 'RAM');
         return api.upload<ScanResponse>('/api/scan/label', form);
       });
-      patchRow(run, row.id, { status: 'done', scan, include: !row.box.maybeMerged });
+      patchRow(row.id, { status: 'done', scan, include: !row.box.maybeMerged });
     } catch (e) {
-      patchRow(run, row.id, { status: 'error', error: scanErrorMessage(e, t), include: false });
+      patchRow(row.id, { status: 'error', error: scanErrorMessage(e, t), include: false });
     }
   };
 
   const processSheet = async (run: number, page: Blob) => {
     setStage('split');
-    setRows([]);
     try {
       const split = await splitSheet(page);
       if (run !== runRef.current) return;
-      setSheet({ url: objectUrl(page), width: split.width, height: split.height });
       if (!split.crops.length) {
         fail(run, 'split', 'none');
         return;
       }
-      const fresh: Row[] = split.crops.map((c, i) => ({
-        id: i,
+      const sheetId = nextSheetId.current++;
+      setSheets(ss => [...ss, { id: sheetId, url: objectUrl(page), width: split.width, height: split.height }]);
+      const fresh: Row[] = split.crops.map(c => ({
+        id: nextStickId.current++,
+        sheetId,
         box: c.box,
         crop: c.blob,
         cropUrl: objectUrl(c.blob),
@@ -176,9 +204,9 @@ export function RamSheetScanDialog({
         qty: '1',
         unitCost: costAll,
       }));
-      setRows(fresh);
+      setRows(rs => [...rs, ...fresh]);
       setStage('read');
-      await runPool(fresh.map(r => () => readLabel(run, r)), READ_CONCURRENCY);
+      await runPool(fresh.map(r => () => readLabel(r)), READ_CONCURRENCY);
       if (run === runRef.current) setStage('review');
     } catch (e) {
       console.error('[ram-sheet] split failed', e);
@@ -191,8 +219,6 @@ export function RamSheetScanDialog({
     const run = ++runRef.current;
     setSource(from);
     setFailure(null);
-    setSheet(null);
-    setRows([]);
     return run;
   };
 
@@ -242,7 +268,29 @@ export function RamSheetScanDialog({
     void processSheet(run, f);
   };
 
-  const retryRow = (r: Row) => void readLabel(runRef.current, r);
+  const retryRow = (r: Row) => void readLabel(r);
+
+  const dropRows = (gone: Row[]) => {
+    gone.forEach(r => {
+      removed.current.add(r.id);
+      revoke(r.cropUrl);
+    });
+  };
+  const removeSheet = (sheetId: number) => {
+    dropRows(rows.filter(r => r.sheetId === sheetId));
+    const s = sheets.find(x => x.id === sheetId);
+    if (s) revoke(s.url);
+    setRows(rs => rs.filter(r => r.sheetId !== sheetId));
+    setSheets(ss => ss.filter(x => x.id !== sheetId));
+  };
+  const clearAll = () => {
+    dropRows(rows);
+    sheets.forEach(s => revoke(s.url));
+    setRows([]);
+    setSheets([]);
+    setFailure(null);
+    setStage('idle');
+  };
   const applyCostAll = () => setRows(rs => rs.map(r => ({ ...r, unitCost: costAll })));
 
   const included = rows.filter(r => r.include && r.status === 'done' && r.scan);
@@ -254,6 +302,8 @@ export function RamSheetScanDialog({
   );
   const canAdd = included.length > 0 && !incomplete && reading === 0;
   const working = !failure && (stage === 'connect' || stage === 'scan' || stage === 'split');
+  // The preview shows the newest scan that still has sticks in the table.
+  const previewSheet = [...sheets].reverse().find(s => rows.some(r => r.sheetId === s.id)) ?? null;
   const steps = stepStates(stage, source, failure?.kind === 'cancelled' ? undefined : failure?.step);
   const showSteps = stage !== 'idle' || !!failure;
 
@@ -293,7 +343,7 @@ export function RamSheetScanDialog({
               disabled={working}
               onClick={() => void scanFromPrinter()}
             >
-              {rows.length || failure ? t('rsheetRescan') : t('rsheetScanPrinter')}
+              {rows.length ? t('rsheetScanNext') : failure ? t('rsheetRescan') : t('rsheetScanPrinter')}
             </button>
           )}
           <button type="button" className="btn" disabled={working} onClick={() => fileRef.current?.click()}>
@@ -321,7 +371,7 @@ export function RamSheetScanDialog({
           />
         )}
 
-        {!failure && (stage === 'connect' || stage === 'scan' || (stage === 'split' && !sheet)) && (
+        {working && (
           <div className="rsheet-stage">
             <div className={`rsheet-page${stage === 'connect' ? ' is-connecting' : ''}`}>
               {stage === 'scan' && <div className="scan-line" />}
@@ -331,16 +381,16 @@ export function RamSheetScanDialog({
           </div>
         )}
 
-        {sheet && rows.length > 0 && (
+        {previewSheet && rows.length > 0 && (
           <div className="rsheet-stage">
             <SheetPreview
-              sheet={sheet}
-              rows={rows}
-              onZoomSheet={() => setZoom({ url: sheet.url, alt: t('rsheetSheetAlt') })}
+              sheet={previewSheet}
+              rows={rows.filter(r => r.sheetId === previewSheet.id)}
+              onZoomSheet={() => setZoom({ url: previewSheet.url, alt: t('rsheetSheetAlt') })}
               onZoomStick={r => setZoom({ url: r.cropUrl, alt: t('rsheetStick', { n: r.id + 1 }) })}
             />
             <div style={{ flex: 1, minWidth: 0 }}>
-              {stage === 'read' ? (
+              {reading > 0 ? (
                 <ProgressLine
                   title={t('rsheetReading', { done: rows.length - reading, total: rows.length })}
                   sub={t('rsheetReadingSub')}
@@ -360,20 +410,48 @@ export function RamSheetScanDialog({
                     <th className="num" style={{ width: 100 }}>{t('unitCost')}</th>
                   </tr>
                 </thead>
-                <tbody>
-                  {rows.map(r => (
-                    <StickRow
-                      key={`${runRef.current}-${r.id}`}
-                      row={r}
-                      lang={lang}
-                      onToggle={() => patchRow(runRef.current, r.id, { include: !r.include })}
-                      onQty={v => patchRow(runRef.current, r.id, { qty: v })}
-                      onCost={v => patchRow(runRef.current, r.id, { unitCost: v })}
-                      onRetry={() => retryRow(r)}
-                      onZoom={() => setZoom({ url: r.cropUrl, alt: t('rsheetStick', { n: r.id + 1 }) })}
-                    />
-                  ))}
-                </tbody>
+                {sheets.map((s, i) => {
+                  const group = rows.filter(r => r.sheetId === s.id);
+                  if (!group.length) return null;
+                  const pns = (rs: Row[]) => rs.map(r => r.scan?.extracted?.partNumber ?? '');
+                  const earlier = rows.filter(r => sheets.findIndex(x => x.id === r.sheetId) < i);
+                  const repeat = group.every(r => r.status !== 'reading')
+                    && samePartsAsEarlier(pns(group), pns(earlier));
+                  return (
+                    <tbody key={s.id}>
+                      <tr className="rsheet-group">
+                        <td colSpan={4}>
+                          <span className="rsheet-group-title">
+                            {t('rsheetGroup', { n: s.id + 1, k: group.length })}
+                          </span>
+                          {repeat && <span className="chip warn">{t('rsheetSameSheet')}</span>}
+                          {sheets.length > 1 && (
+                            <button
+                              type="button"
+                              className="btn sm ghost"
+                              onClick={() => removeSheet(s.id)}
+                              title={t('rsheetRemoveScanTitle')}
+                            >
+                              {t('rsheetRemoveScan')}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                      {group.map(r => (
+                        <StickRow
+                          key={r.id}
+                          row={r}
+                          lang={lang}
+                          onToggle={() => patchRow(r.id, { include: !r.include })}
+                          onQty={v => patchRow(r.id, { qty: v })}
+                          onCost={v => patchRow(r.id, { unitCost: v })}
+                          onRetry={() => retryRow(r)}
+                          onZoom={() => setZoom({ url: r.cropUrl, alt: t('rsheetStick', { n: r.id + 1 }) })}
+                        />
+                      ))}
+                    </tbody>
+                  );
+                })}
               </table>
             </div>
           </div>
@@ -401,6 +479,9 @@ export function RamSheetScanDialog({
               <input type="checkbox" checked={combine} onChange={() => setCombine(c => !c)} />
               {t('rsheetCombine')}
             </label>
+            <button type="button" className="btn sm ghost" onClick={clearAll} disabled={working}>
+              {t('rsheetClearAll')}
+            </button>
           </>
         )}
         <span style={{ flex: 1 }} />
@@ -535,7 +616,7 @@ function BridgeChip({ health, onRecheck }: { health: BridgeHealth | null | 'chec
 function SheetPreview({
   sheet, rows, onZoomSheet, onZoomStick,
 }: {
-  sheet: { url: string; width: number; height: number };
+  sheet: Sheet;
   rows: Row[];
   onZoomSheet: () => void;
   onZoomStick: (r: Row) => void;
