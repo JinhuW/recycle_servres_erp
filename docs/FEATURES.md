@@ -996,6 +996,11 @@ inventory search, sell-order draft creation.
   - Purchasers set qty and cost, with an apply-to-all cost. Identical part
     numbers combine into one line. The lines arrive unconfirmed, with their
     scan image, so the usual blockers name anything the label couldn't supply.
+  - **Each row on the new order shows its label photo** (v1.183.0, RS-117). The
+    items table puts a 40px thumbnail of the scan (or first saved photo, `+N`
+    when there are more) after the item name. Clicking it opens the full-screen
+    viewer without selecting the row. This works for single scans and for rows
+    the label couldn't fill.
   - **The dialog shows each stage live** (v1.180.0, RS-114).
     - A step row runs Connect → Scan page → Find sticks → Read labels.
     - While the printer works, the page sweeps and the dialog shows elapsed

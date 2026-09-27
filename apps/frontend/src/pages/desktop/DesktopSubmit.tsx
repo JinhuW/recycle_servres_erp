@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { AttachmentChip } from '../../components/AttachmentChip';
 import { AttachmentDropzone } from '../../components/AttachmentDropzone';
+import { ImageLightbox } from '../../components/ImageLightbox';
 import { PaymentFields } from '../../components/PaymentFields';
 import type { HandoffMethod } from '../../lib/handoff';
 import { useT } from '../../lib/i18n';
@@ -32,7 +33,7 @@ import { lineRequirements, missingFieldNames } from '../../lib/lineRequirements'
 import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
 import { loadWarehouses } from '../../lib/warehouses';
 import {
-  deleteLinePhoto, planPhotoCarry, photoSourceFile, uploadLinePhoto,
+  deleteLinePhoto, linePhotos, planPhotoCarry, photoSourceFile, uploadLinePhoto,
   uploadedPhotoCount, useLinePhotoBuffer,
   type LineCarryPlan, type PendingPhoto,
 } from '../../lib/linePhotos';
@@ -123,6 +124,8 @@ function OrderForm({
   const [lastCat, setLastCat] = usePreference('submit.lastCategory', 'RAM');
   const [lines, setLines] = useState<Line[]>([blankLine(lastCat as Category)]);
   const [activeIdx, setActiveIdx] = useState<number | null>(0);
+  // Full-screen view of a row's thumbnail (its scan or first saved photo).
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [meta, setMeta] = useState<OrderMeta>({
     warehouseId: '',
     payment: 'Company',
@@ -870,25 +873,61 @@ function OrderForm({
                 >
                   <td className="mono" style={{ color: isActive ? 'var(--accent-strong)' : 'var(--fg-subtle)', fontWeight: isActive ? 600 : 400 }}>{i + 1}</td>
                   <td>
-                    {filled ? (
-                      <div>
-                        <div style={{ fontWeight: 500 }}>
-                          {lineSpecLabel(l)}
-                          {l.category === 'Other' && (
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                              {!!(l.itemType ?? '').trim() && <span className="chip">{l.itemType}</span>}
-                              {l.description ?? '—'}
-                            </span>
-                          )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      {filled ? (
+                        <div>
+                          <div style={{ fontWeight: 500 }}>
+                            {lineSpecLabel(l)}
+                            {l.category === 'Other' && (
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                {!!(l.itemType ?? '').trim() && <span className="chip">{l.itemType}</span>}
+                                {l.description ?? '—'}
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2 }}>
+                            {l.category === 'RAM' && [l.classification, l.rank, l.speed && (l.speed + 'MHz')].filter(Boolean).join(' · ')}
+                            {l.category === 'SSD' && [l.formFactor, l.condition, l.health != null && (l.health + '%')].filter(Boolean).join(' · ')}
+                            {l.category === 'HDD' && [l.interface, l.formFactor, l.condition, l.health != null && (l.health + '%')].filter(Boolean).join(' · ')}
+                            {l.category === 'Other' && l.condition}
+                          </div>
                         </div>
-                        <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2 }}>
-                          {l.category === 'RAM' && [l.classification, l.rank, l.speed && (l.speed + 'MHz')].filter(Boolean).join(' · ')}
-                          {l.category === 'SSD' && [l.formFactor, l.condition, l.health != null && (l.health + '%')].filter(Boolean).join(' · ')}
-                          {l.category === 'HDD' && [l.interface, l.formFactor, l.condition, l.health != null && (l.health + '%')].filter(Boolean).join(' · ')}
-                          {l.category === 'Other' && l.condition}
-                        </div>
-                      </div>
-                    ) : <span className="muted" style={{ fontStyle: 'italic' }}>{isActive ? t('subEditingFill') : t('subNotFilled')}</span>}
+                      ) : <span className="muted" style={{ fontStyle: 'italic' }}>{isActive ? t('subEditingFill') : t('subNotFilled')}</span>}
+                      {(() => {
+                        // The label crop a scan captured (or the first saved
+                        // photo), after the name so the purchaser can check the
+                        // row against it. Same thumb as the Edit order table;
+                        // shown on unfilled rows too — that's when it helps most.
+                        const shots = linePhotos(l);
+                        if (!shots.length) return null;
+                        return (
+                          <button
+                            type="button"
+                            onClick={e => { e.stopPropagation(); setLightboxUrl(shots[0].url); }}
+                            title={t('linePhotos')}
+                            style={{
+                              width: 40, height: 40, borderRadius: 8, flexShrink: 0, position: 'relative',
+                              border: '1px solid var(--border)', overflow: 'hidden',
+                              padding: 0, background: 'var(--bg-soft)', cursor: 'pointer',
+                            }}
+                          >
+                            <img
+                              src={shots[0].url}
+                              alt={t('linePhotos')}
+                              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                            />
+                            {shots.length > 1 && (
+                              <span style={{
+                                position: 'absolute', right: 0, bottom: 0,
+                                background: 'rgba(15,23,42,0.72)', color: 'white',
+                                fontSize: 9, fontWeight: 700, padding: '1px 4px',
+                                borderTopLeftRadius: 5,
+                              }}>+{shots.length - 1}</span>
+                            )}
+                          </button>
+                        );
+                      })()}
+                    </div>
                   </td>
                   <td className="mono muted" style={{ fontSize: 11 }}>{l.partNumber || '—'}</td>
                   <td className="num mono">{lQty}</td>
@@ -1295,6 +1334,10 @@ function OrderForm({
             </div>
           </div>
         </div>
+      )}
+
+      {lightboxUrl && (
+        <ImageLightbox url={lightboxUrl} alt={t('linePhotos')} onClose={() => setLightboxUrl(null)} />
       )}
     </>
   );
