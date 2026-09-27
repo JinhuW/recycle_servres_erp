@@ -145,6 +145,68 @@ export function stepAutoCapture(
   };
 }
 
+// ── The box on screen: follows the stick ────────────────────────────────────
+//
+// The box is what the trigger judges and what gets cropped, so it tracks the
+// detected stick (findRamStickInPhoto) and falls back to a wide default when
+// there's none. Boxes are fractions of the frame.
+
+export type FrameBox = { x: number; y: number; w: number; h: number };
+
+// Detection moves by a few pixels frame to frame on a still stick; moving the
+// sample rect for that would read as motion and nothing would ever fire.
+export const BOX_JITTER = 0.02;
+// Detection passes (every other sample, so ~2 s) a stick box survives without
+// a hit before the default returns.
+// Stops a flaky frame flipping the box — and re-arming the trigger — while the
+// stick hasn't moved.
+export const MISS_TICKS = 4;
+// Largest native-pixel region the trigger reads. Never scaled: downscaling
+// hides defocus and inflates sharpness.
+export const MAX_SAMPLE_W = 1280;
+export const MAX_SAMPLE_H = 720;
+
+export const defaultBox = (): FrameBox => ({ x: 0.06, y: 0.275, w: 0.88, h: 0.45 });
+
+export type BoxTrack = { box: FrameBox; locked: boolean; misses: number };
+
+export const initialBoxTrack = (): BoxTrack => ({ box: defaultBox(), locked: false, misses: 0 });
+
+const moved = (a: FrameBox, b: FrameBox): boolean =>
+  Math.abs(a.x - b.x) > BOX_JITTER
+  || Math.abs(a.y - b.y) > BOX_JITTER
+  || Math.abs(a.x + a.w - (b.x + b.w)) > BOX_JITTER
+  || Math.abs(a.y + a.h - (b.y + b.h)) > BOX_JITTER;
+
+export function trackBox(t: BoxTrack, detected: FrameBox | null): BoxTrack {
+  if (detected) {
+    if (t.locked && !moved(t.box, detected)) return t.misses ? { ...t, misses: 0 } : t;
+    return { box: detected, locked: true, misses: 0 };
+  }
+  if (!t.locked) return t;
+  if (t.misses + 1 < MISS_TICKS) return { ...t, misses: t.misses + 1 };
+  return initialBoxTrack();
+}
+
+// Native-pixel rect the trigger samples: the box's centre, clipped to the
+// sample cap. On a 1920-wide Continuity feed a stick box fits whole.
+export function sampleRect(
+  box: FrameBox, frameW: number, frameH: number,
+): { x: number; y: number; w: number; h: number } {
+  const bw = Math.max(1, Math.round(box.w * frameW));
+  const bh = Math.max(1, Math.round(box.h * frameH));
+  const w = Math.min(bw, MAX_SAMPLE_W);
+  const h = Math.min(bh, MAX_SAMPLE_H);
+  const x = Math.round(box.x * frameW + (bw - w) / 2);
+  const y = Math.round(box.y * frameH + (bh - h) / 2);
+  return {
+    x: Math.max(0, Math.min(x, frameW - w)),
+    y: Math.max(0, Math.min(y, frameH - h)),
+    w,
+    h,
+  };
+}
+
 export type CameraDevice = { deviceId: string; label: string };
 
 // Continuity Camera shows up as "<name>'s iPhone Camera", alongside a separate
