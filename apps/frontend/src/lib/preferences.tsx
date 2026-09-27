@@ -35,6 +35,10 @@ export type PrefMap = {
   // stays one click away in the add control — this only saves re-picking when
   // someone works through a pallet of one kind.
   'submit.lastCategory': string;
+  // Desk scanner: open the live camera in every new line drawer, and which
+  // camera (by device label — the Continuity iPhone, usually) to use.
+  'scan.deskCamera': boolean;
+  'scan.cameraLabel': string;
 };
 
 export type PrefKey = keyof PrefMap;

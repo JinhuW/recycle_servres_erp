@@ -17,6 +17,29 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.184.0] - 2026-09-27
+
+### Added
+
+- **Desk scanner: the desktop line drawer takes a label straight from a live
+  camera** (RS-119). With an iPhone on an overhead arm acting as the Mac's
+  webcam through Continuity Camera, a RAM stick placed under it is captured and
+  read without a click, and the line fills exactly as a dropped photo would.
+  Before, every stick meant a photo, a transfer and a drag.
+  - **Camera** under the AI label dropzone opens the feed. The iPhone camera is
+    picked automatically (not its Desk View device) and the choice is
+    remembered.
+  - The trigger runs in the browser (`lib/deskScan.ts`): text-like edges in the
+    centre crop, no motion, and focus at its peak for about ¾ s. Sharpness is
+    contrast-normalised, so the ring light's brightness doesn't move it.
+  - A still scene fires once and needs to change before the next capture, with
+    at least 3 s between captures, so a failed scan can't loop and eat the
+    scan rate limit.
+  - A readable scan closes the camera; an unreadable one keeps it open. **Open
+    camera automatically** starts every new line with it live.
+  - Two new user preferences, `scan.deskCamera` and `scan.cameraLabel`, on the
+    server allowlist.
+
 ## [1.183.0] - 2026-09-26
 
 ### Added

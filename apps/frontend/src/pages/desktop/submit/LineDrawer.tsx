@@ -12,6 +12,8 @@ import { BrandConfirmDialog } from '../../../components/BrandConfirmDialog';
 import { SerialChipsField } from '../../../components/SerialChipsField';
 import { RAM_BRANDS } from '../../../lib/catalog';
 import { useT } from '../../../lib/i18n';
+import { usePreference } from '../../../lib/preferences';
+import { DeskCamera } from './DeskCamera';
 import { RamFields, SsdFields, HddFields, OtherFields } from './LineFields';
 import { switchLineCategory, clearedBySwitch, SPEC_FIELD_LABEL_KEY } from '../../../lib/lineCategorySwitch';
 import { LinePhotoStrip, type PendingPhoto } from '../../../components/LinePhotoStrip';
@@ -111,17 +113,28 @@ export function LineDrawer({
   // Open while the purchaser is being asked to name the brand off the photo.
   const [brandDialog, setBrandDialog] = useState(false);
   const [aiNoticeSeverity, setAiNoticeSeverity] = useState<'info' | 'warn' | 'severe'>('info');
+  // Desk scanner (live camera in place of the dropzone). With auto-open on,
+  // every scanless line's drawer starts with it live, so a pallet goes stick
+  // → fields → Confirm → next line without touching the mouse between sticks.
+  // Drawers are keyed per line, so this initial value is read once per line.
+  const [deskAuto] = usePreference('scan.deskCamera', false);
+  const [camOpen, setCamOpen] = useState(() => showDropzone && deskAuto && !scanUrl);
+  // Whether this line's scan came from the camera, so the brand dialog's
+  // Retake reopens it rather than the file picker.
+  const scannedByCamRef = useRef(false);
 
   // Single-file scan: the drawer represents one line, so a drop with multiple
   // images takes only the first. The scan response is merged into the current
   // line via onChange(scanToLinePatch(scan)) — only present fields overwrite,
   // anything the model didn't extract leaves the existing value alone.
-  const handleAiFile = useCallback(async (files: FileList | File[]) => {
-    if (aiBusy) return;
+  // Resolves true when the label was read; the desk camera closes on that and
+  // stays open for a retry otherwise.
+  const handleAiFile = useCallback(async (files: FileList | File[]): Promise<boolean> => {
+    if (aiBusy) return false;
     const file = Array.from(files).find(f => f.type.startsWith('image/'));
     if (!file) {
       if (files.length) setAiError(t('aiOnlyImages'));
-      return;
+      return false;
     }
     setAiBusy(true);
     setAiError(null);
@@ -140,19 +153,28 @@ export function LineDrawer({
       } else if (conf < AI_UNREADABLE_FLOOR || noFields) {
         setAiNotice(t('unreadableLabel'));
         setAiNoticeSeverity('severe');
+        return false;
       } else if (conf < AI_CONFIDENCE_FLOOR) {
         setAiNotice(t('lowConfVerify', { pct: Math.round(conf * 100) }));
         setAiNoticeSeverity('warn');
       }
+      return true;
     } catch (err) {
       setAiError(scanErrorMessage(err, t));
+      return false;
     } finally {
       setAiBusy(false);
     }
   }, [aiBusy, cat, onChange, t]);
 
+  const onCamCapture = useCallback(async (file: File) => {
+    scannedByCamRef.current = true;
+    if (await handleAiFile([file])) setCamOpen(false);
+  }, [handleAiFile]);
+
   const onAiUpload = () => {
     if (aiBusy) return;
+    scannedByCamRef.current = false;
     setAiError(null);
     aiFileInputRef.current?.click();
   };
@@ -294,6 +316,9 @@ export function LineDrawer({
                   style={{ display: 'none' }}
                   onChange={onAiFileChosen}
                 />
+                {camOpen ? (
+                  <DeskCamera busy={aiBusy} onCapture={f => { void onCamCapture(f); }} onClose={() => setCamOpen(false)} />
+                ) : (
                 <div
                   role="button"
                   tabIndex={aiBusy ? -1 : 0}
@@ -318,6 +343,7 @@ export function LineDrawer({
                     e.preventDefault();
                     setAiDragOver(false);
                     if (aiBusy) return;
+                    scannedByCamRef.current = false;
                     if (e.dataTransfer?.files?.length) void handleAiFile(e.dataTransfer.files);
                   }}
                 >
@@ -354,6 +380,14 @@ export function LineDrawer({
                     )}
                   </div>
                 </div>
+                )}
+                {!camOpen && (
+                  <div className="desk-cam-launch">
+                    <button type="button" className="btn sm" onClick={() => setCamOpen(true)} disabled={aiBusy}>
+                      <Icon name="camera" size={12} /> {t('deskCamera')}
+                    </button>
+                  </div>
+                )}
                 {aiError && (
                   <div
                     role="alert"
@@ -690,7 +724,13 @@ export function LineDrawer({
           aiRead={RAM_BRANDS.includes((line.brand ?? '').trim()) ? null : ((line.brand ?? '').trim() || null)}
           brand={line.brand}
           onConfirm={b => { set({ brand: b, _brandNeedsConfirm: false }); setBrandDialog(false); }}
-          onRetake={showDropzone ? () => { setBrandDialog(false); onAiUpload(); } : undefined}
+          onRetake={showDropzone
+            ? () => {
+              setBrandDialog(false);
+              if (scannedByCamRef.current) setCamOpen(true);
+              else onAiUpload();
+            }
+            : undefined}
           onCancel={() => setBrandDialog(false)}
         />
       )}
