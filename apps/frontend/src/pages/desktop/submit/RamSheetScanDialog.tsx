@@ -37,7 +37,9 @@ const READ_CONCURRENCY = 3;
 // While the bridge is down the chip re-checks on its own, so starting it
 // turns the dialog green without a click.
 const BRIDGE_POLL_MS = 5000;
-const SCAN_DPI = 300;
+// Shown until the bridge reports the resolution it resolved from the scanner
+// (it reads it on the first scan); the office MF460 II's maximum.
+const TYPICAL_DPI = 300;
 
 // How long the last scan took, for the estimate bar. Module-level on purpose:
 // it is a property of this Mac and printer, not of the user, so it doesn't
@@ -377,7 +379,11 @@ export function RamSheetScanDialog({
               {stage === 'scan' && <div className="scan-line" />}
               {stage === 'connect' && <span className="ai-dot" />}
             </div>
-            <WorkingStatus stage={stage} elapsedMs={now - scanStartedAt} />
+            <WorkingStatus
+              stage={stage}
+              elapsedMs={now - scanStartedAt}
+              dpi={(health && health !== 'checking' ? health.dpi : null) ?? TYPICAL_DPI}
+            />
           </div>
         )}
 
@@ -526,7 +532,7 @@ function StepRow({ steps }: { steps: ReturnType<typeof stepStates> }) {
   );
 }
 
-function WorkingStatus({ stage, elapsedMs }: { stage: SheetStage; elapsedMs: number }) {
+function WorkingStatus({ stage, elapsedMs, dpi }: { stage: SheetStage; elapsedMs: number; dpi: number }) {
   const { t } = useT();
   if (stage === 'connect') return <ProgressLine title={t('rsheetConnecting')} />;
   if (stage === 'split') return <ProgressLine title={t('rsheetSplitting')} />;
@@ -535,7 +541,7 @@ function WorkingStatus({ stage, elapsedMs }: { stage: SheetStage; elapsedMs: num
   const pct = Math.min(95, (100 * elapsedMs) / lastScanMs);
   return (
     <ProgressLine
-      title={t('rsheetScanningAt', { dpi: SCAN_DPI })}
+      title={t('rsheetScanningAt', { dpi })}
       sub={t('rsheetScanElapsed', { s, est: Math.round(lastScanMs / 1000) })}
       note={t('rsheetKeepLid')}
       pct={pct}

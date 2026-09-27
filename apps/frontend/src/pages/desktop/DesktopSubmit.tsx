@@ -6,7 +6,7 @@ import { PaymentFields } from '../../components/PaymentFields';
 import type { HandoffMethod } from '../../lib/handoff';
 import { useT } from '../../lib/i18n';
 import { api, createOrder, deleteOrder, MAX_UPLOAD_BYTES } from '../../lib/api';
-import { handleFetchError, showErrorDialog, showWarnToast } from '../../lib/errorToast';
+import { handleFetchError, showErrorDialog, showSuccessToast, showWarnToast } from '../../lib/errorToast';
 import { fmtUSD, fmtDateShort } from '../../lib/format';
 import { poEffectiveCost, parseFeeInput } from '../../lib/poTotals';
 import { useEscapeKey } from '../../lib/useEscapeKey';
@@ -20,7 +20,7 @@ import { eligibleDraftTargets } from './submit/eligibleTargets';
 import { DupPartDialog } from './submit/DupPartDialog';
 import {
   blankLine, brandConfirmPending, duplicatesByIndex, findDuplicatePartNumbers,
-  lineBlockerMessages, type DuplicatePartGroup, type Line,
+  lineBlockerMessages, lineSaveBlock, type DuplicatePartGroup, type Line,
 } from './submit/line';
 import { usePreference } from '../../lib/preferences';
 import { useMarketLookup } from '../../lib/useMarketLookup';
@@ -361,18 +361,68 @@ function OrderForm({
     setActiveIdx(null);
     setSheetOpen(true);
   };
-  const addScannedLines = (patches: Partial<Line>[]) => {
+  // Scanned sticks save to the PO straight away, like a confirmed line (RS-116):
+  // every one that passes the Confirm rule goes up in one save (the first save
+  // creates the PO). The rest stay on the page unsaved, exactly like a
+  // hand-entered line that isn't finished, and are named in the message.
+  const [autoSaving, setAutoSaving] = useState(false);
+  const addScannedLines = async (patches: Partial<Line>[]) => {
     if (!patches.length) return;
+    const added = patches.map(p => ({ ...blankLine('RAM'), ...p }));
     setLastCat('RAM');
     setLines(ls => [
       ...(ls.length === 1 && isPristineLine(ls[0]) ? [] : ls),
-      ...patches.map(p => ({ ...blankLine('RAM'), ...p })),
+      ...added,
     ]);
     setActiveIdx(null);
+
+    const blocks = added.map(lineSaveBlock);
+    const ready = added.filter((_, i) => blocks[i] === null);
+    const needDetails = blocks.filter(b => b === 'fields' || b === 'brand').length;
+    const needSerials = blocks.filter(b => b === 'serials').length;
+    if (!ready.length) {
+      showWarnToast(t('subScanNoneSaved', { details: needDetails, serials: needSerials }));
+      return;
+    }
+    setAutoSaving(true);
+    try {
+      const saved = await persistLines(ready.map(toWireLine), wireMeta());
+      const idByCid = new Map<string, string>();
+      ready.forEach((l, i) => { if (saved.lineIds[i]) idByCid.set(l._cid, saved.lineIds[i]); });
+      setLines(ls => ls.map(l => (idByCid.has(l._cid)
+        ? { ...l, _confirmed: true, _dbId: idByCid.get(l._cid)! }
+        : l)));
+      const held = needDetails + needSerials;
+      if (held) {
+        showWarnToast(t('subScanSavedSome', {
+          n: ready.length, po: saved.orderId, details: needDetails, serials: needSerials,
+        }));
+      } else {
+        showSuccessToast(t('subScanSavedAll', { n: ready.length, po: saved.orderId }));
+      }
+    } catch (e) {
+      // Nothing is lost: the lines stay on the page unsaved, and Confirm or
+      // Submit saves them the usual way.
+      showErrorDialog(e instanceof Error ? e.message : t('subSubmitFailed'));
+    } finally {
+      setAutoSaving(false);
+    }
   };
 
-  const removeLine = (i: number) => {
-    setLines(ls => (ls.length <= 1 ? ls : ls.filter((_, j) => j !== i)));
+  const removeLine = async (i: number) => {
+    const l = lines[i];
+    // A saved line is a row on the PO: take it off there first, or the trash
+    // icon would only hide it here (RS-116 — scanned lines are saved at once).
+    const poId = orderIdRef.current;
+    if (l?._dbId && poId) {
+      try {
+        await api.patch(`/api/orders/${poId}`, { removeLineIds: [l._dbId] });
+      } catch (e) {
+        showErrorDialog(e instanceof Error ? e.message : t('subSubmitFailed'));
+        return;
+      }
+    }
+    setLines(ls => (ls.length <= 1 ? ls : ls.filter(x => x._cid !== l?._cid)));
     setActiveIdx(idx => {
       if (lines.length <= 1) return null;
       if (i === idx) return null;
@@ -445,23 +495,39 @@ function OrderForm({
   // PO is therefore never written — if the first POST fails, orderId stays null
   // and a retry creates it fresh. Returns the resolved id so callers can chain
   // (e.g. evidence upload).
-  const persistLines = async (
+  //
+  // Saves run one at a time (RS-116). The scan auto-save fires on its own, so a
+  // Confirm, a second scan or a Submit can start while it is in flight; reading
+  // `orderId` from state there would let both see "no PO yet" and POST two.
+  // The queue orders them, and the ref carries the new id to the next save
+  // before React re-renders.
+  const orderIdRef = useRef<string | null>(null);
+  orderIdRef.current = orderIdRef.current ?? orderId;
+  const saveQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const persistLines = (
     wireLines: ReturnType<typeof toWireLine>[],
     m: WireMeta,
   ): Promise<{ orderId: string; lineIds: string[] }> => {
-    if (orderId) {
-      const r = await api.patch<{ ok: true; addedLineIds?: string[] }>(
-        '/api/orders/' + orderId, { addLines: wireLines, ...m });
-      return { orderId, lineIds: r.addedLineIds ?? [] };
-    }
-    // Ownership travels only on the create — PATCH can't reassign an owner,
-    // so appends deliberately leave it out.
-    const r = await createOrder({
-      lines: wireLines, ...m,
-      ...(onBehalfOfUserId ? { onBehalfOfUserId } : {}),
-    });
-    setOrderId(r.id);
-    return { orderId: r.id, lineIds: r.lineIds ?? [] };
+    const run = async () => {
+      const current = orderIdRef.current;
+      if (current) {
+        const r = await api.patch<{ ok: true; addedLineIds?: string[] }>(
+          '/api/orders/' + current, { addLines: wireLines, ...m });
+        return { orderId: current, lineIds: r.addedLineIds ?? [] };
+      }
+      // Ownership travels only on the create — PATCH can't reassign an owner,
+      // so appends deliberately leave it out.
+      const r = await createOrder({
+        lines: wireLines, ...m,
+        ...(onBehalfOfUserId ? { onBehalfOfUserId } : {}),
+      });
+      orderIdRef.current = r.id;
+      setOrderId(r.id);
+      return { orderId: r.id, lineIds: r.lineIds ?? [] };
+    };
+    const next = saveQueue.current.then(run, run);
+    saveQueue.current = next.catch(() => undefined);
+    return next;
   };
 
   const wireMeta = (): WireMeta => ({
@@ -485,16 +551,18 @@ function OrderForm({
     // addLine bails earlier still. Nothing should reach this — but this is the
     // single funnel every confirm goes through, so it is where the rule can't
     // be routed around.
-    if (brandConfirmPending(l)) {
+    // lineSaveBlock is the same rule the scan auto-save uses (RS-116).
+    const block = lineSaveBlock(l);
+    if (block === 'brand') {
       showErrorDialog(t('subConfirmBrandThis'));
       throw new Error(t('brandConfirmTitle'));
     }
-    if (!lineReady(l)) {
+    if (block === 'fields') {
       const fields = missingNamesFor(l);
       showErrorDialog(fields ? t('subMissingFieldsThis', { fields }) : t('subFillThisLine'));
       return;
     }
-    const issue = serialIssue(l);
+    const issue = block === 'serials' ? serialIssue(l) : null;
     if (issue) {
       setSerialIssues([{ lineNo: idx + 1, label: lineLabel(l), issue }]);
       // Thrown (not returned) so the drawer's confirm handler keeps the
@@ -716,6 +784,7 @@ function OrderForm({
   // warehouse load → warehouse pick → per-line completeness.
   const submitBlockers: string[] =
     submitting              ? []
+  : autoSaving              ? [t('subScanSaving')]
   : warehouses.length === 0 ? [t('subWarehousesNotLoaded')]
   : !meta.warehouseId       ? [t('reviewPickWarehouseHint')]
   : lineBlockerMessages(lines, t, lineReady, missingNamesFor);
@@ -827,13 +896,14 @@ function OrderForm({
                   <td className="num mono">{lQty && lCost ? fmtUSD(lQty * lCost, locale) : '—'}</td>
                   <td>
                     {isActive && <span className="chip info"><Icon name="edit" size={10} /> {t('subStatusEditing')}</span>}
-                    {!isActive && filled && <span className="chip pos">{t('subStatusReady')}</span>}
-                    {!isActive && !filled && <span className="chip warn">{t('subStatusNeedsInfo')}</span>}
+                    {!isActive && l._confirmed && <span className="chip pos">{t('subStatusSaved')}</span>}
+                    {!isActive && !l._confirmed && filled && <span className="chip">{t('subStatusNotSaved')}</span>}
+                    {!isActive && !l._confirmed && !filled && <span className="chip warn">{t('subStatusNeedsInfo')}</span>}
                   </td>
                   <td>
                     <button
                       className="btn icon sm"
-                      onClick={e => { e.stopPropagation(); removeLine(i); }}
+                      onClick={e => { e.stopPropagation(); void removeLine(i); }}
                       title={t('soRemoveLineTooltip')}
                       disabled={lines.length <= 1}
                       style={lines.length <= 1 ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}

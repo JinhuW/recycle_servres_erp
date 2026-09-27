@@ -1005,6 +1005,20 @@ inventory search, sell-order draft creation.
     - Failures say what to do: bridge not running, printer asleep, scanner busy.
     - Clicking a stick's picture (or its box on the page) opens it full size.
     - The chip re-checks a stopped bridge on its own every 5 s.
+  - **Scanned sticks save to the PO straight away** (v1.182.0, RS-116), as a
+    confirmed line does.
+    - Every stick that passes Confirm's rule (required fields, brand
+      confirmation, DDR5 serials) is saved in one go when **Add** is clicked.
+      The first save creates the draft PO.
+    - The rest stay on the page, marked **Not saved**, and a message says what
+      they still need. The Status column shows **Saved** for lines that are on
+      the PO.
+    - Deleting a saved line also removes it from the PO (this applies to
+      hand-confirmed lines too).
+    - Saves run one at a time, and Submit waits for an auto-save in flight, so
+      there is never a second PO or duplicate rows.
+    - The scanner bridge scans at the scanner's highest flatbed resolution,
+      which it reads from the scanner, and the dialog shows it.
   - **Scans add up** (v1.181.0, RS-115).
     - Each new scan or upload adds its sticks under its own "Scan N" group,
       numbered on from the last stick. **Scan next page** continues the pallet.

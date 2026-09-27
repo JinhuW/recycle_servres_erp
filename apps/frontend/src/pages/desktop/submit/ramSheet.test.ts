@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { ApiError } from '../../../lib/api';
 import type { ScanResponse } from '../../../lib/types';
-import { blankLine } from './line';
+import { blankLine, lineSaveBlock, type Line } from './line';
 import {
   buildRamLinePatches, isPristineLine, runPool, samePartsAsEarlier, stepStates, withRateLimitRetry,
 } from './ramSheet';
@@ -151,5 +151,39 @@ describe('samePartsAsEarlier', () => {
   it('does not flag when nothing was scanned before, or nothing was read', () => {
     expect(samePartsAsEarlier(['M471A4G43MB1-CTD'], [])).toBe(false);
     expect(samePartsAsEarlier(['', '  '], ['M471A4G43MB1-CTD'])).toBe(false);
+  });
+});
+
+// RS-116: the one rule for "can this line be saved to the PO now" — shared
+// by Confirm and by the Scan RAM sheet auto-save so the two can't drift.
+describe('lineSaveBlock', () => {
+  const ram = (over: Partial<Line> = {}): Line => ({
+    ...blankLine('RAM'),
+    brand: 'Samsung', capacity: '32GB', generation: 'DDR4', type: 'Laptop',
+    classification: 'SODIMM', rank: '2Rx8', speed: '2666', partNumber: 'M471A4G43MB1-CTD',
+    qty: 1, unitCost: '25', condition: 'Pulled — Tested',
+    ...over,
+  });
+
+  it('lets a complete DDR4 stick save', () => {
+    expect(lineSaveBlock(ram())).toBeNull();
+  });
+
+  it('holds a Micron stick without its chip # for fields', () => {
+    expect(lineSaveBlock(ram({ brand: 'Micron', partNumber: 'MTA36ASF4G72PZ-2G6D1QI' }))).toBe('fields');
+    expect(lineSaveBlock(ram({ brand: 'Micron', chipNumber: 'D9ZFW' }))).toBeNull();
+  });
+
+  it('holds a stick missing its cost for fields', () => {
+    expect(lineSaveBlock(ram({ unitCost: '' }))).toBe('fields');
+  });
+
+  it('holds DDR5 for serials — a scan never reads serial numbers', () => {
+    expect(lineSaveBlock(ram({ generation: 'DDR5' }))).toBe('serials');
+    expect(lineSaveBlock(ram({ generation: 'DDR5', serialNumber: 'S1' }))).toBeNull();
+  });
+
+  it('holds a brand the AI could not name until it is confirmed', () => {
+    expect(lineSaveBlock(ram({ brand: 'Other', _brandNeedsConfirm: true, chipNumber: 'X' }))).toBe('brand');
   });
 });
