@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-122](./RS-122-part-number-chip-map-auto-fills-a-ram-line-s-chip.md) | done | story | P2 | Part number → chip # map auto-fills a RAM line's chip # | — |
+| [RS-123](./RS-123-web-form-submissions-inbox-ram4cash-recycleservers.md) | in-review | story | P2 | Web form submissions inbox (ram4cash + recycleservers) | 1.187.0 |
+| [RS-122](./RS-122-part-number-chip-map-auto-fills-a-ram-line-s-chip.md) | done | story | P2 | Part number → chip # map auto-fills a RAM line's chip # | 1.186.0 |
 | [RS-121](./RS-121-desk-camera-box-follows-the-ram-stick.md) | done | story | P2 | Desk camera box follows the RAM stick | 1.185.0 |
 | [RS-120](./RS-120-desk-scanner-uploads-the-whole-frame-instead-of-just.md) | done | bug | P1 | Desk scanner crops the RAM stick out of the camera frame | 1.184.1 |
 | [RS-119](./RS-119-desk-scanner-continuity-camera-auto-captures-a-ram-l.md) | done | story | P2 | Desk scanner: Continuity Camera auto-captures a RAM label into the line drawer | 1.184.0 |

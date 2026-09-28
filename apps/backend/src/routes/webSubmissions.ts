@@ -1,0 +1,327 @@
+// Manager-only inbox for the public website forms (routes/publicForms.ts):
+//   GET    /api/web-submissions            list, filter by site/status/q, keyset paged
+//   GET    /api/web-submissions/:id        one submission with its photos
+//   PATCH  /api/web-submissions/:id        triage: status, staff note
+//   POST   /api/web-submissions/:id/convert  a ram4cash sell lot → Draft PO
+//
+// Self-applies authMiddleware + requireManager (tracker.ts pattern), so
+// index.ts mounts it with a single app.route().
+
+import { Hono } from 'hono';
+import { authMiddleware } from '../auth';
+import { getDb } from '../db';
+import { log } from '../lib/log';
+import { requireManager } from '../lib/role';
+import { clampLimit, decodeCursor, encodeCursor, escapeLike } from '../lib/pagination';
+import { copyAttachment, deleteAttachments } from '../r2';
+import { insertDraftOrderTx } from '../services/orderDraft';
+import { syncOrderCategory } from '../services/orderCategory';
+import { syncOrderGoodsTotal } from '../services/orderGoodsTotal';
+import { writeOrderEvent } from '../services/orderAudit';
+import { isoDatePlus, loadCrmSettings } from '../services/supplierCrm';
+import type { SellLotPayload } from './publicForms';
+import type { Env, User } from '../types';
+
+const webSubmissions = new Hono<{ Bindings: Env; Variables: { user: User } }>()
+  .use('*', authMiddleware)
+  .use('*', requireManager);
+
+const STATUSES = ['new', 'contacted', 'converted', 'archived', 'spam'] as const;
+type Status = (typeof STATUSES)[number];
+const SITES = ['ram4cash', 'recycleservers'] as const;
+
+// RAM `type` is the tier the DIMM class implies (migration 0027); the form
+// only knows the class.
+const RAM_TYPE: Record<string, string> = {
+  RDIMM: 'Server', LRDIMM: 'Server', UDIMM: 'Desktop', SODIMM: 'Laptop',
+};
+
+type Row = {
+  id: string; site: string; kind: string; status: Status;
+  name: string | null; company: string | null; email: string; phone: string | null;
+  notes: string | null; source: string | null; payload: Record<string, unknown>;
+  order_id: string | null; staff_note: string | null;
+  handled_by: string | null; handled_by_name: string | null;
+  photo_count: number; created_at: Date; updated_at: Date;
+};
+
+function view(r: Row) {
+  return {
+    id: r.id,
+    site: r.site,
+    kind: r.kind,
+    status: r.status,
+    name: r.name,
+    company: r.company,
+    email: r.email,
+    phone: r.phone,
+    notes: r.notes,
+    source: r.source,
+    payload: r.payload,
+    orderId: r.order_id,
+    staffNote: r.staff_note,
+    handledBy: r.handled_by ? { id: r.handled_by, name: r.handled_by_name } : null,
+    photoCount: Number(r.photo_count),
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+webSubmissions.get('/', async (c) => {
+  const sql = getDb(c.env);
+  const status = c.req.query('status');
+  const site = c.req.query('site');
+  const q = c.req.query('q')?.trim();
+  const limit = clampLimit(c.req.query('limit'), 50, 200);
+  const cursor = decodeCursor(c.req.query('cursor'));
+
+  const statusFrag = STATUSES.includes(status as Status) ? sql`w.status = ${status!}` : sql`TRUE`;
+  const siteFrag = SITES.includes(site as (typeof SITES)[number]) ? sql`w.site = ${site!}` : sql`TRUE`;
+  const qFrag = q
+    ? sql`(w.id ILIKE ${'%' + escapeLike(q) + '%'} OR w.email ILIKE ${'%' + escapeLike(q) + '%'}
+           OR w.name ILIKE ${'%' + escapeLike(q) + '%'} OR w.company ILIKE ${'%' + escapeLike(q) + '%'})`
+    : sql`TRUE`;
+  const cursorFrag = cursor
+    ? sql`(w.created_at, w.id) < (${String(cursor.ts)}::timestamptz, ${cursor.id})`
+    : sql`TRUE`;
+
+  const rows = await sql<Row[]>`
+    SELECT w.*, u.name AS handled_by_name,
+           (SELECT COUNT(*) FROM web_submission_photos p WHERE p.submission_id = w.id)::int AS photo_count
+    FROM web_submissions w
+    LEFT JOIN users u ON u.id = w.handled_by
+    WHERE ${statusFrag} AND ${siteFrag} AND ${qFrag} AND ${cursorFrag}
+    ORDER BY w.created_at DESC, w.id DESC
+    LIMIT ${limit + 1}
+  `;
+  const page = rows.slice(0, limit);
+  const last = page[page.length - 1];
+  const nextCursor = rows.length > limit && last
+    ? encodeCursor({ ts: new Date(last.created_at).toISOString(), id: last.id })
+    : null;
+
+  // Tab counts follow the site and search filters but not the status one, so
+  // every tab shows what it would list.
+  const counts = await sql<{ status: Status; n: number }[]>`
+    SELECT w.status, COUNT(*)::int AS n FROM web_submissions w
+    WHERE ${siteFrag} AND ${qFrag}
+    GROUP BY w.status
+  `;
+  const byStatus = Object.fromEntries(STATUSES.map(s => [s, 0])) as Record<Status, number>;
+  for (const r of counts) byStatus[r.status] = r.n;
+
+  return c.json({ items: page.map(view), nextCursor, counts: byStatus });
+});
+
+async function loadOne(sql: ReturnType<typeof getDb>, id: string) {
+  const rows = await sql<Row[]>`
+    SELECT w.*, u.name AS handled_by_name,
+           (SELECT COUNT(*) FROM web_submission_photos p WHERE p.submission_id = w.id)::int AS photo_count
+    FROM web_submissions w
+    LEFT JOIN users u ON u.id = w.handled_by
+    WHERE w.id = ${id}
+  `;
+  if (!rows[0]) return null;
+  const photos = await sql<{
+    id: string; line_index: number; filename: string; mime_type: string; delivery_url: string;
+  }[]>`
+    SELECT id, line_index, filename, mime_type, delivery_url
+    FROM web_submission_photos WHERE submission_id = ${id}
+    ORDER BY line_index, position, created_at
+  `;
+  return {
+    ...view(rows[0]),
+    photos: photos.map(p => ({
+      id: p.id, lineIndex: p.line_index, filename: p.filename, mimeType: p.mime_type, url: p.delivery_url,
+    })),
+  };
+}
+
+webSubmissions.get('/:id', async (c) => {
+  const one = await loadOne(getDb(c.env), c.req.param('id'));
+  if (!one) return c.json({ error: 'Not found' }, 404);
+  return c.json({ submission: one });
+});
+
+webSubmissions.patch('/:id', async (c) => {
+  const id = c.req.param('id');
+  const body = (await c.req.json().catch(() => null)) as { status?: unknown; staffNote?: unknown } | null;
+  if (!body || typeof body !== 'object') return c.json({ error: 'JSON body required' }, 400);
+  if (body.status !== undefined && !STATUSES.includes(body.status as Status)) {
+    return c.json({ error: `status must be one of ${STATUSES.join(', ')}` }, 400);
+  }
+  // 'converted' is what convert sets; picking it by hand would claim a PO
+  // that doesn't exist.
+  if (body.status === 'converted') return c.json({ error: 'use Create Draft PO to convert' }, 400);
+  if (body.staffNote !== undefined && body.staffNote !== null && typeof body.staffNote !== 'string') {
+    return c.json({ error: 'staffNote must be a string' }, 400);
+  }
+
+  const sql = getDb(c.env);
+  const status = (body.status as Status | undefined) ?? null;
+  const hasNote = body.staffNote !== undefined;
+  const note = typeof body.staffNote === 'string' ? body.staffNote.trim().slice(0, 2000) || null : null;
+  const updated = await sql`
+    UPDATE web_submissions SET
+      status = COALESCE(${status}, status),
+      staff_note = CASE WHEN ${hasNote} THEN ${note} ELSE staff_note END,
+      handled_by = ${c.var.user.id},
+      updated_at = NOW()
+    WHERE id = ${id}
+    RETURNING id
+  `;
+  if (updated.length === 0) return c.json({ error: 'Not found' }, 404);
+  return c.json({ submission: await loadOne(sql, id) });
+});
+
+webSubmissions.post('/:id/convert', async (c) => {
+  const id = c.req.param('id');
+  const me = c.var.user;
+  const sql = getDb(c.env);
+
+  const [sub] = await sql<{ kind: string; order_id: string | null; payload: SellLotPayload }[]>`
+    SELECT kind, order_id, payload FROM web_submissions WHERE id = ${id}
+  `;
+  if (!sub) return c.json({ error: 'Not found' }, 404);
+  if (sub.kind !== 'sell_lot') return c.json({ error: 'only a sell lot can become a PO' }, 400);
+  if (sub.order_id) return c.json({ error: `already converted to ${sub.order_id}`, orderId: sub.order_id }, 409);
+
+  const p = sub.payload;
+  const photos = await sql<{
+    line_index: number; filename: string; size_bytes: number; mime_type: string;
+    storage_key: string; delivery_url: string;
+  }[]>`
+    SELECT line_index, filename, size_bytes, mime_type, storage_key, delivery_url
+    FROM web_submission_photos WHERE submission_id = ${id}
+    ORDER BY line_index, position, created_at
+  `;
+
+  // The PO owns copies, so deleting a photo off the PO never breaks the
+  // submission. Copied before the transaction; cleaned up if it fails.
+  const copies: { line: number; filename: string; size: number; mime: string; storageKey: string; deliveryUrl: string }[] = [];
+  const cleanup = () => deleteAttachments(c.env, copies.map(x => x.storageKey))
+    .catch(e => log.warn('web submission convert cleanup', e));
+  const prefix = `web-submissions/${id}/po`;
+  for (const ph of photos) {
+    const r = await copyAttachment(c.env, ph.storage_key, ph.delivery_url, prefix)
+      .catch(e => { log.error('web submission photo copy', e); return null; });
+    if (!r) {
+      await cleanup();
+      return c.json({ error: 'photo copy failed' }, 502);
+    }
+    copies.push({
+      line: ph.line_index, filename: ph.filename, size: ph.size_bytes, mime: ph.mime_type,
+      storageKey: r.storageKey, deliveryUrl: r.deliveryUrl,
+    });
+  }
+
+  const categories = [...new Set(p.lines.map(l => (l.category === 'CPU' ? 'Other' : l.category)))];
+  const crm = await loadCrmSettings(sql);
+  const [owner] = await sql<{ default_warehouse_id: string | null }[]>`
+    SELECT default_warehouse_id FROM users WHERE id = ${me.id}
+  `;
+
+  let orderId: string;
+  try {
+    orderId = await sql.begin(async (tx) => {
+      // Re-checked under a row lock: two managers clicking at once must not
+      // mint two POs for one lot.
+      const [live] = await tx<{ order_id: string | null }[]>`
+        SELECT order_id FROM web_submissions WHERE id = ${id} FOR UPDATE
+      `;
+      if (live?.order_id) throw new Error(`__ALREADY__${live.order_id}`);
+
+      // One house-account supplier per seller. The unique index is on the
+      // generated match_key (alnum(name) + zip), so two spellings of one email
+      // that normalise the same fall into the same row instead of a 23505.
+      const supplier = (await tx<{ id: string }[]>`
+        INSERT INTO suppliers (name, email, owner_id, source, status, supplies,
+                               next_follow_up_at, created_by)
+        VALUES (${p.email}, ${p.email}, NULL, ${p.source}, 'prospect',
+                ${categories}, ${isoDatePlus(crm.cadenceDays.prospect)}, ${me.id})
+        ON CONFLICT (owner_id, match_key) DO UPDATE SET last_contacted_at = NOW()
+        RETURNING id
+      `)[0];
+
+      const pickup = p.handoff === 'pickup';
+      const notes = [
+        `Web submission ${id} · ram4cash.com · ${pickup ? `cash pickup (${p.pickup_location ?? '?'})` : `PayPal ${p.email}`}`,
+        p.notes,
+      ].filter(Boolean).join('\n');
+      const orderId = await insertDraftOrderTx(tx, {
+        ownerId: me.id,
+        actorId: me.id,
+        warehouseId: owner?.default_warehouse_id ?? null,
+        payment: 'company',
+        notes,
+        source: p.source === 'web' ? 'other' : p.source,
+        supplierId: supplier.id,
+      });
+      // Nobody bought this on commission, and the seller already chose how to
+      // be paid: PayPal upfront for a shipped lot, cash at a pickup.
+      await tx`
+        UPDATE orders SET
+          payment_method = ${pickup ? 'cash' : 'paypal'},
+          handoff_method = ${pickup ? 'pickup' : null},
+          commission_rate = 0
+        WHERE id = ${orderId}
+      `;
+
+      for (let i = 0; i < p.lines.length; i++) {
+        const l = p.lines[i];
+        const f = l.fields;
+        // CPU is not an enabled category — it files under Other by item type,
+        // the way the PO form does it.
+        const category = l.category === 'CPU' ? 'Other' : l.category;
+        const row = (await tx<{ id: string }[]>`
+          INSERT INTO order_lines (
+            order_id, category, brand, capacity, type, classification, rank, speed,
+            interface, form_factor, description, item_type, part_number, condition,
+            qty, unit_cost, status, position
+          ) VALUES (
+            ${orderId}, ${category}, ${f.brand ?? null}, ${f.capacity ?? null},
+            ${l.category === 'RAM' && f.classification ? RAM_TYPE[f.classification] ?? null : null},
+            ${l.category === 'RAM' ? f.classification ?? null : null},
+            ${f.rank ?? null}, ${f.speed ?? null},
+            ${f.interface ?? null}, ${f.form_factor ?? null}, ${f.description ?? null},
+            ${l.category === 'CPU' ? 'CPU' : null}, ${f.part_number ?? null}, 'Pulled — Untested',
+            ${l.qty}, 0, 'Draft', ${i}
+          )
+          RETURNING id
+        `)[0];
+        await writeOrderEvent(tx, orderId, me.id, 'line_added', {
+          lineId: row.id, category, partNumber: f.part_number ?? null, qty: l.qty, unitCost: 0,
+        });
+        let pos = 0;
+        for (const u of copies.filter(x => x.line === i)) {
+          await tx`
+            INSERT INTO order_line_photos
+              (order_line_id, order_id, filename, size_bytes, mime_type, storage_key, delivery_url, position, uploaded_by)
+            VALUES
+              (${row.id}::uuid, ${orderId}, ${u.filename}, ${u.size}, ${u.mime},
+               ${u.storageKey}, ${u.deliveryUrl}, ${pos++}, ${me.id})
+          `;
+        }
+      }
+
+      // No autoTrackParts: an anonymous part number must not seed ref_prices.
+      await syncOrderCategory(tx, orderId);
+      await syncOrderGoodsTotal(tx, orderId, true);
+      await tx`
+        UPDATE web_submissions
+        SET order_id = ${orderId}, status = 'converted', handled_by = ${me.id}, updated_at = NOW()
+        WHERE id = ${id}
+      `;
+      return orderId;
+    });
+  } catch (e) {
+    await cleanup();
+    const m = e instanceof Error ? /^__ALREADY__(.+)$/.exec(e.message) : null;
+    if (m) return c.json({ error: `already converted to ${m[1]}`, orderId: m[1] }, 409);
+    throw e;
+  }
+
+  return c.json({ orderId, submission: await loadOne(sql, id) }, 201);
+});
+
+export default webSubmissions;

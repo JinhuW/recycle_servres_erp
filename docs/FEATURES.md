@@ -941,6 +941,19 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   `/api/coordinator` proxy — until that facade is deployed the cards read
   "fleet view unavailable" and the rest of the page works (v1.140.0).
 
+- **Web submissions** — the manager inbox for the public website forms
+  (v1.187.0). The ram4cash.com sell form (`POST /api/public/intake`) and the
+  recycleservers.com quote form (`POST /api/public/quote`) each store a
+  `WS-nnnn` row and notify managers; nothing anonymous touches orders. The page
+  lists them by status (new / contacted / converted / archived / spam) with
+  counts, a site filter and search; a submission opens with its details, line
+  photos, a status + staff-note triage panel and a reply-by-email link. **Create
+  Draft PO** converts a sell lot once into a Draft PO owned by the clicking
+  manager (lines at cost 0, photos copied, seller filed as a house-account
+  supplier with source `web`, PayPal or cash + pickup per the seller's choice).
+  Both endpoints allow 5 submissions a minute per IP and drop a filled honeypot
+  silently.
+
 ## MCP and OAuth connectors
 
 `/api/mcp` is Bearer-only and CSRF-exempt. Tools: market read/write, sellable

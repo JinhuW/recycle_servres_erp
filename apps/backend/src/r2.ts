@@ -5,6 +5,7 @@
 import {
   S3Client,
   PutObjectCommand,
+  CopyObjectCommand,
   DeleteObjectCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
@@ -130,6 +131,41 @@ export async function getAttachmentBytes(env: Env, storageKey: string): Promise<
     });
     return null;
   }
+}
+
+/**
+ * Server-side copy of an existing object under a new prefix, for a record that
+ * must own its bytes independently of the original (a converted web
+ * submission's photos, which the PO may later delete). A stub key mints a new
+ * stub and keeps the delivery URL, as uploadAttachment does in dev/tests.
+ */
+export async function copyAttachment(
+  env: Env,
+  storageKey: string,
+  deliveryUrl: string,
+  prefix: string,
+): Promise<UploadResult> {
+  const s3 = client(env);
+  if (storageKey.startsWith('stub-') || !s3) {
+    return { storageKey: 'stub-' + crypto.randomUUID(), deliveryUrl, provider: 'stub' };
+  }
+  const base = storageKey.split('/').pop() ?? 'photo';
+  // Drop the source's own uuid- prefix so names don't stack on every copy.
+  const safeName = base.replace(/^[0-9a-f-]{36}-/i, '');
+  const key = `${prefix}/${crypto.randomUUID()}-${safeName}`;
+  await s3.send(
+    new CopyObjectCommand({
+      Bucket: env.R2_BUCKET,
+      Key: key,
+      CopySource: `${env.R2_BUCKET}/${encodeURIComponent(storageKey).replace(/%2F/g, '/')}`,
+    }),
+    { abortSignal: AbortSignal.timeout(15_000) },
+  );
+  return {
+    storageKey: key,
+    deliveryUrl: `${env.R2_ATTACHMENTS_PUBLIC_URL!.replace(/\/$/, '')}/${key}`,
+    provider: 'r2',
+  };
 }
 
 export async function deleteAttachment(env: Env, storageKey: string): Promise<void> {
