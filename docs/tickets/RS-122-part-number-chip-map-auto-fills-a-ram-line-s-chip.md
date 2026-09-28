@@ -2,13 +2,13 @@
 id: RS-122
 title: Part number → chip # map auto-fills a RAM line's chip #
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-27
 reporter: Jinhu
 branch: feat/part-chip-map
-pr:
-version:
+pr: "#422"
+version: 1.186.0
 related: []
 ---
 
