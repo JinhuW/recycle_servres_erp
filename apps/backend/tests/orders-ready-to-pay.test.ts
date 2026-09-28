@@ -5,6 +5,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, SOFIA, MARCUS } from './helpers/auth';
+import { firstCustomerId } from './helpers/fixtures';
 
 const BODY = {
   paypalTxnId: 'TESTPAYTXN0000001', category: 'RAM', warehouseId: 'WH-LA1',
@@ -37,11 +38,6 @@ async function orderAt(stage: 'reviewing' | 'ready_to_pay' | 'done') {
   if (stage !== 'reviewing') expect((await advance(alex.token, id)).status).toBe(200);   // → ready_to_pay
   if (stage === 'done') expect((await advance(alex.token, id)).status).toBe(200);        // → done
   return { id, marcus, alex };
-}
-
-async function firstCustomerId(token: string): Promise<string> {
-  const r = await api<{ items: { id: string }[] }>('GET', '/api/customers', { token });
-  return r.body.items[0].id;
 }
 
 describe('Ready to Pay sits between Reviewing and Done', () => {

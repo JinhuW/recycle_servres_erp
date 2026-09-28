@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { getDb } from '../db';
 import { clampLimit } from '../lib/pagination';
 import { effectiveRole } from '../lib/role';
-import type { SqlLike } from '../services/orderAudit';
+import type { SqlLike } from '../db';
 import type { Env, User } from '../types';
 
 const warehouses = new Hono<{ Bindings: Env; Variables: { user: User } }>();

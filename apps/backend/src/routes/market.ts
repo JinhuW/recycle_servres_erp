@@ -215,6 +215,58 @@ market.post('/lookup', async (c) => {
   return c.json({ targetMargin: TARGET_MARGIN, items });
 });
 
+// Part number → chip #, learnt from past PO lines, so the capture screens can
+// fill a blank chip # instead of it being retyped on every line. Workspace-wide
+// on purpose: a chip marking is a fact about the part, not about anyone's order.
+// Votes are per PO — one lot split across many rows would otherwise outvote
+// every other PO — and a tie goes to the most recent line. Keyed by the asked
+// spelling for the same deploy-skew reason as /lookup.
+market.post('/chips', async (c) => {
+  const sql = getDb(c.env);
+  const body = (await c.req.json().catch(() => null)) as
+    | { partNumbers?: unknown }
+    | null;
+  const raw = Array.isArray(body?.partNumbers) ? body!.partNumbers : null;
+  if (!raw) return c.json({ error: 'partNumbers must be an array' }, 400);
+  if (raw.length > LOOKUP_MAX) {
+    return c.json({ error: `at most ${LOOKUP_MAX} part numbers per lookup` }, 413);
+  }
+
+  const asked = new Map<string, string[]>();
+  for (const p of raw) {
+    if (typeof p !== 'string') continue;
+    const key = canonPartNumberJs(p);
+    if (!key) continue;
+    const under = asked.get(key);
+    if (under) under.push(p); else asked.set(key, [p]);
+  }
+  const canon = [...asked.keys()];
+  if (canon.length === 0) return c.json({ items: {} });
+
+  const canonCol = canonPartCol(sql, sql`l.part_number`);
+  const rows = await sql<{ canon: string; chip: string }[]>`
+    SELECT DISTINCT ON (canon) canon, chip FROM (
+      SELECT ${canonCol} AS canon, BTRIM(l.chip_number) AS chip,
+             COUNT(DISTINCT l.order_id) AS n, MAX(l.created_at) AS last
+        FROM order_lines l
+        JOIN orders o ON o.id = l.order_id
+       WHERE ${canonCol} = ANY(${canon})
+         AND BTRIM(COALESCE(l.chip_number, '')) <> ''
+         AND o.archived_at IS NULL
+       GROUP BY 1, 2
+    ) t
+    ORDER BY canon, n DESC, last DESC
+  `;
+
+  const items: Record<string, string> = {};
+  for (const r of rows) {
+    const under = asked.get(canonPartNumberJs(r.canon));
+    if (!under) continue;
+    for (const spelling of under) items[spelling] = r.chip;
+  }
+  return c.json({ items });
+});
+
 // Manual price entry from the Market page. Manager-only; auth + CSRF are
 // handled by the mounted middleware chain. Records one row in
 // ref_price_events and bumps ref_prices.last_price* via appendPriceEvent.

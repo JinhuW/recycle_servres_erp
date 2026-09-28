@@ -5,6 +5,7 @@ import { useT } from '../../lib/i18n';
 import { api, ApiError } from '../../lib/api';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { fmtUSD, fmtUSD0, fmtDate, relTime } from '../../lib/format';
+import { lineSpecLabel } from '../../lib/lineGroups';
 import { LINE_STATUSES, statusTone } from '../../lib/status';
 import { useMarketLookup, type ResolvedMarketValue } from '../../lib/useMarketLookup';
 import { PartNumberField } from '../../components/PartNumberField';
@@ -119,8 +120,7 @@ type LinkedSellOrder = {
 type RefMatch = ResolvedMarketValue;
 
 export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const [item, setItem] = useState<DetailRow | null>(null);
   const [events, setEvents] = useState<Event[]>([]);
   const [tab, setTab] = useState<Tab>('details');
@@ -220,10 +220,7 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
   const lossy   = sellPrice > 0 && sellPrice < unitCost;
 
   const cat = item.category;
-  const itemTitle = cat === 'RAM' ? `${item.brand ?? ''} ${item.capacity ?? ''} ${item.generation ?? ''}`.trim()
-                  : cat === 'SSD' ? `${item.brand ?? ''} ${item.capacity ?? ''} ${item.interface ?? ''}`.trim()
-                  : cat === 'HDD' ? `${item.brand ?? ''} ${item.capacity ?? ''} ${item.rpm ? item.rpm + 'rpm' : ''}`.trim()
-                  : (item.description ?? 'Inventory item');
+  const itemTitle = lineSpecLabel(item) ?? (item.description ?? 'Inventory item');
 
   // Aggregate peers by warehouse for the Stock card.
   const stock = (() => {
@@ -461,8 +458,7 @@ function DetailsPanel({
   currentWhId: string | null;
   linkedSellOrders: LinkedSellOrder[];
 }) {
-  const { lang, t } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const cat = item.category;
   return (
     <>
@@ -768,8 +764,7 @@ function PricingPanel({
   lossy: boolean;
   refMatch: RefMatch | null;
 }) {
-  const { lang, t } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   return (
     <>
       <div className="card">
@@ -927,8 +922,7 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: 'po
 
 // ─── Activity log ────────────────────────────────────────────────────────────
 function HistoryPanel({ events }: { events: Event[] }) {
-  const { lang, t } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   return (
     <div className="card">
       <div className="card-head">
@@ -985,8 +979,7 @@ function SummaryColumn({
   internalNotes: string;
   setInternalNotes: (v: string) => void;
 }) {
-  const { lang, t } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const sellable = draft.status === 'Reviewing' || draft.status === 'Done';
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14, position: 'sticky', top: 16 }}>

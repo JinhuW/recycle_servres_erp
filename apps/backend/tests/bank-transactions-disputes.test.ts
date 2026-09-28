@@ -2,18 +2,13 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api, testEnv } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
+import { NOW, DAY, fakeProvider, type TxnSpec } from './helpers/bankProvider';
 import { syncBankTransactions } from '../src/banktx/sync';
 import { disputeTimeline, normalizeDispute } from '../src/banktx/paypal';
-import type {
-  BankProvider, BankSource, NormalizedDispute, NormalizedTxn,
-} from '../src/banktx/types';
+import type { NormalizedDispute } from '../src/banktx/types';
 
-const NOW = Date.now();
-const DAY = 24 * 60 * 60 * 1000;
 const TXN_A = '7AB12345CD678901E';
 const TXN_IN = '3CD00000INCOMING1';
-
-type TxnSpec = Partial<NormalizedTxn> & { externalId: string; amount: number };
 
 function dispute(over: Partial<NormalizedDispute> & { disputeId: string; txnIds: string[] }): NormalizedDispute {
   return {
@@ -32,36 +27,6 @@ function dispute(over: Partial<NormalizedDispute> & { disputeId: string; txnIds:
     sellerResponseDueAt: null,
     timeline: [],
     ...over,
-  };
-}
-
-// `disputes` is a function so a test can make it throw — the point of hanging
-// it off the provider rather than off fetchSince is that it can fail alone.
-function fakeProvider(
-  source: BankSource,
-  txns: TxnSpec[],
-  disputes?: () => Promise<NormalizedDispute[]>,
-): BankProvider {
-  return {
-    source,
-    async fetchSince() {
-      return {
-        accounts: [{ externalId: `${source}-acct`, name: `${source} acct` }],
-        txns: txns.map((t) => ({
-          source,
-          accountExternalId: `${source}-acct`,
-          postedAt: new Date(NOW - DAY),
-          counterparty: null,
-          description: null,
-          paypalTxnId: source === 'paypal' ? t.externalId : null,
-          category: 'external' as const,
-          settleStatus: 'settled' as const,
-          raw: { id: t.externalId },
-          ...t,
-        })),
-      };
-    },
-    ...(disputes ? { fetchDisputes: disputes } : {}),
   };
 }
 

@@ -544,6 +544,9 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   everywhere — the API does not send them to purchasers.
 - Search matches part number, serial number, brand, description and item type
   (v1.42.0), and the PO number, whole or partial (v1.143.0).
+- After a transfer or add-to-order, the list and its facets reload with every
+  active filter, including Show sold, Hide pending and the attribute chips
+  (v1.179.0).
 - Export honours the row selection, one worksheet per category, with designed
   workbook styling (v1.30.0, v1.31.0). Select/unselect all lots in the current
   filter (v1.19.0).
@@ -665,6 +668,8 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
 
 - Transaction ingest with auto-pair and auto-link (v1.90.0), a background sync
   loop behind a manager-only API (v1.91.0), and a Payments page (v1.92.0).
+  Search waits 200 ms after typing stops; filter chips apply at once
+  (v1.179.0).
 - **Internal Mercury↔PayPal transfers are classified out of the unlinked
   queue** (v1.93.0) by counterparty and Mercury kind rules (v1.94.0).
 - **Ignore rules** (v1.177.0). *Ignore rules* in the page header keeps a
@@ -936,6 +941,19 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   `/api/coordinator` proxy — until that facade is deployed the cards read
   "fleet view unavailable" and the rest of the page works (v1.140.0).
 
+- **Web submissions** — the manager inbox for the public website forms
+  (v1.187.0). The ram4cash.com sell form (`POST /api/public/intake`) and the
+  recycleservers.com quote form (`POST /api/public/quote`) each store a
+  `WS-nnnn` row and notify managers; nothing anonymous touches orders. The page
+  lists them by status (new / contacted / converted / archived / spam) with
+  counts, a site filter and search; a submission opens with its details, line
+  photos, a status + staff-note triage panel and a reply-by-email link. **Create
+  Draft PO** converts a sell lot once into a Draft PO owned by the clicking
+  manager (lines at cost 0, photos copied, seller filed as a house-account
+  supplier with source `web`, PayPal or cash + pickup per the seller's choice).
+  Both endpoints allow 5 submissions a minute per IP and drop a filled honeypot
+  silently.
+
 ## MCP and OAuth connectors
 
 `/api/mcp` is Bearer-only and CSRF-exempt. Tools: market read/write, sellable
@@ -978,10 +996,111 @@ inventory search, sell-order draft creation.
   and the human re-shot the same label. Only timeouts retry; an error from the
   model still fails immediately. Every attempt on one scan shares a single
   45-second budget, so a scan cannot spend two full timeouts on the model.
+- **Scan a whole sheet of RAM at once** (v1.178.0, RS-109). **New order →
+  Scan RAM sheet** takes one flatbed page of sticks, either from the office
+  Canon through the local scanner bridge (`auto_ram_scanner`, loopback
+  `127.0.0.1:47811`) or from an uploaded image.
+  - The page is split into one crop per stick in the browser
+    (`segmentRamSheet` in `@recycle-erp/shared`), and each crop goes through the
+    same `/api/scan/label` RAM pipeline as a single photo.
+  - The dialog shows the page with numbered outlines, and each stick with its
+    fields, confidence and whatever is still missing. Sticks lying against each
+    other are flagged rather than silently read as one.
+  - Purchasers set qty and cost, with an apply-to-all cost. Identical part
+    numbers combine into one line. The lines arrive unconfirmed, with their
+    scan image, so the usual blockers name anything the label couldn't supply.
+  - **Each row on the new order shows its label photo** (v1.183.0, RS-117). The
+    items table puts a 40px thumbnail of the scan (or first saved photo, `+N`
+    when there are more) after the item name. Clicking it opens the full-screen
+    viewer without selecting the row. This works for single scans and for rows
+    the label couldn't fill.
+  - **The dialog shows each stage live** (v1.180.0, RS-114).
+    - A step row runs Connect → Scan page → Find sticks → Read labels.
+    - While the printer works, the page sweeps and the dialog shows elapsed
+      seconds and an estimate bar. Each stick's outline pulses while its label
+      is read, and its row fills in from a placeholder.
+    - **Cancel scan** deletes the printer's job.
+    - Failures say what to do: bridge not running, printer asleep, scanner busy.
+    - Clicking a stick's picture (or its box on the page) opens it full size.
+    - The chip re-checks a stopped bridge on its own every 5 s.
+  - **Scanned sticks save to the PO straight away** (v1.182.0, RS-116), as a
+    confirmed line does.
+    - Every stick that passes Confirm's rule (required fields, brand
+      confirmation, DDR5 serials) is saved in one go when **Add** is clicked.
+      The first save creates the draft PO.
+    - The rest stay on the page, marked **Not saved**, and a message says what
+      they still need. The Status column shows **Saved** for lines that are on
+      the PO.
+    - Deleting a saved line also removes it from the PO (this applies to
+      hand-confirmed lines too).
+    - Saves run one at a time, and Submit waits for an auto-save in flight, so
+      there is never a second PO or duplicate rows.
+    - The scanner bridge scans at the scanner's highest flatbed resolution,
+      which it reads from the scanner, and the dialog shows it.
+  - **Scans add up** (v1.181.0, RS-115).
+    - Each new scan or upload adds its sticks under its own "Scan N" group,
+      numbered on from the last stick. **Scan next page** continues the pallet.
+    - A group can be removed, and **Clear all** empties the table.
+    - A scan whose part numbers were all read before is flagged as possibly the
+      same sheet twice, because combining identical part numbers would
+      double the qty.
 
-> Provider selection is silent: OpenRouter (Gemma 3 27B) when
-> `OPENROUTER_API_KEY` is set, otherwise a deterministic stub. A prod deploy
-> missing the key looks healthy and quietly stubs.
+- **Desk scanner: a live camera in the desktop line drawer** (v1.184.0,
+  RS-119). Meant for an iPhone on an overhead arm used as the Mac's webcam
+  through **Continuity Camera**; any webcam works.
+  - **Camera** under the AI label dropzone swaps it for the live feed. The
+    iPhone camera is picked by itself (its separate Desk View device is
+    skipped); another can be chosen, and the choice is remembered by device
+    label (`scan.cameraLabel`).
+  - **The box follows the stick** (v1.185.0, RS-121). It snaps around the
+    stick found by its green PCB and glides with it (solid border); with no
+    stick found it's a wide dashed default box. Small detection jitter doesn't
+    move it, and a missed detection or two doesn't make it flicker.
+  - **No click to capture.** Four times a second the browser checks the inside
+    of the box at native resolution: text-like edges in view, nothing moving,
+    and focus at its peak. Three such samples in a row (~¾ s) capture one
+    full-resolution frame, flash, beep, and scan it through the same path as a
+    dropped photo (`lib/deskScan.ts`).
+  - **One scan per placement.** A still scene fires once; the next capture
+    needs the scene to change (stick lifted, or a new one). Captures are at
+    least 3 s apart. So a failed scan never loops on the same frame and burns
+    the 20/min scan limit.
+  - **Only the stick is sent** (v1.184.1, RS-120). The captured frame is
+    searched for the green PCB (`findRamStickInPhoto` in
+    `@recycle-erp/shared`), and just the stick — padded so the gold fingers
+    survive, turned upright if it lies vertically — is scanned and becomes the
+    line's scan photo. Desk, cloth and hands are left out. A non-green PCB or a
+    steeply tilted stick isn't found, and the whole frame goes up instead.
+  - A readable scan closes the camera, so swapping sticks can't overwrite the
+    line; an unreadable one leaves it open to re-seat the stick. Brand-confirm
+    **Retake** reopens the camera when the scan came from it.
+  - **Open camera automatically** (`scan.deskCamera`) starts every scanless
+    line's drawer with the camera live, so a pallet goes stick → fields →
+    Confirm → next line.
+- **Chip # fills itself from the part number** (v1.186.0, RS-122). Once a
+  part number's chip # is on record, a RAM line never needs it typed again.
+  The map is learnt from past PO lines (`POST /api/market/chips`): the chip #
+  recorded on the most POs for the canonical part number wins, ties go to the
+  newest, and archived POs don't count. It is workspace-wide, so a purchaser
+  benefits from everyone's lines.
+  - Typing or scanning a part # (desktop drawer, desk scanner, phone form)
+    fills a **blank** chip #. A chip # the user typed is never replaced.
+    Clearing a filled chip # keeps it clear.
+  - Opening an existing line doesn't fill, so an untouched PO never turns
+    dirty or goes back to Draft. Read-only lines never fill.
+  - **Scan RAM sheet** fills known chips before its auto-save, so a Micron
+    stick whose part # is on record saves at once.
+
+> Provider selection is silent: OpenRouter when `OPENROUTER_API_KEY` is set,
+> otherwise a deterministic stub. A prod deploy missing the key looks healthy
+> and quietly stubs. The model is **`openai/gpt-6-luna`** for every image-AI
+> call — labels, receipts, PayPal screenshots (v1.181.0, RS-115; it was
+> `google/gemini-2.5-flash` before, not the Gemma this note used to name). It
+> is tuned for OpenAI: high image detail, minimal reasoning, JSON mode, and
+> an empty answer is asked again once. It reads 300 dpi flatbed scans reliably
+> but is weaker than Gemini on blurry/low-resolution images. Roll back without
+> a deploy by setting `OPENROUTER_OCR_MODEL=google/gemini-2.5-flash` on
+> Railway; a non-OpenAI model gets the old request.
 
 ## The three shells
 
@@ -1012,6 +1131,10 @@ One bundle, three lazy-loaded shells chosen in `App.tsx`: a vendor token in
   past every item already on the order — the screen reopens at the top after
   each line, which made the in-flow row recede a little further with every use.
 - All strings go through `useT()`; the app ships English and Chinese.
+- **Escape closes only the top dialog** (v1.179.0). Desktop dialogs share one
+  Modal. Escape dismisses the dialog on top and leaves the one or the page
+  under it open, is ignored while a dialog is saving, and an autofocused field
+  keeps focus when a dialog opens.
 - User preferences (theme, list-view modes) flow through `lib/preferences.tsx`
   and persist server-side.
 - **A deploy no longer breaks tabs that were already open** (v1.121.1). A

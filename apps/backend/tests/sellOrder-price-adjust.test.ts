@@ -5,6 +5,8 @@ import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
 import { eventsOf } from './helpers/sellOrderEvents';
 import { prorateLines, validateTarget } from '../src/services/sellOrderPriceAdjust';
+import { firstCustomerId } from './helpers/fixtures';
+import { mockFrankfurter } from './helpers/fx';
 
 // Negotiated final-price adjustment: POST /:id/adjust-price prorates the
 // buyer's counter-offer across line unit prices so total === Σ lines holds.
@@ -12,23 +14,6 @@ import { prorateLines, validateTarget } from '../src/services/sellOrderPriceAdju
 
 const RATE_USD_CNY = 7.2154;
 const RATE_TO_USD = 1 / RATE_USD_CNY;
-
-function mockFrankfurter(rate = RATE_USD_CNY, date = '2026-07-22') {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async () =>
-      new Response(
-        JSON.stringify({ amount: 1, base: 'USD', date, rates: { CNY: rate } }),
-        { status: 200 },
-      ),
-    ),
-  );
-}
-
-async function firstCustomerId(token: string): Promise<string> {
-  const r = await api<{ items: { id: string }[] }>('GET', '/api/customers', { token });
-  return r.body.items[0].id;
-}
 
 describe('prorateLines', () => {
   it('hits the target exactly when every qty is 1', () => {
@@ -211,7 +196,7 @@ describe('POST /api/sell-orders/:id/adjust-price', () => {
   });
 
   it('CNY order: native prices sum to the achieved total, USD re-derived at the frozen rate', async () => {
-    mockFrankfurter();
+    mockFrankfurter(RATE_USD_CNY, '2026-07-22');
     const { token } = await loginAs(ALEX);
     const a = await freeSellableLine(token, 2);
     const b = await freeSellableLine(token, 3, new Set([a.id]));

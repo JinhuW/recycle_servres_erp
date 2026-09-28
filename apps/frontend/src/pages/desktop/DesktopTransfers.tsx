@@ -6,7 +6,7 @@ import { Modal } from '../../components/Modal';
 import { statusTone } from '../../lib/status';
 import { TransferManifest, printManifest } from './TransferManifest';
 
-export type TransferLine = {
+type TransferLine = {
   id: string;
   category: string;
   brand: string | null;

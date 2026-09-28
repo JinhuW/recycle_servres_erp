@@ -3,7 +3,7 @@
 // handlers don't each re-implement the query. The fallback is only used when
 // the key is absent — migration 0025 seeds the standard keys.
 
-import type { SqlLike } from '../services/orderAudit';
+import type { SqlLike } from '../db';
 
 export async function getWorkspaceSetting<T>(
   // Takes a transaction handle too: the PO advance guard reads its cutoff from
@@ -21,12 +21,12 @@ export async function getWorkspaceSetting<T>(
 
 // Attachment / evidence upload constraints. Single source for both the
 // generic attachments route and sell-order evidence uploads.
-export const DEFAULT_UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
+const DEFAULT_UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
 // Absolute ceiling for upload_max_bytes regardless of workspace config, and
 // the HTTP-level body-limit cap. Uploads are buffered fully in memory by
 // c.req.formData(), so an unbounded setting risks OOM-killing the container.
 export const UPLOAD_HARD_CAP_BYTES = 50 * 1024 * 1024;
-export const XLSX_MIME =
+const XLSX_MIME =
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 // Stored-XSS guard: attachments land in a public R2 bucket and are served with
@@ -39,7 +39,7 @@ export const XLSX_MIME =
 // render script — and r2.ts forces Content-Disposition: attachment on both.
 // Legacy .xls and macro-enabled .xlsm stay off: they're OLE containers, the
 // standard macro-malware wrapper, and this bucket is public.
-export const DEFAULT_UPLOAD_ALLOWED_MIME = [
+const DEFAULT_UPLOAD_ALLOWED_MIME = [
   'application/pdf', 'image/png', 'image/jpeg', 'image/jpg', 'image/webp',
   XLSX_MIME, 'text/csv',
 ];

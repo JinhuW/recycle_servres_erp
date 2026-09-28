@@ -72,8 +72,8 @@ services:
   backend:
     # Versioned image is opt-in: with APP_VERSION unset this is :latest, which
     # `up -d --build` builds and runs exactly as before — the git-pull refresh
-    # flow is unchanged. scripts/release.sh exports APP_VERSION to build/run a
-    # tagged image instead.
+    # flow is unchanged. Export APP_VERSION to build/run a tagged image
+    # instead.
     image: recycle-erp-backend:${APP_VERSION:-latest}
     build:
       context: .

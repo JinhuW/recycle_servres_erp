@@ -8,6 +8,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
+import { createSellOrderOn } from './helpers/fixtures';
 
 const PN = 'SHAPE-TEST-PN';
 
@@ -42,19 +43,6 @@ async function createReviewing(pur: string, mgr: string): Promise<{ id: string; 
     token: mgr, body: { toStage: 'reviewing' },
   })).status).toBe(200);
   return po;
-}
-
-async function createSellOrderOn(mgr: string, lineId: string): Promise<string> {
-  const customers = await api<{ items: { id: string }[] }>('GET', '/api/customers', { token: mgr });
-  const so = await api<{ id: string }>('POST', '/api/sell-orders', {
-    token: mgr,
-    body: {
-      customerId: customers.body.items[0].id,
-      lines: [{ inventoryId: lineId, category: 'RAM', label: 'x', partNumber: PN, qty: 1, unitPrice: 90 }],
-    },
-  });
-  expect(so.status).toBe(201);
-  return so.body.id;
 }
 
 async function setPreview(token: string, mode: 'as_purchaser' | 'actual'): Promise<void> {
@@ -123,7 +111,7 @@ describe('GET /api/orders/:id/events — archived.removedSellOrderLines', () => 
     const { token: pur } = await loginAs(MARCUS);
     const { token: mgr } = await loginAs(ALEX);
     const { id, lineIds } = await createReviewing(pur, mgr);
-    await createSellOrderOn(mgr, lineIds[0]);
+    await createSellOrderOn(mgr, lineIds[0], PN);
     expect((await api('POST', `/api/orders/${id}/archive`, {
       token: mgr, body: { removeFromSellOrders: true },
     })).status).toBe(200);
@@ -145,7 +133,7 @@ describe('GET /api/orders/:id/events — archived.removedSellOrderLines', () => 
     // Preview scopes reads to the manager's own POs: archive one of those the
     // same way, then read its log in preview.
     const own = await createReviewing(mgr, mgr);
-    await createSellOrderOn(mgr, own.lineIds[0]);
+    await createSellOrderOn(mgr, own.lineIds[0], PN);
     expect((await api('POST', `/api/orders/${own.id}/archive`, {
       token: mgr, body: { removeFromSellOrders: true },
     })).status).toBe(200);
@@ -164,7 +152,7 @@ describe('PATCH /api/orders/:id — sell-order conflict body', () => {
     const { token: pur } = await loginAs(MARCUS);
     const { token: mgr } = await loginAs(ALEX);
     const { id, lineIds } = await createReviewing(pur, mgr);
-    const soId = await createSellOrderOn(mgr, lineIds[0]);
+    const soId = await createSellOrderOn(mgr, lineIds[0], PN);
 
     const blocked = await api<Conflict>('PATCH', `/api/orders/${id}`, {
       token: pur, body: { lines: [{ id: lineIds[0], qty: 6 }] },
@@ -179,7 +167,7 @@ describe('PATCH /api/orders/:id — sell-order conflict body', () => {
     const { token: pur } = await loginAs(MARCUS);
     const { token: mgr } = await loginAs(ALEX);
     const { id, lineIds } = await createReviewing(pur, mgr);
-    const soId = await createSellOrderOn(mgr, lineIds[0]);
+    const soId = await createSellOrderOn(mgr, lineIds[0], PN);
     const remove = () => api<Conflict>('PATCH', `/api/orders/${id}`, {
       token: mgr, body: { removeLineIds: [lineIds[0]] },
     });
@@ -269,7 +257,7 @@ describe('GET /api/inventory/:id/sell-orders', () => {
     const { token: pur } = await loginAs(MARCUS);
     const { token: mgr } = await loginAs(ALEX);
     const { lineIds } = await createReviewing(pur, mgr);
-    const soId = await createSellOrderOn(mgr, lineIds[0]);
+    const soId = await createSellOrderOn(mgr, lineIds[0], PN);
     const list = (token: string) =>
       api<{ items: { id: string }[] }>('GET', `/api/inventory/${lineIds[0]}/sell-orders`, { token });
 
@@ -321,7 +309,7 @@ describe('POST /api/orders/:id/advance — sell-order conflict body', () => {
   it('names the sell order to a manager, but not in preview', async () => {
     const { token: mgr } = await loginAs(ALEX);
     const { id, lineIds } = await createReviewing(mgr, mgr);
-    const soId = await createSellOrderOn(mgr, lineIds[0]);
+    const soId = await createSellOrderOn(mgr, lineIds[0], PN);
     const back = () => api<Conflict>('POST', `/api/orders/${id}/advance`, {
       token: mgr, body: { toStage: 'in_transit' },
     });

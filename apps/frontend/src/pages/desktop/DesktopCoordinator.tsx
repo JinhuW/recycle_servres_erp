@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { ImageLightbox } from '../../components/ImageLightbox';
 import { ApiError } from '../../lib/api';
@@ -122,8 +122,7 @@ where:
 type Props = { showToast?: (msg: string, kind?: 'success' | 'error') => void };
 
 export function DesktopCoordinator({ showToast }: Props) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
 
   const [fleet, setFleet] = useState<FleetDoc | null>(null);
   // The fleet document needs a facade that knows /v1/fleet. An older facade
@@ -442,7 +441,7 @@ function ReviewVolumeCard({ locale, stats }: {
     ? SAMPLE_ALERTS_7D
     : series.slice(-7).reduce((sum, d) => sum + d.alerted, 0);
   const windowTotal = series.reduce((sum, d) => sum + d.reviewed, 0);
-  const fmt = new Intl.NumberFormat(locale);
+  const fmt = useMemo(() => new Intl.NumberFormat(locale), [locale]);
   const value = (n: number | string) => (loading ? '…' : typeof n === 'number' ? fmt.format(n) : n);
 
   return (

@@ -10,6 +10,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
+import { createSellOrderOn } from './helpers/fixtures';
 
 type Realized = {
   soldQty: number; boughtQty: number; revenue: number; cost: number;
@@ -78,19 +79,6 @@ async function listed(id: string, token: string): Promise<List['orders'][number]
   return row!;
 }
 
-async function createSellOrderOn(mgr: string, lineId: string, qty: number, unitPrice: number): Promise<string> {
-  const customers = await api<{ items: { id: string }[] }>('GET', '/api/customers', { token: mgr });
-  const so = await api<{ id: string }>('POST', '/api/sell-orders', {
-    token: mgr,
-    body: {
-      customerId: customers.body.items[0].id,
-      lines: [{ inventoryId: lineId, category: 'RAM', label: 'x', partNumber: PN, qty, unitPrice }],
-    },
-  });
-  expect(so.status).toBe(201);
-  return so.body.id;
-}
-
 async function moveSellOrder(mgr: string, soId: string, to: string): Promise<void> {
   const body = to === 'Closed' ? { to, note: 'x', closeReasonId: 'customer_cancelled' } : { to, note: 'x' };
   expect((await api('POST', `/api/sell-orders/${soId}/status`, { token: mgr, body })).status).toBe(200);
@@ -107,9 +95,9 @@ describe('realized profit on POs', () => {
     expect((await detail(id, mgr)).realized).toBeNull();
     expect((await listed(id, mgr)).realized).toBeNull();
 
-    const shipped = await createSellOrderOn(mgr, lineIds[0], 1, 130);
+    const shipped = await createSellOrderOn(mgr, lineIds[0], PN, 1, 130);
     await moveSellOrder(mgr, shipped, 'Shipped');
-    const cancelled = await createSellOrderOn(mgr, lineIds[0], 1, 500);
+    const cancelled = await createSellOrderOn(mgr, lineIds[0], PN, 1, 500);
     await moveSellOrder(mgr, cancelled, 'Closed');
     expect((await detail(id, mgr)).realized).toBeNull();
     expect((await listed(id, mgr)).realized).toBeNull();
@@ -126,8 +114,8 @@ describe('realized profit on POs', () => {
     const { id, lineIds } = await createReviewing(pur, mgr);
 
     // Line A sells one of four (partial); line B sells out.
-    await moveSellOrder(mgr, await createSellOrderOn(mgr, lineIds[0], 1, 130), 'Done');
-    await moveSellOrder(mgr, await createSellOrderOn(mgr, lineIds[1], 2, 55), 'Done');
+    await moveSellOrder(mgr, await createSellOrderOn(mgr, lineIds[0], PN, 1, 130), 'Done');
+    await moveSellOrder(mgr, await createSellOrderOn(mgr, lineIds[1], PN, 2, 55), 'Done');
 
     const revenue = 130 + 2 * 55;
     const cost = eff(78.5) + 2 * eff(40);
@@ -156,20 +144,20 @@ describe('realized profit on POs', () => {
     const { token: mgr } = await loginAs(ALEX);
     const { id, lineIds } = await createReviewing(pur, mgr);
 
-    await moveSellOrder(mgr, await createSellOrderOn(mgr, lineIds[1], 2, 55), 'Done');
+    await moveSellOrder(mgr, await createSellOrderOn(mgr, lineIds[1], PN, 2, 55), 'Done');
     const before = (await detail(id, mgr)).realized!;
     expect(before.cost).toBeCloseTo(2 * eff(40), 2);
 
     // A partial sale on line A decrements its qty. The fee basis must not
     // follow it, or line B's already-sold units would get dearer.
-    await moveSellOrder(mgr, await createSellOrderOn(mgr, lineIds[0], 1, 130), 'Done');
+    await moveSellOrder(mgr, await createSellOrderOn(mgr, lineIds[0], PN, 1, 130), 'Done');
     const after = (await detail(id, mgr)).realized!;
     // Each figure is rounded to cents on the way out, so the difference of
     // two of them can sit a cent off the exact value.
     expect(after.cost - before.cost).toBeCloseTo(eff(78.5), 1);
 
     // Selling the rest of A allocates exactly the PO's fees, no more.
-    await moveSellOrder(mgr, await createSellOrderOn(mgr, lineIds[0], 3, 130), 'Done');
+    await moveSellOrder(mgr, await createSellOrderOn(mgr, lineIds[0], PN, 3, 130), 'Done');
     const all = (await detail(id, mgr)).realized!;
     expect(all.soldQty).toBe(6);
     expect(all.cost).toBeCloseTo(GOODS + FEES, 2);
@@ -182,7 +170,7 @@ describe('realized profit on POs', () => {
       { qty: 4, unitCost: 78.5, sellPrice: 50 },
       { qty: 2, unitCost: 40, sellPrice: 30 },
     ]);
-    await moveSellOrder(mgr, await createSellOrderOn(mgr, lineIds[1], 2, 55), 'Done');
+    await moveSellOrder(mgr, await createSellOrderOn(mgr, lineIds[1], PN, 2, 55), 'Done');
 
     const r = (await detail(id, mgr)).realized!;
     expect(r.commission).toBe(0);
@@ -196,7 +184,7 @@ describe('realized profit on POs', () => {
       { qty: 4, unitCost: 78.5, sellPrice: 120 },
       { qty: 2, unitCost: 40, sellPrice: null },
     ]);
-    await moveSellOrder(mgr, await createSellOrderOn(mgr, lineIds[1], 2, 55), 'Done');
+    await moveSellOrder(mgr, await createSellOrderOn(mgr, lineIds[1], PN, 2, 55), 'Done');
 
     const r = (await detail(id, mgr)).realized!;
     // What B sold for and cost is real money and counts in full...
@@ -216,7 +204,7 @@ describe('realized profit on POs', () => {
     // The lot was talked down to $300 for lines that list at $394.
     const LOT = 300;
     const { id, lineIds } = await createReviewing(pur, mgr, LINES, LOT);
-    await moveSellOrder(mgr, await createSellOrderOn(mgr, lineIds[1], 2, 55), 'Done');
+    await moveSellOrder(mgr, await createSellOrderOn(mgr, lineIds[1], PN, 2, 55), 'Done');
 
     const r = (await detail(id, mgr)).realized!;
     // The price and the fee are both spread cost-weighted over the lines.
@@ -232,7 +220,7 @@ describe('realized profit on POs', () => {
     const { token: pur } = await loginAs(MARCUS);
     const { token: mgr } = await loginAs(ALEX);
     const { id, lineIds } = await createReviewing(pur, mgr);
-    await moveSellOrder(mgr, await createSellOrderOn(mgr, lineIds[1], 2, 55), 'Done');
+    await moveSellOrder(mgr, await createSellOrderOn(mgr, lineIds[1], PN, 2, 55), 'Done');
 
     expect((await detail(id, mgr)).realized).not.toBeNull();
     expect(await detail(id, pur)).not.toHaveProperty('realized');
@@ -241,7 +229,7 @@ describe('realized profit on POs', () => {
     // Previewing as purchaser also narrows reads to the manager's own POs,
     // so the preview case needs a PO the manager owns.
     const own = await createReviewing(mgr, mgr);
-    await moveSellOrder(mgr, await createSellOrderOn(mgr, own.lineIds[0], 1, 130), 'Done');
+    await moveSellOrder(mgr, await createSellOrderOn(mgr, own.lineIds[0], PN, 1, 130), 'Done');
     expect((await detail(own.id, mgr)).realized).not.toBeNull();
 
     expect((await api('PATCH', '/api/me/preferences', {

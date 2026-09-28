@@ -10,6 +10,8 @@ import type { OrderSummary } from './types';
 const CSRF_HEADER = 'X-Requested-By';
 const CSRF_VALUE = 'recycle-erp';
 
+export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+
 // Counted here because this is where the requests are. lib/timing.ts reads them
 // at report time; the dependency runs that way only, so the two modules do not
 // form a cycle. `refreshes` is the number the 60-minute access token was meant
@@ -126,13 +128,8 @@ async function request<T>(
     if (refreshed) {
       res = await doFetch(method, path, opts, body);
     }
-    if (res.status === 401) {
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('auth:unauthorized'));
-      }
-      const text = await res.text();
-      const json = text ? safeJson(text) : null;
-      throw new ApiError(401, errMsg(json, 401), { path, method, requestId: reqId(res) }, json);
+    if (res.status === 401 && typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('auth:unauthorized'));
     }
   }
 

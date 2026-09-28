@@ -212,8 +212,7 @@ function summarize(event: SellOrderEvent, locale: string, t: TFn): React.ReactNo
 }
 
 export function SellOrderHistory({ sellOrderId, refreshKey }: Props) {
-  const { lang, t } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const [events, setEvents] = useState<SellOrderEvent[] | null>(null);
 
   useEffect(() => {

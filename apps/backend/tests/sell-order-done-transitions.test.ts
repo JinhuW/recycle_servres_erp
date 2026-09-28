@@ -3,14 +3,10 @@ import { resetDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
+import { firstCustomerId } from './helpers/fixtures';
 
 // Any open stage may jump straight to Done (mark paid at any point); Closed
 // is the only status that cannot reach Done.
-
-async function firstCustomerId(token: string): Promise<string> {
-  const r = await api<{ items: { id: string }[] }>('GET', '/api/customers', { token });
-  return r.body.items[0].id;
-}
 
 async function newDraft(token: string): Promise<string> {
   const line = await freeSellableLine(token, 1);

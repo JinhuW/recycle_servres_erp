@@ -10,6 +10,7 @@ import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import { eventsOf } from './helpers/sellOrderEvents';
+import { createSellOrderOn } from './helpers/fixtures';
 
 type Line = { id: string; status: string; qty: number; partNumber: string | null };
 type Detail = { order: { lifecycle: string; archivedAt: string | null; lines: Line[] } };
@@ -49,19 +50,6 @@ async function createReviewing(pur: string, mgr: string): Promise<{ id: string; 
 }
 
 const get = (id: string, token: string) => api<Detail>('GET', `/api/orders/${id}`, { token });
-
-async function createSellOrderOn(mgr: string, lineId: string, qty = 1): Promise<string> {
-  const customers = await api<{ items: { id: string }[] }>('GET', '/api/customers', { token: mgr });
-  const so = await api<{ id: string }>('POST', '/api/sell-orders', {
-    token: mgr,
-    body: {
-      customerId: customers.body.items[0].id,
-      lines: [{ inventoryId: lineId, category: 'RAM', label: 'x', partNumber: PN, qty, unitPrice: 90 }],
-    },
-  });
-  expect(so.status).toBe(201);
-  return so.body.id;
-}
 
 async function statusesOf(id: string, token: string): Promise<Record<string, string>> {
   const got = await get(id, token);
@@ -147,7 +135,7 @@ describe('archive takes the lines out of stock', () => {
     const { token: mgr } = await loginAs(ALEX);
     const { id, lineIds } = await createReviewing(pur, mgr);
     // Sell the whole second lot: Done flips the line to Sold.
-    const soId = await createSellOrderOn(mgr, lineIds[1], 2);
+    const soId = await createSellOrderOn(mgr, lineIds[1], PN, 2);
     expect((await api('POST', `/api/sell-orders/${soId}/status`, {
       token: mgr, body: { to: 'Done' },
     })).status).toBe(200);
@@ -173,7 +161,7 @@ describe('archive and open sell orders', () => {
     const { token: pur } = await loginAs(MARCUS);
     const { token: mgr } = await loginAs(ALEX);
     const { id, lineIds } = await createReviewing(pur, mgr);
-    const soId = await createSellOrderOn(mgr, lineIds[0]);
+    const soId = await createSellOrderOn(mgr, lineIds[0], PN);
     expect((await api('POST', `/api/sell-orders/${soId}/status`, {
       token: mgr, body: { to: 'Shipped' },
     })).status).toBe(200);
@@ -200,7 +188,7 @@ describe('archive and open sell orders', () => {
     const { token: pur } = await loginAs(MARCUS);
     const { token: mgr } = await loginAs(ALEX);
     const { id, lineIds } = await createReviewing(pur, mgr);
-    const soId = await createSellOrderOn(mgr, lineIds[0]);
+    const soId = await createSellOrderOn(mgr, lineIds[0], PN);
 
     const r = await api('POST', `/api/orders/${id}/archive`, {
       token: mgr, body: { removeFromSellOrders: true },
@@ -231,7 +219,7 @@ describe('archive and open sell orders', () => {
     const { token: pur } = await loginAs(MARCUS);
     const { token: mgr } = await loginAs(ALEX);
     const { id, lineIds } = await createReviewing(pur, mgr);
-    const soId = await createSellOrderOn(mgr, lineIds[0]);
+    const soId = await createSellOrderOn(mgr, lineIds[0], PN);
     expect((await api('POST', `/api/orders/${id}/archive`, {
       token: mgr, body: { removeFromSellOrders: true },
     })).status).toBe(200);
@@ -250,7 +238,7 @@ describe('archive and open sell orders', () => {
     const { token: pur } = await loginAs(MARCUS);
     const { token: mgr } = await loginAs(ALEX);
     const { id, lineIds } = await createReviewing(pur, mgr);
-    const soId = await createSellOrderOn(mgr, lineIds[0]);
+    const soId = await createSellOrderOn(mgr, lineIds[0], PN);
     expect((await api('POST', `/api/orders/${id}/archive`, {
       token: mgr, body: { removeFromSellOrders: true },
     })).status).toBe(200);
@@ -265,7 +253,7 @@ describe('archive and open sell orders', () => {
     const { token: pur } = await loginAs(MARCUS);
     const { token: mgr } = await loginAs(ALEX);
     const { id, lineIds } = await createReviewing(pur, mgr);
-    const soId = await createSellOrderOn(mgr, lineIds[0]);
+    const soId = await createSellOrderOn(mgr, lineIds[0], PN);
     expect((await api('POST', `/api/sell-orders/${soId}/status`, {
       token: mgr, body: { to: 'Shipped' },
     })).status).toBe(200);
@@ -350,7 +338,7 @@ describe('an archived order is frozen', () => {
     const { token: pur } = await loginAs(MARCUS);
     const { token: mgr } = await loginAs(ALEX);
     const { id, lineIds } = await createReviewing(pur, mgr);
-    const soId = await createSellOrderOn(mgr, lineIds[1], 2);
+    const soId = await createSellOrderOn(mgr, lineIds[1], PN, 2);
     expect((await api('POST', `/api/sell-orders/${soId}/status`, {
       token: mgr, body: { to: 'Done' },
     })).status).toBe(200);
@@ -444,7 +432,7 @@ describe('0124 — the lines 0121 left on open sell orders', () => {
     const { token: pur } = await loginAs(MARCUS);
     const { token: mgr } = await loginAs(ALEX);
     const { id, lineIds } = await createReviewing(pur, mgr);
-    const soId = await createSellOrderOn(mgr, lineIds[0]);
+    const soId = await createSellOrderOn(mgr, lineIds[0], PN);
     const moved = await api<{ transferOrderId: string }>('POST', '/api/inventory/transfer', {
       token: mgr, body: { toWarehouseId: 'WH-DAL', lines: [{ id: lineIds[1], qty: 2 }] },
     });
@@ -513,7 +501,7 @@ describe('an archived PO is out of stock whatever its lines say', () => {
     const { token: mgr } = await loginAs(ALEX);
     const { id, lineIds } = await createReviewing(pur, mgr);
     // Sell the whole second lot so one line is Sold — the sales record.
-    const soId = await createSellOrderOn(mgr, lineIds[1], 2);
+    const soId = await createSellOrderOn(mgr, lineIds[1], PN, 2);
     expect((await api('POST', `/api/sell-orders/${soId}/status`, { token: mgr, body: { to: 'Done' } })).status).toBe(200);
     await getTestDb()`UPDATE orders SET archived_at = NOW() WHERE id = ${id}`;
     const st = await statusesOf(id, mgr);

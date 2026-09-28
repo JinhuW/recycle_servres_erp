@@ -48,17 +48,22 @@ export function showWarnToast(msg: string): void {
   }
 }
 
+// Something worked and the user should know where it went (e.g. "Saved 3
+// lines to PO-1402"). Clears itself.
+export function showSuccessToast(msg: string): void {
+  if (typeof window !== 'undefined' && typeof window.__showToast === 'function') {
+    window.__showToast(msg, 'success');
+  } else {
+    console.info('[success]', msg);
+  }
+}
+
 // Reporting budget for one page load. A component that throws on every render
 // would otherwise post as fast as it can paint, and the code that would throttle
 // it is the code that just proved it was broken.
 const REPORT_CAP = 5;
 let reported = 0;
 const seen = new Set<string>();
-
-export function _resetErrorReportingForTests(): void {
-  reported = 0;
-  seen.clear();
-}
 
 /**
  * Send a browser-side failure to the backend so it lands in the operator's log.

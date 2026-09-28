@@ -5,6 +5,7 @@
 import {
   S3Client,
   PutObjectCommand,
+  CopyObjectCommand,
   DeleteObjectCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
@@ -20,11 +21,11 @@ export type UploadResult = {
 };
 
 // Thrown by uploadAttachment if the file's declared MIME isn't on the safe
-// allowlist. Routes catch this and convert to a 415. Defence-in-depth: the
-// route layer already runs the same check via getUploadLimits, but if a new
-// caller forgets to gate, the storage layer still refuses to forward a
-// hostile Content-Type to a public bucket.
-export class UnsafeMimeError extends Error {
+// allowlist. Defence-in-depth only: routes refuse the type themselves via
+// getUploadLimits before calling here, and none special-cases this class — if a
+// new caller forgets to gate, the upload fails like any other storage error
+// rather than forwarding a hostile Content-Type to a public bucket.
+class UnsafeMimeError extends Error {
   constructor(public readonly mime: string) {
     super(`unsupported file type: ${mime || 'unknown'}`);
     this.name = 'UnsafeMimeError';
@@ -130,6 +131,41 @@ export async function getAttachmentBytes(env: Env, storageKey: string): Promise<
     });
     return null;
   }
+}
+
+/**
+ * Server-side copy of an existing object under a new prefix, for a record that
+ * must own its bytes independently of the original (a converted web
+ * submission's photos, which the PO may later delete). A stub key mints a new
+ * stub and keeps the delivery URL, as uploadAttachment does in dev/tests.
+ */
+export async function copyAttachment(
+  env: Env,
+  storageKey: string,
+  deliveryUrl: string,
+  prefix: string,
+): Promise<UploadResult> {
+  const s3 = client(env);
+  if (storageKey.startsWith('stub-') || !s3) {
+    return { storageKey: 'stub-' + crypto.randomUUID(), deliveryUrl, provider: 'stub' };
+  }
+  const base = storageKey.split('/').pop() ?? 'photo';
+  // Drop the source's own uuid- prefix so names don't stack on every copy.
+  const safeName = base.replace(/^[0-9a-f-]{36}-/i, '');
+  const key = `${prefix}/${crypto.randomUUID()}-${safeName}`;
+  await s3.send(
+    new CopyObjectCommand({
+      Bucket: env.R2_BUCKET,
+      Key: key,
+      CopySource: `${env.R2_BUCKET}/${encodeURIComponent(storageKey).replace(/%2F/g, '/')}`,
+    }),
+    { abortSignal: AbortSignal.timeout(15_000) },
+  );
+  return {
+    storageKey: key,
+    deliveryUrl: `${env.R2_ATTACHMENTS_PUBLIC_URL!.replace(/\/$/, '')}/${key}`,
+    provider: 'r2',
+  };
 }
 
 export async function deleteAttachment(env: Env, storageKey: string): Promise<void> {

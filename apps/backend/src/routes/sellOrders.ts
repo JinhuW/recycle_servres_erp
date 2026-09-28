@@ -5,6 +5,7 @@ import { getDb } from '../db';
 import { uploadAttachment, deleteAttachment } from '../r2';
 import { notify } from '../lib/notify';
 import { getUploadLimits } from '../lib/settings';
+import { allLimited } from '../lib/concurrency';
 import { log } from '../lib/log';
 import { clampLimit, decodeCursor, encodeCursor } from '../lib/pagination';
 import {
@@ -12,7 +13,9 @@ import {
 } from '../services/sellOrderAudit';
 import { diffSellOrderLines, type SOLineSnap } from '../services/sellOrderLineMatch';
 import { prorateLines, validateTarget } from '../services/sellOrderPriceAdjust';
-import { validateSellLines, createSellOrderDraft } from '../services/sellOrderCreate';
+import {
+  validateSellLines, createSellOrderDraft, insertSellOrderLine, type DraftLineInput,
+} from '../services/sellOrderCreate';
 import {
   parsePriceWorkbook, groupOrderProducts, PriceColumnsNotFoundError,
   type SellOrderLineRow,
@@ -28,7 +31,7 @@ import { committedSellStatuses } from '../lib/sellCommitment';
 import {
   buildXlsxBuffer, xlsxResponse, datedFilename, type XlsxColumn,
 } from '../lib/xlsx';
-import { invLabel } from './inventory';
+import { invLabel } from '../lib/inventoryLabel';
 import {
   convertToUsd, getLatestRateToUsd, isSupportedCurrency,
   type SupportedCurrency, type FxLookup,
@@ -47,6 +50,18 @@ type SqlClient = ReturnType<typeof getDb>;
 async function loadMetaStatuses(sql: SqlClient): Promise<Set<string>> {
   const rows = await sql`SELECT id FROM sell_order_statuses WHERE needs_meta = TRUE`;
   return new Set(rows.map(r => r.id as string));
+}
+
+// Both reads at once; the caller still checks the status before the order,
+// so an unknown status answers 400 even for a missing order.
+async function metaStatusAndOrder(
+  sql: SqlClient, id: string,
+): Promise<[Set<string>, boolean]> {
+  const [metaStatusSet, rows] = await allLimited([
+    () => loadMetaStatuses(sql),
+    () => sql`SELECT 1 FROM sell_orders WHERE id = ${id} LIMIT 1`,
+  ] as const);
+  return [metaStatusSet, rows.length > 0];
 }
 
 // Payment receivers are managers only — purchasers never handle customer money.
@@ -229,7 +244,7 @@ sellOrders.get('/:id', async (c) => {
   `)[0];
   if (!head) return c.json({ error: 'Not found' }, 404);
 
-  const lines = await sql<{
+  const linesQuery = () => sql<{
     id: string; category: string; label: string; sub_label: string | null;
     part_number: string | null; qty: number; unit_price: number;
     source_unit_price: number | null;
@@ -262,6 +277,22 @@ sellOrders.get('/:id', async (c) => {
     WHERE sol.sell_order_id = ${id}
     ORDER BY sol.position
   `;
+  const [lines, metaRows, attRows, metaStatusSet] = await allLimited([
+    linesQuery,
+    // Per-status evidence (notes + attachments). The frontend expects a map
+    // keyed by status with both fields flattened together.
+    () => sql`
+      SELECT status, note, set_at FROM sell_order_status_meta
+      WHERE sell_order_id = ${id}
+    `,
+    () => sql`
+      SELECT id, status, filename, size_bytes, mime_type, delivery_url, uploaded_at
+      FROM sell_order_status_attachments
+      WHERE sell_order_id = ${id}
+      ORDER BY uploaded_at
+    `,
+    () => loadMetaStatuses(sql),
+  ] as const);
   // unit_price is always USD; source_unit_price holds the native price for
   // foreign-currency orders (null on USD orders, where native == USD).
   const subtotal = lines.reduce((a, l) => a + l.qty * l.unit_price, 0);
@@ -269,20 +300,7 @@ sellOrders.get('/:id', async (c) => {
     (a, l) => a + l.qty * (l.source_unit_price ?? l.unit_price), 0,
   );
 
-  // Pull per-status evidence (notes + attachments). The frontend expects a
-  // map keyed by status with both fields flattened together.
-  const metaRows = await sql`
-    SELECT status, note, set_at FROM sell_order_status_meta
-    WHERE sell_order_id = ${id}
-  `;
-  const attRows = await sql`
-    SELECT id, status, filename, size_bytes, mime_type, delivery_url, uploaded_at
-    FROM sell_order_status_attachments
-    WHERE sell_order_id = ${id}
-    ORDER BY uploaded_at
-  `;
   const statusMeta: Record<string, { note: string | null; when: string | null; attachments: unknown[] }> = {};
-  const metaStatusSet = await loadMetaStatuses(sql);
   for (const s of metaStatusSet) statusMeta[s] = { note: null, when: null, attachments: [] };
   // Seed on demand as well as from needs_meta: a status can carry a meta row or
   // an attachment without being flagged needs_meta (the writer keys off the
@@ -566,6 +584,16 @@ sellOrders.post('/:id/price-import/preview', async (c) => {
   }
 });
 
+// Field range gates — fail fast with a clean 400 rather than letting the
+// sell_order_lines CHECK (qty>0, unit_price>=0) surface as a 500.
+function lineRangeError(lines: DraftLineInput[]): string | null {
+  for (const l of lines) {
+    if (!Number.isInteger(l.qty) || l.qty <= 0) return 'qty must be a positive integer';
+    if (!Number.isFinite(l.unitPrice) || l.unitPrice < 0) return 'unitPrice must be ≥ 0';
+  }
+  return null;
+}
+
 // Create a new sell order from a set of inventory lines. The manager picks
 // items off the Inventory page (or the Sell Orders page's "New from inventory"
 // CTA) and the draft modal POSTs the result here. We snapshot each line's
@@ -576,19 +604,8 @@ sellOrders.post('/', async (c) => {
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const sql = getDb(c.env);
 
-  type LineIn = {
-    inventoryId?: string;
-    category: string;
-    label: string;
-    subLabel?: string | null;
-    partNumber?: string | null;
-    qty: number;
-    unitPrice: number;
-    warehouseId?: string | null;
-    condition?: string | null;
-  };
   const body = (await c.req.json().catch(() => null)) as
-    | { customerId: string; lines: LineIn[]; notes?: string; currency?: string;
+    | { customerId: string; lines: DraftLineInput[]; notes?: string; currency?: string;
         paymentReceivedBy?: string | null }
     | null;
   if (!body || !body.customerId || !Array.isArray(body.lines) || body.lines.length === 0) {
@@ -606,16 +623,8 @@ sellOrders.post('/', async (c) => {
   if (!isSupportedCurrency(currency)) {
     return c.json({ error: 'unsupported currency' }, 400);
   }
-  // Field range gates — fail fast with a clean 400 rather than letting the
-  // sell_order_lines CHECK (qty>0, unit_price>=0) surface as a 500.
-  for (const l of body.lines) {
-    if (!Number.isInteger(l.qty) || l.qty <= 0) {
-      return c.json({ error: 'qty must be a positive integer' }, 400);
-    }
-    if (!Number.isFinite(l.unitPrice) || l.unitPrice < 0) {
-      return c.json({ error: 'unitPrice must be ≥ 0' }, 400);
-    }
-  }
+  const rangeErr = lineRangeError(body.lines);
+  if (rangeErr) return c.json({ error: rangeErr }, 400);
 
   const result = await createSellOrderDraft(sql, {
     customerId: body.customerId,
@@ -634,25 +643,13 @@ sellOrders.post('/', async (c) => {
 // updates. Optionally the manager can also re-pick the customer and rewrite the
 // whole line set (same builder UI as a new order) — those edits replace
 // sell_order_lines wholesale and are blocked once the order is Done.
-type LineIn = {
-  inventoryId?: string;
-  category: string;
-  label: string;
-  subLabel?: string | null;
-  partNumber?: string | null;
-  qty: number;
-  unitPrice: number;
-  warehouseId?: string | null;
-  condition?: string | null;
-};
-
 sellOrders.patch('/:id', async (c) => {
   const u = c.var.user;
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const id = c.req.param('id');
   const body = (await c.req.json().catch(() => null)) as
     | { status?: string; notes?: string;
-        customerId?: string; lines?: LineIn[]; currency?: string;
+        customerId?: string; lines?: DraftLineInput[]; currency?: string;
         paymentReceivedBy?: string | null; bidParts?: BidPart[] }
     | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
@@ -708,17 +705,9 @@ sellOrders.patch('/:id', async (c) => {
   if (body.lines !== undefined && (!Array.isArray(body.lines) || body.lines.length === 0)) {
     return c.json({ error: 'at least one line required' }, 400);
   }
-  // Same field range gates as POST — catch zero/negative before they reach
-  // the CHECK constraint and surface as a 500.
   if (Array.isArray(body.lines)) {
-    for (const l of body.lines) {
-      if (!Number.isInteger(l.qty) || l.qty <= 0) {
-        return c.json({ error: 'qty must be a positive integer' }, 400);
-      }
-      if (!Number.isFinite(l.unitPrice) || l.unitPrice < 0) {
-        return c.json({ error: 'unitPrice must be ≥ 0' }, 400);
-      }
-    }
+    const rangeErr = lineRangeError(body.lines);
+    if (rangeErr) return c.json({ error: rangeErr }, 400);
   }
 
   // A confirmed vendor price import names the products whose saved prices
@@ -742,8 +731,7 @@ sellOrders.patch('/:id', async (c) => {
   }
 
   type Outcome = { code: 400; msg: string } | { code: 200 };
-  let outcome: Outcome = { code: 200 };
-  await sql.begin(async (tx) => {
+  const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
     // Snapshot BEFORE state for diffing. Lock the header row so a concurrent
     // edit can't slip an event we'd then miss; lines are read consistently
     // inside the same tx so no extra lock is needed.
@@ -761,15 +749,16 @@ sellOrders.patch('/:id', async (c) => {
 
     // A line rewrite re-snapshots every line's USD value at the current rate.
     // Currency is the explicit new one (validated above) or the order's
-    // existing one when only qty/price changed. `null` until we know we need it.
+    // existing one when only qty/price changed. `preFx` is null without a
+    // line rewrite.
     const effectiveCurrency = (body.currency ?? beforeHead.currency_code) as SupportedCurrency;
-    const fx = body.lines !== undefined ? preFx : null;
+    const fx = preFx;
     if (body.lines !== undefined) {
       // Same sellability check as POST, run inside the tx with FOR UPDATE.
       // This order is excluded so keeping its own already-committed lines
       // doesn't trip the one-open-sell-order-per-line rule.
       const err = await validateSellLines(tx, body.lines, id);
-      if (err) { outcome = { code: 400, msg: err }; return; }
+      if (err) return { code: 400, msg: err };
     }
     // COALESCE can't express "clear to NULL", so the receiver (the one nullable
     // editable field) gets a CASE keyed on whether the key was present at all.
@@ -801,20 +790,21 @@ sellOrders.patch('/:id', async (c) => {
       for (let i = 0; i < body.lines.length; i++) {
         const l = body.lines[i];
         const unitPriceUsd = isNonUsd ? convertToUsd(l.unitPrice, fx.rate) : l.unitPrice;
-        await tx`
-          INSERT INTO sell_order_lines
-            (sell_order_id, inventory_id, category, label, sub_label, part_number,
-             qty, unit_price, warehouse_id, condition, position,
-             source_currency, source_unit_price, source_fx_rate_to_usd)
-          VALUES
-            (${id}, ${l.inventoryId ?? null}, ${l.category}, ${l.label},
-             ${l.subLabel ?? null}, ${l.partNumber ?? null},
-             ${l.qty}, ${unitPriceUsd},
-             ${l.warehouseId ?? null}, ${l.condition ?? null}, ${i},
-             ${isNonUsd ? effectiveCurrency : null},
-             ${isNonUsd ? l.unitPrice : null},
-             ${isNonUsd ? fx.rate : null})
-        `;
+        await insertSellOrderLine(tx, id, {
+          inventoryId: l.inventoryId ?? null,
+          category: l.category,
+          label: l.label,
+          subLabel: l.subLabel ?? null,
+          partNumber: l.partNumber ?? null,
+          qty: l.qty,
+          unitPriceUsd,
+          warehouseId: l.warehouseId ?? null,
+          condition: l.condition ?? null,
+          position: i,
+          sourceCurrency: isNonUsd ? effectiveCurrency : null,
+          sourceUnitPrice: isNonUsd ? l.unitPrice : null,
+          sourceFxRate: isNonUsd ? fx.rate : null,
+        });
       }
       if (body.bidParts?.length) {
         await recordBidDataPoints(tx, id, u.id, body.bidParts);
@@ -855,11 +845,9 @@ sellOrders.patch('/:id', async (c) => {
         });
       }
     }
+    return { code: 200 };
   });
-  if (outcome.code !== 200) {
-    const e = outcome as { code: 400; msg: string };
-    return c.json({ error: e.msg }, 400);
-  }
+  if (outcome.code !== 200) return c.json({ error: outcome.msg }, 400);
   return c.json({ ok: true });
 });
 
@@ -878,11 +866,9 @@ sellOrders.put('/:id/status-meta/:status', async (c) => {
   const body = (await c.req.json().catch(() => null)) as { note?: string | null } | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
   const sql = getDb(c.env);
-  const metaStatusSet = await loadMetaStatuses(sql);
-  if (!metaStatusSet.has(status)) return c.json({ error: 'invalid status' }, 400);
-
   // Ensure the order exists; otherwise the FK upsert silently inserts.
-  const exists = (await sql`SELECT 1 FROM sell_orders WHERE id = ${id} LIMIT 1`)[0];
+  const [metaStatusSet, exists] = await metaStatusAndOrder(sql, id);
+  if (!metaStatusSet.has(status)) return c.json({ error: 'invalid status' }, 400);
   if (!exists) return c.json({ error: 'Not found' }, 404);
 
   const note = (body.note ?? '').trim() || null;
@@ -919,9 +905,8 @@ sellOrders.post('/:id/status-meta/:status/attachments', async (c) => {
   const status = c.req.param('status');
 
   const sql = getDb(c.env);
-  const metaStatusSet = await loadMetaStatuses(sql);
+  const [metaStatusSet, exists] = await metaStatusAndOrder(sql, id);
   if (!metaStatusSet.has(status)) return c.json({ error: 'invalid status' }, 400);
-  const exists = (await sql`SELECT 1 FROM sell_orders WHERE id = ${id} LIMIT 1`)[0];
   if (!exists) return c.json({ error: 'Not found' }, 404);
 
   const form = await c.req.formData().catch(() => null);
@@ -1122,17 +1107,17 @@ sellOrders.post('/:id/adjust-price', async (c) => {
     // Non-USD lines re-derive the USD value at the header's frozen rate; the
     // source_* columns keep carrying the native negotiation truth.
     const isNonUsd = cur.currency_code !== 'USD';
-    for (let i = 0; i < lines.length; i++) {
-      const usd = isNonUsd
-        ? convertToUsd(prices[i], cur.fx_rate_to_usd)
-        : prices[i];
-      await tx`
-        UPDATE sell_order_lines
-        SET unit_price = ${usd},
-            source_unit_price = ${isNonUsd ? prices[i] : null}
-        WHERE id = ${lines[i].id}
-      `;
-    }
+    const usdPrices = prices.map((p) => isNonUsd ? convertToUsd(p, cur.fx_rate_to_usd) : p);
+    const nativePrices = prices.map((p) => isNonUsd ? p : null);
+    // The array casts are load-bearing: on a USD order the native array is all
+    // nulls, which carries no type of its own.
+    await tx`
+      UPDATE sell_order_lines sol
+      SET unit_price = v.usd, source_unit_price = v.native
+      FROM unnest(${lines.map((l) => l.id)}::uuid[], ${usdPrices}::numeric[],
+                  ${nativePrices}::numeric[]) AS v(id, usd, native)
+      WHERE sol.id = v.id
+    `;
 
     // Baseline is the first pre-negotiation total; later adjustments only move
     // adjusted_at/by so the badge always compares first-quoted vs current.
@@ -1217,8 +1202,8 @@ sellOrders.post('/:id/status', async (c) => {
     // client_credentials orders) falls through so those aren't permanently
     // bricked — any manager may reopen them. Checked before the note gate so
     // a non-creator gets 403, not a misleading "note required" 400.
-    if (cur.status === 'Closed' && body.to === 'Draft'
-        && cur.created_by !== null && cur.created_by !== u.id) {
+    const reopening = cur.status === 'Closed' && body.to === 'Draft';
+    if (reopening && cur.created_by !== null && cur.created_by !== u.id) {
       return { kind: 'notCreator' };
     }
 
@@ -1226,7 +1211,7 @@ sellOrders.post('/:id/status', async (c) => {
     // required-note rule: a fresh Draft creation doesn't need a note, so the
     // rule is "transitions *into* Draft from Closed need a note", not "Draft
     // is a meta status".
-    if (cur.status === 'Closed' && body.to === 'Draft' && !hasNote) {
+    if (reopening && !hasNote) {
       return { kind: 'reopenNeedsNote' };
     }
 
@@ -1257,7 +1242,7 @@ sellOrders.post('/:id/status', async (c) => {
                updated_at = NOW()
          WHERE id = ${id}
       `;
-    } else if (cur.status === 'Closed' && body.to === 'Draft') {
+    } else if (reopening) {
       // The reopen reason also lands on the order itself as an appended notes
       // line — the events timeline alone is too easy to miss. Prior notes are
       // preserved; each reopen cycle appends its own line.
@@ -1281,7 +1266,7 @@ sellOrders.post('/:id/status', async (c) => {
     // Draft is intentionally excluded: reopen-to-Draft notes live in
     // sell_order_events so successive reopen cycles don't overwrite each
     // other (status_meta PK is sell_order_id + status, single row per pair).
-    if (META_STATUSES.has(body.to) && body.to !== 'Draft') {
+    if (META_STATUSES.has(body.to)) {
       await tx`
         INSERT INTO sell_order_status_meta (sell_order_id, status, note, set_at, set_by)
         VALUES (${id}, ${body.to}, ${body.note ?? null}, NOW(), ${u.id})
@@ -1300,7 +1285,7 @@ sellOrders.post('/:id/status', async (c) => {
         note: body.note ?? null,
         fromStatus: cur.status,
       });
-    } else if (cur.status === 'Closed' && body.to === 'Draft') {
+    } else if (reopening) {
       await writeSellOrderEvent(tx, id, u.id, 'reopened', {
         note: body.note ?? null,
         fromStatus: 'Closed',
@@ -1335,34 +1320,37 @@ sellOrders.post('/:id/status', async (c) => {
         goodsFollowsLines.set(o.order_id, await goodsTotalIsMirror(tx, o.order_id));
       }
 
-      const sold = await tx<{ line_id: string; remaining: number; sold: number }[]>`
-        UPDATE order_lines ol
-           SET qty    = CASE WHEN ol.qty - s.q <= 0 THEN ol.qty ELSE ol.qty - s.q END,
-               status = CASE WHEN ol.qty - s.q <= 0 THEN 'Sold' ELSE ol.status END,
-               -- A partial sale is the moment qty stops meaning "how many were
-               -- bought", so the PO's goods total needs that number kept here
-               -- before the decrement below overwrites it. Selling a line out
-               -- leaves qty alone, so it still speaks for both.
-               qty_purchased = CASE WHEN ol.qty - s.q <= 0 THEN ol.qty_purchased
-                                    ELSE COALESCE(ol.qty_purchased, ol.qty) END
-          FROM (
-            SELECT inventory_id, SUM(qty)::int AS q
-            FROM sell_order_lines
-            WHERE sell_order_id = ${id} AND inventory_id IS NOT NULL
-            GROUP BY inventory_id
-          ) s
-         WHERE s.inventory_id = ol.id
-        RETURNING ol.id AS line_id,
-                  CASE WHEN ol.status = 'Sold' THEN 0 ELSE ol.qty END AS remaining,
-                  s.q AS sold
+      // The decrement and its audit rows are one statement: `sold` feeds the
+      // inserts directly, with the same detail keys each row used to be
+      // written with one at a time.
+      await tx`
+        WITH sold AS (
+          UPDATE order_lines ol
+             SET qty    = CASE WHEN ol.qty - s.q <= 0 THEN ol.qty ELSE ol.qty - s.q END,
+                 status = CASE WHEN ol.qty - s.q <= 0 THEN 'Sold' ELSE ol.status END,
+                 -- A partial sale is the moment qty stops meaning "how many were
+                 -- bought", so the PO's goods total needs that number kept here
+                 -- before the decrement below overwrites it. Selling a line out
+                 -- leaves qty alone, so it still speaks for both.
+                 qty_purchased = CASE WHEN ol.qty - s.q <= 0 THEN ol.qty_purchased
+                                      ELSE COALESCE(ol.qty_purchased, ol.qty) END
+            FROM (
+              SELECT inventory_id, SUM(qty)::int AS q
+              FROM sell_order_lines
+              WHERE sell_order_id = ${id} AND inventory_id IS NOT NULL
+              GROUP BY inventory_id
+            ) s
+           WHERE s.inventory_id = ol.id
+          RETURNING ol.id AS line_id,
+                    CASE WHEN ol.status = 'Sold' THEN 0 ELSE ol.qty END AS remaining,
+                    s.q AS sold
+        )
+        INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
+        SELECT r.line_id, ${u.id}::uuid, 'sold',
+               jsonb_build_object('soldQty', r.sold, 'remainingQty', r.remaining,
+                                  'sellOrder', ${id}::text)
+        FROM sold r
       `;
-      for (const r of sold) {
-        await tx`
-          INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
-          VALUES (${r.line_id}, ${u.id}, 'sold',
-                  ${tx.json({ soldQty: r.sold, remainingQty: r.remaining, sellOrder: id })})
-        `;
-      }
       for (const [orderId, isMirror] of goodsFollowsLines) {
         await syncOrderGoodsTotal(tx, orderId, isMirror);
       }

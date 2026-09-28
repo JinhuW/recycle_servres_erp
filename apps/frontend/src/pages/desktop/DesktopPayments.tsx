@@ -1,16 +1,19 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Icon } from '../../components/Icon';
 import { ListSkeleton } from '../../components/Skeleton';
 import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
-import { fmtDate, fmtDateShort, fmtMoney, fmtUSD, relTime } from '../../lib/format';
+import { fmtDate, fmtDateShort, fmtMoney, fmtSigned, fmtUSD, relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
+import type { Translate } from '../../lib/orderPresentation';
 import { usePersisted } from '../../lib/listMemory';
 import { match, readHashQuery, useRoute } from '../../lib/route';
+import { useDebouncedValue } from '../../lib/useDebouncedValue';
+import { useSentinel } from '../../lib/useSentinel';
 import { RouteLink } from '../../components/RouteLink';
 import { PAYMENT_NOTE_MAX } from '@recycle-erp/shared';
 import { PaymentIgnoreRules } from './PaymentIgnoreRules';
-import { placePopover } from './popoverPlacement';
+import { useFixedPopover } from './popoverPlacement';
 
 // Manager-only reconciliation of Mercury/PayPal transactions against POs.
 // The list serves logical payments: a PayPal charge and its Mercury
@@ -294,17 +297,9 @@ const SOURCE_LABEL: Record<PaymentRow['source'], string> = {
   paired: 'PayPal + Mercury',
 };
 
-// Signed money: the sign carries meaning here (out vs back in), so a plus is
-// rendered too, where fmtUSD shows only a minus.
-function fmtSigned(n: number, locale: string): string {
-  return (n < 0 ? '−' : '+') + fmtUSD(Math.abs(n), locale);
-}
-
-type T = (k: string, vars?: Record<string, string | number>) => string;
-
 // How far the PO sits from the payment date — the tie-breaker a manager reads
 // first, so it is spelled out rather than shown as a raw number.
-function gapLabel(dayGap: number | null, t: T): string {
+function gapLabel(dayGap: number | null, t: Translate): string {
   if (dayGap === null) return '';
   return dayGap === 0 ? t('payMatchSameDay') : t('payMatchDayGap', { n: dayGap });
 }
@@ -318,13 +313,15 @@ const REASON_TKEY: Record<Suggestion['reason'], string | null> = {
 };
 
 export function DesktopPayments({ onToast }: { onToast: (msg: string) => void }) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
 
   const [status, setStatus] = usePersisted<StatusFilter>('desktop.payments.status', 'unlinked');
   const [source, setSource] = usePersisted('desktop.payments.source', 'all');
   const [direction, setDirection] = usePersisted<Direction>('desktop.payments.direction', DEFAULT_DIRECTION);
   const [q, setQ] = usePersisted('desktop.payments.q', '');
+  // Only the typed text waits; the chips, the deep link and mutations reload
+  // at once, and reqId still drops any response a later request overtook.
+  const settledQ = useDebouncedValue(q);
   const [hasMatch, setHasMatch] = usePersisted('desktop.payments.hasMatch', false);
   const [disputed, setDisputed] = usePersisted('desktop.payments.disputed', false);
   const [settle, setSettle] = usePersisted('desktop.payments.settle', 'all');
@@ -366,7 +363,7 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
       if (status !== 'all') p.set('status', status);
       if (source !== 'all') p.set('source', source);
       if (direction !== 'all') p.set('direction', direction);
-      if (q.trim()) p.set('q', q.trim());
+      if (settledQ.trim()) p.set('q', settledQ.trim());
       if (hasMatch) p.set('hasMatch', '1');
       if (disputed) p.set('dispute', '1');
       if (settle !== 'all') p.set('settle', settle);
@@ -374,7 +371,7 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
     }
     if (cursor) p.set('cursor', cursor);
     return p.toString();
-  }, [focusOrder, status, source, direction, q, hasMatch, disputed, settle, assignee]);
+  }, [focusOrder, status, source, direction, settledQ, hasMatch, disputed, settle, assignee]);
 
   // The owner picker and the filter share one list; the page is manager-only,
   // so /api/members is readable here.
@@ -432,16 +429,7 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
       .finally(() => setLoadingMore(false));
   }, [feed?.nextCursor, loadingMore, params]);
 
-  useEffect(() => {
-    const el = sentinelRef.current;
-    if (!el || !feed?.nextCursor) return;
-    const io = new IntersectionObserver(
-      entries => { if (entries[0].isIntersecting) loadMore(); },
-      { rootMargin: '400px 0px' },
-    );
-    io.observe(el);
-    return () => io.disconnect();
-  }, [loadMore, feed?.nextCursor]);
+  useSentinel(sentinelRef, loadMore, !!feed?.nextCursor, { rootMargin: '400px 0px' });
 
   // Mutations refetch both the feed and the tiles — the row's group may span
   // legs the current page doesn't show, so local patching would drift.
@@ -1479,43 +1467,14 @@ function PoPicker({ txnId, anchor, onPick, onClose, locale }: {
   const [total, setTotal] = useState(0);
   const ref = useRef<HTMLDivElement | null>(null);
   const reqId = useRef(0);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
 
   // Fixed, not absolute: the row lives inside `.table-scroll`, whose
   // `overflow-y: hidden` sheared the dropdown off at the table's bottom edge.
   // `overflow-y: visible` can't fix it — next to `overflow-x: auto` it computes
   // back to `auto` — so the popover has to leave the scroll container instead.
   // Right-aligned: the anchor is the actions cell at the row's right edge.
-  useLayoutEffect(() => {
-    const place = () => {
-      const el = anchor.current;
-      if (!el) return;
-      setPos(placePopover({
-        anchor: el.getBoundingClientRect(),
-        width: PICKER_W,
-        height: PICKER_H,
-        viewport: { width: window.innerWidth, height: window.innerHeight },
-        align: 'right',
-        gap: GAP,
-      }));
-    };
-    place();
-    // Capture phase so the inner table scroller is heard, not just the page.
-    window.addEventListener('scroll', place, true);
-    window.addEventListener('resize', place);
-    return () => {
-      window.removeEventListener('scroll', place, true);
-      window.removeEventListener('resize', place);
-    };
-  }, [anchor]);
-
-  useEffect(() => {
-    const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    };
-    document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
-  }, [onClose]);
+  const pos = useFixedPopover(
+    anchor, ref, { width: PICKER_W, height: PICKER_H, align: 'right', gap: GAP }, onClose);
 
   useEffect(() => {
     const id = ++reqId.current;
@@ -1627,39 +1586,11 @@ function RecordPicker({ txnId, anchor, onDone, onClose }: {
   const { t } = useT();
   const [rows, setRows] = useState<InternalRecord[] | null>(null);
   const ref = useRef<HTMLDivElement | null>(null);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
 
   // Fixed for the same reason PoPicker is — see the comment there.
   // Left-aligned: the anchor is a small chip on the left of the expanded row.
-  useLayoutEffect(() => {
-    const place = () => {
-      const el = anchor.current;
-      if (!el) return;
-      setPos(placePopover({
-        anchor: el.getBoundingClientRect(),
-        width: PICKER_W,
-        height: PICKER_H,
-        viewport: { width: window.innerWidth, height: window.innerHeight },
-        align: 'left',
-        gap: GAP,
-      }));
-    };
-    place();
-    window.addEventListener('scroll', place, true);
-    window.addEventListener('resize', place);
-    return () => {
-      window.removeEventListener('scroll', place, true);
-      window.removeEventListener('resize', place);
-    };
-  }, [anchor]);
-
-  useEffect(() => {
-    const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    };
-    document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
-  }, [onClose]);
+  const pos = useFixedPopover(
+    anchor, ref, { width: PICKER_W, height: PICKER_H, align: 'left', gap: GAP }, onClose);
 
   useEffect(() => {
     api.get<{ rows: InternalRecord[] }>('/api/internal-transactions?limit=20')
@@ -1744,43 +1675,14 @@ function PairPicker({ txnId, anchor, locale, onPick, onClose }: {
   const { t } = useT();
   const [rows, setRows] = useState<PairCandidate[] | null>(null);
   const ref = useRef<HTMLDivElement | null>(null);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
 
   // Fixed for the same reason PoPicker is — see the comment there. This one
   // sits deeper still, in the expanded row's `<td colSpan>`, so it was clipped
   // for every row below the fold. Left-aligned: the anchor is a small button on
   // the left of the expanded row, and right-aligning a 380px panel to it would
   // throw the panel off the button.
-  useLayoutEffect(() => {
-    const place = () => {
-      const el = anchor.current;
-      if (!el) return;
-      setPos(placePopover({
-        anchor: el.getBoundingClientRect(),
-        width: PAIR_W,
-        height: PAIR_H,
-        viewport: { width: window.innerWidth, height: window.innerHeight },
-        align: 'left',
-        gap: GAP,
-      }));
-    };
-    place();
-    // Capture phase so the inner table scroller is heard, not just the page.
-    window.addEventListener('scroll', place, true);
-    window.addEventListener('resize', place);
-    return () => {
-      window.removeEventListener('scroll', place, true);
-      window.removeEventListener('resize', place);
-    };
-  }, [anchor]);
-
-  useEffect(() => {
-    const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    };
-    document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
-  }, [onClose]);
+  const pos = useFixedPopover(
+    anchor, ref, { width: PAIR_W, height: PAIR_H, align: 'left', gap: GAP }, onClose);
 
   useEffect(() => {
     let live = true;

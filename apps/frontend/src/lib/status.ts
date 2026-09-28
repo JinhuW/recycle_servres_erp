@@ -48,6 +48,10 @@ export const LIFECYCLE_STATUS: Record<string, string> = Object.fromEntries(
   WORKFLOW_STAGES.map(s => [s.id, s.label]),
 );
 
+/** Stage label → lifecycle slug, the reverse of LIFECYCLE_STATUS. */
+export const lifecycleOf = (status: string): string | undefined =>
+  Object.keys(LIFECYCLE_STATUS).find(k => LIFECYCLE_STATUS[k] === status);
+
 const TONE: Record<string, 'info' | 'warn' | 'pos' | 'accent' | 'muted' | 'cool'> = {
   'Draft':        'muted',
   'In Transit':   'info',

@@ -2,32 +2,41 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { AttachmentChip } from '../../components/AttachmentChip';
 import { AttachmentDropzone } from '../../components/AttachmentDropzone';
+import { ImageLightbox } from '../../components/ImageLightbox';
 import { PaymentFields } from '../../components/PaymentFields';
 import type { HandoffMethod } from '../../lib/handoff';
 import { useT } from '../../lib/i18n';
-import { api, createOrder, deleteOrder } from '../../lib/api';
-import { handleFetchError, showErrorDialog, showWarnToast } from '../../lib/errorToast';
+import { api, createOrder, deleteOrder, MAX_UPLOAD_BYTES } from '../../lib/api';
+import { handleFetchError, showErrorDialog, showSuccessToast, showWarnToast } from '../../lib/errorToast';
 import { fmtUSD, fmtDateShort } from '../../lib/format';
 import { poEffectiveCost, parseFeeInput } from '../../lib/poTotals';
 import { useEscapeKey } from '../../lib/useEscapeKey';
-import type { Category, ScanResponse, Warehouse, OrderSummary } from '../../lib/types';
+import type { Category, Warehouse, OrderSummary } from '../../lib/types';
 import { LineDrawer } from './submit/LineDrawer';
 import { AddLineMenu } from './submit/AddLineMenu';
+import { RamSheetScanDialog } from './submit/RamSheetScanDialog';
+import { isPristineLine } from './submit/ramSheet';
+import { addableCategories, aiCaptureEnabled } from '../../lib/lookups';
 import { eligibleDraftTargets } from './submit/eligibleTargets';
+import { DupPartDialog } from './submit/DupPartDialog';
+import {
+  blankLine, brandConfirmPending, duplicatesByIndex, findDuplicatePartNumbers,
+  lineBlockerMessages, lineSaveBlock, type DuplicatePartGroup, type Line,
+} from './submit/line';
 import { usePreference } from '../../lib/preferences';
+import { lookupChips } from '../../lib/useChipFill';
 import { useMarketLookup } from '../../lib/useMarketLookup';
-import { groupLines, shouldGroup, pricedTotals } from '../../lib/lineGroups';
+import { groupLines, shouldGroup, pricedTotals, lineSpecLabel } from '../../lib/lineGroups';
 import { CostTape } from '../../components/CostTape';
 import { useAuth } from '../../lib/auth';
 import { synthesizePartNumber, serialIssue } from '@recycle-erp/shared';
 import { lineRequirements, missingFieldNames } from '../../lib/lineRequirements';
-import { ramBrandNeedsConfirm } from '../../lib/scanValidation';
 import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
 import { loadWarehouses } from '../../lib/warehouses';
 import {
-  deleteLinePhoto, planPhotoCarry, photoSourceFile, uploadLinePhoto,
+  deleteLinePhoto, linePhotos, planPhotoCarry, photoSourceFile, uploadLinePhoto,
   uploadedPhotoCount, useLinePhotoBuffer,
-  type LinePhoto, type LineCarryPlan, type PendingPhoto,
+  type LineCarryPlan, type PendingPhoto,
 } from '../../lib/linePhotos';
 
 // ─── Public component ────────────────────────────────────────────────────────
@@ -59,48 +68,6 @@ export function DesktopSubmit({ onDone }: Props) {
   );
 }
 
-// ─── OrderForm ───────────────────────────────────────────────────────────────
-// Exported so DesktopEditOrder can reuse the same line-drawer pattern (table
-// row → right-side drawer with full per-category fields) without duplicating
-// the components.
-export type Line = {
-  category: Category;
-  brand?: string;
-  capacity?: string;
-  generation?: string;
-  type?: string;
-  classification?: string;
-  rank?: string;
-  speed?: string;
-  interface?: string;
-  formFactor?: string;
-  description?: string;
-  itemType?: string;
-  partNumber?: string;
-  serialNumber?: string;
-  chipNumber?: string;
-  condition: string;
-  qty: number | string;
-  unitCost: number | string;
-  sellPrice?: number | string;
-  health?: number | null;
-  rpm?: number | null;
-  totalCost?: string;            // user-typed override (string-typed to allow blank)
-  scanImageId?: string | null;
-  scanConfidence?: number | null;
-  scanImageUrl?: string | null;
-  _confirmed?: boolean;
-  // Set by a scan whose brand the AI couldn't name; cleared when the purchaser
-  // confirms it against the photo. Lives on the line, not in drawer state, so
-  // closing and reopening the drawer can't shake the question off.
-  _brandNeedsConfirm?: boolean;
-  _cid: string;                  // stable client id for React keys (never sent to the API)
-  // DB id, once the line has been persisted. Null before that — which is why
-  // photos are buffered rather than uploaded as they're picked.
-  _dbId?: string | null;
-  photos?: LinePhoto[];
-};
-
 // Extensions and MIME types both: Safari populates neither consistently on
 // drag-and-drop, and Windows file dialogs filter on the extension.
 const SUBMIT_ATTACH_ACCEPT = [
@@ -121,93 +88,14 @@ type OrderMeta = {
   otherFeesNote: string;
 };
 
-
-export function blankLine(cat: Category): Line {
-  return {
-    _cid: crypto.randomUUID(),
-    category: cat, qty: '', unitCost: '',
-    condition: '',
-    scanImageUrl: null,
-  };
-}
-
-export type DuplicatePartGroup = { partNumber: string; lineNums: number[] };
-
-// Two lines sharing a part number on the same PO is almost always a paste-error
-// or a forgotten-already-added — surface it so the user can merge or confirm.
-// Comparison is case-insensitive and trims whitespace; blanks are ignored. The
-// returned `partNumber` carries the first-seen casing for display.
-export function findDuplicatePartNumbers(
-  lines: ReadonlyArray<{ partNumber?: string | null }>,
-): DuplicatePartGroup[] {
-  const groups = new Map<string, DuplicatePartGroup>();
-  lines.forEach((l, i) => {
-    const raw = (l.partNumber ?? '').trim();
-    if (!raw) return;
-    const key = raw.toLowerCase();
-    const g = groups.get(key);
-    if (g) g.lineNums.push(i + 1);
-    else groups.set(key, { partNumber: raw, lineNums: [i + 1] });
-  });
-  return [...groups.values()].filter(g => g.lineNums.length >= 2);
-}
-
-// Build a Line patch from an AI scan response — mirrors the mobile aiDefaults
-// in SubmitForm.tsx so all flows share the same field-mapping. Returned as a
-// Partial so callers can either spread it onto blankLine() (new line) or pass
-// it through onChange() (live edit in the drawer).
-// Low-confidence extractions are still prefilled (a rough draft beats an empty
-// form); scanConfidence rides along so the drawer can flag it for review.
-export function scanToLinePatch(scan: ScanResponse, category?: Category): Partial<Line> {
-  const f = scan.extracted ?? {};
-  return {
-    scanImageId: scan.imageId ?? null,
-    _brandNeedsConfirm: category === 'RAM' && ramBrandNeedsConfirm(f),
-    scanConfidence: scan.confidence ?? null,
-    scanImageUrl: scan.deliveryUrl ?? null,
-    ...(f.brand        ? { brand: f.brand }               : {}),
-    ...(f.capacity     ? { capacity: f.capacity }         : {}),
-    ...(f.generation   ? { generation: f.generation }     : {}),
-    ...(f.type         ? { type: f.type }                 : {}),
-    ...(f.classification ? { classification: f.classification } : {}),
-    ...(f.rank         ? { rank: f.rank }                 : {}),
-    ...(f.speed        ? { speed: f.speed }               : {}),
-    ...(f.interface    ? { interface: f.interface }       : {}),
-    ...(f.formFactor   ? { formFactor: f.formFactor }     : {}),
-    ...(f.description  ? { description: f.description }   : {}),
-    ...(f.rpm          ? { rpm: Number(f.rpm) }           : {}),
-    ...(f.partNumber   ? { partNumber: f.partNumber }     : {}),
-  };
-}
-
-/**
- * Whether this line still owes a brand the purchaser has checked against the
- * scan photo. Every path that persists a line asks this — the drawer's confirm
- * button is only one of four. The category test matters: switching a scanned
- * RAM line to another category leaves the flag behind, and an SSD line must
- * not be asked a RAM question.
- *
- * The second test re-runs the same rule against the line's *own* brand, so
- * picking a real one in the Brand select answers the question as well as the
- * dialog does — being asked to re-pick what you just picked reads as a bug.
- * `Other` and off-catalog values still prompt: `Other` is the catalog's "I
- * don't know", which is precisely what the dialog is for. Note the flag itself
- * stays `true` on a line settled this way — only the dialog's confirm clears
- * it — but nothing else reads it and it never reaches the API.
- */
-export const brandConfirmPending = (l: Line): boolean =>
-  l.category === 'RAM'
-  && !!l._brandNeedsConfirm
-  && ramBrandNeedsConfirm({ brand: l.brand ?? '' });
-
+// ─── OrderForm ───────────────────────────────────────────────────────────────
 function OrderForm({
   onDone,
 }: {
   onDone: (toast?: { msg: string; kind?: 'success' | 'error' }) => void;
 }) {
-  const { t, lang } = useT();
+  const { t, lang, locale } = useT();
   const { user } = useAuth();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   useEffect(() => {
     loadWarehouses()
@@ -237,6 +125,8 @@ function OrderForm({
   const [lastCat, setLastCat] = usePreference('submit.lastCategory', 'RAM');
   const [lines, setLines] = useState<Line[]>([blankLine(lastCat as Category)]);
   const [activeIdx, setActiveIdx] = useState<number | null>(0);
+  // Full-screen view of a row's thumbnail (its scan or first saved photo).
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [meta, setMeta] = useState<OrderMeta>({
     warehouseId: '',
     payment: 'Company',
@@ -304,7 +194,7 @@ function OrderForm({
   const addEvidenceFiles = (fl: FileList | null) => {
     const picked = Array.from(fl || []).filter(f => {
       // 50 MiB server hard cap; oversized images are shrunk server-side.
-      if (f.size > 50 * 1024 * 1024) { showErrorDialog(t('fileTooLarge', { name: f.name })); return false; }
+      if (f.size > MAX_UPLOAD_BYTES) { showErrorDialog(t('fileTooLarge', { name: f.name })); return false; }
       return true;
     });
     if (picked.length) setEvidenceFiles(prev => [...prev, ...picked]);
@@ -400,11 +290,6 @@ function OrderForm({
     otherFees: parseFeeInput(meta.otherFees),
   });
 
-  // No goods-total override on capture: the goods total is the sum of the
-  // lines, and anything paid on top of the goods is the fee — so line costs
-  // plus fee is what the purchaser actually paid, with no second field to
-  // reconcile against the first.
-
   // One batched lookup for every part number on the form, so the drawer can
   // show what the part is worth while the buy price is still being decided.
   const marketFor = useMarketLookup(lines.map(l => l.partNumber));
@@ -415,15 +300,7 @@ function OrderForm({
   const priced = useMemo(() => pricedTotals(lines), [lines]);
 
   const dupGroups = useMemo(() => findDuplicatePartNumbers(lines), [lines]);
-  const dupByIdx = useMemo(() => {
-    const m = new Map<number, number[]>();
-    for (const g of dupGroups) {
-      for (const ln of g.lineNums) {
-        m.set(ln - 1, g.lineNums.filter(n => n !== ln));
-      }
-    }
-    return m;
-  }, [dupGroups]);
+  const dupByIdx = useMemo(() => duplicatesByIndex(dupGroups), [dupGroups]);
   const [dupConfirm, setDupConfirm] = useState<DuplicatePartGroup[] | null>(null);
   // When the dup-part warning is reached via "add to existing", remember which
   // target to merge into so confirming the warning doesn't fall back to new-PO.
@@ -443,34 +320,135 @@ function OrderForm({
   // so they don't lose work by forgetting to press Confirm. If the active line
   // isn't ready yet, surface the reason and don't append — otherwise the user
   // ends up with a silent half-saved row.
-  const addLine = async (cat: Category) => {
-    if (activeIdx != null) {
-      const cur = lines[activeIdx];
-      if (cur && !cur._confirmed) {
-        if (brandConfirmPending(cur)) {
-          showWarnToast(t('subConfirmBrandThis'));
-          return;
-        }
-        if (!lineReady(cur)) {
-          const fields = missingNamesFor(cur);
-          showWarnToast(fields ? t('drawerStillNeeded', { fields }) : t('subFillThisLine'));
-          return;
-        }
-        try {
-          await handleConfirmLine(activeIdx);
-        } catch (e) {
-          showErrorDialog(e instanceof Error ? e.message : t('subSubmitFailed'));
-          return;
-        }
-      }
+  // Saves the line open in the drawer before anything is appended after it.
+  // False when it can't be saved yet — the reason has already been shown.
+  // `skipPristine` lets the sheet scan pass over the untouched opening line,
+  // which it replaces rather than saves.
+  const settleActiveLine = async ({ skipPristine = false } = {}): Promise<boolean> => {
+    if (activeIdx == null) return true;
+    const cur = lines[activeIdx];
+    if (!cur || cur._confirmed) return true;
+    if (skipPristine && isPristineLine(cur)) return true;
+    if (brandConfirmPending(cur)) {
+      showWarnToast(t('subConfirmBrandThis'));
+      return false;
     }
+    if (!lineReady(cur)) {
+      const fields = missingNamesFor(cur);
+      showWarnToast(fields ? t('drawerStillNeeded', { fields }) : t('subFillThisLine'));
+      return false;
+    }
+    try {
+      await handleConfirmLine(activeIdx);
+    } catch (e) {
+      showErrorDialog(e instanceof Error ? e.message : t('subSubmitFailed'));
+      return false;
+    }
+    return true;
+  };
+
+  const addLine = async (cat: Category) => {
+    if (!(await settleActiveLine())) return;
     setLastCat(cat);
     setLines(ls => [...ls, blankLine(cat)]);
     setActiveIdx(lines.length);
   };
 
-  const removeLine = (i: number) => {
-    setLines(ls => (ls.length <= 1 ? ls : ls.filter((_, j) => j !== i)));
+  // "Scan RAM sheet" (RS-109): a flatbed page of sticks becomes one RAM line
+  // per stick (or per part number). The lines arrive unconfirmed, like any
+  // new line: whatever the label couldn't supply (speed, a Micron chip #) is
+  // named by the usual blockers and filled in the drawer.
+  const canScanSheet = aiCaptureEnabled('RAM') && addableCategories().includes('RAM');
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const openSheetScan = async () => {
+    if (!(await settleActiveLine({ skipPristine: true }))) return;
+    setActiveIdx(null);
+    setSheetOpen(true);
+  };
+  // Scanned sticks save to the PO straight away, like a confirmed line (RS-116):
+  // every one that passes the Confirm rule goes up in one save (the first save
+  // creates the PO). The rest stay on the page unsaved, exactly like a
+  // hand-entered line that isn't finished, and are named in the message.
+  const [autoSaving, setAutoSaving] = useState(false);
+  const addScannedLines = async (patches: Partial<Line>[]) => {
+    if (!patches.length) return;
+    // Held from the start: the chip lookup below is a round trip, and Submit or
+    // another add inside it would save these lines a second time.
+    setAutoSaving(true);
+    try {
+      await addScannedLinesHeld(patches);
+    } finally {
+      setAutoSaving(false);
+    }
+  };
+  const addScannedLinesHeld = async (patches: Partial<Line>[]) => {
+    // Known chips go in before the save check, so a Micron stick whose part #
+    // is on record saves instead of waiting in the drawer. The drawer won't
+    // fill these later — a line opened with its part # already set is left as
+    // it is — so this is the only chance.
+    let chips: Record<string, string> = {};
+    try {
+      chips = await lookupChips([...new Set(patches
+        .filter(p => p.partNumber && !p.chipNumber?.trim())
+        .map(p => p.partNumber!))]);
+    } catch {
+      // Without the map the sheet still lands; the chips are typed by hand.
+    }
+    const added = patches.map(p => {
+      const chip = !p.chipNumber?.trim() && p.partNumber ? chips[p.partNumber] : undefined;
+      return { ...blankLine('RAM'), ...p, ...(chip ? { chipNumber: chip } : {}) };
+    });
+    setLastCat('RAM');
+    setLines(ls => [
+      ...(ls.length === 1 && isPristineLine(ls[0]) ? [] : ls),
+      ...added,
+    ]);
+    setActiveIdx(null);
+
+    const blocks = added.map(lineSaveBlock);
+    const ready = added.filter((_, i) => blocks[i] === null);
+    const needDetails = blocks.filter(b => b === 'fields' || b === 'brand').length;
+    const needSerials = blocks.filter(b => b === 'serials').length;
+    if (!ready.length) {
+      showWarnToast(t('subScanNoneSaved', { details: needDetails, serials: needSerials }));
+      return;
+    }
+    try {
+      const saved = await persistLines(ready.map(toWireLine), wireMeta());
+      const idByCid = new Map<string, string>();
+      ready.forEach((l, i) => { if (saved.lineIds[i]) idByCid.set(l._cid, saved.lineIds[i]); });
+      setLines(ls => ls.map(l => (idByCid.has(l._cid)
+        ? { ...l, _confirmed: true, _dbId: idByCid.get(l._cid)! }
+        : l)));
+      const held = needDetails + needSerials;
+      if (held) {
+        showWarnToast(t('subScanSavedSome', {
+          n: ready.length, po: saved.orderId, details: needDetails, serials: needSerials,
+        }));
+      } else {
+        showSuccessToast(t('subScanSavedAll', { n: ready.length, po: saved.orderId }));
+      }
+    } catch (e) {
+      // Nothing is lost: the lines stay on the page unsaved, and Confirm or
+      // Submit saves them the usual way.
+      showErrorDialog(e instanceof Error ? e.message : t('subSubmitFailed'));
+    }
+  };
+
+  const removeLine = async (i: number) => {
+    const l = lines[i];
+    // A saved line is a row on the PO: take it off there first, or the trash
+    // icon would only hide it here (RS-116 — scanned lines are saved at once).
+    const poId = orderIdRef.current;
+    if (l?._dbId && poId) {
+      try {
+        await api.patch(`/api/orders/${poId}`, { removeLineIds: [l._dbId] });
+      } catch (e) {
+        showErrorDialog(e instanceof Error ? e.message : t('subSubmitFailed'));
+        return;
+      }
+    }
+    setLines(ls => (ls.length <= 1 ? ls : ls.filter(x => x._cid !== l?._cid)));
     setActiveIdx(idx => {
       if (lines.length <= 1) return null;
       if (i === idx) return null;
@@ -543,23 +521,39 @@ function OrderForm({
   // PO is therefore never written — if the first POST fails, orderId stays null
   // and a retry creates it fresh. Returns the resolved id so callers can chain
   // (e.g. evidence upload).
-  const persistLines = async (
+  //
+  // Saves run one at a time (RS-116). The scan auto-save fires on its own, so a
+  // Confirm, a second scan or a Submit can start while it is in flight; reading
+  // `orderId` from state there would let both see "no PO yet" and POST two.
+  // The queue orders them, and the ref carries the new id to the next save
+  // before React re-renders.
+  const orderIdRef = useRef<string | null>(null);
+  orderIdRef.current = orderIdRef.current ?? orderId;
+  const saveQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const persistLines = (
     wireLines: ReturnType<typeof toWireLine>[],
     m: WireMeta,
   ): Promise<{ orderId: string; lineIds: string[] }> => {
-    if (orderId) {
-      const r = await api.patch<{ ok: true; addedLineIds?: string[] }>(
-        '/api/orders/' + orderId, { addLines: wireLines, ...m });
-      return { orderId, lineIds: r.addedLineIds ?? [] };
-    }
-    // Ownership travels only on the create — PATCH can't reassign an owner,
-    // so appends deliberately leave it out.
-    const r = await createOrder({
-      lines: wireLines, ...m,
-      ...(onBehalfOfUserId ? { onBehalfOfUserId } : {}),
-    });
-    setOrderId(r.id);
-    return { orderId: r.id, lineIds: r.lineIds ?? [] };
+    const run = async () => {
+      const current = orderIdRef.current;
+      if (current) {
+        const r = await api.patch<{ ok: true; addedLineIds?: string[] }>(
+          '/api/orders/' + current, { addLines: wireLines, ...m });
+        return { orderId: current, lineIds: r.addedLineIds ?? [] };
+      }
+      // Ownership travels only on the create — PATCH can't reassign an owner,
+      // so appends deliberately leave it out.
+      const r = await createOrder({
+        lines: wireLines, ...m,
+        ...(onBehalfOfUserId ? { onBehalfOfUserId } : {}),
+      });
+      orderIdRef.current = r.id;
+      setOrderId(r.id);
+      return { orderId: r.id, lineIds: r.lineIds ?? [] };
+    };
+    const next = saveQueue.current.then(run, run);
+    saveQueue.current = next.catch(() => undefined);
+    return next;
   };
 
   const wireMeta = (): WireMeta => ({
@@ -583,16 +577,18 @@ function OrderForm({
     // addLine bails earlier still. Nothing should reach this — but this is the
     // single funnel every confirm goes through, so it is where the rule can't
     // be routed around.
-    if (brandConfirmPending(l)) {
+    // lineSaveBlock is the same rule the scan auto-save uses (RS-116).
+    const block = lineSaveBlock(l);
+    if (block === 'brand') {
       showErrorDialog(t('subConfirmBrandThis'));
       throw new Error(t('brandConfirmTitle'));
     }
-    if (!lineReady(l)) {
+    if (block === 'fields') {
       const fields = missingNamesFor(l);
       showErrorDialog(fields ? t('subMissingFieldsThis', { fields }) : t('subFillThisLine'));
       return;
     }
-    const issue = serialIssue(l);
+    const issue = block === 'serials' ? serialIssue(l) : null;
     if (issue) {
       setSerialIssues([{ lineNo: idx + 1, label: lineLabel(l), issue }]);
       // Thrown (not returned) so the drawer's confirm handler keeps the
@@ -814,23 +810,10 @@ function OrderForm({
   // warehouse load → warehouse pick → per-line completeness.
   const submitBlockers: string[] =
     submitting              ? []
+  : autoSaving              ? [t('subScanSaving')]
   : warehouses.length === 0 ? [t('subWarehousesNotLoaded')]
   : !meta.warehouseId       ? [t('reviewPickWarehouseHint')]
-  : lines.flatMap((l, i) => {
-      if (brandConfirmPending(l)) {
-        return [lines.length === 1
-          ? t('subConfirmBrandThis')
-          : t('subConfirmBrandLine', { n: i + 1 })];
-      }
-      if (lineReady(l)) return [];
-      const fields = missingNamesFor(l);
-      if (fields) {
-        return [lines.length === 1
-          ? t('subMissingFieldsThis', { fields })
-          : t('subMissingFieldsLine', { n: i + 1, fields })];
-      }
-      return [lines.length === 1 ? t('subFillThisLine') : t('subFillLineN', { n: i + 1 })];
-    });
+  : lineBlockerMessages(lines, t, lineReady, missingNamesFor);
 
   const onSubmitClick = () => {
     if (submitBlockers.length) {
@@ -869,6 +852,17 @@ function OrderForm({
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span className="chip mono">{t('subUnitsCost', { n: totals.units, cost: fmtUSD(totals.cost, locale) })}</span>
+            {canScanSheet && (
+              <button
+                type="button"
+                className="btn sm"
+                title={t('rsheetOpenTitle')}
+                onClick={() => void openSheetScan()}
+              >
+                <Icon name="scan" size={13} />
+                {t('rsheetOpen')}
+              </button>
+            )}
             <AddLineMenu onAdd={addLine} />
           </div>
         </div>
@@ -902,27 +896,61 @@ function OrderForm({
                 >
                   <td className="mono" style={{ color: isActive ? 'var(--accent-strong)' : 'var(--fg-subtle)', fontWeight: isActive ? 600 : 400 }}>{i + 1}</td>
                   <td>
-                    {filled ? (
-                      <div>
-                        <div style={{ fontWeight: 500 }}>
-                          {l.category === 'RAM' && `${l.brand ?? ''} ${l.capacity ?? ''} ${l.generation ?? ''}`.trim()}
-                          {l.category === 'SSD' && `${l.brand ?? ''} ${l.capacity ?? ''} ${l.interface ?? ''}`.trim()}
-                          {l.category === 'HDD' && `${l.brand ?? ''} ${l.capacity ?? ''} ${l.rpm ? l.rpm + 'rpm' : ''}`.trim()}
-                          {l.category === 'Other' && (
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                              {!!(l.itemType ?? '').trim() && <span className="chip">{l.itemType}</span>}
-                              {l.description ?? '—'}
-                            </span>
-                          )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      {filled ? (
+                        <div>
+                          <div style={{ fontWeight: 500 }}>
+                            {lineSpecLabel(l)}
+                            {l.category === 'Other' && (
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                {!!(l.itemType ?? '').trim() && <span className="chip">{l.itemType}</span>}
+                                {l.description ?? '—'}
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2 }}>
+                            {l.category === 'RAM' && [l.classification, l.rank, l.speed && (l.speed + 'MHz')].filter(Boolean).join(' · ')}
+                            {l.category === 'SSD' && [l.formFactor, l.condition, l.health != null && (l.health + '%')].filter(Boolean).join(' · ')}
+                            {l.category === 'HDD' && [l.interface, l.formFactor, l.condition, l.health != null && (l.health + '%')].filter(Boolean).join(' · ')}
+                            {l.category === 'Other' && l.condition}
+                          </div>
                         </div>
-                        <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2 }}>
-                          {l.category === 'RAM' && [l.classification, l.rank, l.speed && (l.speed + 'MHz')].filter(Boolean).join(' · ')}
-                          {l.category === 'SSD' && [l.formFactor, l.condition, l.health != null && (l.health + '%')].filter(Boolean).join(' · ')}
-                          {l.category === 'HDD' && [l.interface, l.formFactor, l.condition, l.health != null && (l.health + '%')].filter(Boolean).join(' · ')}
-                          {l.category === 'Other' && l.condition}
-                        </div>
-                      </div>
-                    ) : <span className="muted" style={{ fontStyle: 'italic' }}>{isActive ? t('subEditingFill') : t('subNotFilled')}</span>}
+                      ) : <span className="muted" style={{ fontStyle: 'italic' }}>{isActive ? t('subEditingFill') : t('subNotFilled')}</span>}
+                      {(() => {
+                        // The label crop a scan captured (or the first saved
+                        // photo), after the name so the purchaser can check the
+                        // row against it. Same thumb as the Edit order table;
+                        // shown on unfilled rows too — that's when it helps most.
+                        const shots = linePhotos(l);
+                        if (!shots.length) return null;
+                        return (
+                          <button
+                            type="button"
+                            onClick={e => { e.stopPropagation(); setLightboxUrl(shots[0].url); }}
+                            title={t('linePhotos')}
+                            style={{
+                              width: 40, height: 40, borderRadius: 8, flexShrink: 0, position: 'relative',
+                              border: '1px solid var(--border)', overflow: 'hidden',
+                              padding: 0, background: 'var(--bg-soft)', cursor: 'pointer',
+                            }}
+                          >
+                            <img
+                              src={shots[0].url}
+                              alt={t('linePhotos')}
+                              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                            />
+                            {shots.length > 1 && (
+                              <span style={{
+                                position: 'absolute', right: 0, bottom: 0,
+                                background: 'rgba(15,23,42,0.72)', color: 'white',
+                                fontSize: 9, fontWeight: 700, padding: '1px 4px',
+                                borderTopLeftRadius: 5,
+                              }}>+{shots.length - 1}</span>
+                            )}
+                          </button>
+                        );
+                      })()}
+                    </div>
                   </td>
                   <td className="mono muted" style={{ fontSize: 11 }}>{l.partNumber || '—'}</td>
                   <td className="num mono">{lQty}</td>
@@ -930,13 +958,14 @@ function OrderForm({
                   <td className="num mono">{lQty && lCost ? fmtUSD(lQty * lCost, locale) : '—'}</td>
                   <td>
                     {isActive && <span className="chip info"><Icon name="edit" size={10} /> {t('subStatusEditing')}</span>}
-                    {!isActive && filled && <span className="chip pos">{t('subStatusReady')}</span>}
-                    {!isActive && !filled && <span className="chip warn">{t('subStatusNeedsInfo')}</span>}
+                    {!isActive && l._confirmed && <span className="chip pos">{t('subStatusSaved')}</span>}
+                    {!isActive && !l._confirmed && filled && <span className="chip">{t('subStatusNotSaved')}</span>}
+                    {!isActive && !l._confirmed && !filled && <span className="chip warn">{t('subStatusNeedsInfo')}</span>}
                   </td>
                   <td>
                     <button
                       className="btn icon sm"
-                      onClick={e => { e.stopPropagation(); removeLine(i); }}
+                      onClick={e => { e.stopPropagation(); void removeLine(i); }}
                       title={t('soRemoveLineTooltip')}
                       disabled={lines.length <= 1}
                       style={lines.length <= 1 ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
@@ -1255,59 +1284,28 @@ function OrderForm({
         </div>
       )}
 
+      {sheetOpen && (
+        <RamSheetScanDialog onClose={() => setSheetOpen(false)} onAddLines={addScannedLines} />
+      )}
       {serialIssues && (
         <SerialCheckDialog issues={serialIssues} onClose={() => setSerialIssues(null)} />
       )}
 
       {dupConfirm && (
-        <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget && !submitting) setDupConfirm(null); }}>
-          <div className="modal-shell" style={{ maxWidth: 480 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-head">
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                <div style={{
-                  width: 36, height: 36, borderRadius: 8,
-                  background: 'var(--warn-soft, #fef3c7)', color: 'var(--warn-strong, #92400e)',
-                  display: 'grid', placeItems: 'center', flexShrink: 0,
-                }}>
-                  <Icon name="alert" size={18} />
-                </div>
-                <div>
-                  <div className="modal-title">{t('dupPartModalTitle')}</div>
-                  <div className="modal-sub">{t('dupPartModalSub')}</div>
-                </div>
-              </div>
-            </div>
-            <div className="modal-body">
-              <ul style={{ margin: 0, padding: '0 0 0 18px', display: 'grid', gap: 6, fontSize: 13 }}>
-                {dupConfirm.map(g => (
-                  <li key={g.partNumber.toLowerCase()}>
-                    {(g.lineNums.length === 1 ? t('dupPartModalRowOne') : t('dupPartModalRowMany'))
-                      .replace('{pn}', g.partNumber)
-                      .replace('{nums}', g.lineNums.join(', '))}
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div className="modal-foot">
-              <button className="btn" onClick={() => setDupConfirm(null)} disabled={submitting}>
-                {t('dupPartReview')}
-              </button>
-              <button
-                className="btn accent"
-                disabled={submitting}
-                onClick={async () => {
-                  setDupConfirm(null);
-                  const target = pendingTargetId ? targets.find(o => o.id === pendingTargetId) : null;
-                  setPendingTargetId(null);
-                  if (target) await doSubmitToExisting(target);
-                  else await doSubmit();
-                }}
-              >
-                {submitting ? '…' : t('dupPartSubmitAnyway')}
-              </button>
-            </div>
-          </div>
-        </div>
+        <DupPartDialog
+          groups={dupConfirm}
+          busy={submitting}
+          confirmTone="accent"
+          confirmLabel={t('dupPartSubmitAnyway')}
+          onClose={() => setDupConfirm(null)}
+          onConfirm={async () => {
+            setDupConfirm(null);
+            const target = pendingTargetId ? targets.find(o => o.id === pendingTargetId) : null;
+            setPendingTargetId(null);
+            if (target) await doSubmitToExisting(target);
+            else await doSubmit();
+          }}
+        />
       )}
 
       {pnConfirm && (
@@ -1360,11 +1358,11 @@ function OrderForm({
           </div>
         </div>
       )}
+
+      {lightboxUrl && (
+        <ImageLightbox url={lightboxUrl} alt={t('linePhotos')} onClose={() => setLightboxUrl(null)} />
+      )}
     </>
   );
 }
 
-// LineDrawer + the per-category field groups (RamFields/SsdFields/HddFields/
-// OtherFields/CatSelect) were extracted verbatim into ./submit/* — re-exported
-// here so external importers (DesktopEditOrder) keep their existing import path.
-export { LineDrawer };

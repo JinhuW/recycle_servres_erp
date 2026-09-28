@@ -1,9 +1,11 @@
 import { Hono } from 'hono';
 import { getDb } from '../db';
+import { UUID_RE } from '../lib/pagination';
 import { notify } from '../lib/notify';
 import { getWorkspaceSetting } from '../lib/settings';
 import { nextHumanId } from '../lib/id-seq';
 import { canonPartCol, canonPartArg } from '../lib/part-number';
+import { invLabel } from '../lib/inventoryLabel';
 import { committedSellStatuses, openSellStatuses } from '../lib/sellCommitment';
 import { buildXlsxWorkbook, xlsxResponse, datedFilename, type XlsxColumn } from '../lib/xlsx';
 import {
@@ -25,6 +27,19 @@ const SPEC_PATCH_FIELDS = [
   'brand', 'capacity', 'generation', 'type', 'classification',
   'rank', 'speed', 'interface', 'formFactor', 'description',
 ] as const;
+const IS_SPEC_PATCH_FIELD = new Set<string>(SPEC_PATCH_FIELDS);
+
+// Fields PATCH /:id audits, and the order_lines column each one is read from.
+const PATCH_AUDIT_FIELDS = [
+  'status', 'sellPrice', 'unitCost', 'qty', 'condition', 'partNumber', 'health', 'rpm',
+  ...SPEC_PATCH_FIELDS,
+] as const;
+const PATCH_AUDIT_COL: Record<string, string> = {
+  status: 'status', sellPrice: 'sell_price', unitCost: 'unit_cost',
+  qty: 'qty', condition: 'condition', partNumber: 'part_number',
+  health: 'health', rpm: 'rpm',
+  ...SPEC_FIELD_TO_DB_COL,
+};
 
 const inventory = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
@@ -237,17 +252,6 @@ const invExportCols = (cat: ExportCategory): XlsxColumn[] => [
   ...INV_EXPORT_TAIL,
 ];
 
-// Exported so the sell-order price template can render the same Item string
-// from a sold line's source inventory row.
-export function invLabel(r: Record<string, unknown>): string {
-  const s = (v: unknown) => (v == null ? '' : String(v));
-  switch (r.category) {
-    case 'RAM': return [s(r.brand), s(r.capacity), s(r.generation)].filter(Boolean).join(' ');
-    case 'SSD':
-    case 'HDD': return [s(r.brand), s(r.capacity)].filter(Boolean).join(' ');
-    default:    return s(r.description);
-  }
-}
 // Grouped export (?view=grouped): one row per product — lines sharing a
 // canonical part number collapse together, mirroring the desktop grouped view.
 // Aggregates qty by status and counts POs/lots. Carries no money and no
@@ -297,7 +301,6 @@ inventory.get('/export', async (c) => {
   // id would otherwise make Postgres throw and 500 the export. A selection
   // that yields NO valid id is a 400 — silently exporting the full set on a
   // corrupted link would be worse than failing.
-  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const rawIds = (c.req.query('ids') ?? '').split(',').filter(Boolean);
   const ids = [...new Set(rawIds.filter((id) => UUID_RE.test(id)))].slice(0, 1000);
   if (rawIds.length > 0 && ids.length === 0) {
@@ -1241,25 +1244,14 @@ inventory.patch('/:id', async (c) => {
       WHERE id = ${id}
     `;
     // One event per changed field — keeps the timeline easy to skim.
-    const fields = [
-      'status', 'sellPrice', 'unitCost', 'qty', 'condition', 'partNumber', 'health', 'rpm',
-      ...SPEC_PATCH_FIELDS,
-    ] as const;
-    const isSpec = new Set<string>(SPEC_PATCH_FIELDS);
-    for (const f of fields) {
+    for (const f of PATCH_AUDIT_FIELDS) {
       const raw = (body as Record<string, unknown>)[f];
       if (raw === undefined) continue;
       // Compare and record what actually landed in the column, not what the
       // client sent — otherwise clearing a field that was already NULL logs a
       // phantom `null → ''` edit.
-      const newVal = isSpec.has(f) ? specVal(raw as string | null) : raw;
-      const beforeKey: Record<string, string> = {
-        status: 'status', sellPrice: 'sell_price', unitCost: 'unit_cost',
-        qty: 'qty', condition: 'condition', partNumber: 'part_number',
-        health: 'health', rpm: 'rpm',
-        ...SPEC_FIELD_TO_DB_COL,
-      };
-      const oldVal = before[beforeKey[f]];
+      const newVal = IS_SPEC_PATCH_FIELD.has(f) ? specVal(raw as string | null) : raw;
+      const oldVal = before[PATCH_AUDIT_COL[f]];
       if (String(oldVal) === String(newVal)) continue;
       const kind = f === 'status' ? 'status' : f === 'sellPrice' ? 'priced' : 'edited';
       const fromStr = oldVal == null ? null : String(oldVal);

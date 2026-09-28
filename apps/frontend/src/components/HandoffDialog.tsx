@@ -63,8 +63,7 @@ function HandoffSection({ item, title, summary, children, phone }: {
 }
 
 export function HandoffFields({ f, phone = false }: { f: Form; phone?: boolean }) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const selectCls = phone ? 'input' : 'select';
   const order = f.order;
 
@@ -225,7 +224,7 @@ export function HandoffBlockers({ keys }: { keys: string[] }) {
 export function HandoffDialog({ init, onCancel, onDone }: Props) {
   const { t } = useT();
   const f = useHandoffForm(init, onDone);
-  useEscapeKey(onCancel, !f.busy);
+  useEscapeKey(() => { if (!f.busy) onCancel(); });
   const missing = f.blockerKeys.length;
 
   return (

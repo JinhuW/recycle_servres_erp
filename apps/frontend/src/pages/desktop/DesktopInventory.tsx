@@ -118,8 +118,7 @@ function sortAttrValues(key: string, values: string[]): string[] {
 }
 
 export function DesktopInventory({ onEditItem, showToast }: Props) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const { user } = useAuth();
   const isManager = user?.role === 'manager';
 
@@ -282,6 +281,8 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     return params.toString();
   }, [filter, showSold, hidePending, warehouseFilter, search, attrSchema, attrFilters]);
 
+  const [reloadKey, setReloadKey] = useState(0);
+
   // Data fetch (debounced on search/filters)
   useEffect(() => {
     let alive = true;
@@ -292,7 +293,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
         .finally(() => { if (alive) setLoadedOnce(true); });
     }, 200);
     return () => { alive = false; clearTimeout(handle); };
-  }, [filterQuery]);
+  }, [filterQuery, reloadKey]);
 
   useEffect(() => {
     // Products endpoint is also our source of facet + warehouse counts.
@@ -318,7 +319,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
         });
     }, 200);
     return () => { alive = false; clearTimeout(h); };
-  }, [filterQuery]);
+  }, [filterQuery, reloadKey]);
 
   useEffect(() => {
     let alive = true;
@@ -533,15 +534,9 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     setTransferItems(buildTransferItems(selectedItems));
   };
 
-  const refetchInventory = () => {
-    const params = new URLSearchParams();
-    if (filter !== 'all') params.set('category', filter);
-    if (warehouseFilter !== 'all') params.set('warehouse', warehouseFilter);
-    if (search.trim()) params.set('q', search.trim());
-    api.get<{ items: InventoryRow[] }>(`/api/inventory?${params}`)
-      .then(r => setItems(r.items))
-      .catch(handleFetchError);
-  };
+  // Re-runs both fetch effects, so a reload keeps every active filter and the
+  // facet counts move with the rows.
+  const refetchInventory = () => setReloadKey(k => k + 1);
 
   return (
     <>
@@ -1063,8 +1058,7 @@ function InventoryQuickView({
   onClose: () => void;
   onEdit: () => void;
 }) {
-  const { lang, t } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   useEscapeKey(onClose);
 
   // Merged change log: union of inventory_events across every PO line sharing

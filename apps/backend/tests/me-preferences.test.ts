@@ -25,6 +25,8 @@ describe('PATCH /api/me/preferences allowlist', () => {
         'orders.cols': ['id'],
         'market.showStaleOnly': true,
         'submit.lastCategory': 'SSD',
+        'scan.deskCamera': true,
+        'scan.cameraLabel': "Jinhu's iPhone Camera",
       },
     });
     expect(res.status).toBe(200);

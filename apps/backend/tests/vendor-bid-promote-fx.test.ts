@@ -2,22 +2,12 @@ import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
+import { mockFrankfurter } from './helpers/fx';
 
 // Mirror vendor-public-bid-currency.test.ts: stub Frankfurter so the
 // bid-submit path freezes a deterministic rate, then assert the promote
 // path uses the rate FROZEN on the bid (not the live rate at promote time)
 // + stamps the SO line audit cols.
-function mockFrankfurter(rate: number, date = '2026-05-26') {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async () =>
-      new Response(
-        JSON.stringify({ amount: 1, base: 'USD', date, rates: { CNY: rate } }),
-        { status: 200 },
-      ),
-    ),
-  );
-}
 
 async function seedLink(): Promise<{ token: string; mgr: string }> {
   const { token: mgr } = await loginAs(ALEX);
@@ -39,7 +29,7 @@ async function anInStockLine(mgr: string, minQty = 1): Promise<{ id: string; qty
 describe('vendor-bids promote — frozen fx + SO line audit', () => {
   beforeEach(async () => {
     await resetDb();
-    mockFrankfurter(7.2154);
+    mockFrankfurter(7.2154, '2026-05-26');
   });
 
   afterEach(() => {

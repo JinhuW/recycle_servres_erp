@@ -5,6 +5,19 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-123](./RS-123-web-form-submissions-inbox-ram4cash-recycleservers.md) | done | story | P2 | Web form submissions inbox (ram4cash + recycleservers) | 1.187.0 |
+| [RS-122](./RS-122-part-number-chip-map-auto-fills-a-ram-line-s-chip.md) | done | story | P2 | Part number → chip # map auto-fills a RAM line's chip # | 1.186.0 |
+| [RS-121](./RS-121-desk-camera-box-follows-the-ram-stick.md) | done | story | P2 | Desk camera box follows the RAM stick | 1.185.0 |
+| [RS-120](./RS-120-desk-scanner-uploads-the-whole-frame-instead-of-just.md) | done | bug | P1 | Desk scanner crops the RAM stick out of the camera frame | 1.184.1 |
+| [RS-119](./RS-119-desk-scanner-continuity-camera-auto-captures-a-ram-l.md) | done | story | P2 | Desk scanner: Continuity Camera auto-captures a RAM label into the line drawer | 1.184.0 |
+| [RS-117](./RS-117-new-po-items-table-shows-the-scanned-label-photo-cli.md) | in-review | story | P2 | New PO items table shows the scanned label photo, click to zoom | 1.183.0 |
+| [RS-116](./RS-116-scanned-ram-lines-auto-save-to-the-po-like-confirmed.md) | done | bug | P1 | Scanned RAM lines auto-save to the PO like confirmed lines, and scans run at the scanner's highest resolution | 1.182.0 |
+| [RS-115](./RS-115-switch-image-ai-to-openai-gpt-6-luna-and-let-new-she.md) | done | story | P2 | Switch image AI to OpenAI gpt-6-luna, and let new sheet scans append to the table | 1.181.0 |
+| [RS-114](./RS-114-scan-from-printer-does-nothing-on-click-and-shows-no.md) | done | bug | P1 | Scan from printer does nothing on click, and shows no progress while it works | 1.180.0 |
+| [RS-113](./RS-113-set-each-purchaser-s-home-warehouse-to-the-closest-w.md) | done | task | P2 | Set each purchaser's home warehouse to the closest warehouse | 1.178.1 |
+| [RS-111](./RS-111-parallel-reads-batched-writes-shared-modal-search-de.md) | done | story | P2 | Parallel reads, batched writes, shared modal, search debounce, inventory reload | 1.179.0 |
+| [RS-109](./RS-109-scan-a-sheet-of-ram-sticks-on-the-flatbed-and-add-on.md) | done | story | P2 | Scan a sheet of RAM sticks on the flatbed and add one line per stick | 1.178.0 |
+| [RS-108](./RS-108-behaviour-preserving-cleanup-across-the-repo.md) | done | chore | P2 | Behaviour-preserving cleanup across the repo | 1.177.4 |
 | [RS-107](./RS-107-manager-only-data-is-absent-from-every-non-manager-a.md) | done | bug | P2 | Manager-only data is absent from every non-manager API response | 1.177.2 |
 | [RS-106](./RS-106-manager-only-po-fields-are-absent-not-null-for-purch.md) | done | bug | P2 | Manager-only PO fields are absent, not null, for purchasers | 1.177.1 |
 | [RS-105](./RS-105-ignore-rules-for-bank-transactions.md) | done | story | P2 | Ignore rules for bank transactions | 1.177.0 |

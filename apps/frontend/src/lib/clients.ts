@@ -52,7 +52,6 @@ export type ClientDetail = Client & {
   timeline: ClientNote[];
   orders: { id: string; lifecycle: string; total_cost: number | null; created_at: string }[];
   sold: { item_type: string; qty: number; spend: number }[];
-  rhythm: number[];
 };
 
 export type Suggestion = {

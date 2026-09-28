@@ -7,7 +7,7 @@ import { useElementWidth } from '../../lib/useElementWidth';
 // Sales in above the baseline, spend out below it, and the gross profit on
 // what sold as a line — one dollar axis, so the three read against each other.
 
-export type SeriesPoint = { start: IsoDate; revenue: number; cost: number; profit: number };
+type SeriesPoint = { start: IsoDate; revenue: number; cost: number; profit: number };
 
 const H = 260;
 const PAD = { l: 58, r: 12, t: 12, b: 26 };

@@ -30,8 +30,7 @@ type Props = {
 };
 
 export function Orders({ onToast }: Props) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   // Backend scopes the list by effectiveRole; track it here so toggling the
   // manager's role-preview tweak re-fetches instead of leaving stale rows.
   const effRole = useEffectiveUser()?.role;

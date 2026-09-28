@@ -58,8 +58,7 @@ const REDIRECT_PRESETS = [
 ] as const;
 
 export function DesktopSettingsConnectors() {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const { user } = useAuth();
   const isManager = user?.role === 'manager';
   const [clients, setClients] = useState<Client[] | null>(null);

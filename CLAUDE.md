@@ -69,8 +69,6 @@ Three things worth knowing:
 - `scripts/changelog.sh backfill` rebuilds the whole file from the tag list and
   is idempotent.  It preserves hand-written sections verbatim, so running it
   is safe — but it is a repair tool, not part of the release flow.
-  `scripts/release.sh` has its own, older generator for the retired
-  Docker/`main` flow; don't extend that one.
 
 ## Session isolation (one branch per Claude Code session)
 
@@ -167,6 +165,12 @@ switches the branch out from under the first.
   raw English in JSX.
 - User preferences (theme, list-view modes, etc.) flow through
   `lib/preferences.tsx`.  Add new keys there, not in component-local state.
+- Dialogs use `components/Modal.tsx`.  Escape is a stack (`lib/escapeStack.ts`)
+  where only the top entry fires, so **never turn Escape off with
+  `useEscapeKey(fn, !busy)` while a dialog is open** — the key would fall
+  through to the layer under it.  Guard inside the handler instead; `active`
+  is only for something mounted but hidden, like a closed drawer.  Nested
+  dialogs render as siblings of the `<Modal>`, not children.
 
 ## Backend
 
@@ -206,6 +210,11 @@ switches the branch out from under the first.
   Do not new-up `postgres()` clients inline; call `getDb(env)`.  The historical
   per-request pool design caused connection exhaustion under load — don't
   bring it back.
+- **Fan out per-request reads with `allLimited` (`lib/concurrency.ts`), at
+  most 4 at a time.**  The prod pool is `max: 10` and postgres.js pipelines
+  past it onto busy connections, so an unbounded `Promise.all` on a hot page
+  queues other requests behind it.  Never use it inside `sql.begin` — a
+  transaction is one connection.
 - **Transactions use `sql.begin(async (tx) => …)`** (postgres.js).  Multi-table
   writes that have to be atomic (notably anywhere `notify` is involved — see
   `lib/notify.ts`) must run inside `sql.begin` and pass `tx` down, not a
@@ -248,7 +257,8 @@ switches the branch out from under the first.
 
 - `/api/mcp` is **Bearer-only and CSRF-exempt**, mounted with
   `bearerGuard({ scopes: [] })` — it requires a *valid* token, nothing more.
-  Per-tool gating lives in `TOOL_SCOPES` (`src/mcp/server.ts`) and filters both
+  Per-tool gating lives in the `TOOLS` registry (`src/mcp/server.ts`; each
+  entry pairs a tool's scope with its handler) and filters both
   `tools/list` and `tools/call`.  A connector that seems to be missing tools is
   a scope problem, not a missing-tool one.
 - **The public origin in every OAuth document comes from `resolvePublicOrigin`**
@@ -325,7 +335,8 @@ switches the branch out from under the first.
 - **Don't reintroduce Cloudflare Images** — it's paywalled (error 5453); we
   migrated everything to R2 attachments.  See [cloudflare_images_unpaid_stubbed][2].
 - **OCR provider selection** lives in `apps/backend/src/ai/`.  OpenRouter
-  (Gemma 3 27B) when `OPENROUTER_API_KEY` is present; otherwise a
+  (`openai/gpt-6-luna`, overridable with `OPENROUTER_OCR_MODEL`) when
+  `OPENROUTER_API_KEY` is present; otherwise a
   deterministic stub.  **The fallback is silent** — a prod deploy missing
   the key looks healthy and quietly stubs.  Verify the secret is set when
   cutting a release.

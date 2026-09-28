@@ -15,6 +15,12 @@ export type BankTxnCategory = 'external' | 'transfer';
 // because only the second one can arrive on a row we already linked to a PO.
 export type SettleStatus = 'settled' | 'pending' | 'failed' | 'reversed';
 
+// Money that never moved, or moved and came back. Nothing may be linked,
+// paired, assigned or filed against it — there is no payment to reconcile.
+// The SQL half of this rule lives in openRowFrag (banktx/match.ts).
+export const SETTLE_DEAD = ['failed', 'reversed'];
+export const isDead = (r: { settle_status?: unknown }) => SETTLE_DEAD.includes(r.settle_status as string);
+
 export type NormalizedTxn = {
   source: BankSource;
   externalId: string;

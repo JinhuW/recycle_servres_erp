@@ -10,6 +10,7 @@
 import { Hono } from 'hono';
 import type { TransactionSql } from 'postgres';
 import { authMiddleware } from '../auth';
+import { requireManager } from '../lib/role';
 import {
   fetchCandidates, groupSettleFrag, hasMatchFrag, matchSummaries, openRowFrag, pairCandidatesBatch,
   PAIR_AUTO_WINDOW_DAYS, PAIR_PICK_WINDOW_DAYS,
@@ -17,31 +18,20 @@ import {
 } from '../banktx/match';
 import { applyIgnoreRules, ignoreRuleMatchFrag, revertIgnoreRule } from '../banktx/ignoreRules';
 import { syncBankTransactions } from '../banktx/sync';
+import { SETTLE_DEAD, isDead } from '../banktx/types';
 import { getDb } from '../db';
 import { writeOrderEvent } from '../services/orderAudit';
-import { clampLimit, decodeCursor, encodeCursor, escapeLike } from '../lib/pagination';
+import { clampLimit, decodeCursor, encodeCursor, escapeLike, UUID_RE } from '../lib/pagination';
 import type { Env, User } from '../types';
 import { PAYMENT_NOTE_MAX } from '@recycle-erp/shared';
 
 const bankTx = new Hono<{ Bindings: Env; Variables: { user: User } }>()
   .use('*', authMiddleware)
-  .use('*', async (c, next) => {
-    if (c.var.user.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
-    return next();
-  });
+  .use('*', requireManager);
 
 type SqlClient = ReturnType<typeof getDb>;
 
-// A bad ?assignee= reaches Postgres as a ::uuid cast, which errors as a 500
-// rather than the 400 the caller earned.
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 const SETTLE_FILTERS = ['all', 'settled', 'pending', 'failed', 'reversed'];
-// Money that never moved, or moved and came back. Nothing may be linked,
-// paired, assigned or filed against it — there is no payment to reconcile.
-// The SQL half of this rule lives in openRowFrag (banktx/match.ts).
-const SETTLE_DEAD = ['failed', 'reversed'];
-const isDead = (r: { settle_status?: unknown }) => SETTLE_DEAD.includes(r.settle_status as string);
 
 type LegRow = {
   id: string;

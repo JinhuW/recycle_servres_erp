@@ -1,9 +1,8 @@
-import { createHash } from 'node:crypto';
 import { Hono } from 'hono';
 import { getCookie } from 'hono/cookie';
 import { MIN_PASSWORD_LEN, MAX_PASSWORD_LEN } from '@recycle-erp/shared';
 import { getDb } from '../db';
-import { hashPassword, verifyPassword } from '../auth';
+import { hashPassword, sha256hex, verifyPassword } from '../auth';
 import { revokeUserOAuthTokens } from '../oauth/tokens';
 import { validatePreferencePatch } from '../preferences';
 import { log } from '../lib/log';
@@ -188,7 +187,7 @@ me.post('/password', async (c) => {
   const currentFamilyId = rtRaw
     ? (await sql<{ family_id: string }[]>`
         SELECT family_id FROM refresh_tokens
-        WHERE token_hash = ${createHash('sha256').update(rtRaw).digest('hex')}
+        WHERE token_hash = ${sha256hex(rtRaw)}
         LIMIT 1
       `)[0]?.family_id ?? null
     : null;

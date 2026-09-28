@@ -42,7 +42,7 @@ export type TrackerSubreddit = {
 
 // Mirrors the tracker API's own validation so the form can reject bad input
 // before a round-trip.
-export const SUBREDDIT_NAME_RE = /^[A-Za-z0-9_]{2,30}$/;
+const SUBREDDIT_NAME_RE = /^[A-Za-z0-9_]{2,30}$/;
 export const MIN_POLL_INTERVAL_S = 30;
 
 /** Trims, strips a leading r/ or /r/, lowercases; null when invalid. */

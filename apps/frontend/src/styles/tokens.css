@@ -611,6 +611,81 @@ button { font-family: inherit; cursor: pointer; }
   .ai-dropzone.is-busy .ai-dropzone-badge { animation: none; }
 }
 
+/* ===== Desk camera — live Continuity Camera feed in place of the dropzone =====
+   Always dark: it's a video surface, and the hint pill has to read over any
+   frame. */
+.desk-cam-launch { display: flex; justify-content: flex-end; margin-top: -4px; }
+.desk-cam {
+  display: flex; flex-direction: column; gap: 8px;
+}
+.desk-cam-stage {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  border-radius: 12px;
+  overflow: hidden;   /* clips .scan-line and the flash to the frame */
+  background: #0b0d10;
+  border: 1.5px solid color-mix(in oklch, var(--accent) 45%, transparent);
+}
+.desk-cam-stage video {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: contain;
+  opacity: 0; transition: opacity 0.15s ease-out;
+}
+.desk-cam-stage video.is-live { opacity: 1; }
+/* Follows the detected stick; glides between samples instead of jumping. */
+.desk-cam-corners {
+  position: absolute;
+  border: 1.5px dashed rgba(255, 255, 255, 0.55);
+  border-radius: 8px;
+  pointer-events: none;
+  transition: left 0.2s ease, top 0.2s ease, width 0.2s ease, height 0.2s ease,
+              border-color 0.2s ease;
+}
+.desk-cam-corners.is-locked {
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35), 0 0 14px color-mix(in oklch, var(--accent) 45%, transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .desk-cam-corners { transition: none; }
+}
+.desk-cam-hint {
+  position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px; border-radius: 999px;
+  background: rgba(0, 0, 0, 0.62); color: white;
+  font-size: 12px; white-space: nowrap;
+}
+.desk-cam-progress {
+  width: 56px; height: 4px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.25); overflow: hidden;
+}
+.desk-cam-progress > span {
+  display: block; height: 100%; background: var(--accent);
+  transition: width 0.2s linear;
+}
+.desk-cam-flash {
+  position: absolute; inset: 0; background: white; opacity: 0.8;
+  pointer-events: none;
+}
+.desk-cam-error {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  padding: 16px; text-align: center;
+  color: rgba(255, 255, 255, 0.85); font-size: 12px;
+}
+.desk-cam-bar {
+  display: flex; align-items: center; gap: 10px; justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.desk-cam-bar .select { max-width: 220px; margin-right: auto; }
+.desk-cam-auto {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--fg-muted); cursor: pointer;
+}
+@media (prefers-reduced-motion: reduce) {
+  .desk-cam-progress > span { transition: none; }
+}
+
 /* ===== Camera viewfinder + RAM stick illustration ===== */
 .cam-viewfinder {
   background:

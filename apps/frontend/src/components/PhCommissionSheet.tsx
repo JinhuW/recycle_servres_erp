@@ -1,6 +1,7 @@
 import { Icon } from './Icon';
 import { fmtUSD } from '../lib/format';
 import { useT } from '../lib/i18n';
+import { PhSheet } from './PhSheet';
 
 // Who the order is for and what they earn — the desktop Commission tab's
 // facts, on the phone. The fields render twice: in the PO page's Commission
@@ -30,7 +31,7 @@ type FieldsProps = {
   idPrefix?: string;
 };
 
-export function commissionPreview(pct: string, m: CommissionMath) {
+function commissionPreview(pct: string, m: CommissionMath) {
   const parsed = pct.trim() === '' ? null : Number(pct);
   const rate = parsed !== null && Number.isFinite(parsed) ? parsed / 100 : 0;
   const profit = m.revenue - m.totalCost;
@@ -120,40 +121,36 @@ export function PhCommissionSheet(p: SheetProps) {
     </div>
   );
   return (
-    <>
-      <div className="ph-sheet-backdrop" onClick={() => { if (!p.busy) p.onClose(); }} />
-      <div className="ph-sheet ph-ho-sheet" role="dialog" aria-modal="true" aria-labelledby="ph-cs-title">
-        <div className="ph-sheet-grabber" />
-        <div className="ph-ho-head">
-          <div>
-            <div id="ph-cs-title" className="ph-ho-title">{t('lifecycleMarkReadyToPay')}</div>
-            <div className="ph-ho-sub">{t('phCsSub')}</div>
-          </div>
-          <button type="button" className="ph-ho-close" onClick={p.onClose} disabled={p.busy}>{t('cancel')}</button>
+    <PhSheet onBackdrop={() => { if (!p.busy) p.onClose(); }} className="ph-ho-sheet" role="dialog" aria-modal="true" aria-labelledby="ph-cs-title">
+      <div className="ph-ho-head">
+        <div>
+          <div id="ph-cs-title" className="ph-ho-title">{t('lifecycleMarkReadyToPay')}</div>
+          <div className="ph-ho-sub">{t('phCsSub')}</div>
         </div>
-        <div className="ho-body">
-          {done(t('poReadyDelivery'), p.deliverySummary)}
-          {done(t('hoPayment'), p.paymentSummary)}
-          <div className="ho-sec">
-            <div className="ho-sec-head">
-              <span className="ho-check miss" aria-hidden="true">!</span>
-              <span className="ho-sec-title">{t('poReadyCommission')}</span>
-            </div>
-            <div style={{ display: 'grid', gap: 12, paddingTop: 10 }}>
-              <PhCommissionFields {...p} idPrefix="phs" />
-            </div>
-          </div>
-        </div>
-        <button
-          type="button"
-          className="ph-btn dark"
-          style={{ width: '100%', marginTop: 14, height: 46 }}
-          onClick={p.onConfirm}
-          disabled={p.busy}
-        >
-          {p.busy ? t('hoWorking') : t('phCsConfirm')}
-        </button>
+        <button type="button" className="ph-ho-close" onClick={p.onClose} disabled={p.busy}>{t('cancel')}</button>
       </div>
-    </>
+      <div className="ho-body">
+        {done(t('poReadyDelivery'), p.deliverySummary)}
+        {done(t('hoPayment'), p.paymentSummary)}
+        <div className="ho-sec">
+          <div className="ho-sec-head">
+            <span className="ho-check miss" aria-hidden="true">!</span>
+            <span className="ho-sec-title">{t('poReadyCommission')}</span>
+          </div>
+          <div style={{ display: 'grid', gap: 12, paddingTop: 10 }}>
+            <PhCommissionFields {...p} idPrefix="phs" />
+          </div>
+        </div>
+      </div>
+      <button
+        type="button"
+        className="ph-btn dark"
+        style={{ width: '100%', marginTop: 14, height: 46 }}
+        onClick={p.onConfirm}
+        disabled={p.busy}
+      >
+        {p.busy ? t('hoWorking') : t('phCsConfirm')}
+      </button>
+    </PhSheet>
   );
 }

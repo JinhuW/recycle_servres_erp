@@ -1,6 +1,5 @@
-import type { Sql, TransactionSql } from 'postgres';
+import type { SqlLike } from '../db';
 
-type SqlLike = Sql | TransactionSql;
 
 // Atomically allocate the next human-friendly id (e.g. PO-1289). The single
 // `UPDATE ... RETURNING` takes a row lock on the counter, so concurrent
@@ -10,7 +9,7 @@ type SqlLike = Sql | TransactionSql;
 // allocate independently (gaps on rollback are fine, same as a sequence).
 export async function nextHumanId(
   sql: SqlLike,
-  name: 'PO' | 'SO' | 'TO' | 'VB',
+  name: 'PO' | 'SO' | 'TO' | 'VB' | 'WS',
   prefix: string,
 ): Promise<string> {
   const rows = await sql<{ value: number }[]>`

@@ -139,3 +139,20 @@ export const catTone = (category: string): React.CSSProperties => {
   const { tone, soft, strong } = categoryTone(category);
   return { '--cat': tone, '--cat-soft': soft, '--cat-strong': strong } as React.CSSProperties;
 };
+
+type SpecFields = {
+  category: string;
+  brand?: string | null;
+  capacity?: string | number | null;
+  generation?: string | null;
+  interface?: string | null;
+  rpm?: string | number | null;
+};
+
+// null for every other category so each caller keeps its own fallback.
+export function lineSpecLabel(l: SpecFields): string | null {
+  if (l.category === 'RAM') return `${l.brand ?? ''} ${l.capacity ?? ''} ${l.generation ?? ''}`.trim();
+  if (l.category === 'SSD') return `${l.brand ?? ''} ${l.capacity ?? ''} ${l.interface ?? ''}`.trim();
+  if (l.category === 'HDD') return `${l.brand ?? ''} ${l.capacity ?? ''} ${l.rpm ? l.rpm + 'rpm' : ''}`.trim();
+  return null;
+}

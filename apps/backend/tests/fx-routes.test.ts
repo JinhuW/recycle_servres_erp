@@ -2,18 +2,7 @@ import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { resetDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
-
-// Mock Frankfurter the same way fx-fetcher.test.ts does — vi.stubGlobal on
-// fetch. Avoids undici MockAgent (not installed) and matches existing repo
-// pattern (ai.test.ts, scan.test.ts).
-function mockFrankfurter(rate: number, date = '2026-05-26') {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async () =>
-      new Response(JSON.stringify({ amount: 1, base: 'USD', date, rates: { CNY: rate } }), { status: 200 }),
-    ),
-  );
-}
+import { mockFrankfurter } from './helpers/fx';
 
 type LatestEntry = { rate: number; source: string; fetchedAt: string; effectiveDate: string };
 type GetBody = { latest: Record<string, LatestEntry>; history: Array<Record<string, unknown>> };
@@ -21,7 +10,7 @@ type GetBody = { latest: Record<string, LatestEntry>; history: Array<Record<stri
 describe('FX rates routes (/api/workspace/fx-rates)', () => {
   beforeEach(async () => {
     await resetDb();
-    mockFrankfurter(7.2154);
+    mockFrankfurter(7.2154, '2026-05-26');
   });
 
   afterEach(() => {

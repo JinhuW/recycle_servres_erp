@@ -13,6 +13,7 @@ import { shareOrCopy } from '../../lib/shareOrCopy';
 import { paymentsForOrderPath } from '../../lib/route';
 import { RouteLink } from '../../components/RouteLink';
 import { fmtUSD0, fmtUSD, fmtDateShort, fmt0 } from '../../lib/format';
+import { lineSpecLabel } from '../../lib/lineGroups';
 import { inTransitDetail, profitTone, trackingNote } from '../../lib/orderPresentation';
 import { statusTone, isCompleted, WORKFLOW_STAGES } from '../../lib/status';
 import { categoryFilterOptions } from '../../lib/lookups';
@@ -125,8 +126,7 @@ type Props = {
 };
 
 export function DesktopOrders({ onToast }: Props) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   // Effective user honours the manager's role-preview tweak — toggling
   // "view as purchaser" flips isManager so the list, pipeline, and KPIs
   // match what the backend will scope to.
@@ -708,10 +708,7 @@ export function DesktopOrders({ onToast }: Props) {
                             <tbody>
                               {openLines.lines.map((l, i) => {
                                 const name =
-                                  l.category === 'RAM' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.generation ?? ''}`.trim()
-                                  : l.category === 'SSD' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.interface ?? ''}`.trim()
-                                  : l.category === 'HDD' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.rpm ? l.rpm + 'rpm' : ''}`.trim()
-                                  : (l.description ?? '');
+                                  lineSpecLabel(l) ?? (l.description ?? '');
                                 const sub =
                                   l.category === 'RAM' ? [l.classification, l.rank, l.speed && (l.speed + 'MHz')].filter(Boolean).join(' · ')
                                   : l.category === 'SSD' ? [l.formFactor, l.health != null && (l.health + '%'), l.condition].filter(Boolean).join(' · ')

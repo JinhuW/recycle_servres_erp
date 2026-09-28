@@ -3,6 +3,7 @@ import { Icon, type IconName } from '../../components/Icon';
 import { api } from '../../lib/api';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { fmtDate } from '../../lib/format';
+import { lineSpecLabel } from '../../lib/lineGroups';
 import { statusTone } from '../../lib/status';
 import { ListSkeleton } from '../../components/Skeleton';
 import { useT } from '../../lib/i18n';
@@ -40,8 +41,7 @@ const ACTION_META: Record<string, { icon: IconName; label: string; dot: string }
 };
 
 export function DesktopActivityDrawer({ onClose }: { onClose: () => void }) {
-  const { lang, t } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const [events, setEvents] = useState<Event[] | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
@@ -82,10 +82,7 @@ export function DesktopActivityDrawer({ onClose }: { onClose: () => void }) {
   }, [events]);
 
   const itemLabel = (e: Event): string =>
-      e.category === 'RAM' ? `${e.brand ?? ''} ${e.capacity ?? ''} ${e.generation ?? ''}`.trim()
-    : e.category === 'SSD' ? `${e.brand ?? ''} ${e.capacity ?? ''} ${e.interface ?? ''}`.trim()
-    : e.category === 'HDD' ? `${e.brand ?? ''} ${e.capacity ?? ''} ${e.rpm ? e.rpm + 'rpm' : ''}`.trim()
-    : (e.description ?? '—');
+      lineSpecLabel(e) ?? (e.description ?? '—');
 
   return (
     <div

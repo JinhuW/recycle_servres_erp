@@ -2,21 +2,11 @@ import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { resetDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
+import { mockFrankfurter } from './helpers/fx';
 
 // Mirror the FX-aware tests: stub Frankfurter so the public submit path
 // freezes a deterministic rate on vendor_bids.fx_rate_to_usd. Manager-side
 // list/detail then echo those columns back as response fields.
-function mockFrankfurter(rate: number, date = '2026-05-26') {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async () =>
-      new Response(
-        JSON.stringify({ amount: 1, base: 'USD', date, rates: { CNY: rate } }),
-        { status: 200 },
-      ),
-    ),
-  );
-}
 
 async function seedLink(name: string, short: string): Promise<{ token: string; mgr: string }> {
   const { token: mgr } = await loginAs(ALEX);
@@ -62,7 +52,7 @@ type DetailBid = {
 describe('manager vendor-bids list/detail — currency response shape', () => {
   beforeEach(async () => {
     await resetDb();
-    mockFrankfurter(7.2154);
+    mockFrankfurter(7.2154, '2026-05-26');
   });
 
   afterEach(() => {

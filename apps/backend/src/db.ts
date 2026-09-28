@@ -12,6 +12,9 @@ import type { Env } from './types';
 
 type Sql = ReturnType<typeof postgres>;
 
+// A pool or a transaction handle: helpers that run inside `sql.begin` take either.
+export type SqlLike = postgres.Sql | postgres.TransactionSql;
+
 // One shared pool per distinct connection string. Production has exactly one
 // DATABASE_URL, so this is a single process-wide shared pool; tests that
 // inject an alternate URL (e.g. to simulate the DB being unreachable) get

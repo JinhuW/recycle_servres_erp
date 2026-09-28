@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Icon } from './Icon';
 import { ImageLightbox } from './ImageLightbox';
+import { fmtBytes } from '../lib/format';
 import { useT } from '../lib/i18n';
 
 // A single attachment row (icon · filename · size). Image attachments open in an
@@ -15,11 +16,6 @@ export type ChipAttachment = {
   mime: string;
   url: string;
 };
-
-const fmtSize = (n: number) =>
-  n < 1024 ? `${n} B`
-  : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB`
-  : `${(n / 1024 / 1024).toFixed(1)} MB`;
 
 const ROW: React.CSSProperties = {
   display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
@@ -45,7 +41,7 @@ export function AttachmentChip({ a, onRemove }: { a: ChipAttachment; onRemove?: 
         <div style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {a.filename}
         </div>
-        <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{fmtSize(a.size)}</div>
+        <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{fmtBytes(a.size)}</div>
       </div>
     </>
   );

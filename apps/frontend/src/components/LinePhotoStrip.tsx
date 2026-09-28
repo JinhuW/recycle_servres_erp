@@ -22,7 +22,6 @@ export function LinePhotoStrip({
   onRemovePending,
   readOnly = false,
   busy = false,
-  max = LINE_PHOTO_CAP,
 }: {
   photos: LinePhoto[];
   pending?: PendingPhoto[];
@@ -31,7 +30,6 @@ export function LinePhotoStrip({
   onRemovePending?: (p: PendingPhoto) => void;
   readOnly?: boolean;
   busy?: boolean;
-  max?: number;
 }) {
   const { t } = useT();
   const [lightbox, setLightbox] = useState<string | null>(null);
@@ -39,7 +37,7 @@ export function LinePhotoStrip({
   const total = photos.length + pending.length;
   // Only uploads count against the server's cap — the scan entry belongs to
   // label_scans, not the per-line photo table the limit is enforced on.
-  const full = uploadedPhotoCount(photos) + pending.length >= max;
+  const full = uploadedPhotoCount(photos) + pending.length >= LINE_PHOTO_CAP;
 
   const tile = (url: string, key: string, alt: string, onDrop?: () => void, isScan = false) => (
     <div key={key} className="lp-tile">
@@ -67,7 +65,7 @@ export function LinePhotoStrip({
         </span>
         {total > 0 && <span className="lp-count">{total}</span>}
         {full && !readOnly && (
-          <span className="muted" style={{ fontSize: 11 }}>{t('linePhotoCapFull', { max })}</span>
+          <span className="muted" style={{ fontSize: 11 }}>{t('linePhotoCapFull', { max: LINE_PHOTO_CAP })}</span>
         )}
       </div>
       <div className="lp-strip">

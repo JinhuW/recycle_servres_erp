@@ -19,8 +19,8 @@ type SqlClient = ReturnType<typeof getDb>;
 // The pool window is wide on purpose: routes/packages.ts mints a draft PO when
 // a box is *delivered*, so for those the distance from the payment is the
 // package's transit time. A narrow pool doesn't rank those low, it hides them.
-export const MATCH_WINDOW_DAYS = 90;
-export const STRONG_WINDOW_DAYS = 7;
+const MATCH_WINDOW_DAYS = 90;
+const STRONG_WINDOW_DAYS = 7;
 
 // Cents of drift (rounding, an FX cent) should still match; a restocking fee
 // or a different PO should not. The floor keeps small POs matchable at all;
@@ -244,7 +244,7 @@ export function hasMatchFrag(sql: SqlClient, legAlias: string) {
 // pair; a bare `c.order_id = l.order_id` is never true for an unlinked leg and
 // would hide the commonest manual case — link the PayPal leg to a PO, then
 // group the Mercury one onto it.
-export function pairEligibleFrag(sql: SqlClient, legAlias: string, candAlias: string) {
+function pairEligibleFrag(sql: SqlClient, legAlias: string, candAlias: string) {
   const l = sql(legAlias);
   const c = sql(candAlias);
   return sql`
@@ -441,7 +441,7 @@ export function rankCandidates(leg: MatchLeg, rows: CandidateRow[]): RankedCandi
 
 // One round trip for a whole page of transactions: the legs arrive as arrays
 // and LATERAL caps each pool, so this stays bounded instead of an N+1.
-export async function fetchCandidatesBatch(
+async function fetchCandidatesBatch(
   sql: SqlClient,
   legs: MatchLeg[],
   limit: number,

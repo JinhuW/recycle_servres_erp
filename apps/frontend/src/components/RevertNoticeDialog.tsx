@@ -21,8 +21,7 @@ type Props = {
 };
 
 export function RevertNoticeDialog({ orderId, changes, onAcknowledged, onDismiss }: Props) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const [busy, setBusy] = useState(false);
 
   const acknowledge = async () => {

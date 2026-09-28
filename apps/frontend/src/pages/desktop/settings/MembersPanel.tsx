@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Icon } from '../../../components/Icon';
+import { Modal } from '../../../components/Modal';
 import { useAuth } from '../../../lib/auth';
 import { api } from '../../../lib/api';
 import { handleFetchError, showErrorDialog } from '../../../lib/errorToast';
-import { useEscapeKey } from '../../../lib/useEscapeKey';
 import { relTime } from '../../../lib/format';
 import { TableSkeleton } from '../../../components/Skeleton';
 import { SettingsHeader, lastSeenLabel, Toggle, type Member, type ToastFn } from './_shared';
@@ -14,8 +14,7 @@ import { useT } from '../../../lib/i18n';
 
 // ─── Members ──────────────────────────────────────────────────────────────────
 export function MembersPanel({ showToast }: { showToast: ToastFn }) {
-  const { lang, t } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const [members, setMembers] = useState<Member[]>([]);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const { user: currentUser } = useAuth();
@@ -322,12 +321,17 @@ function InviteMemberModal({
     }
   };
 
-  useEscapeKey(onClose);
+  // One dialog for both steps, so Escape and the backdrop dismiss the success
+  // step the way Done does — the list refreshes and the toast still shows.
+  const close = () => {
+    if (tempPassword) onInvited(createdName);
+    else if (!saving) onClose();
+  };
 
-  if (tempPassword) {
-    return (
-      <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) onInvited(createdName); }}>
-        <div className="modal-shell" style={{ maxWidth: 460 }} onClick={e => e.stopPropagation()}>
+  return (
+    <Modal onClose={close} shellStyle={{ maxWidth: tempPassword ? 460 : 540 }}>
+      {tempPassword ? (
+        <>
           <div className="modal-head">
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
               <div style={{
@@ -361,115 +365,110 @@ function InviteMemberModal({
           <div className="modal-foot">
             <button className="btn primary" onClick={() => onInvited(createdName)}>{t('done')}</button>
           </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="modal-shell" style={{ maxWidth: 540 }} onClick={e => e.stopPropagation()}>
-        <div className="modal-head">
-          <div className="modal-title">{t('memInviteBtn')}</div>
-          <button className="btn icon" onClick={onClose}><Icon name="x" size={14} /></button>
-        </div>
-        <div className="modal-body">
-          <div className="field-row" style={{ gridTemplateColumns: '1fr 1fr' }}>
-            <div className="field">
-              <label className="label">{t('memFieldFullName')}</label>
-              <input
-                className="input"
-                value={draft.name}
-                onChange={e => set('name', e.target.value)}
-                autoFocus
-              />
-            </div>
-            <div className="field">
-              <label className="label">{t('custFieldContactPhone')}</label>
-              <input
-                className="input"
-                value={draft.phone}
-                onChange={e => set('phone', e.target.value)}
-              />
-            </div>
-            <div className="field" style={{ gridColumn: '1 / -1' }}>
-              <label className="label">
-                {t('memFieldEmail')}
-                {emailCheck.state === 'ok' && (
-                  <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--pos)', fontWeight: 500 }}>
-                    <Icon name="check" size={12} /> {t('memEmailValid')}
-                  </span>
-                )}
-                {(emailCheck.state === 'invalid' || emailCheck.state === 'duplicate') && (
-                  <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--neg)', fontWeight: 500 }}>
-                    <Icon name="x" size={12} /> {emailCheck.state === 'duplicate' ? t('memEmailAlreadyUsed') : t('memEmailInvalidBadge')}
-                  </span>
-                )}
-              </label>
-              <input
-                className="input"
-                type="email"
-                autoComplete="email"
-                spellCheck={false}
-                value={draft.email}
-                onChange={e => set('email', e.target.value)}
-                style={
-                  emailCheck.state === 'invalid' || emailCheck.state === 'duplicate'
-                    ? { borderColor: 'var(--neg)' }
-                    : undefined
-                }
-              />
-              {emailCheck.msg && (
-                <div
-                  className="help"
-                  style={{
-                    color:
-                      emailCheck.state === 'ok'
-                        ? 'var(--pos)'
-                        : emailCheck.state === 'empty'
-                          ? 'var(--fg-subtle)'
-                          : 'var(--neg)',
-                  }}
-                >
-                  {emailCheck.msg}
-                </div>
-              )}
-            </div>
+        </>
+      ) : (
+        <>
+          <div className="modal-head">
+            <div className="modal-title">{t('memInviteBtn')}</div>
+            <button className="btn icon" onClick={onClose}><Icon name="x" size={14} /></button>
           </div>
-          <div className="role-picker" style={{ marginTop: 12 }}>
-            {(['manager', 'purchaser'] as const).map(r => (
-              <label key={r} className={'role-card ' + (draft.role === r ? 'active' : '')}>
+          <div className="modal-body">
+            <div className="field-row" style={{ gridTemplateColumns: '1fr 1fr' }}>
+              <div className="field">
+                <label className="label">{t('memFieldFullName')}</label>
                 <input
-                  type="radio"
-                  name="invite-role"
-                  value={r}
-                  checked={draft.role === r}
-                  onChange={() => set('role', r)}
+                  className="input"
+                  value={draft.name}
+                  onChange={e => set('name', e.target.value)}
+                  autoFocus
                 />
-                <div className="role-card-body">
-                  <div className="role-card-title">{r === 'manager' ? t('role_manager') : t('role_purchaser')}</div>
-                  <div className="role-card-desc">
-                    {r === 'manager' ? t('memRoleMgrDesc') : t('memRolePurchDesc')}
+              </div>
+              <div className="field">
+                <label className="label">{t('custFieldContactPhone')}</label>
+                <input
+                  className="input"
+                  value={draft.phone}
+                  onChange={e => set('phone', e.target.value)}
+                />
+              </div>
+              <div className="field" style={{ gridColumn: '1 / -1' }}>
+                <label className="label">
+                  {t('memFieldEmail')}
+                  {emailCheck.state === 'ok' && (
+                    <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--pos)', fontWeight: 500 }}>
+                      <Icon name="check" size={12} /> {t('memEmailValid')}
+                    </span>
+                  )}
+                  {(emailCheck.state === 'invalid' || emailCheck.state === 'duplicate') && (
+                    <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--neg)', fontWeight: 500 }}>
+                      <Icon name="x" size={12} /> {emailCheck.state === 'duplicate' ? t('memEmailAlreadyUsed') : t('memEmailInvalidBadge')}
+                    </span>
+                  )}
+                </label>
+                <input
+                  className="input"
+                  type="email"
+                  autoComplete="email"
+                  spellCheck={false}
+                  value={draft.email}
+                  onChange={e => set('email', e.target.value)}
+                  style={
+                    emailCheck.state === 'invalid' || emailCheck.state === 'duplicate'
+                      ? { borderColor: 'var(--neg)' }
+                      : undefined
+                  }
+                />
+                {emailCheck.msg && (
+                  <div
+                    className="help"
+                    style={{
+                      color:
+                        emailCheck.state === 'ok'
+                          ? 'var(--pos)'
+                          : emailCheck.state === 'empty'
+                            ? 'var(--fg-subtle)'
+                            : 'var(--neg)',
+                    }}
+                  >
+                    {emailCheck.msg}
                   </div>
-                </div>
-              </label>
-            ))}
+                )}
+              </div>
+            </div>
+            <div className="role-picker" style={{ marginTop: 12 }}>
+              {(['manager', 'purchaser'] as const).map(r => (
+                <label key={r} className={'role-card ' + (draft.role === r ? 'active' : '')}>
+                  <input
+                    type="radio"
+                    name="invite-role"
+                    value={r}
+                    checked={draft.role === r}
+                    onChange={() => set('role', r)}
+                  />
+                  <div className="role-card-body">
+                    <div className="role-card-title">{r === 'manager' ? t('role_manager') : t('role_purchaser')}</div>
+                    <div className="role-card-desc">
+                      {r === 'manager' ? t('memRoleMgrDesc') : t('memRolePurchDesc')}
+                    </div>
+                  </div>
+                </label>
+              ))}
+            </div>
           </div>
-        </div>
-        <div className="modal-foot">
-          <button className="btn" onClick={onClose}>{t('cancel')}</button>
-          <button className="btn primary" onClick={submit} disabled={!canSave}>
-            {saving ? '…' : t('memSendInvite')}
-          </button>
-        </div>
-      </div>
-    </div>
+          <div className="modal-foot">
+            <button className="btn" onClick={onClose}>{t('cancel')}</button>
+            <button className="btn primary" onClick={submit} disabled={!canSave}>
+              {saving ? '…' : t('memSendInvite')}
+            </button>
+          </div>
+        </>
+      )}
+    </Modal>
   );
 }
 
 function MemberEditModal({ member, onClose, onSaved }: { member: Member; onClose: () => void; onSaved: () => void }) {
-  const { lang, t } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const [draft, setDraft] = useState<Partial<Member>>({});
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
@@ -500,142 +499,140 @@ function MemberEditModal({ member, onClose, onSaved }: { member: Member; onClose
   const role = String(v('role'));
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-shell member-edit-modal" onClick={e => e.stopPropagation()}>
-        <div className="modal-head member-edit-head">
-          <div>
-            <div className="modal-title">{t('memEditMember')}</div>
-            <div className="modal-sub">{member.email}</div>
-          </div>
-          <button className="btn icon" onClick={onClose}><Icon name="x" size={14} /></button>
+    <Modal onClose={() => { if (!saving) onClose(); }} shellClassName="member-edit-modal">
+      <div className="modal-head member-edit-head">
+        <div>
+          <div className="modal-title">{t('memEditMember')}</div>
+          <div className="modal-sub">{member.email}</div>
         </div>
-
-        <div className="member-edit-tabs">
-          <button className={'member-edit-tab ' + (tab === 'profile' ? 'active' : '')} onClick={() => setTab('profile')}>
-            <Icon name="user" size={12} /> {t('memTabProfile')}
-          </button>
-          <button className={'member-edit-tab ' + (tab === 'role' ? 'active' : '')} onClick={() => setTab('role')}>
-            <Icon name="shield" size={12} /> {t('role')}
-          </button>
-          <button className={'member-edit-tab ' + (tab === 'security' ? 'active' : '')} onClick={() => setTab('security')}>
-            <Icon name="lock" size={12} /> {t('memTabSecurity')}
-          </button>
-        </div>
-
-        <div className="modal-body member-edit-body">
-          {tab === 'profile' && (
-            <>
-              <div className="field-row">
-                <div className="field">
-                  <label className="label">{t('whFieldName')}</label>
-                  <input className="input" value={String(v('name'))} onChange={e => set('name', e.target.value)} />
-                </div>
-                <div className="field">
-                  <label className="label">{t('memFieldTitle')}</label>
-                  <input className="input" value={String(v('title') ?? '')} onChange={e => set('title', e.target.value)} />
-                </div>
-                <div className="field">
-                  <label className="label">{t('memFieldTeam')}</label>
-                  <input className="input" value={String(v('team') ?? '')} onChange={e => set('team', e.target.value)} />
-                </div>
-                <div className="field">
-                  <label className="label">{t('custFieldContactPhone')}</label>
-                  <input className="input" value={String(v('phone') ?? '')} onChange={e => set('phone', e.target.value)} />
-                </div>
-              </div>
-              <div className="toggle-row">
-                <span>{t('memAccountActive')}</span>
-                <Toggle checked={Boolean(v('active'))} onChange={val => set('active', val)} />
-              </div>
-            </>
-          )}
-
-          {tab === 'role' && (
-            <>
-              <div className="role-picker">
-                {(['manager', 'purchaser'] as const).map(r => (
-                  <label key={r} className={'role-card ' + (role === r ? 'active' : '')}>
-                    <input
-                      type="radio"
-                      name="role"
-                      value={r}
-                      checked={role === r}
-                      onChange={() => set('role', r)}
-                    />
-                    <div className="role-card-body">
-                      <div className="role-card-title">
-                        {r === 'manager' ? t('role_manager') : t('role_purchaser')}
-                        {role === r && <span className="chip accent" style={{ fontSize: 10 }}>{t('memCurrentRole')}</span>}
-                      </div>
-                      <div className="role-card-desc">
-                        {r === 'manager' ? t('memRoleMgrDesc') : t('memRolePurchDesc')}
-                      </div>
-                    </div>
-                  </label>
-                ))}
-              </div>
-            </>
-          )}
-
-          {tab === 'security' && (
-            <>
-              <div className="security-card">
-                <div className="security-card-head">
-                  <div>
-                    <div className="security-card-title">{t('memSecPwTitle')}</div>
-                    <div className="security-card-sub">{t('memSecPwSub')}</div>
-                  </div>
-                </div>
-                <div className="field">
-                  <label className="label">{t('memSecNewPw')}</label>
-                  <div className="pw-input">
-                    <input
-                      className="input"
-                      type={showPw ? 'text' : 'password'}
-                      value={password}
-                      placeholder={t('memSecPwPlaceholder')}
-                      onChange={e => setPassword(e.target.value)}
-                    />
-                    <button
-                      type="button"
-                      className="pw-toggle"
-                      onClick={() => setShowPw(s => !s)}
-                      tabIndex={-1}
-                    >
-                      <Icon name={showPw ? 'eye' : 'eye'} size={12} />
-                      {showPw ? t('memSecHide') : t('memSecShow')}
-                    </button>
-                  </div>
-                  <PasswordMeter password={password} labels={pwStrengthLabels(t)} />
-                  <div className="help">{t('memSecPwHelp')}</div>
-                </div>
-              </div>
-
-              <div className="security-card">
-                <div className="security-card-head">
-                  <div>
-                    <div className="security-card-title">{t('memLastActivityTitle')}</div>
-                    <div className="security-card-sub">{t('memLastActivitySub')}</div>
-                  </div>
-                </div>
-                <div className="security-detail">
-                  <Icon name="check" size={13} />
-                  <span>
-                    {member.last_seen_at
-                      ? <>{t('memLastSignedInLead')} <strong>{lastSeenLabel(member, locale)}</strong>.</>
-                      : <>{t('memNoSignIn')}</>}
-                  </span>
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-
-        <div className="modal-foot member-edit-foot">
-          <button className="btn" onClick={onClose}>{t('cancel')}</button>
-          <button className="btn primary" onClick={save} disabled={saving}>{saving ? '…' : t('save')}</button>
-        </div>
+        <button className="btn icon" onClick={onClose}><Icon name="x" size={14} /></button>
       </div>
-    </div>
+
+      <div className="member-edit-tabs">
+        <button className={'member-edit-tab ' + (tab === 'profile' ? 'active' : '')} onClick={() => setTab('profile')}>
+          <Icon name="user" size={12} /> {t('memTabProfile')}
+        </button>
+        <button className={'member-edit-tab ' + (tab === 'role' ? 'active' : '')} onClick={() => setTab('role')}>
+          <Icon name="shield" size={12} /> {t('role')}
+        </button>
+        <button className={'member-edit-tab ' + (tab === 'security' ? 'active' : '')} onClick={() => setTab('security')}>
+          <Icon name="lock" size={12} /> {t('memTabSecurity')}
+        </button>
+      </div>
+
+      <div className="modal-body member-edit-body">
+        {tab === 'profile' && (
+          <>
+            <div className="field-row">
+              <div className="field">
+                <label className="label">{t('whFieldName')}</label>
+                <input className="input" value={String(v('name'))} onChange={e => set('name', e.target.value)} />
+              </div>
+              <div className="field">
+                <label className="label">{t('memFieldTitle')}</label>
+                <input className="input" value={String(v('title') ?? '')} onChange={e => set('title', e.target.value)} />
+              </div>
+              <div className="field">
+                <label className="label">{t('memFieldTeam')}</label>
+                <input className="input" value={String(v('team') ?? '')} onChange={e => set('team', e.target.value)} />
+              </div>
+              <div className="field">
+                <label className="label">{t('custFieldContactPhone')}</label>
+                <input className="input" value={String(v('phone') ?? '')} onChange={e => set('phone', e.target.value)} />
+              </div>
+            </div>
+            <div className="toggle-row">
+              <span>{t('memAccountActive')}</span>
+              <Toggle checked={Boolean(v('active'))} onChange={val => set('active', val)} />
+            </div>
+          </>
+        )}
+
+        {tab === 'role' && (
+          <>
+            <div className="role-picker">
+              {(['manager', 'purchaser'] as const).map(r => (
+                <label key={r} className={'role-card ' + (role === r ? 'active' : '')}>
+                  <input
+                    type="radio"
+                    name="role"
+                    value={r}
+                    checked={role === r}
+                    onChange={() => set('role', r)}
+                  />
+                  <div className="role-card-body">
+                    <div className="role-card-title">
+                      {r === 'manager' ? t('role_manager') : t('role_purchaser')}
+                      {role === r && <span className="chip accent" style={{ fontSize: 10 }}>{t('memCurrentRole')}</span>}
+                    </div>
+                    <div className="role-card-desc">
+                      {r === 'manager' ? t('memRoleMgrDesc') : t('memRolePurchDesc')}
+                    </div>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </>
+        )}
+
+        {tab === 'security' && (
+          <>
+            <div className="security-card">
+              <div className="security-card-head">
+                <div>
+                  <div className="security-card-title">{t('memSecPwTitle')}</div>
+                  <div className="security-card-sub">{t('memSecPwSub')}</div>
+                </div>
+              </div>
+              <div className="field">
+                <label className="label">{t('memSecNewPw')}</label>
+                <div className="pw-input">
+                  <input
+                    className="input"
+                    type={showPw ? 'text' : 'password'}
+                    value={password}
+                    placeholder={t('memSecPwPlaceholder')}
+                    onChange={e => setPassword(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="pw-toggle"
+                    onClick={() => setShowPw(s => !s)}
+                    tabIndex={-1}
+                  >
+                    <Icon name={showPw ? 'eye' : 'eye'} size={12} />
+                    {showPw ? t('memSecHide') : t('memSecShow')}
+                  </button>
+                </div>
+                <PasswordMeter password={password} labels={pwStrengthLabels(t)} />
+                <div className="help">{t('memSecPwHelp')}</div>
+              </div>
+            </div>
+
+            <div className="security-card">
+              <div className="security-card-head">
+                <div>
+                  <div className="security-card-title">{t('memLastActivityTitle')}</div>
+                  <div className="security-card-sub">{t('memLastActivitySub')}</div>
+                </div>
+              </div>
+              <div className="security-detail">
+                <Icon name="check" size={13} />
+                <span>
+                  {member.last_seen_at
+                    ? <>{t('memLastSignedInLead')} <strong>{lastSeenLabel(member, locale)}</strong>.</>
+                    : <>{t('memNoSignIn')}</>}
+                </span>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="modal-foot member-edit-foot">
+        <button className="btn" onClick={onClose}>{t('cancel')}</button>
+        <button className="btn primary" onClick={save} disabled={saving}>{saving ? '…' : t('save')}</button>
+      </div>
+    </Modal>
   );
 }

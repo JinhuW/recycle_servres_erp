@@ -6,6 +6,7 @@ import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
 import { handleFetchError } from '../lib/errorToast';
 import { fmtUSD0 } from '../lib/format';
+import { lineSpecLabel } from '../lib/lineGroups';
 import { categoryFilterOptions } from '../lib/lookups';
 import { wsNumber } from '../lib/workspace';
 import { isCompleted, statusTone } from '../lib/status';
@@ -38,8 +39,7 @@ type Props = {
 };
 
 export function Inventory({ onNewEntry }: Props) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const { user } = useAuth();
   const [filter, setFilter] = useState<string>('all');
   // Sold lots are terminal; the backend hides them unless includeSold is set.
@@ -125,10 +125,7 @@ export function Inventory({ onNewEntry }: Props) {
 
         {!loadedOnce && <PhoneListSkeleton rows={6} />}
         {loadedOnce && items.map(r => {
-          const label = r.category === 'RAM' ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.generation ?? ''}`.trim()
-                      : r.category === 'SSD' ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.interface ?? ''}`.trim()
-                      : r.category === 'HDD' ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.rpm ? r.rpm + 'rpm' : ''}`.trim()
-                      : (r.description ?? '');
+          const label = lineSpecLabel(r) ?? (r.description ?? '');
           const lowHealth = r.health != null && r.health < wsNumber('low_health_pct', 50);
           return (
             <div key={r.id} className="ph-inv-card">

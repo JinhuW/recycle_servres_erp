@@ -34,8 +34,9 @@ export type OrderSubmitRequest =
   | { kind: 'noop' }
   | { kind: 'error'; message: string };
 
-// New rows (and the new-draft path) carry status 'In Transit'.
-const toAddLine = (l: DraftLine) => ({
+// New rows (and the new-draft path) carry status 'In Transit'. Also the wire
+// shape of the phone's per-line autosave (PATCH /api/orders/:id).
+export const toAddLine = (l: DraftLine) => ({
   category: l.category,
   brand: l.brand ?? null,
   capacity: l.capacity ?? null,
@@ -47,6 +48,7 @@ const toAddLine = (l: DraftLine) => ({
   interface: l.interface ?? null,
   formFactor: l.formFactor ?? null,
   description: l.description ?? null,
+  // Required on an Other line — omitting it 400'd every autosave of one.
   itemType: l.itemType ?? null,
   partNumber: l.partNumber ?? null,
   serialNumber: l.serialNumber ?? null,

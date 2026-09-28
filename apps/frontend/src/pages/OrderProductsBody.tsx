@@ -4,6 +4,7 @@ import { SerialNumbers } from '../components/SerialNumbers';
 import { useT } from '../lib/i18n';
 import { linePhotos, type LinePhoto } from '../lib/linePhotos';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
+import { lineSpecLabel } from '../lib/lineGroups';
 import type { Order, OrderLine } from '../lib/types';
 
 // How many of a line's photos the strip shows before it offers the rest. Four
@@ -33,10 +34,7 @@ function PhotoTile({ photo, label, onOpen }: { photo: LinePhoto; label: string; 
 }
 
 export const itemLabel = (l: OrderLine) =>
-    l.category === 'RAM' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.generation ?? ''}`.trim()
-  : l.category === 'SSD' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.interface ?? ''}`.trim()
-  : l.category === 'HDD' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.rpm ? l.rpm + 'rpm' : ''}`.trim()
-  : (l.description ?? '—');
+    lineSpecLabel(l) ?? (l.description ?? '—');
 
 type Props = {
   order: Order;

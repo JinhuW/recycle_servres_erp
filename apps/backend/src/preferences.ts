@@ -31,6 +31,10 @@ const SCHEMA: Record<string, Validator> = {
   'orders.cols':              isStringArray,
   'market.showStaleOnly':     isBoolean,
   'submit.lastCategory':      isShortString,
+  'scan.deskCamera':          isBoolean,
+  // A camera's device label (e.g. "Jinhu's iPhone Camera"); deviceIds are
+  // re-issued per session, labels aren't.
+  'scan.cameraLabel':         isShortString,
 };
 
 export type PreferencePatchResult =

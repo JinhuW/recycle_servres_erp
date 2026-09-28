@@ -10,10 +10,10 @@ import type { Env, User } from '../types';
 
 const itemTypes = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
-export const ITEM_TYPE_MAX = 40;
+const ITEM_TYPE_MAX = 40;
 
 /** Trim and collapse internal runs of whitespace; '' when there's nothing left. */
-export function normalizeItemType(v: unknown): string {
+function normalizeItemType(v: unknown): string {
   return typeof v === 'string' ? v.trim().replace(/\s+/g, ' ') : '';
 }
 

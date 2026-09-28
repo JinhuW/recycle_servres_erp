@@ -4,10 +4,10 @@
 // All writes assume they are running inside the caller's transaction, so an
 // audit row is committed only if the change it describes is also committed.
 
-import type { Sql, TransactionSql } from 'postgres';
+import type { SqlLike } from '../db';
 export { diff, type AuditChange } from './auditDiff';
 
-export type SqlLike = Sql | TransactionSql;
+export type { SqlLike };
 
 export type SellOrderEventKind =
   | 'created'

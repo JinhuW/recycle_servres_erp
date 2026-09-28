@@ -16,7 +16,6 @@ export default defineConfig({
     // These are top-level options: Vitest 4 removed `poolOptions`, so nesting
     // them there silently drops the cap and lets the pool scale to CPU count.
     maxWorkers: Number(process.env.VITEST_MAX_FORKS) || 8,
-    minWorkers: 1,
     testTimeout: 15_000,
     hookTimeout: 30_000,
   },

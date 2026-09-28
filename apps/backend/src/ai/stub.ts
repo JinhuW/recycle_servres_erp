@@ -2,7 +2,7 @@
 import type { Env, LineCategory } from '../types';
 import type { ScanResult } from './types';
 
-export const STUB_BY_CATEGORY: Record<LineCategory, Omit<ScanResult, 'provider'>> = {
+const STUB_BY_CATEGORY: Record<LineCategory, Omit<ScanResult, 'provider'>> = {
   RAM: {
     category: 'RAM',
     confidence: 0.94,

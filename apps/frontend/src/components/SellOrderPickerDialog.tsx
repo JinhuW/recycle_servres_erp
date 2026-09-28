@@ -33,9 +33,9 @@ export function SellOrderPickerDialog({ lineCount, locale, onClose, onPick }: Pr
     // A page is the newest orders of every status, so the open ones can sit
     // past any single page — walk them all.
     forEachKeysetPage<SellOrderPick>(
-      cursor => api.get<{ items: SellOrderPick[]; nextCursor: string | null }>(
+      cursor => api.get<{ rows: SellOrderPick[]; nextCursor: string | null }>(
         `/api/sell-orders?limit=200${cursor ? '&cursor=' + encodeURIComponent(cursor) : ''}`,
-      ),
+      ).then(r => ({ items: r.rows, nextCursor: r.nextCursor })),
       (items, { first }) => {
         if (!alive) return false;
         setRows(prev => (first || !prev ? items : [...prev, ...items]));

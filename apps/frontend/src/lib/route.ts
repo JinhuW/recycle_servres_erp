@@ -154,6 +154,7 @@ export const DESKTOP_VIEW_TO_PATH = {
   sellorders: '/sell-orders',
   vendorbids: '/vendor-bids',
   transfers:  '/transfers',
+  websubmissions: '/web-submissions',
   activity:   '/activity',
   payments:   '/payments',
   internaltx: '/payments/internal',
@@ -178,6 +179,7 @@ export function pathToDesktopView(path: string): DesktopViewId {
   if (path === '/sell-orders' || match('/sell-orders/:id', path) || match('/sell-orders/:id/edit', path)) return 'sellorders';
   if (path === '/vendor-bids' || match('/vendor-bids/:id', path)) return 'vendorbids';
   if (path === '/transfers') return 'transfers';
+  if (path === '/web-submissions' || match('/web-submissions/:id', path)) return 'websubmissions';
   if (path === '/activity') return 'activity';
   // A tab under Payments, like Analysis under Inventory.
   if (path === '/payments/internal') return 'internaltx';

@@ -17,6 +17,294 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.187.0] - 2026-09-28
+
+### Added
+
+- **Web submissions: one inbox for the public website forms** (RS-123). The
+  ram4cash.com sell form had nowhere to land (its endpoint only lived on an
+  unmerged branch) and the recycleservers.com quote form reached nobody but
+  Formspree.
+  - `POST /api/public/intake` (ram4cash sell lot: RAM/SSD/CPU lines, label
+    photos, PayPal-upfront or cash-pickup hand-off) and `POST /api/public/quote`
+    (recycleservers.com quote request) store a `WS-nnnn` submission and notify
+    managers. Nothing anonymous is written to orders any more.
+  - Per-IP budget of 5 a minute (429 with `Retry-After`, now CORS-exposed) and a
+    silent honeypot; the limiter is scoped to the two form paths.
+  - New manager-only **Web submissions** page (Workspace sidebar): status tabs
+    with counts, site filter, search, keyset paging, and a detail view with the
+    line photos, a status + staff-note triage panel and a reply-by-email link.
+  - **Create Draft PO** turns a sell lot into a Draft PO once: lines at cost 0,
+    photos copied (never shared) onto the lines, the seller filed as a
+    house-account supplier with the new `web` source, PayPal for a shipped lot,
+    cash + pickup for a pickup lot, no commission and no `ref_prices` seeding.
+  - Migration `0138_web_submissions.sql`: `web_submissions`,
+    `web_submission_photos`, the `WS` id counter, `suppliers.source` gains `web`.
+
+## [1.186.0] - 2026-09-27
+
+### Added
+
+- **A RAM line's chip # fills itself from the part number** (RS-122). The chip
+  marking was retyped on every line, even though the same part number always
+  carries the same chip and earlier lines already recorded it.
+  - New `POST /api/market/chips` learns the map from past PO lines: the chip
+    recorded on the most POs wins, ties go to the newest, and archived POs
+    don't vote.
+  - The desktop drawer, the desk scanner, the phone form and Scan RAM sheet
+    fill a blank chip # from it. A typed chip # is never overwritten, and
+    opening an existing line never fills, so an untouched PO isn't dirtied.
+
+## [1.185.0] - 2026-09-27
+
+### Changed
+
+- **The desk camera's box follows the RAM stick** (RS-121). It was a fixed
+  centre crop, so a stick placed off-centre or longer than the box ran past it,
+  and focus and stillness were judged mostly on the paper around it.
+  - The box now snaps around the stick found by its green PCB and glides with
+    it (solid border). With no stick found it falls back to a wide dashed box.
+  - Focus and stillness are judged inside that box, at native resolution — the
+    same stick the capture crops and sends.
+  - Detection jitter on a still stick doesn't move the box (2 % hysteresis),
+    and a missed detection or two doesn't make it flicker (~2 s grace).
+  - Moving the stick or swapping in the next one reads as motion, which is
+    what re-arms the trigger for another scan.
+  - Detection runs every other sample to keep each 1920×1440 sample tick
+    around 10–20 ms.
+
+## [1.184.1] - 2026-09-27
+
+### Fixed
+
+- **The desk scanner sends just the RAM stick, not the whole desk** (RS-120).
+  The first real Continuity Camera run uploaded the full frame: a small stick
+  surrounded by cloth, a wooden desk, paper and a hand.
+  - A capture now finds the stick by its green PCB anywhere in the frame
+    (`findRamStickInPhoto`, next to the sheet segmenter). It crops just the
+    stick, padded by a quarter of the stick's thickness so the gold fingers and
+    label edges survive, and turns a vertical stick upright.
+  - A label spanning the stick's full height no longer splits it in two: the
+    sheet's merge rule takes a wider gap for the one-stick photo case.
+  - No green stick found (other PCB colours, a steeply tilted stick) → the full
+    frame goes up, as before.
+  - The sheet flow's crop-and-rotate moved into a shared `cropToBox`; its
+    behaviour is unchanged.
+
+## [1.184.0] - 2026-09-27
+
+### Added
+
+- **Desk scanner: the desktop line drawer takes a label straight from a live
+  camera** (RS-119). With an iPhone on an overhead arm acting as the Mac's
+  webcam through Continuity Camera, a RAM stick placed under it is captured and
+  read without a click, and the line fills exactly as a dropped photo would.
+  Before, every stick meant a photo, a transfer and a drag.
+  - **Camera** under the AI label dropzone opens the feed. The iPhone camera is
+    picked automatically (not its Desk View device) and the choice is
+    remembered.
+  - The trigger runs in the browser (`lib/deskScan.ts`): text-like edges in the
+    centre crop, no motion, and focus at its peak for about ¾ s. Sharpness is
+    contrast-normalised, so the ring light's brightness doesn't move it.
+  - A still scene fires once and needs to change before the next capture, with
+    at least 3 s between captures, so a failed scan can't loop and eat the
+    scan rate limit.
+  - A readable scan closes the camera; an unreadable one keeps it open. **Open
+    camera automatically** starts every new line with it live.
+  - Two new user preferences, `scan.deskCamera` and `scan.cameraLabel`, on the
+    server allowlist.
+
+## [1.183.0] - 2026-09-26
+
+### Added
+
+- **The new-order items table shows each line's label photo** (RS-117). A
+  scanned line's crop (or its first saved photo, with `+N` for more) sits as a
+  40px thumbnail after the item name, as it already does on Edit order.
+  Clicking it opens the full-screen viewer without selecting the row, so a
+  purchaser can check a Scan RAM sheet row against its sticker at a glance.
+  Rows the label couldn't fill still show it; rows without a photo are
+  unchanged.
+
+## [1.182.0] - 2026-09-26
+
+### Fixed
+
+- **Scanned RAM sticks now save to the PO like confirmed lines** (RS-116).
+  Adding sticks from Scan RAM sheet only put them on the page, so nothing
+  reached the PO until Submit, and leaving the page lost them.
+  - **Save on Add.** Every scanned stick that passes the same rule as Confirm is
+    saved straight away, all in one save. That rule is now one shared function:
+    required fields including qty and cost, brand confirmation, and DDR5
+    serials. The first save creates the draft PO.
+  - **Unfinished sticks stay on the page**, marked **Not saved**. A message says
+    how many were saved and what the rest still need, serial numbers included.
+    Saved lines show **Saved**.
+  - **Deleting a saved line now removes it from the PO.** Before, the trash icon
+    only hid it on the page; that was already true for hand-confirmed lines.
+  - **Saves are serialised.** A Confirm, a second scan or a Submit that starts
+    while an auto-save is running waits for it, so there is never a second PO or
+    duplicate rows. Submit says "still saving" until the save finishes.
+
+### Changed
+
+- **The scan dialog shows the resolution actually used.** The scanner bridge
+  (`auto_ram_scanner` 0.2.0) now scans at the scanner's highest flatbed
+  resolution, read from its eSCL capabilities and capped by `MAX_SCAN_DPI`
+  (300 dpi on the office MF460 II), and reports it on `/health`.
+
+## [1.181.0] - 2026-09-26
+
+### Changed
+
+- **Image AI now runs on OpenAI `gpt-6-luna`** (RS-115). This covers RAM, SSD and
+  HDD label scans, receipt renaming, and PayPal-screenshot reading. It was
+  `google/gemini-2.5-flash`.
+  - **Benchmark.** Several OpenAI vision models were tested on real RAM label
+    crops with the ERP's own prompt and normaliser. luna read every field right
+    on 300 dpi flatbed scans at about a third of Gemini's cost (~$0.21 against
+    $0.70 per 1,000 images). The cheaper OpenAI models misread capacity, DDR
+    generation or part numbers.
+  - **Tuning.** OpenAI models only read small label text well with high image
+    detail, need a little reasoning, and reject `temperature`. The request is
+    now tuned per model family, and a model that spends its budget thinking
+    and answers with nothing is asked once more.
+  - **Checked before shipping.** Alipay and Zelle receipts and a PayPal
+    screenshot read correctly.
+  - **Known weakness.** luna is weaker than Gemini on blurry or low-resolution
+    images.
+  - **Rollback.** Set `OPENROUTER_OCR_MODEL=google/gemini-2.5-flash` on Railway.
+    No deploy is needed, and a non-OpenAI model gets the old request.
+- **New scans add to the Scan RAM sheet table instead of replacing it**
+  (RS-115).
+  - Each scan or upload gets its own "Scan N" group, and stick numbers carry on
+    from the last one.
+  - The button reads **Scan next page** once there are sticks.
+  - Groups can be removed and the table cleared.
+  - A scan whose part numbers were all read before is flagged as possibly the
+    same sheet twice.
+
+## [1.180.0] - 2026-09-26
+
+### Fixed
+
+- **Scan from printer did nothing when clicked** (RS-114). The Scan RAM sheet
+  dialog put its **Scan from printer** and **Upload scan image** buttons inside
+  an `.ai-dropzone`. That class makes its children `pointer-events: none`, so a
+  real mouse click landed on the box around them. The RS-109 smoke clicked
+  through JavaScript, which ignores that, so it passed. The buttons now sit in
+  their own row, and drag-and-drop moved to the whole dialog.
+
+### Changed
+
+- **Scan from printer shows its work while it runs** (RS-114).
+  - A step row (Connect → Scan page → Find sticks → Read labels) shows where it
+    is. While the printer scans, the page sweeps and the dialog shows elapsed
+    seconds and an estimate bar. Each stick's outline pulses while the AI reads
+    its label, and its row fills in from a placeholder.
+  - **Cancel scan** stops the printer. The bridge in `auto_ram_scanner` now
+    deletes the job when the page drops the request.
+  - Failures show a card that says what to do: bridge not running, printer
+    asleep, scanner busy.
+  - The button re-checks the bridge on click instead of trusting the check made
+    when the dialog opened. A stopped bridge is re-checked every 5 s, so starting
+    it turns the chip green on its own.
+  - Clicking a stick's picture, or its box on the page, opens it full size.
+
+## [1.179.0] - 2026-09-26
+
+### Changed
+
+- **Dialogs share one Modal, and Escape closes only the top one** (RS-111).
+  The Warehouse, Customer and Member edit dialogs, the member invite, the
+  sell-order detail and archive dialogs, the vendor-bid detail and links
+  manager, the ignore-rules and price-import dialogs, the vendor review, the
+  sell-order draft and the PO page's delete, archive, revert and duplicate-part
+  dialogs now use the shared Modal. Escape dismisses only the dialog on top,
+  so pressing it in a confirm no longer also closes the page or dialog under
+  it, and the PO page no longer closes when Escape is pressed in its revert or
+  duplicate-part dialog. Escape is ignored while a dialog is saving, and the
+  Warehouse, Customer, Member edit and vendor review dialogs gain it. An
+  autofocused field keeps focus instead of losing it to the panel, which
+  already affected the add-client, brand-confirm and transfer dialogs. Escape
+  on the invite's success step now refreshes the member list, as its backdrop
+  did.
+- **Payments and internal-transaction search waits until typing stops.**
+  Each keystroke used to send a request and blank the list. The search text
+  now settles for 200 ms first, as Activity, Market and Inventory already did.
+  Filter chips still apply at once.
+- **The inventory list keeps every filter after a transfer or add-to-order.**
+  The reload used to drop Show sold, Hide pending and the attribute chips, so
+  the list briefly showed rows outside the active filters. It now reloads the
+  list and the product facets with the full filter.
+- **Faster detail pages and large saves.** A PO or sell-order detail reads its
+  parts in parallel, at most four at a time so one page can't take the
+  database pool, and reads the three payment-cutoff settings once. Adding
+  lines, adjusting a sell order's total, marking one Done, syncing bank
+  transactions and revoking an OAuth client each write in one statement
+  instead of one per row. The bank sync now folds a transaction repeated
+  within one batch before writing it; a repeat like that would otherwise
+  abort the whole statement. Counts and returned ids are unchanged.
+## [1.178.1] - 2026-09-26
+
+- Each purchaser now has a home warehouse, the closest existing warehouse to where
+  they live, so a PO filed without one ships to the right place. Tim, Cynthia
+  (Phoenix) and Stefen (Minneapolis) go to Denver; Harrison (Watertown) and Chris
+  (Chicago) go to Boston. Jinhu and Yuxing already had theirs. Migration 0137 fills
+  these in by email, only where none is set, and does nothing on databases without
+  the prod warehouses. [RS-113]
+
+## [1.178.0] - 2026-09-26
+
+### Added
+
+- **Scan RAM sheet: one flatbed scan becomes one PO line per stick** (RS-109).
+  Reading RAM labels meant one photo per stick. The new-order page now has a
+  **Scan RAM sheet** button. It pulls a page from the office Canon MF460 II
+  through a small local bridge (the separate `auto_ram_scanner` repo, since the
+  cloud backend can't reach the office LAN), or takes an uploaded scan image.
+  - A pure segmenter in `@recycle-erp/shared` (`segmentRamSheet`) finds each
+    stick on the page. It skips dust and the scanner's lid-edge lines,
+    re-joins a stick that a full-width label would cut in two, and flags
+    touching sticks. Sticks come back in reading order, turned upright.
+  - Each crop goes through the existing `/api/scan/label` RAM pipeline, three at
+    a time, and waits out the per-user rate limit instead of failing.
+  - Purchasers review each stick with its thumbnail and AI read, set qty and
+    cost, optionally combine identical part numbers, and add the lines in one
+    step.
+  - There is no new backend route. The segmenter is pinned by tests against
+    the real sample scan and a live 300 dpi scan.
+
+## [1.177.4] - 2026-09-26
+
+### Changed
+
+- **A behaviour-preserving cleanup across the whole repo** (RS-108). Eight
+  reviewers read the backend orders domain, the other routes, the backend
+  infrastructure, the frontend lib, both sets of desktop pages, the phone and
+  vendor shells, and the test tooling. Only changes that leave API responses,
+  error strings, status codes and the screens exactly as they were are in.
+  Copies that had to be kept in step by hand now share one helper: the PayPal
+  transaction-id canon, the PO owner change, the sell-order line insert, the
+  manager-only route guard, the OAuth scope list, the MCP tool registry,
+  `sha256hex`, `SqlLike`, `UUID_RE`, the line spec label, the phone bottom
+  sheet, the Payments popovers, the infinite-scroll sentinel, and 55 copies of
+  the locale ternary (now `useT().locale`). Dead code went: the null-actor
+  path in `orderAdvance`, a second `readRootVersion`, `OrderActivityLog`'s
+  never-used fetch, unused props, fields and exports. The PO submit helpers
+  moved out of `DesktopSubmit`, which ends its import cycle with
+  `LineDrawer`. Backend tests share fixtures for customers, sell orders, the
+  fake bank provider and the FX mock.
+- **Legacy code removed.** The retired Docker release flow is gone:
+  `scripts/release.sh`, `scripts/deploy.sh` and the `pnpm release` aliases.
+  `docker compose up -d --build` still works for self-hosting. The one-off
+  `legacy-ram-po.sql` data script and the May 2026 localStorage-to-server
+  preference migration are removed too. A browser that hasn't opened the app
+  since May starts with default column choices. The desktop sell-order inbox
+  and the sell-order picker now read `rows` from the list endpoint; the
+  backend still sends the `items` alias until a later release, so a stale
+  bundle keeps working during the deploy.
+
 ## [1.177.3] - 2026-09-25
 
 ### Fixed

@@ -8,6 +8,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
+import { createSellOrderOn } from './helpers/fixtures';
 
 type Line = {
   id: string; status: string; qty: number;
@@ -49,19 +50,6 @@ async function lineOf(id: string, token: string, lineId: string): Promise<Line> 
   return line!;
 }
 
-async function createSellOrderOn(mgr: string, lineId: string, qty: number, unitPrice: number): Promise<string> {
-  const customers = await api<{ items: { id: string }[] }>('GET', '/api/customers', { token: mgr });
-  const so = await api<{ id: string }>('POST', '/api/sell-orders', {
-    token: mgr,
-    body: {
-      customerId: customers.body.items[0].id,
-      lines: [{ inventoryId: lineId, category: 'RAM', label: 'x', partNumber: PN, qty, unitPrice }],
-    },
-  });
-  expect(so.status).toBe(201);
-  return so.body.id;
-}
-
 async function moveSellOrder(mgr: string, soId: string, to: string): Promise<void> {
   const body = to === 'Closed' ? { to, note: 'x', closeReasonId: 'customer_cancelled' } : { to, note: 'x' };
   expect((await api('POST', `/api/sell-orders/${soId}/status`, { token: mgr, body })).status).toBe(200);
@@ -79,7 +67,7 @@ describe('final sell price on PO lines', () => {
     expect(line.finalSellPrice).toBeNull();
     expect(line.finalSoldQty).toBeNull();
 
-    const soId = await createSellOrderOn(mgr, lineIds[0], 1, 90);
+    const soId = await createSellOrderOn(mgr, lineIds[0], PN, 1, 90);
     line = await lineOf(id, mgr, lineIds[0]);
     expect(line.finalSellPrice).toBeNull();
 
@@ -102,11 +90,11 @@ describe('final sell price on PO lines', () => {
     const { token: mgr } = await loginAs(ALEX);
     const { id, lineIds } = await createReviewing(pur, mgr);
 
-    const first = await createSellOrderOn(mgr, lineIds[0], 1, 90);
+    const first = await createSellOrderOn(mgr, lineIds[0], PN, 1, 90);
     await moveSellOrder(mgr, first, 'Done');
-    const second = await createSellOrderOn(mgr, lineIds[0], 2, 100);
+    const second = await createSellOrderOn(mgr, lineIds[0], PN, 2, 100);
     await moveSellOrder(mgr, second, 'Done');
-    const cancelled = await createSellOrderOn(mgr, lineIds[0], 1, 500);
+    const cancelled = await createSellOrderOn(mgr, lineIds[0], PN, 1, 500);
     await moveSellOrder(mgr, cancelled, 'Closed');
 
     const line = await lineOf(id, mgr, lineIds[0]);
@@ -123,7 +111,7 @@ describe('final sell price on PO lines', () => {
     const { token: pur } = await loginAs(MARCUS);
     const { token: mgr } = await loginAs(ALEX);
     const { id, lineIds } = await createReviewing(pur, mgr);
-    const soId = await createSellOrderOn(mgr, lineIds[1], 2, 60);
+    const soId = await createSellOrderOn(mgr, lineIds[1], PN, 2, 60);
     await moveSellOrder(mgr, soId, 'Done');
 
     const asManager = await lineOf(id, mgr, lineIds[1]);
@@ -137,7 +125,7 @@ describe('final sell price on PO lines', () => {
     // Previewing as purchaser also narrows reads to the manager's own POs,
     // so the preview case needs a PO the manager owns.
     const own = await createReviewing(mgr, mgr);
-    const ownSo = await createSellOrderOn(mgr, own.lineIds[0], 1, 75);
+    const ownSo = await createSellOrderOn(mgr, own.lineIds[0], PN, 1, 75);
     await moveSellOrder(mgr, ownSo, 'Done');
     expect((await lineOf(own.id, mgr, own.lineIds[0])).finalSellPrice).toBe(75);
 
@@ -161,13 +149,13 @@ describe('a PO and the sell orders that sold it link to each other', () => {
     const { token: mgr } = await loginAs(ALEX);
     const { id, lineIds } = await createReviewing(pur, mgr);
 
-    const done = await createSellOrderOn(mgr, lineIds[0], 1, 90);
+    const done = await createSellOrderOn(mgr, lineIds[0], PN, 1, 90);
     await moveSellOrder(mgr, done, 'Done');
-    const other = await createSellOrderOn(mgr, lineIds[1], 2, 60);
+    const other = await createSellOrderOn(mgr, lineIds[1], PN, 2, 60);
     await moveSellOrder(mgr, other, 'Done');
     // Draft and Shipped orders only claim units; they have not sold them.
-    await createSellOrderOn(mgr, lineIds[0], 1, 95);
-    const shipped = await createSellOrderOn(mgr, lineIds[0], 1, 99);
+    await createSellOrderOn(mgr, lineIds[0], PN, 1, 95);
+    const shipped = await createSellOrderOn(mgr, lineIds[0], PN, 1, 99);
     await moveSellOrder(mgr, shipped, 'Shipped');
 
     const asManager = await api<{ order: { sellOrders: SoRef[] | null } }>('GET', `/api/orders/${id}`, { token: mgr });
@@ -184,7 +172,7 @@ describe('a PO and the sell orders that sold it link to each other', () => {
     const { token: pur } = await loginAs(MARCUS);
     const { token: mgr } = await loginAs(ALEX);
     const { id, lineIds } = await createReviewing(pur, mgr);
-    const soId = await createSellOrderOn(mgr, lineIds[0], 1, 90);
+    const soId = await createSellOrderOn(mgr, lineIds[0], PN, 1, 90);
 
     const so = await api<SoDetail>('GET', `/api/sell-orders/${soId}`, { token: mgr });
     expect(so.status).toBe(200);

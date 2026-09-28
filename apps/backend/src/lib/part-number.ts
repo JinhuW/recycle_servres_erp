@@ -11,13 +11,9 @@
 // tests/market-batch-lookup.test.ts compares pg_get_indexdef against both
 // constants for that reason.
 
-import postgres, { type TransactionSql } from 'postgres';
+import postgres from 'postgres';
+import type { SqlLike } from '../db';
 import { canonicalPartNumber, partPrefixPattern, partSepPattern } from '@recycle-erp/shared';
-
-type Sql = ReturnType<typeof postgres>;
-// Either the top-level pool or a `tx` inside a sql.begin block — both are
-// valid callers of canonPartCol/canonPartArg below.
-type SqlLike = Sql | TransactionSql;
 
 export const PART_PREFIX_RE = partPrefixPattern('[[:space:]]');
 export const PART_SEP_RE = partSepPattern('[:space:]');

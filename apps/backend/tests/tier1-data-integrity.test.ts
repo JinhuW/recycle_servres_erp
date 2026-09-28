@@ -3,15 +3,11 @@ import { resetDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
+import { firstCustomerId } from './helpers/fixtures';
 
 async function sellableLine(token: string, minQty = 1): Promise<{ id: string; qty: number; price: number }> {
   const l = await freeSellableLine(token, minQty);
   return { id: l.id, qty: l.qty, price: l.sell_price };
-}
-
-async function firstCustomerId(token: string): Promise<string> {
-  const r = await api<{ items: { id: string }[] }>('GET', '/api/customers', { token });
-  return r.body.items[0].id;
 }
 
 async function lineQty(token: string, id: string): Promise<number> {

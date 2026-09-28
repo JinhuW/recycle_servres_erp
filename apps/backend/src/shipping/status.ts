@@ -4,7 +4,7 @@
 
 import type { PackageStatus } from './types';
 
-export const ALLOWED_TRANSITIONS: Record<PackageStatus, ReadonlySet<PackageStatus>> = {
+const ALLOWED_TRANSITIONS: Record<PackageStatus, ReadonlySet<PackageStatus>> = {
   purchased: new Set(['in_transit', 'delivered', 'exception']),
   in_transit: new Set(['delivered', 'exception']),
   // Carrier exceptions recover (address fixed, redelivery) or end the trip.

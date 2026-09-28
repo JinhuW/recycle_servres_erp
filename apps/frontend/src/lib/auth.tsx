@@ -41,6 +41,28 @@ export function handleUnauthorized(
   }
 }
 
+// Lookups and workspace settings are best-effort: a transient failure must not
+// look like an auth failure, abort an otherwise-successful login, or strand a
+// valid user on the login screen. Both loaders reset themselves on failure, so
+// they stay retry-able. The cold-load bootstrap runs them in parallel with
+// /api/me; login runs them one after the other before setting the user.
+async function loadSessionCaches(ctx: 'bootstrap' | 'login'): Promise<void> {
+  const when = ctx === 'login' ? ' after login' : '';
+  const load = async (fn: () => Promise<void>, what: string) => {
+    try { await fn(); }
+    catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn(`${what} failed to load${when}; continuing.`, e);
+    }
+  };
+  if (ctx === 'login') {
+    await load(loadLookups, 'Lookups');
+    await load(loadWorkspaceSettings, 'Workspace settings');
+    return;
+  }
+  await Promise.all([load(loadLookups, 'Lookups'), load(loadWorkspaceSettings, 'Workspace settings')]);
+}
+
 type AuthState = {
   user: User | null;
   loading: boolean;
@@ -86,17 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(r.user);
         signalSessionEstablished();
       })(),
-      // Lookups are best-effort: a transient failure must not look like an
-      // auth failure or strand a valid user on the login screen. loadLookups()
-      // resets itself on failure, so it stays retry-able.
-      loadLookups().catch((e) => {
-        // eslint-disable-next-line no-console
-        console.warn('Lookups failed to load; continuing.', e);
-      }),
-      loadWorkspaceSettings().catch((e) => {
-        // eslint-disable-next-line no-console
-        console.warn('Workspace settings failed to load; continuing.', e);
-      }),
+      loadSessionCaches('bootstrap'),
     ])
       .catch((e) => {
         // Not logged in: quietly stay on the login screen, no console error,
@@ -114,18 +126,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (email: string, password: string) => {
     const r = await api.post<{ user: User }>('/api/auth/login', { email, password });
-    // A lookups failure must not abort an otherwise-successful login; it's
-    // best-effort and retry-able on the next call.
-    try { await loadLookups(); }
-    catch (e) {
-      // eslint-disable-next-line no-console
-      console.warn('Lookups failed to load after login; continuing.', e);
-    }
-    try { await loadWorkspaceSettings(); }
-    catch (e) {
-      // eslint-disable-next-line no-console
-      console.warn('Workspace settings failed to load after login; continuing.', e);
-    }
+    await loadSessionCaches('login');
     setUser(r.user);
     // Before the role picker, deliberately: the session is real whichever role
     // a manager then picks, and anything held for one has waited long enough.

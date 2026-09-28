@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api } from './api';
+import { api, MAX_UPLOAD_BYTES } from './api';
 import { handleFetchError, showErrorDialog } from './errorToast';
 import { useT } from './i18n';
 import { compressForUpload } from './image-compress';
@@ -49,7 +49,7 @@ export function usePaymentProof(init: PaymentProofInit) {
     try {
       for (const f of files) {
         // 50 MiB server hard cap; oversized images are shrunk server-side.
-        if (f.size > 50 * 1024 * 1024) { showErrorDialog(t('fileTooLarge', { name: f.name })); continue; }
+        if (f.size > MAX_UPLOAD_BYTES) { showErrorDialog(t('fileTooLarge', { name: f.name })); continue; }
         const form = new FormData();
         form.append('file', f);
         const r = await api.upload<{ attachment: ProofAttachment }>(

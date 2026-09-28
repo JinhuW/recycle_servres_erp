@@ -266,10 +266,33 @@ export function packageChanges(prev: HandoffPackage | null, next: HandoffPackage
   return out;
 }
 
+// Its own event kind rather than a meta diff: user_id isn't a META_FIELD (the
+// timeline names people, not a uuid diff), and both names are snapshotted here
+// because events render without joining users on the owner. A null ownerName
+// is the actor taking the order back.
+export async function changeOrderOwnerTx(
+  tx: SqlLike,
+  id: string,
+  actor: { id: string; name: string },
+  fromUserId: string,
+  newOwner: { ownerId: string; ownerName: string | null },
+): Promise<void> {
+  const prev = (await tx`
+    SELECT name FROM users WHERE id = ${fromUserId} LIMIT 1
+  `)[0] as { name: string } | undefined;
+  await tx`UPDATE orders SET user_id = ${newOwner.ownerId} WHERE id = ${id}`;
+  await writeOrderEvent(tx, id, actor.id, 'owner_changed', {
+    fromUserId,
+    from: prev?.name ?? null,
+    toUserId: newOwner.ownerId,
+    to: newOwner.ownerName ?? actor.name,
+  });
+}
+
 export async function handoffOrderTx(
   tx: SqlLike,
   id: string,
-  actor: NonNullable<AdvanceActor>,
+  actor: AdvanceActor,
   input: HandoffInput,
 ): Promise<{ package: HandoffPackage | null; needsRegister: boolean; paymentsLinked: number }> {
   const before = (await tx`
@@ -383,16 +406,7 @@ export async function handoffOrderTx(
   }
 
   if (input.newOwner && input.newOwner.ownerId !== before.user_id) {
-    const prev = (await tx`
-      SELECT name FROM users WHERE id = ${before.user_id} LIMIT 1
-    `)[0] as { name: string } | undefined;
-    await tx`UPDATE orders SET user_id = ${input.newOwner.ownerId} WHERE id = ${id}`;
-    await writeOrderEvent(tx, id, actor.id, 'owner_changed', {
-      fromUserId: before.user_id,
-      from: prev?.name ?? null,
-      toUserId: input.newOwner.ownerId,
-      to: input.newOwner.ownerName ?? actor.name,
-    });
+    await changeOrderOwnerTx(tx, id, actor, before.user_id, input.newOwner);
   }
 
   // Written before the advance's `submitted` so the timeline reads "handed

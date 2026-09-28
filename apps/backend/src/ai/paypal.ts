@@ -22,12 +22,18 @@ Use null for either value you cannot see. If neither is visible, respond {"txnId
 export const PAYPAL_TXN_STRICT = /^[A-Z0-9]{17}$/;
 const PAYPAL_TXN_LOOSE = /^[A-Z0-9]{10,32}$/;
 
+// The uppercase-no-spaces canon every write of a PayPal id goes through, so
+// an id typed on one screen diffs clean against the same id OCR'd on another.
+// No shape check: a hand-typed id the user swears by must still be storable.
+export function normPaypalTxnId(v: unknown): string | null {
+  return typeof v === 'string' ? v.replace(/\s+/g, '').toUpperCase() || null : null;
+}
+
 // Backstop for model non-compliance: whatever comes back, only a plausible
-// id shape reaches the form. Shared with the packages route boundary.
+// id shape reaches the form.
 export function normalizePaypalTxnId(raw: unknown): string | null {
-  if (typeof raw !== 'string') return null;
-  const cleaned = raw.replace(/\s+/g, '').toUpperCase();
-  return PAYPAL_TXN_LOOSE.test(cleaned) ? cleaned : null;
+  const cleaned = normPaypalTxnId(raw);
+  return cleaned !== null && PAYPAL_TXN_LOOSE.test(cleaned) ? cleaned : null;
 }
 
 // A name goes straight into a form field the user then submits, so the only

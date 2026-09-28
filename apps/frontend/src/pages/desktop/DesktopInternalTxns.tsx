@@ -3,9 +3,10 @@ import { Icon } from '../../components/Icon';
 import { ListSkeleton } from '../../components/Skeleton';
 import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
-import { fmtDate, fmtDateShort, fmtUSD } from '../../lib/format';
+import { fmtDate, fmtDateShort, fmtSigned } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { usePersisted } from '../../lib/listMemory';
+import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { RouteLink } from '../../components/RouteLink';
 
 // The records that explain internal money movement — a Mercury→PayPal
@@ -57,17 +58,13 @@ const SOURCE_LABEL: Record<Member['source'], string> = {
   paired: 'PayPal + Mercury',
 };
 
-// The sign carries meaning here (out of one account, into another), so a plus
-// is rendered too, where fmtUSD shows only a minus.
-function fmtSigned(n: number, locale: string): string {
-  return (n < 0 ? '−' : '+') + fmtUSD(Math.abs(n), locale);
-}
-
 export function DesktopInternalTxns({ onToast }: { onToast: (msg: string) => void }) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
 
   const [q, setQ] = usePersisted('desktop.internaltx.q', '');
+  // Only the typed text waits; mutations reload at once, and reqId still
+  // drops any response a later request overtook.
+  const settledQ = useDebouncedValue(q);
   const [openId, setOpenId] = usePersisted<string | null>('desktop.internaltx.open', null);
   const [feed, setFeed] = useState<Feed | null>(null);
   const [creating, setCreating] = useState(false);
@@ -75,11 +72,11 @@ export function DesktopInternalTxns({ onToast }: { onToast: (msg: string) => voi
 
   const reload = useCallback(() => {
     const mine = ++reqId.current;
-    const p = q ? `?q=${encodeURIComponent(q)}` : '';
+    const p = settledQ ? `?q=${encodeURIComponent(settledQ)}` : '';
     api.get<Feed>(`/api/internal-transactions${p}`)
       .then(r => { if (mine === reqId.current) setFeed(r); })
       .catch(handleFetchError);
-  }, [q]);
+  }, [settledQ]);
 
   useEffect(() => { reload(); }, [reload]);
 

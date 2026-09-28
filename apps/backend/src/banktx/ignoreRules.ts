@@ -3,10 +3,10 @@
 // Every sync and every rule edit runs the whole set: a row that two rules
 // match must keep its ignore when one of them goes.
 
-import type { Sql, TransactionSql } from 'postgres';
+import type { SqlLike } from '../db';
 import { openRowFrag } from './match';
 
-type Db = Sql | TransactionSql;
+type Db = SqlLike;
 
 export type IgnoreRuleInput = { source: 'mercury' | 'paypal' | null; pattern: string };
 

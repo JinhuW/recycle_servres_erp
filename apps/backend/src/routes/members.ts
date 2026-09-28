@@ -5,6 +5,7 @@
 import { Hono } from 'hono';
 import { MIN_PASSWORD_LEN } from '@recycle-erp/shared';
 import { getDb } from '../db';
+import { requireManager } from '../lib/role';
 import {
   listMembers,
   createMember,
@@ -42,6 +43,18 @@ function validateMemberFields(f: {
   return null;
 }
 
+// Deactivating or demoting the only active manager would lock everyone out of
+// the admin pages.
+async function lastManagerError(
+  sql: ReturnType<typeof getDb>,
+  id: string,
+  target: { role: MemberRole; active: boolean },
+): Promise<string | null> {
+  if (target.role !== 'manager' || !target.active) return null;
+  const others = await countOtherActiveManagers(sql, id);
+  return others === 0 ? "Can't remove the last active manager" : null;
+}
+
 // Registered before the manager guard on purpose: the "Picked up by" picker on
 // the hand-off dialog is for every role, and a purchaser collecting a colleague's
 // order needs the names. Ids and names only — `listMembers` also computes each
@@ -54,10 +67,7 @@ members.get('/names', async (c) => {
   return c.json({ items });
 });
 
-members.use('*', async (c, next) => {
-  if (c.var.user.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
-  await next();
-});
+members.use('*', requireManager);
 
 members.get('/', async (c) => {
   const includeInactive = c.req.query('includeInactive') === 'true';
@@ -106,12 +116,8 @@ members.patch('/:id', async (c) => {
   if (deactivating || demoting) {
     const target = await getMemberStatus(sql, id);
     if (!target) return c.json({ error: 'Member not found' }, 404);
-    if (target.role === 'manager' && target.active) {
-      const others = await countOtherActiveManagers(sql, id);
-      if (others === 0) {
-        return c.json({ error: "Can't remove the last active manager" }, 400);
-      }
-    }
+    const lastManager = await lastManagerError(sql, id, target);
+    if (lastManager) return c.json({ error: lastManager }, 400);
   }
 
   await updateMember(sql, id, body);
@@ -129,12 +135,8 @@ members.delete('/:id', async (c) => {
   const sql = getDb(c.env);
   const target = await getMemberStatus(sql, id);
   if (!target) return c.json({ error: 'Member not found' }, 404);
-  if (target.role === 'manager' && target.active) {
-    const others = await countOtherActiveManagers(sql, id);
-    if (others === 0) {
-      return c.json({ error: "Can't remove the last active manager" }, 400);
-    }
-  }
+  const lastManager = await lastManagerError(sql, id, target);
+  if (lastManager) return c.json({ error: lastManager }, 400);
   const updated = await deactivateMember(sql, id);
   if (!updated) return c.json({ error: 'Member not found' }, 404);
   return c.json({ ok: true });

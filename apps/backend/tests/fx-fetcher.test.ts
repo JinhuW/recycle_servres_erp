@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { getTestDb } from './helpers/db';
 import { resetDb } from './helpers/db';
+import { mockFrankfurter } from './helpers/fx';
 import {
   convertToUsd,
   fetchAndStoreLatest,
@@ -10,18 +11,6 @@ import {
   storeManualOverride,
   SUPPORTED_CURRENCIES,
 } from '../src/lib/fx';
-
-// Capture Frankfurter requests so we can assert idempotency without a real
-// network call. The project's existing pattern (see ai.test.ts) is
-// vi.stubGlobal('fetch', …) rather than undici MockAgent.
-function mockFrankfurter(rate: number, date = '2026-05-26') {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async () =>
-      new Response(JSON.stringify({ amount: 1, base: 'USD', date, rates: { CNY: rate } }), { status: 200 }),
-    ),
-  );
-}
 
 describe('fx pure helpers', () => {
   it('listSupportedCurrencies returns USD and CNY', () => {
@@ -63,7 +52,7 @@ describe('fx DB integration', () => {
   });
 
   it('empty CNY lookup triggers Frankfurter fetch and stores', async () => {
-    mockFrankfurter(7.2154);
+    mockFrankfurter(7.2154, '2026-05-26');
     const sql = getTestDb();
     const r = await getLatestRateToUsd(sql, 'CNY');
     expect(r.source).toBe('frankfurter');
@@ -92,7 +81,7 @@ describe('fx DB integration', () => {
       RETURNING id
     `;
     const userId = users[0].id;
-    mockFrankfurter(7.2154);
+    mockFrankfurter(7.2154, '2026-05-26');
     await fetchAndStoreLatest(sql, 'CNY');
     const manual = await storeManualOverride(sql, 'CNY', 7.0, { userId, note: 'pinned' });
     expect(manual.source).toBe('manual');

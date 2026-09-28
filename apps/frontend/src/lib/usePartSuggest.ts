@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
 import { canonicalPartNumber } from './format';
 
@@ -75,11 +75,14 @@ export function usePartSuggest(value: string | null | undefined): PartSuggest {
     return () => clearTimeout(timer);
   }, [q]);
 
-  const meta = new Map<string, string>();
-  for (const it of items) {
-    const text = [it.label, it.category].filter(Boolean).join(' · ');
-    if (text) meta.set(it.partNumber, text);
-  }
+  const { options, meta } = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const it of items) {
+      const text = [it.label, it.category].filter(Boolean).join(' · ');
+      if (text) m.set(it.partNumber, text);
+    }
+    return { options: items.map(i => i.partNumber), meta: m };
+  }, [items]);
 
-  return { options: items.map(i => i.partNumber), meta, loading };
+  return { options, meta, loading };
 }

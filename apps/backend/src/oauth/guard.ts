@@ -12,17 +12,18 @@ export function bearerGuard(opts: { scopes: OAuthScope[] }): MiddlewareHandler<{
   Variables: { oauthCtx: OAuthCtx };
 }> {
   return async (c, next) => {
+    const wwwAuth = () =>
+      `Bearer realm="recycle-erp", error="invalid_token", resource_metadata="${resolvePublicOrigin(c)}/.well-known/oauth-protected-resource"`;
     const env = c.env;
-    const wwwAuth = `Bearer realm="recycle-erp", error="invalid_token", resource_metadata="${resolvePublicOrigin(c)}/.well-known/oauth-protected-resource"`;
     const header = c.req.header('authorization') ?? '';
     if (!header.toLowerCase().startsWith('bearer ')) {
-      c.header('WWW-Authenticate', wwwAuth);
+      c.header('WWW-Authenticate', wwwAuth());
       return c.json({ error: 'invalid_token' }, 401);
     }
     const token = header.slice(7).trim();
     const claims = await verifyAccessToken(env, token);
     if (!claims) {
-      c.header('WWW-Authenticate', wwwAuth);
+      c.header('WWW-Authenticate', wwwAuth());
       return c.json({ error: 'invalid_token' }, 401);
     }
     for (const need of opts.scopes) {

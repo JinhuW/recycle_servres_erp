@@ -61,7 +61,7 @@ export type ProductGroup = {
 // Subset of the flat-view column toggles that have a grouped-view analogue.
 // Columns with no analogue (id/date/profit/margin/submitter) are lot-level
 // only and simply aren't part of the grouped table.
-export type GroupedColVis = {
+type GroupedColVis = {
   category: boolean;
   partNumber: boolean;
   qty: boolean;
@@ -114,8 +114,7 @@ export function InventoryProductTable({
   groups, isManager, cols, selected, selectAllState, onToggleAll,
   onToggleLot, onToggleGroup, onQuickView, onEditLot,
 }: Props) {
-  const { lang, t } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
   const showCost = isManager && cols.unitCost;
   const [open, setOpen] = useState<Set<string>>(() => new Set());
   const [lightbox, setLightbox] = useState<string | null>(null);

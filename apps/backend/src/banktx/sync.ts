@@ -6,10 +6,12 @@
 
 import type { Sql, TransactionSql } from 'postgres';
 import { getDb } from '../db';
+import { allLimited } from '../lib/concurrency';
 import { log } from '../lib/log';
 import type { Env } from '../types';
 import { applyIgnoreRules } from './ignoreRules';
 import { pickBankProviders } from './index';
+import { PAIR_AUTO_WINDOW_DAYS } from './match';
 import { PAYPAL_ACH_DESCRIPTOR } from './mercury';
 import type { BankProvider, BankSource, NormalizedDispute, NormalizedTxn } from './types';
 
@@ -17,8 +19,12 @@ const bankLog = log.child({ module: 'banktx' });
 
 const OVERLAP_MS = 5 * 24 * 60 * 60 * 1000;
 const BACKFILL_MS = 90 * 24 * 60 * 60 * 1000;
-// A settlement can trail its PayPal charge by a weekend + holidays.
-const PAIR_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
+// A settlement can trail its PayPal charge by a weekend + holidays. Shared with
+// the read-time pair suggestion so the two never disagree.
+const PAIR_WINDOW_MS = PAIR_AUTO_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+// Rows per upsert statement: 11 parameters each, far below the protocol's
+// 65535-parameter ceiling, and small enough to keep one statement's plan cheap.
+const UPSERT_CHUNK = 500;
 
 export type SyncCounts = {
   inserted: number;
@@ -139,45 +145,53 @@ async function syncOne(sql: ReturnType<typeof getDb>, provider: BankProvider): P
   // frozen at whatever it said the day it fell out. The overlap alone is not
   // enough: a PayPal payment can sit pending for weeks, and a Mercury pending
   // row is dated by creation because it has no posted date at all.
-  const known = await sql<{ external_id: string; sync_cursor: string | null; oldest_pending: Date | null }[]>`
-    SELECT a.external_id, a.sync_cursor,
-           (SELECT MIN(t.posted_at) FROM bank_transactions t
-            WHERE t.account_id = a.id AND t.settle_status = 'pending') AS oldest_pending
-    FROM bank_accounts a WHERE a.source = ${source}`;
+  //
+  // An account appearing for the first time — the IO card, first listed by a
+  // run after the one that rewound the cursors for it — reaches back as far as
+  // anything the source is fetching or already holds (`oldestRow`), so a run
+  // that failed to list it costs nothing but a retry.
+  const [known, [oldestRow]] = await allLimited([
+    () => sql<{ external_id: string; sync_cursor: string | null; oldest_pending: Date | null }[]>`
+      SELECT a.external_id, a.sync_cursor,
+             (SELECT MIN(t.posted_at) FROM bank_transactions t
+              WHERE t.account_id = a.id AND t.settle_status = 'pending') AS oldest_pending
+      FROM bank_accounts a WHERE a.source = ${source}`,
+    () => sql<{ min: Date | null }[]>`
+      SELECT MIN(posted_at) AS min FROM bank_transactions WHERE source = ${source}`,
+  ] as const);
   const backfillMs = Date.now() - BACKFILL_MS;
   const since = new Map(known.map((a) => [a.external_id, Math.min(
     a.sync_cursor ? new Date(a.sync_cursor).getTime() - OVERLAP_MS : backfillMs,
     a.oldest_pending ? a.oldest_pending.getTime() : Infinity,
   )]));
   const sinceMs = since.size ? Math.min(...since.values()) : backfillMs;
-  // An account appearing for the first time — the IO card, first listed by a
-  // run after the one that rewound the cursors for it — reaches back as far as
-  // anything the source is fetching or already holds, so a run that failed to
-  // list it costs nothing but a retry.
-  const [oldestRow] = await sql<{ min: Date | null }[]>`
-    SELECT MIN(posted_at) AS min FROM bank_transactions WHERE source = ${source}`;
   const newSinceMs = Math.min(sinceMs, backfillMs, oldestRow?.min ? oldestRow.min.getTime() : Infinity);
   const runStartIso = new Date().toISOString();
-
-  const { accounts, txns } = await provider.fetchSince(new Date(sinceMs).toISOString(), {
-    since: new Map([...since].map(([id, ms]) => [id, new Date(ms).toISOString()])),
-    newSince: new Date(newSinceMs).toISOString(),
-  });
 
   // Disputes are a second API behind a second app permission, so this failing
   // must leave the money feed alone. The message is *stored*, not merely
   // logged: nobody watches stdout for the six-hourly loop, and a dispute list
-  // that is quietly always empty reads as good news.
+  // that is quietly always empty reads as good news. It never rejects, so it
+  // can run alongside the transaction fetch.
   let disputes: NormalizedDispute[] = [];
   let disputeError: string | undefined;
-  if (provider.fetchDisputes) {
+  const disputesDone = (async () => {
+    if (!provider.fetchDisputes) return;
     try {
       disputes = await provider.fetchDisputes();
     } catch (e) {
       disputeError = e instanceof Error ? e.message : 'dispute sync failed';
       log.warn('dispute sync failed', { module: 'banktx', source, error: disputeError });
     }
-  }
+  })();
+
+  const [{ accounts, txns }] = await Promise.all([
+    provider.fetchSince(new Date(sinceMs).toISOString(), {
+      since: new Map([...since].map(([id, ms]) => [id, new Date(ms).toISOString()])),
+      newSince: new Date(newSinceMs).toISOString(),
+    }),
+    disputesDone,
+  ]);
 
   return sql.begin(async (tx) => {
     const accountIds = new Map<string, string>();
@@ -191,21 +205,37 @@ async function syncOne(sql: ReturnType<typeof getDb>, provider: BankProvider): P
       accountIds.set(a.externalId, row.id);
     }
 
-    let inserted = 0;
+    // A row for an account the provider didn't list is skipped, uncounted.
+    // A feed that repeats an id must be de-duplicated before a multi-row
+    // upsert — Postgres refuses to touch one row twice in a statement
+    // (SQLSTATE 21000). The last copy wins, as when each copy was its own
+    // upsert, and each dropped copy still counts as the update it would
+    // have been.
+    const byExternalId = new Map<string, NormalizedTxn & { accountId: string }>();
     let updated = 0;
     for (const t of txns) {
       const accountId = accountIds.get(t.accountExternalId);
       if (!accountId) continue;
+      if (byExternalId.delete(t.externalId)) updated++;
+      byExternalId.set(t.externalId, { ...t, accountId });
+    }
+    const rows = [...byExternalId.values()].map((t) => ({
+      source, external_id: t.externalId, account_id: t.accountId, posted_at: t.postedAt,
+      amount: t.amount, counterparty: t.counterparty, description: t.description,
+      paypal_txn_id: t.paypalTxnId, category: t.category, settle_status: t.settleStatus,
+      raw: tx.json(t.raw as never),
+    }));
+
+    let inserted = 0;
+    for (let i = 0; i < rows.length; i += UPSERT_CHUNK) {
       // DO UPDATE touches only provider-owned fields — link/pair/ignore and
       // the tombstones are human state and must survive every re-sync.
-      const [row] = await tx<{ fresh: boolean }[]>`
-        INSERT INTO bank_transactions
-          (source, external_id, account_id, posted_at, amount, counterparty, description, paypal_txn_id,
-           category, settle_status, raw)
-        VALUES
-          (${source}, ${t.externalId}, ${accountId}, ${t.postedAt}, ${t.amount},
-           ${t.counterparty}, ${t.description}, ${t.paypalTxnId}, ${t.category},
-           ${t.settleStatus}, ${tx.json(t.raw as never)})
+      const fresh = await tx<{ fresh: boolean }[]>`
+        INSERT INTO bank_transactions ${tx(
+          // The helper's typing has no room for a json() parameter as a value.
+          rows.slice(i, i + UPSERT_CHUNK) as never,
+          'source', 'external_id', 'account_id', 'posted_at', 'amount', 'counterparty',
+          'description', 'paypal_txn_id', 'category', 'settle_status', 'raw')}
         ON CONFLICT (source, external_id) DO UPDATE SET
           posted_at = EXCLUDED.posted_at,
           amount = EXCLUDED.amount,
@@ -223,7 +253,9 @@ async function syncOne(sql: ReturnType<typeof getDb>, provider: BankProvider): P
                           THEN bank_transactions.category ELSE EXCLUDED.category END,
           raw = EXCLUDED.raw
         RETURNING (xmax = 0) AS fresh`;
-      if (row.fresh) inserted++; else updated++;
+      for (const r of fresh) {
+        if (r.fresh) inserted++; else updated++;
+      }
     }
 
     // Counterparty-taught transfers: re-applied after every upsert, because
@@ -508,12 +540,23 @@ async function autoLink(tx: Tx): Promise<number> {
       AND settle_status IN ('settled', 'pending')
     GROUP BY COALESCE(pair_id, id)`;
 
+  if (groups.length === 0) return 0;
+  // Only an id exactly one PO carries is unambiguous. Compared as stored, not
+  // uppercased: an id carrying lowercase matches no uppercased PO id, and so
+  // is never auto-linked.
+  const owners = await tx<{ ptxn: string; id: string }[]>`
+    SELECT UPPER(paypal_txn_id) AS ptxn, MIN(id) AS id
+    FROM orders
+    WHERE UPPER(paypal_txn_id) = ANY(${groups.map((g) => g.ptxn)}::text[])
+    GROUP BY UPPER(paypal_txn_id)
+    HAVING COUNT(*) = 1`;
+  const ownerOf = new Map(owners.map((o) => [o.ptxn, o.id]));
+
   let linked = 0;
   for (const g of groups) {
-    const orders = await tx<{ id: string }[]>`
-      SELECT id FROM orders WHERE UPPER(paypal_txn_id) = ${g.ptxn} LIMIT 2`;
-    if (orders.length !== 1) continue;
-    linked += await linkPaypalTxnToOrder(tx, g.ptxn, orders[0].id, null);
+    const orderId = ownerOf.get(g.ptxn);
+    if (orderId === undefined) continue;
+    linked += await linkPaypalTxnToOrder(tx, g.ptxn, orderId, null);
   }
   return linked;
 }

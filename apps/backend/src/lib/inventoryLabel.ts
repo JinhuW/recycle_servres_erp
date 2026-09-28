@@ -42,3 +42,16 @@ export function inventorySpec(r: InventoryAttrs): string | null {
   const spec = parts.filter(Boolean).join(' · ');
   return spec || null;
 }
+
+// Export-sheet Item string for a loosely-typed row. Unlike inventoryLabel it
+// drops empty parts instead of trimming, so the two are not interchangeable.
+// The sell-order price template shares it to render a sold line's source row.
+export function invLabel(r: Record<string, unknown>): string {
+  const s = (v: unknown) => (v == null ? '' : String(v));
+  switch (r.category) {
+    case 'RAM': return [s(r.brand), s(r.capacity), s(r.generation)].filter(Boolean).join(' ');
+    case 'SSD':
+    case 'HDD': return [s(r.brand), s(r.capacity)].filter(Boolean).join(' ');
+    default:    return s(r.description);
+  }
+}

@@ -77,7 +77,7 @@ function threshold(): number {
 // root ships in the image (pnpm needs it to install), so reading it at runtime
 // works on Railway, where no release-time build args are passed.
 let rootVersionCache: string | undefined;
-export function readRootVersion(): string {
+function readRootVersion(): string {
   if (rootVersionCache === undefined) {
     let version = 'unknown';
     try {
@@ -92,7 +92,7 @@ export function readRootVersion(): string {
   return rootVersionCache;
 }
 
-// APP_VERSION / GIT_SHA are release-time Docker build args (scripts/release.sh).
+// APP_VERSION / GIT_SHA are optional Docker build args for a tagged self-host build.
 // Railway never passes them and the Dockerfile bakes them as EMPTY strings, so
 // `||` — not `??` — is what falls through to the root package.json version
 // (bumped on every dev push, shipped in the image) and Railway's commit sha.

@@ -33,8 +33,7 @@ const LOOPS: readonly LoopName[] = ['poll', 'evaluate', 'notify'];
 type Props = { showToast?: (msg: string, kind?: 'success' | 'error') => void };
 
 export function DesktopTracker({ showToast }: Props) {
-  const { t, lang } = useT();
-  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { t, locale } = useT();
 
   const [rules, setRules] = useState<TrackerRule[] | null>(null);
   const [subs, setSubs] = useState<TrackerSubreddit[] | null>(null);

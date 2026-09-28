@@ -98,9 +98,7 @@ export function lifecyclesForLabel(label: string, role: Role): string[] {
 // unarchive puts each line back where it was.
 export const ARCHIVED_LINE_STATUS = 'Archived';
 
-// null actor = the system (tracking poll). It is held to the purchaser rule:
-// only Draft → In Transit, never a stage jump.
-export type AdvanceActor = { id: string; name: string; role: string } | null;
+export type AdvanceActor = { id: string; name: string; role: string };
 
 export type AdvanceOutcome =
   | { kind: 'notFound' }
@@ -272,7 +270,7 @@ export async function revertOrderToDraftTx(
   if (blocked) return blocked;
 
   await tx`UPDATE orders SET lifecycle = 'draft' WHERE id = ${id}`;
-  await cascadeLineStatusesTx(tx, id, actor?.id ?? null, LINE_STATUS_FOR_LIFECYCLE.draft);
+  await cascadeLineStatusesTx(tx, id, actor.id, LINE_STATUS_FOR_LIFECYCLE.draft);
   // The forward half of this transition notifies; so must the reverse, or a
   // manager mid-review is never told the order left their queue. The review
   // dialog alone only fires if they happen to reopen that exact order.
@@ -281,9 +279,7 @@ export async function revertOrderToDraftTx(
     tone: 'warn',
     icon: 'inventory',
     title: `Order ${id} back to Draft`,
-    body: actor
-      ? `${actor.name} changed ${id} after submitting it`
-      : `${id} was changed after submission`,
+    body: `${actor.name} changed ${id} after submitting it`,
   });
   return { kind: 'ok', from: fromLifecycle };
 }
@@ -366,7 +362,7 @@ export async function archiveOrderLinesTx(
         category: r.category, label: r.label, sub_label: r.sub_label, part_number: r.part_number,
         warehouse_id: r.warehouse_id,
       };
-      await writeSellOrderEvent(tx, r.so_id, actor?.id ?? null, 'line_removed', {
+      await writeSellOrderEvent(tx, r.so_id, actor.id, 'line_removed', {
         snapshot, reason: 'po_archived', orderId: id,
       });
     }
@@ -375,7 +371,7 @@ export async function archiveOrderLinesTx(
   const moved = (await tx`
     SELECT COUNT(*)::int AS n FROM order_lines WHERE order_id = ${id} AND status <> 'Sold'
   `)[0] as { n: number };
-  await cascadeLineStatusesTx(tx, id, actor?.id ?? null, ARCHIVED_LINE_STATUS);
+  await cascadeLineStatusesTx(tx, id, actor.id, ARCHIVED_LINE_STATUS);
   return { kind: 'ok', lines: moved.n, removedSellOrderLines: claimed.length };
 }
 
@@ -404,7 +400,7 @@ export async function unarchiveOrderLinesTx(
       RETURNING ol.id, p.status
     )
     INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
-    SELECT u.id, ${actor?.id ?? null}::uuid, 'status',
+    SELECT u.id, ${actor.id}::uuid, 'status',
            jsonb_build_object('field','status','from',${ARCHIVED_LINE_STATUS}::text,'to',u.status)
     FROM upd u
     RETURNING order_line_id
@@ -435,14 +431,13 @@ export async function advanceOrderTx(
     | undefined;
   if (!cur) return { kind: 'notFound' };
   // The lines sit at 'Archived'; a cascade here would put them back in stock
-  // behind the archive's back. The tracking poll lands here too and treats
-  // this like any other stage it may not drive.
+  // behind the archive's back.
   if (cur.archived_at) return { kind: 'archived' };
 
   const curIdx = stages.indexOf(stageOf(cur.lifecycle));
   let nextStageId: string;
   if (toStage) {
-    if (actor?.role !== 'manager') return { kind: 'forbidden', msg: 'Only managers can jump stages' };
+    if (actor.role !== 'manager') return { kind: 'forbidden', msg: 'Only managers can jump stages' };
     if (toStage === 'sold') return { kind: 'soldIsAutomatic' };
     if (!stages.includes(toStage)) return { kind: 'badStage', msg: 'Unknown stage' };
     nextStageId = toStage;
@@ -453,10 +448,10 @@ export async function advanceOrderTx(
   // A sold order asked for Done is already there; reopening means Reviewing
   // or Ready to Pay, and the way back to Done re-settles it.
   if (cur.lifecycle === 'sold' && nextStageId === 'done') return { kind: 'alreadySold' };
-  // Purchaser (and the system) can only advance Draft → in_transit — but ANY
+  // Purchaser can only advance Draft → in_transit — but ANY
   // purchaser may, not just the PO's creator: whoever handles the goods
   // submits the order. Every other transition stays manager-only.
-  if (actor?.role !== 'manager' && !(cur.lifecycle === 'draft' && nextStageId === 'in_transit')) {
+  if (actor.role !== 'manager' && !(cur.lifecycle === 'draft' && nextStageId === 'in_transit')) {
     return { kind: 'forbidden', msg: 'Purchasers can only advance Draft to In Transit' };
   }
 
@@ -498,19 +493,19 @@ export async function advanceOrderTx(
              COALESCE(SUM(qty * unit_cost), 0)::float AS total_cost
       FROM order_lines WHERE order_id = ${id}
     `)[0] as { line_count: number; qty: number; total_cost: number };
-    await writeOrderEvent(tx, id, actor?.id ?? null, 'submitted', {
+    await writeOrderEvent(tx, id, actor.id, 'submitted', {
       lineCount: snap.line_count,
       qty: snap.qty,
       totalCost: snap.total_cost,
     });
   } else {
-    await writeOrderEvent(tx, id, actor?.id ?? null, 'advanced', {
+    await writeOrderEvent(tx, id, actor.id, 'advanced', {
       from: cur.lifecycle,
       to: nextStageId,
     });
   }
   if (newLineStatus) {
-    await cascadeLineStatusesTx(tx, id, actor?.id ?? null, newLineStatus);
+    await cascadeLineStatusesTx(tx, id, actor.id, newLineStatus);
   }
   // PRD §10: managers want to see when a purchaser finalises an order. Only
   // the move into In Transit fires it, so later manager-driven moves don't
@@ -522,28 +517,25 @@ export async function advanceOrderTx(
       tone: 'info',
       icon: 'inventory',
       title: `Order ${id} submitted`,
-      body: actor
-        ? `${actor.name} advanced ${id} to In Transit`
-        : `Carrier movement advanced ${id} to In Transit`,
+      body: `${actor.name} advanced ${id} to In Transit`,
     });
   }
   // Ready to Pay is the moment money is owed: the payer needs to know, and so
   // does the purchaser it is owed to. Only forward entry fires it — a Done →
   // Ready to Pay reopen is a correction, not a new payable.
   if (nextStageId === 'ready_to_pay' && curIdx < stages.indexOf('ready_to_pay')) {
-    const who = actor?.name ?? 'The system';
     const n = {
       kind: 'order_ready_to_pay',
       tone: 'pos' as const,
       icon: 'inventory',
       title: `Order ${id} ready to pay`,
-      body: `${who} finished reviewing ${id} — the commission is payable`,
+      body: `${actor.name} finished reviewing ${id} — the commission is payable`,
     };
     await notifyManagers(tx, n);
     await notify(tx, { userId: cur.user_id, ...n });
   }
   // Landing on Done with nothing left to sell settles straight through.
-  if (nextStageId === 'done' && await settleSoldTx(tx, id, actor?.id ?? null)) {
+  if (nextStageId === 'done' && await settleSoldTx(tx, id, actor.id)) {
     return { kind: 'ok', nextStageId: 'sold' };
   }
   return { kind: 'ok', nextStageId };

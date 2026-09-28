@@ -71,7 +71,7 @@ export function exportCategory(v: unknown): ExportCategory {
 // product in the same place. The bid sheet's RAM rows put a device-group /
 // DDR-generation grouping ahead of it (lib/sellOrderPriceTemplate); this order
 // still decides the sequence inside each group.
-export const SHEET_SORT_KEYS = ['brand', 'capacity', 'speed'] as const;
+const SHEET_SORT_KEYS = ['brand', 'capacity', 'speed'] as const;
 
 // Numeric collation, same rule as the vendor catalog chips: it keeps 8GB below
 // 16GB and 3200 below 12800, which a plain lexical sort gets backwards. Blanks

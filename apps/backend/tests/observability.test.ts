@@ -3,6 +3,7 @@ import { resetDb, getTestDb } from './helpers/db';
 import { createOAuthClient } from '../src/oauth/clients';
 import { generateSigningKey } from '../src/oauth/tokens';
 import { api } from './helpers/app';
+import { oauthRefreshRevocationsTotal } from '../src/metrics';
 
 describe('observability counters', () => {
   beforeAll(async () => {
@@ -104,5 +105,43 @@ describe('observability counters', () => {
     expect(m.status).toBe(200);
     const text = m.body as unknown as string;
     expect(text).toMatch(/oauth_refresh_revocations_total\{reason="client_revoked"\}\s+\d+/);
+  });
+
+  it('counts one client_revoked revocation per live family, and none without one', async () => {
+    const sql = getTestDb();
+    const u = (await sql<{ id: string }[]>`SELECT id FROM users WHERE active LIMIT 1`)[0].id;
+    const newClient = (name: string) => createOAuthClient(sql, {
+      name, redirectUris: [], grantTypes: ['client_credentials'], scopes: ['market:read'],
+      createdBy: u, public: false,
+    });
+    const clientRevoked = async (): Promise<number> =>
+      (await oauthRefreshRevocationsTotal.get()).values
+        .find((v) => v.labels.reason === 'client_revoked')?.value ?? 0;
+    const seed = async (clientId: string, familyId: string, hash: string, revoked: boolean) => sql`
+      INSERT INTO oauth_refresh_tokens
+        (token_hash, client_id, user_id, scopes, family_id, expires_at, revoked_at)
+      VALUES (${hash}, ${clientId}, ${u}, ${['market:read']}, ${familyId},
+              NOW() + INTERVAL '1 day', ${revoked ? new Date() : null})`;
+
+    const c = await newClient('revoke-count');
+    const famA = crypto.randomUUID();
+    const famB = crypto.randomUUID();
+    // Two live tokens in one family count once; an already-dead family not at all.
+    await seed(c.clientId, famA, 'count-a1', false);
+    await seed(c.clientId, famA, 'count-a2', false);
+    await seed(c.clientId, famB, 'count-b1', false);
+    await seed(c.clientId, crypto.randomUUID(), 'count-c1', true);
+
+    const { revokeOAuthClient } = await import('../src/oauth/clients');
+    const before = await clientRevoked();
+    await revokeOAuthClient(sql, c.clientId);
+    expect(await clientRevoked()).toBe(before + 2);
+    const live = await sql`
+      SELECT 1 FROM oauth_refresh_tokens WHERE client_id = ${c.clientId} AND revoked_at IS NULL`;
+    expect(live).toHaveLength(0);
+
+    const bare = await newClient('revoke-count-bare');
+    await revokeOAuthClient(sql, bare.clientId);
+    expect(await clientRevoked()).toBe(before + 2);
   });
 });

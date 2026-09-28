@@ -9,10 +9,10 @@
 import type { Context, Next } from 'hono';
 import { Registry, collectDefaultMetrics, Counter, Histogram } from 'prom-client';
 
-export const registry = new Registry();
+const registry = new Registry();
 collectDefaultMetrics({ register: registry });
 
-export const httpRequestDuration = new Histogram({
+const httpRequestDuration = new Histogram({
   name: 'http_request_duration_seconds',
   help: 'HTTP request duration in seconds, labeled by Hono matched route.',
   labelNames: ['method', 'route', 'status'] as const,
@@ -20,7 +20,7 @@ export const httpRequestDuration = new Histogram({
   registers: [registry],
 });
 
-export const httpRequestsTotal = new Counter({
+const httpRequestsTotal = new Counter({
   name: 'http_requests_total',
   help: 'HTTP requests served, labeled by Hono matched route.',
   labelNames: ['method', 'route', 'status'] as const,
