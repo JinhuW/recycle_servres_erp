@@ -17,6 +17,20 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.186.0] - 2026-09-27
+
+### Added
+
+- **A RAM line's chip # fills itself from the part number** (RS-122). The chip
+  marking was retyped on every line, even though the same part number always
+  carries the same chip and earlier lines already recorded it.
+  - New `POST /api/market/chips` learns the map from past PO lines: the chip
+    recorded on the most POs wins, ties go to the newest, and archived POs
+    don't vote.
+  - The desktop drawer, the desk scanner, the phone form and Scan RAM sheet
+    fill a blank chip # from it. A typed chip # is never overwritten, and
+    opening an existing line never fills, so an untouched PO isn't dirtied.
+
 ## [1.185.0] - 2026-09-27
 
 ### Changed

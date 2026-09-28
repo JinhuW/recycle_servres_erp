@@ -24,6 +24,7 @@ import {
   lineBlockerMessages, lineSaveBlock, type DuplicatePartGroup, type Line,
 } from './submit/line';
 import { usePreference } from '../../lib/preferences';
+import { lookupChips } from '../../lib/useChipFill';
 import { useMarketLookup } from '../../lib/useMarketLookup';
 import { groupLines, shouldGroup, pricedTotals, lineSpecLabel } from '../../lib/lineGroups';
 import { CostTape } from '../../components/CostTape';
@@ -371,7 +372,32 @@ function OrderForm({
   const [autoSaving, setAutoSaving] = useState(false);
   const addScannedLines = async (patches: Partial<Line>[]) => {
     if (!patches.length) return;
-    const added = patches.map(p => ({ ...blankLine('RAM'), ...p }));
+    // Held from the start: the chip lookup below is a round trip, and Submit or
+    // another add inside it would save these lines a second time.
+    setAutoSaving(true);
+    try {
+      await addScannedLinesHeld(patches);
+    } finally {
+      setAutoSaving(false);
+    }
+  };
+  const addScannedLinesHeld = async (patches: Partial<Line>[]) => {
+    // Known chips go in before the save check, so a Micron stick whose part #
+    // is on record saves instead of waiting in the drawer. The drawer won't
+    // fill these later — a line opened with its part # already set is left as
+    // it is — so this is the only chance.
+    let chips: Record<string, string> = {};
+    try {
+      chips = await lookupChips([...new Set(patches
+        .filter(p => p.partNumber && !p.chipNumber?.trim())
+        .map(p => p.partNumber!))]);
+    } catch {
+      // Without the map the sheet still lands; the chips are typed by hand.
+    }
+    const added = patches.map(p => {
+      const chip = !p.chipNumber?.trim() && p.partNumber ? chips[p.partNumber] : undefined;
+      return { ...blankLine('RAM'), ...p, ...(chip ? { chipNumber: chip } : {}) };
+    });
     setLastCat('RAM');
     setLines(ls => [
       ...(ls.length === 1 && isPristineLine(ls[0]) ? [] : ls),
@@ -387,7 +413,6 @@ function OrderForm({
       showWarnToast(t('subScanNoneSaved', { details: needDetails, serials: needSerials }));
       return;
     }
-    setAutoSaving(true);
     try {
       const saved = await persistLines(ready.map(toWireLine), wireMeta());
       const idByCid = new Map<string, string>();
@@ -407,8 +432,6 @@ function OrderForm({
       // Nothing is lost: the lines stay on the page unsaved, and Confirm or
       // Submit saves them the usual way.
       showErrorDialog(e instanceof Error ? e.message : t('subSubmitFailed'));
-    } finally {
-      setAutoSaving(false);
     }
   };
 
