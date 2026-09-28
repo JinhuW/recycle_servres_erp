@@ -2,12 +2,12 @@
 id: RS-124
 title: Box check: a desktop review mode for checking a PO against its shipping box
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-09-28
 reporter: jinhu
 branch: feat/po-box-check
-pr:
+pr: "#427"
 version: 1.188.0
 related: []
 ---
