@@ -22,6 +22,7 @@ import { MarketAssist } from '../../../components/MarketAssist';
 import { type ResolvedMarketValue } from '../../../lib/useMarketLookup';
 import { addableCategories, aiCaptureEnabled, categoryTone } from '../../../lib/lookups';
 import { parseSerials } from '../../../components/SerialNumbers';
+import { useChipFill } from '../../../lib/useChipFill';
 
 // ─── LineDrawer ──────────────────────────────────────────────────────────────
 // When `editing` is true (e.g. used by DesktopEditOrder), the pricing grid
@@ -84,6 +85,7 @@ export function LineDrawer({
   // the switch stays out of the way until someone says they filed it wrong.
   const [catOpen, setCatOpen] = useState(false);
   const set = (patch: Partial<Line>) => onChange(patch);
+  useChipFill(line, { enabled: !readOnly, onFill: chipNumber => set({ chipNumber }) });
   const [lightbox, setLightbox] = useState(false);
   const [thumbBroken, setThumbBroken] = useState(false);
   const scanUrl = line.scanImageUrl ?? null;

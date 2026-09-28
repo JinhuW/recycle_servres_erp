@@ -23,6 +23,7 @@ import { addSerials } from '../lib/serialField';
 import { BrandConfirmDialog } from '../components/BrandConfirmDialog';
 import { MarketAssist } from '../components/MarketAssist';
 import { useMarketLookup } from '../lib/useMarketLookup';
+import { useChipFill } from '../lib/useChipFill';
 
 type Props = {
   category: Category;
@@ -201,6 +202,14 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
 
   const snCount = parseSerials(line.serialNumber).length;
   const marketFor = useMarketLookup([line.partNumber]);
+  // Written straight into the line, not through set(): `edited` marks what the
+  // user changed, and this wasn't them. The saved part # (not the scanned one)
+  // is what counts as already on record, so a fresh scan still fills.
+  useChipFill(line, {
+    enabled: true,
+    savedPartNumber: isEditing ? existingLine?.partNumber : '',
+    onFill: chipNumber => setLine(prev => ({ ...prev, chipNumber })),
+  });
 
   const set = <K extends keyof DraftLine>(k: K, v: DraftLine[K]) => {
     setLine(prev => ({ ...prev, [k]: v }));

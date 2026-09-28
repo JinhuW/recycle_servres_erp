@@ -1064,6 +1064,19 @@ inventory search, sell-order draft creation.
   - **Open camera automatically** (`scan.deskCamera`) starts every scanless
     line's drawer with the camera live, so a pallet goes stick → fields →
     Confirm → next line.
+- **Chip # fills itself from the part number** (v1.186.0, RS-122). Once a
+  part number's chip # is on record, a RAM line never needs it typed again.
+  The map is learnt from past PO lines (`POST /api/market/chips`): the chip #
+  recorded on the most POs for the canonical part number wins, ties go to the
+  newest, and archived POs don't count. It is workspace-wide, so a purchaser
+  benefits from everyone's lines.
+  - Typing or scanning a part # (desktop drawer, desk scanner, phone form)
+    fills a **blank** chip #. A chip # the user typed is never replaced.
+    Clearing a filled chip # keeps it clear.
+  - Opening an existing line doesn't fill, so an untouched PO never turns
+    dirty or goes back to Draft. Read-only lines never fill.
+  - **Scan RAM sheet** fills known chips before its auto-save, so a Micron
+    stick whose part # is on record saves at once.
 
 > Provider selection is silent: OpenRouter when `OPENROUTER_API_KEY` is set,
 > otherwise a deterministic stub. A prod deploy missing the key looks healthy
