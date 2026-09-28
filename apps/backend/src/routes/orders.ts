@@ -50,6 +50,7 @@ import { PAYPAL_TXN_STRICT, extractPaypalTxn, normPaypalTxnId } from '../ai/payp
 import { maybeRenameReceipt, suffixFilename } from '../ai/receipt';
 import { shrinkImageToFit } from '../lib/image-shrink';
 import { log } from '../lib/log';
+import { notify } from '../lib/notify';
 
 const orders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
@@ -2927,6 +2928,183 @@ async function pullPaypalIfUnknown(
   reportSyncResult(result);
   return result.perSource.paypal?.error ?? null;
 }
+
+// ── Box check: a manager counting a PO against the box that arrived.
+// Whole-endpoint gate on the raw role, like the other manager-only doors: a
+// manager previewing as a purchaser is still the one holding the box.
+const CHECK_FLAG_REASONS = ['missing', 'short', 'wrong_part', 'damaged', 'not_as_described'] as const;
+type CheckFlagReason = typeof CHECK_FLAG_REASONS[number];
+const CHECK_NOTE_MAX = 500;
+
+type CheckOrderRow = { id: string; user_id: string; archived_at: Date | null };
+async function checkOrder(sql: SqlLike, id: string): Promise<CheckOrderRow | undefined> {
+  return (await sql<CheckOrderRow[]>`
+    SELECT id, user_id, archived_at FROM orders WHERE id = ${id} LIMIT 1`)[0];
+}
+
+async function readChecks(sql: SqlLike, id: string) {
+  const lines = await sql<{
+    line_id: string; counted: number; flag_reason: CheckFlagReason | null;
+    flag_note: string | null; checked_at: Date | null;
+  }[]>`
+    SELECT k.line_id, k.counted, k.flag_reason, k.flag_note, k.checked_at
+    FROM order_line_checks k JOIN order_lines l ON l.id = k.line_id
+    WHERE l.order_id = ${id}`;
+  const extras = await sql<{ id: string; part_number: string; note: string | null; created_at: Date }[]>`
+    SELECT id, part_number, note, created_at FROM order_check_extras
+    WHERE order_id = ${id} ORDER BY created_at ASC, id ASC`;
+  return {
+    lines: lines.map((r) => ({
+      lineId: r.line_id, counted: r.counted, flagReason: r.flag_reason,
+      flagNote: r.flag_note, checkedAt: r.checked_at,
+    })),
+    extras: extras.map((r) => ({ id: r.id, partNumber: r.part_number, note: r.note, createdAt: r.created_at })),
+  };
+}
+
+// undefined = present but not text (a 400); null = empty.
+function cleanCheckNote(v: unknown): string | null | undefined {
+  if (v === undefined || v === null) return null;
+  if (typeof v !== 'string') return undefined;
+  return v.trim().slice(0, CHECK_NOTE_MAX) || null;
+}
+
+orders.get('/:id/checks', async (c) => {
+  if (c.var.user.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const sql = getDb(c.env);
+  const id = c.req.param('id');
+  if (!await checkOrder(sql, id)) return c.json({ error: 'Not found' }, 404);
+  return c.json(await readChecks(sql, id));
+});
+
+orders.put('/:id/checks/:lineId', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const sql = getDb(c.env);
+  const id = c.req.param('id');
+  const lineId = c.req.param('lineId');
+  const order = await checkOrder(sql, id);
+  if (!order || !UUID_RE.test(lineId)) return c.json({ error: 'Not found' }, 404);
+  if (order.archived_at) return c.json({ error: 'Order is archived — unarchive it first' }, 409);
+
+  const body = (await c.req.json().catch(() => null)) as
+    { counted?: unknown; flagReason?: unknown; flagNote?: unknown } | null;
+  if (!body) return c.json({ error: 'invalid body' }, 400);
+  const line = (await sql<{ qty: number }[]>`
+    SELECT qty FROM order_lines WHERE id = ${lineId} AND order_id = ${id} LIMIT 1`)[0];
+  if (!line) return c.json({ error: 'Not found' }, 404);
+  const counted = body.counted;
+  if (typeof counted !== 'number' || !Number.isInteger(counted) || counted < 0 || counted > line.qty) {
+    return c.json({ error: `counted must be a whole number from 0 to ${line.qty}` }, 400);
+  }
+  const reason = body.flagReason ?? null;
+  if (reason !== null && !CHECK_FLAG_REASONS.includes(reason as CheckFlagReason)) {
+    return c.json({ error: 'Unknown flag reason' }, 400);
+  }
+  const note = cleanCheckNote(body.flagNote);
+  if (note === undefined) return c.json({ error: 'flagNote must be text' }, 400);
+  const full = counted === line.qty;
+
+  await sql`
+    INSERT INTO order_line_checks (line_id, counted, flag_reason, flag_note, checked_at, updated_by, updated_at)
+    VALUES (${lineId}, ${counted}, ${reason as string | null}, ${reason ? note : null},
+            ${full ? sql`NOW()` : null}, ${u.id}, NOW())
+    ON CONFLICT (line_id) DO UPDATE SET
+      counted = EXCLUDED.counted,
+      flag_reason = EXCLUDED.flag_reason,
+      flag_note = EXCLUDED.flag_note,
+      checked_at = CASE WHEN ${full} THEN COALESCE(order_line_checks.checked_at, NOW()) END,
+      updated_by = EXCLUDED.updated_by,
+      updated_at = NOW()`;
+  return c.json(await readChecks(sql, id));
+});
+
+orders.post('/:id/checks/extras', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const sql = getDb(c.env);
+  const id = c.req.param('id');
+  const order = await checkOrder(sql, id);
+  if (!order) return c.json({ error: 'Not found' }, 404);
+  if (order.archived_at) return c.json({ error: 'Order is archived — unarchive it first' }, 409);
+  const body = (await c.req.json().catch(() => null)) as { partNumber?: unknown; note?: unknown } | null;
+  const pn = typeof body?.partNumber === 'string' ? body.partNumber.trim().slice(0, 120) : '';
+  if (!pn) return c.json({ error: 'partNumber is required' }, 400);
+  const note = cleanCheckNote(body?.note);
+  if (note === undefined) return c.json({ error: 'note must be text' }, 400);
+  await sql`
+    INSERT INTO order_check_extras (order_id, part_number, note, created_by)
+    VALUES (${id}, ${pn}, ${note}, ${u.id})`;
+  return c.json(await readChecks(sql, id), 201);
+});
+
+orders.delete('/:id/checks/extras/:extraId', async (c) => {
+  if (c.var.user.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const sql = getDb(c.env);
+  const id = c.req.param('id');
+  const extraId = c.req.param('extraId');
+  const order = await checkOrder(sql, id);
+  if (!order || !UUID_RE.test(extraId)) return c.json({ error: 'Not found' }, 404);
+  if (order.archived_at) return c.json({ error: 'Order is archived — unarchive it first' }, 409);
+  const gone = await sql`DELETE FROM order_check_extras WHERE id = ${extraId} AND order_id = ${id}`;
+  if (gone.count === 0) return c.json({ error: 'Not found' }, 404);
+  return c.json(await readChecks(sql, id));
+});
+
+// The flags go to the purchaser as a notification and stay on the order's
+// history. The stage is left alone: what happens next is a conversation, not
+// a transition.
+orders.post('/:id/checks/send', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const sql = getDb(c.env);
+  const id = c.req.param('id');
+  const order = await checkOrder(sql, id);
+  if (!order) return c.json({ error: 'Not found' }, 404);
+  if (order.archived_at) return c.json({ error: 'Order is archived — unarchive it first' }, 409);
+
+  const sent = await sql.begin(async (tx) => {
+    const flags = await tx<{
+      line_id: string; part_number: string | null; qty: number; counted: number;
+      flag_reason: CheckFlagReason; flag_note: string | null;
+    }[]>`
+      SELECT l.id AS line_id, l.part_number, l.qty, k.counted, k.flag_reason, k.flag_note
+      FROM order_line_checks k JOIN order_lines l ON l.id = k.line_id
+      WHERE l.order_id = ${id} AND k.flag_reason IS NOT NULL
+      ORDER BY l.position ASC, l.id ASC`;
+    const extras = await tx<{ part_number: string; note: string | null }[]>`
+      SELECT part_number, note FROM order_check_extras
+      WHERE order_id = ${id} ORDER BY created_at ASC, id ASC`;
+    if (flags.length === 0 && extras.length === 0) return null;
+
+    const detail = {
+      flags: flags.map((f) => ({
+        lineId: f.line_id, partNumber: f.part_number, qty: f.qty, counted: f.counted,
+        reason: f.flag_reason, note: f.flag_note,
+      })),
+      extras: extras.map((x) => ({ partNumber: x.part_number, note: x.note })),
+    };
+    await writeOrderEvent(tx, id, u.id, 'box_check_flagged', detail);
+    if (order.user_id !== u.id) {
+      const n = flags.length + extras.length;
+      await notify(tx, {
+        userId: order.user_id,
+        kind: 'box_check',
+        tone: 'warn',
+        icon: 'flag',
+        title: `${id}: ${n} ${n === 1 ? 'problem' : 'problems'} found in the box`,
+        body: [
+          ...flags.map((f) => `${f.part_number ?? 'Line'}: ${f.flag_reason.replace(/_/g, ' ')}`
+            + (f.flag_note ? ` (${f.flag_note})` : '')),
+          ...extras.map((x) => `Extra item ${x.part_number}` + (x.note ? ` (${x.note})` : '')),
+        ].join('\n'),
+      });
+    }
+    return detail;
+  });
+  if (!sent) return c.json({ error: 'Nothing is flagged — flag a line or record an extra item first.' }, 409);
+  return c.json({ ok: true, flags: sent.flags.length, extras: sent.extras.length });
+});
 
 type TxnRuleRow = {
   payment: string; payment_method: string | null; paypal_txn_id: string | null; created_at: Date;

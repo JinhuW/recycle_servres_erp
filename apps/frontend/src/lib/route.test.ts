@@ -1,5 +1,18 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { hrefFor, navigate, navigateBack, onLinkClick, parseShippingRoute, pathToDesktopView, readSafeNext, type LinkClick } from './route';
+import {
+  hrefFor, matchPoCheck, matchPurchaseOrder, navigate, navigateBack, onLinkClick, parseShippingRoute,
+  pathToDesktopView, poCheckPath, readSafeNext, type LinkClick,
+} from './route';
+
+describe('box check route', () => {
+  it('is its own desktop route under the PO, not a phone screen', () => {
+    expect(poCheckPath('PO-1448')).toBe('/purchase-orders/PO-1448/check');
+    expect(matchPoCheck('/purchase-orders/PO-1448/check')).toEqual({ id: 'PO-1448' });
+    expect(matchPoCheck('/purchase-orders/PO-1448')).toBeNull();
+    expect(matchPurchaseOrder('/purchase-orders/PO-1448/check')).toBeNull();
+    expect(pathToDesktopView('/purchase-orders/PO-1448/check')).toBe('history');
+  });
+});
 
 describe('parseShippingRoute', () => {
   it('parses the dashboard and the add-label routes', () => {

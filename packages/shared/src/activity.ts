@@ -44,6 +44,7 @@ export const ACTIVITY_KIND_MAP: Record<
     line_photo_removed:  'removed',
     archived:            'archived',
     unarchived:          'archived',
+    box_check_flagged:   'note',
   },
   so: {
     created:             'created',

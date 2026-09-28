@@ -113,6 +113,17 @@ export function matchPurchaseOrder(path: string): { id: string; screen: PoScreen
   return null;
 }
 
+// Box check is desktop-only, so it is kept out of PoScreen: the phone never
+// has to learn a screen it cannot show.
+export function poCheckPath(id: string): string {
+  return '/purchase-orders/' + id + '/check';
+}
+
+export function matchPoCheck(path: string): { id: string } | null {
+  const m = match('/purchase-orders/:id/check', path);
+  return m ? { id: m.id! } : null;
+}
+
 export function match(template: string, path: string): Record<string, string> | null {
   const t = template.split('/').filter(Boolean);
   const p = path.split('/').filter(Boolean);
@@ -168,7 +179,7 @@ export type DesktopViewId = keyof typeof DESKTOP_VIEW_TO_PATH;
 export function pathToDesktopView(path: string): DesktopViewId {
   if (path === '/' || path === '/dashboard') return 'dashboard';
   if (path === '/submit') return 'submit';
-  if (path === '/purchase-orders' || matchPurchaseOrder(path)) return 'history';
+  if (path === '/purchase-orders' || matchPurchaseOrder(path) || matchPoCheck(path)) return 'history';
   if (parseShippingRoute(path)) return 'shipping';
   if (path === '/clients' || match('/clients/:id', path)) return 'clients';
   if (path === '/market') return 'market';
