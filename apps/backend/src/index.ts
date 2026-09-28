@@ -43,6 +43,8 @@ import attachmentsRoutes from './routes/attachments';
 import workspaceRoutes from './routes/workspace';
 import { fxRates as fxRatesRoutes } from './routes/fxRates';
 import vendorPublicRoutes from './routes/vendorPublic';
+import publicFormsRoutes from './routes/publicForms';
+import webSubmissionsRoutes from './routes/webSubmissions';
 import vendorBidsRoutes from './routes/vendorBids';
 import activityRoutes from './routes/activity';
 import clientErrorRoutes from './routes/clientErrors';
@@ -184,7 +186,8 @@ app.use(
     ],
     // Without this an in-browser client can't read the WWW-Authenticate
     // challenge and so can't discover where to start the OAuth flow.
-    exposeHeaders: ['WWW-Authenticate', 'X-Request-Id'],
+    // Retry-After: the public website forms show the 429 wait to the sender.
+    exposeHeaders: ['WWW-Authenticate', 'X-Request-Id', 'Retry-After'],
     credentials: true,
   }),
 );
@@ -241,6 +244,8 @@ const uploadBodyLimit = bodyLimit({ maxSize: UPLOAD_HARD_CAP_BYTES });
 const isUploadPath = (path: string): boolean =>
   path === '/api/scan/label' ||
   path === '/api/scan/payment' ||
+  // The ram4cash sell form sends label photos with its payload.
+  path === '/api/public/intake' ||
   path === '/api/attachments' ||
   /^\/api\/(orders|sell-orders)\/[^/]+\/status-meta\/[^/]+\/attachments$/.test(path) ||
   // A line photo comes straight off a phone camera at several MB, uncompressed.
@@ -283,6 +288,8 @@ app.use('*', async (c, next) => {
 // ── Public ──────────────────────────────────────────────────────────────────
 app.route('/api/auth', authRoutes);
 app.route('/api/public/vendor', vendorPublicRoutes);
+// Website forms (ram4cash.com sell lot, recycleservers.com quote).
+app.route('/api/public', publicFormsRoutes);
 app.route('/api/public/shippo', shippoWebhookRoutes);
 app.route('/.well-known', wellKnown);
 app.route('/oauth', oauthRoutes);
@@ -368,6 +375,7 @@ app.route('/api/client-timings', clientTimingRoutes);
 app.route('/api/oauth/clients', oauthAdmin);
 // Self-applies authMiddleware + manager gate (oauthAdmin pattern).
 app.route('/api/tracker', trackerRoutes);
+app.route('/api/web-submissions', webSubmissionsRoutes);
 // Same shape: self-applied authMiddleware + manager gate.
 app.route('/api/coordinator', coordinatorRoutes);
 // Same shape: self-applied authMiddleware + manager gate.

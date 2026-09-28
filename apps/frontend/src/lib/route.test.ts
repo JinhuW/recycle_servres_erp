@@ -32,6 +32,11 @@ describe('parseShippingRoute', () => {
     expect(pathToDesktopView('/clients')).toBe('clients');
     expect(pathToDesktopView('/clients/2f1c0b7e-0000-4000-8000-000000000000')).toBe('clients');
   });
+
+  it('maps the web submissions inbox and one submission', () => {
+    expect(pathToDesktopView('/web-submissions')).toBe('websubmissions');
+    expect(pathToDesktopView('/web-submissions/WS-1001')).toBe('websubmissions');
+  });
 });
 
 // `next` comes back from the backend's /oauth/authorize bounce and is then fed

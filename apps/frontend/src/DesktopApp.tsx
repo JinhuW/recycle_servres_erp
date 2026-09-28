@@ -33,6 +33,7 @@ const DesktopMarket = lazy(() => import('./pages/desktop/DesktopMarket').then(m 
 const DesktopSellOrders = lazy(() => import('./pages/desktop/DesktopSellOrders').then(m => ({ default: m.DesktopSellOrders })));
 const DesktopVendorBids = lazy(() => import('./pages/desktop/DesktopVendorBids').then(m => ({ default: m.DesktopVendorBids })));
 const DesktopTransfers = lazy(() => import('./pages/desktop/DesktopTransfers').then(m => ({ default: m.DesktopTransfers })));
+const DesktopWebSubmissions = lazy(() => import('./pages/desktop/DesktopWebSubmissions').then(m => ({ default: m.DesktopWebSubmissions })));
 const DesktopActivity = lazy(() => import('./pages/desktop/DesktopActivity').then(m => ({ default: m.DesktopActivity })));
 const DesktopPayments = lazy(() => import('./pages/desktop/DesktopPayments').then(m => ({ default: m.DesktopPayments })));
 const DesktopInternalTxns = lazy(() => import('./pages/desktop/DesktopInternalTxns').then(m => ({ default: m.DesktopInternalTxns })));
@@ -160,7 +161,7 @@ export function DesktopApp() {
   }
 
   // Default to dashboard if a purchaser tried to navigate to a manager-only view.
-  const view2: DesktopView = user.role === 'purchaser' && (view === 'inventory' || view === 'analysis' || view === 'sellorders' || view === 'vendorbids' || view === 'transfers' || view === 'activity' || view === 'payments' || view === 'internaltx' || view === 'tracker' || view === 'coordinator')
+  const view2: DesktopView = user.role === 'purchaser' && (view === 'inventory' || view === 'analysis' || view === 'sellorders' || view === 'vendorbids' || view === 'transfers' || view === 'websubmissions' || view === 'activity' || view === 'payments' || view === 'internaltx' || view === 'tracker' || view === 'coordinator')
     ? 'dashboard'
     : view;
 
@@ -250,6 +251,7 @@ export function DesktopApp() {
               />
             )}
             {view2 === 'transfers' && <DesktopTransfers onToast={showToast} />}
+            {view2 === 'websubmissions' && <DesktopWebSubmissions onToast={showToast} />}
             {view2 === 'activity'  && <DesktopActivity />}
             {view2 === 'payments'  && <DesktopPayments onToast={showToast} />}
             {view2 === 'internaltx' && <DesktopInternalTxns onToast={showToast} />}

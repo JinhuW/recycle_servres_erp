@@ -17,6 +17,30 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.187.0] - 2026-09-28
+
+### Added
+
+- **Web submissions: one inbox for the public website forms** (RS-123). The
+  ram4cash.com sell form had nowhere to land (its endpoint only lived on an
+  unmerged branch) and the recycleservers.com quote form reached nobody but
+  Formspree.
+  - `POST /api/public/intake` (ram4cash sell lot: RAM/SSD/CPU lines, label
+    photos, PayPal-upfront or cash-pickup hand-off) and `POST /api/public/quote`
+    (recycleservers.com quote request) store a `WS-nnnn` submission and notify
+    managers. Nothing anonymous is written to orders any more.
+  - Per-IP budget of 5 a minute (429 with `Retry-After`, now CORS-exposed) and a
+    silent honeypot; the limiter is scoped to the two form paths.
+  - New manager-only **Web submissions** page (Workspace sidebar): status tabs
+    with counts, site filter, search, keyset paging, and a detail view with the
+    line photos, a status + staff-note triage panel and a reply-by-email link.
+  - **Create Draft PO** turns a sell lot into a Draft PO once: lines at cost 0,
+    photos copied (never shared) onto the lines, the seller filed as a
+    house-account supplier with the new `web` source, PayPal for a shipped lot,
+    cash + pickup for a pickup lot, no commission and no `ref_prices` seeding.
+  - Migration `0138_web_submissions.sql`: `web_submissions`,
+    `web_submission_photos`, the `WS` id counter, `suppliers.source` gains `web`.
+
 ## [1.186.0] - 2026-09-27
 
 ### Added

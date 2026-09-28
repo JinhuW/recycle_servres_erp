@@ -26,6 +26,7 @@ const NAV: { tKey: string; items: NavItem[] }[] = [
       { id: 'sellorders', tKey: 'nav_sellorders', icon: 'tag',        roles: ['manager'] },
       { id: 'vendorbids', tKey: 'nav_vendorbids', icon: 'invoice',    roles: ['manager'] },
       { id: 'transfers',  tKey: 'nav_transfers',  icon: 'truck',      roles: ['manager'] },
+      { id: 'websubmissions', tKey: 'nav_websubmissions', icon: 'mail', roles: ['manager'] },
     ],
   },
   {
