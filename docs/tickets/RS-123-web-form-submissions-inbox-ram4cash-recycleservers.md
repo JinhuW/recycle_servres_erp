@@ -2,12 +2,12 @@
 id: RS-123
 title: Web form submissions inbox (ram4cash + recycleservers)
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-09-28
 reporter: jinhu
 branch: feat/web-submissions
-pr:
+pr: "#424"
 version: 1.187.0
 related: [RS-095]
 ---
