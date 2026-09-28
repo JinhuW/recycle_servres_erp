@@ -242,6 +242,30 @@ on to Sold once every line has sold (v1.164.0).
   warehouse** (v1.168.0). The v1.132.0 rule that reserved those two moves for
   the manager linked to the PO's warehouse is gone, on both shells and in the
   API; the warehouse's manager in Settings is a contact, not a gate.
+- **Box check: a manager counts a PO against the box that arrived** (v1.188.0,
+  desktop only). **Check box** in the PO page header, primary at Reviewing and
+  present at every stage, opens `#/purchase-orders/<id>/check`: a full-width
+  page with no sidebar.
+  - Each line has a checkbox (the whole qty) and a −/+ count for a partial
+    one. A checked line sinks below a *Checked* divider, newest first, with an
+    Undo. Flagged lines sit between the open and the checked ones.
+  - The scan box takes a label scanner: an exact part number, a prefix, then
+    a recorded serial each count one unit. A scan that matches nothing can be
+    recorded as an extra item.
+  - A flag is one of Missing, Short count, Wrong part, Damaged or Not as
+    described, plus a note. A short count is only ever a flag; the line qty
+    does not change.
+  - Progress is saved on the server (`order_line_checks`,
+    `order_check_extras`), so a reload or a second manager sees the same
+    count. Last write per line wins; there is no live sync.
+  - Once every line is checked or flagged: with no problems at Reviewing,
+    **Approve for payment** moves the PO to Ready to Pay (re-reading the stage
+    first). With problems, **Send flags to purchaser** notifies the owner and
+    writes a `box_check_flagged` event to the PO's history. The stage does not
+    move.
+  - The endpoints (`/api/orders/:id/checks…`) 403 anyone whose real role is
+    not manager; the page and button are hidden from a manager previewing as
+    purchaser.
 - **A company-paid PO names the payment that funded it before it leaves
   Draft** (v1.115.0) — the transaction ID is required, and the advance is
   refused without it for every actor, a manager stage-jump and carrier movement

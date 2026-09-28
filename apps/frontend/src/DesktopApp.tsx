@@ -8,7 +8,7 @@ import { useAuth } from './lib/auth';
 import { useT } from './lib/i18n';
 import { useEffectiveUser } from './lib/tweaks';
 import {
-  useRoute, match, matchPurchaseOrder, navigate, parseShippingRoute,
+  useRoute, match, matchPurchaseOrder, matchPoCheck, navigate, parseShippingRoute,
   pathToDesktopView, isAuthorizePath, readSafeNext, hrefFor, onLinkClick,
 } from './lib/route';
 import { api, ApiError } from './lib/api';
@@ -43,6 +43,7 @@ const DesktopCoordinator = lazy(() => import('./pages/desktop/DesktopCoordinator
 const DesktopSubmit = lazy(() => import('./pages/desktop/DesktopSubmit').then(m => ({ default: m.DesktopSubmit })));
 const DesktopShipping = lazy(() => import('./pages/desktop/DesktopShipping').then(m => ({ default: m.DesktopShipping })));
 const DesktopClients = lazy(() => import('./pages/desktop/DesktopClients').then(m => ({ default: m.DesktopClients })));
+const DesktopBoxCheck = lazy(() => import('./pages/desktop/DesktopBoxCheck').then(m => ({ default: m.DesktopBoxCheck })));
 const Authorize = lazy(() => import('./pages/Authorize').then(m => ({ default: m.Authorize })));
 
 import type { Order } from './lib/types';
@@ -69,12 +70,15 @@ export function DesktopApp() {
   const editingItemId = path === '/inventory/analysis' ? null : (match('/inventory/:id', path)?.id ?? null);
   // Dashboard / add-label — the parser owns the shapes.
   const shippingRoute = parseShippingRoute(path);
+  // Box check takes over the whole window — no sidebar, no top bar — and
+  // shares the loaded order with the PO page it opens from.
+  const boxCheck = matchPoCheck(path);
 
   // Sync editingOrder with the URL hash. Loading the app at
   // `#/purchase-orders/<id>` opens that order's edit page; clearing the hash
   // closes it.
   useEffect(() => {
-    const m = matchPurchaseOrder(path);
+    const m = matchPurchaseOrder(path) ?? boxCheck;
     if (!m) {
       // No id in URL → ensure no order is open.
       if (editingOrder) setEditingOrder(null);
@@ -102,6 +106,13 @@ export function DesktopApp() {
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path]);
+
+  // Box check is a manager's page; anyone else (a manager previewing as a
+  // purchaser included) lands on the PO itself.
+  const boxCheckId = boxCheck?.id ?? null;
+  useEffect(() => {
+    if (boxCheckId && user && user.role !== 'manager') navigate('/purchase-orders/' + boxCheckId);
+  }, [boxCheckId, user]);
 
   // Apply 'desktop' class to <html> so the desktop CSS overrides take effect
   // and undo the mobile shell's overflow lock.
@@ -176,31 +187,48 @@ export function DesktopApp() {
 
   // When the user opens an order's edit page we replace the orders list with
   // it. Cancel / save returns to the list.
-  const ordersOrEdit = editingOrder
+  const reloadOrder = async () => {
+    if (!editingOrder) return;
+    const r = await api.get<{ order: Order }>(`/api/orders/${editingOrder.id}`);
+    setEditingOrder(r.order);
+    setOrderReloads(n => n + 1);
+  };
+  const ordersOrEdit = boxCheck
+    ? (editingOrder?.id === boxCheck.id && user.role === 'manager'
+      ? <DesktopBoxCheck
+          key={editingOrder.id + ':' + orderReloads}
+          order={editingOrder}
+          onExit={() => navigate('/purchase-orders/' + editingOrder.id)}
+          onApproved={async () => {
+            await reloadOrder();
+            navigate('/purchase-orders/' + editingOrder.id);
+            showToast(t('bcApprovedToast', { id: editingOrder.id }));
+          }}
+          showToast={showToast}
+        />
+      : <FormSkeleton fields={8} />)
+    : editingOrder
     ? <DesktopEditOrder
         key={editingOrder.id + ':' + orderReloads}
         order={editingOrder}
         onCancel={() => { navigate('/purchase-orders'); setEditingOrder(null); }}
         onSaved={(msg) => { navigate('/purchase-orders'); setEditingOrder(null); showToast(msg); }}
-        onReload={async () => {
-          const r = await api.get<{ order: Order }>(`/api/orders/${editingOrder.id}`);
-          setEditingOrder(r.order);
-          setOrderReloads(n => n + 1);
-        }}
+        onReload={reloadOrder}
       />
     : loadingOrderId
       ? <FormSkeleton fields={8} />
       : <DesktopOrders onToast={(m) => showToast(m)} />;
 
   return (
-    <div className="app">
-      <Sidebar view={view2} />
+    <div className={'app' + (boxCheck ? ' app-focus' : '')}>
+      {!boxCheck && <Sidebar view={view2} />}
       <main className="main">
-        <Topbar />
-        <RolePreviewBanner />
+        {!boxCheck && <Topbar />}
+        {!boxCheck && <RolePreviewBanner />}
         <div className={'page'
-          + (view2 === 'history' && !editingOrder ? ' page-history' : '')
-          + (view2 === 'history' && editingOrder ? ' page-order-edit' : '')
+          + (view2 === 'history' && boxCheck ? ' page-box-check' : '')
+          + (view2 === 'history' && !editingOrder && !boxCheck ? ' page-history' : '')
+          + (view2 === 'history' && editingOrder && !boxCheck ? ' page-order-edit' : '')
           + (view2 === 'market' ? ' page-market' : '')
           + (view2 === 'inventory' && !editingItemId ? ' page-inventory' : '')
           + (view2 === 'analysis' ? ' page-analysis' : '')

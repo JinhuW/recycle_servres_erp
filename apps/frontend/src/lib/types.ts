@@ -265,7 +265,8 @@ export type OrderEventKind =
   | 'line_photo_added'
   | 'line_photo_removed'
   | 'archived'
-  | 'unarchived';
+  | 'unarchived'
+  | 'box_check_flagged';
 
 export type OrderEventChange = { field: string; from: unknown; to: unknown };
 

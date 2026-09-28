@@ -3826,3 +3826,164 @@ button.rsheet-box:hover { background: color-mix(in oklch, var(--accent) 10%, tra
   .rsheet-box.is-reading { animation: none; background: color-mix(in oklch, var(--accent) 14%, transparent); }
   .rsheet-bar > span, .rsheet-step, .rsheet-box, .rsheet-box-tag { transition: none; }
 }
+
+/* ===== Box check =====
+   The manager's bench view of one PO (DesktopBoxCheck). Full width: the
+   shell drops the sidebar and top bar for it (`.app-focus`). Built from the
+   same card / table / chip / btn pieces as the PO page, so it reads as a
+   mode of that page rather than a new screen. */
+.app.app-focus { grid-template-columns: minmax(0, 1fr); }
+.app.app-focus .main > .page { padding-top: 22px; }
+.bc-page { display: flex; flex-direction: column; gap: 16px; max-width: 1400px; width: 100%; margin: 0 auto; }
+.bc-page > .page-head { margin-bottom: 0; }
+.bc-back {
+  background: none; border: none; padding: 0; margin-bottom: 6px;
+  color: var(--fg-subtle); font-size: 12.5px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.bc-back:hover { color: var(--fg); }
+.bc-title-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.bc-id {
+  font-size: 13px; font-weight: 600; padding: 3px 9px; border-radius: 5px;
+  background: var(--bg-soft); border: 1px solid var(--border); white-space: nowrap;
+}
+.bc-keys { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11.5px; color: var(--fg-subtle); align-self: flex-end; }
+.bc-keys kbd {
+  font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: var(--fg);
+  background: var(--bg-elev); border: 1px solid var(--border-strong); border-bottom-width: 2px;
+  padding: 0 5px; border-radius: 4px; margin-right: 2px;
+}
+.bc-banner { width: fit-content; }
+
+/* Tally: units counted, and where each line stands. */
+.bc-tally { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 20px; align-items: center; padding: 14px 18px; }
+.bc-tally-num { display: grid; gap: 4px; }
+.bc-tally-num .mono { font-size: 26px; letter-spacing: -0.02em; line-height: 1; font-variant-numeric: tabular-nums; }
+.bc-tally-num .mono b { font-weight: 600; }
+.bc-tally-num .mono .muted { font-size: 15px; color: var(--fg-subtle); }
+.bc-meter { display: flex; gap: 2px; height: 10px; border-radius: 5px; overflow: hidden; background: var(--bg-soft); }
+.bc-meter i { display: block; flex-basis: 0; min-width: 0; transition: flex-grow 0.3s ease; }
+.bc-m-done { background: var(--accent); }
+.bc-m-part { background: var(--warn); }
+.bc-m-flag { background: var(--neg); }
+.bc-m-open { background: transparent; }
+.bc-legend { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+
+.bc-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
+.bc-side { position: sticky; top: 0; display: grid; gap: 16px; }
+
+/* Scan box sits in the list card's head. */
+/* .card-head's space-between would shrink the one grid track to content. */
+.bc-scan-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.bc-scan { position: relative; display: block; }
+.bc-scan svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--fg-subtle); pointer-events: none; }
+.bc-scan .input { width: 100%; padding-left: 34px; }
+.bc-scan-msg { font-size: 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 26px; }
+.bc-scan-msg.muted { color: var(--fg-subtle); }
+.bc-scan-msg.pos { color: var(--accent-strong); }
+.bc-scan-msg.neg { color: var(--neg); }
+
+.bc-table td { vertical-align: middle; }
+.bc-row { cursor: pointer; }
+.bc-row:hover td { background: var(--bg-soft); }
+.bc-cb-cell { width: 44px; }
+.bc-thumb-cell { width: 52px; }
+.bc-flag-cell { width: 44px; text-align: right; }
+.bc-cond { font-size: 12px; white-space: nowrap; }
+.bc-cb {
+  width: 24px; height: 24px; border-radius: 6px; padding: 0;
+  border: 1.5px solid var(--border-strong); background: var(--bg-elev);
+  display: grid; place-items: center; color: white;
+}
+.bc-cb:hover:not(:disabled) { border-color: var(--accent); }
+.bc-cb:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.bc-partial .bc-cb { border-color: var(--warn); background: var(--warn-soft); }
+.bc-partial .bc-cb::after { content: ''; width: 10px; height: 2.5px; border-radius: 2px; background: var(--warn-strong); }
+.bc-done .bc-cb { background: var(--accent); border-color: var(--accent); }
+.bc-flagged .bc-cb { border-color: var(--neg); background: var(--neg-soft); color: var(--neg); }
+.bc-thumb {
+  width: 40px; height: 40px; border-radius: 8px; object-fit: cover; display: block;
+  border: 1px solid var(--border); background: var(--bg-soft);
+}
+.bc-thumb-empty { display: grid; place-items: center; color: var(--fg-subtle); }
+.bc-pn { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.bc-spec { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 2px; font-size: 11.5px; color: var(--fg-subtle); }
+.bc-flagnote { margin-top: 4px; font-size: 12px; color: var(--neg); display: flex; align-items: center; gap: 5px; }
+.bc-count { display: inline-flex; align-items: center; gap: 2px; }
+.bc-count-n { min-width: 58px; text-align: center; font-size: 13px; font-variant-numeric: tabular-nums; }
+.bc-count-n b { font-weight: 600; }
+.bc-partial .bc-count-n b { color: var(--warn-strong); }
+.bc-done .bc-count-n b { color: var(--accent-strong); }
+.bc-flagbtn { color: var(--fg-subtle); }
+.bc-flagbtn:hover:not(:disabled), .bc-flagbtn.on { color: var(--neg); background: var(--neg-soft); }
+.bc-done .bc-pn { text-decoration: line-through; text-decoration-color: var(--fg-subtle); }
+/* Dim the content, never a td: opacity on a cell would fade the row's
+   hover/selected wash with it. */
+.bc-done .bc-thumb, .bc-done .bc-pn, .bc-done .bc-spec { opacity: 0.55; }
+.bc-done .bc-cond { color: var(--fg-subtle); }
+.bc-flagged td:first-child { box-shadow: inset 3px 0 0 var(--neg); }
+
+/* Group rows: the Flagged and Checked dividers. */
+.bc-group td {
+  background: var(--bg-soft); font-size: 11px; font-weight: 600; color: var(--fg-subtle);
+  text-transform: uppercase; letter-spacing: 0.06em; padding-top: 7px; padding-bottom: 7px;
+}
+.bc-group .mono { margin-left: 4px; letter-spacing: 0; }
+.bc-link {
+  background: none; border: none; padding: 0; margin-left: 10px; cursor: pointer;
+  font-size: 11px; color: var(--fg-muted); text-decoration: underline; text-underline-offset: 2px;
+  text-transform: none; letter-spacing: 0; font-weight: 500;
+}
+.bc-group-empty td { text-align: center; color: var(--fg-muted); font-size: 12.5px; padding: 18px; }
+
+.bc-flag-row td { background: var(--bg-soft); }
+.bc-flag-edit { display: grid; gap: 10px; padding: 4px 0; }
+.bc-flag-label { font-size: 12px; font-weight: 600; color: var(--fg-muted); }
+.bc-flag-edit .seg { width: fit-content; flex-wrap: wrap; }
+.bc-flag-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.btn.bc-btn-neg { background: var(--neg); border-color: var(--neg); color: white; }
+.btn.bc-btn-neg:hover:not(:disabled) { background: color-mix(in oklch, var(--neg) 88%, black); }
+
+.bc-extras { border-top: 1px solid var(--border); padding: 12px 18px; display: grid; gap: 6px; }
+.bc-extras-head { font-size: 11px; font-weight: 600; color: var(--fg-subtle); text-transform: uppercase; letter-spacing: 0.06em; }
+.bc-extra { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--neg); }
+.bc-extra .muted { color: var(--fg-subtle); }
+.bc-extra .btn { margin-left: auto; }
+
+/* Compare panel: the purchaser's photo next to the part in hand. */
+.bc-compare { overflow: hidden; }
+.bc-photo { aspect-ratio: 4 / 3; background: var(--bg-soft); border-bottom: 1px solid var(--border); max-width: 100%; }
+.bc-photo-btn { display: block; width: 100%; height: 100%; padding: 0; border: 0; background: none; cursor: zoom-in; }
+.bc-photo-btn img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.bc-photo-empty { height: 100%; display: grid; place-content: center; justify-items: center; gap: 6px; color: var(--fg-subtle); font-size: 12px; }
+.bc-photo-strip { display: flex; gap: 6px; padding: 8px 18px 0; flex-wrap: wrap; }
+.bc-photo-pip { width: 36px; height: 36px; padding: 0; border-radius: 6px; overflow: hidden; border: 1px solid var(--border); background: var(--bg-soft); cursor: pointer; }
+.bc-photo-pip.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.bc-photo-pip img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.bc-compare-body { display: grid; gap: 4px; }
+.bc-compare-body .bc-pn { font-size: 15px; }
+.bc-kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 12px 0 0; font-size: 12.5px; }
+.bc-kv dt { color: var(--fg-subtle); }
+.bc-kv dd { margin: 0; text-align: right; font-weight: 500; font-variant-numeric: tabular-nums; }
+.bc-serials { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); display: grid; gap: 6px; }
+.bc-serial-list { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 10px; font-size: 11px; color: var(--fg-muted); }
+
+.bc-finish .card-body { display: grid; gap: 12px; }
+.bc-finish p { margin: 0; }
+.bc-problem-list { margin: 0; padding-left: 18px; display: grid; gap: 3px; font-size: 12.5px; }
+.bc-finish-actions { display: grid; gap: 8px; }
+.bc-finish-actions .btn { justify-content: center; }
+
+.toast.bc-undo button {
+  margin-left: 6px; background: transparent; color: inherit; cursor: pointer;
+  border: 1px solid rgba(255,255,255,0.35); border-radius: 6px; padding: 3px 10px; font-size: 12px; font-weight: 600;
+}
+
+@media (max-width: 1100px) {
+  .bc-grid { grid-template-columns: minmax(0, 1fr); }
+  .bc-side { position: static; }
+  .bc-keys { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bc-meter i { transition: none; }
+}

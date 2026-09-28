@@ -41,7 +41,7 @@ import { HandoffDialog } from '../../components/HandoffDialog';
 import { PaymentFields } from '../../components/PaymentFields';
 import type { HandoffDelivery, HandoffMethod } from '../../lib/handoff';
 import { usePaymentProof } from '../../lib/usePaymentProof';
-import { navigate, readHashQuery, replaceHashQuery } from '../../lib/route';
+import { navigate, poCheckPath, readHashQuery, replaceHashQuery } from '../../lib/route';
 import { poReadiness, type ReadinessTab } from '../../lib/poReadiness';
 import { useOrderEvents } from '../../lib/useOrderEvents';
 import type { StageId } from '../../lib/orderLookback';
@@ -1067,6 +1067,17 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignSelf: 'flex-start', flexWrap: 'wrap' }}>
+          {!isPurchaser && (
+            // Leads at Reviewing, when the box is on the bench; still there
+            // at every other stage for a recount.
+            <button
+              className={'btn' + (savedStatus === 'Reviewing' ? ' accent' : '')}
+              onClick={() => navigate(poCheckPath(order.id))}
+              title={t('bcOpenTip')}
+            >
+              <Icon name="package" size={13} /> {t('bcOpen')}
+            </button>
+          )}
           {canArchive && (
             isArchived ? (
               <button

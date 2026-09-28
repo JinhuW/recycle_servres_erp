@@ -17,6 +17,26 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.188.0] - 2026-09-28
+
+### Added
+
+- **Box check: count a PO against the box that arrived** (RS-124, desktop
+  only). A manager reviewing a delivered PO used to compare the box with the
+  PO page's line table by eye, with nowhere to record what had been counted.
+  **Check box** in the PO header now opens a dedicated full-width checklist.
+  - Ticking a line sinks it to the bottom, so what is still to find stays on
+    top. A −/+ count covers partial counts.
+  - A label scanner counts one unit per scan, and an unknown scan can be
+    recorded as an extra item.
+  - Lines can be flagged (missing, short count, wrong part, damaged, not as
+    described). A panel beside the list shows the purchaser's photo and the
+    line's serials.
+  - Progress is saved per line in two new tables (migration 0139). A clean
+    box approves the PO to Ready to Pay from the same page. A box with
+    problems sends them to the purchaser as a notification and a new
+    `box_check_flagged` history event, and the stage does not change.
+
 ## [1.187.0] - 2026-09-28
 
 ### Added
