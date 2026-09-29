@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-125](./RS-125-box-check-the-count-starts-full.md) | done | task | P2 | Box check: the count starts full | 1.188.1 |
 | [RS-124](./RS-124-box-check-a-desktop-review-mode-for-checking-a-po-ag.md) | done | story | P2 | Box check: a desktop review mode for checking a PO against its shipping box | 1.188.0 |
 | [RS-123](./RS-123-web-form-submissions-inbox-ram4cash-recycleservers.md) | done | story | P2 | Web form submissions inbox (ram4cash + recycleservers) | 1.187.0 |
 | [RS-122](./RS-122-part-number-chip-map-auto-fills-a-ram-line-s-chip.md) | done | story | P2 | Part number → chip # map auto-fills a RAM line's chip # | 1.186.0 |

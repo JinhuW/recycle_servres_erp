@@ -2,12 +2,12 @@
 id: RS-125
 title: Box check: the count starts full
 type: task
-status: in-review
+status: done
 priority: P2
 created: 2026-09-28
 reporter: jinhu
 branch: feat/po-box-check
-pr:
+pr: "#429"
 version: 1.188.1
 related: [RS-124]
 ---
