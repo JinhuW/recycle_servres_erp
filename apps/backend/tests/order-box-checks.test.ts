@@ -76,6 +76,39 @@ describe('box check', () => {
     expect(order.body.order.lines.find(l => l.id === b)!.qty).toBe(2);
   });
 
+  it('takes checked as its own answer, apart from the count', async () => {
+    const { id, lineIds } = await createReviewing(pur, mgr);
+    const a = lineIds[0]!;
+    const put = (body: unknown) => api<Checks>('PUT', `/api/orders/${id}/checks/${a}`, { token: mgr, body });
+    const row = (r: { body: Checks }) => r.body.lines.find(l => l.lineId === a)!;
+
+    // The count starts full; a full count left unticked is not checked.
+    expect(row(await put({ counted: 4, checked: false })).checkedAt).toBeNull();
+    const ticked = row(await put({ counted: 4, checked: true }));
+    expect(ticked.checkedAt).not.toBeNull();
+    // Re-sending the tick keeps its place in the Checked group.
+    expect(row(await put({ counted: 4, checked: true })).checkedAt).toBe(ticked.checkedAt);
+    // Unticking keeps the count.
+    expect(row(await put({ counted: 4, checked: false }))).toMatchObject({ counted: 4, checkedAt: null });
+    expect((await put({ counted: 4, checked: 'yes' })).status).toBe(400);
+  });
+
+  it('reads a body with no checked field the way the first bundle meant it', async () => {
+    const { id, lineIds } = await createReviewing(pur, mgr);
+    const a = lineIds[0]!;
+    const r = await api<Checks>('PUT', `/api/orders/${id}/checks/${a}`, { token: mgr, body: { counted: 4 } });
+    expect(r.body.lines.find(l => l.lineId === a)!.checkedAt).not.toBeNull();
+  });
+
+  it('keeps reads off the PO itself', async () => {
+    const { id, lineIds } = await createReviewing(pur, mgr);
+    const b = lineIds[1]!;
+    await api('PUT', `/api/orders/${id}/checks/${b}`, { token: mgr, body: { counted: 1, checked: false, flagReason: 'short' } });
+    const order = await api<{ order: { lifecycle: string; lines: { id: string; qty: number }[] } }>('GET', `/api/orders/${id}`, { token: mgr });
+    expect(order.body.order.lifecycle).toBe('reviewing');
+    expect(order.body.order.lines.find(l => l.id === b)!.qty).toBe(2);
+  });
+
   it('refuses a purchaser, and lets a manager previewing as purchaser through (raw role)', async () => {
     const { id, lineIds } = await createReviewing(pur, mgr);
     expect((await api('GET', `/api/orders/${id}/checks`, { token: pur })).status).toBe(403);

@@ -2988,7 +2988,7 @@ orders.put('/:id/checks/:lineId', async (c) => {
   if (order.archived_at) return c.json({ error: 'Order is archived — unarchive it first' }, 409);
 
   const body = (await c.req.json().catch(() => null)) as
-    { counted?: unknown; flagReason?: unknown; flagNote?: unknown } | null;
+    { counted?: unknown; checked?: unknown; flagReason?: unknown; flagNote?: unknown } | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
   const line = (await sql<{ qty: number }[]>`
     SELECT qty FROM order_lines WHERE id = ${lineId} AND order_id = ${id} LIMIT 1`)[0];
@@ -3003,17 +3003,23 @@ orders.put('/:id/checks/:lineId', async (c) => {
   }
   const note = cleanCheckNote(body.flagNote);
   if (note === undefined) return c.json({ error: 'flagNote must be text' }, 400);
-  const full = counted === line.qty;
+  if (body.checked !== undefined && typeof body.checked !== 'boolean') {
+    return c.json({ error: 'checked must be true or false' }, 400);
+  }
+  // The count starts at the line's qty, so a full count no longer means the
+  // manager looked: checked is its own answer. A bundle from before that
+  // change sends none, and meant "full count" by it.
+  const checked = body.checked ?? counted === line.qty;
 
   await sql`
     INSERT INTO order_line_checks (line_id, counted, flag_reason, flag_note, checked_at, updated_by, updated_at)
     VALUES (${lineId}, ${counted}, ${reason as string | null}, ${reason ? note : null},
-            ${full ? sql`NOW()` : null}, ${u.id}, NOW())
+            ${checked ? sql`NOW()` : null}, ${u.id}, NOW())
     ON CONFLICT (line_id) DO UPDATE SET
       counted = EXCLUDED.counted,
       flag_reason = EXCLUDED.flag_reason,
       flag_note = EXCLUDED.flag_note,
-      checked_at = CASE WHEN ${full} THEN COALESCE(order_line_checks.checked_at, NOW()) END,
+      checked_at = CASE WHEN ${checked} THEN COALESCE(order_line_checks.checked_at, NOW()) END,
       updated_by = EXCLUDED.updated_by,
       updated_at = NOW()`;
   return c.json(await readChecks(sql, id));

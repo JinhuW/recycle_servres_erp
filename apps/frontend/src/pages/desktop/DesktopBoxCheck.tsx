@@ -6,7 +6,8 @@ import { OrderCategoryChips } from '../../components/OrderCategoryChips';
 import { LineSpecChips } from '../../components/LineSpecChips';
 import { api } from '../../lib/api';
 import {
-  BOX_CHECK_REASONS, boxCheckReasonKey, emptyCheck, lineState, matchScan, nextOpenAfter, orderLines, tally,
+  BOX_CHECK_REASONS, boxCheckReasonKey, checkBody, countOf, emptyCheck, lineState, matchScan, nextOpenAfter,
+  orderLines, tally,
   type BoxCheckReason, type CheckExtra, type ChecksResponse, type LineCheck,
 } from '../../lib/boxCheck';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
@@ -17,9 +18,9 @@ import { linePhotos } from '../../lib/linePhotos';
 import { statusTone } from '../../lib/status';
 import type { Order, OrderLine } from '../../lib/types';
 
-// Box check: the manager's bench view of one PO. The order is counted line by
-// line against what arrived; a counted line sinks to the bottom so what is
-// left to find stays on top. Progress lives on the server, so a reload or a
+// Box check: the manager's bench view of one PO. Each line starts at its full
+// qty and is ticked when found (or lowered and flagged when short); a ticked
+// line sinks to the bottom so what is left to find stays on top. Progress lives on the server, so a reload or a
 // second manager picks up where the count stands.
 
 type Props = {
@@ -84,14 +85,16 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
     if (pending) clearTimeout(pending);
     timers.current.set(next.lineId, setTimeout(() => {
       timers.current.delete(next.lineId);
-      api.put<ChecksResponse>(`/api/orders/${order.id}/checks/${next.lineId}`, {
-        counted: next.counted, flagReason: next.flagReason, flagNote: next.flagNote,
-      }).catch((e) => { handleFetchError(e); void load(); });
+      api.put<ChecksResponse>(`/api/orders/${order.id}/checks/${next.lineId}`, checkBody(next))
+        .catch((e) => { handleFetchError(e); void load(); });
     }, SAVE_DELAY_MS));
   }, [order.id, load]);
 
-  const checkOf = useCallback((id: string) => checks.get(id) ?? emptyCheck(id), [checks]);
   const lineById = useMemo(() => new Map(lines.map(l => [l.id, l])), [lines]);
+  const checkOf = useCallback(
+    (id: string) => checks.get(id) ?? emptyCheck(id, lineById.get(id)?.qty ?? 0),
+    [checks, lineById],
+  );
 
   const flashUndo = (u: Undo) => {
     setUndo(u);
@@ -99,34 +102,38 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
     undoTimer.current = setTimeout(() => setUndo(null), 5000);
   };
 
+  // The stepper only changes the number. Lowering a checked line takes the
+  // tick away — the manager has to decide about the shortfall — and reaching
+  // the qty never ticks on its own, because the count starts there.
   const setCount = (l: OrderLine, n: number) => {
     if (readOnly) return;
     const prev = checkOf(l.id);
     const counted = Math.max(0, Math.min(l.qty, n));
     if (counted === prev.counted) return;
-    const full = counted === l.qty;
-    const next: LineCheck = {
-      ...prev, counted,
-      checkedAt: full ? (prev.checkedAt ?? new Date().toISOString()) : null,
-    };
-    save(next);
-    if (full && !prev.flagReason) {
-      flashUndo({ lineId: l.id, prev, msg: t('bcCheckedToast', { pn: l.partNumber ?? lineLabel(l), n: l.qty }) });
-      const after = new Map(checks).set(l.id, next);
-      setSelectedId(nextOpenAfter(lines, after, l.id)?.id ?? l.id);
-    }
+    save({ ...prev, counted, checkedAt: counted < l.qty ? null : prev.checkedAt });
   };
 
+  const check = (l: OrderLine) => {
+    const prev = checkOf(l.id);
+    const next: LineCheck = { ...prev, checkedAt: new Date().toISOString() };
+    save(next);
+    flashUndo({ lineId: l.id, prev, msg: t('bcCheckedToast', { pn: l.partNumber ?? lineLabel(l), n: countOf(l, prev), of: l.qty }) });
+    setSelectedId(nextOpenAfter(lines, new Map(checks).set(l.id, next), l.id)?.id ?? l.id);
+  };
+
+  // A short line can't just be ticked: the shortfall goes to the purchaser as
+  // a flag, so the tick opens the flag editor instead.
   const toggle = (l: OrderLine) => {
     if (readOnly) return;
     const c = checkOf(l.id);
-    if (c.flagReason) { openFlag(l); return; }
-    if (lineState(l, c) === 'done') {
-      save({ ...c, counted: 0, checkedAt: null });
+    const state = lineState(l, c);
+    if (state === 'flagged' || state === 'partial') { openFlag(l); return; }
+    if (state === 'done') {
+      save({ ...c, checkedAt: null });
       flashUndo({ lineId: l.id, prev: c, msg: t('bcUncheckedToast', { pn: l.partNumber ?? lineLabel(l) }) });
       return;
     }
-    setCount(l, l.qty);
+    check(l);
   };
 
   const openFlag = (l: OrderLine) => {
@@ -134,7 +141,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
     const c = checkOf(l.id);
     setSelectedId(l.id);
     setEditingId(l.id);
-    const short = c.counted > 0 && c.counted < l.qty;
+    const short = c.counted < l.qty;
     setDraft(c.flagReason
       ? { reason: c.flagReason, note: c.flagNote ?? '' }
       : { reason: short ? 'short' : null, note: short ? t('bcShortNote', { n: c.counted, of: l.qty }) : '' });
@@ -175,10 +182,11 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
   const checkAllRemaining = () => {
     if (readOnly) return;
     const now = Date.now();
-    ordered.open.forEach((l, i) => {
-      // Staggered stamps keep the batch in PO order inside the Checked group.
-      save({ ...checkOf(l.id), counted: l.qty, checkedAt: new Date(now - i).toISOString() });
-    });
+    // Short lines are left for a decision; everything still at its full count
+    // is ticked. Staggered stamps keep the batch in PO order inside Checked.
+    ordered.open
+      .filter(l => lineState(l, checks.get(l.id)) === 'open')
+      .forEach((l, i) => save({ ...checkOf(l.id), checkedAt: new Date(now - i).toISOString() }));
     setUndo(null);
   };
 
@@ -193,13 +201,21 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
       return;
     }
     setSelectedId(hit.id);
-    const c = checkOf(hit.id);
-    if (c.counted >= hit.qty) {
-      setScanMsg({ tone: 'neg', text: t('bcScanAlreadyFull', { pn: hit.partNumber ?? lineLabel(hit), n: hit.qty }), extra: text });
+    const pn = hit.partNumber ?? lineLabel(hit);
+    const state = lineState(hit, checks.get(hit.id));
+    if (state === 'done') {
+      setScanMsg({ tone: 'neg', text: t('bcScanAlreadyChecked', { pn }), extra: text });
       return;
     }
-    setScanMsg({ tone: 'pos', text: t('bcScanCounted', { pn: hit.partNumber ?? lineLabel(hit), n: c.counted + 1, of: hit.qty }) });
-    setCount(hit, c.counted + 1);
+    // A scan means "found it": a full line is ticked, a short or flagged one
+    // opens its flag for the decision a tick would have asked for.
+    if (state === 'open') {
+      setScanMsg({ tone: 'pos', text: t('bcScanChecked', { pn }) });
+      check(hit);
+    } else {
+      setScanMsg(null);
+      openFlag(hit);
+    }
     requestAnimationFrame(() => document.getElementById('bc-row-' + hit.id)?.scrollIntoView({ block: 'nearest' }));
   };
 
@@ -222,12 +238,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
   const flush = async () => {
     const ids = [...timers.current.keys()];
     ids.forEach(id => { clearTimeout(timers.current.get(id)); timers.current.delete(id); });
-    await Promise.all(ids.map(id => {
-      const c = checkOf(id);
-      return api.put(`/api/orders/${order.id}/checks/${id}`, {
-        counted: c.counted, flagReason: c.flagReason, flagNote: c.flagNote,
-      });
-    }));
+    await Promise.all(ids.map(id => api.put(`/api/orders/${order.id}/checks/${id}`, checkBody(checkOf(id)))));
   };
 
   const approve = async () => {

@@ -23,17 +23,23 @@ export type CheckableLine = {
 
 export type LineCheckState = 'open' | 'partial' | 'flagged' | 'done';
 
-export function emptyCheck(lineId: string): LineCheck {
-  return { lineId, counted: 0, flagReason: null, flagNote: null, checkedAt: null };
+// Most lines arrive complete, so an untouched line reads as the full qty; the
+// manager only lowers it when something is short. Checked is its own answer
+// (checkedAt), never inferred from the count.
+export function emptyCheck(lineId: string, qty: number): LineCheck {
+  return { lineId, counted: qty, flagReason: null, flagNote: null, checkedAt: null };
 }
 
-// A flag outranks the count: a line counted in full but flagged damaged still
-// needs a decision, so it must not sink with the checked ones.
+export function countOf(line: CheckableLine, check: LineCheck | undefined): number {
+  return Math.min(check?.counted ?? line.qty, line.qty);
+}
+
+// A flag outranks the tick: a line checked but flagged damaged still needs a
+// decision, so it must not sink with the checked ones.
 export function lineState(line: CheckableLine, check: LineCheck | undefined): LineCheckState {
   if (check?.flagReason) return 'flagged';
-  const n = Math.min(check?.counted ?? 0, line.qty);
-  if (n >= line.qty) return 'done';
-  return n > 0 ? 'partial' : 'open';
+  if (check?.checkedAt) return 'done';
+  return countOf(line, check) < line.qty ? 'partial' : 'open';
 }
 
 export type OrderedLines<L> = { open: L[]; flagged: L[]; done: L[] };
@@ -61,28 +67,31 @@ export type Tally = {
   open: number; partial: number; flagged: number; done: number;
 };
 
+// `counted` is the units on checked lines: with the count starting full, only
+// a tick says anyone looked.
 export function tally(lines: readonly CheckableLine[], checks: ReadonlyMap<string, LineCheck>): Tally {
   const t: Tally = { units: 0, counted: 0, open: 0, partial: 0, flagged: 0, done: 0 };
   for (const l of lines) {
     const c = checks.get(l.id);
+    const s = lineState(l, c);
     t.units += l.qty;
-    t.counted += Math.min(c?.counted ?? 0, l.qty);
-    t[lineState(l, c)] += 1;
+    if (s === 'done') t.counted += countOf(l, c);
+    t[s] += 1;
   }
   return t;
 }
 
 // A scanner types the label and presses Enter. Exact part number first, then
 // a prefix (labels often carry a suffix the PO line doesn't), then a serial.
-// Among several lines with the same part number, the first one still short
-// takes the unit.
+// Among several lines with the same part number, the first one not yet
+// checked takes the scan.
 export function matchScan<L extends CheckableLine>(
   lines: readonly L[], checks: ReadonlyMap<string, LineCheck>, raw: string,
 ): L | null {
   const q = canonicalPartNumber(raw);
   if (!q) return null;
   const pick = (hits: L[]): L | null =>
-    hits.find(l => (checks.get(l.id)?.counted ?? 0) < l.qty) ?? hits[0] ?? null;
+    hits.find(l => lineState(l, checks.get(l.id)) !== 'done') ?? hits[0] ?? null;
   const exact = lines.filter(l => canonicalPartNumber(l.partNumber) === q);
   if (exact.length) return pick(exact);
   if (q.length >= 6) {
@@ -105,6 +114,12 @@ export function nextOpenAfter<L extends CheckableLine>(
   if (!open.length) return null;
   const idx = lines.findIndex(l => l.id === fromId);
   return open.find(l => lines.indexOf(l) > idx) ?? open[0] ?? null;
+}
+
+// One body for every write, so a debounced save and a pre-approve flush can't
+// disagree about whether the line is checked.
+export function checkBody(c: LineCheck) {
+  return { counted: c.counted, checked: c.checkedAt !== null, flagReason: c.flagReason, flagNote: c.flagNote };
 }
 
 export function boxCheckReasonKey(r: BoxCheckReason | string): string {
