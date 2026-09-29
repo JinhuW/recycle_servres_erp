@@ -17,6 +17,22 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.188.1] - 2026-09-28
+
+### Changed
+
+- **Box check: every line's count now starts at its full qty** (RS-125).
+  Before, every line started at 0 and was checked once counted up to its
+  qty, which made the common case (a line that arrived complete) the slow
+  one.
+  - A tick now confirms a line, and "checked" is stored as its own answer
+    (`PUT …/checks/:lineId` takes `checked`). A body without it is read the
+    old way, so a stale bundle still works.
+  - Lowering a count turns the line amber, and ticking it opens the flag as
+    Short count.
+  - A scan ticks the matching line instead of adding one unit.
+  - Check all remaining skips amber lines.
+
 ## [1.188.0] - 2026-09-28
 
 ### Added

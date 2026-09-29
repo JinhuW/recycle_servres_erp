@@ -246,12 +246,19 @@ on to Sold once every line has sold (v1.164.0).
   desktop only). **Check box** in the PO page header, primary at Reviewing and
   present at every stage, opens `#/purchase-orders/<id>/check`: a full-width
   page with no sidebar.
-  - Each line has a checkbox (the whole qty) and a −/+ count for a partial
-    one. A checked line sinks below a *Checked* divider, newest first, with an
-    Undo. Flagged lines sit between the open and the checked ones.
-  - The scan box takes a label scanner: an exact part number, a prefix, then
-    a recorded serial each count one unit. A scan that matches nothing can be
-    recorded as an extra item.
+  - Every line's count starts at its full qty (v1.188.1). Ticking the
+    checkbox confirms the line, and a ticked line sinks below a *Checked*
+    divider, newest first, with an Undo. Flagged lines sit between the open
+    and the checked ones.
+  - Checked is its own state, never inferred from the count. Lowering a line
+    with − turns it amber and takes its tick away. Ticking an amber line opens
+    the flag editor prefilled "Short count · Counted n of m".
+  - **Check all remaining** ticks every line still at its full count and
+    leaves amber lines for a decision.
+  - The scan box takes a label scanner. It matches an exact part number, then
+    a prefix, then a recorded serial, and a scan ticks the first matching line
+    not yet checked (an amber one opens its flag). A scan that matches nothing
+    can be recorded as an extra item.
   - A flag is one of Missing, Short count, Wrong part, Damaged or Not as
     described, plus a note. A short count is only ever a flag; the line qty
     does not change.

@@ -1,10 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { boxCheckEventLines, lineState, matchScan, nextOpenAfter, orderLines, tally, type LineCheck } from './boxCheck';
+import {
+  boxCheckEventLines, checkBody, countOf, emptyCheck, lineState, matchScan, nextOpenAfter, orderLines, tally,
+  type LineCheck,
+} from './boxCheck';
 
 const L = (id: string, qty: number, partNumber: string | null, serialNumber: string | null = null) =>
   ({ id, qty, partNumber, serialNumber });
 const C = (lineId: string, counted: number, extra: Partial<LineCheck> = {}): LineCheck =>
   ({ lineId, counted, flagReason: null, flagNote: null, checkedAt: null, ...extra });
+const AT = '2026-09-28T10:00:00Z';
 
 const lines = [
   L('a', 16, 'M393A4K40DB3-CWE'),
@@ -13,15 +17,27 @@ const lines = [
   L('d', 2, 'M393A4K40DB3-CWE'),
 ];
 
-describe('lineState', () => {
-  it('reads open, partial and done from the count', () => {
+describe('the count starts full', () => {
+  it('reads an untouched line as its whole qty, not yet checked', () => {
+    expect(emptyCheck('a', 16)).toMatchObject({ counted: 16, checkedAt: null });
+    expect(countOf(lines[0]!, undefined)).toBe(16);
     expect(lineState(lines[0]!, undefined)).toBe('open');
-    expect(lineState(lines[0]!, C('a', 3))).toBe('partial');
-    expect(lineState(lines[0]!, C('a', 16))).toBe('done');
+  });
+});
+
+describe('lineState', () => {
+  it('is checked only when ticked, whatever the count', () => {
+    expect(lineState(lines[0]!, C('a', 16))).toBe('open');
+    expect(lineState(lines[0]!, C('a', 16, { checkedAt: AT }))).toBe('done');
   });
 
-  it('keeps a flagged line out of done even when fully counted', () => {
-    expect(lineState(lines[0]!, C('a', 16, { flagReason: 'damaged' }))).toBe('flagged');
+  it('turns a lowered, unticked line partial', () => {
+    expect(lineState(lines[0]!, C('a', 14))).toBe('partial');
+    expect(lineState(lines[0]!, C('a', 0))).toBe('partial');
+  });
+
+  it('keeps a flagged line out of done even when ticked', () => {
+    expect(lineState(lines[0]!, C('a', 16, { checkedAt: AT, flagReason: 'damaged' }))).toBe('flagged');
   });
 });
 
@@ -40,10 +56,10 @@ describe('orderLines', () => {
 });
 
 describe('tally', () => {
-  it('counts units without overshooting a line whose qty went down', () => {
-    const t = tally(lines, new Map([['c', C('c', 9)], ['a', C('a', 5)]]));
+  it('counts only the units on checked lines', () => {
+    const t = tally(lines, new Map([['c', C('c', 4, { checkedAt: AT })], ['a', C('a', 5)]]));
     expect(t.units).toBe(30);
-    expect(t.counted).toBe(9);
+    expect(t.counted).toBe(4);
     expect([t.done, t.partial, t.open, t.flagged]).toEqual([1, 1, 2, 0]);
   });
 });
@@ -53,8 +69,8 @@ describe('matchScan', () => {
     expect(matchScan(lines, new Map(), 'm393a4k40db3 cwe')?.id).toBe('a');
   });
 
-  it('gives the unit to the first same-part line still short', () => {
-    expect(matchScan(lines, new Map([['a', C('a', 16)]]), 'M393A4K40DB3-CWE')?.id).toBe('d');
+  it('gives the scan to the first same-part line not yet checked', () => {
+    expect(matchScan(lines, new Map([['a', C('a', 16, { checkedAt: AT })]]), 'M393A4K40DB3-CWE')?.id).toBe('d');
   });
 
   it('matches a label that carries a suffix the line does not', () => {
@@ -68,10 +84,17 @@ describe('matchScan', () => {
 });
 
 describe('nextOpenAfter', () => {
-  it('moves to the next open line below, wrapping to the top', () => {
-    const checks = new Map([['b', C('b', 8)]]);
+  it('moves to the next unchecked line below, wrapping to the top', () => {
+    const checks = new Map([['b', C('b', 8, { checkedAt: AT })]]);
     expect(nextOpenAfter(lines, checks, 'a')?.id).toBe('c');
     expect(nextOpenAfter(lines, checks, 'd')?.id).toBe('a');
+  });
+});
+
+describe('checkBody', () => {
+  it('says whether the line is checked, so no write can re-derive it from the count', () => {
+    expect(checkBody(C('a', 16))).toEqual({ counted: 16, checked: false, flagReason: null, flagNote: null });
+    expect(checkBody(C('a', 14, { checkedAt: AT }))).toMatchObject({ checked: true });
   });
 });
 
