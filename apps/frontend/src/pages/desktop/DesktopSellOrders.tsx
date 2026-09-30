@@ -540,12 +540,35 @@ function ReceiverSelect({ value, current, members, disabled, onChange }: {
 // Two exports off one order, and they go to different people: the bid sheet is
 // emailed to a vendor, the packing list stays in the warehouse. Separate files
 // so the vendor's copy never carries the picking checklist.
-function DownloadMenu({ orderId }: { orderId: string }) {
+//
+// The warehouse picker narrows both packing lists, never the bid sheet: a
+// vendor prices the whole order. 'Unassigned' is the backend's own tab name
+// for lines with no warehouse.
+function DownloadMenu({ orderId, lines }: { orderId: string; lines: SellOrderLine[] }) {
   const { t } = useT();
+  const [warehouse, setWarehouse] = useState('');
+  const warehouses = useMemo(
+    () => [...new Set(lines.map(l => l.warehouse ?? 'Unassigned'))].sort((a, b) => {
+      if (a === 'Unassigned') return 1;
+      if (b === 'Unassigned') return -1;
+      return a.localeCompare(b);
+    }),
+    [lines],
+  );
+  // A picked warehouse the order no longer has (a line was moved) falls back
+  // to All rather than 400ing.
+  const picked = warehouses.includes(warehouse) ? warehouse : '';
 
-  const download = (kind: 'price-template' | 'packing-list') => async () => {
+  const download = (kind: 'price-template' | 'packing-list', byPo = false) => async () => {
+    const params = new URLSearchParams();
+    if (kind === 'packing-list') {
+      if (byPo) params.set('groupBy', 'po');
+      if (picked) params.set('warehouse', picked);
+    }
+    const qs = params.toString() ? `?${params}` : '';
+    const name = `${orderId}-${kind}${byPo ? '-by-po' : ''}.xlsx`;
     try {
-      await api.download(`/api/sell-orders/${orderId}/${kind}`, `${orderId}-${kind}.xlsx`);
+      await api.download(`/api/sell-orders/${orderId}/${kind}${qs}`, name);
     } catch (e) {
       handleFetchError(e);
     }
@@ -555,17 +578,41 @@ function DownloadMenu({ orderId }: { orderId: string }) {
     <>
       <button
         className="btn"
+        style={{ whiteSpace: 'nowrap' }}
         title={t('soDownloadPriceTemplateHint')}
         onClick={download('price-template')}
       >
         <Icon name="dollar" size={14} /> {t('soDownloadPriceTemplate')}
       </button>
+      {warehouses.length > 1 && (
+        <select
+          className="select"
+          style={{ width: 150, height: 32, fontSize: 12.5, padding: '0 12px' }}
+          value={picked}
+          onChange={e => setWarehouse(e.target.value)}
+          title={t('soPackWarehouseHint')}
+        >
+          <option value="">{t('soPackAllWarehouses')}</option>
+          {warehouses.map(w => (
+            <option key={w} value={w}>{w === 'Unassigned' ? t('sodNoWarehouse') : w}</option>
+          ))}
+        </select>
+      )}
       <button
         className="btn"
+        style={{ whiteSpace: 'nowrap' }}
         title={t('soDownloadPackingListHint')}
         onClick={download('packing-list')}
       >
         <Icon name="box" size={14} /> {t('soDownloadPackingList')}
+      </button>
+      <button
+        className="btn"
+        style={{ whiteSpace: 'nowrap' }}
+        title={t('soDownloadPackingListByPoHint')}
+        onClick={download('packing-list', true)}
+      >
+        <Icon name="box" size={14} /> {t('soDownloadPackingListByPo')}
       </button>
     </>
   );
@@ -1514,8 +1561,8 @@ export function SellOrderDetail({
           <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
             {editable && (dirty ? 'Unsaved changes' : 'No changes')}
           </span>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <DownloadMenu orderId={order.id} />
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <DownloadMenu orderId={order.id} lines={order.lines} />
             {editable && !prefill && order.status !== 'Draft' && order.archivedAt === null && (
               <button
                 className="btn"

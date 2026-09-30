@@ -17,6 +17,21 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.189.0] - 2026-09-30
+
+### Added
+
+- **Sell orders: a packing list grouped by PO** (RS-126). Pickers pull stock
+  by the PO it arrived on, but the packing list was only cut by warehouse.
+  `Packing list by PO` downloads one tab per PO in each warehouse, laid out
+  exactly like the warehouse tabs — category sections, RAM grouped by
+  Desktop & laptop / Server and DDR generation, tick boxes, subtotals, no
+  prices. Lines typed onto the order by hand land on a `No PO` tab.
+- A warehouse picker narrows either packing list to one warehouse
+  (`GET /api/sell-orders/:id/packing-list?groupBy=po&warehouse=<short>`);
+  a warehouse not on the order is a 400. Without the parameters the existing
+  packing list is unchanged.
+
 ## [1.188.1] - 2026-09-28
 
 ### Changed
