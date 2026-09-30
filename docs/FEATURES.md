@@ -640,6 +640,15 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   read alike. Both files come from one query and one sort, so a picker and a
   bidder find a product in the same place; uploading this one to the price
   import is rejected for having no price column (v1.130.0).
+- **The packing list also comes cut by PO** (v1.189.0) — `Packing list by PO`,
+  the same route with `?groupBy=po`: one tab per PO per warehouse
+  (`PO-1442 - DEN`), POs in numeric order, hand-typed lines on a
+  `No PO - <warehouse>` tab. Each tab is a warehouse tab in miniature —
+  category sections, the RAM device / DDR-generation labels and tints, tick
+  boxes, subtotals and a PO total. A warehouse picker beside the buttons
+  (shown when the order spans more than one) narrows either packing list to
+  one warehouse (`?warehouse=<short>`); the bid sheet always covers the whole
+  order.
 - **Vendor bids**: vendors reach a tokenised portal with faceted catalog
   filtering, submit bids, and managers review and promote them on a dedicated
   screen. Promotion picks and validates a customer for general links.
