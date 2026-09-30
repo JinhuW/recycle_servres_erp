@@ -2,13 +2,13 @@
 id: RS-126
 title: Packing list grouped by PO
 type: feature
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-30
 reporter: jinhu
 branch: feat/so-package-list-by-po
-pr:
-version:
+pr: "#431"
+version: 1.189.0
 related: []
 ---
 
@@ -30,15 +30,15 @@ the same checklist cut by PO instead.
 
 ## Acceptance criteria
 
-- [ ] The desktop sell order view offers "Packing list by PO" beside "Packing list".
-- [ ] That workbook has one tab per PO per warehouse (`PO-1442 - DEN`), POs in
+- [x] The desktop sell order view offers "Packing list by PO" beside "Packing list".
+- [x] That workbook has one tab per PO per warehouse (`PO-1442 - DEN`), POs in
       numeric order, lines without a PO on a `No PO - <warehouse>` tab.
-- [ ] Each PO tab reads like a warehouse pack tab: category sections, RAM grouped
+- [x] Each PO tab reads like a warehouse pack tab: category sections, RAM grouped
       by Desktop & laptop / Server and DDR generation, tick boxes, quantities,
       subtotals, no prices.
-- [ ] A warehouse picker (All warehouses by default) narrows both packing lists
+- [x] A warehouse picker (All warehouses by default) narrows both packing lists
       to one warehouse; an unknown warehouse is a 400.
-- [ ] The existing packing list is unchanged when no warehouse is picked.
+- [x] The existing packing list is unchanged when no warehouse is picked.
 
 ## Out of scope
 
