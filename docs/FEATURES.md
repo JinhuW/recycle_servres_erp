@@ -242,9 +242,9 @@ on to Sold once every line has sold (v1.164.0).
   warehouse** (v1.168.0). The v1.132.0 rule that reserved those two moves for
   the manager linked to the PO's warehouse is gone, on both shells and in the
   API; the warehouse's manager in Settings is a contact, not a gate.
-- **Box check: a manager counts a PO against the box that arrived** (v1.188.0,
-  desktop only). **Check box** in the PO page header, primary at Reviewing and
-  present at every stage, opens `#/purchase-orders/<id>/check`: a full-width
+- **Review mode: a manager counts a PO against the box that arrived** (v1.188.0,
+  desktop only; called *Box check* until v1.189.2). **Review mode** in the PO
+  page header, primary at Reviewing and present at every stage, opens `#/purchase-orders/<id>/check`: a full-width
   page with no sidebar.
   - Opening and leaving the check re-reads the PO, so neither page works from
     the other's stale copy. A PO page with unsaved edits refuses to open it
