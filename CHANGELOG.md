@@ -17,6 +17,110 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.189.1] - 2026-09-30
+
+### Fixed
+
+Pre-release review of the box check and the packing list by PO (RS-127).
+
+- **The box check no longer works from a stale copy of the PO.** The page
+  reused the order as the PO page first loaded it. A count therefore missed
+  lines changed with Confirm line, and coming back to the PO page and saving a
+  stage change re-sent every line with its old qty, quietly undoing the edit.
+  Moving between the two pages now re-reads the order, and a PO page with
+  unsaved edits refuses to open the check rather than dropping them.
+- **A tick no longer outlives a qty change.** A line ticked at 4/4 whose qty
+  went to 6 still read as checked, so Approve could pass two uncounted units.
+  A line whose qty dropped below its saved count had every later write
+  refused. Ticks now hold only while the count covers the line, and writes
+  clamp the count to the qty.
+- **Nothing writes before the saved count loads.** Space, a scan or Check all
+  remaining during a slow or failed load used to save the full-count default
+  over a short count or a flag already on file. The page now waits, and a
+  failed load offers a retry.
+- **Writes are not lost on the way out.** Leaving within the 400 ms debounce
+  dropped the last tick or flag. Pending writes are now sent on leaving (with
+  `keepalive` when the tab closes). Send and Approve wait for writes already
+  in flight and stop if one failed.
+- **A scan with nothing focused is a scan, not shortcuts.** A label like
+  `M393A4K40DB3-CWE` typed onto the page lowered the selected count (`-`)
+  and opened the flag editor (`F`). The first non-shortcut character now
+  starts the scan in the box, `f` is lowercase-only, and Space acts on the
+  selected row rather than whichever row button was last clicked. Escape
+  under an error dialog closes the dialog instead of leaving the page.
+- **Scans pick the right line.** A flagged line no longer swallows every scan
+  of its part number. A prefix that fits two different part numbers (`-VK` and
+  `-UH` speed grades) asks instead of guessing. Re-scanning a checked line
+  says so plainly instead of calling the unit "extra".
+- **Flags are sent once.** Each Send re-notified the purchaser with every flag
+  on the PO. Flags and extras now record when they went out (migration 0140),
+  Send offers only what is new, and editing a flag makes it news again.
+- **Packing lists follow the lot.** Lines were placed by the warehouse saved
+  on the sell-order line, so after a transfer the narrowed list for the new
+  warehouse left the line out. Placement now uses the lot's current warehouse
+  (falling back to its PO's), and so does the picker. A warehouse short that
+  Excel refuses as a tab name no longer fails the download.
+- A manager previewing as a purchaser no longer sees a Check box button that
+  bounces, and the bounce no longer traps Back. Box-check notifications keep
+  one problem per line on the phone, an IME Enter in the flag note no longer
+  saves a half-typed note, and the toast no longer claims a notification went
+  out when the manager owns the PO.
+
+Known and left for later: `/advance` takes no expected-from stage, so the
+approve re-read is not atomic; a count of 0 still prefills as Short rather than
+Missing; the Checked group's order resets on reload.
+
+## [1.189.0] - 2026-09-30
+
+### Added
+
+- **Sell orders: a packing list grouped by PO** (RS-126). Pickers pull stock
+  by the PO it arrived on, but the packing list was only cut by warehouse.
+  `Packing list by PO` downloads one tab per PO in each warehouse, laid out
+  exactly like the warehouse tabs — category sections, RAM grouped by
+  Desktop & laptop / Server and DDR generation, tick boxes, subtotals, no
+  prices. Lines typed onto the order by hand land on a `No PO` tab.
+- A warehouse picker narrows either packing list to one warehouse
+  (`GET /api/sell-orders/:id/packing-list?groupBy=po&warehouse=<short>`);
+  a warehouse not on the order is a 400. Without the parameters the existing
+  packing list is unchanged.
+
+## [1.188.1] - 2026-09-28
+
+### Changed
+
+- **Box check: every line's count now starts at its full qty** (RS-125).
+  Before, every line started at 0 and was checked once counted up to its
+  qty, which made the common case (a line that arrived complete) the slow
+  one.
+  - A tick now confirms a line, and "checked" is stored as its own answer
+    (`PUT …/checks/:lineId` takes `checked`). A body without it is read the
+    old way, so a stale bundle still works.
+  - Lowering a count turns the line amber, and ticking it opens the flag as
+    Short count.
+  - A scan ticks the matching line instead of adding one unit.
+  - Check all remaining skips amber lines.
+
+## [1.188.0] - 2026-09-28
+
+### Added
+
+- **Box check: count a PO against the box that arrived** (RS-124, desktop
+  only). A manager reviewing a delivered PO used to compare the box with the
+  PO page's line table by eye, with nowhere to record what had been counted.
+  **Check box** in the PO header now opens a dedicated full-width checklist.
+  - Ticking a line sinks it to the bottom, so what is still to find stays on
+    top. A −/+ count covers partial counts.
+  - A label scanner counts one unit per scan, and an unknown scan can be
+    recorded as an extra item.
+  - Lines can be flagged (missing, short count, wrong part, damaged, not as
+    described). A panel beside the list shows the purchaser's photo and the
+    line's serials.
+  - Progress is saved per line in two new tables (migration 0139). A clean
+    box approves the PO to Ready to Pay from the same page. A box with
+    problems sends them to the purchaser as a notification and a new
+    `box_check_flagged` history event, and the stage does not change.
+
 ## [1.187.0] - 2026-09-28
 
 ### Added

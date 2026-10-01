@@ -8,6 +8,7 @@ import {
 } from '../lib/orderPresentation';
 import type { OrderEvent, OrderEventChange } from '../lib/types';
 import type { OrderEvents } from '../lib/useOrderEvents';
+import { boxCheckEventLines } from '../lib/boxCheck';
 
 type Props = {
   // Lets a host lay the card out by class rather than by position. The desktop
@@ -40,6 +41,7 @@ const KIND_ICON: Record<OrderEvent['kind'], IconName> = {
   line_photo_removed: 'image',
   archived:     'box',
   unarchived:   'rotate',
+  box_check_flagged: 'flag',
 };
 
 type Tone = 'pos' | 'info' | 'warn' | 'muted';
@@ -64,6 +66,7 @@ const KIND_TONE: Record<OrderEvent['kind'], Tone> = {
   line_photo_removed: 'warn',
   archived:     'muted',
   unarchived:   'info',
+  box_check_flagged: 'warn',
 };
 
 // Tone palette mirrors the .chip rules in tokens.css so the bubbles read as
@@ -181,6 +184,10 @@ function summary(ev: OrderEvent, locale: string, t: Translate): { title: string;
     case 'unarchived': {
       if (typeof d.lines !== 'number') return { title: t('historyUnarchived'), lines: [t('acUnarchivedLegacy')] };
       return { title: t('historyUnarchived'), lines: [t('acUnarchivedLines', { n: String(d.lines) })] };
+    }
+    case 'box_check_flagged': {
+      const { count, lines } = boxCheckEventLines(d, t);
+      return { title: t('acBoxCheckFlagged', { n: String(count) }), lines };
     }
     // The backend and this bundle deploy independently, so a browser holding
     // an older build can be handed a kind it has never heard of. Returning

@@ -1,5 +1,18 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { hrefFor, navigate, navigateBack, onLinkClick, parseShippingRoute, pathToDesktopView, readSafeNext, type LinkClick } from './route';
+import {
+  hrefFor, matchPoCheck, matchPurchaseOrder, navigate, navigateBack, onLinkClick, parseShippingRoute,
+  pathToDesktopView, poCheckPath, readSafeNext, replaceRoute, type LinkClick,
+} from './route';
+
+describe('box check route', () => {
+  it('is its own desktop route under the PO, not a phone screen', () => {
+    expect(poCheckPath('PO-1448')).toBe('/purchase-orders/PO-1448/check');
+    expect(matchPoCheck('/purchase-orders/PO-1448/check')).toEqual({ id: 'PO-1448' });
+    expect(matchPoCheck('/purchase-orders/PO-1448')).toBeNull();
+    expect(matchPurchaseOrder('/purchase-orders/PO-1448/check')).toBeNull();
+    expect(pathToDesktopView('/purchase-orders/PO-1448/check')).toBe('history');
+  });
+});
 
 describe('parseShippingRoute', () => {
   it('parses the dashboard and the add-label routes', () => {
@@ -79,6 +92,7 @@ function installFakeWindow(entryHash = '') {
         stack.push({ hash: v.startsWith('#') ? v : '#' + v, state: null });
         i++;
       },
+      replace(v: string) { stack[i] = { hash: v.startsWith('#') ? v : '#' + v, state: null }; },
     },
     history: {
       get state() { return stack[i]!.state; },
@@ -116,6 +130,22 @@ describe('navigateBack', () => {
   it('uses the fallback when nothing of ours is behind', () => {
     const w = installFakeWindow('#/purchase-orders/PO-1372');
     navigateBack('/purchase-orders');
+    expect(w.hash()).toBe('#/purchase-orders');
+  });
+});
+
+// A redirect must not leave the page that bounced behind it, or Back lands
+// there and bounces forward again.
+describe('replaceRoute', () => {
+  afterEach(() => { delete (globalThis as { window?: unknown }).window; });
+
+  it('takes the bounced entry\'s place, so Back skips it', () => {
+    const w = installFakeWindow();
+    navigate('/purchase-orders');
+    navigate('/purchase-orders/PO-1/check');
+    replaceRoute('/purchase-orders/PO-1');
+    expect(w.hash()).toBe('#/purchase-orders/PO-1');
+    navigateBack('/dashboard');
     expect(w.hash()).toBe('#/purchase-orders');
   });
 });

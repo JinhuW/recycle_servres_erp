@@ -51,6 +51,17 @@ export function navigate(path: string): void {
   window.history.replaceState({ ...(window.history.state ?? {}), erpDepth: depth }, '');
 }
 
+/** Like `navigate`, but the new route takes the current history entry's place —
+ *  for a redirect, so Back doesn't land on the page that bounced. */
+export function replaceRoute(path: string): void {
+  const target = path.startsWith('/') ? path : '/' + path;
+  if (splitHash(window.location.hash).path === splitHash(target).path) return;
+  const depth = historyDepth();
+  window.location.replace('#' + target);
+  // replace() drops the entry's state; keep the depth the entry already had.
+  window.history.replaceState({ ...(window.history.state ?? {}), erpDepth: depth }, '');
+}
+
 /** The current route's query, e.g. `tab=payment`. */
 export function readHashQuery(): URLSearchParams {
   if (typeof window === 'undefined') return new URLSearchParams();
@@ -113,6 +124,17 @@ export function matchPurchaseOrder(path: string): { id: string; screen: PoScreen
   return null;
 }
 
+// Box check is desktop-only, so it is kept out of PoScreen: the phone never
+// has to learn a screen it cannot show.
+export function poCheckPath(id: string): string {
+  return '/purchase-orders/' + id + '/check';
+}
+
+export function matchPoCheck(path: string): { id: string } | null {
+  const m = match('/purchase-orders/:id/check', path);
+  return m ? { id: m.id! } : null;
+}
+
 export function match(template: string, path: string): Record<string, string> | null {
   const t = template.split('/').filter(Boolean);
   const p = path.split('/').filter(Boolean);
@@ -168,7 +190,7 @@ export type DesktopViewId = keyof typeof DESKTOP_VIEW_TO_PATH;
 export function pathToDesktopView(path: string): DesktopViewId {
   if (path === '/' || path === '/dashboard') return 'dashboard';
   if (path === '/submit') return 'submit';
-  if (path === '/purchase-orders' || matchPurchaseOrder(path)) return 'history';
+  if (path === '/purchase-orders' || matchPurchaseOrder(path) || matchPoCheck(path)) return 'history';
   if (parseShippingRoute(path)) return 'shipping';
   if (path === '/clients' || match('/clients/:id', path)) return 'clients';
   if (path === '/market') return 'market';

@@ -94,7 +94,8 @@ export function PhNotificationsSheet({ items, onClose, onMarkAllRead }: Props) {
                   {relTime(n.time, locale)}
                 </div>
               </div>
-              <div style={{ fontSize: 12.5, color: 'var(--fg-muted)', marginTop: 3, lineHeight: 1.45 }}>
+              {/* A box-check notice lists one problem per line. */}
+              <div style={{ fontSize: 12.5, color: 'var(--fg-muted)', marginTop: 3, lineHeight: 1.45, whiteSpace: 'pre-line' }}>
                 {n.body}
               </div>
             </div>

@@ -10,6 +10,7 @@ import { fmtDate, fmtUSD } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { createdEventParts, linePhotoEventDetail, type Translate } from '../../lib/orderPresentation';
 import { activityRecordHref, onLinkClick } from '../../lib/route';
+import { boxCheckEventLines } from '../../lib/boxCheck';
 import { useSentinel } from '../../lib/useSentinel';
 
 // The global audit register — every change made across all four ledgers, in
@@ -121,6 +122,10 @@ function summarise(e: Event, locale: string, t: Translate): { diff?: Change; not
   }
   // Same shape as an attachment — a filename with no from/to pair, which the
   // generic branches below would render as a bare filename either way round.
+  if (e.kind === 'box_check_flagged') {
+    const { count, lines } = boxCheckEventLines(d, t);
+    return { plain: t('acBoxCheckFlagged', { n: String(count) }), note: lines.join(' · ') || undefined };
+  }
   if (e.kind === 'line_photo_added' || e.kind === 'line_photo_removed') {
     return {
       plain: t(e.kind === 'line_photo_added' ? 'acPhotoAdded' : 'acPhotoRemoved'),

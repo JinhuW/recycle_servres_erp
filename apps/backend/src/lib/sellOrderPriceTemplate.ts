@@ -4,6 +4,10 @@
 //     in by the vendor, one tab per category.
 //   buildPackingListWorkbook  — the internal PACKING CHECKLIST, one tab per
 //     warehouse, never sent to a vendor.
+//   buildPackingListByPoWorkbook — the same checklist cut one tab per PO per
+//     warehouse, for a picker who pulls stock by the PO it arrived on. Each
+//     tab is a warehouse tab in miniature (user-requested 2026-09-30: "follow
+//     the same pattern as the main page"), so it shares that renderer.
 //
 // They shipped as one file until 2026-09-07, which meant every bid request
 // carried the warehouse's picking list with it. Splitting them is why the
@@ -81,6 +85,13 @@ export type PriceTemplateHead = {
 export type PriceTemplateWarehouse = {
   warehouse: string;
   products: PriceTemplateProduct[];
+};
+
+// One warehouse's lines cut per source PO. `po` is null for lines typed onto
+// the order by hand — they came from no PO.
+export type PackingPoWarehouse = {
+  warehouse: string;
+  pos: { po: string | null; products: PriceTemplateProduct[] }[];
 };
 
 type SpecCol = { header: string; key: string; width: number };
@@ -301,11 +312,51 @@ export async function buildPackingListWorkbook(
   const { default: ExcelJS } = await import('exceljs');
   const wb = new ExcelJS.Workbook();
 
+  const used = new Set<string>();
   for (const wh of warehouses) {
-    renderWarehouseSheet(wb, head, wh);
+    renderWarehouseSheet(wb, head, wh, { tabName: packTabName(`Pack - ${wh.warehouse}`, used) });
   }
 
   return Buffer.from(await wb.xlsx.writeBuffer());
+}
+
+export async function buildPackingListByPoWorkbook(
+  head: PriceTemplateHead,
+  warehouses: PackingPoWarehouse[],
+): Promise<Buffer> {
+  const { default: ExcelJS } = await import('exceljs');
+  const wb = new ExcelJS.Workbook();
+
+  const used = new Set<string>();
+  for (const wh of warehouses) {
+    for (const { po, products } of wh.pos) {
+      const poName = po ?? 'No PO';
+      renderWarehouseSheet(wb, head, { warehouse: wh.warehouse, products }, {
+        tabName: packTabName(`${poName} - ${wh.warehouse}`, used),
+        instruction:
+          `Packing checklist — ${poName}, warehouse ${wh.warehouse}. Tick "Packed ✓" as you pack. ` +
+          `/ ${poName}，仓库 ${wh.warehouse} 装箱清单：装箱后请在 "Packed ✓" 列打勾。`,
+        totalLabel: 'PO total',
+      });
+    }
+  }
+
+  return Buffer.from(await wb.xlsx.writeBuffer());
+}
+
+// Excel caps a tab name at 31 characters, refuses * ? : \ / [ ], and refuses
+// an apostrophe at either end; exceljs throws on a duplicate
+// (case-insensitively). Warehouse shorts aren't unique in the schema, so two
+// "Pack - DEN" tabs are possible — the second gets a counter.
+export function packTabName(raw: string, used: Set<string>): string {
+  const base = raw.replace(/[*?:\\/[\]]/g, '-').slice(0, 31).replace(/^'+|'+$/g, '') || 'Pack';
+  let name = base;
+  for (let n = 2; used.has(name.toLowerCase()); n++) {
+    const suffix = ` (${n})`;
+    name = base.slice(0, 31 - suffix.length) + suffix;
+  }
+  used.add(name.toLowerCase());
+  return name;
 }
 
 function renderCategorySheet(
@@ -479,10 +530,12 @@ function renderWarehouseSheet(
   wb: import('exceljs').Workbook,
   head: PriceTemplateHead,
   wh: PriceTemplateWarehouse,
+  // The by-PO workbook reuses this tab whole; only its name and wording move.
+  opts: { tabName?: string; instruction?: string; totalLabel?: string } = {},
 ): void {
   // "Pack - DEN" style: the prefix separates packing tabs from the category
   // bid tabs at a glance and can never collide with RAM/SSD/HDD/Other.
-  const ws = wb.addWorksheet(`Pack - ${wh.warehouse}`);
+  const ws = wb.addWorksheet(opts.tabName ?? `Pack - ${wh.warehouse}`);
 
   const byCategory = groupByCategory(wh.products);
   const sections = CATEGORY_ORDER.filter((cat) => byCategory.has(cat));
@@ -515,7 +568,7 @@ function renderWarehouseSheet(
   // Wording deliberately avoids price/价格 tokens: row 2 sits inside the
   // import parser's 15-row header scan, and this tab must never look like a
   // price sheet.
-  instr.value =
+  instr.value = opts.instruction ??
     `Packing checklist — warehouse ${wh.warehouse}. Tick "Packed ✓" as you pack. ` +
     `/ 仓库 ${wh.warehouse} 装箱清单：装箱后请在 "Packed ✓" 列打勾。`;
   instr.font = { size: 11 };
@@ -590,7 +643,7 @@ function renderWarehouseSheet(
   }
 
   const total = ws.getRow(r);
-  total.getCell(1 + PACK_GROUP_OFFSET).value = 'Warehouse total';
+  total.getCell(1 + PACK_GROUP_OFFSET).value = opts.totalLabel ?? 'Warehouse total';
   total.getCell(2 + PACK_GROUP_OFFSET).value = totalQty;
   total.getCell(2 + PACK_GROUP_OFFSET).numFmt = '#,##0';
   total.font = { bold: true };

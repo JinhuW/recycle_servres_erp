@@ -21,7 +21,7 @@ import {
   type SellOrderLineRow,
 } from '../services/sellOrderPriceImport';
 import {
-  buildPriceTemplateWorkbook, buildPackingListWorkbook,
+  buildPriceTemplateWorkbook, buildPackingListWorkbook, buildPackingListByPoWorkbook,
 } from '../lib/sellOrderPriceTemplate';
 import { canonPartNumberJs } from '../lib/part-number';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
@@ -249,6 +249,7 @@ sellOrders.get('/:id', async (c) => {
     part_number: string | null; qty: number; unit_price: number;
     source_unit_price: number | null;
     condition: string | null; position: number; warehouse_short: string | null;
+    pack_warehouse_short: string | null;
     inventory_id: string | null; warehouse_id: string | null;
     source_order_id: string | null;
     inventory_qty: number | null;
@@ -258,7 +259,7 @@ sellOrders.get('/:id', async (c) => {
            sol.source_unit_price::float AS source_unit_price,
            sol.condition, sol.position,
            sol.inventory_id, sol.warehouse_id, ol.order_id AS source_order_id,
-           w.short AS warehouse_short,
+           w.short AS warehouse_short, pw.short AS pack_warehouse_short,
            -- What this order may still grow its line to: the lot less the units
            -- other committed orders hold. Its own claim is excluded, so editing
            -- a line down and back up is not blocked by itself.
@@ -266,6 +267,8 @@ sellOrders.get('/:id', async (c) => {
     FROM sell_order_lines sol
     LEFT JOIN warehouses w ON w.id = sol.warehouse_id
     LEFT JOIN order_lines ol ON ol.id = sol.inventory_id
+    LEFT JOIN orders src ON src.id = ol.order_id
+    LEFT JOIN warehouses pw ON pw.id = COALESCE(ol.warehouse_id, src.warehouse_id, sol.warehouse_id)
     LEFT JOIN LATERAL (
       SELECT COALESCE(SUM(rival.qty), 0)::int AS qty
         FROM sell_order_lines rival
@@ -348,6 +351,9 @@ sellOrders.get('/:id', async (c) => {
         nativeUnitPrice: l.source_unit_price ?? l.unit_price,
         condition: l.condition, position: l.position,
         warehouse: l.warehouse_short,
+        // Where the lot is now: a transfer moves the lot, not the warehouse
+        // this line was saved with. The packing lists go by this one.
+        packWarehouse: l.pack_warehouse_short,
         inventoryId: l.inventory_id, warehouseId: l.warehouse_id,
         sourceOrderId: l.source_order_id,
         maxQty: l.inventory_qty ?? l.qty,
@@ -398,14 +404,17 @@ async function loadSellOrderSheetData(sql: SqlClient, id: string) {
       sol.label AS sol_label, sol.sub_label AS sol_sub, sol.part_number AS sol_part,
       sol.category AS sol_category, sol.condition AS sol_condition,
       w.short AS warehouse_short,
-      l.id AS inv_id, l.category, l.brand, l.capacity, l.generation, l.type,
+      l.id AS inv_id, l.order_id AS source_order_id, l.category, l.brand, l.capacity, l.generation, l.type,
       l.classification, l.rank, l.speed, l.interface, l.form_factor, l.description,
       l.part_number, l.chip_number, l.condition, l.health::float AS health,
       l.rpm,
       img.delivery_url AS image_url
     FROM sell_order_lines sol
-    LEFT JOIN warehouses w ON w.id = sol.warehouse_id
     LEFT JOIN order_lines l ON l.id = sol.inventory_id
+    LEFT JOIN orders src ON src.id = l.order_id
+    -- The lot's current warehouse, not the one saved on the line: a transfer
+    -- of committed stock moves the lot, and the pick happens where it is.
+    LEFT JOIN warehouses w ON w.id = COALESCE(l.warehouse_id, src.warehouse_id, sol.warehouse_id)
     LEFT JOIN LATERAL (
       SELECT ls.delivery_url
       FROM label_scans ls
@@ -431,6 +440,8 @@ async function loadSellOrderSheetData(sql: SqlClient, id: string) {
   // Same aggregation scoped per warehouse — feeds the packing-checklist tabs.
   // Warehouse-less lines land in an 'Unassigned' tab (old packing-list rule).
   const byWarehouse = new Map<string, Map<string, Group>>();
+  // And per warehouse per source PO, for the by-PO checklist. '' = no PO.
+  const byWarehousePo = new Map<string, Map<string, Map<string, Group>>>();
   for (const r of rows) {
     const hasInv = r.inv_id != null;
     // Manual lines fold sub_label into the label — the sheet's spec columns
@@ -470,18 +481,34 @@ async function loadSellOrderSheetData(sql: SqlClient, id: string) {
     const wh = s(r.warehouse_short) || 'Unassigned';
     if (!byWarehouse.has(wh)) byWarehouse.set(wh, new Map());
     fold(byWarehouse.get(wh)!);
+    const po = s(r.source_order_id);
+    if (!byWarehousePo.has(wh)) byWarehousePo.set(wh, new Map());
+    const whPos = byWarehousePo.get(wh)!;
+    if (!whPos.has(po)) whPos.set(po, new Map());
+    fold(whPos.get(po)!);
   }
 
-  const warehouses = [...byWarehouse.keys()]
-    .sort((a, b) => {
-      if (a === 'Unassigned') return 1;
-      if (b === 'Unassigned') return -1;
-      return a.localeCompare(b);
-    })
-    .map((warehouse) => ({
-      warehouse,
-      products: [...byWarehouse.get(warehouse)!.values()],
-    }));
+  const warehouseOrder = [...byWarehouse.keys()].sort((a, b) => {
+    if (a === 'Unassigned') return 1;
+    if (b === 'Unassigned') return -1;
+    return a.localeCompare(b);
+  });
+  const warehouses = warehouseOrder.map((warehouse) => ({
+    warehouse,
+    products: [...byWarehouse.get(warehouse)!.values()],
+  }));
+  // PO ids are unpadded (PO-999 before PO-1442), hence the numeric collation;
+  // hand-typed lines come last.
+  const poWarehouses = warehouseOrder.map((warehouse) => ({
+    warehouse,
+    pos: [...byWarehousePo.get(warehouse)!.entries()]
+      .sort(([a], [b]) => {
+        if (!a) return 1;
+        if (!b) return -1;
+        return a.localeCompare(b, undefined, { numeric: true });
+      })
+      .map(([po, products]) => ({ po: po || null, products: [...products.values()] })),
+  }));
 
   const slug = customerSlug(head.customer_name);
   return {
@@ -492,6 +519,7 @@ async function loadSellOrderSheetData(sql: SqlClient, id: string) {
     },
     products: [...groups.values()],
     warehouses,
+    poWarehouses,
     filenameStem: slug ? `${head.id}-${slug}` : head.id,
   };
 }
@@ -514,14 +542,28 @@ sellOrders.get('/:id/price-template', async (c) => {
 // and never sent to a vendor — which is why it is its own download and not a
 // tab on the bid sheet (user-requested 2026-09-07). Same manager-only guard:
 // warehouse staff get the file from a manager.
+//
+// ?groupBy=po cuts the same checklist one tab per PO per warehouse;
+// ?warehouse=<short> (or 'Unassigned') narrows either shape to one warehouse.
 sellOrders.get('/:id/packing-list', async (c) => {
   const u = c.var.user;
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const data = await loadSellOrderSheetData(getDb(c.env), c.req.param('id'));
   if (!data) return c.json({ error: 'Not found' }, 404);
 
-  const buf = await buildPackingListWorkbook(data.head, data.warehouses);
-  return xlsxResponse(buf, datedFilename(`${data.filenameStem}-packing-list`));
+  const byPo = c.req.query('groupBy') === 'po';
+  const only = c.req.query('warehouse');
+  const keep = (w: { warehouse: string }) => !only || w.warehouse === only;
+  const warehouses = data.warehouses.filter(keep);
+  if (only && warehouses.length === 0) {
+    return c.json({ error: `No lines in warehouse ${only} on this order` }, 400);
+  }
+
+  const buf = byPo
+    ? await buildPackingListByPoWorkbook(data.head, data.poWarehouses.filter(keep))
+    : await buildPackingListWorkbook(data.head, warehouses);
+  const suffix = `${byPo ? '-by-po' : ''}${only ? `-${customerSlug(only)}` : ''}`;
+  return xlsxResponse(buf, datedFilename(`${data.filenameStem}-packing-list${suffix}`));
 });
 
 // Vendor price import, step 1 of 2: parse an uploaded bid sheet and report how
