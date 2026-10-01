@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-136](./RS-136-inventory-edits-land-whatever-the-po-stage.md) | done | bug | P2 | Inventory edits land whatever the PO stage | — |
+| [RS-136](./RS-136-inventory-edits-land-whatever-the-po-stage.md) | done | bug | P2 | Inventory edits land whatever the PO stage | 1.192.1 |
 | [RS-132](./RS-132-ai-read-mode-in-the-serial-number-scanner.md) | done | story | P2 | AI read mode in the serial-number scanner | 1.192.0 |
 | [RS-131](./RS-131-manager-can-adjust-sell-price-at-ready-to-pay.md) | done | story | P2 | Manager can adjust sell price at Ready to Pay | 1.191.1 |
 | [RS-130](./RS-130-code-review-fixes-criticals-quick-majors-vendor-port.md) | done | bug | P1 | Code-review fixes: criticals, quick majors, vendor portal removal, cleanup | 1.191.0 |
