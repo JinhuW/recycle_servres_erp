@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  boxCheckEventLines, checkBody, countOf, emptyCheck, lineState, matchScan, nextOpenAfter, orderLines, tally,
+  boxCheckEventLines, checkBody, countOf, emptyCheck, isShortChecked, lineState, matchScan, nextOpenAfter, orderLines, tally,
   type LineCheck,
 } from './boxCheck';
 
@@ -36,15 +36,16 @@ describe('lineState', () => {
     expect(lineState(lines[0]!, C('a', 0))).toBe('partial');
   });
 
-  it('keeps a flagged line out of done even when ticked', () => {
-    expect(lineState(lines[0]!, C('a', 16, { checkedAt: AT, flagReason: 'damaged' }))).toBe('flagged');
+  it('ignores a flag left from before flags were retired', () => {
+    expect(lineState(lines[0]!, C('a', 16, { checkedAt: AT, flagReason: 'damaged' }))).toBe('done');
+    expect(lineState(lines[0]!, C('a', 16, { flagReason: 'damaged' }))).toBe('open');
   });
 
-  it('drops a tick whose count no longer covers the line', () => {
-    // Ticked at 4/4, then the PO line went to 6: two units nobody counted.
-    expect(lineState(L('x', 6, 'P'), C('x', 4, { checkedAt: AT }))).toBe('partial');
-    // A short line whose flag was removed keeps its tick stamp but not its tick.
-    expect(lineState(lines[0]!, C('a', 14, { checkedAt: AT }))).toBe('partial');
+  it('checks a short line at its lowered count', () => {
+    expect(lineState(lines[0]!, C('a', 14, { checkedAt: AT }))).toBe('done');
+    expect(isShortChecked(lines[0]!, C('a', 14, { checkedAt: AT }))).toBe(true);
+    expect(isShortChecked(lines[0]!, C('a', 16, { checkedAt: AT }))).toBe(false);
+    expect(isShortChecked(lines[0]!, C('a', 14))).toBe(false);
   });
 
   it('keeps a tick when the line shrank under the count', () => {
@@ -53,15 +54,14 @@ describe('lineState', () => {
 });
 
 describe('orderLines', () => {
-  it('keeps open lines in PO order, flagged next, checked last and newest first', () => {
+  it('keeps open lines in PO order, checked last and newest first', () => {
     const checks = new Map([
       ['a', C('a', 16, { checkedAt: '2026-09-28T10:00:00Z' })],
-      ['b', C('b', 1, { flagReason: 'short' })],
+      ['b', C('b', 1)],
       ['c', C('c', 4, { checkedAt: '2026-09-28T11:00:00Z' })],
     ]);
     const o = orderLines(lines, checks);
-    expect(o.open.map(l => l.id)).toEqual(['d']);
-    expect(o.flagged.map(l => l.id)).toEqual(['b']);
+    expect(o.open.map(l => l.id)).toEqual(['b', 'd']);
     expect(o.done.map(l => l.id)).toEqual(['c', 'a']);
   });
 });
@@ -71,7 +71,7 @@ describe('tally', () => {
     const t = tally(lines, new Map([['c', C('c', 4, { checkedAt: AT })], ['a', C('a', 5)]]));
     expect(t.units).toBe(30);
     expect(t.counted).toBe(4);
-    expect([t.done, t.partial, t.open, t.flagged]).toEqual([1, 1, 2, 0]);
+    expect([t.done, t.partial, t.open]).toEqual([1, 1, 2]);
   });
 });
 
@@ -86,9 +86,7 @@ describe('matchScan', () => {
     expect(hit(matchScan(lines, new Map([['a', C('a', 16, { checkedAt: AT })]]), 'M393A4K40DB3-CWE'))).toBe('d');
   });
 
-  it('passes over a flagged or short line while a same-part line is still open', () => {
-    const flagged = new Map([['a', C('a', 16, { checkedAt: AT, flagReason: 'damaged' })]]);
-    expect(hit(matchScan(lines, flagged, 'M393A4K40DB3-CWE'))).toBe('d');
+  it('passes over a short line while a same-part line is still open', () => {
     expect(hit(matchScan(lines, new Map([['a', C('a', 14)]]), 'M393A4K40DB3-CWE'))).toBe('d');
   });
 
@@ -125,6 +123,8 @@ describe('nextOpenAfter', () => {
 describe('checkBody', () => {
   it('says whether the line is checked, so no write can re-derive it from the count', () => {
     expect(checkBody(C('a', 16), 16)).toEqual({ counted: 16, checked: false, flagReason: null, flagNote: null });
+    // Clears a flag stored before flags were retired.
+    expect(checkBody(C('a', 16, { flagReason: 'damaged', flagNote: 'x' }), 16)).toMatchObject({ flagReason: null, flagNote: null });
     expect(checkBody(C('a', 14, { checkedAt: AT }), 16)).toMatchObject({ checked: true });
   });
 

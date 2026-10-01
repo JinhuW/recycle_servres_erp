@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-129](./RS-129-review-mode-line-numbers-edit-instead-of-flag-device.md) | in-review | story | P2 | Review mode: line numbers, Edit instead of Flag, device type | — |
 | [RS-128](./RS-128-box-check-button-and-page-read-review-mode.md) | done | chore | P3 | Box check button and page read Review mode | 1.189.2 |
 | [RS-127](./RS-127-pre-release-review-fixes-for-box-check-and-packing-l.md) | done | bug | P1 | Pre-release review fixes for box check and packing list | 1.189.1 |
 | [RS-126](./RS-126-packing-list-grouped-by-po.md) | done | story | P2 | Packing list grouped by PO | 1.189.0 |

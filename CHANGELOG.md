@@ -17,6 +17,23 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.190.0] - 2026-10-01
+
+### Changed
+
+- **Review mode fixes a line instead of flagging it** (RS-129). The flag on
+  each row is now an **Edit** button (or the E key). It opens the same line
+  drawer as the PO page, so a manager holding the box corrects the specs,
+  qty or cost to what arrived, under the same save rules. Flags, extra-item
+  recording and *Send flags to purchaser* are removed. A short line is
+  lowered and ticked, and Finish review lists the short lines without
+  blocking Approve. An edit that changes a line's qty clears its tick,
+  because the added units were never counted.
+- **Rows carry their PO line number and the RAM device type.** Each row
+  shows #1, #2…, the PO page's numbering, which stays put while checked
+  rows sink. A RAM row shows Desktop, Server or Laptop beside its class,
+  rank and speed.
+
 ## [1.189.2] - 2026-10-01
 
 ### Changed

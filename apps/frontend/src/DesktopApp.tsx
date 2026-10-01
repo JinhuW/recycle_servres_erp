@@ -208,6 +208,7 @@ export function DesktopApp() {
           key={editingOrder.id + ':' + orderReloads}
           order={editingOrder}
           onExit={() => navigate('/purchase-orders/' + editingOrder.id)}
+          onReload={reloadOrder}
           onApproved={() => {
             // Leaving the check re-reads the order, so it opens at its new stage.
             navigate('/purchase-orders/' + editingOrder.id);
