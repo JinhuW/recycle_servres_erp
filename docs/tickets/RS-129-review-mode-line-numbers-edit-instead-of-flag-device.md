@@ -2,13 +2,13 @@
 id: RS-129
 title: Review mode: line numbers, Edit instead of Flag, device type
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-10-01
 reporter: Jinhu
 branch: feat/review-mode-edit
-pr:
-version:
+pr: "#439"
+version: 1.190.0
 related: []
 ---
 
