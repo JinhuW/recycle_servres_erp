@@ -2,13 +2,13 @@
 id: RS-132
 title: AI read mode in the serial-number scanner
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-01
 reporter: jinhu
 branch: feat/rs132-sn-scanner-ai-read
-pr:
-version:
+pr: "#446"
+version: 1.192.0
 related: []
 ---
 
