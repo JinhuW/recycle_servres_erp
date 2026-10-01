@@ -2,13 +2,13 @@
 id: RS-130
 title: Code-review fixes: criticals, quick majors, vendor portal removal, cleanup
 type: bug
-status: in-progress
+status: done
 priority: P1
 created: 2026-10-01
 reporter: jinhu
 branch: fix/review-criticals
-pr:
-version:
+pr: "#442"
+version: 1.191.0
 related: []
 ---
 
@@ -64,21 +64,21 @@ them.
 
 ## Acceptance criteria
 
-- [ ] A transfer of more units than `qty − committed` is refused with 409, for
+- [x] A transfer of more units than `qty − committed` is refused with 409, for
       partial and full moves alike; an uncommitted remainder still moves.
-- [ ] The `metrics` role cannot log in on any cluster after migrations; the
+- [x] The `metrics` role cannot log in on any cluster after migrations; the
       compose exporter is behind a `metrics` profile.
-- [ ] `/api/public/vendor/*`, `/api/vendor-bids`, the customer vendor-link
+- [x] `/api/public/vendor/*`, `/api/vendor-bids`, the customer vendor-link
       endpoints, the `/v/<token>` app and the Vendor Bids page are gone; the
       three vendor tables and `id_counters` 'VB' row are dropped.
-- [ ] The sell-order bid sheet (price template / import) still works.
-- [ ] `readSafeNext` rejects control characters and anything that resolves
+- [x] The sell-order bid sheet (price template / import) still works.
+- [x] `readSafeNext` rejects control characters and anything that resolves
       off-origin.
-- [ ] `payment` other than `company` / `self` is refused with 400 at create,
+- [x] `payment` other than `company` / `self` is refused with 400 at create,
       draft, PATCH and handoff, and a DB CHECK enforces it.
-- [ ] A linked Draft PO deletes with 200 and its bank rows come back unlinked.
-- [ ] Changing your password keeps the current session and revokes the others.
-- [ ] The dead `/api/attachments` route and its table are gone.
+- [x] A linked Draft PO deletes with 200 and its bank rows come back unlinked.
+- [x] Changing your password keeps the current session and revokes the others.
+- [x] The dead `/api/attachments` route and its table are gone.
 
 ## Out of scope
 
