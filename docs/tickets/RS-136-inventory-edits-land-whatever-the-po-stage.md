@@ -2,13 +2,13 @@
 id: RS-136
 title: Inventory edits land whatever the PO stage
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-01
 reporter: jinhu
 branch: fix/rs136-inventory-edit-any-stage
-pr:
-version:
+pr: "#448"
+version: 1.192.1
 related: [RS-131]
 ---
 
@@ -37,12 +37,12 @@ open-sell-order 409, so a spec-only edit on a committed line failed too.
 
 ## Acceptance criteria
 
-- [ ] The editor sends only the fields that changed.
-- [ ] On a Ready to Pay / Done / Sold PO, sell price, status, condition, part #,
+- [x] The editor sends only the fields that changed.
+- [x] On a Ready to Pay / Done / Sold PO, sell price, status, condition, part #,
       health, RPM and spec edits save.
-- [ ] Qty and unit cost are disabled on those POs, with a hint linking the PO.
-- [ ] Qty and unit cost still save on Draft → Reviewing POs.
-- [ ] Backend test: a manager's non-goods PATCH on a Done PO → 200;
+- [x] Qty and unit cost are disabled on those POs, with a hint linking the PO.
+- [x] Qty and unit cost still save on Draft → Reviewing POs.
+- [x] Backend test: a manager's non-goods PATCH on a Done PO → 200;
       `GET /api/inventory/:id` exposes `order_closed_book`.
 
 ## Out of scope
