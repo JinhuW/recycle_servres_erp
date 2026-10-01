@@ -17,6 +17,18 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.192.0] - 2026-10-01
+
+The phone serial scanner can read a printed serial with AI when the module's
+QR / DataMatrix is too damaged to decode (RS-132). A QR ↔ AI switch sits above
+the scanner's bottom bar; AI mode swaps the live decode for a shutter that
+sends the framed crop to a new `POST /api/scan/serial`, which runs the
+existing OpenRouter vision model (same key, stub fallback and rate limit as
+label and PayPal OCR) with a serial-only prompt and a normaliser that sheds an
+`SN:` label without eating a serial that starts with "SN". Because a model can
+misread, the result waits on Use / Retake instead of auto-adding, and the
+duplicate check ignores case. The shot is not stored.
+
 ## [1.191.1] - 2026-10-01
 
 A manager can adjust a line's sell price on a PO at Ready to Pay (RS-131).

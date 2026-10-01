@@ -34,6 +34,7 @@ function cropFrame(
   video: HTMLVideoElement,
   canvas: HTMLCanvasElement,
   ctx: CanvasRenderingContext2D,
+  maxOut = 1100,
 ): boolean {
   if (!video.videoWidth) return false;
   const side = Math.floor(Math.min(video.videoWidth, video.videoHeight) * CROP);
@@ -41,11 +42,21 @@ function cropFrame(
   const sy = Math.floor((video.videoHeight - side) / 2);
   // Cap the output: past ~1100px the per-frame decode cost outruns the scan
   // loop on mid-range phones, with no accuracy left to gain.
-  const out = Math.min(side, 1100);
+  const out = Math.min(side, maxOut);
   canvas.width = out;
   canvas.height = out;
   ctx.drawImage(video, sx, sy, side, side, 0, 0, out, out);
   return true;
+}
+
+// The same centre crop as a JPEG, for the scanner's AI mode: what the user
+// framed in the box is what the model reads. Printed serials are small text,
+// so it keeps more pixels than a decode frame does.
+export async function captureCropJpeg(video: HTMLVideoElement): Promise<Blob | null> {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx || !cropFrame(video, canvas, ctx, 1600)) return null;
+  return new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.85));
 }
 
 export async function createFrameDecoder(): Promise<FrameDecoder> {

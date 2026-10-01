@@ -1058,6 +1058,12 @@ inventory search, sell-order draft creation.
   with high-res capture and client-side MozJPEG compression (v0.1.1).
 - Mobile QR/serial scanning: a button on the serial-number field (v1.83.0),
   single-shot — capture, confirm, auto-close (v1.83.2).
+- **AI read for damaged codes** (v1.192.0): the serial scanner on the phone
+  Submit form has a QR / AI switch (opens on QR). In AI mode a shutter sends
+  the framed shot to `POST /api/scan/serial`, the same OpenRouter vision model
+  as label OCR reads the *printed* S/N, and the read is shown with Use /
+  Retake — never auto-added. Nothing is stored. The Shipping tracking scan has
+  no switch.
 - **Serials are chips, in both shells** (v1.126.0): scanned, typed or pasted,
   each one deletes whole via its `×` or a two-step Backspace. The stored value
   is unchanged, and text typed but not yet chipped still counts toward the

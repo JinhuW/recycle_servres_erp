@@ -241,6 +241,7 @@ const uploadBodyLimit = bodyLimit({ maxSize: UPLOAD_HARD_CAP_BYTES });
 const isUploadPath = (path: string): boolean =>
   path === '/api/scan/label' ||
   path === '/api/scan/payment' ||
+  path === '/api/scan/serial' ||
   // The ram4cash sell form sends label photos with its payload.
   path === '/api/public/intake' ||
   /^\/api\/(orders|sell-orders)\/[^/]+\/status-meta\/[^/]+\/attachments$/.test(path) ||

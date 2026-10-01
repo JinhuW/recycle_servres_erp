@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from './Icon';
 import { useT } from '../lib/i18n';
-import { createFrameDecoder } from '../lib/qr';
+import { api, ApiError } from '../lib/api';
+import { captureCropJpeg, createFrameDecoder } from '../lib/qr';
 
 type Props = {
   // Serials already on the line — scanning one of these reads as a duplicate
@@ -14,18 +15,37 @@ type Props = {
   // it — "fit the QR code in the box" is the wrong aim hint for a 1D barcode.
   title?: string;
   hint?: string;
+  // Offers the QR ↔ AI switch: a vision model reads the printed serial when
+  // the code itself is too damaged to decode. Serial scans only — a tracking
+  // label has no printed S/N to fall back on.
+  aiRead?: boolean;
 };
+
+type Mode = 'qr' | 'ai';
 
 // Single-shot QR scanner for serial numbers: no shutter — the first code that
 // decodes flashes a confirmation and closes itself, handing the serial back
 // to the form. Scanning the next stick is one tap on the field button again.
-export function SnScanner({ existing, onDone, title, hint }: Props) {
+export function SnScanner({ existing, onDone, title, hint, aiRead = false }: Props) {
   const { t } = useT();
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [torch, setTorch] = useState(false);
   const [lastHit, setLastHit] = useState<{ value: string; dup: boolean; tick: number } | null>(null);
   const [camError, setCamError] = useState(false);
   const [captured, setCaptured] = useState<string | null>(null);
+  // Opens on QR every time: a damaged code is the exception, not the habit.
+  const [mode, setMode] = useState<Mode>('qr');
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiResult, setAiResult] = useState<string | null>(null);
+  const [aiNote, setAiNote] = useState<string | null>(null);
+  // A read that lands after the scanner closed must not touch its state.
+  // Re-armed on mount: StrictMode's mount→unmount→mount would otherwise
+  // leave it false for the scanner's whole life.
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => { aliveRef.current = false; };
+  }, []);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const existingRef = useRef<Set<string>>(new Set(existing));
   const onDoneRef = useRef(onDone);
@@ -97,7 +117,7 @@ export function SnScanner({ existing, onDone, title, hint }: Props) {
   // isn't re-flagged ten times); a fresh serial stops the loop for good —
   // green flash, then the scanner closes itself with the value.
   useEffect(() => {
-    if (!stream) return;
+    if (!stream || mode !== 'qr') return;
     let stop = false;
     let timer = 0;
     let coolUntil = 0;
@@ -115,10 +135,7 @@ export function SnScanner({ existing, onDone, title, hint }: Props) {
               setLastHit({ value, dup: true, tick: performance.now() });
             } else {
               stop = true;
-              setCaptured(value);
-              setLastHit({ value, dup: false, tick: performance.now() });
-              navigator.vibrate?.(35);
-              window.setTimeout(() => onDoneRef.current([value]), 650);
+              finish(value);
               return;
             }
           }
@@ -128,13 +145,70 @@ export function SnScanner({ existing, onDone, title, hint }: Props) {
       step();
     })();
     return () => { stop = true; window.clearTimeout(timer); };
-  }, [stream]);
+  }, [stream, mode]);
+
+  const finish = (value: string) => {
+    setCaptured(value);
+    setLastHit({ value, dup: false, tick: performance.now() });
+    navigator.vibrate?.(35);
+    window.setTimeout(() => onDoneRef.current([value]), 650);
+  };
+
+  const switchMode = (next: Mode) => {
+    if (aiBusy || captured) return;
+    setMode(next);
+    setAiResult(null);
+    setAiNote(null);
+    setLastHit(null);
+  };
+
+  const shoot = async () => {
+    const v = videoRef.current;
+    if (!v || aiBusy) return;
+    setAiNote(null);
+    setAiResult(null);
+    setAiBusy(true);
+    try {
+      const blob = await captureCropJpeg(v);
+      if (!blob) throw new Error('no frame');
+      const form = new FormData();
+      form.append('file', blob, 'serial.jpg');
+      const r = await api.upload<{ serial: string | null }>('/api/scan/serial', form);
+      if (!aliveRef.current) return;
+      if (r.serial) setAiResult(r.serial);
+      else setAiNote(t('snScanAiNone'));
+    } catch (e) {
+      if (!aliveRef.current) return;
+      // The rate-limit message tells the user what to do; anything else is
+      // "retake", whatever failed underneath.
+      setAiNote(e instanceof ApiError && e.status === 429 ? e.message : t('snScanAiFailed'));
+    } finally {
+      if (aliveRef.current) setAiBusy(false);
+    }
+  };
+
+  const shutterOff = aiBusy || !stream || !!aiResult || !!captured;
+
+  // A model read is printed text, so case can differ from the QR payload of
+  // a serial already on the line.
+  const acceptAiResult = () => {
+    if (!aiResult) return;
+    const lower = aiResult.toLowerCase();
+    if ([...existingRef.current].some(s => s.toLowerCase() === lower)) {
+      setAiResult(null);
+      setLastHit({ value: aiResult, dup: true, tick: performance.now() });
+      return;
+    }
+    setAiResult(null);
+    finish(aiResult);
+  };
 
   return (
     <div className="ph-cam-screen">
       <div className="ph-cam-top">
         <button
-          onClick={() => { if (!captured) onDone([]); }}
+          onClick={() => { if (!captured && !aiBusy) onDone([]); }}
+          disabled={aiBusy}
           className="ph-cam-pill"
           style={{ background: 'rgba(255,255,255,0.12)' }}
           aria-label={t('cancel')}
@@ -169,7 +243,7 @@ export function SnScanner({ existing, onDone, title, hint }: Props) {
         />
         {!camError && (
           <div className="ph-snscan-frame">
-            {stream && !captured && <div className="scan-line" />}
+            {stream && !captured && mode === 'qr' && <div className="scan-line" />}
             {captured && <div className="ph-snscan-flash" />}
           </div>
         )}
@@ -185,6 +259,25 @@ export function SnScanner({ existing, onDone, title, hint }: Props) {
               <span className="mono" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{captured}</span>
             </div>
           </div>
+        ) : aiBusy ? (
+          <div className="ph-snscan-toast" role="status">
+            <span>{t('snScanAiReading')}</span>
+          </div>
+        ) : aiResult ? (
+          <div className="ph-snscan-result" role="dialog" aria-label={t('snScanModeAi')}>
+            <span className="mono">{aiResult}</span>
+            <div className="ph-snscan-result-actions">
+              <button className="ph-snscan-result-btn" onClick={() => setAiResult(null)}>{t('snScanAiRetake')}</button>
+              <button className="ph-snscan-result-btn primary" onClick={acceptAiResult}>
+                <Icon name="check2" size={14} /> {t('snScanAiUse')}
+              </button>
+            </div>
+          </div>
+        ) : aiNote ? (
+          <div className="ph-snscan-toast" role="status">
+            <Icon name="info" size={13} style={{ flexShrink: 0, color: 'rgba(255,255,255,0.7)' }} />
+            <span>{aiNote}</span>
+          </div>
         ) : lastHit?.dup ? (
           <div className="ph-snscan-toast" role="status">
             <Icon name="info" size={13} style={{ flexShrink: 0, color: 'rgba(255,255,255,0.7)' }} />
@@ -192,14 +285,41 @@ export function SnScanner({ existing, onDone, title, hint }: Props) {
             <span style={{ color: 'rgba(255,255,255,0.7)', flexShrink: 0 }}>· {t('snScanDup')}</span>
           </div>
         ) : (
-          <div className="cam-hint" style={{ bottom: 18 }}>{hint ?? t('snScanHint')}</div>
+          <div className="cam-hint" style={{ bottom: 18 }}>
+            {mode === 'ai' ? t('snScanAiHint') : hint ?? t('snScanHint')}
+          </div>
         )}
       </div>
 
+      {aiRead && !camError && (
+        <div className="ph-snscan-mode" role="group">
+          {(['qr', 'ai'] as const).map(m => (
+            <button
+              key={m}
+              className={mode === m ? 'active' : undefined}
+              aria-pressed={mode === m}
+              disabled={aiBusy || !!captured}
+              onClick={() => switchMode(m)}
+            >
+              {t(m === 'qr' ? 'snScanModeQr' : 'snScanModeAi')}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="ph-cam-bottom">
-        <button className="ph-snscan-done" onClick={() => { if (!captured) onDone([]); }}>
+        <button className="ph-snscan-done" disabled={aiBusy} onClick={() => { if (!captured && !aiBusy) onDone([]); }}>
           {t('cancel')}
         </button>
+        {mode === 'ai' && (
+          <button
+            className="ph-cam-shutter"
+            style={{ marginLeft: 16, flexShrink: 0, opacity: shutterOff ? 0.5 : 1 }}
+            aria-label={t('snScanModeAi')}
+            disabled={shutterOff}
+            onClick={() => void shoot()}
+          />
+        )}
       </div>
     </div>
   );
