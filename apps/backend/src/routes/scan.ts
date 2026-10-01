@@ -3,6 +3,7 @@ import { getDb } from '../db';
 import { uploadAttachment } from '../r2';
 import { scanLabel } from '../ai';
 import { extractPaypalTxn } from '../ai/paypal';
+import { extractSerial } from '../ai/serial';
 import { normalizeFields } from '../ai/normalize';
 import { EXPECTED_FIELDS_BY_CATEGORY } from '../ai/prompts';
 import { appendErrorRecord, redactSensitivePath, redactSensitiveQuery } from '../lib/error-log';
@@ -16,7 +17,7 @@ const scan = new Hono<{ Bindings: Env; Variables: { user: User; requestId: strin
 const scanLog = log.child({ module: 'scan' });
 
 // Per-user sliding-window rate limit: max 20 scans per 60-second window.
-// One limiter for both scan kinds — same user, same abuse surface.
+// One limiter for every scan kind — same user, same abuse surface.
 const rateLimited = createRateLimiter(60_000, 20);
 
 // A scan the pipeline never completed. The user is told to try again and then
@@ -31,7 +32,7 @@ const rateLimited = createRateLimiter(60_000, 20);
 type ScanStage = 'ocr' | 'upload';
 type ScanCtx = { var: { requestId?: string }; req: { method: string; url: string } };
 function logScanFailure(
-  c: ScanCtx, u: User, kind: 'label' | 'payment', stage: ScanStage, e: unknown,
+  c: ScanCtx, u: User, kind: 'label' | 'payment' | 'serial', stage: ScanStage, e: unknown,
 ): void {
   const what = stage === 'upload' ? 'image upload (R2)' : 'OCR';
   scanLog.child({ kind, stage }).error('scan failed', e);
@@ -261,6 +262,44 @@ scan.post('/payment', async (c) => {
     confidence: result.confidence,
     provider: result.provider,
   });
+});
+
+// The serial scanner's AI mode: read the printed S/N off a label whose code
+// won't decode. Nothing is stored — the shot only exists to read one string,
+// and the user confirms it before it lands on the line.
+scan.post('/serial', async (c) => {
+  const u = c.var.user;
+
+  const retryAfter = rateLimited(u.id);
+  if (retryAfter !== null) {
+    return c.json({ error: 'Too many scans, please wait.' }, 429, { 'Retry-After': String(retryAfter) });
+  }
+  const sql = getDb(c.env);
+
+  const form = await c.req.formData().catch(() => null);
+  if (!form) return c.json({ error: 'multipart/form-data required' }, 400);
+  const file = form.get('file') as File | null;
+  if (!(file instanceof File)) return c.json({ error: 'file is required' }, 400);
+
+  const { maxBytes, allowedMime } = await getUploadLimits(sql);
+  const imageMime = new Set([...allowedMime].filter(m => m.startsWith('image/')));
+  const mime = file.type || '';
+  if (!imageMime.has(mime)) {
+    return c.json({ error: `unsupported image type: ${mime || 'unknown'}` }, 415);
+  }
+  if (file.size > maxBytes) {
+    return c.json({ error: `file too large (max ${maxBytes} bytes)` }, 413);
+  }
+
+  try {
+    const result = await extractSerial(c.env, await file.arrayBuffer());
+    return c.json({ serial: result.serial, provider: result.provider });
+  } catch (e) {
+    logScanFailure(c, u, 'serial', 'ocr', e);
+    return c.json({
+      error: 'serial OCR failed — the AI recognition service is unavailable; contact your system manager if it persists',
+    }, 502);
+  }
 });
 
 export default scan;
