@@ -196,6 +196,19 @@ describe('the book closes at Ready to Pay', () => {
     expect(qty.status).toBe(409);
     expect(qty.body.error).toMatch(/past review/i);
   });
+
+  // The desktop PO page writes a Ready to Pay sell-price correction through
+  // this route: PATCH /api/orders refuses every line field once the book closes.
+  it('a manager can still reprice a line; the purchaser cannot', async () => {
+    const { id, alex, marcus } = await orderAt('ready_to_pay');
+    const line = (await getOrder(alex.token, id)).lines[0];
+    expect((await api('PATCH', `/api/inventory/${line.id}`, { token: marcus.token, body: { sellPrice: 55 } })).status).toBe(403);
+    expect((await api('PATCH', `/api/inventory/${line.id}`, { token: alex.token, body: { sellPrice: 55 } })).status).toBe(200);
+    const after = await api<{ order: { lifecycle: string; lines: { id: string; sellPrice: number | null }[] } }>(
+      'GET', `/api/orders/${id}`, { token: alex.token });
+    expect(after.body.order.lifecycle).toBe('ready_to_pay');
+    expect(after.body.order.lines.find(l => l.id === line.id)?.sellPrice).toBe(55);
+  });
 });
 
 describe('line status stays the inventory vocabulary', () => {

@@ -143,6 +143,11 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // Reviewing (the backend guards lines committed to sell orders).
   // Everything else stays read-only until such a move lands.
   const canReopen = !isPurchaser && orderLocked && !isArchived;
+  // Payment review is where a manager corrects the commission projection, so
+  // sell price survives the Ready to Pay lock. It goes through the inventory
+  // line PATCH, which takes sellPrice on a closed-book PO; PATCH /api/orders
+  // refuses every line field there.
+  const canEditSellPrice = !isPurchaser && order.lifecycle === 'ready_to_pay' && !isArchived;
   const [status, setStatus] = useState(effectiveStatus);
   // The stage as last written. Normally the one the page opened with, but a
   // save that has to keep the user here (a photo upload that failed) has
@@ -694,7 +699,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // purchaser can't fix that line at this stage anyway.
   const canSave =
     dirty && !saving && !txnBlocked && !cashShotBlocked && !trackingIncomplete
-    && (!orderLocked || (canReopen && statusDirty))
+    && (!orderLocked || (canReopen && statusDirty) || (canEditSellPrice && linesDirty))
     && (!canEditOrder || !(linesDirty || statusDirty) || lines.every(lineReady));
 
   // Localized "Brand, Quantity" list of what a line is still waiting on. The
@@ -752,6 +757,23 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       // Past the purchaser's edit window only the note is theirs to change;
       // sending the line/pricing keys too would trip the backend's 403.
       if (!canEditOrder) {
+        // Before /advance, so a stage move never steps on unsaved prices.
+        // Sequential, and each line is marked clean as it lands, so a retry
+        // after a mid-loop failure re-sends only what didn't.
+        let pricesWritten = false;
+        if (canEditSellPrice) {
+          for (const l of lines) {
+            if (!l._id || !l._dirty) continue;
+            const sp = l.sellPrice == null || l.sellPrice === '' ? null : Number(l.sellPrice);
+            // A price typed back to its old value would still log a 'priced'
+            // event server-side.
+            if (sp !== (serverLineById.get(l._id)?.sellPrice ?? null)) {
+              await api.patch(`/api/inventory/${l._id}`, { sellPrice: sp });
+              pricesWritten = true;
+            }
+            setLines(ls => ls.map(x => (x._id === l._id ? { ...x, _dirty: false } : x)));
+          }
+        }
         if (notesDirty) await api.patch(`/api/orders/${order.id}`, { notes });
         // Manager reopening a Done order — the one stage move a closed order
         // accepts. /advance cascades line statuses server-side, so no line
@@ -765,6 +787,13 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
             await onReload();
             return;
           }
+        }
+        // Stay on the PO: the manager is mid-review and wants to see the
+        // commission the new prices project.
+        if (pricesWritten && onReload) {
+          window.__showToast?.('Saved ' + order.id, 'success');
+          await onReload();
+          return;
         }
         onSaved('Saved ' + order.id);
         return;
@@ -1638,6 +1667,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
           onConfirmError={showErrorDialog}
           duplicateOnLines={dupByIdx.get(activeIdx)}
           readOnly={!canEditOrder}
+          sellPriceEditable={canEditSellPrice}
           missingFields={missingNamesFor(lines[activeIdx])}
           market={marketFor(lines[activeIdx].partNumber)}
           photoCtx={{
