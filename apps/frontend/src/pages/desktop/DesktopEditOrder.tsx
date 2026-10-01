@@ -20,6 +20,7 @@ import {
   blankLine, brandConfirmPending, duplicatesByIndex, findDuplicatePartNumbers, lineBlockerMessages,
   type DuplicatePartGroup, type Line,
 } from './submit/line';
+import { editLineToPatch, orderLineToEditLine, type EditLine } from './submit/editLine';
 import { DupPartDialog } from './submit/DupPartDialog';
 import { AddLineMenu } from './submit/AddLineMenu';
 import { OrderCategoryChips } from '../../components/OrderCategoryChips';
@@ -99,10 +100,6 @@ type Props = {
    *  Optional so an older shell that still navigates away keeps working. */
   onReload?: () => Promise<void>;
 };
-
-// Internal line state — the shared `Line` plus the original DB id (when the
-// line came from the server) and a dirty marker so we can scope the PATCH.
-type EditLine = Line & { _id?: string; _dirty?: boolean };
 
 // Edit-order page lifted from design/dashboard.jsx#EditOrderPage. Table is
 // read-only summary rows; clicking a row opens the right-side LineDrawer
@@ -1903,74 +1900,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
 }
 
 // ─── Conversion helpers ──────────────────────────────────────────────────────
-function orderLineToEditLine(l: OrderLine): EditLine {
-  return {
-    _cid:           crypto.randomUUID(),
-    _id:            l.id,
-    category:       l.category,
-    photos:         l.photos ?? [],
-    brand:          l.brand ?? undefined,
-    capacity:       l.capacity ?? undefined,
-    type:           l.type ?? undefined,
-    generation:     l.generation ?? undefined,
-    classification: l.classification ?? undefined,
-    rank:           l.rank ?? undefined,
-    speed:          l.speed ?? undefined,
-    interface:      l.interface ?? undefined,
-    formFactor:     l.formFactor ?? undefined,
-    description:    l.description ?? undefined,
-    itemType:      l.itemType ?? undefined,
-    partNumber:     l.partNumber ?? undefined,
-    serialNumber:   l.serialNumber ?? undefined,
-    chipNumber:     l.chipNumber ?? undefined,
-    condition:      l.condition,
-    qty:            l.qty,
-    // An unpriced line (purchaser raised it, manager prices it at Reviewing)
-    // opens the drawer blank rather than with a 0 to clear first.
-    unitCost:       l.unitCost || '',
-    sellPrice:      l.sellPrice ?? undefined,
-    scanImageId:    l.scanImageId ?? undefined,
-    scanImageUrl:   l.scanImageUrl ?? undefined,
-    health:         l.health,
-    rpm:            l.rpm,
-  };
-}
-
-function editLineToPatch(l: EditLine, status?: string) {
-  const sp = l.sellPrice;
-  return {
-    id:             l._id!,
-    status,
-    // Sent so a recategorisation made in the drawer survives Save. Without it
-    // the backend keeps the stored category and silently drops the change.
-    category:       l.category,
-    sellPrice:      sp == null || sp === '' ? null : Number(sp),
-    qty:            Number(l.qty) || 0,
-    unitCost:       Number(l.unitCost) || 0,
-    brand:          l.brand ?? null,
-    capacity:       l.capacity ?? null,
-    type:           l.type ?? null,
-    generation:     l.generation ?? null,
-    classification: l.classification ?? null,
-    rank:           l.rank ?? null,
-    speed:          l.speed ?? null,
-    interface:      l.interface ?? null,
-    formFactor:     l.formFactor ?? null,
-    description:    l.description ?? null,
-    itemType:      l.itemType ?? null,
-    partNumber:     l.partNumber ?? null,
-    serialNumber:   l.serialNumber ?? null,
-    chipNumber:     l.chipNumber ?? null,
-    condition:      l.condition,
-    health:         l.health ?? null,
-    rpm:            l.rpm ?? null,
-    // A scan performed in the drawer must survive Save; null keeps the stored
-    // value (the backend applies these with COALESCE, like every field here).
-    scanImageId:    l.scanImageId ?? null,
-    scanConfidence: l.scanConfidence ?? null,
-  };
-}
-
 function editLineToInsert(l: EditLine, status: string) {
   const sp = l.sellPrice;
   return {

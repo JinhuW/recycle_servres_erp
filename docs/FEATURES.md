@@ -249,43 +249,43 @@ on to Sold once every line has sold (v1.164.0).
   - Opening and leaving the check re-reads the PO, so neither page works from
     the other's stale copy. A PO page with unsaved edits refuses to open it
     (v1.189.1).
+  - Each row carries its PO line number (#1, #2… — the PO page's numbering,
+    kept while rows regroup), and a RAM row shows its device type (Desktop /
+    Server / Laptop) beside the class, rank and speed chips (v1.190.0).
   - Every line's count starts at its full qty (v1.188.1). Ticking the
-    checkbox confirms the line, and a ticked line sinks below a *Checked*
-    divider, newest first, with an Undo. Flagged lines sit between the open
-    and the checked ones.
+    checkbox confirms the line at the count it shows, and a ticked line sinks
+    below a *Checked* divider, newest first, with an Undo.
   - Checked is its own state, never inferred from the count. Lowering a line
-    with − turns it amber and takes its tick away. Ticking an amber line opens
-    the flag editor prefilled "Short count · Counted n of m". A tick only
-    holds while the count covers the line's *current* qty: a line whose qty is
-    raised on the PO page after it was ticked goes back to amber (v1.189.1).
+    with − turns it amber and takes its tick away; ticking it then confirms
+    the short count (v1.190.0). Finish review lists the lines checked short.
+  - **Edit** (pencil, or lowercase e) opens the PO page's line drawer on that
+    line, so the manager fixes the specs, qty or cost to what actually
+    arrived. Confirm writes it with the same rules as the PO page (brand
+    confirmation, required fields, serial checks). An edit that changes the
+    qty clears that line's tick, since the new units were never counted
+    (v1.190.0). Photos are still edited on the PO page.
+  - Flags, extra items and *Send flags to purchaser* are gone (v1.190.0):
+    a problem is fixed with Edit instead of reported. Past
+    `box_check_flagged` events still show in the PO history.
   - **Check all remaining** ticks every line still at its full count and
-    leaves amber lines for a decision.
+    leaves amber lines for their own tick.
   - The scan box takes a label scanner. It matches an exact part number, then
-    a prefix, then a recorded serial. A scan goes to a matching line still
-    open first, then an amber one (which opens its flag), then a flagged one.
-    A prefix that fits lines with different part numbers ticks nothing and
-    names them. A scan that matches nothing, or matches a line already
-    checked, can be recorded as an extra item (v1.189.1).
+    a prefix, then a recorded serial, and ticks the line it lands on at its
+    count. A scan goes to a matching line still open first, then an amber
+    one. A prefix that fits lines with different part numbers ticks nothing
+    and names them.
   - A scan works with nothing focused: a character typed onto the page that
     is not a shortcut starts the scan in the box, so a label never runs as
-    shortcuts. The shortcuts are ↑↓/j k, Space, + −, lowercase f and /; a
-    scanner sends uppercase. Escape under an open dialog closes only the
-    dialog (v1.189.1).
-  - A flag is one of Missing, Short count, Wrong part, Damaged or Not as
-    described, plus a note. A short count is only ever a flag; the line qty
-    does not change.
-  - Progress is saved on the server (`order_line_checks`,
-    `order_check_extras`), so a reload or a second manager sees the same
-    count. Last write per line wins; there is no live sync. Nothing can be
-    changed until the saved count has loaded, and changes still waiting to
-    save go out when the page is left (v1.189.1).
-  - Once every line is checked or flagged: with no problems at Reviewing,
-    **Approve for payment** moves the PO to Ready to Pay (re-reading the stage
-    first). With problems, **Send flags to purchaser** notifies the owner and
-    writes a `box_check_flagged` event to the PO's history. The stage does not
-    move. Each flag and extra is sent once and then marked *sent*; Send only
-    offers what hasn't gone out, and editing a flag's reason or note makes it
-    news again (v1.189.1).
+    shortcuts. The shortcuts are ↑↓/j k, Space, + −, lowercase e and /; a
+    scanner sends uppercase. Escape closes the drawer or a dialog first
+    (v1.189.1).
+  - Progress is saved on the server (`order_line_checks`), so a reload or a
+    second manager sees the same count. Last write per line wins; there is no
+    live sync. Nothing can be changed until the saved count has loaded, and
+    changes still waiting to save go out when the page is left (v1.189.1).
+  - Once every line is checked, **Approve for payment** at Reviewing moves
+    the PO to Ready to Pay (re-reading the stage first). Short lines don't
+    block it.
   - The endpoints (`/api/orders/:id/checks…`) 403 anyone whose real role is
     not manager. The page and button are hidden from a manager previewing as
     purchaser, and the route bounces them without leaving a Back entry

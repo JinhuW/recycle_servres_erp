@@ -3865,7 +3865,6 @@ button.rsheet-box:hover { background: color-mix(in oklch, var(--accent) 10%, tra
 .bc-meter i { display: block; flex-basis: 0; min-width: 0; transition: flex-grow 0.3s ease; }
 .bc-m-done { background: var(--accent); }
 .bc-m-part { background: var(--warn); }
-.bc-m-flag { background: var(--neg); }
 .bc-m-open { background: transparent; }
 .bc-legend { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 
@@ -3888,7 +3887,8 @@ button.rsheet-box:hover { background: color-mix(in oklch, var(--accent) 10%, tra
 .bc-row:hover td { background: var(--bg-soft); }
 .bc-cb-cell { width: 44px; }
 .bc-thumb-cell { width: 52px; }
-.bc-flag-cell { width: 44px; text-align: right; }
+.bc-no-cell { width: 40px; font-size: 12px; }
+.bc-edit-cell { width: 44px; text-align: right; }
 .bc-cond { font-size: 12px; white-space: nowrap; }
 .bc-cb {
   width: 24px; height: 24px; border-radius: 6px; padding: 0;
@@ -3900,7 +3900,6 @@ button.rsheet-box:hover { background: color-mix(in oklch, var(--accent) 10%, tra
 .bc-partial .bc-cb { border-color: var(--warn); background: var(--warn-soft); }
 .bc-partial .bc-cb::after { content: ''; width: 10px; height: 2.5px; border-radius: 2px; background: var(--warn-strong); }
 .bc-done .bc-cb { background: var(--accent); border-color: var(--accent); }
-.bc-flagged .bc-cb { border-color: var(--neg); background: var(--neg-soft); color: var(--neg); }
 .bc-thumb {
   width: 40px; height: 40px; border-radius: 8px; object-fit: cover; display: block;
   border: 1px solid var(--border); background: var(--bg-soft);
@@ -3908,20 +3907,16 @@ button.rsheet-box:hover { background: color-mix(in oklch, var(--accent) 10%, tra
 .bc-thumb-empty { display: grid; place-items: center; color: var(--fg-subtle); }
 .bc-pn { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
 .bc-spec { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 2px; font-size: 11.5px; color: var(--fg-subtle); }
-.bc-flagnote { margin-top: 4px; font-size: 12px; color: var(--neg); display: flex; align-items: center; gap: 5px; }
 .bc-count { display: inline-flex; align-items: center; gap: 2px; }
 .bc-count-n { min-width: 58px; text-align: center; font-size: 13px; font-variant-numeric: tabular-nums; }
 .bc-count-n b { font-weight: 600; }
 .bc-partial .bc-count-n b { color: var(--warn-strong); }
 .bc-done .bc-count-n b { color: var(--accent-strong); }
-.bc-flagbtn { color: var(--fg-subtle); }
-.bc-flagbtn:hover:not(:disabled), .bc-flagbtn.on { color: var(--neg); background: var(--neg-soft); }
 .bc-done .bc-pn { text-decoration: line-through; text-decoration-color: var(--fg-subtle); }
 /* Dim the content, never a td: opacity on a cell would fade the row's
    hover/selected wash with it. */
 .bc-done .bc-thumb, .bc-done .bc-pn, .bc-done .bc-spec { opacity: 0.55; }
 .bc-done .bc-cond { color: var(--fg-subtle); }
-.bc-flagged td:first-child { box-shadow: inset 3px 0 0 var(--neg); }
 
 /* Group rows: the Flagged and Checked dividers. */
 .bc-group td {
@@ -3935,22 +3930,10 @@ button.rsheet-box:hover { background: color-mix(in oklch, var(--accent) 10%, tra
   text-transform: none; letter-spacing: 0; font-weight: 500;
 }
 .bc-group-empty td { text-align: center; color: var(--fg-muted); font-size: 12.5px; padding: 18px; }
+.bc-editbtn { color: var(--fg-subtle); }
+.bc-editbtn:hover:not(:disabled), .bc-editbtn.on { color: var(--accent-strong); background: var(--accent-soft); }
 
-.bc-flag-row td { background: var(--bg-soft); }
-.bc-flag-edit { display: grid; gap: 10px; padding: 4px 0; }
-.bc-flag-label { font-size: 12px; font-weight: 600; color: var(--fg-muted); }
-.bc-flag-edit .seg { width: fit-content; flex-wrap: wrap; }
-.bc-flag-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
-.btn.bc-btn-neg { background: var(--neg); border-color: var(--neg); color: white; }
-.btn.bc-btn-neg:hover:not(:disabled) { background: color-mix(in oklch, var(--neg) 88%, black); }
 
-.bc-extras { border-top: 1px solid var(--border); padding: 12px 18px; display: grid; gap: 6px; }
-.bc-extras-head { font-size: 11px; font-weight: 600; color: var(--fg-subtle); text-transform: uppercase; letter-spacing: 0.06em; }
-.bc-extra { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--neg); }
-.bc-extra .muted { color: var(--fg-subtle); }
-.bc-extra .btn { margin-left: auto; }
-/* Already with the purchaser: still a problem, no longer news. */
-.bc-sent { font-size: 10.5px; padding: 1px 6px; text-transform: lowercase; }
 .bc-load-error { display: flex; align-items: center; gap: 12px; color: var(--neg); font-size: 13px; }
 
 /* Compare panel: the purchaser's photo next to the part in hand. */
