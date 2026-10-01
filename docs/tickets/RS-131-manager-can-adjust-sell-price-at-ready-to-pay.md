@@ -2,13 +2,13 @@
 id: RS-131
 title: Manager can adjust sell price at Ready to Pay
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-01
 reporter: jinhu
 branch: feat/rs131-sell-price-ready-to-pay
-pr:
-version:
+pr: "#444"
+version: 1.191.1
 related: []
 ---
 
