@@ -2,13 +2,13 @@
 id: RS-127
 title: Pre-release review fixes for box check and packing list
 type: bug
-status: in-progress
+status: done
 priority: P1
 created: 2026-09-30
 reporter: jinhu
 branch: fix/release-review-v1189
-pr:
-version:
+pr: "#433"
+version: 1.189.1
 related: [RS-124, RS-125, RS-126]
 ---
 
@@ -31,20 +31,20 @@ packing list by PO) returned 15 confirmed findings.  The serious ones:
 
 ## Acceptance criteria
 
-- [ ] Entering or leaving `/purchase-orders/<id>/check` refetches the order; a
+- [x] Entering or leaving `/purchase-orders/<id>/check` refetches the order; a
       dirty PO page refuses to open Check box; the button follows the
       effective role and a non-manager bounce replaces history.
-- [ ] A tick only counts while counted ≥ the line's current qty; writes clamp
+- [x] A tick only counts while counted ≥ the line's current qty; writes clamp
       counted to qty.
-- [ ] Nothing writes until the saved checks loaded; a failed load shows Retry.
-- [ ] Pending writes go out on exit; Send/Approve wait for in-flight writes
+- [x] Nothing writes until the saved checks loaded; a failed load shows Retry.
+- [x] Pending writes go out on exit; Send/Approve wait for in-flight writes
       and abort if one failed.
-- [ ] A scan typed onto the page lands in the scan box, not the shortcuts;
+- [x] A scan typed onto the page lands in the scan box, not the shortcuts;
       Space acts on the selected row; Escape under a dialog closes only it.
-- [ ] Scans prefer open lines, refuse to guess between distinct part numbers,
+- [x] Scans prefer open lines, refuse to guess between distinct part numbers,
       and a re-scan of a checked line reads "already checked".
-- [ ] Send sends only flags and extras not yet sent, and shows what was sent.
-- [ ] Packing lists place a line by its lot's current warehouse.
+- [x] Send sends only flags and extras not yet sent, and shows what was sent.
+- [x] Packing lists place a line by its lot's current warehouse.
 
 ## Out of scope
 
