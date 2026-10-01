@@ -5,6 +5,7 @@ import type { Category } from '../lib/types';
 // straight in without a mapping step.
 type SpecLine = {
   category: Category;
+  type?: string | null;
   classification?: string | null;
   rank?: string | null;
   speed?: string | null;
@@ -18,9 +19,12 @@ type Chip = { label: string; key: string; accent?: boolean };
 
 // `accent` chips carry the spec a buyer actually scans for at a glance — RAM
 // rank + speed — so they get the colored pill; the rest stay quiet.
-function chipsFor(l: SpecLine): Chip[] {
+// `withType` adds the RAM device type (Desktop / Server / Laptop) — a bench
+// check reads it off the stick; the list screens leave it to the filters.
+function chipsFor(l: SpecLine, withType = false): Chip[] {
   if (l.category === 'RAM') {
     return [
+      withType && l.type && { key: 'type', label: l.type },
       l.classification && { key: 'class', label: l.classification },
       l.rank && { key: 'rank', label: l.rank, accent: true },
       l.speed && { key: 'speed', label: l.speed + 'MHz', accent: true },
@@ -44,12 +48,12 @@ function chipsFor(l: SpecLine): Chip[] {
   return [];
 }
 
-export function lineHasSpecChips(line: SpecLine): boolean {
-  return chipsFor(line).length > 0;
+export function lineHasSpecChips(line: SpecLine, withType = false): boolean {
+  return chipsFor(line, withType).length > 0;
 }
 
-export function LineSpecChips({ line }: { line: SpecLine }) {
-  const chips = chipsFor(line);
+export function LineSpecChips({ line, withType = false }: { line: SpecLine; withType?: boolean }) {
+  const chips = chipsFor(line, withType);
   if (chips.length === 0) return null;
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>
