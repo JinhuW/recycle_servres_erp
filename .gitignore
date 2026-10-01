@@ -68,3 +68,7 @@ backups/
 
 # Playwright MCP browser-automation scratch (snapshots, screenshots, console logs).
 .playwright-mcp/
+
+# One-off data exports parked next to the backup cron's files; they hold real
+# business data and must never be committed.
+backup/*.csv

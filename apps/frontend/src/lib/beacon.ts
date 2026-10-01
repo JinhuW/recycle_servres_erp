@@ -86,8 +86,6 @@ export function createBeacon(post: Post) {
   };
 }
 
-export type Beacon = ReturnType<typeof createBeacon>;
-
 // ── The wired one ────────────────────────────────────────────────────────────
 
 // Bound at module init, not lazily on the first 401. A listener registered only

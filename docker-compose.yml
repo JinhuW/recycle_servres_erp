@@ -48,14 +48,17 @@ services:
   postgres-exporter:
     image: quay.io/prometheuscommunity/postgres-exporter:v0.15.0
     container_name: recycle_pg_exporter
+    # Opt-in: `docker compose --profile metrics up`. The metrics role (0042,
+    # pg_monitor only) ships unable to log in (0141); enable it once by hand
+    # with ALTER ROLE metrics LOGIN PASSWORD '<secret>' and put the same
+    # secret in POSTGRES_METRICS_PASSWORD.
+    profiles: ["metrics"]
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      # The metrics role is created by migration 0042 and only has
-      # pg_monitor — no application-table access.
-      DATA_SOURCE_NAME: "postgresql://metrics:${POSTGRES_METRICS_PASSWORD:-metrics}@postgres:5432/recycle_erp?sslmode=disable"
+      DATA_SOURCE_NAME: "postgresql://metrics:${POSTGRES_METRICS_PASSWORD:-}@postgres:5432/recycle_erp?sslmode=disable"
       PG_EXPORTER_AUTO_DISCOVER_DATABASES: "false"
       # Default exposes :9187/metrics inside the compose net; not host-published.
     security_opt:

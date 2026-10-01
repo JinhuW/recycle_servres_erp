@@ -26,7 +26,7 @@ const rateLimited = createRateLimiter(60_000, 20);
 
 // Every field is a millisecond count or a small enum. Anything that could carry
 // a URL is deliberately absent: this endpoint must never become a second place
-// a vendor-portal token can land in the log.
+// a URL-borne token can land in the log.
 const MAX_MS = 10 * 60_000;
 
 const num = (v: unknown): number | undefined =>

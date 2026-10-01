@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { resetDb } from './helpers/db';
+import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
 
@@ -21,8 +21,16 @@ describe('POST /api/inventory/transfer — concurrent transfer of the same line'
 
     for (let i = 0; i < 6; i++) {
       const inv = await api<{ items: InvRow[] }>('GET', '/api/inventory', { token });
+      // The seed commits some lines to Shipped sell orders, and a transfer
+      // refuses those outright — neither racer would win.
+      const committed = new Set((await getTestDb()<{ id: string }[]>`
+        SELECT sl.inventory_id AS id FROM sell_order_lines sl
+        JOIN sell_orders so ON so.id = sl.sell_order_id
+        WHERE so.status IN ('Shipped', 'Awaiting payment')
+      `).map(r => r.id));
       const line = inv.body.items.find(
-        l => (l.status === 'Reviewing' || l.status === 'Done') && l.warehouse_id && l.qty > 0,
+        l => (l.status === 'Reviewing' || l.status === 'Done') && l.warehouse_id && l.qty > 0
+          && !committed.has(l.id),
       );
       if (!line) throw new Error('no transferable line in seed');
       const dests = WAREHOUSES.filter(w => w !== line.warehouse_id);

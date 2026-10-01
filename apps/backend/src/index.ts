@@ -39,13 +39,10 @@ import membersRoutes from './routes/members';
 import lookupsRoutes from './routes/lookups';
 import categoriesRoutes from './routes/categories';
 import itemTypesRoutes from './routes/itemTypes';
-import attachmentsRoutes from './routes/attachments';
 import workspaceRoutes from './routes/workspace';
 import { fxRates as fxRatesRoutes } from './routes/fxRates';
-import vendorPublicRoutes from './routes/vendorPublic';
 import publicFormsRoutes from './routes/publicForms';
 import webSubmissionsRoutes from './routes/webSubmissions';
-import vendorBidsRoutes from './routes/vendorBids';
 import activityRoutes from './routes/activity';
 import clientErrorRoutes from './routes/clientErrors';
 import clientTimingRoutes from './routes/clientTimings';
@@ -73,8 +70,8 @@ app.use('*', (c, next) => {
 
 // One structured line per completed request. requestId (and userId, once auth
 // runs) arrive from the log context opened above. The path is redacted the same
-// way the error sink redacts it — vendor portal tokens travel in the URL and
-// must not land in stdout.
+// way the error sink redacts it — public tokens and secrets travel in the URL
+// and must not land in stdout.
 //
 // This deliberately overlaps metricsMiddleware on status and duration: the
 // histogram labels by c.req.routePath to bound cardinality, while this carries
@@ -246,7 +243,6 @@ const isUploadPath = (path: string): boolean =>
   path === '/api/scan/payment' ||
   // The ram4cash sell form sends label photos with its payload.
   path === '/api/public/intake' ||
-  path === '/api/attachments' ||
   /^\/api\/(orders|sell-orders)\/[^/]+\/status-meta\/[^/]+\/attachments$/.test(path) ||
   // A line photo comes straight off a phone camera at several MB, uncompressed.
   // Left under the JSON cap it 413s before the handler that would have checked
@@ -287,7 +283,6 @@ app.use('*', async (c, next) => {
 
 // ── Public ──────────────────────────────────────────────────────────────────
 app.route('/api/auth', authRoutes);
-app.route('/api/public/vendor', vendorPublicRoutes);
 // Website forms (ram4cash.com sell lot, recycleservers.com quote).
 app.route('/api/public', publicFormsRoutes);
 app.route('/api/public/shippo', shippoWebhookRoutes);
@@ -325,9 +320,7 @@ app.use('/api/lookups/*', authMiddleware);
 app.use('/api/categories/*', authMiddleware);
 app.use('/api/item-types', authMiddleware);
 app.use('/api/item-types/*', authMiddleware);
-app.use('/api/attachments/*', authMiddleware);
 app.use('/api/workspace/*', authMiddleware);
-app.use('/api/vendor-bids/*', authMiddleware);
 // The feed lives at the bare /api/activity, which `/*` alone doesn't cover.
 app.use('/api/activity', authMiddleware);
 app.use('/api/activity/*', authMiddleware);
@@ -362,10 +355,8 @@ app.route('/api/members', membersRoutes);
 app.route('/api/lookups', lookupsRoutes);
 app.route('/api/categories', categoriesRoutes);
 app.route('/api/item-types', itemTypesRoutes);
-app.route('/api/attachments', attachmentsRoutes);
 app.route('/api/workspace', workspaceRoutes);
 app.route('/api/workspace', fxRatesRoutes);
-app.route('/api/vendor-bids', vendorBidsRoutes);
 app.route('/api/activity', activityRoutes);
 app.route('/api/client-errors', clientErrorRoutes);
 app.route('/api/client-timings', clientTimingRoutes);

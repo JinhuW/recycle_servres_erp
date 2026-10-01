@@ -66,7 +66,7 @@ clientErrors.post('/', async (c) => {
   if (!message) return c.json({ error: 'message is required' }, 400);
 
   // The failing path comes from the browser, so it gets the same redaction as
-  // anything we log ourselves — a vendor-portal or Shippo URL carries its whole
+  // anything we log ourselves — a portal or Shippo URL carries its whole
   // credential in the path, and this sink is durable.
   const raw = str(body.path, MAX.href);
   let path: string | undefined;

@@ -74,8 +74,16 @@ describe('readSafeNext', () => {
     '/\\evil.com',             // backslash form some browsers normalise to //
     'javascript:alert(1)',
     'oauth/authorize',         // relative, not rooted
-  ])('rejects %s', (candidate) => {
+    // The URL parser drops tab/LF/CR, so each of these resolves to //evil.com.
+    '/\t/evil.com',
+    '/\n/evil.com',
+    '/\r/evil.com',
+  ])('rejects %j', (candidate) => {
     expect(readSafeNext(`?next=${encodeURIComponent(candidate)}`)).toBeNull();
+  });
+
+  it('rejects the percent-encoded tab form as it arrives in the address bar', () => {
+    expect(readSafeNext('?next=%2F%09%2Fevil.com')).toBeNull();
   });
 });
 

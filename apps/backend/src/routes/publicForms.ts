@@ -217,7 +217,7 @@ function unidentified(l: SellLine, photos: File[]): boolean {
 }
 
 // Scoped to the two form paths: this sub-app is mounted at /api/public, and a
-// '*' here would also throttle the vendor portal and the Shippo webhook.
+// '*' here would also throttle the Shippo webhook.
 const limit: MiddlewareHandler<{ Bindings: Env }> = async (c, next) => {
   const retryAfter = rateLimited(clientIp((n) => c.req.header(n)));
   if (retryAfter !== null) {

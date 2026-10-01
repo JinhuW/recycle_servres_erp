@@ -1046,16 +1046,16 @@ sellOrders.delete('/:id/status-meta/:status/attachments/:attachmentId', async (c
   return c.json({ ok: true });
 });
 
-// Sell-order lifecycle. Each forward transition into Shipped/Awaiting/Done
-// must carry evidence (a note OR one or more attachment ids) — PRD §7.4.
+// Sell-order lifecycle. A transition may carry a note; files are evidence
+// through the status-meta attachments endpoints, and only a reopen requires
+// the note.
 // Transitioning to Done also flips every underlying inventory line to Done
 // and writes an audit row per line, so the inventory page stays in sync.
 //
 // Evidence is persisted on main's split schema (migration 0003): the text
 // note lives on sell_order_status_meta (PK = sell_order_id+status, columns
 // note/set_at/set_by); file evidence lives in its own table and is uploaded
-// via the status-meta attachments endpoints above. `attachmentIds` here
-// (generic /api/attachments rows) only needs to satisfy the evidence gate.
+// via the status-meta attachments endpoints above.
 // Transition map is the single source of truth for what status changes
 // are legal. Any open stage can jump straight to Awaiting payment, to Done
 // (the deal can be marked paid at any point), or to Closed. Done has no outgoing edges
@@ -1195,7 +1195,7 @@ sellOrders.post('/:id/status', async (c) => {
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const id = c.req.param('id');
   const body = (await c.req.json().catch(() => null)) as
-    | { to: string; note?: string; attachmentIds?: string[]; closeReasonId?: string }
+    | { to: string; note?: string; closeReasonId?: string }
     | null;
   if (!body?.to) return c.json({ error: 'to is required' }, 400);
   if (!KNOWN_STATUSES.has(body.to)) {

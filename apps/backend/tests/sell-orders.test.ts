@@ -1,14 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { resetDb } from './helpers/db';
-import { api, multipart } from './helpers/app';
+import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
 import { getTestDb } from './helpers/db';
 import { eventsOf } from './helpers/sellOrderEvents';
-
-const pdf = join(__dirname, 'fixtures', 'invoice.pdf');
 
 const findSellableLine = (token: string) => freeSellableLine(token);
 
@@ -61,21 +57,6 @@ describe('POST /api/sell-orders/:id/status', () => {
       'GET', `/api/sell-orders/${id}`, { token });
     expect(got.body.order.status).toBe('Shipped');
     expect(got.body.order.statusMeta?.Shipped?.note).toBe('FedEx 7732');
-  });
-
-  it('Awaiting payment accepts attachments', async () => {
-    const { token } = await loginAs(ALEX);
-    const id = await createDraftSellOrder(token);
-    await api('POST', `/api/sell-orders/${id}/status`, { token, body: { to: 'Shipped', note: 'ship' } });
-
-    const file = new Blob([readFileSync(pdf)], { type: 'application/pdf' });
-    const up = await multipart('/api/attachments', { file }, { token });
-    const attachId = (up.body as { id: string }).id;
-
-    const r = await api('POST', `/api/sell-orders/${id}/status`, {
-      token, body: { to: 'Awaiting payment', attachmentIds: [attachId] },
-    });
-    expect(r.status).toBe(200);
   });
 
   it('Done consumes stock: decrements the source line qty (status unchanged)', async () => {

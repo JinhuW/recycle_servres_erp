@@ -266,6 +266,12 @@ function normFeeNote(v: string | null | undefined): string | null {
   return v == null ? null : (v.trim() || null);
 }
 
+// Every proof rule on the way out of Draft keys on exactly these two values;
+// a third would match none of them and skip them all.
+function isOrderPayment(v: unknown): v is 'company' | 'self' | undefined {
+  return v === undefined || v === 'company' || v === 'self';
+}
+
 // Absent and null both mean "not said"; only a third value is a bad request.
 function isPaymentMethod(v: unknown): v is 'paypal' | 'cash' | null | undefined {
   return v === undefined || v === null || v === 'paypal' || v === 'cash';
@@ -1170,6 +1176,7 @@ orders.post('/', async (c) => {
     return c.json({ error: 'paypalTxnId is too long' }, 400);
   }
   const newPaypalTxnId = normPaypalTxnId(body.paypalTxnId);
+  if (!isOrderPayment(body.payment)) return c.json({ error: 'payment must be company or self' }, 400);
   if (!isPaymentMethod(body.paymentMethod)) {
     return c.json({ error: 'paymentMethod must be paypal or cash' }, 400);
   }
@@ -1278,7 +1285,7 @@ orders.post('/', async (c) => {
 //   lines:          updates for existing lines (each carries `id`)
 //   addLines:       new line rows to INSERT (no `id`)
 //   removeLineIds:  ids to DELETE (409 while an open, non-archived sell order
-//                   or a vendor bid names one)
+//                   names one)
 type LineFields = {
   // Editable: a line filed under the wrong category is corrected in place
   // rather than deleted and retyped. Switching clears the spec fields the old
@@ -1507,6 +1514,7 @@ orders.patch('/:id', async (c) => {
       }
     | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
+  if (!isOrderPayment(body.payment)) return c.json({ error: 'payment must be company or self' }, 400);
   if (!isPaymentMethod(body.paymentMethod)) {
     return c.json({ error: 'paymentMethod must be paypal or cash' }, 400);
   }
@@ -2283,10 +2291,9 @@ orders.patch('/:id', async (c) => {
         `A line you tried to remove is on ${describeSellOrders(blockingSellOrderIds)} and cannot be deleted. Archive or cancel those sell orders first.`,
         'A line you tried to remove is on an open sell order — a manager has to remove it.'), 409);
     }
-    // Sell orders are handled above; the only other NO ACTION FK into
-    // order_lines is vendor_bid_lines.inventory_id.
-    if (/foreign key|violates|referenced/i.test(msg)) {
-      return c.json({ error: 'A line you tried to remove is still referenced by a vendor bid and cannot be deleted' }, 409);
+    // A line value outside a column's CHECK (health 0–100, rpm > 0, qty > 0).
+    if ((e as { code?: string }).code === '23514') {
+      return c.json({ error: 'A line value is out of range' }, 400);
     }
     throw e;
   }
@@ -2330,6 +2337,7 @@ orders.post('/draft', async (c) => {
     if (catErr) return c.json({ error: catErr }, 400);
   }
 
+  if (!isOrderPayment(body?.payment)) return c.json({ error: 'payment must be company or self' }, 400);
   const whErr = await warehouseErr(sql, body?.warehouseId ?? null);
   if (whErr) return c.json({ error: whErr }, 400);
   // No warehouse named → the owner's home warehouse (FK-valid by construction).
@@ -2399,6 +2407,15 @@ orders.delete('/:id', async (c) => {
       SELECT storage_key AS k FROM order_line_photos WHERE order_id = ${id}
     ` as { k: string }[];
 
+    // The FK's SET NULL clears only order_id and trips the paired link CHECKs,
+    // so a draft that ever had a payment linked could never be deleted. No
+    // no_auto_link tombstone: the payment is free to find the PO it paid for.
+    await tx`
+      UPDATE bank_transactions
+         SET order_id = NULL, link_kind = NULL, link_auto = FALSE,
+             linked_by = NULL, linked_at = NULL
+       WHERE order_id = ${id}
+    `;
     await tx`DELETE FROM orders WHERE id = ${id}`; // order_lines cascade via FK
     return { kind: 'ok', scanned };
   });
@@ -3275,9 +3292,7 @@ orders.post('/:id/handoff', async (c) => {
     const err = sourceErr(body.source);
     if (err || body.source === null) return c.json({ error: err ?? 'source must be facebook, local, reddit, or other' }, 400);
   }
-  if (body.payment !== undefined && body.payment !== 'company' && body.payment !== 'self') {
-    return c.json({ error: 'payment must be company or self' }, 400);
-  }
+  if (!isOrderPayment(body.payment)) return c.json({ error: 'payment must be company or self' }, 400);
   // A self-paid order has no method: it is reimbursed from commission. The
   // company card names one, and cash is what lifts the transaction-id rule.
   // Absent means the row's; the advance refuses a company row with none.
@@ -3343,7 +3358,7 @@ orders.post('/:id/handoff', async (c) => {
     warehouseId: body.warehouseId as string | undefined,
     source: body.source as PackageSource | undefined,
     handoff,
-    payment: body.payment as 'company' | 'self' | undefined,
+    payment: body.payment,
     paymentMethod,
     paypalTxnId,
     paymentScreenshotKey: opt(body.paymentScreenshotKey),

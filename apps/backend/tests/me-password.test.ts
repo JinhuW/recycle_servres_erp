@@ -61,9 +61,10 @@ describe('POST /api/me/password', () => {
     const sessA = await loginAs(ALEX);
     const sessB = await loginAs(ALEX);
 
+    // No `rt` here: a browser never sends it to /api/me (it is scoped to
+    // /api/auth), and hand-setting it is what hid the caller being logged out.
     const r = await api('POST', '/api/me/password', {
       token: sessA.token,
-      cookies: { rt: sessA.cookies.rt },
       body: { currentPassword: 'demo', newPassword: NEW_PW },
     });
     expect(r.status).toBe(200);

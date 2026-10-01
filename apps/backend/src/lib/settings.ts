@@ -19,8 +19,8 @@ export async function getWorkspaceSetting<T>(
   return v === undefined || v === null ? fallback : (v as T);
 }
 
-// Attachment / evidence upload constraints. Single source for both the
-// generic attachments route and sell-order evidence uploads.
+// Attachment / evidence upload constraints. Single source for every upload
+// route: status-change evidence, line photos, scans and the public forms.
 const DEFAULT_UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
 // Absolute ceiling for upload_max_bytes regardless of workspace config, and
 // the HTTP-level body-limit cap. Uploads are buffered fully in memory by

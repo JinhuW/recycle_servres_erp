@@ -206,12 +206,12 @@ describe('request logging', () => {
     expect(JSON.parse(out.at(-1)!).error).toBeUndefined();
   });
 
-  it('redacts the vendor portal token from the logged path', async () => {
-    // The token is the only gate to a vendor's data — a bearer-equivalent
-    // secret that must never be replayable from the log stream.
-    await api('GET', '/api/public/vendor/s3cr3t-token/does-not-exist');
+  it('redacts a public URL secret from the logged path', async () => {
+    // The Shippo webhook's path segment is its whole credential — it must
+    // never be replayable from the log stream.
+    await api('GET', '/api/public/shippo/s3cr3t-token/does-not-exist');
     const line = JSON.parse(out.at(-1)!);
-    expect(line.path).toBe('/api/public/vendor/<redacted>/does-not-exist');
+    expect(line.path).toBe('/api/public/shippo/<redacted>/does-not-exist');
     expect(out.join('\n')).not.toContain('s3cr3t-token');
   });
 });
