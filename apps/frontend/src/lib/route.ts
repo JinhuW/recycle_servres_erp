@@ -174,7 +174,6 @@ export const DESKTOP_VIEW_TO_PATH = {
   inventory:  '/inventory',
   analysis:   '/inventory/analysis',
   sellorders: '/sell-orders',
-  vendorbids: '/vendor-bids',
   transfers:  '/transfers',
   websubmissions: '/web-submissions',
   activity:   '/activity',
@@ -199,7 +198,6 @@ export function pathToDesktopView(path: string): DesktopViewId {
   if (path === '/inventory/analysis') return 'analysis';
   if (path === '/inventory' || match('/inventory/:id', path)) return 'inventory';
   if (path === '/sell-orders' || match('/sell-orders/:id', path) || match('/sell-orders/:id/edit', path)) return 'sellorders';
-  if (path === '/vendor-bids' || match('/vendor-bids/:id', path)) return 'vendorbids';
   if (path === '/transfers') return 'transfers';
   if (path === '/web-submissions' || match('/web-submissions/:id', path)) return 'websubmissions';
   if (path === '/activity') return 'activity';
@@ -280,14 +278,25 @@ export function isAuthorizePath(path: string): boolean {
 // something reading `next` back the user lands on the dashboard and the
 // connector's popup waits forever.
 //
-// Only same-origin absolute paths are honoured. `//host` and `/\host` are
-// browser-relative-protocol forms that would navigate off-origin, so an
-// attacker-supplied `next` can't turn the login page into an open redirect.
+// Only same-origin absolute paths are honoured, so an attacker-supplied `next`
+// can't turn the login page into an open redirect. `//host` and `/\host` are
+// protocol-relative forms that navigate off-origin. Prefix checks alone are
+// not enough: the URL parser drops tab, CR and LF anywhere in the string, so
+// `/\t/evil.com` passes a `//` test and still lands on //evil.com. Control
+// characters and backslashes are refused outright, and the survivor is
+// resolved against a placeholder origin and must still be on it — the
+// returned path is the parser's reading, not the raw input.
+const UNSAFE_NEXT_CHARS = /[\x00-\x1f\\]/;
+const NEXT_BASE_ORIGIN = 'https://erp.invalid';
+
 export function readSafeNext(search: string): string | null {
   const raw = new URLSearchParams(search).get('next');
   if (!raw) return null;
-  if (!raw.startsWith('/') || raw.startsWith('//') || raw.startsWith('/\\')) return null;
-  return raw;
+  if (UNSAFE_NEXT_CHARS.test(raw)) return null;
+  if (!raw.startsWith('/') || raw.startsWith('//')) return null;
+  const u = new URL(raw, NEXT_BASE_ORIGIN);
+  if (u.origin !== NEXT_BASE_ORIGIN) return null;
+  return u.pathname + u.search + u.hash;
 }
 
 // Mobile view ids ↔ URL paths.

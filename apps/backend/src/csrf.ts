@@ -3,7 +3,7 @@ import type { Context, Next } from 'hono';
 // Same-site SPA defense-in-depth: every state-changing request must carry a
 // header the browser will not attach cross-site without a CORS preflight the
 // API does not grant. Safe methods, the health probe, the public
-// (unauthenticated, externally-called) vendor endpoints, the OAuth surfaces,
+// (unauthenticated, externally-called) website forms and Shippo webhook, the OAuth surfaces,
 // and the MCP JSON-RPC endpoint are exempt. Most OAuth routes (/token,
 // /revoke, /register, discovery) are not cookie-auth'd at all. The one
 // exception is /oauth/authorize/consent, which IS cookie-auth'd — but a

@@ -133,7 +133,7 @@ describe('csrfGuard', () => {
       json: (b: unknown, s?: number) => ({ __json: b, __status: s ?? 200 }),
     } as never;
   }
-  it('allows safe methods, /api/health, and public vendor; blocks header-less mutations', async () => {
+  it('allows safe methods, /api/health, and /api/public; blocks header-less mutations', async () => {
     let nexted = false; const next = async () => { nexted = true; };
     await csrfGuard(ctx('GET', '/api/orders') as never, next);
     expect(nexted).toBe(true);
@@ -141,7 +141,7 @@ describe('csrfGuard', () => {
     await csrfGuard(ctx('GET', '/api/health') as never, next);
     expect(nexted).toBe(true);
     nexted = false;
-    await csrfGuard(ctx('POST', '/api/public/vendor/bid') as never, next);
+    await csrfGuard(ctx('POST', '/api/public/quote') as never, next);
     expect(nexted).toBe(true);            // external unauth submission — no header required
     nexted = false;
     const blocked = await csrfGuard(ctx('POST', '/api/orders') as never, next) as never as { __status: number };

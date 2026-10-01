@@ -65,6 +65,9 @@ const readRefs = async (): Promise<RefRow[]> => {
 describe('0112 merges duplicate part numbers per category', () => {
   beforeEach(async () => {
     await resetDb();
+    // Both files also re-spell vendor_bid_lines, which 0142 dropped with the
+    // vendor portal. An empty stand-in lets the historical SQL replay as is.
+    await getTestDb()`CREATE TABLE vendor_bid_lines (part_number TEXT, category TEXT)`;
     // Two RAM spellings of one part, plus an SSD row that canonicalises the
     // same way and is a genuinely different product.
     await seedRef('rp-ram-hyphen', RAM_HYPHEN, 'RAM', {

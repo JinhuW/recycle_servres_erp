@@ -42,34 +42,6 @@ describe('sell-order audit events', () => {
     });
   });
 
-  it('vendor-bid promotion emits `created` with source: vendor_bid', async () => {
-    const { token } = await loginAs(ALEX);
-    const sql = getTestDb();
-
-    const bidRow = (await sql`
-      SELECT vb.id AS bid_id
-      FROM vendor_bids vb
-      JOIN vendor_bid_lines vbl ON vbl.bid_id = vb.id
-      WHERE vbl.line_status = 'accepted'
-        AND vbl.sell_order_id IS NULL
-        AND vbl.accepted_qty > 0
-      LIMIT 1
-    `)[0] as { bid_id: string } | undefined;
-    if (!bidRow) throw new Error('seed has no promotable vendor bid; expand seed.mjs');
-
-    const r = await api<{ sellOrderId: string }>(
-      'POST', `/api/vendor-bids/${bidRow.bid_id}/promote`, { token });
-    expect(r.status).toBe(201);
-
-    const events = await eventsOf(r.body.sellOrderId);
-    expect(events).toHaveLength(1);
-    expect(events[0].kind).toBe('created');
-    expect(events[0].detail).toMatchObject({
-      source: 'vendor_bid',
-      vendorBidId: bidRow.bid_id,
-    });
-  });
-
   it('PATCH that changes only `notes` emits one `meta_changed`', async () => {
     const { token } = await loginAs(ALEX);
     const line = await freeSellableLine(token);

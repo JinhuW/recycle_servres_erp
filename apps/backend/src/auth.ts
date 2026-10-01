@@ -54,13 +54,19 @@ export async function verifyPassword(plain: string, hash: string): Promise<boole
   return bcrypt.compare(plain, hash);
 }
 
-export async function signToken(env: Env, user: { id: string; email: string; role: string }): Promise<string> {
+// `fid` names the refresh family this access token was minted alongside. The
+// `rt` cookie is scoped to /api/auth, so outside that path this claim is the
+// only way a request can tell which session it belongs to.
+export async function signToken(
+  env: Env, user: { id: string; email: string; role: string }, familyId?: string,
+): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   return jwt.sign(
     {
       sub: user.id,
       email: user.email,
       role: user.role,
+      ...(familyId ? { fid: familyId } : {}),
       iss: env.JWT_ISSUER ?? 'recycle-erp',
       iat: now,
       exp: now + TOKEN_TTL_SEC,
@@ -69,11 +75,13 @@ export async function signToken(env: Env, user: { id: string; email: string; rol
   );
 }
 
-export async function verifyToken(env: Env, token: string): Promise<{ sub: string; role?: string } | null> {
+export async function verifyToken(
+  env: Env, token: string,
+): Promise<{ sub: string; role?: string; fid?: string } | null> {
   try {
     // verify() returns the decoded token when valid, undefined when not — no
     // need for a second decode() parse.
-    const decoded = await jwt.verify<{ sub: string; role?: string }>(token, env.JWT_SECRET);
+    const decoded = await jwt.verify<{ sub: string; role?: string; fid?: string }>(token, env.JWT_SECRET);
     if (!decoded) return null;
     return decoded.payload;
   } catch {

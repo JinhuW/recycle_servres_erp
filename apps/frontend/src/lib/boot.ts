@@ -1,7 +1,6 @@
 // Reader for the speculative fetches the boot script starts before the entry
-// bundle has parsed (see ../../vite-plugin-boot.ts). In dev, and on the vendor
-// portal, there is no boot script and every caller falls through to its normal
-// api.get.
+// bundle has parsed (see ../../vite-plugin-boot.ts). In dev there is no boot
+// script and every caller falls through to its normal api.get.
 
 declare global {
   interface Window {

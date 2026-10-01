@@ -2,7 +2,7 @@
 //
 // CSRF-exempt and unauthenticated like the rest of /api/public/* (see csrf.ts
 // and the auth allowlist in index.ts) — the secret in the URL is the whole
-// credential, vendor-portal style. Shippo publishes no signature or HMAC
+// credential. Shippo publishes no signature or HMAC
 // header, so there is nothing else to verify against; the secret has to be
 // long and random, and rotating it means updating the Shippo dashboard too.
 //

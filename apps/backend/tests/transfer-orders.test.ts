@@ -6,13 +6,12 @@ import { loginAs, ALEX, MARCUS } from './helpers/auth';
 type InvRow = { id: string; status: string; warehouse_id: string | null; qty: number };
 const WAREHOUSES = ['WH-LA1', 'WH-DAL', 'WH-NJ2', 'WH-HK', 'WH-AMS'];
 
-async function transferOne(token: string): Promise<{ id: string; from: string; to: string; orderId: string }> {
-  const inv = await api<{ items: InvRow[] }>('GET', '/api/inventory', { token });
-  // The seed already commits some lines to Shipped sell orders, and transfer
-  // reopen/discard correctly 409 on those. Seed ids are random, so which line
-  // sorts first varies per run — without this the suite passed or failed by
-  // luck of the draw.
-  const committed = new Set(
+// The seed already commits some lines to Shipped sell orders, and transfer,
+// reopen and discard correctly 409 on those. Seed ids are random, so which
+// line sorts first varies per run — without this the suite passed or failed
+// by luck of the draw.
+async function committedLineIds(): Promise<Set<string>> {
+  return new Set(
     (await getTestDb()`
       SELECT sl.inventory_id AS id
         FROM sell_order_lines sl
@@ -20,6 +19,11 @@ async function transferOne(token: string): Promise<{ id: string; from: string; t
        WHERE so.status = ANY(${['Shipped', 'Awaiting payment']}::text[])
     ` as unknown as Array<{ id: string }>).map((r) => r.id),
   );
+}
+
+async function transferOne(token: string): Promise<{ id: string; from: string; to: string; orderId: string }> {
+  const inv = await api<{ items: InvRow[] }>('GET', '/api/inventory', { token });
+  const committed = await committedLineIds();
   const line = inv.body.items.find(
     (i) => (i.status === 'Reviewing' || i.status === 'Done') && i.warehouse_id && !committed.has(i.id),
   );
@@ -92,6 +96,7 @@ describe('POST /api/inventory/transfer — creates a transfer order', () => {
       SELECT l.id, l.status, l.qty, COALESCE(l.warehouse_id, o.warehouse_id) AS wh
       FROM order_lines l JOIN orders o ON o.id = l.order_id
       WHERE l.status IN ('Reviewing','Done') AND COALESCE(l.warehouse_id, o.warehouse_id) IS NOT NULL
+        AND NOT (l.id = ANY(${[...await committedLineIds()]}::uuid[]))
       LIMIT 1
     `)[0] as { id: string; status: string; qty: number; wh: string };
     const to = WAREHOUSES.find((w) => w !== before.wh)!;
@@ -110,8 +115,9 @@ describe('POST /api/inventory/transfer — creates a transfer order', () => {
   it('uses NULL from_warehouse_id when sources differ', async () => {
     const { token } = await loginAs(ALEX);
     const inv = await api<{ items: InvRow[] }>('GET', '/api/inventory', { token });
+    const committed = await committedLineIds();
     const sellable = inv.body.items.filter(
-      (i) => (i.status === 'Reviewing' || i.status === 'Done') && i.warehouse_id,
+      (i) => (i.status === 'Reviewing' || i.status === 'Done') && i.warehouse_id && !committed.has(i.id),
     );
     const a = sellable[0]!;
     const b = sellable.find((i) => i.warehouse_id !== a.warehouse_id);

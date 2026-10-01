@@ -1,7 +1,7 @@
 // Multi-currency support module. USD is the reporting currency; CNY is the
-// only foreign quote currency vendors can submit in. The DB stores rates as
+// only foreign currency a sell order can be priced in. The DB stores rates as
 // USD→quote (i.e. how many CNY per 1 USD); callers always work in the
-// "multiplier to USD" direction (1/stored), so vendor amounts × rate = USD.
+// "multiplier to USD" direction (1/stored), so foreign amounts × rate = USD.
 //
 // Three sources, decreasing freshness wins via fetched_at: 'frankfurter'
 // (the 6-hourly refresh loop), 'manual' (a manager override), and the
@@ -81,9 +81,9 @@ export async function fetchAndStoreLatest(
 ): Promise<FxLookup> {
   if (quote === 'USD') return getLatestRateToUsd(sql, 'USD');
   const url = `${FRANKFURTER_URL}?base=USD&symbols=${quote}`;
-  // Not just the refresh loop: an empty table sends a *request* here, including
-  // from the unauthenticated vendor portal. Without a signal this is bounded
-  // only by undici's ~300s default, so a hung upstream pins the request.
+  // Not just the refresh loop: an empty table sends a *request* here. Without a
+  // signal this is bounded only by undici's ~300s default, so a hung upstream
+  // pins the request.
   const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   if (!res.ok) throw new Error(`frankfurter ${res.status}`);
   const body = (await res.json()) as { amount: number; base: string; date: string; rates: Record<string, number> };

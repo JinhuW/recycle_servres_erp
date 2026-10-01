@@ -151,12 +151,12 @@ switches the branch out from under the first.
 
 ## Frontend
 
-- One bundle, three shells.  `apps/frontend/src/App.tsx` decides which to
-  render: vendor token in `/v/<token>` → `VendorApp`; else viewport width
-  `< 720` → `MobileApp`; else `DesktopApp`.  Each is lazy-imported so each
-  shell ships its own chunk.  When adding a feature, identify which shell(s)
-  it lives in and keep its components scoped to that subtree
-  (`pages/desktop/`, `pages/` for mobile, `VendorApp.tsx` for the portal).
+- One bundle, two shells.  `apps/frontend/src/App.tsx` decides which to
+  render: viewport width `< 720` → `MobileApp`; else `DesktopApp`.  Each is
+  lazy-imported so each shell ships its own chunk.  When adding a feature,
+  identify which shell(s) it lives in and keep its components scoped to that
+  subtree (`pages/desktop/`, `pages/` for mobile).  The vendor bid portal
+  (`/v/<token>`) was removed in v1.191.0 — nobody had ever placed a bid.
 - Use `apps/frontend/src/lib/api.ts` for every backend call.  It sets
   `credentials: 'include'`, attaches the `X-Requested-By: recycle-erp` CSRF
   header on mutating requests, and single-flights refresh.  Do **not** call
@@ -219,9 +219,8 @@ switches the branch out from under the first.
   writes that have to be atomic (notably anywhere `notify` is involved — see
   `lib/notify.ts`) must run inside `sql.begin` and pass `tx` down, not a
   fresh `sql`.
-- **Status guards.**  Purchase orders, sell orders, transfer orders, and
-  vendor bids each have explicit allowed-transition tables in their route
-  files.  When adding a new state-changing endpoint, extend the existing
+- **Status guards.**  Purchase orders, sell orders and transfer orders each
+  have explicit allowed-transition tables in their route files.  When adding a new state-changing endpoint, extend the existing
   guard — don't write a parallel one.
 - **Order ID counters** are per-type sequences in `id_counters` (see
   `migrations/0029`).  Use `lib/id-seq.ts`; never compute an ID by counting
@@ -234,8 +233,10 @@ switches the branch out from under the first.
   negotiated verdict has to be read *before* the line writes
   (`goodsTotalIsMirror`); afterwards a stale mirror and a real override are
   indistinguishable.
-- **Upload validation** — `routes/attachments.ts` enforces both
-  `maxBytes` and `allowedMime` from `lib/settings.ts → getUploadLimits()`.
+- **Upload validation** — every upload route (status-meta evidence and line
+  photos in `orders.ts`/`sellOrders.ts`, `scan.ts`, `publicForms.ts`) and the
+  storage layer (`r2.ts`) enforce both `maxBytes` and `allowedMime` from
+  `lib/settings.ts → getUploadLimits()`.
   The allowed set is intersected with `SAFE_UPLOAD_MIME` so a misconfigured
   DB setting can't widen the surface.  Keep it that way.
 - **Migrations** are plain SQL under `apps/backend/migrations/`, numbered
@@ -245,12 +246,15 @@ switches the branch out from under the first.
 
 ## Auth & CSRF
 
-- httpOnly `at` (15-min JWT) + `rt` (rotating refresh family) cookies.  No
+- httpOnly `at` (60-min JWT) + `rt` (rotating refresh family) cookies.  No
   `localStorage`, no bearer tokens.  See [auth_cookie_model.md][1] in memory.
+- The `rt` cookie is scoped to `path=/api/auth`, so no other route can see it.
+  A route that needs the caller's session reads the `fid` claim from the
+  verified `at` JWT instead (`/api/me/password` does).
 - Every mutating request must carry `X-Requested-By: recycle-erp` (the
   `csrfGuard` middleware drops it otherwise with 403).  Exempt: safe methods,
-  `/api/health`, and `/api/public/*` (the unauthenticated vendor endpoints
-  — they use URL tokens, not cookies, so CSRF doesn't apply).
+  `/api/health`, and `/api/public/*` (the unauthenticated website intake and
+  quote forms and the Shippo webhook — no cookies, so CSRF doesn't apply).
 - Refresh-token reuse revokes the whole family.  Don't relax that.
 
 ## MCP & OAuth (connectors)
@@ -281,7 +285,7 @@ switches the branch out from under the first.
 - Loopback redirect URIs match **ignoring the port** (RFC 8252 §7.3) so Claude
   Code's ephemeral port works.  That applies to the `/authorize` allowlist only —
   the token endpoint stays an exact match against the URI recorded on the code.
-- `/oauth/authorize` accepts only the 15-min `at` cookie and bounces to
+- `/oauth/authorize` accepts only the `at` cookie and bounces to
   `/login?next=…`.  The SPA **must** honour `next` (`readSafeNext` in
   `lib/route.ts`, consumed in `DesktopApp.tsx`/`MobileApp.tsx`) or the connector
   popup dead-ends on the dashboard.

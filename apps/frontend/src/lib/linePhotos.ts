@@ -14,7 +14,7 @@ export { isRealPhotoUrl, LINE_PHOTO_CAP };
 // OCR, so only RAM lines ever had one) or an explicit upload (any line). The
 // API merges them into `photos`, but this module synthesizes the scan entry
 // client-side too, so it works unchanged against endpoints that don't return
-// `photos` yet — the inventory list, sell orders, the vendor portal.
+// `photos` yet — the inventory list and sell orders.
 
 export type LinePhoto = {
   id: string;

@@ -14,7 +14,6 @@ or anything under `apps/frontend/src/lib/pwa.ts`.
 | Home-screen icon is the correct (maskable / apple-touch)    |                |            | n/a            |
 | Reload after deploy picks up new SW within one refresh      |                |            | n/a            |
 | Offline reload of `/` shows the SPA shell (not browser err) |                |            | n/a            |
-| Vendor portal `/v/<token>` is NOT SW-controlled             |                |            | n/a            |
 | Background upload retries on flaky network (Task 10)        |                |            | n/a            |
 | Share-from-Camera-Roll opens the AI label flow (Task 11)    |                |            | n/a            |
 
@@ -106,10 +105,6 @@ declaring the PWA close-out complete:
       the update toast appears, tap Reload, confirm new SW takes over.
 - [ ] **Offline shell**: with the PWA installed, go offline, reload `/` — must
       render the SPA shell, not the browser's offline error page.
-- [ ] **Vendor portal not SW-controlled**: open `/v/<a-test-token>` on a real
-      device, DevTools Application → Service Workers — no SW should claim the
-      page. (Automatable check confirms it's excluded from precache + denylist;
-      this verifies the runtime behavior.)
 - [ ] **Background-sync upload**: install on a real device, switch to airplane
       mode, take a label photo via the AI capture flow, exit and re-enter the
       app, toggle airplane mode off, confirm the upload completes silently and

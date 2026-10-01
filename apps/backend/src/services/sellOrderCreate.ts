@@ -16,21 +16,16 @@ export type SellLine = { inventoryId?: string | null; qty: number };
 // already-committed lines); null for a brand-new order. Returns a human error
 // string, or null when every line is sellable.
 //
-// `checkExistingSellOrders` (default true) also nets out the units other sell
-// orders have already committed (COMMITTED_SELL_STATUSES — Draft rivals are
-// allowed, they're only proposals). A commitment reserves the quantity it named,
-// not the whole lot, so 20 sold out of 100 still leaves 80 for the next order;
-// only demand past the remainder is refused. The vendor-bid promote path passes
-// false: a bid may legitimately reference inventory that is already on a sell
-// order, so it reuses the qty/sellability locking here without the
-// cross-sell-order reservation.
+// Also nets out the units other sell orders have already committed
+// (COMMITTED_SELL_STATUSES — Draft rivals are allowed, they're only proposals).
+// A commitment reserves the quantity it named, not the whole lot, so 20 sold
+// out of 100 still leaves 80 for the next order; only demand past the
+// remainder is refused.
 export async function validateSellLines(
   tx: postgres.TransactionSql,
   lines: SellLine[],
   excludeOrderId: string | null,
-  opts: { checkExistingSellOrders?: boolean } = {},
 ): Promise<string | null> {
-  const checkConflicts = opts.checkExistingSellOrders !== false;
   const demand = new Map<string, number>();
   for (const l of lines) {
     if (!l.inventoryId) continue; // manual line — nothing to reserve
@@ -47,7 +42,6 @@ export async function validateSellLines(
       return `inventory line not sellable (status=${inv.status})`;
     if (inv.archived_at !== null) return `inventory line's order is archived`;
     if (qty > inv.qty) return `qty ${qty} exceeds inventory available ${inv.qty}`;
-    if (!checkConflicts) continue;
     // Reserved units, plus one committed order to name in the error — a bare
     // "not enough left" leaves the manager with nowhere to go looking.
     const claim = (await tx<{
@@ -101,8 +95,8 @@ export type CreateDraftResult =
   | { ok: true; id: string; customerId: string; lineCount: number; currency: SupportedCurrency }
   | { ok: false; error: string };
 
-// One sell_order_lines INSERT, shared by createSellOrderDraft and the vendor-bid
-// promote path so the column list lives in one place. Callers pass the already
+// One sell_order_lines INSERT, shared by createSellOrderDraft and the sell-order
+// routes so the column list lives in one place. Callers pass the already
 // USD-converted unit price plus the source-currency snapshot (all null for USD).
 export interface SellOrderLineInsert {
   inventoryId: string | null;

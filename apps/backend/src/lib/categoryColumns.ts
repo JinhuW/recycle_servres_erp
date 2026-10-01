@@ -73,7 +73,7 @@ export function exportCategory(v: unknown): ExportCategory {
 // still decides the sequence inside each group.
 const SHEET_SORT_KEYS = ['brand', 'capacity', 'speed'] as const;
 
-// Numeric collation, same rule as the vendor catalog chips: it keeps 8GB below
+// Numeric collation: it keeps 8GB below
 // 16GB and 3200 below 12800, which a plain lexical sort gets backwards. Blanks
 // sink so manual lines (no specs at all) never head the tab.
 export function compareSpecValue(a: string, b: string): number {

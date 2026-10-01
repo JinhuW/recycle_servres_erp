@@ -1,12 +1,11 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { LangProvider } from './lib/i18n';
-import { vendorTokenFromPath } from './lib/vendor';
 import { PHONE_BREAKPOINT } from './lib/viewport';
 
-// desktop.css stays here despite the name: it owns the shared modal, card and
-// vendor-portal layer (~100 classes the phone and vendor shells render), so it
-// is the main stylesheet rather than a desktop-only one.
+// desktop.css stays here despite the name: it owns the shared modal and card
+// layer the phone shell renders too, so it is the main stylesheet rather than
+// a desktop-only one.
 import './styles/desktop.css';
 
 // Phone-only, and they carry pwa.css with them.
@@ -17,7 +16,6 @@ const PwaUpdateToast = lazy(() =>
 
 const DesktopApp = lazy(() => import('./DesktopApp').then(m => ({ default: m.DesktopApp })));
 const MobileApp  = lazy(() => import('./MobileApp').then(m => ({ default: m.MobileApp })));
-const VendorApp  = lazy(() => import('./VendorApp').then(m => ({ default: m.VendorApp })));
 
 function useIsPhone() {
   const get = () => typeof window !== 'undefined' && window.innerWidth < PHONE_BREAKPOINT;
@@ -32,19 +30,6 @@ function useIsPhone() {
 
 export default function App() {
   const isPhone = useIsPhone();
-  const vendorToken = typeof window !== 'undefined'
-    ? vendorTokenFromPath(window.location.pathname) : null;
-  if (vendorToken) {
-    return (
-      <LangProvider>
-        <ErrorBoundary>
-          <Suspense fallback={<div className="app-loading" />}>
-            <VendorApp token={vendorToken} isPhone={isPhone} />
-          </Suspense>
-        </ErrorBoundary>
-      </LangProvider>
-    );
-  }
   return (
     <LangProvider>
       <ErrorBoundary>
