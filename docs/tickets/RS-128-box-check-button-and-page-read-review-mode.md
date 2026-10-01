@@ -2,13 +2,13 @@
 id: RS-128
 title: Box check button and page read Review mode
 type: chore
-status: in-review
+status: done
 priority: P3
 created: 2026-10-01
 reporter: Jinhu
 branch: feat/review-mode-label
-pr:
-version:
+pr: "#436"
+version: 1.189.2
 related: []
 ---
 
