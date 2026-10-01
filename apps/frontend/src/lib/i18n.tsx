@@ -1784,6 +1784,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     drawerCapturedLabel: 'Captured label',
     drawerLossyWarn: 'Sell price below unit cost',
     drawerReadOnly: 'This order is closed — line details are view-only.',
+    sellPriceStillEditable: 'Sell price stays editable until the PO is Done.',
     drawerConfirmed: 'Confirmed',
     drawerConfirming: 'Confirming…',
     drawerStillNeeded: 'Still needed: {fields}',

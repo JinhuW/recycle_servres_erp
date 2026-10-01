@@ -17,6 +17,17 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.191.1] - 2026-10-01
+
+A manager can adjust a line's sell price on a PO at Ready to Pay (RS-131).
+That stage closed the whole desktop PO page, sell price included, though sell
+price is the commission projection and payment review is exactly when a
+manager corrects it. The line drawer now keeps Sell / unit live for a manager
+(real role) at Ready to Pay while every other field stays frozen; Save writes
+the changed prices through the inventory line endpoint — which already took a
+closed-book sell price — and stays on the PO so the new commission shows.
+Purchasers, Done/Sold and archived POs remain fully locked.
+
 ## [1.191.0] - 2026-10-01
 
 The first batch of fixes from the 2026-10-01 full code review (RS-130): its

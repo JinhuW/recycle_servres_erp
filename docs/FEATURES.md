@@ -224,7 +224,11 @@ on to Sold once every line has sold (v1.164.0).
   ownership freeze, notes still append, line goods edits refuse
   — and the PO's lines read Done for every stock and sellable bucket. Managers
   and the owner are notified when a PO reaches it. The stage is a PO stage
-  only: it can't be written as a line status.
+  only: it can't be written as a line status. One field survives the lock:
+  a manager can still change a line's **sell price** from the desktop PO
+  page's line drawer while the PO is at Ready to Pay, so the commission
+  projection can be corrected during payment review; Save stays on the PO
+  (v1.191.1).
 - **Sold is Done with every line sold** (v1.164.0). Nobody picks it: a PO
   lands on it when a manager marks it Done and every line already sits at the
   `Sold` line status, or when a sell order reaching Done consumes the last
