@@ -9,7 +9,7 @@ import { useT } from './lib/i18n';
 import { useEffectiveUser } from './lib/tweaks';
 import {
   useRoute, match, matchPurchaseOrder, matchPoCheck, navigate, parseShippingRoute,
-  pathToDesktopView, isAuthorizePath, readSafeNext, hrefFor, onLinkClick,
+  pathToDesktopView, isAuthorizePath, readSafeNext, hrefFor, onLinkClick, replaceRoute,
 } from './lib/route';
 import { api, ApiError } from './lib/api';
 import { showErrorDialog } from './lib/errorToast';
@@ -77,14 +77,22 @@ export function DesktopApp() {
   // Sync editingOrder with the URL hash. Loading the app at
   // `#/purchase-orders/<id>` opens that order's edit page; clearing the hash
   // closes it.
+  // Moving between the PO page and its box check re-reads the order: each
+  // writes lines the other's copy doesn't know about (Confirm line, a count),
+  // and the PO page re-sends every line on a stage save.
+  const orderRouteKind = useRef<'page' | 'check' | null>(null);
   useEffect(() => {
     const m = matchPurchaseOrder(path) ?? boxCheck;
+    const kind = boxCheck ? 'check' : 'page';
+    const kindChanged = orderRouteKind.current !== null && orderRouteKind.current !== kind;
+    orderRouteKind.current = m ? kind : null;
     if (!m) {
       // No id in URL → ensure no order is open.
       if (editingOrder) setEditingOrder(null);
       return;
     }
-    if (editingOrder?.id === m.id) return; // already showing the right one
+    if (editingOrder?.id === m.id && !kindChanged) return; // already showing the right one
+    if (kindChanged) setEditingOrder(null);
     let alive = true;
     setLoadingOrderId(m.id);
     api.get<{ order: Order }>(`/api/orders/${m.id}`)
@@ -108,10 +116,11 @@ export function DesktopApp() {
   }, [path]);
 
   // Box check is a manager's page; anyone else (a manager previewing as a
-  // purchaser included) lands on the PO itself.
+  // purchaser included) lands on the PO itself — in place of the bounced
+  // entry, so Back doesn't return to it.
   const boxCheckId = boxCheck?.id ?? null;
   useEffect(() => {
-    if (boxCheckId && user && user.role !== 'manager') navigate('/purchase-orders/' + boxCheckId);
+    if (boxCheckId && user && user.role !== 'manager') replaceRoute('/purchase-orders/' + boxCheckId);
   }, [boxCheckId, user]);
 
   // Apply 'desktop' class to <html> so the desktop CSS overrides take effect
@@ -199,8 +208,8 @@ export function DesktopApp() {
           key={editingOrder.id + ':' + orderReloads}
           order={editingOrder}
           onExit={() => navigate('/purchase-orders/' + editingOrder.id)}
-          onApproved={async () => {
-            await reloadOrder();
+          onApproved={() => {
+            // Leaving the check re-reads the order, so it opens at its new stage.
             navigate('/purchase-orders/' + editingOrder.id);
             showToast(t('bcApprovedToast', { id: editingOrder.id }));
           }}

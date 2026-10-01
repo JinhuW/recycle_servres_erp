@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-126](./RS-126-packing-list-grouped-by-po.md) | done | feature | P2 | Packing list grouped by PO | — |
+| [RS-127](./RS-127-pre-release-review-fixes-for-box-check-and-packing-l.md) | in-progress | bug | P1 | Pre-release review fixes for box check and packing list | — |
+| [RS-126](./RS-126-packing-list-grouped-by-po.md) | done | story | P2 | Packing list grouped by PO | 1.189.0 |
 | [RS-125](./RS-125-box-check-the-count-starts-full.md) | done | task | P2 | Box check: the count starts full | 1.188.1 |
 | [RS-124](./RS-124-box-check-a-desktop-review-mode-for-checking-a-po-ag.md) | done | story | P2 | Box check: a desktop review mode for checking a PO against its shipping box | 1.188.0 |
 | [RS-123](./RS-123-web-form-submissions-inbox-ram4cash-recycleservers.md) | done | story | P2 | Web form submissions inbox (ram4cash + recycleservers) | 1.187.0 |

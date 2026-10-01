@@ -39,6 +39,17 @@ describe('lineState', () => {
   it('keeps a flagged line out of done even when ticked', () => {
     expect(lineState(lines[0]!, C('a', 16, { checkedAt: AT, flagReason: 'damaged' }))).toBe('flagged');
   });
+
+  it('drops a tick whose count no longer covers the line', () => {
+    // Ticked at 4/4, then the PO line went to 6: two units nobody counted.
+    expect(lineState(L('x', 6, 'P'), C('x', 4, { checkedAt: AT }))).toBe('partial');
+    // A short line whose flag was removed keeps its tick stamp but not its tick.
+    expect(lineState(lines[0]!, C('a', 14, { checkedAt: AT }))).toBe('partial');
+  });
+
+  it('keeps a tick when the line shrank under the count', () => {
+    expect(lineState(L('x', 14, 'P'), C('x', 16, { checkedAt: AT }))).toBe('done');
+  });
 });
 
 describe('orderLines', () => {
@@ -65,20 +76,40 @@ describe('tally', () => {
 });
 
 describe('matchScan', () => {
+  const hit = (r: ReturnType<typeof matchScan<typeof lines[number]>>) => (r && 'line' in r ? r.line.id : r);
+
   it('matches the part number ignoring separators and case', () => {
-    expect(matchScan(lines, new Map(), 'm393a4k40db3 cwe')?.id).toBe('a');
+    expect(hit(matchScan(lines, new Map(), 'm393a4k40db3 cwe'))).toBe('a');
   });
 
   it('gives the scan to the first same-part line not yet checked', () => {
-    expect(matchScan(lines, new Map([['a', C('a', 16, { checkedAt: AT })]]), 'M393A4K40DB3-CWE')?.id).toBe('d');
+    expect(hit(matchScan(lines, new Map([['a', C('a', 16, { checkedAt: AT })]]), 'M393A4K40DB3-CWE'))).toBe('d');
+  });
+
+  it('passes over a flagged or short line while a same-part line is still open', () => {
+    const flagged = new Map([['a', C('a', 16, { checkedAt: AT, flagReason: 'damaged' })]]);
+    expect(hit(matchScan(lines, flagged, 'M393A4K40DB3-CWE'))).toBe('d');
+    expect(hit(matchScan(lines, new Map([['a', C('a', 14)]]), 'M393A4K40DB3-CWE'))).toBe('d');
   });
 
   it('matches a label that carries a suffix the line does not', () => {
-    expect(matchScan(lines, new Map(), 'SSDSC2KB960G801')?.id).toBe('c');
+    expect(hit(matchScan(lines, new Map(), 'SSDSC2KB960G801'))).toBe('c');
+  });
+
+  it('refuses to guess between different part numbers a prefix fits', () => {
+    const skus = [L('vk', 4, 'HMA84GR7AFR4N-VK'), L('uh', 4, 'HMA84GR7AFR4N-UH')];
+    expect(matchScan(skus, new Map(), 'HMA84GR7AFR4N')).toEqual({ ambiguous: ['HMA84GR7AFR4N-VK', 'HMA84GR7AFR4N-UH'] });
+    // A truncated scan is ambiguous whenever it fits more than one part number.
+    expect(matchScan(skus, new Map(), 'hma84g')).toMatchObject({ ambiguous: expect.any(Array) });
+  });
+
+  it('gives a suffixed label to the most specific line it extends', () => {
+    const two = [L('base', 2, 'M393A4K40DB3'), L('cwe', 2, 'M393A4K40DB3-CWE')];
+    expect(hit(matchScan(two, new Map(), 'M393A4K40DB3-CWE-BY'))).toBe('cwe');
   });
 
   it('falls back to a recorded serial, and misses cleanly', () => {
-    expect(matchScan(lines, new Map(), 'sn-222')?.id).toBe('b');
+    expect(hit(matchScan(lines, new Map(), 'sn-222'))).toBe('b');
     expect(matchScan(lines, new Map(), 'NOPE-123')).toBeNull();
   });
 });
@@ -93,8 +124,12 @@ describe('nextOpenAfter', () => {
 
 describe('checkBody', () => {
   it('says whether the line is checked, so no write can re-derive it from the count', () => {
-    expect(checkBody(C('a', 16))).toEqual({ counted: 16, checked: false, flagReason: null, flagNote: null });
-    expect(checkBody(C('a', 14, { checkedAt: AT }))).toMatchObject({ checked: true });
+    expect(checkBody(C('a', 16), 16)).toEqual({ counted: 16, checked: false, flagReason: null, flagNote: null });
+    expect(checkBody(C('a', 14, { checkedAt: AT }), 16)).toMatchObject({ checked: true });
+  });
+
+  it('clamps a count the line has since shrunk below', () => {
+    expect(checkBody(C('a', 16, { checkedAt: AT }), 14)).toMatchObject({ counted: 14, checked: true });
   });
 });
 

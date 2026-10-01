@@ -1067,12 +1067,17 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignSelf: 'flex-start', flexWrap: 'wrap' }}>
-          {!isPurchaser && (
+          {isManager && (
             // Leads at Reviewing, when the box is on the bench; still there
-            // at every other stage for a recount.
+            // at every other stage for a recount. Hidden in purchaser preview,
+            // which the box check route bounces.
             <button
               className={'btn' + (savedStatus === 'Reviewing' ? ' accent' : '')}
-              onClick={() => navigate(poCheckPath(order.id))}
+              onClick={() => {
+                // The check replaces this page; unsaved edits would go with it.
+                if (dirty) { showErrorDialog(t('bcSaveFirst')); return; }
+                navigate(poCheckPath(order.id));
+              }}
               title={t('bcOpenTip')}
             >
               <Icon name="package" size={13} /> {t('bcOpen')}

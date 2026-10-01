@@ -249,6 +249,7 @@ sellOrders.get('/:id', async (c) => {
     part_number: string | null; qty: number; unit_price: number;
     source_unit_price: number | null;
     condition: string | null; position: number; warehouse_short: string | null;
+    pack_warehouse_short: string | null;
     inventory_id: string | null; warehouse_id: string | null;
     source_order_id: string | null;
     inventory_qty: number | null;
@@ -258,7 +259,7 @@ sellOrders.get('/:id', async (c) => {
            sol.source_unit_price::float AS source_unit_price,
            sol.condition, sol.position,
            sol.inventory_id, sol.warehouse_id, ol.order_id AS source_order_id,
-           w.short AS warehouse_short,
+           w.short AS warehouse_short, pw.short AS pack_warehouse_short,
            -- What this order may still grow its line to: the lot less the units
            -- other committed orders hold. Its own claim is excluded, so editing
            -- a line down and back up is not blocked by itself.
@@ -266,6 +267,8 @@ sellOrders.get('/:id', async (c) => {
     FROM sell_order_lines sol
     LEFT JOIN warehouses w ON w.id = sol.warehouse_id
     LEFT JOIN order_lines ol ON ol.id = sol.inventory_id
+    LEFT JOIN orders src ON src.id = ol.order_id
+    LEFT JOIN warehouses pw ON pw.id = COALESCE(ol.warehouse_id, src.warehouse_id, sol.warehouse_id)
     LEFT JOIN LATERAL (
       SELECT COALESCE(SUM(rival.qty), 0)::int AS qty
         FROM sell_order_lines rival
@@ -348,6 +351,9 @@ sellOrders.get('/:id', async (c) => {
         nativeUnitPrice: l.source_unit_price ?? l.unit_price,
         condition: l.condition, position: l.position,
         warehouse: l.warehouse_short,
+        // Where the lot is now: a transfer moves the lot, not the warehouse
+        // this line was saved with. The packing lists go by this one.
+        packWarehouse: l.pack_warehouse_short,
         inventoryId: l.inventory_id, warehouseId: l.warehouse_id,
         sourceOrderId: l.source_order_id,
         maxQty: l.inventory_qty ?? l.qty,
@@ -404,8 +410,11 @@ async function loadSellOrderSheetData(sql: SqlClient, id: string) {
       l.rpm,
       img.delivery_url AS image_url
     FROM sell_order_lines sol
-    LEFT JOIN warehouses w ON w.id = sol.warehouse_id
     LEFT JOIN order_lines l ON l.id = sol.inventory_id
+    LEFT JOIN orders src ON src.id = l.order_id
+    -- The lot's current warehouse, not the one saved on the line: a transfer
+    -- of committed stock moves the lot, and the pick happens where it is.
+    LEFT JOIN warehouses w ON w.id = COALESCE(l.warehouse_id, src.warehouse_id, sol.warehouse_id)
     LEFT JOIN LATERAL (
       SELECT ls.delivery_url
       FROM label_scans ls

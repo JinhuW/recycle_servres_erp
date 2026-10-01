@@ -13,8 +13,12 @@ export type LineCheck = {
   flagReason: BoxCheckReason | null;
   flagNote: string | null;
   checkedAt: string | null;
+  // When this flag last went to the purchaser; editing the flag clears it.
+  flagSentAt?: string | null;
 };
-export type CheckExtra = { id: string; partNumber: string; note: string | null; createdAt: string };
+export type CheckExtra = {
+  id: string; partNumber: string; note: string | null; createdAt: string; sentAt?: string | null;
+};
 export type ChecksResponse = { lines: LineCheck[]; extras: CheckExtra[] };
 
 export type CheckableLine = {
@@ -35,11 +39,14 @@ export function countOf(line: CheckableLine, check: LineCheck | undefined): numb
 }
 
 // A flag outranks the tick: a line checked but flagged damaged still needs a
-// decision, so it must not sink with the checked ones.
+// decision, so it must not sink with the checked ones.  A tick only holds while
+// the count still covers the line: a qty raised on the PO page after the tick
+// puts units on the line that nobody counted.
 export function lineState(line: CheckableLine, check: LineCheck | undefined): LineCheckState {
   if (check?.flagReason) return 'flagged';
-  if (check?.checkedAt) return 'done';
-  return countOf(line, check) < line.qty ? 'partial' : 'open';
+  const short = (check?.counted ?? line.qty) < line.qty;
+  if (check?.checkedAt && !short) return 'done';
+  return short ? 'partial' : 'open';
 }
 
 export type OrderedLines<L> = { open: L[]; flagged: L[]; done: L[] };
@@ -81,24 +88,41 @@ export function tally(lines: readonly CheckableLine[], checks: ReadonlyMap<strin
   return t;
 }
 
+export type ScanMatch<L> = { line: L } | { ambiguous: string[] };
+
+// Which same-part line a scan lands on: one still waiting first, so a flagged
+// or short line can't swallow every scan of its part number.
+const SCAN_RANK: Record<LineCheckState, number> = { open: 0, partial: 1, flagged: 2, done: 3 };
+
 // A scanner types the label and presses Enter. Exact part number first, then
 // a prefix (labels often carry a suffix the PO line doesn't), then a serial.
-// Among several lines with the same part number, the first one not yet
-// checked takes the scan.
+// A prefix that fits lines with different part numbers is a different SKU
+// each — a speed grade, a revision — so it is handed back, not guessed.
 export function matchScan<L extends CheckableLine>(
   lines: readonly L[], checks: ReadonlyMap<string, LineCheck>, raw: string,
-): L | null {
+): ScanMatch<L> | null {
   const q = canonicalPartNumber(raw);
   if (!q) return null;
-  const pick = (hits: L[]): L | null =>
-    hits.find(l => lineState(l, checks.get(l.id)) !== 'done') ?? hits[0] ?? null;
+  const pick = (hits: L[]): ScanMatch<L> | null => {
+    const rank = (l: L) => SCAN_RANK[lineState(l, checks.get(l.id))];
+    const best = hits.reduce<L | null>((b, l) => (b === null || rank(l) < rank(b) ? l : b), null);
+    return best ? { line: best } : null;
+  };
   const exact = lines.filter(l => canonicalPartNumber(l.partNumber) === q);
   if (exact.length) return pick(exact);
   if (q.length >= 6) {
-    const prefix = lines.filter(l => {
+    let prefix = lines.filter(l => {
       const pn = canonicalPartNumber(l.partNumber);
       return pn.length >= 6 && (q.startsWith(pn) || pn.startsWith(q));
     });
+    // A label with a suffix names the most specific line it extends.
+    const longest = Math.max(0, ...prefix
+      .map(l => canonicalPartNumber(l.partNumber))
+      .filter(pn => q.startsWith(pn))
+      .map(pn => pn.length));
+    if (longest) prefix = prefix.filter(l => canonicalPartNumber(l.partNumber).length === longest);
+    const pns = new Map(prefix.map(l => [canonicalPartNumber(l.partNumber), l.partNumber ?? '']));
+    if (pns.size > 1) return { ambiguous: [...pns.values()] };
     if (prefix.length) return pick(prefix);
   }
   const serial = lines.filter(l => parseSerials(l.serialNumber).some(s => canonicalPartNumber(s) === q));
@@ -117,9 +141,14 @@ export function nextOpenAfter<L extends CheckableLine>(
 }
 
 // One body for every write, so a debounced save and a pre-approve flush can't
-// disagree about whether the line is checked.
-export function checkBody(c: LineCheck) {
-  return { counted: c.counted, checked: c.checkedAt !== null, flagReason: c.flagReason, flagNote: c.flagNote };
+// disagree about whether the line is checked.  The count is clamped to the
+// line's current qty: a qty lowered on the PO page after the count would
+// otherwise make every later write of this line a 400.
+export function checkBody(c: LineCheck, qty: number) {
+  return {
+    counted: Math.min(c.counted, qty), checked: c.checkedAt !== null,
+    flagReason: c.flagReason, flagNote: c.flagNote,
+  };
 }
 
 export function boxCheckReasonKey(r: BoxCheckReason | string): string {
