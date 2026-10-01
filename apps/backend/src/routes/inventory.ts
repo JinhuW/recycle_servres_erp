@@ -16,7 +16,7 @@ import { UNTYPED_ITEM, normSellPrice, SPEC_FIELD_TO_DB_COL } from '@recycle-erp/
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { settleSoldTx } from '../services/orderSold';
 import type { Env, User } from '../types';
-import { isClosedBook, LINE_STATUS_FOR_LIFECYCLE, ARCHIVED_LINE_STATUS } from '../services/orderAdvance';
+import { isClosedBook, LINE_STATUS_FOR_LIFECYCLE, ARCHIVED_LINE_STATUS, REVIEWED_LIFECYCLES } from '../services/orderAdvance';
 
 const LINE_STATUSES = new Set([...Object.values(LINE_STATUS_FOR_LIFECYCLE), 'Sold']);
 
@@ -1013,6 +1013,9 @@ inventory.get('/:id', async (c) => {
   const row = (await sql`
     SELECT l.*, l.unit_cost::float AS unit_cost, l.sell_price::float AS sell_price,
            o.id AS order_id, o.user_id,
+           -- The editor locks qty/unit cost on this, which PATCH refuses past
+           -- review. A flag, not the lifecycle, so a purchaser never reads 'sold'.
+           o.lifecycle = ANY(${REVIEWED_LIFECYCLES}::text[]) AS order_closed_book,
            COALESCE(l.warehouse_id, o.warehouse_id) AS warehouse_id,
            u.name AS user_name, u.initials AS user_initials,
            w.short AS warehouse_short, w.region AS warehouse_region

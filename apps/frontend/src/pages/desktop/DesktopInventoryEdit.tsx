@@ -6,6 +6,9 @@ import { api, ApiError } from '../../lib/api';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { fmtUSD, fmtUSD0, fmtDate, relTime } from '../../lib/format';
 import { lineSpecLabel } from '../../lib/lineGroups';
+import {
+  SPEC_FIELDS, inventoryEditPatch, type InventoryEditDraft as Draft, type SpecField,
+} from '../../lib/inventoryEditPatch';
 import { LINE_STATUSES, statusTone } from '../../lib/status';
 import { useMarketLookup, type ResolvedMarketValue } from '../../lib/useMarketLookup';
 import { PartNumberField } from '../../components/PartNumberField';
@@ -32,6 +35,8 @@ type DetailRow = {
   warehouse_short: string | null; warehouse_region: string | null;
   user_initials: string; user_name: string;
   created_at: string; order_id: string;
+  // Its PO is at Ready to Pay or later: qty and unit cost are frozen.
+  order_closed_book?: boolean;
 };
 
 type Event = {
@@ -57,28 +62,10 @@ const KIND_ICON: Record<string, IconName> = {
 };
 
 type Tab = 'details' | 'pricing' | 'history';
-type Draft = {
-  partNumber: string;
-  condition: string;
-  qty: string;
-  unitCost: string;
-  sellPrice: string;
-  status: string;
-  health: string;
-  rpm: string;
-} & Record<SpecField, string>;
 
-// Spec fields the Details tab edits. Held as '' rather than null in the draft —
-// a <select>'s clear option is value="", so a nullable column round-tripping
-// through the form is a string either way. `specOf` re-applies that convention
-// to the loaded row so the dirty check compares like with like; without it a
-// NULL column reads as changed on every save.
-const SPEC_FIELDS = [
-  'brand', 'capacity', 'generation', 'type', 'classification',
-  'rank', 'speed', 'interface', 'formFactor', 'description',
-] as const;
-type SpecField = typeof SPEC_FIELDS[number];
-
+// `specOf` applies the draft's '' convention to the loaded row so the dirty
+// check compares like with like; without it a NULL column reads as changed on
+// every save.
 const specOf = (item: DetailRow, f: SpecField): string =>
   (f === 'formFactor' ? item.form_factor : item[f]) ?? '';
 
@@ -125,7 +112,7 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
   const [events, setEvents] = useState<Event[]>([]);
   const [tab, setTab] = useState<Tab>('details');
   const [draft, setDraft] = useState<Draft | null>(null);
-  const initialRef = useRef<string>('');
+  const initialRef = useRef<Draft | null>(null);
   const [saving, setSaving] = useState(false);
 
   const [peers, setPeers] = useState<PeerRow[]>([]);
@@ -155,7 +142,7 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
           ...Object.fromEntries(SPEC_FIELDS.map(f => [f, specOf(r.item, f)])) as Record<SpecField, string>,
         };
         setDraft(d);
-        initialRef.current = JSON.stringify(d);
+        initialRef.current = d;
       })
       .catch(handleFetchError);
     return () => { alive = false; };
@@ -204,7 +191,7 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
     );
   }
 
-  const dirty = JSON.stringify(draft) !== initialRef.current;
+  const dirty = JSON.stringify(draft) !== JSON.stringify(initialRef.current);
   // Its PO is archived: the line is out of stock and the backend refuses
   // every edit until the PO is unarchived.
   const archived = item.status === 'Archived';
@@ -252,24 +239,7 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
     setSaving(true);
     setBlocked(null);
     try {
-      // Specs go up only when they actually moved. A key that is absent means
-      // "leave alone" and a present null means "clear" — sending all ten every
-      // time would make those two indistinguishable and log an edit per save.
-      const specPatch: Record<string, string | null> = {};
-      for (const f of SPEC_FIELDS) {
-        if (draft[f] !== specOf(item, f)) specPatch[f] = draft[f] === '' ? null : draft[f];
-      }
-      await api.patch(`/api/inventory/${itemId}`, {
-        ...specPatch,
-        status: draft.status,
-        sellPrice: draft.sellPrice === '' ? null : Number(draft.sellPrice),
-        unitCost: Number(draft.unitCost) || 0,
-        qty: Number(draft.qty) || 0,
-        condition: draft.condition,
-        partNumber: draft.partNumber || null,
-        health: draft.health === '' ? null : Number(draft.health),
-        rpm: draft.rpm === '' ? null : Number(draft.rpm),
-      });
+      await api.patch(`/api/inventory/${itemId}`, inventoryEditPatch(initialRef.current!, draft));
       onSaved();
     } catch (err) {
       // 409 with the committed-to-open-sell-order message is structured: a
@@ -765,13 +735,23 @@ function PricingPanel({
   refMatch: RefMatch | null;
 }) {
   const { t, locale } = useT();
+  // The route refuses qty and unit cost from Ready to Pay on (closed book);
+  // every other field still saves. `=== true`: a backend without the flag
+  // leaves the inputs open and the route stays the gate.
+  const goodsLocked = item.order_closed_book === true;
+  // A bare disabled .input renders like an open one; this is .order-readonly's look.
+  const lockedStyle = goodsLocked ? { opacity: 0.7, background: 'var(--bg-soft)' } : undefined;
   return (
     <>
       <div className="card">
         <div className="card-head">
           <div>
             <div className="card-title">{t('iePricingQty')}</div>
-            <div className="card-sub">{t('iePricingQtySub')}</div>
+            <div className="card-sub">
+              {goodsLocked
+                ? linkedSentence(t('ieGoodsLockedHint'), item.order_id, '/purchase-orders/' + item.order_id)
+                : t('iePricingQtySub')}
+            </div>
           </div>
           <span className={'chip dot ' + statusTone(draft.status)}>{draft.status}</span>
         </div>
@@ -784,6 +764,8 @@ function PricingPanel({
                 type="number"
                 min={0}
                 value={draft.qty}
+                disabled={goodsLocked}
+                style={lockedStyle}
                 onChange={e => set({ qty: e.target.value })}
               />
             </div>
@@ -802,6 +784,8 @@ function PricingPanel({
                 step="0.01"
                 min={0}
                 value={draft.unitCost}
+                disabled={goodsLocked}
+                style={lockedStyle}
                 onChange={e => set({ unitCost: e.target.value })}
               />
             </div>

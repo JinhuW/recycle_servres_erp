@@ -624,6 +624,11 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   screens do not.
 - Other-type stock can be filtered by Untyped (v1.49.0).
 - Spec fields on an inventory line are editable in place on desktop.
+  **The inventory editor saves whatever stage the PO is at** (v1.192.1):
+  sell price, status, condition, part #, health, RPM and specs land on a
+  Ready to Pay, Done or Sold PO too. Only qty and unit cost freeze from
+  Ready to Pay on. They show dimmed, with a line linking the PO and saying
+  to move it back to Reviewing. A save sends only the fields that changed.
 - **Committed sell orders reserve the units they name**, not the whole lot.
 
 ## Sell orders

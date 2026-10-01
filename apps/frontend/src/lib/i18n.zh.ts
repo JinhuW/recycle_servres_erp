@@ -1651,6 +1651,7 @@ const zh: Record<string, string> = {
   ieNoSellOrdersRef: '尚无销售订单引用此库存项。',
   iePricingQty: '定价与数量',
   iePricingQtySub: '明细打开时数量和单位成本可编辑。售价决定审核后的毛利。',
+  ieGoodsLockedHint: '{id} 进入待付款后，数量和单位成本即被锁定，需退回审核中才能修改。其他字段仍可保存。',
   ieLossyBanner: '售价低于单位成本 —— 此明细将亏损入账。',
   ieMarketReference: '市场参考',
   ieMarketRefSub: '{label} 的近期基准。',

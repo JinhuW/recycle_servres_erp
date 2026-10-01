@@ -17,6 +17,21 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.192.1] - 2026-10-01
+
+Saving a line from the desktop inventory editor works again on a PO at Ready
+to Pay, Done or Sold (RS-136). The editor sent every field on every save,
+changed or not. The route reads a present `qty` or `unitCost` as a goods edit,
+which is refused once the book closes. So a sell-price, condition or spec edit
+on a reviewed PO came back 409, "past review", and nothing saved; in prod this
+hit a Done PO three times in a row. The editor now sends only the fields that
+changed (`lib/inventoryEditPatch.ts`, which compares qty and unit cost as
+numbers). The same over-send also tripped the open-sell-order 409 on a
+spec-only edit, and that stops too. Qty and unit cost stay frozen from Ready to
+Pay on. `GET /api/inventory/:id` now returns `order_closed_book`, which the
+editor uses to dim those two inputs and link the PO with a "move it back to
+Reviewing" hint.
+
 ## [1.192.0] - 2026-10-01
 
 The phone serial scanner can read a printed serial with AI when the module's
