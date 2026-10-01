@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-128](./RS-128-box-check-button-and-page-read-review-mode.md) | in-review | chore | P3 | Box check button and page read Review mode | — |
 | [RS-127](./RS-127-pre-release-review-fixes-for-box-check-and-packing-l.md) | done | bug | P1 | Pre-release review fixes for box check and packing list | 1.189.1 |
 | [RS-126](./RS-126-packing-list-grouped-by-po.md) | done | story | P2 | Packing list grouped by PO | 1.189.0 |
 | [RS-125](./RS-125-box-check-the-count-starts-full.md) | done | task | P2 | Box check: the count starts full | 1.188.1 |

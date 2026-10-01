@@ -17,6 +17,15 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.189.2] - 2026-10-01
+
+### Changed
+
+- **The box check is called Review mode** (RS-128). The PO page header button
+  that read *Check box* and the page it opens, which was titled *Box check*,
+  both read **Review mode** now (zh 审核模式, previously 点货). Only the
+  labels change. The page, its route and its behaviour are the same.
+
 ## [1.189.1] - 2026-09-30
 
 ### Fixed

@@ -2013,9 +2013,9 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     eoStepLater: 'Not yet — one stage at a time',
     eoMarkAs: 'Mark as {s}',
     // Box check — the manager's bench view for counting a PO against its box.
-    bcOpen: 'Check box',
+    bcOpen: 'Review mode',
     bcOpenTip: 'Count this PO against the box that arrived',
-    bcTitle: 'Box check',
+    bcTitle: 'Review mode',
     bcBack: 'Back to PO',
     bcKeyMove: 'move',
     bcKeyCheck: 'check',
