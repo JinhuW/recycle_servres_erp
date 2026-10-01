@@ -6,7 +6,7 @@ import { freeSellableLine } from './helpers/inventory';
 import { api, multipart, testEnv } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import {
-  buildPriceTemplateWorkbook, buildPackingListWorkbook,
+  buildPriceTemplateWorkbook, buildPackingListWorkbook, packTabName,
 } from '../src/lib/sellOrderPriceTemplate';
 
 const XLSX_MIME =
@@ -656,6 +656,8 @@ describe('GET /api/sell-orders/:id/packing-list?groupBy=po', () => {
         SELECT order_id FROM order_lines WHERE id = ${line.id}`;
       if (!picked.some(p => p.po === po)) picked.push({ id: line.id, po });
     }
+    // The packing list places a line by where its lot is, so pin both lots.
+    await sql`UPDATE order_lines SET warehouse_id = 'WH-LA1' WHERE id IN ${sql(picked.map(p => p.id))}`;
     return picked.sort((a, b) => a.po.localeCompare(b.po, undefined, { numeric: true }));
   }
 
@@ -712,11 +714,59 @@ describe('GET /api/sell-orders/:id/packing-list?groupBy=po', () => {
     expect(rowQty(wb.worksheets[0], 'PO total')).toEqual([2]);
   });
 
+  it('places a line by where its lot is now, not the warehouse it was saved with', async () => {
+    const { token } = await loginAs(ALEX);
+    const [moved, inherited] = await linesFromTwoPos(token);
+    const id = await createOrder(token, {
+      lines: [
+        { inventoryId: moved.id, category: 'RAM', label: 'A', partNumber: 'MV-R1', qty: 1, unitPrice: 40, warehouseId: 'WH-LA1' },
+        { inventoryId: inherited.id, category: 'RAM', label: 'B', partNumber: 'MV-R2', qty: 1, unitPrice: 40, warehouseId: 'WH-LA1' },
+      ],
+    });
+    const sql = getTestDb();
+    // One lot transferred to NJ2; the other carries no warehouse of its own
+    // and sits wherever its PO does.
+    await sql`UPDATE order_lines SET warehouse_id = 'WH-NJ2' WHERE id = ${moved.id}`;
+    await sql`UPDATE order_lines SET warehouse_id = NULL WHERE id = ${inherited.id}`;
+    await sql`UPDATE orders SET warehouse_id = 'WH-NJ2' WHERE id = ${inherited.po}`;
+
+    const nj2 = await getRaw(`/api/sell-orders/${id}/packing-list?warehouse=NJ2`, token);
+    expect(nj2.status).toBe(200);
+    const wb = await loadWorkbook(nj2);
+    expect(wb.worksheets.map(w => w.name)).toEqual(['Pack - NJ2']);
+    expect(rowQty(wb.worksheets[0], 'Warehouse total')).toEqual([2]);
+    expect((await getRaw(`/api/sell-orders/${id}/packing-list?warehouse=LA1`, token)).status).toBe(400);
+
+    // The picker reads packWarehouse; the edit form keeps the saved one.
+    const detail = await api<{ order: { lines: { warehouse: string; packWarehouse: string }[] } }>(
+      'GET', `/api/sell-orders/${id}`, { token });
+    expect(detail.body.order.lines.map(l => [l.warehouse, l.packWarehouse])).toEqual([['LA1', 'NJ2'], ['LA1', 'NJ2']]);
+  });
+
   it('403s non-managers', async () => {
     const mgr = await loginAs(ALEX);
     const id = await createOrder(mgr.token);
     const pur = await loginAs(MARCUS);
     const res = await getRaw(`/api/sell-orders/${id}/packing-list?groupBy=po`, pur.token);
     expect(res.status).toBe(403);
+  });
+});
+
+describe('packTabName', () => {
+  it('drops apostrophes Excel refuses at either end and de-duplicates', () => {
+    const used = new Set<string>();
+    expect(packTabName("Pack - DEN'", used)).toBe('Pack - DEN');
+    expect(packTabName("'Pack - DEN", used)).toBe('Pack - DEN (2)');
+    expect(packTabName('Pack - A/B', used)).toBe('Pack - A-B');
+  });
+
+  it('builds a workbook for a warehouse short Excel would refuse as-is', async () => {
+    const buf = await buildPackingListWorkbook(
+      { id: 'SO-1', customerName: 'C', currencyCode: 'USD' },
+      [{ warehouse: "X'", products: [] }, { warehouse: "x'", products: [] }],
+    );
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf);
+    expect(wb.worksheets.map(w => w.name)).toEqual(['Pack - X', 'Pack - x (2)']);
   });
 });

@@ -312,8 +312,9 @@ export async function buildPackingListWorkbook(
   const { default: ExcelJS } = await import('exceljs');
   const wb = new ExcelJS.Workbook();
 
+  const used = new Set<string>();
   for (const wh of warehouses) {
-    renderWarehouseSheet(wb, head, wh);
+    renderWarehouseSheet(wb, head, wh, { tabName: packTabName(`Pack - ${wh.warehouse}`, used) });
   }
 
   return Buffer.from(await wb.xlsx.writeBuffer());
@@ -343,12 +344,12 @@ export async function buildPackingListByPoWorkbook(
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
-// Excel caps a tab name at 31 characters and refuses * ? : \ / [ ]; exceljs
-// throws on a duplicate (case-insensitively). Warehouse shorts aren't unique
-// in the schema, so two "PO-1442 - DEN" tabs are possible — the second gets a
-// counter.
-function packTabName(raw: string, used: Set<string>): string {
-  const base = raw.replace(/[*?:\\/[\]]/g, '-').slice(0, 31);
+// Excel caps a tab name at 31 characters, refuses * ? : \ / [ ], and refuses
+// an apostrophe at either end; exceljs throws on a duplicate
+// (case-insensitively). Warehouse shorts aren't unique in the schema, so two
+// "Pack - DEN" tabs are possible — the second gets a counter.
+export function packTabName(raw: string, used: Set<string>): string {
+  const base = raw.replace(/[*?:\\/[\]]/g, '-').slice(0, 31).replace(/^'+|'+$/g, '') || 'Pack';
   let name = base;
   for (let n = 2; used.has(name.toLowerCase()); n++) {
     const suffix = ` (${n})`;

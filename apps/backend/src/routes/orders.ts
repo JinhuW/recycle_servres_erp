@@ -2945,20 +2945,24 @@ async function checkOrder(sql: SqlLike, id: string): Promise<CheckOrderRow | und
 async function readChecks(sql: SqlLike, id: string) {
   const lines = await sql<{
     line_id: string; counted: number; flag_reason: CheckFlagReason | null;
-    flag_note: string | null; checked_at: Date | null;
+    flag_note: string | null; checked_at: Date | null; flag_sent_at: Date | null;
   }[]>`
-    SELECT k.line_id, k.counted, k.flag_reason, k.flag_note, k.checked_at
+    SELECT k.line_id, k.counted, k.flag_reason, k.flag_note, k.checked_at, k.flag_sent_at
     FROM order_line_checks k JOIN order_lines l ON l.id = k.line_id
     WHERE l.order_id = ${id}`;
-  const extras = await sql<{ id: string; part_number: string; note: string | null; created_at: Date }[]>`
-    SELECT id, part_number, note, created_at FROM order_check_extras
+  const extras = await sql<{
+    id: string; part_number: string; note: string | null; created_at: Date; sent_at: Date | null;
+  }[]>`
+    SELECT id, part_number, note, created_at, sent_at FROM order_check_extras
     WHERE order_id = ${id} ORDER BY created_at ASC, id ASC`;
   return {
     lines: lines.map((r) => ({
       lineId: r.line_id, counted: r.counted, flagReason: r.flag_reason,
-      flagNote: r.flag_note, checkedAt: r.checked_at,
+      flagNote: r.flag_note, checkedAt: r.checked_at, flagSentAt: r.flag_sent_at,
     })),
-    extras: extras.map((r) => ({ id: r.id, partNumber: r.part_number, note: r.note, createdAt: r.created_at })),
+    extras: extras.map((r) => ({
+      id: r.id, partNumber: r.part_number, note: r.note, createdAt: r.created_at, sentAt: r.sent_at,
+    })),
   };
 }
 
@@ -3020,6 +3024,11 @@ orders.put('/:id/checks/:lineId', async (c) => {
       flag_reason = EXCLUDED.flag_reason,
       flag_note = EXCLUDED.flag_note,
       checked_at = CASE WHEN ${checked} THEN COALESCE(order_line_checks.checked_at, NOW()) END,
+      -- A changed flag is a new message; a count-only write keeps the stamp.
+      flag_sent_at = CASE
+        WHEN order_line_checks.flag_reason IS DISTINCT FROM EXCLUDED.flag_reason
+          OR order_line_checks.flag_note IS DISTINCT FROM EXCLUDED.flag_note THEN NULL
+        ELSE order_line_checks.flag_sent_at END,
       updated_by = EXCLUDED.updated_by,
       updated_at = NOW()`;
   return c.json(await readChecks(sql, id));
@@ -3059,7 +3068,8 @@ orders.delete('/:id/checks/extras/:extraId', async (c) => {
 
 // The flags go to the purchaser as a notification and stay on the order's
 // history. The stage is left alone: what happens next is a conversation, not
-// a transition.
+// a transition.  Only what hasn't gone out yet is sent, so a second click — or
+// a second manager opening the page — doesn't repeat the message.
 orders.post('/:id/checks/send', async (c) => {
   const u = c.var.user;
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
@@ -3076,12 +3086,22 @@ orders.post('/:id/checks/send', async (c) => {
     }[]>`
       SELECT l.id AS line_id, l.part_number, l.qty, k.counted, k.flag_reason, k.flag_note
       FROM order_line_checks k JOIN order_lines l ON l.id = k.line_id
-      WHERE l.order_id = ${id} AND k.flag_reason IS NOT NULL
-      ORDER BY l.position ASC, l.id ASC`;
-    const extras = await tx<{ part_number: string; note: string | null }[]>`
-      SELECT part_number, note FROM order_check_extras
-      WHERE order_id = ${id} ORDER BY created_at ASC, id ASC`;
+      WHERE l.order_id = ${id} AND k.flag_reason IS NOT NULL AND k.flag_sent_at IS NULL
+      ORDER BY l.position ASC, l.id ASC
+      FOR UPDATE OF k`;
+    const extras = await tx<{ id: string; part_number: string; note: string | null }[]>`
+      SELECT id, part_number, note FROM order_check_extras
+      WHERE order_id = ${id} AND sent_at IS NULL ORDER BY created_at ASC, id ASC
+      FOR UPDATE`;
     if (flags.length === 0 && extras.length === 0) return null;
+    if (flags.length) {
+      await tx`UPDATE order_line_checks SET flag_sent_at = NOW()
+               WHERE line_id IN ${tx(flags.map((f) => f.line_id))}`;
+    }
+    if (extras.length) {
+      await tx`UPDATE order_check_extras SET sent_at = NOW()
+               WHERE id IN ${tx(extras.map((x) => x.id))}`;
+    }
 
     const detail = {
       flags: flags.map((f) => ({
@@ -3108,8 +3128,13 @@ orders.post('/:id/checks/send', async (c) => {
     }
     return detail;
   });
-  if (!sent) return c.json({ error: 'Nothing is flagged — flag a line or record an extra item first.' }, 409);
-  return c.json({ ok: true, flags: sent.flags.length, extras: sent.extras.length });
+  if (!sent) {
+    return c.json({ error: 'Nothing new to send — every flag and extra item has already gone to the purchaser.' }, 409);
+  }
+  return c.json({
+    ...await readChecks(sql, id),
+    ok: true, sentFlags: sent.flags.length, sentExtras: sent.extras.length, notified: order.user_id !== u.id,
+  });
 });
 
 type TxnRuleRow = {

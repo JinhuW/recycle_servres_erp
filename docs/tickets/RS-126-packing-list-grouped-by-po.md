@@ -1,7 +1,7 @@
 ---
 id: RS-126
 title: Packing list grouped by PO
-type: feature
+type: story
 status: done
 priority: P2
 created: 2026-09-30

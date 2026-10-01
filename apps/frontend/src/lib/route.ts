@@ -51,6 +51,17 @@ export function navigate(path: string): void {
   window.history.replaceState({ ...(window.history.state ?? {}), erpDepth: depth }, '');
 }
 
+/** Like `navigate`, but the new route takes the current history entry's place —
+ *  for a redirect, so Back doesn't land on the page that bounced. */
+export function replaceRoute(path: string): void {
+  const target = path.startsWith('/') ? path : '/' + path;
+  if (splitHash(window.location.hash).path === splitHash(target).path) return;
+  const depth = historyDepth();
+  window.location.replace('#' + target);
+  // replace() drops the entry's state; keep the depth the entry already had.
+  window.history.replaceState({ ...(window.history.state ?? {}), erpDepth: depth }, '');
+}
+
 /** The current route's query, e.g. `tab=payment`. */
 export function readHashQuery(): URLSearchParams {
   if (typeof window === 'undefined') return new URLSearchParams();

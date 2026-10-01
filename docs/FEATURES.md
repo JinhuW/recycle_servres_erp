@@ -246,33 +246,50 @@ on to Sold once every line has sold (v1.164.0).
   desktop only). **Check box** in the PO page header, primary at Reviewing and
   present at every stage, opens `#/purchase-orders/<id>/check`: a full-width
   page with no sidebar.
+  - Opening and leaving the check re-reads the PO, so neither page works from
+    the other's stale copy. A PO page with unsaved edits refuses to open it
+    (v1.189.1).
   - Every line's count starts at its full qty (v1.188.1). Ticking the
     checkbox confirms the line, and a ticked line sinks below a *Checked*
     divider, newest first, with an Undo. Flagged lines sit between the open
     and the checked ones.
   - Checked is its own state, never inferred from the count. Lowering a line
     with − turns it amber and takes its tick away. Ticking an amber line opens
-    the flag editor prefilled "Short count · Counted n of m".
+    the flag editor prefilled "Short count · Counted n of m". A tick only
+    holds while the count covers the line's *current* qty: a line whose qty is
+    raised on the PO page after it was ticked goes back to amber (v1.189.1).
   - **Check all remaining** ticks every line still at its full count and
     leaves amber lines for a decision.
   - The scan box takes a label scanner. It matches an exact part number, then
-    a prefix, then a recorded serial, and a scan ticks the first matching line
-    not yet checked (an amber one opens its flag). A scan that matches nothing
-    can be recorded as an extra item.
+    a prefix, then a recorded serial. A scan goes to a matching line still
+    open first, then an amber one (which opens its flag), then a flagged one.
+    A prefix that fits lines with different part numbers ticks nothing and
+    names them. A scan that matches nothing, or matches a line already
+    checked, can be recorded as an extra item (v1.189.1).
+  - A scan works with nothing focused: a character typed onto the page that
+    is not a shortcut starts the scan in the box, so a label never runs as
+    shortcuts. The shortcuts are ↑↓/j k, Space, + −, lowercase f and /; a
+    scanner sends uppercase. Escape under an open dialog closes only the
+    dialog (v1.189.1).
   - A flag is one of Missing, Short count, Wrong part, Damaged or Not as
     described, plus a note. A short count is only ever a flag; the line qty
     does not change.
   - Progress is saved on the server (`order_line_checks`,
     `order_check_extras`), so a reload or a second manager sees the same
-    count. Last write per line wins; there is no live sync.
+    count. Last write per line wins; there is no live sync. Nothing can be
+    changed until the saved count has loaded, and changes still waiting to
+    save go out when the page is left (v1.189.1).
   - Once every line is checked or flagged: with no problems at Reviewing,
     **Approve for payment** moves the PO to Ready to Pay (re-reading the stage
     first). With problems, **Send flags to purchaser** notifies the owner and
     writes a `box_check_flagged` event to the PO's history. The stage does not
-    move.
+    move. Each flag and extra is sent once and then marked *sent*; Send only
+    offers what hasn't gone out, and editing a flag's reason or note makes it
+    news again (v1.189.1).
   - The endpoints (`/api/orders/:id/checks…`) 403 anyone whose real role is
-    not manager; the page and button are hidden from a manager previewing as
-    purchaser.
+    not manager. The page and button are hidden from a manager previewing as
+    purchaser, and the route bounces them without leaving a Back entry
+    (v1.189.1).
 - **A company-paid PO names the payment that funded it before it leaves
   Draft** (v1.115.0) — the transaction ID is required, and the advance is
   refused without it for every actor, a manager stage-jump and carrier movement
@@ -648,7 +665,10 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   boxes, subtotals and a PO total. A warehouse picker beside the buttons
   (shown when the order spans more than one) narrows either packing list to
   one warehouse (`?warehouse=<short>`); the bid sheet always covers the whole
-  order.
+  order. Both packing lists place a line by where its lot is *now* — the lot's
+  own warehouse, else its PO's — not the warehouse the line was saved with,
+  so a lot transferred after it went on the order is picked where it sits
+  (v1.189.1).
 - **Vendor bids**: vendors reach a tokenised portal with faceted catalog
   filtering, submit bids, and managers review and promote them on a dedicated
   screen. Promotion picks and validates a customer for general links.

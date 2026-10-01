@@ -3949,6 +3949,9 @@ button.rsheet-box:hover { background: color-mix(in oklch, var(--accent) 10%, tra
 .bc-extra { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--neg); }
 .bc-extra .muted { color: var(--fg-subtle); }
 .bc-extra .btn { margin-left: auto; }
+/* Already with the purchaser: still a problem, no longer news. */
+.bc-sent { font-size: 10.5px; padding: 1px 6px; text-transform: lowercase; }
+.bc-load-error { display: flex; align-items: center; gap: 12px; color: var(--neg); font-size: 13px; }
 
 /* Compare panel: the purchaser's photo next to the part in hand. */
 .bc-compare { overflow: hidden; }

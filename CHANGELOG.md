@@ -17,6 +17,59 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.189.1] - 2026-09-30
+
+### Fixed
+
+Pre-release review of the box check and the packing list by PO (RS-127).
+
+- **The box check no longer works from a stale copy of the PO.** The page
+  reused the order as the PO page first loaded it. A count therefore missed
+  lines changed with Confirm line, and coming back to the PO page and saving a
+  stage change re-sent every line with its old qty, quietly undoing the edit.
+  Moving between the two pages now re-reads the order, and a PO page with
+  unsaved edits refuses to open the check rather than dropping them.
+- **A tick no longer outlives a qty change.** A line ticked at 4/4 whose qty
+  went to 6 still read as checked, so Approve could pass two uncounted units.
+  A line whose qty dropped below its saved count had every later write
+  refused. Ticks now hold only while the count covers the line, and writes
+  clamp the count to the qty.
+- **Nothing writes before the saved count loads.** Space, a scan or Check all
+  remaining during a slow or failed load used to save the full-count default
+  over a short count or a flag already on file. The page now waits, and a
+  failed load offers a retry.
+- **Writes are not lost on the way out.** Leaving within the 400 ms debounce
+  dropped the last tick or flag. Pending writes are now sent on leaving (with
+  `keepalive` when the tab closes). Send and Approve wait for writes already
+  in flight and stop if one failed.
+- **A scan with nothing focused is a scan, not shortcuts.** A label like
+  `M393A4K40DB3-CWE` typed onto the page lowered the selected count (`-`)
+  and opened the flag editor (`F`). The first non-shortcut character now
+  starts the scan in the box, `f` is lowercase-only, and Space acts on the
+  selected row rather than whichever row button was last clicked. Escape
+  under an error dialog closes the dialog instead of leaving the page.
+- **Scans pick the right line.** A flagged line no longer swallows every scan
+  of its part number. A prefix that fits two different part numbers (`-VK` and
+  `-UH` speed grades) asks instead of guessing. Re-scanning a checked line
+  says so plainly instead of calling the unit "extra".
+- **Flags are sent once.** Each Send re-notified the purchaser with every flag
+  on the PO. Flags and extras now record when they went out (migration 0140),
+  Send offers only what is new, and editing a flag makes it news again.
+- **Packing lists follow the lot.** Lines were placed by the warehouse saved
+  on the sell-order line, so after a transfer the narrowed list for the new
+  warehouse left the line out. Placement now uses the lot's current warehouse
+  (falling back to its PO's), and so does the picker. A warehouse short that
+  Excel refuses as a tab name no longer fails the download.
+- A manager previewing as a purchaser no longer sees a Check box button that
+  bounces, and the bounce no longer traps Back. Box-check notifications keep
+  one problem per line on the phone, an IME Enter in the flag note no longer
+  saves a half-typed note, and the toast no longer claims a notification went
+  out when the manager owns the PO.
+
+Known and left for later: `/advance` takes no expected-from stage, so the
+approve re-read is not atomic; a count of 0 still prefills as Short rather than
+Missing; the Checked group's order resets on reload.
+
 ## [1.189.0] - 2026-09-30
 
 ### Added

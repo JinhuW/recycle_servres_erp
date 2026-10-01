@@ -80,6 +80,9 @@ type SellOrderLine = {
   nativeUnitPrice: number;  // order-currency price (== unitPrice for USD)
   condition: string | null;
   warehouse: string | null;
+  // Where the line's lot is now, which the packing lists go by. Absent from a
+  // backend older than this bundle.
+  packWarehouse?: string | null;
   lineTotal: number;        // USD
   position: number;
   inventoryId: string | null;
@@ -548,7 +551,7 @@ function DownloadMenu({ orderId, lines }: { orderId: string; lines: SellOrderLin
   const { t } = useT();
   const [warehouse, setWarehouse] = useState('');
   const warehouses = useMemo(
-    () => [...new Set(lines.map(l => l.warehouse ?? 'Unassigned'))].sort((a, b) => {
+    () => [...new Set(lines.map(l => (l.packWarehouse === undefined ? l.warehouse : l.packWarehouse) ?? 'Unassigned'))].sort((a, b) => {
       if (a === 'Unassigned') return 1;
       if (b === 'Unassigned') return -1;
       return a.localeCompare(b);

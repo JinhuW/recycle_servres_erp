@@ -4,7 +4,7 @@ import { Icon } from '../../components/Icon';
 import { ImageLightbox } from '../../components/ImageLightbox';
 import { OrderCategoryChips } from '../../components/OrderCategoryChips';
 import { LineSpecChips } from '../../components/LineSpecChips';
-import { api } from '../../lib/api';
+import { api, rawFetch } from '../../lib/api';
 import {
   BOX_CHECK_REASONS, boxCheckReasonKey, checkBody, countOf, emptyCheck, lineState, matchScan, nextOpenAfter,
   orderLines, tally,
@@ -13,6 +13,7 @@ import {
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { fmtUSD } from '../../lib/format';
 import { useT } from '../../lib/i18n';
+import { useEscapeKey } from '../../lib/useEscapeKey';
 import { lineSpecLabel } from '../../lib/lineGroups';
 import { linePhotos } from '../../lib/linePhotos';
 import { statusTone } from '../../lib/status';
@@ -26,12 +27,13 @@ import type { Order, OrderLine } from '../../lib/types';
 type Props = {
   order: Order;
   onExit: () => void;
-  onApproved: () => Promise<void>;
+  onApproved: () => void;
   showToast: (msg: string, kind?: 'success' | 'error' | 'warn') => void;
 };
 
 type Undo = { lineId: string; prev: LineCheck; msg: string };
 type ScanMsg = { tone: 'muted' | 'pos' | 'neg'; text: string; extra?: string };
+type SendResponse = ChecksResponse & { notified: boolean };
 
 const SAVE_DELAY_MS = 400;
 
@@ -43,7 +45,9 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
 
   const [checks, setChecks] = useState<Map<string, LineCheck>>(new Map());
   const [extras, setExtras] = useState<CheckExtra[]>([]);
-  const [loaded, setLoaded] = useState(false);
+  // Nothing may write until the saved count is in: an action taken against
+  // the full-count default would overwrite a short count or a flag on file.
+  const [loadState, setLoadState] = useState<'loading' | 'ok' | 'error'>('loading');
   const [selectedId, setSelectedId] = useState<string | null>(lines[0]?.id ?? null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<{ reason: BoxCheckReason | null; note: string }>({ reason: null, note: '' });
@@ -54,43 +58,129 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
   const [busy, setBusy] = useState<'approve' | 'send' | null>(null);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [photoIdx, setPhotoIdx] = useState(0);
+  const ready = loadState === 'ok' && !readOnly;
 
   const scanRef = useRef<HTMLInputElement | null>(null);
-  const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  // Set when a scanner's first character landed on the page and was moved into
+  // the scan box; the box gives focus back once the scan is in.
+  const scanFromPage = useRef(false);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const lineById = useMemo(() => new Map(lines.map(l => [l.id, l])), [lines]);
+  const lineByIdRef = useRef(lineById);
+  lineByIdRef.current = lineById;
+
+  // ── Writes. Each line's latest state waits out a short debounce in
+  // `pending`, then goes out behind any earlier write of the same line
+  // (`inflight`), so a scanner burst is one write and two writes of a line
+  // never land out of order.
+  const pending = useRef(new Map<string, LineCheck>());
+  const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const inflight = useRef(new Map<string, Promise<ChecksResponse>>());
+
+  // The server's copy, except where a write of ours is still on its way —
+  // there the page is newer.
+  const applyServer = useCallback((r: ChecksResponse) => {
+    setChecks(prev => {
+      const next = new Map(r.lines.map(c => [c.lineId, c]));
+      for (const id of [...pending.current.keys(), ...inflight.current.keys()]) {
+        const mine = prev.get(id);
+        if (mine) next.set(id, mine);
+      }
+      return next;
+    });
+    setExtras(r.extras);
+  }, []);
 
   const load = useCallback(async () => {
     try {
-      const r = await api.get<ChecksResponse>(`/api/orders/${order.id}/checks`);
-      setChecks(new Map(r.lines.map(c => [c.lineId, c])));
-      setExtras(r.extras);
+      applyServer(await api.get<ChecksResponse>(`/api/orders/${order.id}/checks`));
+      setLoadState('ok');
     } catch (e) {
       handleFetchError(e);
-    } finally {
-      setLoaded(true);
+      // A failed re-read leaves the page's own copy standing.
+      setLoadState(s => (s === 'ok' ? 'ok' : 'error'));
     }
-  }, [order.id]);
+  }, [order.id, applyServer]);
 
   useEffect(() => { void load(); }, [load]);
+
+  const put = useCallback((c: LineCheck): Promise<ChecksResponse> => {
+    const qty = lineByIdRef.current.get(c.lineId)?.qty ?? c.counted;
+    const before: Promise<unknown> = inflight.current.get(c.lineId) ?? Promise.resolve(null);
+    const p = before.catch(() => null).then(() =>
+      api.put<ChecksResponse>(`/api/orders/${order.id}/checks/${c.lineId}`, checkBody(c, qty)));
+    inflight.current.set(c.lineId, p);
+    const settle = () => { if (inflight.current.get(c.lineId) === p) inflight.current.delete(c.lineId); };
+    p.then(r => {
+      settle();
+      // Whether the flag still counts as sent is the server's call (it
+      // compares against what it holds), so take its answer for this line.
+      if (pending.current.has(c.lineId) || inflight.current.has(c.lineId)) return;
+      const fresh = r.lines.find(x => x.lineId === c.lineId);
+      setChecks(m => {
+        const cur = m.get(c.lineId);
+        return cur ? new Map(m).set(c.lineId, { ...cur, flagSentAt: fresh?.flagSentAt ?? null }) : m;
+      });
+    }, settle);
+    return p;
+  }, [order.id]);
+
+  const fire = useCallback((id: string): Promise<ChecksResponse> | null => {
+    const t0 = timers.current.get(id);
+    if (t0) clearTimeout(t0);
+    timers.current.delete(id);
+    const c = pending.current.get(id);
+    pending.current.delete(id);
+    return c ? put(c) : null;
+  }, [put]);
+
+  // Leaving the page sends what is still waiting rather than dropping it.
   useEffect(() => () => {
-    timers.current.forEach(clearTimeout);
+    for (const id of [...pending.current.keys()]) fire(id)?.catch(() => {});
     if (undoTimer.current) clearTimeout(undoTimer.current);
-  }, []);
+  }, [fire]);
+  // Closing the tab: an ordinary request would be cancelled with the page.
+  useEffect(() => {
+    const onHide = () => {
+      for (const [id, c] of pending.current) {
+        clearTimeout(timers.current.get(id));
+        const qty = lineByIdRef.current.get(id)?.qty ?? c.counted;
+        void rawFetch('PUT', `/api/orders/${order.id}/checks/${id}`, checkBody(c, qty), undefined, { keepalive: true })
+          .catch(() => {});
+      }
+      pending.current.clear();
+      timers.current.clear();
+    };
+    window.addEventListener('pagehide', onHide);
+    return () => window.removeEventListener('pagehide', onHide);
+  }, [order.id]);
 
   // Optimistic: the row moves the moment it is ticked, and a burst from a
   // scanner collapses into one write per line.
   const save = useCallback((next: LineCheck) => {
     setChecks(m => new Map(m).set(next.lineId, next));
-    const pending = timers.current.get(next.lineId);
-    if (pending) clearTimeout(pending);
+    pending.current.set(next.lineId, next);
+    const t0 = timers.current.get(next.lineId);
+    if (t0) clearTimeout(t0);
     timers.current.set(next.lineId, setTimeout(() => {
-      timers.current.delete(next.lineId);
-      api.put<ChecksResponse>(`/api/orders/${order.id}/checks/${next.lineId}`, checkBody(next))
-        .catch((e) => { handleFetchError(e); void load(); });
+      fire(next.lineId)?.catch((e) => { handleFetchError(e); void load(); });
     }, SAVE_DELAY_MS));
-  }, [order.id, load]);
+  }, [fire, load]);
 
-  const lineById = useMemo(() => new Map(lines.map(l => [l.id, l])), [lines]);
+  // Everything waiting goes out, and everything already out lands, before
+  // anything reads the server's copy of the count. A write that failed stops
+  // the caller: Send or Approve must not act on a count the server lacks.
+  const flush = async () => {
+    for (const id of [...pending.current.keys()]) fire(id)?.catch(() => {});
+    const results = await Promise.allSettled([...inflight.current.values()]);
+    const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+    if (failed) {
+      void load();
+      throw failed.reason;
+    }
+  };
+
   const checkOf = useCallback(
     (id: string) => checks.get(id) ?? emptyCheck(id, lineById.get(id)?.qty ?? 0),
     [checks, lineById],
@@ -106,7 +196,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
   // tick away — the manager has to decide about the shortfall — and reaching
   // the qty never ticks on its own, because the count starts there.
   const setCount = (l: OrderLine, n: number) => {
-    if (readOnly) return;
+    if (!ready) return;
     const prev = checkOf(l.id);
     const counted = Math.max(0, Math.min(l.qty, n));
     if (counted === prev.counted) return;
@@ -124,7 +214,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
   // A short line can't just be ticked: the shortfall goes to the purchaser as
   // a flag, so the tick opens the flag editor instead.
   const toggle = (l: OrderLine) => {
-    if (readOnly) return;
+    if (!ready) return;
     const c = checkOf(l.id);
     const state = lineState(l, c);
     if (state === 'flagged' || state === 'partial') { openFlag(l); return; }
@@ -137,20 +227,23 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
   };
 
   const openFlag = (l: OrderLine) => {
-    if (readOnly) return;
+    if (!ready) return;
     const c = checkOf(l.id);
+    const counted = countOf(l, c);
     setSelectedId(l.id);
     setEditingId(l.id);
-    const short = c.counted < l.qty;
+    const short = counted < l.qty;
     setDraft(c.flagReason
       ? { reason: c.flagReason, note: c.flagNote ?? '' }
-      : { reason: short ? 'short' : null, note: short ? t('bcShortNote', { n: c.counted, of: l.qty }) : '' });
+      : { reason: short ? 'short' : null, note: short ? t('bcShortNote', { n: counted, of: l.qty }) : '' });
   };
 
   const saveFlag = (l: OrderLine) => {
-    if (!draft.reason) return;
+    if (!ready || !draft.reason) return;
     const prev = checkOf(l.id);
-    const next = { ...prev, flagReason: draft.reason, flagNote: draft.note.trim() || null };
+    const note = draft.note.trim() || null;
+    const changed = prev.flagReason !== draft.reason || prev.flagNote !== note;
+    const next = { ...prev, flagReason: draft.reason, flagNote: note, flagSentAt: changed ? null : prev.flagSentAt };
     save(next);
     setEditingId(null);
     flashUndo({ lineId: l.id, prev, msg: t('bcFlaggedToast', { pn: l.partNumber ?? lineLabel(l) }) });
@@ -158,13 +251,14 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
   };
 
   const clearFlag = (l: OrderLine) => {
+    if (!ready) return;
     const prev = checkOf(l.id);
-    save({ ...prev, flagReason: null, flagNote: null });
+    save({ ...prev, flagReason: null, flagNote: null, flagSentAt: null });
     setEditingId(null);
   };
 
   const applyUndo = () => {
-    if (!undo) return;
+    if (!undo || !ready) return;
     save(undo.prev);
     setSelectedId(undo.lineId);
     setUndo(null);
@@ -180,7 +274,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
   const selected = (selectedId && lineById.get(selectedId)) || lines[0] || null;
 
   const checkAllRemaining = () => {
-    if (readOnly) return;
+    if (!ready) return;
     const now = Date.now();
     // Short lines are left for a decision; everything still at its full count
     // is ticked. Staggered stamps keep the batch in PO order inside Checked.
@@ -194,17 +288,29 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
   const onScan = (raw: string) => {
     const text = raw.trim();
     setScan('');
-    if (!text) return;
-    const hit = matchScan(lines, checks, text);
-    if (!hit) {
+    if (scanFromPage.current) {
+      scanFromPage.current = false;
+      scanRef.current?.blur();
+    }
+    if (!text || !ready) return;
+    const m = matchScan(lines, checks, text);
+    if (!m) {
       setScanMsg({ tone: 'neg', text: t('bcScanNoMatch', { pn: text, id: order.id }), extra: text });
       return;
     }
+    if ('ambiguous' in m) {
+      setScanMsg({ tone: 'neg', text: t('bcScanAmbiguous', { pn: text, pns: m.ambiguous.join(', ') }) });
+      return;
+    }
+    const hit = m.line;
     setSelectedId(hit.id);
     const pn = hit.partNumber ?? lineLabel(hit);
     const state = lineState(hit, checks.get(hit.id));
+    // A scan checks the whole line, so the next unit of it reads as already
+    // done. Recording it as extra stays on offer for a box that really holds
+    // one more than the PO.
     if (state === 'done') {
-      setScanMsg({ tone: 'neg', text: t('bcScanAlreadyChecked', { pn }), extra: text });
+      setScanMsg({ tone: 'muted', text: t('bcScanAlreadyChecked', { pn }), extra: text });
       return;
     }
     // A scan means "found it": a full line is ticked, a short or flagged one
@@ -220,6 +326,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
   };
 
   const addExtra = async (partNumber: string) => {
+    if (!ready) return;
     try {
       const r = await api.post<ChecksResponse>(`/api/orders/${order.id}/checks/extras`, { partNumber });
       setExtras(r.extras);
@@ -227,21 +334,15 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
     } catch (e) { handleFetchError(e); }
   };
   const removeExtra = async (x: CheckExtra) => {
+    if (!ready) return;
     try {
       const r = await api.delete<ChecksResponse>(`/api/orders/${order.id}/checks/extras/${x.id}`);
       setExtras(r.extras);
     } catch (e) { handleFetchError(e); }
   };
 
-  // Writes still waiting on their debounce go out before anything reads the
-  // server's copy of the count.
-  const flush = async () => {
-    const ids = [...timers.current.keys()];
-    ids.forEach(id => { clearTimeout(timers.current.get(id)); timers.current.delete(id); });
-    await Promise.all(ids.map(id => api.put(`/api/orders/${order.id}/checks/${id}`, checkBody(checkOf(id)))));
-  };
-
   const approve = async () => {
+    if (!ready) return;
     setBusy('approve');
     try {
       await flush();
@@ -253,20 +354,25 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
         return;
       }
       await api.post(`/api/orders/${order.id}/advance`, { toStage: 'ready_to_pay' });
-      await onApproved();
     } catch (e) {
       handleFetchError(e);
+      return;
     } finally {
       setBusy(null);
     }
+    onApproved();
   };
 
   const send = async () => {
+    if (!ready) return;
     setBusy('send');
     try {
       await flush();
-      await api.post(`/api/orders/${order.id}/checks/send`, {});
-      showToast(t('bcSentToast', { name: order.userName.split(' ')[0] ?? order.userName }));
+      const r = await api.post<SendResponse>(`/api/orders/${order.id}/checks/send`, {});
+      applyServer(r);
+      showToast(r.notified
+        ? t('bcSentToast', { name: firstName(order.userName) })
+        : t('bcSentToastSelf'));
     } catch (e) {
       handleFetchError(e);
     } finally {
@@ -274,14 +380,16 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
     }
   };
 
-  // ── FLIP: a row that changes group slides from where it was.
+  // ── FLIP: a row that changes group slides from where it was. Positions are
+  // measured inside the table, so scrolling the page between two changes
+  // doesn't read as every row having moved.
   const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
   const lastTops = useRef(new Map<string, number>());
   useLayoutEffect(() => {
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     const tops = new Map<string, number>();
     rowRefs.current.forEach((el, id) => {
-      const top = el.getBoundingClientRect().top;
+      const top = el.offsetTop;
       tops.set(id, top);
       const was = lastTops.current.get(id);
       if (!reduce && was !== undefined && Math.abs(was - top) > 2 && el.animate) {
@@ -292,17 +400,18 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
     lastTops.current = tops;
   }, [ordered, showDone, editingId]);
 
+  // Escape joins the app's layer stack, so a dialog or the photo on top of
+  // the page closes first and the page only leaves when it is the top layer.
+  useEscapeKey(() => { if (editingId) setEditingId(null); else onExit(); });
+
   // ── Keyboard. Ignored while typing, so the scan box and the note stay
-  // plain text fields.
+  // plain text fields, and while a dialog is up.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (lightbox) return;
+      if (lightbox || document.querySelector('[aria-modal="true"]')) return;
       const target = e.target as HTMLElement | null;
-      if (target?.closest('input, textarea, select')) {
-        if (e.key === 'Escape' && target.id === 'bc-scan') target.blur();
-        return;
-      }
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (target?.closest('input, textarea, select')) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || e.key === 'Escape') return;
       const i = visible.findIndex(l => l.id === selected?.id);
       const move = (d: number) => {
         const n = visible[Math.max(0, Math.min(visible.length - 1, i + d))];
@@ -314,13 +423,29 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
         case 'ArrowDown': case 'j': e.preventDefault(); move(1); break;
         case 'ArrowUp': case 'k': e.preventDefault(); move(-1); break;
         case ' ':
-          if (target?.closest('button')) return;
-          e.preventDefault(); if (selected) toggle(selected); break;
-        case '+': case '=': if (selected) setCount(selected, checkOf(selected.id).counted + 1); break;
-        case '-': if (selected) setCount(selected, checkOf(selected.id).counted - 1); break;
-        case 'f': case 'F': e.preventDefault(); if (selected) openFlag(selected); break;
+          // A row's own buttons keep focus after a click while the arrows move
+          // the selection; Space belongs to the selected row, not to them.
+          // Buttons outside the list (Approve, Send) keep their own Space.
+          if (target?.closest('button') && !target.closest('.bc-table')) return;
+          e.preventDefault();
+          if (target?.closest('button')) target.blur();
+          if (selected) toggle(selected);
+          break;
+        case '+': case '=': if (selected) setCount(selected, countOf(selected, checkOf(selected.id)) + 1); break;
+        case '-': if (selected) setCount(selected, countOf(selected, checkOf(selected.id)) - 1); break;
+        // Lowercase only: scanners type labels in uppercase (F4-…, KVR…).
+        case 'f': e.preventDefault(); if (selected) openFlag(selected); break;
         case '/': e.preventDefault(); scanRef.current?.focus(); break;
-        case 'Escape': if (editingId) setEditingId(null); else onExit(); break;
+        default:
+          // A scanner types into whatever has focus. Its first character
+          // starts the scan in the box; the rest then follows it there, so
+          // the label never runs as shortcuts.
+          if (ready && e.key.length === 1 && e.key.trim()) {
+            e.preventDefault();
+            scanFromPage.current = true;
+            setScan(e.key);
+            scanRef.current?.focus();
+          }
       }
     };
     document.addEventListener('keydown', onKey);
@@ -329,8 +454,11 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
 
   useEffect(() => { setPhotoIdx(0); }, [selected?.id]);
 
-  const flaggedCount = ordered.flagged.length;
-  const problems = flaggedCount + extras.length;
+  const problems = ordered.flagged.length + extras.length;
+  // What Send would deliver: flags and extras not yet in front of the purchaser.
+  const unsentFlags = ordered.flagged.filter(l => !checkOf(l.id).flagSentAt);
+  const unsentExtras = extras.filter(x => !x.sentAt);
+  const unsent = unsentFlags.length + unsentExtras.length;
 
   const row = (l: OrderLine) => {
     const c = checkOf(l.id);
@@ -352,7 +480,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
               className="bc-cb"
               aria-pressed={state === 'done'}
               aria-label={t(state === 'done' ? 'bcUncheckLine' : 'bcCheckLine', { pn })}
-              disabled={readOnly}
+              disabled={!ready}
               onClick={e => { e.stopPropagation(); setSelectedId(l.id); toggle(l); }}
             >
               {state === 'done' && <Icon name="check" size={14} stroke={3} />}
@@ -376,6 +504,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
               <div className="bc-flagnote">
                 <Icon name="flag" size={11} /> {t(boxCheckReasonKey(c.flagReason))}
                 {c.flagNote && <span className="muted"> · {c.flagNote}</span>}
+                {c.flagSentAt && <span className="chip muted bc-sent">{t('bcSentTag')}</span>}
               </div>
             )}
           </td>
@@ -383,14 +512,14 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
           <td className="num">
             <div className="bc-count" onClick={e => e.stopPropagation()}>
               <button type="button" className="btn ghost icon-only sm" aria-label={t('bcCountLess')}
-                disabled={readOnly || c.counted === 0} onClick={() => { setSelectedId(l.id); setCount(l, c.counted - 1); }}>
+                disabled={!ready || countOf(l, c) === 0} onClick={() => { setSelectedId(l.id); setCount(l, countOf(l, c) - 1); }}>
                 <Icon name="minus" size={13} />
               </button>
               <span className="mono bc-count-n">
-                <b>{Math.min(c.counted, l.qty)}</b><span className="muted"> / {l.qty}</span>
+                <b>{countOf(l, c)}</b><span className="muted"> / {l.qty}</span>
               </span>
               <button type="button" className="btn ghost icon-only sm" aria-label={t('bcCountMore')}
-                disabled={readOnly || c.counted >= l.qty} onClick={() => { setSelectedId(l.id); setCount(l, c.counted + 1); }}>
+                disabled={!ready || countOf(l, c) >= l.qty} onClick={() => { setSelectedId(l.id); setCount(l, countOf(l, c) + 1); }}>
                 <Icon name="plus" size={13} />
               </button>
             </div>
@@ -401,7 +530,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
               className={'btn ghost icon-only sm bc-flagbtn' + (c.flagReason ? ' on' : '')}
               title={t('bcFlagTip')}
               aria-label={t('bcFlagTip')}
-              disabled={readOnly}
+              disabled={!ready}
               onClick={e => { e.stopPropagation(); if (editingId === l.id) setEditingId(null); else openFlag(l); }}
             >
               <Icon name="flag" size={13} />
@@ -430,7 +559,12 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
                   value={draft.note}
                   placeholder={t('bcFlagNotePh')}
                   onChange={e => setDraft(d => ({ ...d, note: e.target.value }))}
-                  onKeyDown={e => { if (e.key === 'Enter') saveFlag(l); if (e.key === 'Escape') setEditingId(null); }}
+                  onKeyDown={e => {
+                    if (e.nativeEvent.isComposing) return;
+                    if (e.key === 'Enter') saveFlag(l);
+                    // Closes the editor only — the page's own Escape would leave.
+                    if (e.key === 'Escape') { e.stopPropagation(); setEditingId(null); }
+                  }}
                 />
                 <div className="bc-flag-actions">
                   {c.flagReason && (
@@ -477,7 +611,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
         </div>
         <div className="bc-keys" aria-hidden="true">
           <span><kbd>↑</kbd><kbd>↓</kbd> {t('bcKeyMove')}</span>
-          <span><kbd>Space</kbd> {t('bcKeyCheck')}</span>
+          <span><kbd>{t('bcKeySpace')}</kbd> {t('bcKeyCheck')}</span>
           <span><kbd>+</kbd><kbd>−</kbd> {t('bcKeyCount')}</span>
           <span><kbd>F</kbd> {t('bcKeyFlag')}</span>
           <span><kbd>/</kbd> {t('bcKeyScan')}</span>
@@ -507,7 +641,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
             <span className="chip muted dot">{t('bcLegendOpen', { n: sum.open })}</span>
           </div>
         </div>
-        <button type="button" className="btn" disabled={readOnly || remaining === 0} onClick={checkAllRemaining}>
+        <button type="button" className="btn" disabled={!ready || remaining === 0} onClick={checkAllRemaining}>
           <Icon name="check2" size={13} /> {t('bcCheckAll')}
         </button>
       </div>
@@ -525,23 +659,34 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
                 autoComplete="off"
                 spellCheck={false}
                 value={scan}
-                disabled={readOnly}
+                disabled={!ready}
                 placeholder={t('bcScanPh')}
                 onChange={e => setScan(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); onScan(scan); } }}
+                onBlur={() => { scanFromPage.current = false; }}
+                onKeyDown={e => {
+                  if (e.nativeEvent.isComposing) return;
+                  if (e.key === 'Enter') { e.preventDefault(); onScan(scan); }
+                  // Leaves the box, not the page.
+                  if (e.key === 'Escape') { e.stopPropagation(); e.currentTarget.blur(); }
+                }}
               />
             </label>
             <div className={'bc-scan-msg ' + (scanMsg?.tone ?? 'muted')} aria-live="polite">
               {scanMsg ? scanMsg.text : t('bcScanHint')}
-              {scanMsg?.extra && !readOnly && (
-                <button type="button" className="btn sm" onClick={() => void addExtra(scanMsg.extra!)}>
+              {scanMsg?.extra && ready && (
+                <button type="button" className={'btn sm' + (scanMsg.tone === 'neg' ? '' : ' ghost')} onClick={() => void addExtra(scanMsg.extra!)}>
                   <Icon name="plus" size={12} /> {t('bcRecordExtra')}
                 </button>
               )}
             </div>
           </div>
-          {!loaded ? (
+          {loadState === 'loading' ? (
             <div className="card-body muted">{t('loadingApp')}</div>
+          ) : loadState === 'error' ? (
+            <div className="card-body bc-load-error">
+              <span>{t('bcLoadFailed')}</span>
+              <button type="button" className="btn sm" onClick={() => { setLoadState('loading'); void load(); }}>{t('bcRetry')}</button>
+            </div>
           ) : (
             <table className="table bc-table">
               <thead>
@@ -585,7 +730,8 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
                   <Icon name="alert" size={12} />
                   <span className="mono">{x.partNumber}</span>
                   {x.note && <span className="muted">{x.note}</span>}
-                  {!readOnly && (
+                  {x.sentAt && <span className="chip muted bc-sent">{t('bcSentTag')}</span>}
+                  {ready && (
                     <button type="button" className="btn ghost icon-only sm" aria-label={t('delete')} onClick={() => void removeExtra(x)}>
                       <Icon name="x" size={12} />
                     </button>
@@ -626,7 +772,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
                 <dl className="bc-kv">
                   <dt>{t('bcColCondition')}</dt><dd>{selected.condition}</dd>
                   <dt>{t('bcExpected')}</dt><dd className="mono">{selected.qty}</dd>
-                  <dt>{t('bcColCounted')}</dt><dd className="mono">{Math.min(selCheck.counted, selected.qty)}</dd>
+                  <dt>{t('bcColCounted')}</dt><dd className="mono">{countOf(selected, selCheck)}</dd>
                   <dt>{t('unitCost')}</dt><dd className="mono">{fmtUSD(selected.unitCost, locale)}</dd>
                   {selected.chipNumber && (<><dt>{t('bcChip')}</dt><dd className="mono">{selected.chipNumber}</dd></>)}
                 </dl>
@@ -645,11 +791,11 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
             <div className="card-body">
               {remaining > 0 ? (
                 <p className="card-sub">{t(remaining === 1 ? 'bcRemainingOne' : 'bcRemainingMany', { n: remaining })}</p>
-              ) : problems > 0 ? (
+              ) : unsent > 0 ? (
                 <>
                   <p className="card-sub">{t('bcSendIntro')}</p>
                   <ul className="bc-problem-list">
-                    {ordered.flagged.map(l => {
+                    {unsentFlags.map(l => {
                       const c = checkOf(l.id);
                       return (
                         <li key={l.id}>
@@ -658,20 +804,22 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
                         </li>
                       );
                     })}
-                    {extras.map(x => <li key={x.id}>{t('bcExtraItem', { pn: x.partNumber })}</li>)}
+                    {unsentExtras.map(x => <li key={x.id}>{t('bcExtraItem', { pn: x.partNumber })}</li>)}
                   </ul>
                 </>
+              ) : problems > 0 ? (
+                <p className="card-sub">{t('bcAllSent', { name: firstName(order.userName) })}</p>
               ) : (
                 <p className="card-sub">{t(atReviewing ? 'bcAllMatch' : 'bcAllMatchNotReviewing', { n: lines.length, s: order.status })}</p>
               )}
               <div className="bc-finish-actions">
-                {problems > 0 && (
-                  <button type="button" className="btn bc-btn-neg" disabled={readOnly || busy !== null || remaining > 0} onClick={() => void send()}>
+                {unsent > 0 && (
+                  <button type="button" className="btn bc-btn-neg" disabled={!ready || busy !== null || remaining > 0} onClick={() => void send()}>
                     <Icon name="flag" size={13} /> {busy === 'send' ? '…' : t('bcSend')}
                   </button>
                 )}
                 {atReviewing && problems === 0 && (
-                  <button type="button" className="btn accent" disabled={readOnly || busy !== null || remaining > 0} onClick={() => void approve()}>
+                  <button type="button" className="btn accent" disabled={!ready || busy !== null || remaining > 0} onClick={() => void approve()}>
                     <Icon name="check" size={13} /> {busy === 'approve' ? '…' : t('bcApprove')}
                   </button>
                 )}
@@ -693,6 +841,10 @@ export function DesktopBoxCheck({ order, onExit, onApproved, showToast }: Props)
       {lightbox && <ImageLightbox url={lightbox} alt={t('linePhotos')} onClose={() => setLightbox(null)} />}
     </div>
   );
+}
+
+function firstName(name: string): string {
+  return name.split(' ')[0] || name;
 }
 
 function lineLabel(l: OrderLine): string {
