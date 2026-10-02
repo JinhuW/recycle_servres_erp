@@ -59,30 +59,60 @@ const reqId = (res: Response): string | undefined =>
 // the same promise instead of stampeding the refresh endpoint.
 let refreshing: Promise<boolean> | null = null;
 
-async function tryRefresh(): Promise<boolean> {
-  if (!refreshing) {
-    refreshing = (async () => {
-      try {
-        refreshes++;
-        const res = await fetch('/api/auth/refresh', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { [CSRF_HEADER]: CSRF_VALUE },
-        });
-        // The mirror of the `auth:unauthorized` below. A silent mid-session
-        // refresh never reaches AuthProvider's setUser, so without this a
-        // telemetry report that 401ed against the expired cookie would wait for
-        // a session signal that only a fresh login could ever send.
-        if (res.ok && typeof window !== 'undefined') {
-          window.dispatchEvent(new Event('auth:established'));
-        }
-        return res.ok;
-      } catch {
-        return false;
-      }
-    })().finally(() => {
-      refreshing = null;
+// The refresh token rotates, and presenting a rotated-out one revokes the whole
+// family. Two tabs whose access cookie expired together each refreshed, so the
+// second presented the token the first had just replaced and signed the user
+// out of every tab. Refreshes are therefore serialised across tabs with a Web
+// Lock, and a tab that gets the lock after another tab refreshed (later than
+// its own request went out) just retries: the cookie it shares is fresh.
+const REFRESHED_AT_KEY = 'erp.auth.refreshedAt';
+function readRefreshedAt(): number {
+  try { return Number(localStorage.getItem(REFRESHED_AT_KEY)) || 0; } catch { return 0; }
+}
+function markRefreshed(): void {
+  try { localStorage.setItem(REFRESHED_AT_KEY, String(Date.now())); } catch { /* private mode */ }
+}
+
+// The mirror of the `auth:unauthorized` below. A silent mid-session refresh
+// never reaches AuthProvider's setUser, so without this a telemetry report that
+// 401ed against the expired cookie would wait for a session signal that only a
+// fresh login could ever send.
+function announceSession(): void {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('auth:established'));
+}
+
+async function refreshNow(requestedAt: number): Promise<boolean> {
+  if (readRefreshedAt() > requestedAt) {
+    announceSession();
+    return true;
+  }
+  try {
+    refreshes++;
+    const res = await fetch('/api/auth/refresh', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { [CSRF_HEADER]: CSRF_VALUE },
     });
+    if (res.ok) {
+      markRefreshed();
+      announceSession();
+    }
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function tryRefresh(requestedAt: number): Promise<boolean> {
+  if (!refreshing) {
+    const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined;
+    const run = () => refreshNow(requestedAt);
+    // locks.request resolves with the callback's own result, so the inner
+    // promise is already flattened; the lib typing says otherwise.
+    refreshing = (locks ? locks.request('erp-auth-refresh', run) as unknown as Promise<boolean> : run())
+      .finally(() => {
+        refreshing = null;
+      });
   }
   return refreshing;
 }
@@ -118,13 +148,14 @@ async function request<T>(
   body?: unknown,
   opts: { isForm?: boolean } = {},
 ): Promise<T> {
+  const requestedAt = Date.now();
   let res = await doFetch(method, path, opts, body);
 
   // A 401 on any call other than the session-establishing endpoints means the
   // access cookie expired. Silently refresh once, then retry the original
   // request a single time. The refresh call never recurses into this logic.
   if (res.status === 401 && !isSessionEndpoint(path)) {
-    const refreshed = await tryRefresh();
+    const refreshed = await tryRefresh(requestedAt);
     if (refreshed) {
       res = await doFetch(method, path, opts, body);
     }
@@ -169,9 +200,10 @@ export function filenameFromContentDisposition(cd: string | null): string | null
 // we still ride the cookie + the single-flight 401→refresh→retry path. Pulls
 // the filename from Content-Disposition, falling back to `fallbackName`.
 async function download(path: string, fallbackName: string): Promise<void> {
+  const requestedAt = Date.now();
   let res = await fetch(path, { method: 'GET', credentials: 'include' });
   if (res.status === 401) {
-    const refreshed = await tryRefresh();
+    const refreshed = await tryRefresh(requestedAt);
     if (refreshed) res = await fetch(path, { method: 'GET', credentials: 'include' });
     if (res.status === 401) {
       if (typeof window !== 'undefined') window.dispatchEvent(new Event('auth:unauthorized'));

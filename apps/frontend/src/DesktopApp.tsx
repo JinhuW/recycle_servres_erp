@@ -86,8 +86,11 @@ export function DesktopApp() {
     const kindChanged = orderRouteKind.current !== null && orderRouteKind.current !== kind;
     orderRouteKind.current = m ? kind : null;
     if (!m) {
-      // No id in URL → ensure no order is open.
+      // No id in URL → ensure no order is open, and nothing is still loading:
+      // leaving mid-fetch skips the `finally` below, which would otherwise
+      // leave the list's row spinner on for good.
       if (editingOrder) setEditingOrder(null);
+      setLoadingOrderId(null);
       return;
     }
     if (editingOrder?.id === m.id && !kindChanged) return; // already showing the right one
@@ -110,7 +113,12 @@ export function DesktopApp() {
         ));
       })
       .finally(() => { if (alive) setLoadingOrderId(null); });
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+      // Superseded mid-fetch: the `finally` above is now a no-op, so the flag
+      // is cleared here, unless a newer fetch has already claimed it.
+      setLoadingOrderId(cur => (cur === m.id ? null : cur));
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path]);
 

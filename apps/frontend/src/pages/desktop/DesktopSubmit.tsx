@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
+import { useUnsavedGuard } from '../../lib/unsavedGuard';
 import { AttachmentChip } from '../../components/AttachmentChip';
 import { AttachmentDropzone } from '../../components/AttachmentDropzone';
 import { ImageLightbox } from '../../components/ImageLightbox';
@@ -124,6 +125,9 @@ function OrderForm({
   // add control offers all four regardless, so this only sets the first line.
   const [lastCat, setLastCat] = usePreference('submit.lastCategory', 'RAM');
   const [lines, setLines] = useState<Line[]>([blankLine(lastCat as Category)]);
+  // A filled-in line not yet confirmed exists only in this page; a reload or
+  // a layout switch asks before throwing it away.
+  useUnsavedGuard(lines.some(l => !l._confirmed && (!!l.brand || !!l.description)));
   const [activeIdx, setActiveIdx] = useState<number | null>(0);
   // Full-screen view of a row's thumbnail (its scan or first saved photo).
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);

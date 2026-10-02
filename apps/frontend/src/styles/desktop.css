@@ -3974,3 +3974,16 @@ button.rsheet-box:hover { background: color-mix(in oklch, var(--accent) 10%, tra
 @media (prefers-reduced-motion: reduce) {
   .bc-meter i { transition: none; }
 }
+
+/* Offered when the window no longer fits the shell it loaded with (App.tsx).
+   Fixed and above both shells' chrome, never in the layout flow, so it cannot
+   push the page around while it is being resized. At the top, because both
+   shells keep their Save and tab bars at the bottom. */
+.layout-switch {
+  position: fixed;
+  left: 50%;
+  top: calc(10px + env(safe-area-inset-top, 0px));
+  transform: translateX(-50%);
+  z-index: 1200;
+  box-shadow: var(--shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.18));
+}

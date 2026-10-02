@@ -9,6 +9,7 @@ import {
 } from '../../components/CloseSellOrderDialog';
 import { useT } from '../../lib/i18n';
 import { forEachKeysetPage } from '../../lib/keysetPages';
+import { confirmDiscard, useUnsavedGuard } from '../../lib/unsavedGuard';
 import { api, ApiError, archiveSellOrder, unarchiveSellOrder } from '../../lib/api';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { useRoute, navigate, replaceRoute, match } from '../../lib/route';
@@ -943,6 +944,9 @@ function SellOrderDetail({ id, mode, onToast }: {
     || draft.bidParts.length > 0
     || pendingAdjust != null
   );
+  // Back and Cancel left the edit page with its edits and no word.
+  useUnsavedGuard(mode === 'edit' && !!dirty);
+  const leaving = (go: () => void) => () => { void confirmDiscard().then(ok => { if (ok) go(); }); };
 
   // The stepper shows only the forward lifecycle. Closed is an off-ramp
   // reached via the Discard button (CloseSellOrderDialog needs a reason the
@@ -1173,7 +1177,7 @@ function SellOrderDetail({ id, mode, onToast }: {
         <div style={{ minWidth: 0 }}>
           <button
             type="button"
-            onClick={toList}
+            onClick={leaving(toList)}
             disabled={saving || unarchiving}
             style={{
               background: 'none', border: 'none', padding: 0,
@@ -1810,7 +1814,7 @@ function SellOrderDetail({ id, mode, onToast }: {
                     {t('sodDiscard')}
                   </button>
                 )}
-                <button className="btn" onClick={toView} disabled={saving}>
+                <button className="btn" onClick={leaving(toView)} disabled={saving}>
                   {t('cancel')}
                 </button>
                 <button

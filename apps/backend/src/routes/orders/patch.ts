@@ -13,7 +13,7 @@ import { syncOrderCategory } from '../../services/orderCategory';
 import { nameHandoffByChange, setOrderPackageTx, unlinkOrderPackagesTx, packageChanges, changeOrderOwnerTx, type HandoffPackage } from '../../services/orderHandoff';
 import { linkPaypalTxnToOrder, unlinkPaypalTxnFromOrder } from '../../banktx/sync';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../../services/orderGoodsTotal';
-import { synthesizePartNumber, serialIssue, staleSpecDbCols, normSellPrice, normalizeTracking, type Carrier, type PackageSource } from '@recycle-erp/shared';
+import { synthesizePartNumber, serialIssue, staleSpecDbCols, normSellPrice, normalizeTracking, isMaterialPatch, type Carrier, type PackageSource } from '@recycle-erp/shared';
 import { normPaypalTxnId } from '../../ai/paypal';
 import { log } from '../../lib/log';
 import { type OrdersEnv, assertCategoriesEnabled, badFees, canonChipNumber, changesMaterialField, committedLinesBody, describeSellOrders, handoffByErr, handoffFactsAfter, identityErr, isOrderPayment, isPaymentMethod, lineAuditCols, type LineFields, type LinePatch, type LineSnapRow, lineSnapshot, newLineRow, normFeeNote, PACKAGE_DELIVERED_MSG, parseCommissionRate, registerIfNeeded, resolveOrderOwner, serialErr, sourceErr, type StoredLine, storedLineCols, supplierErr, TRACKING_TAKEN_STANDALONE_MSG, trackingErr, trackingTakenMsg, trackInput, warehouseErr } from './shared';
@@ -105,14 +105,8 @@ patchRoutes.patch('/:id', async (c) => {
   // back to Draft (below, in the tx, where the lifecycle read is locked).
   // `notes` is not such a field: receipts and shipping details keep arriving
   // after the goods leave, and appending one leaves the order where it stands.
-  const materialEdit =
-    !!body.lines?.length || !!body.addLines?.length || !!body.removeLineIds?.length ||
-    body.totalCost !== undefined || body.otherFees !== undefined ||
-    body.otherFeesNote !== undefined || body.warehouseId !== undefined ||
-    body.payment !== undefined || body.paymentMethod !== undefined ||
-    body.paypalTxnId !== undefined || body.source !== undefined ||
-    body.handoffMethod !== undefined || body.handoffBy !== undefined ||
-    tracking !== undefined;
+  // The one list the editors' revert warning reads too (@recycle-erp/shared).
+  const materialEdit = isMaterialPatch(body as Record<string, unknown>) || tracking !== undefined;
   if (u.role !== 'manager' && existing.lifecycle !== 'draft') {
     // Past review the PO is a closed book to the purchaser, note included.
     if (isClosedBook(existing.lifecycle)) {

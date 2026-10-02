@@ -48,7 +48,10 @@ portal was removed in v1.191.0; no bid had ever been placed through it.
   family (the access token was 15 minutes until v1.122.0, which made four out
   of five app loads open with a 401, a refresh and a retry before painting).
   No localStorage, no bearer tokens. Refresh-token reuse revokes the whole
-  family.
+  family. **Tabs refresh one at a time** (v1.200.0): the refresh runs under a
+  `navigator.locks` lock, and a tab that sees another tab refreshed after its
+  request began retries instead of presenting the rotated token. Two tabs
+  waking together used to revoke each other's session.
 - **Changing your password keeps you signed in** (v1.191.0) and signs out every
   other session. Until then it signed you out too, up to an hour later: the
   `rt` cookie is scoped to `/api/auth`, so `/api/me/password` never saw it and
@@ -1394,6 +1397,16 @@ inventory search, sell-order draft creation.
 One bundle, two lazy-loaded shells chosen in `App.tsx`: viewport under 720px →
 `MobileApp`; else `DesktopApp`. The third, the `/v/<token>` vendor portal, was
 removed in v1.191.0.
+
+- **The shell is chosen once per page load** (v1.200.0). Resizing across 720px
+  no longer swaps it, which used to unmount the page mid-edit. Instead a
+  **Switch to phone / desktop layout** button appears at the top. It asks
+  before discarding unsaved edits.
+- **Leaving unsaved edits asks first** (v1.200.0). Escape, Cancel and Back on
+  the desktop PO editor, the sell-order editor, the phone submit form, and
+  desktop submit with unconfirmed lines ask before discarding, and so does a
+  reload or tab close. A dialog closes on the backdrop only when the press and
+  the release both land there, so a drag out of a field no longer shuts it.
 
 - The desktop shell runs down to 720px. **Under 900px its sidebar folds to a
   64px icon rail** (v1.134.0) — brand mark, nav icons with their names on

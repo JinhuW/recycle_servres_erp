@@ -17,6 +17,44 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.200.0] - 2026-10-02
+
+Frontend robustness (RS-154), batch 8b and the last of the remaining
+code-review work.
+
+### Changed
+
+- **The layout is picked once per page load.** The app used to swap between
+  the phone and desktop shells whenever the window crossed 720px, so rotating
+  a tablet or snapping a window to half the screen unmounted the page and
+  everything typed into it. It now keeps the shell it opened with. When the
+  window crosses the line, a "Switch to phone layout" (or desktop) button
+  appears at the top, and it asks before throwing away unsaved edits.
+
+### Fixed
+
+- **Leaving an edit screen asks before dropping edits.** Escape, Cancel and
+  Back on the desktop PO editor, the sell-order editor, the phone submit form,
+  and desktop submit with unconfirmed lines now ask first. So does reloading
+  or closing the tab. Until now the typing just went.
+- **A dialog no longer closes when a drag ends on its backdrop.** Selecting
+  text in a field and releasing the mouse outside the panel counted as a
+  backdrop click. A dialog now closes only when the press and the release are
+  both on the backdrop.
+- **Two tabs no longer sign each other out.** When their access tokens
+  expired together, both tabs refreshed with the same refresh cookie. The
+  second presented a token the first had just rotated, which reads as reuse
+  and revokes the whole session. Refresh now runs under a browser lock, and a
+  tab that finds another tab refreshed after its request began just retries.
+- **A deep-linked PO no longer leaves "Loading…" stuck** when the route moves
+  away, or to another order, before the fetch returns.
+- **The phone no longer treats a commission change as a material edit.** The
+  backend never did, so the phone warned about a revert to Draft that did not
+  happen. The list of material PATCH keys now lives in `@recycle-erp/shared`
+  and the backend reads it from there. The desktop editor and phone detail
+  derive their edit, annotate, reopen and delete rights from one
+  `derivePoPermissions`.
+
 ## [1.199.0] - 2026-10-02
 
 Lists and cursors (RS-153), batch 8a of the remaining code-review work.

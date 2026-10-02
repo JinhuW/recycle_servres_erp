@@ -68,4 +68,63 @@ describe('api silent refresh', () => {
     expect(seen.credentials).toBe('include');
     expect(new Headers(seen.headers).get('X-Requested-By')).toBe('recycle-erp');
   });
+
+  // Two tabs whose cookie expired together used to both refresh; the second
+  // presented the rotated-out token and revoked the whole family.
+  describe('across tabs', () => {
+    const store = new Map<string, string>();
+    beforeEach(() => {
+      store.clear();
+      (globalThis as any).localStorage = {
+        getItem: (k: string) => store.get(k) ?? null,
+        setItem: (k: string, v: string) => { store.set(k, v); },
+      };
+    });
+
+    it('takes the refresh under a Web Lock', async () => {
+      const names: string[] = [];
+      Object.defineProperty(globalThis, 'navigator', {
+        configurable: true,
+        value: { locks: { request: async (name: string, cb: () => Promise<unknown>) => { names.push(name); return cb(); } } },
+      });
+      let orders = 0;
+      globalThis.fetch = vi.fn(async (url: any) => {
+        const u = String(url);
+        if (u === '/api/orders') { orders++; return new Response('{}', { status: orders === 1 ? 401 : 200 }); }
+        return new Response('{}', { status: 200 });
+      }) as any;
+      const { api } = await import('../src/lib/api');
+      await api.get('/api/orders');
+      expect(names).toEqual(['erp-auth-refresh']);
+      expect(Number(store.get('erp.auth.refreshedAt'))).toBeGreaterThan(0);
+    });
+
+    it('reuses a refresh another tab made after this request went out', async () => {
+      Object.defineProperty(globalThis, 'navigator', {
+        configurable: true,
+        // The lock is granted only once the other tab's refresh has landed.
+        value: { locks: { request: async (_n: string, cb: () => Promise<unknown>) => {
+          store.set('erp.auth.refreshedAt', String(Date.now() + 1000));
+          return cb();
+        } } },
+      });
+      const calls: string[] = [];
+      let orders = 0;
+      globalThis.fetch = vi.fn(async (url: any, init: any) => {
+        const u = String(url);
+        calls.push(`${init?.method ?? 'GET'} ${u}`);
+        if (u === '/api/orders') { orders++; return new Response('{}', { status: orders === 1 ? 401 : 200 }); }
+        return new Response('{}', { status: 200 });
+      }) as any;
+      let established = 0;
+      const onEstablished = () => { established++; };
+      window.addEventListener('auth:established', onEstablished);
+      const { api } = await import('../src/lib/api');
+      await api.get('/api/orders');
+      window.removeEventListener('auth:established', onEstablished);
+      expect(established).toBe(1);
+      expect(calls.filter((c) => c === 'POST /api/auth/refresh')).toHaveLength(0);
+      expect(calls.filter((c) => c === 'GET /api/orders')).toHaveLength(2);
+    });
+  });
 });
