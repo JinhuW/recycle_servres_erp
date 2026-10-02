@@ -21,7 +21,7 @@ import { syncBankTransactions } from '../banktx/sync';
 import { SETTLE_DEAD, isDead } from '../banktx/types';
 import { getDb } from '../db';
 import { writeOrderEvent } from '../services/orderAudit';
-import { clampLimit, decodeCursor, encodeCursor, escapeLike, UUID_RE } from '../lib/pagination';
+import { clampLimit, cursorTs, cursorTsParam, cursorTsSelect, decodeCursor, encodeCursor, escapeLike, UUID_RE } from '../lib/pagination';
 import type { Env, User } from '../types';
 import { PAYMENT_NOTE_MAX } from '@recycle-erp/shared';
 
@@ -151,8 +151,9 @@ bankTx.get('/', async (c) => {
     assignee === '' ? sql`TRUE`
     : assignee === 'unassigned' ? sql`bt.assignee_id IS NULL`
     : sql`bt.assignee_id = ${assignee}::uuid`;
-  const cursorFrag = cursor
-    ? sql`AND (bt.posted_at, bt.id) < (${cursor.ts}::timestamptz, ${cursor.id}::uuid)`
+  const afterTs = cursorTs(cursor);
+  const cursorFrag = afterTs && cursor
+    ? sql`AND (bt.posted_at, bt.id) < (${cursorTsParam(sql, afterTs)}, ${cursor.id}::uuid)`
     : sql`AND TRUE`;
   // In the WHERE rather than applied to the page, so keyset pagination over
   // the filtered set doesn't return short pages.
@@ -179,7 +180,8 @@ bankTx.get('/', async (c) => {
   // The join is aliased `po`, not `o`: `hasMatchFrag` lands in this WHERE
   // carrying its own `EXISTS (SELECT 1 FROM orders o …)`.
   const rows = await sql`
-    SELECT bt.id, bt.source, bt.external_id, bt.posted_at, bt.amount::float AS amount, bt.currency,
+    SELECT bt.id, bt.source, bt.external_id, bt.posted_at, ${cursorTsSelect(sql, sql`bt.posted_at`)} AS cursor_ts,
+           bt.amount::float AS amount, bt.currency,
            bt.counterparty, bt.description, bt.paypal_txn_id, bt.pair_id,
            bt.order_id, bt.link_kind, bt.link_auto, bt.linked_at, bt.ignored, bt.category,
            ${groupSettleFrag(sql, 'bt')} AS settle_status,
@@ -222,7 +224,7 @@ bankTx.get('/', async (c) => {
   const slice = hasMore ? rows.slice(0, limit) : rows;
   const nextCursor = hasMore
     ? encodeCursor({
-        ts: (slice[slice.length - 1].posted_at as Date).toISOString(),
+        ts: slice[slice.length - 1].cursor_ts as string,
         id: slice[slice.length - 1].id as string,
       })
     : null;

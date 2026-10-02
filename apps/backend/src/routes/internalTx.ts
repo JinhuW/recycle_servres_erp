@@ -15,7 +15,7 @@ import { authMiddleware } from '../auth';
 import { requireManager } from '../lib/role';
 import { getDb } from '../db';
 import { isDead } from '../banktx/types';
-import { clampLimit, decodeCursor, encodeCursor, escapeLike, UUID_RE } from '../lib/pagination';
+import { clampLimit, cursorTs, cursorTsParam, cursorTsSelect, decodeCursor, encodeCursor, escapeLike, UUID_RE } from '../lib/pagination';
 import type { Env, User } from '../types';
 
 const internalTx = new Hono<{ Bindings: Env; Variables: { user: User } }>()
@@ -83,13 +83,15 @@ internalTx.get('/', async (c) => {
 
   const like = `%${escapeLike(q)}%`;
   const qFrag = q ? sql`(it.title ILIKE ${like} OR it.note ILIKE ${like})` : sql`TRUE`;
-  const cursorFrag = cursor
-    ? sql`AND (it.created_at, it.id) < (${cursor.ts}::timestamptz, ${cursor.id}::uuid)`
+  const afterTs = cursorTs(cursor);
+  const cursorFrag = afterTs && cursor
+    ? sql`AND (it.created_at, it.id) < (${cursorTsParam(sql, afterTs)}, ${cursor.id}::uuid)`
     : sql`AND TRUE`;
   const counted = countedFrag(sql, 'bt');
 
   const rows = await sql`
-    SELECT it.id, it.title, it.note, it.created_at, u.name AS created_by_name,
+    SELECT it.id, it.title, it.note, it.created_at, ${cursorTsSelect(sql, sql`it.created_at`)} AS cursor_ts,
+           u.name AS created_by_name,
            COALESCE(m.member_count, 0)::int AS member_count,
            COALESCE(m.total_in, 0)::float   AS total_in,
            COALESCE(m.total_out, 0)::float  AS total_out,
@@ -116,7 +118,7 @@ internalTx.get('/', async (c) => {
   const slice = hasMore ? rows.slice(0, limit) : rows;
   const nextCursor = hasMore
     ? encodeCursor({
-        ts: (slice[slice.length - 1].created_at as Date).toISOString(),
+        ts: slice[slice.length - 1].cursor_ts as string,
         id: slice[slice.length - 1].id as string,
       })
     : null;

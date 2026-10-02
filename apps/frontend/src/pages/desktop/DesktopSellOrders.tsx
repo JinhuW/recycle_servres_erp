@@ -8,6 +8,7 @@ import {
   CloseSellOrderDialog, ReopenSellOrderDialog,
 } from '../../components/CloseSellOrderDialog';
 import { useT } from '../../lib/i18n';
+import { forEachKeysetPage } from '../../lib/keysetPages';
 import { api, ApiError, archiveSellOrder, unarchiveSellOrder } from '../../lib/api';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { useRoute, navigate, replaceRoute, match } from '../../lib/route';
@@ -275,15 +276,34 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
   // filters survive — and the list refetches on every return, which is what
   // shows a save, archive or discard made on the page.
   const listShown = !open;
+  // The tiles count every order in scope, not the pages the list has loaded;
+  // summing the list capped them at the API's first page.
+  const [serverStats, setServerStats] = useState<Record<string, { count: number; revenue: number }> | null>(null);
   useEffect(() => {
     if (!listShown) return;
     let alive = true;
-    api.get<{ rows: SellOrderSummary[] }>(`/api/sell-orders?${listQuery}`)
-      .then(r => { if (alive) setOrders(r.rows); })
+    // Search and the closed/done toggle filter client-side, so the list holds
+    // every order in scope, a page at a time; the first page paints at once.
+    forEachKeysetPage<SellOrderSummary>(
+      cursor => api.get<{ rows: SellOrderSummary[]; nextCursor: string | null }>(
+        `/api/sell-orders?${listQuery}&limit=200${cursor ? '&cursor=' + encodeURIComponent(cursor) : ''}`,
+      ).then(r => ({ items: r.rows, nextCursor: r.nextCursor ?? null })),
+      (items, { first }) => {
+        if (!alive) return false;
+        setOrders(prev => first ? items : [...prev, ...items]);
+        setLoadedOnce(true);
+      },
+    )
       .catch(handleFetchError)
       .finally(() => { if (alive) setLoadedOnce(true); });
+    api.get<{ byStatus: Record<string, { count: number; revenue: number }> }>(
+      `/api/sell-orders/stats${showClosedDone ? '?includeArchived=true' : ''}`,
+    )
+      .then(r => { if (alive) setServerStats(r.byStatus); })
+      // An older backend has no /stats; the tiles fall back to the list.
+      .catch(() => { if (alive) setServerStats(null); });
     return () => { alive = false; };
-  }, [listQuery, listShown]);
+  }, [listQuery, listShown, showClosedDone]);
 
   // The page shares the list's scroll box; opening an order from far down the
   // list would otherwise land mid-page.
@@ -309,6 +329,10 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
   const stats = useMemo(() => {
     const m: Record<string, { count: number; revenue: number }> = {};
     for (const o of sellOrderStatuses) m[o.id] = { count: 0, revenue: 0 };
+    if (serverStats) {
+      for (const [status, v] of Object.entries(serverStats)) if (m[status]) m[status] = v;
+      return m;
+    }
     // Guard: if lookups didn't load, or an order carries an unknown status,
     // skip it rather than crashing the page.
     orders.forEach(o => {
@@ -318,7 +342,7 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
       entry.revenue += o.total;
     });
     return m;
-  }, [orders]);
+  }, [orders, serverStats]);
 
   if (open) {
     return <SellOrderDetail key={`${open.id}:${open.mode}`} id={open.id} mode={open.mode} onToast={onToast} />;

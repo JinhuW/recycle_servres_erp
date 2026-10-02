@@ -1,3 +1,8 @@
+import type postgres from 'postgres';
+import type { SqlLike } from '../db';
+
+type SqlFragment = postgres.PendingQuery<postgres.Row[]>;
+
 // `ts` carries the value of the active sort column for the last row of the
 // previous page (an ISO timestamp for created_at, a number for total_cost,
 // text for lifecycle). `id` is the stable tiebreaker. The keyset WHERE clause
@@ -39,6 +44,29 @@ export function decodeCursor(raw: string | null | undefined): Cursor | null {
     }
     return null;
   } catch { return null; }
+}
+
+// A keyset cursor on a timestamptz has to keep its microseconds. postgres.js
+// parses the column into a JS Date, which keeps milliseconds, so a cursor
+// encoded from `row.created_at` sat up to 999µs before the last row shown:
+// page two skipped every row in that window, or repeated the boundary row.
+// A burst insert (a sync, an import) puts dozens of rows in one millisecond.
+// Encode from `cursorTsSelect` (text, µs, UTC), and compare with
+// `cursorTsParam`, which casts through text so the value never meets a Date.
+// `inventory.ts`'s transfer-orders list was the first to do this.
+export function cursorTsSelect(sql: SqlLike, col: SqlFragment): SqlFragment {
+  return sql`to_char(${col} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
+}
+
+const CURSOR_TS_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$/;
+
+/** The cursor's timestamp, or null when it is not one: a page-one fallback. */
+export function cursorTs(c: Cursor | null): string | null {
+  return c && typeof c.ts === 'string' && CURSOR_TS_RE.test(c.ts) ? c.ts : null;
+}
+
+export function cursorTsParam(sql: SqlLike, ts: string): SqlFragment {
+  return sql`(${ts}::text)::timestamptz`;
 }
 
 export function clampLimit(raw: string | null | undefined, def = 50, max = 200): number {

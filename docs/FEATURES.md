@@ -466,13 +466,21 @@ on to Sold once every line has sold (v1.164.0).
   page itself, each row of the Cost Payment tab's *Bank payments* ledger is a
   link to that transaction — the Payments page pinned to the PO with that row
   open (v1.167.0).
+- **Every list holds every row in scope** (v1.199.0). The phone PO list, the
+  sell-order inbox and the internal transactions walk the API's pages, as the
+  desktop PO list has since v1.140.1. Until then they each stopped at the
+  first 50 with no sign more existed. The sell-order status tiles come from
+  `GET /api/sell-orders/stats`, so they count every order rather than the
+  loaded ones. The phone Market list shows its true total, with a Load more
+  button. Paging also no longer skips or repeats rows created within the same
+  millisecond, such as a bank sync or an import.
 - **The desktop list holds every PO in scope** (v1.140.1). It used to stop
   silently at the API's first page — the newest 50 — so older orders were
   unreachable and the stage counts, KPI cards, search and sort all ran over
   that slice. It now follows the API's pages to the end: the first page
   paints at once and older pages append behind a "Loading older orders…"
   row until the last one lands. The mobile PO list and the sell-order list
-  still stop at 50.
+  followed in v1.199.0.
 - Managers can reopen a Done PO back to Reviewing (v1.81.0), and since
   v1.132.0 also Done → Ready to Pay and Ready to Pay → Reviewing. Since
   v1.138.5 a move back to Reviewing is refused only while a line sits on a

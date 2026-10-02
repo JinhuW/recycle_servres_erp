@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../components/Icon';
 import { PhHeader } from '../components/PhHeader';
 import { useT } from '../lib/i18n';
+import { forEachKeysetPage } from '../lib/keysetPages';
 import { api } from '../lib/api';
 import { handleFetchError } from '../lib/errorToast';
 import { useEffectiveUser } from '../lib/tweaks';
@@ -59,8 +60,19 @@ export function Orders({ onToast }: Props) {
     // Sold until their chips ask for them explicitly.
     else if (isManager) { params.append('excludeStatus', 'Done'); params.append('excludeStatus', 'Sold'); }
     if (showArchived) params.set('includeArchived', 'true');
-    api.get<{ orders: OrderSummary[] }>(`/api/orders?${params}`)
-      .then(r => { if (alive) setOrders(r.orders); })
+    params.set('limit', '200');
+    // The list filters and counts client-side, so it holds every PO in scope;
+    // the API's first page alone silently capped it at 50.
+    forEachKeysetPage<OrderSummary>(
+      cursor => api.get<{ orders: OrderSummary[]; nextCursor: string | null }>(
+        `/api/orders?${params}${cursor ? '&cursor=' + encodeURIComponent(cursor) : ''}`,
+      ).then(r => ({ items: r.orders, nextCursor: r.nextCursor ?? null })),
+      (items, { first }) => {
+        if (!alive) return false;
+        setOrders(prev => first ? items : [...prev, ...items]);
+        setLoadedOnce(true);
+      },
+    )
       .catch(handleFetchError)
       .finally(() => { if (alive) setLoadedOnce(true); });
     return () => { alive = false; };

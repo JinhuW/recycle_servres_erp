@@ -2,7 +2,7 @@
 // manager-only figures each row carries.
 import { Hono } from 'hono';
 import { getDb } from '../../db';
-import { clampLimit, decodeCursor, encodeCursor, parseSort } from '../../lib/pagination';
+import { clampLimit, cursorTsSelect, decodeCursor, encodeCursor, parseSort } from '../../lib/pagination';
 import { effectiveRole } from '../../lib/role';
 import { LIFECYCLE_LABEL, lifecyclesForLabel, visibleLifecycle } from '../../services/orderAdvance';
 import { sortCategories } from '../../services/orderCategory';
@@ -95,8 +95,10 @@ listRoutes.get('/', async (c) => {
   const dirSql = sql.unsafe(sort.dir.toUpperCase()); // nosec
   const cursorFrag = cursor
     ? (sort.dir === 'desc'
-        ? sql`AND (${sortExpr}, o.id) < (${cursor.ts}::${castSql}, ${cursor.id})`
-        : sql`AND (${sortExpr}, o.id) > (${cursor.ts}::${castSql}, ${cursor.id})`)
+        // Through ::text first: a bare $1::timestamptz parameter is serialised
+        // via a JS Date, which drops the cursor's microseconds (pagination.ts).
+        ? sql`AND (${sortExpr}, o.id) < ((${String(cursor.ts)}::text)::${castSql}, ${cursor.id})`
+        : sql`AND (${sortExpr}, o.id) > ((${String(cursor.ts)}::text)::${castSql}, ${cursor.id})`)
     : sql`AND TRUE`;
 
   // What the bank has actually paid for the PO, as the Payments page counts
@@ -115,6 +117,7 @@ listRoutes.get('/', async (c) => {
   const rows = await sql`
     SELECT
       o.id, o.user_id, o.category, o.payment, o.notes, o.lifecycle, o.created_at,
+      ${cursorTsSelect(sql, sql`o.created_at`)} AS cursor_ts,
       o.archived_at,
       o.total_cost::float AS total_cost,
       o.other_fees::float AS other_fees,
@@ -173,11 +176,11 @@ listRoutes.get('/', async (c) => {
   const slice = hasMore ? rows.slice(0, limit) : rows;
   let nextCursor: string | null = null;
   if (hasMore) {
-    const last = slice[slice.length - 1] as { created_at: string | Date; total_cost: number | null; lifecycle: string; id: string };
+    const last = slice[slice.length - 1] as { cursor_ts: string; total_cost: number | null; lifecycle: string; id: string };
     const sortVal: string | number =
       sort.col === 'total_cost' ? (last.total_cost ?? 0)
       : sort.col === 'lifecycle' ? last.lifecycle
-      : (last.created_at instanceof Date ? last.created_at.toISOString() : String(last.created_at));
+      : last.cursor_ts;
     nextCursor = encodeCursor({ ts: sortVal, id: last.id });
   }
 
