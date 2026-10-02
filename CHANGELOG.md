@@ -17,6 +17,36 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.195.1] - 2026-10-02
+
+Fixes to 1.195.0 (RS-143) from a code review before it reached production.
+
+- **The OAuth token endpoint can't be made to hold memory.** 1.195.0 keyed a
+  limiter on the caller's `client_id`, and the form body allows a megabyte.
+  Each invented id stayed in memory for a minute, so the 50,000-key cap
+  bounded the count but not the size. A client id over 64 characters (real
+  ones are 32) is now refused before it becomes a key, and the per-address
+  budget runs first.
+- **Large staff screenshots are shrunk again.** The 40-megapixel cap meant for
+  the anonymous sell form applied to staff uploads too. A long scrolling
+  screenshot of a chat or a PayPal page, filed as payment evidence, got a 413
+  where it used to be downscaled. Staff uploads are back to sharp's own
+  ceiling. Anonymous and staff re-encodes also queue separately now, so a
+  flood through the public form can't make a staff upload wait or fall back.
+- **One sender can't close the public forms for everyone.** Pacing under the
+  5-a-minute limit, a single address could use the whole 300-a-day budget.
+  Each address the Worker names now gets 20 a day.
+- **The submissions purge keeps rows it can't clean up.** Without R2
+  configured, the delete call reports success for objects it never touched,
+  so the rows went and their photos stayed. Rows with real photos now wait for
+  a run that has R2. Batches also walk an id cursor, so rows whose deletes keep
+  failing can't hold the head of the queue.
+- A sign-in whose attempt record failed to save no longer leaves a row that
+  counts as a failure.
+- The Docker stack's Caddy drops a caller's `X-Client-IP` instead of passing it
+  to the backend, and password-change attempts record the address group as
+  sign-ins do.
+
 ## [1.195.0] - 2026-10-02
 
 Public-surface hardening (RS-143), batch 3b of the remaining code-review work.

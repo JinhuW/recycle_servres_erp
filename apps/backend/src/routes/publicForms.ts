@@ -44,26 +44,39 @@ const STORED_FILENAME_MAX = 200;
 // trade-off /api/scan makes.
 const rateLimited = createRateLimiter(60_000, 5);
 
-// The per-address limit stops one sender; this stops many. Both forms share one
+// The per-minute limit slows one sender; this stops many. Both forms share one
 // daily budget of submissions and of photo bytes (UTC day), counted in Postgres
-// so it holds across instances. Workspace settings can raise either.
+// so it holds across instances. Workspace settings can raise either. One
+// address also gets a daily share of its own, or a single sender pacing
+// itself under the per-minute limit would close both forms for everyone.
 const DEFAULT_DAILY_SUBMISSIONS = 300;
 const DEFAULT_DAILY_BYTES = 2_000_000_000;
+const DAILY_PER_ADDRESS = 20;
 
-/** Seconds until the budget resets, or null while there is room. */
-async function overDailyBudget(sql: SqlLike, incomingBytes: number): Promise<number | null> {
+/**
+ * Seconds until the budget resets, or null while there is room. `address` is
+ * null when the Worker did not name the caller — then every request shares a
+ * Cloudflare address, and a per-address share would be everyone's.
+ */
+async function overDailyBudget(
+  sql: SqlLike, incomingBytes: number, address: string | null,
+): Promise<number | null> {
   const [maxSubmissions, maxBytes] = await Promise.all([
     getWorkspaceSetting(sql, 'public_form_daily_submissions', DEFAULT_DAILY_SUBMISSIONS),
     getWorkspaceSetting(sql, 'public_form_daily_bytes', DEFAULT_DAILY_BYTES),
   ]);
-  const [{ n, bytes }] = await sql<{ n: number; bytes: string }[]>`
+  const [{ n, bytes, mine }] = await sql<{ n: number; bytes: string; mine: number }[]>`
     SELECT
       (SELECT COUNT(*)::int FROM web_submissions
         WHERE created_at >= date_trunc('day', NOW(), 'UTC')) AS n,
       (SELECT COALESCE(SUM(size_bytes), 0)::text FROM web_submission_photos
-        WHERE created_at >= date_trunc('day', NOW(), 'UTC')) AS bytes
+        WHERE created_at >= date_trunc('day', NOW(), 'UTC')) AS bytes,
+      (SELECT COUNT(*)::int FROM web_submissions
+        WHERE ${address}::text IS NOT NULL AND ip = ${address}::text
+          AND created_at >= date_trunc('day', NOW(), 'UTC')) AS mine
   `;
-  if (n < maxSubmissions && Number(bytes) + incomingBytes <= maxBytes) return null;
+  if (n < maxSubmissions && Number(bytes) + incomingBytes <= maxBytes
+      && mine < DAILY_PER_ADDRESS) return null;
   const now = new Date();
   const midnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
   return Math.max(1, Math.ceil((midnight - now.getTime()) / 1000));
@@ -243,6 +256,11 @@ function unidentified(l: SellLine, photos: File[]): boolean {
   return photos.length === 0 && !l.fields.part_number && !l.fields.capacity && !l.fields.description;
 }
 
+// The stored address, when the Worker vouched for it.
+function namedSender(c: { req: { header(name: string): string | undefined } }): string | null {
+  return c.req.header('x-client-ip') ? clientIp((n) => c.req.header(n)).full : null;
+}
+
 // Scoped to the two form paths: this sub-app is mounted at /api/public, and a
 // '*' here would also throttle the Shippo webhook.
 const limit: MiddlewareHandler<{ Bindings: Env }> = async (c, next) => {
@@ -290,7 +308,7 @@ publicForms.post('/intake', async (c) => {
   // clean up what reached the bucket.
   const sql = getDb(c.env);
   const incoming = photos.flat().reduce((n, f) => n + f.size, 0);
-  const full = await overDailyBudget(sql, incoming);
+  const full = await overDailyBudget(sql, incoming, namedSender(c));
   if (full !== null) {
     c.header('Retry-After', String(full));
     return c.json({ error: 'we are not taking more submissions today; try again tomorrow' }, 429);
@@ -381,7 +399,7 @@ publicForms.post('/quote', async (c) => {
   const q = parsed.ok;
 
   const sql = getDb(c.env);
-  const full = await overDailyBudget(sql, 0);
+  const full = await overDailyBudget(sql, 0, namedSender(c));
   if (full !== null) {
     c.header('Retry-After', String(full));
     return c.json({ error: 'we are not taking more submissions today; try again tomorrow' }, 429);

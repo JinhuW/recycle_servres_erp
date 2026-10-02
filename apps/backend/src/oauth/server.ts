@@ -450,12 +450,22 @@ async function readFormBody(
 // egress shared by everyone, so only the per-client budget applies.
 const tokenCallsByClient = createRateLimiter(60_000, 60);
 const tokenCallsByAddress = createRateLimiter(60_000, 120);
+// Real ids are 32 hex characters (clients.ts). A longer one can't match a
+// client, and must not become a limiter key: each key is held for the whole
+// window, and the form body allows a megabyte, so the key cap alone would not
+// bound memory.
+const MAX_CLIENT_ID_LEN = 64;
 
 function tokenEndpointBusy(c: Context, clientId: string | undefined): Response | null {
+  if (clientId && clientId.length > MAX_CLIENT_ID_LEN) {
+    return c.json({ error: 'invalid_client' }, 401);
+  }
   const ip = clientIp((n) => c.req.header(n));
   const known = !!c.req.header('x-client-ip');
-  const wait = (clientId ? tokenCallsByClient(known ? `${clientId} ${ip.key}` : clientId) : null)
-    ?? (known ? tokenCallsByAddress(ip.key) : null);
+  // Address first, so a flood from one caller is turned away before it can
+  // mint a per-client key for every id it invents.
+  const wait = (known ? tokenCallsByAddress(ip.key) : null)
+    ?? (clientId ? tokenCallsByClient(known ? `${clientId} ${ip.key}` : clientId) : null);
   if (wait === null) return null;
   c.header('Retry-After', String(wait));
   return c.json({ error: 'temporarily_unavailable' }, 429);

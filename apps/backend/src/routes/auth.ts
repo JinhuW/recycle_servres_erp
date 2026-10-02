@@ -50,10 +50,12 @@ auth.post('/login', async (c) => {
     RETURNING id
   `;
   let settled = false;
+  // A failed write leaves `settled` false, so the finally below deletes the
+  // reservation instead of leaving a NULL row that counts as a failure.
   const settle = async (success: boolean) => {
     await sql`UPDATE login_attempts SET success = ${success} WHERE id = ${attemptId}`
+      .then(() => { settled = true; })
       .catch((e) => log.error('login_attempts write failed', e));
-    settled = true;
   };
   try {
     const [{ fails, ipFails }] = await sql<{ fails: number; ipFails: number }[]>`

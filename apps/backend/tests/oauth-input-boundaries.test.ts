@@ -192,6 +192,14 @@ describe('token endpoint budget', () => {
     expect(r.headers.get('Retry-After')).toBeTruthy();
   });
 
+  it('refuses an over-long client id before it becomes a limiter key', async () => {
+    const r = await api<Body>('POST', '/oauth/token', {
+      form: { grant_type: 'refresh_token', client_id: 'x'.repeat(65), refresh_token: 'x' },
+    });
+    expect(r.status).toBe(401);
+    expect(r.body.error).toBe('invalid_client');
+  });
+
   // The id is public, so a stranger spending it must not lock out the
   // connector's own calls from its own address.
   it('keys the client budget by address once the Worker names the caller', async () => {

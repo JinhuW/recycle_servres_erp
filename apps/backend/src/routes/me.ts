@@ -145,7 +145,7 @@ me.post('/password', async (c) => {
   }
 
   const sql = getDb(c.env);
-  const ip = clientIp((n) => c.req.header(n)).full;
+  const ip = clientIp((n) => c.req.header(n));
 
   // Throttle check before any bcrypt work — keeps it un-timeable. Counts
   // failed attempts on this account since its last success, in a 15-min
@@ -165,7 +165,7 @@ me.post('/password', async (c) => {
   }
 
   const recordAttempt = (success: boolean) =>
-    sql`INSERT INTO login_attempts (email, ip, success) VALUES (${u.email}, ${ip}, ${success})`
+    sql`INSERT INTO login_attempts (email, ip, ip_key, success) VALUES (${u.email}, ${ip.full}, ${ip.key}, ${success})`
       .catch((e) => log.error('login_attempts write failed', e));
 
   const row = (await sql<{ password_hash: string }[]>`

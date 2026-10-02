@@ -1114,10 +1114,13 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   (workspace settings `public_form_daily_submissions` and
   `public_form_daily_bytes`), then answer 429 until midnight UTC. The per-IP
   limit keys on the visitor's real address, with IPv6 grouped by /64; until
-  v1.195.0 every request looked like one of a few Cloudflare servers. An
+  v1.195.0 every request looked like one of a few Cloudflare servers. One
+  address gets at most 20 a day, so a single sender can't spend the shared
+  budget (v1.195.1). An
   intake post is capped at 25 MiB and each photo at 15 MiB. A photo over 40
   megapixels, or one that can't be decoded, is refused with a 400 instead of
-  being stored as is. The two form routes answer the marketing-site origins
+  being stored as is. Staff uploads keep sharp's own, much higher, ceiling
+  (v1.195.1). The two form routes answer the marketing-site origins
   without credentials; those origins get no CORS anywhere else.
 - **Spam and archived submissions are deleted after 30 days** (v1.195.0),
   together with their photos in R2, by a daily job. A row whose photo delete
