@@ -61,3 +61,5 @@ carry the number at all, so a picker couldn't match a row back to the PO.
 - The number comes from `lib/poLineNo.ts` (RS-145). The spreadsheet collects it
   only on the by-PO aggregation; the bid sheet and mixed-PO maps would otherwise
   gather numbers from different POs.
+- The page column was replaced by a `PO #3` badge in RS-152 (Jinhu: "revert
+  this change. let we keep use the badge"). The spreadsheet column stays.
