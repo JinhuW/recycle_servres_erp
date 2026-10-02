@@ -28,6 +28,9 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
     <meta name="theme-color" content="#ffffff" />
+    <!-- Bumped with every change to the CSP in public/_headers: the service
+         worker re-precaches index.html only when its bytes change. -->
+    <meta name="csp-rev" content="1" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
