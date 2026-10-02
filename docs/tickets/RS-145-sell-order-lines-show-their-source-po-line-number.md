@@ -2,13 +2,13 @@
 id: RS-145
 title: Sell order lines show their source PO line number
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-02
 reporter: jinhu
 branch: feat/sell-order-po-line-numbers
-pr:
-version:
+pr: "#462"
+version: 1.196.0
 related: [RS-138]
 ---
 
@@ -40,13 +40,13 @@ same position*. So the number is a rank, not `position + 1`, and with
 
 ## Acceptance criteria
 
-- [ ] By PO, each PO card has a `#` column that shows the line's number on that
+- [x] By PO, each PO card has a `#` column that shows the line's number on that
       PO's page, and the card lists its lines in that order. The No PO card has
       no `#` column.
-- [ ] By warehouse, a line's source reads `From PO-1432 #3`.
-- [ ] Lines added in edit mode, from the picker or from Inventory → Add to sell
+- [x] By warehouse, a line's source reads `From PO-1432 #3`.
+- [x] Lines added in edit mode, from the picker or from Inventory → Add to sell
       order, show their number before saving.
-- [ ] The numbers stay equal to the PO page's numbers across position gaps,
+- [x] The numbers stay equal to the PO page's numbers across position gaps,
       ties, and partial-transfer clones. A clone sorts after its source, so the
       source keeps its number.
 
