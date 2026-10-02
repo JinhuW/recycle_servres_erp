@@ -638,6 +638,37 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
 
 ## Sell orders
 
+- **A sell order is a full page** (v1.194.0), `#/sell-orders/:id` and
+  `/:id/edit`, rendered in place of the list as a PO's page is. It was a
+  popup before.
+  - The line items and editing controls are on the left. The order summary,
+    payment receiver, evidence and internal notes are on the right; under
+    1100px everything stacks into one column.
+  - The page head carries the downloads, Edit order, Reopen, and Archive /
+    Unarchive.
+  - Editing adds a sticky footer: Discard, Cancel and Save. Save lands on the
+    order's view page with a toast.
+  - View and edit share one history entry, so browser Back returns to where
+    the order was opened from.
+- **Line items group By warehouse or By PO** (v1.194.0), in both view and edit.
+  The switch on the Line items header is remembered per user (preference
+  `sellOrders.lineGroup`, default by warehouse).
+  - By PO orders the groups numerically and puts hand-typed lines last under
+    "No PO", matching the "Packing list by PO" download. It shows a Warehouse
+    column.
+  - By warehouse groups on the warehouse each line was saved with and shows
+    the "From PO-…" reference under each line.
+  - PO references are links in view mode and plain text while editing, since
+    the edit page has no leave guard.
+- **Each line shows its spec as tags** (v1.194.0).
+  - RAM: Desktop / Server / Laptop, classification, rank and speed (rank and
+    speed accented).
+  - SSD / HDD: interface, form factor and health.
+  - The tags are read live from the line's lot, so a line added while editing
+    shows them before the save. A hand-typed line, or one whose lot is gone,
+    shows its saved spec text instead.
+  - `GET /api/sell-orders/sellable` and the `search_sellable_inventory` MCP
+    tool return the same fields plus `sourceOrderId`.
 - **Only a Done or Closed sell order can be archived** (v1.193.0). Shipped and
   Awaiting-payment orders still reserve their units, and an archived order
   leaves the inbox, so archiving one would hide stock it holds; the API refuses
@@ -648,12 +679,16 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   (`/sell-orders/sellable` returns `hasMore`).
 - **Inventory lots can be added to an existing sell order** (v1.175.0). The
   desktop Inventory selection bar and toolbar offer "Add to sell order" beside
-  Create sell order. It lists the open orders (Draft, Shipped, Awaiting
-  payment; not archived), searchable by order number or customer, and opens
-  the chosen one's edit modal with the selection appended. Lots already on the
-  order are skipped, with a notice when that is all of them. A new line takes
-  the price the order already has for that product, else 0. Saving clears the
-  selection. The modal offers no Archive or Discard on this path.
+  Create sell order.
+  - The picker lists the open orders (Draft, Shipped, Awaiting payment; not
+    archived), searchable by order number or customer.
+  - Picking one opens that order's edit page with the selection appended
+    (a modal until v1.194.0).
+  - Lots already on the order are skipped, with a notice when that is all of
+    them. A new line takes the price the order already has for that product,
+    else 0.
+  - Saving clears the Inventory selection; leaving the page without saving
+    keeps it (v1.194.0). The page offers no Archive or Discard on this path.
 - **Each line links back to its PO** (v1.174.0). The sell order view shows a
   "From PO-…" link under a line that was picked from inventory. A free-typed
   line has no PO.

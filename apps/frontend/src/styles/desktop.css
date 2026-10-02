@@ -1108,6 +1108,35 @@ html.desktop, body.desktop, .desktop #root {
   flex-shrink: 0;
 }
 
+/* Sell order page: the lines and the editing work on the left, the money and
+   the record on the right. No overflow on either column — `.main > .page` is
+   the scroller, and a clipping column would cut off the customer dropdown. */
+.so-page-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 14px;
+  align-items: start;
+}
+.so-page-main, .so-page-side { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.so-page-card { padding: 18px 20px; }
+/* Sits in the uppercase section head; it is a control, not a heading. */
+.so-group-seg { margin-left: 12px; text-transform: none; letter-spacing: normal; }
+.so-group-seg button { padding: 4px 10px; font-size: 12px; }
+.so-page-foot {
+  position: sticky; bottom: 0; z-index: 5;
+  margin-top: 14px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.06);
+  /* The Tweaks gear floats at the page's bottom-right corner; keep Save clear of it. */
+  padding: 12px 64px 12px 16px;
+  gap: 12px;
+}
+@media (max-width: 1100px) {
+  .so-page-body { grid-template-columns: minmax(0, 1fr); }
+}
+
 .so-stat {
   background: var(--bg-elev);
   border: 1px solid var(--border);

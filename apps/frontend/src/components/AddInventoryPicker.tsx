@@ -26,6 +26,15 @@ export type SellableItem = {
   // Other drafts holding this lot. Drafts are proposals, so a contended lot is
   // still offered — the count just warns that promoting will be a race.
   draftCount: number;
+  // Absent from a backend older than this bundle.
+  sourceOrderId?: string | null;
+  type?: string | null;
+  classification?: string | null;
+  rank?: string | null;
+  speed?: string | null;
+  interface?: string | null;
+  formFactor?: string | null;
+  health?: number | null;
 };
 
 type Props = {

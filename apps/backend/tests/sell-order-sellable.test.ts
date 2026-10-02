@@ -14,6 +14,10 @@ type SellableItem = {
   availableQty: number;
   sellPrice: number | null;
   draftCount: number;
+  sourceOrderId: string;
+  type: string | null;
+  rank: string | null;
+  speed: string | null;
 };
 
 const getSellable = (token: string, qs = '') =>
@@ -46,6 +50,22 @@ describe('GET /api/sell-orders/sellable', () => {
     const item = r.body.items[0];
     expect(item.inventoryId).toBeTruthy();
     expect(item.availableQty).toBeGreaterThan(0);
+  });
+
+  it('carries the lot\'s PO and structured spec', async () => {
+    const { token } = await loginAs(ALEX);
+    const line = await freeSellableLine(token);
+    const sql = getTestDb();
+    const [lot] = await sql<{ order_id: string }[]>`
+      UPDATE order_lines SET type = 'Desktop', rank = '1Rx8', speed = '2666'
+       WHERE id = ${line.id}
+      RETURNING order_id
+    `;
+    const r = await getSellable(token);
+    const item = r.body.items.find(i => i.inventoryId === line.id);
+    expect(item).toMatchObject({
+      sourceOrderId: lot.order_id, type: 'Desktop', rank: '1Rx8', speed: '2666',
+    });
   });
 
   it('keeps a line on a rival draft listed, then drops it once fully committed', async () => {

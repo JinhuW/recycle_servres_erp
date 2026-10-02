@@ -17,6 +17,39 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.194.0] - 2026-10-01
+
+A sell order now opens as a full page, as a purchase order does, instead of a
+popup over the list (RS-138). The popup was 760px wide (1100px when editing)
+and its body was capped at 70% of the window, so a ten-line order scrolled
+inside a box.
+
+On the page, the line items and the editing controls sit on the left, and the
+order summary, payment receiver and internal notes sit on the right. When
+editing, a sticky footer holds Save, Cancel and Discard. View and edit share
+one browser-history entry, so Back returns to wherever the order was opened
+from. Inventory's "Add to sell order" now opens the chosen order's edit page
+with the selection appended. Saving lands on the order and clears the
+Inventory selection; leaving without saving keeps it. The new-order builder
+(Create sell order) is still a popup.
+
+Line items switch between **By warehouse** (where they ship from) and **By
+PO** (the purchase order each lot came in on). This works when viewing and
+when editing, and the choice is remembered per user (preference
+`sellOrders.lineGroup`). By PO lists the POs in numeric order with
+hand-typed lines last under "No PO", the same order as the "Packing list by
+PO" download. Until now the on-screen lines could only be grouped by
+warehouse, and the edit form was a flat table.
+
+Each line shows its spec as tags: Desktop / Server / Laptop, RDIMM-style
+classification, rank and speed for RAM, and the interface, form factor and
+health chips for SSD and HDD. `GET /api/sell-orders/:id` reads them live from
+the line's lot, and `GET /api/sell-orders/sellable` (also behind the
+`search_sellable_inventory` MCP tool) now returns them along with
+`sourceOrderId`. A newly added line therefore shows its tags and joins its PO
+group before it is saved. A line with no lot behind it shows its saved spec
+text instead.
+
 ## [1.193.0] - 2026-10-01
 
 This release fixes every Minor finding left from the 2026-10-01 code review

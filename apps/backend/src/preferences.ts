@@ -35,6 +35,7 @@ const SCHEMA: Record<string, Validator> = {
   // A camera's device label (e.g. "Jinhu's iPhone Camera"); deviceIds are
   // re-issued per session, labels aren't.
   'scan.cameraLabel':         isShortString,
+  'sellOrders.lineGroup':     isOneOf('warehouse', 'po'),
 };
 
 export type PreferencePatchResult =

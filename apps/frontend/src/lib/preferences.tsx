@@ -39,6 +39,9 @@ export type PrefMap = {
   // camera (by device label — the Continuity iPhone, usually) to use.
   'scan.deskCamera': boolean;
   'scan.cameraLabel': string;
+  // How a sell order's lines are grouped: where they ship from, or which PO
+  // they came in on.
+  'sellOrders.lineGroup': 'warehouse' | 'po';
 };
 
 export type PrefKey = keyof PrefMap;
