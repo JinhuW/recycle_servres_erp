@@ -2,13 +2,13 @@
 id: RS-154
 title: "Frontend robustness: one layout per load, unsaved-edit guard, cross-tab refresh, shared PO permission and material rules"
 type: bug
-status: backlog
+status: done
 priority: P2
 created: 2026-10-02
 reporter: jinhu
 branch: fix/frontend-robustness
-pr:
-version:
+pr: "#472"
+version: 1.200.0
 related: [RS-153, RS-148]
 ---
 
@@ -43,25 +43,25 @@ review findings M30, M34, M35, M36 and M39, and closes the plan's batches.
 
 ## Acceptance criteria
 
-- [ ] `loadingOrderId` clears when the route leaves the order and when another
+- [x] `loadingOrderId` clears when the route leaves the order and when another
       order replaces it mid-fetch.
-- [ ] `Modal` closes only when the press and the release both land on the
+- [x] `Modal` closes only when the press and the release both land on the
       backdrop.
-- [ ] `useUnsavedGuard(dirty)` registers dirty screens. The browser asks
+- [x] `useUnsavedGuard(dirty)` registers dirty screens. The browser asks
       before a reload or close. `confirmDiscard()` asks through a
       `ConfirmDialog` before Escape, Cancel or Back throws edits away on the
       desktop PO editor, the sell-order editor, the phone submit form and
       desktop submit.
-- [ ] The shell is picked once per page load. When the viewport crosses 720px,
+- [x] The shell is picked once per page load. When the viewport crosses 720px,
       a "Switch to phone/desktop layout" button appears. It asks before
       discarding unsaved edits.
-- [ ] A refresh runs under a `navigator.locks` lock. A tab that sees another
+- [x] A refresh runs under a `navigator.locks` lock. A tab that sees another
       tab refreshed after its request began retries without refreshing.
       Covered by unit tests with mocked locks and storage.
-- [ ] `@recycle-erp/shared` exports `MATERIAL_PATCH_KEYS` and
+- [x] `@recycle-erp/shared` exports `MATERIAL_PATCH_KEYS` and
       `isMaterialPatch`, and the backend PATCH uses them. The phone no longer
       counts commission as material.
-- [ ] `lib/poPermissions.ts` `derivePoPermissions` is the one place both PO
+- [x] `lib/poPermissions.ts` `derivePoPermissions` is the one place both PO
       shells read their rights from. Unit tests cover purchaser, manager,
       archived, closed-book and never-submitted cases.
 
