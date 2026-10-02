@@ -37,16 +37,18 @@ class UnsafeMimeError extends Error {
 // churn under load — memoize by the credential tuple instead.
 let cached: { key: string; client: S3Client } | null = null;
 
+// Without it uploads fall back to `stub-` keys and deletes report success
+// without touching anything.
+type R2Env = Env & Required<Pick<Env,
+  'R2_S3_ENDPOINT' | 'R2_ACCESS_KEY_ID' | 'R2_SECRET_ACCESS_KEY' | 'R2_BUCKET' | 'R2_ATTACHMENTS_PUBLIC_URL'>>;
+
+export function r2Configured(env: Env): env is R2Env {
+  return !!(env.R2_S3_ENDPOINT && env.R2_ACCESS_KEY_ID && env.R2_SECRET_ACCESS_KEY
+    && env.R2_BUCKET && env.R2_ATTACHMENTS_PUBLIC_URL);
+}
+
 function client(env: Env): S3Client | null {
-  if (
-    !env.R2_S3_ENDPOINT ||
-    !env.R2_ACCESS_KEY_ID ||
-    !env.R2_SECRET_ACCESS_KEY ||
-    !env.R2_BUCKET ||
-    !env.R2_ATTACHMENTS_PUBLIC_URL
-  ) {
-    return null;
-  }
+  if (!r2Configured(env)) return null;
   const key = `${env.R2_S3_ENDPOINT} ${env.R2_ACCESS_KEY_ID} ${env.R2_SECRET_ACCESS_KEY}`;
   if (cached && cached.key === key) return cached.client;
   const s3 = new S3Client({

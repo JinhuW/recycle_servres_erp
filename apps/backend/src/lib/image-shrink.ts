@@ -20,9 +20,16 @@ const SCALE_STEP = 0.7;
 // A PNG can declare 16k×16k in under a megabyte, and the re-encode then needs
 // the whole raster in memory (palette quantisation, ~1 GB for that one) — more
 // than the backend's memory cap, from one anonymous upload. 40 MP is well past
-// any phone camera. Re-encodes are also few at a time, process-wide.
+// any phone camera, so it is the anonymous (strict) limit. Staff uploads keep
+// sharp's own ceiling: a long scrolling screenshot of a chat or a PayPal page,
+// filed as payment evidence, can run past 40 MP and has to be shrunk, not
+// refused.
 export const MAX_INPUT_PIXELS = 40_000_000;
-const runShrink = createSemaphore(2, 30_000, () => new ImageRejectedError('busy'));
+const SHARP_DEFAULT_PIXELS = 0x3fff * 0x3fff;
+// Few re-encodes at a time, and anonymous ones in their own lane, so a flood
+// through the public form can't make a staff upload wait or fall back.
+const runPublicShrink = createSemaphore(2, 30_000, () => new ImageRejectedError('busy'));
+const runStaffShrink = createSemaphore(2, 60_000, () => new ImageRejectedError('busy'));
 
 // Why a strict caller's image was refused. Non-strict callers never see it:
 // for them every problem falls back to the original file.
@@ -36,7 +43,7 @@ export class ImageRejectedError extends Error {
 export type ShrinkOptions = {
   // Refuse (throw ImageRejectedError) instead of passing the original through.
   // For anonymous uploads, where "the route's size check decides" is not a
-  // safety net worth having.
+  // safety net worth having. Also lowers the pixel limit to MAX_INPUT_PIXELS.
   strict?: boolean;
   maxPixels?: number;
 };
@@ -45,10 +52,12 @@ export async function shrinkImageToFit(
   file: File, maxBytes: number, opts: ShrinkOptions = {},
 ): Promise<File> {
   if (file.size <= maxBytes || !SHRINKABLE.has(file.type)) return file;
-  const maxPixels = opts.maxPixels ?? MAX_INPUT_PIXELS;
+  const strict = opts.strict === true;
+  const maxPixels = opts.maxPixels ?? (strict ? MAX_INPUT_PIXELS : SHARP_DEFAULT_PIXELS);
+  const run = strict ? runPublicShrink : runStaffShrink;
 
   try {
-    return await runShrink(() => shrink(file, maxBytes, maxPixels, opts.strict === true));
+    return await run(() => shrink(file, maxBytes, maxPixels, strict));
   } catch (e) {
     if (opts.strict) throw e instanceof ImageRejectedError ? e : new ImageRejectedError('undecodable');
     log.warn('image shrink failed; passing the original through', {

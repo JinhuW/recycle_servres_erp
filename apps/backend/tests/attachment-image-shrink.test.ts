@@ -230,4 +230,19 @@ describe('shrinkImageToFit limits', () => {
     const file = await png(1200, 1200);
     expect(await shrinkImageToFit(file, 1_000, { maxPixels: 1_000_000 })).toBe(file);
   });
+
+  // A long scrolling screenshot filed as payment evidence: past the anonymous
+  // 40 MP cap, and still has to be shrunk for a staff upload.
+  it('still shrinks a staff image past the anonymous pixel cap', async () => {
+    const { default: sharp } = await import('sharp');
+    const { shrinkImageToFit, MAX_INPUT_PIXELS } = await import('../src/lib/image-shrink');
+    const width = 1200;
+    const height = Math.ceil(MAX_INPUT_PIXELS / width) + 100;
+    const buf = await sharp({ create: { width, height, channels: 3, background: '#808080' } })
+      .jpeg({ quality: 100 }).toBuffer();
+    const file = new File([new Uint8Array(buf)], 'scroll.jpg', { type: 'image/jpeg' });
+    const out = await shrinkImageToFit(file, file.size - 1);
+    expect(out).not.toBe(file);
+    expect(out.size).toBeLessThan(file.size);
+  }, 30_000);
 });

@@ -2,13 +2,13 @@
 id: RS-143
 title: "Public-surface hardening: client-IP limits, CORS split, intake limits, login throttle, consent host"
 type: bug
-status: in-progress
+status: done
 priority: P1
 created: 2026-10-02
 reporter: jinhu
 branch: fix/public-surface
-pr:
-version:
+pr: "#460, #461"
+version: 1.195.0
 related: [RS-130, RS-134, RS-141]
 ---
 
@@ -49,30 +49,30 @@ gate; form spam is handled by budgets and a purge, with no CAPTCHA.
 
 ## Acceptance criteria
 
-- [ ] Every per-IP limit and every stored IP comes from one `clientIp()`
+- [x] Every per-IP limit and every stored IP comes from one `clientIp()`
       helper. It reads `X-Client-IP` first, then the first `X-Forwarded-For`
       entry, then `X-Real-IP`. Limiter keys group IPv6 by /64.
-- [ ] The in-memory limiter drops expired keys and never holds more than
+- [x] The in-memory limiter drops expired keys and never holds more than
       50,000.
-- [ ] `/api/public/intake` and `/api/public/quote` answer the four site origins
+- [x] `/api/public/intake` and `/api/public/quote` answer the four site origins
       without credentials. Those origins get no CORS headers on any other
       route, and the SPA keeps its credentialed CORS.
-- [ ] The intake body is capped at 25 MiB and each photo at 15 MiB (413). A
+- [x] The intake body is capped at 25 MiB and each photo at 15 MiB (413). A
       photo over 40 MP, or one that cannot be decoded, gets a 400. At most two
       shrinks run at once, and a public caller that waits too long gets a 503.
-- [ ] Past 300 submissions or 2 GB of photos in a UTC day, both forms answer
+- [x] Past 300 submissions or 2 GB of photos in a UTC day, both forms answer
       429 with `Retry-After`. Both limits are workspace settings.
-- [ ] A daily job deletes spam and archived submissions older than 30 days,
+- [x] A daily job deletes spam and archived submissions older than 30 days,
       together with their R2 photos. A row whose photo delete fails is kept.
-- [ ] 20 parallel bad logins for one email record at most 5 failures, and the
+- [x] 20 parallel bad logins for one email record at most 5 failures, and the
       rest get a 429. No pending rows are left over. 30 failures from one real
       client IP within 15 minutes lock that IP across emails. That limit is
       skipped while `X-Client-IP` is absent.
-- [ ] At most 4 bcrypt operations run at once. A caller that queues for longer
+- [x] At most 4 bcrypt operations run at once. A caller that queues for longer
       than 5s gets a 503 with `Retry-After`.
-- [ ] `/oauth/token` and `/oauth/revoke` refuse past 60 calls a minute per
-      client, and past 120 per client IP.
-- [ ] The consent page names the redirect host and marks a self-registered
+- [x] `/oauth/token` and `/oauth/revoke` refuse past 60 calls a minute per
+      client and address, and past 120 per client IP.
+- [x] The consent page names the redirect host and marks a self-registered
       client "Unverified". The connectors list shows each client's redirect
       URIs and the same badge.
 
@@ -90,3 +90,38 @@ gate; form spam is handled by budgets and a purge, with no CAPTCHA.
 - The per-IP login budget is deliberately off when `X-Client-IP` is missing.
   Without it, every request looks like it comes from a handful of Cloudflare
   addresses, and one attacker would lock everyone out.
+
+## Follow-up (v1.195.1)
+
+A `/code-review high` by the release session found these in 1.195.0 before it
+reached prod. Each was confirmed or reproduced:
+
+- **Memory DoS on `/oauth/token`.** The per-client budget used the caller's
+  `client_id` as a key, with no length cap and a 1 MiB body allowed. A client
+  id over 64 characters (real ones are 32) is now refused before it becomes a
+  key, and the per-address budget runs first.
+- **Staff images over 40 MP got a 413.** The 40 MP cap applied to every caller,
+  not just the anonymous form. A long scrolling screenshot filed as payment
+  evidence was refused instead of being shrunk. Staff uploads are back to
+  sharp's own ceiling, and anonymous and staff shrinks queue in separate lanes.
+- **A failed attempt write could look like a failure.** `settle()` marked the
+  reservation settled even when its UPDATE failed, which left a NULL row that
+  counted against the email. The row is now deleted instead.
+- **One sender could close both forms for the day.** Pacing under 5/min, a
+  single address could spend the whole 300/day budget. Each address named by
+  the Worker now gets 20 a day.
+- **The purge could strand objects or stall.** Without R2 configured,
+  `deleteAttachments` reports success, so rows were deleted and their objects
+  stranded; real keys now wait for a run that has R2. A head of always-failing
+  rows could also block the batch, so batches now walk an id cursor.
+- **The Docker/Caddy stack passed `X-Client-IP` through.** Caddy now strips it.
+- Password-change attempts record `ip_key` too.
+
+Not taken, recorded here:
+- DCR's per-IP throttle still counts by full address, not /64. It counts
+  `oauth_clients.created_ip` rows, so grouping needs a stored key; the
+  behaviour is the same as before 1.195.0.
+- `/api/me/password` still counts failures before recording one. It needs an
+  authenticated session, so the parallel-burst race is not open to a stranger.
+- The daily budget is check-then-act, so a burst can overshoot by its own
+  size. It is a soft ceiling.

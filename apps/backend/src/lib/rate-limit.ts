@@ -10,7 +10,10 @@
  * records the hit, returning `null` when allowed or the seconds to wait when
  * the window is full — the value to put in `Retry-After`.
  *
- * Each limiter owns its Map, so budgets never bleed between call sites.
+ * Each limiter owns its Map, so budgets never bleed between call sites. The
+ * key count is capped, not the key size: a key the caller chooses (a client
+ * id, an email) must be length-checked first, or each one held for the window
+ * can be as large as the request body.
  */
 export function createRateLimiter(
   windowMs: number,
