@@ -31,8 +31,8 @@ const server = serve({ fetch: (request) => app.fetch(request, env), port }, (inf
 });
 
 // Railway sends SIGKILL when its draining window ends, so hardMs has to stay
-// under that setting (RAILWAY_DEPLOYMENT_DRAINING_SECONDS) for the exit to be
-// ours.
+// under that window for the exit to be ours. It is the backend service's
+// `drainingSeconds`, set to 30 on prod and dev.
 const shutdown = onShutdown({
   server: server as Server,
   loops,

@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
+import sharp from 'sharp';
 import { resetDb, getTestDb } from './helpers/db';
 import { api, multipart } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
@@ -10,8 +11,17 @@ let ipSeq = 0;
 const ip = () => `203.0.113.${++ipSeq % 250}`;
 const headers = (extra: Record<string, string> = {}) => ({ 'X-Forwarded-For': ip(), ...extra });
 
+// A real image: the intake decodes every anonymous photo's header, whatever
+// its size, so stand-in bytes are refused.
+let tinyJpeg: Uint8Array;
+beforeAll(async () => {
+  tinyJpeg = new Uint8Array(await sharp({
+    create: { width: 8, height: 8, channels: 3, background: '#808080' },
+  }).jpeg().toBuffer());
+});
+
 function jpeg(name = 'label.jpg'): File {
-  return new File([new Uint8Array([0xff, 0xd8, 0xff, 0xe0])], name, { type: 'image/jpeg' });
+  return new File([tinyJpeg], name, { type: 'image/jpeg' });
 }
 
 const ramLine = {
@@ -102,6 +112,16 @@ describe('POST /api/public/intake', () => {
     const r = await multipart('/api/public/intake', { payload, 'photo-0-0': chunk(), 'photo-0-1': chunk() },
       { headers: headers({ 'X-Requested-By': '' }) });
     expect(r.status).toBe(413);
+  });
+
+  it('400s a photo under the size cap that is not really an image', async () => {
+    const payload = JSON.stringify({ email: 'fake@example.com', source: 'web', lines: [ramLine] });
+    const fake = new File([new Uint8Array([0xff, 0xd8, 0xff, 0xe0])], 'x.jpg', { type: 'image/jpeg' });
+    const r = await multipart('/api/public/intake', { payload, 'photo-0-0': fake },
+      { headers: headers({ 'X-Requested-By': '' }) });
+    expect(r.status).toBe(400);
+    expect((r.body as { error: string }).error).toBe('photo could not be processed');
+    expect((await getTestDb()`SELECT 1 FROM web_submissions WHERE email = 'fake@example.com'`).length).toBe(0);
   });
 
   it('refuses a non-image photo with 415', async () => {

@@ -38,6 +38,30 @@ function historyDepth(): number {
   return typeof s?.erpDepth === 'number' ? s.erpDepth : 0;
 }
 
+// Each entry the app shows or leaves also carries a sequence number, handed out
+// in the order entries are made, so it rises along the history stack. The entry
+// a hash change lands on against the one on screen tells Back from Forward; an
+// entry with none is one the browser has just added ahead of the screen (a
+// typed address, a plain link).
+let lastSeq = 0;
+
+function seqOf(state: unknown): number | null {
+  const s = (state as { erpSeq?: number } | null)?.erpSeq;
+  return typeof s === 'number' ? s : null;
+}
+
+// A reload restarts the counter while the stack keeps its numbers; catching up
+// on every entry seen keeps a new one from repeating an old one's.
+function catchUpSeq(): void {
+  lastSeq = Math.max(lastSeq, seqOf(window.history.state) ?? 0);
+}
+
+function stampSeq(): void {
+  catchUpSeq();
+  if (seqOf(window.history.state) !== null) return;
+  window.history.replaceState({ ...(window.history.state ?? {}), erpSeq: ++lastSeq }, '');
+}
+
 // Leaving a screen with unsaved edits asks first. The check is installed by
 // lib/unsavedGuard, so routing knows nothing about edits; with none installed
 // every navigation goes through. `wouldAsk` answers synchronously, because a
@@ -64,11 +88,12 @@ export function navigate(path: string): void {
   // path decides: a page that only changed its own query is still that page.
   if (splitHash(window.location.hash).path === splitHash(target).path) return;
   const depth = historyDepth() + 1;
+  stampSeq();
   selfNavs++;
   window.location.hash = target;
   // The hash assignment has already pushed the entry, so this stamps the one
   // we just landed on, not the one we left.
-  window.history.replaceState({ ...(window.history.state ?? {}), erpDepth: depth }, '');
+  window.history.replaceState({ ...(window.history.state ?? {}), erpDepth: depth, erpSeq: ++lastSeq }, '');
 }
 
 /** Like `navigate`, but the new route takes the current history entry's place —
@@ -77,10 +102,13 @@ export function replaceRoute(path: string): void {
   const target = path.startsWith('/') ? path : '/' + path;
   if (splitHash(window.location.hash).path === splitHash(target).path) return;
   const depth = historyDepth();
+  catchUpSeq();
+  const seq = seqOf(window.history.state) ?? ++lastSeq;
   selfNavs++;
   window.location.replace('#' + target);
-  // replace() drops the entry's state; keep the depth the entry already had.
-  window.history.replaceState({ ...(window.history.state ?? {}), erpDepth: depth }, '');
+  // replace() drops the entry's state; keep the depth and place the entry
+  // already had.
+  window.history.replaceState({ ...(window.history.state ?? {}), erpDepth: depth, erpSeq: seq }, '');
 }
 
 /** The current route's query, e.g. `tab=payment`. */
@@ -117,14 +145,30 @@ let listening = false;
 // The entry the app is showing, for putting it back when a change is refused.
 let shownState: unknown = null;
 let askingToLeave = false;
+// A refused Forward or typed address being stepped back off: `toSeq` is the
+// entry on screen, `then` a target the user has agreed to go to since.
+let undo: { toSeq: number; then: string | null } | null = null;
 
 function acceptRoute(): void {
+  stampSeq();
   shownState = window.history.state;
   for (const notify of routeSubscribers) notify();
 }
 
 /** Exported for tests; the app reaches it through useRoute(). */
 export function onHashChange(e: { oldURL: string; newURL: string }): void {
+  if (undo) {
+    // A Forward can jump several entries; step until the screen's own is back.
+    const seq = seqOf(window.history.state);
+    if (seq === null || seq > undo.toSeq) {
+      window.history.back();
+      return;
+    }
+    const then = undo.then;
+    undo = null;
+    if (then !== null) navigate(then);
+    return;
+  }
   if (selfNavs > 0) {
     selfNavs--;
     acceptRoute();
@@ -138,29 +182,44 @@ export function onHashChange(e: { oldURL: string; newURL: string }): void {
     acceptRoute();
     return;
   }
-  const landed = window.history.state as { erpDepth?: number } | null;
-  window.history.pushState(shownState, '', e.oldURL);
+  const landedSeq = seqOf(window.history.state);
+  const shownSeq = seqOf(shownState);
+  // With nothing accepted yet there is no direction to go on; putting the
+  // screen's entry back on top is right for Back and harmless otherwise.
+  const wentBack = shownSeq === null || (landedSeq !== null && landedSeq < shownSeq);
+  if (wentBack) {
+    window.history.pushState(shownState, '', e.oldURL);
+  } else {
+    // Forward or a new entry: step back onto the screen's own entry, so the
+    // refused one stays ahead of it. A copy pushed after it (as for Back) left
+    // it behind the screen, for the next in-app Back to land on unasked.
+    undo = { toSeq: shownSeq, then: null };
+    window.history.back();
+  }
   if (askingToLeave || !leaveGuard) return;
   askingToLeave = true;
+  const hashAt = e.newURL.indexOf('#');
+  const target = hashAt < 0 ? '/' : e.newURL.slice(hashAt + 1);
   void leaveGuard.ask(next).then((ok) => {
     askingToLeave = false;
     if (!ok) return;
-    const shownDepth = (shownState as { erpDepth?: number } | null)?.erpDepth ?? 0;
-    if (typeof landed?.erpDepth === 'number' && landed.erpDepth < shownDepth) {
+    if (wentBack) {
       // Back: step onto the real entry, which keeps its scroll position.
       selfNavs++;
       window.history.back();
       return;
     }
-    // Forward or a typed address: the restored entry becomes the target.
-    window.history.replaceState(landed, '', e.newURL);
-    acceptRoute();
+    // Forward or a typed address: go where it was headed, once the undo is
+    // done if a quick answer beat it.
+    if (undo) undo.then = target;
+    else navigate(target);
   });
 }
 
 function subscribeRoute(notify: () => void): () => void {
   if (!listening) {
     listening = true;
+    stampSeq();
     shownState = window.history.state;
     window.addEventListener('hashchange', onHashChange);
   }

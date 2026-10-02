@@ -312,7 +312,7 @@ export async function handoffOrderTx(
     FROM orders o
     LEFT JOIN suppliers sup ON sup.id = o.supplier_id
     WHERE o.id = ${id} LIMIT 1
-    FOR UPDATE OF o
+    FOR NO KEY UPDATE OF o
   `)[0] as OrderRow | undefined;
   if (!before) throw new HandoffRefused({ kind: 'notFound' });
   // Owner or manager: the hand-off writes the same fields PATCH does (warehouse,

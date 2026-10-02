@@ -36,6 +36,7 @@ import {
   navigate, navigateBack, useRoute, match, matchPurchaseOrder, poProductsPath, parseShippingRoute,
   MOBILE_VIEW_TO_PATH, pathToMobileView, readSafeNext,
 } from './lib/route';
+import { confirmDiscard } from './lib/unsavedGuard';
 import type { Category, DraftLine, Notification, Order, OrderLine, OrderSummary, ScanResponse } from './lib/types';
 import { buildOrderSubmit, toAddLine } from './lib/orderSubmit';
 import { findDuplicateLine } from './lib/dupParts';
@@ -119,9 +120,12 @@ function Shell() {
   const view: View = pathToMobileView(path);
   // The 'submit' tab triggers the capture flow (onCenterPress) and has no
   // URL of its own, so we ignore it here.
+  // Asks first, like a tab-bar link: navigate() alone passes the unsaved-edit
+  // guard, since it is what callers use once they have asked.
   const setView = (v: View) => {
     if (v === 'submit') return;
-    navigate(MOBILE_VIEW_TO_PATH[v]);
+    const to = MOBILE_VIEW_TO_PATH[v];
+    void confirmDiscard(to).then((ok) => { if (ok) navigate(to); });
   };
   // Lock body overflow on mobile so the phone shell behaves like a native screen.
   useEffect(() => {

@@ -84,13 +84,6 @@ async function connectWithRetry(statement) {
   }
 }
 
-if (reset && process.env.NODE_ENV === 'production' && process.env.ALLOW_DESTRUCTIVE_RESET !== 'true') {
-  log.error(
-    '--reset is not allowed in production (NODE_ENV=production). ' +
-    'If you really mean it, re-run with ALLOW_DESTRUCTIVE_RESET=true as well.',
-  );
-  process.exit(1);
-}
 if (reset) {
   const refusal = destructiveRefusal(url, '--reset', 'ALLOW_DESTRUCTIVE_RESET', process.env);
   if (refusal) {

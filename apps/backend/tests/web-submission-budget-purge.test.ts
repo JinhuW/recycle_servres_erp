@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import sharp from 'sharp';
 import { resetDb, getTestDb } from './helpers/db';
-import { api, testEnv } from './helpers/app';
+import { api, multipart, testEnv } from './helpers/app';
 import { purgeStaleWebSubmissions } from '../src/lib/webSubmissionPurge';
 
 const quote = {
@@ -66,6 +67,43 @@ describe('public form daily budget', () => {
     expect(row).toEqual({ ip: '2001:db8:1:2::abcd', ip_key: '2001:db8:1:2::/64' });
     expect((await from('2001:db8:1:2::ffff')).status).toBe(429);
     expect((await from('2001:db8:1:3::1')).status).toBe(201);
+  });
+
+  // The budget totals stored bytes, and a photo is stored at most at the
+  // upload cap, so a raw phone picture larger than what is left of the day
+  // still fits when its shrunk copy does.
+  it('counts an incoming photo at no more than the upload cap', async () => {
+    const sql = getTestDb();
+    const cap = 200_000;
+    await sql`
+      INSERT INTO workspace_settings (key, value) VALUES
+        ('upload_max_bytes', ${String(cap)}::jsonb),
+        ('public_form_daily_bytes', ${String(cap + 50_000)}::jsonb)
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+    `;
+    // Per-pixel noise defeats compression, so the raw file is well past the
+    // day's remaining budget and has to be shrunk.
+    const width = 500;
+    const height = 500;
+    const raw = Buffer.alloc(width * height * 3);
+    let seed = 0x2f6e2b1;
+    for (let i = 0; i < raw.length; i++) {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      raw[i] = seed & 0xff;
+    }
+    const big = await sharp(raw, { raw: { width, height, channels: 3 } }).jpeg({ quality: 100 }).toBuffer();
+    expect(big.byteLength).toBeGreaterThan(cap + 50_000);
+
+    const payload = JSON.stringify({
+      email: 'budget@example.com', source: 'web', lines: [{ category: 'RAM', qty: 1, fields: {} }],
+    });
+    const r = await multipart('/api/public/intake', {
+      payload, 'photo-0-0': new File([new Uint8Array(big)], 'big.jpg', { type: 'image/jpeg' }),
+    }, { headers: { 'X-Requested-By': '', 'X-Client-IP': '198.51.100.240' } });
+    expect(r.status).toBe(201);
+    const [row] = await sql<{ size_bytes: number }[]>`
+      SELECT size_bytes FROM web_submission_photos WHERE submission_id = ${(r.body as { ref: string }).ref}`;
+    expect(row.size_bytes).toBeLessThanOrEqual(cap);
   });
 });
 
