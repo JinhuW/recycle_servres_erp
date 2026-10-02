@@ -68,7 +68,9 @@ export function editLineToPatch(l: EditLine, status?: string) {
     health:         l.health ?? null,
     rpm:            l.rpm ?? null,
     // A scan performed in the drawer must survive Save; null keeps the stored
-    // value (the backend applies these with COALESCE, like every field here).
+    // value. These two stay COALESCE on the backend because orderLineToEditLine
+    // never copies scanConfidence. Every spec field above is echoed with its
+    // current value, and there a null clears the column.
     scanImageId:    l.scanImageId ?? null,
     scanConfidence: l.scanConfidence ?? null,
   };

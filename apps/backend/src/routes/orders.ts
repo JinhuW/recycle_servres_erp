@@ -10,6 +10,7 @@ import {
 import { autoTrackParts, type TrackablePart } from '../lib/marketAutoTrack';
 import { effectiveRole } from '../lib/role';
 import { committedClaimsByLine, openSellStatuses } from '../lib/sellCommitment';
+import { specVal, validateLineInput } from '../lib/orderInput';
 import { getUploadLimits } from '../lib/settings';
 import { buildXlsxWorkbook, xlsxResponse, type XlsxColumn } from '../lib/xlsx';
 import {
@@ -1206,6 +1207,8 @@ orders.post('/', async (c) => {
   const warehouseId = body.warehouseId ?? owner.ownerDefaultWarehouseId;
   const lineCats: string[] = [];
   for (let i = 0; i < body.lines.length; i++) {
+    const inputErr = validateLineInput(body.lines[i] as Record<string, unknown>, 'create');
+    if (inputErr) return c.json({ error: `line ${i + 1}: ${inputErr}` }, 400);
     const cat = body.lines[i].category ?? body.category;
     if (!cat) return c.json({ error: `line ${i + 1}: category is required` }, 400);
     lineCats.push(cat);
@@ -1396,6 +1399,15 @@ function sameStoredValue(before: unknown, after: unknown): boolean {
 }
 
 const LINE_FIELD_SET: ReadonlySet<string> = new Set(LINE_FIELDS);
+// The line columns PATCH writes with a presence sentinel (null clears), not
+// COALESCE (null keeps) — must match the UPDATE in PATCH /:id.
+const LINE_SPEC_TEXT_COLS: ReadonlySet<string> = new Set([
+  'brand', 'capacity', 'type', 'generation', 'classification', 'rank', 'speed',
+  'interface', 'form_factor', 'description', 'item_type',
+]);
+const LINE_SENTINEL_COLS: ReadonlySet<string> = new Set([
+  ...LINE_SPEC_TEXT_COLS, 'chip_number', 'health', 'rpm', 'sell_price',
+]);
 
 // The hand-off facts a PATCH may write, in their after-state: the collector
 // is NULLed unless the method is (or becomes) pickup, the way payment_method
@@ -1440,7 +1452,16 @@ function changesMaterialField(
       // Anything outside LINE_FIELDS is not part of the record a manager
       // reviews (scan refs, positions) and does not cost the order its stage.
       if (!LINE_FIELD_SET.has(col)) continue;
-      if (!sameStoredValue(row[col], value)) return true;
+      // Judged on what the UPDATE will store, not on what was sent: a null on
+      // a COALESCE column keeps it, and a sentinel field lands normalised.
+      // Comparing the raw value read an echoed null as a change and sent the
+      // order back to Draft for an edit that never landed.
+      if (!LINE_SENTINEL_COLS.has(col) && value == null) continue;
+      const landed = col === 'chip_number' ? (canonChipNumber(value as string | null) || null)
+        : col === 'sell_price' ? normSellPrice(value as number | null)
+        : LINE_SPEC_TEXT_COLS.has(col) ? specVal(value as string | null)
+        : value;
+      if (!sameStoredValue(row[col], landed)) return true;
     }
   }
 
@@ -1633,24 +1654,14 @@ orders.patch('/:id', async (c) => {
   // a malformed value hits the order_lines CHECK constraint inside the tx
   // and surfaces as a 500. Both the line-patch list (`lines`) and the
   // insert list (`addLines`) need the same check.
-  const badLine = (l: { qty?: number | null; unitCost?: number | null; sellPrice?: number | null }) => {
-    if (l.qty !== undefined && l.qty !== null && (!Number.isInteger(l.qty) || l.qty <= 0)) {
-      return 'qty must be a positive integer';
-    }
-    if (l.unitCost !== undefined && l.unitCost !== null && (!Number.isFinite(l.unitCost) || l.unitCost < 0)) {
-      return 'unitCost must be ≥ 0';
-    }
-    if (l.sellPrice !== undefined && l.sellPrice !== null && (!Number.isFinite(l.sellPrice) || l.sellPrice < 0)) {
-      return 'sellPrice must be ≥ 0';
-    }
-    return null;
-  };
   for (const l of body.lines ?? []) {
-    const e = badLine(l);
+    const e = validateLineInput(l as Record<string, unknown>, 'patch');
     if (e) return c.json({ error: e }, 400);
   }
+  // A new line through PATCH has the INSERT's defaults (qty 1, cost 0) for
+  // what it leaves out, so only what it carries is checked.
   for (const l of body.addLines ?? []) {
-    const e = badLine(l);
+    const e = validateLineInput(l as Record<string, unknown>, 'patch');
     if (e) return c.json({ error: e }, 400);
   }
 
@@ -2127,14 +2138,20 @@ orders.patch('/:id', async (c) => {
               });
             if (wasSynthetic) {
               const keep = (col: string) => !stale.includes(col);
+              // What each spec will hold after the UPDATE below: a present
+              // field lands as sent (cleared included), an absent one keeps the
+              // stored value unless the category switch just cleared it.
+              const sent = l as unknown as Record<string, unknown>;
+              const after = (key: string, col: string, v: string | null | undefined): string | null =>
+                sent[key] !== undefined ? specVal(v) : (keep(col) ? (stored as Record<string, unknown>)[col] as string | null : null);
               const rebuilt = synthesizePartNumber(l.category, {
-                brand:       l.brand      ?? (keep('brand')       ? stored.brand : null),
-                capacity:    l.capacity   ?? (keep('capacity')    ? stored.capacity : null),
-                interface:   l.interface  ?? (keep('interface')   ? stored.interface : null),
-                formFactor:  l.formFactor ?? (keep('form_factor') ? stored.form_factor : null),
-                generation:  l.generation ?? (keep('generation')  ? stored.generation : null),
-                speed:       l.speed      ?? (keep('speed')       ? stored.speed : null),
-                rpm:         l.rpm        ?? (keep('rpm')         ? stored.rpm : null),
+                brand:       after('brand', 'brand', l.brand),
+                capacity:    after('capacity', 'capacity', l.capacity),
+                interface:   after('interface', 'interface', l.interface),
+                formFactor:  after('formFactor', 'form_factor', l.formFactor),
+                generation:  after('generation', 'generation', l.generation),
+                speed:       after('speed', 'speed', l.speed),
+                rpm:         sent.rpm !== undefined ? (l.rpm ?? null) : (keep('rpm') ? stored.rpm : null),
               });
               if (rebuilt) l = { ...l, partNumber: rebuilt };
             }
@@ -2143,6 +2160,8 @@ orders.patch('/:id', async (c) => {
           // own fields, and the sentinels/COALESCEs that keep the rest differ
           // per row — a single statement would need a sentinel per column.
           const setSellPrice = l.sellPrice !== undefined ? 1 : 0;
+          const lineBody = l as unknown as Record<string, unknown>;
+          const has = (f: string) => (lineBody[f] !== undefined ? 1 : 0);
           // `status` is deliberately NOT settable here. Line status is driven
           // by the lifecycle (advance handler) and 'Sold' is a protected
           // terminal state; accepting a client-supplied status would let any
@@ -2160,25 +2179,32 @@ orders.patch('/:id', async (c) => {
                                     THEN qty_purchased
                                     ELSE qty_purchased + (${l.qty ?? null}::int - qty) END,
               unit_cost      = COALESCE(${l.unitCost ?? null}, unit_cost),
-              brand          = COALESCE(${l.brand ?? null}, brand),
-              capacity       = COALESCE(${l.capacity ?? null}, capacity),
-              type           = COALESCE(${l.type ?? null}, type),
-              generation     = COALESCE(${l.generation ?? null}, generation),
-              classification = COALESCE(${l.classification ?? null}, classification),
-              rank           = COALESCE(${l.rank ?? null}, rank),
-              speed          = COALESCE(${l.speed ?? null}, speed),
-              interface      = COALESCE(${l.interface ?? null}, interface),
-              form_factor    = COALESCE(${l.formFactor ?? null}, form_factor),
-              description    = COALESCE(${l.description ?? null}, description),
-              item_type     = COALESCE(${l.itemType?.trim() || null}, item_type),
+              -- The fields the line editors own take a sentinel, not COALESCE:
+              -- present (null included) is what lands, absent keeps the
+              -- column. The editors echo every one of them back with its
+              -- current value, so a blank one is the user clearing it, and
+              -- COALESCE read that as "no change": the save said it worked and
+              -- the value came back.
+              brand          = CASE WHEN ${has('brand')}::int = 1          THEN ${specVal(l.brand)}          ELSE brand END,
+              capacity       = CASE WHEN ${has('capacity')}::int = 1       THEN ${specVal(l.capacity)}       ELSE capacity END,
+              type           = CASE WHEN ${has('type')}::int = 1           THEN ${specVal(l.type)}           ELSE type END,
+              generation     = CASE WHEN ${has('generation')}::int = 1     THEN ${specVal(l.generation)}     ELSE generation END,
+              classification = CASE WHEN ${has('classification')}::int = 1 THEN ${specVal(l.classification)} ELSE classification END,
+              rank           = CASE WHEN ${has('rank')}::int = 1           THEN ${specVal(l.rank)}           ELSE rank END,
+              speed          = CASE WHEN ${has('speed')}::int = 1          THEN ${specVal(l.speed)}          ELSE speed END,
+              interface      = CASE WHEN ${has('interface')}::int = 1      THEN ${specVal(l.interface)}      ELSE interface END,
+              form_factor    = CASE WHEN ${has('formFactor')}::int = 1     THEN ${specVal(l.formFactor)}     ELSE form_factor END,
+              description    = CASE WHEN ${has('description')}::int = 1    THEN ${specVal(l.description)}    ELSE description END,
+              item_type      = CASE WHEN ${has('itemType')}::int = 1       THEN ${specVal(l.itemType)}       ELSE item_type END,
+              -- Never written back as NULL: inventory grouping and reference
+              -- pricing are keyed on it.
               part_number    = COALESCE(${l.partNumber ?? null}, part_number),
               serial_number  = COALESCE(${l.serialNumber ?? null}, serial_number),
-              -- '' means "cleared by the user" (the edit forms always send the
-              -- field); NULLIF turns it into NULL instead of storing ''.
-              chip_number    = NULLIF(COALESCE(${canonChipNumber(l.chipNumber)}, chip_number), ''),
+              chip_number    = CASE WHEN ${has('chipNumber')}::int = 1
+                                    THEN NULLIF(${canonChipNumber(l.chipNumber)}, '') ELSE chip_number END,
               condition      = COALESCE(${l.condition ?? null}, condition),
-              health         = COALESCE(${l.health ?? null}, health),
-              rpm            = COALESCE(${l.rpm ?? null}, rpm),
+              health         = CASE WHEN ${has('health')}::int = 1 THEN ${l.health ?? null} ELSE health END,
+              rpm            = CASE WHEN ${has('rpm')}::int = 1    THEN ${l.rpm ?? null}    ELSE rpm END,
               scan_image_id  = COALESCE(${l.scanImageId ?? null}, scan_image_id),
               scan_confidence = COALESCE(${l.scanConfidence ?? null}, scan_confidence)
             WHERE id = ${l.id} AND order_id = ${id}
