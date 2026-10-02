@@ -612,6 +612,11 @@ bankTx.post('/:id/unpair', async (c) => {
   // two unpaired rows stay linked to one PO and its paid figure counts the
   // payment twice. They stay on the PayPal leg, the one the feed shows for a
   // pair and the one carrying the payee.
+  //
+  // A Mercury leg parses the same PayPal id out of its description, so freed
+  // like that the next sync's autoLink would hand it straight back to the PO.
+  // It gets the tombstone /unlink leaves; a leg carrying a different id was
+  // never this payment and stays linkable.
   const keep = group.find((l) => l.source === 'paypal') ?? group[0];
   const others = group.filter((l) => l.id !== keep.id).map((l) => l.id);
   await sql.begin(async (tx) => {
@@ -624,7 +629,9 @@ bankTx.post('/:id/unpair', async (c) => {
         UPDATE bank_transactions
         SET order_id = NULL, link_kind = NULL, link_auto = FALSE, linked_by = NULL, linked_at = NULL,
             assignee_id = NULL, assigned_by = NULL, assigned_at = NULL,
-            internal_txn_id = NULL
+            internal_txn_id = NULL,
+            no_auto_link = no_auto_link
+              OR COALESCE(UPPER(paypal_txn_id) = UPPER(${keep.paypal_txn_id}::text), FALSE)
         WHERE id IN ${tx(others)}`;
     }
   });

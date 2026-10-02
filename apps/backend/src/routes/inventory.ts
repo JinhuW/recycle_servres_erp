@@ -8,7 +8,7 @@ import { canonPartCol, canonPartArg } from '../lib/part-number';
 import { invLabel } from '../lib/inventoryLabel';
 import { committedClaimsByLine, committedQtySql, openSellStatuses } from '../lib/sellCommitment';
 import { lockOrdersForLinesTx } from '../services/orderLocks';
-import { validateLineInput } from '../lib/orderInput';
+import { specVal, validateLineInput } from '../lib/orderInput';
 import { buildXlsxWorkbook, xlsxResponse, datedFilename, type XlsxColumn } from '../lib/xlsx';
 import {
   CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields, categoryTabSheets,
@@ -1135,7 +1135,6 @@ inventory.patch('/:id', async (c) => {
   // Was the key present at all? `undefined` means "leave alone"; an explicit
   // null or '' means "clear it".
   const has = (f: string) => ((body as Record<string, unknown>)[f] !== undefined ? 1 : 0);
-  const specVal = (v: string | null | undefined) => (v == null || v.trim() === '' ? null : v.trim());
   // The same field rules as the PO editor (lib/orderInput.ts), as 400s
   // before the database, where qty=0 or a negative price is a CHECK failure.
   const inputErr = validateLineInput(body as Record<string, unknown>, 'patch');

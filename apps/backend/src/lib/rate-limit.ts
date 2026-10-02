@@ -28,11 +28,21 @@ export function createRateLimiter(
   // cap drop the oldest-inserted, so the Map cannot grow for the life of the
   // process.  Eviction leaves a tenth of the cap free; trimming to exactly the
   // cap would re-run a full sweep on every call while a flood holds it there.
+  //
+  // Keys being refused right now go last. They are usually the oldest, so
+  // insertion order alone let a flood of fresh keys evict the one key it was
+  // throttling, and with it the budget.  Refused hits are never recorded, so a
+  // key's list is at most `max` long and "full" is one comparison.
   const sweep = (cutoff: number) => {
     for (const [k, ts] of hits) if (ts[ts.length - 1]! <= cutoff) hits.delete(k);
     const target = maxKeys - Math.ceil(maxKeys / 10);
+    const full = (ts: number[]) => ts.length >= max && ts[ts.length - max]! > cutoff;
+    for (const [k, ts] of hits) {
+      if (hits.size <= target) return;
+      if (!full(ts)) hits.delete(k);
+    }
     for (const k of hits.keys()) {
-      if (hits.size <= target) break;
+      if (hits.size <= target) return;
       hits.delete(k);
     }
   };

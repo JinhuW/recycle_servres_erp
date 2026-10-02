@@ -69,7 +69,7 @@ export async function searchSellableInventory(
     SELECT l.id, l.order_id, ${poLineNo(sql, 'l')} AS line_no, l.category, l.brand, l.capacity, l.generation, l.type,
            l.classification, l.rank, l.speed, l.interface, l.form_factor,
            l.description, l.part_number, l.condition,
-           (l.qty - ${committed}) AS qty,
+           (l.qty - c.n) AS qty,
            l.sell_price::float AS sell_price,
            l.health::float AS health, l.rpm,
            COALESCE(l.warehouse_id, o.warehouse_id) AS warehouse_id,
@@ -81,9 +81,12 @@ export async function searchSellableInventory(
     FROM order_lines l
     JOIN orders o ON o.id = l.order_id
     LEFT JOIN warehouses w ON w.id = COALESCE(l.warehouse_id, o.warehouse_id)
+    -- Once per line for both the SELECT and the WHERE. OFFSET 0 keeps the
+    -- planner from pulling the subquery up and inlining it twice again.
+    CROSS JOIN LATERAL (SELECT ${committed} AS n OFFSET 0) c
     WHERE l.status IN ('Reviewing', 'Done')
       AND o.archived_at IS NULL
-      AND l.qty > ${committed}
+      AND l.qty > c.n
       AND (${like}::text IS NULL
            OR LOWER(COALESCE(l.brand,'')) LIKE ${like ?? ''}
            OR LOWER(COALESCE(l.part_number,'')) LIKE ${like ?? ''}

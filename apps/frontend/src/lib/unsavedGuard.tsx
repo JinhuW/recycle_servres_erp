@@ -1,23 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
 import { ConfirmDialog } from '../pages/desktop/settings/dialogs';
 import { useT } from './i18n';
+import { hasUnsavedChanges, registerHolder } from './leaveRegistry';
+import { setLeaveGuard, splitHash } from './route';
 
-// Screens holding edits nobody has saved. A screen registers while it is
-// dirty. The browser then asks before a reload or tab close drops the edits,
-// and anything about to throw the screen away (Escape, Cancel, Back, the
-// layout switch) asks first through confirmDiscard(). Leaving an edit page used
-// to just leave, and the typing went with it.
-const holders = new Set<symbol>();
-
-export function useUnsavedGuard(dirty: boolean): void {
-  const key = useRef(Symbol('unsaved'));
+// A screen registers while it holds unsaved edits. The browser then asks
+// before a reload or tab close drops them, a link, Back or Forward that would
+// unmount the screen asks first (lib/route.ts), and so does anything else about
+// to throw it away (Escape, Cancel, the layout switch) through confirmDiscard().
+// Leaving an edit page used to just leave, and the typing went with it.
+//
+// `keepsOn` names the routes the screen survives; by default, the one it was
+// on when it became dirty.
+export function useUnsavedGuard(dirty: boolean, keepsOn?: (path: string) => boolean): void {
+  const keepsOnRef = useRef(keepsOn);
+  keepsOnRef.current = keepsOn;
   useEffect(() => {
-    const k = key.current;
-    if (!dirty) {
-      holders.delete(k);
-      return;
-    }
-    holders.add(k);
+    if (!dirty) return;
+    const here = splitHash(window.location.hash).path || '/';
+    const unregister = registerHolder((p) => (keepsOnRef.current ? keepsOnRef.current(p) : p === here));
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       // Some browsers still need the legacy field set to show the prompt.
@@ -25,14 +26,10 @@ export function useUnsavedGuard(dirty: boolean): void {
     };
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => {
-      holders.delete(k);
+      unregister();
       window.removeEventListener('beforeunload', onBeforeUnload);
     };
   }, [dirty]);
-}
-
-export function hasUnsavedChanges(): boolean {
-  return holders.size > 0;
 }
 
 declare global {
@@ -43,13 +40,16 @@ declare global {
 
 /**
  * Asks whether to drop unsaved edits; resolves true to go ahead. Resolves true
- * straight away when nothing is unsaved, so callers can always await it.
+ * straight away when nothing would be lost going to `nextPath` (or, with no
+ * path, when nothing is unsaved), so callers can always await it.
  */
-export function confirmDiscard(): Promise<boolean> {
-  if (!hasUnsavedChanges()) return Promise.resolve(true);
+export function confirmDiscard(nextPath?: string): Promise<boolean> {
+  if (!hasUnsavedChanges(nextPath)) return Promise.resolve(true);
   if (typeof window.__confirmDiscard === 'function') return window.__confirmDiscard();
   return Promise.resolve(true);
 }
+
+setLeaveGuard({ wouldAsk: (p) => hasUnsavedChanges(p), ask: (p) => confirmDiscard(p) });
 
 // Mounted once at the root, beside both shells, so either can ask.
 export function DiscardConfirmHost() {

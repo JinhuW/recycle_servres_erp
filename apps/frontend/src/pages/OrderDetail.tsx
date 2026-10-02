@@ -16,7 +16,8 @@ import { useEffectiveUser } from '../lib/tweaks';
 import { api, deleteOrder, archiveOrder, unarchiveOrder, followLineTotal } from '../lib/api';
 import { readArchiveConflict, type ArchiveConflict } from '../lib/archiveConflict';
 import { ArchiveConflictList } from '../components/ArchiveConflictList';
-import { navigate, poProductsPath, type PoScreen } from '../lib/route';
+import { matchPurchaseOrder, navigate, poProductsPath, type PoScreen } from '../lib/route';
+import { confirmDiscard, useUnsavedGuard } from '../lib/unsavedGuard';
 import { OrderProductsBody, itemLabel } from './OrderProductsBody';
 import { handleFetchError, showErrorDialog } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
@@ -314,6 +315,15 @@ export function OrderDetail({
     && (commissionRateValue ?? 0) !== (order.commissionRate ?? 0);
   const commission = ownerDirty || commissionDirty;
   const dirty = notesDirty || warehouseDirty || paymentDirty || methodDirty || paypalDirty || feesDirty || facts || commission;
+  // The order and its products screen are one instance, so moving between
+  // them keeps the edits; anywhere else asks first.
+  useUnsavedGuard(dirty, (p) => matchPurchaseOrder(p)?.id === order.id);
+  // The products screen backs out to the order, which keeps the edits; the
+  // order backs out to the list, which doesn't.
+  const leave = async () => {
+    if (section === 'info' && !(await confirmDiscard())) return;
+    onCancel();
+  };
 
   // The server's verdict when it sends one: these lines carry what is left,
   // and the verdict is on what was bought (see the desktop editor).
@@ -723,7 +733,7 @@ export function OrderDetail({
       <PhHeader
         title={headerTitle}
         sub={headerSub}
-        leading={<button className="ph-icon-btn" onClick={onCancel} aria-label={t('back')}><Icon name="chevronLeft" size={16} /></button>}
+        leading={<button className="ph-icon-btn" onClick={() => { void leave(); }} aria-label={t('back')}><Icon name="chevronLeft" size={16} /></button>}
       />
       {section === 'products' && (
         <>

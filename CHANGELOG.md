@@ -17,6 +17,58 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.200.1] - 2026-10-02
+
+Fixes from the closing re-review of the remaining code-review work (RS-155),
+over everything since v1.194.0.
+
+### Fixed
+
+- **Ungrouping a pair no longer counts the payment twice at the next sync.**
+  Unpairing left the PO link on the PayPal leg and freed the Mercury leg, but
+  the Mercury leg reads the same PayPal id out of its description. The
+  six-hourly auto-link then linked it straight back to the PO, and the paid
+  figure counted the payment twice, the state the v1.198.3 change was meant to
+  end. The freed leg now gets the same "don't auto-link" mark a manual Unlink
+  leaves. A leg carrying a different id was never this payment and stays
+  linkable.
+- **Unsaved edits are asked about on every way out.** v1.200.0 asked on each
+  screen's own Escape, Cancel and Back. The sidebar, the phone tab bar, record
+  links and the browser's Back and Forward still dropped the edits silently,
+  and the phone PO screen didn't ask at all. Routing now checks before any
+  change that would unmount a screen holding edits. A Back is undone while the
+  question is up, and a second Back during it is ignored. Moving between the
+  phone PO's order and products screens (one page) never asks, and a save that
+  then navigates never asks. Discarding on the phone now really discards: the
+  typed fee used to come back on the next visit.
+- **IPv6 senders are counted per /64.** The public forms' 20-a-day share per
+  address and the connector-registration per-IP limit compared stored full
+  addresses, so a sender rotating through its /64 got a fresh count every
+  time. Both now count by the same /64 key the per-minute limits use (new
+  `ip_key` / `created_ip_key` columns, migration 0155).
+- **A throttled caller can't reset its own limit with a flood.** At its key
+  cap, the in-memory rate limiter evicted the oldest keys first, which is
+  usually the one being throttled; a burst of made-up keys gave it a fresh
+  budget. Keys being refused are now evicted last.
+- **Mixed-script client names no longer merge.** The v1.198.3 key fell back
+  to the full name only when no A–Z or 0–9 was left, so 'Đức' keyed as 'C', and
+  '王 RAM' and '李 RAM' keyed as the same client. A name with any non-ASCII
+  character now keys on its whole text (migration 0154). ASCII names key as
+  before. Prod had no such names.
+- **A converted web submission is never purged.** One archived by hand after
+  conversion was deleted after 30 days, taking the PO's record of who sold the
+  lot with it.
+- **The phone Market's Load more can't splice in the previous filter's
+  page** when the filter or search changes while it is loading.
+
+### Changed
+
+- A login against an email or address that is already locked is refused on a
+  single read, with no attempt row written and deleted.
+- The sellable-inventory search computes each line's committed quantity once,
+  not twice.
+- The inventory editor uses the shared `specVal` instead of its own copy.
+
 ## [1.200.0] - 2026-10-02
 
 Frontend robustness (RS-154), batch 8b and the last of the remaining

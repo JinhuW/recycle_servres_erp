@@ -177,6 +177,24 @@ describe('DCR unused-client cap', () => {
   });
 });
 
+describe('DCR per-address throttle', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  // An IPv6 caller holds a /64, so the hourly count is per /64, not per address.
+  it('counts an IPv6 caller by its /64', async () => {
+    const register = (ip: string) => api<Body>('POST', '/oauth/register', {
+      body: { client_name: 'v6', redirect_uris: ['https://example.com/cb'] },
+      headers: { 'X-Client-IP': ip },
+    });
+    for (let i = 1; i <= 10; i++) expect((await register(`2001:db8:9:9::${i}`)).status).toBe(201);
+    expect((await register('2001:db8:9:9::beef')).status).toBe(429);
+    expect((await register('2001:db8:9:a::1')).status).toBe(201);
+    const keys = await getTestDb()<{ k: string }[]>`
+      SELECT DISTINCT created_ip_key AS k FROM oauth_clients WHERE created_ip LIKE '2001:db8:9:9::%'`;
+    expect(keys.map((r) => r.k)).toEqual(['2001:db8:9:9::/64']);
+  });
+});
+
 // Every token/revoke call compares a bcrypt secret; a loop against one client
 // id would otherwise pin a core.
 describe('token endpoint budget', () => {

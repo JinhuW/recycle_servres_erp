@@ -42,8 +42,36 @@ auth.post('/login', async (c) => {
   // one another; counting first let a whole burst pass before any was recorded.
   // The reservation is settled once bcrypt answers, or deleted if this request
   // is refused or fails first, so a refusal never lengthens the lockout.
+  //
+  // An email or address already locked is refused on a read alone, before any
+  // reservation: a flood against it would otherwise cost an insert, a count
+  // and a delete per request, for an answer that is already known.
   const FAILED_LIMIT = 5;
   const IP_FAILED_LIMIT = 30;
+  const locked = async (excludeId: string | null): Promise<boolean> => {
+    const [{ fails, ipFails }] = await sql<{ fails: number; ipFails: number }[]>`
+      SELECT
+        (SELECT COUNT(*)::int FROM login_attempts
+          WHERE email = ${email} AND success IS NOT TRUE
+            AND (${excludeId}::bigint IS NULL OR id <> ${excludeId}::bigint)
+            AND attempted_at > NOW() - INTERVAL '15 minutes'
+            AND attempted_at > COALESCE(
+              (SELECT MAX(attempted_at) FROM login_attempts
+                WHERE email = ${email} AND success = TRUE),
+              'epoch'::timestamptz)) AS fails,
+        (SELECT COUNT(*)::int FROM login_attempts
+          WHERE ${ipKnown} AND ip_key = ${ip.key} AND success IS NOT TRUE
+            AND (${excludeId}::bigint IS NULL OR id <> ${excludeId}::bigint)
+            AND attempted_at > NOW() - INTERVAL '15 minutes') AS "ipFails"
+    `;
+    return fails >= FAILED_LIMIT || ipFails >= IP_FAILED_LIMIT;
+  };
+  const tooMany = () => {
+    c.header('Retry-After', '900');
+    return c.json({ error: 'too many failed attempts; try again later' }, 429);
+  };
+  if (await locked(null)) return tooMany();
+
   const [{ id: attemptId }] = await sql<{ id: string }[]>`
     INSERT INTO login_attempts (email, ip, ip_key, success)
     VALUES (${email}, ${ip.full}, ${ip.key}, NULL)
@@ -58,24 +86,7 @@ auth.post('/login', async (c) => {
       .catch((e) => log.error('login_attempts write failed', e));
   };
   try {
-    const [{ fails, ipFails }] = await sql<{ fails: number; ipFails: number }[]>`
-      SELECT
-        (SELECT COUNT(*)::int FROM login_attempts
-          WHERE email = ${email} AND success IS NOT TRUE AND id <> ${attemptId}
-            AND attempted_at > NOW() - INTERVAL '15 minutes'
-            AND attempted_at > COALESCE(
-              (SELECT MAX(attempted_at) FROM login_attempts
-                WHERE email = ${email} AND success = TRUE),
-              'epoch'::timestamptz)) AS fails,
-        (SELECT COUNT(*)::int FROM login_attempts
-          WHERE ${ipKnown} AND ip_key = ${ip.key} AND success IS NOT TRUE
-            AND id <> ${attemptId}
-            AND attempted_at > NOW() - INTERVAL '15 minutes') AS "ipFails"
-    `;
-    if (fails >= FAILED_LIMIT || ipFails >= IP_FAILED_LIMIT) {
-      c.header('Retry-After', '900');
-      return c.json({ error: 'too many failed attempts; try again later' }, 429);
-    }
+    if (await locked(attemptId)) return tooMany();
 
     const rows = await sql<
       {
