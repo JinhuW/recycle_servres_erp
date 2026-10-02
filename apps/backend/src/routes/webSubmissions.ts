@@ -19,7 +19,7 @@ import { syncOrderCategory } from '../services/orderCategory';
 import { syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { writeOrderEvent } from '../services/orderAudit';
 import { isoDatePlus, loadCrmSettings } from '../services/supplierCrm';
-import type { SellLotPayload } from './publicForms';
+import { WEB_CHANNEL_SOURCES, type SellLotPayload } from './publicForms';
 import type { Env, User } from '../types';
 
 const webSubmissions = new Hono<{ Bindings: Env; Variables: { user: User } }>()
@@ -192,8 +192,6 @@ webSubmissions.patch('/:id', async (c) => {
 // on it filed one seller's lot under somebody else. A key collision therefore
 // means a different seller holds that key, and this one is inserted under a
 // name that keeps it distinct.
-const WEB_CHANNEL_SOURCES = ['web', 'facebook', 'reddit'];
-
 async function webSellerSupplierTx(
   tx: SqlLike,
   submissionId: string,

@@ -42,8 +42,8 @@ const rateLimited = createRateLimiter(60_000, 5);
 
 export const SELL_CATEGORIES = ['RAM', 'SSD', 'CPU'] as const;
 export type SellCategory = (typeof SELL_CATEGORIES)[number];
-const SOURCES = ['web', 'facebook', 'reddit'] as const;
-type Source = (typeof SOURCES)[number];
+export const WEB_CHANNEL_SOURCES = ['web', 'facebook', 'reddit'] as const;
+type Source = (typeof WEB_CHANNEL_SOURCES)[number];
 const HANDOFFS = ['ship', 'pickup'] as const;
 export type Handoff = (typeof HANDOFFS)[number];
 // The spec fields the sell form can send, all optional. Anything else is dropped.
@@ -146,7 +146,7 @@ export function parseSellLot(raw: unknown): Parsed<SellLotPayload> {
     ok: {
       email: mail,
       notes: text(b.notes, MAX_NOTES),
-      source: SOURCES.includes(b.source as Source) ? (b.source as Source) : 'web',
+      source: WEB_CHANNEL_SOURCES.includes(b.source as Source) ? (b.source as Source) : 'web',
       handoff,
       pickup_location: pickup,
       lines,

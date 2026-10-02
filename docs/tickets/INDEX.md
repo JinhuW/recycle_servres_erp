@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-139](./RS-139-pre-release-review-fixes-for-v1-193-v1-194.md) | done | bug | P2 | Pre-release review fixes for v1.193–v1.194 | 1.194.1 |
 | [RS-138](./RS-138-sell-order-full-page-by-po-by-warehouse-line-switch.md) | done | story | P2 | Sell order full page, by-PO/by-warehouse line switch, spec tags | 1.194.0 |
 | [RS-136](./RS-136-inventory-edits-land-whatever-the-po-stage.md) | done | bug | P2 | Inventory edits land whatever the PO stage | 1.192.1 |
 | [RS-134](./RS-134-code-review-fixes-batch-2-every-remaining-minor-find.md) | done | bug | P2 | Code-review fixes batch 2: every remaining Minor finding | 1.193.0 |

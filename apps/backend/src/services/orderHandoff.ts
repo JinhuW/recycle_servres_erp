@@ -158,7 +158,13 @@ export async function setOrderPackageTx(
     && { id: curRow.id, tracking_number: curRow.tracking_number, carrier: curRow.carrier };
   if (cur && cur.tracking_number === want.trackingNumber) {
     if (cur.carrier === want.carrier) return { kind: 'ok', package: cur, prev: cur, needsRegister: false };
-    await tx`UPDATE packages SET carrier = ${want.carrier}, tracking_registered_at = NULL WHERE id = ${cur.id}`;
+    // The stored event date came from the wrong carrier's lookup; left in
+    // place, it would drop every earlier-dated event the right one reports.
+    await tx`
+      UPDATE packages SET carrier = ${want.carrier}, tracking_registered_at = NULL,
+                          tracking_status_at = NULL
+      WHERE id = ${cur.id}
+    `;
     return { kind: 'ok', package: { ...cur, carrier: want.carrier }, prev: cur, needsRegister: true };
   }
   if (curRow?.status === 'delivered') return { kind: 'delivered' };
@@ -174,11 +180,13 @@ export async function setOrderPackageTx(
   if (other) {
     if (other.order_id !== null) return { kind: 'taken', packageId: other.id, otherOrderId: other.order_id };
     if (!mayAdopt(actor, order.user_id, other.created_by)) return { kind: 'takenStandalone', packageId: other.id };
-    const needsRegister = other.tracking_registered_at === null || other.carrier !== want.carrier;
+    const carrierChanged = other.carrier !== want.carrier;
+    const needsRegister = other.tracking_registered_at === null || carrierChanged;
     await tx`
       UPDATE packages SET order_id = ${orderId}, carrier = ${want.carrier},
                           source = COALESCE(source, ${order.source}),
-                          tracking_registered_at = CASE WHEN ${needsRegister}::boolean THEN NULL ELSE tracking_registered_at END
+                          tracking_registered_at = CASE WHEN ${needsRegister}::boolean THEN NULL ELSE tracking_registered_at END,
+                          tracking_status_at = CASE WHEN ${carrierChanged}::boolean THEN NULL ELSE tracking_status_at END
       WHERE id = ${other.id}
     `;
     if (cur) await tx`UPDATE packages SET order_id = NULL WHERE id = ${cur.id}`;
@@ -198,7 +206,7 @@ export async function setOrderPackageTx(
       UPDATE packages SET
         tracking_number = ${want.trackingNumber}, carrier = ${want.carrier},
         status = 'purchased', tracking_status = NULL, tracking_eta = NULL,
-        last_tracked_at = NULL, tracking_registered_at = NULL
+        tracking_status_at = NULL, last_tracked_at = NULL, tracking_registered_at = NULL
       WHERE id = ${cur.id}
     `;
     return {

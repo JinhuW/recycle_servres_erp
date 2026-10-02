@@ -98,6 +98,26 @@ describe('MCP search_sellable_inventory', () => {
     expect(body.result).toBeUndefined();
     expect(body.error.message).toMatch(/insufficient_scope/);
   });
+
+  it('returns at most the schema\'s 100 rows whatever limit asks for', async () => {
+    const sql = getTestDb();
+    const { token } = await loginAs(ALEX);
+    const line = await freeSellableLine(token);
+    // The seed has fewer than 100 sellable lots; clone one past the cap.
+    const cols = (await sql<{ c: string }[]>`
+      SELECT column_name AS c FROM information_schema.columns
+      WHERE table_name = 'order_lines' AND column_name <> 'id'`).map((r) => r.c).join(', ');
+    const clones = await sql.unsafe<{ id: string }[]>(
+      `INSERT INTO order_lines (${cols}) SELECT ${cols} FROM order_lines, generate_series(1, 120)
+       WHERE id = $1 RETURNING id`, [line.id]);
+    try {
+      const r = await call(bearerRead, { limit: 201 });
+      const rows = JSON.parse((r.body as any).result.content[0].text);
+      expect(rows).toHaveLength(100);
+    } finally {
+      await sql`DELETE FROM order_lines WHERE id IN ${sql(clones.map((c) => c.id))}`;
+    }
+  });
 });
 
 describe('MCP create_sell_order_draft', () => {

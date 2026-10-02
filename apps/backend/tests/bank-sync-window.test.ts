@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api, testEnv } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
@@ -82,6 +82,27 @@ describe('bank sync window, health and single-flight', () => {
     const whole = syncBankTransactions(testEnv, [full.paypal.provider, full.mercury.provider]);
     release();
     await Promise.all([partial, whole]);
+    expect(full.mercury.asked).toHaveLength(1);
+  });
+
+  it('starts a run that cannot join only once the run sharing its source is done', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const paypalOnly = recording('paypal', {}, gate);
+    const full = { paypal: recording('paypal'), mercury: recording('mercury') };
+
+    const partial = syncBankTransactions(testEnv, [paypalOnly.provider], { disputes: false });
+    // syncOne reads the DB before it fetches; wait until the narrow run is
+    // actually holding the PayPal fetch open.
+    await vi.waitFor(() => expect(paypalOnly.asked).toHaveLength(1));
+    const whole = syncBankTransactions(testEnv, [full.paypal.provider, full.mercury.provider]);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(full.paypal.asked).toHaveLength(0);
+    expect(full.mercury.asked).toHaveLength(0);
+
+    release();
+    await Promise.all([partial, whole]);
+    expect(full.paypal.asked).toHaveLength(1);
     expect(full.mercury.asked).toHaveLength(1);
   });
 });
