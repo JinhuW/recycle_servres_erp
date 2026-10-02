@@ -2,13 +2,13 @@
 id: RS-156
 title: Pre-release review fixes for v1.200.1
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-02
 reporter: jinhu
 branch: fix/prerelease-review-v1-200
-pr:
-version:
+pr: "#476"
+version: 1.200.2
 related: [RS-154, RS-155]
 ---
 
@@ -57,24 +57,24 @@ Each finding was checked against `origin/dev` at v1.200.1:
 
 ## Acceptance criteria
 
-- [ ] An anonymous intake photo under the byte cap whose header can't be read, or
+- [x] An anonymous intake photo under the byte cap whose header can't be read, or
       whose pixel count is past the cap, is refused (400). A small valid photo is
       stored unchanged.
-- [ ] `seed.mjs` and `migrate.mjs --reset` refuse to run with `NODE_ENV=production`,
+- [x] `seed.mjs` and `migrate.mjs --reset` refuse to run with `NODE_ENV=production`,
       whatever the host, unless the named override is set.
-- [ ] After a declined Forward or typed address, the page's real predecessor is one
+- [x] After a declined Forward or typed address, the page's real predecessor is one
       Back away, and the refused page is one Forward away. The same holds for a
       multi-step Forward.
-- [ ] `GET /api/orders` with a malformed cursor answers 200 with page one, for each
+- [x] `GET /api/orders` with a malformed cursor answers 200 with page one, for each
       sort column.
-- [ ] A PO PATCH that names another PO's line id with a low qty is a no-op for that
+- [x] A PO PATCH that names another PO's line id with a low qty is a no-op for that
       line, not a 409.
-- [ ] The shutdown comment and CLAUDE.md state the 30s draining window.
-- [ ] The hand-off locks the order `FOR NO KEY UPDATE`.
-- [ ] The phone shell's `setView` asks before leaving unsaved edits.
-- [ ] The daily byte budget counts each incoming photo at most at the upload cap,
+- [x] The shutdown comment and CLAUDE.md state the 30s draining window.
+- [x] The hand-off locks the order `FOR NO KEY UPDATE`.
+- [x] The phone shell's `setView` asks before leaving unsaved edits.
+- [x] The daily byte budget counts each incoming photo at most at the upload cap,
       which is the most that can be stored for it.
-- [ ] `uniqueWindowPairs` builds its buckets in linear time, with the same pairs as
+- [x] `uniqueWindowPairs` builds its buckets in linear time, with the same pairs as
       before.
 
 ## Out of scope
