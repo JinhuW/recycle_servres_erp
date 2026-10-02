@@ -259,6 +259,13 @@ switches the branch out from under the first.
   negotiated verdict has to be read *before* the line writes
   (`goodsTotalIsMirror`); afterwards a stale mirror and a real override are
   indistinguishable.
+- **A supplier's identity is the SQL function `supplier_name_key()`**
+  (migration 0151), which `suppliers.match_key` is generated from and which
+  the suggestions, package adoption and duplicate lookup all call.  Don't
+  compress a name in TypeScript.
+- **Bank rows carry `currency`** (0153).  Reconciliation is USD-only
+  (`openRowFrag`, `pairEligibleFrag`, autoPair, auto-link, `/link`, `/pair`).
+  A new matcher has to filter on it too.
 - **Upload validation** — every upload route (status-meta evidence and line
   photos in `routes/orders/`/`sellOrders.ts`, `scan.ts`, `publicForms.ts`) and the
   storage layer (`r2.ts`) enforce both `maxBytes` and `allowedMime` from

@@ -32,9 +32,9 @@ const SCORE_SQL = `COALESCE(SUM(o.total_cost * CASE
   WHEN o.created_at > NOW() - INTERVAL '365 days' THEN 0.3
   ELSE 0 END), 0)::float`;
 
-/** The compressed-name expression suppliers.match_key is generated from. Kept
- *  as SQL text, never re-implemented in TypeScript — see the note in 0113. */
-const COMPRESS = (col: string) => `regexp_replace(upper(${col}), '[^A-Z0-9]', '', 'g')`;
+// A supplier's name key is the SQL function supplier_name_key() (0151), which
+// suppliers.match_key is generated from. Never re-implemented in TypeScript —
+// see the note in 0113.
 
 type Row = {
   id: string; name: string; company: string | null; phone: string | null; email: string | null;
@@ -262,7 +262,7 @@ suppliers.get('/suggestions', async (c) => {
   const rows = await sql`
     WITH seen AS (
       SELECT o.user_id AS owner_id,
-             ${sql.unsafe(COMPRESS('p.seller_name'))} AS ck,
+             supplier_name_key(p.seller_name) AS ck,
              regexp_replace(btrim(p.seller_name), '[[:space:]]+', ' ', 'g') AS name,
              o.id AS order_id, o.total_cost, p.created_at
       FROM packages p
@@ -295,7 +295,7 @@ suppliers.get('/suggestions', async (c) => {
     WHERE NOT EXISTS (
       SELECT 1 FROM suppliers s
       WHERE s.owner_id IS NOT DISTINCT FROM a.owner_id
-        AND ${sql.unsafe(COMPRESS('s.name'))} = a.ck)
+        AND supplier_name_key(s.name) = a.ck)
     AND NOT EXISTS (
       SELECT 1 FROM supplier_suggestion_dismissals d
       WHERE d.user_id = ${u.id} AND d.match_key = a.ck)
@@ -364,13 +364,11 @@ suppliers.post('/adopt', async (c) => {
                 ${body.street2 ?? null}, ${body.city ?? null}, ${body.state ?? null},
                 ${body.zip ?? null}, ${body.country ?? 'US'}, ${ownerId}, ${source},
                 'active', ${u.id})
-        RETURNING id, match_key
+        RETURNING id
       `;
       const id = ins[0].id as string;
 
-      // Packages match by name alone (a package carries no address to match
-      // on); the match_key's zip half is empty for them.
-      const compressed = (ins[0].match_key as string).split('|')[0];
+      // Packages match by name alone: a package carries no address to match on.
       const byPkg = await tx`
         UPDATE orders o SET supplier_id = ${id}
         WHERE o.supplier_id IS NULL
@@ -378,7 +376,8 @@ suppliers.post('/adopt', async (c) => {
           AND EXISTS (
             SELECT 1 FROM packages p
             WHERE p.order_id = o.id AND p.seller_name IS NOT NULL
-              AND ${sql.unsafe(COMPRESS('p.seller_name'))} = ${compressed})
+              AND supplier_name_key(p.seller_name) =
+                  (SELECT supplier_name_key(s.name) FROM suppliers s WHERE s.id = ${id}))
         RETURNING o.id
       `;
       const linked = byPkg.length;
@@ -451,8 +450,7 @@ suppliers.post('/', async (c) => {
       const dup = await sql`
         SELECT s.name, u2.name AS owner FROM suppliers s
         LEFT JOIN users u2 ON u2.id = s.owner_id
-        WHERE ${sql.unsafe(COMPRESS('s.name'))} = ${
-          body.name.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')}
+        WHERE supplier_name_key(s.name) = supplier_name_key(${body.name})
         LIMIT 1
       `;
       // Naming the owner is a deliberate, narrow exception to owner-scoping: it

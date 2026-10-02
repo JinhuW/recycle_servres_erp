@@ -588,6 +588,11 @@ on to Sold once every line has sold (v1.164.0).
 
 ## Clients (the people we buy from)
 
+- **Clients named in other scripts no longer collide** (v1.198.3). A name's
+  key kept only A–Z and 0–9, so every Chinese or Vietnamese name keyed as
+  empty. A second such client at the same zip was refused, and every
+  non-Latin package seller "matched" every non-Latin client. Such names now
+  key on their own text; Latin names key exactly as before.
 - **A purchaser's client card counts their own POs** (v1.198.0). Spend, PO
   count, rhythm, gap and the items list cover only the POs the purchaser
   owns, where they used to sum every colleague's POs onto the purchaser's
@@ -865,6 +870,23 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
   (v1.179.0).
 - **Internal Mercury↔PayPal transfers are classified out of the unlinked
   queue** (v1.93.0) by counterparty and Mercury kind rules (v1.94.0).
+- **Automatic pairing is stricter about what it guesses** (v1.198.3).
+  - An amount-and-date pair needs the Mercury row to name PayPal (its card
+    descriptor or counterparty), and a transfer pair needs the `PAYPAL;` ACH
+    descriptor. Every real pair in production carried them.
+  - A pair is made only when each leg is the other's sole candidate within
+    the window. A same-amount row from months ago no longer blocks a fresh
+    match forever.
+  - Rows unpaired for 120 days stop being re-examined unless they are still
+    pending.
+- **Ungrouping a pair leaves the PO link on the PayPal leg only**
+  (v1.198.3). It used to stay on both, so the PO's paid figure counted the
+  payment twice. Migration 0152 groups PO-1383's two $2,800 legs, which had
+  the same problem.
+- **A payment in another currency is not reconciled** (v1.198.3). Every PO is
+  in USD, so a non-USD row is kept out of matching, pairing and auto-link,
+  can't be linked or grouped by hand, and shows a "EUR · not reconciled" chip
+  in the feed. Every prod row was USD.
 - **Ignore rules** (v1.177.0). *Ignore rules* in the page header keeps a
   manager-edited list: a case-insensitive "contains" match on counterparty or
   description, optionally pinned to one source, with a label. A saved rule

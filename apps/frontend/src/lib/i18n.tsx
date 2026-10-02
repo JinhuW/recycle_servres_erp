@@ -351,6 +351,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payKindPayment: 'Payment',
     payKindRefund: 'Refund',
     payAuto: 'auto',
+    payForeignChip: '{cur} · not reconciled',
+    payForeignHint: 'Purchase orders are in USD, so a payment in another currency is not matched or linked.',
     payLink: 'Link…',
     payLinkTo: 'Link {id}',
     payUnlink: 'Unlink',

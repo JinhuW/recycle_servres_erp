@@ -32,6 +32,8 @@ const DEEP_EVERY_MS = 7 * DAY_MS;
 // A settlement can trail its PayPal charge by a weekend + holidays. Shared with
 // the read-time pair suggestion so the two never disagree.
 const PAIR_WINDOW_MS = PAIR_AUTO_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+// How far back an unpaired row stays a candidate for automatic pairing.
+const PAIR_REACH_DAYS = 120;
 // Rows per upsert statement: 11 parameters each, far below the protocol's
 // 65535-parameter ceiling, and small enough to keep one statement's plan cheap.
 const UPSERT_CHUNK = 500;
@@ -64,6 +66,7 @@ type LegRow = {
   posted_at: Date;
   paypal_txn_id: string | null;
   description: string | null;
+  counterparty: string | null;
   category: string;
   category_manual: boolean;
   order_id: string | null;
@@ -314,7 +317,7 @@ async function syncOne(
     }
     const rows = [...byExternalId.values()].map((t) => ({
       source, external_id: t.externalId, account_id: t.accountId, posted_at: t.postedAt,
-      amount: t.amount, counterparty: t.counterparty, description: t.description,
+      amount: t.amount, currency: t.currency, counterparty: t.counterparty, description: t.description,
       paypal_txn_id: t.paypalTxnId, category: t.category, settle_status: t.settleStatus,
       raw: tx.json(t.raw as never),
     }));
@@ -327,11 +330,12 @@ async function syncOne(
         INSERT INTO bank_transactions ${tx(
           // The helper's typing has no room for a json() parameter as a value.
           rows.slice(i, i + UPSERT_CHUNK) as never,
-          'source', 'external_id', 'account_id', 'posted_at', 'amount', 'counterparty',
+          'source', 'external_id', 'account_id', 'posted_at', 'amount', 'currency', 'counterparty',
           'description', 'paypal_txn_id', 'category', 'settle_status', 'raw')}
         ON CONFLICT (source, external_id) DO UPDATE SET
           posted_at = EXCLUDED.posted_at,
           amount = EXCLUDED.amount,
+          currency = EXCLUDED.currency,
           counterparty = EXCLUDED.counterparty,
           description = EXCLUDED.description,
           paypal_txn_id = EXCLUDED.paypal_txn_id,
@@ -453,7 +457,7 @@ async function copyNoteAcrossPair(tx: Tx, pairId: string): Promise<void> {
 async function autoPair(tx: Tx): Promise<number> {
   const legs = await tx<LegRow[]>`
     SELECT id, source, external_id, amount::text AS amount, posted_at, paypal_txn_id, description,
-           category, category_manual, order_id, link_kind, link_auto, linked_by, linked_at,
+           counterparty, category, category_manual, order_id, link_kind, link_auto, linked_by, linked_at,
            settle_status, ignored
     FROM bank_transactions
     -- A human's Ignore is a verdict on the row and takes it out of pairing. A
@@ -472,7 +476,14 @@ async function autoPair(tx: Tx): Promise<number> {
       -- human handling: restructuring it here would move an assigned payment's
       -- link onto it, or (via transferPair) re-categorize it out of the queue
       -- the assignment deliberately kept it in.
-      AND assignee_id IS NULL AND internal_txn_id IS NULL`;
+      AND assignee_id IS NULL AND internal_txn_id IS NULL
+      -- Amounts compare as numbers; across currencies the same number is not
+      -- the same money.
+      AND currency = 'USD'
+      -- Every unpaired row ever was read on every sync; one that has waited
+      -- four months for its sibling is a human's now. A pending row stays in
+      -- however old, since its sibling is by definition still on the way.
+      AND (posted_at > NOW() - make_interval(days => ${PAIR_REACH_DAYS}) OR settle_status = 'pending')`;
 
   // Payment pairing is external-only: a transfer leg's sibling has the
   // OPPOSITE sign (money leaving Mercury lands in PayPal), so it would only
@@ -493,25 +504,21 @@ async function autoPair(tx: Tx): Promise<number> {
     }
   }
 
-  // Amount+date: bucket the leftovers by amount; only a 1:1 bucket within the
-  // window is safe to pair — anything else waits for a human.
-  const byAmount = new Map<string, { m: LegRow[]; p: LegRow[] }>();
-  for (const l of external) {
-    if (taken.has(l.id)) continue;
-    const key = Number(l.amount).toFixed(2);
-    const bucket = byAmount.get(key) ?? { m: [], p: [] };
-    (l.source === 'mercury' ? bucket.m : bucket.p).push(l);
-    byAmount.set(key, bucket);
-  }
-  for (const { m, p } of byAmount.values()) {
-    if (m.length !== 1 || p.length !== 1) continue;
-    const dt = Math.abs(m[0].posted_at.getTime() - p[0].posted_at.getTime());
-    if (dt > PAIR_WINDOW_MS) continue;
-    pairs.push([m[0], p[0]]);
+  // Amount+date: same signed amount, inside the window, and each the other's
+  // only candidate there. The Mercury leg also has to say PayPal: an amount
+  // alone pairs a card charge with whatever PayPal payment happened to match
+  // it, and every real pair in production carried the marker.
+  const leftover = external.filter((l) => !taken.has(l.id));
+  for (const [m, p] of uniqueWindowPairs(
+    leftover.filter((l) => l.source === 'mercury' && saysPaypal(l)),
+    leftover.filter((l) => l.source === 'paypal'),
+    (l) => Number(l.amount).toFixed(2),
+  )) {
+    pairs.push([m, p]);
     // Claim both legs, or transferPair re-examines them and can steal one into
     // a transfer pair — overwriting this pair_id and orphaning the sibling.
-    taken.add(m[0].id);
-    taken.add(p[0].id);
+    taken.add(m.id);
+    taken.add(p.id);
   }
 
   for (const [m, p] of pairs) {
@@ -547,42 +554,60 @@ async function autoPair(tx: Tx): Promise<number> {
 // the window pairs; the Mercury side is then a transfer too — unless a human
 // already ruled otherwise.
 async function transferPair(tx: Tx, legs: LegRow[], taken: Set<string>): Promise<number> {
-  const byAbs = new Map<string, { m: LegRow[]; p: LegRow[] }>();
-  for (const l of legs) {
-    if (taken.has(l.id) || l.order_id) continue;
-    // PayPal candidates must already be transfers (event code). A Mercury
-    // candidate is either still external, or a transfer *because of the
-    // PayPal ACH descriptor* — which says its sibling is on PayPal, which is
-    // precisely this pairing. A Mercury leg that is a transfer for any other
-    // reason (kind, counterparty rule) has its sibling elsewhere: the other
-    // Mercury account, or the sibling company.
-    const eligible = l.source === 'paypal'
-      ? l.category === 'transfer'
-      : l.category === 'external' || (!!l.description && PAYPAL_ACH_DESCRIPTOR.test(l.description));
-    if (!eligible) continue;
-    const key = Math.abs(Number(l.amount)).toFixed(2);
-    const bucket = byAbs.get(key) ?? { m: [], p: [] };
-    (l.source === 'mercury' ? bucket.m : bucket.p).push(l);
-    byAbs.set(key, bucket);
-  }
+  const free = legs.filter((l) => !taken.has(l.id) && !l.order_id);
+  // PayPal candidates must already be transfers (event code). A Mercury one
+  // must carry the PayPal ACH descriptor, which names its sibling as PayPal; a
+  // plain external Mercury row of the opposite amount is just as likely an
+  // unrelated deposit. Every transfer pair in production carried it. A Mercury
+  // leg that is a transfer for any other reason (kind, counterparty rule) has
+  // its sibling elsewhere: the other Mercury account, or the sibling company.
+  const found = uniqueWindowPairs(
+    free.filter((l) => l.source === 'mercury' && !!l.description && PAYPAL_ACH_DESCRIPTOR.test(l.description)),
+    free.filter((l) => l.source === 'paypal' && l.category === 'transfer'),
+    (l) => Math.abs(Number(l.amount)).toFixed(2),
+  ).filter(([m, p]) => Number(m.amount) === -Number(p.amount));
 
-  let paired = 0;
-  for (const { m, p } of byAbs.values()) {
-    if (m.length !== 1 || p.length !== 1) continue;
-    if (Number(m[0].amount) !== -Number(p[0].amount)) continue;
-    const dt = Math.abs(m[0].posted_at.getTime() - p[0].posted_at.getTime());
-    if (dt > PAIR_WINDOW_MS) continue;
+  for (const [m, p] of found) {
     const pairId = crypto.randomUUID();
-    await tx`UPDATE bank_transactions SET pair_id = ${pairId} WHERE id IN (${m[0].id}, ${p[0].id})`;
+    await tx`UPDATE bank_transactions SET pair_id = ${pairId} WHERE id IN (${m.id}, ${p.id})`;
     await copyNoteAcrossPair(tx, pairId);
     await tx`
       UPDATE bank_transactions SET category = 'transfer'
-      WHERE id = ${m[0].id} AND NOT category_manual`;
-    taken.add(m[0].id);
-    taken.add(p[0].id);
-    paired++;
+      WHERE id = ${m.id} AND NOT category_manual`;
+    taken.add(m.id);
+    taken.add(p.id);
   }
-  return paired;
+  return found.length;
+}
+
+// A Mercury row that names PayPal: the card descriptor ("PAYPAL *…") or the
+// counterparty Mercury resolved it to.
+function saysPaypal(l: LegRow): boolean {
+  return /paypal/i.test(l.description ?? '') || /paypal/i.test(l.counterparty ?? '');
+}
+
+// Mercury/PayPal legs that are each other's ONLY candidate: same `key`, and no
+// other leg of the same key inside the window around either. Buckets used to
+// span all time, so a same-amount leg from months ago blocked a fresh 1:1
+// pair forever; now only a rival close enough to be confused with it does —
+// the same window the read-time suggestion uses (match.ts pairCandidatesBatch).
+function uniqueWindowPairs(
+  mercury: LegRow[], paypal: LegRow[], key: (l: LegRow) => string,
+): Array<[LegRow, LegRow]> {
+  const near = (a: LegRow, b: LegRow) => Math.abs(a.posted_at.getTime() - b.posted_at.getTime()) <= PAIR_WINDOW_MS;
+  const byKey = new Map<string, LegRow[]>();
+  for (const p of paypal) byKey.set(key(p), [...(byKey.get(key(p)) ?? []), p]);
+  const mByKey = new Map<string, LegRow[]>();
+  for (const m of mercury) mByKey.set(key(m), [...(mByKey.get(key(m)) ?? []), m]);
+  const out: Array<[LegRow, LegRow]> = [];
+  for (const m of mercury) {
+    const ps = (byKey.get(key(m)) ?? []).filter((p) => near(m, p));
+    if (ps.length !== 1) continue;
+    const ms = (mByKey.get(key(m)) ?? []).filter((x) => near(x, ps[0]));
+    if (ms.length !== 1) continue;
+    out.push([m, ps[0]]);
+  }
+  return out;
 }
 
 // ─── Auto-link ────────────────────────────────────────────────────────────────
@@ -628,6 +653,8 @@ export async function linkPaypalTxnToOrder(
     FROM bank_transactions bt
     WHERE order_id IS NULL AND NOT no_auto_link AND NOT ignored
       AND category <> 'transfer'
+      -- Every PO is in USD.
+      AND currency = 'USD'
       -- A payment in flight still answers "what paid for this PO"; a denied or
       -- reversed one does not, and claiming it would leave the order reading
       -- as paid on money that never left, or came back.

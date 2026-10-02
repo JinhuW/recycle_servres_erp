@@ -39,6 +39,7 @@ type LegRow = {
   external_id: string;
   posted_at: Date;
   amount: number;
+  currency: string;
   counterparty: string | null;
   description: string | null;
   paypal_txn_id: string | null;
@@ -85,7 +86,7 @@ function soleCandidate(list: PairCandidate[] | undefined) {
 // All legs of the logical payment `id` belongs to (1 row when unpaired).
 async function groupOf(sql: SqlClient, id: string): Promise<LegRow[]> {
   return sql<LegRow[]>`
-    SELECT id, source, external_id, posted_at, amount::float AS amount, counterparty,
+    SELECT id, source, external_id, posted_at, amount::float AS amount, currency, counterparty,
            description, paypal_txn_id, pair_id, order_id, link_kind, link_auto,
            linked_by, linked_at, ignored, category, settle_status, internal_txn_id, assignee_id,
            note, note_by, note_at
@@ -178,7 +179,7 @@ bankTx.get('/', async (c) => {
   // The join is aliased `po`, not `o`: `hasMatchFrag` lands in this WHERE
   // carrying its own `EXISTS (SELECT 1 FROM orders o …)`.
   const rows = await sql`
-    SELECT bt.id, bt.source, bt.external_id, bt.posted_at, bt.amount::float AS amount,
+    SELECT bt.id, bt.source, bt.external_id, bt.posted_at, bt.amount::float AS amount, bt.currency,
            bt.counterparty, bt.description, bt.paypal_txn_id, bt.pair_id,
            bt.order_id, bt.link_kind, bt.link_auto, bt.linked_at, bt.ignored, bt.category,
            ${groupSettleFrag(sql, 'bt')} AS settle_status,
@@ -229,7 +230,8 @@ bankTx.get('/', async (c) => {
   // Only the rows the manager can still act on need candidates; a linked,
   // ignored or transfer row is already off the queue.
   const openLegs: MatchLeg[] = slice
-    .filter((r) => !r.order_id && !r.ignored && r.category === 'external' && !isDead(r))
+    .filter((r) => !r.order_id && !r.ignored && r.category === 'external' && !isDead(r)
+      && r.currency === 'USD')
     .map((r) => ({
       id: r.id as string,
       amount: Number(r.amount),
@@ -247,7 +249,7 @@ bankTx.get('/', async (c) => {
     // Same rule autoPair and pairEligibleFrag follow: pending is a real leg,
     // failed and reversed are records.
     .filter((r) => !r.pair_id && !r.order_id && !r.ignored && r.category === 'external'
-      && !isDead(r))
+      && !isDead(r) && r.currency === 'USD')
     .map((r) => ({
       id: r.id as string,
       source: r.source as string,
@@ -269,6 +271,7 @@ bankTx.get('/', async (c) => {
       source: r.pair_id ? 'paired' : r.source,
       postedAt: r.posted_at,
       amount: Number(r.amount),
+      currency: r.currency,
       counterparty: r.counterparty,
       description: r.description,
       paypalTxnId: r.paypal_txn_id,
@@ -389,7 +392,7 @@ bankTx.get('/by-order/:orderId', async (c) => {
   const sql = getDb(c.env);
   const orderId = c.req.param('orderId');
   const rows = await sql<LegRow[]>`
-    SELECT id, source, external_id, posted_at, amount::float AS amount, counterparty,
+    SELECT id, source, external_id, posted_at, amount::float AS amount, currency, counterparty,
            description, paypal_txn_id, pair_id, order_id, link_kind, link_auto,
            linked_by, linked_at, ignored, settle_status, internal_txn_id, assignee_id
     FROM bank_transactions
@@ -423,6 +426,9 @@ bankTx.post('/:id/link', async (c) => {
   // The money never left, or came back. Linking it would make the PO read as
   // paid by a payment that did not happen.
   if (group.some(isDead)) return c.json({ error: 'This payment did not settle' }, 400);
+  // Every PO is in USD.
+  const foreign = group.find((l) => l.currency !== 'USD');
+  if (foreign) return c.json({ error: `A ${foreign.currency} transaction cannot be linked to a purchase order` }, 400);
   // A membership is part of a record someone wrote a note on, so it is refused
   // rather than cleared. The owner tag below has no such home and goes quietly.
   if (group.some((l) => l.internal_txn_id)) {
@@ -522,6 +528,9 @@ bankTx.post('/:id/pair', async (c) => {
   // that is both — which the PO's paid figure would then count.
   if (a.ignored || b.ignored) return c.json({ error: 'Unignore the transaction before grouping it' }, 400);
   if (a.source === b.source) return c.json({ error: 'A pair needs one Mercury and one PayPal leg' }, 400);
+  if (a.currency !== 'USD' || b.currency !== 'USD') {
+    return c.json({ error: 'Only USD transactions can be grouped' }, 400);
+  }
   // A pending leg is a real half of a payment; a failed or reversed one is a
   // record of money that never moved, or came back. Same rule autoPair and
   // pairEligibleFrag follow, so the picker never offers this either.
@@ -596,10 +605,27 @@ bankTx.post('/:id/unpair', async (c) => {
   const group = await groupOf(sql, c.req.param('id'));
   if (group.length === 0) return c.json({ error: 'Not found' }, 404);
   if (!group[0].pair_id) return c.json({ error: 'Not paired' }, 400);
-  await sql`
-    UPDATE bank_transactions
-    SET pair_id = NULL, no_auto_pair = TRUE
-    WHERE id IN ${sql(group.map((l) => l.id))}`;
+  // Pairing spread the link, the owner and the internal transaction onto every
+  // leg (/pair, autoPair). Ungrouping has to take them back off all but one, or
+  // two unpaired rows stay linked to one PO and its paid figure counts the
+  // payment twice. They stay on the PayPal leg, the one the feed shows for a
+  // pair and the one carrying the payee.
+  const keep = group.find((l) => l.source === 'paypal') ?? group[0];
+  const others = group.filter((l) => l.id !== keep.id).map((l) => l.id);
+  await sql.begin(async (tx) => {
+    await tx`
+      UPDATE bank_transactions
+      SET pair_id = NULL, no_auto_pair = TRUE
+      WHERE id IN ${tx(group.map((l) => l.id))}`;
+    if (others.length) {
+      await tx`
+        UPDATE bank_transactions
+        SET order_id = NULL, link_kind = NULL, link_auto = FALSE, linked_by = NULL, linked_at = NULL,
+            assignee_id = NULL, assigned_by = NULL, assigned_at = NULL,
+            internal_txn_id = NULL
+        WHERE id IN ${tx(others)}`;
+    }
+  });
   return c.json({ ok: true });
 });
 
