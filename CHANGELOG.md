@@ -17,6 +17,48 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.196.1] - 2026-10-02
+
+Ops and tooling (RS-144), batch 4 of the remaining code-review work.
+
+- **A redeploy no longer kills requests mid-flight.** The container started
+  the backend through `sh -c "… && pnpm start"`. The shell held PID 1 and
+  forwarded no signal, so every redeploy ended in SIGKILL at the draining
+  deadline, and a write in progress rolled back after its client had given up.
+  The CMD now `exec`s node directly. On SIGTERM the backend stops its
+  background loops, gives in-flight requests 20 seconds, cuts whatever is
+  still open (an MCP stream never closes on its own), closes the database pool
+  and exits by 25 seconds. Railway's draining window must be longer than that
+  for the exit to be clean; raising it is a separate ops step.
+- **CI notices root manifest changes.** A change to only `pnpm-lock.yaml`,
+  `package.json`, `pnpm-workspace.yaml`, `tsconfig.base.json`, `.npmrc` or
+  `.nvmrc` ran no tests and deployed no Worker, though it changes what every
+  package builds with. Both workflows now trigger on them. `version-check`
+  counts them, plus `backup/` and `infra/`, as code that needs a version bump.
+- **Two sessions can't be handed the same worktree.** `new-session.sh` picked
+  an idle slot and wrote its claim in separate steps, so two launchers
+  started together could both pick one slot. The second `checkout -B` then
+  swapped the branch under the first session. Choosing and claiming now happen
+  under a mutex, and the claim is written the moment a slot is picked.
+  `--print-only` records the calling session's claude PID instead of an 8-hour
+  timestamp, whose expiry is how a running session's worktree once got swept.
+  Any process with its working directory inside a slot keeps it live. The
+  `SessionStart` hook records the session's PID whenever it starts or resumes
+  inside a slot.
+- **The seed and reset scripts refuse a remote database.** `seed.mjs` deletes
+  every order and `migrate.mjs --reset` drops every table. A `DATABASE_URL`
+  left in a shell from a Railway session was all it took to point either at
+  real data. Both now exit before connecting unless the host is local, or
+  `ALLOW_DESTRUCTIVE_SEED` / `ALLOW_DESTRUCTIVE_RESET` is set.
+- **The nightly prod→dev copy no longer carries live credentials.** Refresh
+  tokens, OAuth grants and client secrets copied to dev would have kept
+  working against prod's own backend for anyone with dev database access.
+  `deploy/railway-sync/scrub.sql` now runs inside the restore transaction. It
+  truncates those tables and the login attempts, and nulls OAuth client
+  secrets. Password hashes stay, so people sign in to dev as themselves. A
+  test runs the scrub against the migrated schema, so an FK added later fails
+  CI instead of the 04:00 restore.
+
 ## [1.196.0] - 2026-10-02
 
 A sell order line now shows its number on the PO it came from (RS-145).

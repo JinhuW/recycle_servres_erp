@@ -120,11 +120,18 @@ switches the branch out from under the first.
   startup stays a few seconds) and sweeps any other idle slots, so abandoned
   sessions cannot pile up at ~290 MB each.  `--fresh` forces a new one.
 - A slot counts as idle only if it is clean, on a branch, holds nothing that is
-  not already in `origin/dev`, **and** carries a lock file from a session that
-  has since exited.  Locks live in `.claude/worktrees/.locks/` (outside the
-  checkouts, so they don't show up as untracked files): the launcher records the
-  PID that `exec claude` inherits, and the `--print-only` path records a
-  timestamp that expires after 8h.  A worktree with **no** lock is never touched
+  not already in `origin/dev`, **no process has its working directory inside
+  it**, **and** it carries a lock file from a session that has since exited.
+  Locks live in `.claude/worktrees/.locks/` (outside the checkouts, so they
+  don't show up as untracked files) and hold a claude PID: the launcher's
+  (which `exec claude` inherits), or for `--print-only` the calling session's,
+  found by walking up the process tree.  Only when no claude ancestor exists
+  does `--print-only` fall back to a timestamp that expires after 8h.  The
+  `SessionStart` hook re-records the PID whenever a session starts or resumes
+  inside a slot, unless the lock names another live process.  Choosing a slot
+  and writing its claim happen under a `mkdir` mutex
+  (`.locks/.select`), so two launchers started together can't take the same
+  slot (v1.196.1).  A worktree with **no** lock is never touched
   automatically — it predates the mechanism or was made by hand, so whether
   someone is sitting in it is unknowable.
 - `scripts/new-session.sh --prune` reclaims idle slots on demand and `--list`
@@ -362,6 +369,27 @@ switches the branch out from under the first.
   cutting a release.
 
 ## Docker & ops
+
+- **The backend container exits on SIGTERM** (v1.196.1).  The Dockerfile
+  `exec`s `node --import tsx src/server.ts`, so node holds the signal, and
+  `lib/shutdown.ts` stops the loops, drains in-flight requests for 20s, cuts
+  what is left (MCP streams never end on their own), closes the pool and
+  exits by 25s.  A new background loop must return `{ stop }` and join the
+  `loops` list in `server.ts`.  Railway's draining window has to exceed 25s,
+  or SIGKILL lands first.  Don't put `pnpm start` back in the CMD: `sh -c`
+  held PID 1 and forwarded nothing.
+- **`seed.mjs` and `migrate.mjs --reset` refuse a non-local `DATABASE_URL`**
+  (v1.196.1).  Local means `localhost`, `127.0.0.1`, `::1` or the compose
+  `postgres` service.  Override with `ALLOW_DESTRUCTIVE_SEED=true` or
+  `ALLOW_DESTRUCTIVE_RESET=true`.  A shell can carry a `DATABASE_URL` left
+  over from a Railway session, which is how a laptop reseed could reach real
+  data.
+- **The nightly prod→dev copy scrubs credentials**
+  (`deploy/railway-sync/scrub.sql`, v1.196.1).  It truncates the refresh,
+  OAuth and login-attempt tables and nulls OAuth client secrets, inside the
+  restore transaction.  A new table holding a token belongs in that file.  An
+  FK onto a scrubbed table fails `tests/sync-scrub.test.ts`, which is the
+  point.
 
 - `docker-compose.yml` is the prod-shaped stack.  Every service has
   `cap_drop: ALL` + `no-new-privileges` + memory caps + JSON log rotation.

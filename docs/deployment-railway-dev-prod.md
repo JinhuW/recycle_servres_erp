@@ -89,7 +89,7 @@ dev runs against realistic data.
 ```
 GitHub branch  prod ───► Railway env "production"  ── backend ── Postgres (prod)
                                                                      │
-                                                          nightly    │  pg_dump --clean
+                                                          nightly    │  pg_dump + scrub
                                                           prod→dev    ▼
 GitHub branch  dev  ───► Railway env "dev"  ── backend ── Postgres (dev)  ◄── overwritten
                                                   ▲
@@ -109,7 +109,8 @@ GitHub branch  dev  ───► Railway env "dev"  ── backend ── Postgr
 | Path | Purpose |
 |------|---------|
 | `deploy/railway-sync/Dockerfile` | `postgres:18-alpine` sync image |
-| `deploy/railway-sync/sync.sh` | `pg_dump --clean prod \| psql dev`, one-way, guarded |
+| `deploy/railway-sync/sync.sh` | `pg_dump prod` to a temp file, then one transaction on dev: drop and recreate `public`, restore, scrub. One-way, guarded |
+| `deploy/railway-sync/scrub.sql` | Clears prod's live credentials from the copy (v1.196.1): every refresh token, OAuth grant, pending consent and login attempt, and every OAuth client secret. Password hashes stay |
 
 ## Provisioning steps (need Railway API access)
 
@@ -155,4 +156,10 @@ Temporarily clear the cron, deploy once so it runs immediately, read logs for
 - Consider a prod **read-only** role for `PROD_DATABASE_URL` so the sync can only
   read prod, not modify it.
 - The prod→dev copy includes all prod data — treat the dev DB and its access
-  with the same sensitivity as prod.
+  with the same sensitivity as prod. Since v1.196.1 it no longer includes
+  prod's live credentials: `scrub.sql` runs inside the restore transaction, so
+  no token copied from prod can be replayed against prod's backend. Password
+  hashes are kept on purpose, so people sign in to dev with their own
+  passwords. `tests/sync-scrub.test.ts` runs the scrub against the migrated
+  schema, so an FK added onto a scrubbed table fails CI instead of the nightly
+  restore.

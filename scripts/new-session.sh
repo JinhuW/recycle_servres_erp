@@ -84,6 +84,8 @@ FORCE_FRESH=0
 NAME=""
 CHECKOUT=""
 CLAUDE_ARGS=()
+# What create_session writes into the chosen slot's lock; set per mode below.
+CLAIM=""
 
 # Where in-use markers live. Deliberately OUTSIDE the worktrees themselves: a
 # lock file inside a checkout would show up as an untracked file, making the
@@ -260,15 +262,49 @@ worktree_status() {
 
 lock_file() { printf '%s/%s' "$LOCK_DIR" "$(basename "$1")"; }
 
+# Working directories of this user's processes, read once per run: lsof over
+# every process costs a few hundred ms, and the selection loops ask per slot.
+CWD_PATHS=""
+CWD_PATHS_READ=0
+process_cwd_in() {
+  local wt="$1" p
+  if [ "$CWD_PATHS_READ" -eq 0 ]; then
+    CWD_PATHS="$(lsof -a -d cwd -u "$(id -u)" -Fn 2>/dev/null | sed -n 's/^n//p' || true)"
+    CWD_PATHS_READ=1
+  fi
+  while IFS= read -r p; do
+    case "$p" in "$wt"|"$wt"/*) return 0 ;; esac
+  done <<< "$CWD_PATHS"
+  return 1
+}
+
+# The Claude Code process this script runs under, if any: the --print-only
+# caller is a live session whose Bash tool started us, so its PID is the one
+# that frees the slot when it exits.
+claude_ancestor_pid() {
+  local pid="$$" comm
+  while [ -n "$pid" ] && [ "$pid" -gt 1 ]; do
+    comm="$(ps -o comm= -p "$pid" 2>/dev/null || true)"
+    [ "${comm##*/}" = "claude" ] && { printf '%s\n' "$pid"; return 0; }
+    pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
+  done
+  return 1
+}
+
 # True while a session still holds this worktree.
 #
-# The launch path records the PID that `exec claude` inherits, so liveness is
-# exact — `kill -0` on a dead session fails and the worktree frees itself. The
-# --print-only path has no PID to record (the caller is an already-running
-# session that will EnterWorktree into it), so it records a timestamp and the
-# claim expires after CLAIM_TTL_SECONDS.
+# Any process standing in it counts — a session whose lock was overwritten or
+# never written, or a `pnpm dev` it left behind, is just as disrupted by a
+# `checkout -B` as the session the lock names. Otherwise the lock decides: the
+# launch path records the PID that `exec claude` inherits, and --print-only
+# records the calling session's claude PID, so `kill -0` on a dead session
+# fails and the worktree frees itself. Only when no claude ancestor can be
+# found does --print-only fall back to a timestamp that expires after
+# CLAIM_TTL_SECONDS — the expiry that once let a running session's slot be
+# swept from under it.
 session_is_live() {
   local lock content age
+  process_cwd_in "$1" && return 0
   lock="$(lock_file "$1")"
   [ -f "$lock" ] || return 1
   content="$(cat "$lock" 2>/dev/null || true)"
@@ -282,6 +318,33 @@ session_is_live() {
 }
 
 claim_worktree() { mkdir -p "$LOCK_DIR"; printf '%s\n' "$2" > "$(lock_file "$1")"; }
+
+# Serialises choosing a slot and writing its claim. Two launchers started
+# together would otherwise both find the same idle slot, and the second
+# `checkout -B` would swap the branch under the first session. mkdir is the
+# atomic test-and-set; the holder's PID lets a crashed launcher's mutex be
+# taken over instead of blocking every later one.
+SELECT_MUTEX="$LOCK_DIR/.select"
+acquire_select_mutex() {
+  local tries=0 holder
+  mkdir -p "$LOCK_DIR"
+  until mkdir "$SELECT_MUTEX" 2>/dev/null; do
+    holder="$(cat "$SELECT_MUTEX/pid" 2>/dev/null || true)"
+    if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then
+      rm -rf "$SELECT_MUTEX"
+      continue
+    fi
+    tries=$((tries + 1))
+    [ "$tries" -lt 120 ] \
+      || die "another launcher has held $SELECT_MUTEX for a minute — if none is running: rm -rf $SELECT_MUTEX"
+    sleep 0.5
+  done
+  printf '%s\n' "$$" > "$SELECT_MUTEX/pid"
+}
+release_select_mutex() {
+  [ "$(cat "$SELECT_MUTEX/pid" 2>/dev/null || true)" = "$$" ] && rm -rf "$SELECT_MUTEX"
+  return 0
+}
 
 # Whether automation may take this worktree.
 #
@@ -447,6 +510,12 @@ create_session() {
   slug="$(printf '%s' "$branch" | tr '/' '-' | tr -cd '[:alnum:]._-')"
   [ -n "$slug" ] || die "branch name '$branch' has no usable characters"
 
+  # Held from the first look at the slots until this session's claim is
+  # written; released before the install, which can take a minute. This runs
+  # in a command substitution, so the trap fires when the subshell ends.
+  acquire_select_mutex
+  trap release_select_mutex EXIT
+
   # A branch lives in at most one worktree, so an existing checkout of it has to
   # be resolved before anything else — git would simply refuse a second one.
   # Handing that worktree back is also the behaviour you want: it is where the
@@ -461,7 +530,9 @@ create_session() {
       ! session_is_live "$holder" \
         || die "$branch is in use by a session at $holder (if that session is gone: rm $(lock_file "$holder"))"
       log "adopting $(basename "$holder") — already on $branch"
+      claim_worktree "$holder" "$CLAIM"
       reap_idle_except "$holder"
+      release_select_mutex
       provision_worktree "$holder"
       printf '%s\n' "$holder"
       return 0
@@ -474,6 +545,7 @@ create_session() {
   # slot keeps its original directory name and gets a fresh branch.
   if [ "$FORCE_FRESH" -eq 0 ] && reused="$(reusable_worktree)"; then
     wt="$reused"
+    claim_worktree "$wt" "$CLAIM"
     old_branch="$(git -C "$wt" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
     log "reusing $(basename "$wt") — nothing in it${old_branch:+ (was $old_branch)}"
     if [ -n "$CHECKOUT" ]; then
@@ -499,11 +571,13 @@ create_session() {
     else
       git -C "$REPO_ROOT" worktree add -b "$branch" "$wt" "$BASE_REF" >&2
     fi
+    claim_worktree "$wt" "$CLAIM"
   fi
 
   # One idle slot is enough to keep around; sweep any others so abandoned
   # sessions cannot accumulate at ~290 MB each.
   reap_idle_except "$wt"
+  release_select_mutex
 
   provision_worktree "$wt"
   printf '%s\n' "$wt"
@@ -538,23 +612,24 @@ case "$MODE" in
   list)  list_sessions ;;
   prune) prune_sessions ;;
   print)
+    # The caller is an already-running session that will EnterWorktree into
+    # this path, so its claude process is what to watch. A timer is the
+    # fallback for a caller that isn't one.
+    CLAIM="$(claude_ancestor_pid || printf 'claimed:%s' "$(date +%s)")"
     target="$(create_session)" || exit 1
     [ -n "$target" ] || exit 1
-    # No PID to watch — the caller is an already-running session that will
-    # EnterWorktree into this path — so the claim expires on a timer instead.
-    claim_worktree "$target" "claimed:$(date +%s)"
     rename_tmux_window "$target"
     printf '%s\n' "$target"
     ;;
   launch)
+    # `exec` keeps this PID, so the lock names the claude process itself and the
+    # slot frees automatically when that session exits.
+    CLAIM="$$"
     target="$(create_session)" || exit 1
     [ -n "$target" ] || exit 1
     log "session branch ready — launching claude in $target"
     cd "$target"
     rename_tmux_window "$target"
-    # `exec` keeps this PID, so the lock names the claude process itself and the
-    # slot frees automatically when that session exits.
-    claim_worktree "$target" "$$"
     # The flag is passed here, not via .claude/settings.json: Claude Code ignores
     # a bypassPermissions default at project scope and starts in Manual mode.
     # The worktree isolates the BRANCH, not the machine — remove the flag from

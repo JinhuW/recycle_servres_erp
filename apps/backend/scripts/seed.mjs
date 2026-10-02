@@ -5,12 +5,19 @@
 import postgres from 'postgres';
 import bcrypt from 'bcryptjs';
 import './load-env.mjs';
+import { dbTarget, destructiveRefusal } from '../src/lib/dbTarget.ts';
 
 const url = process.env.DATABASE_URL;
 if (!url) {
   console.error('DATABASE_URL is not set. Add it to repo-root .env');
   process.exit(1);
 }
+const refusal = destructiveRefusal(url, 'seed', 'ALLOW_DESTRUCTIVE_SEED', process.env);
+if (refusal) {
+  console.error(refusal);
+  process.exit(1);
+}
+console.log(`seeding ${dbTarget(url).host}`);
 // Seeding is sequential, so a small pool suffices. SEED_POOL_MAX lets the test
 // harness shrink it further (many seed subprocesses run in parallel there).
 const sql = postgres(url, { max: Number(process.env.SEED_POOL_MAX) || 8, onnotice: () => {} });

@@ -68,12 +68,14 @@ dump="$(mktemp /tmp/prod-dump.XXXXXX)"
 trap 'rm -f "$dump"' EXIT
 pg_dump --no-owner --no-privileges "$PROD_DATABASE_URL" > "$dump"
 
-# Preamble + dump run in ONE transaction, so a mid-restore failure still rolls
-# back to an unchanged dev rather than an empty one. pgcrypto lives in public
-# and is dropped by the CASCADE; the dump's CREATE EXTENSION restores it.
+# Preamble + dump + scrub run in ONE transaction, so a mid-restore failure
+# still rolls back to an unchanged dev rather than an empty one, and no moment
+# exists where dev holds prod's live tokens. pgcrypto lives in public and is
+# dropped by the CASCADE; the dump's CREATE EXTENSION restores it.
 {
   echo 'DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;'
   cat "$dump"
+  cat /usr/local/share/sync/scrub.sql
 } | psql --single-transaction --set ON_ERROR_STOP=1 "$DEV_DATABASE_URL" >/dev/null
 
 # The restore just replaced dev's schema with prod's, which erases any dev-only

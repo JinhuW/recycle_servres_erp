@@ -48,7 +48,7 @@ jobs:
 
           if [ -n "$LAST_TAG" ]; then
             LAST_VERSION="${LAST_TAG#v}"
-            if ! git diff --name-only "$LAST_TAG"..HEAD -- apps packages deploy docker-compose.yml | grep -q .; then
+            if ! git diff --name-only "$LAST_TAG"..HEAD -- apps packages deploy docker-compose.yml backup infra pnpm-lock.yaml package.json pnpm-workspace.yaml tsconfig.base.json .npmrc .nvmrc | grep -q .; then
               echo "No code changes since $LAST_TAG — version bump not required."
               exit 0
             fi

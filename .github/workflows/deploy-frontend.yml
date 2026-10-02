@@ -19,6 +19,14 @@ on:
       - "packages/shared/**"
       - "deploy/cloudflare/**"
       - ".github/workflows/deploy-frontend.yml"
+      # Root manifests: a lockfile, workspace or Node change alters what every
+      # package builds and runs with, without touching a file under apps/.
+      - "pnpm-lock.yaml"
+      - "package.json"
+      - "pnpm-workspace.yaml"
+      - "tsconfig.base.json"
+      - ".npmrc"
+      - ".nvmrc"
   workflow_dispatch: # manual re-deploy without a code change
 
 concurrency:

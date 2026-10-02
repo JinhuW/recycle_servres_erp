@@ -11,7 +11,8 @@
 #
 # Stays silent (exit 0, no output) when there is nothing to do:
 #   - source is resume/clear/compact — that session already has a branch
-#   - cwd is already inside .claude/worktrees/ — already isolated
+#   - cwd is already inside .claude/worktrees/ — already isolated; the hook
+#     only refreshes that slot's lock to this session's claude PID
 #
 # Note: launching via `scripts/new-session.sh` skips all of this, because the
 # session then starts inside the worktree already.
@@ -26,11 +27,40 @@ command -v jq >/dev/null 2>&1 || exit 0
 source_kind="$(printf '%s' "$payload" | jq -r '.source // ""' 2>/dev/null || echo "")"
 cwd="$(printf '%s' "$payload" | jq -r '.cwd // ""' 2>/dev/null || echo "")"
 
-[ "$source_kind" = "startup" ] || exit 0
+# A session inside a slot — launched there, resumed there, or back from a
+# compact — records its own claude PID as the slot's lock, so the launcher sees
+# it as live for as long as it runs. Without this a resumed session ran on a
+# lock written by whichever process first took the slot, and a slot with a
+# dead or expired lock under a running session got reused or swept. A lock
+# naming another live process is left alone.
+record_slot_lock() {
+  local root rest slot lock pid comm current
+  root="${cwd%%/.claude/worktrees/*}/.claude/worktrees"
+  rest="${cwd#*/.claude/worktrees/}"
+  slot="${rest%%/*}"
+  case "$slot" in ''|.*) return 0 ;; esac
+  pid="$PPID"
+  while [ -n "$pid" ] && [ "$pid" -gt 1 ]; do
+    comm="$(ps -o comm= -p "$pid" 2>/dev/null || true)"
+    [ "${comm##*/}" = "claude" ] && break
+    pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
+  done
+  [ "${comm##*/}" = "claude" ] || return 0
+  lock="$root/.locks/$slot"
+  current="$(cat "$lock" 2>/dev/null || true)"
+  case "$current" in
+    ''|*[!0-9]*) ;;
+    *) [ "$current" != "$pid" ] && kill -0 "$current" 2>/dev/null && return 0 ;;
+  esac
+  mkdir -p "$root/.locks" 2>/dev/null && printf '%s\n' "$pid" > "$lock" 2>/dev/null
+  return 0
+}
 
 case "$cwd" in
-  */.claude/worktrees/*) exit 0 ;;
+  */.claude/worktrees/*) record_slot_lock; exit 0 ;;
 esac
+
+[ "$source_kind" = "startup" ] || exit 0
 
 read -r -d '' CONTEXT <<'EOF' || true
 This session started in the SHARED main checkout of recycle_servres_erp, which
