@@ -115,14 +115,7 @@ function summarize(event: SellOrderEvent, locale: string, t: TFn): React.ReactNo
       return (
         <>
           {t('historyCreatedPrefix')} (
-          {(d.source === 'vendor_bid')
-            ? <>
-                {t('historyFromVendorBid', { id: String(d.vendorBidId ?? '') })}
-                {typeof d.currency === 'string' && d.currency !== 'USD' && typeof d.fxRateToUsd === 'number'
-                  ? <> — {d.currency} at fx {(1 / d.fxRateToUsd).toFixed(4)}{typeof d.fxSource === 'string' ? <> ({d.fxSource})</> : null}</>
-                  : null}
-              </>
-            : <>{t('historyByActor', { name: event.actor?.name ?? t('historyDefaultManager') })}</>}
+          {t('historyByActor', { name: event.actor?.name ?? t('historyDefaultManager') })}
           ){typeof d.lineCount === 'number'
               ? <> · {d.lineCount === 1
                   ? t('historyLineCountOne', { n: d.lineCount })

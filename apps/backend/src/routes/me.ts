@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { getCookie } from 'hono/cookie';
 import { MIN_PASSWORD_LEN, MAX_PASSWORD_LEN } from '@recycle-erp/shared';
 import { getDb } from '../db';
-import { hashPassword, sha256hex, verifyPassword } from '../auth';
+import { hashPassword, verifyPassword, verifyToken } from '../auth';
 import { revokeUserOAuthTokens } from '../oauth/tokens';
 import { validatePreferencePatch } from '../preferences';
 import { log } from '../lib/log';
@@ -183,14 +183,11 @@ me.post('/password', async (c) => {
   await recordAttempt(true);
 
   const newHash = await hashPassword(newPassword);
-  const rtRaw = getCookie(c, 'rt');
-  const currentFamilyId = rtRaw
-    ? (await sql<{ family_id: string }[]>`
-        SELECT family_id FROM refresh_tokens
-        WHERE token_hash = ${sha256hex(rtRaw)}
-        LIMIT 1
-      `)[0]?.family_id ?? null
-    : null;
+  // The caller's session is the refresh family its access token was minted
+  // with. The `rt` cookie itself never reaches this path (it is scoped to
+  // /api/auth), so reading it here found nothing and revoked the caller too.
+  // A token minted before the claim existed has no fid: every family goes.
+  const currentFamilyId = (await verifyToken(c.env, getCookie(c, 'at') ?? ''))?.fid ?? null;
 
   await sql.begin(async (tx) => {
     await tx`UPDATE users SET password_hash = ${newHash} WHERE id = ${u.id}`;

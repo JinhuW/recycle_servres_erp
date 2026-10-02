@@ -16,8 +16,8 @@ behaviour, edit the bullet here in the same PR and cite the new version.
 
 ## Roles and access
 
-Three roles: **manager**, **purchaser**, and unauthenticated **vendors** who
-reach a portal through a URL token.
+Two roles: **manager** and **purchaser**. The unauthenticated vendor bid
+portal was removed in v1.191.0; no bid had ever been placed through it.
 
 - Managers see everything. Purchasers see the buying side — dashboard, submit,
   history, shipping, clients, market, settings — and their own POs.
@@ -27,7 +27,7 @@ reach a portal through a URL token.
 - **The API enforces every manager-only view, not just the UI.** A
   non-manager's JSON never carries a manager-only key — not even as `null`,
   since the name alone would advertise the feature. Whole-endpoint manager
-  features (sell orders, customers, vendor bids, transfers, activity, members,
+  features (sell orders, customers, transfers, activity, members,
   bank and internal transactions, tracker, coordinator, connectors, FX rates,
   inventory export and analysis, a line's linked sell orders) answer 403;
   shared reads are scoped to the caller's own rows and leave the manager-only
@@ -49,9 +49,14 @@ reach a portal through a URL token.
   of five app loads open with a 401, a refresh and a retry before painting).
   No localStorage, no bearer tokens. Refresh-token reuse revokes the whole
   family.
+- **Changing your password keeps you signed in** (v1.191.0) and signs out every
+  other session. Until then it signed you out too, up to an hour later: the
+  `rt` cookie is scoped to `/api/auth`, so `/api/me/password` never saw it and
+  revoked every refresh family. The access token now names its family (`fid`).
 - Every mutating request carries `X-Requested-By: recycle-erp`; the CSRF guard
   drops it otherwise. Exempt: safe methods, `/api/health`, and `/api/public/*`
-  (vendor endpoints, which authenticate by URL token instead).
+  (the website intake and quote forms and the Shippo webhook, none of which
+  use cookies).
 - Managers can reassign a PO's purchaser until it is Done (v1.84.0) and submit
   a PO on behalf of one (v1.82.0). The owner can be any active member,
   managers included — the picker lists purchasers first, then managers
@@ -219,7 +224,11 @@ on to Sold once every line has sold (v1.164.0).
   ownership freeze, notes still append, line goods edits refuse
   — and the PO's lines read Done for every stock and sellable bucket. Managers
   and the owner are notified when a PO reaches it. The stage is a PO stage
-  only: it can't be written as a line status.
+  only: it can't be written as a line status. One field survives the lock:
+  a manager can still change a line's **sell price** from the desktop PO
+  page's line drawer while the PO is at Ready to Pay, so the commission
+  projection can be corrected during payment review; Save stays on the PO
+  (v1.191.1).
 - **Sold is Done with every line sold** (v1.164.0). Nobody picks it: a PO
   lands on it when a manager marks it Done and every line already sits at the
   `Sold` line status, or when a sell order reaching Done consumes the last
@@ -407,6 +416,13 @@ on to Sold once every line has sold (v1.164.0).
   (`paymentMethod` on POST / PATCH), logged, and cleared when the PO flips to
   Self-paid; `GET /api/orders/:id` reports `cashShotRequired` beside
   `txnRequired` and `chatShotRequired`.
+- **`payment` is `company` or `self`, at every door** (v1.191.0): create, draft,
+  PATCH and hand-off refuse anything else with a 400, and a CHECK constraint
+  backs it. Every proof rule above keys on one of the two values, so a third
+  string used to skip all of them.
+- **A Draft with a linked bank payment can be deleted** (v1.191.0). The delete
+  unlinks the payment first — it used to fail with a 500 — and leaves it free
+  to auto-link to the PO it really paid for.
 - **A PO cannot be submitted without a cost** (v1.148.0). Leaving Draft is
   refused while the order's goods cost is zero, through every door — the
   hand-off, a manager stage-jump, the carrier poll. The rule is per order,
@@ -485,10 +501,10 @@ on to Sold once every line has sold (v1.164.0).
 - **Archiving a PO takes its goods out of stock** (v1.137.0). Archive still
   hides the order from the default list and is still reversible, but it now
   also moves every non-Sold line to the `Archived` line status, which drops
-  it out of the inventory screens, the sellable picker, the vendor catalog
-  and bids, and the MCP search the same way Sold does. Since v1.138.2 the
+  it out of the inventory screens, the sellable picker and the MCP search the
+  same way Sold does. Since v1.138.2 the
   order's archived flag itself keeps its non-Sold lines out of all of those,
-  and out of sell orders, bids and transfers, whatever status a line holds —
+  and out of sell orders and transfers, whatever status a line holds —
   the pre-release backfill is finished by migration 0124, which pulls such
   lines off open sell orders the way the archive dialog does. Unarchive
   restores each line to the status it held. If a line sits on an open sell order
@@ -608,9 +624,14 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   screens do not.
 - Other-type stock can be filtered by Untyped (v1.49.0).
 - Spec fields on an inventory line are editable in place on desktop.
+  **The inventory editor saves whatever stage the PO is at** (v1.192.1):
+  sell price, status, condition, part #, health, RPM and specs land on a
+  Ready to Pay, Done or Sold PO too. Only qty and unit cost freeze from
+  Ready to Pay on. They show dimmed, with a line linking the PO and saying
+  to move it back to Reviewing. A save sends only the fields that changed.
 - **Committed sell orders reserve the units they name**, not the whole lot.
 
-## Sell orders and the vendor portal
+## Sell orders
 
 - **Inventory lots can be added to an existing sell order** (v1.175.0). The
   desktop Inventory selection bar and toolbar offer "Add to sell order" beside
@@ -669,9 +690,6 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   own warehouse, else its PO's — not the warehouse the line was saved with,
   so a lot transferred after it went on the order is picked where it sits
   (v1.189.1).
-- **Vendor bids**: vendors reach a tokenised portal with faceted catalog
-  filtering, submit bids, and managers review and promote them on a dedicated
-  screen. Promotion picks and validates a customer for general links.
 
 ## Shipping
 
@@ -901,6 +919,12 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
 Internal stock movement between warehouses, with a manifest view and its own
 status guard.
 
+- **Units a committed sell order holds cannot be moved** (v1.191.0). A
+  transfer may take only `qty − committed` from a line (committed = what
+  Shipped and Awaiting-payment sell orders name); more is refused with a 409
+  that says how many are free. Before, a partial move split reserved units into
+  a clone the sell order's Done never touched, leaving phantom stock.
+
 ## Market values
 
 Reference prices per part, readable and writable by managers, and reachable
@@ -925,8 +949,8 @@ over MCP.
   labels can't drift.
 - Loads as you scroll, with a pinned column head (v1.38.0), and "Open record"
   opens the record (v1.51.x).
-- Vendor bids and member/permission changes are **absent** — they write no
-  audit rows anywhere today.
+- Member/permission changes are **absent** — they write no audit rows
+  anywhere today.
 
 ## Dashboard
 
@@ -1039,6 +1063,12 @@ inventory search, sell-order draft creation.
   with high-res capture and client-side MozJPEG compression (v0.1.1).
 - Mobile QR/serial scanning: a button on the serial-number field (v1.83.0),
   single-shot — capture, confirm, auto-close (v1.83.2).
+- **AI read for damaged codes** (v1.192.0): the serial scanner on the phone
+  Submit form has a QR / AI switch (opens on QR). In AI mode a shutter sends
+  the framed shot to `POST /api/scan/serial`, the same OpenRouter vision model
+  as label OCR reads the *printed* S/N, and the read is shown with Use /
+  Retake — never auto-added. Nothing is stored. The Shipping tracking scan has
+  no switch.
 - **Serials are chips, in both shells** (v1.126.0): scanned, typed or pasted,
   each one deletes whole via its `×` or a two-step Backspace. The stored value
   is unchanged, and text typed but not yet chipped still counts toward the
@@ -1162,11 +1192,11 @@ inventory search, sell-order draft creation.
 > a deploy by setting `OPENROUTER_OCR_MODEL=google/gemini-2.5-flash` on
 > Railway; a non-OpenAI model gets the old request.
 
-## The three shells
+## The two shells
 
-One bundle, three lazy-loaded shells chosen in `App.tsx`: a vendor token in
-`/v/<token>` → `VendorApp`; viewport under 720px → `MobileApp`; else
-`DesktopApp`.
+One bundle, two lazy-loaded shells chosen in `App.tsx`: viewport under 720px →
+`MobileApp`; else `DesktopApp`. The third, the `/v/<token>` vendor portal, was
+removed in v1.191.0.
 
 - The desktop shell runs down to 720px. **Under 900px its sidebar folds to a
   64px icon rail** (v1.134.0) — brand mark, nav icons with their names on
@@ -1176,7 +1206,7 @@ One bundle, three lazy-loaded shells chosen in `App.tsx`: a vendor token in
   the Inventory ▸ Analysis strip, the phone tab bar and Home quick links, and
   every PO, sell-order or payment id shown on another page — the inventory
   lots table, the item page, payments rows and match suggestions, shipping,
-  vendor bids, the sell-order list, the client drawer — are anchors with the
+  the sell-order list, the client drawer — are anchors with the
   hash written out. A plain click still routes in place (the back button keeps
   working); ⌘/ctrl/middle-click and "Open in new tab" open the record in a
   new tab. The PO page's "Open payments" lands on the list focused on that

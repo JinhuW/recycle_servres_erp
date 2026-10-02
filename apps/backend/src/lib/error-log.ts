@@ -33,9 +33,9 @@ export interface ErrorRecord {
   context?: Record<string, unknown>;
 }
 
-// Three public routes carry a bearer-equivalent secret in the URL path: the
-// vendor portal's token (/api/public/vendor/<token>/…), the only gate to a
-// vendor's data; the Shippo webhook's secret (/api/public/shippo/<secret>),
+// Public routes carry a bearer-equivalent secret in the URL path: the retired
+// vendor portal's token (/api/public/vendor/<token>/…), still redacted because
+// old links outlive the route; the Shippo webhook's secret (/api/public/shippo/<secret>),
 // which is the whole credential — Shippo publishes no signature to verify
 // against; and the seller-fill link (/api/public/shipping/<token>), whose own
 // header says outright that the token in the URL *is* the credential. None may
@@ -65,8 +65,8 @@ const SENSITIVE_QUERY_KEYS = new Set([
 //     is the fragment. Recomposing origin+pathname+search drops it and collapses
 //     every report to "https://host/", destroying the field's whole point.
 //
-// Redacts the portal tokens the SPA carries in its own path (/v/<t>, /s/<t> —
-// see App.tsx and lib/vendor.ts) as well as the API routes above, and sweeps
+// Redacts the portal tokens a browser may still carry in the SPA path (/v/<t>
+// from the retired vendor portal, /s/<t>) as well as the API routes above, and sweeps
 // sensitive query keys anywhere in the string, including inside the fragment.
 // Stops at `#` too, unlike the path form: an href carries a fragment.
 const PUBLIC_SECRET_HREF_RE = new RegExp(String.raw`${PUBLIC_SECRET_PREFIX}[^/?#\s]+`, 'g');

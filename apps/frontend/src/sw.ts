@@ -9,11 +9,10 @@ declare const self: ServiceWorkerGlobalScope & {
 
 precacheAndRoute(self.__WB_MANIFEST);
 
-// SPA fallback to /index.html, but never for the vendor portal (short-lived
-// per-vendor tokens, must hit the network), backend surfaces, or the
+// SPA fallback to /index.html, but never for backend surfaces or the
 // share-target POST (handled as a fetch event below).
 const navRoute = new NavigationRoute(createHandlerBoundToURL('/index.html'), {
-  denylist: [/^\/v\//, /^\/api\//, /^\/oauth\//, /^\/\.well-known\//, /^\/share-target$/],
+  denylist: [/^\/api\//, /^\/oauth\//, /^\/\.well-known\//, /^\/share-target$/],
 });
 registerRoute(navRoute);
 

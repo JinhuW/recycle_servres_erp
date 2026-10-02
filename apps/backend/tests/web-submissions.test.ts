@@ -133,7 +133,7 @@ describe('POST /api/public/intake', () => {
   it('does not throttle the rest of /api/public', async () => {
     const addr = '198.51.100.8';
     for (let i = 0; i < 6; i++) {
-      const r = await api('GET', '/api/public/vendor/not-a-token', { headers: { 'X-Forwarded-For': addr } });
+      const r = await api('GET', '/api/public/shippo/not-a-secret', { headers: { 'X-Forwarded-For': addr } });
       expect(r.status).not.toBe(429);
     }
   });

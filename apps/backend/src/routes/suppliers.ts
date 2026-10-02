@@ -240,7 +240,7 @@ suppliers.get('/', async (c) => {
 
 // ── Suggestions ────────────────────────────────────────────────────────────
 // Registered before `/:id` so the literal segment is not swallowed by the
-// param route — the same trap customers.ts documents at its vendor-link PATCH.
+// param route.
 //
 // Sellers already visible in shipping/packages who have no client record and
 // have not been waved off. Buying a label deliberately creates nothing: this

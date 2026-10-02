@@ -135,5 +135,3 @@ export function useHandoffForm(init: HandoffInit, onDone: (r: { packageId: strin
     readiness, blockerKeys, canSubmit, busy, submit,
   };
 }
-
-export type HandoffForm = ReturnType<typeof useHandoffForm>;

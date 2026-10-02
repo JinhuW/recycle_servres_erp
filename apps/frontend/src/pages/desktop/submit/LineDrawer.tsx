@@ -32,7 +32,7 @@ import { useChipFill } from '../../../lib/useChipFill';
 export function LineDrawer({
   line, idx, onChange, onClose, onRemove, canRemove, editing = false,
   onConfirmLine, onConfirmError, duplicateOnLines, readOnly = false,
-  photoCtx, market, missingFields,
+  sellPriceEditable = false, photoCtx, market, missingFields,
 }: {
   line: Line;
   idx: number;
@@ -48,6 +48,8 @@ export function LineDrawer({
   // Locked order (Done, or a purchaser past their stage): the drawer still
   // opens so the line's full spec stays lookup-able, but nothing can change.
   readOnly?: boolean;
+  // Sell price stays live inside a readOnly drawer (a manager at Ready to Pay).
+  sellPriceEditable?: boolean;
   // Recorded market value for this line's part number, if the parent looked
   // one up. Optional so surfaces that don't fetch it still render.
   market?: ResolvedMarketValue | null;
@@ -107,6 +109,21 @@ export function LineDrawer({
   // fieldset wrapping the form doesn't inert it the way it does real inputs.
   const [hadScanAtMount] = useState(!!scanUrl);
   const showDropzone = aiCaptureEnabled(cat) && !readOnly && (!editing || !hadScanAtMount);
+  const sellOutside = readOnly && sellPriceEditable;
+  const sellField = (
+    <div className="field">
+      <label className="label">{t('sellUnit')}</label>
+      <input
+        className="input mono"
+        type="number"
+        step="0.01"
+        min={0}
+        value={line.sellPrice ?? ''}
+        onChange={e => set({ sellPrice: e.target.value })}
+        placeholder="0.00"
+      />
+    </div>
+  );
   const aiFileInputRef = useRef<HTMLInputElement | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiDragOver, setAiDragOver] = useState(false);
@@ -605,18 +622,7 @@ export function LineDrawer({
                   placeholder="0.00"
                 />
               </div>
-              <div className="field">
-                <label className="label">{t('sellUnit')}</label>
-                <input
-                  className="input mono"
-                  type="number"
-                  step="0.01"
-                  min={0}
-                  value={line.sellPrice ?? ''}
-                  onChange={e => set({ sellPrice: e.target.value })}
-                  placeholder="0.00"
-                />
-              </div>
+              {!sellOutside && sellField}
             </div>
 
             {/* What the recorded market says, while the buy can still change.
@@ -643,6 +649,15 @@ export function LineDrawer({
               </div>
             )}
           </fieldset>
+
+          {/* A disabled fieldset disables every descendant, so the one field
+              that outlives the lock has to sit outside it. */}
+          {sellOutside && (
+            <div style={{ padding: '0 16px 16px', display: 'grid', gap: 6 }}>
+              {sellField}
+              <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>{t('sellPriceStillEditable')}</div>
+            </div>
+          )}
 
           {/* Named where it can be closed, and for as long as it is true: a
               toast that names eight fields and then clears itself leaves the

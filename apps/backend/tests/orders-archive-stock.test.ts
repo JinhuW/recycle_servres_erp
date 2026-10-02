@@ -530,27 +530,18 @@ describe('an archived PO is out of stock whatever its lines say', () => {
     expect(sellable.body.items).toEqual([]);
   });
 
-  it('drops it from Analysis and the vendor catalog', async () => {
+  it('drops it from Analysis', async () => {
     const { token: pur } = await loginAs(MARCUS);
     const { token: mgr } = await loginAs(ALEX);
-    const { id, lineIds } = await createReviewing(pur, mgr);
-    const customer = await api<{ id: string }>('POST', '/api/customers', { token: mgr, body: { name: 'Vendor Co', shortName: 'VendCo' } });
-    const link = await api<{ token: string }>('POST', `/api/customers/${customer.body.id}/vendor-link`, { token: mgr });
-    const catalogIds = async () => {
-      const r = await api<{ groups: { items: { id: string }[] }[] }>('GET', `/api/public/vendor/${link.body.token}/catalog`);
-      return r.body.groups.flatMap(g => g.items.map(i => i.id));
-    };
+    const { id } = await createReviewing(pur, mgr);
     type Totals = { totals: { lines: number; units: number } };
 
-    expect(await catalogIds()).toEqual(expect.arrayContaining(lineIds));
     const before = await api<Totals>('GET', '/api/inventory/analysis', { token: mgr });
     await getTestDb()`UPDATE orders SET archived_at = NOW() WHERE id = ${id}`;
     const after = await api<Totals>('GET', '/api/inventory/analysis', { token: mgr });
 
     expect(after.body.totals.lines).toBe(before.body.totals.lines - 2);
     expect(after.body.totals.units).toBe(before.body.totals.units - 6);
-    const catalog = await catalogIds();
-    for (const l of lineIds) expect(catalog).not.toContain(l);
   });
 
   it('refuses to sell or transfer it', async () => {

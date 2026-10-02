@@ -16,7 +16,7 @@ import { UNTYPED_ITEM, normSellPrice, SPEC_FIELD_TO_DB_COL } from '@recycle-erp/
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { settleSoldTx } from '../services/orderSold';
 import type { Env, User } from '../types';
-import { isClosedBook, LINE_STATUS_FOR_LIFECYCLE, ARCHIVED_LINE_STATUS } from '../services/orderAdvance';
+import { isClosedBook, LINE_STATUS_FOR_LIFECYCLE, ARCHIVED_LINE_STATUS, REVIEWED_LIFECYCLES } from '../services/orderAdvance';
 
 const LINE_STATUSES = new Set([...Object.values(LINE_STATUS_FOR_LIFECYCLE), 'Sold']);
 
@@ -1013,6 +1013,9 @@ inventory.get('/:id', async (c) => {
   const row = (await sql`
     SELECT l.*, l.unit_cost::float AS unit_cost, l.sell_price::float AS sell_price,
            o.id AS order_id, o.user_id,
+           -- The editor locks qty/unit cost on this, which PATCH refuses past
+           -- review. A flag, not the lifecycle, so a purchaser never reads 'sold'.
+           o.lifecycle = ANY(${REVIEWED_LIFECYCLES}::text[]) AS order_closed_book,
            COALESCE(l.warehouse_id, o.warehouse_id) AS warehouse_id,
            u.name AS user_name, u.initials AS user_initials,
            w.short AS warehouse_short, w.region AS warehouse_region
@@ -1406,6 +1409,7 @@ inventory.post('/transfer', async (c) => {
     | { kind: 'notSellable'; id: string; status: string }
     | { kind: 'archived'; id: string }
     | { kind: 'overQty'; id: string; have: number }
+    | { kind: 'committed'; id: string; free: number }
     | { kind: 'alreadyThere'; id: string }
     | { kind: 'ok'; transferOrderId: string; result: ResultLine[] };
 
@@ -1424,11 +1428,27 @@ inventory.post('/transfer', async (c) => {
       FROM order_lines l
       JOIN orders o ON o.id = l.order_id
       WHERE l.id = ANY(${ids}::uuid[])
+      ORDER BY l.id
       FOR UPDATE OF l
     `) as unknown as SourceRow[];
 
     if (sources.length !== reqLines.length) return { kind: 'missing' };
     const byId = new Map(sources.map((s) => [s.id, s]));
+
+    // Units a committed sell order names are spoken for: moving them would
+    // leave the order consuming a line that no longer holds them while the
+    // clone carries them back into stock. Read under the row locks above —
+    // promotion locks the same rows, so no claim can land in between.
+    const committed = new Map(
+      (await tx<{ id: string; qty: number }[]>`
+        SELECT sol.inventory_id AS id, SUM(sol.qty)::int AS qty
+        FROM sell_order_lines sol
+        JOIN sell_orders so ON so.id = sol.sell_order_id
+        WHERE sol.inventory_id = ANY(${ids}::uuid[])
+          AND so.status = ANY(${committedSellStatuses()}::text[])
+        GROUP BY sol.inventory_id
+      `).map((r) => [r.id, r.qty]),
+    );
 
     // Validate every line before touching anything. One bad line aborts the
     // whole submission — partial transfers across the batch are confusing.
@@ -1440,6 +1460,8 @@ inventory.post('/transfer', async (c) => {
       }
       if (s.archived_at !== null) return { kind: 'archived', id: r.id };
       if (r.qty > s.qty) return { kind: 'overQty', id: r.id, have: s.qty };
+      const free = s.qty - (committed.get(r.id) ?? 0);
+      if (r.qty > free) return { kind: 'committed', id: r.id, free };
       if (s.effective_wh === toWarehouseId) return { kind: 'alreadyThere', id: r.id };
     }
 
@@ -1531,6 +1553,9 @@ inventory.post('/transfer', async (c) => {
   }
   if (outcome.kind === 'archived') return c.json({ error: `line ${outcome.id} belongs to an archived order` }, 400);
   if (outcome.kind === 'overQty') return c.json({ error: `line ${outcome.id} only has ${outcome.have} units` }, 400);
+  if (outcome.kind === 'committed') {
+    return c.json({ error: `line ${outcome.id} has only ${outcome.free} units not committed to a sell order` }, 409);
+  }
   if (outcome.kind === 'alreadyThere') return c.json({ error: `line ${outcome.id} is already in ${toWarehouseId}` }, 400);
   return c.json({ ok: true, transferOrderId: outcome.transferOrderId, lines: outcome.result });
 });

@@ -196,6 +196,52 @@ describe('the book closes at Ready to Pay', () => {
     expect(qty.status).toBe(409);
     expect(qty.body.error).toMatch(/past review/i);
   });
+
+  // The desktop PO page writes a Ready to Pay sell-price correction through
+  // this route: PATCH /api/orders refuses every line field once the book closes.
+  it('a manager can still reprice a line; the purchaser cannot', async () => {
+    const { id, alex, marcus } = await orderAt('ready_to_pay');
+    const line = (await getOrder(alex.token, id)).lines[0];
+    expect((await api('PATCH', `/api/inventory/${line.id}`, { token: marcus.token, body: { sellPrice: 55 } })).status).toBe(403);
+    expect((await api('PATCH', `/api/inventory/${line.id}`, { token: alex.token, body: { sellPrice: 55 } })).status).toBe(200);
+    const after = await api<{ order: { lifecycle: string; lines: { id: string; sellPrice: number | null }[] } }>(
+      'GET', `/api/orders/${id}`, { token: alex.token });
+    expect(after.body.order.lifecycle).toBe('ready_to_pay');
+    expect(after.body.order.lines.find(l => l.id === line.id)?.sellPrice).toBe(55);
+  });
+
+  // The inventory editor sends only the fields that moved, so everything but
+  // the goods pair lands on a reviewed PO.
+  it('non-goods line edits land on a Done PO, and on it once Sold', async () => {
+    const { id, alex } = await orderAt('done');
+    const line = (await getOrder(alex.token, id)).lines[0];
+    const patch = (body: Record<string, unknown>) =>
+      api('PATCH', `/api/inventory/${line.id}`, { token: alex.token, body });
+    const item = async () => (await api<{ item: Record<string, unknown> }>(
+      'GET', `/api/inventory/${line.id}`, { token: alex.token })).body.item;
+
+    expect((await patch({ sellPrice: 45, condition: 'Used', partNumber: 'M393A2K40BB1-CRC', brand: 'Samsung' })).status)
+      .toBe(200);
+    expect(await item()).toMatchObject({
+      sell_price: 45, condition: 'Used', part_number: 'M393A2K40BB1-CRC', brand: 'Samsung',
+    });
+
+    // A hand-set Sold on the only line settles the PO; a reprice still lands.
+    expect((await patch({ status: 'Sold' })).status).toBe(200);
+    expect((await getOrder(alex.token, id)).lifecycle).toBe('sold');
+    expect((await patch({ sellPrice: 50 })).status).toBe(200);
+    expect(await item()).toMatchObject({ sell_price: 50, order_closed_book: true });
+  });
+
+  it('the line read flags a closed book from Ready to Pay on', async () => {
+    for (const [stage, closed] of [['reviewing', false], ['ready_to_pay', true], ['done', true]] as const) {
+      const { id, alex } = await orderAt(stage);
+      const line = (await getOrder(alex.token, id)).lines[0];
+      const r = await api<{ item: { order_closed_book: boolean } }>(
+        'GET', `/api/inventory/${line.id}`, { token: alex.token });
+      expect(r.body.item.order_closed_book, stage).toBe(closed);
+    }
+  });
 });
 
 describe('line status stays the inventory vocabulary', () => {

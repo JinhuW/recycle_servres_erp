@@ -2,15 +2,15 @@
 
 Inventory ERP for a server-parts recycler. Field purchasers scan part labels
 with their phone, the AI fills the spec sheet, and the order flows through
-warehouse intake → inventory → sell orders → vendor bidding. One backend
-serves three React shells out of the same SPA bundle.
+warehouse intake → inventory → sell orders. One backend serves two React
+shells out of the same SPA bundle.
 
 ## Repository layout
 
 ```
 apps/
   backend/         Node + Hono + Postgres API.  Mounted under /api/*.
-  frontend/        Vite + React SPA.  Mobile / Desktop / Vendor shells.
+  frontend/        Vite + React SPA.  Mobile / Desktop shells.
 packages/
   shared/          Types and helpers shared across the workspace.
 infra/
@@ -21,7 +21,7 @@ docker-compose.yml Production-shaped stack (postgres + backend + Caddy/SPA).
 docker-compose.override.yml  Local dev only — re-publishes Postgres on 127.0.0.1.
 ```
 
-## The three shells
+## The two shells
 
 Mounted from one bundle in `apps/frontend/src/App.tsx` (lazy-imported per
 shell, so each ships its own chunk):
@@ -31,11 +31,8 @@ shell, so each ships its own chunk):
   Language sheet.
 - **Desktop (≥ 720)** — Manager UI with sidebar: Dashboard, Purchase Orders,
   Inventory (grouped-by-part-number with per-PO drilldown, or flat),
-  Inventory Transfers, Market, Sell Orders, Vendor Bids, Settings
+  Inventory Transfers, Market, Sell Orders, Settings
   (Members / Customers / Categories / Warehouses / General).
-- **Vendor portal (`/v/<token>`)** — Public, token-scoped pages: browse the
-  catalog the manager has published, place bids, view your offers. No
-  account, no cookie auth — token in the URL.
 
 ## Stack
 
@@ -111,7 +108,8 @@ must not ship to prod.
   a revoked token revokes the whole family.
 - CSRF: every state-changing request must carry `X-Requested-By: recycle-erp`
   (see `apps/backend/src/csrf.ts`).  Safe methods, `/api/health`, and the
-  unauthenticated `/api/public/*` vendor endpoints are exempt.
+  unauthenticated `/api/public/*` routes (website forms, Shippo webhook) are
+  exempt.
 
 ## Market-value MCP
 

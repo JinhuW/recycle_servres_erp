@@ -453,8 +453,8 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
 }
 
 // ─── Currency picker ─────────────────────────────────────────────────────────
-// Segmented USD/CNY control. Mirrors the vendor portal's bid-currency radio;
-// shared by the new-order builder and the edit modal.
+// Segmented USD/CNY control, shared by the new-order builder and the edit
+// modal.
 export function CurrencyPicker({
   value, onChange, t, disabled,
 }: {

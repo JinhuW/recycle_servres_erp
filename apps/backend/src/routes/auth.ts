@@ -88,8 +88,8 @@ auth.post('/login', async (c) => {
 
   await sql`UPDATE users SET last_seen_at = NOW() WHERE id = ${u.id}`;
 
-  const token = await signToken(c.env, { id: u.id, email: u.email, role: u.role });
-  const { raw: refreshRaw } = await issueRefresh(sql, u.id);
+  const { raw: refreshRaw, familyId } = await issueRefresh(sql, u.id);
+  const token = await signToken(c.env, { id: u.id, email: u.email, role: u.role }, familyId);
   setAuthCookies(c, c.env as Env, token, refreshRaw);
   return c.json({
     user: {
@@ -140,7 +140,7 @@ auth.post('/refresh', async (c) => {
     return c.json({ error: 'invalid refresh' }, 401);
   }
 
-  const at = await signToken(c.env, { id: u.id, email: u.email, role: u.role });
+  const at = await signToken(c.env, { id: u.id, email: u.email, role: u.role }, res.familyId);
   setAuthCookies(c, c.env as Env, at, res.raw);
   return c.json({ ok: true });
 });

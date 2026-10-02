@@ -1,6 +1,6 @@
-// Pure helpers for part-number duplicate detection on the submit / edit /
-// vendor-bid pages. Shared across the desktop, mobile, and vendor shells so
-// no shell chunk has to pull in another to get the rule.
+// Pure helpers for part-number duplicate detection on the submit / edit
+// pages. Kept out of any shell module so no shell chunk has to pull in another
+// to get the rule.
 import { canonicalPartNumber } from './format';
 
 // Returns the 1-based line number of the first existing line whose part

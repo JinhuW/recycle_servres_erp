@@ -88,7 +88,7 @@ export function lifecyclesForLabel(label: string, role: Role): string[] {
 // stock and sellable bucket the same way a sold lot does: by status. Two
 // authorities, on purpose: the status is what the archive cascade writes and
 // unarchive restores, and every stock reader (inventory list and analysis,
-// sellable picker, vendor catalog, bid submit and availability) also joins
+// sellable picker, sell-order line validation) also joins
 // `orders` and requires `archived_at IS NULL`, because status alone is not
 // airtight — 0122 legitimately leaves a transfer-stranded line at In Transit
 // on an archived PO. The readers spell the join out rather than share a

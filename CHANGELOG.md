@@ -17,6 +17,97 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.192.1] - 2026-10-01
+
+Saving a line from the desktop inventory editor works again on a PO at Ready
+to Pay, Done or Sold (RS-136). The editor sent every field on every save,
+changed or not. The route reads a present `qty` or `unitCost` as a goods edit,
+which is refused once the book closes. So a sell-price, condition or spec edit
+on a reviewed PO came back 409, "past review", and nothing saved; in prod this
+hit a Done PO three times in a row. The editor now sends only the fields that
+changed (`lib/inventoryEditPatch.ts`, which compares qty and unit cost as
+numbers). The same over-send also tripped the open-sell-order 409 on a
+spec-only edit, and that stops too. Qty and unit cost stay frozen from Ready to
+Pay on. `GET /api/inventory/:id` now returns `order_closed_book`, which the
+editor uses to dim those two inputs and link the PO with a "move it back to
+Reviewing" hint.
+
+## [1.192.0] - 2026-10-01
+
+The phone serial scanner can read a printed serial with AI when the module's
+QR / DataMatrix is too damaged to decode (RS-132). A QR ↔ AI switch sits above
+the scanner's bottom bar; AI mode swaps the live decode for a shutter that
+sends the framed crop to a new `POST /api/scan/serial`, which runs the
+existing OpenRouter vision model (same key, stub fallback and rate limit as
+label and PayPal OCR) with a serial-only prompt and a normaliser that sheds an
+`SN:` label without eating a serial that starts with "SN". Because a model can
+misread, the result waits on Use / Retake instead of auto-adding, and the
+duplicate check ignores case. The shot is not stored.
+
+## [1.191.1] - 2026-10-01
+
+A manager can adjust a line's sell price on a PO at Ready to Pay (RS-131).
+That stage closed the whole desktop PO page, sell price included, though sell
+price is the commission projection and payment review is exactly when a
+manager corrects it. The line drawer now keeps Sell / unit live for a manager
+(real role) at Ready to Pay while every other field stays frozen; Save writes
+the changed prices through the inventory line endpoint — which already took a
+closed-book sell price — and stays on the PO so the new commission shows.
+Purchasers, Done/Sold and archived POs remain fully locked.
+
+## [1.191.0] - 2026-10-01
+
+The first batch of fixes from the 2026-10-01 full code review (RS-130): its
+three Critical findings, four of the smaller Major ones, and removal of the
+vendor bid portal.
+
+### Removed
+
+- **The vendor bid portal.** The `/v/<token>` app, `/api/public/vendor/*`,
+  `/api/vendor-bids`, the customer vendor-link endpoints and the desktop Vendor
+  Bids page are gone. Migration 0142 drops `vendor_links`, `vendor_bids` and
+  `vendor_bid_lines`. Production had three links, the newest last opened on
+  2026-08-04, and no bid had ever been placed. The general link had also shown
+  every vendor all the other vendors' bids. Dropping the tables also removes a
+  foreign key that blocked deleting any PO line a bid had once named. The
+  sell-order **bid sheet** (price template and import) is a separate feature
+  and is unchanged.
+- **The unused `/api/attachments` route** and its empty `attachments` table.
+  Status-change evidence and line photos have always had their own tables.
+
+### Fixed
+
+- **A transfer can no longer move units a committed sell order holds.** It used
+  to check only the line's quantity, so a partial move split reserved units
+  into a clone. When the sell order went Done, that clone stayed listed as
+  stock that wasn't physically there, and it could be sold a second time. The
+  transfer now refuses more than `qty − committed` with a 409.
+- **The `metrics` database role can no longer log in.** Migration 0042 had
+  created it with the password `metrics` on every cluster, including
+  production, whose Postgres is reachable through a public TCP proxy. Prod was
+  locked by hand on release day, and 0141 does the same everywhere else. The
+  compose `postgres-exporter` is now opt-in (`--profile metrics`) and needs
+  login turned on deliberately.
+- **`next` after login can't leave the site.** `?next=/%09/evil.com` got past
+  the old prefix check, and browsers strip the tab and land on `//evil.com`.
+  `readSafeNext` now rejects control characters and anything that resolves to
+  another origin.
+- **`payment` must be `company` or `self`.** Create, draft, PATCH and hand-off
+  never checked it. Every proof-of-payment rule tests for one of those two
+  values, so any other string skipped all of them. Migration 0143 adds the
+  CHECK; production held only the two valid values.
+- **A Draft with a linked bank payment can be deleted.** The foreign key's
+  `SET NULL` cleared only `order_id` and broke the paired link CHECKs, so the
+  delete failed with a 500. Four production drafts were stuck this way.
+- **Changing your password no longer signs you out.** The `rt` cookie never
+  reaches `/api/me/password`, so every session was revoked, including your
+  own. Access tokens now carry their refresh family (`fid`). Tokens issued
+  before this release don't, so for up to an hour after the deploy a password
+  change still revokes everything, as it did before.
+- A CHECK violation in a PO line edit now returns 400 "A line value is out of
+  range". It used to be reported as "referenced by a vendor bid". Other
+  constraint errors there now surface as 500s rather than that misleading 409.
+
 ## [1.190.0] - 2026-10-01
 
 ### Changed
