@@ -2,13 +2,13 @@
 id: RS-134
 title: "Code-review fixes batch 2: every remaining Minor finding"
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-01
 reporter: jinhu
 branch: fix/review-minors
-pr:
-version:
+pr: "#451"
+version: 1.193.0
 related: [RS-130]
 ---
 
@@ -53,14 +53,14 @@ backup CSV, the empty `.gitkeep`); the other 38 are this ticket. They cluster as
 
 ## Acceptance criteria
 
-- [ ] Every item in the approved plan (`~/.claude/plans/optimized-watching-map.md`)
+- [x] Every item in the approved plan (`~/.claude/plans/optimized-watching-map.md`)
       is fixed or explicitly recorded as decided-against with a reason.
-- [ ] Archiving a Shipped or Awaiting-payment sell order is refused.
-- [ ] A password change or reset makes older access tokens 401; the caller of a
+- [x] Archiving a Shipped or Awaiting-payment sell order is refused.
+- [x] A password change or reset makes older access tokens 401; the caller of a
       self change stays signed in through one refresh.
-- [ ] Changing or clearing a PO's PayPal id unlinks the bank row linked through
+- [x] Changing or clearing a PO's PayPal id unlinks the bank row linked through
       the old id, unless a manager made that link.
-- [ ] Full backend and frontend suites pass; CI runs on Postgres 18.
+- [x] Full backend and frontend suites pass; CI runs on Postgres 18.
 
 ## Out of scope
 
