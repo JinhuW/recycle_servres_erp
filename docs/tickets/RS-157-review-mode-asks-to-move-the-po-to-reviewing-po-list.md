@@ -2,12 +2,12 @@
 id: RS-157
 title: Review mode asks to move the PO to Reviewing; PO list opens it
 type: feature
-status: in-review
+status: done
 priority: P2
 created: 2026-10-02
 reporter: jinhu
 branch: feat/review-mode-prompt
-pr:
+pr: "#478"
 version: 1.201.0
 related: [RS-124]
 ---
