@@ -2,13 +2,13 @@
 id: RS-152
 title: Sell order By PO shows the source PO line as a PO #n badge
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-02
 reporter: jinhu
 branch: feat/sell-order-po-line-badge
-pr:
-version:
+pr: "#469"
+version: 1.198.2
 related: [RS-149, RS-145]
 ---
 
@@ -38,14 +38,14 @@ the `#` column.
 
 ## Acceptance criteria
 
-- [ ] The sell order page has no "ID in PO" column, in view or edit mode, in
+- [x] The sell order page has no "ID in PO" column, in view or edit mode, in
       either view.
-- [ ] By PO: a line from a PO shows a grey `PO #3` pill after its item name.
+- [x] By PO: a line from a PO shows a grey `PO #3` pill after its item name.
       Hovering it reads "Line 3 on PO-1432". A hand-typed line has no pill.
-- [ ] By warehouse: the line's detail row reads `From PO-1432 #3`, as in
+- [x] By warehouse: the line's detail row reads `From PO-1432 #3`, as in
       v1.196.0.
-- [ ] Lines picked in edit mode show the pill before saving.
-- [ ] The Packing list by PO spreadsheet keeps its "ID in PO" column.
+- [x] Lines picked in edit mode show the pill before saving.
+- [x] The Packing list by PO spreadsheet keeps its "ID in PO" column.
 
 ## Out of scope
 
