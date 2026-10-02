@@ -17,6 +17,30 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.194.2] - 2026-10-02
+
+Edge hardening (RS-141), batch 3a of the remaining code-review work.
+
+### Fixed
+
+- **The backend now receives the real client IP.** Every recorded login
+  attempt in the last month came from one of 24 Cloudflare egress addresses
+  shared by every user. The Worker does set `X-Forwarded-For` from
+  `CF-Connecting-IP`, but Railway's edge rewrites that header, the same trap
+  behind `X-Public-Host`. The Worker now also sends a private `X-Client-IP`
+  that passes through intact. The backend's per-IP limits move to it in the
+  next batch; until then they keep keying on Cloudflare's servers.
+- **Pages and assets carry browser security headers again.** The move from Caddy
+  to the Cloudflare Worker had dropped all of them. They are now
+  `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy: same-origin` (keeping
+  `/authorize?req=…` out of other sites' logs), and a `Permissions-Policy` that
+  allows the camera on this origin only. A Content-Security-Policy ships as
+  **report-only** for this release. Enforced against a local build, it allowed
+  every flow tried: login, all desktop pages, the xlsx download, both WASM
+  decoders, R2 images, the desk-scanner bridge, the phone shell and a
+  service-worker-served reload. It blocked a fetch to a foreign origin.
+  `index.html` gains a `csp-rev` marker, because the service worker caches
+  headers alongside its precache and refreshes only when the file changes.
 ## [1.194.1] - 2026-10-02
 
 Fixes from the code review that cleared v1.193.0 and v1.194.0 for production
