@@ -2,13 +2,13 @@
 id: RS-138
 title: Sell order full page, by-PO/by-warehouse line switch, spec tags
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-01
 reporter: jinhu
 branch: feat/sell-order-page
-pr:
-version:
+pr: "#453"
+version: 1.194.0
 related: []
 ---
 
