@@ -17,6 +17,32 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.197.3] - 2026-10-02
+
+The source PO line number gets its own "ID in PO" column, on the sell order page
+and in the Packing list by PO (RS-149).
+
+### Changed
+
+- **"ID in PO" replaces the `#` column on the sell order page.** In 1.196.0, By
+  PO showed a line's number on its source PO in a leading `#` column. That is
+  where a table's own row number sits, and when an order takes lines 1, 2, 3 of
+  a PO the column read exactly like row numbering. The number now has an "ID in
+  PO" column right after Item, in both views and in view and edit mode. By
+  warehouse gets the column too, so its detail row goes back to "From PO-1432".
+  By PO's No PO card still has no column.
+
+### Added
+
+- **"ID in PO" in the Packing list by PO spreadsheet.** Every by-PO tab has an
+  ID in PO column after Part #, so a picker can match a row back to the PO page.
+  A row that folds several lots of the same PO lists their IDs ascending
+  (`1, 3`).
+  - Only the by-PO aggregation collects IDs. The bid sheet and the
+    per-warehouse packing list fold several POs into one row, where a line
+    number means nothing.
+  - The price import still can't read a pack tab, which has no price header.
+
 ## [1.197.1] - 2026-10-02
 
 Line validation and field clears (RS-147), batch 6a of the remaining
