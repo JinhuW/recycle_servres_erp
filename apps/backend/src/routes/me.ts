@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { getCookie } from 'hono/cookie';
 import { MIN_PASSWORD_LEN, MAX_PASSWORD_LEN } from '@recycle-erp/shared';
 import { getDb } from '../db';
-import { hashPassword, verifyPassword, verifyToken } from '../auth';
+import { epochSeconds, hashPassword, verifyPassword, verifyToken } from '../auth';
 import { revokeUserOAuthTokens } from '../oauth/tokens';
 import { validatePreferencePatch } from '../preferences';
 import { log } from '../lib/log';
@@ -116,8 +116,10 @@ me.patch('/preferences', async (c) => {
 
 // POST /api/me/password — change the signed-in user's own password.
 // Verifies currentPassword against the live hash, writes the new hash, and
-// revokes every OTHER refresh-token family (this session stays alive so the
-// user doesn't get bounced to login). Failed currentPassword attempts are
+// revokes every OTHER refresh-token family. Every access token issued so far
+// stops working, this session's included; this session keeps its refresh
+// family, so its next request 401s once and refreshes instead of bouncing the
+// user to login. Failed currentPassword attempts are
 // throttled through the same durable login_attempts table the login route
 // uses, so the defence survives restarts and is shared across replicas
 // (an in-memory map would be per-process and reset on every deploy).
@@ -190,7 +192,11 @@ me.post('/password', async (c) => {
   const currentFamilyId = (await verifyToken(c.env, getCookie(c, 'at') ?? ''))?.fid ?? null;
 
   await sql.begin(async (tx) => {
-    await tx`UPDATE users SET password_hash = ${newHash} WHERE id = ${u.id}`;
+    // No fresh cookies are set here: setAuthCookies also rewrites `rt`, which
+    // this path never sees, so the caller is left to refresh into a new token.
+    await tx`UPDATE users
+             SET password_hash = ${newHash}, tokens_valid_after = to_timestamp(${epochSeconds()})
+             WHERE id = ${u.id}`;
     if (currentFamilyId) {
       await tx`UPDATE refresh_tokens SET revoked_at = NOW()
                WHERE user_id = ${u.id} AND revoked_at IS NULL

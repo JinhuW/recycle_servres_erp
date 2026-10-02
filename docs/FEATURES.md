@@ -53,6 +53,11 @@ portal was removed in v1.191.0; no bid had ever been placed through it.
   other session. Until then it signed you out too, up to an hour later: the
   `rt` cookie is scoped to `/api/auth`, so `/api/me/password` never saw it and
   revoked every refresh family. The access token now names its family (`fid`).
+- **A password change or reset ends every other session at once** (v1.193.0).
+  `users.tokens_valid_after` is stamped, and any cookie access token or OAuth
+  bearer token issued before it is refused (they used to keep working for up to
+  60 and 15 minutes). The person changing their own password re-authenticates
+  through one silent refresh.
 - Every mutating request carries `X-Requested-By: recycle-erp`; the CSRF guard
   drops it otherwise. Exempt: safe methods, `/api/health`, and `/api/public/*`
   (the website intake and quote forms and the Shippo webhook, none of which
@@ -633,6 +638,14 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
 
 ## Sell orders
 
+- **Only a Done or Closed sell order can be archived** (v1.193.0). Shipped and
+  Awaiting-payment orders still reserve their units, and an archived order
+  leaves the inbox, so archiving one would hide stock it holds; the API refuses
+  it and the Archive button is offered only on Done and Closed. An archived
+  order can't be moved back into either committed status.
+- **The add-inventory picker says when it is cut off** (v1.193.0): it shows the
+  first 200 sellable matches and asks for a narrower search when there are more
+  (`/sell-orders/sellable` returns `hasMore`).
 - **Inventory lots can be added to an existing sell order** (v1.175.0). The
   desktop Inventory selection bar and toolbar offer "Add to sell order" beside
   Create sell order. It lists the open orders (Draft, Shipped, Awaiting
@@ -914,6 +927,14 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
 > the permission is the only cause an admin can act on, so a timeout that
 > claimed to be one sent them to fix a setting that was already right.
 
+> **A partial sync failure shows too** (v1.193.0). When part of a source fails
+> while the rest syncs — Mercury's card list, or one card — the account keeps
+> `sync_error` and the Payments header shows a red *"<source> didn't sync"*
+> chip; `/stats` reports the stalest account per source rather than the
+> freshest, so a healthy checking account no longer hides a stale card. Each
+> account is also re-read 60 days back once a week so a late reversal is seen,
+> and a row pending for over 120 days stops holding the fetch window open.
+
 ## Transfers
 
 Internal stock movement between warehouses, with a manifest view and its own
@@ -924,6 +945,10 @@ status guard.
   Shipped and Awaiting-payment sell orders name); more is refused with a 409
   that says how many are free. Before, a partial move split reserved units into
   a clone the sell order's Done never touched, leaving phantom stock.
+- **Receiving a transfer restores each line's own status** (v1.193.0) — the
+  `prior_status` its transfer recorded, Reviewing or Done — instead of
+  promoting every line to Done; reopen accepts either. The transfer-orders list
+  pages by cursor (`?limit=&cursor=`) instead of stopping at 200.
 
 ## Market values
 

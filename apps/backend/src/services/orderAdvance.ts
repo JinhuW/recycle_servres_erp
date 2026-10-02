@@ -108,6 +108,7 @@ export type AdvanceOutcome =
   | { kind: 'finalStage' }
   | { kind: 'soldIsAutomatic' }
   | { kind: 'alreadySold' }
+  | { kind: 'sameStage'; lifecycle: string }
   | { kind: 'committedLines'; offendingLineIds: string[]; sellOrderIds: string[] }
   | { kind: 'transferClaimed'; offendingLineIds: string[] }
   | LeaveDraftBlocker
@@ -448,6 +449,10 @@ export async function advanceOrderTx(
   // A sold order asked for Done is already there; reopening means Reviewing
   // or Ready to Pay, and the way back to Done re-settles it.
   if (cur.lifecycle === 'sold' && nextStageId === 'done') return { kind: 'alreadySold' };
+  // A jump to where the order already is moves nothing, but would still write
+  // an `advanced` event for a transition that never happened — the stale page
+  // that sent it is better told the order has moved.
+  if (nextStageId === cur.lifecycle) return { kind: 'sameStage', lifecycle: cur.lifecycle };
   // Purchaser can only advance Draft → in_transit — but ANY
   // purchaser may, not just the PO's creator: whoever handles the goods
   // submits the order. Every other transition stays manager-only.

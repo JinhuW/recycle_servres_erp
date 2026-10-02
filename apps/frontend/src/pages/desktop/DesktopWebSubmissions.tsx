@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { api } from '../../lib/api';
 import { useT } from '../../lib/i18n';
 import { match, navigate, useRoute } from '../../lib/route';
@@ -92,6 +92,11 @@ function SubmissionList({ onToast }: Props) {
   const [counts, setCounts] = useState<Record<Status, number> | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  // A filter change bumps reqId, so a "load more" still in flight from the old
+  // filters can't append its page under the new ones.  The ref, not the state,
+  // is the in-flight guard: a double click lands before the re-render.
+  const reqId = useRef(0);
+  const moreInFlight = useRef(false);
 
   // The search box settles before it queries.
   useEffect(() => {
@@ -110,7 +115,11 @@ function SubmissionList({ onToast }: Props) {
 
   useEffect(() => {
     let live = true;
+    ++reqId.current;
+    moreInFlight.current = false;
+    setLoadingMore(false);
     setItems(null);
+    setCursor(null);
     api.get<ListResponse>(url(null))
       .then(r => {
         if (!live) return;
@@ -123,16 +132,22 @@ function SubmissionList({ onToast }: Props) {
   }, [url, onToast]);
 
   const loadMore = async () => {
-    if (!cursor) return;
+    if (!cursor || moreInFlight.current) return;
+    const id = reqId.current;
+    moreInFlight.current = true;
     setLoadingMore(true);
     try {
       const r = await api.get<ListResponse>(url(cursor));
+      if (id !== reqId.current) return;
       setItems(prev => [...(prev ?? []), ...r.items]);
       setCursor(r.nextCursor);
     } catch (e) {
-      onToast?.(errMsg(e), 'error');
+      if (id === reqId.current) onToast?.(errMsg(e), 'error');
     } finally {
-      setLoadingMore(false);
+      if (id === reqId.current) {
+        moreInFlight.current = false;
+        setLoadingMore(false);
+      }
     }
   };
 

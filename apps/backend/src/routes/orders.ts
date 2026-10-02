@@ -4,7 +4,8 @@ import { uploadAttachment, deleteAttachment, deleteAttachments } from '../r2';
 import { clampLimit, decodeCursor, encodeCursor, parseSort, UUID_RE } from '../lib/pagination';
 import { nextHumanId } from '../lib/id-seq';
 import {
-  diff, writeOrderEvent, wasEverSubmitted, META_FIELDS, LINE_FIELDS, type AuditChange, type SqlLike,
+  diff, writeOrderEvent, wasEverSubmitted, META_FIELDS, LINE_FIELDS, type AuditChange, type EventKind,
+  type SqlLike,
 } from '../services/orderAudit';
 import { autoTrackParts, type TrackablePart } from '../lib/marketAutoTrack';
 import { effectiveRole } from '../lib/role';
@@ -34,7 +35,9 @@ import { leaveDraftBlockers } from '../services/orderTxnRule';
 import { pickTrackingClient, carrierTrackingUrl } from '../shipping';
 import { registerPackageTracking } from '../shipping/track';
 import { pickBankProviders } from '../banktx';
-import { linkPaypalTxnToOrder, reportSyncResult, syncBankTransactions } from '../banktx/sync';
+import {
+  linkPaypalTxnToOrder, reportSyncResult, syncBankTransactions, unlinkPaypalTxnFromOrder,
+} from '../banktx/sync';
 import { createRateLimiter } from '../lib/rate-limit';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { poRealizedLateral } from '../lib/po-cost';
@@ -951,7 +954,9 @@ orders.post('/:id/revert-ack', async (c) => {
   const id = c.req.param('id');
   const sql = getDb(c.env);
 
-  if (effectiveRole(u) !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  // A write: the raw role, so a manager previewing as a purchaser can still
+  // clear the dialog (lib/role.ts).
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const order = (await sql`SELECT id FROM orders WHERE id = ${id} LIMIT 1`)[0];
   if (!order) return c.json({ error: 'Not found' }, 404);
 
@@ -1031,10 +1036,14 @@ orders.get('/:id/spreadsheet', async (c) => {
   if (!order) return c.json({ error: 'Not found' }, 404);
   if (effectiveRole(u) !== 'manager' && order.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
 
+  // The sheet is the PO as bought. A partial sale decrements `qty` and parks
+  // the original in `qty_purchased`, so reading `qty` shrank the subtotal, the
+  // fee basis and the projected profit with every sale — the same basis
+  // lib/po-cost.ts and the goods-total mirror use.
   const lines = await sql`
     SELECT category, brand, capacity, generation, type, classification, rank, speed,
            interface, form_factor, description, item_type, part_number, chip_number, serial_number,
-           condition, qty, health::float AS health, rpm,
+           condition, COALESCE(qty_purchased, qty) AS qty, health::float AS health, rpm,
            unit_cost::float AS unit_cost, sell_price::float AS sell_price
     FROM order_lines WHERE order_id = ${id} ORDER BY position ASC
   ` as unknown as Record<string, unknown>[];
@@ -1514,6 +1523,17 @@ orders.patch('/:id', async (c) => {
       }
     | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
+  // order_lines.id is uuid-typed: a malformed id reaches `::uuid[]` inside the
+  // transaction and surfaces as a 500 instead of the 400 the client can act on.
+  const isLineId = (v: unknown) => typeof v === 'string' && UUID_RE.test(v);
+  if (body.lines != null
+      && (!Array.isArray(body.lines) || !body.lines.every(l => isLineId((l as { id?: unknown } | null)?.id)))) {
+    return c.json({ error: 'lines[].id must be a line id' }, 400);
+  }
+  if (body.removeLineIds != null
+      && (!Array.isArray(body.removeLineIds) || !body.removeLineIds.every(isLineId))) {
+    return c.json({ error: 'removeLineIds must be line ids' }, 400);
+  }
   if (!isOrderPayment(body.payment)) return c.json({ error: 'payment must be company or self' }, 400);
   if (!isPaymentMethod(body.paymentMethod)) {
     return c.json({ error: 'paymentMethod must be paypal or cash' }, 400);
@@ -1796,9 +1816,12 @@ orders.patch('/:id', async (c) => {
           body.otherFees !== undefined ||
           body.otherFeesNote !== undefined ||
           body.commissionRate !== undefined ||
-          // The payment reference is part of the closed book too.
+          // The payment reference is part of the closed book too — and so is
+          // who paid: a flip to self moves the reimbursement into commission.
+          // A re-save echoing the stored value changes nothing.
           body.paypalTxnId !== undefined ||
           body.paymentMethod !== undefined ||
+          (body.payment !== undefined && body.payment !== orderBefore.payment) ||
           // Ownership decides whose closed book this is — commission and
           // "my orders" both key off it, so it freezes with the rest.
           body.onBehalfOfUserId !== undefined;
@@ -1934,6 +1957,12 @@ orders.patch('/:id', async (c) => {
             handoff_by     = CASE WHEN ${setBy}::int = 1 THEN ${facts.by}::uuid ELSE handoff_by END
           WHERE id = ${id}
         `;
+        // A corrected or cleared id must take its old payments with it, or the
+        // ledger keeps reading this PO as paid by a payment it no longer names.
+        const oldPaypal = normPaypalTxnId(orderBefore.paypal_txn_id);
+        if (setPaypal && oldPaypal && oldPaypal !== normPaypal) {
+          await unlinkPaypalTxnFromOrder(tx, id, oldPaypal);
+        }
         // The id names a payment that has very likely already synced, so link
         // it here rather than leaving it to a pass that runs every six hours.
         // Not gated on the value having changed: only free transactions are
@@ -1994,10 +2023,12 @@ orders.patch('/:id', async (c) => {
 
         // A sell order holds a line only while it is open — the shared
         // OPEN_SELL_STATUSES rule the archive dialog uses — and not archived.
-        // Closed released the stock, Done consumed it, archive is the manager's
-        // "this one is history" flag: all three keep their snapshot and let the
-        // source line go (the FK is SET NULL since 0127). Both halves matter —
-        // a Shipped sell order can be archived, and an archived one releases.
+        // Closed released the stock and Done consumed it: both keep their
+        // snapshot and let the source line go (the FK is SET NULL since 0127).
+        // An archived one releases too, and the only open status it can hold
+        // is Draft: archiving a Shipped or Awaiting-payment order is refused,
+        // and so is moving an archived one back into either — what is left is
+        // a Closed order reopened to Draft, which reserves nothing.
         const stillNamed = doomed.length ? await tx`
           SELECT DISTINCT sol.inventory_id AS line_id, sol.sell_order_id
           FROM sell_order_lines sol
@@ -2080,6 +2111,9 @@ orders.patch('/:id', async (c) => {
               if (rebuilt) l = { ...l, partNumber: rebuilt };
             }
           }
+          // One UPDATE per line, unlike the events below: each patch names its
+          // own fields, and the sentinels/COALESCEs that keep the rest differ
+          // per row — a single statement would need a sentinel per column.
           const setSellPrice = l.sellPrice !== undefined ? 1 : 0;
           // `status` is deliberately NOT settable here. Line status is driven
           // by the lifecycle (advance handler) and 'Sold' is a protected
@@ -2216,21 +2250,30 @@ orders.patch('/:id', async (c) => {
           if (!before || !after) continue;
           const changes = diff(before, after, LINE_FIELDS);
           if (changes.length) {
-            const detail = {
+            revertLinesEdited.push({
               lineId: patch.id,
               partNumber: after.part_number ?? null,
               changes,
-            };
-            await writeOrderEvent(tx, id, u.id, 'line_edited', detail);
-            revertLinesEdited.push(detail);
+            });
           }
         }
       }
-      for (const r of addedRows) {
-        await writeOrderEvent(tx, id, u.id, 'line_added', lineSnapshot(r));
-      }
-      for (const r of removedSnapshots) {
-        await writeOrderEvent(tx, id, u.id, 'line_removed', lineSnapshot(r));
+      // One statement for every per-line event: a wide edit used to cost a
+      // round trip per line.
+      const lineEvents: { kind: EventKind; detail: Record<string, unknown> }[] = [
+        ...revertLinesEdited.map(detail => ({ kind: 'line_edited' as const, detail })),
+        ...addedRows.map(r => ({ kind: 'line_added' as const, detail: lineSnapshot(r) })),
+        ...removedSnapshots.map(r => ({ kind: 'line_removed' as const, detail: lineSnapshot(r) })),
+      ];
+      if (lineEvents.length) {
+        await tx`
+          INSERT INTO order_events ${tx(
+            // The helper's typing has no room for a json() parameter as a value.
+            lineEvents.map(e => ({
+              order_id: id, actor_id: u.id, kind: e.kind, detail: tx.json(e.detail as never),
+            })) as never,
+            'order_id', 'actor_id', 'kind', 'detail')}
+        `;
       }
 
       if (revertedFrom) {
@@ -2548,8 +2591,10 @@ const PO_META_STATUSES = new Set(['Submission', 'Done', 'Payment', 'Commission']
 // Submission evidence (receipts attached at submit time) is owner-editable: the
 // purchaser who owns the order may add/remove files while it is still a Draft.
 // Every other meta status (Done, Commission) remains manager-only.
+// Writes, so the raw role: the preview is a viewing convenience, not a
+// permission demotion (lib/role.ts).
 function canWriteMeta(u: User, status: string, order: { user_id: string; lifecycle: string }): boolean {
-  if (effectiveRole(u) === 'manager') return true;
+  if (u.role === 'manager') return true;
   // Submission evidence belongs to the purchaser who raised the PO and stays
   // theirs until the review closes — a receipt or a photo of the goods
   // routinely shows up after the order has already moved to In Transit or
@@ -2566,6 +2611,21 @@ type OrderAccess = { user_id: string; lifecycle: string };
 async function loadOrderAccess(sql: SqlLike, id: string): Promise<OrderAccess | undefined> {
   return (await sql`SELECT user_id, lifecycle FROM orders WHERE id = ${id} LIMIT 1`)[0] as
     | OrderAccess | undefined;
+}
+
+type LockedOrderAccess = OrderAccess & {
+  payment: string; payment_method: string | null; created_at: Date;
+};
+
+// The same row under FOR UPDATE, for the writes: the unlocked read above can
+// be seconds stale by the time the file is stored, and the lock is what keeps
+// an advance from closing the book between the check and the write. The
+// payment fields are what the proof rules key on.
+async function lockOrderAccess(tx: SqlLike, id: string): Promise<LockedOrderAccess | undefined> {
+  return (await tx`
+    SELECT user_id, lifecycle, payment, payment_method, created_at
+    FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE
+  `)[0] as LockedOrderAccess | undefined;
 }
 
 // Upsert the text note for a single (order, status).
@@ -2664,29 +2724,48 @@ orders.post('/:id/status-meta/:status/attachments', async (c) => {
     ? new File([renamed], suffixFilename(renamed.name, scan.txnId), { type: renamed.type })
     : renamed;
 
-  // R2 upload happens outside the transaction — it's the slow part. If the
-  // INSERT below fails the object is orphaned in R2; r2.ts treats orphans as
-  // a separate concern.
+  // R2 upload happens outside the transaction — it's the slow part.
   const uploaded = await uploadAttachment(c.env, stored, `orders/${id}/${status}`)
     .catch(e => { log.error('attachment upload', e); return null; });
   if (!uploaded) return c.json({ error: 'upload failed' }, 502);
 
-  const row = await sql.begin(async (tx) => {
-    const r = (await tx`
-      INSERT INTO order_status_attachments
-        (order_id, status, filename, size_bytes, mime_type, storage_key, delivery_url, uploaded_by)
-      VALUES
-        (${id}, ${status}, ${stored.name}, ${stored.size},
-         ${stored.type || 'application/octet-stream'},
-         ${uploaded.storageKey}, ${uploaded.deliveryUrl}, ${u.id})
-      RETURNING id, filename, size_bytes, mime_type, delivery_url, uploaded_at
-    `)[0];
-    await writeOrderEvent(tx, id, u.id, 'status_meta_changed', {
-      status, field: 'attachment_added',
-      attachmentId: r.id, filename: r.filename, size: r.size_bytes, mime: r.mime_type,
+  type AttachmentRow = {
+    id: string; filename: string; size_bytes: number; mime_type: string;
+    delivery_url: string; uploaded_at: Date;
+  };
+  let row: AttachmentRow;
+  try {
+    row = await sql.begin(async (tx) => {
+      // Re-checked under the lock, as the photo upload does: the permission
+      // read happened before the shrink, the OCR and the R2 round trip —
+      // seconds a manager can spend closing the book on the order.
+      const live = await lockOrderAccess(tx, id);
+      if (!live) throw new Error('__ORDER_GONE__');
+      if (!canWriteMeta(u, status, live)) throw new Error('__FORBIDDEN__');
+      const r = (await tx<AttachmentRow[]>`
+        INSERT INTO order_status_attachments
+          (order_id, status, filename, size_bytes, mime_type, storage_key, delivery_url, uploaded_by)
+        VALUES
+          (${id}, ${status}, ${stored.name}, ${stored.size},
+           ${stored.type || 'application/octet-stream'},
+           ${uploaded.storageKey}, ${uploaded.deliveryUrl}, ${u.id})
+        RETURNING id, filename, size_bytes, mime_type, delivery_url, uploaded_at
+      `)[0];
+      await writeOrderEvent(tx, id, u.id, 'status_meta_changed', {
+        status, field: 'attachment_added',
+        attachmentId: r.id, filename: r.filename, size: r.size_bytes, mime: r.mime_type,
+      });
+      return r;
     });
-    return r;
-  });
+  } catch (e) {
+    // The object went up first, so any rollback leaves it in R2 with no row
+    // naming it, where nothing can find it again.
+    await deleteAttachment(c.env, uploaded.storageKey).catch(() => { /* best-effort */ });
+    const msg = (e as { message?: string })?.message ?? '';
+    if (msg.includes('__ORDER_GONE__')) return c.json({ error: 'Not found' }, 404);
+    if (msg.includes('__FORBIDDEN__')) return c.json({ error: 'Forbidden' }, 403);
+    throw e;
+  }
 
   const attachment = {
     id: row.id,
@@ -2712,22 +2791,53 @@ orders.delete('/:id/status-meta/:status/attachments/:attachmentId', async (c) =>
   if (!existing) return c.json({ error: 'Not found' }, 404);
   if (!canWriteMeta(u, status, existing)) return c.json({ error: 'Forbidden' }, 403);
 
-  const removed = await sql.begin(async (tx) => {
+  const removed = await sql.begin(async (tx): Promise<
+    | { kind: 'notFound' } | { kind: 'forbidden' } | { kind: 'lastProof' }
+    | { kind: 'ok'; storage_key: string }
+  > => {
+    const live = await lockOrderAccess(tx, id);
+    if (!live) return { kind: 'notFound' };
+    if (!canWriteMeta(u, status, live)) return { kind: 'forbidden' };
     const row = (await tx`
       SELECT storage_key, filename FROM order_status_attachments
       WHERE id = ${attachmentId} AND order_id = ${id} AND status = ${status}
       LIMIT 1
     `)[0] as { storage_key: string; filename: string } | undefined;
-    if (!row) return null;
+    if (!row) return { kind: 'notFound' };
+    // The purchaser keeps their evidence until the review closes — receipts
+    // get swapped for better ones — but once the order is submitted, the one
+    // file a proof rule let it leave Draft on is what the review is judging.
+    // Deleting the last of those would leave a submitted order that could
+    // never have been submitted. A manager can always clean up.
+    if (u.role !== 'manager' && live.lifecycle !== 'draft') {
+      const required = status === 'Submission' ? await chatShotRequiredFor(tx, live)
+        : status === 'Payment' ? await cashShotRequiredFor(tx, live)
+        : false;
+      if (required) {
+        const [{ n }] = await tx<{ n: number }[]>`
+          SELECT COUNT(*)::int AS n FROM order_status_attachments
+          WHERE order_id = ${id} AND status = ${status}
+        `;
+        if (n <= 1) return { kind: 'lastProof' };
+      }
+    }
     await tx`DELETE FROM order_status_attachments WHERE id = ${attachmentId}`;
     await writeOrderEvent(tx, id, u.id, 'status_meta_changed', {
       status, field: 'attachment_removed',
       attachmentId, filename: row.filename,
     });
-    return row;
+    return { kind: 'ok', storage_key: row.storage_key };
   });
 
-  if (!removed) return c.json({ error: 'Not found' }, 404);
+  if (removed.kind === 'notFound') return c.json({ error: 'Not found' }, 404);
+  if (removed.kind === 'forbidden') return c.json({ error: 'Forbidden' }, 403);
+  if (removed.kind === 'lastProof') {
+    return c.json({
+      error: status === 'Submission'
+        ? 'This is the only chat screenshot on a submitted self-paid order — upload a replacement before removing it.'
+        : 'This is the only payment screenshot on a submitted cash order — upload a replacement before removing it.',
+    }, 409);
+  }
   // R2 delete outside the tx — slow side effect, kept out of the lock window.
   // Best-effort.
   await deleteAttachment(c.env, removed.storage_key).catch(e => log.error('r2 delete', e));
@@ -2748,7 +2858,7 @@ orders.delete('/:id/status-meta/:status/attachments/:attachmentId', async (c) =>
 // arriving after it has moved to In Transit — so ownership lasts until the
 // review closes, mirroring the Submission-evidence rule in canWriteMeta.
 function canWritePhotos(u: User, order: { user_id: string; lifecycle: string }): boolean {
-  if (effectiveRole(u) === 'manager') return true;
+  if (u.role === 'manager') return true;
   return order.user_id === u.id && !isClosedBook(order.lifecycle);
 }
 
@@ -2881,25 +2991,32 @@ orders.delete('/:id/lines/:lineId/photos/:photoId', async (c) => {
   if (!order) return c.json({ error: 'Not found' }, 404);
   if (!canWritePhotos(u, order)) return c.json({ error: 'Forbidden' }, 403);
 
-  const removed = await sql.begin(async (tx) => {
+  const removed = await sql.begin(async (tx): Promise<
+    { kind: 'notFound' } | { kind: 'forbidden' } | { kind: 'ok'; storage_key: string }
+  > => {
     // Orders row first, as everywhere else that writes under this order — the
     // photo delete touches a table whose FK makes Postgres take KEY SHARE on
     // it anyway, so taking it in the other order deadlocks against PATCH.
-    await tx`SELECT 1 FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE`;
+    // Permission is re-judged on the locked row: the read above is unlocked,
+    // and an advance past review can land between the two.
+    const live = await lockOrderAccess(tx, id);
+    if (!live) return { kind: 'notFound' };
+    if (!canWritePhotos(u, live)) return { kind: 'forbidden' };
     const row = (await tx`
       SELECT storage_key, filename FROM order_line_photos
       WHERE id = ${photoId}::uuid AND order_line_id = ${lineId}::uuid AND order_id = ${id}
       LIMIT 1
     `)[0] as { storage_key: string; filename: string } | undefined;
-    if (!row) return null;
+    if (!row) return { kind: 'notFound' };
     await tx`DELETE FROM order_line_photos WHERE id = ${photoId}::uuid`;
     await writeOrderEvent(tx, id, u.id, 'line_photo_removed', {
       lineId, photoId, filename: row.filename,
     });
-    return row;
+    return { kind: 'ok', storage_key: row.storage_key };
   });
 
-  if (!removed) return c.json({ error: 'Not found' }, 404);
+  if (removed.kind === 'notFound') return c.json({ error: 'Not found' }, 404);
+  if (removed.kind === 'forbidden') return c.json({ error: 'Forbidden' }, 403);
   await deleteAttachment(c.env, removed.storage_key).catch(e => log.error('r2 delete (line photo)', e));
   return c.json({ ok: true });
 });
@@ -2941,7 +3058,8 @@ async function pullPaypalIfUnknown(
   if (!PAYPAL_TXN_STRICT.test((order.paypal_txn_id ?? '').trim())) return null;
   if (!await companyPayTxnUnknown(sql, order)) return null;
   if (pullRateLimited(userId) !== null) return null;
-  const result = await syncBankTransactions(env, [paypal]);
+  // The purchaser is waiting on Submit, and disputes answer nothing it asked.
+  const result = await syncBankTransactions(env, [paypal], { disputes: false });
   reportSyncResult(result);
   return result.perSource.paypal?.error ?? null;
 }
@@ -3202,6 +3320,11 @@ function advanceRefusedResponse(
       return c.json({ error: 'Sold is not a stage you can choose — an order becomes Sold on its own once it is Done and every line has sold.' }, 409);
     case 'alreadySold':
       return c.json({ error: 'This order is Done and every line has sold. To reopen it, move it back to Reviewing or Ready to Pay.' }, 409);
+    case 'sameStage':
+      return c.json({
+        error: `Order is already ${LIFECYCLE_LABEL[outcome.lifecycle] ?? outcome.lifecycle} — reload to see where it stands.`,
+        lifecycle: outcome.lifecycle,
+      }, 409);
     case 'committedLines':
       return c.json(committedLinesBody(c.var.user, outcome.offendingLineIds, outcome.sellOrderIds,
         `Lines committed to ${describeSellOrders(outcome.sellOrderIds)} — cancel those sell orders first.`,

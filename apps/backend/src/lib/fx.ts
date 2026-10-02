@@ -93,15 +93,18 @@ export async function fetchAndStoreLatest(
 
   // Single-writer path (refresh loop + manual override). A SELECT-then-INSERT
   // is sufficient; the daily uniqueness invariant is by effective_date.
-  const existing = await sql<{ rate: string; fetched_at: Date }[]>`
-    SELECT rate, fetched_at FROM fx_rates
+  // The day's row may be a manager's override rather than an earlier fetch;
+  // the rate returned is that row's, so the source has to be too.
+  const existing = await sql<{ rate: string; source: 'frankfurter' | 'manual'; fetched_at: Date }[]>`
+    SELECT rate, source, fetched_at FROM fx_rates
     WHERE base_currency = 'USD' AND quote_currency = ${quote} AND effective_date = ${effectiveDate}
+    ORDER BY fetched_at DESC
     LIMIT 1
   `;
   if (existing.length > 0) {
     return {
       rate: 1 / Number(existing[0].rate),
-      source: 'frankfurter',
+      source: existing[0].source,
       fetchedAt: existing[0].fetched_at,
       effectiveDate,
     };

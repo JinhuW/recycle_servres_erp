@@ -182,10 +182,16 @@ export function DesktopCoordinator({ showToast }: Props) {
   useEffect(() => { load(); }, [load]);
 
   // Liveness and queue age both move on their own, so the whole page refetches
-  // on a timer rather than waiting for a navigation.
+  // on a timer rather than waiting for a navigation.  A backgrounded tab polls
+  // nothing and catches up the moment it's back.
   useEffect(() => {
-    const timer = setInterval(load, REFRESH_MS);
-    return () => clearInterval(timer);
+    const refresh = () => { if (!document.hidden) load(); };
+    const timer = setInterval(refresh, REFRESH_MS);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', refresh);
+    };
   }, [load]);
 
   return (

@@ -135,7 +135,7 @@ export function Camera({ category, onDetected, onClose, onBack }: Props) {
     // captureFrame returns a tiny placeholder we don't want to preview.
     const live = !!videoRef.current?.videoWidth;
     const raw = await captureFrame();
-    if (!raw) { setPhase('framing'); setError('Camera unavailable'); return; }
+    if (!raw) { setPhase('framing'); setError(t('cameraUnavailable')); return; }
     // Compress the real frame; the no-camera placeholder PNG is left as-is.
     const blob = live ? await compressForUpload(raw) : raw;
     setCaptured(live ? await blobToDataUrl(blob) : null);

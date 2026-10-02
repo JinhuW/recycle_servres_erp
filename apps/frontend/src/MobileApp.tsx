@@ -159,6 +159,9 @@ function Shell() {
   const [aboutSheet, setAboutSheet] = useState(false);
   const [pwSheet, setPwSheet] = useState(false);
   const [notifs, setNotifs] = useState<Notification[]>([]);
+  // The list is only the newest 50, so the badge takes the server's own count;
+  // null until it answers (or on a backend that predates the field).
+  const [serverUnread, setServerUnread] = useState<number | null>(null);
   const [detailOrder, setDetailOrder] = useState<Order | null>(null);
   // The detail screen's unsaved fees / notes / warehouse / payment. Held here
   // because opening a line form unmounts that screen — typing a fee and then
@@ -170,8 +173,12 @@ function Shell() {
   useEffect(() => {
     if (!user) return;
     let alive = true;
-    api.get<{ items: Notification[] }>('/api/notifications')
-      .then(r => { if (alive) setNotifs(r.items); })
+    api.get<{ items: Notification[]; unreadCount?: number }>('/api/notifications')
+      .then(r => {
+        if (!alive) return;
+        setNotifs(r.items);
+        setServerUnread(r.unreadCount ?? null);
+      })
       .catch(handleFetchError);
     return () => { alive = false; };
   }, [user?.id]);
@@ -760,7 +767,7 @@ function Shell() {
     );
   }
 
-  const unreadCount = notifs.filter(n => n.unread).length;
+  const unreadCount = serverUnread ?? notifs.filter(n => n.unread).length;
   const orderDetailOpen = view === 'history' && !!orderDetailMatch && !!detailOrder;
   const shippingRoute = parseShippingRoute(path);
   // Add / focus / wizard-handoff are focused task screens like the order
@@ -827,9 +834,12 @@ function Shell() {
       {notifSheet && (
         <PhNotificationsSheet
           items={notifs}
+          unreadCount={unreadCount}
           onClose={() => setNotifSheet(false)}
           onMarkAllRead={async () => {
             setNotifs(ns => ns.map(n => ({ ...n, unread: false })));
+            // mark-read clears every unread row, including those past the list.
+            setServerUnread(0);
             try { await api.post('/api/notifications/mark-read', {}); } catch {}
           }}
         />

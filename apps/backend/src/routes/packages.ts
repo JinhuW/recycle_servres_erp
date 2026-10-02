@@ -88,6 +88,8 @@ packages.get('/', async (c) => {
   // phone's personal glance.
   const mineOnly = c.req.query('mine') === 'true';
   const scopeFrag = effectiveRole(u) === 'manager' && !mineOnly ? sql`TRUE` : sql`created_by = ${u.id}`;
+  // Deliberately unpaged: the client derives its counts and filters from every
+  // row, so a cap would silently hide packages the way a capped list page does.
   const rows = (await sql`
     SELECT ${PACKAGE_COLS(sql)},
            (SELECT name FROM users us WHERE us.id = created_by) AS creator_name

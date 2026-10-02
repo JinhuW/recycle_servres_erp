@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { getDb } from '../db';
 import { getWorkspaceSetting } from '../lib/settings';
 import { formatRefPrice, marketValueSelect } from '../lib/market';
-import { applyMarketWrites, type WriteValue } from '../lib/marketWrite';
+import { applyMarketWrites } from '../lib/marketWrite';
 import { appendPriceEvent } from '../lib/refPriceEvents';
 import { escapeLike } from '../lib/pagination';
 import { canonPartCol, canonPartNumberJs } from '../lib/part-number';
@@ -303,7 +303,8 @@ market.post('/:id/manual-price', async (c) => {
 // Scraper push surface. Bearer-only (no cookie/CSRF). Batch capped at 500 rows
 // and rejected before the transaction so oversized payloads cost us nothing.
 market.post('/values', bearerGuard({ scopes: ['market:write'] }), async (c) => {
-  const body = (await c.req.json().catch(() => null)) as null | { values?: WriteValue[] };
+  // Elements stay unknown: applyMarketWrites shape-checks each one.
+  const body = (await c.req.json().catch(() => null)) as null | { values?: unknown };
   if (!body || !Array.isArray(body.values)) return c.json({ error: 'invalid_request' }, 400);
   if (body.values.length > 500) {
     return c.json({ error: 'payload_too_large', hint: 'paginate to <=500 rows' }, 413);

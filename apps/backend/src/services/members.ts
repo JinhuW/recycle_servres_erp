@@ -3,7 +3,7 @@
 // functions are usable from routes, scripts, or tests.
 
 import type { Sql } from 'postgres';
-import { hashPassword, generateTempPassword, revokeUserRefreshTokens } from '../auth';
+import { epochSeconds, hashPassword, generateTempPassword, revokeUserRefreshTokens } from '../auth';
 import { revokeUserOAuthTokens } from '../oauth/tokens';
 import { effUnitCost, poFeeBasis } from '../lib/po-cost';
 
@@ -106,7 +106,7 @@ export async function createMember(
   const r = await sql`
     INSERT INTO users (email, name, initials, role, team, phone, title, password_hash)
     VALUES (
-      ${input.email.toLowerCase()}, ${input.name}, ${initials}, ${input.role},
+      ${input.email.trim().toLowerCase()}, ${input.name}, ${initials}, ${input.role},
       ${input.team ?? null}, ${input.phone ?? null}, ${input.title ?? null}, ${hash}
     )
     RETURNING id
@@ -119,40 +119,32 @@ export async function updateMember(
   id: string,
   input: UpdateMemberInput,
 ): Promise<void> {
-  if (input.password) {
-    // Password change + token revoke must be atomic: either both land or
-    // neither does. A crash between the two would leave old (possibly stolen)
-    // tokens live against the new password.
-    const hash = await hashPassword(input.password);
-    await sql.begin(async (tx) => {
-      await tx`
-        UPDATE users SET
-          name            = COALESCE(${input.name ?? null},            name),
-          team            = COALESCE(${input.team ?? null},            team),
-          phone           = COALESCE(${input.phone ?? null},           phone),
-          title           = COALESCE(${input.title ?? null},           title),
-          role            = COALESCE(${input.role ?? null},            role),
-          active          = COALESCE(${input.active ?? null},          active),
-          password_hash   = ${hash}
-        WHERE id = ${id}
-      `;
-      // A password reset must invalidate any existing (possibly stolen)
-      // refresh tokens, mirroring deactivateMember's revoke.
-      await revokeUserRefreshTokens(tx, id);
-      await revokeUserOAuthTokens(tx, id);
-    });
-  } else {
-    await sql`
+  const hash = input.password ? await hashPassword(input.password) : null;
+  // A reset also kills the access tokens already issued, which revoking the
+  // refresh side alone leaves alive until they expire.
+  const resetAt = hash !== null ? epochSeconds() : null;
+  // A password reset or a deactivation has to take the member's live sessions
+  // with it, atomically: a crash between the two writes would leave old
+  // (possibly stolen) tokens working against the new state.
+  const endsSessions = hash !== null || input.active === false;
+  await sql.begin(async (tx) => {
+    await tx`
       UPDATE users SET
-        name            = COALESCE(${input.name ?? null},            name),
-        team            = COALESCE(${input.team ?? null},            team),
-        phone           = COALESCE(${input.phone ?? null},           phone),
-        title           = COALESCE(${input.title ?? null},           title),
-        role            = COALESCE(${input.role ?? null},            role),
-        active          = COALESCE(${input.active ?? null},          active)
+        name               = COALESCE(${input.name ?? null},       name),
+        team               = COALESCE(${input.team ?? null},       team),
+        phone              = COALESCE(${input.phone ?? null},      phone),
+        title              = COALESCE(${input.title ?? null},      title),
+        role               = COALESCE(${input.role ?? null},       role),
+        active             = COALESCE(${input.active ?? null},     active),
+        password_hash      = COALESCE(${hash},                     password_hash),
+        tokens_valid_after = COALESCE(to_timestamp(${resetAt}),    tokens_valid_after)
       WHERE id = ${id}
     `;
-  }
+    if (endsSessions) {
+      await revokeUserRefreshTokens(tx, id);
+      await revokeUserOAuthTokens(tx, id);
+    }
+  });
 }
 
 export async function getMemberStatus(

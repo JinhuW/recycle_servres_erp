@@ -1,5 +1,4 @@
 import postgres from 'postgres';
-import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -8,7 +7,7 @@ import { adminUrl } from './pg-urls';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const backendRoot = join(here, '..', '..');
-const migrationsDir = join(backendRoot, 'migrations');
+const migrateScript = join(backendRoot, 'scripts', 'migrate.mjs');
 const seedScript = join(backendRoot, 'scripts', 'seed.mjs');
 
 // Each vitest worker (fork) gets its OWN database so test FILES can run in
@@ -34,9 +33,12 @@ export const TEST_DATABASE_URL = resolveWorkerUrl();
 
 const workerDbName = new URL(TEST_DATABASE_URL).pathname.replace(/^\//, '');
 const templateDbName = `${workerDbName}_tmpl`;
-function templateUrl(): string {
+// Built under this name and renamed only once migrated AND seeded, so a build
+// that dies part-way leaves nothing that passes for a ready template.
+const buildingDbName = `${templateDbName}_building`;
+function dbUrl(name: string): string {
   const u = new URL(TEST_DATABASE_URL);
-  u.pathname = `/${templateDbName}`;
+  u.pathname = `/${name}`;
   return u.toString();
 }
 
@@ -50,49 +52,68 @@ const MIGRATE_LOCK_KEY = 778423;
 // migrated + seeded a single time per worker slot — the existence check makes
 // it idempotent across the fresh processes vitest spawns per file. Called from
 // setup.ts's beforeAll and (defensively) from resetDb.
-let templateReady = false;
-export async function ensureWorkerDb(): Promise<void> {
-  if (templateReady || !process.env.VITEST_POOL_ID) return;
-  templateReady = true;
-  const turl = templateUrl();
+//
+// Migrations run through scripts/migrate.mjs, the runner production boots
+// with: one transaction per file, the ledger, the lock timeout. Replaying the
+// files bare let a migration that cannot run inside a transaction pass here
+// and then fail the deploy.
+//
+// One build per process, shared: setup.ts's beforeAll and a file's resetDb
+// both call this, and a hook that timed out leaves its build running — a
+// second caller starting its own would DROP … WITH (FORCE) the first one's
+// half-built database out from under it. A failed build is forgotten so the
+// next caller retries.
+let ready: Promise<void> | null = null;
+export function ensureWorkerDb(): Promise<void> {
+  if (!process.env.VITEST_POOL_ID) return Promise.resolve();
+  ready ??= buildIfMissing().catch((e: unknown) => { ready = null; throw e; });
+  return ready;
+}
+
+async function buildIfMissing(): Promise<void> {
   const admin = postgres(adminUrl(TEST_DATABASE_URL), { max: 1, onnotice: () => {} });
   try {
     const exists = await admin`SELECT 1 FROM pg_database WHERE datname = ${templateDbName}`;
-    if (exists.length > 0) return;
-    await admin.unsafe(`CREATE DATABASE "${templateDbName}"`); // nosec — internal sanitised identifier
-
-    // Workers migrate their OWN databases, but migration 0042 creates the
-    // cluster-wide `metrics` role behind an IF NOT EXISTS — a check-then-act,
-    // not an atomic one. Two workers both see it absent, both CREATE ROLE, and
-    // the loser dies on pg_authid's unique index with its template
-    // half-migrated: the later files never run, the seed lands in a database
-    // with no users, and every login test 401s.
-    //
-    // The lock has to be held HERE, on the shared `postgres` maintenance
-    // database: advisory locks are scoped to the database they're taken in, so
-    // locking inside each worker's own template serialises nothing. (This is
-    // also why scripts/migrate.mjs's lock doesn't cover us — it locks in the
-    // target database, which is the right scope for its one-database job.)
-    //
-    // Only bites a FRESH cluster. Locally the role survives from an earlier
-    // run, so the race is invisible until CI runs against a new container.
-    await admin`SELECT pg_advisory_lock(${MIGRATE_LOCK_KEY})`;
-    const tsql = postgres(turl, { max: 1, onnotice: () => {} });
-    try {
-      const files = readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort();
-      for (const f of files) await tsql.unsafe(readFileSync(join(migrationsDir, f), 'utf8')); // nosec — trusted migration SQL from the repo's migrations dir
-    } finally {
-      await tsql.end({ timeout: 5 });
-      await admin`SELECT pg_advisory_unlock(${MIGRATE_LOCK_KEY})`;
-    }
+    if (exists.length === 0) await buildTemplate(admin);
   } finally {
     await admin.end({ timeout: 5 });
   }
+}
+
+async function buildTemplate(admin: postgres.Sql): Promise<void> {
+  const burl = dbUrl(buildingDbName);
+  await admin.unsafe(`DROP DATABASE IF EXISTS "${buildingDbName}" WITH (FORCE)`); // nosec — internal sanitised identifier
+  await admin.unsafe(`CREATE DATABASE "${buildingDbName}"`); // nosec — internal sanitised identifier
+
+  // Workers migrate their OWN databases, but migration 0042 creates the
+  // cluster-wide `metrics` role behind an IF NOT EXISTS — a check-then-act,
+  // not an atomic one. Two workers both see it absent, both CREATE ROLE, and
+  // the loser dies on pg_authid's unique index with its template
+  // half-migrated.
+  //
+  // The lock has to be held HERE, on the shared `postgres` maintenance
+  // database, for the whole migrate run: advisory locks are scoped to the
+  // database they're taken in, so migrate.mjs's own lock (taken in the
+  // template it migrates) serialises nothing across workers.
+  //
+  // Only bites a FRESH cluster. Locally the role survives from an earlier
+  // run, so the race is invisible until CI runs against a new container.
+  await admin`SELECT pg_advisory_lock(${MIGRATE_LOCK_KEY})`;
+  try {
+    const m = spawnSync('node', [migrateScript], {
+      env: { ...process.env, DATABASE_URL: burl },
+      encoding: 'utf8',
+    });
+    if (m.status !== 0) throw new Error(`migrate (template) failed: ${m.stderr}\n${m.stdout}`);
+  } finally {
+    await admin`SELECT pg_advisory_unlock(${MIGRATE_LOCK_KEY})`;
+  }
   const r = spawnSync('node', [seedScript], {
-    env: { ...process.env, DATABASE_URL: turl, SEED_POOL_MAX: '2' },
+    env: { ...process.env, DATABASE_URL: burl, SEED_POOL_MAX: '2' },
     encoding: 'utf8',
   });
   if (r.status !== 0) throw new Error(`seed (template) failed: ${r.stderr}\n${r.stdout}`);
+  await admin.unsafe(`ALTER DATABASE "${buildingDbName}" RENAME TO "${templateDbName}"`); // nosec — internal identifiers
 }
 
 let sql: postgres.Sql | null = null;

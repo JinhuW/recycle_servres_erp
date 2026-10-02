@@ -52,8 +52,8 @@ const TOOLS: Record<string, { scope: OAuthScope; call: ToolCall }> = {
   },
 };
 
-// A plain object on purpose: a name like `toString` resolves to an inherited
-// member and takes the insufficient_scope path, which clients already see.
+// Read only through Object.hasOwn: `name` is caller-supplied, and a plain
+// lookup would resolve `toString` and friends to inherited members.
 const TOOL_SCOPES: Record<string, OAuthScope> = Object.fromEntries(
   Object.entries(TOOLS).map(([name, t]) => [name, t.scope]),
 );
@@ -109,21 +109,23 @@ export async function handleMcp(c: Context<{ Bindings: Env; Variables: any }>): 
         tools: ALL_TOOLS.filter(t => granted.has(TOOL_SCOPES[t.name])),
       }));
     case 'tools/call': {
-      const { name, arguments: args = {} } = (req.params ?? {}) as { name?: string; arguments?: any };
-      const toolLabel = name ?? 'unknown';
+      const { name, arguments: args = {} } = (req.params ?? {}) as { name?: unknown; arguments?: any };
+      // Only a real tool name may become a metric label: anything the caller
+      // sends would otherwise mint its own Prometheus series. The type check
+      // also stops a one-element array passing the lookup by key coercion.
+      const known = typeof name === 'string' && Object.hasOwn(TOOL_SCOPES, name);
+      const toolLabel = known ? name : 'unknown';
       try {
-        const required = name ? TOOL_SCOPES[name] : undefined;
-        if (!name || !required) {
+        if (!known) {
           mcpToolCallsTotal.inc({ tool: toolLabel, status: 'error' });
-          return c.json(rpcErr(req.id, -32601, `unknown tool: ${name}`));
+          return c.json(rpcErr(req.id, -32601, `unknown tool: ${String(name)}`));
         }
+        const required = TOOL_SCOPES[name];
         if (!granted.has(required)) {
           mcpToolCallsTotal.inc({ tool: toolLabel, status: 'error' });
           return c.json(rpcErr(req.id, -32001, `insufficient_scope: ${required} required`));
         }
-        // A non-string `name` (e.g. a one-element array) can pass the scope
-        // lookup by key coercion; it has never run a tool, so it still doesn't.
-        const payload = typeof name === 'string' ? await TOOLS[name].call(sql, args, ctx!) : undefined;
+        const payload = await TOOLS[name].call(sql, args, ctx!);
         mcpToolCallsTotal.inc({ tool: toolLabel, status: 'ok' });
         return c.json(rpcOk(req.id, {
           content: [{ type: 'text', text: JSON.stringify(payload) }],

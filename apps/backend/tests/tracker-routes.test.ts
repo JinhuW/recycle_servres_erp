@@ -119,6 +119,16 @@ describe('Tracker proxy routes (/api/tracker)', () => {
     expect(url).toBe('http://tracker.internal:8080/api/subreddits/homelab');
   });
 
+  it('relays a bodiless upstream status without a body', async () => {
+    const { token } = await loginAs(ALEX);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 204 })));
+
+    const r = await api('DELETE', '/api/tracker/rules/7', { token, env: TRACKER_ENV });
+
+    expect(r.status).toBe(204);
+    expect(r.body).toBeUndefined();
+  });
+
   it('answers 502 when the tracker is unreachable', async () => {
     const { token } = await loginAs(ALEX);
     vi.stubGlobal('fetch', vi.fn(async () => {

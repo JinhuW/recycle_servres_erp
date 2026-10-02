@@ -48,7 +48,7 @@ export function FxRatesPanel() {
       setHistory(r.history);
       setError(null);
     } catch (e) {
-      setError((e as Error).message || 'Failed to load');
+      setError((e as Error).message || t('fx.load_failed'));
     }
   }
 

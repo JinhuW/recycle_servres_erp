@@ -274,6 +274,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     cameraUpload: 'Upload from library',
     cameraSwitch: 'Switch camera',
     cameraFlash: 'Toggle flash',
+    cameraUnavailable: 'Camera unavailable',
     orderIdCopied: 'Order link copied',
     orderIdCopyFailed: 'Could not copy link',
     shareOrder: 'Share order',
@@ -392,6 +393,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     paySettleReversedHint: 'The money was returned, so it no longer counts towards the order.',
     payDisputeUnauthorised: 'PayPal disputes not authorised',
     payDisputeSyncFailed: "PayPal disputes didn't sync",
+    paySourceSyncFailed: "{source} didn't sync",
     payDisputeDue: 'Reply by {when}',
     payDisputeOutcome: 'Outcome: {outcome}',
     payDisputeEvtOpened: 'Case opened \u2014 {reason}',
@@ -972,6 +974,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     poOnBehalfLocked: 'Owner is set — change it from the order page',
     eoOwnerLockedDone: 'A Done order keeps its owner',
     eoPaymentLinkedToast: 'Saved {id} — its bank payment is now linked',
+    eoSavedToast: 'Saved {id}',
     acOwnerChanged: 'Purchaser changed',
 
     // StatusChangeDialog
@@ -1091,6 +1094,12 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     invFlatView: 'Flat',
     activitySearchPlaceholder: 'Search by item, user, part #, serial #…',
     soArchiveTooltip: 'Archive this sell order',
+    soArchiveTitle: 'Archive sell order',
+    soArchiveBody: 'Archiving hides this sell order from the default list. It stays in the database with its lines, commissions, and audit history intact, and can be unarchived later.',
+    soArchiving: 'Archiving…',
+    soUnarchive: 'Unarchive',
+    soUnarchiving: 'Unarchiving…',
+    soArchiveFailed: 'Archive failed',
     soDiscardTooltip: 'Discard this sell order',
     soReopenTooltip: 'Reopen this sell order',
     soDownloadPriceTemplate: 'Price template (bid sheet)',
@@ -1136,6 +1145,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     soAddInventorySelected: '{n} selected',
     soAddInventoryOnDrafts: 'on {n} other draft(s)',
     soAddInventoryBtn: 'Add to order',
+    soAddInventoryCapped: 'Showing the first {n} matches — refine your search to see the rest',
     soViewTooltip: 'View',
     category: 'Category',
 
@@ -2393,6 +2403,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     'fx.cancel': 'Cancel',
     'fx.rate_positive_error': 'Rate must be greater than 0',
     'fx.history_empty': 'No rate history yet.',
+    'fx.load_failed': 'Failed to load FX rates',
 
     // ── Sell-order close reasons ──
     soCloseReason_customer_cancelled: 'Customer cancelled',

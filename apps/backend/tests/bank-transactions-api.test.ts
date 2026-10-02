@@ -425,11 +425,14 @@ describe('bank transactions API', () => {
     await api('POST', `/api/bank-transactions/${await idOf('m-settle')}/link`, {
       token, body: { orderId: poA } });
     // Free one leg while its partner stays with poA — the state the guard is
-    // there for. Reached by hand because no endpoint will produce it.
+    // there for. Reached by hand because no endpoint will produce it. The id
+    // /link filled on poA goes too, or the one-live-PO-per-id rule would be
+    // what refuses poB rather than the pair guard.
     await db`
       UPDATE bank_transactions
       SET order_id = NULL, link_kind = NULL, linked_by = NULL, linked_at = NULL
       WHERE external_id = 'm-settle'`;
+    await db`UPDATE orders SET paypal_txn_id = NULL WHERE id = ${poA}`;
 
     const poB = await createPO(token);
     const r = await api<{ paymentsLinked: number }>('PATCH', `/api/orders/${poB}`, {
@@ -511,6 +514,22 @@ describe('bank transactions API', () => {
     expect((await api('POST', `/api/bank-transactions/${id}/link`, { token, body: { orderId: 'PO-99999' } })).status).toBe(404);
     expect((await api('POST', `/api/bank-transactions/${id}/link`, { token, body: {} })).status).toBe(400);
     expect((await api('POST', `/api/bank-transactions/${id}/unlink`, { token })).status).toBe(400);
+  });
+
+  it('refuses a link to an archived PO and leaves the payment unlinked', async () => {
+    await seedPairedAndSingles();
+    const { token } = await loginAs(ALEX);
+    const poId = await createPO(token);
+    const sql = getTestDb();
+    await sql`UPDATE orders SET archived_at = NOW() WHERE id = ${poId}`;
+    const id = await idOf('m-wire');
+    const r = await api<{ error: string }>('POST', `/api/bank-transactions/${id}/link`, {
+      token, body: { orderId: poId },
+    });
+    expect(r.status).toBe(409);
+    expect(r.body.error).toMatch(/archived/i);
+    const [row] = await sql`SELECT order_id FROM bank_transactions WHERE id = ${id}`;
+    expect(row.order_id).toBeNull();
   });
 
   it('manual pair validates sources and amounts; unpair tombstones', async () => {

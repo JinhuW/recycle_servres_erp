@@ -56,15 +56,29 @@ export async function autoTrackParts(
   // 2. Find which canonical PNs already have a ref_prices row. Uses the shared
   //    canonPartCol so the SQL key matches canonPartNumberJs above byte-for-byte
   //    (see lib/part-number.ts on why the whitespace class must not be \s).
-  const canons = Array.from(byCanon.keys());
-  const existing = await tx<{ canon: string }[]>`
+  const tracked = (canons: string[]) => tx<{ canon: string }[]>`
     SELECT ${canonPartCol(tx, tx`part_number`)} AS canon
     FROM ref_prices
     WHERE ${canonPartCol(tx, tx`part_number`)} = ANY(${canons}::text[])
   `;
-  const taken = new Set(existing.map(r => r.canon));
+  const taken = new Set((await tracked(Array.from(byCanon.keys()))).map(r => r.canon));
 
-  // 3. Insert the missing rows. One INSERT per row (the batch is bounded by
+  // 3. Two POs saving the same new part at once would both find it untracked
+  //    above and both insert it. No unique index can stop that — 0112
+  //    deliberately keeps rows that share a canon across categories — so each
+  //    new canon takes a transaction-scoped advisory lock, released at commit,
+  //    and is looked up again under it. Sorted, so two batches naming the same
+  //    parts lock them in one order and cannot deadlock; a part already
+  //    tracked takes no lock at all.
+  const fresh = Array.from(byCanon.keys()).filter(canon => !taken.has(canon)).sort();
+  for (const canon of fresh) {
+    await tx`SELECT pg_advisory_xact_lock(hashtext(${canon}))`;
+  }
+  if (fresh.length) {
+    for (const r of await tracked(fresh)) taken.add(r.canon);
+  }
+
+  // 4. Insert the missing rows. One INSERT per row (the batch is bounded by
   //    the order's line count — POs in this system are tens of lines, not
   //    thousands) keeps the SQL readable and lets postgres.js handle the
   //    parameter binding without a custom unnest.

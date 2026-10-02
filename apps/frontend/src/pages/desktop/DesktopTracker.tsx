@@ -253,12 +253,17 @@ function FleetCard({ locale, onError, showToast }: {
 
   // Liveness is time-derived, so the loaded window refetches on a timer —
   // as one request covering everything currently on screen, not per page.
+  // A backgrounded tab polls nothing and catches up the moment it's back.
   useEffect(() => {
-    const timer = setInterval(
-      () => load(0, Math.max(loadedRef.current, WORKERS_PAGE_SIZE), false),
-      FLEET_REFRESH_MS,
-    );
-    return () => clearInterval(timer);
+    const refresh = () => {
+      if (!document.hidden) load(0, Math.max(loadedRef.current, WORKERS_PAGE_SIZE), false);
+    };
+    const timer = setInterval(refresh, FLEET_REFRESH_MS);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', refresh);
+    };
   }, [load]);
 
   // Infinite scroll: when the sentinel under the table becomes visible and

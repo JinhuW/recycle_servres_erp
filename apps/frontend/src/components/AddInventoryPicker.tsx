@@ -46,6 +46,9 @@ export function AddInventoryPicker({ excludeIds, locale, onClose, onAdd }: Props
   const { t } = useT();
   const [q, setQ] = useState('');
   const [items, setItems] = useState<SellableItem[] | null>(null);
+  // The server caps the list, so a broad search can leave lots unseen; the
+  // hint is the only sign of that.
+  const [hasMore, setHasMore] = useState(false);
   const [checked, setChecked] = useState<Set<string>>(new Set());
 
   useEscapeKey(onClose);
@@ -55,12 +58,12 @@ export function AddInventoryPicker({ excludeIds, locale, onClose, onAdd }: Props
     let alive = true;
     const handle = setTimeout(async () => {
       try {
-        const r = await api.get<{ items: SellableItem[] }>(
+        const r = await api.get<{ items: SellableItem[]; hasMore?: boolean }>(
           `/api/sell-orders/sellable${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''}`,
         );
-        if (alive) setItems(r.items);
+        if (alive) { setItems(r.items); setHasMore(r.hasMore ?? false); }
       } catch (e) {
-        if (alive) { setItems([]); handleFetchError(e); }
+        if (alive) { setItems([]); setHasMore(false); handleFetchError(e); }
       }
     }, q ? 250 : 0);
     return () => { alive = false; clearTimeout(handle); };
@@ -172,6 +175,11 @@ export function AddInventoryPicker({ excludeIds, locale, onClose, onAdd }: Props
                 })}
               </div>
             ))
+          )}
+          {items !== null && hasMore && (
+            <div style={{ padding: '10px 0 14px', textAlign: 'center', color: 'var(--fg-subtle)', fontSize: 12 }}>
+              {t('soAddInventoryCapped', { n: items.length })}
+            </div>
           )}
         </div>
 

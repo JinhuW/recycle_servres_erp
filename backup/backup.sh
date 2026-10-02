@@ -61,10 +61,18 @@ pg_dump \
 # reads only the TOC and exits early, so gunzip dies of SIGPIPE (exit 141) and
 # `set -o pipefail` would report a false "corrupt" verdict on a perfectly good
 # dump. Checking the file directly avoids that pipe entirely.
-if ! pg_restore --list "$DUMP_RAW" >/dev/null 2>&1; then
+TOC="$(pg_restore --list "$DUMP_RAW" 2>/dev/null)" || {
   echo "ERROR: dump failed integrity check (pg_restore --list); not uploading." >&2
   exit 1
-fi
+}
+# A readable TOC is not yet a useful dump: an empty or half-migrated database
+# lists fine too. The tables the business runs on must carry data entries.
+for table in orders order_lines sell_orders users; do
+  if ! grep -qE "TABLE DATA public ${table}( |$)" <<<"$TOC"; then
+    echo "ERROR: dump has no data for public.${table}; not uploading." >&2
+    exit 1
+  fi
+done
 
 # Compress for storage/transfer. Custom format is already zlib-compressed, so
 # this is a modest extra squeeze but keeps the .dump.gz naming consistent.
@@ -88,9 +96,12 @@ echo "[$(date -u +%FT%TZ)] Offsite copy complete."
 
 # Prune: keep only the newest $KEEP dumps in R2. Timestamped names sort
 # chronologically, so lexical sort == chronological order.
+# The listing is taken on its own line so a failed `lsf` aborts the run
+# (set -e) instead of reading as "nothing to prune"; `|| true` then keeps a
+# no-match grep from tripping pipefail after a successful upload.
 if [[ "$KEEP" -gt 0 ]]; then
-  rclone lsf "R2:${R2_DST}/" 2>/dev/null \
-    | grep -E "^${NAME_PREFIX}_.*\.dump\.gz$" \
+  LISTING="$(rclone lsf "R2:${R2_DST}/")"
+  { grep -E "^${NAME_PREFIX}_.*\.dump\.gz$" <<<"$LISTING" || true; } \
     | sort \
     | head -n "-${KEEP}" \
     | while IFS= read -r old; do

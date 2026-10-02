@@ -38,7 +38,9 @@ if [[ "$NO_BUILD" != "--no-build" ]]; then
 fi
 
 echo "▸ wrangler deploy --env $ENV"
-(cd "$SCRIPT_DIR" && npx wrangler@4 deploy --env "$ENV")
+# Exact version: this step runs with a DNS-edit token, so a new wrangler is an
+# upgrade to make on purpose, not one a floating `@4` hands us mid-deploy.
+(cd "$SCRIPT_DIR" && npx wrangler@4.146.0 deploy --env "$ENV")
 
 # Retries ride out cert/DNS propagation when a domain was just (re)attached.
 fail=0

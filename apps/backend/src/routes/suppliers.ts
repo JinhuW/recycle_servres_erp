@@ -470,19 +470,24 @@ suppliers.get('/:id', async (c) => {
   `) as unknown as Row[];
   if (!rows[0]) return c.json({ error: 'Not found' }, 404);
 
+  // A client can be shared, but the POs against it stay owner-scoped like
+  // every other PO read: seeing the supplier is not seeing a colleague's orders.
+  const orderScope = effectiveRole(u) === 'manager' ? sql`TRUE` : sql`o.user_id = ${u.id}`;
   const [timeline, orders, sold] = await Promise.all([
     sql`SELECT n.id, n.kind, n.body, n.created_at, u2.name AS author
         FROM supplier_notes n LEFT JOIN users u2 ON u2.id = n.author_id
         WHERE n.supplier_id = ${id} ORDER BY n.created_at DESC LIMIT 100`,
     sql`SELECT o.id, o.lifecycle, o.total_cost::float AS total_cost, o.created_at
-        FROM orders o WHERE o.supplier_id = ${id} ORDER BY o.created_at DESC LIMIT 50`,
+        FROM orders o
+        WHERE o.supplier_id = ${id} AND o.archived_at IS NULL AND ${orderScope}
+        ORDER BY o.created_at DESC LIMIT 50`,
     // What they have actually sold us, straight off the lines. Never typed, so
     // it cannot go stale.
     sql`SELECT COALESCE(NULLIF(btrim(ol.item_type), ''), ol.category, 'Other') AS item_type,
                SUM(ol.qty)::int AS qty,
                SUM(ol.qty * COALESCE(ol.unit_cost, 0))::float AS spend
         FROM order_lines ol JOIN orders o ON o.id = ol.order_id
-        WHERE o.supplier_id = ${id} AND o.archived_at IS NULL
+        WHERE o.supplier_id = ${id} AND o.archived_at IS NULL AND ${orderScope}
         GROUP BY 1 ORDER BY qty DESC LIMIT 12`,
     ]);
   // The contact log is `timeline`, NOT `notes`: suppliers.notes is the client's

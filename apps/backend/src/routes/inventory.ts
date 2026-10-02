@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
-import { getDb } from '../db';
-import { UUID_RE } from '../lib/pagination';
+import { getDb, type SqlLike } from '../db';
+import { UUID_RE, clampLimit, decodeCursor, encodeCursor, escapeLike } from '../lib/pagination';
 import { notify } from '../lib/notify';
 import { getWorkspaceSetting } from '../lib/settings';
 import { nextHumanId } from '../lib/id-seq';
@@ -42,6 +42,9 @@ const PATCH_AUDIT_COL: Record<string, string> = {
 };
 
 const inventory = new Hono<{ Bindings: Env; Variables: { user: User } }>();
+
+// The shape /transfer-orders renders its cursor timestamp in.
+const TRANSFER_CURSOR_TS_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/;
 
 // Category-specific attribute filter parsing. Comma-separated multi-select per
 // facet — within a facet values OR, across facets they AND. `rpm` is a smallint
@@ -160,7 +163,8 @@ function inventoryWhereFrag(
 // the export and the grouped view so the three can never disagree.
 function lineSearchFrag(sql: ReturnType<typeof getDb>, search: string | undefined) {
   if (!search) return sql`TRUE`;
-  return sql`(LOWER(COALESCE(l.brand,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.part_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.serial_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.description,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.item_type,'')) LIKE '%' || ${search} || '%' OR LOWER(o.id) LIKE '%' || ${search} || '%')`;
+  const like = `%${escapeLike(search)}%`;
+  return sql`(LOWER(COALESCE(l.brand,'')) LIKE ${like} OR LOWER(COALESCE(l.part_number,'')) LIKE ${like} OR LOWER(COALESCE(l.serial_number,'')) LIKE ${like} OR LOWER(COALESCE(l.description,'')) LIKE ${like} OR LOWER(COALESCE(l.item_type,'')) LIKE ${like} OR LOWER(o.id) LIKE ${like})`;
 }
 
 // An archived PO's goods are not in stock whatever its lines' status says:
@@ -458,13 +462,14 @@ inventory.get('/events/all', async (c) => {
 
   const scopeFrag  = isManager ? sql`TRUE` : sql`o.user_id = ${u.id}`;
   const kindFrag   = kind ? sql`e.kind = ${kind}` : sql`TRUE`;
+  const like = search ? `%${escapeLike(search)}%` : '';
   const searchFrag = search
     ? sql`(
-        LOWER(COALESCE(l.part_number, ''))   LIKE '%' || ${search} || '%' OR
-        LOWER(COALESCE(l.brand, ''))         LIKE '%' || ${search} || '%' OR
-        LOWER(COALESCE(l.serial_number, '')) LIKE '%' || ${search} || '%' OR
-        LOWER(COALESCE(l.description, ''))   LIKE '%' || ${search} || '%' OR
-        LOWER(COALESCE(act.name, ''))        LIKE '%' || ${search} || '%'
+        LOWER(COALESCE(l.part_number, ''))   LIKE ${like} OR
+        LOWER(COALESCE(l.brand, ''))         LIKE ${like} OR
+        LOWER(COALESCE(l.serial_number, '')) LIKE ${like} OR
+        LOWER(COALESCE(l.description, ''))   LIKE ${like} OR
+        LOWER(COALESCE(act.name, ''))        LIKE ${like}
       )`
     : sql`TRUE`;
 
@@ -691,9 +696,13 @@ inventory.get('/events/by-part', async (c) => {
 
 // Transfer orders. Manager-only. ?status=pending|received|all (default
 // pending). Each order carries every line currently linked to it (no line-
-// status filter; lines are In Transit under a Pending order and Done under a
-// Received one as a natural consequence of receive/reopen), enriched with
-// each line's prior 'from' warehouse from its latest 'transferred' event.
+// status filter; lines are In Transit under a Pending order and the status it
+// had before the transfer under a Received one, as a natural consequence of
+// receive/reopen), enriched with each line's prior 'from' warehouse from its
+// latest 'transferred' event.
+//
+// Keyset-paginated on (created_at DESC, id DESC): ?limit= (default 50, max
+// 200) and ?cursor= from the previous page's nextCursor, null on the last.
 inventory.get('/transfer-orders', async (c) => {
   const u = c.var.user;
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
@@ -705,21 +714,41 @@ inventory.get('/transfer-orders', async (c) => {
     : sp === 'all'    ? sql`TRUE`
     :                   sql`t.status = 'Pending'`;
 
-  const orders = (await sql`
+  const limit = clampLimit(c.req.query('limit'), 50, 200);
+  // Only a cursor this route minted: a numeric or free-form ts would 500 in
+  // the ::timestamptz cast, so anything else restarts from the first page.
+  const raw = decodeCursor(c.req.query('cursor'));
+  const cursor = raw && typeof raw.ts === 'string' && TRANSFER_CURSOR_TS_RE.test(raw.ts) ? raw : null;
+  // ::text first: given a bare ::timestamptz param, postgres.js serializes the
+  // string through a JS Date and drops the microseconds this cursor exists for.
+  const cursorFrag = cursor
+    ? sql`AND (t.created_at, t.id) < ((${cursor.ts}::text)::timestamptz, ${cursor.id}::text)`
+    : sql`AND TRUE`;
+
+  const rows = (await sql`
     SELECT t.id, t.from_warehouse_id, t.to_warehouse_id, t.note, t.status,
            t.created_at, t.received_at,
            fw.short AS from_short, tw.short AS to_short,
            cu.name  AS created_by_name,
            (SELECT COUNT(*)::int FROM order_lines ol WHERE ol.transfer_order_id = t.id)             AS item_count,
-           (SELECT COALESCE(SUM(ol.qty),0)::int FROM order_lines ol WHERE ol.transfer_order_id = t.id) AS unit_count
+           (SELECT COALESCE(SUM(ol.qty),0)::int FROM order_lines ol WHERE ol.transfer_order_id = t.id) AS unit_count,
+           -- Microseconds, rendered by Postgres: a JS Date keeps only
+           -- milliseconds, and a truncated cursor skips every row created
+           -- later within the same millisecond as the page's last one.
+           to_char(t.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_ts
     FROM transfer_orders t
     LEFT JOIN warehouses fw ON fw.id = t.from_warehouse_id
     LEFT JOIN warehouses tw ON tw.id = t.to_warehouse_id
     LEFT JOIN users cu      ON cu.id = t.created_by
-    WHERE ${statusFrag}
-    ORDER BY t.created_at DESC
-    LIMIT 200
-  `) as unknown as Array<Record<string, unknown> & { id: string }>;
+    WHERE ${statusFrag} ${cursorFrag}
+    ORDER BY t.created_at DESC, t.id DESC
+    LIMIT ${limit + 1}
+  `) as unknown as Array<Record<string, unknown> & { id: string; cursor_ts: string }>;
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+  const last = page[page.length - 1];
+  const nextCursor = hasMore ? encodeCursor({ ts: last.cursor_ts, id: last.id }) : null;
+  const orders = page.map(({ cursor_ts: _ts, ...o }) => o);
 
   const orderIds = orders.map((o) => o.id);
   type LineRow = Record<string, unknown> & { transfer_order_id: string };
@@ -752,6 +781,7 @@ inventory.get('/transfer-orders', async (c) => {
   }
   return c.json({
     orders: orders.map((o) => ({ ...o, lines: byOrder.get(o.id) ?? [] })),
+    nextCursor,
   });
 });
 
@@ -1008,6 +1038,7 @@ inventory.get('/products', async (c) => {
 inventory.get('/:id', async (c) => {
   const u = c.var.user;
   const id = c.req.param('id');
+  if (!UUID_RE.test(id)) return c.json({ error: 'Not found' }, 404);
   const sql = getDb(c.env);
 
   const row = (await sql`
@@ -1054,6 +1085,7 @@ inventory.get('/:id', async (c) => {
 inventory.get('/:id/sell-orders', async (c) => {
   if (c.var.user.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const id = c.req.param('id');
+  if (!UUID_RE.test(id)) return c.json({ error: 'Not found' }, 404);
   const sql = getDb(c.env);
 
   const line = (await sql`SELECT 1 FROM order_lines WHERE id = ${id} LIMIT 1`)[0];
@@ -1076,6 +1108,7 @@ inventory.get('/:id/sell-orders', async (c) => {
 inventory.patch('/:id', async (c) => {
   const u = c.var.user;
   const id = c.req.param('id');
+  if (!UUID_RE.test(id)) return c.json({ error: 'Not found' }, 404);
   const sql = getDb(c.env);
   const body = (await c.req.json().catch(() => null)) as
     | {
@@ -1351,6 +1384,7 @@ inventory.post('/transfer', async (c) => {
   }
   type ReqLine = { id: string; qty: number };
   const reqLines: ReqLine[] = [];
+  const seen = new Set<string>();
   for (const raw of body.lines) {
     if (!raw || typeof raw !== 'object') {
       return c.json({ error: 'each line must be an object' }, 400);
@@ -1359,10 +1393,16 @@ inventory.post('/transfer', async (c) => {
     if (typeof r.id !== 'string' || !r.id) {
       return c.json({ error: 'each line needs a string id' }, 400);
     }
+    if (!UUID_RE.test(r.id)) return c.json({ error: `line ${r.id} is not a valid line id` }, 400);
     if (typeof r.qty !== 'number' || !Number.isInteger(r.qty) || r.qty < 1) {
       return c.json({ error: 'each line qty must be a positive integer' }, 400);
     }
-    reqLines.push({ id: r.id, qty: r.qty });
+    // The locked source set holds each row once, so a repeated id would come
+    // back as "one or more lines not found" — the wrong problem to point at.
+    const key = r.id.toLowerCase();
+    if (seen.has(key)) return c.json({ error: `line ${r.id} appears more than once` }, 400);
+    seen.add(key);
+    reqLines.push({ id: key, qty: r.qty });
   }
 
   const sql = getDb(c.env);
@@ -1560,9 +1600,36 @@ inventory.post('/transfer', async (c) => {
   return c.json({ ok: true, transferOrderId: outcome.transferOrderId, lines: outcome.result });
 });
 
+// The status each line held before this transfer order took it — what
+// receive restores and discard reverts to. The newest of the order's own
+// 'transferred' row and any 'reopened' row wins: the PO may have moved the
+// line on (Reviewing → Done) while it sat received, and a reopen records that.
+// Lines whose events predate prior_status are absent; callers default them.
+async function transferPriorStatuses(
+  tx: SqlLike, lineIds: string[], transferOrderId: string,
+): Promise<Map<string, string>> {
+  if (lineIds.length === 0) return new Map();
+  const rows = (await tx`
+    SELECT DISTINCT ON (order_line_id) order_line_id, detail->>'prior_status' AS prior_status
+    FROM inventory_events
+    WHERE order_line_id = ANY(${lineIds}::uuid[])
+      AND kind IN ('transferred', 'reopened')
+      AND detail->>'transfer_order_id' = ${transferOrderId}
+      AND detail->>'prior_status' IS NOT NULL
+    ORDER BY order_line_id, created_at DESC
+  `) as unknown as Array<{ order_line_id: string; prior_status: string }>;
+  return new Map(rows.map((r) => [r.order_line_id, r.prior_status]));
+}
+
+// Transfer only ever takes a Reviewing or Done line. One with no recorded
+// prior status comes back Reviewing — the conservative direction: a human
+// re-confirms it rather than it being promoted to fully stocked by mistake.
+const LEGACY_PRIOR_STATUS = 'Reviewing';
+
 // Receive a whole transfer order. Manager-only. Validates the order is
-// Pending (row-locked inside the tx), flips every still-In-Transit line under
-// it to Done with a 'received' event, and marks the order Received.
+// Pending (row-locked inside the tx), returns every still-In-Transit line
+// under it to the status it had before the transfer with a 'received' event,
+// and marks the order Received.
 inventory.post('/transfer-orders/:id/receive', async (c) => {
   const u = c.var.user;
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
@@ -1585,41 +1652,49 @@ inventory.post('/transfer-orders/:id/receive', async (c) => {
       return;
     }
     const lines = (await tx`
-      SELECT id FROM order_lines
-      WHERE transfer_order_id = ${id} AND status = 'In Transit'
-    `) as unknown as Array<{ id: string }>;
+      SELECT l.id, (o.archived_at IS NOT NULL) AS archived
+      FROM order_lines l JOIN orders o ON o.id = l.order_id
+      WHERE l.transfer_order_id = ${id} AND l.status = 'In Transit'
+      FOR UPDATE OF l
+    `) as unknown as Array<{ id: string; archived: boolean }>;
     if (lines.length > 0) {
-      // Collapse the per-line UPDATE+INSERT pair into two bulk statements.
-      // Receiving a 200-line transfer order used to fire 400 sequential
-      // round-trips inside the tx — under load that's a slow request and
-      // unnecessary lock duration on the order_lines rows.
-      const lineIds = lines.map(l => l.id);
-      // A line received into an archived PO lands at Archived, not Done: the
-      // PO's goods are out of stock, and a Done line behind the archive flag
-      // is hidden from every list yet unknown to unarchive. Only a line 0122
-      // put back at In Transit gets here — the archive button refuses a PO
+      // Bulk statements over unnest'd arrays, not a per-line UPDATE+INSERT
+      // pair: a 200-line transfer order used to fire 400 sequential round-trips
+      // inside the tx, holding the order_lines locks the whole time.
+      const lineIds = lines.map((l) => l.id);
+      const prior = await transferPriorStatuses(tx, lineIds, id);
+      const restored = lineIds.map((lid) => prior.get(lid) ?? LEGACY_PRIOR_STATUS);
+      // A line received into an archived PO lands at Archived instead: the
+      // PO's goods are out of stock, and a stock-status line behind the archive
+      // flag is hidden from every list yet unknown to unarchive. Only a line
+      // 0122 put back at In Transit gets here — the archive button refuses a PO
       // with a pending transfer. The status row is what unarchive restores
-      // from, so it names Done; reopen 409s on such a transfer until then.
+      // from, so it names the restored status; reopen 409s on such a transfer
+      // until then.
+      const landed = lines.map((l, i) => (l.archived ? ARCHIVED_LINE_STATUS : restored[i]));
       await tx`
         UPDATE order_lines l
-           SET status = CASE WHEN o.archived_at IS NULL THEN 'Done' ELSE ${ARCHIVED_LINE_STATUS} END
-          FROM orders o
-         WHERE l.id = ANY(${lineIds}::uuid[]) AND o.id = l.order_id
+           SET status = v.status
+          FROM unnest(${lineIds}::uuid[], ${landed}::text[]) AS v(id, status)
+         WHERE l.id = v.id
       `;
-      const detail = tx.json({ at: ord.to_warehouse_id, transfer_order_id: id });
       await tx`
         INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
-        SELECT id, ${u.id}::uuid, 'received', ${detail}::jsonb
-        FROM order_lines
-        WHERE id = ANY(${lineIds}::uuid[])
+        SELECT v.id, ${u.id}::uuid, 'received',
+               jsonb_build_object('at', ${ord.to_warehouse_id}::text, 'transfer_order_id', ${id}::text,
+                                  'field', 'status', 'from', 'In Transit', 'to', v.status)
+        FROM unnest(${lineIds}::uuid[], ${restored}::text[]) AS v(id, status)
       `;
-      const archivedDetail = tx.json({ field: 'status', from: 'Done', to: ARCHIVED_LINE_STATUS });
-      await tx`
-        INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
-        SELECT id, ${u.id}::uuid, 'status', ${archivedDetail}::jsonb
-        FROM order_lines
-        WHERE id = ANY(${lineIds}::uuid[]) AND status = ${ARCHIVED_LINE_STATUS}
-      `;
+      const archivedIds = lineIds.filter((_, i) => lines[i].archived);
+      const archivedFrom = restored.filter((_, i) => lines[i].archived);
+      if (archivedIds.length > 0) {
+        await tx`
+          INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
+          SELECT v.id, ${u.id}::uuid, 'status',
+                 jsonb_build_object('field', 'status', 'from', v.status, 'to', ${ARCHIVED_LINE_STATUS}::text)
+          FROM unnest(${archivedIds}::uuid[], ${archivedFrom}::text[]) AS v(id, status)
+        `;
+      }
     }
     await tx`
       UPDATE transfer_orders
@@ -1638,7 +1713,9 @@ inventory.post('/transfer-orders/:id/receive', async (c) => {
 // Re-open a received transfer order. Manager-only. Reverts the lines that
 // CURRENTLY point to the order (a line re-transferred elsewhere had its
 // transfer_order_id overwritten and is intentionally not chased). Guard:
-// every such line must still be Done and not committed to a sell order.
+// every such line must still be at a stock status (Reviewing or Done — the one
+// receive restored, or where the PO has since moved it) and not committed to
+// a sell order.
 inventory.post('/transfer-orders/:id/reopen', async (c) => {
   const u = c.var.user;
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
@@ -1674,7 +1751,7 @@ inventory.post('/transfer-orders/:id/reopen', async (c) => {
       outcome = { code: 409, msg: `transfer order ${id} has no lines to re-open` };
       return;
     }
-    const bad = lines.filter((l) => l.status !== 'Done' || l.sell_count > 0);
+    const bad = lines.filter((l) => (l.status !== 'Reviewing' && l.status !== 'Done') || l.sell_count > 0);
     if (bad.length > 0) {
       outcome = { code: 409, msg: `cannot re-open: line(s) ${bad.map((l) => l.id).join(', ')} have moved on since receipt` };
       return;
@@ -1682,9 +1759,12 @@ inventory.post('/transfer-orders/:id/reopen', async (c) => {
 
     const ids = lines.map((l) => l.id);
     await tx`UPDATE order_lines SET status = 'In Transit' WHERE id = ANY(${ids}::uuid[])`;
+    // prior_status here is what the next receive (or a discard) restores.
     await tx`
       INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
-      SELECT unnest(${ids}::uuid[]), ${u.id}, 'reopened', ${tx.json({ transfer_order_id: id })}
+      SELECT v.id, ${u.id}::uuid, 'reopened',
+             jsonb_build_object('transfer_order_id', ${id}::text, 'prior_status', v.status)
+      FROM unnest(${ids}::uuid[], ${lines.map((l) => l.status)}::text[]) AS v(id, status)
     `;
     await tx`
       UPDATE transfer_orders
@@ -1755,6 +1835,7 @@ inventory.delete('/transfer-orders/:id', async (c) => {
         AND detail->>'transfer_order_id' = ${id}
     `) as unknown as Array<{ order_line_id: string; detail: Record<string, unknown> }>;
     const evByLine = new Map(evs.map((e) => [e.order_line_id, e.detail]));
+    const priorByLine = await transferPriorStatuses(tx, lineIds, id);
 
     for (const l of lines) {
       const detail = evByLine.get(l.id) ?? {};
@@ -1763,13 +1844,7 @@ inventory.delete('/transfer-orders/:id', async (c) => {
       // origin; setting warehouse_id = NULL is intentional, so the line re-inherits its order's
       // warehouse and the pre-transfer state is restored.
       const origin = ord.from_warehouse_id ?? fromDetail;
-      // prior_status is stamped on the 'transferred' event by current code.
-      // Events predating that field have no record of the pre-transfer status;
-      // since transfer is only ever allowed from 'Reviewing' or 'Done', restore
-      // legacy lines to 'Reviewing' — the conservative direction (a human
-      // re-confirms before it counts as fully stocked) rather than wrongly
-      // promoting a once-'Reviewing' line to 'Done'.
-      const priorStatus = typeof detail.prior_status === 'string' ? detail.prior_status : 'Reviewing';
+      const priorStatus = priorByLine.get(l.id) ?? LEGACY_PRIOR_STATUS;
       const peerLineId = typeof detail.peer_line_id === 'string' ? detail.peer_line_id : null;
 
       let merged = false;

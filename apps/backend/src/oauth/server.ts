@@ -93,6 +93,10 @@ export function redirectUriMatches(registered: string[], presented: string): boo
 const DCR_PER_IP_HOUR = 10;
 const DCR_GLOBAL_HOUR = 60;
 const DCR_UNUSED_CAP = 200;
+const DCR_CLIENT_NAME_MAX = 80;
+
+const isStringArray = (v: unknown): v is string[] =>
+  Array.isArray(v) && v.every((x) => typeof x === 'string');
 
 oauth.post('/register', async (c) => {
   if (!dcrEnabled(c.env)) {
@@ -104,7 +108,9 @@ oauth.post('/register', async (c) => {
     || null;
   // Counted before any work, mirroring the windowed-COUNT throttle on login.
   // `unused` reclaims the case where a script registers repeatedly but never
-  // completes a flow — those clients never mint a refresh token.
+  // completes a flow — those clients never mint a refresh token. It is
+  // windowed like the others: counted over all time, abandoned registrations
+  // pile up until the cap shuts registration for good.
   const [counts] = await sql<{ per_ip: number; global_n: number; unused: number }[]>`
     SELECT
       COUNT(*) FILTER (
@@ -113,9 +119,10 @@ oauth.post('/register', async (c) => {
       )::int AS per_ip,
       COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '1 hour')::int AS global_n,
       COUNT(*) FILTER (
-        WHERE NOT EXISTS (
-          SELECT 1 FROM oauth_refresh_tokens rt WHERE rt.client_id = oauth_clients.id
-        )
+        WHERE created_at > NOW() - INTERVAL '24 hours'
+          AND NOT EXISTS (
+            SELECT 1 FROM oauth_refresh_tokens rt WHERE rt.client_id = oauth_clients.id
+          )
       )::int AS unused
     FROM oauth_clients
     WHERE created_by IS NULL AND revoked_at IS NULL
@@ -130,16 +137,36 @@ oauth.post('/register', async (c) => {
     }, 429);
   }
   const body = (await c.req.json().catch(() => null)) as null | {
-    client_name?: string;
-    redirect_uris?: string[];
-    grant_types?: string[];
-    scope?: string;
-    token_endpoint_auth_method?: string;
+    client_name?: unknown;
+    redirect_uris?: unknown;
+    grant_types?: unknown;
+    scope?: unknown;
+    token_endpoint_auth_method?: unknown;
   };
   if (!body?.client_name || !Array.isArray(body.redirect_uris) || body.redirect_uris.length === 0) {
     return c.json({ error: 'client_name and redirect_uris required' }, 400);
   }
-  for (const r of body.redirect_uris) {
+  // The name is shown to managers on the consent screen and in Settings, and
+  // whoever registers is anonymous: no control characters, and a bounded length.
+  const clientName = typeof body.client_name === 'string'
+    ? body.client_name.replace(/[\u0000-\u001f\u007f-\u009f]/g, '').trim()
+    : '';
+  if (!clientName || clientName.length > DCR_CLIENT_NAME_MAX) {
+    return c.json({
+      error: 'invalid_client_metadata',
+      error_description: `client_name must be 1–${DCR_CLIENT_NAME_MAX} characters`,
+    }, 400);
+  }
+  const { redirect_uris: redirectUris, grant_types: grantTypesIn, scope: scopeIn } = body;
+  if (!isStringArray(redirectUris)
+      || (grantTypesIn !== undefined && !isStringArray(grantTypesIn))
+      || (scopeIn !== undefined && typeof scopeIn !== 'string')) {
+    return c.json({
+      error: 'invalid_client_metadata',
+      error_description: 'redirect_uris and grant_types must be arrays of strings, scope a string',
+    }, 400);
+  }
+  for (const r of redirectUris) {
     // The rejected URI is deliberately not echoed. Registration is open and
     // unauthenticated, and a validation failure creates no client row — so it
     // never reaches the throttle above, which counts rows. Echoing would hand
@@ -147,7 +174,7 @@ oauth.post('/register', async (c) => {
     if (!isValidRedirectUri(r)) return c.json({ error: 'invalid_redirect_uri' }, 400);
   }
   const allowedGrants = new Set(['authorization_code', 'refresh_token']);
-  const grants = (body.grant_types ?? ['authorization_code', 'refresh_token']).filter(g => allowedGrants.has(g));
+  const grants = (grantTypesIn ?? ['authorization_code', 'refresh_token']).filter(g => allowedGrants.has(g));
   if (grants.length === 0) return c.json({ error: 'no allowed grant_types requested' }, 400);
   // Narrow to the advertised scope set, but keep market:write: registration
   // alone grants nothing — a DCR client can only mint a token through the
@@ -159,7 +186,7 @@ oauth.post('/register', async (c) => {
   // silently hid the sell-order and write tools from every connector that
   // registered without asking, which reads as "the server only has two tools"
   // rather than as a permissions issue.
-  const requested = body.scope?.split(' ').filter(Boolean) ?? [...KNOWN_SCOPES];
+  const requested = scopeIn?.split(' ').filter(Boolean) ?? [...KNOWN_SCOPES];
   const scopes = requested.filter(s => KNOWN_SCOPES.has(s));
   if (scopes.length === 0) scopes.push(...KNOWN_SCOPES);
   // token_endpoint_auth_method: "none" = public client (PKCE only, no secret).
@@ -169,8 +196,8 @@ oauth.post('/register', async (c) => {
     : 'client_secret_basic';
   const isPublic = authMethod === 'none';
   const out = await createOAuthClient(sql, {
-    name: body.client_name,
-    redirectUris: body.redirect_uris,
+    name: clientName,
+    redirectUris,
     grantTypes: grants,
     scopes,
     createdBy: null,
@@ -186,8 +213,8 @@ oauth.post('/register', async (c) => {
     ...(out.clientSecret
       ? { client_secret: out.clientSecret, client_secret_expires_at: 0 }
       : {}),
-    client_name: body.client_name,
-    redirect_uris: body.redirect_uris,
+    client_name: clientName,
+    redirect_uris: redirectUris,
     grant_types: grants,
     response_types: ['code'],
     scope: scopes.join(' '),
@@ -232,6 +259,8 @@ oauth.get('/authorize', async (c) => {
     ? [...client.scopes]
     : requestedRaw.filter(s => client.scopes.includes(s));
   if (requested.length === 0) return redirectWithError('invalid_scope');
+  // Signature-only on purpose: this just parks the request. The consent POST
+  // that issues the code sits behind authMiddleware, which checks the user.
   const at = getCookie(c, 'at');
   const payload = at ? await verifyToken(c.env, at) : null;
   if (!payload) {
@@ -394,13 +423,22 @@ function readClientCreds(
   return null;
 }
 
+// A JSON body can put any type where the form grammar only has strings, so a
+// non-string value is dropped and reads as absent: `code: {}` gets the same
+// invalid_request as no code, instead of reaching the hash or the SQL.
 async function readFormBody(
   c: Context<{ Bindings: Env; Variables: { user: User } }>,
 ): Promise<Record<string, string>> {
   const ct = c.req.header('content-type') ?? '';
-  if (ct.includes('application/json')) return await c.req.json();
+  if (ct.includes('application/json')) {
+    const body: unknown = await c.req.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return {};
+    return Object.fromEntries(
+      Object.entries(body).filter((e): e is [string, string] => typeof e[1] === 'string'),
+    );
+  }
   const text = await c.req.text();
-  return Object.fromEntries(new URLSearchParams(text)) as Record<string, string>;
+  return Object.fromEntries(new URLSearchParams(text));
 }
 
 oauth.post('/token', async (c) => {
@@ -506,11 +544,8 @@ oauth.post('/token', async (c) => {
     if (!raw) {
       return fail('refresh_token', { error: 'invalid_request' }, 400);
     }
-    const res = await rotateRefreshToken(sql, env, raw);
+    const res = await rotateRefreshToken(sql, env, raw, client.id);
     if (!res.ok) {
-      return fail('refresh_token', { error: 'invalid_grant' }, 400);
-    }
-    if (res.clientId !== client.id) {
       return fail('refresh_token', { error: 'invalid_grant' }, 400);
     }
     const at = await signAccessToken(env, {

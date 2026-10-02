@@ -13,9 +13,16 @@ export type ErrorDialogContent = {
 
 type QueuedError = ErrorDialogContent & { seq: number };
 
+// A failed call's reference line ends in its request id
+// (`<method path> · <status> · <id>`, lib/errorToast.ts). Every retry mints a
+// new id, so comparing it would make each repeat of one failure a new dialog.
+const withoutRequestId = (detail: string) => detail.replace(/( · \d{3}) · \S+$/, '$1');
+
+const detailsKey = (c: ErrorDialogContent) =>
+  (c.details ?? []).map(withoutRequestId).join('\n');
+
 const sameProblem = (a: ErrorDialogContent, b: ErrorDialogContent) =>
-  a.msg === b.msg && a.title === b.title
-  && (a.details ?? []).join('\n') === (b.details ?? []).join('\n');
+  a.msg === b.msg && a.title === b.title && detailsKey(a) === detailsKey(b);
 
 /**
  * Errors queue instead of overwriting one another: a photo upload and an

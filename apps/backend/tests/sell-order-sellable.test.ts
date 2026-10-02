@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { resetDb } from './helpers/db';
+import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
@@ -17,7 +17,22 @@ type SellableItem = {
 };
 
 const getSellable = (token: string, qs = '') =>
-  api<{ items: SellableItem[] }>('GET', `/api/sell-orders/sellable${qs}`, { token });
+  api<{ items: SellableItem[]; hasMore: boolean }>('GET', `/api/sell-orders/sellable${qs}`, { token });
+
+// Extra Reviewing lines on the PO of an existing sellable line, so they pass
+// every sellability rule without driving a PO through its stages.
+async function addReviewingLines(token: string, n: number, partNumber: string): Promise<string[]> {
+  const seedLine = await freeSellableLine(token);
+  const sql = getTestDb();
+  const rows = await sql<{ id: string }[]>`
+    INSERT INTO order_lines (order_id, category, qty, unit_cost, part_number, status, position)
+    SELECT order_id, 'RAM', 1, 10, ${partNumber}, 'Reviewing', 0
+    FROM order_lines, generate_series(1, ${n})
+    WHERE id = ${seedLine.id}
+    RETURNING id
+  `;
+  return rows.map(r => r.id);
+}
 
 describe('GET /api/sell-orders/sellable', () => {
   beforeEach(async () => { await resetDb(); });
@@ -81,6 +96,27 @@ describe('GET /api/sell-orders/sellable', () => {
     expect(filtered.status).toBe(200);
     expect(filtered.body.items.length).toBeGreaterThan(0);
     expect(filtered.body.items.some(i => i.inventoryId === withPn!.inventoryId)).toBe(true);
+  });
+
+  it('caps the list at 200 and says so with hasMore', async () => {
+    const { token } = await loginAs(ALEX);
+    const before = await getSellable(token);
+    expect(before.status).toBe(200);
+    if (before.body.items.length < 200) expect(before.body.hasMore).toBe(false);
+
+    await addReviewingLines(token, 210, 'HASMORE-PN');
+    const r = await getSellable(token);
+    expect(r.status).toBe(200);
+    expect(r.body.items).toHaveLength(200);
+    expect(r.body.hasMore).toBe(true);
+  });
+
+  it('treats % in the search box as a literal character', async () => {
+    const { token } = await loginAs(ALEX);
+    const [id] = await addReviewingLines(token, 1, 'ESC%LIKE');
+    const r = await getSellable(token, `?q=${encodeURIComponent('%')}`);
+    expect(r.status).toBe(200);
+    expect(r.body.items.map(i => i.inventoryId)).toEqual([id]);
   });
 
   it('is manager-only', async () => {

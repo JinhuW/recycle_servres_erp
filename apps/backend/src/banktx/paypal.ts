@@ -253,7 +253,19 @@ export function normalizeDispute(
   };
 }
 
-async function fetchDisputes(env: Env): Promise<NormalizedDispute[]> {
+// Compared as instants, not strings: the stored copy took its `updatedAt` from
+// the detail document, and nothing promises the list spells the same moment
+// the same way. A miss only costs the detail GET.
+function sameInstant(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false;
+  const ta = Date.parse(a), tb = Date.parse(b);
+  return Number.isFinite(ta) && ta === tb;
+}
+
+async function fetchDisputes(
+  env: Env,
+  known?: ReadonlyMap<string, NormalizedDispute>,
+): Promise<NormalizedDispute[]> {
   // No window parameters. `start_time` is deprecated and is a 400 alongside
   // `disputed_transaction_id`; `update_time_after` already defaults to the full
   // 180 days PayPal will serve. Taking the lot every run is also what keeps a
@@ -281,9 +293,18 @@ async function fetchDisputes(env: Env): Promise<NormalizedDispute[]> {
     url = next;
   }
 
+  // Every case costs a detail GET, every run, for as long as PayPal serves it
+  // — 180 days of closed cases re-read four times a day. A case PayPal hasn't
+  // touched since the stored copy keeps that copy. `dispute_state` is the one
+  // field only the list carries, so it is refreshed from the summary anyway.
   const out: NormalizedDispute[] = [];
   for (const s of summaries) {
     if (!s.dispute_id) continue;
+    const stored = known?.get(s.dispute_id);
+    if (stored && sameInstant(stored.updatedAt, s.update_time)) {
+      out.push({ ...stored, disputeState: s.dispute_state ?? stored.disputeState });
+      continue;
+    }
     const detail = await getJson<WireDisputeDetail>(
       env,
       `${base(env)}/v1/customer/disputes/${encodeURIComponent(s.dispute_id)}`,
@@ -335,6 +356,6 @@ export function paypalProvider(env: Env): BankProvider {
       }
       return { accounts: [{ externalId: 'primary', name: 'PayPal' }], txns };
     },
-    fetchDisputes: () => fetchDisputes(env),
+    fetchDisputes: (known) => fetchDisputes(env, known),
   };
 }
