@@ -246,6 +246,7 @@ function installEventedWindow(entryHash: string) {
       },
       back() { move(() => { if (i > 0) i--; }); },
       forward() { move(() => { if (i < stack.length - 1) i++; }); },
+      go(delta: number) { move(() => { i = Math.min(stack.length - 1, Math.max(0, i + delta)); }); },
     },
     addEventListener() {},
   };
@@ -338,6 +339,118 @@ describe('leaving unsaved edits', () => {
     flush();
     expect(asked).toEqual(['/dashboard']);
     expect(w.hash()).toBe('#/purchase-orders');
+  });
+
+  // A refused Forward used to be undone by pushing the page again after the
+  // refused entry, which left that entry behind the page: the next in-app Back
+  // landed on it with a pass, and the edits went unasked.
+  it('keeps a refused Forward ahead of the page, not behind it', async () => {
+    route.navigate('/purchase-orders');
+    route.navigate('/inventory');
+    flush();
+    route.navigateBack('/dashboard');
+    flush();
+    const asked = guard(async () => false);
+    w.win.history.forward();
+    flush();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(w.hash()).toBe('#/purchase-orders');
+    w.win.history.forward();
+    flush();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(w.hash()).toBe('#/purchase-orders');
+    expect(asked).toEqual(['/inventory', '/inventory']);
+    route.navigateBack('/dashboard');
+    flush();
+    expect(w.hash()).toBe('#/dashboard');
+  });
+
+  it('keeps a refused typed address ahead of the page too', async () => {
+    route.navigate('/purchase-orders');
+    flush();
+    const asked = guard(async () => false);
+    w.win.location.hash = '#/clients';
+    flush();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(w.hash()).toBe('#/purchase-orders');
+    w.win.history.back();
+    flush();
+    expect(asked).toEqual(['/clients', '/dashboard']);
+    expect(w.hash()).toBe('#/purchase-orders');
+  });
+
+  it('undoes a Back onto the first entry, and goes there on a yes', async () => {
+    route.navigate('/purchase-orders');
+    flush();
+    let answer!: (ok: boolean) => void;
+    const asked = guard(() => new Promise((r) => { answer = r; }));
+    w.win.history.back();
+    flush();
+    expect(w.hash()).toBe('#/purchase-orders');
+    expect(asked).toEqual(['/dashboard']);
+    answer(true);
+    await new Promise((r) => setTimeout(r, 0));
+    flush();
+    expect(w.hash()).toBe('#/dashboard');
+  });
+
+  // The history menu's long-press jumps several entries at once.
+  it('steps a refused multi-entry Forward all the way back', async () => {
+    route.navigate('/a');
+    route.navigate('/b');
+    route.navigate('/c');
+    flush();
+    route.navigateBack('/dashboard');
+    flush();
+    route.navigateBack('/dashboard');
+    flush();
+    expect(w.hash()).toBe('#/a');
+    const asked = guard(async () => false);
+    w.win.history.go(2);
+    flush();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(w.hash()).toBe('#/a');
+    // The screen is still /a's: Back asks about what is really behind it.
+    w.win.history.back();
+    flush();
+    expect(asked).toEqual(['/c', '/dashboard']);
+    expect(w.hash()).toBe('#/a');
+  });
+
+  it('lands on a Forward target with its query on a yes', async () => {
+    route.navigate('/purchase-orders');
+    route.navigate('/purchase-orders/PO-1?tab=payment');
+    flush();
+    route.navigateBack('/dashboard');
+    flush();
+    guard(async () => true);
+    w.win.history.forward();
+    flush();
+    await new Promise((r) => setTimeout(r, 0));
+    flush();
+    expect(w.hash()).toBe('#/purchase-orders/PO-1?tab=payment');
+  });
+
+  // A reload restarts the module's counter while the stack keeps its numbers.
+  it('still reads a Back as Back after a reload', async () => {
+    route.navigate('/a');
+    route.navigate('/b');
+    route.navigate('/c');
+    flush();
+    route.navigateBack('/dashboard');
+    flush();
+    vi.resetModules();
+    route = await import('./route');
+    w.win.history.forward();
+    flush();
+    route.navigate('/e');
+    flush();
+    const asked = guard(async () => false);
+    w.win.history.back();
+    flush();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(asked).toEqual(['/c']);
+    expect(w.hash()).toBe('#/e');
   });
 
   it('lands on the Forward target on a yes', async () => {
