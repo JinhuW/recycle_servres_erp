@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-157](./RS-157-review-mode-asks-to-move-the-po-to-reviewing-po-list.md) | in-review | feature | P2 | Review mode asks to move the PO to Reviewing; PO list opens it | 1.201.0 |
+| [RS-157](./RS-157-review-mode-asks-to-move-the-po-to-reviewing-po-list.md) | done | feature | P2 | Review mode asks to move the PO to Reviewing; PO list opens it | 1.201.0 |
 | [RS-156](./RS-156-pre-release-review-fixes-for-v1-200-1.md) | done | bug | P2 | Pre-release review fixes for v1.200.1 | 1.200.2 |
 | [RS-155](./RS-155-re-review-fixes-unpair-tombstone-64-budgets-limiter.md) | done | bug | P2 | Re-review fixes: unpair tombstone, /64 budgets, limiter eviction, leave guard on navigation, Unicode supplier keys | 1.200.1 |
 | [RS-154](./RS-154-frontend-robustness-one-layout-per-load-unsaved-edit.md) | done | bug | P2 | Frontend robustness: one layout per load, unsaved-edit guard, cross-tab refresh, shared PO permission and material rules | 1.200.0 |
