@@ -72,15 +72,34 @@ describe('oauth tokens', () => {
     const r1 = await issueRefreshToken(db, env(), {
       clientId: c.clientId, userId: u, scopes: ['market:read'],
     });
-    const r2 = await rotateRefreshToken(db, env(), r1.raw);
+    const r2 = await rotateRefreshToken(db, env(), r1.raw, c.clientId);
     expect(r2.ok).toBe(true);
-    const reuse = await rotateRefreshToken(db, env(), r1.raw);
+    const reuse = await rotateRefreshToken(db, env(), r1.raw, c.clientId);
     expect(reuse.ok).toBe(false);
     // The just-issued r2 token is now revoked transitively.
     if (r2.ok) {
-      const after = await rotateRefreshToken(db, env(), r2.raw);
+      const after = await rotateRefreshToken(db, env(), r2.raw, c.clientId);
       expect(after.ok).toBe(false);
     }
+  });
+
+  it('rotation refuses a token presented by another client and burns nothing', async () => {
+    const db = getTestDb();
+    const owner = await aClient();
+    const thief = await aClient();
+    const u = (await db<{ id: string }[]>`SELECT id FROM users WHERE active LIMIT 1`)[0].id;
+    const r1 = await issueRefreshToken(db, env(), {
+      clientId: owner.clientId, userId: u, scopes: ['market:read'],
+    });
+    const stolen = await rotateRefreshToken(db, env(), r1.raw, thief.clientId);
+    expect(stolen).toEqual({ ok: false, reason: 'not_found' });
+    const r2 = await rotateRefreshToken(db, env(), r1.raw, owner.clientId);
+    expect(r2.ok).toBe(true);
+    if (!r2.ok) return;
+    // Replaying the now-rotated r1 from the other client must not trip the
+    // reuse path either: the owner's live successor keeps working.
+    expect((await rotateRefreshToken(db, env(), r1.raw, thief.clientId)).ok).toBe(false);
+    expect((await rotateRefreshToken(db, env(), r2.raw, owner.clientId)).ok).toBe(true);
   });
 
   it('issueRefreshToken with null userId works (client_credentials)', async () => {
@@ -111,10 +130,10 @@ describe('oauth tokens', () => {
       clientId: c.clientId, userId: u, scopes: ['market:read'],
     });
     await db`UPDATE users SET active = FALSE WHERE id = ${u}`;
-    expect((await rotateRefreshToken(db, env(), r1.raw)).ok).toBe(false);
+    expect((await rotateRefreshToken(db, env(), r1.raw, c.clientId)).ok).toBe(false);
     // Reactivation must not resurrect the grant — the family was revoked.
     await db`UPDATE users SET active = TRUE WHERE id = ${u}`;
-    expect((await rotateRefreshToken(db, env(), r1.raw)).ok).toBe(false);
+    expect((await rotateRefreshToken(db, env(), r1.raw, c.clientId)).ok).toBe(false);
   });
 
   it('rotation narrows a demoted manager to market:read (sellorder reads included)', async () => {
@@ -125,7 +144,7 @@ describe('oauth tokens', () => {
       clientId: c.clientId, userId: u, scopes: ['market:read', 'market:write', 'sellorder:read'],
     });
     await db`UPDATE users SET role = 'purchaser' WHERE id = ${u}`;
-    const res = await rotateRefreshToken(db, env(), r1.raw);
+    const res = await rotateRefreshToken(db, env(), r1.raw, c.clientId);
     expect(res.ok).toBe(true);
     if (res.ok) expect(res.scopes).toEqual(['market:read']);
   });
@@ -138,6 +157,6 @@ describe('oauth tokens', () => {
       clientId: c.clientId, userId: u, scopes: ['market:read'],
     });
     await deactivateMember(db, u);
-    expect((await rotateRefreshToken(db, env(), r1.raw)).ok).toBe(false);
+    expect((await rotateRefreshToken(db, env(), r1.raw, c.clientId)).ok).toBe(false);
   });
 });

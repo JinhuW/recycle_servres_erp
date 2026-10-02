@@ -34,6 +34,14 @@ export function getDb(env: Env): Sql {
       idle_timeout: 20,
       connect_timeout: 10,
       prepare: false, // disable prepared statements (safe with poolers; no perf need here)
+      // Ten connections are the whole budget, and /api/health draws from it
+      // too: a runaway query or a transaction a bug left open would otherwise
+      // hold one for good. Handlers run in tens of ms, so a minute is only
+      // ever hit by something stuck.
+      connection: {
+        statement_timeout: 60_000,
+        idle_in_transaction_session_timeout: 60_000,
+      },
     });
     pools.set(url, pool);
   }

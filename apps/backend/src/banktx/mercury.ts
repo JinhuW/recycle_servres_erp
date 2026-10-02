@@ -7,7 +7,8 @@ import type { Env } from '../types';
 import { PAYPAL_TXN_STRICT } from '../ai/paypal';
 import { log } from '../lib/log';
 import type {
-  BankAccountInfo, BankFetch, BankProvider, BankTxnCategory, KnownAccounts, NormalizedTxn, SettleStatus,
+  BankAccountInfo, BankFetch, BankFetchError, BankProvider, BankTxnCategory, KnownAccounts, NormalizedTxn,
+  SettleStatus,
 } from './types';
 
 const DEFAULT_BASE = 'https://api.mercury.com';
@@ -110,13 +111,17 @@ export function mercuryProvider(env: Env): BankProvider {
     source: 'mercury',
     async fetchSince(sinceIso: string, known?: KnownAccounts): Promise<BankFetch> {
       // Card spend must not cost us the bank feed: a token without credit
-      // access (or a /credit outage) fails only this part.
+      // access (or a /credit outage) fails only this part. It is reported, not
+      // only logged — a card feed that is quietly always empty reads as a
+      // card nobody used.
+      const partialErrors: BankFetchError[] = [];
       const [{ accounts: wireAccounts }, credit] = await Promise.all([
         call<{ accounts: WireAccount[] }>(env, '/api/v1/accounts', {}),
         call<{ accounts: WireCreditAccount[] }>(env, '/api/v1/credit', {}).then(
           (r) => r.accounts ?? [],
           (e: unknown) => {
             log.warn('mercury credit accounts unavailable', { module: 'banktx', error: errorText(e) });
+            partialErrors.push({ account: null, message: errorText(e) });
             return [];
           },
         ),
@@ -189,9 +194,10 @@ export function mercuryProvider(env: Env): BankProvider {
           accounts.push(card);
         } catch (e) {
           log.warn('mercury credit transactions unavailable', { module: 'banktx', account: card.externalId, error: errorText(e) });
+          partialErrors.push({ account: card.externalId, message: errorText(e) });
         }
       }
-      return { accounts, txns };
+      return { accounts, txns, partialErrors };
     },
   };
 }

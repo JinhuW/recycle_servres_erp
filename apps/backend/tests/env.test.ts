@@ -1,6 +1,19 @@
 import { describe, it, expect } from 'vitest';
 import { buildEnv } from '../src/env';
 
+// Long enough for the production length floor. Test fixture only.
+const PROD_SECRET = 'p'.repeat(32); // pragma: allowlist secret
+
+// Everything a production boot needs, so each test below can knock out one.
+const PROD = {
+  NODE_ENV: 'production',
+  DATABASE_URL: 'postgres://u:realpw@db/erp',
+  JWT_SECRET: PROD_SECRET,
+  CORS_ALLOWED_ORIGINS: 'https://app',
+  OPENROUTER_API_KEY: 'k',
+  OAUTH_SIGNING_KEY_CURRENT: 'x',
+} as NodeJS.ProcessEnv;
+
 describe('buildEnv', () => {
   it('maps process.env into the Env shape', () => {
     const env = buildEnv({
@@ -24,7 +37,7 @@ describe('buildEnv', () => {
     expect(() => buildEnv({
       NODE_ENV: 'production',
       DATABASE_URL: 'postgres://x',
-      JWT_SECRET: 's',
+      JWT_SECRET: PROD_SECRET,
       CORS_ALLOWED_ORIGINS: 'https://app',
     } as NodeJS.ProcessEnv)).toThrow(/OPENROUTER_API_KEY/);
   });
@@ -51,11 +64,36 @@ describe('buildEnv', () => {
     expect(() => buildEnv({
       NODE_ENV: 'production',
       DATABASE_URL: 'postgres://recycle:recycle@postgres:5432/recycle_erp',
-      JWT_SECRET: 'a-real-secret', // test fixture — pragma: allowlist secret
+      JWT_SECRET: PROD_SECRET,
       CORS_ALLOWED_ORIGINS: 'https://app',
       OPENROUTER_API_KEY: 'k',
       OAUTH_SIGNING_KEY_CURRENT: 'x',
     } as NodeJS.ProcessEnv)).toThrow(/default dev password/);
+  });
+
+  it('rejects a JWT_SECRET under 32 bytes in production', () => {
+    expect(() => buildEnv({ ...PROD, JWT_SECRET: 'p'.repeat(31) })).toThrow(/at least 32 bytes/);
+  });
+
+  it('accepts a short JWT_SECRET outside production', () => {
+    expect(() => buildEnv({ DATABASE_URL: 'postgres://x', JWT_SECRET: 's' } as NodeJS.ProcessEnv))
+      .not.toThrow();
+  });
+
+  it('requires PROXY_SECRET on Railway in production', () => {
+    expect(() => buildEnv({ ...PROD, RAILWAY_ENVIRONMENT: 'production' })).toThrow(/PROXY_SECRET/);
+    expect(() => buildEnv({ ...PROD, RAILWAY_ENVIRONMENT: 'production', PROXY_SECRET: 'x'.repeat(64) }))
+      .not.toThrow();
+  });
+
+  it('does not require PROXY_SECRET off Railway (the Docker stack has no Worker)', () => {
+    expect(() => buildEnv(PROD)).not.toThrow();
+  });
+
+  it('does not require PROXY_SECRET outside production', () => {
+    expect(() => buildEnv({
+      DATABASE_URL: 'postgres://x', JWT_SECRET: 's', RAILWAY_ENVIRONMENT: 'dev',
+    } as NodeJS.ProcessEnv)).not.toThrow();
   });
 
   it('accepts the dev defaults outside production', () => {

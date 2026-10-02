@@ -18,6 +18,21 @@ describe('Cache-Control on reference-data endpoints', () => {
     expect(r.headers.get('cache-control')).toBeNull();
   });
 
+  // Under the cached /api/workspace prefix, but re-read right after a save.
+  it('does NOT cache /api/workspace/fx-rates', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api('GET', '/api/workspace/fx-rates', { token });
+    expect(r.status).toBe(200);
+    expect(r.headers.get('cache-control')).toBeNull();
+  });
+
+  it('still caches the rest of /api/workspace', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api('GET', '/api/workspace', { token });
+    expect(r.status).toBe(200);
+    expect(r.headers.get('cache-control')).toBe('private, max-age=60');
+  });
+
   it('still caches /api/lookups', async () => {
     const { token } = await loginAs(ALEX);
     const r = await api('GET', '/api/lookups', { token });

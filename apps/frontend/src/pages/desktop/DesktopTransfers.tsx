@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, discardTransferOrder } from '../../lib/api';
+import { forEachKeysetPage } from '../../lib/keysetPages';
 import { useT } from '../../lib/i18n';
 import { Icon } from '../../components/Icon';
 import { Modal } from '../../components/Modal';
@@ -89,12 +90,24 @@ export function DesktopTransfers({ onToast }: Props = {}) {
 
   const filterRef = useRef(filter);
   filterRef.current = filter;
+  // Bumped per load, so a filter change or a reload after an action stops the
+  // superseded walk instead of letting its pages land on the new list.
+  const loadGen = useRef(0);
 
+  // The list is keyset-paginated; walk every page so nothing past the first
+  // goes missing silently.  A backend without `nextCursor` is one page.
   const load = useCallback((f: StatusFilter) => {
-    api
-      .get<{ orders: TransferOrder[] }>(`/api/inventory/transfer-orders?status=${f}`)
-      .then((r) => setOrders(r.orders))
-      .catch((e) => onToast?.(errMsg(e), 'error'));
+    const gen = ++loadGen.current;
+    forEachKeysetPage<TransferOrder>(
+      cursor => api.get<{ orders: TransferOrder[]; nextCursor?: string | null }>(
+        `/api/inventory/transfer-orders?status=${f}&limit=200`
+          + (cursor ? '&cursor=' + encodeURIComponent(cursor) : ''),
+      ).then(r => ({ items: r.orders, nextCursor: r.nextCursor ?? null })),
+      (items, { first }) => {
+        if (gen !== loadGen.current) return false;
+        setOrders(prev => first ? items : [...prev, ...items]);
+      },
+    ).catch((e) => { if (gen === loadGen.current) onToast?.(errMsg(e), 'error'); });
   }, [onToast]);
 
   useEffect(() => { load(filter); }, [filter, load]);

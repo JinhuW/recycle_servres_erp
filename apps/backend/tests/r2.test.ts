@@ -53,6 +53,20 @@ afterEach(() => {
 });
 
 describe('r2 via S3 API', () => {
+  it('caps the stored name at 100 characters, keeping the extension', async () => {
+    const long = new File([new Uint8Array([0xff, 0xd8])], `${'a'.repeat(300)}.jpeg`, { type: 'image/jpeg' });
+    const r = await uploadAttachment(s3Env, long, 'label-scans');
+    const name = r.storageKey.replace(/^label-scans\/[0-9a-f-]{36}-/, '');
+    expect(name).toHaveLength(100);
+    expect(name.endsWith('.jpeg')).toBe(true);
+  });
+
+  it('caps a name whose "extension" is itself long without keeping it', async () => {
+    const odd = new File([new Uint8Array([0xff, 0xd8])], `x.${'b'.repeat(300)}`, { type: 'image/jpeg' });
+    const r = await uploadAttachment(s3Env, odd, 'label-scans');
+    expect(r.storageKey.replace(/^label-scans\/[0-9a-f-]{36}-/, '')).toHaveLength(100);
+  });
+
   it('uploads to S3 and returns a real public URL', async () => {
     const r = await uploadAttachment(s3Env, jpeg(), 'label-scans');
     expect(r.provider).toBe('r2');

@@ -127,6 +127,61 @@ describe('POST /api/market/values', () => {
     expect(body.errors.length).toBe(1);
   });
 
+  it('turns a malformed element into an error row instead of failing the batch', async () => {
+    const good = { selector: { id: knownId }, low: '1', high: '2', avgSell: '1.5', samples: 1, source: 'ok' };
+    const r = await api('POST', '/api/market/values', {
+      headers: { authorization: `Bearer ${writeBearer}` },
+      body: {
+        values: [
+          null,
+          'row',
+          { low: '1', high: '2', avgSell: '1.5', samples: 1, source: 'x' },
+          { selector: { id: knownId, partNumber: 'X' }, low: '1', high: '2', avgSell: '1.5', samples: 1, source: 'x' },
+          { selector: {}, low: '1', high: '2', avgSell: '1.5', samples: 1, source: 'x' },
+          { selector: { id: 42 }, low: '1', high: '2', avgSell: '1.5', samples: 1, source: 'x' },
+          { selector: { id: knownId }, low: '1', high: '2', avgSell: '1.5', samples: 1 },
+          { selector: { id: knownId }, low: null, high: '2', avgSell: '1.5', samples: 1, source: 'x' },
+          good,
+        ],
+      },
+    });
+    expect(r.status).toBe(200);
+    const body = r.body as { updated: number; notFound: number; errors: { selector: unknown; error: string }[] };
+    expect(body.updated).toBe(1);
+    expect(body.notFound).toBe(0);
+    expect(body.errors).toHaveLength(8);
+    expect(body.errors[3].error).toMatch(/exactly one/);
+    // A non-string selector field is not echoed back.
+    expect(body.errors[5].selector).toEqual({});
+    expect(body.errors[7].error).toMatch(/non-numeric/);
+  });
+
+  it('writes the most recently updated row when a part number matches two', async () => {
+    const sql = getTestDb();
+    const [src] = await sql<{ id: string; part_number: string }[]>`
+      SELECT id, part_number FROM ref_prices WHERE part_number IS NOT NULL AND part_number <> '' LIMIT 1`;
+    const [twin] = await sql<{ id: string }[]>`
+      INSERT INTO ref_prices (id, category, label, part_number, target, low_price, high_price, avg_sell, updated_at)
+      SELECT 'twin-' || id, category, label, part_number, target, low_price, high_price, avg_sell,
+             NOW() + INTERVAL '1 day'
+      FROM ref_prices WHERE id = ${src.id}
+      RETURNING id`;
+    const r = await api('POST', '/api/market/values', {
+      headers: { authorization: `Bearer ${writeBearer}` },
+      body: {
+        values: [{
+          selector: { partNumber: src.part_number },
+          low: '10', high: '30', avgSell: '20', samples: 2, source: 'twin-check',
+        }],
+      },
+    });
+    expect((r.body as { updated: number }).updated).toBe(1);
+    const rows = await sql<{ id: string; source: string | null }[]>`
+      SELECT id, source FROM ref_prices WHERE id IN (${src.id}, ${twin.id})`;
+    expect(rows.find((x) => x.id === twin.id)?.source).toBe('twin-check');
+    expect(rows.find((x) => x.id === src.id)?.source).not.toBe('twin-check');
+  });
+
   it('413 on >500 values', async () => {
     const values = Array.from({ length: 501 }, () => ({
       selector: { id: knownId },

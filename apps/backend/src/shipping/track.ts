@@ -46,25 +46,40 @@ function nextStatus(current: PackageStatus, info: TrackingInfo): PackageStatus |
 // Status move and its consequences commit together: a transition the metadata
 // UPDATE persisted but whose notification failed would never be retried —
 // `next` is null on every later tick.
+//
+// Shippo does not deliver pushes in order, and a retried one can land after a
+// newer push or a poll. An event the carrier dates before the stored one is
+// dropped whole: its headline and ETA are as stale as its status, and an
+// in-transit push arriving after an exception would otherwise read as the box
+// moving again. A payload with no date is not comparable and is applied.
+//
+// `info` describes the number and carrier the caller looked up. A correction
+// on the PO can land between that lookup and this lock; applying the old box's
+// event to the corrected row would stamp its date there and drop the real
+// box's earlier events.
 export async function applyPackageTracking(
   sql: Sql,
-  row: Pick<TrackedPackageRow, 'id'>,
+  row: Pick<TrackedPackageRow, 'id' | 'tracking_number' | 'carrier'>,
   info: TrackingInfo,
 ): Promise<PackageStatus | null> {
   return sql.begin(async (tx): Promise<PackageStatus | null> => {
     const cur = (await tx`
-      SELECT id, status, tracking_number, carrier, created_by
+      SELECT id, status, tracking_number, carrier, created_by, tracking_status_at
       FROM packages WHERE id = ${row.id} LIMIT 1 FOR UPDATE
-    `)[0] as TrackedPackageRow | undefined;
+    `)[0] as (TrackedPackageRow & { tracking_status_at: Date | null }) | undefined;
     if (!cur) return null;
+    if (cur.tracking_number !== row.tracking_number || cur.carrier !== row.carrier) return null;
+    const statusAt = info.statusAt ?? null;
+    if (statusAt && cur.tracking_status_at && statusAt < cur.tracking_status_at) return null;
     const next = nextStatus(cur.status, info);
 
     await tx`
       UPDATE packages SET
-        status          = ${next ?? cur.status},
-        tracking_status = COALESCE(NULLIF(${info.raw}, ''), tracking_status),
-        tracking_eta    = COALESCE(${info.eta}, tracking_eta),
-        last_tracked_at = NOW()
+        status             = ${next ?? cur.status},
+        tracking_status    = COALESCE(NULLIF(${info.raw}, ''), tracking_status),
+        tracking_eta       = COALESCE(${info.eta}, tracking_eta),
+        tracking_status_at = COALESCE(${statusAt}, tracking_status_at),
+        last_tracked_at    = NOW()
       WHERE id = ${cur.id}
     `;
     // Delivery is the moment the row wants a human: the PO is created

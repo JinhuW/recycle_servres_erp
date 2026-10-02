@@ -68,7 +68,9 @@ export async function contributions(
   const headerCost = sql`COALESCE(po.total_cost, fee.goods) + po.other_fees`;
   const reviewed = sql`po.lifecycle = ANY(${REVIEWED_LIFECYCLES}::text[])
                        AND po.created_at >= ${start} AND po.created_at < ${end}`;
-  const spend = sql`po.lifecycle <> 'draft'
+  // Mirrors the dashboard's spend window, archived POs out included, or the
+  // breakdown would not add up to the tile above it.
+  const spend = sql`po.lifecycle <> 'draft' AND po.archived_at IS NULL
                     AND po.created_at >= ${start} AND po.created_at < ${end}`;
 
   if (opts.role === 'manager') {

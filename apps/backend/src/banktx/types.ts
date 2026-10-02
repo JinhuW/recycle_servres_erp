@@ -44,9 +44,18 @@ export type BankAccountInfo = {
   name: string | null;
 };
 
+// A part of a fetch that failed without failing the source. `account` is the
+// external id of the account whose transactions could not be read; null when
+// the failure belongs to no single account (Mercury's /credit list).
+export type BankFetchError = {
+  account: string | null;
+  message: string;
+};
+
 export type BankFetch = {
   accounts: BankAccountInfo[];
   txns: NormalizedTxn[];
+  partialErrors?: BankFetchError[];
 };
 
 // One dated thing that happened to a case. `code` is PayPal's own enum value
@@ -103,5 +112,9 @@ export type BankProvider = {
   // PayPal only, and kept off `fetchSince` on purpose: disputes are a second
   // API behind a second app permission, so they have to be able to fail without
   // taking the transaction feed with them.
-  fetchDisputes?(): Promise<NormalizedDispute[]>;
+  //
+  // `known` is what is already stored, by case id. A case whose summary carries
+  // the stored `updatedAt` has not changed, and the provider may return the
+  // stored copy instead of fetching its detail again.
+  fetchDisputes?(known?: ReadonlyMap<string, NormalizedDispute>): Promise<NormalizedDispute[]>;
 };

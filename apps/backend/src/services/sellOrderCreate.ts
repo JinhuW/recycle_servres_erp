@@ -31,12 +31,21 @@ export async function validateSellLines(
     if (!l.inventoryId) continue; // manual line — nothing to reserve
     demand.set(l.inventoryId, (demand.get(l.inventoryId) ?? 0) + l.qty);
   }
+  if (demand.size === 0) return null;
+  // One statement, in id order: two orders naming the same lines in a
+  // different order would otherwise each hold one row while waiting on the
+  // other's, and Postgres would abort one of them as a deadlock.
+  const ids = [...demand.keys()].sort();
+  const locked = await tx<{ id: string; qty: number; status: string; archived_at: string | null }[]>`
+    SELECT l.id, l.qty, l.status, o.archived_at
+    FROM order_lines l JOIN orders o ON o.id = l.order_id
+    WHERE l.id = ANY(${ids}::uuid[])
+    ORDER BY l.id
+    FOR UPDATE OF l
+  `;
+  const byId = new Map(locked.map(r => [r.id.toLowerCase(), r]));
   for (const [inventoryId, qty] of demand) {
-    const inv = (await tx<{ qty: number; status: string; archived_at: string | null }[]>`
-      SELECT l.qty, l.status, o.archived_at
-      FROM order_lines l JOIN orders o ON o.id = l.order_id
-      WHERE l.id = ${inventoryId} LIMIT 1 FOR UPDATE OF l
-    `)[0];
+    const inv = byId.get(inventoryId.toLowerCase());
     if (!inv) return `inventory line ${inventoryId} not found`;
     if (!isSellableLineStatus(inv.status))
       return `inventory line not sellable (status=${inv.status})`;
@@ -137,8 +146,8 @@ export async function insertSellOrderLine(
 // create_sell_order_draft MCP tool. Resolves the FX snapshot BEFORE opening the
 // transaction (getLatestRateToUsd may do an outbound fetch on a cold cache;
 // holding the id-counter + inventory locks across it would serialize all
-// sell-order creation). Allocates the id, lock-validates lines, inserts the
-// header + lines + a 'created' audit event, all atomically.
+// sell-order creation). Lock-validates lines, then allocates the id, inserts
+// the header + lines + a 'created' audit event, all atomically.
 export async function createSellOrderDraft(
   sql: Sql,
   input: CreateDraftInput,
@@ -150,9 +159,12 @@ export async function createSellOrderDraft(
   let outcome: CreateDraftResult = { ok: true, id: '', customerId: input.customerId, lineCount: input.lines.length, currency: input.currency };
 
   await sql.begin(async (tx) => {
-    nextId = await nextHumanId(tx, 'SO', 'SO');
+    // Validated before the id is drawn: returning here commits the tx, so a
+    // counter bumped first would stay bumped and every refused create would
+    // leave a hole in the SO numbering.
     const err = await validateSellLines(tx, input.lines, null);
-    if (err) { outcome = { ok: false, error: err }; return; } // roll back — nothing written
+    if (err) { outcome = { ok: false, error: err }; return; }
+    nextId = await nextHumanId(tx, 'SO', 'SO');
     await tx`
       INSERT INTO sell_orders (id, customer_id, status, notes, created_by,
                                payment_received_by, currency_code, fx_rate_to_usd, fx_source)

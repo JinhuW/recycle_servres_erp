@@ -405,8 +405,9 @@ describe('0121 + 0122 — backfilling POs archived before the cascade', () => {
     expect(audit[0]?.detail).toMatchObject({ from: 'Archived', to: 'In Transit' });
 
     // Which is exactly what receive needs to find. Received into an archived
-    // PO, the line joins the archive rather than sitting at Done behind the
-    // flag, with the audit row that lets unarchive put it at Done.
+    // PO, the line joins the archive rather than sitting in stock behind the
+    // flag, with the audit row that lets unarchive put it back at the status
+    // it had before the transfer — Reviewing, for this PO.
     const received = await api('POST', `/api/inventory/transfer-orders/${moved.body.transferOrderId}/receive`, { token: mgr });
     expect(received.status).toBe(200);
     expect((await statusesOf(id, mgr))[lineIds[0]]).toBe('Archived');
@@ -414,14 +415,14 @@ describe('0121 + 0122 — backfilling POs archived before the cascade', () => {
       SELECT detail FROM inventory_events
       WHERE order_line_id = ${lineIds[0]} AND kind = 'status'
       ORDER BY created_at DESC LIMIT 1`;
-    expect(received_audit[0]?.detail).toMatchObject({ from: 'Done', to: 'Archived' });
+    expect(received_audit[0]?.detail).toMatchObject({ from: 'Reviewing', to: 'Archived' });
 
     // Running the repair again touches nothing: the transfer is no longer pending.
     await sql.unsafe(M0122);
     expect((await statusesOf(id, mgr))[lineIds[0]]).toBe('Archived');
 
     expect((await api('POST', `/api/orders/${id}/unarchive`, { token: mgr })).status).toBe(200);
-    expect((await statusesOf(id, mgr))[lineIds[0]]).toBe('Done');
+    expect((await statusesOf(id, mgr))[lineIds[0]]).toBe('Reviewing');
   });
 });
 

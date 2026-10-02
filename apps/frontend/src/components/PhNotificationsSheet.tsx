@@ -5,6 +5,8 @@ import { PhSheet } from './PhSheet';
 
 type Props = {
   items: Notification[];
+  // The server's count: `items` is capped, so counting it would undercount.
+  unreadCount: number;
   onClose: () => void;
   onMarkAllRead: () => void;
 };
@@ -36,9 +38,8 @@ function relTime(iso: string, locale = 'en-US') {
   return new Date(iso).toLocaleDateString(locale, { month: 'short', day: 'numeric' });
 }
 
-export function PhNotificationsSheet({ items, onClose, onMarkAllRead }: Props) {
+export function PhNotificationsSheet({ items, unreadCount, onClose, onMarkAllRead }: Props) {
   const { t, locale } = useT();
-  const unreadCount = items.filter(n => n.unread).length;
   return (
     <PhSheet onBackdrop={onClose} style={{ maxHeight: '78%', display: 'flex', flexDirection: 'column', paddingBottom: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px 14px' }}>

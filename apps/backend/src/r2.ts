@@ -61,6 +61,20 @@ function client(env: Env): S3Client | null {
   return s3;
 }
 
+// The name lands in the object key and the Content-Disposition header, and a
+// client controls its length. The extension survives the cut so the stored
+// object still reads as its type.
+const SAFE_NAME_MAX = 100;
+const KEPT_EXTENSION_MAX = 16;
+
+function safeFileName(name: string): string {
+  const cleaned = name.replace(/[^A-Za-z0-9._-]+/g, '_');
+  if (cleaned.length <= SAFE_NAME_MAX) return cleaned;
+  const dot = cleaned.lastIndexOf('.');
+  const ext = dot > 0 && cleaned.length - dot <= KEPT_EXTENSION_MAX ? cleaned.slice(dot) : '';
+  return cleaned.slice(0, SAFE_NAME_MAX - ext.length) + ext;
+}
+
 export async function uploadAttachment(
   env: Env,
   file: File,
@@ -86,7 +100,7 @@ export async function uploadAttachment(
     };
   }
 
-  const safeName = file.name.replace(/[^A-Za-z0-9._-]+/g, '_');
+  const safeName = safeFileName(file.name);
   const key = `${prefix}/${crypto.randomUUID()}-${safeName}`;
   const body = new Uint8Array(await file.arrayBuffer());
   // Images and PDFs are viewed in place (lightbox / inline PDF), so they keep

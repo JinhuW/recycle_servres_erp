@@ -103,11 +103,11 @@ export function DesktopApp() {
         // a manager in role-preview mode follows a link to a PO they don't own.
         navigate('/purchase-orders');
         const status = err instanceof ApiError ? err.status : 0;
-        showErrorDialog(
-          status === 403 ? "You don't have access to this purchase order."
-          : status === 404 ? 'That purchase order no longer exists.'
-          : 'Could not open that purchase order.',
-        );
+        showErrorDialog(t(
+          status === 403 ? 'poNoAccess'
+          : status === 404 ? 'poNotFound'
+          : 'poOpenFailed',
+        ));
       })
       .finally(() => { if (alive) setLoadingOrderId(null); });
     return () => { alive = false; };
@@ -189,7 +189,7 @@ export function DesktopApp() {
     ? <DesktopInventoryEdit
         itemId={editingItemId}
         onCancel={() => navigate('/inventory')}
-        onSaved={() => { navigate('/inventory'); showToast('Saved'); }}
+        onSaved={() => { navigate('/inventory'); showToast(t('savedShort')); }}
       />
     : <DesktopInventory onEditItem={(id) => navigate('/inventory/' + id)} showToast={showToast} />;
 

@@ -3,7 +3,7 @@
 // this file owns the HTTP shape only.
 
 import { Hono } from 'hono';
-import { MIN_PASSWORD_LEN } from '@recycle-erp/shared';
+import { MAX_PASSWORD_LEN, MIN_PASSWORD_LEN } from '@recycle-erp/shared';
 import { getDb } from '../db';
 import { requireManager } from '../lib/role';
 import {
@@ -24,11 +24,14 @@ const members = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 const VALID_ROLES: MemberRole[] = ['manager', 'purchaser'];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+const TEXT_FIELDS = ['name', 'team', 'phone', 'title'] as const;
+
 // Shared field validation for create/update. Returns an error string for the
 // first invalid field, or null when every supplied field is acceptable.
-// `email`/`role` are only checked when present so a partial PATCH stays valid.
+// Fields are only checked when present so a partial PATCH stays valid.
 function validateMemberFields(f: {
-  email?: unknown; role?: unknown; password?: unknown;
+  email?: unknown; role?: unknown; password?: unknown; active?: unknown;
+  name?: unknown; team?: unknown; phone?: unknown; title?: unknown;
 }): string | null {
   if (f.email !== undefined && (typeof f.email !== 'string' || !EMAIL_RE.test(f.email.trim()))) {
     return 'email is not a valid address';
@@ -36,9 +39,21 @@ function validateMemberFields(f: {
   if (f.role !== undefined && !VALID_ROLES.includes(f.role as MemberRole)) {
     return `role must be one of: ${VALID_ROLES.join(', ')}`;
   }
+  // null keeps meaning "leave unchanged", as the update's COALESCE reads it.
+  for (const k of TEXT_FIELDS) {
+    if (f[k] !== undefined && f[k] !== null && typeof f[k] !== 'string') {
+      return `${k} must be a string`;
+    }
+  }
+  // Strictly boolean: Postgres would read the string 'false' as false, and the
+  // lockout guards and session revoke key on `active === false`.
+  if (f.active !== undefined && typeof f.active !== 'boolean') {
+    return 'active must be true or false';
+  }
   if (f.password !== undefined &&
-      (typeof f.password !== 'string' || f.password.length < MIN_PASSWORD_LEN)) {
-    return `password must be at least ${MIN_PASSWORD_LEN} characters`;
+      (typeof f.password !== 'string' ||
+       f.password.length < MIN_PASSWORD_LEN || f.password.length > MAX_PASSWORD_LEN)) {
+    return `password must be ${MIN_PASSWORD_LEN}–${MAX_PASSWORD_LEN} characters`;
   }
   return null;
 }
@@ -107,7 +122,8 @@ members.patch('/:id', async (c) => {
   const sql = getDb(c.env);
 
   // Same lockout protections as DELETE: PATCH accepts {active} and {role}, so
-  // it can deactivate or demote a manager just as destructively.
+  // it can deactivate or demote a manager just as destructively. Deactivating
+  // ends the member's sessions too, inside updateMember's transaction.
   const deactivating = body.active === false;
   const demoting = body.role !== undefined && body.role !== 'manager';
   if (deactivating && id === c.var.user.id) {

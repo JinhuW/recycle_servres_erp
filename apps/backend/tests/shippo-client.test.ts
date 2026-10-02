@@ -61,6 +61,13 @@ describe('shippo — track payloads', () => {
     expect(info.raw).toBe('Your shipment has been delivered.');
     // A real instant is kept as one — see parseEta below.
     expect(info.eta?.toISOString()).toBe('2026-08-27T20:42:29.622Z');
+    expect(info.statusAt?.toISOString()).toBe('2026-08-25T22:01:59.222Z');
+  });
+
+  it('reads no status date from a missing or unparseable one', () => {
+    expect(trackToInfo({ tracking_status: { status: 'TRANSIT' } }).statusAt).toBeNull();
+    expect(trackToInfo({ tracking_status: { status: 'TRANSIT', status_date: 'soon' } }).statusAt).toBeNull();
+    expect(trackToInfo({ tracking_status: { status: 'TRANSIT', status_date: 12 } }).statusAt).toBeNull();
   });
 
   it('falls back to the bare status when there is no human detail', () => {

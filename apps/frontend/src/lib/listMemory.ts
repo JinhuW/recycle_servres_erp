@@ -20,6 +20,14 @@ export function usePersisted<T>(key: string, initial: T): [T, Dispatch<SetStateA
 }
 
 /**
+ * Drops remembered values so the next mount starts from its `initial`. For a
+ * page that finishes another page's work after that page has unmounted.
+ */
+export function forgetPersisted(...keys: string[]): void {
+  for (const k of keys) mem.delete(k);
+}
+
+/**
  * Remembers the scrollTop of a scroll container under `key`. Returns a
  * callback ref to put on the scrolling element. Restoration is deferred until
  * `ready` is true (i.e. the list rows have actually rendered) so the saved

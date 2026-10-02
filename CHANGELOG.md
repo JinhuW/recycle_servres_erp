@@ -17,6 +17,196 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.194.1] - 2026-10-02
+
+Fixes from the code review that cleared v1.193.0 and v1.194.0 for production
+(RS-139).
+
+- **Correcting a tracking number no longer freezes the box.** 1.193.0 started
+  dropping carrier events dated before the last one applied. A typo fixed in
+  place, or a corrected carrier, kept the wrong box's date, so every event of
+  the real box was dropped as stale. A correction now clears that date, and so
+  does adopting a standalone box under a different carrier. A poll or push that
+  looked up the old number before the correction now lands on nothing instead
+  of re-stamping it.
+- **Bank syncs that share a source no longer run side by side.** A full sync
+  that couldn't join a PayPal-only pull already running used to start beside
+  it. Two transactions then upserted the same rows and auto-paired from each
+  other's stale view. It now waits for the pull to finish.
+- **A sell-order line whose lot is gone says so.** When a line's lot has left
+  Reviewing or Done, its PO was archived, or other committed orders hold all of
+  it, the edit page used to show "/ 0" and snap any typed quantity to 1. The
+  quantity is now locked and the line reads "No longer available — remove the
+  line". Saving already refused such a line.
+- **The new sell-order page is fully translated.** Several pieces of English
+  were still hard-coded:
+  - the Editing chip and the Edit order, Reopen and New from inventory buttons
+  - the status card's heading, hint, step tooltips and its "Status will change
+    from … to …" note
+  - the Customer label and History
+  - the footer's Discard, Saving and changed/unchanged states
+
+  Status names stay as the app shows them everywhere else.
+- MCP `search_sellable_inventory` again returns at most the 100 rows its schema
+  advertises. The shared search had been raised to 201 for the REST picker.
+- The web-form channel list exists once, in `publicForms.ts`. The supplier
+  lookup in `webSubmissions.ts` had its own copy, so a channel added to only
+  one list would have created a duplicate house supplier on every
+  conversion.
+- `GET /api/notifications` fetches the list and the unread count in one
+  statement.
+
+## [1.194.0] - 2026-10-01
+
+A sell order now opens as a full page, as a purchase order does, instead of a
+popup over the list (RS-138). The popup was 760px wide (1100px when editing)
+and its body was capped at 70% of the window, so a ten-line order scrolled
+inside a box.
+
+On the page, the line items and the editing controls sit on the left, and the
+order summary, payment receiver and internal notes sit on the right. When
+editing, a sticky footer holds Save, Cancel and Discard. View and edit share
+one browser-history entry, so Back returns to wherever the order was opened
+from. Inventory's "Add to sell order" now opens the chosen order's edit page
+with the selection appended. Saving lands on the order and clears the
+Inventory selection; leaving without saving keeps it. The new-order builder
+(Create sell order) is still a popup.
+
+Line items switch between **By warehouse** (where they ship from) and **By
+PO** (the purchase order each lot came in on). This works when viewing and
+when editing, and the choice is remembered per user (preference
+`sellOrders.lineGroup`). By PO lists the POs in numeric order with
+hand-typed lines last under "No PO", the same order as the "Packing list by
+PO" download. Until now the on-screen lines could only be grouped by
+warehouse, and the edit form was a flat table.
+
+Each line shows its spec as tags: Desktop / Server / Laptop, RDIMM-style
+classification, rank and speed for RAM, and the interface, form factor and
+health chips for SSD and HDD. `GET /api/sell-orders/:id` reads them live from
+the line's lot, and `GET /api/sell-orders/sellable` (also behind the
+`search_sellable_inventory` MCP tool) now returns them along with
+`sourceOrderId`. A newly added line therefore shows its tags and joins its PO
+group before it is saved. A line with no lot behind it shows its saved spec
+text instead.
+
+## [1.193.0] - 2026-10-01
+
+This release fixes every Minor finding left from the 2026-10-01 code review
+(RS-134), the second batch after RS-130. Most are edge cases. A few change
+behaviour that people will notice, and those come first.
+
+### Changed
+
+- **Shipped and Awaiting-payment sell orders can't be archived.** Archiving
+  hides an order from the inbox, yet such an order still reserves its units, so
+  the stock stayed held by something nobody could see. Close or complete the
+  order first. The Archive button now appears only on Done and Closed orders,
+  and an archived order can't be moved back into a committed status.
+- **A password change or reset signs out every other session at once.** Until
+  now an access token stayed valid for up to an hour after the change, and an
+  OAuth bearer token for up to fifteen minutes. The person who changed their own
+  password stays signed in through one ordinary refresh.
+- **Receiving a transfer puts each line back at the status it had before.** A
+  line taken from a PO still under review used to come back as Done. Reopening
+  a received transfer accepts lines at either status.
+- **The add-inventory picker says when its list is cut off.** It shows up to
+  200 matches and tells you to refine your search when there are more. It used
+  to stop silently at 100.
+- **Payments shows a red chip when part of a bank sync failed**, for example
+  the Mercury card list. Before, the healthy checking account hid it.
+- **The phone notification badge counts every unread notification**, not just
+  the newest 50.
+
+### Fixed
+
+- **Accounts and auth:**
+  - A string `active: "false"` on a member edit slipped past the
+    last-manager and self-deactivation guards. Deactivating through an edit now
+    revokes the member's sessions and connector grants.
+  - Emails are stored trimmed, so a pasted address can sign in.
+  - An OAuth refresh token presented by the wrong client is refused before it
+    is rotated, so it can no longer burn the real client's session.
+  - Self-registration's "too many unused clients" cap counts only the last 24
+    hours, so an old backlog can't block every new connector.
+  - Malformed JSON or non-string fields on login and the OAuth endpoints answer
+    400 instead of 500, which used to write an error record each time.
+  - Production refuses to boot with a `JWT_SECRET` under 32 bytes, or on Railway
+    without `PROXY_SECRET`. The proxy secret is now compared in constant time.
+  - MCP metrics no longer create a series for every made-up tool name, and
+    uploaded file names are capped before they reach an R2 key.
+- **Purchase orders:**
+  - `payment` is frozen with the rest of the closed book.
+  - Changing or clearing a PO's PayPal ID unlinks the bank payment it had
+    linked. A link a manager made by hand stays.
+  - A PayPal ID now auto-links only on a company-paid, non-cash, unarchived PO
+    that no other PO claims.
+  - Evidence uploads and deletes re-check permission under the order lock.
+  - A purchaser can't delete the only chat or cash screenshot that let a
+    submitted order leave Draft; they can upload a replacement first.
+  - A manager "jump" to the stage the PO is already at is refused rather than
+    re-notifying everyone.
+  - Three write checks used the role-preview role instead of the real one.
+  - Line ids that aren't uuids answer 400.
+  - Market auto-tracking no longer creates duplicate rows when two POs add the
+    same new part at once.
+  - The PO spreadsheet counts quantities as bought rather than what's left
+    after a partial sale.
+  - A web lot whose email compresses like an existing supplier name is filed
+    under its own seller.
+- **Sell orders and inventory:**
+  - A refused sell-order create no longer uses up an SO number.
+  - Sell-order validation locks lines in id order, so two orders naming the
+    same lines can't deadlock.
+  - A sell-order edit checks the Done/Closed lock under the row lock, so a
+    concurrent completion can't let it rewrite a finished sale.
+  - Closed orders are frozen like Done ones.
+  - Max-qty is 0 for sold or archived lots.
+  - Search boxes treat `%` and `_` literally.
+  - The transfer-orders list pages with a cursor instead of stopping at 200,
+    and the cursor keeps microseconds. Postgres.js turns a `::timestamptz`
+    parameter into a JS `Date` and drops them, which is in a debug note.
+  - Ids that aren't uuids answer 400, not 500.
+- **Bank sync and integrations:**
+  - A full sync no longer reuses a PayPal-only run that's already in flight.
+  - The purchaser's PayPal pull skips disputes, and dispute details are
+    fetched only when a case changed.
+  - A pending row older than 120 days no longer drags every fetch back to it.
+    Production's oldest was from June.
+  - Once a week each account is re-read 60 days back, so a late reversal is
+    seen.
+  - The FX panel isn't served from browser cache after a save, and reports a
+    manual rate as manual.
+  - Supplier detail is scoped to the purchaser's own POs. Dashboard spend
+    ignores archived POs.
+  - An out-of-order Shippo push can no longer overwrite a newer status.
+  - The tracker proxy survives a 204.
+  - The coordinator screenshot is served only as an image.
+  - A malformed market-price batch element is reported rather than failing
+    the batch. The manual bank link refuses archived POs.
+- **Frontend:**
+  - Tracker and Fleet pages stop polling while the tab is hidden, and repeated
+    failures of one request collapse into a single error dialog.
+  - "Load more" on web submissions can no longer mix in another filter's rows.
+  - The last raw English strings on the PO, archive, camera and FX screens are
+    translated.
+- **Ops:**
+  - Migrations run under a 10s lock timeout with retries, and record a
+    checksum that warns when an applied file changes.
+  - The shared pool has a 60s statement and idle-in-transaction timeout.
+  - Test templates are built through `migrate.mjs` and only count once
+    complete.
+  - CI runs Postgres 18, as production does.
+  - Wrangler, the GitHub actions and the Terraform providers are pinned.
+  - The backup script reads the bucket variable Terraform's outputs name, fails
+    loudly on a broken bucket listing, and refuses a dump with no data for the
+    core tables.
+  - The cloud-side backup steps are written up in
+    `docs/backups-cloud-runbook.md` for separate approval.
+
+Migrations 0144 (`users.tokens_valid_after`), 0145
+(`packages.tracking_status_at`), 0146 (`bank_accounts.sync_error`,
+`deep_synced_at`).
+
 ## [1.192.1] - 2026-10-01
 
 Saving a line from the desktop inventory editor works again on a PO at Ready

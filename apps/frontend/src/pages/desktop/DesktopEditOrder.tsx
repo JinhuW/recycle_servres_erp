@@ -258,7 +258,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       showErrorDialog(t('linePhotoUploadFailed'));
       return;
     }
-    if (heldAfterSave) onSaved('Saved ' + order.id);
+    if (heldAfterSave) onSaved(t('eoSavedToast', { id: order.id }));
   };
 
   const removeLinePhoto = async (idx: number, photo: LinePhoto) => {
@@ -783,7 +783,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
           await api.post(`/api/orders/${order.id}/advance`, { toStage });
           setSavedStatus(status);
           if (onReload) {
-            window.__showToast?.('Saved ' + order.id, 'success');
+            window.__showToast?.(t('eoSavedToast', { id: order.id }), 'success');
             await onReload();
             return;
           }
@@ -791,11 +791,11 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
         // Stay on the PO: the manager is mid-review and wants to see the
         // commission the new prices project.
         if (pricesWritten && onReload) {
-          window.__showToast?.('Saved ' + order.id, 'success');
+          window.__showToast?.(t('eoSavedToast', { id: order.id }), 'success');
           await onReload();
           return;
         }
-        onSaved('Saved ' + order.id);
+        onSaved(t('eoSavedToast', { id: order.id }));
         return;
       }
       const presentIds = new Set(lines.filter(l => l._id).map(l => l._id!));
@@ -872,7 +872,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       // Saving a transaction id reconciles the payment on the way past, and the
       // page is about to navigate away — so the toast is where the manager
       // finds out it happened.
-      const msg = r.paymentsLinked ? t('eoPaymentLinkedToast', { id: order.id }) : 'Saved ' + order.id;
+      const msg = r.paymentsLinked ? t('eoPaymentLinkedToast', { id: order.id }) : t('eoSavedToast', { id: order.id });
       // A stage move is the news the status section exists to show: stay on
       // the page, on the new stage's panel. A plain save returns to the list
       // as it always has.

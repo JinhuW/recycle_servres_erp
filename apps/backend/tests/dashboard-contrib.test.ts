@@ -137,6 +137,23 @@ describe('GET /api/dashboard — contributions', () => {
     expect(r.body.series.reduce((acc, b) => acc + b.cost, 0)).toBeCloseTo(1500, 2);
   });
 
+  it('an archived PO is not spend, in the card or the chart', async () => {
+    await fixture();
+    await insertPO('PO-CT-ARCH', MARCUS, { supplierId: null, category: 'RAM', totalCost: 777 },
+      [{ category: 'RAM', unitCost: 777, sellPrice: 900, qty: 1 }]);
+    await getTestDb()`UPDATE orders SET archived_at = NOW() WHERE id = 'PO-CT-ARCH'`;
+    for (const email of [ALEX, MARCUS]) {
+      const { token } = await loginAs(email);
+      const r = await api<Body>('GET', '/api/dashboard?range=7d', { token });
+      expect(r.status).toBe(200);
+      const cost = r.body.contrib.cost;
+      // Manager: the fixture's 1500. Marcus: his 950 + 50 + 200.
+      const expected = email === ALEX ? 1500 : 1200;
+      expect(cost.total).toBeCloseTo(expected, 2);
+      expect(r.body.series.reduce((acc, b) => acc + b.cost, 0)).toBeCloseTo(expected, 2);
+    }
+  });
+
   it('sales and profit cards equal the tiles; a line with no inventory link is in neither', async () => {
     await fixture();
     const { token } = await loginAs(ALEX);

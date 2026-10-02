@@ -15,7 +15,8 @@
 // before the transaction, like PATCH); this file trusts its input.
 
 import type { Carrier, PackageSource } from '@recycle-erp/shared';
-import { linkPaypalTxnToOrder } from '../banktx/sync';
+import { normPaypalTxnId } from '../ai/paypal';
+import { linkPaypalTxnToOrder, unlinkPaypalTxnFromOrder } from '../banktx/sync';
 import { advanceOrderTx, type AdvanceActor, type AdvanceOutcome } from './orderAdvance';
 import { diff, writeOrderEvent, type AuditChange, type SqlLike } from './orderAudit';
 
@@ -157,7 +158,13 @@ export async function setOrderPackageTx(
     && { id: curRow.id, tracking_number: curRow.tracking_number, carrier: curRow.carrier };
   if (cur && cur.tracking_number === want.trackingNumber) {
     if (cur.carrier === want.carrier) return { kind: 'ok', package: cur, prev: cur, needsRegister: false };
-    await tx`UPDATE packages SET carrier = ${want.carrier}, tracking_registered_at = NULL WHERE id = ${cur.id}`;
+    // The stored event date came from the wrong carrier's lookup; left in
+    // place, it would drop every earlier-dated event the right one reports.
+    await tx`
+      UPDATE packages SET carrier = ${want.carrier}, tracking_registered_at = NULL,
+                          tracking_status_at = NULL
+      WHERE id = ${cur.id}
+    `;
     return { kind: 'ok', package: { ...cur, carrier: want.carrier }, prev: cur, needsRegister: true };
   }
   if (curRow?.status === 'delivered') return { kind: 'delivered' };
@@ -173,11 +180,13 @@ export async function setOrderPackageTx(
   if (other) {
     if (other.order_id !== null) return { kind: 'taken', packageId: other.id, otherOrderId: other.order_id };
     if (!mayAdopt(actor, order.user_id, other.created_by)) return { kind: 'takenStandalone', packageId: other.id };
-    const needsRegister = other.tracking_registered_at === null || other.carrier !== want.carrier;
+    const carrierChanged = other.carrier !== want.carrier;
+    const needsRegister = other.tracking_registered_at === null || carrierChanged;
     await tx`
       UPDATE packages SET order_id = ${orderId}, carrier = ${want.carrier},
                           source = COALESCE(source, ${order.source}),
-                          tracking_registered_at = CASE WHEN ${needsRegister}::boolean THEN NULL ELSE tracking_registered_at END
+                          tracking_registered_at = CASE WHEN ${needsRegister}::boolean THEN NULL ELSE tracking_registered_at END,
+                          tracking_status_at = CASE WHEN ${carrierChanged}::boolean THEN NULL ELSE tracking_status_at END
       WHERE id = ${other.id}
     `;
     if (cur) await tx`UPDATE packages SET order_id = NULL WHERE id = ${cur.id}`;
@@ -197,7 +206,7 @@ export async function setOrderPackageTx(
       UPDATE packages SET
         tracking_number = ${want.trackingNumber}, carrier = ${want.carrier},
         status = 'purchased', tracking_status = NULL, tracking_eta = NULL,
-        last_tracked_at = NULL, tracking_registered_at = NULL
+        tracking_status_at = NULL, last_tracked_at = NULL, tracking_registered_at = NULL
       WHERE id = ${cur.id}
     `;
     return {
@@ -398,8 +407,14 @@ export async function handoffOrderTx(
   if (changes.length) {
     await writeOrderEvent(tx, id, actor.id, 'meta_changed', { changes });
   }
-  // Same reasoning as PATCH: the id names a payment that has very likely
-  // already synced, so link it now rather than waiting for the six-hour pass.
+  // Same reasoning as PATCH: the payments the old id claimed let go when the
+  // id changes or the method no longer has one, and the new id names a payment
+  // that has very likely already synced, so it links now rather than waiting
+  // for the six-hour pass.
+  const oldPaypal = normPaypalTxnId(before.paypal_txn_id);
+  if (oldPaypal && oldPaypal !== normPaypalTxnId(paypalTxnId)) {
+    await unlinkPaypalTxnFromOrder(tx, id, oldPaypal);
+  }
   let paymentsLinked = 0;
   if (paypalTxnId) {
     paymentsLinked = await linkPaypalTxnToOrder(tx, paypalTxnId, id, actor.id);

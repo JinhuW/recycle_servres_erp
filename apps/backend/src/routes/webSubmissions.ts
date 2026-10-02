@@ -9,7 +9,7 @@
 
 import { Hono } from 'hono';
 import { authMiddleware } from '../auth';
-import { getDb } from '../db';
+import { getDb, type SqlLike } from '../db';
 import { log } from '../lib/log';
 import { requireManager } from '../lib/role';
 import { clampLimit, decodeCursor, encodeCursor, escapeLike } from '../lib/pagination';
@@ -19,7 +19,7 @@ import { syncOrderCategory } from '../services/orderCategory';
 import { syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { writeOrderEvent } from '../services/orderAudit';
 import { isoDatePlus, loadCrmSettings } from '../services/supplierCrm';
-import type { SellLotPayload } from './publicForms';
+import { WEB_CHANNEL_SOURCES, type SellLotPayload } from './publicForms';
 import type { Env, User } from '../types';
 
 const webSubmissions = new Hono<{ Bindings: Env; Variables: { user: User } }>()
@@ -35,6 +35,13 @@ const SITES = ['ram4cash', 'recycleservers'] as const;
 const RAM_TYPE: Record<string, string> = {
   RDIMM: 'Server', LRDIMM: 'Server', UDIMM: 'Desktop', SODIMM: 'Laptop',
 };
+
+// Own keys only: the class is the public form's text, and a plain index would
+// hand `constructor` back as Object's function, which no column can bind.
+function ramType(classification: string | null | undefined): string | null {
+  if (!classification || !Object.hasOwn(RAM_TYPE, classification)) return null;
+  return RAM_TYPE[classification];
+}
 
 type Row = {
   id: string; site: string; kind: string; status: Status;
@@ -174,6 +181,52 @@ webSubmissions.patch('/:id', async (c) => {
   return c.json({ submission: await loadOne(sql, id) });
 });
 
+// The house-account supplier a converted lot files under: one per seller, and
+// a seller is their email. Looked up by it exactly, among the house accounts
+// this form files (sourced by one of its channels), before anything is
+// inserted.
+//
+// The unique index is on the generated match_key — alnum(name) + zip — which
+// is the wrong identity for an email: john.smith@ and johnsmith@ compress to
+// the same key, and so can any house account someone typed by hand. Upserting
+// on it filed one seller's lot under somebody else. A key collision therefore
+// means a different seller holds that key, and this one is inserted under a
+// name that keeps it distinct.
+async function webSellerSupplierTx(
+  tx: SqlLike,
+  submissionId: string,
+  p: SellLotPayload,
+  categories: string[],
+  followUp: string,
+  actorId: string,
+): Promise<{ id: string }> {
+  const [known] = await tx<{ id: string }[]>`
+    SELECT id FROM suppliers
+    WHERE owner_id IS NULL AND source = ANY(${WEB_CHANNEL_SOURCES})
+      AND lower(email) = lower(${p.email})
+    ORDER BY created_at, id
+    LIMIT 1
+  `;
+  if (known) {
+    await tx`UPDATE suppliers SET last_contacted_at = NOW() WHERE id = ${known.id}`;
+    return known;
+  }
+  // The submission id is the last resort: it is unique, so a name carrying it
+  // can never collide, however many sellers' emails compress alike.
+  for (const name of [p.email, `${p.email} (web)`, `${p.email} (${submissionId})`]) {
+    const [row] = await tx<{ id: string }[]>`
+      INSERT INTO suppliers (name, email, owner_id, source, status, supplies,
+                             next_follow_up_at, created_by)
+      VALUES (${name}, ${p.email}, NULL, ${p.source}, 'prospect',
+              ${categories}, ${followUp}, ${actorId})
+      ON CONFLICT (owner_id, match_key) DO NOTHING
+      RETURNING id
+    `;
+    if (row) return row;
+  }
+  throw new Error(`no free supplier name for web submission ${submissionId}`);
+}
+
 webSubmissions.post('/:id/convert', async (c) => {
   const id = c.req.param('id');
   const me = c.var.user;
@@ -231,17 +284,8 @@ webSubmissions.post('/:id/convert', async (c) => {
       `;
       if (live?.order_id) throw new Error(`__ALREADY__${live.order_id}`);
 
-      // One house-account supplier per seller. The unique index is on the
-      // generated match_key (alnum(name) + zip), so two spellings of one email
-      // that normalise the same fall into the same row instead of a 23505.
-      const supplier = (await tx<{ id: string }[]>`
-        INSERT INTO suppliers (name, email, owner_id, source, status, supplies,
-                               next_follow_up_at, created_by)
-        VALUES (${p.email}, ${p.email}, NULL, ${p.source}, 'prospect',
-                ${categories}, ${isoDatePlus(crm.cadenceDays.prospect)}, ${me.id})
-        ON CONFLICT (owner_id, match_key) DO UPDATE SET last_contacted_at = NOW()
-        RETURNING id
-      `)[0];
+      const supplier = await webSellerSupplierTx(tx, id, p, categories,
+        isoDatePlus(crm.cadenceDays.prospect), me.id);
 
       const pickup = p.handoff === 'pickup';
       const notes = [
@@ -280,7 +324,7 @@ webSubmissions.post('/:id/convert', async (c) => {
             qty, unit_cost, status, position
           ) VALUES (
             ${orderId}, ${category}, ${f.brand ?? null}, ${f.capacity ?? null},
-            ${l.category === 'RAM' && f.classification ? RAM_TYPE[f.classification] ?? null : null},
+            ${l.category === 'RAM' ? ramType(f.classification) : null},
             ${l.category === 'RAM' ? f.classification ?? null : null},
             ${f.rank ?? null}, ${f.speed ?? null},
             ${f.interface ?? null}, ${f.form_factor ?? null}, ${f.description ?? null},

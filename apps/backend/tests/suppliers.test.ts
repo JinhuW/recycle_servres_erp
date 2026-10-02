@@ -244,6 +244,30 @@ describe('clients — the detail payload', () => {
     expect(Array.isArray(d.body.timeline)).toBe(true);
     expect(d.body.timeline[0].body).toBe('Spoke about a pallet');
   });
+
+  it("lists only the caller's own live POs, and totals only those", async () => {
+    const marcus = await loginAs(MARCUS);
+    const alex = await loginAs(ALEX);
+    const id = await mkClient(marcus.token, 'Shared History Co');
+    await givePOs(id, MARCUS, [10], 100);
+    // POs a colleague placed against the same seller before the book moved.
+    await givePOs(id, PRIYA, [20, 30], 1000);
+    await givePOs(id, MARCUS, [40], 500);
+    const sql = getTestDb();
+    await sql`
+      UPDATE orders SET archived_at = NOW()
+      WHERE supplier_id = ${id} AND total_cost = 500`;
+
+    type Detail = { orders: { id: string; total_cost: number }[]; sold: { qty: number; spend: number }[] };
+    const mine = await api<Detail>('GET', `/api/suppliers/${id}`, { token: marcus.token });
+    expect(mine.status).toBe(200);
+    expect(mine.body.orders.map((o) => o.total_cost)).toEqual([100]);
+    expect(mine.body.sold).toEqual([expect.objectContaining({ qty: 10, spend: 100 })]);
+
+    const all = await api<Detail>('GET', `/api/suppliers/${id}`, { token: alex.token });
+    expect(all.body.orders.map((o) => o.total_cost).sort((a, b) => a - b)).toEqual([100, 1000, 1000]);
+    expect(all.body.sold).toEqual([expect.objectContaining({ qty: 30, spend: 2100 })]);
+  });
 });
 
 describe('clients — building the book', () => {

@@ -9,6 +9,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { UPLOAD_HARD_CAP_BYTES } from './lib/settings';
 import { appendErrorRecord, redactSensitivePath, redactSensitiveQuery } from './lib/error-log';
 import { log, releaseCommit, releaseVersion, runWithLogContext } from './lib/log';
+import { secretMatches } from './lib/secret';
 
 import { describeOcr } from './ai';
 import { authMiddleware } from './auth';
@@ -145,7 +146,7 @@ app.use('*', async (c, next) => {
 app.use('*', async (c, next) => {
   const secret = (c.env as Env).PROXY_SECRET;
   if (secret && c.req.path !== '/api/health') {
-    if (c.req.header('X-Proxy-Secret') !== secret) {
+    if (!secretMatches(c.req.header('X-Proxy-Secret'), secret)) {
       return c.json({ error: 'forbidden' }, 403);
     }
   }
@@ -273,10 +274,14 @@ app.use('*', (c, next) => {
 // Safe methods only: these prefixes also carry POST/PATCH endpoints, whose
 // responses have no business advertising a cache lifetime.
 const CACHEABLE_PREFIXES = ['/api/lookups', '/api/categories', '/api/workspace'];
+// Same trap as /api/warehouses, under a cached prefix: the FX panel re-reads
+// the rates straight after a manual save or a refresh.
+const UNCACHED_PATHS = new Set(['/api/workspace/fx-rates']);
 app.use('*', async (c, next) => {
   await next();
   if (c.req.method !== 'GET' && c.req.method !== 'HEAD') return;
   const path = c.req.path;
+  if (UNCACHED_PATHS.has(path)) return;
   if (CACHEABLE_PREFIXES.some((p) => path === p || path.startsWith(p + '/'))) {
     c.header('Cache-Control', 'private, max-age=60');
   }

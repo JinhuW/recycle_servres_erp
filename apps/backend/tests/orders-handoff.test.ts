@@ -3,6 +3,7 @@ import { resetDb, getTestDb } from './helpers/db';
 import { api, multipart, testEnv } from './helpers/app';
 import { loginAs, ALEX, MARCUS, PRIYA } from './helpers/auth';
 import { syncBankTransactions } from '../src/banktx/sync';
+import { applyPackageTracking } from '../src/shipping/track';
 import { stubPaypalProvider } from '../src/banktx/stub';
 
 // POST /api/orders/:id/handoff — the Draft → In Transit hand-off as one
@@ -529,6 +530,36 @@ describe('hand-off facts on the page', () => {
     const [orphan] = await sql`SELECT order_id FROM packages WHERE id = ${solo.body.package.id}`;
     expect(orphan.order_id).toBeNull();
     expect((await api('DELETE', `/api/packages/${solo.body.package.id}`, { token })).status).toBe(200);
+  });
+
+  it('a corrected number or carrier forgets the wrong box\'s event date', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await createOrder(token, 'self');
+    expect((await patch(token, id, { source: 'facebook', handoffMethod: 'label', ...label })).status).toBe(200);
+    const pkgId = (await readOrder(token, id)).package!.id;
+    const sql = getTestDb();
+    const pkg = async () => (await sql`
+      SELECT carrier, status, tracking_status_at FROM packages WHERE id = ${pkgId}`)[0];
+    // The mistyped number belongs to a box the carrier moved today.
+    await sql`UPDATE packages SET status = 'in_transit', tracking_status_at = NOW() WHERE id = ${pkgId}`;
+
+    expect((await patch(token, id, { trackingNumber: '1Z999AA10123456791', carrier: 'UPS' })).status).toBe(200);
+    expect((await pkg()).tracking_status_at).toBeNull();
+    // Every event of the real box is older than the wrong one's, and still applies.
+    const fixed = { id: pkgId, tracking_number: '1Z999AA10123456791', carrier: 'UPS' };
+    const yesterday = new Date(Date.now() - 86_400_000);
+    expect(await applyPackageTracking(sql, fixed, {
+      raw: 'In transit', normalized: 'in_transit', eta: null, statusAt: yesterday,
+    })).toBe('in_transit');
+
+    expect((await patch(token, id, { trackingNumber: '1Z999AA10123456791', carrier: 'FedEx' })).status).toBe(200);
+    expect((await pkg()).tracking_status_at).toBeNull();
+
+    // A poll that looked the box up as UPS before the correction lands on nothing.
+    expect(await applyPackageTracking(sql, fixed, {
+      raw: 'Delivered', normalized: 'delivered', eta: null, statusAt: new Date(),
+    })).toBeNull();
+    expect(await pkg()).toMatchObject({ carrier: 'FedEx', status: 'in_transit', tracking_status_at: null });
   });
 
   it('a PO minted from a package hands off with its own tracking number', async () => {

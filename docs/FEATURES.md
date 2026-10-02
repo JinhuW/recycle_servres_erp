@@ -53,6 +53,11 @@ portal was removed in v1.191.0; no bid had ever been placed through it.
   other session. Until then it signed you out too, up to an hour later: the
   `rt` cookie is scoped to `/api/auth`, so `/api/me/password` never saw it and
   revoked every refresh family. The access token now names its family (`fid`).
+- **A password change or reset ends every other session at once** (v1.193.0).
+  `users.tokens_valid_after` is stamped, and any cookie access token or OAuth
+  bearer token issued before it is refused (they used to keep working for up to
+  60 and 15 minutes). The person changing their own password re-authenticates
+  through one silent refresh.
 - Every mutating request carries `X-Requested-By: recycle-erp`; the CSRF guard
   drops it otherwise. Exempt: safe methods, `/api/health`, and `/api/public/*`
   (the website intake and quote forms and the Shippo webhook, none of which
@@ -633,14 +638,62 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
 
 ## Sell orders
 
+- **A sell order is a full page** (v1.194.0), `#/sell-orders/:id` and
+  `/:id/edit`, rendered in place of the list as a PO's page is. It was a
+  popup before.
+  - The line items and editing controls are on the left. The order summary,
+    payment receiver, evidence and internal notes are on the right; under
+    1100px everything stacks into one column.
+  - The page head carries the downloads, Edit order, Reopen, and Archive /
+    Unarchive.
+  - Editing adds a sticky footer: Discard, Cancel and Save. Save lands on the
+    order's view page with a toast.
+  - A line can grow to what its lot still has free. A line whose lot has
+    nothing left to offer shows a locked quantity and "No longer available —
+    remove the line" (v1.194.1). That covers a lot that left Reviewing or
+    Done, one whose PO was archived, and one that other committed orders hold
+    in full. Saving refuses such a line.
+  - View and edit share one history entry, so browser Back returns to where
+    the order was opened from.
+- **Line items group By warehouse or By PO** (v1.194.0), in both view and edit.
+  The switch on the Line items header is remembered per user (preference
+  `sellOrders.lineGroup`, default by warehouse).
+  - By PO orders the groups numerically and puts hand-typed lines last under
+    "No PO", matching the "Packing list by PO" download. It shows a Warehouse
+    column.
+  - By warehouse groups on the warehouse each line was saved with and shows
+    the "From PO-…" reference under each line.
+  - PO references are links in view mode and plain text while editing, since
+    the edit page has no leave guard.
+- **Each line shows its spec as tags** (v1.194.0).
+  - RAM: Desktop / Server / Laptop, classification, rank and speed (rank and
+    speed accented).
+  - SSD / HDD: interface, form factor and health.
+  - The tags are read live from the line's lot, so a line added while editing
+    shows them before the save. A hand-typed line, or one whose lot is gone,
+    shows its saved spec text instead.
+  - `GET /api/sell-orders/sellable` and the `search_sellable_inventory` MCP
+    tool return the same fields plus `sourceOrderId`.
+- **Only a Done or Closed sell order can be archived** (v1.193.0). Shipped and
+  Awaiting-payment orders still reserve their units, and an archived order
+  leaves the inbox, so archiving one would hide stock it holds; the API refuses
+  it and the Archive button is offered only on Done and Closed. An archived
+  order can't be moved back into either committed status.
+- **The add-inventory picker says when it is cut off** (v1.193.0): it shows the
+  first 200 sellable matches and asks for a narrower search when there are more
+  (`/sell-orders/sellable` returns `hasMore`).
 - **Inventory lots can be added to an existing sell order** (v1.175.0). The
   desktop Inventory selection bar and toolbar offer "Add to sell order" beside
-  Create sell order. It lists the open orders (Draft, Shipped, Awaiting
-  payment; not archived), searchable by order number or customer, and opens
-  the chosen one's edit modal with the selection appended. Lots already on the
-  order are skipped, with a notice when that is all of them. A new line takes
-  the price the order already has for that product, else 0. Saving clears the
-  selection. The modal offers no Archive or Discard on this path.
+  Create sell order.
+  - The picker lists the open orders (Draft, Shipped, Awaiting payment; not
+    archived), searchable by order number or customer.
+  - Picking one opens that order's edit page with the selection appended
+    (a modal until v1.194.0).
+  - Lots already on the order are skipped, with a notice when that is all of
+    them. A new line takes the price the order already has for that product,
+    else 0.
+  - Saving clears the Inventory selection; leaving the page without saving
+    keeps it (v1.194.0). The page offers no Archive or Discard on this path.
 - **Each line links back to its PO** (v1.174.0). The sell order view shows a
   "From PO-…" link under a line that was picked from inventory. A free-typed
   line has no PO.
@@ -914,6 +967,14 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
 > the permission is the only cause an admin can act on, so a timeout that
 > claimed to be one sent them to fix a setting that was already right.
 
+> **A partial sync failure shows too** (v1.193.0). When part of a source fails
+> while the rest syncs — Mercury's card list, or one card — the account keeps
+> `sync_error` and the Payments header shows a red *"<source> didn't sync"*
+> chip; `/stats` reports the stalest account per source rather than the
+> freshest, so a healthy checking account no longer hides a stale card. Each
+> account is also re-read 60 days back once a week so a late reversal is seen,
+> and a row pending for over 120 days stops holding the fetch window open.
+
 ## Transfers
 
 Internal stock movement between warehouses, with a manifest view and its own
@@ -924,6 +985,10 @@ status guard.
   Shipped and Awaiting-payment sell orders name); more is refused with a 409
   that says how many are free. Before, a partial move split reserved units into
   a clone the sell order's Done never touched, leaving phantom stock.
+- **Receiving a transfer restores each line's own status** (v1.193.0) — the
+  `prior_status` its transfer recorded, Reviewing or Done — instead of
+  promoting every line to Done; reopen accepts either. The transfer-orders list
+  pages by cursor (`?limit=&cursor=`) instead of stopping at 200.
 
 ## Market values
 

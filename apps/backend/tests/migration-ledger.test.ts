@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readdirSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import postgres from 'postgres';
 import { TEST_DATABASE_URL } from './helpers/db';
 
@@ -81,5 +82,63 @@ describe('migrate.mjs schema_migrations ledger', () => {
       const prev = after1.find(x => x.filename === row.filename)!;
       expect(row.applied_at).toEqual(prev.applied_at); // others untouched
     }
+  }, 60_000);
+
+  // A migration stuck behind another session's lock gives up after the lock
+  // timeout and is retried, instead of queueing every query behind it or
+  // failing boot outright.
+  it('retries a file that timed out waiting for a lock', async () => {
+    const file = '0145_packages_tracking_status_at.sql';
+    await db`ALTER TABLE packages DROP COLUMN IF EXISTS tracking_status_at`;
+    await db`DELETE FROM schema_migrations WHERE filename = ${file}`;
+
+    const holder = postgres(scratchUrl, { max: 1, onnotice: () => {} });
+    let release!: () => void;
+    const held = holder.begin(async (tx) => {
+      await tx`LOCK TABLE packages IN ACCESS EXCLUSIVE MODE`;
+      await new Promise<void>((r) => { release = r; });
+    });
+    await new Promise((r) => setTimeout(r, 300)); // the lock is taken
+
+    const child = spawn('node', [migrateScript], { env: { ...process.env, DATABASE_URL: scratchUrl } });
+    let out = '';
+    child.stdout.on('data', (d) => { out += d; });
+    child.stderr.on('data', (d) => { out += d; });
+    const exited = new Promise<number | null>((r) => child.on('exit', r));
+    // Past one 10s lock timeout, then let the retry through.
+    await new Promise((r) => setTimeout(r, 11_000));
+    release();
+    await held;
+    await holder.end();
+
+    expect(await exited).toBe(0);
+    expect(out).toContain('waited too long for a lock; retrying');
+    const [row] = await db<{ n: number }[]>`
+      SELECT COUNT(*)::int AS n FROM schema_migrations WHERE filename = ${file}`;
+    expect(row.n).toBe(1);
+  }, 60_000);
+
+  // Runs after the test above, against the same scratch ledger.
+  it('records a checksum per file, backfills a missing one, and warns on an edited file', async () => {
+    const sha = (f: string) =>
+      createHash('sha256').update(readFileSync(join(migrationsDir, f), 'utf8')).digest('hex');
+    const rows = await db<{ filename: string; checksum: string | null }[]>`
+      SELECT filename, checksum FROM schema_migrations ORDER BY filename
+    `;
+    const [first, second] = rows;
+    expect(first.checksum).toBe(sha(first.filename));
+
+    await db`UPDATE schema_migrations SET checksum = NULL WHERE filename = ${first.filename}`;
+    await db`UPDATE schema_migrations SET checksum = 'edited' WHERE filename = ${second.filename}`;
+    const r = runMigrate();
+    expect(r.status).toBe(0);
+    const out = r.stdout + r.stderr;
+    expect(out).toContain('applied migration has changed on disk');
+    expect(out).toContain(second.filename);
+
+    const [backfilled] = await db<{ checksum: string }[]>`
+      SELECT checksum FROM schema_migrations WHERE filename = ${first.filename}
+    `;
+    expect(backfilled.checksum).toBe(sha(first.filename));
   }, 60_000);
 });

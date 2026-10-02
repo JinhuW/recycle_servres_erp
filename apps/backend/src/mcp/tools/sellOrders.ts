@@ -17,7 +17,9 @@ export const SELL_ORDER_TOOL_DEFS = [
       'and warehouseName, availableQty (the full sellable quantity of the line), draftCount (how many other ' +
       'drafts already propose this line — drafts are proposals, so a line may appear on several and only the ' +
       'first one promoted keeps it), and sellPrice (the price already ' +
-      'assigned to the line, in USD — advisory; you still choose each line\'s unitPrice). Filter with query ' +
+      'assigned to the line, in USD — advisory; you still choose each line\'s unitPrice), sourceOrderId (the PO ' +
+      'the line came in on), and the structured spec behind subLabel: type (Desktop / Server / Laptop), ' +
+      'classification, rank, speed, interface, formFactor, health. Filter with query ' +
       '(matches brand / part number / description / category) and warehouseId. Requires the sellorder:read scope.',
     inputSchema: {
       type: 'object',
@@ -80,11 +82,18 @@ export const SELL_ORDER_TOOL_DEFS = [
   },
 ] as const;
 
+// The schema's ceiling, held here: tool args arrive unvalidated, and the shared
+// search goes up to 201 for the REST picker's truncation check.
+const MCP_SELLABLE_MAX = 100;
+
 export async function callSearchSellableInventory(
   sql: postgres.Sql,
   args: { query?: string; warehouseId?: string; limit?: number },
 ) {
-  return searchSellableInventory(sql, args);
+  return searchSellableInventory(sql, {
+    ...args,
+    limit: Math.min(args.limit ?? 20, MCP_SELLABLE_MAX),
+  });
 }
 
 const DEFAULT_MCP_CUSTOMER = 'f30f98bc-09c7-4108-b083-c7d69cc9968c';

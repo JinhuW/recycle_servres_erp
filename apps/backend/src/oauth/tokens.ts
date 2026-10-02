@@ -151,10 +151,15 @@ export type RotateRefreshResult =
   | { ok: true; raw: string; clientId: string; userId: string | null; scopes: OAuthScope[]; familyId: string }
   | { ok: false; reason: 'not_found' | 'expired' | 'revoked' | 'reused' };
 
+// `expectedClientId` is the client that authenticated at /token. A token held
+// by a different client is refused before anything is written: otherwise any
+// registered client presenting a stolen token would rotate it, or trip the
+// reuse path and burn the owner's whole family.
 export async function rotateRefreshToken(
   sql: postgres.Sql,
   env: Env,
   raw: string,
+  expectedClientId: string,
 ): Promise<RotateRefreshResult> {
   return sql.begin<RotateRefreshResult>(async (tx) => {
     const row = (await tx<{
@@ -171,7 +176,7 @@ export async function rotateRefreshToken(
       FOR UPDATE OF rt
       LIMIT 1
     `)[0];
-    if (!row) return { ok: false, reason: 'not_found' };
+    if (!row || row.client_id !== expectedClientId) return { ok: false, reason: 'not_found' };
     if (row.revoked_at) {
       // Token-theft signal: someone replayed an already-rotated token.
       await revokeRefreshFamily(tx, row.family_id, 'reuse');

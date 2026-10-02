@@ -89,12 +89,14 @@ export function trackToInfo(track: Record<string, unknown>): TrackingInfo {
     : {}) as Record<string, unknown>;
   const status = typeof st.status === 'string' ? st.status : '';
   const details = typeof st.status_details === 'string' ? st.status_details.trim() : '';
+  const statusAt = typeof st.status_date === 'string' ? new Date(st.status_date) : null;
   return {
     // '' means "this payload carried no status" — the apply* writers COALESCE
     // it away rather than overwriting a good carrier string with a placeholder.
     raw: details || status,
     normalized: normalizeShippoStatus(status),
     eta: parseEta(typeof track.eta === 'string' ? track.eta : null),
+    statusAt: statusAt && !Number.isNaN(statusAt.getTime()) ? statusAt : null,
   };
 }
 
