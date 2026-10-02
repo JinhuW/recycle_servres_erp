@@ -317,13 +317,17 @@ publicForms.post('/intake', async (c) => {
   // cap. Uploads happen before the transaction so a failed INSERT can still
   // clean up what reached the bucket.
   const sql = getDb(c.env);
-  const incoming = photos.flat().reduce((n, f) => n + f.size, 0);
+  const { maxBytes, allowedMime } = await getUploadLimits(sql);
+  // In stored bytes, like the budget's own total: a photo is kept at most at
+  // the upload cap (shrunk to fit, or refused), so a raw phone picture counts
+  // for what it can cost, not for the size it arrived at. Still worked out
+  // before anything is decoded.
+  const incoming = photos.flat().reduce((n, f) => n + Math.min(f.size, maxBytes), 0);
   const full = await overDailyBudget(sql, incoming, namedSender(c));
   if (full !== null) {
     c.header('Retry-After', String(full));
     return c.json({ error: 'we are not taking more submissions today; try again tomorrow' }, 429);
   }
-  const { maxBytes, allowedMime } = await getUploadLimits(sql);
   const uploaded: { line: number; pos: number; file: File; storageKey: string; deliveryUrl: string }[] = [];
   const cleanup = () => deleteAttachments(c.env, uploaded.map(u => u.storageKey))
     .catch(e => log.warn('intake photo cleanup', e));

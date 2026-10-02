@@ -2,7 +2,7 @@
 // manager-only figures each row carries.
 import { Hono } from 'hono';
 import { getDb } from '../../db';
-import { clampLimit, cursorTsSelect, decodeCursor, encodeCursor, parseSort } from '../../lib/pagination';
+import { clampLimit, cursorTs, cursorTsSelect, decodeCursor, encodeCursor, parseSort } from '../../lib/pagination';
 import { effectiveRole } from '../../lib/role';
 import { LIFECYCLE_LABEL, lifecyclesForLabel, visibleLifecycle } from '../../services/orderAdvance';
 import { sortCategories } from '../../services/orderCategory';
@@ -33,7 +33,15 @@ listRoutes.get('/', async (c) => {
     return c.json({ error: 'sort column not allowed' }, 400);
   }
   const sort = parseSort('orders', sortRaw) ?? { col: 'created_at', dir: 'desc' as const };
-  const cursor = decodeCursor(c.req.query('cursor'));
+  // The cursor's value is cast to the sort column's type in SQL, so one that
+  // doesn't fit that type would 500 (and land in the error sink); it falls back
+  // to page one instead, like every other list.
+  const decoded = decodeCursor(c.req.query('cursor'));
+  const cursorFits = decoded !== null && (
+    sort.col === 'total_cost' ? typeof decoded.ts === 'number' && Number.isFinite(decoded.ts)
+    : sort.col === 'lifecycle' ? typeof decoded.ts === 'string'
+    : cursorTs(decoded) !== null);
+  const cursor = cursorFits ? decoded : null;
 
   // Build the query in pieces to keep dynamic filters tidy. Each fragment
   // either narrows the result set or evaluates to TRUE so the AND chain

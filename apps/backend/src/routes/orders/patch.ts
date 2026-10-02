@@ -593,8 +593,11 @@ patchRoutes.patch('/:id', async (c) => {
         for (const r of lockedRows) lockedById.set(r.id, r);
 
         // A qty edit may not drop below what committed sell orders hold: the
-        // order would go on consuming units the line no longer has.
-        const qtyEdits = body.lines.filter(l => l.qty !== undefined && l.qty !== null);
+        // order would go on consuming units the line no longer has. Only this
+        // PO's lines: another order's id is a no-op in the UPDATE below, so it
+        // can't be what refuses the patch.
+        const qtyEdits = body.lines.filter(l => l.qty !== undefined && l.qty !== null
+          && lockedById.has(l.id.toLowerCase()));
         if (qtyEdits.length) {
           const claims = await committedClaimsByLine(tx, qtyEdits.map(l => l.id));
           const short = qtyEdits.filter(l => (claims.get(l.id.toLowerCase())?.qty ?? 0) > Number(l.qty));

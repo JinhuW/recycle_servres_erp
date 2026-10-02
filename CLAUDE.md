@@ -402,11 +402,14 @@ switches the branch out from under the first.
   what is left (MCP streams never end on their own), closes the pool and
   exits by 25s.  A new background loop must return `{ stop }` and join the
   `loops` list in `server.ts`.  Railway's draining window has to exceed 25s,
-  or SIGKILL lands first.  Don't put `pnpm start` back in the CMD: `sh -c`
+  or SIGKILL lands first: the backend's `drainingSeconds` is 30 on prod and
+  dev (set through the Railway API).  Don't put `pnpm start` back in the CMD: `sh -c`
   held PID 1 and forwarded nothing.
 - **`seed.mjs` and `migrate.mjs --reset` refuse a non-local `DATABASE_URL`**
-  (v1.196.1).  Local means `localhost`, `127.0.0.1`, `::1` or the compose
-  `postgres` service.  Override with `ALLOW_DESTRUCTIVE_SEED=true` or
+  (v1.196.1), and anything at all under `NODE_ENV=production` (v1.200.2).
+  Local means `localhost`, `127.0.0.1`, `::1` or the compose `postgres`
+  service — which is the real database on a self-hosted prod stack, hence
+  the `NODE_ENV` check.  Override with `ALLOW_DESTRUCTIVE_SEED=true` or
   `ALLOW_DESTRUCTIVE_RESET=true`.  A shell can carry a `DATABASE_URL` left
   over from a Railway session, which is how a laptop reseed could reach real
   data.
