@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-153](./RS-153-lists-and-cursors-microsecond-exact-keyset-cursors-s.md) | done | bug | P2 | Lists and cursors: microsecond-exact keyset cursors, sell-order stats, every list walks its pages | 1.199.0 |
 | [RS-152](./RS-152-sell-order-by-po-shows-the-source-po-line-as-a-po-n.md) | done | story | P2 | Sell order By PO shows the source PO line as a PO #n badge | 1.198.2 |
 | [RS-151](./RS-151-supplier-name-keys-and-bank-pairing-non-latin-names.md) | done | bug | P2 | Supplier name keys and bank pairing: non-Latin names, unpair, bounded pairing windows, currency | 1.198.3 |
 | [RS-150](./RS-150-reporting-money-sales-dated-by-done-purchased-qty-ba.md) | done | bug | P2 | Reporting money: sales dated by Done, purchased-qty basis, lot-price cost, customer tiles, supplier rollups | 1.198.0 |

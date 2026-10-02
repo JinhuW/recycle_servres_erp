@@ -15,6 +15,26 @@ export function Market() {
   const [filter, setFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
   const [items, setItems] = useState<RefPrice[]>([]);
+  // The full filtered count. The API pages at 100 and the screen used to stop
+  // at the first page, quietly cut to 30, with a header claiming that was all.
+  const [total, setTotal] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const queryOf = (offset: number) => {
+    const params = new URLSearchParams();
+    if (filter !== 'all') params.set('category', filter);
+    if (search.trim()) params.set('q', search.trim());
+    if (offset) params.set('offset', String(offset));
+    return `/api/market?${params}`;
+  };
+  const loadMore = async () => {
+    setLoadingMore(true);
+    try {
+      const r = await api.get<{ items: RefPrice[]; total: number }>(queryOf(items.length));
+      setItems(prev => [...prev, ...r.items]);
+      setTotal(r.total);
+    } catch (e) { handleFetchError(e); }
+    finally { setLoadingMore(false); }
+  };
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -23,11 +43,8 @@ export function Market() {
   useEffect(() => {
     let alive = true;
     const handle = setTimeout(() => {
-      const params = new URLSearchParams();
-      if (filter !== 'all') params.set('category', filter);
-      if (search.trim()) params.set('q', search.trim());
-      api.get<{ items: RefPrice[] }>(`/api/market?${params}`)
-        .then(r => { if (alive) setItems(r.items); })
+      api.get<{ items: RefPrice[]; total?: number }>(queryOf(0))
+        .then(r => { if (alive) { setItems(r.items); setTotal(r.total ?? r.items.length); } })
         .catch(handleFetchError)
         .finally(() => { if (alive) setLoadedOnce(true); });
     }, 250);
@@ -36,7 +53,7 @@ export function Market() {
 
   return (
     <>
-      <PhHeader title={t('marketTitle')} sub={t('marketSub', { n: items.length })} scrolled={scrolled} />
+      <PhHeader title={t('marketTitle')} sub={t('marketSub', { n: total })} scrolled={scrolled} />
       <div className="ph-scroll" ref={scrollRef}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px', background: 'var(--accent-soft)', border: '1px solid color-mix(in oklch, var(--accent) 25%, transparent)', borderRadius: 12, marginTop: 4, fontSize: 12, color: 'var(--accent-strong)' }}>
           <Icon name="zap" size={14} style={{ marginTop: 1, flexShrink: 0 }} />
@@ -58,7 +75,7 @@ export function Market() {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {!loadedOnce && <PhoneListSkeleton rows={5} />}
-          {loadedOnce && items.slice(0, 30).map(r => {
+          {loadedOnce && items.map(r => {
             const open = openId === r.id;
             const trendUp = r.trend > 0.005;
             const trendDown = r.trend < -0.005;
@@ -130,6 +147,12 @@ export function Market() {
               </div>
             );
           })}
+          {loadedOnce && items.length < total && (
+            <button type="button" className="btn" style={{ alignSelf: 'center', marginTop: 4 }}
+              disabled={loadingMore} onClick={() => { void loadMore(); }}>
+              {t('webSubLoadMore')}
+            </button>
+          )}
         </div>
       </div>
     </>

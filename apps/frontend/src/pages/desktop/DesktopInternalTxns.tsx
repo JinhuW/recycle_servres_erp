@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { ListSkeleton } from '../../components/Skeleton';
+import { forEachKeysetPage } from '../../lib/keysetPages';
 import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { fmtDate, fmtDateShort, fmtSigned } from '../../lib/format';
@@ -72,10 +73,17 @@ export function DesktopInternalTxns({ onToast }: { onToast: (msg: string) => voi
 
   const reload = useCallback(() => {
     const mine = ++reqId.current;
-    const p = settledQ ? `?q=${encodeURIComponent(settledQ)}` : '';
-    api.get<Feed>(`/api/internal-transactions${p}`)
-      .then(r => { if (mine === reqId.current) setFeed(r); })
-      .catch(handleFetchError);
+    const q = settledQ ? `&q=${encodeURIComponent(settledQ)}` : '';
+    // Every record, a page at a time: the endpoint pages at 50, and stopping
+    // at the first page hid every older record without a word.
+    void forEachKeysetPage<RecordRow>(
+      cursor => api.get<Feed>(`/api/internal-transactions?limit=200${q}${cursor ? '&cursor=' + encodeURIComponent(cursor) : ''}`)
+        .then(r => ({ items: r.rows, nextCursor: r.nextCursor })),
+      (items, { first }) => {
+        if (mine !== reqId.current) return false;
+        setFeed(prev => ({ rows: first || !prev ? items : [...prev.rows, ...items], nextCursor: null }));
+      },
+    ).catch(handleFetchError);
   }, [settledQ]);
 
   useEffect(() => { reload(); }, [reload]);

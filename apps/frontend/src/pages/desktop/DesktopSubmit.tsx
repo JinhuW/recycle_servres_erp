@@ -244,7 +244,9 @@ function OrderForm({
   const [allDrafts, setAllDrafts] = useState<OrderSummary[]>([]);
   useEffect(() => {
     let alive = true;
-    api.get<{ orders: OrderSummary[] }>('/api/orders?status=Draft')
+    // mine=true: for a manager the list is company-wide, and its first page
+    // could be other people's drafts, leaving their own off the picker.
+    api.get<{ orders: OrderSummary[] }>('/api/orders?status=Draft&mine=true&limit=200')
       .then(r => { if (alive) setAllDrafts(r.orders); })
       .catch(() => { /* non-fatal: just means no "add to existing" option */ });
     return () => { alive = false; };

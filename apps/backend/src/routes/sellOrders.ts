@@ -7,7 +7,7 @@ import { notify } from '../lib/notify';
 import { getUploadLimits } from '../lib/settings';
 import { allLimited } from '../lib/concurrency';
 import { log } from '../lib/log';
-import { clampLimit, decodeCursor, encodeCursor, UUID_RE } from '../lib/pagination';
+import { clampLimit, cursorTs, cursorTsParam, cursorTsSelect, decodeCursor, encodeCursor, UUID_RE } from '../lib/pagination';
 import {
   writeSellOrderEvent, diff, META_FIELDS_SO, type AuditChange,
 } from '../services/sellOrderAudit';
@@ -94,13 +94,15 @@ sellOrders.get('/', async (c) => {
   // order forever; eventually that's an OOM risk and a slow first paint.
   const limit = clampLimit(c.req.query('limit'), 50, 200);
   const cursor = decodeCursor(c.req.query('cursor'));
-  const cursorFrag = cursor
-    ? sql`AND (so.created_at, so.id) < (${cursor.ts}, ${cursor.id})`
+  const afterTs = cursorTs(cursor);
+  const cursorFrag = afterTs && cursor
+    ? sql`AND (so.created_at, so.id) < (${cursorTsParam(sql, afterTs)}, ${cursor.id})`
     : sql`AND TRUE`;
 
   const rows = await sql`
     SELECT
       so.id, so.status, so.notes, so.created_at, so.updated_at, so.archived_at, so.currency_code,
+      ${cursorTsSelect(sql, sql`so.created_at`)} AS cursor_ts,
       (so.adjusted_at IS NOT NULL) AS adjusted,
       c.id AS customer_id, c.name AS customer_name, c.short_name AS customer_short,
       pu.name AS payment_received_by_name,
@@ -120,7 +122,7 @@ sellOrders.get('/', async (c) => {
   const slice = hasMore ? rows.slice(0, limit) : rows;
   const nextCursor = hasMore
     ? encodeCursor({
-        ts: (slice[slice.length - 1] as { created_at: string }).created_at,
+        ts: (slice[slice.length - 1] as { cursor_ts: string }).cursor_ts,
         id: (slice[slice.length - 1] as { id: string }).id,
       })
     : null;
@@ -145,6 +147,24 @@ sellOrders.get('/', async (c) => {
     // current sell-orders inbox UI doesn't go blank while it migrates.
     items: shaped,
   });
+});
+
+// The inbox's status tiles. They were summed in the browser from the first
+// page of the list, so past 50 orders every tile undercounted. Same archive
+// rule as the list; USD, like the list's totals.
+sellOrders.get('/stats', async (c) => {
+  if (c.var.user.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const sql = getDb(c.env);
+  const includeArchived = c.req.query('includeArchived') === 'true';
+  const rows = await sql<{ status: string; count: number; revenue: number }[]>`
+    SELECT so.status, COUNT(DISTINCT so.id)::int AS count,
+           COALESCE(SUM(sol.qty * sol.unit_price), 0)::float AS revenue
+    FROM sell_orders so
+    LEFT JOIN sell_order_lines sol ON sol.sell_order_id = so.id
+    WHERE ${includeArchived ? sql`TRUE` : sql`so.archived_at IS NULL`}
+    GROUP BY so.status
+  `;
+  return c.json({ byStatus: Object.fromEntries(rows.map((r) => [r.status, { count: r.count, revenue: r.revenue }])) });
 });
 
 // Excel export of the sell-order list. Manager-only (every route here is).

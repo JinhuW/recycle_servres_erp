@@ -17,6 +17,32 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.199.0] - 2026-10-02
+
+Lists and cursors (RS-153), batch 8a of the remaining code-review work.
+
+### Fixed
+
+- **Paging no longer drops rows created in the same millisecond.** Keyset
+  cursors were encoded from the timestamp postgres.js hands back as a JS Date,
+  which keeps milliseconds only. The next page then started up to 999 µs
+  early or late, skipping or repeating every row in that window, and a bank
+  sync or an import writes dozens in one millisecond. The PO list, sell
+  orders, the bank feed, internal transactions, web submissions and the
+  activity feed now encode the cursor from the column as µs-exact text, and
+  compare against it cast through text. A cursor whose timestamp isn't one
+  reads as page one instead of a 500. The transfer-orders list already worked
+  this way.
+- **Every list shows every row.** The phone PO list, the sell-order inbox and
+  the internal transactions loaded the API's first 50 and stopped, with
+  nothing to say more existed. They now walk the pages, painting the first at
+  once. The sell-order status tiles, which were summed from those 50, come
+  from a new `GET /api/sell-orders/stats`. The phone Market list said "100
+  SKUs" and showed 30. It now states the real total and loads more on
+  request. The desktop submit screen's "add to an existing draft" list asks
+  for the user's own drafts, which a manager's first page of everyone's could
+  leave out.
+
 ## [1.198.3] - 2026-10-02
 
 Supplier keys and bank pairing (RS-151), batch 7b of the remaining code-review
