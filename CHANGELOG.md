@@ -17,6 +17,33 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.197.1] - 2026-10-02
+
+Line validation and field clears (RS-147), batch 6a of the remaining
+code-review work.
+
+- **A field blanked in the PO editor stays blank.** PATCH wrote every spec
+  field with COALESCE, so the `null` a cleared dropdown sends read as "no
+  change". The save said it worked and the old value came back. The fields
+  the line editors own now land as sent, with null clearing them, and keep
+  their stored value only when left out. Those are brand through RPM, plus
+  item type and chip #. Part #, serial #, condition, qty, cost and the scan
+  fields keep the old behaviour, because the editors leave the scan fields
+  out and inventory grouping is keyed on the part #. The inventory editor had
+  the same fix in 1.192.1.
+- **An edit that changes nothing no longer costs a PO its stage.** Whether a
+  purchaser's save was a material edit was judged on the raw value sent. An
+  echoed `null` on a field that null leaves alone counted as a change and
+  sent the submitted PO back to Draft. It is now judged on what will land.
+- **One validator checks every line.** Creating a PO checked no numbers at
+  all, so a negative unit cost was stored and a qty of 0 surfaced as "A line
+  value is out of range". The PO editor and the inventory editor each checked
+  a different subset. All three now share `lib/orderInput.ts`, covering qty,
+  unit cost, sell price, health, RPM and text length and type. Errors on a
+  new PO name the line.
+- Migration 0149 adds `CHECK (unit_cost >= 0)` and `CHECK (total_cost >= 0)`
+  as the backstop; prod had no violating row.
+
 ## [1.197.0] - 2026-10-02
 
 Stock math and lock order (RS-146), batch 5 of the remaining code-review work.

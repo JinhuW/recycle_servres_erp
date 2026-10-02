@@ -491,6 +491,18 @@ on to Sold once every line has sold (v1.164.0).
   total-cost change. Which totals count as pinned is the server's call: the
   page's lines show what is left, while the comparison is against what was
   bought. Judged in the browser, every partly sold PO looked negotiated.
+- **Blanking a field in the PO editor clears it** (v1.197.1). It used to be
+  saved as "no change", so the value came back after a Save that reported
+  success. That covered brand, capacity, type, generation, class, rank, speed,
+  interface, form factor, description, item type, chip #, health and RPM; the
+  inventory editor had the same fix in v1.192.1. Part # and serial # keep their
+  stored value when sent blank. A save that changes nothing no longer sends a
+  purchaser's submitted PO back to Draft.
+- **Every line is checked the same way on the way in** (v1.197.1): qty a whole
+  number of at least 1, unit cost and sell price 0 or more, health 0–100, RPM a
+  whole number above 0, and text fields within a length limit. That holds for
+  a new PO, the PO editor and the inventory editor alike. Negative unit costs
+  and goods totals are also refused by the database.
 - **A qty edit keeps the sold units sold** (v1.197.0). On a partly sold line,
   a recount in the PO editor or the inventory editor moves the purchased count
   by the same amount, so the PO's cost and the units sold stay put. The PO

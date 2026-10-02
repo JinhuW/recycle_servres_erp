@@ -8,6 +8,7 @@ import { canonPartCol, canonPartArg } from '../lib/part-number';
 import { invLabel } from '../lib/inventoryLabel';
 import { committedClaimsByLine, committedQtySql, openSellStatuses } from '../lib/sellCommitment';
 import { lockOrdersForLinesTx } from '../services/orderLocks';
+import { validateLineInput } from '../lib/orderInput';
 import { buildXlsxWorkbook, xlsxResponse, datedFilename, type XlsxColumn } from '../lib/xlsx';
 import {
   CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields, categoryTabSheets,
@@ -1135,26 +1136,14 @@ inventory.patch('/:id', async (c) => {
   // null or '' means "clear it".
   const has = (f: string) => ((body as Record<string, unknown>)[f] !== undefined ? 1 : 0);
   const specVal = (v: string | null | undefined) => (v == null || v.trim() === '' ? null : v.trim());
-  if (body.health !== undefined && body.health !== null && (body.health < 0 || body.health > 100)) {
-    return c.json({ error: 'health must be between 0 and 100' }, 400);
-  }
-  // Field range gates — surface as 400s before we ever reach the DB. Without
-  // these, qty=0 / negative price hit a CHECK constraint and surfaced as a
-  // 500 (looks like an internal error to the caller).
+  // The same field rules as the PO editor (lib/orderInput.ts), as 400s
+  // before the database, where qty=0 or a negative price is a CHECK failure.
+  const inputErr = validateLineInput(body as Record<string, unknown>, 'patch');
+  if (inputErr) return c.json({ error: inputErr }, 400);
   // Line status is the inventory vocabulary, not the PO stage list: a stage
   // label written here would drop the line out of every stock bucket.
   if (body.status !== undefined && !LINE_STATUSES.has(body.status)) {
     return c.json({ error: 'status must be one of ' + [...LINE_STATUSES].join(', ') }, 400);
-  }
-  if (body.qty !== undefined && (!Number.isInteger(body.qty) || body.qty <= 0)) {
-    return c.json({ error: 'qty must be a positive integer' }, 400);
-  }
-  if (body.unitCost !== undefined && (!Number.isFinite(body.unitCost) || body.unitCost < 0)) {
-    return c.json({ error: 'unitCost must be ≥ 0' }, 400);
-  }
-  if (body.sellPrice !== undefined && body.sellPrice !== null &&
-      (!Number.isFinite(body.sellPrice) || body.sellPrice < 0)) {
-    return c.json({ error: 'sellPrice must be ≥ 0' }, 400);
   }
 
   // Permission probe runs outside the tx — it doesn't write and the user_id

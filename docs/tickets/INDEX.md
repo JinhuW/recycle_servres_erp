@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-147](./RS-147-line-validation-and-field-clears-one-line-validator.md) | done | bug | P2 | Line validation and field clears: one line validator, CHECK constraints, editor-managed fields can be cleared | 1.197.1 |
 | [RS-146](./RS-146-stock-math-and-lock-order-one-free-quantity-rule-po.md) | done | bug | P1 | Stock math and lock order: one free-quantity rule, PO qty vs committed, deadlock-free locking, lot-price reset | 1.197.0 |
 | [RS-145](./RS-145-sell-order-lines-show-their-source-po-line-number.md) | done | story | P2 | Sell order lines show their source PO line number | 1.196.0 |
 | [RS-144](./RS-144-ops-and-tooling-graceful-shutdown-ci-path-filters-se.md) | done | task | P2 | Ops and tooling: graceful shutdown, CI path filters, session-launcher races, destructive-script guard, prod-to-dev scrub | 1.196.1 |
