@@ -89,8 +89,15 @@ export default {
     proxied.headers.set('X-Forwarded-Proto', url.protocol.replace(':', ''));
     // Without this the backend sees the Worker as the peer and records a null IP
     // for every login attempt and DCR registration it tries to rate-limit.
+    // X-Forwarded-For is one of the headers Railway's edge rewrites, so on its
+    // own it reaches the backend as a Cloudflare egress address shared by every
+    // user. X-Client-IP is private, passes through intact, and is what the
+    // backend's per-IP limits key on. `set` drops any value the caller sent.
     const clientIp = request.headers.get('CF-Connecting-IP');
-    if (clientIp) proxied.headers.set('X-Forwarded-For', clientIp);
+    if (clientIp) {
+      proxied.headers.set('X-Forwarded-For', clientIp);
+      proxied.headers.set('X-Client-IP', clientIp);
+    }
     return fetch(proxied, { redirect: 'manual' });
   },
 };

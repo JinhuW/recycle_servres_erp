@@ -406,6 +406,17 @@ switches the branch out from under the first.
   production environment also tracks `main` (the `prod` branch is retired,
   2026-07-20), so a `dev`→`main` merge is a full release. The `uptime-monitor` Railway cron
   (`deploy/railway-uptime/`) probes prod every 5 min as the backstop.
+- **Browser security headers live in `apps/frontend/public/_headers` under
+  `/*`** (CSP, frame, nosniff, referrer, permissions). Cloudflare applies them to
+  what the Worker fetches from `ASSETS` and to the SPA fallback built from
+  `index.html`, so don't duplicate them in `worker.js`. Every CSP change must
+  also bump the `csp-rev` meta in `index.html`: the service worker serves
+  navigations from its precached index.html *with the headers it was cached
+  with*, and only re-precaches when the file's bytes change.
+- **The real client IP reaches the backend as `X-Client-IP`**, set by the
+  Worker from `CF-Connecting-IP`. Railway rewrites `X-Forwarded-For` to a
+  Cloudflare egress address shared by every user, so anything keyed per IP
+  must read `X-Client-IP`.
 
 ## Infrastructure (Terraform)
 

@@ -6,8 +6,26 @@
 # The Worker 308s plain http to https; HSTS makes repeat visitors skip even
 # that first insecure hop, so the Secure auth cookies are never in play on
 # http. Host-only on purpose — other subdomains are not ours to pin.
+#
+# These rules also reach what the Worker fetches from ASSETS and the SPA
+# fallback it builds from index.html, so this is the one place they live.
+# Referrer-Policy keeps /authorize?req=… off cross-origin Referers; the camera
+# stays on for label scans. The CSP is report-only until a release shows no
+# violations in the console:
+#   'wasm-unsafe-eval'   zxing (QR) and @jsquash (JPEG) decode in WASM
+#   'unsafe-inline'      styles: React `style` props, ~2.3k of them
+#   both R2 origins      prod's, and dev's (dev's database is a copy of prod's)
+#   127.0.0.1:47811      the desk-scanner bridge
+# A service worker serves index.html from its precache together with the
+# headers it was cached with, so a policy change here must also bump the
+# csp-rev meta in index.html or installed clients keep the old one.
 /*
   Strict-Transport-Security: max-age=31536000
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: same-origin
+  Permissions-Policy: camera=(self), microphone=(), geolocation=(), payment=()
+  Content-Security-Policy-Report-Only: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob: https://static.recycleservers.com https://pub-01be3c247eb8470fb80dfe80494362f7.r2.dev; media-src 'self' blob:; connect-src 'self' https://static.recycleservers.com https://pub-01be3c247eb8470fb80dfe80494362f7.r2.dev http://127.0.0.1:47811; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
 
 # Content-hashed by the build: the filename changes whenever the bytes do.
 /assets/*
