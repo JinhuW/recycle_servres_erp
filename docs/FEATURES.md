@@ -270,6 +270,19 @@ on to Sold once every line has sold (v1.164.0).
   desktop only; called *Box check* until v1.189.2). **Review mode** in the PO
   page header, primary at Reviewing and present at every stage, opens `#/purchase-orders/<id>/check`: a full-width
   page with no sidebar.
+  - Each row of the desktop PO list has its own Review mode button (package
+    icon, left of the download button), for managers only. It's hidden in
+    purchaser preview (v1.201.0).
+  - Opening it on a Draft or In Transit PO asks *Move PO-n to Reviewing?*,
+    because Approve is only offered at Reviewing (v1.201.0). The choices are
+    **Move to Reviewing** (moves the PO, then opens), **Open without moving**,
+    and **Cancel**.
+    - Reviewing and later stages, and archived POs, open with no question.
+    - The move re-reads the PO, and only the stage the question named moves.
+      A PO that has since passed Reviewing just opens. One sent back to Draft
+      is asked again.
+    - A move the server refuses, such as the proof rules for leaving Draft,
+      shows its message, and the page stays put.
   - Opening and leaving the check re-reads the PO, so neither page works from
     the other's stale copy. A PO page with unsaved edits refuses to open it
     (v1.189.1).

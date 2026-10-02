@@ -1948,6 +1948,10 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     // Box check — the manager's bench view for counting a PO against its box.
     bcOpen: 'Review mode',
     bcOpenTip: 'Count this PO against the box that arrived',
+    bcMoveTitle: 'Move {id} to Reviewing?',
+    bcMoveMsg: "{id} is at {s}. Review mode can approve it only once it's at Reviewing.",
+    bcMoveConfirm: 'Move to Reviewing',
+    bcMoveSkip: 'Open without moving',
     bcTitle: 'Review mode',
     bcBack: 'Back to PO',
     bcKeyMove: 'move',

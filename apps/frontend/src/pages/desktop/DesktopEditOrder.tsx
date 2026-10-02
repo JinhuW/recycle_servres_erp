@@ -44,7 +44,7 @@ import { HandoffDialog } from '../../components/HandoffDialog';
 import { PaymentFields } from '../../components/PaymentFields';
 import type { HandoffDelivery, HandoffMethod } from '../../lib/handoff';
 import { usePaymentProof } from '../../lib/usePaymentProof';
-import { navigate, poCheckPath, readHashQuery, replaceHashQuery } from '../../lib/route';
+import { readHashQuery, replaceHashQuery } from '../../lib/route';
 import { poReadiness, type ReadinessTab } from '../../lib/poReadiness';
 import { useOrderEvents } from '../../lib/useOrderEvents';
 import type { StageId } from '../../lib/orderLookback';
@@ -63,6 +63,7 @@ import type { CommissionShots } from '../../components/CommissionPaymentFields';
 import { AttachmentChip } from '../../components/AttachmentChip';
 import { AttachmentDropzone } from '../../components/AttachmentDropzone';
 import { loadWarehouses } from '../../lib/warehouses';
+import { useReviewModeEntry } from './ReviewModeEntry';
 
 // The uppercase heading over each block of the action card.
 const SectionHead = ({ icon, children }: { icon: IconName; children: ReactNode }) => (
@@ -137,6 +138,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // save that has to keep the user here (a photo upload that failed) has
   // already advanced the order — re-sending it would step it on again.
   const [savedStatus, setSavedStatus] = useState(effectiveStatus);
+  const { enter: enterReview, prompt: reviewPrompt } = useReviewModeEntry();
   const [warehouseId, setWarehouseId] = useState<string>(order.warehouse?.id ?? '');
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   // Submitting is the one stage move a purchaser makes. Everything after it is
@@ -1110,7 +1112,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
               onClick={() => {
                 // The check replaces this page; unsaved edits would go with it.
                 if (dirty) { showErrorDialog(t('bcSaveFirst')); return; }
-                navigate(poCheckPath(order.id));
+                enterReview({
+                  id: order.id, lifecycle: lifecycleOf(savedStatus) ?? order.lifecycle,
+                  archived: isArchived, status: savedStatus,
+                });
               }}
               title={t('bcOpenTip')}
             >
@@ -1844,6 +1849,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       {serialIssues && (
         <SerialCheckDialog issues={serialIssues} onClose={() => setSerialIssues(null)} />
       )}
+
+      {reviewPrompt}
 
       {dupConfirm && (
         <DupPartDialog

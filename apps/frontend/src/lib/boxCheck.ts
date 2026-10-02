@@ -27,6 +27,13 @@ export type CheckableLine = {
 
 export type LineCheckState = 'open' | 'partial' | 'done';
 
+// Approve needs the PO at Reviewing, so opening review mode before then offers
+// to move it there. Later stages open as a recount — moving one back would
+// reopen its closed book — and an archived PO can't move at all.
+export function asksToMoveToReviewing(o: { lifecycle: string; archived: boolean }): boolean {
+  return !o.archived && (o.lifecycle === 'draft' || o.lifecycle === 'in_transit');
+}
+
 // Most lines arrive complete, so an untouched line reads as the full qty; the
 // manager only lowers it when something is short. Checked is its own answer
 // (checkedAt), never inferred from the count.

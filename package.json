@@ -1,6 +1,6 @@
 {
   "name": "recycle-erp",
-  "version": "1.200.2",
+  "version": "1.201.0",
   "private": true,
   "packageManager": "pnpm@11.0.9",
   "engines": {
