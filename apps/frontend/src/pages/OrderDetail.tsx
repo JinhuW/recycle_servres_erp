@@ -13,7 +13,7 @@ import { AttachmentDropzone } from '../components/AttachmentDropzone';
 import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
 import { useEffectiveUser } from '../lib/tweaks';
-import { api, deleteOrder, archiveOrder, unarchiveOrder } from '../lib/api';
+import { api, deleteOrder, archiveOrder, unarchiveOrder, followLineTotal } from '../lib/api';
 import { readArchiveConflict, type ArchiveConflict } from '../lib/archiveConflict';
 import { ArchiveConflictList } from '../components/ArchiveConflictList';
 import { navigate, poProductsPath, type PoScreen } from '../lib/route';
@@ -22,7 +22,7 @@ import { handleFetchError, showErrorDialog } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
 import { profitTone } from '../lib/orderPresentation';
 import { isPricedSellPrice } from '@recycle-erp/shared';
-import { poEffectiveCost, parseFeeInput } from '../lib/poTotals';
+import { poEffectiveCost, parseFeeInput, readStoredGoodsTotal } from '../lib/poTotals';
 import type { HandoffDelivery, HandoffMethod } from '../lib/handoff';
 import { NEED_SHORT_KEY, poReadiness } from '../lib/poReadiness';
 import { resolveTracking } from '../lib/useTrackingInput';
@@ -328,6 +328,24 @@ export function OrderDetail({
     && (commissionRateValue ?? 0) !== (order.commissionRate ?? 0);
   const commission = ownerDirty || commissionDirty;
   const dirty = notesDirty || warehouseDirty || paymentDirty || methodDirty || paypalDirty || feesDirty || facts || commission;
+
+  // The server's verdict when it sends one: these lines carry what is left,
+  // and the verdict is on what was bought (see the desktop editor).
+  const goodsNegotiated = order.goodsFollowsLines !== undefined
+    ? !order.goodsFollowsLines
+    : readStoredGoodsTotal(order.totalCost, totals.cost).negotiated;
+  const [followingLines, setFollowingLines] = useState(false);
+  const followLines = async () => {
+    setFollowingLines(true);
+    try {
+      await followLineTotal(order.id);
+      await refetchOrder();
+    } catch (e) {
+      handleFetchError(e);
+    } finally {
+      setFollowingLines(false);
+    }
+  };
 
   const refetchOrder = async () => {
     try {
@@ -1103,6 +1121,22 @@ export function OrderDetail({
               {fmtUSD(cost.total, locale)}
             </span>
           </div>
+          {goodsNegotiated && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 11.5, marginTop: 4, color: 'var(--accent-strong)' }}>
+              <span>{t('poNegotiatedLot')}</span>
+              {showFinalSell && (
+                <button
+                  type="button"
+                  className="btn sm ghost"
+                  style={{ padding: '0 8px', height: 24, fontSize: 11.5 }}
+                  disabled={followingLines}
+                  onClick={() => { void followLines(); }}
+                >
+                  {t('poFollowLineTotal')}
+                </button>
+              )}
+            </div>
+          )}
 
           {/* The two profits, managers only. Unrealized is the list column's
               figure — margin on priced lines less the fee; Realized is what

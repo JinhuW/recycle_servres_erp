@@ -484,6 +484,18 @@ on to Sold once every line has sold (v1.164.0).
   can be moved into Other fees (v1.45.0). Fees amortize per line, which is what
   commission is calculated from. `orders.category` and `orders.total_cost` are
   **derived from the lines** — clients must not send `totalCost`.
+- **A pinned lot price says so, and a manager can let go of it** (v1.197.0).
+  When the stored goods total no longer matches the lines, the cost card on
+  desktop and phone labels it "Negotiated lot price". A manager's **Follow line
+  total** button resets it to the line sum, at any stage, logged as a
+  total-cost change. Which totals count as pinned is the server's call: the
+  page's lines show what is left, while the comparison is against what was
+  bought. Judged in the browser, every partly sold PO looked negotiated.
+- **A qty edit keeps the sold units sold** (v1.197.0). On a partly sold line,
+  a recount in the PO editor or the inventory editor moves the purchased count
+  by the same amount, so the PO's cost and the units sold stay put. The PO
+  editor also refuses a qty below what committed sell orders hold, naming them
+  to a manager.
 - Line specs are per-category: RAM carries Part #, Chip #, Brand, Capacity,
   Generation, Type, Class, Rank and Speed; SSD/HDD carry Interface, Form
   factor, Health % and RPM; Other carries a free item type (v1.47.0).
@@ -642,6 +654,12 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   Ready to Pay on. They show dimmed, with a line linking the PO and saying
   to move it back to Reviewing. A save sends only the fields that changed.
 - **Committed sell orders reserve the units they name**, not the whole lot.
+  Since v1.197.0 one rule computes them everywhere. That covers the sell-order
+  picker, a sell order's max qty, the transfer limit, the inventory list's
+  `committed_qty` (managers) and both editors. A recount in the inventory
+  editor may go down to the committed units, not below. A status change waits
+  until nothing is committed; until v1.197.0 any qty edit was refused once a
+  single unit was committed.
 
 ## Sell orders
 
@@ -1003,7 +1021,13 @@ status guard.
   transfer may take only `qty − committed` from a line (committed = what
   Shipped and Awaiting-payment sell orders name); more is refused with a 409
   that says how many are free. Before, a partial move split reserved units into
-  a clone the sell order's Done never touched, leaving phantom stock.
+  a clone the sell order's Done never touched, leaving phantom stock. The
+  modal now caps each line at its free units and says how many are committed
+  (v1.197.0).
+- **Moving a whole line a Draft names asks first** (v1.197.0). The line goes
+  out In Transit, so the draft can't be promoted until the transfer is
+  received. The server answers 409 with the drafts, and the modal names them
+  and moves only on "Move anyway".
 - **Receiving a transfer restores each line's own status** (v1.193.0) — the
   `prior_status` its transfer recorded, Reviewing or Done — instead of
   promoting every line to Done; reopen accepts either. The transfer-orders list

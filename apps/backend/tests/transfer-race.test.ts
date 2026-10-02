@@ -38,10 +38,10 @@ describe('POST /api/inventory/transfer — concurrent transfer of the same line'
 
       const [a, b] = await Promise.all([
         api('POST', '/api/inventory/transfer', {
-          token, body: { toWarehouseId: d1, lines: [{ id: line.id, qty: line.qty }] },
+          token, body: { confirmDrafts: true, toWarehouseId: d1, lines: [{ id: line.id, qty: line.qty }] },
         }),
         api('POST', '/api/inventory/transfer', {
-          token, body: { toWarehouseId: d2, lines: [{ id: line.id, qty: line.qty }] },
+          token, body: { confirmDrafts: true, toWarehouseId: d2, lines: [{ id: line.id, qty: line.qty }] },
         }),
       ]);
 

@@ -246,6 +246,12 @@ export const createDraftOrder = (
   },
 ) => api.post<{ id: string }>('/api/orders/draft', { ...meta });
 
+// Manager-only: drop a pinned lot price so the PO's total follows its lines
+// again. The backend audits it as a total_cost change.
+export const followLineTotal = (orderId: string) =>
+  api.post<{ ok: true; totalCost: number | null }>(
+    `/api/orders/${encodeURIComponent(orderId)}/total-cost/follow-lines`, {});
+
 // Create a PO already carrying its first line(s). The desktop submit form uses
 // this so a draft is never written empty — the order is born with content.
 //

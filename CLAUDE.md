@@ -229,6 +229,16 @@ switches the branch out from under the first.
 - **Status guards.**  Purchase orders, sell orders and transfer orders each
   have explicit allowed-transition tables in their route files.  When adding a new state-changing endpoint, extend the existing
   guard — don't write a parallel one.
+- **One lock order: orders rows (sorted) before lines** (v1.197.0).  Lock a
+  PO with `FOR NO KEY UPDATE` unless the transaction deletes it, because
+  `FOR UPDATE` blocks the `FOR KEY SHARE` a line INSERT's FK check takes.  A
+  writer that locks lines and later updates `orders` (goods-total sync, sold
+  settlement) calls `lockOrdersForLinesTx` (`services/orderLocks.ts`) first.
+  Getting this wrong is a 40P01 that surfaces as a 500;
+  `tests/stock-lock-order.test.ts` races the known pairs.
+- **"How much of this line is free" has one implementation**: `committedQtySql`
+  / `committedClaimsByLine` in `lib/sellCommitment.ts`.  Don't hand-roll the
+  `SUM(sol.qty)` subquery again; ten drifted copies is what it replaced.
 - **Order ID counters** are per-type sequences in `id_counters` (see
   `migrations/0029`).  Use `lib/id-seq.ts`; never compute an ID by counting
   rows.

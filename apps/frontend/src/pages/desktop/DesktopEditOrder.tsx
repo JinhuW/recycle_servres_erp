@@ -5,7 +5,7 @@ import { Modal } from '../../components/Modal';
 import { useT } from '../../lib/i18n';
 import { useAuth } from '../../lib/auth';
 import { useEffectiveUser } from '../../lib/tweaks';
-import { api, deleteOrder, archiveOrder, unarchiveOrder, ApiError } from '../../lib/api';
+import { api, deleteOrder, archiveOrder, unarchiveOrder, followLineTotal, ApiError } from '../../lib/api';
 import { readArchiveConflict, type ArchiveConflict } from '../../lib/archiveConflict';
 import { ArchiveConflictList } from '../../components/ArchiveConflictList';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
@@ -602,7 +602,27 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     () => readStoredGoodsTotal(order.totalCost, loadedLineSubtotal),
     [order.totalCost, loadedLineSubtotal],
   );
-  const goodsOverridden = storedGoods.negotiated;
+  // The label and the reset button take the server's word: the lines here
+  // carry what is left, the verdict is on what was bought, and a partly sold
+  // PO would otherwise read as negotiated.
+  const goodsOverridden = order.goodsFollowsLines !== undefined
+    ? !order.goodsFollowsLines
+    : storedGoods.negotiated;
+  // A pinned total is a negotiated lot price until a manager says it is stale;
+  // nothing on this page can tell the two apart.
+  const [followingLines, setFollowingLines] = useState(false);
+  const followLines = async () => {
+    if (!onReload) return;
+    setFollowingLines(true);
+    try {
+      await followLineTotal(order.id);
+      await onReload();
+    } catch (e) {
+      showErrorDialog((e as { message?: string })?.message ?? t('poFollowLineTotalFailed'));
+    } finally {
+      setFollowingLines(false);
+    }
+  };
 
   // Derived values for the side Payment-detail panel.
   // Self pay → the purchaser is reimbursed for what they paid out of pocket
@@ -1339,7 +1359,24 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
             realized={order.realized ?? null}
             commissionRate={order.commissionRate}
             goodsNote={goodsOverridden ? (
-              <span style={{ color: 'var(--accent-strong)', fontWeight: 500 }}> · {t('subOverride')}</span>
+              <span style={{ color: 'var(--accent-strong)', fontWeight: 500 }}>
+                {' · '}{t('poNegotiatedLot')}
+                {isManager && onReload && (
+                  <>
+                    {' · '}
+                    <button
+                      type="button"
+                      className="btn sm ghost"
+                      style={{ padding: '0 6px', height: 20, fontSize: 11.5 }}
+                      disabled={followingLines}
+                      title={t('poFollowLineTotalHint')}
+                      onClick={() => { void followLines(); }}
+                    >
+                      {t('poFollowLineTotal')}
+                    </button>
+                  </>
+                )}
+              </span>
             ) : undefined}
             feeField={canEditOrder ? (
               <span style={{ position: 'relative', display: 'inline-block' }}>

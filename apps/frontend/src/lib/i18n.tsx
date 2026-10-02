@@ -260,6 +260,10 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     transferPickDestinationHint: 'Pick a destination warehouse before transferring.',
     transferQtyOutOfRangeHint: 'One or more lines has an invalid quantity (must be ≥ 1 and ≤ stock).',
     transferFailed: 'Transfer failed',
+    transferCommittedHint: '{n} on committed sell orders — not movable',
+    transferDraftsTitle: 'Take these lines off draft sell orders?',
+    transferDraftsMsg: 'Moving these lines whole sends them out In Transit, so {ids} cannot be promoted until the transfer is received.',
+    transferDraftsConfirm: 'Move anyway',
 
     // ── Mobile parity additions (2026-05-12) ──
     notifTitle: 'Notifications',
@@ -1769,6 +1773,10 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     subOptional: 'Optional',
     subTotalUnits: 'Total units',
     subOverride: 'override',
+    poNegotiatedLot: 'Negotiated lot price',
+    poFollowLineTotal: 'Follow line total',
+    poFollowLineTotalHint: 'Drop the pinned lot price so the total is the sum of the lines again',
+    poFollowLineTotalFailed: 'Could not reset the total',
     subWarehousesNotLoaded: "Warehouses haven't loaded — refresh the page.",
     subFillThisLine: 'Fill in brand/description, quantity and unit cost on this line before submitting.',
     subFillLineN: 'Fill in brand/description, quantity and unit cost on line {n} before submitting.',

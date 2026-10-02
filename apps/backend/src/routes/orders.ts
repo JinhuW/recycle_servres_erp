@@ -9,7 +9,7 @@ import {
 } from '../services/orderAudit';
 import { autoTrackParts, type TrackablePart } from '../lib/marketAutoTrack';
 import { effectiveRole } from '../lib/role';
-import { openSellStatuses } from '../lib/sellCommitment';
+import { committedClaimsByLine, openSellStatuses } from '../lib/sellCommitment';
 import { getUploadLimits } from '../lib/settings';
 import { buildXlsxWorkbook, xlsxResponse, type XlsxColumn } from '../lib/xlsx';
 import {
@@ -668,7 +668,8 @@ orders.get('/:id', async (c) => {
   ] as const);
 
   const [lines, sellOrders, metaRows, attRows, photoRows,
-    txnRequired, chatShotRequired, cashShotRequired, blockers, pendingRevert] = await allLimited([
+    txnRequired, chatShotRequired, cashShotRequired, blockers, pendingRevert,
+    goodsFollowsLines] = await allLimited([
     // `fs` is what the units actually sold for — the qty-weighted unit price
     // over Done sell orders naming the line — as opposed to `sell_price`, the
     // projection that feeds commission. A partial sale leaves the remainder in
@@ -767,6 +768,7 @@ orders.get('/:id', async (c) => {
             : null,
         }))
       : undefined,
+    () => goodsTotalIsMirror(sql, id),
   ] as const);
 
   const photosByLine = new Map<string, LinePhoto[]>();
@@ -834,6 +836,11 @@ orders.get('/:id', async (c) => {
         ? { id: order.supplier_id, name: order.supplier_name }
         : null,
       commissionRate: order.commission_rate,
+      // Whether total_cost tracks the lines or is a pinned lot price. The
+      // client can't judge it: the lines it gets carry what is left, and the
+      // verdict is on what was bought (orderGoodsTotal.ts), so a partly sold
+      // PO would read as negotiated.
+      goodsFollowsLines,
       // Manager-only keys are left out, not nulled, for everyone else — the
       // key alone would name the feature. Same rule as the list above.
       ...(isManager ? {
@@ -1783,7 +1790,7 @@ orders.patch('/:id', async (c) => {
                 ORDER BY p.created_at DESC, p.id DESC LIMIT 1) AS pkg
         FROM orders o
         LEFT JOIN suppliers sup ON sup.id = o.supplier_id
-        WHERE o.id = ${id} LIMIT 1 FOR UPDATE OF o
+        WHERE o.id = ${id} LIMIT 1 FOR NO KEY UPDATE OF o
       `)[0] as
         | { id: string; user_id: string; lifecycle: string; notes: string | null;
             warehouse_id: string | null;
@@ -2066,13 +2073,33 @@ orders.patch('/:id', async (c) => {
         // that committed a category switch in between leaves it claiming the
         // OLD category, so the clear is skipped and the row keeps columns the
         // category it now holds does not own.
+        //
+        // The lines are locked here too, in id order, after the order (the
+        // one lock order — services/orderLocks.ts): a sell-order promotion
+        // locks them to stake its claim, so the committed check below and
+        // the qty write can't straddle one.
         const lockedById = new Map<string, StoredLine>();
         const lockedRows = await tx`
           SELECT ${storedLineCols(tx)}
           FROM order_lines
           WHERE order_id = ${id} AND id = ANY(${body.lines.map(l => l.id)}::uuid[])
+          ORDER BY id
+          FOR UPDATE
         ` as StoredLine[];
         for (const r of lockedRows) lockedById.set(r.id, r);
+
+        // A qty edit may not drop below what committed sell orders hold: the
+        // order would go on consuming units the line no longer has.
+        const qtyEdits = body.lines.filter(l => l.qty !== undefined && l.qty !== null);
+        if (qtyEdits.length) {
+          const claims = await committedClaimsByLine(tx, qtyEdits.map(l => l.id));
+          const short = qtyEdits.filter(l => (claims.get(l.id.toLowerCase())?.qty ?? 0) > Number(l.qty));
+          if (short.length) {
+            committedLineIds = short.map(l => l.id);
+            blockingSellOrderIds = [...new Set(short.map(l => claims.get(l.id.toLowerCase())!.sellOrderId))].sort();
+            throw new Error('__QTY_BELOW_COMMITTED__');
+          }
+        }
 
         for (let l of body.lines) {
           const stored = lockedById.get(l.id);
@@ -2127,6 +2154,11 @@ orders.patch('/:id', async (c) => {
               category       = COALESCE(${l.category ?? null}, category),
               sell_price     = CASE WHEN ${setSellPrice}::int = 1 THEN ${normSellPrice(l.sellPrice)} ELSE sell_price END,
               qty            = COALESCE(${l.qty ?? null}, qty),
+              -- A partly sold line keeps what was bought in qty_purchased; a
+              -- recount moves both by the same amount, so the sold units stay sold.
+              qty_purchased  = CASE WHEN qty_purchased IS NULL OR ${l.qty ?? null}::int IS NULL
+                                    THEN qty_purchased
+                                    ELSE qty_purchased + (${l.qty ?? null}::int - qty) END,
               unit_cost      = COALESCE(${l.unitCost ?? null}, unit_cost),
               brand          = COALESCE(${l.brand ?? null}, brand),
               capacity       = COALESCE(${l.capacity ?? null}, capacity),
@@ -2330,6 +2362,11 @@ orders.patch('/:id', async (c) => {
     if (msg.includes('__PACKAGE_DELIVERED__')) {
       return c.json({ error: PACKAGE_DELIVERED_MSG }, 409);
     }
+    if (msg.includes('__QTY_BELOW_COMMITTED__')) {
+      return c.json(committedLinesBody(u, committedLineIds, blockingSellOrderIds,
+        `A line's new qty is below what ${describeSellOrders(blockingSellOrderIds)} already holds. Lower or close that sell order first.`,
+        'A line\'s new qty is below what an open sell order holds — a manager has to change it.'), 409);
+    }
     if (msg.includes('__REMOVE_REFERENCED__')) {
       return c.json(committedLinesBody(u, committedLineIds, blockingSellOrderIds,
         `A line you tried to remove is on ${describeSellOrders(blockingSellOrderIds)} and cannot be deleted. Archive or cancel those sell orders first.`,
@@ -2491,7 +2528,7 @@ orders.delete('/:id', async (c) => {
 // delete stays Draft-only — once business records exist we want them around
 // for audit, sell-order references, and commission history.
 //
-// Both endpoints lock the orders row FOR UPDATE inside a single tx so a
+// Both endpoints lock the orders row FOR NO KEY UPDATE inside a single tx so a
 // concurrent archive + unarchive can't race, and so the audit event is only
 // committed if the flag flip succeeds.
 type OrderCtx = Context<{ Bindings: Env; Variables: { user: User } }>;
@@ -2520,7 +2557,7 @@ async function setArchived(c: OrderCtx, archive: boolean) {
 
   const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
     const existing = (await tx`
-      SELECT user_id, lifecycle, archived_at FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE
+      SELECT user_id, lifecycle, archived_at FROM orders WHERE id = ${id} LIMIT 1 FOR NO KEY UPDATE
     `)[0] as { user_id: string; lifecycle: string; archived_at: string | null } | undefined;
     if (!existing) return { kind: 'notFound' };
     if (!isManager && existing.user_id !== u.id) return { kind: 'forbidden' };
@@ -2578,6 +2615,33 @@ async function setArchived(c: OrderCtx, archive: boolean) {
   return c.json({ ok: true });
 }
 
+// A total_cost that no longer matches the lines is a negotiated lot price, and
+// it survives every line edit after it (services/orderGoodsTotal.ts). Nothing
+// in the editors can tell "we agreed $8,500 for the lot" from "that number
+// went stale", so a manager says which: this lets go of the pinned figure and
+// the total follows the lines again. A correction, so allowed at any stage.
+orders.post('/:id/total-cost/follow-lines', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const id = c.req.param('id');
+  const sql = getDb(c.env);
+  const totalCost = await sql.begin(async (tx) => {
+    const [before] = await tx<{ total_cost: number | null }[]>`
+      SELECT total_cost::float AS total_cost FROM orders WHERE id = ${id} LIMIT 1 FOR NO KEY UPDATE
+    `;
+    if (!before) return undefined;
+    await syncOrderGoodsTotal(tx, id, true);
+    const [after] = await tx<{ total_cost: number | null }[]>`
+      SELECT total_cost::float AS total_cost FROM orders WHERE id = ${id} LIMIT 1
+    `;
+    const changes = diff(before, after, ['total_cost']);
+    if (changes.length) await writeOrderEvent(tx, id, u.id, 'meta_changed', { changes });
+    return after!.total_cost;
+  });
+  if (totalCost === undefined) return c.json({ error: 'Not found' }, 404);
+  return c.json({ ok: true, totalCost });
+});
+
 orders.post('/:id/archive',   c => setArchived(c, true));
 orders.post('/:id/unarchive', c => setArchived(c, false));
 
@@ -2618,14 +2682,14 @@ type LockedOrderAccess = OrderAccess & {
   payment: string; payment_method: string | null; created_at: Date;
 };
 
-// The same row under FOR UPDATE, for the writes: the unlocked read above can
+// The same row under FOR NO KEY UPDATE, for the writes: the unlocked read above can
 // be seconds stale by the time the file is stored, and the lock is what keeps
 // an advance from closing the book between the check and the write. The
 // payment fields are what the proof rules key on.
 async function lockOrderAccess(tx: SqlLike, id: string): Promise<LockedOrderAccess | undefined> {
   return (await tx`
     SELECT user_id, lifecycle, payment, payment_method, created_at
-    FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE
+    FROM orders WHERE id = ${id} LIMIT 1 FOR NO KEY UPDATE
   `)[0] as LockedOrderAccess | undefined;
 }
 
@@ -2916,12 +2980,12 @@ orders.post('/:id/lines/:lineId/photos', async (c) => {
   try {
     const row = await sql.begin(async (tx) => {
       // Lock the ORDER first, then the line — the same order PATCH /:id and
-      // /advance take. Locking the line first deadlocks against them: the
-      // INSERT below needs FOR KEY SHARE on the orders row for its FK, which
-      // conflicts with the FOR UPDATE they are already holding while they wait
-      // on this line. Postgres kills one with 40P01 and nothing here retries.
+      // /advance take. Locking the line first used to deadlock against them
+      // when they held FOR UPDATE on the order (the INSERT's FK check needs
+      // FOR KEY SHARE on it); every non-deleting order lock is FOR NO KEY
+      // UPDATE now, but orders-before-lines is still the one lock order.
       const live = (await tx`
-        SELECT user_id, lifecycle FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE
+        SELECT user_id, lifecycle FROM orders WHERE id = ${id} LIMIT 1 FOR NO KEY UPDATE
       `)[0] as { user_id: string; lifecycle: string } | undefined;
       // Re-checked under the lock: the permission read happened before the
       // image shrink and the R2 round trip, seconds a manager can spend
@@ -3293,8 +3357,8 @@ orders.post('/:id/advance', async (c) => {
     : null;
 
   // The lifecycle read, all stage guards and the writes run inside one tx
-  // with the orders row locked FOR UPDATE (see services/orderAdvance.ts —
-  // shared with the shipping tracking poll). Reading lifecycle outside the tx
+  // with the orders row locked (FOR NO KEY UPDATE, which a delete's FOR
+  // UPDATE still waits on — see services/orderAdvance.ts). Reading lifecycle outside the tx
   // let a concurrent delete (which also guarded on a stale lifecycle read)
   // delete an order that was being advanced, and vice-versa.
   const outcome = await sql.begin(async (tx) =>

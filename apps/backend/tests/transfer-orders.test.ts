@@ -35,7 +35,7 @@ async function transferOne(token: string, only?: 'Reviewing' | 'Done'): Promise<
   const to = WAREHOUSES.find((w) => w !== line.warehouse_id)!;
   const r = await api<{ ok: true; transferOrderId: string }>(
     'POST', '/api/inventory/transfer',
-    { token, body: { toWarehouseId: to, lines: [{ id: line.id, qty: line.qty }] } },
+    { token, body: { confirmDrafts: true, toWarehouseId: to, lines: [{ id: line.id, qty: line.qty }] } },
   );
   expect(r.status).toBe(200);
   expect(typeof r.body.transferOrderId).toBe('string');
@@ -106,7 +106,7 @@ describe('POST /api/inventory/transfer — creates a transfer order', () => {
     const to = WAREHOUSES.find((w) => w !== before.wh)!;
     const r = await api<{ ok: true; transferOrderId: string }>(
       'POST', '/api/inventory/transfer',
-      { token, body: { toWarehouseId: to, lines: [{ id: before.id, qty: before.qty }] } },
+      { token, body: { confirmDrafts: true, toWarehouseId: to, lines: [{ id: before.id, qty: before.qty }] } },
     );
     expect(r.status).toBe(200);
     const ev = (await db`
@@ -119,14 +119,14 @@ describe('POST /api/inventory/transfer — creates a transfer order', () => {
   it('400 for a malformed line id or the same line twice', async () => {
     const { token } = await loginAs(ALEX);
     const bad = await api<{ error: string }>('POST', '/api/inventory/transfer', {
-      token, body: { toWarehouseId: 'WH-LA1', lines: [{ id: 'not-a-uuid', qty: 1 }] },
+      token, body: { confirmDrafts: true, toWarehouseId: 'WH-LA1', lines: [{ id: 'not-a-uuid', qty: 1 }] },
     });
     expect(bad.status).toBe(400);
     const inv = await api<{ items: InvRow[] }>('GET', '/api/inventory', { token });
     const any = inv.body.items[0];
     const to = WAREHOUSES.find((w) => w !== any.warehouse_id)!;
     const dup = await api<{ error: string }>('POST', '/api/inventory/transfer', {
-      token, body: { toWarehouseId: to, lines: [{ id: any.id, qty: 1 }, { id: any.id.toUpperCase(), qty: 1 }] },
+      token, body: { confirmDrafts: true, toWarehouseId: to, lines: [{ id: any.id, qty: 1 }, { id: any.id.toUpperCase(), qty: 1 }] },
     });
     expect(dup.status).toBe(400);
     expect(dup.body.error).toMatch(/more than once/);
@@ -145,7 +145,7 @@ describe('POST /api/inventory/transfer — creates a transfer order', () => {
     const to = WAREHOUSES.find((w) => w !== a.warehouse_id && w !== b.warehouse_id)!;
     const r = await api<{ ok: true; transferOrderId: string }>(
       'POST', '/api/inventory/transfer',
-      { token, body: { toWarehouseId: to, lines: [
+      { token, body: { confirmDrafts: true, toWarehouseId: to, lines: [
         { id: a.id, qty: a.qty }, { id: b.id, qty: b.qty },
       ] } },
     );
@@ -346,7 +346,7 @@ describe('POST /api/inventory/transfer-orders/:id/reopen', () => {
     const to = WAREHOUSES.find((w) => w !== clean!.warehouse_id)!;
     const tr = await api<{ ok: true; transferOrderId: string }>(
       'POST', '/api/inventory/transfer',
-      { token, body: { toWarehouseId: to, lines: [{ id: clean!.id, qty: clean!.qty }] } },
+      { token, body: { confirmDrafts: true, toWarehouseId: to, lines: [{ id: clean!.id, qty: clean!.qty }] } },
     );
     expect(tr.status).toBe(200);
     const orderId = tr.body.transferOrderId;
@@ -416,7 +416,7 @@ describe('POST /api/inventory/transfer-orders/:id/reopen', () => {
     const to2 = WAREHOUSES.find((w) => w !== moved.to)!;
     const r2 = await api<{ ok: true; transferOrderId: string }>(
       'POST', '/api/inventory/transfer',
-      { token, body: { toWarehouseId: to2, lines: [{ id: moved.id, qty: ln.qty }] } },
+      { token, body: { confirmDrafts: true, toWarehouseId: to2, lines: [{ id: moved.id, qty: ln.qty }] } },
     );
     expect(r2.status).toBe(200);
     const r = await api('POST', `/api/inventory/transfer-orders/${moved.orderId}/reopen`, { token });
@@ -464,7 +464,7 @@ describe('DELETE /api/inventory/transfer-orders/:id — discard', () => {
     const to = WAREHOUSES.find((w) => w !== before.wh)!;
     const tr = await api<{ ok: true; transferOrderId: string }>(
       'POST', '/api/inventory/transfer',
-      { token, body: { toWarehouseId: to, lines: [{ id: before.id, qty: before.qty }] } },
+      { token, body: { confirmDrafts: true, toWarehouseId: to, lines: [{ id: before.id, qty: before.qty }] } },
     );
     const orderId = tr.body.transferOrderId;
 
@@ -503,7 +503,7 @@ describe('DELETE /api/inventory/transfer-orders/:id — discard', () => {
     const to = WAREHOUSES.find((w) => w !== a.wh && w !== b.wh)!;
     const tr = await api<{ ok: true; transferOrderId: string }>(
       'POST', '/api/inventory/transfer',
-      { token, body: { toWarehouseId: to, lines: [
+      { token, body: { confirmDrafts: true, toWarehouseId: to, lines: [
         { id: a.id, qty: a.qty }, { id: b.id, qty: b.qty },
       ] } },
     );
@@ -545,7 +545,7 @@ describe('DELETE /api/inventory/transfer-orders/:id — discard', () => {
     const to = WAREHOUSES.find((w) => w !== src.wh)!;
     const tr = await api<{ ok: true; transferOrderId: string }>(
       'POST', '/api/inventory/transfer',
-      { token, body: { toWarehouseId: to, lines: [{ id: src.id, qty: 2 }] } },
+      { token, body: { confirmDrafts: true, toWarehouseId: to, lines: [{ id: src.id, qty: 2 }] } },
     );
     const orderId = tr.body.transferOrderId;
     const clone = (await db`SELECT id FROM order_lines WHERE transfer_order_id = ${orderId}`)[0] as { id: string };
@@ -577,7 +577,7 @@ describe('DELETE /api/inventory/transfer-orders/:id — discard', () => {
     const to = WAREHOUSES.find((w) => w !== src.wh)!;
     const tr = await api<{ ok: true; transferOrderId: string }>(
       'POST', '/api/inventory/transfer',
-      { token, body: { toWarehouseId: to, lines: [{ id: src.id, qty: 2 }] } },
+      { token, body: { confirmDrafts: true, toWarehouseId: to, lines: [{ id: src.id, qty: 2 }] } },
     );
     const orderId = tr.body.transferOrderId;
     const clone = (await db`SELECT id FROM order_lines WHERE transfer_order_id = ${orderId}`)[0] as { id: string };
@@ -648,7 +648,7 @@ describe('discarding a partial transfer keeps the clone\'s photos', () => {
     // Partial: move less than the whole quantity, so a clone is minted.
     const tr = await api<{ ok: true; transferOrderId: string; lines: { destId: string }[] }>(
       'POST', '/api/inventory/transfer',
-      { token, body: { toWarehouseId: to, lines: [{ id: src.id, qty: 1 }] } },
+      { token, body: { confirmDrafts: true, toWarehouseId: to, lines: [{ id: src.id, qty: 1 }] } },
     );
     expect(tr.status).toBe(200);
     const destId = tr.body.lines[0].destId;

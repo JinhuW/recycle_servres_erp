@@ -58,6 +58,8 @@ type InventoryRow = {
   order_id: string;
   // The lot's # on its PO's page. Absent from a backend older than this bundle.
   po_line_no?: number | null;
+  // Manager-only; absent for purchasers and from an older backend.
+  committed_qty?: number;
 };
 
 type Props = {
@@ -500,6 +502,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     subLabel: itemSpec(r) || null,
     partNumber: r.part_number,
     qty: r.qty,
+    committedQty: r.committed_qty ?? 0,
     warehouseId: r.warehouse_id,
     warehouseShort: r.warehouse_short,
   }));

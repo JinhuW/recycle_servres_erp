@@ -161,6 +161,10 @@ const zh: Record<string, string> = {
   transferPickDestinationHint: '请先选择目标仓库再调拨。',
   transferQtyOutOfRangeHint: '有数量无效（必须 ≥ 1 且 ≤ 库存）。',
   transferFailed: '调拨失败',
+  transferCommittedHint: '{n} 件已被确认的销售单占用，不可调拨',
+  transferDraftsTitle: '要把这些明细移出草稿销售单吗？',
+  transferDraftsMsg: '整条调拨会让这些明细进入在途状态，{ids} 在调拨收货前无法提交。',
+  transferDraftsConfirm: '仍然调拨',
 
   // ── Desktop (zh) ──
   appBrand: '回收服务器', brandSub: '库存与利润',
@@ -1336,6 +1340,10 @@ const zh: Record<string, string> = {
   subOptional: '可选',
   subTotalUnits: '总件数',
   subOverride: '已覆盖',
+  poNegotiatedLot: '议定整批价',
+  poFollowLineTotal: '改按明细合计',
+  poFollowLineTotalHint: '取消固定的整批价，总价重新等于各明细之和',
+  poFollowLineTotalFailed: '无法重置总价',
   subWarehousesNotLoaded: '仓库尚未加载 —— 请刷新页面。',
   subFillThisLine: '提交前请填写此项的品牌/描述、数量与单位成本。',
   subFillLineN: '提交前请填写第 {n} 项的品牌/描述、数量与单位成本。',

@@ -6,7 +6,8 @@ import { getWorkspaceSetting } from '../lib/settings';
 import { nextHumanId } from '../lib/id-seq';
 import { canonPartCol, canonPartArg } from '../lib/part-number';
 import { invLabel } from '../lib/inventoryLabel';
-import { committedSellStatuses, openSellStatuses } from '../lib/sellCommitment';
+import { committedClaimsByLine, committedQtySql, openSellStatuses } from '../lib/sellCommitment';
+import { lockOrdersForLinesTx } from '../services/orderLocks';
 import { buildXlsxWorkbook, xlsxResponse, datedFilename, type XlsxColumn } from '../lib/xlsx';
 import {
   CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields, categoryTabSheets,
@@ -108,13 +109,7 @@ function attrFragments(sql: ReturnType<typeof getDb>, a: AttrFilters) {
 const PENDING_SO_STATUSES = openSellStatuses();
 function pendingSellOrderFrag(sql: ReturnType<typeof getDb>, hide: boolean) {
   return hide
-    ? sql`l.qty > COALESCE((
-        SELECT SUM(sol.qty)
-        FROM sell_order_lines sol
-        JOIN sell_orders so ON so.id = sol.sell_order_id
-        WHERE sol.inventory_id = l.id
-          AND so.status = ANY(${PENDING_SO_STATUSES}::text[])
-      ), 0)`
+    ? sql`l.qty > ${committedQtySql(sql, sql`l.id`, { statuses: PENDING_SO_STATUSES })}`
     : sql`TRUE`;
 }
 
@@ -193,7 +188,9 @@ inventory.get('/', async (c) => {
            o.id AS order_id, ${poLineNo(sql, 'l')} AS po_line_no, o.user_id,
            COALESCE(l.warehouse_id, o.warehouse_id) AS warehouse_id,
            u.name AS user_name, u.initials AS user_initials,
-           w.short AS warehouse_short, w.region AS warehouse_region
+           w.short AS warehouse_short, w.region AS warehouse_region,
+           -- What the transfer modal may move: units no committed sell order holds.
+           ${committedQtySql(sql, sql`l.id`)} AS committed_qty
     FROM order_lines l
     JOIN orders o ON o.id = l.order_id
     JOIN users  u ON u.id = o.user_id
@@ -216,7 +213,7 @@ inventory.get('/', async (c) => {
   // returning. Sell price stays visible — it is not sensitive.
   if (!isManager) {
     const filtered = items.map(r => {
-      const { unit_cost: _uc, profit: _p, margin: _m, ...rest } = r;
+      const { unit_cost: _uc, profit: _p, margin: _m, committed_qty: _cq, ...rest } = r;
       return rest;
     });
     return c.json({ items: filtered });
@@ -1187,12 +1184,16 @@ inventory.patch('/:id', async (c) => {
   // we'd silently change qty/status out from under the deal.
   type Outcome =
     | { kind: 'notFound' }
-    | { kind: 'committed' }
+    | { kind: 'committed'; committed: number }
     | { kind: 'doneLocked' }
     | { kind: 'soldLocked' }
     | { kind: 'archived' }
     | { kind: 'ok'; before: Record<string, unknown> };
   const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
+    // Order before line (services/orderLocks.ts): a goods edit below rewrites
+    // orders.total_cost, and taking that row after the line deadlocks
+    // against PO PATCH, which holds the order and waits on the line.
+    await lockOrdersForLinesTx(tx, [id]);
     const before = (await tx<Record<string, unknown>[]>`
       SELECT * FROM order_lines WHERE id = ${id} LIMIT 1 FOR UPDATE
     `)[0];
@@ -1207,21 +1208,19 @@ inventory.patch('/:id', async (c) => {
     // line status, for exactly that second case. Unarchive the PO to edit it.
     if (parent?.archived_at) return { kind: 'archived' };
 
-    // A line committed to a sell order (COMMITTED_SELL_STATUSES) is "spoken
-    // for": editing its qty or status out from under the deal silently
-    // corrupts that sell order's totals/sellability. A line on a mere Draft
-    // stays editable — the draft is a proposal and is re-validated when it is
-    // promoted. Other fields stay editable. Run under the row lock so a
+    // Units a committed sell order names are spoken for. A status change
+    // would pull the whole line out from under that deal, so it waits until
+    // nothing is committed. A qty change only has to leave the committed
+    // units in place: 30 of 100 on an order still lets the count go to 40,
+    // not to 20. A line on a mere Draft stays editable — the draft is a
+    // proposal, re-validated when it is promoted. Run under the row lock so a
     // concurrent promotion can't slip a claim in between.
     if (body.qty !== undefined || body.status !== undefined) {
-      const open = (await tx<{ n: number }[]>`
-        SELECT COUNT(*)::int AS n
-        FROM sell_order_lines sol
-        JOIN sell_orders so ON so.id = sol.sell_order_id
-        WHERE sol.inventory_id = ${id}
-          AND so.status = ANY(${committedSellStatuses()}::text[])
-      `)[0];
-      if (open.n > 0) return { kind: 'committed' };
+      const committed = (await committedClaimsByLine(tx, [id])).get(id.toLowerCase())?.qty ?? 0;
+      const statusMoves = body.status !== undefined && body.status !== before.status;
+      if (committed > 0 && (statusMoves || (body.qty !== undefined && body.qty < committed))) {
+        return { kind: 'committed', committed };
+      }
     }
 
     const touchesGoods = body.qty !== undefined || body.unitCost !== undefined;
@@ -1255,6 +1254,11 @@ inventory.patch('/:id', async (c) => {
                            THEN ${normSellPrice(body.sellPrice)} ELSE sell_price END,
         unit_cost   = COALESCE(${body.unitCost ?? null}, unit_cost),
         qty         = COALESCE(${body.qty ?? null}, qty),
+        -- A partly sold line keeps what was bought in qty_purchased; a recount
+        -- moves both by the same amount, so the units already sold stay sold.
+        qty_purchased = CASE WHEN qty_purchased IS NULL OR ${body.qty ?? null}::int IS NULL
+                             THEN qty_purchased
+                             ELSE qty_purchased + (${body.qty ?? null}::int - qty) END,
         condition   = COALESCE(${body.condition ?? null}, condition),
         part_number = COALESCE(${body.partNumber ?? null}, part_number),
         -- Sentinel, not COALESCE: both became editable dropdowns whose blank
@@ -1306,7 +1310,11 @@ inventory.patch('/:id', async (c) => {
 
   if (outcome.kind === 'notFound') return c.json({ error: 'Not found' }, 404);
   if (outcome.kind === 'committed') {
-    return c.json({ error: 'line is committed to an open sell order; close or unlink it before changing qty/status' }, 409);
+    return c.json({
+      error: `${outcome.committed} units of this line are committed to an open sell order: `
+        + 'its status cannot change, and its qty cannot drop below that, until the order is closed or the line unlinked',
+      committedQty: outcome.committed,
+    }, 409);
   }
   if (outcome.kind === 'doneLocked') {
     return c.json({ error: 'the purchase order is past review; move it back to Reviewing before changing qty or unit cost' }, 409);
@@ -1370,8 +1378,10 @@ inventory.post('/transfer', async (c) => {
     toWarehouseId?: unknown;
     note?: unknown;
     lines?: unknown;
+    confirmDrafts?: unknown;
   } | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
+  const confirmDrafts = body.confirmDrafts === true;
 
   const toWarehouseId = typeof body.toWarehouseId === 'string' ? body.toWarehouseId.trim() : '';
   if (!toWarehouseId) return c.json({ error: 'toWarehouseId is required' }, 400);
@@ -1452,6 +1462,7 @@ inventory.post('/transfer', async (c) => {
     | { kind: 'overQty'; id: string; have: number }
     | { kind: 'committed'; id: string; free: number }
     | { kind: 'alreadyThere'; id: string }
+    | { kind: 'needsConfirm'; drafts: string[] }
     | { kind: 'ok'; transferOrderId: string; result: ResultLine[] };
 
   // Source read, validation and writes all run in one tx with the source
@@ -1480,16 +1491,7 @@ inventory.post('/transfer', async (c) => {
     // leave the order consuming a line that no longer holds them while the
     // clone carries them back into stock. Read under the row locks above —
     // promotion locks the same rows, so no claim can land in between.
-    const committed = new Map(
-      (await tx<{ id: string; qty: number }[]>`
-        SELECT sol.inventory_id AS id, SUM(sol.qty)::int AS qty
-        FROM sell_order_lines sol
-        JOIN sell_orders so ON so.id = sol.sell_order_id
-        WHERE sol.inventory_id = ANY(${ids}::uuid[])
-          AND so.status = ANY(${committedSellStatuses()}::text[])
-        GROUP BY sol.inventory_id
-      `).map((r) => [r.id, r.qty]),
-    );
+    const committed = await committedClaimsByLine(tx, ids);
 
     // Validate every line before touching anything. One bad line aborts the
     // whole submission — partial transfers across the batch are confusing.
@@ -1501,9 +1503,27 @@ inventory.post('/transfer', async (c) => {
       }
       if (s.archived_at !== null) return { kind: 'archived', id: r.id };
       if (r.qty > s.qty) return { kind: 'overQty', id: r.id, have: s.qty };
-      const free = s.qty - (committed.get(r.id) ?? 0);
+      const free = s.qty - (committed.get(r.id.toLowerCase())?.qty ?? 0);
       if (r.qty > free) return { kind: 'committed', id: r.id, free };
       if (s.effective_wh === toWarehouseId) return { kind: 'alreadyThere', id: r.id };
+    }
+
+    // A full move sends the line itself out In Transit, so a Draft that names
+    // it can no longer be promoted until the transfer is received. Nothing is
+    // wrong with that, but the manager drafting that sale should not find out
+    // at promotion: the drafts are named first, and the move goes ahead once
+    // the caller confirms. A partial move leaves the named line where it is.
+    if (!confirmDrafts) {
+      const fullMoves = reqLines.filter((r) => r.qty === byId.get(r.id)!.qty).map((r) => r.id);
+      const drafts = fullMoves.length === 0 ? [] : await tx<{ id: string }[]>`
+        SELECT DISTINCT so.id
+        FROM sell_order_lines sol
+        JOIN sell_orders so ON so.id = sol.sell_order_id
+        WHERE sol.inventory_id = ANY(${fullMoves}::uuid[])
+          AND so.status = 'Draft' AND so.archived_at IS NULL
+        ORDER BY so.id
+      `;
+      if (drafts.length > 0) return { kind: 'needsConfirm', drafts: drafts.map((d) => d.id) };
     }
 
     const result: ResultLine[] = [];
@@ -1598,6 +1618,14 @@ inventory.post('/transfer', async (c) => {
     return c.json({ error: `line ${outcome.id} has only ${outcome.free} units not committed to a sell order` }, 409);
   }
   if (outcome.kind === 'alreadyThere') return c.json({ error: `line ${outcome.id} is already in ${toWarehouseId}` }, 400);
+  if (outcome.kind === 'needsConfirm') {
+    return c.json({
+      error: `Moving these lines whole takes them off draft sell order${outcome.drafts.length === 1 ? '' : 's'} `
+        + `${outcome.drafts.join(', ')} until the transfer is received. Confirm to move them anyway.`,
+      needsConfirm: true,
+      drafts: outcome.drafts,
+    }, 409);
+  }
   return c.json({ ok: true, transferOrderId: outcome.transferOrderId, lines: outcome.result });
 });
 
@@ -1737,12 +1765,7 @@ inventory.post('/transfer-orders/:id/reopen', async (c) => {
     }
 
     const lines = (await tx`
-      SELECT l.id, l.status,
-             (SELECT COUNT(*)::int
-                FROM sell_order_lines sl
-                JOIN sell_orders so ON so.id = sl.sell_order_id
-               WHERE sl.inventory_id = l.id
-                 AND so.status = ANY(${committedSellStatuses()}::text[])) AS sell_count
+      SELECT l.id, l.status, ${committedQtySql(tx, tx`l.id`)} AS sell_count
       FROM order_lines l
       WHERE l.transfer_order_id = ${id}
       FOR UPDATE OF l
@@ -1809,11 +1832,7 @@ inventory.delete('/transfer-orders/:id', async (c) => {
 
     const lines = (await tx`
       SELECT l.id, l.status, l.qty, (o.archived_at IS NOT NULL) AS archived,
-             (SELECT COUNT(*)::int
-                FROM sell_order_lines sl
-                JOIN sell_orders so ON so.id = sl.sell_order_id
-               WHERE sl.inventory_id = l.id
-                 AND so.status = ANY(${committedSellStatuses()}::text[])) AS sell_count
+             ${committedQtySql(tx, tx`l.id`)} AS sell_count
       FROM order_lines l
       JOIN orders o ON o.id = l.order_id
       WHERE l.transfer_order_id = ${id}
