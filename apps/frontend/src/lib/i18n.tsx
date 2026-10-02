@@ -1721,6 +1721,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     poProductsRowEmpty: 'Nothing added yet',
     poProductsEmpty: 'No products yet — add one with the buttons below.',
     poProductsNone: 'This order has no products.',
+    scrollToTop: 'Scroll to top',
+    scrollToBottom: 'Scroll to bottom',
     costBreakdown: 'Cost breakdown',
     changeCategory: 'Change category',
     resumeDraftSubAny: 'Add to one of these, or start a new order.',
