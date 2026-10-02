@@ -1281,6 +1281,8 @@ const zh: Record<string, string> = {
   poProductsRowEmpty: '尚未添加',
   poProductsEmpty: '还没有产品 — 用下方按钮添加。',
   poProductsNone: '此订单没有产品。',
+  scrollToTop: '回到顶部',
+  scrollToBottom: '滚动到底部',
   costBreakdown: '成本明细',
   changeCategory: '更改类别',
   resumeDraftSubAny: '添加到其中一笔,或新建订单。',

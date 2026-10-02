@@ -17,6 +17,31 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.202.0] - 2026-10-02
+
+The phone PO's Products screen lands where the purchaser left it after the
+line form, and gains a jump-to-top/bottom button (RS-158).
+
+### Changed
+
+- **Scanning line after line no longer means scrolling down after each one.**
+  The line form unmounts the Products screen, so every return from it was a
+  fresh page, opened at the top. A purchaser scanning a box of RAM had to
+  scroll down to the line just added, every time. Now a return from adding a
+  line lands at the bottom, with the new line above the dock. That covers a
+  save, Back and Cancel. A return from editing a line lands on that line,
+  centred.
+
+  Opening Products from the PO page, or by a link, still starts at the top.
+  The landing is used once, so it never carries into a later visit.
+
+### Added
+
+- **Jump-to-top/bottom button on the phone Products screen.** It is one round
+  button above the add dock. It points down until the list is at its end,
+  then up. It shows only when the list is longer than the screen. The list
+  got 44px more bottom padding so its last line is never under the button.
+
 ## [1.201.0] - 2026-10-02
 
 Review mode offers to move the PO to Reviewing, and opens from the PO list

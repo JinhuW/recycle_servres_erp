@@ -103,7 +103,11 @@ on to Sold once every line has sold (v1.164.0).
   log. The *Products* row opens `/purchase-orders/:id/products`: the line
   cards — each leading with the line's first photo beside its number, the
   rest in a strip under the chips (v1.170.1) — the add-category dock and
-  the goods total; the line form opens from there and returns there. A line removed on one screen is already gone on
+  the goods total; the line form opens from there and returns there —
+  at the bottom after adding a line, on the line after editing one, and at
+  the top when opened by link; a round button above the dock jumps to the
+  bottom or back to the top once the list outgrows the screen (v1.202.0). A
+  line removed on one screen is already gone on
   the other, unsaved fields survive the round trip, and the "back to Draft"
   warning is asked once per visit. The capture flow's **Review screen is
   the product list and nothing else** (v1.169.0): header, the line cards or

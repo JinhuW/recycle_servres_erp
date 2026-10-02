@@ -78,6 +78,7 @@ export function OrderProductsBody({
         return (
         <div
           key={l.id}
+          id={'ph-line-' + l.id}
           className="ph-line"
           onClick={canEditOrder ? () => { onEditLine(i); } : undefined}
           style={canEditOrder ? { cursor: 'pointer' } : undefined}
