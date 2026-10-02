@@ -424,7 +424,8 @@ async function loadSellOrderSheetData(sql: SqlClient, id: string) {
       sol.label AS sol_label, sol.sub_label AS sol_sub, sol.part_number AS sol_part,
       sol.category AS sol_category, sol.condition AS sol_condition,
       w.short AS warehouse_short,
-      l.id AS inv_id, l.order_id AS source_order_id, l.category, l.brand, l.capacity, l.generation, l.type,
+      l.id AS inv_id, l.order_id AS source_order_id, ${poLineNo(sql, 'l')} AS po_line_no,
+      l.category, l.brand, l.capacity, l.generation, l.type,
       l.classification, l.rank, l.speed, l.interface, l.form_factor, l.description,
       l.part_number, l.chip_number, l.condition, l.health::float AS health,
       l.rpm,
@@ -450,6 +451,9 @@ async function loadSellOrderSheetData(sql: SqlClient, id: string) {
     category: SoCategory; label: string; partNumber: string | null;
     condition: string | null; qty: number; imageUrl: string | null;
     specs: Record<string, string | number>;
+    // The folded lots' # on their PO. Only the by-PO tabs collect it: the
+    // other maps fold several POs together, where a line number names nothing.
+    poLineNos?: number[];
   };
   // Only real public URLs make the sheet — seeded/stub scans carry data: URLs
   // that would render as garbage text in the cell.
@@ -488,13 +492,19 @@ async function loadSellOrderSheetData(sql: SqlClient, id: string) {
         health: (r.health as number | null) ?? '', rpm: (r.rpm as number | null) ?? '',
       } : {},
     });
-    const fold = (map: Map<string, Group>) => {
-      const existing = map.get(key);
-      if (existing) {
-        existing.qty += Number(r.sell_qty ?? 0);
-        if (!existing.imageUrl) existing.imageUrl = publicUrl(r.image_url);
+    const lineNo = r.po_line_no as number | null;
+    const fold = (map: Map<string, Group>, withLineNo = false) => {
+      let g = map.get(key);
+      if (g) {
+        g.qty += Number(r.sell_qty ?? 0);
+        if (!g.imageUrl) g.imageUrl = publicUrl(r.image_url);
       } else {
-        map.set(key, makeGroup());
+        g = makeGroup();
+        map.set(key, g);
+      }
+      if (withLineNo && lineNo != null) {
+        g.poLineNos ??= [];
+        if (!g.poLineNos.includes(lineNo)) g.poLineNos.push(lineNo);
       }
     };
     fold(groups);
@@ -505,7 +515,7 @@ async function loadSellOrderSheetData(sql: SqlClient, id: string) {
     if (!byWarehousePo.has(wh)) byWarehousePo.set(wh, new Map());
     const whPos = byWarehousePo.get(wh)!;
     if (!whPos.has(po)) whPos.set(po, new Map());
-    fold(whPos.get(po)!);
+    fold(whPos.get(po)!, true);
   }
 
   const warehouseOrder = [...byWarehouse.keys()].sort((a, b) => {

@@ -2305,7 +2305,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     backToSellOrders: 'Back to sell orders',
     sodNoWarehouse: 'No warehouse',
     sodFromPO: 'From {po}',
-    sodFromPOLine: 'From {po} #{n}',
+    sodIdInPo: 'ID in PO',
     sodLineTotal: 'Line total',
     sodListPriceTooltip: 'List price: {price}',
     sodAllItemsRemoved: 'All items removed. Close and re-select from Inventory.',

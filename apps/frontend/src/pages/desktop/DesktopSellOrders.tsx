@@ -648,7 +648,6 @@ type ItemCellLine = LineSpec & {
   partNumber: string | null;
   condition: string | null;
   sourceOrderId?: string | null;
-  sourceLineNo?: number | null;
 };
 
 function LineItemCell({ line, sub, showPo, linkPo }: {
@@ -663,9 +662,6 @@ function LineItemCell({ line, sub, showPo, linkPo }: {
   // Condition stays in the text row, so the SSD/HDD chips don't repeat it.
   const chipLine = { ...line, condition: null };
   const po = showPo ? line.sourceOrderId : null;
-  const from = po && (line.sourceLineNo != null
-    ? t('sodFromPOLine', { po, n: line.sourceLineNo })
-    : t('sodFromPO', { po }));
   return (
     <td>
       <div style={{ fontWeight: 500, fontSize: 13 }}>{line.label}</div>
@@ -677,8 +673,8 @@ function LineItemCell({ line, sub, showPo, linkPo }: {
         {line.condition && (<><span>·</span><span>{line.condition}</span></>)}
         {po && (<><span>·</span>
           {linkPo
-            ? <RouteLink to={'/purchase-orders/' + po} className="mono rec-link">{from}</RouteLink>
-            : <span className="mono">{from}</span>}
+            ? <RouteLink to={'/purchase-orders/' + po} className="mono rec-link">{t('sodFromPO', { po })}</RouteLink>
+            : <span className="mono">{t('sodFromPO', { po })}</span>}
         </>)}
       </div>
     </td>
@@ -1021,9 +1017,10 @@ function SellOrderDetail({ id, mode, onToast }: {
     () => (draft ? groupSellOrderLines(draft.lines, lineGroup) : []),
     [draft, lineGroup],
   );
-  // A PO card numbers its lines as the PO page does. The No PO card has no PO
-  // to number against.
-  const numbered = (g: SellOrderLineGroup<unknown>) => lineGroup === 'po' && g.poId !== null;
+  // The ID in PO column: each line's # on its PO page. Every warehouse group
+  // has poId null (lines from many POs), so only By PO's No PO card — hand-typed
+  // lines, no PO to number against — goes without it.
+  const showsPoId = (g: SellOrderLineGroup<unknown>) => lineGroup === 'warehouse' || g.poId !== null;
 
   const setLine = (idx: number, patch: Partial<EditLine>) =>
     setDraft(d => d && { ...d, lines: d.lines.map((l, i) => (i === idx ? { ...l, ...patch } : l)) });
@@ -1408,8 +1405,8 @@ function SellOrderDetail({ id, mode, onToast }: {
                       <table className="so-line-table">
                         <thead>
                           <tr>
-                            {numbered(g) && <th style={{ width: 36 }}>#</th>}
                             <th>{t('item')}</th>
+                            {showsPoId(g) && <th style={{ width: 88, whiteSpace: 'nowrap' }}>{t('sodIdInPo')}</th>}
                             {lineGroup === 'po' && <th style={{ width: 100 }}>{t('warehouse')}</th>}
                             <th className="num" style={{ width: 110 }}>{t('qty')}</th>
                             <th className="num" style={{ width: 140 }}>{t('fieldUnitPrice')}</th>
@@ -1419,8 +1416,8 @@ function SellOrderDetail({ id, mode, onToast }: {
                         <tbody>
                           {g.items.map(({ line: l }) => (
                             <tr key={l.id}>
-                              {numbered(g) && <td className="muted mono">{l.sourceLineNo ?? '—'}</td>}
                               <LineItemCell line={l} sub={l.sub} showPo={lineGroup === 'warehouse'} linkPo />
+                              {showsPoId(g) && <td className="muted mono">{l.sourceLineNo ?? '—'}</td>}
                               {lineGroup === 'po' && <td style={{ fontSize: 12 }}>{l.warehouse ?? t('sodNoWarehouse')}</td>}
                               <td className="num mono">{l.qty}</td>
                               <td className="num mono">{fmtMoney(l.nativeUnitPrice, order.currency, locale)}</td>
@@ -1445,8 +1442,8 @@ function SellOrderDetail({ id, mode, onToast }: {
                       <table className="so-line-table">
                         <thead>
                           <tr>
-                            {numbered(g) && <th style={{ width: 36 }}>#</th>}
                             <th>{t('item')}</th>
+                            {showsPoId(g) && <th style={{ width: 88, whiteSpace: 'nowrap' }}>{t('sodIdInPo')}</th>}
                             {lineGroup === 'po' && <th style={{ width: 100 }}>{t('warehouse')}</th>}
                             <th className="num" style={{ width: 130 }}>{t('qty')}</th>
                             <th className="num" style={{ width: 130 }}>{t('fieldUnitPrice')}</th>
@@ -1463,8 +1460,8 @@ function SellOrderDetail({ id, mode, onToast }: {
                             const unavailable = l.inventoryId !== null && l.maxQty <= 0;
                             return (
                             <tr key={l._cid}>
-                              {numbered(g) && <td className="muted mono">{l.sourceLineNo ?? '—'}</td>}
                               <LineItemCell line={l} sub={l.subLabel} showPo={lineGroup === 'warehouse'} linkPo={false} />
+                              {showsPoId(g) && <td className="muted mono">{l.sourceLineNo ?? '—'}</td>}
                               {lineGroup === 'po' && <td style={{ fontSize: 12 }}>{l.warehouse ?? t('sodNoWarehouse')}</td>}
                               <td className="num">
                                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
