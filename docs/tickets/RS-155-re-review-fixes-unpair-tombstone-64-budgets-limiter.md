@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-02
 reporter: jinhu
 branch: fix/rereview-v1200
-pr:
+pr: "#474"
 version: 1.200.1
 related: [RS-143, RS-151, RS-153, RS-154]
 ---
