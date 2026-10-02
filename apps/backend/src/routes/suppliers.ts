@@ -111,16 +111,24 @@ function canWrite(u: User, ownerId: string | null): boolean {
 
 /** The rollup every read shares. Tier ranking runs over the whole company, not
  *  the caller's slice: tier means business value, not local ranking, so a
- *  purchaser whose clients are all small should see that honestly. */
-function rollup(sql: ReturnType<typeof getDb>, floor: number) {
+ *  purchaser whose clients are all small should see that honestly. Everything
+ *  else (spend, PO count, rhythm, gap, items) is over the POs the caller may
+ *  see: a purchaser's own, or all of them for a manager. Summing every user's
+ *  POs onto a purchaser's own client told them what colleagues spent there. */
+function rollup(sql: ReturnType<typeof getDb>, floor: number, u: User) {
+  const mine = effectiveRole(u) === 'manager' ? sql`TRUE` : sql`o.user_id = ${u.id}`;
   return sql`
-    WITH po AS (
+    WITH scored AS (
+      SELECT o.supplier_id, ${sql.unsafe(SCORE_SQL)} AS score
+      FROM orders o
+      WHERE o.supplier_id IS NOT NULL AND o.archived_at IS NULL
+      GROUP BY o.supplier_id
+    ), po AS (
       SELECT o.supplier_id,
              COUNT(*)::int AS po_count,
              COALESCE(SUM(o.total_cost), 0)::float AS spend_total,
              COALESCE(SUM(o.total_cost) FILTER (
                WHERE o.created_at > NOW() - INTERVAL '365 days'), 0)::float AS spend_recent,
-             ${sql.unsafe(SCORE_SQL)} AS score,
              MAX(o.created_at) AS last_po_at,
              -- Days-ago per order, newest first: the marks the rhythm strip
              -- draws on every row. Capped so a very old client cannot bloat
@@ -128,7 +136,7 @@ function rollup(sql: ReturnType<typeof getDb>, floor: number) {
              (array_agg((NOW()::date - o.created_at::date)
                         ORDER BY o.created_at DESC))[1:60] AS rhythm
       FROM orders o
-      WHERE o.supplier_id IS NOT NULL AND o.archived_at IS NULL
+      WHERE o.supplier_id IS NOT NULL AND o.archived_at IS NULL AND ${mine}
       GROUP BY o.supplier_id
     ), gap AS (
       SELECT supplier_id,
@@ -138,7 +146,7 @@ function rollup(sql: ReturnType<typeof getDb>, floor: number) {
                EXTRACT(EPOCH FROM (o.created_at - LAG(o.created_at)
                  OVER (PARTITION BY o.supplier_id ORDER BY o.created_at))) / 86400.0 AS g
         FROM orders o
-        WHERE o.supplier_id IS NOT NULL AND o.archived_at IS NULL
+        WHERE o.supplier_id IS NOT NULL AND o.archived_at IS NULL AND ${mine}
       ) x
       WHERE g IS NOT NULL
       GROUP BY supplier_id
@@ -152,15 +160,15 @@ function rollup(sql: ReturnType<typeof getDb>, floor: number) {
                AS item_types
       FROM orders o
       JOIN order_lines ol ON ol.order_id = o.id
-      WHERE o.supplier_id IS NOT NULL AND o.archived_at IS NULL
+      WHERE o.supplier_id IS NOT NULL AND o.archived_at IS NULL AND ${mine}
       GROUP BY o.supplier_id
     ), tierrank AS (
       SELECT id, percent_rank() OVER (ORDER BY score DESC) AS pr
       FROM (
-        SELECT s2.id, COALESCE(po2.score, 0) AS score
+        SELECT s2.id, COALESCE(sc.score, 0) AS score
         FROM suppliers s2
-        LEFT JOIN po po2 ON po2.supplier_id = s2.id
-        WHERE s2.status = 'active' AND COALESCE(po2.score, 0) >= ${floor}
+        LEFT JOIN scored sc ON sc.supplier_id = s2.id
+        WHERE s2.status = 'active' AND COALESCE(sc.score, 0) >= ${floor}
       ) q
     )
     SELECT s.id, s.name, s.company, s.phone, s.email, s.street1, s.street2, s.city,
@@ -171,7 +179,7 @@ function rollup(sql: ReturnType<typeof getDb>, floor: number) {
            COALESCE(po.po_count, 0) AS po_count,
            COALESCE(po.spend_total, 0)::float AS spend_total,
            COALESCE(po.spend_recent, 0)::float AS spend_recent,
-           COALESCE(po.score, 0)::float AS score,
+           COALESCE(scored.score, 0)::float AS score,
            po.last_po_at, po.rhythm,
            (NOW()::date - po.last_po_at::date) AS days_since_po,
            gap.raw_gap, tierrank.pr,
@@ -180,6 +188,7 @@ function rollup(sql: ReturnType<typeof getDb>, floor: number) {
     FROM suppliers s
     LEFT JOIN users u   ON u.id = s.owner_id
     LEFT JOIN po        ON po.supplier_id = s.id
+    LEFT JOIN scored    ON scored.supplier_id = s.id
     LEFT JOIN gap       ON gap.supplier_id = s.id
     LEFT JOIN items     ON items.supplier_id = s.id
     LEFT JOIN tierrank  ON tierrank.id = s.id
@@ -200,7 +209,7 @@ suppliers.get('/', async (c) => {
   const limit = clampLimit(c.req.query('limit'), 200, 500);
 
   const rows = (await sql`
-    ${rollup(sql, s.tierFloorUsd)}
+    ${rollup(sql, s.tierFloorUsd, u)}
     WHERE ${readScope(sql, u)}
       AND (
         ${status} = 'all'
@@ -466,7 +475,7 @@ suppliers.get('/:id', async (c) => {
   const s = await loadCrmSettings(sql);
   const id = c.req.param('id');
   const rows = (await sql`
-    ${rollup(sql, s.tierFloorUsd)} WHERE s.id = ${id} AND ${readScope(sql, u)}
+    ${rollup(sql, s.tierFloorUsd, u)} WHERE s.id = ${id} AND ${readScope(sql, u)}
   `) as unknown as Row[];
   if (!rows[0]) return c.json({ error: 'Not found' }, 404);
 
@@ -484,8 +493,9 @@ suppliers.get('/:id', async (c) => {
     // What they have actually sold us, straight off the lines. Never typed, so
     // it cannot go stale.
     sql`SELECT COALESCE(NULLIF(btrim(ol.item_type), ''), ol.category, 'Other') AS item_type,
-               SUM(ol.qty)::int AS qty,
-               SUM(ol.qty * COALESCE(ol.unit_cost, 0))::float AS spend
+               -- As bought: a partial sale lowers qty, not what we bought.
+               SUM(COALESCE(ol.qty_purchased, ol.qty))::int AS qty,
+               SUM(COALESCE(ol.qty_purchased, ol.qty) * COALESCE(ol.unit_cost, 0))::float AS spend
         FROM order_lines ol JOIN orders o ON o.id = ol.order_id
         WHERE o.supplier_id = ${id} AND o.archived_at IS NULL AND ${orderScope}
         GROUP BY 1 ORDER BY qty DESC LIMIT 12`,
@@ -572,7 +582,7 @@ suppliers.post('/:id/notes', async (c) => {
 
   const s = await loadCrmSettings(sql);
   const rows = (await sql`
-    ${rollup(sql, s.tierFloorUsd)} WHERE s.id = ${id}
+    ${rollup(sql, s.tierFloorUsd, u)} WHERE s.id = ${id}
   `) as unknown as Row[];
   const cur = rows[0];
   if (!cur) return c.json({ error: 'Not found' }, 404);

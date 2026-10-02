@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { isPricedSellPrice } from '@recycle-erp/shared';
 import { getDb } from '../db';
 import { effectiveRole } from '../lib/role';
-import { effUnitCost, poFeeBasis } from '../lib/po-cost';
+import { effUnitCost, paidUnitCost, poFeeBasis } from '../lib/po-cost';
 import { parseReportingWindow, windowBounds } from '../lib/reporting-window';
 import { contributions } from '../services/contributions';
 import { REVIEWED_LIFECYCLES } from '../services/orderAdvance';
@@ -51,8 +51,10 @@ dashboard.get('/', async (c) => {
   // Every window is half-open on business-zone calendar days, and the previous
   // window is the equal-length one ending the day before, so a boundary day is
   // never counted twice.
-  const saleDateWin = sql`so.status = 'Done' AND so.updated_at >= ${start} AND so.updated_at < ${end}`;
-  const salePrevWin = sql`so.status = 'Done' AND so.updated_at >= ${prevStart} AND so.updated_at < ${prevEnd}`;
+  // A sale belongs to the day it became Done (done_at): updated_at moves with
+  // every later note, attachment or archive.
+  const saleDateWin = sql`so.status = 'Done' AND so.done_at >= ${start} AND so.done_at < ${end}`;
+  const salePrevWin = sql`so.status = 'Done' AND so.done_at >= ${prevStart} AND so.done_at < ${prevEnd}`;
   // Projected windows key off the PO's own created_at; only the purchaser's reviewed POs count.
   const projDateWin = sql`po.lifecycle = ANY(${REVIEWED_LIFECYCLES}::text[]) AND po.user_id = ${u.id}
                           AND po.created_at >= ${start} AND po.created_at < ${end}`;
@@ -77,6 +79,14 @@ dashboard.get('/', async (c) => {
   // is a cost. See lib/po-cost.ts for the allocation rule.
   const feeBasis = poFeeBasis(sql);
   const eff = effUnitCost(sql);
+  // What a sold unit cost the company, a negotiated lot price included. The
+  // realized cost and profit read it; commission stays on `eff`, because the
+  // lot price never enters commission (lib/po-cost.ts).
+  const paid = paidUnitCost(sql);
+  // The purchaser lens projects over the PO as bought: a partial sale lowers
+  // qty, and reading it shrank the projected revenue, profit and commission
+  // with every unit sold.
+  const bought = sql`COALESCE(ol.qty_purchased, ol.qty)`;
   const headerCost = sql`COALESCE(po.total_cost, fee.goods) + po.other_fees`;
 
   // Chart buckets are business-zone calendar units. Each row is keyed by the
@@ -98,8 +108,8 @@ dashboard.get('/', async (c) => {
         ? sql<{ revenue: number; cost: number; profit: number; commission: number }[]>`
             SELECT
               COALESCE(SUM(sol.unit_price * sol.qty), 0)::float                              AS revenue,
-              COALESCE(SUM(${eff}         * sol.qty), 0)::float                              AS cost,
-              COALESCE(SUM((sol.unit_price - ${eff}) * sol.qty), 0)::float                   AS profit,
+              COALESCE(SUM(${paid}        * sol.qty), 0)::float                              AS cost,
+              COALESCE(SUM((sol.unit_price - ${paid}) * sol.qty), 0)::float                  AS profit,
               COALESCE(SUM((sol.unit_price - ${eff}) * sol.qty
                            * COALESCE(po.commission_rate, 0)), 0)::float                     AS commission
             FROM sell_order_lines sol
@@ -111,16 +121,16 @@ dashboard.get('/', async (c) => {
           `
         : sql<{ revenue: number; cost: number; profit: number; commission: number }[]>`
             SELECT
-              COALESCE(SUM(ol.sell_price * ol.qty), 0)::float                  AS revenue,
+              COALESCE(SUM(ol.sell_price * ${bought}), 0)::float                  AS revenue,
               -- Filtered to the SAME lines revenue and profit are drawn from.
               -- An unpriced line's NULL drops out of those two SUMs on its own;
               -- cost summing every line regardless would leave the KPI row
               -- stating a revenue and a cost that don't reconcile to its own
               -- profit. Cost here is the cost OF the priced lines.
-              COALESCE(SUM(${eff} * ol.qty)
+              COALESCE(SUM(${eff} * ${bought})
                        FILTER (WHERE ol.sell_price IS NOT NULL), 0)::float                             AS cost,
-              COALESCE(SUM((ol.sell_price - ${eff}) * ol.qty), 0)::float       AS profit,
-              COALESCE(SUM((ol.sell_price - ${eff}) * ol.qty
+              COALESCE(SUM((ol.sell_price - ${eff}) * ${bought}), 0)::float       AS profit,
+              COALESCE(SUM((ol.sell_price - ${eff}) * ${bought}
                            * COALESCE(po.commission_rate, 0)), 0)::float                               AS commission
             FROM order_lines ol
             JOIN orders po ON po.id = ol.order_id
@@ -132,7 +142,7 @@ dashboard.get('/', async (c) => {
         ? sql<{ revenue: number; profit: number }[]>`
             SELECT
               COALESCE(SUM(sol.unit_price * sol.qty), 0)::float             AS revenue,
-              COALESCE(SUM((sol.unit_price - ${eff}) * sol.qty), 0)::float  AS profit
+              COALESCE(SUM((sol.unit_price - ${paid}) * sol.qty), 0)::float AS profit
             FROM sell_order_lines sol
             JOIN sell_orders so ON so.id = sol.sell_order_id
             JOIN order_lines ol ON ol.id = sol.inventory_id
@@ -142,8 +152,8 @@ dashboard.get('/', async (c) => {
           `
         : sql<{ revenue: number; profit: number }[]>`
             SELECT
-              COALESCE(SUM(ol.sell_price * ol.qty), 0)::float            AS revenue,
-              COALESCE(SUM((ol.sell_price - ${eff}) * ol.qty), 0)::float AS profit
+              COALESCE(SUM(ol.sell_price * ${bought}), 0)::float            AS revenue,
+              COALESCE(SUM((ol.sell_price - ${eff}) * ${bought}), 0)::float AS profit
             FROM order_lines ol
             JOIN orders po ON po.id = ol.order_id
             ${feeBasis}
@@ -171,9 +181,9 @@ dashboard.get('/', async (c) => {
         ? sql<{ start: string; revenue: number; cost: number; profit: number }[]>`
             WITH series AS (${seriesFrag}),
             sales AS (
-              SELECT ${bucketOf(sql`so.updated_at`)} AS b,
-                     SUM(sol.unit_price * sol.qty)            AS revenue,
-                     SUM((sol.unit_price - ${eff}) * sol.qty) AS profit
+              SELECT ${bucketOf(sql`so.done_at`)} AS b,
+                     SUM(sol.unit_price * sol.qty)             AS revenue,
+                     SUM((sol.unit_price - ${paid}) * sol.qty) AS profit
               FROM sell_order_lines sol
               JOIN sell_orders so ON so.id = sol.sell_order_id
               JOIN order_lines ol ON ol.id = sol.inventory_id
@@ -202,8 +212,8 @@ dashboard.get('/', async (c) => {
             WITH series AS (${seriesFrag}),
             sales AS (
               SELECT ${bucketOf(sql`po.created_at`)} AS b,
-                     SUM(ol.sell_price * ol.qty)            AS revenue,
-                     SUM((ol.sell_price - ${eff}) * ol.qty) AS profit
+                     SUM(ol.sell_price * ${bought})            AS revenue,
+                     SUM((ol.sell_price - ${eff}) * ${bought}) AS profit
               FROM order_lines ol
               JOIN orders po ON po.id = ol.order_id
               ${feeBasis}
@@ -249,9 +259,9 @@ dashboard.get('/', async (c) => {
           GROUP BY po.user_id
         ), per_line AS (
           SELECT po.user_id,
-                 COALESCE(SUM(ol.sell_price * ol.qty), 0)::float                AS revenue,
-                 COALESCE(SUM((ol.sell_price - ${eff}) * ol.qty), 0)::float     AS profit,
-                 COALESCE(SUM((ol.sell_price - ${eff}) * ol.qty
+                 COALESCE(SUM(ol.sell_price * ${bought}), 0)::float                AS revenue,
+                 COALESCE(SUM((ol.sell_price - ${eff}) * ${bought}), 0)::float     AS profit,
+                 COALESCE(SUM((ol.sell_price - ${eff}) * ${bought}
                               * COALESCE(po.commission_rate, 0)), 0)::float                             AS commission
           FROM order_lines ol
           JOIN orders po ON po.id = ol.order_id
@@ -277,7 +287,7 @@ dashboard.get('/', async (c) => {
         ? sql<{ category: string; count: number; revenue: number; profit: number }[]>`
             SELECT sol.category, COUNT(*)::int AS count,
                    COALESCE(SUM(sol.unit_price * sol.qty), 0)::float                  AS revenue,
-                   COALESCE(SUM((sol.unit_price - ${eff}) * sol.qty), 0)::float AS profit
+                   COALESCE(SUM((sol.unit_price - ${paid}) * sol.qty), 0)::float AS profit
             FROM sell_order_lines sol
             JOIN sell_orders so ON so.id = sol.sell_order_id
             JOIN order_lines ol ON ol.id = sol.inventory_id
@@ -288,8 +298,8 @@ dashboard.get('/', async (c) => {
           `
         : sql<{ category: string; count: number; revenue: number; profit: number }[]>`
             SELECT ol.category, COUNT(*)::int AS count,
-                   COALESCE(SUM(ol.sell_price * ol.qty), 0)::float                  AS revenue,
-                   COALESCE(SUM((ol.sell_price - ${eff}) * ol.qty), 0)::float AS profit
+                   COALESCE(SUM(ol.sell_price * ${bought}), 0)::float                  AS revenue,
+                   COALESCE(SUM((ol.sell_price - ${eff}) * ${bought}), 0)::float AS profit
             FROM order_lines ol
             JOIN orders po ON po.id = ol.order_id
             ${feeBasis}

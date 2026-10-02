@@ -37,9 +37,9 @@ describe('GET /api/me — lifetime commission uses per-order rate', () => {
 
     const customerId = (await db<{ id: string }[]>`SELECT id FROM customers LIMIT 1`)[0].id;
     await db`
-      INSERT INTO sell_orders (id, customer_id, status, created_by, created_at, updated_at)
+      INSERT INTO sell_orders (id, customer_id, status, created_by, created_at, updated_at, done_at)
       VALUES ('SO-TEST-COMM-1', ${customerId}, 'Done',
-              (SELECT id FROM users WHERE email = ${MARCUS}), NOW(), NOW())
+              (SELECT id FROM users WHERE email = ${MARCUS}), NOW(), NOW(), NOW())
     `;
     await db`
       INSERT INTO sell_order_lines (sell_order_id, inventory_id, category, label, qty, unit_price, position)
@@ -76,8 +76,8 @@ describe('GET /api/me — lifetime commission uses per-order rate', () => {
     `)[0].id;
     const customerId = (await db<{ id: string }[]>`SELECT id FROM customers LIMIT 1`)[0].id;
     await db`
-      INSERT INTO sell_orders (id, customer_id, status, created_by, created_at, updated_at)
-      VALUES ('SO-ME-FEE', ${customerId}, 'Done', ${owner}, NOW(), NOW())
+      INSERT INTO sell_orders (id, customer_id, status, created_by, created_at, updated_at, done_at)
+      VALUES ('SO-ME-FEE', ${customerId}, 'Done', ${owner}, NOW(), NOW(), NOW())
     `;
     await db`
       INSERT INTO sell_order_lines (sell_order_id, inventory_id, category, label, qty, unit_price, position)

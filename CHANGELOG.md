@@ -17,6 +17,39 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.198.0] - 2026-10-02
+
+Reporting money (RS-150), batch 7a of the remaining code-review work.
+
+### Fixed
+
+- **A sale stays in the month it was made.** The dashboard and the
+  contribution cards dated sales by `sell_orders.updated_at`. Every later
+  edit moves that column, so a note, an attachment or an archive months
+  afterwards dragged a sale into the current period. Migration 0150 adds
+  `done_at`, set the moment an order becomes Done and never cleared (Done is
+  terminal). It is backfilled from the status-change event, then the Done
+  evidence row, then `updated_at`.
+- **Realized profit counts the lot price.** A manager's realized cost and
+  profit added only each line's cost and fee share, so a lot bought for $950
+  over one $100 line showed a $50 profit when it sold for $150. They now use
+  what the unit actually cost the company, the same figure the PO page's
+  Realized column shows. Commission is unchanged: the lot price never enters
+  it.
+- **A partial sale no longer lowers a purchaser's projected commission.** The
+  purchaser tiles, chart, ranking, categories and contribution cards
+  multiplied by `qty`, which a partial sale decrements. They now multiply by
+  the quantity bought. A client's items list on the supplier page does the
+  same.
+- **Customer revenue is what sold.** `lifetime_revenue` summed every sell
+  order line, Drafts and Closed orders included, and `outstanding` was
+  everything not yet Done. Revenue is now Done orders only (archived ones
+  included). What is owed is Shipped and Awaiting payment.
+- **A purchaser's client card counts their own POs.** Spend, PO count, the
+  rhythm strip, the median gap and the items list summed every user's POs
+  onto a purchaser's own client, which told them what colleagues bought
+  there. They now cover the caller's POs. The tier stays company-wide.
+
 ## [1.197.4] - 2026-10-02
 
 Structure only (RS-148), batch 6b of the remaining code-review work. Nothing

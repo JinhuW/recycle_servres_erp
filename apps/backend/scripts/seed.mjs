@@ -649,8 +649,9 @@ try {
     const id = 'SO-' + (++soId);
     const created = new Date(Date.now() - s.ago * 86400000);
     await sql`
-      INSERT INTO sell_orders (id, customer_id, status, created_by, created_at, updated_at)
-      VALUES (${id}, ${cust.id}, ${s.status}, ${protoToUuid['u1']}, ${created}, ${created})
+      INSERT INTO sell_orders (id, customer_id, status, created_by, created_at, updated_at, done_at)
+      VALUES (${id}, ${cust.id}, ${s.status}, ${protoToUuid['u1']}, ${created}, ${created},
+              ${s.status === 'Done' ? created : null})
     `;
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i];

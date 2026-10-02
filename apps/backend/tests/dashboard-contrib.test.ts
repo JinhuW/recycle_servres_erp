@@ -66,8 +66,8 @@ async function insertPO(
 async function insertDoneSale(id: string, customerId: string, lines: { inventoryId: string | null; category: string; unitPrice: number }[]) {
   const db = getTestDb();
   await db`
-    INSERT INTO sell_orders (id, customer_id, status, created_by, created_at, updated_at)
-    VALUES (${id}, ${customerId}, 'Done', (SELECT id FROM users WHERE email = ${ALEX}), NOW(), NOW())
+    INSERT INTO sell_orders (id, customer_id, status, created_by, created_at, updated_at, done_at)
+    VALUES (${id}, ${customerId}, 'Done', (SELECT id FROM users WHERE email = ${ALEX}), NOW(), NOW(), NOW())
   `;
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
@@ -162,10 +162,13 @@ describe('GET /api/dashboard — contributions', () => {
     expect(r.body.kpis.revenue).toBeCloseTo(410, 2);
     expect(revenue.total).toBeCloseTo(r.body.kpis.revenue, 2);
     expect(profit.total).toBeCloseTo(r.body.kpis.profit, 2);
-    expect(profit.total).toBeCloseTo(110, 2);
+    // Realized profit is on what the unit cost the company: PO-CT-1's $950
+    // lot price over its one $100 line makes that sale -$800, and the HDD
+    // earns $60. The same figure the PO page's Realized column shows.
+    expect(profit.total).toBeCloseTo(-740, 2);
     expect(revenue.count).toBe(r.body.kpis.count);
     for (const dim of Object.values(revenue.byDim)) expect(sum(dim)).toBeCloseTo(410, 2);
-    for (const dim of Object.values(profit.byDim)) expect(sum(dim)).toBeCloseTo(110, 2);
+    for (const dim of Object.values(profit.byDim)) expect(sum(dim)).toBeCloseTo(-740, 2);
     expect(byName(revenue.byDim.customer!, 'Cust A').amount).toBeCloseTo(150, 2);
     expect(byName(revenue.byDim.customer!, 'Cust B').amount).toBeCloseTo(260, 2);
     expect(byName(profit.byDim.customer!, 'Cust B').amount).toBeCloseTo(60, 2);

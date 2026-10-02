@@ -588,6 +588,12 @@ on to Sold once every line has sold (v1.164.0).
 
 ## Clients (the people we buy from)
 
+- **A purchaser's client card counts their own POs** (v1.198.0). Spend, PO
+  count, rhythm, gap and the items list cover only the POs the purchaser
+  owns, where they used to sum every colleague's POs onto the purchaser's
+  own client. The tier stays company-wide, because it ranks business value.
+  A client's items list counts what was bought, not what is left.
+
 Purchase orders had no counterparty until v1.108.0 — who we bought from
 survived only as free text on `shipments.from_name`, `packages.seller_name` and
 a blob in `orders.notes`, which is why payment reconciliation fuzzy-matches
@@ -1081,6 +1087,18 @@ over MCP.
 ## Dashboard
 
 Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
+
+- **The money reads the right facts** (v1.198.0):
+  - A sale belongs to the day its sell order became Done
+    (`sell_orders.done_at`), for the tiles, the chart and the contribution
+    cards. Until then it was dated by `updated_at`, which a later note,
+    attachment or archive moved.
+  - A manager's realized cost and profit count a negotiated lot price: a
+    $950 lot sold for $150 is a $800 loss, the same figure the PO page's
+    Realized column shows. Commission stays on the line costs, because the
+    lot price never enters commission.
+  - A purchaser's projected figures are over the PO as bought, so selling
+    part of a line no longer lowers the commission they were shown.
 
 - **The reporting window is two calendar dates in the business time zone**
   (America/Denver), chosen on the desktop by a chip with presets (last 7 /
