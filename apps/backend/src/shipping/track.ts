@@ -52,9 +52,14 @@ function nextStatus(current: PackageStatus, info: TrackingInfo): PackageStatus |
 // dropped whole: its headline and ETA are as stale as its status, and an
 // in-transit push arriving after an exception would otherwise read as the box
 // moving again. A payload with no date is not comparable and is applied.
+//
+// `info` describes the number and carrier the caller looked up. A correction
+// on the PO can land between that lookup and this lock; applying the old box's
+// event to the corrected row would stamp its date there and drop the real
+// box's earlier events.
 export async function applyPackageTracking(
   sql: Sql,
-  row: Pick<TrackedPackageRow, 'id'>,
+  row: Pick<TrackedPackageRow, 'id' | 'tracking_number' | 'carrier'>,
   info: TrackingInfo,
 ): Promise<PackageStatus | null> {
   return sql.begin(async (tx): Promise<PackageStatus | null> => {
@@ -63,6 +68,7 @@ export async function applyPackageTracking(
       FROM packages WHERE id = ${row.id} LIMIT 1 FOR UPDATE
     `)[0] as (TrackedPackageRow & { tracking_status_at: Date | null }) | undefined;
     if (!cur) return null;
+    if (cur.tracking_number !== row.tracking_number || cur.carrier !== row.carrier) return null;
     const statusAt = info.statusAt ?? null;
     if (statusAt && cur.tracking_status_at && statusAt < cur.tracking_status_at) return null;
     const next = nextStatus(cur.status, info);

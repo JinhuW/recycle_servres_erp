@@ -648,6 +648,11 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
     Unarchive.
   - Editing adds a sticky footer: Discard, Cancel and Save. Save lands on the
     order's view page with a toast.
+  - A line can grow to what its lot still has free. A line whose lot has
+    nothing left to offer shows a locked quantity and "No longer available —
+    remove the line" (v1.194.1). That covers a lot that left Reviewing or
+    Done, one whose PO was archived, and one that other committed orders hold
+    in full. Saving refuses such a line.
   - View and edit share one history entry, so browser Back returns to where
     the order was opened from.
 - **Line items group By warehouse or By PO** (v1.194.0), in both view and edit.

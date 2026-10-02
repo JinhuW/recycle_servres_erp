@@ -332,7 +332,7 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
           </button>
           {onNewFromInventory && (
             <button className="btn accent" onClick={onNewFromInventory}>
-              <Icon name="plus" size={14} /> New from inventory
+              <Icon name="plus" size={14} /> {t('sodNewFromInventory')}
             </button>
           )}
         </div>
@@ -1157,7 +1157,7 @@ function SellOrderDetail({ id, mode, onToast }: {
                     {order.currency}
                   </span>
                 )}
-                {editable && <span className="chip accent" style={{ fontSize: 10 }}>Editing</span>}
+                {editable && <span className="chip accent" style={{ fontSize: 10 }}>{t('subStatusEditing')}</span>}
               </div>
               <div className="page-sub">
                 {t('soColCreated')} {fmtDate(order.createdAt, locale)} · {t('soColUpdated')} {fmtDate(order.updatedAt, locale)} · {order.customer.region}
@@ -1218,12 +1218,12 @@ function SellOrderDetail({ id, mode, onToast }: {
                 onClick={() => setShowReopenDialog(true)}
                 title={t('soReopenTooltip')}
               >
-                <Icon name="edit" size={14} /> Reopen
+                <Icon name="edit" size={14} /> {t('sodReopen')}
               </button>
             )}
             {!editable && !locked && (
               <button className="btn accent" onClick={toEdit}>
-                <Icon name="edit" size={14} /> Edit order
+                <Icon name="edit" size={14} /> {t('editOrder')}
               </button>
             )}
           </div>
@@ -1262,9 +1262,9 @@ function SellOrderDetail({ id, mode, onToast }: {
                       fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
                       textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10,
                     }}>
-                      <Icon name="flag" size={12} /> Order status
+                      <Icon name="flag" size={12} /> {t('orderStatus')}
                       <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
-                        Manually advance as the deal progresses
+                        {t('sodStatusHint')}
                       </span>
                     </div>
                     <div className="so-stepper">
@@ -1288,9 +1288,9 @@ function SellOrderDetail({ id, mode, onToast }: {
                               }}
                               title={dialog
                                 ? (s === draft.status
-                                    ? `Edit tracking note / attachments for ${s}`
-                                    : `Advance to ${s} (add tracking note / attachments)`)
-                                : `Set status to ${s}`}
+                                    ? t('sodStepEditMeta', { s })
+                                    : t('sodStepAdvance', { s }))
+                                : t('sodStepSet', { s })}
                             >
                               <span className="so-step-dot">{i + 1}</span>
                               <span className="so-step-label">
@@ -1322,7 +1322,11 @@ function SellOrderDetail({ id, mode, onToast }: {
                         fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 8,
                       }}>
                         <Icon name="info" size={13} />
-                        Status will change from <strong>{order.status}</strong> to <strong>{draft.status}</strong> when you save.
+                        <span>
+                          {t('sodStatusChangePre')}<strong>{order.status}</strong>
+                          {t('sodStatusChangeMid')}<strong>{draft.status}</strong>
+                          {t('sodStatusChangePost')}
+                        </span>
                       </div>
                     )}
                   </div>
@@ -1335,7 +1339,7 @@ function SellOrderDetail({ id, mode, onToast }: {
                       fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
                       textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10,
                     }}>
-                      <Icon name="user" size={12} /> Customer
+                      <Icon name="user" size={12} /> {t('fieldCustomer')}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
                       <div style={{ flex: '0 1 340px', minWidth: 240 }}>
@@ -1436,7 +1440,13 @@ function SellOrderDetail({ id, mode, onToast }: {
                           </tr>
                         </thead>
                         <tbody>
-                          {g.items.map(({ line: l, idx }) => (
+                          {g.items.map(({ line: l, idx }) => {
+                            // The lot left the sellable statuses, its PO was
+                            // archived, or other committed orders hold it all:
+                            // save refuses any qty, so clamping to 0 would only
+                            // snap the saved one to 1.
+                            const unavailable = l.inventoryId !== null && l.maxQty <= 0;
+                            return (
                             <tr key={l._cid}>
                               <LineItemCell line={l} sub={l.subLabel} showPo={lineGroup === 'warehouse'} linkPo={false} />
                               {lineGroup === 'po' && <td style={{ fontSize: 12 }}>{l.warehouse ?? t('sodNoWarehouse')}</td>}
@@ -1446,16 +1456,23 @@ function SellOrderDetail({ id, mode, onToast }: {
                                     className="so-mini-input"
                                     type="number"
                                     min={1}
-                                    max={l.maxQty}
+                                    max={unavailable ? undefined : l.maxQty}
                                     value={l.qty}
+                                    disabled={unavailable}
                                     onChange={e => setLine(idx, {
                                       qty: Math.max(1, Math.min(l.maxQty, Number(e.target.value) || 0)),
                                     })}
                                     style={{ width: 64 }}
                                   />
-                                  <span style={{ fontSize: 10.5, color: 'var(--fg-subtle)', whiteSpace: 'nowrap' }}>
-                                    / {l.maxQty}
-                                  </span>
+                                  {unavailable ? (
+                                    <span style={{ fontSize: 10.5, color: 'var(--neg, #c0392b)', whiteSpace: 'nowrap' }}>
+                                      {t('sodLineUnavailable')}
+                                    </span>
+                                  ) : (
+                                    <span style={{ fontSize: 10.5, color: 'var(--fg-subtle)', whiteSpace: 'nowrap' }}>
+                                      / {l.maxQty}
+                                    </span>
+                                  )}
                                 </div>
                               </td>
                               <td className="num">
@@ -1480,7 +1497,8 @@ function SellOrderDetail({ id, mode, onToast }: {
                                 </button>
                               </td>
                             </tr>
-                          ))}
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -1525,7 +1543,7 @@ function SellOrderDetail({ id, mode, onToast }: {
               <div className="card so-page-card">
                 <details open>
                   <summary style={{ cursor: 'pointer', fontWeight: 600, padding: '8px 0' }}>
-                    History
+                    {t('sodHistory')}
                   </summary>
                   <div style={{ marginTop: 12 }}>
                     <SellOrderHistory sellOrderId={order.id} refreshKey={historyKey} />
@@ -1729,7 +1747,7 @@ function SellOrderDetail({ id, mode, onToast }: {
           {editable && (
             <div className="so-footer so-page-foot">
               <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
-                {dirty ? 'Unsaved changes' : 'No changes'}
+                {dirty ? t('sodUnsavedChanges') : t('sodNoChanges')}
               </span>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                 {/* Close as off-ramp: everywhere except Done (terminal) and
@@ -1743,7 +1761,7 @@ function SellOrderDetail({ id, mode, onToast }: {
                     title={t('soDiscardTooltip')}
                     style={{ color: 'var(--neg, #c0392b)', borderColor: 'var(--border-strong)' }}
                   >
-                    Discard
+                    {t('sodDiscard')}
                   </button>
                 )}
                 <button className="btn" onClick={toView} disabled={saving}>
@@ -1754,7 +1772,7 @@ function SellOrderDetail({ id, mode, onToast }: {
                   onClick={save}
                   disabled={!dirty || saving || (draftCurrency !== 'USD' && draftRateToUsd == null)}
                 >
-                  <Icon name="check2" size={14} /> {saving ? 'Saving…' : 'Save changes'}
+                  <Icon name="check2" size={14} /> {saving ? t('sodSaving') : t('saveChanges')}
                 </button>
               </div>
             </div>

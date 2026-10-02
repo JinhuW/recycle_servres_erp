@@ -90,6 +90,12 @@ type Run = { sources: ReadonlySet<BankSource>; disputes: boolean; result: Promis
 // it wants them. A full sync that joined a PayPal-only pull would come back
 // without Mercury and report success. Keyed by what a run covers, so at most
 // one run per shape is in flight.
+//
+// A run that can't join still must not fetch beside one that shares a source:
+// two syncOne transactions upserting the same rows contend on their locks and
+// auto-pair from each other's stale snapshots. It waits those out first. The
+// set is taken before it registers itself, so a run only ever waits on older
+// ones and the waits can't form a cycle.
 const inFlight = new Map<string, Run>();
 
 export function syncBankTransactions(
@@ -112,8 +118,13 @@ export function syncBankTransactions(
       }));
     }
   }
+  const overlapping = [...inFlight.values()]
+    .filter((run) => [...sources].some((s) => run.sources.has(s)))
+    .map((run) => run.result.catch(() => undefined));
   const key = `${[...sources].sort().join(',')}|${disputes ? 'disputes' : 'no-disputes'}`;
-  const result = doSync(env, picked, disputes).finally(() => inFlight.delete(key));
+  const result = Promise.all(overlapping)
+    .then(() => doSync(env, picked, disputes))
+    .finally(() => inFlight.delete(key));
   inFlight.set(key, { sources, disputes, result });
   return result;
 }

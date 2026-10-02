@@ -82,11 +82,18 @@ export const SELL_ORDER_TOOL_DEFS = [
   },
 ] as const;
 
+// The schema's ceiling, held here: tool args arrive unvalidated, and the shared
+// search goes up to 201 for the REST picker's truncation check.
+const MCP_SELLABLE_MAX = 100;
+
 export async function callSearchSellableInventory(
   sql: postgres.Sql,
   args: { query?: string; warehouseId?: string; limit?: number },
 ) {
-  return searchSellableInventory(sql, args);
+  return searchSellableInventory(sql, {
+    ...args,
+    limit: Math.min(args.limit ?? 20, MCP_SELLABLE_MAX),
+  });
 }
 
 const DEFAULT_MCP_CUSTOMER = 'f30f98bc-09c7-4108-b083-c7d69cc9968c';

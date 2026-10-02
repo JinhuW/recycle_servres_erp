@@ -17,6 +17,45 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.194.1] - 2026-10-02
+
+Fixes from the code review that cleared v1.193.0 and v1.194.0 for production
+(RS-139).
+
+- **Correcting a tracking number no longer freezes the box.** 1.193.0 started
+  dropping carrier events dated before the last one applied. A typo fixed in
+  place, or a corrected carrier, kept the wrong box's date, so every event of
+  the real box was dropped as stale. A correction now clears that date, and so
+  does adopting a standalone box under a different carrier. A poll or push that
+  looked up the old number before the correction now lands on nothing instead
+  of re-stamping it.
+- **Bank syncs that share a source no longer run side by side.** A full sync
+  that couldn't join a PayPal-only pull already running used to start beside
+  it. Two transactions then upserted the same rows and auto-paired from each
+  other's stale view. It now waits for the pull to finish.
+- **A sell-order line whose lot is gone says so.** When a line's lot has left
+  Reviewing or Done, its PO was archived, or other committed orders hold all of
+  it, the edit page used to show "/ 0" and snap any typed quantity to 1. The
+  quantity is now locked and the line reads "No longer available — remove the
+  line". Saving already refused such a line.
+- **The new sell-order page is fully translated.** Several pieces of English
+  were still hard-coded:
+  - the Editing chip and the Edit order, Reopen and New from inventory buttons
+  - the status card's heading, hint, step tooltips and its "Status will change
+    from … to …" note
+  - the Customer label and History
+  - the footer's Discard, Saving and changed/unchanged states
+
+  Status names stay as the app shows them everywhere else.
+- MCP `search_sellable_inventory` again returns at most the 100 rows its schema
+  advertises. The shared search had been raised to 201 for the REST picker.
+- The web-form channel list exists once, in `publicForms.ts`. The supplier
+  lookup in `webSubmissions.ts` had its own copy, so a channel added to only
+  one list would have created a duplicate house supplier on every
+  conversion.
+- `GET /api/notifications` fetches the list and the unread count in one
+  statement.
+
 ## [1.194.0] - 2026-10-01
 
 A sell order now opens as a full page, as a purchase order does, instead of a

@@ -36,4 +36,13 @@ describe('notifications mark-read', () => {
     expect(list.body.items).toHaveLength(50);
     expect(list.body.unreadCount).toBe(n);
   });
+
+  it('an empty inbox reports nothing unread', async () => {
+    const { token } = await loginAs(MARCUS);
+    const sql = getTestDb();
+    await sql`DELETE FROM notifications WHERE user_id = (SELECT id FROM users WHERE email = ${MARCUS})`;
+    const list = await api<{ items: unknown[]; unreadCount: number }>('GET', '/api/notifications', { token });
+    expect(list.status).toBe(200);
+    expect(list.body).toEqual({ items: [], unreadCount: 0 });
+  });
 });
