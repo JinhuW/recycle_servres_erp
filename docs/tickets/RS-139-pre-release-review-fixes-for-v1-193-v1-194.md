@@ -2,13 +2,13 @@
 id: RS-139
 title: Pre-release review fixes for v1.193–v1.194
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-02
 reporter: jinhu
 branch: fix/prerelease-review-rs139
-pr:
-version:
+pr: "#456"
+version: 1.194.1
 related: [RS-134, RS-138]
 ---
 
@@ -42,14 +42,14 @@ that decides whether it can happen:
 
 ## Acceptance criteria
 
-- [ ] A corrected tracking number or carrier clears `tracking_status_at`, so the real box's earlier-dated events apply; adopting a standalone box on a different carrier does too.
-- [ ] `applyPackageTracking` ignores an update computed for a number the row no longer carries.
-- [ ] A sync that can't join an in-flight run waits for any run sharing one of its sources before fetching.
-- [ ] A sell-order line whose lot has nothing left to offer shows a disabled qty and "No longer available — remove the line" instead of "/ 0".
-- [ ] `search_sellable_inventory` over MCP returns at most 100 rows whatever `limit` says.
-- [ ] One web-channel list, exported from `publicForms.ts`.
-- [ ] `GET /api/notifications` is one statement; an empty inbox reports `unreadCount: 0`.
-- [ ] No raw English left in `DesktopSellOrders.tsx`'s JSX; both locales carry the keys.
+- [x] A corrected tracking number or carrier clears `tracking_status_at`, so the real box's earlier-dated events apply; adopting a standalone box on a different carrier does too.
+- [x] `applyPackageTracking` ignores an update computed for a number the row no longer carries.
+- [x] A sync that can't join an in-flight run waits for any run sharing one of its sources before fetching.
+- [x] A sell-order line whose lot has nothing left to offer shows a disabled qty and "No longer available — remove the line" instead of "/ 0".
+- [x] `search_sellable_inventory` over MCP returns at most 100 rows whatever `limit` says.
+- [x] One web-channel list, exported from `publicForms.ts`.
+- [x] `GET /api/notifications` is one statement; an empty inbox reports `unreadCount: 0`.
+- [x] No raw English left in `DesktopSellOrders.tsx`'s JSX; both locales carry the keys.
 
 ## Out of scope
 
