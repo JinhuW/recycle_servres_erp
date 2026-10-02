@@ -17,6 +17,45 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.198.3] - 2026-10-02
+
+Supplier keys and bank pairing (RS-151), batch 7b of the remaining code-review
+work.
+
+### Fixed
+
+- **Clients named in other scripts no longer collide.** A supplier's key kept
+  only A–Z and 0–9, so every name in Chinese, Vietnamese or any other script
+  keyed as empty. A second such client at the same zip was refused as a
+  duplicate, and the suggestions rail matched every non-Latin seller to every
+  non-Latin client. Migration 0151 adds one SQL function,
+  `supplier_name_key()`, that keys such names on their own trimmed text. The
+  generated column, the suggestions, package adoption and the duplicate check
+  all call it. A Latin name keys exactly as before; prod had no empty key.
+- **Ungrouping a pair no longer double-counts a payment.** Grouping spreads
+  the PO link, the owner and the internal transaction onto both legs, and
+  ungrouping left them there: two unpaired rows linked to one PO, whose paid
+  figure then counted the payment twice. Ungroup now keeps them on the PayPal
+  leg only. Migration 0152 groups the one prod case the bug left behind:
+  PO-1383's $2,800 PayPal payment and the Mercury debit that funded it, six
+  days apart.
+- **Automatic pairing guesses less.**
+  - An amount-and-date pair now needs the Mercury row to name PayPal, and a
+    transfer pair needs the `PAYPAL;` ACH descriptor, so a card charge or a
+    wire of the same amount no longer pairs. Every real pair in prod carried
+    the marker.
+  - A pair is made only when each leg is the other's sole candidate within
+    the window. Amounts used to be bucketed across all time, so one
+    same-amount row from months ago blocked a fresh match forever.
+  - Unpaired rows older than 120 days, unless pending, are no longer reread
+    on every sync.
+- **A payment in another currency stays out of reconciliation.** Every PO is
+  in USD, and every amount comparison assumed the bank rows were too.
+  Migration 0153 adds `bank_transactions.currency`, filled from each
+  provider. A non-USD row is never matched, paired or auto-linked, and `/link`
+  and `/pair` refuse it. The feed marks it "EUR · not reconciled". Every prod
+  row was USD.
+
 ## [1.198.2] - 2026-10-02
 
 The sell order page shows the source PO line as a badge again (RS-152).

@@ -2308,6 +2308,8 @@ const zh: Record<string, string> = {
   payKindPayment: '付款',
   payKindRefund: '退款',
   payAuto: '自动',
+  payForeignChip: '{cur} · 不对账',
+  payForeignHint: '采购单以美元计价，其他币种的付款不会被匹配或关联。',
   payLink: '关联…',
   payLinkTo: '关联 {id}',
   payUnlink: '取消关联',

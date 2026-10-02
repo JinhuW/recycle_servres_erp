@@ -25,6 +25,7 @@ export function fakeProvider(
           source,
           accountExternalId: `${source}-acct`,
           postedAt: new Date(NOW - DAY),
+          currency: 'USD',
           counterparty: null,
           description: null,
           paypalTxnId: source === 'paypal' ? t.externalId : null,

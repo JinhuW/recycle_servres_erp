@@ -194,6 +194,9 @@ function sellerNameFrag(sql: SqlClient, legAlias: string, orderAlias = 'o') {
 export function openRowFrag(sql: SqlClient | TransactionSql, legAlias: string) {
   const a = sql(legAlias);
   return sql`${a}.order_id IS NULL AND NOT ${a}.ignored AND ${a}.category = 'external'
+    -- Every PO is in USD; a row in another currency has nothing to be
+    -- reconciled against, and its number would match the wrong payment.
+    AND ${a}.currency = 'USD'
     -- A denied or reversed payment is a record, not a task: there is nothing
     -- to reconcile it against. Pending stays in — that money is still moving,
     -- and it is exactly what the queue exists to chase.
@@ -251,6 +254,7 @@ function pairEligibleFrag(sql: SqlClient, legAlias: string, candAlias: string) {
     ${c}.pair_id IS NULL
     AND NOT ${c}.ignored
     AND ${c}.category = 'external'
+    AND ${c}.currency = 'USD'
     -- Same rule autoPair follows: a pending leg is a real half — Mercury
     -- reports the pull before it posts — but a failed or reversed one is a
     -- record of money that never moved, or came back. Offering one here would
