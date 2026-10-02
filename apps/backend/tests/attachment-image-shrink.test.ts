@@ -225,6 +225,28 @@ describe('shrinkImageToFit limits', () => {
       .rejects.toBeInstanceOf(ImageRejectedError);
   });
 
+  // Anonymous uploads are checked whatever their size: under the byte cap is
+  // where a non-image or a lying header is cheapest to send.
+  it('refuses a small strict file that is not an image', async () => {
+    const { shrinkImageToFit, ImageRejectedError } = await import('../src/lib/image-shrink');
+    const file = new File([new Uint8Array([0xff, 0xd8, 0xff, 0xe0])], 'x.jpg', { type: 'image/jpeg' });
+    await expect(shrinkImageToFit(file, 10 * 1024 * 1024, { strict: true }))
+      .rejects.toEqual(new ImageRejectedError('undecodable'));
+  });
+
+  it('refuses a strict image under the byte cap that is past the pixel cap', async () => {
+    const { shrinkImageToFit, ImageRejectedError } = await import('../src/lib/image-shrink');
+    const file = await png(1200, 1200);
+    await expect(shrinkImageToFit(file, file.size + 1, { strict: true, maxPixels: 1_000_000 }))
+      .rejects.toBeInstanceOf(ImageRejectedError);
+  });
+
+  it('returns a small, valid strict image untouched', async () => {
+    const { shrinkImageToFit } = await import('../src/lib/image-shrink');
+    const file = await png(64, 64);
+    expect(await shrinkImageToFit(file, file.size + 1, { strict: true })).toBe(file);
+  });
+
   it('passes the original through when not strict', async () => {
     const { shrinkImageToFit } = await import('../src/lib/image-shrink');
     const file = await png(1200, 1200);

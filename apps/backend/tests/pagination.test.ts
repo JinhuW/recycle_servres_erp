@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
+import { encodeCursor } from '../src/lib/pagination';
 
 describe('pagination on /api/orders', () => {
   beforeEach(async () => { await resetDb(); });
@@ -30,6 +31,22 @@ describe('pagination on /api/orders', () => {
     const { token } = await loginAs(ALEX);
     const r = await api('GET', '/api/orders?sort=password_hash:asc', { token });
     expect(r.status).toBe(400);
+  });
+
+  // The cursor's value is cast to the sort column's type, so one that doesn't
+  // fit it must fall back to page one rather than 500 into the error sink.
+  it.each([
+    ['created_at', '', { ts: 'not-a-date', id: 'PO-1' }],
+    ['total_cost', '&sort=total_cost:desc', { ts: 'abc', id: 'PO-1' }],
+    ['lifecycle', '&sort=lifecycle:asc', { ts: 7, id: 'PO-1' }],
+  ])('answers page one for a cursor that does not fit the %s sort', async (_col, sort, bad) => {
+    const { token } = await loginAs(ALEX);
+    const first = await api<{ orders: { id: string }[] }>('GET', `/api/orders?limit=3${sort}`, { token });
+    const cursor = encodeCursor(bad as { ts: string | number; id: string });
+    const r = await api<{ orders: { id: string }[] }>(
+      'GET', `/api/orders?limit=3${sort}&cursor=${encodeURIComponent(cursor)}`, { token });
+    expect(r.status).toBe(200);
+    expect(r.body.orders.map(o => o.id)).toEqual(first.body.orders.map(o => o.id));
   });
 });
 

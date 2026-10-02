@@ -1228,10 +1228,13 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   address gets at most 20 a day, so a single sender can't spend the shared
   budget (v1.195.1), counted per /64 for IPv6 since v1.200.1. An
   intake post is capped at 25 MiB and each photo at 15 MiB. A photo over 40
-  megapixels, or one that can't be decoded, is refused with a 400 instead of
-  being stored as is. Staff uploads keep sharp's own, much higher, ceiling
-  (v1.195.1). The two form routes answer the marketing-site origins
-  without credentials; those origins get no CORS anywhere else.
+  megapixels, or one whose image header can't be read, is refused with a 400
+  instead of being stored as is, whatever its size since v1.200.2. Staff
+  uploads keep sharp's own, much higher, ceiling (v1.195.1). The daily byte
+  budget counts each incoming photo at most at the upload cap, the most its
+  stored copy can take (v1.200.2). The two form routes answer the
+  marketing-site origins without credentials; those origins get no CORS
+  anywhere else.
 - **Spam and archived submissions are deleted after 30 days** (v1.195.0),
   together with their photos in R2, by a daily job. A row whose photo delete
   fails is kept, so the next run retries it. A converted submission is never
@@ -1417,7 +1420,9 @@ removed in v1.191.0.
   Since v1.200.1 the sidebar, the phone tab bar, record links and the
   browser's Back and Forward ask too, and so does backing out of a phone PO.
   The phone PO's order and products screens are one page, so moving between
-  them never asks. A save that then navigates never asks.
+  them never asks. A save that then navigates never asks. A refused Forward
+  or typed address leaves the page where it was in history: Back still leads
+  to what was behind it, and Forward to the refused page (v1.200.2).
 
 - The desktop shell runs down to 720px. **Under 900px its sidebar folds to a
   64px icon rail** (v1.134.0) — brand mark, nav icons with their names on

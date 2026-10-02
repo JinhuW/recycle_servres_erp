@@ -5,7 +5,7 @@
 // which gate on the real role (the preview is a viewing convenience).
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { resetDb } from './helpers/db';
+import { getTestDb, resetDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import { createSellOrderOn } from './helpers/fixtures';
@@ -183,6 +183,26 @@ describe('PATCH /api/orders/:id — sell-order conflict body', () => {
     expect(inPreview.body.offendingLineIds).toEqual([lineIds[0]]);
     expect(inPreview.body).not.toHaveProperty('sellOrderIds');
     expect(inPreview.body.error).not.toContain(soId);
+  });
+
+  // An id from another PO is a no-op in the line UPDATE, so it must not be
+  // what refuses the patch — nor name that PO's sell order.
+  it('ignores another PO\'s line in the committed-qty check', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const { token: mgr } = await loginAs(ALEX);
+    const a = await createReviewing(pur, mgr);
+    const b = await createReviewing(pur, mgr);
+    const soId = await createSellOrderOn(mgr, b.lineIds[0], PN, 3);
+    await getTestDb()`UPDATE sell_orders SET status = 'Shipped' WHERE id = ${soId}`;
+    const lower = (orderId: string) => api<Conflict>('PATCH', `/api/orders/${orderId}`, {
+      token: mgr, body: { lines: [{ id: b.lineIds[0], qty: 1 }] },
+    });
+
+    expect((await lower(b.id)).status).toBe(409);
+    expect((await lower(a.id)).status).toBe(200);
+    const got = await api<{ order: { lines: { id: string; qty: number }[] } }>(
+      'GET', `/api/orders/${b.id}`, { token: mgr });
+    expect(got.body.order.lines.find(l => l.id === b.lineIds[0])?.qty).toBe(4);
   });
 });
 

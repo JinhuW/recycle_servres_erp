@@ -3,7 +3,9 @@
 // made receipt capture unusable, so images are re-encoded to fit instead.
 // Best-effort by default, like the receipt renamer: any decode/encode problem
 // returns the original file and the route's existing size check decides. A
-// strict caller (the anonymous intake form) gets a refusal instead.
+// strict caller (the anonymous intake form) gets a refusal instead, and its
+// files are checked whatever their size: a small one is what a non-image or a
+// lying header costs least to send.
 import sharp from 'sharp';
 
 import { log } from './log';
@@ -51,8 +53,9 @@ export type ShrinkOptions = {
 export async function shrinkImageToFit(
   file: File, maxBytes: number, opts: ShrinkOptions = {},
 ): Promise<File> {
-  if (file.size <= maxBytes || !SHRINKABLE.has(file.type)) return file;
   const strict = opts.strict === true;
+  if (!strict && (file.size <= maxBytes || !SHRINKABLE.has(file.type))) return file;
+  if (!SHRINKABLE.has(file.type)) throw new ImageRejectedError('undecodable');
   const maxPixels = opts.maxPixels ?? (strict ? MAX_INPUT_PIXELS : SHARP_DEFAULT_PIXELS);
   const run = strict ? runPublicShrink : runStaffShrink;
 
@@ -78,6 +81,7 @@ async function shrink(file: File, maxBytes: number, maxPixels: number, strict: b
     return file;
   }
   if (meta.width * meta.height > maxPixels) throw new ImageRejectedError('too_many_pixels');
+  if (file.size <= maxBytes) return file;
   // .rotate() bakes in EXIF orientation — resizing strips metadata, and a
   // sideways receipt would defeat both the OCR rename and the reader. The
   // metadata is pre-rotation, so a quarter-turned photo's width is its height.

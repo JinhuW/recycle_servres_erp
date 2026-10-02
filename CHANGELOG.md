@@ -17,6 +17,55 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.200.2] - 2026-10-02
+
+Fixes from the pre-release review of v1.194.2 → v1.200.1 (RS-156). v1.200.1
+had already reached prod by the time the review finished, so these ship on top
+of it.
+
+### Fixed
+
+- **A refused Forward or typed address no longer lies in wait behind the
+  page.** v1.200.1 undid it by pushing the page again *after* the refused
+  entry. That entry then sat one step back: the next in-app Back landed on it
+  without asking, and edits typed since were lost. A browser Back asked about
+  the refused page instead of the real one behind. Now the router steps back
+  onto the page's own entry, so the refused page stays one Forward ahead,
+  where it was. That holds for a multi-step jump from the history menu too.
+  Each history entry carries a sequence number in creation order, which tells
+  a Back (still undone as before) from everything else.
+- **Every anonymous intake photo is checked, whatever its size.** The 40 MP and
+  "must be an image" checks ran only on photos big enough to need shrinking. A
+  small file that wasn't an image at all was stored in R2 as sent. A small,
+  valid photo is still stored untouched.
+- **`seed.mjs` refuses production.** Its guard counted the compose host
+  `postgres` as local. On a self-hosted prod stack that host is the real
+  database, and only `migrate.mjs --reset` checked `NODE_ENV`. Both scripts now
+  refuse under `NODE_ENV=production`, whatever the host, unless
+  `ALLOW_DESTRUCTIVE_SEED` or `ALLOW_DESTRUCTIVE_RESET` is set.
+- **A malformed PO-list cursor answers page one.** It was cast straight into
+  SQL, so a crafted one became a 500 and a line in the error sink. It is now
+  checked against the sort column first, as every other list does.
+- **A PO edit can't be refused over another PO's line.** The check that a qty
+  stays at or above what committed sell orders hold read every line id in the
+  request. A stray id from another PO got the whole edit refused and named
+  that PO's sell order, where elsewhere such an id does nothing.
+- **The intake's daily byte budget counts like it stores.** It added raw photo
+  sizes to the stored, shrunk ones, so a phone photo near the cap was refused
+  even when its stored copy would have fit. An incoming photo now counts at
+  most the upload cap.
+- The PO hand-off locks the order `FOR NO KEY UPDATE`, like every other
+  non-deleting order write, so it no longer blocks a line insert under the same
+  order.
+- The phone shell's view switch asks before leaving unsaved edits, like the
+  tab bar. Its only caller today is the dashboard's "See all", where nothing is
+  ever unsaved.
+- Bank pairing builds its same-amount buckets in linear time. They were copied
+  on every insert.
+
+The shutdown timings depend on Railway's draining window. It is now recorded
+as 30s on the backend in prod and dev, set during the v1.200.1 release.
+
 ## [1.200.1] - 2026-10-02
 
 Fixes from the closing re-review of the remaining code-review work (RS-155),

@@ -595,17 +595,33 @@ function uniqueWindowPairs(
   mercury: LegRow[], paypal: LegRow[], key: (l: LegRow) => string,
 ): Array<[LegRow, LegRow]> {
   const near = (a: LegRow, b: LegRow) => Math.abs(a.posted_at.getTime() - b.posted_at.getTime()) <= PAIR_WINDOW_MS;
-  const byKey = new Map<string, LegRow[]>();
-  for (const p of paypal) byKey.set(key(p), [...(byKey.get(key(p)) ?? []), p]);
-  const mByKey = new Map<string, LegRow[]>();
-  for (const m of mercury) mByKey.set(key(m), [...(mByKey.get(key(m)) ?? []), m]);
+  const bucket = (legs: LegRow[]) => {
+    const by = new Map<string, LegRow[]>();
+    for (const l of legs) {
+      const k = key(l);
+      const b = by.get(k);
+      if (b) b.push(l); else by.set(k, [l]);
+    }
+    return by;
+  };
+  // The only leg of `legs` near `to`, or null for none or a rival; stops at
+  // the second, since a rival is all it takes to rule the pair out.
+  const soleNear = (legs: LegRow[] | undefined, to: LegRow): LegRow | null => {
+    let found: LegRow | null = null;
+    for (const l of legs ?? []) {
+      if (!near(l, to)) continue;
+      if (found) return null;
+      found = l;
+    }
+    return found;
+  };
+  const byKey = bucket(paypal);
+  const mByKey = bucket(mercury);
   const out: Array<[LegRow, LegRow]> = [];
   for (const m of mercury) {
-    const ps = (byKey.get(key(m)) ?? []).filter((p) => near(m, p));
-    if (ps.length !== 1) continue;
-    const ms = (mByKey.get(key(m)) ?? []).filter((x) => near(x, ps[0]));
-    if (ms.length !== 1) continue;
-    out.push([m, ps[0]]);
+    const p = soleNear(byKey.get(key(m)), m);
+    if (!p || soleNear(mByKey.get(key(m)), p) !== m) continue;
+    out.push([m, p]);
   }
   return out;
 }
