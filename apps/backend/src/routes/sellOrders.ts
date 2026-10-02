@@ -260,6 +260,9 @@ sellOrders.get('/:id', async (c) => {
     inventory_id: string | null; warehouse_id: string | null;
     source_order_id: string | null;
     inventory_qty: number | null;
+    type: string | null; classification: string | null; rank: string | null;
+    speed: string | null; interface: string | null; form_factor: string | null;
+    health: number | null;
   }[]>`
     SELECT sol.id, sol.category, sol.label, sol.sub_label, sol.part_number,
            sol.qty, sol.unit_price::float AS unit_price,
@@ -267,6 +270,10 @@ sellOrders.get('/:id', async (c) => {
            sol.condition, sol.position,
            sol.inventory_id, sol.warehouse_id, ol.order_id AS source_order_id,
            w.short AS warehouse_short, pw.short AS pack_warehouse_short,
+           -- The lot's spec, read live: sell_order_lines keeps only a text
+           -- snapshot. Null for a hand-typed line or a deleted lot.
+           ol.type, ol.classification, ol.rank, ol.speed, ol.interface,
+           ol.form_factor, ol.health::float AS health,
            -- What this order may still grow its line to: the lot less the units
            -- other committed orders hold. Its own claim is excluded, so editing
            -- a line down and back up is not blocked by itself. A lot that left
@@ -368,6 +375,9 @@ sellOrders.get('/:id', async (c) => {
         packWarehouse: l.pack_warehouse_short,
         inventoryId: l.inventory_id, warehouseId: l.warehouse_id,
         sourceOrderId: l.source_order_id,
+        type: l.type, classification: l.classification, rank: l.rank,
+        speed: l.speed, interface: l.interface, formFactor: l.form_factor,
+        health: l.health,
         maxQty: l.inventory_qty ?? l.qty,
         lineTotal: +(l.qty * l.unit_price).toFixed(2),
       })),

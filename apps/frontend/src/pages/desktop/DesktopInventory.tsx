@@ -4,7 +4,7 @@ import { Icon, type IconName } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { useAuth } from '../../lib/auth';
 import { usePreference } from '../../lib/preferences';
-import { usePersisted, useScrollMemory } from '../../lib/listMemory';
+import { usePersisted, useScrollMemory, forgetPersisted } from '../../lib/listMemory';
 import { api } from '../../lib/api';
 import { UNTYPED_ITEM } from '@recycle-erp/shared';
 import { handleFetchError } from '../../lib/errorToast';
@@ -15,9 +15,10 @@ import type { Warehouse } from '../../lib/types';
 import { DesktopSellOrderDraft, type DraftItem } from './DesktopSellOrderDraft';
 import { DesktopInventoryTransfer, type TransferItem } from './DesktopInventoryTransfer';
 import { DesktopActivityDrawer } from './DesktopActivityDrawer';
-import { SellOrderDetail } from './DesktopSellOrders';
 import { SellOrderPickerDialog } from '../../components/SellOrderPickerDialog';
 import type { SellableItem } from '../../components/AddInventoryPicker';
+import { stashSellOrderPrefill } from '../../lib/sellOrderPrefill';
+import { navigate } from '../../lib/route';
 import { TableSkeleton } from '../../components/Skeleton';
 import { SerialNumbers } from '../../components/SerialNumbers';
 import { InventoryProductTable } from './InventoryProductTable';
@@ -448,11 +449,9 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   // the table don't mutate what's in the modal.
   const [draftItems, setDraftItems] = useState<DraftItem[] | null>(null);
   const [transferItems, setTransferItems] = useState<TransferItem[] | null>(null);
-  // "Add to sell order": the picker, then that order's edit modal with the
-  // selection (snapshotted at click time, like draftItems) appended.
-  const [addToOrder, setAddToOrder] = useState<
-    { items: SellableItem[]; orderId: string | null } | null
-  >(null);
+  // "Add to sell order": the order picker, holding the selection snapshotted
+  // at click time (like draftItems) for that order's edit page to append.
+  const [addToOrder, setAddToOrder] = useState<SellableItem[] | null>(null);
   const [showActivity, setShowActivity] = useState(false);
   const [quickView, setQuickView] = useState<InventoryRow | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -517,11 +516,19 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     availableQty: r.qty,
     sellPrice: r.sell_price,
     draftCount: 0,
+    sourceOrderId: r.order_id,
+    type: r.type,
+    classification: r.classification,
+    rank: r.rank,
+    speed: r.speed,
+    interface: r.interface,
+    formFactor: r.form_factor,
+    health: r.health,
   }));
 
   const openAddToOrder = () => {
     if (!selectedItems.length) return;
-    setAddToOrder({ items: buildSellableItems(selectedItems), orderId: null });
+    setAddToOrder(buildSellableItems(selectedItems));
   };
 
   const openSellOrderDraft = () => {
@@ -988,28 +995,21 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
         />
       )}
 
-      {addToOrder && addToOrder.orderId === null && (
+      {addToOrder && (
         <SellOrderPickerDialog
-          lineCount={addToOrder.items.length}
+          lineCount={addToOrder.length}
           locale={locale}
           onClose={() => setAddToOrder(null)}
-          onPick={id => setAddToOrder({ ...addToOrder, orderId: id })}
-        />
-      )}
-
-      {addToOrder?.orderId && (
-        <SellOrderDetail
-          id={addToOrder.orderId}
-          mode="edit"
-          prefill={addToOrder.items}
-          onSwitchToEdit={() => {}}
-          onClose={() => setAddToOrder(null)}
-          onSaved={() => {
-            const id = addToOrder.orderId ?? '';
+          onPick={id => {
+            // The order's edit page appends the lots. The selection stays put
+            // until that save lands, so backing out of the page keeps it.
+            stashSellOrderPrefill({
+              orderId: id,
+              items: addToOrder,
+              onSaved: () => forgetPersisted('desktop.inventory.selected', 'desktop.inventory.selectedRows'),
+            });
             setAddToOrder(null);
-            clearSelection();
-            refetchInventory();
-            showToast?.(t('invAddToSoSavedToast', { id }), 'success');
+            navigate('/sell-orders/' + id + '/edit');
           }}
         />
       )}

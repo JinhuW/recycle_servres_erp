@@ -27,6 +27,7 @@ describe('PATCH /api/me/preferences allowlist', () => {
         'submit.lastCategory': 'SSD',
         'scan.deskCamera': true,
         'scan.cameraLabel': "Jinhu's iPhone Camera",
+        'sellOrders.lineGroup': 'po',
       },
     });
     expect(res.status).toBe(200);
@@ -44,5 +45,10 @@ describe('PATCH /api/me/preferences allowlist', () => {
       token, body: { 'submit.lastCategory': 'x'.repeat(65) },
     });
     expect(tooLong.status).toBe(400);
+
+    const badGroup = await api('PATCH', '/api/me/preferences', {
+      token, body: { 'sellOrders.lineGroup': 'customer' },
+    });
+    expect(badGroup.status).toBe(400);
   });
 });

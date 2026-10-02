@@ -28,10 +28,20 @@ export type SellableItem = {
   availableQty: number;
   sellPrice: number | null;
   draftCount: number;
+  sourceOrderId: string;
+  // Structured spec, so a picker can show the same chips a saved line does.
+  type: string | null;
+  classification: string | null;
+  rank: string | null;
+  speed: string | null;
+  interface: string | null;
+  formFactor: string | null;
+  health: number | null;
 };
 
 type SellableRow = InventoryAttrs & {
   id: string;
+  order_id: string;
   part_number: string | null;
   qty: number;
   sell_price: number | null;
@@ -51,7 +61,7 @@ export async function searchSellableInventory(
   const like = q ? `%${escapeLike(q)}%` : null;
   const wh = opts.warehouseId?.trim() || null;
   const rows = await sql<SellableRow[]>`
-    SELECT l.id, l.category, l.brand, l.capacity, l.generation, l.type,
+    SELECT l.id, l.order_id, l.category, l.brand, l.capacity, l.generation, l.type,
            l.classification, l.rank, l.speed, l.interface, l.form_factor,
            l.description, l.part_number, l.condition,
            (l.qty - committed.qty) AS qty,
@@ -97,5 +107,13 @@ export async function searchSellableInventory(
     availableQty: r.qty,
     sellPrice: r.sell_price,
     draftCount: r.draft_count,
+    sourceOrderId: r.order_id,
+    type: r.type,
+    classification: r.classification,
+    rank: r.rank,
+    speed: r.speed,
+    interface: r.interface,
+    formFactor: r.form_factor,
+    health: r.health,
   }));
 }

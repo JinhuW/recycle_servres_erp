@@ -17,7 +17,9 @@ export const SELL_ORDER_TOOL_DEFS = [
       'and warehouseName, availableQty (the full sellable quantity of the line), draftCount (how many other ' +
       'drafts already propose this line — drafts are proposals, so a line may appear on several and only the ' +
       'first one promoted keeps it), and sellPrice (the price already ' +
-      'assigned to the line, in USD — advisory; you still choose each line\'s unitPrice). Filter with query ' +
+      'assigned to the line, in USD — advisory; you still choose each line\'s unitPrice), sourceOrderId (the PO ' +
+      'the line came in on), and the structured spec behind subLabel: type (Desktop / Server / Laptop), ' +
+      'classification, rank, speed, interface, formFactor, health. Filter with query ' +
       '(matches brand / part number / description / category) and warehouseId. Requires the sellorder:read scope.',
     inputSchema: {
       type: 'object',

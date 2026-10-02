@@ -330,6 +330,52 @@ describe('GET /api/sell-orders — archive filter', () => {
   });
 });
 
+describe('GET /api/sell-orders/:id — line spec', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('reads each line\'s spec live from its lot; a hand-typed line has none', async () => {
+    const { token } = await loginAs(ALEX);
+    const line = await findSellableLine(token);
+    // Pin the spec: the seed picks attributes at random.
+    const sql = getTestDb();
+    await sql`
+      UPDATE order_lines
+         SET category = 'RAM', type = 'Server', classification = 'RDIMM',
+             rank = '2Rx4', speed = '3200'
+       WHERE id = ${line.id}
+    `;
+    const customerId = await firstCustomerId(token);
+    const created = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token,
+      body: {
+        customerId,
+        lines: [
+          {
+            inventoryId: line.id, category: 'RAM', label: 'Sample',
+            partNumber: 'PN-1', qty: 1, unitPrice: line.sell_price,
+            warehouseId: 'WH-LA1', condition: 'Pulled — Tested',
+          },
+          { inventoryId: null, category: 'Other', label: 'Rails', qty: 1, unitPrice: 10 },
+        ],
+      },
+    });
+    expect(created.status).toBe(201);
+
+    type Line = { inventoryId: string | null; type: string | null; classification: string | null;
+      rank: string | null; speed: string | null; formFactor: string | null };
+    const got = await api<{ order: { lines: Line[] } }>(
+      'GET', `/api/sell-orders/${created.body.id}`, { token },
+    );
+    expect(got.status).toBe(200);
+    const fromLot = got.body.order.lines.find(l => l.inventoryId === line.id)!;
+    expect(fromLot).toMatchObject({
+      type: 'Server', classification: 'RDIMM', rank: '2Rx4', speed: '3200',
+    });
+    const typed = got.body.order.lines.find(l => l.inventoryId === null)!;
+    expect(typed).toMatchObject({ type: null, rank: null, speed: null, formFactor: null });
+  });
+});
+
 describe('POST /api/sell-orders/:id/archive (+/unarchive)', () => {
   beforeEach(async () => { await resetDb(); });
 
