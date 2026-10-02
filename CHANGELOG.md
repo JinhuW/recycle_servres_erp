@@ -17,6 +17,22 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.198.2] - 2026-10-02
+
+The sell order page shows the source PO line as a badge again (RS-152).
+
+### Changed
+
+- **By PO: a `PO #3` badge by the item name replaces the "ID in PO" column.**
+  The 1.197.3 column was reverted on request.
+  - By PO now puts a grey `PO #3` pill after each line's name, which is the
+    design picked before the column was tried. Hovering it reads "Line 3 on
+    PO-1432".
+  - By warehouse has no column again, and its detail row reads
+    `From PO-1432 #3`, as in 1.196.0.
+  - The Packing list by PO spreadsheet keeps its "ID in PO" column. A badge
+    can't exist in a spreadsheet, and that column was asked for separately.
+
 ## [1.198.0] - 2026-10-02
 
 Reporting money (RS-150), batch 7a of the remaining code-review work.

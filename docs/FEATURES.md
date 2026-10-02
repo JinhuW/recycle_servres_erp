@@ -710,12 +710,13 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
     the edit page has no leave guard.
 - **A line carries its number on the source PO** (v1.196.0): the `#` the PO
   page shows for that line.
-  - It sits in an **ID in PO** column right after Item, in both views and in
-    view and edit mode (v1.197.3). Until then By PO showed it as a leading `#`
-    column, which read as the sell order's own row number. A hand-typed line
-    shows `—`, and By PO's No PO card has no ID in PO column.
-  - By PO lists each card's lines in PO order. By warehouse's reference reads
-    "From PO-1432".
+  - By PO shows it as a grey `PO #3` badge after the item name, in view and
+    edit mode (v1.198.2). Hovering reads "Line 3 on PO-1432". Each card lists
+    its lines in PO order, and a hand-typed line has no badge. It is a badge,
+    not a column, on purpose: a leading `#` column (v1.196.0) read as the sell
+    order's own row number, and an "ID in PO" column (v1.197.3) was tried and
+    dropped.
+  - By warehouse's reference reads "From PO-1432 #3".
   - Lines picked in edit mode, from the picker or Inventory → Add to sell order,
     show the number before saving.
   - The number is computed live, not stored. It is the line's rank among the
