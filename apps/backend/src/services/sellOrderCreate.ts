@@ -1,7 +1,7 @@
 import type postgres from 'postgres';
 import type { Sql } from 'postgres';
 import { nextHumanId } from '../lib/id-seq';
-import { committedSellStatuses, isSellableLineStatus } from '../lib/sellCommitment';
+import { committedClaimsByLine, isSellableLineStatus } from '../lib/sellCommitment';
 import { writeSellOrderEvent } from './sellOrderAudit';
 import {
   convertToUsd, getLatestRateToUsd, type SupportedCurrency,
@@ -44,6 +44,8 @@ export async function validateSellLines(
     FOR UPDATE OF l
   `;
   const byId = new Map(locked.map(r => [r.id.toLowerCase(), r]));
+  // Read after the locks, so no rival can commit units in between.
+  const claims = await committedClaimsByLine(tx, ids, { excludeOrderId });
   for (const [inventoryId, qty] of demand) {
     const inv = byId.get(inventoryId.toLowerCase());
     if (!inv) return `inventory line ${inventoryId} not found`;
@@ -51,28 +53,14 @@ export async function validateSellLines(
       return `inventory line not sellable (status=${inv.status})`;
     if (inv.archived_at !== null) return `inventory line's order is archived`;
     if (qty > inv.qty) return `qty ${qty} exceeds inventory available ${inv.qty}`;
-    // Reserved units, plus one committed order to name in the error — a bare
-    // "not enough left" leaves the manager with nowhere to go looking.
-    const claim = (await tx<{
-      reserved: number; so_id: string | null; label: string | null; part_number: string | null;
-    }[]>`
-      SELECT COALESCE(SUM(sol.qty), 0)::int AS reserved,
-             MIN(so.id) AS so_id,
-             MIN(sol.label) AS label,
-             MIN(sol.part_number) AS part_number
-      FROM sell_order_lines sol
-      JOIN sell_orders so ON so.id = sol.sell_order_id
-      WHERE sol.inventory_id = ${inventoryId}
-        AND so.status = ANY(${committedSellStatuses()}::text[])
-        AND (${excludeOrderId}::text IS NULL OR so.id <> ${excludeOrderId}::text)
-    `)[0];
-    const remaining = inv.qty - claim.reserved;
-    if (qty > remaining) {
-      const name = claim.part_number
-        ? `${claim.label} (${claim.part_number})`
+    const claim = claims.get(inventoryId.toLowerCase());
+    const remaining = inv.qty - (claim?.qty ?? 0);
+    if (claim && qty > remaining) {
+      const name = claim.partNumber
+        ? `${claim.label} (${claim.partNumber})`
         : claim.label ?? inventoryId;
       return `qty ${qty} exceeds the ${remaining} left of ${name}`
-        + ` — ${claim.reserved} already committed to sell order ${claim.so_id}`;
+        + ` — ${claim.qty} already committed to sell order ${claim.sellOrderId}`;
     }
   }
   return null;

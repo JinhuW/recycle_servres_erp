@@ -1,6 +1,6 @@
 import type postgres from 'postgres';
 import { inventoryLabel, inventorySpec, type InventoryAttrs } from '../lib/inventoryLabel';
-import { committedSellStatuses } from '../lib/sellCommitment';
+import { committedQtySql } from '../lib/sellCommitment';
 import { escapeLike } from '../lib/pagination';
 import { poLineNo } from '../lib/poLineNo';
 
@@ -64,11 +64,12 @@ export async function searchSellableInventory(
   const q = opts.query?.toLowerCase().trim() || null;
   const like = q ? `%${escapeLike(q)}%` : null;
   const wh = opts.warehouseId?.trim() || null;
+  const committed = committedQtySql(sql, sql`l.id`);
   const rows = await sql<SellableRow[]>`
     SELECT l.id, l.order_id, ${poLineNo(sql, 'l')} AS line_no, l.category, l.brand, l.capacity, l.generation, l.type,
            l.classification, l.rank, l.speed, l.interface, l.form_factor,
            l.description, l.part_number, l.condition,
-           (l.qty - committed.qty) AS qty,
+           (l.qty - ${committed}) AS qty,
            l.sell_price::float AS sell_price,
            l.health::float AS health, l.rpm,
            COALESCE(l.warehouse_id, o.warehouse_id) AS warehouse_id,
@@ -80,16 +81,9 @@ export async function searchSellableInventory(
     FROM order_lines l
     JOIN orders o ON o.id = l.order_id
     LEFT JOIN warehouses w ON w.id = COALESCE(l.warehouse_id, o.warehouse_id)
-    CROSS JOIN LATERAL (
-      SELECT COALESCE(SUM(sol.qty), 0)::int AS qty
-        FROM sell_order_lines sol
-        JOIN sell_orders so ON so.id = sol.sell_order_id
-       WHERE sol.inventory_id = l.id
-         AND so.status = ANY(${committedSellStatuses()}::text[])
-    ) committed
     WHERE l.status IN ('Reviewing', 'Done')
       AND o.archived_at IS NULL
-      AND l.qty > committed.qty
+      AND l.qty > ${committed}
       AND (${like}::text IS NULL
            OR LOWER(COALESCE(l.brand,'')) LIKE ${like ?? ''}
            OR LOWER(COALESCE(l.part_number,'')) LIKE ${like ?? ''}

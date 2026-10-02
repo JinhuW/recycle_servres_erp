@@ -88,7 +88,7 @@ describe('Tier 1 #4 — order_lines committed to a sell order are locked', () =>
     const create = await api<{ id: string }>('POST', '/api/sell-orders', {
       token,
       body: { customerId, lines: [{ inventoryId: line.id, category: 'RAM', label: 'x',
-        partNumber: 'pn', qty: 1, unitPrice: line.price }] },
+        partNumber: 'pn', qty: 2, unitPrice: line.price }] },
     });
 
     // A Draft is only a proposal — it must not freeze the line.
@@ -97,6 +97,7 @@ describe('Tier 1 #4 — order_lines committed to a sell order are locked', () =>
 
     await api('POST', `/api/sell-orders/${create.body.id}/status`, { token, body: { to: 'Shipped', note: 's' } });
 
+    // Two units are committed, so a recount may not drop below two.
     const qtyEdit = await api('PATCH', `/api/inventory/${line.id}`, { token, body: { qty: 1 } });
     expect(qtyEdit.status).toBe(409);
     const statusEdit = await api('PATCH', `/api/inventory/${line.id}`, { token, body: { status: 'In Transit' } });
@@ -126,7 +127,7 @@ describe('Tier 1 #4 — order_lines committed to a sell order are locked', () =>
     const create = await api<{ id: string }>('POST', '/api/sell-orders', {
       token,
       body: { customerId, lines: [{ inventoryId: line.id, category: 'RAM', label: 'x',
-        partNumber: 'pn', qty: 1, unitPrice: line.price }] },
+        partNumber: 'pn', qty: 2, unitPrice: line.price }] },
     });
     await api('POST', `/api/sell-orders/${create.body.id}/status`, { token, body: { to: 'Shipped', note: 's' } });
     expect((await api('PATCH', `/api/inventory/${line.id}`, { token, body: { qty: 1 } })).status).toBe(409);

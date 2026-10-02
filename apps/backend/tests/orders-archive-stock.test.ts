@@ -284,7 +284,7 @@ describe('archive and open sell orders', () => {
     const { token: mgr } = await loginAs(ALEX);
     const { id, lineIds } = await createReviewing(pur, mgr);
     const moved = await api<{ transferOrderId: string }>('POST', '/api/inventory/transfer', {
-      token: mgr, body: { toWarehouseId: 'WH-DAL', lines: [{ id: lineIds[0], qty: 4 }] },
+      token: mgr, body: { confirmDrafts: true, toWarehouseId: 'WH-DAL', lines: [{ id: lineIds[0], qty: 4 }] },
     });
     expect(moved.status).toBe(200);
 
@@ -380,7 +380,7 @@ describe('0121 + 0122 — backfilling POs archived before the cascade', () => {
     const { token: mgr } = await loginAs(ALEX);
     const { id, lineIds } = await createReviewing(pur, mgr);
     const moved = await api<{ transferOrderId: string }>('POST', '/api/inventory/transfer', {
-      token: mgr, body: { toWarehouseId: 'WH-DAL', lines: [{ id: lineIds[0], qty: 4 }] },
+      token: mgr, body: { confirmDrafts: true, toWarehouseId: 'WH-DAL', lines: [{ id: lineIds[0], qty: 4 }] },
     });
     expect(moved.status).toBe(200);
     expect((await statusesOf(id, mgr))[lineIds[0]]).toBe('In Transit');
@@ -435,7 +435,7 @@ describe('0124 — the lines 0121 left on open sell orders', () => {
     const { id, lineIds } = await createReviewing(pur, mgr);
     const soId = await createSellOrderOn(mgr, lineIds[0], PN);
     const moved = await api<{ transferOrderId: string }>('POST', '/api/inventory/transfer', {
-      token: mgr, body: { toWarehouseId: 'WH-DAL', lines: [{ id: lineIds[1], qty: 2 }] },
+      token: mgr, body: { confirmDrafts: true, toWarehouseId: 'WH-DAL', lines: [{ id: lineIds[1], qty: 2 }] },
     });
     expect(moved.status).toBe(200);
 
@@ -559,7 +559,7 @@ describe('an archived PO is out of stock whatever its lines say', () => {
     expect(so.body.error).toMatch(/archived/);
 
     const moved = await api<{ error: string }>('POST', '/api/inventory/transfer', {
-      token: mgr, body: { toWarehouseId: 'WH-DAL', lines: [{ id: lineIds[0], qty: 1 }] },
+      token: mgr, body: { confirmDrafts: true, toWarehouseId: 'WH-DAL', lines: [{ id: lineIds[0], qty: 1 }] },
     });
     expect(moved.status).toBe(400);
     expect(moved.body.error).toMatch(/archived/);

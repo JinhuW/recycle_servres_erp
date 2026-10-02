@@ -17,6 +17,50 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.197.0] - 2026-10-02
+
+Stock math and lock order (RS-146), batch 5 of the remaining code-review work.
+
+### Fixed
+
+- **PO writers no longer deadlock each other.** PO PATCH locked the order and
+  then its lines. The inventory editor and a sell order's Done went the other
+  way, locking lines and only later updating the order's goods total, and
+  every order lock was `FOR UPDATE`, which also blocked a transfer's line
+  insert. Two such edits at once could end with Postgres aborting one as a
+  deadlock, which the user saw as a 500. On 1.196.1 a test reproduces it for
+  the inventory editor and for partial transfers. Every writer now locks the
+  orders first, in id order, with `FOR NO KEY UPDATE` wherever the order isn't
+  being deleted.
+- **One rule says how much of a line is free.** The quantity committed sell
+  orders hold was computed by about ten hand-written queries that had drifted
+  apart. The worst was the inventory editor: it refused any qty edit once a
+  single unit was committed. All of them now share one helper. A recount may
+  go down to the committed units, not below, and a status change waits until
+  nothing is committed. Validating a sell order's lines takes one query
+  instead of one per line.
+- **The PO editor can't cut a line below what is committed.** Lowering a qty
+  under the units a committed sell order holds now answers 409 and names the
+  order to a manager, and the lines are locked so a promotion can't slip in
+  between. A recount of a partly sold line, in either editor, moves the
+  purchased count with it, so the units already sold stay sold and the PO's
+  cost stays put.
+- **The transfer modal offers only what can move.** It caps each line at its
+  uncommitted units and says how many are held. Moving a whole line that a
+  draft sell order names now asks first: the line goes out In Transit and the
+  draft can't be promoted until it is received.
+- **A pinned lot price can be released.** A goods total that no longer matches
+  the lines is a negotiated price and survives every edit, so a stale one
+  could only be fixed in psql. The cost card now labels it "Negotiated lot
+  price", and managers get a "Follow line total" button on desktop and phone
+  (`POST /api/orders/:id/total-cost/follow-lines`), logged as a total-cost
+  change. The server now reports whether a total is pinned. The page judged it
+  from the units left, so every partly sold PO looked negotiated.
+- Migration 0148 releases PO-1339's stale $8,500. A 2026-07-23 hand clone
+  moved its only line to PO-1353 and left the figure behind, so that lot was
+  costed twice. The migration is guarded on the id, the amount and an empty
+  line set.
+
 ## [1.196.1] - 2026-10-02
 
 Ops and tooling (RS-144), batch 4 of the remaining code-review work.

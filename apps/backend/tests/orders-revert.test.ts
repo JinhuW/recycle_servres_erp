@@ -297,7 +297,7 @@ describe('revert guards', () => {
     })).status).toBe(200);
 
     const moved = await api<{ transferOrderId: string }>('POST', '/api/inventory/transfer', {
-      token: mgr, body: { toWarehouseId: 'WH-DAL', lines: [{ id: lineId, qty: 4 }] },
+      token: mgr, body: { confirmDrafts: true, toWarehouseId: 'WH-DAL', lines: [{ id: lineId, qty: 4 }] },
     });
     expect(moved.status).toBe(200);
 

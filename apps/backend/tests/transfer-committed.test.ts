@@ -42,7 +42,7 @@ describe('POST /api/inventory/transfer — committed units stay put', () => {
   it('refuses a partial move that reaches into reserved units', async () => {
     const { token, line, dest } = await setup();
     const r = await api<{ error: string }>('POST', '/api/inventory/transfer', {
-      token, body: { toWarehouseId: dest, lines: [{ id: line.id, qty: 2 }] },
+      token, body: { confirmDrafts: true, toWarehouseId: dest, lines: [{ id: line.id, qty: 2 }] },
     });
     expect(r.status).toBe(409);
     expect(r.body.error).toContain('only 1 units not committed');
@@ -51,7 +51,7 @@ describe('POST /api/inventory/transfer — committed units stay put', () => {
   it('refuses a full move of a line a committed order holds', async () => {
     const { token, line, dest } = await setup();
     const r = await api('POST', '/api/inventory/transfer', {
-      token, body: { toWarehouseId: dest, lines: [{ id: line.id, qty: line.qty }] },
+      token, body: { confirmDrafts: true, toWarehouseId: dest, lines: [{ id: line.id, qty: line.qty }] },
     });
     expect(r.status).toBe(409);
   });
@@ -59,7 +59,7 @@ describe('POST /api/inventory/transfer — committed units stay put', () => {
   it('moves the uncommitted remainder and leaves the reservation on the source', async () => {
     const { token, line, dest, sql } = await setup();
     const r = await api('POST', '/api/inventory/transfer', {
-      token, body: { toWarehouseId: dest, lines: [{ id: line.id, qty: 1 }] },
+      token, body: { confirmDrafts: true, toWarehouseId: dest, lines: [{ id: line.id, qty: 1 }] },
     });
     expect(r.status).toBe(200);
     const [src] = await sql<{ qty: number; status: string }[]>`

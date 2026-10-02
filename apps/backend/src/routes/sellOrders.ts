@@ -27,7 +27,8 @@ import { canonPartNumberJs } from '../lib/part-number';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { settleSoldTx } from '../services/orderSold';
 import { searchSellableInventory } from '../services/sellableInventory';
-import { committedSellStatuses } from '../lib/sellCommitment';
+import { committedQtySql, committedSellStatuses } from '../lib/sellCommitment';
+import { lockOrdersForLinesTx } from '../services/orderLocks';
 import {
   buildXlsxBuffer, xlsxResponse, datedFilename, type XlsxColumn,
 } from '../lib/xlsx';
@@ -284,21 +285,13 @@ sellOrders.get('/:id', async (c) => {
            -- validateSellLines would refuse any qty for it on save.
            CASE WHEN ol.id IS NULL THEN NULL
                 WHEN ol.status IN ('Reviewing', 'Done') AND src.archived_at IS NULL
-                THEN ol.qty - elsewhere.qty
+                THEN ol.qty - ${committedQtySql(sql, sql`sol.inventory_id`, { excludeOrderId: id })}
                 ELSE 0 END AS inventory_qty
     FROM sell_order_lines sol
     LEFT JOIN warehouses w ON w.id = sol.warehouse_id
     LEFT JOIN order_lines ol ON ol.id = sol.inventory_id
     LEFT JOIN orders src ON src.id = ol.order_id
     LEFT JOIN warehouses pw ON pw.id = COALESCE(ol.warehouse_id, src.warehouse_id, sol.warehouse_id)
-    LEFT JOIN LATERAL (
-      SELECT COALESCE(SUM(rival.qty), 0)::int AS qty
-        FROM sell_order_lines rival
-        JOIN sell_orders rso ON rso.id = rival.sell_order_id
-       WHERE rival.inventory_id = sol.inventory_id
-         AND rso.id <> ${id}
-         AND rso.status = ANY(${committedSellStatuses()}::text[])
-    ) elsewhere ON TRUE
     WHERE sol.sell_order_id = ${id}
     ORDER BY sol.position
   `;
@@ -1321,6 +1314,18 @@ sellOrders.post('/:id/status', async (c) => {
     // is a meta status".
     if (reopening && !hasNote) {
       return { kind: 'reopenNeedsNote' };
+    }
+
+    // Done rewrites every source PO (goods total, sold settlement) after it
+    // has locked their lines, so those orders are locked first: lines-then-
+    // orders is the order PO PATCH deadlocks against (services/orderLocks.ts).
+    // Before the Draft check below too, which locks the lines.
+    if (body.to === 'Done') {
+      const sources = await tx<{ inventory_id: string }[]>`
+        SELECT inventory_id FROM sell_order_lines
+        WHERE sell_order_id = ${id} AND inventory_id IS NOT NULL
+      `;
+      await lockOrdersForLinesTx(tx, sources.map((r) => r.inventory_id));
     }
 
     // Leaving Draft is where the order actually claims its inventory, so it's

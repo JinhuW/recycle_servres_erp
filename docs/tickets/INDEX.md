@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-146](./RS-146-stock-math-and-lock-order-one-free-quantity-rule-po.md) | done | bug | P1 | Stock math and lock order: one free-quantity rule, PO qty vs committed, deadlock-free locking, lot-price reset | 1.197.0 |
 | [RS-145](./RS-145-sell-order-lines-show-their-source-po-line-number.md) | done | story | P2 | Sell order lines show their source PO line number | 1.196.0 |
 | [RS-144](./RS-144-ops-and-tooling-graceful-shutdown-ci-path-filters-se.md) | done | task | P2 | Ops and tooling: graceful shutdown, CI path filters, session-launcher races, destructive-script guard, prod-to-dev scrub | 1.196.1 |
 | [RS-143](./RS-143-public-surface-hardening-client-ip-limits-cors-split.md) | done | bug | P1 | Public-surface hardening: client-IP limits, CORS split, intake limits, login throttle, consent host | 1.195.0 |
