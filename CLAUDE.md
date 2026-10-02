@@ -226,6 +226,15 @@ switches the branch out from under the first.
   writes that have to be atomic (notably anywhere `notify` is involved — see
   `lib/notify.ts`) must run inside `sql.begin` and pass `tx` down, not a
   fresh `sql`.
+- **PO routes live in `routes/orders/`, one module per concern** (v1.197.4):
+  `list`, `detail`, `create`, `patch`, `lifecycle` (revert-ack, delete,
+  archive, lot-price reset, advance, hand-off), `evidence` (status meta,
+  photos), `checks` (Review mode) and `spreadsheet`, each a Hono sub-app
+  mounted by `index.ts`.  Helpers two modules share go in `shared.ts`.  A
+  write refused inside its transaction throws `OrderRefusal` (`refusal.ts`)
+  with a typed `kind` and payload, and the handler's catch returns
+  `refusalResponse`.  Don't bring back `throw new Error('__X__')` plus
+  `msg.includes`.
 - **Status guards.**  Purchase orders, sell orders and transfer orders each
   have explicit allowed-transition tables in their route files.  When adding a new state-changing endpoint, extend the existing
   guard — don't write a parallel one.
@@ -251,7 +260,7 @@ switches the branch out from under the first.
   (`goodsTotalIsMirror`); afterwards a stale mirror and a real override are
   indistinguishable.
 - **Upload validation** — every upload route (status-meta evidence and line
-  photos in `orders.ts`/`sellOrders.ts`, `scan.ts`, `publicForms.ts`) and the
+  photos in `routes/orders/`/`sellOrders.ts`, `scan.ts`, `publicForms.ts`) and the
   storage layer (`r2.ts`) enforce both `maxBytes` and `allowedMime` from
   `lib/settings.ts → getUploadLimits()`.
   The allowed set is intersected with `SAFE_UPLOAD_MIME` so a misconfigured

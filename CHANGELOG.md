@@ -17,6 +17,24 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.197.4] - 2026-10-02
+
+Structure only (RS-148), batch 6b of the remaining code-review work. Nothing
+a user sees changes.
+
+- **`routes/orders.ts` is now `routes/orders/`.** The 3,632-line file holding
+  all 24 PO routes is one module per concern, each a Hono sub-app mounted by
+  `index.ts`: list, detail, create, the PATCH, lifecycle moves, evidence,
+  Review mode and the spreadsheet. Helpers more than one module uses live in
+  `shared.ts`. The code moved verbatim.
+- **Refusals inside a PO write are typed.** PATCH, the status-meta
+  attachments and the line photos used to throw message strings like
+  `'__DONE_LOCKED__'` and match them with `includes()`. Their payload went
+  through variables captured from the handler, and a refusal added on one
+  side and missed on the other fell through as a 500. They now throw
+  `OrderRefusal` with a typed kind and payload, mapped by one
+  `refusalResponse` to the same status codes and bodies.
+
 ## [1.197.3] - 2026-10-02
 
 The source PO line number gets its own "ID in PO" column, on the sell order page
