@@ -699,6 +699,66 @@ describe('GET /api/sell-orders/:id/packing-list?groupBy=po', () => {
     expect(rowQty(noPoLa1, 'PO total')).toEqual([4]);
   });
 
+  // The ID in PO cells of a tab's data rows, every section. Found by header
+  // text: the lot's own part number, not the sell line's, reaches the sheet.
+  const poIdCells = (ws: ExcelJS.Worksheet): string[] => {
+    const out: string[] = [];
+    let col = 0;
+    ws.eachRow(row => {
+      const first = String(row.getCell(1 + PACK_OFFSET).value ?? '');
+      if (first === 'Packed ✓') {
+        col = 0;
+        row.eachCell((cell, c) => { if (cell.value === 'ID in PO') col = c; });
+      } else if (first === 'Subtotal') {
+        col = 0;
+      } else if (col) {
+        out.push(String(row.getCell(col).value ?? ''));
+      }
+    });
+    return out;
+  };
+  // A line's # on the PO page: its index in GET /api/orders/:id.
+  async function poPageNo(token: string, po: string, lineId: string): Promise<number> {
+    const r = await api<{ order: { lines: { id: string }[] } }>('GET', `/api/orders/${po}`, { token });
+    return r.body.order.lines.findIndex(l => l.id === lineId) + 1;
+  }
+
+  it('gives each row its ID in PO, listing every lot a row folds', async () => {
+    const { token } = await loginAs(ALEX);
+    const sql = getTestDb();
+    const [a] = await linesFromTwoPos(token);
+    // Two lots alike in everything the sheet folds on — part, label (no brand,
+    // capacity or generation), condition, warehouse — on a's PO.
+    const twins = (await sql<{ id: string }[]>`
+      INSERT INTO order_lines (order_id, category, qty, unit_cost, sell_price, part_number,
+                               condition, status, position, warehouse_id)
+      SELECT ${a.po}, 'RAM', 1, 10, 20, 'TWIN-PN', 'Pulled — Tested', 'Reviewing', 90 + g, 'WH-LA1'
+      FROM generate_series(1, 2) g
+      RETURNING id`).map(r => r.id);
+    const id = await createOrder(token, {
+      lines: [
+        { inventoryId: a.id, category: 'RAM', label: 'A', partNumber: 'X', qty: 1, unitPrice: 40, warehouseId: 'WH-LA1' },
+        ...twins.map(t => ({
+          inventoryId: t, category: 'RAM', label: 'Twin', partNumber: 'TWIN-PN', qty: 1, unitPrice: 40,
+          warehouseId: 'WH-LA1', condition: 'Pulled — Tested',
+        })),
+        { category: 'SSD', label: 'Hand typed', partNumber: 'NOPO-1', qty: 1, unitPrice: 9, warehouseId: 'WH-LA1' },
+      ],
+    });
+
+    const wb = await loadWorkbook(await getRaw(`/api/sell-orders/${id}/packing-list?groupBy=po`, token));
+    const tab = wb.worksheets.find(w => w.name === `${a.po} - LA1`)!;
+    const [x, y] = (await Promise.all(twins.map(t => poPageNo(token, a.po, t)))).sort((m, n) => m - n);
+    expect(poIdCells(tab).sort()).toEqual([String(await poPageNo(token, a.po, a.id)), `${x}, ${y}`].sort());
+    // A hand-typed line came from no PO: the column stays, empty.
+    const noPo = wb.worksheets.find(w => w.name === 'No PO - LA1')!;
+    expect(poIdCells(noPo)).toEqual(['']);
+
+    // The per-warehouse list mixes POs, so it has no ID in PO to give.
+    const plain = await loadWorkbook(await getRaw(`/api/sell-orders/${id}/packing-list`, token));
+    expect(plain.worksheets.flatMap(cellStrings)).not.toContain('ID in PO');
+  });
+
   it('narrows to one warehouse', async () => {
     const { token } = await loginAs(ALEX);
     const id = await createOrder(token, {

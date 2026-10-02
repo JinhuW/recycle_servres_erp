@@ -5,13 +5,13 @@ import { Modal } from '../../components/Modal';
 import { useT } from '../../lib/i18n';
 import { useAuth } from '../../lib/auth';
 import { useEffectiveUser } from '../../lib/tweaks';
-import { api, deleteOrder, archiveOrder, unarchiveOrder, ApiError } from '../../lib/api';
+import { api, deleteOrder, archiveOrder, unarchiveOrder, followLineTotal, ApiError } from '../../lib/api';
 import { readArchiveConflict, type ArchiveConflict } from '../../lib/archiveConflict';
 import { ArchiveConflictList } from '../../components/ArchiveConflictList';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { fmtUSD, fmtDateShort } from '../../lib/format';
 import {
-  ORDER_STATUSES, LIFECYCLE_STATUS, isClosedBook, lifecycleOf, spineStatus,
+  ORDER_STATUSES, LIFECYCLE_STATUS, lifecycleOf, spineStatus,
 } from '../../lib/status';
 import { poEffectiveCost, parseFeeInput, feeEq, readStoredGoodsTotal } from '../../lib/poTotals';
 import type { Category, Order, OrderLine, Warehouse } from '../../lib/types';
@@ -32,6 +32,8 @@ import { groupLines, shouldGroup, displayRows, catTone, pricedTotals, lineSpecLa
 import { CostTape } from '../../components/CostTape';
 import { useMarketLookup } from '../../lib/useMarketLookup';
 import { useEscapeKey } from '../../lib/useEscapeKey';
+import { confirmDiscard, useUnsavedGuard } from '../../lib/unsavedGuard';
+import { derivePoPermissions } from '../../lib/poPermissions';
 import { ImageLightbox } from '../../components/ImageLightbox';
 import { serialIssue } from '@recycle-erp/shared';
 import { lineRequirements, missingFieldNames } from '../../lib/lineRequirements';
@@ -118,31 +120,13 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // The final-sell column follows the role-preview tweak (the API nulls the
   // figure under it); edit rights above stay on the real role.
   const isManager = useEffectiveUser()?.role === 'manager';
-  // Edit-gating keys off the authoritative lifecycle, not the 'Mixed'-prone
-  // derived status, so an owner is never locked out of their own draft.
-  const effectiveStatus = LIFECYCLE_STATUS[order.lifecycle] ?? order.status;
-  // Locked from Ready to Pay on: the review is over and the figure is what
-  // the purchaser gets paid on. Managers keep the stage moves (below).
-  // An archived order is locked too: its lines are out of stock, and every
-  // write the backend would take is refused until it is unarchived.
-  const isArchived = !!order.archivedAt;
-  const orderLocked = isClosedBook(effectiveStatus) || isArchived;
-  // The purchaser keeps their order until the review closes it. Editing it
-  // after submission is allowed and costs them the stage: the backend sends it
-  // back to Draft, so `revertOnSave` warns before the first such save.
-  const canEditOrder = !orderLocked;
-  const revertOnSave = isPurchaser && !orderLocked && effectiveStatus !== 'Draft';
-  // Notes and submission evidence outlive the purchaser's edit window: the
-  // manager owns pricing from Reviewing on, but whoever raised the PO can keep
-  // documenting it until the book closes. Mirrors the backend's notes-only
-  // gate.
-  const isOwnerOrManager = !isPurchaser || order.userId === user?.id;
-  const canAnnotate = !orderLocked && isOwnerOrManager;
-  // A closed order keeps its stage moves for managers: Done can go back to
-  // Ready to Pay or Reviewing, Ready to Pay forward to Done or back to
-  // Reviewing (the backend guards lines committed to sell orders).
-  // Everything else stays read-only until such a move lands.
-  const canReopen = !isPurchaser && orderLocked && !isArchived;
+  // Edit rights, the same rule the phone uses (lib/poPermissions.ts). A
+  // closed order keeps its stage moves for managers (canReopen); everything
+  // else stays read-only until such a move lands.
+  const {
+    effectiveStatus, isArchived, orderLocked, canEditOrder, revertOnSave,
+    isOwnerOrManager, canAnnotate, canReopen,
+  } = derivePoPermissions({ isPurchaser, userId: user?.id, order });
   // Payment review is where a manager corrects the commission projection, so
   // sell price survives the Ready to Pay lock. It goes through the inventory
   // line PATCH, which takes sellPrice on a closed-book PO; PATCH /api/orders
@@ -431,14 +415,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     return opts;
   }, [members, order.userId, order.userName, user?.id, user?.name]);
 
-  // Escape closes the drawer; if none open, closes the page. The page mounts
-  // before any of its dialogs, so each one sits above this on the Escape stack
-  // and a press inside a dialog never reaches the page.
-  useEscapeKey(() => {
-    if (activeIdx !== null) setActiveIdx(null);
-    else onCancel();
-  });
-
   const updateLine = (i: number, patch: Partial<EditLine>) =>
     setLines(ls => ls.map((l, j) => (j === i ? { ...l, ...patch, _dirty: true } : l)));
 
@@ -602,7 +578,27 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     () => readStoredGoodsTotal(order.totalCost, loadedLineSubtotal),
     [order.totalCost, loadedLineSubtotal],
   );
-  const goodsOverridden = storedGoods.negotiated;
+  // The label and the reset button take the server's word: the lines here
+  // carry what is left, the verdict is on what was bought, and a partly sold
+  // PO would otherwise read as negotiated.
+  const goodsOverridden = order.goodsFollowsLines !== undefined
+    ? !order.goodsFollowsLines
+    : storedGoods.negotiated;
+  // A pinned total is a negotiated lot price until a manager says it is stale;
+  // nothing on this page can tell the two apart.
+  const [followingLines, setFollowingLines] = useState(false);
+  const followLines = async () => {
+    if (!onReload) return;
+    setFollowingLines(true);
+    try {
+      await followLineTotal(order.id);
+      await onReload();
+    } catch (e) {
+      showErrorDialog((e as { message?: string })?.message ?? t('poFollowLineTotalFailed'));
+    } finally {
+      setFollowingLines(false);
+    }
+  };
 
   // Derived values for the side Payment-detail panel.
   // Self pay → the purchaser is reimbursed for what they paid out of pocket
@@ -634,6 +630,18 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     notes: notesDirty,
   };
   const dirty = statusDirty || Object.values(dirtyBy).some(Boolean);
+  // Unsaved edits ask before the page is left: Escape, Back and the footer's
+  // Cancel all just closed it, edits and all.
+  useUnsavedGuard(dirty);
+  const leave = () => { void confirmDiscard().then(ok => { if (ok) onCancel(); }); };
+
+  // Escape closes the drawer; if none open, leaves the page. The page mounts
+  // before any of its dialogs, so each one sits above this on the Escape stack
+  // and a press inside a dialog never reaches the page.
+  useEscapeKey(() => {
+    if (activeIdx !== null) setActiveIdx(null);
+    else leave();
+  });
   // What the backend reads as a change to the order itself — the set that
   // sends a purchaser's submitted order back to Draft. A note is not one.
   const materialDirty =
@@ -1069,7 +1077,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       <div className="page-head" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
         <div>
           <button
-            onClick={onCancel}
+            onClick={leave}
             style={{
               background: 'none', border: 'none', padding: 0,
               color: 'var(--fg-subtle)', fontSize: 12.5,
@@ -1339,7 +1347,24 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
             realized={order.realized ?? null}
             commissionRate={order.commissionRate}
             goodsNote={goodsOverridden ? (
-              <span style={{ color: 'var(--accent-strong)', fontWeight: 500 }}> · {t('subOverride')}</span>
+              <span style={{ color: 'var(--accent-strong)', fontWeight: 500 }}>
+                {' · '}{t('poNegotiatedLot')}
+                {isManager && onReload && (
+                  <>
+                    {' · '}
+                    <button
+                      type="button"
+                      className="btn sm ghost"
+                      style={{ padding: '0 6px', height: 20, fontSize: 11.5 }}
+                      disabled={followingLines}
+                      title={t('poFollowLineTotalHint')}
+                      onClick={() => { void followLines(); }}
+                    >
+                      {t('poFollowLineTotal')}
+                    </button>
+                  </>
+                )}
+              </span>
             ) : undefined}
             feeField={canEditOrder ? (
               <span style={{ position: 'relative', display: 'inline-block' }}>
@@ -1642,7 +1667,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
         retryablePhotos={retryablePhotos}
         onRetryPhotos={() => void retryQueuedPhotos()}
         retryDisabled={saving || photos.busy}
-        onCancel={onCancel}
+        onCancel={leave}
         onSave={attemptSave}
         saving={saving}
         saveTitle={saveBlockers[0]}

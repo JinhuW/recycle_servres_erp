@@ -27,6 +27,8 @@ export type NormalizedTxn = {
   accountExternalId: string;
   postedAt: Date;
   amount: number;
+  // ISO 4217, upper case. Mercury accounts are USD; PayPal states its own.
+  currency: string;
   counterparty: string | null;
   description: string | null;
   // PayPal legs: the transaction id itself. Mercury legs: parsed from the

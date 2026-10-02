@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import bcrypt from 'bcryptjs';
+import { withBcryptSlot } from '../lib/bcryptGate';
 import type postgres from 'postgres';
 import type { SqlLike } from '../db';
 import { oauthRefreshRevocationsTotal } from '../metrics';
@@ -13,6 +14,7 @@ export type OAuthClientRow = {
   scopes: string[];
   created_by: string | null;
   created_ip: string | null;
+  created_ip_key: string | null;
   created_at: Date;
   revoked_at: Date | null;
 };
@@ -30,6 +32,7 @@ export type CreateClientInput = {
   createdBy: string | null;
   // Only set for self-registered (DCR) clients — feeds the per-IP throttle.
   createdIp?: string | null;
+  createdIpKey?: string | null;
   public: boolean;
 };
 
@@ -39,13 +42,14 @@ export async function createOAuthClient(
 ): Promise<{ clientId: string; clientSecret: string | null }> {
   const id = newClientId();
   const secret = input.public ? null : newClientSecret();
-  const hash = secret ? await bcrypt.hash(secret, 10) : null;
+  const hash = secret ? await withBcryptSlot(() => bcrypt.hash(secret, 10)) : null;
   await sql`
     INSERT INTO oauth_clients
-      (id, secret_hash, name, redirect_uris, grant_types, scopes, created_by, created_ip)
+      (id, secret_hash, name, redirect_uris, grant_types, scopes, created_by, created_ip, created_ip_key)
     VALUES
       (${id}, ${hash}, ${input.name}, ${input.redirectUris},
-       ${input.grantTypes}, ${input.scopes}, ${input.createdBy}, ${input.createdIp ?? null})
+       ${input.grantTypes}, ${input.scopes}, ${input.createdBy}, ${input.createdIp ?? null},
+       ${input.createdIpKey ?? null})
   `;
   return { clientId: id, clientSecret: secret };
 }
@@ -65,7 +69,7 @@ export async function verifyClientSecret(
   presented: string,
 ): Promise<boolean> {
   if (!row.secret_hash) return false;
-  return bcrypt.compare(presented, row.secret_hash);
+  return withBcryptSlot(() => bcrypt.compare(presented, row.secret_hash!));
 }
 
 export async function listOAuthClients(sql: AnySql): Promise<OAuthClientRow[]> {

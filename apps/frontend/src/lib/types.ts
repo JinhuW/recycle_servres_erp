@@ -124,6 +124,9 @@ export type OrderSummary = {
   // The goods cost — a negotiated override of the line subtotal, or null for
   // none. `otherFees` is charged on top of it, never folded into it.
   totalCost: number | null;
+  // The server's verdict on totalCost: false = a pinned lot price. Optional so
+  // a bundle ahead of its backend falls back to judging it locally.
+  goodsFollowsLines?: boolean;
   otherFees: number;
   otherFeesNote: string | null;
   // PayPal payment reference, seeded from the tracked package's screenshot

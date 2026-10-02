@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
 import { Icon } from '../../components/Icon';
-import { api } from '../../lib/api';
+import { api, ApiError } from '../../lib/api';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import type { Warehouse } from '../../lib/types';
 import { useT } from '../../lib/i18n';
 import { showErrorDialog } from '../../lib/errorToast';
+import { ConfirmDialog } from './settings/dialogs';
 
 // Bulk warehouse-to-warehouse transfer modal. Manager picks a single
 // destination, optionally trims the qty per line, and POSTs to
@@ -16,7 +17,10 @@ export type TransferItem = {
   label: string;
   subLabel: string | null;
   partNumber: string | null;
-  qty: number;                           // max qty on the source line
+  qty: number;                           // qty on the source line
+  // Units committed sell orders hold — not movable. Optional: the Worker can
+  // ship ahead of the backend that reports it.
+  committedQty?: number;
   warehouseId: string | null;            // effective source warehouse
   warehouseShort: string | null;
   category: 'RAM' | 'SSD' | 'HDD' | 'Other';
@@ -31,14 +35,20 @@ type Props = {
 
 const NOTE_MAX = 200;
 
+// What may be moved off a line: the rest is held by committed sell orders,
+// and the server refuses to move it.
+const movable = (it: TransferItem) => Math.max(0, it.qty - (it.committedQty ?? 0));
+
 export function DesktopInventoryTransfer({ items, warehouses, onClose, onSaved }: Props) {
   const { t } = useT();
   const [toWarehouseId, setToWarehouseId] = useState<string>('');
   const [qty, setQty] = useState<Record<string, number>>(() =>
-    Object.fromEntries(items.map(it => [it.id, it.qty])),
+    Object.fromEntries(items.map(it => [it.id, movable(it)])),
   );
   const [note, setNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // Draft sell orders the server says a whole-line move would strand.
+  const [draftsToConfirm, setDraftsToConfirm] = useState<string[] | null>(null);
 
   // Esc closes the modal (ignored mid-submit).
   useEscapeKey(() => { if (!submitting) onClose(); });
@@ -58,7 +68,7 @@ export function DesktopInventoryTransfer({ items, warehouses, onClose, onSaved }
   const destShort = destinations.find(w => w.id === toWarehouseId)?.short ?? '';
   const anyInvalidQty = items.some(it => {
     const n = qty[it.id];
-    return !Number.isInteger(n) || n < 1 || n > it.qty;
+    return !Number.isInteger(n) || n < 1 || n > movable(it);
   });
   const canSubmit = !!toWarehouseId && !anyInvalidQty && !submitting;
 
@@ -85,7 +95,7 @@ export function DesktopInventoryTransfer({ items, warehouses, onClose, onSaved }
     setQty(prev => ({ ...prev, [id]: Number.isFinite(n) ? Math.floor(n) : 0 }));
   };
 
-  const submit = async () => {
+  const submit = async (confirmDrafts = false) => {
     if (!canSubmit) return;
     setSubmitting(true);
     try {
@@ -95,17 +105,24 @@ export function DesktopInventoryTransfer({ items, warehouses, onClose, onSaved }
           toWarehouseId,
           note: note.trim() || undefined,
           lines: items.map(it => ({ id: it.id, qty: qty[it.id] })),
+          ...(confirmDrafts ? { confirmDrafts: true } : {}),
         },
       );
       onSaved(res.lines.length, destShort);
     } catch (e) {
-      showErrorDialog((e as { message?: string })?.message ?? t('transferFailed'));
+      const body = e instanceof ApiError ? e.body as { needsConfirm?: boolean; drafts?: string[] } | undefined : undefined;
+      if (body?.needsConfirm && body.drafts?.length) {
+        setDraftsToConfirm(body.drafts);
+      } else {
+        showErrorDialog((e as { message?: string })?.message ?? t('transferFailed'));
+      }
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
+    <>
     <div
       onClick={() => { if (!submitting) onClose(); }}
       style={{
@@ -200,7 +217,8 @@ export function DesktopInventoryTransfer({ items, warehouses, onClose, onSaved }
             </div>
             {items.map(it => {
               const n = qty[it.id];
-              const invalid = !Number.isInteger(n) || n < 1 || n > it.qty;
+              const max = movable(it);
+              const invalid = !Number.isInteger(n) || n < 1 || n > max;
               return (
                 <div
                   key={it.id}
@@ -227,7 +245,7 @@ export function DesktopInventoryTransfer({ items, warehouses, onClose, onSaved }
                       type="number"
                       className="input"
                       min={1}
-                      max={it.qty}
+                      max={max}
                       step={1}
                       value={Number.isFinite(n) ? n : ''}
                       onChange={e => setLineQty(it.id, e.target.value)}
@@ -238,8 +256,13 @@ export function DesktopInventoryTransfer({ items, warehouses, onClose, onSaved }
                         borderColor: invalid ? 'var(--neg)' : undefined,
                       }}
                     />
-                    <span style={{ fontSize: 11.5, color: 'var(--fg-subtle)', minWidth: 26 }}>/{it.qty}</span>
+                    <span style={{ fontSize: 11.5, color: 'var(--fg-subtle)', minWidth: 26 }}>/{max}</span>
                   </div>
+                  {!!it.committedQty && (
+                    <div style={{ gridColumn: '1 / -1', fontSize: 11, color: 'var(--fg-subtle)', textAlign: 'right' }}>
+                      {t('transferCommittedHint', { n: it.committedQty })}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -288,5 +311,17 @@ export function DesktopInventoryTransfer({ items, warehouses, onClose, onSaved }
         </div>
       </div>
     </div>
+    {/* A sibling, not a child: clicks in it would otherwise bubble to the
+        backdrop above and close the transfer. */}
+    {draftsToConfirm && (
+      <ConfirmDialog
+        title={t('transferDraftsTitle')}
+        message={t('transferDraftsMsg', { ids: draftsToConfirm.join(', ') })}
+        confirmLabel={t('transferDraftsConfirm')}
+        onCancel={() => setDraftsToConfirm(null)}
+        onConfirm={() => { setDraftsToConfirm(null); void submit(true); }}
+      />
+    )}
+    </>
   );
 }

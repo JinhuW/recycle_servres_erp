@@ -15,13 +15,14 @@
 // submission's reference.
 
 import { Hono, type MiddlewareHandler } from 'hono';
-import { getDb } from '../db';
+import { getDb, type SqlLike } from '../db';
 import { log } from '../lib/log';
 import { nextHumanId } from '../lib/id-seq';
 import { createRateLimiter } from '../lib/rate-limit';
+import { clientIp } from '../lib/clientIp';
 import { notifyManagers } from '../lib/notify';
-import { getUploadLimits } from '../lib/settings';
-import { shrinkImageToFit } from '../lib/image-shrink';
+import { getUploadLimits, getWorkspaceSetting } from '../lib/settings';
+import { ImageRejectedError, shrinkImageToFit } from '../lib/image-shrink';
 import { deleteAttachments, uploadAttachment } from '../r2';
 import type { Env } from '../types';
 
@@ -33,12 +34,54 @@ const MAX_TEXT = 120;
 const MAX_NOTES = 2000;
 const PHOTOS_PER_LINE = 4;
 const PHOTOS_PER_REQUEST = 20;
+// Checked before any decoding. An anonymous photo bigger than this is not a
+// phone picture, and buffering it costs memory before it is ever refused.
+const PHOTO_RAW_MAX = 15 * 1024 * 1024;
 // The file name is the sender's own text, stored as-is for display.
 const STORED_FILENAME_MAX = 200;
 // Five submissions a minute from one address is generous for a person and
 // cheap for a script. One budget across both forms; per-process, the same
 // trade-off /api/scan makes.
 const rateLimited = createRateLimiter(60_000, 5);
+
+// The per-minute limit slows one sender; this stops many. Both forms share one
+// daily budget of submissions and of photo bytes (UTC day), counted in Postgres
+// so it holds across instances. Workspace settings can raise either. One
+// address also gets a daily share of its own, or a single sender pacing
+// itself under the per-minute limit would close both forms for everyone.
+const DEFAULT_DAILY_SUBMISSIONS = 300;
+const DEFAULT_DAILY_BYTES = 2_000_000_000;
+const DAILY_PER_ADDRESS = 20;
+
+/**
+ * Seconds until the budget resets, or null while there is room. `address` is
+ * the caller's limiter key (an IPv6 /64, not the address), or null when the
+ * Worker did not name the caller — then every request shares a Cloudflare
+ * address, and a per-address share would be everyone's.
+ */
+async function overDailyBudget(
+  sql: SqlLike, incomingBytes: number, address: string | null,
+): Promise<number | null> {
+  const [maxSubmissions, maxBytes] = await Promise.all([
+    getWorkspaceSetting(sql, 'public_form_daily_submissions', DEFAULT_DAILY_SUBMISSIONS),
+    getWorkspaceSetting(sql, 'public_form_daily_bytes', DEFAULT_DAILY_BYTES),
+  ]);
+  const [{ n, bytes, mine }] = await sql<{ n: number; bytes: string; mine: number }[]>`
+    SELECT
+      (SELECT COUNT(*)::int FROM web_submissions
+        WHERE created_at >= date_trunc('day', NOW(), 'UTC')) AS n,
+      (SELECT COALESCE(SUM(size_bytes), 0)::text FROM web_submission_photos
+        WHERE created_at >= date_trunc('day', NOW(), 'UTC')) AS bytes,
+      (SELECT COUNT(*)::int FROM web_submissions
+        WHERE ${address}::text IS NOT NULL AND COALESCE(ip_key, ip) = ${address}::text
+          AND created_at >= date_trunc('day', NOW(), 'UTC')) AS mine
+  `;
+  if (n < maxSubmissions && Number(bytes) + incomingBytes <= maxBytes
+      && mine < DAILY_PER_ADDRESS) return null;
+  const now = new Date();
+  const midnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
+  return Math.max(1, Math.ceil((midnight - now.getTime()) / 1000));
+}
 
 export const SELL_CATEGORIES = ['RAM', 'SSD', 'CPU'] as const;
 export type SellCategory = (typeof SELL_CATEGORIES)[number];
@@ -84,10 +127,6 @@ export type QuotePayload = {
 type Parsed<T> = { ok: T } | { error: string } | { honeypot: true };
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-
-function clientIp(h: (name: string) => string | undefined): string {
-  return h('x-forwarded-for')?.split(',')[0]?.trim() || h('x-real-ip') || 'anon';
-}
 
 function text(v: unknown, max = MAX_TEXT): string | null {
   if (typeof v !== 'string') return null;
@@ -218,10 +257,24 @@ function unidentified(l: SellLine, photos: File[]): boolean {
   return photos.length === 0 && !l.fields.part_number && !l.fields.capacity && !l.fields.description;
 }
 
+type HeaderReader = { req: { header(name: string): string | undefined } };
+
+// The sender's limiter key, when the Worker vouched for the address.
+function namedSender(c: HeaderReader): string | null {
+  return c.req.header('x-client-ip') ? clientIp((n) => c.req.header(n)).key : null;
+}
+
+// What a submission row stores: the address as received, and the key the
+// daily share counts by. No address, no key — never the 'unknown' bucket.
+function storedAddress(c: HeaderReader): { ip: string | null; ipKey: string | null } {
+  const ip = clientIp((n) => c.req.header(n));
+  return { ip: ip.full, ipKey: ip.full === null ? null : ip.key };
+}
+
 // Scoped to the two form paths: this sub-app is mounted at /api/public, and a
 // '*' here would also throttle the Shippo webhook.
 const limit: MiddlewareHandler<{ Bindings: Env }> = async (c, next) => {
-  const retryAfter = rateLimited(clientIp((n) => c.req.header(n)));
+  const retryAfter = rateLimited(clientIp((n) => c.req.header(n)).key);
   if (retryAfter !== null) {
     c.header('Retry-After', String(retryAfter));
     return c.json({ error: 'too many submissions, try again shortly' }, 429);
@@ -264,6 +317,12 @@ publicForms.post('/intake', async (c) => {
   // cap. Uploads happen before the transaction so a failed INSERT can still
   // clean up what reached the bucket.
   const sql = getDb(c.env);
+  const incoming = photos.flat().reduce((n, f) => n + f.size, 0);
+  const full = await overDailyBudget(sql, incoming, namedSender(c));
+  if (full !== null) {
+    c.header('Retry-After', String(full));
+    return c.json({ error: 'we are not taking more submissions today; try again tomorrow' }, 429);
+  }
   const { maxBytes, allowedMime } = await getUploadLimits(sql);
   const uploaded: { line: number; pos: number; file: File; storageKey: string; deliveryUrl: string }[] = [];
   const cleanup = () => deleteAttachments(c.env, uploaded.map(u => u.storageKey))
@@ -276,7 +335,21 @@ publicForms.post('/intake', async (c) => {
         await cleanup();
         return c.json({ error: `unsupported file type: ${file.type || 'unknown'}` }, 415);
       }
-      const fitted = await shrinkImageToFit(file, maxBytes);
+      if (file.size > PHOTO_RAW_MAX) {
+        await cleanup();
+        return c.json({ error: `photo too large (max ${PHOTO_RAW_MAX} bytes)` }, 413);
+      }
+      let fitted: File;
+      try {
+        fitted = await shrinkImageToFit(file, maxBytes, { strict: true });
+      } catch (e) {
+        await cleanup();
+        if (e instanceof ImageRejectedError && e.reason === 'busy') {
+          c.header('Retry-After', '30');
+          return c.json({ error: 'too many photos being processed; try again shortly' }, 503);
+        }
+        return c.json({ error: 'photo could not be processed' }, 400);
+      }
       if (fitted.size > maxBytes) {
         await cleanup();
         return c.json({ error: `photo too large (max ${maxBytes} bytes)` }, 413);
@@ -296,10 +369,11 @@ publicForms.post('/intake', async (c) => {
   try {
     ref = await sql.begin(async (tx) => {
       const id = await nextHumanId(tx, 'WS', 'WS');
+      const from = storedAddress(c);
       await tx`
-        INSERT INTO web_submissions (id, site, kind, email, notes, source, payload, ip, user_agent)
+        INSERT INTO web_submissions (id, site, kind, email, notes, source, payload, ip, ip_key, user_agent)
         VALUES (${id}, 'ram4cash', 'sell_lot', ${payload.email}, ${payload.notes}, ${payload.source},
-                ${tx.json(payload as never)}, ${clientIp((n) => c.req.header(n))},
+                ${tx.json(payload as never)}, ${from.ip}, ${from.ipKey},
                 ${text(c.req.header('user-agent'), 300)})
       `;
       for (const u of uploaded) {
@@ -336,12 +410,18 @@ publicForms.post('/quote', async (c) => {
   const q = parsed.ok;
 
   const sql = getDb(c.env);
+  const full = await overDailyBudget(sql, 0, namedSender(c));
+  if (full !== null) {
+    c.header('Retry-After', String(full));
+    return c.json({ error: 'we are not taking more submissions today; try again tomorrow' }, 429);
+  }
   const ref = await sql.begin(async (tx) => {
     const id = await nextHumanId(tx, 'WS', 'WS');
+    const from = storedAddress(c);
     await tx`
-      INSERT INTO web_submissions (id, site, kind, name, company, email, phone, notes, payload, ip, user_agent)
+      INSERT INTO web_submissions (id, site, kind, name, company, email, phone, notes, payload, ip, ip_key, user_agent)
       VALUES (${id}, 'recycleservers', 'quote', ${q.name}, ${q.company}, ${q.email}, ${q.phone},
-              ${q.notes}, ${tx.json(q as never)}, ${clientIp((n) => c.req.header(n))},
+              ${q.notes}, ${tx.json(q as never)}, ${from.ip}, ${from.ipKey},
               ${text(c.req.header('user-agent'), 300)})
     `;
     await notifyManagers(tx, {

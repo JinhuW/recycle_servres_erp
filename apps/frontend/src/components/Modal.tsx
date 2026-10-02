@@ -23,6 +23,10 @@ type ModalProps = {
 // Escape (via the shared useEscapeKey stack) and on backdrop click.
 export function Modal({ onClose, children, shellStyle, shellClassName, ariaLabel, closeOnEscape = true }: ModalProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
+  // Where the press began. A drag that starts inside the panel (selecting text
+  // in a field) and is released over the backdrop fires its click on the
+  // backdrop, and closed the dialog with whatever was typed in it.
+  const pressedBackdrop = useRef(false);
 
   useEscapeKey(onClose, closeOnEscape);
 
@@ -45,7 +49,11 @@ export function Modal({ onClose, children, shellStyle, shellClassName, ariaLabel
   return (
     <div
       className="modal-backdrop"
-      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+      onMouseDown={e => { pressedBackdrop.current = e.target === e.currentTarget; }}
+      onClick={e => {
+        if (e.target === e.currentTarget && pressedBackdrop.current) onClose();
+        pressedBackdrop.current = false;
+      }}
     >
       <div
         ref={panelRef}

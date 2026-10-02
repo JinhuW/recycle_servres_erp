@@ -1,7 +1,8 @@
 import type postgres from 'postgres';
 import { inventoryLabel, inventorySpec, type InventoryAttrs } from '../lib/inventoryLabel';
-import { committedSellStatuses } from '../lib/sellCommitment';
+import { committedQtySql } from '../lib/sellCommitment';
 import { escapeLike } from '../lib/pagination';
+import { poLineNo } from '../lib/poLineNo';
 
 // Inventory lines that can currently be placed on a sell order: status
 // Reviewing or Done with units left over after every committed sell order
@@ -29,6 +30,8 @@ export type SellableItem = {
   sellPrice: number | null;
   draftCount: number;
   sourceOrderId: string;
+  // The lot's # on that PO's page.
+  sourceLineNo: number;
   // Structured spec, so a picker can show the same chips a saved line does.
   type: string | null;
   classification: string | null;
@@ -42,6 +45,7 @@ export type SellableItem = {
 type SellableRow = InventoryAttrs & {
   id: string;
   order_id: string;
+  line_no: number;
   part_number: string | null;
   qty: number;
   sell_price: number | null;
@@ -60,11 +64,12 @@ export async function searchSellableInventory(
   const q = opts.query?.toLowerCase().trim() || null;
   const like = q ? `%${escapeLike(q)}%` : null;
   const wh = opts.warehouseId?.trim() || null;
+  const committed = committedQtySql(sql, sql`l.id`);
   const rows = await sql<SellableRow[]>`
-    SELECT l.id, l.order_id, l.category, l.brand, l.capacity, l.generation, l.type,
+    SELECT l.id, l.order_id, ${poLineNo(sql, 'l')} AS line_no, l.category, l.brand, l.capacity, l.generation, l.type,
            l.classification, l.rank, l.speed, l.interface, l.form_factor,
            l.description, l.part_number, l.condition,
-           (l.qty - committed.qty) AS qty,
+           (l.qty - c.n) AS qty,
            l.sell_price::float AS sell_price,
            l.health::float AS health, l.rpm,
            COALESCE(l.warehouse_id, o.warehouse_id) AS warehouse_id,
@@ -76,16 +81,12 @@ export async function searchSellableInventory(
     FROM order_lines l
     JOIN orders o ON o.id = l.order_id
     LEFT JOIN warehouses w ON w.id = COALESCE(l.warehouse_id, o.warehouse_id)
-    CROSS JOIN LATERAL (
-      SELECT COALESCE(SUM(sol.qty), 0)::int AS qty
-        FROM sell_order_lines sol
-        JOIN sell_orders so ON so.id = sol.sell_order_id
-       WHERE sol.inventory_id = l.id
-         AND so.status = ANY(${committedSellStatuses()}::text[])
-    ) committed
+    -- Once per line for both the SELECT and the WHERE. OFFSET 0 keeps the
+    -- planner from pulling the subquery up and inlining it twice again.
+    CROSS JOIN LATERAL (SELECT ${committed} AS n OFFSET 0) c
     WHERE l.status IN ('Reviewing', 'Done')
       AND o.archived_at IS NULL
-      AND l.qty > committed.qty
+      AND l.qty > c.n
       AND (${like}::text IS NULL
            OR LOWER(COALESCE(l.brand,'')) LIKE ${like ?? ''}
            OR LOWER(COALESCE(l.part_number,'')) LIKE ${like ?? ''}
@@ -108,6 +109,7 @@ export async function searchSellableInventory(
     sellPrice: r.sell_price,
     draftCount: r.draft_count,
     sourceOrderId: r.order_id,
+    sourceLineNo: r.line_no,
     type: r.type,
     classification: r.classification,
     rank: r.rank,

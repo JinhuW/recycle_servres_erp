@@ -28,6 +28,8 @@ export type SellableItem = {
   draftCount: number;
   // Absent from a backend older than this bundle.
   sourceOrderId?: string | null;
+  // The lot's # on that PO's page.
+  sourceLineNo?: number | null;
   type?: string | null;
   classification?: string | null;
   rank?: string | null;

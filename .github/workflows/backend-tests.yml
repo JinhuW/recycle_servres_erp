@@ -27,12 +27,32 @@ on:
       - "apps/frontend/**"
       - "packages/shared/**"
       - ".github/workflows/backend-tests.yml"
+      # tests/sync-scrub.test.ts runs this against the migrated schema.
+      - "deploy/railway-sync/scrub.sql"
+      # Root manifests: a lockfile, workspace or Node change alters what every
+      # package builds and runs with, without touching a file under apps/.
+      - "pnpm-lock.yaml"
+      - "package.json"
+      - "pnpm-workspace.yaml"
+      - "tsconfig.base.json"
+      - ".npmrc"
+      - ".nvmrc"
   pull_request:
     paths:
       - "apps/backend/**"
       - "apps/frontend/**"
       - "packages/shared/**"
       - ".github/workflows/backend-tests.yml"
+      # tests/sync-scrub.test.ts runs this against the migrated schema.
+      - "deploy/railway-sync/scrub.sql"
+      # Root manifests: a lockfile, workspace or Node change alters what every
+      # package builds and runs with, without touching a file under apps/.
+      - "pnpm-lock.yaml"
+      - "package.json"
+      - "pnpm-workspace.yaml"
+      - "tsconfig.base.json"
+      - ".npmrc"
+      - ".nvmrc"
 
 concurrency:
   group: backend-tests-${{ github.ref }}

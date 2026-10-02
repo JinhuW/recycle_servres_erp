@@ -13,16 +13,18 @@ import { AttachmentDropzone } from '../components/AttachmentDropzone';
 import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
 import { useEffectiveUser } from '../lib/tweaks';
-import { api, deleteOrder, archiveOrder, unarchiveOrder } from '../lib/api';
+import { api, deleteOrder, archiveOrder, unarchiveOrder, followLineTotal } from '../lib/api';
 import { readArchiveConflict, type ArchiveConflict } from '../lib/archiveConflict';
 import { ArchiveConflictList } from '../components/ArchiveConflictList';
-import { navigate, poProductsPath, type PoScreen } from '../lib/route';
+import { matchPurchaseOrder, navigate, poProductsPath, type PoScreen } from '../lib/route';
+import { confirmDiscard, useUnsavedGuard } from '../lib/unsavedGuard';
 import { OrderProductsBody, itemLabel } from './OrderProductsBody';
 import { handleFetchError, showErrorDialog } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
 import { profitTone } from '../lib/orderPresentation';
 import { isPricedSellPrice } from '@recycle-erp/shared';
-import { poEffectiveCost, parseFeeInput } from '../lib/poTotals';
+import { derivePoPermissions } from '../lib/poPermissions';
+import { poEffectiveCost, parseFeeInput, readStoredGoodsTotal } from '../lib/poTotals';
 import type { HandoffDelivery, HandoffMethod } from '../lib/handoff';
 import { NEED_SHORT_KEY, poReadiness } from '../lib/poReadiness';
 import { resolveTracking } from '../lib/useTrackingInput';
@@ -40,7 +42,7 @@ import { usePaymentProof, type ProofAttachment } from '../lib/usePaymentProof';
 import { PaymentFields } from '../components/PaymentFields';
 import { CommissionPaymentFields, type CommissionShots } from '../components/CommissionPaymentFields';
 import {
-  ORDER_STATUSES, LIFECYCLE_STATUS, statusTone, spineStatus, isClosedBook,
+  ORDER_STATUSES, statusTone, spineStatus,
 } from '../lib/status';
 import { addableCategories, categoryTone } from '../lib/lookups';
 import type { Category, Order, Warehouse } from '../lib/types';
@@ -110,26 +112,11 @@ export function OrderDetail({
   const isPurchaser = user?.role !== 'manager';
   // The final-sell row follows the role-preview tweak, like the API does.
   const showFinalSell = useEffectiveUser()?.role === 'manager';
-  const effectiveStatus = LIFECYCLE_STATUS[order.lifecycle] ?? order.status;
-  // Locked from Ready to Pay on: the review is over and the figure is what
-  // the purchaser gets paid on.
-  // An archived order is locked too: its lines are out of stock, and every
-  // write the backend would take is refused until it is unarchived.
-  const isArchived = !!order.archivedAt;
-  const orderLocked = isClosedBook(effectiveStatus) || isArchived;
-  // The purchaser keeps their order until it is Done. Past Draft the edit
-  // costs them the stage: the backend sends the order back to Draft, so
-  // `revertOnSave` warns before the first write that does it.
-  const canEditOrder = !orderLocked;
-  const revertOnSave = isPurchaser && !orderLocked && effectiveStatus !== 'Draft';
-  // A reverted order is a Draft again but not a fresh one — once submitted it
-  // is archived, never deleted (the backend enforces the same).
-  const canDelete = canEditOrder && effectiveStatus === 'Draft' && !order.everSubmitted;
-  // The note outlives the purchaser's edit window — the manager owns pricing
-  // from Reviewing on, but whoever raised the PO keeps documenting it until
-  // Done. Mirrors the backend's notes-only gate.
-  const isOwnerOrManager = !isPurchaser || order.userId === user?.id;
-  const canAnnotate = !orderLocked && isOwnerOrManager;
+  // Edit rights, the same rule the desktop editor uses (lib/poPermissions.ts).
+  const {
+    effectiveStatus, isArchived, orderLocked, canEditOrder, revertOnSave,
+    canDelete, isOwnerOrManager, canAnnotate,
+  } = derivePoPermissions({ isPurchaser, userId: user?.id, order });
 
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const metaAtts = (k: string) => order.statusMeta?.[k]?.attachments ?? [];
@@ -328,6 +315,33 @@ export function OrderDetail({
     && (commissionRateValue ?? 0) !== (order.commissionRate ?? 0);
   const commission = ownerDirty || commissionDirty;
   const dirty = notesDirty || warehouseDirty || paymentDirty || methodDirty || paypalDirty || feesDirty || facts || commission;
+  // The order and its products screen are one instance, so moving between
+  // them keeps the edits; anywhere else asks first.
+  useUnsavedGuard(dirty, (p) => matchPurchaseOrder(p)?.id === order.id);
+  // The products screen backs out to the order, which keeps the edits; the
+  // order backs out to the list, which doesn't.
+  const leave = async () => {
+    if (section === 'info' && !(await confirmDiscard())) return;
+    onCancel();
+  };
+
+  // The server's verdict when it sends one: these lines carry what is left,
+  // and the verdict is on what was bought (see the desktop editor).
+  const goodsNegotiated = order.goodsFollowsLines !== undefined
+    ? !order.goodsFollowsLines
+    : readStoredGoodsTotal(order.totalCost, totals.cost).negotiated;
+  const [followingLines, setFollowingLines] = useState(false);
+  const followLines = async () => {
+    setFollowingLines(true);
+    try {
+      await followLineTotal(order.id);
+      await refetchOrder();
+    } catch (e) {
+      handleFetchError(e);
+    } finally {
+      setFollowingLines(false);
+    }
+  };
 
   const refetchOrder = async () => {
     try {
@@ -373,7 +387,9 @@ export function OrderDetail({
       return;
     }
     // A note is not a change to the order itself and leaves the stage alone.
-    const material = warehouseDirty || paymentDirty || methodDirty || paypalDirty || feesDirty || facts || commission;
+    // The same keys the backend treats as material (MATERIAL_PATCH_KEYS);
+    // commission and owner are a manager's, and never cost the stage.
+    const material = warehouseDirty || paymentDirty || methodDirty || paypalDirty || feesDirty || facts;
     if (material && !(await askRevert())) return;
     setSaving(true);
     try {
@@ -717,7 +733,7 @@ export function OrderDetail({
       <PhHeader
         title={headerTitle}
         sub={headerSub}
-        leading={<button className="ph-icon-btn" onClick={onCancel} aria-label={t('back')}><Icon name="chevronLeft" size={16} /></button>}
+        leading={<button className="ph-icon-btn" onClick={() => { void leave(); }} aria-label={t('back')}><Icon name="chevronLeft" size={16} /></button>}
       />
       {section === 'products' && (
         <>
@@ -1103,6 +1119,22 @@ export function OrderDetail({
               {fmtUSD(cost.total, locale)}
             </span>
           </div>
+          {goodsNegotiated && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 11.5, marginTop: 4, color: 'var(--accent-strong)' }}>
+              <span>{t('poNegotiatedLot')}</span>
+              {showFinalSell && (
+                <button
+                  type="button"
+                  className="btn sm ghost"
+                  style={{ padding: '0 8px', height: 24, fontSize: 11.5 }}
+                  disabled={followingLines}
+                  onClick={() => { void followLines(); }}
+                >
+                  {t('poFollowLineTotal')}
+                </button>
+              )}
+            </div>
+          )}
 
           {/* The two profits, managers only. Unrealized is the list column's
               figure — margin on priced lines less the fee; Realized is what

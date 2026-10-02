@@ -168,6 +168,7 @@ export function mercuryProvider(env: Env): BankProvider {
               accountExternalId: account.externalId,
               postedAt: new Date(when),
               amount,
+              currency: 'USD',
               counterparty: t.counterpartyName ?? t.counterpartyNickname ?? null,
               description,
               paypalTxnId: paypalTxnFromDescription(

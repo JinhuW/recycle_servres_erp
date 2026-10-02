@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Icon } from '../components/Icon';
+import { confirmDiscard, useUnsavedGuard } from '../lib/unsavedGuard';
 import { PhHeader } from '../components/PhHeader';
 import { PhCategoryFields } from '../components/PhCategoryFields';
 import { useT } from '../lib/i18n';
@@ -164,6 +165,13 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
   // An AI-filled field stays red-bordered (low-confidence cue) until the user
   // edits it, at which point the red clears — "you've verified this one".
   const [edited, setEdited] = useState<ReadonlySet<keyof DraftLine>>(() => new Set());
+  // A field the user changed is an edit nobody has saved: Cancel and Back
+  // ask first, and so does a reload.
+  // On the phone this form is drawn by capture state, not by the route, so a
+  // route change leaves it standing and loses nothing; only its own Back and
+  // Cancel discard, and they ask.
+  useUnsavedGuard(edited.size > 0, () => true);
+  const leave = () => { void confirmDiscard().then(ok => { if (ok) (onBack ?? onCancel)(); }); };
   // Cleared by tapping "Enter manually" in the unreadable banner so the user
   // can type values without the warning hovering over them.
   const [unreadableDismissed, setUnreadableDismissed] = useState(false);
@@ -302,7 +310,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
         title={title}
         sub={sub}
         leading={
-          <button className="ph-icon-btn" onClick={onBack ?? onCancel}>
+          <button className="ph-icon-btn" onClick={leave}>
             <Icon name="chevronLeft" size={16} />
           </button>
         }
@@ -659,7 +667,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
       </div>
 
       <div className="ph-action-bar">
-        <button className="ph-btn ghost" onClick={onBack ?? onCancel}>{t('cancel')}</button>
+        <button className="ph-btn ghost" onClick={leave}>{t('cancel')}</button>
         <button className="ph-btn dark" onClick={attemptSave}>
           <Icon name="check" size={16} /> {isEditing ? t('saveChanges') : (isFirst ? t('addToOrder') : t('addItem'))}
         </button>

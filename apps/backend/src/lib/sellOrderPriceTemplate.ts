@@ -72,6 +72,9 @@ export type PriceTemplateProduct = {
   imageUrl: string | null;
   // Keyed by SPEC_COLS_BY_CATEGORY keys; absent/blank for manual lines.
   specs: Record<string, string | number>;
+  // The folded lots' # on their PO (lib/poLineNo.ts). Set only for a by-PO
+  // tab's products — elsewhere one row can span several POs.
+  poLineNos?: number[];
 };
 
 export type PriceTemplateHead = {
@@ -333,6 +336,7 @@ export async function buildPackingListByPoWorkbook(
       const poName = po ?? 'No PO';
       renderWarehouseSheet(wb, head, { warehouse: wh.warehouse, products }, {
         tabName: packTabName(`${poName} - ${wh.warehouse}`, used),
+        poLineIds: true,
         instruction:
           `Packing checklist — ${poName}, warehouse ${wh.warehouse}. Tick "Packed ✓" as you pack. ` +
           `/ ${poName}，仓库 ${wh.warehouse} 装箱清单：装箱后请在 "Packed ✓" 列打勾。`,
@@ -507,15 +511,17 @@ type WhCol = { header: string; key: string; width: number; numFmt?: string };
 // Condition / Image URL here). The bid tabs still carry all of them.
 const PACK_OMITTED_SPECS = new Set(['classification', 'chip']);
 
-// Section layout: Packed ✓ | Part # | <category specs> | Qty, shifted right by
-// PACK_GROUP_OFFSET to leave room for the RAM group labels. No prices by
-// design (user-decided): a picker has no use for them, and "Part #" (not "Part
-// Number") plus the absence of any price header is also what keeps
-// findHeaders() from ever parsing these tabs.
-function whSectionCols(category: string): WhCol[] {
+// Section layout: Packed ✓ | Part # | [ID in PO] | <category specs> | Qty,
+// shifted right by PACK_GROUP_OFFSET to leave room for the RAM group labels.
+// No prices by design (user-decided): a picker has no use for them, and "Part
+// #" (not "Part Number") plus the absence of any price header is also what
+// keeps findHeaders() from ever parsing these tabs. "ID in PO" — the line's #
+// on its PO page — only on a by-PO tab: a mixed-PO tab has no PO to number in.
+function whSectionCols(category: string, withPoId: boolean): WhCol[] {
   return [
     { header: 'Packed ✓',  key: 'packed',    width: 9 },
     { header: 'Part #',    key: 'part',      width: 24 },
+    ...(withPoId ? [{ header: 'ID in PO', key: 'poLine', width: 12 }] : []),
     ...(SPEC_COLS_BY_CATEGORY[category] ?? []).filter((c) => !PACK_OMITTED_SPECS.has(c.key)),
     { header: 'Qty',       key: 'qty',       width: 8, numFmt: '#,##0' },
   ];
@@ -530,8 +536,9 @@ function renderWarehouseSheet(
   wb: import('exceljs').Workbook,
   head: PriceTemplateHead,
   wh: PriceTemplateWarehouse,
-  // The by-PO workbook reuses this tab whole; only its name and wording move.
-  opts: { tabName?: string; instruction?: string; totalLabel?: string } = {},
+  // The by-PO workbook reuses this tab whole; only its name and wording move,
+  // plus the ID in PO column.
+  opts: { tabName?: string; instruction?: string; totalLabel?: string; poLineIds?: boolean } = {},
 ): void {
   // "Pack - DEN" style: the prefix separates packing tabs from the category
   // bid tabs at a glance and can never collide with RAM/SSD/HDD/Other.
@@ -543,7 +550,7 @@ function renderWarehouseSheet(
   // Shared per-index widths: the widest column wins across sections.
   const widths: number[] = [];
   for (const cat of sections) {
-    whSectionCols(cat).forEach((c, i) => {
+    whSectionCols(cat, !!opts.poLineIds).forEach((c, i) => {
       widths[i] = Math.max(widths[i] ?? 0, c.width);
     });
   }
@@ -583,7 +590,7 @@ function renderWarehouseSheet(
   let r = 5;
   let totalQty = 0;
   for (const cat of sections) {
-    const cols = whSectionCols(cat);
+    const cols = whSectionCols(cat, !!opts.poLineIds);
     const qtyIdx = cols.findIndex((c) => c.key === 'qty') + 1 + PACK_GROUP_OFFSET;
 
     const title = ws.getRow(r++);
@@ -619,6 +626,14 @@ function renderWarehouseSheet(
             cell.border = box;
             break;
           case 'part': cell.value = p.partNumber ?? ''; break;
+          case 'poLine': {
+            // A row folding several lots of the PO lists them all. Centred, so
+            // the lone numbers and the "1, 3" text line up as one column.
+            const ids = [...(p.poLineNos ?? [])].sort((a, b) => a - b);
+            cell.value = ids.length === 1 ? ids[0] : ids.join(', ');
+            cell.alignment = { horizontal: 'center' };
+            break;
+          }
           case 'qty':
             cell.value = p.qty;
             cell.numFmt = c.numFmt!;

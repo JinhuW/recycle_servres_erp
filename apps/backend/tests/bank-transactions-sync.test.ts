@@ -102,10 +102,10 @@ describe('bank transaction sync', () => {
         { externalId: '8XK42345CD678901F', amount: -500, postedAt: new Date(NOW - 2 * DAY) },
       ]),
       fakeProvider('mercury', [
-        { externalId: 'm-a', amount: -89.99, postedAt: new Date(NOW - DAY) },
+        { externalId: 'm-a', amount: -89.99, postedAt: new Date(NOW - DAY), description: 'PAYPAL *SELLERONE' },
         // Two same-amount Mercury candidates → ambiguous, no pairing.
-        { externalId: 'm-b1', amount: -500, postedAt: new Date(NOW - DAY) },
-        { externalId: 'm-b2', amount: -500, postedAt: new Date(NOW - DAY) },
+        { externalId: 'm-b1', amount: -500, postedAt: new Date(NOW - DAY), description: 'PAYPAL *SELLERTWO' },
+        { externalId: 'm-b2', amount: -500, postedAt: new Date(NOW - DAY), description: 'PAYPAL *SELLERTWO' },
       ]),
     ]);
 
@@ -124,6 +124,44 @@ describe('bank transaction sync', () => {
     ]);
     const rows = await legs();
     expect(rows.get('m-late')!.pair_id).toBeNull();
+  });
+
+  // Buckets used to span all time: a same-amount leg from months ago made the
+  // bucket 2:1 and blocked this fresh pair forever.
+  it('pairs past a stale same-amount leg outside the window', async () => {
+    await syncBankTransactions(testEnv, [
+      fakeProvider('paypal', [{ externalId: '9ZY87654WV321012K', amount: -42, postedAt: new Date(NOW - 2 * DAY) }]),
+      fakeProvider('mercury', [
+        { externalId: 'm-old', amount: -42, postedAt: new Date(NOW - 60 * DAY), description: 'PAYPAL *OLDSELLER' },
+        { externalId: 'm-new', amount: -42, postedAt: new Date(NOW - DAY), description: 'PAYPAL *NEWSELLER' },
+      ]),
+    ]);
+    const rows = await legs();
+    expect(rows.get('m-new')!.pair_id).toBeTruthy();
+    expect(rows.get('m-new')!.pair_id).toBe(rows.get('9ZY87654WV321012K')!.pair_id);
+    expect(rows.get('m-old')!.pair_id).toBeNull();
+  });
+
+  it('never amount-pairs a Mercury row that does not name PayPal', async () => {
+    await syncBankTransactions(testEnv, [
+      fakeProvider('paypal', [{ externalId: '9ZY87654WV321012K', amount: -89.99, postedAt: new Date(NOW - 2 * DAY) }]),
+      fakeProvider('mercury', [
+        { externalId: 'm-card', amount: -89.99, postedAt: new Date(NOW - DAY), description: 'AMAZON MKTPL', counterparty: 'Amazon' },
+      ]),
+    ]);
+    const rows = await legs();
+    expect(rows.get('m-card')!.pair_id).toBeNull();
+  });
+
+  it('never transfer-pairs a Mercury row without the PayPal ACH descriptor', async () => {
+    await syncBankTransactions(testEnv, [
+      fakeProvider('paypal', [
+        { externalId: TXN_A, amount: 2000, category: 'transfer', postedAt: new Date(NOW - 2 * DAY) },
+      ]),
+      fakeProvider('mercury', [{ externalId: 'm-wire', amount: -2000, postedAt: new Date(NOW - DAY), description: 'WIRE OUT' }]),
+    ]);
+    const rows = await legs();
+    expect(rows.get('m-wire')!.pair_id).toBeNull();
   });
 
   it('a human unpair sticks across re-syncs', async () => {
@@ -208,7 +246,7 @@ describe('bank transaction sync', () => {
         { externalId: TXN_A, amount: 2000, category: 'transfer', postedAt: new Date(NOW - 2 * DAY) },
       ]),
       fakeProvider('mercury', [
-        { externalId: 'm-topup', amount: -2000, postedAt: new Date(NOW - DAY) },
+        { externalId: 'm-topup', amount: -2000, postedAt: new Date(NOW - DAY), description: 'PAYPAL; TRANSFER' },
       ]),
     ]);
     const rows = await legs();
@@ -224,8 +262,8 @@ describe('bank transaction sync', () => {
         { externalId: TXN_A, amount: 2000, category: 'transfer', postedAt: new Date(NOW - 2 * DAY) },
       ]),
       fakeProvider('mercury', [
-        { externalId: 'm-t1', amount: -2000, postedAt: new Date(NOW - DAY) },
-        { externalId: 'm-t2', amount: -2000, postedAt: new Date(NOW - DAY) },
+        { externalId: 'm-t1', amount: -2000, postedAt: new Date(NOW - DAY), description: 'PAYPAL; TRANSFER' },
+        { externalId: 'm-t2', amount: -2000, postedAt: new Date(NOW - DAY), description: 'PAYPAL; TRANSFER' },
       ]),
     ]);
     const rows = await legs();

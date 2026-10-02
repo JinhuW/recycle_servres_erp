@@ -8,6 +8,8 @@ import {
   CloseSellOrderDialog, ReopenSellOrderDialog,
 } from '../../components/CloseSellOrderDialog';
 import { useT } from '../../lib/i18n';
+import { forEachKeysetPage } from '../../lib/keysetPages';
+import { confirmDiscard, useUnsavedGuard } from '../../lib/unsavedGuard';
 import { api, ApiError, archiveSellOrder, unarchiveSellOrder } from '../../lib/api';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { useRoute, navigate, replaceRoute, match } from '../../lib/route';
@@ -111,6 +113,8 @@ type SellOrderLine = LineSpec & {
   warehouseId: string | null;
   // The PO the line's inventory came from; null for a free-typed line.
   sourceOrderId?: string | null;
+  // The lot's # on that PO's page. Absent from a backend older than this bundle.
+  sourceLineNo?: number | null;
   maxQty: number;
 };
 
@@ -119,6 +123,7 @@ type EditLine = LineSpec & {
   _cid: string;                 // stable client id for React keys (never sent to the API)
   inventoryId: string | null;
   sourceOrderId: string | null; // display only — the server derives it from the lot
+  sourceLineNo: number | null;  // display only, as sourceOrderId
   category: SellOrderLine['category'];
   label: string;
   subLabel: string | null;
@@ -145,6 +150,7 @@ const toEditLine = (l: SellOrderLine): EditLine => ({
   warehouse:   l.warehouse,
   condition:   l.condition,
   sourceOrderId: l.sourceOrderId ?? null,
+  sourceLineNo: l.sourceLineNo ?? null,
   ...specOf(l),
 });
 
@@ -175,6 +181,7 @@ function appendSellable(lines: EditLine[], picked: SellableItem[]): EditLine[] {
       warehouse:   it.warehouseName,
       condition:   it.condition,
       sourceOrderId: it.sourceOrderId ?? null,
+      sourceLineNo: it.sourceLineNo ?? null,
       ...specOf(it),
     }));
 }
@@ -270,15 +277,34 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
   // filters survive — and the list refetches on every return, which is what
   // shows a save, archive or discard made on the page.
   const listShown = !open;
+  // The tiles count every order in scope, not the pages the list has loaded;
+  // summing the list capped them at the API's first page.
+  const [serverStats, setServerStats] = useState<Record<string, { count: number; revenue: number }> | null>(null);
   useEffect(() => {
     if (!listShown) return;
     let alive = true;
-    api.get<{ rows: SellOrderSummary[] }>(`/api/sell-orders?${listQuery}`)
-      .then(r => { if (alive) setOrders(r.rows); })
+    // Search and the closed/done toggle filter client-side, so the list holds
+    // every order in scope, a page at a time; the first page paints at once.
+    forEachKeysetPage<SellOrderSummary>(
+      cursor => api.get<{ rows: SellOrderSummary[]; nextCursor: string | null }>(
+        `/api/sell-orders?${listQuery}&limit=200${cursor ? '&cursor=' + encodeURIComponent(cursor) : ''}`,
+      ).then(r => ({ items: r.rows, nextCursor: r.nextCursor ?? null })),
+      (items, { first }) => {
+        if (!alive) return false;
+        setOrders(prev => first ? items : [...prev, ...items]);
+        setLoadedOnce(true);
+      },
+    )
       .catch(handleFetchError)
       .finally(() => { if (alive) setLoadedOnce(true); });
+    api.get<{ byStatus: Record<string, { count: number; revenue: number }> }>(
+      `/api/sell-orders/stats${showClosedDone ? '?includeArchived=true' : ''}`,
+    )
+      .then(r => { if (alive) setServerStats(r.byStatus); })
+      // An older backend has no /stats; the tiles fall back to the list.
+      .catch(() => { if (alive) setServerStats(null); });
     return () => { alive = false; };
-  }, [listQuery, listShown]);
+  }, [listQuery, listShown, showClosedDone]);
 
   // The page shares the list's scroll box; opening an order from far down the
   // list would otherwise land mid-page.
@@ -304,6 +330,10 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
   const stats = useMemo(() => {
     const m: Record<string, { count: number; revenue: number }> = {};
     for (const o of sellOrderStatuses) m[o.id] = { count: 0, revenue: 0 };
+    if (serverStats) {
+      for (const [status, v] of Object.entries(serverStats)) if (m[status]) m[status] = v;
+      return m;
+    }
     // Guard: if lookups didn't load, or an order carries an unknown status,
     // skip it rather than crashing the page.
     orders.forEach(o => {
@@ -313,7 +343,7 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
       entry.revenue += o.total;
     });
     return m;
-  }, [orders]);
+  }, [orders, serverStats]);
 
   if (open) {
     return <SellOrderDetail key={`${open.id}:${open.mode}`} id={open.id} mode={open.mode} onToast={onToast} />;
@@ -643,23 +673,40 @@ type ItemCellLine = LineSpec & {
   partNumber: string | null;
   condition: string | null;
   sourceOrderId?: string | null;
+  sourceLineNo?: number | null;
 };
 
-function LineItemCell({ line, sub, showPo, linkPo }: {
+function LineItemCell({ line, sub, showPo, showLineNo, linkPo }: {
   line: ItemCellLine;
   // The spec text snapshot saved with the line — shown only when the lot
   // can't supply chips (a hand-typed line, a deleted lot, an "Other" item).
   sub: string | null;
   showPo: boolean;
+  // By PO: the card already names the PO, so the line's # on it rides as a
+  // badge by the name — a "#" column read as the sell order's own row number.
+  showLineNo: boolean;
   linkPo: boolean;
 }) {
   const { t } = useT();
   // Condition stays in the text row, so the SSD/HDD chips don't repeat it.
   const chipLine = { ...line, condition: null };
   const po = showPo ? line.sourceOrderId : null;
+  const n = line.sourceLineNo;
+  const from = po && (n != null ? t('sodFromPOLine', { po, n }) : t('sodFromPO', { po }));
   return (
     <td>
-      <div style={{ fontWeight: 500, fontSize: 13 }}>{line.label}</div>
+      <div style={{ fontWeight: 500, fontSize: 13 }}>
+        {line.label}
+        {showLineNo && n != null && line.sourceOrderId && (
+          <span
+            className="chip muted mono"
+            style={{ fontSize: 10, padding: '1px 6px', marginLeft: 6 }}
+            title={t('sodPoLineTitle', { po: line.sourceOrderId, n })}
+          >
+            {t('sodPoLineBadge', { n })}
+          </span>
+        )}
+      </div>
       {lineHasSpecChips(chipLine, true)
         ? <LineSpecChips line={chipLine} withType />
         : sub && <div style={{ fontSize: 11.5, color: 'var(--fg-muted)', marginTop: 3 }}>{sub}</div>}
@@ -668,8 +715,8 @@ function LineItemCell({ line, sub, showPo, linkPo }: {
         {line.condition && (<><span>·</span><span>{line.condition}</span></>)}
         {po && (<><span>·</span>
           {linkPo
-            ? <RouteLink to={'/purchase-orders/' + po} className="mono rec-link">{t('sodFromPO', { po })}</RouteLink>
-            : <span className="mono">{t('sodFromPO', { po })}</span>}
+            ? <RouteLink to={'/purchase-orders/' + po} className="mono rec-link">{from}</RouteLink>
+            : <span className="mono">{from}</span>}
         </>)}
       </div>
     </td>
@@ -897,6 +944,9 @@ function SellOrderDetail({ id, mode, onToast }: {
     || draft.bidParts.length > 0
     || pendingAdjust != null
   );
+  // Back and Cancel left the edit page with its edits and no word.
+  useUnsavedGuard(mode === 'edit' && !!dirty);
+  const leaving = (go: () => void) => () => { void confirmDiscard().then(ok => { if (ok) go(); }); };
 
   // The stepper shows only the forward lifecycle. Closed is an off-ramp
   // reached via the Discard button (CloseSellOrderDialog needs a reason the
@@ -1127,7 +1177,7 @@ function SellOrderDetail({ id, mode, onToast }: {
         <div style={{ minWidth: 0 }}>
           <button
             type="button"
-            onClick={toList}
+            onClick={leaving(toList)}
             disabled={saving || unarchiving}
             style={{
               background: 'none', border: 'none', padding: 0,
@@ -1406,7 +1456,7 @@ function SellOrderDetail({ id, mode, onToast }: {
                         <tbody>
                           {g.items.map(({ line: l }) => (
                             <tr key={l.id}>
-                              <LineItemCell line={l} sub={l.sub} showPo={lineGroup === 'warehouse'} linkPo />
+                              <LineItemCell line={l} sub={l.sub} showPo={lineGroup === 'warehouse'} showLineNo={lineGroup === 'po'} linkPo />
                               {lineGroup === 'po' && <td style={{ fontSize: 12 }}>{l.warehouse ?? t('sodNoWarehouse')}</td>}
                               <td className="num mono">{l.qty}</td>
                               <td className="num mono">{fmtMoney(l.nativeUnitPrice, order.currency, locale)}</td>
@@ -1448,7 +1498,7 @@ function SellOrderDetail({ id, mode, onToast }: {
                             const unavailable = l.inventoryId !== null && l.maxQty <= 0;
                             return (
                             <tr key={l._cid}>
-                              <LineItemCell line={l} sub={l.subLabel} showPo={lineGroup === 'warehouse'} linkPo={false} />
+                              <LineItemCell line={l} sub={l.subLabel} showPo={lineGroup === 'warehouse'} showLineNo={lineGroup === 'po'} linkPo={false} />
                               {lineGroup === 'po' && <td style={{ fontSize: 12 }}>{l.warehouse ?? t('sodNoWarehouse')}</td>}
                               <td className="num">
                                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
@@ -1764,7 +1814,7 @@ function SellOrderDetail({ id, mode, onToast }: {
                     {t('sodDiscard')}
                   </button>
                 )}
-                <button className="btn" onClick={toView} disabled={saving}>
+                <button className="btn" onClick={leaving(toView)} disabled={saving}>
                   {t('cancel')}
                 </button>
                 <button

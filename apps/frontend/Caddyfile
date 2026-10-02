@@ -1,3 +1,13 @@
+# X-Client-IP is what the backend's per-IP limits trust, and only the
+# Cloudflare Worker may set it. Nothing in front of this stack is known to, so
+# a caller's own value is dropped: the backend then falls back to
+# X-Forwarded-For and skips the limits that need a trustworthy address.
+(backend) {
+	reverse_proxy backend:8787 {
+		header_up -X-Client-IP
+	}
+}
+
 :80 {
 	encode gzip
 	# Keep paths and query strings (e.g. /authorize?req=…) off cross-origin Referers.
@@ -11,14 +21,14 @@
 	header Permissions-Policy "camera=(self), microphone=(), geolocation=(), payment=()"
 	# API → backend container.
 	handle /api/* {
-		reverse_proxy backend:8787
+		import backend
 	}
 	# OAuth surfaces — RFC 8414 discovery + /oauth/{authorize,token,consent,…}.
 	handle /oauth/* {
-		reverse_proxy backend:8787
+		import backend
 	}
 	handle /.well-known/* {
-		reverse_proxy backend:8787
+		import backend
 	}
 	# Service Worker: must not be cached by browsers — updates land within one reload.
 	@sw path /sw.js

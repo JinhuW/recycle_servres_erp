@@ -1,4 +1,4 @@
-// PO audit-log helpers — used by routes/orders.ts to record activity from the
+// PO audit-log helpers — used by routes/orders/ to record activity from the
 // moment an order is created. Lives outside the routes file so the diffing
 // logic is reusable from scripts/tests and the call sites in the PATCH /
 // advance handlers stay readable.

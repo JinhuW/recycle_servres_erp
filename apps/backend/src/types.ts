@@ -51,6 +51,9 @@ export type Env = {
   // requests. Unset = loopback-only (dev); set it in production to the real
   // frontend origin(s).
   CORS_ALLOWED_ORIGINS?: string;
+  // The marketing sites whose forms post to /api/public/{intake,quote}.
+  // Comma-separated; a built-in list when unset.
+  PUBLIC_FORM_ORIGINS?: string;
   // Shared secret that the Cloudflare Worker injects (X-Proxy-Secret) on every
   // proxied request. When set, the backend refuses requests that don't carry
   // it — so the public Railway origin can't be hit directly, only via the

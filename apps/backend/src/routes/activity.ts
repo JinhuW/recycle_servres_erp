@@ -4,7 +4,7 @@ import {
   type ActivityAction, type ActivityArea,
 } from '@recycle-erp/shared';
 import { getDb } from '../db';
-import { clampLimit, decodeCursor, encodeCursor } from '../lib/pagination';
+import { clampLimit, cursorTs, cursorTsParam, cursorTsSelect, decodeCursor, encodeCursor } from '../lib/pagination';
 import type { Env, User } from '../types';
 
 // Workspace-wide activity feed — the union of all four audit ledgers
@@ -19,6 +19,7 @@ type FeedRow = {
   area: ActivityArea;
   id: string;
   created_at: string | Date;
+  cursor_ts: string;
   actor_id: string | null;
   actor_name: string | null;
   actor_initials: string | null;
@@ -57,8 +58,9 @@ activity.get('/', async (c) => {
   // documents. Both columns stay uncast so each branch can use its *_feed_idx
   // from migration 0079; all four ledgers key on uuid, so the id compare is
   // type-clean.
-  const cursorFrag = cursor
-    ? sql`(e.created_at, e.id) < (${String(cursor.ts)}::timestamptz, ${cursor.id}::uuid)`
+  const afterTs = cursorTs(cursor);
+  const cursorFrag = afterTs && cursor
+    ? sql`(e.created_at, e.id) < (${cursorTsParam(sql, afterTs)}, ${cursor.id}::uuid)`
     : sql`TRUE`;
   const sinceFrag = since ? sql`e.created_at >= ${since}::timestamptz` : sql`TRUE`;
 
@@ -113,15 +115,15 @@ activity.get('/', async (c) => {
         ORDER BY e.created_at DESC, e.id DESC LIMIT ${limit + 1}`;
 
   const BRANCH: Record<ActivityArea, ReturnType<typeof sql>> = {
-    po: sql`SELECT 'po' AS area, e.id AS id, e.created_at,
+    po: sql`SELECT 'po' AS area, e.id AS id, e.created_at, ${cursorTsSelect(sql, sql`e.created_at`)} AS cursor_ts,
               e.actor_id AS actor_id, act.name AS actor_name, act.initials AS actor_initials,
               e.order_id AS target, e.order_id AS target_ref, e.kind, e.detail
             ${tail('po')}`,
-    so: sql`SELECT 'so' AS area, e.id AS id, e.created_at,
+    so: sql`SELECT 'so' AS area, e.id AS id, e.created_at, ${cursorTsSelect(sql, sql`e.created_at`)} AS cursor_ts,
               e.actor_id AS actor_id, act.name AS actor_name, act.initials AS actor_initials,
               e.sell_order_id AS target, e.sell_order_id AS target_ref, e.kind, e.detail
             ${tail('so')}`,
-    inv: sql`SELECT 'inv' AS area, e.id AS id, e.created_at,
+    inv: sql`SELECT 'inv' AS area, e.id AS id, e.created_at, ${cursorTsSelect(sql, sql`e.created_at`)} AS cursor_ts,
               e.actor_id AS actor_id, act.name AS actor_name, act.initials AS actor_initials,
               COALESCE(NULLIF(l.part_number, ''), NULLIF(l.description, ''),
                        LEFT(l.id::text, 8)) AS target,
@@ -131,7 +133,7 @@ activity.get('/', async (c) => {
     // (ON DELETE SET NULL, so unattributed rows are normal), and it has no kind
     // and no detail — only price, source and note. Synthesise both so the row
     // shape matches its siblings.
-    price: sql`SELECT 'price' AS area, e.id AS id, e.created_at,
+    price: sql`SELECT 'price' AS area, e.id AS id, e.created_at, ${cursorTsSelect(sql, sql`e.created_at`)} AS cursor_ts,
               e.actor_user_id AS actor_id, act.name AS actor_name, act.initials AS actor_initials,
               COALESCE(NULLIF(rp.part_number, ''), rp.label) AS target,
               e.ref_price_id AS target_ref, 'priced' AS kind,
@@ -155,12 +157,7 @@ activity.get('/', async (c) => {
   const slice = hasMore ? rows.slice(0, limit) : rows;
   const last = slice[slice.length - 1];
   const nextCursor = hasMore && last
-    ? encodeCursor({
-        ts: last.created_at instanceof Date
-          ? last.created_at.toISOString()
-          : String(last.created_at),
-        id: last.id,
-      })
+    ? encodeCursor({ ts: last.cursor_ts as string, id: last.id })
     : null;
 
   // ── Pill counts ───────────────────────────────────────────────────────────

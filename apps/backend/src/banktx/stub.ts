@@ -9,11 +9,11 @@ import type {
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function txn(
-  partial: Omit<NormalizedTxn, 'raw' | 'category' | 'settleStatus'>
-    & { category?: BankTxnCategory; settleStatus?: SettleStatus },
+  partial: Omit<NormalizedTxn, 'raw' | 'category' | 'settleStatus' | 'currency'>
+    & { category?: BankTxnCategory; settleStatus?: SettleStatus; currency?: string },
 ): NormalizedTxn {
   return {
-    category: 'external', settleStatus: 'settled', ...partial,
+    category: 'external', settleStatus: 'settled', currency: 'USD', ...partial,
     raw: { stub: true, id: partial.externalId },
   };
 }

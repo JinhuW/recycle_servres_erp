@@ -120,11 +120,18 @@ switches the branch out from under the first.
   startup stays a few seconds) and sweeps any other idle slots, so abandoned
   sessions cannot pile up at ~290 MB each.  `--fresh` forces a new one.
 - A slot counts as idle only if it is clean, on a branch, holds nothing that is
-  not already in `origin/dev`, **and** carries a lock file from a session that
-  has since exited.  Locks live in `.claude/worktrees/.locks/` (outside the
-  checkouts, so they don't show up as untracked files): the launcher records the
-  PID that `exec claude` inherits, and the `--print-only` path records a
-  timestamp that expires after 8h.  A worktree with **no** lock is never touched
+  not already in `origin/dev`, **no process has its working directory inside
+  it**, **and** it carries a lock file from a session that has since exited.
+  Locks live in `.claude/worktrees/.locks/` (outside the checkouts, so they
+  don't show up as untracked files) and hold a claude PID: the launcher's
+  (which `exec claude` inherits), or for `--print-only` the calling session's,
+  found by walking up the process tree.  Only when no claude ancestor exists
+  does `--print-only` fall back to a timestamp that expires after 8h.  The
+  `SessionStart` hook re-records the PID whenever a session starts or resumes
+  inside a slot, unless the lock names another live process.  Choosing a slot
+  and writing its claim happen under a `mkdir` mutex
+  (`.locks/.select`), so two launchers started together can't take the same
+  slot (v1.196.1).  A worktree with **no** lock is never touched
   automatically — it predates the mechanism or was made by hand, so whether
   someone is sitting in it is unknowable.
 - `scripts/new-session.sh --prune` reclaims idle slots on demand and `--list`
@@ -219,9 +226,28 @@ switches the branch out from under the first.
   writes that have to be atomic (notably anywhere `notify` is involved — see
   `lib/notify.ts`) must run inside `sql.begin` and pass `tx` down, not a
   fresh `sql`.
+- **PO routes live in `routes/orders/`, one module per concern** (v1.197.4):
+  `list`, `detail`, `create`, `patch`, `lifecycle` (revert-ack, delete,
+  archive, lot-price reset, advance, hand-off), `evidence` (status meta,
+  photos), `checks` (Review mode) and `spreadsheet`, each a Hono sub-app
+  mounted by `index.ts`.  Helpers two modules share go in `shared.ts`.  A
+  write refused inside its transaction throws `OrderRefusal` (`refusal.ts`)
+  with a typed `kind` and payload, and the handler's catch returns
+  `refusalResponse`.  Don't bring back `throw new Error('__X__')` plus
+  `msg.includes`.
 - **Status guards.**  Purchase orders, sell orders and transfer orders each
   have explicit allowed-transition tables in their route files.  When adding a new state-changing endpoint, extend the existing
   guard — don't write a parallel one.
+- **One lock order: orders rows (sorted) before lines** (v1.197.0).  Lock a
+  PO with `FOR NO KEY UPDATE` unless the transaction deletes it, because
+  `FOR UPDATE` blocks the `FOR KEY SHARE` a line INSERT's FK check takes.  A
+  writer that locks lines and later updates `orders` (goods-total sync, sold
+  settlement) calls `lockOrdersForLinesTx` (`services/orderLocks.ts`) first.
+  Getting this wrong is a 40P01 that surfaces as a 500;
+  `tests/stock-lock-order.test.ts` races the known pairs.
+- **"How much of this line is free" has one implementation**: `committedQtySql`
+  / `committedClaimsByLine` in `lib/sellCommitment.ts`.  Don't hand-roll the
+  `SUM(sol.qty)` subquery again; ten drifted copies is what it replaced.
 - **Order ID counters** are per-type sequences in `id_counters` (see
   `migrations/0029`).  Use `lib/id-seq.ts`; never compute an ID by counting
   rows.
@@ -233,8 +259,15 @@ switches the branch out from under the first.
   negotiated verdict has to be read *before* the line writes
   (`goodsTotalIsMirror`); afterwards a stale mirror and a real override are
   indistinguishable.
+- **A supplier's identity is the SQL function `supplier_name_key()`**
+  (migration 0151), which `suppliers.match_key` is generated from and which
+  the suggestions, package adoption and duplicate lookup all call.  Don't
+  compress a name in TypeScript.
+- **Bank rows carry `currency`** (0153).  Reconciliation is USD-only
+  (`openRowFrag`, `pairEligibleFrag`, autoPair, auto-link, `/link`, `/pair`).
+  A new matcher has to filter on it too.
 - **Upload validation** — every upload route (status-meta evidence and line
-  photos in `orders.ts`/`sellOrders.ts`, `scan.ts`, `publicForms.ts`) and the
+  photos in `routes/orders/`/`sellOrders.ts`, `scan.ts`, `publicForms.ts`) and the
   storage layer (`r2.ts`) enforce both `maxBytes` and `allowedMime` from
   `lib/settings.ts → getUploadLimits()`.
   The allowed set is intersected with `SAFE_UPLOAD_MIME` so a misconfigured
@@ -363,6 +396,27 @@ switches the branch out from under the first.
 
 ## Docker & ops
 
+- **The backend container exits on SIGTERM** (v1.196.1).  The Dockerfile
+  `exec`s `node --import tsx src/server.ts`, so node holds the signal, and
+  `lib/shutdown.ts` stops the loops, drains in-flight requests for 20s, cuts
+  what is left (MCP streams never end on their own), closes the pool and
+  exits by 25s.  A new background loop must return `{ stop }` and join the
+  `loops` list in `server.ts`.  Railway's draining window has to exceed 25s,
+  or SIGKILL lands first.  Don't put `pnpm start` back in the CMD: `sh -c`
+  held PID 1 and forwarded nothing.
+- **`seed.mjs` and `migrate.mjs --reset` refuse a non-local `DATABASE_URL`**
+  (v1.196.1).  Local means `localhost`, `127.0.0.1`, `::1` or the compose
+  `postgres` service.  Override with `ALLOW_DESTRUCTIVE_SEED=true` or
+  `ALLOW_DESTRUCTIVE_RESET=true`.  A shell can carry a `DATABASE_URL` left
+  over from a Railway session, which is how a laptop reseed could reach real
+  data.
+- **The nightly prod→dev copy scrubs credentials**
+  (`deploy/railway-sync/scrub.sql`, v1.196.1).  It truncates the refresh,
+  OAuth and login-attempt tables and nulls OAuth client secrets, inside the
+  restore transaction.  A new table holding a token belongs in that file.  An
+  FK onto a scrubbed table fails `tests/sync-scrub.test.ts`, which is the
+  point.
+
 - `docker-compose.yml` is the prod-shaped stack.  Every service has
   `cap_drop: ALL` + `no-new-privileges` + memory caps + JSON log rotation.
   When you add a service, copy that block.
@@ -416,7 +470,11 @@ switches the branch out from under the first.
 - **The real client IP reaches the backend as `X-Client-IP`**, set by the
   Worker from `CF-Connecting-IP`. Railway rewrites `X-Forwarded-For` to a
   Cloudflare egress address shared by every user, so anything keyed per IP
-  must read `X-Client-IP`.
+  must read `X-Client-IP`.  In the backend that means `lib/clientIp.ts`: `full`
+  to store, `key` (IPv6 grouped by /64) for a limiter.  A limit that would
+  lock people out when every request looks like the same few Cloudflare
+  addresses must skip itself while `X-Client-IP` is absent, as the per-IP
+  login budget does.
 
 ## Infrastructure (Terraform)
 

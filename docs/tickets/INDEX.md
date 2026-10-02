@@ -5,7 +5,20 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-141](./RS-141-edge-hardening-real-client-ip-and-browser-security-h.md) | in-progress | bug | P1 | Edge hardening: real client IP and browser security headers | — |
+| [RS-155](./RS-155-re-review-fixes-unpair-tombstone-64-budgets-limiter.md) | done | bug | P2 | Re-review fixes: unpair tombstone, /64 budgets, limiter eviction, leave guard on navigation, Unicode supplier keys | 1.200.1 |
+| [RS-154](./RS-154-frontend-robustness-one-layout-per-load-unsaved-edit.md) | done | bug | P2 | Frontend robustness: one layout per load, unsaved-edit guard, cross-tab refresh, shared PO permission and material rules | 1.200.0 |
+| [RS-153](./RS-153-lists-and-cursors-microsecond-exact-keyset-cursors-s.md) | done | bug | P2 | Lists and cursors: microsecond-exact keyset cursors, sell-order stats, every list walks its pages | 1.199.0 |
+| [RS-152](./RS-152-sell-order-by-po-shows-the-source-po-line-as-a-po-n.md) | done | story | P2 | Sell order By PO shows the source PO line as a PO #n badge | 1.198.2 |
+| [RS-151](./RS-151-supplier-name-keys-and-bank-pairing-non-latin-names.md) | done | bug | P2 | Supplier name keys and bank pairing: non-Latin names, unpair, bounded pairing windows, currency | 1.198.3 |
+| [RS-150](./RS-150-reporting-money-sales-dated-by-done-purchased-qty-ba.md) | done | bug | P2 | Reporting money: sales dated by Done, purchased-qty basis, lot-price cost, customer tiles, supplier rollups | 1.198.0 |
+| [RS-149](./RS-149-id-in-po-column-on-the-sell-order-page-and-packing-l.md) | done | story | P2 | ID in PO column on the sell order page and Packing list by PO | 1.197.3 |
+| [RS-148](./RS-148-split-routes-orders-ts-into-routes-orders-modules-an.md) | done | task | P3 | Split routes/orders.ts into routes/orders/ modules and type the PATCH refusals | 1.197.4 |
+| [RS-147](./RS-147-line-validation-and-field-clears-one-line-validator.md) | done | bug | P2 | Line validation and field clears: one line validator, CHECK constraints, editor-managed fields can be cleared | 1.197.1 |
+| [RS-146](./RS-146-stock-math-and-lock-order-one-free-quantity-rule-po.md) | done | bug | P1 | Stock math and lock order: one free-quantity rule, PO qty vs committed, deadlock-free locking, lot-price reset | 1.197.0 |
+| [RS-145](./RS-145-sell-order-lines-show-their-source-po-line-number.md) | done | story | P2 | Sell order lines show their source PO line number | 1.196.0 |
+| [RS-144](./RS-144-ops-and-tooling-graceful-shutdown-ci-path-filters-se.md) | done | task | P2 | Ops and tooling: graceful shutdown, CI path filters, session-launcher races, destructive-script guard, prod-to-dev scrub | 1.196.1 |
+| [RS-143](./RS-143-public-surface-hardening-client-ip-limits-cors-split.md) | done | bug | P1 | Public-surface hardening: client-IP limits, CORS split, intake limits, login throttle, consent host | 1.195.0 |
+| [RS-141](./RS-141-edge-hardening-real-client-ip-and-browser-security-h.md) | done | bug | P1 | Edge hardening: real client IP and browser security headers | 1.194.2 |
 | [RS-139](./RS-139-pre-release-review-fixes-for-v1-193-v1-194.md) | done | bug | P2 | Pre-release review fixes for v1.193–v1.194 | 1.194.1 |
 | [RS-138](./RS-138-sell-order-full-page-by-po-by-warehouse-line-switch.md) | done | story | P2 | Sell order full page, by-PO/by-warehouse line switch, spec tags | 1.194.0 |
 | [RS-136](./RS-136-inventory-edits-land-whatever-the-po-stage.md) | done | bug | P2 | Inventory edits land whatever the PO stage | 1.192.1 |

@@ -5,12 +5,19 @@
 import postgres from 'postgres';
 import bcrypt from 'bcryptjs';
 import './load-env.mjs';
+import { dbTarget, destructiveRefusal } from '../src/lib/dbTarget.ts';
 
 const url = process.env.DATABASE_URL;
 if (!url) {
   console.error('DATABASE_URL is not set. Add it to repo-root .env');
   process.exit(1);
 }
+const refusal = destructiveRefusal(url, 'seed', 'ALLOW_DESTRUCTIVE_SEED', process.env);
+if (refusal) {
+  console.error(refusal);
+  process.exit(1);
+}
+console.log(`seeding ${dbTarget(url).host}`);
 // Seeding is sequential, so a small pool suffices. SEED_POOL_MAX lets the test
 // harness shrink it further (many seed subprocesses run in parallel there).
 const sql = postgres(url, { max: Number(process.env.SEED_POOL_MAX) || 8, onnotice: () => {} });
@@ -642,8 +649,9 @@ try {
     const id = 'SO-' + (++soId);
     const created = new Date(Date.now() - s.ago * 86400000);
     await sql`
-      INSERT INTO sell_orders (id, customer_id, status, created_by, created_at, updated_at)
-      VALUES (${id}, ${cust.id}, ${s.status}, ${protoToUuid['u1']}, ${created}, ${created})
+      INSERT INTO sell_orders (id, customer_id, status, created_by, created_at, updated_at, done_at)
+      VALUES (${id}, ${cust.id}, ${s.status}, ${protoToUuid['u1']}, ${created}, ${created},
+              ${s.status === 'Done' ? created : null})
     `;
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i];

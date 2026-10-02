@@ -343,6 +343,7 @@ export function paypalProvider(env: Env): BankProvider {
               accountExternalId: 'primary',
               postedAt: new Date(info.transaction_initiation_date),
               amount,
+              currency: (info.transaction_amount?.currency_code ?? 'USD').toUpperCase(),
               counterparty: counterpartyOf(t),
               description: info.transaction_subject ?? info.transaction_note ?? null,
               paypalTxnId: externalId,

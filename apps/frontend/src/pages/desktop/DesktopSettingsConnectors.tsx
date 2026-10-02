@@ -20,6 +20,9 @@ type Client = {
   createdAt: string;
   lastUsedAt: string | null;
   hasLiveGrant: boolean;
+  // Optional: the Worker can ship ahead of the backend that adds them.
+  redirectUris?: string[];
+  selfRegistered?: boolean;
 };
 
 // The four scopes the backend grants (oauth/server.ts VALID_SCOPES). Order is
@@ -527,6 +530,16 @@ export function DesktopSettingsConnectors() {
                   <td>
                     <div style={{ fontWeight: 500, fontSize: 13.5 }}>{c.name}</div>
                     <div className="mono" style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{c.id}</div>
+                    {/* A self-registered client chose its own name, so the
+                        redirect target is the only thing that identifies it. */}
+                    {c.redirectUris?.map((u) => (
+                      <div key={u} className="mono" style={{ fontSize: 11, color: 'var(--fg-muted)' }}>{u}</div>
+                    ))}
+                    {c.selfRegistered && (
+                      <span className="chip warn" style={{ marginTop: 4 }} title={t('oauthConsentUnverified')}>
+                        {t('connectorsUnverified')}
+                      </span>
+                    )}
                   </td>
                   <td className="mono" style={{ fontSize: 12 }}>{c.scopes.join(' ') || '—'}</td>
                   <td className="mono" style={{ fontSize: 12 }}>{c.grantTypes.join(' ') || '—'}</td>

@@ -5,6 +5,8 @@ import type { Context } from 'hono';
 import { OAUTH_SCOPES, type Env, type OAuthScope, type User } from '../types';
 import { authorizationServerMetadata, protectedResourceMetadata, resolvePublicOrigin, dcrEnabled } from './metadata';
 import { getDb } from '../db';
+import { clientIp } from '../lib/clientIp';
+import { createRateLimiter } from '../lib/rate-limit';
 import { authMiddleware, sha256hex, verifyToken } from '../auth';
 import { createOAuthClient, findOAuthClient, verifyClientSecret, listOAuthClients, revokeOAuthClient } from './clients';
 import { verifyChallenge } from './pkce';
@@ -103,9 +105,10 @@ oauth.post('/register', async (c) => {
     return c.json({ error: 'registration disabled' }, 403);
   }
   const sql = getDb(c.env);
-  const ip = c.req.header('x-forwarded-for')?.split(',')[0]?.trim()
-    || c.req.header('x-real-ip')?.trim()
-    || null;
+  const caller = clientIp((n) => c.req.header(n));
+  const ip = caller.full;
+  // Counted by the limiter key: an IPv6 caller holds a whole /64.
+  const ipKey = ip === null ? null : caller.key;
   // Counted before any work, mirroring the windowed-COUNT throttle on login.
   // `unused` reclaims the case where a script registers repeatedly but never
   // completes a flow — those clients never mint a refresh token. It is
@@ -114,7 +117,7 @@ oauth.post('/register', async (c) => {
   const [counts] = await sql<{ per_ip: number; global_n: number; unused: number }[]>`
     SELECT
       COUNT(*) FILTER (
-        WHERE created_ip IS NOT DISTINCT FROM ${ip}
+        WHERE COALESCE(created_ip_key, created_ip) IS NOT DISTINCT FROM ${ipKey}
           AND created_at > NOW() - INTERVAL '1 hour'
       )::int AS per_ip,
       COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '1 hour')::int AS global_n,
@@ -202,6 +205,7 @@ oauth.post('/register', async (c) => {
     scopes,
     createdBy: null,
     createdIp: ip,
+    createdIpKey: ipKey,
     public: isPublic,
   });
   return c.json({
@@ -441,11 +445,43 @@ async function readFormBody(
   return Object.fromEntries(new URLSearchParams(text));
 }
 
+// /token and /revoke check a bcrypt-hashed client secret on every call and
+// are reachable by anyone, so each is a CPU lever. A connector refreshes a few
+// times an hour; these budgets only bite a loop. A client id is public (it sits
+// in every authorize URL), so once the Worker names the caller the per-client
+// budget is per client *and* address: otherwise anyone could spend a live
+// connector's budget for it. Without X-Client-IP the address is a Cloudflare
+// egress shared by everyone, so only the per-client budget applies.
+const tokenCallsByClient = createRateLimiter(60_000, 60);
+const tokenCallsByAddress = createRateLimiter(60_000, 120);
+// Real ids are 32 hex characters (clients.ts). A longer one can't match a
+// client, and must not become a limiter key: each key is held for the whole
+// window, and the form body allows a megabyte, so the key cap alone would not
+// bound memory.
+const MAX_CLIENT_ID_LEN = 64;
+
+function tokenEndpointBusy(c: Context, clientId: string | undefined): Response | null {
+  if (clientId && clientId.length > MAX_CLIENT_ID_LEN) {
+    return c.json({ error: 'invalid_client' }, 401);
+  }
+  const ip = clientIp((n) => c.req.header(n));
+  const known = !!c.req.header('x-client-ip');
+  // Address first, so a flood from one caller is turned away before it can
+  // mint a per-client key for every id it invents.
+  const wait = (known ? tokenCallsByAddress(ip.key) : null)
+    ?? (clientId ? tokenCallsByClient(known ? `${clientId} ${ip.key}` : clientId) : null);
+  if (wait === null) return null;
+  c.header('Retry-After', String(wait));
+  return c.json({ error: 'temporarily_unavailable' }, 429);
+}
+
 oauth.post('/token', async (c) => {
   const env = c.env;
   const sql = getDb(env);
   const form = await readFormBody(c);
   const creds = readClientCreds(c, form);
+  const busy = tokenEndpointBusy(c, creds?.id);
+  if (busy) return busy;
   // Failed-mint counter: label with the requested grant_type if known, else
   // 'unknown' for top-of-handler rejects (no client/secret means we never
   // got far enough to commit to a particular grant flow).
@@ -599,6 +635,8 @@ oauth.post('/token', async (c) => {
 oauth.post('/revoke', async (c) => {
   const form = await readFormBody(c);
   const creds = readClientCreds(c, form);
+  const busy = tokenEndpointBusy(c, creds?.id);
+  if (busy) return busy;
   if (!creds) return c.json({ error: 'invalid_client' }, 401);
   const sql = getDb(c.env);
   const client = await findOAuthClient(sql, creds.id);
@@ -618,6 +656,10 @@ oauth.post('/revoke', async (c) => {
   return c.json({}, 200);
 });
 
+function hostOf(uri: string): string | null {
+  try { return new URL(uri).host; } catch { return null; }
+}
+
 oauth.get('/authorize/pending/:req', authMiddleware, async (c) => {
   const sql = getDb(c.env);
   const row = (await sql<{
@@ -636,6 +678,12 @@ oauth.get('/authorize/pending/:req', authMiddleware, async (c) => {
     clientId: row.client_id,
     clientName: client.name,
     redirectUri: row.redirect_uri,
+    // The name is whatever the registrant typed — anyone can register a
+    // client called "Claude". Where the code will be sent, and whether a
+    // manager made the client or it registered itself, are what the person
+    // approving can actually check.
+    redirectHost: hostOf(row.redirect_uri),
+    selfRegistered: client.created_by === null,
     scopes: row.scopes,
     codeChallenge: row.code_challenge,
     state: row.state,
@@ -680,6 +728,8 @@ export const oauthAdmin = new Hono<{ Bindings: Env; Variables: { user: User } }>
         name: r.name,
         scopes: r.scopes,
         grantTypes: r.grant_types,
+        redirectUris: r.redirect_uris,
+        selfRegistered: r.created_by === null,
         createdAt: r.created_at,
         lastUsedAt: activityByClient.get(r.id)?.last_used_at ?? null,
         // What the cleanup sweep goes by: a connector with no live refresh

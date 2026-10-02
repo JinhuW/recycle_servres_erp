@@ -48,7 +48,10 @@ portal was removed in v1.191.0; no bid had ever been placed through it.
   family (the access token was 15 minutes until v1.122.0, which made four out
   of five app loads open with a 401, a refresh and a retry before painting).
   No localStorage, no bearer tokens. Refresh-token reuse revokes the whole
-  family.
+  family. **Tabs refresh one at a time** (v1.200.0): the refresh runs under a
+  `navigator.locks` lock, and a tab that sees another tab refreshed after its
+  request began retries instead of presenting the rotated token. Two tabs
+  waking together used to revoke each other's session.
 - **Changing your password keeps you signed in** (v1.191.0) and signs out every
   other session. Until then it signed you out too, up to an hour later: the
   `rt` cookie is scoped to `/api/auth`, so `/api/me/password` never saw it and
@@ -58,6 +61,13 @@ portal was removed in v1.191.0; no bid had ever been placed through it.
   bearer token issued before it is refused (they used to keep working for up to
   60 and 15 minutes). The person changing their own password re-authenticates
   through one silent refresh.
+- **Sign-in locks an email after 5 failures in 15 minutes, and a client IP
+  after 30** (v1.195.0). Each attempt reserves its row before the password is
+  checked, so parallel guesses can't all read "0 failures": 20 at once record
+  at most 5. Refused attempts don't lengthen the lock. The per-IP lock counts
+  across emails and only runs once the Worker's `X-Client-IP` is present.
+  Password hashing runs at most 4 at a time; a caller that queues longer than
+  5 seconds gets a 503 with `Retry-After`.
 - Every mutating request carries `X-Requested-By: recycle-erp`; the CSRF guard
   drops it otherwise. Exempt: safe methods, `/api/health`, and `/api/public/*`
   (the website intake and quote forms and the Shippo webhook, none of which
@@ -459,13 +469,21 @@ on to Sold once every line has sold (v1.164.0).
   page itself, each row of the Cost Payment tab's *Bank payments* ledger is a
   link to that transaction — the Payments page pinned to the PO with that row
   open (v1.167.0).
+- **Every list holds every row in scope** (v1.199.0). The phone PO list, the
+  sell-order inbox and the internal transactions walk the API's pages, as the
+  desktop PO list has since v1.140.1. Until then they each stopped at the
+  first 50 with no sign more existed. The sell-order status tiles come from
+  `GET /api/sell-orders/stats`, so they count every order rather than the
+  loaded ones. The phone Market list shows its true total, with a Load more
+  button. Paging also no longer skips or repeats rows created within the same
+  millisecond, such as a bank sync or an import.
 - **The desktop list holds every PO in scope** (v1.140.1). It used to stop
   silently at the API's first page — the newest 50 — so older orders were
   unreachable and the stage counts, KPI cards, search and sort all ran over
   that slice. It now follows the API's pages to the end: the first page
   paints at once and older pages append behind a "Loading older orders…"
   row until the last one lands. The mobile PO list and the sell-order list
-  still stop at 50.
+  followed in v1.199.0.
 - Managers can reopen a Done PO back to Reviewing (v1.81.0), and since
   v1.132.0 also Done → Ready to Pay and Ready to Pay → Reviewing. Since
   v1.138.5 a move back to Reviewing is refused only while a line sits on a
@@ -477,6 +495,30 @@ on to Sold once every line has sold (v1.164.0).
   can be moved into Other fees (v1.45.0). Fees amortize per line, which is what
   commission is calculated from. `orders.category` and `orders.total_cost` are
   **derived from the lines** — clients must not send `totalCost`.
+- **A pinned lot price says so, and a manager can let go of it** (v1.197.0).
+  When the stored goods total no longer matches the lines, the cost card on
+  desktop and phone labels it "Negotiated lot price". A manager's **Follow line
+  total** button resets it to the line sum, at any stage, logged as a
+  total-cost change. Which totals count as pinned is the server's call: the
+  page's lines show what is left, while the comparison is against what was
+  bought. Judged in the browser, every partly sold PO looked negotiated.
+- **Blanking a field in the PO editor clears it** (v1.197.1). It used to be
+  saved as "no change", so the value came back after a Save that reported
+  success. That covered brand, capacity, type, generation, class, rank, speed,
+  interface, form factor, description, item type, chip #, health and RPM; the
+  inventory editor had the same fix in v1.192.1. Part # and serial # keep their
+  stored value when sent blank. A save that changes nothing no longer sends a
+  purchaser's submitted PO back to Draft.
+- **Every line is checked the same way on the way in** (v1.197.1): qty a whole
+  number of at least 1, unit cost and sell price 0 or more, health 0–100, RPM a
+  whole number above 0, and text fields within a length limit. That holds for
+  a new PO, the PO editor and the inventory editor alike. Negative unit costs
+  and goods totals are also refused by the database.
+- **A qty edit keeps the sold units sold** (v1.197.0). On a partly sold line,
+  a recount in the PO editor or the inventory editor moves the purchased count
+  by the same amount, so the PO's cost and the units sold stay put. The PO
+  editor also refuses a qty below what committed sell orders hold, naming them
+  to a manager.
 - Line specs are per-category: RAM carries Part #, Chip #, Brand, Capacity,
   Generation, Type, Class, Rank and Speed; SSD/HDD carry Interface, Form
   factor, Health % and RPM; Other carries a free item type (v1.47.0).
@@ -557,6 +599,19 @@ on to Sold once every line has sold (v1.164.0).
 
 ## Clients (the people we buy from)
 
+- **Clients named in other scripts no longer collide** (v1.198.3). A name's
+  key kept only A–Z and 0–9, so every Chinese or Vietnamese name keyed as
+  empty. A second such client at the same zip was refused, and every
+  non-Latin package seller "matched" every non-Latin client. Such names now
+  key on their own text; Latin names key exactly as before. Since v1.200.1
+  that covers any name with a non-ASCII character: a mixed name kept only its
+  Latin part, so 'Đức' keyed as 'C' and '王 RAM' and '李 RAM' as one client.
+- **A purchaser's client card counts their own POs** (v1.198.0). Spend, PO
+  count, rhythm, gap and the items list cover only the POs the purchaser
+  owns, where they used to sum every colleague's POs onto the purchaser's
+  own client. The tier stays company-wide, because it ranks business value.
+  A client's items list counts what was bought, not what is left.
+
 Purchase orders had no counterparty until v1.108.0 — who we bought from
 survived only as free text on `shipments.from_name`, `packages.seller_name` and
 a blob in `orders.notes`, which is why payment reconciliation fuzzy-matches
@@ -635,6 +690,12 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   Ready to Pay on. They show dimmed, with a line linking the PO and saying
   to move it back to Reviewing. A save sends only the fields that changed.
 - **Committed sell orders reserve the units they name**, not the whole lot.
+  Since v1.197.0 one rule computes them everywhere. That covers the sell-order
+  picker, a sell order's max qty, the transfer limit, the inventory list's
+  `committed_qty` (managers) and both editors. A recount in the inventory
+  editor may go down to the committed units, not below. A status change waits
+  until nothing is committed; until v1.197.0 any qty edit was refused once a
+  single unit was committed.
 
 ## Sell orders
 
@@ -665,6 +726,22 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
     the "From PO-…" reference under each line.
   - PO references are links in view mode and plain text while editing, since
     the edit page has no leave guard.
+- **A line carries its number on the source PO** (v1.196.0): the `#` the PO
+  page shows for that line.
+  - By PO shows it as a grey `PO #3` badge after the item name, in view and
+    edit mode (v1.198.2). Hovering reads "Line 3 on PO-1432". Each card lists
+    its lines in PO order, and a hand-typed line has no badge. It is a badge,
+    not a column, on purpose: a leading `#` column (v1.196.0) read as the sell
+    order's own row number, and an "ID in PO" column (v1.197.3) was tried and
+    dropped.
+  - By warehouse's reference reads "From PO-1432 #3".
+  - Lines picked in edit mode, from the picker or Inventory → Add to sell order,
+    show the number before saving.
+  - The number is computed live, not stored. It is the line's rank among the
+    PO's lines by position, then creation time, then id, which is also the order
+    the PO page lists them in. Removing a PO line renumbers both pages together.
+    A partial-transfer clone sorts after its source, so the source keeps its
+    number.
 - **Each line shows its spec as tags** (v1.194.0).
   - RAM: Desktop / Server / Laptop, classification, rank and speed (rank and
     speed accented).
@@ -736,7 +813,10 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   (`PO-1442 - DEN`), POs in numeric order, hand-typed lines on a
   `No PO - <warehouse>` tab. Each tab is a warehouse tab in miniature —
   category sections, the RAM device / DDR-generation labels and tints, tick
-  boxes, subtotals and a PO total. A warehouse picker beside the buttons
+  boxes, subtotals and a PO total. Each tab adds an **ID in PO** column after
+  Part # (v1.197.3): the line's # on that PO's page. A row that folds several
+  lots of the PO lists their IDs ascending ("1, 3"). The per-warehouse packing
+  list has no such column, since its tabs mix POs. A warehouse picker beside the buttons
   (shown when the order spans more than one) narrows either packing list to
   one warehouse (`?warehouse=<short>`); the bid sheet always covers the whole
   order. Both packing lists place a line by where its lot is *now* — the lot's
@@ -803,6 +883,25 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
   (v1.179.0).
 - **Internal Mercury↔PayPal transfers are classified out of the unlinked
   queue** (v1.93.0) by counterparty and Mercury kind rules (v1.94.0).
+- **Automatic pairing is stricter about what it guesses** (v1.198.3).
+  - An amount-and-date pair needs the Mercury row to name PayPal (its card
+    descriptor or counterparty), and a transfer pair needs the `PAYPAL;` ACH
+    descriptor. Every real pair in production carried them.
+  - A pair is made only when each leg is the other's sole candidate within
+    the window. A same-amount row from months ago no longer blocks a fresh
+    match forever.
+  - Rows unpaired for 120 days stop being re-examined unless they are still
+    pending.
+- **Ungrouping a pair leaves the PO link on the PayPal leg only**
+  (v1.198.3). It used to stay on both, so the PO's paid figure counted the
+  payment twice. Migration 0152 groups PO-1383's two $2,800 legs, which had
+  the same problem. The freed Mercury leg carries the same PayPal id in its
+  description, so since v1.200.1 it is also kept out of auto-link; until
+  then the next sync linked it straight back.
+- **A payment in another currency is not reconciled** (v1.198.3). Every PO is
+  in USD, so a non-USD row is kept out of matching, pairing and auto-link,
+  can't be linked or grouped by hand, and shows a "EUR · not reconciled" chip
+  in the feed. Every prod row was USD.
 - **Ignore rules** (v1.177.0). *Ignore rules* in the page header keeps a
   manager-edited list: a case-insensitive "contains" match on counterparty or
   description, optionally pinned to one source, with a label. A saved rule
@@ -984,7 +1083,13 @@ status guard.
   transfer may take only `qty − committed` from a line (committed = what
   Shipped and Awaiting-payment sell orders name); more is refused with a 409
   that says how many are free. Before, a partial move split reserved units into
-  a clone the sell order's Done never touched, leaving phantom stock.
+  a clone the sell order's Done never touched, leaving phantom stock. The
+  modal now caps each line at its free units and says how many are committed
+  (v1.197.0).
+- **Moving a whole line a Draft names asks first** (v1.197.0). The line goes
+  out In Transit, so the draft can't be promoted until the transfer is
+  received. The server answers 409 with the drafts, and the modal names them
+  and moves only on "Move anyway".
 - **Receiving a transfer restores each line's own status** (v1.193.0) — the
   `prior_status` its transfer recorded, Reviewing or Done — instead of
   promoting every line to Done; reopen accepts either. The transfer-orders list
@@ -1020,6 +1125,18 @@ over MCP.
 ## Dashboard
 
 Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
+
+- **The money reads the right facts** (v1.198.0):
+  - A sale belongs to the day its sell order became Done
+    (`sell_orders.done_at`), for the tiles, the chart and the contribution
+    cards. Until then it was dated by `updated_at`, which a later note,
+    attachment or archive moved.
+  - A manager's realized cost and profit count a negotiated lot price: a
+    $950 lot sold for $150 is a $800 loss, the same figure the PO page's
+    Realized column shows. Commission stays on the line costs, because the
+    lot price never enters commission.
+  - A purchaser's projected figures are over the PO as bought, so selling
+    part of a line no longer lowers the commission they were shown.
 
 - **The reporting window is two calendar dates in the business time zone**
   (America/Denver), chosen on the desktop by a chip with presets (last 7 /
@@ -1102,6 +1219,24 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   supplier with source `web`, PayPal or cash + pickup per the seller's choice).
   Both endpoints allow 5 submissions a minute per IP and drop a filled honeypot
   silently.
+- **The public forms have a daily ceiling and their own CORS** (v1.195.0).
+  Together they accept 300 submissions or 2 GB of photos per UTC day
+  (workspace settings `public_form_daily_submissions` and
+  `public_form_daily_bytes`), then answer 429 until midnight UTC. The per-IP
+  limit keys on the visitor's real address, with IPv6 grouped by /64; until
+  v1.195.0 every request looked like one of a few Cloudflare servers. One
+  address gets at most 20 a day, so a single sender can't spend the shared
+  budget (v1.195.1), counted per /64 for IPv6 since v1.200.1. An
+  intake post is capped at 25 MiB and each photo at 15 MiB. A photo over 40
+  megapixels, or one that can't be decoded, is refused with a 400 instead of
+  being stored as is. Staff uploads keep sharp's own, much higher, ceiling
+  (v1.195.1). The two form routes answer the marketing-site origins
+  without credentials; those origins get no CORS anywhere else.
+- **Spam and archived submissions are deleted after 30 days** (v1.195.0),
+  together with their photos in R2, by a daily job. A row whose photo delete
+  fails is kept, so the next run retries it. A converted submission is never
+  deleted, even archived later (v1.200.1): it is the PO's record of who sold
+  the lot.
 
 ## MCP and OAuth connectors
 
@@ -1120,7 +1255,14 @@ inventory search, sell-order draft creation.
 - Tool failures answer as normal results with `isError: true`, not JSON-RPC
   errors; only protocol failures are errors. Every tool ships MCP
   `annotations`, without which clients label read-only tools destructive.
-- DCR is open by default, rate-limited per IP and globally.
+- DCR is open by default, rate-limited per IP (per /64 for IPv6 since
+  v1.200.1) and globally.
+- **Consent says where the code goes** (v1.195.0). Any app can register itself
+  under any name, "Claude" included. The consent page therefore names the
+  redirect host and marks a self-registered client **Unverified**. The
+  Settings connector list shows each client's redirect URIs and the same
+  badge. `/oauth/token` and `/oauth/revoke` refuse past 60 calls a minute per
+  client and 120 per client IP.
 
 ## AI scanning and OCR
 
@@ -1262,6 +1404,20 @@ inventory search, sell-order draft creation.
 One bundle, two lazy-loaded shells chosen in `App.tsx`: viewport under 720px →
 `MobileApp`; else `DesktopApp`. The third, the `/v/<token>` vendor portal, was
 removed in v1.191.0.
+
+- **The shell is chosen once per page load** (v1.200.0). Resizing across 720px
+  no longer swaps it, which used to unmount the page mid-edit. Instead a
+  **Switch to phone / desktop layout** button appears at the top. It asks
+  before discarding unsaved edits.
+- **Leaving unsaved edits asks first** (v1.200.0). Escape, Cancel and Back on
+  the desktop PO editor, the sell-order editor, the phone submit form, and
+  desktop submit with unconfirmed lines ask before discarding, and so does a
+  reload or tab close. A dialog closes on the backdrop only when the press and
+  the release both land there, so a drag out of a field no longer shuts it.
+  Since v1.200.1 the sidebar, the phone tab bar, record links and the
+  browser's Back and Forward ask too, and so does backing out of a phone PO.
+  The phone PO's order and products screens are one page, so moving between
+  them never asks. A save that then navigates never asks.
 
 - The desktop shell runs down to 720px. **Under 900px its sidebar folds to a
   64px icon rail** (v1.134.0) — brand mark, nav icons with their names on

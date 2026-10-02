@@ -91,3 +91,25 @@ commit the backend reports before concluding a fix didn't work:
 curl -s https://inventory.recycleservers.com/api/health
 # {"status":"ok","version":"1.46.1","commit":"4afe8d1…"}
 ```
+
+## Trap 3 — `X-Forwarded-For` too: every per-IP limit keyed on Cloudflare
+
+Found 2026-10-02, two months after Trap 1. The rewrite is not limited to
+`X-Forwarded-Host`. The Worker set `X-Forwarded-For` from `CF-Connecting-IP`,
+and the backend read its first entry in four places: login attempts, the
+public forms, password change and DCR. What arrived instead was a Cloudflare
+egress address. Prod's `login_attempts` held 24 distinct "client" IPs in 30
+days (104.22.x, 172.68.x, 162.159.x), shared across every user. So the
+public-form limit of 5/min per IP was really per Cloudflare node, and a
+per-IP login lockout would have locked out the whole company at once.
+
+Nothing failed loudly, because a limit keyed on the wrong address still
+limits. To see it, look at the *data*:
+`SELECT ip, COUNT(DISTINCT email) FROM login_attempts GROUP BY 1`. If a few
+addresses span many users, the header is being rewritten.
+
+The fix is the same private-header pattern. The Worker sends `X-Client-IP`
+(v1.194.2), and the backend reads it through `lib/clientIp.ts` (v1.195.0). A
+limit that would lock people out when the header is missing must skip itself
+then, as the per-IP login budget does, rather than fall back to the shared
+address.

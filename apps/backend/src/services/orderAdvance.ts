@@ -4,7 +4,7 @@
 // used to be a third caller; carrier movement no longer moves a PO.
 //
 // Must run inside the caller's transaction: the lifecycle read, every guard,
-// and all writes happen under one FOR UPDATE lock on the orders row.
+// and all writes happen under one FOR NO KEY UPDATE lock on the orders row.
 
 import { writeOrderEvent } from './orderAudit';
 import { settleSoldTx } from './orderSold';
@@ -423,7 +423,7 @@ export async function advanceOrderTx(
            archived_at, total_cost::float AS total_cost,
            warehouse_id, source, handoff_method, handoff_by,
            EXISTS (SELECT 1 FROM packages p WHERE p.order_id = orders.id) AS has_package
-    FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE`)[0] as
+    FROM orders WHERE id = ${id} LIMIT 1 FOR NO KEY UPDATE`)[0] as
     | { id: string; user_id: string; lifecycle: string; payment: string;
         payment_method: string | null; paypal_txn_id: string | null; created_at: Date;
         archived_at: Date | null; total_cost: number | null; warehouse_id: string | null;

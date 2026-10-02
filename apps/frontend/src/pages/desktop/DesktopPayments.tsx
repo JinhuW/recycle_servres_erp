@@ -212,6 +212,9 @@ type PaymentRow = Omit<Leg, 'source'> & {
   // One human-written note per payment, with who wrote it and when. Added in
   // v1.136.0 — optional for the same deploy-skew reason.
   note?: { text: string; at: string; byName: string | null } | null;
+  // ISO 4217. Added in v1.198.1, optional for the same deploy-skew reason; an
+  // older backend only ever ingested USD.
+  currency?: string;
 };
 
 type Feed = { rows: PaymentRow[]; nextCursor: string | null };
@@ -849,6 +852,13 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh
           {settleChip && (
             <span className={'chip dot ' + settleChip.tone} style={{ fontSize: 10.5, marginLeft: 6 }}>
               {t(settleChip.key)}
+            </span>
+          )}
+          {/* Every PO is in USD, so a row in another currency is never
+              offered a match; this says why it sits there untouched. */}
+          {row.currency && row.currency !== 'USD' && (
+            <span className="chip warn" style={{ fontSize: 10.5, marginLeft: 6 }} title={t('payForeignHint')}>
+              {t('payForeignChip', { cur: row.currency })}
             </span>
           )}
           {/* Here rather than in the Status cell: that cell states one verdict

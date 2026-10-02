@@ -198,6 +198,9 @@ function Shell() {
   useEffect(() => {
     if (!orderDetailMatch || capture.phase !== 'idle') {
       if (detailOrder) setDetailOrder(null);
+      // Off the PO with no line form on top: whatever was typed there was
+      // discarded on the way out, and must not come back on the next visit.
+      if (!orderDetailMatch && capture.phase === 'idle' && detailMeta) setDetailMeta(null);
       return;
     }
     if (detailOrder?.id === orderDetailMatch.id) return;

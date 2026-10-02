@@ -7,7 +7,7 @@ import { notify } from '../lib/notify';
 import { getUploadLimits } from '../lib/settings';
 import { allLimited } from '../lib/concurrency';
 import { log } from '../lib/log';
-import { clampLimit, decodeCursor, encodeCursor, UUID_RE } from '../lib/pagination';
+import { clampLimit, cursorTs, cursorTsParam, cursorTsSelect, decodeCursor, encodeCursor, UUID_RE } from '../lib/pagination';
 import {
   writeSellOrderEvent, diff, META_FIELDS_SO, type AuditChange,
 } from '../services/sellOrderAudit';
@@ -27,7 +27,8 @@ import { canonPartNumberJs } from '../lib/part-number';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { settleSoldTx } from '../services/orderSold';
 import { searchSellableInventory } from '../services/sellableInventory';
-import { committedSellStatuses } from '../lib/sellCommitment';
+import { committedQtySql, committedSellStatuses } from '../lib/sellCommitment';
+import { lockOrdersForLinesTx } from '../services/orderLocks';
 import {
   buildXlsxBuffer, xlsxResponse, datedFilename, type XlsxColumn,
 } from '../lib/xlsx';
@@ -39,6 +40,7 @@ import {
 import { recordSaleDataPoints, recordBidDataPoints, type BidPart } from '../lib/sellOrderMarket';
 import { maybeRenameReceipt } from '../ai/receipt';
 import { shrinkImageToFit } from '../lib/image-shrink';
+import { poLineNo } from '../lib/poLineNo';
 import type { Env, User } from '../types';
 
 const sellOrders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -92,13 +94,15 @@ sellOrders.get('/', async (c) => {
   // order forever; eventually that's an OOM risk and a slow first paint.
   const limit = clampLimit(c.req.query('limit'), 50, 200);
   const cursor = decodeCursor(c.req.query('cursor'));
-  const cursorFrag = cursor
-    ? sql`AND (so.created_at, so.id) < (${cursor.ts}, ${cursor.id})`
+  const afterTs = cursorTs(cursor);
+  const cursorFrag = afterTs && cursor
+    ? sql`AND (so.created_at, so.id) < (${cursorTsParam(sql, afterTs)}, ${cursor.id})`
     : sql`AND TRUE`;
 
   const rows = await sql`
     SELECT
       so.id, so.status, so.notes, so.created_at, so.updated_at, so.archived_at, so.currency_code,
+      ${cursorTsSelect(sql, sql`so.created_at`)} AS cursor_ts,
       (so.adjusted_at IS NOT NULL) AS adjusted,
       c.id AS customer_id, c.name AS customer_name, c.short_name AS customer_short,
       pu.name AS payment_received_by_name,
@@ -118,7 +122,7 @@ sellOrders.get('/', async (c) => {
   const slice = hasMore ? rows.slice(0, limit) : rows;
   const nextCursor = hasMore
     ? encodeCursor({
-        ts: (slice[slice.length - 1] as { created_at: string }).created_at,
+        ts: (slice[slice.length - 1] as { cursor_ts: string }).cursor_ts,
         id: (slice[slice.length - 1] as { id: string }).id,
       })
     : null;
@@ -143,6 +147,24 @@ sellOrders.get('/', async (c) => {
     // current sell-orders inbox UI doesn't go blank while it migrates.
     items: shaped,
   });
+});
+
+// The inbox's status tiles. They were summed in the browser from the first
+// page of the list, so past 50 orders every tile undercounted. Same archive
+// rule as the list; USD, like the list's totals.
+sellOrders.get('/stats', async (c) => {
+  if (c.var.user.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const sql = getDb(c.env);
+  const includeArchived = c.req.query('includeArchived') === 'true';
+  const rows = await sql<{ status: string; count: number; revenue: number }[]>`
+    SELECT so.status, COUNT(DISTINCT so.id)::int AS count,
+           COALESCE(SUM(sol.qty * sol.unit_price), 0)::float AS revenue
+    FROM sell_orders so
+    LEFT JOIN sell_order_lines sol ON sol.sell_order_id = so.id
+    WHERE ${includeArchived ? sql`TRUE` : sql`so.archived_at IS NULL`}
+    GROUP BY so.status
+  `;
+  return c.json({ byStatus: Object.fromEntries(rows.map((r) => [r.status, { count: r.count, revenue: r.revenue }])) });
 });
 
 // Excel export of the sell-order list. Manager-only (every route here is).
@@ -259,6 +281,7 @@ sellOrders.get('/:id', async (c) => {
     pack_warehouse_short: string | null;
     inventory_id: string | null; warehouse_id: string | null;
     source_order_id: string | null;
+    source_line_no: number | null;
     inventory_qty: number | null;
     type: string | null; classification: string | null; rank: string | null;
     speed: string | null; interface: string | null; form_factor: string | null;
@@ -269,6 +292,7 @@ sellOrders.get('/:id', async (c) => {
            sol.source_unit_price::float AS source_unit_price,
            sol.condition, sol.position,
            sol.inventory_id, sol.warehouse_id, ol.order_id AS source_order_id,
+           ${poLineNo(sql, 'ol')} AS source_line_no,
            w.short AS warehouse_short, pw.short AS pack_warehouse_short,
            -- The lot's spec, read live: sell_order_lines keeps only a text
            -- snapshot. Null for a hand-typed line or a deleted lot.
@@ -281,21 +305,13 @@ sellOrders.get('/:id', async (c) => {
            -- validateSellLines would refuse any qty for it on save.
            CASE WHEN ol.id IS NULL THEN NULL
                 WHEN ol.status IN ('Reviewing', 'Done') AND src.archived_at IS NULL
-                THEN ol.qty - elsewhere.qty
+                THEN ol.qty - ${committedQtySql(sql, sql`sol.inventory_id`, { excludeOrderId: id })}
                 ELSE 0 END AS inventory_qty
     FROM sell_order_lines sol
     LEFT JOIN warehouses w ON w.id = sol.warehouse_id
     LEFT JOIN order_lines ol ON ol.id = sol.inventory_id
     LEFT JOIN orders src ON src.id = ol.order_id
     LEFT JOIN warehouses pw ON pw.id = COALESCE(ol.warehouse_id, src.warehouse_id, sol.warehouse_id)
-    LEFT JOIN LATERAL (
-      SELECT COALESCE(SUM(rival.qty), 0)::int AS qty
-        FROM sell_order_lines rival
-        JOIN sell_orders rso ON rso.id = rival.sell_order_id
-       WHERE rival.inventory_id = sol.inventory_id
-         AND rso.id <> ${id}
-         AND rso.status = ANY(${committedSellStatuses()}::text[])
-    ) elsewhere ON TRUE
     WHERE sol.sell_order_id = ${id}
     ORDER BY sol.position
   `;
@@ -375,6 +391,8 @@ sellOrders.get('/:id', async (c) => {
         packWarehouse: l.pack_warehouse_short,
         inventoryId: l.inventory_id, warehouseId: l.warehouse_id,
         sourceOrderId: l.source_order_id,
+        // The line's # on that PO's page.
+        sourceLineNo: l.source_line_no,
         type: l.type, classification: l.classification, rank: l.rank,
         speed: l.speed, interface: l.interface, formFactor: l.form_factor,
         health: l.health,
@@ -426,7 +444,8 @@ async function loadSellOrderSheetData(sql: SqlClient, id: string) {
       sol.label AS sol_label, sol.sub_label AS sol_sub, sol.part_number AS sol_part,
       sol.category AS sol_category, sol.condition AS sol_condition,
       w.short AS warehouse_short,
-      l.id AS inv_id, l.order_id AS source_order_id, l.category, l.brand, l.capacity, l.generation, l.type,
+      l.id AS inv_id, l.order_id AS source_order_id, ${poLineNo(sql, 'l')} AS po_line_no,
+      l.category, l.brand, l.capacity, l.generation, l.type,
       l.classification, l.rank, l.speed, l.interface, l.form_factor, l.description,
       l.part_number, l.chip_number, l.condition, l.health::float AS health,
       l.rpm,
@@ -452,6 +471,9 @@ async function loadSellOrderSheetData(sql: SqlClient, id: string) {
     category: SoCategory; label: string; partNumber: string | null;
     condition: string | null; qty: number; imageUrl: string | null;
     specs: Record<string, string | number>;
+    // The folded lots' # on their PO. Only the by-PO tabs collect it: the
+    // other maps fold several POs together, where a line number names nothing.
+    poLineNos?: number[];
   };
   // Only real public URLs make the sheet — seeded/stub scans carry data: URLs
   // that would render as garbage text in the cell.
@@ -490,13 +512,19 @@ async function loadSellOrderSheetData(sql: SqlClient, id: string) {
         health: (r.health as number | null) ?? '', rpm: (r.rpm as number | null) ?? '',
       } : {},
     });
-    const fold = (map: Map<string, Group>) => {
-      const existing = map.get(key);
-      if (existing) {
-        existing.qty += Number(r.sell_qty ?? 0);
-        if (!existing.imageUrl) existing.imageUrl = publicUrl(r.image_url);
+    const lineNo = r.po_line_no as number | null;
+    const fold = (map: Map<string, Group>, withLineNo = false) => {
+      let g = map.get(key);
+      if (g) {
+        g.qty += Number(r.sell_qty ?? 0);
+        if (!g.imageUrl) g.imageUrl = publicUrl(r.image_url);
       } else {
-        map.set(key, makeGroup());
+        g = makeGroup();
+        map.set(key, g);
+      }
+      if (withLineNo && lineNo != null) {
+        g.poLineNos ??= [];
+        if (!g.poLineNos.includes(lineNo)) g.poLineNos.push(lineNo);
       }
     };
     fold(groups);
@@ -507,7 +535,7 @@ async function loadSellOrderSheetData(sql: SqlClient, id: string) {
     if (!byWarehousePo.has(wh)) byWarehousePo.set(wh, new Map());
     const whPos = byWarehousePo.get(wh)!;
     if (!whPos.has(po)) whPos.set(po, new Map());
-    fold(whPos.get(po)!);
+    fold(whPos.get(po)!, true);
   }
 
   const warehouseOrder = [...byWarehouse.keys()].sort((a, b) => {
@@ -1318,6 +1346,18 @@ sellOrders.post('/:id/status', async (c) => {
       return { kind: 'reopenNeedsNote' };
     }
 
+    // Done rewrites every source PO (goods total, sold settlement) after it
+    // has locked their lines, so those orders are locked first: lines-then-
+    // orders is the order PO PATCH deadlocks against (services/orderLocks.ts).
+    // Before the Draft check below too, which locks the lines.
+    if (body.to === 'Done') {
+      const sources = await tx<{ inventory_id: string }[]>`
+        SELECT inventory_id FROM sell_order_lines
+        WHERE sell_order_id = ${id} AND inventory_id IS NOT NULL
+      `;
+      await lockOrdersForLinesTx(tx, sources.map((r) => r.inventory_id));
+    }
+
     // Leaving Draft is where the order actually claims its inventory, so it's
     // where the one-committed-order-per-line rule is enforced. Drafts are
     // proposals: rivals may name the same line, and the qty they were written
@@ -1361,7 +1401,14 @@ sellOrders.post('/:id/status', async (c) => {
          WHERE id = ${id}
       `;
     } else {
-      await tx`UPDATE sell_orders SET status = ${body.to}, updated_at = NOW() WHERE id = ${id}`;
+      // done_at is the date the sale belongs to (dashboard, contributions).
+      // Done is terminal, so it is set here once and never cleared.
+      await tx`
+        UPDATE sell_orders
+           SET status = ${body.to}, updated_at = NOW(),
+               done_at = CASE WHEN ${body.to} = 'Done' THEN NOW() ELSE done_at END
+         WHERE id = ${id}
+      `;
     }
 
     // Evidence persistence (status_meta upsert). Fires for any transition

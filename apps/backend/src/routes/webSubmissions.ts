@@ -12,7 +12,7 @@ import { authMiddleware } from '../auth';
 import { getDb, type SqlLike } from '../db';
 import { log } from '../lib/log';
 import { requireManager } from '../lib/role';
-import { clampLimit, decodeCursor, encodeCursor, escapeLike } from '../lib/pagination';
+import { clampLimit, cursorTs, cursorTsParam, cursorTsSelect, decodeCursor, encodeCursor, escapeLike } from '../lib/pagination';
 import { copyAttachment, deleteAttachments } from '../r2';
 import { insertDraftOrderTx } from '../services/orderDraft';
 import { syncOrderCategory } from '../services/orderCategory';
@@ -45,6 +45,8 @@ function ramType(classification: string | null | undefined): string | null {
 
 type Row = {
   id: string; site: string; kind: string; status: Status;
+  // The list's keyset value, µs-exact; absent on the single-row reads.
+  cursor_ts?: string;
   name: string | null; company: string | null; email: string; phone: string | null;
   notes: string | null; source: string | null; payload: Record<string, unknown>;
   order_id: string | null; staff_note: string | null;
@@ -88,12 +90,13 @@ webSubmissions.get('/', async (c) => {
     ? sql`(w.id ILIKE ${'%' + escapeLike(q) + '%'} OR w.email ILIKE ${'%' + escapeLike(q) + '%'}
            OR w.name ILIKE ${'%' + escapeLike(q) + '%'} OR w.company ILIKE ${'%' + escapeLike(q) + '%'})`
     : sql`TRUE`;
-  const cursorFrag = cursor
-    ? sql`(w.created_at, w.id) < (${String(cursor.ts)}::timestamptz, ${cursor.id})`
+  const afterTs = cursorTs(cursor);
+  const cursorFrag = afterTs && cursor
+    ? sql`(w.created_at, w.id) < (${cursorTsParam(sql, afterTs)}, ${cursor.id})`
     : sql`TRUE`;
 
   const rows = await sql<Row[]>`
-    SELECT w.*, u.name AS handled_by_name,
+    SELECT w.*, u.name AS handled_by_name, ${cursorTsSelect(sql, sql`w.created_at`)} AS cursor_ts,
            (SELECT COUNT(*) FROM web_submission_photos p WHERE p.submission_id = w.id)::int AS photo_count
     FROM web_submissions w
     LEFT JOIN users u ON u.id = w.handled_by
@@ -104,7 +107,7 @@ webSubmissions.get('/', async (c) => {
   const page = rows.slice(0, limit);
   const last = page[page.length - 1];
   const nextCursor = rows.length > limit && last
-    ? encodeCursor({ ts: new Date(last.created_at).toISOString(), id: last.id })
+    ? encodeCursor({ ts: last.cursor_ts!, id: last.id })
     : null;
 
   // Tab counts follow the site and search filters but not the status one, so
@@ -186,9 +189,10 @@ webSubmissions.patch('/:id', async (c) => {
 // this form files (sourced by one of its channels), before anything is
 // inserted.
 //
-// The unique index is on the generated match_key — alnum(name) + zip — which
-// is the wrong identity for an email: john.smith@ and johnsmith@ compress to
-// the same key, and so can any house account someone typed by hand. Upserting
+// The unique index is on the generated match_key — supplier_name_key(name) +
+// zip — which is the wrong identity for an email: john.smith@ and johnsmith@
+// compress to the same key, and so can any house account someone typed by
+// hand. Upserting
 // on it filed one seller's lot under somebody else. A key collision therefore
 // means a different seller holds that key, and this one is inserted under a
 // name that keeps it distinct.

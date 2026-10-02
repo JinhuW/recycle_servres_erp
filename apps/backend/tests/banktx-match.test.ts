@@ -21,6 +21,7 @@ function fakeProvider(source: BankSource, txns: TxnSpec[]): BankProvider {
           source,
           accountExternalId: `${source}-acct`,
           postedAt: new Date(NOW),
+          currency: 'USD',
           counterparty: null,
           description: null,
           paypalTxnId: null,

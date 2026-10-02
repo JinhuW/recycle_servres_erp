@@ -92,7 +92,11 @@ export default {
     // X-Forwarded-For is one of the headers Railway's edge rewrites, so on its
     // own it reaches the backend as a Cloudflare egress address shared by every
     // user. X-Client-IP is private, passes through intact, and is what the
-    // backend's per-IP limits key on. `set` drops any value the caller sent.
+    // backend's per-IP limits key on. The proxied request starts as a copy of
+    // the caller's, so both are cleared first: a caller-sent X-Client-IP must
+    // never survive to pick its own rate-limit key.
+    proxied.headers.delete('X-Forwarded-For');
+    proxied.headers.delete('X-Client-IP');
     const clientIp = request.headers.get('CF-Connecting-IP');
     if (clientIp) {
       proxied.headers.set('X-Forwarded-For', clientIp);

@@ -17,6 +17,483 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.200.1] - 2026-10-02
+
+Fixes from the closing re-review of the remaining code-review work (RS-155),
+over everything since v1.194.0.
+
+### Fixed
+
+- **Ungrouping a pair no longer counts the payment twice at the next sync.**
+  Unpairing left the PO link on the PayPal leg and freed the Mercury leg, but
+  the Mercury leg reads the same PayPal id out of its description. The
+  six-hourly auto-link then linked it straight back to the PO, and the paid
+  figure counted the payment twice, the state the v1.198.3 change was meant to
+  end. The freed leg now gets the same "don't auto-link" mark a manual Unlink
+  leaves. A leg carrying a different id was never this payment and stays
+  linkable.
+- **Unsaved edits are asked about on every way out.** v1.200.0 asked on each
+  screen's own Escape, Cancel and Back. The sidebar, the phone tab bar, record
+  links and the browser's Back and Forward still dropped the edits silently,
+  and the phone PO screen didn't ask at all. Routing now checks before any
+  change that would unmount a screen holding edits. A Back is undone while the
+  question is up, and a second Back during it is ignored. Moving between the
+  phone PO's order and products screens (one page) never asks, and a save that
+  then navigates never asks. Discarding on the phone now really discards: the
+  typed fee used to come back on the next visit.
+- **IPv6 senders are counted per /64.** The public forms' 20-a-day share per
+  address and the connector-registration per-IP limit compared stored full
+  addresses, so a sender rotating through its /64 got a fresh count every
+  time. Both now count by the same /64 key the per-minute limits use (new
+  `ip_key` / `created_ip_key` columns, migration 0155).
+- **A throttled caller can't reset its own limit with a flood.** At its key
+  cap, the in-memory rate limiter evicted the oldest keys first, which is
+  usually the one being throttled; a burst of made-up keys gave it a fresh
+  budget. Keys being refused are now evicted last.
+- **Mixed-script client names no longer merge.** The v1.198.3 key fell back
+  to the full name only when no A–Z or 0–9 was left, so 'Đức' keyed as 'C', and
+  '王 RAM' and '李 RAM' keyed as the same client. A name with any non-ASCII
+  character now keys on its whole text (migration 0154). ASCII names key as
+  before. Prod had no such names.
+- **A converted web submission is never purged.** One archived by hand after
+  conversion was deleted after 30 days, taking the PO's record of who sold the
+  lot with it.
+- **The phone Market's Load more can't splice in the previous filter's
+  page** when the filter or search changes while it is loading.
+
+### Changed
+
+- A login against an email or address that is already locked is refused on a
+  single read, with no attempt row written and deleted.
+- The sellable-inventory search computes each line's committed quantity once,
+  not twice.
+- The inventory editor uses the shared `specVal` instead of its own copy.
+
+## [1.200.0] - 2026-10-02
+
+Frontend robustness (RS-154), batch 8b and the last of the remaining
+code-review work.
+
+### Changed
+
+- **The layout is picked once per page load.** The app used to swap between
+  the phone and desktop shells whenever the window crossed 720px, so rotating
+  a tablet or snapping a window to half the screen unmounted the page and
+  everything typed into it. It now keeps the shell it opened with. When the
+  window crosses the line, a "Switch to phone layout" (or desktop) button
+  appears at the top, and it asks before throwing away unsaved edits.
+
+### Fixed
+
+- **Leaving an edit screen asks before dropping edits.** Escape, Cancel and
+  Back on the desktop PO editor, the sell-order editor, the phone submit form,
+  and desktop submit with unconfirmed lines now ask first. So does reloading
+  or closing the tab. Until now the typing just went.
+- **A dialog no longer closes when a drag ends on its backdrop.** Selecting
+  text in a field and releasing the mouse outside the panel counted as a
+  backdrop click. A dialog now closes only when the press and the release are
+  both on the backdrop.
+- **Two tabs no longer sign each other out.** When their access tokens
+  expired together, both tabs refreshed with the same refresh cookie. The
+  second presented a token the first had just rotated, which reads as reuse
+  and revokes the whole session. Refresh now runs under a browser lock, and a
+  tab that finds another tab refreshed after its request began just retries.
+- **A deep-linked PO no longer leaves "Loading…" stuck** when the route moves
+  away, or to another order, before the fetch returns.
+- **The phone no longer treats a commission change as a material edit.** The
+  backend never did, so the phone warned about a revert to Draft that did not
+  happen. The list of material PATCH keys now lives in `@recycle-erp/shared`
+  and the backend reads it from there. The desktop editor and phone detail
+  derive their edit, annotate, reopen and delete rights from one
+  `derivePoPermissions`.
+
+## [1.199.0] - 2026-10-02
+
+Lists and cursors (RS-153), batch 8a of the remaining code-review work.
+
+### Fixed
+
+- **Paging no longer drops rows created in the same millisecond.** Keyset
+  cursors were encoded from the timestamp postgres.js hands back as a JS Date,
+  which keeps milliseconds only. The next page then started up to 999 µs
+  early or late, skipping or repeating every row in that window, and a bank
+  sync or an import writes dozens in one millisecond. The PO list, sell
+  orders, the bank feed, internal transactions, web submissions and the
+  activity feed now encode the cursor from the column as µs-exact text, and
+  compare against it cast through text. A cursor whose timestamp isn't one
+  reads as page one instead of a 500. The transfer-orders list already worked
+  this way.
+- **Every list shows every row.** The phone PO list, the sell-order inbox and
+  the internal transactions loaded the API's first 50 and stopped, with
+  nothing to say more existed. They now walk the pages, painting the first at
+  once. The sell-order status tiles, which were summed from those 50, come
+  from a new `GET /api/sell-orders/stats`. The phone Market list said "100
+  SKUs" and showed 30. It now states the real total and loads more on
+  request. The desktop submit screen's "add to an existing draft" list asks
+  for the user's own drafts, which a manager's first page of everyone's could
+  leave out.
+
+## [1.198.3] - 2026-10-02
+
+Supplier keys and bank pairing (RS-151), batch 7b of the remaining code-review
+work.
+
+### Fixed
+
+- **Clients named in other scripts no longer collide.** A supplier's key kept
+  only A–Z and 0–9, so every name in Chinese, Vietnamese or any other script
+  keyed as empty. A second such client at the same zip was refused as a
+  duplicate, and the suggestions rail matched every non-Latin seller to every
+  non-Latin client. Migration 0151 adds one SQL function,
+  `supplier_name_key()`, that keys such names on their own trimmed text. The
+  generated column, the suggestions, package adoption and the duplicate check
+  all call it. A Latin name keys exactly as before; prod had no empty key.
+- **Ungrouping a pair no longer double-counts a payment.** Grouping spreads
+  the PO link, the owner and the internal transaction onto both legs, and
+  ungrouping left them there: two unpaired rows linked to one PO, whose paid
+  figure then counted the payment twice. Ungroup now keeps them on the PayPal
+  leg only. Migration 0152 groups the one prod case the bug left behind:
+  PO-1383's $2,800 PayPal payment and the Mercury debit that funded it, six
+  days apart.
+- **Automatic pairing guesses less.**
+  - An amount-and-date pair now needs the Mercury row to name PayPal, and a
+    transfer pair needs the `PAYPAL;` ACH descriptor, so a card charge or a
+    wire of the same amount no longer pairs. Every real pair in prod carried
+    the marker.
+  - A pair is made only when each leg is the other's sole candidate within
+    the window. Amounts used to be bucketed across all time, so one
+    same-amount row from months ago blocked a fresh match forever.
+  - Unpaired rows older than 120 days, unless pending, are no longer reread
+    on every sync.
+- **A payment in another currency stays out of reconciliation.** Every PO is
+  in USD, and every amount comparison assumed the bank rows were too.
+  Migration 0153 adds `bank_transactions.currency`, filled from each
+  provider. A non-USD row is never matched, paired or auto-linked, and `/link`
+  and `/pair` refuse it. The feed marks it "EUR · not reconciled". Every prod
+  row was USD.
+
+## [1.198.2] - 2026-10-02
+
+The sell order page shows the source PO line as a badge again (RS-152).
+
+### Changed
+
+- **By PO: a `PO #3` badge by the item name replaces the "ID in PO" column.**
+  The 1.197.3 column was reverted on request.
+  - By PO now puts a grey `PO #3` pill after each line's name, which is the
+    design picked before the column was tried. Hovering it reads "Line 3 on
+    PO-1432".
+  - By warehouse has no column again, and its detail row reads
+    `From PO-1432 #3`, as in 1.196.0.
+  - The Packing list by PO spreadsheet keeps its "ID in PO" column. A badge
+    can't exist in a spreadsheet, and that column was asked for separately.
+
+## [1.198.0] - 2026-10-02
+
+Reporting money (RS-150), batch 7a of the remaining code-review work.
+
+### Fixed
+
+- **A sale stays in the month it was made.** The dashboard and the
+  contribution cards dated sales by `sell_orders.updated_at`. Every later
+  edit moves that column, so a note, an attachment or an archive months
+  afterwards dragged a sale into the current period. Migration 0150 adds
+  `done_at`, set the moment an order becomes Done and never cleared (Done is
+  terminal). It is backfilled from the status-change event, then the Done
+  evidence row, then `updated_at`.
+- **Realized profit counts the lot price.** A manager's realized cost and
+  profit added only each line's cost and fee share, so a lot bought for $950
+  over one $100 line showed a $50 profit when it sold for $150. They now use
+  what the unit actually cost the company, the same figure the PO page's
+  Realized column shows. Commission is unchanged: the lot price never enters
+  it.
+- **A partial sale no longer lowers a purchaser's projected commission.** The
+  purchaser tiles, chart, ranking, categories and contribution cards
+  multiplied by `qty`, which a partial sale decrements. They now multiply by
+  the quantity bought. A client's items list on the supplier page does the
+  same.
+- **Customer revenue is what sold.** `lifetime_revenue` summed every sell
+  order line, Drafts and Closed orders included, and `outstanding` was
+  everything not yet Done. Revenue is now Done orders only (archived ones
+  included). What is owed is Shipped and Awaiting payment.
+- **A purchaser's client card counts their own POs.** Spend, PO count, the
+  rhythm strip, the median gap and the items list summed every user's POs
+  onto a purchaser's own client, which told them what colleagues bought
+  there. They now cover the caller's POs. The tier stays company-wide.
+
+## [1.197.4] - 2026-10-02
+
+Structure only (RS-148), batch 6b of the remaining code-review work. Nothing
+a user sees changes.
+
+- **`routes/orders.ts` is now `routes/orders/`.** The 3,632-line file holding
+  all 24 PO routes is one module per concern, each a Hono sub-app mounted by
+  `index.ts`: list, detail, create, the PATCH, lifecycle moves, evidence,
+  Review mode and the spreadsheet. Helpers more than one module uses live in
+  `shared.ts`. The code moved verbatim.
+- **Refusals inside a PO write are typed.** PATCH, the status-meta
+  attachments and the line photos used to throw message strings like
+  `'__DONE_LOCKED__'` and match them with `includes()`. Their payload went
+  through variables captured from the handler, and a refusal added on one
+  side and missed on the other fell through as a 500. They now throw
+  `OrderRefusal` with a typed kind and payload, mapped by one
+  `refusalResponse` to the same status codes and bodies.
+
+## [1.197.3] - 2026-10-02
+
+The source PO line number gets its own "ID in PO" column, on the sell order page
+and in the Packing list by PO (RS-149).
+
+### Changed
+
+- **"ID in PO" replaces the `#` column on the sell order page.** In 1.196.0, By
+  PO showed a line's number on its source PO in a leading `#` column. That is
+  where a table's own row number sits, and when an order takes lines 1, 2, 3 of
+  a PO the column read exactly like row numbering. The number now has an "ID in
+  PO" column right after Item, in both views and in view and edit mode. By
+  warehouse gets the column too, so its detail row goes back to "From PO-1432".
+  By PO's No PO card still has no column.
+
+### Added
+
+- **"ID in PO" in the Packing list by PO spreadsheet.** Every by-PO tab has an
+  ID in PO column after Part #, so a picker can match a row back to the PO page.
+  A row that folds several lots of the same PO lists their IDs ascending
+  (`1, 3`).
+  - Only the by-PO aggregation collects IDs. The bid sheet and the
+    per-warehouse packing list fold several POs into one row, where a line
+    number means nothing.
+  - The price import still can't read a pack tab, which has no price header.
+
+## [1.197.1] - 2026-10-02
+
+Line validation and field clears (RS-147), batch 6a of the remaining
+code-review work.
+
+- **A field blanked in the PO editor stays blank.** PATCH wrote every spec
+  field with COALESCE, so the `null` a cleared dropdown sends read as "no
+  change". The save said it worked and the old value came back. The fields
+  the line editors own now land as sent, with null clearing them, and keep
+  their stored value only when left out. Those are brand through RPM, plus
+  item type and chip #. Part #, serial #, condition, qty, cost and the scan
+  fields keep the old behaviour, because the editors leave the scan fields
+  out and inventory grouping is keyed on the part #. The inventory editor had
+  the same fix in 1.192.1.
+- **An edit that changes nothing no longer costs a PO its stage.** Whether a
+  purchaser's save was a material edit was judged on the raw value sent. An
+  echoed `null` on a field that null leaves alone counted as a change and
+  sent the submitted PO back to Draft. It is now judged on what will land.
+- **One validator checks every line.** Creating a PO checked no numbers at
+  all, so a negative unit cost was stored and a qty of 0 surfaced as "A line
+  value is out of range". The PO editor and the inventory editor each checked
+  a different subset. All three now share `lib/orderInput.ts`, covering qty,
+  unit cost, sell price, health, RPM and text length and type. Errors on a
+  new PO name the line.
+- Migration 0149 adds `CHECK (unit_cost >= 0)` and `CHECK (total_cost >= 0)`
+  as the backstop; prod had no violating row.
+
+## [1.197.0] - 2026-10-02
+
+Stock math and lock order (RS-146), batch 5 of the remaining code-review work.
+
+### Fixed
+
+- **PO writers no longer deadlock each other.** PO PATCH locked the order and
+  then its lines. The inventory editor and a sell order's Done went the other
+  way, locking lines and only later updating the order's goods total, and
+  every order lock was `FOR UPDATE`, which also blocked a transfer's line
+  insert. Two such edits at once could end with Postgres aborting one as a
+  deadlock, which the user saw as a 500. On 1.196.1 a test reproduces it for
+  the inventory editor and for partial transfers. Every writer now locks the
+  orders first, in id order, with `FOR NO KEY UPDATE` wherever the order isn't
+  being deleted.
+- **One rule says how much of a line is free.** The quantity committed sell
+  orders hold was computed by about ten hand-written queries that had drifted
+  apart. The worst was the inventory editor: it refused any qty edit once a
+  single unit was committed. All of them now share one helper. A recount may
+  go down to the committed units, not below, and a status change waits until
+  nothing is committed. Validating a sell order's lines takes one query
+  instead of one per line.
+- **The PO editor can't cut a line below what is committed.** Lowering a qty
+  under the units a committed sell order holds now answers 409 and names the
+  order to a manager, and the lines are locked so a promotion can't slip in
+  between. A recount of a partly sold line, in either editor, moves the
+  purchased count with it, so the units already sold stay sold and the PO's
+  cost stays put.
+- **The transfer modal offers only what can move.** It caps each line at its
+  uncommitted units and says how many are held. Moving a whole line that a
+  draft sell order names now asks first: the line goes out In Transit and the
+  draft can't be promoted until it is received.
+- **A pinned lot price can be released.** A goods total that no longer matches
+  the lines is a negotiated price and survives every edit, so a stale one
+  could only be fixed in psql. The cost card now labels it "Negotiated lot
+  price", and managers get a "Follow line total" button on desktop and phone
+  (`POST /api/orders/:id/total-cost/follow-lines`), logged as a total-cost
+  change. The server now reports whether a total is pinned. The page judged it
+  from the units left, so every partly sold PO looked negotiated.
+- Migration 0148 releases PO-1339's stale $8,500. A 2026-07-23 hand clone
+  moved its only line to PO-1353 and left the figure behind, so that lot was
+  costed twice. The migration is guarded on the id, the amount and an empty
+  line set.
+
+## [1.196.1] - 2026-10-02
+
+Ops and tooling (RS-144), batch 4 of the remaining code-review work.
+
+- **A redeploy no longer kills requests mid-flight.** The container started
+  the backend through `sh -c "… && pnpm start"`. The shell held PID 1 and
+  forwarded no signal, so every redeploy ended in SIGKILL at the draining
+  deadline, and a write in progress rolled back after its client had given up.
+  The CMD now `exec`s node directly. On SIGTERM the backend stops its
+  background loops, gives in-flight requests 20 seconds, cuts whatever is
+  still open (an MCP stream never closes on its own), closes the database pool
+  and exits by 25 seconds. Railway's draining window must be longer than that
+  for the exit to be clean; raising it is a separate ops step.
+- **CI notices root manifest changes.** A change to only `pnpm-lock.yaml`,
+  `package.json`, `pnpm-workspace.yaml`, `tsconfig.base.json`, `.npmrc` or
+  `.nvmrc` ran no tests and deployed no Worker, though it changes what every
+  package builds with. Both workflows now trigger on them. `version-check`
+  counts them, plus `backup/` and `infra/`, as code that needs a version bump.
+- **Two sessions can't be handed the same worktree.** `new-session.sh` picked
+  an idle slot and wrote its claim in separate steps, so two launchers
+  started together could both pick one slot. The second `checkout -B` then
+  swapped the branch under the first session. Choosing and claiming now happen
+  under a mutex, and the claim is written the moment a slot is picked.
+  `--print-only` records the calling session's claude PID instead of an 8-hour
+  timestamp, whose expiry is how a running session's worktree once got swept.
+  Any process with its working directory inside a slot keeps it live. The
+  `SessionStart` hook records the session's PID whenever it starts or resumes
+  inside a slot.
+- **The seed and reset scripts refuse a remote database.** `seed.mjs` deletes
+  every order and `migrate.mjs --reset` drops every table. A `DATABASE_URL`
+  left in a shell from a Railway session was all it took to point either at
+  real data. Both now exit before connecting unless the host is local, or
+  `ALLOW_DESTRUCTIVE_SEED` / `ALLOW_DESTRUCTIVE_RESET` is set.
+- **The nightly prod→dev copy no longer carries live credentials.** Refresh
+  tokens, OAuth grants and client secrets copied to dev would have kept
+  working against prod's own backend for anyone with dev database access.
+  `deploy/railway-sync/scrub.sql` now runs inside the restore transaction. It
+  truncates those tables and the login attempts, and nulls OAuth client
+  secrets. Password hashes stay, so people sign in to dev as themselves. A
+  test runs the scrub against the migrated schema, so an FK added later fails
+  CI instead of the 04:00 restore.
+
+## [1.196.0] - 2026-10-02
+
+A sell order line now shows its number on the PO it came from (RS-145).
+
+### Added
+
+- **PO line numbers on sell order lines.** The By PO view (1.194.0) grouped
+  lines under their PO, but a line didn't say which line of that PO it was.
+  Matching it back meant reading part numbers against the PO page. Each line
+  now carries the `#` the PO page shows for it:
+  - By PO, every PO card has a `#` column and lists its lines in PO order.
+  - By warehouse, the reference reads "From PO-1432 #3".
+  - Lines picked in edit mode, from the picker or Inventory → Add to sell order,
+    show the number before saving.
+  - `search_sellable_inventory` (MCP) returns it as `sourceLineNo`.
+
+### Changed
+
+- **A PO's lines list in a fully stable order.** Nothing stores a line number.
+  The PO page numbers lines by their index in the order the server returns,
+  and that order was `position` alone. A partial inventory transfer clones a
+  line *at its source's position*, so the two tied rows could swap between
+  loads and renumber the page. The PO detail and the PO spreadsheet now order by
+  `(position, created_at, id)`. The sell order computes its numbers by the same
+  key, in `lib/poLineNo.ts`, so the clone always sorts after its source and the
+  source keeps the number a sell order already shows for it.
+
+## [1.195.1] - 2026-10-02
+
+Fixes to 1.195.0 (RS-143) from a code review before it reached production.
+
+- **The OAuth token endpoint can't be made to hold memory.** 1.195.0 keyed a
+  limiter on the caller's `client_id`, and the form body allows a megabyte.
+  Each invented id stayed in memory for a minute, so the 50,000-key cap
+  bounded the count but not the size. A client id over 64 characters (real
+  ones are 32) is now refused before it becomes a key, and the per-address
+  budget runs first.
+- **Large staff screenshots are shrunk again.** The 40-megapixel cap meant for
+  the anonymous sell form applied to staff uploads too. A long scrolling
+  screenshot of a chat or a PayPal page, filed as payment evidence, got a 413
+  where it used to be downscaled. Staff uploads are back to sharp's own
+  ceiling. Anonymous and staff re-encodes also queue separately now, so a
+  flood through the public form can't make a staff upload wait or fall back.
+- **One sender can't close the public forms for everyone.** Pacing under the
+  5-a-minute limit, a single address could use the whole 300-a-day budget.
+  Each address the Worker names now gets 20 a day.
+- **The submissions purge keeps rows it can't clean up.** Without R2
+  configured, the delete call reports success for objects it never touched,
+  so the rows went and their photos stayed. Rows with real photos now wait for
+  a run that has R2. Batches also walk an id cursor, so rows whose deletes keep
+  failing can't hold the head of the queue.
+- A sign-in whose attempt record failed to save no longer leaves a row that
+  counts as a failure.
+- The Docker stack's Caddy drops a caller's `X-Client-IP` instead of passing it
+  to the backend, and password-change attempts record the address group as
+  sign-ins do.
+
+## [1.195.0] - 2026-10-02
+
+Public-surface hardening (RS-143), batch 3b of the remaining code-review work.
+It builds on the `X-Client-IP` header the Worker started sending in 1.194.2.
+
+### Fixed
+
+- **Per-IP limits key on the visitor, not on Cloudflare.** Four copies of the
+  IP lookup read `X-Forwarded-For`, which Railway rewrites to one of a few
+  Cloudflare addresses. So one busy visitor could exhaust the public-form limit
+  for everyone, and a login lockout per IP would have locked out the company.
+  One `clientIp()` helper now reads `X-Client-IP` first. Limiters group IPv6 by
+  /64, since one client can rotate through a whole /64. The in-memory limiter
+  also forgets expired keys and stops at 50,000; before, it kept every address
+  it had ever seen. The Worker now clears any `X-Client-IP` or
+  `X-Forwarded-For` the caller sent before setting its own, so a request that
+  somehow arrives without `CF-Connecting-IP` can't pick its own rate-limit key.
+- **The login lock holds under parallel guesses.** The 5-failure check read the
+  count before any concurrent attempt had written one, so 20 guesses sent at
+  once all got through. Each attempt now reserves its row first and counts
+  everyone else's, so 20 parallel guesses record 5 failures and the rest get a
+  429. A refused or interrupted attempt deletes its row, so it doesn't lengthen
+  the lock. A second budget of 30 failures per client IP spans every email. It
+  stays off until `X-Client-IP` is present, because without it, one attacker
+  would lock out everyone behind the same Cloudflare node. Password hashing runs
+  at most 4 at a time. A caller that queues longer than 5 seconds gets a 503,
+  instead of piling CPU onto a process that also serves the app.
+- **The OAuth token and revoke endpoints are rate limited**, at 60 calls a
+  minute per client and 120 per client IP, before the secret compare runs.
+- **The marketing sites no longer get credentialed CORS.** ram4cash.com and
+  recycleservers.com only post two cookie-less forms. Their place in
+  `CORS_ALLOWED_ORIGINS` gave them `Access-Control-Allow-Credentials` on every
+  route. The intake and quote routes now carry their own CORS: those four
+  origins, POST only, no credentials, `Retry-After` exposed. Every other route
+  ignores them. The origins can be overridden with `PUBLIC_FORM_ORIGINS`.
+  Removing them from prod's `CORS_ALLOWED_ORIGINS` is a separate ops step after
+  this release.
+- **The sell form can't make the server decode huge images.** An intake post
+  is capped at 25 MiB, down from the 50 MiB shared with staff uploads, and
+  each photo at 15 MiB. sharp now refuses anything over 40 megapixels before it
+  allocates. A photo it can't decode gets a 400, where before it was stored as
+  uploaded. Shrinks run two at a time. A public caller that waits longer than
+  30 seconds gets a 503; staff uploads keep their old fallback.
+- **The public forms have a daily ceiling.** A spammer rotating addresses could
+  fill R2 and the inbox without bound. Past 300 submissions or 2 GB of photos
+  in a UTC day, both forms answer 429 until midnight UTC. Both numbers are
+  workspace settings.
+- **Old spam is cleaned up.** A daily job deletes spam and archived submissions
+  older than 30 days, together with their photos in R2. A row whose photo
+  delete fails stays for the next run, so no row is lost while its file
+  survives.
+- **Consent says where the code goes.** Any app can register itself as
+  "Claude". The consent page now names the redirect host and marks a
+  self-registered client Unverified. The Settings connector list shows each
+  client's redirect URIs and the same badge.
+
+Migration 0147 makes `login_attempts.success` nullable, so an attempt can be
+reserved before it's judged, and adds `ip_key` with its index.
+
 ## [1.194.2] - 2026-10-02
 
 Edge hardening (RS-141), batch 3a of the remaining code-review work.
@@ -41,6 +518,7 @@ Edge hardening (RS-141), batch 3a of the remaining code-review work.
   service-worker-served reload. It blocked a fetch to a foreign origin.
   `index.html` gains a `csp-rev` marker, because the service worker caches
   headers alongside its precache and refreshes only when the file changes.
+
 ## [1.194.1] - 2026-10-02
 
 Fixes from the code review that cleared v1.193.0 and v1.194.0 for production
