@@ -189,9 +189,10 @@ webSubmissions.patch('/:id', async (c) => {
 // this form files (sourced by one of its channels), before anything is
 // inserted.
 //
-// The unique index is on the generated match_key — alnum(name) + zip — which
-// is the wrong identity for an email: john.smith@ and johnsmith@ compress to
-// the same key, and so can any house account someone typed by hand. Upserting
+// The unique index is on the generated match_key — supplier_name_key(name) +
+// zip — which is the wrong identity for an email: john.smith@ and johnsmith@
+// compress to the same key, and so can any house account someone typed by
+// hand. Upserting
 // on it filed one seller's lot under somebody else. A key collision therefore
 // means a different seller holds that key, and this one is inserted under a
 // name that keeps it distinct.

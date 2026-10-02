@@ -19,6 +19,16 @@ describe('login brute-force throttle', () => {
     expect(blocked.status).toBe(429);
   });
 
+  // A locked email is refused on a read: a flood against it writes nothing.
+  it('writes no attempt row while the email is locked', async () => {
+    for (let i = 0; i < 5; i++) expect((await login(ALEX, 'wrong-password')).status).toBe(401);
+    const count = async () => (await getTestDb()<{ n: number }[]>`
+      SELECT COUNT(*)::int AS n FROM login_attempts WHERE email = ${ALEX}`)[0].n;
+    const before = await count();
+    for (let i = 0; i < 5; i++) expect((await login(ALEX, 'wrong-password')).status).toBe(429);
+    expect(await count()).toBe(before);
+  });
+
   it('does not throttle a normal successful login', async () => {
     const r = await login(ALEX, 'demo');
     expect(r.status).toBe(200);

@@ -38,6 +38,25 @@ function historyDepth(): number {
   return typeof s?.erpDepth === 'number' ? s.erpDepth : 0;
 }
 
+// Leaving a screen with unsaved edits asks first. The check is installed by
+// lib/unsavedGuard, so routing knows nothing about edits; with none installed
+// every navigation goes through. `wouldAsk` answers synchronously, because a
+// Back already under way has to be undone before the dialog opens.
+export type LeaveGuard = {
+  wouldAsk(nextPath: string): boolean;
+  ask(nextPath: string): Promise<boolean>;
+};
+let leaveGuard: LeaveGuard | null = null;
+
+export function setLeaveGuard(guard: LeaveGuard | null): void {
+  leaveGuard = guard;
+}
+
+// Hash changes this module started. They pass the guard: whoever calls
+// navigate() has asked already, or has just saved. Counted, not flagged, since
+// two can be made before the first one's event arrives.
+let selfNavs = 0;
+
 export function navigate(path: string): void {
   const target = path.startsWith('/') ? path : '/' + path;
   // Avoid setting the same hash twice — that would emit a redundant
@@ -45,6 +64,7 @@ export function navigate(path: string): void {
   // path decides: a page that only changed its own query is still that page.
   if (splitHash(window.location.hash).path === splitHash(target).path) return;
   const depth = historyDepth() + 1;
+  selfNavs++;
   window.location.hash = target;
   // The hash assignment has already pushed the entry, so this stamps the one
   // we just landed on, not the one we left.
@@ -57,6 +77,7 @@ export function replaceRoute(path: string): void {
   const target = path.startsWith('/') ? path : '/' + path;
   if (splitHash(window.location.hash).path === splitHash(target).path) return;
   const depth = historyDepth();
+  selfNavs++;
   window.location.replace('#' + target);
   // replace() drops the entry's state; keep the depth the entry already had.
   window.history.replaceState({ ...(window.history.state ?? {}), erpDepth: depth }, '');
@@ -82,19 +103,74 @@ export function replaceHashQuery(params: URLSearchParams): void {
 /** Back to wherever the user came from, or `fallback` when that's off-site. */
 export function navigateBack(fallback: string): void {
   if (historyDepth() > 0) {
+    selfNavs++;
     window.history.back();
     return;
   }
   navigate(fallback);
 }
 
+// One hashchange listener for the whole app, so a change the guard refuses is
+// refused once, before any shell re-renders.
+const routeSubscribers = new Set<() => void>();
+let listening = false;
+// The entry the app is showing, for putting it back when a change is refused.
+let shownState: unknown = null;
+let askingToLeave = false;
+
+function acceptRoute(): void {
+  shownState = window.history.state;
+  for (const notify of routeSubscribers) notify();
+}
+
+/** Exported for tests; the app reaches it through useRoute(). */
+export function onHashChange(e: { oldURL: string; newURL: string }): void {
+  if (selfNavs > 0) {
+    selfNavs--;
+    acceptRoute();
+    return;
+  }
+  // Back, Forward, or a typed address. Undo it while the user is asked, so the
+  // address bar and the screen keep agreeing; a second one while the dialog is
+  // up is undone without asking again.
+  const next = readPath();
+  if (!askingToLeave && !leaveGuard?.wouldAsk(next)) {
+    acceptRoute();
+    return;
+  }
+  const landed = window.history.state as { erpDepth?: number } | null;
+  window.history.pushState(shownState, '', e.oldURL);
+  if (askingToLeave || !leaveGuard) return;
+  askingToLeave = true;
+  void leaveGuard.ask(next).then((ok) => {
+    askingToLeave = false;
+    if (!ok) return;
+    const shownDepth = (shownState as { erpDepth?: number } | null)?.erpDepth ?? 0;
+    if (typeof landed?.erpDepth === 'number' && landed.erpDepth < shownDepth) {
+      // Back: step onto the real entry, which keeps its scroll position.
+      selfNavs++;
+      window.history.back();
+      return;
+    }
+    // Forward or a typed address: the restored entry becomes the target.
+    window.history.replaceState(landed, '', e.newURL);
+    acceptRoute();
+  });
+}
+
+function subscribeRoute(notify: () => void): () => void {
+  if (!listening) {
+    listening = true;
+    shownState = window.history.state;
+    window.addEventListener('hashchange', onHashChange);
+  }
+  routeSubscribers.add(notify);
+  return () => { routeSubscribers.delete(notify); };
+}
+
 export function useRoute(): { path: string } {
   const [path, setPath] = useState<string>(readPath);
-  useEffect(() => {
-    const onChange = () => setPath(readPath());
-    window.addEventListener('hashchange', onChange);
-    return () => { window.removeEventListener('hashchange', onChange); };
-  }, []);
+  useEffect(() => subscribeRoute(() => setPath(readPath())), []);
   return { path };
 }
 
@@ -249,9 +325,17 @@ export function onLinkClick(path: string, onNavigate?: () => void): (e: LinkClic
   return (e) => {
     e.stopPropagation();
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    // Before anything async, or the anchor's own href navigates as well.
     e.preventDefault();
-    onNavigate?.();
-    navigate(path);
+    const go = () => {
+      onNavigate?.();
+      navigate(path);
+    };
+    if (!leaveGuard?.wouldAsk(path)) {
+      go();
+      return;
+    }
+    void leaveGuard.ask(path).then((ok) => { if (ok) go(); });
   };
 }
 

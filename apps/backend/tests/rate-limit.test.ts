@@ -22,4 +22,14 @@ describe('createRateLimiter', () => {
     for (let i = 0; i < 4; i++) limit('ip-999');
     expect(limit('ip-999')).toBeGreaterThan(0);
   });
+
+  // Evicting oldest-first let a flood of fresh keys push out the key being
+  // throttled, which then started over with a full budget.
+  it('keeps a throttled key through a flood of fresh ones', () => {
+    const limit = createRateLimiter(60_000, 3, 100);
+    for (let i = 0; i < 3; i++) limit('victim');
+    expect(limit('victim')).toBeGreaterThan(0);
+    for (let i = 0; i < 200; i++) limit(`flood-${i}`);
+    expect(limit('victim')).toBeGreaterThan(0);
+  });
 });

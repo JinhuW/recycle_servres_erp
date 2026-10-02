@@ -55,8 +55,9 @@ const DAILY_PER_ADDRESS = 20;
 
 /**
  * Seconds until the budget resets, or null while there is room. `address` is
- * null when the Worker did not name the caller — then every request shares a
- * Cloudflare address, and a per-address share would be everyone's.
+ * the caller's limiter key (an IPv6 /64, not the address), or null when the
+ * Worker did not name the caller — then every request shares a Cloudflare
+ * address, and a per-address share would be everyone's.
  */
 async function overDailyBudget(
   sql: SqlLike, incomingBytes: number, address: string | null,
@@ -72,7 +73,7 @@ async function overDailyBudget(
       (SELECT COALESCE(SUM(size_bytes), 0)::text FROM web_submission_photos
         WHERE created_at >= date_trunc('day', NOW(), 'UTC')) AS bytes,
       (SELECT COUNT(*)::int FROM web_submissions
-        WHERE ${address}::text IS NOT NULL AND ip = ${address}::text
+        WHERE ${address}::text IS NOT NULL AND COALESCE(ip_key, ip) = ${address}::text
           AND created_at >= date_trunc('day', NOW(), 'UTC')) AS mine
   `;
   if (n < maxSubmissions && Number(bytes) + incomingBytes <= maxBytes
@@ -256,9 +257,18 @@ function unidentified(l: SellLine, photos: File[]): boolean {
   return photos.length === 0 && !l.fields.part_number && !l.fields.capacity && !l.fields.description;
 }
 
-// The stored address, when the Worker vouched for it.
-function namedSender(c: { req: { header(name: string): string | undefined } }): string | null {
-  return c.req.header('x-client-ip') ? clientIp((n) => c.req.header(n)).full : null;
+type HeaderReader = { req: { header(name: string): string | undefined } };
+
+// The sender's limiter key, when the Worker vouched for the address.
+function namedSender(c: HeaderReader): string | null {
+  return c.req.header('x-client-ip') ? clientIp((n) => c.req.header(n)).key : null;
+}
+
+// What a submission row stores: the address as received, and the key the
+// daily share counts by. No address, no key — never the 'unknown' bucket.
+function storedAddress(c: HeaderReader): { ip: string | null; ipKey: string | null } {
+  const ip = clientIp((n) => c.req.header(n));
+  return { ip: ip.full, ipKey: ip.full === null ? null : ip.key };
 }
 
 // Scoped to the two form paths: this sub-app is mounted at /api/public, and a
@@ -359,10 +369,11 @@ publicForms.post('/intake', async (c) => {
   try {
     ref = await sql.begin(async (tx) => {
       const id = await nextHumanId(tx, 'WS', 'WS');
+      const from = storedAddress(c);
       await tx`
-        INSERT INTO web_submissions (id, site, kind, email, notes, source, payload, ip, user_agent)
+        INSERT INTO web_submissions (id, site, kind, email, notes, source, payload, ip, ip_key, user_agent)
         VALUES (${id}, 'ram4cash', 'sell_lot', ${payload.email}, ${payload.notes}, ${payload.source},
-                ${tx.json(payload as never)}, ${clientIp((n) => c.req.header(n)).full},
+                ${tx.json(payload as never)}, ${from.ip}, ${from.ipKey},
                 ${text(c.req.header('user-agent'), 300)})
       `;
       for (const u of uploaded) {
@@ -406,10 +417,11 @@ publicForms.post('/quote', async (c) => {
   }
   const ref = await sql.begin(async (tx) => {
     const id = await nextHumanId(tx, 'WS', 'WS');
+    const from = storedAddress(c);
     await tx`
-      INSERT INTO web_submissions (id, site, kind, name, company, email, phone, notes, payload, ip, user_agent)
+      INSERT INTO web_submissions (id, site, kind, name, company, email, phone, notes, payload, ip, ip_key, user_agent)
       VALUES (${id}, 'recycleservers', 'quote', ${q.name}, ${q.company}, ${q.email}, ${q.phone},
-              ${q.notes}, ${tx.json(q as never)}, ${clientIp((n) => c.req.header(n)).full},
+              ${q.notes}, ${tx.json(q as never)}, ${from.ip}, ${from.ipKey},
               ${text(c.req.header('user-agent'), 300)})
     `;
     await notifyManagers(tx, {

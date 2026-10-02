@@ -26,10 +26,16 @@ export function Market() {
     if (offset) params.set('offset', String(offset));
     return `/api/market?${params}`;
   };
+  // Which list a page belongs to. A filter or search change starts a new one,
+  // and so does its first page landing, so a Load more still in flight for
+  // the old list (or sent before page 1 replaced it) is dropped, not appended.
+  const listGen = useRef(0);
   const loadMore = async () => {
+    const gen = listGen.current;
     setLoadingMore(true);
     try {
       const r = await api.get<{ items: RefPrice[]; total: number }>(queryOf(items.length));
+      if (gen !== listGen.current) return;
       setItems(prev => [...prev, ...r.items]);
       setTotal(r.total);
     } catch (e) { handleFetchError(e); }
@@ -42,9 +48,15 @@ export function Market() {
 
   useEffect(() => {
     let alive = true;
+    listGen.current++;
     const handle = setTimeout(() => {
       api.get<{ items: RefPrice[]; total?: number }>(queryOf(0))
-        .then(r => { if (alive) { setItems(r.items); setTotal(r.total ?? r.items.length); } })
+        .then(r => {
+          if (!alive) return;
+          listGen.current++;
+          setItems(r.items);
+          setTotal(r.total ?? r.items.length);
+        })
         .catch(handleFetchError)
         .finally(() => { if (alive) setLoadedOnce(true); });
     }, 250);

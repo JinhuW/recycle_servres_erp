@@ -167,7 +167,10 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
   const [edited, setEdited] = useState<ReadonlySet<keyof DraftLine>>(() => new Set());
   // A field the user changed is an edit nobody has saved: Cancel and Back
   // ask first, and so does a reload.
-  useUnsavedGuard(edited.size > 0);
+  // On the phone this form is drawn by capture state, not by the route, so a
+  // route change leaves it standing and loses nothing; only its own Back and
+  // Cancel discard, and they ask.
+  useUnsavedGuard(edited.size > 0, () => true);
   const leave = () => { void confirmDiscard().then(ok => { if (ok) (onBack ?? onCancel)(); }); };
   // Cleared by tapping "Enter manually" in the unreadable banner so the user
   // can type values without the warning hovering over them.

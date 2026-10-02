@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import {
   hrefFor, matchPoCheck, matchPurchaseOrder, navigate, navigateBack, onLinkClick, parseShippingRoute,
   pathToDesktopView, poCheckPath, readSafeNext, replaceRoute, type LinkClick,
@@ -207,5 +207,151 @@ describe('onLinkClick', () => {
     expect(w.hash()).toBe('#/dashboard');
     expect(calls).toEqual({ prevented: 0, stopped: 1 });
     expect(sideEffects).toBe(0);
+  });
+});
+
+// A history that fires hashchange the way a browser does: after the change,
+// not inside it (flush() delivers them), with old and new URLs.
+function installEventedWindow(entryHash: string) {
+  const stack: Array<{ hash: string; state: unknown }> = [{ hash: entryHash, state: null }];
+  let i = 0;
+  const queue: Array<{ oldURL: string; newURL: string }> = [];
+  const url = (hash: string) => 'https://erp.test/' + hash;
+  const hashOf = (u: string) => (u.includes('#') ? u.slice(u.indexOf('#')) : '');
+  const norm = (v: string) => (v.startsWith('#') ? v : '#' + v);
+  const move = (change: () => void) => {
+    const before = url(stack[i]!.hash);
+    change();
+    const after = url(stack[i]!.hash);
+    if (before !== after) queue.push({ oldURL: before, newURL: after });
+  };
+  const win = {
+    location: {
+      get hash() { return stack[i]!.hash; },
+      set hash(v: string) {
+        move(() => { stack.length = i + 1; stack.push({ hash: norm(v), state: null }); i++; });
+      },
+      replace(v: string) { move(() => { stack[i] = { hash: norm(v), state: null }; }); },
+    },
+    history: {
+      get state() { return stack[i]!.state; },
+      replaceState(s: unknown, _t: string, u?: string) {
+        stack[i]!.state = s;
+        if (u) stack[i]!.hash = hashOf(u);
+      },
+      pushState(s: unknown, _t: string, u: string) {
+        stack.length = i + 1;
+        stack.push({ hash: hashOf(u), state: s });
+        i++;
+      },
+      back() { move(() => { if (i > 0) i--; }); },
+      forward() { move(() => { if (i < stack.length - 1) i++; }); },
+    },
+    addEventListener() {},
+  };
+  globalThis.window = win as unknown as Window & typeof globalThis;
+  return { win, queue, hash: () => stack[i]!.hash };
+}
+
+describe('leaving unsaved edits', () => {
+  // The route module counts its own navigations; a fresh copy per test keeps
+  // one test's count out of the next.
+  let route: typeof import('./route');
+  let w: ReturnType<typeof installEventedWindow>;
+  const flush = () => {
+    while (w.queue.length) route.onHashChange(w.queue.shift()!);
+  };
+  beforeEach(async () => {
+    vi.resetModules();
+    route = await import('./route');
+    w = installEventedWindow('#/dashboard');
+  });
+  afterEach(() => { delete (globalThis as { window?: unknown }).window; });
+
+  function guard(answer: () => Promise<boolean>) {
+    const asked: string[] = [];
+    route.setLeaveGuard({
+      wouldAsk: () => true,
+      ask: (p) => { asked.push(p); return answer(); },
+    });
+    return asked;
+  }
+  const plainClick = (): LinkClick => ({
+    button: 0, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false,
+    defaultPrevented: false, preventDefault() {}, stopPropagation() {},
+  });
+
+  it('asks before a link leaves, and stays on a no', async () => {
+    const asked = guard(async () => false);
+    let prevented = false;
+    route.onLinkClick('/inventory')({ ...plainClick(), preventDefault() { prevented = true; } });
+    expect(prevented).toBe(true);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(asked).toEqual(['/inventory']);
+    expect(w.hash()).toBe('#/dashboard');
+  });
+
+  it('follows the link on a yes', async () => {
+    guard(async () => true);
+    route.onLinkClick('/inventory')(plainClick());
+    await new Promise((r) => setTimeout(r, 0));
+    expect(w.hash()).toBe('#/inventory');
+  });
+
+  it('never asks for its own navigate(), which follows a save or an answered Cancel', () => {
+    const asked = guard(async () => false);
+    route.navigate('/purchase-orders');
+    flush();
+    expect(w.hash()).toBe('#/purchase-orders');
+    expect(asked).toEqual([]);
+  });
+
+  it('undoes a Back while it asks, asks once, and goes back on a yes', async () => {
+    route.navigate('/purchase-orders');
+    route.navigate('/purchase-orders/PO-1');
+    flush();
+    let answer!: (ok: boolean) => void;
+    const asked = guard(() => new Promise((r) => { answer = r; }));
+    w.win.history.back();
+    flush();
+    expect(w.hash()).toBe('#/purchase-orders/PO-1');
+    // A second Back while the dialog is up is undone without a second dialog.
+    w.win.history.back();
+    flush();
+    expect(w.hash()).toBe('#/purchase-orders/PO-1');
+    expect(asked).toEqual(['/purchase-orders']);
+    answer(true);
+    await new Promise((r) => setTimeout(r, 0));
+    flush();
+    expect(w.hash()).toBe('#/purchase-orders');
+  });
+
+  // A navigate() to the page already shown changes nothing, so it must not
+  // leave a pass behind for the user's next Back.
+  it('leaves no pass behind for a navigate() that changed nothing', () => {
+    route.navigate('/purchase-orders');
+    flush();
+    route.navigate('/purchase-orders');
+    const asked = guard(async () => false);
+    w.win.history.back();
+    flush();
+    expect(asked).toEqual(['/dashboard']);
+    expect(w.hash()).toBe('#/purchase-orders');
+  });
+
+  it('lands on the Forward target on a yes', async () => {
+    route.navigate('/purchase-orders');
+    route.navigate('/inventory');
+    flush();
+    route.navigateBack('/dashboard');
+    flush();
+    expect(w.hash()).toBe('#/purchase-orders');
+    guard(async () => true);
+    w.win.history.forward();
+    flush();
+    await new Promise((r) => setTimeout(r, 0));
+    flush();
+    expect(w.hash()).toBe('#/inventory');
   });
 });

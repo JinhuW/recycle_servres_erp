@@ -105,7 +105,10 @@ oauth.post('/register', async (c) => {
     return c.json({ error: 'registration disabled' }, 403);
   }
   const sql = getDb(c.env);
-  const ip = clientIp((n) => c.req.header(n)).full;
+  const caller = clientIp((n) => c.req.header(n));
+  const ip = caller.full;
+  // Counted by the limiter key: an IPv6 caller holds a whole /64.
+  const ipKey = ip === null ? null : caller.key;
   // Counted before any work, mirroring the windowed-COUNT throttle on login.
   // `unused` reclaims the case where a script registers repeatedly but never
   // completes a flow — those clients never mint a refresh token. It is
@@ -114,7 +117,7 @@ oauth.post('/register', async (c) => {
   const [counts] = await sql<{ per_ip: number; global_n: number; unused: number }[]>`
     SELECT
       COUNT(*) FILTER (
-        WHERE created_ip IS NOT DISTINCT FROM ${ip}
+        WHERE COALESCE(created_ip_key, created_ip) IS NOT DISTINCT FROM ${ipKey}
           AND created_at > NOW() - INTERVAL '1 hour'
       )::int AS per_ip,
       COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '1 hour')::int AS global_n,
@@ -202,6 +205,7 @@ oauth.post('/register', async (c) => {
     scopes,
     createdBy: null,
     createdIp: ip,
+    createdIpKey: ipKey,
     public: isPublic,
   });
   return c.json({

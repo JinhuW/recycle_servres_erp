@@ -45,6 +45,28 @@ describe('public form daily budget', () => {
     // Without X-Client-IP every caller shares a Cloudflare address.
     expect((await from({ 'X-Forwarded-For': '203.0.113.50' })).status).toBe(201);
   });
+
+  // An IPv6 subscriber holds a whole /64; counted per address, rotating
+  // through it was a fresh share every time.
+  it('counts an IPv6 sender by its /64', async () => {
+    const sql = getTestDb();
+    for (let i = 0; i < 19; i++) {
+      await sql`
+        INSERT INTO web_submissions (id, site, kind, email, payload, ip, ip_key)
+        VALUES (${`WS-V6-${i}`}, 'recycleservers', 'quote', 'x@example.com', '{}'::jsonb,
+                ${`2001:db8:1:2::${i + 1}`}, '2001:db8:1:2::/64')
+      `;
+    }
+    const from = (ip: string) =>
+      api<{ ref?: string }>('POST', '/api/public/quote', { body: quote, headers: { 'X-Requested-By': '', 'X-Client-IP': ip } });
+    const twentieth = await from('2001:db8:1:2::abcd');
+    expect(twentieth.status).toBe(201);
+    const [row] = await sql<{ ip: string; ip_key: string }[]>`
+      SELECT ip, ip_key FROM web_submissions WHERE id = ${twentieth.body.ref!}`;
+    expect(row).toEqual({ ip: '2001:db8:1:2::abcd', ip_key: '2001:db8:1:2::/64' });
+    expect((await from('2001:db8:1:2::ffff')).status).toBe(429);
+    expect((await from('2001:db8:1:3::1')).status).toBe(201);
+  });
 });
 
 describe('purgeStaleWebSubmissions', () => {
@@ -54,7 +76,7 @@ describe('purgeStaleWebSubmissions', () => {
     const sql = getTestDb();
     for (const [id, status, days] of [
       ['WS-OLD-SPAM', 'spam', 40], ['WS-OLD-ARCH', 'archived', 31],
-      ['WS-NEW-SPAM', 'spam', 5], ['WS-OLD-NEW', 'new', 90],
+      ['WS-NEW-SPAM', 'spam', 5], ['WS-OLD-NEW', 'new', 90], ['WS-OLD-CONV', 'archived', 60],
     ] as const) {
       await sql`
         INSERT INTO web_submissions (id, site, kind, email, payload, status, updated_at)
@@ -66,10 +88,13 @@ describe('purgeStaleWebSubmissions', () => {
       INSERT INTO web_submission_photos (submission_id, line_index, position, filename, size_bytes, mime_type, storage_key, delivery_url)
       VALUES ('WS-OLD-SPAM', 0, 0, 'a.jpg', 10, 'image/jpeg', 'stub-a', 'stub://a')
     `;
+    // Converted, then archived by hand to clear the inbox: it is the PO's
+    // record of who sold the lot, so it stays.
+    await sql`UPDATE web_submissions SET order_id = (SELECT id FROM orders LIMIT 1) WHERE id = 'WS-OLD-CONV'`;
     const r = await purgeStaleWebSubmissions(sql, testEnv);
     expect(r).toMatchObject({ submissions: 2, photos: 1, scanned: 2 });
     const left = await sql<{ id: string }[]>`SELECT id FROM web_submissions WHERE id LIKE 'WS-%' ORDER BY id`;
-    expect(left.map((x) => x.id)).toEqual(['WS-NEW-SPAM', 'WS-OLD-NEW']);
+    expect(left.map((x) => x.id)).toEqual(['WS-NEW-SPAM', 'WS-OLD-CONV', 'WS-OLD-NEW']);
   });
 
   // Without R2 the delete call reports success for keys it never touched, so

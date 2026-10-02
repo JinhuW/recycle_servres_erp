@@ -603,7 +603,9 @@ on to Sold once every line has sold (v1.164.0).
   key kept only A–Z and 0–9, so every Chinese or Vietnamese name keyed as
   empty. A second such client at the same zip was refused, and every
   non-Latin package seller "matched" every non-Latin client. Such names now
-  key on their own text; Latin names key exactly as before.
+  key on their own text; Latin names key exactly as before. Since v1.200.1
+  that covers any name with a non-ASCII character: a mixed name kept only its
+  Latin part, so 'Đức' keyed as 'C' and '王 RAM' and '李 RAM' as one client.
 - **A purchaser's client card counts their own POs** (v1.198.0). Spend, PO
   count, rhythm, gap and the items list cover only the POs the purchaser
   owns, where they used to sum every colleague's POs onto the purchaser's
@@ -893,7 +895,9 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
 - **Ungrouping a pair leaves the PO link on the PayPal leg only**
   (v1.198.3). It used to stay on both, so the PO's paid figure counted the
   payment twice. Migration 0152 groups PO-1383's two $2,800 legs, which had
-  the same problem.
+  the same problem. The freed Mercury leg carries the same PayPal id in its
+  description, so since v1.200.1 it is also kept out of auto-link; until
+  then the next sync linked it straight back.
 - **A payment in another currency is not reconciled** (v1.198.3). Every PO is
   in USD, so a non-USD row is kept out of matching, pairing and auto-link,
   can't be linked or grouped by hand, and shows a "EUR · not reconciled" chip
@@ -1222,7 +1226,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   limit keys on the visitor's real address, with IPv6 grouped by /64; until
   v1.195.0 every request looked like one of a few Cloudflare servers. One
   address gets at most 20 a day, so a single sender can't spend the shared
-  budget (v1.195.1). An
+  budget (v1.195.1), counted per /64 for IPv6 since v1.200.1. An
   intake post is capped at 25 MiB and each photo at 15 MiB. A photo over 40
   megapixels, or one that can't be decoded, is refused with a 400 instead of
   being stored as is. Staff uploads keep sharp's own, much higher, ceiling
@@ -1230,7 +1234,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   without credentials; those origins get no CORS anywhere else.
 - **Spam and archived submissions are deleted after 30 days** (v1.195.0),
   together with their photos in R2, by a daily job. A row whose photo delete
-  fails is kept, so the next run retries it.
+  fails is kept, so the next run retries it. A converted submission is never
+  deleted, even archived later (v1.200.1): it is the PO's record of who sold
+  the lot.
 
 ## MCP and OAuth connectors
 
@@ -1249,7 +1255,8 @@ inventory search, sell-order draft creation.
 - Tool failures answer as normal results with `isError: true`, not JSON-RPC
   errors; only protocol failures are errors. Every tool ships MCP
   `annotations`, without which clients label read-only tools destructive.
-- DCR is open by default, rate-limited per IP and globally.
+- DCR is open by default, rate-limited per IP (per /64 for IPv6 since
+  v1.200.1) and globally.
 - **Consent says where the code goes** (v1.195.0). Any app can register itself
   under any name, "Claude" included. The consent page therefore names the
   redirect host and marks a self-registered client **Unverified**. The
@@ -1407,6 +1414,10 @@ removed in v1.191.0.
   desktop submit with unconfirmed lines ask before discarding, and so does a
   reload or tab close. A dialog closes on the backdrop only when the press and
   the release both land there, so a drag out of a field no longer shuts it.
+  Since v1.200.1 the sidebar, the phone tab bar, record links and the
+  browser's Back and Forward ask too, and so does backing out of a phone PO.
+  The phone PO's order and products screens are one page, so moving between
+  them never asks. A save that then navigates never asks.
 
 - The desktop shell runs down to 720px. **Under 900px its sidebar folds to a
   64px icon rail** (v1.134.0) — brand mark, nav icons with their names on

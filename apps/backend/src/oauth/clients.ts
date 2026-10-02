@@ -14,6 +14,7 @@ export type OAuthClientRow = {
   scopes: string[];
   created_by: string | null;
   created_ip: string | null;
+  created_ip_key: string | null;
   created_at: Date;
   revoked_at: Date | null;
 };
@@ -31,6 +32,7 @@ export type CreateClientInput = {
   createdBy: string | null;
   // Only set for self-registered (DCR) clients — feeds the per-IP throttle.
   createdIp?: string | null;
+  createdIpKey?: string | null;
   public: boolean;
 };
 
@@ -43,10 +45,11 @@ export async function createOAuthClient(
   const hash = secret ? await withBcryptSlot(() => bcrypt.hash(secret, 10)) : null;
   await sql`
     INSERT INTO oauth_clients
-      (id, secret_hash, name, redirect_uris, grant_types, scopes, created_by, created_ip)
+      (id, secret_hash, name, redirect_uris, grant_types, scopes, created_by, created_ip, created_ip_key)
     VALUES
       (${id}, ${hash}, ${input.name}, ${input.redirectUris},
-       ${input.grantTypes}, ${input.scopes}, ${input.createdBy}, ${input.createdIp ?? null})
+       ${input.grantTypes}, ${input.scopes}, ${input.createdBy}, ${input.createdIp ?? null},
+       ${input.createdIpKey ?? null})
   `;
   return { clientId: id, clientSecret: secret };
 }

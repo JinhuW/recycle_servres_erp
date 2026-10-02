@@ -35,6 +35,22 @@ describe('supplier name keys', () => {
       SELECT match_key FROM suppliers WHERE name IN ('王记电子', '李氏回收', 'Acme Recycling') ORDER BY match_key`;
     expect(keys.map((k) => k.match_key)).toEqual(['ACMERECYCLING|80216', 'U:李氏回收|80216', 'U:王记电子|80216']);
   });
+
+  // A name mixing scripts compressed to its Latin residue: 'Đức' keyed as 'C',
+  // and two Chinese names sharing an English word both keyed as that word.
+  it('keys a mixed-script name on its whole text', async () => {
+    const { token } = await loginAs(MARCUS);
+    const make = (name: string) => api('POST', '/api/suppliers', { token, body: { name, zip: '80216' } });
+    expect((await make('Đức')).status).toBe(201);
+    expect((await make('Ức')).status).toBe(201);
+    expect((await make('王 RAM')).status).toBe(201);
+    expect((await make('李 RAM')).status).toBe(201);
+    expect((await make('王  ram ')).status).toBe(409);
+    expect((await make('---')).status).toBe(201);
+    const keys = await getTestDb()<{ match_key: string }[]>`
+      SELECT match_key FROM suppliers WHERE name IN ('Đức', '王 RAM', '---') ORDER BY name`;
+    expect(keys.map((k) => k.match_key).sort()).toEqual(['U:---|80216', 'U:đức|80216', 'U:王 ram|80216']);
+  });
 });
 
 describe('ungrouping a pair', () => {
@@ -59,6 +75,37 @@ describe('ungrouping a pair', () => {
       SELECT id, order_id, pair_id FROM bank_transactions WHERE id IN (${p}, ${m})`).map((r) => [r.id, r]));
     expect(after.get(p)).toMatchObject({ order_id: po, pair_id: null });
     expect(after.get(m)).toMatchObject({ order_id: null, pair_id: null });
+  });
+
+  // The Mercury leg carries the PayPal id it parsed from its description, so
+  // the next sync's autoLink would link it straight back to the PO.
+  it('keeps the freed leg unlinked through the next sync', async () => {
+    const { token } = await loginAs(ALEX);
+    const txn = '5QR34567TU890123M';
+    const providers = () => [
+      fakeProvider('paypal', [{ externalId: txn, amount: -420, postedAt: new Date(NOW - 2 * DAY) }]),
+      fakeProvider('mercury', [{
+        externalId: 'm-relink', amount: -420, postedAt: new Date(NOW - DAY),
+        description: `PAYPAL ${txn}`, paypalTxnId: txn,
+      }]),
+    ];
+    await syncBankTransactions(testEnv, providers());
+    const p = await idOf(txn);
+    const m = await idOf('m-relink');
+    const po = await createPO(token);
+    const linked = await api<{ paymentsLinked: number }>('PATCH', `/api/orders/${po}`, {
+      token, body: { paypalTxnId: txn },
+    });
+    expect(linked.body.paymentsLinked).toBe(1);
+
+    expect((await api('POST', `/api/bank-transactions/${p}/unpair`, { token })).status).toBe(200);
+    await syncBankTransactions(testEnv, providers());
+    const rows = new Map((await getTestDb()<{
+      id: string; order_id: string | null; pair_id: string | null; no_auto_link: boolean;
+    }[]>`SELECT id, order_id, pair_id, no_auto_link FROM bank_transactions WHERE id IN (${p}, ${m})`)
+      .map((r) => [r.id, r]));
+    expect(rows.get(p)).toMatchObject({ order_id: po, pair_id: null });
+    expect(rows.get(m)).toMatchObject({ order_id: null, pair_id: null, no_auto_link: true });
   });
 });
 

@@ -6,7 +6,8 @@ import { log } from './log';
 // Photos sent through the public forms live in the public bucket, and nothing
 // else ever removes them: marking a submission spam or archived only changes
 // its status. A month after that it goes, photos first. A converted lot is never
-// touched; its PO owns copies.
+// touched, even archived later to clear the inbox: its PO owns copies of the
+// photos, but this row is the PO's only record of who sold it.
 const PURGE_AFTER_DAYS = 30;
 const BATCH = 200;
 const MAX_BATCHES_PER_RUN = 50;
@@ -33,7 +34,7 @@ export async function purgeStaleWebSubmissions(
            COALESCE(array_agg(p.storage_key) FILTER (WHERE p.storage_key IS NOT NULL), '{}') AS keys
     FROM web_submissions ws
     LEFT JOIN web_submission_photos p ON p.submission_id = ws.id
-    WHERE ws.status IN ('spam', 'archived')
+    WHERE ws.status IN ('spam', 'archived') AND ws.order_id IS NULL
       AND ws.updated_at < NOW() - make_interval(days => ${olderThanDays})
       AND (${afterId}::text IS NULL OR ws.id > ${afterId}::text)
     GROUP BY ws.id
