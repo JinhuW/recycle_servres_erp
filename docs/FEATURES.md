@@ -704,9 +704,12 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
     the edit page has no leave guard.
 - **A line carries its number on the source PO** (v1.196.0): the `#` the PO
   page shows for that line.
-  - By PO, each PO card has a `#` column and lists its lines in PO order. The
-    No PO card has no `#` column.
-  - By warehouse, the reference reads "From PO-1432 #3".
+  - It sits in an **ID in PO** column right after Item, in both views and in
+    view and edit mode (v1.197.3). Until then By PO showed it as a leading `#`
+    column, which read as the sell order's own row number. A hand-typed line
+    shows `—`, and By PO's No PO card has no ID in PO column.
+  - By PO lists each card's lines in PO order. By warehouse's reference reads
+    "From PO-1432".
   - Lines picked in edit mode, from the picker or Inventory → Add to sell order,
     show the number before saving.
   - The number is computed live, not stored. It is the line's rank among the
@@ -785,7 +788,10 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   (`PO-1442 - DEN`), POs in numeric order, hand-typed lines on a
   `No PO - <warehouse>` tab. Each tab is a warehouse tab in miniature —
   category sections, the RAM device / DDR-generation labels and tints, tick
-  boxes, subtotals and a PO total. A warehouse picker beside the buttons
+  boxes, subtotals and a PO total. Each tab adds an **ID in PO** column after
+  Part # (v1.197.3): the line's # on that PO's page. A row that folds several
+  lots of the PO lists their IDs ascending ("1, 3"). The per-warehouse packing
+  list has no such column, since its tabs mix POs. A warehouse picker beside the buttons
   (shown when the order spans more than one) narrows either packing list to
   one warehouse (`?warehouse=<short>`); the bid sheet always covers the whole
   order. Both packing lists place a line by where its lot is *now* — the lot's
