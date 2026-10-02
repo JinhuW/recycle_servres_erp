@@ -382,7 +382,7 @@ bankTx.post('/sync', async (c) => {
 });
 
 // ─── PO-side ledger ──────────────────────────────────────────────────────────
-// Lives here (not routes/orders.ts) so the manager-only boundary stays in one
+// Lives here (not routes/orders/) so the manager-only boundary stays in one
 // place; the PO detail renders the section only for managers.
 
 bankTx.get('/by-order/:orderId', async (c) => {
