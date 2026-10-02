@@ -1381,7 +1381,14 @@ sellOrders.post('/:id/status', async (c) => {
          WHERE id = ${id}
       `;
     } else {
-      await tx`UPDATE sell_orders SET status = ${body.to}, updated_at = NOW() WHERE id = ${id}`;
+      // done_at is the date the sale belongs to (dashboard, contributions).
+      // Done is terminal, so it is set here once and never cleared.
+      await tx`
+        UPDATE sell_orders
+           SET status = ${body.to}, updated_at = NOW(),
+               done_at = CASE WHEN ${body.to} = 'Done' THEN NOW() ELSE done_at END
+         WHERE id = ${id}
+      `;
     }
 
     // Evidence persistence (status_meta upsert). Fires for any transition

@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { getDb } from '../db';
+import { committedSellStatuses } from '../lib/sellCommitment';
 import { clampLimit } from '../lib/pagination';
 import type { Env, User } from '../types';
 
@@ -46,9 +47,13 @@ customers.get('/', async (c) => {
     SELECT c.id, c.name, c.short_name, c.contact_name, c.contact_email,
            c.contact_phone, c.address, c.country, c.region,
            c.tags, c.notes, c.active, c.created_at,
-           COALESCE(SUM(sol.qty * sol.unit_price), 0)::float AS lifetime_revenue,
+           -- Revenue is what was sold (Done, archived ones included); what
+           -- is owed is what has shipped or is awaiting payment. Drafts and
+           -- Closed orders are neither, and counting them inflated both.
            COALESCE(SUM(sol.qty * sol.unit_price)
-                    FILTER (WHERE so.status <> 'Done'), 0)::float AS outstanding,
+                    FILTER (WHERE so.status = 'Done'), 0)::float AS lifetime_revenue,
+           COALESCE(SUM(sol.qty * sol.unit_price)
+                    FILTER (WHERE so.status = ANY(${committedSellStatuses()}::text[])), 0)::float AS outstanding,
            COUNT(DISTINCT so.id)::int AS order_count,
            MAX(so.created_at)         AS last_order
     FROM customers c

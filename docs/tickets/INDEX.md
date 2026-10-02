@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-150](./RS-150-reporting-money-sales-dated-by-done-purchased-qty-ba.md) | done | bug | P2 | Reporting money: sales dated by Done, purchased-qty basis, lot-price cost, customer tiles, supplier rollups | 1.198.0 |
 | [RS-149](./RS-149-id-in-po-column-on-the-sell-order-page-and-packing-l.md) | done | story | P2 | ID in PO column on the sell order page and Packing list by PO | 1.197.3 |
 | [RS-148](./RS-148-split-routes-orders-ts-into-routes-orders-modules-an.md) | done | task | P3 | Split routes/orders.ts into routes/orders/ modules and type the PATCH refusals | 1.197.4 |
 | [RS-147](./RS-147-line-validation-and-field-clears-one-line-validator.md) | done | bug | P2 | Line validation and field clears: one line validator, CHECK constraints, editor-managed fields can be cleared | 1.197.1 |

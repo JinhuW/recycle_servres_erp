@@ -15,7 +15,7 @@
 import type postgres from 'postgres';
 import { REVIEWED_LIFECYCLES } from './orderAdvance';
 import type { SqlLike } from '../db';
-import { effUnitCost, poFeeBasis } from '../lib/po-cost';
+import { effUnitCost, paidUnitCost, poFeeBasis } from '../lib/po-cost';
 import type { Role } from '../types';
 
 type Frag = postgres.Fragment;
@@ -74,7 +74,8 @@ export async function contributions(
                     AND po.created_at >= ${start} AND po.created_at < ${end}`;
 
   if (opts.role === 'manager') {
-    const saleWin = sql`so.status = 'Done' AND so.updated_at >= ${start} AND so.updated_at < ${end}`;
+    // Same sale date and realized cost as the dashboard tiles it breaks down.
+    const saleWin = sql`so.status = 'Done' AND so.done_at >= ${start} AND so.done_at < ${end}`;
     const salesFrom = sql`
       sell_order_lines sol
       JOIN sell_orders so ON so.id = sol.sell_order_id
@@ -82,7 +83,7 @@ export async function contributions(
       JOIN orders po      ON po.id = ol.order_id
       ${feeBasis}`;
     const revenue = sql`sol.unit_price * sol.qty`;
-    const profit  = sql`(sol.unit_price - ${eff}) * sol.qty`;
+    const profit  = sql`(sol.unit_price - ${paidUnitCost(sql)}) * sol.qty`;
     const soCount = sql`COUNT(DISTINCT so.id)`;
     const saleDims = (amount: Frag): Record<'customer' | 'purchaser' | 'category', Grouping> => ({
       customer:  { key: sql`so.customer_id`, name: sql`cu.name`, amount, count: soCount, where: saleWin,
@@ -127,8 +128,9 @@ export async function contributions(
   const poCount = sql`COUNT(DISTINCT po.id)`;
   const linesFrom = sql`order_lines ol JOIN orders po ON po.id = ol.order_id ${feeBasis}`;
   const spendFrom = sql`orders po ${feeBasis}`;
-  const revenue = sql`ol.sell_price * ol.qty`;
-  const profit  = sql`(ol.sell_price - ${eff}) * ol.qty`;
+  // Over the PO as bought, like the dashboard's purchaser tiles.
+  const revenue = sql`ol.sell_price * COALESCE(ol.qty_purchased, ol.qty)`;
+  const profit  = sql`(ol.sell_price - ${eff}) * COALESCE(ol.qty_purchased, ol.qty)`;
   const lineDims = (amount: Frag): Record<'supplier' | 'category', Grouping> => ({
     supplier: { key: sql`po.supplier_id`, name: sql`s.name`, amount, count: poCount, where: own,
                 from: sql`${linesFrom} LEFT JOIN suppliers s ON s.id = po.supplier_id` },

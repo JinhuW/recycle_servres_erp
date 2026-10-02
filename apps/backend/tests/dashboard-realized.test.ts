@@ -29,9 +29,9 @@ async function setupOneDoneSale(opts: { rate: number; unitPrice: number; soldQty
   await db`UPDATE orders SET commission_rate = ${opts.rate} WHERE id = ${line.po_id}`;
   const customerId = (await db<{ id: string }[]>`SELECT id FROM customers LIMIT 1`)[0].id;
   await db`
-    INSERT INTO sell_orders (id, customer_id, status, created_by, created_at, updated_at)
+    INSERT INTO sell_orders (id, customer_id, status, created_by, created_at, updated_at, done_at)
     VALUES ('SO-TEST-DASH-1', ${customerId}, 'Done',
-            (SELECT id FROM users WHERE email = ${MARCUS}), NOW(), NOW())
+            (SELECT id FROM users WHERE email = ${MARCUS}), NOW(), NOW(), NOW())
   `;
   await db`
     INSERT INTO sell_order_lines (sell_order_id, inventory_id, category, label, qty, unit_price, position)
@@ -87,7 +87,7 @@ describe('GET /api/dashboard — realized financials', () => {
     const { unitCost } = await setupOneDoneSale({ rate: 0.10, unitPrice: 200, soldQty: 1 });
     // Backdate the Done transition into the previous 30d window (45 days ago).
     const db = getTestDb();
-    await db`UPDATE sell_orders SET updated_at = NOW() - INTERVAL '45 days' WHERE id = 'SO-TEST-DASH-1'`;
+    await db`UPDATE sell_orders SET done_at = NOW() - INTERVAL '45 days' WHERE id = 'SO-TEST-DASH-1'`;
 
     const { token } = await loginAs(ALEX);
     const r = await api<{
@@ -125,8 +125,8 @@ describe('GET /api/dashboard — realized financials', () => {
 
     const sell = async (soId: string, qty: number) => {
       await db`
-        INSERT INTO sell_orders (id, customer_id, status, created_by, created_at, updated_at)
-        VALUES (${soId}, ${customerId}, 'Done', ${owner}, NOW(), NOW())
+        INSERT INTO sell_orders (id, customer_id, status, created_by, created_at, updated_at, done_at)
+        VALUES (${soId}, ${customerId}, 'Done', ${owner}, NOW(), NOW(), NOW())
       `;
       await db`
         INSERT INTO sell_order_lines (sell_order_id, inventory_id, category, label, qty, unit_price, position)
@@ -145,11 +145,11 @@ describe('GET /api/dashboard — realized financials', () => {
     expect(full.body.kpis.cost).toBeCloseTo(1050, 2);  // whole fee lands once fully sold
   });
 
-  it('range windows on the sell-order Done date (updated_at), not PO created_at', async () => {
+  it('range windows on the sell-order Done date (done_at), not PO created_at', async () => {
     await setupOneDoneSale({ rate: 0.1, unitPrice: 100, soldQty: 1 });
     // Backdate the Done transition beyond the 7d window.
     const db = getTestDb();
-    await db`UPDATE sell_orders SET updated_at = NOW() - INTERVAL '30 days' WHERE id = 'SO-TEST-DASH-1'`;
+    await db`UPDATE sell_orders SET done_at = NOW() - INTERVAL '30 days' WHERE id = 'SO-TEST-DASH-1'`;
 
     const { token } = await loginAs(ALEX);
     const inside  = await api<{ kpis: { revenue: number } }>('GET', '/api/dashboard?range=90d', { token });

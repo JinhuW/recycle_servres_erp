@@ -62,9 +62,9 @@ describe('GET /api/dashboard', () => {
     `)[0];
     const customerId = (await db<{ id: string }[]>`SELECT id FROM customers LIMIT 1`)[0].id;
     await db`
-      INSERT INTO sell_orders (id, customer_id, status, created_by, created_at, updated_at)
+      INSERT INTO sell_orders (id, customer_id, status, created_by, created_at, updated_at, done_at)
       VALUES ('SO-TEST-ROUND', ${customerId}, 'Done',
-              (SELECT id FROM users LIMIT 1), NOW(), NOW())
+              (SELECT id FROM users LIMIT 1), NOW(), NOW(), NOW())
     `;
     // unit_price=1.005 so revenue = 1.005 (rounds to 1.01 or 1.00 depending on impl)
     await db`
