@@ -4,6 +4,7 @@ type GroupableLine = {
   warehouseId: string | null;
   warehouse: string | null;
   sourceOrderId?: string | null;
+  sourceLineNo?: number | null;
 };
 
 export type SellOrderLineGroup<T> = {
@@ -18,7 +19,9 @@ export type SellOrderLineGroup<T> = {
 
 // Warehouse groups keep first-seen order — the order the lines were added in.
 // PO groups read like the "Packing list by PO" download: numeric PO order
-// (PO-999 before PO-1442), hand-typed lines last.
+// (PO-999 before PO-1442), hand-typed lines last. Inside a PO group the lines
+// run in the PO page's own order (#1, #2, …), so a line picked in edit mode
+// lands in its slot rather than at the bottom.
 export function groupSellOrderLines<T extends GroupableLine>(
   lines: readonly T[],
   by: SellOrderLineGroupBy,
@@ -41,6 +44,8 @@ export function groupSellOrderLines<T extends GroupableLine>(
       if (b.poId === null) return -1;
       return a.poId.localeCompare(b.poId, undefined, { numeric: true });
     });
+    const no = (x: { line: T }) => x.line.sourceLineNo ?? Infinity;
+    for (const g of groups) g.items.sort((a, b) => no(a) - no(b) || a.idx - b.idx);
   }
   return groups;
 }

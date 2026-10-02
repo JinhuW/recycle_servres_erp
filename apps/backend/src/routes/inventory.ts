@@ -15,6 +15,7 @@ import {
 import { UNTYPED_ITEM, normSellPrice, SPEC_FIELD_TO_DB_COL } from '@recycle-erp/shared';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { settleSoldTx } from '../services/orderSold';
+import { poLineNo } from '../lib/poLineNo';
 import type { Env, User } from '../types';
 import { isClosedBook, LINE_STATUS_FOR_LIFECYCLE, ARCHIVED_LINE_STATUS, REVIEWED_LIFECYCLES } from '../services/orderAdvance';
 
@@ -189,7 +190,7 @@ inventory.get('/', async (c) => {
            l.qty, l.unit_cost::float AS unit_cost, l.sell_price::float AS sell_price,
            l.status, l.created_at, l.position,
            l.health::float AS health, l.rpm,
-           o.id AS order_id, o.user_id,
+           o.id AS order_id, ${poLineNo(sql, 'l')} AS po_line_no, o.user_id,
            COALESCE(l.warehouse_id, o.warehouse_id) AS warehouse_id,
            u.name AS user_name, u.initials AS user_initials,
            w.short AS warehouse_short, w.region AS warehouse_region

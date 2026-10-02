@@ -56,6 +56,8 @@ type InventoryRow = {
   user_name: string;
   created_at: string;
   order_id: string;
+  // The lot's # on its PO's page. Absent from a backend older than this bundle.
+  po_line_no?: number | null;
 };
 
 type Props = {
@@ -517,6 +519,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     sellPrice: r.sell_price,
     draftCount: 0,
     sourceOrderId: r.order_id,
+    sourceLineNo: r.po_line_no ?? null,
     type: r.type,
     classification: r.classification,
     rank: r.rank,

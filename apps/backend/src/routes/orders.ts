@@ -54,6 +54,7 @@ import { maybeRenameReceipt, suffixFilename } from '../ai/receipt';
 import { shrinkImageToFit } from '../lib/image-shrink';
 import { log } from '../lib/log';
 import { notify } from '../lib/notify';
+import { poLineOrder } from '../lib/poLineNo';
 
 const orders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
@@ -691,7 +692,7 @@ orders.get('/:id', async (c) => {
         WHERE sol.inventory_id = ol.id AND so.status = 'Done'
       ) fs ON TRUE
       WHERE ol.order_id = ${id}
-      ORDER BY ol.position ASC
+      ORDER BY ${poLineOrder(sql, 'ol')}
     `,
     // The sell orders that sold this PO's units — Done only, the same set the
     // final sell price reads. An archived Done order still sold them, so it stays.
@@ -1045,7 +1046,7 @@ orders.get('/:id/spreadsheet', async (c) => {
            interface, form_factor, description, item_type, part_number, chip_number, serial_number,
            condition, COALESCE(qty_purchased, qty) AS qty, health::float AS health, rpm,
            unit_cost::float AS unit_cost, sell_price::float AS sell_price
-    FROM order_lines WHERE order_id = ${id} ORDER BY position ASC
+    FROM order_lines WHERE order_id = ${id} ORDER BY ${poLineOrder(sql, 'order_lines')}
   ` as unknown as Record<string, unknown>[];
 
   // Mirror the invoice's payment summary: subtotal is the sum of line costs;

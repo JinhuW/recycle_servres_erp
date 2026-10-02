@@ -35,6 +35,23 @@ describe('groupSellOrderLines', () => {
     ]);
   });
 
+  it('runs a PO group in the PO page\'s line order, unnumbered lines last', () => {
+    const numbered = [
+      { ...line('a', 'WH-DEN', 'PO-1442'), sourceLineNo: 3 },
+      { ...line('b', 'WH-DEN', 'PO-1442'), sourceLineNo: null },
+      { ...line('c', 'WH-LA1', 'PO-1442'), sourceLineNo: 1 },
+      { ...line('d', 'WH-DEN', 'PO-1442') },
+      { ...line('e', 'WH-LA1', 'PO-1442'), sourceLineNo: 2 },
+    ];
+    const [g] = groupSellOrderLines(numbered, 'po');
+    expect(g.items.map(i => [i.line.id, i.idx])).toEqual([
+      ['c', 2], ['e', 4], ['a', 0], ['b', 1], ['d', 3],
+    ]);
+    // By warehouse, lines stay in the order they were added.
+    expect(groupSellOrderLines(numbered, 'warehouse')[0].items.map(i => i.line.id))
+      .toEqual(['a', 'b', 'd']);
+  });
+
   it('treats a missing sourceOrderId as hand-typed', () => {
     const g = groupSellOrderLines([{ warehouseId: 'WH-DEN', warehouse: 'DEN' }], 'po');
     expect(g).toHaveLength(1);

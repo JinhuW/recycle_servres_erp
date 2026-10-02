@@ -39,6 +39,7 @@ import {
 import { recordSaleDataPoints, recordBidDataPoints, type BidPart } from '../lib/sellOrderMarket';
 import { maybeRenameReceipt } from '../ai/receipt';
 import { shrinkImageToFit } from '../lib/image-shrink';
+import { poLineNo } from '../lib/poLineNo';
 import type { Env, User } from '../types';
 
 const sellOrders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -259,6 +260,7 @@ sellOrders.get('/:id', async (c) => {
     pack_warehouse_short: string | null;
     inventory_id: string | null; warehouse_id: string | null;
     source_order_id: string | null;
+    source_line_no: number | null;
     inventory_qty: number | null;
     type: string | null; classification: string | null; rank: string | null;
     speed: string | null; interface: string | null; form_factor: string | null;
@@ -269,6 +271,7 @@ sellOrders.get('/:id', async (c) => {
            sol.source_unit_price::float AS source_unit_price,
            sol.condition, sol.position,
            sol.inventory_id, sol.warehouse_id, ol.order_id AS source_order_id,
+           ${poLineNo(sql, 'ol')} AS source_line_no,
            w.short AS warehouse_short, pw.short AS pack_warehouse_short,
            -- The lot's spec, read live: sell_order_lines keeps only a text
            -- snapshot. Null for a hand-typed line or a deleted lot.
@@ -375,6 +378,8 @@ sellOrders.get('/:id', async (c) => {
         packWarehouse: l.pack_warehouse_short,
         inventoryId: l.inventory_id, warehouseId: l.warehouse_id,
         sourceOrderId: l.source_order_id,
+        // The line's # on that PO's page.
+        sourceLineNo: l.source_line_no,
         type: l.type, classification: l.classification, rank: l.rank,
         speed: l.speed, interface: l.interface, formFactor: l.form_factor,
         health: l.health,
