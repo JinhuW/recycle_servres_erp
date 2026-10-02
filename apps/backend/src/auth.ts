@@ -24,8 +24,9 @@ const isProd = (env: Env) => env.NODE_ENV === 'production';
 // trips of blank screen — because a user who steps away for a coffee comes back
 // past the deadline. What actually bounds a stolen cookie is the rotating
 // refresh family and its reuse-revocation, not this number; and deactivating a
-// user still takes effect on their very next request, because authMiddleware
-// re-checks `active = TRUE` every time rather than trusting the JWT.
+// user or changing their password still takes effect on their very next
+// request, because authMiddleware re-checks `active` and `tokens_valid_after`
+// every time rather than trusting the JWT.
 const TOKEN_TTL_SEC = 60 * 60;
 
 export function setAuthCookies(c: Context, env: Env, accessJwt: string, refreshRaw: string) {
@@ -54,13 +55,21 @@ export async function verifyPassword(plain: string, hash: string): Promise<boole
   return bcrypt.compare(plain, hash);
 }
 
+/**
+ * Whole seconds on the app clock: what signToken stamps as `iat`, and what a
+ * password change stores as `users.tokens_valid_after`. With both on one clock
+ * at one resolution, a token minted after the change can never compare as
+ * older, whatever the database clock says.
+ */
+export const epochSeconds = (): number => Math.floor(Date.now() / 1000);
+
 // `fid` names the refresh family this access token was minted alongside. The
 // `rt` cookie is scoped to /api/auth, so outside that path this claim is the
 // only way a request can tell which session it belongs to.
 export async function signToken(
   env: Env, user: { id: string; email: string; role: string }, familyId?: string,
 ): Promise<string> {
-  const now = Math.floor(Date.now() / 1000);
+  const now = epochSeconds();
   return jwt.sign(
     {
       sub: user.id,
@@ -75,15 +84,19 @@ export async function signToken(
   );
 }
 
-export async function verifyToken(
-  env: Env, token: string,
-): Promise<{ sub: string; role?: string; fid?: string } | null> {
+export type AccessTokenPayload = { sub: string; role?: string; fid?: string; iat: number };
+
+export async function verifyToken(env: Env, token: string): Promise<AccessTokenPayload | null> {
   try {
     // verify() returns the decoded token when valid, undefined when not — no
     // need for a second decode() parse.
     const decoded = await jwt.verify<{ sub: string; role?: string; fid?: string }>(token, env.JWT_SECRET);
     if (!decoded) return null;
-    return decoded.payload;
+    const { payload } = decoded;
+    // signToken always stamps iat; a token without one can't be placed
+    // against a password change, so it isn't honoured.
+    if (typeof payload.iat !== 'number') return null;
+    return { ...payload, iat: payload.iat };
   } catch {
     return null;
   }
@@ -102,18 +115,24 @@ export const authMiddleware: MiddlewareHandler<{
   if (!payload) return c.json({ error: 'Invalid auth token' }, 401);
 
   const sql = getDb(c.env);
-  const rows = await sql<User[]>`
+  const rows = await sql<(User & { stale: boolean })[]>`
     SELECT id, email, name, initials, role, team, language,
            default_warehouse_id AS "defaultWarehouseId",
-           COALESCE(preferences, '{}'::jsonb) AS preferences
+           COALESCE(preferences, '{}'::jsonb) AS preferences,
+           (tokens_valid_after IS NOT NULL
+             AND to_timestamp(${payload.iat}) < tokens_valid_after) AS stale
     FROM users
     WHERE id = ${payload.sub} AND active = TRUE
     LIMIT 1
   `;
   if (rows.length === 0) return c.json({ error: 'User not found' }, 401);
+  const { stale, ...user } = rows[0];
+  // Minted before the password last changed. A plain 401, so a session that
+  // kept its refresh family (the one that made the change) refreshes past it.
+  if (stale) return c.json({ error: 'Session expired' }, 401);
 
-  c.set('user', rows[0]);
-  addLogContext({ userId: rows[0].id });
+  c.set('user', user);
+  addLogContext({ userId: user.id });
   await next();
 };
 

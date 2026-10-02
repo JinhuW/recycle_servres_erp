@@ -11,7 +11,7 @@
 // lockdown.
 
 import { Hono } from 'hono';
-import { timingSafeEqual } from 'node:crypto';
+import { secretMatches } from '../lib/secret';
 import { normalizeTracking } from '@recycle-erp/shared';
 import type { Env, User } from '../types';
 import { getDb } from '../db';
@@ -22,15 +22,6 @@ import { log } from '../lib/log';
 const shippoLog = log.child({ module: 'shippo' });
 
 const shippoWebhook = new Hono<{ Bindings: Env; Variables: { user: User } }>();
-
-function secretMatches(given: string, expected: string | undefined): boolean {
-  if (!expected) return false;
-  const a = Buffer.from(given);
-  const b = Buffer.from(expected);
-  // timingSafeEqual throws on a length mismatch, which would leak length by
-  // status code — compare lengths first and still run the constant-time check.
-  return a.length === b.length && timingSafeEqual(a, b);
-}
 
 shippoWebhook.post('/:secret', async (c) => {
   // A miss and an unconfigured secret answer identically: the endpoint never

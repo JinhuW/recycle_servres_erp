@@ -277,6 +277,33 @@ describe('/api/web-submissions (manager)', () => {
     expect(again.body.orderId).toBe(conv.body.orderId);
   });
 
+  // match_key is alnum(name)|zip, so a@cme.corp and a hand-typed "Acme Corp"
+  // share ACMECORP| — the lot must not land on that house account.
+  it('files a lot under its own seller when the email compresses like another supplier', async () => {
+    const db = getTestDb();
+    const [acme] = await db<{ id: string }[]>`
+      INSERT INTO suppliers (name, owner_id) VALUES ('Acme Corp', NULL) RETURNING id
+    `;
+    const odd = { ...ramLine, fields: { ...ramLine.fields, classification: 'constructor' } };
+    const r = await submit({ email: 'a@cme.corp', source: 'web', lines: [odd] }, headers());
+    expect(r.status).toBe(201);
+    const { token } = await loginAs(ALEX);
+    const conv = await api<{ orderId: string }>('POST', `/api/web-submissions/${r.body.ref}/convert`, { token });
+    expect(conv.status).toBe(201);
+
+    const [po] = await db<{ supplier_id: string; name: string }[]>`
+      SELECT o.supplier_id, s.name FROM orders o JOIN suppliers s ON s.id = o.supplier_id
+      WHERE o.id = ${conv.body.orderId}
+    `;
+    expect(po.supplier_id).not.toBe(acme.id);
+    expect(po.name).toBe('a@cme.corp (web)');
+    // A free-text class that names an Object.prototype key is not a RAM type.
+    const [line] = await db<{ type: string | null }[]>`
+      SELECT type FROM order_lines WHERE order_id = ${conv.body.orderId}
+    `;
+    expect(line.type).toBeNull();
+  });
+
   it('converts a pickup lot as cash at a pickup, and refuses a quote', async () => {
     const lot = await submit({ email: 'local@example.com', source: 'facebook', handoff: 'pickup', pickup_location: 'chicago', lines: [ssdLine] });
     const q = await submitQuote(quote);

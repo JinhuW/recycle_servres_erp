@@ -10,7 +10,9 @@ Cloudflare R2. Fully self-contained on Railway.
    (`30 3 * * *`, i.e. 03:30 UTC daily).
 2. `backup.sh` runs `pg_dump --format=custom` against `DATABASE_URL` (the
    Postgres service, reached over Railway's **private network**), gzips it,
-   verifies it with `pg_restore --list`, and `rclone copy`s it to R2.
+   verifies it with `pg_restore --list` — including that `orders`,
+   `order_lines`, `sell_orders` and `users` carry data — and `rclone copy`s it
+   to R2. A failed bucket listing at the prune step fails the run.
 3. Old dumps are pruned to the newest `BACKUP_KEEP` (30).
 4. The script exits — required for Railway cron (a lingering process makes
    Railway skip the next run).

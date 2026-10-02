@@ -14,6 +14,9 @@ export interface TrackingInfo {
   raw: string;
   normalized: PackageStatus;
   eta: Date | null;
+  // When the carrier says this status happened. Absent or null when the source
+  // doesn't say, and then the payload cannot be ordered against the stored one.
+  statusAt?: Date | null;
 }
 
 // Nobody here bought the label, so a source has to track a stranger's number

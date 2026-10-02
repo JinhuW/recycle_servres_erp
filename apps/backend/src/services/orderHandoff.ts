@@ -15,7 +15,8 @@
 // before the transaction, like PATCH); this file trusts its input.
 
 import type { Carrier, PackageSource } from '@recycle-erp/shared';
-import { linkPaypalTxnToOrder } from '../banktx/sync';
+import { normPaypalTxnId } from '../ai/paypal';
+import { linkPaypalTxnToOrder, unlinkPaypalTxnFromOrder } from '../banktx/sync';
 import { advanceOrderTx, type AdvanceActor, type AdvanceOutcome } from './orderAdvance';
 import { diff, writeOrderEvent, type AuditChange, type SqlLike } from './orderAudit';
 
@@ -398,8 +399,14 @@ export async function handoffOrderTx(
   if (changes.length) {
     await writeOrderEvent(tx, id, actor.id, 'meta_changed', { changes });
   }
-  // Same reasoning as PATCH: the id names a payment that has very likely
-  // already synced, so link it now rather than waiting for the six-hour pass.
+  // Same reasoning as PATCH: the payments the old id claimed let go when the
+  // id changes or the method no longer has one, and the new id names a payment
+  // that has very likely already synced, so it links now rather than waiting
+  // for the six-hour pass.
+  const oldPaypal = normPaypalTxnId(before.paypal_txn_id);
+  if (oldPaypal && oldPaypal !== normPaypalTxnId(paypalTxnId)) {
+    await unlinkPaypalTxnFromOrder(tx, id, oldPaypal);
+  }
   let paymentsLinked = 0;
   if (paypalTxnId) {
     paymentsLinked = await linkPaypalTxnToOrder(tx, paypalTxnId, id, actor.id);

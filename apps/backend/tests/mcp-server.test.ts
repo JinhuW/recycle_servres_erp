@@ -278,4 +278,20 @@ describe('MCP JSON-RPC transport conformance', () => {
     const r = await post({ jsonrpc: '2.0', id: 1 });
     expect((r.body as any).error.code).toBe(-32600);
   });
+
+  // Inherited members and non-strings are unknown tools, and none of them
+  // may mint its own metric series.
+  it('treats inherited and non-string tool names as unknown, labelled "unknown"', async () => {
+    const names: unknown[] = ['toString', '__proto__', 'hasOwnProperty', ['list_market_values'], 42, 'no_such_tool'];
+    for (const name of names) {
+      const r = await post({ jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name, arguments: {} } });
+      expect((r.body as any).error?.code, JSON.stringify(name)).toBe(-32601);
+    }
+    const text = (await api<string>('GET', '/metrics')).body;
+    const tools = [...text.matchAll(/mcp_tool_calls_total\{[^}]*tool="([^"]*)"/g)].map((m) => m[1]);
+    for (const leaked of ['toString', '__proto__', 'hasOwnProperty', 'no_such_tool', '42', 'list_market_values,']) {
+      expect(tools).not.toContain(leaked);
+    }
+    expect(tools).toContain('unknown');
+  });
 });

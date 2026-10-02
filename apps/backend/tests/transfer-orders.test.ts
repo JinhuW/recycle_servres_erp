@@ -21,11 +21,15 @@ async function committedLineIds(): Promise<Set<string>> {
   );
 }
 
-async function transferOne(token: string): Promise<{ id: string; from: string; to: string; orderId: string }> {
+type Moved = { id: string; from: string; to: string; orderId: string; status: string };
+
+// `status` is the line's status before the move — what receive gives back.
+async function transferOne(token: string, only?: 'Reviewing' | 'Done'): Promise<Moved> {
   const inv = await api<{ items: InvRow[] }>('GET', '/api/inventory', { token });
   const committed = await committedLineIds();
   const line = inv.body.items.find(
-    (i) => (i.status === 'Reviewing' || i.status === 'Done') && i.warehouse_id && !committed.has(i.id),
+    (i) => (only ? i.status === only : i.status === 'Reviewing' || i.status === 'Done')
+      && i.warehouse_id && !committed.has(i.id),
   );
   if (!line) throw new Error('no uncommitted sellable line in seed');
   const to = WAREHOUSES.find((w) => w !== line.warehouse_id)!;
@@ -35,7 +39,7 @@ async function transferOne(token: string): Promise<{ id: string; from: string; t
   );
   expect(r.status).toBe(200);
   expect(typeof r.body.transferOrderId).toBe('string');
-  return { id: line.id, from: line.warehouse_id!, to, orderId: r.body.transferOrderId };
+  return { id: line.id, from: line.warehouse_id!, to, orderId: r.body.transferOrderId, status: line.status };
 }
 
 describe('migration 0028 — transfer_orders schema', () => {
@@ -112,6 +116,22 @@ describe('POST /api/inventory/transfer — creates a transfer order', () => {
     expect(ev.detail.prior_status).toBe(before.status);
   });
 
+  it('400 for a malformed line id or the same line twice', async () => {
+    const { token } = await loginAs(ALEX);
+    const bad = await api<{ error: string }>('POST', '/api/inventory/transfer', {
+      token, body: { toWarehouseId: 'WH-LA1', lines: [{ id: 'not-a-uuid', qty: 1 }] },
+    });
+    expect(bad.status).toBe(400);
+    const inv = await api<{ items: InvRow[] }>('GET', '/api/inventory', { token });
+    const any = inv.body.items[0];
+    const to = WAREHOUSES.find((w) => w !== any.warehouse_id)!;
+    const dup = await api<{ error: string }>('POST', '/api/inventory/transfer', {
+      token, body: { toWarehouseId: to, lines: [{ id: any.id, qty: 1 }, { id: any.id.toUpperCase(), qty: 1 }] },
+    });
+    expect(dup.status).toBe(400);
+    expect(dup.body.error).toMatch(/more than once/);
+  });
+
   it('uses NULL from_warehouse_id when sources differ', async () => {
     const { token } = await loginAs(ALEX);
     const inv = await api<{ items: InvRow[] }>('GET', '/api/inventory', { token });
@@ -166,6 +186,36 @@ describe('GET /api/inventory/transfer-orders', () => {
     expect(line!.from_wh).toBe(moved.from);
   });
 
+  it('pages with limit + cursor, never skipping rows created in the same millisecond', async () => {
+    const { token } = await loginAs(ALEX);
+    const db = getTestDb();
+    // Microsecond-apart timestamps inside one millisecond: a cursor rounded to
+    // a JS Date would skip the rows after the page boundary.
+    await db`
+      INSERT INTO transfer_orders (id, to_warehouse_id, status, created_at)
+      SELECT 'TO-PAGE-' || g, 'WH-LA1', 'Pending',
+             TIMESTAMPTZ '2030-01-01 00:00:00.123000+00' + make_interval(secs => g / 1000000.0)
+      FROM generate_series(1, 7) g
+    `;
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < 20; page++) {
+      const qs = `?status=all&limit=3${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+      const r = await api<{ orders: Array<{ id: string; cursor_ts?: unknown }>; nextCursor: string | null }>(
+        'GET', `/api/inventory/transfer-orders${qs}`, { token });
+      expect(r.status).toBe(200);
+      expect(r.body.orders.length).toBeLessThanOrEqual(3);
+      expect(r.body.orders.every((o) => o.cursor_ts === undefined)).toBe(true);
+      seen.push(...r.body.orders.map((o) => o.id));
+      cursor = r.body.nextCursor;
+      if (!cursor) break;
+    }
+    expect(cursor).toBeNull();
+    const all = (await db`SELECT id FROM transfer_orders ORDER BY created_at DESC, id DESC`)
+      .map((r) => (r as { id: string }).id);
+    expect(seen).toEqual(all);
+  });
+
   it('status=all includes the order; default (pending) does too while Pending', async () => {
     const { token } = await loginAs(ALEX);
     const moved = await transferOne(token);
@@ -191,7 +241,7 @@ describe('POST /api/inventory/transfer-orders/:id/receive', () => {
     expect(r.status).toBe(404);
   });
 
-  it('receives the whole order: lines Done, order Received', async () => {
+  it('receives the whole order: lines back at their prior status, order Received', async () => {
     const { token } = await loginAs(ALEX);
     const moved = await transferOne(token);
     const r = await api<{ ok: true; id: string }>(
@@ -206,13 +256,14 @@ describe('POST /api/inventory/transfer-orders/:id/receive', () => {
     expect(ord.received_at).not.toBeNull();
     expect(ord.received_by).not.toBeNull();
     const ln = (await db`SELECT status FROM order_lines WHERE id = ${moved.id}`)[0] as { status: string };
-    expect(ln.status).toBe('Done');
+    expect(ln.status).toBe(moved.status);
     const ev = (await db`
       SELECT detail FROM inventory_events
       WHERE order_line_id = ${moved.id} AND kind = 'received' ORDER BY created_at DESC LIMIT 1
     `)[0] as { detail: Record<string, unknown> };
     expect(ev.detail.transfer_order_id).toBe(moved.orderId);
     expect(ev.detail.at).toBe(moved.to);
+    expect(ev.detail).toMatchObject({ field: 'status', from: 'In Transit', to: moved.status });
 
     const pend = await api<{ orders: Array<{ id: string }> }>(
       'GET', '/api/inventory/transfer-orders', { token },
@@ -222,6 +273,30 @@ describe('POST /api/inventory/transfer-orders/:id/receive', () => {
       'GET', '/api/inventory/transfer-orders?status=received', { token },
     );
     expect(recv.body.orders.some((o) => o.id === moved.orderId)).toBe(true);
+  });
+
+  it('a Reviewing line comes back Reviewing, not promoted to Done', async () => {
+    const { token } = await loginAs(ALEX);
+    const moved = await transferOne(token, 'Reviewing');
+    expect((await api('POST', `/api/inventory/transfer-orders/${moved.orderId}/receive`, { token })).status)
+      .toBe(200);
+    const ln = (await getTestDb()`SELECT status FROM order_lines WHERE id = ${moved.id}`)[0] as { status: string };
+    expect(ln.status).toBe('Reviewing');
+  });
+
+  it('after a reopen, receive restores the status the line had at the reopen', async () => {
+    const { token } = await loginAs(ALEX);
+    const moved = await transferOne(token, 'Reviewing');
+    const db = getTestDb();
+    await api('POST', `/api/inventory/transfer-orders/${moved.orderId}/receive`, { token });
+    // The PO moved the received line on before the transfer was reopened.
+    await db`UPDATE order_lines SET status = 'Done' WHERE id = ${moved.id}`;
+    expect((await api('POST', `/api/inventory/transfer-orders/${moved.orderId}/reopen`, { token })).status)
+      .toBe(200);
+    expect((await api('POST', `/api/inventory/transfer-orders/${moved.orderId}/receive`, { token })).status)
+      .toBe(200);
+    const ln = (await db`SELECT status FROM order_lines WHERE id = ${moved.id}`)[0] as { status: string };
+    expect(ln.status).toBe('Done');
   });
 
   it('400 when the order is already Received', async () => {
@@ -638,11 +713,11 @@ describe('transfer receive / discard into an archived PO', () => {
     expect(archived.body.items.find((i) => i.id === t.id)).toBeDefined();
 
     // The received transfer cannot be reopened while the PO is archived —
-    // reopen wants its lines at Done. Unarchive first.
+    // reopen wants its lines at a stock status. Unarchive first.
     expect((await api('POST', `/api/inventory/transfer-orders/${t.orderId}/reopen`, { token })).status).toBe(409);
 
     expect((await api('POST', `/api/orders/${orderRow.order_id}/unarchive`, { token })).status).toBe(200);
-    expect(await lineRow(t.id)).toEqual({ status: 'Done', warehouse_id: t.to });
+    expect(await lineRow(t.id)).toEqual({ status: t.status, warehouse_id: t.to });
   });
 
   it('discard lands the line at Archived and unarchive restores its prior status', async () => {

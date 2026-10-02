@@ -46,7 +46,8 @@ crash.log
 crash.*.log
 *.auto.tfvars
 **/*.secret.tfvars
-.terraform.lock.hcl
+# .terraform.lock.hcl is committed: it pins provider versions and checksums, so
+# every machine and CI apply with the same provider build.
 
 # Superpowers brainstorm/visual-companion artifacts
 .superpowers/

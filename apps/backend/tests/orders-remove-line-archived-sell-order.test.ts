@@ -63,7 +63,9 @@ describe('removing a PO line named by a sell order', () => {
     const { id, lineIds } = await createReviewing(pur, mgr);
     const soId = await createSellOrderOn(mgr, lineIds[0], PN);
     await moveSellOrder(mgr, soId, 'Shipped');
-    expect((await api('POST', `/api/sell-orders/${soId}/archive`, { token: mgr })).status).toBe(200);
+    // Written directly: the archive endpoint now refuses a committed order,
+    // but rows archived before that rule still exist and must not pin the line.
+    await getTestDb()`UPDATE sell_orders SET archived_at = NOW() WHERE id = ${soId}`;
 
     const res = await api('PATCH', `/api/orders/${id}`, { token: mgr, body: { removeLineIds: [lineIds[0]] } });
     expect(res.status).toBe(200);

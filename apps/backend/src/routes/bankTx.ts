@@ -343,9 +343,14 @@ bankTx.get('/stats', async (c) => {
       AND ${openRowFrag(sql, 'bt')}
       AND ${hasMatchFrag(sql, 'bt')}
       ${dirFragBt}`;
+  // The stalest account, not the freshest: a card whose fetch keeps failing
+  // holds its old sync time, and MAX would let checking's clean run hide it.
+  // Its error comes with it, the stalest account's first.
   const sources = await sql`
-    SELECT source, MAX(last_synced_at) AS last_synced_at,
-           MAX(dispute_error) AS dispute_error
+    SELECT source, MIN(last_synced_at) AS last_synced_at,
+           MAX(dispute_error) AS dispute_error,
+           (ARRAY_AGG(sync_error ORDER BY last_synced_at NULLS FIRST, external_id)
+              FILTER (WHERE sync_error IS NOT NULL))[1] AS sync_error
     FROM bank_accounts GROUP BY source`;
   return c.json({
     unlinked: { count: agg.unlinked_count, amount: agg.unlinked_amount },
@@ -362,6 +367,9 @@ bankTx.get('/stats', async (c) => {
       // transaction sync is perfectly healthy. The page says so rather than
       // showing an empty dispute list that reads as "no cases".
       disputeError: s.dispute_error ?? null,
+      // Part of the source failed while the rest synced — Mercury's card list
+      // or one card's transactions. The money feed shown is incomplete.
+      syncError: s.sync_error ?? null,
     })),
   });
 });
@@ -421,8 +429,13 @@ bankTx.post('/:id/link', async (c) => {
     return c.json({ error: 'Remove the transaction from its internal transaction before linking it' }, 400);
   }
 
-  const order = await sql`SELECT id FROM orders WHERE id = ${orderId} LIMIT 1`;
+  const order = await sql<{ archived_at: Date | null }[]>`
+    SELECT archived_at FROM orders WHERE id = ${orderId} LIMIT 1`;
   if (order.length === 0) return c.json({ error: 'Order not found' }, 404);
+  // The picker never offers an archived PO; a typed or stale id is refused
+  // the same way, since an archived PO is out of every money reader and a
+  // payment linked to it would vanish from both sides.
+  if (order[0].archived_at) return c.json({ error: 'Order is archived — unarchive it first' }, 409);
 
   const kind = group[0].amount < 0 ? 'payment' : 'refund';
   const txnId = group.find((l) => l.paypal_txn_id)?.paypal_txn_id ?? null;

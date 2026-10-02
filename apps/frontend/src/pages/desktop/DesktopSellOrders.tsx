@@ -8,7 +8,7 @@ import {
   CloseSellOrderDialog, ReopenSellOrderDialog,
 } from '../../components/CloseSellOrderDialog';
 import { useT } from '../../lib/i18n';
-import { api, archiveSellOrder, unarchiveSellOrder } from '../../lib/api';
+import { api, ApiError, archiveSellOrder, unarchiveSellOrder } from '../../lib/api';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { useRoute, navigate, match } from '../../lib/route';
 import { RouteLink } from '../../components/RouteLink';
@@ -1566,17 +1566,23 @@ export function SellOrderDetail({
           </span>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             <DownloadMenu orderId={order.id} lines={order.lines} />
-            {editable && !prefill && order.status !== 'Draft' && order.archivedAt === null && (
+            {/* Only a settled order archives: Draft has nothing to hide yet,
+                and Shipped / Awaiting payment still owe a close or a payment
+                (the backend 409s those). Settled orders are locked, so these
+                two sit outside the editor's `editable` gate — gating on it
+                made both unreachable. */}
+            {!prefill && (order.status === 'Done' || order.status === 'Closed')
+              && order.archivedAt === null && (
               <button
                 className="btn"
                 onClick={() => setConfirmArchive(true)}
                 title={t('soArchiveTooltip')}
                 style={{ color: 'var(--neg, #c0392b)', borderColor: 'var(--neg, #c0392b)' }}
               >
-                <Icon name="box" size={14} /> Archive
+                <Icon name="box" size={14} /> {t('archive')}
               </button>
             )}
-            {editable && !prefill && order.archivedAt !== null && (
+            {!prefill && order.archivedAt !== null && (
               <button
                 className="btn"
                 disabled={unarchiving}
@@ -1593,7 +1599,7 @@ export function SellOrderDetail({
                   }
                 }}
               >
-                <Icon name="box" size={14} /> {unarchiving ? 'Unarchiving…' : 'Unarchive'}
+                <Icon name="box" size={14} /> {unarchiving ? t('soUnarchiving') : t('soUnarchive')}
               </button>
             )}
             {/* Close as off-ramp: available in edit mode, everywhere except
@@ -1716,6 +1722,7 @@ function ArchiveSellOrderDialog({
   onCancel: () => void;
   onConfirmed: () => void;
 }) {
+  const { t } = useT();
   const [typed, setTyped] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1730,8 +1737,10 @@ function ArchiveSellOrderDialog({
       await archiveSellOrder(orderId);
       onConfirmed();
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Archive failed';
-      setError(msg);
+      // A refusal (an order that still owes a close or a payment) says why in
+      // its body; anything without one gets the generic line, not "HTTP 500".
+      const body = e instanceof ApiError ? e.body as { error?: unknown } | null : null;
+      setError(typeof body?.error === 'string' ? body.error : t('soArchiveFailed'));
       setBusy(false);
     }
   };
@@ -1739,16 +1748,12 @@ function ArchiveSellOrderDialog({
   return (
     <Modal onClose={() => { if (!busy) onCancel(); }} shellStyle={{ maxWidth: 460, width: 'calc(100vw - 80px)' }}>
       <div className="modal-head">
-        <div className="modal-title">Archive sell order</div>
+        <div className="modal-title">{t('soArchiveTitle')}</div>
       </div>
       <div className="modal-body" style={{ padding: 20 }}>
-        <p style={{ marginTop: 0, fontSize: 13.5 }}>
-          Archiving hides this sell order from the default list. It stays in the
-          database with its lines, commissions, and audit history intact, and can
-          be unarchived later.
-        </p>
+        <p style={{ marginTop: 0, fontSize: 13.5 }}>{t('soArchiveBody')}</p>
         <label className="label" style={{ marginTop: 12 }}>
-          Type <span className="mono" style={{ fontWeight: 600 }}>{orderId}</span> to confirm
+          {t('dangerTypeToConfirmPrefix')} <span className="mono" style={{ fontWeight: 600 }}>{orderId}</span> {t('dangerTypeToConfirmSuffix')}
         </label>
         <input
           className="input mono"
@@ -1765,14 +1770,14 @@ function ArchiveSellOrderDialog({
         )}
       </div>
       <div className="modal-foot">
-        <button className="btn" onClick={onCancel} disabled={busy}>Cancel</button>
+        <button className="btn" onClick={onCancel} disabled={busy}>{t('cancel')}</button>
         <button
           className="btn danger"
           onClick={submit}
           disabled={!matches || busy}
           style={{ background: 'var(--neg, #c0392b)', color: '#fff', borderColor: 'transparent' }}
         >
-          {busy ? 'Archiving…' : 'Archive'}
+          {busy ? t('soArchiving') : t('archive')}
         </button>
       </div>
     </Modal>

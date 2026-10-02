@@ -7,7 +7,7 @@ import { notify } from '../lib/notify';
 import { getUploadLimits } from '../lib/settings';
 import { allLimited } from '../lib/concurrency';
 import { log } from '../lib/log';
-import { clampLimit, decodeCursor, encodeCursor } from '../lib/pagination';
+import { clampLimit, decodeCursor, encodeCursor, UUID_RE } from '../lib/pagination';
 import {
   writeSellOrderEvent, diff, META_FIELDS_SO, type AuditChange,
 } from '../services/sellOrderAudit';
@@ -66,6 +66,7 @@ async function metaStatusAndOrder(
 
 // Payment receivers are managers only — purchasers never handle customer money.
 async function isActiveManager(sql: SqlClient, userId: string): Promise<boolean> {
+  if (typeof userId !== 'string' || !UUID_RE.test(userId)) return false;
   const rows = await sql`
     SELECT 1 FROM users
     WHERE id = ${userId} AND active = TRUE AND role = 'manager' LIMIT 1
@@ -205,12 +206,18 @@ sellOrders.get('/sellable', async (c) => {
   const u = c.var.user;
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const sql = getDb(c.env);
-  const items = await searchSellableInventory(sql, {
+  // One past the page so the picker can say the list is cut off rather than
+  // silently ending at 200 — it has no cursor to fetch the rest with.
+  const SELLABLE_PAGE = 200;
+  const rows = await searchSellableInventory(sql, {
     query: c.req.query('q') ?? null,
     warehouseId: c.req.query('warehouseId') ?? null,
-    limit: 200,
+    limit: SELLABLE_PAGE + 1,
   });
-  return c.json({ items });
+  return c.json({
+    items: rows.slice(0, SELLABLE_PAGE),
+    hasMore: rows.length > SELLABLE_PAGE,
+  });
 });
 
 sellOrders.get('/:id', async (c) => {
@@ -262,8 +269,13 @@ sellOrders.get('/:id', async (c) => {
            w.short AS warehouse_short, pw.short AS pack_warehouse_short,
            -- What this order may still grow its line to: the lot less the units
            -- other committed orders hold. Its own claim is excluded, so editing
-           -- a line down and back up is not blocked by itself.
-           (ol.qty - elsewhere.qty) AS inventory_qty
+           -- a line down and back up is not blocked by itself. A lot that left
+           -- the sellable statuses or whose PO was archived offers nothing:
+           -- validateSellLines would refuse any qty for it on save.
+           CASE WHEN ol.id IS NULL THEN NULL
+                WHEN ol.status IN ('Reviewing', 'Done') AND src.archived_at IS NULL
+                THEN ol.qty - elsewhere.qty
+                ELSE 0 END AS inventory_qty
     FROM sell_order_lines sol
     LEFT JOIN warehouses w ON w.id = sol.warehouse_id
     LEFT JOIN order_lines ol ON ol.id = sol.inventory_id
@@ -626,15 +638,27 @@ sellOrders.post('/:id/price-import/preview', async (c) => {
   }
 });
 
-// Field range gates — fail fast with a clean 400 rather than letting the
-// sell_order_lines CHECK (qty>0, unit_price>=0) surface as a 500.
-function lineRangeError(lines: DraftLineInput[]): string | null {
+// Field gates — fail fast with a clean 400 rather than letting a malformed
+// line reach the uuid cast, the NOT NULL columns or the sell_order_lines CHECK
+// (qty>0, unit_price>=0) and surface as a 500.
+function lineInputError(lines: readonly unknown[]): string | null {
   for (const l of lines) {
-    if (!Number.isInteger(l.qty) || l.qty <= 0) return 'qty must be a positive integer';
-    if (!Number.isFinite(l.unitPrice) || l.unitPrice < 0) return 'unitPrice must be ≥ 0';
+    if (typeof l !== 'object' || l === null) return 'each line must be an object';
+    const { inventoryId, category, label, qty, unitPrice } = l as Record<string, unknown>;
+    if (inventoryId != null && (typeof inventoryId !== 'string' || !UUID_RE.test(inventoryId))) {
+      return 'inventoryId must be a uuid';
+    }
+    if (typeof category !== 'string' || category.trim() === '') return 'category is required on every line';
+    if (typeof label !== 'string') return 'label is required on every line';
+    if (!Number.isInteger(qty) || (qty as number) <= 0) return 'qty must be a positive integer';
+    if (!Number.isFinite(unitPrice) || (unitPrice as number) < 0) return 'unitPrice must be ≥ 0';
   }
   return null;
 }
+
+// A Done order's line set is the historical record of what was sold, and a
+// Closed one is frozen until it is reopened to Draft.
+const STRUCTURE_LOCKED_STATUSES = new Set(['Done', 'Closed']);
 
 // Create a new sell order from a set of inventory lines. The manager picks
 // items off the Inventory page (or the Sell Orders page's "New from inventory"
@@ -653,6 +677,9 @@ sellOrders.post('/', async (c) => {
   if (!body || !body.customerId || !Array.isArray(body.lines) || body.lines.length === 0) {
     return c.json({ error: 'customerId and at least one line required' }, 400);
   }
+  if (typeof body.customerId !== 'string' || !UUID_RE.test(body.customerId)) {
+    return c.json({ error: 'customerId must be a uuid' }, 400);
+  }
   // Receiver must be an active manager — catch a stale/forged id as a clean
   // 400 instead of an FK violation 500.
   if (body.paymentReceivedBy != null
@@ -665,8 +692,8 @@ sellOrders.post('/', async (c) => {
   if (!isSupportedCurrency(currency)) {
     return c.json({ error: 'unsupported currency' }, 400);
   }
-  const rangeErr = lineRangeError(body.lines);
-  if (rangeErr) return c.json({ error: rangeErr }, 400);
+  const lineErr = lineInputError(body.lines);
+  if (lineErr) return c.json({ error: lineErr }, 400);
 
   const result = await createSellOrderDraft(sql, {
     customerId: body.customerId,
@@ -684,7 +711,7 @@ sellOrders.post('/', async (c) => {
 // Edit an existing sell order. Status / discount / notes are simple COALESCE
 // updates. Optionally the manager can also re-pick the customer and rewrite the
 // whole line set (same builder UI as a new order) — those edits replace
-// sell_order_lines wholesale and are blocked once the order is Done.
+// sell_order_lines wholesale and are blocked once the order is Done or Closed.
 sellOrders.patch('/:id', async (c) => {
   const u = c.var.user;
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
@@ -715,6 +742,10 @@ sellOrders.patch('/:id', async (c) => {
       return c.json({ error: 'lines required when changing currency' }, 400);
     }
   }
+  if (body.customerId !== undefined
+      && (typeof body.customerId !== 'string' || !UUID_RE.test(body.customerId))) {
+    return c.json({ error: 'customerId must be a uuid' }, 400);
+  }
   const sql = getDb(c.env);
 
   // Same active-manager gate as POST; explicit null is a clear (always allowed).
@@ -726,30 +757,30 @@ sellOrders.patch('/:id', async (c) => {
   const editsStructure = body.customerId !== undefined || body.lines !== undefined
     || body.currency !== undefined;
 
+  // Unlocked read: it answers 404 and picks the currency to fetch FX for. The
+  // status is re-read under the row lock below, which is the check that holds.
   const current = (await sql<{ status: string; currency_code: string }[]>`
     SELECT status, currency_code FROM sell_orders WHERE id = ${id} LIMIT 1
   `)[0];
   if (!current) return c.json({ error: 'Not found' }, 404);
+  if (editsStructure && STRUCTURE_LOCKED_STATUSES.has(current.status)) {
+    return c.json({ error: `cannot edit lines or customer of a ${current.status} order` }, 409);
+  }
 
   // Resolve FX outside the transaction (a cold-cache frankfurter fetch must not
   // run while the sell_orders row lock is held). Only a line rewrite needs a
   // fresh rate; currency is the caller's new one, else the order's stored one.
+  const fxCurrency = (body.currency ?? current.currency_code) as SupportedCurrency;
   const preFx: FxLookup | null = body.lines !== undefined
-    ? await getLatestRateToUsd(sql, (body.currency ?? current.currency_code) as SupportedCurrency)
+    ? await getLatestRateToUsd(sql, fxCurrency)
     : null;
-
-  // Customer / line edits are locked once the deal closes — a Done order's
-  // line set is the historical record of what was sold.
-  if (editsStructure && current.status === 'Done') {
-    return c.json({ error: 'cannot edit lines or customer of a Done order' }, 409);
-  }
 
   if (body.lines !== undefined && (!Array.isArray(body.lines) || body.lines.length === 0)) {
     return c.json({ error: 'at least one line required' }, 400);
   }
   if (Array.isArray(body.lines)) {
-    const rangeErr = lineRangeError(body.lines);
-    if (rangeErr) return c.json({ error: rangeErr }, 400);
+    const lineErr = lineInputError(body.lines);
+    if (lineErr) return c.json({ error: lineErr }, 400);
   }
 
   // A confirmed vendor price import names the products whose saved prices
@@ -772,15 +803,35 @@ sellOrders.patch('/:id', async (c) => {
     }
   }
 
-  type Outcome = { code: 400; msg: string } | { code: 200 };
+  type Outcome = { code: 400 | 404 | 409; msg: string } | { code: 200 };
   const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
     // Snapshot BEFORE state for diffing. Lock the header row so a concurrent
     // edit can't slip an event we'd then miss; lines are read consistently
     // inside the same tx so no extra lock is needed.
-    const beforeHead = (await tx<{ notes: string | null; customer_id: string; currency_code: string; payment_received_by: string | null }[]>`
-      SELECT notes, customer_id, currency_code, payment_received_by
+    const beforeHead = (await tx<{
+      status: string; notes: string | null; customer_id: string;
+      currency_code: string; payment_received_by: string | null;
+    }[]>`
+      SELECT status, notes, customer_id, currency_code, payment_received_by
       FROM sell_orders WHERE id = ${id} LIMIT 1 FOR UPDATE
     `)[0];
+    if (!beforeHead) return { code: 404, msg: 'Not found' };
+    // Under the lock: a status move to Done committed between the read above
+    // and here would otherwise let this rewrite the record of what was sold.
+    if (editsStructure && STRUCTURE_LOCKED_STATUSES.has(beforeHead.status)) {
+      return { code: 409, msg: `cannot edit lines or customer of a ${beforeHead.status} order` };
+    }
+    // A line rewrite re-snapshots every line's USD value at the current rate.
+    // Currency is the explicit new one (validated above) or the order's
+    // existing one when only qty/price changed. `preFx` is null without a
+    // line rewrite.
+    const effectiveCurrency = (body.currency ?? beforeHead.currency_code) as SupportedCurrency;
+    const fx = preFx;
+    // preFx was fetched for the currency read before the lock; a concurrent
+    // currency change would have the lines priced at the wrong rate.
+    if (fx && effectiveCurrency !== fxCurrency) {
+      return { code: 409, msg: 'sell order currency changed while saving — reload and retry' };
+    }
     const beforeLines = body.lines !== undefined
       ? await tx<SOLineSnap[]>`
           SELECT inventory_id, qty, unit_price::float AS unit_price, condition,
@@ -788,13 +839,6 @@ sellOrders.patch('/:id', async (c) => {
           FROM sell_order_lines WHERE sell_order_id = ${id} ORDER BY position
         `
       : [];
-
-    // A line rewrite re-snapshots every line's USD value at the current rate.
-    // Currency is the explicit new one (validated above) or the order's
-    // existing one when only qty/price changed. `preFx` is null without a
-    // line rewrite.
-    const effectiveCurrency = (body.currency ?? beforeHead.currency_code) as SupportedCurrency;
-    const fx = preFx;
     if (body.lines !== undefined) {
       // Same sellability check as POST, run inside the tx with FOR UPDATE.
       // This order is excluded so keeping its own already-committed lines
@@ -889,7 +933,7 @@ sellOrders.patch('/:id', async (c) => {
     }
     return { code: 200 };
   });
-  if (outcome.code !== 200) return c.json({ error: outcome.msg }, 400);
+  if (outcome.code !== 200) return c.json({ error: outcome.msg }, outcome.code);
   return c.json({ ok: true });
 });
 
@@ -1226,11 +1270,12 @@ sellOrders.post('/:id/status', async (c) => {
     | { kind: 'notCreator' }
     | { kind: 'reopenNeedsNote' }
     | { kind: 'conflict'; msg: string }
+    | { kind: 'archived'; to: string }
     | { kind: 'done' };
 
   const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
-    const cur = (await tx<{ status: string; created_by: string | null }[]>`
-      SELECT status, created_by FROM sell_orders WHERE id = ${id} LIMIT 1 FOR UPDATE
+    const cur = (await tx<{ status: string; created_by: string | null; archived_at: string | null }[]>`
+      SELECT status, created_by, archived_at FROM sell_orders WHERE id = ${id} LIMIT 1 FOR UPDATE
     `)[0];
     if (!cur) return { kind: 'notFound' };
     if (cur.status === body.to) return { kind: 'idempotent', status: cur.status };
@@ -1238,6 +1283,12 @@ sellOrders.post('/:id/status', async (c) => {
     const allowed = ALLOWED_TRANSITIONS[cur.status] ?? new Set<string>();
     if (!allowed.has(body.to)) {
       return { kind: 'illegal', from: cur.status, to: body.to };
+    }
+    // An archived order is hidden from the inbox, so a reservation it staked
+    // would hold stock nobody can see. Reopening an archived Closed order
+    // lands in Draft, which is how one could otherwise get here.
+    if (cur.archived_at !== null && committedSellStatuses().includes(body.to)) {
+      return { kind: 'archived', to: body.to };
     }
 
     // Reopen (Closed → Draft) is creator-only. NULL created_by (MCP
@@ -1437,6 +1488,9 @@ sellOrders.post('/:id/status', async (c) => {
     return c.json({ error: 'note required to reopen' }, 400);
   }
   if (outcome.kind === 'conflict') return c.json({ error: outcome.msg }, 409);
+  if (outcome.kind === 'archived') {
+    return c.json({ error: `unarchive this sell order before moving it to ${outcome.to}` }, 409);
+  }
   return c.json({ ok: true, status: body.to });
 });
 
@@ -1458,6 +1512,7 @@ async function setSellOrderArchived(c: SOCtx, archive: boolean) {
   type Outcome =
     | { kind: 'notFound' }
     | { kind: 'isDraft' }
+    | { kind: 'isCommitted' }
     | { kind: 'noChange' }
     | { kind: 'ok' };
 
@@ -1466,9 +1521,16 @@ async function setSellOrderArchived(c: SOCtx, archive: boolean) {
       SELECT status, archived_at FROM sell_orders WHERE id = ${id} LIMIT 1 FOR UPDATE
     `)[0] as { status: string; archived_at: string | null } | undefined;
     if (!existing) return { kind: 'notFound' };
-    if (existing.status === 'Draft') return { kind: 'isDraft' };
     const wasArchived = existing.archived_at !== null;
     if (wasArchived === archive) return { kind: 'noChange' };
+    // Archive-only: a Draft reached by reopening an archived Closed order must
+    // still be unarchivable, or it could never return to the inbox.
+    if (archive && existing.status === 'Draft') return { kind: 'isDraft' };
+    // A committed order still reserves its units, and archived ones drop out
+    // of the inbox — the stock would stay held by an order nobody sees.
+    if (archive && committedSellStatuses().includes(existing.status)) {
+      return { kind: 'isCommitted' };
+    }
 
     if (archive) {
       await tx`UPDATE sell_orders SET archived_at = NOW() WHERE id = ${id}`;
@@ -1486,6 +1548,9 @@ async function setSellOrderArchived(c: SOCtx, archive: boolean) {
   if (outcome.kind === 'notFound') return c.json({ error: 'Not found' }, 404);
   if (outcome.kind === 'isDraft') {
     return c.json({ error: 'Draft sell orders cannot be archived — delete instead' }, 403);
+  }
+  if (outcome.kind === 'isCommitted') {
+    return c.json({ error: 'close or complete this sell order before archiving it' }, 409);
   }
   if (outcome.kind === 'noChange') {
     return c.json({ error: archive ? 'Sell order is already archived' : 'Sell order is not archived' }, 409);

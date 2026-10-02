@@ -33,6 +33,8 @@ const MAX_TEXT = 120;
 const MAX_NOTES = 2000;
 const PHOTOS_PER_LINE = 4;
 const PHOTOS_PER_REQUEST = 20;
+// The file name is the sender's own text, stored as-is for display.
+const STORED_FILENAME_MAX = 200;
 // Five submissions a minute from one address is generous for a person and
 // cheap for a script. One budget across both forms; per-process, the same
 // trade-off /api/scan makes.
@@ -304,7 +306,7 @@ publicForms.post('/intake', async (c) => {
         await tx`
           INSERT INTO web_submission_photos
             (submission_id, line_index, filename, size_bytes, mime_type, storage_key, delivery_url, position)
-          VALUES (${id}, ${u.line}, ${u.file.name || 'photo.jpg'}, ${u.file.size},
+          VALUES (${id}, ${u.line}, ${(u.file.name || 'photo.jpg').slice(0, STORED_FILENAME_MAX)}, ${u.file.size},
                   ${u.file.type || 'image/jpeg'}, ${u.storageKey}, ${u.deliveryUrl}, ${u.pos})
         `;
       }

@@ -91,4 +91,18 @@ describe('fx DB integration', () => {
     expect(r.source).toBe('manual');
     expect(r.rate).toBeCloseTo(1 / 7.0, 6);
   });
+
+  it('a refresh landing on a day already overridden reports the override as its source', async () => {
+    const sql = getTestDb();
+    const [{ id: userId }] = await sql<{ id: string }[]>`
+      INSERT INTO users (email, name, initials, role, password_hash)
+      VALUES ('fx2@test', 'FX Tester', 'FT', 'manager', 'x')
+      RETURNING id
+    `;
+    await storeManualOverride(sql, 'CNY', 7.0, { userId });
+    mockFrankfurter(7.2154, new Date().toISOString().slice(0, 10));
+    const r = await fetchAndStoreLatest(sql, 'CNY');
+    expect(r.source).toBe('manual');
+    expect(r.rate).toBeCloseTo(1 / 7.0, 6);
+  });
 });

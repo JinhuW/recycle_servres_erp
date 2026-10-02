@@ -61,10 +61,12 @@ dashboard.get('/', async (c) => {
   // Spend — what the PO pages call "Total cost" — over every PO past Draft in
   // the window, scoped to the caller for the purchaser lens. Money is committed
   // the moment a PO is submitted; the leaderboard's narrower Ready-to-Pay/Done
-  // rule is about when commission is owed, not about what was spent.
+  // rule is about when commission is owed, not about what was spent. An
+  // archived PO is out of every stock and cost reader, so it is out of here.
   const spendWin = isManager
-    ? sql`po.lifecycle <> 'draft' AND po.created_at >= ${start} AND po.created_at < ${end}`
-    : sql`po.lifecycle <> 'draft' AND po.user_id = ${u.id}
+    ? sql`po.lifecycle <> 'draft' AND po.archived_at IS NULL
+          AND po.created_at >= ${start} AND po.created_at < ${end}`
+    : sql`po.lifecycle <> 'draft' AND po.archived_at IS NULL AND po.user_id = ${u.id}
           AND po.created_at >= ${start} AND po.created_at < ${end}`;
   // The "Recent activity" panel always tracks ingest (the purchasing pipeline).
   const poScopeFrag = isManager ? sql`TRUE` : sql`o.user_id = ${u.id}`;

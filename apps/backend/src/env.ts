@@ -11,11 +11,24 @@ const KNOWN_DEFAULT_JWT_SECRETS = new Set([
   'dev-secret-change-me',
 ]);
 
+const MIN_PROD_JWT_SECRET_BYTES = 32;
+
 export function buildEnv(src: NodeJS.ProcessEnv = process.env): Env {
   if (!src.JWT_SECRET) throw new Error('JWT_SECRET is not configured');
   if (!src.DATABASE_URL) throw new Error('DATABASE_URL is required');
   if (src.NODE_ENV === 'production' && KNOWN_DEFAULT_JWT_SECRETS.has(src.JWT_SECRET)) {
     throw new Error('JWT_SECRET is set to a published default — set a real secret in production');
+  }
+  // Any captured cookie is an offline brute-force target for its HS256 key,
+  // so a short secret is as good as a published one.
+  if (src.NODE_ENV === 'production' && Buffer.byteLength(src.JWT_SECRET) < MIN_PROD_JWT_SECRET_BYTES) {
+    throw new Error(`JWT_SECRET must be at least ${MIN_PROD_JWT_SECRET_BYTES} bytes in production`);
+  }
+  // The Railway origin has a public hostname, and the proxy secret is the only
+  // thing that keeps callers going through the Worker. The Docker stack has no
+  // Worker in front and leaves it unset.
+  if (src.NODE_ENV === 'production' && src.RAILWAY_ENVIRONMENT && !src.PROXY_SECRET) {
+    throw new Error('PROXY_SECRET is required when running on Railway in production');
   }
   if (src.NODE_ENV === 'production') {
     // The compose file falls back to the documented dev password when

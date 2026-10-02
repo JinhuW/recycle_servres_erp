@@ -10,15 +10,25 @@ import { allLimited } from '../lib/concurrency';
 import { log } from '../lib/log';
 import type { Env } from '../types';
 import { applyIgnoreRules } from './ignoreRules';
-import { pickBankProviders } from './index';
+import { pickBankProviders, type BankProviderPick } from './index';
 import { PAIR_AUTO_WINDOW_DAYS } from './match';
 import { PAYPAL_ACH_DESCRIPTOR } from './mercury';
 import type { BankProvider, BankSource, NormalizedDispute, NormalizedTxn } from './types';
 
 const bankLog = log.child({ module: 'banktx' });
 
-const OVERLAP_MS = 5 * 24 * 60 * 60 * 1000;
-const BACKFILL_MS = 90 * 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const OVERLAP_MS = 5 * DAY_MS;
+const BACKFILL_MS = 90 * DAY_MS;
+// A row pending this long has been abandoned by its provider rather than
+// delayed, and holding the window open for it costs every run a fetch that far
+// back.
+const PENDING_REACH_MS = 120 * DAY_MS;
+// The cursor window only reaches OVERLAP_MS behind, so a settled row reversed
+// weeks later would never be re-read. Once a week each account is fetched this
+// far back instead.
+const DEEP_WINDOW_MS = 60 * DAY_MS;
+const DEEP_EVERY_MS = 7 * DAY_MS;
 // A settlement can trail its PayPal charge by a weekend + holidays. Shared with
 // the read-time pair suggestion so the two never disagree.
 const PAIR_WINDOW_MS = PAIR_AUTO_WINDOW_DAYS * 24 * 60 * 60 * 1000;
@@ -65,15 +75,47 @@ type LegRow = {
   ignored: boolean;
 };
 
-// Two concurrent "Sync now" clicks (or a click racing the interval) join the
-// same run instead of double-fetching the providers.
-let inFlight: Promise<SyncResult> | null = null;
+export type SyncOptions = {
+  // false skips the dispute list. For a pull that only needs the money feed —
+  // a purchaser waiting on Submit — the cases are a second API's worth of
+  // latency answering nothing that was asked. Defaults to on.
+  disputes?: boolean;
+};
 
-export function syncBankTransactions(env: Env, providersOverride?: BankProvider[]): Promise<SyncResult> {
-  if (inFlight) return inFlight;
-  const run = doSync(env, providersOverride).finally(() => { inFlight = null; });
-  inFlight = run;
-  return run;
+type Run = { sources: ReadonlySet<BankSource>; disputes: boolean; result: Promise<SyncResult> };
+
+// Two concurrent "Sync now" clicks (or a click racing the interval) join the
+// same run instead of double-fetching the providers. Only a run that covers
+// the request may be joined: every source it asks for, and the disputes too if
+// it wants them. A full sync that joined a PayPal-only pull would come back
+// without Mercury and report success. Keyed by what a run covers, so at most
+// one run per shape is in flight.
+const inFlight = new Map<string, Run>();
+
+export function syncBankTransactions(
+  env: Env,
+  providersOverride?: BankProvider[],
+  opts: SyncOptions = {},
+): Promise<SyncResult> {
+  const picked: BankProviderPick = providersOverride
+    ? { providers: providersOverride, notConfigured: [] }
+    : pickBankProviders(env);
+  const disputes = opts.disputes !== false;
+  const sources = new Set(picked.providers.map((p) => p.source));
+  for (const run of inFlight.values()) {
+    if ([...sources].every((s) => run.sources.has(s)) && (run.disputes || !disputes)) {
+      // A wider run answers for sources this caller never asked about; it
+      // gets back only its own.
+      return run.result.then((r) => ({
+        perSource: Object.fromEntries(Object.entries(r.perSource).filter(([s]) => sources.has(s as BankSource))),
+        notConfigured: picked.notConfigured,
+      }));
+    }
+  }
+  const key = `${[...sources].sort().join(',')}|${disputes ? 'disputes' : 'no-disputes'}`;
+  const result = doSync(env, picked, disputes).finally(() => inFlight.delete(key));
+  inFlight.set(key, { sources, disputes, result });
+  return result;
 }
 
 // doSync swallows a provider's failure into its own slot so one bank being down
@@ -117,16 +159,13 @@ export function startBankSyncLoop(env: Env): { stop: () => void } {
   };
 }
 
-async function doSync(env: Env, providersOverride?: BankProvider[]): Promise<SyncResult> {
-  const picked = providersOverride
-    ? { providers: providersOverride, notConfigured: [] as BankSource[] }
-    : pickBankProviders(env);
+async function doSync(env: Env, picked: BankProviderPick, disputes: boolean): Promise<SyncResult> {
   const sql = getDb(env);
   const result: SyncResult = { perSource: {}, notConfigured: picked.notConfigured };
 
   for (const provider of picked.providers) {
     try {
-      result.perSource[provider.source] = await syncOne(sql, provider);
+      result.perSource[provider.source] = await syncOne(sql, provider, disputes);
     } catch (e) {
       // One provider down must not block the other; the page shows the error.
       result.perSource[provider.source] = {
@@ -138,54 +177,66 @@ async function doSync(env: Env, providersOverride?: BankProvider[]): Promise<Syn
   return result;
 }
 
-async function syncOne(sql: ReturnType<typeof getDb>, provider: BankProvider): Promise<SyncCounts> {
+async function syncOne(
+  sql: ReturnType<typeof getDb>,
+  provider: BankProvider,
+  withDisputes: boolean,
+): Promise<SyncCounts> {
   const source = provider.source;
   // A row we are still holding as pending has to stay inside its account's
-  // window until it resolves, however long that takes — otherwise its badge is
-  // frozen at whatever it said the day it fell out. The overlap alone is not
-  // enough: a PayPal payment can sit pending for weeks, and a Mercury pending
-  // row is dated by creation because it has no posted date at all.
+  // window until it resolves — otherwise its badge is frozen at whatever it
+  // said the day it fell out. The overlap alone is not enough: a PayPal
+  // payment can sit pending for weeks, and a Mercury pending row is dated by
+  // creation because it has no posted date at all. Past PENDING_REACH_MS it is
+  // let go: the oldest pending row inside that reach holds the window instead.
   //
   // An account appearing for the first time — the IO card, first listed by a
   // run after the one that rewound the cursors for it — reaches back as far as
   // anything the source is fetching or already holds (`oldestRow`), so a run
   // that failed to list it costs nothing but a retry.
+  const nowMs = Date.now();
   const [known, [oldestRow]] = await allLimited([
-    () => sql<{ external_id: string; sync_cursor: string | null; oldest_pending: Date | null }[]>`
-      SELECT a.external_id, a.sync_cursor,
+    () => sql<{
+      external_id: string; sync_cursor: string | null; oldest_pending: Date | null; deep_synced_at: Date | null;
+    }[]>`
+      SELECT a.external_id, a.sync_cursor, a.deep_synced_at,
              (SELECT MIN(t.posted_at) FROM bank_transactions t
-              WHERE t.account_id = a.id AND t.settle_status = 'pending') AS oldest_pending
+              WHERE t.account_id = a.id AND t.settle_status = 'pending'
+                AND t.posted_at >= ${new Date(nowMs - PENDING_REACH_MS)}) AS oldest_pending
       FROM bank_accounts a WHERE a.source = ${source}`,
     () => sql<{ min: Date | null }[]>`
       SELECT MIN(posted_at) AS min FROM bank_transactions WHERE source = ${source}`,
   ] as const);
-  const backfillMs = Date.now() - BACKFILL_MS;
+  const backfillMs = nowMs - BACKFILL_MS;
+  const deepMs = nowMs - DEEP_WINDOW_MS;
   const since = new Map(known.map((a) => [a.external_id, Math.min(
     a.sync_cursor ? new Date(a.sync_cursor).getTime() - OVERLAP_MS : backfillMs,
     a.oldest_pending ? a.oldest_pending.getTime() : Infinity,
+    !a.deep_synced_at || a.deep_synced_at.getTime() < nowMs - DEEP_EVERY_MS ? deepMs : Infinity,
   )]));
   const sinceMs = since.size ? Math.min(...since.values()) : backfillMs;
   const newSinceMs = Math.min(sinceMs, backfillMs, oldestRow?.min ? oldestRow.min.getTime() : Infinity);
-  const runStartIso = new Date().toISOString();
+  const runStartIso = new Date(nowMs).toISOString();
 
   // Disputes are a second API behind a second app permission, so this failing
   // must leave the money feed alone. The message is *stored*, not merely
   // logged: nobody watches stdout for the six-hourly loop, and a dispute list
   // that is quietly always empty reads as good news. It never rejects, so it
   // can run alongside the transaction fetch.
+  const disputesWanted = withDisputes && !!provider.fetchDisputes;
   let disputes: NormalizedDispute[] = [];
   let disputeError: string | undefined;
   const disputesDone = (async () => {
-    if (!provider.fetchDisputes) return;
+    if (!disputesWanted) return;
     try {
-      disputes = await provider.fetchDisputes();
+      disputes = await provider.fetchDisputes!(await storedDisputes(sql, source));
     } catch (e) {
       disputeError = e instanceof Error ? e.message : 'dispute sync failed';
       log.warn('dispute sync failed', { module: 'banktx', source, error: disputeError });
     }
   })();
 
-  const [{ accounts, txns }] = await Promise.all([
+  const [{ accounts, txns, partialErrors }] = await Promise.all([
     provider.fetchSince(new Date(sinceMs).toISOString(), {
       since: new Map([...since].map(([id, ms]) => [id, new Date(ms).toISOString()])),
       newSince: new Date(newSinceMs).toISOString(),
@@ -193,16 +244,47 @@ async function syncOne(sql: ReturnType<typeof getDb>, provider: BankProvider): P
     disputesDone,
   ]);
 
+  // Where each part that failed gets written. An account with a row of its own
+  // carries its own error. A failure with no row to hold it — the /credit list,
+  // or a card failing before it ever synced — is recorded on every account the
+  // run did sync, the way dispute_error is source-wide, so /stats still shows
+  // it; the next clean run clears it from all of them.
+  const accountError = new Map<string, string>();
+  const unhoused: string[] = [];
+  for (const e of partialErrors ?? []) {
+    if (e.account && since.has(e.account)) accountError.set(e.account, e.message);
+    else unhoused.push(e.message);
+  }
+  const sourceError = unhoused.length ? unhoused.join('; ') : null;
+  // Whether this run's window for an account reached the deep window. A
+  // provider that fetches every account from `sinceIso` reached at least as
+  // far as the account's own start, so this never stamps a shallow run.
+  const deepIds = new Set(accounts
+    .filter((a) => (since.get(a.externalId) ?? newSinceMs) <= deepMs)
+    .map((a) => a.externalId));
+
   return sql.begin(async (tx) => {
     const accountIds = new Map<string, string>();
     for (const a of accounts) {
+      const deep = deepIds.has(a.externalId);
       const [row] = await tx<{ id: string }[]>`
-        INSERT INTO bank_accounts (source, external_id, name, last_synced_at, sync_cursor)
-        VALUES (${source}, ${a.externalId}, ${a.name}, NOW(), ${runStartIso})
+        INSERT INTO bank_accounts (source, external_id, name, last_synced_at, sync_cursor, sync_error, deep_synced_at)
+        VALUES (${source}, ${a.externalId}, ${a.name}, NOW(), ${runStartIso}, ${sourceError},
+                CASE WHEN ${deep}::boolean THEN NOW() END)
         ON CONFLICT (source, external_id) DO UPDATE
-          SET name = EXCLUDED.name, last_synced_at = NOW(), sync_cursor = ${runStartIso}
+          SET name = EXCLUDED.name, last_synced_at = NOW(), sync_cursor = ${runStartIso},
+              sync_error = EXCLUDED.sync_error,
+              deep_synced_at = CASE WHEN ${deep}::boolean THEN NOW() ELSE bank_accounts.deep_synced_at END
         RETURNING id`;
       accountIds.set(a.externalId, row.id);
+    }
+    // A known account the provider could not read keeps its cursor and its
+    // last sync time, so the next run retries the same window; it only learns
+    // why.
+    for (const [externalId, message] of accountError) {
+      await tx`
+        UPDATE bank_accounts SET sync_error = ${message}
+        WHERE source = ${source} AND external_id = ${externalId}`;
     }
 
     // A row for an account the provider didn't list is skipped, uncounted.
@@ -289,7 +371,9 @@ async function syncOne(sql: ReturnType<typeof getDb>, provider: BankProvider): P
         await tx`UPDATE bank_transactions SET dispute = ${tx.json(next as never)} WHERE id = ${r.id}`;
       }
     }
-    if (provider.fetchDisputes) {
+    // A run that skipped the cases knows nothing about them, and must not
+    // clear an error a full run recorded.
+    if (disputesWanted) {
       await tx`UPDATE bank_accounts SET dispute_error = ${disputeError ?? null} WHERE source = ${source}`;
     }
 
@@ -318,6 +402,21 @@ async function syncOne(sql: ReturnType<typeof getDb>, provider: BankProvider): P
     if (ruleIgnored > 0) bankLog.info('ignore rules applied', { source, rows: ruleIgnored });
     return { inserted, updated, paired, autoLinked, disputes: disputeHits, disputeError };
   });
+}
+
+// The cases already on file, by id, so the provider can skip re-reading the
+// detail of one PayPal hasn't touched. A case sits on every row it matched;
+// any copy will do, the newest is taken.
+async function storedDisputes(
+  sql: ReturnType<typeof getDb>,
+  source: BankSource,
+): Promise<Map<string, NormalizedDispute>> {
+  const rows = await sql<{ d: NormalizedDispute }[]>`
+    SELECT DISTINCT ON (d->>'disputeId') d
+    FROM bank_transactions bt, jsonb_array_elements(bt.dispute) d
+    WHERE bt.source = ${source} AND jsonb_typeof(bt.dispute) = 'array'
+    ORDER BY d->>'disputeId', d->>'updatedAt' DESC NULLS LAST`;
+  return new Map(rows.map((r) => [r.d.disputeId, r.d]));
 }
 
 // ─── Auto-pair ────────────────────────────────────────────────────────────────
@@ -491,12 +590,28 @@ async function transferPair(tx: Tx, legs: LegRow[], taken: Set<string>): Promise
 // Only free transactions are claimed. `no_auto_link` is a manager's Unlink,
 // `ignored` is their dismissal, and a row already carrying an order_id is
 // someone else's decision — none of the three is a typed id's to overturn.
+//
+// And only onto an order the company paid for through PayPal. A self-paid or
+// cash PO holding a leftover id would book a company payment against an
+// order the company never paid; an archived one is history; and an id two
+// live POs both carry says nothing about which of them it paid for. NULL
+// method is a scan-born Draft nobody has asked yet — still a company card.
 export async function linkPaypalTxnToOrder(
   tx: Sql | TransactionSql,
   paypalTxnId: string,
   orderId: string,
   actorId: string | null,
 ): Promise<number> {
+  const eligible = await tx`
+    SELECT 1 FROM orders o
+    WHERE o.id = ${orderId} AND o.payment = 'company'
+      AND o.payment_method IS DISTINCT FROM 'cash' AND o.archived_at IS NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM orders other
+        WHERE other.id <> o.id AND other.archived_at IS NULL
+          AND UPPER(other.paypal_txn_id) = UPPER(${paypalTxnId}))`;
+  if (eligible.length === 0) return 0;
+
   const groups = await tx<{ ids: string[]; amount: string }[]>`
     SELECT ARRAY_AGG(id::text) AS ids, MAX(amount::text) AS amount
     FROM bank_transactions bt
@@ -531,6 +646,33 @@ export async function linkPaypalTxnToOrder(
   return groups.length;
 }
 
+// The other half of a typed id: when a PO's id changes or is cleared, the
+// payments it claimed through the old one let go — pair siblings with them,
+// since a pair is one payment. No `no_auto_link` tombstone: nothing about the
+// payment was judged wrong, and the next order to carry the id should get it.
+// A link a manager made stays: their /link is a decision about the payment,
+// and a purchaser re-typing the field must not quietly undo it.
+export async function unlinkPaypalTxnFromOrder(
+  tx: Sql | TransactionSql,
+  orderId: string,
+  oldTxnId: string,
+): Promise<number> {
+  const freed = await tx`
+    WITH hit AS (
+      SELECT bt.id, bt.pair_id FROM bank_transactions bt
+      WHERE bt.order_id = ${orderId} AND UPPER(bt.paypal_txn_id) = UPPER(${oldTxnId})
+        AND NOT EXISTS (SELECT 1 FROM users m WHERE m.id = bt.linked_by AND m.role = 'manager')
+    )
+    UPDATE bank_transactions t
+    SET order_id = NULL, link_kind = NULL, link_auto = FALSE, linked_by = NULL, linked_at = NULL
+    WHERE t.order_id = ${orderId}
+      AND (t.id IN (SELECT id FROM hit)
+           OR t.pair_id IN (SELECT pair_id FROM hit WHERE pair_id IS NOT NULL))
+      AND NOT EXISTS (SELECT 1 FROM users m WHERE m.id = t.linked_by AND m.role = 'manager')
+    RETURNING t.id`;
+  return freed.count;
+}
+
 async function autoLink(tx: Tx): Promise<number> {
   const groups = await tx<{ ptxn: string }[]>`
     SELECT MAX(paypal_txn_id) AS ptxn
@@ -543,11 +685,12 @@ async function autoLink(tx: Tx): Promise<number> {
   if (groups.length === 0) return 0;
   // Only an id exactly one PO carries is unambiguous. Compared as stored, not
   // uppercased: an id carrying lowercase matches no uppercased PO id, and so
-  // is never auto-linked.
+  // is never auto-linked. An archived PO neither claims nor contests one.
   const owners = await tx<{ ptxn: string; id: string }[]>`
     SELECT UPPER(paypal_txn_id) AS ptxn, MIN(id) AS id
     FROM orders
     WHERE UPPER(paypal_txn_id) = ANY(${groups.map((g) => g.ptxn)}::text[])
+      AND archived_at IS NULL
     GROUP BY UPPER(paypal_txn_id)
     HAVING COUNT(*) = 1`;
   const ownerOf = new Map(owners.map((o) => [o.ptxn, o.id]));

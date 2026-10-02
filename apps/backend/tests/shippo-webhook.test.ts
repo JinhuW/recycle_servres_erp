@@ -123,6 +123,47 @@ describe('shippo webhook — applying track_updated', () => {
     expect(row.status).toBe('in_transit');
   });
 
+  it('drops a push the carrier dates before the one already applied', async () => {
+    const id = await addPackage();
+    const at = (iso: string) => ({ status_date: iso });
+    const newer = trackUpdated('FAILURE', {
+      tracking_status: { status: 'FAILURE', status_details: 'Address not found', ...at('2026-08-26T10:00:00.000Z') },
+      eta: null,
+    });
+    // Shippo retried this one late; it describes the box a day earlier.
+    const older = trackUpdated('TRANSIT', {
+      tracking_status: { status: 'TRANSIT', status_details: 'Departed facility', ...at('2026-08-25T10:00:00.000Z') },
+    });
+    await api('POST', WEBHOOK, { body: newer, env });
+    const r = await api<{ ok: boolean; status: string }>('POST', WEBHOOK, { body: older, env });
+    expect(r.status).toBe(200);
+    expect(r.body.ok).toBe(true);
+    expect(r.body.status).toBe('exception');
+
+    const sql = getTestDb();
+    const row = (await sql`
+      SELECT status, tracking_status, tracking_eta, tracking_status_at FROM packages WHERE id = ${id}
+    `)[0] as { status: string; tracking_status: string; tracking_eta: Date | null; tracking_status_at: Date };
+    expect(row.status).toBe('exception');
+    expect(row.tracking_status).toBe('Address not found');
+    expect(row.tracking_eta).toBeNull();
+    expect(row.tracking_status_at.toISOString()).toBe('2026-08-26T10:00:00.000Z');
+
+    // A later event still lands.
+    await api('POST', WEBHOOK, {
+      body: trackUpdated('TRANSIT', {
+        tracking_status: { status: 'TRANSIT', status_details: 'Rerouted', ...at('2026-08-27T10:00:00.000Z') },
+      }),
+      env,
+    });
+    const after = (await sql`
+      SELECT status, tracking_status, tracking_status_at FROM packages WHERE id = ${id}
+    `)[0] as { status: string; tracking_status: string; tracking_status_at: Date };
+    expect(after.status).toBe('in_transit');
+    expect(after.tracking_status).toBe('Rerouted');
+    expect(after.tracking_status_at.toISOString()).toBe('2026-08-27T10:00:00.000Z');
+  });
+
   it('routes FAILURE and RETURNED to exception', async () => {
     const id = await addPackage();
     await api('POST', WEBHOOK, { body: trackUpdated('FAILURE'), env });

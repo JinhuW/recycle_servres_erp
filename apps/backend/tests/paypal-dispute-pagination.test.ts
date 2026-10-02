@@ -1,5 +1,6 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { paypalProvider } from '../src/banktx/paypal';
+import type { NormalizedDispute } from '../src/banktx/types';
 import type { Env } from '../src/types';
 
 // PayPal's own `self` link carries a next_page_token= from page 2 on, so a
@@ -90,5 +91,39 @@ describe('paypal dispute pagination', () => {
 
     expect(listCalls).toHaveLength(2);
     expect(out.map(d => d.disputeId)).toEqual(['PP-D-1', 'PP-D-2']);
+  });
+});
+
+describe('paypal dispute detail reuse', () => {
+  const storedCase = (id: string, updatedAt: string): NormalizedDispute => ({
+    disputeId: id, txnIds: ['7AB12345CD678901E'], reason: 'MERCHANDISE_OR_SERVICE_NOT_RECEIVED',
+    status: 'RESOLVED', disputeState: 'RESOLVED', lifeCycleStage: 'INQUIRY', channel: 'INTERNAL',
+    amount: 10, currency: 'USD', outcomeCode: 'RESOLVED_BUYER_FAVOUR', refundedAmount: 10,
+    openedAt: '2026-06-01T00:00:00Z', updatedAt, buyerResponseDueAt: null, sellerResponseDueAt: null,
+    timeline: [],
+  });
+
+  it('keeps the stored copy of a case PayPal has not touched, and refetches one it has', async () => {
+    const { detailCalls } = stub(() => ({
+      items: [
+        // Same moment as stored, spelled differently.
+        { dispute_id: 'PP-D-1', update_time: '2026-07-01T10:00:00.000Z', dispute_state: 'CLOSED' },
+        { dispute_id: 'PP-D-2', update_time: '2026-09-30T10:00:00Z' },
+        { dispute_id: 'PP-D-3', update_time: '2026-09-30T10:00:00Z' },
+      ],
+      links: [],
+    }));
+    const known = new Map([
+      ['PP-D-1', storedCase('PP-D-1', '2026-07-01T10:00:00Z')],
+      ['PP-D-2', storedCase('PP-D-2', '2026-07-01T10:00:00Z')],
+    ]);
+
+    const out = await paypalProvider(env).fetchDisputes!(known);
+
+    expect(detailCalls.map((u) => u.split('/').pop())).toEqual(['PP-D-2', 'PP-D-3']);
+    const kept = out.find((d) => d.disputeId === 'PP-D-1');
+    expect(kept).toMatchObject({ txnIds: ['7AB12345CD678901E'], outcomeCode: 'RESOLVED_BUYER_FAVOUR' });
+    // The list is the only place dispute_state arrives, so it is refreshed.
+    expect(kept?.disputeState).toBe('CLOSED');
   });
 });

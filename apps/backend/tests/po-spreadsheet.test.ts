@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import app from '../src/index';
-import { resetDb } from './helpers/db';
+import { resetDb, getTestDb } from './helpers/db';
 import { api, testEnv } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 
@@ -108,6 +108,32 @@ describe('GET /api/orders/:id/spreadsheet', () => {
     expect(Number(byField.get('Projected sell value'))).toBeCloseTo(SELL * QTY, 2);
     expect(Number(byField.get('Projected profit'))).toBeCloseTo(expProfit, 2);
     expect(Number(byField.get('Commission amount'))).toBeCloseTo(expProfit * RATE, 2);
+  });
+
+  // A partial sale lowers qty to the remainder and keeps the bought count in
+  // qty_purchased; the PO sheet is about what was bought.
+  it('reads quantities as bought, not what is left after a partial sale', async () => {
+    const { token } = await loginAs(ALEX);
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: {
+        category: 'RAM', warehouseId: 'WH-LA1', payment: 'company',
+        lines: [{ category: 'RAM', brand: 'Samsung', condition: 'New', qty: 10, unitCost: 5 }],
+      },
+    });
+    expect(created.status).toBe(201);
+    await getTestDb()`
+      UPDATE order_lines SET qty = 4, qty_purchased = 10 WHERE order_id = ${created.body.id}
+    `;
+
+    const res = await getRaw(`/api/orders/${created.body.id}/spreadsheet`, token);
+    const { default: ExcelJS } = await import('exceljs');
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await res.arrayBuffer());
+    const byField = new Map<string, unknown>();
+    wb.getWorksheet('Payment')!.eachRow(row => byField.set(String(row.getCell(1).value ?? ''), row.getCell(2).value));
+    expect(Number(byField.get('Subtotal (line costs)'))).toBeCloseTo(50, 2);
+    expect(Number(byField.get('Total quantity'))).toBe(10);
   });
 
   it('includes sell price, sell total and profit per line item', async () => {

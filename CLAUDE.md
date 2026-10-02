@@ -241,8 +241,14 @@ switches the branch out from under the first.
   DB setting can't widen the surface.  Keep it that way.
 - **Migrations** are plain SQL under `apps/backend/migrations/`, numbered
   `NNNN_…sql`.  The backend runs them on startup via `scripts/migrate.mjs`,
-  recorded in `schema_migrations`.  Always add the next number; never edit
-  a migration that's been deployed.
+  recorded in `schema_migrations` with a sha256 `checksum` (an edited,
+  already-applied file logs a warning; its edit never runs).  Each file runs
+  under `lock_timeout = '10s'` and is retried on 55P03, so a migration queued
+  behind the old instance's transactions doesn't stall the app.  Always add the
+  next number; never edit a migration that's been deployed.
+- The shared pool sets `statement_timeout` and
+  `idle_in_transaction_session_timeout` to 60s (`db.ts`).  A job that
+  legitimately runs longer must `SET LOCAL statement_timeout` inside its tx.
 
 ## Auth & CSRF
 
@@ -256,6 +262,11 @@ switches the branch out from under the first.
   `/api/health`, and `/api/public/*` (the unauthenticated website intake and
   quote forms and the Shippo webhook — no cookies, so CSRF doesn't apply).
 - Refresh-token reuse revokes the whole family.  Don't relax that.
+- A password change or reset stamps `users.tokens_valid_after`
+  (app-clock second); `authMiddleware` and `bearerGuard` refuse any token whose
+  `iat` is older.  The self-change caller keeps its refresh family, so it
+  re-authenticates through one ordinary refresh — don't re-issue cookies from
+  `/api/me` (`setAuthCookies` would overwrite `rt`, which that path can't see).
 
 ## MCP & OAuth (connectors)
 
@@ -307,7 +318,7 @@ switches the branch out from under the first.
   most likely to break), so the DB dependency is intentional, not a smell.
   They need `127.0.0.1:5432` reachable — `docker-compose.override.yml` does
   that for local dev.  Production compose doesn't ship the override.
-  CI runs them against a `postgres:16` service container
+  CI runs them against a `postgres:18` service container (prod's major)
   (`.github/workflows/backend-tests.yml`), which must set `TEST_DATABASE_URL`
   in the job env: `global-setup.ts` otherwise falls back to the repo-root
   `.env`, which doesn't exist on a runner, and throws.
@@ -323,6 +334,11 @@ switches the branch out from under the first.
   per-test seed subprocess and the suite stays under `max_connections=100`
   even at high parallelism.  Keep test-side pools small (`DB_POOL_MAX`,
   `SEED_POOL_MAX`) — many parallel workers share the connection budget.
+  The template is migrated by **spawning `scripts/migrate.mjs`** (the boot
+  runner, so a migration that can't run in a transaction fails here first),
+  built as `<…>_tmpl_building` and renamed only once migrate and seed both
+  succeed.  See
+  [docs/debug-notes/2026-10-01-test-templates-build-through-migrate-mjs.md](./docs/debug-notes/2026-10-01-test-templates-build-through-migrate-mjs.md).
 - Frontend tests are sparse (~6 files).  Add coverage when you add a
   non-trivial pure helper; UI behavior is mostly validated by visiting it.
 - **To run a single backend test file**, `cd apps/backend && npx vitest run

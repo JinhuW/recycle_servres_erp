@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import type { ContentfulStatusCode } from 'hono/utils/http-status';
+import type { ContentfulStatusCode, StatusCode } from 'hono/utils/http-status';
 import { authMiddleware } from '../auth';
 import { requireManager } from '../lib/role';
 import type { Env, User } from '../types';
@@ -17,8 +17,16 @@ const tracker = new Hono<{ Bindings: Env; Variables: { user: User } }>()
   .use('*', authMiddleware)
   .use('*', requireManager);
 
+// Statuses a Response may not carry a body on; building one with a body throws.
+const NULL_BODY_STATUSES = new Set([204, 205, 304]);
+
 async function forward(
-  c: { env: Env; req: { json(): Promise<unknown> }; json: (body: unknown, status?: number) => Response },
+  c: {
+    env: Env;
+    req: { json(): Promise<unknown> };
+    json: (body: unknown, status?: number) => Response;
+    body: (data: null, status: StatusCode) => Response;
+  },
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
   path: string,
   withBody: boolean,
@@ -46,6 +54,7 @@ async function forward(
     return c.json({ error: 'Tracker API is unreachable' }, 502);
   }
 
+  if (NULL_BODY_STATUSES.has(res.status)) return c.body(null, res.status as StatusCode);
   // Pass the upstream body and status through verbatim: the tracker's 400s
   // carry actionable validation messages the UI shows as-is.
   const body = await res.json().catch(() => ({ error: `tracker returned ${res.status}` }));

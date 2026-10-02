@@ -230,7 +230,13 @@ type Stats = {
   disputes?: { count: number; amount: number };
   // `disputeError` is set when PayPal refuses the disputes API while the
   // transaction sync is fine, which is its own state and not a sync failure.
-  sources: { source: string; lastSyncedAt: string | null; disputeError?: string | null }[];
+  // `syncError` is that sync failure: an account whose last pull failed.
+  sources: {
+    source: string;
+    lastSyncedAt: string | null;
+    disputeError?: string | null;
+    syncError?: string | null;
+  }[];
 };
 
 type SyncResult = {
@@ -472,6 +478,7 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
   }, [stats]);
 
   const disputeError = (stats?.sources ?? []).find(s => s.disputeError)?.disputeError ?? null;
+  const syncErrors = (stats?.sources ?? []).filter(s => s.syncError);
 
   const [rulesOpen, setRulesOpen] = useState(false);
 
@@ -542,6 +549,16 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
               {DISPUTE_FORBIDDEN.test(disputeError) ? t('payDisputeUnauthorised') : t('payDisputeSyncFailed')}
             </span>
           )}
+          {/* A failing account otherwise only shows as rows that never
+              arrive — the last-synced time can still read fresh off the
+              other source. */}
+          {syncErrors.map(s => (
+            <span key={s.source} className="chip dot neg" style={{ fontSize: 11 }} title={s.syncError ?? undefined}>
+              {t('paySourceSyncFailed', {
+                source: SOURCE_LABEL[s.source as PaymentRow['source']] ?? s.source,
+              })}
+            </span>
+          ))}
           <button type="button" className="btn primary" onClick={syncNow} disabled={syncing}>
             <Icon name="rotate" size={13} />
             {syncing ? t('paySyncing') : t('paySyncNow')}

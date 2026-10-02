@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import type { ContentfulStatusCode } from 'hono/utils/http-status';
+import type { ContentfulStatusCode, StatusCode } from 'hono/utils/http-status';
 import { authMiddleware } from '../auth';
 import { requireManager } from '../lib/role';
 import type { Env, User } from '../types';
@@ -38,8 +38,15 @@ function upstream(env: Env): { base: string; headers: Record<string, string> } |
   return { base, headers };
 }
 
+// Statuses a Response may not carry a body on; building one with a body throws.
+const NULL_BODY_STATUSES = new Set([204, 205, 304]);
+
 async function forward(
-  c: { env: Env; json: (body: unknown, status?: number) => Response },
+  c: {
+    env: Env;
+    json: (body: unknown, status?: number) => Response;
+    body: (data: null, status: StatusCode) => Response;
+  },
   method: 'GET' | 'POST',
   path: string,
   body?: unknown,
@@ -61,6 +68,7 @@ async function forward(
     return c.json({ error: UNREACHABLE }, 502);
   }
 
+  if (NULL_BODY_STATUSES.has(res.status)) return c.body(null, res.status as StatusCode);
   // Pass the upstream body and status through verbatim: the coordinator's 4xx
   // bodies carry actionable messages the UI shows as-is.
   const payload = await res.json().catch(() => ({ error: `coordinator returned ${res.status}` }));
@@ -101,6 +109,16 @@ coordinator.post('/challenges/:id/resolve', (c) =>
     resolved_by: c.var.user.name || c.var.user.email,
   }));
 
+// The bytes are served from our own origin, so the upstream's type is not
+// trusted as-is: an HTML or SVG body relayed under its own type would run as
+// script on the ERP's origin. Anything but a raster image downloads instead.
+const SCREENSHOT_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+
+function screenshotType(upstreamType: string | null): string {
+  const type = (upstreamType ?? '').split(';')[0].trim().toLowerCase();
+  return SCREENSHOT_TYPES.has(type) ? type : 'application/octet-stream';
+}
+
 // Image, not JSON: the browser can't send the bearer token, so the <img> src
 // points here and the bytes are relayed with the upstream content type.
 coordinator.get('/challenges/:id/screenshot', async (c) => {
@@ -128,7 +146,8 @@ coordinator.get('/challenges/:id/screenshot', async (c) => {
   return new Response(bytes, {
     status: 200,
     headers: {
-      'Content-Type': res.headers.get('Content-Type') ?? 'image/png',
+      'Content-Type': screenshotType(res.headers.get('Content-Type')),
+      'X-Content-Type-Options': 'nosniff',
       'Content-Length': String(bytes.byteLength),
       // A capture never changes, but the challenge it belongs to disappears
       // once resolved — cache it briefly, and never in a shared cache.

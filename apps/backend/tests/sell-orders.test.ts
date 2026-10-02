@@ -223,6 +223,30 @@ describe('PATCH /api/sell-orders/:id — editing customer + lines', () => {
     expect(r.status).toBe(409);
   });
 
+  it('rejects line/customer edits on a Closed order, but still takes a note', async () => {
+    const { token } = await loginAs(ALEX);
+    const { id, line } = await makeOrder(token);
+    expect((await api('POST', `/api/sell-orders/${id}/status`, {
+      token, body: { to: 'Closed', closeReasonId: 'customer_cancelled' },
+    })).status).toBe(200);
+
+    const lines = await api<{ error: string }>('PATCH', `/api/sell-orders/${id}`, {
+      token,
+      body: { lines: [{
+        inventoryId: line.id, category: 'RAM', label: 'x', partNumber: 'pn',
+        qty: 1, unitPrice: line.sell_price,
+      }] },
+    });
+    expect(lines.status).toBe(409);
+    expect(lines.body.error).toMatch(/Closed/);
+    const customers = await api<{ items: { id: string }[] }>('GET', '/api/customers', { token });
+    const target = customers.body.items[customers.body.items.length - 1].id;
+    expect((await api('PATCH', `/api/sell-orders/${id}`, { token, body: { customerId: target } })).status)
+      .toBe(409);
+    expect((await api('PATCH', `/api/sell-orders/${id}`, { token, body: { notes: 'why it closed' } })).status)
+      .toBe(200);
+  });
+
   it('PATCH rejects status changes — must go through POST /:id/status', async () => {
     const { token } = await loginAs(ALEX);
     const { id } = await makeOrder(token);
@@ -309,11 +333,12 @@ describe('GET /api/sell-orders — archive filter', () => {
 describe('POST /api/sell-orders/:id/archive (+/unarchive)', () => {
   beforeEach(async () => { await resetDb(); });
 
-  // Advance a sell order out of Draft so it is eligible for archive.
+  // Close a sell order so it is eligible for archive: Draft is refused, and so
+  // are Shipped / Awaiting payment, which still hold their units.
   async function nonDraftSellOrder(token: string): Promise<string> {
     const id = await createDraftSellOrder(token);
     const r = await api('POST', `/api/sell-orders/${id}/status`, {
-      token, body: { to: 'Shipped', note: 'shipped for test' },
+      token, body: { to: 'Closed', closeReasonId: 'customer_cancelled', note: 'closed for test' },
     });
     expect(r.status).toBe(200);
     return id;
@@ -347,6 +372,42 @@ describe('POST /api/sell-orders/:id/archive (+/unarchive)', () => {
     );
     expect(r.status).toBe(403);
     expect(r.body.error).toMatch(/delete instead/);
+  });
+
+  it('refuses to archive a Shipped or Awaiting payment order (409), leaving it unarchived', async () => {
+    const { token } = await loginAs(ALEX);
+    for (const to of ['Shipped', 'Awaiting payment']) {
+      const id = await createDraftSellOrder(token);
+      expect((await api('POST', `/api/sell-orders/${id}/status`, { token, body: { to } })).status).toBe(200);
+      const r = await api<{ error: string }>('POST', `/api/sell-orders/${id}/archive`, { token });
+      expect(r.status).toBe(409);
+      expect(r.body.error).toMatch(/close or complete/);
+      const got = await api<{ order: { archivedAt: string | null } }>('GET', `/api/sell-orders/${id}`, { token });
+      expect(got.body.order.archivedAt).toBeNull();
+    }
+  });
+
+  it('an archived order cannot move into a committed status, and its Draft can still be unarchived', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await nonDraftSellOrder(token);
+    expect((await api('POST', `/api/sell-orders/${id}/archive`, { token })).status).toBe(200);
+    // Reopen is how an archived order becomes an archived Draft.
+    expect((await api('POST', `/api/sell-orders/${id}/status`, {
+      token, body: { to: 'Draft', note: 'customer came back' },
+    })).status).toBe(200);
+
+    for (const to of ['Shipped', 'Awaiting payment']) {
+      const r = await api<{ error: string }>('POST', `/api/sell-orders/${id}/status`, { token, body: { to } });
+      expect(r.status).toBe(409);
+      expect(r.body.error).toMatch(/unarchive/);
+    }
+    const still = await api<{ order: { status: string } }>('GET', `/api/sell-orders/${id}`, { token });
+    expect(still.body.order.status).toBe('Draft');
+
+    expect((await api('POST', `/api/sell-orders/${id}/unarchive`, { token })).status).toBe(200);
+    expect((await api('POST', `/api/sell-orders/${id}/status`, {
+      token, body: { to: 'Shipped' },
+    })).status).toBe(200);
   });
 
   it('double-archive returns 409', async () => {
@@ -396,9 +457,9 @@ describe('sell_order_events append-only triggers', () => {
     const { token } = await loginAs(ALEX);
     const id = await createDraftSellOrder(token);
     await api('POST', `/api/sell-orders/${id}/status`, {
-      token, body: { to: 'Shipped', note: 'n' },
+      token, body: { to: 'Closed', closeReasonId: 'customer_cancelled', note: 'n' },
     });
-    await api('POST', `/api/sell-orders/${id}/archive`, { token });
+    expect((await api('POST', `/api/sell-orders/${id}/archive`, { token })).status).toBe(200);
 
     const sql = getTestDb();
     await expect(sql`UPDATE sell_order_events SET kind = 'tampered' WHERE sell_order_id = ${id}`)
@@ -574,5 +635,109 @@ describe('sell-order payment receiver', () => {
     const row = (await sql`SELECT status, payment_received_by FROM sell_orders WHERE id = ${closed}`)[0];
     expect(row.status).toBe('Closed');
     expect(row.payment_received_by).toBe(user.id);
+  });
+});
+
+describe('POST /api/sell-orders — SO numbering', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('a refused create does not burn an SO id', async () => {
+    const { token } = await loginAs(ALEX);
+    const line = await findSellableLine(token);
+    const customerId = await firstCustomerId(token);
+    const post = (qty: number) => api<{ id: string; error?: string }>('POST', '/api/sell-orders', {
+      token,
+      body: { customerId, lines: [{
+        inventoryId: line.id, category: 'RAM', label: 'x', partNumber: 'pn', qty, unitPrice: 1,
+      }] },
+    });
+    const first = await post(1);
+    expect(first.status).toBe(201);
+    const refused = await post(line.qty + 99);
+    expect(refused.status).toBe(400);
+    const second = await post(1);
+    expect(second.status).toBe(201);
+    const n = (id: string) => Number(id.replace(/^SO-/, ''));
+    expect(n(second.body.id)).toBe(n(first.body.id) + 1);
+  });
+});
+
+describe('sell-order input boundaries', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  const line = (over: Record<string, unknown> = {}) => ({
+    category: 'RAM', label: 'x', partNumber: 'pn', qty: 1, unitPrice: 1, ...over,
+  });
+
+  it('POST answers 400, not 500, for malformed ids and missing line fields', async () => {
+    const { token } = await loginAs(ALEX);
+    const customerId = await firstCustomerId(token);
+    const cases: Array<[Record<string, unknown>, RegExp]> = [
+      [{ customerId: 'not-a-uuid', lines: [line()] }, /customerId/],
+      [{ customerId, lines: [line({ inventoryId: 'not-a-uuid' })] }, /inventoryId/],
+      [{ customerId, lines: [line({ category: undefined })] }, /category/],
+      [{ customerId, lines: [line({ category: 7 })] }, /category/],
+      [{ customerId, lines: [line({ label: null })] }, /label/],
+      [{ customerId, lines: [line({ qty: '2' })] }, /qty/],
+      [{ customerId, lines: [line({ unitPrice: 'free' })] }, /unitPrice/],
+      [{ customerId, lines: [null] }, /line/],
+    ];
+    for (const [body, msg] of cases) {
+      const r = await api<{ error: string }>('POST', '/api/sell-orders', { token, body });
+      expect(r.status, JSON.stringify(body)).toBe(400);
+      expect(r.body.error).toMatch(msg);
+    }
+  });
+
+  it('PATCH answers 400 for a malformed customerId or line', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await createDraftSellOrder(token);
+    const bad = await api<{ error: string }>('PATCH', `/api/sell-orders/${id}`, {
+      token, body: { customerId: 'nope' },
+    });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error).toMatch(/customerId/);
+    const badLine = await api<{ error: string }>('PATCH', `/api/sell-orders/${id}`, {
+      token, body: { lines: [line({ inventoryId: 'nope' })] },
+    });
+    expect(badLine.status).toBe(400);
+    expect(badLine.body.error).toMatch(/inventoryId/);
+  });
+});
+
+describe('GET /api/sell-orders/:id — maxQty', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  type Detail = { order: { lines: { inventoryId: string | null; maxQty: number; qty: number }[] } };
+
+  it('offers nothing once the lot leaves the sellable statuses or its PO is archived', async () => {
+    const { token } = await loginAs(ALEX);
+    const src = await findSellableLine(token);
+    const customerId = await firstCustomerId(token);
+    const created = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token,
+      body: { customerId, lines: [
+        { inventoryId: src.id, category: 'RAM', label: 'x', partNumber: 'pn', qty: 1, unitPrice: 1 },
+        { category: 'RAM', label: 'manual', qty: 3, unitPrice: 1 },
+      ] },
+    });
+    expect(created.status).toBe(201);
+    const maxQtys = async () => {
+      const got = await api<Detail>('GET', `/api/sell-orders/${created.body.id}`, { token });
+      expect(got.status).toBe(200);
+      return got.body.order.lines.map(l => l.maxQty);
+    };
+    // A manual line has no lot behind it, so its own qty is the ceiling.
+    expect(await maxQtys()).toEqual([src.qty, 3]);
+
+    const sql = getTestDb();
+    const [{ order_id: poId }] = await sql<{ order_id: string }[]>`
+      SELECT order_id FROM order_lines WHERE id = ${src.id}`;
+    await sql`UPDATE orders SET archived_at = NOW() WHERE id = ${poId}`;
+    expect(await maxQtys()).toEqual([0, 3]);
+
+    await sql`UPDATE orders SET archived_at = NULL WHERE id = ${poId}`;
+    await sql`UPDATE order_lines SET status = 'In Transit' WHERE id = ${src.id}`;
+    expect(await maxQtys()).toEqual([0, 3]);
   });
 });

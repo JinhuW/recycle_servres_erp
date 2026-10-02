@@ -3,6 +3,7 @@
 // Use --reset to DROP all known tables first (dev only).
 
 import postgres from 'postgres';
+import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -42,6 +43,29 @@ const reset = process.argv.includes('--reset');
 // yet" six times — which is the line an operator reads while the container
 // merely looks slow to start.
 const CONNECT_ATTEMPTS = 6;
+
+// A migration waiting on a lock queues every later query on that table behind
+// it, and during a deploy the previous instance is still serving — so give up
+// the lock after 10s instead of stalling the app, and try the file again a few
+// times rather than failing boot into the restart loop described above.
+const LOCK_TIMEOUT = '10s';
+const LOCK_ATTEMPTS = 3;
+const LOCK_NOT_AVAILABLE = '55P03';
+
+async function applyWithLockRetry(file, apply) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await apply();
+    } catch (err) {
+      if (err?.code !== LOCK_NOT_AVAILABLE || attempt >= LOCK_ATTEMPTS) throw err;
+      const waitMs = 2000 * attempt;
+      log.warn('migration waited too long for a lock; retrying', { file, attempt, of: LOCK_ATTEMPTS, waitMs });
+      await new Promise((r) => setTimeout(r, waitMs));
+    }
+  }
+}
+
+const sha256 = (text) => createHash('sha256').update(text).digest('hex');
 
 async function connectWithRetry(statement) {
   for (let attempt = 1; ; attempt++) {
@@ -102,27 +126,42 @@ try {
       applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
-  const applied = new Set(
-    (await sql`SELECT filename FROM schema_migrations`).map(r => r.filename),
+  // The checksum is how an edited, already-applied file gets noticed: the
+  // ledger is keyed by name alone, so the edit would otherwise never run
+  // anywhere and nobody would know. Rows from before the column are filled
+  // in from the file as it stands the first time they're seen.
+  await sql.unsafe(`ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS checksum TEXT`);
+  const applied = new Map(
+    (await sql`SELECT filename, checksum FROM schema_migrations`).map(r => [r.filename, r.checksum]),
   );
 
   const files = readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort();
   let appliedNow = 0;
   for (const file of files) {
+    const ddl = readFileSync(join(migrationsDir, file), 'utf8');
+    const checksum = sha256(ddl);
     if (applied.has(file)) {
+      const recorded = applied.get(file);
+      if (recorded === null) {
+        await sql`UPDATE schema_migrations SET checksum = ${checksum} WHERE filename = ${file}`;
+      } else if (recorded !== checksum) {
+        // Warn, don't fail: refusing to boot over an edited comment would take
+        // the app down, and the file's DDL already ran in its original form.
+        log.warn('applied migration has changed on disk; the edit will not run', { file });
+      }
       log.info('skip (already applied)', { file });
       continue;
     }
     log.info('applying migration', { file });
-    const ddl = readFileSync(join(migrationsDir, file), 'utf8');
     // One transaction per file: a mid-file failure rolls the whole file
     // back, and the ledger row is only written if the DDL fully succeeded —
     // so a crashed migration never half-applies and never records itself.
-    await sql.begin(async (tx) => {
+    await applyWithLockRetry(file, () => sql.begin(async (tx) => {
+      await tx.unsafe(`SET LOCAL lock_timeout = '${LOCK_TIMEOUT}'`);
       await tx.unsafe(ddl);
-      await tx`INSERT INTO schema_migrations (filename) VALUES (${file})
+      await tx`INSERT INTO schema_migrations (filename, checksum) VALUES (${file}, ${checksum})
                ON CONFLICT (filename) DO NOTHING`;
-    });
+    }));
     appliedNow++;
   }
   log.info('migrations applied', { applied: appliedNow, total: files.length });

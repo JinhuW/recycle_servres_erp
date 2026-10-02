@@ -170,10 +170,11 @@ describe('mercury provider: credit accounts', () => {
       },
     });
 
-    const { accounts, txns } = await mercuryProvider(env).fetchSince('2026-09-01T00:00:00Z');
+    const { accounts, txns, partialErrors } = await mercuryProvider(env).fetchSince('2026-09-01T00:00:00Z');
 
     expect(accounts.map((a) => a.externalId)).toEqual([CHECKING]);
     expect(txns.map((t) => t.externalId)).toEqual(['wire-1']);
+    expect(partialErrors).toEqual([{ account: CREDIT, message: expect.stringMatching(/HTTP 500/) }]);
   });
 
   it('still fails the sync when a bank account fetch fails', async () => {
@@ -193,9 +194,10 @@ describe('mercury provider: credit accounts', () => {
       },
     });
 
-    const { accounts, txns } = await mercuryProvider(env).fetchSince('2026-09-01T00:00:00Z');
+    const { accounts, txns, partialErrors } = await mercuryProvider(env).fetchSince('2026-09-01T00:00:00Z');
 
     expect(accounts.map((a) => a.externalId)).toEqual([CHECKING]);
     expect(txns.map((t) => t.externalId)).toEqual(['wire-1']);
+    expect(partialErrors).toEqual([{ account: null, message: expect.stringMatching(/\/api\/v1\/credit.*HTTP 403/) }]);
   });
 });

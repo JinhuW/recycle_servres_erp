@@ -14,12 +14,18 @@ notifications.get('/', async (c) => {
     ORDER BY created_at DESC
     LIMIT 50
   `;
+  // Counted on its own: the list is capped, so counting the page would stop
+  // the badge at 50 however many are actually unread.
+  const [{ n: unreadCount }] = await sql<{ n: number }[]>`
+    SELECT COUNT(*)::int AS n FROM notifications
+    WHERE user_id = ${u.id} AND unread
+  `;
   return c.json({
     items: rows.map(r => ({
       id: r.id, kind: r.kind, tone: r.tone, icon: r.icon,
       title: r.title, body: r.body, unread: r.unread, time: r.created_at,
     })),
-    unreadCount: rows.filter(r => r.unread).length,
+    unreadCount,
   });
 });
 

@@ -104,23 +104,23 @@ resource "cloudflare_api_token" "backups_r2" {
 }
 
 output "r2_s3_endpoint" {
-  description = "S3-compatible endpoint → set as RCLONE_CONFIG_R2_ENDPOINT on the backup service."
+  description = "S3-compatible endpoint → R2_S3_ENDPOINT on the backup service."
   value       = "https://${var.cloudflare_account_id}.r2.cloudflarestorage.com"
 }
 
 output "bucket_name" {
-  description = "Backups bucket name → R2_BACKUP_BUCKET."
+  description = "Backups bucket name → BACKUP_R2_BUCKET on the backup service."
   value       = cloudflare_r2_bucket.backups.name
 }
 
 output "r2_access_key_id" {
-  description = "Access Key ID (the token's ID) → RCLONE_CONFIG_R2_ACCESS_KEY_ID."
+  description = "Access Key ID (the token's ID) → R2_ACCESS_KEY_ID on the backup service."
   value       = cloudflare_api_token.backups_r2.id
   sensitive   = true
 }
 
 output "r2_secret_access_key" {
-  description = "Secret Access Key = SHA-256 hex of the token value → RCLONE_CONFIG_R2_SECRET_ACCESS_KEY."
+  description = "Secret Access Key = SHA-256 hex of the token value → R2_SECRET_ACCESS_KEY on the backup service."
   value       = sha256(cloudflare_api_token.backups_r2.value)
   sensitive   = true
 }

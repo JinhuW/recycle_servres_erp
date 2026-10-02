@@ -1,4 +1,5 @@
 import type { MiddlewareHandler } from 'hono';
+import { getDb } from '../db';
 import { verifyAccessToken } from './tokens';
 import { resolvePublicOrigin } from './metadata';
 import { addLogContext } from '../lib/log';
@@ -23,6 +24,27 @@ export function bearerGuard(opts: { scopes: OAuthScope[] }): MiddlewareHandler<{
     const token = header.slice(7).trim();
     const claims = await verifyAccessToken(env, token);
     if (!claims) {
+      c.header('WWW-Authenticate', wwwAuth());
+      return c.json({ error: 'invalid_token' }, 401);
+    }
+    // A signature only proves the token was issued. Revoking the client,
+    // deactivating the user or changing their password has to end it too,
+    // rather than leaving it working until it expires. client_credentials
+    // tokens carry no user, so only the client is checked for those.
+    const sql = getDb(env);
+    const userLive = claims.sub
+      ? sql`AND EXISTS (
+          SELECT 1 FROM users u
+          WHERE u.id = ${claims.sub} AND u.active
+            AND (u.tokens_valid_after IS NULL
+                 OR to_timestamp(${claims.iat}) >= u.tokens_valid_after))`
+      : sql``;
+    const live = await sql`
+      SELECT 1 FROM oauth_clients
+      WHERE id = ${claims.cid} AND revoked_at IS NULL ${userLive}
+      LIMIT 1
+    `;
+    if (live.length === 0) {
       c.header('WWW-Authenticate', wwwAuth());
       return c.json({ error: 'invalid_token' }, 401);
     }

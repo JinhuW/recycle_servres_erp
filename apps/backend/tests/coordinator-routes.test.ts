@@ -64,6 +64,27 @@ describe('Coordinator proxy routes (/api/coordinator)', () => {
     expect(url).toBe('http://facade.internal:8600/v1/stats/alert-hits?days=7');
   });
 
+  it('serves a raster screenshot under its own type, and anything else as a download', async () => {
+    const { token } = await loginAs(ALEX);
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+    const cases: Array<[string | null, string]> = [
+      ['image/jpeg', 'image/jpeg'],
+      ['image/webp; charset=binary', 'image/webp'],
+      ['text/html', 'application/octet-stream'],
+      ['image/svg+xml', 'application/octet-stream'],
+    ];
+    for (const [upstreamType, served] of cases) {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(bytes, {
+        status: 200,
+        headers: upstreamType ? { 'Content-Type': upstreamType } : {},
+      })));
+      const r = await api('GET', '/api/coordinator/challenges/c-1/screenshot', { token, env: ENV });
+      expect(r.status).toBe(200);
+      expect(r.headers.get('Content-Type')).toBe(served);
+      expect(r.headers.get('X-Content-Type-Options')).toBe('nosniff');
+    }
+  });
+
   it('passes an upstream failure status through', async () => {
     const { token } = await loginAs(ALEX);
     stubFacade(502, { detail: 'Coordinator is unreachable' });
