@@ -4,12 +4,14 @@
 // shadow our config — so we pass buildEnv() explicitly per request.
 
 import '../scripts/load-env.mjs';
+import type { Server } from 'node:http';
 import { serve } from '@hono/node-server';
 import app from './index';
 import { buildEnv } from './env';
-import { getDb } from './db';
+import { closeSharedDb, getDb } from './db';
 import { startFxRefreshLoop } from './lib/fx';
 import { log } from './lib/log';
+import { onShutdown } from './lib/shutdown';
 import { startPackageTrackingLoop } from './shipping/track';
 import { startBankSyncLoop } from './banktx/sync';
 import { startWebSubmissionPurgeLoop } from './lib/webSubmissionPurge';
@@ -17,11 +19,26 @@ import { startWebSubmissionPurgeLoop } from './lib/webSubmissionPurge';
 const env = buildEnv();
 const port = Number(process.env.PORT ?? 8787);
 
-startFxRefreshLoop(getDb(env));
-startPackageTrackingLoop(getDb(env), env);
-startBankSyncLoop(env);
-startWebSubmissionPurgeLoop(getDb(env), env);
+const loops = [
+  startFxRefreshLoop(getDb(env)),
+  startPackageTrackingLoop(getDb(env), env),
+  startBankSyncLoop(env),
+  startWebSubmissionPurgeLoop(getDb(env), env),
+];
 
-serve({ fetch: (request) => app.fetch(request, env), port }, (info) => {
+const server = serve({ fetch: (request) => app.fetch(request, env), port }, (info) => {
   log.info('recycle-erp-backend listening', { port: info.port });
 });
+
+// Railway sends SIGKILL when its draining window ends, so hardMs has to stay
+// under that setting (RAILWAY_DEPLOYMENT_DRAINING_SECONDS) for the exit to be
+// ours.
+const shutdown = onShutdown({
+  server: server as Server,
+  loops,
+  closeDb: closeSharedDb,
+  graceMs: 20_000,
+  hardMs: 25_000,
+});
+process.once('SIGTERM', () => void shutdown('SIGTERM'));
+process.once('SIGINT', () => void shutdown('SIGINT'));

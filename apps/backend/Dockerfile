@@ -61,5 +61,8 @@ EXPOSE 8787
 HEALTHCHECK --interval=15s --timeout=5s --start-period=40s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:8787/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 # Run migrations, provision the default admin (idempotent), then start the
-# server. Single instance — no migration race.
-CMD ["sh", "-c", "node ./scripts/migrate.mjs && node ./scripts/init-admin.mjs && pnpm start"]
+# server. Single instance — no migration race. `exec` makes node the process
+# that receives SIGTERM: under `sh -c … && pnpm start` the shell held PID 1 and
+# forwarded nothing, so a redeploy always ended in SIGKILL. tsx loads in-process
+# (`--import`), not as a wrapper that would sit between the signal and node.
+CMD ["sh", "-c", "node ./scripts/migrate.mjs && node ./scripts/init-admin.mjs && exec node --import tsx src/server.ts"]

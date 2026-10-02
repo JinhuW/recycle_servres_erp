@@ -11,6 +11,7 @@ import './load-env.mjs';
 // Plain-node import of a .ts module: Node strips the types. log.ts is kept
 // free of intra-repo imports so this resolves without a transpiler.
 import { log as rootLog } from '../src/lib/log.ts';
+import { dbTarget, destructiveRefusal } from '../src/lib/dbTarget.ts';
 import { isTransientConnectError } from './pg-retry.mjs';
 
 const log = rootLog.child({ module: 'migrate' });
@@ -89,6 +90,14 @@ if (reset && process.env.NODE_ENV === 'production' && process.env.ALLOW_DESTRUCT
     'If you really mean it, re-run with ALLOW_DESTRUCTIVE_RESET=true as well.',
   );
   process.exit(1);
+}
+if (reset) {
+  const refusal = destructiveRefusal(url, '--reset', 'ALLOW_DESTRUCTIVE_RESET', process.env);
+  if (refusal) {
+    log.error(refusal);
+    process.exit(1);
+  }
+  log.warn('resetting database', { host: dbTarget(url).host });
 }
 
 // Cluster-wide lock so two instances starting at once (rolling deploy,

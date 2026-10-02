@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // src/lib/log.ts must stay importable by BARE NODE: the container's CMD runs
-// `node ./scripts/migrate.mjs && node ./scripts/init-admin.mjs && pnpm start`
+// `node ./scripts/migrate.mjs && node ./scripts/init-admin.mjs && exec node …`
 // (Dockerfile), and both .mjs scripts import the .ts module directly, relying
 // on Node's TypeScript type-stripping. That resolves only while every import in
 // log.ts is a `node:` builtin — the rest of src/ uses extensionless specifiers

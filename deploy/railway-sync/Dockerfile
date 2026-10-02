@@ -12,6 +12,9 @@ RUN apk add --no-cache curl
 
 COPY sync.sh /usr/local/bin/sync.sh
 RUN chmod +x /usr/local/bin/sync.sh
+# Clears prod's live credentials from the copy; sync.sh runs it in the restore
+# transaction.
+COPY scrub.sql /usr/local/share/sync/scrub.sql
 
 # Railway invokes this once per cron tick; the script copies prod->dev and exits.
 CMD ["/usr/local/bin/sync.sh"]
