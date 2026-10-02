@@ -30,6 +30,9 @@ type Pending = {
   clientId: string;
   clientName: string;
   redirectUri: string;
+  // Optional: a backend older than the SPA doesn't send them.
+  redirectHost?: string | null;
+  selfRegistered?: boolean;
   scopes: string[];
   codeChallenge: string;
   state: string | null;
@@ -191,6 +194,18 @@ export function Authorize() {
             <p style={{ fontSize: 13, color: 'var(--fg-subtle)', margin: '0 0 18px' }}>
               {t('oauthConsentSub')}
             </p>
+            {/* The name above is whatever the app registered with; where the
+                approval is sent, and who made the app, are what can be checked. */}
+            {state.kind === 'ready' && state.pending.redirectHost && (
+              <p style={{ fontSize: 13, margin: '0 0 10px' }}>
+                {t('oauthConsentSendsToPre')}<strong>{state.pending.redirectHost}</strong>{t('oauthConsentSendsToPost')}
+              </p>
+            )}
+            {state.kind === 'ready' && state.pending.selfRegistered && (
+              <p className="chip warn" style={{ fontSize: 12, margin: '0 0 14px', display: 'inline-block' }}>
+                {t('oauthConsentUnverified')}
+              </p>
+            )}
 
             <div className="card" style={{ padding: 14, marginBottom: 14, background: 'var(--bg-elev)', borderRadius: 10 }}>
               <div style={{ fontSize: 12, color: 'var(--fg-subtle)', marginBottom: 6 }}>

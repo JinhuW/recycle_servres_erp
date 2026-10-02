@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { resetDb } from './helpers/db';
+import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { ALEX } from './helpers/auth';
 
@@ -34,5 +34,38 @@ describe('login brute-force throttle', () => {
     for (let i = 0; i < 3; i++) {
       expect((await login(ALEX, 'wrong-password')).status).toBe(401);
     }
+  });
+});
+
+describe('login throttle under concurrency and per address', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  // Counting before recording let a whole burst through: every request saw
+  // fewer than five failures because none had been written yet.
+  it('lets at most five guesses of a burst reach the password check', async () => {
+    const results = await Promise.all(
+      Array.from({ length: 20 }, () => login(ALEX, 'wrong-password')),
+    );
+    expect(results.filter((r) => r.status === 401).length).toBeLessThanOrEqual(5);
+    expect(results.every((r) => r.status === 401 || r.status === 429)).toBe(true);
+    const sql = getTestDb();
+    const [{ pending, failed }] = await sql<{ pending: number; failed: number }[]>`
+      SELECT COUNT(*) FILTER (WHERE success IS NULL)::int AS pending,
+             COUNT(*) FILTER (WHERE success = FALSE)::int AS failed
+      FROM login_attempts WHERE email = ${ALEX}
+    `;
+    expect(pending).toBe(0);
+    expect(failed).toBeLessThanOrEqual(5);
+  });
+
+  it('locks an address that keeps failing across different emails', async () => {
+    const from = (email: string) => api('POST', '/api/auth/login', {
+      body: { email, password: 'x' }, headers: { 'X-Client-IP': '203.0.113.50' },
+    });
+    for (let i = 0; i < 30; i++) expect((await from(`nobody${i}@example.com`)).status).toBe(401);
+    expect((await from('nobody-else@example.com')).status).toBe(429);
+    // Without the Worker's header the address is a shared Cloudflare one, so
+    // no per-address budget applies.
+    expect((await login('another@example.com', 'x')).status).toBe(401);
   });
 });

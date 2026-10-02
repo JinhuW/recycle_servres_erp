@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import bcrypt from 'bcryptjs';
+import { withBcryptSlot } from '../lib/bcryptGate';
 import type postgres from 'postgres';
 import type { SqlLike } from '../db';
 import { oauthRefreshRevocationsTotal } from '../metrics';
@@ -39,7 +40,7 @@ export async function createOAuthClient(
 ): Promise<{ clientId: string; clientSecret: string | null }> {
   const id = newClientId();
   const secret = input.public ? null : newClientSecret();
-  const hash = secret ? await bcrypt.hash(secret, 10) : null;
+  const hash = secret ? await withBcryptSlot(() => bcrypt.hash(secret, 10)) : null;
   await sql`
     INSERT INTO oauth_clients
       (id, secret_hash, name, redirect_uris, grant_types, scopes, created_by, created_ip)
@@ -65,7 +66,7 @@ export async function verifyClientSecret(
   presented: string,
 ): Promise<boolean> {
   if (!row.secret_hash) return false;
-  return bcrypt.compare(presented, row.secret_hash);
+  return withBcryptSlot(() => bcrypt.compare(presented, row.secret_hash!));
 }
 
 export async function listOAuthClients(sql: AnySql): Promise<OAuthClientRow[]> {

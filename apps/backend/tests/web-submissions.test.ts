@@ -87,6 +87,23 @@ describe('POST /api/public/intake', () => {
     expect(photos.map(p => [p.line_index, p.filename, p.position])).toEqual([[0, 'a.jpg', 0], [0, 'b.jpg', 1], [1, 'c.jpg', 0]]);
   });
 
+  // Checked before any decoding: a photo past the raw cap never reaches sharp.
+  it('413s a single photo over the raw cap', async () => {
+    const big = new File([new Uint8Array(16 * 1024 * 1024)], 'big.jpg', { type: 'image/jpeg' });
+    const payload = JSON.stringify({ email: 'big@example.com', source: 'web', lines: [ramLine] });
+    const r = await multipart('/api/public/intake', { payload, 'photo-0-0': big },
+      { headers: headers({ 'X-Requested-By': '' }) });
+    expect(r.status).toBe(413);
+  });
+
+  it('413s a whole request over the intake body cap', async () => {
+    const chunk = () => new File([new Uint8Array(13 * 1024 * 1024)], 'a.jpg', { type: 'image/jpeg' });
+    const payload = JSON.stringify({ email: 'huge@example.com', source: 'web', lines: [ramLine] });
+    const r = await multipart('/api/public/intake', { payload, 'photo-0-0': chunk(), 'photo-0-1': chunk() },
+      { headers: headers({ 'X-Requested-By': '' }) });
+    expect(r.status).toBe(413);
+  });
+
   it('refuses a non-image photo with 415', async () => {
     const payload = JSON.stringify({ email: 'bad@example.com', source: 'web', lines: [ramLine] });
     const pdf = new File([new Uint8Array([0x25, 0x50, 0x44, 0x46])], 'x.pdf', { type: 'application/pdf' });

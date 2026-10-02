@@ -12,6 +12,7 @@ import { startFxRefreshLoop } from './lib/fx';
 import { log } from './lib/log';
 import { startPackageTrackingLoop } from './shipping/track';
 import { startBankSyncLoop } from './banktx/sync';
+import { startWebSubmissionPurgeLoop } from './lib/webSubmissionPurge';
 
 const env = buildEnv();
 const port = Number(process.env.PORT ?? 8787);
@@ -19,6 +20,7 @@ const port = Number(process.env.PORT ?? 8787);
 startFxRefreshLoop(getDb(env));
 startPackageTrackingLoop(getDb(env), env);
 startBankSyncLoop(env);
+startWebSubmissionPurgeLoop(getDb(env), env);
 
 serve({ fetch: (request) => app.fetch(request, env), port }, (info) => {
   log.info('recycle-erp-backend listening', { port: info.port });
