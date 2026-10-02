@@ -317,6 +317,35 @@ describe('/oauth/authorize', () => {
     expect(r.headers.get('location')).toMatch(/^\/authorize\?req=/);
   });
 
+  it('consent names where the code goes and whether a manager made the client', async () => {
+    const sql = getTestDb();
+    const { createOAuthClient } = await import('../src/oauth/clients');
+    const { token } = await loginAs(ALEX);
+    const pendingFor = async (clientId: string, redirectUri: string) => {
+      const r = await api('GET', `/oauth/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&code_challenge=ch&code_challenge_method=S256&scope=market:read&state=s1`, { token });
+      const req = new URLSearchParams(r.headers.get('location')!.split('?')[1]).get('req')!;
+      const p = await api('GET', `/oauth/authorize/pending/${req}`, { token });
+      expect(p.status).toBe(200);
+      return p.body as { clientName: string; redirectHost: string | null; selfRegistered: boolean };
+    };
+
+    const managerMade = await aClient();
+    expect(await pendingFor(managerMade.clientId, 'https://example.com/cb'))
+      .toMatchObject({ redirectHost: 'example.com', selfRegistered: false });
+
+    const impostor = await createOAuthClient(sql, {
+      name: 'Claude', redirectUris: ['https://evil.example:8443/cb'],
+      grantTypes: ['authorization_code', 'refresh_token'], scopes: ['market:read'],
+      createdBy: null, public: true,
+    });
+    expect(await pendingFor(impostor.clientId, 'https://evil.example:8443/cb'))
+      .toMatchObject({ clientName: 'Claude', redirectHost: 'evil.example:8443', selfRegistered: true });
+
+    const list = await api('GET', '/api/oauth/clients', { token });
+    const row = ((list.body as any).clients as any[]).find((c) => c.id === impostor.clientId);
+    expect(row).toMatchObject({ redirectUris: ['https://evil.example:8443/cb'], selfRegistered: true });
+  });
+
   it('redirects with error=invalid_request when code_challenge is missing', async () => {
     const c = await aClient();
     const r = await api('GET',

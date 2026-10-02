@@ -58,6 +58,13 @@ portal was removed in v1.191.0; no bid had ever been placed through it.
   bearer token issued before it is refused (they used to keep working for up to
   60 and 15 minutes). The person changing their own password re-authenticates
   through one silent refresh.
+- **Sign-in locks an email after 5 failures in 15 minutes, and a client IP
+  after 30** (v1.195.0). Each attempt reserves its row before the password is
+  checked, so parallel guesses can't all read "0 failures": 20 at once record
+  at most 5. Refused attempts don't lengthen the lock. The per-IP lock counts
+  across emails and only runs once the Worker's `X-Client-IP` is present.
+  Password hashing runs at most 4 at a time; a caller that queues longer than
+  5 seconds gets a 503 with `Retry-After`.
 - Every mutating request carries `X-Requested-By: recycle-erp`; the CSRF guard
   drops it otherwise. Exempt: safe methods, `/api/health`, and `/api/public/*`
   (the website intake and quote forms and the Shippo webhook, none of which
@@ -1102,6 +1109,19 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   supplier with source `web`, PayPal or cash + pickup per the seller's choice).
   Both endpoints allow 5 submissions a minute per IP and drop a filled honeypot
   silently.
+- **The public forms have a daily ceiling and their own CORS** (v1.195.0).
+  Together they accept 300 submissions or 2 GB of photos per UTC day
+  (workspace settings `public_form_daily_submissions` and
+  `public_form_daily_bytes`), then answer 429 until midnight UTC. The per-IP
+  limit keys on the visitor's real address, with IPv6 grouped by /64; until
+  v1.195.0 every request looked like one of a few Cloudflare servers. An
+  intake post is capped at 25 MiB and each photo at 15 MiB. A photo over 40
+  megapixels, or one that can't be decoded, is refused with a 400 instead of
+  being stored as is. The two form routes answer the marketing-site origins
+  without credentials; those origins get no CORS anywhere else.
+- **Spam and archived submissions are deleted after 30 days** (v1.195.0),
+  together with their photos in R2, by a daily job. A row whose photo delete
+  fails is kept, so the next run retries it.
 
 ## MCP and OAuth connectors
 
@@ -1121,6 +1141,12 @@ inventory search, sell-order draft creation.
   errors; only protocol failures are errors. Every tool ships MCP
   `annotations`, without which clients label read-only tools destructive.
 - DCR is open by default, rate-limited per IP and globally.
+- **Consent says where the code goes** (v1.195.0). Any app can register itself
+  under any name, "Claude" included. The consent page therefore names the
+  redirect host and marks a self-registered client **Unverified**. The
+  Settings connector list shows each client's redirect URIs and the same
+  badge. `/oauth/token` and `/oauth/revoke` refuse past 60 calls a minute per
+  client and 120 per client IP.
 
 ## AI scanning and OCR
 

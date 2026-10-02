@@ -9,6 +9,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { UPLOAD_HARD_CAP_BYTES } from './lib/settings';
 import { appendErrorRecord, redactSensitivePath, redactSensitiveQuery } from './lib/error-log';
 import { log, releaseCommit, releaseVersion, runWithLogContext } from './lib/log';
+import { BcryptBusyError } from './lib/bcryptGate';
 import { secretMatches } from './lib/secret';
 
 import { describeOcr } from './ai';
@@ -153,42 +154,66 @@ app.use('*', async (c, next) => {
   await next();
 });
 
-app.use(
-  '*',
-  cors({
-    // With credentials:true, reflecting an arbitrary origin lets any site
-    // make credentialed calls. In production set CORS_ALLOWED_ORIGINS to the
-    // real frontend origin(s); only those are then echoed back. When unset we
-    // FAIL CLOSED — only loopback origins (the Vite SPA on a shifting
-    // localhost port) are permitted, never an arbitrary remote site.
-    origin: (origin, c) => {
-      const configured = (c.env as Env).CORS_ALLOWED_ORIGINS ?? '';
-      const allow = configured.split(',').map((s: string) => s.trim()).filter(Boolean);
-      if (allow.length > 0) return allow.includes(origin) ? origin : null;
-      if (!origin) return null;
-      try {
-        const host = new URL(origin).hostname;
-        if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]') {
-          return origin;
-        }
-      } catch { /* malformed Origin header — deny */ }
-      return null;
-    },
-    allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowHeaders: [
-      'Content-Type', 'Authorization', 'X-Requested-By',
-      // Streamable HTTP transport headers, for browser-hosted MCP clients and
-      // the MCP Inspector. claude.ai and chatgpt.com call server-to-server and
-      // never preflight, so these matter only for the in-browser case.
-      'MCP-Protocol-Version', 'Mcp-Session-Id', 'Last-Event-ID',
-    ],
-    // Without this an in-browser client can't read the WWW-Authenticate
-    // challenge and so can't discover where to start the OAuth flow.
-    // Retry-After: the public website forms show the 429 wait to the sender.
-    exposeHeaders: ['WWW-Authenticate', 'X-Request-Id', 'Retry-After'],
-    credentials: true,
-  }),
-);
+// The website forms post from the marketing sites and must read their reply
+// (`ref`, and `Retry-After` on a 429), but they never carry a session. They get
+// their own credential-less policy so those sites stay OUT of the credentialed
+// list below — recycleservers.com is same-site with the app, so its Lax cookies
+// would ride along, and a script injected there would act as any staff member
+// who had the app open. Exact paths: the Shippo webhook under /api/public is
+// server-to-server and wants no CORS at all.
+const PUBLIC_FORM_PATHS = new Set(['/api/public/intake', '/api/public/quote']);
+const DEFAULT_PUBLIC_FORM_ORIGINS = [
+  'https://ram4cash.com', 'https://www.ram4cash.com',
+  'https://recycleservers.com', 'https://www.recycleservers.com',
+];
+const publicFormCors = cors({
+  origin: (origin, c) => {
+    const configured = ((c.env as Env).PUBLIC_FORM_ORIGINS ?? '')
+      .split(',').map((s: string) => s.trim()).filter(Boolean);
+    return (configured.length > 0 ? configured : DEFAULT_PUBLIC_FORM_ORIGINS).includes(origin)
+      ? origin : null;
+  },
+  allowMethods: ['POST', 'OPTIONS'],
+  allowHeaders: ['Content-Type'],
+  exposeHeaders: ['Retry-After'],
+  credentials: false,
+});
+
+const appCors = cors({
+  // With credentials:true, reflecting an arbitrary origin lets any site
+  // make credentialed calls. In production set CORS_ALLOWED_ORIGINS to the
+  // real frontend origin(s); only those are then echoed back. When unset we
+  // FAIL CLOSED — only loopback origins (the Vite SPA on a shifting
+  // localhost port) are permitted, never an arbitrary remote site.
+  origin: (origin, c) => {
+    const configured = (c.env as Env).CORS_ALLOWED_ORIGINS ?? '';
+    const allow = configured.split(',').map((s: string) => s.trim()).filter(Boolean);
+    if (allow.length > 0) return allow.includes(origin) ? origin : null;
+    if (!origin) return null;
+    try {
+      const host = new URL(origin).hostname;
+      if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]') {
+        return origin;
+      }
+    } catch { /* malformed Origin header — deny */ }
+    return null;
+  },
+  allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowHeaders: [
+    'Content-Type', 'Authorization', 'X-Requested-By',
+    // Streamable HTTP transport headers, for browser-hosted MCP clients and
+    // the MCP Inspector. claude.ai and chatgpt.com call server-to-server and
+    // never preflight, so these matter only for the in-browser case.
+    'MCP-Protocol-Version', 'Mcp-Session-Id', 'Last-Event-ID',
+  ],
+  // Without this an in-browser client can't read the WWW-Authenticate
+  // challenge and so can't discover where to start the OAuth flow.
+  exposeHeaders: ['WWW-Authenticate', 'X-Request-Id', 'Retry-After'],
+  credentials: true,
+});
+
+app.use('*', (c, next) =>
+  PUBLIC_FORM_PATHS.has(c.req.path) ? publicFormCors(c, next) : appCors(c, next));
 app.use('*', metricsMiddleware);
 app.get('/metrics', metricsHandler);
 app.use('*', csrfGuard);
@@ -236,6 +261,14 @@ app.get('/api/health', async (c) => {
 // malicious request is rejected before auth, without buffering.
 const JSON_BODY_LIMIT = 1_048_576; // 1 MiB
 const uploadBodyLimit = bodyLimit({ maxSize: UPLOAD_HARD_CAP_BYTES });
+// The anonymous intake form buffers its whole multipart body before a single
+// check runs, so it gets half the staff upload cap — still room for its 20
+// photos once a phone has compressed them.
+const INTAKE_BODY_LIMIT = 25 * 1024 * 1024;
+const intakeBodyLimit = bodyLimit({
+  maxSize: INTAKE_BODY_LIMIT,
+  onError: (c) => c.json({ error: 'Payload too large' }, 413),
+});
 // Only the actual multipart endpoints get the generous cap. A prefix-wide
 // exemption (e.g. all of /api/sell-orders/*) would let every JSON endpoint
 // under it buffer 50 MiB bodies.
@@ -243,8 +276,6 @@ const isUploadPath = (path: string): boolean =>
   path === '/api/scan/label' ||
   path === '/api/scan/payment' ||
   path === '/api/scan/serial' ||
-  // The ram4cash sell form sends label photos with its payload.
-  path === '/api/public/intake' ||
   /^\/api\/(orders|sell-orders)\/[^/]+\/status-meta\/[^/]+\/attachments$/.test(path) ||
   // A line photo comes straight off a phone camera at several MB, uncompressed.
   // Left under the JSON cap it 413s before the handler that would have checked
@@ -260,6 +291,8 @@ const jsonBodyLimit = bodyLimit({
   onError: (c) => c.json({ error: 'Payload too large' }, 413),
 });
 app.use('*', (c, next) => {
+  // The ram4cash sell form sends label photos with its payload.
+  if (c.req.path === '/api/public/intake') return intakeBodyLimit(c, next);
   if (isUploadPath(c.req.path)) return uploadBodyLimit(c, next);
   return jsonBodyLimit(c, next);
 });
@@ -384,6 +417,12 @@ app.route('/api/internal-transactions', internalTxRoutes);
 app.route('/api/suppliers', suppliersRoutes);
 
 app.onError((err, c) => {
+  // Load shedding, not a fault: the caller is told to retry and nothing is
+  // logged — a login flood would otherwise also flood the error sink.
+  if (err instanceof BcryptBusyError) {
+    c.header('Retry-After', '5');
+    return c.json({ error: err.message }, 503);
+  }
   // Log the full error server-side with the request ID for correlation, but
   // never return err.message to the client — postgres.js errors embed
   // table/column/constraint names and SQL fragments that aid schema

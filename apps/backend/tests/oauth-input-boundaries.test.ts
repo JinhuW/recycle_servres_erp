@@ -176,3 +176,31 @@ describe('DCR unused-client cap', () => {
     expect(r.body.error).toBe('temporarily_unavailable');
   });
 });
+
+// Every token/revoke call compares a bcrypt secret; a loop against one client
+// id would otherwise pin a core.
+describe('token endpoint budget', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('answers 429 once a client id has made 60 calls in a minute', async () => {
+    const call = () => api<Body>('POST', '/oauth/token', {
+      form: { grant_type: 'refresh_token', client_id: 'budget-probe', refresh_token: 'x' },
+    });
+    for (let i = 0; i < 60; i++) expect((await call()).status).not.toBe(429);
+    const r = await call();
+    expect(r.status).toBe(429);
+    expect(r.headers.get('Retry-After')).toBeTruthy();
+  });
+
+  // The id is public, so a stranger spending it must not lock out the
+  // connector's own calls from its own address.
+  it('keys the client budget by address once the Worker names the caller', async () => {
+    const call = (ip: string) => api<Body>('POST', '/oauth/token', {
+      form: { grant_type: 'refresh_token', client_id: 'budget-shared', refresh_token: 'x' },
+      headers: { 'X-Client-IP': ip },
+    });
+    for (let i = 0; i < 60; i++) await call('198.51.100.7');
+    expect((await call('198.51.100.7')).status).toBe(429);
+    expect((await call('203.0.113.9')).status).not.toBe(429);
+  });
+});

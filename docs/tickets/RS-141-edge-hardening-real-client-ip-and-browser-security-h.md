@@ -2,13 +2,13 @@
 id: RS-141
 title: "Edge hardening: real client IP and browser security headers"
 type: bug
-status: in-progress
+status: done
 priority: P1
 created: 2026-10-02
 reporter: jinhu
 branch: fix/edge-headers
-pr:
-version:
+pr: "#457"
+version: 1.194.2
 related: [RS-130, RS-134]
 ---
 
@@ -35,15 +35,15 @@ This is Batch 3a of the approved plan,
 
 ## Acceptance criteria
 
-- [ ] Every proxied `/api` request carries `X-Client-IP` set from
+- [x] Every proxied `/api` request carries `X-Client-IP` set from
       `CF-Connecting-IP`.
-- [ ] Every page and asset response carries `X-Frame-Options: DENY`,
+- [x] Every page and asset response carries `X-Frame-Options: DENY`,
       `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, a
       `Permissions-Policy` that allows the camera on self only, and HSTS.
-- [ ] The CSP ships as `Content-Security-Policy-Report-Only` for this release.
+- [x] The CSP ships as `Content-Security-Policy-Report-Only` for this release.
       It reports nothing during login, PO photos, QR/RAM-sheet scanning, the
       desk-scanner bridge, downloads, PWA registration and OAuth consent.
-- [ ] `index.html` carries a `csp-rev` marker, so a policy change also
+- [x] `index.html` carries a `csp-rev` marker, so a policy change also
       refreshes the service-worker precache.
 
 ## Out of scope
@@ -56,3 +56,7 @@ This is Batch 3a of the approved plan,
 
 Both R2 origins are in the one policy, because the dev database is a nightly
 copy of prod and shows prod's image URLs.
+
+The report-only CSP was checked enforced against a local build, across every
+flow listed above. On inventory-dev (b9ad1719) it reported nothing on a
+logged-out, service-worker-served load; dev has no demo logins to go further.

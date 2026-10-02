@@ -17,6 +17,65 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.195.0] - 2026-10-02
+
+Public-surface hardening (RS-143), batch 3b of the remaining code-review work.
+It builds on the `X-Client-IP` header the Worker started sending in 1.194.2.
+
+### Fixed
+
+- **Per-IP limits key on the visitor, not on Cloudflare.** Four copies of the
+  IP lookup read `X-Forwarded-For`, which Railway rewrites to one of a few
+  Cloudflare addresses. So one busy visitor could exhaust the public-form limit
+  for everyone, and a login lockout per IP would have locked out the company.
+  One `clientIp()` helper now reads `X-Client-IP` first. Limiters group IPv6 by
+  /64, since one client can rotate through a whole /64. The in-memory limiter
+  also forgets expired keys and stops at 50,000; before, it kept every address
+  it had ever seen. The Worker now clears any `X-Client-IP` or
+  `X-Forwarded-For` the caller sent before setting its own, so a request that
+  somehow arrives without `CF-Connecting-IP` can't pick its own rate-limit key.
+- **The login lock holds under parallel guesses.** The 5-failure check read the
+  count before any concurrent attempt had written one, so 20 guesses sent at
+  once all got through. Each attempt now reserves its row first and counts
+  everyone else's, so 20 parallel guesses record 5 failures and the rest get a
+  429. A refused or interrupted attempt deletes its row, so it doesn't lengthen
+  the lock. A second budget of 30 failures per client IP spans every email. It
+  stays off until `X-Client-IP` is present, because without it, one attacker
+  would lock out everyone behind the same Cloudflare node. Password hashing runs
+  at most 4 at a time. A caller that queues longer than 5 seconds gets a 503,
+  instead of piling CPU onto a process that also serves the app.
+- **The OAuth token and revoke endpoints are rate limited**, at 60 calls a
+  minute per client and 120 per client IP, before the secret compare runs.
+- **The marketing sites no longer get credentialed CORS.** ram4cash.com and
+  recycleservers.com only post two cookie-less forms. Their place in
+  `CORS_ALLOWED_ORIGINS` gave them `Access-Control-Allow-Credentials` on every
+  route. The intake and quote routes now carry their own CORS: those four
+  origins, POST only, no credentials, `Retry-After` exposed. Every other route
+  ignores them. The origins can be overridden with `PUBLIC_FORM_ORIGINS`.
+  Removing them from prod's `CORS_ALLOWED_ORIGINS` is a separate ops step after
+  this release.
+- **The sell form can't make the server decode huge images.** An intake post
+  is capped at 25 MiB, down from the 50 MiB shared with staff uploads, and
+  each photo at 15 MiB. sharp now refuses anything over 40 megapixels before it
+  allocates. A photo it can't decode gets a 400, where before it was stored as
+  uploaded. Shrinks run two at a time. A public caller that waits longer than
+  30 seconds gets a 503; staff uploads keep their old fallback.
+- **The public forms have a daily ceiling.** A spammer rotating addresses could
+  fill R2 and the inbox without bound. Past 300 submissions or 2 GB of photos
+  in a UTC day, both forms answer 429 until midnight UTC. Both numbers are
+  workspace settings.
+- **Old spam is cleaned up.** A daily job deletes spam and archived submissions
+  older than 30 days, together with their photos in R2. A row whose photo
+  delete fails stays for the next run, so no row is lost while its file
+  survives.
+- **Consent says where the code goes.** Any app can register itself as
+  "Claude". The consent page now names the redirect host and marks a
+  self-registered client Unverified. The Settings connector list shows each
+  client's redirect URIs and the same badge.
+
+Migration 0147 makes `login_attempts.success` nullable, so an attempt can be
+reserved before it's judged, and adds `ip_key` with its index.
+
 ## [1.194.2] - 2026-10-02
 
 Edge hardening (RS-141), batch 3a of the remaining code-review work.
@@ -41,6 +100,7 @@ Edge hardening (RS-141), batch 3a of the remaining code-review work.
   service-worker-served reload. It blocked a fetch to a foreign origin.
   `index.html` gains a `csp-rev` marker, because the service worker caches
   headers alongside its precache and refreshes only when the file changes.
+
 ## [1.194.1] - 2026-10-02
 
 Fixes from the code review that cleared v1.193.0 and v1.194.0 for production

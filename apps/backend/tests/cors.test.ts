@@ -63,3 +63,43 @@ describe('CORS headers for MCP clients', () => {
       .toContain('www-authenticate');
   });
 });
+
+// The marketing-site forms read their reply but never carry a session, so they
+// get a credential-less policy of their own and stay out of the credentialed
+// allowlist the app uses.
+describe('CORS for the public website forms', () => {
+  const SITE = 'https://ram4cash.com';
+  const APP = 'https://inventory.example.com';
+  const env = { CORS_ALLOWED_ORIGINS: APP };
+
+  it('answers a site preflight to /intake without credentials', async () => {
+    const r = await api('OPTIONS', '/api/public/intake', {
+      env,
+      headers: { Origin: SITE, 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type' },
+    });
+    expect(r.headers.get('access-control-allow-origin')).toBe(SITE);
+    expect(r.headers.get('access-control-allow-credentials')).toBeNull();
+  });
+
+  it('exposes Retry-After on a /quote reply so the form can show the wait', async () => {
+    const r = await api('POST', '/api/public/quote', { env, headers: { Origin: SITE }, body: {} });
+    expect(r.headers.get('access-control-allow-origin')).toBe(SITE);
+    expect(r.headers.get('access-control-expose-headers') ?? '').toMatch(/Retry-After/i);
+  });
+
+  it('gives the site nothing on an app route', async () => {
+    const r = await api('GET', '/api/orders', { env, headers: { Origin: SITE } });
+    expect(r.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  it('keeps credentials for the app origin', async () => {
+    const r = await api('GET', '/api/health', { env, headers: { Origin: APP } });
+    expect(r.headers.get('access-control-allow-origin')).toBe(APP);
+    expect(r.headers.get('access-control-allow-credentials')).toBe('true');
+  });
+
+  it('leaves the Shippo webhook path out of the form policy', async () => {
+    const r = await api('POST', '/api/public/shippo/x', { env, headers: { Origin: SITE }, body: {} });
+    expect(r.headers.get('access-control-allow-origin')).toBeNull();
+  });
+});

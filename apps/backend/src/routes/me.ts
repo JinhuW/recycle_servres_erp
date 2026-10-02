@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { getCookie } from 'hono/cookie';
 import { MIN_PASSWORD_LEN, MAX_PASSWORD_LEN } from '@recycle-erp/shared';
 import { getDb } from '../db';
+import { clientIp } from '../lib/clientIp';
 import { epochSeconds, hashPassword, verifyPassword, verifyToken } from '../auth';
 import { revokeUserOAuthTokens } from '../oauth/tokens';
 import { validatePreferencePatch } from '../preferences';
@@ -144,17 +145,14 @@ me.post('/password', async (c) => {
   }
 
   const sql = getDb(c.env);
-  const ip =
-    c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
-    c.req.header('x-real-ip') ||
-    null;
+  const ip = clientIp((n) => c.req.header(n)).full;
 
   // Throttle check before any bcrypt work — keeps it un-timeable. Counts
   // failed attempts on this account since its last success, in a 15-min
   // window, sharing the login route's table and semantics.
   const recentFails = (await sql<{ n: number }[]>`
     SELECT COUNT(*)::int AS n FROM login_attempts
-    WHERE email = ${u.email} AND success = FALSE
+    WHERE email = ${u.email} AND success IS NOT TRUE
       AND attempted_at > NOW() - INTERVAL '15 minutes'
       AND attempted_at > COALESCE(
         (SELECT MAX(attempted_at) FROM login_attempts

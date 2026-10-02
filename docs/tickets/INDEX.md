@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-141](./RS-141-edge-hardening-real-client-ip-and-browser-security-h.md) | in-progress | bug | P1 | Edge hardening: real client IP and browser security headers | — |
+| [RS-143](./RS-143-public-surface-hardening-client-ip-limits-cors-split.md) | in-progress | bug | P1 | Public-surface hardening: client-IP limits, CORS split, intake limits, login throttle, consent host | — |
+| [RS-141](./RS-141-edge-hardening-real-client-ip-and-browser-security-h.md) | done | bug | P1 | Edge hardening: real client IP and browser security headers | 1.194.2 |
 | [RS-139](./RS-139-pre-release-review-fixes-for-v1-193-v1-194.md) | done | bug | P2 | Pre-release review fixes for v1.193–v1.194 | 1.194.1 |
 | [RS-138](./RS-138-sell-order-full-page-by-po-by-warehouse-line-switch.md) | done | story | P2 | Sell order full page, by-PO/by-warehouse line switch, spec tags | 1.194.0 |
 | [RS-136](./RS-136-inventory-edits-land-whatever-the-po-stage.md) | done | bug | P2 | Inventory edits land whatever the PO stage | 1.192.1 |

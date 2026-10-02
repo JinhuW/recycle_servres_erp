@@ -83,6 +83,7 @@ export function buildEnv(src: NodeJS.ProcessEnv = process.env): Env {
     R2_BUCKET: src.R2_BUCKET,
     R2_ATTACHMENTS_PUBLIC_URL: src.R2_ATTACHMENTS_PUBLIC_URL,
     CORS_ALLOWED_ORIGINS: src.CORS_ALLOWED_ORIGINS,
+    PUBLIC_FORM_ORIGINS: src.PUBLIC_FORM_ORIGINS,
     PROXY_SECRET: src.PROXY_SECRET, // pragma: allowlist secret
     NODE_ENV: src.NODE_ENV,
     ENABLE_DEMO_ACCOUNTS: src.ENABLE_DEMO_ACCOUNTS,

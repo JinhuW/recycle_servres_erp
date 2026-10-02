@@ -7,6 +7,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import jwt from '@tsndr/cloudflare-worker-jwt';
 import bcrypt from 'bcryptjs';
+import { withBcryptSlot } from './lib/bcryptGate';
 import type { Context, MiddlewareHandler } from 'hono';
 import { setCookie, deleteCookie, getCookie } from 'hono/cookie';
 import type postgres from 'postgres';
@@ -42,7 +43,7 @@ export function clearAuthCookies(c: Context, env: Env) {
 }
 
 export async function hashPassword(plain: string): Promise<string> {
-  return bcrypt.hash(plain, 10);
+  return withBcryptSlot(() => bcrypt.hash(plain, 10));
 }
 
 export function generateTempPassword(): string {
@@ -52,7 +53,7 @@ export function generateTempPassword(): string {
 }
 
 export async function verifyPassword(plain: string, hash: string): Promise<boolean> {
-  return bcrypt.compare(plain, hash);
+  return withBcryptSlot(() => bcrypt.compare(plain, hash));
 }
 
 /**

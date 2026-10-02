@@ -416,7 +416,11 @@ switches the branch out from under the first.
 - **The real client IP reaches the backend as `X-Client-IP`**, set by the
   Worker from `CF-Connecting-IP`. Railway rewrites `X-Forwarded-For` to a
   Cloudflare egress address shared by every user, so anything keyed per IP
-  must read `X-Client-IP`.
+  must read `X-Client-IP`.  In the backend that means `lib/clientIp.ts`: `full`
+  to store, `key` (IPv6 grouped by /64) for a limiter.  A limit that would
+  lock people out when every request looks like the same few Cloudflare
+  addresses must skip itself while `X-Client-IP` is absent, as the per-IP
+  login budget does.
 
 ## Infrastructure (Terraform)
 
