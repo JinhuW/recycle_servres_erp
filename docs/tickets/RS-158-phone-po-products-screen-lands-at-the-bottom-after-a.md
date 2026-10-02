@@ -2,13 +2,13 @@
 id: RS-158
 title: Phone PO products screen lands at the bottom after a scan, with a top/bottom jump button
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-02
 reporter: jinhu
 branch: feat/scan-scroll-bottom
-pr:
-version:
+pr: "#480"
+version: 1.202.0
 related: [RS-074]
 ---
 
