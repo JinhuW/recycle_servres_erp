@@ -20,6 +20,7 @@ import { categoryFilterOptions } from '../../lib/lookups';
 import type { OrderSummary, Order } from '../../lib/types';
 import { TableSkeleton } from '../../components/Skeleton';
 import { OrderCategoryChips } from '../../components/OrderCategoryChips';
+import { useReviewModeEntry } from './ReviewModeEntry';
 
 // Map a stage tone keyword to a usable CSS variable. Same lookup as the
 // design's lifecycleTone helper.
@@ -132,6 +133,7 @@ export function DesktopOrders({ onToast }: Props) {
   // match what the backend will scope to.
   const user = useEffectiveUser();
   const isManager = user?.role === 'manager';
+  const { enter: enterReview, prompt: reviewPrompt } = useReviewModeEntry();
 
   // Persisted across the open-order → back round-trip (see lib/listMemory).
   const [filter, setFilter] = usePersisted<string>('desktop.orders.filter', 'all');
@@ -499,7 +501,7 @@ export function DesktopOrders({ onToast }: Props) {
                 {isVis('commission') && <SortTh col="commission" sort={sort} onSort={cycleSort} align="right">{t('commission')}</SortTh>}
                 {isVis('payment') && <SortTh col="payment" sort={sort} onSort={cycleSort}>{t('payment')}</SortTh>}
                 {isVis('status') && <SortTh col="status" sort={sort} onSort={cycleSort}>{t('status')}</SortTh>}
-                <th style={{ width: 90 }}>{t('actions')}</th>
+                <th style={{ width: isManager ? 122 : 90 }}>{t('actions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -665,6 +667,19 @@ export function DesktopOrders({ onToast }: Props) {
                       </td>
                       <td>
                         <div style={{ display: 'inline-flex', gap: 4 }}>
+                          {isManager && (
+                            <button
+                              className="btn icon sm"
+                              title={t('bcOpen')}
+                              aria-label={t('bcOpen')}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                enterReview({ id: o.id, lifecycle: o.lifecycle, archived: o.archivedAt !== null, status: o.status });
+                              }}
+                            >
+                              <Icon name="package" size={12} />
+                            </button>
+                          )}
                           <button
                             className="btn icon sm"
                             title={t('downloadPoXlsx')}
@@ -773,6 +788,9 @@ export function DesktopOrders({ onToast }: Props) {
           )}
         </div>
       </div>
+      {/* Outside the table: the dialog doesn't portal, and a backdrop click
+          would otherwise reach the row's own toggle. */}
+      {reviewPrompt}
     </>
   );
 }

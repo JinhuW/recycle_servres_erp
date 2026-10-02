@@ -17,6 +17,35 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.201.0] - 2026-10-02
+
+Review mode offers to move the PO to Reviewing, and opens from the PO list
+(RS-157).
+
+### Added
+
+- **Opening review mode before Reviewing asks to move the PO there.** Review
+  mode's Approve is only offered at Reviewing, so a manager who opened it on an
+  In Transit PO had to back out, change the stage on the PO page, save, and come
+  back. Review mode on a Draft or In Transit PO now asks *Move PO-n to
+  Reviewing?*:
+  - **Move to Reviewing** moves the PO, then opens review mode with Approve.
+  - **Open without moving** opens it as before.
+  - **Cancel** does nothing.
+
+  Reviewing, Ready to Pay, Done, Sold and archived POs open straight away. For
+  the closed stages that's a recount, and moving them back would reopen the
+  book. The move re-reads the PO first, and only the stage the prompt named
+  moves:
+  - A PO that has since passed Reviewing just opens.
+  - A PO that went back to Draft is asked again.
+
+  A list row can be stale, and the jump would otherwise move the PO the wrong
+  way.
+- **Review mode button on every PO list row.** It sits left of the download
+  button, for managers (hidden in purchaser preview), and asks the same
+  question.
+
 ## [1.200.2] - 2026-10-02
 
 Fixes from the pre-release review of v1.194.2 → v1.200.1 (RS-156). v1.200.1
