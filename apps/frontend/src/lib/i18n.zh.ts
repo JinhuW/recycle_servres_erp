@@ -1813,6 +1813,7 @@ const zh: Record<string, string> = {
   backToSellOrders: '返回销售订单',
   sodNoWarehouse: '无仓库',
   sodFromPO: '来源 {po}',
+  sodFromPOLine: '来源 {po} #{n}',
   sodLineTotal: '小计',
   sodListPriceTooltip: '挂牌价:{price}',
   sodAllItemsRemoved: '所有项目已移除。关闭后从「库存」重新选择。',

@@ -672,6 +672,18 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
     the "From PO-…" reference under each line.
   - PO references are links in view mode and plain text while editing, since
     the edit page has no leave guard.
+- **A line carries its number on the source PO** (v1.196.0): the `#` the PO
+  page shows for that line.
+  - By PO, each PO card has a `#` column and lists its lines in PO order. The
+    No PO card has no `#` column.
+  - By warehouse, the reference reads "From PO-1432 #3".
+  - Lines picked in edit mode, from the picker or Inventory → Add to sell order,
+    show the number before saving.
+  - The number is computed live, not stored. It is the line's rank among the
+    PO's lines by position, then creation time, then id, which is also the order
+    the PO page lists them in. Removing a PO line renumbers both pages together.
+    A partial-transfer clone sorts after its source, so the source keeps its
+    number.
 - **Each line shows its spec as tags** (v1.194.0).
   - RAM: Desktop / Server / Laptop, classification, rank and speed (rank and
     speed accented).
