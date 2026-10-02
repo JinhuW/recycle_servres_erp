@@ -17,6 +17,33 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.196.0] - 2026-10-02
+
+A sell order line now shows its number on the PO it came from (RS-145).
+
+### Added
+
+- **PO line numbers on sell order lines.** The By PO view (1.194.0) grouped
+  lines under their PO, but a line didn't say which line of that PO it was.
+  Matching it back meant reading part numbers against the PO page. Each line
+  now carries the `#` the PO page shows for it:
+  - By PO, every PO card has a `#` column and lists its lines in PO order.
+  - By warehouse, the reference reads "From PO-1432 #3".
+  - Lines picked in edit mode, from the picker or Inventory → Add to sell order,
+    show the number before saving.
+  - `search_sellable_inventory` (MCP) returns it as `sourceLineNo`.
+
+### Changed
+
+- **A PO's lines list in a fully stable order.** Nothing stores a line number.
+  The PO page numbers lines by their index in the order the server returns,
+  and that order was `position` alone. A partial inventory transfer clones a
+  line *at its source's position*, so the two tied rows could swap between
+  loads and renumber the page. The PO detail and the PO spreadsheet now order by
+  `(position, created_at, id)`. The sell order computes its numbers by the same
+  key, in `lib/poLineNo.ts`, so the clone always sorts after its source and the
+  source keeps the number a sell order already shows for it.
+
 ## [1.195.1] - 2026-10-02
 
 Fixes to 1.195.0 (RS-143) from a code review before it reached production.
