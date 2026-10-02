@@ -49,20 +49,20 @@ renders the Desktop/Server · RDIMM · rank · speed pills on the box check page
 
 ## Acceptance criteria
 
-- [ ] `#/sell-orders/:id` and `/:id/edit` render a full page in place of the
+- [x] `#/sell-orders/:id` and `/:id/edit` render a full page in place of the
       list, with no modal. Back returns to the list with its status filter and
       search intact.
-- [ ] Line items have a By warehouse / By PO switch in both view and edit
+- [x] Line items have a By warehouse / By PO switch in both view and edit
       modes. The choice is remembered per user as a preference.
-- [ ] By PO: one group per source PO, in numeric order and linked. Hand-typed
+- [x] By PO: one group per source PO, in numeric order and linked. Hand-typed
       lines go under "No PO", last. A Warehouse column shows. By warehouse:
       today's grouping, with the "From PO" link per line.
-- [ ] Each RAM line shows Desktop/Server · classification · rank · speed chips,
+- [x] Each RAM line shows Desktop/Server · classification · rank · speed chips,
       and SSD/HDD lines show their chips. A line with no linked lot falls back
       to its saved spec text.
-- [ ] Lines added in edit mode (from the picker or Inventory) show chips and
+- [x] Lines added in edit mode (from the picker or Inventory) show chips and
       group by PO before saving.
-- [ ] Inventory → Add to sell order opens the order's edit page with the
+- [x] Inventory → Add to sell order opens the order's edit page with the
       selection appended. Save lands on the order page and clears the
       Inventory selection; leaving without saving keeps it.
 
@@ -79,3 +79,16 @@ renders the Desktop/Server · RDIMM · rank · speed pills on the box check page
 - Numbered RS-138: RS-134 was in flight in a peer worktree and RS-133/135 were
   not visible locally, so I took two above the last number seen.
 - Plan: `~/.claude/plans/ancient-floating-pretzel.md`.
+- **The page is keyed on `id:mode`.** Each switch between view and edit
+  remounts and refetches, so Save never shows the pre-save order and Cancel
+  never resurrects an abandoned draft. View and edit share one history entry
+  (`replaceRoute`), so browser Back leaves the order instead of bouncing
+  between its two modes.
+- **The Inventory hand-off is a one-shot module stash**
+  (`lib/sellOrderPrefill.ts`). It is peeked inside a `useState` initializer,
+  which StrictMode runs twice, and cleared on unmount. The `onSaved` hook
+  clears Inventory's remembered selection only after the save lands.
+- **Rebased over RS-134 (v1.193.0),** which moved Archive / Unarchive out of
+  the `editable` gate onto Done and Closed orders. Those are locked, so on the
+  page Archive and Unarchive sit in the page head; Discard stays in the edit
+  footer.
