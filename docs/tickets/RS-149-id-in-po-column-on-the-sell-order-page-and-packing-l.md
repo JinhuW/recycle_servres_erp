@@ -2,13 +2,13 @@
 id: RS-149
 title: ID in PO column on the sell order page and Packing list by PO
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-02
 reporter: jinhu
 branch: feat/sell-order-id-in-po
-pr:
-version:
+pr: "#466"
+version: 1.197.3
 related: [RS-145]
 ---
 
@@ -38,12 +38,12 @@ carry the number at all, so a picker couldn't match a row back to the PO.
 
 ## Acceptance criteria
 
-- [ ] The sell order page has an "ID in PO" column right after Item, in view and
+- [x] The sell order page has an "ID in PO" column right after Item, in view and
       edit, By PO and By warehouse. It shows the line's number on its PO, or
       `—` for a hand-typed line. The By PO "No PO" card has no such column.
-- [ ] By warehouse's detail row reads "From PO-1432" again, since the number
+- [x] By warehouse's detail row reads "From PO-1432" again, since the number
       has its own column.
-- [ ] Every tab of the Packing list by PO spreadsheet has an "ID in PO" column
+- [x] Every tab of the Packing list by PO spreadsheet has an "ID in PO" column
       after Part #. A row that folds several lots of one PO lists their IDs
       ascending ("1, 3"). The per-warehouse Packing list has no such column.
 
