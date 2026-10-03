@@ -2,13 +2,13 @@
 id: RS-159
 title: Pre-release review fixes for v1.201.0–v1.202.0
 type: bug
-status: backlog
+status: done
 priority: P1
 created: 2026-10-02
 reporter: jinhu
 branch: fix/prerelease-review-v1-202
-pr:
-version:
+pr: "#482"
+version: 1.202.1
 related: [RS-157, RS-158]
 ---
 
