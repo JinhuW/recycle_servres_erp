@@ -311,7 +311,8 @@ lifecycleRoutes.post('/:id/advance', async (c) => {
   const u = c.var.user;
   const id = c.req.param('id');
   const sql = getDb(c.env);
-  const body = (await c.req.json().catch(() => null)) as { toStage?: string } | null;
+  const body = (await c.req.json().catch(() => null)) as
+    { toStage?: string; fromStage?: unknown; enforce?: unknown } | null;
 
   // Only a live Draft meets the guard, so only one is worth a pull — the tx
   // refuses an archived order before it reads the id.
@@ -327,8 +328,14 @@ lifecycleRoutes.post('/:id/advance', async (c) => {
   // UPDATE still waits on — see services/orderAdvance.ts). Reading lifecycle outside the tx
   // let a concurrent delete (which also guarded on a stale lifecycle read)
   // delete an order that was being advanced, and vice-versa.
+  //
+  // `enforce` can only make the guard stricter: a caller that collects none
+  // of the hand-off's facts asks for them to be there already.
   const outcome = await sql.begin(async (tx) =>
-    advanceOrderTx(tx, id, { id: u.id, name: u.name, role: u.role }, body?.toStage));
+    advanceOrderTx(tx, id, { id: u.id, name: u.name, role: u.role }, body?.toStage, {
+      enforce: body?.enforce === 'all' ? 'all' : 'rules',
+      fromStage: typeof body?.fromStage === 'string' ? body.fromStage : undefined,
+    }));
 
   if (outcome.kind !== 'ok') return advanceRefusedResponse(c, outcome, pullError);
   return c.json({ ok: true, lifecycle: outcome.nextStageId });
@@ -356,6 +363,15 @@ function advanceRefusedResponse(
         error: `Order is already ${LIFECYCLE_LABEL[outcome.lifecycle] ?? outcome.lifecycle} — reload to see where it stands.`,
         lifecycle: outcome.lifecycle,
       }, 409);
+    case 'stageMoved': {
+      // Any role may name a `fromStage`; a purchaser still never learns Sold.
+      const seen = visibleLifecycle(outcome.lifecycle, effectiveRole(c.var.user));
+      return c.json({
+        error: `Order is now ${LIFECYCLE_LABEL[seen] ?? seen} — reload to see where it stands.`,
+        code: 'stageMoved',
+        lifecycle: seen,
+      }, 409);
+    }
     case 'committedLines':
       return c.json(committedLinesBody(c.var.user, outcome.offendingLineIds, outcome.sellOrderIds,
         `Lines committed to ${describeSellOrders(outcome.sellOrderIds)} — cancel those sell orders first.`,

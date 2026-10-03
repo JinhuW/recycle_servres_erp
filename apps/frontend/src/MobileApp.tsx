@@ -232,6 +232,16 @@ function Shell() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, capture.phase]);
 
+  // A landing belongs to the PO whose line form set it. Another PO opening
+  // first means that return never came, and the landing must not reach a
+  // later visit by link. Keyed on the PO actually shown, not the address:
+  // Back from the form goes idle a render before its navigation lands, so
+  // the address can still name another PO for that one render.
+  useEffect(() => {
+    if (detailOrder && productsLanding && detailOrder.id !== productsLanding.orderId) setProductsLanding(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detailOrder]);
+
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
   // Errors never become toasts: they go to the blocking dialog so the user can

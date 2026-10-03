@@ -109,6 +109,7 @@ export type AdvanceOutcome =
   | { kind: 'soldIsAutomatic' }
   | { kind: 'alreadySold' }
   | { kind: 'sameStage'; lifecycle: string }
+  | { kind: 'stageMoved'; lifecycle: string }
   | { kind: 'committedLines'; offendingLineIds: string[]; sellOrderIds: string[] }
   | { kind: 'transferClaimed'; offendingLineIds: string[] }
   | LeaveDraftBlocker
@@ -117,8 +118,13 @@ export type AdvanceOutcome =
 // Which leave-Draft blockers a door refuses on. 'rules' is the default and
 // what /advance uses: the proof-of-payment and cost rules only. The hand-off
 // passes 'all' — it is the door that collects the facts, so it is the one
-// that may refuse for want of them.
-export type AdvanceOptions = { enforce?: 'rules' | 'all' };
+// that may refuse for want of them — and so does review mode, which jumps a
+// Draft past the hand-off without collecting them.
+//
+// `fromStage` is where the caller saw the order. `toStage` is a jump, so a
+// page that sat open while someone else moved the order would otherwise move
+// it from wherever it is now — a Ready to Pay order back to Reviewing.
+export type AdvanceOptions = { enforce?: 'rules' | 'all'; fromStage?: string };
 
 // Line statuses in lifecycle order, so a cascade can tell which lines it would
 // move BACKWARDS. A committed line may never go backwards — not even from Done
@@ -434,6 +440,9 @@ export async function advanceOrderTx(
   // The lines sit at 'Archived'; a cascade here would put them back in stock
   // behind the archive's back.
   if (cur.archived_at) return { kind: 'archived' };
+  if (opts.fromStage !== undefined && cur.lifecycle !== opts.fromStage) {
+    return { kind: 'stageMoved', lifecycle: cur.lifecycle };
+  }
 
   const curIdx = stages.indexOf(stageOf(cur.lifecycle));
   let nextStageId: string;

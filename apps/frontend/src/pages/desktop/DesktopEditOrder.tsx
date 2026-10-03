@@ -138,7 +138,11 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // save that has to keep the user here (a photo upload that failed) has
   // already advanced the order — re-sending it would step it on again.
   const [savedStatus, setSavedStatus] = useState(effectiveStatus);
-  const { enter: enterReview, prompt: reviewPrompt } = useReviewModeEntry();
+  // A move that finds the order elsewhere is another write path that learns
+  // where it stands — see applyLifecycle.
+  const { enter: enterReview, prompt: reviewPrompt } = useReviewModeEntry({
+    onStale: (_id, lifecycle) => applyLifecycle(lifecycle),
+  });
   const [warehouseId, setWarehouseId] = useState<string>(order.warehouse?.id ?? '');
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   // Submitting is the one stage move a purchaser makes. Everything after it is
@@ -1114,7 +1118,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                 if (dirty) { showErrorDialog(t('bcSaveFirst')); return; }
                 enterReview({
                   id: order.id, lifecycle: lifecycleOf(savedStatus) ?? order.lifecycle,
-                  archived: isArchived, status: savedStatus,
+                  archived: isArchived,
                 });
               }}
               title={t('bcOpenTip')}

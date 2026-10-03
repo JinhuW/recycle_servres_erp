@@ -2,18 +2,22 @@ import { useState, type ReactNode } from 'react';
 import { Icon } from '../../components/Icon';
 import { Modal } from '../../components/Modal';
 import { api } from '../../lib/api';
-import { asksToMoveToReviewing } from '../../lib/boxCheck';
+import { asksToMoveToReviewing, readStageMoved } from '../../lib/boxCheck';
 import { handleFetchError } from '../../lib/errorToast';
 import { useT } from '../../lib/i18n';
+import { poStageName } from '../../lib/orderPresentation';
 import { navigate, poCheckPath } from '../../lib/route';
-import type { Order } from '../../lib/types';
 
 // The way into review mode from the PO page and the PO list. A PO not yet at
 // Reviewing is offered the move first, since Approve is only offered there.
 
-export type ReviewTarget = { id: string; lifecycle: string; archived: boolean; status: string };
+export type ReviewTarget = { id: string; lifecycle: string; archived: boolean };
 
-export function useReviewModeEntry(): { enter: (o: ReviewTarget) => void; prompt: ReactNode } {
+// `onStale` hears where a PO really stands when a move finds it gone from the
+// stage the caller showed, so the caller can stop showing the old one.
+export function useReviewModeEntry(
+  opts: { onStale?: (id: string, lifecycle: string) => void } = {},
+): { enter: (o: ReviewTarget) => void; prompt: ReactNode } {
   const { t } = useT();
   const [target, setTarget] = useState<ReviewTarget | null>(null);
   const [busy, setBusy] = useState(false);
@@ -30,27 +34,34 @@ export function useReviewModeEntry(): { enter: (o: ReviewTarget) => void; prompt
     setBusy(true);
     // Set when the PO turned out to be somewhere else: it is entered afresh
     // from where it really stands instead of being moved.
-    let elsewhere: ReviewTarget | null = null;
+    let elsewhere: string | null = null;
     try {
       // `toStage` is a jump: from a stale row it would move a PO that has
       // since passed Reviewing backwards, or one sent back to Draft forwards
-      // past its re-submission. Only the stage the manager was shown moves.
-      const fresh = (await api.get<{ order: Order }>(`/api/orders/${target.id}`)).order;
-      if (fresh.lifecycle !== target.lifecycle || fresh.archivedAt !== null) {
-        elsewhere = { id: fresh.id, lifecycle: fresh.lifecycle, archived: fresh.archivedAt !== null, status: fresh.status };
-      } else {
-        await api.post(`/api/orders/${target.id}/advance`, { toStage: 'reviewing' });
-      }
+      // past its re-submission. `fromStage` has the server refuse, under the
+      // row lock, anything but the stage the manager was shown. Review mode
+      // collects none of the hand-off's facts, so a Draft it jumps past In
+      // Transit must carry them already (`enforce`).
+      await api.post(`/api/orders/${target.id}/advance`, {
+        toStage: 'reviewing', fromStage: target.lifecycle, enforce: 'all',
+      });
     } catch (e) {
-      handleFetchError(e);
-      setBusy(false);
-      setTarget(null);
-      return;
+      elsewhere = readStageMoved(e);
+      if (elsewhere === null) {
+        handleFetchError(e);
+        setBusy(false);
+        setTarget(null);
+        return;
+      }
     }
     setBusy(false);
     setTarget(null);
-    if (elsewhere) enter(elsewhere);
-    else navigate(poCheckPath(target.id));
+    if (elsewhere !== null) {
+      opts.onStale?.(target.id, elsewhere);
+      enter({ id: target.id, lifecycle: elsewhere, archived: false });
+    } else {
+      navigate(poCheckPath(target.id));
+    }
   };
 
   const prompt = target && (
@@ -66,7 +77,7 @@ export function useReviewModeEntry(): { enter: (o: ReviewTarget) => void; prompt
           </div>
           <div>
             <div className="modal-title">{t('bcMoveTitle', { id: target.id })}</div>
-            <div className="modal-sub">{t('bcMoveMsg', { id: target.id, s: target.status })}</div>
+            <div className="modal-sub">{t('bcMoveMsg', { id: target.id, s: poStageName(target.lifecycle, t) })}</div>
           </div>
         </div>
       </div>
