@@ -17,7 +17,7 @@ type Checks = {
   extras: { id: string; partNumber: string; note: string | null; sentAt: string | null }[];
 };
 
-async function createReviewing(pur: string, mgr: string): Promise<{ id: string; lineIds: string[] }> {
+async function createDraft(pur: string): Promise<string> {
   const created = await api<{ id: string }>('POST', '/api/orders', {
     token: pur,
     body: {
@@ -32,7 +32,11 @@ async function createReviewing(pur: string, mgr: string): Promise<{ id: string; 
     },
   });
   expect(created.status).toBe(201);
-  const id = created.body.id;
+  return created.body.id;
+}
+
+async function createReviewing(pur: string, mgr: string): Promise<{ id: string; lineIds: string[] }> {
+  const id = await createDraft(pur);
   expect((await api('POST', `/api/orders/${id}/advance`, { token: pur })).status).toBe(200);
   expect((await api('POST', `/api/orders/${id}/advance`, { token: mgr, body: { toStage: 'reviewing' } })).status).toBe(200);
   const got = await api<{ order: { lines: { id: string }[] } }>('GET', `/api/orders/${id}`, { token: mgr });
@@ -234,5 +238,85 @@ describe('box check', () => {
     await sql`DELETE FROM order_lines WHERE id = ${lineIds[0]!}`;
     const after = await api<Checks>('GET', `/api/orders/${id}/checks`, { token: mgr });
     expect(after.body.lines).toEqual([]);
+  });
+});
+
+// Review mode moves a PO to Reviewing, and its Approve to Ready to Pay, with an
+// absolute `toStage`: both name the stage they saw, and review mode asks for
+// the hand-off's facts on a Draft it jumps past In Transit.
+describe('advance preconditions used by review mode', () => {
+  let pur: string;
+  let mgr: string;
+  let purId: string;
+  beforeEach(async () => {
+    await resetDb();
+    const p = await loginAs(MARCUS);
+    pur = p.token;
+    purId = p.user.id;
+    mgr = (await loginAs(ALEX)).token;
+  });
+
+  type Refusal = { error: string; code?: string; lifecycle?: string };
+  const lifecycleOf = async (id: string) =>
+    (await api<{ order: { lifecycle: string } }>('GET', `/api/orders/${id}`, { token: mgr })).body.order.lifecycle;
+  const eventCount = async (id: string) =>
+    (await api<{ events: unknown[] }>('GET', `/api/orders/${id}/events`, { token: mgr })).body.events.length;
+
+  it('refuses a move from a stage the order has left, before anything is written', async () => {
+    const { id } = await createReviewing(pur, mgr);
+    expect((await api('POST', `/api/orders/${id}/advance`, { token: mgr, body: { toStage: 'ready_to_pay' } })).status).toBe(200);
+    const before = await eventCount(id);
+
+    const stale = await api<Refusal>('POST', `/api/orders/${id}/advance`, {
+      token: mgr, body: { toStage: 'reviewing', fromStage: 'in_transit' },
+    });
+    expect(stale.status).toBe(409);
+    expect(stale.body).toMatchObject({ code: 'stageMoved', lifecycle: 'ready_to_pay' });
+    expect(await lifecycleOf(id)).toBe('ready_to_pay');
+    expect(await eventCount(id)).toBe(before);
+  });
+
+  it('checks the precondition ahead of the same-stage refusal', async () => {
+    const { id } = await createReviewing(pur, mgr);
+    const r = await api<Refusal>('POST', `/api/orders/${id}/advance`, {
+      token: mgr, body: { toStage: 'reviewing', fromStage: 'in_transit' },
+    });
+    expect(r.status).toBe(409);
+    expect(r.body).toMatchObject({ code: 'stageMoved', lifecycle: 'reviewing' });
+  });
+
+  it('moves when the order is where the caller saw it', async () => {
+    const { id } = await createReviewing(pur, mgr);
+    const r = await api('POST', `/api/orders/${id}/advance`, {
+      token: mgr, body: { toStage: 'ready_to_pay', fromStage: 'reviewing' },
+    });
+    expect(r.status).toBe(200);
+    expect(await lifecycleOf(id)).toBe('ready_to_pay');
+  });
+
+  it("holds a Draft to the hand-off's facts only when asked to", async () => {
+    const strict = await createDraft(pur);
+    const refused = await api<Refusal>('POST', `/api/orders/${strict}/advance`, {
+      token: mgr, body: { toStage: 'reviewing', fromStage: 'draft', enforce: 'all' },
+    });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toMatch(/where this order came from/);
+    expect(await lifecycleOf(strict)).toBe('draft');
+
+    // With the facts on file the same request goes through.
+    await getTestDb()`
+      UPDATE orders SET source = 'facebook', handoff_method = 'pickup', handoff_by = ${purId},
+                        payment_method = 'paypal'
+      WHERE id = ${strict}`;
+    const moved = await api('POST', `/api/orders/${strict}/advance`, {
+      token: mgr, body: { toStage: 'reviewing', fromStage: 'draft', enforce: 'all' },
+    });
+    expect(moved.status).toBe(200);
+    expect(await lifecycleOf(strict)).toBe('reviewing');
+
+    // Unasked, a manager's jump still skips them, so an old Draft is never stuck.
+    const lax = await createDraft(pur);
+    const jumped = await api('POST', `/api/orders/${lax}/advance`, { token: mgr, body: { toStage: 'reviewing' } });
+    expect(jumped.status).toBe(200);
   });
 });

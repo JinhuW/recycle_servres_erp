@@ -103,7 +103,11 @@ on to Sold once every line has sold (v1.164.0).
   log. The *Products* row opens `/purchase-orders/:id/products`: the line
   cards — each leading with the line's first photo beside its number, the
   rest in a strip under the chips (v1.170.1) — the add-category dock and
-  the goods total; the line form opens from there and returns there. A line removed on one screen is already gone on
+  the goods total; the line form opens from there and returns there —
+  at the bottom after adding a line, on the line after editing one, and at
+  the top when opened by link; a round button above the dock jumps to the
+  bottom or back to the top once the list outgrows the screen (v1.202.0). A
+  line removed on one screen is already gone on
   the other, unsaved fields survive the round trip, and the "back to Draft"
   warning is asked once per visit. The capture flow's **Review screen is
   the product list and nothing else** (v1.169.0): header, the line cards or
@@ -270,6 +274,26 @@ on to Sold once every line has sold (v1.164.0).
   desktop only; called *Box check* until v1.189.2). **Review mode** in the PO
   page header, primary at Reviewing and present at every stage, opens `#/purchase-orders/<id>/check`: a full-width
   page with no sidebar.
+  - Each row of the desktop PO list has its own Review mode button (package
+    icon, left of the download button), for managers only. It's hidden in
+    purchaser preview (v1.201.0).
+  - Opening it on a Draft or In Transit PO asks *Move PO-n to Reviewing?*,
+    because Approve is only offered at Reviewing (v1.201.0). The choices are
+    **Move to Reviewing** (moves the PO, then opens), **Open without moving**,
+    and **Cancel**.
+    - Reviewing and later stages, and archived POs, open with no question.
+    - The question names the stage in the reader's language, from the PO's
+      lifecycle (v1.202.1).
+    - Only the stage the question named moves. The server checks it under the
+      row lock (`fromStage`, v1.202.1). A PO that has since passed Reviewing
+      just opens. One sent back to Draft is asked again, and the list row or
+      PO page shows its real stage.
+    - Moving a Draft needs everything the hand-off would have collected:
+      source, delivery, tracking, payment method and the proof rules
+      (v1.202.1). A Draft missing one stays Draft, and the server says what is
+      missing.
+    - A move the server refuses, such as the proof rules for leaving Draft,
+      shows its message, and the page stays put.
   - Opening and leaving the check re-reads the PO, so neither page works from
     the other's stale copy. A PO page with unsaved edits refuses to open it
     (v1.189.1).

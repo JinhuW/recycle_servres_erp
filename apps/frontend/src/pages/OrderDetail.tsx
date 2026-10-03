@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { Icon } from '../components/Icon';
 import { PhHeader } from '../components/PhHeader';
 import { ImageLightbox } from '../components/ImageLightbox';
@@ -8,6 +8,7 @@ import { PhCommissionFields, PhCommissionSheet } from '../components/PhCommissio
 import { RevertNoticeDialog } from '../components/RevertNoticeDialog';
 import { StatusChangeDialog } from '../components/StatusChangeDialog';
 import { PhHandoffSheet } from '../components/PhHandoffSheet';
+import { PhScrollJump } from '../components/PhScrollJump';
 import { AttachmentChip } from '../components/AttachmentChip';
 import { AttachmentDropzone } from '../components/AttachmentDropzone';
 import { useT } from '../lib/i18n';
@@ -76,6 +77,13 @@ export type OrderMetaDraft = {
   commissionPct: string;
 };
 
+/**
+ * Where the products screen opens after a trip into the line form: on the line
+ * that was edited, or — `lineId: null`, a line being added — at the bottom,
+ * where the new one lands. Absent, the screen opens at the top.
+ */
+export type ProductsLanding = { orderId: string; lineId: string | null };
+
 type FoldId = 'delivery' | 'payment' | 'commission' | 'notes' | 'activity';
 // The fold a stage is about; the others start closed.
 const STAGE_FOLD: Record<string, FoldId> = { 'In Transit': 'delivery', 'Ready to Pay': 'commission' };
@@ -98,11 +106,14 @@ type Props = {
   /** Opens the line form on an existing line. Returns here when it closes. */
   onEditLine: (order: Order, idx: number) => void;
   onAddLine: (order: Order, cat: Category) => void;
+  /** Set when the screen is coming back from the line form; used once. */
+  landing: ProductsLanding | null;
+  onLanded: () => void;
 };
 
 export function OrderDetail({
   order: initialOrder, section, meta: metaDraft, onMetaChange,
-  onCancel, onSaved, onDeleted, onEditLine, onAddLine,
+  onCancel, onSaved, onDeleted, onEditLine, onAddLine, landing, onLanded,
 }: Props) {
   const { t, locale } = useT();
   const { user } = useAuth();
@@ -180,6 +191,24 @@ export function OrderDetail({
   // first few and says how many more there are.
   const [expandedPhotos, setExpandedPhotos] = useState<ReadonlySet<string>>(() => new Set());
   const [removingLineId, setRemovingLineId] = useState<string | null>(null);
+  const productsScrollRef = useRef<HTMLDivElement>(null);
+  const productsContentRef = useRef<HTMLDivElement>(null);
+  // The line form unmounts this screen, so every return from it is a fresh
+  // mount that would open at the top — a purchaser scanning stick after stick
+  // scrolled down to each new line by hand. Instant, not the container's CSS
+  // smooth scroll: the trip down from the top is not something to watch. Used
+  // up even when it can't scroll, so it never reaches a later visit by link.
+  useLayoutEffect(() => {
+    if (!landing) return;
+    const el = productsScrollRef.current;
+    if (section === 'products' && el) {
+      const line = landing.lineId ? document.getElementById('ph-line-' + landing.lineId) : null;
+      if (line) line.scrollIntoView({ block: 'center', behavior: 'instant' });
+      else el.scrollTo({ top: el.scrollHeight, behavior: 'instant' });
+    }
+    onLanded();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [landing, section]);
   // Holds the answer callback while the "this returns the order to Draft"
   // warning is up; acknowledging once covers the rest of the visit.
   const [revertConfirm, setRevertConfirm] = useState<((ok: boolean) => void) | null>(null);
@@ -737,26 +766,30 @@ export function OrderDetail({
       />
       {section === 'products' && (
         <>
-          <div className="ph-scroll" style={{ paddingTop: 12, paddingBottom: canEditOrder ? 168 : 110 }}>
-            <OrderProductsBody
-              order={order}
-              canEditOrder={canEditOrder}
-              showFinalSell={showFinalSell}
-              locale={locale}
-              expandedPhotos={expandedPhotos}
-              onExpandPhotos={id => setExpandedPhotos(prev => new Set(prev).add(id))}
-              onOpenPhoto={setLightboxUrl}
-              onEditLine={i => { void editLine(i); }}
-              onRemoveLine={setRemovingLineId}
-            />
+          {/* The extra 44px under the dock's own clearance is the jump
+              button's, which floats above the dock over the list's end. */}
+          <div ref={productsScrollRef} className="ph-scroll" style={{ paddingTop: 12, paddingBottom: canEditOrder ? 212 : 154 }}>
+            <div ref={productsContentRef}>
+              <OrderProductsBody
+                order={order}
+                canEditOrder={canEditOrder}
+                showFinalSell={showFinalSell}
+                locale={locale}
+                expandedPhotos={expandedPhotos}
+                onExpandPhotos={id => setExpandedPhotos(prev => new Set(prev).add(id))}
+                onOpenPhoto={setLightboxUrl}
+                onEditLine={i => { void editLine(i); }}
+                onRemoveLine={setRemovingLineId}
+              />
+            </div>
           </div>
           <div className="ph-action-bar stacked">
+            <PhScrollJump scrollRef={productsScrollRef} contentRef={productsContentRef} />
             {/* One target per category, matching the capture screen. A single
                 "Add another" button would put the old category lock back in the
                 user's head — the PO is not in a mode. Docked rather than in flow:
-                the list it appends to grows every time it is used, and the screen
-                reopens at the top after each line, so in flow it only ever got
-                further away. */}
+                the list it appends to grows every time it is used, so in flow it
+                only ever got further away. */}
             {canEditOrder && (
               <div className="ph-add-dock" style={{ gridTemplateColumns: `repeat(${cats.length}, 1fr)` }}>
                 {cats.map(cat => (

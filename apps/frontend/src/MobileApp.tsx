@@ -15,7 +15,7 @@ import { Camera } from './pages/Camera';
 import { SubmitForm } from './pages/SubmitForm';
 import { OrderReview } from './pages/OrderReview';
 import { Orders } from './pages/Orders';
-import { OrderDetail, type OrderMetaDraft } from './pages/OrderDetail';
+import { OrderDetail, type OrderMetaDraft, type ProductsLanding } from './pages/OrderDetail';
 import { Market } from './pages/Market';
 import { Inventory } from './pages/Inventory';
 import { Profile } from './pages/Profile';
@@ -171,6 +171,9 @@ function Shell() {
   // because opening a line form unmounts that screen — typing a fee and then
   // adding the line it is for used to blank the fee.
   const [detailMeta, setDetailMeta] = useState<OrderMetaDraft | null>(null);
+  // Where the products screen opens on the way back from the line form. Held
+  // here for the same reason: the form unmounts that screen.
+  const [productsLanding, setProductsLanding] = useState<ProductsLanding | null>(null);
   const orderDetailMatch = matchPurchaseOrder(path);
 
   // Load notifications when the user is signed in.
@@ -205,6 +208,7 @@ function Shell() {
       // Off the PO with no line form on top: whatever was typed there was
       // discarded on the way out, and must not come back on the next visit.
       if (!orderDetailMatch && capture.phase === 'idle' && detailMeta) setDetailMeta(null);
+      if (!orderDetailMatch && capture.phase === 'idle' && productsLanding) setProductsLanding(null);
       return;
     }
     if (detailOrder?.id === orderDetailMatch.id) return;
@@ -227,6 +231,16 @@ function Shell() {
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, capture.phase]);
+
+  // A landing belongs to the PO whose line form set it. Another PO opening
+  // first means that return never came, and the landing must not reach a
+  // later visit by link. Keyed on the PO actually shown, not the address:
+  // Back from the form goes idle a render before its navigation lands, so
+  // the address can still name another PO for that one render.
+  useEffect(() => {
+    if (detailOrder && productsLanding && detailOrder.id !== productsLanding.orderId) setProductsLanding(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detailOrder]);
 
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
@@ -585,6 +599,12 @@ function Shell() {
   // screen is what owns them.
   const openOrderLineForm = (order: Order, category: Category, editingLineIdx: number | null) => {
     seedPhotos(order);
+    // Recorded on the way in, so save, Back, cancel and a rescan all land the
+    // same: on the line edited, or at the bottom where an added line goes.
+    setProductsLanding({
+      orderId: order.id,
+      lineId: editingLineIdx != null ? order.lines[editingLineIdx]?.id ?? null : null,
+    });
     setCapture({
       phase: 'form',
       category,
@@ -806,6 +826,8 @@ function Shell() {
           onDeleted={() => navigate('/purchase-orders')}
           onEditLine={startEditLine}
           onAddLine={startAddLine}
+          landing={productsLanding?.orderId === detailOrder.id ? productsLanding : null}
+          onLanded={() => setProductsLanding(null)}
         />
       )}
       {view === 'history' && (!orderDetailMatch || !detailOrder) && (

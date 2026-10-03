@@ -15,11 +15,12 @@ import { RouteLink } from '../../components/RouteLink';
 import { fmtUSD0, fmtUSD, fmtDateShort, fmt0 } from '../../lib/format';
 import { lineSpecLabel } from '../../lib/lineGroups';
 import { inTransitDetail, profitTone, trackingNote } from '../../lib/orderPresentation';
-import { statusTone, isCompleted, WORKFLOW_STAGES } from '../../lib/status';
+import { statusTone, isCompleted, LIFECYCLE_STATUS, WORKFLOW_STAGES } from '../../lib/status';
 import { categoryFilterOptions } from '../../lib/lookups';
 import type { OrderSummary, Order } from '../../lib/types';
 import { TableSkeleton } from '../../components/Skeleton';
 import { OrderCategoryChips } from '../../components/OrderCategoryChips';
+import { useReviewModeEntry } from './ReviewModeEntry';
 
 // Map a stage tone keyword to a usable CSS variable. Same lookup as the
 // design's lifecycleTone helper.
@@ -143,6 +144,13 @@ export function DesktopOrders({ onToast }: Props) {
   // to the all-stages view — same contract as the sell-order list.
   const [showDone, setShowDone] = usePersisted<boolean>('desktop.orders.showDone', false);
   const [orders, setOrders] = useState<OrderSummary[]>([]);
+  // A move that finds the PO elsewhere asks again from there; the row takes
+  // that stage too, or the next click would ask about the old one again.
+  const { enter: enterReview, prompt: reviewPrompt } = useReviewModeEntry({
+    onStale: (id, lifecycle) => setOrders(os => os.map(o => (o.id === id
+      ? { ...o, lifecycle, status: LIFECYCLE_STATUS[lifecycle] ?? o.status }
+      : o))),
+  });
   const [loadedOnce, setLoadedOnce] = useState(false);
   // True once the last page has landed (or the stream failed) — the loading
   // row, the empty state and the scroll restore all wait on it.
@@ -499,7 +507,7 @@ export function DesktopOrders({ onToast }: Props) {
                 {isVis('commission') && <SortTh col="commission" sort={sort} onSort={cycleSort} align="right">{t('commission')}</SortTh>}
                 {isVis('payment') && <SortTh col="payment" sort={sort} onSort={cycleSort}>{t('payment')}</SortTh>}
                 {isVis('status') && <SortTh col="status" sort={sort} onSort={cycleSort}>{t('status')}</SortTh>}
-                <th style={{ width: 90 }}>{t('actions')}</th>
+                <th style={{ width: isManager ? 122 : 90 }}>{t('actions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -665,6 +673,19 @@ export function DesktopOrders({ onToast }: Props) {
                       </td>
                       <td>
                         <div style={{ display: 'inline-flex', gap: 4 }}>
+                          {isManager && (
+                            <button
+                              className="btn icon sm"
+                              title={t('bcOpen')}
+                              aria-label={t('bcOpen')}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                enterReview({ id: o.id, lifecycle: o.lifecycle, archived: o.archivedAt !== null });
+                              }}
+                            >
+                              <Icon name="package" size={12} />
+                            </button>
+                          )}
                           <button
                             className="btn icon sm"
                             title={t('downloadPoXlsx')}
@@ -773,6 +794,9 @@ export function DesktopOrders({ onToast }: Props) {
           )}
         </div>
       </div>
+      {/* Outside the table: the dialog doesn't portal, and a backdrop click
+          would otherwise reach the row's own toggle. */}
+      {reviewPrompt}
     </>
   );
 }

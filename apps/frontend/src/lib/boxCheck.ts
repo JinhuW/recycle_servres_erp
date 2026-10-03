@@ -1,4 +1,5 @@
 import { canonicalPartNumber, parseSerials } from '@recycle-erp/shared';
+import { ApiError } from './api';
 import type { Translate } from './orderPresentation';
 
 // Box check: a manager counting a PO's lines against the box that arrived.
@@ -26,6 +27,22 @@ export type CheckableLine = {
 };
 
 export type LineCheckState = 'open' | 'partial' | 'done';
+
+// Approve needs the PO at Reviewing, so opening review mode before then offers
+// to move it there. Later stages open as a recount — moving one back would
+// reopen its closed book — and an archived PO can't move at all.
+export function asksToMoveToReviewing(o: { lifecycle: string; archived: boolean }): boolean {
+  return !o.archived && (o.lifecycle === 'draft' || o.lifecycle === 'in_transit');
+}
+
+// Review mode's moves name the stage they saw (`fromStage`); the server refuses
+// one the PO has since left with where it really is. Every other refusal is
+// the server's to word.
+export function readStageMoved(err: unknown): string | null {
+  if (!(err instanceof ApiError) || err.status !== 409) return null;
+  const body = err.body as { code?: unknown; lifecycle?: unknown } | null | undefined;
+  return body?.code === 'stageMoved' && typeof body.lifecycle === 'string' ? body.lifecycle : null;
+}
 
 // Most lines arrive complete, so an untouched line reads as the full qty; the
 // manager only lowers it when something is short. Checked is its own answer

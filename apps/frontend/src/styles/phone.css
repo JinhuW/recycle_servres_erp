@@ -675,6 +675,15 @@
 .ph-action-bar.stacked { flex-direction: column; align-items: stretch; gap: 8px; }
 .ph-action-row { display: flex; align-items: center; gap: 10px; flex: 1; }
 .ph-add-dock { display: grid; gap: 7px; }
+/* Floats just above the dock it is a child of, so it follows the dock's height
+   instead of hard-coding it. The list scrolling under it needs the same
+   clearance added to its bottom padding, or its last line sits beneath. */
+.ph-scroll-jump {
+  position: absolute;
+  right: 16px;
+  bottom: calc(100% + 6px);
+  box-shadow: 0 4px 12px rgba(15,23,42,0.12);
+}
 .ph-btn {
   flex: 1;
   height: 50px;
