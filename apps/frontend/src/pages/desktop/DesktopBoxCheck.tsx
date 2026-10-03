@@ -7,7 +7,7 @@ import { LineSpecChips } from '../../components/LineSpecChips';
 import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
 import { api, rawFetch } from '../../lib/api';
 import {
-  checkBody, countOf, emptyCheck, isShortChecked, lineState, matchScan, nextOpenAfter, orderLines, tally,
+  checkBody, countOf, emptyCheck, isShortChecked, lineState, matchScan, nextOpenAfter, orderLines, readStageMoved, tally,
   type ChecksResponse, type LineCheck,
 } from '../../lib/boxCheck';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
@@ -17,6 +17,7 @@ import { useEscapeKey } from '../../lib/useEscapeKey';
 import { lineSpecLabel } from '../../lib/lineGroups';
 import { linePhotos } from '../../lib/linePhotos';
 import { lineRequirements, missingFieldNames } from '../../lib/lineRequirements';
+import { poStageName } from '../../lib/orderPresentation';
 import { statusTone } from '../../lib/status';
 import type { Order, OrderLine } from '../../lib/types';
 import { LineDrawer } from './submit/LineDrawer';
@@ -332,16 +333,13 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     setBusy('approve');
     try {
       await flush();
-      // The page may have sat open while someone else moved the PO; a bare
-      // advance from a stale Reviewing would skip a stage.
-      const fresh = await api.get<{ order: Order }>(`/api/orders/${order.id}`);
-      if (fresh.order.lifecycle !== 'reviewing') {
-        showErrorDialog(t('bcStaleStage', { id: order.id, s: fresh.order.status }));
-        return;
-      }
-      await api.post(`/api/orders/${order.id}/advance`, { toStage: 'ready_to_pay' });
+      // The page may have sat open while someone else moved the PO; the jump
+      // is refused under the row lock unless it is still at Reviewing.
+      await api.post(`/api/orders/${order.id}/advance`, { toStage: 'ready_to_pay', fromStage: 'reviewing' });
     } catch (e) {
-      handleFetchError(e);
+      const now = readStageMoved(e);
+      if (now !== null) showErrorDialog(t('bcStaleStage', { id: order.id, s: poStageName(now, t) }));
+      else handleFetchError(e);
       return;
     } finally {
       setBusy(null);

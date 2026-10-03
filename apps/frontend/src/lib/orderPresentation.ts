@@ -90,6 +90,22 @@ export function ownerChangedLine(detail: Record<string, unknown>): string {
 
 export const LIFECYCLE_LABEL: Record<string, string> = LIFECYCLE_STATUS;
 
+const PO_STAGE_KEY: Record<string, string> = {
+  draft: 'poStageDraft',
+  in_transit: 'poStageInTransit',
+  reviewing: 'poStageReviewing',
+  ready_to_pay: 'poStageReadyToPay',
+  done: 'poStageDone',
+  sold: 'poStageSold',
+};
+
+/** A PO stage named inside a sentence, from the lifecycle slug — never from
+ *  `order.status`, which reads "Mixed" while an open order's lines disagree. */
+export function poStageName(lifecycle: string, t: Translate): string {
+  const key = PO_STAGE_KEY[lifecycle];
+  return key ? t(key) : lifecycle;
+}
+
 // Friendly labels for the fields we surface on line_edited / meta_changed
 // events and in the revert-review dialog. Anything not listed falls back to
 // the raw db column name.

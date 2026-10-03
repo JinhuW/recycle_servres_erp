@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { ApiError } from './api';
 import {
-  asksToMoveToReviewing, boxCheckEventLines, checkBody, countOf, emptyCheck, isShortChecked, lineState, matchScan, nextOpenAfter, orderLines, tally,
+  asksToMoveToReviewing, boxCheckEventLines, checkBody, countOf, emptyCheck, isShortChecked, lineState, matchScan, nextOpenAfter, orderLines, readStageMoved, tally,
   type LineCheck,
 } from './boxCheck';
 
@@ -156,5 +157,19 @@ describe('asksToMoveToReviewing', () => {
 
   it('never asks of an archived PO', () => {
     expect(asksToMoveToReviewing({ lifecycle: 'in_transit', archived: true })).toBe(false);
+  });
+});
+
+describe('readStageMoved', () => {
+  it('reads where the PO really is off the stageMoved refusal', () => {
+    const err = new ApiError(409, 'Order is now Draft', {}, { error: 'x', code: 'stageMoved', lifecycle: 'draft' });
+    expect(readStageMoved(err)).toBe('draft');
+  });
+
+  it('leaves every other failure alone', () => {
+    expect(readStageMoved(new ApiError(409, 'Say where this order came from', {}, { error: 'x' }))).toBeNull();
+    expect(readStageMoved(new ApiError(409, 'x', {}, { code: 'stageMoved' }))).toBeNull();
+    expect(readStageMoved(new ApiError(400, 'x', {}, { code: 'stageMoved', lifecycle: 'draft' }))).toBeNull();
+    expect(readStageMoved(new Error('network'))).toBeNull();
   });
 });

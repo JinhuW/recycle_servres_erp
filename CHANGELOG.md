@@ -17,6 +17,45 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.202.1] - 2026-10-02
+
+Fixes from the pre-release review of v1.201.0 → v1.202.0 (RS-159), before
+either reached prod.
+
+### Fixed
+
+- **Review mode can no longer push a Draft past its hand-off.** *Move to
+  Reviewing* on a Draft was a plain manager stage-jump, which skips the facts
+  the hand-off collects. The PO landed at Reviewing with no source, delivery,
+  tracking or payment method, which the PO page never allows. The move now asks
+  the server to hold every leave-Draft rule. A Draft missing one gets the
+  server's message, such as "Say where this order came from…", and stays where
+  it is. `POST /api/orders/:id/advance` takes `enforce: 'all'` for this. It can
+  only make the check stricter, and a manager's jump without it behaves as
+  before.
+- **A stale review-mode move or Approve can't jump the PO from where it really
+  is.** Both read the PO, then posted an absolute stage jump, so a move landing
+  in between still went through. For example, a PO just approved to Ready to
+  Pay could be sent back to Reviewing. `/advance` now takes `fromStage` and
+  checks it under the row lock. It refuses a PO that has left that stage with
+  409 `stageMoved` and the stage it is at, without writing anything. Neither
+  page reads the whole PO first any more.
+- **A refused move asks again from the real stage, and the PO list row moves
+  with it.** Before, cancelling and clicking again asked about the old stage
+  and repeated the round trip. On the PO page the stage shown updates too.
+- **The review-mode question names the stage in the reader's language.** It
+  printed `order.status`, which reads *Mixed* while an open PO's lines
+  disagree, and dropped English into the Chinese sentence. Stage names in
+  sentences now come from the lifecycle, with Chinese names (草稿, 在途, 审核中,
+  待付佣金, 已完成, 已售罄). The stale-Approve message uses them too.
+- **A phone Products landing can't fire on a later visit.** It was dropped only
+  once the shell left every PO, so reaching another PO first kept it, and the
+  first PO later opened at the bottom from a link. It is now also dropped as
+  soon as any other PO opens. The check keys on the PO shown, not the address,
+  because Back from the line form goes idle one render before its navigation
+  lands, and keying on the address would have dropped the landing on that
+  ordinary return.
+
 ## [1.202.0] - 2026-10-02
 
 The phone PO's Products screen lands where the purchaser left it after the

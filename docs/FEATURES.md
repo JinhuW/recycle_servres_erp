@@ -282,9 +282,16 @@ on to Sold once every line has sold (v1.164.0).
     **Move to Reviewing** (moves the PO, then opens), **Open without moving**,
     and **Cancel**.
     - Reviewing and later stages, and archived POs, open with no question.
-    - The move re-reads the PO, and only the stage the question named moves.
-      A PO that has since passed Reviewing just opens. One sent back to Draft
-      is asked again.
+    - The question names the stage in the reader's language, from the PO's
+      lifecycle (v1.202.1).
+    - Only the stage the question named moves. The server checks it under the
+      row lock (`fromStage`, v1.202.1). A PO that has since passed Reviewing
+      just opens. One sent back to Draft is asked again, and the list row or
+      PO page shows its real stage.
+    - Moving a Draft needs everything the hand-off would have collected:
+      source, delivery, tracking, payment method and the proof rules
+      (v1.202.1). A Draft missing one stays Draft, and the server says what is
+      missing.
     - A move the server refuses, such as the proof rules for leaving Draft,
       shows its message, and the page stays put.
   - Opening and leaving the check re-reads the PO, so neither page works from

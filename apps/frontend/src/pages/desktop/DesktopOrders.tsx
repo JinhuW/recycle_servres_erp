@@ -15,7 +15,7 @@ import { RouteLink } from '../../components/RouteLink';
 import { fmtUSD0, fmtUSD, fmtDateShort, fmt0 } from '../../lib/format';
 import { lineSpecLabel } from '../../lib/lineGroups';
 import { inTransitDetail, profitTone, trackingNote } from '../../lib/orderPresentation';
-import { statusTone, isCompleted, WORKFLOW_STAGES } from '../../lib/status';
+import { statusTone, isCompleted, LIFECYCLE_STATUS, WORKFLOW_STAGES } from '../../lib/status';
 import { categoryFilterOptions } from '../../lib/lookups';
 import type { OrderSummary, Order } from '../../lib/types';
 import { TableSkeleton } from '../../components/Skeleton';
@@ -133,7 +133,6 @@ export function DesktopOrders({ onToast }: Props) {
   // match what the backend will scope to.
   const user = useEffectiveUser();
   const isManager = user?.role === 'manager';
-  const { enter: enterReview, prompt: reviewPrompt } = useReviewModeEntry();
 
   // Persisted across the open-order → back round-trip (see lib/listMemory).
   const [filter, setFilter] = usePersisted<string>('desktop.orders.filter', 'all');
@@ -145,6 +144,13 @@ export function DesktopOrders({ onToast }: Props) {
   // to the all-stages view — same contract as the sell-order list.
   const [showDone, setShowDone] = usePersisted<boolean>('desktop.orders.showDone', false);
   const [orders, setOrders] = useState<OrderSummary[]>([]);
+  // A move that finds the PO elsewhere asks again from there; the row takes
+  // that stage too, or the next click would ask about the old one again.
+  const { enter: enterReview, prompt: reviewPrompt } = useReviewModeEntry({
+    onStale: (id, lifecycle) => setOrders(os => os.map(o => (o.id === id
+      ? { ...o, lifecycle, status: LIFECYCLE_STATUS[lifecycle] ?? o.status }
+      : o))),
+  });
   const [loadedOnce, setLoadedOnce] = useState(false);
   // True once the last page has landed (or the stream failed) — the loading
   // row, the empty state and the scroll restore all wait on it.
@@ -674,7 +680,7 @@ export function DesktopOrders({ onToast }: Props) {
                               aria-label={t('bcOpen')}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                enterReview({ id: o.id, lifecycle: o.lifecycle, archived: o.archivedAt !== null, status: o.status });
+                                enterReview({ id: o.id, lifecycle: o.lifecycle, archived: o.archivedAt !== null });
                               }}
                             >
                               <Icon name="package" size={12} />

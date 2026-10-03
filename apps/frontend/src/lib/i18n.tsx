@@ -1954,6 +1954,13 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     bcMoveMsg: "{id} is at {s}. Review mode can approve it only once it's at Reviewing.",
     bcMoveConfirm: 'Move to Reviewing',
     bcMoveSkip: 'Open without moving',
+    // A PO stage named inside a sentence (the stepper chips keep their labels).
+    poStageDraft: 'Draft',
+    poStageInTransit: 'In Transit',
+    poStageReviewing: 'Reviewing',
+    poStageReadyToPay: 'Ready to Pay',
+    poStageDone: 'Done',
+    poStageSold: 'Sold',
     bcTitle: 'Review mode',
     bcBack: 'Back to PO',
     bcKeyMove: 'move',
