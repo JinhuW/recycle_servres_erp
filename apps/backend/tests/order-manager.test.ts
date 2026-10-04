@@ -8,10 +8,12 @@ import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, SOFIA, MARCUS, type LoginResult } from './helpers/auth';
 
-const MIGRATION = readFileSync(
-  join(dirname(fileURLToPath(import.meta.url)), '../migrations/0156_order_manager.sql'),
+const migration = (file: string) => readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), '../migrations', file),
   'utf8',
 );
+const MIGRATION = migration('0156_order_manager.sql');
+const BACKFILL_PAST_REVIEW = migration('0158_order_manager_backfill_past_review.sql');
 
 const BODY = {
   paypalTxnId: 'TESTPAYTXN0000001', category: 'RAM', warehouseId: 'WH-LA1',
@@ -20,6 +22,7 @@ const BODY = {
 
 type Manager = { id: string; name: string } | null;
 type OrderBody = { lifecycle: string; manager: Manager; lines: { id: string }[] };
+type AnyEvent = { kind: string; detail: { to?: string } };
 type Event = { kind: string; detail: { fromUserId?: string | null; from?: string | null; toUserId?: string; to?: string } };
 
 async function getOrder(token: string, id: string): Promise<OrderBody> {
@@ -35,7 +38,8 @@ async function managerEvents(token: string, id: string): Promise<Event[]> {
 }
 
 async function advance(token: string, id: string, body: Record<string, unknown> = {}) {
-  return api<{ lifecycle?: string; error?: string }>('POST', `/api/orders/${id}/advance`, { token, body });
+  return api<{ lifecycle?: string; error?: string; code?: string; manager?: Manager }>(
+    'POST', `/api/orders/${id}/advance`, { token, body });
 }
 
 let marcus: LoginResult;
@@ -138,6 +142,65 @@ describe('the manager of a PO', () => {
     expect(after.manager?.id).toBe(alex.user.id);
   });
 
+  it('refuses a move from a page that saw a different manager, and moves nothing', async () => {
+    const id = await reviewedByAlex();
+
+    const r = await advance(sofia.token, id, { fromManagerId: null });
+    expect(r.status).toBe(409);
+    expect(r.body.code).toBe('managerChanged');
+    expect(r.body.manager).toEqual({ id: alex.user.id, name: expect.any(String) });
+    const after = await getOrder(sofia.token, id);
+    expect(after.lifecycle).toBe('reviewing');
+    expect(after.manager?.id).toBe(alex.user.id);
+    expect(await managerEvents(sofia.token, id)).toHaveLength(1);
+
+    expect((await advance(sofia.token, id, { fromManagerId: alex.user.id })).body.lifecycle).toBe('ready_to_pay');
+  });
+
+  it("ignores the manager a purchaser's page saw", async () => {
+    const created = await api<{ id: string }>('POST', '/api/orders', { token: marcus.token, body: BODY });
+    const id = created.body.id;
+    await getTestDb()`UPDATE orders SET manager_id = ${alex.user.id} WHERE id = ${id}`;
+
+    expect((await advance(marcus.token, id, { fromManagerId: null })).body.lifecycle).toBe('in_transit');
+  });
+
+  it.each([
+    ['demoted', { role: 'purchaser' }],
+    ['deactivated', { active: false }],
+  ])('stops being the manager once %s, and the next mover is stamped', async (_, change) => {
+    const id = await reviewedByAlex();
+    const sql = getTestDb();
+    await sql`UPDATE users SET ${sql(change)} WHERE id = ${alex.user.id}`;
+
+    expect((await getOrder(sofia.token, id)).manager).toBeNull();
+    const list = await api<{ orders: { id: string; manager: Manager }[] }>('GET', '/api/orders', { token: sofia.token });
+    expect(list.body.orders.find(o => o.id === id)?.manager).toBeNull();
+
+    // Sofia's page shows nobody, so nobody is asked about.
+    expect((await advance(sofia.token, id, { fromManagerId: null })).body.lifecycle).toBe('ready_to_pay');
+    expect((await getOrder(sofia.token, id)).manager?.id).toBe(sofia.user.id);
+    const evs = await managerEvents(sofia.token, id);
+    expect(evs).toHaveLength(2);
+    expect(evs[1].detail).toMatchObject({ fromUserId: alex.user.id, toUserId: sofia.user.id });
+    expect(evs[1].detail.from).toEqual(expect.any(String));
+  });
+
+  it('logs the takeover after the move that made it', async () => {
+    // Three POs: on a shared NOW() each pair would land in random order.
+    for (let i = 0; i < 3; i++) {
+      const id = await reviewedByAlex();
+      expect((await advance(sofia.token, id, { takeManager: true })).status).toBe(200);
+      const r = await api<{ events: AnyEvent[] }>('GET', `/api/orders/${id}/events`, { token: sofia.token });
+      const kinds = r.body.events
+        .filter(e => e.kind === 'manager_changed' || (e.kind === 'advanced' && e.detail.to !== 'in_transit'))
+        .map(e => (e.kind === 'advanced' ? `advanced:${e.detail.to}` : e.kind));
+      expect(kinds).toEqual([
+        'advanced:reviewing', 'manager_changed', 'advanced:ready_to_pay', 'manager_changed',
+      ]);
+    }
+  });
+
   it('is shown to the purchaser in the detail, the list and the activity log', async () => {
     const id = await reviewedByAlex();
 
@@ -180,5 +243,45 @@ describe('0156 — the manager from history', () => {
       SELECT id, manager_id FROM orders WHERE id IN ${sql([toSofia, toNobody])}`;
     expect(rows.find(r => r.id === toSofia)?.manager_id).toBe(sofia.user.id);
     expect(rows.find(r => r.id === toNobody)?.manager_id).toBeNull();
+  });
+});
+
+describe('0158 — the manager from moves past Reviewing', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('names the manager who last moved each PO into a managed stage, if still a manager', async () => {
+    marcus = await loginAs(MARCUS);
+    alex = await loginAs(ALEX);
+    sofia = await loginAs(SOFIA);
+    const sql = getTestDb();
+
+    // Jumped straight to Ready to Pay: 0156 found no move into Reviewing.
+    const jumped = await inTransit();
+    expect((await advance(sofia.token, jumped, { toStage: 'ready_to_pay' })).status).toBe(200);
+    // The latest managed move is by someone who isn't a manager; Alex's,
+    // before it, still names the manager.
+    const shadowed = await reviewedByAlex();
+    // Already has one: left alone.
+    const kept = await reviewedByAlex();
+    // Never moved past In Transit: nothing to name.
+    const never = await inTransit();
+
+    await sql`UPDATE orders SET manager_id = NULL WHERE id IN ${sql([jumped, shadowed, never])}`;
+    await sql`
+      INSERT INTO order_events (order_id, actor_id, kind, detail, created_at)
+      VALUES (${shadowed}, ${marcus.user.id}, 'advanced', ${sql.json({ from: 'reviewing', to: 'done' })},
+              now() + interval '1 minute'),
+             (${kept}, ${sofia.user.id}, 'advanced', ${sql.json({ from: 'reviewing', to: 'ready_to_pay' })},
+              now() + interval '1 minute')`;
+
+    await sql.unsafe(BACKFILL_PAST_REVIEW);
+
+    const rows = await sql<{ id: string; manager_id: string | null }[]>`
+      SELECT id, manager_id FROM orders WHERE id IN ${sql([jumped, shadowed, kept, never])}`;
+    const managerOf = (id: string) => rows.find(r => r.id === id)?.manager_id;
+    expect(managerOf(jumped)).toBe(sofia.user.id);
+    expect(managerOf(shadowed)).toBe(alex.user.id);
+    expect(managerOf(kept)).toBe(alex.user.id);
+    expect(managerOf(never)).toBeNull();
   });
 });

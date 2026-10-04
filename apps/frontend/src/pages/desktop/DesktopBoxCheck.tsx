@@ -8,7 +8,8 @@ import { useManagerTakeover } from '../../components/ManagerTakeoverDialog';
 import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
 import { api, rawFetch } from '../../lib/api';
 import {
-  checkBody, countOf, emptyCheck, isShortChecked, lineState, matchScan, nextOpenAfter, orderLines, readStageMoved, tally,
+  checkBody, countOf, emptyCheck, entryAnswerFor, isShortChecked, lineState, matchScan, nextOpenAfter, orderLines,
+  readStageMoved, stashEntryAnswer, tally,
   type ChecksResponse, type LineCheck,
 } from '../../lib/boxCheck';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
@@ -332,17 +333,17 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
 
   const approve = async () => {
     if (!ready) return;
-    const choice = await takeover.ask(order);
-    if (choice === null) return;
+    // Answered on the way into this visit, it isn't asked a second time.
+    const answer = entryAnswerFor(order) ?? await takeover.ask(order);
+    if (answer === null) return;
     setBusy('approve');
     try {
       await flush();
       // The page may have sat open while someone else moved the PO; the jump
       // is refused under the row lock unless it is still at Reviewing.
-      await api.post(`/api/orders/${order.id}/advance`, {
-        toStage: 'ready_to_pay', fromStage: 'reviewing',
-        ...(choice === 'take' ? { takeManager: true } : {}),
-      });
+      const moved = await takeover.advance(order, { toStage: 'ready_to_pay', fromStage: 'reviewing' }, answer);
+      if (!moved) return;
+      stashEntryAnswer(order.id, null);
     } catch (e) {
       const now = readStageMoved(e);
       if (now !== null) showErrorDialog(t('bcStaleStage', { id: order.id, s: poStageName(now, t) }));

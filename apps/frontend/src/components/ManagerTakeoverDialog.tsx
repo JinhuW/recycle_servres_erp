@@ -7,18 +7,23 @@
 import { useRef, useState, type ReactNode } from 'react';
 import { Icon } from './Icon';
 import { Modal } from './Modal';
+import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useT } from '../lib/i18n';
-import { asksManagerTakeover } from '../lib/poPermissions';
+import { asksManagerTakeover, readManagerChanged, type TakeoverAnswer } from '../lib/poPermissions';
 
-export type TakeoverChoice = 'take' | 'keep';
+type TakeoverChoice = 'take' | 'keep';
 
 type TakeoverTarget = { id: string; manager?: { id: string; name: string } | null };
 
-// `ask` resolves 'keep' at once when there is nothing to ask, null on Cancel.
-// The caller sends `takeManager: true` with its move only on 'take'.
+// `ask` resolves at once when there is nothing to ask, null on Cancel; its
+// answer rides on the move as part of the /advance body. `advance` posts that
+// move, and when the server says the order's manager has changed since the
+// page loaded, asks again about the one it named — the question a stale page
+// would otherwise never put. False when that second question is cancelled.
 export function useManagerTakeover(): {
-  ask: (o: TakeoverTarget) => Promise<TakeoverChoice | null>;
+  ask: (o: TakeoverTarget) => Promise<TakeoverAnswer | null>;
+  advance: (o: { id: string }, body: Record<string, unknown>, answer: TakeoverAnswer) => Promise<boolean>;
   asking: boolean;
   dialog: ReactNode;
 } {
@@ -36,14 +41,37 @@ export function useManagerTakeover(): {
     resolve?.(c);
   };
 
-  const ask = (o: TakeoverTarget): Promise<TakeoverChoice | null> => {
-    if (!o.manager || !asksManagerTakeover(o.manager, user)) return Promise.resolve('keep');
+  const ask = async (o: TakeoverTarget): Promise<TakeoverAnswer | null> => {
+    const fromManagerId = o.manager?.id ?? null;
+    if (!o.manager || !asksManagerTakeover(o.manager, user)) return { fromManagerId };
     const name = o.manager.name;
     resolver.current?.(null);
-    return new Promise((resolve) => {
+    const choice = await new Promise<TakeoverChoice | null>((resolve) => {
       resolver.current = resolve;
       setPending({ id: o.id, name });
     });
+    if (choice === null) return null;
+    return choice === 'take' ? { fromManagerId, takeManager: true } : { fromManagerId };
+  };
+
+  const advance = async (
+    o: { id: string }, body: Record<string, unknown>, first: TakeoverAnswer,
+  ): Promise<boolean> => {
+    const post = (a: TakeoverAnswer) => api.post(`/api/orders/${o.id}/advance`, { ...body, ...a });
+    try {
+      await post(first);
+      return true;
+    } catch (e) {
+      const manager = readManagerChanged(e);
+      if (manager === undefined) throw e;
+      const again = await ask({ id: o.id, manager });
+      if (again === null) return false;
+      // Nothing to ask about the new one (nobody, or the mover): a "make me
+      // the manager" already given still stands.
+      const take = asksManagerTakeover(manager, user) ? again.takeManager : first.takeManager;
+      await post(take ? { ...again, takeManager: true } : again);
+      return true;
+    }
   };
 
   const dialog = pending && (
@@ -71,5 +99,5 @@ export function useManagerTakeover(): {
     </Modal>
   );
 
-  return { ask, asking: pending !== null, dialog };
+  return { ask, advance, asking: pending !== null, dialog };
 }

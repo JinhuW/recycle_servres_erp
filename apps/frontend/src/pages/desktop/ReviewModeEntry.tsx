@@ -2,8 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { Icon } from '../../components/Icon';
 import { useManagerTakeover } from '../../components/ManagerTakeoverDialog';
 import { Modal } from '../../components/Modal';
-import { api } from '../../lib/api';
-import { asksToMoveToReviewing, readStageMoved } from '../../lib/boxCheck';
+import { asksToMoveToReviewing, readStageMoved, stashEntryAnswer } from '../../lib/boxCheck';
 import { handleFetchError } from '../../lib/errorToast';
 import { useT } from '../../lib/i18n';
 import { poStageName } from '../../lib/orderPresentation';
@@ -28,6 +27,8 @@ export function useReviewModeEntry(
   const takeover = useManagerTakeover();
 
   const enter = (o: ReviewTarget) => {
+    // A visit's answer is its own: one from an earlier visit asks again.
+    stashEntryAnswer(o.id, null);
     if (asksToMoveToReviewing(o)) setTarget(o);
     else navigate(poCheckPath(o.id));
   };
@@ -37,8 +38,8 @@ export function useReviewModeEntry(
   const move = async () => {
     if (!target) return;
     // Cancelling the takeover question leaves this prompt up, unmoved.
-    const choice = await takeover.ask(target);
-    if (choice === null) return;
+    const answer = await takeover.ask(target);
+    if (answer === null) return;
     setBusy(true);
     // Set when the PO turned out to be somewhere else: it is entered afresh
     // from where it really stands instead of being moved.
@@ -50,10 +51,10 @@ export function useReviewModeEntry(
       // row lock, anything but the stage the manager was shown. Review mode
       // collects none of the hand-off's facts, so a Draft it jumps past In
       // Transit must carry them already (`enforce`).
-      await api.post(`/api/orders/${target.id}/advance`, {
+      const moved = await takeover.advance(target, {
         toStage: 'reviewing', fromStage: target.lifecycle, enforce: 'all',
-        ...(choice === 'take' ? { takeManager: true } : {}),
-      });
+      }, answer);
+      if (!moved) { setBusy(false); return; }
     } catch (e) {
       elsewhere = readStageMoved(e);
       if (elsewhere === null) {
@@ -69,6 +70,8 @@ export function useReviewModeEntry(
       opts.onStale?.(target.id, elsewhere);
       enter({ ...target, lifecycle: elsewhere, archived: false });
     } else {
+      // Approve asks the same question; answered here, it isn't asked twice.
+      stashEntryAnswer(target.id, answer);
       navigate(poCheckPath(target.id));
     }
   };

@@ -25,8 +25,8 @@ import { handleFetchError, showErrorDialog } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
 import { profitTone } from '../lib/orderPresentation';
 import { isPricedSellPrice } from '@recycle-erp/shared';
-import { derivePoPermissions } from '../lib/poPermissions';
-import { poEffectiveCost, parseFeeInput, readStoredGoodsTotal } from '../lib/poTotals';
+import { derivePoPermissions, type TakeoverAnswer } from '../lib/poPermissions';
+import { poEffectiveCost, parseFeeInput, rateEq, readStoredGoodsTotal } from '../lib/poTotals';
 import type { HandoffDelivery, HandoffMethod } from '../lib/handoff';
 import { NEED_SHORT_KEY, poReadiness } from '../lib/poReadiness';
 import { resolveTracking } from '../lib/useTrackingInput';
@@ -232,7 +232,7 @@ export function OrderDetail({
   // The mover's answer to the takeover question, carried through the
   // commission sheet or the Done dialog to the move it confirms. Cleared when
   // either closes, so it never rides on a later move.
-  const [takeManager, setTakeManager] = useState(false);
+  const [takeoverAnswer, setTakeoverAnswer] = useState<TakeoverAnswer | null>(null);
   const [activityRefreshKey, setActivityRefreshKey] = useState(0);
   const [showDelete, setShowDelete] = useState(false);
   const [typedId, setTypedId] = useState('');
@@ -342,12 +342,13 @@ export function OrderDetail({
   const trackingIncomplete = trackingDirty && (!tracking.valid || !tracking.carrier);
   const facts = sourceDirty || deliveryDirty || byUserDirty || trackingDirty;
   // Manager-only fields; a purchaser's copy never counts as a change. A
-  // blank rate and a saved null are the same thing, as on the desktop page.
+  // blank rate and a saved null are the same thing, as on the desktop page,
+  // and the rate is compared in basis points as there too.
   const ownerDirty = !isPurchaser && ownerId !== order.userId;
   const parsedPct = commissionPct.trim() === '' ? null : Number(commissionPct);
   const commissionRateValue = parsedPct === null || !Number.isFinite(parsedPct) ? null : parsedPct / 100;
   const commissionDirty = !isPurchaser && (parsedPct === null || Number.isFinite(parsedPct))
-    && (commissionRateValue ?? 0) !== (order.commissionRate ?? 0);
+    && !rateEq(commissionRateValue ?? 0, order.commissionRate ?? 0);
   const commission = ownerDirty || commissionDirty;
   const dirty = notesDirty || warehouseDirty || paymentDirty || methodDirty || paypalDirty || feesDirty || facts || commission;
   // The order and its products screen are one instance, so moving between
@@ -487,17 +488,18 @@ export function OrderDetail({
   })();
   const canAdvance = !!nextStatus && !advancing && !saving;
 
-  const doAdvance = async (take: boolean) => {
+  const doAdvance = async (answer: TakeoverAnswer) => {
     setAdvancing(true);
     try {
-      await api.post(`/api/orders/${order.id}/advance`, take ? { takeManager: true } : {});
-      await refetchOrder();
-      setActivityRefreshKey(k => k + 1);
+      if (await takeover.advance(order, {}, answer)) {
+        await refetchOrder();
+        setActivityRefreshKey(k => k + 1);
+      }
     } catch (e) {
       showErrorDialog(e instanceof Error ? e.message : t('advanceFailed'));
     } finally {
       setAdvancing(false);
-      setTakeManager(false);
+      setTakeoverAnswer(null);
     }
   };
 
@@ -534,22 +536,23 @@ export function OrderDetail({
     if (unsaved) { showErrorDialog(t('phSaveFirst')); return; }
     // Asked before the sheets, so the manager knows whose order it is before
     // confirming anything on it.
-    const choice = await takeover.ask(order);
-    if (choice === null) return;
-    const take = choice === 'take';
+    const answer = await takeover.ask(order);
+    if (answer === null) return;
     // Ready to Pay fixes the commission, so the manager confirms it on the
     // way in — the sheet saves the fields and then advances.
-    if (nextStatus === 'Ready to Pay') { setTakeManager(take); setCommissionOpen(true); return; }
+    if (nextStatus === 'Ready to Pay') { setTakeoverAnswer(answer); setCommissionOpen(true); return; }
     // Done asks for the commission screenshot first — unless one is already
     // on file, in which case the move is as plain as any other. Confirming in
     // the dialog fires the actual advance.
-    if (nextStatus === 'Done' && proof.commissionAtts.length === 0) { setTakeManager(take); setDoneDialogOpen(true); return; }
-    await doAdvance(take);
+    if (nextStatus === 'Done' && proof.commissionAtts.length === 0) { setTakeoverAnswer(answer); setDoneDialogOpen(true); return; }
+    await doAdvance(answer);
   };
 
   // The commission sheet's Confirm: write the fields if they changed, then
   // move the stage. A failed write leaves the sheet up with the error.
   const confirmCommission = async () => {
+    // Set whenever the sheet is open: it is only opened after the question.
+    if (!takeoverAnswer) return;
     setAdvancing(true);
     try {
       if (commission) {
@@ -558,9 +561,10 @@ export function OrderDetail({
           commissionRate: commissionDirty ? commissionRateValue : undefined,
         });
       }
-      await api.post(`/api/orders/${order.id}/advance`, takeManager ? { takeManager: true } : {});
+      // A second question cancelled leaves the sheet up; its fields are saved.
+      if (!(await takeover.advance(order, {}, takeoverAnswer))) return;
       setCommissionOpen(false);
-      setTakeManager(false);
+      setTakeoverAnswer(null);
       await refetchOrder();
       setActivityRefreshKey(k => k + 1);
     } catch (e) {
@@ -1795,7 +1799,7 @@ export function OrderDetail({
           deliverySummary={deliverySummary}
           paymentSummary={paymentSummary}
           busy={advancing}
-          onClose={() => { setCommissionOpen(false); setTakeManager(false); }}
+          onClose={() => { setCommissionOpen(false); setTakeoverAnswer(null); }}
           onConfirm={() => void confirmCommission()}
         />
       )}
@@ -1811,8 +1815,12 @@ export function OrderDetail({
           variant="purchase"
           // The note live-saves inside the dialog, so a cancel still needs a
           // refetch for the read-only block to reflect it.
-          onCancel={() => { setDoneDialogOpen(false); setTakeManager(false); refetchOrder(); }}
-          onConfirm={async () => { setDoneDialogOpen(false); await doAdvance(takeManager); }}
+          onCancel={() => { setDoneDialogOpen(false); setTakeoverAnswer(null); refetchOrder(); }}
+          onConfirm={async () => {
+            setDoneDialogOpen(false);
+            // Set whenever the dialog is open: it is only opened after the question.
+            if (takeoverAnswer) await doAdvance(takeoverAnswer);
+          }}
           onMutated={() => setActivityRefreshKey(k => k + 1)}
         />
       )}

@@ -33,7 +33,7 @@ detailRoutes.get('/:id', async (c) => {
            o.paypal_txn_id,
            o.source, o.handoff_method, o.handoff_by, o.payment_method,
            hb.name AS handoff_by_name,
-           o.manager_id, mg.name AS manager_name,
+           mg.id AS manager_id, mg.name AS manager_name,
            o.supplier_id, sup.name AS supplier_name,
            o.commission_rate::float AS commission_rate,
            u.name AS user_name, u.initials AS user_initials,
@@ -44,7 +44,9 @@ detailRoutes.get('/:id', async (c) => {
     FROM orders o
     JOIN users u ON u.id = o.user_id
     LEFT JOIN users hb ON hb.id = o.handoff_by
-    LEFT JOIN users mg ON mg.id = o.manager_id
+    -- Only while still an active manager: the advance reads it the same way,
+    -- so the client asks about exactly the manager the server would keep.
+    LEFT JOIN users mg ON mg.id = o.manager_id AND mg.role = 'manager' AND mg.active
     LEFT JOIN warehouses w ON w.id = o.warehouse_id
     LEFT JOIN suppliers sup ON sup.id = o.supplier_id
                           AND (${isManager} OR sup.owner_id IS NULL

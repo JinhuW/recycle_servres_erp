@@ -312,7 +312,8 @@ lifecycleRoutes.post('/:id/advance', async (c) => {
   const id = c.req.param('id');
   const sql = getDb(c.env);
   const body = (await c.req.json().catch(() => null)) as
-    { toStage?: string; fromStage?: unknown; enforce?: unknown; takeManager?: unknown } | null;
+    { toStage?: string; fromStage?: unknown; enforce?: unknown; takeManager?: unknown;
+      fromManagerId?: unknown } | null;
 
   // Only a live Draft meets the guard, so only one is worth a pull — the tx
   // refuses an archived order before it reads the id.
@@ -336,6 +337,9 @@ lifecycleRoutes.post('/:id/advance', async (c) => {
       enforce: body?.enforce === 'all' ? 'all' : 'rules',
       fromStage: typeof body?.fromStage === 'string' ? body.fromStage : undefined,
       takeManager: body?.takeManager === true,
+      // null is an answer ("I saw none"); absent asks for no check.
+      fromManagerId: typeof body?.fromManagerId === 'string' || body?.fromManagerId === null
+        ? body.fromManagerId : undefined,
     }));
 
   if (outcome.kind !== 'ok') return advanceRefusedResponse(c, outcome, pullError);
@@ -373,6 +377,14 @@ function advanceRefusedResponse(
         lifecycle: seen,
       }, 409);
     }
+    case 'managerChanged':
+      return c.json({
+        error: outcome.manager
+          ? `${outcome.manager.name} is now the manager of this order — reload to see it.`
+          : 'This order no longer has a manager — reload to see it.',
+        code: 'managerChanged',
+        manager: outcome.manager,
+      }, 409);
     case 'committedLines':
       return c.json(committedLinesBody(c.var.user, outcome.offendingLineIds, outcome.sellOrderIds,
         `Lines committed to ${describeSellOrders(outcome.sellOrderIds)} — cancel those sell orders first.`,
