@@ -47,6 +47,7 @@ html.desktop, body.desktop, .desktop #root {
   height: 100vh;
   overflow-y: auto;
   z-index: 5;
+  container: sidebar / inline-size;
 }
 .sidebar .brand {
   display: flex; align-items: center; gap: 10px;
@@ -54,6 +55,10 @@ html.desktop, body.desktop, .desktop #root {
 }
 .brand-name { font-weight: 600; letter-spacing: -0.01em; font-size: 14px; }
 .brand-sub  { font-size: 11px; color: var(--fg-subtle); }
+/* The fold toggle shares the brand row, leaving ~117px for the name. */
+.sidebar .brand-name,
+.sidebar .brand-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sidebar .sidebar-toggle { flex-shrink: 0; }
 
 .nav-section {
   font-size: 11px; color: var(--fg-subtle);
@@ -890,16 +895,29 @@ html.desktop, body.desktop, .desktop #root {
 .tab.active { color: var(--fg); border-bottom-color: var(--accent); }
 .tab:hover  { color: var(--fg); }
 
-/* ===== Narrow-window collapse =====
+/* ===== Sidebar icon rail =====
    The sidebar folds to a 64px icon rail rather than vanishing: below 900px the
    old rule hid it outright, and the desktop shell runs down to 720px, so a
-   split-screen window had no way to leave the page it was on. Labels hide by
-   CSS only, so the buttons keep their text for assistive tech and their
-   `title` names them on hover. */
+   split-screen window had no way to leave the page it was on. The user can
+   also fold it at any width (`.sidebar-folded`, a saved preference).
+
+   Two triggers, one look: each only narrows the track (and the sidebar's own
+   padding, which a container query can't reach); the rail styling keys off
+   the sidebar's width in the @container block, so the two can't drift. Under
+   900px the rail is forced, so the toggle hides rather than offer an Expand
+   that does nothing. Names show on hover via `title`, and the links carry an
+   aria-label because display:none drops the label for assistive tech too. */
 @media (max-width: 900px) {
   .app { grid-template-columns: 64px minmax(0, 1fr); }
   .sidebar { padding: 14px 8px; }
-  .sidebar .brand { padding: 4px 0 12px; justify-content: center; }
+  .sidebar .sidebar-toggle { display: none; }
+  .kpi-grid { grid-template-columns: 1fr 1fr; }
+  .grid-2, .grid-3 { grid-template-columns: 1fr; }
+}
+.app.sidebar-folded { grid-template-columns: 64px minmax(0, 1fr); }
+.app.sidebar-folded .sidebar { padding: 14px 8px; }
+@container sidebar (max-width: 120px) {
+  .sidebar .brand { flex-direction: column; gap: 8px; padding: 4px 0 12px; justify-content: center; }
   .sidebar .brand > div:not(.brand-mark),
   .sidebar .nav-section,
   .sidebar .nav-item > span:not(.badge),
@@ -909,8 +927,6 @@ html.desktop, body.desktop, .desktop #root {
   .sidebar .nav-item .nav-icon { width: 18px; height: 18px; }
   .sidebar .nav-group + .nav-group { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
   .sidebar .sidebar-foot { flex-direction: column; gap: 8px; padding: 12px 0; }
-  .kpi-grid { grid-template-columns: 1fr 1fr; }
-  .grid-2, .grid-3 { grid-template-columns: 1fr; }
 }
 
 /* ===== Warehouse filter pills (Inventory) ===== */

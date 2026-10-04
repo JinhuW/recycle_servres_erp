@@ -1511,6 +1511,11 @@ removed in v1.191.0.
   64px icon rail** (v1.134.0) — brand mark, nav icons with their names on
   hover, avatar and sign-out — where it used to disappear and leave a
   split-screen window with no navigation at all.
+  **At any width the user can fold it to the same rail** with the toggle in
+  the brand row (v1.208.0). It is a per-user preference (`sidebar.folded`), so
+  it follows the user across reloads and devices. Under 900px the rail is
+  forced and the toggle hidden. In the rail every link keeps its name for
+  screen readers.
 - **The sidebar has a second level** (v1.207.0). A parent entry opens while
   you are on one of its pages and is one row with a › caret everywhere else;
   clicking it opens its first child. The one parent today is **Oversight ▸

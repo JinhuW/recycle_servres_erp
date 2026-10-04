@@ -10,6 +10,10 @@ export type DesktopView = DesktopViewId;
 
 type Props = {
   view: DesktopView;
+  // Folded = the icon rail at any width. Under 900px the rail is forced by
+  // CSS and the toggle is hidden, whatever this says.
+  folded: boolean;
+  onToggleFold: () => void;
 };
 
 // Nav items are real anchors so ⌘-click / middle-click open a tab; a plain
@@ -29,6 +33,9 @@ function NavLink({ view, className, label, icon, current, children }: {
       href={hrefFor(path)}
       onClick={onLinkClick(path)}
       aria-current={current ? 'page' : undefined}
+      // The rail hides the label with display:none, which takes it out of
+      // the accessibility tree too.
+      aria-label={label}
       title={label}
     >
       <Icon name={icon} size={15} className="nav-icon" />
@@ -54,11 +61,12 @@ function LeafLink({ item, sub }: { item: ShownLeaf; sub?: boolean }) {
   );
 }
 
-export function Sidebar({ view }: Props) {
+export function Sidebar({ view, folded, onToggleFold }: Props) {
   const { t } = useT();
   const { logout } = useAuth();
   const user = useEffectiveUser();
   if (!user) return null;
+  const foldLabel = folded ? t('sidebarExpand') : t('sidebarCollapse');
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -67,6 +75,16 @@ export function Sidebar({ view }: Props) {
           <div className="brand-name">{t('appBrand')}</div>
           <div className="brand-sub">{t('brandSub')}</div>
         </div>
+        <button
+          type="button"
+          className="btn ghost icon sm sidebar-toggle"
+          onClick={onToggleFold}
+          aria-expanded={!folded}
+          aria-label={foldLabel}
+          title={foldLabel}
+        >
+          <Icon name={folded ? 'chevronRight' : 'chevronLeft'} size={14} />
+        </button>
       </div>
 
       {shownNav(user.role, view).map(group => (

@@ -36,6 +36,7 @@ const SCHEMA: Record<string, Validator> = {
   // re-issued per session, labels aren't.
   'scan.cameraLabel':         isShortString,
   'sellOrders.lineGroup':     isOneOf('warehouse', 'po'),
+  'sidebar.folded':           isBoolean,
 };
 
 export type PreferencePatchResult =

@@ -174,6 +174,8 @@ const zh: Record<string, string> = {
   nav_transfers: '调拨',
   nav_analysis: '分析',
   nav_group_oversight: '监督',
+  sidebarCollapse: '收起侧边栏',
+  sidebarExpand: '展开侧边栏',
   nav_activity: '操作记录',
   nav_monitors: '监控',
 

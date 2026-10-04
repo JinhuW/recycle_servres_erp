@@ -313,6 +313,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     nav_activity: 'Activity',
     nav_payments: 'Payments',
     nav_monitors: 'Monitors',
+    sidebarCollapse: 'Collapse sidebar',
+    sidebarExpand: 'Expand sidebar',
 
     // ── Payments — bank-transaction reconciliation against POs ──
     payTitle: 'Payments',
