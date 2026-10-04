@@ -2,13 +2,13 @@
 id: RS-161
 title: Reply to web submissions by email from inside the ERP, and see the customer's replies there
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-04
 reporter: jinhu
 branch: feat/ws-email-thread
-pr:
-version:
+pr: "#486"
+version: 1.209.0
 related: []
 ---
 
@@ -43,25 +43,25 @@ Decisions taken with the requester before planning:
 
 ## Acceptance criteria
 
-- [ ] A manager can write a reply on a WS page. It is sent from the shared
+- [x] A manager can write a reply on a WS page. It is sent from the shared
       mailbox to the submission's email and shown in a Conversation thread
       with its status: sending, sent, failed or not confirmed.
-- [ ] The first sent reply moves a `new` submission to `contacted`. Every send
+- [x] The first sent reply moves a `new` submission to `contacted`. Every send
       stamps `handled_by` and `updated_at`.
-- [ ] Customer replies are pulled from the Lark INBOX about every 2 minutes and
+- [x] Customer replies are pulled from the Lark INBOX about every 2 minutes and
       appear in the thread. The pull is read-only, so Lark's read state is
       untouched.
-- [ ] A reply is matched to a submission only when its `In-Reply-To` or
+- [x] A reply is matched to a submission only when its `In-Reply-To` or
       `References` names a message the ERP sent. A WS id in the subject is
       not enough. Anything else, including mail whose From names several
       addresses, stays in Lark only.
-- [ ] Every inbound message shows its raw sender address. A warning appears
+- [x] Every inbound message shows its raw sender address. A warning appears
       when that address isn't the submission's or Lark's DMARC check failed.
-- [ ] Attachments on a reply are listed by name with "open in Lark mail".
+- [x] Attachments on a reply are listed by name with "open in Lark mail".
       Inline signature images aren't counted.
-- [ ] Managers get an in-app notification for each reply, except on `spam`
+- [x] Managers get an in-app notification for each reply, except on `spam`
       submissions.
-- [ ] Mail stays dark until `MAIL_USER` and `MAIL_PASSWORD` are set. Until
+- [x] Mail stays dark until `MAIL_USER` and `MAIL_PASSWORD` are set. Until
       then the page keeps the mailto link, and `/api/health` reports
       `providers.mail`.
 
