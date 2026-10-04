@@ -17,6 +17,30 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.208.0] - 2026-10-04
+
+The desktop sidebar folds to its icon rail on demand (RS-166).
+
+### Added
+
+- **A fold toggle in the sidebar's brand row** collapses the desktop sidebar
+  to the 64px icon rail at any window width, and expands it again. Until now
+  the rail only appeared on its own under 900px, so on a normal window there
+  was no way to give the ~176px back to wide tables like the PO list and
+  inventory. The choice is a per-user preference (`sidebar.folded`), so it
+  survives a reload and follows you to another device. Under 900px the rail
+  is still forced and the toggle is hidden, so it never offers an Expand that
+  does nothing.
+
+### Changed
+
+- **The rail styling now has one source.** It moved out of the 900px media
+  query into an `@container sidebar` query on the sidebar's own width. The
+  viewport rule and the user's fold each only narrow the track, so the two
+  can't drift apart.
+- **Sidebar links carry an `aria-label`.** The rail hides labels with
+  `display: none`, which also hid them from screen readers, so Submit read as
+  "+". Each link now announces its name in the rail as well.
 ## [1.207.0] - 2026-10-04
 
 The desktop sidebar gets a second level, and the two listing monitors move

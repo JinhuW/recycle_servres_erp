@@ -6,6 +6,7 @@ import { RolePreviewBanner } from './components/RolePreviewBanner';
 import { TweaksPanel } from './components/TweaksPanel';
 import { useAuth } from './lib/auth';
 import { useT } from './lib/i18n';
+import { usePreference } from './lib/preferences';
 import { useEffectiveUser } from './lib/tweaks';
 import {
   useRoute, match, matchPurchaseOrder, matchPoCheck, navigate, parseShippingRoute,
@@ -57,6 +58,7 @@ export function DesktopApp() {
   const { current: errorDialog, push: pushErrorDialog, dismiss: dismissErrorDialog } = useErrorDialogQueue();
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [loadingOrderId, setLoadingOrderId] = useState<string | null>(null);
+  const [sidebarFolded, setSidebarFolded] = usePreference('sidebar.folded', false);
   // Bumped when the edit page asks to be re-read in place (after a stage
   // move). It keys the page, so the fresh order reseeds every field instead
   // of the page reconciling itself against props it never watched.
@@ -237,8 +239,10 @@ export function DesktopApp() {
       : <DesktopOrders onToast={(m) => showToast(m)} />;
 
   return (
-    <div className={'app' + (boxCheck ? ' app-focus' : '')}>
-      {!boxCheck && <Sidebar view={view2} />}
+    <div className={'app' + (boxCheck ? ' app-focus' : sidebarFolded ? ' sidebar-folded' : '')}>
+      {!boxCheck && (
+        <Sidebar view={view2} folded={sidebarFolded} onToggleFold={() => setSidebarFolded(!sidebarFolded)} />
+      )}
       <main className="main">
         {!boxCheck && <Topbar />}
         {!boxCheck && <RolePreviewBanner />}
