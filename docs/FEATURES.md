@@ -285,22 +285,32 @@ on to Sold once every line has sold (v1.164.0).
     - **Cancel** moves nothing.
   - **Where it asks.** Every door that moves a PO asks the same way:
     - the desktop PO page's Save
-    - Review mode's *Move to Reviewing* and *Approve for payment*
+    - Review mode's *Move to Reviewing* and *Approve for payment*. One
+      review-mode visit asks once: *Keep ‹X›* given on the way in carries to
+      Approve while X is still the manager (v1.203.2).
     - the phone's next-step button, whose answer rides through the Ready to
       Pay and Done sheets
+  - **A page that is out of date still asks the right question** (v1.203.2).
+    Each move sends the manager the page showed. If another manager has taken
+    the PO since, the server refuses the move, the page asks about the
+    manager it named, and then moves.
   - **Where it doesn't ask.** The hand-off (Draft → In Transit) and the
     automatic Done → Sold settle never ask.
   - **It sticks.** The manager stays through a send-back to Draft, so a
     re-submission returns to the same manager. It changes only through a
     takeover; there is no picker.
+  - **Only while still a manager** (v1.203.2). A user who is demoted or
+    deactivated stops counting. Their POs read as having no manager, and the
+    next manager move stamps the mover without asking.
   - **Who sees it.** Everyone, purchasers included. It shows as *Manager
     ‹name›* in the desktop PO header and in the phone Order status card.
   - **The record.** Each set or takeover is a *Manager changed* entry in the
-    activity log.
+    activity log, right after the move that made it.
   - **Existing POs** were filled in from history: each got the manager who
-    last moved it into Reviewing. POs a manager jumped straight from Draft
-    have no such record, so they start empty and fill in on their next
-    manager move.
+    last moved it into Reviewing or, failing that (v1.203.2), into Ready to
+    Pay or Done. Only users who are still managers count. POs a manager
+    jumped straight from Draft have no such record, so they start empty and
+    fill in on their next manager move.
 - **Review mode: a manager counts a PO against the box that arrived** (v1.188.0,
   desktop only; called *Box check* until v1.189.2). **Review mode** in the PO
   page header, primary at Reviewing and present at every stage, opens `#/purchase-orders/<id>/check`: a full-width

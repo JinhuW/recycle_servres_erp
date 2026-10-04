@@ -17,6 +17,50 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.203.2] - 2026-10-04
+
+Pre-release review fixes for v1.203.0–v1.203.1 (RS-163). A `/code-review
+high` of dev against main found nine issues in the PO manager (RS-160) and the
+Save fix (RS-162). Eight are fixed here. The ninth, the hand-off not asking
+the takeover question, stays as RS-160 decided.
+
+### Fixed
+
+- **The phone PO page no longer opens dirty at rates like 0.35%.** v1.203.1
+  moved the desktop page's commission compare to basis points, but the phone
+  still compared floats after the `toFixed(2)` percent round trip. On such a
+  PO every next-step asked to save first, and saving changed nothing, so a
+  manager could not move it from the phone. Both pages now share one compare,
+  `rateEq`.
+- **A former manager stops being a PO's manager.** Once the user who managed
+  a PO is demoted or deactivated, the PO reads as having no manager, on the
+  page and in the list. The next manager to move it into Reviewing or past is
+  stamped without a question, and the activity log names who it came from.
+  Before this, the former manager stayed on every PO they held, and every move
+  asked about them.
+- **A page that is out of date asks the right takeover question.** Whether to
+  ask was decided from the page's own copy of the PO. A list row or PO page
+  loaded before another manager took the PO into review asked nothing, sent
+  nothing, and left the PO with that manager. Each move now sends the manager
+  it showed (`fromManagerId`), and the server refuses one that no longer
+  matches with a 409 `managerChanged`, checked under the row lock. The page
+  then asks about the manager the server named and makes the move. Cancelling
+  moves nothing.
+- **"Became the manager" always follows the move that made it.** Both events
+  were stamped with the transaction's `NOW()` and tie-broken on a random id,
+  so the activity log showed them in either order. The manager event is now
+  written after the move's own event, at `clock_timestamp()`.
+- **POs a manager jumped past Reviewing get their manager back.** The 0156
+  backfill only read moves into Reviewing. Migration 0158 also reads moves into
+  Ready to Pay and Done, for POs that still have no manager. It takes the
+  latest such move by a user who is still an active manager.
+- **Review mode asks about the manager once per visit.** A *Keep ‹X›* given
+  on *Move to Reviewing* now carries to *Approve for payment*, even after a
+  line edit reloads the page. It holds only while X is still the manager.
+- The move's row lock now also reads the manager's name, so the extra lookup
+  a takeover made is gone. One hook owns the takeover answer and the
+  `/advance` post, replacing four hand-built `takeManager` bodies.
+
 ## [1.203.1] - 2026-10-04
 
 The desktop PO page's Save greys out when there is nothing to save (RS-162).

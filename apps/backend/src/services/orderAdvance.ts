@@ -110,6 +110,7 @@ export type AdvanceOutcome =
   | { kind: 'alreadySold' }
   | { kind: 'sameStage'; lifecycle: string }
   | { kind: 'stageMoved'; lifecycle: string }
+  | { kind: 'managerChanged'; manager: { id: string; name: string } | null }
   | { kind: 'committedLines'; offendingLineIds: string[]; sellOrderIds: string[] }
   | { kind: 'transferClaimed'; offendingLineIds: string[] }
   | LeaveDraftBlocker
@@ -128,7 +129,16 @@ export type AdvanceOutcome =
 // `takeManager` is the mover's answer to "make yourself the manager?", asked
 // only when the order already has a different one. Without it a manager who
 // moves an order into review with nobody on it becomes its manager anyway.
-export type AdvanceOptions = { enforce?: 'rules' | 'all'; fromStage?: string; takeManager?: boolean };
+//
+// `fromManagerId` is the manager the caller saw (null: none). The question is
+// decided on the client from that copy, so a page loaded before another
+// manager took the order would move it without ever asking.
+export type AdvanceOptions = {
+  enforce?: 'rules' | 'all';
+  fromStage?: string;
+  takeManager?: boolean;
+  fromManagerId?: string | null;
+};
 
 // Moving an order into any of these makes the mover its manager when it has
 // none — Reviewing, and the stages a manager can jump to past it.
@@ -424,23 +434,26 @@ export async function unarchiveOrderLinesTx(
 }
 
 // Names are snapshotted into the event, like owner_changed, because the
-// timeline renders without joining users.
+// timeline renders without joining users. Stamped clock_timestamp(), after
+// the move's own event: on the transaction's NOW() the two tie and sort by a
+// random id, so "became the manager" could precede the move that made it.
 async function setOrderManagerTx(
   tx: SqlLike,
   id: string,
   actor: AdvanceActor,
-  fromUserId: string | null,
+  from: { id: string; name: string | null } | null,
 ): Promise<void> {
-  const prev = fromUserId === null ? undefined : (await tx`
-    SELECT name FROM users WHERE id = ${fromUserId} LIMIT 1
-  `)[0] as { name: string } | undefined;
   await tx`UPDATE orders SET manager_id = ${actor.id} WHERE id = ${id}`;
-  await writeOrderEvent(tx, id, actor.id, 'manager_changed', {
-    fromUserId,
-    from: prev?.name ?? null,
+  const detail = {
+    fromUserId: from?.id ?? null,
+    from: from?.name ?? null,
     toUserId: actor.id,
     to: actor.name,
-  });
+  };
+  await tx`
+    INSERT INTO order_events (order_id, actor_id, kind, detail, created_at)
+    VALUES (${id}, ${actor.id}, 'manager_changed', ${tx.json(detail as never)}, clock_timestamp())
+  `;
 }
 
 export async function advanceOrderTx(
@@ -456,13 +469,17 @@ export async function advanceOrderTx(
     SELECT id, user_id, lifecycle, payment, payment_method, paypal_txn_id, created_at,
            archived_at, total_cost::float AS total_cost,
            warehouse_id, source, handoff_method, handoff_by, manager_id,
+           (SELECT u.name FROM users u WHERE u.id = orders.manager_id) AS manager_name,
+           EXISTS (SELECT 1 FROM users u WHERE u.id = orders.manager_id
+                   AND u.role = 'manager' AND u.active) AS manager_live,
            EXISTS (SELECT 1 FROM packages p WHERE p.order_id = orders.id) AS has_package
     FROM orders WHERE id = ${id} LIMIT 1 FOR NO KEY UPDATE`)[0] as
     | { id: string; user_id: string; lifecycle: string; payment: string;
         payment_method: string | null; paypal_txn_id: string | null; created_at: Date;
         archived_at: Date | null; total_cost: number | null; warehouse_id: string | null;
         source: string | null; handoff_method: string | null; handoff_by: string | null;
-        manager_id: string | null; has_package: boolean }
+        manager_id: string | null; manager_name: string | null; manager_live: boolean;
+        has_package: boolean }
     | undefined;
   if (!cur) return { kind: 'notFound' };
   // The lines sit at 'Archived'; a cascade here would put them back in stock
@@ -470,6 +487,18 @@ export async function advanceOrderTx(
   if (cur.archived_at) return { kind: 'archived' };
   if (opts.fromStage !== undefined && cur.lifecycle !== opts.fromStage) {
     return { kind: 'stageMoved', lifecycle: cur.lifecycle };
+  }
+  // A user demoted or deactivated since stops being the order's manager, the
+  // same view GET gives: nobody is asked about them, and the next managed
+  // move is stamped as if the order had none.
+  const liveManager = cur.manager_live ? cur.manager_id : null;
+  // Only a manager is ever asked, so only a manager's move turns on the answer.
+  if (actor.role === 'manager' && opts.fromManagerId !== undefined
+      && opts.fromManagerId !== liveManager) {
+    return {
+      kind: 'managerChanged',
+      manager: liveManager ? { id: liveManager, name: cur.manager_name ?? '' } : null,
+    };
   }
 
   const curIdx = stages.indexOf(stageOf(cur.lifecycle));
@@ -523,13 +552,6 @@ export async function advanceOrderTx(
   }
   await tx`UPDATE orders SET lifecycle = ${nextStageId} WHERE id = ${id}`;
 
-  if (
-    actor.role === 'manager' && cur.manager_id !== actor.id
-    && (opts.takeManager || (cur.manager_id === null && MANAGED_STAGES.has(nextStageId)))
-  ) {
-    await setOrderManagerTx(tx, id, actor, cur.manager_id);
-  }
-
   // PO-level audit: leaving Draft is the "submitted" baseline (snapshot of
   // lineCount + totalCost); every subsequent advance is an `advanced` event
   // with from/to. A manager stage-jump out of Draft counts — the order has
@@ -552,6 +574,13 @@ export async function advanceOrderTx(
       from: cur.lifecycle,
       to: nextStageId,
     });
+  }
+  if (
+    actor.role === 'manager' && liveManager !== actor.id
+    && (opts.takeManager || (liveManager === null && MANAGED_STAGES.has(nextStageId)))
+  ) {
+    await setOrderManagerTx(tx, id, actor,
+      cur.manager_id ? { id: cur.manager_id, name: cur.manager_name } : null);
   }
   if (newLineStatus) {
     await cascadeLineStatusesTx(tx, id, actor.id, newLineStatus);

@@ -1,9 +1,11 @@
 import { canonicalPartNumber, parseSerials } from '@recycle-erp/shared';
 import { ApiError } from './api';
 import type { Translate } from './orderPresentation';
+import type { TakeoverAnswer } from './poPermissions';
 
 // Box check: a manager counting a PO's lines against the box that arrived.
-// Pure — the page owns the state, this decides what it means.
+// Pure — the page owns the state, this decides what it means. (One exception,
+// the entry's takeover answer, which has to outlive the page.)
 
 export const BOX_CHECK_REASONS = ['missing', 'short', 'wrong_part', 'damaged', 'not_as_described'] as const;
 export type BoxCheckReason = typeof BOX_CHECK_REASONS[number];
@@ -33,6 +35,23 @@ export type LineCheckState = 'open' | 'partial' | 'done';
 // reopen its closed book — and an archived PO can't move at all.
 export function asksToMoveToReviewing(o: { lifecycle: string; archived: boolean }): boolean {
   return !o.archived && (o.lifecycle === 'draft' || o.lifecycle === 'in_transit');
+}
+
+// The takeover answer given on the way into review mode, held for that
+// visit's Approve: one review, one question. A module value because the page
+// remounts on every line save in its drawer. Set or cleared by every entry,
+// and it only stands while the manager is still the one it answered about.
+let entryAnswer: { orderId: string; answer: TakeoverAnswer } | null = null;
+
+export function stashEntryAnswer(orderId: string, answer: TakeoverAnswer | null): void {
+  entryAnswer = answer ? { orderId, answer } : null;
+}
+
+export function entryAnswerFor(
+  o: { id: string; manager?: { id: string } | null },
+): TakeoverAnswer | null {
+  if (entryAnswer?.orderId !== o.id) return null;
+  return entryAnswer.answer.fromManagerId === (o.manager?.id ?? null) ? entryAnswer.answer : null;
 }
 
 // Review mode's moves name the stage they saw (`fromStage`); the server refuses

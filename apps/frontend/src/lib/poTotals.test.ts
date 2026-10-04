@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { poEffectiveCost, parseFeeInput, feeEq, readStoredGoodsTotal } from './poTotals';
+import { poEffectiveCost, parseFeeInput, feeEq, rateEq, readStoredGoodsTotal } from './poTotals';
 
 describe('poEffectiveCost', () => {
   it('uses the line subtotal when there is no override', () => {
@@ -115,5 +115,22 @@ describe('feeEq', () => {
     expect(feeEq(238.20, 238.21)).toBe(false);
     expect(feeEq(0, 0.01)).toBe(false);
     expect(feeEq(250, 0)).toBe(false);
+  });
+});
+
+describe('rateEq', () => {
+  // The page seeds the input as String(+(rate * 100).toFixed(2)) and reads it
+  // back as Number(input) / 100 — a round trip that loses 0.0035.
+  const roundTrip = (rate: number) => Number(String(+(rate * 100).toFixed(2))) / 100;
+
+  it('ignores the percent round trip', () => {
+    for (const rate of [0.0035, 0.0145, 0.0055, 0.0007, 0.075, 0]) {
+      expect(rateEq(roundTrip(rate), rate)).toBe(true);
+    }
+  });
+
+  it('still sees a change of one basis point', () => {
+    expect(rateEq(0.0035, 0.0036)).toBe(false);
+    expect(rateEq(0, 0.0001)).toBe(false);
   });
 });

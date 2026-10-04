@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { ApiError } from './api';
 import {
-  asksToMoveToReviewing, boxCheckEventLines, checkBody, countOf, emptyCheck, isShortChecked, lineState, matchScan, nextOpenAfter, orderLines, readStageMoved, tally,
+  asksToMoveToReviewing, boxCheckEventLines, checkBody, countOf, emptyCheck, entryAnswerFor, isShortChecked, lineState, matchScan, nextOpenAfter, orderLines, readStageMoved, stashEntryAnswer, tally,
   type LineCheck,
 } from './boxCheck';
 
@@ -157,6 +157,26 @@ describe('asksToMoveToReviewing', () => {
 
   it('never asks of an archived PO', () => {
     expect(asksToMoveToReviewing({ lifecycle: 'in_transit', archived: true })).toBe(false);
+  });
+});
+
+describe('the takeover answer from the way in', () => {
+  const alex = { id: 'alex', name: 'Alex' };
+
+  it("holds for the same PO while it is still that manager's", () => {
+    stashEntryAnswer('PO-1', { fromManagerId: 'alex' });
+    expect(entryAnswerFor({ id: 'PO-1', manager: alex })).toEqual({ fromManagerId: 'alex' });
+    // Asked again: the page remounting reads it again.
+    expect(entryAnswerFor({ id: 'PO-1', manager: alex })).toEqual({ fromManagerId: 'alex' });
+  });
+
+  it('does not hold for another PO, a changed manager, or after it is cleared', () => {
+    stashEntryAnswer('PO-1', { fromManagerId: 'alex' });
+    expect(entryAnswerFor({ id: 'PO-2', manager: alex })).toBeNull();
+    expect(entryAnswerFor({ id: 'PO-1', manager: { id: 'sofia' } })).toBeNull();
+    expect(entryAnswerFor({ id: 'PO-1', manager: null })).toBeNull();
+    stashEntryAnswer('PO-1', null);
+    expect(entryAnswerFor({ id: 'PO-1', manager: alex })).toBeNull();
   });
 });
 
