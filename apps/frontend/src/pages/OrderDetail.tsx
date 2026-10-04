@@ -6,6 +6,7 @@ import { OrderActivityLog } from '../components/OrderActivityLog';
 import { PhFold, type PhFoldMark } from '../components/PhFold';
 import { PhCommissionFields, PhCommissionSheet } from '../components/PhCommissionSheet';
 import { RevertNoticeDialog } from '../components/RevertNoticeDialog';
+import { useManagerTakeover } from '../components/ManagerTakeoverDialog';
 import { StatusChangeDialog } from '../components/StatusChangeDialog';
 import { PhHandoffSheet } from '../components/PhHandoffSheet';
 import { PhScrollJump } from '../components/PhScrollJump';
@@ -227,6 +228,11 @@ export function OrderDetail({
   const [doneDialogOpen, setDoneDialogOpen] = useState(false);
   const [handoffOpen, setHandoffOpen] = useState(false);
   const [commissionOpen, setCommissionOpen] = useState(false);
+  const takeover = useManagerTakeover();
+  // The mover's answer to the takeover question, carried through the
+  // commission sheet or the Done dialog to the move it confirms. Cleared when
+  // either closes, so it never rides on a later move.
+  const [takeManager, setTakeManager] = useState(false);
   const [activityRefreshKey, setActivityRefreshKey] = useState(0);
   const [showDelete, setShowDelete] = useState(false);
   const [typedId, setTypedId] = useState('');
@@ -481,16 +487,17 @@ export function OrderDetail({
   })();
   const canAdvance = !!nextStatus && !advancing && !saving;
 
-  const doAdvance = async () => {
+  const doAdvance = async (take: boolean) => {
     setAdvancing(true);
     try {
-      await api.post(`/api/orders/${order.id}/advance`, {});
+      await api.post(`/api/orders/${order.id}/advance`, take ? { takeManager: true } : {});
       await refetchOrder();
       setActivityRefreshKey(k => k + 1);
     } catch (e) {
       showErrorDialog(e instanceof Error ? e.message : t('advanceFailed'));
     } finally {
       setAdvancing(false);
+      setTakeManager(false);
     }
   };
 
@@ -525,14 +532,19 @@ export function OrderDetail({
       return;
     }
     if (unsaved) { showErrorDialog(t('phSaveFirst')); return; }
+    // Asked before the sheets, so the manager knows whose order it is before
+    // confirming anything on it.
+    const choice = await takeover.ask(order);
+    if (choice === null) return;
+    const take = choice === 'take';
     // Ready to Pay fixes the commission, so the manager confirms it on the
     // way in — the sheet saves the fields and then advances.
-    if (nextStatus === 'Ready to Pay') { setCommissionOpen(true); return; }
+    if (nextStatus === 'Ready to Pay') { setTakeManager(take); setCommissionOpen(true); return; }
     // Done asks for the commission screenshot first — unless one is already
     // on file, in which case the move is as plain as any other. Confirming in
     // the dialog fires the actual advance.
-    if (nextStatus === 'Done' && proof.commissionAtts.length === 0) { setDoneDialogOpen(true); return; }
-    await doAdvance();
+    if (nextStatus === 'Done' && proof.commissionAtts.length === 0) { setTakeManager(take); setDoneDialogOpen(true); return; }
+    await doAdvance(take);
   };
 
   // The commission sheet's Confirm: write the fields if they changed, then
@@ -546,8 +558,9 @@ export function OrderDetail({
           commissionRate: commissionDirty ? commissionRateValue : undefined,
         });
       }
-      await api.post(`/api/orders/${order.id}/advance`, {});
+      await api.post(`/api/orders/${order.id}/advance`, takeManager ? { takeManager: true } : {});
       setCommissionOpen(false);
+      setTakeManager(false);
       await refetchOrder();
       setActivityRefreshKey(k => k + 1);
     } catch (e) {
@@ -971,6 +984,13 @@ export function OrderDetail({
               ) : (
                 <div style={{ fontSize: 12.5, color: 'var(--fg-subtle)' }}>{t('eoNoDeliveryRecorded')}</div>
               )}
+            </div>
+          )}
+
+          {view === null && order.manager && (
+            <div style={{ marginTop: 14, borderTop: '1px dashed var(--border)', paddingTop: 10, fontSize: 13, display: 'flex', alignItems: 'baseline', gap: 8 }}>
+              <span style={{ fontSize: 10.5, color: 'var(--fg-subtle)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{t('poManager')}</span>
+              <span>{order.manager.name}</span>
             </div>
           )}
 
@@ -1775,7 +1795,7 @@ export function OrderDetail({
           deliverySummary={deliverySummary}
           paymentSummary={paymentSummary}
           busy={advancing}
-          onClose={() => setCommissionOpen(false)}
+          onClose={() => { setCommissionOpen(false); setTakeManager(false); }}
           onConfirm={() => void confirmCommission()}
         />
       )}
@@ -1791,11 +1811,12 @@ export function OrderDetail({
           variant="purchase"
           // The note live-saves inside the dialog, so a cancel still needs a
           // refetch for the read-only block to reflect it.
-          onCancel={() => { setDoneDialogOpen(false); refetchOrder(); }}
-          onConfirm={async () => { setDoneDialogOpen(false); await doAdvance(); }}
+          onCancel={() => { setDoneDialogOpen(false); setTakeManager(false); refetchOrder(); }}
+          onConfirm={async () => { setDoneDialogOpen(false); await doAdvance(takeManager); }}
           onMutated={() => setActivityRefreshKey(k => k + 1)}
         />
       )}
+      {takeover.dialog}
     </div>
   );
 }

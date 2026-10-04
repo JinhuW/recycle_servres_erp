@@ -312,7 +312,7 @@ lifecycleRoutes.post('/:id/advance', async (c) => {
   const id = c.req.param('id');
   const sql = getDb(c.env);
   const body = (await c.req.json().catch(() => null)) as
-    { toStage?: string; fromStage?: unknown; enforce?: unknown } | null;
+    { toStage?: string; fromStage?: unknown; enforce?: unknown; takeManager?: unknown } | null;
 
   // Only a live Draft meets the guard, so only one is worth a pull — the tx
   // refuses an archived order before it reads the id.
@@ -335,6 +335,7 @@ lifecycleRoutes.post('/:id/advance', async (c) => {
     advanceOrderTx(tx, id, { id: u.id, name: u.name, role: u.role }, body?.toStage, {
       enforce: body?.enforce === 'all' ? 'all' : 'rules',
       fromStage: typeof body?.fromStage === 'string' ? body.fromStage : undefined,
+      takeManager: body?.takeManager === true,
     }));
 
   if (outcome.kind !== 'ok') return advanceRefusedResponse(c, outcome, pullError);

@@ -4,6 +4,7 @@ import { Icon } from '../../components/Icon';
 import { ImageLightbox } from '../../components/ImageLightbox';
 import { OrderCategoryChips } from '../../components/OrderCategoryChips';
 import { LineSpecChips } from '../../components/LineSpecChips';
+import { useManagerTakeover } from '../../components/ManagerTakeoverDialog';
 import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
 import { api, rawFetch } from '../../lib/api';
 import {
@@ -65,6 +66,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   const [scan, setScan] = useState('');
   const [scanMsg, setScanMsg] = useState<ScanMsg | null>(null);
   const [busy, setBusy] = useState<'approve' | null>(null);
+  const takeover = useManagerTakeover();
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [photoIdx, setPhotoIdx] = useState(0);
   const ready = loadState === 'ok' && !readOnly;
@@ -330,12 +332,17 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
 
   const approve = async () => {
     if (!ready) return;
+    const choice = await takeover.ask(order);
+    if (choice === null) return;
     setBusy('approve');
     try {
       await flush();
       // The page may have sat open while someone else moved the PO; the jump
       // is refused under the row lock unless it is still at Reviewing.
-      await api.post(`/api/orders/${order.id}/advance`, { toStage: 'ready_to_pay', fromStage: 'reviewing' });
+      await api.post(`/api/orders/${order.id}/advance`, {
+        toStage: 'ready_to_pay', fromStage: 'reviewing',
+        ...(choice === 'take' ? { takeManager: true } : {}),
+      });
     } catch (e) {
       const now = readStageMoved(e);
       if (now !== null) showErrorDialog(t('bcStaleStage', { id: order.id, s: poStageName(now, t) }));
@@ -696,7 +703,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
               )}
               <div className="bc-finish-actions">
                 {atReviewing && (
-                  <button type="button" className="btn accent" disabled={!ready || busy !== null || remaining > 0} onClick={() => void approve()}>
+                  <button type="button" className="btn accent" disabled={!ready || busy !== null || takeover.asking || remaining > 0} onClick={() => void approve()}>
                     <Icon name="check" size={13} /> {busy === 'approve' ? '…' : t('bcApprove')}
                   </button>
                 )}
@@ -733,6 +740,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
         />
       )}
       {serialIssues && <SerialCheckDialog issues={serialIssues} onClose={() => setSerialIssues(null)} />}
+      {takeover.dialog}
     </div>
   );
 }

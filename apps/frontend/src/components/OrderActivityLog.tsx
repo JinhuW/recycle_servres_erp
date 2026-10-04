@@ -3,7 +3,7 @@ import { Icon, type IconName } from './Icon';
 import { fmtDate, relTime, fmtUSD } from '../lib/format';
 import { useT } from '../lib/i18n';
 import {
-  createdEventParts, linePhotoEventDetail, ownerChangedLine, changeLine, renderValue,
+  createdEventParts, linePhotoEventDetail, managerChangedLine, ownerChangedLine, changeLine, renderValue,
   LIFECYCLE_LABEL, type Translate,
 } from '../lib/orderPresentation';
 import type { OrderEvent, OrderEventChange } from '../lib/types';
@@ -36,6 +36,7 @@ const KIND_ICON: Record<OrderEvent['kind'], IconName> = {
   meta_changed: 'settings',
   handoff:      'truck',
   owner_changed: 'user',
+  manager_changed: 'user',
   status_meta_changed: 'paperclip',
   line_photo_added:   'image',
   line_photo_removed: 'image',
@@ -59,6 +60,7 @@ const KIND_TONE: Record<OrderEvent['kind'], Tone> = {
   // The goods started moving — the same weight as the submit it rides with.
   handoff:      'pos',
   owner_changed: 'info',
+  manager_changed: 'info',
   status_meta_changed: 'muted',
   // A photo is evidence hung off a line, so it tones like the attachment
   // events rather than like the line itself; losing one still warns.
@@ -150,6 +152,9 @@ function summary(ev: OrderEvent, locale: string, t: Translate): { title: string;
     }
     case 'owner_changed': {
       return { title: t('acOwnerChanged'), lines: [ownerChangedLine(d)] };
+    }
+    case 'manager_changed': {
+      return { title: t('acManagerChanged'), lines: [managerChangedLine(d, t)] };
     }
     case 'status_meta_changed': {
       // The Payment and Commission buckets are not stages the way Submission

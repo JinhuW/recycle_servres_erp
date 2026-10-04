@@ -50,3 +50,14 @@ export function derivePoPermissions(opts: {
     canDelete: canEditOrder && effectiveStatus === 'Draft' && !order.everSubmitted,
   };
 }
+
+// Whether moving this PO should first ask the mover to take it over: only a
+// manager (the real role — a previewing manager still moves as one) moving an
+// order someone else manages. An order with no manager is stamped with the
+// mover by the server, no question asked.
+export function asksManagerTakeover(
+  manager: { id: string } | null | undefined,
+  me: { id: string; role: string } | null | undefined,
+): boolean {
+  return !!me && me.role === 'manager' && !!manager && manager.id !== me.id;
+}
