@@ -17,6 +17,44 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.209.0] - 2026-10-04
+
+Web submissions can be answered by email from inside the ERP (RS-161).
+
+### Added
+
+- **A web submission has an email conversation.** "Reply by email" used to be
+  a `mailto:` link. It opened the clicking manager's own mail client, so the
+  customer's answer landed in a personal inbox that nobody else could see,
+  and the ERP never knew a conversation had happened.
+  - **Sending.** The submission now shows the thread the way a mail client
+    does: the subject on top, earlier messages folded to one line each, the
+    newest open with its From / To, and the reply written in a draft with its
+    own From / To / Subject. A manager's reply is sent over SMTP from one
+    shared company mailbox
+    (Lark), as "ram4cash" or "Recycle Servers" depending on the site the
+    request came from. The first sent reply moves a `new` submission to
+    `contacted`.
+  - **Receiving.** The backend reads the mailbox's INBOX over IMAP every two
+    minutes and attaches the customer's answers to the same thread. A message
+    counts as an answer if it replies to one of ours, or if its subject names
+    the WS id, it comes from the submission's address, and Lark's DMARC check
+    didn't fail it.
+  - **Read-only.** The poll looks at headers first, downloads only the
+    matches, and never marks anything read, so the box stays usable in Lark.
+  - **Shown in the thread.** Each answer shows its sender address, with a
+    warning when that isn't the submission's address or Lark's DMARC check
+    failed: a forged "pay my new PayPal" message must not look authentic.
+    Quoted history folds away. Attachments are listed by name to open in the
+    mailbox, and managers are notified.
+  - **Configuration.** New `MAIL_USER` and `MAIL_PASSWORD` turn this on; they
+    are set on the prod backend only, because dev's database is a copy of
+    prod. Without them the page keeps the mailto link, and `/api/health`
+    reports `providers.mail`.
+  - **Storage and dependencies.** Migration 0157 adds
+    `web_submission_messages` and `mail_sync_state`. New backend
+    dependencies: nodemailer, imapflow, mailparser and html-to-text.
+
 ## [1.208.2] - 2026-10-04
 
 The Re-login dialog tells the truth about what will happen (RS-170).
