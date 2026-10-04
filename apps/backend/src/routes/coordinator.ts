@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { ContentfulStatusCode, StatusCode } from 'hono/utils/http-status';
 import { authMiddleware } from '../auth';
+import { log } from '../lib/log';
 import { allowedAppOrigin } from '../lib/origins';
 import { requireManager } from '../lib/role';
 import type { Env, User } from '../types';
@@ -39,6 +40,21 @@ export function upstream(env: Env): { base: string; headers: Record<string, stri
   return { base, headers };
 }
 
+// The facade refusing *our* credentials (a stale COORDINATOR_API_TOKEN, an
+// Access service token that was rotated) must never reach the browser as a
+// 401/403: the SPA reads a 401 from any /api route as "your session expired",
+// refreshes, retries, and on a second 401 signs the manager out. It is a
+// misconfiguration on this side, so it goes out as a 502 that names the fix.
+const UPSTREAM_AUTH_REFUSED =
+  'The fleet console refused the ERP’s credentials — check COORDINATOR_API_TOKEN (and the Access service token)';
+
+function upstreamAuthRefused(c: { json: (body: unknown, status?: number) => Response }, status: number, path: string): Response {
+  log.warn('coordinator upstream refused our credentials', { module: 'coordinator', upstreamStatus: status, upstreamPath: path });
+  return c.json({ error: UPSTREAM_AUTH_REFUSED }, 502);
+}
+
+const isAuthRefusal = (status: number) => status === 401 || status === 403;
+
 // Statuses a Response may not carry a body on; building one with a body throws.
 const NULL_BODY_STATUSES = new Set([204, 205, 304]);
 
@@ -69,6 +85,7 @@ async function forward(
     return c.json({ error: UNREACHABLE }, 502);
   }
 
+  if (isAuthRefusal(res.status)) return upstreamAuthRefused(c, res.status, path);
   if (NULL_BODY_STATUSES.has(res.status)) return c.body(null, res.status as StatusCode);
   // Pass the upstream body and status through verbatim: the coordinator's 4xx
   // bodies carry actionable messages the UI shows as-is.
@@ -174,6 +191,7 @@ coordinator.get('/challenges/:id/screenshot', async (c) => {
   }
 
   // Only a 200 carries image bytes; errors come back as JSON.
+  if (isAuthRefusal(res.status)) return upstreamAuthRefused(c, res.status, path);
   if (!res.ok) {
     const payload = await res.json().catch(() => ({ error: `coordinator returned ${res.status}` }));
     return c.json(payload, res.status as ContentfulStatusCode);
