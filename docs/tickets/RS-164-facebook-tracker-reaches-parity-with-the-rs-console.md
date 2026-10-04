@@ -2,7 +2,7 @@
 id: RS-164
 title: Facebook tracker reaches parity with the rs-console dashboard, including watching a worker's browser
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-04
 reporter: Jinhu
