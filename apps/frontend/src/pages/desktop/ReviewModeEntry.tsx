@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { Icon } from '../../components/Icon';
+import { useManagerTakeover } from '../../components/ManagerTakeoverDialog';
 import { Modal } from '../../components/Modal';
 import { api } from '../../lib/api';
 import { asksToMoveToReviewing, readStageMoved } from '../../lib/boxCheck';
@@ -11,7 +12,10 @@ import { navigate, poCheckPath } from '../../lib/route';
 // The way into review mode from the PO page and the PO list. A PO not yet at
 // Reviewing is offered the move first, since Approve is only offered there.
 
-export type ReviewTarget = { id: string; lifecycle: string; archived: boolean };
+export type ReviewTarget = {
+  id: string; lifecycle: string; archived: boolean;
+  manager?: { id: string; name: string } | null;
+};
 
 // `onStale` hears where a PO really stands when a move finds it gone from the
 // stage the caller showed, so the caller can stop showing the old one.
@@ -21,16 +25,20 @@ export function useReviewModeEntry(
   const { t } = useT();
   const [target, setTarget] = useState<ReviewTarget | null>(null);
   const [busy, setBusy] = useState(false);
+  const takeover = useManagerTakeover();
 
   const enter = (o: ReviewTarget) => {
     if (asksToMoveToReviewing(o)) setTarget(o);
     else navigate(poCheckPath(o.id));
   };
 
-  const close = () => { if (!busy) setTarget(null); };
+  const close = () => { if (!busy && !takeover.asking) setTarget(null); };
 
   const move = async () => {
     if (!target) return;
+    // Cancelling the takeover question leaves this prompt up, unmoved.
+    const choice = await takeover.ask(target);
+    if (choice === null) return;
     setBusy(true);
     // Set when the PO turned out to be somewhere else: it is entered afresh
     // from where it really stands instead of being moved.
@@ -44,6 +52,7 @@ export function useReviewModeEntry(
       // Transit must carry them already (`enforce`).
       await api.post(`/api/orders/${target.id}/advance`, {
         toStage: 'reviewing', fromStage: target.lifecycle, enforce: 'all',
+        ...(choice === 'take' ? { takeManager: true } : {}),
       });
     } catch (e) {
       elsewhere = readStageMoved(e);
@@ -58,43 +67,52 @@ export function useReviewModeEntry(
     setTarget(null);
     if (elsewhere !== null) {
       opts.onStale?.(target.id, elsewhere);
-      enter({ id: target.id, lifecycle: elsewhere, archived: false });
+      enter({ ...target, lifecycle: elsewhere, archived: false });
     } else {
       navigate(poCheckPath(target.id));
     }
   };
 
-  const prompt = target && (
-    <Modal onClose={close} shellStyle={{ maxWidth: 460 }}>
-      <div className="modal-head">
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-          <div style={{
-            width: 36, height: 36, borderRadius: 8,
-            background: 'var(--accent-soft)', color: 'var(--accent-strong)',
-            display: 'grid', placeItems: 'center', flexShrink: 0,
-          }}>
-            <Icon name="package" size={18} />
+  // While the takeover question is up this prompt waits under it.
+  const locked = busy || takeover.asking;
+
+  // Siblings, not nested: the takeover question sits on top of this prompt.
+  const prompt = (
+    <>
+      {target && (
+        <Modal onClose={close} shellStyle={{ maxWidth: 460 }}>
+          <div className="modal-head">
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+              <div style={{
+                width: 36, height: 36, borderRadius: 8,
+                background: 'var(--accent-soft)', color: 'var(--accent-strong)',
+                display: 'grid', placeItems: 'center', flexShrink: 0,
+              }}>
+                <Icon name="package" size={18} />
+              </div>
+              <div>
+                <div className="modal-title">{t('bcMoveTitle', { id: target.id })}</div>
+                <div className="modal-sub">{t('bcMoveMsg', { id: target.id, s: poStageName(target.lifecycle, t) })}</div>
+              </div>
+            </div>
           </div>
-          <div>
-            <div className="modal-title">{t('bcMoveTitle', { id: target.id })}</div>
-            <div className="modal-sub">{t('bcMoveMsg', { id: target.id, s: poStageName(target.lifecycle, t) })}</div>
+          <div className="modal-foot">
+            <button className="btn" disabled={locked} onClick={close}>{t('cancel')}</button>
+            <button
+              className="btn"
+              disabled={locked}
+              onClick={() => { const id = target.id; setTarget(null); navigate(poCheckPath(id)); }}
+            >
+              {t('bcMoveSkip')}
+            </button>
+            <button className="btn accent" disabled={locked} onClick={() => { void move(); }} autoFocus>
+              {busy ? '…' : t('bcMoveConfirm')}
+            </button>
           </div>
-        </div>
-      </div>
-      <div className="modal-foot">
-        <button className="btn" disabled={busy} onClick={close}>{t('cancel')}</button>
-        <button
-          className="btn"
-          disabled={busy}
-          onClick={() => { const id = target.id; setTarget(null); navigate(poCheckPath(id)); }}
-        >
-          {t('bcMoveSkip')}
-        </button>
-        <button className="btn accent" disabled={busy} onClick={() => { void move(); }} autoFocus>
-          {busy ? '…' : t('bcMoveConfirm')}
-        </button>
-      </div>
-    </Modal>
+        </Modal>
+      )}
+      {takeover.dialog}
+    </>
   );
 
   return { enter, prompt };

@@ -133,6 +133,7 @@ listRoutes.get('/', async (c) => {
       o.paypal_txn_id,
       ${linkedPaidFrag}::float AS linked_paid,
       o.handoff_method,
+      o.manager_id, mg.name AS manager_name,
       ${newestPackageJson(sql)} AS pkg,
       o.supplier_id, sup.name AS supplier_name,
       u.name AS user_name, u.initials AS user_initials,
@@ -169,13 +170,14 @@ listRoutes.get('/', async (c) => {
       ARRAY_REMOVE(ARRAY_AGG(DISTINCT l.category), NULL)                            AS categories
     FROM orders o
     JOIN users u      ON u.id = o.user_id
+    LEFT JOIN users mg ON mg.id = o.manager_id
     LEFT JOIN warehouses w ON w.id = o.warehouse_id
     LEFT JOIN suppliers sup ON sup.id = o.supplier_id
                           AND (${isManager} OR sup.owner_id IS NULL OR sup.owner_id = ${u.id})
     ${poRealizedLateral(sql, isManager)}
     LEFT JOIN order_lines l ON l.order_id = o.id
     WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${excludeFrag} AND ${archivedFrag} ${cursorFrag}
-    GROUP BY o.id, u.name, u.initials, w.id, w.short, w.region, sup.name,
+    GROUP BY o.id, u.name, u.initials, mg.name, w.id, w.short, w.region, sup.name,
              rz.sold_qty, rz.bought_qty, rz.revenue, rz.cost, rz.projected_profit
     ORDER BY ${sortExpr} ${dirSql}, o.id ${dirSql}
     LIMIT ${limit + 1}
@@ -217,6 +219,9 @@ listRoutes.get('/', async (c) => {
       // Optional and additive, like handoffMethod: a stale SPA renders the
       // plain status chip.
       tracking: packageFromJson(r.pkg),
+      // Optional and additive; the review-mode entry asks the takeover
+      // question from the row.
+      manager: r.manager_id ? { id: r.manager_id, name: r.manager_name ?? '' } : null,
       goodsTotal: r.goods_total,
       // Optional and additive: a stale SPA that never reads it is unaffected.
       // Keyed on the JOINED name, not the raw column: the join is scoped to the

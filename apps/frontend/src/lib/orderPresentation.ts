@@ -88,6 +88,17 @@ export function ownerChangedLine(detail: Record<string, unknown>): string {
   return `${from} → ${to}`;
 }
 
+/**
+ * The `manager_changed` event's one-line body. A null `from` is the order's
+ * first manager, set by the move into review; otherwise one manager took it
+ * over from another. Names are snapshotted, as for `owner_changed`.
+ */
+export function managerChangedLine(detail: Record<string, unknown>, t: Translate): string {
+  const to = typeof detail.to === 'string' && detail.to ? detail.to : '—';
+  const from = typeof detail.from === 'string' && detail.from ? detail.from : null;
+  return from ? t('acManagerTook', { to, from }) : t('acManagerSet', { name: to });
+}
+
 export const LIFECYCLE_LABEL: Record<string, string> = LIFECYCLE_STATUS;
 
 const PO_STAGE_KEY: Record<string, string> = {

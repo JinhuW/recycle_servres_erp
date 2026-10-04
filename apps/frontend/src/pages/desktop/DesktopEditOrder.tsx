@@ -64,6 +64,7 @@ import { AttachmentChip } from '../../components/AttachmentChip';
 import { AttachmentDropzone } from '../../components/AttachmentDropzone';
 import { loadWarehouses } from '../../lib/warehouses';
 import { useReviewModeEntry } from './ReviewModeEntry';
+import { useManagerTakeover } from '../../components/ManagerTakeoverDialog';
 
 // The uppercase heading over each block of the action card.
 const SectionHead = ({ icon, children }: { icon: IconName; children: ReactNode }) => (
@@ -138,6 +139,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // save that has to keep the user here (a photo upload that failed) has
   // already advanced the order — re-sending it would step it on again.
   const [savedStatus, setSavedStatus] = useState(effectiveStatus);
+  const takeover = useManagerTakeover();
   // A move that finds the order elsewhere is another write path that learns
   // where it stands — see applyLifecycle.
   const { enter: enterReview, prompt: reviewPrompt } = useReviewModeEntry({
@@ -766,6 +768,11 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   };
 
   const doSave = async () => {
+    // A manager moving an order someone else manages is asked first whether to
+    // take it over. Cancel stops the whole save — the move is part of it.
+    const choice = statusDirty && !isPurchaser ? await takeover.ask(order) : 'keep';
+    if (choice === null) return;
+    const takeManager = choice === 'take' ? { takeManager: true } : {};
     setSaving(true);
     try {
       // Past the purchaser's edit window only the note is theirs to change;
@@ -794,7 +801,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
         // patch is needed alongside it.
         if (statusDirty && !isPurchaser) {
           const toStage = lifecycleOf(status);
-          await api.post(`/api/orders/${order.id}/advance`, { toStage });
+          await api.post(`/api/orders/${order.id}/advance`, { toStage, ...takeManager });
           setSavedStatus(status);
           if (onReload) {
             window.__showToast?.(t('eoSavedToast', { id: order.id }), 'success');
@@ -869,7 +876,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       let movedStage = false;
       if (statusDirty) {
         const toStage = lifecycleOf(status);
-        await api.post(`/api/orders/${order.id}/advance`, isPurchaser ? {} : { toStage });
+        await api.post(`/api/orders/${order.id}/advance`, isPurchaser ? {} : { toStage, ...takeManager });
         setSavedStatus(status);
         movedStage = true;
       } else {
@@ -1103,7 +1110,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
             <OrderCategoryChips categories={order.categories} max={3} />
           </div>
           <div className="page-sub" style={{ marginTop: 6 }}>
-            {fmtDateShort(order.createdAt, locale)} · {t('submittedBy')} {order.userName.split(' ')[0]} · {lines.length === 1 ? t('historyLineCountOne', { n: lines.length }) : t('historyLineCountMany', { n: lines.length })} · {t('editOrderSub')}
+            {fmtDateShort(order.createdAt, locale)} · {t('submittedBy')} {order.userName.split(' ')[0]}{order.manager && <> · {t('poManager')} {order.manager.name.split(' ')[0]}</>} · {lines.length === 1 ? t('historyLineCountOne', { n: lines.length }) : t('historyLineCountMany', { n: lines.length })} · {t('editOrderSub')}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignSelf: 'flex-start', flexWrap: 'wrap' }}>
@@ -1118,7 +1125,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                 if (dirty) { showErrorDialog(t('bcSaveFirst')); return; }
                 enterReview({
                   id: order.id, lifecycle: lifecycleOf(savedStatus) ?? order.lifecycle,
-                  archived: isArchived,
+                  archived: isArchived, manager: order.manager,
                 });
               }}
               title={t('bcOpenTip')}
@@ -1855,6 +1862,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       )}
 
       {reviewPrompt}
+      {takeover.dialog}
 
       {dupConfirm && (
         <DupPartDialog

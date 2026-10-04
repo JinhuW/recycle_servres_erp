@@ -270,6 +270,34 @@ on to Sold once every line has sold (v1.164.0).
   warehouse** (v1.168.0). The v1.132.0 rule that reserved those two moves for
   the manager linked to the PO's warehouse is gone, on both shells and in the
   API; the warehouse's manager in Settings is a contact, not a gate.
+- **A PO has a manager: the manager who took it into review** (v1.203.0).
+  - **How it is set.** A manager who moves a PO with no manager into
+    Reviewing, Ready to Pay or Done becomes its manager, without being
+    asked.
+  - **Taking over.** When a *different* manager later moves the PO, forward
+    or back, a dialog asks first: *‹X› is the manager of PO-n*. There are
+    three choices:
+    - **Make me the manager** moves the PO and takes it over.
+    - **Keep ‹X›** moves the PO and leaves X in charge.
+    - **Cancel** moves nothing.
+  - **Where it asks.** Every door that moves a PO asks the same way:
+    - the desktop PO page's Save
+    - Review mode's *Move to Reviewing* and *Approve for payment*
+    - the phone's next-step button, whose answer rides through the Ready to
+      Pay and Done sheets
+  - **Where it doesn't ask.** The hand-off (Draft → In Transit) and the
+    automatic Done → Sold settle never ask.
+  - **It sticks.** The manager stays through a send-back to Draft, so a
+    re-submission returns to the same manager. It changes only through a
+    takeover; there is no picker.
+  - **Who sees it.** Everyone, purchasers included. It shows as *Manager
+    ‹name›* in the desktop PO header and in the phone Order status card.
+  - **The record.** Each set or takeover is a *Manager changed* entry in the
+    activity log.
+  - **Existing POs** were filled in from history: each got the manager who
+    last moved it into Reviewing. POs a manager jumped straight from Draft
+    have no such record, so they start empty and fill in on their next
+    manager move.
 - **Review mode: a manager counts a PO against the box that arrived** (v1.188.0,
   desktop only; called *Box check* until v1.189.2). **Review mode** in the PO
   page header, primary at Reviewing and present at every stage, opens `#/purchase-orders/<id>/check`: a full-width

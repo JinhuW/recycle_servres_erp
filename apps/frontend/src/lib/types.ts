@@ -159,6 +159,10 @@ export type OrderSummary = {
   paymentMethod?: 'paypal' | 'cash' | null;
   handoffMethod?: 'pickup' | 'label' | null;
   handoffBy?: { id: string; name: string } | null;
+  // The manager reviewing the order: set by the move into Reviewing, taken
+  // over only when another manager moving it says so. Optional for deploy
+  // skew; null until a manager has moved it that far.
+  manager?: { id: string; name: string } | null;
   // The hand-off's package — what the In Transit chip links. Only the list
   // endpoint reports it; null on a pickup or a pre-hand-off order.
   tracking?: PackageTracking | null;
@@ -264,6 +268,7 @@ export type OrderEventKind =
   | 'meta_changed'
   | 'handoff'
   | 'owner_changed'
+  | 'manager_changed'
   | 'status_meta_changed'
   | 'line_photo_added'
   | 'line_photo_removed'

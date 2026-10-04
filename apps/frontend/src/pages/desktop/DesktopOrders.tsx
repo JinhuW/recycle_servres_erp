@@ -680,7 +680,7 @@ export function DesktopOrders({ onToast }: Props) {
                               aria-label={t('bcOpen')}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                enterReview({ id: o.id, lifecycle: o.lifecycle, archived: o.archivedAt !== null });
+                                enterReview({ id: o.id, lifecycle: o.lifecycle, archived: o.archivedAt !== null, manager: o.manager });
                               }}
                             >
                               <Icon name="package" size={12} />

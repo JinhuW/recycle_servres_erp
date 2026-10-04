@@ -124,7 +124,15 @@ export type AdvanceOutcome =
 // `fromStage` is where the caller saw the order. `toStage` is a jump, so a
 // page that sat open while someone else moved the order would otherwise move
 // it from wherever it is now — a Ready to Pay order back to Reviewing.
-export type AdvanceOptions = { enforce?: 'rules' | 'all'; fromStage?: string };
+//
+// `takeManager` is the mover's answer to "make yourself the manager?", asked
+// only when the order already has a different one. Without it a manager who
+// moves an order into review with nobody on it becomes its manager anyway.
+export type AdvanceOptions = { enforce?: 'rules' | 'all'; fromStage?: string; takeManager?: boolean };
+
+// Moving an order into any of these makes the mover its manager when it has
+// none — Reviewing, and the stages a manager can jump to past it.
+const MANAGED_STAGES = new Set(['reviewing', 'ready_to_pay', 'done']);
 
 // Line statuses in lifecycle order, so a cascade can tell which lines it would
 // move BACKWARDS. A committed line may never go backwards — not even from Done
@@ -415,6 +423,26 @@ export async function unarchiveOrderLinesTx(
   return { lines: rows.length };
 }
 
+// Names are snapshotted into the event, like owner_changed, because the
+// timeline renders without joining users.
+async function setOrderManagerTx(
+  tx: SqlLike,
+  id: string,
+  actor: AdvanceActor,
+  fromUserId: string | null,
+): Promise<void> {
+  const prev = fromUserId === null ? undefined : (await tx`
+    SELECT name FROM users WHERE id = ${fromUserId} LIMIT 1
+  `)[0] as { name: string } | undefined;
+  await tx`UPDATE orders SET manager_id = ${actor.id} WHERE id = ${id}`;
+  await writeOrderEvent(tx, id, actor.id, 'manager_changed', {
+    fromUserId,
+    from: prev?.name ?? null,
+    toUserId: actor.id,
+    to: actor.name,
+  });
+}
+
 export async function advanceOrderTx(
   tx: SqlLike,
   id: string,
@@ -427,14 +455,14 @@ export async function advanceOrderTx(
   const cur = (await tx`
     SELECT id, user_id, lifecycle, payment, payment_method, paypal_txn_id, created_at,
            archived_at, total_cost::float AS total_cost,
-           warehouse_id, source, handoff_method, handoff_by,
+           warehouse_id, source, handoff_method, handoff_by, manager_id,
            EXISTS (SELECT 1 FROM packages p WHERE p.order_id = orders.id) AS has_package
     FROM orders WHERE id = ${id} LIMIT 1 FOR NO KEY UPDATE`)[0] as
     | { id: string; user_id: string; lifecycle: string; payment: string;
         payment_method: string | null; paypal_txn_id: string | null; created_at: Date;
         archived_at: Date | null; total_cost: number | null; warehouse_id: string | null;
         source: string | null; handoff_method: string | null; handoff_by: string | null;
-        has_package: boolean }
+        manager_id: string | null; has_package: boolean }
     | undefined;
   if (!cur) return { kind: 'notFound' };
   // The lines sit at 'Archived'; a cascade here would put them back in stock
@@ -494,6 +522,13 @@ export async function advanceOrderTx(
     if (blocked) return blocked;
   }
   await tx`UPDATE orders SET lifecycle = ${nextStageId} WHERE id = ${id}`;
+
+  if (
+    actor.role === 'manager' && cur.manager_id !== actor.id
+    && (opts.takeManager || (cur.manager_id === null && MANAGED_STAGES.has(nextStageId)))
+  ) {
+    await setOrderManagerTx(tx, id, actor, cur.manager_id);
+  }
 
   // PO-level audit: leaving Draft is the "submitted" baseline (snapshot of
   // lineCount + totalCost); every subsequent advance is an `advanced` event

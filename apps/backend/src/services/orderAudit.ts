@@ -31,6 +31,9 @@ export type EventKind =
   // makes ride on a meta_changed beside it.
   | 'handoff'
   | 'owner_changed'
+  // The manager of the order was set or taken over by the manager moving it.
+  // A null `from` is the first assignment.
+  | 'manager_changed'
   | 'status_meta_changed'
   | 'line_photo_added'
   | 'line_photo_removed'

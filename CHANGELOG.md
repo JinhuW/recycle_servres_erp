@@ -17,6 +17,38 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.203.0] - 2026-10-03
+
+A PO has a manager (RS-160).
+
+### Added
+
+- **The manager who takes a PO into review becomes its manager.** Any manager
+  could move any PO through Reviewing, Ready to Pay and Done, and nothing on
+  the PO said who was handling it. The record was only in the activity log.
+  Now `orders.manager_id` is stamped when a manager moves a PO with no
+  manager into Reviewing, or straight past it to Ready to Pay or Done. The
+  stamp happens inside the move's own transaction, and the manager shows as
+  *Manager ‹name›* on the desktop PO header and the phone Order status card.
+  Purchasers see it too.
+- **A different manager moving the PO is asked whether to take it over.** The
+  dialog offers three choices:
+  - *Make me the manager* moves the PO and takes it over.
+  - *Keep ‹X›* moves the PO and leaves X in charge.
+  - *Cancel* moves nothing.
+
+  It asks on every move, forward and back, and every door asks the same
+  way: the desktop page's Save, Review mode's *Move to Reviewing* and
+  *Approve for payment*, and the phone's next-step button. The phone carries
+  the answer through the Ready to Pay and Done sheets. The server applies
+  the takeover only when the move itself succeeds (`takeManager` on
+  `/advance`), and ignores the flag from a purchaser.
+- **Each change is a *Manager changed* activity entry**, naming who became
+  manager and, on a takeover, whom they took it from.
+- **Existing POs were backfilled from history.** Migration 0156 gives each PO
+  the manager who last moved it into Reviewing, if that user is still a
+  manager.
+
 ## [1.202.1] - 2026-10-02
 
 Fixes from the pre-release review of v1.201.0 → v1.202.0 (RS-159), before
