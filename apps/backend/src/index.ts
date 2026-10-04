@@ -17,6 +17,7 @@ import { describeOcr } from './ai';
 import { authMiddleware } from './auth';
 import { csrfGuard } from './csrf';
 import { describeShipping } from './shipping';
+import { describeMail } from './mail';
 import { getDb } from './db';
 import { readBuildTime } from './lib/version';
 import { metricsMiddleware, metricsHandler } from './metrics';
@@ -234,7 +235,7 @@ app.get('/api/health', async (c) => {
   // identical to a healthy one until someone notices packages never move. Modes
   // only — no key values, no more than set/unset.
   const ship = describeShipping(c.env as Env);
-  const providers = { ...ship, ocr: describeOcr(c.env as Env) };
+  const providers = { ...ship, ocr: describeOcr(c.env as Env), ...describeMail(c.env as Env) };
   try {
     await getDb(c.env)`SELECT 1`;
     return c.json({ status: 'ok', version, commit, builtAt, providers });

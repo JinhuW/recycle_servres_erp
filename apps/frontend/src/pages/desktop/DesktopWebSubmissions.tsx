@@ -3,6 +3,7 @@ import { api } from '../../lib/api';
 import { useT } from '../../lib/i18n';
 import { match, navigate, useRoute } from '../../lib/route';
 import { Icon } from '../../components/Icon';
+import { SubmissionThread, type MailMode } from './DesktopWebSubmissionThread';
 
 // Manager inbox for the public website forms: ram4cash.com sell lots and
 // recycleservers.com quote requests. A sell lot becomes a Draft PO only when
@@ -264,6 +265,10 @@ function SubmissionDetail({ id, onToast }: Props & { id: string }) {
   const [missing, setMissing] = useState(false);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
+  // Unknown until the thread loads; the header keeps the mailto link until
+  // the backend says it can send.
+  const [mailMode, setMailMode] = useState<MailMode | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     let live = true;
@@ -329,9 +334,20 @@ function SubmissionDetail({ id, onToast }: Props & { id: string }) {
           </div>
         </div>
         <div className="page-actions">
-          <a className="btn" href={`mailto:${s.email}?subject=${replySubject}`}>
-            <Icon name="mail" size={13} /> {t('webSubReply')}
-          </a>
+          {mailMode && mailMode !== 'off' ? (
+            <button className="btn" onClick={() => {
+              // The whole draft, so its From / To / Subject stay in view too.
+              (composerRef.current?.closest('.ws-mail-draft') ?? composerRef.current)
+                ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+              composerRef.current?.focus({ preventScroll: true });
+            }}>
+              <Icon name="mail" size={13} /> {t('webSubReplyHere')}
+            </button>
+          ) : (
+            <a className="btn" href={`mailto:${s.email}?subject=${replySubject}`}>
+              <Icon name="mail" size={13} /> {t('webSubReply')}
+            </a>
+          )}
           {sell && !s.orderId && (
             <button className="btn accent" disabled={busy} onClick={convert}>
               <Icon name="plus" size={13} /> {t('webSubConvert')}
@@ -415,6 +431,10 @@ function SubmissionDetail({ id, onToast }: Props & { id: string }) {
               </table>
             </div>
           )}
+
+          {/* Keyed: moving to another submission must not carry a half-written
+              draft or open rows across. */}
+          <SubmissionThread key={s.id} submission={s} composerRef={composerRef} onMode={setMailMode} onSent={setS} onToast={onToast} />
         </div>
 
         <div className="card" style={{ padding: 16, flexShrink: 0 }}>
