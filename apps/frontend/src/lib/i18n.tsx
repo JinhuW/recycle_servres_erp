@@ -991,6 +991,9 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     eoPaymentLinkedToast: 'Saved {id} — its bank payment is now linked',
     eoSavedToast: 'Saved {id}',
     acOwnerChanged: 'Purchaser changed',
+    acManagerChanged: 'Manager changed',
+    acManagerSet: '{name} became the manager',
+    acManagerTook: '{to} took over from {from}',
 
     // StatusChangeDialog
     statusShippedTitle: 'Mark as Shipped',
@@ -1954,6 +1957,13 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     bcMoveMsg: "{id} is at {s}. Review mode can approve it only once it's at Reviewing.",
     bcMoveConfirm: 'Move to Reviewing',
     bcMoveSkip: 'Open without moving',
+    // The manager of a PO — who took it into review — and the question a
+    // different manager is asked when they move it.
+    poManager: 'Manager',
+    mgrTakeTitle: '{name} is the manager of {id}',
+    mgrTakeMsg: 'Make yourself the manager of this order? The move goes ahead either way.',
+    mgrTakeConfirm: 'Make me the manager',
+    mgrKeep: 'Keep {name}',
     // A PO stage named inside a sentence (the stepper chips keep their labels).
     poStageDraft: 'Draft',
     poStageInTransit: 'In Transit',

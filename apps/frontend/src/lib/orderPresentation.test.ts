@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { I18N } from './i18n';
 import zh from './i18n.zh';
 import {
-  createdEventParts, inTransitDetail, linePhotoEventDetail, ownerChangedLine, profitTone,
+  createdEventParts, inTransitDetail, linePhotoEventDetail, managerChangedLine, ownerChangedLine, profitTone,
   signedUSD0, trackingNote,
 } from './orderPresentation';
 import type { PackageTracking } from './types';
@@ -89,6 +89,13 @@ describe('ownerChangedLine', () => {
 
   it('shows a dash for a name the event never captured', () => {
     expect(ownerChangedLine({ to: 'Marcus Wright' })).toBe('— → Marcus Wright');
+  });
+});
+
+describe('managerChangedLine', () => {
+  it('names the first manager, then who took over from whom', () => {
+    expect(managerChangedLine({ from: null, to: 'Alex Chen' }, t)).toBe('acManagerSet');
+    expect(managerChangedLine({ from: 'Alex Chen', to: 'Sofia Reyes' }, t)).toBe('acManagerTook');
   });
 });
 

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { derivePoPermissions } from './poPermissions';
+import { ApiError } from './api';
+import { asksManagerTakeover, derivePoPermissions, readManagerChanged } from './poPermissions';
 
 const order = (o: Partial<{ lifecycle: string; archivedAt: string | null; userId: string; everSubmitted: boolean }>) => ({
   lifecycle: 'draft', status: 'Draft', archivedAt: null, userId: 'owner', everSubmitted: false, ...o,
@@ -31,5 +32,38 @@ describe('derivePoPermissions', () => {
   it("gives a purchaser no annotation rights on someone else's PO", () => {
     const p = derivePoPermissions({ isPurchaser: true, userId: 'other', order: order({ lifecycle: 'reviewing' }) });
     expect(p).toMatchObject({ isOwnerOrManager: false, canAnnotate: false });
+  });
+});
+
+describe('asksManagerTakeover', () => {
+  const mgr = { id: 'mgr', role: 'manager' };
+
+  it('asks a manager moving an order someone else manages', () => {
+    expect(asksManagerTakeover({ id: 'other' }, mgr)).toBe(true);
+  });
+
+  it('does not ask the order\'s own manager, about an unmanaged order, or a purchaser', () => {
+    expect(asksManagerTakeover({ id: 'mgr' }, mgr)).toBe(false);
+    expect(asksManagerTakeover(null, mgr)).toBe(false);
+    expect(asksManagerTakeover(undefined, mgr)).toBe(false);
+    expect(asksManagerTakeover({ id: 'other' }, { id: 'pur', role: 'purchaser' })).toBe(false);
+    expect(asksManagerTakeover({ id: 'other' }, null)).toBe(false);
+  });
+});
+
+describe('readManagerChanged', () => {
+  const refusal = (manager: unknown) =>
+    new ApiError(409, 'x', {}, { error: 'x', code: 'managerChanged', manager });
+
+  it('reads the manager the server named, or that there is none now', () => {
+    expect(readManagerChanged(refusal({ id: 'a', name: 'Alex' }))).toEqual({ id: 'a', name: 'Alex' });
+    expect(readManagerChanged(refusal(null))).toBeNull();
+  });
+
+  it('leaves every other failure alone', () => {
+    expect(readManagerChanged(new ApiError(409, 'x', {}, { code: 'stageMoved', lifecycle: 'draft' }))).toBeUndefined();
+    expect(readManagerChanged(new ApiError(400, 'x', {}, { code: 'managerChanged', manager: null }))).toBeUndefined();
+    expect(readManagerChanged(refusal({ id: 'a' }))).toBeUndefined();
+    expect(readManagerChanged(new Error('network'))).toBeUndefined();
   });
 });

@@ -44,6 +44,12 @@ export function feeEq(a: number, b: number): boolean {
   return Math.round(a * 100) === Math.round(b * 100);
 }
 
+// Same trap for the commission rate: NUMERIC(5,4), seeded into the input as a
+// `toFixed(2)` percent — and 0.35 / 100 is not 0.0035. Basis points.
+export function rateEq(a: number, b: number): boolean {
+  return Math.round(a * 1e4) === Math.round(b * 1e4);
+}
+
 export type StoredGoodsTotal = {
   /**
    * What to hand `poEffectiveCost` as `totalCostOverride`. Null when the stored

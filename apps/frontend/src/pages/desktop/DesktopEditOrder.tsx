@@ -13,7 +13,7 @@ import { fmtUSD, fmtDateShort } from '../../lib/format';
 import {
   ORDER_STATUSES, LIFECYCLE_STATUS, lifecycleOf, spineStatus,
 } from '../../lib/status';
-import { poEffectiveCost, parseFeeInput, feeEq, readStoredGoodsTotal } from '../../lib/poTotals';
+import { poEffectiveCost, parseFeeInput, feeEq, rateEq, readStoredGoodsTotal } from '../../lib/poTotals';
 import type { Category, Order, OrderLine, Warehouse } from '../../lib/types';
 import { LineDrawer } from './submit/LineDrawer';
 import {
@@ -64,6 +64,7 @@ import { AttachmentChip } from '../../components/AttachmentChip';
 import { AttachmentDropzone } from '../../components/AttachmentDropzone';
 import { loadWarehouses } from '../../lib/warehouses';
 import { useReviewModeEntry } from './ReviewModeEntry';
+import { useManagerTakeover } from '../../components/ManagerTakeoverDialog';
 
 // The uppercase heading over each block of the action card.
 const SectionHead = ({ icon, children }: { icon: IconName; children: ReactNode }) => (
@@ -138,6 +139,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // save that has to keep the user here (a photo upload that failed) has
   // already advanced the order — re-sending it would step it on again.
   const [savedStatus, setSavedStatus] = useState(effectiveStatus);
+  const takeover = useManagerTakeover();
   // A move that finds the order elsewhere is another write path that learns
   // where it stands — see applyLifecycle.
   const { enter: enterReview, prompt: reviewPrompt } = useReviewModeEntry({
@@ -537,9 +539,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     parsedCommission === null ? null : parsedCommission / 100;
   // null (unset) and 0 are equivalent — both yield zero commission — so
   // opening an order with a null DB rate at the default 0% UI value isn't
-  // flagged as a pending change.
-  const commissionDirty =
-    commissionValid && (commissionRateValue ?? 0) !== (order.commissionRate ?? 0);
+  // flagged as a pending change. Compared in basis points (`rateEq`): a plain
+  // !== called orders at rates like 0.0035 dirty on open.
+  const commissionDirty = commissionValid
+    && !rateEq(commissionRateValue ?? 0, order.commissionRate ?? 0);
   // Non-numeric intermediate input ("5e") must not read as a change.
   const parsedOtherFees = parseFeeInput(otherFeesInput);
   // Compared in cents, not as raw floats: the input is seeded from
@@ -748,6 +751,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // Everything standing between the user and a save, one entry per problem.
   // Save stays clickable while these exist: clicking opens a dialog listing
   // them, which beats a dead button next to a hint that's easy to miss.
+  // A clean page is the exception — there is nothing to fix, and a live
+  // Save after a stage move reads as "click again to keep it" — so the
+  // footer greys it out and the entry here becomes its tooltip.
   const saveBlockers: string[] =
     saving || canSave  ? []
   : isArchived         ? [t('saveBlockedArchived')]
@@ -766,6 +772,15 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   };
 
   const doSave = async () => {
+    // A manager moving an order someone else manages is asked first whether to
+    // take it over. Cancel stops the whole save — the move is part of it.
+    const asks = statusDirty && !isPurchaser;
+    const answer = asks ? await takeover.ask(order) : null;
+    if (asks && answer === null) return;
+    // A manager's move. False when the server named a new manager and the
+    // second question was cancelled: the rest of the save stands, the stage
+    // stays unsaved, and Save stays on to try it again.
+    const moveAsManager = (toStage: string | undefined) => takeover.advance(order, { toStage }, answer!);
     setSaving(true);
     try {
       // Past the purchaser's edit window only the note is theirs to change;
@@ -793,8 +808,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
         // accepts. /advance cascades line statuses server-side, so no line
         // patch is needed alongside it.
         if (statusDirty && !isPurchaser) {
-          const toStage = lifecycleOf(status);
-          await api.post(`/api/orders/${order.id}/advance`, { toStage });
+          if (!(await moveAsManager(lifecycleOf(status)))) return;
           setSavedStatus(status);
           if (onReload) {
             window.__showToast?.(t('eoSavedToast', { id: order.id }), 'success');
@@ -868,8 +882,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       // them, so send an empty body to advance one stage.
       let movedStage = false;
       if (statusDirty) {
-        const toStage = lifecycleOf(status);
-        await api.post(`/api/orders/${order.id}/advance`, isPurchaser ? {} : { toStage });
+        if (isPurchaser) await api.post(`/api/orders/${order.id}/advance`, {});
+        else if (!(await moveAsManager(lifecycleOf(status)))) return;
         setSavedStatus(status);
         movedStage = true;
       } else {
@@ -1103,7 +1117,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
             <OrderCategoryChips categories={order.categories} max={3} />
           </div>
           <div className="page-sub" style={{ marginTop: 6 }}>
-            {fmtDateShort(order.createdAt, locale)} · {t('submittedBy')} {order.userName.split(' ')[0]} · {lines.length === 1 ? t('historyLineCountOne', { n: lines.length }) : t('historyLineCountMany', { n: lines.length })} · {t('editOrderSub')}
+            {fmtDateShort(order.createdAt, locale)} · {t('submittedBy')} {order.userName.split(' ')[0]}{order.manager && <> · {t('poManager')} {order.manager.name.split(' ')[0]}</>} · {lines.length === 1 ? t('historyLineCountOne', { n: lines.length }) : t('historyLineCountMany', { n: lines.length })} · {t('editOrderSub')}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignSelf: 'flex-start', flexWrap: 'wrap' }}>
@@ -1118,7 +1132,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                 if (dirty) { showErrorDialog(t('bcSaveFirst')); return; }
                 enterReview({
                   id: order.id, lifecycle: lifecycleOf(savedStatus) ?? order.lifecycle,
-                  archived: isArchived,
+                  archived: isArchived, manager: order.manager,
                 });
               }}
               title={t('bcOpenTip')}
@@ -1679,6 +1693,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
         onCancel={leave}
         onSave={attemptSave}
         saving={saving}
+        hasChanges={dirty}
         saveTitle={saveBlockers[0]}
         locale={locale}
       />
@@ -1855,6 +1870,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       )}
 
       {reviewPrompt}
+      {takeover.dialog}
 
       {dupConfirm && (
         <DupPartDialog

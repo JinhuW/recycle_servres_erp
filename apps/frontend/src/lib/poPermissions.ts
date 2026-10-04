@@ -1,3 +1,4 @@
+import { ApiError } from './api';
 import { isClosedBook, LIFECYCLE_STATUS } from './status';
 
 // What the signed-in user may do on one PO, in one place. The desktop editor
@@ -49,4 +50,31 @@ export function derivePoPermissions(opts: {
     canReopen: !isPurchaser && orderLocked && !isArchived,
     canDelete: canEditOrder && effectiveStatus === 'Draft' && !order.everSubmitted,
   };
+}
+
+// Whether moving this PO should first ask the mover to take it over: only a
+// manager (the real role — a previewing manager still moves as one) moving an
+// order someone else manages. An order with no manager is stamped with the
+// mover by the server, no question asked.
+export function asksManagerTakeover(
+  manager: { id: string } | null | undefined,
+  me: { id: string; role: string } | null | undefined,
+): boolean {
+  return !!me && me.role === 'manager' && !!manager && manager.id !== me.id;
+}
+
+// What a manager's move sends with it: the manager the mover was shown, so
+// the server can refuse a move whose question was asked about someone else,
+// and whether to take the order over.
+export type TakeoverAnswer = { fromManagerId: string | null; takeManager?: true };
+
+// The manager the server named when it refused a move for that reason
+// (null: the order has none now); undefined for any other failure.
+export function readManagerChanged(err: unknown): { id: string; name: string } | null | undefined {
+  if (!(err instanceof ApiError) || err.status !== 409) return undefined;
+  const body = err.body as { code?: unknown; manager?: unknown } | null | undefined;
+  if (body?.code !== 'managerChanged') return undefined;
+  const m = body.manager as { id?: unknown; name?: unknown } | null | undefined;
+  if (m === null) return null;
+  return m && typeof m.id === 'string' && typeof m.name === 'string' ? { id: m.id, name: m.name } : undefined;
 }
