@@ -17,6 +17,31 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.203.1] - 2026-10-04
+
+The desktop PO page's Save greys out when there is nothing to save (RS-162).
+
+### Fixed
+
+- **Save no longer invites a click it can't use.** The footer's Save was
+  disabled only while a save was running. On a clean page it stayed dark,
+  and clicking it only opened *Can't save — No changes to save.* This was
+  most misleading right after *Mark as In Transit*. The checkpoint saves and
+  moves the PO by itself, but the In Transit page it lands on still offered
+  Save, which read as a second step that was needed to keep the move. Save
+  is now greyed while nothing is unsaved, and hovering it says why. An
+  edit, or a staged manager move (*Save · Mark as ‹stage›*), turns it back
+  on. A dirty page with a real blocker, like an incomplete line or a bad
+  tracking number, keeps Save clickable so the click can still list what
+  to fix.
+- **An order with an odd commission rate no longer opens with unsaved
+  changes.** The rate field compares its value with the stored one as exact
+  floats after a two-decimal percent round trip. Rates like 0.35% (0.0035)
+  don't survive that round trip, so those orders opened dirty. That would
+  have kept the new Save lit, and the checkpoint answered them with a false
+  "save first". The compare now works in basis points, the column's own
+  precision.
+
 ## [1.203.0] - 2026-10-03
 
 A PO has a manager (RS-160).

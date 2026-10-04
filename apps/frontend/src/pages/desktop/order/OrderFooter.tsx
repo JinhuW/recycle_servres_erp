@@ -24,6 +24,8 @@ type Props = {
   onCancel: () => void;
   onSave: () => void;
   saving: boolean;
+  /** False on a clean page: Save greys out rather than offer a no-op. */
+  hasChanges: boolean;
   saveTitle?: string;
   locale: string;
 };
@@ -76,7 +78,7 @@ export function OrderFooter(p: Props) {
             <Icon name="refresh" size={14} /> {t('linePhotoRetryAction', { n: p.retryablePhotos })}
           </button>
         )}
-        <button className="btn primary" disabled={p.saving} title={p.saveTitle} onClick={p.onSave}>
+        <button className="btn primary" disabled={p.saving || !p.hasChanges} title={p.saveTitle} onClick={p.onSave}>
           <Icon name="check2" size={14} />
           {' '}{p.saving ? '…' : p.stagePending ? t('eoSaveAndStage', { s: p.stagePending }) : t('save')}
         </button>

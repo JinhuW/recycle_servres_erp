@@ -166,7 +166,10 @@ on to Sold once every line has sold (v1.164.0).
   stage suggests one otherwise — Delivery while In Transit, Commission at
   Ready to Pay — until the user picks another (v1.161.1). A sticky
   footer holds the total cost, what the purchaser earns, *Unsaved edits: …*,
-  Discard and Save. **Delivery facts are the page's to edit until Ready to
+  Discard and Save. Save greys out while nothing is unsaved, including right
+  after the checkpoint moves the PO, and its tooltip says why. With unsaved
+  edits it stays clickable even when something blocks the save, and the
+  click lists what to fix (v1.203.1). **Delivery facts are the page's to edit until Ready to
   Pay**: source, pickup or label, collector and tracking number save through
   the order like any other field; a purchaser's change past Draft is
   material — back to Draft for the manager's change-review — and a new

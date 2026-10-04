@@ -539,9 +539,12 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     parsedCommission === null ? null : parsedCommission / 100;
   // null (unset) and 0 are equivalent — both yield zero commission — so
   // opening an order with a null DB rate at the default 0% UI value isn't
-  // flagged as a pending change.
-  const commissionDirty =
-    commissionValid && (commissionRateValue ?? 0) !== (order.commissionRate ?? 0);
+  // flagged as a pending change. Compared in basis points, the column's
+  // NUMERIC(5,4) precision: the input is seeded through a toFixed(2) percent,
+  // and rates like 0.0035 don't survive that as floats, so a plain !== called
+  // those orders dirty on open.
+  const commissionDirty = commissionValid
+    && Math.round((commissionRateValue ?? 0) * 1e4) !== Math.round((order.commissionRate ?? 0) * 1e4);
   // Non-numeric intermediate input ("5e") must not read as a change.
   const parsedOtherFees = parseFeeInput(otherFeesInput);
   // Compared in cents, not as raw floats: the input is seeded from
@@ -750,6 +753,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // Everything standing between the user and a save, one entry per problem.
   // Save stays clickable while these exist: clicking opens a dialog listing
   // them, which beats a dead button next to a hint that's easy to miss.
+  // A clean page is the exception — there is nothing to fix, and a live
+  // Save after a stage move reads as "click again to keep it" — so the
+  // footer greys it out and the entry here becomes its tooltip.
   const saveBlockers: string[] =
     saving || canSave  ? []
   : isArchived         ? [t('saveBlockedArchived')]
@@ -1686,6 +1692,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
         onCancel={leave}
         onSave={attemptSave}
         saving={saving}
+        hasChanges={dirty}
         saveTitle={saveBlockers[0]}
         locale={locale}
       />
