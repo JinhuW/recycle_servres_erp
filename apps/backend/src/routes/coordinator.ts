@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { ContentfulStatusCode, StatusCode } from 'hono/utils/http-status';
 import { authMiddleware } from '../auth';
+import { allowedAppOrigin } from '../lib/origins';
 import { requireManager } from '../lib/role';
 import type { Env, User } from '../types';
 
@@ -24,7 +25,7 @@ const coordinator = new Hono<{ Bindings: Env; Variables: { user: User } }>()
   .use('*', authMiddleware)
   .use('*', requireManager);
 
-function upstream(env: Env): { base: string; headers: Record<string, string> } | null {
+export function upstream(env: Env): { base: string; headers: Record<string, string> } | null {
   const base = env.COORDINATOR_API_URL?.replace(/\/+$/, '');
   const token = env.COORDINATOR_API_TOKEN;
   if (!base || !token) return null;
@@ -94,6 +95,42 @@ coordinator.get('/filter-prompt', (c) => forward(c, 'GET', '/v1/config/filter-pr
 // joined to worker health, assembled by the facade so the browser never sees
 // a config file. Proxies arrive as env-var names only.
 coordinator.get('/fleet', (c) => forward(c, 'GET', '/v1/fleet'));
+
+// Queue a Facebook re-login for one worker: the coordinator rides a one-shot
+// directive back on the worker's next heartbeat, and the worker re-enters its
+// username, password and 2FA code from the vault. Moves no credential and
+// names no account, which is why the facade lets it through.
+coordinator.post('/workers/:id/relogin', (c) =>
+  forward(c, 'POST', `/v1/workers/${encodeURIComponent(c.req.param('id'))}/relogin`));
+
+// ── Watching a worker's browser ──────────────────────────────────────────────
+// The bytes themselves are relayed by vncBridge.ts, which owns the HTTP
+// upgrade. Before it accepts a socket it replays the handshake through the
+// app to this route, so the proxy-secret gate, the session cookie and the
+// manager check all apply exactly as they do to any other request. A 204 is
+// the only answer that opens a socket.
+
+// What a worker id may look like: what fleet.toml and RS_WORKER_ID use.
+// Anything else never reaches the facade's URL space.
+export const VNC_WORKER_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+coordinator.get('/vnc/:workerId/ws', (c) => {
+  // A plain GET is not a socket; browsers cannot forge an Upgrade header.
+  if (c.req.header('upgrade')?.toLowerCase() !== 'websocket') {
+    return c.json({ error: 'Expected a WebSocket upgrade' }, 426);
+  }
+  // CORS never runs for a handshake and the cookie rides on one from any
+  // site, so a foreign page must be refused here or it could drive a
+  // manager's session into a worker's browser.
+  if (!allowedAppOrigin(c.req.header('origin'), c.env.CORS_ALLOWED_ORIGINS)) {
+    return c.json({ error: 'Origin not allowed' }, 403);
+  }
+  if (!VNC_WORKER_ID.test(c.req.param('workerId'))) {
+    return c.json({ error: 'Unknown worker' }, 404);
+  }
+  if (!upstream(c.env)) return c.json({ error: NOT_CONFIGURED }, 501);
+  return c.body(null, 204);
+});
 
 coordinator.get('/challenges', (c) => {
   // Pass the status filter through untouched; the coordinator validates it.

@@ -146,6 +146,10 @@ export type FleetAccount = {
   proxy_env: string | null;
   pacing: { search_interval: string | null; max_search_interval: string | null; overridden: boolean };
   vnc_url: string | null;
+  // True when the facade itself can bridge to this worker's browser (it is in
+  // RS_VNC_TARGETS) — the only case the ERP's own viewer can show it. A
+  // `vnc_url` without it is a link someone wrote into config.
+  vnc_live?: boolean;
   // null until the worker has reported at least once — or for every row when
   // the coordinator was unreachable (see FleetDoc.health).
   health: FleetWorker | null;
@@ -205,4 +209,19 @@ export const coordinatorApi = {
   // nothing to send.
   resolveChallenge: (id: number) =>
     api.post<{ status: string }>(`/api/coordinator/challenges/${id}/resolve`, {}),
+
+  // Queue a Facebook re-login: the worker re-enters its username, password
+  // and 2FA code from the vault on its next cycle.
+  relogin: (workerId: string) =>
+    api.post<unknown>(`/api/coordinator/workers/${encodeURIComponent(workerId)}/relogin`, {}),
 };
+
+/**
+ * The same-origin socket the backend relays to a worker's VNC session
+ * (apps/backend/src/vncBridge.ts). The session cookie rides on the handshake;
+ * no token ever appears in the URL.
+ */
+export function vncSocketUrl(workerId: string, loc: Pick<Location, 'protocol' | 'host'> = window.location): string {
+  const scheme = loc.protocol === 'https:' ? 'wss' : 'ws';
+  return `${scheme}://${loc.host}/api/coordinator/vnc/${encodeURIComponent(workerId)}/ws`;
+}

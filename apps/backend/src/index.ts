@@ -11,6 +11,7 @@ import { appendErrorRecord, redactSensitivePath, redactSensitiveQuery } from './
 import { log, releaseCommit, releaseVersion, runWithLogContext } from './lib/log';
 import { BcryptBusyError } from './lib/bcryptGate';
 import { secretMatches } from './lib/secret';
+import { allowedAppOrigin } from './lib/origins';
 
 import { describeOcr } from './ai';
 import { authMiddleware } from './auth';
@@ -185,19 +186,7 @@ const appCors = cors({
   // real frontend origin(s); only those are then echoed back. When unset we
   // FAIL CLOSED — only loopback origins (the Vite SPA on a shifting
   // localhost port) are permitted, never an arbitrary remote site.
-  origin: (origin, c) => {
-    const configured = (c.env as Env).CORS_ALLOWED_ORIGINS ?? '';
-    const allow = configured.split(',').map((s: string) => s.trim()).filter(Boolean);
-    if (allow.length > 0) return allow.includes(origin) ? origin : null;
-    if (!origin) return null;
-    try {
-      const host = new URL(origin).hostname;
-      if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]') {
-        return origin;
-      }
-    } catch { /* malformed Origin header — deny */ }
-    return null;
-  },
+  origin: (origin, c) => allowedAppOrigin(origin, (c.env as Env).CORS_ALLOWED_ORIGINS),
   allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   allowHeaders: [
     'Content-Type', 'Authorization', 'X-Requested-By',

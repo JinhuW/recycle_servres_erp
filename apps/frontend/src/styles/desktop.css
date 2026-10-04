@@ -3336,7 +3336,60 @@ html.desktop, body.desktop, .desktop #root {
 .fl-legend .chip .n { font-weight: 600; opacity: 0.8; margin-left: 4px; }
 .fl-empty { padding: 14px 18px; color: var(--fg-subtle); font-size: 13px; }
 /* "2 / 7": the denominator sits beside the big number, quieter and smaller. */
+/* A build string is "0.5.5 (8dc9e9b)"; the hash is what is cut first. */
+.fl-build { max-width: 104px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: middle; }
 .kpi-value .fl-of { font-size: 14px; font-weight: 500; color: var(--fg-subtle); margin-left: 6px; }
+
+/* "Needs a human": checkpoints and flagged accounts, tinted like a flagged row. */
+.fl-attention { border-color: color-mix(in oklch, var(--warn) 45%, var(--border)); }
+.fl-attention .card-head { background: var(--warn-soft); border-radius: var(--radius) var(--radius) 0 0; }
+.fl-attn-row { display: flex; align-items: center; gap: 14px; padding: 12px 16px; border-top: 1px solid var(--border); }
+.fl-attn-row .what { flex: 1; min-width: 0; font-size: 13.5px; }
+.fl-attn-row .what .sub { font-size: 12.5px; color: var(--fg-subtle); margin-top: 2px; }
+
+/* ── Watch a worker's browser (/fleet/watch/<worker>) ── */
+.fl-back {
+  display: inline-flex; align-items: center; gap: 4px; margin-bottom: 4px;
+  font-size: 12.5px; color: var(--fg-subtle); text-decoration: none;
+}
+.fl-back:hover { color: var(--fg); }
+.fl-watch { overflow: hidden; }
+/* noVNC needs a target with a definite size: the stage takes the viewport
+   minus the shell's bars and the page head, and the screen fills it. */
+.fl-watch-stage {
+  position: relative; height: calc(100vh - 250px); min-height: 360px;
+  background: oklch(0.24 0.01 250);
+}
+.fl-watch-screen { position: absolute; inset: 12px; }
+.fl-watch-screen canvas { box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45); }
+.fl-watch.in-control .fl-watch-screen canvas { outline: 3px solid var(--warn); }
+.fl-watch-overlay {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+.fl-watch-overlay-card {
+  background: var(--bg-elev); color: var(--fg); border-radius: var(--radius-lg);
+  padding: 22px 24px; max-width: 460px; width: calc(100% - 32px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+}
+.fl-watch-overlay-title { font-weight: 600; font-size: 16px; margin-bottom: 8px; }
+.fl-watch-overlay-card p { margin: 0 0 16px; color: var(--fg-muted); font-size: 13.5px; overflow-wrap: anywhere; }
+.fl-watch-note {
+  display: flex; gap: 8px; align-items: flex-start; padding: 10px 16px;
+  font-size: 12px; color: var(--fg-subtle); border-top: 1px solid var(--border); background: var(--bg-soft);
+}
+.fl-watch-note .icon { flex-shrink: 0; margin-top: 1px; }
+.fl-watch-status { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--fg-muted); }
+.fl-watch-status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fg-subtle); }
+.fl-watch-status.pos .dot { background: var(--pos); }
+.fl-watch-status.neg .dot { background: var(--neg); }
+.fl-watch-toggle {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  font-size: 12.5px; font-weight: 500; color: var(--fg-muted);
+  padding: 5px 10px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg-elev);
+}
+.fl-watch-toggle:has(input:checked) { background: var(--warn-soft); color: var(--warn-strong); border-color: transparent; }
+.fl-watch-toggle input { margin: 0; accent-color: var(--warn-strong); }
 
 .card-note {
   display: flex; gap: 10px; align-items: flex-start;

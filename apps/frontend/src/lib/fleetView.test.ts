@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import type { FleetAccount } from './coordinator';
+import { vncSocketUrl, type Challenge, type FleetAccount, type FleetDoc, type FleetWorker } from './coordinator';
 import {
-  accountAlerts, accountHaystack, browserLabel, hitsByCity, matchesTerms, queryTerms,
-  searchersByCity, splitHighlights, whoIs,
+  accountAlerts, accountHaystack, attentionEntries, attentionReason, browserLabel, canWatch,
+  externalVncUrl, hitsByCity, isUnstampedBuild, matchesTerms, offersRelogin, queryTerms, reviewedToday, searchersByCity,
+  splitHighlights, whoIs,
 } from './fleetView';
 
 const account = (over: Partial<FleetAccount>): FleetAccount => ({
@@ -88,4 +89,82 @@ describe('fleetView', () => {
     expect(accountAlerts(account({}), hits)).toBe(0);
     expect(accountAlerts(account({ health: { liveness: 'live' } as never }), hits)).toBe(3);
   });
+
+  describe('needs a human', () => {
+    const health = (over: Partial<FleetWorker>): FleetWorker => ({
+      worker_id: 'w', state: 'HEALTHY', status: null, region: null, account_id: null,
+      session_expiry: null, session_days_left: 300, last_heartbeat_at: '2026-10-04T09:00:00Z',
+      last_search_at: null, last_listing_at: null, error_count: 0, vnc_url: null,
+      liveness: 'live', needs_attention: false, ...over,
+    });
+
+    it('reads the most urgent reason first', () => {
+      expect(attentionReason(account({ health: health({ liveness: 'dead', state: 'SESSION_EXPIRED' }) })).kind).toBe('dead');
+      expect(attentionReason(account({ health: health({ state: 'SESSION_EXPIRED' }) })))
+        .toEqual({ kind: 'state', state: 'SESSION_EXPIRED' });
+      expect(attentionReason(account({ health: health({ session_days_left: 0 }) })).kind).toBe('expired');
+      expect(attentionReason(account({ health: health({ session_days_left: 2 }) })))
+        .toEqual({ kind: 'expiring', days: 2 });
+    });
+
+    it('offers a re-login only where the session is the problem', () => {
+      expect(offersRelogin(account({ health: health({ state: 'SESSION_EXPIRED' }) }))).toBe(true);
+      expect(offersRelogin(account({ health: health({ session_days_left: -1 }) }))).toBe(true);
+      expect(offersRelogin(account({ health: health({ state: 'CHECKPOINT' }) }))).toBe(false);
+      expect(offersRelogin(account({ health: health({ state: 'SESSION_EXPIRED', liveness: 'dead' }) }))).toBe(false);
+      expect(offersRelogin(account({}))).toBe(false);
+    });
+
+    it('lists checkpoints first and does not repeat a parked worker', () => {
+      const ne = account({ worker_id: 'ne-1', vnc_live: true, health: health({ needs_attention: true }) });
+      const mw = account({ worker_id: 'mw-1', health: health({ needs_attention: true }) });
+      const ok = account({ worker_id: 'sc-1', health: health({}) });
+      const fleet = { workers: [ne, mw, ok] } as unknown as FleetDoc;
+      const ch = { id: 7, worker_id: 'ne-1', kind: 'captcha' } as Challenge;
+      const entries = attentionEntries(fleet, [ch]);
+      expect(entries.map(e => e.kind === 'challenge' ? `c:${e.challenge.id}` : `w:${e.account.worker_id}`))
+        .toEqual(['c:7', 'w:mw-1']);
+      expect(entries[0]?.kind === 'challenge' && entries[0].account?.worker_id).toBe('ne-1');
+      expect(attentionEntries(null, null)).toEqual([]);
+    });
+  });
+
+  it('watches only what the facade can bridge to', () => {
+    expect(canWatch(account({ vnc_live: true }))).toBe(true);
+    expect(canWatch(account({ vnc_url: 'http://somewhere:6080' }))).toBe(false);
+    expect(canWatch(null)).toBe(false);
+  });
+
+  it('builds the relay socket on the page’s own origin', () => {
+    expect(vncSocketUrl('ne-1', { protocol: 'https:', host: 'inventory.recycleservers.com' }))
+      .toBe('wss://inventory.recycleservers.com/api/coordinator/vnc/ne-1/ws');
+    expect(vncSocketUrl('a b', { protocol: 'http:', host: 'localhost:5173' }))
+      .toBe('ws://localhost:5173/api/coordinator/vnc/a%20b/ws');
+  });
+
+  it('counts today in UTC and the trailing seven days', () => {
+    const now = Date.parse('2026-10-04T03:00:00Z');
+    const days = [
+      { day: '2026-09-27', reviewed: 1000, alerted: 0 },
+      { day: '2026-09-28', reviewed: 10, alerted: 1 },
+      { day: '2026-10-04', reviewed: 36, alerted: 2 },
+    ];
+    expect(reviewedToday(days, now)).toEqual({ today: 36, alertedToday: 2, last7: 46 });
+    expect(reviewedToday([], now)).toEqual({ today: 0, alertedToday: 0, last7: 0 });
+  });
+
+  it('opens only absolute config VNC links, never a facade-relative path', () => {
+    expect(externalVncUrl('/vnc/homelab-1')).toBeNull();
+    expect(externalVncUrl('vnc/homelab-1')).toBeNull();
+    expect(externalVncUrl('javascript:alert(1)')).toBeNull();
+    expect(externalVncUrl(null)).toBeNull();
+    expect(externalVncUrl('https://fbc-api.recycleservers.com/vnc/ne-1')).toBe('https://fbc-api.recycleservers.com/vnc/ne-1');
+  });
+
+  it('tells an unstamped image from a real build', () => {
+    expect(isUnstampedBuild('unknown (unknown)')).toBe(true);
+    expect(isUnstampedBuild('unknown')).toBe(true);
+    expect(isUnstampedBuild('0.5.5 (9958051)')).toBe(false);
+  });
 });
+
