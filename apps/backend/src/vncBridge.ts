@@ -106,6 +106,9 @@ async function mintTicket(env: Env, workerId: string): Promise<Grant | { error: 
   if (res.status === 404) {
     return { error: `The fleet console has no VNC target for ${workerId} (RS_VNC_TARGETS)` };
   }
+  if (res.status === 401 || res.status === 403) {
+    return { error: 'The fleet console refused the ERP’s credentials (COORDINATOR_API_TOKEN)' };
+  }
   if (!res.ok) return { error: `The fleet console refused a ticket (${res.status})` };
   const body = await res.json().catch(() => null) as { path?: unknown } | null;
   if (!body || typeof body.path !== 'string' || !body.path.startsWith('/')) {

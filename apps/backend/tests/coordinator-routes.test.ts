@@ -161,4 +161,20 @@ describe('Coordinator proxy routes (/api/coordinator)', () => {
       expect(unconfigured.status).toBe(501);
     });
   });
+
+  it('never passes the facade refusing our token through as a 401 the SPA reads as a lapsed session', async () => {
+    const { token } = await loginAs(ALEX);
+    for (const status of [401, 403]) {
+      stubFacade(status, { detail: 'Invalid bearer token' });
+      for (const path of ['/api/coordinator/fleet', '/api/coordinator/challenges?status=open', '/api/coordinator/challenges/7/screenshot']) {
+        const r = await api<{ error: string }>('GET', path, { token, env: ENV });
+        expect(r.status, `${path} on upstream ${status}`).toBe(502);
+        expect(r.body.error).toMatch(/COORDINATOR_API_TOKEN/);
+      }
+    }
+    // A refused write is the same misconfiguration.
+    stubFacade(401, { detail: 'Invalid bearer token' });
+    expect((await api('POST', '/api/coordinator/workers/ne-1/relogin', { token, env: ENV })).status).toBe(502);
+  });
 });
+
