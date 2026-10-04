@@ -5,7 +5,7 @@ import { api, testEnv } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import { mailConfig, type MailConfig } from '../src/mail';
 import { stubOutbox } from '../src/mail/send';
-import { matchSubmission, type InboundHeader, type MatchLookups } from '../src/mail/match';
+import { dmarcVerdict, matchSubmission, type InboundHeader, type MatchLookups } from '../src/mail/match';
 import { runInboxTick, toInboundHeader, type InboxClient } from '../src/mail/inbox';
 
 const BOX = 'sales@recycleservers.com';
@@ -178,30 +178,26 @@ function hdr(over: Partial<InboundHeader>): InboundHeader {
 describe('matchSubmission', () => {
   const lookups: MatchLookups = {
     byMessageId: new Map([['<ours@recycleservers.com>', 'WS-1001']]),
-    emailById: new Map([['WS-1002', 'seller@example.com']]),
     ownAddress: BOX,
   };
 
-  it('follows the thread headers first, whoever sent it', () => {
+  it('follows the thread headers to a message we sent, whoever replied', () => {
     expect(matchSubmission(hdr({ inReplyTo: '<ours@recycleservers.com>', from: 'someone@else.example' }), lookups))
-      .toEqual({ submissionId: 'WS-1001', via: 'thread' });
+      .toEqual({ submissionId: 'WS-1001' });
     expect(matchSubmission(hdr({ references: ['<zzz@x>', '<ours@recycleservers.com>'] }), lookups))
-      .toEqual({ submissionId: 'WS-1001', via: 'thread' });
+      .toEqual({ submissionId: 'WS-1001' });
   });
 
-  it('accepts a subject tag only from the submission address', () => {
-    expect(matchSubmission(hdr({ subject: 'Re: your sell request ws-1002' }), lookups))
-      .toEqual({ submissionId: 'WS-1002', via: 'subject' });
-    expect(matchSubmission(hdr({ subject: 'Re: WS-1002', from: 'mallory@evil.example' }), lookups)).toBeNull();
-    expect(matchSubmission(hdr({ subject: 'Re: WS-9999' }), lookups)).toBeNull();
+  it('never matches on a WS id in the subject, even from the submission address with a DMARC pass', () => {
+    // WS ids are sequential and From is forgeable; only our own Message-IDs thread.
+    expect(matchSubmission(hdr({ subject: 'Re: your sell request WS-1001' }), lookups)).toBeNull();
+    expect(matchSubmission(hdr({ subject: 'Re: WS-1001', authResults: ['mx.larksuite.com; dmarc=pass'] }), lookups)).toBeNull();
   });
 
-  it('never lets a DMARC failure in by subject, wherever the server put its verdict', () => {
-    const forged = { subject: 'Re: WS-1002' };
-    expect(matchSubmission(hdr({ ...forged, authResults: ['mx.larksuite.com; dmarc=fail'] }), lookups)).toBeNull();
-    expect(matchSubmission(hdr({ ...forged, authResults: ['attacker; dmarc=pass', 'mx.larksuite.com; dmarc=fail'] }), lookups)).toBeNull();
-    expect(matchSubmission(hdr({ ...forged, authResults: ['mx.larksuite.com; dmarc=pass'] }), lookups))
-      .toEqual({ submissionId: 'WS-1002', via: 'subject' });
+  it('reads the DMARC verdict so that a fail anywhere wins', () => {
+    expect(dmarcVerdict(['attacker; dmarc=pass', 'mx.larksuite.com; dmarc=FAIL'])).toBe('fail');
+    expect(dmarcVerdict(['mx.larksuite.com; spf=pass; dmarc=pass'])).toBe('pass');
+    expect(dmarcVerdict(['mx.larksuite.com; spf=pass'])).toBeNull();
   });
 
   it('reads one sender and every Authentication-Results header off the fetch', () => {
@@ -283,6 +279,16 @@ describe('runInboxTick', () => {
     SELECT direction, from_addr, body_text, status, dmarc, attachment_names, in_reply_to
     FROM web_submission_messages WHERE submission_id = ${id} AND direction = 'in' ORDER BY created_at
   `;
+  // A message we sent on the submission's thread; replies thread onto its id.
+  let sentSeq = 0;
+  const seedSent = async (id: string) => {
+    const messageId = `<sent.${++sentSeq}.${id.toLowerCase()}@recycleservers.com>`;
+    await getTestDb()`
+      INSERT INTO web_submission_messages (submission_id, direction, from_addr, to_addr, subject, message_id, status, created_at)
+      VALUES (${id}, 'out', ${BOX}, 'seller@example.com', 's', ${messageId}, 'sent', NOW() - interval '1 hour')
+    `;
+    return messageId;
+  };
   // One row per manager; counting one manager's is counting replies.
   const replyNotices = async () => Number((await getTestDb()`
     SELECT count(*) FROM notifications n JOIN users u ON u.id = n.user_id
@@ -337,16 +343,23 @@ describe('runInboxTick', () => {
     expect(await replyNotices()).toBe(1);
   });
 
-  it('matches on subject only from the submission address, and turns HTML into text', async () => {
+  it('turns HTML into text, and never threads on a subject or on a customer-chosen id', async () => {
     const id = await insertSubmission({ email: 'Seller@Example.com' });
     const sql = getTestDb();
+    const ours = await seedSent(id);
+    await sql`
+      INSERT INTO web_submission_messages (submission_id, direction, from_addr, to_addr, subject, message_id, status)
+      VALUES (${id}, 'in', 'seller@example.com', ${BOX}, 's', '<theirs@mail.example>', 'received')
+    `;
     await sql`INSERT INTO mail_sync_state (account, mailbox, uid_validity, last_uid) VALUES (${BOX}, 'INBOX', 7, 0)`;
     const box = new FakeInbox([
-      { uid: 1, header: { messageId: '<a@x>', subject: `Re: your sell request ${id}` }, raw: rawMail({ html: '<p>Is <b>$40</b> firm?</p>' }) },
-      { uid: 2, header: { messageId: '<b@x>', subject: `Re: ${id}`, from: 'mallory@evil.example' }, raw: rawMail({}) },
+      { uid: 1, header: { messageId: '<a@x>', inReplyTo: ours }, raw: rawMail({ html: '<p>Is <b>$40</b> firm?</p>' }) },
+      { uid: 2, header: { messageId: '<b@x>', subject: `Re: your sell request ${id}` }, raw: rawMail({}) },
+      // An inbound message's own Message-ID was chosen by its sender.
+      { uid: 3, header: { messageId: '<c@x>', inReplyTo: '<theirs@mail.example>' }, raw: rawMail({}) },
     ]);
     await runInboxTick(sql, cfg, box, new Map());
-    expect((await replies(id)).map((m) => m.body_text)).toEqual(['Is $40 firm?']);
+    expect((await replies(id)).map((m) => m.body_text)).toEqual(['', 'Is $40 firm?']);
     expect(box.sourceCalls).toEqual([1]);
   });
 
@@ -354,7 +367,7 @@ describe('runInboxTick', () => {
     const id = await insertSubmission({ status: 'spam' });
     const sql = getTestDb();
     await sql`INSERT INTO mail_sync_state (account, mailbox, uid_validity, last_uid) VALUES (${BOX}, 'INBOX', 7, 0)`;
-    const box = new FakeInbox([{ uid: 1, header: { subject: `Re: ${id}` }, raw: rawMail({}) }]);
+    const box = new FakeInbox([{ uid: 1, header: { inReplyTo: await seedSent(id) }, raw: rawMail({}) }]);
     await runInboxTick(sql, cfg, box, new Map());
     expect(await replies(id)).toHaveLength(1);
     expect(await replyNotices()).toBe(0);
@@ -374,9 +387,10 @@ describe('runInboxTick', () => {
     const id = await insertSubmission();
     const sql = getTestDb();
     await sql`INSERT INTO mail_sync_state (account, mailbox, uid_validity, last_uid) VALUES (${BOX}, 'INBOX', 7, 0)`;
+    const ours = await seedSent(id);
     const box = new FakeInbox([
-      { uid: 1, header: { messageId: '<one@x>', subject: `Re: ${id}` }, raw: rawMail({ body: 'first' }) },
-      { uid: 2, header: { messageId: '<two@x>', subject: `Re: ${id}` }, raw: rawMail({ body: 'second' }) },
+      { uid: 1, header: { messageId: '<one@x>', inReplyTo: ours }, raw: rawMail({ body: 'first' }) },
+      { uid: 2, header: { messageId: '<two@x>', inReplyTo: ours }, raw: rawMail({ body: 'second' }) },
     ]);
     box.failSource.add(1);
     const strikes = new Map<number, number>();

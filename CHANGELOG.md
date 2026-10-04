@@ -37,9 +37,10 @@ Web submissions can be answered by email from inside the ERP (RS-161).
     `contacted`.
   - **Receiving.** The backend reads the mailbox's INBOX over IMAP every two
     minutes and attaches the customer's answers to the same thread. A message
-    counts as an answer if it replies to one of ours, or if its subject names
-    the WS id, it comes from the submission's address, and Lark's DMARC check
-    didn't fail it.
+    counts as an answer only if it replies to one the ERP sent. A WS id in
+    the subject is not enough: ids are sequential and a From address is easy
+    to forge, so a forged "pay my new PayPal" message can't land on a
+    seller's thread.
   - **Read-only.** The poll looks at headers first, downloads only the
     matches, and never marks anything read, so the box stays usable in Lark.
   - **Shown in the thread.** Each answer shows its sender address, with a

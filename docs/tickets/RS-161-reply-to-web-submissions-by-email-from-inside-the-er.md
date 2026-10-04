@@ -51,13 +51,10 @@ Decisions taken with the requester before planning:
 - [ ] Customer replies are pulled from the Lark INBOX about every 2 minutes and
       appear in the thread. The pull is read-only, so Lark's read state is
       untouched.
-- [ ] A reply is matched to a submission in one of two ways:
-      - its `In-Reply-To` or `References` names one of our sent messages, or
-      - its subject carries the WS id **and** it comes from the submission's
-        address, with no DMARC failure.
-
-      Anything else, including mail whose From names several addresses, stays
-      in Lark only.
+- [ ] A reply is matched to a submission only when its `In-Reply-To` or
+      `References` names a message the ERP sent. A WS id in the subject is
+      not enough. Anything else, including mail whose From names several
+      addresses, stays in Lark only.
 - [ ] Every inbound message shows its raw sender address. A warning appears
       when that address isn't the submission's or Lark's DMARC check failed.
 - [ ] Attachments on a reply are listed by name with "open in Lark mail".
@@ -95,5 +92,18 @@ of printed letters.
 ## Notes
 
 - Plan: `~/.claude/plans/rustling-doodling-bird.md`.
+- **Live check against the real box `sell@ram4cash.com` (2026-10-04)**
+  - **Logins.** The SMTP login on 465 and the read-only IMAP EXAMINE on 993
+    both worked.
+  - **Send.** One reply was sent to the box itself. Lark filed it in 已发送
+    (Sent) with the ERP's Message-ID unchanged, which is what reply threading
+    rests on.
+  - **INBOX.** The self-addressed copy never reached INBOX, so a customer
+    reply's In-Reply-To match and Lark's DMARC stamping are still unseen
+    live.
+- **Follow-up, not built.** The poll reads INBOX only. A customer reply that
+  Lark files as 垃圾邮件 (Junk) never reaches the thread.
+- **The subject fallback was removed** after a background security review.
+  A WS id and a forgeable From were enough to attach mail to a thread.
 - `MAIL_*` goes on the Railway **prod** backend only. Dev's database is a
   nightly copy of prod, so a test send from dev would reach a real customer.

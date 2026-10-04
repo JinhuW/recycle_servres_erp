@@ -1336,13 +1336,14 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     - The first sent reply moves a `new` submission to `contacted`.
   - **Receiving.** Every two minutes the backend reads the box's INBOX over
     IMAP, read-only, so nothing in Lark changes. It attaches a customer's
-    answer to the thread in one of two ways:
-    - the answer replies to one of the thread's messages, or
-    - its subject names the WS id **and** it comes from the submission's
-      address, with no DMARC failure from Lark.
-
-    Mail whose From names more than one address is ignored. Other mail is
-    never downloaded.
+    answer to the thread only when the answer replies to a message the ERP
+    sent: its `In-Reply-To` or `References` names one of our Message-IDs.
+    A WS id in the subject is not enough, because ids are sequential and a
+    From address is easy to forge. A customer who writes a fresh email
+    instead of replying stays in Lark. Mail whose From names more than one
+    address is ignored. Other mail is never downloaded. Lark keeps the
+    ERP's Message-ID and files each sent reply in its Sent folder (checked
+    against the live box).
   - **What the thread shows.**
     - Each answer shows its sender address, with a warning when that isn't
       the submission's address or Lark's DMARC check failed.

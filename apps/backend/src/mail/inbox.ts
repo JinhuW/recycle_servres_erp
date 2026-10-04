@@ -17,7 +17,7 @@ import type { Env } from '../types';
 import { notifyManagers } from '../lib/notify';
 import { mailConfig, mailLog, type MailConfig } from './index';
 import {
-  dmarcVerdict, matchSubmission, normalizeMessageId, parseReferences, subjectSubmissionIds, threadIds,
+  dmarcVerdict, matchSubmission, normalizeMessageId, parseReferences, threadIds,
   type InboundHeader, type MatchLookups,
 } from './match';
 
@@ -143,18 +143,13 @@ export async function parseInbound(raw: Buffer | string): Promise<ParsedInbound>
 
 async function loadLookups(sql: Sql, headers: InboundHeader[], ownAddress: string): Promise<MatchLookups> {
   const ids = [...new Set(headers.flatMap(threadIds))];
-  const wsIds = [...new Set(headers.flatMap((h) => subjectSubmissionIds(h.subject)))];
+  // Only ids we generated: an inbound message's own Message-ID was chosen by
+  // its sender, so it must never stand in for ours.
   const known = ids.length === 0 ? [] : await sql<{ message_id: string; submission_id: string }[]>`
-    SELECT message_id, submission_id FROM web_submission_messages WHERE message_id = ANY(${ids}::text[])
+    SELECT message_id, submission_id FROM web_submission_messages
+    WHERE direction = 'out' AND message_id = ANY(${ids}::text[])
   `;
-  const subs = wsIds.length === 0 ? [] : await sql<{ id: string; email: string }[]>`
-    SELECT id, lower(email) AS email FROM web_submissions WHERE id = ANY(${wsIds}::text[])
-  `;
-  return {
-    byMessageId: new Map(known.map((r) => [r.message_id, r.submission_id])),
-    emailById: new Map(subs.map((r) => [r.id, r.email])),
-    ownAddress,
-  };
+  return { byMessageId: new Map(known.map((r) => [r.message_id, r.submission_id])), ownAddress };
 }
 
 // Returns whether a new row was written.
