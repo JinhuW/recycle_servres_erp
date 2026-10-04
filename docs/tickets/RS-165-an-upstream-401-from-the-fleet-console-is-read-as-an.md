@@ -7,8 +7,8 @@ priority: P2
 created: 2026-10-04
 reporter: Jinhu
 branch: fix/coordinator-upstream-401
-pr:
-version:
+pr: 496
+version: 1.208.1
 related: [RS-164]
 ---
 
