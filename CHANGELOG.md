@@ -17,6 +17,23 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.208.1] - 2026-10-04
+
+A stale fleet-console token no longer signs managers out of the ERP (RS-165).
+
+### Fixed
+
+- **The facade refusing the ERP's token is reported as that, not as an expired
+  session.** The `/api/coordinator` proxy passed every upstream status through
+  verbatim, so when the dev environment's `COORDINATOR_API_TOKEN` stopped
+  matching the console's token, the console's 401 reached the browser as a
+  401 — which the SPA reads as "your session expired". It refreshed, retried,
+  raised an "HTTP 401" dialog on the Facebook tracker page, and after a few
+  rounds the refreshes were refused too. An upstream 401/403 now becomes a
+  502 whose message names `COORDINATOR_API_TOKEN`, on the JSON routes, the
+  checkpoint screenshot and Re-login alike; the live viewer says the same when
+  its ticket is refused, and each refusal is logged as a warning.
+
 ## [1.208.0] - 2026-10-04
 
 The desktop sidebar folds to its icon rail on demand (RS-166).
