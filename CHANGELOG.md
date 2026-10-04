@@ -17,6 +17,31 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.207.0] - 2026-10-04
+
+The desktop sidebar gets a second level, and the two listing monitors move
+into it (RS-169). Facebook tracker and Tracker sat as two unrelated rows in
+Oversight; they are one job — watching marketplaces for sellers — so they now
+live under a single **Monitors** entry.
+
+### Added
+
+- **Sidebar entries can have children.** A parent opens while you are on one
+  of its pages and is a single row with a › caret everywhere else; the parent
+  itself links to its first child, so ⌘-click still opens a tab. The table
+  and the rules for what is shown and lit moved out of `Sidebar.tsx` into
+  `lib/desktopNav.ts`, with unit tests. In the icon rail the caret hides and
+  the children show as icons.
+
+### Changed
+
+- **Oversight ▸ Monitors** holds **Facebook** (`/fleet`, including the
+  worker viewer at `/fleet/watch/<worker>`) and **Reddit** (`/tracker`).
+  URLs and the pages themselves are unchanged; only the sidebar labels lost
+  their "tracker" suffix, since the parent now says what they are.
+- Inventory and Payments stay lit on their Analysis and Internal tabs through
+  an `alsoActiveOn` field on the entry rather than two hard-coded clauses.
+
 ## [1.204.0] - 2026-10-04
 
 The Facebook tracker page catches up with the rs-console dashboard it was

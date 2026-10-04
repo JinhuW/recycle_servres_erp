@@ -175,6 +175,7 @@ const zh: Record<string, string> = {
   nav_analysis: '分析',
   nav_group_oversight: '监督',
   nav_activity: '操作记录',
+  nav_monitors: '监控',
 
   // ── Activity — the global audit register (zh) ──
   acTitle: '操作记录',
@@ -2048,7 +2049,7 @@ const zh: Record<string, string> = {
   'pwa.intro.android.note':     '即时安装，无需应用商店。',
 
   // ── Tracker (zh) ──
-  nav_tracker: '追踪器',
+  nav_tracker: 'Reddit',
   trkTitle: 'Reddit 追踪器',
   trkSubtitle: '二手交易监控的提醒规则、关注的子版块与机群状态。',
   trkNotConfigured: '追踪器连接尚未配置。请在后端设置 TRACKER_API_URL 和 TRACKER_API_TOKEN 后刷新。',
@@ -2101,7 +2102,7 @@ const zh: Record<string, string> = {
   trkSubInvalidInterval: '间隔不得少于 30 秒。',
 
   // ── Facebook 机群（控制中心） ──
-  nav_coordinator: 'Facebook 追踪器',
+  nav_coordinator: 'Facebook',
   fbcTitle: 'Facebook 追踪器',
   fbcSubtitle: '监控器运行的每个 Facebook 账号：在哪里搜索、搜索什么、是否在线——以及审核量、验证拦截和内容过滤规则。',
   fbcNotConfigured: '节点控制中心尚未配置。请在后端设置 COORDINATOR_API_URL 和 COORDINATOR_API_TOKEN 后刷新。',

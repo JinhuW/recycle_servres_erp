@@ -1,46 +1,12 @@
+import { Fragment, type ReactNode } from 'react';
 import { Icon, type IconName } from './Icon';
 import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
 import { useEffectiveUser } from '../lib/tweaks';
-import type { Role } from '../lib/types';
+import { shownNav, type ShownLeaf } from '../lib/desktopNav';
 import { DESKTOP_VIEW_TO_PATH, hrefFor, onLinkClick, type DesktopViewId } from '../lib/route';
 
 export type DesktopView = DesktopViewId;
-
-type NavItem = { id: DesktopView; tKey: string; icon: IconName; roles: Role[]; badge?: string };
-
-// Two groups: where you do the work, and where you check it. Activity and
-// Settings are the latter — neither is a place a purchase gets made.
-const NAV: { tKey: string; items: NavItem[] }[] = [
-  {
-    tKey: 'workspace',
-    items: [
-      { id: 'dashboard',  tKey: 'nav_dashboard',  icon: 'dashboard',  roles: ['manager', 'purchaser'] },
-      { id: 'submit',     tKey: 'nav_submit',     icon: 'submit',     roles: ['manager', 'purchaser'], badge: '+' },
-      { id: 'history',    tKey: 'nav_history',    icon: 'history',    roles: ['manager', 'purchaser'] },
-      // Shipping is unlisted for now: tracking numbers are handed off from the
-      // PO itself (the In Transit dialog). The routes still resolve by URL.
-      { id: 'clients',    tKey: 'nav_clients',    icon: 'book',       roles: ['manager', 'purchaser'] },
-      { id: 'market',     tKey: 'nav_market',     icon: 'tag',        roles: ['manager', 'purchaser'] },
-      { id: 'inventory',  tKey: 'nav_inventory',  icon: 'inventory',  roles: ['manager'] },
-      { id: 'sellorders', tKey: 'nav_sellorders', icon: 'tag',        roles: ['manager'] },
-      { id: 'transfers',  tKey: 'nav_transfers',  icon: 'truck',      roles: ['manager'] },
-      { id: 'websubmissions', tKey: 'nav_websubmissions', icon: 'mail', roles: ['manager'] },
-    ],
-  },
-  {
-    tKey: 'nav_group_oversight',
-    items: [
-      { id: 'activity',   tKey: 'nav_activity',   icon: 'clock',      roles: ['manager'] },
-      { id: 'payments',   tKey: 'nav_payments',   icon: 'dollar',     roles: ['manager'] },
-      { id: 'tracker',    tKey: 'nav_tracker',    icon: 'globe',      roles: ['manager'] },
-      { id: 'coordinator', tKey: 'nav_coordinator', icon: 'shield',   roles: ['manager'] },
-      // Purchasers get Settings too (Account + Connectors — the MCP connect
-      // page); the admin sections are filtered inside DesktopSettings.
-      { id: 'settings',   tKey: 'nav_settings',   icon: 'settings',   roles: ['manager', 'purchaser'] },
-    ],
-  },
-];
 
 type Props = {
   view: DesktopView;
@@ -48,6 +14,46 @@ type Props = {
 
 // Nav items are real anchors so ⌘-click / middle-click open a tab; a plain
 // click still routes through navigate() (see onLinkClick).
+function NavLink({ view, className, label, icon, current, children }: {
+  view: DesktopViewId;
+  className: string;
+  label: string;
+  icon: IconName;
+  current?: boolean;
+  children?: ReactNode;
+}) {
+  const path = DESKTOP_VIEW_TO_PATH[view];
+  return (
+    <a
+      className={className}
+      href={hrefFor(path)}
+      onClick={onLinkClick(path)}
+      aria-current={current ? 'page' : undefined}
+      title={label}
+    >
+      <Icon name={icon} size={15} className="nav-icon" />
+      <span>{label}</span>
+      {children}
+    </a>
+  );
+}
+
+function LeafLink({ item, sub }: { item: ShownLeaf; sub?: boolean }) {
+  const { t } = useT();
+  const { leaf, active } = item;
+  return (
+    <NavLink
+      view={leaf.id}
+      className={'nav-item' + (sub ? ' nav-sub' : '') + (active ? ' active' : '')}
+      label={t(leaf.tKey)}
+      icon={leaf.icon}
+      current={active}
+    >
+      {leaf.badge && <span className="badge">{leaf.badge}</span>}
+    </NavLink>
+  );
+}
+
 export function Sidebar({ view }: Props) {
   const { t } = useT();
   const { logout } = useAuth();
@@ -63,37 +69,36 @@ export function Sidebar({ view }: Props) {
         </div>
       </div>
 
-      {/* Analysis and Internal transactions live as tabs under Inventory and
-          Payments — keep the parent lit while you are on one. */}
-      {NAV.map(group => {
-        const items = group.items.filter(n => n.roles.includes(user.role));
-        if (!items.length) return null;
-        return (
-          <div key={group.tKey} className="nav-group">
-            <div className="nav-section">{t(group.tKey)}</div>
-            {items.map(n => {
-              const active = view === n.id
-                || (n.id === 'inventory' && view === 'analysis')
-                || (n.id === 'payments' && view === 'internaltx');
-              const path = DESKTOP_VIEW_TO_PATH[n.id];
-              return (
-                <a
-                  key={n.id}
-                  className={'nav-item ' + (active ? 'active' : '')}
-                  href={hrefFor(path)}
-                  onClick={onLinkClick(path)}
-                  aria-current={active ? 'page' : undefined}
-                  title={t(n.tKey)}
+      {shownNav(user.role, view).map(group => (
+        <div key={group.tKey} className="nav-group">
+          <div className="nav-section">{t(group.tKey)}</div>
+          {group.items.map(item => {
+            if (item.kind === 'leaf') return <LeafLink key={item.leaf.id} item={item} />;
+            const label = t(item.parent.tKey);
+            return (
+              <Fragment key={item.parent.tKey}>
+                {/* Not aria-current: while it is open, the page is one of its
+                    children. */}
+                <NavLink
+                  view={item.target}
+                  className={'nav-item nav-parent' + (item.open ? ' open' : '')}
+                  label={label}
+                  icon={item.parent.icon}
                 >
-                  <Icon name={n.icon} size={15} className="nav-icon" />
-                  <span>{t(n.tKey)}</span>
-                  {n.badge && <span className="badge">{n.badge}</span>}
-                </a>
-              );
-            })}
-          </div>
-        );
-      })}
+                  <span className="nav-caret">
+                    <Icon name={item.open ? 'chevronDown' : 'chevronRight'} size={13} />
+                  </span>
+                </NavLink>
+                {item.open && (
+                  <div className="nav-children" role="group" aria-label={label}>
+                    {item.children.map(c => <LeafLink key={c.leaf.id} item={c} sub />)}
+                  </div>
+                )}
+              </Fragment>
+            );
+          })}
+        </div>
+      ))}
 
       <div className="sidebar-foot">
         <div className="avatar">{user.initials}</div>

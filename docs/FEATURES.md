@@ -1258,9 +1258,11 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
 ## Oversight extras
 
 - **Tracker** — admin page and API proxy for the Reddit listing monitor, with a
-  fleet status filter and infinite scroll (v1.64.0, v1.65.0).
+  fleet status filter and infinite scroll (v1.64.0, v1.65.0).  In the sidebar
+  it is **Monitors ▸ Reddit** (v1.207.0).
 - **Coordinator** — Facebook tracker page with live fleet, review stats and a
-  filter prompt (v1.83.1).  The fleet view shows one row per Facebook account
+  filter prompt (v1.83.1), reached from **Monitors ▸ Facebook** in the sidebar
+  (v1.207.0).  The fleet view shows one row per Facebook account
   (liveness, state, session days left, last search, heartbeat, the week's
   alerts from its cities, the vault login and Facebook user id, expandable to
   cities, secrets by name, browser identity, backup age, proxy, session file
@@ -1509,6 +1511,11 @@ removed in v1.191.0.
   64px icon rail** (v1.134.0) — brand mark, nav icons with their names on
   hover, avatar and sign-out — where it used to disappear and leave a
   split-screen window with no navigation at all.
+- **The sidebar has a second level** (v1.207.0). A parent entry opens while
+  you are on one of its pages and is one row with a › caret everywhere else;
+  clicking it opens its first child. The one parent today is **Oversight ▸
+  Monitors**, holding **Facebook** (`/fleet`) and **Reddit** (`/tracker`). In
+  the icon rail the caret hides and the open children show as icons.
 - **Menus and record references are real links** (v1.144.0). The sidebar,
   the Inventory ▸ Analysis strip, the phone tab bar and Home quick links, and
   every PO, sell-order or payment id shown on another page — the inventory
