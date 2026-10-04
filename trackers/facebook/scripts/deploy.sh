@@ -184,7 +184,11 @@ if [ "$MODE" != "sync" ]; then
     # The output goes to a file so the tail is still short on success and the
     # whole thing is there to read on failure.
     build_log=$(mktemp)
-    if ssh "$VM" "cd $REMOTE/ai-marketplace-monitor && docker build -t $IMAGE ." \
+    # The build args are the identity every heartbeat reports (`version` on
+    # the worker's health row); without them the image says "unknown
+    # (unknown)" and the fleet dashboard cannot tell an old image from a new.
+    if ssh "$VM" "cd $REMOTE/ai-marketplace-monitor && docker build -t $IMAGE \
+            --build-arg RS_VERSION=$VERSION --build-arg RS_MONITOR_COMMIT=$SHA ." \
             > "$build_log" 2>&1; then
         tail -5 "$build_log"
         rm -f "$build_log"
