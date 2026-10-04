@@ -7,8 +7,8 @@ priority: P2
 created: 2026-10-04
 reporter: Jinhu
 branch: feat/fleet-console-parity
-pr:
-version:
+pr: 491
+version: 1.204.0
 related: [RS-048]
 ---
 
