@@ -2,12 +2,12 @@
 id: RS-169
 title: Second-level sidebar nav; the trackers move under Monitors
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-04
 reporter: jinhu
 branch: feat/sidebar-second-level-nav
-pr:
+pr: 495
 version: 1.207.0
 related: [RS-164, RS-166]
 ---
