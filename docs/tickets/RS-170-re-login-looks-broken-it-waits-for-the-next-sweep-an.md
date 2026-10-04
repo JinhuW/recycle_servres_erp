@@ -2,12 +2,12 @@
 id: RS-170
 title: Re-login looks broken: it waits for the next sweep and cannot sign in without a stored password
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-04
 reporter: Jinhu
 branch: fix/relogin-honest
-pr:
+pr: 499
 version: 1.208.2
 related: [RS-164]
 ---
