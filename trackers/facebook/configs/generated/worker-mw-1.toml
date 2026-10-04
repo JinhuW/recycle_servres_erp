@@ -1,0 +1,205 @@
+# GENERATED FILE — DO NOT EDIT.
+# Produced by `rsc gen-configs` from configs/master.toml + configs/fleet.toml.
+# Worker: mw-1   Region: rs_midwest (cedar-rapids, desmoines, chicago, 113848465291957, 108768365814696, 104023752968315, fort-wayne, indianapolis, lexington, louisville, detroit, grandrapids, 106102649421844, duluth, minneapolis, 103941732976595, 104114042957938, cincinnati, cleveland, columbus, 104023459634857, 106021666096708, greenbay, madison, milwaukee)
+
+[monitor]
+storage_state_path = "/data/fb_state.json"
+proxy_server = [
+    "${PROXY_MIDWEST}",
+]
+
+[ai.openrouter]
+provider = "openai"
+base_url = "https://openrouter.ai/api/v1"
+api_key = "${OPENROUTER_API_KEY}"
+model = "openai/gpt-5.6-luna"
+timeout = 60
+max_tokens = 4096
+
+[marketplace.facebook]
+login_wait_time = 120
+start_at = [
+    "13:00",
+    "21:00",
+]
+delivery_method = "local_pick_up"
+date_listed = [
+    "last 7 days",
+    "last 7 days",
+]
+title_prefilter = true
+max_results = 120
+min_seller_rating = 4.5
+exclude_unrated_sellers = false
+search_interval = "45m"
+max_search_interval = "75m"
+rating = 4
+min_unit_count = 5
+ai = [
+    "openrouter",
+]
+notify = [
+    "recycle",
+]
+prompt = "You are a purchasing agent for Recycle Servers LLC, a used-server hardware reseller in Denver, CO. Decide whether the Facebook Marketplace listing given at the end is a genuine FOR-SALE offer of a BULK LOT (5+ units) of a component type we buy.\n\nWE BUY exactly two component types:\n- RAM: DDR4 or DDR5 memory modules in any form factor — server ECC RDIMM/LRDIMM, desktop DIMMs, and laptop SODIMMs are all wanted. Module label prefixes identify the generation when the seller doesn't say: PC4-xxxxx is DDR4 and PC5-xxxxx is DDR5 (wanted); PC3/PC3L is DDR3 and PC2 is DDR2 (not wanted).\n- SSD: enterprise/datacenter solid-state drives (SATA, SAS, or NVMe/U.2).\n\nCOUNTING THE UNITS. You are judging TEXT ONLY — the title and the description. The photos are not attached, so never assume what they show. Sellers often bury the count in the description rather than the title (\"clearing out a box of 24\", \"$8 each, 40 available\", \"3 trays of 8\"), so read all of it and work the count out from whatever the text gives — an explicit number, a per-unit price with an available count, or a lot described as N x M. Treat the quantity as unstated only when the text really gives nothing to count.\n\nTHE SINGLE-UNIT RULE. When the text makes you CONFIDENT the seller is offering exactly ONE unit, reject the listing. Singular phrasing all the way through is the signal: \"selling my 32GB stick\", \"1x 960GB SSD\", \"this drive\", \"the module\", one price for one item, a title naming a single part number with no count. This rule outranks everything else — a lone module or drive is rejected however large its capacity, however low its price, however rare the part. Only genuine doubt about the count makes the quantity \"unclear\" instead; do not manufacture doubt to rescue an attractive single item.\n\nREJECT the listing when ANY of these is true:\n- It is not RAM or an SSD as defined above: whole servers, motherboards, GPUs, hard disk drives (HDD), networking gear (NICs, switches), and other parts. CPUs too — we are NOT buying Xeon or EPYC processors at the moment, even though they are server parts.\n- The memory is DDR3, DDR2 or older ONLY. A mixed-generation lot qualifies on its DDR4/DDR5 modules alone: count only those toward the 5-unit minimum and reject if fewer than 5 remain.\n- You are confident it is ONE unit (the single-unit rule above), it has fewer than 5 units, or the text gives nothing to work a quantity out from.\n- The memory is a consumer gaming-brand kit: Corsair (Vengeance, Dominator), G.Skill (Trident, Ripjaws, Aegis), Kingston Fury / HyperX, TeamGroup T-Force, Crucial Ballistix, ADATA XPG, or any RGB-branded kit. The brand line, not the form factor, is what rejects: plain/OEM modules (Samsung, SK Hynix, Micron, plain Crucial or Kingston ValueRAM) still qualify, and a memory lot is never rejected merely for being non-ECC, desktop, or SODIMM.\n- The SSDs are low-capacity consumer drives with no resale value to us. (This applies to SSDs only, never to RAM.)\n- The seller is looking to buy or trade, it is a discussion rather than a real for-sale listing, or it is already marked sold or pending.\n- It is an eBay (or other online marketplace) reseller cross-posting their storefront inventory rather than a local seller with the parts in hand. Tell-tales: pointing at their eBay store or feedback score, stock/catalogue photos instead of photos of the actual parts, \"brand new sealed\" retail stock, shipping-only with no local pickup, or a description written as a retail spec sheet. Do NOT reject a genuine local seller merely for mentioning eBay — quoting eBay prices to justify their own (\"these go for $1k on eBay\") is normal."
+rating_prompt = "Rate the listing from 1 to 5:\n1 - Reject: any reject rule above applies. A listing you are confident is a SINGLE unit is always a 1 — never higher on capacity, price or condition.\n2 - Unlikely: probably not a qualifying bulk component lot, or the text establishes no quantity.\n3 - Maybe: a qualifying component type but borderline quantity (around 5), unclear condition, or a memory lot whose generation cannot be determined from the text.\n4 - Good: a clear bulk lot of 5+ DDR4/DDR5 memory modules (server, desktop or laptop) or 5+ enterprise SSDs, with usable details.\n5 - Strong: a large or high-value bulk lot (many units, high capacity, or priced well below market). \"Large\" and \"high-value\" describe the lot, never a single unit.\nConclude with exactly one JSON object and nothing else — no prose before or after it, no code fences:\n{\"rating\": <1-5>, \"unit_count\": <integer or null>, \"count_phrase\": \"<phrase>\", \"summary\": \"<summary>\"}\nwhere:\n- rating is the 1-5 rating defined above;\n- unit_count is the number of units you worked out from the text. Use 1 ONLY when you are confident the seller is offering exactly one unit; use null when the text gives nothing to count or you are genuinely unsure. A confident unit_count of 1 must always come with a rating of 1.\n- count_phrase is that count as a short phrase (e.g. \"8 sticks\", \"24 SSDs\"), or \"\" when unit_count is null;\n- summary names the component type, the unit count, and the price (max 25 words). Always state the count explicitly, e.g. \"8x 32GB DDR4 ECC RDIMM\"."
+search_region = "rs_midwest"
+worker_id = "mw-1"
+control_plane_url = "${RS_CONTROL_PLANE_URL}"
+control_plane_token = "${RS_CONTROL_PLANE_TOKEN}"
+
+[region.rs_midwest]
+full_name = "Midwest / Ohio Valley"
+search_city = [
+    "cedar-rapids",
+    "desmoines",
+    "chicago",
+    "113848465291957",
+    "108768365814696",
+    "104023752968315",
+    "fort-wayne",
+    "indianapolis",
+    "lexington",
+    "louisville",
+    "detroit",
+    "grandrapids",
+    "106102649421844",
+    "duluth",
+    "minneapolis",
+    "103941732976595",
+    "104114042957938",
+    "cincinnati",
+    "cleveland",
+    "columbus",
+    "104023459634857",
+    "106021666096708",
+    "greenbay",
+    "madison",
+    "milwaukee",
+]
+city_name = [
+    "Cedar Rapids, IA",
+    "Des Moines, IA",
+    "Chicago, IL",
+    "Peoria, IL",
+    "Rockford, IL",
+    "Springfield, IL",
+    "Fort Wayne, IN",
+    "Indianapolis, IN",
+    "Lexington, KY",
+    "Louisville, KY",
+    "Detroit, MI",
+    "Grand Rapids, MI",
+    "Lansing, MI",
+    "Duluth, MN",
+    "Minneapolis, MN",
+    "Rochester, MN",
+    "Akron, OH",
+    "Cincinnati, OH",
+    "Cleveland, OH",
+    "Columbus, OH",
+    "Dayton, OH",
+    "Toledo, OH",
+    "Green Bay, WI",
+    "Madison, WI",
+    "Milwaukee, WI",
+]
+radius = [
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+]
+currency = "USD"
+
+[item.server_ram]
+search_phrases = [
+    "server ram memory ddr4 ddr5 ecc",
+]
+keywords = [
+    "ram OR memory OR dimm OR sodimm OR rdimm OR lrdimm OR udimm OR ddr3 OR ddr4 OR ddr5 OR ecc",
+]
+antikeywords = [
+    "single stick",
+    "\"ebay store\" OR \"my ebay\" OR \"ebay listing\" OR \"ebay.com\" OR \"our ebay\" OR \"ebay feedback\"",
+    "corsair OR vengeance OR dominator OR g.skill OR gskill OR trident OR ripjaws OR aegis OR t-force OR tforce OR teamgroup OR xpg OR ballistix OR hyperx OR fury OR rgb",
+]
+description = "Bulk lots of DDR4/DDR5 memory in any form factor — server\nECC RDIMM/LRDIMM, desktop DIMMs, and laptop SODIMMs. Lots of 5+ modules.\nDDR3 and older generations are not wanted."
+
+[item.server_cpu]
+enabled = false
+search_phrases = [
+    "xeon lot",
+    "epyc lot",
+    "server cpu lot",
+]
+keywords = [
+    "xeon OR epyc",
+]
+antikeywords = [
+    "laptop",
+    "i3",
+    "i5",
+    "i7",
+    "i9",
+    "ryzen",
+    "single",
+    "\"ebay store\" OR \"my ebay\" OR \"ebay listing\" OR \"ebay.com\" OR \"our ebay\" OR \"ebay feedback\"",
+]
+description = "Bulk lots of server CPUs: Intel Xeon (E5, Scalable/Gold/Platinum)\nand AMD EPYC. Only interested in lots of 5+ processors."
+
+[item.enterprise_ssd]
+search_phrases = [
+    "ssd lot server ssd samsung micron",
+]
+keywords = [
+    "ssd OR nvme OR u.2 OR sas OR m.2 OR \"solid state\"",
+]
+antikeywords = [
+    "hdd",
+    "hard drive",
+    "external",
+    "usb",
+    "laptop",
+    "single",
+    "gaming",
+    "rgb",
+    "portable",
+    "flash drive",
+    "sd card",
+    "thumb drive",
+    "\"ebay store\" OR \"my ebay\" OR \"ebay listing\" OR \"ebay.com\" OR \"our ebay\" OR \"ebay feedback\"",
+]
+description = "Bulk lots of enterprise/datacenter SSDs: SATA, SAS, or NVMe/U.2\nsolid-state drives. Only interested in lots of 5+ drives. Not spinning HDDs."
+
+[user.recycle]
+remind = false
+notify_with = [
+    "coordinator",
+]
+
+[notification.coordinator]
+coordinator_url = "${RS_COORDINATOR_URL}"
+coordinator_token = "${RS_COORDINATOR_TOKEN}"
+worker_id = "mw-1"

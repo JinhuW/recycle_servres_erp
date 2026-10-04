@@ -1,0 +1,63 @@
+# Coordinator: one instance for the whole fleet.
+#
+# Holds every account's secrets (Fernet-encrypted in Postgres), answers workers'
+# verification-code requests, aggregates fleet health, and owns the challenge
+# queue the admin console reads. It is the most sensitive service here — a
+# compromise of this host reaches every Facebook account at once.
+#
+# Bound to 127.0.0.1 deliberately. Workers on this host reach it over the
+# `rs-fleet` docker network by name; workers on other machines must come in over
+# a tailnet/WireGuard, never a LAN or public port. The bearer tokens guard
+# against stray requests, not against a reachable port.
+
+services:
+  coordinator:
+    build:
+      context: ../rs_coordinator
+      dockerfile: ../deploy/Dockerfile.coordinator
+    image: rs-coordinator:latest
+    container_name: rs-coordinator
+    restart: unless-stopped
+
+    ports:
+      - "127.0.0.1:8500:8500"
+
+    # RS_DATABASE_URL, RS_VAULT_KEY, RS_WORKER_TOKEN_SECRET, RS_ADMIN_TOKEN and
+    # the Telegram pair all come from here. Without RS_VAULT_KEY the service
+    # starts but cannot read a single secret, so treat a missing value as an
+    # outage rather than a warning.
+    env_file:
+      - ../configs/secrets.env
+
+    environment:
+      RS_LOG_LEVEL: INFO
+      # Only used if RS_DATABASE_URL is absent — the SQLite fallback. Kept so a
+      # misconfigured deploy degrades to a local file rather than crashing, but
+      # note the vault would then be empty: the accounts live in Postgres.
+      RS_COORDINATOR_DB: /data/coordinator.db
+
+    volumes:
+      # Screenshots from escalated challenges, plus the SQLite fallback file.
+      - coordinator-data:/data
+
+    networks:
+      - rs-fleet
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8500/healthz')"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+volumes:
+  coordinator-data:
+
+networks:
+  rs-fleet:
+    name: rs-fleet

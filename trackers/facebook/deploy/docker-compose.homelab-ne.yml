@@ -1,0 +1,91 @@
+# Second standalone monitor on the homelab VM — the Northeast account.
+#
+# One VM, two Facebook accounts, ZERO shared IP: this worker searches only the
+# Northeast (configs/homelab-ne.toml) and reaches Facebook through its OWN
+# dedicated Decodo ISP exit (PROXY_HOMELAB_NE, port 10002), while rs-monitor
+# uses PROXY_HOMELAB (10001). Facebook therefore sees two different residential
+# IPs, which is the whole point — accounts kept dying when they shared the
+# house IP (see the 2026-08-26 double revocation).
+#
+# It is a CLONE of docker-compose.homelab.yml. Only the per-worker fields
+# differ, and they are the only reason this is a separate file:
+#   container_name  rs-monitor-ne        (distinct from rs-monitor)
+#   config mount    configs/homelab-ne.toml  (Northeast, not the SE phase-1 list)
+#   session dir     configs/sessions/homelab-ne  (its own account's cookies)
+#   diskcache vol   aimm-home-ne         (its own dedupe/verdict cache)
+#   RS_WORKER_ID    homelab-ne           (own OpenSearch label + control-plane id)
+#   VNC             5901 on the host     (5900 is rs-monitor's)
+#
+# Alerts still go straight to Telegram (same chat, same topics) — the two
+# workers cover disjoint regions, so there is nothing to de-duplicate and no
+# need to route through the coordinator.
+#
+# Before first start:
+#   configs/sessions/homelab-ne/fb_state.json   — the NE account's session,
+#       CAPTURED THROUGH PROXY_HOMELAB_NE (10002) so it is born on that IP:
+#         rs-session capture --proxy "$PROXY_HOMELAB_NE" \
+#             --storage-state configs/sessions/homelab-ne/fb_state.json
+#   configs/secrets.homelab-ne.env              — RS_WORKER_ID + the worker's
+#       own RS_CONTROL_PLANE_TOKEN (rsc mint-token --worker homelab-ne)
+#
+#   docker compose -f deploy/docker-compose.homelab-ne.yml up -d
+
+services:
+  monitor-ne:
+    image: aimm-recycle:latest
+    container_name: rs-monitor-ne
+    restart: unless-stopped
+
+    # Own VNC port; 5900 belongs to rs-monitor. Loopback-only, same as the other.
+    #   ssh -L 5901:127.0.0.1:5901 jinhu@10.10.10.73
+    ports:
+      - "127.0.0.1:5901:5900"
+
+    # Shared secrets first, then this worker's overrides (later file wins):
+    # RS_WORKER_ID and its own RS_CONTROL_PLANE_TOKEN live in the second file so
+    # they do not collide with rs-monitor's identity in the shared one.
+    env_file:
+      - ../configs/secrets.env
+      - ../configs/secrets.homelab-ne.env
+
+    environment:
+      AIMM_ENABLE_VNC: "1"
+      AIMM_WEBUI_HOST: 127.0.0.1
+      AIMM_WEBUI_PORT: "8467"
+      AIMM_OPENSEARCH_URL: "http://host.docker.internal:9200"
+      AIMM_OPENSEARCH_INDEX: "fb-tracker"
+
+    volumes:
+      - ../configs/homelab-ne.toml:/root/.ai-marketplace-monitor/config.toml:ro
+      - aimm-home-ne:/root/.ai-marketplace-monitor
+      - ../configs/sessions/homelab-ne:/data
+      - ./healthcheck.sh:/usr/local/bin/rs-healthcheck:ro
+
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/rs-healthcheck"]
+      interval: 5m
+      timeout: 1m
+      retries: 1
+      start_period: 10m
+
+    shm_size: 1gb
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    networks:
+      - rs-fleet
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+volumes:
+  aimm-home-ne:
+
+networks:
+  rs-fleet:
+    name: rs-fleet
+    external: true

@@ -1,0 +1,26 @@
+# The Messenger bridge, built on the monitor image.
+#
+# aimm-recycle:latest already carries Python 3.12, Playwright with Chromium,
+# Xvfb, and the VNC stack — everything a browser-driving worker needs. Rather
+# than reinstall all of that, this layers the two local packages on top and
+# swaps the entrypoint for one that starts a virtual display and runs
+# rs-messenger. rs_poster comes along because rs_messenger imports its session,
+# lock, and typed-error machinery.
+#
+# Build from the repo root so the package sources are in context:
+#   docker build -f deploy/Dockerfile.messenger -t rs-messenger:latest .
+# (scripts/deploy.sh does this on the VM.)
+FROM aimm-recycle:latest
+
+# Chromium is already installed in the base image; only the Python packages and
+# their pip deps are new. --no-deps would drop Playwright's own requirements, so
+# let pip resolve, but the heavy browser download does not repeat.
+COPY rs_poster /opt/rs_poster
+COPY rs_messenger /opt/rs_messenger
+RUN pip install /opt/rs_poster /opt/rs_messenger
+
+COPY deploy/xvfb-entrypoint.sh /usr/local/bin/xvfb-entrypoint
+RUN chmod +x /usr/local/bin/xvfb-entrypoint
+
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/xvfb-entrypoint"]
+CMD ["rs-messenger", "run", "--interval", "300", "--depth", "10"]
