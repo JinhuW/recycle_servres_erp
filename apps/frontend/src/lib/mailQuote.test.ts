@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { splitQuotedReply } from './mailQuote';
+import { mailDate, mailSnippet, splitQuotedReply } from './mailQuote';
 
 describe('splitQuotedReply', () => {
   it('folds Gmail history, including a wrapped "wrote:" line', () => {
@@ -27,5 +27,22 @@ describe('splitQuotedReply', () => {
     expect(splitQuotedReply('On Monday I can ship.\nThanks')).toEqual({ reply: 'On Monday I can ship.\nThanks', quoted: '' });
     expect(splitQuotedReply('> only quoted').reply).toBe('> only quoted');
     expect(splitQuotedReply('')).toEqual({ reply: '', quoted: '' });
+  });
+});
+
+describe('mailSnippet', () => {
+  it('is what the sender wrote, on one line', () => {
+    expect(mailSnippet('Hi Alex,\n\nSure, photo attached.\n\nOn Mon, Oct 3 ram4cash <s@x.com> wrote:\n> Offer'))
+      .toBe('Hi Alex, Sure, photo attached.');
+    expect(mailSnippet('   ')).toBe('');
+  });
+});
+
+describe('mailDate', () => {
+  const now = new Date(2026, 9, 4, 15, 0);
+  it('shows the time today, the day this year, and the year before that', () => {
+    expect(mailDate(new Date(2026, 9, 4, 9, 12), now, 'en-US')).toBe('9:12 AM');
+    expect(mailDate(new Date(2026, 9, 3, 23, 59), now, 'en-US')).toBe('Oct 3');
+    expect(mailDate(new Date(2025, 11, 30), now, 'en-US')).toBe('Dec 30, 2025');
   });
 });

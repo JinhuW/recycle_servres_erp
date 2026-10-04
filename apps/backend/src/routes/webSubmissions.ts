@@ -22,8 +22,8 @@ import { syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { writeOrderEvent } from '../services/orderAudit';
 import { isoDatePlus, loadCrmSettings } from '../services/supplierCrm';
 import { WEB_CHANNEL_SOURCES, type SellLotPayload } from './publicForms';
-import { mailConfig } from '../mail';
-import { sendSubmissionReply } from '../mail/send';
+import { baseSubject, mailConfig, replySubject, siteBrand } from '../mail';
+import { sendSubmissionReply, threadMessageIds } from '../mail/send';
 import type { Env, User } from '../types';
 
 const webSubmissions = new Hono<{ Bindings: Env; Variables: { user: User } }>()
@@ -420,12 +420,23 @@ async function loadMessages(sql: ReturnType<typeof getDb>, where: { submissionId
 webSubmissions.get('/:id/messages', async (c) => {
   const sql = getDb(c.env);
   const id = c.req.param('id');
-  const [exists] = await sql`SELECT 1 FROM web_submissions WHERE id = ${id}`;
-  if (!exists) return c.json({ error: 'Not found' }, 404);
+  const [sub] = await sql<{ id: string; site: string; kind: string }[]>`
+    SELECT id, site, kind FROM web_submissions WHERE id = ${id}
+  `;
+  if (!sub) return c.json({ error: 'Not found' }, 404);
   const cfg = mailConfig(c.env);
+  const base = baseSubject(sub);
   return c.json({
     messages: await loadMessages(sql, { submissionId: id }),
-    mail: { mode: cfg?.mode ?? 'off', address: cfg?.user ?? null },
+    mail: {
+      mode: cfg?.mode ?? 'off',
+      address: cfg?.user ?? null,
+      fromName: siteBrand(sub.site).name,
+      // The thread's title, and what the next send will carry: the same rule
+      // the send path applies, so the draft never shows a subject it won't use.
+      threadSubject: base,
+      replySubject: replySubject(base, (await threadMessageIds(sql, sub.id)).length > 0),
+    },
   });
 });
 

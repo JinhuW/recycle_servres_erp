@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { createTransport, type SendMailOptions } from 'nodemailer';
 import type { Sql } from 'postgres';
 import type { Env } from '../types';
-import { baseSubject, mailboxDomain, mailConfig, mailLog, siteBrand, type MailConfig } from './index';
+import { baseSubject, mailboxDomain, mailConfig, mailLog, replySubject, siteBrand, type MailConfig } from './index';
 
 // Well inside the 25 s shutdown window; nodemailer's own defaults (2 min to
 // connect, 10 min idle) would outlive the process.
@@ -45,6 +45,21 @@ async function deliver(cfg: MailConfig, msg: SendMailOptions): Promise<void> {
   }).sendMail(msg);
 }
 
+// The thread's Message-IDs a reply threads onto, newest first. Only ids that
+// really went over the wire count: a failed or unconfirmed send was never
+// seen by the customer, and a synthetic `imap:` key is not a Message-ID at all.
+export async function threadMessageIds(sql: Sql, submissionId: string): Promise<string[]> {
+  const rows = await sql<{ message_id: string }[]>`
+    SELECT message_id FROM web_submission_messages
+    WHERE submission_id = ${submissionId}
+      AND status IN ('sent', 'received')
+      AND message_id LIKE '<%@%>'
+    ORDER BY created_at DESC, id DESC
+    LIMIT ${MAX_REFERENCES}
+  `;
+  return rows.map((r) => r.message_id);
+}
+
 export type ReplyOutcome =
   | { kind: 'off' }
   | { kind: 'not_found' }
@@ -61,21 +76,10 @@ export async function sendSubmissionReply(
   `;
   if (!sub) return { kind: 'not_found' };
 
-  // Only ids that really went over the wire thread: a failed or unconfirmed
-  // send was never seen by the customer, and a synthetic `imap:` key is not a
-  // Message-ID at all.
-  const thread = await sql<{ message_id: string }[]>`
-    SELECT message_id FROM web_submission_messages
-    WHERE submission_id = ${sub.id}
-      AND status IN ('sent', 'received')
-      AND message_id LIKE '<%@%>'
-    ORDER BY created_at DESC, id DESC
-    LIMIT ${MAX_REFERENCES}
-  `;
-  const base = baseSubject(sub);
-  const subject = thread.length > 0 ? `Re: ${base}` : base;
+  const thread = await threadMessageIds(sql, sub.id);
+  const subject = replySubject(baseSubject(sub), thread.length > 0);
   const messageId = `<${randomUUID()}.${sub.id.toLowerCase()}@${mailboxDomain(cfg.user)}>`;
-  const inReplyTo = thread[0]?.message_id ?? null;
+  const inReplyTo = thread[0] ?? null;
 
   const [row] = await sql<{ id: string }[]>`
     INSERT INTO web_submission_messages
@@ -95,7 +99,7 @@ export async function sendSubmissionReply(
       subject,
       text: args.body,
       messageId,
-      ...(inReplyTo ? { inReplyTo, references: thread.map((t) => t.message_id).reverse() } : {}),
+      ...(inReplyTo ? { inReplyTo, references: [...thread].reverse() } : {}),
     });
   } catch (err) {
     const error = (err instanceof Error ? err.message : String(err)).slice(0, 300);

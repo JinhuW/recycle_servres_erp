@@ -63,6 +63,12 @@ export function baseSubject(sub: { id: string; site: string; kind: string }): st
   return `Your ${what} ${sub.id} · ${siteBrand(sub.site).label}`;
 }
 
+// A thread that already holds a message that really went over the wire is
+// answered with `Re:`; the first message carries the bare subject.
+export function replySubject(base: string, threaded: boolean): string {
+  return threaded ? `Re: ${base}` : base;
+}
+
 export function mailboxDomain(address: string): string {
   const at = address.lastIndexOf('@');
   return at >= 0 ? address.slice(at + 1).toLowerCase() : 'localhost';

@@ -336,7 +336,9 @@ function SubmissionDetail({ id, onToast }: Props & { id: string }) {
         <div className="page-actions">
           {mailMode && mailMode !== 'off' ? (
             <button className="btn" onClick={() => {
-              composerRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+              // The whole draft, so its From / To / Subject stay in view too.
+              (composerRef.current?.closest('.ws-mail-draft') ?? composerRef.current)
+                ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
               composerRef.current?.focus({ preventScroll: true });
             }}>
               <Icon name="mail" size={13} /> {t('webSubReplyHere')}
@@ -430,7 +432,9 @@ function SubmissionDetail({ id, onToast }: Props & { id: string }) {
             </div>
           )}
 
-          <SubmissionThread submission={s} composerRef={composerRef} onMode={setMailMode} onSent={setS} onToast={onToast} />
+          {/* Keyed: moving to another submission must not carry a half-written
+              draft or open rows across. */}
+          <SubmissionThread key={s.id} submission={s} composerRef={composerRef} onMode={setMailMode} onSent={setS} onToast={onToast} />
         </div>
 
         <div className="card" style={{ padding: 16, flexShrink: 0 }}>

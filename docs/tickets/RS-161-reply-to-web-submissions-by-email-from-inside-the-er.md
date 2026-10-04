@@ -78,6 +78,20 @@ Decisions taken with the requester before planning:
 - Per-staff mailboxes
 - A mobile WS page (there is none)
 
+## Follow-up ask
+
+> Pls redeisgn the way it is commnicate in the page, it shuold still has the mail style.
+
+The first cut drew the thread as chat bubbles. It became a mail thread
+instead:
+- the subject on top
+- earlier messages folded to one line each
+- the newest open with its From / To
+- a reply draft with From / To / Subject rows
+
+The requester chose that layout over an inbox-plus-reading-pane and a stack
+of printed letters.
+
 ## Notes
 
 - Plan: `~/.claude/plans/rustling-doodling-bird.md`.

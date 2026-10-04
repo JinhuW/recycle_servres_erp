@@ -42,3 +42,23 @@ export function splitQuotedReply(text: string): { reply: string; quoted: string 
   }
   return { reply: text, quoted: '' };
 }
+
+// What a folded message shows on its one line: what the sender wrote, not the
+// history quoted under it, with line breaks flattened. CSS ellipsises it; an
+// empty result means the message had no text the thread can show.
+export function mailSnippet(body: string): string {
+  return splitQuotedReply(body).reply.replace(/\s+/g, ' ').trim();
+}
+
+// A mail client's date column: the time for today, the day for this year, and
+// the full date for anything older.
+export function mailDate(date: Date | string, now: Date, locale: string): string {
+  const d = new Date(date);
+  if (d.toDateString() === now.toDateString()) {
+    return d.toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' });
+  }
+  if (d.getFullYear() === now.getFullYear()) {
+    return d.toLocaleDateString(locale, { month: 'short', day: 'numeric' });
+  }
+  return d.toLocaleDateString(locale, { month: 'short', day: 'numeric', year: 'numeric' });
+}

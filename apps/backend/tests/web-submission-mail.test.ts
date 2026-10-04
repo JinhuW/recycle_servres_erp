@@ -26,7 +26,10 @@ type Msg = {
   id: string; direction: string; from: string; to: string; subject: string; body: string;
   status: string; error: string | null; author: { id: string } | null; attachmentNames: string[];
 };
-type Thread = { messages: Msg[]; mail: { mode: string; address: string | null } };
+type Thread = {
+  messages: Msg[];
+  mail: { mode: string; address: string | null; fromName: string; threadSubject: string; replySubject: string };
+};
 type Sent = { message: Msg; submission: { status: string; handledBy: { id: string } | null } };
 
 // The subject carries a `·`, so nodemailer RFC 2047-encodes it on the wire.
@@ -47,7 +50,14 @@ describe('web submission email thread — routes', () => {
     const { token } = await loginAs(ALEX);
     const t = await api<Thread>('GET', `/api/web-submissions/${id}/messages`, { token });
     expect(t.status).toBe(200);
-    expect(t.body).toEqual({ messages: [], mail: { mode: 'off', address: null } });
+    expect(t.body).toEqual({
+      messages: [],
+      mail: {
+        mode: 'off', address: null, fromName: 'ram4cash',
+        threadSubject: `Your sell request ${id} · ram4cash.com`,
+        replySubject: `Your sell request ${id} · ram4cash.com`,
+      },
+    });
     const s = await api('POST', `/api/web-submissions/${id}/messages`, { token, body: { body: 'Hi' } });
     expect(s.status).toBe(503);
     expect((await api('GET', '/api/health')).body).toMatchObject({ providers: { mail: 'off' } });
@@ -75,7 +85,12 @@ describe('web submission email thread — routes', () => {
     expect(row.message_id).toBe(header(raw, 'Message-ID'));
 
     const t = await api<Thread>('GET', `/api/web-submissions/${id}/messages`, { token, env: STUB });
-    expect(t.body.mail).toEqual({ mode: 'stub', address: BOX });
+    // Once something went out, the thread keeps its title and replies carry Re:.
+    expect(t.body.mail).toEqual({
+      mode: 'stub', address: BOX, fromName: 'ram4cash',
+      threadSubject: `Your sell request ${id} · ram4cash.com`,
+      replySubject: `Re: Your sell request ${id} · ram4cash.com`,
+    });
     expect(t.body.messages.map((m) => m.id)).toEqual([r.body.message.id]);
     expect((await api('GET', '/api/health', { env: STUB })).body).toMatchObject({ providers: { mail: 'stub' } });
   });
@@ -109,6 +124,8 @@ describe('web submission email thread — routes', () => {
     const raw = stubOutbox[stubOutbox.length - 1];
     expect(header(raw, 'From')).toBe(`Recycle Servers <${BOX}>`);
     expect(await subjectOf(raw)).toBe(`Your quote request ${id} · Recycle Servers`);
+    const t = await api<Thread>('GET', `/api/web-submissions/${id}/messages`, { token, env: STUB });
+    expect(t.body.mail).toMatchObject({ fromName: 'Recycle Servers', threadSubject: `Your quote request ${id} · Recycle Servers` });
   });
 
   it('records a failed send and leaves the triage status alone', async () => {

@@ -27,8 +27,11 @@ Web submissions can be answered by email from inside the ERP (RS-161).
   a `mailto:` link. It opened the clicking manager's own mail client, so the
   customer's answer landed in a personal inbox that nobody else could see,
   and the ERP never knew a conversation had happened.
-  - **Sending.** A Conversation card on the submission now holds the thread.
-    A manager's reply is sent over SMTP from one shared company mailbox
+  - **Sending.** The submission now shows the thread the way a mail client
+    does: the subject on top, earlier messages folded to one line each, the
+    newest open with its From / To, and the reply written in a draft with its
+    own From / To / Subject. A manager's reply is sent over SMTP from one
+    shared company mailbox
     (Lark), as "ram4cash" or "Recycle Servers" depending on the site the
     request came from. The first sent reply moves a `new` submission to
     `contacted`.

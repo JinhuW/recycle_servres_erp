@@ -1293,8 +1293,11 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   deleted, even archived later (v1.200.1): it is the PO's record of who sold
   the lot.
 - **A submission carries its email conversation** (v1.204.0).
-  - **Sending.** A manager writes a reply in the Conversation card. It goes
-    out from one shared company mailbox, a Lark box set by `MAIL_USER` and
+  - **Sending.** The thread reads like a mail client: the subject on top,
+    earlier messages folded to one line (sender, snippet, date, any problem),
+    the newest open with its From / To. A manager writes the reply in a draft
+    showing the From / To / Subject it will go out with. It goes out from one
+    shared company mailbox, a Lark box set by `MAIL_USER` and
     `MAIL_PASSWORD`.
     - A ram4cash sell request is sent as "ram4cash" with the subject "Your
       sell request WS-nnnn · ram4cash.com".
