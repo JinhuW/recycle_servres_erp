@@ -2,13 +2,13 @@
 id: RS-160
 title: A PO has a manager, set on entering Reviewing and offered to whoever moves it next
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-03
 reporter: jinhu
 branch: feat/po-order-manager
-pr:
-version:
+pr: "#484"
+version: 1.203.0
 related: [RS-157]
 ---
 
