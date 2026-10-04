@@ -2,13 +2,13 @@
 id: RS-163
 title: Pre-release review fixes for v1.203.0–v1.203.1
 type: bug
-status: in-review
+status: done
 priority: P1
 created: 2026-10-04
 reporter: jinhu
 branch: fix/prerelease-review-v1-203
-pr:
-version:
+pr: "#488"
+version: 1.203.2
 related: [RS-160, RS-162]
 ---
 
