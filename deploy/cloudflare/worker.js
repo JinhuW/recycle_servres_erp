@@ -2,6 +2,8 @@
 // surfaces to Railway. The browser only ever talks to this Worker, so the
 // backend's SameSite=Lax cookies and X-Requested-By CSRF header keep working
 // with no backend changes.
+import { isShellPath } from '../../apps/frontend/src/lib/shellPaths';
+
 const API_PREFIXES = ['/api', '/oauth', '/.well-known'];
 // Content-hashed by the build, and cached `immutable` for a year by
 // public/_headers. A miss under these is never a page the user typed — it is a
@@ -44,11 +46,14 @@ export default {
           headers: { 'Cache-Control': 'no-store', 'Content-Type': 'text/plain' },
         });
       }
-      // Every other path is a client-side route — the app is hash-routed, so in
-      // practice `/`, the vendor portal (/v/), /authorize, and
-      // the PWA manifest shortcuts. Same bytes index.html always served, with
-      // the no-cache it carries in _headers, which does not apply to a response
-      // built here.
+      // Only the shell's own paths get index.html. The app is hash-routed, so
+      // anything else is not a page of ours — and serving the shell there let
+      // the hash render a real screen under a dead URL (`/vnc/homelab-1#/fleet`
+      // showed Fleet, RS-167). The list is shared with the service worker's
+      // navigation fallback so an installed client 404s the same paths.
+      if (!isShellPath(url.pathname)) return notFoundPage();
+      // Same bytes index.html always served, with the no-cache it carries in
+      // _headers, which does not apply to a response built here.
       // A plain GET, not a copy of `request`: /share-target arrives as a POST
       // (the manifest's share target, normally intercepted by the service
       // worker) and the asset binding would answer a POST with 405.
@@ -105,3 +110,46 @@ export default {
     return fetch(proxied, { redirect: 'manual' });
   },
 };
+
+// A page, not a bare status: this is what a person who followed a stale or
+// mistyped link sees. Self-contained (no app bundle, no fonts) so it renders
+// even when the build it would load is the thing that is missing.
+function notFoundPage() {
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Page not found · Recycle Servers</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center;
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+         background: #f6f7f9; color: #1f2937; }
+  main { text-align: center; padding: 24px; }
+  h1 { font-size: 56px; margin: 0; letter-spacing: -0.02em; }
+  p { margin: 8px 0 20px; color: #6b7280; }
+  a { color: #2563eb; text-decoration: none; font-weight: 600; }
+  a:hover { text-decoration: underline; }
+  @media (prefers-color-scheme: dark) {
+    body { background: #111318; color: #e5e7eb; }
+    p { color: #9ca3af; }
+    a { color: #60a5fa; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>404</h1>
+  <p>This page doesn't exist.</p>
+  <a href="/">Go to the dashboard</a>
+</main>
+</body>
+</html>
+`;
+  return new Response(html, {
+    status: 404,
+    headers: { 'Cache-Control': 'no-store', 'Content-Type': 'text/html; charset=utf-8' },
+  });
+}

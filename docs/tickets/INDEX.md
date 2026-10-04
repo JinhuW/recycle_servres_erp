@@ -24,6 +24,7 @@ See [README.md](./README.md) for what the fields mean.
 | [RS-173](./RS-173-web-submission-email-can-run-on-dev-behind-a-test-re.md) | done | story | P2 | Web-submission email can run on dev behind a test-recipient list | 1.209.2 |
 | [RS-170](./RS-170-re-login-looks-broken-it-waits-for-the-next-sweep-an.md) | done | bug | P2 | Re-login looks broken: it waits for the next sweep and cannot sign in without a stored password | 1.208.2 |
 | [RS-169](./RS-169-second-level-sidebar-nav-the-trackers-move-under-mon.md) | done | story | P2 | Second-level sidebar nav; the trackers move under Monitors | 1.207.0 |
+| [RS-167](./RS-167-unknown-paths-return-404-instead-of-the-app-shell.md) | done | bug | P2 | Unknown paths return 404 instead of the app shell | 1.206.1 |
 | [RS-166](./RS-166-desktop-sidebar-folds-to-an-icon-rail.md) | done | story | P2 | Desktop sidebar folds to an icon rail | 1.208.0 |
 | [RS-165](./RS-165-an-upstream-401-from-the-fleet-console-is-read-as-an.md) | done | bug | P2 | An upstream 401 from the fleet console is read as an expired ERP session | 1.208.1 |
 | [RS-164](./RS-164-facebook-tracker-reaches-parity-with-the-rs-console.md) | done | story | P2 | Facebook tracker reaches parity with the rs-console dashboard, including watching a worker's browser | 1.204.0 |
