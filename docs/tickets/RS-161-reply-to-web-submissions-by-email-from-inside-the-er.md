@@ -54,9 +54,10 @@ Decisions taken with the requester before planning:
 - [ ] A reply is matched to a submission in one of two ways:
       - its `In-Reply-To` or `References` names one of our sent messages, or
       - its subject carries the WS id **and** it comes from the submission's
-        address.
+        address, with no DMARC failure.
 
-      Anything else stays in Lark only.
+      Anything else, including mail whose From names several addresses, stays
+      in Lark only.
 - [ ] Every inbound message shows its raw sender address. A warning appears
       when that address isn't the submission's or Lark's DMARC check failed.
 - [ ] Attachments on a reply are listed by name with "open in Lark mail".

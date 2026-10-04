@@ -1305,9 +1305,10 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     answer to the thread in one of two ways:
     - the answer replies to one of the thread's messages, or
     - its subject names the WS id **and** it comes from the submission's
-      address.
+      address, with no DMARC failure from Lark.
 
-    Other mail is never downloaded.
+    Mail whose From names more than one address is ignored. Other mail is
+    never downloaded.
   - **What the thread shows.**
     - Each answer shows its sender address, with a warning when that isn't
       the submission's address or Lark's DMARC check failed.

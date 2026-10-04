@@ -62,9 +62,9 @@ export function parseHeaderBlock(raw: Buffer | string | undefined): Map<string, 
   return out;
 }
 
-function toInboundHeader(m: FetchMessageObject): InboundHeader {
+export function toInboundHeader(m: FetchMessageObject): InboundHeader {
   const env = m.envelope;
-  const from = env?.from?.[0];
+  const from = env?.from?.length === 1 ? env.from[0] : undefined;
   const hdr = parseHeaderBlock(m.headers);
   return {
     uid: m.uid,
@@ -75,7 +75,7 @@ function toInboundHeader(m: FetchMessageObject): InboundHeader {
     from: from?.address ? from.address.trim().toLowerCase() : null,
     fromName: from?.name?.trim() || null,
     subject: env?.subject ?? '',
-    authResults: hdr.get('authentication-results')?.[0] ?? null,
+    authResults: hdr.get('authentication-results') ?? [],
   };
 }
 

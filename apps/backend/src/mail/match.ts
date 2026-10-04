@@ -6,8 +6,11 @@
 //      Those ids are ours (uuid-based), so this is not guessable.
 //   2. subject — the subject carries a WS id AND the sender is that
 //      submission's address. WS ids are sequential and From is forgeable, so
-//      the page still shows every inbound sender and flags a mismatch.
-// Anything else stays in the mailbox only.
+//      a message the receiving server marked dmarc=fail never gets in this
+//      way, and the page still shows every inbound sender and flags a
+//      mismatch.
+// Anything else stays in the mailbox only, including mail whose From names
+// more than one address: which of them sent it is anyone's guess.
 
 export type InboundHeader = {
   uid: number;
@@ -15,12 +18,12 @@ export type InboundHeader = {
   messageId: string | null;
   inReplyTo: string | null;
   references: string[];
-  // Lowercased address, or null when the message has no usable From.
+  // Lowercased address, or null unless From names exactly one.
   from: string | null;
   fromName: string | null;
   subject: string;
-  // The topmost Authentication-Results header: the receiving server's own.
-  authResults: string | null;
+  // Every Authentication-Results header, in message order.
+  authResults: string[];
 };
 
 export type MatchLookups = {
@@ -54,12 +57,15 @@ export function subjectSubmissionIds(subject: string): string[] {
   return [...new Set(ids)];
 }
 
-// `dmarc=pass` / `dmarc=fail` from an Authentication-Results value. Only the
-// verdict is kept; the page warns on fail and says nothing on pass, so a
-// sender who forges a pass gains nothing over sending none.
-export function dmarcVerdict(authResults: string | null): string | null {
-  const m = authResults?.match(/\bdmarc=([a-z]+)/i);
-  return m ? m[1].toLowerCase() : null;
+// The DMARC verdict across every Authentication-Results header. A sender can
+// add headers of their own but never remove the receiving server's, and
+// whether that one lands on top or at the bottom is the server's choice — so
+// a fail anywhere wins. A pass is kept but never shown as proof of anything.
+export function dmarcVerdict(authResults: readonly string[]): string | null {
+  const verdicts = authResults
+    .map((v) => v.match(/\bdmarc=([a-z]+)/i)?.[1].toLowerCase())
+    .filter((v): v is string => v !== undefined);
+  return verdicts.includes('fail') ? 'fail' : verdicts[0] ?? null;
 }
 
 export function matchSubmission(h: InboundHeader, l: MatchLookups): Match | null {
@@ -68,6 +74,7 @@ export function matchSubmission(h: InboundHeader, l: MatchLookups): Match | null
     const submissionId = l.byMessageId.get(id);
     if (submissionId) return { submissionId, via: 'thread' };
   }
+  if (dmarcVerdict(h.authResults) === 'fail') return null;
   for (const id of subjectSubmissionIds(h.subject)) {
     if (l.emailById.get(id) === h.from) return { submissionId: id, via: 'subject' };
   }

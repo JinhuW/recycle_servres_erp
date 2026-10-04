@@ -6,7 +6,7 @@ import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import { mailConfig, type MailConfig } from '../src/mail';
 import { stubOutbox } from '../src/mail/send';
 import { matchSubmission, type InboundHeader, type MatchLookups } from '../src/mail/match';
-import { runInboxTick, type InboxClient } from '../src/mail/inbox';
+import { runInboxTick, toInboundHeader, type InboxClient } from '../src/mail/inbox';
 
 const BOX = 'sales@recycleservers.com';
 const STUB = { MAIL_STUB: '1', MAIL_USER: BOX };
@@ -154,7 +154,7 @@ describe('web submission email thread — routes', () => {
 function hdr(over: Partial<InboundHeader>): InboundHeader {
   return {
     uid: 1, size: 100, messageId: '<m@x>', inReplyTo: null, references: [], from: 'seller@example.com',
-    fromName: null, subject: '', authResults: null, ...over,
+    fromName: null, subject: '', authResults: [], ...over,
   };
 }
 
@@ -177,6 +177,31 @@ describe('matchSubmission', () => {
       .toEqual({ submissionId: 'WS-1002', via: 'subject' });
     expect(matchSubmission(hdr({ subject: 'Re: WS-1002', from: 'mallory@evil.example' }), lookups)).toBeNull();
     expect(matchSubmission(hdr({ subject: 'Re: WS-9999' }), lookups)).toBeNull();
+  });
+
+  it('never lets a DMARC failure in by subject, wherever the server put its verdict', () => {
+    const forged = { subject: 'Re: WS-1002' };
+    expect(matchSubmission(hdr({ ...forged, authResults: ['mx.larksuite.com; dmarc=fail'] }), lookups)).toBeNull();
+    expect(matchSubmission(hdr({ ...forged, authResults: ['attacker; dmarc=pass', 'mx.larksuite.com; dmarc=fail'] }), lookups)).toBeNull();
+    expect(matchSubmission(hdr({ ...forged, authResults: ['mx.larksuite.com; dmarc=pass'] }), lookups))
+      .toEqual({ submissionId: 'WS-1002', via: 'subject' });
+  });
+
+  it('reads one sender and every Authentication-Results header off the fetch', () => {
+    const fetched = (from: { address: string }[]) => toInboundHeader({
+      seq: 1, uid: 9, size: 10,
+      envelope: { subject: 'Re: WS-1002', messageId: 'abc@x', inReplyTo: '<ours@recycleservers.com>', from },
+      headers: Buffer.from('References: <a@x>\r\n <b@x>\r\nAuthentication-Results: one; dmarc=pass\r\nAuthentication-Results: two;\r\n dmarc=fail\r\n'),
+    });
+    const one = fetched([{ address: 'Seller@Example.com' }]);
+    expect(one).toMatchObject({
+      uid: 9, from: 'seller@example.com', messageId: '<abc@x>', references: ['<a@x>', '<b@x>'],
+      authResults: ['one; dmarc=pass', 'two; dmarc=fail'],
+    });
+    // Two addresses in From: whichever one a check reads, the other may be the sender.
+    const two = fetched([{ address: 'seller@example.com' }, { address: 'mallory@evil.example' }]);
+    expect(two.from).toBeNull();
+    expect(matchSubmission(two, lookups)).toBeNull();
   });
 
   it('ignores the box itself and mail with no sender', () => {
@@ -269,7 +294,9 @@ describe('runInboxTick', () => {
         uid: 12,
         header: {
           messageId: '<reply-1@mail.example>', inReplyTo: '<ours.1@recycleservers.com>', fromName: 'Sam Seller',
-          authResults: 'mx.larksuite.com; spf=pass; dmarc=FAIL header.from=example.com',
+          // Thread-matched mail is kept even on a fail, with the warning; a
+          // forged pass stacked above the server's verdict doesn't hide it.
+          authResults: ['forged.example; dmarc=pass', 'mx.larksuite.com; spf=pass; dmarc=FAIL header.from=example.com'],
         },
         raw: rawMail({ body: 'Photos attached', attachments: 'yes' }),
       },
