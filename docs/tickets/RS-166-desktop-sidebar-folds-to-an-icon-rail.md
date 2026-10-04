@@ -2,12 +2,12 @@
 id: RS-166
 title: Desktop sidebar folds to an icon rail
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-04
 reporter: jinhu
 branch: feat/sidebar-collapse
-pr:
+pr: "#492"
 version: 1.208.0
 related: []
 ---
