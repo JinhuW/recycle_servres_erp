@@ -3,7 +3,7 @@
 // accounts cards need (alert hits per city, active searchers per city).
 // Kept out of the components so they can be unit-tested without React.
 
-import type { AlertHitRow, FleetAccount } from './coordinator';
+import type { AlertHitRow, Challenge, FleetAccount, FleetDoc } from './coordinator';
 
 export type AccountLiveness = 'live' | 'stale' | 'dead' | 'unknown' | 'none';
 
@@ -120,4 +120,72 @@ export function searchersByCity(workers: readonly FleetAccount[]): Map<string, F
 export function accountAlerts(w: FleetAccount, hits: Map<string, CityHits>): number {
   if (!w.health) return 0;
   return w.cities.reduce((n, c) => n + (hits.get(c.slug)?.sent ?? 0), 0);
+}
+
+// Whether the ERP's own viewer can show this worker's browser: only a worker
+// the facade bridges to (RS_VNC_TARGETS). A config-only vnc_url points at a
+// host the ERP cannot reach on the manager's behalf.
+export const canWatch = (w: FleetAccount | null | undefined): boolean => Boolean(w?.vnc_live);
+
+// Why a flagged worker is flagged, most urgent first — the order the
+// facade's own dashboard reads them in.
+export type AttentionReason =
+  | { kind: 'dead'; since: string | null }
+  | { kind: 'state'; state: string }
+  | { kind: 'expired' }
+  | { kind: 'expiring'; days: number }
+  | { kind: 'other' };
+
+export function attentionReason(w: FleetAccount): AttentionReason {
+  const h = w.health;
+  if (!h) return { kind: 'other' };
+  if (h.liveness === 'dead') return { kind: 'dead', since: h.last_heartbeat_at };
+  if (h.state && h.state !== 'HEALTHY') return { kind: 'state', state: h.state };
+  if (h.session_days_left !== null && h.session_days_left <= 0) return { kind: 'expired' };
+  if (h.session_days_left !== null) return { kind: 'expiring', days: h.session_days_left };
+  return { kind: 'other' };
+}
+
+// A re-login fixes a worker whose Facebook session is the problem; it does
+// nothing for one that stopped reporting or is parked on a checkpoint.
+export function offersRelogin(w: FleetAccount): boolean {
+  const h = w.health;
+  if (!h || h.liveness === 'dead' || h.liveness === 'unknown') return false;
+  return h.state === 'SESSION_EXPIRED' || (h.session_days_left !== null && h.session_days_left <= 0);
+}
+
+// The "Needs a human" list: every open checkpoint, then every flagged worker
+// that is not already there because of one. A checkpoint row borrows its
+// worker's account so it can offer the viewer.
+export type AttentionEntry =
+  | { kind: 'challenge'; challenge: Challenge; account: FleetAccount | null }
+  | { kind: 'worker'; account: FleetAccount };
+
+export function attentionEntries(fleet: FleetDoc | null, challenges: readonly Challenge[] | null): AttentionEntry[] {
+  const workers = fleet?.workers ?? [];
+  const byId = new Map(workers.map(w => [w.worker_id, w]));
+  const out: AttentionEntry[] = (challenges ?? []).map(ch => ({
+    kind: 'challenge', challenge: ch, account: byId.get(ch.worker_id) ?? null,
+  }));
+  const parked = new Set((challenges ?? []).map(ch => ch.worker_id));
+  for (const w of workers) {
+    if (needsAttention(w) && !parked.has(w.worker_id)) out.push({ kind: 'worker', account: w });
+  }
+  return out;
+}
+
+// Listings reviewed on the current UTC day (the coordinator buckets in UTC),
+// with today's alerts and the trailing seven days' reviews.
+export function reviewedToday(
+  days: ReadonlyArray<{ day: string; reviewed: number; alerted: number }>,
+  now: number = Date.now(),
+): { today: number; alertedToday: number; last7: number } {
+  const today = new Date(now).toISOString().slice(0, 10);
+  const cutoff = new Date(now - 6 * 86_400_000).toISOString().slice(0, 10);
+  const row = days.find(d => d.day === today);
+  return {
+    today: row?.reviewed ?? 0,
+    alertedToday: row?.alerted ?? 0,
+    last7: days.filter(d => d.day >= cutoff).reduce((n, d) => n + d.reviewed, 0),
+  };
 }

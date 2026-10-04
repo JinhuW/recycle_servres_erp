@@ -64,7 +64,14 @@ export default defineConfig({
   // breaks that fetch, so exclude it from Vite's dep optimizer.
   optimizeDeps: {
     exclude: ['@jsquash/jpeg', '@jsquash/jpeg/encode'],
+    // noVNC probes for WebCodecs H.264 with a top-level await; see `esbuild`.
+    esbuildOptions: { supported: { 'top-level-await': true } },
   },
+  // noVNC (the fleet page's worker viewer) uses a top-level await, which the
+  // default build target refuses outright. It only ever loads as its own lazy
+  // chunk, and every browser that runs this app's ES modules today has TLA, so
+  // allow the syntax rather than raising the whole bundle's target.
+  esbuild: { supported: { 'top-level-await': true } },
   server: {
     host: '0.0.0.0',                  // bind on all interfaces, not just IPv6 loopback
     port: 5173,
@@ -74,6 +81,8 @@ export default defineConfig({
       '/api': {
         target: process.env.VITE_API_BASE || 'http://localhost:8787',
         changeOrigin: true,
+        // The fleet page's worker viewer is a WebSocket under /api.
+        ws: true,
       },
       // OAuth surfaces live off `/api` — RFC 8414 puts discovery at
       // `/.well-known/oauth-authorization-server`, the token/authorize/consent

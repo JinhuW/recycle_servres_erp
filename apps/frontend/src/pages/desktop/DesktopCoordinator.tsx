@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { ImageLightbox } from '../../components/ImageLightbox';
 import { ApiError } from '../../lib/api';
@@ -13,11 +13,21 @@ import {
   type ReviewStatsDay,
 } from '../../lib/coordinator';
 import { handleFetchError } from '../../lib/errorToast';
+import {
+  attentionEntries, attentionReason, canWatch, offersRelogin, type AttentionEntry,
+} from '../../lib/fleetView';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
+import { matchFleetWatch, useRoute } from '../../lib/route';
+import { FormSkeleton } from '../../components/Skeleton';
 import {
-  AccountsCard, CoverageCard, FleetKpis, HITS_DAYS, PhrasesCard, SettingsCard,
+  AccountInfoCard, AccountsCard, CoverageCard, FleetKpis, fmtDays, HITS_DAYS, PhrasesCard,
+  ReloginButton, SettingsCard, stateLabel, WatchButton,
 } from './FleetAccounts';
+
+// The viewer carries noVNC; it is its own chunk, fetched only when a manager
+// actually opens a worker's browser.
+const FleetWatch = lazy(() => import('./FleetWatch').then(m => ({ default: m.FleetWatch })));
 
 // ─── Facebook tracker console ─────────────────────────────────────────────────
 // The dedicated Facebook Marketplace monitor page: the fleet's accounts (who
@@ -122,6 +132,19 @@ where:
 type Props = { showToast?: (msg: string, kind?: 'success' | 'error') => void };
 
 export function DesktopCoordinator({ showToast }: Props) {
+  const { path } = useRoute();
+  const watch = matchFleetWatch(path);
+  if (watch) {
+    return (
+      <Suspense fallback={<FormSkeleton fields={4} />}>
+        <FleetWatch key={watch.workerId} workerId={watch.workerId} />
+      </Suspense>
+    );
+  }
+  return <FleetPage showToast={showToast} />;
+}
+
+function FleetPage({ showToast }: Props) {
   const { t, locale } = useT();
 
   const [fleet, setFleet] = useState<FleetDoc | null>(null);
@@ -198,7 +221,7 @@ export function DesktopCoordinator({ showToast }: Props) {
     <>
       <PageHead query={query} onQuery={setQuery} filter={filter} onFilter={setFilter} />
 
-      {!notConfigured && <FleetKpis fleet={fleet} challenges={challenges} locale={locale} />}
+      {!notConfigured && <FleetKpis fleet={fleet} stats={stats} locale={locale} />}
 
       {/* ── Review volume (live when the facade answers, sample otherwise) ── */}
       <ReviewVolumeCard locale={locale} stats={stats} />
@@ -214,8 +237,10 @@ export function DesktopCoordinator({ showToast }: Props) {
         </div>
       ) : (
         <>
-          {/* ── Checkpoint queue (first of the live parts: it has a human in it) ── */}
-          <ChallengeQueueCard
+          {/* ── Needs a human: checkpoints and flagged accounts (first of the
+              live parts — it is the one with a person in it) ── */}
+          <NeedsHumanCard
+            fleet={fleet}
             challenges={challenges}
             locale={locale}
             onResolved={id => {
@@ -229,6 +254,9 @@ export function DesktopCoordinator({ showToast }: Props) {
           {/* ── Accounts: one row per Facebook account ── */}
           <AccountsCard fleet={fleet} unavailable={fleetUnavailable} hits={hits} query={query} filter={filter}
             expanded={expanded} onToggle={toggleRow} locale={locale} />
+
+          {/* ── The Facebook identity behind each worker, in one table ── */}
+          <AccountInfoCard fleet={fleet} query={query} filter={filter} locale={locale} />
 
           {/* ── What each account searches for, and the shared settings ── */}
           <div className="grid-2" style={{ marginBottom: 16 }}>
@@ -289,7 +317,14 @@ function PageHead({ query, onQuery, filter, onFilter }: {
   );
 }
 
-function ChallengeQueueCard({ challenges, locale, onResolved, onError }: {
+// The rs-console dashboard's "Needs a human" panel: every open checkpoint
+// (with its capture, the worker's live browser and "Mark resolved"), then every
+// account the control plane flags that is not already there for a checkpoint —
+// stopped reporting, a session expired or about to, a non-healthy state. And,
+// above both, the coordinator itself when it is not answering. Hidden when
+// there is nothing to do, as on the facade's own page.
+function NeedsHumanCard({ fleet, challenges, locale, onResolved, onError }: {
+  fleet: FleetDoc | null;
   challenges: Challenge[] | null;
   locale: string;
   onResolved: (id: number) => void;
@@ -298,63 +333,93 @@ function ChallengeQueueCard({ challenges, locale, onResolved, onError }: {
   const { t } = useT();
   const [zoom, setZoom] = useState<Challenge | null>(null);
   const [resolving, setResolving] = useState<number | null>(null);
+  const entries = attentionEntries(fleet, challenges);
+  const healthDown = Boolean(fleet && !fleet.health.ok);
+  if (entries.length === 0 && !healthDown) return null;
+
+  const reasonText = (entry: Extract<AttentionEntry, { kind: 'worker' }>) => {
+    const r = attentionReason(entry.account);
+    switch (r.kind) {
+      case 'dead': return t('fbcWhyDead', { age: r.since ? relTime(r.since, locale) : t('fbcNever') });
+      case 'state': return t('fbcWhyState', { state: stateLabel(t, r.state) });
+      case 'expired': return t('fbcWhyExpired');
+      case 'expiring': return t('fbcWhyExpiring', { days: fmtDays(t, r.days) });
+      default: return t('fbcWhyOther');
+    }
+  };
 
   return (
-    <div className="card" style={{ marginBottom: 16 }}>
+    <div className="card fl-attention" style={{ marginBottom: 16 }}>
       <div className="card-head">
         <div>
-          <div className="card-title">{t('fbcQueueTitle')}</div>
-          <div className="card-sub">{t('fbcQueueSub')}</div>
+          <div className="card-title">{t('fbcAttnTitle')}</div>
+          <div className="card-sub">{t('fbcAttnSub')}</div>
         </div>
-        {challenges && challenges.length > 0 && (
-          <span className="chip warn">{t('fbcQueueCount', { n: String(challenges.length) })}</span>
-        )}
+        <span className="chip warn">{entries.length + (healthDown ? 1 : 0)}</span>
       </div>
 
-      {challenges?.length === 0 && (
-        <div className="card-body" style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-          <Icon name="check2" size={16} style={{ flexShrink: 0, marginTop: 2, color: 'var(--accent-strong)' }} />
-          <div>
-            <div style={{ fontWeight: 600, fontSize: 13.5 }}>{t('fbcQueueEmpty')}</div>
-            <div style={{ fontSize: 12.5, color: 'var(--fg-subtle)', marginTop: 2 }}>
-              {t('fbcQueueEmptySub')}
-            </div>
+      {healthDown && (
+        <div className="fl-attn-row">
+          <Icon name="alert" size={16} style={{ color: 'var(--neg)', flexShrink: 0 }} />
+          <div className="what">
+            <div style={{ fontWeight: 600 }}>{t('fbcAttnCoordinatorDown')}</div>
+            <div className="sub">{t('fbcAccHealthDownNote', { error: fleet?.health.error ?? '' })}</div>
           </div>
         </div>
       )}
 
-      {(challenges ?? []).map(ch => (
-        <div key={ch.id} style={{
-          display: 'flex', alignItems: 'center', gap: 14,
-          padding: '12px 16px', borderTop: '1px solid var(--border)',
-        }}>
-          <Thumbnail challenge={ch} onZoom={() => setZoom(ch)} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span className="mono" style={{ fontWeight: 600, fontSize: 13.5 }}>{ch.worker_id}</span>
-              <span className="chip accent">{ch.kind}</span>
+      {entries.map(entry => entry.kind === 'challenge' ? (
+        <div key={`c${entry.challenge.id}`} className="fl-attn-row">
+          <Thumbnail challenge={entry.challenge} onZoom={() => setZoom(entry.challenge)} />
+          <div className="what">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span className="chip accent">{entry.challenge.kind}</span>
+              <span>
+                <span className="mono" style={{ fontWeight: 600 }}>{entry.challenge.worker_id}</span>
+                {' '}{t('fbcAttnParked', { kind: entry.challenge.kind })}
+              </span>
             </div>
-            <div style={{ fontSize: 12.5, color: 'var(--fg-subtle)', marginTop: 2 }}>
-              {t('fbcFlagged', { age: relTime(ch.created_at, locale) })}
-              {ch.account_id && ` · ${ch.account_id}`}
+            <div className="sub">
+              {t('fbcFlagged', { age: relTime(entry.challenge.created_at, locale) })}
+              {entry.challenge.account_id && ` · ${entry.challenge.account_id}`}
+              {` · ${t('fbcAttnClearIt')}`}
             </div>
           </div>
-          {ch.vnc_url && (
-            <a className="btn sm" href={ch.vnc_url} target="_blank" rel="noopener">
-              <Icon name="eye" size={13} />
-              {t('fbcOpenVnc')}
-            </a>
-          )}
-          <button className="btn primary sm" disabled={resolving === ch.id}
+          {canWatch(entry.account)
+            ? <WatchButton workerId={entry.challenge.worker_id} />
+            : entry.challenge.vnc_url && (
+              <a className="btn sm" href={entry.challenge.vnc_url} target="_blank" rel="noopener">
+                <Icon name="eye" size={13} />
+                {t('fbcOpenVnc')}
+              </a>
+            )}
+          <button className="btn primary sm" disabled={resolving === entry.challenge.id}
             onClick={() => {
-              setResolving(ch.id);
-              coordinatorApi.resolveChallenge(ch.id)
-                .then(() => onResolved(ch.id))
+              const id = entry.challenge.id;
+              setResolving(id);
+              coordinatorApi.resolveChallenge(id)
+                .then(() => onResolved(id))
                 .catch(onError)
                 .finally(() => setResolving(null));
             }}>
             {t('fbcResolve')}
           </button>
+        </div>
+      ) : (
+        <div key={`w${entry.account.worker_id}`} className="fl-attn-row">
+          <span className="chip warn">{t('fbcAttnChip')}</span>
+          <div className="what">
+            <div>
+              <span className="mono" style={{ fontWeight: 600 }}>{entry.account.worker_id}</span>
+              {' '}{reasonText(entry)}
+            </div>
+            <div className="sub">
+              {entry.account.region.name}
+              {entry.account.health?.account_id && ` · ${entry.account.health.account_id}`}
+            </div>
+          </div>
+          {offersRelogin(entry.account) && <ReloginButton workerId={entry.account.worker_id} />}
+          {canWatch(entry.account) && <WatchButton workerId={entry.account.worker_id} />}
         </div>
       ))}
 

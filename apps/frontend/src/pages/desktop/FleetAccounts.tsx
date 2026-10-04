@@ -1,16 +1,21 @@
-import { useMemo, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Icon } from '../../components/Icon';
-import type {
-  AlertHitRow, Challenge, FleetAccount, FleetCity, FleetDoc, FleetFilter, WorkerState,
-} from '../../lib/coordinator';
+import { Modal } from '../../components/Modal';
 import {
-  accountAlerts, accountHaystack, browserLabel, hitsByCity, isActive, liveness, matchesTerms,
-  needsAttention, queryTerms, searchersByCity, splitHighlights, whoIs, type AccountLiveness,
-  type CityHits,
+  coordinatorApi,
+  type AlertHitRow, type FleetAccount, type FleetCity, type FleetDoc, type FleetFilter,
+  type ReviewStatsDay, type WorkerState,
+} from '../../lib/coordinator';
+import { handleFetchError, showSuccessToast } from '../../lib/errorToast';
+import {
+  accountAlerts, accountHaystack, browserLabel, canWatch, hitsByCity, isActive, liveness,
+  matchesTerms, needsAttention, queryTerms, reviewedToday, searchersByCity, splitHighlights,
+  whoIs, type AccountLiveness, type CityHits,
 } from '../../lib/fleetView';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import type { Translate } from '../../lib/orderPresentation';
+import { fleetWatchPath, hrefFor, onLinkClick } from '../../lib/route';
 
 // ─── Fleet accounts ───────────────────────────────────────────────────────────
 // The cards that answer "which account is searching which cities for which
@@ -54,13 +59,13 @@ const STATE_CHIP: Record<WorkerState, string> = {
 
 // The control plane can add states faster than this UI ships, so an unknown
 // one falls back to its raw name rather than a blank cell.
-function stateLabel(t: Translate, state: WorkerState): string {
+export function stateLabel(t: Translate, state: WorkerState | string): string {
   const key = `fbcState_${state}`;
   const label = t(key);
   return label === key ? state : label;
 }
 
-function fmtDays(t: Translate, days: number | null): string {
+export function fmtDays(t: Translate, days: number | null): string {
   if (days === null) return '—';
   if (days <= 0) return t('fbcSessionExpired');
   if (days < 1) return t('fbcHoursLeft', { n: Math.round(days * 24) });
@@ -81,11 +86,86 @@ function StatusCell({ account }: { account: FleetAccount }) {
   );
 }
 
+// ─── Watch & re-login ─────────────────────────────────────────────────────────
+// "Watch" opens the ERP's own viewer for a worker's browser (FleetWatch.tsx),
+// relayed through the backend — so it appears only for a worker the facade
+// can bridge to. An in-app link: ⌘/ctrl-click opens it in its own tab, and a
+// click never also toggles the row it sits in.
+
+// `compact` is the table cell's icon-only form: the accounts table is already
+// wider than the page beside the sidebar, and a labelled button there ends up
+// behind the horizontal scroll.
+export function WatchButton({ workerId, compact }: { workerId: string; compact?: boolean }) {
+  const { t } = useT();
+  const path = fleetWatchPath(workerId);
+  return (
+    <a className={compact ? 'btn icon sm' : 'btn sm'} href={hrefFor(path)} onClick={onLinkClick(path)}
+      title={t('fbcWatchHint')} aria-label={compact ? t('fbcWatchHint') : undefined}>
+      <Icon name="eye" size={13} />
+      {!compact && t('fbcWatch')}
+    </a>
+  );
+}
+
+// Queues a Facebook re-login for one worker, after a confirm that says what it
+// will do: the worker re-enters its username, password and 2FA code from the
+// vault on its next cycle.
+export function ReloginButton({ workerId, onQueued, className = 'btn sm' }: {
+  workerId: string; onQueued?: () => void; className?: string;
+}) {
+  const { t } = useT();
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [queued, setQueued] = useState(false);
+
+  const confirm = () => {
+    setBusy(true);
+    coordinatorApi.relogin(workerId)
+      .then(() => {
+        setAsking(false);
+        setQueued(true);
+        showSuccessToast(t('fbcReloginQueued', { id: workerId }));
+        onQueued?.();
+        setTimeout(() => setQueued(false), 4000);
+      })
+      .catch(handleFetchError)
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <>
+      <button type="button" className={className} disabled={busy || queued}
+        title={t('fbcReloginHint')}
+        onClick={e => { e.stopPropagation(); setAsking(true); }}>
+        <Icon name="refresh" size={13} />
+        {queued ? t('fbcReloginDone') : t('fbcRelogin')}
+      </button>
+      {asking && (
+        <Modal onClose={() => { if (!busy) setAsking(false); }} shellStyle={{ maxWidth: 440 }}>
+          <div className="modal-head">
+            <div>
+              <div className="modal-title">{t('fbcReloginTitle', { id: workerId })}</div>
+            </div>
+          </div>
+          <div className="modal-body">
+            <p style={{ margin: 0, fontSize: 13.5, color: 'var(--fg-muted)' }}>{t('fbcReloginBody')}</p>
+          </div>
+          <div className="modal-foot" style={{ justifyContent: 'flex-end' }}>
+            <button type="button" className="btn" disabled={busy} onClick={() => setAsking(false)}>{t('cancel')}</button>
+            <button type="button" className="btn primary" disabled={busy} onClick={confirm}>{t('fbcRelogin')}</button>
+          </div>
+        </Modal>
+      )}
+    </>
+  );
+}
+
 // ─── KPIs ─────────────────────────────────────────────────────────────────────
 
-export function FleetKpis({ fleet, challenges, locale }: {
+export function FleetKpis({ fleet, stats, locale }: {
   fleet: FleetDoc | null;
-  challenges: Challenge[] | null;
+  // Review-stats days, 'unavailable' when the stats route failed, null while loading.
+  stats: ReviewStatsDay[] | 'unavailable' | null;
   locale: string;
 }) {
   const { t } = useT();
@@ -103,7 +183,7 @@ export function FleetKpis({ fleet, challenges, locale }: {
   const items = fleet?.items ?? [];
   const enabled = items.filter(i => i.enabled);
   const phrases = enabled.reduce((n, i) => n + i.search_phrases.length, 0);
-  const open = challenges?.length ?? null;
+  const reviews = Array.isArray(stats) ? reviewedToday(stats) : null;
 
   const value = (n: number) => (fleet ? fmt.format(n) : '…');
 
@@ -137,10 +217,12 @@ export function FleetKpis({ fleet, challenges, locale }: {
         <div className="kpi-trend">{t('fbcKpiPhrasesSub', { on: enabled.length, n: items.length })}</div>
       </div>
       <div className="kpi">
-        <div className="kpi-label">{t('fbcKpiCheckpoints')}</div>
-        <div className="kpi-value mono">{open === null ? '…' : fmt.format(open)}</div>
-        <div className={`kpi-trend ${open ? 'down' : ''}`}>
-          {open ? t('fbcKpiCheckpointsSub') : t('fbcKpiCheckpointsNone')}
+        <div className="kpi-label">{t('fbcKpiReviewedToday')}</div>
+        <div className="kpi-value mono">{reviews ? fmt.format(reviews.today) : stats === 'unavailable' ? '—' : '…'}</div>
+        <div className="kpi-trend">
+          {reviews
+            ? t('fbcKpiReviewedSub', { alerted: fmt.format(reviews.alertedToday), week: fmt.format(reviews.last7) })
+            : stats === 'unavailable' ? t('fbcKpiReviewedUnavailable') : '…'}
         </div>
       </div>
     </div>
@@ -248,6 +330,7 @@ export function AccountsCard({ fleet, unavailable, hits, query, filter, expanded
                 {t('fbcColAlerts', { days: HITS_DAYS })}
               </th>
               <th title={t('fbcColBuildHint')}>{t('fbcColBuild')}</th>
+              <th title={t('fbcColWatchHint')} aria-label={t('fbcColWatch')}><Icon name="eye" size={13} /></th>
             </tr>
           </thead>
           <tbody>
@@ -323,7 +406,7 @@ function AccountRow({ account: w, hits, terms, coordinatorVersion, open, onToggl
             ? <span className={STATE_CHIP[h.state] ?? 'chip muted'}>{stateLabel(t, h.state)}</span>
             : <span className="muted">—</span>}
         </td>
-        <td title={h?.session_expiry ?? undefined}>{sessionCell}</td>
+        <td title={h?.session_expiry ?? undefined} style={{ whiteSpace: 'nowrap' }}>{sessionCell}</td>
         <td className={h?.last_search_at ? undefined : 'muted'} title={h?.last_search_at ?? undefined}>
           {h?.last_search_at ? relTime(h.last_search_at, locale) : '—'}
         </td>
@@ -332,6 +415,11 @@ function AccountRow({ account: w, hits, terms, coordinatorVersion, open, onToggl
         </td>
         <td className={`num ${alerts ? '' : 'muted'}`}>{h ? alerts : '—'}</td>
         <td><BuildChip health={h} coordinatorVersion={coordinatorVersion} /></td>
+        <td>
+          {canWatch(w)
+            ? <WatchButton workerId={w.worker_id} compact />
+            : <span className="muted" title={t('fbcNoWatchHint')}>—</span>}
+        </td>
       </tr>
       {open && <AccountDetail account={w} hits={hits} terms={terms} locale={locale} />}
     </>
@@ -349,8 +437,8 @@ function BuildChip({ health, coordinatorVersion }: {
   if (!v) return <span className="chip muted" title={t('fbcBuildPreHint')}>{t('fbcBuildPre')}</span>;
   const same = Boolean(coordinatorVersion && v.startsWith(coordinatorVersion));
   return (
-    <span className={`chip ${same ? 'muted' : 'warn'} mono`}
-      title={same ? t('fbcBuildSame') : t('fbcBuildDiffers', { v: coordinatorVersion ?? '?' })}>
+    <span className={`chip ${same ? 'muted' : 'warn'} mono fl-build`}
+      title={`${v} — ${same ? t('fbcBuildSame') : t('fbcBuildDiffers', { v: coordinatorVersion ?? '?' })}`}>
       {v}
     </span>
   );
@@ -388,7 +476,9 @@ function AccountDetail({ account: w, hits, terms, locale }: {
   const pace = w.pacing.search_interval
     ? `${w.pacing.search_interval} – ${w.pacing.max_search_interval ?? w.pacing.search_interval}${w.pacing.overridden ? ` ${t('fbcPacingOverride')}` : ''}`
     : '—';
-  const vnc = h?.vnc_url ?? w.vnc_url ?? w.account?.vnc_url ?? null;
+  // A config-written link is the fallback for a worker the facade cannot
+  // bridge to; it opens wherever it points, outside the ERP.
+  const configVnc = canWatch(w) ? null : (w.vnc_url ?? h?.vnc_url ?? w.account?.vnc_url ?? null);
   const muted = (text: string) => <span className="muted">{text}</span>;
   const who = whoIs(w);
   const acct = w.account;
@@ -422,14 +512,16 @@ function AccountDetail({ account: w, hits, terms, locale }: {
       : muted('—')],
     [t('fbcDetailLastListing'), h?.last_listing_at ? relTime(h.last_listing_at, locale) : muted(t('fbcNoListing'))],
     [t('fbcDetailErrors'), h ? String(h.error_count) : muted('—')],
-    [t('fbcDetailVnc'), vnc
-      ? <a href={vnc} target="_blank" rel="noopener">{t('fbcOpenVnc')}</a>
-      : muted(t('fbcNoVnc'))],
+    [t('fbcDetailVnc'), canWatch(w)
+      ? <a href={hrefFor(fleetWatchPath(w.worker_id))} onClick={onLinkClick(fleetWatchPath(w.worker_id))}>{t('fbcWatchLive')}</a>
+      : configVnc
+        ? <><a href={configVnc} target="_blank" rel="noopener">{t('fbcOpenVnc')}</a> {muted(t('fbcFromConfig'))}</>
+        : muted(t('fbcNoVnc'))],
   ];
 
   return (
     <tr className="fl-detail">
-      <td colSpan={9}>
+      <td colSpan={10}>
         <div className="fl-detail-inner">
           <div>
             <div className="fl-section-label">
@@ -451,6 +543,126 @@ function AccountDetail({ account: w, hits, terms, locale }: {
         </div>
       </td>
     </tr>
+  );
+}
+
+// ─── Account information ──────────────────────────────────────────────────────
+// Every account's identity in one flat table — the facts otherwise spread over
+// each row's expandable detail. A worker with nothing to identify it (configured,
+// never logged in) is left out; the Accounts card above still lists it.
+
+export function AccountInfoCard({ fleet, query, filter, locale }: {
+  fleet: FleetDoc | null; query: string; filter: FleetFilter; locale: string;
+}) {
+  const { t } = useT();
+  if (!fleet) return null;
+  const terms = queryTerms(query);
+  const all = fleet.workers.filter(w => {
+    const who = whoIs(w);
+    return who.login || who.userId || who.label;
+  });
+  const shown = all.filter(w =>
+    (filter === 'all' || (filter === 'active' ? Boolean(w.health) : needsAttention(w)))
+    && matchesTerms(accountHaystack(w), terms));
+  const unregistered = all.filter(w => !w.account).length;
+  const none = <span className="muted">—</span>;
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card-head">
+        <div>
+          <div className="card-title">{t('fbcInfoTitle')}</div>
+          <div className="card-sub">{t('fbcInfoSub', { shown: shown.length, n: all.length })}</div>
+        </div>
+      </div>
+      {unregistered > 0 && (
+        <div className="card-note">
+          <Icon name="info" size={16} />
+          <span>{t('fbcInfoUnregistered', { n: unregistered, total: all.length })}</span>
+        </div>
+      )}
+      <div style={{ overflowX: 'auto' }}>
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>{t('fbcInfoColLogin')}</th>
+              <th>{t('fbcInfoColUserId')}</th>
+              <th>{t('fbcInfoColWorker')}</th>
+              <th>{t('fbcColRegion')}</th>
+              <th>{t('fbcColState')}</th>
+              <th title={t('fbcInfoColProxyHint')}>{t('fbcDetailProxy')}</th>
+              <th title={t('fbcInfoColSecretsHint')}>{t('fbcInfoColSecrets')}</th>
+              <th title={t('fbcInfoColBrowserHint')}>{t('fbcDetailUa')}</th>
+              <th title={t('fbcInfoColBackupHint')}>{t('fbcDetailBackup')}</th>
+              <th title={t('fbcInfoColExpiresHint')}>{t('fbcInfoColExpires')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map(w => {
+              const who = whoIs(w);
+              const acct = w.account;
+              const sess = w.session;
+              const h = w.health;
+              const stored = acct
+                ? Object.entries(acct.secrets).filter(([k, on]) => on && k !== 'totp_secret').map(([k]) => k)
+                : [];
+              const browser = browserLabel(sess?.user_agent);
+              return (
+                <tr key={w.worker_id}>
+                  <td>
+                    {who.login
+                      ? <div><Hi text={who.login} terms={terms} /></div>
+                      : <div className="muted" title={t('fbcNoVaultAccount')}>{t('fbcNotInVault')}</div>}
+                    {acct?.account_id && (
+                      <div className="muted mono" style={{ fontSize: 11.5 }}><Hi text={acct.account_id} terms={terms} /></div>
+                    )}
+                  </td>
+                  <td>
+                    {who.userId
+                      ? <a className="mono" href={`https://www.facebook.com/profile.php?id=${encodeURIComponent(who.userId)}`}
+                          target="_blank" rel="noopener" title={t('fbcInfoOpenProfile')}>
+                          <Hi text={who.userId} terms={terms} />
+                        </a>
+                      : none}
+                  </td>
+                  <td className="mono" style={{ whiteSpace: 'nowrap' }}><Hi text={w.worker_id} terms={terms} /></td>
+                  <td><Hi text={w.region.name} terms={terms} /></td>
+                  <td>
+                    {h?.state ? <span className={STATE_CHIP[h.state] ?? 'chip muted'}>{stateLabel(t, h.state)}</span> : none}
+                  </td>
+                  <td>
+                    {w.proxy_env
+                      ? <span className="mono" style={{ fontSize: 12 }}>${w.proxy_env}</span>
+                      : <span className="muted">{t('fbcInfoOwnIp')}</span>}
+                  </td>
+                  <td>
+                    <span className="fl-cities">
+                      {acct?.secrets.totp_secret
+                        ? <span className="chip pos" title={t('fbcInfoTotpHint')}>TOTP</span>
+                        : acct ? <span className="chip muted">{t('fbcNone')}</span> : none}
+                      {stored.map(k => <span key={k} className="chip muted mono">{k}</span>)}
+                      {acct?.allow_password_login && <span className="chip warn">{t('fbcInfoPasswordLogin')}</span>}
+                    </span>
+                  </td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    {browser ? <span title={sess?.user_agent ?? undefined}>{browser}</span> : none}
+                  </td>
+                  <td title={sess?.backed_up_at ?? undefined}>
+                    {sess?.backed_up_at ? relTime(sess.backed_up_at, locale) : <span className="muted">{t('fbcNever')}</span>}
+                  </td>
+                  <td title={h?.session_expiry ?? sess?.session_expiry ?? undefined}>
+                    {h?.session_days_left != null ? fmtDays(t, h.session_days_left) : none}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {shown.length === 0 && (
+          <div className="fl-empty">{terms.length ? t('fbcAccEmptySearch') : t('fbcInfoEmpty')}</div>
+        )}
+      </div>
+    </div>
   );
 }
 

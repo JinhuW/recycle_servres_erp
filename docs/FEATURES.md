@@ -1271,6 +1271,22 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   rs-console facade's `/v1/fleet` document through the manager-only
   `/api/coordinator` proxy — until that facade is deployed the cards read
   "fleet view unavailable" and the rest of the page works (v1.140.0).
+  A **Needs a human** card leads the live part of the page: open checkpoints
+  (capture, Watch, Mark resolved) and every account the control plane flags,
+  with why — stopped reporting, a non-healthy state, a session expired or
+  expiring — plus **Re-login** where the session is the problem.  An
+  **Account information** table lists each account's Facebook identity,
+  proxy, stored secrets, browser and backup age, and the fourth KPI is
+  listings reviewed today, matching the console (v1.204.0).
+- **Watching a worker's browser** — `/fleet/watch/<worker>` shows the live
+  Chromium a Facebook worker is driving, through noVNC, view-only until
+  "Take control" is ticked (and handed back when the tab is hidden), with
+  Re-login and Reconnect.  The socket is same-origin
+  (`/api/coordinator/vnc/<worker>/ws`); the backend admits it through the
+  usual middleware plus an Origin check, mints the facade's single-use VNC
+  ticket and relays bytes, so the facade token and Cloudflare Access
+  credentials stay server-side.  Offered for every worker the facade can
+  bridge to (`RS_VNC_TARGETS`) (v1.204.0).
 
 - **Web submissions** — the manager inbox for the public website forms
   (v1.187.0). The ram4cash.com sell form (`POST /api/public/intake`) and the

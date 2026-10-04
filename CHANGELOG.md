@@ -17,6 +17,51 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.204.0] - 2026-10-04
+
+The Facebook tracker page catches up with the rs-console dashboard it was
+ported from (RS-164). RS-048 copied the console as it stood in early
+September; since then the console grew a "Needs a human" panel, an account
+identity table and — the piece operators actually reach for — a Watch button
+that opens a worker's live browser. The ERP now has all of it.
+
+### Added
+
+- **Watch a worker's browser from the ERP** at `/fleet/watch/<worker>`. The
+  console's own viewer could not simply be linked: it needs a console token
+  pasted into the browser on the facade's origin, and that hostname sits
+  behind Cloudflare Access. The ERP backend already holds both credentials,
+  so it relays the socket (`vncBridge.ts`): the upgrade is replayed through
+  the app as a GET, so the proxy-secret gate, session cookie, manager check
+  and a new Origin check all apply before a WebSocket exists; then it mints
+  the facade's single-use ticket and pumps bytes. Neither credential reaches
+  the browser. View-only by default, with Take control, Re-login and
+  Reconnect; noVNC loads as its own chunk only on this page.
+- **Needs a human** replaces the checkpoint queue: checkpoints as before, plus
+  every flagged account with its reason, a Watch button, and Re-login where
+  the session is what is broken. A coordinator outage gets its own row. The
+  card hides when nothing needs a person.
+- **Account information**: one table of each worker's Facebook login, user id,
+  proxy, stored secrets (TOTP badged), browser identity, backup age and
+  session expiry.
+- **Re-login** (`POST /api/coordinator/workers/:id/relogin`, manager-only):
+  queues the facade's one-shot re-login directive for a worker.
+- A Watch column in the accounts table, and the row detail links to the viewer.
+
+### Changed
+
+- The fourth fleet KPI is **Listings reviewed today** (with today's alerts and
+  the 7-day total), as on the console; open checkpoints are counted on the
+  Needs-a-human card instead.
+- The credentialed-origin rule moved to `lib/origins.ts` so CORS and the VNC
+  socket share one implementation.
+
+### Deploy
+
+Nothing to set: the bridge reuses `COORDINATOR_API_URL`,
+`COORDINATOR_API_TOKEN` and `COORDINATOR_ACCESS_CLIENT_*`. Watch needs console
+0.5.5 or later (ticket route) with the worker listed in `RS_VNC_TARGETS`.
+
 ## [1.203.2] - 2026-10-04
 
 Pre-release review fixes for v1.203.0–v1.203.1 (RS-163). A `/code-review

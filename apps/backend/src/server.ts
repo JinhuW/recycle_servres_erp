@@ -15,6 +15,7 @@ import { onShutdown } from './lib/shutdown';
 import { startPackageTrackingLoop } from './shipping/track';
 import { startBankSyncLoop } from './banktx/sync';
 import { startWebSubmissionPurgeLoop } from './lib/webSubmissionPurge';
+import { attachVncBridge, closeVncBridges } from './vncBridge';
 
 const env = buildEnv();
 const port = Number(process.env.PORT ?? 8787);
@@ -30,6 +31,10 @@ const server = serve({ fetch: (request) => app.fetch(request, env), port }, (inf
   log.info('recycle-erp-backend listening', { port: info.port });
 });
 
+// The only WebSocket the backend serves: the Facebook fleet's VNC viewer,
+// relayed to the rs-console facade (see vncBridge.ts).
+attachVncBridge(server as Server, app, env);
+
 // Railway sends SIGKILL when its draining window ends, so hardMs has to stay
 // under that window for the exit to be ours. It is the backend service's
 // `drainingSeconds`, set to 30 on prod and dev.
@@ -40,5 +45,8 @@ const shutdown = onShutdown({
   graceMs: 20_000,
   hardMs: 25_000,
 });
-process.once('SIGTERM', () => void shutdown('SIGTERM'));
-process.once('SIGINT', () => void shutdown('SIGINT'));
+// A relayed VNC socket never ends on its own, and an upgraded socket is no
+// longer an HTTP connection closeAllConnections() can cut — so the viewers are
+// told to go first, and server.close() is not left waiting on them.
+process.once('SIGTERM', () => { closeVncBridges(); void shutdown('SIGTERM'); });
+process.once('SIGINT', () => { closeVncBridges(); void shutdown('SIGINT'); });

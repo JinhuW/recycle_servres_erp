@@ -340,9 +340,21 @@ export function pathToDesktopView(path: string): DesktopViewId {
   if (path === '/payments/internal') return 'internaltx';
   if (path === '/payments' || match('/payments/po/:id', path)) return 'payments';
   if (path === '/tracker') return 'tracker';
-  if (path === '/fleet') return 'coordinator';
+  if (path === '/fleet' || matchFleetWatch(path)) return 'coordinator';
   if (path === '/settings') return 'settings';
   return 'dashboard';
+}
+
+// The fleet page's live-browser viewer for one Facebook worker. A sub-route of
+// /fleet (same view, same sidebar entry) so the back button returns to the
+// fleet with its filters intact.
+export function fleetWatchPath(workerId: string): string {
+  return `/fleet/watch/${encodeURIComponent(workerId)}`;
+}
+
+export function matchFleetWatch(path: string): { workerId: string } | null {
+  const m = match('/fleet/watch/:workerId', path);
+  return m?.workerId ? { workerId: m.workerId } : null;
 }
 
 // The Payments page focused on one PO's linked payments. A path for
