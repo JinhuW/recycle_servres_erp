@@ -56,6 +56,19 @@ that opens a worker's live browser. The ERP now has all of it.
 - The credentialed-origin rule moved to `lib/origins.ts` so CORS and the VNC
   socket share one implementation.
 
+### Fixed
+
+- **"Open VNC" no longer opens a dead ERP page.** The facade gives its viewer
+  as a path (`/vnc/homelab-1`) meant for its own page, and the account detail
+  used it as-is, so it resolved to `inventory.recycleservers.com/vnc/…`.
+  Workers the facade can bridge to now open the ERP's own viewer, and a
+  config-written VNC link is offered only when it is an absolute `http(s)`
+  URL — in the row detail and on a checkpoint alike.
+- **An image built without its version reads "build not stamped"**, quietly,
+  instead of an amber "unknown (unknown)" that looked like a stale build. The
+  cause was on the fleet side: its deploy built the monitor without
+  `RS_VERSION` / `RS_MONITOR_COMMIT` (fixed in facebook_tracker `a744733`).
+
 ### Deploy
 
 Nothing to set: the bridge reuses `COORDINATOR_API_URL`,

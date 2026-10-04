@@ -2280,6 +2280,8 @@ const zh: Record<string, string> = {
   fbcBuildDiffers: '与协调器不同，协调器运行 {v}',
   fbcBuildOf: '{svc} 构建版本',
   fbcBuildUnknown: '{svc} 未上报构建版本',
+  fbcBuildUnstamped: '未标记构建',
+  fbcBuildUnstampedHint: '该节点的镜像构建时未写入版本（RS_VERSION / RS_MONITOR_COMMIT）。请用 facebook_tracker 中的 scripts/build-monitor-image.sh 重新构建。',
   fbcWatch: '查看',
   fbcWatchHint: '打开该节点的实时浏览器',
   fbcColWatch: '查看',

@@ -189,3 +189,16 @@ export function reviewedToday(
     last7: days.filter(d => d.day >= cutoff).reduce((n, d) => n + d.reviewed, 0),
   };
 }
+
+// A VNC link written into config, usable from the ERP only if it is absolute.
+// The facade hands out its own viewer as a path ("/vnc/homelab-1") meant for
+// its own page; opened here it resolves against the ERP's origin and lands on
+// a page that does not exist. Such a worker is watched through the ERP's
+// viewer (canWatch) instead.
+export function externalVncUrl(url: string | null | undefined): string | null {
+  return url && /^https?:\/\//i.test(url) ? url : null;
+}
+
+// A build the image was not stamped with: the Dockerfile's "unknown" default,
+// which says nothing about whether the worker is current.
+export const isUnstampedBuild = (v: string): boolean => /^unknown\b/i.test(v.trim());

@@ -2780,6 +2780,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     fbcBuildDiffers: 'Differs from the coordinator, which runs {v}',
     fbcBuildOf: '{svc} build',
     fbcBuildUnknown: '{svc} build not reported',
+    fbcBuildUnstamped: 'build not stamped',
+    fbcBuildUnstampedHint: 'This worker\'s image was built without its version (RS_VERSION / RS_MONITOR_COMMIT). Rebuild it with scripts/build-monitor-image.sh in facebook_tracker.',
     fbcWatch: 'Watch',
     fbcWatchHint: 'Open the worker’s live browser',
     fbcColWatch: 'Watch',

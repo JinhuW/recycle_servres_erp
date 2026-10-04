@@ -14,7 +14,7 @@ import {
 } from '../../lib/coordinator';
 import { handleFetchError } from '../../lib/errorToast';
 import {
-  attentionEntries, attentionReason, canWatch, offersRelogin, type AttentionEntry,
+  attentionEntries, attentionReason, canWatch, externalVncUrl, offersRelogin, type AttentionEntry,
 } from '../../lib/fleetView';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
@@ -387,8 +387,8 @@ function NeedsHumanCard({ fleet, challenges, locale, onResolved, onError }: {
           </div>
           {canWatch(entry.account)
             ? <WatchButton workerId={entry.challenge.worker_id} />
-            : entry.challenge.vnc_url && (
-              <a className="btn sm" href={entry.challenge.vnc_url} target="_blank" rel="noopener">
+            : externalVncUrl(entry.challenge.vnc_url) && (
+              <a className="btn sm" href={externalVncUrl(entry.challenge.vnc_url)!} target="_blank" rel="noopener">
                 <Icon name="eye" size={13} />
                 {t('fbcOpenVnc')}
               </a>

@@ -8,7 +8,8 @@ import {
 } from '../../lib/coordinator';
 import { handleFetchError, showSuccessToast } from '../../lib/errorToast';
 import {
-  accountAlerts, accountHaystack, browserLabel, canWatch, hitsByCity, isActive, liveness,
+  accountAlerts, accountHaystack, browserLabel, canWatch, externalVncUrl, hitsByCity, isActive,
+  isUnstampedBuild, liveness,
   matchesTerms, needsAttention, queryTerms, reviewedToday, searchersByCity, splitHighlights,
   whoIs, type AccountLiveness, type CityHits,
 } from '../../lib/fleetView';
@@ -435,6 +436,10 @@ function BuildChip({ health, coordinatorVersion }: {
   if (!health) return <span className="muted">—</span>;
   const v = health.version;
   if (!v) return <span className="chip muted" title={t('fbcBuildPreHint')}>{t('fbcBuildPre')}</span>;
+  // Not a mismatch, just an image built without its identity — quiet, not amber.
+  if (isUnstampedBuild(v)) {
+    return <span className="chip muted" title={t('fbcBuildUnstampedHint')}>{t('fbcBuildUnstamped')}</span>;
+  }
   const same = Boolean(coordinatorVersion && v.startsWith(coordinatorVersion));
   return (
     <span className={`chip ${same ? 'muted' : 'warn'} mono fl-build`}
@@ -478,7 +483,8 @@ function AccountDetail({ account: w, hits, terms, locale }: {
     : '—';
   // A config-written link is the fallback for a worker the facade cannot
   // bridge to; it opens wherever it points, outside the ERP.
-  const configVnc = canWatch(w) ? null : (w.vnc_url ?? h?.vnc_url ?? w.account?.vnc_url ?? null);
+  const configVnc = canWatch(w) ? null
+    : externalVncUrl(w.vnc_url) ?? externalVncUrl(h?.vnc_url) ?? externalVncUrl(w.account?.vnc_url);
   const muted = (text: string) => <span className="muted">{text}</span>;
   const who = whoIs(w);
   const acct = w.account;

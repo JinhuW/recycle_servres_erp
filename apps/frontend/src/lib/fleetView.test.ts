@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { vncSocketUrl, type Challenge, type FleetAccount, type FleetDoc, type FleetWorker } from './coordinator';
 import {
   accountAlerts, accountHaystack, attentionEntries, attentionReason, browserLabel, canWatch,
-  hitsByCity, matchesTerms, offersRelogin, queryTerms, reviewedToday, searchersByCity,
+  externalVncUrl, hitsByCity, isUnstampedBuild, matchesTerms, offersRelogin, queryTerms, reviewedToday, searchersByCity,
   splitHighlights, whoIs,
 } from './fleetView';
 
@@ -152,4 +152,19 @@ describe('fleetView', () => {
     expect(reviewedToday(days, now)).toEqual({ today: 36, alertedToday: 2, last7: 46 });
     expect(reviewedToday([], now)).toEqual({ today: 0, alertedToday: 0, last7: 0 });
   });
+
+  it('opens only absolute config VNC links, never a facade-relative path', () => {
+    expect(externalVncUrl('/vnc/homelab-1')).toBeNull();
+    expect(externalVncUrl('vnc/homelab-1')).toBeNull();
+    expect(externalVncUrl('javascript:alert(1)')).toBeNull();
+    expect(externalVncUrl(null)).toBeNull();
+    expect(externalVncUrl('https://fbc-api.recycleservers.com/vnc/ne-1')).toBe('https://fbc-api.recycleservers.com/vnc/ne-1');
+  });
+
+  it('tells an unstamped image from a real build', () => {
+    expect(isUnstampedBuild('unknown (unknown)')).toBe(true);
+    expect(isUnstampedBuild('unknown')).toBe(true);
+    expect(isUnstampedBuild('0.5.5 (9958051)')).toBe(false);
+  });
 });
+
