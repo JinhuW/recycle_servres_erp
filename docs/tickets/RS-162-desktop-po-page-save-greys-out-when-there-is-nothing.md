@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-04
 reporter: jinhu
 branch: fix/po-save-disabled-when-clean
-pr:
+pr: "#487"
 version: 1.203.1
 related: []
 ---
