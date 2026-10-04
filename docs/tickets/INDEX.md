@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-169](./RS-169-second-level-sidebar-nav-the-trackers-move-under-mon.md) | in-progress | story | P2 | Second-level sidebar nav; the trackers move under Monitors | 1.207.0 |
 | [RS-164](./RS-164-facebook-tracker-reaches-parity-with-the-rs-console.md) | done | story | P2 | Facebook tracker reaches parity with the rs-console dashboard, including watching a worker's browser | 1.204.0 |
 | [RS-163](./RS-163-pre-release-review-fixes-for-v1-203-0-v1-203-1.md) | done | bug | P1 | Pre-release review fixes for v1.203.0–v1.203.1 | 1.203.2 |
 | [RS-162](./RS-162-desktop-po-page-save-greys-out-when-there-is-nothing.md) | done | bug | P2 | Desktop PO page: Save greys out when there is nothing to save | 1.203.1 |

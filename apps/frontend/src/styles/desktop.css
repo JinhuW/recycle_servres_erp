@@ -87,6 +87,14 @@ html.desktop, body.desktop, .desktop #root {
   border-radius: 999px; background: var(--accent-soft);
   color: var(--accent-strong); font-weight: 600;
 }
+/* Second level: a parent opens while you are on one of its pages. These stay
+   above the icon-rail block, whose `.sidebar .nav-item` padding has to win
+   over the child indent; the rail hides the caret as one of its label spans. */
+.nav-item .nav-caret { margin-left: auto; display: inline-flex; opacity: 0.6; }
+.nav-item.open { color: var(--fg); }
+.nav-item.open .nav-icon { color: var(--accent); opacity: 1; }
+.nav-children { display: flex; flex-direction: column; gap: 2px; }
+.nav-item.nav-sub { padding-left: 30px; font-size: 13px; }
 
 .sidebar-foot {
   margin-top: auto;

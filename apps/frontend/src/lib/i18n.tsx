@@ -312,6 +312,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     nav_group_oversight: 'Oversight',
     nav_activity: 'Activity',
     nav_payments: 'Payments',
+    nav_monitors: 'Monitors',
 
     // ── Payments — bank-transaction reconciliation against POs ──
     payTitle: 'Payments',
@@ -2548,7 +2549,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     'pwa.intro.android.note':     'Installs instantly. No Play Store needed.',
 
     // ── Tracker ──
-    nav_tracker: 'Tracker',
+    nav_tracker: 'Reddit',
     trkTitle: 'Reddit tracker',
     trkSubtitle: 'Alert rules, watched subreddits and fleet health for the for-sale monitor.',
     trkNotConfigured: 'The tracker connection is not set up yet. Set TRACKER_API_URL and TRACKER_API_TOKEN on the backend, then reload.',
@@ -2601,7 +2602,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     trkSubInvalidInterval: 'Interval must be at least 30 seconds.',
 
     // ── Facebook fleet (coordinator) ──
-    nav_coordinator: 'Facebook tracker',
+    nav_coordinator: 'Facebook',
     fbcTitle: 'Facebook tracker',
     fbcSubtitle: 'Every Facebook account the monitor runs: where it searches, what it searches for, whether it is alive — plus review volume, checkpoints and the content filter.',
     fbcNotConfigured: 'The worker control plane is not set up yet. Set COORDINATOR_API_URL and COORDINATOR_API_TOKEN on the backend, then reload.',
