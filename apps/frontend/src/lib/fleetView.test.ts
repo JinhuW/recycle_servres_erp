@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { vncSocketUrl, type Challenge, type FleetAccount, type FleetDoc, type FleetWorker } from './coordinator';
 import {
   accountAlerts, accountHaystack, attentionEntries, attentionReason, browserLabel, canWatch,
-  externalVncUrl, hitsByCity, isUnstampedBuild, matchesTerms, offersRelogin, queryTerms, reviewedToday, searchersByCity,
+  externalVncUrl, hitsByCity, isUnstampedBuild, reloginIsAutomatic, matchesTerms, offersRelogin, queryTerms, reviewedToday, searchersByCity,
   splitHighlights, whoIs,
 } from './fleetView';
 
@@ -165,6 +165,17 @@ describe('fleetView', () => {
     expect(isUnstampedBuild('unknown (unknown)')).toBe(true);
     expect(isUnstampedBuild('unknown')).toBe(true);
     expect(isUnstampedBuild('0.5.5 (9958051)')).toBe(false);
+  });
+
+  it('calls a re-login automatic only with a stored password the account may use', () => {
+    const vault = (allow: boolean, secrets: Record<string, boolean>) =>
+      account({ account: { account_id: 'a', fb_username: null, region: null, vnc_url: null,
+        allow_password_login: allow, proxy_configured: false, secrets } });
+    expect(reloginIsAutomatic(vault(true, { password: true, totp_secret: true }))).toBe(true);
+    expect(reloginIsAutomatic(vault(false, { password: true }))).toBe(false);
+    expect(reloginIsAutomatic(vault(true, { totp_secret: true }))).toBe(false);
+    expect(reloginIsAutomatic(account({}))).toBe(false);
+    expect(reloginIsAutomatic(null)).toBe(false);
   });
 });
 
