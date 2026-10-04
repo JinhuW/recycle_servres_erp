@@ -15,6 +15,7 @@ import { onShutdown } from './lib/shutdown';
 import { startPackageTrackingLoop } from './shipping/track';
 import { startBankSyncLoop } from './banktx/sync';
 import { startWebSubmissionPurgeLoop } from './lib/webSubmissionPurge';
+import { startMailInboxLoop } from './mail/inbox';
 
 const env = buildEnv();
 const port = Number(process.env.PORT ?? 8787);
@@ -24,6 +25,7 @@ const loops = [
   startPackageTrackingLoop(getDb(env), env),
   startBankSyncLoop(env),
   startWebSubmissionPurgeLoop(getDb(env), env),
+  startMailInboxLoop(getDb(env), env),
 ];
 
 const server = serve({ fetch: (request) => app.fetch(request, env), port }, (info) => {

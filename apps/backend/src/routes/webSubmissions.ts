@@ -3,6 +3,8 @@
 //   GET    /api/web-submissions/:id        one submission with its photos
 //   PATCH  /api/web-submissions/:id        triage: status, staff note
 //   POST   /api/web-submissions/:id/convert  a ram4cash sell lot → Draft PO
+//   GET    /api/web-submissions/:id/messages  the email thread + mail mode
+//   POST   /api/web-submissions/:id/messages  send a reply from the shared box
 //
 // Self-applies authMiddleware + requireManager (tracker.ts pattern), so
 // index.ts mounts it with a single app.route().
@@ -20,6 +22,8 @@ import { syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { writeOrderEvent } from '../services/orderAudit';
 import { isoDatePlus, loadCrmSettings } from '../services/supplierCrm';
 import { WEB_CHANNEL_SOURCES, type SellLotPayload } from './publicForms';
+import { mailConfig } from '../mail';
+import { sendSubmissionReply } from '../mail/send';
 import type { Env, User } from '../types';
 
 const webSubmissions = new Hono<{ Bindings: Env; Variables: { user: User } }>()
@@ -370,6 +374,75 @@ webSubmissions.post('/:id/convert', async (c) => {
   }
 
   return c.json({ orderId, submission: await loadOne(sql, id) }, 201);
+});
+
+// A send that never settled — the process died mid-SMTP — may or may not have
+// gone out. After this long the page says so instead of spinning forever.
+const UNCONFIRMED_AFTER_MS = 2 * 60 * 1000;
+const MAX_REPLY_CHARS = 10_000;
+
+type MessageRow = {
+  id: string; direction: 'out' | 'in'; from_addr: string; to_addr: string; subject: string;
+  body_text: string; status: string; error: string | null; dmarc: string | null;
+  attachment_names: string[]; author_id: string | null; author_name: string | null; created_at: Date;
+};
+
+function messageView(m: MessageRow) {
+  const stale = m.status === 'sending' && Date.now() - m.created_at.getTime() > UNCONFIRMED_AFTER_MS;
+  return {
+    id: m.id,
+    direction: m.direction,
+    from: m.from_addr,
+    to: m.to_addr,
+    subject: m.subject,
+    body: m.body_text,
+    status: stale ? 'unconfirmed' : m.status,
+    error: m.error,
+    dmarc: m.dmarc,
+    attachmentNames: m.attachment_names,
+    author: m.author_id ? { id: m.author_id, name: m.author_name } : null,
+    createdAt: m.created_at,
+  };
+}
+
+async function loadMessages(sql: ReturnType<typeof getDb>, where: { submissionId: string } | { id: string }) {
+  const rows = await sql<MessageRow[]>`
+    SELECT m.id, m.direction, m.from_addr, m.to_addr, m.subject, m.body_text, m.status, m.error,
+           m.dmarc, m.attachment_names, m.author_id, u.name AS author_name, m.created_at
+    FROM web_submission_messages m
+    LEFT JOIN users u ON u.id = m.author_id
+    WHERE ${'id' in where ? sql`m.id = ${where.id}` : sql`m.submission_id = ${where.submissionId}`}
+    ORDER BY m.created_at, m.id
+  `;
+  return rows.map(messageView);
+}
+
+webSubmissions.get('/:id/messages', async (c) => {
+  const sql = getDb(c.env);
+  const id = c.req.param('id');
+  const [exists] = await sql`SELECT 1 FROM web_submissions WHERE id = ${id}`;
+  if (!exists) return c.json({ error: 'Not found' }, 404);
+  const cfg = mailConfig(c.env);
+  return c.json({
+    messages: await loadMessages(sql, { submissionId: id }),
+    mail: { mode: cfg?.mode ?? 'off', address: cfg?.user ?? null },
+  });
+});
+
+webSubmissions.post('/:id/messages', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { body?: unknown } | null;
+  const text = typeof body?.body === 'string' ? body.body.trim() : '';
+  if (!text) return c.json({ error: 'body required' }, 400);
+  if (text.length > MAX_REPLY_CHARS) return c.json({ error: `body is limited to ${MAX_REPLY_CHARS} characters` }, 400);
+
+  const sql = getDb(c.env);
+  const id = c.req.param('id');
+  const r = await sendSubmissionReply(sql, c.env, { submissionId: id, authorId: c.var.user.id, body: text });
+  if (r.kind === 'off') return c.json({ error: 'mail_off' }, 503);
+  if (r.kind === 'not_found') return c.json({ error: 'Not found' }, 404);
+  const [message] = await loadMessages(sql, { id: r.messageRowId });
+  if (r.kind === 'failed') return c.json({ error: 'send_failed', message }, 502);
+  return c.json({ message, submission: await loadOne(sql, id) }, 201);
 });
 
 export default webSubmissions;
