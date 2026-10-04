@@ -1265,7 +1265,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   `WS-nnnn` row and notify managers; nothing anonymous touches orders. The page
   lists them by status (new / contacted / converted / archived / spam) with
   counts, a site filter and search; a submission opens with its details, line
-  photos, a status + staff-note triage panel and a reply-by-email link. **Create
+  photos, a status + staff-note triage panel and its email conversation. **Create
   Draft PO** converts a sell lot once into a Draft PO owned by the clicking
   manager (lines at cost 0, photos copied, seller filed as a house-account
   supplier with source `web`, PayPal or cash + pickup per the seller's choice).
@@ -1292,6 +1292,37 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   fails is kept, so the next run retries it. A converted submission is never
   deleted, even archived later (v1.200.1): it is the PO's record of who sold
   the lot.
+- **A submission carries its email conversation** (v1.204.0).
+  - **Sending.** The thread reads like a mail client: the subject on top,
+    earlier messages folded to one line (sender, snippet, date, any problem),
+    the newest open with its From / To. A manager writes the reply in a draft
+    showing the From / To / Subject it will go out with. It goes out from one
+    shared company mailbox, a Lark box set by `MAIL_USER` and
+    `MAIL_PASSWORD`.
+    - A ram4cash sell request is sent as "ram4cash" with the subject "Your
+      sell request WS-nnnn · ram4cash.com".
+    - A recycleservers.com quote is sent as "Recycle Servers".
+    - The first sent reply moves a `new` submission to `contacted`.
+  - **Receiving.** Every two minutes the backend reads the box's INBOX over
+    IMAP, read-only, so nothing in Lark changes. It attaches a customer's
+    answer to the thread in one of two ways:
+    - the answer replies to one of the thread's messages, or
+    - its subject names the WS id **and** it comes from the submission's
+      address, with no DMARC failure from Lark.
+
+    Mail whose From names more than one address is ignored. Other mail is
+    never downloaded.
+  - **What the thread shows.**
+    - Each answer shows its sender address, with a warning when that isn't
+      the submission's address or Lark's DMARC check failed.
+    - Quoted history is folded away.
+    - Attachments are listed by name, to open in the mailbox.
+    - A reply notifies managers, except on spam.
+    - Every send shows as sent, not sent (with the server's error), or "not
+      confirmed" if the backend died mid-send.
+  - **Without the two variables** mail is off and the page keeps its
+    reply-by-email link. `/api/health` reports `providers.mail` as `smtp`,
+    `stub` or `off`. Set them on prod only.
 
 ## MCP and OAuth connectors
 

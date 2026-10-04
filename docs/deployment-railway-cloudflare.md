@@ -98,6 +98,20 @@ secret values.
 `OAUTH_SIGNING_KEY_PREVIOUS` is not required (no key rotation needed for the
 experiment).
 
+**Web-submission email — prod backend only.** Leave these unset on `dev`: its
+database is a nightly copy of prod, so a dev backend with them set would send
+mail to real customers and race prod for the same inbox. Railway only allows
+outbound SMTP on the Pro plan, and a service only picks that up on a redeploy.
+
+| Variable | Value / how to generate |
+|---|---|
+| `MAIL_USER` | the shared mailbox address replies are sent from |
+| `MAIL_PASSWORD` | the mailbox's IMAP/SMTP app password (Lark: Mail settings → IMAP/SMTP) — do not commit |
+| `MAIL_SMTP_HOST` / `MAIL_SMTP_PORT` | optional; default `smtp.larksuite.com` / `465` |
+| `MAIL_IMAP_HOST` / `MAIL_IMAP_PORT` | optional; default `imap.larksuite.com` / `993` |
+
+`/api/health` reports `providers.mail` as `smtp`, `stub` or `off`.
+
 **Why `OAUTH_SIGNING_KEY_CURRENT` is mandatory:** `env.ts` has a production boot
 guard that rejects startup unless `JWT_SECRET` is non-default, the DB password is
 not `recycle`, `CORS_ALLOWED_ORIGINS` is set, `OPENROUTER_API_KEY` is set, and
