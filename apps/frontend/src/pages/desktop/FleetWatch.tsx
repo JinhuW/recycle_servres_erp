@@ -155,7 +155,7 @@ export function FleetWatch({ workerId }: { workerId: string }) {
             <input type="checkbox" checked={control} onChange={e => setControl(e.target.checked)} />
             <span>{t('fbcWatchControl')}</span>
           </label>
-          <ReloginButton workerId={workerId} />
+          <ReloginButton workerId={workerId} account={account} />
           {phase.kind === 'closed' && (
             <button type="button" className="btn sm" onClick={() => setAttempt(n => n + 1)}>
               <Icon name="rotate" size={13} />

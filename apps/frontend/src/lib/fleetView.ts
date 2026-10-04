@@ -202,3 +202,12 @@ export function externalVncUrl(url: string | null | undefined): string | null {
 // A build the image was not stamped with: the Dockerfile's "unknown" default,
 // which says nothing about whether the worker is current.
 export const isUnstampedBuild = (v: string): boolean => /^unknown\b/i.test(v.trim());
+
+// Whether a re-login can finish on its own: the worker re-enters a password
+// only when the vault holds one AND the account opts into password login.
+// Otherwise the forced re-login clears the session and leaves Facebook's
+// login form open for a person to complete through the viewer.
+export function reloginIsAutomatic(w: FleetAccount | null | undefined): boolean {
+  const acct = w?.account;
+  return Boolean(acct?.allow_password_login && acct.secrets.password);
+}

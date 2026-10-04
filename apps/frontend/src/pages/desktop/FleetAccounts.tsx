@@ -10,7 +10,8 @@ import { handleFetchError, showSuccessToast } from '../../lib/errorToast';
 import {
   accountAlerts, accountHaystack, browserLabel, canWatch, externalVncUrl, hitsByCity, isActive,
   isUnstampedBuild, liveness,
-  matchesTerms, needsAttention, queryTerms, reviewedToday, searchersByCity, splitHighlights,
+  matchesTerms, needsAttention, queryTerms, reloginIsAutomatic, reviewedToday, searchersByCity,
+  splitHighlights,
   whoIs, type AccountLiveness, type CityHits,
 } from '../../lib/fleetView';
 import { relTime } from '../../lib/format';
@@ -111,8 +112,13 @@ export function WatchButton({ workerId, compact }: { workerId: string; compact?:
 // Queues a Facebook re-login for one worker, after a confirm that says what it
 // will do: the worker re-enters its username, password and 2FA code from the
 // vault on its next cycle.
-export function ReloginButton({ workerId, onQueued, className = 'btn sm' }: {
-  workerId: string; onQueued?: () => void; className?: string;
+export function ReloginButton({ workerId, account, onQueued, className = 'btn sm' }: {
+  workerId: string;
+  // The worker's fleet row, to say up front whether the login can finish by
+  // itself. Unknown (undefined) reads as "not automatic", the safe claim.
+  account?: FleetAccount | null;
+  onQueued?: () => void;
+  className?: string;
 }) {
   const { t } = useT();
   const [asking, setAsking] = useState(false);
@@ -149,7 +155,15 @@ export function ReloginButton({ workerId, onQueued, className = 'btn sm' }: {
             </div>
           </div>
           <div className="modal-body">
-            <p style={{ margin: 0, fontSize: 13.5, color: 'var(--fg-muted)' }}>{t('fbcReloginBody')}</p>
+            <p style={{ margin: 0, fontSize: 13.5, color: 'var(--fg-muted)' }}>
+              {reloginIsAutomatic(account) ? t('fbcReloginBody') : t('fbcReloginManualBody')}
+            </p>
+            {!reloginIsAutomatic(account) && (
+              <div className="card-note" style={{ marginTop: 12, padding: '10px 12px' }}>
+                <Icon name="info" size={16} />
+                <span>{t('fbcReloginManualNote', { id: workerId })}</span>
+              </div>
+            )}
           </div>
           <div className="modal-foot" style={{ justifyContent: 'flex-end' }}>
             <button type="button" className="btn" disabled={busy} onClick={() => setAsking(false)}>{t('cancel')}</button>

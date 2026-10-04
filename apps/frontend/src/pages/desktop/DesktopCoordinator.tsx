@@ -418,7 +418,7 @@ function NeedsHumanCard({ fleet, challenges, locale, onResolved, onError }: {
               {entry.account.health?.account_id && ` · ${entry.account.health.account_id}`}
             </div>
           </div>
-          {offersRelogin(entry.account) && <ReloginButton workerId={entry.account.worker_id} />}
+          {offersRelogin(entry.account) && <ReloginButton workerId={entry.account.worker_id} account={entry.account} />}
           {canWatch(entry.account) && <WatchButton workerId={entry.account.worker_id} />}
         </div>
       ))}

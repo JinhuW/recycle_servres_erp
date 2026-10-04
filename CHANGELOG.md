@@ -17,6 +17,22 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.208.2] - 2026-10-04
+
+The Re-login dialog tells the truth about what will happen (RS-170).
+
+### Fixed
+
+- **Re-login no longer promises what it cannot do.** The dialog said the
+  worker would re-enter its password and 2FA code "on its next search cycle".
+  Sweeps now run once a day, and no worker has a stored password it may use,
+  so a click looked like nothing happened. The worker side is fixed in
+  facebook_tracker (`8b6c28d`, `34c4116`): a re-login now runs within about
+  five minutes, and a login finished by hand in Watch is kept within ~15 s.
+  The dialog now says "within about 5 minutes", and for a worker without a
+  usable stored password it says the login page will open for you to finish
+  in Watch → Take control, with the vault command that makes it automatic.
+
 ## [1.208.1] - 2026-10-04
 
 A stale fleet-console token no longer signs managers out of the ERP (RS-165).
