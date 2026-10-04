@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-160](./RS-160-a-po-has-a-manager-set-on-entering-reviewing-and-off.md) | done | story | P2 | A PO has a manager, set on entering Reviewing and offered to whoever moves it next | — |
+| [RS-162](./RS-162-desktop-po-page-save-greys-out-when-there-is-nothing.md) | done | bug | P2 | Desktop PO page: Save greys out when there is nothing to save | 1.203.1 |
+| [RS-160](./RS-160-a-po-has-a-manager-set-on-entering-reviewing-and-off.md) | done | story | P2 | A PO has a manager, set on entering Reviewing and offered to whoever moves it next | 1.203.0 |
 | [RS-159](./RS-159-pre-release-review-fixes-for-v1-201-0-v1-202-0.md) | done | bug | P1 | Pre-release review fixes for v1.201.0–v1.202.0 | 1.202.1 |
 | [RS-158](./RS-158-phone-po-products-screen-lands-at-the-bottom-after-a.md) | done | story | P2 | Phone PO products screen lands at the bottom after a scan, with a top/bottom jump button | 1.202.0 |
 | [RS-157](./RS-157-review-mode-asks-to-move-the-po-to-reviewing-po-list.md) | done | feature | P2 | Review mode asks to move the PO to Reviewing; PO list opens it | 1.201.0 |
