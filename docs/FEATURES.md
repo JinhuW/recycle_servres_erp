@@ -1288,7 +1288,11 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   usual middleware plus an Origin check, mints the facade's single-use VNC
   ticket and relays bytes, so the facade token and Cloudflare Access
   credentials stay server-side.  Offered for every worker the facade can
-  bridge to (`RS_VNC_TARGETS`) (v1.204.0).
+  bridge to (`RS_VNC_TARGETS`) (v1.204.0).  The relay re-checks the
+  manager's session every minute.  A manager who is signed out, deactivated
+  or demoted loses the view within a minute.  When the access token behind
+  the socket runs out, the viewer reconnects on its own with a fresh one and
+  keeps control if it had it (v1.209.1).
 
 - **Web submissions** — the manager inbox for the public website forms
   (v1.187.0). The ram4cash.com sell form (`POST /api/public/intake`) and the

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type RFB from '@novnc/novnc';
 import { Icon } from '../../components/Icon';
-import { coordinatorApi, vncSocketUrl, type FleetAccount } from '../../lib/coordinator';
+import { api } from '../../lib/api';
+import { coordinatorApi, VNC_SESSION_LAPSED, vncSocketUrl, type FleetAccount } from '../../lib/coordinator';
 import { liveness } from '../../lib/fleetView';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
@@ -59,7 +60,11 @@ export function FleetWatch({ workerId }: { workerId: string }) {
     const tr = (key: string) => tRef.current(key);
     setPhase({ kind: 'connecting' });
 
-    import('@novnc/novnc').then(({ default: RFBClass }) => {
+    // A socket handshake can't run api.ts's 401 → refresh → retry, and the
+    // `at` cookie is gone the moment its token expires — which is exactly
+    // when the relay cuts a socket. An ordinary call first puts a live cookie
+    // on the handshake, or signs out a session that is really over.
+    Promise.all([import('@novnc/novnc'), api.get('/api/me').catch(() => undefined)]).then(([{ default: RFBClass }]) => {
       if (cancelled || !screenRef.current) return;
       // Our own socket rather than noVNC's, so the relay's close reason ("no
       // VNC target for se-1", "rs-monitor-ne:5900 is not answering") reaches
@@ -83,6 +88,12 @@ export function FleetWatch({ workerId }: { workerId: string }) {
         if (cancelled) return;
         const clean = (e as CustomEvent<{ clean?: boolean }>).detail?.clean;
         const close = lastClose as { code: number; reason: string } | null;
+        // Sent only by a re-check after a handshake that succeeded, so this
+        // cannot loop: a refused handshake closes 1006 and shows the overlay.
+        if (close?.code === VNC_SESSION_LAPSED) {
+          setAttempt(n => n + 1);
+          return;
+        }
         setPhase({
           kind: 'closed',
           title: clean && !close?.reason ? tr('fbcWatchEnded') : tr('fbcWatchLost'),

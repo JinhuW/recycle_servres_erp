@@ -396,7 +396,11 @@ function AccountRow({ account: w, hits, terms, coordinatorVersion, open, onToggl
         className={`fl-row${needsAttention(w) ? ' needs-attention' : ''}`}
         role="button" tabIndex={0} aria-expanded={open}
         onClick={onToggle}
-        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); } }}
+        onKeyDown={e => {
+          // A key pressed on a control inside the row (Watch) is that control's.
+          if (e.target !== e.currentTarget) return;
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); }
+        }}
       >
         <td><StatusCell account={w} /></td>
         <td className="mono">

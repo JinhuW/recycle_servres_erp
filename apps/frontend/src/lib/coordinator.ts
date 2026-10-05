@@ -225,3 +225,10 @@ export function vncSocketUrl(workerId: string, loc: Pick<Location, 'protocol' | 
   const scheme = loc.protocol === 'https:' ? 'wss' : 'ws';
   return `${scheme}://${loc.host}/api/coordinator/vnc/${encodeURIComponent(workerId)}/ws`;
 }
+
+/**
+ * The close code the relay sends when its minute re-check finds the
+ * handshake's session no longer valid — most often just the access token
+ * running out (VNC_SESSION_LAPSED in vncBridge.ts).
+ */
+export const VNC_SESSION_LAPSED = 4401;

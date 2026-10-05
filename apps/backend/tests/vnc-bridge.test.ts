@@ -4,8 +4,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
 import { createAdaptorServer } from '@hono/node-server';
 import app from '../src/index';
-import { attachVncBridge, openVncBridges } from '../src/vncBridge';
-import { resetDb } from './helpers/db';
+import { attachVncBridge, openVncBridges, VNC_SESSION_LAPSED } from '../src/vncBridge';
+import { getTestDb, resetDb } from './helpers/db';
 import { testEnv } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import type { Env } from '../src/types';
@@ -165,5 +165,81 @@ describe('VNC bridge (/api/coordinator/vnc/:workerId/ws)', () => {
     });
     await new Promise((r) => setTimeout(r, 50));
     expect(openVncBridges()).toBe(0);
+  });
+});
+
+// The minute re-check, at 100 ms on a server of its own. Every test here ends
+// with its socket closed, so no re-check runs into the next resetDb.
+describe('VNC bridge session re-check', () => {
+  let fast: Server;
+  let fastPort: number;
+
+  beforeAll(async () => {
+    const env: Env = Object.assign(Object.create(testEnv), {
+      COORDINATOR_API_URL: facadeUrl,
+      COORDINATOR_API_TOKEN: FACADE_TOKEN,
+    });
+    fast = createAdaptorServer({ fetch: (req) => app.fetch(req, env) }) as Server;
+    attachVncBridge(fast, app, env, { revalidateMs: 100 });
+    fastPort = await listen(fast);
+  });
+
+  afterAll(async () => {
+    fast.closeAllConnections();
+    await new Promise((r) => fast.close(r));
+  });
+
+  // Opens a viewer, lets `during` run once the first frame arrives, and
+  // resolves with how the socket ended — or still open after `holdMs`, in
+  // which case the test closes it.
+  function watch(token: string, during: () => Promise<void>, holdMs = 1500): Promise<{ code?: number; reason?: string; messages: string[] }> {
+    return new Promise((resolve) => {
+      const out: { code?: number; reason?: string; messages: string[] } = { messages: [] };
+      const ws = new WebSocket(`ws://127.0.0.1:${fastPort}/api/coordinator/vnc/ne-1/ws`, {
+        headers: { Cookie: `at=${token}`, Origin: 'http://localhost:5173' },
+      });
+      let timer: NodeJS.Timeout | undefined;
+      ws.on('message', (data) => {
+        out.messages.push(String(data));
+        if (out.messages.length === 1) {
+          void during().then(() => { timer = setTimeout(() => ws.close(), holdMs); });
+        }
+      });
+      ws.on('close', (code, reason) => {
+        clearTimeout(timer);
+        if (code !== 1005) { out.code = code; out.reason = String(reason); }
+        resolve(out);
+      });
+      ws.on('error', () => { /* surfaced through close */ });
+    });
+  }
+
+  it('keeps a socket whose session still stands, without minting another ticket', async () => {
+    const { token } = await loginAs(ALEX);
+    const before = issued.size;
+    const out = await watch(token, async () => {}, 600);
+    expect(out.code).toBeUndefined();
+    expect(out.messages).toEqual(['RFB 003.008\n']);
+    // Every ticket is consumed on use, so a re-check that minted one would
+    // leave it behind here.
+    expect(issued.size).toBe(before);
+  });
+
+  it('closes with 4401 once the manager is deactivated', async () => {
+    const { token } = await loginAs(ALEX);
+    const out = await watch(token, async () => {
+      await getTestDb()`UPDATE users SET active = FALSE WHERE email = ${ALEX}`;
+    });
+    expect(out.code).toBe(VNC_SESSION_LAPSED);
+    expect(out.reason).toBe('Your sign-in has run out');
+  });
+
+  it('closes with 1008 once the manager is demoted', async () => {
+    const { token } = await loginAs(ALEX);
+    const out = await watch(token, async () => {
+      await getTestDb()`UPDATE users SET role = 'purchaser' WHERE email = ${ALEX}`;
+    });
+    expect(out.code).toBe(1008);
+    expect(out.reason).toBe('You can no longer watch this worker');
   });
 });
