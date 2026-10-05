@@ -28,6 +28,7 @@ describe('PATCH /api/me/preferences allowlist', () => {
         'scan.deskCamera': true,
         'scan.cameraLabel': "Jinhu's iPhone Camera",
         'sellOrders.lineGroup': 'po',
+        'sidebar.folded': true,
       },
     });
     expect(res.status).toBe(200);

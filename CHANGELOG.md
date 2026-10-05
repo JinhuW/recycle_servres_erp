@@ -17,6 +17,219 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.209.1] - 2026-10-04
+
+Pre-release review fixes for v1.204.0–v1.209.0 (RS-175).
+
+### Fixed
+
+- **Watching a worker no longer outlives the session that opened it.** The
+  viewer's socket was checked once, at the handshake, and then relayed bytes
+  for as long as the tab stayed open. So a manager who was signed out,
+  deactivated or demoted kept live control of a worker's Facebook browser.
+  The relay now re-runs the handshake's checks every minute. A lapsed sign-in
+  closes the socket, and the viewer reconnects on a refreshed cookie, keeping
+  control if it had it. Losing the manager role ends the view. A socket now
+  lasts at most as long as the access token it opened with, so a long session
+  sees a brief reconnect about once an hour. The viewer also makes an ordinary
+  call before every connect. Before this, Reconnect more than an hour into a
+  session sent no cookie, and every click was refused. A tab loaded before
+  this release still has the old viewer and may need a reload after its first
+  cut.
+- **The Watch eye on an account row works from the keyboard.** The row
+  caught Enter for its own expand toggle and cancelled it, so Enter on the
+  link inside the row expanded the row instead of opening the viewer.
+- **A failed poll no longer blanks a web submission's email thread.** Any
+  failed refresh, such as a 30-second poll that hit a redeploy, was read as
+  "this backend has no thread". The conversation disappeared, the reply being
+  typed was lost, and the header fell back to the `mailto:` link. Now only a
+  404 does that. Anything else keeps the thread as it was until the next poll
+  gets through.
+- **A 403 that the fleet console explains keeps its explanation.** Since
+  1.208.1 every facade 401/403 has reached the browser as a 502 saying "check
+  COORDINATOR_API_TOKEN". That stays for a 401, a bare 403, and Cloudflare
+  Access's HTML page. A 403 whose JSON gives a reason now shows that reason.
+  It is still a 502, so the ERP still never reads it as a lapsed session.
+
+## [1.209.0] - 2026-10-04
+
+Web submissions can be answered by email from inside the ERP (RS-161).
+
+### Added
+
+- **A web submission has an email conversation.** "Reply by email" used to be
+  a `mailto:` link. It opened the clicking manager's own mail client, so the
+  customer's answer landed in a personal inbox that nobody else could see,
+  and the ERP never knew a conversation had happened.
+  - **Sending.** The submission now shows the thread the way a mail client
+    does: the subject on top, earlier messages folded to one line each, the
+    newest open with its From / To, and the reply written in a draft with its
+    own From / To / Subject. A manager's reply is sent over SMTP from one
+    shared company mailbox
+    (Lark), as "ram4cash" or "Recycle Servers" depending on the site the
+    request came from. The first sent reply moves a `new` submission to
+    `contacted`.
+  - **Receiving.** The backend reads the mailbox's INBOX over IMAP every two
+    minutes and attaches the customer's answers to the same thread. A message
+    counts as an answer only if it replies to one the ERP sent. A WS id in
+    the subject is not enough: ids are sequential and a From address is easy
+    to forge, so a forged "pay my new PayPal" message can't land on a
+    seller's thread.
+  - **Read-only.** The poll looks at headers first, downloads only the
+    matches, and never marks anything read, so the box stays usable in Lark.
+  - **Shown in the thread.** Each answer shows its sender address, with a
+    warning when that isn't the submission's address or Lark's DMARC check
+    failed: a forged "pay my new PayPal" message must not look authentic.
+    Quoted history folds away. Attachments are listed by name to open in the
+    mailbox, and managers are notified.
+  - **Configuration.** New `MAIL_USER` and `MAIL_PASSWORD` turn this on; they
+    are set on the prod backend only, because dev's database is a copy of
+    prod. Without them the page keeps the mailto link, and `/api/health`
+    reports `providers.mail`.
+  - **Storage and dependencies.** Migration 0157 adds
+    `web_submission_messages` and `mail_sync_state`. New backend
+    dependencies: nodemailer, imapflow, mailparser and html-to-text.
+
+## [1.208.2] - 2026-10-04
+
+The Re-login dialog tells the truth about what will happen (RS-170).
+
+### Fixed
+
+- **Re-login no longer promises what it cannot do.** The dialog said the
+  worker would re-enter its password and 2FA code "on its next search cycle".
+  Sweeps now run once a day, and no worker has a stored password it may use,
+  so a click looked like nothing happened. The worker side is fixed in
+  facebook_tracker (`8b6c28d`, `34c4116`): a re-login now runs within about
+  five minutes, and a login finished by hand in Watch is kept within ~15 s.
+  The dialog now says "within about 5 minutes", and for a worker without a
+  usable stored password it says the login page will open for you to finish
+  in Watch → Take control, with the vault command that makes it automatic.
+
+## [1.208.1] - 2026-10-04
+
+A stale fleet-console token no longer signs managers out of the ERP (RS-165).
+
+### Fixed
+
+- **The facade refusing the ERP's token is reported as that, not as an expired
+  session.** The `/api/coordinator` proxy passed every upstream status through
+  verbatim, so when the dev environment's `COORDINATOR_API_TOKEN` stopped
+  matching the console's token, the console's 401 reached the browser as a
+  401 — which the SPA reads as "your session expired". It refreshed, retried,
+  raised an "HTTP 401" dialog on the Facebook tracker page, and after a few
+  rounds the refreshes were refused too. An upstream 401/403 now becomes a
+  502 whose message names `COORDINATOR_API_TOKEN`, on the JSON routes, the
+  checkpoint screenshot and Re-login alike; the live viewer says the same when
+  its ticket is refused, and each refusal is logged as a warning.
+
+## [1.208.0] - 2026-10-04
+
+The desktop sidebar folds to its icon rail on demand (RS-166).
+
+### Added
+
+- **A fold toggle in the sidebar's brand row** collapses the desktop sidebar
+  to the 64px icon rail at any window width, and expands it again. Until now
+  the rail only appeared on its own under 900px, so on a normal window there
+  was no way to give the ~176px back to wide tables like the PO list and
+  inventory. The choice is a per-user preference (`sidebar.folded`), so it
+  survives a reload and follows you to another device. Under 900px the rail
+  is still forced and the toggle is hidden, so it never offers an Expand that
+  does nothing.
+
+### Changed
+
+- **The rail styling now has one source.** It moved out of the 900px media
+  query into an `@container sidebar` query on the sidebar's own width. The
+  viewport rule and the user's fold each only narrow the track, so the two
+  can't drift apart.
+- **Sidebar links carry an `aria-label`.** The rail hides labels with
+  `display: none`, which also hid them from screen readers, so Submit read as
+  "+". Each link now announces its name in the rail as well.
+## [1.207.0] - 2026-10-04
+
+The desktop sidebar gets a second level, and the two listing monitors move
+into it (RS-169). Facebook tracker and Tracker sat as two unrelated rows in
+Oversight; they are one job — watching marketplaces for sellers — so they now
+live under a single **Monitors** entry.
+
+### Added
+
+- **Sidebar entries can have children.** A parent opens while you are on one
+  of its pages and is a single row with a › caret everywhere else; the parent
+  itself links to its first child, so ⌘-click still opens a tab. The table
+  and the rules for what is shown and lit moved out of `Sidebar.tsx` into
+  `lib/desktopNav.ts`, with unit tests. In the icon rail the caret hides and
+  the children show as icons.
+
+### Changed
+
+- **Oversight ▸ Monitors** holds **Facebook** (`/fleet`, including the
+  worker viewer at `/fleet/watch/<worker>`) and **Reddit** (`/tracker`).
+  URLs and the pages themselves are unchanged; only the sidebar labels lost
+  their "tracker" suffix, since the parent now says what they are.
+- Inventory and Payments stay lit on their Analysis and Internal tabs through
+  an `alsoActiveOn` field on the entry rather than two hard-coded clauses.
+
+## [1.204.0] - 2026-10-04
+
+The Facebook tracker page catches up with the rs-console dashboard it was
+ported from (RS-164). RS-048 copied the console as it stood in early
+September; since then the console grew a "Needs a human" panel, an account
+identity table and — the piece operators actually reach for — a Watch button
+that opens a worker's live browser. The ERP now has all of it.
+
+### Added
+
+- **Watch a worker's browser from the ERP** at `/fleet/watch/<worker>`. The
+  console's own viewer could not simply be linked: it needs a console token
+  pasted into the browser on the facade's origin, and that hostname sits
+  behind Cloudflare Access. The ERP backend already holds both credentials,
+  so it relays the socket (`vncBridge.ts`): the upgrade is replayed through
+  the app as a GET, so the proxy-secret gate, session cookie, manager check
+  and a new Origin check all apply before a WebSocket exists; then it mints
+  the facade's single-use ticket and pumps bytes. Neither credential reaches
+  the browser. View-only by default, with Take control, Re-login and
+  Reconnect; noVNC loads as its own chunk only on this page.
+- **Needs a human** replaces the checkpoint queue: checkpoints as before, plus
+  every flagged account with its reason, a Watch button, and Re-login where
+  the session is what is broken. A coordinator outage gets its own row. The
+  card hides when nothing needs a person.
+- **Account information**: one table of each worker's Facebook login, user id,
+  proxy, stored secrets (TOTP badged), browser identity, backup age and
+  session expiry.
+- **Re-login** (`POST /api/coordinator/workers/:id/relogin`, manager-only):
+  queues the facade's one-shot re-login directive for a worker.
+- A Watch column in the accounts table, and the row detail links to the viewer.
+
+### Changed
+
+- The fourth fleet KPI is **Listings reviewed today** (with today's alerts and
+  the 7-day total), as on the console; open checkpoints are counted on the
+  Needs-a-human card instead.
+- The credentialed-origin rule moved to `lib/origins.ts` so CORS and the VNC
+  socket share one implementation.
+
+### Fixed
+
+- **"Open VNC" no longer opens a dead ERP page.** The facade gives its viewer
+  as a path (`/vnc/homelab-1`) meant for its own page, and the account detail
+  used it as-is, so it resolved to `inventory.recycleservers.com/vnc/…`.
+  Workers the facade can bridge to now open the ERP's own viewer, and a
+  config-written VNC link is offered only when it is an absolute `http(s)`
+  URL — in the row detail and on a checkpoint alike.
+- **An image built without its version reads "build not stamped"**, quietly,
+  instead of an amber "unknown (unknown)" that looked like a stale build. The
+  cause was on the fleet side: its deploy built the monitor without
+  `RS_VERSION` / `RS_MONITOR_COMMIT` (fixed in facebook_tracker `a744733`).
+
+### Deploy
+
+Nothing to set: the bridge reuses `COORDINATOR_API_URL`,
+`COORDINATOR_API_TOKEN` and `COORDINATOR_ACCESS_CLIENT_*`. Watch needs console
+0.5.5 or later (ticket route) with the worker listed in `RS_VNC_TARGETS`.
+
 ## [1.203.2] - 2026-10-04
 
 Pre-release review fixes for v1.203.0–v1.203.1 (RS-163). A `/code-review

@@ -42,6 +42,9 @@ export type PrefMap = {
   // How a sell order's lines are grouped: where they ship from, or which PO
   // they came in on.
   'sellOrders.lineGroup': 'warehouse' | 'po';
+  // Desktop sidebar folded to its icon rail at any width (under 900px the
+  // rail is forced regardless).
+  'sidebar.folded': boolean;
 };
 
 export type PrefKey = keyof PrefMap;

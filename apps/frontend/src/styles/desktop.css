@@ -47,6 +47,7 @@ html.desktop, body.desktop, .desktop #root {
   height: 100vh;
   overflow-y: auto;
   z-index: 5;
+  container: sidebar / inline-size;
 }
 .sidebar .brand {
   display: flex; align-items: center; gap: 10px;
@@ -54,6 +55,10 @@ html.desktop, body.desktop, .desktop #root {
 }
 .brand-name { font-weight: 600; letter-spacing: -0.01em; font-size: 14px; }
 .brand-sub  { font-size: 11px; color: var(--fg-subtle); }
+/* The fold toggle shares the brand row, leaving ~117px for the name. */
+.sidebar .brand-name,
+.sidebar .brand-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sidebar .sidebar-toggle { flex-shrink: 0; }
 
 .nav-section {
   font-size: 11px; color: var(--fg-subtle);
@@ -87,6 +92,14 @@ html.desktop, body.desktop, .desktop #root {
   border-radius: 999px; background: var(--accent-soft);
   color: var(--accent-strong); font-weight: 600;
 }
+/* Second level: a parent opens while you are on one of its pages. These stay
+   above the icon-rail block, whose `.sidebar .nav-item` padding has to win
+   over the child indent; the rail hides the caret as one of its label spans. */
+.nav-item .nav-caret { margin-left: auto; display: inline-flex; opacity: 0.6; }
+.nav-item.open { color: var(--fg); }
+.nav-item.open .nav-icon { color: var(--accent); opacity: 1; }
+.nav-children { display: flex; flex-direction: column; gap: 2px; }
+.nav-item.nav-sub { padding-left: 30px; font-size: 13px; }
 
 .sidebar-foot {
   margin-top: auto;
@@ -882,16 +895,29 @@ html.desktop, body.desktop, .desktop #root {
 .tab.active { color: var(--fg); border-bottom-color: var(--accent); }
 .tab:hover  { color: var(--fg); }
 
-/* ===== Narrow-window collapse =====
+/* ===== Sidebar icon rail =====
    The sidebar folds to a 64px icon rail rather than vanishing: below 900px the
    old rule hid it outright, and the desktop shell runs down to 720px, so a
-   split-screen window had no way to leave the page it was on. Labels hide by
-   CSS only, so the buttons keep their text for assistive tech and their
-   `title` names them on hover. */
+   split-screen window had no way to leave the page it was on. The user can
+   also fold it at any width (`.sidebar-folded`, a saved preference).
+
+   Two triggers, one look: each only narrows the track (and the sidebar's own
+   padding, which a container query can't reach); the rail styling keys off
+   the sidebar's width in the @container block, so the two can't drift. Under
+   900px the rail is forced, so the toggle hides rather than offer an Expand
+   that does nothing. Names show on hover via `title`, and the links carry an
+   aria-label because display:none drops the label for assistive tech too. */
 @media (max-width: 900px) {
   .app { grid-template-columns: 64px minmax(0, 1fr); }
   .sidebar { padding: 14px 8px; }
-  .sidebar .brand { padding: 4px 0 12px; justify-content: center; }
+  .sidebar .sidebar-toggle { display: none; }
+  .kpi-grid { grid-template-columns: 1fr 1fr; }
+  .grid-2, .grid-3 { grid-template-columns: 1fr; }
+}
+.app.sidebar-folded { grid-template-columns: 64px minmax(0, 1fr); }
+.app.sidebar-folded .sidebar { padding: 14px 8px; }
+@container sidebar (max-width: 120px) {
+  .sidebar .brand { flex-direction: column; gap: 8px; padding: 4px 0 12px; justify-content: center; }
   .sidebar .brand > div:not(.brand-mark),
   .sidebar .nav-section,
   .sidebar .nav-item > span:not(.badge),
@@ -901,8 +927,6 @@ html.desktop, body.desktop, .desktop #root {
   .sidebar .nav-item .nav-icon { width: 18px; height: 18px; }
   .sidebar .nav-group + .nav-group { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
   .sidebar .sidebar-foot { flex-direction: column; gap: 8px; padding: 12px 0; }
-  .kpi-grid { grid-template-columns: 1fr 1fr; }
-  .grid-2, .grid-3 { grid-template-columns: 1fr; }
 }
 
 /* ===== Warehouse filter pills (Inventory) ===== */
@@ -3336,7 +3360,60 @@ html.desktop, body.desktop, .desktop #root {
 .fl-legend .chip .n { font-weight: 600; opacity: 0.8; margin-left: 4px; }
 .fl-empty { padding: 14px 18px; color: var(--fg-subtle); font-size: 13px; }
 /* "2 / 7": the denominator sits beside the big number, quieter and smaller. */
+/* A build string is "0.5.5 (8dc9e9b)"; the hash is what is cut first. */
+.fl-build { max-width: 104px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: middle; }
 .kpi-value .fl-of { font-size: 14px; font-weight: 500; color: var(--fg-subtle); margin-left: 6px; }
+
+/* "Needs a human": checkpoints and flagged accounts, tinted like a flagged row. */
+.fl-attention { border-color: color-mix(in oklch, var(--warn) 45%, var(--border)); }
+.fl-attention .card-head { background: var(--warn-soft); border-radius: var(--radius) var(--radius) 0 0; }
+.fl-attn-row { display: flex; align-items: center; gap: 14px; padding: 12px 16px; border-top: 1px solid var(--border); }
+.fl-attn-row .what { flex: 1; min-width: 0; font-size: 13.5px; }
+.fl-attn-row .what .sub { font-size: 12.5px; color: var(--fg-subtle); margin-top: 2px; }
+
+/* ── Watch a worker's browser (/fleet/watch/<worker>) ── */
+.fl-back {
+  display: inline-flex; align-items: center; gap: 4px; margin-bottom: 4px;
+  font-size: 12.5px; color: var(--fg-subtle); text-decoration: none;
+}
+.fl-back:hover { color: var(--fg); }
+.fl-watch { overflow: hidden; }
+/* noVNC needs a target with a definite size: the stage takes the viewport
+   minus the shell's bars and the page head, and the screen fills it. */
+.fl-watch-stage {
+  position: relative; height: calc(100vh - 250px); min-height: 360px;
+  background: oklch(0.24 0.01 250);
+}
+.fl-watch-screen { position: absolute; inset: 12px; }
+.fl-watch-screen canvas { box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45); }
+.fl-watch.in-control .fl-watch-screen canvas { outline: 3px solid var(--warn); }
+.fl-watch-overlay {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+.fl-watch-overlay-card {
+  background: var(--bg-elev); color: var(--fg); border-radius: var(--radius-lg);
+  padding: 22px 24px; max-width: 460px; width: calc(100% - 32px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+}
+.fl-watch-overlay-title { font-weight: 600; font-size: 16px; margin-bottom: 8px; }
+.fl-watch-overlay-card p { margin: 0 0 16px; color: var(--fg-muted); font-size: 13.5px; overflow-wrap: anywhere; }
+.fl-watch-note {
+  display: flex; gap: 8px; align-items: flex-start; padding: 10px 16px;
+  font-size: 12px; color: var(--fg-subtle); border-top: 1px solid var(--border); background: var(--bg-soft);
+}
+.fl-watch-note .icon { flex-shrink: 0; margin-top: 1px; }
+.fl-watch-status { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--fg-muted); }
+.fl-watch-status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fg-subtle); }
+.fl-watch-status.pos .dot { background: var(--pos); }
+.fl-watch-status.neg .dot { background: var(--neg); }
+.fl-watch-toggle {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  font-size: 12.5px; font-weight: 500; color: var(--fg-muted);
+  padding: 5px 10px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg-elev);
+}
+.fl-watch-toggle:has(input:checked) { background: var(--warn-soft); color: var(--warn-strong); border-color: transparent; }
+.fl-watch-toggle input { margin: 0; accent-color: var(--warn-strong); }
 
 .card-note {
   display: flex; gap: 10px; align-items: flex-start;
@@ -3987,3 +4064,75 @@ button.rsheet-box:hover { background: color-mix(in oklch, var(--accent) 10%, tra
   z-index: 1200;
   box-shadow: var(--shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.18));
 }
+
+/* ===== Web-submission mail thread =====
+   Reads as a mail client, not a chat: the subject heads the thread, earlier
+   messages fold into one-line rows, the newest is open with its envelope, and
+   the reply is a draft sheet with From / To / Subject. Every message keeps ONE
+   toggle button whose contents swap, so keyboard focus survives opening it. */
+.ws-mail { overflow: hidden; }
+.ws-mail-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 16px 18px 12px; border-bottom: 1px solid var(--border); }
+.ws-mail-subject { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.35; overflow-wrap: anywhere; }
+.ws-mail-count { flex: none; font-size: 12px; color: var(--fg-subtle); white-space: nowrap; }
+.ws-mail-empty { padding: 14px 18px 0; font-size: 13px; color: var(--fg-subtle); }
+
+.ws-mail-msg { border-bottom: 1px solid var(--border); }
+.ws-mail-toggle { width: 100%; display: flex; align-items: center; gap: 12px; padding: 11px 18px; background: transparent; border: 0; cursor: pointer; text-align: left; font-family: inherit; color: var(--fg); }
+.ws-mail-toggle:hover { background: var(--bg-soft); }
+.ws-mail-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ws-mail-msg.is-open .ws-mail-toggle { align-items: flex-start; padding-top: 16px; padding-bottom: 4px; }
+.ws-mail-msg.is-open .ws-mail-toggle:hover { background: transparent; }
+
+/* Who sent it: our site's mark in the accent, the customer's initial in grey. */
+.ws-mail-stamp { flex: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 600; background: var(--bg-soft); color: var(--fg-muted); border: 1px solid var(--border); text-transform: uppercase; }
+.ws-mail-stamp.is-ours { background: var(--accent-soft); color: var(--accent-strong); border-color: transparent; text-transform: none; }
+
+.ws-mail-who { flex: none; max-width: 34%; font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-mail-snippet { flex: 1; min-width: 0; font-size: 13px; color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-mail-snippet.is-empty { color: var(--fg-subtle); font-style: italic; }
+.ws-mail-flags { flex: none; display: inline-flex; align-items: center; gap: 6px; color: var(--fg-subtle); }
+.ws-mail-flag-warn { color: var(--warn-strong); }
+.ws-mail-date { flex: none; font-size: 12px; color: var(--fg-subtle); white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* The open envelope: sender line, then "to …" under it. */
+.ws-mail-env { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+/* Wraps as a whole when the column is narrow: chip and date drop to their
+   own line rather than squeezing the sender into a sliver. */
+.ws-mail-env-top { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; row-gap: 2px; min-width: 0; }
+.ws-mail-from { min-width: 0; font-size: 13.5px; overflow-wrap: anywhere; }
+.ws-mail-from strong { font-weight: 600; }
+.ws-mail-addr { color: var(--fg-subtle); font-weight: 400; white-space: nowrap; }
+.ws-mail-env-top .ws-mail-date { margin-left: auto; }
+.ws-mail-to { font-size: 12px; color: var(--fg-subtle); overflow-wrap: anywhere; }
+
+/* Body sits under the envelope text, past the stamp column. */
+.ws-mail-body { padding: 6px 18px 18px 60px; }
+.ws-mail-text { max-width: 68ch; font-size: 14px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ws-mail-text.is-empty { color: var(--fg-subtle); font-style: italic; }
+.ws-mail-note { margin: 0 0 10px; padding: 8px 10px; border-radius: var(--radius-sm); font-size: 12.5px; line-height: 1.45; display: flex; gap: 8px; align-items: flex-start; }
+.ws-mail-note.is-warn { background: var(--warn-soft); color: var(--warn-strong); }
+.ws-mail-note.is-neg { background: var(--neg-soft); color: var(--neg); }
+.ws-mail-note.is-muted { background: var(--bg-soft); color: var(--fg-muted); }
+.ws-mail-quote-toggle { margin-top: 8px; padding: 0 8px; height: 18px; border-radius: 9px; border: 1px solid var(--border); background: var(--bg-soft); color: var(--fg-muted); font: inherit; font-size: 12px; line-height: 1; letter-spacing: 1px; cursor: pointer; }
+.ws-mail-quote-toggle:hover { border-color: var(--border-strong); color: var(--fg); }
+.ws-mail-quote-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ws-mail-quoted { max-width: 68ch; margin-top: 8px; padding-left: 10px; border-left: 2px solid var(--border); font-size: 13px; line-height: 1.55; color: var(--fg-subtle); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ws-mail-files { margin-top: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ws-mail-file { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 4px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 12px; color: var(--fg-muted); overflow-wrap: anywhere; }
+.ws-mail-files-hint { font-size: 12px; color: var(--fg-subtle); }
+
+/* The draft: a sheet with the mail's own header fields above a borderless
+   body. The whole sheet takes the focus ring an input would. */
+.ws-mail-draft { margin: 16px 18px 18px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg-elev); overflow: hidden; transition: border-color 0.12s, box-shadow 0.12s; }
+.ws-mail-draft:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.ws-mail-fields { margin: 0; background: var(--bg-soft); border-bottom: 1px solid var(--border); }
+.ws-mail-field { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; padding: 7px 14px; font-size: 13px; }
+.ws-mail-field + .ws-mail-field { border-top: 1px solid var(--border); }
+.ws-mail-field dt { color: var(--fg-subtle); }
+.ws-mail-field dd { margin: 0; color: var(--fg); overflow-wrap: anywhere; }
+.ws-mail-compose { display: block; width: 100%; min-height: 128px; padding: 12px 14px; border: 0; outline: none; resize: vertical; background: transparent; color: var(--fg); font: inherit; font-size: 14px; line-height: 1.6; }
+.ws-mail-draft-foot { display: flex; align-items: center; gap: 8px; padding: 8px 10px 10px 14px; }
+.ws-mail-draft-foot .ws-mail-hint { margin-right: auto; font-size: 12px; color: var(--fg-subtle); }
+.ws-mail-off { margin: 14px 18px 18px; font-size: 13px; color: var(--fg-subtle); }
+
+.ws-mail-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }

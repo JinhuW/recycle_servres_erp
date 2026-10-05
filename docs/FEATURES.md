@@ -1258,9 +1258,11 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
 ## Oversight extras
 
 - **Tracker** — admin page and API proxy for the Reddit listing monitor, with a
-  fleet status filter and infinite scroll (v1.64.0, v1.65.0).
+  fleet status filter and infinite scroll (v1.64.0, v1.65.0).  In the sidebar
+  it is **Monitors ▸ Reddit** (v1.207.0).
 - **Coordinator** — Facebook tracker page with live fleet, review stats and a
-  filter prompt (v1.83.1).  The fleet view shows one row per Facebook account
+  filter prompt (v1.83.1), reached from **Monitors ▸ Facebook** in the sidebar
+  (v1.207.0).  The fleet view shows one row per Facebook account
   (liveness, state, session days left, last search, heartbeat, the week's
   alerts from its cities, the vault login and Facebook user id, expandable to
   cities, secrets by name, browser identity, backup age, proxy, session file
@@ -1271,6 +1273,26 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   rs-console facade's `/v1/fleet` document through the manager-only
   `/api/coordinator` proxy — until that facade is deployed the cards read
   "fleet view unavailable" and the rest of the page works (v1.140.0).
+  A **Needs a human** card leads the live part of the page: open checkpoints
+  (capture, Watch, Mark resolved) and every account the control plane flags,
+  with why — stopped reporting, a non-healthy state, a session expired or
+  expiring — plus **Re-login** where the session is the problem.  An
+  **Account information** table lists each account's Facebook identity,
+  proxy, stored secrets, browser and backup age, and the fourth KPI is
+  listings reviewed today, matching the console (v1.204.0).
+- **Watching a worker's browser** — `/fleet/watch/<worker>` shows the live
+  Chromium a Facebook worker is driving, through noVNC, view-only until
+  "Take control" is ticked (and handed back when the tab is hidden), with
+  Re-login and Reconnect.  The socket is same-origin
+  (`/api/coordinator/vnc/<worker>/ws`); the backend admits it through the
+  usual middleware plus an Origin check, mints the facade's single-use VNC
+  ticket and relays bytes, so the facade token and Cloudflare Access
+  credentials stay server-side.  Offered for every worker the facade can
+  bridge to (`RS_VNC_TARGETS`) (v1.204.0).  The relay re-checks the
+  manager's session every minute.  A manager who is signed out, deactivated
+  or demoted loses the view within a minute.  When the access token behind
+  the socket runs out, the viewer reconnects on its own with a fresh one and
+  keeps control if it had it (v1.209.1).
 
 - **Web submissions** — the manager inbox for the public website forms
   (v1.187.0). The ram4cash.com sell form (`POST /api/public/intake`) and the
@@ -1278,7 +1300,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   `WS-nnnn` row and notify managers; nothing anonymous touches orders. The page
   lists them by status (new / contacted / converted / archived / spam) with
   counts, a site filter and search; a submission opens with its details, line
-  photos, a status + staff-note triage panel and a reply-by-email link. **Create
+  photos, a status + staff-note triage panel and its email conversation. **Create
   Draft PO** converts a sell lot once into a Draft PO owned by the clicking
   manager (lines at cost 0, photos copied, seller filed as a house-account
   supplier with source `web`, PayPal or cash + pickup per the seller's choice).
@@ -1305,6 +1327,38 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   fails is kept, so the next run retries it. A converted submission is never
   deleted, even archived later (v1.200.1): it is the PO's record of who sold
   the lot.
+- **A submission carries its email conversation** (v1.209.0).
+  - **Sending.** The thread reads like a mail client: the subject on top,
+    earlier messages folded to one line (sender, snippet, date, any problem),
+    the newest open with its From / To. A manager writes the reply in a draft
+    showing the From / To / Subject it will go out with. It goes out from one
+    shared company mailbox, a Lark box set by `MAIL_USER` and
+    `MAIL_PASSWORD`.
+    - A ram4cash sell request is sent as "ram4cash" with the subject "Your
+      sell request WS-nnnn · ram4cash.com".
+    - A recycleservers.com quote is sent as "Recycle Servers".
+    - The first sent reply moves a `new` submission to `contacted`.
+  - **Receiving.** Every two minutes the backend reads the box's INBOX over
+    IMAP, read-only, so nothing in Lark changes. It attaches a customer's
+    answer to the thread only when the answer replies to a message the ERP
+    sent: its `In-Reply-To` or `References` names one of our Message-IDs.
+    A WS id in the subject is not enough, because ids are sequential and a
+    From address is easy to forge. A customer who writes a fresh email
+    instead of replying stays in Lark. Mail whose From names more than one
+    address is ignored. Other mail is never downloaded. Lark keeps the
+    ERP's Message-ID and files each sent reply in its Sent folder (checked
+    against the live box).
+  - **What the thread shows.**
+    - Each answer shows its sender address, with a warning when that isn't
+      the submission's address or Lark's DMARC check failed.
+    - Quoted history is folded away.
+    - Attachments are listed by name, to open in the mailbox.
+    - A reply notifies managers, except on spam.
+    - Every send shows as sent, not sent (with the server's error), or "not
+      confirmed" if the backend died mid-send.
+  - **Without the two variables** mail is off and the page keeps its
+    reply-by-email link. `/api/health` reports `providers.mail` as `smtp`,
+    `stub` or `off`. Set them on prod only.
 
 ## MCP and OAuth connectors
 
@@ -1493,6 +1547,16 @@ removed in v1.191.0.
   64px icon rail** (v1.134.0) — brand mark, nav icons with their names on
   hover, avatar and sign-out — where it used to disappear and leave a
   split-screen window with no navigation at all.
+  **At any width the user can fold it to the same rail** with the toggle in
+  the brand row (v1.208.0). It is a per-user preference (`sidebar.folded`), so
+  it follows the user across reloads and devices. Under 900px the rail is
+  forced and the toggle hidden. In the rail every link keeps its name for
+  screen readers.
+- **The sidebar has a second level** (v1.207.0). A parent entry opens while
+  you are on one of its pages and is one row with a › caret everywhere else;
+  clicking it opens its first child. The one parent today is **Oversight ▸
+  Monitors**, holding **Facebook** (`/fleet`) and **Reddit** (`/tracker`). In
+  the icon rail the caret hides and the open children show as icons.
 - **Menus and record references are real links** (v1.144.0). The sidebar,
   the Inventory ▸ Analysis strip, the phone tab bar and Home quick links, and
   every PO, sell-order or payment id shown on another page — the inventory

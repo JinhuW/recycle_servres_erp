@@ -11,11 +11,13 @@ import { appendErrorRecord, redactSensitivePath, redactSensitiveQuery } from './
 import { log, releaseCommit, releaseVersion, runWithLogContext } from './lib/log';
 import { BcryptBusyError } from './lib/bcryptGate';
 import { secretMatches } from './lib/secret';
+import { allowedAppOrigin } from './lib/origins';
 
 import { describeOcr } from './ai';
 import { authMiddleware } from './auth';
 import { csrfGuard } from './csrf';
 import { describeShipping } from './shipping';
+import { describeMail } from './mail';
 import { getDb } from './db';
 import { readBuildTime } from './lib/version';
 import { metricsMiddleware, metricsHandler } from './metrics';
@@ -185,19 +187,7 @@ const appCors = cors({
   // real frontend origin(s); only those are then echoed back. When unset we
   // FAIL CLOSED — only loopback origins (the Vite SPA on a shifting
   // localhost port) are permitted, never an arbitrary remote site.
-  origin: (origin, c) => {
-    const configured = (c.env as Env).CORS_ALLOWED_ORIGINS ?? '';
-    const allow = configured.split(',').map((s: string) => s.trim()).filter(Boolean);
-    if (allow.length > 0) return allow.includes(origin) ? origin : null;
-    if (!origin) return null;
-    try {
-      const host = new URL(origin).hostname;
-      if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]') {
-        return origin;
-      }
-    } catch { /* malformed Origin header — deny */ }
-    return null;
-  },
+  origin: (origin, c) => allowedAppOrigin(origin, (c.env as Env).CORS_ALLOWED_ORIGINS),
   allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   allowHeaders: [
     'Content-Type', 'Authorization', 'X-Requested-By',
@@ -245,7 +235,7 @@ app.get('/api/health', async (c) => {
   // identical to a healthy one until someone notices packages never move. Modes
   // only — no key values, no more than set/unset.
   const ship = describeShipping(c.env as Env);
-  const providers = { ...ship, ocr: describeOcr(c.env as Env) };
+  const providers = { ...ship, ocr: describeOcr(c.env as Env), ...describeMail(c.env as Env) };
   try {
     await getDb(c.env)`SELECT 1`;
     return c.json({ status: 'ok', version, commit, builtAt, providers });

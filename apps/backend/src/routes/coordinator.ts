@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import type { ContentfulStatusCode, StatusCode } from 'hono/utils/http-status';
 import { authMiddleware } from '../auth';
+import { log } from '../lib/log';
+import { allowedAppOrigin } from '../lib/origins';
 import { requireManager } from '../lib/role';
 import type { Env, User } from '../types';
 
@@ -24,7 +26,7 @@ const coordinator = new Hono<{ Bindings: Env; Variables: { user: User } }>()
   .use('*', authMiddleware)
   .use('*', requireManager);
 
-function upstream(env: Env): { base: string; headers: Record<string, string> } | null {
+export function upstream(env: Env): { base: string; headers: Record<string, string> } | null {
   const base = env.COORDINATOR_API_URL?.replace(/\/+$/, '');
   const token = env.COORDINATOR_API_TOKEN;
   if (!base || !token) return null;
@@ -36,6 +38,45 @@ function upstream(env: Env): { base: string; headers: Record<string, string> } |
     headers['CF-Access-Client-Secret'] = env.COORDINATOR_ACCESS_CLIENT_SECRET;
   }
   return { base, headers };
+}
+
+// The facade refusing *our* credentials (a stale COORDINATOR_API_TOKEN, an
+// Access service token that was rotated) must never reach the browser as a
+// 401/403: the SPA reads a 401 from any /api route as "your session expired",
+// refreshes, retries, and on a second 401 signs the manager out. It is a
+// misconfiguration on this side, so it goes out as a 502 that names the fix.
+const UPSTREAM_AUTH_REFUSED =
+  'The fleet console refused the ERP’s credentials — check COORDINATOR_API_TOKEN (and the Access service token)';
+const REFUSAL_DETAIL_MAX = 200;
+
+/**
+ * What to tell the manager when the facade answers 401/403; null for any
+ * other status, whose body is left unread for the caller. A 401 is always
+ * our credentials, and so is a 403 that comes bare or as Cloudflare Access's
+ * HTML page. A 403 the facade explains in JSON means it declined this
+ * request, and its own words are the useful part.
+ */
+export async function refusalMessage(res: Response): Promise<string | null> {
+  if (res.status === 401) return UPSTREAM_AUTH_REFUSED;
+  if (res.status !== 403) return null;
+  // Parsed whatever the Content-Type says; an HTML page simply fails to parse.
+  let body: { detail?: unknown; error?: unknown } | null;
+  try {
+    body = JSON.parse(await res.text()) as { detail?: unknown; error?: unknown } | null;
+  } catch {
+    return UPSTREAM_AUTH_REFUSED;
+  }
+  const why = typeof body?.detail === 'string' ? body.detail
+    : typeof body?.error === 'string' ? body.error
+    : null;
+  return why ? `The fleet console refused this request: ${why.slice(0, REFUSAL_DETAIL_MAX)}` : UPSTREAM_AUTH_REFUSED;
+}
+
+function upstreamRefused(
+  c: { json: (body: unknown, status?: number) => Response }, status: number, path: string, message: string,
+): Response {
+  log.warn('coordinator upstream refused the request', { module: 'coordinator', upstreamStatus: status, upstreamPath: path });
+  return c.json({ error: message }, 502);
 }
 
 // Statuses a Response may not carry a body on; building one with a body throws.
@@ -68,6 +109,8 @@ async function forward(
     return c.json({ error: UNREACHABLE }, 502);
   }
 
+  const refused = await refusalMessage(res);
+  if (refused) return upstreamRefused(c, res.status, path, refused);
   if (NULL_BODY_STATUSES.has(res.status)) return c.body(null, res.status as StatusCode);
   // Pass the upstream body and status through verbatim: the coordinator's 4xx
   // bodies carry actionable messages the UI shows as-is.
@@ -94,6 +137,42 @@ coordinator.get('/filter-prompt', (c) => forward(c, 'GET', '/v1/config/filter-pr
 // joined to worker health, assembled by the facade so the browser never sees
 // a config file. Proxies arrive as env-var names only.
 coordinator.get('/fleet', (c) => forward(c, 'GET', '/v1/fleet'));
+
+// Queue a Facebook re-login for one worker: the coordinator rides a one-shot
+// directive back on the worker's next heartbeat, and the worker re-enters its
+// username, password and 2FA code from the vault. Moves no credential and
+// names no account, which is why the facade lets it through.
+coordinator.post('/workers/:id/relogin', (c) =>
+  forward(c, 'POST', `/v1/workers/${encodeURIComponent(c.req.param('id'))}/relogin`));
+
+// ── Watching a worker's browser ──────────────────────────────────────────────
+// The bytes themselves are relayed by vncBridge.ts, which owns the HTTP
+// upgrade. Before it accepts a socket it replays the handshake through the
+// app to this route, so the proxy-secret gate, the session cookie and the
+// manager check all apply exactly as they do to any other request. A 204 is
+// the only answer that opens a socket.
+
+// What a worker id may look like: what fleet.toml and RS_WORKER_ID use.
+// Anything else never reaches the facade's URL space.
+export const VNC_WORKER_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+coordinator.get('/vnc/:workerId/ws', (c) => {
+  // A plain GET is not a socket; browsers cannot forge an Upgrade header.
+  if (c.req.header('upgrade')?.toLowerCase() !== 'websocket') {
+    return c.json({ error: 'Expected a WebSocket upgrade' }, 426);
+  }
+  // CORS never runs for a handshake and the cookie rides on one from any
+  // site, so a foreign page must be refused here or it could drive a
+  // manager's session into a worker's browser.
+  if (!allowedAppOrigin(c.req.header('origin'), c.env.CORS_ALLOWED_ORIGINS)) {
+    return c.json({ error: 'Origin not allowed' }, 403);
+  }
+  if (!VNC_WORKER_ID.test(c.req.param('workerId'))) {
+    return c.json({ error: 'Unknown worker' }, 404);
+  }
+  if (!upstream(c.env)) return c.json({ error: NOT_CONFIGURED }, 501);
+  return c.body(null, 204);
+});
 
 coordinator.get('/challenges', (c) => {
   // Pass the status filter through untouched; the coordinator validates it.
@@ -137,6 +216,8 @@ coordinator.get('/challenges/:id/screenshot', async (c) => {
   }
 
   // Only a 200 carries image bytes; errors come back as JSON.
+  const refused = await refusalMessage(res);
+  if (refused) return upstreamRefused(c, res.status, path, refused);
   if (!res.ok) {
     const payload = await res.json().catch(() => ({ error: `coordinator returned ${res.status}` }));
     return c.json(payload, res.status as ContentfulStatusCode);

@@ -40,6 +40,17 @@ export type Env = {
   PAYPAL_CLIENT_ID?: string;
   PAYPAL_CLIENT_SECRET?: string;
   BANKTX_STUB?: string;
+  // The shared company mailbox that web-submission replies go out from and
+  // come back to (src/mail/). Dark until both USER and PASSWORD are set; hosts
+  // and ports default to Lark's. MAIL_STUB=1 turns sending on against a
+  // capture transport (and `fail` makes every send throw) with no IMAP poll.
+  MAIL_USER?: string;
+  MAIL_PASSWORD?: string;
+  MAIL_SMTP_HOST?: string;
+  MAIL_SMTP_PORT?: string;
+  MAIL_IMAP_HOST?: string;
+  MAIL_IMAP_PORT?: string;
+  MAIL_STUB?: string;
   // Cloudflare R2 via its S3-compatible API. When any of endpoint / key /
   // secret / bucket is missing, uploadAttachment returns a stub (dev/tests).
   R2_S3_ENDPOINT?: string;
