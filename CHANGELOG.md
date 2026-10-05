@@ -17,6 +17,22 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.211.0] - 2026-10-05
+
+SSD capacity offers 2TB and RAM class offers CAMM (RS-178).
+
+### Added
+
+- **2TB in the SSD Capacity select.** The list jumped from 1.92TB to 3.2TB,
+  so a 2TB drive had no option to pick. 2TB now sits between the two, and
+  the larger sizes move down one slot to keep the list in ascending order.
+  Migration 0159.
+- **CAMM in the RAM Class select**, after SODIMM. CAMM is the
+  compression-attached laptop module (CAMM2 / LPCAMM2). It is a form factor
+  like SODIMM, so it belongs in Class; Type is still the Desktop / Server /
+  Laptop device list. The label scanner may now read a module as CAMM and
+  types it Laptop.
+
 ## [1.209.2] - 2026-10-04
 
 Web-submission email can run on dev behind a test-recipient list (RS-173).

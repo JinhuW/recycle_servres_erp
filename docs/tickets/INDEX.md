@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-178](./RS-178-ssd-capacity-offers-2tb-and-ram-class-offers-camm.md) | in-progress | story | P2 | SSD capacity offers 2TB and RAM class offers CAMM | — |
 | [RS-176](./RS-176-vnc-bridge-and-mail-thread-hardening-from-the-v1-209.md) | backlog | task | P3 | VNC bridge and mail thread hardening from the v1.209 review | — |
 | [RS-175](./RS-175-pre-release-review-fixes-for-v1-204-0-v1-209-0.md) | done | bug | P1 | Pre-release review fixes for v1.204.0–v1.209.0 | 1.209.1 |
 | [RS-173](./RS-173-web-submission-email-can-run-on-dev-behind-a-test-re.md) | done | story | P2 | Web-submission email can run on dev behind a test-recipient list | 1.209.2 |
