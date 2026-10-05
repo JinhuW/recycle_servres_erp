@@ -15,7 +15,7 @@ import { simpleParser } from 'mailparser';
 import type { Sql } from 'postgres';
 import type { Env } from '../types';
 import { notifyManagers } from '../lib/notify';
-import { mailConfig, mailLog, type MailConfig } from './index';
+import { mailGate, mailLog, type MailConfig } from './index';
 import {
   dmarcVerdict, matchSubmission, normalizeMessageId, parseReferences, threadIds,
   type InboundHeader, type MatchLookups,
@@ -263,7 +263,13 @@ export async function runInboxTick(
 }
 
 export function startMailInboxLoop(sql: Sql, env: Env): { stop(): void } {
-  const cfg = mailConfig(env);
+  const { config: cfg, blocked } = mailGate(env);
+  // Otherwise the variables would sit there looking ignored.
+  if (blocked) {
+    mailLog.warn('mail is off: MAIL_USER/MAIL_PASSWORD are set on a non-production Railway environment without MAIL_ALLOW_TO', {
+      environment: env.RAILWAY_ENVIRONMENT_NAME || env.RAILWAY_ENVIRONMENT || null,
+    });
+  }
   if (cfg?.mode !== 'smtp') return { stop: () => {} };
 
   let stopped = false;

@@ -17,6 +17,30 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.209.2] - 2026-10-04
+
+Web-submission email can run on dev behind a test-recipient list (RS-173).
+
+### Added
+
+- **`MAIL_ALLOW_TO` makes a server a test sender.** Email replies (v1.209.0)
+  were deliberately off on dev: dev's database is a nightly copy of prod, so
+  every submission there is a real customer. Tried there, the feature looked
+  broken. Now a server with `MAIL_ALLOW_TO` mails only the listed addresses,
+  or whole domains written as `@x.com`.
+  - **Anyone else is refused before anything is recorded.** The draft says
+    why and disables Send, the keyboard shortcut included, and the API
+    answers 403.
+  - **The draft shows a "Test list only" chip**, and `/api/health` reports
+    `mailRestricted`.
+
+### Changed
+
+- **Dev can't email customers by accident.** On any Railway environment other
+  than `production`, mail now stays off unless the list is set, and boot logs
+  a warning saying so. Re-forking dev from production copies service
+  variables, and the guard holds whichever way the variables got there.
+
 ## [1.209.1] - 2026-10-04
 
 Pre-release review fixes for v1.204.0–v1.209.0 (RS-175).

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildEnv } from '../src/env';
+import { describeMail, mailConfig } from '../src/mail';
 
 // Long enough for the production length floor. Test fixture only.
 const PROD_SECRET = 'p'.repeat(32); // pragma: allowlist secret
@@ -94,6 +95,17 @@ describe('buildEnv', () => {
     expect(() => buildEnv({
       DATABASE_URL: 'postgres://x', JWT_SECRET: 's', RAILWAY_ENVIRONMENT: 'dev',
     } as NodeJS.ProcessEnv)).not.toThrow();
+  });
+
+  // buildEnv copies named keys; one missed there would silently drop both the
+  // test-recipient list and the dev guard while every hand-built Env passes.
+  it('carries the mail allow list and the Railway environment through to the mail gate', () => {
+    const base = { DATABASE_URL: 'postgres://x', JWT_SECRET: 's', MAIL_USER: 'box@x.com', MAIL_PASSWORD: 'pw' };
+    const dev = { ...base, RAILWAY_ENVIRONMENT_NAME: 'dev' } as NodeJS.ProcessEnv;
+    expect(mailConfig(buildEnv(dev))).toBeNull();
+    expect(mailConfig(buildEnv({ ...dev, MAIL_ALLOW_TO: 'me@x.com' }))?.allowTo).toEqual(['me@x.com']);
+    expect(describeMail(buildEnv({ ...dev, MAIL_ALLOW_TO: 'me@x.com' }))).toEqual({ mail: 'smtp', mailRestricted: true });
+    expect(mailConfig(buildEnv({ ...base, RAILWAY_ENVIRONMENT_NAME: 'production' } as NodeJS.ProcessEnv))?.allowTo).toBeNull();
   });
 
   it('accepts the dev defaults outside production', () => {
