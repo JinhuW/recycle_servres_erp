@@ -151,6 +151,10 @@ Temporarily clear the cron, deploy once so it runs immediately, read logs for
 ## Safety notes
 
 - The sync OVERWRITES dev every run — never store dev-only data you can't lose.
+- Web-submission email on dev needs `MAIL_ALLOW_TO` beside `MAIL_USER` and
+  `MAIL_PASSWORD`. Every submission on dev is a real customer, and re-forking
+  dev from production copies service variables. Without the list the backend
+  keeps mail off on any non-production Railway environment.
 - One-directional by construction; the script aborts if `PROD_DATABASE_URL ==
   DEV_DATABASE_URL`.
 - Consider a prod **read-only** role for `PROD_DATABASE_URL` so the sync can only

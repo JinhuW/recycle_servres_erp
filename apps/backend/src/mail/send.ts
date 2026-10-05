@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { createTransport, type SendMailOptions } from 'nodemailer';
 import type { Sql } from 'postgres';
 import type { Env } from '../types';
-import { baseSubject, mailboxDomain, mailConfig, mailLog, replySubject, siteBrand, type MailConfig } from './index';
+import { baseSubject, mailboxDomain, mailConfig, mailLog, recipientAllowed, replySubject, siteBrand, type MailConfig } from './index';
 
 // Well inside the 25 s shutdown window; nodemailer's own defaults (2 min to
 // connect, 10 min idle) would outlive the process.
@@ -63,6 +63,7 @@ export async function threadMessageIds(sql: Sql, submissionId: string): Promise<
 export type ReplyOutcome =
   | { kind: 'off' }
   | { kind: 'not_found' }
+  | { kind: 'blocked' }
   | { kind: 'sent' | 'failed'; messageRowId: string };
 
 export async function sendSubmissionReply(
@@ -75,6 +76,9 @@ export async function sendSubmissionReply(
     SELECT id, site, kind, email FROM web_submissions WHERE id = ${args.submissionId}
   `;
   if (!sub) return { kind: 'not_found' };
+  // A test sender refuses before anything is recorded: there's no attempt to
+  // show, and no address outside its list is ever handed to SMTP.
+  if (!recipientAllowed(cfg, sub.email)) return { kind: 'blocked' };
 
   const thread = await threadMessageIds(sql, sub.id);
   const subject = replySubject(baseSubject(sub), thread.length > 0);

@@ -91,6 +91,10 @@ const SSD_BRANDS = ['Samsung','Intel','Micron','WD','Seagate','Kioxia'];
 const SSD_IFACE  = ['SATA','SAS','NVMe','U.2'];
 const SSD_FORM   = ['2.5"','M.2 2280','M.2 22110','U.2','AIC'];
 const SSD_CAP    = ['120GB','128GB','240GB','256GB','400GB','480GB','512GB','800GB','960GB','1000GB','1TB','1.6TB','1.92TB','3.2TB','3.84TB','6.4TB','7.68TB','8TB','12.8TB','15.36TB','30.72TB'];
+// The dropdown lists (migration 0159) are longer than the generator's: pick()
+// indexes by array length, so adding an option here would reshuffle every
+// seeded line the tests have learned to expect.
+const SSD_CAP_OPTIONS = ['120GB','128GB','240GB','256GB','400GB','480GB','512GB','800GB','960GB','1000GB','1TB','1.6TB','1.92TB','2TB','3.2TB','3.84TB','6.4TB','7.68TB','8TB','12.8TB','15.36TB','30.72TB'];
 const HDD_BRANDS = ['Seagate','WD','Toshiba','HGST'];
 const HDD_IFACE  = ['SATA','SAS'];
 const HDD_FORM   = ['2.5"','3.5"'];
@@ -445,14 +449,14 @@ try {
   const CATALOG_GROUPS = {
     RAM_BRAND:     RAM_BRANDS,
     RAM_TYPE:      RAM_TYPES,
-    RAM_CLASS:     RAM_CLASS,
+    RAM_CLASS:     [...RAM_CLASS, 'CAMM'],
     RAM_RANK:      RAM_RANK,
     RAM_CAP:       RAM_CAP,
     RAM_SPEED:     RAM_SPEED,
     SSD_BRAND:     [...SSD_BRANDS, 'Mixed'],
     SSD_INTERFACE: SSD_IFACE,
     SSD_FORM:      SSD_FORM,
-    SSD_CAP:       SSD_CAP,
+    SSD_CAP:       SSD_CAP_OPTIONS,
     HDD_BRAND:     HDD_BRANDS,
     HDD_INTERFACE: HDD_IFACE,
     HDD_FORM:      HDD_FORM,

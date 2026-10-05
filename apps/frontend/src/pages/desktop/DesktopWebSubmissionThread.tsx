@@ -37,6 +37,10 @@ type ThreadResponse = {
     fromName: string;
     threadSubject: string;
     replySubject: string;
+    // A test sender (MAIL_ALLOW_TO), and whether it would mail this
+    // submission. Optional: an older backend sends neither.
+    restricted?: boolean;
+    recipientAllowed?: boolean;
   };
 };
 
@@ -105,7 +109,8 @@ export function SubmissionThread({ submission, composerRef, onMode, onSent, onTo
 
   const send = async () => {
     const body = draft.trim();
-    if (!body || sending) return;
+    // ⌘/Ctrl+Enter reaches here past the disabled button.
+    if (!body || sending || thread?.mail.recipientAllowed === false) return;
     setSending(true);
     try {
       const r = await api.post<{ message: ThreadMessage; submission: WebSubmission }>(
@@ -117,7 +122,12 @@ export function SubmissionThread({ submission, composerRef, onMode, onSent, onTo
       // The draft's Subject turns into `Re: …` once something has gone out.
       void load();
     } catch (e) {
-      onToast?.(e instanceof ApiError && e.status === 502 ? t('webSubThreadSendFailed') : (e instanceof Error ? e.message : String(e)), 'error');
+      onToast?.(
+        e instanceof ApiError && e.status === 502 ? t('webSubThreadSendFailed')
+          : e instanceof ApiError && e.status === 403 ? t('webSubThreadNotAllowed', { email: submission.email })
+          : e instanceof Error ? e.message : String(e),
+        'error',
+      );
       // The failed attempt is on the thread now, with its error.
       await load();
     } finally {
@@ -167,6 +177,11 @@ export function SubmissionThread({ submission, composerRef, onMode, onSent, onTo
               <dd>{mail.replySubject}</dd>
             </div>
           </dl>
+          {mail.recipientAllowed === false && (
+            <p className="ws-mail-note is-warn ws-mail-draft-note">
+              <Icon name="alert" size={13} /> {t('webSubThreadNotAllowed', { email: submission.email })}
+            </p>
+          )}
           <textarea
             ref={composerRef}
             className="ws-mail-compose"
@@ -182,7 +197,9 @@ export function SubmissionThread({ submission, composerRef, onMode, onSent, onTo
           <div className="ws-mail-draft-foot">
             <span className="ws-mail-hint">{t('webSubThreadShortcut')}</span>
             {mail.mode === 'stub' && <span className="chip warn" title={t('webSubThreadStub')}>{t('webSubThreadStubShort')}</span>}
-            <button className="btn accent" disabled={sending || !draft.trim()} onClick={() => void send()}>
+            {mail.restricted === true && <span className="chip muted" title={t('webSubThreadTestListTitle')}>{t('webSubThreadTestList')}</span>}
+            <button className="btn accent" disabled={sending || !draft.trim() || mail.recipientAllowed === false}
+                    onClick={() => void send()}>
               <Icon name="mail" size={13} /> {sending ? t('webSubThreadSending') : t('webSubThreadSend')}
             </button>
           </div>
