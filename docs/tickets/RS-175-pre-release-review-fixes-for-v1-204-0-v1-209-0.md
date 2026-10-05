@@ -2,13 +2,13 @@
 id: RS-175
 title: Pre-release review fixes for v1.204.0–v1.209.0
 type: bug
-status: in-progress
+status: done
 priority: P1
 created: 2026-10-04
 reporter: Jinhu
 branch: fix/prerelease-review-v1209
-pr:
-version:
+pr: "#502"
+version: 1.209.1
 related: [RS-164, RS-165, RS-161, RS-176]
 ---
 
