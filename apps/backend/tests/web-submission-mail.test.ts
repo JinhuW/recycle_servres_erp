@@ -3,7 +3,7 @@ import { simpleParser } from 'mailparser';
 import { resetDb, getTestDb } from './helpers/db';
 import { api, testEnv } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
-import { mailConfig, type MailConfig } from '../src/mail';
+import { mailConfig, mailGate, recipientAllowed, type MailConfig } from '../src/mail';
 import { stubOutbox } from '../src/mail/send';
 import { dmarcVerdict, matchSubmission, type InboundHeader, type MatchLookups } from '../src/mail/match';
 import { runInboxTick, toInboundHeader, type InboxClient } from '../src/mail/inbox';
@@ -28,7 +28,10 @@ type Msg = {
 };
 type Thread = {
   messages: Msg[];
-  mail: { mode: string; address: string | null; fromName: string; threadSubject: string; replySubject: string };
+  mail: {
+    mode: string; address: string | null; fromName: string; threadSubject: string; replySubject: string;
+    restricted: boolean; recipientAllowed: boolean;
+  };
 };
 type Sent = { message: Msg; submission: { status: string; handledBy: { id: string } | null } };
 
@@ -56,6 +59,7 @@ describe('web submission email thread — routes', () => {
         mode: 'off', address: null, fromName: 'ram4cash',
         threadSubject: `Your sell request ${id} · ram4cash.com`,
         replySubject: `Your sell request ${id} · ram4cash.com`,
+        restricted: false, recipientAllowed: false,
       },
     });
     const s = await api('POST', `/api/web-submissions/${id}/messages`, { token, body: { body: 'Hi' } });
@@ -90,6 +94,7 @@ describe('web submission email thread — routes', () => {
       mode: 'stub', address: BOX, fromName: 'ram4cash',
       threadSubject: `Your sell request ${id} · ram4cash.com`,
       replySubject: `Re: Your sell request ${id} · ram4cash.com`,
+      restricted: false, recipientAllowed: true,
     });
     expect(t.body.messages.map((m) => m.id)).toEqual([r.body.message.id]);
     expect((await api('GET', '/api/health', { env: STUB })).body).toMatchObject({ providers: { mail: 'stub' } });
@@ -165,6 +170,58 @@ describe('web submission email thread — routes', () => {
     const { token } = await loginAs(ALEX);
     const t = await api<Thread>('GET', `/api/web-submissions/${id}/messages`, { token });
     expect(t.body.messages.map((m) => m.status)).toEqual(['unconfirmed', 'sending']);
+  });
+});
+
+describe('test-recipient list (MAIL_ALLOW_TO)', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('sends only to listed addresses and domains, and refuses the rest before recording anything', async () => {
+    const listed = await insertSubmission({ email: 'Me@Team.example' });
+    const inDomain = await insertSubmission({ email: 'ops@ram4cash.com' });
+    const customer = await insertSubmission({ email: 'real.customer@gmail.com' });
+    const env = { ...STUB, MAIL_ALLOW_TO: ' me@team.example , @RAM4CASH.com ' };
+    const { token } = await loginAs(ALEX);
+    const post = (id: string) => api<Sent>('POST', `/api/web-submissions/${id}/messages`, { token, env, body: { body: 'Test' } });
+
+    expect((await post(listed)).status).toBe(201);
+    expect((await post(inDomain)).status).toBe(201);
+    const refused = await post(customer);
+    expect(refused.status).toBe(403);
+    expect(refused.body).toEqual({ error: 'recipient_not_allowed' });
+    const rows = await getTestDb()`SELECT count(*)::int AS n FROM web_submission_messages WHERE submission_id = ${customer}`;
+    expect(rows[0].n).toBe(0);
+
+    const t = (id: string) => api<Thread>('GET', `/api/web-submissions/${id}/messages`, { token, env });
+    expect((await t(listed)).body.mail).toMatchObject({ restricted: true, recipientAllowed: true });
+    expect((await t(customer)).body.mail).toMatchObject({ restricted: true, recipientAllowed: false });
+    expect((await api('GET', '/api/health', { env })).body).toMatchObject({ providers: { mail: 'stub', mailRestricted: true } });
+  });
+
+  it('keeps mail off on a non-production Railway environment unless the list is set', () => {
+    const box = { ...testEnv, MAIL_USER: BOX, MAIL_PASSWORD: 'pw' };
+    expect(mailGate({ ...box, RAILWAY_ENVIRONMENT_NAME: 'dev' })).toEqual({ config: null, blocked: 'non_production_without_allow_list' });
+    // Railway, but no name to tell which environment: the safe side is off.
+    expect(mailGate({ ...box, RAILWAY_ENVIRONMENT_ID: 'b20f' }).config).toBeNull();
+    expect(mailGate({ ...box, RAILWAY_ENVIRONMENT: 'dev' }).config).toBeNull();
+    expect(mailGate({ ...box, RAILWAY_ENVIRONMENT_NAME: 'dev', MAIL_ALLOW_TO: 'me@x.com' }).config?.mode).toBe('smtp');
+    expect(mailGate({ ...box, RAILWAY_ENVIRONMENT_NAME: 'production' }).config?.allowTo).toBeNull();
+    // Off Railway (local, docker) nothing changes.
+    expect(mailGate(box).config?.mode).toBe('smtp');
+    // A blank list is no list.
+    expect(mailGate({ ...box, RAILWAY_ENVIRONMENT_NAME: 'dev', MAIL_ALLOW_TO: ' , ' }).config).toBeNull();
+    // Stub never delivers, so it is exempt.
+    expect(mailGate({ ...testEnv, MAIL_STUB: '1', RAILWAY_ENVIRONMENT_NAME: 'dev' }).config?.mode).toBe('stub');
+  });
+
+  it('matches addresses exactly and domains on the part after the last @', () => {
+    const cfg = mailConfig({ ...testEnv, MAIL_STUB: '1', MAIL_ALLOW_TO: 'a@x.com,y.com,@z.com' })!;
+    expect(recipientAllowed(cfg, 'A@X.com')).toBe(true);
+    expect(recipientAllowed(cfg, 'b@x.com')).toBe(false);
+    expect(recipientAllowed(cfg, 'anyone@Y.com')).toBe(true);
+    expect(recipientAllowed(cfg, 'anyone@z.com')).toBe(true);
+    expect(recipientAllowed(cfg, 'anyone@sub.z.com')).toBe(false);
+    expect(recipientAllowed(cfg, 'evil@z.com.attacker.example')).toBe(false);
   });
 });
 

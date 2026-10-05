@@ -22,7 +22,7 @@ import { syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { writeOrderEvent } from '../services/orderAudit';
 import { isoDatePlus, loadCrmSettings } from '../services/supplierCrm';
 import { WEB_CHANNEL_SOURCES, type SellLotPayload } from './publicForms';
-import { baseSubject, mailConfig, replySubject, siteBrand } from '../mail';
+import { baseSubject, mailConfig, recipientAllowed, replySubject, siteBrand } from '../mail';
 import { sendSubmissionReply, threadMessageIds } from '../mail/send';
 import type { Env, User } from '../types';
 
@@ -420,8 +420,8 @@ async function loadMessages(sql: ReturnType<typeof getDb>, where: { submissionId
 webSubmissions.get('/:id/messages', async (c) => {
   const sql = getDb(c.env);
   const id = c.req.param('id');
-  const [sub] = await sql<{ id: string; site: string; kind: string }[]>`
-    SELECT id, site, kind FROM web_submissions WHERE id = ${id}
+  const [sub] = await sql<{ id: string; site: string; kind: string; email: string }[]>`
+    SELECT id, site, kind, email FROM web_submissions WHERE id = ${id}
   `;
   if (!sub) return c.json({ error: 'Not found' }, 404);
   const cfg = mailConfig(c.env);
@@ -436,6 +436,9 @@ webSubmissions.get('/:id/messages', async (c) => {
       // the send path applies, so the draft never shows a subject it won't use.
       threadSubject: base,
       replySubject: replySubject(base, (await threadMessageIds(sql, sub.id)).length > 0),
+      // A test sender (MAIL_ALLOW_TO) and whether it would mail this one.
+      restricted: Boolean(cfg?.allowTo),
+      recipientAllowed: cfg ? recipientAllowed(cfg, sub.email) : false,
     },
   });
 });
@@ -451,6 +454,7 @@ webSubmissions.post('/:id/messages', async (c) => {
   const r = await sendSubmissionReply(sql, c.env, { submissionId: id, authorId: c.var.user.id, body: text });
   if (r.kind === 'off') return c.json({ error: 'mail_off' }, 503);
   if (r.kind === 'not_found') return c.json({ error: 'Not found' }, 404);
+  if (r.kind === 'blocked') return c.json({ error: 'recipient_not_allowed' }, 403);
   const [message] = await loadMessages(sql, { id: r.messageRowId });
   if (r.kind === 'failed') return c.json({ error: 'send_failed', message }, 502);
   return c.json({ message, submission: await loadOne(sql, id) }, 201);

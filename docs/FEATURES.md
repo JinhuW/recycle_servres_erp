@@ -1358,7 +1358,16 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
       confirmed" if the backend died mid-send.
   - **Without the two variables** mail is off and the page keeps its
     reply-by-email link. `/api/health` reports `providers.mail` as `smtp`,
-    `stub` or `off`. Set them on prod only.
+    `stub` or `off`.
+  - **A test-recipient list** (v1.209.2). With `MAIL_ALLOW_TO` set, the server
+    mails only the listed addresses or domains.
+    - **Other recipients:** the draft says so, Send is disabled, and the API
+      answers 403 without recording anything. The draft carries a "Test list
+      only" chip.
+    - **Non-production Railway environments:** mail stays off unless the list
+      is set. Dev's data is a copy of prod, so its submissions are real
+      customers.
+    - **Health:** `/api/health` adds `providers.mailRestricted`.
 
 ## MCP and OAuth connectors
 

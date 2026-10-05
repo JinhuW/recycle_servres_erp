@@ -51,6 +51,13 @@ export type Env = {
   MAIL_IMAP_HOST?: string;
   MAIL_IMAP_PORT?: string;
   MAIL_STUB?: string;
+  // Comma-separated test recipients (addresses, or `@domain`); set, the server
+  // mails no one else. Required for mail on any non-production Railway env.
+  MAIL_ALLOW_TO?: string;
+  // Injected by Railway; mail's dev guard reads which environment this is.
+  RAILWAY_ENVIRONMENT_NAME?: string;
+  RAILWAY_ENVIRONMENT?: string;
+  RAILWAY_ENVIRONMENT_ID?: string;
   // Cloudflare R2 via its S3-compatible API. When any of endpoint / key /
   // secret / bucket is missing, uploadAttachment returns a stub (dev/tests).
   R2_S3_ENDPOINT?: string;

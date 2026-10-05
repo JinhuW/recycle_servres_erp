@@ -6,7 +6,8 @@ See [README.md](./README.md) for what the fields mean.
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
 | [RS-176](./RS-176-vnc-bridge-and-mail-thread-hardening-from-the-v1-209.md) | backlog | task | P3 | VNC bridge and mail thread hardening from the v1.209 review | — |
-| [RS-175](./RS-175-pre-release-review-fixes-for-v1-204-0-v1-209-0.md) | done | bug | P1 | Pre-release review fixes for v1.204.0–v1.209.0 | — |
+| [RS-175](./RS-175-pre-release-review-fixes-for-v1-204-0-v1-209-0.md) | done | bug | P1 | Pre-release review fixes for v1.204.0–v1.209.0 | 1.209.1 |
+| [RS-173](./RS-173-web-submission-email-can-run-on-dev-behind-a-test-re.md) | in-progress | story | P2 | Web-submission email can run on dev behind a test-recipient list | — |
 | [RS-170](./RS-170-re-login-looks-broken-it-waits-for-the-next-sweep-an.md) | done | bug | P2 | Re-login looks broken: it waits for the next sweep and cannot sign in without a stored password | 1.208.2 |
 | [RS-169](./RS-169-second-level-sidebar-nav-the-trackers-move-under-mon.md) | done | story | P2 | Second-level sidebar nav; the trackers move under Monitors | 1.207.0 |
 | [RS-166](./RS-166-desktop-sidebar-folds-to-an-icon-rail.md) | done | story | P2 | Desktop sidebar folds to an icon rail | 1.208.0 |
