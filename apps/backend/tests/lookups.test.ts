@@ -50,6 +50,17 @@ describe('GET /api/lookups', () => {
     expect(caps.indexOf('1TB')).toBe(caps.indexOf('1000GB') + 1);
   });
 
+  // Seed half only, like the rank test below; the migration has its own test.
+  it('offers 2TB between 1.92TB and 3.2TB, and CAMM as a RAM class', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api('GET', '/api/lookups', { token });
+    expect(r.status).toBe(200);
+    const caps: string[] = r.body.catalog.SSD_CAP;
+    expect(caps.indexOf('2TB')).toBe(caps.indexOf('1.92TB') + 1);
+    expect(caps.indexOf('3.2TB')).toBe(caps.indexOf('2TB') + 1);
+    expect(r.body.catalog.RAM_CLASS).toContain('CAMM');
+  });
+
   // Guards the seed half of the rank list only: the template DB is migrated and
   // then seeded, and the seed deletes catalog_options first — so a value missing
   // from migration 0125 alone would still pass here.
