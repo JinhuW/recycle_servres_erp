@@ -47,13 +47,37 @@ export function upstream(env: Env): { base: string; headers: Record<string, stri
 // misconfiguration on this side, so it goes out as a 502 that names the fix.
 const UPSTREAM_AUTH_REFUSED =
   'The fleet console refused the ERP’s credentials — check COORDINATOR_API_TOKEN (and the Access service token)';
+const REFUSAL_DETAIL_MAX = 200;
 
-function upstreamAuthRefused(c: { json: (body: unknown, status?: number) => Response }, status: number, path: string): Response {
-  log.warn('coordinator upstream refused our credentials', { module: 'coordinator', upstreamStatus: status, upstreamPath: path });
-  return c.json({ error: UPSTREAM_AUTH_REFUSED }, 502);
+/**
+ * What to tell the manager when the facade answers 401/403; null for any
+ * other status, whose body is left unread for the caller. A 401 is always
+ * our credentials, and so is a 403 that comes bare or as Cloudflare Access's
+ * HTML page. A 403 the facade explains in JSON means it declined this
+ * request, and its own words are the useful part.
+ */
+export async function refusalMessage(res: Response): Promise<string | null> {
+  if (res.status === 401) return UPSTREAM_AUTH_REFUSED;
+  if (res.status !== 403) return null;
+  // Parsed whatever the Content-Type says; an HTML page simply fails to parse.
+  let body: { detail?: unknown; error?: unknown } | null;
+  try {
+    body = JSON.parse(await res.text()) as { detail?: unknown; error?: unknown } | null;
+  } catch {
+    return UPSTREAM_AUTH_REFUSED;
+  }
+  const why = typeof body?.detail === 'string' ? body.detail
+    : typeof body?.error === 'string' ? body.error
+    : null;
+  return why ? `The fleet console refused this request: ${why.slice(0, REFUSAL_DETAIL_MAX)}` : UPSTREAM_AUTH_REFUSED;
 }
 
-const isAuthRefusal = (status: number) => status === 401 || status === 403;
+function upstreamRefused(
+  c: { json: (body: unknown, status?: number) => Response }, status: number, path: string, message: string,
+): Response {
+  log.warn('coordinator upstream refused the request', { module: 'coordinator', upstreamStatus: status, upstreamPath: path });
+  return c.json({ error: message }, 502);
+}
 
 // Statuses a Response may not carry a body on; building one with a body throws.
 const NULL_BODY_STATUSES = new Set([204, 205, 304]);
@@ -85,7 +109,8 @@ async function forward(
     return c.json({ error: UNREACHABLE }, 502);
   }
 
-  if (isAuthRefusal(res.status)) return upstreamAuthRefused(c, res.status, path);
+  const refused = await refusalMessage(res);
+  if (refused) return upstreamRefused(c, res.status, path, refused);
   if (NULL_BODY_STATUSES.has(res.status)) return c.body(null, res.status as StatusCode);
   // Pass the upstream body and status through verbatim: the coordinator's 4xx
   // bodies carry actionable messages the UI shows as-is.
@@ -191,7 +216,8 @@ coordinator.get('/challenges/:id/screenshot', async (c) => {
   }
 
   // Only a 200 carries image bytes; errors come back as JSON.
-  if (isAuthRefusal(res.status)) return upstreamAuthRefused(c, res.status, path);
+  const refused = await refusalMessage(res);
+  if (refused) return upstreamRefused(c, res.status, path, refused);
   if (!res.ok) {
     const payload = await res.json().catch(() => ({ error: `coordinator returned ${res.status}` }));
     return c.json(payload, res.status as ContentfulStatusCode);

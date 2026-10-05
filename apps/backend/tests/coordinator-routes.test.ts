@@ -164,17 +164,36 @@ describe('Coordinator proxy routes (/api/coordinator)', () => {
 
   it('never passes the facade refusing our token through as a 401 the SPA reads as a lapsed session', async () => {
     const { token } = await loginAs(ALEX);
-    for (const status of [401, 403]) {
-      stubFacade(status, { detail: 'Invalid bearer token' });
-      for (const path of ['/api/coordinator/fleet', '/api/coordinator/challenges?status=open', '/api/coordinator/challenges/7/screenshot']) {
+    const paths = ['/api/coordinator/fleet', '/api/coordinator/challenges?status=open', '/api/coordinator/challenges/7/screenshot'];
+    // A 401, a bare 403, and Cloudflare Access's HTML 403 page all mean our
+    // credentials.
+    const refusals: [string, () => Response][] = [
+      ['401', () => new Response(JSON.stringify({ detail: 'Invalid bearer token' }), { status: 401 })],
+      ['bare 403', () => new Response(null, { status: 403 })],
+      ['Access 403', () => new Response('<!doctype html><title>Forbidden</title>', { status: 403, headers: { 'Content-Type': 'text/html' } })],
+    ];
+    for (const [label, make] of refusals) {
+      vi.stubGlobal('fetch', vi.fn(async () => make()));
+      for (const path of paths) {
         const r = await api<{ error: string }>('GET', path, { token, env: ENV });
-        expect(r.status, `${path} on upstream ${status}`).toBe(502);
+        expect(r.status, `${path} on upstream ${label}`).toBe(502);
         expect(r.body.error).toMatch(/COORDINATOR_API_TOKEN/);
       }
     }
     // A refused write is the same misconfiguration.
     stubFacade(401, { detail: 'Invalid bearer token' });
     expect((await api('POST', '/api/coordinator/workers/ne-1/relogin', { token, env: ENV })).status).toBe(502);
+  });
+
+  it('keeps the facade’s own words when it explains a 403, still never as a 403', async () => {
+    const { token } = await loginAs(ALEX);
+    stubFacade(403, { detail: 'Re-login is not allowed for this worker' });
+    const relogin = await api<{ error: string }>('POST', '/api/coordinator/workers/ne-1/relogin', { token, env: ENV });
+    expect(relogin.status).toBe(502);
+    expect(relogin.body.error).toBe('The fleet console refused this request: Re-login is not allowed for this worker');
+    const shot = await api<{ error: string }>('GET', '/api/coordinator/challenges/7/screenshot', { token, env: ENV });
+    expect(shot.status).toBe(502);
+    expect(shot.body.error).not.toMatch(/COORDINATOR_API_TOKEN/);
   });
 });
 

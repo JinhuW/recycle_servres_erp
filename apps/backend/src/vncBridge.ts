@@ -20,6 +20,11 @@
 //      (POST /v1/vnc/<worker>/ticket) and opens the facade's socket with it.
 //      From then on it only moves bytes. A failure upstream closes the
 //      browser's socket with a reason the viewer shows.
+//   4. Every minute the same handshake is replayed again. The socket is the
+//      only request a viewer makes, so without this a manager signed out,
+//      deactivated or demoted mid-session would keep the worker's browser
+//      for as long as the tab stayed open. It also means no socket outlives
+//      the access token it opened with — the viewer reconnects on a fresh one.
 //
 // View-only vs. control is the client's business (noVNC's viewOnly): RFB
 // input is just bytes here, the same as on the facade's own viewer page.
@@ -29,7 +34,7 @@ import type { Duplex } from 'node:stream';
 import { WebSocket, WebSocketServer, type RawData } from 'ws';
 import type { Hono } from 'hono';
 import { log } from './lib/log';
-import { upstream, VNC_WORKER_ID } from './routes/coordinator';
+import { refusalMessage, upstream, VNC_WORKER_ID } from './routes/coordinator';
 import type { Env } from './types';
 
 const PATH = /^\/api\/coordinator\/vnc\/([^/?#]+)\/ws$/;
@@ -41,6 +46,10 @@ export const MAX_BRIDGES = 8;
 // Bytes queued for a slow browser before the bridge gives up on it rather than
 // buffering a framebuffer stream without bound.
 const MAX_BUFFERED = 16 * 1024 * 1024;
+const REVALIDATE_MS = 60_000;
+// Close code for "the handshake's session no longer admits this socket"; the
+// viewer (lib/coordinator.ts) reconnects on it with a refreshed cookie.
+export const VNC_SESSION_LAPSED = 4401;
 
 const vlog = log.child({ module: 'vnc' });
 
@@ -106,9 +115,8 @@ async function mintTicket(env: Env, workerId: string): Promise<Grant | { error: 
   if (res.status === 404) {
     return { error: `The fleet console has no VNC target for ${workerId} (RS_VNC_TARGETS)` };
   }
-  if (res.status === 401 || res.status === 403) {
-    return { error: 'The fleet console refused the ERP’s credentials (COORDINATOR_API_TOKEN)' };
-  }
+  const refused = await refusalMessage(res);
+  if (refused) return { error: refused };
   if (!res.ok) return { error: `The fleet console refused a ticket (${res.status})` };
   const body = await res.json().catch(() => null) as { path?: unknown } | null;
   if (!body || typeof body.path !== 'string' || !body.path.startsWith('/')) {
@@ -191,11 +199,34 @@ function pump(client: WebSocket, env: Env, workerId: string): void {
   })();
 }
 
+// Re-admits an open socket on its own handshake (step 4 above). Only a 401 or
+// 403 is a verdict; a 5xx means the check itself failed — the database blipped
+// — and the next tick decides.
+function recheck(client: WebSocket, workerId: string, check: () => Promise<number>, everyMs: number): void {
+  let inFlight = false;
+  const timer = setInterval(() => {
+    if (inFlight) return;
+    inFlight = true;
+    check().then((status) => {
+      if (status === 401) closeQuietly(client, VNC_SESSION_LAPSED, 'Your sign-in has run out');
+      else if (status === 403) closeQuietly(client, 1008, 'You can no longer watch this worker');
+      else return;
+      vlog.info('vnc bridge revoked', { workerId, status });
+    }, (e: unknown) => {
+      vlog.warn('vnc session re-check failed', e);
+    }).finally(() => { inFlight = false; });
+  }, everyMs);
+  timer.unref();
+  client.once('close', () => clearInterval(timer));
+}
+
 /**
  * Takes over HTTP upgrades on the server. Only the VNC path upgrades; every
  * other upgrade request is refused, as it was before this existed.
  */
-export function attachVncBridge(server: Server, app: FetchApp, env: Env): WebSocketServer {
+export function attachVncBridge(
+  server: Server, app: FetchApp, env: Env, { revalidateMs = REVALIDATE_MS }: { revalidateMs?: number } = {},
+): WebSocketServer {
   const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false });
 
   server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
@@ -231,6 +262,7 @@ export function attachVncBridge(server: Server, app: FetchApp, env: Env): WebSoc
         open.add(client);
         vlog.info('vnc bridge opened', { workerId, open: open.size });
         pump(client, env, workerId);
+        recheck(client, workerId, () => admit(app, env, req), revalidateMs);
       });
     }).catch((e) => {
       vlog.error('vnc upgrade failed', e);

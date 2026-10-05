@@ -17,6 +17,40 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.209.1] - 2026-10-04
+
+Pre-release review fixes for v1.204.0–v1.209.0 (RS-175).
+
+### Fixed
+
+- **Watching a worker no longer outlives the session that opened it.** The
+  viewer's socket was checked once, at the handshake, and then relayed bytes
+  for as long as the tab stayed open. So a manager who was signed out,
+  deactivated or demoted kept live control of a worker's Facebook browser.
+  The relay now re-runs the handshake's checks every minute. A lapsed sign-in
+  closes the socket, and the viewer reconnects on a refreshed cookie, keeping
+  control if it had it. Losing the manager role ends the view. A socket now
+  lasts at most as long as the access token it opened with, so a long session
+  sees a brief reconnect about once an hour. The viewer also makes an ordinary
+  call before every connect. Before this, Reconnect more than an hour into a
+  session sent no cookie, and every click was refused. A tab loaded before
+  this release still has the old viewer and may need a reload after its first
+  cut.
+- **The Watch eye on an account row works from the keyboard.** The row
+  caught Enter for its own expand toggle and cancelled it, so Enter on the
+  link inside the row expanded the row instead of opening the viewer.
+- **A failed poll no longer blanks a web submission's email thread.** Any
+  failed refresh, such as a 30-second poll that hit a redeploy, was read as
+  "this backend has no thread". The conversation disappeared, the reply being
+  typed was lost, and the header fell back to the `mailto:` link. Now only a
+  404 does that. Anything else keeps the thread as it was until the next poll
+  gets through.
+- **A 403 that the fleet console explains keeps its explanation.** Since
+  1.208.1 every facade 401/403 has reached the browser as a 502 saying "check
+  COORDINATOR_API_TOKEN". That stays for a 401, a bare 403, and Cloudflare
+  Access's HTML page. A 403 whose JSON gives a reason now shows that reason.
+  It is still a 502, so the ERP still never reads it as a lapsed session.
+
 ## [1.209.0] - 2026-10-04
 
 Web submissions can be answered by email from inside the ERP (RS-161).

@@ -74,10 +74,12 @@ export function SubmissionThread({ submission, composerRef, onMode, onSent, onTo
       if (!alive.current) return;
       setThread(r);
       onMode(r.mail.mode);
-    } catch {
+    } catch (e) {
       // A backend from before the thread existed answers 404 here; the page
-      // keeps working as it did, with the mailto link.
-      if (!alive.current) return;
+      // keeps working as it did, with the mailto link. Anything else is a
+      // blip (a redeploy, a dropped connection): the thread and the draft
+      // under it stay as they were until a later poll gets through.
+      if (!alive.current || !(e instanceof ApiError && e.status === 404)) return;
       setThread(null);
       onMode('off');
     }
