@@ -2,13 +2,13 @@
 id: RS-173
 title: Web-submission email can run on dev behind a test-recipient list
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-04
 reporter: jinhu
 branch: fix/mail-dev-allowlist
-pr:
-version:
+pr: "#501"
+version: 1.209.2
 related: [RS-161]
 ---
 
@@ -30,15 +30,15 @@ The requester chose to make dev usable behind a safety list: a server with
 
 ## Acceptance criteria
 
-- [ ] With `MAIL_ALLOW_TO` set, a reply to a listed address (or one in a listed
+- [x] With `MAIL_ALLOW_TO` set, a reply to a listed address (or one in a listed
       domain) is sent. Any other recipient is refused with 403, and nothing is
       recorded.
-- [ ] On a submission whose address isn't on the list, the draft says so and
+- [x] On a submission whose address isn't on the list, the draft says so and
       Send is disabled, including the ⌘/Ctrl+Enter shortcut.
-- [ ] On any Railway environment other than `production`, mail stays off
+- [x] On any Railway environment other than `production`, mail stays off
       unless `MAIL_ALLOW_TO` is set, and boot logs why. Setting `MAIL_*` on dev
       alone can never reach a customer.
-- [ ] `/api/health` reports `mailRestricted` beside `mail`.
+- [x] `/api/health` reports `mailRestricted` beside `mail`.
 
 ## Out of scope
 
