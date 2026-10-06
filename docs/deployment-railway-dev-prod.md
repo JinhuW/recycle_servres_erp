@@ -166,4 +166,7 @@ Temporarily clear the cron, deploy once so it runs immediately, read logs for
   hashes are kept on purpose, so people sign in to dev with their own
   passwords. `tests/sync-scrub.test.ts` runs the scrub against the migrated
   schema, so an FK added onto a scrubbed table fails CI instead of the nightly
-  restore.
+  restore. Every name in `scrub.sql` is `public.`-qualified because the dump
+  before it empties `search_path` for the rest of the session. The test runs
+  the scrub with `search_path` emptied too, so an unqualified name fails CI.
+  Missing that prefix stopped every sync from 2026-10-03 to 2026-10-05 (v1.211.1).

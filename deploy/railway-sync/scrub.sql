@@ -11,6 +11,11 @@
 -- decided on (scrub it too, or not), not silently emptied. Such an FK makes
 -- the TRUNCATE fail, and tests/sync-scrub.test.ts fails with it in CI rather
 -- than the nightly restore failing on dev.
-TRUNCATE refresh_tokens, oauth_refresh_tokens, oauth_authorization_codes,
-         oauth_pending_consent, login_attempts;
-UPDATE oauth_clients SET secret_hash = NULL, revoked_at = COALESCE(revoked_at, NOW());
+--
+-- Every name is schema-qualified because the dump this follows empties
+-- search_path for the rest of the session; an unqualified table doesn't
+-- resolve, and the whole restore rolls back.  The test runs it the same way.
+TRUNCATE public.refresh_tokens, public.oauth_refresh_tokens,
+         public.oauth_authorization_codes, public.oauth_pending_consent,
+         public.login_attempts;
+UPDATE public.oauth_clients SET secret_hash = NULL, revoked_at = COALESCE(revoked_at, NOW());

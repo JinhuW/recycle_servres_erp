@@ -17,6 +17,23 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.211.1] - 2026-10-05
+
+The nightly prod→dev database copy works again (RS-182).
+
+### Fixed
+
+- **The 04:00 UTC `db-sync` run had failed every night since v1.196.1**
+  with `relation "refresh_tokens" does not exist`, so dev's data stayed at
+  2026-10-02. Plain-format `pg_dump` opens with a line that empties
+  `search_path` for the rest of the session. The credential scrub runs in that
+  session right after the dump, and its table names were unqualified, so the
+  first `TRUNCATE` could not find its table. The restore is one transaction,
+  so each run rolled back cleanly and dev was never left empty. It was only
+  stale, and nothing alerted. `scrub.sql` now qualifies every name with
+  `public.`, and `tests/sync-scrub.test.ts` runs the scrub with `search_path`
+  emptied, so an unqualified name added later fails CI instead of the restore.
+
 ## [1.211.0] - 2026-10-05
 
 SSD capacity offers 2TB and RAM class offers CAMM (RS-178).
