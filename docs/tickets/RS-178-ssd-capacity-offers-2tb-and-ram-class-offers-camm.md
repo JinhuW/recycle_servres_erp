@@ -2,13 +2,13 @@
 id: RS-178
 title: SSD capacity offers 2TB and RAM class offers CAMM
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-05
 reporter: Jinhu
 branch: feat/ssd-2tb-ram-camm
-pr:
-version:
+pr: "#506"
+version: 1.211.0
 related: []
 ---
 
@@ -38,11 +38,11 @@ was for 0071–0073 and 0078.
 
 ## Acceptance criteria
 
-- [ ] The SSD Capacity select on every line form offers 2TB, between 1.92TB
+- [x] The SSD Capacity select on every line form offers 2TB, between 1.92TB
       and 3.2TB.
-- [ ] The RAM Class select offers CAMM, after SODIMM.
-- [ ] The label scanner may read a module as CAMM, and types it Laptop.
-- [ ] Both are live on prod.
+- [x] The RAM Class select offers CAMM, after SODIMM.
+- [x] The label scanner may read a module as CAMM, and types it Laptop.
+- [x] Both are live on prod.
 
 ## Out of scope
 
@@ -51,5 +51,5 @@ was for 0071–0073 and 0078.
 
 ## Notes
 
-The prod release also carried v1.209.2 (RS-173), which was on dev and not yet
-on prod.
+Shipped to prod in release #507 (main 9c6d6b46), which also carried v1.209.2
+(RS-173).
