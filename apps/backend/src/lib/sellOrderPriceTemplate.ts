@@ -25,11 +25,11 @@
 //
 // Bid-sheet photos ship as clickable Image URL cells, not embedded thumbnails
 // (user-requested 2026-07-22): links keep the file small and always show the
-// full-size scan. The packing tabs are the opposite case — printed and read
-// at the shelf — so they embed a thumbnail on every row a picker ticks
-// (user-requested 2026-10-07). Spec attributes get individual columns (same
-// request as the order spreadsheet — never re-merge them into one composed
-// field).
+// full-size scan. The packing tabs carry no photo at all: an embedded
+// thumbnail per row was tried and dropped (user-decided 2026-10-07, "not
+// required in the spreadsheet") — Pack mode shows it on screen instead. Spec
+// attributes get individual columns (same request as the order spreadsheet —
+// never re-merge them into one composed field).
 //
 // The workbook ships completely unprotected (user-decided 2026-08-08): a
 // manager reshaping a long bid sheet shouldn't have to lift a lock first, and
@@ -65,7 +65,6 @@
 // containing price/unitprice/单价/价格 here.
 
 import { compareSpecValue, sortSheetRows } from './categoryColumns';
-import type { ScanThumb } from './scanThumbnails';
 
 export type PriceTemplateProduct = {
   category: string;
@@ -84,11 +83,8 @@ export type PriceTemplateProduct = {
 // One PO line's share of a row. `lineNo` is the line's # on its PO page
 // (lib/poLineNo.ts); `po` and `lineNo` are both null for a line typed onto
 // the order by hand. `soLineNos` are the sell-order lines it covers — the #
-// the packer writes on each item's label — and `imageUrl` its lot's scan.
-export type PoSource = {
-  po: string | null; lineNo: number | null; qty: number;
-  soLineNos: number[]; imageUrl: string | null;
-};
+// the packer writes on each item's label.
+export type PoSource = { po: string | null; lineNo: number | null; qty: number; soLineNos: number[] };
 
 export type PriceTemplateHead = {
   id: string;
@@ -333,15 +329,13 @@ export async function buildPriceTemplateWorkbook(
 export async function buildPackingListWorkbook(
   head: PriceTemplateHead,
   warehouses: PriceTemplateWarehouse[],
-  photos: ReadonlyMap<string, ScanThumb> = new Map(),
 ): Promise<Buffer> {
   const { default: ExcelJS } = await import('exceljs');
   const wb = new ExcelJS.Workbook();
 
   const used = new Set<string>();
-  const photoOf = photoPlacer(wb, photos);
   for (const wh of warehouses) {
-    renderWarehouseSheet(wb, head, wh, { tabName: packTabName(`Pack - ${wh.warehouse}`, used), photoOf });
+    renderWarehouseSheet(wb, head, wh, { tabName: packTabName(`Pack - ${wh.warehouse}`, used) });
   }
 
   return Buffer.from(await wb.xlsx.writeBuffer());
@@ -350,20 +344,17 @@ export async function buildPackingListWorkbook(
 export async function buildPackingListByPoWorkbook(
   head: PriceTemplateHead,
   warehouses: PackingPoWarehouse[],
-  photos: ReadonlyMap<string, ScanThumb> = new Map(),
 ): Promise<Buffer> {
   const { default: ExcelJS } = await import('exceljs');
   const wb = new ExcelJS.Workbook();
 
   const used = new Set<string>();
-  const photoOf = photoPlacer(wb, photos);
   for (const wh of warehouses) {
     for (const { po, products } of wh.pos) {
       const poName = po ?? 'No PO';
       renderWarehouseSheet(wb, head, { warehouse: wh.warehouse, products }, {
         tabName: packTabName(`${poName} - ${wh.warehouse}`, used),
         poCol: 'id',
-        photoOf,
         instruction:
           `Packing checklist — ${poName}, warehouse ${wh.warehouse}. Tick "Packed ✓" as you pack. ` +
           `/ ${poName}，仓库 ${wh.warehouse} 装箱清单：装箱后请在 "Packed ✓" 列打勾。`,
@@ -538,9 +529,9 @@ type WhCol = { header: string; key: string; width: number; numFmt?: string };
 // Condition / Image URL here). The bid tabs still carry all of them.
 const PACK_OMITTED_SPECS = new Set(['classification', 'chip']);
 
-// Section layout: # | Packed ✓ | Photo | Part # | From PO or ID in PO |
-// <category specs> | Qty, shifted right by PACK_GROUP_OFFSET to leave room for
-// the RAM group labels. No prices by design (user-decided): a picker has no use
+// Section layout: # | Packed ✓ | Part # | From PO or ID in PO | <category
+// specs> | Qty, shifted right by PACK_GROUP_OFFSET to leave room for the RAM
+// group labels. No prices by design (user-decided): a picker has no use
 // for them, and "Part #" (not "Part Number") plus the absence of any price
 // header is also what keeps findHeaders() from ever parsing these tabs. The
 // source column names where a row's units came from: "From PO" ("PO-1442 #3")
@@ -553,7 +544,6 @@ function whSectionCols(category: string, poCol: PoCol): WhCol[] {
     // The line's # on the sell order, which the packer labels the item with.
     { header: '#',         key: 'soLine',    width: 8 },
     { header: 'Packed ✓',  key: 'packed',    width: 9 },
-    { header: 'Photo',     key: 'photo',     width: PHOTO_COL_WIDTH },
     { header: 'Part #',    key: 'part',      width: 24 },
     poCol === 'id'
       ? { header: 'ID in PO', key: 'poLine',   width: 12 }
@@ -585,35 +575,6 @@ const numList = (nos: readonly number[]): number | string => {
   return sorted.length === 1 ? sorted[0] : sorted.join(', ');
 };
 
-// A thumbnail placed on a row: the workbook's media id and the size to show.
-type PlacedPhoto = { id: number; width: number; height: number };
-type PhotoOf = (url: string | null) => PlacedPhoto | null;
-
-// One media entry per photo per workbook, shared by every tab that shows it.
-function photoPlacer(wb: import('exceljs').Workbook, photos: ReadonlyMap<string, ScanThumb>): PhotoOf {
-  const ids = new Map<string, number>();
-  return (url) => {
-    const thumb = url ? photos.get(url) : undefined;
-    if (!url || !thumb) return null;
-    let id = ids.get(url);
-    if (id === undefined) {
-      // exceljs declares its own Buffer type, which Node's no longer satisfies.
-      id = wb.addImage({ buffer: thumb.buffer as unknown as import('exceljs').Buffer, extension: 'jpeg' });
-      ids.set(url, id);
-    }
-    return { id, width: thumb.width, height: thumb.height };
-  };
-}
-
-// A row with a photo is tall enough for the 56 px thumbnail and its margin,
-// and the photo is centred in its cell. Excel sizes a column of width 10 at
-// 75 px (Calibri 11) and a 46 pt row at 61 px; anchors are in EMU.
-const PHOTO_COL_WIDTH = 10;
-const PHOTO_COL_PX = 75;
-const PHOTO_ROW_PT = 46;
-const PHOTO_ROW_PX = (PHOTO_ROW_PT * 96) / 72;
-const EMU_PER_PX = 9525;
-
 // Every pack tab reserves the group-label columns, whether or not it holds a
 // RAM section: two tabs on the same order then have the same layout, so a
 // picker moving between warehouses doesn't have to re-find the columns.
@@ -625,9 +586,7 @@ function renderWarehouseSheet(
   wh: PriceTemplateWarehouse,
   // The by-PO workbook reuses this tab whole; only its name and wording move,
   // and its source column narrows to ID in PO.
-  opts: {
-    tabName?: string; instruction?: string; totalLabel?: string; poCol?: PoCol; photoOf?: PhotoOf;
-  } = {},
+  opts: { tabName?: string; instruction?: string; totalLabel?: string; poCol?: PoCol } = {},
 ): void {
   const poCol = opts.poCol ?? 'source';
   // "Pack - DEN" style: the prefix separates packing tabs from the category
@@ -710,24 +669,20 @@ function renderWarehouseSheet(
       const sources = sortSources(p.poSources ?? []);
       // From one PO line, a product is one row. From several, it is laid out
       // the way the inventory page lists a product's lots: the product on a
-      // bold row of its own, then a row per PO line with its own #, tick box,
-      // photo and qty, so a picker pulling one part from three boxes ticks
-      // each box (user-requested 2026-10-07).
+      // bold row of its own, then a row per PO line with its own #, tick box
+      // and qty, so a picker pulling one part from three boxes ticks each box
+      // (user-requested 2026-10-07).
       const block: { kind: 'single' | 'product' | 'line'; src: PoSource | null }[] = sources.length > 1
         ? [{ kind: 'product', src: null }, ...sources.map((src) => ({ kind: 'line' as const, src }))]
         : [{ kind: 'single', src: sources[0] ?? null }];
       for (const { kind, src } of block) {
-        const rowNo = r++;
-        const row = ws.getRow(rowNo);
+        const row = ws.getRow(r++);
         const tickable = kind !== 'product';
         // Part # and the specs belong to the product; a line row only says
         // which PO line it is.
         const productCells = kind !== 'line';
-        const photo = tickable ? opts.photoOf?.(src?.imageUrl ?? null) ?? null : null;
-        if (photo) row.height = PHOTO_ROW_PT;
         cols.forEach((c, i) => {
-          const col = i + 1 + PACK_GROUP_OFFSET;
-          const cell = row.getCell(col);
+          const cell = row.getCell(i + 1 + PACK_GROUP_OFFSET);
           if (wash && c.key !== 'packed') cell.fill = wash;
           switch (c.key) {
             case 'soLine':
@@ -738,16 +693,6 @@ function renderWarehouseSheet(
             case 'packed':
               // Blank bordered tick box — pen after printing, or type x in Excel.
               if (tickable) cell.border = box;
-              break;
-            case 'photo':
-              if (photo) {
-                const tl: import('exceljs').IAnchor = {
-                  col: col - 1, row: rowNo - 1, nativeCol: col - 1, nativeRow: rowNo - 1,
-                  nativeColOff: Math.round(((PHOTO_COL_PX - photo.width) / 2) * EMU_PER_PX),
-                  nativeRowOff: Math.round(((PHOTO_ROW_PX - photo.height) / 2) * EMU_PER_PX),
-                };
-                ws.addImage(photo.id, { tl, ext: { width: photo.width, height: photo.height }, editAs: 'oneCell' });
-              }
               break;
             case 'part': if (productCells) cell.value = p.partNumber ?? ''; break;
             case 'poLine':
@@ -767,7 +712,6 @@ function renderWarehouseSheet(
             default: if (productCells) cell.value = p.specs[c.key] ?? '';
           }
           if (kind === 'product' && (c.key === 'part' || c.key === 'qty')) cell.font = { bold: true };
-          if (photo) cell.alignment = { ...cell.alignment, vertical: 'middle' };
         });
       }
       spans.push(block.length);

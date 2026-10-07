@@ -611,8 +611,7 @@ function DownloadMenu({ orderId, lines }: { orderId: string; lines: SellOrderLin
   // A picked warehouse the order no longer has (a line was moved) falls back
   // to All rather than 400ing.
   const picked = warehouses.includes(warehouse) ? warehouse : '';
-  // A packing list fetches every lot's photo, so it takes a few seconds; a
-  // second click would only start the whole job again.
+  // A second click while a file is being prepared would only download it twice.
   const [busy, setBusy] = useState(false);
 
   const download = (kind: 'price-template' | 'packing-list', byPo = false) => async () => {

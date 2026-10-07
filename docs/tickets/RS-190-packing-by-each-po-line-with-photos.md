@@ -65,3 +65,6 @@ not picked)": the PO lines nest under their product rather than replacing it.
 ## Notes
 
 Plan: `~/.claude/plans/velvet-sleeping-acorn.md`.
+
+Spreadsheet photos removed again in RS-191 (v1.220.1): not required on the
+sheet. Pack mode keeps them.
