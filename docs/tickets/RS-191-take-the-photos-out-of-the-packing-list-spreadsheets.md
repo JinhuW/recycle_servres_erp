@@ -2,13 +2,13 @@
 id: RS-191
 title: Take the photos out of the packing-list spreadsheets
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-10-07
 reporter: jinhu
 branch: dev-7
-pr:
-version:
+pr: "#527"
+version: 1.220.1
 related: [RS-190]
 ---
 
