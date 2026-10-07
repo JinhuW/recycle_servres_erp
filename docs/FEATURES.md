@@ -1491,6 +1491,9 @@ inventory search, sell-order draft creation.
 - Tool failures answer as normal results with `isError: true`, not JSON-RPC
   errors; only protocol failures are errors. Every tool ships MCP
   `annotations`, without which clients label read-only tools destructive.
+- When two reference prices share a part number, `get_market_value` and
+  `set_market_price` use the most recently updated one, like the scraper push
+  (v1.219.1).
 - DCR is open by default, rate-limited per IP (per /64 for IPv6 since
   v1.200.1) and globally.
 - **Consent says where the code goes** (v1.195.0). Any app can register itself

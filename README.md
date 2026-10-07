@@ -39,7 +39,8 @@ shell, so each ships its own chunk):
 - **Backend** — Node 24, Hono, postgres.js, `@aws-sdk/client-s3` for R2,
   bcryptjs, `@tsndr/cloudflare-worker-jwt` for JWT.
 - **Frontend** — Vite 6, React 18, TypeScript 5, no UI framework.
-- **DB** — Postgres 16. Plain SQL migrations under `apps/backend/migrations/`
+- **DB** — Postgres 18 (Railway prod and CI; `docker-compose.yml` stays on 16
+  until its data directory gets a dump/restore). Plain SQL migrations under `apps/backend/migrations/`
   (numbered `NNNN_…sql`; the highest number is the head), applied
   automatically by the backend on startup.
 - **Storage** — Cloudflare R2 via S3 API.  Label scans + sell-order
