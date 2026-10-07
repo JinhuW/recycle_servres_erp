@@ -2,13 +2,13 @@
 id: RS-190
 title: Packing by each PO line, with photos
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-10-07
 reporter: jinhu
 branch: feat/pack-by-po-line-photos
-pr:
-version:
+pr: "#525"
+version: 1.220.0
 related: [RS-186, RS-187, RS-188]
 ---
 
