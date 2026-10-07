@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-187](./RS-187-pack-mode-an-ipad-checklist-for-packing-a-sell-order.md) | done | story | P2 | Pack mode: an iPad checklist for packing a sell order | — |
 | [RS-186](./RS-186-packing-list-shows-each-row-s-source-po-line.md) | done | story | P2 | Packing list shows each row's source PO line | 1.216.0 |
 | [RS-185](./RS-185-commission-payment-records-which-manager-paid-it.md) | done | story | P2 | Commission payment records which manager paid it | 1.217.0 |
 | [RS-184](./RS-184-a-po-line-may-be-counted-down-to-0-only-a-new-line-n.md) | done | story | P1 | A PO line may be counted down to 0; only a new line needs qty 1 | 1.213.0 |

@@ -2,13 +2,13 @@
 id: RS-187
 title: Pack mode: an iPad checklist for packing a sell order
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-07
 reporter: jinhu
 branch: dev-4
-pr:
-version:
+pr: "#519"
+version: 1.218.0
 related: [RS-124, RS-145]
 ---
 
