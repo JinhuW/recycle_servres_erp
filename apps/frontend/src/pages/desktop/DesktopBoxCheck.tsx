@@ -8,7 +8,7 @@ import { useManagerTakeover } from '../../components/ManagerTakeoverDialog';
 import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
 import { api, rawFetch } from '../../lib/api';
 import {
-  checkBody, countOf, emptyCheck, entryAnswerFor, isShortChecked, lineState, matchScan, nextOpenAfter, orderLines,
+  checkBody, countOf, emptyCheck, entryAnswerFor, isAbsentChecked, isShortChecked, lineState, matchScan, nextOpenAfter, orderLines,
   readStageMoved, stashEntryAnswer, tally,
   type ChecksResponse, type LineCheck,
 } from '../../lib/boxCheck';
@@ -319,6 +319,12 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     setSelectedId(hit.id);
     const pn = hit.partNumber ?? lineLabel(hit);
     const state = lineState(hit, checks.get(hit.id));
+    // A scan says the part is here, and a tick at 0 would confirm it isn't —
+    // Approve would then take the line off the PO.
+    if (countOf(hit, checks.get(hit.id)) === 0) {
+      setScanMsg({ tone: 'neg', text: t('bcScanZero', { pn }) });
+      return;
+    }
     // A scan checks the whole line, so the next unit of it reads as already
     // done.
     if (state === 'done') {
@@ -337,17 +343,30 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     const answer = entryAnswerFor(order) ?? await takeover.ask(order);
     if (answer === null) return;
     setBusy('approve');
+    // Once lines are gone, a move that doesn't happen leaves this page showing
+    // rows the PO no longer has; the re-read drops them.
+    let removed = false;
+    const reloadIfRemoved = () => (removed ? onReload().catch(handleFetchError) : undefined);
     try {
       await flush();
+      // Ahead of the move: from Ready to Pay the lines are closed book.
+      if (absent.length) {
+        await api.patch(`/api/orders/${order.id}`, { removeLineIds: absent.map(l => l.id) });
+        removed = true;
+      }
       // The page may have sat open while someone else moved the PO; the jump
       // is refused under the row lock unless it is still at Reviewing.
       const moved = await takeover.advance(order, { toStage: 'ready_to_pay', fromStage: 'reviewing' }, answer);
-      if (!moved) return;
+      if (!moved) {
+        await reloadIfRemoved();
+        return;
+      }
       stashEntryAnswer(order.id, null);
     } catch (e) {
       const now = readStageMoved(e);
       if (now !== null) showErrorDialog(t('bcStaleStage', { id: order.id, s: poStageName(now, t) }));
       else handleFetchError(e);
+      await reloadIfRemoved();
       return;
     } finally {
       setBusy(null);
@@ -430,6 +449,9 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   useEffect(() => { setPhotoIdx(0); }, [selected?.id]);
 
   const short = ordered.done.filter(l => isShortChecked(l, checks.get(l.id)));
+  const absent = ordered.done.filter(l => isAbsentChecked(l, checks.get(l.id)));
+  // An order keeps at least one line, so this one can't be approved away.
+  const allAbsent = absent.length === lines.length;
   // The PO page's numbering, which the regrouped rows would otherwise lose.
   const lineNo = (l: OrderLine) => lines.indexOf(l) + 1;
 
@@ -444,7 +466,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
         <tr
           id={'bc-row-' + l.id}
           ref={el => { if (el) rowRefs.current.set(l.id, el); else rowRefs.current.delete(l.id); }}
-          className={'bc-row bc-' + state + (isSel ? ' row-selected' : '')}
+          className={'bc-row bc-' + state + (isAbsentChecked(l, c) ? ' bc-done-absent' : '') + (isSel ? ' row-selected' : '')}
           onClick={() => setSelectedId(l.id)}
         >
           <td className="bc-cb-cell">
@@ -489,6 +511,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
                 <Icon name="plus" size={13} />
               </button>
             </div>
+            {countOf(l, c) === 0 && <div className="bc-absent-tag">{t('bcAbsentTag')}</div>}
           </td>
           <td className="bc-edit-cell">
             <button
@@ -555,11 +578,13 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
           <div className="bc-meter" role="img" aria-label={t('bcUnitsCounted', { n: sum.done, of: lines.length })}>
             <i className="bc-m-done" style={{ flexGrow: sum.done }} />
             <i className="bc-m-part" style={{ flexGrow: sum.partial }} />
+            <i className="bc-m-absent" style={{ flexGrow: sum.absent }} />
             <i className="bc-m-open" style={{ flexGrow: sum.open }} />
           </div>
           <div className="bc-legend">
             <span className="chip pos dot">{t('bcLegendDone', { n: sum.done })}</span>
             <span className="chip warn dot">{t('bcLegendPartial', { n: sum.partial })}</span>
+            {sum.absent > 0 && <span className="chip neg dot">{t('bcLegendAbsent', { n: sum.absent })}</span>}
             <span className="chip muted dot">{t('bcLegendOpen', { n: sum.open })}</span>
           </div>
         </div>
@@ -687,25 +712,47 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
             <div className="card-body">
               {remaining > 0 ? (
                 <p className="card-sub">{t(remaining === 1 ? 'bcRemainingOne' : 'bcRemainingMany', { n: remaining })}</p>
-              ) : short.length > 0 ? (
+              ) : allAbsent ? (
+                <p className="card-sub">{t('bcAllAbsent')}</p>
+              ) : absent.length > 0 || short.length > 0 ? (
                 <>
-                  <p className="card-sub">{t('bcShortIntro', { n: short.length })}</p>
-                  <ul className="bc-problem-list">
-                    {short.map(l => (
-                      <li key={l.id}>
-                        <span className="mono">#{lineNo(l)} {l.partNumber ?? lineLabel(l)}</span>
-                        {' · '}{t('bcShortNote', { n: countOf(l, checks.get(l.id)), of: l.qty })}
-                      </li>
-                    ))}
-                  </ul>
+                  {absent.length > 0 && (
+                    <>
+                      <p className="card-sub">{t(atReviewing ? 'bcRemoveIntro' : 'bcAbsentIntro', { n: absent.length })}</p>
+                      <ul className="bc-problem-list">
+                        {absent.map(l => (
+                          <li key={l.id}>
+                            <span className="mono">#{lineNo(l)} {l.partNumber ?? lineLabel(l)}</span>
+                            {' · '}{t('bcShortNote', { n: 0, of: l.qty })}
+                          </li>
+                        ))}
+                      </ul>
+                      {atReviewing && order.goodsFollowsLines === false && (
+                        <p className="card-sub bc-lot-note">{t('bcLotPriceKept')}</p>
+                      )}
+                    </>
+                  )}
+                  {short.length > 0 && (
+                    <>
+                      <p className="card-sub">{t('bcShortIntro', { n: short.length })}</p>
+                      <ul className="bc-problem-list">
+                        {short.map(l => (
+                          <li key={l.id}>
+                            <span className="mono">#{lineNo(l)} {l.partNumber ?? lineLabel(l)}</span>
+                            {' · '}{t('bcShortNote', { n: countOf(l, checks.get(l.id)), of: l.qty })}
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
                 </>
               ) : (
                 <p className="card-sub">{t(atReviewing ? 'bcAllMatch' : 'bcAllMatchNotReviewing', { n: lines.length, s: order.status })}</p>
               )}
               <div className="bc-finish-actions">
                 {atReviewing && (
-                  <button type="button" className="btn accent" disabled={!ready || busy !== null || takeover.asking || remaining > 0} onClick={() => void approve()}>
-                    <Icon name="check" size={13} /> {busy === 'approve' ? '…' : t('bcApprove')}
+                  <button type="button" className="btn accent" disabled={!ready || busy !== null || takeover.asking || remaining > 0 || allAbsent} onClick={() => void approve()}>
+                    <Icon name="check" size={13} /> {busy === 'approve' ? '…' : absent.length && !allAbsent ? t('bcApproveRemoving', { n: absent.length }) : t('bcApprove')}
                   </button>
                 )}
               </div>

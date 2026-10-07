@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { ApiError } from './api';
 import {
-  asksToMoveToReviewing, boxCheckEventLines, checkBody, countOf, emptyCheck, entryAnswerFor, isShortChecked, lineState, matchScan, nextOpenAfter, orderLines, readStageMoved, stashEntryAnswer, tally,
+  asksToMoveToReviewing, boxCheckEventLines, checkBody, countOf, emptyCheck, entryAnswerFor, isAbsentChecked, isShortChecked, lineState, matchScan, nextOpenAfter, orderLines, readStageMoved, stashEntryAnswer, tally,
   type LineCheck,
 } from './boxCheck';
 
@@ -34,7 +34,19 @@ describe('lineState', () => {
 
   it('turns a lowered, unticked line partial', () => {
     expect(lineState(lines[0]!, C('a', 14))).toBe('partial');
-    expect(lineState(lines[0]!, C('a', 0))).toBe('partial');
+    expect(lineState(lines[0]!, C('a', 1))).toBe('partial');
+  });
+
+  it('reads a line lowered to 0 as not in the box, still waiting for its tick', () => {
+    expect(lineState(lines[0]!, C('a', 0))).toBe('absent');
+    expect(isAbsentChecked(lines[0]!, C('a', 0))).toBe(false);
+  });
+
+  it('checks a line at 0 as not in the box, never as short', () => {
+    expect(lineState(lines[0]!, C('a', 0, { checkedAt: AT }))).toBe('done');
+    expect(isAbsentChecked(lines[0]!, C('a', 0, { checkedAt: AT }))).toBe(true);
+    expect(isShortChecked(lines[0]!, C('a', 0, { checkedAt: AT }))).toBe(false);
+    expect(isAbsentChecked(lines[0]!, C('a', 14, { checkedAt: AT }))).toBe(false);
   });
 
   it('ignores a flag left from before flags were retired', () => {
@@ -74,6 +86,12 @@ describe('tally', () => {
     expect(t.counted).toBe(4);
     expect([t.done, t.partial, t.open]).toEqual([1, 1, 2]);
   });
+
+  it('counts lines at 0 apart from partly counted ones', () => {
+    const t = tally(lines, new Map([['a', C('a', 0)], ['b', C('b', 3)], ['c', C('c', 0, { checkedAt: AT })]]));
+    expect([t.done, t.partial, t.absent, t.open]).toEqual([1, 1, 1, 1]);
+    expect(t.counted).toBe(0);
+  });
 });
 
 describe('matchScan', () => {
@@ -89,6 +107,11 @@ describe('matchScan', () => {
 
   it('passes over a short line while a same-part line is still open', () => {
     expect(hit(matchScan(lines, new Map([['a', C('a', 14)]]), 'M393A4K40DB3-CWE'))).toBe('d');
+  });
+
+  it('gives the scan to a short line before one counted 0', () => {
+    const checks = new Map([['a', C('a', 0)], ['d', C('d', 1)]]);
+    expect(hit(matchScan(lines, checks, 'M393A4K40DB3-CWE'))).toBe('d');
   });
 
   it('matches a label that carries a suffix the line does not', () => {
