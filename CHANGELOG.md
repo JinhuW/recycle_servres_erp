@@ -17,6 +17,39 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.219.0] - 2026-10-07
+
+Sell-order lines are numbered by their place on the order, and a line that
+can't ship is set to 0 instead of removed (RS-188). Jinhu labels every packed
+item with its line's # on the sell order and the receiver checks the box by
+those labels, so Pack mode (v1.218.0, which grouped lines by source PO) had to
+follow the order's own list, the packing lists had to carry the same #, and the
+numbers had to stop shifting: removing a line renumbers every line after it.
+
+### Changed
+
+- **Pack mode goes by the order's #.** Lines run #1 to #n in the order's own
+  list order; each row's tag is its `#`, and its source reads
+  `From PO-1111 #1`. A ticked line stays in its place instead of sinking.
+- **The sell order page shows each line's `#n`** before the item name, in view
+  and edit.
+- **Both packing lists gain a `#` column** before the tick box; a row that
+  folds several lines lists every # (`2, 5`).
+- **A saved line can be set to 0** in the order editor, including one whose
+  lot is gone, so it keeps its # and so does every line after it. New lines
+  and new orders still need at least 1; a hand-typed line is no longer capped
+  at its saved qty.
+
+### Fixed
+
+- A line at 0 holds nothing everywhere it could have mattered: it reserves no
+  stock, is never sold, flipped to Sold or logged as sold on Done, records no
+  market price (it would have been NaN), stays off the bid sheet and packing
+  lists, keeps its price through a negotiated total (the proration loop would
+  never have ended), and no longer divides a PO line's final sell price by
+  zero. An order whose lines are all 0 can't move to Shipped, Awaiting payment
+  or Done. Pack mode shows such a line as nothing to pack.
+
 ## [1.218.0] - 2026-10-07
 
 Sell orders get a Pack mode (RS-187): the Packing list as a checklist on an

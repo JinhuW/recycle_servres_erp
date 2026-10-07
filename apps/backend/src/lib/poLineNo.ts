@@ -24,3 +24,8 @@ export function poLineOrder(sql: SqlLike, alias: string) {
   const l = sql(alias);
   return sql`${l}.position ASC, ${l}.created_at ASC, ${l}.id ASC`;
 }
+
+// A sell-order line's # is its place in this order, 1-based — the number the
+// packer writes on the item's label. Every save writes `position` as the
+// editor's index, so the tiebreak only settles rows older than that.
+export const sellLineOrder = poLineOrder;

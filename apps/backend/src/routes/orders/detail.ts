@@ -94,7 +94,8 @@ detailRoutes.get('/:id', async (c) => {
                (SUM(sol.qty * sol.unit_price) / SUM(sol.qty))::float AS final_sell_price
         FROM sell_order_lines sol
         JOIN sell_orders so ON so.id = sol.sell_order_id
-        WHERE sol.inventory_id = ol.id AND so.status = 'Done'
+        -- A sell line held at 0 sold nothing; alone it would divide by zero.
+        WHERE sol.inventory_id = ol.id AND so.status = 'Done' AND sol.qty > 0
       ) fs ON TRUE
       WHERE ol.order_id = ${id}
       ORDER BY ${poLineOrder(sql, 'ol')}
@@ -107,7 +108,7 @@ detailRoutes.get('/:id', async (c) => {
       JOIN order_lines ol ON ol.id = sol.inventory_id
       JOIN sell_orders so ON so.id = sol.sell_order_id
       JOIN customers c ON c.id = so.customer_id
-      WHERE ol.order_id = ${id} AND so.status = 'Done'
+      WHERE ol.order_id = ${id} AND so.status = 'Done' AND sol.qty > 0
       GROUP BY so.id, c.short_name, c.name
       ORDER BY so.id
     ` : null,

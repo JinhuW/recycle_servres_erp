@@ -4095,21 +4095,15 @@ body:has(.pk-page) .tweaks-fab, body:has(.pk-page) .tweaks-pop { display: none; 
 
 .pk-list-card { overflow: hidden; }
 .pk-list { list-style: none; margin: 0; padding: 0; position: relative; }
-.pk-group {
-  display: flex; align-items: baseline; gap: 10px; padding: 14px 18px 9px;
-  background: var(--bg-soft); border-top: 1px solid var(--border);
-}
 .pk-list > li:first-child { border-top: 0; }
-.pk-group-po { font-size: 14.5px; font-weight: 600; color: var(--fg); }
-.pk-group-wh { font-size: 13px; color: var(--fg-muted); }
-.pk-group-left { margin-left: auto; font-size: 13px; color: var(--fg-subtle); white-space: nowrap; }
 
 .pk-row {
   display: grid; grid-template-columns: 92px minmax(0, 1fr) auto; gap: 18px; align-items: center;
   padding: 14px 18px; border-top: 1px solid var(--border); background: var(--bg-elev);
 }
 
-/* The shelf tag: what is printed on the lot, so it is matched at a glance. */
+/* The line's tag: its # on the sell order, the label the packer writes on
+   the item and the receiver checks the box by. */
 .pk-tag {
   position: relative; display: grid; justify-items: center; align-content: center; gap: 3px;
   min-height: 76px; padding: 16px 6px 9px;
@@ -4123,15 +4117,13 @@ body:has(.pk-page) .tweaks-fab, body:has(.pk-page) .tweaks-pop { display: none; 
 }
 .pk-tag-po { font-size: 11.5px; color: var(--fg-muted); white-space: nowrap; }
 .pk-tag-no { font-size: 28px; font-weight: 700; line-height: 1; letter-spacing: -0.03em; color: var(--fg); }
-.pk-tag.none { border-style: dashed; padding-top: 9px; }
-.pk-tag.none::before { display: none; }
-.pk-tag.none .pk-tag-po { font-size: 13px; color: var(--fg-subtle); }
 
 .pk-item { min-width: 0; display: grid; gap: 6px; justify-items: start; }
 .pk-label { font-size: 16px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
 .pk-sub { font-size: 13.5px; color: var(--fg-muted); }
 .pk-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13.5px; color: var(--fg-subtle); }
 .pk-meta .mono { color: var(--fg-muted); font-size: 13px; }
+.pk-meta .pk-from { color: var(--fg); }
 
 .pk-ctrl { display: flex; align-items: center; gap: 16px; }
 .pk-count-wrap { display: grid; justify-items: center; gap: 4px; }
@@ -4177,21 +4169,16 @@ body:has(.pk-page) .tweaks-fab, body:has(.pk-page) .tweaks-pop { display: none; 
 /* Dim the content, never the row: the tick has to stay readable to undo it. */
 .pk-done .pk-tag, .pk-done .pk-item, .pk-done .pk-step { opacity: 0.55; }
 
-/* A part-number scan that fits lots on more than one line: the candidates,
-   waiting for a tap on the one that was packed. */
+/* A line held at 0 keeps its # in the list but has nothing to pack. */
+.pk-zero .pk-tag { border-style: dashed; }
+.pk-zero .pk-tag, .pk-zero .pk-item { opacity: 0.5; }
+.pk-zero-note { font-size: 14px; color: var(--fg-subtle); white-space: nowrap; }
+
+/* A part-number scan that fits more than one line: the candidates, waiting
+   for a tap on the one that was packed. */
 .pk-choose { background: var(--warn-soft); box-shadow: inset 4px 0 0 var(--warn); }
 .pk-choose .pk-tick { border-color: var(--warn-strong); }
 
-.pk-divider {
-  display: flex; align-items: center; gap: 12px; padding: 8px 18px;
-  border-top: 1px solid var(--border); background: var(--bg-soft);
-  font-size: 13.5px; font-weight: 600; color: var(--fg-muted);
-}
-.pk-divider .mono { margin-left: 4px; font-weight: 500; }
-.pk-link {
-  margin-left: auto; min-height: 40px; padding: 0 8px; background: none; border: 0; cursor: pointer;
-  color: var(--fg-muted); font-size: 13.5px; text-decoration: underline; text-underline-offset: 2px;
-}
 .pk-empty { padding: 28px 18px; text-align: center; color: var(--fg-muted); font-size: 14.5px; border-top: 1px solid var(--border); }
 
 /* The one action, where a thumb rests; Undo lives here too, since the
@@ -4215,7 +4202,8 @@ body:has(.pk-page) .tweaks-fab, body:has(.pk-page) .tweaks-pop { display: none; 
   .pk-row { grid-template-columns: 84px minmax(0, 1fr); grid-template-areas: 'tag item' 'tag ctrl'; row-gap: 12px; align-items: start; }
   .pk-tag { grid-area: tag; }
   .pk-item { grid-area: item; }
-  .pk-ctrl { grid-area: ctrl; justify-content: flex-end; }
+  .pk-ctrl, .pk-zero-note { grid-area: ctrl; justify-self: end; }
+  .pk-ctrl { justify-content: flex-end; }
   .pk-progress { grid-template-columns: auto minmax(0, 1fr); }
   .pk-wh { grid-column: 1 / -1; justify-items: start; }
   .pk-scan-wrap { flex-basis: 100%; }

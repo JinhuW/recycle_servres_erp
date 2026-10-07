@@ -814,12 +814,27 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   - Editing adds a sticky footer: Discard, Cancel and Save. Save lands on the
     order's view page with a toast.
   - A line can grow to what its lot still has free. A line whose lot has
-    nothing left to offer shows a locked quantity and "No longer available —
-    remove the line" (v1.194.1). That covers a lot that left Reviewing or
-    Done, one whose PO was archived, and one that other committed orders hold
-    in full. Saving refuses such a line.
+    nothing left to offer reads "No longer available — set it to 0 or remove
+    it" (v1.194.1, v1.219.0). That covers a lot that left Reviewing or Done,
+    one whose PO was archived, and one that other committed orders hold in
+    full. Saving refuses such a line above 0.
   - View and edit share one history entry, so browser Back returns to where
     the order was opened from.
+- **Every line shows its # on the order** (v1.219.0) — `#3` before the item
+  name, in view and edit. The # is the line's place in the order's list
+  (position, then creation, then id): the number the packer labels the item
+  with and the receiver checks the box by. Pack mode and both packing lists
+  show the same number, and a line added while editing shows its # before the
+  save.
+- **A line that can't ship is set to 0, not removed** (v1.219.0), so no line
+  after it is renumbered. Any line already on the order may go to 0 in the
+  editor, including one whose lot is gone; a line being added still needs at
+  least 1, as does a new order (and the MCP create tool). A line at 0 holds
+  nothing: it reserves no stock, sells nothing on Done, records no market
+  price, is left off the bid sheet and both packing lists (its # stays taken),
+  and keeps its price through a negotiated total. An order whose lines are
+  all 0 can't move to Shipped, Awaiting payment or Done. A hand-typed line is
+  no longer capped at its saved qty.
 - **Line items group By warehouse or By PO** (v1.194.0), in both view and edit.
   The switch on the Line items header is remembered per user (preference
   `sellOrders.lineGroup`, default by warehouse).
@@ -918,6 +933,10 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   quantity (`PO-1442 #3 ×8`, `PO-1450 #1 ×4`), POs in numeric order and a
   hand-typed share last as `No PO ×2`; a row of hand-typed lines alone reads
   `—`.
+- **Both packing lists number their rows by the sell order's #** (v1.219.0): a
+  `#` column first, before the tick box, so the label on an item matches its
+  row. A row that folds several lines lists their #s ascending (`2, 5`). The
+  bid sheet has no such column.
 - **The packing list also comes cut by PO** (v1.189.0) — `Packing list by PO`,
   the same route with `?groupBy=po`: one tab per PO per warehouse
   (`PO-1442 - DEN`), POs in numeric order, hand-typed lines on a
@@ -938,23 +957,24 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   `#/sell-orders/<id>/pack`, a full-window page with no sidebar, top bar or
   tweaks button. It is the on-screen form of the Packing list, and the
   outbound twin of the PO's Review mode.
-  - Each line leads with a shelf tag naming the lot it comes from — `PO-1111`
-    over a large `#1`, the # the PO page shows. A hand-typed line has a dashed
-    *No PO* tag.
-  - Open lines group by source PO in numeric order, each PO's lines in its own
-    order, hand-typed last — the Packing list by PO's arrangement. A group head
-    names where its lots are now. When the order's lots sit in more than one
-    warehouse, a *Packing from* switch narrows the list, split the way the
-    download's warehouse picker splits it.
+  - **Lines run in the order's own list order** (v1.219.0; grouped by source
+    PO in v1.218.0). Each row's tag is the line's `#` on the order, the label
+    the packer writes on the item, and its meta line names the lot it comes
+    from (`From PO-1111 #1`, or *Typed in*). When the order's lots sit in more
+    than one warehouse, a *Packing from* switch narrows the list without
+    renumbering it.
   - A line's count starts at its qty. − / + record a short pick (amber, *Short*)
     or none at all (red, *Not packed*), and lowering a packed line unticks it.
-    The tick confirms the count as shown; a ticked line sinks under *Packed*,
-    newest first, with Undo in the bottom bar.
+    The tick confirms the count as shown; a ticked line **stays in its place**
+    (v1.219.0), dimmed with a green tick, with Undo in the bottom bar.
+  - A line held at 0 keeps its row and # but reads *Qty 0 · nothing to pack*:
+    no counter or tick, never matched by a scan, left out of the progress and
+    of what blocks Mark shipped.
   - The scan box takes a Bluetooth or USB label scanner, with nothing focused,
     and matches a part number, a prefix, then a recorded serial, as Review mode
-    does. When the part is still waiting on lines from more than one lot, the
-    scan ticks nothing: it highlights those lines, names their lots and asks
-    for a tap on the one that was packed.
+    does. When the part is still waiting on more than one line, the scan ticks
+    nothing: it highlights those lines, names them by # and asks for a tap on
+    the one that was packed.
   - Progress is saved on the server (`sell_order_packs`), so a reload, a second
     iPad or coming back from another app picks up where the count stands; the
     page re-reads when it returns to the foreground. Last write per line wins.

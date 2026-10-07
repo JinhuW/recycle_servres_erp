@@ -76,6 +76,9 @@ export type PriceTemplateProduct = {
   // packing tabs read it: a per-warehouse row can span several POs, so it
   // names each; a by-PO tab already names the PO and prints just the #s.
   poSources?: PoSource[];
+  // The sell-order lines the row folds, by their # on the order — what the
+  // packer writes on each item's label. Only the packing tabs print them.
+  soLineNos?: number[];
 };
 
 // One PO line's share of a row. `lineNo` is the line's # on its PO page
@@ -517,8 +520,8 @@ type WhCol = { header: string; key: string; width: number; numFmt?: string };
 // Condition / Image URL here). The bid tabs still carry all of them.
 const PACK_OMITTED_SPECS = new Set(['classification', 'chip']);
 
-// Section layout: Packed ✓ | Part # | From PO or ID in PO | <category specs> |
-// Qty, shifted right by PACK_GROUP_OFFSET to leave room for the RAM group
+// Section layout: # | Packed ✓ | Part # | From PO or ID in PO | <category
+// specs> | Qty, shifted right by PACK_GROUP_OFFSET to leave room for the RAM group
 // labels. No prices by design (user-decided): a picker has no use for them,
 // and "Part #" (not "Part Number") plus the absence of any price header is also
 // what keeps findHeaders() from ever parsing these tabs. The source column
@@ -529,6 +532,8 @@ type PoCol = 'source' | 'id';
 
 function whSectionCols(category: string, poCol: PoCol): WhCol[] {
   return [
+    // The line's # on the sell order, which the packer labels the item with.
+    { header: '#',         key: 'soLine',    width: 8 },
     { header: 'Packed ✓',  key: 'packed',    width: 9 },
     { header: 'Part #',    key: 'part',      width: 24 },
     poCol === 'id'
@@ -658,6 +663,13 @@ function renderWarehouseSheet(
             cell.border = box;
             break;
           case 'part': cell.value = p.partNumber ?? ''; break;
+          case 'soLine': {
+            // Centred like ID in PO, so a lone # and a folded "2, 5" line up.
+            const nos = [...(p.soLineNos ?? [])].sort((a, b) => a - b);
+            cell.value = nos.length === 1 ? nos[0] : nos.join(', ');
+            cell.alignment = { horizontal: 'center' };
+            break;
+          }
           case 'poLine': {
             // A row folding several lots of the PO lists them all. Centred, so
             // the lone numbers and the "1, 3" text line up as one column.

@@ -53,6 +53,8 @@ async function recordSellOrderDataPoints(
 
   const byCanon = new Map<string, Group>();
   for (const l of lines) {
+    // A line held at 0 sold nothing and was priced for nothing.
+    if (l.qty === 0) continue;
     const raw = (l.part_number ?? '').trim();
     if (!raw) continue;
     const canon = canonPartNumberJs(raw);

@@ -28,7 +28,9 @@ export async function validateSellLines(
 ): Promise<string | null> {
   const demand = new Map<string, number>();
   for (const l of lines) {
-    if (!l.inventoryId) continue; // manual line — nothing to reserve
+    // A manual line reserves nothing, and neither does one held at 0 — which
+    // is how a line whose lot has since gone stays on the order with its #.
+    if (!l.inventoryId || l.qty === 0) continue;
     demand.set(l.inventoryId, (demand.get(l.inventoryId) ?? 0) + l.qty);
   }
   if (demand.size === 0) return null;
