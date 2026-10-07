@@ -17,6 +17,34 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.212.0] - 2026-10-06
+
+In Review mode, a line counted down to 0 now means it isn't in the box, and
+approving takes it off the PO (RS-183).
+
+### Changed
+
+- **A line lowered to 0 reads *Not in the box*, in red, with its own legend
+  chip.** It used to count as *partly counted*. It still needs its own tick,
+  like any short line, and *Check all remaining* still leaves it alone.
+- **Approve removes the lines ticked at 0, then moves the PO to Ready to
+  Pay.** Previously such a line stayed on the PO at its full qty, so it was
+  paid for and counted as stock although nothing arrived. Review mode's Edit
+  drawer can't remove a line, so the only fix was the PO page.
+  - Finish review lists those lines and the button reads *Remove n &
+    approve*. The removal goes through the PO page's own `PATCH
+    removeLineIds`, so it records `line_removed` and recomputes the goods
+    total. It also refuses a line on an open sell order.
+  - It runs ahead of the move because Ready to Pay is closed-book. If the move
+    is then refused, or a manager re-ask is cancelled, the page re-reads the PO
+    so it stops showing rows the PO no longer has.
+- **A PO with a negotiated lot price gets a warning** that removing lines
+  doesn't lower that price.
+- **When every line is at 0, Approve is disabled and the page says why.** A
+  PO must keep a line.
+- **A scan of a line counted 0 ticks nothing.** A scan says the part is
+  there, so ticking a line at 0 from it would confirm its removal.
+
 ## [1.211.1] - 2026-10-05
 
 The nightly prod→dev database copy works again (RS-182).

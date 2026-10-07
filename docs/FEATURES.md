@@ -347,6 +347,9 @@ on to Sold once every line has sold (v1.164.0).
   - Checked is its own state, never inferred from the count. Lowering a line
     with − turns it amber and takes its tick away; ticking it then confirms
     the short count (v1.190.0). Finish review lists the lines checked short.
+  - **A line lowered to 0 is *Not in the box*** (v1.212.0). It shows in red
+    with its own legend chip, not as partly counted. It still needs its own
+    tick, and the row keeps the tag once ticked.
   - **Edit** (pencil, or lowercase e) opens the PO page's line drawer on that
     line, so the manager fixes the specs, qty or cost to what actually
     arrived. Confirm writes it with the same rules as the PO page (brand
@@ -357,12 +360,13 @@ on to Sold once every line has sold (v1.164.0).
     a problem is fixed with Edit instead of reported. Past
     `box_check_flagged` events still show in the PO history.
   - **Check all remaining** ticks every line still at its full count and
-    leaves amber lines for their own tick.
+    leaves amber and red lines for their own tick.
   - The scan box takes a label scanner. It matches an exact part number, then
     a prefix, then a recorded serial, and ticks the line it lands on at its
     count. A scan goes to a matching line still open first, then an amber
     one. A prefix that fits lines with different part numbers ticks nothing
-    and names them.
+    and names them. A scan that lands on a line counted 0 ticks nothing and
+    asks for the count to be raised first (v1.212.0).
   - A scan works with nothing focused: a character typed onto the page that
     is not a shortcut starts the scan in the box, so a label never runs as
     shortcuts. The shortcuts are ↑↓/j k, Space, + −, lowercase e and /; a
@@ -375,6 +379,18 @@ on to Sold once every line has sold (v1.164.0).
   - Once every line is checked, **Approve for payment** at Reviewing moves
     the PO to Ready to Pay (re-reading the stage first). Short lines don't
     block it.
+  - **Lines ticked at 0 come off the PO on Approve** (v1.212.0).
+    - Finish review lists them and the button reads *Remove n & approve*.
+    - They are removed first, the way the PO page removes a line, and then
+      the PO moves. Ready to Pay is closed-book. A line on an open sell order
+      can't be removed, and then nothing moves.
+    - If the move is refused or a manager re-ask is cancelled, the lines stay
+      removed, and the page re-reads the PO with the PO still at Reviewing.
+    - A goods total that follows the lines drops with them. A negotiated lot
+      price stays, and Finish review warns about that.
+    - When every line is at 0, Approve is disabled: a PO must keep a line.
+    - Only Review mode's Approve removes them. Moving the PO from the PO page
+      or the phone leaves 0 lines at their full qty.
   - The endpoints (`/api/orders/:id/checks…`) 403 anyone whose real role is
     not manager. The page and button are hidden from a manager previewing as
     purchaser, and the route bounces them without leaving a Back entry
