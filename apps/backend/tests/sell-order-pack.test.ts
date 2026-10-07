@@ -167,6 +167,14 @@ describe('sell order pack mode', () => {
     expect(rowOf(re.body, newPicked).packedAt).not.toBeNull();
   });
 
+  it('refuses to pack a line held at 0 — there is nothing of it to pack', async () => {
+    const { id, lot } = await createOrder(mgr);
+    const after = await rewriteLines(mgr, id, l => (l.inventoryId === lot ? { qty: 0 } : {}));
+    const zero = after.find(l => l.inventoryId === lot)!.id;
+    expect(rowOf((await getPack(mgr, id)).body, zero)).toMatchObject({ counted: 0, packedAt: null });
+    expect((await putPack(mgr, id, zero, { counted: 0, packed: true })).status).toBe(409);
+  });
+
   it('refuses writes on a Closed or archived order but still reads it', async () => {
     const { id, picked } = await createOrder(mgr);
     expect((await api('POST', `/api/sell-orders/${id}/status`, {

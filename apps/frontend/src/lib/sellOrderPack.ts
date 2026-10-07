@@ -1,14 +1,14 @@
 import { canonicalPartNumber } from '@recycle-erp/shared';
 import {
-  isAbsentChecked, isShortChecked, lineState, matchScan, orderLines,
+  isAbsentChecked, isShortChecked, lineState, matchScan,
   type CheckableLine, type LineCheck, type ScanMatch,
 } from './boxCheck';
-import { groupSellOrderLines, type SellOrderLineGroup } from './sellOrderLineGroups';
 
 // Pack mode: a manager ticking a sell order's lines into the box. The count
 // and tick rules are Review mode's (lib/boxCheck.ts), applied to sell lines;
-// this adds what packing needs on top — where each lot sits, and which lot a
-// scan meant. Pure — the page owns the state.
+// this adds what packing needs on top — the line's # on the order, which the
+// packer labels each item with, where each lot sits, and which line a scan
+// meant. Pure — the page owns the state.
 
 export type PackLine = CheckableLine & {
   warehouseId: string | null;
@@ -48,19 +48,19 @@ export function packWarehouseOptions(lines: readonly Pick<PackLine, 'warehouse' 
   });
 }
 
-export type PackView<L> = { groups: SellOrderLineGroup<L>[]; done: L[] };
+// A line held at 0 stays on the order to keep its #, but has nothing to pack.
+export const isPackable = (l: Pick<CheckableLine, 'qty'>): boolean => l.qty > 0;
 
-// Open lines read like the "Packing list by PO" download — by source PO, in
-// that PO's own line order — because that is how the lots are found on the
-// shelf. Packed lines sink, newest first. `wh` '' means every warehouse.
-export function packView<L extends PackLine>(
-  lines: readonly L[], checks: ReadonlyMap<string, LineCheck>, wh: string,
-): PackView<L> {
-  const shown = wh ? lines.filter(l => packWarehouseOf(l) === wh) : lines;
-  const { open, done } = orderLines(shown, checks);
-  // A group's head names where its lots are now, not where the line was saved.
-  const groups = groupSellOrderLines(open.map(l => ({ ...l, warehouse: packWarehouseOf(l) })), 'po');
-  return { groups, done };
+export type PackRowView<L> = { line: L; no: number };
+
+// Every line in the order's own list order with its # (1-based, counted over
+// the whole order so a warehouse filter doesn't renumber). A ticked line stays
+// where it is: the packer and the receiver both read the list by #.
+// `wh` '' means every warehouse.
+export function packView<L extends PackLine>(lines: readonly L[], wh: string): PackRowView<L>[] {
+  return lines
+    .map((line, i) => ({ line, no: i + 1 }))
+    .filter(r => !wh || packWarehouseOf(r.line) === wh);
 }
 
 export function sourceTag(l: Pick<PackLine, 'sourceOrderId' | 'sourceLineNo'>): { po: string; no: number | null } | null {
@@ -74,7 +74,7 @@ export type ShipBlockers = { open: number; short: number; zero: number };
 // edited to what is in the box first.
 export function shipBlockers(lines: readonly CheckableLine[], checks: ReadonlyMap<string, LineCheck>): ShipBlockers {
   const out: ShipBlockers = { open: 0, short: 0, zero: 0 };
-  for (const l of lines) {
+  for (const l of lines.filter(isPackable)) {
     const c = checks.get(l.id);
     if (lineState(l, c) !== 'done') out.open += 1;
     else if (isShortChecked(l, c)) out.short += 1;
@@ -88,13 +88,15 @@ export type PackScan<L> = ScanMatch<L> | { choose: L[] };
 const partMatches = (q: string, pn: string) =>
   pn !== '' && (pn === q || (q.length >= 6 && pn.length >= 6 && (q.startsWith(pn) || pn.startsWith(q))));
 
-// Review mode's scan, with one difference: a sell order often carries the
-// same part from several lots, and a part-number label can't say which lot it
-// came off. Rather than tick one of them on a guess, the lines still waiting
-// are handed back to choose from. A serial names its lot, so it ticks.
+// Review mode's scan, with two differences. A sell order often carries the
+// same part on several lines, and a part-number label can't say which one it
+// came off: rather than tick one of them on a guess, the lines still waiting
+// are handed back to choose from (a serial names its lot, so it ticks). And a
+// line held at 0 is never a match — there is nothing of it to pack.
 export function packScan<L extends PackLine>(
-  lines: readonly L[], checks: ReadonlyMap<string, LineCheck>, raw: string,
+  all: readonly L[], checks: ReadonlyMap<string, LineCheck>, raw: string,
 ): PackScan<L> | null {
+  const lines = all.filter(isPackable);
   const m = matchScan(lines, checks, raw);
   if (!m || !('line' in m)) return m;
   const pn = canonicalPartNumber(m.line.partNumber);

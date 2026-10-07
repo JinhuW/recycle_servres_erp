@@ -167,7 +167,9 @@ describe('qty / price range gates — must 400, never 500', () => {
     expect(neg.status).toBe(400);
   });
 
-  it('sell-orders PATCH rejects qty=0 / negative unitPrice', async () => {
+  // A line that can't ship is held at 0 instead of removed, so every other
+  // line keeps its # on the order.
+  it('sell-orders PATCH accepts qty=0, rejects negative unitPrice', async () => {
     const { token } = await loginAs(ALEX);
     const line = await freeSellableLine(token);
     const customers = await api<{ items: { id: string }[] }>('GET', '/api/customers', { token });
@@ -180,13 +182,20 @@ describe('qty / price range gates — must 400, never 500', () => {
       }] },
     });
     const soId = created.body.id;
-    const bad = await api('PATCH', `/api/sell-orders/${soId}`, {
+    const zero = await api('PATCH', `/api/sell-orders/${soId}`, {
       token,
       body: { lines: [{
         inventoryId: line.id, category: 'RAM', label: 'x',
         partNumber: 'pn', qty: 0, unitPrice: line.sell_price,
       }] },
     });
-    expect(bad.status).toBe(400);
+    expect(zero.status).toBe(200);
+    for (const bad of [{ qty: -1, unitPrice: line.sell_price }, { qty: 1, unitPrice: -5 }, { qty: 1.5, unitPrice: 1 }]) {
+      const r = await api('PATCH', `/api/sell-orders/${soId}`, {
+        token,
+        body: { lines: [{ inventoryId: line.id, category: 'RAM', label: 'x', partNumber: 'pn', ...bad }] },
+      });
+      expect(r.status).toBe(400);
+    }
   });
 });

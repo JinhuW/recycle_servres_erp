@@ -125,6 +125,10 @@ type SellOrderLine = LineSpec & {
 // Editable line shape used by the edit modal (mirrors the new-order builder).
 type EditLine = LineSpec & {
   _cid: string;                 // stable client id for React keys (never sent to the API)
+  // On the order before this edit. Only such a line may go to 0 — held there
+  // instead of removed, so no line after it is renumbered; a line being added
+  // needs at least 1.
+  saved: boolean;
   inventoryId: string | null;
   sourceOrderId: string | null; // display only — the server derives it from the lot
   sourceLineNo: number | null;  // display only, as sourceOrderId
@@ -142,6 +146,7 @@ type EditLine = LineSpec & {
 
 const toEditLine = (l: SellOrderLine): EditLine => ({
   _cid:        crypto.randomUUID(),
+  saved:       true,
   inventoryId: l.inventoryId,
   category:    l.category,
   label:       l.label,
@@ -173,6 +178,7 @@ function appendSellable(lines: EditLine[], picked: SellableItem[]): EditLine[] {
     .filter(it => !have.has(it.inventoryId))
     .map(it => ({
       _cid:        crypto.randomUUID(),
+      saved:       false,
       inventoryId: it.inventoryId,
       category:    it.category as EditLine['category'],
       label:       it.label,
@@ -678,8 +684,10 @@ type ItemCellLine = LineSpec & {
   sourceLineNo?: number | null;
 };
 
-function LineItemCell({ line, sub, showPo, showLineNo, linkPo }: {
+function LineItemCell({ line, lineNo, sub, showPo, showLineNo, linkPo }: {
   line: ItemCellLine;
+  // The line's # on this sell order — the number its item is labelled with.
+  lineNo: number;
   // The spec text snapshot saved with the line — shown only when the lot
   // can't supply chips (a hand-typed line, a deleted lot, an "Other" item).
   sub: string | null;
@@ -698,6 +706,13 @@ function LineItemCell({ line, sub, showPo, showLineNo, linkPo }: {
   return (
     <td>
       <div style={{ fontWeight: 500, fontSize: 13 }}>
+        <span
+          className="mono"
+          style={{ color: 'var(--fg-subtle)', fontWeight: 600, marginRight: 8 }}
+          title={t('sodLineNoTitle', { n: lineNo })}
+        >
+          #{lineNo}
+        </span>
         {line.label}
         {showLineNo && n != null && line.sourceOrderId && (
           <span
@@ -1461,9 +1476,9 @@ function SellOrderDetail({ id, mode, onToast }: {
                           </tr>
                         </thead>
                         <tbody>
-                          {g.items.map(({ line: l }) => (
+                          {g.items.map(({ line: l, idx }) => (
                             <tr key={l.id}>
-                              <LineItemCell line={l} sub={l.sub} showPo={lineGroup === 'warehouse'} showLineNo={lineGroup === 'po'} linkPo />
+                              <LineItemCell line={l} lineNo={idx + 1} sub={l.sub} showPo={lineGroup === 'warehouse'} showLineNo={lineGroup === 'po'} linkPo />
                               {lineGroup === 'po' && <td style={{ fontSize: 12 }}>{l.warehouse ?? t('sodNoWarehouse')}</td>}
                               <td className="num mono">{l.qty}</td>
                               <td className="num mono">{fmtMoney(l.nativeUnitPrice, order.currency, locale)}</td>
@@ -1500,24 +1515,27 @@ function SellOrderDetail({ id, mode, onToast }: {
                           {g.items.map(({ line: l, idx }) => {
                             // The lot left the sellable statuses, its PO was
                             // archived, or other committed orders hold it all:
-                            // save refuses any qty, so clamping to 0 would only
-                            // snap the saved one to 1.
+                            // save refuses any qty above 0, so a saved line can
+                            // only be held at 0 (keeping its #) or removed.
                             const unavailable = l.inventoryId !== null && l.maxQty <= 0;
+                            const minQty = l.saved ? 0 : 1;
+                            // A typed line has no lot to run out of.
+                            const cap = l.inventoryId === null ? Infinity : Math.max(0, l.maxQty);
                             return (
                             <tr key={l._cid}>
-                              <LineItemCell line={l} sub={l.subLabel} showPo={lineGroup === 'warehouse'} showLineNo={lineGroup === 'po'} linkPo={false} />
+                              <LineItemCell line={l} lineNo={idx + 1} sub={l.subLabel} showPo={lineGroup === 'warehouse'} showLineNo={lineGroup === 'po'} linkPo={false} />
                               {lineGroup === 'po' && <td style={{ fontSize: 12 }}>{l.warehouse ?? t('sodNoWarehouse')}</td>}
                               <td className="num">
                                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
                                   <input
                                     className="so-mini-input"
                                     type="number"
-                                    min={1}
-                                    max={unavailable ? undefined : l.maxQty}
+                                    min={minQty}
+                                    max={cap === Infinity ? undefined : cap}
                                     value={l.qty}
-                                    disabled={unavailable}
+                                    disabled={unavailable && !l.saved}
                                     onChange={e => setLine(idx, {
-                                      qty: Math.max(1, Math.min(l.maxQty, Number(e.target.value) || 0)),
+                                      qty: Math.max(minQty, Math.min(cap, Number(e.target.value) || 0)),
                                     })}
                                     style={{ width: 64 }}
                                   />
@@ -1525,7 +1543,7 @@ function SellOrderDetail({ id, mode, onToast }: {
                                     <span style={{ fontSize: 10.5, color: 'var(--neg, #c0392b)', whiteSpace: 'nowrap' }}>
                                       {t('sodLineUnavailable')}
                                     </span>
-                                  ) : (
+                                  ) : l.inventoryId !== null && (
                                     <span style={{ fontSize: 10.5, color: 'var(--fg-subtle)', whiteSpace: 'nowrap' }}>
                                       / {l.maxQty}
                                     </span>

@@ -99,6 +99,8 @@ export async function committedClaimsByLine(
     WHERE sol.inventory_id = ANY(${[...lineIds]}::uuid[])
       AND so.status = ANY(${committedSellStatuses()}::text[])
       AND (${exclude}::text IS NULL OR so.id <> ${exclude}::text)
+      -- A line held at 0 claims nothing, so it never names the order holding it.
+      AND sol.qty > 0
     GROUP BY sol.inventory_id
   `;
   return new Map(rows.map((r) => [r.id.toLowerCase(), {

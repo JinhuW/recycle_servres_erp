@@ -32,6 +32,8 @@ type PackRow = {
 // line's — except a short pack the order was then edited down to match, which
 // is exactly what was asked for.
 function readRow(r: PackRow): { counted: number; packedAt: Date | null } {
+  // A line held at 0 has nothing to pack, whatever was ticked before it was.
+  if (r.qty === 0) return { counted: 0, packedAt: null };
   if (r.line_qty === r.qty) return { counted: r.counted!, packedAt: r.packed_at };
   if (r.packed_at && r.counted === r.qty) return { counted: r.qty, packedAt: r.packed_at };
   return { counted: r.qty, packedAt: null };
@@ -82,6 +84,7 @@ packRoutes.put('/:id/pack/:lineId', async (c) => {
     WITH k AS (${keyedLines(sql, id)})
     SELECT line_key, qty FROM k WHERE id = ${lineId}`)[0];
   if (!line) return c.json({ error: 'Not found' }, 404);
+  if (line.qty === 0) return c.json({ error: 'This line is at 0 — there is nothing of it to pack' }, 409);
   const { counted, packed } = body;
   if (typeof counted !== 'number' || !Number.isInteger(counted) || counted < 0 || counted > line.qty) {
     return c.json({ error: `counted must be a whole number from 0 to ${line.qty}` }, 400);

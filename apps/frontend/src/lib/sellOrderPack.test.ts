@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { LineCheck } from './boxCheck';
 import {
-  packBody, packScan, packView, packWarehouseOptions, shipBlockers, sourceTag, toCheck,
+  isPackable, packBody, packScan, packView, packWarehouseOptions, shipBlockers, sourceTag, toCheck,
   type PackLine,
 } from './sellOrderPack';
 
@@ -38,28 +38,16 @@ describe('packView', () => {
     L('t', { sourceOrderId: null }),
     L('b2', { sourceOrderId: 'PO-1442', sourceLineNo: 2, packWarehouse: 'DEN' }),
     L('a3', { sourceOrderId: 'PO-999', sourceLineNo: 3 }),
-    L('b1', { sourceOrderId: 'PO-1442', sourceLineNo: 1, packWarehouse: 'DEN' }),
-    L('a1', { sourceOrderId: 'PO-999', sourceLineNo: 1 }),
+    L('z', { qty: 0 }),
   ];
 
-  it('groups open lines by PO in numeric order, PO line order inside, hand-typed last', () => {
-    const v = packView(lines, new Map(), '');
-    expect(v.groups.map(g => g.poId)).toEqual(['PO-999', 'PO-1442', null]);
-    expect(v.groups[0]!.items.map(i => i.line.id)).toEqual(['a1', 'a3']);
-    expect(v.groups[1]!.items.map(i => i.line.id)).toEqual(['b1', 'b2']);
-    expect(v.groups[1]!.warehouse).toBe('DEN');
-    expect(v.done).toEqual([]);
+  it('lists every line in the order\'s own order with its #, ticked or not', () => {
+    expect(packView(lines, '').map(r => [r.line.id, r.no])).toEqual([['t', 1], ['b2', 2], ['a3', 3], ['z', 4]]);
   });
 
-  it('sinks packed lines newest first and filters by warehouse', () => {
-    const cs = checks(C('a1', 2, '2026-10-07T01:00:00Z'), C('b1', 2, '2026-10-07T02:00:00Z'));
-    const v = packView(lines, cs, '');
-    expect(v.done.map(l => l.id)).toEqual(['b1', 'a1']);
-    expect(v.groups[0]!.items.map(i => i.line.id)).toEqual(['a3']);
-
-    const den = packView(lines, cs, 'DEN');
-    expect(den.groups.map(g => g.poId)).toEqual(['PO-1442']);
-    expect(den.done.map(l => l.id)).toEqual(['b1']);
+  it('filters by warehouse without renumbering', () => {
+    expect(packView(lines, 'DEN').map(r => [r.line.id, r.no])).toEqual([['b2', 2]]);
+    expect(packView(lines, 'LA1').map(r => r.no)).toEqual([1, 3, 4]);
   });
 });
 
@@ -78,6 +66,12 @@ describe('shipBlockers', () => {
       C('a', 2, 'x'), C('b', 1, 'x'), C('c', 0, 'x'), C('d', 1),
     );
     expect(shipBlockers(ls, cs)).toEqual({ open: 2, short: 1, zero: 1 });
+  });
+
+  it('never counts a line held at 0', () => {
+    const ls = [L('a'), L('z', { qty: 0 })];
+    expect(isPackable(ls[1]!)).toBe(false);
+    expect(shipBlockers(ls, checks(C('a', 2, 'x')))).toEqual({ open: 0, short: 0, zero: 0 });
   });
 });
 
@@ -111,6 +105,15 @@ describe('packScan', () => {
       L('b', { partNumber: 'M393A4K40DB3-CWE', serialNumber: 'S9' }),
     ];
     expect(packScan(ls, new Map(), 'S9')).toEqual({ line: ls[1] });
+  });
+
+  it('never lands on a line held at 0', () => {
+    const ls = [
+      L('a', { partNumber: 'M393A4K40DB3-CWE', qty: 0, serialNumber: 'S1' }),
+      L('b', { partNumber: 'M393A4K40DB3-CWE' }),
+    ];
+    expect(packScan(ls, new Map(), 'M393A4K40DB3-CWE')).toEqual({ line: ls[1] });
+    expect(packScan(ls, new Map(), 'S1')).toBeNull();
   });
 
   it('passes a miss and an ambiguous prefix through', () => {

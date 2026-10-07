@@ -176,6 +176,8 @@ async function committedLines(
     WHERE ol.order_id = ${orderId}
       AND ol.status = ANY(${lineStatuses})
       AND so.status = ANY(${sellStatuses}::text[])
+      -- Same rule as committedQtySql: a sell line held at 0 holds nothing.
+      AND sol.qty > 0
   ` as unknown as { id: string; so_id: string }[];
   return {
     lineIds: [...new Set(rows.map(r => r.id))],

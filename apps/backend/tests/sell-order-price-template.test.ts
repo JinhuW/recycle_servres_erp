@@ -323,8 +323,8 @@ describe('GET /api/sell-orders/:id/price-template', () => {
       ) as unknown as ArrayBuffer,
     );
     const pack = packWb.worksheets.find(w => w.name === 'Pack - LA1')!;
-    // Part # sits right of the two reserved label columns and the tick box.
-    const packPartCol = 2 + 2;
+    // Part # sits right of the two reserved label columns, the # and the tick box.
+    const packPartCol = 2 + 3;
     const packParts: string[] = [];
     pack.eachRow((row, r) => {
       // Rows 1-2 are merged banners, which proxy their text to every cell.
@@ -701,12 +701,12 @@ describe('GET /api/sell-orders/:id/packing-list?groupBy=po', () => {
 
   // One column's cells over a tab's data rows, every section. Found by header
   // text: the lot's own part number, not the sell line's, reaches the sheet.
-  const colCells = (ws: ExcelJS.Worksheet, header: 'ID in PO' | 'From PO'): string[] => {
+  const colCells = (ws: ExcelJS.Worksheet, header: 'ID in PO' | 'From PO' | '#'): string[] => {
     const out: string[] = [];
     let col = 0;
     ws.eachRow(row => {
       const first = String(row.getCell(1 + PACK_OFFSET).value ?? '');
-      if (first === 'Packed ✓') {
+      if ((row.values as unknown[]).includes('Packed ✓')) {
         col = 0;
         row.eachCell((cell, c) => { if (cell.value === header) col = c; });
       } else if (first === 'Subtotal') {
@@ -801,6 +801,22 @@ describe('GET /api/sell-orders/:id/packing-list?groupBy=po', () => {
     const byPoCells = byPo.worksheets.flatMap(cellStrings);
     expect(byPoCells).toContain('ID in PO');
     expect(byPoCells).not.toContain('From PO');
+  });
+
+  it('numbers each row by its line # on the sell order, both lists, a folded row listing every #', async () => {
+    const { token } = await loginAs(ALEX);
+    // #1 and #3 are the same product, so they fold into one row on each list.
+    const id = await createOrder(token, {
+      lines: [
+        { category: 'RAM', label: 'DIMM A', partNumber: 'NO-R1', qty: 2, unitPrice: 40, warehouseId: 'WH-LA1' },
+        { category: 'SSD', label: 'Drive B', partNumber: 'NO-S1', qty: 1, unitPrice: 90, warehouseId: 'WH-LA1' },
+        { category: 'RAM', label: 'DIMM A', partNumber: 'NO-R1', qty: 3, unitPrice: 40, warehouseId: 'WH-LA1' },
+      ],
+    });
+    const plain = await loadWorkbook(await getRaw(`/api/sell-orders/${id}/packing-list`, token));
+    expect(colCells(plain.worksheets[0]!, '#').sort()).toEqual(['1, 3', '2']);
+    const byPo = await loadWorkbook(await getRaw(`/api/sell-orders/${id}/packing-list?groupBy=po`, token));
+    expect(colCells(byPo.worksheets[0]!, '#').sort()).toEqual(['1, 3', '2']);
   });
 
   it('narrows to one warehouse', async () => {

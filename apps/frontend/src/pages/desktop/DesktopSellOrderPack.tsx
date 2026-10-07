@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { LineSpecChips, lineHasSpecChips } from '../../components/LineSpecChips';
 import { StatusChangeDialog, type StatusAttachment } from '../../components/StatusChangeDialog';
@@ -11,18 +11,20 @@ import { useT } from '../../lib/i18n';
 import { sellOrderStatuses } from '../../lib/lookups';
 import { navigate, navigateBack } from '../../lib/route';
 import {
-  packBody, packScan, packView, packWarehouseOf, packWarehouseOptions, shipBlockers, sourceTag, toCheck,
-  UNASSIGNED, type PackLine, type PackResponse,
+  isPackable, packBody, packScan, packView, packWarehouseOf, packWarehouseOptions, shipBlockers, sourceTag,
+  toCheck, UNASSIGNED, type PackLine, type PackResponse,
 } from '../../lib/sellOrderPack';
 import type { Category } from '../../lib/types';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { useLineSaveQueue } from '../../lib/useLineSaveQueue';
 
 // Pack mode: a sell order as a packing checklist, built for an iPad on a cart.
-// Each line leads with the lot it comes from (PO-1111 #1), which is how stock
-// is found on the shelf; open lines are grouped by that PO, and a line sinks
-// under Packed once it is ticked into the box. Counts start full and are
-// lowered only when the shelf is short, as in the PO's Review mode.
+// Lines run in the order's own list order, each led by its # on the order —
+// the number the packer writes on the item's label and the receiver checks
+// the box by — and each names the lot it comes from (From PO-1111 #1). A
+// ticked line stays in its place, so the list always reads #1 to #n. Counts
+// start full and are lowered only when the shelf is short, as in the PO's
+// Review mode; a line held at 0 keeps its # but has nothing to pack.
 
 type OrderLine = {
   id: string;
@@ -72,7 +74,6 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   const [order, setOrder] = useState<PackOrder | null>(null);
   const [serials, setSerials] = useState<ReadonlyMap<string, string | null>>(new Map());
   const [wh, setWh] = useState('');
-  const [showDone, setShowDone] = useState(true);
   const [undo, setUndo] = useState<Undo | null>(null);
   const [scan, setScan] = useState('');
   const [scanMsg, setScanMsg] = useState<ScanMsg | null>(null);
@@ -145,17 +146,19 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   const warehouses = useMemo(() => packWarehouseOptions(lines), [lines]);
   // A picked warehouse the order no longer has (a line was moved) falls back to all.
   const picked = warehouses.includes(wh) ? wh : '';
-  const shown = useMemo(() => (picked ? lines.filter(l => packWarehouseOf(l) === picked) : lines), [lines, picked]);
-  const view = useMemo(() => packView(lines, checks, picked), [lines, checks, picked]);
-  const sum = useMemo(() => tally(shown, checks), [shown, checks]);
+  const rows = useMemo(() => packView(lines, picked), [lines, picked]);
+  const shownPackable = useMemo(() => rows.map(r => r.line).filter(isPackable), [rows]);
+  const sum = useMemo(() => tally(shownPackable, checks), [shownPackable, checks]);
   const blockers = useMemo(() => shipBlockers(lines, checks), [lines, checks]);
-  const canShip = ready && isDraft && lines.length > 0
+  const lineNo = useMemo(() => new Map(lines.map((l, i) => [l.id, i + 1])), [lines]);
+  const canShip = ready && isDraft && lines.some(isPackable)
     && blockers.open === 0 && blockers.short === 0 && blockers.zero === 0;
 
   const whName = (w: string | null) => (w === null || w === UNASSIGNED ? t('sodNoWarehouse') : w);
-  const lotName = (l: Line) => {
+  const fromText = (l: Line) => {
     const tag = sourceTag(l);
-    return tag ? `${tag.po} #${tag.no ?? '–'}` : t('pkNoPo');
+    if (!tag) return t('pkTypedIn');
+    return tag.no != null ? t('pkFromPoLine', { po: tag.po, n: tag.no }) : t('pkFromPo', { po: tag.po });
   };
   const checkOf = (lineId: string) => checks.get(lineId) ?? emptyCheck(lineId, lineById.get(lineId)?.qty ?? 0);
 
@@ -227,7 +230,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     }
     if ('choose' in m) {
       setChoose(new Set(m.choose.map(l => l.id)));
-      setScanMsg({ tone: 'warn', text: t('pkScanChoose', { pn: text, n: m.choose.length, lots: m.choose.map(lotName).join(', ') }) });
+      setScanMsg({ tone: 'warn', text: t('pkScanChoose', { pn: text, n: m.choose.length, lots: m.choose.map(l => '#' + lineNo.get(l.id)).join(', ') }) });
       if (picked && m.choose.some(l => packWarehouseOf(l) !== picked)) setWh('');
       scrollTo(m.choose[0]!.id);
       return;
@@ -301,50 +304,26 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     exit();
   };
 
-  // ── FLIP: a row that changes group slides from where it was. Positions are
-  // measured inside the list, so scrolling between two changes doesn't read
-  // as every row having moved.
-  const rowRefs = useRef(new Map<string, HTMLLIElement>());
-  const lastTops = useRef(new Map<string, number>());
-  useLayoutEffect(() => {
-    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    const tops = new Map<string, number>();
-    rowRefs.current.forEach((el, lineId) => {
-      const top = el.offsetTop;
-      tops.set(lineId, top);
-      const was = lastTops.current.get(lineId);
-      if (!reduce && was !== undefined && Math.abs(was - top) > 2 && el.animate) {
-        el.animate([{ transform: `translateY(${was - top}px)` }, { transform: 'none' }],
-          { duration: 380, easing: 'cubic-bezier(.2,.8,.2,1)' });
-      }
-    });
-    lastTops.current = tops;
-  }, [view, showDone]);
-
-  const row = (l: Line) => {
+  const row = (l: Line, no: number) => {
     const c = checkOf(l.id);
     const state = lineState(l, c);
     const n = countOf(l, c);
-    const tag = sourceTag(l);
     const pn = pnOf(l);
+    const packable = isPackable(l);
     // Condition stays in the meta row, so the SSD/HDD chips don't repeat it.
     const chipLine = { ...l, condition: null };
     return (
       <li
         key={l.id}
         id={'pk-row-' + l.id}
-        ref={el => { if (el) rowRefs.current.set(l.id, el); else rowRefs.current.delete(l.id); }}
-        className={'pk-row pk-' + state
+        className={'pk-row ' + (packable ? 'pk-' + state : 'pk-zero')
           + (isShortChecked(l, c) ? ' pk-done-short' : '')
           + (isAbsentChecked(l, c) ? ' pk-done-zero' : '')
           + (choose.has(l.id) ? ' pk-choose' : '')}
       >
-        <div
-          className={'pk-tag' + (tag ? '' : ' none')}
-          title={tag ? (tag.no != null ? t('sodPoLineTitle', { po: tag.po, n: tag.no }) : tag.po) : t('pkTagNoneTitle')}
-        >
-          <span className="pk-tag-po">{tag ? tag.po : t('pkNoPo')}</span>
-          {tag && <span className="pk-tag-no">#{tag.no ?? '–'}</span>}
+        <div className="pk-tag" title={t('pkLineTitle', { n: no, id })}>
+          <span className="pk-tag-po">{id}</span>
+          <span className="pk-tag-no">#{no}</span>
         </div>
         <div className="pk-item">
           <div className="pk-label">{l.label}</div>
@@ -354,41 +333,46 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
           <div className="pk-meta">
             <span className="mono">{l.partNumber ?? '—'}</span>
             {l.condition && <span>{l.condition}</span>}
+            <span className="mono pk-from">{fromText(l)}</span>
             {!picked && warehouses.length > 1 && <span>{whName(packWarehouseOf(l))}</span>}
           </div>
         </div>
-        <div className="pk-ctrl">
-          <div className="pk-count-wrap">
-            <div className="pk-step">
-              <button
-                type="button" className="pk-step-btn" aria-label={t('pkLess')}
-                disabled={!ready || n === 0} onClick={() => setCount(l, n - 1)}
-              >
-                <Icon name="minus" size={18} />
-              </button>
-              <span className="pk-count mono"><b>{n}</b><span> / {l.qty}</span></span>
-              <button
-                type="button" className="pk-step-btn" aria-label={t('pkMore')}
-                disabled={!ready || n >= l.qty} onClick={() => setCount(l, n + 1)}
-              >
-                <Icon name="plus" size={18} />
-              </button>
+        {packable ? (
+          <div className="pk-ctrl">
+            <div className="pk-count-wrap">
+              <div className="pk-step">
+                <button
+                  type="button" className="pk-step-btn" aria-label={t('pkLess')}
+                  disabled={!ready || n === 0} onClick={() => setCount(l, n - 1)}
+                >
+                  <Icon name="minus" size={18} />
+                </button>
+                <span className="pk-count mono"><b>{n}</b><span> / {l.qty}</span></span>
+                <button
+                  type="button" className="pk-step-btn" aria-label={t('pkMore')}
+                  disabled={!ready || n >= l.qty} onClick={() => setCount(l, n + 1)}
+                >
+                  <Icon name="plus" size={18} />
+                </button>
+              </div>
+              {n === 0
+                ? <span className="pk-flag neg">{t('pkZeroTag')}</span>
+                : n < l.qty && <span className="pk-flag warn">{t('pkShortTag')}</span>}
             </div>
-            {n === 0
-              ? <span className="pk-flag neg">{t('pkZeroTag')}</span>
-              : n < l.qty && <span className="pk-flag warn">{t('pkShortTag')}</span>}
+            <button
+              type="button"
+              className="pk-tick"
+              aria-pressed={state === 'done'}
+              aria-label={t(state === 'done' ? 'pkUnpackLine' : 'pkPackLine', { pn })}
+              disabled={!ready}
+              onClick={() => toggle(l)}
+            >
+              <Icon name="check" size={26} stroke={3} />
+            </button>
           </div>
-          <button
-            type="button"
-            className="pk-tick"
-            aria-pressed={state === 'done'}
-            aria-label={t(state === 'done' ? 'pkUnpackLine' : 'pkPackLine', { pn })}
-            disabled={!ready}
-            onClick={() => toggle(l)}
-          >
-            <Icon name="check" size={26} stroke={3} />
-          </button>
-        </div>
+        ) : (
+          <div className="pk-zero-note">{t('pkZeroLine')}</div>
+        )}
       </li>
     );
   };
@@ -462,11 +446,11 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
 
       <div className="card pk-progress">
         <div className="pk-progress-num">
-          <span className="mono"><b>{sum.done}</b><span className="muted"> / {shown.length}</span></span>
+          <span className="mono"><b>{sum.done}</b><span className="muted"> / {shownPackable.length}</span></span>
           <span className="card-sub">{t('pkUnits', { n: sum.counted, of: sum.units })}</span>
         </div>
         <div className="pk-progress-meter">
-          <div className="bc-meter" role="img" aria-label={t('pkProgress', { n: sum.done, of: shown.length })}>
+          <div className="bc-meter" role="img" aria-label={t('pkProgress', { n: sum.done, of: shownPackable.length })}>
             <i className="bc-m-done" style={{ flexGrow: sum.done }} />
             <i className="bc-m-part" style={{ flexGrow: sum.partial }} />
             <i className="bc-m-absent" style={{ flexGrow: sum.absent }} />
@@ -506,28 +490,8 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
           </div>
         ) : (
           <ul className="pk-list">
-            {view.groups.map(g => (
-              <Fragment key={g.key}>
-                <li className="pk-group">
-                  <span className="pk-group-po mono">{g.poId ?? t('pkNoPo')}</span>
-                  <span className="pk-group-wh">{whName(g.warehouse)}</span>
-                  <span className="pk-group-left">{t('pkGroupLeft', { n: g.items.length })}</span>
-                </li>
-                {g.items.map(({ line }) => row(line))}
-              </Fragment>
-            ))}
-            {view.groups.length === 0 && (
-              <li className="pk-empty">{shown.length ? t('pkAllPacked') : t('pkNoneHere')}</li>
-            )}
-            {view.done.length > 0 && (
-              <li className="pk-divider">
-                <span>{t('pkPackedGroup')} <span className="mono">{view.done.length}</span></span>
-                <button type="button" className="pk-link" onClick={() => setShowDone(s => !s)}>
-                  {showDone ? t('pkHide') : t('pkShow')}
-                </button>
-              </li>
-            )}
-            {showDone && view.done.map(row)}
+            {rows.map(r => row(r.line, r.no))}
+            {rows.length === 0 && <li className="pk-empty">{t('pkNoneHere')}</li>}
           </ul>
         )}
       </div>
