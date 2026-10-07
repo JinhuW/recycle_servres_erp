@@ -2,13 +2,13 @@
 id: RS-183
 title: Review mode: a line counted to 0 is not in the box and is removed on Approve
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-06
 reporter: jinhu
 branch: dev-2
-pr:
-version:
+pr: "#511"
+version: 1.212.0
 related: [RS-124]
 ---
 
@@ -38,19 +38,19 @@ delete it on the PO page.
 
 ## Acceptance criteria
 
-- [ ] An unticked line counted to 0 shows as *Not in the box* (red), counted
+- [x] An unticked line counted to 0 shows as *Not in the box* (red), counted
       in its own legend chip, not as *partly counted*.
-- [ ] A 0 line still needs its own tick; *Check all remaining* leaves it alone.
-- [ ] A ticked 0 line carries a *Not in the box* tag and is listed in Finish
+- [x] A 0 line still needs its own tick; *Check all remaining* leaves it alone.
+- [x] A ticked 0 line carries a *Not in the box* tag and is listed in Finish
       review apart from short lines.
-- [ ] At Reviewing, Approve reads *Remove n & approve*, removes the lines
+- [x] At Reviewing, Approve reads *Remove n & approve*, removes the lines
       ticked at 0 from the PO (same `PATCH removeLineIds` the PO page uses),
       then moves the PO to Ready to Pay.
-- [ ] If the move fails or is cancelled after the removal, the page reloads
+- [x] If the move fails or is cancelled after the removal, the page reloads
       without the removed lines.
-- [ ] When every line is at 0, Approve is disabled with an explanation.
-- [ ] A PO with a pinned lot price warns that removing lines does not change it.
-- [ ] A scan landing on a line counted 0 ticks nothing and says to raise the
+- [x] When every line is at 0, Approve is disabled with an explanation.
+- [x] A PO with a pinned lot price warns that removing lines does not change it.
+- [x] A scan landing on a line counted 0 ticks nothing and says to raise the
       count first.
 
 ## Out of scope
