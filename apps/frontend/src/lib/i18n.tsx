@@ -1954,6 +1954,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     hoShotRead: 'Read the transaction ID from the screenshot — check it against the image.',
     cpTitle: 'Commission payment',
     cpHint: 'How {name} is paid their commission. If no screenshot is here when the order is marked Done, the Done dialog asks for one.',
+    cpPaidByLabel: 'Paid by',
+    cpPaidByNone: 'Not recorded',
     cpShotLabel: 'Payment screenshot',
     cpShotHint: 'PNG or JPG — the PayPal or cash screenshot showing the commission paid.',
     cpPaid: 'Paid',

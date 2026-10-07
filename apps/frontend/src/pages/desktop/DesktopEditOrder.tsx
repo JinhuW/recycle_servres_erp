@@ -65,6 +65,7 @@ import { AttachmentDropzone } from '../../components/AttachmentDropzone';
 import { loadWarehouses } from '../../lib/warehouses';
 import { useReviewModeEntry } from './ReviewModeEntry';
 import { useManagerTakeover } from '../../components/ManagerTakeoverDialog';
+import { useCommissionPaidBy } from '../../lib/useCommissionPaidBy';
 
 // The uppercase heading over each block of the action card.
 const SectionHead = ({ icon, children }: { icon: IconName; children: ReactNode }) => (
@@ -399,11 +400,11 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // (or take it back) at any stage short of Done; ownership drives commission
   // and "my orders".
   const [ownerId, setOwnerId] = useState(order.userId);
-  const [members, setMembers] = useState<{ id: string; name: string }[]>([]);
+  const [members, setMembers] = useState<{ id: string; name: string; role: string }[]>([]);
   useEffect(() => {
     if (isPurchaser) return;
     let alive = true;
-    api.get<{ items: { id: string; name: string }[] }>('/api/members')
+    api.get<{ items: { id: string; name: string; role: string }[] }>('/api/members')
       .then(r => { if (alive) setMembers(r.items); })
       .catch(handleFetchError);
     return () => { alive = false; };
@@ -413,7 +414,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // needs a row so the select can show the order as-is. The signed-in user is
   // ensured too, so the list never loses "take it back" while it loads.
   const ownerOptions = useMemo(() => {
-    const opts = members.map(m => ({ ...m }));
+    const opts = members.map(m => ({ id: m.id, name: m.name }));
     const ensure = (id?: string, name?: string | null) => {
       if (!id || opts.some(o => o.id === id)) return;
       opts.unshift({ id, name: name ?? id });
@@ -422,6 +423,17 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     ensure(user?.id, user?.name);
     return opts;
   }, [members, order.userId, order.userName, user?.id, user?.name]);
+  // Only a manager handles the commission money — the server refuses anyone else.
+  const managers = useMemo(
+    () => members.filter(m => m.role === 'manager').map(m => ({ id: m.id, name: m.name })),
+    [members],
+  );
+  const commissionPaidBy = useCommissionPaidBy({
+    orderId: order.id,
+    paidBy: order.commissionPaidBy ?? null,
+    managers,
+    onMutated: () => setActivityKey(k => k + 1),
+  });
 
   const updateLine = (i: number, patch: Partial<EditLine>) =>
     setLines(ls => ls.map((l, j) => (j === i ? { ...l, ...patch, _dirty: true } : l)));
@@ -1625,6 +1637,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
               firstName={order.userName.split(' ')[0]}
               locale={locale}
               commissionShots={commissionShots}
+              commissionPaidBy={commissionPaidBy}
               canEditCommissionPayment={!isPurchaser}
             />
           ),

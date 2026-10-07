@@ -42,6 +42,7 @@ import { recordSaleDataPoints, recordBidDataPoints, type BidPart } from '../lib/
 import { maybeRenameReceipt } from '../ai/receipt';
 import { shrinkImageToFit } from '../lib/image-shrink';
 import { poLineNo } from '../lib/poLineNo';
+import { isActiveManager } from '../services/members';
 import type { Env, User } from '../types';
 
 const sellOrders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -65,16 +66,6 @@ async function metaStatusAndOrder(
     () => sql`SELECT 1 FROM sell_orders WHERE id = ${id} LIMIT 1`,
   ] as const);
   return [metaStatusSet, rows.length > 0];
-}
-
-// Payment receivers are managers only — purchasers never handle customer money.
-async function isActiveManager(sql: SqlClient, userId: string): Promise<boolean> {
-  if (typeof userId !== 'string' || !UUID_RE.test(userId)) return false;
-  const rows = await sql`
-    SELECT 1 FROM users
-    WHERE id = ${userId} AND active = TRUE AND role = 'manager' LIMIT 1
-  `;
-  return rows.length > 0;
 }
 
 sellOrders.get('/', async (c) => {

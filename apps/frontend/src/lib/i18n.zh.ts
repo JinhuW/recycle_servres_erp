@@ -1496,6 +1496,8 @@ const zh: Record<string, string> = {
   hoShotRead: '已从截图读取交易号 —— 请对照图片核对。',
   cpTitle: '提成付款',
   cpHint: '{name} 的提成如何支付。标记完成时若此处没有截图，完成对话框会要求上传。',
+  cpPaidByLabel: '付款人',
+  cpPaidByNone: '未记录',
   cpShotLabel: '付款截图',
   cpShotHint: 'PNG 或 JPG —— 显示已支付提成的 PayPal 或现金截图。',
   cpPaid: '已付',

@@ -148,6 +148,7 @@ const FIELD_LABEL: Record<string, string> = {
   other_fees:      'Other fees',
   other_fees_note: 'Other fees note',
   paypal_txn_id:   'PayPal transaction ID',
+  commission_paid_by: 'Commission paid by',
   source:          'Source',
   handoff_method:  'Delivery',
   handoff_by:      'Picked up by',
