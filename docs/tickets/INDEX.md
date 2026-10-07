@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-186](./RS-186-packing-list-shows-each-row-s-source-po-line.md) | in-review | story | P2 | Packing list shows each row's source PO line | — |
+| [RS-186](./RS-186-packing-list-shows-each-row-s-source-po-line.md) | done | story | P2 | Packing list shows each row's source PO line | 1.216.0 |
 | [RS-184](./RS-184-a-po-line-may-be-counted-down-to-0-only-a-new-line-n.md) | done | story | P1 | A PO line may be counted down to 0; only a new line needs qty 1 | 1.213.0 |
 | [RS-183](./RS-183-review-mode-a-line-counted-to-0-is-not-in-the-box-an.md) | done | story | P2 | Review mode: a line counted to 0 is not in the box and is removed on Approve | 1.212.0 |
 | [RS-182](./RS-182-nightly-prod-to-dev-db-copy-fails-at-the-credential.md) | in-progress | bug | P1 | Nightly prod-to-dev DB copy fails at the credential scrub | — |
