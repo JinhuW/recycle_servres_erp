@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-191](./RS-191-take-the-photos-out-of-the-packing-list-spreadsheets.md) | in-review | story | P2 | Take the photos out of the packing-list spreadsheets | — |
 | [RS-190](./RS-190-packing-by-each-po-line-with-photos.md) | done | story | P2 | Packing by each PO line, with photos | 1.220.0 |
 | [RS-189](./RS-189-prompt-text-that-has-drifted-from-the-code-claude-md.md) | done | bug | P2 | Prompt text that has drifted from the code: CLAUDE.md facts, the session hook, MCP tool descriptions | 1.219.1 |
 | [RS-188](./RS-188-sell-order-line-numbers-pack-mode-and-packing-lists.md) | done | story | P2 | Sell-order line numbers: Pack mode and packing lists go by the order's #, a line can be set to 0 | 1.219.0 |

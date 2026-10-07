@@ -17,6 +17,22 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.220.1] - 2026-10-07
+
+The packing-list spreadsheets lose the photos 1.220.0 gave them: not needed
+on the sheet (RS-191).
+
+### Removed
+
+- **Both packing lists (per warehouse and by PO) no longer embed a photo.**
+  The `Photo` column with a thumbnail of each lot's label scan is gone, so
+  Part # sits right after the tick box again, and the export no longer fetches
+  every scan from its public URL before it can build the file. Everything else
+  1.220.0 brought stays: the row per PO line under a product, its own # and
+  tick box, the RAM labels and totals. Pack mode still shows each line's photo
+  on screen, and the bid sheet keeps its Image URL links. The Packing list
+  button's hint stops mentioning a photo.
+
 ## [1.220.0] - 2026-10-07
 
 A packer can now tick a product off PO line by PO line, and sees each lot's

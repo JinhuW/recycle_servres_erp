@@ -739,7 +739,7 @@ const zh: Record<string, string> = {
   soDownloadPriceTemplate: '报价模板（投标表）',
   soDownloadPriceTemplateHint: '含商品规格、图片链接和空白价格 — 发给供应商填写',
   soDownloadPackingList: '装箱清单',
-  soDownloadPackingListHint: '每个仓库一个工作表，每个采购单行各有勾选框、照片和数量，不含价格 — 供拣货使用，不发给供应商',
+  soDownloadPackingListHint: '每个仓库一个工作表，每个采购单行各有勾选框和数量，不含价格 — 供拣货使用，不发给供应商',
   soDownloadPackingListByPo: '按采购单装箱清单',
   soDownloadPackingListByPoHint: '同一份装箱清单，每个仓库内每张采购单一个工作表',
   soPackAllWarehouses: '全部仓库',

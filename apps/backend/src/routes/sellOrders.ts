@@ -24,7 +24,6 @@ import {
   buildPriceTemplateWorkbook, buildPackingListWorkbook, buildPackingListByPoWorkbook,
   type PoSource,
 } from '../lib/sellOrderPriceTemplate';
-import { loadScanThumbnails } from '../lib/scanThumbnails';
 import { canonPartNumberJs } from '../lib/part-number';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { settleSoldTx } from '../services/orderSold';
@@ -476,8 +475,8 @@ async function loadSellOrderSheetData(sql: SqlClient, id: string) {
     condition: string | null; qty: number; imageUrl: string | null;
     specs: Record<string, string | number>;
     // Where the row's units came from, one entry per PO line, each with the
-    // sell-order lines it covers and its lot's photo. The packing tabs give
-    // every entry its own tickable row; the bid sheet reads none of it.
+    // sell-order lines it covers. The packing tabs give every entry its own
+    // tickable row; the bid sheet reads none of it.
     poSources: PoSource[];
   };
   // Only real public URLs make the sheet — seeded/stub scans carry data: URLs
@@ -540,7 +539,7 @@ async function loadSellOrderSheetData(sql: SqlClient, id: string) {
         src.qty += qty;
         src.soLineNos.push(soLineNo);
       } else {
-        g.poSources.push({ po, lineNo, qty, soLineNos: [soLineNo], imageUrl: publicUrl(r.image_url) });
+        g.poSources.push({ po, lineNo, qty, soLineNos: [soLineNo] });
       }
     };
     fold(groups);
@@ -625,17 +624,9 @@ sellOrders.get('/:id/packing-list', async (c) => {
     return c.json({ error: `No lines in warehouse ${only} on this order` }, 400);
   }
 
-  const poWarehouses = data.poWarehouses.filter(keep);
-  // Every tickable row carries its lot's photo. Collected in the order the
-  // lines first appear, so a photo cap drops the order's tail, not a shelf.
-  const photoUrls = (byPo ? poWarehouses.flatMap((w) => w.pos) : warehouses)
-    .flatMap((t) => t.products.flatMap((p) => p.poSources.map((x) => x.imageUrl)))
-    .filter((u): u is string => u != null);
-  const photos = await loadScanThumbnails(photoUrls);
-
   const buf = byPo
-    ? await buildPackingListByPoWorkbook(data.head, poWarehouses, photos)
-    : await buildPackingListWorkbook(data.head, warehouses, photos);
+    ? await buildPackingListByPoWorkbook(data.head, data.poWarehouses.filter(keep))
+    : await buildPackingListWorkbook(data.head, warehouses);
   const suffix = `${byPo ? '-by-po' : ''}${only ? `-${customerSlug(only)}` : ''}`;
   return xlsxResponse(buf, datedFilename(`${data.filenameStem}-packing-list${suffix}`));
 });

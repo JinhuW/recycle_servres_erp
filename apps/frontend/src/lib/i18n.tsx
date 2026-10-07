@@ -1157,7 +1157,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     soDownloadPriceTemplate: 'Price template (bid sheet)',
     soDownloadPriceTemplateHint: 'Item specs + photo links + blank prices — send to the vendor to fill in',
     soDownloadPackingList: 'Packing list',
-    soDownloadPackingListHint: 'One tab per warehouse: a tick box, photo and quantity for each PO line, no prices — for the pickers, not the vendor',
+    soDownloadPackingListHint: 'One tab per warehouse: a tick box and quantity for each PO line, no prices — for the pickers, not the vendor',
     soDownloadPackingListByPo: 'Packing list by PO',
     soDownloadPackingListByPoHint: 'The same checklist with one tab per PO in each warehouse',
     soPackAllWarehouses: 'All warehouses',

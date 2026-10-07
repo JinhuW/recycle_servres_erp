@@ -933,18 +933,17 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   laid out like the inventory page's lots): a bold row for the product — Part
   #, specs, its total and the POs it spans (`2 POs`, `1 PO`, `+ No PO` for a
   hand-typed share), no tick box — then a row per PO line with its own #,
-  tick box, photo, `From PO-999 #12` (or `No PO`) and quantity, POs in numeric
+  tick box, `From PO-999 #12` (or `No PO`) and quantity, POs in numeric
   order, hand-typed last. The RAM labels run down the whole block and the
   subtotals count the product once. Until v1.220.0 those lines were stacked in
   one cell under a single tick box (v1.216.0).
-- **Packing-list rows carry the lot's photo** (v1.220.0): a `Photo` column
-  after the tick box holds a thumbnail of the lot's label scan, embedded so it
-  prints. The export fetches the scans from their public URL (dev's copy of
-  prod can't read the prod bucket by key), shrinks them to 112 px, and gives
-  up on a photo that is missing, not a raster, over 20 MB or still loading
-  after the 20-second budget — that cell stays blank and the download still
-  succeeds. At most 200 photos per file. The bid sheet keeps its Image URL
-  links. The download buttons stay disabled while a file is being prepared.
+- **The packing lists carry no photos** (v1.220.1). v1.220.0 embedded a
+  thumbnail of each lot's label scan in a `Photo` column after the tick box,
+  fetched at export time; it was taken out the same day as not needed on the
+  sheet, so Part # sits right after the tick box again and the export fetches
+  nothing. The photo is on screen in Pack mode instead, and the bid sheet keeps
+  its Image URL links. The download buttons stay disabled while a file is
+  being prepared.
 - **Both packing lists number their rows by the sell order's #** (v1.219.0): a
   `#` column first, before the tick box, so the label on an item matches its
   row. A row that folds several lines lists their #s ascending (`2, 5`). The

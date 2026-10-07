@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import ExcelJS from 'exceljs';
-import sharp from 'sharp';
 import app from '../src/index';
 import { resetDb, getTestDb } from './helpers/db';
 import { freeSellableLine } from './helpers/inventory';
@@ -324,9 +323,8 @@ describe('GET /api/sell-orders/:id/price-template', () => {
       ) as unknown as ArrayBuffer,
     );
     const pack = packWb.worksheets.find(w => w.name === 'Pack - LA1')!;
-    // Part # sits right of the two reserved label columns, the #, the tick box
-    // and the photo.
-    const packPartCol = 2 + 4;
+    // Part # sits right of the two reserved label columns, the # and the tick box.
+    const packPartCol = 2 + 3;
     const packParts: string[] = [];
     pack.eachRow((row, r) => {
       // Rows 1-2 are merged banners, which proxy their text to every cell.
@@ -849,62 +847,39 @@ describe('GET /api/sell-orders/:id/packing-list?groupBy=po', () => {
     expect(byPoCells).not.toContain('From PO');
   });
 
-  it('puts each lot\'s photo on its row, and leaves the cell blank for one it can\'t fetch', async () => {
+  // Photos were tried on these sheets and dropped (user-decided 2026-10-07);
+  // Pack mode shows them on screen instead.
+  it('leaves photos off both packing lists, even for a lot with a real scan', async () => {
     const { token } = await loginAs(ALEX);
     const sql = getTestDb();
     const [a, b] = await linesFromTwoPos(token);
-    const [c] = (await sql<{ id: string }[]>`
-      INSERT INTO order_lines (order_id, category, qty, unit_cost, sell_price, part_number,
-                               status, position, warehouse_id)
-      VALUES (${a.po}, 'SSD', 1, 10, 20, 'STUB-SCAN', 'Reviewing', 91, 'WH-LA1')
-      RETURNING id`);
-    const scan = async (lineId: string, key: string, url: string) => {
+    for (const [lineId, key] of [[a.id, 'pack-photo-a'], [b.id, 'pack-photo-b']]) {
       await sql`UPDATE order_lines SET scan_image_id = ${key} WHERE id = ${lineId}`;
       await sql`
         INSERT INTO label_scans (user_id, cf_image_id, delivery_url, category)
-        VALUES ((SELECT id FROM users ORDER BY created_at LIMIT 1), ${key}, ${url}, 'RAM')`;
-    };
-    await scan(a.id, 'pack-photo-a', 'https://photos.test/a.jpg');
-    await scan(b.id, 'pack-photo-b', 'https://photos.test/b.jpg');
-    // A stub-provider scan: nothing to fetch.
-    await scan(c.id, 'stub-pack-photo-c', 'data:image/placeholder');
-
-    const png = await sharp({ create: { width: 300, height: 200, channels: 3, background: '#3a7' } })
-      .png().toBuffer();
-    const realFetch = globalThis.fetch;
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
-      const url = input instanceof Request ? input.url : String(input);
-      if (url === 'https://photos.test/a.jpg') return new Response(png);
-      if (url.startsWith('https://photos.test/')) return new Response('gone', { status: 404 });
-      return realFetch(input, init);
-    });
+        VALUES ((SELECT id FROM users ORDER BY created_at LIMIT 1), ${key},
+                ${`https://photos.test/${key}.jpg`}, 'RAM')`;
+    }
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
     try {
       const id = await createOrder(token, {
         lines: [
           { inventoryId: a.id, category: 'RAM', label: 'A', partNumber: 'X', qty: 1, unitPrice: 40, warehouseId: 'WH-LA1' },
           { inventoryId: b.id, category: 'RAM', label: 'B', partNumber: 'Y', qty: 1, unitPrice: 40, warehouseId: 'WH-LA1' },
-          { inventoryId: c.id, category: 'SSD', label: 'C', partNumber: 'STUB-SCAN', qty: 1, unitPrice: 9, warehouseId: 'WH-LA1' },
         ],
       });
-      const res = await getRaw(`/api/sell-orders/${id}/packing-list`, token);
-      expect(res.status).toBe(200);
-      const tab = (await loadWorkbook(res)).worksheets.find(w => w.name === 'Pack - LA1')!;
-      // b's 404 and c's stub scan leave their cells blank; only a's shows.
-      const images = tab.getImages();
-      expect(images).toHaveLength(1);
-      const na = await poPageNo(token, a.po, a.id);
-      const photoCell = dataRows(tab).find(m => text(m, 'From PO') === `${a.po} #${na}`)!.get('Photo')!;
-      expect(Math.floor(images[0].range.tl.nativeRow)).toBe(Number(photoCell.row) - 1);
-      expect(Math.floor(images[0].range.tl.nativeCol)).toBe(Number(photoCell.col) - 1);
+      for (const qs of ['', '?groupBy=po']) {
+        const res = await getRaw(`/api/sell-orders/${id}/packing-list${qs}`, token);
+        expect(res.status).toBe(200);
+        const wb = await loadWorkbook(res);
+        expect(wb.worksheets.length).toBeGreaterThan(0);
+        for (const ws of wb.worksheets) {
+          expect(ws.getImages()).toHaveLength(0);
+          expect(cellStrings(ws)).not.toContain('Photo');
+        }
+      }
       const asked = fetchSpy.mock.calls.map(([u]) => (u instanceof Request ? u.url : String(u)));
-      expect(asked).toContain('https://photos.test/b.jpg');
-      expect(asked.some(u => u.startsWith('data:'))).toBe(false);
-
-      const byPoRes = await getRaw(`/api/sell-orders/${id}/packing-list?groupBy=po`, token);
-      expect(byPoRes.status).toBe(200);
-      const byPo = await loadWorkbook(byPoRes);
-      expect(byPo.worksheets.find(w => w.name === `${a.po} - LA1`)!.getImages()).toHaveLength(1);
-      expect(byPo.worksheets.find(w => w.name === `${b.po} - LA1`)!.getImages()).toHaveLength(0);
+      expect(asked.some(u => u.startsWith('https://photos.test/'))).toBe(false);
     } finally {
       fetchSpy.mockRestore();
     }
