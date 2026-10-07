@@ -1,5 +1,6 @@
 import { CommissionPaymentFields, type CommissionShots } from '../../../components/CommissionPaymentFields';
 import { Icon } from '../../../components/Icon';
+import type { CommissionPaidBy } from '../../../lib/useCommissionPaidBy';
 import { fmtUSD } from '../../../lib/format';
 import { useT } from '../../../lib/i18n';
 
@@ -30,6 +31,8 @@ type Props = {
   locale: string;
   /** The commission-payment screenshot — writes through, a manager's at any stage. */
   commissionShots: CommissionShots;
+  /** Which manager paid it — writes through the same way. */
+  commissionPaidBy: CommissionPaidBy;
   canEditCommissionPayment: boolean;
 };
 
@@ -185,7 +188,11 @@ export function CommissionTab(p: Props) {
         <div style={{ fontSize: 12, color: 'var(--fg-subtle)', marginBottom: 10 }}>
           {t('cpHint', { name: p.firstName })}
         </div>
-        <CommissionPaymentFields shots={p.commissionShots} editable={p.canEditCommissionPayment} />
+        <CommissionPaymentFields
+          paidBy={p.commissionPaidBy}
+          shots={p.commissionShots}
+          editable={p.canEditCommissionPayment}
+        />
       </div>
     </div>
   );

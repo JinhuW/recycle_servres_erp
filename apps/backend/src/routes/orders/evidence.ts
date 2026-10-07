@@ -9,6 +9,7 @@ import { isClosedBook } from '../../services/orderAdvance';
 import { chatShotRequiredFor, cashShotRequiredFor } from '../../services/orderTxnRule';
 import { LINE_PHOTO_CAP } from '@recycle-erp/shared';
 import { type User } from '../../types';
+import { isActiveManager } from '../../services/members';
 import { extractPaypalTxn } from '../../ai/paypal';
 import { maybeRenameReceipt, suffixFilename } from '../../ai/receipt';
 import { shrinkImageToFit } from '../../lib/image-shrink';
@@ -278,6 +279,51 @@ evidenceRoutes.delete('/:id/status-meta/:status/attachments/:attachmentId', asyn
   // Best-effort.
   await deleteAttachment(c.env, removed.storage_key).catch(e => log.error('r2 delete', e));
   return c.json({ ok: true });
+});
+
+// ─── Commission paid by ────────────────────────────────────────────────────
+// Which manager paid the purchaser their commission — the screenshot above
+// shows that it was paid, and its uploader need not be the payer. Its own
+// endpoint, open at every stage like the Commission bucket: the commission is
+// paid once the PO is a closed book, where PATCH refuses and the pages turn
+// Save off. `userId: null` clears it.
+evidenceRoutes.put('/:id/commission-paid-by', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const id = c.req.param('id');
+  const body = (await c.req.json().catch(() => null)) as { userId?: unknown } | null;
+  if (!body || (body.userId !== null && typeof body.userId !== 'string')) {
+    return c.json({ error: 'userId must be a manager id or null' }, 400);
+  }
+  const to = body.userId;
+  const sql = getDb(c.env);
+  if (to !== null && !(await isActiveManager(sql, to))) {
+    return c.json({ error: 'Paid by must be an active manager' }, 400);
+  }
+
+  const saved = await sql.begin(async (tx) => {
+    const row = (await tx<{ commission_paid_by: string | null }[]>`
+      SELECT commission_paid_by FROM orders WHERE id = ${id} LIMIT 1 FOR NO KEY UPDATE
+    `)[0];
+    if (!row) return null;
+    const from = row.commission_paid_by;
+    const ids = [from, to].filter((v): v is string => v !== null);
+    const names = ids.length
+      ? await tx<{ id: string; name: string }[]>`SELECT id, name FROM users WHERE id = ANY(${ids}::uuid[])`
+      : [];
+    const nameOf = (v: string | null) => (v === null ? null : names.find(n => n.id === v)?.name ?? null);
+    if (from !== to) {
+      await tx`UPDATE orders SET commission_paid_by = ${to} WHERE id = ${id}`;
+      // Names, not ids, as owner_changed and the handoff's handoff_by do: the
+      // timeline reads the manager as they were when it was recorded.
+      await writeOrderEvent(tx, id, u.id, 'meta_changed', {
+        changes: [{ field: 'commission_paid_by', from: nameOf(from), to: nameOf(to) }],
+      });
+    }
+    return { paidBy: to === null ? null : { id: to, name: nameOf(to) ?? '' } };
+  });
+  if (!saved) return c.json({ error: 'Not found' }, 404);
+  return c.json({ commissionPaidBy: saved.paidBy });
 });
 
 // ─── Per-line photos ───────────────────────────────────────────────────────

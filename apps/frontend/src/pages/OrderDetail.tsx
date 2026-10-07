@@ -43,6 +43,7 @@ import { ApiError } from '../lib/api';
 import { usePaymentProof, type ProofAttachment } from '../lib/usePaymentProof';
 import { PaymentFields } from '../components/PaymentFields';
 import { CommissionPaymentFields, type CommissionShots } from '../components/CommissionPaymentFields';
+import { useCommissionPaidBy } from '../lib/useCommissionPaidBy';
 import {
   ORDER_STATUSES, statusTone, spineStatus,
 } from '../lib/status';
@@ -299,6 +300,25 @@ export function OrderDetail({
       .catch(handleFetchError);
     return () => { alive = false; };
   }, []);
+  // The names list carries no roles, and only a manager handles the commission
+  // money; the full member list is a manager's, as is the pick.
+  const [managers, setManagers] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => {
+    if (isPurchaser) return;
+    let alive = true;
+    api.get<{ items: { id: string; name: string; role: string }[] }>('/api/members')
+      .then(r => {
+        if (alive) setManagers(r.items.filter(m => m.role === 'manager').map(m => ({ id: m.id, name: m.name })));
+      })
+      .catch(handleFetchError);
+    return () => { alive = false; };
+  }, [isPurchaser]);
+  const commissionPaidBy = useCommissionPaidBy({
+    orderId: order.id,
+    paidBy: order.commissionPaidBy ?? null,
+    managers,
+    onMutated: () => setActivityRefreshKey(k => k + 1),
+  });
 
   const totals = useMemo(() => {
     let qty = 0, cost = 0, margin = 0;
@@ -1410,7 +1430,7 @@ export function OrderDetail({
               the phone rules for the labels hang off that class, and the fold
               body is shared with the fields above. */}
           <div className="ph-pay">
-            <CommissionPaymentFields shots={commissionShots} editable={!isPurchaser} />
+            <CommissionPaymentFields paidBy={commissionPaidBy} shots={commissionShots} editable={!isPurchaser} />
           </div>
         </PhFold>
 

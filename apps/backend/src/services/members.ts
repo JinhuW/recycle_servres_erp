@@ -3,6 +3,8 @@
 // functions are usable from routes, scripts, or tests.
 
 import type { Sql } from 'postgres';
+import type { SqlLike } from '../db';
+import { UUID_RE } from '../lib/pagination';
 import { epochSeconds, hashPassword, generateTempPassword, revokeUserRefreshTokens } from '../auth';
 import { revokeUserOAuthTokens } from '../oauth/tokens';
 import { effUnitCost, poFeeBasis } from '../lib/po-cost';
@@ -165,6 +167,17 @@ export async function countOtherActiveManagers(sql: Sql, exceptId: string): Prom
     WHERE role = 'manager' AND active = TRUE AND id <> ${exceptId}
   `;
   return (r[0] as { n: number }).n;
+}
+
+// Who may be named as having handled money: the sell order's payment receiver
+// and the manager who paid a PO's commission. Purchasers never handle it.
+export async function isActiveManager(sql: SqlLike, userId: string): Promise<boolean> {
+  if (typeof userId !== 'string' || !UUID_RE.test(userId)) return false;
+  const rows = await sql`
+    SELECT 1 FROM users
+    WHERE id = ${userId} AND active = TRUE AND role = 'manager' LIMIT 1
+  `;
+  return rows.length > 0;
 }
 
 // Soft-delete. Returns true if a row was updated, false if no such user.

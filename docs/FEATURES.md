@@ -150,8 +150,13 @@ on to Sold once every line has sold (v1.164.0).
   detail" — and a **Commission payment** drop box for the screenshot that
   shows the purchaser was paid (v1.163.0 shipped it with a PayPal/Cash picker
   and an OCR-filled transaction ID; v1.165.0 cut it to the screenshot alone).
-  Files write through as they are dropped — managers at any stage, closed
-  book included — and purchasers see the list read-only. **Ready to Pay →
+  Above the drop box, **Paid by** names the manager who paid the purchaser
+  (v1.217.0): a select of the active managers, or *Not recorded*, which every
+  order starts at — the screenshot's uploader need not be the payer, so
+  nothing is guessed. Files write through as they are dropped and the pick
+  as it is made — managers at any stage, closed book included — and
+  purchasers see both read-only. Each pick is one *Commission paid by:
+  ‹from› → ‹to›* line in Activity, the names as they were at the time. **Ready to Pay →
   Done asks for it only when it is missing** (v1.165.0): with a screenshot
   on file the move is as plain as any other; without one the *Mark order as
   Done* dialog opens, and a file attached there is the same file the tab
@@ -183,8 +188,9 @@ on to Sold once every line has sold (v1.164.0).
 - **The phone's *Order details* are the desktop's five tabs, as folds**
   (v1.162.0): Delivery (source, warehouse, label or pickup, tracking),
   Cost Payment, **Commission** (with the commission-payment screenshot box
-  under the maths since v1.163.0, screenshot-only since v1.165.0; the fold's
-  summary reads *· Paid* once one is on file), Notes & files, Activity —
+  under the maths since v1.163.0, screenshot-only since v1.165.0, with the
+  *Paid by* manager select above it since v1.217.0; the fold's summary reads
+  *· Paid* once a screenshot is on file), Notes & files, Activity —
   same order, same names.
   Each is one card (`PhFold`): closed, the title with its answer read back;
   open, a tinted header ruled off from the fields in the same card. An amber
