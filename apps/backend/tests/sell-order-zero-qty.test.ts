@@ -3,6 +3,7 @@
 // A 0 line holds nothing, sells nothing and prices nothing.
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import { randomUUID } from 'node:crypto';
 import ExcelJS from 'exceljs';
 import app from '../src/index';
 import { resetDb, getTestDb } from './helpers/db';
@@ -133,6 +134,37 @@ describe('sell order lines at qty 0', () => {
 
     expect((await patchLines(mgr, id, lines)).status).toBe(400);
     expect((await patchLines(mgr, id, lines, l => (l.inventoryId ? { qty: 0 } : {}))).status).toBe(200);
+  });
+
+  it('holds at 0 only a lot already on the order', async () => {
+    const { ids } = await freshLots(2);
+    const id = await createOrder(mgr, [lotLine(ids[0]!, 1)]);
+    const saved = (await detailLines(mgr, id)).map(l => ({
+      inventoryId: l.inventoryId, category: l.category, label: l.label, partNumber: l.partNumber,
+      qty: l.qty, unitPrice: l.nativeUnitPrice, warehouseId: l.warehouseId, condition: l.condition,
+    }));
+    const save = (lines: object[]) => api<{ error: string }>('PATCH', `/api/sell-orders/${id}`, {
+      token: mgr, body: { lines },
+    });
+
+    // A lot new to the order, and an id no lot has: a 400, never the FK's 500.
+    const fresh = await save([...saved, { ...lotLine(ids[1]!, 2), qty: 0 }]);
+    expect(fresh.status).toBe(400);
+    expect(fresh.body.error).toMatch(/at least 1/);
+    expect((await save([...saved, { ...lotLine(ids[1]!, 2), inventoryId: randomUUID(), qty: 0 }])).status).toBe(400);
+
+    // The lot already on the order, however its id is spelt.
+    expect((await save([{ ...saved[0]!, inventoryId: ids[0]!.toUpperCase(), qty: 0 }])).status).toBe(200);
+  });
+
+  it('refuses both packing lists for an order with nothing above 0', async () => {
+    const id = await createOrder(mgr, [typedLine('ZQ-T1'), typedLine('ZQ-T2')]);
+    expect((await patchLines(mgr, id, await detailLines(mgr, id), () => ({ qty: 0 }))).status).toBe(200);
+    for (const q of ['', '?groupBy=po']) {
+      const r = await api<{ error: string }>('GET', `/api/sell-orders/${id}/packing-list${q}`, { token: mgr });
+      expect(r.status).toBe(400);
+      expect(r.body.error).toMatch(/nothing to pack/);
+    }
   });
 
   it('an order with nothing on it cannot ship, wait for payment or be done', async () => {

@@ -77,7 +77,9 @@ export async function searchSellableInventory(
            (SELECT COUNT(DISTINCT sol.sell_order_id)::int
               FROM sell_order_lines sol
               JOIN sell_orders so ON so.id = sol.sell_order_id
-             WHERE sol.inventory_id = l.id AND so.status = 'Draft') AS draft_count
+             WHERE sol.inventory_id = l.id AND so.status = 'Draft'
+               -- A line held at 0 is no rival: it holds nothing.
+               AND sol.qty > 0) AS draft_count
     FROM order_lines l
     JOIN orders o ON o.id = l.order_id
     LEFT JOIN warehouses w ON w.id = COALESCE(l.warehouse_id, o.warehouse_id)

@@ -89,6 +89,7 @@ export type ProductsLanding = { orderId: string; lineId: string | null };
 type FoldId = 'delivery' | 'payment' | 'commission' | 'notes' | 'activity';
 // The fold a stage is about; the others start closed.
 const STAGE_FOLD: Record<string, FoldId> = { 'In Transit': 'delivery', 'Ready to Pay': 'commission' };
+const NO_MANAGERS: { id: string; name: string }[] = [];
 
 type Props = {
   order: Order;
@@ -300,23 +301,12 @@ export function OrderDetail({
       .catch(handleFetchError);
     return () => { alive = false; };
   }, []);
-  // The names list carries no roles, and only a manager handles the commission
-  // money; the full member list is a manager's, as is the pick.
-  const [managers, setManagers] = useState<{ id: string; name: string }[]>([]);
-  useEffect(() => {
-    if (isPurchaser) return;
-    let alive = true;
-    api.get<{ items: { id: string; name: string; role: string }[] }>('/api/members')
-      .then(r => {
-        if (alive) setManagers(r.items.filter(m => m.role === 'manager').map(m => ({ id: m.id, name: m.name })));
-      })
-      .catch(handleFetchError);
-    return () => { alive = false; };
-  }, [isPurchaser]);
+  // Filled when the Commission fold opens, below.
+  const [managers, setManagers] = useState<{ id: string; name: string }[] | null>(null);
   const commissionPaidBy = useCommissionPaidBy({
     orderId: order.id,
     paidBy: order.commissionPaidBy ?? null,
-    managers,
+    managers: managers ?? NO_MANAGERS,
     onMutated: () => setActivityRefreshKey(k => k + 1),
   });
 
@@ -721,6 +711,20 @@ export function OrderDetail({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveStatus]);
   const toggleFold = (id: FoldId) => setOpenFold(o => o === id ? null : id);
+  // The names list carries no roles, and only a manager handles the commission
+  // money; the full member list is a manager's, as is the pick. It is a
+  // heavy read, so it waits until the fold that needs it is open.
+  const wantManagers = !isPurchaser && openFold === 'commission' && managers === null;
+  useEffect(() => {
+    if (!wantManagers) return;
+    let alive = true;
+    api.get<{ items: { id: string; name: string; role: string }[] }>('/api/members')
+      .then(r => {
+        if (alive) setManagers(r.items.filter(m => m.role === 'manager').map(m => ({ id: m.id, name: m.name })));
+      })
+      .catch(handleFetchError);
+    return () => { alive = false; };
+  }, [wantManagers]);
   // A readiness row opens the fold and lands on its first field; the fold
   // has to be open before the scroll can find anything.
   const showFold = (id: FoldId) => {

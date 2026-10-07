@@ -10,7 +10,7 @@ import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import { eventsOf } from './helpers/sellOrderEvents';
-import { createSellOrderOn } from './helpers/fixtures';
+import { createSellOrderOn, firstCustomerId } from './helpers/fixtures';
 
 type Line = { id: string; status: string; qty: number; partNumber: string | null };
 type Detail = { order: { lifecycle: string; archivedAt: string | null; lines: Line[] } };
@@ -54,6 +54,31 @@ const get = (id: string, token: string) => api<Detail>('GET', `/api/orders/${id}
 async function statusesOf(id: string, token: string): Promise<Record<string, string>> {
   const got = await get(id, token);
   return Object.fromEntries(got.body.order.lines.map(l => [l.id, l.status]));
+}
+
+const lotLine = (inventoryId: string) =>
+  ({ inventoryId, category: 'RAM', label: 'x', partNumber: PN, qty: 1, unitPrice: 90 });
+const typed = (partNumber: string) => ({ category: 'SSD', label: 'Typed', partNumber, qty: 1, unitPrice: 10 });
+
+async function createSellOrder(mgr: string, lines: object[]): Promise<string> {
+  const r = await api<{ id: string }>('POST', '/api/sell-orders', {
+    token: mgr, body: { customerId: await firstCustomerId(mgr), lines },
+  });
+  expect(r.status).toBe(201);
+  return r.body.id;
+}
+
+// What the editor's save does to a line whose lot can't ship.
+async function holdAtZero(soId: string, inventoryId: string): Promise<void> {
+  await getTestDb()`
+    UPDATE sell_order_lines SET qty = 0 WHERE sell_order_id = ${soId} AND inventory_id = ${inventoryId}`;
+}
+
+async function soLines(mgr: string, soId: string) {
+  const r = await api<{ order: { lines: { inventoryId: string | null; partNumber: string | null; qty: number }[] } }>(
+    'GET', `/api/sell-orders/${soId}`, { token: mgr });
+  expect(r.status).toBe(200);
+  return r.body.order.lines;
 }
 
 describe('archive takes the lines out of stock', () => {
@@ -232,6 +257,53 @@ describe('archive and open sell orders', () => {
     expect((await api('POST', `/api/sell-orders/${soId}/status`, {
       token: mgr, body: { to: 'Closed', closeReasonId: 'other' },
     })).status).toBe(200);
+  });
+
+  it('leaves a sell line held at 0 where it is: no conflict, nothing removed, every # kept', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const { token: mgr } = await loginAs(ALEX);
+    const { id, lineIds } = await createReviewing(pur, mgr);
+    const soId = await createSellOrder(mgr, [lotLine(lineIds[0]), typed('ARCHV-T1')]);
+    await holdAtZero(soId, lineIds[0]);
+
+    expect((await api('POST', `/api/orders/${id}/archive`, { token: mgr })).status).toBe(200);
+
+    const so = await soLines(mgr, soId);
+    expect(so.map(l => [l.inventoryId, l.partNumber, l.qty])).toEqual([[lineIds[0], PN, 0], [null, 'ARCHV-T1', 1]]);
+    expect((await eventsOf(soId)).filter(e => e.kind === 'line_removed')).toHaveLength(0);
+  });
+
+  it('names and removes only the lines that hold something, and counts only those', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const { token: mgr } = await loginAs(ALEX);
+    const { id, lineIds } = await createReviewing(pur, mgr);
+    const soId = await createSellOrder(mgr, [lotLine(lineIds[0]), lotLine(lineIds[1])]);
+    await holdAtZero(soId, lineIds[0]);
+
+    const r = await api<Conflict>('POST', `/api/orders/${id}/archive`, { token: mgr });
+    expect(r.status).toBe(409);
+    expect(r.body.sellOrders?.[0].lineCount).toBe(1);
+    expect(r.body.sellOrders?.[0].lines.map(l => l.inventoryId)).toEqual([lineIds[1]]);
+
+    expect((await api('POST', `/api/orders/${id}/archive`, {
+      token: mgr, body: { removeFromSellOrders: true },
+    })).status).toBe(200);
+    expect((await soLines(mgr, soId)).map(l => [l.inventoryId, l.qty])).toEqual([[lineIds[0], 0]]);
+  });
+
+  it('lets a PO line go that a sell order holds only at 0; that line stays, typed, with its #', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const { token: mgr } = await loginAs(ALEX);
+    const { id, lineIds } = await createReviewing(pur, mgr);
+    const soId = await createSellOrder(mgr, [lotLine(lineIds[0]), typed('ARCHV-T1')]);
+    await holdAtZero(soId, lineIds[0]);
+
+    expect((await api('PATCH', `/api/orders/${id}`, {
+      token: mgr, body: { removeLineIds: [lineIds[0]] },
+    })).status).toBe(200);
+
+    const so = await soLines(mgr, soId);
+    expect(so.map(l => [l.inventoryId, l.partNumber, l.qty])).toEqual([[null, PN, 0], [null, 'ARCHV-T1', 1]]);
   });
 
   it('unarchive does not bring the removed sell-order lines back', async () => {
