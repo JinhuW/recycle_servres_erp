@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
+import { ImageLightbox } from '../../components/ImageLightbox';
 import { LineSpecChips, lineHasSpecChips } from '../../components/LineSpecChips';
 import { StatusChangeDialog, type StatusAttachment } from '../../components/StatusChangeDialog';
 import { api, ApiError, rawFetch } from '../../lib/api';
@@ -24,7 +25,9 @@ import { useLineSaveQueue } from '../../lib/useLineSaveQueue';
 // the box by — and each names the lot it comes from (From PO-1111 #1). A
 // ticked line stays in its place, so the list always reads #1 to #n. Counts
 // start full and are lowered only when the shelf is short, as in the PO's
-// Review mode; a line held at 0 keeps its # but has nothing to pack.
+// Review mode; a line held at 0 keeps its # but has nothing to pack. Each line
+// shows its lot's photo, so the packer matches the item by eye
+// (user-requested 2026-10-07).
 
 type OrderLine = {
   id: string;
@@ -46,6 +49,8 @@ type OrderLine = {
   interface?: string | null;
   formFactor?: string | null;
   health?: number | null;
+  // The lot's label scan; optional because the Worker can ship before the API.
+  imageUrl?: string | null;
 };
 
 type PackOrder = {
@@ -81,6 +86,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   const [choose, setChoose] = useState<ReadonlySet<string>>(new Set());
   const [shipping, setShipping] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [zoom, setZoom] = useState<string | null>(null);
 
   const scanRef = useRef<HTMLInputElement | null>(null);
   // Set when a scanner's first character landed on the page and was moved into
@@ -255,7 +261,8 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   // scan in the box; the rest then follows it there.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (shipping || document.querySelector('[aria-modal="true"]')) return;
+      // The photo viewer isn't an aria-modal dialog, so it is named here.
+      if (shipping || zoom || document.querySelector('[aria-modal="true"]')) return;
       const target = e.target as HTMLElement | null;
       if (target?.closest('input, textarea, select')) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -325,6 +332,17 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
           <span className="pk-tag-po">{id}</span>
           <span className="pk-tag-no">#{no}</span>
         </div>
+        {l.imageUrl ? (
+          <button
+            type="button" className="pk-photo" aria-label={t('pkPhoto', { pn })}
+            onClick={() => setZoom(l.imageUrl!)}
+          >
+            <img src={l.imageUrl} alt="" loading="lazy" decoding="async" />
+          </button>
+        ) : (
+          // Same footprint, so the items stay in one column.
+          <div className="pk-photo pk-photo-none" aria-hidden="true"><Icon name="image" size={20} /></div>
+        )}
         <div className="pk-item">
           <div className="pk-label">{l.label}</div>
           {lineHasSpecChips(chipLine, true)
@@ -540,6 +558,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
           onConfirm={({ note }) => void confirmShip(note)}
         />
       )}
+      {zoom && <ImageLightbox url={zoom} onClose={() => setZoom(null)} />}
     </div>
   );
 }

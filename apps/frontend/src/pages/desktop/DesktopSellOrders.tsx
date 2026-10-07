@@ -611,6 +611,9 @@ function DownloadMenu({ orderId, lines }: { orderId: string; lines: SellOrderLin
   // A picked warehouse the order no longer has (a line was moved) falls back
   // to All rather than 400ing.
   const picked = warehouses.includes(warehouse) ? warehouse : '';
+  // A packing list fetches every lot's photo, so it takes a few seconds; a
+  // second click would only start the whole job again.
+  const [busy, setBusy] = useState(false);
 
   const download = (kind: 'price-template' | 'packing-list', byPo = false) => async () => {
     const params = new URLSearchParams();
@@ -620,10 +623,13 @@ function DownloadMenu({ orderId, lines }: { orderId: string; lines: SellOrderLin
     }
     const qs = params.toString() ? `?${params}` : '';
     const name = `${orderId}-${kind}${byPo ? '-by-po' : ''}.xlsx`;
+    setBusy(true);
     try {
       await api.download(`/api/sell-orders/${orderId}/${kind}${qs}`, name);
     } catch (e) {
       handleFetchError(e);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -633,6 +639,7 @@ function DownloadMenu({ orderId, lines }: { orderId: string; lines: SellOrderLin
         className="btn"
         style={{ whiteSpace: 'nowrap' }}
         title={t('soDownloadPriceTemplateHint')}
+        disabled={busy}
         onClick={download('price-template')}
       >
         <Icon name="dollar" size={14} /> {t('soDownloadPriceTemplate')}
@@ -655,6 +662,7 @@ function DownloadMenu({ orderId, lines }: { orderId: string; lines: SellOrderLin
         className="btn"
         style={{ whiteSpace: 'nowrap' }}
         title={t('soDownloadPackingListHint')}
+        disabled={busy}
         onClick={download('packing-list')}
       >
         <Icon name="box" size={14} /> {t('soDownloadPackingList')}
@@ -663,6 +671,7 @@ function DownloadMenu({ orderId, lines }: { orderId: string; lines: SellOrderLin
         className="btn"
         style={{ whiteSpace: 'nowrap' }}
         title={t('soDownloadPackingListByPoHint')}
+        disabled={busy}
         onClick={download('packing-list', true)}
       >
         <Icon name="box" size={14} /> {t('soDownloadPackingListByPo')}

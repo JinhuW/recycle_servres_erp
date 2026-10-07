@@ -17,6 +17,42 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.220.0] - 2026-10-07
+
+A packer can now tick a product off PO line by PO line, and sees each lot's
+photo while doing it — on the Packing list spreadsheets and in Pack mode
+(RS-190).
+
+### Changed
+
+- **A product that came from several PO lines is checked per line on both
+  packing lists.** It used to be one row whose `From PO` cell stacked the
+  lines (1.216.0) under a single tick box, so a picker pulling one part from
+  three boxes could not tick them apart. Now it reads like the inventory
+  page's lots: a bold row for the product — Part #, specs, total, the POs it
+  spans (`2 POs + No PO`) and no tick box — then a row per PO line with its
+  own sell-order #, tick box, photo, `From PO-999 #12` and quantity. A product
+  from one PO line is still one row. The Packing list by PO splits a product
+  folding several lines of its PO the same way (`2 lines`, then each ID).
+- The `Warehouse total` / `PO total` label is no longer cut off: its figure
+  moved two columns along.
+
+### Added
+
+- **Packing-list photos.** A `Photo` column after the tick box carries a
+  thumbnail of each lot's label scan, embedded so the sheet prints with it.
+  The export fetches up to 200 scans from their public URL, four at a time,
+  shrinks them in a shared two-at-a-time lane, and leaves the cell blank for a
+  scan that is missing, not a raster, over 20 MB or not back within the
+  20-second budget — the download never fails over a photo. The bid sheet keeps
+  its Image URL links.
+- **Pack mode shows each line's photo** between its # tag and the item; a tap
+  zooms it and Esc closes the zoom before leaving Pack mode. Lines keep their #
+  order. `GET /api/sell-orders/:id` returns the scan as each line's `imageUrl`
+  (null for a typed line or a stub scan).
+- The sell order's download buttons are disabled while a file is being
+  prepared, so a second click can't start the photo fetches again.
+
 ## [1.219.1] - 2026-10-07
 
 Text that models read had drifted from the code (RS-189). A prompt audit

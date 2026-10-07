@@ -94,4 +94,43 @@ describe('PO line number on sell order lines', () => {
       expect(inv.body.items.find(i => i.id === id)?.po_line_no).toBe(noOf(after, id));
     }
   });
+
+  // Pack mode shows each line's photo: its lot's label scan.
+  it('gives each line its lot\'s scan photo, and none for a stub scan or a typed line', async () => {
+    const { token } = await loginAs(ALEX);
+    const sql = getTestDb();
+    const a = await freeSellableLine(token);
+    const b = await freeSellableLine(token, 1, new Set([a.id]));
+    const scan = async (lineId: string, key: string, url: string) => {
+      await sql`UPDATE order_lines SET scan_image_id = ${key} WHERE id = ${lineId}`;
+      await sql`
+        INSERT INTO label_scans (user_id, cf_image_id, delivery_url, category)
+        VALUES ((SELECT id FROM users ORDER BY created_at LIMIT 1), ${key}, ${url}, 'RAM')`;
+    };
+    await scan(a.id, 'photo-a', 'https://static.test/a.jpg');
+    // What the stub OCR provider stores: nothing an <img> can show.
+    await scan(b.id, 'stub-photo-b', 'data:image/placeholder');
+
+    const created = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token,
+      body: {
+        customerId: await firstCustomerId(token),
+        lines: [
+          ...[a.id, b.id].map(id => ({
+            inventoryId: id, category: 'RAM', label: 'Sample', partNumber: 'PN-1',
+            qty: 1, unitPrice: 20, warehouseId: 'WH-LA1',
+          })),
+          { inventoryId: null, category: 'Other', label: 'Rails', qty: 1, unitPrice: 10 },
+        ],
+      },
+    });
+    expect(created.status).toBe(201);
+
+    type Line = { inventoryId: string | null; imageUrl: string | null };
+    const got = await api<{ order: { lines: Line[] } }>('GET', `/api/sell-orders/${created.body.id}`, { token });
+    const byLot = (id: string | null) => got.body.order.lines.find(l => l.inventoryId === id)!;
+    expect(byLot(a.id).imageUrl).toBe('https://static.test/a.jpg');
+    expect(byLot(b.id).imageUrl).toBeNull();
+    expect(byLot(null).imageUrl).toBeNull();
+  });
 });

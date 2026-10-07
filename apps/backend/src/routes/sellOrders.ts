@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import { CLOSE_REASON_IDS } from '@recycle-erp/shared';
+import { CLOSE_REASON_IDS, isRealPhotoUrl } from '@recycle-erp/shared';
 import { getDb } from '../db';
 import { uploadAttachment, deleteAttachment } from '../r2';
 import { notify } from '../lib/notify';
@@ -24,6 +24,7 @@ import {
   buildPriceTemplateWorkbook, buildPackingListWorkbook, buildPackingListByPoWorkbook,
   type PoSource,
 } from '../lib/sellOrderPriceTemplate';
+import { loadScanThumbnails } from '../lib/scanThumbnails';
 import { canonPartNumberJs } from '../lib/part-number';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { settleSoldTx } from '../services/orderSold';
@@ -277,7 +278,7 @@ sellOrders.get('/:id', async (c) => {
     inventory_qty: number | null;
     type: string | null; classification: string | null; rank: string | null;
     speed: string | null; interface: string | null; form_factor: string | null;
-    health: number | null;
+    health: number | null; image_url: string | null;
   }[]>`
     SELECT sol.id, sol.category, sol.label, sol.sub_label, sol.part_number,
            sol.qty, sol.unit_price::float AS unit_price,
@@ -290,6 +291,7 @@ sellOrders.get('/:id', async (c) => {
            -- snapshot. Null for a hand-typed line or a deleted lot.
            ol.type, ol.classification, ol.rank, ol.speed, ol.interface,
            ol.form_factor, ol.health::float AS health,
+           img.delivery_url AS image_url,
            -- What this order may still grow its line to: the lot less the units
            -- other committed orders hold. Its own claim is excluded, so editing
            -- a line down and back up is not blocked by itself. A lot that left
@@ -304,6 +306,13 @@ sellOrders.get('/:id', async (c) => {
     LEFT JOIN order_lines ol ON ol.id = sol.inventory_id
     LEFT JOIN orders src ON src.id = ol.order_id
     LEFT JOIN warehouses pw ON pw.id = COALESCE(ol.warehouse_id, src.warehouse_id, sol.warehouse_id)
+    LEFT JOIN LATERAL (
+      SELECT ls.delivery_url
+      FROM label_scans ls
+      WHERE ls.cf_image_id = ol.scan_image_id
+      ORDER BY ls.created_at ASC
+      LIMIT 1
+    ) img ON TRUE
     WHERE sol.sell_order_id = ${id}
     ORDER BY ${sellLineOrder(sql, 'sol')}
   `;
@@ -388,6 +397,9 @@ sellOrders.get('/:id', async (c) => {
         type: l.type, classification: l.classification, rank: l.rank,
         speed: l.speed, interface: l.interface, formFactor: l.form_factor,
         health: l.health,
+        // The lot's label scan, which Pack mode shows on the line. A stub
+        // scan's placeholder data: URL would render as a broken image.
+        imageUrl: isRealPhotoUrl(l.image_url) ? l.image_url : null,
         maxQty: l.inventory_qty ?? l.qty,
         lineTotal: +(l.qty * l.unit_price).toFixed(2),
       })),
@@ -463,12 +475,10 @@ async function loadSellOrderSheetData(sql: SqlClient, id: string) {
     category: SoCategory; label: string; partNumber: string | null;
     condition: string | null; qty: number; imageUrl: string | null;
     specs: Record<string, string | number>;
-    // Where the row's units came from, one entry per PO line. The
-    // per-warehouse tabs print every entry, a by-PO tab only their line
-    // numbers, the bid sheet none.
+    // Where the row's units came from, one entry per PO line, each with the
+    // sell-order lines it covers and its lot's photo. The packing tabs give
+    // every entry its own tickable row; the bid sheet reads none of it.
     poSources: PoSource[];
-    // The sell-order lines the row folds, by their # on the order.
-    soLineNos: number[];
   };
   // Only real public URLs make the sheet — seeded/stub scans carry data: URLs
   // that would render as garbage text in the cell.
@@ -511,7 +521,6 @@ async function loadSellOrderSheetData(sql: SqlClient, id: string) {
         health: (r.health as number | null) ?? '', rpm: (r.rpm as number | null) ?? '',
       } : {},
       poSources: [],
-      soLineNos: [],
     });
     // Both null for a hand-typed line, both set for a lot: order_lines.order_id
     // is NOT NULL and poLineNo is null only without a lot.
@@ -527,9 +536,12 @@ async function loadSellOrderSheetData(sql: SqlClient, id: string) {
         map.set(key, g);
       }
       const src = g.poSources.find((x) => x.po === po && x.lineNo === lineNo);
-      if (src) src.qty += qty;
-      else g.poSources.push({ po, lineNo, qty });
-      g.soLineNos.push(soLineNo);
+      if (src) {
+        src.qty += qty;
+        src.soLineNos.push(soLineNo);
+      } else {
+        g.poSources.push({ po, lineNo, qty, soLineNos: [soLineNo], imageUrl: publicUrl(r.image_url) });
+      }
     };
     fold(groups);
     const wh = s(r.warehouse_short) || 'Unassigned';
@@ -613,9 +625,17 @@ sellOrders.get('/:id/packing-list', async (c) => {
     return c.json({ error: `No lines in warehouse ${only} on this order` }, 400);
   }
 
+  const poWarehouses = data.poWarehouses.filter(keep);
+  // Every tickable row carries its lot's photo. Collected in the order the
+  // lines first appear, so a photo cap drops the order's tail, not a shelf.
+  const photoUrls = (byPo ? poWarehouses.flatMap((w) => w.pos) : warehouses)
+    .flatMap((t) => t.products.flatMap((p) => p.poSources.map((x) => x.imageUrl)))
+    .filter((u): u is string => u != null);
+  const photos = await loadScanThumbnails(photoUrls);
+
   const buf = byPo
-    ? await buildPackingListByPoWorkbook(data.head, data.poWarehouses.filter(keep))
-    : await buildPackingListWorkbook(data.head, warehouses);
+    ? await buildPackingListByPoWorkbook(data.head, poWarehouses, photos)
+    : await buildPackingListWorkbook(data.head, warehouses, photos);
   const suffix = `${byPo ? '-by-po' : ''}${only ? `-${customerSlug(only)}` : ''}`;
   return xlsxResponse(buf, datedFilename(`${data.filenameStem}-packing-list${suffix}`));
 });

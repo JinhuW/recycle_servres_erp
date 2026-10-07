@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import ExcelJS from 'exceljs';
+import sharp from 'sharp';
 import app from '../src/index';
 import { resetDb, getTestDb } from './helpers/db';
 import { freeSellableLine } from './helpers/inventory';
@@ -323,8 +324,9 @@ describe('GET /api/sell-orders/:id/price-template', () => {
       ) as unknown as ArrayBuffer,
     );
     const pack = packWb.worksheets.find(w => w.name === 'Pack - LA1')!;
-    // Part # sits right of the two reserved label columns, the # and the tick box.
-    const packPartCol = 2 + 3;
+    // Part # sits right of the two reserved label columns, the #, the tick box
+    // and the photo.
+    const packPartCol = 2 + 4;
     const packParts: string[] = [];
     pack.eachRow((row, r) => {
       // Rows 1-2 are merged banners, which proxy their text to every cell.
@@ -717,6 +719,28 @@ describe('GET /api/sell-orders/:id/packing-list?groupBy=po', () => {
     });
     return out;
   };
+  // Every data row of a tab as header → cell, sections in order — so a test
+  // can read a product's block row by row.
+  const dataRows = (ws: ExcelJS.Worksheet): Map<string, ExcelJS.Cell>[] => {
+    const out: Map<string, ExcelJS.Cell>[] = [];
+    let headers: Map<number, string> | null = null;
+    ws.eachRow(row => {
+      if ((row.values as unknown[]).includes('Packed ✓')) {
+        const h = new Map<number, string>();
+        row.eachCell((cell, c) => { h.set(c, String(cell.value)); });
+        headers = h;
+      } else if (String(row.getCell(1 + PACK_OFFSET).value ?? '') === 'Subtotal') {
+        headers = null;
+      } else if (headers) {
+        const m = new Map<string, ExcelJS.Cell>();
+        for (const [c, h] of headers) m.set(h, row.getCell(c));
+        out.push(m);
+      }
+    });
+    return out;
+  };
+  const text = (m: Map<string, ExcelJS.Cell>, header: string) => String(m.get(header)!.value ?? '');
+
   // A line's # on the PO page: its index in GET /api/orders/:id.
   async function poPageNo(token: string, po: string, lineId: string): Promise<number> {
     const r = await api<{ order: { lines: { id: string }[] } }>('GET', `/api/orders/${po}`, { token });
@@ -749,13 +773,15 @@ describe('GET /api/sell-orders/:id/packing-list?groupBy=po', () => {
     const wb = await loadWorkbook(await getRaw(`/api/sell-orders/${id}/packing-list?groupBy=po`, token));
     const tab = wb.worksheets.find(w => w.name === `${a.po} - LA1`)!;
     const [x, y] = (await Promise.all(twins.map(t => poPageNo(token, a.po, t)))).sort((m, n) => m - n);
-    expect(colCells(tab, 'ID in PO').sort()).toEqual([String(await poPageNo(token, a.po, a.id)), `${x}, ${y}`].sort());
+    // The twins split into their own rows under the product's row.
+    expect(colCells(tab, 'ID in PO').sort())
+      .toEqual([String(await poPageNo(token, a.po, a.id)), '2 lines', String(x), String(y)].sort());
     // A hand-typed line came from no PO: the column stays, empty.
     const noPo = wb.worksheets.find(w => w.name === 'No PO - LA1')!;
     expect(colCells(noPo, 'ID in PO')).toEqual(['']);
   });
 
-  it('names each per-warehouse row\'s source PO lines, one per line when it folds several', async () => {
+  it('splits a product from several PO lines into a tickable row per line under its own row', async () => {
     const { token } = await loginAs(ALEX);
     const sql = getTestDb();
     const [a, b] = await linesFromTwoPos(token);
@@ -787,13 +813,33 @@ describe('GET /api/sell-orders/:id/packing-list?groupBy=po', () => {
     const [na, x, y] = await Promise.all([
       poPageNo(token, a.po, a.id), poPageNo(token, a.po, twinA), poPageNo(token, b.po, twinB),
     ]);
-    const folded = `${a.po} #${x} ×1\n${b.po} #${y} ×1\nNo PO ×2`;
-    expect(colCells(tab, 'From PO').sort()).toEqual([`${a.po} #${na}`, folded, '—'].sort());
-    // Tall enough for its three sources, Part # level with the first.
-    let tall: ExcelJS.Row | undefined;
-    tab.eachRow(row => { if ((row.values as unknown[]).includes(folded)) tall = row; });
-    expect(tall?.height).toBe(45);
-    expect(tall?.getCell(2 + PACK_OFFSET).alignment?.vertical).toBe('top');
+    const rows = dataRows(tab);
+    // The twins and the typed share: the product's own row, then its PO lines
+    // in PO order with the typed share last — each with its # on the order.
+    const at = rows.findIndex(m => text(m, 'From PO') === '2 POs + No PO');
+    expect(at).toBeGreaterThanOrEqual(0);
+    const block = rows.slice(at, at + 4);
+    expect(block.map(m => text(m, 'From PO'))).toEqual(['2 POs + No PO', `${a.po} #${x}`, `${b.po} #${y}`, 'No PO']);
+    expect(block.map(m => text(m, '#'))).toEqual(['', '3', '2', '4']);
+    expect(block.map(m => m.get('Qty')!.value)).toEqual([4, 1, 1, 2]);
+    expect(block.map(m => text(m, 'Part #'))).toEqual(['TWIN-PN', '', '', '']);
+    expect(block[0].get('Part #')!.font?.bold).toBe(true);
+    // Only the PO-line rows are ticked; the product's row is a heading.
+    expect(block.map(m => !!m.get('Packed ✓')!.border?.top)).toEqual([false, true, true, true]);
+    // The RAM device/generation labels run down the whole block.
+    const top = Number(block[0].get('#')!.row);
+    const bottom = Number(block[3].get('#')!.row);
+    expect(tab.getCell(bottom, 1).master.address).toBe(tab.getCell(top, 1).master.address);
+    expect(tab.getCell(bottom, 2).master.address).toBe(tab.getCell(top, 2).master.address);
+
+    // A product from one PO line stays one row; a typed-only one reads "—".
+    const single = rows.find(m => text(m, 'From PO') === `${a.po} #${na}`)!;
+    expect(text(single, '#')).toBe('1');
+    expect(single.get('Packed ✓')!.border?.top).toBeTruthy();
+    expect(rows.map(m => text(m, 'From PO'))).toContain('—');
+    // Totals count each product once: RAM 1 + 4, SSD 1.
+    expect(rowQty(tab, 'Subtotal')).toEqual([5, 1]);
+    expect(rowQty(tab, 'Warehouse total')).toEqual([6]);
 
     // Each list carries one source column: the by-PO tabs already name the PO.
     expect(plain.worksheets.flatMap(cellStrings)).not.toContain('ID in PO');
@@ -801,6 +847,67 @@ describe('GET /api/sell-orders/:id/packing-list?groupBy=po', () => {
     const byPoCells = byPo.worksheets.flatMap(cellStrings);
     expect(byPoCells).toContain('ID in PO');
     expect(byPoCells).not.toContain('From PO');
+  });
+
+  it('puts each lot\'s photo on its row, and leaves the cell blank for one it can\'t fetch', async () => {
+    const { token } = await loginAs(ALEX);
+    const sql = getTestDb();
+    const [a, b] = await linesFromTwoPos(token);
+    const [c] = (await sql<{ id: string }[]>`
+      INSERT INTO order_lines (order_id, category, qty, unit_cost, sell_price, part_number,
+                               status, position, warehouse_id)
+      VALUES (${a.po}, 'SSD', 1, 10, 20, 'STUB-SCAN', 'Reviewing', 91, 'WH-LA1')
+      RETURNING id`);
+    const scan = async (lineId: string, key: string, url: string) => {
+      await sql`UPDATE order_lines SET scan_image_id = ${key} WHERE id = ${lineId}`;
+      await sql`
+        INSERT INTO label_scans (user_id, cf_image_id, delivery_url, category)
+        VALUES ((SELECT id FROM users ORDER BY created_at LIMIT 1), ${key}, ${url}, 'RAM')`;
+    };
+    await scan(a.id, 'pack-photo-a', 'https://photos.test/a.jpg');
+    await scan(b.id, 'pack-photo-b', 'https://photos.test/b.jpg');
+    // A stub-provider scan: nothing to fetch.
+    await scan(c.id, 'stub-pack-photo-c', 'data:image/placeholder');
+
+    const png = await sharp({ create: { width: 300, height: 200, channels: 3, background: '#3a7' } })
+      .png().toBuffer();
+    const realFetch = globalThis.fetch;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url === 'https://photos.test/a.jpg') return new Response(png);
+      if (url.startsWith('https://photos.test/')) return new Response('gone', { status: 404 });
+      return realFetch(input, init);
+    });
+    try {
+      const id = await createOrder(token, {
+        lines: [
+          { inventoryId: a.id, category: 'RAM', label: 'A', partNumber: 'X', qty: 1, unitPrice: 40, warehouseId: 'WH-LA1' },
+          { inventoryId: b.id, category: 'RAM', label: 'B', partNumber: 'Y', qty: 1, unitPrice: 40, warehouseId: 'WH-LA1' },
+          { inventoryId: c.id, category: 'SSD', label: 'C', partNumber: 'STUB-SCAN', qty: 1, unitPrice: 9, warehouseId: 'WH-LA1' },
+        ],
+      });
+      const res = await getRaw(`/api/sell-orders/${id}/packing-list`, token);
+      expect(res.status).toBe(200);
+      const tab = (await loadWorkbook(res)).worksheets.find(w => w.name === 'Pack - LA1')!;
+      // b's 404 and c's stub scan leave their cells blank; only a's shows.
+      const images = tab.getImages();
+      expect(images).toHaveLength(1);
+      const na = await poPageNo(token, a.po, a.id);
+      const photoCell = dataRows(tab).find(m => text(m, 'From PO') === `${a.po} #${na}`)!.get('Photo')!;
+      expect(Math.floor(images[0].range.tl.nativeRow)).toBe(Number(photoCell.row) - 1);
+      expect(Math.floor(images[0].range.tl.nativeCol)).toBe(Number(photoCell.col) - 1);
+      const asked = fetchSpy.mock.calls.map(([u]) => (u instanceof Request ? u.url : String(u)));
+      expect(asked).toContain('https://photos.test/b.jpg');
+      expect(asked.some(u => u.startsWith('data:'))).toBe(false);
+
+      const byPoRes = await getRaw(`/api/sell-orders/${id}/packing-list?groupBy=po`, token);
+      expect(byPoRes.status).toBe(200);
+      const byPo = await loadWorkbook(byPoRes);
+      expect(byPo.worksheets.find(w => w.name === `${a.po} - LA1`)!.getImages()).toHaveLength(1);
+      expect(byPo.worksheets.find(w => w.name === `${b.po} - LA1`)!.getImages()).toHaveLength(0);
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 
   it('numbers each row by its line # on the sell order, both lists, a folded row listing every #', async () => {
