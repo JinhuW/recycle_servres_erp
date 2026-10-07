@@ -928,11 +928,23 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   bidder find a product in the same place; uploading this one to the price
   import is rejected for having no price column (v1.130.0). **Every row names
   its source in a `From PO` column after Part #** (v1.216.0): `PO-1442 #3`,
-  the line's # on that PO's page. A row folds one product across POs, so one
-  that folds several sources lists each on its own line in the cell with its
-  quantity (`PO-1442 #3 ×8`, `PO-1450 #1 ×4`), POs in numeric order and a
-  hand-typed share last as `No PO ×2`; a row of hand-typed lines alone reads
-  `—`.
+  the line's # on that PO's page; a row of hand-typed lines alone reads `—`.
+  **A product from several PO lines is checked off line by line** (v1.220.0,
+  laid out like the inventory page's lots): a bold row for the product — Part
+  #, specs, its total and the POs it spans (`2 POs`, `1 PO`, `+ No PO` for a
+  hand-typed share), no tick box — then a row per PO line with its own #,
+  tick box, photo, `From PO-999 #12` (or `No PO`) and quantity, POs in numeric
+  order, hand-typed last. The RAM labels run down the whole block and the
+  subtotals count the product once. Until v1.220.0 those lines were stacked in
+  one cell under a single tick box (v1.216.0).
+- **Packing-list rows carry the lot's photo** (v1.220.0): a `Photo` column
+  after the tick box holds a thumbnail of the lot's label scan, embedded so it
+  prints. The export fetches the scans from their public URL (dev's copy of
+  prod can't read the prod bucket by key), shrinks them to 112 px, and gives
+  up on a photo that is missing, not a raster, over 20 MB or still loading
+  after the 20-second budget — that cell stays blank and the download still
+  succeeds. At most 200 photos per file. The bid sheet keeps its Image URL
+  links. The download buttons stay disabled while a file is being prepared.
 - **Both packing lists number their rows by the sell order's #** (v1.219.0): a
   `#` column first, before the tick box, so the label on an item matches its
   row. A row that folds several lines lists their #s ascending (`2, 5`). The
@@ -944,8 +956,9 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   category sections, the RAM device / DDR-generation labels and tints, tick
   boxes, subtotals and a PO total. Each tab adds an **ID in PO** column after
   Part # (v1.197.3): the line's # on that PO's page. A row that folds several
-  lots of the PO lists their IDs ascending ("1, 3"); the tab already names the
-  PO, so it has no `From PO` column. A warehouse picker beside the buttons
+  lots of the PO is split the same way (v1.220.0): the product's row reads
+  `2 lines`, then each line's row its ID; the tab already names the PO, so it
+  has no `From PO` column. A warehouse picker beside the buttons
   (shown when the order spans more than one) narrows either packing list to
   one warehouse (`?warehouse=<short>`); the bid sheet always covers the whole
   order. Both packing lists place a line by where its lot is *now* — the lot's
@@ -963,6 +976,11 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
     from (`From PO-1111 #1`, or *Typed in*). When the order's lots sit in more
     than one warehouse, a *Packing from* switch narrows the list without
     renumbering it.
+  - **Each line shows its lot's photo** (v1.220.0) between the tag and the
+    item — the label scan, loaded lazily; a tap zooms it, and Esc closes the
+    zoom before it leaves Pack mode. A line with no real scan (typed, or a
+    stub scan) keeps an empty slot so the items stay in one column. The photo
+    comes from `GET /api/sell-orders/:id` as each line's `imageUrl`.
   - A line's count starts at its qty. − / + record a short pick (amber, *Short*)
     or none at all (red, *Not packed*), and lowering a packed line unticks it.
     The tick confirms the count as shown; a ticked line **stays in its place**
