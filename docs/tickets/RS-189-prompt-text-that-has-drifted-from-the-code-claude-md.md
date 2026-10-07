@@ -2,13 +2,13 @@
 id: RS-189
 title: "Prompt text that has drifted from the code: CLAUDE.md facts, the session hook, MCP tool descriptions"
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-07
 reporter: jinhu
 branch: dev-6
-pr:
-version:
+pr: 523
+version: 1.219.1
 related: [RS-188]
 ---
 
@@ -55,13 +55,13 @@ the code. Each finding was checked against the repository, not guessed:
 
 ## Acceptance criteria
 
-- [ ] Each CLAUDE.md / README.md fact above matches the code.
-- [ ] The history sentences, memory pointers and `plan-first` naming are gone
+- [x] Each CLAUDE.md / README.md fact above matches the code.
+- [x] The history sentences, memory pointers and `plan-first` naming are gone
       or restated as current rules.
-- [ ] The hook stays silent in a linked worktree and still speaks in the main
+- [x] The hook stays silent in a linked worktree and still speaks in the main
       checkout.
-- [ ] The three MCP descriptions state what the code does.
-- [ ] With two reference prices on one canonical part number,
+- [x] The three MCP descriptions state what the code does.
+- [x] With two reference prices on one canonical part number,
       `set_market_price` and `get_market_value` use the most recently updated
       one (test).
 
