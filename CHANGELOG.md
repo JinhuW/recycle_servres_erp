@@ -17,6 +17,27 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.216.0] - 2026-10-07
+
+The sell order's Packing list now tells the picker which PO line each row came
+from (RS-186). The sell order page and the Packing list by PO already did; the
+per-warehouse list was the one place a row couldn't be traced back to its PO.
+
+### Added
+
+- **A `From PO` column after Part # on every `Pack - <warehouse>` tab.** A
+  row from one PO line reads `PO-1442 #3`, the same # the PO page shows.
+  - A row on this list folds one product across POs, which is why it never
+    had the column (RS-149). A row that folds several sources now lists each
+    on its own line in the cell with its quantity — `PO-1442 #3 ×8`,
+    `PO-1450 #1 ×4` — POs in numeric order and a hand-typed share last as
+    `No PO ×2`. The row grows to fit and its cells sit at the top, so Part #
+    reads beside the first source.
+  - A row of hand-typed lines alone reads `—`.
+  - Rows, quantities and totals are unchanged. The Packing list by PO keeps
+    its `ID in PO` column, since its tab already names the PO, and the bid
+    sheet has no source column: it goes to the vendor.
+
 ## [1.213.0] - 2026-10-07
 
 A PO line whose units never arrived can now be counted down to 0 instead of

@@ -22,6 +22,7 @@ import {
 } from '../services/sellOrderPriceImport';
 import {
   buildPriceTemplateWorkbook, buildPackingListWorkbook, buildPackingListByPoWorkbook,
+  type PoSource,
 } from '../lib/sellOrderPriceTemplate';
 import { canonPartNumberJs } from '../lib/part-number';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
@@ -471,9 +472,10 @@ async function loadSellOrderSheetData(sql: SqlClient, id: string) {
     category: SoCategory; label: string; partNumber: string | null;
     condition: string | null; qty: number; imageUrl: string | null;
     specs: Record<string, string | number>;
-    // The folded lots' # on their PO. Only the by-PO tabs collect it: the
-    // other maps fold several POs together, where a line number names nothing.
-    poLineNos?: number[];
+    // Where the row's units came from, one entry per PO line. The
+    // per-warehouse tabs print every entry, a by-PO tab only their line
+    // numbers, the bid sheet none.
+    poSources: PoSource[];
   };
   // Only real public URLs make the sheet — seeded/stub scans carry data: URLs
   // that would render as garbage text in the cell.
@@ -500,9 +502,9 @@ async function loadSellOrderSheetData(sql: SqlClient, id: string) {
     const part = (r.part_number ?? r.sol_part ?? null) as string | null;
     const condition = (r.condition ?? r.sol_condition ?? null) as string | null;
     const key = `${part ? canonPartNumberJs(part) : ''}|${label}|${condition ?? ''}`;
+    const qty = Number(r.sell_qty ?? 0);
     const makeGroup = (): Group => ({
-      category, label, partNumber: part, condition,
-      qty: Number(r.sell_qty ?? 0),
+      category, label, partNumber: part, condition, qty,
       imageUrl: publicUrl(r.image_url),
       specs: hasInv ? {
         brand: s(r.brand), capacity: s(r.capacity), generation: s(r.generation),
@@ -511,31 +513,34 @@ async function loadSellOrderSheetData(sql: SqlClient, id: string) {
         formFactor: s(r.form_factor),
         health: (r.health as number | null) ?? '', rpm: (r.rpm as number | null) ?? '',
       } : {},
+      poSources: [],
     });
+    // Both null for a hand-typed line, both set for a lot: order_lines.order_id
+    // is NOT NULL and poLineNo is null only without a lot.
+    const po = s(r.source_order_id) || null;
     const lineNo = r.po_line_no as number | null;
-    const fold = (map: Map<string, Group>, withLineNo = false) => {
+    const fold = (map: Map<string, Group>) => {
       let g = map.get(key);
       if (g) {
-        g.qty += Number(r.sell_qty ?? 0);
+        g.qty += qty;
         if (!g.imageUrl) g.imageUrl = publicUrl(r.image_url);
       } else {
         g = makeGroup();
         map.set(key, g);
       }
-      if (withLineNo && lineNo != null) {
-        g.poLineNos ??= [];
-        if (!g.poLineNos.includes(lineNo)) g.poLineNos.push(lineNo);
-      }
+      const src = g.poSources.find((x) => x.po === po && x.lineNo === lineNo);
+      if (src) src.qty += qty;
+      else g.poSources.push({ po, lineNo, qty });
     };
     fold(groups);
     const wh = s(r.warehouse_short) || 'Unassigned';
     if (!byWarehouse.has(wh)) byWarehouse.set(wh, new Map());
     fold(byWarehouse.get(wh)!);
-    const po = s(r.source_order_id);
     if (!byWarehousePo.has(wh)) byWarehousePo.set(wh, new Map());
     const whPos = byWarehousePo.get(wh)!;
-    if (!whPos.has(po)) whPos.set(po, new Map());
-    fold(whPos.get(po)!, true);
+    const poKey = po ?? '';
+    if (!whPos.has(poKey)) whPos.set(poKey, new Map());
+    fold(whPos.get(poKey)!);
   }
 
   const warehouseOrder = [...byWarehouse.keys()].sort((a, b) => {
