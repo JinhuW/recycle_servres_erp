@@ -17,6 +17,102 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.213.0] - 2026-10-07
+
+A PO line whose units never arrived can now be counted down to 0 instead of
+deleted, so every other line keeps its `#` (RS-184). Review mode's Approve
+uses it in place of the removal 1.212.0 introduced, and PO-1483 gets back the
+two lines that were deleted for this reason.
+
+### Changed
+
+- **An existing PO line may be set to qty 0.** Deleting a line was the only
+  way to record "none of it arrived", and it renumbered every line after it,
+  because a line's `#` is its rank on the PO (RS-145). `order_lines.qty` now
+  allows 0 (migration 0160).
+  - Only a line already on the PO can be set to 0. PATCH `lines` takes it,
+    and so do the PO page drawer, the Review-mode drawer and the phone line
+    form on an existing order.
+  - A new line still needs at least 1: POST `/api/orders`, PATCH `addLines`,
+    the new-PO screens on desktop and phone, and the web form. The inventory
+    stock editor also keeps 1 as its floor.
+  - A line committed to a Shipped or Awaiting-payment sell order still can't
+    drop below what that order holds.
+- **Review mode's Approve sets lines ticked at 0 to qty 0, then moves the PO
+  to Ready to Pay.** In 1.212.0 it deleted them. That release never reached
+  prod, so on prod Approve has never removed a line.
+  - The button reads *Set n to 0 & approve*. A goods total that follows the
+    lines drops by their value. A negotiated lot price stays as it is, with
+    the same warning.
+  - Zeroing keeps each line's scan photo. A delete swept it out of storage.
+  - A line already at qty 0 is ticked by *Check all remaining*, and Approve
+    doesn't send it again. A scan that lands on it says it is at qty 0
+    instead of asking to raise a count that can't go up.
+  - When every line is at 0, Approve stays disabled. Nothing arrived, so
+    there is nothing to pay for.
+- **A 0-qty line is not stock.** The inventory list, its export, the grouped
+  view and the analysis page leave it out. It no longer keeps a Done PO from
+  settling to Sold.
+- **A DDR5 line counted down to 0 needs no serials.** It holds no module to
+  serialize. A blank qty still does.
+
+### Fixed
+
+- **PO-1483 lines #33 and #37 are back, at qty 0** (migration 0161). Both were
+  deleted on 2026-10-07 because none of their units arrived, and the delete
+  renumbered the lines below them.
+  - They return at their original positions and timestamps, so every line
+    has its old `#` again. The goods total ($12,331) and other fees ($969)
+    don't move.
+  - The migration is guarded on each line's own `line_removed` record, so it
+    does nothing on any other database.
+  - #37's label scan was swept with the delete and doesn't come back.
+
+## [1.212.0] - 2026-10-06
+
+In Review mode, a line counted down to 0 now means it isn't in the box, and
+approving takes it off the PO (RS-183).
+
+### Changed
+
+- **A line lowered to 0 reads *Not in the box*, in red, with its own legend
+  chip.** It used to count as *partly counted*. It still needs its own tick,
+  like any short line, and *Check all remaining* still leaves it alone.
+- **Approve removes the lines ticked at 0, then moves the PO to Ready to
+  Pay.** Previously such a line stayed on the PO at its full qty, so it was
+  paid for and counted as stock although nothing arrived. Review mode's Edit
+  drawer can't remove a line, so the only fix was the PO page.
+  - Finish review lists those lines and the button reads *Remove n &
+    approve*. The removal goes through the PO page's own `PATCH
+    removeLineIds`, so it records `line_removed` and recomputes the goods
+    total. It also refuses a line on an open sell order.
+  - It runs ahead of the move because Ready to Pay is closed-book. If the move
+    is then refused, or a manager re-ask is cancelled, the page re-reads the PO
+    so it stops showing rows the PO no longer has.
+- **A PO with a negotiated lot price gets a warning** that removing lines
+  doesn't lower that price.
+- **When every line is at 0, Approve is disabled and the page says why.** A
+  PO must keep a line.
+- **A scan of a line counted 0 ticks nothing.** A scan says the part is
+  there, so ticking a line at 0 from it would confirm its removal.
+
+## [1.211.1] - 2026-10-05
+
+The nightly prod→dev database copy works again (RS-182).
+
+### Fixed
+
+- **The 04:00 UTC `db-sync` run had failed every night since v1.196.1**
+  with `relation "refresh_tokens" does not exist`, so dev's data stayed at
+  2026-10-02. Plain-format `pg_dump` opens with a line that empties
+  `search_path` for the rest of the session. The credential scrub runs in that
+  session right after the dump, and its table names were unqualified, so the
+  first `TRUNCATE` could not find its table. The restore is one transaction,
+  so each run rolled back cleanly and dev was never left empty. It was only
+  stale, and nothing alerted. `scrub.sql` now qualifies every name with
+  `public.`, and `tests/sync-scrub.test.ts` runs the scrub with `search_path`
+  emptied, so an unqualified name added later fails CI instead of the restore.
+
 ## [1.211.0] - 2026-10-05
 
 SSD capacity offers 2TB and RAM class offers CAMM (RS-178).

@@ -8,6 +8,7 @@ import { scanErrorMessage } from '../../../lib/scanError';
 import { AI_CONFIDENCE_FLOOR, AI_UNREADABLE_FLOOR } from '../../../lib/status';
 import type { Category, ScanResponse } from '../../../lib/types';
 import { brandConfirmPending, scanToLinePatch, type Line } from './line';
+import type { EditLine } from './editLine';
 import { BrandConfirmDialog } from '../../../components/BrandConfirmDialog';
 import { SerialChipsField } from '../../../components/SerialChipsField';
 import { RAM_BRANDS } from '../../../lib/catalog';
@@ -34,7 +35,7 @@ export function LineDrawer({
   onConfirmLine, onConfirmError, duplicateOnLines, readOnly = false,
   sellPriceEditable = false, photoCtx, market, missingFields,
 }: {
-  line: Line;
+  line: Line | EditLine;
   idx: number;
   onChange: (patch: Partial<Line>) => void;
   onClose: () => void;
@@ -590,7 +591,8 @@ export function LineDrawer({
                 <input
                   className="input"
                   type="number"
-                  min={1}
+                  // A line already on the PO may be counted down to 0.
+                  min={'_id' in line && line._id ? 0 : 1}
                   value={line.qty}
                   onChange={e => set({ qty: e.target.value })}
                 />

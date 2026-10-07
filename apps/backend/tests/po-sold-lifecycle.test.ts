@@ -106,6 +106,29 @@ describe('a sell order reaching Done settles a Done PO', () => {
     expect(evs.find(e => e.detail.to === 'sold')?.actor?.id).toBeDefined();
   });
 
+  // A line counted down to 0 in review never arrived: nothing of it can sell,
+  // so it must not hold the PO at done forever.
+  it('a line counted down to 0 does not keep the PO from settling', async () => {
+    const marcus = await loginAs(MARCUS);
+    const alex = await loginAs(ALEX);
+    const created = await api<{ id: string }>('POST', '/api/orders', { token: marcus.token, body: BODY });
+    const id = created.body.id;
+    expect((await advance(marcus.token, id)).status).toBe(200);   // → in_transit
+    expect((await advance(alex.token, id)).status).toBe(200);     // → reviewing
+    const [sold, never] = (await getOrder(alex.token, id)).lines;
+    const zero = await api('PATCH', `/api/orders/${id}`, {
+      token: alex.token, body: { lines: [{ id: never.id, qty: 0 }] },
+    });
+    expect(zero.status).toBe(200);
+    expect((await advance(alex.token, id)).status).toBe(200);     // → ready_to_pay
+    expect((await advance(alex.token, id)).status).toBe(200);     // → done
+
+    await sellDone(alex.token, sold.id, sold.qty);
+    const order = await getOrder(alex.token, id);
+    expect(order.lifecycle).toBe('sold');
+    expect(order.lines.find(l => l.id === never.id)).toMatchObject({ qty: 0, status: 'Done' });
+  });
+
   it('a partial sale leaves the PO at done', async () => {
     const { id, alex, lines } = await orderAt('done');
     await sellDone(alex.token, lines[1].id, 1);

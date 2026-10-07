@@ -33,6 +33,9 @@ export type SerialIssue =
 // Returns the first violated rule, or null when the line is fine. Lines with
 // no serials and no DDR5 requirement pass untouched.
 export function serialIssue(line: SerialCheckLine): SerialIssue | null {
+  // An existing line counted down to 0 holds no module to serialize. Only an
+  // explicit 0: a blank qty is a line still being filled in.
+  if (line.qty !== '' && line.qty != null && Number(line.qty) === 0) return null;
   const serials = parseSerials(line.serialNumber);
   const qty = Math.floor(Number(line.qty ?? 0)) || 0;
   const isDdr5 =

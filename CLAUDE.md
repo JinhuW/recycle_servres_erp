@@ -418,7 +418,8 @@ switches the branch out from under the first.
   OAuth and login-attempt tables and nulls OAuth client secrets, inside the
   restore transaction.  A new table holding a token belongs in that file.  An
   FK onto a scrubbed table fails `tests/sync-scrub.test.ts`, which is the
-  point.
+  point.  Qualify every name in it with `public.`, because the dump before it
+  empties `search_path` (v1.211.1).
 
 - `docker-compose.yml` is the prod-shaped stack.  Every service has
   `cap_drop: ALL` + `no-new-privileges` + memory caps + JSON log rotation.

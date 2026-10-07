@@ -28,7 +28,8 @@ export type CheckableLine = {
   id: string; qty: number; partNumber: string | null; serialNumber: string | null;
 };
 
-export type LineCheckState = 'open' | 'partial' | 'done';
+// `absent`: lowered to 0 — nothing of it arrived — and not yet ticked.
+export type LineCheckState = 'open' | 'partial' | 'absent' | 'done';
 
 // Approve needs the PO at Reviewing, so opening review mode before then offers
 // to move it there. Later stages open as a recount — moving one back would
@@ -78,12 +79,20 @@ export function countOf(line: CheckableLine, check: LineCheck | undefined): numb
 // settled by lowering the count, or by editing the line to what arrived.
 export function lineState(line: CheckableLine, check: LineCheck | undefined): LineCheckState {
   if (check?.checkedAt) return 'done';
-  return (check?.counted ?? line.qty) < line.qty ? 'partial' : 'open';
+  const n = countOf(line, check);
+  if (n === 0) return 'absent';
+  return n < line.qty ? 'partial' : 'open';
 }
 
-// Checked, but for fewer units than the line carries.
+// Checked, but for fewer units than the line carries — at least one arrived.
 export function isShortChecked(line: CheckableLine, check: LineCheck | undefined): boolean {
-  return !!check?.checkedAt && countOf(line, check) < line.qty;
+  const n = countOf(line, check);
+  return !!check?.checkedAt && n > 0 && n < line.qty;
+}
+
+// Checked at 0: the line isn't in the box, and Approve sets its qty to 0.
+export function isAbsentChecked(line: CheckableLine, check: LineCheck | undefined): boolean {
+  return !!check?.checkedAt && countOf(line, check) === 0;
 }
 
 export type OrderedLines<L> = { open: L[]; done: L[] };
@@ -107,13 +116,13 @@ export function orderLines<L extends CheckableLine>(
 
 export type Tally = {
   units: number; counted: number;
-  open: number; partial: number; done: number;
+  open: number; partial: number; absent: number; done: number;
 };
 
 // `counted` is the units on checked lines: with the count starting full, only
 // a tick says anyone looked.
 export function tally(lines: readonly CheckableLine[], checks: ReadonlyMap<string, LineCheck>): Tally {
-  const t: Tally = { units: 0, counted: 0, open: 0, partial: 0, done: 0 };
+  const t: Tally = { units: 0, counted: 0, open: 0, partial: 0, absent: 0, done: 0 };
   for (const l of lines) {
     const c = checks.get(l.id);
     const s = lineState(l, c);
@@ -128,7 +137,7 @@ export type ScanMatch<L> = { line: L } | { ambiguous: string[] };
 
 // Which same-part line a scan lands on: one still waiting first, so a short
 // line can't swallow every scan of its part number.
-const SCAN_RANK: Record<LineCheckState, number> = { open: 0, partial: 1, done: 2 };
+const SCAN_RANK: Record<LineCheckState, number> = { open: 0, partial: 1, absent: 2, done: 3 };
 
 // A scanner types the label and presses Enter. Exact part number first, then
 // a prefix (labels often carry a suffix the PO line doesn't), then a serial.

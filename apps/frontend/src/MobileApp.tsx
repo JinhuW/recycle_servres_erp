@@ -427,9 +427,10 @@ function Shell() {
   // same shared rule first, so reaching this with something missing means the
   // line arrived from somewhere else — a resumed draft, or a category switch
   // that emptied the fields the new category needs. Surfaced to the user so a
-  // line never fails to sync silently.
-  const lineSyncBlock = (l: DraftLine): string | null => {
-    const fields = missingFieldNames(lineRequirements(l).missingKeys, t, lang);
+  // line never fails to sync silently. A saved line of an existing order may
+  // be counted down to 0; a line being captured needs at least 1.
+  const lineSyncBlock = (l: DraftLine, allowZeroQty = false): string | null => {
+    const fields = missingFieldNames(lineRequirements(l, { allowZeroQty }).missingKeys, t, lang);
     return fields ? t('drawerStillNeeded', { fields }) : null;
   };
 
@@ -467,7 +468,7 @@ function Shell() {
     // must UPDATE that row so the edit syncs now, instead of sitting
     // browser-only until final submit (or being dropped as a "confirmed" line).
     if (line.id) {
-      const blocked = lineSyncBlock(line);
+      const blocked = lineSyncBlock(line, !!editingId);
       if (blocked) {
         showToast(blocked, 'error');
         return;
@@ -486,7 +487,10 @@ function Shell() {
         // the line's lifecycle (Done, etc.) instead of forcing In Transit.
         const { status, ...fields } = toAddLine(line);
         void status;
-        await api.patch('/api/orders/' + orderId, { lines: [{ id: line.id, ...fields }] });
+        // toAddLine reads a 0 qty as 1, as a new line must; an existing
+        // order's line may stand at 0.
+        const qty = editingId ? Number(line.qty) || 0 : fields.qty;
+        await api.patch('/api/orders/' + orderId, { lines: [{ id: line.id, ...fields, qty }] });
         await flushLinePhotos(line, orderId, line.id);
         if (backToDetail) doneToDetail();
       } catch (e) {
@@ -760,6 +764,7 @@ function Shell() {
           lineCount={capture.lines.length}
           editingLineIdx={capture.editingLineIdx ?? null}
           existingLine={existing}
+          allowZeroQty={!!capture.editingId && !!existing?.id}
           onSaveLine={onSaveLine}
           onCancel={cancelCapture}
           onBack={goBack}

@@ -3943,6 +3943,7 @@ button.rsheet-box:hover { background: color-mix(in oklch, var(--accent) 10%, tra
 .bc-meter i { display: block; flex-basis: 0; min-width: 0; transition: flex-grow 0.3s ease; }
 .bc-m-done { background: var(--accent); }
 .bc-m-part { background: var(--warn); }
+.bc-m-absent { background: var(--neg); }
 .bc-m-open { background: transparent; }
 .bc-legend { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 
@@ -3977,6 +3978,8 @@ button.rsheet-box:hover { background: color-mix(in oklch, var(--accent) 10%, tra
 .bc-cb:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .bc-partial .bc-cb { border-color: var(--warn); background: var(--warn-soft); }
 .bc-partial .bc-cb::after { content: ''; width: 10px; height: 2.5px; border-radius: 2px; background: var(--warn-strong); }
+.bc-absent .bc-cb { border-color: var(--neg); background: var(--neg-soft); }
+.bc-absent .bc-cb::after { content: ''; width: 10px; height: 2.5px; border-radius: 2px; background: var(--neg); }
 .bc-done .bc-cb { background: var(--accent); border-color: var(--accent); }
 .bc-thumb {
   width: 40px; height: 40px; border-radius: 8px; object-fit: cover; display: block;
@@ -3989,7 +3992,10 @@ button.rsheet-box:hover { background: color-mix(in oklch, var(--accent) 10%, tra
 .bc-count-n { min-width: 58px; text-align: center; font-size: 13px; font-variant-numeric: tabular-nums; }
 .bc-count-n b { font-weight: 600; }
 .bc-partial .bc-count-n b { color: var(--warn-strong); }
+.bc-absent .bc-count-n b { color: var(--neg); }
+.bc-absent-tag { margin-top: 2px; font-size: 11px; font-weight: 500; color: var(--neg); }
 .bc-done .bc-count-n b { color: var(--accent-strong); }
+.bc-done-absent .bc-count-n b { color: var(--neg); }
 .bc-done .bc-pn { text-decoration: line-through; text-decoration-color: var(--fg-subtle); }
 /* Dim the content, never a td: opacity on a cell would fade the row's
    hover/selected wash with it. */
@@ -4035,6 +4041,7 @@ button.rsheet-box:hover { background: color-mix(in oklch, var(--accent) 10%, tra
 .bc-finish .card-body { display: grid; gap: 12px; }
 .bc-finish p { margin: 0; }
 .bc-problem-list { margin: 0; padding-left: 18px; display: grid; gap: 3px; font-size: 12.5px; }
+.bc-finish .bc-lot-note { color: var(--warn-strong); }
 .bc-finish-actions { display: grid; gap: 8px; }
 .bc-finish-actions .btn { justify-content: center; }
 

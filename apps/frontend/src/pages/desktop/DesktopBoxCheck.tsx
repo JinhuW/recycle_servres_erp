@@ -8,7 +8,7 @@ import { useManagerTakeover } from '../../components/ManagerTakeoverDialog';
 import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
 import { api, rawFetch } from '../../lib/api';
 import {
-  checkBody, countOf, emptyCheck, entryAnswerFor, isShortChecked, lineState, matchScan, nextOpenAfter, orderLines,
+  checkBody, countOf, emptyCheck, entryAnswerFor, isAbsentChecked, isShortChecked, lineState, matchScan, nextOpenAfter, orderLines,
   readStageMoved, stashEntryAnswer, tally,
   type ChecksResponse, type LineCheck,
 } from '../../lib/boxCheck';
@@ -233,8 +233,10 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   };
 
   // A cost is owed only once the line is touched, as on the PO page: legacy
-  // $0 lines must stay openable.
-  const editRequirements = (l: EditLine) => lineRequirements(l, { requireCost: !!l._dirty });
+  // $0 lines must stay openable. Every line here is already on the PO, so it
+  // may be set to 0.
+  const editRequirements = (l: EditLine) =>
+    lineRequirements(l, { requireCost: !!l._dirty, allowZeroQty: true });
 
   // Throws to keep the drawer open; the drawer shows the message.
   const confirmEdit = async (): Promise<void> => {
@@ -290,9 +292,10 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     if (!ready) return;
     const now = Date.now();
     // Short lines are left for their own tick; everything still at its full
-    // count is ticked. Staggered stamps keep the batch in PO order inside Checked.
+    // count is ticked, a line already at qty 0 included — there is nothing of
+    // it to count. Staggered stamps keep the batch in PO order inside Checked.
     ordered.open
-      .filter(l => lineState(l, checks.get(l.id)) === 'open')
+      .filter(l => l.qty === 0 || lineState(l, checks.get(l.id)) === 'open')
       .forEach((l, i) => save({ ...checkOf(l.id), checkedAt: new Date(now - i).toISOString() }));
     setUndo(null);
   };
@@ -319,6 +322,17 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     setSelectedId(hit.id);
     const pn = hit.partNumber ?? lineLabel(hit);
     const state = lineState(hit, checks.get(hit.id));
+    // A scan says the part is here, and a tick at 0 would confirm it isn't —
+    // Approve would then set the line to 0. A line already at qty 0 has no
+    // count to raise; only an edit can put units back on it.
+    if (hit.qty === 0) {
+      setScanMsg({ tone: 'neg', text: t('bcScanZeroQty', { pn }) });
+      return;
+    }
+    if (countOf(hit, checks.get(hit.id)) === 0) {
+      setScanMsg({ tone: 'neg', text: t('bcScanZero', { pn }) });
+      return;
+    }
     // A scan checks the whole line, so the next unit of it reads as already
     // done.
     if (state === 'done') {
@@ -337,17 +351,31 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     const answer = entryAnswerFor(order) ?? await takeover.ask(order);
     if (answer === null) return;
     setBusy('approve');
+    // Once lines are at 0, a move that doesn't happen leaves this page showing
+    // the qty they had; the re-read brings the new one (and the goods total).
+    let zeroed = false;
+    const reloadIfZeroed = () => (zeroed ? onReload().catch(handleFetchError) : undefined);
     try {
       await flush();
+      // Ahead of the move: from Ready to Pay the lines are closed book. Set to
+      // 0 rather than removed, so every line keeps its # on the PO.
+      if (toZero.length) {
+        await api.patch(`/api/orders/${order.id}`, { lines: toZero.map(l => ({ id: l.id, qty: 0 })) });
+        zeroed = true;
+      }
       // The page may have sat open while someone else moved the PO; the jump
       // is refused under the row lock unless it is still at Reviewing.
       const moved = await takeover.advance(order, { toStage: 'ready_to_pay', fromStage: 'reviewing' }, answer);
-      if (!moved) return;
+      if (!moved) {
+        await reloadIfZeroed();
+        return;
+      }
       stashEntryAnswer(order.id, null);
     } catch (e) {
       const now = readStageMoved(e);
       if (now !== null) showErrorDialog(t('bcStaleStage', { id: order.id, s: poStageName(now, t) }));
       else handleFetchError(e);
+      await reloadIfZeroed();
       return;
     } finally {
       setBusy(null);
@@ -430,6 +458,11 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   useEffect(() => { setPhotoIdx(0); }, [selected?.id]);
 
   const short = ordered.done.filter(l => isShortChecked(l, checks.get(l.id)));
+  const absent = ordered.done.filter(l => isAbsentChecked(l, checks.get(l.id)));
+  // What Approve still has to set to 0: a line already there needs nothing.
+  const toZero = absent.filter(l => l.qty > 0);
+  // Nothing on this PO arrived: there is nothing to pay for.
+  const allAbsent = absent.length === lines.length;
   // The PO page's numbering, which the regrouped rows would otherwise lose.
   const lineNo = (l: OrderLine) => lines.indexOf(l) + 1;
 
@@ -444,7 +477,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
         <tr
           id={'bc-row-' + l.id}
           ref={el => { if (el) rowRefs.current.set(l.id, el); else rowRefs.current.delete(l.id); }}
-          className={'bc-row bc-' + state + (isSel ? ' row-selected' : '')}
+          className={'bc-row bc-' + state + (isAbsentChecked(l, c) ? ' bc-done-absent' : '') + (isSel ? ' row-selected' : '')}
           onClick={() => setSelectedId(l.id)}
         >
           <td className="bc-cb-cell">
@@ -489,6 +522,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
                 <Icon name="plus" size={13} />
               </button>
             </div>
+            {countOf(l, c) === 0 && <div className="bc-absent-tag">{t('bcAbsentTag')}</div>}
           </td>
           <td className="bc-edit-cell">
             <button
@@ -555,11 +589,13 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
           <div className="bc-meter" role="img" aria-label={t('bcUnitsCounted', { n: sum.done, of: lines.length })}>
             <i className="bc-m-done" style={{ flexGrow: sum.done }} />
             <i className="bc-m-part" style={{ flexGrow: sum.partial }} />
+            <i className="bc-m-absent" style={{ flexGrow: sum.absent }} />
             <i className="bc-m-open" style={{ flexGrow: sum.open }} />
           </div>
           <div className="bc-legend">
             <span className="chip pos dot">{t('bcLegendDone', { n: sum.done })}</span>
             <span className="chip warn dot">{t('bcLegendPartial', { n: sum.partial })}</span>
+            {sum.absent > 0 && <span className="chip neg dot">{t('bcLegendAbsent', { n: sum.absent })}</span>}
             <span className="chip muted dot">{t('bcLegendOpen', { n: sum.open })}</span>
           </div>
         </div>
@@ -687,25 +723,47 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
             <div className="card-body">
               {remaining > 0 ? (
                 <p className="card-sub">{t(remaining === 1 ? 'bcRemainingOne' : 'bcRemainingMany', { n: remaining })}</p>
-              ) : short.length > 0 ? (
+              ) : allAbsent ? (
+                <p className="card-sub">{t('bcAllAbsent')}</p>
+              ) : absent.length > 0 || short.length > 0 ? (
                 <>
-                  <p className="card-sub">{t('bcShortIntro', { n: short.length })}</p>
-                  <ul className="bc-problem-list">
-                    {short.map(l => (
-                      <li key={l.id}>
-                        <span className="mono">#{lineNo(l)} {l.partNumber ?? lineLabel(l)}</span>
-                        {' · '}{t('bcShortNote', { n: countOf(l, checks.get(l.id)), of: l.qty })}
-                      </li>
-                    ))}
-                  </ul>
+                  {absent.length > 0 && (
+                    <>
+                      <p className="card-sub">{t(atReviewing && toZero.length ? 'bcZeroIntro' : 'bcAbsentIntro', { n: absent.length })}</p>
+                      <ul className="bc-problem-list">
+                        {absent.map(l => (
+                          <li key={l.id}>
+                            <span className="mono">#{lineNo(l)} {l.partNumber ?? lineLabel(l)}</span>
+                            {' · '}{t('bcShortNote', { n: 0, of: l.qty })}
+                          </li>
+                        ))}
+                      </ul>
+                      {atReviewing && toZero.length > 0 && order.goodsFollowsLines === false && (
+                        <p className="card-sub bc-lot-note">{t('bcLotPriceKept')}</p>
+                      )}
+                    </>
+                  )}
+                  {short.length > 0 && (
+                    <>
+                      <p className="card-sub">{t('bcShortIntro', { n: short.length })}</p>
+                      <ul className="bc-problem-list">
+                        {short.map(l => (
+                          <li key={l.id}>
+                            <span className="mono">#{lineNo(l)} {l.partNumber ?? lineLabel(l)}</span>
+                            {' · '}{t('bcShortNote', { n: countOf(l, checks.get(l.id)), of: l.qty })}
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
                 </>
               ) : (
                 <p className="card-sub">{t(atReviewing ? 'bcAllMatch' : 'bcAllMatchNotReviewing', { n: lines.length, s: order.status })}</p>
               )}
               <div className="bc-finish-actions">
                 {atReviewing && (
-                  <button type="button" className="btn accent" disabled={!ready || busy !== null || takeover.asking || remaining > 0} onClick={() => void approve()}>
-                    <Icon name="check" size={13} /> {busy === 'approve' ? '…' : t('bcApprove')}
+                  <button type="button" className="btn accent" disabled={!ready || busy !== null || takeover.asking || remaining > 0 || allAbsent} onClick={() => void approve()}>
+                    <Icon name="check" size={13} /> {busy === 'approve' ? '…' : toZero.length && !allAbsent ? t('bcApproveZeroing', { n: toZero.length }) : t('bcApprove')}
                   </button>
                 )}
               </div>

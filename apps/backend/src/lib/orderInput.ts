@@ -8,6 +8,10 @@
 // `create` is a brand-new line: qty and unit cost must be there. `patch` is
 // an edit: an absent field keeps its stored value, so only what is present is
 // checked.
+//
+// A new line carries at least one unit. An existing PO line may be counted
+// down to 0 (`allowZeroQty`) when none of it arrived: deleting it instead
+// would renumber every line after it, since a line's # is its rank on the PO.
 
 export type LineInputMode = 'create' | 'patch';
 
@@ -22,11 +26,16 @@ const TEXT_MAX: Record<string, number> = {
 
 const present = (v: unknown) => v !== undefined && v !== null;
 
-export function validateLineInput(l: Record<string, unknown>, mode: LineInputMode): string | null {
+export function validateLineInput(
+  l: Record<string, unknown>,
+  mode: LineInputMode,
+  { allowZeroQty = false }: { allowZeroQty?: boolean } = {},
+): string | null {
   const qty = l.qty;
   if (mode === 'create' && !present(qty)) return 'qty is required';
-  if (present(qty) && (typeof qty !== 'number' || !Number.isInteger(qty) || qty <= 0)) {
-    return 'qty must be a whole number of at least 1';
+  const minQty = allowZeroQty ? 0 : 1;
+  if (present(qty) && (typeof qty !== 'number' || !Number.isInteger(qty) || qty < minQty)) {
+    return allowZeroQty ? 'qty must be a whole number of 0 or more' : 'qty must be a whole number of at least 1';
   }
   const unitCost = l.unitCost;
   if (mode === 'create' && !present(unitCost)) return 'unitCost is required';
