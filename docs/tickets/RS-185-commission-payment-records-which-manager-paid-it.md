@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-07
 reporter: jinhu
 branch: feat/commission-paid-by
-pr:
+pr: 517
 version: 1.217.0
 related: [RS-084, RS-086]
 ---
