@@ -1,7 +1,8 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import {
-  hrefFor, matchPoCheck, matchPurchaseOrder, navigate, navigateBack, onLinkClick, parseShippingRoute,
-  pathToDesktopView, poCheckPath, readSafeNext, replaceRoute, type LinkClick,
+  hrefFor, matchPoCheck, matchPurchaseOrder, matchSellOrderPack, navigate, navigateBack, onLinkClick,
+  parseShippingRoute, pathToDesktopView, poCheckPath, readSafeNext, replaceRoute, sellOrderPackPath,
+  type LinkClick,
 } from './route';
 
 describe('box check route', () => {
@@ -11,6 +12,16 @@ describe('box check route', () => {
     expect(matchPoCheck('/purchase-orders/PO-1448')).toBeNull();
     expect(matchPurchaseOrder('/purchase-orders/PO-1448/check')).toBeNull();
     expect(pathToDesktopView('/purchase-orders/PO-1448/check')).toBe('history');
+  });
+});
+
+describe('pack mode route', () => {
+  it('is a desktop route under the sell order', () => {
+    expect(sellOrderPackPath('SO-0042')).toBe('/sell-orders/SO-0042/pack');
+    expect(matchSellOrderPack('/sell-orders/SO-0042/pack')).toEqual({ id: 'SO-0042' });
+    expect(matchSellOrderPack('/sell-orders/SO-0042')).toBeNull();
+    expect(matchSellOrderPack('/sell-orders/SO-0042/edit')).toBeNull();
+    expect(pathToDesktopView('/sell-orders/SO-0042/pack')).toBe('sellorders');
   });
 });
 

@@ -270,6 +270,16 @@ export function matchPoCheck(path: string): { id: string } | null {
   return m ? { id: m.id! } : null;
 }
 
+// Pack mode is desktop-only too — an iPad gets the desktop shell.
+export function sellOrderPackPath(id: string): string {
+  return '/sell-orders/' + id + '/pack';
+}
+
+export function matchSellOrderPack(path: string): { id: string } | null {
+  const m = match('/sell-orders/:id/pack', path);
+  return m ? { id: m.id! } : null;
+}
+
 export function match(template: string, path: string): Record<string, string> | null {
   const t = template.split('/').filter(Boolean);
   const p = path.split('/').filter(Boolean);
@@ -332,7 +342,8 @@ export function pathToDesktopView(path: string): DesktopViewId {
   // route so it isn't read as an item id.
   if (path === '/inventory/analysis') return 'analysis';
   if (path === '/inventory' || match('/inventory/:id', path)) return 'inventory';
-  if (path === '/sell-orders' || match('/sell-orders/:id', path) || match('/sell-orders/:id/edit', path)) return 'sellorders';
+  if (path === '/sell-orders' || match('/sell-orders/:id', path) || match('/sell-orders/:id/edit', path)
+    || matchSellOrderPack(path)) return 'sellorders';
   if (path === '/transfers') return 'transfers';
   if (path === '/web-submissions' || match('/web-submissions/:id', path)) return 'websubmissions';
   if (path === '/activity') return 'activity';
