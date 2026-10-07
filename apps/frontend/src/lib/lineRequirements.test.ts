@@ -83,6 +83,18 @@ describe('lineRequirements', () => {
     expect(lineRequirements({ category: 'SSD', brand: 'Intel', qty: 0, unitCost: 5 }).missingKeys).toEqual(['qty']);
   });
 
+  // A line already on a PO may be counted down to 0 when none of it arrived;
+  // blank is still blank, and a new line still needs one.
+  it('takes 0 for an existing line only when asked, never blank', () => {
+    const ssd = { category: 'SSD', brand: 'Intel', unitCost: 5 };
+    expect(lineRequirements({ ...ssd, qty: 0 }, { allowZeroQty: true }).ready).toBe(true);
+    expect(lineRequirements({ ...ssd, qty: '0' }, { allowZeroQty: true }).ready).toBe(true);
+    expect(lineRequirements({ ...ssd, qty: '' }, { allowZeroQty: true }).missingKeys).toEqual(['qty']);
+    expect(lineRequirements({ ...ssd, qty: null }, { allowZeroQty: true }).missingKeys).toEqual(['qty']);
+    expect(lineRequirements({ ...ssd, qty: -1 }, { allowZeroQty: true }).missingKeys).toEqual(['qty']);
+    expect(lineRequirements({ ...ssd, qty: 0 }).missingKeys).toEqual(['qty']);
+  });
+
   // One name per field, everywhere: "Qty" on capture and "Quantity" in the
   // editor were the same blank field described two ways.
   it('names the missing quantity with the label the drawer prints', () => {

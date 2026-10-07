@@ -1448,8 +1448,8 @@ sellOrders.post('/:id/status', async (c) => {
     }
 
     if (body.to === 'Done') {
-      // Done consumes stock. order_lines.qty carries CHECK (qty > 0) so a
-      // sold-out line can't drop to 0 — instead it flips to status 'Sold'.
+      // Done consumes stock. A sold-out line doesn't drop to 0 — a 0-qty
+      // line means none of it arrived — instead it flips to status 'Sold'.
       // In-stock aggregates key off status, so a Sold line falls out
       // regardless of its retained qty. Partially-sold lines lose qty and
       // stay sellable. Aggregated by inventory_id so multiple lines hitting

@@ -75,7 +75,7 @@ describe('qty / price range gates — must 400, never 500', () => {
     expect(negSell.status).toBe(400);
   });
 
-  it('orders PATCH rejects qty=0 / negative cost on line edits and adds', async () => {
+  it('orders PATCH counts an existing line down to 0, but not below, and adds still need 1', async () => {
     const { token: pTok } = await loginAs(MARCUS);
     const created = await api<{ id: string }>('POST', '/api/orders', {
       token: pTok,
@@ -88,8 +88,14 @@ describe('qty / price range gates — must 400, never 500', () => {
     const lineId = detail.body.order.lines[0].id;
 
     expect((await api('PATCH', `/api/orders/${id}`, {
-      token: pTok, body: { lines: [{ id: lineId, qty: 0 }] },
+      token: pTok, body: { lines: [{ id: lineId, qty: -1 }] },
     })).status).toBe(400);
+    expect((await api('PATCH', `/api/orders/${id}`, {
+      token: pTok, body: { lines: [{ id: lineId, qty: 0 }] },
+    })).status).toBe(200);
+    const zeroed = await api<{ order: { lines: { id: string; qty: number }[] } }>(
+      'GET', `/api/orders/${id}`, { token: pTok });
+    expect(zeroed.body.order.lines.find(l => l.id === lineId)?.qty).toBe(0);
     expect((await api('PATCH', `/api/orders/${id}`, {
       token: pTok, body: { lines: [{ id: lineId, unitCost: -1 }] },
     })).status).toBe(400);

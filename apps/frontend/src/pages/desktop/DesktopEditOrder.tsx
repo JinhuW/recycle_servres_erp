@@ -710,7 +710,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // purpose); Save checks every line, so demanding a cost of an untouched
   // one would lock those orders against any edit.
   const costRequired = (l: EditLine) => !l._id || !!l._dirty;
-  const lineReady = (l: EditLine) => lineRequirements(l, { requireCost: costRequired(l) }).ready;
+  // A line already on the PO may be counted down to 0; a new one needs 1.
+  const lineRule = (l: EditLine) =>
+    lineRequirements(l, { requireCost: costRequired(l), allowZeroQty: !!l._id });
+  const lineReady = (l: EditLine) => lineRule(l).ready;
   // Line readiness gates only the saves that actually write lines. A note-only
   // save sends none, so an incomplete legacy line must not block it — the
   // purchaser can't fix that line at this stage anyway.
@@ -723,7 +726,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // capture screen asks the same question, and used to name the same blank
   // field by a different word.
   const missingNamesFor = (l: EditLine): string | null =>
-    missingFieldNames(lineRequirements(l, { requireCost: costRequired(l) }).missingKeys, t, lang);
+    missingFieldNames(lineRule(l).missingKeys, t, lang);
 
   // Serial rules fire only where the backend's will: on new lines, and on
   // edits that change serial/qty/generation from what the server holds.

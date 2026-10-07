@@ -66,3 +66,7 @@ delete it on the PO page.
 - Plan: `~/.claude/plans/zany-brewing-pebble.md`.
 - The state is called `absent` in code — `BOX_CHECK_REASONS` already has a
   `'missing'` flag reason.
+- **Superseded in part by RS-184 (v1.213.0):** Approve now sets the lines
+  ticked at 0 to qty 0 instead of removing them, because removing renumbers
+  the PO. The *Not in the box* state and its tick are unchanged. v1.212.0's
+  removal never reached prod.

@@ -150,8 +150,9 @@ function inventoryWhereFrag(
   const attrFrag     = attrFragments(sql, attrs);
   const pendingFrag  = pendingSellOrderFrag(sql, hidePending);
   const archivedFrag = archivedOrderFrag(sql);
+  const unitsFrag    = hasUnitsFrag(sql);
 
-  return sql`${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${soldFrag} AND ${archivedFrag} AND ${whFrag} AND ${searchFrag} AND ${attrFrag} AND ${pendingFrag}`;
+  return sql`${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${soldFrag} AND ${archivedFrag} AND ${unitsFrag} AND ${whFrag} AND ${searchFrag} AND ${attrFrag} AND ${pendingFrag}`;
 }
 
 // The search box's one query matched against every identifying field on the
@@ -171,6 +172,12 @@ function lineSearchFrag(sql: ReturnType<typeof getDb>, search: string | undefine
 // filter, so those two stay visible under their own rules.
 function archivedOrderFrag(sql: ReturnType<typeof getDb>) {
   return sql`(o.archived_at IS NULL OR l.status IN ('Sold', ${ARCHIVED_LINE_STATUS}))`;
+}
+
+// A PO line counted down to 0 records goods that never arrived. It stays on
+// its PO, keeping the PO's line numbers, but it was never stock.
+function hasUnitsFrag(sql: ReturnType<typeof getDb>) {
+  return sql`l.qty > 0`;
 }
 
 // List inventory with the same filters as the desktop screen.
@@ -529,7 +536,8 @@ inventory.get('/analysis', async (c) => {
   // the way the list does. Sold lines still count here, as they always have —
   // they are the sales record, and archiving the PO afterwards does not undo
   // the sale — so the archive flag exempts them exactly as archivedOrderFrag.
-  const liveCond = sql`l.status <> ${ARCHIVED_LINE_STATUS} AND (o.archived_at IS NULL OR l.status = 'Sold')`;
+  // A 0-qty line never arrived, so it is no lot in any count below.
+  const liveCond = sql`l.status <> ${ARCHIVED_LINE_STATUS} AND (o.archived_at IS NULL OR l.status = 'Sold') AND ${hasUnitsFrag(sql)}`;
 
   // Grouped unit-count over a whitelisted column for one category, honouring
   // the warehouse scope. The column set is the fixed SUBTYPE_DIMS whitelist, and
@@ -863,7 +871,7 @@ inventory.get('/products', async (c) => {
       ORDER BY ls.created_at ASC
       LIMIT 1
     ) img ON TRUE
-    WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${soldFrag} AND ${archivedFrag} AND ${searchFrag} AND ${pendingFrag}
+    WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${soldFrag} AND ${archivedFrag} AND ${hasUnitsFrag(sql)} AND ${searchFrag} AND ${pendingFrag}
     ORDER BY l.created_at DESC
     LIMIT ${RAW_CAP}
   `) as unknown as Row[];
