@@ -2,13 +2,13 @@
 id: RS-192
 title: Fix the dev to main review findings before the v1.220 release
 type: bug
-status: in-review
+status: done
 priority: P1
 created: 2026-10-07
 reporter: jinhu
 branch: dev-8
-pr:
-version:
+pr: "#529"
+version: 1.220.2
 related: [RS-187, RS-188, RS-185, RS-191]
 ---
 
@@ -57,7 +57,8 @@ or skipped every check on it.
 - [x] The phone PO page asks for the member list only when the Commission
       fold opens.
 - [x] One field-label map serves the Activity page and the PO timelines.
-- [ ] dev is released to main and prod health reports the new version.
+- [x] dev is released to main and prod health reports the new version
+      (#530, main `5ce702cc`; migrations 0162–0164 applied on prod).
 
 ## Out of scope
 
