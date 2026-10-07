@@ -699,16 +699,16 @@ describe('GET /api/sell-orders/:id/packing-list?groupBy=po', () => {
     expect(rowQty(noPoLa1, 'PO total')).toEqual([4]);
   });
 
-  // The ID in PO cells of a tab's data rows, every section. Found by header
+  // One column's cells over a tab's data rows, every section. Found by header
   // text: the lot's own part number, not the sell line's, reaches the sheet.
-  const poIdCells = (ws: ExcelJS.Worksheet): string[] => {
+  const colCells = (ws: ExcelJS.Worksheet, header: 'ID in PO' | 'From PO'): string[] => {
     const out: string[] = [];
     let col = 0;
     ws.eachRow(row => {
       const first = String(row.getCell(1 + PACK_OFFSET).value ?? '');
       if (first === 'Packed ✓') {
         col = 0;
-        row.eachCell((cell, c) => { if (cell.value === 'ID in PO') col = c; });
+        row.eachCell((cell, c) => { if (cell.value === header) col = c; });
       } else if (first === 'Subtotal') {
         col = 0;
       } else if (col) {
@@ -749,14 +749,58 @@ describe('GET /api/sell-orders/:id/packing-list?groupBy=po', () => {
     const wb = await loadWorkbook(await getRaw(`/api/sell-orders/${id}/packing-list?groupBy=po`, token));
     const tab = wb.worksheets.find(w => w.name === `${a.po} - LA1`)!;
     const [x, y] = (await Promise.all(twins.map(t => poPageNo(token, a.po, t)))).sort((m, n) => m - n);
-    expect(poIdCells(tab).sort()).toEqual([String(await poPageNo(token, a.po, a.id)), `${x}, ${y}`].sort());
+    expect(colCells(tab, 'ID in PO').sort()).toEqual([String(await poPageNo(token, a.po, a.id)), `${x}, ${y}`].sort());
     // A hand-typed line came from no PO: the column stays, empty.
     const noPo = wb.worksheets.find(w => w.name === 'No PO - LA1')!;
-    expect(poIdCells(noPo)).toEqual(['']);
+    expect(colCells(noPo, 'ID in PO')).toEqual(['']);
+  });
 
-    // The per-warehouse list mixes POs, so it has no ID in PO to give.
+  it('names each per-warehouse row\'s source PO lines, one per line when it folds several', async () => {
+    const { token } = await loginAs(ALEX);
+    const sql = getTestDb();
+    const [a, b] = await linesFromTwoPos(token);
+    // One lot on each PO, alike in everything the sheet folds on; the brand
+    // gives them a label a hand-typed line can share.
+    const twinOn = async (po: string) => (await sql<{ id: string }[]>`
+      INSERT INTO order_lines (order_id, category, brand, qty, unit_cost, sell_price, part_number,
+                               condition, status, position, warehouse_id)
+      VALUES (${po}, 'RAM', 'Twin', 1, 10, 20, 'TWIN-PN', 'Pulled — Tested', 'Reviewing', 90, 'WH-LA1')
+      RETURNING id`)[0].id;
+    const twinA = await twinOn(a.po);
+    const twinB = await twinOn(b.po);
+    const twin = { category: 'RAM', label: 'Twin', partNumber: 'TWIN-PN', unitPrice: 40,
+                   warehouseId: 'WH-LA1', condition: 'Pulled — Tested' };
+    const id = await createOrder(token, {
+      lines: [
+        { inventoryId: a.id, category: 'RAM', label: 'A', partNumber: 'X', qty: 1, unitPrice: 40, warehouseId: 'WH-LA1' },
+        // Listed B before A: the cell orders by PO, not by the sell order.
+        { ...twin, inventoryId: twinB, qty: 1 },
+        { ...twin, inventoryId: twinA, qty: 1 },
+        // Typed by hand, but the same product: folds into the twins' row.
+        { ...twin, qty: 2 },
+        { category: 'SSD', label: 'Hand typed', partNumber: 'NOPO-1', qty: 1, unitPrice: 9, warehouseId: 'WH-LA1' },
+      ],
+    });
+
     const plain = await loadWorkbook(await getRaw(`/api/sell-orders/${id}/packing-list`, token));
+    const tab = plain.worksheets.find(w => w.name === 'Pack - LA1')!;
+    const [na, x, y] = await Promise.all([
+      poPageNo(token, a.po, a.id), poPageNo(token, a.po, twinA), poPageNo(token, b.po, twinB),
+    ]);
+    const folded = `${a.po} #${x} ×1\n${b.po} #${y} ×1\nNo PO ×2`;
+    expect(colCells(tab, 'From PO').sort()).toEqual([`${a.po} #${na}`, folded, '—'].sort());
+    // Tall enough for its three sources, Part # level with the first.
+    let tall: ExcelJS.Row | undefined;
+    tab.eachRow(row => { if ((row.values as unknown[]).includes(folded)) tall = row; });
+    expect(tall?.height).toBe(45);
+    expect(tall?.getCell(2 + PACK_OFFSET).alignment?.vertical).toBe('top');
+
+    // Each list carries one source column: the by-PO tabs already name the PO.
     expect(plain.worksheets.flatMap(cellStrings)).not.toContain('ID in PO');
+    const byPo = await loadWorkbook(await getRaw(`/api/sell-orders/${id}/packing-list?groupBy=po`, token));
+    const byPoCells = byPo.worksheets.flatMap(cellStrings);
+    expect(byPoCells).toContain('ID in PO');
+    expect(byPoCells).not.toContain('From PO');
   });
 
   it('narrows to one warehouse', async () => {

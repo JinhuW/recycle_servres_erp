@@ -905,7 +905,13 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   leading columns — reserved on every pack tab, so two warehouses on one order
   read alike. Both files come from one query and one sort, so a picker and a
   bidder find a product in the same place; uploading this one to the price
-  import is rejected for having no price column (v1.130.0).
+  import is rejected for having no price column (v1.130.0). **Every row names
+  its source in a `From PO` column after Part #** (v1.216.0): `PO-1442 #3`,
+  the line's # on that PO's page. A row folds one product across POs, so one
+  that folds several sources lists each on its own line in the cell with its
+  quantity (`PO-1442 #3 ×8`, `PO-1450 #1 ×4`), POs in numeric order and a
+  hand-typed share last as `No PO ×2`; a row of hand-typed lines alone reads
+  `—`.
 - **The packing list also comes cut by PO** (v1.189.0) — `Packing list by PO`,
   the same route with `?groupBy=po`: one tab per PO per warehouse
   (`PO-1442 - DEN`), POs in numeric order, hand-typed lines on a
@@ -913,8 +919,8 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   category sections, the RAM device / DDR-generation labels and tints, tick
   boxes, subtotals and a PO total. Each tab adds an **ID in PO** column after
   Part # (v1.197.3): the line's # on that PO's page. A row that folds several
-  lots of the PO lists their IDs ascending ("1, 3"). The per-warehouse packing
-  list has no such column, since its tabs mix POs. A warehouse picker beside the buttons
+  lots of the PO lists their IDs ascending ("1, 3"); the tab already names the
+  PO, so it has no `From PO` column. A warehouse picker beside the buttons
   (shown when the order spans more than one) narrows either packing list to
   one warehouse (`?warehouse=<short>`); the bid sheet always covers the whole
   order. Both packing lists place a line by where its lot is *now* — the lot's
