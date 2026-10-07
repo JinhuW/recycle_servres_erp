@@ -4059,6 +4059,171 @@ button.rsheet-box:hover { background: color-mix(in oklch, var(--accent) 10%, tra
   .bc-meter i { transition: none; }
 }
 
+/* ===== Pack mode =====
+   A sell order as a packing checklist (DesktopSellOrderPack), built for an
+   iPad on a cart: every control is a thumb wide, nothing waits on hover, and
+   the one action sits in a bar at the bottom of the screen. Each row leads
+   with the lot's shelf tag — its PO and line number — because that is what
+   the packer is matching against the shelf. Shares the Review mode shell
+   (`.app-focus`) and its meter, legend and scan box. */
+.app.app-focus .main { height: 100dvh; }
+.app.app-focus .main > .page:has(> .pk-page) { padding-bottom: 0; }
+/* The tweaks button owns the bottom-right corner, which is where the bar's
+   action sits; nobody changes density mid-pack. */
+body:has(.pk-page) .tweaks-fab, body:has(.pk-page) .tweaks-pop { display: none; }
+.pk-page { display: flex; flex-direction: column; gap: 14px; max-width: 1200px; width: 100%; margin: 0 auto; }
+.pk-page button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+.pk-page .bc-back { min-height: 32px; font-size: 13.5px; }
+.pk-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px 24px; flex-wrap: wrap; }
+.pk-head-main { min-width: 0; }
+.pk-head .page-sub { font-size: 14px; }
+.pk-scan-wrap { flex: 0 1 420px; min-width: 280px; display: grid; gap: 6px; }
+.pk-scan .input { height: 48px; padding-left: 40px; font-size: 15px; }
+.pk-scan svg { left: 14px; }
+.pk-scan-wrap .bc-scan-msg { font-size: 13px; }
+.pk-scan-wrap .bc-scan-msg.warn { color: var(--warn-strong); }
+
+.pk-progress { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 20px; align-items: center; padding: 14px 18px; }
+.pk-progress-num { display: grid; gap: 4px; }
+.pk-progress-num .mono { font-size: 28px; letter-spacing: -0.02em; line-height: 1; font-variant-numeric: tabular-nums; }
+.pk-progress-num .mono b { font-weight: 600; }
+.pk-progress-num .mono .muted { font-size: 16px; color: var(--fg-subtle); }
+.pk-progress .bc-legend .chip { font-size: 12.5px; }
+.pk-wh { display: grid; gap: 6px; justify-items: end; }
+.pk-wh-label { font-size: 12.5px; color: var(--fg-subtle); }
+.pk-wh .seg button { min-height: 40px; padding: 8px 16px; font-size: 14px; }
+
+.pk-list-card { overflow: hidden; }
+.pk-list { list-style: none; margin: 0; padding: 0; position: relative; }
+.pk-group {
+  display: flex; align-items: baseline; gap: 10px; padding: 14px 18px 9px;
+  background: var(--bg-soft); border-top: 1px solid var(--border);
+}
+.pk-list > li:first-child { border-top: 0; }
+.pk-group-po { font-size: 14.5px; font-weight: 600; color: var(--fg); }
+.pk-group-wh { font-size: 13px; color: var(--fg-muted); }
+.pk-group-left { margin-left: auto; font-size: 13px; color: var(--fg-subtle); white-space: nowrap; }
+
+.pk-row {
+  display: grid; grid-template-columns: 92px minmax(0, 1fr) auto; gap: 18px; align-items: center;
+  padding: 14px 18px; border-top: 1px solid var(--border); background: var(--bg-elev);
+}
+
+/* The shelf tag: what is printed on the lot, so it is matched at a glance. */
+.pk-tag {
+  position: relative; display: grid; justify-items: center; align-content: center; gap: 3px;
+  min-height: 76px; padding: 16px 6px 9px;
+  border: 1.5px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg-elev);
+  font-family: 'JetBrains Mono', ui-monospace, monospace; font-feature-settings: 'tnum';
+}
+/* The hang-tag hole. */
+.pk-tag::before {
+  content: ''; position: absolute; top: 6px; left: 50%; width: 7px; height: 7px; margin-left: -3.5px;
+  border-radius: 50%; border: 1.5px solid var(--border-strong); background: var(--bg-soft);
+}
+.pk-tag-po { font-size: 11.5px; color: var(--fg-muted); white-space: nowrap; }
+.pk-tag-no { font-size: 28px; font-weight: 700; line-height: 1; letter-spacing: -0.03em; color: var(--fg); }
+.pk-tag.none { border-style: dashed; padding-top: 9px; }
+.pk-tag.none::before { display: none; }
+.pk-tag.none .pk-tag-po { font-size: 13px; color: var(--fg-subtle); }
+
+.pk-item { min-width: 0; display: grid; gap: 6px; justify-items: start; }
+.pk-label { font-size: 16px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+.pk-sub { font-size: 13.5px; color: var(--fg-muted); }
+.pk-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13.5px; color: var(--fg-subtle); }
+.pk-meta .mono { color: var(--fg-muted); font-size: 13px; }
+
+.pk-ctrl { display: flex; align-items: center; gap: 16px; }
+.pk-count-wrap { display: grid; justify-items: center; gap: 4px; }
+.pk-step {
+  display: inline-flex; align-items: center; border: 1px solid var(--border-strong);
+  border-radius: 12px; background: var(--bg-elev); overflow: hidden;
+}
+.pk-step-btn {
+  width: 48px; height: 48px; display: grid; place-items: center;
+  border: 0; background: transparent; color: var(--fg); cursor: pointer;
+}
+.pk-step-btn:active:not(:disabled) { background: var(--bg-soft); }
+.pk-step-btn:disabled { color: var(--fg-subtle); opacity: 0.4; cursor: not-allowed; }
+.pk-count {
+  min-width: 82px; text-align: center; line-height: 48px; font-size: 15px;
+  border-inline: 1px solid var(--border); font-variant-numeric: tabular-nums;
+}
+.pk-count b { font-size: 20px; font-weight: 700; }
+.pk-count span { color: var(--fg-subtle); }
+.pk-flag { font-size: 12.5px; font-weight: 600; line-height: 1; }
+.pk-flag.warn { color: var(--warn-strong); }
+.pk-flag.neg { color: var(--neg); }
+
+.pk-tick {
+  width: 60px; height: 60px; padding: 0; border-radius: 16px;
+  border: 2px solid var(--border-strong); background: var(--bg-elev); color: transparent;
+  display: grid; place-items: center; cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s, transform 0.08s;
+}
+.pk-tick:active:not(:disabled) { transform: scale(0.95); }
+.pk-tick:disabled { opacity: 0.5; cursor: not-allowed; }
+.pk-tick:focus-visible, .pk-step-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (hover: hover) {
+  .pk-open .pk-tick:hover:not(:disabled) { border-color: var(--accent); color: var(--border-strong); }
+}
+.pk-partial .pk-tick { border-color: var(--warn); background: var(--warn-soft); }
+.pk-absent .pk-tick { border-color: var(--neg); background: var(--neg-soft); }
+.pk-done .pk-tick { background: var(--accent); border-color: var(--accent); color: #fff; }
+.pk-partial .pk-count b, .pk-done-short .pk-count b { color: var(--warn-strong); }
+.pk-absent .pk-count b, .pk-done-zero .pk-count b { color: var(--neg); }
+.pk-done .pk-count b { color: var(--accent-strong); }
+.pk-done .pk-label { text-decoration: line-through; text-decoration-color: var(--fg-subtle); }
+/* Dim the content, never the row: the tick has to stay readable to undo it. */
+.pk-done .pk-tag, .pk-done .pk-item, .pk-done .pk-step { opacity: 0.55; }
+
+/* A part-number scan that fits lots on more than one line: the candidates,
+   waiting for a tap on the one that was packed. */
+.pk-choose { background: var(--warn-soft); box-shadow: inset 4px 0 0 var(--warn); }
+.pk-choose .pk-tick { border-color: var(--warn-strong); }
+
+.pk-divider {
+  display: flex; align-items: center; gap: 12px; padding: 8px 18px;
+  border-top: 1px solid var(--border); background: var(--bg-soft);
+  font-size: 13.5px; font-weight: 600; color: var(--fg-muted);
+}
+.pk-divider .mono { margin-left: 4px; font-weight: 500; }
+.pk-link {
+  margin-left: auto; min-height: 40px; padding: 0 8px; background: none; border: 0; cursor: pointer;
+  color: var(--fg-muted); font-size: 13.5px; text-decoration: underline; text-underline-offset: 2px;
+}
+.pk-empty { padding: 28px 18px; text-align: center; color: var(--fg-muted); font-size: 14.5px; border-top: 1px solid var(--border); }
+
+/* The one action, where a thumb rests; Undo lives here too, since the
+   shell's toast would land on top of it. */
+.pk-bar {
+  position: sticky; bottom: 0; z-index: 5; margin-top: auto;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px 16px; flex-wrap: wrap;
+  padding: 12px 18px calc(12px + env(safe-area-inset-bottom, 0px));
+  background: var(--bg-elev); border: 1px solid var(--border); border-bottom: 0;
+  border-radius: var(--radius) var(--radius) 0 0;
+  box-shadow: 0 -8px 24px oklch(0.22 0.012 250 / 0.07);
+}
+.pk-bar-msg { display: flex; align-items: center; gap: 12px; min-width: 0; font-size: 14.5px; color: var(--fg-muted); }
+.pk-bar-actions { display: flex; gap: 10px; margin-left: auto; }
+.pk-bar .btn.lg { min-height: 50px; padding: 12px 22px; font-size: 15px; }
+.pk-bar .btn.sm { min-height: 36px; padding: 6px 14px; font-size: 13px; }
+
+/* iPad portrait and narrower: the controls drop under the item, the tag
+   stays at the left edge. */
+@media (max-width: 780px) {
+  .pk-row { grid-template-columns: 84px minmax(0, 1fr); grid-template-areas: 'tag item' 'tag ctrl'; row-gap: 12px; align-items: start; }
+  .pk-tag { grid-area: tag; }
+  .pk-item { grid-area: item; }
+  .pk-ctrl { grid-area: ctrl; justify-content: flex-end; }
+  .pk-progress { grid-template-columns: auto minmax(0, 1fr); }
+  .pk-wh { grid-column: 1 / -1; justify-items: start; }
+  .pk-scan-wrap { flex-basis: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pk-tick { transition: none; }
+}
+
 /* Offered when the window no longer fits the shell it loaded with (App.tsx).
    Fixed and above both shells' chrome, never in the layout flow, so it cannot
    push the page around while it is being resized. At the top, because both

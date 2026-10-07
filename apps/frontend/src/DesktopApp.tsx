@@ -9,7 +9,7 @@ import { useT } from './lib/i18n';
 import { usePreference } from './lib/preferences';
 import { useEffectiveUser } from './lib/tweaks';
 import {
-  useRoute, match, matchPurchaseOrder, matchPoCheck, navigate, parseShippingRoute,
+  useRoute, match, matchPurchaseOrder, matchPoCheck, matchSellOrderPack, navigate, parseShippingRoute,
   pathToDesktopView, isAuthorizePath, readSafeNext, hrefFor, onLinkClick, replaceRoute,
 } from './lib/route';
 import { api, ApiError } from './lib/api';
@@ -193,6 +193,10 @@ export function DesktopApp() {
   const view2: DesktopView = user.role === 'purchaser' && (view === 'inventory' || view === 'analysis' || view === 'sellorders' || view === 'transfers' || view === 'websubmissions' || view === 'activity' || view === 'payments' || view === 'internaltx' || view === 'tracker' || view === 'coordinator')
     ? 'dashboard'
     : view;
+  // Review mode and Pack mode take over the whole window — no sidebar, no top
+  // bar. Pack mode only once the view stands: a bounced purchaser lands on the
+  // dashboard, which keeps its chrome.
+  const focus = !!boxCheck || (view2 === 'sellorders' && matchSellOrderPack(path) !== null);
 
   // Edit page is rendered in place of the inventory list when an item is open.
   const inventoryOrEdit = editingItemId
@@ -239,13 +243,13 @@ export function DesktopApp() {
       : <DesktopOrders onToast={(m) => showToast(m)} />;
 
   return (
-    <div className={'app' + (boxCheck ? ' app-focus' : sidebarFolded ? ' sidebar-folded' : '')}>
-      {!boxCheck && (
+    <div className={'app' + (focus ? ' app-focus' : sidebarFolded ? ' sidebar-folded' : '')}>
+      {!focus && (
         <Sidebar view={view2} folded={sidebarFolded} onToggleFold={() => setSidebarFolded(!sidebarFolded)} />
       )}
       <main className="main">
-        {!boxCheck && <Topbar />}
-        {!boxCheck && <RolePreviewBanner />}
+        {!focus && <Topbar />}
+        {!focus && <RolePreviewBanner />}
         <div className={'page'
           + (view2 === 'history' && boxCheck ? ' page-box-check' : '')
           + (view2 === 'history' && !editingOrder && !boxCheck ? ' page-history' : '')

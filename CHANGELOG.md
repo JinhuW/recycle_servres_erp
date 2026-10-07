@@ -17,6 +17,29 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.218.0] - 2026-10-07
+
+Sell orders get a Pack mode (RS-187): the Packing list as a checklist on an
+iPad, the way PO Review mode checks a box that arrived. Until now packing meant
+printing the xlsx, and nothing recorded what actually went into the box.
+
+### Added
+
+- **Pack mode** — `#/sell-orders/<id>/pack`, opened from the sell order's page
+  head. A full-window page laid out for touch: 48px steppers, a 60px tick, no
+  hover, and the one action in a bar at the bottom of the screen.
+  - Each line leads with a shelf tag for the lot it comes from, `PO-1111` over
+    `#1`, because that is how stock is found. Open lines group by source PO;
+    a *Packing from* switch narrows to one warehouse.
+  - Counts start full; − marks a short pick, a tick confirms, and a ticked
+    line sinks under *Packed* with Undo. A label scanner packs the line it
+    reads, and asks which lot when one part sits on several.
+  - Progress is saved per line in `sell_order_packs` (migration 0163), keyed
+    on the line's lot rather than its row, because saving an order rewrites
+    every line row.
+  - On a Draft with everything packed at full count, **Mark shipped** takes the
+    Shipped note and packing photos and moves the order on.
+
 ## [1.217.0] - 2026-10-07
 
 The commission payment now records which manager paid the purchaser (RS-185).

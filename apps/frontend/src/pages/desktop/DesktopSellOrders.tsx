@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, lazy, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { Modal } from '../../components/Modal';
 import {
@@ -12,7 +12,7 @@ import { forEachKeysetPage } from '../../lib/keysetPages';
 import { confirmDiscard, useUnsavedGuard } from '../../lib/unsavedGuard';
 import { api, ApiError, archiveSellOrder, unarchiveSellOrder } from '../../lib/api';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
-import { useRoute, navigate, replaceRoute, match } from '../../lib/route';
+import { useRoute, navigate, replaceRoute, match, matchSellOrderPack, sellOrderPackPath } from '../../lib/route';
 import { RouteLink } from '../../components/RouteLink';
 import { shareOrCopy } from '../../lib/shareOrCopy';
 import { fmtUSD, fmtUSD0, fmtMoney, fmtDate, fmtDateShort, CURRENCY_SYMBOL } from '../../lib/format';
@@ -31,7 +31,11 @@ import { applyPriceRows, type BidPart, mergeBidParts } from '../../lib/priceImpo
 import { usePreference } from '../../lib/preferences';
 import { LineSpecChips, lineHasSpecChips } from '../../components/LineSpecChips';
 import { groupSellOrderLines, type SellOrderLineGroup } from '../../lib/sellOrderLineGroups';
+import { packWarehouseOptions, UNASSIGNED } from '../../lib/sellOrderPack';
 import { peekSellOrderPrefill, clearSellOrderPrefill } from '../../lib/sellOrderPrefill';
+
+// Its own chunk: only a packer opens it.
+const DesktopSellOrderPack = lazy(() => import('./DesktopSellOrderPack'));
 
 type Currency = 'USD' | 'CNY';
 
@@ -268,9 +272,11 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
   };
   const editMatch = match('/sell-orders/:id/edit', path);
   const viewMatch = match('/sell-orders/:id', path);
-  const open: { id: string; mode: 'view' | 'edit' } | null =
+  const packMatch = matchSellOrderPack(path);
+  const open: { id: string; mode: 'view' | 'edit' | 'pack' } | null =
     editMatch ? { id: editMatch.id, mode: 'edit' }
     : viewMatch ? { id: viewMatch.id, mode: 'view' }
+    : packMatch ? { id: packMatch.id, mode: 'pack' }
     : null;
 
   // An open order replaces the list but this component stays mounted, so the
@@ -345,6 +351,9 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
     return m;
   }, [orders, serverStats]);
 
+  if (open?.mode === 'pack') {
+    return <DesktopSellOrderPack key={open.id} id={open.id} onToast={onToast} />;
+  }
   if (open) {
     return <SellOrderDetail key={`${open.id}:${open.mode}`} id={open.id} mode={open.mode} onToast={onToast} />;
   }
@@ -592,14 +601,7 @@ function ReceiverSelect({ value, current, members, disabled, onChange }: {
 function DownloadMenu({ orderId, lines }: { orderId: string; lines: SellOrderLine[] }) {
   const { t } = useT();
   const [warehouse, setWarehouse] = useState('');
-  const warehouses = useMemo(
-    () => [...new Set(lines.map(l => (l.packWarehouse === undefined ? l.warehouse : l.packWarehouse) ?? 'Unassigned'))].sort((a, b) => {
-      if (a === 'Unassigned') return 1;
-      if (b === 'Unassigned') return -1;
-      return a.localeCompare(b);
-    }),
-    [lines],
-  );
+  const warehouses = useMemo(() => packWarehouseOptions(lines), [lines]);
   // A picked warehouse the order no longer has (a line was moved) falls back
   // to All rather than 400ing.
   const picked = warehouses.includes(warehouse) ? warehouse : '';
@@ -639,7 +641,7 @@ function DownloadMenu({ orderId, lines }: { orderId: string; lines: SellOrderLin
         >
           <option value="">{t('soPackAllWarehouses')}</option>
           {warehouses.map(w => (
-            <option key={w} value={w}>{w === 'Unassigned' ? t('sodNoWarehouse') : w}</option>
+            <option key={w} value={w}>{w === UNASSIGNED ? t('sodNoWarehouse') : w}</option>
           ))}
         </select>
       )}
@@ -1269,6 +1271,11 @@ function SellOrderDetail({ id, mode, onToast }: {
                 title={t('soReopenTooltip')}
               >
                 <Icon name="edit" size={14} /> {t('sodReopen')}
+              </button>
+            )}
+            {!editable && !prefill && (
+              <button className="btn" onClick={() => navigate(sellOrderPackPath(order.id))} title={t('pkOpenTip')}>
+                <Icon name="package" size={14} /> {t('pkOpen')}
               </button>
             )}
             {!editable && !locked && (
