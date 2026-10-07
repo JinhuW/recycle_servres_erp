@@ -105,6 +105,23 @@ describe('GET /api/sell-orders/sellable', () => {
     expect(after.body.items.some(i => i.inventoryId === line.id)).toBe(false);
   });
 
+  it('does not count a draft that holds the line only at 0 as a rival', async () => {
+    const { token } = await loginAs(ALEX);
+    const line = await freeSellableLine(token);
+    const created = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token,
+      body: {
+        customerId: await firstCustomerId(token),
+        lines: [{ inventoryId: line.id, category: 'RAM', label: 'Sample', partNumber: 'PN-1', qty: 1, unitPrice: 1 }],
+      },
+    });
+    expect(created.status).toBe(201);
+    await getTestDb()`UPDATE sell_order_lines SET qty = 0 WHERE sell_order_id = ${created.body.id}`;
+
+    const r = await getSellable(token);
+    expect(r.body.items.find(i => i.inventoryId === line.id)?.draftCount).toBe(0);
+  });
+
   it('honours the q filter', async () => {
     const { token } = await loginAs(ALEX);
     const all = await getSellable(token);

@@ -109,7 +109,8 @@ describe('MCP set_market_price tool', () => {
     });
     const row = (await sql<{ id: string; part_number: string }[]>`
       SELECT id, part_number FROM ref_prices
-      WHERE part_number IS NOT NULL AND part_number <> '' LIMIT 1
+      WHERE part_number IS NOT NULL AND part_number <> ''
+      ORDER BY updated_at DESC, id LIMIT 1
     `)[0];
     knownId = row.id;
     knownPartNumber = row.part_number;
@@ -178,6 +179,34 @@ describe('MCP set_market_price tool', () => {
     expect(body.error).toBeUndefined();
     expect(body.result.isError).toBe(true);
     expect(body.result.content[0].text).toMatch(/invalid_price/);
+  });
+
+  // Twins on one canonical part number are rare but nothing forbids them. The
+  // older row goes in first so an unordered LIMIT 1 would reach it.
+  it('reads and writes the most recently updated twin', async () => {
+    const sql = getTestDb();
+    await sql`
+      INSERT INTO ref_prices (id, category, label, part_number, updated_at) VALUES
+        ('mcp-twin-old', 'RAM', 'twin old', 'MCP-TWIN-0001', NOW() - INTERVAL '1 day'),
+        ('mcp-twin-new', 'RAM', 'twin new', 'mcp twin 0001', NOW())
+    `;
+    const read = await api('POST', '/api/mcp', {
+      headers: { authorization: `Bearer ${bearerWrite}` },
+      body: {
+        jsonrpc: '2.0', id: 13, method: 'tools/call',
+        params: { name: 'get_market_value', arguments: { partNumber: 'MCP-TWIN-0001' } },
+      },
+    });
+    expect(JSON.parse((read.body as any).result.content[0].text).id).toBe('mcp-twin-new');
+
+    const r = await callWrite(bearerWrite, { partNumber: 'MCP-TWIN-0001', price: 77 });
+    expect((r.body as any).result.isError).toBeUndefined();
+    const rows = await sql<{ id: string; last_price: number | null }[]>`
+      SELECT id, last_price::float AS last_price FROM ref_prices
+      WHERE id IN ('mcp-twin-old', 'mcp-twin-new')
+    `;
+    expect(rows.find(x => x.id === 'mcp-twin-new')?.last_price).toBe(77);
+    expect(rows.find(x => x.id === 'mcp-twin-old')?.last_price).toBeNull();
   });
 
   it('keeps insufficient_scope a protocol error', async () => {

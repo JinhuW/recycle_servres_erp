@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import { CLOSE_REASON_IDS } from '@recycle-erp/shared';
+import { CLOSE_REASON_IDS, isRealPhotoUrl } from '@recycle-erp/shared';
 import { getDb } from '../db';
 import { uploadAttachment, deleteAttachment } from '../r2';
 import { notify } from '../lib/notify';
@@ -22,6 +22,7 @@ import {
 } from '../services/sellOrderPriceImport';
 import {
   buildPriceTemplateWorkbook, buildPackingListWorkbook, buildPackingListByPoWorkbook,
+  type PoSource,
 } from '../lib/sellOrderPriceTemplate';
 import { canonPartNumberJs } from '../lib/part-number';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
@@ -40,7 +41,8 @@ import {
 import { recordSaleDataPoints, recordBidDataPoints, type BidPart } from '../lib/sellOrderMarket';
 import { maybeRenameReceipt } from '../ai/receipt';
 import { shrinkImageToFit } from '../lib/image-shrink';
-import { poLineNo } from '../lib/poLineNo';
+import { poLineNo, sellLineOrder } from '../lib/poLineNo';
+import { isActiveManager } from '../services/members';
 import type { Env, User } from '../types';
 
 const sellOrders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -64,16 +66,6 @@ async function metaStatusAndOrder(
     () => sql`SELECT 1 FROM sell_orders WHERE id = ${id} LIMIT 1`,
   ] as const);
   return [metaStatusSet, rows.length > 0];
-}
-
-// Payment receivers are managers only — purchasers never handle customer money.
-async function isActiveManager(sql: SqlClient, userId: string): Promise<boolean> {
-  if (typeof userId !== 'string' || !UUID_RE.test(userId)) return false;
-  const rows = await sql`
-    SELECT 1 FROM users
-    WHERE id = ${userId} AND active = TRUE AND role = 'manager' LIMIT 1
-  `;
-  return rows.length > 0;
 }
 
 sellOrders.get('/', async (c) => {
@@ -285,7 +277,7 @@ sellOrders.get('/:id', async (c) => {
     inventory_qty: number | null;
     type: string | null; classification: string | null; rank: string | null;
     speed: string | null; interface: string | null; form_factor: string | null;
-    health: number | null;
+    health: number | null; image_url: string | null;
   }[]>`
     SELECT sol.id, sol.category, sol.label, sol.sub_label, sol.part_number,
            sol.qty, sol.unit_price::float AS unit_price,
@@ -298,6 +290,7 @@ sellOrders.get('/:id', async (c) => {
            -- snapshot. Null for a hand-typed line or a deleted lot.
            ol.type, ol.classification, ol.rank, ol.speed, ol.interface,
            ol.form_factor, ol.health::float AS health,
+           img.delivery_url AS image_url,
            -- What this order may still grow its line to: the lot less the units
            -- other committed orders hold. Its own claim is excluded, so editing
            -- a line down and back up is not blocked by itself. A lot that left
@@ -312,8 +305,15 @@ sellOrders.get('/:id', async (c) => {
     LEFT JOIN order_lines ol ON ol.id = sol.inventory_id
     LEFT JOIN orders src ON src.id = ol.order_id
     LEFT JOIN warehouses pw ON pw.id = COALESCE(ol.warehouse_id, src.warehouse_id, sol.warehouse_id)
+    LEFT JOIN LATERAL (
+      SELECT ls.delivery_url
+      FROM label_scans ls
+      WHERE ls.cf_image_id = ol.scan_image_id
+      ORDER BY ls.created_at ASC
+      LIMIT 1
+    ) img ON TRUE
     WHERE sol.sell_order_id = ${id}
-    ORDER BY sol.position
+    ORDER BY ${sellLineOrder(sql, 'sol')}
   `;
   const [lines, metaRows, attRows, metaStatusSet] = await allLimited([
     linesQuery,
@@ -396,6 +396,9 @@ sellOrders.get('/:id', async (c) => {
         type: l.type, classification: l.classification, rank: l.rank,
         speed: l.speed, interface: l.interface, formFactor: l.form_factor,
         health: l.health,
+        // The lot's label scan, which Pack mode shows on the line. A stub
+        // scan's placeholder data: URL would render as a broken image.
+        imageUrl: isRealPhotoUrl(l.image_url) ? l.image_url : null,
         maxQty: l.inventory_qty ?? l.qty,
         lineTotal: +(l.qty * l.unit_price).toFixed(2),
       })),
@@ -464,16 +467,17 @@ async function loadSellOrderSheetData(sql: SqlClient, id: string) {
       LIMIT 1
     ) img ON TRUE
     WHERE sol.sell_order_id = ${id}
-    ORDER BY sol.position
+    ORDER BY ${sellLineOrder(sql, 'sol')}
   `) as Record<string, unknown>[];
 
   type Group = {
     category: SoCategory; label: string; partNumber: string | null;
     condition: string | null; qty: number; imageUrl: string | null;
     specs: Record<string, string | number>;
-    // The folded lots' # on their PO. Only the by-PO tabs collect it: the
-    // other maps fold several POs together, where a line number names nothing.
-    poLineNos?: number[];
+    // Where the row's units came from, one entry per PO line, each with the
+    // sell-order lines it covers. The packing tabs give every entry its own
+    // tickable row; the bid sheet reads none of it.
+    poSources: PoSource[];
   };
   // Only real public URLs make the sheet — seeded/stub scans carry data: URLs
   // that would render as garbage text in the cell.
@@ -486,7 +490,12 @@ async function loadSellOrderSheetData(sql: SqlClient, id: string) {
   const byWarehouse = new Map<string, Map<string, Group>>();
   // And per warehouse per source PO, for the by-PO checklist. '' = no PO.
   const byWarehousePo = new Map<string, Map<string, Map<string, Group>>>();
-  for (const r of rows) {
+  for (const [idx, r] of rows.entries()) {
+    // A line held at 0 keeps its # (counted here) but is nothing to price or
+    // pick, so it never becomes a row.
+    const soLineNo = idx + 1;
+    const qty = Number(r.sell_qty ?? 0);
+    if (qty === 0) continue;
     const hasInv = r.inv_id != null;
     // Manual lines fold sub_label into the label — the sheet's spec columns
     // only fill from an inventory row.
@@ -501,8 +510,7 @@ async function loadSellOrderSheetData(sql: SqlClient, id: string) {
     const condition = (r.condition ?? r.sol_condition ?? null) as string | null;
     const key = `${part ? canonPartNumberJs(part) : ''}|${label}|${condition ?? ''}`;
     const makeGroup = (): Group => ({
-      category, label, partNumber: part, condition,
-      qty: Number(r.sell_qty ?? 0),
+      category, label, partNumber: part, condition, qty,
       imageUrl: publicUrl(r.image_url),
       specs: hasInv ? {
         brand: s(r.brand), capacity: s(r.capacity), generation: s(r.generation),
@@ -511,31 +519,38 @@ async function loadSellOrderSheetData(sql: SqlClient, id: string) {
         formFactor: s(r.form_factor),
         health: (r.health as number | null) ?? '', rpm: (r.rpm as number | null) ?? '',
       } : {},
+      poSources: [],
     });
+    // Both null for a hand-typed line, both set for a lot: order_lines.order_id
+    // is NOT NULL and poLineNo is null only without a lot.
+    const po = s(r.source_order_id) || null;
     const lineNo = r.po_line_no as number | null;
-    const fold = (map: Map<string, Group>, withLineNo = false) => {
+    const fold = (map: Map<string, Group>) => {
       let g = map.get(key);
       if (g) {
-        g.qty += Number(r.sell_qty ?? 0);
+        g.qty += qty;
         if (!g.imageUrl) g.imageUrl = publicUrl(r.image_url);
       } else {
         g = makeGroup();
         map.set(key, g);
       }
-      if (withLineNo && lineNo != null) {
-        g.poLineNos ??= [];
-        if (!g.poLineNos.includes(lineNo)) g.poLineNos.push(lineNo);
+      const src = g.poSources.find((x) => x.po === po && x.lineNo === lineNo);
+      if (src) {
+        src.qty += qty;
+        src.soLineNos.push(soLineNo);
+      } else {
+        g.poSources.push({ po, lineNo, qty, soLineNos: [soLineNo] });
       }
     };
     fold(groups);
     const wh = s(r.warehouse_short) || 'Unassigned';
     if (!byWarehouse.has(wh)) byWarehouse.set(wh, new Map());
     fold(byWarehouse.get(wh)!);
-    const po = s(r.source_order_id);
     if (!byWarehousePo.has(wh)) byWarehousePo.set(wh, new Map());
     const whPos = byWarehousePo.get(wh)!;
-    if (!whPos.has(po)) whPos.set(po, new Map());
-    fold(whPos.get(po)!, true);
+    const poKey = po ?? '';
+    if (!whPos.has(poKey)) whPos.set(poKey, new Map());
+    fold(whPos.get(poKey)!);
   }
 
   const warehouseOrder = [...byWarehouse.keys()].sort((a, b) => {
@@ -601,6 +616,11 @@ sellOrders.get('/:id/packing-list', async (c) => {
   const data = await loadSellOrderSheetData(getDb(c.env), c.req.param('id'));
   if (!data) return c.json({ error: 'Not found' }, 404);
 
+  // Lines held at 0 have no row on either list, and a workbook without a
+  // sheet is a file Excel calls corrupt.
+  if (data.warehouses.length === 0) {
+    return c.json({ error: 'there is nothing to pack — no line on this order is above 0' }, 400);
+  }
   const byPo = c.req.query('groupBy') === 'po';
   const only = c.req.query('warehouse');
   const keep = (w: { warehouse: string }) => !only || w.warehouse === only;
@@ -660,7 +680,8 @@ sellOrders.post('/:id/price-import/preview', async (c) => {
            unit_price::float AS unit_price,
            source_unit_price::float AS source_unit_price
     FROM sell_order_lines
-    WHERE sell_order_id = ${id}
+    -- A line held at 0 is left off the bid sheet, so it can't be missing from it.
+    WHERE sell_order_id = ${id} AND qty > 0
     ORDER BY position
   `) as SellOrderLineRow[];
   const products = groupOrderProducts(lines, head.currency_code === 'CNY');
@@ -678,8 +699,12 @@ sellOrders.post('/:id/price-import/preview', async (c) => {
 
 // Field gates — fail fast with a clean 400 rather than letting a malformed
 // line reach the uuid cast, the NOT NULL columns or the sell_order_lines CHECK
-// (qty>0, unit_price>=0) and surface as a 500.
-function lineInputError(lines: readonly unknown[]): string | null {
+// (qty>=0, unit_price>=0) and surface as a 500. A saved order may hold a line
+// at 0 rather than remove it, which would renumber the lines after it; a new
+// order still needs at least 1 of everything. Which lot lines of a save are
+// new is checked under the lock in PATCH; a typed line has no identity apart
+// from its fields, qty included, so a typed 0 is the editor's to refuse.
+function lineInputError(lines: readonly unknown[], opts: { allowZeroQty?: boolean } = {}): string | null {
   for (const l of lines) {
     if (typeof l !== 'object' || l === null) return 'each line must be an object';
     const { inventoryId, category, label, qty, unitPrice } = l as Record<string, unknown>;
@@ -688,7 +713,10 @@ function lineInputError(lines: readonly unknown[]): string | null {
     }
     if (typeof category !== 'string' || category.trim() === '') return 'category is required on every line';
     if (typeof label !== 'string') return 'label is required on every line';
-    if (!Number.isInteger(qty) || (qty as number) <= 0) return 'qty must be a positive integer';
+    const minQty = opts.allowZeroQty ? 0 : 1;
+    if (!Number.isInteger(qty) || (qty as number) < minQty) {
+      return opts.allowZeroQty ? 'qty must be a whole number, 0 or more' : 'qty must be a positive integer';
+    }
     if (!Number.isFinite(unitPrice) || (unitPrice as number) < 0) return 'unitPrice must be ≥ 0';
   }
   return null;
@@ -817,7 +845,7 @@ sellOrders.patch('/:id', async (c) => {
     return c.json({ error: 'at least one line required' }, 400);
   }
   if (Array.isArray(body.lines)) {
-    const lineErr = lineInputError(body.lines);
+    const lineErr = lineInputError(body.lines, { allowZeroQty: true });
     if (lineErr) return c.json({ error: lineErr }, 400);
   }
 
@@ -878,6 +906,13 @@ sellOrders.patch('/:id', async (c) => {
         `
       : [];
     if (body.lines !== undefined) {
+      // A 0 is how a line already on the order keeps its # once its lot has
+      // gone, so validateSellLines passes it unchecked. A lot new to the order
+      // has to come with at least 1, or a stale or made-up id reaches the FK.
+      const onOrder = new Set(beforeLines.flatMap(l => (l.inventory_id ? [l.inventory_id.toLowerCase()] : [])));
+      if (body.lines.some(l => l.qty === 0 && l.inventoryId && !onOrder.has(l.inventoryId.toLowerCase()))) {
+        return { code: 400, msg: 'a new line needs a qty of at least 1 — only a line already on the order can be held at 0' };
+      }
       // Same sellability check as POST, run inside the tx with FOR UPDATE.
       // This order is excluded so keeping its own already-committed lines
       // doesn't trip the one-open-sell-order-per-line rule.
@@ -1346,6 +1381,16 @@ sellOrders.post('/:id/status', async (c) => {
       return { kind: 'reopenNeedsNote' };
     }
 
+    // Lines held at 0 hold nothing; an order made only of them would ship,
+    // bill or sell nothing. Checked on every move into those statuses, not
+    // only out of Draft: a shipped order can be zeroed through PATCH.
+    if (body.to === 'Shipped' || body.to === 'Awaiting payment' || body.to === 'Done') {
+      const [{ any }] = await tx<{ any: boolean }[]>`
+        SELECT EXISTS (SELECT 1 FROM sell_order_lines WHERE sell_order_id = ${id} AND qty > 0) AS any
+      `;
+      if (!any) return { kind: 'conflict', msg: 'every line on this order is at 0 — there is nothing to sell' };
+    }
+
     // Done rewrites every source PO (goods total, sold settlement) after it
     // has locked their lines, so those orders are locked first: lines-then-
     // orders is the order PO PATCH deadlocks against (services/orderLocks.ts).
@@ -1459,11 +1504,12 @@ sellOrders.post('/:id/status', async (c) => {
       // derived goods total. The mirror verdict has to be taken before the
       // decrement — afterwards a stale mirror reads as a negotiated lot price
       // and that PO's total_cost pins itself against its lines for good.
+      // Lines held at 0 sold nothing: they move no stock and owe no commission.
       const sourceOrders = await tx<{ order_id: string }[]>`
         SELECT DISTINCT l.order_id
         FROM sell_order_lines sol
         JOIN order_lines l ON l.id = sol.inventory_id
-        WHERE sol.sell_order_id = ${id} AND sol.inventory_id IS NOT NULL
+        WHERE sol.sell_order_id = ${id} AND sol.inventory_id IS NOT NULL AND sol.qty > 0
       `;
       const goodsFollowsLines = new Map<string, boolean>();
       for (const o of sourceOrders) {
@@ -1487,7 +1533,7 @@ sellOrders.post('/:id/status', async (c) => {
             FROM (
               SELECT inventory_id, SUM(qty)::int AS q
               FROM sell_order_lines
-              WHERE sell_order_id = ${id} AND inventory_id IS NOT NULL
+              WHERE sell_order_id = ${id} AND inventory_id IS NOT NULL AND qty > 0
               GROUP BY inventory_id
             ) s
            WHERE s.inventory_id = ol.id
@@ -1513,7 +1559,7 @@ sellOrders.post('/:id/status', async (c) => {
         FROM sell_order_lines sol
         JOIN order_lines l ON l.id = sol.inventory_id
         JOIN orders o ON o.id = l.order_id
-        WHERE sol.sell_order_id = ${id} AND sol.inventory_id IS NOT NULL
+        WHERE sol.sell_order_id = ${id} AND sol.inventory_id IS NOT NULL AND sol.qty > 0
       `;
       for (const s of submitters) {
         await notify(tx, {

@@ -23,10 +23,13 @@
 // only that category's spec columns. The import parser reads prices from
 // EVERY sheet, so a vendor filling several tabs round-trips fine.
 //
-// Photos ship as clickable Image URL cells, not embedded thumbnails
+// Bid-sheet photos ship as clickable Image URL cells, not embedded thumbnails
 // (user-requested 2026-07-22): links keep the file small and always show the
-// full-size scan. Spec attributes get individual columns (same request as the
-// order spreadsheet — never re-merge them into one composed field).
+// full-size scan. The packing tabs carry no photo at all: an embedded
+// thumbnail per row was tried and dropped (user-decided 2026-10-07, "not
+// required in the spreadsheet") — Pack mode shows it on screen instead. Spec
+// attributes get individual columns (same request as the order spreadsheet —
+// never re-merge them into one composed field).
 //
 // The workbook ships completely unprotected (user-decided 2026-08-08): a
 // manager reshaping a long bid sheet shouldn't have to lift a lock first, and
@@ -72,10 +75,16 @@ export type PriceTemplateProduct = {
   imageUrl: string | null;
   // Keyed by SPEC_COLS_BY_CATEGORY keys; absent/blank for manual lines.
   specs: Record<string, string | number>;
-  // The folded lots' # on their PO (lib/poLineNo.ts). Set only for a by-PO
-  // tab's products — elsewhere one row can span several POs.
-  poLineNos?: number[];
+  // Where the row's units came from, one entry per PO line it folds. Only the
+  // packing tabs read it, giving each entry a tickable row of its own.
+  poSources?: PoSource[];
 };
+
+// One PO line's share of a row. `lineNo` is the line's # on its PO page
+// (lib/poLineNo.ts); `po` and `lineNo` are both null for a line typed onto
+// the order by hand. `soLineNos` are the sell-order lines it covers — the #
+// the packer writes on each item's label.
+export type PoSource = { po: string | null; lineNo: number | null; qty: number; soLineNos: number[] };
 
 export type PriceTemplateHead = {
   id: string;
@@ -251,8 +260,17 @@ function renderGroupLabels(
   groupCols: readonly GroupCol[],
   sorted: PriceTemplateProduct[],
   firstRow: number,
+  // Rows each product takes: one on a bid tab; on a pack tab a product split
+  // by PO line takes its own row plus one per line, all under its label.
+  spans?: readonly number[],
 ): void {
   const thin = { style: 'thin' } as const;
+  const starts: number[] = [];
+  let at = firstRow;
+  sorted.forEach((_, i) => {
+    starts.push(at);
+    at += spans?.[i] ?? 1;
+  });
   groupCols.forEach((col, g) => {
     const prefix = (p: PriceTemplateProduct) =>
       groupCols.slice(0, g + 1).map((c) => c.label(spec(p, c.key))).join(' ');
@@ -260,8 +278,8 @@ function renderGroupLabels(
     while (start < sorted.length) {
       let end = start;
       while (end + 1 < sorted.length && prefix(sorted[end + 1]) === prefix(sorted[start])) end++;
-      const top = firstRow + start;
-      const bottom = firstRow + end;
+      const top = starts[start];
+      const bottom = starts[end] + (spans?.[end] ?? 1) - 1;
       if (bottom > top) ws.mergeCells(top, g + 1, bottom, g + 1);
       const cell = ws.getCell(top, g + 1);
       cell.value = col.label(spec(sorted[start], col.key));
@@ -336,7 +354,7 @@ export async function buildPackingListByPoWorkbook(
       const poName = po ?? 'No PO';
       renderWarehouseSheet(wb, head, { warehouse: wh.warehouse, products }, {
         tabName: packTabName(`${poName} - ${wh.warehouse}`, used),
-        poLineIds: true,
+        poCol: 'id',
         instruction:
           `Packing checklist — ${poName}, warehouse ${wh.warehouse}. Tick "Packed ✓" as you pack. ` +
           `/ ${poName}，仓库 ${wh.warehouse} 装箱清单：装箱后请在 "Packed ✓" 列打勾。`,
@@ -511,21 +529,51 @@ type WhCol = { header: string; key: string; width: number; numFmt?: string };
 // Condition / Image URL here). The bid tabs still carry all of them.
 const PACK_OMITTED_SPECS = new Set(['classification', 'chip']);
 
-// Section layout: Packed ✓ | Part # | [ID in PO] | <category specs> | Qty,
-// shifted right by PACK_GROUP_OFFSET to leave room for the RAM group labels.
-// No prices by design (user-decided): a picker has no use for them, and "Part
-// #" (not "Part Number") plus the absence of any price header is also what
-// keeps findHeaders() from ever parsing these tabs. "ID in PO" — the line's #
-// on its PO page — only on a by-PO tab: a mixed-PO tab has no PO to number in.
-function whSectionCols(category: string, withPoId: boolean): WhCol[] {
+// Section layout: # | Packed ✓ | Part # | From PO or ID in PO | <category
+// specs> | Qty, shifted right by PACK_GROUP_OFFSET to leave room for the RAM
+// group labels. No prices by design (user-decided): a picker has no use
+// for them, and "Part #" (not "Part Number") plus the absence of any price
+// header is also what keeps findHeaders() from ever parsing these tabs. The
+// source column names where a row's units came from: "From PO" ("PO-1442 #3")
+// on a warehouse tab, whose rows mix POs; "ID in PO" (just the #) on a by-PO
+// tab, where the tab already names the PO.
+type PoCol = 'source' | 'id';
+
+function whSectionCols(category: string, poCol: PoCol): WhCol[] {
   return [
+    // The line's # on the sell order, which the packer labels the item with.
+    { header: '#',         key: 'soLine',    width: 8 },
     { header: 'Packed ✓',  key: 'packed',    width: 9 },
     { header: 'Part #',    key: 'part',      width: 24 },
-    ...(withPoId ? [{ header: 'ID in PO', key: 'poLine', width: 12 }] : []),
+    poCol === 'id'
+      ? { header: 'ID in PO', key: 'poLine',   width: 12 }
+      : { header: 'From PO',  key: 'poSource', width: 18 },
     ...(SPEC_COLS_BY_CATEGORY[category] ?? []).filter((c) => !PACK_OMITTED_SPECS.has(c.key)),
     { header: 'Qty',       key: 'qty',       width: 8, numFmt: '#,##0' },
   ];
 }
+
+// A product's PO lines in the order a picker walks them: POs in numeric order
+// (PO-999 before PO-1442), then line #, a hand-typed share last.
+function sortSources(sources: readonly PoSource[]): PoSource[] {
+  return [...sources].sort((a, b) => {
+    if (!a.po || !b.po) return a.po ? -1 : b.po ? 1 : 0;
+    return a.po.localeCompare(b.po, undefined, { numeric: true }) || a.lineNo! - b.lineNo!;
+  });
+}
+
+// What a split product's own row says it spans: "2 POs", "1 PO" for two lines
+// of one PO, "+ No PO" when part of it was typed in by hand.
+function posSpanned(sources: readonly PoSource[]): string {
+  const n = new Set(sources.flatMap((x) => (x.po ? [x.po] : []))).size;
+  const pos = `${n} PO${n === 1 ? '' : 's'}`;
+  return sources.some((x) => !x.po) ? `${pos} + No PO` : pos;
+}
+
+const numList = (nos: readonly number[]): number | string => {
+  const sorted = [...nos].sort((a, b) => a - b);
+  return sorted.length === 1 ? sorted[0] : sorted.join(', ');
+};
 
 // Every pack tab reserves the group-label columns, whether or not it holds a
 // RAM section: two tabs on the same order then have the same layout, so a
@@ -537,9 +585,10 @@ function renderWarehouseSheet(
   head: PriceTemplateHead,
   wh: PriceTemplateWarehouse,
   // The by-PO workbook reuses this tab whole; only its name and wording move,
-  // plus the ID in PO column.
-  opts: { tabName?: string; instruction?: string; totalLabel?: string; poLineIds?: boolean } = {},
+  // and its source column narrows to ID in PO.
+  opts: { tabName?: string; instruction?: string; totalLabel?: string; poCol?: PoCol } = {},
 ): void {
+  const poCol = opts.poCol ?? 'source';
   // "Pack - DEN" style: the prefix separates packing tabs from the category
   // bid tabs at a glance and can never collide with RAM/SSD/HDD/Other.
   const ws = wb.addWorksheet(opts.tabName ?? `Pack - ${wh.warehouse}`);
@@ -550,7 +599,7 @@ function renderWarehouseSheet(
   // Shared per-index widths: the widest column wins across sections.
   const widths: number[] = [];
   for (const cat of sections) {
-    whSectionCols(cat, !!opts.poLineIds).forEach((c, i) => {
+    whSectionCols(cat, poCol).forEach((c, i) => {
       widths[i] = Math.max(widths[i] ?? 0, c.width);
     });
   }
@@ -590,7 +639,7 @@ function renderWarehouseSheet(
   let r = 5;
   let totalQty = 0;
   for (const cat of sections) {
-    const cols = whSectionCols(cat, !!opts.poLineIds);
+    const cols = whSectionCols(cat, poCol);
     const qtyIdx = cols.findIndex((c) => c.key === 'qty') + 1 + PACK_GROUP_OFFSET;
 
     const title = ws.getRow(r++);
@@ -612,40 +661,65 @@ function renderWarehouseSheet(
     // labels below merge runs of THIS array, so the two must not diverge.
     const sectionRows = sortCategoryForSheet(cat, byCategory.get(cat)!);
     const firstRow = r;
+    const spans: number[] = [];
     for (const p of sectionRows) {
-      const row = ws.getRow(r++);
       // Wash under the group, tick box excluded — a tinted box reads as
       // already ticked once the sheet is printed.
       const wash = cat === 'RAM' ? tintFill(rowTint(p)) : null;
-      cols.forEach((c, i) => {
-        const cell = row.getCell(i + 1 + PACK_GROUP_OFFSET);
-        if (wash && c.key !== 'packed') cell.fill = wash;
-        switch (c.key) {
-          case 'packed':
-            // Blank bordered tick box — pen after printing, or type x in Excel.
-            cell.border = box;
-            break;
-          case 'part': cell.value = p.partNumber ?? ''; break;
-          case 'poLine': {
-            // A row folding several lots of the PO lists them all. Centred, so
-            // the lone numbers and the "1, 3" text line up as one column.
-            const ids = [...(p.poLineNos ?? [])].sort((a, b) => a - b);
-            cell.value = ids.length === 1 ? ids[0] : ids.join(', ');
-            cell.alignment = { horizontal: 'center' };
-            break;
+      const sources = sortSources(p.poSources ?? []);
+      // From one PO line, a product is one row. From several, it is laid out
+      // the way the inventory page lists a product's lots: the product on a
+      // bold row of its own, then a row per PO line with its own #, tick box
+      // and qty, so a picker pulling one part from three boxes ticks each box
+      // (user-requested 2026-10-07).
+      const block: { kind: 'single' | 'product' | 'line'; src: PoSource | null }[] = sources.length > 1
+        ? [{ kind: 'product', src: null }, ...sources.map((src) => ({ kind: 'line' as const, src }))]
+        : [{ kind: 'single', src: sources[0] ?? null }];
+      for (const { kind, src } of block) {
+        const row = ws.getRow(r++);
+        const tickable = kind !== 'product';
+        // Part # and the specs belong to the product; a line row only says
+        // which PO line it is.
+        const productCells = kind !== 'line';
+        cols.forEach((c, i) => {
+          const cell = row.getCell(i + 1 + PACK_GROUP_OFFSET);
+          if (wash && c.key !== 'packed') cell.fill = wash;
+          switch (c.key) {
+            case 'soLine':
+              // Centred, so a lone # and a folded "2, 5" line up.
+              if (tickable) cell.value = numList(src?.soLineNos ?? []);
+              cell.alignment = { horizontal: 'center' };
+              break;
+            case 'packed':
+              // Blank bordered tick box — pen after printing, or type x in Excel.
+              if (tickable) cell.border = box;
+              break;
+            case 'part': if (productCells) cell.value = p.partNumber ?? ''; break;
+            case 'poLine':
+              cell.value = kind === 'product' ? `${sources.length} lines` : src?.lineNo ?? '';
+              cell.alignment = { horizontal: 'center' };
+              break;
+            case 'poSource':
+              if (kind === 'product') cell.value = posSpanned(sources);
+              else if (src?.po) cell.value = `${src.po} #${src.lineNo}`;
+              else if (src) cell.value = kind === 'line' ? 'No PO' : '—';
+              if (kind === 'line') cell.alignment = { indent: 1 };
+              break;
+            case 'qty':
+              cell.value = kind === 'line' ? src!.qty : p.qty;
+              cell.numFmt = c.numFmt!;
+              break;
+            default: if (productCells) cell.value = p.specs[c.key] ?? '';
           }
-          case 'qty':
-            cell.value = p.qty;
-            cell.numFmt = c.numFmt!;
-            break;
-          default: cell.value = p.specs[c.key] ?? '';
-        }
-      });
+          if (kind === 'product' && (c.key === 'part' || c.key === 'qty')) cell.font = { bold: true };
+        });
+      }
+      spans.push(block.length);
       sectionQty += p.qty;
     }
     // Spans are merged across sectionRows only, so they stop at the section's
     // last row and can never reach the subtotal below it.
-    if (cat === 'RAM') renderGroupLabels(ws, RAM_GROUP_COLS, sectionRows, firstRow);
+    if (cat === 'RAM') renderGroupLabels(ws, RAM_GROUP_COLS, sectionRows, firstRow, spans);
     totalQty += sectionQty;
 
     const subtotal = ws.getRow(r++);
@@ -658,8 +732,10 @@ function renderWarehouseSheet(
   }
 
   const total = ws.getRow(r);
+  // The figure sits two columns along, so the label can run across the empty
+  // tick-box cell instead of being cut off at the narrow # column.
   total.getCell(1 + PACK_GROUP_OFFSET).value = opts.totalLabel ?? 'Warehouse total';
-  total.getCell(2 + PACK_GROUP_OFFSET).value = totalQty;
-  total.getCell(2 + PACK_GROUP_OFFSET).numFmt = '#,##0';
+  total.getCell(3 + PACK_GROUP_OFFSET).value = totalQty;
+  total.getCell(3 + PACK_GROUP_OFFSET).numFmt = '#,##0';
   total.font = { bold: true };
 }

@@ -1517,6 +1517,8 @@ inventory.post('/transfer', async (c) => {
         JOIN sell_orders so ON so.id = sol.sell_order_id
         WHERE sol.inventory_id = ANY(${fullMoves}::uuid[])
           AND so.status = 'Draft' AND so.archived_at IS NULL
+          -- Promotion skips a line held at 0, so it is not held up by the move.
+          AND sol.qty > 0
         ORDER BY so.id
       `;
       if (drafts.length > 0) return { kind: 'needsConfirm', drafts: drafts.map((d) => d.id) };

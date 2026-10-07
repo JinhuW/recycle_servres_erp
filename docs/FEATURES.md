@@ -150,8 +150,13 @@ on to Sold once every line has sold (v1.164.0).
   detail" — and a **Commission payment** drop box for the screenshot that
   shows the purchaser was paid (v1.163.0 shipped it with a PayPal/Cash picker
   and an OCR-filled transaction ID; v1.165.0 cut it to the screenshot alone).
-  Files write through as they are dropped — managers at any stage, closed
-  book included — and purchasers see the list read-only. **Ready to Pay →
+  Above the drop box, **Paid by** names the manager who paid the purchaser
+  (v1.217.0): a select of the active managers, or *Not recorded*, which every
+  order starts at — the screenshot's uploader need not be the payer, so
+  nothing is guessed. Files write through as they are dropped and the pick
+  as it is made — managers at any stage, closed book included — and
+  purchasers see both read-only. Each pick is one *Commission paid by:
+  ‹from› → ‹to›* line in Activity, the names as they were at the time. **Ready to Pay →
   Done asks for it only when it is missing** (v1.165.0): with a screenshot
   on file the move is as plain as any other; without one the *Mark order as
   Done* dialog opens, and a file attached there is the same file the tab
@@ -183,8 +188,9 @@ on to Sold once every line has sold (v1.164.0).
 - **The phone's *Order details* are the desktop's five tabs, as folds**
   (v1.162.0): Delivery (source, warehouse, label or pickup, tracking),
   Cost Payment, **Commission** (with the commission-payment screenshot box
-  under the maths since v1.163.0, screenshot-only since v1.165.0; the fold's
-  summary reads *· Paid* once one is on file), Notes & files, Activity —
+  under the maths since v1.163.0, screenshot-only since v1.165.0, with the
+  *Paid by* manager select above it since v1.217.0; the fold's summary reads
+  *· Paid* once a screenshot is on file), Notes & files, Activity —
   same order, same names.
   Each is one card (`PhFold`): closed, the title with its answer read back;
   open, a tinted header ruled off from the fields in the same card. An amber
@@ -655,7 +661,9 @@ on to Sold once every line has sold (v1.164.0).
   (Draft, Shipped or Awaiting payment) the archive dialog names the sell
   orders and lines and asks whether to remove them from those sell orders
   first; the removal is audited on the sell order and is not undone by
-  unarchiving. That question, and the removal, are the manager's: a
+  unarchiving. A sell line held at 0 holds nothing, so it is neither named
+  nor removed, nor counted in the sell order's line count (v1.220.2): it stays,
+  with its #, pointing at the archived lot. That question, and the removal, are the manager's: a
   purchaser who owns the PO gets a plain refusal naming no sell orders
   (v1.137.1). A line out on a pending transfer refuses the archive; one that
   was already out when the PO was archived (migration 0122's case) joins the
@@ -676,7 +684,9 @@ on to Sold once every line has sold (v1.164.0).
   ever named the line blocked and the message named nothing; v1.144.1
   exempted archived sell orders only, so closing one did not help despite
   the dialog saying it would. A sale whose source line is gone drops out of
-  the cost-based dashboard figures.
+  the cost-based dashboard figures. A sell line held at 0 doesn't block
+  either (v1.220.2): it keeps its # and becomes a hand-typed line, no longer
+  capped by a lot's stock.
 - **Every change is audited**, drafts included (v1.33.0), and each timeline
   opens with an "Order created" entry.
 - Excel export carries the category's full spec set per line, one tab per
@@ -808,12 +818,32 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   - Editing adds a sticky footer: Discard, Cancel and Save. Save lands on the
     order's view page with a toast.
   - A line can grow to what its lot still has free. A line whose lot has
-    nothing left to offer shows a locked quantity and "No longer available —
-    remove the line" (v1.194.1). That covers a lot that left Reviewing or
-    Done, one whose PO was archived, and one that other committed orders hold
-    in full. Saving refuses such a line.
+    nothing left to offer reads "No longer available — set it to 0 or remove
+    it" (v1.194.1, v1.219.0). That covers a lot that left Reviewing or Done,
+    one whose PO was archived, and one that other committed orders hold in
+    full. Saving refuses such a line above 0.
   - View and edit share one history entry, so browser Back returns to where
     the order was opened from.
+- **Every line shows its # on the order** (v1.219.0) — `#3` before the item
+  name, in view and edit. The # is the line's place in the order's list
+  (position, then creation, then id): the number the packer labels the item
+  with and the receiver checks the box by. Pack mode and both packing lists
+  show the same number, and a line added while editing shows its # before the
+  save.
+- **A line that can't ship is set to 0, not removed** (v1.219.0), so no line
+  after it is renumbered. Any line already on the order may go to 0 in the
+  editor, including one whose lot is gone; a line being added still needs at
+  least 1, as does a new order (and the MCP create tool). Since v1.220.2 the
+  server holds that rule too: a save may hold at 0 only a lot already on the
+  order, and a 0 for any other lot — or an id no lot has — is a 400. A line at 0 holds
+  nothing: it reserves no stock, sells nothing on Done, records no market
+  price, is left off the bid sheet and both packing lists (its # stays taken),
+  and keeps its price through a negotiated total. An order whose lines are
+  all 0 can't move to Shipped, Awaiting payment or Done, and has nothing to
+  pack: both packing-list buttons are off for it (v1.220.2). A hand-typed line is
+  no longer capped at its saved qty. Archiving a PO or removing one of its
+  lines leaves a sell line held at 0 alone (v1.220.2): it is not a conflict and
+  is not removed, so no # after it moves.
 - **Line items group By warehouse or By PO** (v1.194.0), in both view and edit.
   The switch on the Line items header is remembered per user (preference
   `sellOrders.lineGroup`, default by warehouse).
@@ -905,7 +935,28 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   leading columns — reserved on every pack tab, so two warehouses on one order
   read alike. Both files come from one query and one sort, so a picker and a
   bidder find a product in the same place; uploading this one to the price
-  import is rejected for having no price column (v1.130.0).
+  import is rejected for having no price column (v1.130.0). **Every row names
+  its source in a `From PO` column after Part #** (v1.216.0): `PO-1442 #3`,
+  the line's # on that PO's page; a row of hand-typed lines alone reads `—`.
+  **A product from several PO lines is checked off line by line** (v1.220.0,
+  laid out like the inventory page's lots): a bold row for the product — Part
+  #, specs, its total and the POs it spans (`2 POs`, `1 PO`, `+ No PO` for a
+  hand-typed share), no tick box — then a row per PO line with its own #,
+  tick box, `From PO-999 #12` (or `No PO`) and quantity, POs in numeric
+  order, hand-typed last. The RAM labels run down the whole block and the
+  subtotals count the product once. Until v1.220.0 those lines were stacked in
+  one cell under a single tick box (v1.216.0).
+- **The packing lists carry no photos** (v1.220.1). v1.220.0 embedded a
+  thumbnail of each lot's label scan in a `Photo` column after the tick box,
+  fetched at export time; it was taken out the same day as not needed on the
+  sheet, so Part # sits right after the tick box again and the export fetches
+  nothing. The photo is on screen in Pack mode instead, and the bid sheet keeps
+  its Image URL links. The download buttons stay disabled while a file is
+  being prepared.
+- **Both packing lists number their rows by the sell order's #** (v1.219.0): a
+  `#` column first, before the tick box, so the label on an item matches its
+  row. A row that folds several lines lists their #s ascending (`2, 5`). The
+  bid sheet has no such column.
 - **The packing list also comes cut by PO** (v1.189.0) — `Packing list by PO`,
   the same route with `?groupBy=po`: one tab per PO per warehouse
   (`PO-1442 - DEN`), POs in numeric order, hand-typed lines on a
@@ -913,14 +964,63 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   category sections, the RAM device / DDR-generation labels and tints, tick
   boxes, subtotals and a PO total. Each tab adds an **ID in PO** column after
   Part # (v1.197.3): the line's # on that PO's page. A row that folds several
-  lots of the PO lists their IDs ascending ("1, 3"). The per-warehouse packing
-  list has no such column, since its tabs mix POs. A warehouse picker beside the buttons
-  (shown when the order spans more than one) narrows either packing list to
+  lots of the PO is split the same way (v1.220.0): the product's row reads
+  `2 lines`, then each line's row its ID; the tab already names the PO, so it
+  has no `From PO` column. A warehouse picker beside the buttons
+  (shown when the order's lines above 0 span more than one — a warehouse
+  holding only 0 lines isn't offered, v1.220.2) narrows either packing list to
   one warehouse (`?warehouse=<short>`); the bid sheet always covers the whole
   order. Both packing lists place a line by where its lot is *now* — the lot's
   own warehouse, else its PO's — not the warehouse the line was saved with,
   so a lot transferred after it went on the order is picked where it sits
   (v1.189.1).
+- **Pack mode: a manager ticks the order into the box** (v1.218.0, desktop
+  shell, built for an iPad). **Pack mode** in the sell order's page head opens
+  `#/sell-orders/<id>/pack`, a full-window page with no sidebar, top bar or
+  tweaks button. It is the on-screen form of the Packing list, and the
+  outbound twin of the PO's Review mode.
+  - **Lines run in the order's own list order** (v1.219.0; grouped by source
+    PO in v1.218.0). Each row's tag is the line's `#` on the order, the label
+    the packer writes on the item, and its meta line names the lot it comes
+    from (`From PO-1111 #1`, or *Typed in*). When the order's lots sit in more
+    than one warehouse, a *Packing from* switch narrows the list without
+    renumbering it.
+  - **Each line shows its lot's photo** (v1.220.0) between the tag and the
+    item — the label scan, loaded lazily; a tap zooms it, and Esc closes the
+    zoom before it leaves Pack mode. A line with no real scan (typed, or a
+    stub scan) keeps an empty slot so the items stay in one column. The photo
+    comes from `GET /api/sell-orders/:id` as each line's `imageUrl`.
+  - A line's count starts at its qty. − / + record a short pick (amber, *Short*)
+    or none at all (red, *Not packed*), and lowering a packed line unticks it.
+    The tick confirms the count as shown; a ticked line **stays in its place**
+    (v1.219.0), dimmed with a green tick, with Undo in the bottom bar.
+  - A line held at 0 keeps its row and # but reads *Qty 0 · nothing to pack*:
+    no counter or tick, never matched by a scan, left out of the progress and
+    of what blocks Mark shipped.
+  - The scan box takes a Bluetooth or USB label scanner, with nothing focused,
+    and matches a part number, a prefix, then a recorded serial, as Review mode
+    does. When the part is still waiting on more than one line, the scan ticks
+    nothing: it highlights those lines, names them by # and asks for a tap on
+    the one that was packed.
+  - Progress is saved on the server (`sell_order_packs`), so a reload, a second
+    iPad or coming back from another app picks up where the count stands; the
+    page re-reads when it returns to the foreground. Last write per line wins.
+    Progress is kept by the line's lot (or a hand-typed line's text), not its
+    row, so saving the order keeps it. A line whose qty changes comes back
+    unpacked, unless it was packed short and edited down to exactly the count
+    packed. If the order itself can't be loaded, the list says so with *Try
+    again* instead of loading forever (v1.220.2).
+  - Every control is at least 44px and the tick is 60px; nothing needs hover.
+    Under 780px each row puts the counter and tick on a second line.
+  - On a Draft with every line packed at full count, **Mark shipped** opens the
+    Shipped dialog (note, packing photos) and moves the order to Shipped. Short
+    or unpacked lines block it, and the bar offers Edit order to match the
+    order to the box first. A refused move (a lot taken meanwhile) says why and
+    stays on the page. Other statuses end with Back to order.
+  - The endpoints (`GET /api/sell-orders/:id/pack`,
+    `PUT /api/sell-orders/:id/pack/:lineId`) 403 anyone whose real role is not
+    manager. An archived or Closed order opens read-only and its writes 409; a
+    Done order can still be packed, since an order can be paid before it ships.
 
 ## Shipping
 
@@ -1419,6 +1519,9 @@ inventory search, sell-order draft creation.
 - Tool failures answer as normal results with `isError: true`, not JSON-RPC
   errors; only protocol failures are errors. Every tool ships MCP
   `annotations`, without which clients label read-only tools destructive.
+- When two reference prices share a part number, `get_market_value` and
+  `set_market_price` use the most recently updated one, like the scraper push
+  (v1.219.1).
 - DCR is open by default, rate-limited per IP (per /64 for IPv6 since
   v1.200.1) and globally.
 - **Consent says where the code goes** (v1.195.0). Any app can register itself
@@ -1609,6 +1712,10 @@ removed in v1.191.0.
   new tab. The PO page's "Open payments" lands on the list focused on that
   PO. Sell-order links stay desktop-only: the phone shell has no sell-order
   route.
+- **An iPad gets the desktop shell** — every iPad is at least 744px wide.
+  Most desktop pages are built for a pointer; sell-order Pack mode (v1.218.0)
+  is the one page laid out for touch. An iPad in Split View narrower than
+  720px loads the phone shell, which has no sell-order routes.
 - The mobile shell is a **PWA** with install onboarding, a service worker and a
   share target, scoped to mobile only (v0.1.1).
 - Mobile PO lists colour-code warehouse, status and owner with stable hashed

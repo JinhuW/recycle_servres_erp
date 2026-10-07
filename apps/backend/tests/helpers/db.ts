@@ -13,7 +13,7 @@ const seedScript = join(backendRoot, 'scripts', 'seed.mjs');
 // Each vitest worker (fork) gets its OWN database so test FILES can run in
 // parallel without sharing schema/data. global-setup hands every worker the
 // same run-scoped base name via TEST_DATABASE_URL; we suffix it with the
-// fork's VITEST_POOL_ID (1..maxForks). Files that land on the same slot run
+// fork's VITEST_POOL_ID (1..maxWorkers). Files that land on the same slot run
 // sequentially and safely reuse that slot's DB. Outside vitest (no pool id),
 // the base URL is used unchanged.
 function resolveWorkerUrl(): string {

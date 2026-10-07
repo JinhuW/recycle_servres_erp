@@ -176,6 +176,8 @@ async function committedLines(
     WHERE ol.order_id = ${orderId}
       AND ol.status = ANY(${lineStatuses})
       AND so.status = ANY(${sellStatuses}::text[])
+      -- Same rule as committedQtySql: a sell line held at 0 holds nothing.
+      AND sol.qty > 0
   ` as unknown as { id: string; so_id: string }[];
   return {
     lineIds: [...new Set(rows.map(r => r.id))],
@@ -348,7 +350,8 @@ export async function archiveOrderLinesTx(
 
   const claimed = await tx`
     SELECT sol.id AS sol_id, so.id AS so_id, so.status AS so_status,
-           (SELECT COUNT(*) FROM sell_order_lines x WHERE x.sell_order_id = so.id)::int AS so_line_count,
+           (SELECT COUNT(*) FROM sell_order_lines x
+             WHERE x.sell_order_id = so.id AND x.qty > 0)::int AS so_line_count,
            sol.inventory_id, sol.qty, sol.unit_price::float AS unit_price, sol.condition,
            sol.category, sol.label, sol.sub_label, sol.part_number, sol.warehouse_id
     FROM sell_order_lines sol
@@ -357,6 +360,9 @@ export async function archiveOrderLinesTx(
     WHERE ol.order_id = ${id}
       AND ol.status <> 'Sold'
       AND so.status = ANY(${openSellStatuses()}::text[])
+      -- A line held at 0 claims nothing, and it is held rather than removed
+      -- so the lines after it keep their #: the archive leaves it be.
+      AND sol.qty > 0
     ORDER BY so.id, sol.position
   ` as unknown as (SOLineSnap & {
     sol_id: string; so_id: string; so_status: string; so_line_count: number; inventory_id: string;

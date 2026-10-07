@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, lazy, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { Modal } from '../../components/Modal';
 import {
@@ -12,7 +12,7 @@ import { forEachKeysetPage } from '../../lib/keysetPages';
 import { confirmDiscard, useUnsavedGuard } from '../../lib/unsavedGuard';
 import { api, ApiError, archiveSellOrder, unarchiveSellOrder } from '../../lib/api';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
-import { useRoute, navigate, replaceRoute, match } from '../../lib/route';
+import { useRoute, navigate, replaceRoute, match, matchSellOrderPack, sellOrderPackPath } from '../../lib/route';
 import { RouteLink } from '../../components/RouteLink';
 import { shareOrCopy } from '../../lib/shareOrCopy';
 import { fmtUSD, fmtUSD0, fmtMoney, fmtDate, fmtDateShort, CURRENCY_SYMBOL } from '../../lib/format';
@@ -31,7 +31,11 @@ import { applyPriceRows, type BidPart, mergeBidParts } from '../../lib/priceImpo
 import { usePreference } from '../../lib/preferences';
 import { LineSpecChips, lineHasSpecChips } from '../../components/LineSpecChips';
 import { groupSellOrderLines, type SellOrderLineGroup } from '../../lib/sellOrderLineGroups';
+import { isPackable, packWarehouseOptions, UNASSIGNED } from '../../lib/sellOrderPack';
 import { peekSellOrderPrefill, clearSellOrderPrefill } from '../../lib/sellOrderPrefill';
+
+// Its own chunk: only a packer opens it.
+const DesktopSellOrderPack = lazy(() => import('./DesktopSellOrderPack'));
 
 type Currency = 'USD' | 'CNY';
 
@@ -121,6 +125,10 @@ type SellOrderLine = LineSpec & {
 // Editable line shape used by the edit modal (mirrors the new-order builder).
 type EditLine = LineSpec & {
   _cid: string;                 // stable client id for React keys (never sent to the API)
+  // On the order before this edit. Only such a line may go to 0 — held there
+  // instead of removed, so no line after it is renumbered; a line being added
+  // needs at least 1.
+  saved: boolean;
   inventoryId: string | null;
   sourceOrderId: string | null; // display only — the server derives it from the lot
   sourceLineNo: number | null;  // display only, as sourceOrderId
@@ -138,6 +146,7 @@ type EditLine = LineSpec & {
 
 const toEditLine = (l: SellOrderLine): EditLine => ({
   _cid:        crypto.randomUUID(),
+  saved:       true,
   inventoryId: l.inventoryId,
   category:    l.category,
   label:       l.label,
@@ -169,6 +178,7 @@ function appendSellable(lines: EditLine[], picked: SellableItem[]): EditLine[] {
     .filter(it => !have.has(it.inventoryId))
     .map(it => ({
       _cid:        crypto.randomUUID(),
+      saved:       false,
       inventoryId: it.inventoryId,
       category:    it.category as EditLine['category'],
       label:       it.label,
@@ -268,9 +278,11 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
   };
   const editMatch = match('/sell-orders/:id/edit', path);
   const viewMatch = match('/sell-orders/:id', path);
-  const open: { id: string; mode: 'view' | 'edit' } | null =
+  const packMatch = matchSellOrderPack(path);
+  const open: { id: string; mode: 'view' | 'edit' | 'pack' } | null =
     editMatch ? { id: editMatch.id, mode: 'edit' }
     : viewMatch ? { id: viewMatch.id, mode: 'view' }
+    : packMatch ? { id: packMatch.id, mode: 'pack' }
     : null;
 
   // An open order replaces the list but this component stays mounted, so the
@@ -345,6 +357,9 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
     return m;
   }, [orders, serverStats]);
 
+  if (open?.mode === 'pack') {
+    return <DesktopSellOrderPack key={open.id} id={open.id} onToast={onToast} />;
+  }
   if (open) {
     return <SellOrderDetail key={`${open.id}:${open.mode}`} id={open.id} mode={open.mode} onToast={onToast} />;
   }
@@ -592,17 +607,15 @@ function ReceiverSelect({ value, current, members, disabled, onChange }: {
 function DownloadMenu({ orderId, lines }: { orderId: string; lines: SellOrderLine[] }) {
   const { t } = useT();
   const [warehouse, setWarehouse] = useState('');
-  const warehouses = useMemo(
-    () => [...new Set(lines.map(l => (l.packWarehouse === undefined ? l.warehouse : l.packWarehouse) ?? 'Unassigned'))].sort((a, b) => {
-      if (a === 'Unassigned') return 1;
-      if (b === 'Unassigned') return -1;
-      return a.localeCompare(b);
-    }),
-    [lines],
-  );
+  // A line held at 0 has no row on either packing list, so a warehouse holding
+  // only those would download as a 400.
+  const warehouses = useMemo(() => packWarehouseOptions(lines.filter(isPackable)), [lines]);
+  const nothingToPack = warehouses.length === 0;
   // A picked warehouse the order no longer has (a line was moved) falls back
   // to All rather than 400ing.
   const picked = warehouses.includes(warehouse) ? warehouse : '';
+  // A second click while a file is being prepared would only download it twice.
+  const [busy, setBusy] = useState(false);
 
   const download = (kind: 'price-template' | 'packing-list', byPo = false) => async () => {
     const params = new URLSearchParams();
@@ -612,10 +625,13 @@ function DownloadMenu({ orderId, lines }: { orderId: string; lines: SellOrderLin
     }
     const qs = params.toString() ? `?${params}` : '';
     const name = `${orderId}-${kind}${byPo ? '-by-po' : ''}.xlsx`;
+    setBusy(true);
     try {
       await api.download(`/api/sell-orders/${orderId}/${kind}${qs}`, name);
     } catch (e) {
       handleFetchError(e);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -625,6 +641,7 @@ function DownloadMenu({ orderId, lines }: { orderId: string; lines: SellOrderLin
         className="btn"
         style={{ whiteSpace: 'nowrap' }}
         title={t('soDownloadPriceTemplateHint')}
+        disabled={busy}
         onClick={download('price-template')}
       >
         <Icon name="dollar" size={14} /> {t('soDownloadPriceTemplate')}
@@ -639,14 +656,15 @@ function DownloadMenu({ orderId, lines }: { orderId: string; lines: SellOrderLin
         >
           <option value="">{t('soPackAllWarehouses')}</option>
           {warehouses.map(w => (
-            <option key={w} value={w}>{w === 'Unassigned' ? t('sodNoWarehouse') : w}</option>
+            <option key={w} value={w}>{w === UNASSIGNED ? t('sodNoWarehouse') : w}</option>
           ))}
         </select>
       )}
       <button
         className="btn"
         style={{ whiteSpace: 'nowrap' }}
-        title={t('soDownloadPackingListHint')}
+        title={t(nothingToPack ? 'soNothingToPackHint' : 'soDownloadPackingListHint')}
+        disabled={busy || nothingToPack}
         onClick={download('packing-list')}
       >
         <Icon name="box" size={14} /> {t('soDownloadPackingList')}
@@ -654,7 +672,8 @@ function DownloadMenu({ orderId, lines }: { orderId: string; lines: SellOrderLin
       <button
         className="btn"
         style={{ whiteSpace: 'nowrap' }}
-        title={t('soDownloadPackingListByPoHint')}
+        title={t(nothingToPack ? 'soNothingToPackHint' : 'soDownloadPackingListByPoHint')}
+        disabled={busy || nothingToPack}
         onClick={download('packing-list', true)}
       >
         <Icon name="box" size={14} /> {t('soDownloadPackingListByPo')}
@@ -676,8 +695,10 @@ type ItemCellLine = LineSpec & {
   sourceLineNo?: number | null;
 };
 
-function LineItemCell({ line, sub, showPo, showLineNo, linkPo }: {
+function LineItemCell({ line, lineNo, sub, showPo, showLineNo, linkPo }: {
   line: ItemCellLine;
+  // The line's # on this sell order — the number its item is labelled with.
+  lineNo: number;
   // The spec text snapshot saved with the line — shown only when the lot
   // can't supply chips (a hand-typed line, a deleted lot, an "Other" item).
   sub: string | null;
@@ -696,6 +717,13 @@ function LineItemCell({ line, sub, showPo, showLineNo, linkPo }: {
   return (
     <td>
       <div style={{ fontWeight: 500, fontSize: 13 }}>
+        <span
+          className="mono"
+          style={{ color: 'var(--fg-subtle)', fontWeight: 600, marginRight: 8 }}
+          title={t('sodLineNoTitle', { n: lineNo })}
+        >
+          #{lineNo}
+        </span>
         {line.label}
         {showLineNo && n != null && line.sourceOrderId && (
           <span
@@ -1271,6 +1299,11 @@ function SellOrderDetail({ id, mode, onToast }: {
                 <Icon name="edit" size={14} /> {t('sodReopen')}
               </button>
             )}
+            {!editable && !prefill && (
+              <button className="btn" onClick={() => navigate(sellOrderPackPath(order.id))} title={t('pkOpenTip')}>
+                <Icon name="package" size={14} /> {t('pkOpen')}
+              </button>
+            )}
             {!editable && !locked && (
               <button className="btn accent" onClick={toEdit}>
                 <Icon name="edit" size={14} /> {t('editOrder')}
@@ -1454,9 +1487,9 @@ function SellOrderDetail({ id, mode, onToast }: {
                           </tr>
                         </thead>
                         <tbody>
-                          {g.items.map(({ line: l }) => (
+                          {g.items.map(({ line: l, idx }) => (
                             <tr key={l.id}>
-                              <LineItemCell line={l} sub={l.sub} showPo={lineGroup === 'warehouse'} showLineNo={lineGroup === 'po'} linkPo />
+                              <LineItemCell line={l} lineNo={idx + 1} sub={l.sub} showPo={lineGroup === 'warehouse'} showLineNo={lineGroup === 'po'} linkPo />
                               {lineGroup === 'po' && <td style={{ fontSize: 12 }}>{l.warehouse ?? t('sodNoWarehouse')}</td>}
                               <td className="num mono">{l.qty}</td>
                               <td className="num mono">{fmtMoney(l.nativeUnitPrice, order.currency, locale)}</td>
@@ -1493,24 +1526,27 @@ function SellOrderDetail({ id, mode, onToast }: {
                           {g.items.map(({ line: l, idx }) => {
                             // The lot left the sellable statuses, its PO was
                             // archived, or other committed orders hold it all:
-                            // save refuses any qty, so clamping to 0 would only
-                            // snap the saved one to 1.
+                            // save refuses any qty above 0, so a saved line can
+                            // only be held at 0 (keeping its #) or removed.
                             const unavailable = l.inventoryId !== null && l.maxQty <= 0;
+                            const minQty = l.saved ? 0 : 1;
+                            // A typed line has no lot to run out of.
+                            const cap = l.inventoryId === null ? Infinity : Math.max(0, l.maxQty);
                             return (
                             <tr key={l._cid}>
-                              <LineItemCell line={l} sub={l.subLabel} showPo={lineGroup === 'warehouse'} showLineNo={lineGroup === 'po'} linkPo={false} />
+                              <LineItemCell line={l} lineNo={idx + 1} sub={l.subLabel} showPo={lineGroup === 'warehouse'} showLineNo={lineGroup === 'po'} linkPo={false} />
                               {lineGroup === 'po' && <td style={{ fontSize: 12 }}>{l.warehouse ?? t('sodNoWarehouse')}</td>}
                               <td className="num">
                                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
                                   <input
                                     className="so-mini-input"
                                     type="number"
-                                    min={1}
-                                    max={unavailable ? undefined : l.maxQty}
+                                    min={minQty}
+                                    max={cap === Infinity ? undefined : cap}
                                     value={l.qty}
-                                    disabled={unavailable}
+                                    disabled={unavailable && !l.saved}
                                     onChange={e => setLine(idx, {
-                                      qty: Math.max(1, Math.min(l.maxQty, Number(e.target.value) || 0)),
+                                      qty: Math.max(minQty, Math.min(cap, Number(e.target.value) || 0)),
                                     })}
                                     style={{ width: 64 }}
                                   />
@@ -1518,7 +1554,7 @@ function SellOrderDetail({ id, mode, onToast }: {
                                     <span style={{ fontSize: 10.5, color: 'var(--neg, #c0392b)', whiteSpace: 'nowrap' }}>
                                       {t('sodLineUnavailable')}
                                     </span>
-                                  ) : (
+                                  ) : l.inventoryId !== null && (
                                     <span style={{ fontSize: 10.5, color: 'var(--fg-subtle)', whiteSpace: 'nowrap' }}>
                                       / {l.maxQty}
                                     </span>

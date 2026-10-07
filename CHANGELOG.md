@@ -17,6 +17,239 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.220.2] - 2026-10-07
+
+Fixes from the pre-release review of dev against main (RS-192). Most of them
+finish what 1.219.0 started: a sell-order line held at 0 claims nothing, but
+several paths still treated it as a claim, or skipped every check on it.
+
+### Fixed
+
+- **A sell-order save may hold at 0 only a lot already on the order.** A 0
+  skipped the sellability check, so a 0 line naming a lot new to the order —
+  archived, unsellable, or an id no lot has — went through, the last one as a
+  500 from the foreign key. It is now a 400 asking for at least 1, which is
+  the rule the editor already kept.
+- **An order with nothing above 0 has no packing list.** Both downloads built
+  a workbook with no sheet, which Excel reports as corrupt; they now answer
+  400, and the desktop turns both buttons off for such an order. The
+  warehouse picker no longer offers a warehouse that holds only 0 lines,
+  which downloaded as a 400.
+- **Archiving a PO leaves a sell line held at 0 alone.** It was named as a
+  conflict, and *Remove from sell orders* deleted it, renumbering every line
+  after it on that sell order. The archive dialog's line count now ignores 0
+  lines too, so "this empties the order" stays true.
+- **A PO line held at 0 by a sell order can be removed.** The removal was
+  refused as if the sell order still needed the lot; the sell line keeps its
+  # and becomes a hand-typed line. The transfer prompt about Drafts naming a
+  line, and the MCP search's `draftCount`, ignore Drafts that hold it at 0.
+- **Pack mode no longer loads forever when the order can't be read.** It
+  says so and offers *Try again*, and the bottom bar stops reporting
+  "Everything is packed." before there is an order.
+
+### Changed
+
+- Review mode saves through the same per-line queue as Pack mode
+  (`useLineSaveQueue`) instead of its own copy of it.
+- The phone PO page asks for the member list — a heavy read — only when the
+  Commission fold opens, not on every open.
+- The Activity page and the PO timelines read field names from one map, so
+  the Activity page now also labels hand-off, tracking and source fields and
+  shows `payment: company` as *Company card*.
+
+## [1.220.1] - 2026-10-07
+
+The packing-list spreadsheets lose the photos 1.220.0 gave them: not needed
+on the sheet (RS-191).
+
+### Removed
+
+- **Both packing lists (per warehouse and by PO) no longer embed a photo.**
+  The `Photo` column with a thumbnail of each lot's label scan is gone, so
+  Part # sits right after the tick box again, and the export no longer fetches
+  every scan from its public URL before it can build the file. Everything else
+  1.220.0 brought stays: the row per PO line under a product, its own # and
+  tick box, the RAM labels and totals. Pack mode still shows each line's photo
+  on screen, and the bid sheet keeps its Image URL links. The Packing list
+  button's hint stops mentioning a photo.
+
+## [1.220.0] - 2026-10-07
+
+A packer can now tick a product off PO line by PO line, and sees each lot's
+photo while doing it — on the Packing list spreadsheets and in Pack mode
+(RS-190).
+
+### Changed
+
+- **A product that came from several PO lines is checked per line on both
+  packing lists.** It used to be one row whose `From PO` cell stacked the
+  lines (1.216.0) under a single tick box, so a picker pulling one part from
+  three boxes could not tick them apart. Now it reads like the inventory
+  page's lots: a bold row for the product — Part #, specs, total, the POs it
+  spans (`2 POs + No PO`) and no tick box — then a row per PO line with its
+  own sell-order #, tick box, photo, `From PO-999 #12` and quantity. A product
+  from one PO line is still one row. The Packing list by PO splits a product
+  folding several lines of its PO the same way (`2 lines`, then each ID).
+- The `Warehouse total` / `PO total` label is no longer cut off: its figure
+  moved two columns along.
+
+### Added
+
+- **Packing-list photos.** A `Photo` column after the tick box carries a
+  thumbnail of each lot's label scan, embedded so the sheet prints with it.
+  The export fetches up to 200 scans from their public URL, four at a time,
+  shrinks them in a shared two-at-a-time lane, and leaves the cell blank for a
+  scan that is missing, not a raster, over 20 MB or not back within the
+  20-second budget — the download never fails over a photo. The bid sheet keeps
+  its Image URL links.
+- **Pack mode shows each line's photo** between its # tag and the item; a tap
+  zooms it and Esc closes the zoom before leaving Pack mode. Lines keep their #
+  order. `GET /api/sell-orders/:id` returns the scan as each line's `imageUrl`
+  (null for a typed line or a stub scan).
+- The sell order's download buttons are disabled while a file is being
+  prepared, so a second click can't start the photo fetches again.
+
+## [1.219.1] - 2026-10-07
+
+Text that models read had drifted from the code (RS-189). A prompt audit
+checked CLAUDE.md, the project skills, the SessionStart hook and the MCP tool
+descriptions against the repository; this release makes each of them say what
+the code does.
+
+### Fixed
+
+- **`get_market_value` and `set_market_price` pick the newest twin.** When two
+  reference prices share a canonical part number, both now use the most
+  recently updated one, as `set_market_price`'s description always promised
+  and as the scraper push already did. Before, the read and the write could
+  each land on either row.
+- **MCP tool descriptions match the code.** `search_sellable_inventory` lists
+  lines with units left after committed sell orders (not lines with no
+  commitment at all), skips archived POs, and reports the remainder as
+  `availableQty`. `create_sell_order_draft` lists the errors it really
+  returns — being on another draft is not one of them.
+- **The SessionStart hook no longer misfires in a linked worktree** made by
+  other tooling. It told such a session it was in the shared main checkout and
+  to create a second worktree; it now stays silent there, and still speaks in
+  the main checkout.
+- **CLAUDE.md and README.md facts.** Prod refuses to boot without the OCR key
+  (the fallback is not silent there); Railway prod and CI run Postgres 18;
+  `.claude/skills/` and `commands/` are in git; frontend tests number 64, not
+  ~6; the vitest option is `maxWorkers`. History the model can't act on, link
+  labels naming memory files from another checkout, and the `plan-first` skill
+  name (which lives outside the repo) are replaced by the current rules.
+
+## [1.219.0] - 2026-10-07
+
+Sell-order lines are numbered by their place on the order, and a line that
+can't ship is set to 0 instead of removed (RS-188). Jinhu labels every packed
+item with its line's # on the sell order and the receiver checks the box by
+those labels, so Pack mode (v1.218.0, which grouped lines by source PO) had to
+follow the order's own list, the packing lists had to carry the same #, and the
+numbers had to stop shifting: removing a line renumbers every line after it.
+
+### Changed
+
+- **Pack mode goes by the order's #.** Lines run #1 to #n in the order's own
+  list order; each row's tag is its `#`, and its source reads
+  `From PO-1111 #1`. A ticked line stays in its place instead of sinking.
+- **The sell order page shows each line's `#n`** before the item name, in view
+  and edit.
+- **Both packing lists gain a `#` column** before the tick box; a row that
+  folds several lines lists every # (`2, 5`).
+- **A saved line can be set to 0** in the order editor, including one whose
+  lot is gone, so it keeps its # and so does every line after it. New lines
+  and new orders still need at least 1; a hand-typed line is no longer capped
+  at its saved qty.
+
+### Fixed
+
+- A line at 0 holds nothing everywhere it could have mattered: it reserves no
+  stock, is never sold, flipped to Sold or logged as sold on Done, records no
+  market price (it would have been NaN), stays off the bid sheet and packing
+  lists, keeps its price through a negotiated total (the proration loop would
+  never have ended), and no longer divides a PO line's final sell price by
+  zero. An order whose lines are all 0 can't move to Shipped, Awaiting payment
+  or Done. Pack mode shows such a line as nothing to pack.
+
+## [1.218.0] - 2026-10-07
+
+Sell orders get a Pack mode (RS-187): the Packing list as a checklist on an
+iPad, the way PO Review mode checks a box that arrived. Until now packing meant
+printing the xlsx, and nothing recorded what actually went into the box.
+
+### Added
+
+- **Pack mode** — `#/sell-orders/<id>/pack`, opened from the sell order's page
+  head. A full-window page laid out for touch: 48px steppers, a 60px tick, no
+  hover, and the one action in a bar at the bottom of the screen.
+  - Each line leads with a shelf tag for the lot it comes from, `PO-1111` over
+    `#1`, because that is how stock is found. Open lines group by source PO;
+    a *Packing from* switch narrows to one warehouse.
+  - Counts start full; − marks a short pick, a tick confirms, and a ticked
+    line sinks under *Packed* with Undo. A label scanner packs the line it
+    reads, and asks which lot when one part sits on several.
+  - Progress is saved per line in `sell_order_packs` (migration 0163), keyed
+    on the line's lot rather than its row, because saving an order rewrites
+    every line row.
+  - On a Draft with everything packed at full count, **Mark shipped** takes the
+    Shipped note and packing photos and moves the order on.
+
+## [1.217.0] - 2026-10-07
+
+The commission payment now records which manager paid the purchaser (RS-185).
+Until now the Commission tab kept only the screenshot that shows the purchaser
+was paid. The Activity log named whoever uploaded it, and that need not be the
+person who sent the money.
+
+### Added
+
+- **Paid by, in the Commission payment box.** It is on the desktop Commission
+  tab and the phone Commission fold, above the screenshot drop box.
+  - A manager picks from the active managers or clears it. Purchasers see the
+    name, or *Not recorded*.
+  - Every order starts at *Not recorded*. Nothing is backfilled or guessed
+    from the uploader or the PO manager.
+  - The pick saves as it is made, at every stage, Done included. The
+    commission is paid once the PO is a closed book, where the page's Save is
+    off and PATCH refuses, so it has its own endpoint,
+    `PUT /api/orders/:id/commission-paid-by` (`{ userId }` or `null`). It is
+    manager-only, and anyone but an active manager is refused with a 400.
+  - The column is `orders.commission_paid_by` (migration 0162, `ON DELETE SET
+    NULL`, indexed). `GET /api/orders/:id` reports it as `commissionPaidBy`
+    to every role that can read the PO.
+  - Each change writes one *Commission paid by: ‹from› → ‹to›* entry to the
+    PO's Activity tab and the desktop Activity page. The entry keeps the names
+    as they were, so a manager renamed or deactivated later still reads
+    correctly.
+
+### Changed
+
+- **One definition of "active manager".** `isActiveManager` moved from the
+  sell-order routes into `services/members.ts`. The sell order's *payment
+  received by* picker and the new picker now accept the same people.
+
+## [1.216.0] - 2026-10-07
+
+The sell order's Packing list now tells the picker which PO line each row came
+from (RS-186). The sell order page and the Packing list by PO already did; the
+per-warehouse list was the one place a row couldn't be traced back to its PO.
+
+### Added
+
+- **A `From PO` column after Part # on every `Pack - <warehouse>` tab.** A
+  row from one PO line reads `PO-1442 #3`, the same # the PO page shows.
+  - A row on this list folds one product across POs, which is why it never
+    had the column (RS-149). A row that folds several sources now lists each
+    on its own line in the cell with its quantity — `PO-1442 #3 ×8`,
+    `PO-1450 #1 ×4` — POs in numeric order and a hand-typed share last as
+    `No PO ×2`. The row grows to fit and its cells sit at the top, so Part #
+    reads beside the first source.
+  - A row of hand-typed lines alone reads `—`.
+  - Rows, quantities and totals are unchanged. The Packing list by PO keeps
+    its `ID in PO` column, since its tab already names the PO, and the bid
+    sheet has no source column: it goes to the vendor.
+
 ## [1.213.0] - 2026-10-07
 
 A PO line whose units never arrived can now be counted down to 0 instead of

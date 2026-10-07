@@ -34,6 +34,7 @@ detailRoutes.get('/:id', async (c) => {
            o.source, o.handoff_method, o.handoff_by, o.payment_method,
            hb.name AS handoff_by_name,
            mg.id AS manager_id, mg.name AS manager_name,
+           o.commission_paid_by, cpb.name AS commission_paid_by_name,
            o.supplier_id, sup.name AS supplier_name,
            o.commission_rate::float AS commission_rate,
            u.name AS user_name, u.initials AS user_initials,
@@ -47,6 +48,8 @@ detailRoutes.get('/:id', async (c) => {
     -- Only while still an active manager: the advance reads it the same way,
     -- so the client asks about exactly the manager the server would keep.
     LEFT JOIN users mg ON mg.id = o.manager_id AND mg.role = 'manager' AND mg.active
+    -- Unfiltered, unlike mg: a record of who paid, kept after they leave.
+    LEFT JOIN users cpb ON cpb.id = o.commission_paid_by
     LEFT JOIN warehouses w ON w.id = o.warehouse_id
     LEFT JOIN suppliers sup ON sup.id = o.supplier_id
                           AND (${isManager} OR sup.owner_id IS NULL
@@ -91,7 +94,8 @@ detailRoutes.get('/:id', async (c) => {
                (SUM(sol.qty * sol.unit_price) / SUM(sol.qty))::float AS final_sell_price
         FROM sell_order_lines sol
         JOIN sell_orders so ON so.id = sol.sell_order_id
-        WHERE sol.inventory_id = ol.id AND so.status = 'Done'
+        -- A sell line held at 0 sold nothing; alone it would divide by zero.
+        WHERE sol.inventory_id = ol.id AND so.status = 'Done' AND sol.qty > 0
       ) fs ON TRUE
       WHERE ol.order_id = ${id}
       ORDER BY ${poLineOrder(sql, 'ol')}
@@ -104,7 +108,7 @@ detailRoutes.get('/:id', async (c) => {
       JOIN order_lines ol ON ol.id = sol.inventory_id
       JOIN sell_orders so ON so.id = sol.sell_order_id
       JOIN customers c ON c.id = so.customer_id
-      WHERE ol.order_id = ${id} AND so.status = 'Done'
+      WHERE ol.order_id = ${id} AND so.status = 'Done' AND sol.qty > 0
       GROUP BY so.id, c.short_name, c.name
       ORDER BY so.id
     ` : null,
@@ -241,6 +245,10 @@ detailRoutes.get('/:id', async (c) => {
         ? { id: order.supplier_id, name: order.supplier_name }
         : null,
       commissionRate: order.commission_rate,
+      // Every role, as `manager` is: the purchaser may see who paid them.
+      commissionPaidBy: order.commission_paid_by
+        ? { id: order.commission_paid_by, name: order.commission_paid_by_name ?? '' }
+        : null,
       // Whether total_cost tracks the lines or is a pinned lot price. The
       // client can't judge it: the lines it gets carry what is left, and the
       // verdict is on what was bought (orderGoodsTotal.ts), so a partly sold

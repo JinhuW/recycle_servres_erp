@@ -56,8 +56,10 @@ export function prorateLines(
 
   // Floor pass keeps the running total at or under target, so the residual is
   // always non-negative and gets distributed upward. Zero-price lines scale to
-  // zero and stay there — free items don't absorb negotiation deltas.
-  const base = priceCents.map(p => Math.floor(p * scale));
+  // zero and stay there — free items don't absorb negotiation deltas. A line
+  // held at 0 adds nothing to the total, so it keeps its price; in the cent
+  // loop below it would "fit" forever without taking any of the residual.
+  const base = priceCents.map((p, i) => (lines[i].qty === 0 ? p : Math.floor(p * scale)));
   const remainders = priceCents.map((p, i) => p * scale - base[i]);
   let residual = targetCents - lines.reduce((a, l, i) => a + l.qty * base[i], 0);
 
@@ -67,7 +69,7 @@ export function prorateLines(
   // still fits into the residual.
   const order = lines
     .map((_, i) => i)
-    .filter(i => priceCents[i] > 0)
+    .filter(i => priceCents[i] > 0 && lines[i].qty > 0)
     .sort((a, b) => remainders[b] - remainders[a] || a - b);
   let progressed = true;
   while (residual > 0 && progressed) {

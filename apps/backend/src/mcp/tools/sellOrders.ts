@@ -9,12 +9,14 @@ export const SELL_ORDER_TOOL_DEFS = [
   {
     name: 'search_sellable_inventory',
     description:
-      'Read-only. List inventory lines that can currently be put on a sell order — status Reviewing or Done and ' +
-      'not committed to a Shipped or Awaiting payment sell order — newest first. Use this to find the inventoryId ' +
+      'Read-only. List inventory lines that can currently be put on a sell order — status Reviewing or Done, on ' +
+      'an unarchived PO, with units left after every Shipped or Awaiting payment sell order takes the quantity it ' +
+      'names — newest first. Use this to find the inventoryId ' +
       'values that create_sell_order_draft requires. Each row includes: inventoryId (pass this to ' +
       'create_sell_order_draft), ' +
       'category, label and subLabel (the display name the draft will store), partNumber, condition, warehouseId ' +
-      'and warehouseName, availableQty (the full sellable quantity of the line), draftCount (how many other ' +
+      'and warehouseName, availableQty (the units still free: the line\'s quantity minus what committed sell ' +
+      'orders hold), draftCount (how many other ' +
       'drafts already propose this line — drafts are proposals, so a line may appear on several and only the ' +
       'first one promoted keeps it), and sellPrice (the price already ' +
       'assigned to the line, in USD — advisory; you still choose each line\'s unitPrice), sourceOrderId (the PO ' +
@@ -35,14 +37,15 @@ export const SELL_ORDER_TOOL_DEFS = [
   {
     name: 'create_sell_order_draft',
     description:
-      'Write. Create a Draft sell order from inventory lines. Every line MUST reference a real sellable line by ' +
+      'Write. Create a Draft sell order from inventory lines. Each line references a sellable line by ' +
       'inventoryId (get them from search_sellable_inventory) plus a qty (>0) and unitPrice (>=0, in the order ' +
       'currency). Descriptive fields (category, label, part number, warehouse, condition) are taken from the ' +
       'referenced inventory line — do not supply them. customerId defaults to the MCP customer when omitted. ' +
       'currency is USD (default) or CNY; unitPrice is the native price and is converted to USD on store. On ' +
-      'success returns { id, status, customerId, lineCount, currency }. Errors (insufficient stock, an ' +
-      'inventoryId that is unknown or already on an open sell order, an unknown customerId) come back as a ' +
-      'normal tool result with isError set and a message explaining which line failed — fix the arguments and ' +
+      'success returns { id, status, customerId, lineCount, currency }. Errors (an unknown inventoryId, a ' +
+      'line that is no longer sellable or whose PO is archived, a qty above what committed sell orders leave ' +
+      'free, an unknown customerId) come back as a normal tool result with isError set and a message saying ' +
+      'what failed — fix the arguments and ' +
       'retry rather than treating the tool as unavailable. Requires the sellorder:write scope (a ' +
       'sellorder:read-only token is rejected).',
     inputSchema: {

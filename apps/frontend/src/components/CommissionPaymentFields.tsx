@@ -1,15 +1,17 @@
+import { useId } from 'react';
 import { AttachmentChip } from './AttachmentChip';
 import { AttachmentDropzone } from './AttachmentDropzone';
 import { Icon } from './Icon';
 import { useT } from '../lib/i18n';
+import type { CommissionPaidBy } from '../lib/useCommissionPaidBy';
 import type { ProofAttachment } from '../lib/usePaymentProof';
 
-// The commission payment — the screenshot that shows the purchaser was paid
-// — on the desktop Commission tab and in the phone fold, one component so the
-// two cannot drift. Files go straight to the order's Commission bucket as
-// they are dropped; there is no Save. The Done dialog offers the same box on
-// the way to Done when nothing is here yet. No panel around it: the drop box
-// is the whole thing.
+// The commission payment — which manager paid the purchaser, and the
+// screenshot that shows it — on the desktop Commission tab and in the phone
+// fold, one component so the two cannot drift. Both write through as they are
+// used: the pick saves at once and files go straight to the order's
+// Commission bucket; there is no Save. The Done dialog offers the same drop box
+// on the way to Done when nothing is here yet. No panel around it.
 
 export type CommissionShots = {
   atts: ProofAttachment[];
@@ -19,12 +21,53 @@ export type CommissionShots = {
 };
 
 type Props = {
+  paidBy: CommissionPaidBy;
   shots: CommissionShots;
   /** Managers edit; everyone else reads what is on file. */
   editable: boolean;
 };
 
-export function CommissionPaymentFields({ shots, editable }: Props) {
+export function CommissionPaymentFields({ paidBy, shots, editable }: Props) {
+  return (
+    <div style={{ display: 'grid', gap: 14 }}>
+      <PaidByField paidBy={paidBy} editable={editable} />
+      <ScreenshotField shots={shots} editable={editable} />
+    </div>
+  );
+}
+
+function PaidByField({ paidBy, editable }: { paidBy: CommissionPaidBy; editable: boolean }) {
+  const { t } = useT();
+  const id = useId();
+  if (!editable) {
+    return (
+      <div className="field" style={{ marginBottom: 0, display: 'grid', gap: 8 }}>
+        <span className="label">{t('cpPaidByLabel')}</span>
+        <div className={paidBy.paidBy ? '' : 'pay-proof-title muted'}>
+          {paidBy.paidBy?.name ?? t('cpPaidByNone')}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="field" style={{ marginBottom: 0, display: 'grid', gap: 8 }}>
+      <label className="label" htmlFor={id}>{t('cpPaidByLabel')}</label>
+      <select
+        id={id}
+        className="select"
+        value={paidBy.paidBy?.id ?? ''}
+        onChange={e => void paidBy.setPaidBy(e.target.value || null)}
+        disabled={paidBy.saving}
+        style={{ width: '100%' }}
+      >
+        <option value="">{t('cpPaidByNone')}</option>
+        {paidBy.options.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+      </select>
+    </div>
+  );
+}
+
+function ScreenshotField({ shots, editable }: { shots: CommissionShots; editable: boolean }) {
   const { t } = useT();
 
   if (!editable) {

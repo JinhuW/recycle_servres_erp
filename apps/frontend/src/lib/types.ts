@@ -163,6 +163,9 @@ export type OrderSummary = {
   // over only when another manager moving it says so. Optional for deploy
   // skew; null until a manager has moved it that far.
   manager?: { id: string; name: string } | null;
+  // Which manager paid the purchaser their commission. Optional for deploy
+  // skew; null until a manager records it.
+  commissionPaidBy?: { id: string; name: string } | null;
   // The hand-off's package — what the In Transit chip links. Only the list
   // endpoint reports it; null on a pickup or a pre-hand-off order.
   tracking?: PackageTracking | null;

@@ -115,6 +115,19 @@ describe('moving a whole line a Draft names', () => {
     const moved = await api('POST', '/api/inventory/transfer', { token, body: { ...body, confirmDrafts: true } });
     expect(moved.status).toBe(200);
   });
+
+  it('does not ask about a draft that holds the line only at 0', async () => {
+    const { token } = await loginAs(ALEX);
+    const line = await freeSellableLine(token, 1);
+    const draft = await createSellOrderOn(token, line.id, 'PN-DRAFT0', 1);
+    await getTestDb()`UPDATE sell_order_lines SET qty = 0 WHERE sell_order_id = ${draft}`;
+    const to = await otherWarehouse(token, line.id);
+
+    const moved = await api('POST', '/api/inventory/transfer', {
+      token, body: { toWarehouseId: to, lines: [{ id: line.id, qty: line.qty }] },
+    });
+    expect(moved.status).toBe(200);
+  });
 });
 
 describe('POST /api/orders/:id/total-cost/follow-lines', () => {

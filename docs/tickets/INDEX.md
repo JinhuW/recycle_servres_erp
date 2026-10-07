@@ -5,7 +5,15 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-184](./RS-184-a-po-line-may-be-counted-down-to-0-only-a-new-line-n.md) | done | story | P1 | A PO line may be counted down to 0; only a new line needs qty 1 | — |
+| [RS-192](./RS-192-fix-the-dev-to-main-review-findings-before-the-v1-22.md) | in-review | bug | P1 | Fix the dev to main review findings before the v1.220 release | — |
+| [RS-191](./RS-191-take-the-photos-out-of-the-packing-list-spreadsheets.md) | done | story | P2 | Take the photos out of the packing-list spreadsheets | 1.220.1 |
+| [RS-190](./RS-190-packing-by-each-po-line-with-photos.md) | done | story | P2 | Packing by each PO line, with photos | 1.220.0 |
+| [RS-189](./RS-189-prompt-text-that-has-drifted-from-the-code-claude-md.md) | done | bug | P2 | Prompt text that has drifted from the code: CLAUDE.md facts, the session hook, MCP tool descriptions | 1.219.1 |
+| [RS-188](./RS-188-sell-order-line-numbers-pack-mode-and-packing-lists.md) | done | story | P2 | Sell-order line numbers: Pack mode and packing lists go by the order's #, a line can be set to 0 | 1.219.0 |
+| [RS-187](./RS-187-pack-mode-an-ipad-checklist-for-packing-a-sell-order.md) | done | story | P2 | Pack mode: an iPad checklist for packing a sell order | 1.218.0 |
+| [RS-186](./RS-186-packing-list-shows-each-row-s-source-po-line.md) | done | story | P2 | Packing list shows each row's source PO line | 1.216.0 |
+| [RS-185](./RS-185-commission-payment-records-which-manager-paid-it.md) | done | story | P2 | Commission payment records which manager paid it | 1.217.0 |
+| [RS-184](./RS-184-a-po-line-may-be-counted-down-to-0-only-a-new-line-n.md) | done | story | P1 | A PO line may be counted down to 0; only a new line needs qty 1 | 1.213.0 |
 | [RS-183](./RS-183-review-mode-a-line-counted-to-0-is-not-in-the-box-an.md) | done | story | P2 | Review mode: a line counted to 0 is not in the box and is removed on Approve | 1.212.0 |
 | [RS-182](./RS-182-nightly-prod-to-dev-db-copy-fails-at-the-credential.md) | in-progress | bug | P1 | Nightly prod-to-dev DB copy fails at the credential scrub | — |
 | [RS-178](./RS-178-ssd-capacity-offers-2tb-and-ram-class-offers-camm.md) | done | story | P2 | SSD capacity offers 2TB and RAM class offers CAMM | 1.211.0 |
