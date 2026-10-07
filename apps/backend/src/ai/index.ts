@@ -33,9 +33,9 @@ export function pickProvider(env: Env): OcrProvider {
 }
 
 // Mode for /api/health. Same conditions as pickProvider, but without its
-// one-shot warning — a probe must not have side effects. The silent fallback is
-// exactly what makes this worth reporting: a prod missing the key scans fine and
-// returns canned data.
+// one-shot warning — a probe must not have side effects. Prod refuses to boot
+// without the key (env.ts), so this is what tells dev and CI that scans are
+// returning canned data.
 export function describeOcr(env: Env): OcrProvider {
   return env.OPENROUTER_API_KEY ? 'openrouter' : 'stub';
 }

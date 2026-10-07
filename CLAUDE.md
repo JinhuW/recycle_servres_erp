@@ -1,6 +1,6 @@
 # Recycle Servers ERP — Conventions
 
-Read [README.md](./README.md) first for the what.  This file is the how:
+[README.md](./README.md) covers the what.  This file is the how:
 the conventions, quirks, and tripwires that aren't obvious from the code.
 
 ## Workspace
@@ -31,9 +31,9 @@ system does today.  Read `docs/FEATURES.md` first when you don't know this
 codebase.
 
 1. **A change request becomes a ticket** in `docs/tickets/` —
-   `scripts/ticket.sh new "<title>"`.  Because `plan-first` governs this repo,
-   the ticket is *drafted inside plan mode* and shown as part of the plan, then
-   written as the first step of implementation.  The `## Ask` block is the
+   `scripts/ticket.sh new "<title>"`.  Changes here are planned before they're
+   built, so the ticket is *drafted inside plan mode* and shown as part of the
+   plan, then written as the first step of implementation.  The `## Ask` block is the
    requester's own words, **verbatim** — that field is the only thing in the
    file that can't be reconstructed from the code later.  The `ticket-workflow`
    skill in `.claude/skills/` covers the rest; `/ticket` is the manual path.
@@ -94,8 +94,7 @@ switches the branch out from under the first.
   flag is the *only* repo-owned way in: Claude Code ignores a
   `permissions.defaultMode: "bypassPermissions"` set in a project-scope file
   (`.claude/settings.json` or `.claude/settings.local.json`) and starts the
-  session in Manual mode — silently.  The repo carried exactly that no-op key
-  for seven weeks while `CLAUDE.md` described a flag that had been removed; see
+  session in Manual mode — silently.  See
   [docs/debug-notes/2026-09-12-project-settings-cannot-enable-bypass-mode.md](./docs/debug-notes/2026-09-12-project-settings-cannot-enable-bypass-mode.md).
   Don't put the key back.
 - **A plain `claude` started in the main checkout keeps its prompts**, even
@@ -153,7 +152,8 @@ switches the branch out from under the first.
   [docs/debug-notes/2026-07-26-prune-ancestry-vs-squash-merge.md](./docs/debug-notes/2026-07-26-prune-ancestry-vs-squash-merge.md)
   and
   [docs/debug-notes/2026-08-23-prune-content-check-rots-as-dev-advances.md](./docs/debug-notes/2026-08-23-prune-content-check-rots-as-dev-advances.md).
-- `.claude/` is gitignored **except** `settings.json`, so the hook config is
+- `.claude/` is gitignored **except** `settings.json`, `skills/` and
+  `commands/`, so the hook config and the project's skills and commands are
   shared but worktrees and `settings.local.json` are not.
 
 ## Frontend
@@ -162,8 +162,7 @@ switches the branch out from under the first.
   render: viewport width `< 720` → `MobileApp`; else `DesktopApp`.  Each is
   lazy-imported so each shell ships its own chunk.  When adding a feature,
   identify which shell(s) it lives in and keep its components scoped to that
-  subtree (`pages/desktop/`, `pages/` for mobile).  The vendor bid portal
-  (`/v/<token>`) was removed in v1.191.0 — nobody had ever placed a bid.
+  subtree (`pages/desktop/`, `pages/` for mobile).
 - Use `apps/frontend/src/lib/api.ts` for every backend call.  It sets
   `credentials: 'include'`, attaches the `X-Requested-By: recycle-erp` CSRF
   header on mutating requests, and single-flights refresh.  Do **not** call
@@ -233,8 +232,7 @@ switches the branch out from under the first.
   mounted by `index.ts`.  Helpers two modules share go in `shared.ts`.  A
   write refused inside its transaction throws `OrderRefusal` (`refusal.ts`)
   with a typed `kind` and payload, and the handler's catch returns
-  `refusalResponse`.  Don't bring back `throw new Error('__X__')` plus
-  `msg.includes`.
+  `refusalResponse`.
 - **Status guards.**  Purchase orders, sell orders and transfer orders each
   have explicit allowed-transition tables in their route files.  When adding a new state-changing endpoint, extend the existing
   guard — don't write a parallel one.
@@ -286,7 +284,7 @@ switches the branch out from under the first.
 ## Auth & CSRF
 
 - httpOnly `at` (60-min JWT) + `rt` (rotating refresh family) cookies.  No
-  `localStorage`, no bearer tokens.  See [auth_cookie_model.md][1] in memory.
+  `localStorage`, no bearer tokens.  See [the auth design][1].
 - The `rt` cookie is scoped to `path=/api/auth`, so no other route can see it.
   A route that needs the caller's session reads the `fid` claim from the
   verified `at` JWT instead (`/api/me/password` does).
@@ -336,8 +334,9 @@ switches the branch out from under the first.
 
 ## Database & migrations
 
-- Postgres 16.  The highest-numbered file in `apps/backend/migrations/` is
-  the head.
+- Postgres 18 on Railway prod and in CI; `docker-compose.yml` stays on 16
+  until its data directory gets a dump/restore.  The highest-numbered file
+  in `apps/backend/migrations/` is the head.
 - FKs use `ON DELETE` rules added in `0041_fk_on_delete.sql`.  When adding
   a new child table, declare the rule explicitly; don't rely on default
   `NO ACTION`.
@@ -356,7 +355,7 @@ switches the branch out from under the first.
   in the job env: `global-setup.ts` otherwise falls back to the repo-root
   `.env`, which doesn't exist on a runner, and throws.
 - **Test files run in PARALLEL** (`vitest.config.ts`: `pool: 'forks'`, files
-  parallel, `maxForks` 8 by default — override with `VITEST_MAX_FORKS`).  Each
+  parallel, `maxWorkers` 8 by default — override with `VITEST_MAX_FORKS`).  Each
   fork owns a **private database**: `global-setup.ts` hands every worker a
   run-scoped base name; `tests/helpers/db.ts` suffixes it with `VITEST_POOL_ID`
   (`<run>_w<id>`).  The suite runs in ~15s, not ~8min.
@@ -372,8 +371,9 @@ switches the branch out from under the first.
   built as `<…>_tmpl_building` and renamed only once migrate and seed both
   succeed.  See
   [docs/debug-notes/2026-10-01-test-templates-build-through-migrate-mjs.md](./docs/debug-notes/2026-10-01-test-templates-build-through-migrate-mjs.md).
-- Frontend tests are sparse (~6 files).  Add coverage when you add a
-  non-trivial pure helper; UI behavior is mostly validated by visiting it.
+- Frontend tests (vitest) sit next to the code under `src/` and in
+  `tests/`.  Add coverage when you add a non-trivial pure helper; UI
+  behavior is mostly validated by visiting it.
 - **To run a single backend test file**, `cd apps/backend && npx vitest run
   tests/foo.test.ts` — `pnpm --filter recycle-erp-backend test -- tests/foo.test.ts`
   silently drops the path and runs the full suite.
@@ -386,13 +386,13 @@ switches the branch out from under the first.
   `/<bucket>` segment when the R2 custom domain serves at `/<bucket>/<key>`
   (as `static.recycleservers.com` does).
 - **Don't reintroduce Cloudflare Images** — it's paywalled (error 5453); we
-  migrated everything to R2 attachments.  See [cloudflare_images_unpaid_stubbed][2].
+  migrated everything to R2 attachments.  See [the AI-scan image design][2].
 - **OCR provider selection** lives in `apps/backend/src/ai/`.  OpenRouter
   (`openai/gpt-6-luna`, overridable with `OPENROUTER_OCR_MODEL`) when
-  `OPENROUTER_API_KEY` is present; otherwise a
-  deterministic stub.  **The fallback is silent** — a prod deploy missing
-  the key looks healthy and quietly stubs.  Verify the secret is set when
-  cutting a release.
+  `OPENROUTER_API_KEY` is present; otherwise a deterministic stub that
+  returns canned data.  Production refuses to boot without the key
+  (`env.ts`); in dev and CI the stub logs one warning, and `/api/health`
+  reports which one is live (`providers.ocr`).
 
 ## Docker & ops
 
@@ -437,7 +437,7 @@ switches the branch out from under the first.
   `pnpm dev` (via `apps/backend/scripts/load-env.mjs`, which resolves the
   path off its own location so CWD/workspace filter don't matter).
   `POSTGRES_PASSWORD` defaults to `recycle` if unset; override in prod.
-  See [docker_compose_ops][3].
+  See [the Docker migration design][3].
 - `CORS_ALLOWED_ORIGINS` is required in production — the backend throws on
   startup if `NODE_ENV=production` and it's unset.
 - **Unhandled-500 sink.** `app.onError` writes a JSONL record to
@@ -484,7 +484,7 @@ switches the branch out from under the first.
 
 - `infra/terraform/` owns Cloudflare side: R2 attachments bucket, custom
   domain, scoped API token.  State lives in the `recycle-erp-tfstate` R2
-  bucket.  See [terraform_cloud_infra][4].
+  bucket.  See [the Terraform module design][4].
 - The attachments bucket carries `prevent_destroy = true`.  If you need to
   destroy it, edit the lifecycle block in the same change — don't pass
   `-target` flags to work around it.
@@ -493,7 +493,7 @@ switches the branch out from under the first.
 
 - **Commission payment types are exactly two**: Company pay and Self pay.
   Don't expose UI to add, remove, or rename them.  Backend enums and seed
-  data assume the closed set.  See [commission_payment_types][5].
+  data assume the closed set.  See [the commission-rate design][5].
 
 ## Style
 
@@ -513,8 +513,6 @@ switches the branch out from under the first.
 - What shipped when: `CHANGELOG.md` — one section per `v*` tag.
 - Per-feature design docs: `docs/superpowers/specs/`.
 - Implementation plans (in-flight and finished): `docs/superpowers/plans/`.
-- Auto-memory referenced above lives under
-  `~/.claude/projects/-srv-data-recycle-erp/memory/`.
 
 [1]: docs/superpowers/specs/2026-05-18-frontend-auth-overhaul-design.md
 [2]: docs/superpowers/specs/2026-05-12-ai-scan-image-preview-design.md

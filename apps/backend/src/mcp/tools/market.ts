@@ -117,14 +117,14 @@ export async function callGetMarketValue(
     OR (${args.partNumber ?? null}::text IS NOT NULL
         AND ${canonPartCol(sql, sql`rp.part_number`)} = ${canonPartArg(sql, args.partNumber ?? '')})
   `;
-  const rows = await marketValueSelect(sql, where, sql`LIMIT 1`);
+  const rows = await marketValueSelect(sql, where, sql`ORDER BY rp.updated_at DESC, rp.id LIMIT 1`);
   if (rows.length === 0) return null;
   const margin = await getWorkspaceSetting(sql, 'target_margin', 0.30);
   return formatRefPrice(rows[0], margin);
 }
 
 // Write path for the market:write-scoped MCP tool. Resolves the ref price by
-// part number (same LIMIT 1 selector idiom as the scraper push), then routes
+// part number (same selector as the scraper push: the newest twin), then routes
 // through appendPriceEvent so last_price* + the event row stay consistent —
 // the single write path shared with the Market page's manual entry.
 export async function callSetMarketPrice(
@@ -143,6 +143,7 @@ export async function callSetMarketPrice(
     const row = (await tx<{ id: string }[]>`
       SELECT id FROM ref_prices
       WHERE ${canonPartCol(tx, tx`part_number`)} = ${canonPartArg(tx, partNumber)}
+      ORDER BY updated_at DESC, id
       LIMIT 1
     `)[0];
     if (!row) return null;

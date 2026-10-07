@@ -18,8 +18,8 @@ already covered by an open ticket — check `docs/tickets/INDEX.md` first.
 
 ## Order of operations — this matters
 
-This repo runs `plan-first`: nothing is written until a plan is reviewed and
-approved. A ticket is a written file, so it does **not** get written first.
+Changes in this repo are planned first: nothing is written until a plan is
+reviewed and approved. A ticket is a written file, so it does **not** get written first.
 
 1. **Draft the ticket inside plan mode** and show it as part of the plan.
 2. On approval, `scripts/ticket.sh new "<title>"` and fill the file in — this

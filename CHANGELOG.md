@@ -17,6 +17,36 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.219.1] - 2026-10-07
+
+Text that models read had drifted from the code (RS-189). A prompt audit
+checked CLAUDE.md, the project skills, the SessionStart hook and the MCP tool
+descriptions against the repository; this release makes each of them say what
+the code does.
+
+### Fixed
+
+- **`get_market_value` and `set_market_price` pick the newest twin.** When two
+  reference prices share a canonical part number, both now use the most
+  recently updated one, as `set_market_price`'s description always promised
+  and as the scraper push already did. Before, the read and the write could
+  each land on either row.
+- **MCP tool descriptions match the code.** `search_sellable_inventory` lists
+  lines with units left after committed sell orders (not lines with no
+  commitment at all), skips archived POs, and reports the remainder as
+  `availableQty`. `create_sell_order_draft` lists the errors it really
+  returns — being on another draft is not one of them.
+- **The SessionStart hook no longer misfires in a linked worktree** made by
+  other tooling. It told such a session it was in the shared main checkout and
+  to create a second worktree; it now stays silent there, and still speaks in
+  the main checkout.
+- **CLAUDE.md and README.md facts.** Prod refuses to boot without the OCR key
+  (the fallback is not silent there); Railway prod and CI run Postgres 18;
+  `.claude/skills/` and `commands/` are in git; frontend tests number 64, not
+  ~6; the vitest option is `maxWorkers`. History the model can't act on, link
+  labels naming memory files from another checkout, and the `plan-first` skill
+  name (which lives outside the repo) are replaced by the current rules.
+
 ## [1.219.0] - 2026-10-07
 
 Sell-order lines are numbered by their place on the order, and a line that

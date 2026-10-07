@@ -11,7 +11,7 @@ If the request is empty, use what the user asked for earlier in this
 conversation.
 
 Create it now with `scripts/ticket.sh new` — the user asked for a ticket, so
-this is not the plan-first path where the ticket waits for approval. Fill in
+this is not the planned-change path where the ticket waits for approval. Fill in
 every section, and keep the `## Ask` block as the user's own words, verbatim:
 no tidying, no rephrasing into solution language.
 

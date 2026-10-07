@@ -13,6 +13,8 @@
 #   - source is resume/clear/compact — that session already has a branch
 #   - cwd is already inside .claude/worktrees/ — already isolated; the hook
 #     only refreshes that slot's lock to this session's claude PID
+#   - cwd is in any other linked worktree (made by an IDE or an agent
+#     manager) — already on its own branch, and not a slot the launcher manages
 #
 # Note: launching via `scripts/new-session.sh` skips all of this, because the
 # session then starts inside the worktree already.
@@ -61,6 +63,14 @@ case "$cwd" in
 esac
 
 [ "$source_kind" = "startup" ] || exit 0
+
+# A linked worktree's git dir sits under the main checkout's common dir; only
+# the main checkout has the two equal.
+if [ -n "$cwd" ]; then
+  git_dir="$(git -C "$cwd" rev-parse --absolute-git-dir 2>/dev/null || true)"
+  common_dir="$(git -C "$cwd" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+  [ -n "$git_dir" ] && [ "$git_dir" != "$common_dir" ] && exit 0
+fi
 
 read -r -d '' CONTEXT <<'EOF' || true
 This session started in the SHARED main checkout of recycle_servres_erp, which

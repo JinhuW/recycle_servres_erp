@@ -231,10 +231,11 @@ app.get('/api/health', async (c) => {
   // ISO-8601 UTC or null; the frontend shows this instead of the sha, which
   // means nothing to the people reading the footer.
   const builtAt = process.env.BUILD_TIME || readBuildTime();
-  // Which providers this deployment actually has credentials for. Every one of
-  // these falls back silently, so a release that shipped without a secret looks
-  // identical to a healthy one until someone notices packages never move. Modes
-  // only — no key values, no more than set/unset.
+  // Which providers this deployment actually has credentials for. Most of these
+  // fall back silently (OCR refuses to boot prod without its key), so a release
+  // that shipped without a secret looks identical to a healthy one until
+  // someone notices packages never move. Modes only — no key values, no more
+  // than set/unset.
   const ship = describeShipping(c.env as Env);
   const providers = { ...ship, ocr: describeOcr(c.env as Env), ...describeMail(c.env as Env) };
   try {
