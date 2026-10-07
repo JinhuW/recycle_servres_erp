@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-192](./RS-192-fix-the-dev-to-main-review-findings-before-the-v1-22.md) | in-review | bug | P1 | Fix the dev to main review findings before the v1.220 release | — |
 | [RS-191](./RS-191-take-the-photos-out-of-the-packing-list-spreadsheets.md) | done | story | P2 | Take the photos out of the packing-list spreadsheets | 1.220.1 |
 | [RS-190](./RS-190-packing-by-each-po-line-with-photos.md) | done | story | P2 | Packing by each PO line, with photos | 1.220.0 |
 | [RS-189](./RS-189-prompt-text-that-has-drifted-from-the-code-claude-md.md) | done | bug | P2 | Prompt text that has drifted from the code: CLAUDE.md facts, the session hook, MCP tool descriptions | 1.219.1 |

@@ -31,7 +31,7 @@ import { applyPriceRows, type BidPart, mergeBidParts } from '../../lib/priceImpo
 import { usePreference } from '../../lib/preferences';
 import { LineSpecChips, lineHasSpecChips } from '../../components/LineSpecChips';
 import { groupSellOrderLines, type SellOrderLineGroup } from '../../lib/sellOrderLineGroups';
-import { packWarehouseOptions, UNASSIGNED } from '../../lib/sellOrderPack';
+import { isPackable, packWarehouseOptions, UNASSIGNED } from '../../lib/sellOrderPack';
 import { peekSellOrderPrefill, clearSellOrderPrefill } from '../../lib/sellOrderPrefill';
 
 // Its own chunk: only a packer opens it.
@@ -607,7 +607,10 @@ function ReceiverSelect({ value, current, members, disabled, onChange }: {
 function DownloadMenu({ orderId, lines }: { orderId: string; lines: SellOrderLine[] }) {
   const { t } = useT();
   const [warehouse, setWarehouse] = useState('');
-  const warehouses = useMemo(() => packWarehouseOptions(lines), [lines]);
+  // A line held at 0 has no row on either packing list, so a warehouse holding
+  // only those would download as a 400.
+  const warehouses = useMemo(() => packWarehouseOptions(lines.filter(isPackable)), [lines]);
+  const nothingToPack = warehouses.length === 0;
   // A picked warehouse the order no longer has (a line was moved) falls back
   // to All rather than 400ing.
   const picked = warehouses.includes(warehouse) ? warehouse : '';
@@ -660,8 +663,8 @@ function DownloadMenu({ orderId, lines }: { orderId: string; lines: SellOrderLin
       <button
         className="btn"
         style={{ whiteSpace: 'nowrap' }}
-        title={t('soDownloadPackingListHint')}
-        disabled={busy}
+        title={t(nothingToPack ? 'soNothingToPackHint' : 'soDownloadPackingListHint')}
+        disabled={busy || nothingToPack}
         onClick={download('packing-list')}
       >
         <Icon name="box" size={14} /> {t('soDownloadPackingList')}
@@ -669,8 +672,8 @@ function DownloadMenu({ orderId, lines }: { orderId: string; lines: SellOrderLin
       <button
         className="btn"
         style={{ whiteSpace: 'nowrap' }}
-        title={t('soDownloadPackingListByPoHint')}
-        disabled={busy}
+        title={t(nothingToPack ? 'soNothingToPackHint' : 'soDownloadPackingListByPoHint')}
+        disabled={busy || nothingToPack}
         onClick={download('packing-list', true)}
       >
         <Icon name="box" size={14} /> {t('soDownloadPackingListByPo')}

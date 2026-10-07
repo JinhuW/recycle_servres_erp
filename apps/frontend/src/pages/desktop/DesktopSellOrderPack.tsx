@@ -77,6 +77,9 @@ const pnOf = (l: Line) => l.partNumber ?? l.label;
 export default function DesktopSellOrderPack({ id, onToast }: Props) {
   const { t } = useT();
   const [order, setOrder] = useState<PackOrder | null>(null);
+  // Only the first read can leave the page with no order; a failed re-read
+  // keeps the one already shown.
+  const [orderFailed, setOrderFailed] = useState(false);
   const [serials, setSerials] = useState<ReadonlyMap<string, string | null>>(new Map());
   const [wh, setWh] = useState('');
   const [undo, setUndo] = useState<Undo | null>(null);
@@ -97,8 +100,10 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   const loadOrder = useCallback(async () => {
     try {
       setOrder((await api.get<{ order: PackOrder }>(`/api/sell-orders/${id}`)).order);
+      setOrderFailed(false);
     } catch (e) {
       handleFetchError(e);
+      setOrderFailed(true);
     }
   }, [id]);
   useEffect(() => { void loadOrder(); }, [loadOrder]);
@@ -395,8 +400,11 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     );
   };
 
-  const barText = readOnly
-    ? t(order?.archivedAt ? 'pkArchived' : 'pkClosed')
+  // With no order yet there is nothing to report, packed least of all.
+  const barText = !order
+    ? ''
+    : readOnly
+    ? t(order.archivedAt ? 'pkArchived' : 'pkClosed')
     : blockers.open > 0
       ? t('pkBarLeft', { n: blockers.open })
       : blockers.short > 0 || blockers.zero > 0
@@ -499,7 +507,22 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
       </div>
 
       <div className="card pk-list-card">
-        {!order || loadState === 'loading' ? (
+        {!order && orderFailed ? (
+          <div className="card-body bc-load-error">
+            <span>{t('pkOrderLoadFailed')}</span>
+            <button
+              type="button"
+              className="btn sm"
+              onClick={() => {
+                setOrderFailed(false);
+                void loadOrder();
+                if (loadState === 'error') void reload();
+              }}
+            >
+              {t('pkRetry')}
+            </button>
+          </div>
+        ) : !order || loadState === 'loading' ? (
           <div className="card-body muted">{t('loadingApp')}</div>
         ) : loadState === 'error' ? (
           <div className="card-body bc-load-error">

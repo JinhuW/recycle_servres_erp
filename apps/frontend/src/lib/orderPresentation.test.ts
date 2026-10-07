@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { I18N } from './i18n';
 import zh from './i18n.zh';
+import { fmtUSD } from './format';
 import {
-  createdEventParts, inTransitDetail, linePhotoEventDetail, managerChangedLine, ownerChangedLine, profitTone,
-  signedUSD0, trackingNote,
+  createdEventParts, fieldLabel, inTransitDetail, linePhotoEventDetail, managerChangedLine, ownerChangedLine,
+  profitTone, renderValue, signedUSD0, trackingNote,
 } from './orderPresentation';
 import type { PackageTracking } from './types';
 
@@ -78,6 +79,19 @@ describe('the keys the audit rows name', () => {
     createdEventParts({ category: 'RAM', lineCount: 1, qty: 1, onBehalfOfName: 'X' }, spy);
     const missing = [...asked].filter(k => !(k in I18N.en!) || !(k in zh));
     expect(missing).toEqual([]);
+  });
+});
+
+describe('fieldLabel', () => {
+  it('names purchase- and sell-order fields from the one map', () => {
+    expect(fieldLabel('commission_paid_by')).toBe('Commission paid by');
+    expect(fieldLabel('payment_received_by')).toBe('Payment received by');
+    expect(fieldLabel('handoff_by')).toBe('Picked up by');
+    expect(fieldLabel('not_a_column')).toBe('not_a_column');
+  });
+
+  it('reads a sell line\'s unit price as money', () => {
+    expect(renderValue('unit_price', 12.5, 'en-US')).toBe(fmtUSD(12.5, 'en-US'));
   });
 });
 

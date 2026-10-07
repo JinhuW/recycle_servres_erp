@@ -538,7 +538,9 @@ patchRoutes.patch('/:id', async (c) => {
         // An archived one releases too, and the only open status it can hold
         // is Draft: archiving a Shipped or Awaiting-payment order is refused,
         // and so is moving an archived one back into either — what is left is
-        // a Closed order reopened to Draft, which reserves nothing.
+        // a Closed order reopened to Draft, which reserves nothing. A line held
+        // at 0 holds nothing either: it lets the lot go the same way and stays
+        // on its order, with its #, as a typed line.
         const stillNamed = doomed.length ? await tx`
           SELECT DISTINCT sol.inventory_id AS line_id, sol.sell_order_id
           FROM sell_order_lines sol
@@ -546,6 +548,7 @@ patchRoutes.patch('/:id', async (c) => {
           WHERE sol.inventory_id = ANY(${doomed.map(r => r.id)}::uuid[])
             AND so.archived_at IS NULL
             AND so.status = ANY(${openSellStatuses()}::text[])
+            AND sol.qty > 0
         ` as { line_id: string; sell_order_id: string }[] : [];
         if (stillNamed.length) {
           throw new OrderRefusal({

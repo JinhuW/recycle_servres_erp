@@ -16,6 +16,7 @@ import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { fmtUSD } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { useEscapeKey } from '../../lib/useEscapeKey';
+import { useLineSaveQueue } from '../../lib/useLineSaveQueue';
 import { lineSpecLabel } from '../../lib/lineGroups';
 import { linePhotos } from '../../lib/linePhotos';
 import { lineRequirements, missingFieldNames } from '../../lib/lineRequirements';
@@ -47,18 +48,12 @@ type ScanMsg = { tone: 'muted' | 'pos' | 'neg'; text: string };
 // The line open in the drawer, and the server's copy it is compared against.
 type Editing = { line: EditLine; original: EditLine };
 
-const SAVE_DELAY_MS = 400;
-
 export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast }: Props) {
   const { t, lang, locale } = useT();
   const lines = order.lines;
   const readOnly = order.archivedAt !== null;
   const atReviewing = order.lifecycle === 'reviewing';
 
-  const [checks, setChecks] = useState<Map<string, LineCheck>>(new Map());
-  // Nothing may write until the saved count is in: an action taken against
-  // the full-count default would overwrite a short count on file.
-  const [loadState, setLoadState] = useState<'loading' | 'ok' | 'error'>('loading');
   const [selectedId, setSelectedId] = useState<string | null>(lines[0]?.id ?? null);
   const [editing, setEditing] = useState<Editing | null>(null);
   const [serialIssues, setSerialIssues] = useState<SerialLineIssue[] | null>(null);
@@ -70,7 +65,6 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   const takeover = useManagerTakeover();
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [photoIdx, setPhotoIdx] = useState(0);
-  const ready = loadState === 'ok' && !readOnly;
 
   const scanRef = useRef<HTMLInputElement | null>(null);
   // Set when a scanner's first character landed on the page and was moved into
@@ -82,105 +76,20 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   const lineByIdRef = useRef(lineById);
   lineByIdRef.current = lineById;
 
-  // ── Writes. Each line's latest state waits out a short debounce in
-  // `pending`, then goes out behind any earlier write of the same line
-  // (`inflight`), so a scanner burst is one write and two writes of a line
-  // never land out of order.
-  const pending = useRef(new Map<string, LineCheck>());
-  const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
-  const inflight = useRef(new Map<string, Promise<ChecksResponse>>());
+  // ── Writes, through the queue Pack mode shares. Nothing may write until
+  // the saved count is in: an action taken against the full-count default
+  // would overwrite a short count on file.
+  const url = (lineId: string) => `/api/orders/${order.id}/checks/${lineId}`;
+  const bodyOf = (c: LineCheck) => checkBody(c, lineByIdRef.current.get(c.lineId)?.qty ?? c.counted);
+  const { checks, loadState, reload, save, flush } = useLineSaveQueue<ChecksResponse>({
+    read: () => api.get<ChecksResponse>(`/api/orders/${order.id}/checks`),
+    send: c => api.put<ChecksResponse>(url(c.lineId), bodyOf(c)),
+    beacon: c => { void rawFetch('PUT', url(c.lineId), bodyOf(c), undefined, { keepalive: true }).catch(() => {}); },
+    checksOf: r => r.lines,
+  });
+  const ready = loadState === 'ok' && !readOnly;
 
-  // The server's copy, except where a write of ours is still on its way —
-  // there the page is newer.
-  const applyServer = useCallback((r: ChecksResponse) => {
-    setChecks(prev => {
-      const next = new Map(r.lines.map(c => [c.lineId, c]));
-      for (const id of [...pending.current.keys(), ...inflight.current.keys()]) {
-        const mine = prev.get(id);
-        if (mine) next.set(id, mine);
-      }
-      return next;
-    });
-  }, []);
-
-  const load = useCallback(async () => {
-    try {
-      applyServer(await api.get<ChecksResponse>(`/api/orders/${order.id}/checks`));
-      setLoadState('ok');
-    } catch (e) {
-      handleFetchError(e);
-      // A failed re-read leaves the page's own copy standing.
-      setLoadState(s => (s === 'ok' ? 'ok' : 'error'));
-    }
-  }, [order.id, applyServer]);
-
-  useEffect(() => { void load(); }, [load]);
-
-  const put = useCallback((c: LineCheck): Promise<ChecksResponse> => {
-    const qty = lineByIdRef.current.get(c.lineId)?.qty ?? c.counted;
-    const before: Promise<unknown> = inflight.current.get(c.lineId) ?? Promise.resolve(null);
-    const p = before.catch(() => null).then(() =>
-      api.put<ChecksResponse>(`/api/orders/${order.id}/checks/${c.lineId}`, checkBody(c, qty)));
-    inflight.current.set(c.lineId, p);
-    const settle = () => { if (inflight.current.get(c.lineId) === p) inflight.current.delete(c.lineId); };
-    p.then(settle, settle);
-    return p;
-  }, [order.id]);
-
-  const fire = useCallback((id: string): Promise<ChecksResponse> | null => {
-    const t0 = timers.current.get(id);
-    if (t0) clearTimeout(t0);
-    timers.current.delete(id);
-    const c = pending.current.get(id);
-    pending.current.delete(id);
-    return c ? put(c) : null;
-  }, [put]);
-
-  // Leaving the page sends what is still waiting rather than dropping it.
-  useEffect(() => () => {
-    for (const id of [...pending.current.keys()]) fire(id)?.catch(() => {});
-    if (undoTimer.current) clearTimeout(undoTimer.current);
-  }, [fire]);
-  // Closing the tab: an ordinary request would be cancelled with the page.
-  useEffect(() => {
-    const onHide = () => {
-      for (const [id, c] of pending.current) {
-        clearTimeout(timers.current.get(id));
-        const qty = lineByIdRef.current.get(id)?.qty ?? c.counted;
-        void rawFetch('PUT', `/api/orders/${order.id}/checks/${id}`, checkBody(c, qty), undefined, { keepalive: true })
-          .catch(() => {});
-      }
-      pending.current.clear();
-      timers.current.clear();
-    };
-    window.addEventListener('pagehide', onHide);
-    return () => window.removeEventListener('pagehide', onHide);
-  }, [order.id]);
-
-  // Optimistic: the row moves the moment it is ticked, and a burst from a
-  // scanner collapses into one write per line.
-  const save = useCallback((next: LineCheck) => {
-    setChecks(m => new Map(m).set(next.lineId, next));
-    pending.current.set(next.lineId, next);
-    const t0 = timers.current.get(next.lineId);
-    if (t0) clearTimeout(t0);
-    timers.current.set(next.lineId, setTimeout(() => {
-      fire(next.lineId)?.catch((e) => { handleFetchError(e); void load(); });
-    }, SAVE_DELAY_MS));
-  }, [fire, load]);
-
-  // Everything waiting goes out, and everything already out lands, before
-  // anything reads the server's copy of the count. A write that failed stops
-  // the caller: Approve must not act on a count the server lacks.
-  const flush = async () => {
-    for (const id of [...pending.current.keys()]) fire(id)?.catch(() => {});
-    const results = await Promise.allSettled([...inflight.current.values()]);
-    const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
-    if (failed) {
-      void load();
-      throw failed.reason;
-    }
-  };
+  useEffect(() => () => { if (undoTimer.current) clearTimeout(undoTimer.current); }, []);
 
   const checkOf = useCallback(
     (id: string) => checks.get(id) ?? emptyCheck(id, lineById.get(id)?.qty ?? 0),
@@ -259,15 +168,10 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     }
     await api.patch(`/api/orders/${order.id}`, { lines: [editLineToPatch(l)] });
     // Units added to the line were never counted, so its tick can't stand.
-    // Written before the reload: the remount reads the count straight back.
-    if (Number(l.qty) !== Number(o.qty)) {
-      const t0 = timers.current.get(id);
-      if (t0) clearTimeout(t0);
-      timers.current.delete(id);
-      pending.current.delete(id);
-      await put(emptyCheck(id, Number(l.qty))).catch(handleFetchError);
-    }
-    await flush().catch(() => {});
+    // It replaces whatever was waiting for the line and goes out with the
+    // rest before the reload: the remount reads the count straight back.
+    if (Number(l.qty) !== Number(o.qty)) save(emptyCheck(id, Number(l.qty)));
+    await flush().catch(handleFetchError);
     showToast(t('bcLineSaved', { n }), 'success');
     await onReload();
   };
@@ -638,7 +542,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
           ) : loadState === 'error' ? (
             <div className="card-body bc-load-error">
               <span>{t('bcLoadFailed')}</span>
-              <button type="button" className="btn sm" onClick={() => { setLoadState('loading'); void load(); }}>{t('bcRetry')}</button>
+              <button type="button" className="btn sm" onClick={() => void reload()}>{t('bcRetry')}</button>
             </div>
           ) : (
             <table className="table bc-table">

@@ -742,6 +742,7 @@ const zh: Record<string, string> = {
   soDownloadPackingListHint: '每个仓库一个工作表，每个采购单行各有勾选框和数量，不含价格 — 供拣货使用，不发给供应商',
   soDownloadPackingListByPo: '按采购单装箱清单',
   soDownloadPackingListByPoHint: '同一份装箱清单，每个仓库内每张采购单一个工作表',
+  soNothingToPackHint: '此订单每行数量均为 0，没有需要装箱的货品',
   soPackAllWarehouses: '全部仓库',
   soPackWarehouseHint: '将两份装箱清单限定到一个仓库',
   soPriceImportTitle: '供应商报价导入',
@@ -2065,6 +2066,7 @@ const zh: Record<string, string> = {
   pkShippedToast: '{id} 已标记为已发货',
   pkLineChanged: '打包期间订单有变动，列表已重新加载。',
   pkLoadFailed: '无法加载打包进度。加载成功前不能修改。',
+  pkOrderLoadFailed: '无法加载该销售订单。',
   pkRetry: '重试',
 
   // ── Sell-order close reasons ──

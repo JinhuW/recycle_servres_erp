@@ -17,6 +17,46 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.220.2] - 2026-10-07
+
+Fixes from the pre-release review of dev against main (RS-192). Most of them
+finish what 1.219.0 started: a sell-order line held at 0 claims nothing, but
+several paths still treated it as a claim, or skipped every check on it.
+
+### Fixed
+
+- **A sell-order save may hold at 0 only a lot already on the order.** A 0
+  skipped the sellability check, so a 0 line naming a lot new to the order —
+  archived, unsellable, or an id no lot has — went through, the last one as a
+  500 from the foreign key. It is now a 400 asking for at least 1, which is
+  the rule the editor already kept.
+- **An order with nothing above 0 has no packing list.** Both downloads built
+  a workbook with no sheet, which Excel reports as corrupt; they now answer
+  400, and the desktop turns both buttons off for such an order. The
+  warehouse picker no longer offers a warehouse that holds only 0 lines,
+  which downloaded as a 400.
+- **Archiving a PO leaves a sell line held at 0 alone.** It was named as a
+  conflict, and *Remove from sell orders* deleted it, renumbering every line
+  after it on that sell order. The archive dialog's line count now ignores 0
+  lines too, so "this empties the order" stays true.
+- **A PO line held at 0 by a sell order can be removed.** The removal was
+  refused as if the sell order still needed the lot; the sell line keeps its
+  # and becomes a hand-typed line. The transfer prompt about Drafts naming a
+  line, and the MCP search's `draftCount`, ignore Drafts that hold it at 0.
+- **Pack mode no longer loads forever when the order can't be read.** It
+  says so and offers *Try again*, and the bottom bar stops reporting
+  "Everything is packed." before there is an order.
+
+### Changed
+
+- Review mode saves through the same per-line queue as Pack mode
+  (`useLineSaveQueue`) instead of its own copy of it.
+- The phone PO page asks for the member list — a heavy read — only when the
+  Commission fold opens, not on every open.
+- The Activity page and the PO timelines read field names from one map, so
+  the Activity page now also labels hand-off, tracking and source fields and
+  shows `payment: company` as *Company card*.
+
 ## [1.220.1] - 2026-10-07
 
 The packing-list spreadsheets lose the photos 1.220.0 gave them: not needed

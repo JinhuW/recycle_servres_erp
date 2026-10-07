@@ -8,7 +8,9 @@ import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { fmtDate, fmtUSD } from '../../lib/format';
 import { useT } from '../../lib/i18n';
-import { createdEventParts, linePhotoEventDetail, type Translate } from '../../lib/orderPresentation';
+import {
+  createdEventParts, fieldLabel, linePhotoEventDetail, renderValue, type Translate,
+} from '../../lib/orderPresentation';
 import { activityRecordHref, onLinkClick } from '../../lib/route';
 import { boxCheckEventLines } from '../../lib/boxCheck';
 import { useSentinel } from '../../lib/useSentinel';
@@ -66,31 +68,7 @@ const RANGES: { days: number; tKey: string }[] = [
   { days: 7, tKey: 'acRange7' },
 ];
 
-// Field labels shared with OrderActivityLog's vocabulary — the two panels
-// describe the same underlying diffs, so they must not disagree.
-const FIELD_LABEL: Record<string, string> = {
-  sell_price: 'Sell price', qty: 'Qty', unit_cost: 'Unit cost', unit_price: 'Unit price',
-  brand: 'Brand', capacity: 'Capacity', type: 'Type', generation: 'Generation',
-  classification: 'Classification', rank: 'Rank', speed: 'Speed', interface: 'Interface',
-  form_factor: 'Form factor', description: 'Description', part_number: 'Part number',
-  serial_number: 'Serial number', chip_number: 'Chip number', condition: 'Condition',
-  health: 'Health', rpm: 'RPM', notes: 'Notes', warehouse_id: 'Warehouse',
-  payment: 'Payment', total_cost: 'Goods total', commission_rate: 'Commission rate',
-  other_fees: 'Other fees', other_fees_note: 'Other fees note',
-  paypal_txn_id: 'PayPal transaction ID', commission_paid_by: 'Commission paid by',
-  customer_id: 'Customer', currency_code: 'Currency', payment_received_by: 'Payment received by',
-  label: 'Label', sub_label: 'Sub-label', inventory_id: 'Inventory item', status: 'Status',
-};
-const MONEY_FIELDS = new Set(['sell_price', 'unit_cost', 'unit_price', 'total_cost', 'price', 'other_fees']);
-
 type Change = { field: string; from: unknown; to: unknown };
-
-function renderValue(field: string, v: unknown, locale: string): string {
-  if (v === null || v === undefined || v === '') return '—';
-  if (field === 'commission_rate' && typeof v === 'number') return (v * 100).toFixed(2) + '%';
-  if (MONEY_FIELDS.has(field) && typeof v === 'number') return fmtUSD(v, locale);
-  return String(v);
-}
 
 // Reduce an event to the one line the Change lane shows. Returns either a
 // field diff (rendered as struck-old → solid-new) or a plain sentence.
@@ -392,7 +370,7 @@ export function DesktopActivity() {
                           {s.diff ? (
                             <>
                               {s.diff.field && (
-                                <span className="ac-k">{FIELD_LABEL[s.diff.field] ?? s.diff.field} </span>
+                                <span className="ac-k">{fieldLabel(s.diff.field)} </span>
                               )}
                               {s.diff.from !== null && s.diff.from !== undefined && (
                                 <span className="ac-was">{renderValue(s.diff.field, s.diff.from, locale)}</span>
@@ -429,7 +407,7 @@ export function DesktopActivity() {
                               <div className="ac-diffs">
                                 {(e.detail.changes as Change[]).map((c, i) => (
                                   <div key={i}>
-                                    <span className="ac-k">{FIELD_LABEL[c.field] ?? c.field}: </span>
+                                    <span className="ac-k">{fieldLabel(c.field)}: </span>
                                     <span className="ac-was">{renderValue(c.field, c.from, locale)}</span>
                                     <span className="ac-arr">→</span>
                                     <span className="ac-now">{renderValue(c.field, c.to, locale)}</span>

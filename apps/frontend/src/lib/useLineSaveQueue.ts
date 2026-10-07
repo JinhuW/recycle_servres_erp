@@ -47,6 +47,8 @@ export function useLineSaveQueue<R>(options: Options<R>) {
   }, []);
 
   const reload = useCallback(async () => {
+    // A retry after a failed first read shows as loading again.
+    setLoadState(s => (s === 'error' ? 'loading' : s));
     try {
       applyServer(await opts.current.read());
       setLoadState('ok');

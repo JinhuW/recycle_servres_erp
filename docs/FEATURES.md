@@ -661,7 +661,9 @@ on to Sold once every line has sold (v1.164.0).
   (Draft, Shipped or Awaiting payment) the archive dialog names the sell
   orders and lines and asks whether to remove them from those sell orders
   first; the removal is audited on the sell order and is not undone by
-  unarchiving. That question, and the removal, are the manager's: a
+  unarchiving. A sell line held at 0 holds nothing, so it is neither named
+  nor removed, nor counted in the sell order's line count (v1.220.2): it stays,
+  with its #, pointing at the archived lot. That question, and the removal, are the manager's: a
   purchaser who owns the PO gets a plain refusal naming no sell orders
   (v1.137.1). A line out on a pending transfer refuses the archive; one that
   was already out when the PO was archived (migration 0122's case) joins the
@@ -682,7 +684,9 @@ on to Sold once every line has sold (v1.164.0).
   ever named the line blocked and the message named nothing; v1.144.1
   exempted archived sell orders only, so closing one did not help despite
   the dialog saying it would. A sale whose source line is gone drops out of
-  the cost-based dashboard figures.
+  the cost-based dashboard figures. A sell line held at 0 doesn't block
+  either (v1.220.2): it keeps its # and becomes a hand-typed line, no longer
+  capped by a lot's stock.
 - **Every change is audited**, drafts included (v1.33.0), and each timeline
   opens with an "Order created" entry.
 - Excel export carries the category's full spec set per line, one tab per
@@ -829,12 +833,17 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
 - **A line that can't ship is set to 0, not removed** (v1.219.0), so no line
   after it is renumbered. Any line already on the order may go to 0 in the
   editor, including one whose lot is gone; a line being added still needs at
-  least 1, as does a new order (and the MCP create tool). A line at 0 holds
+  least 1, as does a new order (and the MCP create tool). Since v1.220.2 the
+  server holds that rule too: a save may hold at 0 only a lot already on the
+  order, and a 0 for any other lot — or an id no lot has — is a 400. A line at 0 holds
   nothing: it reserves no stock, sells nothing on Done, records no market
   price, is left off the bid sheet and both packing lists (its # stays taken),
   and keeps its price through a negotiated total. An order whose lines are
-  all 0 can't move to Shipped, Awaiting payment or Done. A hand-typed line is
-  no longer capped at its saved qty.
+  all 0 can't move to Shipped, Awaiting payment or Done, and has nothing to
+  pack: both packing-list buttons are off for it (v1.220.2). A hand-typed line is
+  no longer capped at its saved qty. Archiving a PO or removing one of its
+  lines leaves a sell line held at 0 alone (v1.220.2): it is not a conflict and
+  is not removed, so no # after it moves.
 - **Line items group By warehouse or By PO** (v1.194.0), in both view and edit.
   The switch on the Line items header is remembered per user (preference
   `sellOrders.lineGroup`, default by warehouse).
@@ -958,7 +967,8 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   lots of the PO is split the same way (v1.220.0): the product's row reads
   `2 lines`, then each line's row its ID; the tab already names the PO, so it
   has no `From PO` column. A warehouse picker beside the buttons
-  (shown when the order spans more than one) narrows either packing list to
+  (shown when the order's lines above 0 span more than one — a warehouse
+  holding only 0 lines isn't offered, v1.220.2) narrows either packing list to
   one warehouse (`?warehouse=<short>`); the bid sheet always covers the whole
   order. Both packing lists place a line by where its lot is *now* — the lot's
   own warehouse, else its PO's — not the warehouse the line was saved with,
@@ -998,7 +1008,8 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
     Progress is kept by the line's lot (or a hand-typed line's text), not its
     row, so saving the order keeps it. A line whose qty changes comes back
     unpacked, unless it was packed short and edited down to exactly the count
-    packed.
+    packed. If the order itself can't be loaded, the list says so with *Try
+    again* instead of loading forever (v1.220.2).
   - Every control is at least 44px and the tick is 60px; nothing needs hover.
     Under 780px each row puts the counter and tick on a second line.
   - On a Draft with every line packed at full count, **Mark shipped** opens the

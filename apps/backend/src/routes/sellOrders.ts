@@ -616,6 +616,11 @@ sellOrders.get('/:id/packing-list', async (c) => {
   const data = await loadSellOrderSheetData(getDb(c.env), c.req.param('id'));
   if (!data) return c.json({ error: 'Not found' }, 404);
 
+  // Lines held at 0 have no row on either list, and a workbook without a
+  // sheet is a file Excel calls corrupt.
+  if (data.warehouses.length === 0) {
+    return c.json({ error: 'there is nothing to pack — no line on this order is above 0' }, 400);
+  }
   const byPo = c.req.query('groupBy') === 'po';
   const only = c.req.query('warehouse');
   const keep = (w: { warehouse: string }) => !only || w.warehouse === only;
@@ -696,9 +701,9 @@ sellOrders.post('/:id/price-import/preview', async (c) => {
 // line reach the uuid cast, the NOT NULL columns or the sell_order_lines CHECK
 // (qty>=0, unit_price>=0) and surface as a 500. A saved order may hold a line
 // at 0 rather than remove it, which would renumber the lines after it; a new
-// order still needs at least 1 of everything. Which lines of a save are new
-// is the editor's to enforce: a save rewrites every row, and a typed line has
-// no identity apart from its fields, qty included.
+// order still needs at least 1 of everything. Which lot lines of a save are
+// new is checked under the lock in PATCH; a typed line has no identity apart
+// from its fields, qty included, so a typed 0 is the editor's to refuse.
 function lineInputError(lines: readonly unknown[], opts: { allowZeroQty?: boolean } = {}): string | null {
   for (const l of lines) {
     if (typeof l !== 'object' || l === null) return 'each line must be an object';
@@ -901,6 +906,13 @@ sellOrders.patch('/:id', async (c) => {
         `
       : [];
     if (body.lines !== undefined) {
+      // A 0 is how a line already on the order keeps its # once its lot has
+      // gone, so validateSellLines passes it unchecked. A lot new to the order
+      // has to come with at least 1, or a stale or made-up id reaches the FK.
+      const onOrder = new Set(beforeLines.flatMap(l => (l.inventory_id ? [l.inventory_id.toLowerCase()] : [])));
+      if (body.lines.some(l => l.qty === 0 && l.inventoryId && !onOrder.has(l.inventoryId.toLowerCase()))) {
+        return { code: 400, msg: 'a new line needs a qty of at least 1 — only a line already on the order can be held at 0' };
+      }
       // Same sellability check as POST, run inside the tx with FOR UPDATE.
       // This order is excluded so keeping its own already-committed lines
       // doesn't trip the one-open-sell-order-per-line rule.

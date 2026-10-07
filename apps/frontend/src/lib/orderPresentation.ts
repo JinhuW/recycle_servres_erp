@@ -118,12 +118,14 @@ export function poStageName(lifecycle: string, t: Translate): string {
 }
 
 // Friendly labels for the fields we surface on line_edited / meta_changed
-// events and in the revert-review dialog. Anything not listed falls back to
-// the raw db column name.
+// events — purchase and sell orders alike — in the revert-review dialog and
+// on the Activity page. Anything not listed falls back to the raw db column
+// name.
 const FIELD_LABEL: Record<string, string> = {
   sell_price:      'Sell price',
   qty:             'Qty',
   unit_cost:       'Unit cost',
+  unit_price:      'Unit price',
   brand:           'Brand',
   capacity:        'Capacity',
   type:            'Type',
@@ -155,9 +157,18 @@ const FIELD_LABEL: Record<string, string> = {
   tracking_number: 'Tracking number',
   carrier:         'Carrier',
   payment_method:  'Payment method',
+  customer_id:     'Customer',
+  currency_code:   'Currency',
+  payment_received_by: 'Payment received by',
+  label:           'Label',
+  sub_label:       'Sub-label',
+  inventory_id:    'Inventory item',
+  status:          'Status',
 };
 
-const MONEY_FIELDS = new Set(['sell_price', 'unit_cost', 'total_cost', 'other_fees']);
+export const fieldLabel = (field: string): string => FIELD_LABEL[field] ?? field;
+
+const MONEY_FIELDS = new Set(['sell_price', 'unit_cost', 'unit_price', 'total_cost', 'price', 'other_fees']);
 
 // The hand-off writes lower-case ids; the timeline reads them as words.
 const ENUM_VALUE_LABEL: Record<string, Record<string, string>> = {
@@ -178,7 +189,7 @@ export function renderValue(field: string, v: unknown, locale: string): string {
 
 /** `Qty: 4 → 8`, the one form a field change takes wherever it is shown. */
 export function changeLine(c: OrderEventChange, locale: string): string {
-  const label = FIELD_LABEL[c.field] ?? c.field;
+  const label = fieldLabel(c.field);
   return `${label}: ${renderValue(c.field, c.from, locale)} → ${renderValue(c.field, c.to, locale)}`;
 }
 

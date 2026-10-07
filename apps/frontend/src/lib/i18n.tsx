@@ -1160,6 +1160,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     soDownloadPackingListHint: 'One tab per warehouse: a tick box and quantity for each PO line, no prices — for the pickers, not the vendor',
     soDownloadPackingListByPo: 'Packing list by PO',
     soDownloadPackingListByPoHint: 'The same checklist with one tab per PO in each warehouse',
+    soNothingToPackHint: 'Every line on this order is at 0, so there is nothing to pack',
     soPackAllWarehouses: 'All warehouses',
     soPackWarehouseHint: 'Narrow both packing lists to one warehouse',
     soPriceImportTitle: 'Vendor price import',
@@ -2565,6 +2566,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     pkShippedToast: '{id} marked shipped',
     pkLineChanged: 'The order changed while you were packing. The list has been reloaded.',
     pkLoadFailed: 'The packing progress could not be loaded. Nothing can be changed until it is.',
+    pkOrderLoadFailed: 'This sell order could not be loaded.',
     pkRetry: 'Try again',
 
     // ── Sell-order close reasons ──
