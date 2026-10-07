@@ -58,7 +58,7 @@ two lines that were deleted for this reason.
 
 ### Fixed
 
-- **PO-1483 lines #32 and #36 are back, at qty 0** (migration 0161). Both were
+- **PO-1483 lines #33 and #37 are back, at qty 0** (migration 0161). Both were
   deleted on 2026-10-07 because none of their units arrived, and the delete
   renumbered the lines below them.
   - They return at their original positions and timestamps, so every line
@@ -66,7 +66,7 @@ two lines that were deleted for this reason.
     don't move.
   - The migration is guarded on each line's own `line_removed` record, so it
     does nothing on any other database.
-  - #36's label scan was swept with the delete and doesn't come back.
+  - #37's label scan was swept with the delete and doesn't come back.
 
 ## [1.212.0] - 2026-10-06
 
