@@ -90,7 +90,7 @@ export function isShortChecked(line: CheckableLine, check: LineCheck | undefined
   return !!check?.checkedAt && n > 0 && n < line.qty;
 }
 
-// Checked at 0: the line isn't in the box, and Approve takes it off the PO.
+// Checked at 0: the line isn't in the box, and Approve sets its qty to 0.
 export function isAbsentChecked(line: CheckableLine, check: LineCheck | undefined): boolean {
   return !!check?.checkedAt && countOf(line, check) === 0;
 }

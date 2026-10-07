@@ -17,6 +17,57 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.213.0] - 2026-10-07
+
+A PO line whose units never arrived can now be counted down to 0 instead of
+deleted, so every other line keeps its `#` (RS-184). Review mode's Approve
+uses it in place of the removal 1.212.0 introduced, and PO-1483 gets back the
+two lines that were deleted for this reason.
+
+### Changed
+
+- **An existing PO line may be set to qty 0.** Deleting a line was the only
+  way to record "none of it arrived", and it renumbered every line after it,
+  because a line's `#` is its rank on the PO (RS-145). `order_lines.qty` now
+  allows 0 (migration 0160).
+  - Only a line already on the PO can be set to 0. PATCH `lines` takes it,
+    and so do the PO page drawer, the Review-mode drawer and the phone line
+    form on an existing order.
+  - A new line still needs at least 1: POST `/api/orders`, PATCH `addLines`,
+    the new-PO screens on desktop and phone, and the web form. The inventory
+    stock editor also keeps 1 as its floor.
+  - A line committed to a Shipped or Awaiting-payment sell order still can't
+    drop below what that order holds.
+- **Review mode's Approve sets lines ticked at 0 to qty 0, then moves the PO
+  to Ready to Pay.** In 1.212.0 it deleted them. That release never reached
+  prod, so on prod Approve has never removed a line.
+  - The button reads *Set n to 0 & approve*. A goods total that follows the
+    lines drops by their value. A negotiated lot price stays as it is, with
+    the same warning.
+  - Zeroing keeps each line's scan photo. A delete swept it out of storage.
+  - A line already at qty 0 is ticked by *Check all remaining*, and Approve
+    doesn't send it again. A scan that lands on it says it is at qty 0
+    instead of asking to raise a count that can't go up.
+  - When every line is at 0, Approve stays disabled. Nothing arrived, so
+    there is nothing to pay for.
+- **A 0-qty line is not stock.** The inventory list, its export, the grouped
+  view and the analysis page leave it out. It no longer keeps a Done PO from
+  settling to Sold.
+- **A DDR5 line counted down to 0 needs no serials.** It holds no module to
+  serialize. A blank qty still does.
+
+### Fixed
+
+- **PO-1483 lines #32 and #36 are back, at qty 0** (migration 0161). Both were
+  deleted on 2026-10-07 because none of their units arrived, and the delete
+  renumbered the lines below them.
+  - They return at their original positions and timestamps, so every line
+    has its old `#` again. The goods total ($12,331) and other fees ($969)
+    don't move.
+  - The migration is guarded on each line's own `line_removed` record, so it
+    does nothing on any other database.
+  - #36's label scan was swept with the delete and doesn't come back.
+
 ## [1.212.0] - 2026-10-06
 
 In Review mode, a line counted down to 0 now means it isn't in the box, and

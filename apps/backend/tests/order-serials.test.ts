@@ -52,6 +52,13 @@ describe('serialIssue (shared validator)', () => {
       .toBeNull();
   });
 
+  it('asks nothing of a DDR5 line counted down to 0, but still of a blank qty', () => {
+    expect(serialIssue({ category: 'RAM', generation: 'DDR5', qty: 0, serialNumber: null })).toBeNull();
+    expect(serialIssue({ category: 'RAM', generation: 'DDR5', qty: '0', serialNumber: '' })).toBeNull();
+    expect(serialIssue({ category: 'RAM', generation: 'DDR5', qty: '', serialNumber: null }))
+      .toEqual({ kind: 'ddr5Required' });
+  });
+
   it('does not require serials below DDR5 or outside RAM', () => {
     expect(serialIssue({ category: 'RAM', generation: 'DDR4', qty: 2, serialNumber: null }))
       .toBeNull();

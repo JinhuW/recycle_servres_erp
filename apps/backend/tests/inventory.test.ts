@@ -462,3 +462,40 @@ describe('GET /api/inventory — search by PO number', () => {
     expect(r.body.products.some(g => g.lines.some(l => l.order_id === poId))).toBe(true);
   });
 });
+
+describe('GET /api/inventory — a line counted down to 0 is not stock', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  type Item = { id: string; order_id: string };
+
+  it('drops from the list and the grouped view, while its sibling stays', async () => {
+    const { token } = await loginAs(ALEX);
+    const line = (pn: string) => ({
+      category: 'RAM', brand: 'Zebrastripe', capacity: '32GB', type: 'DDR4',
+      classification: 'RDIMM', speed: '3200', partNumber: pn,
+      condition: 'Pulled — Tested', qty: 2, unitCost: 40,
+    });
+    const po = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: { paypalTxnId: 'TESTPAYTXN0000184', category: 'RAM', lines: [line('ZS-KEEP'), line('ZS-NEVER')] },
+    });
+    expect(po.status).toBe(201);
+    const poId = po.body.id;
+    const detail = await api<{ order: { lines: { id: string; partNumber: string }[] } }>(
+      'GET', `/api/orders/${poId}`, { token });
+    const keep = detail.body.order.lines.find(l => l.partNumber === 'ZS-KEEP')!.id;
+    const never = detail.body.order.lines.find(l => l.partNumber === 'ZS-NEVER')!.id;
+    expect((await api('PATCH', `/api/orders/${poId}`, {
+      token, body: { lines: [{ id: never, qty: 0 }] },
+    })).status).toBe(200);
+
+    const list = await api<{ items: Item[] }>('GET', `/api/inventory?q=${encodeURIComponent(poId)}`, { token });
+    expect(list.body.items.map(i => i.id)).toEqual([keep]);
+
+    const grouped = await api<{ products: { lines: Item[] }[] }>(
+      'GET', `/api/inventory/products?q=${encodeURIComponent(poId)}`, { token });
+    const ids = grouped.body.products.flatMap(g => g.lines.map(l => l.id));
+    expect(ids).toContain(keep);
+    expect(ids).not.toContain(never);
+  });
+});

@@ -32,6 +32,9 @@ type Props = {
   lineCount: number;
   editingLineIdx?: number | null;
   existingLine?: DraftLine;
+  // A saved line of an existing order: it may be counted down to 0, where a
+  // line being captured needs at least 1.
+  allowZeroQty?: boolean;
   onSaveLine: (line: DraftLine) => void;
   onCancel: () => void;
   onBack?: () => void;
@@ -122,7 +125,7 @@ const aiDefaults = (category: Category, scan: ScanResponse): DraftLine => {
   };
 };
 
-export function SubmitForm({ category, detected, lineCount, editingLineIdx, existingLine, onSaveLine, onCancel, onBack, onRescan, rescanDraft, photoCtx }: Props) {
+export function SubmitForm({ category, detected, lineCount, editingLineIdx, existingLine, allowZeroQty = false, onSaveLine, onCancel, onBack, onRescan, rescanDraft, photoCtx }: Props) {
   const { t, lang, locale } = useT();
   const isEditing = editingLineIdx != null;
   const aiFilled = !!detected;
@@ -157,7 +160,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
   // of a literal 0 the user has to select and delete before typing. The number
   // the form works with is parsed off these, so a half-typed value never
   // rewrites what's on screen.
-  const [qtyRaw, setQtyRaw] = useState(() => (initial.qty ? String(initial.qty) : ''));
+  const [qtyRaw, setQtyRaw] = useState(() => (initial.qty || (allowZeroQty && initial.qty === 0) ? String(initial.qty) : ''));
   const [costRaw, setCostRaw] = useState(() => (initial.unitCost ? String(initial.unitCost) : ''));
   const [lightbox, setLightbox] = useState(false);
   const [thumbBroken, setThumbBroken] = useState(false);
@@ -266,7 +269,11 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
     // The same rule the desktop screens ask, so a line this form accepts is
     // never one the editor then refuses to save — which used to lock the whole
     // order until someone reopened that line and filled in a brand.
-    const { missingKeys } = lineRequirements(line);
+    // The typed text, not the parsed number: a cleared field reads 0 there.
+    const { missingKeys } = lineRequirements(
+      { ...line, qty: qtyRaw.trim() === '' ? null : line.qty },
+      { allowZeroQty },
+    );
     const fields = missingFieldNames(missingKeys, t, lang);
     if (fields) {
       showWarnToast(t('drawerStillNeeded', { fields }));
@@ -513,7 +520,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
             <input
               className="input"
               type="number"
-              min={1}
+              min={allowZeroQty ? 0 : 1}
               inputMode="numeric"
               placeholder="1"
               value={qtyRaw}

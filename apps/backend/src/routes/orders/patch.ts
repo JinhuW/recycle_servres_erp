@@ -152,12 +152,12 @@ patchRoutes.patch('/:id', async (c) => {
     if (supErr) return c.json({ error: supErr }, 400);
   }
 
-  // Field range gates — qty>0, unit_cost>=0, sell_price>=0. Without these,
+  // Field range gates — qty, unit_cost>=0, sell_price>=0. Without these,
   // a malformed value hits the order_lines CHECK constraint inside the tx
-  // and surfaces as a 500. Both the line-patch list (`lines`) and the
-  // insert list (`addLines`) need the same check.
+  // and surfaces as a 500. An existing line may be counted down to 0 (none of
+  // it arrived); a new one needs at least 1.
   for (const l of body.lines ?? []) {
-    const e = validateLineInput(l as Record<string, unknown>, 'patch');
+    const e = validateLineInput(l as Record<string, unknown>, 'patch', { allowZeroQty: true });
     if (e) return c.json({ error: e }, 400);
   }
   // A new line through PATCH has the INSERT's defaults (qty 1, cost 0) for
@@ -848,7 +848,7 @@ patchRoutes.patch('/:id', async (c) => {
     });
   } catch (e) {
     if (e instanceof OrderRefusal) return refusalResponse(c, u, e.refusal);
-    // A line value outside a column's CHECK (health 0–100, rpm > 0, qty > 0).
+    // A line value outside a column's CHECK (health 0–100, rpm > 0, qty >= 0).
     if ((e as { code?: string }).code === '23514') {
       return c.json({ error: 'A line value is out of range' }, 400);
     }

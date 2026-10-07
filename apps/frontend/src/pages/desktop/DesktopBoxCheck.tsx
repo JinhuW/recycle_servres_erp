@@ -233,8 +233,10 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   };
 
   // A cost is owed only once the line is touched, as on the PO page: legacy
-  // $0 lines must stay openable.
-  const editRequirements = (l: EditLine) => lineRequirements(l, { requireCost: !!l._dirty });
+  // $0 lines must stay openable. Every line here is already on the PO, so it
+  // may be set to 0.
+  const editRequirements = (l: EditLine) =>
+    lineRequirements(l, { requireCost: !!l._dirty, allowZeroQty: true });
 
   // Throws to keep the drawer open; the drawer shows the message.
   const confirmEdit = async (): Promise<void> => {
@@ -290,9 +292,10 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     if (!ready) return;
     const now = Date.now();
     // Short lines are left for their own tick; everything still at its full
-    // count is ticked. Staggered stamps keep the batch in PO order inside Checked.
+    // count is ticked, a line already at qty 0 included — there is nothing of
+    // it to count. Staggered stamps keep the batch in PO order inside Checked.
     ordered.open
-      .filter(l => lineState(l, checks.get(l.id)) === 'open')
+      .filter(l => l.qty === 0 || lineState(l, checks.get(l.id)) === 'open')
       .forEach((l, i) => save({ ...checkOf(l.id), checkedAt: new Date(now - i).toISOString() }));
     setUndo(null);
   };
@@ -320,7 +323,12 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     const pn = hit.partNumber ?? lineLabel(hit);
     const state = lineState(hit, checks.get(hit.id));
     // A scan says the part is here, and a tick at 0 would confirm it isn't —
-    // Approve would then take the line off the PO.
+    // Approve would then set the line to 0. A line already at qty 0 has no
+    // count to raise; only an edit can put units back on it.
+    if (hit.qty === 0) {
+      setScanMsg({ tone: 'neg', text: t('bcScanZeroQty', { pn }) });
+      return;
+    }
     if (countOf(hit, checks.get(hit.id)) === 0) {
       setScanMsg({ tone: 'neg', text: t('bcScanZero', { pn }) });
       return;
@@ -343,22 +351,23 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     const answer = entryAnswerFor(order) ?? await takeover.ask(order);
     if (answer === null) return;
     setBusy('approve');
-    // Once lines are gone, a move that doesn't happen leaves this page showing
-    // rows the PO no longer has; the re-read drops them.
-    let removed = false;
-    const reloadIfRemoved = () => (removed ? onReload().catch(handleFetchError) : undefined);
+    // Once lines are at 0, a move that doesn't happen leaves this page showing
+    // the qty they had; the re-read brings the new one (and the goods total).
+    let zeroed = false;
+    const reloadIfZeroed = () => (zeroed ? onReload().catch(handleFetchError) : undefined);
     try {
       await flush();
-      // Ahead of the move: from Ready to Pay the lines are closed book.
-      if (absent.length) {
-        await api.patch(`/api/orders/${order.id}`, { removeLineIds: absent.map(l => l.id) });
-        removed = true;
+      // Ahead of the move: from Ready to Pay the lines are closed book. Set to
+      // 0 rather than removed, so every line keeps its # on the PO.
+      if (toZero.length) {
+        await api.patch(`/api/orders/${order.id}`, { lines: toZero.map(l => ({ id: l.id, qty: 0 })) });
+        zeroed = true;
       }
       // The page may have sat open while someone else moved the PO; the jump
       // is refused under the row lock unless it is still at Reviewing.
       const moved = await takeover.advance(order, { toStage: 'ready_to_pay', fromStage: 'reviewing' }, answer);
       if (!moved) {
-        await reloadIfRemoved();
+        await reloadIfZeroed();
         return;
       }
       stashEntryAnswer(order.id, null);
@@ -366,7 +375,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
       const now = readStageMoved(e);
       if (now !== null) showErrorDialog(t('bcStaleStage', { id: order.id, s: poStageName(now, t) }));
       else handleFetchError(e);
-      await reloadIfRemoved();
+      await reloadIfZeroed();
       return;
     } finally {
       setBusy(null);
@@ -450,7 +459,9 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
 
   const short = ordered.done.filter(l => isShortChecked(l, checks.get(l.id)));
   const absent = ordered.done.filter(l => isAbsentChecked(l, checks.get(l.id)));
-  // An order keeps at least one line, so this one can't be approved away.
+  // What Approve still has to set to 0: a line already there needs nothing.
+  const toZero = absent.filter(l => l.qty > 0);
+  // Nothing on this PO arrived: there is nothing to pay for.
   const allAbsent = absent.length === lines.length;
   // The PO page's numbering, which the regrouped rows would otherwise lose.
   const lineNo = (l: OrderLine) => lines.indexOf(l) + 1;
@@ -718,7 +729,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
                 <>
                   {absent.length > 0 && (
                     <>
-                      <p className="card-sub">{t(atReviewing ? 'bcRemoveIntro' : 'bcAbsentIntro', { n: absent.length })}</p>
+                      <p className="card-sub">{t(atReviewing && toZero.length ? 'bcZeroIntro' : 'bcAbsentIntro', { n: absent.length })}</p>
                       <ul className="bc-problem-list">
                         {absent.map(l => (
                           <li key={l.id}>
@@ -727,7 +738,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
                           </li>
                         ))}
                       </ul>
-                      {atReviewing && order.goodsFollowsLines === false && (
+                      {atReviewing && toZero.length > 0 && order.goodsFollowsLines === false && (
                         <p className="card-sub bc-lot-note">{t('bcLotPriceKept')}</p>
                       )}
                     </>
@@ -752,7 +763,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
               <div className="bc-finish-actions">
                 {atReviewing && (
                   <button type="button" className="btn accent" disabled={!ready || busy !== null || takeover.asking || remaining > 0 || allAbsent} onClick={() => void approve()}>
-                    <Icon name="check" size={13} /> {busy === 'approve' ? '…' : absent.length && !allAbsent ? t('bcApproveRemoving', { n: absent.length }) : t('bcApprove')}
+                    <Icon name="check" size={13} /> {busy === 'approve' ? '…' : toZero.length && !allAbsent ? t('bcApproveZeroing', { n: toZero.length }) : t('bcApprove')}
                   </button>
                 )}
               </div>

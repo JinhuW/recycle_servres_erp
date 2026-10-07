@@ -359,14 +359,16 @@ on to Sold once every line has sold (v1.164.0).
   - Flags, extra items and *Send flags to purchaser* are gone (v1.190.0):
     a problem is fixed with Edit instead of reported. Past
     `box_check_flagged` events still show in the PO history.
-  - **Check all remaining** ticks every line still at its full count and
-    leaves amber and red lines for their own tick.
+  - **Check all remaining** ticks every line still at its full count, and a
+    line already at qty 0 (v1.213.0). It leaves amber and red lines for their
+    own tick.
   - The scan box takes a label scanner. It matches an exact part number, then
     a prefix, then a recorded serial, and ticks the line it lands on at its
     count. A scan goes to a matching line still open first, then an amber
     one. A prefix that fits lines with different part numbers ticks nothing
     and names them. A scan that lands on a line counted 0 ticks nothing and
-    asks for the count to be raised first (v1.212.0).
+    asks for the count to be raised first (v1.212.0). On a line already at
+    qty 0 it says so instead: only an edit can put units back (v1.213.0).
   - A scan works with nothing focused: a character typed onto the page that
     is not a shortcut starts the scan in the box, so a label never runs as
     shortcuts. The shortcuts are ↑↓/j k, Space, + −, lowercase e and /; a
@@ -379,18 +381,23 @@ on to Sold once every line has sold (v1.164.0).
   - Once every line is checked, **Approve for payment** at Reviewing moves
     the PO to Ready to Pay (re-reading the stage first). Short lines don't
     block it.
-  - **Lines ticked at 0 come off the PO on Approve** (v1.212.0).
-    - Finish review lists them and the button reads *Remove n & approve*.
-    - They are removed first, the way the PO page removes a line, and then
-      the PO moves. Ready to Pay is closed-book. A line on an open sell order
-      can't be removed, and then nothing moves.
+  - **Lines ticked at 0 are set to qty 0 on Approve** (v1.213.0; in v1.212.0,
+    which never reached prod, Approve deleted them). They stay on the PO, so
+    every line keeps its `#`.
+    - Finish review lists them and the button reads *Set n to 0 & approve*.
+      A line already at qty 0 isn't sent again.
+    - They are zeroed first, through the PO page's own line PATCH, and then
+      the PO moves. Ready to Pay is closed-book. A line committed to a
+      Shipped or Awaiting-payment sell order can't drop below that, and then
+      nothing moves.
     - If the move is refused or a manager re-ask is cancelled, the lines stay
-      removed, and the page re-reads the PO with the PO still at Reviewing.
-    - A goods total that follows the lines drops with them. A negotiated lot
-      price stays, and Finish review warns about that.
-    - When every line is at 0, Approve is disabled: a PO must keep a line.
-    - Only Review mode's Approve removes them. Moving the PO from the PO page
-      or the phone leaves 0 lines at their full qty.
+      at 0, and the page re-reads the PO with the PO still at Reviewing.
+    - A goods total that follows the lines drops by their value. A negotiated
+      lot price stays, and Finish review warns about that.
+    - When every line is at 0, Approve is disabled: nothing arrived, so there
+      is nothing to pay for.
+    - Only Review mode's Approve zeroes them. Moving the PO from the PO page
+      or the phone leaves 0-counted lines at their full qty.
   - The endpoints (`/api/orders/:id/checks…`) 403 anyone whose real role is
     not manager. The page and button are hidden from a manager previewing as
     purchaser, and the route bounces them without leaving a Back entry
@@ -591,7 +598,7 @@ on to Sold once every line has sold (v1.164.0).
   stored value when sent blank. A save that changes nothing no longer sends a
   purchaser's submitted PO back to Draft.
 - **Every line is checked the same way on the way in** (v1.197.1): qty a whole
-  number of at least 1, unit cost and sell price 0 or more, health 0–100, RPM a
+  number of at least 1 (0 allowed on an existing PO line, v1.213.0), unit cost and sell price 0 or more, health 0–100, RPM a
   whole number above 0, and text fields within a length limit. That holds for
   a new PO, the PO editor and the inventory editor alike. Negative unit costs
   and goods totals are also refused by the database.
@@ -600,6 +607,15 @@ on to Sold once every line has sold (v1.164.0).
   by the same amount, so the PO's cost and the units sold stay put. The PO
   editor also refuses a qty below what committed sell orders hold, naming them
   to a manager.
+- **A line already on the PO can be counted down to 0** (v1.213.0), when none
+  of its units arrived. Deleting it would renumber every line after it, since
+  a line's `#` is its rank. The PO page drawer, the Review-mode drawer and the
+  phone line form on an existing order all take 0. A new line still needs at
+  least 1: a new PO, *Add item*, and a line being captured on the phone. The
+  inventory editor keeps 1 as its floor. For a purchaser past Draft, setting
+  0 is a qty edit like any other and sends the PO back to Draft. A DDR5 line
+  at 0 needs no serials. A 0-qty line costs nothing, isn't stock, and doesn't
+  keep a Done PO from settling to Sold.
 - Line specs are per-category: RAM carries Part #, Chip #, Brand, Capacity,
   Generation, Type, Class, Rank and Speed; SSD/HDD carry Interface, Form
   factor, Health % and RPM; Other carries a free item type (v1.47.0).
@@ -735,7 +751,8 @@ log and `orders.supplier_id`.
 ## Inventory
 
 There is **no inventory table**. Stock is `order_lines` whose PO is Done or In
-Transit, and a line's qty can never be 0. A PO whose every line has sold reads
+Transit. A line counted down to 0 stays on its PO but is never stock: the list,
+the export, the grouped view and the analysis page leave it out (v1.213.0). A PO whose every line has sold reads
 Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an archived PO sit at the
 `Archived` status and are out of every stock view until the PO is unarchived
 (v1.137.0); like Sold, they are reachable through an explicit status filter.

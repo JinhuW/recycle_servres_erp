@@ -59,16 +59,23 @@ function missingIdentityFields(line: RequirementLine): string[] {
  * refused at hand-off. `requireCost: false` is for the editor's untouched
  * legacy lines — hundreds sit at $0 in production, and a line the user never
  * opened is not being re-submitted.
+ *
+ * `allowZeroQty` is for a line already on a PO: it may be counted down to 0
+ * when none of it arrived, which keeps the PO's line numbers where deleting it
+ * would not. A blank qty is still missing. A new line needs at least 1.
  */
 export function lineRequirements(
   line: RequirementLine,
-  { requireCost = true }: { requireCost?: boolean } = {},
+  { requireCost = true, allowZeroQty = false }: { requireCost?: boolean; allowZeroQty?: boolean } = {},
 ): {
   ready: boolean;
   missingKeys: string[];
 } {
   const missingKeys = missingIdentityFields(line);
-  if (!(Number(line.qty) > 0)) missingKeys.push('qty');
+  const qtyOk = allowZeroQty
+    ? line.qty !== '' && line.qty != null && Number.isInteger(Number(line.qty)) && Number(line.qty) >= 0
+    : Number(line.qty) > 0;
+  if (!qtyOk) missingKeys.push('qty');
   if (requireCost && !(Number(line.unitCost) > 0)) missingKeys.push('unitCost');
   return { ready: missingKeys.length === 0, missingKeys };
 }
