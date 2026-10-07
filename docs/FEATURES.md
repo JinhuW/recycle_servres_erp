@@ -933,6 +933,46 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   own warehouse, else its PO's — not the warehouse the line was saved with,
   so a lot transferred after it went on the order is picked where it sits
   (v1.189.1).
+- **Pack mode: a manager ticks the order into the box** (v1.218.0, desktop
+  shell, built for an iPad). **Pack mode** in the sell order's page head opens
+  `#/sell-orders/<id>/pack`, a full-window page with no sidebar, top bar or
+  tweaks button. It is the on-screen form of the Packing list, and the
+  outbound twin of the PO's Review mode.
+  - Each line leads with a shelf tag naming the lot it comes from — `PO-1111`
+    over a large `#1`, the # the PO page shows. A hand-typed line has a dashed
+    *No PO* tag.
+  - Open lines group by source PO in numeric order, each PO's lines in its own
+    order, hand-typed last — the Packing list by PO's arrangement. A group head
+    names where its lots are now. When the order's lots sit in more than one
+    warehouse, a *Packing from* switch narrows the list, split the way the
+    download's warehouse picker splits it.
+  - A line's count starts at its qty. − / + record a short pick (amber, *Short*)
+    or none at all (red, *Not packed*), and lowering a packed line unticks it.
+    The tick confirms the count as shown; a ticked line sinks under *Packed*,
+    newest first, with Undo in the bottom bar.
+  - The scan box takes a Bluetooth or USB label scanner, with nothing focused,
+    and matches a part number, a prefix, then a recorded serial, as Review mode
+    does. When the part is still waiting on lines from more than one lot, the
+    scan ticks nothing: it highlights those lines, names their lots and asks
+    for a tap on the one that was packed.
+  - Progress is saved on the server (`sell_order_packs`), so a reload, a second
+    iPad or coming back from another app picks up where the count stands; the
+    page re-reads when it returns to the foreground. Last write per line wins.
+    Progress is kept by the line's lot (or a hand-typed line's text), not its
+    row, so saving the order keeps it. A line whose qty changes comes back
+    unpacked, unless it was packed short and edited down to exactly the count
+    packed.
+  - Every control is at least 44px and the tick is 60px; nothing needs hover.
+    Under 780px each row puts the counter and tick on a second line.
+  - On a Draft with every line packed at full count, **Mark shipped** opens the
+    Shipped dialog (note, packing photos) and moves the order to Shipped. Short
+    or unpacked lines block it, and the bar offers Edit order to match the
+    order to the box first. A refused move (a lot taken meanwhile) says why and
+    stays on the page. Other statuses end with Back to order.
+  - The endpoints (`GET /api/sell-orders/:id/pack`,
+    `PUT /api/sell-orders/:id/pack/:lineId`) 403 anyone whose real role is not
+    manager. An archived or Closed order opens read-only and its writes 409; a
+    Done order can still be packed, since an order can be paid before it ships.
 
 ## Shipping
 
@@ -1621,6 +1661,10 @@ removed in v1.191.0.
   new tab. The PO page's "Open payments" lands on the list focused on that
   PO. Sell-order links stay desktop-only: the phone shell has no sell-order
   route.
+- **An iPad gets the desktop shell** — every iPad is at least 744px wide.
+  Most desktop pages are built for a pointer; sell-order Pack mode (v1.218.0)
+  is the one page laid out for touch. An iPad in Split View narrower than
+  720px loads the phone shell, which has no sell-order routes.
 - The mobile shell is a **PWA** with install onboarding, a service worker and a
   share target, scoped to mobile only (v0.1.1).
 - Mobile PO lists colour-code warehouse, status and owner with stable hashed

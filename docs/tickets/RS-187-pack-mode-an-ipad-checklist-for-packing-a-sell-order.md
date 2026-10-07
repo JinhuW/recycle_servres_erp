@@ -42,16 +42,16 @@ or a hand-typed line's text), not its row id.
 
 ## Acceptance criteria
 
-- [ ] The sell order page head shows **Pack mode** (manager); it opens `#/sell-orders/<id>/pack`, a full-window page with no sidebar or top bar.
-- [ ] Every line shows its source as a `PO-1111 #1` tag (the `#` matches the PO page); a hand-typed line reads *No PO*.
-- [ ] Open lines are grouped by source PO in numeric order, lines in PO order, hand-typed last; a warehouse filter appears when the order's lots sit in more than one warehouse.
-- [ ] Each line's count starts at its qty; − / + change it; the tick confirms the count; a ticked line sinks under *Packed*, newest first, with Undo.
-- [ ] Lowered below qty = *short* (amber), lowered to 0 = *not packed* (red); both still need their tick.
-- [ ] A label scan (Bluetooth / USB scanner, nothing focused) ticks the matching line by part number, prefix or serial, like Review mode; when the part sits on lines from more than one PO it highlights them and asks which lot was packed instead of ticking.
-- [ ] Progress is saved on the server and survives a reload, a second iPad, and an edit of the order's lines; a line whose qty changes comes back unpacked, unless it was packed short and edited down to exactly its count.
-- [ ] With every line packed at full count on a Draft order, **Mark shipped** opens the Shipped evidence dialog (note + packing photos) and moves the order to Shipped. Short or 0 lines block it and point to Edit order.
-- [ ] Every tap target is ≥ 44px and the tick is 56px. Nothing depends on hover. Portrait (≈820px) and landscape (≈1180px) iPad both lay out without horizontal scroll.
-- [ ] The pack endpoints 403 a purchaser; an archived or Closed order opens read-only and its writes 409.
+- [x] The sell order page head shows **Pack mode** (manager); it opens `#/sell-orders/<id>/pack`, a full-window page with no sidebar or top bar.
+- [x] Every line shows its source as a `PO-1111 #1` tag (the `#` matches the PO page); a hand-typed line reads *No PO*.
+- [x] Open lines are grouped by source PO in numeric order, lines in PO order, hand-typed last; a warehouse filter appears when the order's lots sit in more than one warehouse.
+- [x] Each line's count starts at its qty; − / + change it; the tick confirms the count; a ticked line sinks under *Packed*, newest first, with Undo.
+- [x] Lowered below qty = *short* (amber), lowered to 0 = *not packed* (red); both still need their tick.
+- [x] A label scan (Bluetooth / USB scanner, nothing focused) ticks the matching line by part number, prefix or serial, like Review mode; when the part sits on lines from more than one PO it highlights them and asks which lot was packed instead of ticking.
+- [x] Progress is saved on the server and survives a reload, a second iPad, and an edit of the order's lines; a line whose qty changes comes back unpacked, unless it was packed short and edited down to exactly its count.
+- [x] With every line packed at full count on a Draft order, **Mark shipped** opens the Shipped evidence dialog (note + packing photos) and moves the order to Shipped. Short or 0 lines block it and point to Edit order.
+- [x] Every tap target is ≥ 44px and the tick is 56px. Nothing depends on hover. Portrait (≈820px) and landscape (≈1180px) iPad both lay out without horizontal scroll.
+- [x] The pack endpoints 403 a purchaser; an archived or Closed order opens read-only and its writes 409.
 
 ## Out of scope
 
