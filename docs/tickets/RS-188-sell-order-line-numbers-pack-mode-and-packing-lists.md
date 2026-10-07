@@ -2,13 +2,13 @@
 id: RS-188
 title: "Sell-order line numbers: Pack mode and packing lists go by the order's #, a line can be set to 0"
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-07
 reporter: jinhu
 branch: dev-4
-pr:
-version:
+pr: "#521"
+version: 1.219.0
 related: [RS-187, RS-184]
 ---
 
