@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-183](./RS-183-review-mode-a-line-counted-to-0-is-not-in-the-box-an.md) | done | story | P2 | Review mode: a line counted to 0 is not in the box and is removed on Approve | — |
+| [RS-184](./RS-184-a-po-line-may-be-counted-down-to-0-only-a-new-line-n.md) | done | story | P1 | A PO line may be counted down to 0; only a new line needs qty 1 | — |
+| [RS-183](./RS-183-review-mode-a-line-counted-to-0-is-not-in-the-box-an.md) | done | story | P2 | Review mode: a line counted to 0 is not in the box and is removed on Approve | 1.212.0 |
 | [RS-182](./RS-182-nightly-prod-to-dev-db-copy-fails-at-the-credential.md) | in-progress | bug | P1 | Nightly prod-to-dev DB copy fails at the credential scrub | — |
 | [RS-178](./RS-178-ssd-capacity-offers-2tb-and-ram-class-offers-camm.md) | done | story | P2 | SSD capacity offers 2TB and RAM class offers CAMM | 1.211.0 |
 | [RS-176](./RS-176-vnc-bridge-and-mail-thread-hardening-from-the-v1-209.md) | backlog | task | P3 | VNC bridge and mail thread hardening from the v1.209 review | — |
