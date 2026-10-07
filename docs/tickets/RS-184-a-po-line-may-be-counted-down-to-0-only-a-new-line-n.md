@@ -2,13 +2,13 @@
 id: RS-184
 title: A PO line may be counted down to 0; only a new line needs qty 1
 type: story
-status: in-progress
+status: done
 priority: P1
 created: 2026-10-07
 reporter: jinhu
 branch: fix/po-line-qty-zero
-pr:
-version:
+pr: "#513"
+version: 1.213.0
 related: [RS-183, RS-124, RS-145]
 ---
 
@@ -47,22 +47,22 @@ delete lines ticked at 0. That is the same renumbering, done automatically.
 
 ## Acceptance criteria
 
-- [ ] Editing an existing PO line to qty 0 saves (PATCH `lines`, PO page
+- [x] Editing an existing PO line to qty 0 saves (PATCH `lines`, PO page
       drawer, Review-mode drawer, phone line form on an existing order).
-- [ ] A new line still needs qty ≥1: POST `/api/orders`, PATCH `addLines`,
+- [x] A new line still needs qty ≥1: POST `/api/orders`, PATCH `addLines`,
       the new-PO screens on desktop and phone, and the web form. The
       inventory stock editor still needs ≥1.
-- [ ] A line committed to a sell order (Shipped / Awaiting payment) can't drop
+- [x] A line committed to a sell order (Shipped / Awaiting payment) can't drop
       below that commitment, 0 included.
-- [ ] Review mode: Approve sets lines ticked at 0 to qty 0 and then moves the
+- [x] Review mode: Approve sets lines ticked at 0 to qty 0 and then moves the
       PO. The lines stay on the PO and the `#` order holds.
-- [ ] Review mode: a line already at qty 0 is ticked by *Check all remaining*,
+- [x] Review mode: a line already at qty 0 is ticked by *Check all remaining*,
       isn't re-zeroed by Approve, and a scan landing on it says it is at qty 0.
-- [ ] A 0-qty line is not stock: hidden from the inventory list, export,
+- [x] A 0-qty line is not stock: hidden from the inventory list, export,
       grouped view and analysis. It doesn't keep a Done PO from settling to
       Sold.
-- [ ] A DDR5 line counted down to 0 doesn't need serials.
-- [ ] PO-1483's two lines come back at qty 0 in their old places (#32, #36),
+- [x] A DDR5 line counted down to 0 doesn't need serials.
+- [x] PO-1483's two lines come back at qty 0 in their old places (#32, #36),
       by migration, guarded so it does nothing anywhere else.
 
 ## Out of scope
