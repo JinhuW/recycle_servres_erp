@@ -2,13 +2,13 @@
 id: RS-186
 title: Packing list shows each row's source PO line
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-10-07
 reporter: jinhu
 branch: feat/packing-list-source-po
-pr:
-version:
+pr: "#516"
+version: 1.216.0
 related: [RS-149, RS-152, RS-145]
 ---
 
