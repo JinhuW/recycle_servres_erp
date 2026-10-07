@@ -17,6 +17,40 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.217.0] - 2026-10-07
+
+The commission payment now records which manager paid the purchaser (RS-185).
+Until now the Commission tab kept only the screenshot that shows the purchaser
+was paid. The Activity log named whoever uploaded it, and that need not be the
+person who sent the money.
+
+### Added
+
+- **Paid by, in the Commission payment box.** It is on the desktop Commission
+  tab and the phone Commission fold, above the screenshot drop box.
+  - A manager picks from the active managers or clears it. Purchasers see the
+    name, or *Not recorded*.
+  - Every order starts at *Not recorded*. Nothing is backfilled or guessed
+    from the uploader or the PO manager.
+  - The pick saves as it is made, at every stage, Done included. The
+    commission is paid once the PO is a closed book, where the page's Save is
+    off and PATCH refuses, so it has its own endpoint,
+    `PUT /api/orders/:id/commission-paid-by` (`{ userId }` or `null`). It is
+    manager-only, and anyone but an active manager is refused with a 400.
+  - The column is `orders.commission_paid_by` (migration 0162, `ON DELETE SET
+    NULL`, indexed). `GET /api/orders/:id` reports it as `commissionPaidBy`
+    to every role that can read the PO.
+  - Each change writes one *Commission paid by: ‹from› → ‹to›* entry to the
+    PO's Activity tab and the desktop Activity page. The entry keeps the names
+    as they were, so a manager renamed or deactivated later still reads
+    correctly.
+
+### Changed
+
+- **One definition of "active manager".** `isActiveManager` moved from the
+  sell-order routes into `services/members.ts`. The sell order's *payment
+  received by* picker and the new picker now accept the same people.
+
 ## [1.216.0] - 2026-10-07
 
 The sell order's Packing list now tells the picker which PO line each row came

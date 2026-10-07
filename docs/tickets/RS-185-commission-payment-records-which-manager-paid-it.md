@@ -2,13 +2,13 @@
 id: RS-185
 title: Commission payment records which manager paid it
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-07
 reporter: jinhu
 branch: feat/commission-paid-by
 pr:
-version:
+version: 1.217.0
 related: [RS-084, RS-086]
 ---
 
@@ -43,15 +43,15 @@ record writes through on its own endpoint, as the screenshot does.
 
 ## Acceptance criteria
 
-- [ ] The desktop Commission tab and the phone Commission fold show a *Paid by*
+- [x] The desktop Commission tab and the phone Commission fold show a *Paid by*
       field in the Commission payment box: a manager picks from the active
       managers (or clears it); everyone else sees the name, or "Not recorded".
-- [ ] The choice saves as it is made, at every stage including Done, without
+- [x] The choice saves as it is made, at every stage including Done, without
       the page's Save; it survives a reload.
-- [ ] `PUT /api/orders/:id/commission-paid-by` is manager-only (403 otherwise)
+- [x] `PUT /api/orders/:id/commission-paid-by` is manager-only (403 otherwise)
       and accepts only an active manager or `null` (400 otherwise).
-- [ ] `GET /api/orders/:id` returns `commissionPaidBy: { id, name } | null`.
-- [ ] Each change writes one Activity entry, "Commission paid by: <from> →
+- [x] `GET /api/orders/:id` returns `commissionPaidBy: { id, name } | null`.
+- [x] Each change writes one Activity entry, "Commission paid by: <from> →
       <to>", with names as they were at the time — on the PO's Activity tab and
       the desktop Activity page. Re-saving the same manager writes nothing.
 
@@ -71,5 +71,7 @@ record writes through on its own endpoint, as the screenshot does.
   sell order's *payment received by* picker) into `services/members.ts` so both
   pickers share one definition. The manager list comes from `/api/members`
   filtered by role in the browser, as the sell-order picker does.
-- Numbers: RS-184 / v1.213.0 / migrations 0160–0161 were claimed by a peer
-  session (`fix/po-line-qty-zero`); this ticket takes RS-185, v1.214.0, 0162.
+- Numbers: RS-184 / v1.213.0 / migrations 0160–0161 went to a peer session
+  (`fix/po-line-qty-zero`), so this ticket took RS-185 and 0162. It was first
+  bumped to v1.214.0; RS-186 then landed v1.216.0 ahead of it, so it ships as
+  v1.217.0 (1.215.0 had been claimed by another peer).
