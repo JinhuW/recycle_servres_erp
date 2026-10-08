@@ -111,6 +111,9 @@ export interface SellOrderLineInsert {
   sourceCurrency: string | null;
   sourceUnitPrice: number | null;
   sourceFxRate: number | null;
+  // Which save past Draft added the line (sell_order_lines.append_batch), or
+  // null for a line numbered with the order's sorted set.
+  appendBatch: number | null;
 }
 
 export async function insertSellOrderLine(
@@ -122,13 +125,14 @@ export async function insertSellOrderLine(
     INSERT INTO sell_order_lines
       (sell_order_id, inventory_id, category, label, sub_label, part_number,
        qty, unit_price, warehouse_id, condition, position,
-       source_currency, source_unit_price, source_fx_rate_to_usd)
+       source_currency, source_unit_price, source_fx_rate_to_usd, append_batch)
     VALUES
       (${sellOrderId}, ${line.inventoryId}, ${line.category}, ${line.label},
        ${line.subLabel}, ${line.partNumber},
        ${line.qty}, ${line.unitPriceUsd},
        ${line.warehouseId}, ${line.condition}, ${line.position},
-       ${line.sourceCurrency}, ${line.sourceUnitPrice}, ${line.sourceFxRate})
+       ${line.sourceCurrency}, ${line.sourceUnitPrice}, ${line.sourceFxRate},
+       ${line.appendBatch})
   `;
 }
 
@@ -178,6 +182,7 @@ export async function createSellOrderDraft(
         sourceCurrency: isNonUsd ? input.currency : null,
         sourceUnitPrice: isNonUsd ? l.unitPrice : null,
         sourceFxRate: isNonUsd ? fx.rate : null,
+        appendBatch: null,
       });
     }
     await writeSellOrderEvent(tx, nextId, input.actorUserId, 'created', {

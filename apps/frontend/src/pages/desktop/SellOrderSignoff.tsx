@@ -10,7 +10,8 @@ import type { SellOrderSignoff } from '../../lib/types';
 type Props = {
   orderId: string;
   signoff: SellOrderSignoff;
-  // Draft, Shipped or Awaiting payment — the statuses a sign-off can change in.
+  // Draft, Packing, Shipped or Awaiting payment — the statuses a sign-off can
+  // change in.
   open: boolean;
   // On the edit page signing waits for the save: a sign-off approves the order
   // as saved, not the draft on screen.

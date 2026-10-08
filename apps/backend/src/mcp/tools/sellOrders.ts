@@ -17,8 +17,8 @@ export const SELL_ORDER_TOOL_DEFS = [
       'category, label and subLabel (the display name the draft will store), partNumber, condition, warehouseId ' +
       'and warehouseName, availableQty (the units still free: the line\'s quantity minus what committed sell ' +
       'orders hold), draftCount (how many other ' +
-      'drafts already propose this line — drafts are proposals, so a line may appear on several and only the ' +
-      'first one promoted keeps it), and sellPrice (the price already ' +
+      'Draft or Packing orders already propose this line — they are proposals, so a line may appear on several ' +
+      'and only the first one promoted keeps it), and sellPrice (the price already ' +
       'assigned to the line, in USD — advisory; you still choose each line\'s unitPrice), sourceOrderId (the PO ' +
       'the line came in on), sourceLineNo (the line\'s # on that PO\'s page), and the structured spec behind subLabel: type (Desktop / Server / Laptop), ' +
       'classification, rank, speed, interface, formFactor, health. Filter with query ' +

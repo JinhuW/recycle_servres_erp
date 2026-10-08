@@ -715,7 +715,7 @@ on to Sold once every line has sold (v1.164.0).
   the pre-release backfill is finished by migration 0124, which pulls such
   lines off open sell orders the way the archive dialog does. Unarchive
   restores each line to the status it held. If a line sits on an open sell order
-  (Draft, Shipped or Awaiting payment) the archive dialog names the sell
+  (Draft, Packing, Shipped or Awaiting payment) the archive dialog names the sell
   orders and lines and asks whether to remove them from those sell orders
   first; the removal is audited on the sell order and is not undone by
   unarchiving. A sell line held at 0 holds nothing, so it is neither named
@@ -733,7 +733,7 @@ on to Sold once every line has sold (v1.164.0).
   record and keep counting (v1.138.4).
 - **Removing a PO line is refused while an open, non-archived sell order
   names it** (v1.145.2), and the refusal names the sell orders. Open means
-  Draft, Shipped or Awaiting payment — the same set the archive dialog
+  Draft, Packing, Shipped or Awaiting payment — the same set the archive dialog
   above uses. A Closed, Done or archived sell order lets the line go: it
   keeps its own line as the snapshot it already carried (label, part number,
   qty, price) with the link to the source cleared. Until v1.144.1 the
@@ -890,10 +890,27 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   speed — through the whole file, and **the order lists its lines in that same
   order**, so the page, Pack mode and both packing lists read alike. Lines of
   one product (several PO lines of one part) share its #. The number is worked
-  out from the sort each time the order is read, so adding a line, deleting a
-  lot, moving one to another warehouse or editing a spec that re-sorts it
-  renumbers the products after it; setting a line to 0, editing a price or
-  saving the order as shown never does (v1.221.0). A product's place comes
+  out from the sort each time the order is read.
+  - **On a Draft, adding a line sorts it in** and renumbers the products
+    after it.
+  - **Once the order is past Draft** (Packing, Shipped, Awaiting payment), a
+    save that adds inventory gives each new product the next # after every
+    other product, and **adding never moves a #** (v1.230.0). Products added
+    in one save are numbered among themselves in packing-list order, and a
+    later save's go after them.
+    - A new lot of a product already on the order joins that product's #.
+    - The order page and Pack mode list an added product last. Both packing
+      lists keep their sorted rows, so it prints there in its sorted place
+      with its later # (`#1, #2, #9, #3`).
+    - Each line records which save added it (`sell_order_lines.append_batch`,
+      NULL for the sorted set). The editor sends each saved line's row id, so
+      the mark survives the save's rewrite, and an edited hand-typed line
+      keeps its place. Lines already on an order when v1.230.0 shipped count
+      as the sorted set.
+  - **What still renumbers the products after it, in any status:** deleting a
+    lot, moving one to another warehouse, and editing a spec that re-sorts it.
+  - **What never renumbers:** setting a line to 0, editing a price, or saving
+    the order as shown (v1.221.0). A product's place comes
   from its first line by PO and line # — 0s included, never the order the
   page lists them in — and a tie on everything the sheet sorts by goes by
   part #. Before v1.221.0 the first line by stored position decided, and a
@@ -967,7 +984,7 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
 - **Inventory lots can be added to an existing sell order** (v1.175.0). The
   desktop Inventory selection bar and toolbar offer "Add to sell order" beside
   Create sell order.
-  - The picker lists the open orders (Draft, Shipped, Awaiting payment; not
+  - The picker lists the open orders (Draft, Packing, Shipped, Awaiting payment; not
     archived), searchable by order number or customer.
   - Picking one opens that order's edit page with the selection appended
     (a modal until v1.194.0).
@@ -982,7 +999,7 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
 - **Done needs every active manager's sign-off** (v1.226.0). The order page
   carries a Sign-off card under the summary: each manager signed (with when),
   waiting, or needing to sign again, and the viewer's own Sign off / Sign
-  again / Withdraw. Managers sign in Draft, Shipped or Awaiting payment, each
+  again / Withdraw. Managers sign in Draft, Packing, Shipped or Awaiting payment, each
   for themselves.
   - `POST /api/sell-orders/:id/status` to Done answers 409 naming who is
     missing, and the stepper's Done step is locked with the same names.
@@ -1002,6 +1019,21 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
     Done before v1.226.0 carry none.
 - A **draft sell order is a proposal**; inventory is claimed only on promotion
   (v1.41.0). Drafts can move straight to Awaiting payment (v1.13.0).
+- **Packing sits between Draft and Shipped** (v1.230.0). It marks a Draft whose
+  goods are being boxed.
+  - **Getting in and out.** Opening Pack mode moves a Draft there; any other
+    status stays as it is, and if the move is refused, packing goes on
+    quietly. The stepper can also set it. A Packing order can step back to
+    Draft, the only backward move besides reopening.
+  - **Like a Draft, it reserves nothing.** Leaving it for Shipped, Awaiting
+    payment or Done runs the promotion stock check. Entering it therefore
+    never fails on a rival's claim, but a rival Draft promoted meanwhile can
+    still take units already in the box. Mark shipped then says so.
+  - **It counts as open** wherever a Draft does: hide-pending, the Add to sell
+    order picker, sign-off, and the PO archive and line-removal checks.
+  - **What it doesn't do.** It asks for no evidence, and it can't be archived.
+  - **Numbering.** Being past Draft, inventory added to it appends its #
+    (above).
 - Orders carry a payment receiver, creator-only reopen (v1.15.0) and a receiver
   column with a managers-only receiver rule (v1.16.0). The receiver can be
   reassigned from the detail view in any status, Done and Closed included —
@@ -1058,7 +1090,9 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
 - **Both packing lists number their rows by the product's # on the order**
   (v1.219.0; per product since v1.220.3): a `#` column first, before the tick
   box, so the label on an item matches its row. The count runs 1..N down the
-  file and never restarts on a new tab; the by-PO file and a one-warehouse
+  file and never restarts on a new tab. A product added once the order was
+  past Draft is the exception: its row stays in its sorted place and carries
+  a later # (v1.230.0). The by-PO file and a one-warehouse
   download show each product the same # as the full list, and a product held
   at 0 leaves a gap. The bid sheet's own `#` column is a plain row index per
   tab, not this number.
@@ -1071,8 +1105,8 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   Part # (v1.197.3): the line's # on that PO's page. A row that folds several
   lots of the PO stacks their IDs in that cell the same way (`#2 × 13` above
   `#3 × 12`, v1.220.3); the tab already names the PO, so it has no `From PO`
-  column. A tab is cut from the numbered products, so its rows run in #
-  order under the same device and generation labels as the plain list, with
+  column. A tab is cut from the numbered products, so its rows run in the
+  plain list's order under the same device and generation labels, with
   its own lots' details (v1.221.0). A warehouse picker beside the buttons
   (shown when the order's lines above 0 span more than one — a warehouse
   holding only 0 lines isn't offered, v1.220.2) narrows either packing list to
@@ -1088,11 +1122,14 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   outbound twin of the PO's Review mode, laid out like it since v1.227.0: a
   page head, a progress card, a table with the scan box over it, and a side
   panel with the selected item and a **Finish** card.
-  - **Products run in the order's own list order**, the Packing list's
-    (v1.220.3; by # since v1.219.0, grouped by source PO in v1.218.0), with
-    the packed ones sunk to the bottom (v1.228.0, below). Each
-    row leads with its product's `#`, the label the packer writes on the item,
-    and names the lot it comes from (`From PO-1111 #1`, or *Typed in*). When
+  - **Opening it moves a Draft to Packing** (v1.230.0), once per visit.
+  - **Products run in the order's own list order**, # order (v1.220.3; by #
+    since v1.219.0, grouped by source PO in v1.218.0). That is the Packing
+    list's order, except for products added once the order was past Draft,
+    which come last here. The packed ones sink to the bottom (v1.228.0,
+    below). Each row leads with its product's `#`, the label the packer
+    writes on the item, and names the lot it comes from (`From PO-1111 #1`,
+    or *Typed in*). When
     the order's lots sit in more than one warehouse, a *Packing from* switch
     narrows the list without renumbering it.
   - **A product from several lots is one fold row** (v1.227.0). It shows the
@@ -1122,7 +1159,8 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
     Ticking the selected product moves the selection to the next one still to
     pack, and a row that changes group slides there. From v1.219.0 to
     v1.227.0 a ticked row stayed in its place.
-  - **On a Draft the tick writes the count onto the order** (v1.228.0). Ticking
+  - **On a Draft or Packing order the tick writes the count onto the order**
+    (v1.228.0; Packing since v1.230.0). Ticking
     a lot below its qty sets that sell-order line's qty to the count:
     - it is an in-place edit, so the line keeps its id and its #;
     - History records it as the editor's own qty edit would be;
@@ -1135,12 +1173,28 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
     archived or sold meanwhile. A line at 0 can only be put back from the
     Undo toast; after that, Edit order does it. Shipped, Awaiting payment and
     Done orders keep their qty: the tick there is progress only.
+  - **Apply sends every flagged count at once** (v1.229.0). A lot lowered
+    with − and not yet ticked is only flagged (*Short*, *Not packed*). While
+    any is, the Finish card on a Draft or Packing order lists each one by #, part and lot
+    (`#12 PO-1111 #4 · Counted 0 of 2`), even while products are still left
+    to pack, with **Apply n to the order**:
+    - Apply ticks them all at their counts in one request, in one
+      transaction. Each line goes to its count as its own tick would set it,
+      a 0 included, keeping its id and its #.
+    - A lot applied at 0 stays on the order at qty 0. Products packed in
+      full sink under *Packed*.
+    - One Undo puts every line's qty back, and the selection moves on as a
+      tick's does.
+    - A lot that is no longer lowered on the server (another iPad ticked it,
+      the order was edited) is skipped.
   - **The side panel** shows the selected row: its photo large, part, From
     PO, warehouse, qty and count, and the serials on file. For a product it
     lists each lot's count. Tap a row to select it, or use ↑ / ↓; Space packs
-    the selected row. The **Finish** card says what is left to pack, lists
-    the lots packed short or at 0 with **Edit order**, and holds **Mark
-    shipped**. Below 1024px wide (an iPad in portrait) the panel drops under
+    the selected row. The **Finish** card says what is left to pack. On a
+    Draft or Packing order it lists the lots flagged short with **Apply**
+    (v1.229.0), and the
+    lots ticked short before v1.228.0 with **Edit order**. It also holds
+    **Mark shipped**. Below 1024px wide (an iPad in portrait) the panel drops under
     the list and the selected-item card is hidden.
   - The scan box takes a Bluetooth or USB label scanner, with nothing focused,
     and matches a part number, a prefix, a recorded serial, then any part
@@ -1163,16 +1217,18 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
     again* instead of loading forever (v1.220.2).
   - Every control is at least 44px; nothing needs hover. Below 900px the
     condition moves under the item.
-  - On a Draft with every lot packed at full count, **Mark shipped** opens the
+  - On a Draft or Packing order with every lot packed at full count, **Mark shipped** opens the
     Shipped dialog (note, packing photos) and moves the order to Shipped.
-    Unpacked lots block it. Since v1.228.0 a short tick on a Draft has already
+    Unpacked lots block it, flagged ones included until Apply or their own
+    tick sends their counts. Since v1.228.0 a short tick on a Draft has already
     set the line to its count. A short pack from before that release still
     blocks, and the Finish card offers Edit order to match the order to the
     box first. A refused move (a lot taken meanwhile) says
     why and stays on the page.
   - The endpoints (`GET /api/sell-orders/:id/pack`,
-    `PUT /api/sell-orders/:id/pack/:lineId`) 403 anyone whose real role is not
-    manager. An archived or Closed order opens read-only and its writes 409; a
+    `PUT /api/sell-orders/:id/pack/:lineId`, and
+    `POST /api/sell-orders/:id/pack/apply` on a Draft or Packing order only) 403 anyone whose
+    real role is not manager. An archived or Closed order opens read-only and its writes 409; a
     Done order can still be packed, since an order can be paid before it ships.
 
 ## Shipping

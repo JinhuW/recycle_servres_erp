@@ -197,6 +197,18 @@ describe('sell order pack mode', () => {
 
   // On a Draft, the tick writes what went in the box onto the order.
   describe('a tick on a Draft sets the line to the count', () => {
+    it('does the same on a Packing order, and an untick puts the qty back', async () => {
+      const { id, picked } = await createOrder(mgr);
+      expect((await api('POST', `/api/sell-orders/${id}/status`, {
+        token: mgr, body: { to: 'Packing' },
+      })).status).toBe(200);
+      expect(rowOf((await putPack(mgr, id, picked, { counted: 1, packed: true })).body, picked))
+        .toMatchObject({ qty: 1, counted: 1 });
+      expect((await detailLines(mgr, id)).find(l => l.id === picked)!.qty).toBe(1);
+      expect((await putPack(mgr, id, picked, { counted: 1, packed: false })).status).toBe(200);
+      expect((await detailLines(mgr, id)).find(l => l.id === picked)!.qty).toBe(2);
+    });
+
     it('lowers the qty in place, reads packed, and records the edit', async () => {
       const { id, picked, lot } = await createOrder(mgr);
       const r = await putPack(mgr, id, picked, { counted: 1, packed: true });
@@ -303,15 +315,151 @@ describe('sell order pack mode', () => {
     });
   });
 
+  // Apply: the lots lowered and left unticked, ticked at their counts at once.
+  describe('apply on a Draft', () => {
+    // Two same-text typed lines are one product, under one #.
+    async function bigOrder() {
+      const lot = await freeSellableLine(mgr, 2);
+      const so = await api<{ id: string }>('POST', '/api/sell-orders', {
+        token: mgr,
+        body: {
+          customerId: await firstCustomerId(mgr),
+          lines: [
+            { inventoryId: lot.id, category: 'RAM', label: 'x', partNumber: 'PACK-PN', qty: 2, unitPrice: 90 },
+            TYPED,
+            { ...TYPED, qty: 2 },
+            { category: 'Other', label: 'Bezel', partNumber: 'BEZ-1', qty: 4, unitPrice: 5 },
+            { category: 'Other', label: 'Cable', partNumber: 'CAB-1', qty: 1, unitPrice: 3 },
+          ],
+        },
+      });
+      expect(so.status).toBe(201);
+      const lines = await detailLines(mgr, so.body.id);
+      const rails = lines.filter(l => l.partNumber === 'RAIL-1');
+      return {
+        id: so.body.id,
+        lines,
+        picked: lines.find(l => l.inventoryId === lot.id)!.id,
+        rail3: rails.find(l => l.qty === 3)!.id,
+        rail2: rails.find(l => l.qty === 2)!.id,
+        bezel: lines.find(l => l.partNumber === 'BEZ-1')!.id,
+        cable: lines.find(l => l.partNumber === 'CAB-1')!.id,
+      };
+    }
+    const apply = (token: string, id: string, body: unknown) =>
+      api<Pack & { applied: string[] }>('POST', `/api/sell-orders/${id}/pack/apply`, { token, body });
+
+    // Lowered and left: the lot and one rail lot at 0, the bezel short. The
+    // other rail lot is ticked in full, the cable untouched.
+    async function flag(o: Awaited<ReturnType<typeof bigOrder>>) {
+      await putPack(mgr, o.id, o.picked, { counted: 0, packed: false });
+      await putPack(mgr, o.id, o.rail3, { counted: 0, packed: false });
+      await putPack(mgr, o.id, o.bezel, { counted: 2, packed: false });
+      await putPack(mgr, o.id, o.rail2, { counted: 2, packed: true });
+    }
+
+    it('sets each lowered lot to its count in place, keeping every #, and records each edit', async () => {
+      const o = await bigOrder();
+      const noOf = new Map(o.lines.map(l => [l.id, l.no]));
+      expect(noOf.get(o.rail3)).toBe(noOf.get(o.rail2));
+      await flag(o);
+
+      const r = await apply(mgr, o.id, { lineIds: o.lines.map(l => l.id) });
+      expect(r.status).toBe(200);
+      expect([...r.body.applied].sort()).toEqual([o.picked, o.rail3, o.bezel].sort());
+      expect(rowOf(r.body, o.picked)).toMatchObject({ qty: 0, counted: 0, packedAt: null });
+      expect(rowOf(r.body, o.rail3)).toMatchObject({ qty: 0, counted: 0, packedAt: null });
+      expect(rowOf(r.body, o.bezel)).toMatchObject({ qty: 2, counted: 2 });
+      expect(rowOf(r.body, o.bezel).packedAt).not.toBeNull();
+      expect(rowOf(r.body, o.cable)).toMatchObject({ qty: 1, counted: 1, packedAt: null });
+
+      const after = await detailLines(mgr, o.id);
+      expect(new Map(after.map(l => [l.id, l.no]))).toEqual(noOf);
+      expect(Object.fromEntries(after.map(l => [l.id, l.qty]))).toEqual({
+        [o.picked]: 0, [o.rail3]: 0, [o.rail2]: 2, [o.bezel]: 2, [o.cable]: 1,
+      });
+      const edits = (await eventsOf(o.id)).filter(e => e.kind === 'line_edited');
+      expect(edits.map(e => (e.detail as { partNumber: string; changes: unknown[] }))
+        .map(d => [d.partNumber, d.changes]).sort()).toEqual([
+        ['BEZ-1', [{ field: 'qty', from: 4, to: 2 }]],
+        ['PACK-PN', [{ field: 'qty', from: 2, to: 0 }]],
+        ['RAIL-1', [{ field: 'qty', from: 3, to: 0 }]],
+      ]);
+    });
+
+    it('an untick of each, as Undo sends them, puts every qty back', async () => {
+      const o = await bigOrder();
+      await flag(o);
+      await apply(mgr, o.id, { lineIds: o.lines.map(l => l.id) });
+      const back = await Promise.all([
+        putPack(mgr, o.id, o.picked, { counted: 0, packed: false }),
+        putPack(mgr, o.id, o.rail3, { counted: 0, packed: false }),
+        putPack(mgr, o.id, o.bezel, { counted: 2, packed: false }),
+      ]);
+      expect(back.map(r => r.status)).toEqual([200, 200, 200]);
+      const p = (await getPack(mgr, o.id)).body;
+      expect(rowOf(p, o.picked)).toMatchObject({ qty: 2, counted: 0, packedAt: null });
+      expect(rowOf(p, o.rail3)).toMatchObject({ qty: 3, counted: 0, packedAt: null });
+      expect(rowOf(p, o.bezel)).toMatchObject({ qty: 4, counted: 2, packedAt: null });
+    });
+
+    it('skips a lot no longer lowered, so a second apply changes nothing', async () => {
+      const o = await bigOrder();
+      await flag(o);
+      await apply(mgr, o.id, { lineIds: [o.bezel] });
+      const again = await apply(mgr, o.id, { lineIds: [o.bezel, o.rail2, o.cable] });
+      expect(again.status).toBe(200);
+      expect(again.body.applied).toEqual([]);
+      expect((await eventsOf(o.id)).filter(e => e.kind === 'line_edited')).toHaveLength(1);
+      // The lots it wasn't asked about stay lowered.
+      expect(rowOf(again.body, o.picked)).toMatchObject({ qty: 2, counted: 0, packedAt: null });
+    });
+
+    it('applies on a Packing order too', async () => {
+      const o = await bigOrder();
+      expect((await api('POST', `/api/sell-orders/${o.id}/status`, {
+        token: mgr, body: { to: 'Packing' },
+      })).status).toBe(200);
+      await flag(o);
+      const r = await apply(mgr, o.id, { lineIds: [o.bezel] });
+      expect(r.status).toBe(200);
+      expect(r.body.applied).toEqual([o.bezel]);
+      expect((await detailLines(mgr, o.id)).find(l => l.id === o.bezel)!.qty).toBe(2);
+    });
+
+    it('refuses an order past Packing and writes nothing', async () => {
+      const o = await bigOrder();
+      expect((await api('POST', `/api/sell-orders/${o.id}/status`, {
+        token: mgr, body: { to: 'Shipped' },
+      })).status).toBe(200);
+      await putPack(mgr, o.id, o.bezel, { counted: 2, packed: false });
+      expect((await apply(mgr, o.id, { lineIds: [o.bezel] })).status).toBe(409);
+      expect((await detailLines(mgr, o.id)).find(l => l.id === o.bezel)!.qty).toBe(4);
+      expect((await eventsOf(o.id)).some(e => e.kind === 'line_edited')).toBe(false);
+    });
+
+    it('is manager-only and rejects a bad body', async () => {
+      const { id, picked } = await createOrder(mgr);
+      const pur = (await loginAs(MARCUS)).token;
+      expect((await apply(pur, id, { lineIds: [picked] })).status).toBe(403);
+      for (const body of [null, {}, { lineIds: [] }, { lineIds: picked }, { lineIds: ['not-a-uuid'] }]) {
+        expect((await apply(mgr, id, body)).status).toBe(400);
+      }
+      expect((await apply(mgr, 'SO-NOPE', { lineIds: [picked] })).status).toBe(404);
+    });
+  });
+
   it('refuses writes on a Closed or archived order but still reads it', async () => {
     const { id, picked } = await createOrder(mgr);
     expect((await api('POST', `/api/sell-orders/${id}/status`, {
       token: mgr, body: { to: 'Closed', closeReasonId: 'customer_cancelled' },
     })).status).toBe(200);
     expect((await putPack(mgr, id, picked, { counted: 1, packed: true })).status).toBe(409);
+    expect((await api('POST', `/api/sell-orders/${id}/pack/apply`, { token: mgr, body: { lineIds: [picked] } })).status).toBe(409);
 
     expect((await api('POST', `/api/sell-orders/${id}/archive`, { token: mgr })).status).toBe(200);
     expect((await putPack(mgr, id, picked, { counted: 1, packed: true })).status).toBe(409);
+    expect((await api('POST', `/api/sell-orders/${id}/pack/apply`, { token: mgr, body: { lineIds: [picked] } })).status).toBe(409);
     expect((await getPack(mgr, id)).status).toBe(200);
   });
 });

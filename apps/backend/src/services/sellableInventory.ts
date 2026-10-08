@@ -1,6 +1,6 @@
 import type postgres from 'postgres';
 import { inventoryLabel, inventorySpec, type InventoryAttrs } from '../lib/inventoryLabel';
-import { committedQtySql } from '../lib/sellCommitment';
+import { committedQtySql, proposalSellStatuses } from '../lib/sellCommitment';
 import { escapeLike } from '../lib/pagination';
 import { poLineNo } from '../lib/poLineNo';
 
@@ -9,9 +9,9 @@ import { poLineNo } from '../lib/poLineNo';
 // (COMMITTED_SELL_STATUSES) takes the quantity it named. A commitment reserves
 // units, not the lot: 20 sold out of 100 leaves 80 here, and `availableQty`
 // reports the remainder rather than the purchased quantity.
-// Lines merely sitting on a rival *draft* are still
-// listed at full remaining qty — drafts are proposals, several may name the
-// same line — with `draftCount` reporting the contention so the caller can
+// Lines merely sitting on a rival Draft or Packing order are
+// still listed at full remaining qty — those are proposals, several may name
+// the same line — with `draftCount` reporting the contention so the caller can
 // flag it. Shared by
 // the search_sellable_inventory MCP tool and the GET /sell-orders/sellable
 // REST endpoint (the desktop "add inventory to an order" picker) so both run
@@ -77,7 +77,8 @@ export async function searchSellableInventory(
            (SELECT COUNT(DISTINCT sol.sell_order_id)::int
               FROM sell_order_lines sol
               JOIN sell_orders so ON so.id = sol.sell_order_id
-             WHERE sol.inventory_id = l.id AND so.status = 'Draft'
+             WHERE sol.inventory_id = l.id
+               AND so.status = ANY(${proposalSellStatuses()}::text[])
                -- A line held at 0 is no rival: it holds nothing.
                AND sol.qty > 0) AS draft_count
     FROM order_lines l

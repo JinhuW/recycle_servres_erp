@@ -10,6 +10,7 @@ import {
   SPEC_FIELDS, inventoryEditPatch, type InventoryEditDraft as Draft, type SpecField,
 } from '../../lib/inventoryEditPatch';
 import { LINE_STATUSES, statusTone } from '../../lib/status';
+import { sellOrderStatuses } from '../../lib/lookups';
 import { useMarketLookup, type ResolvedMarketValue } from '../../lib/useMarketLookup';
 import { PartNumberField } from '../../components/PartNumberField';
 import { CatSelect, CatCombo } from './submit/LineFields';
@@ -95,7 +96,7 @@ type StockRow = {
 // "Linked sell orders" card.
 type LinkedSellOrder = {
   id: string;
-  status: 'Draft' | 'Shipped' | 'Awaiting payment' | 'Done' | 'Closed';
+  status: 'Draft' | 'Packing' | 'Shipped' | 'Awaiting payment' | 'Done' | 'Closed';
   created_at: string;
   customer_name: string | null;
   qty: number;
@@ -105,6 +106,9 @@ type LinkedSellOrder = {
 // Subset of the /api/market row (RefPrice). Just what we render in the
 // Market reference card.
 type RefMatch = ResolvedMarketValue;
+
+// A sell order's status chip, toned as the Sell orders page tones it.
+const soTone = (s: string) => sellOrderStatuses.find(o => o.id === s)?.tone ?? 'muted';
 
 export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
   const { t, locale } = useT();
@@ -652,11 +656,7 @@ function DetailsPanel({
                     <td><RouteLink to={'/sell-orders/' + so.id} className="mono rec-link" style={{ fontSize: 12.5 }}>{so.id}</RouteLink></td>
                     <td style={{ fontSize: 13 }}>{so.customer_name ?? '—'}</td>
                     <td>
-                      <span className={'chip ' + (
-                        so.status === 'Done' ? 'pos'
-                        : so.status === 'Draft' ? 'muted'
-                        : 'accent'
-                      )} style={{ fontSize: 10.5 }}>{so.status}</span>
+                      <span className={'chip ' + soTone(so.status)} style={{ fontSize: 10.5 }}>{so.status}</span>
                     </td>
                     <td className="mono" style={{ textAlign: 'right' }}>{so.qty}</td>
                     <td className="mono" style={{ textAlign: 'right' }}>{fmtUSD(so.unit_price, locale)}</td>
@@ -1162,7 +1162,7 @@ function BlockedByOpenOrdersBanner({
               >
                 <Icon name="invoice" size={13} style={{ color: 'var(--fg-subtle)' }} />
                 <RouteLink to={'/sell-orders/' + so.id} className="mono rec-link" style={{ fontSize: 12 }}>{so.id.slice(0, 8)}</RouteLink>
-                <span className={'chip ' + (so.status === 'Draft' ? 'muted' : 'accent')} style={{ fontSize: 10.5 }}>
+                <span className={'chip ' + soTone(so.status)} style={{ fontSize: 10.5 }}>
                   {so.status}
                 </span>
                 {so.customer_name && (

@@ -11,11 +11,12 @@ const rows = [
   so('SO-4003', 'Awaiting payment', 'Charlie IT'),
   so('SO-4004', 'Done', 'Acme Servers', 'ACME'),
   so('SO-4005', 'Closed', 'Bravo Parts'),
+  so('SO-4006', 'Packing', 'Delta Data'),
 ];
 
 describe('openSellOrders', () => {
   it('drops the locked statuses', () => {
-    expect(openSellOrders(rows, '').map(o => o.id)).toEqual(['SO-4001', 'SO-4002', 'SO-4003']);
+    expect(openSellOrders(rows, '').map(o => o.id)).toEqual(['SO-4001', 'SO-4002', 'SO-4003', 'SO-4006']);
   });
 
   it('matches order id, customer name and short name, case-insensitively', () => {
