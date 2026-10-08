@@ -2,13 +2,13 @@
 id: RS-205
 title: Pack mode applies the flagged short counts to the sell order
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-08
 reporter: jinhu
 branch: feat/pack-apply-short
-pr:
-version:
+pr: "#554"
+version: 1.229.0
 related: [RS-204, RS-188, RS-199]
 ---
 
