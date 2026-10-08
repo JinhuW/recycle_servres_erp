@@ -15,9 +15,6 @@ type Props = {
   earn: number;
   /** Names of the sections with unsaved edits, already translated. */
   dirtySections: string[];
-  /** The stage a Save would move the order to, when one is staged. */
-  stagePending: string | null;
-  onUndoStage: (() => void) | null;
   retryablePhotos: number;
   onRetryPhotos: () => void;
   retryDisabled: boolean;
@@ -54,14 +51,6 @@ export function OrderFooter(p: Props) {
         </div>
       </div>
       <div className="oe-foot-state">
-        {p.stagePending && (
-          <span className="chip info oe-foot-pill">
-            <Icon name="flag" size={11} /> {t('eoStagePending', { s: p.stagePending })}
-            {p.onUndoStage && (
-              <button type="button" className="oe-foot-undo" onClick={p.onUndoStage}>{t('eoUndoStage')}</button>
-            )}
-          </span>
-        )}
         {p.dirtySections.length > 0 && (
           <span className="oe-foot-dirty">
             <span className="oe-tab-dot blue" aria-hidden="true" />
@@ -80,7 +69,7 @@ export function OrderFooter(p: Props) {
         )}
         <button className="btn primary" disabled={p.saving || !p.hasChanges} title={p.saveTitle} onClick={p.onSave}>
           <Icon name="check2" size={14} />
-          {' '}{p.saving ? '…' : p.stagePending ? t('eoSaveAndStage', { s: p.stagePending }) : t('save')}
+          {' '}{p.saving ? '…' : t('save')}
         </button>
       </div>
     </div>

@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-202](./RS-202-a-po-stage-move-on-the-desktop-saves-on-the-click.md) | in-progress | bug | P2 | A PO stage move on the desktop saves on the click | — |
 | [RS-200](./RS-200-warn-the-manager-when-a-po-s-payment-doesn-t-match-i.md) | done | story | P2 | Warn the manager when a PO's payment doesn't match its total cost | 1.225.0 |
 | [RS-199](./RS-199-pack-mode-reads-like-review-mode-with-a-fold-for-a-p.md) | done | story | P2 | Pack mode reads like Review mode, with a fold for a product from several PO lots | 1.227.0 |
 | [RS-198](./RS-198-sell-orders-need-every-manager-s-sign-off-before-don.md) | done | story | P2 | Sell orders need every manager's sign-off before Done | 1.226.0 |

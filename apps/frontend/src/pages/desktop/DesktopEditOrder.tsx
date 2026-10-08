@@ -312,7 +312,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   }, []);
   // Which stage the status section is showing. Null follows the order; a
   // reached step sets it to look back at what that stage recorded. Any
-  // stage change snaps it back — a staged or committed move is the news.
+  // stage change snaps it back — a move is the news.
   const [view, setView] = useState<string | null>(null);
   // The open tab, kept in the route's query so a readiness row, a reload and
   // a copied link all land on the same section. A copied link wins; otherwise
@@ -330,19 +330,20 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     replaceHashQuery(q);
   };
   const events = useOrderEvents(order.id, activityKey);
-  // A stage change — staged from the panel or the stepper, or an Undo — snaps
-  // the look-back shut and re-suggests the tab. Judged against the stage the
-  // page last saw, not "first run": the deep link above has had its say, and
-  // React's dev double-mount must not read as a change.
-  const seenStatus = useRef(status);
+  // A stage change that lands snaps the look-back shut and re-suggests the
+  // tab — keyed off the written stage, so a move that is taken back leaves the
+  // tab where the user had it. Judged against the stage the page last saw,
+  // not "first run": the deep link above has had its say, and React's dev
+  // double-mount must not read as a change.
+  const seenStatus = useRef(savedStatus);
   useEffect(() => {
     setView(null);
-    if (seenStatus.current === status) return;
-    seenStatus.current = status;
-    const suggested = STAGE_TAB[status];
+    if (seenStatus.current === savedStatus) return;
+    seenStatus.current = savedStatus;
+    const suggested = STAGE_TAB[savedStatus];
     if (suggested) setTab(suggested);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status]);
+  }, [savedStatus]);
   // Default to 0% when no rate has been set on the order yet, so the field
   // and the side commission summary show a concrete value out of the gate
   // instead of a blank input. Saving 0 against a still-null DB rate is
@@ -656,7 +657,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     commission: commissionDirty || ownerDirty,
     notes: notesDirty,
   };
-  const dirty = statusDirty || Object.values(dirtyBy).some(Boolean);
+  const editsDirty = Object.values(dirtyBy).some(Boolean);
+  const dirty = statusDirty || editsDirty;
   // Unsaved edits ask before the page is left: Escape, Back and the footer's
   // Cancel all just closed it, edits and all.
   useUnsavedGuard(dirty);
@@ -733,12 +735,12 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     lineRequirements(l, { requireCost: costRequired(l), allowZeroQty: !!l._id });
   const lineReady = (l: EditLine) => lineRule(l).ready;
   // Line readiness gates only the saves that actually write lines. A note-only
-  // save sends none, so an incomplete legacy line must not block it — the
-  // purchaser can't fix that line at this stage anyway.
+  // save or a stage move sends none, so an incomplete legacy line must not
+  // block it — the purchaser can't fix that line at this stage anyway.
   const canSave =
     dirty && !saving && !txnBlocked && !cashShotBlocked && !trackingIncomplete
     && (!orderLocked || (canReopen && statusDirty) || (canEditSellPrice && linesDirty))
-    && (!canEditOrder || !(linesDirty || statusDirty) || lines.every(lineReady));
+    && (!canEditOrder || !linesDirty || lines.every(lineReady));
 
   // Localized "Brand, Quantity" list of what a line is still waiting on. The
   // capture screen asks the same question, and used to name the same blank
@@ -784,15 +786,22 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   : trackingIncomplete ? [t(tracking.valid ? 'hoNeedCarrier' : 'hoNeedTracking')]
   : lineBlockerMessages(lines, t, lineReady, missingNamesFor);
 
+  // A stage move sits in `status` only while Save writes it (moveTo). Every
+  // exit that doesn't write it takes it back, so the page never rests on a
+  // stage the order isn't at — nor offers the step after it.
+  const takeBackMove = () => { if (statusDirty) setStatus(savedStatus); };
+
   const attemptSave = () => {
     if (saveBlockers.length) {
+      takeBackMove();
       showErrorDialog(t('errCantSaveMsg'), saveBlockers, t('errCantSaveTitle'));
       return;
     }
     void save();
   };
 
-  const doSave = async () => {
+  // True when it wrote the stage move.
+  const doSave = async (): Promise<boolean> => {
     // A manager moving an order someone else manages is asked first whether to
     // take it over. Cancel stops the whole save — the move is part of it.
     const asks = statusDirty && !isPurchaser;
@@ -802,18 +811,23 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     const readyIdx = ORDER_STATUSES.indexOf('Ready to Pay');
     const stageIdx = (s: string) => ORDER_STATUSES.indexOf(spineStatus(s) as typeof ORDER_STATUSES[number]);
     const approving = asks && stageIdx(savedStatus) < readyIdx && stageIdx(status) >= readyIdx;
-    if (approving && !(await mismatch.confirm(order.id, payGap))) return;
+    if (approving && !(await mismatch.confirm(order.id, payGap))) return false;
     const answer = asks ? await takeover.ask(order) : null;
-    if (asks && answer === null) return;
+    if (asks && answer === null) return false;
     // A manager's move. False when the server named a new manager and the
-    // second question was cancelled: the rest of the save stands, the stage
-    // stays unsaved, and Save stays on to try it again.
+    // second question was cancelled: the rest of the save stands and the move
+    // is taken back.
     const moveAsManager = (toStage: string | undefined) => takeover.advance(order, { toStage }, answer!);
+    let moved = false;
     setSaving(true);
     try {
       // Past the purchaser's edit window only the note is theirs to change;
-      // sending the line/pricing keys too would trip the backend's 403.
-      if (!canEditOrder) {
+      // sending the line/pricing keys too would trip the backend's 403. A
+      // stage move with nothing else to write takes the same road: /advance
+      // alone, not a PATCH that re-checks every line for a move that writes
+      // none. Photos still waiting on a line keep the long road, which
+      // uploads them before the page goes.
+      if (!canEditOrder || (!editsDirty && retryablePhotos === 0)) {
         // Before /advance, so a stage move never steps on unsaved prices.
         // Sequential, and each line is marked clean as it lands, so a retry
         // after a mid-loop failure re-sends only what didn't.
@@ -836,12 +850,13 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
         // accepts. /advance cascades line statuses server-side, so no line
         // patch is needed alongside it.
         if (statusDirty && !isPurchaser) {
-          if (!(await moveAsManager(lifecycleOf(status)))) return;
+          if (!(await moveAsManager(lifecycleOf(status)))) return false;
           setSavedStatus(status);
+          moved = true;
           if (onReload) {
             window.__showToast?.(t('eoSavedToast', { id: order.id }), 'success');
             await onReload();
-            return;
+            return true;
           }
         }
         // Stay on the PO: the manager is mid-review and wants to see the
@@ -849,10 +864,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
         if (pricesWritten && onReload) {
           window.__showToast?.(t('eoSavedToast', { id: order.id }), 'success');
           await onReload();
-          return;
+          return moved;
         }
         onSaved(t('eoSavedToast', { id: order.id }));
-        return;
+        return moved;
       }
       const presentIds = new Set(lines.filter(l => l._id).map(l => l._id!));
       const removeLineIds = persistedIds.filter(id => !presentIds.has(id));
@@ -875,8 +890,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
           : {}),
         otherFees:     otherFeesDirty ? parsedOtherFees : undefined,
         otherFeesNote: otherFeesNoteDirty ? (otherFeesNote.trim() || null) : undefined,
+        // Only what was edited: the server takes a line's status from the
+        // stage, never from here.
         lines: lines
-          .filter(l => l._id && (l._dirty || statusDirty))
+          .filter(l => l._id && l._dirty)
           .map(l => editLineToPatch(l, statusDirty ? status : undefined)),
         addLines: addedLines.map(l => editLineToInsert(l, status)),
         removeLineIds: removeLineIds.length ? removeLineIds : undefined,
@@ -908,12 +925,11 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       // back on reload. Managers may jump straight to the target stage;
       // purchasers can only step forward and the backend rejects `toStage` for
       // them, so send an empty body to advance one stage.
-      let movedStage = false;
       if (statusDirty) {
         if (isPurchaser) await api.post(`/api/orders/${order.id}/advance`, {});
-        else if (!(await moveAsManager(lifecycleOf(status)))) return;
+        else if (!(await moveAsManager(lifecycleOf(status)))) return false;
         setSavedStatus(status);
-        movedStage = true;
+        moved = true;
       } else {
         applyLifecycle(r.lifecycle);
       }
@@ -923,7 +939,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       if (stillQueued > 0) {
         setHeldAfterSave(true);
         showErrorDialog(t('linePhotoRetryHold', { n: stillQueued }));
-        return;
+        return moved;
       }
       // Saving a transaction id reconciles the payment on the way past, and the
       // page is about to navigate away — so the toast is where the manager
@@ -932,10 +948,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       // A stage move is the news the status section exists to show: stay on
       // the page, on the new stage's panel. A plain save returns to the list
       // as it always has.
-      if (movedStage && onReload) {
+      if (moved && onReload) {
         window.__showToast?.(msg, 'success');
         await onReload();
-        return;
+        return true;
       }
       onSaved(msg);
     } catch (e) {
@@ -945,6 +961,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     } finally {
       setSaving(false);
     }
+    return moved;
   };
 
   // PATCH returns where the order ended up: a purchaser's material change sends
@@ -976,15 +993,17 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       .map((l, idx) => ({ lineNo: idx + 1, label: l.partNumber || itemType(l), issue: serialIssueFor(l) }))
       .filter((x): x is SerialLineIssue => x.issue !== null);
     if (issues.length) {
+      takeBackMove();
       setSerialIssues(issues);
       return;
     }
-    if (dupGroups.length > 0) {
+    // A duplicate this save doesn't write isn't news.
+    if (linesDirty && dupGroups.length > 0) {
       setDupConfirm(dupGroups);
       return;
     }
     if (!(await askRevert(materialDirty))) return;
-    await doSave();
+    if (!(await doSave())) takeBackMove();
   };
 
   // Drawer "Confirm line" writes that one line straight to the DB instead of
@@ -1048,14 +1067,30 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   const stepDisabled = (s: string) =>
     !allowedStatuses.includes(s)
     || (orderLocked && !(canReopen && REOPEN_TARGETS[savedStatus]?.includes(s)));
+  // A stage move is written on the click — the stepper, the panel's button,
+  // the look-back's Move back and the Done dialog all end here. It goes
+  // through Save, so the page's other edits ride along and every question
+  // and check Save makes still holds. Save reads the move off `status`, which
+  // is why it runs a render later rather than here.
+  const [moveQueued, setMoveQueued] = useState(false);
+  const moveTo = (s: string) => {
+    if (saving || statusDirty) return;
+    setStatus(s);
+    setMoveQueued(true);
+  };
+  useEffect(() => {
+    if (!moveQueued) return;
+    setMoveQueued(false);
+    attemptSave();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [moveQueued]);
   // The move to a stage — the panel's button and the stepper's next step call
   // the same thing. Done asks for the commission screenshot first, unless one
-  // is already on file; leaving Draft is the checkpoint's job; everything
-  // else is staged and Save commits it.
+  // is already on file; leaving Draft is the checkpoint's job.
   const advanceTo = (s: string) => {
-    if (stepDisabled(s)) return;
+    if (saving || statusDirty || stepDisabled(s)) return;
     if (s === 'Done') {
-      if (proof.commissionAtts.length > 0) setStatus('Done');
+      if (proof.commissionAtts.length > 0) moveTo('Done');
       else setDoneDialogOpen(true);
       return;
     }
@@ -1073,13 +1108,13 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       setHandoffOpen(true);
       return;
     }
-    setStatus(s);
+    moveTo(s);
   };
   const nextStage = ORDER_STATUSES[currentIdx + 1] ?? null;
   const nextStep = nextStage ? {
     label: t('eoMarkAs', { s: nextStage }),
     onClick: () => advanceTo(nextStage),
-    disabled: stepDisabled(nextStage),
+    disabled: saving || statusDirty || stepDisabled(nextStage),
     hint: stepDisabled(nextStage)
       ? (isPurchaser ? t('eoStepLockedTooltip') : null)
       : nextStage === 'In Transit' ? t('eoNextInTransitHint') : null,
@@ -1523,7 +1558,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
             eventsLoaded={events.loaded}
             pkg={pkg}
             onBack={() => setView(null)}
-            moveBack={!stepDisabled(view) && view !== status ? () => { setStatus(view); setView(null); } : null}
+            moveBack={!stepDisabled(view) && view !== status ? () => { setView(null); moveTo(view); } : null}
             locale={locale}
           />
         ) : (
@@ -1577,12 +1612,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
               </div>
             )}
             {payGap && <PaymentMismatchBanner orderId={order.id} gap={payGap} />}
-            {statusDirty && (
-              <div className="oe-banner accent">
-                <Icon name="info" size={13} />
-                {t('eoStatusChangeMgrPre')} <strong>{effectiveStatus}</strong> {t('eoStatusChangeMid')} <strong>{status}</strong> {isPurchaser ? t('eoStatusChangePurchPost') : t('eoStatusChangePost')}
-              </div>
-            )}
           </StagePanel>
         )}
       </div>
@@ -1715,8 +1744,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
           dirtyBy.commission ? t('eoTabCommission') : null,
           dirtyBy.notes ? t('eoTabNotes') : null,
         ].filter((x): x is string => !!x)}
-        stagePending={statusDirty ? status : null}
-        onUndoStage={statusDirty ? () => setStatus(savedStatus) : null}
         retryablePhotos={retryablePhotos}
         onRetryPhotos={() => void retryQueuedPhotos()}
         retryDisabled={saving || photos.busy}
@@ -1909,11 +1936,11 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
           busy={saving}
           confirmTone="primary"
           confirmLabel={t('dupPartSaveAnyway')}
-          onClose={() => setDupConfirm(null)}
+          onClose={() => { setDupConfirm(null); takeBackMove(); }}
           onConfirm={async () => {
             setDupConfirm(null);
             if (!(await askRevert(materialDirty))) return;
-            await doSave();
+            if (!(await doSave())) takeBackMove();
           }}
         />
       )}
@@ -2003,7 +2030,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
           onConfirm={({ note }) => {
             setDoneNote(note);
             setDoneDialogOpen(false);
-            setStatus('Done');
+            moveTo('Done');
           }}
           onMutated={() => setActivityKey(k => k + 1)}
         />
