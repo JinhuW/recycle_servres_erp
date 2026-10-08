@@ -2,13 +2,13 @@
 id: RS-197
 title: Review and Pack mode scan box filters by any part of a part number
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-08
 reporter: jinhu
 branch: feat/scan-box-part-filter
-pr:
-version:
+pr: "#540"
+version: 1.222.0
 related: [RS-124, RS-187]
 ---
 
@@ -32,24 +32,24 @@ not on PO-n"*.
 
 ## Acceptance criteria
 
-- [ ] Typing in either scan box narrows the list to the lines whose part number
+- [x] Typing in either scan box narrows the list to the lines whose part number
       contains the text, at any position and length, ignoring separators and
       case. A label that extends a line's part number, or a serial recorded on
       the line, also keeps that line.
-- [ ] Enter ticks (Review) or packs (Pack) the line when the text names one
+- [x] Enter ticks (Review) or packs (Pack) the line when the text names one
       part number. The exact part number, the 6+ prefix and the serial still
       come first, so a scanner behaves exactly as before.
-- [ ] When the text fits several part numbers, Enter ticks nothing. The text and
+- [x] When the text fits several part numbers, Enter ticks nothing. The text and
       the filtered list stay up, the box blurs, and the message names the parts
       (first five, then "+n more").
-- [ ] A scanner's burst does not flash a filter: the filter is debounced and
+- [x] A scanner's burst does not flash a filter: the filter is debounced and
       the matcher is not.
-- [ ] Escape in the box clears its text before it blurs. Escape on the page
+- [x] Escape in the box clears its text before it blurs. Escape on the page
       with a filter up clears the filter and does not leave the page. A ×
       button clears it too.
-- [ ] Counts, progress, Approve, Mark shipped and Finish review never see the
+- [x] Counts, progress, Approve, Mark shipped and Finish review never see the
       filter. *Check all remaining* is disabled while a filter is up.
-- [ ] Pack mode's filter searches the whole order (packable lines only), as
+- [x] Pack mode's filter searches the whole order (packable lines only), as
       Enter does, even with a warehouse picked.
 
 ## Out of scope
