@@ -3,7 +3,7 @@ import { resetDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
-import { firstCustomerId } from './helpers/fixtures';
+import { firstCustomerId, signOffAll } from './helpers/fixtures';
 
 // C2 regression: the status read + idempotency guard ran OUTSIDE the
 // transaction, so two concurrent POST /:id/status {to:'Done'} (double
@@ -31,6 +31,7 @@ describe('POST /api/sell-orders/:id/status — Done is idempotent under concurre
     await api('POST', `/api/sell-orders/${soId}/status`, { token, body: { to: 'Shipped', note: 's' } });
     await api('POST', `/api/sell-orders/${soId}/status`, { token, body: { to: 'Awaiting payment', note: 'a' } });
 
+    await signOffAll(soId);
     // Fire two Done transitions concurrently.
     const [a, b] = await Promise.all([
       api('POST', `/api/sell-orders/${soId}/status`, { token, body: { to: 'Done', note: 'paid' } }),

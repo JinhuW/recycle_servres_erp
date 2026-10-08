@@ -9,7 +9,7 @@ import app from '../src/index';
 import { resetDb, getTestDb } from './helpers/db';
 import { api, multipart, testEnv } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
-import { firstCustomerId } from './helpers/fixtures';
+import { firstCustomerId, signOffAll } from './helpers/fixtures';
 
 type DetailLine = {
   id: string; no: number; inventoryId: string | null; category: string; label: string; sub: string | null;
@@ -188,6 +188,7 @@ describe('sell order lines at qty 0', () => {
     const { ids, po } = await freshLots(2);
     const id = await createOrder(mgr, [lotLine(ids[0]!, 1), lotLine(ids[1]!, 2, 2)]);
     await patchLines(mgr, id, await detailLines(mgr, id), l => (l.inventoryId === ids[0] ? { qty: 0 } : {}));
+    await signOffAll(id);
     expect((await setStatus(mgr, id, 'Done')).status).toBe(200);
 
     const lots = await sql<{ id: string; qty: number; status: string }[]>`

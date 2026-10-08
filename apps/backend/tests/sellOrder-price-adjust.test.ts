@@ -5,7 +5,7 @@ import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
 import { eventsOf } from './helpers/sellOrderEvents';
 import { prorateLines, validateTarget } from '../src/services/sellOrderPriceAdjust';
-import { firstCustomerId } from './helpers/fixtures';
+import { firstCustomerId, signOffAll } from './helpers/fixtures';
 import { mockFrankfurter } from './helpers/fx';
 
 // Negotiated final-price adjustment: POST /:id/adjust-price prorates the
@@ -115,6 +115,7 @@ describe('POST /api/sell-orders/:id/adjust-price', () => {
   it('409s once the order is Done or Closed', async () => {
     const { token } = await loginAs(ALEX);
     const done = await createUsdOrder(token);
+    await signOffAll(done);
     await api('POST', `/api/sell-orders/${done}/status`, { token, body: { to: 'Done' } });
     const r1 = await api('POST', `/api/sell-orders/${done}/adjust-price`, {
       token, body: { targetTotal: 90 },
@@ -341,6 +342,7 @@ describe('POST /api/sell-orders/:id/adjust-price', () => {
       adjustedBy: { id: user.id },
     });
 
+    await signOffAll(id);
     await api('POST', `/api/sell-orders/${id}/status`, { token, body: { to: 'Done' } });
     const sql = getTestDb();
     const [rp] = await sql<{ last_price: number }[]>`

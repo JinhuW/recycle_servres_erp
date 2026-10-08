@@ -302,7 +302,16 @@ export type SellOrderEventKind =
   | 'archived'
   | 'unarchived'
   | 'closed'
-  | 'reopened';
+  | 'reopened'
+  | 'signed_off'
+  | 'signoff_withdrawn';
+
+// Done needs a current sign-off from every manager marked `required` (every
+// active one). `stale`: signed, but the order changed since.
+export type SellOrderSignoff = {
+  managers: { id: string; name: string; required: boolean; signedAt: string | null; stale: boolean }[];
+  complete: boolean;
+};
 
 export type SellOrderEvent = {
   id: string;

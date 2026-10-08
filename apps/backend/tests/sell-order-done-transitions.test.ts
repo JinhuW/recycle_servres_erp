@@ -3,7 +3,7 @@ import { resetDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
-import { firstCustomerId } from './helpers/fixtures';
+import { firstCustomerId, signOffAll } from './helpers/fixtures';
 
 // Any open stage may jump straight to Done (mark paid at any point); Closed
 // is the only status that cannot reach Done.
@@ -24,6 +24,7 @@ describe('sell-order status — direct-to-Done transitions', () => {
   it('Draft → Done directly succeeds', async () => {
     const { token } = await loginAs(ALEX);
     const id = await newDraft(token);
+    await signOffAll(id);
     const r = await api('POST', `/api/sell-orders/${id}/status`, { token, body: { to: 'Done', note: 'paid' } });
     expect(r.status).toBe(200);
     const got = await api<{ order: { status: string } }>('GET', `/api/sell-orders/${id}`, { token });
@@ -34,6 +35,7 @@ describe('sell-order status — direct-to-Done transitions', () => {
     const { token } = await loginAs(ALEX);
     const id = await newDraft(token);
     await api('POST', `/api/sell-orders/${id}/status`, { token, body: { to: 'Shipped', note: 'ship' } });
+    await signOffAll(id);
     const r = await api('POST', `/api/sell-orders/${id}/status`, { token, body: { to: 'Done', note: 'paid' } });
     expect(r.status).toBe(200);
   });

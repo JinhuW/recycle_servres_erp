@@ -26,6 +26,8 @@ const KIND_ICON: Record<SellOrderEvent['kind'], IconName> = {
   unarchived:          'rotate',
   closed:              'x',
   reopened:            'rotate',
+  signed_off:          'check',
+  signoff_withdrawn:   'rotate',
 };
 
 type Tone = 'pos' | 'info' | 'warn' | 'muted';
@@ -42,6 +44,8 @@ const KIND_TONE: Record<SellOrderEvent['kind'], Tone> = {
   unarchived:          'info',
   closed:              'warn',
   reopened:            'info',
+  signed_off:          'pos',
+  signoff_withdrawn:   'warn',
 };
 
 // Tone palette mirrors the .chip rules in tokens.css so the bubbles read as
@@ -201,6 +205,8 @@ function summarize(event: SellOrderEvent, locale: string, t: TFn): React.ReactNo
       const note = d.note ? <> · "{String(d.note)}"</> : null;
       return <>{t('historyReopened')}{note}</>;
     }
+    case 'signed_off':        return <>{t('historySignedOff')}</>;
+    case 'signoff_withdrawn': return <>{t('historySignoffWithdrawn')}</>;
   }
 }
 

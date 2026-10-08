@@ -971,6 +971,24 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
 - **Each line links back to its PO** (v1.174.0). The sell order view shows a
   "From PO-…" link under a line that was picked from inventory. A free-typed
   line has no PO.
+- **Done needs every active manager's sign-off** (v1.226.0). The order page
+  carries a Sign-off card under the summary: each manager signed (with when),
+  waiting, or needing to sign again, and the viewer's own Sign off / Sign
+  again / Withdraw. Managers sign in Draft, Shipped or Awaiting payment, each
+  for themselves.
+  - `POST /api/sell-orders/:id/status` to Done answers 409 naming who is
+    missing, and the stepper's Done step is locked with the same names.
+    Signing only unlocks Done; a manager still moves the order there.
+  - A sign-off approves the order as it stood: the customer, the currency and
+    each line's item, qty, native price and lot. Changing any of them — in the
+    editor, by a negotiated total, or by a PO archive taking a line off —
+    leaves earlier sign-offs reading "needs to sign again". Notes, the
+    receiver, warehouse moves and evidence don't, nor does reordering lines
+    or re-saving at a new FX rate. The edit page warns before such a save.
+  - Who is required is worked out live: every active manager. Reopening a
+    Closed order clears its sign-offs. History logs each sign-off and
+    withdrawal, and a sign-off notifies the managers still to sign. Orders
+    Done before v1.226.0 carry none.
 - A **draft sell order is a proposal**; inventory is claimed only on promotion
   (v1.41.0). Drafts can move straight to Awaiting payment (v1.13.0).
 - Orders carry a payment receiver, creator-only reopen (v1.15.0) and a receiver

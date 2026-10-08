@@ -21,7 +21,9 @@ export type SellOrderEventKind =
   | 'archived'
   | 'unarchived'
   | 'closed'
-  | 'reopened';
+  | 'reopened'
+  | 'signed_off'
+  | 'signoff_withdrawn';
 
 // Header fields PATCH /api/sell-orders/:id may touch on the sell_orders row.
 // Status is intentionally excluded — it moves through POST /:id/status which
