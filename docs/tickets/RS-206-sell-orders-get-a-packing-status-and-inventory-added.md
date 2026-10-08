@@ -2,13 +2,13 @@
 id: RS-206
 title: Sell orders get a Packing status, and inventory added once packing has begun takes the next #
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-08
 reporter: jinhu
 branch: dev-5
-pr:
-version:
+pr: "#556"
+version: 1.230.0
 related: [RS-193, RS-194, RS-204, RS-205]
 ---
 
@@ -50,33 +50,33 @@ Shipped → Awaiting payment → Done (plus Closed), and Pack mode
 
 ## Acceptance criteria
 
-- [ ] A **Packing** status sits between Draft and Shipped on the stepper, the
+- [x] A **Packing** status sits between Draft and Shipped on the stepper, the
       status tiles, the filter and every chip. It is a row in
       `sell_order_statuses` with position 1 and tone `cool`, and needs no
       evidence.
-- [ ] Opening Pack mode on a Draft moves the order to Packing, with a
+- [x] Opening Pack mode on a Draft moves the order to Packing, with a
       `status_changed` event. Opening it on any other status changes nothing.
       If the move fails, packing still works.
-- [ ] Packing → Shipped, Awaiting payment, Done, Closed and Draft are legal.
+- [x] Packing → Shipped, Awaiting payment, Done, Closed and Draft are legal.
       Draft → Packing is legal. Shipped → Packing is a 409.
-- [ ] Packing reserves no stock, like a Draft. Leaving it for Shipped,
+- [x] Packing reserves no stock, like a Draft. Leaving it for Shipped,
       Awaiting payment or Done runs the same stock check as leaving Draft. A
       Packing order can't be archived.
-- [ ] Pack mode's count write-back works on a Packing order exactly as on a
+- [x] Pack mode's count write-back works on a Packing order exactly as on a
       Draft: the tick writes the qty, untick restores it, Apply works, and Mark
       shipped works.
-- [ ] While an order is past Draft, a save that adds inventory gives each new
+- [x] While an order is past Draft, a save that adds inventory gives each new
       product the next # after every existing one. No existing # moves.
       Products added in one save are numbered among themselves in
       packing-list order.
-- [ ] A new lot of a product already on the order joins that product's #.
-- [ ] A typed line keeps its place through a price or label edit, because the
+- [x] A new lot of a product already on the order joins that product's #.
+- [x] A typed line keeps its place through a price or label edit, because the
       editor sends the row id.
-- [ ] On a Draft, an added product still sorts into place, as before.
-- [ ] Both packing-list spreadsheets keep today's sorted row order. An appended
+- [x] On a Draft, an added product still sorts into place, as before.
+- [x] Both packing-list spreadsheets keep today's sorted row order. An appended
       product prints in its sorted row with its later #. The order page and
       Pack mode list it last.
-- [ ] Nothing renumbers on deploy: lines already on an order count as
+- [x] Nothing renumbers on deploy: lines already on an order count as
       numbered.
 
 ## Out of scope
