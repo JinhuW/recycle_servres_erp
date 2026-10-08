@@ -17,6 +17,27 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.221.1] - 2026-10-08
+
+Unknown paths return 404 (RS-167). The app is hash-routed, but the Cloudflare
+Worker answered every path it had no file for with `index.html`, and the hash
+then chose the screen — so `/vnc/homelab-1#/fleet`, a URL that only exists on
+rs-console, rendered the ERP's Fleet page as though it were valid.
+
+### Fixed
+
+- **A path that isn't a page of ours is a 404.** The Worker now serves the
+  app shell only at the paths it actually lives at — `/`, `/authorize`,
+  `/login` (the OAuth sign-in bounce), `/share-target` and the PWA shortcuts `/submit`, `/inventory`,
+  `/sell-orders` — and answers everything else with a small "Page not found"
+  page (status 404) linking back to the dashboard. Static files and `/api/*`
+  are unchanged.
+- **Installed clients agree.** The service worker's navigation fallback used to
+  serve its cached `index.html` for any path, which would have kept the bug
+  alive on every PWA. It now uses the same allowlist
+  (`apps/frontend/src/lib/shellPaths.ts`, imported by both), so other
+  navigations reach the Worker and get its 404.
+
 ## [1.221.0] - 2026-10-08
 
 Fixes from the pre-release review of dev against main (RS-194), most of them

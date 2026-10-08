@@ -1773,6 +1773,10 @@ removed in v1.191.0.
   content-hashed chunk that a release has replaced now 404s instead of being
   answered with `index.html`, and a tab that asks for one reloads itself once
   onto the current build rather than stalling on a skeleton.
+- **Unknown paths are a 404** (v1.221.1). The shell is served only at `/`,
+  `/authorize`, `/login`, `/share-target` and the PWA shortcuts; any other path — at the
+  edge or through the service worker — gets a "Page not found" page instead of
+  the app rendering whatever its `#/` hash names.
 - **The load starts before the bundle does** (v1.122.0). A small boot script,
   injected ahead of the entry, preloads whichever shell the viewport is about
   to need and starts `/api/me`, `/api/lookups` and `/api/workspace` — none of
