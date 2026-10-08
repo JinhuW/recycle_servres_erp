@@ -2548,6 +2548,7 @@ const zh: Record<string, string> = {
   payDisputeStageChargeback: '索赔',
   payDisputeStagePreArbitration: '预仲裁',
   payDisputeStageArbitration: '仲裁',
+  payDisputeStageClosed: '已结案',
   payDisputeStatusOpen: '进行中',
   payDisputeStatusWaitingBuyer: '等待我方回复',
   payDisputeStatusWaitingSeller: '等待卖家回复',

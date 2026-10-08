@@ -416,6 +416,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payDisputeStageChargeback: 'Claim',
     payDisputeStagePreArbitration: 'Pre-arbitration',
     payDisputeStageArbitration: 'Arbitration',
+    payDisputeStageClosed: 'Closed',
     payDisputeStatusOpen: 'Open',
     payDisputeStatusWaitingBuyer: 'Waiting on us',
     payDisputeStatusWaitingSeller: 'Waiting on seller',
