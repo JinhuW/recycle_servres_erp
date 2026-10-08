@@ -430,6 +430,10 @@ on to Sold once every line has sold (v1.164.0).
     PO's total cost* below for the banner and the question at Approve. Here
     the comparison is against the total the PO will have after Approve, so
     ticking a line at 0 can raise the warning or clear it before the click.
+  - The side panel (the selected line and Finish review) stays beside the
+    list as it scrolls and is never taller than the window; on a short screen
+    it scrolls by itself (v1.230.1). At 1100px wide and below it drops under
+    the list.
   - The endpoints (`/api/orders/:id/checks…`) 403 anyone whose real role is
     not manager. The page and button are hidden from a manager previewing as
     purchaser, and the route bounces them without leaving a Back entry
@@ -1194,8 +1198,11 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
     Draft or Packing order it lists the lots flagged short with **Apply**
     (v1.229.0), and the
     lots ticked short before v1.228.0 with **Edit order**. It also holds
-    **Mark shipped**. Below 1024px wide (an iPad in portrait) the panel drops under
-    the list and the selected-item card is hidden.
+    **Mark shipped**. The panel stays beside the list as it scrolls and is
+    never taller than the window: on a short screen it scrolls by itself, so
+    Apply and Mark shipped are in reach mid-list (v1.230.1). Below 1024px wide
+    (an iPad in portrait) the panel drops under the list and the selected-item
+    card is hidden.
   - The scan box takes a Bluetooth or USB label scanner, with nothing focused,
     and matches a part number, a prefix, a recorded serial, then any part
     number holding the text, as Review mode does. Typing filters the list
