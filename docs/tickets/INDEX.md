@@ -6,7 +6,7 @@ See [README.md](./README.md) for what the fields mean.
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
 | [RS-200](./RS-200-warn-the-manager-when-a-po-s-payment-doesn-t-match-i.md) | done | story | P2 | Warn the manager when a PO's payment doesn't match its total cost | 1.225.0 |
-| [RS-199](./RS-199-pack-mode-reads-like-review-mode-with-a-fold-for-a-p.md) | in-progress | story | P2 | Pack mode reads like Review mode, with a fold for a product from several PO lots | 1.227.0 |
+| [RS-199](./RS-199-pack-mode-reads-like-review-mode-with-a-fold-for-a-p.md) | done | story | P2 | Pack mode reads like Review mode, with a fold for a product from several PO lots | 1.227.0 |
 | [RS-198](./RS-198-sell-orders-need-every-manager-s-sign-off-before-don.md) | done | story | P2 | Sell orders need every manager's sign-off before Done | 1.226.0 |
 | [RS-197](./RS-197-review-and-pack-mode-scan-box-filters-by-any-part-of.md) | done | story | P2 | Review and Pack mode scan box filters by any part of a part number | 1.222.0 |
 | [RS-195](./RS-195-a-closed-paypal-dispute-s-stage-ladder-ends-on-close.md) | done | bug | P2 | A closed PayPal dispute's stage ladder ends on Closed | 1.221.2 |
