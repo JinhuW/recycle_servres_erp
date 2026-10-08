@@ -224,9 +224,14 @@ describe('sell order lines at qty 0', () => {
   });
 
   it('numbers products the same way on the order and the packing list, tied positions included', async () => {
-    const id = await createOrder(mgr, [typedLine('ZQ-T1'), typedLine('ZQ-T2'), typedLine('ZQ-T3')]);
+    // One label, so only the part # tells the products apart and every sort
+    // key ties.
+    const tied = (pn: string) => ({ ...typedLine(pn), label: 'Typed tie' });
+    const id = await createOrder(mgr, [tied('ZQ-T3'), tied('ZQ-T1'), tied('ZQ-T2')]);
     await getTestDb()`UPDATE sell_order_lines SET position = 0 WHERE sell_order_id = ${id}`;
     const noOf = new Map((await detailLines(mgr, id)).map(l => [l.partNumber, l.no]));
+    // A tie the position can't break goes by the product's part #.
+    expect([...noOf.entries()].sort()).toEqual([['ZQ-T1', 1], ['ZQ-T2', 2], ['ZQ-T3', 3]]);
 
     const wb = await workbook(mgr, `/api/sell-orders/${id}/packing-list`);
     const rows = packRows(wb.worksheets[0]!);

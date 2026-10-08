@@ -17,6 +17,50 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.221.0] - 2026-10-08
+
+Fixes from the pre-release review of dev against main (RS-194), most of them
+to the one-# per product rule that 1.220.3 brought in. That release was a feature
+shipped under a patch number; this minor carries it to main.
+
+### Fixed
+
+- **Saving a sell order no longer renumbers it.** A product's place — and so
+  its # — came from its first line by stored position, and every save
+  rewrote positions in packing-list order. On an order holding two lots of
+  one part that differ in type, a price edit or setting a line to 0 could
+  make the other lot speak for the product and move it, after its items were
+  already labelled. A product is now placed by its first line by PO and line
+  #, held-at-0 lines included, and products that tie on every sorted field go
+  by part #, so the # depends only on which lines the order has. Some
+  existing orders renumber once on this release; none move on a save after
+  it.
+- **A lot held at 0 no longer speaks for what ships.** Its product's health,
+  rank, part # spelling and the bid sheet's Image URL now come from the first
+  line above 0.
+- **By-PO tabs list their rows in # order** with the same device and
+  generation labels as the plain list, each tab showing its own lots'
+  details. They re-sorted their own subset, so `#2` could print above `#1`.
+- **Pack ticks stay on their own line** when a save reorders two same-text
+  hand-typed lines in different warehouses; they used to swap.
+- **By warehouse groups the order page on where each lot is now**, as the #
+  and the packing lists do, not on the warehouse the line was saved with.
+- **Two lines that share a # price together** in the editor even when their
+  part numbers are spelled differently (`M393A4K40CB2-CTD` and
+  `M393A4K40CB2CTD`).
+- **A product from more PO lines than a row can show** (Excel stops a row at
+  409pt) goes on over further rows on the packing lists, its # and tick box
+  merged down them, instead of hiding the last sources.
+- The order page sorts with shared collators instead of building one per
+  comparison.
+
+### Added
+
+- **A desktop tab offers a reload once a new build is live.** The build
+  writes `version.json`; an open desktop tab or iPad compares it with the
+  build it runs when it comes back into view and shows the "new version"
+  toast. Tabs left open across this release still need one manual reload.
+
 ## [1.220.3] - 2026-10-08
 
 A sell order's # is now one per product, and the order page, Pack mode and

@@ -291,7 +291,7 @@ describe('archive and open sell orders', () => {
     expect((await soLines(mgr, soId)).map(l => [l.inventoryId, l.qty])).toEqual([[lineIds[0], 0]]);
   });
 
-  it('lets a PO line go that a sell order holds only at 0; that line stays, typed, with its #', async () => {
+  it('lets a PO line go that a sell order holds only at 0; that line stays on the order, typed', async () => {
     const { token: pur } = await loginAs(MARCUS);
     const { token: mgr } = await loginAs(ALEX);
     const { id, lineIds } = await createReviewing(pur, mgr);
