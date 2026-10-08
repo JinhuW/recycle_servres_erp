@@ -17,6 +17,27 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.227.2] - 2026-10-08
+
+Fix from the review before the v1.227 release (RS-203). Ten findings came
+back from `/code-review high` of dev against main. Each was checked against
+the code, and one was a defect. The rest are recorded in the ticket with why
+they stay as they are.
+
+### Fixed
+
+- **The approve question judges the payment the same click links.** On the
+  desktop PO page, approving a PO (into Ready to Pay or Done) asks *Continue
+  anyway?* when the bank paid something other than the total cost (RS-200).
+  It read the paid figure as the page loaded it. But a PayPal id typed on the
+  page is reconciled inside the save, and a switch to Cash unlinks the old
+  payment. A $70 PO approved together with a new id for a $2,415 payment went
+  to Ready to Pay unasked, and correcting a wrong id raised a false alarm.
+  When the same click edits the Cost Payment section, the page now writes the
+  edits, reads what the bank paid, and asks then. On that path Cancel keeps the
+  edits and drops only the move, and the page reloads with the banner up.
+  Every other approve still asks before anything is written.
+
 ## [1.227.1] - 2026-10-08
 
 A stage move on the desktop PO page is saved on the click (RS-202). Since

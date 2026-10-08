@@ -603,6 +603,12 @@ on to Sold once every line has sold (v1.164.0).
     Ready to Pay or Done asks *Continue anyway?* first. That covers Review
     mode's Approve and the PO page's Save.
     - Cancel writes nothing.
+    - Except when the same PO-page click also edits the Cost Payment section
+      (paid by, method or PayPal id) (v1.227.2). Those edits can link or
+      unlink a bank payment, so the page writes them first and asks against
+      what the bank paid then: a newly linked payment that is off asks, and a
+      corrected id that now matches doesn't. Cancel keeps the edits, leaves
+      the stage and reloads with the banner up.
     - Cancel has the focus, because a label scanner ends each read with
       Enter.
   - **What it leaves alone.**

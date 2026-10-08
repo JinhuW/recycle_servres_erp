@@ -811,7 +811,12 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     const readyIdx = ORDER_STATUSES.indexOf('Ready to Pay');
     const stageIdx = (s: string) => ORDER_STATUSES.indexOf(spineStatus(s) as typeof ORDER_STATUSES[number]);
     const approving = asks && stageIdx(savedStatus) < readyIdx && stageIdx(status) >= readyIdx;
-    if (approving && !(await mismatch.confirm(order.id, payGap))) return false;
+    // A payment-section edit links or unlinks bank rows inside the PATCH (a
+    // PayPal id reconciles; Cash or Self pay drops the id), so what the bank
+    // paid is only known once it lands — that save asks between the PATCH and
+    // the move.
+    const gapAfterPatch = approving && dirtyBy.payment && canEditOrder;
+    if (approving && !gapAfterPatch && !(await mismatch.confirm(order.id, payGap))) return false;
     const answer = asks ? await takeover.ask(order) : null;
     if (asks && answer === null) return false;
     // A manager's move. False when the server named a new manager and the
@@ -919,6 +924,27 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
           stillQueued += await flushPendingPhotos(l._cid, l._id);
         }
       }
+      // Saving a transaction id reconciles the payment on the way past, and the
+      // page is about to navigate away — so the toast is where the manager
+      // finds out it happened.
+      const msg = r.paymentsLinked ? t('eoPaymentLinkedToast', { id: order.id }) : t('eoSavedToast', { id: order.id });
+      if (gapAfterPatch) {
+        const fresh = (await api.get<{ order: Order }>(`/api/orders/${order.id}`)).order;
+        if (!(await mismatch.confirm(order.id, paymentGap(fresh.linkedPaid, cost.total, payment)))) {
+          // The edits are written; only the move is dropped, as when the
+          // take-over's second question is cancelled.
+          if (stillQueued > 0) {
+            setHeldAfterSave(true);
+            showErrorDialog(t('linePhotoRetryHold', { n: stillQueued }));
+          } else if (onReload) {
+            window.__showToast?.(msg, 'success');
+            await onReload();
+          } else {
+            onSaved(msg);
+          }
+          return false;
+        }
+      }
       // The stepper's stage lives on orders.lifecycle, which PATCH never
       // touches — only /advance moves it (and cascades the line statuses).
       // Without this the save returns 200, the lines flip, but the stage snaps
@@ -941,10 +967,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
         showErrorDialog(t('linePhotoRetryHold', { n: stillQueued }));
         return moved;
       }
-      // Saving a transaction id reconciles the payment on the way past, and the
-      // page is about to navigate away — so the toast is where the manager
-      // finds out it happened.
-      const msg = r.paymentsLinked ? t('eoPaymentLinkedToast', { id: order.id }) : t('eoSavedToast', { id: order.id });
       // A stage move is the news the status section exists to show: stay on
       // the page, on the new stage's panel. A plain save returns to the list
       // as it always has.
