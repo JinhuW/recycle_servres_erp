@@ -2,12 +2,12 @@
 id: RS-200
 title: Warn the manager when a PO's payment doesn't match its total cost
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-10-08
 reporter: jinhu
 branch: dev-12
-pr:
+pr: "#542"
 version: 1.225.0
 related: [RS-009, RS-010]
 ---
