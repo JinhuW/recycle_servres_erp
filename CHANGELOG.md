@@ -17,7 +17,7 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
-## [1.206.1] - 2026-10-04
+## [1.221.1] - 2026-10-08
 
 Unknown paths return 404 (RS-167). The app is hash-routed, but the Cloudflare
 Worker answered every path it had no file for with `index.html`, and the hash

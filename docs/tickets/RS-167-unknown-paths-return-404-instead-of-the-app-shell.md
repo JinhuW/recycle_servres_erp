@@ -7,8 +7,8 @@ priority: P2
 created: 2026-10-04
 reporter: jinhu
 branch: fix/unknown-path-404
-pr: 493
-version: 1.206.1
+pr: "#493"
+version: 1.221.1
 related: []
 ---
 
