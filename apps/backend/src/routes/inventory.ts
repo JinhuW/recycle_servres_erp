@@ -7,7 +7,7 @@ import { nextHumanId } from '../lib/id-seq';
 import { canonPartCol, canonPartArg } from '../lib/part-number';
 import { invLabel } from '../lib/inventoryLabel';
 import {
-  committedClaimsByLine, committedQtySql, openSellStatuses, proposalSellStatuses,
+  committedClaimsByLine, committedQtySql, isSellableLineStatus, openSellStatuses, proposalSellStatuses,
 } from '../lib/sellCommitment';
 import { lockOrdersForLinesTx } from '../services/orderLocks';
 import { specVal, validateLineInput } from '../lib/orderInput';
@@ -182,13 +182,22 @@ function hasUnitsFrag(sql: ReturnType<typeof getDb>) {
   return sql`l.qty > 0`;
 }
 
-// List inventory with the same filters as the desktop screen.
-inventory.get('/', async (c) => {
-  const u = c.var.user;
-  const sql = getDb(c.env);
-  const isManager = u.role === 'manager';
-  const whereFrag = inventoryWhereFrag(c, sql, u);
+// A desktop selection travels as ids — select-all reaches lots past the
+// 200-group cap — so the routes that take one share this ceiling. It sits well
+// above today's whole sellable stock and well inside the 1 MiB JSON body cap.
+const SELECTION_MAX = 5000;
 
+// Rows in the flat list's shape, newest first, then put in the workbook's
+// order — category, then brand, capacity, speed — so a screen and an export
+// of the same stock read alike. A capped read stays recency-based on purpose:
+// reordering the N newest rows keeps *which* rows appear as it was, where
+// sorting in SQL would hand back the alphabetically-first N instead and hide
+// everything recent.
+async function selectInventoryRows(
+  sql: ReturnType<typeof getDb>,
+  whereFrag: ReturnType<typeof inventoryWhereFrag>,
+  limit: number | null,
+) {
   const rows = await sql`
     SELECT l.id, l.category, l.brand, l.capacity, l.generation, l.type, l.classification, l.rank, l.speed,
            l.interface, l.form_factor, l.description, l.item_type, l.part_number, l.serial_number, l.condition,
@@ -207,17 +216,27 @@ inventory.get('/', async (c) => {
     LEFT JOIN warehouses w ON w.id = COALESCE(l.warehouse_id, o.warehouse_id)
     WHERE ${whereFrag}
     ORDER BY l.created_at DESC
-    LIMIT 200
+    ${limit === null ? sql`` : sql`LIMIT ${limit}`}
   `;
-  // Ship the list in the workbook's order — category, then brand, capacity,
-  // speed — so a screen and an export of the same stock read alike. The cap
-  // above stays recency-based on purpose: reordering the 200 newest rows keeps
-  // *which* rows appear as it was, where sorting in SQL would hand back the
-  // alphabetically-first 200 instead and hide everything recent.
-  const items = sortSheetRows(
+  return sortSheetRows(
     rows as unknown as Record<string, unknown>[],
     (r) => ({ category: String(r.category ?? ''), specs: r, label: invLabel(r) }),
   );
+}
+
+// A selection's ids: the uuid-shaped ones, once each. Anything else in the
+// array is dropped — l.id is uuid-typed, so a mangled id would make Postgres
+// throw and 500 the request.
+function selectionIds(raw: readonly unknown[]): string[] {
+  return [...new Set(raw.filter((id): id is string => typeof id === 'string' && UUID_RE.test(id)))];
+}
+
+// List inventory with the same filters as the desktop screen.
+inventory.get('/', async (c) => {
+  const u = c.var.user;
+  const sql = getDb(c.env);
+  const isManager = u.role === 'manager';
+  const items = await selectInventoryRows(sql, inventoryWhereFrag(c, sql, u), 200);
 
   // Purchasers MUST NOT see cost or profit fields (PRD §6.8). Strip them before
   // returning. Sell price stays visible — it is not sensitive.
@@ -228,6 +247,27 @@ inventory.get('/', async (c) => {
     });
     return c.json({ items: filtered });
   }
+  return c.json({ items });
+});
+
+// The rows behind a desktop selection, by id. Select-all reaches lots in
+// product groups past the grouped view's cap, which the page never loaded, and
+// the bulk actions need each lot's row. POST because a few hundred uuids
+// overflow a query string. Ids bypass the list filters, never the scope: the
+// route is manager-only, as is every bulk action that reads it.
+inventory.post('/rows', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const body = (await c.req.json().catch(() => null)) as { ids?: unknown } | null;
+  if (!Array.isArray(body?.ids)) return c.json({ error: 'ids must be an array' }, 400);
+  const ids = selectionIds(body.ids);
+  if (body.ids.length > 0 && ids.length === 0) return c.json({ error: 'Invalid ids' }, 400);
+  if (ids.length > SELECTION_MAX) {
+    return c.json({ error: `at most ${SELECTION_MAX} lots per selection` }, 413);
+  }
+  if (ids.length === 0) return c.json({ items: [] });
+  const sql = getDb(c.env);
+  const items = await selectInventoryRows(sql, sql`l.id = ANY(${ids}::uuid[])`, null);
   return c.json({ items });
 });
 
@@ -301,7 +341,10 @@ async function buildCategoryTabs(
   return buildXlsxWorkbook(categoryTabSheets(sorted, colsFor, { emptySheetName: 'Inventory' }));
 }
 
-inventory.get('/export', async (c) => {
+// POST carries a row selection in its body: select-all reaches past a thousand
+// lots, whose ids overflow a query string. GET still takes `?ids=` for a tab
+// running an older bundle. Filters, view and category ride the query either way.
+inventory.on(['GET', 'POST'], '/export', async (c) => {
   const u = c.var.user;
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const sql = getDb(c.env);
@@ -309,14 +352,22 @@ inventory.get('/export', async (c) => {
   // those lines and ignores the list filters — the selection may deliberately
   // span warehouses or statuses the current filters would exclude. The route
   // is manager-only, so bypassing the filters loses no role scoping.
-  // Non-UUID tokens are rejected up front: l.id is uuid-typed, so a mangled
-  // id would otherwise make Postgres throw and 500 the export. A selection
-  // that yields NO valid id is a 400 — silently exporting the full set on a
-  // corrupted link would be worse than failing.
-  const rawIds = (c.req.query('ids') ?? '').split(',').filter(Boolean);
-  const ids = [...new Set(rawIds.filter((id) => UUID_RE.test(id)))].slice(0, 1000);
+  // A selection that yields NO valid id is a 400 — silently exporting the full
+  // set on a corrupted link would be worse than failing.
+  let rawIds: unknown[];
+  if (c.req.method === 'POST') {
+    const body = (await c.req.json().catch(() => null)) as { ids?: unknown } | null;
+    if (!Array.isArray(body?.ids)) return c.json({ error: 'ids must be an array' }, 400);
+    rawIds = body.ids;
+  } else {
+    rawIds = (c.req.query('ids') ?? '').split(',').filter(Boolean);
+  }
+  const ids = selectionIds(rawIds);
   if (rawIds.length > 0 && ids.length === 0) {
     return c.json({ error: 'Invalid ids' }, 400);
+  }
+  if (ids.length > SELECTION_MAX) {
+    return c.json({ error: `at most ${SELECTION_MAX} lots per selection` }, 413);
   }
   const whereFrag = ids.length ? sql`l.id IN ${sql(ids)}` : inventoryWhereFrag(c, sql, u);
 
@@ -944,6 +995,20 @@ inventory.get('/products', async (c) => {
     groupMatchesWarehouse(lots) && groupMatchesAttr(lots, null);
   const filteredOrder = order.filter((k) => applyAll(groups.get(k)!));
 
+  // What the desktop's select-all picks: every sellable lot the filters match,
+  // including groups past GROUP_CAP that the page never lists. Warehouse is a
+  // group-level match above ("any lot is there"), so it is re-applied per lot.
+  const sellableIds: string[] = [];
+  if (isManager) {
+    for (const key of filteredOrder) {
+      for (const l of groups.get(key)!) {
+        if (!isSellableLineStatus(l.status)) continue;
+        if (warehouse && l.warehouse_id !== warehouse) continue;
+        sellableIds.push(l.id);
+      }
+    }
+  }
+
   const SPEC_KEYS = ['category','brand','capacity','generation','type','classification','rank','speed','interface','form_factor','description','item_type','rpm'] as const;
 
   const capped = filteredOrder.slice(0, GROUP_CAP).map((key) => {
@@ -1040,6 +1105,7 @@ inventory.get('/products', async (c) => {
     facets,
     warehouse_counts: warehouseProducts,
     total: totalProducts,
+    ...(isManager ? { sellable_ids: sellableIds } : {}),
   });
 });
 

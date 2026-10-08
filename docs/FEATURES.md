@@ -843,7 +843,10 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   (v1.179.0).
 - Export honours the row selection, one worksheet per category, with designed
   workbook styling (v1.30.0, v1.31.0). Select/unselect all lots in the current
-  filter (v1.19.0).
+  filter (v1.19.0). Select all takes every sellable lot the filters match,
+  including products past the 200 the list shows, and the bulk actions and
+  export receive the whole set; export posts the selection, up to 5000 lots
+  (v1.230.2).
 - **The export and both screens read in the vendor bid sheet's order** — brand,
   then capacity, speed, numerically collated with blanks last (v1.107.0), and
   category rank ahead of it on the screens, which have no tabs to group by
