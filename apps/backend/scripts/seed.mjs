@@ -491,6 +491,7 @@ try {
 
   const SELL_ORDER_STATUSES = [
     { id: 'Draft',            short: 'Draft',        tone: 'muted', needsMeta: false },
+    { id: 'Packing',          short: 'Packing',      tone: 'cool',  needsMeta: false },
     { id: 'Shipped',          short: 'Shipped',      tone: 'info',  needsMeta: true  },
     { id: 'Awaiting payment', short: 'Awaiting pay', tone: 'warn',  needsMeta: true  },
     { id: 'Done',             short: 'Done',         tone: 'pos',   needsMeta: true  },

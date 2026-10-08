@@ -1,8 +1,11 @@
 // A sell order's # is one per product, counted 1..N in the order the packing
 // list walks them — warehouse tab, category, device, generation, brand… —
-// through the whole file. The order page lists its lines the same way and
-// every line carries its product's #, so the label on an item, the row on the
-// sheet and the line on the page all read the same number.
+// through the whole file. The order page lists its lines in # order and every
+// line carries its product's #, so the label on an item, the row on the sheet
+// and the line on the page all read the same number. Once the order is past
+// Draft its items may be labelled, so a product added then takes the next #
+// after every other: the page lists it last, while the sheet still prints it
+// in its sorted row.
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import ExcelJS from 'exceljs';
@@ -32,19 +35,38 @@ async function createOrder(mgr: string, lines: object[]): Promise<string> {
   return r.body.id;
 }
 
-// The editor's save: every line sent back in the order it was shown.
-function saveLines(mgr: string, id: string, lines: DetailLine[], edit: (l: DetailLine) => object = () => ({})) {
+// The editor's save: every line sent back in the order it was shown, each
+// with the row it was, then any lines added.
+function saveLines(
+  mgr: string, id: string, lines: DetailLine[], edit: (l: DetailLine) => object = () => ({}),
+  added: object[] = [],
+) {
   return api('PATCH', `/api/sell-orders/${id}`, {
     token: mgr,
     body: {
-      lines: lines.map(l => ({
-        inventoryId: l.inventoryId, category: l.category, label: l.label, subLabel: l.sub,
-        partNumber: l.partNumber, qty: l.qty, unitPrice: l.nativeUnitPrice,
-        warehouseId: l.warehouseId, condition: l.condition, ...edit(l),
-      })),
+      lines: [
+        ...lines.map(l => ({
+          id: l.id, inventoryId: l.inventoryId, category: l.category, label: l.label, subLabel: l.sub,
+          partNumber: l.partNumber, qty: l.qty, unitPrice: l.nativeUnitPrice,
+          warehouseId: l.warehouseId, condition: l.condition, ...edit(l),
+        })),
+        ...added,
+      ],
     },
   });
 }
+
+// Adds lines to the order as the editor does, everything already on it kept.
+async function addLines(mgr: string, id: string, added: object[], withIds = true) {
+  const r = await saveLines(mgr, id, await detailLines(mgr, id), withIds ? () => ({}) : () => ({ id: undefined }), added);
+  expect(r.status).toBe(200);
+}
+
+async function moveTo(mgr: string, id: string, to: string) {
+  expect((await api('POST', `/api/sell-orders/${id}/status`, { token: mgr, body: { to } })).status).toBe(200);
+}
+
+const numbers = async (mgr: string, id: string) => (await detailLines(mgr, id)).map(l => [l.partNumber, l.no]);
 
 type Lot = {
   pn: string; brand: string; generation?: string; warehouse: string;
@@ -260,7 +282,7 @@ describe('sell order #: one per product, in packing-list order', () => {
     expect(bidRow).not.toBeNull();
   });
 
-  it('lists every by-PO tab in # order, with the plain tab\'s Type for each #', async () => {
+  it('lists every by-PO tab in the plain tab\'s order, with its Type for each #', async () => {
     const [low, high] = await twoPos();
     // Tied on every spec, told apart only by part #.
     const [pHigh] = await lotsOn(high, [{ pn: 'TIE-P', brand: 'Tie', warehouse: 'WH-LA1' }]);
@@ -304,5 +326,127 @@ describe('sell order #: one per product, in packing-list order', () => {
     for (const q of ['', '?groupBy=po', '?warehouse=LA1']) {
       expect((await getRaw(`/api/sell-orders/${id}/packing-list${q}`, mgr)).status).toBe(400);
     }
+  });
+});
+
+describe('sell order #: once past Draft, an added product takes the next #', () => {
+  let mgr: string;
+  beforeEach(async () => {
+    await resetDb();
+    mgr = (await loginAs(ALEX)).token;
+  });
+
+  // Kingston and Samsung DDR4 on the order; a DDR3 module, which the sheet
+  // sorts ahead of both, is the one added later.
+  async function packingOrder(status = 'Packing') {
+    const [po] = await twoPos();
+    const [k4, s4, d3] = await lotsOn(po!, [
+      { pn: 'NUM-K4', brand: 'Kingston', warehouse: 'WH-LA1' },
+      { pn: 'NUM-S4', brand: 'Samsung', warehouse: 'WH-LA1' },
+      { pn: 'NUM-D3', brand: 'Samsung', generation: 'DDR3', warehouse: 'WH-LA1' },
+    ]);
+    const id = await createOrder(mgr, [lotLine(k4!, 'NUM-K4', 'WH-LA1'), lotLine(s4!, 'NUM-S4', 'WH-LA1')]);
+    expect(await numbers(mgr, id)).toEqual([['NUM-K4', 1], ['NUM-S4', 2]]);
+    if (status !== 'Draft') await moveTo(mgr, id, status);
+    return { id, po: po!, d3: d3! };
+  }
+
+  it('on a Packing order: the page lists it last, the sheets keep it in its sorted row', async () => {
+    const { id, po, d3 } = await packingOrder();
+    await addLines(mgr, id, [lotLine(d3, 'NUM-D3', 'WH-LA1')]);
+
+    expect(await numbers(mgr, id)).toEqual([['NUM-K4', 1], ['NUM-S4', 2], ['NUM-D3', 3]]);
+    const plain = await workbook(mgr, `/api/sell-orders/${id}/packing-list`);
+    expect(packRows(plain.worksheets[0]!)).toEqual([['3', 'NUM-D3'], ['1', 'NUM-K4'], ['2', 'NUM-S4']]);
+    const byPo = await workbook(mgr, `/api/sell-orders/${id}/packing-list?groupBy=po`);
+    expect(byPo.worksheets.map(w => [w.name, packRows(w)])).toEqual([
+      [`${po} - LA1`, [['3', 'NUM-D3'], ['1', 'NUM-K4'], ['2', 'NUM-S4']]],
+    ]);
+  });
+
+  it('on a Draft it still sorts in', async () => {
+    const { id, d3 } = await packingOrder('Draft');
+    await addLines(mgr, id, [lotLine(d3, 'NUM-D3', 'WH-LA1')]);
+    expect(await numbers(mgr, id)).toEqual([['NUM-D3', 1], ['NUM-K4', 2], ['NUM-S4', 3]]);
+  });
+
+  it('on a Shipped order it appends too', async () => {
+    const { id, d3 } = await packingOrder('Shipped');
+    await addLines(mgr, id, [lotLine(d3, 'NUM-D3', 'WH-LA1')]);
+    expect(await numbers(mgr, id)).toEqual([['NUM-K4', 1], ['NUM-S4', 2], ['NUM-D3', 3]]);
+  });
+
+  it('a new lot of a product already on the order joins its #', async () => {
+    const { id } = await packingOrder();
+    const [, high] = await twoPos();
+    const [k4b] = await lotsOn(high!, [{ pn: 'NUM-K4', brand: 'Kingston', warehouse: 'WH-LA1' }]);
+    await addLines(mgr, id, [lotLine(k4b!, 'NUM-K4', 'WH-LA1')]);
+    expect(await numbers(mgr, id)).toEqual([['NUM-K4', 1], ['NUM-K4', 1], ['NUM-S4', 2]]);
+  });
+
+  it('products added in one save are numbered in sheet order; a later save goes after them', async () => {
+    const { id, po, d3 } = await packingOrder();
+    const [h4, a3] = await lotsOn(po, [
+      { pn: 'NUM-H4', brand: 'Hynix', warehouse: 'WH-LA1' },
+      { pn: 'NUM-A3', brand: 'Adata', generation: 'DDR3', warehouse: 'WH-LA1' },
+    ], 700);
+    // Sent Hynix first; the sheet puts the DDR3 module first.
+    await addLines(mgr, id, [lotLine(h4!, 'NUM-H4', 'WH-LA1'), lotLine(d3, 'NUM-D3', 'WH-LA1')]);
+    expect(await numbers(mgr, id)).toEqual([['NUM-K4', 1], ['NUM-S4', 2], ['NUM-D3', 3], ['NUM-H4', 4]]);
+    // Adata DDR3 sorts ahead of every other, but came in a later save.
+    await addLines(mgr, id, [lotLine(a3!, 'NUM-A3', 'WH-LA1')]);
+    expect(await numbers(mgr, id))
+      .toEqual([['NUM-K4', 1], ['NUM-S4', 2], ['NUM-D3', 3], ['NUM-H4', 4], ['NUM-A3', 5]]);
+  });
+
+  it('a save without row ids keeps every lot\'s place, and a dropped-and-re-added lot too', async () => {
+    const { id, d3 } = await packingOrder();
+    await addLines(mgr, id, [lotLine(d3, 'NUM-D3', 'WH-LA1')]);
+    const expected = [['NUM-K4', 1], ['NUM-S4', 2], ['NUM-D3', 3]];
+    await addLines(mgr, id, [], false);
+    expect(await numbers(mgr, id)).toEqual(expected);
+    // Dropped and sent again as new, in one save.
+    const lines = await detailLines(mgr, id);
+    const r = await saveLines(mgr, id, lines.filter(l => l.inventoryId !== d3), () => ({}),
+      [lotLine(d3, 'NUM-D3', 'WH-LA1')]);
+    expect(r.status).toBe(200);
+    expect(await numbers(mgr, id)).toEqual(expected);
+  });
+
+  it('a typed line keeps its place through a price or a label edit', async () => {
+    const [po] = await twoPos();
+    const [k4, d3] = await lotsOn(po!, [
+      { pn: 'NUM-K4', brand: 'Kingston', warehouse: 'WH-LA1' },
+      { pn: 'NUM-D3', brand: 'Samsung', generation: 'DDR3', warehouse: 'WH-LA1' },
+    ]);
+    const id = await createOrder(mgr, [lotLine(k4!, 'NUM-K4', 'WH-LA1'), typedLine('NUM-T1')]);
+    await moveTo(mgr, id, 'Packing');
+    await addLines(mgr, id, [lotLine(d3!, 'NUM-D3', 'WH-LA1')]);
+    const expected = [['NUM-K4', 1], ['NUM-T1', 2], ['NUM-D3', 3]];
+    expect(await numbers(mgr, id)).toEqual(expected);
+
+    const typed = (l: DetailLine) => l.inventoryId === null;
+    expect((await saveLines(mgr, id, await detailLines(mgr, id),
+      l => (typed(l) ? { unitPrice: 11, label: 'Typed NUM-T1 (fixed)' } : {}))).status).toBe(200);
+    expect(await numbers(mgr, id)).toEqual(expected);
+  });
+
+  it('across warehouse tabs it takes the next # after every tab, and moves none in another', async () => {
+    const [po] = await twoPos();
+    const [la, nj, d3] = await lotsOn(po!, [
+      { pn: 'NUM-LA', brand: 'Kingston', warehouse: 'WH-LA1' },
+      { pn: 'NUM-NJ', brand: 'Kingston', warehouse: 'WH-NJ2' },
+      { pn: 'NUM-D3', brand: 'Samsung', generation: 'DDR3', warehouse: 'WH-LA1' },
+    ]);
+    const id = await createOrder(mgr, [lotLine(la!, 'NUM-LA', 'WH-LA1'), lotLine(nj!, 'NUM-NJ', 'WH-NJ2')]);
+    await moveTo(mgr, id, 'Packing');
+    await addLines(mgr, id, [lotLine(d3!, 'NUM-D3', 'WH-LA1')]);
+
+    expect(await numbers(mgr, id)).toEqual([['NUM-LA', 1], ['NUM-NJ', 2], ['NUM-D3', 3]]);
+    const plain = await workbook(mgr, `/api/sell-orders/${id}/packing-list`);
+    expect(plain.worksheets.map(w => [w.name, packRows(w)])).toEqual([
+      ['Pack - LA1', [['3', 'NUM-D3'], ['1', 'NUM-LA']]],
+      ['Pack - NJ2', [['2', 'NUM-NJ']]],
+    ]);
   });
 });

@@ -197,6 +197,18 @@ describe('sell order pack mode', () => {
 
   // On a Draft, the tick writes what went in the box onto the order.
   describe('a tick on a Draft sets the line to the count', () => {
+    it('does the same on a Packing order, and an untick puts the qty back', async () => {
+      const { id, picked } = await createOrder(mgr);
+      expect((await api('POST', `/api/sell-orders/${id}/status`, {
+        token: mgr, body: { to: 'Packing' },
+      })).status).toBe(200);
+      expect(rowOf((await putPack(mgr, id, picked, { counted: 1, packed: true })).body, picked))
+        .toMatchObject({ qty: 1, counted: 1 });
+      expect((await detailLines(mgr, id)).find(l => l.id === picked)!.qty).toBe(1);
+      expect((await putPack(mgr, id, picked, { counted: 1, packed: false })).status).toBe(200);
+      expect((await detailLines(mgr, id)).find(l => l.id === picked)!.qty).toBe(2);
+    });
+
     it('lowers the qty in place, reads packed, and records the edit', async () => {
       const { id, picked, lot } = await createOrder(mgr);
       const r = await putPack(mgr, id, picked, { counted: 1, packed: true });
@@ -403,7 +415,19 @@ describe('sell order pack mode', () => {
       expect(rowOf(again.body, o.picked)).toMatchObject({ qty: 2, counted: 0, packedAt: null });
     });
 
-    it('refuses an order past Draft and writes nothing', async () => {
+    it('applies on a Packing order too', async () => {
+      const o = await bigOrder();
+      expect((await api('POST', `/api/sell-orders/${o.id}/status`, {
+        token: mgr, body: { to: 'Packing' },
+      })).status).toBe(200);
+      await flag(o);
+      const r = await apply(mgr, o.id, { lineIds: [o.bezel] });
+      expect(r.status).toBe(200);
+      expect(r.body.applied).toEqual([o.bezel]);
+      expect((await detailLines(mgr, o.id)).find(l => l.id === o.bezel)!.qty).toBe(2);
+    });
+
+    it('refuses an order past Packing and writes nothing', async () => {
       const o = await bigOrder();
       expect((await api('POST', `/api/sell-orders/${o.id}/status`, {
         token: mgr, body: { to: 'Shipped' },

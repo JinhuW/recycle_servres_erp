@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import type postgres from 'postgres';
 import { getDb, type SqlLike } from '../db';
 import { UUID_RE } from '../lib/pagination';
+import { proposalSellStatuses } from '../lib/sellCommitment';
 import { writeSellOrderEvent } from '../services/sellOrderAudit';
 import { validateSellLines } from '../services/sellOrderCreate';
 import type { SOLineSnap } from '../services/sellOrderLineMatch';
@@ -74,10 +75,10 @@ packRoutes.get('/:id/pack', async (c) => {
   return c.json(await readPack(sql, id));
 });
 
-// On a Draft the tick and the order's qty move together: a lot packed short
-// or at 0 sells what went in the box, and taking the tick back puts the qty
-// back. A Draft claims no stock until it leaves Draft, so either way costs
-// nothing here. Recorded as the editor's own qty edit would be.
+// On a Draft or Packing order the tick and the order's qty move together: a
+// lot packed short or at 0 sells what went in the box, and taking the tick
+// back puts the qty back. Neither claims stock until it is promoted, so either
+// way costs nothing here. Recorded as the editor's own qty edit would be.
 async function setLineQty(
   tx: postgres.TransactionSql, orderId: string, lineId: string, from: number, to: number, actorId: string,
 ) {
@@ -155,7 +156,8 @@ packRoutes.put('/:id/pack/:lineId', async (c) => {
 
     // The line still stands where its own tick lowered it, from `was_qty`.
     // A qty edited since no longer matches the count, and is left alone.
-    const lowered = order.status === 'Draft' && line.was_packed_at !== null
+    const takesCounts = proposalSellStatuses().includes(order.status);
+    const lowered = takesCounts && line.was_packed_at !== null
       && line.was_counted === line.qty && line.was_qty !== null && line.was_qty > line.qty;
     const restoring = lowered && !packed;
     const qty = restoring ? line.was_qty! : line.qty;
@@ -178,7 +180,7 @@ packRoutes.put('/:id/pack/:lineId', async (c) => {
       }
       await setLineQty(tx, id, lineId, line.qty, qty, u.id);
       rowQty = qty;
-    } else if (order.status === 'Draft' && packed && counted < line.qty) {
+    } else if (takesCounts && packed && counted < line.qty) {
       await setLineQty(tx, id, lineId, line.qty, counted, u.id);
       rowQty = lowered ? line.was_qty! : line.qty;
     }
@@ -193,10 +195,10 @@ packRoutes.put('/:id/pack/:lineId', async (c) => {
 type FlaggedLine = { line_id: string; line_key: string; qty: number; counted: number };
 
 // Apply: every lot named that is still lowered and unticked is ticked at its
-// count, as its own tick would on a Draft — in one transaction, so a long
-// order's shorts reach it under one lock rather than a PUT apiece. A lot
-// that is no longer lowered (another iPad ticked it, an edit rewrote it) is
-// skipped: the page asked about a state that has since moved on.
+// count, as its own tick would on a Draft or Packing order — in one
+// transaction, so a long order's shorts reach it under one lock rather than a
+// PUT apiece. A lot that is no longer lowered (another iPad ticked it, an edit
+// rewrote it) is skipped: the page asked about a state that has since moved on.
 packRoutes.post('/:id/pack/apply', async (c) => {
   const u = c.var.user;
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
@@ -215,8 +217,11 @@ packRoutes.post('/:id/pack/apply', async (c) => {
       SELECT status, archived_at FROM sell_orders WHERE id = ${id} FOR UPDATE`)[0];
     if (!order) return { code: 404, msg: 'Not found' };
     if (order.archived_at) return { code: 409, msg: 'Order is archived — unarchive it first' };
-    if (order.status !== 'Draft') {
-      return { code: 409, msg: `Order is ${order.status} — only a Draft takes its counts from the box` };
+    if (!proposalSellStatuses().includes(order.status)) {
+      return {
+        code: 409,
+        msg: `Order is ${order.status} — only a Draft or Packing order takes its counts from the box`,
+      };
     }
     // A row written against another qty is stale, and reads as unlowered.
     const flagged = await tx<FlaggedLine[]>`

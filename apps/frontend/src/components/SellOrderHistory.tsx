@@ -70,6 +70,7 @@ type TFn = (key: string, vars?: Record<string, string | number>) => string;
 // values fall through to the raw string so a new backend state still renders.
 const LIFECYCLE_KEY: Record<string, string> = {
   Draft:              'lifecycleDraft',
+  Packing:            'lifecyclePacking',
   Shipped:            'lifecycleShipped',
   'Awaiting payment': 'lifecycleAwaiting',
   Done:               'lifecycleDone',

@@ -67,7 +67,7 @@ function evidenceEntries(meta: StatusMetaMap | null) {
 
 type SellOrderSummary = {
   id: string;
-  status: 'Draft' | 'Shipped' | 'Awaiting payment' | 'Done' | 'Closed';
+  status: 'Draft' | 'Packing' | 'Shipped' | 'Awaiting payment' | 'Done' | 'Closed';
   notes: string | null;
   createdAt: string;
   updatedAt: string;
@@ -135,6 +135,9 @@ type EditLine = LineSpec & {
   // instead of removed, so no line after it is renumbered; a line being added
   // needs at least 1.
   saved: boolean;
+  // The row it was saved as, sent back so the server can keep the line's
+  // place in the numbering through the rewrite; null for a line added here.
+  id: string | null;
   // The product's # as last saved; a line added here has none until the save.
   no: number | null;
   inventoryId: string | null;
@@ -159,6 +162,7 @@ type EditLine = LineSpec & {
 const toEditLine = (l: SellOrderLine): EditLine => ({
   _cid:        crypto.randomUUID(),
   saved:       true,
+  id:          l.id,
   no:          l.no ?? null,
   inventoryId: l.inventoryId,
   category:    l.category,
@@ -195,6 +199,7 @@ function appendSellable(lines: EditLine[], picked: SellableItem[]): EditLine[] {
     .map(it => ({
       _cid:        crypto.randomUUID(),
       saved:       false,
+      id:          null,
       no:          null,
       inventoryId: it.inventoryId,
       category:    it.category as EditLine['category'],
@@ -1168,6 +1173,7 @@ function SellOrderDetail({ id, mode, onToast }: {
       // prices, so the line set goes with it regardless of a diff.
       if (linesChanged || currencyChanged || draft.bidParts.length > 0) {
         patchBody.lines = draft.lines.map(l => ({
+          id:          l.id,
           inventoryId: l.inventoryId,
           category:    l.category,
           label:       l.label,

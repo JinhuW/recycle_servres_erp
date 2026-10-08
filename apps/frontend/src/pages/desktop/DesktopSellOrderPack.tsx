@@ -129,6 +129,21 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   }, [id]);
   useEffect(() => { void loadOrder(); }, [loadOrder]);
 
+  // Opening Pack mode is what moves a Draft to Packing — once per visit, so a
+  // refocus doesn't undo a manager stepping it back to Draft. A refusal stays
+  // quiet: packing works the same on a Draft, and a backend older than this
+  // bundle refuses the status it doesn't know on every open.
+  const enteredPacking = useRef(false);
+  useEffect(() => {
+    if (!order || enteredPacking.current) return;
+    enteredPacking.current = true;
+    if (order.status !== 'Draft' || order.archivedAt !== null) return;
+    api.post(`/api/sell-orders/${id}/status`, { to: 'Packing' }).then(
+      () => setOrder(o => o && { ...o, status: 'Packing' }),
+      () => {},
+    );
+  }, [order, id]);
+
   const qtyById = useRef(new Map<string, number>());
   qtyById.current = useMemo(
     () => new Map((order?.lines ?? []).map(l => [l.id, qtys.get(l.id) ?? l.qty])),
@@ -188,7 +203,9 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   const lineById = useMemo(() => new Map(lines.map(l => [l.id, l])), [lines]);
   const readOnly = !!order && (order.archivedAt !== null || order.status === 'Closed');
   const ready = loadState === 'ok' && !!order && !readOnly;
-  const isDraft = order?.status === 'Draft';
+  // A Draft or Packing order takes its counts from the box: a short tick sets
+  // the line's qty, and the order can ship from here.
+  const takesCounts = order?.status === 'Draft' || order?.status === 'Packing';
 
   const warehouses = useMemo(() => packWarehouseOptions(lines), [lines]);
   // A picked warehouse the order no longer has (a line was moved) falls back to all.
@@ -215,7 +232,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   const whole = useMemo(() => productTally(allProducts, checks), [allProducts, checks]);
   const blockers = useMemo(() => shipBlockers(lines, checks), [lines, checks]);
   const flagged = useMemo(() => flaggedLots(lines, checks), [lines, checks]);
-  const canShip = ready && isDraft && lines.some(isPackable)
+  const canShip = ready && takesCounts && lines.some(isPackable)
     && blockers.open === 0 && blockers.short === 0 && blockers.zero === 0;
 
   const folds = (p: Product) => p.lots.length > 1;
@@ -326,7 +343,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     save(next);
     setChoose(new Set());
     const n = countOf(l, prev);
-    flashUndo({ prev: [prev], msg: t(isDraft && n < l.qty ? 'pkPackedSetToast' : 'pkPackedToast', { pn: pnOf(l), n, of: l.qty }) });
+    flashUndo({ prev: [prev], msg: t(takesCounts && n < l.qty ? 'pkPackedSetToast' : 'pkPackedToast', { pn: pnOf(l), n, of: l.qty }) });
     moveOn(l.id, new Map(checks).set(l.id, next));
   };
 
@@ -380,9 +397,10 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   };
 
   // Every lot lowered and left unticked, ticked at its count in one request:
-  // on a Draft each line goes to its count, a 0 included, and keeps its #.
+  // on a Draft or Packing order each line goes to its count, a 0 included,
+  // and keeps its #.
   const applyFlagged = async () => {
-    if (!ready || !isDraft || busy || !flagged.length) return;
+    if (!ready || !takesCounts || busy || !flagged.length) return;
     const before = new Map(flagged.map(l => [l.id, checkOf(l.id)]));
     setBusy(true);
     try {
@@ -771,7 +789,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
           ? t(left === 1 ? 'pkFinishLeftOne' : 'pkFinishLeft', { n: left })
           : blockers.short > 0 || blockers.zero > 0
             ? t('pkFinishFix', { short: blockers.short, zero: blockers.zero })
-            : !isDraft
+            : !takesCounts
               ? t('pkFinishStatus', { status: order.status })
               : t('pkFinishDone');
 
@@ -1015,7 +1033,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
                   ))}
                 </ul>
               )}
-              {!readOnly && isDraft && flagged.length > 0 && (
+              {!readOnly && takesCounts && flagged.length > 0 && (
                 <div className="pk-flagged">
                   <div className="pk-flagged-title">{t('pkFlaggedTitle')}</div>
                   <ul className="bc-problem-list pk-flagged-list">
@@ -1030,7 +1048,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
                   <p className="card-sub">{t('pkApplyHint')}</p>
                 </div>
               )}
-              {!readOnly && isDraft && (
+              {!readOnly && takesCounts && (
                 <div className="bc-finish-actions">
                   {flagged.length > 0 && (
                     <button type="button" className="btn" disabled={!ready || busy} onClick={() => void applyFlagged()}>

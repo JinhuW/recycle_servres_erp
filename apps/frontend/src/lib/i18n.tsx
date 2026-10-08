@@ -261,7 +261,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     transferQtyOutOfRangeHint: 'One or more lines has an invalid quantity (must be ≥ 1 and ≤ stock).',
     transferFailed: 'Transfer failed',
     transferCommittedHint: '{n} on committed sell orders — not movable',
-    transferDraftsTitle: 'Take these lines off draft sell orders?',
+    transferDraftsTitle: 'Take these lines off Draft or Packing sell orders?',
     transferDraftsMsg: 'Moving these lines whole sends them out In Transit, so {ids} cannot be promoted until the transfer is received.',
     transferDraftsConfirm: 'Move anyway',
 
@@ -998,6 +998,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
 
     // Lifecycle status names (used by SellOrderHistory & other timeline views)
     lifecycleDraft: 'Draft',
+    lifecyclePacking: 'Packing',
     lifecycleShipped: 'Shipped',
     lifecycleAwaiting: 'Awaiting payment',
     lifecycleDone: 'Done',
@@ -1219,7 +1220,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     soAddInventoryLoading: 'Loading inventory…',
     soAddInventoryEmpty: 'No sellable inventory available',
     soAddInventorySelected: '{n} selected',
-    soAddInventoryOnDrafts: 'on {n} other draft(s)',
+    soAddInventoryOnDrafts: 'on {n} other Draft or Packing order(s)',
     soAddInventoryBtn: 'Add to order',
     soAddInventoryCapped: 'Showing the first {n} matches — refine your search to see the rest',
     soViewTooltip: 'View',
@@ -2412,7 +2413,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     sodCustomerTotal: 'Customer total',
     sodCostBasis: 'Cost basis',
     sodDraftTipPre: 'Saving as ',
-    sodDraftTipPost: ' keeps items reserved. Advance the order through Shipped → Awaiting payment → Done as the deal progresses.',
+    sodDraftTipPost: ' reserves nothing until the order is Shipped or Awaiting payment. Advance it through Packing → Shipped → Awaiting payment → Done as the deal progresses.',
     sodSaveDraft: 'Save draft',
     sodSelectCustomer: 'Select customer…',
     sodSearchCustomers: 'Search customers…',
@@ -2463,7 +2464,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     invShowSold: 'Show sold',
     invShowSoldTip: 'Sold lots are hidden by default — turn on to include them.',
     invHidePending: 'Hide in sell orders',
-    invHidePendingTip: 'Hide items already claimed by a pending sell order (Draft, Shipped, or Awaiting payment).',
+    invHidePendingTip: 'Hide items already claimed by a pending sell order (Draft, Packing, Shipped, or Awaiting payment).',
     invRefinePre: 'Refine',
     invFiltersActive: '{n} filter(s) active',
     invClearAll: 'Clear all',
@@ -2476,7 +2477,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     invAddToSoSub: '{n} selected line(s) will be appended; you set prices before saving',
     invAddToSoSearch: 'Search by order number or customer…',
     invAddToSoLoading: 'Loading sell orders…',
-    invAddToSoEmpty: 'No open sell orders (Draft, Shipped or Awaiting payment)',
+    invAddToSoEmpty: 'No open sell orders (Draft, Packing, Shipped or Awaiting payment)',
     invAddToSoMeta: '{lines} lines · {units} units',
     invAddToSoSavedToast: '{id} updated',
     soPrefillAllPresent: 'Every selected lot is already on {id} — nothing new was added.',
@@ -2543,7 +2544,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
 
     // ── Pack mode (sell order) ──
     pkOpen: 'Pack mode',
-    pkOpenTip: 'Tick each line into the box as you pack it',
+    pkOpenTip: 'Tick each line into the box as you pack it. Opening it moves a Draft to Packing.',
     pkTitle: 'Pack',
     pkBack: 'Back to order',
     pkSub: '{products} products · {units} units',
