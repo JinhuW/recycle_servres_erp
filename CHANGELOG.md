@@ -17,6 +17,40 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.227.0] - 2026-10-08
+
+Pack mode is laid out like the PO's Review mode, and a product picked from
+several PO lots folds into one row (RS-199). Pack mode was a card list with
+one big row per sell line and a bar at the bottom. Since RS-193 the lines of
+one product share a #, so a product from three lots read as three `#3` rows.
+Jinhu finds Review mode's layout clearer.
+
+### Changed
+
+- **Review mode's layout.** Pack mode now has a page head, a progress card, a
+  table with the scan box over it, and a side panel. The panel shows the
+  selected row (photo, part, From PO, warehouse, count, serials) above a
+  **Finish** card. The Finish card says what is left, lists lots packed short
+  or at 0 with Edit order, and holds Mark shipped. The bottom bar is gone, and
+  Undo moves to a toast. ↑ / ↓ move the selection and Space packs it; no letter
+  is a shortcut, so typing still starts the scan box's filter.
+- **One row per product.** A product from two or more lots is a fold row:
+  its #, part, specs, its lots' PO tags and the summed count. It starts
+  closed. Opening it lists each lot with its photo, count and tick. Ticking
+  the product packs every lot still at full count. A lowered lot waits for
+  its own tick, and the fold opens to show it. Ticking a fully packed product
+  unpacks it, and one Undo reverses either. Rows still never move: packed
+  rows dim in place, in # order.
+- **Progress counts products**, the rows the packer sees, with units beside.
+- A lot held at 0 is left out of its product, as the packing lists leave it
+  out. A product whose lots are all 0 keeps one greyed row for its #.
+- A scan that could be several lots opens their products and highlights the
+  lots. The type-to-filter keeps a product whole and holds its fold open
+  while a lot in it matches.
+- On an iPad the two columns hold from 1024px wide. Both landscape iPads
+  (1080 and 1180) keep the side panel. Portrait puts Finish under the list
+  and hides the selected-item card.
+
 ## [1.226.0] - 2026-10-08
 
 A sell order now needs every manager's sign-off before it can be marked Done

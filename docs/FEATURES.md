@@ -1077,37 +1077,53 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   shell, built for an iPad). **Pack mode** in the sell order's page head opens
   `#/sell-orders/<id>/pack`, a full-window page with no sidebar, top bar or
   tweaks button. It is the on-screen form of the Packing list, and the
-  outbound twin of the PO's Review mode.
-  - **Lines run in the order's own list order** — the Packing list's
+  outbound twin of the PO's Review mode, laid out like it since v1.227.0: a
+  page head, a progress card, a table with the scan box over it, and a side
+  panel with the selected item and a **Finish** card.
+  - **Products run in the order's own list order**, the Packing list's
     (v1.220.3; by # since v1.219.0, grouped by source PO in v1.218.0). Each
-    row's tag is its product's `#`, the label the packer writes on the item, and
-    its meta line names the lot it comes from (`From PO-1111 #1`, or *Typed
-    in*); two lines of one product share a tag, and a scan that could mean
-    either names them by both. When the order's lots sit in more
-    than one warehouse, a *Packing from* switch narrows the list without
-    renumbering it.
-  - **Each line shows its lot's photo** (v1.220.0) between the tag and the
-    item — the label scan, loaded lazily; a tap zooms it, and Esc closes the
-    zoom before it leaves Pack mode. A line with no real scan (typed, or a
-    stub scan) keeps an empty slot so the items stay in one column. The photo
-    comes from `GET /api/sell-orders/:id` as each line's `imageUrl`.
-  - A line's count starts at its qty. − / + record a short pick (amber, *Short*)
-    or none at all (red, *Not packed*), and lowering a packed line unticks it.
-    The tick confirms the count as shown; a ticked line **stays in its place**
-    (v1.219.0), dimmed with a green tick, with Undo in the bottom bar.
-  - A line held at 0 keeps its row and # but reads *Qty 0 · nothing to pack*:
-    no counter or tick, never matched by a scan, left out of the progress and
-    of what blocks Mark shipped.
+    row leads with its product's `#`, the label the packer writes on the item,
+    and names the lot it comes from (`From PO-1111 #1`, or *Typed in*). When
+    the order's lots sit in more than one warehouse, a *Packing from* switch
+    narrows the list without renumbering it.
+  - **A product from several lots is one fold row** (v1.227.0). It shows the
+    product's #, part, specs, how many lots and their PO tags
+    (`PO-1111 #4, PO-1203 #1 +1`), and the summed count. It starts closed.
+    The chevron (or ← / →) opens it to one row per lot, each with its own
+    photo, count and tick. Ticking the product row packs every lot still at
+    its full count. A lot that was lowered keeps waiting for its own tick, and
+    the fold opens to show it. Once every lot is packed, the same tick unpacks
+    them all. A product with some lots packed shows a dash in its tick. A lot
+    held at 0 is left out of its product. A product whose lots are all at 0
+    keeps one greyed row: *Qty 0 · nothing to pack*, with no counter or tick.
+  - **Each row shows its lot's photo** (v1.220.0), loaded lazily; a tap zooms
+    it, and Esc closes the zoom before it leaves Pack mode. A product row
+    shows the first lot that has one. A line with no real scan (typed, or a
+    stub scan) keeps an empty slot. The photo comes from
+    `GET /api/sell-orders/:id` as each line's `imageUrl`.
+  - A lot's count starts at its qty. − / + record a short pick (amber, *Short*)
+    or none at all (red, *Not packed*), and lowering a packed lot unticks it.
+    The tick confirms the count as shown. A ticked row **stays in its place**
+    (v1.219.0), dimmed with a green tick. Undo reverses the last tick, a whole
+    product's included, from a toast.
+  - **The side panel** shows the selected row: its photo large, part, From
+    PO, warehouse, qty and count, and the serials on file. For a product it
+    lists each lot's count. Tap a row to select it, or use ↑ / ↓; Space packs
+    the selected row. The **Finish** card says what is left to pack, lists
+    the lots packed short or at 0 with **Edit order**, and holds **Mark
+    shipped**. Below 1024px wide (an iPad in portrait) the panel drops under
+    the list and the selected-item card is hidden.
   - The scan box takes a Bluetooth or USB label scanner, with nothing focused,
     and matches a part number, a prefix, a recorded serial, then any part
     number holding the text, as Review mode does. Typing filters the list
     the same way too (v1.222.0), with ×, Escape and a fragment that fits
     several parts behaving as in Review mode. The filter searches the whole
     order, packable lines only, even with a *Packing from* warehouse picked,
-    so it never hides the line Enter would pack. Progress stays on the
-    warehouse view. When the part is still waiting on more than one line, the scan ticks
-    nothing: it highlights those lines, names them by # and asks for a tap on
-    the one that was packed.
+    so it never hides the line Enter would pack. A product holding a match
+    is listed whole, opened while the filter is up. Progress stays on the
+    warehouse view. When the part is still waiting on more than one lot, the
+    scan ticks nothing: it opens those products, highlights the lots, names
+    them by # and asks for a tap on the one that was packed.
   - Progress is saved on the server (`sell_order_packs`), so a reload, a second
     iPad or coming back from another app picks up where the count stands; the
     page re-reads when it returns to the foreground. Last write per line wins.
@@ -1116,13 +1132,13 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
     unpacked, unless it was packed short and edited down to exactly the count
     packed. If the order itself can't be loaded, the list says so with *Try
     again* instead of loading forever (v1.220.2).
-  - Every control is at least 44px and the tick is 60px; nothing needs hover.
-    Under 780px each row puts the counter and tick on a second line.
-  - On a Draft with every line packed at full count, **Mark shipped** opens the
+  - Every control is at least 44px; nothing needs hover. Below 900px the
+    condition moves under the item.
+  - On a Draft with every lot packed at full count, **Mark shipped** opens the
     Shipped dialog (note, packing photos) and moves the order to Shipped. Short
-    or unpacked lines block it, and the bar offers Edit order to match the
-    order to the box first. A refused move (a lot taken meanwhile) says why and
-    stays on the page. Other statuses end with Back to order.
+    or unpacked lots block it, and the Finish card offers Edit order to match
+    the order to the box first. A refused move (a lot taken meanwhile) says
+    why and stays on the page.
   - The endpoints (`GET /api/sell-orders/:id/pack`,
     `PUT /api/sell-orders/:id/pack/:lineId`) 403 anyone whose real role is not
     manager. An archived or Closed order opens read-only and its writes 409; a
