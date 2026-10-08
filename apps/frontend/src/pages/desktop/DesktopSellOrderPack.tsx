@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { parseSerials } from '@recycle-erp/shared';
 import { Icon } from '../../components/Icon';
 import { ImageLightbox } from '../../components/ImageLightbox';
@@ -13,8 +13,8 @@ import { useT } from '../../lib/i18n';
 import { sellOrderStatuses } from '../../lib/lookups';
 import { navigate, navigateBack } from '../../lib/route';
 import {
-  isPackable, packBody, packProducts, packScan, packView, packWarehouseOf, packWarehouseOptions, productSummary,
-  productTally, productTick, shipBlockers, sourceTag, toCheck, UNASSIGNED,
+  isPackable, nextOpenProduct, packBody, packGroups, packProducts, packScan, packView, packWarehouseOf,
+  packWarehouseOptions, productSummary, productTally, productTick, shipBlockers, sourceTag, toCheck, UNASSIGNED,
   type PackLine, type PackProduct, type PackResponse,
 } from '../../lib/sellOrderPack';
 import type { Category } from '../../lib/types';
@@ -28,10 +28,13 @@ import { useScanFilterText } from '../../lib/useScanFilter';
 // the item's label and the receiver checks the box by. A product picked from
 // several lots folds them under one row: ticking the row packs every lot at
 // its full count, and opening it shows each lot (From PO-1111 #1) with its own
-// count and tick. A ticked row stays in its place, so the list always reads #1
-// to #n (user-requested 2026-10-07, kept 2026-10-08). Counts start full and
-// are lowered only when the shelf is short; a lot held at 0 has nothing to
-// pack.
+// count and tick. A packed product sinks under Packed, newest first, as Review
+// mode's checked lines do, and what is left stays on top in # order; one
+// packed at 0 keeps its place. (Rows stayed put from 2026-10-07; sinking was
+// asked for on 2026-10-08.) Counts start full and are lowered only when the
+// shelf is short. On a Draft the tick writes the count onto the order's line
+// and taking it back puts the qty back — the server's rule, in
+// routes/sellOrderPack.ts — so a lot held at 0 has nothing left to pack.
 
 type OrderLine = {
   id: string;
@@ -90,6 +93,10 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   // keeps the one already shown.
   const [orderFailed, setOrderFailed] = useState(false);
   const [serials, setSerials] = useState<ReadonlyMap<string, string | null>>(new Map());
+  // Each line's qty as the pack endpoints last reported it: a tick on a Draft
+  // changes it without the order being re-read.
+  const [qtys, setQtys] = useState<ReadonlyMap<string, number>>(new Map());
+  const [showPacked, setShowPacked] = useState(true);
   const [wh, setWh] = useState('');
   const [undo, setUndo] = useState<Undo | null>(null);
   const [scan, setScan] = useState('');
@@ -121,25 +128,40 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   useEffect(() => { void loadOrder(); }, [loadOrder]);
 
   const qtyById = useRef(new Map<string, number>());
-  qtyById.current = useMemo(() => new Map((order?.lines ?? []).map(l => [l.id, l.qty])), [order]);
+  qtyById.current = useMemo(
+    () => new Map((order?.lines ?? []).map(l => [l.id, qtys.get(l.id) ?? l.qty])),
+    [order, qtys],
+  );
   const url = (lineId: string) => `/api/sell-orders/${id}/pack/${lineId}`;
   const bodyOf = (c: LineCheck) => packBody(c, qtyById.current.get(c.lineId) ?? c.counted);
 
   const { checks, loadState, reload, save, flush } = useLineSaveQueue<PackResponse>({
     read: () => api.get<PackResponse>(`/api/sell-orders/${id}/pack`),
-    send: c => api.put<PackResponse>(url(c.lineId), bodyOf(c)),
+    // Only the written line's qty is taken from a write: writes of one line
+    // land in order, while the rest of the reply can be older than theirs.
+    send: c => api.put<PackResponse>(url(c.lineId), bodyOf(c)).then(r => {
+      const q = r.lines.find(x => x.lineId === c.lineId)?.qty;
+      if (q !== undefined) setQtys(m => (m.get(c.lineId) === q ? m : new Map(m).set(c.lineId, q)));
+      return r;
+    }),
     beacon: c => { void rawFetch('PUT', url(c.lineId), bodyOf(c), undefined, { keepalive: true }).catch(() => {}); },
     checksOf: r => r.lines.map(toCheck),
-    onServer: r => setSerials(new Map(r.lines.map(x => [x.lineId, x.serialNumber]))),
+    onServer: r => {
+      setSerials(new Map(r.lines.map(x => [x.lineId, x.serialNumber])));
+      setQtys(new Map(r.lines.flatMap(x => (x.qty === undefined ? [] : [[x.lineId, x.qty] as const]))));
+    },
     onWriteError: e => {
       // Saving the order's lines replaces their rows, so a line this page
       // still holds may be gone; the fresh order carries its successor.
       if (e instanceof ApiError && e.status === 404) {
         showWarnToast(t('pkLineChanged'));
         void loadOrder();
-      } else {
-        handleFetchError(e);
+        return;
       }
+      handleFetchError(e);
+      // The page's copy is behind: another iPad or the editor changed the
+      // line, or its lot went elsewhere before its qty could be put back.
+      if (e instanceof ApiError && (e.status === 400 || e.status === 409)) void loadOrder();
     },
   });
 
@@ -158,8 +180,8 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   useEffect(() => () => { if (undoTimer.current) clearTimeout(undoTimer.current); }, []);
 
   const lines: Line[] = useMemo(
-    () => (order?.lines ?? []).map(l => ({ ...l, serialNumber: serials.get(l.id) ?? null })),
-    [order, serials],
+    () => (order?.lines ?? []).map(l => ({ ...l, qty: qtys.get(l.id) ?? l.qty, serialNumber: serials.get(l.id) ?? null })),
+    [order, serials, qtys],
   );
   const lineById = useMemo(() => new Map(lines.map(l => [l.id, l])), [lines]);
   const readOnly = !!order && (order.archivedAt !== null || order.status === 'Closed');
@@ -198,7 +220,8 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   const forcedOpen = (p: Product) => !!fit && p.lots.some(l => fit.has(l.id));
   const isOpen = (p: Product) => folds(p) && (open.has(p.no) || forcedOpen(p));
   const keysOf = (p: Product) => (folds(p) ? [prodKey(p.no), ...(isOpen(p) ? p.lots.map(l => l.id) : [])] : [p.head.id]);
-  const visibleKeys = listed.flatMap(keysOf);
+  const groups = useMemo(() => packGroups(listed, checks), [listed, checks]);
+  const visibleKeys = [...groups.open, ...(showPacked ? groups.packed : [])].flatMap(keysOf);
   const selKey = selected && visibleKeys.includes(selected) ? selected : visibleKeys[0] ?? null;
   const productOf = (lineId: string) => productByNo.get(lineNo.get(lineId) ?? -1) ?? null;
   // The row a line shows on: its own, or its product's while folded.
@@ -206,6 +229,32 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     const p = productOf(lineId);
     return p && folds(p) && !isOpen(p) ? prodKey(p.no) : lineId;
   };
+
+  // ── FLIP: a row that changes group slides from where it was, as in Review
+  // mode. Positions are measured inside the table, so scrolling between two
+  // changes doesn't read as every row having moved.
+  const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
+  const lastTops = useRef(new Map<string, number>());
+  const lastLayout = useRef({ fit, picked, open });
+  useLayoutEffect(() => {
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    // A filter, a warehouse or a fold moves rows without any of them changing
+    // group: measured, never animated.
+    const was = lastLayout.current;
+    const relaid = was.fit !== fit || was.picked !== picked || was.open !== open;
+    lastLayout.current = { fit, picked, open };
+    const tops = new Map<string, number>();
+    rowRefs.current.forEach((el, key) => {
+      const top = el.offsetTop;
+      tops.set(key, top);
+      const before = lastTops.current.get(key);
+      if (!reduce && !relaid && before !== undefined && Math.abs(before - top) > 2 && el.animate) {
+        el.animate([{ transform: `translateY(${before - top}px)` }, { transform: 'none' }],
+          { duration: 380, easing: 'cubic-bezier(.2,.8,.2,1)' });
+      }
+    });
+    lastTops.current = tops;
+  }, [groups, showPacked, fit, picked, open]);
 
   const showWh = warehouses.length > 1 && (!!fit || !picked);
   const whName = (w: string | null) => (w === null || w === UNASSIGNED ? t('sodNoWarehouse') : w);
@@ -258,11 +307,24 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     save({ ...prev, counted, checkedAt: counted < l.qty ? null : prev.checkedAt });
   };
 
+  // Once a tick packs the product the selection is on, the selection moves on
+  // to the next one still to pack, as Review mode's does: the packed row has
+  // sunk, or at 0 has nothing left to do.
+  const moveOn = (lineId: string, after: ReadonlyMap<string, LineCheck>) => {
+    const p = productOf(lineId);
+    if (!p || productSummary(p.lots, after).state !== 'done') return;
+    const next = nextOpenProduct(products, after, p.no);
+    if (next) setSelected(keysOf(next)[0]!);
+  };
+
   const pack = (l: Line) => {
     const prev = checkOf(l.id);
-    save({ ...prev, checkedAt: new Date().toISOString() });
+    const next = { ...prev, checkedAt: new Date().toISOString() };
+    save(next);
     setChoose(new Set());
-    flashUndo({ prev: [prev], msg: t('pkPackedToast', { pn: pnOf(l), n: countOf(l, prev), of: l.qty }) });
+    const n = countOf(l, prev);
+    flashUndo({ prev: [prev], msg: t(isDraft && n < l.qty ? 'pkPackedSetToast' : 'pkPackedToast', { pn: pnOf(l), n, of: l.qty }) });
+    moveOn(l.id, new Map(checks).set(l.id, next));
   };
 
   const toggle = (l: Line) => {
@@ -294,8 +356,14 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     if (!plan.tick.length) return;
     const now = new Date().toISOString();
     const prev = plan.tick.map(l => checkOf(l.id));
-    prev.forEach(c => save({ ...c, checkedAt: now }));
+    const after = new Map(checks);
+    prev.forEach(c => {
+      const next = { ...c, checkedAt: now };
+      save(next);
+      after.set(c.lineId, next);
+    });
     flashUndo({ prev, msg: t('pkPackedLotsToast', { pn, n: plan.tick.length, of: p.lots.length }) });
+    moveOn(p.head.id, after);
   };
 
   const toggleKey = (key: string) => {
@@ -480,9 +548,18 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     );
   };
 
-  const tickCell = (pressed: boolean | 'mixed', label: string, onTick: () => void) => (
+  // The click stops here: the row's own click would select it again after a
+  // tick that packed it had moved the selection on.
+  const tickCell = (key: string, pressed: boolean | 'mixed', label: string, onTick: () => void) => (
     <td className="bc-cb-cell">
-      <button type="button" className="bc-cb pk-cb" aria-pressed={pressed} aria-label={label} disabled={!ready} onClick={onTick}>
+      <button
+        type="button"
+        className="bc-cb pk-cb"
+        aria-pressed={pressed}
+        aria-label={label}
+        disabled={!ready}
+        onClick={e => { e.stopPropagation(); setSelected(key); onTick(); }}
+      >
         {pressed === true && <Icon name="check" size={18} stroke={3} />}
       </button>
     </td>
@@ -516,6 +593,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   };
   const rowProps = (key: string, cls: string) => ({
     id: rowElId(key),
+    ref: (el: HTMLTableRowElement | null) => { if (el) rowRefs.current.set(key, el); else rowRefs.current.delete(key); },
     className: 'bc-row ' + cls + (selKey === key ? ' row-selected' : ''),
     onClick: () => setSelected(key),
   });
@@ -527,7 +605,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     const state = lineState(l, c);
     return (
       <tr key={l.id} {...rowProps(l.id, lineClass(l))}>
-        {tickCell(state === 'done', t(state === 'done' ? 'pkUnpackLine' : 'pkPackLine', { pn: pnOf(l) }), () => toggle(l))}
+        {tickCell(l.id, state === 'done', t(state === 'done' ? 'pkUnpackLine' : 'pkPackLine', { pn: pnOf(l) }), () => toggle(l))}
         <td className="pk-no-cell mono"><span className="pk-no">#{p.no}</span></td>
         <td className="pk-thumb-cell">{thumb(l)}</td>
         {itemCell(l, (
@@ -569,6 +647,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
       <Fragment key={key}>
         <tr {...rowProps(key, cls)}>
           {tickCell(
+            key,
             s.state === 'done' ? true : s.state === 'mixed' ? 'mixed' : false,
             t(s.state === 'done' ? 'pkUnpackProduct' : 'pkPackProduct', { pn }),
             () => toggleProduct(p),
@@ -606,7 +685,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
           const state = lineState(l, c);
           return (
             <tr key={l.id} {...rowProps(l.id, 'pk-lot ' + lineClass(l) + (fit?.has(l.id) ? ' pk-hit' : ''))}>
-              {tickCell(state === 'done', t(state === 'done' ? 'pkUnpackLine' : 'pkPackLine', { pn: `${pn} ${lotTag(l)}` }), () => toggle(l))}
+              {tickCell(l.id, state === 'done', t(state === 'done' ? 'pkUnpackLine' : 'pkPackLine', { pn: `${pn} ${lotTag(l)}` }), () => toggle(l))}
               <td className="pk-no-cell" />
               <td className="pk-thumb-cell">{thumb(l)}</td>
               <td className="pk-item-cell pk-lot-cell">
@@ -799,13 +878,24 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {listed.map(productRows)}
+                {groups.open.map(productRows)}
                 {fit?.size === 0 && (
                   <tr className="pk-empty"><td colSpan={COLS}>{t('pkFilterNone', { pn: filterText, id })}</td></tr>
                 )}
                 {!fit && products.length === 0 && (
                   <tr className="pk-empty"><td colSpan={COLS}>{t('pkNoneHere')}</td></tr>
                 )}
+                {groups.packed.length > 0 && (
+                  <tr className="bc-group pk-group">
+                    <td colSpan={COLS}>
+                      {t('pkGroupPacked')} <span className="mono muted">{groups.packed.length}</span>
+                      <button type="button" className="bc-link" onClick={() => setShowPacked(v => !v)}>
+                        {showPacked ? t('bcHide') : t('bcShow')}
+                      </button>
+                    </td>
+                  </tr>
+                )}
+                {showPacked && groups.packed.map(productRows)}
               </tbody>
             </table>
           )}

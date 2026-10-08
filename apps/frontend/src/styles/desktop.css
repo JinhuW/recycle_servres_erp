@@ -4200,6 +4200,9 @@ body:has(.pk-page) .tweaks-fab, body:has(.pk-page) .tweaks-pop { display: none; 
 .pk-zero .pk-thumb, .pk-zero .bc-pn, .pk-zero .bc-spec, .pk-zero .pk-meta, .pk-zero .pk-no { opacity: 0.5; }
 .pk-zero-note { font-size: 13px; color: var(--fg-subtle); white-space: nowrap; }
 .pk-table .pk-empty td { text-align: center; color: var(--fg-muted); font-size: 14px; padding: 24px; }
+/* The Packed divider: Review mode's, with a Hide / Show big enough to tap. */
+.pk-table .pk-group td { padding-top: 0; padding-bottom: 0; font-size: 12px; }
+.pk-group .bc-link { min-height: 44px; padding: 0 10px; margin-left: 6px; font-size: 13px; }
 
 .pk-sel-lots { list-style: none; margin: 12px 0 0; padding: 10px 0 0; border-top: 1px solid var(--border); display: grid; gap: 6px; font-size: 12.5px; }
 .pk-sel-lots li { display: flex; justify-content: space-between; align-items: center; gap: 10px; color: var(--fg-muted); }

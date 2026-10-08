@@ -1089,7 +1089,8 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   page head, a progress card, a table with the scan box over it, and a side
   panel with the selected item and a **Finish** card.
   - **Products run in the order's own list order**, the Packing list's
-    (v1.220.3; by # since v1.219.0, grouped by source PO in v1.218.0). Each
+    (v1.220.3; by # since v1.219.0, grouped by source PO in v1.218.0), with
+    the packed ones sunk to the bottom (v1.228.0, below). Each
     row leads with its product's `#`, the label the packer writes on the item,
     and names the lot it comes from (`From PO-1111 #1`, or *Typed in*). When
     the order's lots sit in more than one warehouse, a *Packing from* switch
@@ -1111,9 +1112,29 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
     `GET /api/sell-orders/:id` as each line's `imageUrl`.
   - A lot's count starts at its qty. − / + record a short pick (amber, *Short*)
     or none at all (red, *Not packed*), and lowering a packed lot unticks it.
-    The tick confirms the count as shown. A ticked row **stays in its place**
-    (v1.219.0), dimmed with a green tick. Undo reverses the last tick, a whole
+    The tick confirms the count as shown. Undo reverses the last tick, a whole
     product's included, from a toast.
+  - **A packed product sinks under *Packed*** (v1.228.0), newest first, as
+    Review mode's checked lines do. The products still to pack stay on top in
+    # order, and *Hide* / *Show* folds the group away (hidden rows leave the
+    ↑ / ↓ order). A partly packed fold stays up until its last lot is ticked.
+    A product packed at 0 keeps its place: nothing of it went in the box.
+    Ticking the selected product moves the selection to the next one still to
+    pack, and a row that changes group slides there. From v1.219.0 to
+    v1.227.0 a ticked row stayed in its place.
+  - **On a Draft the tick writes the count onto the order** (v1.228.0). Ticking
+    a lot below its qty sets that sell-order line's qty to the count:
+    - it is an in-place edit, so the line keeps its id and its #;
+    - History records it as the editor's own qty edit would be;
+    - it clears a price adjustment, as an editor save does.
+
+    A short pick then reads as packed in full and no longer blocks Mark
+    shipped. One packed at 0 becomes the product's *Qty 0* row at the same #,
+    and no product is renumbered. Unticking, Undo, or lowering such a line
+    puts its qty back and keeps the count. That is refused if its lot was
+    archived or sold meanwhile. A line at 0 can only be put back from the
+    Undo toast; after that, Edit order does it. Shipped, Awaiting payment and
+    Done orders keep their qty: the tick there is progress only.
   - **The side panel** shows the selected row: its photo large, part, From
     PO, warehouse, qty and count, and the serials on file. For a product it
     lists each lot's count. Tap a row to select it, or use ↑ / ↓; Space packs
@@ -1143,9 +1164,11 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   - Every control is at least 44px; nothing needs hover. Below 900px the
     condition moves under the item.
   - On a Draft with every lot packed at full count, **Mark shipped** opens the
-    Shipped dialog (note, packing photos) and moves the order to Shipped. Short
-    or unpacked lots block it, and the Finish card offers Edit order to match
-    the order to the box first. A refused move (a lot taken meanwhile) says
+    Shipped dialog (note, packing photos) and moves the order to Shipped.
+    Unpacked lots block it. Since v1.228.0 a short tick on a Draft has already
+    set the line to its count. A short pack from before that release still
+    blocks, and the Finish card offers Edit order to match the order to the
+    box first. A refused move (a lot taken meanwhile) says
     why and stays on the page.
   - The endpoints (`GET /api/sell-orders/:id/pack`,
     `PUT /api/sell-orders/:id/pack/:lineId`) 403 anyone whose real role is not
