@@ -17,6 +17,21 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.221.2] - 2026-10-08
+
+A closed PayPal dispute looks closed (RS-195). The stage ladder on an expanded
+disputed payment was drawn from PayPal's lifecycle stage alone, and PayPal
+leaves that stage wherever the case was decided — every resolved case in prod
+reads *claim*. So a case refunded to us a week ago still showed Claim as the
+step in progress, with pre-arbitration and arbitration ahead of it.
+
+### Fixed
+
+- **A resolved case's ladder ends on ✓ Closed.** The stages it went through
+  stay grey, the ones it never reached are dimmed behind dashed bars, and the
+  Closed step is the highlighted one. Open cases are drawn as before. The
+  ladder's states now come from one tested helper, `lib/disputeLadder.ts`.
+
 ## [1.221.1] - 2026-10-08
 
 Unknown paths return 404 (RS-167). The app is hash-routed, but the Cloudflare

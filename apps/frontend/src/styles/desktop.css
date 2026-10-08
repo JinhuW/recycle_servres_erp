@@ -1248,6 +1248,14 @@ html.desktop, body.desktop, .desktop #root {
 .so-step.locked { opacity: 0.55; cursor: not-allowed; background: var(--bg-soft); }
 .so-step.locked:hover { border-color: var(--border); color: var(--fg-subtle); }
 .so-step.locked .so-step-dot { background: var(--bg-soft); color: var(--fg-subtle); border: 1px dashed var(--border-strong); }
+/* A stage a closed dispute never climbed to: kept so the ladder keeps its
+   shape, but it is not a step the case took. The dashes are a gradient: a
+   dashed border on the bar's rounded 2px box paints as a solid line in
+   Chromium, and dashes in --border would read as the plain bar anyway. */
+.so-step.skipped { opacity: 0.55; }
+.so-step-bar.skipped {
+  background: repeating-linear-gradient(90deg, var(--border-strong) 0 5px, transparent 5px 10px);
+}
 
 /* ===== Settings shell ===== */
 .settings-shell {

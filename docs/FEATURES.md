@@ -1245,6 +1245,11 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
   direction, so ours always sit on money going out. Message threads and evidence
   are not stored — the page answers "where has this got to", not "what was
   said".
+  - **A closed case ends on Closed** (v1.221.2). PayPal leaves the stage where
+    the case was decided — nearly always the claim — so the ladder used to keep
+    that stage lit after the close. A resolved case's ladder now runs on to a
+    highlighted **✓ Closed** step; the stages it went through stay grey, and
+    the ones it never reached are dimmed behind dashed bars.
 
 - **Money that hasn't settled says so** (v1.127.0). Both providers used to drop
   every row that had not settled, so a payment in flight was indistinguishable
