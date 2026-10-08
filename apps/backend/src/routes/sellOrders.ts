@@ -22,7 +22,7 @@ import {
 } from '../services/sellOrderPriceImport';
 import {
   buildPriceTemplateWorkbook, buildPackingListWorkbook, buildPackingListByPoWorkbook,
-  type PoSource,
+  packSections, sortSources, type PoSource, type PriceTemplateProduct,
 } from '../lib/sellOrderPriceTemplate';
 import { canonPartNumberJs } from '../lib/part-number';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
@@ -278,6 +278,9 @@ sellOrders.get('/:id', async (c) => {
     type: string | null; classification: string | null; rank: string | null;
     speed: string | null; interface: string | null; form_factor: string | null;
     health: number | null; image_url: string | null;
+    lot_category: string | null; brand: string | null; capacity: string | null;
+    generation: string | null; description: string | null; lot_part_number: string | null;
+    chip_number: string | null; lot_condition: string | null; rpm: number | null;
   }[]>`
     SELECT sol.id, sol.category, sol.label, sol.sub_label, sol.part_number,
            sol.qty, sol.unit_price::float AS unit_price,
@@ -290,6 +293,10 @@ sellOrders.get('/:id', async (c) => {
            -- snapshot. Null for a hand-typed line or a deleted lot.
            ol.type, ol.classification, ol.rank, ol.speed, ol.interface,
            ol.form_factor, ol.health::float AS health,
+           -- The rest of what the packing list numbers a product by.
+           ol.category AS lot_category, ol.brand, ol.capacity, ol.generation,
+           ol.description, ol.part_number AS lot_part_number, ol.chip_number,
+           ol.condition AS lot_condition, ol.rpm,
            img.delivery_url AS image_url,
            -- What this order may still grow its line to: the lot less the units
            -- other committed orders hold. Its own claim is excluded, so editing
@@ -315,7 +322,7 @@ sellOrders.get('/:id', async (c) => {
     WHERE sol.sell_order_id = ${id}
     ORDER BY ${sellLineOrder(sql, 'sol')}
   `;
-  const [lines, metaRows, attRows, metaStatusSet] = await allLimited([
+  const [listed, metaRows, attRows, metaStatusSet] = await allLimited([
     linesQuery,
     // Per-status evidence (notes + attachments). The frontend expects a map
     // keyed by status with both fields flattened together.
@@ -331,6 +338,23 @@ sellOrders.get('/:id', async (c) => {
     `,
     () => loadMetaStatuses(sql),
   ] as const);
+  // The lines in packing-list order, each with its product's # — folded from
+  // this one read, so a save landing mid-request can't leave a line unnumbered.
+  const { lineOrder, noByLine } = foldSheetLines(listed.map((l) => ({
+    sol_id: l.id, sell_qty: l.qty,
+    sol_label: l.label, sol_sub: l.sub_label, sol_part: l.part_number,
+    sol_category: l.category, sol_condition: l.condition,
+    warehouse_short: l.pack_warehouse_short,
+    inv_id: l.inventory_id, source_order_id: l.source_order_id, po_line_no: l.source_line_no,
+    category: l.lot_category, brand: l.brand, capacity: l.capacity, generation: l.generation,
+    type: l.type, classification: l.classification, rank: l.rank, speed: l.speed,
+    interface: l.interface, form_factor: l.form_factor, description: l.description,
+    part_number: l.lot_part_number, chip_number: l.chip_number, condition: l.lot_condition,
+    health: l.health, rpm: l.rpm, image_url: l.image_url,
+  })));
+  const rank = new Map(lineOrder.map((lineId, i) => [lineId, i]));
+  const lines = [...listed].sort((a, b) => rank.get(a.id)! - rank.get(b.id)!);
+
   // unit_price is always USD; source_unit_price holds the native price for
   // foreign-currency orders (null on USD orders, where native == USD).
   const subtotal = lines.reduce((a, l) => a + l.qty * l.unit_price, 0);
@@ -380,7 +404,11 @@ sellOrders.get('/:id', async (c) => {
         : null,
       customer: { id: head.customer_id, name: head.customer_name, short: head.customer_short, region: head.customer_region },
       lines: lines.map(l => ({
-        id: l.id, category: l.category, label: l.label, sub: l.sub_label, partNumber: l.part_number,
+        id: l.id,
+        // The product's # on this order — what the packer labels its items
+        // with, and what both packing lists show. Lines of one product share it.
+        no: noByLine.get(l.id)!,
+        category: l.category, label: l.label, sub: l.sub_label, partNumber: l.part_number,
         qty: l.qty, unitPrice: l.unit_price,
         // Native (order-currency) unit price; equals unitPrice for USD orders.
         nativeUnitPrice: l.source_unit_price ?? l.unit_price,
@@ -427,6 +455,155 @@ function customerSlug(name: string | null): string {
     .replace(/\s+/g, '-');
 }
 
+// One row of an order's lines as the sheets read them: the line, its lot's
+// spec, and where the lot is now. Both the sheet query below and GET /:id
+// produce these, so the order page and the files fold the same lines the same
+// way.
+type SheetLineRow = Record<string, unknown> & { sol_id: string; sell_qty: number };
+
+type SheetSource = PoSource & { solIds: string[] };
+type SheetProduct = Omit<PriceTemplateProduct, 'category' | 'poSources'>
+  & { category: SoCategory; key: string; poSources: SheetSource[] };
+
+// The packing list's products, and the # each one carries — one per product,
+// counted 1..N in the order the packing list shows them (warehouse tab, then
+// its sections and rows) through the whole file. Every sell line takes its
+// product's # and `lineOrder` lists the lines in that order, which is how the
+// order page, Pack mode and every file agree on both.
+//
+// `rows` come in the order's own list order: a product's spec is its first
+// line's. A line held at 0 is folded and numbered like any other — zeroing a
+// line must not move a # — and only then left off the files.
+function foldSheetLines(rows: readonly SheetLineRow[]) {
+  // Only real public URLs make the sheet — seeded/stub scans carry data: URLs
+  // that would render as garbage text in the cell.
+  const publicUrl = (v: unknown): string | null =>
+    typeof v === 'string' && /^https:\/\//i.test(v) ? v : null;
+  const s = (v: unknown) => (v == null ? '' : String(v));
+  const groups = new Map<string, SheetProduct>();
+  // Same aggregation scoped per warehouse — feeds the packing-checklist tabs.
+  // Warehouse-less lines land in an 'Unassigned' tab (old packing-list rule).
+  const byWarehouse = new Map<string, Map<string, SheetProduct>>();
+  // And per warehouse per source PO, for the by-PO checklist. '' = no PO.
+  const byWarehousePo = new Map<string, Map<string, Map<string, SheetProduct>>>();
+  for (const r of rows) {
+    const qty = Number(r.sell_qty ?? 0);
+    const hasInv = r.inv_id != null;
+    // Manual lines fold sub_label into the label — the sheet's spec columns
+    // only fill from an inventory row.
+    const label = hasInv
+      ? invLabel(r)
+      : [r.sol_label, r.sol_sub].filter(Boolean).join(' — ');
+    const rawCategory = s(r.category ?? r.sol_category);
+    const category: SoCategory = (SO_CATEGORY_ORDER as readonly string[]).includes(rawCategory)
+      ? (rawCategory as SoCategory)
+      : 'Other';
+    const part = (r.part_number ?? r.sol_part ?? null) as string | null;
+    const condition = (r.condition ?? r.sol_condition ?? null) as string | null;
+    const key = `${part ? canonPartNumberJs(part) : ''}|${label}|${condition ?? ''}`;
+    const makeGroup = (): SheetProduct => ({
+      category, key, label, partNumber: part, condition, qty,
+      imageUrl: publicUrl(r.image_url),
+      specs: hasInv ? {
+        brand: s(r.brand), capacity: s(r.capacity), generation: s(r.generation),
+        type: s(r.type), classification: s(r.classification), rank: s(r.rank),
+        speed: s(r.speed), chip: s(r.chip_number), interface: s(r.interface),
+        formFactor: s(r.form_factor),
+        health: (r.health as number | null) ?? '', rpm: (r.rpm as number | null) ?? '',
+      } : {},
+      poSources: [],
+    });
+    // Both null for a hand-typed line, both set for a lot: order_lines.order_id
+    // is NOT NULL and poLineNo is null only without a lot.
+    const po = s(r.source_order_id) || null;
+    const lineNo = r.po_line_no as number | null;
+    const fold = (map: Map<string, SheetProduct>) => {
+      let g = map.get(key);
+      if (g) {
+        g.qty += qty;
+        if (!g.imageUrl) g.imageUrl = publicUrl(r.image_url);
+      } else {
+        g = makeGroup();
+        map.set(key, g);
+      }
+      const src = g.poSources.find((x) => x.po === po && x.lineNo === lineNo);
+      if (src) {
+        src.qty += qty;
+        src.solIds.push(r.sol_id);
+      } else {
+        g.poSources.push({ po, lineNo, qty, solIds: [r.sol_id] });
+      }
+    };
+    fold(groups);
+    const wh = s(r.warehouse_short) || 'Unassigned';
+    if (!byWarehouse.has(wh)) byWarehouse.set(wh, new Map());
+    fold(byWarehouse.get(wh)!);
+    if (!byWarehousePo.has(wh)) byWarehousePo.set(wh, new Map());
+    const whPos = byWarehousePo.get(wh)!;
+    const poKey = po ?? '';
+    if (!whPos.has(poKey)) whPos.set(poKey, new Map());
+    fold(whPos.get(poKey)!);
+  }
+
+  const warehouseOrder = [...byWarehouse.keys()].sort((a, b) => {
+    if (a === 'Unassigned') return 1;
+    if (b === 'Unassigned') return -1;
+    return a.localeCompare(b);
+  });
+
+  // Walk the packing list as it prints, numbering as it goes.
+  let n = 0;
+  const lineOrder: string[] = [];
+  const noByLine = new Map<string, number>();
+  const noByProduct = new Map<string, number>();
+  for (const wh of warehouseOrder) {
+    for (const { rows: products } of packSections([...byWarehouse.get(wh)!.values()])) {
+      for (const p of products) {
+        p.no = ++n;
+        noByProduct.set(`${wh}|${p.key}`, n);
+        for (const src of sortSources(p.poSources)) {
+          for (const id of src.solIds) {
+            lineOrder.push(id);
+            noByLine.set(id, n);
+          }
+        }
+      }
+    }
+  }
+
+  // What the files show: a line held at 0 is nothing to price or pick. Its
+  // product keeps the # it was given above; a tab or PO left empty goes.
+  const live = (products: Iterable<SheetProduct>): SheetProduct[] =>
+    [...products].flatMap((p) => {
+      const poSources = p.poSources.filter((x) => x.qty > 0);
+      return poSources.length ? [{ ...p, poSources }] : [];
+    });
+  const warehouses = warehouseOrder
+    .map((warehouse) => ({ warehouse, products: live(byWarehouse.get(warehouse)!.values()) }))
+    .filter((w) => w.products.length > 0);
+  // PO ids are unpadded (PO-999 before PO-1442), hence the numeric collation;
+  // hand-typed lines come last.
+  const poWarehouses = warehouseOrder
+    .map((warehouse) => ({
+      warehouse,
+      pos: [...byWarehousePo.get(warehouse)!.entries()]
+        .sort(([a], [b]) => {
+          if (!a) return 1;
+          if (!b) return -1;
+          return a.localeCompare(b, undefined, { numeric: true });
+        })
+        .map(([po, products]) => ({
+          po: po || null,
+          products: live(products.values())
+            .map((p) => ({ ...p, no: noByProduct.get(`${warehouse}|${p.key}`) })),
+        }))
+        .filter((x) => x.products.length > 0),
+    }))
+    .filter((w) => w.pos.length > 0);
+
+  return { products: live(groups.values()), warehouses, poWarehouses, lineOrder, noByLine };
+}
+
 // What both sell-order spreadsheets are built from: the product grouping the
 // edit form prices by (part|label|condition, qty summed across warehouses),
 // and the same grouping scoped per warehouse. One query feeds the bid sheet
@@ -443,7 +620,7 @@ async function loadSellOrderSheetData(sql: SqlClient, id: string) {
 
   const rows = (await sql`
     SELECT
-      sol.qty AS sell_qty,
+      sol.id AS sol_id, sol.qty AS sell_qty,
       sol.label AS sol_label, sol.sub_label AS sol_sub, sol.part_number AS sol_part,
       sol.category AS sol_category, sol.condition AS sol_condition,
       w.short AS warehouse_short,
@@ -468,112 +645,9 @@ async function loadSellOrderSheetData(sql: SqlClient, id: string) {
     ) img ON TRUE
     WHERE sol.sell_order_id = ${id}
     ORDER BY ${sellLineOrder(sql, 'sol')}
-  `) as Record<string, unknown>[];
+  `) as SheetLineRow[];
 
-  type Group = {
-    category: SoCategory; label: string; partNumber: string | null;
-    condition: string | null; qty: number; imageUrl: string | null;
-    specs: Record<string, string | number>;
-    // Where the row's units came from, one entry per PO line, each with the
-    // sell-order lines it covers. The packing tabs give every entry its own
-    // tickable row; the bid sheet reads none of it.
-    poSources: PoSource[];
-  };
-  // Only real public URLs make the sheet — seeded/stub scans carry data: URLs
-  // that would render as garbage text in the cell.
-  const publicUrl = (v: unknown): string | null =>
-    typeof v === 'string' && /^https:\/\//i.test(v) ? v : null;
-  const s = (v: unknown) => (v == null ? '' : String(v));
-  const groups = new Map<string, Group>();
-  // Same aggregation scoped per warehouse — feeds the packing-checklist tabs.
-  // Warehouse-less lines land in an 'Unassigned' tab (old packing-list rule).
-  const byWarehouse = new Map<string, Map<string, Group>>();
-  // And per warehouse per source PO, for the by-PO checklist. '' = no PO.
-  const byWarehousePo = new Map<string, Map<string, Map<string, Group>>>();
-  for (const [idx, r] of rows.entries()) {
-    // A line held at 0 keeps its # (counted here) but is nothing to price or
-    // pick, so it never becomes a row.
-    const soLineNo = idx + 1;
-    const qty = Number(r.sell_qty ?? 0);
-    if (qty === 0) continue;
-    const hasInv = r.inv_id != null;
-    // Manual lines fold sub_label into the label — the sheet's spec columns
-    // only fill from an inventory row.
-    const label = hasInv
-      ? invLabel(r)
-      : [r.sol_label, r.sol_sub].filter(Boolean).join(' — ');
-    const rawCategory = s(r.category ?? r.sol_category);
-    const category: SoCategory = (SO_CATEGORY_ORDER as readonly string[]).includes(rawCategory)
-      ? (rawCategory as SoCategory)
-      : 'Other';
-    const part = (r.part_number ?? r.sol_part ?? null) as string | null;
-    const condition = (r.condition ?? r.sol_condition ?? null) as string | null;
-    const key = `${part ? canonPartNumberJs(part) : ''}|${label}|${condition ?? ''}`;
-    const makeGroup = (): Group => ({
-      category, label, partNumber: part, condition, qty,
-      imageUrl: publicUrl(r.image_url),
-      specs: hasInv ? {
-        brand: s(r.brand), capacity: s(r.capacity), generation: s(r.generation),
-        type: s(r.type), classification: s(r.classification), rank: s(r.rank),
-        speed: s(r.speed), chip: s(r.chip_number), interface: s(r.interface),
-        formFactor: s(r.form_factor),
-        health: (r.health as number | null) ?? '', rpm: (r.rpm as number | null) ?? '',
-      } : {},
-      poSources: [],
-    });
-    // Both null for a hand-typed line, both set for a lot: order_lines.order_id
-    // is NOT NULL and poLineNo is null only without a lot.
-    const po = s(r.source_order_id) || null;
-    const lineNo = r.po_line_no as number | null;
-    const fold = (map: Map<string, Group>) => {
-      let g = map.get(key);
-      if (g) {
-        g.qty += qty;
-        if (!g.imageUrl) g.imageUrl = publicUrl(r.image_url);
-      } else {
-        g = makeGroup();
-        map.set(key, g);
-      }
-      const src = g.poSources.find((x) => x.po === po && x.lineNo === lineNo);
-      if (src) {
-        src.qty += qty;
-        src.soLineNos.push(soLineNo);
-      } else {
-        g.poSources.push({ po, lineNo, qty, soLineNos: [soLineNo] });
-      }
-    };
-    fold(groups);
-    const wh = s(r.warehouse_short) || 'Unassigned';
-    if (!byWarehouse.has(wh)) byWarehouse.set(wh, new Map());
-    fold(byWarehouse.get(wh)!);
-    if (!byWarehousePo.has(wh)) byWarehousePo.set(wh, new Map());
-    const whPos = byWarehousePo.get(wh)!;
-    const poKey = po ?? '';
-    if (!whPos.has(poKey)) whPos.set(poKey, new Map());
-    fold(whPos.get(poKey)!);
-  }
-
-  const warehouseOrder = [...byWarehouse.keys()].sort((a, b) => {
-    if (a === 'Unassigned') return 1;
-    if (b === 'Unassigned') return -1;
-    return a.localeCompare(b);
-  });
-  const warehouses = warehouseOrder.map((warehouse) => ({
-    warehouse,
-    products: [...byWarehouse.get(warehouse)!.values()],
-  }));
-  // PO ids are unpadded (PO-999 before PO-1442), hence the numeric collation;
-  // hand-typed lines come last.
-  const poWarehouses = warehouseOrder.map((warehouse) => ({
-    warehouse,
-    pos: [...byWarehousePo.get(warehouse)!.entries()]
-      .sort(([a], [b]) => {
-        if (!a) return 1;
-        if (!b) return -1;
-        return a.localeCompare(b, undefined, { numeric: true });
-      })
-      .map(([po, products]) => ({ po: po || null, products: [...products.values()] })),
-  }));
+  const sheet = foldSheetLines(rows);
 
   const slug = customerSlug(head.customer_name);
   return {
@@ -582,9 +656,9 @@ async function loadSellOrderSheetData(sql: SqlClient, id: string) {
       customerName: head.customer_name ?? '',
       currencyCode: head.currency_code,
     },
-    products: [...groups.values()],
-    warehouses,
-    poWarehouses,
+    products: sheet.products,
+    warehouses: sheet.warehouses,
+    poWarehouses: sheet.poWarehouses,
     filenameStem: slug ? `${head.id}-${slug}` : head.id,
   };
 }

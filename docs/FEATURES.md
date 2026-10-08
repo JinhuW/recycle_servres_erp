@@ -685,8 +685,9 @@ on to Sold once every line has sold (v1.164.0).
   exempted archived sell orders only, so closing one did not help despite
   the dialog saying it would. A sale whose source line is gone drops out of
   the cost-based dashboard figures. A sell line held at 0 doesn't block
-  either (v1.220.2): it keeps its # and becomes a hand-typed line, no longer
-  capped by a lot's stock.
+  either (v1.220.2): it becomes a hand-typed line, no longer capped by a
+  lot's stock — and, as a different product now, it takes a hand-typed
+  line's place and # in the packing-list order (v1.220.3).
 - **Every change is audited**, drafts included (v1.33.0), and each timeline
   opens with an "Order created" entry.
 - Excel export carries the category's full spec set per line, one tab per
@@ -824,12 +825,18 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
     full. Saving refuses such a line above 0.
   - View and edit share one history entry, so browser Back returns to where
     the order was opened from.
-- **Every line shows its # on the order** (v1.219.0) — `#3` before the item
-  name, in view and edit. The # is the line's place in the order's list
-  (position, then creation, then id): the number the packer labels the item
-  with and the receiver checks the box by. Pack mode and both packing lists
-  show the same number, and a line added while editing shows its # before the
-  save.
+- **Every line shows its product's # on the order** (v1.219.0; one per
+  product since v1.220.3) — `#3` before the item name, in view and edit: the
+  number the packer labels the items with and the receiver checks the box by.
+  Products are numbered 1..N in the order the Packing list shows them —
+  warehouse tab, then category, device, DDR generation, brand / capacity /
+  speed — through the whole file, and **the order lists its lines in that same
+  order**, so the page, Pack mode and both packing lists read alike. Lines of
+  one product (several PO lines of one part) share its #. The number is worked
+  out from the sort each time the order is read, so adding a line, deleting a
+  lot, moving one to another warehouse or editing a spec that re-sorts it
+  renumbers the products after it; setting a line to 0 never does. A line
+  added while editing reads *new* until the save numbers it.
 - **A line that can't ship is set to 0, not removed** (v1.219.0), so no line
   after it is renumbered. Any line already on the order may go to 0 in the
   editor, including one whose lot is gone; a line being added still needs at
@@ -837,7 +844,8 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   server holds that rule too: a save may hold at 0 only a lot already on the
   order, and a 0 for any other lot — or an id no lot has — is a 400. A line at 0 holds
   nothing: it reserves no stock, sells nothing on Done, records no market
-  price, is left off the bid sheet and both packing lists (its # stays taken),
+  price, is left off the bid sheet and both packing lists (its product keeps
+  its #, which the sheet then skips),
   and keeps its price through a negotiated total. An order whose lines are
   all 0 can't move to Shipped, Awaiting payment or Done, and has nothing to
   pack: both packing-list buttons are off for it (v1.220.2). A hand-typed line is
@@ -849,7 +857,8 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   `sellOrders.lineGroup`, default by warehouse).
   - By PO orders the groups numerically and puts hand-typed lines last under
     "No PO", matching the "Packing list by PO" download. It shows a Warehouse
-    column.
+    column. Inside a group, either way, the lines keep the order's # order
+    (v1.220.3; By PO went by the PO page's line # before).
   - By warehouse groups on the warehouse each line was saved with and shows
     the "From PO-…" reference under each line.
   - PO references are links in view mode and plain text while editing, since
@@ -938,14 +947,13 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   import is rejected for having no price column (v1.130.0). **Every row names
   its source in a `From PO` column after Part #** (v1.216.0): `PO-1442 #3`,
   the line's # on that PO's page; a row of hand-typed lines alone reads `—`.
-  **A product from several PO lines is checked off line by line** (v1.220.0,
-  laid out like the inventory page's lots): a bold row for the product — Part
-  #, specs, its total and the POs it spans (`2 POs`, `1 PO`, `+ No PO` for a
-  hand-typed share), no tick box — then a row per PO line with its own #,
-  tick box, `From PO-999 #12` (or `No PO`) and quantity, POs in numeric
-  order, hand-typed last. The RAM labels run down the whole block and the
-  subtotals count the product once. Until v1.220.0 those lines were stacked in
-  one cell under a single tick box (v1.216.0).
+  **A product is one row with one tick box** (v1.220.3): a product from
+  several PO lines stacks them in its `From PO` cell, a line each with its
+  share — `PO-1445 #2 × 13` above `PO-1460 #3 × 12` (`No PO × n` for a
+  hand-typed share) — POs in numeric order, hand-typed last, and the row grows
+  to show them. v1.220.0 had split such a product into a bold product row and
+  a tickable row per PO line; that went back to one row once the # became one
+  per product.
 - **The packing lists carry no photos** (v1.220.1). v1.220.0 embedded a
   thumbnail of each lot's label scan in a `Photo` column after the tick box,
   fetched at export time; it was taken out the same day as not needed on the
@@ -953,10 +961,13 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   nothing. The photo is on screen in Pack mode instead, and the bid sheet keeps
   its Image URL links. The download buttons stay disabled while a file is
   being prepared.
-- **Both packing lists number their rows by the sell order's #** (v1.219.0): a
-  `#` column first, before the tick box, so the label on an item matches its
-  row. A row that folds several lines lists their #s ascending (`2, 5`). The
-  bid sheet has no such column.
+- **Both packing lists number their rows by the product's # on the order**
+  (v1.219.0; per product since v1.220.3): a `#` column first, before the tick
+  box, so the label on an item matches its row. The count runs 1..N down the
+  file and never restarts on a new tab; the by-PO file and a one-warehouse
+  download show each product the same # as the full list, and a product held
+  at 0 leaves a gap. The bid sheet's own `#` column is a plain row index per
+  tab, not this number.
 - **The packing list also comes cut by PO** (v1.189.0) — `Packing list by PO`,
   the same route with `?groupBy=po`: one tab per PO per warehouse
   (`PO-1442 - DEN`), POs in numeric order, hand-typed lines on a
@@ -964,9 +975,9 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   category sections, the RAM device / DDR-generation labels and tints, tick
   boxes, subtotals and a PO total. Each tab adds an **ID in PO** column after
   Part # (v1.197.3): the line's # on that PO's page. A row that folds several
-  lots of the PO is split the same way (v1.220.0): the product's row reads
-  `2 lines`, then each line's row its ID; the tab already names the PO, so it
-  has no `From PO` column. A warehouse picker beside the buttons
+  lots of the PO stacks their IDs in that cell the same way (`#2 × 13` above
+  `#3 × 12`, v1.220.3); the tab already names the PO, so it has no `From PO`
+  column. A warehouse picker beside the buttons
   (shown when the order's lines above 0 span more than one — a warehouse
   holding only 0 lines isn't offered, v1.220.2) narrows either packing list to
   one warehouse (`?warehouse=<short>`); the bid sheet always covers the whole
@@ -979,10 +990,12 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   `#/sell-orders/<id>/pack`, a full-window page with no sidebar, top bar or
   tweaks button. It is the on-screen form of the Packing list, and the
   outbound twin of the PO's Review mode.
-  - **Lines run in the order's own list order** (v1.219.0; grouped by source
-    PO in v1.218.0). Each row's tag is the line's `#` on the order, the label
-    the packer writes on the item, and its meta line names the lot it comes
-    from (`From PO-1111 #1`, or *Typed in*). When the order's lots sit in more
+  - **Lines run in the order's own list order** — the Packing list's
+    (v1.220.3; by # since v1.219.0, grouped by source PO in v1.218.0). Each
+    row's tag is its product's `#`, the label the packer writes on the item, and
+    its meta line names the lot it comes from (`From PO-1111 #1`, or *Typed
+    in*); two lines of one product share a tag, and a scan that could mean
+    either names them by both. When the order's lots sit in more
     than one warehouse, a *Packing from* switch narrows the list without
     renumbering it.
   - **Each line shows its lot's photo** (v1.220.0) between the tag and the

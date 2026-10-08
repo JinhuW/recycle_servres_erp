@@ -35,20 +35,16 @@ describe('groupSellOrderLines', () => {
     ]);
   });
 
-  it('runs a PO group in the PO page\'s line order, unnumbered lines last', () => {
-    const numbered = [
-      { ...line('a', 'WH-DEN', 'PO-1442'), sourceLineNo: 3 },
-      { ...line('b', 'WH-DEN', 'PO-1442'), sourceLineNo: null },
-      { ...line('c', 'WH-LA1', 'PO-1442'), sourceLineNo: 1 },
-      { ...line('d', 'WH-DEN', 'PO-1442') },
-      { ...line('e', 'WH-LA1', 'PO-1442'), sourceLineNo: 2 },
+  it('keeps the server\'s packing-list order inside a group, both ways', () => {
+    const sameOrder = [
+      line('a', 'WH-DEN', 'PO-1442'),
+      line('b', 'WH-DEN', 'PO-1442'),
+      line('c', 'WH-LA1', 'PO-1442'),
+      line('d', 'WH-DEN', 'PO-1442'),
     ];
-    const [g] = groupSellOrderLines(numbered, 'po');
-    expect(g.items.map(i => [i.line.id, i.idx])).toEqual([
-      ['c', 2], ['e', 4], ['a', 0], ['b', 1], ['d', 3],
-    ]);
-    // By warehouse, lines stay in the order they were added.
-    expect(groupSellOrderLines(numbered, 'warehouse')[0].items.map(i => i.line.id))
+    const [g] = groupSellOrderLines(sameOrder, 'po');
+    expect(g.items.map(i => [i.line.id, i.idx])).toEqual([['a', 0], ['b', 1], ['c', 2], ['d', 3]]);
+    expect(groupSellOrderLines(sameOrder, 'warehouse')[0].items.map(i => i.line.id))
       .toEqual(['a', 'b', 'd']);
   });
 

@@ -12,7 +12,7 @@ import { loginAs, ALEX } from './helpers/auth';
 import { firstCustomerId } from './helpers/fixtures';
 
 type DetailLine = {
-  id: string; inventoryId: string | null; category: string; label: string; sub: string | null;
+  id: string; no: number; inventoryId: string | null; category: string; label: string; sub: string | null;
   partNumber: string | null; qty: number; nativeUnitPrice: number; unitPrice: number;
   warehouseId: string | null; condition: string | null; position: number;
 };
@@ -223,14 +223,14 @@ describe('sell order lines at qty 0', () => {
     expect(+(live.unitPrice * live.qty).toFixed(2)).toBeCloseTo(25, 1);
   });
 
-  it('numbers lines the same way on the order and the packing list, tied positions included', async () => {
+  it('numbers products the same way on the order and the packing list, tied positions included', async () => {
     const id = await createOrder(mgr, [typedLine('ZQ-T1'), typedLine('ZQ-T2'), typedLine('ZQ-T3')]);
     await getTestDb()`UPDATE sell_order_lines SET position = 0 WHERE sell_order_id = ${id}`;
-    const order = (await detailLines(mgr, id)).map(l => l.partNumber);
+    const noOf = new Map((await detailLines(mgr, id)).map(l => [l.partNumber, l.no]));
 
     const wb = await workbook(mgr, `/api/sell-orders/${id}/packing-list`);
     const rows = packRows(wb.worksheets[0]!);
-    for (const r of rows) expect(r.no).toBe(String(order.indexOf(r.part) + 1));
+    for (const r of rows) expect(r.no).toBe(String(noOf.get(r.part)));
     expect(rows).toHaveLength(3);
   });
 

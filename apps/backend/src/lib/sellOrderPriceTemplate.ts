@@ -76,15 +76,17 @@ export type PriceTemplateProduct = {
   // Keyed by SPEC_COLS_BY_CATEGORY keys; absent/blank for manual lines.
   specs: Record<string, string | number>;
   // Where the row's units came from, one entry per PO line it folds. Only the
-  // packing tabs read it, giving each entry a tickable row of its own.
+  // packing tabs read it, stacking the entries in the row's source cell.
   poSources?: PoSource[];
+  // The product's # on the order: the number the packer labels its items
+  // with, shared by every file, the order page and Pack mode. Packing tabs only.
+  no?: number;
 };
 
 // One PO line's share of a row. `lineNo` is the line's # on its PO page
 // (lib/poLineNo.ts); `po` and `lineNo` are both null for a line typed onto
-// the order by hand. `soLineNos` are the sell-order lines it covers — the #
-// the packer writes on each item's label.
-export type PoSource = { po: string | null; lineNo: number | null; qty: number; soLineNos: number[] };
+// the order by hand.
+export type PoSource = { po: string | null; lineNo: number | null; qty: number };
 
 export type PriceTemplateHead = {
   id: string;
@@ -179,7 +181,7 @@ const CATEGORY_ORDER = ['RAM', 'SSD', 'HDD', 'Other'] as const;
 
 // Row order lives in lib/categoryColumns so the inventory export ships the same
 // sequence — brand, then capacity, speed — and the two can't drift apart.
-function sortForSheet(products: PriceTemplateProduct[]): PriceTemplateProduct[] {
+function sortForSheet<T extends PriceTemplateProduct>(products: T[]): T[] {
   return sortSheetRows(products, (p) => ({ specs: p.specs, label: p.label }));
 }
 
@@ -234,7 +236,7 @@ const spec = (p: PriceTemplateProduct, key: string): string => String(p.specs[ke
 // Device group, DDR generation (numeric, blanks last — DDR3 < DDR4 < DDR5),
 // desktop before laptop, then the shared brand/capacity/speed order. Bid tab
 // and packing tabs both use this so a product sits in the same place on each.
-function sortRamForSheet(products: PriceTemplateProduct[]): PriceTemplateProduct[] {
+function sortRamForSheet<T extends PriceTemplateProduct>(products: T[]): T[] {
   return sortForSheet(products).sort((a, b) => {
     const d = deviceRank(spec(a, 'type')) - deviceRank(spec(b, 'type'));
     if (d !== 0) return d;
@@ -244,7 +246,7 @@ function sortRamForSheet(products: PriceTemplateProduct[]): PriceTemplateProduct
   });
 }
 
-function sortCategoryForSheet(category: string, products: PriceTemplateProduct[]): PriceTemplateProduct[] {
+function sortCategoryForSheet<T extends PriceTemplateProduct>(category: string, products: T[]): T[] {
   return category === 'RAM' ? sortRamForSheet(products) : sortForSheet(products);
 }
 
@@ -260,17 +262,8 @@ function renderGroupLabels(
   groupCols: readonly GroupCol[],
   sorted: PriceTemplateProduct[],
   firstRow: number,
-  // Rows each product takes: one on a bid tab; on a pack tab a product split
-  // by PO line takes its own row plus one per line, all under its label.
-  spans?: readonly number[],
 ): void {
   const thin = { style: 'thin' } as const;
-  const starts: number[] = [];
-  let at = firstRow;
-  sorted.forEach((_, i) => {
-    starts.push(at);
-    at += spans?.[i] ?? 1;
-  });
   groupCols.forEach((col, g) => {
     const prefix = (p: PriceTemplateProduct) =>
       groupCols.slice(0, g + 1).map((c) => c.label(spec(p, c.key))).join(' ');
@@ -278,8 +271,8 @@ function renderGroupLabels(
     while (start < sorted.length) {
       let end = start;
       while (end + 1 < sorted.length && prefix(sorted[end + 1]) === prefix(sorted[start])) end++;
-      const top = starts[start];
-      const bottom = starts[end] + (spans?.[end] ?? 1) - 1;
+      const top = firstRow + start;
+      const bottom = firstRow + end;
       if (bottom > top) ws.mergeCells(top, g + 1, bottom, g + 1);
       const cell = ws.getCell(top, g + 1);
       cell.value = col.label(spec(sorted[start], col.key));
@@ -294,14 +287,25 @@ function renderGroupLabels(
 
 // Fold products into CATEGORY_ORDER buckets; unknown categories go to Other
 // so nothing can fall off the workbook.
-function groupByCategory(products: PriceTemplateProduct[]): Map<string, PriceTemplateProduct[]> {
-  const byCategory = new Map<string, PriceTemplateProduct[]>();
+function groupByCategory<T extends PriceTemplateProduct>(products: T[]): Map<string, T[]> {
+  const byCategory = new Map<string, T[]>();
   for (const p of products) {
     const cat = (CATEGORY_ORDER as readonly string[]).includes(p.category) ? p.category : 'Other';
     if (!byCategory.has(cat)) byCategory.set(cat, []);
     byCategory.get(cat)!.push(p);
   }
   return byCategory;
+}
+
+// A packing tab's sections and rows, in the order the tab shows them. The
+// route numbers products by walking exactly this, so the # a product gets and
+// the place its row takes cannot disagree.
+export function packSections<T extends PriceTemplateProduct>(
+  products: T[],
+): { category: string; rows: T[] }[] {
+  const byCategory = groupByCategory(products);
+  return CATEGORY_ORDER.filter((cat) => byCategory.has(cat))
+    .map((category) => ({ category, rows: sortCategoryForSheet(category, byCategory.get(category)!) }));
 }
 
 export async function buildPriceTemplateWorkbook(
@@ -541,8 +545,8 @@ type PoCol = 'source' | 'id';
 
 function whSectionCols(category: string, poCol: PoCol): WhCol[] {
   return [
-    // The line's # on the sell order, which the packer labels the item with.
-    { header: '#',         key: 'soLine',    width: 8 },
+    // The product's # on the sell order, which the packer labels its items with.
+    { header: '#',         key: 'no',        width: 8 },
     { header: 'Packed ✓',  key: 'packed',    width: 9 },
     { header: 'Part #',    key: 'part',      width: 24 },
     poCol === 'id'
@@ -555,25 +559,27 @@ function whSectionCols(category: string, poCol: PoCol): WhCol[] {
 
 // A product's PO lines in the order a picker walks them: POs in numeric order
 // (PO-999 before PO-1442), then line #, a hand-typed share last.
-function sortSources(sources: readonly PoSource[]): PoSource[] {
+export function sortSources<T extends PoSource>(sources: readonly T[]): T[] {
   return [...sources].sort((a, b) => {
     if (!a.po || !b.po) return a.po ? -1 : b.po ? 1 : 0;
     return a.po.localeCompare(b.po, undefined, { numeric: true }) || a.lineNo! - b.lineNo!;
   });
 }
 
-// What a split product's own row says it spans: "2 POs", "1 PO" for two lines
-// of one PO, "+ No PO" when part of it was typed in by hand.
-function posSpanned(sources: readonly PoSource[]): string {
-  const n = new Set(sources.flatMap((x) => (x.po ? [x.po] : []))).size;
-  const pos = `${n} PO${n === 1 ? '' : 's'}`;
-  return sources.some((x) => !x.po) ? `${pos} + No PO` : pos;
+// A product's source cell. One PO line reads as it always has; several are
+// stacked in the one cell, a line each with its share of the qty, so the
+// product keeps one row, one # and one tick box (user-requested 2026-10-07).
+function sourceCell(sources: readonly PoSource[], poCol: PoCol): string | number {
+  const name = (x: PoSource) =>
+    poCol === 'id' ? (x.lineNo != null ? `#${x.lineNo}` : '—')
+      : x.po ? `${x.po} #${x.lineNo}` : 'No PO';
+  if (sources.length === 1) {
+    const [x] = sources;
+    if (poCol === 'id') return x.lineNo ?? '';
+    return x.po ? name(x) : '—';
+  }
+  return sources.map((x) => `${name(x)} × ${x.qty}`).join('\n');
 }
-
-const numList = (nos: readonly number[]): number | string => {
-  const sorted = [...nos].sort((a, b) => a - b);
-  return sorted.length === 1 ? sorted[0] : sorted.join(', ');
-};
 
 // Every pack tab reserves the group-label columns, whether or not it holds a
 // RAM section: two tabs on the same order then have the same layout, so a
@@ -593,12 +599,11 @@ function renderWarehouseSheet(
   // bid tabs at a glance and can never collide with RAM/SSD/HDD/Other.
   const ws = wb.addWorksheet(opts.tabName ?? `Pack - ${wh.warehouse}`);
 
-  const byCategory = groupByCategory(wh.products);
-  const sections = CATEGORY_ORDER.filter((cat) => byCategory.has(cat));
+  const sections = packSections(wh.products);
 
   // Shared per-index widths: the widest column wins across sections.
   const widths: number[] = [];
-  for (const cat of sections) {
+  for (const { category: cat } of sections) {
     whSectionCols(cat, poCol).forEach((c, i) => {
       widths[i] = Math.max(widths[i] ?? 0, c.width);
     });
@@ -638,7 +643,7 @@ function renderWarehouseSheet(
   const box = { top: thin, bottom: thin, left: thin, right: thin };
   let r = 5;
   let totalQty = 0;
-  for (const cat of sections) {
+  for (const { category: cat, rows: sectionRows } of sections) {
     const cols = whSectionCols(cat, poCol);
     const qtyIdx = cols.findIndex((c) => c.key === 'qty') + 1 + PACK_GROUP_OFFSET;
 
@@ -657,69 +662,49 @@ function renderWarehouseSheet(
 
     let sectionQty = 0;
     // Same order as the bid tabs, so a picker walking the shelf and a manager
-    // reading the bid see a product in the same place. Sorted once: the group
-    // labels below merge runs of THIS array, so the two must not diverge.
-    const sectionRows = sortCategoryForSheet(cat, byCategory.get(cat)!);
+    // reading the bid see a product in the same place. The group labels below
+    // merge runs of sectionRows, one row each.
     const firstRow = r;
-    const spans: number[] = [];
     for (const p of sectionRows) {
+      const row = ws.getRow(r++);
       // Wash under the group, tick box excluded — a tinted box reads as
       // already ticked once the sheet is printed.
       const wash = cat === 'RAM' ? tintFill(rowTint(p)) : null;
       const sources = sortSources(p.poSources ?? []);
-      // From one PO line, a product is one row. From several, it is laid out
-      // the way the inventory page lists a product's lots: the product on a
-      // bold row of its own, then a row per PO line with its own #, tick box
-      // and qty, so a picker pulling one part from three boxes ticks each box
-      // (user-requested 2026-10-07).
-      const block: { kind: 'single' | 'product' | 'line'; src: PoSource | null }[] = sources.length > 1
-        ? [{ kind: 'product', src: null }, ...sources.map((src) => ({ kind: 'line' as const, src }))]
-        : [{ kind: 'single', src: sources[0] ?? null }];
-      for (const { kind, src } of block) {
-        const row = ws.getRow(r++);
-        const tickable = kind !== 'product';
-        // Part # and the specs belong to the product; a line row only says
-        // which PO line it is.
-        const productCells = kind !== 'line';
-        cols.forEach((c, i) => {
-          const cell = row.getCell(i + 1 + PACK_GROUP_OFFSET);
-          if (wash && c.key !== 'packed') cell.fill = wash;
-          switch (c.key) {
-            case 'soLine':
-              // Centred, so a lone # and a folded "2, 5" line up.
-              if (tickable) cell.value = numList(src?.soLineNos ?? []);
-              cell.alignment = { horizontal: 'center' };
-              break;
-            case 'packed':
-              // Blank bordered tick box — pen after printing, or type x in Excel.
-              if (tickable) cell.border = box;
-              break;
-            case 'part': if (productCells) cell.value = p.partNumber ?? ''; break;
-            case 'poLine':
-              cell.value = kind === 'product' ? `${sources.length} lines` : src?.lineNo ?? '';
-              cell.alignment = { horizontal: 'center' };
-              break;
-            case 'poSource':
-              if (kind === 'product') cell.value = posSpanned(sources);
-              else if (src?.po) cell.value = `${src.po} #${src.lineNo}`;
-              else if (src) cell.value = kind === 'line' ? 'No PO' : '—';
-              if (kind === 'line') cell.alignment = { indent: 1 };
-              break;
-            case 'qty':
-              cell.value = kind === 'line' ? src!.qty : p.qty;
-              cell.numFmt = c.numFmt!;
-              break;
-            default: if (productCells) cell.value = p.specs[c.key] ?? '';
-          }
-          if (kind === 'product' && (c.key === 'part' || c.key === 'qty')) cell.font = { bold: true };
-        });
-      }
-      spans.push(block.length);
+      const stacked = sources.length > 1;
+      // Excel won't grow a row for wrapped text it didn't lay out itself.
+      if (stacked) row.height = 15 * sources.length;
+      cols.forEach((c, i) => {
+        const cell = row.getCell(i + 1 + PACK_GROUP_OFFSET);
+        if (wash && c.key !== 'packed') cell.fill = wash;
+        switch (c.key) {
+          case 'no':
+            cell.value = p.no ?? '';
+            cell.alignment = { horizontal: 'center', vertical: 'top' };
+            break;
+          case 'packed':
+            // Blank bordered tick box — pen after printing, or type x in Excel.
+            cell.border = box;
+            break;
+          case 'part': cell.value = p.partNumber ?? ''; break;
+          case 'poLine':
+          case 'poSource':
+            cell.value = sources.length ? sourceCell(sources, poCol) : '';
+            cell.alignment = { vertical: 'top', wrapText: stacked, horizontal: c.key === 'poLine' ? 'center' : undefined };
+            break;
+          case 'qty':
+            cell.value = p.qty;
+            cell.numFmt = c.numFmt!;
+            break;
+          default: cell.value = p.specs[c.key] ?? '';
+        }
+        if (stacked && !cell.alignment) cell.alignment = { vertical: 'top' };
+      });
       sectionQty += p.qty;
     }
-    // Spans are merged across sectionRows only, so they stop at the section's
-    // last row and can never reach the subtotal below it.
-    if (cat === 'RAM') renderGroupLabels(ws, RAM_GROUP_COLS, sectionRows, firstRow, spans);
+    // Merged across sectionRows only, so they stop at the section's last row
+    // and can never reach the subtotal below it.
+    if (cat === 'RAM') renderGroupLabels(ws, RAM_GROUP_COLS, sectionRows, firstRow);
     totalQty += sectionQty;
 
     const subtotal = ws.getRow(r++);
