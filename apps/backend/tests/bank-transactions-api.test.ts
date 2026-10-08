@@ -318,6 +318,33 @@ describe('bank transactions API', () => {
     expect(none.body.rows).toHaveLength(0);
   });
 
+  // The PO page and Review mode compare this net with the PO's total cost, so
+  // the detail has to carry the same figure the list does.
+  it('the PO detail carries the net linked payments, managers only', async () => {
+    await seedPairedAndSingles();
+    const manager = (await loginAs(ALEX)).token;
+    const purchaser = (await loginAs(MARCUS)).token;
+    const paid = await createPO(purchaser);
+    const unpaid = await createPO(purchaser);
+    for (const ext of ['m-settle', 'm-refund']) {
+      const r = await api('POST', `/api/bank-transactions/${await idOf(ext)}/link`,
+        { token: manager, body: { orderId: paid } });
+      expect(r.status).toBe(200);
+    }
+
+    type Detail = { order: { linkedPaid?: number | null } };
+    const detail = async (token: string, id: string) => {
+      const r = await api<Detail>('GET', `/api/orders/${id}`, { token });
+      expect(r.status).toBe(200);
+      return r.body.order;
+    };
+    expect((await detail(manager, paid)).linkedPaid).toBe(1120);   // −1240 paid, +120 refunded
+    const none = await detail(manager, unpaid);
+    expect(none).toHaveProperty('linkedPaid');
+    expect(none.linkedPaid).toBeNull();
+    expect(await detail(purchaser, paid)).not.toHaveProperty('linkedPaid');
+  });
+
   // The number a manager reads the row's own amount against. Goods alone would
   // report 1200 beside a -1240 payment and look like a shortfall.
   it('a linked row carries the PO cost, goods plus fees', async () => {

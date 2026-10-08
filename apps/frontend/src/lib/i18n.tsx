@@ -466,6 +466,14 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payLedgerOpen: 'Open Payments',
     payLedgerNet: 'Net paid',
     payLinkOpen: "Open this PO's payments",
+    // The bank's net paid against the PO's goods + fees, warned of in Review
+    // mode and on the PO page, and asked about before approving for payment.
+    payGapBanner: "Payment doesn't match the total cost: the bank paid {paid}, the PO totals {total}",
+    payGapMore: '{amt} more',
+    payGapLess: '{amt} less',
+    payGapConfirmTitle: "Payment doesn't match {id}'s total cost",
+    payGapConfirmMsg: 'The bank paid {paid}; the PO totals {total} ({gap}). Check the payment or the cost first, or continue anyway.',
+    payGapContinue: 'Continue anyway',
     // After the stage on the In Transit chip when the goods were collected, not shipped.
     inboundLocal: 'Local',
     payFocusOrder: 'Payments for {id}',

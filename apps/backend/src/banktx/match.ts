@@ -186,6 +186,24 @@ function sellerNameFrag(sql: SqlClient, legAlias: string, orderAlias = 'o') {
   )`;
 }
 
+// What the bank has actually paid for a PO, as the Payments page counts it.
+// Signed, and one row per logical payment: a paired charge writes both legs,
+// so a pair reports only its PayPal leg, and a refund subtracts. Summing ABS()
+// over every leg reported a $1,000 paired payment as $2,000 and read a refunded
+// PO as fully paid. PayPal reverses a payment in place, keeping the transaction
+// id, so a linked row can turn into money that came back; failed and reversed
+// rows stay out. NULL, not 0, when nothing is linked, so "unpaid" and "paid
+// and fully refunded" read apart.
+export function linkedPaidFrag(sql: SqlClient, orderAlias = 'o') {
+  const o = sql(orderAlias);
+  return sql`(
+    SELECT -SUM(bt.amount) FROM bank_transactions bt
+    WHERE bt.order_id = ${o}.id AND NOT bt.ignored
+      AND (bt.pair_id IS NULL OR bt.source = 'paypal')
+      AND bt.settle_status <> 'failed' AND bt.settle_status <> 'reversed'
+  )`;
+}
+
 // A row the manager can still act on. Defined once so the status filter, the
 // `hasMatch` toggle, the stats tile and the rows that get a `match` payload
 // cannot drift apart — they did, and the toggle then returned linked rows
@@ -474,19 +492,7 @@ async function fetchCandidatesBatch(
            o.txn_hit,
            o.pool_total::int AS pool_total,
            u.name AS created_by_name,
-           -- Signed, and one row per logical payment: a paired charge writes
-           -- both legs, and a refund is money back. Summing ABS() over every
-           -- leg reported a $1,000 paired payment as $2,000 and read a
-           -- refunded PO as fully paid. Same guard GET /by-order/:id uses.
-           COALESCE((
-             SELECT -SUM(bt.amount) FROM bank_transactions bt
-             WHERE bt.order_id = o.id AND NOT bt.ignored
-               AND (bt.pair_id IS NULL OR bt.source = 'paypal')
-               -- PayPal reverses a payment in place, keeping the transaction
-               -- id, so a linked row can turn into money that came back. Left
-               -- in, the PO would go on reading as fully paid.
-               AND bt.settle_status <> 'failed' AND bt.settle_status <> 'reversed'
-           ), 0)::float AS linked_total,
+           COALESCE(${linkedPaidFrag(sql)}, 0)::float AS linked_total,
            ${sellerNameFrag(sql, 'l')} AS seller_name,
            EXISTS (
              SELECT 1 FROM bank_transactions bt2

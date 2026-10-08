@@ -5,6 +5,7 @@ import { ImageLightbox } from '../../components/ImageLightbox';
 import { OrderCategoryChips } from '../../components/OrderCategoryChips';
 import { LineSpecChips } from '../../components/LineSpecChips';
 import { useManagerTakeover } from '../../components/ManagerTakeoverDialog';
+import { PaymentMismatchBanner, usePaymentMismatchConfirm } from '../../components/PaymentMismatch';
 import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
 import { api, rawFetch } from '../../lib/api';
 import {
@@ -21,6 +22,7 @@ import { useScanFilterText } from '../../lib/useScanFilter';
 import { lineSpecLabel } from '../../lib/lineGroups';
 import { linePhotos } from '../../lib/linePhotos';
 import { lineRequirements, missingFieldNames } from '../../lib/lineRequirements';
+import { paymentGap, reviewApproveTotal } from '../../lib/paymentGap';
 import { poStageName } from '../../lib/orderPresentation';
 import { statusTone } from '../../lib/status';
 import type { Order, OrderLine } from '../../lib/types';
@@ -64,6 +66,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   const [scanMsg, setScanMsg] = useState<ScanMsg | null>(null);
   const [busy, setBusy] = useState<'approve' | null>(null);
   const takeover = useManagerTakeover();
+  const mismatch = usePaymentMismatchConfirm();
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [photoIdx, setPhotoIdx] = useState(0);
 
@@ -271,6 +274,8 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
 
   const approve = async () => {
     if (!ready) return;
+    // Before anything is written, so Cancel leaves the PO as it was.
+    if (!(await mismatch.confirm(order.id, gap))) return;
     // Answered on the way into this visit, it isn't asked a second time.
     const answer = entryAnswerFor(order) ?? await takeover.ask(order);
     if (answer === null) return;
@@ -396,6 +401,9 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   const absent = ordered.done.filter(l => isAbsentChecked(l, checks.get(l.id)));
   // What Approve still has to set to 0: a line already there needs nothing.
   const toZero = absent.filter(l => l.qty > 0);
+  // Against the total the PO will have once Approve has zeroed those lines,
+  // so a line counted 0 can open a gap, or close one, before the click.
+  const gap = paymentGap(order.linkedPaid, reviewApproveTotal(order, atReviewing ? toZero : []), order.payment);
   // Nothing on this PO arrived: there is nothing to pay for.
   const allAbsent = absent.length === lines.length;
   // The PO page's numbering, which the regrouped rows would otherwise lose.
@@ -514,6 +522,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
       {readOnly && (
         <div className="oe-banner bc-banner"><Icon name="lock" size={13} /> {t('bcArchived')}</div>
       )}
+      {gap && <PaymentMismatchBanner orderId={order.id} gap={gap} className="bc-banner" />}
 
       <div className="card bc-tally">
         <div className="bc-tally-num">
@@ -718,7 +727,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
               )}
               <div className="bc-finish-actions">
                 {atReviewing && (
-                  <button type="button" className="btn accent" disabled={!ready || busy !== null || takeover.asking || remaining > 0 || allAbsent} onClick={() => void approve()}>
+                  <button type="button" className="btn accent" disabled={!ready || busy !== null || takeover.asking || mismatch.asking || remaining > 0 || allAbsent} onClick={() => void approve()}>
                     <Icon name="check" size={13} /> {busy === 'approve' ? '…' : toZero.length && !allAbsent ? t('bcApproveZeroing', { n: toZero.length }) : t('bcApprove')}
                   </button>
                 )}
@@ -756,6 +765,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
       )}
       {serialIssues && <SerialCheckDialog issues={serialIssues} onClose={() => setSerialIssues(null)} />}
       {takeover.dialog}
+      {mismatch.dialog}
     </div>
   );
 }

@@ -65,6 +65,8 @@ import { AttachmentDropzone } from '../../components/AttachmentDropzone';
 import { loadWarehouses } from '../../lib/warehouses';
 import { useReviewModeEntry } from './ReviewModeEntry';
 import { useManagerTakeover } from '../../components/ManagerTakeoverDialog';
+import { PaymentMismatchBanner, usePaymentMismatchConfirm } from '../../components/PaymentMismatch';
+import { paymentGap } from '../../lib/paymentGap';
 import { useCommissionPaidBy } from '../../lib/useCommissionPaidBy';
 
 // The uppercase heading over each block of the action card.
@@ -141,6 +143,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   // already advanced the order — re-sending it would step it on again.
   const [savedStatus, setSavedStatus] = useState(effectiveStatus);
   const takeover = useManagerTakeover();
+  const mismatch = usePaymentMismatchConfirm();
   // A move that finds the order elsewhere is another write path that learns
   // where it stands — see applyLifecycle.
   const { enter: enterReview, prompt: reviewPrompt } = useReviewModeEntry({
@@ -635,6 +638,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     otherFees: parsedOtherFees,
   });
   const effectiveTotalCost = cost.total;
+  // Against the page's live cost, as the tape reads it: a fee typed to cover
+  // the gap clears the warning before Save, and Save writes it before moving.
+  const payGap = paymentGap(order.linkedPaid, cost.total, payment);
   const effectiveProfit = totals.revenue - effectiveTotalCost;
   const commissionRateApplied = commissionRateValue ?? 0;
   const commissionOnProfit = effectiveProfit * commissionRateApplied;
@@ -790,6 +796,13 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     // A manager moving an order someone else manages is asked first whether to
     // take it over. Cancel stops the whole save — the move is part of it.
     const asks = statusDirty && !isPurchaser;
+    // Approving for payment is the move that matters: into Ready to Pay or
+    // past it from before it. Through spineStatus, so reopening a Sold PO
+    // (it sits on Done's step) doesn't read as one.
+    const readyIdx = ORDER_STATUSES.indexOf('Ready to Pay');
+    const stageIdx = (s: string) => ORDER_STATUSES.indexOf(spineStatus(s) as typeof ORDER_STATUSES[number]);
+    const approving = asks && stageIdx(savedStatus) < readyIdx && stageIdx(status) >= readyIdx;
+    if (approving && !(await mismatch.confirm(order.id, payGap))) return;
     const answer = asks ? await takeover.ask(order) : null;
     if (asks && answer === null) return;
     // A manager's move. False when the server named a new manager and the
@@ -1563,6 +1576,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                 {t('revertHint')}
               </div>
             )}
+            {payGap && <PaymentMismatchBanner orderId={order.id} gap={payGap} />}
             {statusDirty && (
               <div className="oe-banner accent">
                 <Icon name="info" size={13} />
@@ -1887,6 +1901,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
 
       {reviewPrompt}
       {takeover.dialog}
+      {mismatch.dialog}
 
       {dupConfirm && (
         <DupPartDialog

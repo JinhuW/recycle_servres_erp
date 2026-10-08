@@ -423,6 +423,11 @@ on to Sold once every line has sold (v1.164.0).
       is nothing to pay for.
     - Only Review mode's Approve zeroes them. Moving the PO from the PO page
       or the phone leaves 0-counted lines at their full qty.
+  - **A payment that doesn't match the total cost is called out** (v1.225.0).
+    See *A manager is warned when the bank paid something other than the
+    PO's total cost* below for the banner and the question at Approve. Here
+    the comparison is against the total the PO will have after Approve, so
+    ticking a line at 0 can raise the warning or clear it before the click.
   - The endpoints (`/api/orders/:id/checks…`) 403 anyone whose real role is
     not manager. The page and button are hidden from a manager previewing as
     purchaser, and the route bounces them without leaving a Back entry
@@ -582,6 +587,31 @@ on to Sold once every line has sold (v1.164.0).
   page itself, each row of the Cost Payment tab's *Bank payments* ledger is a
   link to that transaction — the Payments page pinned to the PO with that row
   open (v1.167.0).
+- **A manager is warned when the bank paid something other than the PO's
+  total cost** (v1.225.0).
+  - **What is compared.** The same net the Payment cell shows, against goods
+    + other fees, exact to the cent. Prod had 13 of 46 linked POs off, e.g.
+    $2,415 paid on a $70 PO.
+  - **The warning.** An amber banner names both figures and the difference,
+    with *Open Payments*. It shows in Review mode, and in the desktop PO
+    page's Order status card, at any stage.
+    - The PO page compares against its live cost, so a fee typed to cover the
+      gap clears the warning before Save.
+  - **Asked again at approval.** Moving a PO from before Ready to Pay into
+    Ready to Pay or Done asks *Continue anyway?* first. That covers Review
+    mode's Approve and the PO page's Save.
+    - Cancel writes nothing.
+    - Cancel has the focus, because a label scanner ends each read with
+      Enter.
+  - **What it leaves alone.**
+    - Self-paid POs: their bank money is the purchaser's reimbursement plus
+      commission.
+    - POs with nothing linked.
+    - Moves between Ready to Pay, Done and Sold.
+    - The phone.
+  - **Who sees it.** Managers only. `GET /api/orders/:id` now carries
+    `linkedPaid` for them, and leaves the key out for everyone else, a
+    manager previewing as purchaser included.
 - **Every list holds every row in scope** (v1.199.0). The phone PO list, the
   sell-order inbox and the internal transactions walk the API's pages, as the
   desktop PO list has since v1.140.1. Until then they each stopped at the
