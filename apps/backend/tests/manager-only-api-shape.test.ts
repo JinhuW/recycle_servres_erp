@@ -79,6 +79,30 @@ describe('GET /api/orders — linkedPaid', () => {
   });
 });
 
+describe('GET /api/orders/:id — linkedPaid', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('is absent for a purchaser and for a manager previewing as purchaser, present for a manager', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const { token: mgr } = await loginAs(ALEX);
+    const { id } = await createSubmitted(pur);
+    const read = async (token: string, poId: string) => {
+      const r = await api<{ order: { linkedPaid?: number | null } }>('GET', `/api/orders/${poId}`, { token });
+      expect(r.status).toBe(200);
+      return r.body.order;
+    };
+
+    expect(await read(pur, id)).not.toHaveProperty('linkedPaid');
+    const asManager = await read(mgr, id);
+    expect(asManager).toHaveProperty('linkedPaid');
+    expect(asManager.linkedPaid).toBeNull();   // nothing linked yet
+
+    const own = await createSubmitted(mgr);
+    await setPreview(mgr, 'as_purchaser');
+    expect(await read(mgr, own.id)).not.toHaveProperty('linkedPaid');
+  });
+});
+
 describe('GET /api/orders/:id — pendingRevert', () => {
   beforeEach(async () => { await resetDb(); });
 

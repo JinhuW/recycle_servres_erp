@@ -1,5 +1,6 @@
 // GET /api/orders/:id and its audit timeline — what the PO page loads.
 import { Hono } from 'hono';
+import { linkedPaidFrag } from '../../banktx/match';
 import { getDb } from '../../db';
 import { wasEverSubmitted } from '../../services/orderAudit';
 import { effectiveRole } from '../../lib/role';
@@ -31,6 +32,7 @@ detailRoutes.get('/:id', async (c) => {
            o.other_fees::float AS other_fees,
            o.other_fees_note,
            o.paypal_txn_id,
+           ${isManager ? linkedPaidFrag(sql) : sql`NULL`}::float AS linked_paid,
            o.source, o.handoff_method, o.handoff_by, o.payment_method,
            hb.name AS handoff_by_name,
            mg.id AS manager_id, mg.name AS manager_name,
@@ -257,6 +259,7 @@ detailRoutes.get('/:id', async (c) => {
       // Manager-only keys are left out, not nulled, for everyone else — the
       // key alone would name the feature. Same rule as the list above.
       ...(isManager ? {
+        linkedPaid: order.linked_paid,
         realized: realizedFromRow({
           sold_qty: order.sold_qty, bought_qty: order.bought_qty,
           revenue: order.rz_revenue, cost: order.rz_cost,

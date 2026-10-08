@@ -1,6 +1,7 @@
 // GET /api/orders — the PO list: filters, sort, keyset paging, and the
 // manager-only figures each row carries.
 import { Hono } from 'hono';
+import { linkedPaidFrag } from '../../banktx/match';
 import { getDb } from '../../db';
 import { clampLimit, cursorTs, cursorTsSelect, decodeCursor, encodeCursor, parseSort } from '../../lib/pagination';
 import { effectiveRole } from '../../lib/role';
@@ -109,18 +110,8 @@ listRoutes.get('/', async (c) => {
         : sql`AND (${sortExpr}, o.id) > ((${String(cursor.ts)}::text)::${castSql}, ${cursor.id})`)
     : sql`AND TRUE`;
 
-  // What the bank has actually paid for the PO, as the Payments page counts
-  // it: one row per logical payment (a pair reports only its PayPal leg), a
-  // refund subtracts, money that failed or came back does not count. Twin of
-  // the linked_total subquery in banktx/match.ts — keep the two in step. NULL,
-  // not 0, when nothing is linked, so the list can tell "unpaid" from "paid
-  // and fully refunded". Managers only: the figure and the page it opens are.
-  const linkedPaidFrag = isManager
-    ? sql`(SELECT -SUM(bt.amount) FROM bank_transactions bt
-           WHERE bt.order_id = o.id AND NOT bt.ignored
-             AND (bt.pair_id IS NULL OR bt.source = 'paypal')
-             AND bt.settle_status <> 'failed' AND bt.settle_status <> 'reversed')`
-    : sql`NULL`;
+  // Managers only: the figure and the Payments page it opens are.
+  const linkedPaidSel = isManager ? linkedPaidFrag(sql) : sql`NULL`;
 
   const rows = await sql`
     SELECT
@@ -131,7 +122,7 @@ listRoutes.get('/', async (c) => {
       o.other_fees::float AS other_fees,
       o.other_fees_note,
       o.paypal_txn_id,
-      ${linkedPaidFrag}::float AS linked_paid,
+      ${linkedPaidSel}::float AS linked_paid,
       o.handoff_method,
       mg.id AS manager_id, mg.name AS manager_name,
       ${newestPackageJson(sql)} AS pkg,

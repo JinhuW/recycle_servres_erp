@@ -17,6 +17,40 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.225.0] - 2026-10-08
+
+A manager approving a PO for payment is told when the bank paid something
+other than what the PO says it cost (RS-200). The net of the linked bank
+payments was already on the PO list's Payment cell, but nothing set it
+against the cost. In prod, 13 of the 46 POs with linked payments disagreed,
+one by $54,388.
+
+### Added
+
+- **A warning banner in Review mode and on the desktop PO page.** It appears
+  when a company-paid PO's linked payments, refunds subtracted, differ from
+  goods + other fees by a cent or more, and names both figures and the
+  difference, with *Open Payments*.
+  - In Review mode the comparison is against the total after Approve has set
+    0-counted lines to 0.
+  - On the PO page the comparison is against the live cost, so a fee typed
+    to cover the gap clears the banner before Save.
+- **Approving asks first.** Review mode's *Approve for payment*, and a PO-page
+  Save that moves the PO into Ready to Pay or Done from an earlier stage,
+  open *Payment doesn't match PO-n's total cost* with Cancel and *Continue
+  anyway*.
+  - Cancel writes nothing, not even the zeroed lines.
+  - Cancel holds the focus, because Review mode is driven by label scanners
+    that end each read with Enter.
+- **`GET /api/orders/:id` carries `linkedPaid` for managers.** Non-managers,
+  and a manager previewing as purchaser, get no key at all, as on the list.
+
+### Changed
+
+- The "what the bank paid" subquery was copied in the PO list and the
+  payment matcher. It is now one fragment, `linkedPaidFrag` in
+  `banktx/match.ts`, which the detail endpoint shares.
+
 ## [1.222.0] - 2026-10-08
 
 Review mode and Pack mode find a line from any part of its part number
