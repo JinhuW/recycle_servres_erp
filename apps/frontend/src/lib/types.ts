@@ -311,6 +311,8 @@ export type SellOrderEventKind =
 export type SellOrderSignoff = {
   managers: { id: string; name: string; required: boolean; signedAt: string | null; stale: boolean }[];
   complete: boolean;
+  // The order as read; a sign-off sends it back so the server signs this version only.
+  fingerprint: string;
 };
 
 export type SellOrderEvent = {

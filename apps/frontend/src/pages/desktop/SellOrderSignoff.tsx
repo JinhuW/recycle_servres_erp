@@ -31,11 +31,13 @@ export function SellOrderSignoffCard({ orderId, signoff, open, editing, voidsOnS
   const act = async (sign: boolean) => {
     setBusy(true);
     try {
-      if (sign) await api.post(`/api/sell-orders/${orderId}/signoff`, {});
+      if (sign) await api.post(`/api/sell-orders/${orderId}/signoff`, { fingerprint: signoff.fingerprint });
       else await api.delete(`/api/sell-orders/${orderId}/signoff`);
       onChanged();
     } catch (e) {
       handleFetchError(e);
+      // Most likely the order changed under the reviewer: show them what it is now.
+      onChanged();
     } finally {
       setBusy(false);
     }

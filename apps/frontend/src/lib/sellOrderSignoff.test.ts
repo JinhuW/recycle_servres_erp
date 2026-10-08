@@ -40,6 +40,7 @@ describe('missingSigners', () => {
   it('names the required managers without a current sign-off', () => {
     expect(missingSigners({
       complete: false,
+      fingerprint: 'fp',
       managers: [
         { id: '1', name: 'Jinhu', required: true, signedAt: '2026-10-08T08:00:00Z', stale: false },
         { id: '2', name: 'Tim Wu', required: true, signedAt: null, stale: false },

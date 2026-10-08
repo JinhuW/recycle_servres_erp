@@ -46,7 +46,12 @@ export type SignoffManager = {
   stale: boolean;
 };
 
-export type SignoffState = { managers: SignoffManager[]; complete: boolean };
+export type SignoffState = {
+  managers: SignoffManager[];
+  complete: boolean;
+  // The order as it stands. Signing sends back the one the manager reviewed.
+  fingerprint: string;
+};
 
 export async function signoffState(tx: SqlLike, sellOrderId: string): Promise<SignoffState> {
   const fp = await orderFingerprint(tx, sellOrderId);
@@ -67,7 +72,7 @@ export async function signoffState(tx: SqlLike, sellOrderId: string): Promise<Si
     signedAt: r.signed_at,
     stale: r.fingerprint !== null && r.fingerprint !== fp,
   }));
-  return { managers, complete: missingSigners(managers).length === 0 };
+  return { managers, complete: missingSigners(managers).length === 0, fingerprint: fp ?? '' };
 }
 
 export function missingSigners(managers: readonly SignoffManager[]): SignoffManager[] {

@@ -46,6 +46,9 @@ else looking at the deal.
   the save ("Saving these changes clears the sign-offs") and keeps Done locked
   until it's re-signed. Each sign-off stores a fingerprint of what was
   approved, so no code that edits an order has to remember to clear them.
+  Signing sends back the fingerprint the page read, so an edit that lands
+  between a manager's review and their click is refused ("this sell order
+  changed since you opened it") rather than signed unseen.
 - Signing and withdrawing appear in the order's history, and a sign-off sends
   the managers still to sign a notification. Reopening a Closed order clears
   its sign-offs.

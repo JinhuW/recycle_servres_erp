@@ -16,6 +16,7 @@ const SOFIA_NAME = 'Sofia Reyes';
 type Signoff = {
   managers: { id: string; name: string; required: boolean; signedAt: string | null; stale: boolean }[];
   complete: boolean;
+  fingerprint: string;
 };
 type Line = {
   inventoryId: string | null; category: string; label: string; sub: string | null;
@@ -42,7 +43,9 @@ async function newDraft(opts: { qty?: number; currency?: string } = {}): Promise
 }
 
 const detail = async (id: string) => (await api<Detail>('GET', `/api/sell-orders/${id}`, { token: alex })).body.order;
-const sign = (id: string, token: string) => api<{ signoff: Signoff }>('POST', `/api/sell-orders/${id}/signoff`, { token, body: {} });
+// Signs what the order holds now, as the page would after a fresh read.
+const sign = async (id: string, token: string) => api<{ signoff: Signoff; error?: string }>(
+  'POST', `/api/sell-orders/${id}/signoff`, { token, body: { fingerprint: (await detail(id)).signoff.fingerprint } });
 const withdraw = (id: string, token: string) => api<{ signoff: Signoff }>('DELETE', `/api/sell-orders/${id}/signoff`, { token });
 const toDone = (id: string) => api<{ error?: string; missingSignoff?: string[] }>(
   'POST', `/api/sell-orders/${id}/status`, { token: alex, body: { to: 'Done', note: 'paid' } });
@@ -186,6 +189,24 @@ describe('sell-order sign-off before Done', () => {
     expect((await detail(id)).signoff.complete).toBe(false);
   });
 
+  it('signs only the version the manager reviewed', async () => {
+    const { id } = await newDraft({ qty: 2 });
+    const seen = (await detail(id)).signoff.fingerprint;
+    const lines = resendable((await detail(id)).lines);
+    expect((await api('PATCH', `/api/sell-orders/${id}`, {
+      token: alex, body: { lines: [{ ...lines[0], unitPrice: 60 }] },
+    })).status).toBe(200);
+
+    const late = await api<{ error: string }>('POST', `/api/sell-orders/${id}/signoff`, {
+      token: sofia, body: { fingerprint: seen },
+    });
+    expect(late.status).toBe(409);
+    expect(late.body.error).toMatch(/changed/);
+    expect((await detail(id)).signoff.managers.every(m => m.signedAt === null)).toBe(true);
+
+    expect((await api('POST', `/api/sell-orders/${id}/signoff`, { token: sofia, body: {} })).status).toBe(400);
+  });
+
   it('withdrawing a sign-off blocks Done again', async () => {
     const { id } = await newDraft();
     await signBoth(id);
@@ -202,7 +223,7 @@ describe('sell-order sign-off before Done', () => {
     const { token: pur } = await loginAs(MARCUS);
     expect((await sign(id, pur)).status).toBe(403);
     expect((await withdraw(id, pur)).status).toBe(403);
-    expect((await sign('SO-NOPE', alex)).status).toBe(404);
+    expect((await api('POST', '/api/sell-orders/SO-NOPE/signoff', { token: alex, body: { fingerprint: 'x' } })).status).toBe(404);
 
     await signBoth(id);
     expect((await toDone(id)).status).toBe(200);

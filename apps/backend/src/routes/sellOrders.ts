@@ -1845,15 +1845,28 @@ sellOrders.post('/:id/unarchive', c => setSellOrderArchived(c, false));
 // unlocks Done (the gate is in POST /:id/status); a manager signs for
 // themselves alone. Open orders only: a Done order's sign-offs are its
 // record, and a Closed one is reopened before it is signed again.
+//
+// A signature names the version it approves — the fingerprint the page read —
+// so an edit landing between the manager's review and the click can't be
+// signed for them unseen.
 async function setSignoff(c: SOCtx, signing: boolean) {
   const u = c.var.user;
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const id = c.req.param('id') as string;
+  let reviewed: string | null = null;
+  if (signing) {
+    const body = (await c.req.json().catch(() => null)) as { fingerprint?: unknown } | null;
+    if (typeof body?.fingerprint !== 'string') {
+      return c.json({ error: 'fingerprint is required — sign from the order as you read it' }, 400);
+    }
+    reviewed = body.fingerprint;
+  }
   const sql = getDb(c.env);
 
   type Outcome =
     | { kind: 'notFound' }
     | { kind: 'locked'; status: string }
+    | { kind: 'changed' }
     | { kind: 'done'; signoff: SignoffState };
 
   const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
@@ -1865,9 +1878,11 @@ async function setSignoff(c: SOCtx, signing: boolean) {
     if (!openSellStatuses().includes(cur.status)) return { kind: 'locked', status: cur.status };
 
     if (signing) {
+      const current = (await orderFingerprint(tx, id))!;
+      if (current !== reviewed) return { kind: 'changed' };
       await tx`
         INSERT INTO sell_order_signoffs (sell_order_id, user_id, fingerprint)
-        VALUES (${id}, ${u.id}, ${(await orderFingerprint(tx, id))!})
+        VALUES (${id}, ${u.id}, ${current})
         ON CONFLICT (sell_order_id, user_id) DO UPDATE SET
           fingerprint = EXCLUDED.fingerprint,
           signed_at   = NOW()
@@ -1902,6 +1917,8 @@ async function setSignoff(c: SOCtx, signing: boolean) {
     case 'notFound': return c.json({ error: 'Not found' }, 404);
     case 'locked':
       return c.json({ error: `cannot change sign-off on a ${outcome.status} order` }, 409);
+    case 'changed':
+      return c.json({ error: 'this sell order changed since you opened it — reload it and review it again' }, 409);
     case 'done': return c.json({ signoff: outcome.signoff });
   }
 }

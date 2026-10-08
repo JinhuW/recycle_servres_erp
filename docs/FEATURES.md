@@ -985,6 +985,9 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
     leaves earlier sign-offs reading "needs to sign again". Notes, the
     receiver, warehouse moves and evidence don't, nor does reordering lines
     or re-saving at a new FX rate. The edit page warns before such a save.
+    A sign-off names the version the manager read: if the order changed in
+    between, `POST /api/sell-orders/:id/signoff` answers 409 and the card
+    re-reads the order.
   - Who is required is worked out live: every active manager. Reopening a
     Closed order clears its sign-offs. History logs each sign-off and
     withdrawal, and a sign-off notifies the managers still to sign. Orders
