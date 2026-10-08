@@ -11,6 +11,10 @@ export const SHELL_PATHS: readonly string[] = [
   '/',
   // OAuth consent: the backend's /oauth/authorize 302s here (route.ts readPath).
   '/authorize',
+  // OAuth sign-in bounce: /oauth/authorize 302s a signed-out caller to
+  // `/login?next=…` (oauth/server.ts), and readSafeNext resumes from it — a
+  // 404 here strands every connector popup that starts signed out.
+  '/login',
   // Web Share Target landing the service worker 303s to after the POST.
   '/share-target',
   // PWA manifest shortcuts (vite.config.ts). Installed apps launch them as-is.

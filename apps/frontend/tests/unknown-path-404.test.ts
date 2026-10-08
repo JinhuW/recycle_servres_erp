@@ -35,6 +35,12 @@ describe('Worker document fallback', () => {
     expect((await get('/authorize?req=abc')).status).toBe(200);
   });
 
+  it('serves the shell at the OAuth sign-in bounce', async () => {
+    const res = await get('/login?next=%2Foauth%2Fauthorize%3Fclient_id%3Dx');
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe(INDEX);
+  });
+
   it.each(['/vnc/homelab-1', '/fleet', '/asdf/qwe', '/inventory/', '/v/sometoken'])(
     '404s an unknown path %s with a page',
     async (path) => {
@@ -69,7 +75,7 @@ describe('service worker navigation allowlist', () => {
   });
 
   it('does not match unknown paths, so they reach the Worker 404', () => {
-    for (const p of ['/vnc/homelab-1', '/fleet', '/inventory/x', '/submitx', '/authorize2']) {
+    for (const p of ['/vnc/homelab-1', '/fleet', '/inventory/x', '/submitx', '/authorize2', '/login/x']) {
       expect(allowed(p)).toBe(false);
     }
   });

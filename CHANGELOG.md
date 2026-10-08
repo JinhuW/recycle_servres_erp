@@ -28,7 +28,7 @@ rs-console, rendered the ERP's Fleet page as though it were valid.
 
 - **A path that isn't a page of ours is a 404.** The Worker now serves the
   app shell only at the paths it actually lives at — `/`, `/authorize`,
-  `/share-target` and the PWA shortcuts `/submit`, `/inventory`,
+  `/login` (the OAuth sign-in bounce), `/share-target` and the PWA shortcuts `/submit`, `/inventory`,
   `/sell-orders` — and answers everything else with a small "Page not found"
   page (status 404) linking back to the dashboard. Static files and `/api/*`
   are unchanged.

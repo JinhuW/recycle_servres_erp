@@ -30,14 +30,14 @@ ERP's Fleet page as if the URL were valid. The service worker's
 Worker fix alone would not reach them.
 
 The app shell only ever lives at a handful of real paths: `/`, `/authorize`
-(OAuth consent), `/share-target` (Web Share Target landing) and the PWA
+(OAuth consent), `/login` (the signed-out OAuth bounce), `/share-target` (Web Share Target landing) and the PWA
 manifest shortcuts `/submit`, `/inventory`, `/sell-orders`.
 
 ## Acceptance criteria
 
 - [x] A GET for a path outside that list returns 404 with a small "Page not
       found" HTML page linking home, whatever the hash.
-- [x] `/`, `/authorize`, `/share-target`, `/submit`, `/inventory`,
+- [x] `/`, `/authorize`, `/login`, `/share-target`, `/submit`, `/inventory`,
       `/sell-orders` still serve the app shell.
 - [x] Real static files (`/sw.js`, `/manifest.webmanifest`, …) and `/api/*`
       are unchanged.

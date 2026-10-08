@@ -1774,7 +1774,7 @@ removed in v1.191.0.
   answered with `index.html`, and a tab that asks for one reloads itself once
   onto the current build rather than stalling on a skeleton.
 - **Unknown paths are a 404** (v1.206.1). The shell is served only at `/`,
-  `/authorize`, `/share-target` and the PWA shortcuts; any other path — at the
+  `/authorize`, `/login`, `/share-target` and the PWA shortcuts; any other path — at the
   edge or through the service worker — gets a "Page not found" page instead of
   the app rendering whatever its `#/` hash names.
 - **The load starts before the bundle does** (v1.122.0). A small boot script,
