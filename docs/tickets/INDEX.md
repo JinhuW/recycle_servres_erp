@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-195](./RS-195-a-closed-paypal-dispute-s-stage-ladder-ends-on-close.md) | in-progress | bug | P2 | A closed PayPal dispute's stage ladder ends on Closed | — |
+| [RS-195](./RS-195-a-closed-paypal-dispute-s-stage-ladder-ends-on-close.md) | done | bug | P2 | A closed PayPal dispute's stage ladder ends on Closed | 1.221.2 |
 | [RS-194](./RS-194-fix-the-dev-to-main-review-findings-before-the-v1-22.md) | done | bug | P1 | Fix the dev to main review findings before the v1.221 release | 1.221.0 |
 | [RS-193](./RS-193-one-per-product-shared-by-the-packing-lists-the-sell.md) | done | story | P2 | One # per product, shared by the packing lists, the sell order page and Pack mode | 1.220.3 |
 | [RS-192](./RS-192-fix-the-dev-to-main-review-findings-before-the-v1-22.md) | done | bug | P1 | Fix the dev to main review findings before the v1.220 release | 1.220.2 |

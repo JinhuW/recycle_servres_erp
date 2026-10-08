@@ -2,13 +2,13 @@
 id: RS-195
 title: A closed PayPal dispute's stage ladder ends on Closed
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-08
 reporter: jinhu
 branch: fix/dispute-ladder-closed
-pr:
-version:
+pr: "#538"
+version: 1.221.2
 related: [RS-018]
 ---
 
