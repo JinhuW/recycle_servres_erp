@@ -2,13 +2,13 @@
 id: RS-193
 title: "One # per product, shared by the packing lists, the sell order page and Pack mode"
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-10-07
 reporter: jinhu
 branch: dev-8
-pr:
-version:
+pr: "#532"
+version: 1.220.3
 related: [RS-188, RS-190, RS-191, RS-192]
 ---
 

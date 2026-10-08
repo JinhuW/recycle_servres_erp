@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-193](./RS-193-one-per-product-shared-by-the-packing-lists-the-sell.md) | in-review | story | P2 | One # per product, shared by the packing lists, the sell order page and Pack mode | — |
+| [RS-193](./RS-193-one-per-product-shared-by-the-packing-lists-the-sell.md) | done | story | P2 | One # per product, shared by the packing lists, the sell order page and Pack mode | 1.220.3 |
 | [RS-192](./RS-192-fix-the-dev-to-main-review-findings-before-the-v1-22.md) | done | bug | P1 | Fix the dev to main review findings before the v1.220 release | 1.220.2 |
 | [RS-191](./RS-191-take-the-photos-out-of-the-packing-list-spreadsheets.md) | done | story | P2 | Take the photos out of the packing-list spreadsheets | 1.220.1 |
 | [RS-190](./RS-190-packing-by-each-po-line-with-photos.md) | done | story | P2 | Packing by each PO line, with photos | 1.220.0 |
