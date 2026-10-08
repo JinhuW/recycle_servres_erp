@@ -2,13 +2,13 @@
 id: RS-207
 title: Pack mode side panel can't be scrolled to its actions
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-08
 reporter: jinhu
 branch: fix/pack-side-panel-scroll
-pr:
-version:
+pr: "#559"
+version: 1.230.1
 related: []
 ---
 
@@ -39,13 +39,13 @@ lists), so it carried the same bug.
 
 ## Acceptance criteria
 
-- [ ] In Pack mode at 1024px wide and up, the side panel is never taller than
+- [x] In Pack mode at 1024px wide and up, the side panel is never taller than
       the window while it is pinned, and scrolls on its own: Apply, Edit order
       and Mark shipped can be reached without scrolling the list to its end.
-- [ ] Box check's side panel (above 1100px) behaves the same way.
-- [ ] Where the panel stacks under the list (Pack < 1024px, Box check
+- [x] Box check's side panel (above 1100px) behaves the same way.
+- [x] Where the panel stacks under the list (Pack < 1024px, Box check
       ≤ 1100px) it flows with the page — no inner scroll box.
-- [ ] Holds in compact density and in WebKit on an iPad-landscape viewport.
+- [x] Holds in compact density and in WebKit on an iPad-landscape viewport.
 
 ## Out of scope
 
