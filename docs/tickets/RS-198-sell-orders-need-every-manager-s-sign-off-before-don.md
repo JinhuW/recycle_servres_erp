@@ -2,13 +2,13 @@
 id: RS-198
 title: Sell orders need every manager's sign-off before Done
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-08
 reporter: jinhu
 branch: feat/sell-order-signoff
-pr:
-version:
+pr: "#543"
+version: 1.226.0
 related: []
 ---
 
@@ -49,17 +49,17 @@ not back-filled.
 
 ## Acceptance criteria
 
-- [ ] `POST /api/sell-orders/:id/status` to Done is refused with a 409 naming
+- [x] `POST /api/sell-orders/:id/status` to Done is refused with a 409 naming
       every active manager who hasn't signed the order as it stands.
-- [ ] The sell order page has a Sign-off card listing each manager as signed
+- [x] The sell order page has a Sign-off card listing each manager as signed
       (with time), waiting, or needing to sign again, with Sign off / Sign
       again / Withdraw on the viewer's own row.
-- [ ] The stepper's Done step is disabled until sign-off is complete, and
+- [x] The stepper's Done step is disabled until sign-off is complete, and
       while unsaved edits would void it, with the reason in its tooltip.
-- [ ] Line, qty, price, lot, customer or currency changes — through the editor,
+- [x] Line, qty, price, lot, customer or currency changes — through the editor,
       a negotiated total, or a PO archive taking a line off — void earlier
       sign-offs; notes, receiver and warehouse changes don't.
-- [ ] Signing and withdrawing appear in the order's history, and a sign-off
+- [x] Signing and withdrawing appear in the order's history, and a sign-off
       notifies the managers still to sign.
 
 ## Out of scope
@@ -75,3 +75,11 @@ above 0 — its lot). It counts only while that still matches the order, so no
 writer has to remember to clear sign-offs. Native price, so a line rewrite at
 a new FX rate doesn't void it; sorted by content, so resending identical lines
 doesn't either. Plan: `~/.claude/plans/piped-cuddling-hopper.md`.
+
+A sign-off also names the version the manager reviewed: the order detail
+returns the fingerprint and `POST /signoff` must send it back, so an edit that
+lands between the review and the click is refused (409) instead of being
+signed unseen. Added during implementation after a security review flagged it.
+
+Shipped as v1.226.0, not the 1.223.0 first planned: peers' #541 and #542 had
+claimed 1.223.0 and 1.225.0.
