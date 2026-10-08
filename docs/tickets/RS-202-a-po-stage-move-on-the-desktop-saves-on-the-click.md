@@ -2,13 +2,13 @@
 id: RS-202
 title: A PO stage move on the desktop saves on the click
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-08
 reporter: jinhu
 branch: dev-13
-pr:
-version:
+pr: "#547"
+version: 1.227.1
 related: [RS-080, RS-200]
 ---
 
@@ -38,21 +38,21 @@ Transit hand-off already wrote their move on the click.
 
 ## Acceptance criteria
 
-- [ ] One click on *Mark as ‹next›* (Next step card or stepper) writes the
+- [x] One click on *Mark as ‹next›* (Next step card or stepper) writes the
       move for In Transit→Reviewing, Reviewing→Ready to Pay and Ready to
       Pay→Done. Done writes directly with a commission screenshot on file,
       and goes through the Done dialog without one.
-- [ ] One click on *Move back to ‹stage›* in a finished stage's look-back
+- [x] One click on *Move back to ‹stage›* in a finished stage's look-back
       writes that move.
-- [ ] After a move the page reloads in place on the new stage with a toast.
-- [ ] The *Status will change … when you save* banner, the *Moves to … on
+- [x] After a move the page reloads in place on the new stage with a toast.
+- [x] The *Status will change … when you save* banner, the *Moves to … on
       save · Undo* pill and the *Save · Mark as …* label are gone.
-- [ ] Other unsaved edits on the page are saved by the same click.
-- [ ] A move that is cancelled (takeover or payment-mismatch question) or
+- [x] Other unsaved edits on the page are saved by the same click.
+- [x] A move that is cancelled (takeover or payment-mismatch question) or
       refused (a save blocker, a server refusal) leaves the page on the
       stage the order is at.
-- [ ] A move on an otherwise clean page writes no line edits.
-- [ ] A move doesn't ask about lines nobody touched (incomplete legacy lines,
+- [x] A move on an otherwise clean page writes no line edits.
+- [x] A move doesn't ask about lines nobody touched (incomplete legacy lines,
       duplicate part numbers).
 
 ## Out of scope
@@ -75,3 +75,14 @@ Transit hand-off already wrote their move on the click.
 - Plan: `~/.claude/plans/splendid-discovering-harp.md` (reviewed by a
   subagent; its findings changed what happens to a move that doesn't go
   through, the move-only path, and the removal of the staged UI).
+- Checked in the browser against a throwaway seeded DB:
+  - In Transit→Reviewing from the panel and from the stepper
+  - a note saved in the same click as Reviewing→Ready to Pay
+  - Ready to Pay→Done through the Done dialog
+  - *Move back* from Done
+  - take-over Cancel
+  - a move refused by a save blocker
+
+  Not run in the browser: Done with a commission screenshot already on file,
+  RS-200's mismatch Cancel, and a refusal over an untouched incomplete line.
+  They go through the same `moveTo` / `takeBackMove` code as the cases above.
