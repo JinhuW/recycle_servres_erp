@@ -1,6 +1,6 @@
 import { canonicalPartNumber } from '@recycle-erp/shared';
 import {
-  isAbsentChecked, isShortChecked, lineState, matchScan,
+  isAbsentChecked, isShortChecked, lineState, matchScan, spellsSerial,
   type CheckableLine, type LineCheck, type ScanMatch,
 } from './boxCheck';
 
@@ -94,9 +94,6 @@ export function shipBlockers(lines: readonly CheckableLine[], checks: ReadonlyMa
 
 export type PackScan<L> = ScanMatch<L> | { choose: L[] };
 
-const partMatches = (q: string, pn: string) =>
-  pn !== '' && (pn === q || (q.length >= 6 && pn.length >= 6 && (q.startsWith(pn) || pn.startsWith(q))));
-
 // Review mode's scan, with two differences. A sell order often carries the
 // same part on several lines, and a part-number label can't say which one it
 // came off: rather than tick one of them on a guess, the lines still waiting
@@ -108,8 +105,8 @@ export function packScan<L extends PackLine>(
   const lines = all.filter(isPackable);
   const m = matchScan(lines, checks, raw);
   if (!m || !('line' in m)) return m;
+  if (spellsSerial(m.line, canonicalPartNumber(raw))) return m;
   const pn = canonicalPartNumber(m.line.partNumber);
-  if (!partMatches(canonicalPartNumber(raw), pn)) return m;
   const waiting = lines.filter(l =>
     canonicalPartNumber(l.partNumber) === pn && lineState(l, checks.get(l.id)) !== 'done');
   return waiting.length > 1 ? { choose: waiting } : m;

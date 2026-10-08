@@ -5,7 +5,7 @@ import { LineSpecChips, lineHasSpecChips } from '../../components/LineSpecChips'
 import { StatusChangeDialog, type StatusAttachment } from '../../components/StatusChangeDialog';
 import { api, ApiError, rawFetch } from '../../lib/api';
 import {
-  countOf, emptyCheck, isAbsentChecked, isShortChecked, lineState, tally, type LineCheck,
+  countOf, emptyCheck, filterScan, isAbsentChecked, isShortChecked, lineState, partsNamed, tally, type LineCheck,
 } from '../../lib/boxCheck';
 import { handleFetchError, showErrorDialog, showWarnToast } from '../../lib/errorToast';
 import { useT } from '../../lib/i18n';
@@ -18,6 +18,7 @@ import {
 import type { Category } from '../../lib/types';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { useLineSaveQueue } from '../../lib/useLineSaveQueue';
+import { useScanFilterText } from '../../lib/useScanFilter';
 
 // Pack mode: a sell order as a packing checklist, built for an iPad on a cart.
 // Lines run in the order's own list order, each led by its # on the order —
@@ -158,6 +159,19 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   // A picked warehouse the order no longer has (a line was moved) falls back to all.
   const picked = warehouses.includes(wh) ? wh : '';
   const rows = useMemo(() => packView(lines, picked), [lines, picked]);
+  // Typing narrows the list once it pauses. The filter searches the whole
+  // order, packable lines only, as Enter does, so it never hides the line
+  // Enter would pack. It changes only what is listed — progress and Mark
+  // shipped read `rows` and `lines`.
+  const filterText = useScanFilterText(scan);
+  const fit = useMemo(() => {
+    const hits = filterScan(lines.filter(isPackable), filterText);
+    return hits ? new Set(hits.map(l => l.id)) : null;
+  }, [lines, filterText]);
+  const listed = useMemo(
+    () => (fit ? packView(lines, '').filter(r => fit.has(r.line.id)) : rows),
+    [fit, lines, rows],
+  );
   const shownPackable = useMemo(() => rows.map(r => r.line).filter(isPackable), [rows]);
   const sum = useMemo(() => tally(shownPackable, checks), [shownPackable, checks]);
   const blockers = useMemo(() => shipBlockers(lines, checks), [lines, checks]);
@@ -175,7 +189,9 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
 
   const exit = () => navigateBack('/sell-orders/' + id);
   // Escape joins the app's layer stack, so the Shipped dialog closes first.
-  useEscapeKey(exit);
+  // Text left in the scan box goes before the page does: an ambiguous scan
+  // leaves its filter up with the box blurred.
+  useEscapeKey(() => { if (scan) setScan(''); else exit(); });
 
   const flashUndo = (u: Undo) => {
     setUndo(u);
@@ -223,20 +239,24 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   // ── Scanner: a Bluetooth or USB scanner types the label and presses Enter.
   const onScan = (raw: string) => {
     const text = raw.trim();
-    setScan('');
-    if (scanFromPage.current) {
+    const m = text && ready ? packScan(lines, checks, text) : null;
+    // Text that fits several parts stays, and with it the list it narrowed to,
+    // to pick from. The box lets go of it, so the next scan replaces it rather
+    // than running on from it.
+    const ambiguous = m !== null && 'ambiguous' in m;
+    if (!ambiguous) setScan('');
+    if (scanFromPage.current || ambiguous) {
       scanFromPage.current = false;
       scanRef.current?.blur();
     }
     if (!text || !ready) return;
     setChoose(new Set());
-    const m = packScan(lines, checks, text);
     if (!m) {
       setScanMsg({ tone: 'neg', text: t('pkScanNoMatch', { pn: text, id }) });
       return;
     }
     if ('ambiguous' in m) {
-      setScanMsg({ tone: 'neg', text: t('pkScanAmbiguous', { pn: text, pns: m.ambiguous.join(', ') }) });
+      setScanMsg({ tone: 'neg', text: t('pkScanAmbiguous', { pn: text, pns: partsNamed(m.ambiguous, t) }) });
       return;
     }
     if ('choose' in m) {
@@ -435,31 +455,43 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
           )}
         </div>
         <div className="pk-scan-wrap">
-          <label className="bc-scan pk-scan" htmlFor="pk-scan">
-            <Icon name="scan" size={17} />
-            <input
-              id="pk-scan"
-              ref={scanRef}
-              className="input mono"
-              type="text"
-              autoComplete="off"
-              autoCapitalize="characters"
-              autoCorrect="off"
-              spellCheck={false}
-              enterKeyHint="go"
-              value={scan}
-              disabled={!ready}
-              placeholder={t('pkScanPh')}
-              onChange={e => setScan(e.target.value)}
-              onBlur={() => { scanFromPage.current = false; }}
-              onKeyDown={e => {
-                if (e.nativeEvent.isComposing) return;
-                if (e.key === 'Enter') { e.preventDefault(); onScan(scan); }
-                // Leaves the box, not the page.
-                if (e.key === 'Escape') { e.stopPropagation(); e.currentTarget.blur(); }
-              }}
-            />
-          </label>
+          <div className="bc-scan-field">
+            <label className="bc-scan pk-scan" htmlFor="pk-scan">
+              <Icon name="scan" size={17} />
+              <input
+                id="pk-scan"
+                ref={scanRef}
+                className="input mono"
+                type="text"
+                autoComplete="off"
+                autoCapitalize="characters"
+                autoCorrect="off"
+                spellCheck={false}
+                enterKeyHint="go"
+                value={scan}
+                disabled={!ready}
+                placeholder={t('pkScanPh')}
+                onChange={e => setScan(e.target.value)}
+                onBlur={() => { scanFromPage.current = false; }}
+                onKeyDown={e => {
+                  if (e.nativeEvent.isComposing) return;
+                  if (e.key === 'Enter') { e.preventDefault(); onScan(scan); }
+                  // Clears the box, then leaves it; never the page.
+                  if (e.key === 'Escape') {
+                    e.stopPropagation();
+                    if (scan) setScan('');
+                    else e.currentTarget.blur();
+                  }
+                }}
+              />
+            </label>
+            {/* An iPad has no Escape key. */}
+            {scan && (
+              <button type="button" className="bc-scan-clear pk-scan-clear" title={t('scanClear')} aria-label={t('scanClear')} onClick={() => setScan('')}>
+                <Icon name="x" size={15} />
+              </button>
+            )}
+          </div>
           <div className={'bc-scan-msg ' + (scanMsg?.tone ?? 'muted')} aria-live="polite">
             {scanMsg ? scanMsg.text : t('pkScanHint')}
           </div>
@@ -531,8 +563,9 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
           </div>
         ) : (
           <ul className="pk-list">
-            {rows.map(r => row(r.line, r.no))}
-            {rows.length === 0 && <li className="pk-empty">{t('pkNoneHere')}</li>}
+            {listed.map(r => row(r.line, r.no))}
+            {fit?.size === 0 && <li className="pk-empty">{t('pkFilterNone', { pn: filterText, id })}</li>}
+            {!fit && rows.length === 0 && <li className="pk-empty">{t('pkNoneHere')}</li>}
           </ul>
         )}
       </div>

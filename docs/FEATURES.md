@@ -369,12 +369,31 @@ on to Sold once every line has sold (v1.164.0).
     line already at qty 0 (v1.213.0). It leaves amber and red lines for their
     own tick.
   - The scan box takes a label scanner. It matches an exact part number, then
-    a prefix, then a recorded serial, and ticks the line it lands on at its
-    count. A scan goes to a matching line still open first, then an amber
-    one. A prefix that fits lines with different part numbers ticks nothing
-    and names them. A scan that lands on a line counted 0 ticks nothing and
-    asks for the count to be raised first (v1.212.0). On a line already at
-    qty 0 it says so instead: only an edit can put units back (v1.213.0).
+    a prefix, then a recorded serial, then any part number holding the text
+    (v1.222.0), and ticks the line it lands on at its count. A scan goes to a
+    matching line still open first, then an amber one. A prefix that fits
+    lines with different part numbers ticks nothing and names them. A scan
+    that lands on a line counted 0 ticks nothing and asks for the count to be
+    raised first (v1.212.0). On a line already at qty 0 it says so instead:
+    only an edit can put units back (v1.213.0).
+  - **Typing in the scan box filters the list** (v1.222.0).
+    - Once typing pauses (150 ms), only the lines Enter could land on stay:
+      a part number holding the text anywhere, ignoring separators and case;
+      one a label extends; or a whole recorded serial. A scanner's burst ends
+      in Enter inside the pause, so a scan never flashes a filter.
+    - Enter follows the order above, so the filter can show two part numbers
+      while Enter ticks the exact one (`M393A4K40DB3` beside
+      `M393A4K40DB3-CWE`).
+    - A fragment that fits several part numbers ticks nothing. The text and
+      its list stay up, the box lets go so ↑↓ and Space pick a row, and the
+      message names the first five parts. Space, + − and e ignore a selected
+      line the filter hides.
+    - × clears the filter. Escape in the box clears the text and then
+      leaves the box. On the page, Escape clears a leftover filter before it
+      leaves Review mode.
+    - The filter changes only the rows shown. The tally, Finish review and
+      Approve always count the whole PO, and *Check all remaining* is
+      disabled while a filter is up.
   - A scan works with nothing focused: a character typed onto the page that
     is not a shortcut starts the scan in the box, so a label never runs as
     shortcuts. The shortcuts are ↑↓/j k, Space, + −, lowercase e and /; a
@@ -1029,8 +1048,13 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
     no counter or tick, never matched by a scan, left out of the progress and
     of what blocks Mark shipped.
   - The scan box takes a Bluetooth or USB label scanner, with nothing focused,
-    and matches a part number, a prefix, then a recorded serial, as Review mode
-    does. When the part is still waiting on more than one line, the scan ticks
+    and matches a part number, a prefix, a recorded serial, then any part
+    number holding the text, as Review mode does. Typing filters the list
+    the same way too (v1.222.0), with ×, Escape and a fragment that fits
+    several parts behaving as in Review mode. The filter searches the whole
+    order, packable lines only, even with a *Packing from* warehouse picked,
+    so it never hides the line Enter would pack. Progress stays on the
+    warehouse view. When the part is still waiting on more than one line, the scan ticks
     nothing: it highlights those lines, names them by # and asks for a tap on
     the one that was packed.
   - Progress is saved on the server (`sell_order_packs`), so a reload, a second

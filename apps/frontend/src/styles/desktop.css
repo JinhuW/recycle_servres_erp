@@ -3963,7 +3963,17 @@ button.rsheet-box:hover { background: color-mix(in oklch, var(--accent) 10%, tra
 .bc-scan-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
 .bc-scan { position: relative; display: block; }
 .bc-scan svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--fg-subtle); pointer-events: none; }
-.bc-scan .input { width: 100%; padding-left: 34px; }
+.bc-scan .input { width: 100%; padding-left: 34px; padding-right: 34px; }
+/* The clear button sits beside the label, not in it: a label may not hold a
+   second control. */
+.bc-scan-field { position: relative; }
+.bc-scan-clear {
+  position: absolute; right: 5px; top: 50%; transform: translateY(-50%);
+  display: grid; place-items: center; width: 26px; height: 26px; padding: 0;
+  border: 0; border-radius: 6px; background: transparent; color: var(--fg-subtle); cursor: pointer;
+}
+.bc-scan-clear:hover { background: var(--bg-soft); color: var(--fg); }
+.bc-scan-clear:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .bc-scan-msg { font-size: 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 26px; }
 .bc-scan-msg.muted { color: var(--fg-subtle); }
 .bc-scan-msg.pos { color: var(--accent-strong); }
@@ -4086,7 +4096,8 @@ body:has(.pk-page) .tweaks-fab, body:has(.pk-page) .tweaks-pop { display: none; 
 .pk-head-main { min-width: 0; }
 .pk-head .page-sub { font-size: 14px; }
 .pk-scan-wrap { flex: 0 1 420px; min-width: 280px; display: grid; gap: 6px; }
-.pk-scan .input { height: 48px; padding-left: 40px; font-size: 15px; }
+.pk-scan .input { height: 48px; padding-left: 40px; padding-right: 48px; font-size: 15px; }
+.pk-scan-clear { width: 40px; height: 40px; right: 4px; }
 .pk-scan svg { left: 14px; }
 .pk-scan-wrap .bc-scan-msg { font-size: 13px; }
 .pk-scan-wrap .bc-scan-msg.warn { color: var(--warn-strong); }
