@@ -771,15 +771,15 @@ describe('GET /api/sell-orders/:id/packing-list?groupBy=po', () => {
     const wb = await loadWorkbook(await getRaw(`/api/sell-orders/${id}/packing-list?groupBy=po`, token));
     const tab = wb.worksheets.find(w => w.name === `${a.po} - LA1`)!;
     const [x, y] = (await Promise.all(twins.map(t => poPageNo(token, a.po, t)))).sort((m, n) => m - n);
-    // The twins split into their own rows under the product's row.
+    // The twins stay one row, their IDs stacked in its one cell.
     expect(colCells(tab, 'ID in PO').sort())
-      .toEqual([String(await poPageNo(token, a.po, a.id)), '2 lines', String(x), String(y)].sort());
+      .toEqual([String(await poPageNo(token, a.po, a.id)), `#${x} × 1\n#${y} × 1`].sort());
     // A hand-typed line came from no PO: the column stays, empty.
     const noPo = wb.worksheets.find(w => w.name === 'No PO - LA1')!;
     expect(colCells(noPo, 'ID in PO')).toEqual(['']);
   });
 
-  it('splits a product from several PO lines into a tickable row per line under its own row', async () => {
+  it('keeps a product from several PO lines on one row, its PO lines stacked in one cell', async () => {
     const { token } = await loginAs(ALEX);
     const sql = getTestDb();
     const [a, b] = await linesFromTwoPos(token);
@@ -812,28 +812,24 @@ describe('GET /api/sell-orders/:id/packing-list?groupBy=po', () => {
       poPageNo(token, a.po, a.id), poPageNo(token, a.po, twinA), poPageNo(token, b.po, twinB),
     ]);
     const rows = dataRows(tab);
-    // The twins and the typed share: the product's own row, then its PO lines
-    // in PO order with the typed share last — each with its # on the order.
-    const at = rows.findIndex(m => text(m, 'From PO') === '2 POs + No PO');
-    expect(at).toBeGreaterThanOrEqual(0);
-    const block = rows.slice(at, at + 4);
-    expect(block.map(m => text(m, 'From PO'))).toEqual(['2 POs + No PO', `${a.po} #${x}`, `${b.po} #${y}`, 'No PO']);
-    expect(block.map(m => text(m, '#'))).toEqual(['', '3', '2', '4']);
-    expect(block.map(m => m.get('Qty')!.value)).toEqual([4, 1, 1, 2]);
-    expect(block.map(m => text(m, 'Part #'))).toEqual(['TWIN-PN', '', '', '']);
-    expect(block[0].get('Part #')!.font?.bold).toBe(true);
-    // Only the PO-line rows are ticked; the product's row is a heading.
-    expect(block.map(m => !!m.get('Packed ✓')!.border?.top)).toEqual([false, true, true, true]);
-    // The RAM device/generation labels run down the whole block.
-    const top = Number(block[0].get('#')!.row);
-    const bottom = Number(block[3].get('#')!.row);
-    expect(tab.getCell(bottom, 1).master.address).toBe(tab.getCell(top, 1).master.address);
-    expect(tab.getCell(bottom, 2).master.address).toBe(tab.getCell(top, 2).master.address);
+    // One row per product: a's, the twins with their typed share, the SSD.
+    expect(rows).toHaveLength(3);
+    const twins = rows.find(m => text(m, 'Part #') === 'TWIN-PN')!;
+    expect(text(twins, 'From PO')).toBe(`${a.po} #${x} × 1\n${b.po} #${y} × 1\nNo PO × 2`);
+    expect(twins.get('From PO')!.alignment?.wrapText).toBe(true);
+    expect(tab.getRow(Number(twins.get('#')!.row)).height).toBe(45);
+    expect(twins.get('Qty')!.value).toBe(4);
+    expect(twins.get('Packed ✓')!.border?.top).toBeTruthy();
 
-    // A product from one PO line stays one row; a typed-only one reads "—".
+    // Its # is the one every line of it carries on the order.
+    const detail = await api<{ order: { lines: { inventoryId: string | null; partNumber: string | null; no: number }[] } }>(
+      'GET', `/api/sell-orders/${id}`, { token });
+    const twinNos = new Set(detail.body.order.lines.filter(l => l.partNumber === 'TWIN-PN').map(l => l.no));
+    expect([...twinNos]).toEqual([Number(text(twins, '#'))]);
+
+    // A product from one PO line reads as it always did; a typed-only one "—".
     const single = rows.find(m => text(m, 'From PO') === `${a.po} #${na}`)!;
-    expect(text(single, '#')).toBe('1');
-    expect(single.get('Packed ✓')!.border?.top).toBeTruthy();
+    expect(text(single, '#')).toBe(String(detail.body.order.lines.find(l => l.inventoryId === a.id)!.no));
     expect(rows.map(m => text(m, 'From PO'))).toContain('—');
     // Totals count each product once: RAM 1 + 4, SSD 1.
     expect(rowQty(tab, 'Subtotal')).toEqual([5, 1]);
@@ -885,9 +881,9 @@ describe('GET /api/sell-orders/:id/packing-list?groupBy=po', () => {
     }
   });
 
-  it('numbers each row by its line # on the sell order, both lists, a folded row listing every #', async () => {
+  it('numbers each product once, the same on both lists and on the order', async () => {
     const { token } = await loginAs(ALEX);
-    // #1 and #3 are the same product, so they fold into one row on each list.
+    // The first and third lines are one product, so they share a row and a #.
     const id = await createOrder(token, {
       lines: [
         { category: 'RAM', label: 'DIMM A', partNumber: 'NO-R1', qty: 2, unitPrice: 40, warehouseId: 'WH-LA1' },
@@ -896,9 +892,14 @@ describe('GET /api/sell-orders/:id/packing-list?groupBy=po', () => {
       ],
     });
     const plain = await loadWorkbook(await getRaw(`/api/sell-orders/${id}/packing-list`, token));
-    expect(colCells(plain.worksheets[0]!, '#').sort()).toEqual(['1, 3', '2']);
+    expect(colCells(plain.worksheets[0]!, '#')).toEqual(['1', '2']);
     const byPo = await loadWorkbook(await getRaw(`/api/sell-orders/${id}/packing-list?groupBy=po`, token));
-    expect(colCells(byPo.worksheets[0]!, '#').sort()).toEqual(['1, 3', '2']);
+    expect(colCells(byPo.worksheets[0]!, '#')).toEqual(['1', '2']);
+    // The order lists its lines as the sheet does: RAM before SSD.
+    const detail = await api<{ order: { lines: { partNumber: string | null; qty: number; no: number }[] } }>(
+      'GET', `/api/sell-orders/${id}`, { token });
+    expect(detail.body.order.lines.map(l => [l.partNumber, l.qty, l.no]))
+      .toEqual([['NO-R1', 2, 1], ['NO-R1', 3, 1], ['NO-S1', 1, 2]]);
   });
 
   it('narrows to one warehouse', async () => {

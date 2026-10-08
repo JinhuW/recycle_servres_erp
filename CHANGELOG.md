@@ -17,6 +17,33 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.220.3] - 2026-10-08
+
+A sell order's # is now one per product, and the order page, Pack mode and
+both packing lists list and number it the same way (RS-193).
+
+### Changed
+
+- **One # per product, in packing-list order.** The # used to be a line's
+  place in the order, one per PO line, while the packing list sorted its rows
+  by warehouse, category, DDR generation and brand — so the sheet read 13,
+  41, 46… down its DDR3 rows and the page listed the same lines in the order
+  they were added. Products are now numbered 1..N in the order the Packing
+  list shows them, through the whole file, and the order page and Pack mode
+  list the lines that way too; the lines of one product share its #. The
+  number is worked out from the sort on every read, so existing orders read
+  this way at once, and adding a line, deleting a lot, a transfer or a spec
+  edit that re-sorts a product renumbers the products after it. Setting a
+  line to 0 still moves nothing: its product keeps the #, and the sheet skips
+  it. A line added in the editor reads *new* until the save numbers it.
+- **A product is one row on the packing lists again.** A product from several
+  PO lines was a bold product row plus a tickable row per PO line (1.220.0);
+  it is now one row with one tick box, its PO lines stacked in the From PO
+  cell with each one's share (`PO-1445 #2 × 13`), and the same in the by-PO
+  file's ID in PO cell.
+- In Pack mode, a scan that could mean two lines of one product names them by
+  # and source, since they now share the #.
+
 ## [1.220.2] - 2026-10-07
 
 Fixes from the pre-release review of dev against main (RS-192). Most of them

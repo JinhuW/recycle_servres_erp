@@ -161,7 +161,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   const shownPackable = useMemo(() => rows.map(r => r.line).filter(isPackable), [rows]);
   const sum = useMemo(() => tally(shownPackable, checks), [shownPackable, checks]);
   const blockers = useMemo(() => shipBlockers(lines, checks), [lines, checks]);
-  const lineNo = useMemo(() => new Map(lines.map((l, i) => [l.id, i + 1])), [lines]);
+  const lineNo = useMemo(() => new Map(lines.map((l, i) => [l.id, l.no ?? i + 1])), [lines]);
   const canShip = ready && isDraft && lines.some(isPackable)
     && blockers.open === 0 && blockers.short === 0 && blockers.zero === 0;
 
@@ -241,7 +241,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     }
     if ('choose' in m) {
       setChoose(new Set(m.choose.map(l => l.id)));
-      setScanMsg({ tone: 'warn', text: t('pkScanChoose', { pn: text, n: m.choose.length, lots: m.choose.map(l => '#' + lineNo.get(l.id)).join(', ') }) });
+      setScanMsg({ tone: 'warn', text: t('pkScanChoose', { pn: text, n: m.choose.length, lots: m.choose.map(l => `#${lineNo.get(l.id)} ${fromText(l)}`).join(', ') }) });
       if (picked && m.choose.some(l => packWarehouseOf(l) !== picked)) setWh('');
       scrollTo(m.choose[0]!.id);
       return;
