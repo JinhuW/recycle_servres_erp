@@ -17,6 +17,30 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.230.2] - 2026-10-08
+
+Inventory's **Select all** picks every lot the filters match, not just the
+products on screen (RS-208).
+
+### Fixed
+
+- **Select all reaches past the 200 listed products.** The grouped Inventory
+  list shows at most 200 products, the newest first, and the header checkbox
+  and the selection bar's **Select all (n)** only picked lots from those. On
+  prod the default view holds 749 products, so select-all quietly left most
+  of the stock out, and with no visible paging it read as "only the current
+  page". The products endpoint now returns the id of every sellable lot
+  (Reviewing or Done) the filters match, with the warehouse filter applied per
+  lot as before. Select all takes the whole set, fetches the rows for lots the
+  page never loaded from a new `POST /api/inventory/rows`, and the counts,
+  totals, Create sell order, Transfer and Add to sell order all see them.
+- **Export takes a selection of any size.** The selection used to travel in the
+  export URL. About a thousand lots, now one click away, is a ~38 KB address,
+  past what the server accepts, and the server cut ids at 1000 anyway. The
+  desktop now posts the selection. `GET ?ids=` still works for tabs on an
+  older bundle, and a selection over 5000 lots is refused with a 413 instead of
+  being truncated.
+
 ## [1.230.1] - 2026-10-08
 
 Pack mode's side panel scrolls on its own, so **Apply** and **Mark shipped**

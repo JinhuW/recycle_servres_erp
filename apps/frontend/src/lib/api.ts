@@ -199,21 +199,26 @@ export function filenameFromContentDisposition(cd: string | null): string | null
 // Binary download (xlsx export, etc.). GET is CSRF-exempt so no header needed;
 // we still ride the cookie + the single-flight 401→refresh→retry path. Pulls
 // the filename from Content-Disposition, falling back to `fallbackName`.
-async function download(path: string, fallbackName: string): Promise<void> {
+// A `body` makes it a POST, for inputs too large for a query string.
+async function download(path: string, fallbackName: string, body?: unknown): Promise<void> {
   const requestedAt = Date.now();
-  let res = await fetch(path, { method: 'GET', credentials: 'include' });
+  const method = body === undefined ? 'GET' : 'POST';
+  const send = () => (body === undefined
+    ? fetch(path, { method, credentials: 'include' })
+    : doFetch(method, path, {}, body));
+  let res = await send();
   if (res.status === 401) {
     const refreshed = await tryRefresh(requestedAt);
-    if (refreshed) res = await fetch(path, { method: 'GET', credentials: 'include' });
+    if (refreshed) res = await send();
     if (res.status === 401) {
       if (typeof window !== 'undefined') window.dispatchEvent(new Event('auth:unauthorized'));
-      throw new ApiError(401, errMsg(null, 401), { path, method: 'GET', requestId: reqId(res) });
+      throw new ApiError(401, errMsg(null, 401), { path, method, requestId: reqId(res) });
     }
   }
   if (!res.ok) {
     const text = await res.text();
     throw new ApiError(res.status, errMsg(text ? safeJson(text) : null, res.status), {
-      path, method: 'GET', requestId: reqId(res),
+      path, method, requestId: reqId(res),
     });
   }
   const blob = await res.blob();

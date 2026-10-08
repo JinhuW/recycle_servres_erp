@@ -1,5 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import { describe, it, expect, beforeEach } from 'vitest';
-import { resetDb } from './helpers/db';
+import { getTestDb, resetDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import { expectSheetOrder, type SheetOrdered } from './helpers/inventory';
@@ -120,5 +121,111 @@ describe('GET /api/inventory/products', () => {
     const r = await products(buyer.token, 'scope-9');
     expect(r.status).toBe(200);
     expect(r.body.products.length).toBe(0);
+  });
+});
+
+// Select-all on the desktop picks every sellable lot the filters match. The
+// grouped view lists only GROUP_CAP (200) products, so the ids have to come
+// from the server, and the rows for lots past the cap from POST /rows.
+describe('select-all past the grouped cap', () => {
+  const BRAND = 'SELALLQZ';
+  const LINES = 205;
+
+  type Row = { id: string; po_line_no: number | null; committed_qty: number };
+  type Products = { products: Group[]; sellable_ids?: string[] };
+
+  let transitId: string;
+  let dallasId: string;
+  let doneIds: string[];
+
+  beforeEach(async () => {
+    await resetDb();
+    const { token } = await loginAs(ALEX);
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: {
+        warehouseId: 'WH-LA1',
+        paypalTxnId: 'TESTPAYTXN0000001',
+        category: 'RAM',
+        lines: Array.from({ length: LINES }, (_, i) => ({
+          category: 'RAM', brand: BRAND, capacity: '32GB', type: 'DDR4',
+          classification: 'RDIMM', speed: '3200',
+          partNumber: `SELALL-${String(i).padStart(3, '0')}`,
+          condition: 'Pulled — Tested', qty: 2, unitCost: 50,
+        })),
+      },
+    });
+    expect(created.status).toBe(201);
+
+    const sql = getTestDb();
+    const ids = (await sql<{ id: string }[]>`
+      SELECT id FROM order_lines WHERE order_id = ${created.body.id} ORDER BY position
+    `).map((r) => r.id);
+    expect(ids).toHaveLength(LINES);
+    [transitId, dallasId] = ids;
+    await sql`UPDATE order_lines SET status = 'Done' WHERE order_id = ${created.body.id}`;
+    await sql`UPDATE order_lines SET status = 'In Transit' WHERE id = ${transitId}`;
+    await sql`UPDATE order_lines SET warehouse_id = 'WH-DAL' WHERE id = ${dallasId}`;
+    doneIds = ids.filter((id) => id !== transitId);
+  });
+
+  it('lists every matching sellable lot in sellable_ids, past the 200 listed products', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api<Products>('GET', `/api/inventory/products?q=${BRAND}`, { token });
+    expect(r.status).toBe(200);
+    expect(r.body.products).toHaveLength(200);
+
+    const sellable = r.body.sellable_ids!;
+    expect([...sellable].sort()).toEqual([...doneIds].sort());
+    expect(sellable).not.toContain(transitId);
+    const listed = new Set(r.body.products.flatMap((g) => g.lines.map((l) => l.id)));
+    expect(sellable.filter((id) => !listed.has(id)).length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('narrows sellable_ids to the warehouse filter per lot', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api<Products>(
+      'GET', `/api/inventory/products?q=${BRAND}&warehouse=WH-LA1`, { token });
+    expect(r.status).toBe(200);
+    expect(r.body.sellable_ids).not.toContain(dallasId);
+    expect(r.body.sellable_ids).toHaveLength(doneIds.length - 1);
+  });
+
+  it('leaves sellable_ids off a purchaser response', async () => {
+    const { token } = await loginAs(MARCUS);
+    const r = await api<Products>('GET', `/api/inventory/products?q=${BRAND}`, { token });
+    expect(r.status).toBe(200);
+    expect(r.body).not.toHaveProperty('sellable_ids');
+  });
+
+  it('returns the rows behind a selection from POST /rows', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api<{ items: Row[] }>('POST', '/api/inventory/rows', {
+      token, body: { ids: doneIds },
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.items.map((i) => i.id).sort()).toEqual([...doneIds].sort());
+    for (const row of r.body.items) {
+      expect(row.po_line_no).toEqual(expect.any(Number));
+      expect(row.committed_qty).toBe(0);
+    }
+  });
+
+  it('refuses POST /rows to purchasers and rejects malformed or oversized selections', async () => {
+    const buyer = await loginAs(MARCUS);
+    const forbidden = await api('POST', '/api/inventory/rows', {
+      token: buyer.token, body: { ids: doneIds.slice(0, 1) },
+    });
+    expect(forbidden.status).toBe(403);
+
+    const { token } = await loginAs(ALEX);
+    const notArray = await api('POST', '/api/inventory/rows', { token, body: { ids: doneIds[0] } });
+    expect(notArray.status).toBe(400);
+    const junk = await api('POST', '/api/inventory/rows', { token, body: { ids: ['not-a-uuid'] } });
+    expect(junk.status).toBe(400);
+    const tooMany = await api('POST', '/api/inventory/rows', {
+      token, body: { ids: Array.from({ length: 5001 }, () => randomUUID()) },
+    });
+    expect(tooMany.status).toBe(413);
   });
 });

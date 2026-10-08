@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { describe, it, expect, beforeEach } from 'vitest';
 import ExcelJS from 'exceljs';
 import app from '../src/index';
@@ -14,6 +15,19 @@ function getRaw(path: string, token: string): Promise<Response> {
   return app.fetch(
     new Request('http://test' + path, {
       headers: { cookie: `at=${token}`, 'X-Requested-By': 'recycle-erp' },
+    }),
+    testEnv,
+  );
+}
+
+function postRaw(path: string, token: string, body: unknown): Promise<Response> {
+  return app.fetch(
+    new Request('http://test' + path, {
+      method: 'POST',
+      headers: {
+        cookie: `at=${token}`, 'X-Requested-By': 'recycle-erp', 'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
     }),
     testEnv,
   );
@@ -140,6 +154,37 @@ describe('GET /api/inventory/export', () => {
     expect(dataRows).toBe(2);
     // The ID column carries the 8-char prefix of each selected line.
     expect(exportedIds.sort()).toEqual(picked.map(id => id.slice(0, 8)).sort());
+  });
+
+  // A select-all reaches past a thousand lots, whose ids overflow a URL, so the
+  // desktop posts the selection.
+  it('exports a posted selection, and refuses a malformed or oversized one', async () => {
+    const { token } = await loginAs(ALEX);
+    const list = await getRaw('/api/inventory?status=Reviewing', token);
+    const { items } = await list.json() as { items: { id: string }[] };
+    const picked = items.slice(0, 3).map(i => i.id);
+    expect(picked).toHaveLength(3);
+
+    const res = await postRaw('/api/inventory/export', token, { ids: picked });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain(XLSX_MIME);
+    const wb = await loadWorkbook(res);
+    const exportedIds: string[] = [];
+    for (const ws of wb.worksheets) {
+      for (let r = 2; r <= ws.rowCount; r++) {
+        const v = ws.getRow(r).getCell(1).value;
+        if (v) exportedIds.push(String(v));
+      }
+    }
+    expect(exportedIds.sort()).toEqual(picked.map(id => id.slice(0, 8)).sort());
+
+    expect((await postRaw('/api/inventory/export', token, { ids: 'nope' })).status).toBe(400);
+    expect((await postRaw('/api/inventory/export', token, { ids: ['not-a-uuid'] })).status).toBe(400);
+    const tooMany = Array.from({ length: 5001 }, () => randomUUID());
+    expect((await postRaw('/api/inventory/export', token, { ids: tooMany })).status).toBe(413);
+
+    const buyer = await loginAs(MARCUS);
+    expect((await postRaw('/api/inventory/export', buyer.token, { ids: picked })).status).toBe(403);
   });
 
   it('rejects malformed ids instead of 500ing, and ignores junk among valid ones', async () => {
