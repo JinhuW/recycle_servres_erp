@@ -2,12 +2,12 @@
 id: RS-199
 title: Pack mode reads like Review mode, with a fold for a product from several PO lots
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-08
 reporter: jinhu
 branch: feat/pack-mode-review-layout
-pr:
+pr: "#541"
 version: 1.227.0
 related: [RS-187, RS-188, RS-190, RS-193, RS-197]
 ---
@@ -42,23 +42,23 @@ from several lots collapses into one row that opens to show its lots.
 
 ## Acceptance criteria
 
-- [ ] Pack mode has Review mode's shape: page head, tally card, a table with the
+- [x] Pack mode has Review mode's shape: page head, tally card, a table with the
       scan box in its head, and a side panel holding the selected item and a
       Finish card. The bottom bar is gone.
-- [ ] Rows run #1..#n and never move; a packed row dims in place.
-- [ ] A product with two or more lots above 0 is one fold row: its #, part,
+- [x] Rows run #1..#n and never move; a packed row dims in place.
+- [x] A product with two or more lots above 0 is one fold row: its #, part,
       specs, the lots' PO tags, and the summed count. It starts closed. Opening it
       lists one row per lot with its photo, PO tag, count stepper and tick.
-- [ ] Ticking a product packs its lots still at full count. A lowered lot keeps
+- [x] Ticking a product packs its lots still at full count. A lowered lot keeps
       waiting for its own tick, and the fold opens to show it. Ticking a fully
       packed product unpacks it. One Undo reverses either.
-- [ ] A scan that could be several lots opens their products and highlights the
+- [x] A scan that could be several lots opens their products and highlights the
       lots. RS-197's filter keeps every product holding a match, with the
       matches showing.
-- [ ] The Finish card lists what still blocks Mark shipped (left to pack, short,
+- [x] The Finish card lists what still blocks Mark shipped (left to pack, short,
       zero, with Edit order). With everything packed on a Draft it offers Mark
       shipped → the Shipped dialog.
-- [ ] iPad landscape (1080 and 1180 wide) shows two columns. Portrait stacks the
+- [x] iPad landscape (1080 and 1180 wide) shows two columns. Portrait stacks the
       Finish card under the list. No horizontal scroll, and every tap target is
       ≥ 44px.
 
@@ -79,3 +79,10 @@ from several lots collapses into one row that opens to show its lots.
 - A lot at qty 0 is dropped from a product that still has a lot above 0, as the
   packing lists drop it. A product whose lots are all 0 stays as one greyed row,
   so its # is still accounted for.
+- Verified on a local stack (throwaway DB, Playwright WebKit at 1180×820,
+  1080×810, 820×1180 and 810×1080; Chromium at 1440×900) against a draft with
+  a 3-lot product, a live lot plus a 0 lot, an all-zero product and three
+  warehouses: 54 checks, including no horizontal scroll and every button
+  ≥ 44px.
+- Released as v1.227.0, not the 1.223.0 first claimed: RS-200 (v1.225.0)
+  merged first and `version-check` refuses a version below the newest tag.
