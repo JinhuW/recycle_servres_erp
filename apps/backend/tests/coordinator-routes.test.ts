@@ -162,6 +162,158 @@ describe('Coordinator proxy routes (/api/coordinator)', () => {
     });
   });
 
+  describe('account pool (/accounts)', () => {
+    const sent = (spy: ReturnType<typeof stubFacade>) => {
+      const [url, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
+      return { url, method: init.method, body: JSON.parse(init.body as string) as unknown };
+    };
+
+    it('keeps purchasers out without asking upstream', async () => {
+      const { token } = await loginAs(MARCUS);
+      const spy = stubFacade(200, {});
+      expect((await api('GET', '/api/coordinator/accounts', { token, env: ENV })).status).toBe(403);
+      expect((await api('POST', '/api/coordinator/accounts', { token, env: ENV, body: { account_id: 'a1' } })).status).toBe(403);
+      expect((await api('PATCH', '/api/coordinator/accounts/a1', { token, env: ENV, body: {} })).status).toBe(403);
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it('reports 501 when the control plane is not configured', async () => {
+      const { token } = await loginAs(ALEX);
+      expect((await api('GET', '/api/coordinator/accounts', { token })).status).toBe(501);
+    });
+
+    it('lists the vault accounts with the bearer token', async () => {
+      const { token } = await loginAs(ALEX);
+      const spy = stubFacade(200, { accounts: [{ account_id: 'fb-1', worker_id: null }] });
+
+      const r = await api<{ accounts: Array<{ account_id: string }> }>(
+        'GET', '/api/coordinator/accounts', { token, env: ENV },
+      );
+
+      expect(r.status).toBe(200);
+      expect(r.body.accounts[0]?.account_id).toBe('fb-1');
+      const [url, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
+      expect(url).toBe('http://facade.internal:8600/v1/accounts');
+      expect(init.method).toBe('GET');
+      expect((init.headers as Record<string, string>).Authorization).toBe('Bearer console-secret');
+    });
+
+    it('creates from a rebuilt body signed by the session user', async () => {
+      const { token } = await loginAs(ALEX);
+      const spy = stubFacade(201, { account_id: 'fb-1' });
+
+      const r = await api('POST', '/api/coordinator/accounts', {
+        token, env: ENV, body: {
+          account_id: 'fb-1',
+          fb_username: 'ops@example.com',
+          worker_id: null,
+          region: 'denver',
+          secrets: { password: 'hunter2', imap_port: null, recovery_codes: 'x' },
+          changed_by: 'mallory',
+          allow_password_login: true,
+          proxy: 'socks5://evil',
+        },
+      });
+
+      expect(r.status).toBe(201);
+      expect(sent(spy)).toEqual({
+        url: 'http://facade.internal:8600/v1/accounts',
+        method: 'POST',
+        body: {
+          account_id: 'fb-1',
+          fb_username: 'ops@example.com',
+          worker_id: null,
+          region: 'denver',
+          secrets: { password: 'hunter2', imap_port: null },
+          changed_by: 'Alex Chen',
+        },
+      });
+    });
+
+    it('edits only the fields sent, keeping nulls, under the session user', async () => {
+      const { token } = await loginAs(ALEX);
+      const spy = stubFacade(200, { account_id: 'ops@fb.1' });
+
+      const r = await api('PATCH', '/api/coordinator/accounts/ops@fb.1', {
+        token, env: ENV, body: {
+          worker_id: null,
+          secrets: { email: null, email_password: 'pw', session_cookie: 'x' },
+          account_id: 'someone-else',
+          changed_by: 'mallory',
+        },
+      });
+
+      expect(r.status).toBe(200);
+      expect(sent(spy)).toEqual({
+        url: 'http://facade.internal:8600/v1/accounts/ops%40fb.1',
+        method: 'PATCH',
+        body: {
+          worker_id: null,
+          secrets: { email: null, email_password: 'pw' },
+          changed_by: 'Alex Chen',
+        },
+      });
+    });
+
+    it('refuses a bad id or body without asking upstream', async () => {
+      const { token } = await loginAs(ALEX);
+      const spy = stubFacade(200, {});
+      const cases: Array<['POST' | 'PATCH', string, unknown]> = [
+        ['PATCH', '/api/coordinator/accounts/..%2Fadmin', {}],
+        ['PATCH', '/api/coordinator/accounts/-leading-dash', {}],
+        ['POST', '/api/coordinator/accounts', { fb_username: 'no id' }],
+        ['POST', '/api/coordinator/accounts', { account_id: 'has space' }],
+        ['POST', '/api/coordinator/accounts', 'not an object'],
+        ['PATCH', '/api/coordinator/accounts/fb-1', ['not', 'an', 'object']],
+        ['PATCH', '/api/coordinator/accounts/fb-1', { region: 7 }],
+        ['PATCH', '/api/coordinator/accounts/fb-1', { secrets: 'hunter2' }],
+        ['PATCH', '/api/coordinator/accounts/fb-1', { secrets: { password: 42 } }],
+      ];
+      for (const [method, path, body] of cases) {
+        const r = await api<{ error: string }>(method, path, { token, env: ENV, body });
+        expect(r.status, `${method} ${path} ${JSON.stringify(body)}`).toBe(400);
+        expect(typeof r.body.error).toBe('string');
+      }
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it('shows the coordinator’s reason for a refused write as the error', async () => {
+      const { token } = await loginAs(ALEX);
+      stubFacade(409, { detail: 'worker ne-1 is held by fb-2' });
+      const held = await api<{ error: string }>('PATCH', '/api/coordinator/accounts/fb-1', {
+        token, env: ENV, body: { worker_id: 'ne-1' },
+      });
+      expect(held.status).toBe(409);
+      expect(held.body).toEqual({ error: 'worker ne-1 is held by fb-2' });
+
+      // A schema miss is a list of field errors, which may echo the value.
+      stubFacade(422, { detail: [{ loc: ['body', 'secrets', 'imap_port'], msg: 'bad', input: 'hunter2' }] });
+      const schema = await api<{ error: string }>('POST', '/api/coordinator/accounts', {
+        token, env: ENV, body: { account_id: 'fb-1' },
+      });
+      expect(schema.status).toBe(422);
+      expect(schema.body).toEqual({ error: 'Invalid account data' });
+    });
+
+    it('turns the facade refusing our token into a 502', async () => {
+      const { token } = await loginAs(ALEX);
+      stubFacade(401, { detail: 'Invalid bearer token' });
+      const list = await api<{ error: string }>('GET', '/api/coordinator/accounts', { token, env: ENV });
+      expect(list.status).toBe(502);
+      expect(list.body.error).toMatch(/COORDINATOR_API_TOKEN/);
+      const edit = await api('PATCH', '/api/coordinator/accounts/fb-1', { token, env: ENV, body: { region: 'x' } });
+      expect(edit.status).toBe(502);
+    });
+
+    it('leaves the other routes’ refusals as the coordinator wrote them', async () => {
+      const { token } = await loginAs(ALEX);
+      stubFacade(409, { detail: 'already resolved' });
+      const r = await api<{ detail: string }>('POST', '/api/coordinator/challenges/7/resolve', { token, env: ENV });
+      expect(r.status).toBe(409);
+      expect(r.body).toEqual({ detail: 'already resolved' });
+    });
+  });
+
   it('never passes the facade refusing our token through as a 401 the SPA reads as a lapsed session', async () => {
     const { token } = await loginAs(ALEX);
     for (const status of [401, 403]) {

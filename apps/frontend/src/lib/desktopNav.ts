@@ -54,6 +54,7 @@ export const DESKTOP_NAV: readonly NavGroup[] = [
         icon: 'eye',
         children: [
           { id: 'coordinator', tKey: 'nav_coordinator', icon: 'shield', roles: ['manager'] },
+          { id: 'accountPool', tKey: 'nav_accountPool', icon: 'lock',   roles: ['manager'] },
           { id: 'tracker',     tKey: 'nav_tracker',     icon: 'globe',  roles: ['manager'] },
         ],
       },

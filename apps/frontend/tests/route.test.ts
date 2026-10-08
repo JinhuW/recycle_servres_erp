@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   pathToDesktopView, pathToMobileView, matchPurchaseOrder, poProductsPath, match, activityRecordHref,
-  splitHash,
+  splitHash, DESKTOP_VIEW_TO_PATH,
 } from '../src/lib/route';
 
 describe('splitHash — a route may carry a page-local query', () => {
@@ -64,6 +64,20 @@ describe('pathToDesktopView — tracker', () => {
   });
   it('does not match tracker sub-paths', () => {
     expect(pathToDesktopView('/tracker/x')).toBe('dashboard');
+  });
+});
+
+describe('pathToDesktopView — Facebook fleet', () => {
+  it('resolves the fleet page and its watch sub-route', () => {
+    expect(pathToDesktopView('/fleet')).toBe('coordinator');
+    expect(pathToDesktopView('/fleet/watch/x')).toBe('coordinator');
+  });
+  it('resolves the account pool', () => {
+    expect(pathToDesktopView('/fleet/accounts')).toBe('accountPool');
+    expect(DESKTOP_VIEW_TO_PATH.accountPool).toBe('/fleet/accounts');
+  });
+  it('does not match account pool sub-paths', () => {
+    expect(pathToDesktopView('/fleet/accounts/x')).toBe('dashboard');
   });
 });
 

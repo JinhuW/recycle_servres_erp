@@ -40,6 +40,7 @@ const DesktopInternalTxns = lazy(() => import('./pages/desktop/DesktopInternalTx
 const DesktopSettings = lazy(() => import('./pages/desktop/DesktopSettings').then(m => ({ default: m.DesktopSettings })));
 const DesktopTracker = lazy(() => import('./pages/desktop/DesktopTracker').then(m => ({ default: m.DesktopTracker })));
 const DesktopCoordinator = lazy(() => import('./pages/desktop/DesktopCoordinator').then(m => ({ default: m.DesktopCoordinator })));
+const DesktopAccountPool = lazy(() => import('./pages/desktop/DesktopAccountPool').then(m => ({ default: m.DesktopAccountPool })));
 const DesktopSubmit = lazy(() => import('./pages/desktop/DesktopSubmit').then(m => ({ default: m.DesktopSubmit })));
 const DesktopShipping = lazy(() => import('./pages/desktop/DesktopShipping').then(m => ({ default: m.DesktopShipping })));
 const DesktopClients = lazy(() => import('./pages/desktop/DesktopClients').then(m => ({ default: m.DesktopClients })));
@@ -190,7 +191,7 @@ export function DesktopApp() {
   }
 
   // Default to dashboard if a purchaser tried to navigate to a manager-only view.
-  const view2: DesktopView = user.role === 'purchaser' && (view === 'inventory' || view === 'analysis' || view === 'sellorders' || view === 'transfers' || view === 'websubmissions' || view === 'activity' || view === 'payments' || view === 'internaltx' || view === 'tracker' || view === 'coordinator')
+  const view2: DesktopView = user.role === 'purchaser' && (view === 'inventory' || view === 'analysis' || view === 'sellorders' || view === 'transfers' || view === 'websubmissions' || view === 'activity' || view === 'payments' || view === 'internaltx' || view === 'tracker' || view === 'coordinator' || view === 'accountPool')
     ? 'dashboard'
     : view;
 
@@ -300,6 +301,7 @@ export function DesktopApp() {
             {view2 === 'internaltx' && <DesktopInternalTxns onToast={showToast} />}
             {view2 === 'tracker'   && <DesktopTracker showToast={showToast} />}
             {view2 === 'coordinator' && <DesktopCoordinator showToast={showToast} />}
+            {view2 === 'accountPool' && <DesktopAccountPool />}
             {view2 === 'settings'   && <DesktopSettings showToast={showToast} />}
           </Suspense>
         </div>

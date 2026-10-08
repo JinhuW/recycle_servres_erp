@@ -9,9 +9,9 @@ import type { Env, User } from '../types';
 // ─── Facebook worker control-plane proxy ──────────────────────────────────────
 // Manager-only pass-through to the coordinator API, so its bearer token never
 // reaches the browser. Explicit allowlist rather than a catch-all: the
-// coordinator also exposes worker lifecycle and account endpoints this UI has
-// no business calling. Self-applies authMiddleware (tracker pattern), so
-// index.ts mounts it with a single app.route().
+// coordinator also exposes worker lifecycle and credential endpoints this UI
+// has no business calling. Self-applies authMiddleware
+// (tracker pattern), so index.ts mounts it with a single app.route().
 
 const TIMEOUT_MS = 10_000;
 // A checkpoint screenshot is a full browser-window PNG the coordinator may be
@@ -58,15 +58,31 @@ const isAuthRefusal = (status: number) => status === 401 || status === 403;
 // Statuses a Response may not carry a body on; building one with a body throws.
 const NULL_BODY_STATUSES = new Set([204, 205, 304]);
 
+const INVALID_ACCOUNT = 'Invalid account data';
+
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
+// FastAPI says why it refused a write in `detail`: a sentence from the
+// coordinator's own checks, or a list of field errors from schema validation.
+// The SPA shows only `error`, so a route that opts in gets the sentence there.
+function detailAsError(payload: unknown): unknown {
+  if (!isRecord(payload)) return payload;
+  if (typeof payload.detail === 'string') return { error: payload.detail };
+  if (Array.isArray(payload.detail)) return { error: INVALID_ACCOUNT };
+  return payload;
+}
+
 async function forward(
   c: {
     env: Env;
     json: (body: unknown, status?: number) => Response;
     body: (data: null, status: StatusCode) => Response;
   },
-  method: 'GET' | 'POST',
+  method: 'GET' | 'POST' | 'PATCH',
   path: string,
   body?: unknown,
+  opts: { detailAsError?: boolean } = {},
 ): Promise<Response> {
   const up = upstream(c.env);
   if (!up) return c.json({ error: NOT_CONFIGURED }, 501);
@@ -87,10 +103,11 @@ async function forward(
 
   if (isAuthRefusal(res.status)) return upstreamAuthRefused(c, res.status, path);
   if (NULL_BODY_STATUSES.has(res.status)) return c.body(null, res.status as StatusCode);
-  // Pass the upstream body and status through verbatim: the coordinator's 4xx
-  // bodies carry actionable messages the UI shows as-is.
+  // Pass the upstream body and status through: the coordinator's 4xx bodies
+  // carry actionable messages the UI shows as-is.
   const payload = await res.json().catch(() => ({ error: `coordinator returned ${res.status}` }));
-  return c.json(payload, res.status as ContentfulStatusCode);
+  const refused = res.status >= 400 && res.status < 500;
+  return c.json(opts.detailAsError && refused ? detailAsError(payload) : payload, res.status as ContentfulStatusCode);
 }
 
 coordinator.get('/workers', (c) => forward(c, 'GET', '/v1/workers'));
@@ -119,6 +136,79 @@ coordinator.get('/fleet', (c) => forward(c, 'GET', '/v1/fleet'));
 // names no account, which is why the facade lets it through.
 coordinator.post('/workers/:id/relogin', (c) =>
   forward(c, 'POST', `/v1/workers/${encodeURIComponent(c.req.param('id'))}/relogin`));
+
+// ── The account pool ─────────────────────────────────────────────────────────
+// Managers create and edit vault accounts here. Secrets travel one way: a
+// write may carry them, but every answer says only which ones are stored.
+// Each write is rebuilt from an allowlist, so nothing else the browser sends
+// reaches the vault — not `changed_by`, not password-login release — and no
+// body is ever logged, because it holds the secrets.
+
+// The coordinator's own rule for an account id. Anything else never reaches
+// the facade's URL space.
+const ACCOUNT_ID = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/;
+
+const ACCOUNT_FIELDS = ['fb_username', 'worker_id', 'region'] as const;
+const SECRET_FIELDS: ReadonlySet<string> = new Set([
+  'password', 'email', 'email_password', 'totp_secret', 'imap_host', 'imap_port',
+]);
+
+const isStringOrNull = (v: unknown): v is string | null => v === null || typeof v === 'string';
+
+// Upstream reads an absent key as "keep" and an explicit null as "clear", so
+// the distinction survives the rebuild. Unknown secret names are dropped; a
+// value of the wrong type refuses the whole write (null).
+function accountWrite(raw: Record<string, unknown>): Record<string, unknown> | null {
+  const out: Record<string, unknown> = {};
+  for (const key of ACCOUNT_FIELDS) {
+    if (!Object.hasOwn(raw, key)) continue;
+    if (!isStringOrNull(raw[key])) return null;
+    out[key] = raw[key];
+  }
+  if (Object.hasOwn(raw, 'secrets')) {
+    if (!isRecord(raw.secrets)) return null;
+    const secrets: Record<string, string | null> = {};
+    for (const [key, value] of Object.entries(raw.secrets)) {
+      if (!SECRET_FIELDS.has(key)) continue;
+      if (!isStringOrNull(value)) return null;
+      secrets[key] = value;
+    }
+    out.secrets = secrets;
+  }
+  return out;
+}
+
+// The vault's audit trail names the manager who made the change, so it comes
+// from the session, never from the request body.
+const changedBy = (user: User) => user.name || user.email;
+
+coordinator.get('/accounts', (c) =>
+  forward(c, 'GET', '/v1/accounts', undefined, { detailAsError: true }));
+
+coordinator.post('/accounts', async (c) => {
+  const raw: unknown = await c.req.json().catch(() => null);
+  if (!isRecord(raw)) return c.json({ error: 'invalid body' }, 400);
+  if (typeof raw.account_id !== 'string' || !ACCOUNT_ID.test(raw.account_id)) {
+    return c.json({ error: 'Invalid account id' }, 400);
+  }
+  const write = accountWrite(raw);
+  if (!write) return c.json({ error: INVALID_ACCOUNT }, 400);
+  return forward(c, 'POST', '/v1/accounts',
+    { account_id: raw.account_id, ...write, changed_by: changedBy(c.var.user) },
+    { detailAsError: true });
+});
+
+coordinator.patch('/accounts/:id', async (c) => {
+  const id = c.req.param('id');
+  if (!ACCOUNT_ID.test(id)) return c.json({ error: 'Invalid account id' }, 400);
+  const raw: unknown = await c.req.json().catch(() => null);
+  if (!isRecord(raw)) return c.json({ error: 'invalid body' }, 400);
+  const write = accountWrite(raw);
+  if (!write) return c.json({ error: INVALID_ACCOUNT }, 400);
+  return forward(c, 'PATCH', `/v1/accounts/${encodeURIComponent(id)}`,
+    { ...write, changed_by: changedBy(c.var.user) },
+    { detailAsError: true });
+});
 
 // ── Watching a worker's browser ──────────────────────────────────────────────
 // The bytes themselves are relayed by vncBridge.ts, which owns the HTTP

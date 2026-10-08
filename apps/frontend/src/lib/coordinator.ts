@@ -184,9 +184,54 @@ export type AlertHitRow = {
   hit: number;
 };
 
+// ── Account pool (/v1/accounts) ────────────────────────────────────────────────
+// Every vault account, assigned to a worker or waiting in the pool. Secrets
+// are write-only: a write may carry one, but `secrets` on the way back only
+// says which are stored.
+
+export const SECRET_FIELDS = [
+  'password', 'email', 'email_password', 'totp_secret', 'imap_host', 'imap_port',
+] as const;
+
+export type SecretField = typeof SECRET_FIELDS[number];
+
+export type PoolAccount = {
+  account_id: string;
+  worker_id: string | null;
+  fb_username: string | null;
+  region: string | null;
+  vnc_url: string | null;
+  allow_password_login: boolean;
+  proxy_configured: boolean;
+  secrets: Record<SecretField, boolean>;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+// An absent key keeps what is stored and null clears it (`worker_id: null`
+// returns the account to the pool). The backend signs the write with the
+// session's user, so there is no `changed_by` here.
+export type AccountWrite = {
+  fb_username?: string | null;
+  worker_id?: string | null;
+  region?: string | null;
+  secrets?: Partial<Record<SecretField, string | null>>;
+};
+
+export type AccountCreate = AccountWrite & { account_id: string };
+
 export const coordinatorApi = {
   listWorkers: () =>
     api.get<{ workers: FleetWorker[] }>('/api/coordinator/workers').then(r => r.workers),
+
+  listAccounts: () =>
+    api.get<{ accounts: PoolAccount[] }>('/api/coordinator/accounts').then(r => r.accounts),
+
+  createAccount: (body: AccountCreate) =>
+    api.post<PoolAccount>('/api/coordinator/accounts', body),
+
+  updateAccount: (accountId: string, body: AccountWrite) =>
+    api.patch<PoolAccount>(`/api/coordinator/accounts/${encodeURIComponent(accountId)}`, body),
 
   reviewStats: (days: number) =>
     api.get<{ days: ReviewStatsDay[] }>(`/api/coordinator/stats/reviews?days=${days}`)

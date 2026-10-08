@@ -1289,6 +1289,17 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   ticket and relays bytes, so the facade token and Cloudflare Access
   credentials stay server-side.  Offered for every worker the facade can
   bridge to (`RS_VNC_TARGETS`) (v1.204.0).
+- **Account Pool** — `/fleet/accounts`, **Monitors ▸ Account Pool**,
+  manager-only (v1.210.0).  Lists every Facebook account in the coordinator
+  vault, assigned or in the pool, with which secrets are stored and whether
+  password login is on, searchable and filtered All / Assigned / Pool.  A
+  manager creates an account and edits its Facebook login, worker (including
+  un-assigning it), region and the six secrets; a blank secret keeps what is
+  stored and Clear removes it.  Secrets are write-only: the ERP API never
+  returns one and never logs a write.  The proxy routes rebuild each write
+  from an allowlist and sign it with the manager's name.  No delete, and
+  password login, proxy and VNC link stay on the VM (`rsc vault`).  Against a
+  facade without the account routes the page shows a quiet notice.
 
 - **Web submissions** — the manager inbox for the public website forms
   (v1.187.0). The ram4cash.com sell form (`POST /api/public/intake`) and the
@@ -1551,7 +1562,8 @@ removed in v1.191.0.
 - **The sidebar has a second level** (v1.207.0). A parent entry opens while
   you are on one of its pages and is one row with a › caret everywhere else;
   clicking it opens its first child. The one parent today is **Oversight ▸
-  Monitors**, holding **Facebook** (`/fleet`) and **Reddit** (`/tracker`). In
+  Monitors**, holding **Facebook** (`/fleet`), **Account Pool**
+  (`/fleet/accounts`, v1.210.0) and **Reddit** (`/tracker`). In
   the icon rail the caret hides and the open children show as icons.
 - **Menus and record references are real links** (v1.144.0). The sidebar,
   the Inventory ▸ Analysis strip, the phone tab bar and Home quick links, and

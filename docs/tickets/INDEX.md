@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-171](./RS-171-account-pool-page-manage-vault-accounts-from-the-erp.md) | in-progress | story | P2 | Account Pool page: manage vault accounts from the ERP | — |
 | [RS-170](./RS-170-re-login-looks-broken-it-waits-for-the-next-sweep-an.md) | done | bug | P2 | Re-login looks broken: it waits for the next sweep and cannot sign in without a stored password | 1.208.2 |
 | [RS-169](./RS-169-second-level-sidebar-nav-the-trackers-move-under-mon.md) | done | story | P2 | Second-level sidebar nav; the trackers move under Monitors | 1.207.0 |
 | [RS-166](./RS-166-desktop-sidebar-folds-to-an-icon-rail.md) | done | story | P2 | Desktop sidebar folds to an icon rail | 1.208.0 |

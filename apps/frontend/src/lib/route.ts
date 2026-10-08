@@ -316,6 +316,7 @@ export const DESKTOP_VIEW_TO_PATH = {
   internaltx: '/payments/internal',
   tracker:    '/tracker',
   coordinator: '/fleet',
+  accountPool: '/fleet/accounts',
   settings:   '/settings',
 } as const;
 
@@ -341,6 +342,7 @@ export function pathToDesktopView(path: string): DesktopViewId {
   if (path === '/payments' || match('/payments/po/:id', path)) return 'payments';
   if (path === '/tracker') return 'tracker';
   if (path === '/fleet' || matchFleetWatch(path)) return 'coordinator';
+  if (path === '/fleet/accounts') return 'accountPool';
   if (path === '/settings') return 'settings';
   return 'dashboard';
 }

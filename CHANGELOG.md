@@ -17,6 +17,56 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.210.0] - 2026-10-04
+
+The Facebook accounts in the coordinator vault can be kept from the ERP
+(RS-171). Adding or changing one used to mean `rsc vault set-account` on the
+fleet VM, and the ERP could only see the accounts already bound to a worker,
+read-only, inside the fleet page.
+
+### Added
+
+- **Account Pool** (`/fleet/accounts`, **Monitors ▸ Account Pool**,
+  manager-only). Every vault account, assigned to a worker or waiting in the
+  pool, with its Facebook login, worker, region, which secrets are stored,
+  whether password login is on, and when it last changed. A search box and an
+  All / Assigned / Pool filter narrow the list.
+- **Create and edit an account** from one dialog: the Facebook login, the
+  worker (with the fleet's worker ids suggested, and Un-assign to return it to
+  the pool), the region, and the six secrets (password, email, email
+  password, TOTP key, IMAP host and port). A blank secret keeps what is
+  stored; Clear removes it.
+- **Secrets are write-only.** They are typed into the dialog, sent once and
+  dropped when it closes; nothing on the page, in the ERP API or in its logs
+  ever holds one again, and the list only says which are set. Password login,
+  the proxy and the VNC link stay read-only here (still set with
+  `rsc vault set-account`), and the dialog says that changing an account's
+  worker turns its password login off.
+- **The coordinator's rules are checked before Save**: the id format, an IMAP
+  port of 1–65535, and that setting a new mailbox address, IMAP host or port
+  re-sends the mailbox password in the same save (clearing them needs
+  nothing).
+- **Proxy routes** `GET /api/coordinator/accounts`, `POST
+  /api/coordinator/accounts` and `PATCH /api/coordinator/accounts/:id`. Each
+  write is rebuilt from an allowlist of fields and secret names, and
+  `changed_by` is set from the signed-in manager, never from the request. A
+  refusal from the coordinator (`{detail}`) comes back as the message the
+  dialog shows.
+
+### Changed
+
+- The fleet page's "no vault record" hints point to the Account Pool page
+  instead of the CLI.
+
+### Deploy
+
+Needs the facebook_tracker coordinator and rs-console with the account routes
+(`GET/POST/PATCH /v1/accounts`) deployed first. Until then the page shows a
+quiet "the fleet console doesn't support account editing yet" notice and the
+rest of the fleet page is unaffected. Nothing to set on the ERP side: the
+routes reuse `COORDINATOR_API_URL` and `COORDINATOR_API_TOKEN`. There is no
+delete; removing an account stays `rsc vault rm` on the VM.
+
 ## [1.209.0] - 2026-10-04
 
 Web submissions can be answered by email from inside the ERP (RS-161).
