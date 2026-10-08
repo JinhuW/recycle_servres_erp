@@ -13,7 +13,7 @@ import { useT } from '../../lib/i18n';
 import { sellOrderStatuses } from '../../lib/lookups';
 import { navigate, navigateBack } from '../../lib/route';
 import {
-  isPackable, nextOpenProduct, packBody, packGroups, packProducts, packScan, packView, packWarehouseOf,
+  flaggedLots, isPackable, nextOpenProduct, packBody, packGroups, packProducts, packScan, packView, packWarehouseOf,
   packWarehouseOptions, productSummary, productTally, productTick, shipBlockers, sourceTag, toCheck, UNASSIGNED,
   type PackLine, type PackProduct, type PackResponse,
 } from '../../lib/sellOrderPack';
@@ -35,6 +35,8 @@ import { useScanFilterText } from '../../lib/useScanFilter';
 // shelf is short. On a Draft the tick writes the count onto the order's line
 // and taking it back puts the qty back — the server's rule, in
 // routes/sellOrderPack.ts — so a lot held at 0 has nothing left to pack.
+// Lots lowered and left unticked are listed in Finish, whose Apply ticks them
+// all at their counts in one request.
 
 type OrderLine = {
   id: string;
@@ -135,7 +137,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   const url = (lineId: string) => `/api/sell-orders/${id}/pack/${lineId}`;
   const bodyOf = (c: LineCheck) => packBody(c, qtyById.current.get(c.lineId) ?? c.counted);
 
-  const { checks, loadState, reload, save, flush } = useLineSaveQueue<PackResponse>({
+  const { checks, loadState, reload, save, flush, accept } = useLineSaveQueue<PackResponse>({
     read: () => api.get<PackResponse>(`/api/sell-orders/${id}/pack`),
     // Only the written line's qty is taken from a write: writes of one line
     // land in order, while the rest of the reply can be older than theirs.
@@ -212,6 +214,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   const sum = useMemo(() => productTally(products, checks), [products, checks]);
   const whole = useMemo(() => productTally(allProducts, checks), [allProducts, checks]);
   const blockers = useMemo(() => shipBlockers(lines, checks), [lines, checks]);
+  const flagged = useMemo(() => flaggedLots(lines, checks), [lines, checks]);
   const canShip = ready && isDraft && lines.some(isPackable)
     && blockers.open === 0 && blockers.short === 0 && blockers.zero === 0;
 
@@ -374,6 +377,48 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     }
     const l = lineById.get(key);
     if (l && isPackable(l)) toggle(l);
+  };
+
+  // Every lot lowered and left unticked, ticked at its count in one request:
+  // on a Draft each line goes to its count, a 0 included, and keeps its #.
+  const applyFlagged = async () => {
+    if (!ready || !isDraft || busy || !flagged.length) return;
+    const before = new Map(flagged.map(l => [l.id, checkOf(l.id)]));
+    setBusy(true);
+    try {
+      // The counts being applied are the server's, so none may still be waiting.
+      await flush();
+      const r = await api.post<PackResponse>(`/api/sell-orders/${id}/pack/apply`, { lineIds: [...before.keys()] });
+      accept(r);
+      const applied = r.applied ?? [];
+      setChoose(new Set());
+      if (!applied.length) {
+        showWarnToast(t('pkApplyNone'));
+        return;
+      }
+      flashUndo({
+        prev: applied.flatMap(lineId => before.get(lineId) ?? []),
+        msg: applied.length === 1 ? t('pkAppliedToastOne') : t('pkAppliedToast', { n: applied.length }),
+      });
+      // The selection moves on as a tick's does, judged on the reply: a fold
+      // that lost a lot to 0 may now be a single row, under another key.
+      const selNo = selKey ? (selKey.startsWith('p:') ? Number(selKey.slice(2)) : lineNo.get(selKey)) : undefined;
+      if (selNo !== undefined && applied.some(lineId => lineNo.get(lineId) === selNo)) {
+        const qtyNow = new Map(r.lines.map(x => [x.lineId, x.qty]));
+        const now = packProducts(packView(lines.map(l => ({ ...l, qty: qtyNow.get(l.id) ?? l.qty })), picked));
+        const after = new Map(r.lines.map(x => [x.lineId, toCheck(x)]));
+        const p = now.find(x => x.no === selNo);
+        const state = p && productSummary(p.lots, after).state;
+        const target = state === 'open' || state === 'mixed' ? p : nextOpenProduct(now, after, selNo);
+        setSelected(target ? keysOf(target)[0]! : null);
+      }
+    } catch (e) {
+      handleFetchError(e);
+      void loadOrder();
+      void reload();
+    } finally {
+      setBusy(false);
+    }
   };
 
   const undoLast = () => {
@@ -970,8 +1015,29 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
                   ))}
                 </ul>
               )}
+              {!readOnly && isDraft && flagged.length > 0 && (
+                <div className="pk-flagged">
+                  <div className="pk-flagged-title">{t('pkFlaggedTitle')}</div>
+                  <ul className="bc-problem-list pk-flagged-list">
+                    {flagged.map(l => (
+                      <li key={l.id}>
+                        <span className="mono">#{lineNo.get(l.id)} {pnOf(l)}</span>
+                        {' · '}<span className="muted">{lotTag(l)}</span>
+                        {' · '}{t('bcShortNote', { n: countOf(l, checks.get(l.id)), of: l.qty })}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="card-sub">{t('pkApplyHint')}</p>
+                </div>
+              )}
               {!readOnly && isDraft && (
                 <div className="bc-finish-actions">
+                  {flagged.length > 0 && (
+                    <button type="button" className="btn" disabled={!ready || busy} onClick={() => void applyFlagged()}>
+                      <Icon name="check" size={15} />
+                      {' '}{flagged.length === 1 ? t('pkApplyOne') : t('pkApply', { n: flagged.length })}
+                    </button>
+                  )}
                   {(blockers.short > 0 || blockers.zero > 0) && (
                     <button type="button" className="btn" onClick={() => navigate(`/sell-orders/${id}/edit`)}>
                       <Icon name="edit" size={15} /> {t('editOrder')}

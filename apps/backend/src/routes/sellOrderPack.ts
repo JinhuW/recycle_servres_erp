@@ -96,6 +96,26 @@ async function setLineQty(
   });
 }
 
+// A re-tick keeps its place in the Packed group; a tick against a new qty is
+// a new answer.
+async function writePackRow(
+  tx: postgres.TransactionSql, orderId: string, lineKey: string,
+  rowQty: number, counted: number, packed: boolean, actorId: string,
+) {
+  await tx`
+    INSERT INTO sell_order_packs (sell_order_id, line_key, line_qty, counted, packed_at, updated_by, updated_at)
+    VALUES (${orderId}, ${lineKey}, ${rowQty}, ${counted}, ${packed ? tx`NOW()` : null}, ${actorId}, NOW())
+    ON CONFLICT (sell_order_id, line_key) DO UPDATE SET
+      line_qty = EXCLUDED.line_qty,
+      counted = EXCLUDED.counted,
+      packed_at = CASE WHEN ${packed} THEN
+        CASE WHEN sell_order_packs.line_qty = EXCLUDED.line_qty
+             THEN COALESCE(sell_order_packs.packed_at, NOW()) ELSE NOW() END
+      END,
+      updated_by = EXCLUDED.updated_by,
+      updated_at = NOW()`;
+}
+
 type PackedLine = {
   line_key: string; qty: number; inventory_id: string | null;
   was_qty: number | null; was_counted: number | null; was_packed_at: Date | null;
@@ -163,24 +183,58 @@ packRoutes.put('/:id/pack/:lineId', async (c) => {
       rowQty = lowered ? line.was_qty! : line.qty;
     }
 
-    // A re-tick keeps its place in the Packed group; a tick against a new qty
-    // is a new answer.
-    await tx`
-      INSERT INTO sell_order_packs (sell_order_id, line_key, line_qty, counted, packed_at, updated_by, updated_at)
-      VALUES (${id}, ${line.line_key}, ${rowQty}, ${counted}, ${packed ? tx`NOW()` : null}, ${u.id}, NOW())
-      ON CONFLICT (sell_order_id, line_key) DO UPDATE SET
-        line_qty = EXCLUDED.line_qty,
-        counted = EXCLUDED.counted,
-        packed_at = CASE WHEN ${packed} THEN
-          CASE WHEN sell_order_packs.line_qty = EXCLUDED.line_qty
-               THEN COALESCE(sell_order_packs.packed_at, NOW()) ELSE NOW() END
-        END,
-        updated_by = EXCLUDED.updated_by,
-        updated_at = NOW()`;
+    await writePackRow(tx, id, line.line_key, rowQty, counted, packed, u.id);
     return { code: 200 };
   });
   if (outcome.code !== 200) return c.json({ error: outcome.msg }, outcome.code);
   return c.json(await readPack(sql, id));
+});
+
+type FlaggedLine = { line_id: string; line_key: string; qty: number; counted: number };
+
+// Apply: every lot named that is still lowered and unticked is ticked at its
+// count, as its own tick would on a Draft — in one transaction, so a long
+// order's shorts reach it under one lock rather than a PUT apiece. A lot
+// that is no longer lowered (another iPad ticked it, an edit rewrote it) is
+// skipped: the page asked about a state that has since moved on.
+packRoutes.post('/:id/pack/apply', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const sql = getDb(c.env);
+  const id = c.req.param('id');
+  const body = (await c.req.json().catch(() => null)) as { lineIds?: unknown } | null;
+  const ids = body?.lineIds;
+  if (!Array.isArray(ids) || ids.length === 0 || ids.length > 2000
+    || !ids.every(x => typeof x === 'string' && UUID_RE.test(x))) {
+    return c.json({ error: 'lineIds must be a list of line ids' }, 400);
+  }
+
+  type Outcome = { code: 404 | 409; msg: string } | { code: 200; applied: string[] };
+  const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
+    const order = (await tx<{ status: string; archived_at: Date | null }[]>`
+      SELECT status, archived_at FROM sell_orders WHERE id = ${id} FOR UPDATE`)[0];
+    if (!order) return { code: 404, msg: 'Not found' };
+    if (order.archived_at) return { code: 409, msg: 'Order is archived — unarchive it first' };
+    if (order.status !== 'Draft') {
+      return { code: 409, msg: `Order is ${order.status} — only a Draft takes its counts from the box` };
+    }
+    // A row written against another qty is stale, and reads as unlowered.
+    const flagged = await tx<FlaggedLine[]>`
+      WITH k AS (${keyedLines(tx, id)})
+      SELECT k.id AS line_id, k.line_key, k.qty, p.counted
+      FROM k
+      JOIN sell_order_packs p ON p.sell_order_id = ${id} AND p.line_key = k.line_key
+      WHERE k.id = ANY(${ids}::uuid[])
+        AND k.qty > 0 AND p.line_qty = k.qty AND p.packed_at IS NULL AND p.counted < k.qty`;
+    for (const l of flagged) {
+      await setLineQty(tx, id, l.line_id, l.qty, l.counted, u.id);
+      // Written against the qty it came down from, which an untick puts back.
+      await writePackRow(tx, id, l.line_key, l.qty, l.counted, true, u.id);
+    }
+    return { code: 200, applied: flagged.map(l => l.line_id) };
+  });
+  if (outcome.code !== 200) return c.json({ error: outcome.msg }, outcome.code);
+  return c.json({ ...(await readPack(sql, id)), applied: outcome.applied });
 });
 
 export default packRoutes;

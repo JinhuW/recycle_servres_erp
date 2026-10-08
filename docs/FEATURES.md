@@ -1135,12 +1135,27 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
     archived or sold meanwhile. A line at 0 can only be put back from the
     Undo toast; after that, Edit order does it. Shipped, Awaiting payment and
     Done orders keep their qty: the tick there is progress only.
+  - **Apply sends every flagged count at once** (v1.229.0). A lot lowered
+    with − and not yet ticked is only flagged (*Short*, *Not packed*). While
+    any is, the Finish card on a Draft lists each one by #, part and lot
+    (`#12 PO-1111 #4 · Counted 0 of 2`), even while products are still left
+    to pack, with **Apply n to the order**:
+    - Apply ticks them all at their counts in one request, in one
+      transaction. Each line goes to its count as its own tick would set it,
+      a 0 included, keeping its id and its #.
+    - A lot applied at 0 stays on the order at qty 0. Products packed in
+      full sink under *Packed*.
+    - One Undo puts every line's qty back, and the selection moves on as a
+      tick's does.
+    - A lot that is no longer lowered on the server (another iPad ticked it,
+      the order was edited) is skipped.
   - **The side panel** shows the selected row: its photo large, part, From
     PO, warehouse, qty and count, and the serials on file. For a product it
     lists each lot's count. Tap a row to select it, or use ↑ / ↓; Space packs
-    the selected row. The **Finish** card says what is left to pack, lists
-    the lots packed short or at 0 with **Edit order**, and holds **Mark
-    shipped**. Below 1024px wide (an iPad in portrait) the panel drops under
+    the selected row. The **Finish** card says what is left to pack. On a
+    Draft it lists the lots flagged short with **Apply** (v1.229.0), and the
+    lots ticked short before v1.228.0 with **Edit order**. It also holds
+    **Mark shipped**. Below 1024px wide (an iPad in portrait) the panel drops under
     the list and the selected-item card is hidden.
   - The scan box takes a Bluetooth or USB label scanner, with nothing focused,
     and matches a part number, a prefix, a recorded serial, then any part
@@ -1165,14 +1180,16 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
     condition moves under the item.
   - On a Draft with every lot packed at full count, **Mark shipped** opens the
     Shipped dialog (note, packing photos) and moves the order to Shipped.
-    Unpacked lots block it. Since v1.228.0 a short tick on a Draft has already
+    Unpacked lots block it, flagged ones included until Apply or their own
+    tick sends their counts. Since v1.228.0 a short tick on a Draft has already
     set the line to its count. A short pack from before that release still
     blocks, and the Finish card offers Edit order to match the order to the
     box first. A refused move (a lot taken meanwhile) says
     why and stays on the page.
   - The endpoints (`GET /api/sell-orders/:id/pack`,
-    `PUT /api/sell-orders/:id/pack/:lineId`) 403 anyone whose real role is not
-    manager. An archived or Closed order opens read-only and its writes 409; a
+    `PUT /api/sell-orders/:id/pack/:lineId`, and
+    `POST /api/sell-orders/:id/pack/apply` on a Draft only) 403 anyone whose
+    real role is not manager. An archived or Closed order opens read-only and its writes 409; a
     Done order can still be packed, since an order can be paid before it ships.
 
 ## Shipping

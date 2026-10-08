@@ -2092,7 +2092,7 @@ const zh: Record<string, string> = {
   pkPackProduct: '打包 {pn} 的全部批次',
   pkUnpackProduct: '取消打包 {pn} 的全部批次',
   pkPackedLotsToast: '已打包 {pn} 的 {n} / {of} 个批次',
-  pkProductLeft: '{pn}：有 {n} 个批次数量短缺，请逐个勾选确认数量。',
+  pkProductLeft: '{pn}：有 {n} 个批次数量短缺，请逐个勾选确认数量，或在「完成打包」中一次全部应用。',
   pkSelTitle: '当前选中',
   pkFrom: '来源',
   pkFinishTitle: '完成打包',
@@ -2102,6 +2102,13 @@ const zh: Record<string, string> = {
   pkFinishFix: '短缺 {short} 个，未打包 {zero} 个。发货前请编辑订单，使其与箱内一致。',
   pkFinishDone: '全部已打包。',
   pkFinishStatus: '全部已打包。订单状态为 {status}。',
+  pkFlaggedTitle: '已标记短缺，尚未写入订单',
+  pkApply: '将 {n} 个数量应用到订单',
+  pkApplyOne: '将 1 个数量应用到订单',
+  pkApplyHint: '每行改为清点数量，与编辑订单相同，会清除价格调整。清点为 0 的行仍以数量 0 保留在订单上，# 不变。',
+  pkAppliedToast: '已将 {n} 行改为清点数量',
+  pkAppliedToastOne: '已将 1 行改为清点数量',
+  pkApplyNone: '这些批次已被更改，未应用任何数量。',
 
   // ── Sell-order close reasons ──
   soCloseReason_customer_cancelled: '客户取消',

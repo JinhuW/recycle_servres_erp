@@ -28,7 +28,8 @@ export type PackLine = CheckableLine & {
 export type PackRow = {
   lineId: string; qty?: number; counted: number; packedAt: string | null; serialNumber: string | null;
 };
-export type PackResponse = { lines: PackRow[] };
+// `applied`: the lines an apply set to their counts, on its reply only.
+export type PackResponse = { lines: PackRow[]; applied?: string[] };
 
 export function toCheck(r: PackRow): LineCheck {
   return { lineId: r.lineId, counted: r.counted, checkedAt: r.packedAt };
@@ -218,6 +219,18 @@ export function shipBlockers(lines: readonly CheckableLine[], checks: ReadonlyMa
     else if (isAbsentChecked(l, c)) out.zero += 1;
   }
   return out;
+}
+
+// Lots counted below their qty and not ticked, in list order: flagged short
+// or at 0, but not yet on the order. Apply ticks them all at their counts.
+export function flaggedLots<L extends CheckableLine>(
+  lines: readonly L[], checks: ReadonlyMap<string, LineCheck>,
+): L[] {
+  return lines.filter(l => {
+    if (!isPackable(l)) return false;
+    const s = lineState(l, checks.get(l.id));
+    return s === 'partial' || s === 'absent';
+  });
 }
 
 export type PackScan<L> = ScanMatch<L> | { choose: L[] };

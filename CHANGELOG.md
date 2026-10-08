@@ -17,6 +17,35 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.229.0] - 2026-10-08
+
+Pack mode can now send every short count a packer flagged to the sell order
+in one go (RS-205).
+
+### Added
+
+- **Apply n to the order, in the Finish card.** Since v1.228.0 the tick wrote
+  a lot's count onto a Draft. Lowering a count with − only flagged the lot,
+  and nothing on the page said the tick was the step that wrote it. So a long
+  order could finish its count with dozens of lots marked *Not packed* or
+  *Short* that never reached the order: SO-4082 on prod had 26.
+  - While any lot is lowered and unticked, the Finish card lists each one by #,
+    part and source lot (`#12 PO-1111 #4 · Counted 0 of 2`) and offers
+    **Apply**. The list shows even while other products are still to pack.
+  - Apply ticks them all at their counts in one request
+    (`POST /api/sell-orders/:id/pack/apply`), in one transaction under the
+    order's lock, through the same write as the tick. Each line goes to its
+    count in place, keeping its id and its #, and History records each edit.
+  - A lot applied at 0 stays on the order at qty 0, so no # moves. Jinhu labels
+    each item with its # while counting, and the receiver checks the box by
+    those labels.
+  - One Undo in the toast puts every line's qty back. The selection moves on
+    as a tick's does.
+  - A lot that is no longer lowered on the server is skipped, not refused:
+    another iPad may have ticked it, or the order may have been edited.
+  - Apply is for Drafts only. The endpoint refuses any other status, and
+    archived orders.
+
 ## [1.228.0] - 2026-10-08
 
 Sell-order Pack mode now behaves like the PO's Review mode for a ticked row,
