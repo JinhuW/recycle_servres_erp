@@ -35,8 +35,19 @@ code before anything was fixed. One is a defect:
 | 8 | Pack mode assumes a product's lots are adjacent and in one warehouse | Guaranteed by the server's numbering and line order |
 | 10 | `sell_order_signoffs.user_id` cascades on a user delete | Nothing hard-deletes users, and older tables cascade the same way |
 
-RS-202 (#547, v1.227.1) landed on dev during the review and was reviewed
-separately before the release.
+RS-202 (#547, v1.227.1) landed on dev during the review, so it got its own
+`/code-review high` before the release. Ten findings; #1 was the payment one
+above. Two more are fixed here:
+
+| # | Finding | Verdict |
+|---|---|---|
+| 2 | A move refused after the PATCH landed (the take-over's second question cancelled) left the page offering the saved edits as unsaved: the footer listed them, Escape asked to discard them, the next click re-sent them | **Fixed**: ends like a plain save, on a reloaded page |
+| 7 | A cancelled *Move back* closed the look-back the manager was reading | **Fixed**: the look-back closes only when the move lands |
+| 3 | A stage click saves the page's other edits without asking | Kept: RS-202's stated design |
+| 4, 8, 9 | `moveQueued` effect vs `doSave(target)`; dead line-status argument; the guard in three places | Refactors, not defects |
+| 5 | A stage click during a photo upload remounts the page | Old window: a plain Save navigates away mid-upload too |
+| 6 | The duplicate-part prompt skips lines written by the drawer's Confirm line | The drawer shows its own live duplicate banner |
+| 10 | INDEX.md listed RS-202 with no version | Fixed by regenerating the index |
 
 ## Acceptance criteria
 
@@ -49,6 +60,10 @@ separately before the release.
       the page reloads with the payment-mismatch banner, and the toast says
       when a payment was linked. Every other approve still asks before
       anything is written, and Cancel there writes nothing.
+- [ ] A stage move that doesn't land after the page's edits were written
+      (the take-over's second question cancelled) reloads the page onto
+      them; nothing saved is offered as unsaved.
+- [ ] Cancelling a look-back's *Move back* keeps the look-back open.
 - [ ] dev is released to main, and prod health reports the new version.
 
 ## Out of scope

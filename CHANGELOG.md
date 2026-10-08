@@ -19,10 +19,10 @@ at the last commit that carried each version.
 
 ## [1.227.2] - 2026-10-08
 
-Fix from the review before the v1.227 release (RS-203). Ten findings came
-back from `/code-review high` of dev against main. Each was checked against
-the code, and one was a defect. The rest are recorded in the ticket with why
-they stay as they are.
+Fixes from the reviews before the v1.227 release (RS-203). `/code-review high`
+of dev against main, and of RS-202 once it landed mid-review, came back with
+ten findings each. Each was checked against the code, and three were defects.
+The rest are recorded in the ticket with why they stay as they are.
 
 ### Fixed
 
@@ -37,6 +37,14 @@ they stay as they are.
   edits, reads what the bank paid, and asks then. On that path Cancel keeps the
   edits and drops only the move, and the page reloads with the banner up.
   Every other approve still asks before anything is written.
+- **A move refused after the edits were written leaves a clean page.** A stage
+  click saves the page's other edits first (RS-202). If the move then didn't
+  land because the take-over's second question was cancelled, the page kept
+  offering the saved edits as unsaved: the footer listed them, Escape asked to
+  discard them, and the next click sent them again. It now reloads onto them,
+  as a plain save would.
+- **Cancelling a *Move back* keeps the look-back open.** The stage it was
+  reading closed even when the move was cancelled or refused.
 
 ## [1.227.1] - 2026-10-08
 

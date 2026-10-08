@@ -928,21 +928,25 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       // page is about to navigate away — so the toast is where the manager
       // finds out it happened.
       const msg = r.paymentsLinked ? t('eoPaymentLinkedToast', { id: order.id }) : t('eoSavedToast', { id: order.id });
+      // The edits are written now, so a move cancelled past this point ends
+      // the save like a plain one: on a page reloaded onto them, not one that
+      // still offers them as unsaved.
+      const dropMove = async (): Promise<false> => {
+        if (stillQueued > 0) {
+          setHeldAfterSave(true);
+          showErrorDialog(t('linePhotoRetryHold', { n: stillQueued }));
+        } else if (onReload) {
+          window.__showToast?.(msg, 'success');
+          await onReload();
+        } else {
+          onSaved(msg);
+        }
+        return false;
+      };
       if (gapAfterPatch) {
         const fresh = (await api.get<{ order: Order }>(`/api/orders/${order.id}`)).order;
         if (!(await mismatch.confirm(order.id, paymentGap(fresh.linkedPaid, cost.total, payment)))) {
-          // The edits are written; only the move is dropped, as when the
-          // take-over's second question is cancelled.
-          if (stillQueued > 0) {
-            setHeldAfterSave(true);
-            showErrorDialog(t('linePhotoRetryHold', { n: stillQueued }));
-          } else if (onReload) {
-            window.__showToast?.(msg, 'success');
-            await onReload();
-          } else {
-            onSaved(msg);
-          }
-          return false;
+          return dropMove();
         }
       }
       // The stepper's stage lives on orders.lifecycle, which PATCH never
@@ -953,7 +957,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       // them, so send an empty body to advance one stage.
       if (statusDirty) {
         if (isPurchaser) await api.post(`/api/orders/${order.id}/advance`, {});
-        else if (!(await moveAsManager(lifecycleOf(status)))) return false;
+        else if (!(await moveAsManager(lifecycleOf(status)))) return dropMove();
         setSavedStatus(status);
         moved = true;
       } else {
@@ -1580,7 +1584,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
             eventsLoaded={events.loaded}
             pkg={pkg}
             onBack={() => setView(null)}
-            moveBack={!stepDisabled(view) && view !== status ? () => { setView(null); moveTo(view); } : null}
+            moveBack={!stepDisabled(view) && view !== status ? () => moveTo(view) : null}
             locale={locale}
           />
         ) : (
