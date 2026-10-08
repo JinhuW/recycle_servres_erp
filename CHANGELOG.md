@@ -17,6 +17,36 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.227.1] - 2026-10-08
+
+A stage move on the desktop PO page is saved on the click (RS-202). Since
+RS-080 (v1.160.0), *Mark as Reviewing* only staged the move. The page then
+read *Status will change from In Transit to Reviewing when you save*, and the
+footer asked for the same move again as *Save · Mark as Reviewing*. Meanwhile
+the Next step card already offered *Mark as Ready to Pay* for a stage that had
+not been saved. The phone and the Draft hand-off already saved on the click.
+
+### Fixed
+
+- **One click moves the order.** *Mark as ‹stage›*, the stepper's next step,
+  a finished stage's *Move back* and the Done dialog's Confirm all save the
+  move. The page reloads on the new stage. The staged-move banner, the *Moves
+  to … on save · Undo* pill and the *Save · Mark as* label are gone. The move
+  still goes through Save, so the take-over question, the payment-mismatch
+  confirm (RS-200) and every save check still apply. Other unsaved edits are
+  saved in the same click: a plain desktop Save goes back to the PO list, so
+  asking the manager to save first would take them off the PO in the middle
+  of a review.
+- **A move that is cancelled or refused is taken back.** Cancelling the
+  take-over or mismatch question, a save blocker, or a server refusal leaves
+  the page on the stage the order is at. Before, the move stayed staged, and
+  the next click became a two-stage jump.
+- **A move on its own is just `/advance`.** Before, a staged move PATCHed
+  every line again, even though the server ignores a line's `status` there.
+  So an untouched incomplete legacy line could refuse the move with *Can't
+  save yet*. Saves now write and check only the lines that were edited, and
+  the duplicate-part prompt only appears when lines were edited.
+
 ## [1.227.0] - 2026-10-08
 
 Pack mode is laid out like the PO's Review mode, and a product picked from

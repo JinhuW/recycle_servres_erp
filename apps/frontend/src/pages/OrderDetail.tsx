@@ -523,8 +523,10 @@ export function OrderDetail({
     }
     // Every move refetches the order, and a refetch that changes the server
     // version rebuilds the draft from it — so anything typed but not saved
-    // would vanish. Same rule as the desktop: save first. The commission
-    // sheet writes its own two fields, so those alone do not hold it.
+    // would vanish. Save first, as the desktop's hand-off asks (past Draft the
+    // desktop saves the edits along with the move: its plain Save leaves the
+    // PO). The commission sheet writes its own two fields, so those alone do
+    // not hold it.
     const unsavedOutsideSheet = notesDirty || warehouseDirty || paymentDirty || methodDirty || paypalDirty || feesDirty || facts;
     const unsaved = nextStatus === 'Ready to Pay' ? unsavedOutsideSheet : dirty;
     // Leaving Draft is the hand-off sheet's job: how the goods get here and

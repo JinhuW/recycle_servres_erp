@@ -519,11 +519,6 @@ html.desktop, body.desktop, .desktop #root {
 }
 .oe-foot-stat { white-space: nowrap; }
 .oe-foot-state { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0; font-size: 12px; }
-.oe-foot-pill { gap: 6px; }
-.oe-foot-undo {
-  border: 0; background: transparent; font: inherit; font-size: 11px; text-decoration: underline;
-  color: inherit; cursor: pointer; padding: 0 0 0 4px;
-}
 .oe-foot-dirty { display: inline-flex; align-items: center; gap: 6px; color: var(--info); }
 .oe-foot-actions { display: flex; gap: 8px; justify-content: flex-end; }
 /* The Tweaks gear floats at the page's bottom-right corner; keep Save clear of it. */
