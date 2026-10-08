@@ -2,13 +2,13 @@
 id: RS-204
 title: "Pack mode: packed products sink to the bottom, and the tick writes the count onto the sell order"
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-08
 reporter: jinhu
 branch: feat/pack-mode-packed-sink
-pr:
-version:
+pr: "#551"
+version: 1.228.0
 related: [RS-187, RS-188, RS-199]
 ---
 
@@ -45,27 +45,27 @@ when it leaves Draft), so the tick can write the qty cheaply.
 
 ## Acceptance criteria
 
-- [ ] A product whose lots are all packed, with a count above 0, moves under a
+- [x] A product whose lots are all packed, with a count above 0, moves under a
       **Packed N · Hide / Show** divider at the bottom of the table, newest
       first.
       - Products still to pack stay above in # order.
       - A mixed fold stays up until its last lot is packed.
-- [ ] A product counted 0 stays at its #, whether ticked or at qty 0. Other
+- [x] A product counted 0 stays at its #, whether ticked or at qty 0. Other
       products keep their numbers.
-- [ ] Ticking the selected product moves the selection to the next product
+- [x] Ticking the selected product moves the selection to the next product
       still to pack. A row changing group slides there, unless reduced motion
       is set.
-- [ ] Hide removes the packed rows and ↑ / ↓ skip them. The divider's Hide /
+- [x] Hide removes the packed rows and ↑ / ↓ skip them. The divider's Hide /
       Show is ≥ 44px.
-- [ ] On a Draft, ticking a lot below its qty sets the sell-order line's qty to
+- [x] On a Draft, ticking a lot below its qty sets the sell-order line's qty to
       the count, 0 included.
       - The line keeps its id and #.
       - History records the edit.
       - The row reads as packed at full count (or as a 0 row).
-- [ ] Unticking, Undo, or lowering such a line puts its qty back and keeps the
+- [x] Unticking, Undo, or lowering such a line puts its qty back and keeps the
       count. This is refused (409) if the lot was archived or sold meanwhile.
-- [ ] A short pick ticked on a Draft no longer blocks Mark shipped.
-- [ ] Shipped, Awaiting payment and Done orders never have their qty written.
+- [x] A short pick ticked on a Draft no longer blocks Mark shipped.
+- [x] Shipped, Awaiting payment and Done orders never have their qty written.
 
 ## Out of scope
 
@@ -87,3 +87,20 @@ when it leaves Draft), so the tick can write the qty cheaply.
   - a typed line's History entry names the line.
 - No migration: `sell_order_packs.line_qty` already holds the qty a row was
   written against, which is the qty an untick restores.
+- Verified on a local stack: a throwaway DB, and a Draft holding a 3-lot product
+  plus four single-lot products across three warehouses, at 1440×900, 1180×820
+  and 820×1180.
+  - **Full tick:** the product sinks and the selection moves on.
+  - **Short tick:** qty 2 → 1 on the order. Untick, re-tick and Undo move it
+    2 → 1 → 2.
+  - **0 tick:** the row stays at #4 and becomes a *Qty 0* row, with every #
+    unchanged. Undo restores it.
+  - **Fold:** stays up while mixed and sinks on its last lot.
+  - **Hide / Show and keys:** both work, and ↓ skips hidden rows.
+  - **Space and scan:** each one packs, moves the row down and moves the
+    selection on.
+  - **Mark shipped:** enabled once everything is packed.
+  - **Activity:** shows `Qty 2→1 SAM-256-248`.
+
+  The slide was not inspected frame by frame. It is Review mode's FLIP
+  effect, ported as is.
