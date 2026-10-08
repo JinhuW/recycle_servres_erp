@@ -164,9 +164,12 @@ function summarize(event: SellOrderEvent, locale: string, t: TFn): React.ReactNo
     case 'line_edited': {
       const changes = (d.changes as Array<{ field: string; from: unknown; to: unknown }>) ?? [];
       const invId = String(d.inventoryId ?? '');
+      // A typed line has no lot to name; its part # (or label) says which.
+      const snap = (d.snapshot ?? {}) as { part_number?: string | null; label?: string };
+      const typed = invId ? '' : snap.part_number || snap.label || '';
       return (
         <>
-          <div>{t('historyEditedLine')} {invId ? <code>{invId}</code> : null}</div>
+          <div>{t('historyEditedLine')} {invId ? <code>{invId}</code> : typed ? <code>{typed}</code> : null}</div>
           <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
             {changes.map((c, i) => (
               <li key={i}>
