@@ -17,6 +17,25 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.230.1] - 2026-10-08
+
+Pack mode's side panel scrolls on its own, so **Apply** and **Mark shipped**
+can be reached mid-list (RS-207).
+
+### Fixed
+
+- **The side panel no longer runs off the bottom of the screen.** It stays
+  pinned beside the list while the list scrolls, but it had no height of its
+  own: the selected item's photo and details plus the Finish card (the flagged
+  lots, Apply, Edit order, Mark shipped) come to about 1000px, taller than an
+  iPad in landscape or a laptop window. A pinned box that is taller than the
+  window only shows its bottom once the whole list has been scrolled past, so
+  the actions were out of reach while packing. The panel is now capped at the
+  window's height and scrolls by itself. Below 1024px, where it already drops
+  under the list, it flows with the page as before.
+- PO Review mode's side panel had the same rule and the same problem (its
+  serial and problem lists have no cap), and gets the same fix above 1100px.
+
 ## [1.230.0] - 2026-10-08
 
 Sell orders get a **Packing** status, and inventory added once packing has

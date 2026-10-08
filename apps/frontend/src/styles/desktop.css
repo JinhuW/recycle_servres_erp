@@ -3974,7 +3974,11 @@ button.rsheet-box:hover { background: color-mix(in oklch, var(--accent) 10%, tra
 .bc-legend { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 
 .bc-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
-.bc-side { position: sticky; top: 0; display: grid; gap: 16px; }
+/* The panel outgrows a laptop or iPad screen, and a sticky box taller than its
+   scroller only shows its bottom at the end of the list — so it scrolls on its
+   own. 46px is `.app.app-focus .main > .page`'s top + bottom padding, which
+   the sticky area is inset by. */
+.bc-side { position: sticky; top: 0; display: grid; gap: 16px; max-height: calc(100dvh - 46px); overflow-y: auto; }
 
 /* Scan box sits in the list card's head. */
 /* .card-head's space-between would shrink the one grid track to content. */
@@ -4088,7 +4092,7 @@ button.rsheet-box:hover { background: color-mix(in oklch, var(--accent) 10%, tra
 
 @media (max-width: 1100px) {
   .bc-grid { grid-template-columns: minmax(0, 1fr); }
-  .bc-side { position: static; }
+  .bc-side { position: static; max-height: none; overflow: visible; }
   .bc-keys { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -4118,7 +4122,8 @@ body:has(.pk-page) .tweaks-fab, body:has(.pk-page) .tweaks-pop { display: none; 
 .pk-wh .seg button { min-height: 44px; padding: 8px 16px; font-size: 14px; }
 
 .pk-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
-.pk-side { position: sticky; top: 0; display: grid; gap: 16px; }
+/* Scrolls on its own, as `.bc-side` does. */
+.pk-side { position: sticky; top: 0; display: grid; gap: 16px; max-height: calc(100dvh - 46px); overflow-y: auto; }
 .pk-list-card { overflow: hidden; }
 .pk-scan .input { height: 48px; padding-left: 40px; padding-right: 48px; font-size: 15px; }
 .pk-scan-clear { width: 40px; height: 40px; right: 4px; }
@@ -4208,8 +4213,8 @@ body:has(.pk-page) .tweaks-fab, body:has(.pk-page) .tweaks-pop { display: none; 
 .pk-sel-lots li { display: flex; justify-content: space-between; align-items: center; gap: 10px; color: var(--fg-muted); }
 .pk-sel-lots .pk-sel-done { color: var(--accent-strong); }
 .pk-page .bc-finish-actions .btn { min-height: 48px; font-size: 14.5px; }
-/* A long order can flag dozens of lots; the list scrolls so the sticky panel's
-   actions stay on screen. */
+/* A long order can flag dozens of lots; the list scrolls so Apply stays next
+   to the lots it writes. */
 .pk-flagged { display: grid; gap: 6px; }
 .pk-flagged-title { font-size: 12.5px; font-weight: 600; color: var(--warn-strong); }
 .pk-flagged-list { max-height: 200px; overflow: auto; }
@@ -4220,7 +4225,7 @@ body:has(.pk-page) .tweaks-fab, body:has(.pk-page) .tweaks-pop { display: none; 
    zooms. */
 @media (max-width: 1023px) {
   .pk-grid { grid-template-columns: minmax(0, 1fr); }
-  .pk-side { position: static; }
+  .pk-side { position: static; max-height: none; overflow: visible; }
   .pk-compare, .pk-page .bc-keys { display: none; }
 }
 @media (min-width: 1024px) {

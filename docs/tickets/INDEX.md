@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-206](./RS-206-sell-orders-get-a-packing-status-and-inventory-added.md) | done | story | P2 | Sell orders get a Packing status, and inventory added once packing has begun takes the next # | — |
+| [RS-207](./RS-207-pack-mode-side-panel-can-t-be-scrolled-to-its-action.md) | in-progress | bug | P2 | Pack mode side panel can't be scrolled to its actions | — |
+| [RS-206](./RS-206-sell-orders-get-a-packing-status-and-inventory-added.md) | done | story | P2 | Sell orders get a Packing status, and inventory added once packing has begun takes the next # | 1.230.0 |
 | [RS-205](./RS-205-pack-mode-applies-the-flagged-short-counts-to-the-se.md) | done | story | P2 | Pack mode applies the flagged short counts to the sell order | 1.229.0 |
 | [RS-204](./RS-204-pack-mode-packed-products-sink-to-the-bottom-and-the.md) | done | story | P2 | Pack mode: packed products sink to the bottom, and the tick writes the count onto the sell order | 1.228.0 |
 | [RS-203](./RS-203-pre-release-review-fixes-for-the-v1-227-release.md) | done | bug | P1 | Pre-release review fixes for the v1.227 release | 1.227.2 |
