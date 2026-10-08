@@ -23,7 +23,11 @@ export type PackLine = CheckableLine & {
   no?: number;
 };
 
-export type PackRow = { lineId: string; counted: number; packedAt: string | null; serialNumber: string | null };
+// `qty` is the line's on the order, which a tick on a Draft sets to the count.
+// Absent from a backend older than this bundle.
+export type PackRow = {
+  lineId: string; qty?: number; counted: number; packedAt: string | null; serialNumber: string | null;
+};
 export type PackResponse = { lines: PackRow[] };
 
 export function toCheck(r: PackRow): LineCheck {
@@ -122,6 +126,38 @@ export function productSummary(lots: readonly CheckableLine[], checks: ReadonlyM
     : touched > 0 ? 'mixed'
     : 'open';
   return { state, counted, qty, short, zeroed };
+}
+
+export type PackGroups<L> = { open: PackProduct<L>[]; packed: PackProduct<L>[] };
+
+// A packed product sinks under Packed, newest first, as Review mode's checked
+// lines do, so what is left to pack stays on top in # order. One packed at 0
+// stays at its #: nothing of it went in the box.
+export function packGroups<L extends CheckableLine>(
+  products: readonly PackProduct<L>[], checks: ReadonlyMap<string, LineCheck>,
+): PackGroups<L> {
+  const out: PackGroups<L> = { open: [], packed: [] };
+  for (const p of products) {
+    const s = productSummary(p.lots, checks);
+    (s.state === 'done' && s.counted > 0 ? out.packed : out.open).push(p);
+  }
+  const at = (p: PackProduct<L>) =>
+    p.lots.reduce((m, l) => { const a = checks.get(l.id)?.checkedAt ?? ''; return a > m ? a : m; }, '');
+  out.packed.sort((a, b) => (at(a) < at(b) ? 1 : at(a) > at(b) ? -1 : 0));
+  return out;
+}
+
+// Where the selection goes once a tick packs the product it was on: the next
+// one still to pack, from the top again past the last.
+export function nextOpenProduct<L extends CheckableLine>(
+  products: readonly PackProduct<L>[], checks: ReadonlyMap<string, LineCheck>, fromNo: number,
+): PackProduct<L> | null {
+  const left = (p: PackProduct<L>) => {
+    const s = productSummary(p.lots, checks).state;
+    return s === 'open' || s === 'mixed';
+  };
+  const from = products.findIndex(p => p.no === fromNo);
+  return products.find((p, i) => i > from && left(p)) ?? products.find(left) ?? null;
 }
 
 export type ProductTick<L> = { tick: L[]; untick: L[]; left: L[] };

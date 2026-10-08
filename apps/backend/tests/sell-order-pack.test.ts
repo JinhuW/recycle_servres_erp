@@ -8,12 +8,13 @@ import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import { firstCustomerId } from './helpers/fixtures';
 import { freeSellableLine } from './helpers/inventory';
+import { eventsOf } from './helpers/sellOrderEvents';
 
 type Pack = {
-  lines: { lineId: string; counted: number; packedAt: string | null; serialNumber: string | null }[];
+  lines: { lineId: string; qty: number; counted: number; packedAt: string | null; serialNumber: string | null }[];
 };
 type DetailLine = {
-  id: string; inventoryId: string | null; category: string; label: string; sub: string | null;
+  id: string; no: number; inventoryId: string | null; category: string; label: string; sub: string | null;
   partNumber: string | null; qty: number; nativeUnitPrice: number; warehouseId: string | null;
   condition: string | null;
 };
@@ -181,7 +182,7 @@ describe('sell order pack mode', () => {
     expect(row.counted).toBe(1);
     expect(row.packedAt).not.toBeNull();
 
-    // A write at the new qty restamps the row against it.
+    // A re-tick at the count leaves it packed.
     const re = await putPack(mgr, id, newPicked, { counted: 1, packed: true });
     expect(rowOf(re.body, newPicked).packedAt).not.toBeNull();
   });
@@ -192,6 +193,114 @@ describe('sell order pack mode', () => {
     const zero = after.find(l => l.inventoryId === lot)!.id;
     expect(rowOf((await getPack(mgr, id)).body, zero)).toMatchObject({ counted: 0, packedAt: null });
     expect((await putPack(mgr, id, zero, { counted: 0, packed: true })).status).toBe(409);
+  });
+
+  // On a Draft, the tick writes what went in the box onto the order.
+  describe('a tick on a Draft sets the line to the count', () => {
+    it('lowers the qty in place, reads packed, and records the edit', async () => {
+      const { id, picked, lot } = await createOrder(mgr);
+      const r = await putPack(mgr, id, picked, { counted: 1, packed: true });
+      expect(r.status).toBe(200);
+      expect(rowOf(r.body, picked)).toMatchObject({ qty: 1, counted: 1 });
+      expect(rowOf(r.body, picked).packedAt).not.toBeNull();
+
+      const line = (await detailLines(mgr, id)).find(l => l.id === picked)!;
+      expect(line.qty).toBe(1);
+      const edits = (await eventsOf(id)).filter(e => e.kind === 'line_edited');
+      expect(edits).toHaveLength(1);
+      expect(edits[0]!.detail).toMatchObject({ inventoryId: lot, changes: [{ field: 'qty', from: 2, to: 1 }] });
+    });
+
+    it('puts the qty back on an untick, keeping the count', async () => {
+      const { id, picked } = await createOrder(mgr);
+      await putPack(mgr, id, picked, { counted: 1, packed: true });
+      const r = await putPack(mgr, id, picked, { counted: 1, packed: false });
+      expect(r.status).toBe(200);
+      expect(rowOf(r.body, picked)).toMatchObject({ qty: 2, counted: 1, packedAt: null });
+      expect((await detailLines(mgr, id)).find(l => l.id === picked)!.qty).toBe(2);
+      const edits = (await eventsOf(id)).filter(e => e.kind === 'line_edited');
+      expect(edits.map(e => (e.detail as { changes: unknown[] }).changes)).toEqual([
+        [{ field: 'qty', from: 2, to: 1 }], [{ field: 'qty', from: 1, to: 2 }],
+      ]);
+    });
+
+    it('a re-tick of a lowered line keeps what an untick puts back', async () => {
+      const { id, picked } = await createOrder(mgr);
+      const first = await putPack(mgr, id, picked, { counted: 1, packed: true });
+      const again = await putPack(mgr, id, picked, { counted: 1, packed: true });
+      expect(rowOf(again.body, picked).packedAt).toBe(rowOf(first.body, picked).packedAt);
+      await putPack(mgr, id, picked, { counted: 1, packed: false });
+      expect((await detailLines(mgr, id)).find(l => l.id === picked)!.qty).toBe(2);
+    });
+
+    it('a typed line goes to the count too, named in its edit', async () => {
+      const { id } = await createOrder(mgr);
+      const typedId = (await detailLines(mgr, id)).find(l => l.inventoryId === null)!.id;
+      await putPack(mgr, id, typedId, { counted: 2, packed: true });
+      expect((await detailLines(mgr, id)).find(l => l.id === typedId)!.qty).toBe(2);
+      const edit = (await eventsOf(id)).find(e => e.kind === 'line_edited')!;
+      expect(edit.detail).toMatchObject({ inventoryId: null, partNumber: 'RAIL-1' });
+    });
+
+    it('a 0 holds the line at 0 with its #, and an untick brings it back', async () => {
+      const { id, picked } = await createOrder(mgr);
+      const before = await detailLines(mgr, id);
+      const r = await putPack(mgr, id, picked, { counted: 0, packed: true });
+      expect(r.status).toBe(200);
+      expect(rowOf(r.body, picked)).toMatchObject({ qty: 0, counted: 0, packedAt: null });
+      const after = await detailLines(mgr, id);
+      expect(after.find(l => l.id === picked)!.qty).toBe(0);
+      expect(after.map(l => [l.id, l.no])).toEqual(before.map(l => [l.id, l.no]));
+
+      // Nothing to pack at 0, but the tick that put it there can be taken back.
+      expect((await putPack(mgr, id, picked, { counted: 0, packed: true })).status).toBe(409);
+      const back = await putPack(mgr, id, picked, { counted: 0, packed: false });
+      expect(back.status).toBe(200);
+      expect(rowOf(back.body, picked)).toMatchObject({ qty: 2, counted: 0, packedAt: null });
+    });
+
+    it('leaves a qty edited since alone', async () => {
+      const { id, picked, lot } = await createOrder(mgr);
+      await putPack(mgr, id, picked, { counted: 1, packed: true });
+      // The editor set it back to 2 — no longer the count the tick lowered it to.
+      const after = await rewriteLines(mgr, id, l => (l.inventoryId === lot ? { qty: 2 } : {}));
+      const newPicked = after.find(l => l.inventoryId === lot)!.id;
+      await putPack(mgr, id, newPicked, { counted: 2, packed: false });
+      expect((await detailLines(mgr, id)).find(l => l.id === newPicked)!.qty).toBe(2);
+    });
+
+    it('refuses to put the qty back once the lot is sold elsewhere', async () => {
+      const { id, picked, lot } = await createOrder(mgr);
+      await putPack(mgr, id, picked, { counted: 0, packed: true });
+      const lotQty = (await api<{ items: { id: string; qty: number }[] }>(
+        'GET', '/api/inventory?status=Reviewing', { token: mgr })).body.items.find(i => i.id === lot)!.qty;
+      const rival = await api<{ id: string }>('POST', '/api/sell-orders', {
+        token: mgr,
+        body: {
+          customerId: await firstCustomerId(mgr),
+          lines: [{ inventoryId: lot, category: 'RAM', label: 'x', partNumber: 'PACK-PN', qty: lotQty, unitPrice: 90 }],
+        },
+      });
+      expect(rival.status).toBe(201);
+      expect((await api('POST', `/api/sell-orders/${rival.body.id}/status`, {
+        token: mgr, body: { to: 'Shipped' },
+      })).status).toBe(200);
+
+      expect((await putPack(mgr, id, picked, { counted: 0, packed: false })).status).toBe(409);
+      expect((await detailLines(mgr, id)).find(l => l.id === picked)!.qty).toBe(0);
+    });
+
+    it('never writes the qty once the order has left Draft', async () => {
+      const { id, picked } = await createOrder(mgr);
+      expect((await api('POST', `/api/sell-orders/${id}/status`, {
+        token: mgr, body: { to: 'Shipped' },
+      })).status).toBe(200);
+      const r = await putPack(mgr, id, picked, { counted: 1, packed: true });
+      expect(r.status).toBe(200);
+      expect(rowOf(r.body, picked)).toMatchObject({ qty: 2, counted: 1 });
+      expect((await detailLines(mgr, id)).find(l => l.id === picked)!.qty).toBe(2);
+      expect((await eventsOf(id)).some(e => e.kind === 'line_edited')).toBe(false);
+    });
   });
 
   it('refuses writes on a Closed or archived order but still reads it', async () => {

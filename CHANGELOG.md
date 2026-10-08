@@ -17,6 +17,39 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.228.0] - 2026-10-08
+
+Sell-order Pack mode now behaves like the PO's Review mode for a ticked row,
+and the count a packer ticks becomes the order's own qty (RS-204).
+
+### Changed
+
+- **A packed product sinks under *Packed*.** Since RS-188 (v1.219.0) a ticked
+  row stayed in its place, so the list always read #1..#n. Jinhu asked for
+  Review mode's behaviour instead.
+  - A product whose lots are all packed moves under a *Packed N · Hide/Show*
+    divider at the foot of the table, newest first, and slides there.
+  - What is left to pack stays on top in # order. A partly packed fold stays up
+    until its last lot is ticked.
+  - The selection moves on to the next product still to pack.
+  - A product packed at 0 keeps its place, because nothing of it went in the
+    box.
+  - The divider's Hide is a 44px tap target, like the rest of the page.
+- **On a Draft, the tick writes the count onto the sell order.** Before this,
+  a short or empty shelf was recorded only as pack progress, and Mark shipped
+  stayed blocked until someone used Edit order to match the order to the box.
+  - Now ticking a lot below its qty sets the line's qty to the count, in place,
+    so the line keeps its id and its #. History records it as an editor qty
+    edit would be.
+  - A lot packed at 0 becomes the product's *Qty 0* row at the same #, and no
+    product is renumbered.
+  - Unticking, Undo, or lowering such a line puts the qty back. The row
+    remembers the qty it was lowered from, so no migration was needed. The put
+    back is refused if the lot was archived or sold meanwhile.
+  - Orders past Draft never have their qty written: they already hold their
+    stock.
+- A typed line's qty edit names the line in the order's History.
+
 ## [1.227.2] - 2026-10-08
 
 Fixes from the reviews before the v1.227 release (RS-203). `/code-review high`

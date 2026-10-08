@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-203](./RS-203-pre-release-review-fixes-for-the-v1-227-release.md) | in-progress | bug | P1 | Pre-release review fixes for the v1.227 release | — |
+| [RS-204](./RS-204-pack-mode-packed-products-sink-to-the-bottom-and-the.md) | done | story | P2 | Pack mode: packed products sink to the bottom, and the tick writes the count onto the sell order | — |
+| [RS-203](./RS-203-pre-release-review-fixes-for-the-v1-227-release.md) | done | bug | P1 | Pre-release review fixes for the v1.227 release | 1.227.2 |
 | [RS-202](./RS-202-a-po-stage-move-on-the-desktop-saves-on-the-click.md) | done | bug | P2 | A PO stage move on the desktop saves on the click | 1.227.1 |
 | [RS-200](./RS-200-warn-the-manager-when-a-po-s-payment-doesn-t-match-i.md) | done | story | P2 | Warn the manager when a PO's payment doesn't match its total cost | 1.225.0 |
 | [RS-199](./RS-199-pack-mode-reads-like-review-mode-with-a-fold-for-a-p.md) | done | story | P2 | Pack mode reads like Review mode, with a fold for a product from several PO lots | 1.227.0 |

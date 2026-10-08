@@ -2,13 +2,13 @@
 id: RS-203
 title: Pre-release review fixes for the v1.227 release
 type: bug
-status: in-progress
+status: done
 priority: P1
 created: 2026-10-08
 reporter: jinhu
 branch: fix/prerelease-rs203
-pr:
-version:
+pr: "#548"
+version: 1.227.2
 related: [RS-200, RS-202, RS-197, RS-198, RS-167, RS-199]
 ---
 
@@ -51,20 +51,20 @@ above. Two more are fixed here:
 
 ## Acceptance criteria
 
-- [ ] On the desktop PO page, a manager's Save that edits the payment section
+- [x] On the desktop PO page, a manager's Save that edits the payment section
       (paid by, method or PayPal id) and approves (into Ready to Pay or Done)
       asks *Continue anyway?* against what the bank paid **after** the edit:
       a newly linked payment that doesn't match the total asks; a corrected id
       that now matches does not.
-- [ ] Cancel there keeps the saved edits and leaves the stage where it was;
+- [x] Cancel there keeps the saved edits and leaves the stage where it was;
       the page reloads with the payment-mismatch banner, and the toast says
       when a payment was linked. Every other approve still asks before
       anything is written, and Cancel there writes nothing.
-- [ ] A stage move that doesn't land after the page's edits were written
+- [x] A stage move that doesn't land after the page's edits were written
       (the take-over's second question cancelled) reloads the page onto
       them; nothing saved is offered as unsaved.
-- [ ] Cancelling a look-back's *Move back* keeps the look-back open.
-- [ ] dev is released to main, and prod health reports the new version.
+- [x] Cancelling a look-back's *Move back* keeps the look-back open.
+- [x] dev is released to main (#549, 5ead902c), and prod health reports 1.227.2.
 
 ## Out of scope
 

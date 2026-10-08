@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import type { LineCheck } from './boxCheck';
 import {
-  isPackable, packBody, packProducts, packScan, packView, packWarehouseOptions, productSummary, productTally,
-  productTick, shipBlockers, sourceTag, toCheck,
-  type PackLine,
+  isPackable, nextOpenProduct, packBody, packGroups, packProducts, packScan, packView, packWarehouseOptions,
+  productSummary, productTally, productTick, shipBlockers, sourceTag, toCheck,
+  type PackLine, type PackProduct,
 } from './sellOrderPack';
 
 const L = (id: string, o: Partial<PackLine> = {}): PackLine => ({
@@ -187,6 +187,57 @@ describe('productSummary', () => {
 
   it('is zero with no lot to pack', () => {
     expect(productSummary([], new Map()).state).toBe('zero');
+  });
+});
+
+describe('packGroups', () => {
+  const P = (no: number, ...lots: PackLine[]): PackProduct<PackLine> => ({ no, lots, head: lots[0] ?? L('h' + no) });
+  const products = [P(1, L('a')), P(2, L('b'), L('c')), P(3, L('d')), P(4), P(5, L('e'))];
+  const nos = (ps: readonly PackProduct<PackLine>[]) => ps.map(p => p.no);
+
+  it('keeps everything up, in # order, until something is packed', () => {
+    expect(nos(packGroups(products, new Map()).open)).toEqual([1, 2, 3, 4, 5]);
+    expect(packGroups(products, new Map()).packed).toEqual([]);
+  });
+
+  it('sinks a packed product, newest first, and a tie keeps # order', () => {
+    const g = packGroups(products, checks(C('a', 2, 't1'), C('d', 2, 't2'), C('e', 2, 't1')));
+    expect(nos(g.open)).toEqual([2, 4]);
+    expect(nos(g.packed)).toEqual([3, 1, 5]);
+  });
+
+  it('keeps a product up while any lot is still to pack, and sinks it on the last', () => {
+    expect(nos(packGroups(products, checks(C('b', 2, 't1'))).open)).toContain(2);
+    const both = packGroups(products, checks(C('b', 2, 't1'), C('c', 1, 't3')));
+    expect(nos(both.packed)).toEqual([2]);
+  });
+
+  it('keeps a product packed at 0, and one with no lot, at its #', () => {
+    const g = packGroups(products, checks(C('a', 0, 't1'), C('b', 0, 't1'), C('c', 0, 't1')));
+    expect(nos(g.open)).toEqual([1, 2, 3, 4, 5]);
+    expect(g.packed).toEqual([]);
+  });
+});
+
+describe('nextOpenProduct', () => {
+  const P = (no: number, ...lots: PackLine[]): PackProduct<PackLine> => ({ no, lots, head: lots[0] ?? L('h' + no) });
+  const products = [P(1, L('a')), P(2, L('b')), P(3), P(4, L('d'), L('e'))];
+
+  it('moves on to the next product still to pack, skipping packed and empty ones', () => {
+    expect(nextOpenProduct(products, checks(C('a', 2, 'x'), C('b', 2, 'x')), 1)?.no).toBe(4);
+  });
+
+  it('counts a partly packed product as still to pack', () => {
+    expect(nextOpenProduct(products, checks(C('a', 2, 'x'), C('b', 2, 'x'), C('d', 2, 'x')), 1)?.no).toBe(4);
+  });
+
+  it('goes back to the top past the last', () => {
+    expect(nextOpenProduct(products, checks(C('d', 2, 'x'), C('e', 2, 'x')), 4)?.no).toBe(1);
+  });
+
+  it('is null once everything is packed', () => {
+    const all = checks(C('a', 2, 'x'), C('b', 2, 'x'), C('d', 2, 'x'), C('e', 2, 'x'));
+    expect(nextOpenProduct(products, all, 2)).toBeNull();
   });
 });
 
