@@ -134,9 +134,11 @@ on to Sold once every line has sold (v1.164.0).
   the final journey, who moved it on and when, the Done note and files — read
   from the activity log, read-only, with *Back to ‹current›*; a manager also
   gets *Move back to ‹stage›* there when the order allows it. The next step is
-  the only forward click; a stage beyond it stays locked (a manager stages one
-  move at a time now, and Save commits it — the footer's button reads *Save ·
-  Mark as ‹stage›* while one is pending). After a stage move the page **stays
+  the only forward click; a stage beyond it stays locked. **A move is written
+  on the click** (v1.227.1): *Mark as ‹stage›*, the stepper's next step, *Move
+  back* and the Done dialog's Confirm save the move right away, along with any
+  other unsaved edits on the page. A move that is cancelled or refused leaves
+  the page on the stage the order is at. After a stage move the page **stays
   put** on the new stage's panel instead of returning to the list. Below the
   status card, **five tabs**: *Delivery* (source, receiving warehouse, shipping
   label or local pickup, tracking number with the carrier recognised from its
