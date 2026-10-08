@@ -3,7 +3,7 @@ import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
-import { firstCustomerId } from './helpers/fixtures';
+import { firstCustomerId, signOffAll } from './helpers/fixtures';
 
 async function lineStatus(token: string, id: string): Promise<string> {
   const r = await api<{ item: { status: string } }>('GET', `/api/inventory/${id}`, { token });
@@ -18,6 +18,7 @@ async function lineQty(token: string, id: string): Promise<number> {
 async function driveToDone(token: string, soId: string) {
   await api('POST', `/api/sell-orders/${soId}/status`, { token, body: { to: 'Shipped', note: 's' } });
   await api('POST', `/api/sell-orders/${soId}/status`, { token, body: { to: 'Awaiting payment', note: 'a' } });
+  await signOffAll(soId);
   return api('POST', `/api/sell-orders/${soId}/status`, { token, body: { to: 'Done', note: 'paid' } });
 }
 

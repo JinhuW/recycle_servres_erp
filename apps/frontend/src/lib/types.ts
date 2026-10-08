@@ -173,9 +173,10 @@ export type OrderSummary = {
   // for the deploy-skew reason above.
   goodsTotal?: number;
   // Net of the bank payments linked to this PO on the Payments page (refunds
-  // subtract, failed/reversed excluded) — the ledger's "Net paid". Null when
-  // nothing is linked; absent altogether for a non-manager. Either way there
-  // is no link to draw. Optional for the same deploy-skew reason as `txnRequired`.
+  // subtract, failed/reversed excluded) — the ledger's "Net paid". The list and
+  // the detail both send it. Null when nothing is linked; absent altogether
+  // for a non-manager. Either way there is no link to draw and no payment gap
+  // to warn of. Optional for the same deploy-skew reason as `txnRequired`.
   linkedPaid?: number | null;
   warehouse: Warehouse | null;
   qty: number;
@@ -301,7 +302,18 @@ export type SellOrderEventKind =
   | 'archived'
   | 'unarchived'
   | 'closed'
-  | 'reopened';
+  | 'reopened'
+  | 'signed_off'
+  | 'signoff_withdrawn';
+
+// Done needs a current sign-off from every manager marked `required` (every
+// active one). `stale`: signed, but the order changed since.
+export type SellOrderSignoff = {
+  managers: { id: string; name: string; required: boolean; signedAt: string | null; stale: boolean }[];
+  complete: boolean;
+  // The order as read; a sign-off sends it back so the server signs this version only.
+  fingerprint: string;
+};
 
 export type SellOrderEvent = {
   id: string;

@@ -33,6 +33,9 @@ import { LineSpecChips, lineHasSpecChips } from '../../components/LineSpecChips'
 import { groupSellOrderLines, type SellOrderLineGroup } from '../../lib/sellOrderLineGroups';
 import { isPackable, lotWarehouse, packWarehouseOptions, UNASSIGNED } from '../../lib/sellOrderPack';
 import { peekSellOrderPrefill, clearSellOrderPrefill } from '../../lib/sellOrderPrefill';
+import { missingSigners, signoffSig } from '../../lib/sellOrderSignoff';
+import type { SellOrderSignoff } from '../../lib/types';
+import { SellOrderSignoffCard } from './SellOrderSignoff';
 
 // Its own chunk: only a packer opens it.
 const DesktopSellOrderPack = lazy(() => import('./DesktopSellOrderPack'));
@@ -241,6 +244,8 @@ type SellOrderDetailType = {
     adjustedBy: { id: string; name: string } | null;
   } | null;
   statusMeta: StatusMetaMap;
+  // Absent from a backend older than this bundle; nothing waits on it then.
+  signoff?: SellOrderSignoff;
 };
 
 // Driven by sell_order_statuses; ids match sell_orders.status CHECK constraint.
@@ -995,6 +1000,20 @@ function SellOrderDetail({ id, mode, onToast }: {
   );
   // Back and Cancel left the edit page with its edits and no word.
   useUnsavedGuard(mode === 'edit' && !!dirty);
+
+  // Done waits on every manager's sign-off of the order as saved. Edits that
+  // void it are read the way the server reads them: a reorder or a warehouse
+  // move doesn't, so linesChanged would over-warn.
+  const voidsSignoff = !!order && !!draft && (
+    pendingAdjust != null
+    || signoffSig(draft.lines, draft.customerId, draft.currency)
+      !== signoffSig(order.lines.map(toEditLine), order.customer.id, order.currency)
+  );
+  const signoffMissing = order?.signoff ? missingSigners(order.signoff) : [];
+  const doneBlockedReason = !order?.signoff ? null
+    : voidsSignoff ? t('sodDoneSignoffVoided')
+    : signoffMissing.length > 0 ? t('sodDoneNeedsSignoff', { names: signoffMissing.join(', ') })
+    : null;
   const leaving = (go: () => void) => () => { void confirmDiscard().then(ok => { if (ok) go(); }); };
 
   // The stepper shows only the forward lifecycle. Closed is an off-ramp
@@ -1127,6 +1146,11 @@ function SellOrderDetail({ id, mode, onToast }: {
   const save = async () => {
     if (!order || !draft) return;
     if (draft.lines.length === 0) return;
+    // The server would refuse Done only after the PATCH had saved the rest.
+    if (draft.status === 'Done' && order.status !== 'Done' && doneBlockedReason) {
+      showErrorDialog(doneBlockedReason);
+      return;
+    }
     setSaving(true);
     try {
       // Structural / notes edits go through PATCH. Skip the call entirely if
@@ -1379,18 +1403,21 @@ function SellOrderDetail({ id, mode, onToast }: {
                         const meta = needsDialog(s) ? statusMeta?.[s] : null;
                         const hasMeta = !!meta && (!!meta.note || meta.attachments.length > 0);
                         const dialog = needsDialog(s);
+                        const blocked = s === 'Done' && !active && doneBlockedReason !== null;
                         return (
                           <Fragment key={s}>
                             <button
                               type="button"
-                              className={'so-step' + (active ? ' active' : '') + (reached ? ' reached' : '')}
+                              disabled={blocked}
+                              className={'so-step' + (active ? ' active' : '') + (reached ? ' reached' : '')
+                                + (blocked ? ' locked' : '')}
                               onClick={() => {
                                 // Re-open the dialog even on the current status so the
                                 // user can come back and add more notes / attachments.
                                 if (dialog) setPending(s);
                                 else setDraft({ ...draft, status: s });
                               }}
-                              title={dialog
+                              title={blocked ? doneBlockedReason! : dialog
                                 ? (s === draft.status
                                     ? t('sodStepEditMeta', { s })
                                     : t('sodStepAdvance', { s }))
@@ -1419,6 +1446,11 @@ function SellOrderDetail({ id, mode, onToast }: {
                         );
                       })}
                     </div>
+                    {doneBlockedReason && draft.status !== 'Done' && (
+                      <div className="so-signoff-step-note">
+                        <Icon name="lock" size={12} /> {doneBlockedReason}
+                      </div>
+                    )}
                     {draft.status !== order.status && (
                       <div style={{
                         marginTop: 10, padding: '8px 12px', borderRadius: 8,
@@ -1783,6 +1815,20 @@ function SellOrderDetail({ id, mode, onToast }: {
                   </div>
                 )}
               </div>
+              )}
+
+              {/* A Done order keeps its sign-offs as the record; one closed
+                  before sign-off existed has none to show. */}
+              {order.signoff && (!CLOSED_DONE_STATUSES.has(order.status)
+                || order.signoff.managers.some(m => m.signedAt !== null)) && (
+                <SellOrderSignoffCard
+                  orderId={order.id}
+                  signoff={order.signoff}
+                  open={!CLOSED_DONE_STATUSES.has(order.status)}
+                  editing={editable}
+                  voidsOnSave={editable && voidsSignoff}
+                  onChanged={() => { setRefreshKey(k => k + 1); setHistoryKey(k => k + 1); }}
+                />
               )}
 
               {/* Tracking & evidence — read-only view of the per-status notes and

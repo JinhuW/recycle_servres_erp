@@ -134,9 +134,11 @@ on to Sold once every line has sold (v1.164.0).
   the final journey, who moved it on and when, the Done note and files — read
   from the activity log, read-only, with *Back to ‹current›*; a manager also
   gets *Move back to ‹stage›* there when the order allows it. The next step is
-  the only forward click; a stage beyond it stays locked (a manager stages one
-  move at a time now, and Save commits it — the footer's button reads *Save ·
-  Mark as ‹stage›* while one is pending). After a stage move the page **stays
+  the only forward click; a stage beyond it stays locked. **A move is written
+  on the click** (v1.227.1): *Mark as ‹stage›*, the stepper's next step, *Move
+  back* and the Done dialog's Confirm save the move right away, along with any
+  other unsaved edits on the page. A move that is cancelled or refused leaves
+  the page on the stage the order is at. After a stage move the page **stays
   put** on the new stage's panel instead of returning to the list. Below the
   status card, **five tabs**: *Delivery* (source, receiving warehouse, shipping
   label or local pickup, tracking number with the carrier recognised from its
@@ -369,12 +371,31 @@ on to Sold once every line has sold (v1.164.0).
     line already at qty 0 (v1.213.0). It leaves amber and red lines for their
     own tick.
   - The scan box takes a label scanner. It matches an exact part number, then
-    a prefix, then a recorded serial, and ticks the line it lands on at its
-    count. A scan goes to a matching line still open first, then an amber
-    one. A prefix that fits lines with different part numbers ticks nothing
-    and names them. A scan that lands on a line counted 0 ticks nothing and
-    asks for the count to be raised first (v1.212.0). On a line already at
-    qty 0 it says so instead: only an edit can put units back (v1.213.0).
+    a prefix, then a recorded serial, then any part number holding the text
+    (v1.222.0), and ticks the line it lands on at its count. A scan goes to a
+    matching line still open first, then an amber one. A prefix that fits
+    lines with different part numbers ticks nothing and names them. A scan
+    that lands on a line counted 0 ticks nothing and asks for the count to be
+    raised first (v1.212.0). On a line already at qty 0 it says so instead:
+    only an edit can put units back (v1.213.0).
+  - **Typing in the scan box filters the list** (v1.222.0).
+    - Once typing pauses (150 ms), only the lines Enter could land on stay:
+      a part number holding the text anywhere, ignoring separators and case;
+      one a label extends; or a whole recorded serial. A scanner's burst ends
+      in Enter inside the pause, so a scan never flashes a filter.
+    - Enter follows the order above, so the filter can show two part numbers
+      while Enter ticks the exact one (`M393A4K40DB3` beside
+      `M393A4K40DB3-CWE`).
+    - A fragment that fits several part numbers ticks nothing. The text and
+      its list stay up, the box lets go so ↑↓ and Space pick a row, and the
+      message names the first five parts. Space, + − and e ignore a selected
+      line the filter hides.
+    - × clears the filter. Escape in the box clears the text and then
+      leaves the box. On the page, Escape clears a leftover filter before it
+      leaves Review mode.
+    - The filter changes only the rows shown. The tally, Finish review and
+      Approve always count the whole PO, and *Check all remaining* is
+      disabled while a filter is up.
   - A scan works with nothing focused: a character typed onto the page that
     is not a shortcut starts the scan in the box, so a label never runs as
     shortcuts. The shortcuts are ↑↓/j k, Space, + −, lowercase e and /; a
@@ -404,6 +425,11 @@ on to Sold once every line has sold (v1.164.0).
       is nothing to pay for.
     - Only Review mode's Approve zeroes them. Moving the PO from the PO page
       or the phone leaves 0-counted lines at their full qty.
+  - **A payment that doesn't match the total cost is called out** (v1.225.0).
+    See *A manager is warned when the bank paid something other than the
+    PO's total cost* below for the banner and the question at Approve. Here
+    the comparison is against the total the PO will have after Approve, so
+    ticking a line at 0 can raise the warning or clear it before the click.
   - The endpoints (`/api/orders/:id/checks…`) 403 anyone whose real role is
     not manager. The page and button are hidden from a manager previewing as
     purchaser, and the route bounces them without leaving a Back entry
@@ -563,6 +589,37 @@ on to Sold once every line has sold (v1.164.0).
   page itself, each row of the Cost Payment tab's *Bank payments* ledger is a
   link to that transaction — the Payments page pinned to the PO with that row
   open (v1.167.0).
+- **A manager is warned when the bank paid something other than the PO's
+  total cost** (v1.225.0).
+  - **What is compared.** The same net the Payment cell shows, against goods
+    + other fees, exact to the cent. Prod had 13 of 46 linked POs off, e.g.
+    $2,415 paid on a $70 PO.
+  - **The warning.** An amber banner names both figures and the difference,
+    with *Open Payments*. It shows in Review mode, and in the desktop PO
+    page's Order status card, at any stage.
+    - The PO page compares against its live cost, so a fee typed to cover the
+      gap clears the warning before Save.
+  - **Asked again at approval.** Moving a PO from before Ready to Pay into
+    Ready to Pay or Done asks *Continue anyway?* first. That covers Review
+    mode's Approve and the PO page's Save.
+    - Cancel writes nothing.
+    - Except when the same PO-page click also edits the Cost Payment section
+      (paid by, method or PayPal id) (v1.227.2). Those edits can link or
+      unlink a bank payment, so the page writes them first and asks against
+      what the bank paid then: a newly linked payment that is off asks, and a
+      corrected id that now matches doesn't. Cancel keeps the edits, leaves
+      the stage and reloads with the banner up.
+    - Cancel has the focus, because a label scanner ends each read with
+      Enter.
+  - **What it leaves alone.**
+    - Self-paid POs: their bank money is the purchaser's reimbursement plus
+      commission.
+    - POs with nothing linked.
+    - Moves between Ready to Pay, Done and Sold.
+    - The phone.
+  - **Who sees it.** Managers only. `GET /api/orders/:id` now carries
+    `linkedPaid` for them, and leaves the key out for everyone else, a
+    manager previewing as purchaser included.
 - **Every list holds every row in scope** (v1.199.0). The phone PO list, the
   sell-order inbox and the internal transactions walk the API's pages, as the
   desktop PO list has since v1.140.1. Until then they each stopped at the
@@ -922,6 +979,27 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
 - **Each line links back to its PO** (v1.174.0). The sell order view shows a
   "From PO-…" link under a line that was picked from inventory. A free-typed
   line has no PO.
+- **Done needs every active manager's sign-off** (v1.226.0). The order page
+  carries a Sign-off card under the summary: each manager signed (with when),
+  waiting, or needing to sign again, and the viewer's own Sign off / Sign
+  again / Withdraw. Managers sign in Draft, Shipped or Awaiting payment, each
+  for themselves.
+  - `POST /api/sell-orders/:id/status` to Done answers 409 naming who is
+    missing, and the stepper's Done step is locked with the same names.
+    Signing only unlocks Done; a manager still moves the order there.
+  - A sign-off approves the order as it stood: the customer, the currency and
+    each line's item, qty, native price and lot. Changing any of them — in the
+    editor, by a negotiated total, or by a PO archive taking a line off —
+    leaves earlier sign-offs reading "needs to sign again". Notes, the
+    receiver, warehouse moves and evidence don't, nor does reordering lines
+    or re-saving at a new FX rate. The edit page warns before such a save.
+    A sign-off names the version the manager read: if the order changed in
+    between, `POST /api/sell-orders/:id/signoff` answers 409 and the card
+    re-reads the order.
+  - Who is required is worked out live: every active manager. Reopening a
+    Closed order clears its sign-offs. History logs each sign-off and
+    withdrawal, and a sign-off notifies the managers still to sign. Orders
+    Done before v1.226.0 carry none.
 - A **draft sell order is a proposal**; inventory is claimed only on promotion
   (v1.41.0). Drafts can move straight to Awaiting payment (v1.13.0).
 - Orders carry a payment receiver, creator-only reopen (v1.15.0) and a receiver
@@ -1007,32 +1085,53 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   shell, built for an iPad). **Pack mode** in the sell order's page head opens
   `#/sell-orders/<id>/pack`, a full-window page with no sidebar, top bar or
   tweaks button. It is the on-screen form of the Packing list, and the
-  outbound twin of the PO's Review mode.
-  - **Lines run in the order's own list order** — the Packing list's
+  outbound twin of the PO's Review mode, laid out like it since v1.227.0: a
+  page head, a progress card, a table with the scan box over it, and a side
+  panel with the selected item and a **Finish** card.
+  - **Products run in the order's own list order**, the Packing list's
     (v1.220.3; by # since v1.219.0, grouped by source PO in v1.218.0). Each
-    row's tag is its product's `#`, the label the packer writes on the item, and
-    its meta line names the lot it comes from (`From PO-1111 #1`, or *Typed
-    in*); two lines of one product share a tag, and a scan that could mean
-    either names them by both. When the order's lots sit in more
-    than one warehouse, a *Packing from* switch narrows the list without
-    renumbering it.
-  - **Each line shows its lot's photo** (v1.220.0) between the tag and the
-    item — the label scan, loaded lazily; a tap zooms it, and Esc closes the
-    zoom before it leaves Pack mode. A line with no real scan (typed, or a
-    stub scan) keeps an empty slot so the items stay in one column. The photo
-    comes from `GET /api/sell-orders/:id` as each line's `imageUrl`.
-  - A line's count starts at its qty. − / + record a short pick (amber, *Short*)
-    or none at all (red, *Not packed*), and lowering a packed line unticks it.
-    The tick confirms the count as shown; a ticked line **stays in its place**
-    (v1.219.0), dimmed with a green tick, with Undo in the bottom bar.
-  - A line held at 0 keeps its row and # but reads *Qty 0 · nothing to pack*:
-    no counter or tick, never matched by a scan, left out of the progress and
-    of what blocks Mark shipped.
+    row leads with its product's `#`, the label the packer writes on the item,
+    and names the lot it comes from (`From PO-1111 #1`, or *Typed in*). When
+    the order's lots sit in more than one warehouse, a *Packing from* switch
+    narrows the list without renumbering it.
+  - **A product from several lots is one fold row** (v1.227.0). It shows the
+    product's #, part, specs, how many lots and their PO tags
+    (`PO-1111 #4, PO-1203 #1 +1`), and the summed count. It starts closed.
+    The chevron (or ← / →) opens it to one row per lot, each with its own
+    photo, count and tick. Ticking the product row packs every lot still at
+    its full count. A lot that was lowered keeps waiting for its own tick, and
+    the fold opens to show it. Once every lot is packed, the same tick unpacks
+    them all. A product with some lots packed shows a dash in its tick. A lot
+    held at 0 is left out of its product. A product whose lots are all at 0
+    keeps one greyed row: *Qty 0 · nothing to pack*, with no counter or tick.
+  - **Each row shows its lot's photo** (v1.220.0), loaded lazily; a tap zooms
+    it, and Esc closes the zoom before it leaves Pack mode. A product row
+    shows the first lot that has one. A line with no real scan (typed, or a
+    stub scan) keeps an empty slot. The photo comes from
+    `GET /api/sell-orders/:id` as each line's `imageUrl`.
+  - A lot's count starts at its qty. − / + record a short pick (amber, *Short*)
+    or none at all (red, *Not packed*), and lowering a packed lot unticks it.
+    The tick confirms the count as shown. A ticked row **stays in its place**
+    (v1.219.0), dimmed with a green tick. Undo reverses the last tick, a whole
+    product's included, from a toast.
+  - **The side panel** shows the selected row: its photo large, part, From
+    PO, warehouse, qty and count, and the serials on file. For a product it
+    lists each lot's count. Tap a row to select it, or use ↑ / ↓; Space packs
+    the selected row. The **Finish** card says what is left to pack, lists
+    the lots packed short or at 0 with **Edit order**, and holds **Mark
+    shipped**. Below 1024px wide (an iPad in portrait) the panel drops under
+    the list and the selected-item card is hidden.
   - The scan box takes a Bluetooth or USB label scanner, with nothing focused,
-    and matches a part number, a prefix, then a recorded serial, as Review mode
-    does. When the part is still waiting on more than one line, the scan ticks
-    nothing: it highlights those lines, names them by # and asks for a tap on
-    the one that was packed.
+    and matches a part number, a prefix, a recorded serial, then any part
+    number holding the text, as Review mode does. Typing filters the list
+    the same way too (v1.222.0), with ×, Escape and a fragment that fits
+    several parts behaving as in Review mode. The filter searches the whole
+    order, packable lines only, even with a *Packing from* warehouse picked,
+    so it never hides the line Enter would pack. A product holding a match
+    is listed whole, opened while the filter is up. Progress stays on the
+    warehouse view. When the part is still waiting on more than one lot, the
+    scan ticks nothing: it opens those products, highlights the lots, names
+    them by # and asks for a tap on the one that was packed.
   - Progress is saved on the server (`sell_order_packs`), so a reload, a second
     iPad or coming back from another app picks up where the count stands; the
     page re-reads when it returns to the foreground. Last write per line wins.
@@ -1041,13 +1140,13 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
     unpacked, unless it was packed short and edited down to exactly the count
     packed. If the order itself can't be loaded, the list says so with *Try
     again* instead of loading forever (v1.220.2).
-  - Every control is at least 44px and the tick is 60px; nothing needs hover.
-    Under 780px each row puts the counter and tick on a second line.
-  - On a Draft with every line packed at full count, **Mark shipped** opens the
+  - Every control is at least 44px; nothing needs hover. Below 900px the
+    condition moves under the item.
+  - On a Draft with every lot packed at full count, **Mark shipped** opens the
     Shipped dialog (note, packing photos) and moves the order to Shipped. Short
-    or unpacked lines block it, and the bar offers Edit order to match the
-    order to the box first. A refused move (a lot taken meanwhile) says why and
-    stays on the page. Other statuses end with Back to order.
+    or unpacked lots block it, and the Finish card offers Edit order to match
+    the order to the box first. A refused move (a lot taken meanwhile) says
+    why and stays on the page.
   - The endpoints (`GET /api/sell-orders/:id/pack`,
     `PUT /api/sell-orders/:id/pack/:lineId`) 403 anyone whose real role is not
     manager. An archived or Closed order opens read-only and its writes 409; a
@@ -1245,6 +1344,11 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
   direction, so ours always sit on money going out. Message threads and evidence
   are not stored — the page answers "where has this got to", not "what was
   said".
+  - **A closed case ends on Closed** (v1.221.2). PayPal leaves the stage where
+    the case was decided — nearly always the claim — so the ladder used to keep
+    that stage lit after the close. A resolved case's ladder now runs on to a
+    highlighted **✓ Closed** step; the stages it went through stay grey, and
+    the ones it never reached are dimmed behind dashed bars.
 
 - **Money that hasn't settled says so** (v1.127.0). Both providers used to drop
   every row that had not settled, so a payment in flight was indistinguishable
@@ -1773,6 +1877,10 @@ removed in v1.191.0.
   content-hashed chunk that a release has replaced now 404s instead of being
   answered with `index.html`, and a tab that asks for one reloads itself once
   onto the current build rather than stalling on a skeleton.
+- **Unknown paths are a 404** (v1.221.1). The shell is served only at `/`,
+  `/authorize`, `/login`, `/share-target` and the PWA shortcuts; any other path — at the
+  edge or through the service worker — gets a "Page not found" page instead of
+  the app rendering whatever its `#/` hash names.
 - **The load starts before the bundle does** (v1.122.0). A small boot script,
   injected ahead of the entry, preloads whichever shell the viewport is about
   to need and starts `/api/me`, `/api/lookups` and `/api/workspace` — none of

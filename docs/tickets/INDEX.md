@@ -5,7 +5,14 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-194](./RS-194-fix-the-dev-to-main-review-findings-before-the-v1-22.md) | in-progress | bug | P1 | Fix the dev to main review findings before the v1.221 release | — |
+| [RS-203](./RS-203-pre-release-review-fixes-for-the-v1-227-release.md) | in-progress | bug | P1 | Pre-release review fixes for the v1.227 release | — |
+| [RS-202](./RS-202-a-po-stage-move-on-the-desktop-saves-on-the-click.md) | done | bug | P2 | A PO stage move on the desktop saves on the click | 1.227.1 |
+| [RS-200](./RS-200-warn-the-manager-when-a-po-s-payment-doesn-t-match-i.md) | done | story | P2 | Warn the manager when a PO's payment doesn't match its total cost | 1.225.0 |
+| [RS-199](./RS-199-pack-mode-reads-like-review-mode-with-a-fold-for-a-p.md) | done | story | P2 | Pack mode reads like Review mode, with a fold for a product from several PO lots | 1.227.0 |
+| [RS-198](./RS-198-sell-orders-need-every-manager-s-sign-off-before-don.md) | done | story | P2 | Sell orders need every manager's sign-off before Done | 1.226.0 |
+| [RS-197](./RS-197-review-and-pack-mode-scan-box-filters-by-any-part-of.md) | done | story | P2 | Review and Pack mode scan box filters by any part of a part number | 1.222.0 |
+| [RS-195](./RS-195-a-closed-paypal-dispute-s-stage-ladder-ends-on-close.md) | done | bug | P2 | A closed PayPal dispute's stage ladder ends on Closed | 1.221.2 |
+| [RS-194](./RS-194-fix-the-dev-to-main-review-findings-before-the-v1-22.md) | done | bug | P1 | Fix the dev to main review findings before the v1.221 release | 1.221.0 |
 | [RS-193](./RS-193-one-per-product-shared-by-the-packing-lists-the-sell.md) | done | story | P2 | One # per product, shared by the packing lists, the sell order page and Pack mode | 1.220.3 |
 | [RS-192](./RS-192-fix-the-dev-to-main-review-findings-before-the-v1-22.md) | done | bug | P1 | Fix the dev to main review findings before the v1.220 release | 1.220.2 |
 | [RS-191](./RS-191-take-the-photos-out-of-the-packing-list-spreadsheets.md) | done | story | P2 | Take the photos out of the packing-list spreadsheets | 1.220.1 |
@@ -24,6 +31,7 @@ See [README.md](./README.md) for what the fields mean.
 | [RS-173](./RS-173-web-submission-email-can-run-on-dev-behind-a-test-re.md) | done | story | P2 | Web-submission email can run on dev behind a test-recipient list | 1.209.2 |
 | [RS-170](./RS-170-re-login-looks-broken-it-waits-for-the-next-sweep-an.md) | done | bug | P2 | Re-login looks broken: it waits for the next sweep and cannot sign in without a stored password | 1.208.2 |
 | [RS-169](./RS-169-second-level-sidebar-nav-the-trackers-move-under-mon.md) | done | story | P2 | Second-level sidebar nav; the trackers move under Monitors | 1.207.0 |
+| [RS-167](./RS-167-unknown-paths-return-404-instead-of-the-app-shell.md) | done | bug | P2 | Unknown paths return 404 instead of the app shell | 1.221.1 |
 | [RS-166](./RS-166-desktop-sidebar-folds-to-an-icon-rail.md) | done | story | P2 | Desktop sidebar folds to an icon rail | 1.208.0 |
 | [RS-165](./RS-165-an-upstream-401-from-the-fleet-console-is-read-as-an.md) | done | bug | P2 | An upstream 401 from the fleet console is read as an expired ERP session | 1.208.1 |
 | [RS-164](./RS-164-facebook-tracker-reaches-parity-with-the-rs-console.md) | done | story | P2 | Facebook tracker reaches parity with the rs-console dashboard, including watching a worker's browser | 1.204.0 |

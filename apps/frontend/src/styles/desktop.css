@@ -519,11 +519,6 @@ html.desktop, body.desktop, .desktop #root {
 }
 .oe-foot-stat { white-space: nowrap; }
 .oe-foot-state { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0; font-size: 12px; }
-.oe-foot-pill { gap: 6px; }
-.oe-foot-undo {
-  border: 0; background: transparent; font: inherit; font-size: 11px; text-decoration: underline;
-  color: inherit; cursor: pointer; padding: 0 0 0 4px;
-}
 .oe-foot-dirty { display: inline-flex; align-items: center; gap: 6px; color: var(--info); }
 .oe-foot-actions { display: flex; gap: 8px; justify-content: flex-end; }
 /* The Tweaks gear floats at the page's bottom-right corner; keep Save clear of it. */
@@ -1143,6 +1138,29 @@ html.desktop, body.desktop, .desktop #root {
 }
 .so-page-main, .so-page-side { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .so-page-card { padding: 18px 20px; }
+/* Sign-off card: one row per manager, the viewer's own row carrying the buttons. */
+.so-section-head .so-signoff-count { margin-left: auto; text-transform: none; letter-spacing: normal; font-weight: 500; }
+.so-signoff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.so-signoff-row { display: flex; align-items: center; gap: 10px; }
+.so-signoff-mark {
+  flex: none; width: 18px; height: 18px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1.5px dashed var(--border);
+}
+.so-signoff-row.signed .so-signoff-mark { border: none; background: var(--pos-soft); color: var(--accent-strong); }
+.so-signoff-row.stale .so-signoff-mark { border-style: solid; border-color: var(--warn-strong); }
+.so-signoff-who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.so-signoff-name { font-size: 13px; font-weight: 500; }
+.so-signoff-you { color: var(--fg-subtle); font-weight: 400; white-space: nowrap; }
+.so-signoff-state { font-size: 11.5px; color: var(--fg-subtle); }
+.so-signoff-row.stale .so-signoff-state { color: var(--warn-strong); }
+.so-signoff-actions { flex: none; display: flex; gap: 6px; }
+.so-signoff-foot {
+  margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border);
+  font-size: 12px; color: var(--fg-subtle);
+}
+.so-signoff-foot.warn { color: var(--warn-strong); }
+.so-signoff-step-note { margin-top: 10px; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-subtle); }
 /* Sits in the uppercase section head; it is a control, not a heading. */
 .so-group-seg { margin-left: 12px; text-transform: none; letter-spacing: normal; }
 .so-group-seg button { padding: 4px 10px; font-size: 12px; }
@@ -1248,6 +1266,14 @@ html.desktop, body.desktop, .desktop #root {
 .so-step.locked { opacity: 0.55; cursor: not-allowed; background: var(--bg-soft); }
 .so-step.locked:hover { border-color: var(--border); color: var(--fg-subtle); }
 .so-step.locked .so-step-dot { background: var(--bg-soft); color: var(--fg-subtle); border: 1px dashed var(--border-strong); }
+/* A stage a closed dispute never climbed to: kept so the ladder keeps its
+   shape, but it is not a step the case took. The dashes are a gradient: a
+   dashed border on the bar's rounded 2px box paints as a solid line in
+   Chromium, and dashes in --border would read as the plain bar anyway. */
+.so-step.skipped { opacity: 0.55; }
+.so-step-bar.skipped {
+  background: repeating-linear-gradient(90deg, var(--border-strong) 0 5px, transparent 5px 10px);
+}
 
 /* ===== Settings shell ===== */
 .settings-shell {
@@ -3955,7 +3981,17 @@ button.rsheet-box:hover { background: color-mix(in oklch, var(--accent) 10%, tra
 .bc-scan-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
 .bc-scan { position: relative; display: block; }
 .bc-scan svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--fg-subtle); pointer-events: none; }
-.bc-scan .input { width: 100%; padding-left: 34px; }
+.bc-scan .input { width: 100%; padding-left: 34px; padding-right: 34px; }
+/* The clear button sits beside the label, not in it: a label may not hold a
+   second control. */
+.bc-scan-field { position: relative; }
+.bc-scan-clear {
+  position: absolute; right: 5px; top: 50%; transform: translateY(-50%);
+  display: grid; place-items: center; width: 26px; height: 26px; padding: 0;
+  border: 0; border-radius: 6px; background: transparent; color: var(--fg-subtle); cursor: pointer;
+}
+.bc-scan-clear:hover { background: var(--bg-soft); color: var(--fg); }
+.bc-scan-clear:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .bc-scan-msg { font-size: 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 26px; }
 .bc-scan-msg.muted { color: var(--fg-subtle); }
 .bc-scan-msg.pos { color: var(--accent-strong); }
@@ -4060,167 +4096,136 @@ button.rsheet-box:hover { background: color-mix(in oklch, var(--accent) 10%, tra
 }
 
 /* ===== Pack mode =====
-   A sell order as a packing checklist (DesktopSellOrderPack), built for an
-   iPad on a cart: every control is a thumb wide, nothing waits on hover, and
-   the one action sits in a bar at the bottom of the screen. Each row leads
-   with the lot's shelf tag — its PO and line number — because that is what
-   the packer is matching against the shelf. Shares the Review mode shell
-   (`.app-focus`) and its meter, legend and scan box. */
+   A sell order as a packing checklist (DesktopSellOrderPack), laid out like
+   Review mode — head, tally, a table with the scan box over it, and a side
+   panel with the selected item and Finish — and built for an iPad on a cart:
+   every control is a thumb wide and nothing waits on hover. Its own classes
+   for the grid, side and breakpoint: Review's stack at 1100px, which would
+   fold a 1080-wide iPad in landscape. Shares the Review mode shell
+   (`.app-focus`) and its meter, legend, table and scan box. */
 .app.app-focus .main { height: 100dvh; }
-.app.app-focus .main > .page:has(> .pk-page) { padding-bottom: 0; }
-/* The tweaks button owns the bottom-right corner, which is where the bar's
-   action sits; nobody changes density mid-pack. */
+/* Nobody changes density mid-pack. */
 body:has(.pk-page) .tweaks-fab, body:has(.pk-page) .tweaks-pop { display: none; }
-.pk-page { display: flex; flex-direction: column; gap: 14px; max-width: 1200px; width: 100%; margin: 0 auto; }
+.pk-page { display: flex; flex-direction: column; gap: 16px; max-width: 1400px; width: 100%; margin: 0 auto; }
+.pk-page > .page-head { margin-bottom: 0; }
 .pk-page button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
-.pk-page .bc-back { min-height: 32px; font-size: 13.5px; }
-.pk-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px 24px; flex-wrap: wrap; }
-.pk-head-main { min-width: 0; }
-.pk-head .page-sub { font-size: 14px; }
-.pk-scan-wrap { flex: 0 1 420px; min-width: 280px; display: grid; gap: 6px; }
-.pk-scan .input { height: 48px; padding-left: 40px; font-size: 15px; }
-.pk-scan svg { left: 14px; }
-.pk-scan-wrap .bc-scan-msg { font-size: 13px; }
-.pk-scan-wrap .bc-scan-msg.warn { color: var(--warn-strong); }
+.pk-page .bc-back { min-height: 44px; font-size: 13.5px; }
+.pk-page .page-sub { font-size: 14px; }
 
-.pk-progress { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 20px; align-items: center; padding: 14px 18px; }
-.pk-progress-num { display: grid; gap: 4px; }
-.pk-progress-num .mono { font-size: 28px; letter-spacing: -0.02em; line-height: 1; font-variant-numeric: tabular-nums; }
-.pk-progress-num .mono b { font-weight: 600; }
-.pk-progress-num .mono .muted { font-size: 16px; color: var(--fg-subtle); }
-.pk-progress .bc-legend .chip { font-size: 12.5px; }
+.pk-tally .bc-legend .chip { font-size: 12.5px; }
 .pk-wh { display: grid; gap: 6px; justify-items: end; }
 .pk-wh-label { font-size: 12.5px; color: var(--fg-subtle); }
-.pk-wh .seg button { min-height: 40px; padding: 8px 16px; font-size: 14px; }
+.pk-wh .seg button { min-height: 44px; padding: 8px 16px; font-size: 14px; }
 
+.pk-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
+.pk-side { position: sticky; top: 0; display: grid; gap: 16px; }
 .pk-list-card { overflow: hidden; }
-.pk-list { list-style: none; margin: 0; padding: 0; position: relative; }
-.pk-list > li:first-child { border-top: 0; }
+.pk-scan .input { height: 48px; padding-left: 40px; padding-right: 48px; font-size: 15px; }
+.pk-scan-clear { width: 40px; height: 40px; right: 4px; }
+.pk-scan svg { left: 14px; }
+.pk-page .bc-scan-msg { font-size: 13px; }
+.pk-page .bc-scan-msg.warn { color: var(--warn-strong); }
 
-.pk-row {
-  display: grid; grid-template-columns: 92px 64px minmax(0, 1fr) auto; gap: 18px; align-items: center;
-  padding: 14px 18px; border-top: 1px solid var(--border); background: var(--bg-elev);
+.pk-table th, .pk-table td { padding-left: 10px; padding-right: 10px; }
+.pk-table td { padding-top: 10px; padding-bottom: 10px; }
+.pk-table .bc-cb-cell { width: 64px; }
+.pk-cb { width: 44px; height: 44px; border-radius: 10px; }
+.pk-table .bc-partial .pk-cb::after, .pk-table .bc-absent .pk-cb::after { width: 14px; height: 3px; }
+/* Some lots of a folded product packed or lowered, not all packed. */
+.pk-mixed .pk-cb { border-color: var(--accent); background: var(--accent-soft); }
+.pk-mixed .pk-cb::after { content: ''; width: 14px; height: 3px; border-radius: 2px; background: var(--accent-strong); }
+/* The product's # on the order: what goes on the label, so it reads first. */
+.pk-no-cell { width: 84px; }
+.pk-no { font-size: 15px; font-weight: 700; color: var(--fg); font-family: 'JetBrains Mono', ui-monospace, monospace; font-feature-settings: 'tnum'; }
+.pk-fold {
+  display: inline-flex; align-items: center; gap: 4px; min-width: 44px; min-height: 44px; padding: 0 6px 0 2px;
+  border: 0; border-radius: 8px; background: transparent; color: var(--fg-muted); cursor: pointer; font: inherit;
 }
-
-/* The line's tag: its # on the sell order, the label the packer writes on
-   the item and the receiver checks the box by. */
-.pk-tag {
-  position: relative; display: grid; justify-items: center; align-content: center; gap: 3px;
-  min-height: 76px; padding: 16px 6px 9px;
-  border: 1.5px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg-elev);
-  font-family: 'JetBrains Mono', ui-monospace, monospace; font-feature-settings: 'tnum';
+.pk-fold svg { transition: transform 0.15s ease; }
+.pk-fold[aria-expanded="false"] svg { transform: rotate(-90deg); }
+.pk-fold:disabled { cursor: default; }
+.pk-fold:focus-visible, .pk-step:focus-visible, .pk-thumb:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pk-thumb-cell { width: 72px; }
+.pk-thumb {
+  width: 52px; height: 52px; padding: 0; overflow: hidden; display: grid; place-items: center;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--bg-soft); color: var(--fg-subtle); cursor: zoom-in;
 }
-/* The hang-tag hole. */
-.pk-tag::before {
-  content: ''; position: absolute; top: 6px; left: 50%; width: 7px; height: 7px; margin-left: -3.5px;
-  border-radius: 50%; border: 1.5px solid var(--border-strong); background: var(--bg-soft);
-}
-.pk-tag-po { font-size: 11.5px; color: var(--fg-muted); white-space: nowrap; }
-.pk-tag-no { font-size: 28px; font-weight: 700; line-height: 1; letter-spacing: -0.03em; color: var(--fg); }
-
-/* The lot's photo, to match the item by eye; tap to zoom. A line without one
-   keeps the slot, so the items stay in one column. */
-.pk-photo {
-  width: 64px; height: 64px; padding: 0; overflow: hidden;
-  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-soft);
-  display: grid; place-items: center; cursor: zoom-in;
-}
-.pk-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.pk-photo-none { cursor: default; color: var(--fg-subtle); opacity: 0.6; }
-
-.pk-item { min-width: 0; display: grid; gap: 6px; justify-items: start; }
-.pk-label { font-size: 16px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
-.pk-sub { font-size: 13.5px; color: var(--fg-muted); }
-.pk-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13.5px; color: var(--fg-subtle); }
-.pk-meta .mono { color: var(--fg-muted); font-size: 13px; }
+.pk-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pk-thumb-none { cursor: default; opacity: 0.6; }
+.pk-table .bc-pn { font-size: 14.5px; }
+.pk-table .bc-spec { font-size: 12.5px; }
+.pk-meta { display: flex; flex-wrap: wrap; gap: 2px 12px; margin-top: 4px; font-size: 12.5px; color: var(--fg-subtle); }
 .pk-meta .pk-from { color: var(--fg); }
+.pk-lots { font-weight: 600; color: var(--fg-muted); }
+.pk-cond-inline { display: none; }
 
-.pk-ctrl { display: flex; align-items: center; gap: 16px; }
-.pk-count-wrap { display: grid; justify-items: center; gap: 4px; }
+.pk-count-cell { white-space: nowrap; }
+.pk-count { display: inline-flex; align-items: center; border: 1px solid var(--border-strong); border-radius: 10px; overflow: hidden; background: var(--bg-elev); }
 .pk-step {
-  display: inline-flex; align-items: center; border: 1px solid var(--border-strong);
-  border-radius: 12px; background: var(--bg-elev); overflow: hidden;
-}
-.pk-step-btn {
-  width: 48px; height: 48px; display: grid; place-items: center;
+  width: 44px; height: 44px; display: grid; place-items: center; padding: 0;
   border: 0; background: transparent; color: var(--fg); cursor: pointer;
 }
-.pk-step-btn:active:not(:disabled) { background: var(--bg-soft); }
-.pk-step-btn:disabled { color: var(--fg-subtle); opacity: 0.4; cursor: not-allowed; }
-.pk-count {
-  min-width: 82px; text-align: center; line-height: 48px; font-size: 15px;
-  border-inline: 1px solid var(--border); font-variant-numeric: tabular-nums;
-}
-.pk-count b { font-size: 20px; font-weight: 700; }
-.pk-count span { color: var(--fg-subtle); }
-.pk-flag { font-size: 12.5px; font-weight: 600; line-height: 1; }
+.pk-step:active:not(:disabled) { background: var(--bg-soft); }
+.pk-step:disabled { color: var(--fg-subtle); opacity: 0.4; cursor: not-allowed; }
+.pk-count .bc-count-n { min-width: 70px; line-height: 44px; font-size: 13.5px; border-inline: 1px solid var(--border); }
+.pk-count .bc-count-n b, .pk-sum b { font-size: 16px; }
+.pk-sum { font-size: 13.5px; }
+.pk-flag { margin-top: 3px; font-size: 11.5px; font-weight: 600; }
 .pk-flag.warn { color: var(--warn-strong); }
 .pk-flag.neg { color: var(--neg); }
 
-.pk-tick {
-  width: 60px; height: 60px; padding: 0; border-radius: 16px;
-  border: 2px solid var(--border-strong); background: var(--bg-elev); color: transparent;
-  display: grid; place-items: center; cursor: pointer;
-  transition: background 0.12s, border-color 0.12s, color 0.12s, transform 0.08s;
+/* A tapped row would stay grey on an iPad; hover tints only where there is one. */
+@media (hover: none) {
+  .pk-table .bc-row:hover td { background: none; }
 }
-.pk-tick:active:not(:disabled) { transform: scale(0.95); }
-.pk-tick:disabled { opacity: 0.5; cursor: not-allowed; }
-.pk-tick:focus-visible, .pk-step-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-@media (hover: hover) {
-  .pk-open .pk-tick:hover:not(:disabled) { border-color: var(--accent); color: var(--border-strong); }
+/* Done rows dim their content, never the cell: the tick has to stay readable
+   to undo it, and the selected wash would go patchy. */
+.pk-table .bc-done .pk-thumb, .pk-table .bc-done .pk-meta, .pk-table .bc-done .pk-no,
+.pk-table .bc-done .pk-lot-src, .pk-table .bc-done .pk-count { opacity: 0.55; }
+.pk-table .pk-done-short .bc-count-n b, .pk-table .pk-has-short .bc-count-n b { color: var(--warn-strong); }
+.pk-table .bc-done-absent .bc-count-n b, .pk-table .pk-has-zero .bc-count-n b { color: var(--neg); }
+
+/* A folded product's lots, under its row. */
+.pk-lot { background: var(--bg-soft); }
+.pk-lot td { padding-top: 8px; padding-bottom: 8px; }
+.pk-lot .pk-lot-cell { box-shadow: inset 3px 0 0 var(--border-strong); padding-left: 16px; }
+.pk-lot-src { font-size: 13.5px; font-weight: 600; color: var(--fg); }
+.pk-hit .pk-lot-src { color: var(--accent-strong); }
+/* A part-number scan that fits more than one lot: the candidates, waiting for
+   a tap on the one that was packed. */
+.pk-table .pk-choose { background: var(--warn-soft); }
+.pk-table .pk-choose td:first-child { box-shadow: inset 4px 0 0 var(--warn); }
+.pk-choose .pk-cb { border-color: var(--warn-strong); }
+/* Every lot held at 0: the # stays in the list, there is nothing to pack. */
+.pk-zero .pk-thumb, .pk-zero .bc-pn, .pk-zero .bc-spec, .pk-zero .pk-meta, .pk-zero .pk-no { opacity: 0.5; }
+.pk-zero-note { font-size: 13px; color: var(--fg-subtle); white-space: nowrap; }
+.pk-table .pk-empty td { text-align: center; color: var(--fg-muted); font-size: 14px; padding: 24px; }
+
+.pk-sel-lots { list-style: none; margin: 12px 0 0; padding: 10px 0 0; border-top: 1px solid var(--border); display: grid; gap: 6px; font-size: 12.5px; }
+.pk-sel-lots li { display: flex; justify-content: space-between; align-items: center; gap: 10px; color: var(--fg-muted); }
+.pk-sel-lots .pk-sel-done { color: var(--accent-strong); }
+.pk-page .bc-finish-actions .btn { min-height: 48px; font-size: 14.5px; }
+.toast.pk-undo button { min-height: 44px; min-width: 64px; font-size: 13px; }
+
+/* Portrait iPad and narrower: Finish drops under the list, and the selected
+   card goes — a photo far below its row helps nobody; the row's own photo
+   zooms. */
+@media (max-width: 1023px) {
+  .pk-grid { grid-template-columns: minmax(0, 1fr); }
+  .pk-side { position: static; }
+  .pk-compare, .pk-page .bc-keys { display: none; }
 }
-.pk-partial .pk-tick { border-color: var(--warn); background: var(--warn-soft); }
-.pk-absent .pk-tick { border-color: var(--neg); background: var(--neg-soft); }
-.pk-done .pk-tick { background: var(--accent); border-color: var(--accent); color: #fff; }
-.pk-partial .pk-count b, .pk-done-short .pk-count b { color: var(--warn-strong); }
-.pk-absent .pk-count b, .pk-done-zero .pk-count b { color: var(--neg); }
-.pk-done .pk-count b { color: var(--accent-strong); }
-.pk-done .pk-label { text-decoration: line-through; text-decoration-color: var(--fg-subtle); }
-/* Dim the content, never the row: the tick has to stay readable to undo it. */
-.pk-done .pk-tag, .pk-done .pk-photo, .pk-done .pk-item, .pk-done .pk-step { opacity: 0.55; }
-
-/* A line held at 0 keeps its # in the list but has nothing to pack. */
-.pk-zero .pk-tag { border-style: dashed; }
-.pk-zero .pk-tag, .pk-zero .pk-photo, .pk-zero .pk-item { opacity: 0.5; }
-.pk-zero-note { font-size: 14px; color: var(--fg-subtle); white-space: nowrap; }
-
-/* A part-number scan that fits more than one line: the candidates, waiting
-   for a tap on the one that was packed. */
-.pk-choose { background: var(--warn-soft); box-shadow: inset 4px 0 0 var(--warn); }
-.pk-choose .pk-tick { border-color: var(--warn-strong); }
-
-.pk-empty { padding: 28px 18px; text-align: center; color: var(--fg-muted); font-size: 14.5px; border-top: 1px solid var(--border); }
-
-/* The one action, where a thumb rests; Undo lives here too, since the
-   shell's toast would land on top of it. */
-.pk-bar {
-  position: sticky; bottom: 0; z-index: 5; margin-top: auto;
-  display: flex; align-items: center; justify-content: space-between; gap: 10px 16px; flex-wrap: wrap;
-  padding: 12px 18px calc(12px + env(safe-area-inset-bottom, 0px));
-  background: var(--bg-elev); border: 1px solid var(--border); border-bottom: 0;
-  border-radius: var(--radius) var(--radius) 0 0;
-  box-shadow: 0 -8px 24px oklch(0.22 0.012 250 / 0.07);
+@media (min-width: 1024px) {
+  .pk-page .bc-keys { display: flex; }
 }
-.pk-bar-msg { display: flex; align-items: center; gap: 12px; min-width: 0; font-size: 14.5px; color: var(--fg-muted); }
-.pk-bar-actions { display: flex; gap: 10px; margin-left: auto; }
-.pk-bar .btn.lg { min-height: 50px; padding: 12px 22px; font-size: 15px; }
-.pk-bar .btn.sm { min-height: 36px; padding: 6px 14px; font-size: 13px; }
-
-/* iPad portrait and narrower: the controls drop under the item, the tag
-   stays at the left edge. */
-@media (max-width: 780px) {
-  .pk-row { grid-template-columns: 84px 64px minmax(0, 1fr); grid-template-areas: 'tag photo item' 'tag photo ctrl'; row-gap: 12px; align-items: start; }
-  .pk-tag { grid-area: tag; }
-  .pk-photo { grid-area: photo; }
-  .pk-item { grid-area: item; }
-  .pk-ctrl, .pk-zero-note { grid-area: ctrl; justify-self: end; }
-  .pk-ctrl { justify-content: flex-end; }
-  .pk-progress { grid-template-columns: auto minmax(0, 1fr); }
+@media (max-width: 900px) {
+  .pk-cond-cell { display: none; }
+  .pk-cond-inline { display: inline; }
+  .pk-tally { grid-template-columns: auto minmax(0, 1fr); }
   .pk-wh { grid-column: 1 / -1; justify-items: start; }
-  .pk-scan-wrap { flex-basis: 100%; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .pk-tick { transition: none; }
+  .pk-fold svg { transition: none; }
 }
 
 /* Offered when the window no longer fits the shell it loaded with (App.tsx).

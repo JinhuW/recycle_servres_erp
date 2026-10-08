@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import type { LineCheck } from './boxCheck';
 import {
-  isPackable, packBody, packScan, packView, packWarehouseOptions, shipBlockers, sourceTag, toCheck,
+  isPackable, packBody, packProducts, packScan, packView, packWarehouseOptions, productSummary, productTally,
+  productTick, shipBlockers, sourceTag, toCheck,
   type PackLine,
 } from './sellOrderPack';
 
@@ -104,6 +105,16 @@ describe('packScan', () => {
     expect(packScan(ls, checks(C('a', 2, 'x')), 'M393A4K40DB3-CWE')).toEqual({ line: ls[1] });
   });
 
+  it('asks which lot when a piece of the part number fits lines from more than one lot', () => {
+    const ls = [
+      L('a', { partNumber: 'M393A4K40DB3-CWE', sourceOrderId: 'PO-1', sourceLineNo: 1 }),
+      L('b', { partNumber: 'M393A4K40DB3-CWE', sourceOrderId: 'PO-2', sourceLineNo: 4 }),
+      L('c', { partNumber: 'SSDSC2KB960G8' }),
+    ];
+    expect(packScan(ls, new Map(), '4k40')).toEqual({ choose: [ls[0], ls[1]] });
+    expect(packScan(ls, new Map(), 'KB960')).toEqual({ line: ls[2] });
+  });
+
   it('ticks by serial even when the part is on several lines', () => {
     const ls = [
       L('a', { partNumber: 'M393A4K40DB3-CWE', serialNumber: 'S1, S2' }),
@@ -125,5 +136,103 @@ describe('packScan', () => {
     const ls = [L('a', { partNumber: 'ABCDEF-1' }), L('b', { partNumber: 'ABCDEF-2' })];
     expect(packScan(ls, new Map(), 'ZZZ')).toBeNull();
     expect(packScan(ls, new Map(), 'ABCDEF')).toEqual({ ambiguous: ['ABCDEF-1', 'ABCDEF-2'] });
+  });
+});
+
+describe('packProducts', () => {
+  it('folds the lines of one # into one product, in list order', () => {
+    const ls = [L('a', { no: 1 }), L('b', { no: 2 }), L('c', { no: 2 }), L('d', { no: 3 })];
+    expect(packProducts(packView(ls, '')).map(p => [p.no, p.lots.map(l => l.id)]))
+      .toEqual([[1, ['a']], [2, ['b', 'c']], [3, ['d']]]);
+  });
+
+  it('leaves a lot held at 0 out of a product that still has one to pack', () => {
+    const ls = [L('a', { no: 1 }), L('b', { no: 1, qty: 0 })];
+    const [p] = packProducts(packView(ls, ''));
+    expect(p!.lots.map(l => l.id)).toEqual(['a']);
+    expect(p!.head.id).toBe('a');
+  });
+
+  it('keeps a product whose lots are all 0, with nothing to pack', () => {
+    const ls = [L('a', { no: 1, qty: 0 }), L('b', { no: 1, qty: 0 }), L('c', { no: 2 })];
+    const ps = packProducts(packView(ls, ''));
+    expect(ps.map(p => [p.no, p.head.id, p.lots.length])).toEqual([[1, 'a', 0], [2, 'c', 1]]);
+  });
+
+  it('makes each line its own product when the server sends no #', () => {
+    const ls = [L('a'), L('b')];
+    expect(packProducts(packView(ls, '')).map(p => p.no)).toEqual([1, 2]);
+  });
+});
+
+describe('productSummary', () => {
+  const lots = [L('a'), L('b'), L('c')];
+
+  it('is open while nothing has been touched, and sums the counts', () => {
+    expect(productSummary(lots, new Map())).toEqual({ state: 'open', counted: 6, qty: 6, short: false, zeroed: false });
+  });
+
+  it('is mixed once one lot is packed or lowered', () => {
+    expect(productSummary(lots, checks(C('a', 2, 'x'))).state).toBe('mixed');
+    const lowered = productSummary(lots, checks(C('b', 1)));
+    expect(lowered).toMatchObject({ state: 'mixed', counted: 5, short: true, zeroed: false });
+  });
+
+  it('is done when every lot is packed, saying when one went short or to 0', () => {
+    const all = checks(C('a', 2, 'x'), C('b', 2, 'x'), C('c', 2, 'x'));
+    expect(productSummary(lots, all)).toMatchObject({ state: 'done', short: false, zeroed: false });
+    const off = checks(C('a', 1, 'x'), C('b', 0, 'x'), C('c', 2, 'x'));
+    expect(productSummary(lots, off)).toMatchObject({ state: 'done', counted: 3, short: true, zeroed: true });
+  });
+
+  it('is zero with no lot to pack', () => {
+    expect(productSummary([], new Map()).state).toBe('zero');
+  });
+});
+
+describe('productTick', () => {
+  const lots = [L('a'), L('b'), L('c')];
+
+  it('packs every lot still at its full count and leaves a lowered one for its own tick', () => {
+    const plan = productTick(lots, checks(C('a', 2, 'x'), C('c', 1)));
+    expect(plan.tick.map(l => l.id)).toEqual(['b']);
+    expect(plan.untick).toEqual([]);
+    expect(plan.left.map(l => l.id)).toEqual(['c']);
+  });
+
+  it('unpacks every lot once all are packed', () => {
+    const plan = productTick(lots, checks(C('a', 2, 'x'), C('b', 1, 'x'), C('c', 0, 'x')));
+    expect(plan.untick.map(l => l.id)).toEqual(['a', 'b', 'c']);
+    expect(plan.tick).toEqual([]);
+  });
+
+  it('has nothing to tick when only lowered lots are waiting', () => {
+    const plan = productTick(lots, checks(C('a', 2, 'x'), C('b', 1), C('c', 0)));
+    expect(plan.tick).toEqual([]);
+    expect(plan.left.map(l => l.id)).toEqual(['b', 'c']);
+  });
+
+  it('does nothing for a product with no lot to pack', () => {
+    expect(productTick([], new Map())).toEqual({ tick: [], untick: [], left: [] });
+  });
+});
+
+describe('productTally', () => {
+  it('puts each product in one bucket and counts units over its lots', () => {
+    const ps = packProducts(packView([
+      L('a', { no: 1 }),
+      L('b', { no: 2 }), L('c', { no: 2 }),
+      L('d', { no: 3 }), L('e', { no: 3 }),
+      L('f', { no: 4 }),
+      L('z', { no: 5, qty: 0 }),
+    ], ''));
+    const cs = checks(
+      C('a', 2, 'x'),
+      C('b', 2, 'x'), C('c', 1),
+      C('d', 0), C('e', 1),
+    );
+    expect(productTally(ps, cs)).toEqual({
+      products: 4, done: 1, partial: 1, absent: 1, open: 1, units: 12, counted: 4,
+    });
   });
 });

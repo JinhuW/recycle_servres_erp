@@ -2,6 +2,7 @@
 import { precacheAndRoute, createHandlerBoundToURL } from 'workbox-precaching';
 import { registerRoute, NavigationRoute } from 'workbox-routing';
 import { NetworkOnly } from 'workbox-strategies';
+import { shellNavigationAllowlist } from './lib/shellPaths';
 
 declare const self: ServiceWorkerGlobalScope & {
   __WB_MANIFEST: Array<{ url: string; revision: string | null }>;
@@ -9,9 +10,13 @@ declare const self: ServiceWorkerGlobalScope & {
 
 precacheAndRoute(self.__WB_MANIFEST);
 
-// SPA fallback to /index.html, but never for backend surfaces or the
-// share-target POST (handled as a fetch event below).
+// SPA fallback to /index.html — only for the shell's own paths, the same list
+// the Cloudflare Worker serves it for. Any other navigation goes to the
+// network and gets the Worker's 404, rather than the cached shell rendering
+// whatever the hash names under a dead URL (RS-167). /share-target stays
+// denied: its POST is handled as a fetch event below.
 const navRoute = new NavigationRoute(createHandlerBoundToURL('/index.html'), {
+  allowlist: shellNavigationAllowlist(),
   denylist: [/^\/api\//, /^\/oauth\//, /^\/\.well-known\//, /^\/share-target$/],
 });
 registerRoute(navRoute);

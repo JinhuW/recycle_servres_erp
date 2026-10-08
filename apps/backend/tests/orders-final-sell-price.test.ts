@@ -8,7 +8,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
-import { createSellOrderOn } from './helpers/fixtures';
+import { createSellOrderOn, signOffAll } from './helpers/fixtures';
 
 type Line = {
   id: string; status: string; qty: number;
@@ -52,6 +52,7 @@ async function lineOf(id: string, token: string, lineId: string): Promise<Line> 
 
 async function moveSellOrder(mgr: string, soId: string, to: string): Promise<void> {
   const body = to === 'Closed' ? { to, note: 'x', closeReasonId: 'customer_cancelled' } : { to, note: 'x' };
+  if (to === 'Done') await signOffAll(soId);
   expect((await api('POST', `/api/sell-orders/${soId}/status`, { token: mgr, body })).status).toBe(200);
 }
 

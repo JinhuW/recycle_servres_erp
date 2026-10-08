@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSPr
 import { Icon } from '../../components/Icon';
 import { ListSkeleton } from '../../components/Skeleton';
 import { api } from '../../lib/api';
+import { disputeLadder } from '../../lib/disputeLadder';
 import { handleFetchError } from '../../lib/errorToast';
 import { fmtDate, fmtDateShort, fmtMoney, fmtSigned, fmtUSD, relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
@@ -114,9 +115,6 @@ type Dispute = {
   sellerResponseDueAt: string | null;
   timeline: DisputeEvent[];
 };
-
-// PayPal's own ladder. A case enters at INQUIRY and only climbs.
-const DISPUTE_STAGES = ['INQUIRY', 'CHARGEBACK', 'PRE_ARBITRATION', 'ARBITRATION'] as const;
 
 // The missing app permission is one cause of a dispute-sync failure, and it is
 // the only one an admin can act on — but a timeout or a 502 stored the same way
@@ -1310,11 +1308,11 @@ function NoteEditor({ row, locale, act, onToast }: {
 // expanding a transaction costs no round trip.
 function DisputeDetail({ dispute: d, locale }: { dispute: Dispute; locale: string }) {
   const { t } = useT();
-  const stageIdx = DISPUTE_STAGES.indexOf(d.lifeCycleStage as (typeof DISPUTE_STAGES)[number]);
   // Ours is the buyer clock; the seller's shows when it is the one running,
   // because "waiting on them" is as much of an answer as "waiting on us".
   const due = d.buyerResponseDueAt ?? d.sellerResponseDueAt;
   const live = disputeLive(d);
+  const ladder = disputeLadder(d.lifeCycleStage, !live);
   // Every amount in this card is the case's currency, not ours — a EUR claim
   // rendered with a '$' misstates money we are trying to recover. The timeline
   // borrows it: a fund movement carries its own currency_code on the wire, but
@@ -1345,17 +1343,24 @@ function DisputeDetail({ dispute: d, locale }: { dispute: Dispute; locale: strin
 
       {/* The stage ladder. Divs, not buttons: .so-step is written for a stepper
           you click through, and there is nothing here to click. */}
-      {stageIdx >= 0 && (
+      {ladder && (
         <div className="so-stepper">
-          {DISPUTE_STAGES.map((stage, i) => (
-            <Fragment key={stage}>
-              {i > 0 && <span className={'so-step-bar' + (i <= stageIdx ? ' reached' : '')} />}
+          {ladder.map(({ key, state }, i) => (
+            <Fragment key={key}>
+              {/* A bar wears the step it leads into. */}
+              {i > 0 && (
+                <span
+                  className={'so-step-bar' + (state === 'skipped' ? ' skipped' : state === 'ahead' ? '' : ' reached')}
+                />
+              )}
               <div
-                className={'so-step' + (i < stageIdx ? ' reached' : i === stageIdx ? ' active' : '')}
+                className={'so-step' + (state === 'ahead' ? '' : ' ' + state)}
                 style={{ cursor: 'default' }}
               >
-                <span className="so-step-dot">{i + 1}</span>
-                <span className="so-step-label">{disputeLabel(t, stage)}</span>
+                <span className="so-step-dot">{key === 'CLOSED' ? '\u2713' : i + 1}</span>
+                <span className="so-step-label">
+                  {key === 'CLOSED' ? t('payDisputeStageClosed') : disputeLabel(t, key)}
+                </span>
               </div>
             </Fragment>
           ))}

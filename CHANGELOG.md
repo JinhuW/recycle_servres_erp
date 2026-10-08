@@ -17,6 +17,242 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.227.2] - 2026-10-08
+
+Fixes from the reviews before the v1.227 release (RS-203). `/code-review high`
+of dev against main, and of RS-202 once it landed mid-review, came back with
+ten findings each. Each was checked against the code, and three were defects.
+The rest are recorded in the ticket with why they stay as they are.
+
+### Fixed
+
+- **The approve question judges the payment the same click links.** On the
+  desktop PO page, approving a PO (into Ready to Pay or Done) asks *Continue
+  anyway?* when the bank paid something other than the total cost (RS-200).
+  It read the paid figure as the page loaded it. But a PayPal id typed on the
+  page is reconciled inside the save, and a switch to Cash unlinks the old
+  payment. A $70 PO approved together with a new id for a $2,415 payment went
+  to Ready to Pay unasked, and correcting a wrong id raised a false alarm.
+  When the same click edits the Cost Payment section, the page now writes the
+  edits, reads what the bank paid, and asks then. On that path Cancel keeps the
+  edits and drops only the move, and the page reloads with the banner up.
+  Every other approve still asks before anything is written.
+- **A move refused after the edits were written leaves a clean page.** A stage
+  click saves the page's other edits first (RS-202). If the move then didn't
+  land because the take-over's second question was cancelled, the page kept
+  offering the saved edits as unsaved: the footer listed them, Escape asked to
+  discard them, and the next click sent them again. It now reloads onto them,
+  as a plain save would.
+- **Cancelling a *Move back* keeps the look-back open.** The stage it was
+  reading closed even when the move was cancelled or refused.
+
+## [1.227.1] - 2026-10-08
+
+A stage move on the desktop PO page is saved on the click (RS-202). Since
+RS-080 (v1.160.0), *Mark as Reviewing* only staged the move. The page then
+read *Status will change from In Transit to Reviewing when you save*, and the
+footer asked for the same move again as *Save · Mark as Reviewing*. Meanwhile
+the Next step card already offered *Mark as Ready to Pay* for a stage that had
+not been saved. The phone and the Draft hand-off already saved on the click.
+
+### Fixed
+
+- **One click moves the order.** *Mark as ‹stage›*, the stepper's next step,
+  a finished stage's *Move back* and the Done dialog's Confirm all save the
+  move. The page reloads on the new stage. The staged-move banner, the *Moves
+  to … on save · Undo* pill and the *Save · Mark as* label are gone. The move
+  still goes through Save, so the take-over question, the payment-mismatch
+  confirm (RS-200) and every save check still apply. Other unsaved edits are
+  saved in the same click: a plain desktop Save goes back to the PO list, so
+  asking the manager to save first would take them off the PO in the middle
+  of a review.
+- **A move that is cancelled or refused is taken back.** Cancelling the
+  take-over or mismatch question, a save blocker, or a server refusal leaves
+  the page on the stage the order is at. Before, the move stayed staged, and
+  the next click became a two-stage jump.
+- **A move on its own is just `/advance`.** Before, a staged move PATCHed
+  every line again, even though the server ignores a line's `status` there.
+  So an untouched incomplete legacy line could refuse the move with *Can't
+  save yet*. Saves now write and check only the lines that were edited, and
+  the duplicate-part prompt only appears when lines were edited.
+
+## [1.227.0] - 2026-10-08
+
+Pack mode is laid out like the PO's Review mode, and a product picked from
+several PO lots folds into one row (RS-199). Pack mode was a card list with
+one big row per sell line and a bar at the bottom. Since RS-193 the lines of
+one product share a #, so a product from three lots read as three `#3` rows.
+Jinhu finds Review mode's layout clearer.
+
+### Changed
+
+- **Review mode's layout.** Pack mode now has a page head, a progress card, a
+  table with the scan box over it, and a side panel. The panel shows the
+  selected row (photo, part, From PO, warehouse, count, serials) above a
+  **Finish** card. The Finish card says what is left, lists lots packed short
+  or at 0 with Edit order, and holds Mark shipped. The bottom bar is gone, and
+  Undo moves to a toast. ↑ / ↓ move the selection and Space packs it; no letter
+  is a shortcut, so typing still starts the scan box's filter.
+- **One row per product.** A product from two or more lots is a fold row:
+  its #, part, specs, its lots' PO tags and the summed count. It starts
+  closed. Opening it lists each lot with its photo, count and tick. Ticking
+  the product packs every lot still at full count. A lowered lot waits for
+  its own tick, and the fold opens to show it. Ticking a fully packed product
+  unpacks it, and one Undo reverses either. Rows still never move: packed
+  rows dim in place, in # order.
+- **Progress counts products**, the rows the packer sees, with units beside.
+- A lot held at 0 is left out of its product, as the packing lists leave it
+  out. A product whose lots are all 0 keeps one greyed row for its #.
+- A scan that could be several lots opens their products and highlights the
+  lots. The type-to-filter keeps a product whole and holds its fold open
+  while a lot in it matches.
+- On an iPad the two columns hold from 1024px wide. Both landscape iPads
+  (1080 and 1180) keep the side panel. Portrait puts Finish under the list
+  and hides the selected-item card.
+
+## [1.226.0] - 2026-10-08
+
+A sell order now needs every manager's sign-off before it can be marked Done
+(RS-198). Done is the step with consequences: it consumes stock, records
+market prices from the line prices, settles the source POs and starts their
+commission. Until now one manager could take an order there without anyone
+else looking at the deal.
+
+### Added
+
+- **A Sign-off card on the sell order page**, under the order summary. It
+  lists every active manager as signed (with when), waiting, or needing to
+  sign again, with a count such as "1 of 2 signed". The viewer's own row
+  carries **Sign off**, **Sign again** or **Withdraw**. Signing is open in
+  Draft, Shipped and Awaiting payment; a Done order keeps its sign-offs as the
+  record of who approved it.
+- **Done is refused until every active manager has signed** — the API answers
+  409 naming who is missing, and the edit page's stepper locks its Done step
+  with the same names. Signing only unlocks Done: a manager still moves the
+  order there, so the Done evidence dialog runs as before. A deactivated
+  manager stops being required; a new one is required from then on.
+- **A sign-off approves the order as it stood.** Changing the customer, the
+  currency, or any line's item, qty, native price or lot — in the editor,
+  through a negotiated total, or by a PO archive taking a line off — leaves
+  earlier sign-offs reading "needs to sign again". Notes, the payment
+  receiver, warehouse moves and evidence don't. The edit page says so before
+  the save ("Saving these changes clears the sign-offs") and keeps Done locked
+  until it's re-signed. Each sign-off stores a fingerprint of what was
+  approved, so no code that edits an order has to remember to clear them.
+  Signing sends back the fingerprint the page read, so an edit that lands
+  between a manager's review and their click is refused ("this sell order
+  changed since you opened it") rather than signed unseen.
+- Signing and withdrawing appear in the order's history, and a sign-off sends
+  the managers still to sign a notification. Reopening a Closed order clears
+  its sign-offs.
+## [1.225.0] - 2026-10-08
+
+A manager approving a PO for payment is told when the bank paid something
+other than what the PO says it cost (RS-200). The net of the linked bank
+payments was already on the PO list's Payment cell, but nothing set it
+against the cost. In prod, 13 of the 46 POs with linked payments disagreed,
+one by $54,388.
+
+### Added
+
+- **A warning banner in Review mode and on the desktop PO page.** It appears
+  when a company-paid PO's linked payments, refunds subtracted, differ from
+  goods + other fees by a cent or more, and names both figures and the
+  difference, with *Open Payments*.
+  - In Review mode the comparison is against the total after Approve has set
+    0-counted lines to 0.
+  - On the PO page the comparison is against the live cost, so a fee typed
+    to cover the gap clears the banner before Save.
+- **Approving asks first.** Review mode's *Approve for payment*, and a PO-page
+  Save that moves the PO into Ready to Pay or Done from an earlier stage,
+  open *Payment doesn't match PO-n's total cost* with Cancel and *Continue
+  anyway*.
+  - Cancel writes nothing, not even the zeroed lines.
+  - Cancel holds the focus, because Review mode is driven by label scanners
+    that end each read with Enter.
+- **`GET /api/orders/:id` carries `linkedPaid` for managers.** Non-managers,
+  and a manager previewing as purchaser, get no key at all, as on the list.
+
+### Changed
+
+- The "what the bank paid" subquery was copied in the PO list and the
+  payment matcher. It is now one fragment, `linkedPaidFrag` in
+  `banktx/match.ts`, which the detail endpoint shares.
+
+## [1.222.0] - 2026-10-08
+
+Review mode and Pack mode find a line from any part of its part number
+(RS-197). Their scan box was built for a label scanner and matched only an
+exact part number, a prefix of six or more characters, or an exact serial. A
+manager who typed what they could read off a stick, such as `4K40` or
+`HMA84`, was told the part wasn't on the order.
+
+### Added
+
+- **The scan box filters the list as you type.** After a short pause the list
+  narrows to the lines whose part number holds the text anywhere, ignoring
+  separators and case. A label that extends a part number, and a serial
+  recorded on a line, keep that line too. A scanner's burst ends in Enter
+  inside the pause, so scanning never flashes a filter.
+- **Enter ticks (or packs) the line when the text names one part.** The exact
+  part number, the prefix and the serial still come first, so a scan lands
+  where it always did. A fragment that fits several part numbers ticks
+  nothing: the text and its filtered list stay up for the manager to pick
+  from, the box lets go so the arrow keys work, and the message names the
+  parts (the first five, then a count).
+- **Clearing the filter.** A × button in the box clears it, and so does
+  Escape: inside the box it clears the text before it blurs, and on the page
+  a leftover filter goes before the page does.
+
+### Changed
+
+- *Check all remaining* is disabled while a filter is up. It ticks the whole
+  PO, which a filter would hide most of. Counts, progress, Approve, Mark
+  shipped and Finish review never see the filter.
+- Pack mode's filter searches the whole order, as Enter does, even with a
+  *Packing from* warehouse picked. A typed fragment therefore never hides the
+  line Enter would pack.
+- Pack mode no longer guesses a lot when a fragment fits one part held on
+  several lots. It used to re-derive "was this a part-number scan" from the
+  prefix rules, so a fragment hit would have packed one lot on a guess. It now
+  asks whether the scan spells the hit's serial.
+
+## [1.221.2] - 2026-10-08
+
+A closed PayPal dispute looks closed (RS-195). The stage ladder on an expanded
+disputed payment was drawn from PayPal's lifecycle stage alone, and PayPal
+leaves that stage wherever the case was decided — every resolved case in prod
+reads *claim*. So a case refunded to us a week ago still showed Claim as the
+step in progress, with pre-arbitration and arbitration ahead of it.
+
+### Fixed
+
+- **A resolved case's ladder ends on ✓ Closed.** The stages it went through
+  stay grey, the ones it never reached are dimmed behind dashed bars, and the
+  Closed step is the highlighted one. Open cases are drawn as before. The
+  ladder's states now come from one tested helper, `lib/disputeLadder.ts`.
+
+## [1.221.1] - 2026-10-08
+
+Unknown paths return 404 (RS-167). The app is hash-routed, but the Cloudflare
+Worker answered every path it had no file for with `index.html`, and the hash
+then chose the screen — so `/vnc/homelab-1#/fleet`, a URL that only exists on
+rs-console, rendered the ERP's Fleet page as though it were valid.
+
+### Fixed
+
+- **A path that isn't a page of ours is a 404.** The Worker now serves the
+  app shell only at the paths it actually lives at — `/`, `/authorize`,
+  `/login` (the OAuth sign-in bounce), `/share-target` and the PWA shortcuts `/submit`, `/inventory`,
+  `/sell-orders` — and answers everything else with a small "Page not found"
+  page (status 404) linking back to the dashboard. Static files and `/api/*`
+  are unchanged.
+- **Installed clients agree.** The service worker's navigation fallback used to
+  serve its cached `index.html` for any path, which would have kept the bug
+  alive on every PWA. It now uses the same allowlist
+  (`apps/frontend/src/lib/shellPaths.ts`, imported by both), so other
+  navigations reach the Worker and get its 404.
+
 ## [1.221.0] - 2026-10-08
 
 Fixes from the pre-release review of dev against main (RS-194), most of them

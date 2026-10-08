@@ -1,33 +1,37 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { parseSerials } from '@recycle-erp/shared';
 import { Icon } from '../../components/Icon';
 import { ImageLightbox } from '../../components/ImageLightbox';
 import { LineSpecChips, lineHasSpecChips } from '../../components/LineSpecChips';
 import { StatusChangeDialog, type StatusAttachment } from '../../components/StatusChangeDialog';
 import { api, ApiError, rawFetch } from '../../lib/api';
 import {
-  countOf, emptyCheck, isAbsentChecked, isShortChecked, lineState, tally, type LineCheck,
+  countOf, emptyCheck, filterScan, isAbsentChecked, isShortChecked, lineState, partsNamed, type LineCheck,
 } from '../../lib/boxCheck';
 import { handleFetchError, showErrorDialog, showWarnToast } from '../../lib/errorToast';
 import { useT } from '../../lib/i18n';
 import { sellOrderStatuses } from '../../lib/lookups';
 import { navigate, navigateBack } from '../../lib/route';
 import {
-  isPackable, packBody, packScan, packView, packWarehouseOf, packWarehouseOptions, shipBlockers, sourceTag,
-  toCheck, UNASSIGNED, type PackLine, type PackResponse,
+  isPackable, packBody, packProducts, packScan, packView, packWarehouseOf, packWarehouseOptions, productSummary,
+  productTally, productTick, shipBlockers, sourceTag, toCheck, UNASSIGNED,
+  type PackLine, type PackProduct, type PackResponse,
 } from '../../lib/sellOrderPack';
 import type { Category } from '../../lib/types';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { useLineSaveQueue } from '../../lib/useLineSaveQueue';
+import { useScanFilterText } from '../../lib/useScanFilter';
 
-// Pack mode: a sell order as a packing checklist, built for an iPad on a cart.
-// Lines run in the order's own list order, each led by its # on the order —
-// the number the packer writes on the item's label and the receiver checks
-// the box by — and each names the lot it comes from (From PO-1111 #1). A
-// ticked line stays in its place, so the list always reads #1 to #n. Counts
-// start full and are lowered only when the shelf is short, as in the PO's
-// Review mode; a line held at 0 keeps its # but has nothing to pack. Each line
-// shows its lot's photo, so the packer matches the item by eye
-// (user-requested 2026-10-07).
+// Pack mode: a sell order as a packing checklist, laid out like the PO's
+// Review mode and built for an iPad on a cart. Products run in the order's own
+// list order, each led by its # on the order — the number the packer writes on
+// the item's label and the receiver checks the box by. A product picked from
+// several lots folds them under one row: ticking the row packs every lot at
+// its full count, and opening it shows each lot (From PO-1111 #1) with its own
+// count and tick. A ticked row stays in its place, so the list always reads #1
+// to #n (user-requested 2026-10-07, kept 2026-10-08). Counts start full and
+// are lowered only when the shelf is short; a lot held at 0 has nothing to
+// pack.
 
 type OrderLine = {
   id: string;
@@ -63,7 +67,8 @@ type PackOrder = {
 };
 
 type Line = OrderLine & PackLine;
-type Undo = { prev: LineCheck; msg: string };
+type Product = PackProduct<Line>;
+type Undo = { prev: LineCheck[]; msg: string };
 type ScanMsg = { tone: 'muted' | 'pos' | 'warn' | 'neg'; text: string };
 
 type Props = {
@@ -73,6 +78,10 @@ type Props = {
 
 const toneFor = (s: string) => sellOrderStatuses.find(o => o.id === s)?.tone ?? 'muted';
 const pnOf = (l: Line) => l.partNumber ?? l.label;
+// A row is a lot (its line id) or a folded product's head row.
+const prodKey = (no: number) => 'p:' + no;
+const rowElId = (key: string) => (key.startsWith('p:') ? 'pk-prod-' + key.slice(2) : 'pk-row-' + key);
+const COLS = 6;
 
 export default function DesktopSellOrderPack({ id, onToast }: Props) {
   const { t } = useT();
@@ -87,6 +96,9 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   const [scanMsg, setScanMsg] = useState<ScanMsg | null>(null);
   // Lines a part-number scan could have meant, waiting for a tap.
   const [choose, setChoose] = useState<ReadonlySet<string>>(new Set());
+  // Folded products the packer opened, by #.
+  const [open, setOpen] = useState<ReadonlySet<number>>(new Set());
+  const [selected, setSelected] = useState<string | null>(null);
   const [shipping, setShipping] = useState(false);
   const [busy, setBusy] = useState(false);
   const [zoom, setZoom] = useState<string | null>(null);
@@ -157,31 +169,84 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   const warehouses = useMemo(() => packWarehouseOptions(lines), [lines]);
   // A picked warehouse the order no longer has (a line was moved) falls back to all.
   const picked = warehouses.includes(wh) ? wh : '';
-  const rows = useMemo(() => packView(lines, picked), [lines, picked]);
-  const shownPackable = useMemo(() => rows.map(r => r.line).filter(isPackable), [rows]);
-  const sum = useMemo(() => tally(shownPackable, checks), [shownPackable, checks]);
-  const blockers = useMemo(() => shipBlockers(lines, checks), [lines, checks]);
+  const allProducts = useMemo(() => packProducts(packView(lines, '')), [lines]);
+  const products = useMemo(() => packProducts(packView(lines, picked)), [lines, picked]);
+  const productByNo = useMemo(() => new Map(allProducts.map(p => [p.no, p])), [allProducts]);
   const lineNo = useMemo(() => new Map(lines.map((l, i) => [l.id, l.no ?? i + 1])), [lines]);
+  // Typing narrows the list once it pauses. The filter searches the whole
+  // order, packable lines only, as Enter does, so it never hides the line
+  // Enter would pack; a product holding a match shows whole, opened. It
+  // changes only what is listed — progress and Mark shipped read `products`
+  // and `lines`.
+  const filterText = useScanFilterText(scan);
+  const fit = useMemo(() => {
+    const hits = filterScan(lines.filter(isPackable), filterText);
+    return hits ? new Set(hits.map(l => l.id)) : null;
+  }, [lines, filterText]);
+  const listed = useMemo(
+    () => (fit ? allProducts.filter(p => p.lots.some(l => fit.has(l.id))) : products),
+    [fit, allProducts, products],
+  );
+  const sum = useMemo(() => productTally(products, checks), [products, checks]);
+  const whole = useMemo(() => productTally(allProducts, checks), [allProducts, checks]);
+  const blockers = useMemo(() => shipBlockers(lines, checks), [lines, checks]);
   const canShip = ready && isDraft && lines.some(isPackable)
     && blockers.open === 0 && blockers.short === 0 && blockers.zero === 0;
 
+  const folds = (p: Product) => p.lots.length > 1;
+  // Opened by the packer, or held open while the filter has a match in it.
+  const forcedOpen = (p: Product) => !!fit && p.lots.some(l => fit.has(l.id));
+  const isOpen = (p: Product) => folds(p) && (open.has(p.no) || forcedOpen(p));
+  const keysOf = (p: Product) => (folds(p) ? [prodKey(p.no), ...(isOpen(p) ? p.lots.map(l => l.id) : [])] : [p.head.id]);
+  const visibleKeys = listed.flatMap(keysOf);
+  const selKey = selected && visibleKeys.includes(selected) ? selected : visibleKeys[0] ?? null;
+  const productOf = (lineId: string) => productByNo.get(lineNo.get(lineId) ?? -1) ?? null;
+  // The row a line shows on: its own, or its product's while folded.
+  const rowKeyOf = (lineId: string) => {
+    const p = productOf(lineId);
+    return p && folds(p) && !isOpen(p) ? prodKey(p.no) : lineId;
+  };
+
+  const showWh = warehouses.length > 1 && (!!fit || !picked);
   const whName = (w: string | null) => (w === null || w === UNASSIGNED ? t('sodNoWarehouse') : w);
   const fromText = (l: Line) => {
     const tag = sourceTag(l);
     if (!tag) return t('pkTypedIn');
     return tag.no != null ? t('pkFromPoLine', { po: tag.po, n: tag.no }) : t('pkFromPo', { po: tag.po });
   };
+  const lotTag = (l: Line) => {
+    const tag = sourceTag(l);
+    if (!tag) return t('pkNoPo');
+    return tag.no != null ? `${tag.po} #${tag.no}` : tag.po;
+  };
+  const lotTags = (lots: readonly Line[]) => {
+    const shown = lots.slice(0, 2).map(lotTag).join(', ');
+    return lots.length > 2 ? `${shown} ${t('pkSourcesMore', { n: lots.length - 2 })}` : shown;
+  };
   const checkOf = (lineId: string) => checks.get(lineId) ?? emptyCheck(lineId, lineById.get(lineId)?.qty ?? 0);
 
   const exit = () => navigateBack('/sell-orders/' + id);
   // Escape joins the app's layer stack, so the Shipped dialog closes first.
-  useEscapeKey(exit);
+  // Text left in the scan box goes before the page does: an ambiguous scan
+  // leaves its filter up with the box blurred.
+  useEscapeKey(() => { if (scan) setScan(''); else exit(); });
 
   const flashUndo = (u: Undo) => {
     setUndo(u);
     if (undoTimer.current) clearTimeout(undoTimer.current);
     undoTimer.current = setTimeout(() => setUndo(null), 5000);
   };
+
+  const setFold = (no: number, to: boolean) => {
+    setOpen(prev => {
+      const next = new Set(prev);
+      if (to) next.add(no); else next.delete(no);
+      return next;
+    });
+    // A lot can't stay selected inside a fold that closed over it.
+    if (!to && selKey && !selKey.startsWith('p:') && lineNo.get(selKey) === no) setSelected(prodKey(no));
+  };
+  const openFolds = (nos: Iterable<number>) => setOpen(prev => new Set([...prev, ...nos]));
 
   // The stepper only changes the number. Lowering a packed line takes the
   // tick away, so a short pick is always confirmed by a tick made after it.
@@ -197,7 +262,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     const prev = checkOf(l.id);
     save({ ...prev, checkedAt: new Date().toISOString() });
     setChoose(new Set());
-    flashUndo({ prev, msg: t('pkPackedToast', { pn: pnOf(l), n: countOf(l, prev), of: l.qty }) });
+    flashUndo({ prev: [prev], msg: t('pkPackedToast', { pn: pnOf(l), n: countOf(l, prev), of: l.qty }) });
   };
 
   const toggle = (l: Line) => {
@@ -205,52 +270,93 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     const c = checkOf(l.id);
     if (lineState(l, c) === 'done') {
       save({ ...c, checkedAt: null });
-      flashUndo({ prev: c, msg: t('pkUnpackedToast', { pn: pnOf(l) }) });
+      flashUndo({ prev: [c], msg: t('pkUnpackedToast', { pn: pnOf(l) }) });
       return;
     }
     pack(l);
   };
 
+  const toggleProduct = (p: Product) => {
+    if (!ready) return;
+    const plan = productTick(p.lots, checks);
+    const pn = pnOf(p.head);
+    setChoose(new Set());
+    if (plan.untick.length) {
+      const prev = plan.untick.map(l => checkOf(l.id));
+      prev.forEach(c => save({ ...c, checkedAt: null }));
+      flashUndo({ prev, msg: t('pkUnpackedToast', { pn }) });
+      return;
+    }
+    if (plan.left.length) {
+      setFold(p.no, true);
+      setScanMsg({ tone: 'warn', text: t('pkProductLeft', { pn, n: plan.left.length }) });
+    }
+    if (!plan.tick.length) return;
+    const now = new Date().toISOString();
+    const prev = plan.tick.map(l => checkOf(l.id));
+    prev.forEach(c => save({ ...c, checkedAt: now }));
+    flashUndo({ prev, msg: t('pkPackedLotsToast', { pn, n: plan.tick.length, of: p.lots.length }) });
+  };
+
+  const toggleKey = (key: string) => {
+    if (key.startsWith('p:')) {
+      const p = productByNo.get(Number(key.slice(2)));
+      if (p) toggleProduct(p);
+      return;
+    }
+    const l = lineById.get(key);
+    if (l && isPackable(l)) toggle(l);
+  };
+
   const undoLast = () => {
     if (!undo || !ready) return;
-    save(undo.prev);
+    undo.prev.forEach(save);
     setUndo(null);
   };
 
-  const scrollTo = (lineId: string) =>
-    requestAnimationFrame(() => document.getElementById('pk-row-' + lineId)?.scrollIntoView({ block: 'nearest' }));
+  const scrollTo = (key: string) =>
+    requestAnimationFrame(() => document.getElementById(rowElId(key))?.scrollIntoView({ block: 'nearest' }));
 
   // ── Scanner: a Bluetooth or USB scanner types the label and presses Enter.
   const onScan = (raw: string) => {
     const text = raw.trim();
-    setScan('');
-    if (scanFromPage.current) {
+    const m = text && ready ? packScan(lines, checks, text) : null;
+    // Text that fits several parts stays, and with it the list it narrowed to,
+    // to pick from. The box lets go of it, so the next scan replaces it rather
+    // than running on from it.
+    const ambiguous = m !== null && 'ambiguous' in m;
+    if (!ambiguous) setScan('');
+    if (scanFromPage.current || ambiguous) {
       scanFromPage.current = false;
       scanRef.current?.blur();
     }
     if (!text || !ready) return;
     setChoose(new Set());
-    const m = packScan(lines, checks, text);
     if (!m) {
       setScanMsg({ tone: 'neg', text: t('pkScanNoMatch', { pn: text, id }) });
       return;
     }
     if ('ambiguous' in m) {
-      setScanMsg({ tone: 'neg', text: t('pkScanAmbiguous', { pn: text, pns: m.ambiguous.join(', ') }) });
+      setScanMsg({ tone: 'neg', text: t('pkScanAmbiguous', { pn: text, pns: partsNamed(m.ambiguous, t) }) });
       return;
     }
     if ('choose' in m) {
+      // The candidates can sit in several products, and in another warehouse.
       setChoose(new Set(m.choose.map(l => l.id)));
+      openFolds(m.choose.map(l => lineNo.get(l.id) ?? -1));
       setScanMsg({ tone: 'warn', text: t('pkScanChoose', { pn: text, n: m.choose.length, lots: m.choose.map(l => `#${lineNo.get(l.id)} ${fromText(l)}`).join(', ') }) });
       if (picked && m.choose.some(l => packWarehouseOf(l) !== picked)) setWh('');
+      setSelected(m.choose[0]!.id);
       scrollTo(m.choose[0]!.id);
       return;
     }
     const hit = m.line;
     const c = checks.get(hit.id);
+    const key = rowKeyOf(hit.id);
+    setSelected(key);
     if (countOf(hit, c) === 0) {
       setScanMsg({ tone: 'neg', text: t('pkScanZero', { pn: pnOf(hit) }) });
-      scrollTo(hit.id);
+      scrollTo(key);
       return;
     }
     if (lineState(hit, c) === 'done') {
@@ -259,11 +365,11 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     }
     setScanMsg({ tone: 'pos', text: t('pkScanPacked', { pn: pnOf(hit) }) });
     pack(hit);
-    scrollTo(hit.id);
+    scrollTo(key);
   };
 
-  // A scanner types into whatever has focus. Its first character starts the
-  // scan in the box; the rest then follows it there.
+  // ── Keyboard. Arrows, Space and / only: every other key a scanner or a
+  // person types starts the scan box, which filters as it fills.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // The photo viewer isn't an aria-modal dialog, so it is named here.
@@ -271,10 +377,36 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
       const target = e.target as HTMLElement | null;
       if (target?.closest('input, textarea, select')) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === '/') {
-        e.preventDefault();
-        scanRef.current?.focus();
-        return;
+      const move = (d: number) => {
+        const i = selKey ? visibleKeys.indexOf(selKey) : -1;
+        const next = visibleKeys[Math.max(0, Math.min(visibleKeys.length - 1, i + d))];
+        if (!next) return;
+        setSelected(next);
+        scrollTo(next);
+      };
+      const foldOf = (key: string) => productByNo.get(key.startsWith('p:') ? Number(key.slice(2)) : lineNo.get(key) ?? -1);
+      switch (e.key) {
+        case 'ArrowDown': e.preventDefault(); move(1); return;
+        case 'ArrowUp': e.preventDefault(); move(-1); return;
+        case 'ArrowRight':
+        case 'ArrowLeft': {
+          const p = selKey ? foldOf(selKey) : undefined;
+          if (!p || !folds(p)) return;
+          e.preventDefault();
+          setFold(p.no, e.key === 'ArrowRight');
+          return;
+        }
+        case ' ':
+          // Buttons outside the list (Mark shipped) keep their own Space.
+          if (target?.closest('button') && !target.closest('.pk-table')) return;
+          e.preventDefault();
+          if (target?.closest('button')) target.blur();
+          if (selKey) toggleKey(selKey);
+          return;
+        case '/':
+          e.preventDefault();
+          scanRef.current?.focus();
+          return;
       }
       if (ready && e.key.length === 1 && e.key.trim()) {
         e.preventDefault();
@@ -316,110 +448,216 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     exit();
   };
 
-  const row = (l: Line, no: number) => {
-    const c = checkOf(l.id);
-    const state = lineState(l, c);
-    const n = countOf(l, c);
-    const pn = pnOf(l);
-    const packable = isPackable(l);
-    // Condition stays in the meta row, so the SSD/HDD chips don't repeat it.
+  // ── Rows
+  // A product shows the first lot with a photo, as the packing list does.
+  const photoOf = (p: Product) => p.lots.find(l => l.imageUrl) ?? p.head;
+  const thumb = (l: Line) => (l.imageUrl ? (
+    <button type="button" className="pk-thumb" aria-label={t('pkPhoto', { pn: pnOf(l) })} onClick={() => setZoom(l.imageUrl!)}>
+      <img src={l.imageUrl} alt="" loading="lazy" decoding="async" />
+    </button>
+  ) : (
+    // Same footprint, so the items stay in one column.
+    <span className="pk-thumb pk-thumb-none" aria-hidden="true">
+      <Icon name={l.category === 'RAM' ? 'chip' : 'drive'} size={18} />
+    </span>
+  ));
+
+  const itemCell = (l: Line, meta: ReactNode) => {
+    // Condition has its own column, so the SSD/HDD chips don't repeat it.
     const chipLine = { ...l, condition: null };
     return (
-      <li
-        key={l.id}
-        id={'pk-row-' + l.id}
-        className={'pk-row ' + (packable ? 'pk-' + state : 'pk-zero')
-          + (isShortChecked(l, c) ? ' pk-done-short' : '')
-          + (isAbsentChecked(l, c) ? ' pk-done-zero' : '')
-          + (choose.has(l.id) ? ' pk-choose' : '')}
-      >
-        <div className="pk-tag" title={t('pkLineTitle', { n: no, id })}>
-          <span className="pk-tag-po">{id}</span>
-          <span className="pk-tag-no">#{no}</span>
+      <td className="pk-item-cell">
+        <div className="bc-pn mono">{pnOf(l)}</div>
+        <div className="bc-spec">
+          {l.partNumber && <span>{l.label}</span>}
+          {lineHasSpecChips(chipLine, true) ? <LineSpecChips line={chipLine} withType /> : l.sub && <span>{l.sub}</span>}
         </div>
-        {l.imageUrl ? (
-          <button
-            type="button" className="pk-photo" aria-label={t('pkPhoto', { pn })}
-            onClick={() => setZoom(l.imageUrl!)}
-          >
-            <img src={l.imageUrl} alt="" loading="lazy" decoding="async" />
-          </button>
-        ) : (
-          // Same footprint, so the items stay in one column.
-          <div className="pk-photo pk-photo-none" aria-hidden="true"><Icon name="image" size={20} /></div>
-        )}
-        <div className="pk-item">
-          <div className="pk-label">{l.label}</div>
-          {lineHasSpecChips(chipLine, true)
-            ? <LineSpecChips line={chipLine} withType />
-            : l.sub && <div className="pk-sub">{l.sub}</div>}
-          <div className="pk-meta">
-            <span className="mono">{l.partNumber ?? '—'}</span>
-            {l.condition && <span>{l.condition}</span>}
-            <span className="mono pk-from">{fromText(l)}</span>
-            {!picked && warehouses.length > 1 && <span>{whName(packWarehouseOf(l))}</span>}
-          </div>
+        <div className="pk-meta">
+          {meta}
+          {l.condition && <span className="pk-cond-inline">{l.condition}</span>}
         </div>
-        {packable ? (
-          <div className="pk-ctrl">
-            <div className="pk-count-wrap">
-              <div className="pk-step">
-                <button
-                  type="button" className="pk-step-btn" aria-label={t('pkLess')}
-                  disabled={!ready || n === 0} onClick={() => setCount(l, n - 1)}
-                >
-                  <Icon name="minus" size={18} />
-                </button>
-                <span className="pk-count mono"><b>{n}</b><span> / {l.qty}</span></span>
-                <button
-                  type="button" className="pk-step-btn" aria-label={t('pkMore')}
-                  disabled={!ready || n >= l.qty} onClick={() => setCount(l, n + 1)}
-                >
-                  <Icon name="plus" size={18} />
-                </button>
-              </div>
-              {n === 0
-                ? <span className="pk-flag neg">{t('pkZeroTag')}</span>
-                : n < l.qty && <span className="pk-flag warn">{t('pkShortTag')}</span>}
-            </div>
-            <button
-              type="button"
-              className="pk-tick"
-              aria-pressed={state === 'done'}
-              aria-label={t(state === 'done' ? 'pkUnpackLine' : 'pkPackLine', { pn })}
-              disabled={!ready}
-              onClick={() => toggle(l)}
-            >
-              <Icon name="check" size={26} stroke={3} />
-            </button>
-          </div>
-        ) : (
-          <div className="pk-zero-note">{t('pkZeroLine')}</div>
-        )}
-      </li>
+      </td>
     );
   };
 
-  // With no order yet there is nothing to report, packed least of all.
-  const barText = !order
+  const tickCell = (pressed: boolean | 'mixed', label: string, onTick: () => void) => (
+    <td className="bc-cb-cell">
+      <button type="button" className="bc-cb pk-cb" aria-pressed={pressed} aria-label={label} disabled={!ready} onClick={onTick}>
+        {pressed === true && <Icon name="check" size={18} stroke={3} />}
+      </button>
+    </td>
+  );
+
+  const flag = (n: number, qty: number) => (n === 0
+    ? <div className="pk-flag neg">{t('pkZeroTag')}</div>
+    : n < qty && <div className="pk-flag warn">{t('pkShortTag')}</div>);
+
+  const countCell = (l: Line, n: number) => (
+    <td className="num pk-count-cell">
+      <div className="pk-count">
+        <button type="button" className="pk-step" aria-label={t('pkLess')} disabled={!ready || n === 0} onClick={() => setCount(l, n - 1)}>
+          <Icon name="minus" size={16} />
+        </button>
+        <span className="mono bc-count-n"><b>{n}</b><span className="muted"> / {l.qty}</span></span>
+        <button type="button" className="pk-step" aria-label={t('pkMore')} disabled={!ready || n >= l.qty} onClick={() => setCount(l, n + 1)}>
+          <Icon name="plus" size={16} />
+        </button>
+      </div>
+      {flag(n, l.qty)}
+    </td>
+  );
+
+  const lineClass = (l: Line) => {
+    const c = checks.get(l.id);
+    return 'bc-' + lineState(l, c)
+      + (isShortChecked(l, c) ? ' pk-done-short' : '')
+      + (isAbsentChecked(l, c) ? ' bc-done-absent' : '')
+      + (choose.has(l.id) ? ' pk-choose' : '');
+  };
+  const rowProps = (key: string, cls: string) => ({
+    id: rowElId(key),
+    className: 'bc-row ' + cls + (selKey === key ? ' row-selected' : ''),
+    onClick: () => setSelected(key),
+  });
+
+  // A product from one lot is one row, as a line.
+  const singleRow = (p: Product) => {
+    const l = p.head;
+    const c = checkOf(l.id);
+    const state = lineState(l, c);
+    return (
+      <tr key={l.id} {...rowProps(l.id, lineClass(l))}>
+        {tickCell(state === 'done', t(state === 'done' ? 'pkUnpackLine' : 'pkPackLine', { pn: pnOf(l) }), () => toggle(l))}
+        <td className="pk-no-cell mono"><span className="pk-no">#{p.no}</span></td>
+        <td className="pk-thumb-cell">{thumb(l)}</td>
+        {itemCell(l, (
+          <>
+            <span className="mono pk-from">{fromText(l)}</span>
+            {showWh && <span>{whName(packWarehouseOf(l))}</span>}
+          </>
+        ))}
+        <td className="muted bc-cond pk-cond-cell">{l.condition}</td>
+        {countCell(l, countOf(l, c))}
+      </tr>
+    );
+  };
+
+  // Every lot of the product is held at 0: it keeps its # and nothing else.
+  const zeroRow = (p: Product) => {
+    const l = p.head;
+    return (
+      <tr key={l.id} {...rowProps(l.id, 'pk-zero')}>
+        <td className="bc-cb-cell" />
+        <td className="pk-no-cell mono"><span className="pk-no">#{p.no}</span></td>
+        <td className="pk-thumb-cell">{thumb(l)}</td>
+        {itemCell(l, <span className="mono">{fromText(l)}</span>)}
+        <td className="muted bc-cond pk-cond-cell">{l.condition}</td>
+        <td className="num pk-zero-note">{t('pkZeroLine')}</td>
+      </tr>
+    );
+  };
+
+  const foldRows = (p: Product) => {
+    const s = productSummary(p.lots, checks);
+    const pn = pnOf(p.head);
+    const opened = isOpen(p);
+    const key = prodKey(p.no);
+    const cls = 'pk-prod ' + (s.state === 'done' ? 'bc-done' : s.state === 'mixed' ? 'pk-mixed' : 'bc-open')
+      + (s.zeroed ? ' pk-has-zero' : s.short ? ' pk-has-short' : '')
+      + (p.lots.some(l => choose.has(l.id)) ? ' pk-choose' : '');
+    return (
+      <Fragment key={key}>
+        <tr {...rowProps(key, cls)}>
+          {tickCell(
+            s.state === 'done' ? true : s.state === 'mixed' ? 'mixed' : false,
+            t(s.state === 'done' ? 'pkUnpackProduct' : 'pkPackProduct', { pn }),
+            () => toggleProduct(p),
+          )}
+          <td className="pk-no-cell">
+            <button
+              type="button"
+              className="pk-fold mono"
+              aria-expanded={opened}
+              aria-label={t(opened ? 'pkFoldClose' : 'pkFoldOpen', { no: p.no, n: p.lots.length })}
+              // The filter holds a fold with a match open.
+              disabled={forcedOpen(p)}
+              onClick={() => setFold(p.no, !opened)}
+            >
+              <Icon name="chevronDown" size={14} />
+              <span className="pk-no">#{p.no}</span>
+            </button>
+          </td>
+          <td className="pk-thumb-cell">{thumb(photoOf(p))}</td>
+          {itemCell(p.head, (
+            <>
+              <span className="pk-lots">{t('pkLotsCount', { n: p.lots.length })}</span>
+              <span className="mono pk-from">{lotTags(p.lots)}</span>
+              {showWh && <span>{whName(packWarehouseOf(p.head))}</span>}
+            </>
+          ))}
+          <td className="muted bc-cond pk-cond-cell">{p.head.condition}</td>
+          <td className="num pk-count-cell">
+            <span className="mono bc-count-n pk-sum"><b>{s.counted}</b><span className="muted"> / {s.qty}</span></span>
+            {flag(s.counted, s.qty)}
+          </td>
+        </tr>
+        {opened && p.lots.map(l => {
+          const c = checkOf(l.id);
+          const state = lineState(l, c);
+          return (
+            <tr key={l.id} {...rowProps(l.id, 'pk-lot ' + lineClass(l) + (fit?.has(l.id) ? ' pk-hit' : ''))}>
+              {tickCell(state === 'done', t(state === 'done' ? 'pkUnpackLine' : 'pkPackLine', { pn: `${pn} ${lotTag(l)}` }), () => toggle(l))}
+              <td className="pk-no-cell" />
+              <td className="pk-thumb-cell">{thumb(l)}</td>
+              <td className="pk-item-cell pk-lot-cell">
+                <div className="pk-lot-src mono">{fromText(l)}</div>
+                {showWh && <div className="pk-meta">{whName(packWarehouseOf(l))}</div>}
+              </td>
+              <td className="pk-cond-cell" />
+              {countCell(l, countOf(l, c))}
+            </tr>
+          );
+        })}
+      </Fragment>
+    );
+  };
+
+  const productRows = (p: Product) => (!p.lots.length ? zeroRow(p) : folds(p) ? foldRows(p) : singleRow(p));
+
+  // ── The selected row, beside the list.
+  const selProduct = selKey?.startsWith('p:') ? productByNo.get(Number(selKey.slice(2))) ?? null : null;
+  const selLine = selProduct ? selProduct.head : selKey ? lineById.get(selKey) ?? null : null;
+  const selNo = selLine ? lineNo.get(selLine.id) : undefined;
+  const selPhoto = (selProduct ? photoOf(selProduct) : selLine)?.imageUrl ?? null;
+  const selSummary = selProduct ? productSummary(selProduct.lots, checks) : null;
+  const selSerials = selLine && !selProduct ? parseSerials(selLine.serialNumber) : [];
+
+  const problems = lines.filter(isPackable).filter(l => {
+    const c = checks.get(l.id);
+    return isShortChecked(l, c) || isAbsentChecked(l, c);
+  });
+  const left = whole.products - whole.done;
+  const finishText = !order
     ? ''
     : readOnly
-    ? t(order.archivedAt ? 'pkArchived' : 'pkClosed')
-    : blockers.open > 0
-      ? t('pkBarLeft', { n: blockers.open })
-      : blockers.short > 0 || blockers.zero > 0
-        ? t('pkBarFix', { short: blockers.short, zero: blockers.zero })
-        : !isDraft && order
-          ? t('pkBarStatus', { status: order.status })
-          : t('pkBarDone');
+      ? t(order.archivedAt ? 'pkArchived' : 'pkClosed')
+      : whole.products === 0
+        ? t('pkFinishNothing')
+        : blockers.open > 0
+          ? t(left === 1 ? 'pkFinishLeftOne' : 'pkFinishLeft', { n: left })
+          : blockers.short > 0 || blockers.zero > 0
+            ? t('pkFinishFix', { short: blockers.short, zero: blockers.zero })
+            : !isDraft
+              ? t('pkFinishStatus', { status: order.status })
+              : t('pkFinishDone');
 
   const units = lines.reduce((a, l) => a + l.qty, 0);
   const shippedMeta = order?.statusMeta.Shipped;
 
   return (
     <div className="pk-page">
-      <div className="pk-head">
-        <div className="pk-head-main">
+      <div className="page-head">
+        <div>
           <button type="button" className="bc-back" onClick={exit}>
             <Icon name="chevronLeft" size={12} /> {t('pkBack')}
           </button>
@@ -430,53 +668,29 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
           </div>
           {order && (
             <div className="page-sub">
-              {order.customer.name} · {t('pkSub', { lines: lines.length, units })}
+              {order.customer.name} · {t('pkSub', { products: whole.products, units })}
             </div>
           )}
         </div>
-        <div className="pk-scan-wrap">
-          <label className="bc-scan pk-scan" htmlFor="pk-scan">
-            <Icon name="scan" size={17} />
-            <input
-              id="pk-scan"
-              ref={scanRef}
-              className="input mono"
-              type="text"
-              autoComplete="off"
-              autoCapitalize="characters"
-              autoCorrect="off"
-              spellCheck={false}
-              enterKeyHint="go"
-              value={scan}
-              disabled={!ready}
-              placeholder={t('pkScanPh')}
-              onChange={e => setScan(e.target.value)}
-              onBlur={() => { scanFromPage.current = false; }}
-              onKeyDown={e => {
-                if (e.nativeEvent.isComposing) return;
-                if (e.key === 'Enter') { e.preventDefault(); onScan(scan); }
-                // Leaves the box, not the page.
-                if (e.key === 'Escape') { e.stopPropagation(); e.currentTarget.blur(); }
-              }}
-            />
-          </label>
-          <div className={'bc-scan-msg ' + (scanMsg?.tone ?? 'muted')} aria-live="polite">
-            {scanMsg ? scanMsg.text : t('pkScanHint')}
-          </div>
+        <div className="bc-keys pk-keys" aria-hidden="true">
+          <span><kbd>↑</kbd><kbd>↓</kbd> {t('bcKeyMove')}</span>
+          <span><kbd>{t('bcKeySpace')}</kbd> {t('pkKeyPack')}</span>
+          <span><kbd>←</kbd><kbd>→</kbd> {t('pkKeyFold')}</span>
+          <span><kbd>/</kbd> {t('bcKeyScan')}</span>
         </div>
       </div>
 
       {readOnly && (
-        <div className="oe-banner bc-banner"><Icon name="lock" size={13} /> {barText}</div>
+        <div className="oe-banner bc-banner"><Icon name="lock" size={13} /> {finishText}</div>
       )}
 
-      <div className="card pk-progress">
-        <div className="pk-progress-num">
-          <span className="mono"><b>{sum.done}</b><span className="muted"> / {shownPackable.length}</span></span>
+      <div className="card bc-tally pk-tally">
+        <div className="bc-tally-num">
+          <span className="mono"><b>{sum.done}</b><span className="muted"> / {sum.products}</span></span>
           <span className="card-sub">{t('pkUnits', { n: sum.counted, of: sum.units })}</span>
         </div>
-        <div className="pk-progress-meter">
-          <div className="bc-meter" role="img" aria-label={t('pkProgress', { n: sum.done, of: shownPackable.length })}>
+        <div className="bc-tally-meter">
+          <div className="bc-meter" role="img" aria-label={t('pkProgress', { n: sum.done, of: sum.products })}>
             <i className="bc-m-done" style={{ flexGrow: sum.done }} />
             <i className="bc-m-part" style={{ flexGrow: sum.partial }} />
             <i className="bc-m-absent" style={{ flexGrow: sum.absent }} />
@@ -506,70 +720,198 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
         )}
       </div>
 
-      <div className="card pk-list-card">
-        {!order && orderFailed ? (
-          <div className="card-body bc-load-error">
-            <span>{t('pkOrderLoadFailed')}</span>
-            <button
-              type="button"
-              className="btn sm"
-              onClick={() => {
-                setOrderFailed(false);
-                void loadOrder();
-                if (loadState === 'error') void reload();
-              }}
-            >
-              {t('pkRetry')}
-            </button>
-          </div>
-        ) : !order || loadState === 'loading' ? (
-          <div className="card-body muted">{t('loadingApp')}</div>
-        ) : loadState === 'error' ? (
-          <div className="card-body bc-load-error">
-            <span>{t('pkLoadFailed')}</span>
-            <button type="button" className="btn sm" onClick={() => void reload()}>{t('pkRetry')}</button>
-          </div>
-        ) : (
-          <ul className="pk-list">
-            {rows.map(r => row(r.line, r.no))}
-            {rows.length === 0 && <li className="pk-empty">{t('pkNoneHere')}</li>}
-          </ul>
-        )}
-      </div>
-
-      <div className="pk-bar">
-        <div className="pk-bar-msg" aria-live="polite">
-          {undo ? (
-            <>
-              <span>{undo.msg}</span>
-              <button type="button" className="btn sm" onClick={undoLast}>{t('undo')}</button>
-            </>
-          ) : <span>{barText}</span>}
-        </div>
-        <div className="pk-bar-actions">
-          {readOnly || !isDraft ? (
-            <button type="button" className="btn lg" onClick={exit}>{t('pkBack')}</button>
-          ) : (
-            <>
-              {(blockers.short > 0 || blockers.zero > 0) && (
-                <button type="button" className="btn lg" onClick={() => navigate(`/sell-orders/${id}/edit`)}>
-                  <Icon name="edit" size={15} /> {t('editOrder')}
+      <div className="pk-grid">
+        <div className="card pk-list-card">
+          <div className="card-head bc-scan-head">
+            <div className="bc-scan-field">
+              <label className="bc-scan pk-scan" htmlFor="pk-scan">
+                <Icon name="scan" size={17} />
+                <input
+                  id="pk-scan"
+                  ref={scanRef}
+                  className="input mono"
+                  type="text"
+                  autoComplete="off"
+                  autoCapitalize="characters"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  enterKeyHint="go"
+                  value={scan}
+                  disabled={!ready}
+                  placeholder={t('pkScanPh')}
+                  onChange={e => setScan(e.target.value)}
+                  onBlur={() => { scanFromPage.current = false; }}
+                  onKeyDown={e => {
+                    if (e.nativeEvent.isComposing) return;
+                    if (e.key === 'Enter') { e.preventDefault(); onScan(scan); }
+                    // Clears the box, then leaves it; never the page.
+                    if (e.key === 'Escape') {
+                      e.stopPropagation();
+                      if (scan) setScan('');
+                      else e.currentTarget.blur();
+                    }
+                  }}
+                />
+              </label>
+              {/* An iPad has no Escape key. */}
+              {scan && (
+                <button type="button" className="bc-scan-clear pk-scan-clear" title={t('scanClear')} aria-label={t('scanClear')} onClick={() => setScan('')}>
+                  <Icon name="x" size={15} />
                 </button>
               )}
+            </div>
+            <div className={'bc-scan-msg ' + (scanMsg?.tone ?? 'muted')} aria-live="polite">
+              {scanMsg ? scanMsg.text : t('pkScanHint')}
+            </div>
+          </div>
+          {!order && orderFailed ? (
+            <div className="card-body bc-load-error">
+              <span>{t('pkOrderLoadFailed')}</span>
               <button
                 type="button"
-                className="btn accent lg"
-                disabled={!canShip || busy}
-                title={canShip ? undefined : t('pkMarkShippedTip')}
-                onClick={() => void startShip()}
+                className="btn sm"
+                onClick={() => {
+                  setOrderFailed(false);
+                  void loadOrder();
+                  if (loadState === 'error') void reload();
+                }}
               >
-                <Icon name="truck" size={16} /> {t('pkMarkShipped')}
+                {t('pkRetry')}
               </button>
-            </>
+            </div>
+          ) : !order || loadState === 'loading' ? (
+            <div className="card-body muted">{t('loadingApp')}</div>
+          ) : loadState === 'error' ? (
+            <div className="card-body bc-load-error">
+              <span>{t('pkLoadFailed')}</span>
+              <button type="button" className="btn sm" onClick={() => void reload()}>{t('pkRetry')}</button>
+            </div>
+          ) : (
+            <table className="table bc-table pk-table">
+              <thead>
+                <tr>
+                  <th className="bc-cb-cell" aria-label={t('pkColPacked')} />
+                  <th className="pk-no-cell">#</th>
+                  <th className="pk-thumb-cell" aria-label={t('linePhotos')} />
+                  <th>{t('bcColItem')}</th>
+                  <th className="pk-cond-cell">{t('bcColCondition')}</th>
+                  <th className="num">{t('pkColCount')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {listed.map(productRows)}
+                {fit?.size === 0 && (
+                  <tr className="pk-empty"><td colSpan={COLS}>{t('pkFilterNone', { pn: filterText, id })}</td></tr>
+                )}
+                {!fit && products.length === 0 && (
+                  <tr className="pk-empty"><td colSpan={COLS}>{t('pkNoneHere')}</td></tr>
+                )}
+              </tbody>
+            </table>
           )}
+        </div>
+
+        <div className="pk-side">
+          {selLine && (
+            <div className="card bc-compare pk-compare">
+              <div className="card-head">
+                <span className="card-title">
+                  {t('pkSelTitle')} <span className="mono muted">#{selNo}</span>
+                </span>
+              </div>
+              <div className="bc-photo">
+                {selPhoto ? (
+                  <button type="button" className="bc-photo-btn" onClick={() => setZoom(selPhoto)} title={t('linePhotos')}>
+                    <img src={selPhoto} alt={t('pkPhoto', { pn: pnOf(selLine) })} />
+                  </button>
+                ) : (
+                  <div className="bc-photo-empty"><Icon name="image" size={20} /><span>{t('bcNoPhoto')}</span></div>
+                )}
+              </div>
+              <div className="card-body bc-compare-body">
+                <div className="bc-pn mono">{pnOf(selLine)}</div>
+                {selLine.partNumber && <div className="card-sub">{selLine.label}</div>}
+                <dl className="bc-kv">
+                  {selLine.condition && <><dt>{t('condition')}</dt><dd>{selLine.condition}</dd></>}
+                  {!selProduct && <><dt>{t('pkFrom')}</dt><dd className="mono">{lotTag(selLine)}</dd></>}
+                  <dt>{t('warehouse')}</dt><dd>{whName(packWarehouseOf(selLine))}</dd>
+                  <dt>{t('qty')}</dt><dd className="mono">{selSummary ? selSummary.qty : selLine.qty}</dd>
+                  <dt>{t('bcColCounted')}</dt>
+                  <dd className="mono">{selSummary ? selSummary.counted : countOf(selLine, checks.get(selLine.id))}</dd>
+                </dl>
+                {selProduct ? (
+                  <ul className="pk-sel-lots">
+                    {selProduct.lots.map(l => {
+                      const c = checks.get(l.id);
+                      const done = lineState(l, c) === 'done';
+                      return (
+                        <li key={l.id} className={done ? 'pk-sel-done' : ''}>
+                          <span className="mono">{lotTag(l)}</span>
+                          <span className="mono">
+                            {done && <Icon name="check" size={12} stroke={3} />} {countOf(l, c)} / {l.qty}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <div className="bc-serials">
+                    <div className="card-sub">{selSerials.length ? t('bcSerialsOnFile', { n: selSerials.length }) : t('bcNoSerials')}</div>
+                    {selSerials.length > 0 && (
+                      <div className="bc-serial-list">{selSerials.map(s => <span key={s} className="mono">{s}</span>)}</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="card bc-finish">
+            <div className="card-head"><span className="card-title">{t('pkFinishTitle')}</span></div>
+            <div className="card-body">
+              <p className="card-sub">{finishText}</p>
+              {!readOnly && blockers.open === 0 && problems.length > 0 && (
+                <ul className="bc-problem-list">
+                  {problems.map(l => (
+                    <li key={l.id}>
+                      <span className="mono">#{lineNo.get(l.id)} {lotTag(l)}</span>
+                      {' · '}{t('bcShortNote', { n: countOf(l, checks.get(l.id)), of: l.qty })}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {!readOnly && isDraft && (
+                <div className="bc-finish-actions">
+                  {(blockers.short > 0 || blockers.zero > 0) && (
+                    <button type="button" className="btn" onClick={() => navigate(`/sell-orders/${id}/edit`)}>
+                      <Icon name="edit" size={15} /> {t('editOrder')}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="btn accent"
+                    disabled={!canShip || busy}
+                    title={canShip ? undefined : t('pkMarkShippedTip')}
+                    onClick={() => void startShip()}
+                  >
+                    <Icon name="truck" size={16} /> {t('pkMarkShipped')}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
+      {undo && (
+        <div className="toast-wrap">
+          <div className="toast info bc-undo pk-undo">
+            <Icon name="check2" size={16} />
+            <span>{undo.msg}</span>
+            <button type="button" onClick={undoLast}>{t('undo')}</button>
+          </div>
+        </div>
+      )}
       {shipping && order && (
         <StatusChangeDialog
           orderId={order.id}

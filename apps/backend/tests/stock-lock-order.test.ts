@@ -3,7 +3,7 @@ import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
-import { createSellOrderOn } from './helpers/fixtures';
+import { createSellOrderOn, signOffAll } from './helpers/fixtures';
 
 // Writers that touch a PO and its lines take the orders row first, then the
 // lines (services/orderLocks.ts). One that went line-first — the inventory
@@ -82,6 +82,7 @@ describe('PO writers share one lock order', () => {
       const so = await createSellOrderOn(token, line.id, `PN-LOCK-${i}`, 1);
       expect((await api('POST', `/api/sell-orders/${so}/status`, { token, body: { to: 'Shipped', note: 's' } })).status)
         .toBe(200);
+      await signOffAll(so);
       const [a, b] = await Promise.all([
         api('POST', `/api/sell-orders/${so}/status`, { token, body: { to: 'Done', note: 'paid' } }),
         poPatchCost(token, orderId, line.id, line.unit_cost + i + 1),

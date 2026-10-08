@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
+import { signOffAll } from './helpers/fixtures';
 
 type Subtype = {
   units: number; cost: number; sell: number; lines: number;
@@ -178,6 +179,7 @@ describe('GET /api/inventory/analysis and archived POs', () => {
     });
     expect(so.status).toBe(201);
     for (const to of ['Shipped', 'Awaiting payment', 'Done']) {
+      if (to === 'Done') await signOffAll(so.body.id);
       expect((await api('POST', `/api/sell-orders/${so.body.id}/status`, { token: mgr, body: { to, note: 'x' } })).status).toBe(200);
     }
     const sold = await api<{ item: { status: string } }>('GET', `/api/inventory/${soldLine.id}`, { token: mgr });

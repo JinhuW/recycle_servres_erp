@@ -139,10 +139,31 @@ export type ScanMatch<L> = { line: L } | { ambiguous: string[] };
 // line can't swallow every scan of its part number.
 const SCAN_RANK: Record<LineCheckState, number> = { open: 0, partial: 1, absent: 2, done: 3 };
 
+export function spellsSerial(line: CheckableLine, q: string): boolean {
+  return parseSerials(line.serialNumber).some(s => canonicalPartNumber(s) === q);
+}
+
+// Every line Enter could land on: a part number holding the text anywhere, one
+// a label extends with its suffix, or a serial the text spells.
+function scanFits(line: CheckableLine, q: string): boolean {
+  const pn = canonicalPartNumber(line.partNumber);
+  return (pn !== '' && (pn.includes(q) || (q.length >= 6 && pn.length >= 6 && q.startsWith(pn))))
+    || spellsSerial(line, q);
+}
+
+// What the list narrows to while text sits in the scan box; null is no filter.
+// Empty is judged after canonicalising, so a lone separator filters nothing.
+export function filterScan<L extends CheckableLine>(lines: readonly L[], raw: string): L[] | null {
+  const q = canonicalPartNumber(raw);
+  return q ? lines.filter(l => scanFits(l, q)) : null;
+}
+
 // A scanner types the label and presses Enter. Exact part number first, then
-// a prefix (labels often carry a suffix the PO line doesn't), then a serial.
-// A prefix that fits lines with different part numbers is a different SKU
-// each — a speed grade, a revision — so it is handed back, not guessed.
+// a prefix (labels often carry a suffix the PO line doesn't), then a serial,
+// and last any part number holding the text — what a person types off a
+// label. A prefix or fragment that fits lines with different part numbers is
+// a different SKU each — a speed grade, a revision — so it is handed back,
+// not guessed.
 export function matchScan<L extends CheckableLine>(
   lines: readonly L[], checks: ReadonlyMap<string, LineCheck>, raw: string,
 ): ScanMatch<L> | null {
@@ -170,8 +191,19 @@ export function matchScan<L extends CheckableLine>(
     if (pns.size > 1) return { ambiguous: [...pns.values()] };
     if (prefix.length) return pick(prefix);
   }
-  const serial = lines.filter(l => parseSerials(l.serialNumber).some(s => canonicalPartNumber(s) === q));
-  return pick(serial);
+  const serial = lines.filter(l => spellsSerial(l, q));
+  if (serial.length) return pick(serial);
+  const part = lines.filter(l => canonicalPartNumber(l.partNumber).includes(q));
+  const pns = new Map(part.map(l => [canonicalPartNumber(l.partNumber), l.partNumber ?? '']));
+  if (pns.size > 1) return { ambiguous: [...pns.values()] };
+  return pick(part);
+}
+
+// The part numbers an ambiguous scan fits, for its message. A short fragment
+// can fit dozens; the filtered list beside the message names the rest.
+export function partsNamed(pns: readonly string[], t: Translate, max = 5): string {
+  const named = pns.slice(0, max).join(', ');
+  return pns.length > max ? `${named} ${t('acAndMore', { n: pns.length - max })}` : named;
 }
 
 // After a line is checked the selection moves on to the next line

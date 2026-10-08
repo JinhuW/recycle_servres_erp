@@ -4,9 +4,10 @@ import { api } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
 import { CLOSE_REASON_IDS } from '@recycle-erp/shared';
-import { firstCustomerId } from './helpers/fixtures';
+import { firstCustomerId, signOffAll } from './helpers/fixtures';
 
 async function toDone(token: string, sellOrderId: string) {
+  await signOffAll(sellOrderId);
   return api('POST', `/api/sell-orders/${sellOrderId}/status`, {
     token, body: { to: 'Done' },
   });

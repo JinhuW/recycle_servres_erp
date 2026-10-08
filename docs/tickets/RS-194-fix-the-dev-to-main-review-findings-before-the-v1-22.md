@@ -2,13 +2,13 @@
 id: RS-194
 title: Fix the dev to main review findings before the v1.221 release
 type: bug
-status: in-progress
+status: done
 priority: P1
 created: 2026-10-08
 reporter: jinhu
 branch: dev-9
-pr:
-version:
+pr: "#535"
+version: 1.221.0
 related: [RS-193, RS-188, RS-192]
 ---
 
@@ -45,23 +45,23 @@ were already labelled.
 
 ## Acceptance criteria
 
-- [ ] A product's # depends only on the order's set of lines: saving the order
+- [x] A product's # depends only on the order's set of lines: saving the order
       as shown, editing a price, or setting a line to 0 moves no #, also when
       a product's lots differ in type and the higher-PO lot was picked first.
-- [ ] The files show a product's per-lot details (health, image, part) from
+- [x] The files show a product's per-lot details (health, image, part) from
       its first line above 0; its sort fields from the line that numbers it.
-- [ ] Every by-PO tab lists its rows in # order, with the same group labels
+- [x] Every by-PO tab lists its rows in # order, with the same group labels
       as the plain tab.
-- [ ] Two same-text typed lines in different warehouses keep their pack ticks
+- [x] Two same-text typed lines in different warehouses keep their pack ticks
       across a save that reorders them.
-- [ ] By warehouse cards group on where the lot is now.
-- [ ] Two lines sharing a # price together even when their part spellings
+- [x] By warehouse cards group on where the lot is now.
+- [x] Two lines sharing a # price together even when their part spellings
       differ.
-- [ ] A desktop tab on an old bundle is offered a reload once a new build is
+- [x] A desktop tab on an old bundle is offered a reload once a new build is
       live.
-- [ ] No packing-list row is taller than Excel's limit.
-- [ ] FEATURES.md, comments and test titles match the code.
-- [ ] Released to main as v1.221.0; prod reports it.
+- [x] No packing-list row is taller than Excel's limit.
+- [x] FEATURES.md, comments and test titles match the code.
+- [x] Released to main as v1.221.0; prod reports it.
 
 ## Out of scope
 
@@ -75,3 +75,7 @@ were already labelled.
 Plan: two reviewed drafts in the session scratchpad. The review's own
 cleanup list (duplicate comparators, re-sorting numbered products,
 `noByProduct`) is folded in where the fixes touch it.
+
+Released 2026-10-08: #535 squashed to dev as bf31f88f, release #536 merged
+to main as 74177d42. Prod `/api/health` and `version.json` both read
+1.221.0; version-check, backend-tests and deploy-frontend green on main.

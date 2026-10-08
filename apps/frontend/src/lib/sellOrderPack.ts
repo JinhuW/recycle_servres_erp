@@ -1,6 +1,6 @@
 import { canonicalPartNumber } from '@recycle-erp/shared';
 import {
-  isAbsentChecked, isShortChecked, lineState, matchScan,
+  countOf, isAbsentChecked, isShortChecked, lineState, matchScan, spellsSerial, tally,
   type CheckableLine, type LineCheck, type ScanMatch,
 } from './boxCheck';
 
@@ -76,6 +76,98 @@ export function sourceTag(l: Pick<PackLine, 'sourceOrderId' | 'sourceLineNo'>): 
   return l.sourceOrderId ? { po: l.sourceOrderId, no: l.sourceLineNo ?? null } : null;
 }
 
+// A product is every line carrying one #; each line is a lot, usually a PO
+// line of its own. The server puts a product's lines next to each other and in
+// one warehouse, so grouping runs of a # is enough and a warehouse filter never
+// splits one. A lot held at 0 has nothing to pack and is left out, as the
+// packing lists leave it — unless every lot is, when `lots` is empty and the
+// product still stands, by its first line, to account for its #.
+export type PackProduct<L> = { no: number; lots: L[]; head: L };
+
+export function packProducts<L extends PackLine>(rows: readonly PackRowView<L>[]): PackProduct<L>[] {
+  const out: { no: number; lines: L[] }[] = [];
+  for (const r of rows) {
+    const last = out[out.length - 1];
+    if (last && last.no === r.no) last.lines.push(r.line);
+    else out.push({ no: r.no, lines: [r.line] });
+  }
+  return out.map(({ no, lines }) => {
+    const lots = lines.filter(isPackable);
+    return { no, lots, head: lots[0] ?? lines[0]! };
+  });
+}
+
+// `mixed`: some lot is packed or lowered, and not all are packed.
+export type ProductState = 'zero' | 'open' | 'mixed' | 'done';
+export type ProductSummary = {
+  state: ProductState; counted: number; qty: number;
+  // A lot counted below its qty, and a lot counted to 0 — packed or not.
+  short: boolean; zeroed: boolean;
+};
+
+export function productSummary(lots: readonly CheckableLine[], checks: ReadonlyMap<string, LineCheck>): ProductSummary {
+  let counted = 0, qty = 0, done = 0, touched = 0, short = false, zeroed = false;
+  for (const l of lots) {
+    const c = checks.get(l.id);
+    const n = countOf(l, c);
+    counted += n;
+    qty += l.qty;
+    if (lineState(l, c) === 'done') done += 1;
+    if (lineState(l, c) !== 'open') touched += 1;
+    if (n === 0) zeroed = true;
+    else if (n < l.qty) short = true;
+  }
+  const state: ProductState = lots.length === 0 ? 'zero'
+    : done === lots.length ? 'done'
+    : touched > 0 ? 'mixed'
+    : 'open';
+  return { state, counted, qty, short, zeroed };
+}
+
+export type ProductTick<L> = { tick: L[]; untick: L[]; left: L[] };
+
+// Ticking a product packs its lots still at full count. A lot lowered and not
+// yet ticked waits for its own tick, as Review mode's Check all leaves a short
+// line: the tick is what confirms the short count. Once every lot is packed
+// the same tick unpacks them all.
+export function productTick<L extends CheckableLine>(
+  lots: readonly L[], checks: ReadonlyMap<string, LineCheck>,
+): ProductTick<L> {
+  const states = lots.map(l => lineState(l, checks.get(l.id)));
+  if (lots.length && states.every(s => s === 'done')) return { tick: [], untick: [...lots], left: [] };
+  return {
+    tick: lots.filter((_, i) => states[i] === 'open'),
+    untick: [],
+    left: lots.filter((_, i) => states[i] === 'partial' || states[i] === 'absent'),
+  };
+}
+
+export type ProductTally = {
+  products: number; done: number; partial: number; absent: number; open: number;
+  units: number; counted: number;
+};
+
+// The progress card, one bucket per product — the rows the packer sees. A
+// product is short while any lot is lowered and not yet ticked, at 0 first.
+// Units are the lots' (`tally`). A product with nothing to pack isn't counted.
+export function productTally<L extends CheckableLine>(
+  products: readonly PackProduct<L>[], checks: ReadonlyMap<string, LineCheck>,
+): ProductTally {
+  const out: ProductTally = { products: 0, done: 0, partial: 0, absent: 0, open: 0, units: 0, counted: 0 };
+  for (const p of products) {
+    if (!p.lots.length) continue;
+    const units = tally(p.lots, checks);
+    out.products += 1;
+    out.units += units.units;
+    out.counted += units.counted;
+    if (units.done === p.lots.length) out.done += 1;
+    else if (units.absent > 0) out.absent += 1;
+    else if (units.partial > 0) out.partial += 1;
+    else out.open += 1;
+  }
+  return out;
+}
+
 export type ShipBlockers = { open: number; short: number; zero: number };
 
 // What stands between the box and Mark shipped: lines nobody ticked, and
@@ -94,9 +186,6 @@ export function shipBlockers(lines: readonly CheckableLine[], checks: ReadonlyMa
 
 export type PackScan<L> = ScanMatch<L> | { choose: L[] };
 
-const partMatches = (q: string, pn: string) =>
-  pn !== '' && (pn === q || (q.length >= 6 && pn.length >= 6 && (q.startsWith(pn) || pn.startsWith(q))));
-
 // Review mode's scan, with two differences. A sell order often carries the
 // same part on several lines, and a part-number label can't say which one it
 // came off: rather than tick one of them on a guess, the lines still waiting
@@ -108,8 +197,8 @@ export function packScan<L extends PackLine>(
   const lines = all.filter(isPackable);
   const m = matchScan(lines, checks, raw);
   if (!m || !('line' in m)) return m;
+  if (spellsSerial(m.line, canonicalPartNumber(raw))) return m;
   const pn = canonicalPartNumber(m.line.partNumber);
-  if (!partMatches(canonicalPartNumber(raw), pn)) return m;
   const waiting = lines.filter(l =>
     canonicalPartNumber(l.partNumber) === pn && lineState(l, checks.get(l.id)) !== 'done');
   return waiting.length > 1 ? { choose: waiting } : m;
