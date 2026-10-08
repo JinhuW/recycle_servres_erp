@@ -2,13 +2,13 @@
 id: RS-208
 title: Inventory select all reaches every lot the filter matches
 type: bug
-status: in-review
+status: done
 priority: P2
 created: 2026-10-08
 reporter: jinhu
 branch: fix/inventory-select-all-filter
-pr:
-version:
+pr: "#561"
+version: 1.230.2
 related: []
 ---
 
