@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { LineCheck } from './boxCheck';
 import {
-  isPackable, nextOpenProduct, packBody, packGroups, packProducts, packScan, packView, packWarehouseOptions,
+  flaggedLots, isPackable, nextOpenProduct, packBody, packGroups, packProducts, packScan, packView, packWarehouseOptions,
   productSummary, productTally, productTick, shipBlockers, sourceTag, toCheck,
   type PackLine, type PackProduct,
 } from './sellOrderPack';
@@ -78,6 +78,16 @@ describe('shipBlockers', () => {
     const ls = [L('a'), L('z', { qty: 0 })];
     expect(isPackable(ls[1]!)).toBe(false);
     expect(shipBlockers(ls, checks(C('a', 2, 'x')))).toEqual({ open: 0, short: 0, zero: 0 });
+  });
+});
+
+describe('flaggedLots', () => {
+  it('lists the lots lowered and not ticked, in list order', () => {
+    const ls = [L('open'), L('zero'), L('short'), L('ticked-short'), L('ticked-zero'), L('full'), L('held', { qty: 0 })];
+    const cs = checks(
+      C('zero', 0), C('short', 1), C('ticked-short', 1, 'x'), C('ticked-zero', 0, 'x'), C('full', 2, 'x'), C('held', 0),
+    );
+    expect(flaggedLots(ls, cs).map(l => l.id)).toEqual(['zero', 'short']);
   });
 });
 

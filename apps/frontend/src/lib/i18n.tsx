@@ -2601,7 +2601,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     pkPackProduct: 'Pack every lot of {pn}',
     pkUnpackProduct: 'Unpack every lot of {pn}',
     pkPackedLotsToast: 'Packed {n} of {of} lots of {pn}',
-    pkProductLeft: '{pn}: {n} lot(s) counted short. Tick each one to confirm its count.',
+    pkProductLeft: '{pn}: {n} lot(s) counted short. Tick each one to confirm its count, or apply them all from Finish packing.',
     pkSelTitle: 'Selected',
     pkFrom: 'From',
     pkFinishTitle: 'Finish packing',
@@ -2611,6 +2611,13 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     pkFinishFix: '{short} short, {zero} not packed. Edit the order to match the box before it ships.',
     pkFinishDone: 'Everything is packed.',
     pkFinishStatus: 'Everything is packed. The order is {status}.',
+    pkFlaggedTitle: 'Counted short, not on the order yet',
+    pkApply: 'Apply {n} counts to the order',
+    pkApplyOne: 'Apply 1 count to the order',
+    pkApplyHint: 'Each line goes to its count, as an edit would, which clears a price adjustment. A line counted 0 stays on the order at qty 0 and keeps its #.',
+    pkAppliedToast: 'Set {n} lines to their counts on the order',
+    pkAppliedToastOne: 'Set 1 line to its count on the order',
+    pkApplyNone: 'Those lots changed meanwhile. Nothing was applied.',
 
     // ── Sell-order close reasons ──
     soCloseReason_customer_cancelled: 'Customer cancelled',

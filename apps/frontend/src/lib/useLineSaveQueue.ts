@@ -122,5 +122,6 @@ export function useLineSaveQueue<R>(options: Options<R>) {
     }
   }, [fire, reload]);
 
-  return { checks, loadState, reload, save, flush };
+  // A server read the page fetched itself, such as a batch write's reply.
+  return { checks, loadState, reload, save, flush, accept: applyServer };
 }
