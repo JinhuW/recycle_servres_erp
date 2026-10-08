@@ -3,7 +3,7 @@ import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
-import { createSellOrderOn } from './helpers/fixtures';
+import { createSellOrderOn, signOffAll } from './helpers/fixtures';
 
 // One rule for "how much of this line is free": its qty less the units
 // committed sell orders (Shipped, Awaiting payment) name. Every surface that
@@ -80,6 +80,7 @@ describe('a partly committed line', () => {
     const { token } = await loginAs(ALEX);
     const line = await freeSellableLine(token, 3);
     const so = await createSellOrderOn(token, line.id, 'PN-RECOUNT', 1);
+    await signOffAll(so);
     expect((await api('POST', `/api/sell-orders/${so}/status`, { token, body: { to: 'Done', note: 'paid' } })).status)
       .toBe(200);
     const sold = await lineQty(line.id);
@@ -166,6 +167,7 @@ describe('POST /api/orders/:id/total-cost/follow-lines', () => {
     const { token } = await loginAs(ALEX);
     const line = await freeSellableLine(token, 3);
     const so = await createSellOrderOn(token, line.id, 'PN-MIRROR', 1);
+    await signOffAll(so);
     expect((await api('POST', `/api/sell-orders/${so}/status`, { token, body: { to: 'Done', note: 'paid' } })).status)
       .toBe(200);
     const orderId = await lineOrder(line.id);

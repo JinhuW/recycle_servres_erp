@@ -5,6 +5,7 @@ import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
 import { getTestDb } from './helpers/db';
 import { eventsOf } from './helpers/sellOrderEvents';
+import { signOffAll } from './helpers/fixtures';
 
 const findSellableLine = (token: string) => freeSellableLine(token);
 
@@ -77,6 +78,7 @@ describe('POST /api/sell-orders/:id/status', () => {
     const soId = create.body.id;
     await api('POST', `/api/sell-orders/${soId}/status`, { token, body: { to: 'Shipped', note: 's' } });
     await api('POST', `/api/sell-orders/${soId}/status`, { token, body: { to: 'Awaiting payment', note: 'a' } });
+    await signOffAll(soId);
     await api('POST', `/api/sell-orders/${soId}/status`, { token, body: { to: 'Done', note: 'paid' } });
 
     const got = await api<{ item: { status: string; qty: number } }>('GET', `/api/inventory/${line.id}`, { token });
@@ -119,6 +121,7 @@ describe('payment_received notification', () => {
     const soId = create.body.id;
     await api('POST', `/api/sell-orders/${soId}/status`, { token: mTok, body: { to: 'Shipped', note: 's' } });
     await api('POST', `/api/sell-orders/${soId}/status`, { token: mTok, body: { to: 'Awaiting payment', note: 'a' } });
+    await signOffAll(soId);
     await api('POST', `/api/sell-orders/${soId}/status`, { token: mTok, body: { to: 'Done', note: 'paid' } });
 
     const got = await api<{ items: { kind: string }[] }>('GET', '/api/notifications', { token: subTok });
@@ -207,6 +210,7 @@ describe('PATCH /api/sell-orders/:id — editing customer + lines', () => {
     // Walk Draft → Shipped → Awaiting payment → Done via the dedicated route.
     // PATCH no longer accepts a status change (see "PATCH rejects status …").
     for (const to of ['Shipped', 'Awaiting payment', 'Done']) {
+      if (to === 'Done') await signOffAll(id);
       const r = await api('POST', `/api/sell-orders/${id}/status`, {
         token, body: { to, note: 'evidence' },
       });
@@ -252,6 +256,7 @@ describe('PATCH /api/sell-orders/:id — editing customer + lines', () => {
     const { id } = await makeOrder(token);
     // Move to Done via the dedicated route first.
     for (const to of ['Shipped', 'Awaiting payment', 'Done']) {
+      if (to === 'Done') await signOffAll(id);
       const r = await api('POST', `/api/sell-orders/${id}/status`, {
         token, body: { to, note: 'evidence' },
       });
@@ -656,6 +661,7 @@ describe('sell-order payment receiver', () => {
     const sql = getTestDb();
 
     const done = (await createWithReceiver(token, null)).body.id;
+    await signOffAll(done);
     const toDone = await api('POST', `/api/sell-orders/${done}/status`, {
       token, body: { to: 'Done', note: 'paid' },
     });

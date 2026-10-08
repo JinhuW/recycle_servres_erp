@@ -1143,6 +1143,29 @@ html.desktop, body.desktop, .desktop #root {
 }
 .so-page-main, .so-page-side { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .so-page-card { padding: 18px 20px; }
+/* Sign-off card: one row per manager, the viewer's own row carrying the buttons. */
+.so-section-head .so-signoff-count { margin-left: auto; text-transform: none; letter-spacing: normal; font-weight: 500; }
+.so-signoff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.so-signoff-row { display: flex; align-items: center; gap: 10px; }
+.so-signoff-mark {
+  flex: none; width: 18px; height: 18px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1.5px dashed var(--border);
+}
+.so-signoff-row.signed .so-signoff-mark { border: none; background: var(--pos-soft); color: var(--accent-strong); }
+.so-signoff-row.stale .so-signoff-mark { border-style: solid; border-color: var(--warn-strong); }
+.so-signoff-who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.so-signoff-name { font-size: 13px; font-weight: 500; }
+.so-signoff-you { color: var(--fg-subtle); font-weight: 400; white-space: nowrap; }
+.so-signoff-state { font-size: 11.5px; color: var(--fg-subtle); }
+.so-signoff-row.stale .so-signoff-state { color: var(--warn-strong); }
+.so-signoff-actions { flex: none; display: flex; gap: 6px; }
+.so-signoff-foot {
+  margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border);
+  font-size: 12px; color: var(--fg-subtle);
+}
+.so-signoff-foot.warn { color: var(--warn-strong); }
+.so-signoff-step-note { margin-top: 10px; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-subtle); }
 /* Sits in the uppercase section head; it is a control, not a heading. */
 .so-group-seg { margin-left: 12px; text-transform: none; letter-spacing: normal; }
 .so-group-seg button { padding: 4px 10px; font-size: 12px; }

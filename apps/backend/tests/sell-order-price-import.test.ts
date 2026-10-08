@@ -10,6 +10,7 @@ import app from '../src/index';
 import { resetDb, getTestDb } from './helpers/db';
 import { api, multipart, testEnv } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
+import { signOffAll } from './helpers/fixtures';
 
 const XLSX_MIME =
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -426,6 +427,7 @@ describe('POST /api/sell-orders/:id/price-import/preview', () => {
   it('409s when the order is Done', async () => {
     const { token } = await loginAs(ALEX);
     const id = await createOrder(token);
+    await signOffAll(id);
     const done = await api('POST', `/api/sell-orders/${id}/status`, {
       token, body: { to: 'Done', note: 'paid' },
     });

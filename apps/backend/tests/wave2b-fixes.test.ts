@@ -13,6 +13,7 @@ import { resetDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
+import { signOffAll } from './helpers/fixtures';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -265,6 +266,7 @@ describe('Wave 2B backend fixes', () => {
     const soId = soRes.body.id;
 
     for (const to of ['Shipped', 'Awaiting payment', 'Done']) {
+      if (to === 'Done') await signOffAll(soId);
       await api('POST', `/api/sell-orders/${soId}/status`, { token: mgr, body: { to, note: 'evidence' } });
     }
 

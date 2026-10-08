@@ -8,7 +8,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
-import { createSellOrderOn } from './helpers/fixtures';
+import { createSellOrderOn, signOffAll } from './helpers/fixtures';
 
 type Line = { id: string; status: string; qty: number };
 type Detail = { order: { lines: Line[] } };
@@ -45,6 +45,7 @@ const get = (id: string, token: string) => api<Detail>('GET', `/api/orders/${id}
 async function moveSellOrder(mgr: string, soId: string, to: string): Promise<void> {
   // Closing needs a structured reason; every other move takes just a note.
   const body = to === 'Closed' ? { to, note: 'x', closeReasonId: 'customer_cancelled' } : { to, note: 'x' };
+  if (to === 'Done') await signOffAll(soId);
   expect((await api('POST', `/api/sell-orders/${soId}/status`, { token: mgr, body })).status).toBe(200);
 }
 

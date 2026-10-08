@@ -17,6 +17,41 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.226.0] - 2026-10-08
+
+A sell order now needs every manager's sign-off before it can be marked Done
+(RS-198). Done is the step with consequences: it consumes stock, records
+market prices from the line prices, settles the source POs and starts their
+commission. Until now one manager could take an order there without anyone
+else looking at the deal.
+
+### Added
+
+- **A Sign-off card on the sell order page**, under the order summary. It
+  lists every active manager as signed (with when), waiting, or needing to
+  sign again, with a count such as "1 of 2 signed". The viewer's own row
+  carries **Sign off**, **Sign again** or **Withdraw**. Signing is open in
+  Draft, Shipped and Awaiting payment; a Done order keeps its sign-offs as the
+  record of who approved it.
+- **Done is refused until every active manager has signed** — the API answers
+  409 naming who is missing, and the edit page's stepper locks its Done step
+  with the same names. Signing only unlocks Done: a manager still moves the
+  order there, so the Done evidence dialog runs as before. A deactivated
+  manager stops being required; a new one is required from then on.
+- **A sign-off approves the order as it stood.** Changing the customer, the
+  currency, or any line's item, qty, native price or lot — in the editor,
+  through a negotiated total, or by a PO archive taking a line off — leaves
+  earlier sign-offs reading "needs to sign again". Notes, the payment
+  receiver, warehouse moves and evidence don't. The edit page says so before
+  the save ("Saving these changes clears the sign-offs") and keeps Done locked
+  until it's re-signed. Each sign-off stores a fingerprint of what was
+  approved, so no code that edits an order has to remember to clear them.
+  Signing sends back the fingerprint the page read, so an edit that lands
+  between a manager's review and their click is refused ("this sell order
+  changed since you opened it") rather than signed unseen.
+- Signing and withdrawing appear in the order's history, and a sign-off sends
+  the managers still to sign a notification. Reopening a Closed order clears
+  its sign-offs.
 ## [1.225.0] - 2026-10-08
 
 A manager approving a PO for payment is told when the bank paid something

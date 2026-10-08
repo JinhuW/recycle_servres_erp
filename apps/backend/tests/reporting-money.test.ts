@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS, PRIYA } from './helpers/auth';
-import { firstCustomerId } from './helpers/fixtures';
+import { firstCustomerId, signOffAll } from './helpers/fixtures';
 
 // The money figures read the right fact: a sale's date is when it became Done,
 // a projection is over the PO as bought, a customer's revenue is what sold,
@@ -39,6 +39,7 @@ const sellSome = async (token: string, lineId: string, qty: number, to: 'Done' |
       lines: [{ inventoryId: lineId, category: 'HDD', label: 'x', partNumber: 'PN', qty, unitPrice: 100 }] },
   });
   expect(so.status).toBe(201);
+  if (to === 'Done') await signOffAll(so.body.id);
   const r = await api('POST', `/api/sell-orders/${so.body.id}/status`, { token, body: { to, note: 'x' } });
   expect(r.status).toBe(200);
   return so.body.id;

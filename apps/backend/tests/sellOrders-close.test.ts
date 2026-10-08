@@ -3,6 +3,7 @@ import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, SOFIA, MARCUS } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
+import { signOffAll } from './helpers/fixtures';
 
 async function firstCustomerId(token: string): Promise<string> {
   const r = await api<{ items: { id: string }[] }>('GET', '/api/customers', { token });
@@ -35,6 +36,7 @@ async function createDraftSellOrder(
 }
 
 async function advanceTo(token: string, soId: string, to: string, note = 'note') {
+  if (to === 'Done') await signOffAll(soId);
   const r = await api('POST', `/api/sell-orders/${soId}/status`, { token, body: { to, note } });
   expect(r.status).toBe(200);
 }

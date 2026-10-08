@@ -28,7 +28,7 @@ import { canonPartNumberJs } from '../lib/part-number';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { settleSoldTx } from '../services/orderSold';
 import { searchSellableInventory } from '../services/sellableInventory';
-import { committedQtySql, committedSellStatuses } from '../lib/sellCommitment';
+import { committedQtySql, committedSellStatuses, openSellStatuses } from '../lib/sellCommitment';
 import { lockOrdersForLinesTx } from '../services/orderLocks';
 import {
   buildXlsxBuffer, xlsxResponse, datedFilename, type XlsxColumn,
@@ -43,6 +43,9 @@ import { maybeRenameReceipt } from '../ai/receipt';
 import { shrinkImageToFit } from '../lib/image-shrink';
 import { poLineNo, sellLineOrder } from '../lib/poLineNo';
 import { isActiveManager } from '../services/members';
+import {
+  missingSigners, orderFingerprint, signoffState, type SignoffState,
+} from '../services/sellOrderSignoff';
 import type { Env, User } from '../types';
 
 const sellOrders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -322,7 +325,7 @@ sellOrders.get('/:id', async (c) => {
     WHERE sol.sell_order_id = ${id}
     ORDER BY ${sellLineOrder(sql, 'sol')}
   `;
-  const [listed, metaRows, attRows, metaStatusSet] = await allLimited([
+  const [listed, metaRows, attRows, metaStatusSet, signoff] = await allLimited([
     linesQuery,
     // Per-status evidence (notes + attachments). The frontend expects a map
     // keyed by status with both fields flattened together.
@@ -337,6 +340,7 @@ sellOrders.get('/:id', async (c) => {
       ORDER BY uploaded_at
     `,
     () => loadMetaStatuses(sql),
+    () => signoffState(sql, id),
   ] as const);
   // The lines in packing-list order, each with its product's # — folded from
   // this one read, so a save landing mid-request can't leave a line unnumbered.
@@ -403,6 +407,7 @@ sellOrders.get('/:id', async (c) => {
           }
         : null,
       customer: { id: head.customer_id, name: head.customer_name, short: head.customer_short, region: head.customer_region },
+      signoff,
       lines: lines.map(l => ({
         id: l.id,
         // The product's # on this order — what the packer labels its items
@@ -1498,6 +1503,7 @@ sellOrders.post('/:id/status', async (c) => {
     | { kind: 'reopenNeedsNote' }
     | { kind: 'conflict'; msg: string }
     | { kind: 'archived'; to: string }
+    | { kind: 'needsSignoff'; missing: string[] }
     | { kind: 'done' };
 
   const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
@@ -1574,6 +1580,15 @@ sellOrders.post('/:id/status', async (c) => {
       if (err) return { kind: 'conflict', msg: err };
     }
 
+    // Done needs every active manager's sign-off on the order as it stands.
+    // Checked after the source POs are locked: a PO archive takes lines off
+    // this order holding only the PO's lock, and the fingerprint has to see
+    // that. Last, too, so any other refusal names its own reason.
+    if (body.to === 'Done') {
+      const missing = missingSigners((await signoffState(tx, id)).managers);
+      if (missing.length > 0) return { kind: 'needsSignoff', missing: missing.map(m => m.name) };
+    }
+
     // Apply the status update + (for close) the denormalized reason; (for
     // reopen) clear the reason.
     if (body.to === 'Closed') {
@@ -1599,6 +1614,8 @@ sellOrders.post('/:id/status', async (c) => {
                updated_at = NOW()
          WHERE id = ${id}
       `;
+      // A deal revived after it was closed is a new deal to approve.
+      await tx`DELETE FROM sell_order_signoffs WHERE sell_order_id = ${id}`;
     } else {
       // done_at is the date the sale belongs to (dashboard, contributions).
       // Done is terminal, so it is set here once and never cleared.
@@ -1748,6 +1765,12 @@ sellOrders.post('/:id/status', async (c) => {
   if (outcome.kind === 'archived') {
     return c.json({ error: `unarchive this sell order before moving it to ${outcome.to}` }, 409);
   }
+  if (outcome.kind === 'needsSignoff') {
+    return c.json({
+      error: `needs sign-off from ${outcome.missing.join(', ')}`,
+      missingSignoff: outcome.missing,
+    }, 409);
+  }
   return c.json({ ok: true, status: body.to });
 });
 
@@ -1817,6 +1840,91 @@ async function setSellOrderArchived(c: SOCtx, archive: boolean) {
 
 sellOrders.post('/:id/archive',   c => setSellOrderArchived(c, true));
 sellOrders.post('/:id/unarchive', c => setSellOrderArchived(c, false));
+
+// ── Manager sign-off. Signing approves the order as it stands and only
+// unlocks Done (the gate is in POST /:id/status); a manager signs for
+// themselves alone. Open orders only: a Done order's sign-offs are its
+// record, and a Closed one is reopened before it is signed again.
+//
+// A signature names the version it approves — the fingerprint the page read —
+// so an edit landing between the manager's review and the click can't be
+// signed for them unseen.
+async function setSignoff(c: SOCtx, signing: boolean) {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const id = c.req.param('id') as string;
+  let reviewed: string | null = null;
+  if (signing) {
+    const body = (await c.req.json().catch(() => null)) as { fingerprint?: unknown } | null;
+    if (typeof body?.fingerprint !== 'string') {
+      return c.json({ error: 'fingerprint is required — sign from the order as you read it' }, 400);
+    }
+    reviewed = body.fingerprint;
+  }
+  const sql = getDb(c.env);
+
+  type Outcome =
+    | { kind: 'notFound' }
+    | { kind: 'locked'; status: string }
+    | { kind: 'changed' }
+    | { kind: 'done'; signoff: SignoffState };
+
+  const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
+    // The row lock orders this against a PATCH or a Done on the same order.
+    const cur = (await tx<{ status: string }[]>`
+      SELECT status FROM sell_orders WHERE id = ${id} LIMIT 1 FOR UPDATE
+    `)[0];
+    if (!cur) return { kind: 'notFound' };
+    if (!openSellStatuses().includes(cur.status)) return { kind: 'locked', status: cur.status };
+
+    if (signing) {
+      const current = (await orderFingerprint(tx, id))!;
+      if (current !== reviewed) return { kind: 'changed' };
+      await tx`
+        INSERT INTO sell_order_signoffs (sell_order_id, user_id, fingerprint)
+        VALUES (${id}, ${u.id}, ${current})
+        ON CONFLICT (sell_order_id, user_id) DO UPDATE SET
+          fingerprint = EXCLUDED.fingerprint,
+          signed_at   = NOW()
+      `;
+      await writeSellOrderEvent(tx, id, u.id, 'signed_off', {});
+    } else {
+      const gone = await tx`
+        DELETE FROM sell_order_signoffs WHERE sell_order_id = ${id} AND user_id = ${u.id}
+        RETURNING 1
+      `;
+      if (gone.length > 0) await writeSellOrderEvent(tx, id, u.id, 'signoff_withdrawn', {});
+    }
+
+    const signoff = await signoffState(tx, id);
+    if (signing) {
+      const signer = signoff.managers.find(m => m.id === u.id)?.name ?? u.name;
+      for (const m of missingSigners(signoff.managers)) {
+        if (m.id === u.id) continue;
+        await notify(tx, {
+          userId: m.id,
+          kind: 'sell_order_signoff',
+          icon: 'check',
+          title: `${signer} signed off sell order ${id}`,
+          body: 'Your sign-off is needed before it can be marked Done.',
+        });
+      }
+    }
+    return { kind: 'done', signoff };
+  });
+
+  switch (outcome.kind) {
+    case 'notFound': return c.json({ error: 'Not found' }, 404);
+    case 'locked':
+      return c.json({ error: `cannot change sign-off on a ${outcome.status} order` }, 409);
+    case 'changed':
+      return c.json({ error: 'this sell order changed since you opened it — reload it and review it again' }, 409);
+    case 'done': return c.json({ signoff: outcome.signoff });
+  }
+}
+
+sellOrders.post('/:id/signoff', (c) => setSignoff(c, true));
+sellOrders.delete('/:id/signoff', (c) => setSignoff(c, false));
 
 // ── Audit timeline for a single sell order. Manager-only (sell-orders is
 // manager-only throughout the route file).

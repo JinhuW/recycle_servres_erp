@@ -10,7 +10,7 @@ import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import { eventsOf } from './helpers/sellOrderEvents';
-import { createSellOrderOn, firstCustomerId } from './helpers/fixtures';
+import { createSellOrderOn, firstCustomerId, signOffAll } from './helpers/fixtures';
 
 type Line = { id: string; status: string; qty: number; partNumber: string | null };
 type Detail = { order: { lifecycle: string; archivedAt: string | null; lines: Line[] } };
@@ -161,6 +161,7 @@ describe('archive takes the lines out of stock', () => {
     const { id, lineIds } = await createReviewing(pur, mgr);
     // Sell the whole second lot: Done flips the line to Sold.
     const soId = await createSellOrderOn(mgr, lineIds[1], PN, 2);
+    await signOffAll(soId);
     expect((await api('POST', `/api/sell-orders/${soId}/status`, {
       token: mgr, body: { to: 'Done' },
     })).status).toBe(200);
@@ -411,6 +412,7 @@ describe('an archived order is frozen', () => {
     const { token: mgr } = await loginAs(ALEX);
     const { id, lineIds } = await createReviewing(pur, mgr);
     const soId = await createSellOrderOn(mgr, lineIds[1], PN, 2);
+    await signOffAll(soId);
     expect((await api('POST', `/api/sell-orders/${soId}/status`, {
       token: mgr, body: { to: 'Done' },
     })).status).toBe(200);
@@ -575,6 +577,7 @@ describe('an archived PO is out of stock whatever its lines say', () => {
     const { id, lineIds } = await createReviewing(pur, mgr);
     // Sell the whole second lot so one line is Sold — the sales record.
     const soId = await createSellOrderOn(mgr, lineIds[1], PN, 2);
+    await signOffAll(soId);
     expect((await api('POST', `/api/sell-orders/${soId}/status`, { token: mgr, body: { to: 'Done' } })).status).toBe(200);
     await getTestDb()`UPDATE orders SET archived_at = NOW() WHERE id = ${id}`;
     const st = await statusesOf(id, mgr);

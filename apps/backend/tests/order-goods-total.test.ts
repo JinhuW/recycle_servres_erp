@@ -3,6 +3,7 @@ import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, MARCUS, ALEX } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
+import { signOffAll } from './helpers/fixtures';
 
 // orders.total_cost is the PO's goods total. It is USUALLY a denormalization of
 // the lines — kept as a column so the list's keyset sort, the draft picker and
@@ -69,6 +70,7 @@ const sell = async (token: string, src: { id: string; sell_price: number }, qty:
     },
   });
   expect(created.status).toBe(201);
+  await signOffAll(created.body.id);
   const done = await api('POST', `/api/sell-orders/${created.body.id}/status`, {
     token, body: { to: 'Done', note: 'paid' },
   });
