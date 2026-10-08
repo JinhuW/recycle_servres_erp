@@ -1,12 +1,41 @@
-import { defineConfig } from 'vite';
+import { readFileSync } from 'node:fs';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 import { bootPlugin } from './vite-plugin-boot';
 
+// The release version lives in the root package.json, bumped with every push
+// to dev, so a bundle built from a commit knows which release it is.
+const APP_VERSION = (JSON.parse(
+  readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
+) as { version: string }).version;
+
+// Published next to index.html so an open desktop tab can ask what is deployed
+// now and compare it with what it is running (lib/buildVersion.ts). Comes from
+// the same deploy as the bundle, unlike /api/health, which lags on a
+// frontend-only release.
+function versionFilePlugin(): Plugin {
+  return {
+    name: 'recycle-erp-version-file',
+    apply: 'build',
+    generateBundle() {
+      this.emitFile({
+        type: 'asset',
+        fileName: 'version.json',
+        source: JSON.stringify({ version: APP_VERSION }),
+      });
+    },
+  };
+}
+
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(APP_VERSION),
+  },
   plugins: [
     react(),
     bootPlugin(),
+    versionFilePlugin(),
     VitePWA({
       registerType: 'prompt',
       // SW registration is owned by src/lib/pwa.ts so we can gate on user consent.

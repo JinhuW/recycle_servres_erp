@@ -7,12 +7,12 @@ type Health = { status: string; version: string; commit: string; builtAt: string
 // callers show the version on its own rather than an invented date.
 export type Build = { version: string; commit: string; builtAt: string | null };
 
-// The deployed version isn't baked into the bundle — it's stamped into the
-// backend image at release time and surfaced at /api/health. Reading it from
-// there means the footer reflects what is actually running, and the single
-// source of truth (root package.json -> image -> health) can't drift from a
-// hand-edited frontend constant. Unauthenticated GET, so it works on every
-// shell regardless of login state.
+// The footer shows the backend's version — stamped into its image at release
+// time and surfaced at /api/health — so it reflects what the server is
+// actually running. The bundle knows its own build's version as well
+// (lib/buildVersion.ts), but only to notice a newer deploy of itself: the two
+// differ whenever one side deploys without the other. Unauthenticated GET, so
+// it works on every shell regardless of login state.
 let cache: Build | null = null;
 
 export function useAppVersion(): Build | null {

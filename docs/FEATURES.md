@@ -835,8 +835,14 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   one product (several PO lines of one part) share its #. The number is worked
   out from the sort each time the order is read, so adding a line, deleting a
   lot, moving one to another warehouse or editing a spec that re-sorts it
-  renumbers the products after it; setting a line to 0 never does. A line
-  added while editing reads *new* until the save numbers it.
+  renumbers the products after it; setting a line to 0, editing a price or
+  saving the order as shown never does (v1.221.0). A product's place comes
+  from its first line by PO and line # — 0s included, never the order the
+  page lists them in — and a tie on everything the sheet sorts by goes by
+  part #. Before v1.221.0 the first line by stored position decided, and a
+  save rewrote positions, so a price edit could renumber an order whose lots
+  of one part differed in type. A line added while editing reads *new* until
+  the save numbers it.
 - **A line that can't ship is set to 0, not removed** (v1.219.0), so no line
   after it is renumbered. Any line already on the order may go to 0 in the
   editor, including one whose lot is gone; a line being added still needs at
@@ -849,9 +855,11 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   and keeps its price through a negotiated total. An order whose lines are
   all 0 can't move to Shipped, Awaiting payment or Done, and has nothing to
   pack: both packing-list buttons are off for it (v1.220.2). A hand-typed line is
-  no longer capped at its saved qty. Archiving a PO or removing one of its
-  lines leaves a sell line held at 0 alone (v1.220.2): it is not a conflict and
-  is not removed, so no # after it moves.
+  no longer capped at its saved qty. Archiving a PO leaves a sell line held
+  at 0 alone (v1.220.2): it is not a conflict and is not removed, so no #
+  after it moves. Removing the PO line it names doesn't block either, but the
+  sell line becomes a hand-typed line — a different product — so it and the
+  products after it are renumbered.
 - **Line items group By warehouse or By PO** (v1.194.0), in both view and edit.
   The switch on the Line items header is remembered per user (preference
   `sellOrders.lineGroup`, default by warehouse).
@@ -859,15 +867,18 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
     "No PO", matching the "Packing list by PO" download. It shows a Warehouse
     column. Inside a group, either way, the lines keep the order's # order
     (v1.220.3; By PO went by the PO page's line # before).
-  - By warehouse groups on the warehouse each line was saved with and shows
-    the "From PO-…" reference under each line.
+  - By warehouse groups on where each line's lot is now — the warehouse the
+    packing lists file it under (v1.221.0; the warehouse the line was saved
+    with before, which a transfer left behind) — and shows the "From PO-…"
+    reference under each line. By PO's Warehouse column reads the same.
   - PO references are links in view mode and plain text while editing, since
     the edit page has no leave guard.
 - **A line carries its number on the source PO** (v1.196.0): the `#` the PO
   page shows for that line.
   - By PO shows it as a grey `PO #3` badge after the item name, in view and
     edit mode (v1.198.2). Hovering reads "Line 3 on PO-1432". Each card lists
-    its lines in PO order, and a hand-typed line has no badge. It is a badge,
+    its lines in the order's # order (v1.220.3), so the badges need not run
+    in sequence, and a hand-typed line has no badge. It is a badge,
     not a column, on purpose: a leading `#` column (v1.196.0) read as the sell
     order's own row number, and an "ID in PO" column (v1.197.3) was tried and
     dropped.
@@ -953,7 +964,12 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   hand-typed share) — POs in numeric order, hand-typed last, and the row grows
   to show them. v1.220.0 had split such a product into a bold product row and
   a tickable row per PO line; that went back to one row once the # became one
-  per product.
+  per product. A product from more PO lines than one row can show (Excel
+  caps a row at 409pt) goes on over further rows, its #, tick box and other
+  cells merged down them (v1.221.0). Its per-lot details — health, rank, the
+  part # spelling, the bid sheet's Image URL — come from its first line above
+  0, so a lot held at 0 never speaks for what ships; its place, device and
+  generation stay with the line that numbers it (v1.221.0).
 - **The packing lists carry no photos** (v1.220.1). v1.220.0 embedded a
   thumbnail of each lot's label scan in a `Photo` column after the tick box,
   fetched at export time; it was taken out the same day as not needed on the
@@ -977,7 +993,9 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   Part # (v1.197.3): the line's # on that PO's page. A row that folds several
   lots of the PO stacks their IDs in that cell the same way (`#2 × 13` above
   `#3 × 12`, v1.220.3); the tab already names the PO, so it has no `From PO`
-  column. A warehouse picker beside the buttons
+  column. A tab is cut from the numbered products, so its rows run in #
+  order under the same device and generation labels as the plain list, with
+  its own lots' details (v1.221.0). A warehouse picker beside the buttons
   (shown when the order's lines above 0 span more than one — a warehouse
   holding only 0 lines isn't offered, v1.220.2) narrows either packing list to
   one warehouse (`?warehouse=<short>`); the bid sheet always covers the whole
@@ -1725,6 +1743,13 @@ removed in v1.191.0.
   new tab. The PO page's "Open payments" lands on the list focused on that
   PO. Sell-order links stay desktop-only: the phone shell has no sell-order
   route.
+- **A desktop tab offers a reload once a new build is live** (v1.221.0). The
+  build writes `version.json` next to the bundle; a desktop tab reads it when
+  it comes back into view (at most every 5 minutes) and, when it no longer
+  matches the build it is running, shows the same "new version" toast the
+  phone app shows for its service-worker update. A tab or iPad left open
+  across a release would otherwise keep numbering against the new API with
+  old code. The phone keeps its service-worker flow.
 - **An iPad gets the desktop shell** — every iPad is at least 744px wide.
   Most desktop pages are built for a pointer; sell-order Pack mode (v1.218.0)
   is the one page laid out for touch. An iPad in Split View narrower than

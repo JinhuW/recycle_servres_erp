@@ -75,11 +75,15 @@ const SHEET_SORT_KEYS = ['brand', 'capacity', 'speed'] as const;
 
 // Numeric collation: it keeps 8GB below
 // 16GB and 3200 below 12800, which a plain lexical sort gets backwards. Blanks
-// sink so manual lines (no specs at all) never head the tab.
+// sink so manual lines (no specs at all) never head the tab. One collator for
+// the module: localeCompare with options builds a fresh one per call, and the
+// sell-order page sorts its lines on every read.
+const SPEC_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
 export function compareSpecValue(a: string, b: string): number {
   if (!a) return b ? 1 : 0;
   if (!b) return -1;
-  return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+  return SPEC_COLLATOR.compare(a, b);
 }
 
 // Label breaks ties so the same data always exports byte-identically. `read`

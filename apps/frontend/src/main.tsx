@@ -10,8 +10,8 @@ import { registerPwa } from './lib/pwa';
 
 import './styles/tokens.css';
 import './styles/phone.css';
-// pwa.css rides along with the two components that own it (App.tsx lazy-loads
-// them, phone-only), so it is not in the entry bundle.
+// pwa.css rides along with the components that own it (App.tsx lazy-loads
+// them), so it is not in the entry bundle.
 
 // Before render: a shell chunk can fail on the very first import, so the
 // listener has to be up before anything asks for one.

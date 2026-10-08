@@ -13,9 +13,9 @@ RUN pnpm --filter recycle-erp-frontend build
 FROM caddy:2-alpine
 # Build provenance (see apps/backend/Dockerfile). Re-declared here because ARGs
 # don't cross stage boundaries; defaults keep a plain `docker build` working.
-# The footer reads the version at runtime from /api/health, so the static
-# bundle needs no version baked in — these are just OCI labels for `docker
-# inspect`.
+# The footer reads the version at runtime from /api/health, and the bundle
+# takes its own from the root package.json copied above — these are just OCI
+# labels for `docker inspect`.
 ARG APP_VERSION=dev
 ARG GIT_SHA=unknown
 LABEL org.opencontainers.image.version=$APP_VERSION \

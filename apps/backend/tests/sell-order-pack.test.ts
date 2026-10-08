@@ -140,6 +140,25 @@ describe('sell order pack mode', () => {
     expect(rowOf(p, newTyped).packedAt).not.toBeNull();
   });
 
+  it('keeps each tick on its own line when two same-text typed lines in two warehouses swap places', async () => {
+    const so = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token: mgr,
+      body: {
+        customerId: await firstCustomerId(mgr),
+        lines: [{ ...TYPED, warehouseId: 'WH-NJ2' }, { ...TYPED, warehouseId: 'WH-LA1' }],
+      },
+    });
+    expect(so.status).toBe(201);
+    const nj = (await detailLines(mgr, so.body.id)).find(l => l.warehouseId === 'WH-NJ2')!.id;
+    await putPack(mgr, so.body.id, nj, { counted: 3, packed: true });
+
+    // The page lists LA1 first, so saving it as shown swaps their positions.
+    const after = await rewriteLines(mgr, so.body.id, () => ({}));
+    const p = (await getPack(mgr, so.body.id)).body;
+    expect(rowOf(p, after.find(l => l.warehouseId === 'WH-NJ2')!.id).packedAt).not.toBeNull();
+    expect(rowOf(p, after.find(l => l.warehouseId === 'WH-LA1')!.id).packedAt).toBeNull();
+  });
+
   it('a qty change unpacks that line only', async () => {
     const { id, picked, lot } = await createOrder(mgr);
     const typedId = (await detailLines(mgr, id)).find(l => l.inventoryId === null)!.id;

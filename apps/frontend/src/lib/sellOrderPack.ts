@@ -37,8 +37,13 @@ export function packBody(c: LineCheck, qty: number): { counted: number; packed: 
 // The backend's own name for lines with no warehouse, on the packing-list tabs.
 export const UNASSIGNED = 'Unassigned';
 
+// Where the line's lot is now; null when it has no warehouse.
+export function lotWarehouse(l: Pick<PackLine, 'warehouse' | 'packWarehouse'>): string | null {
+  return l.packWarehouse === undefined ? l.warehouse : l.packWarehouse;
+}
+
 export function packWarehouseOf(l: Pick<PackLine, 'warehouse' | 'packWarehouse'>): string {
-  return (l.packWarehouse === undefined ? l.warehouse : l.packWarehouse) ?? UNASSIGNED;
+  return lotWarehouse(l) ?? UNASSIGNED;
 }
 
 // The warehouses an order is packed from, as the packing-list downloads split

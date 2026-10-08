@@ -6,7 +6,7 @@ import { freeSellableLine } from './helpers/inventory';
 import { api, multipart, testEnv } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import {
-  buildPriceTemplateWorkbook, buildPackingListWorkbook, packTabName,
+  buildPriceTemplateWorkbook, buildPackingListWorkbook, packSections, packTabName,
 } from '../src/lib/sellOrderPriceTemplate';
 
 const XLSX_MIME =
@@ -314,12 +314,14 @@ describe('GET /api/sell-orders/:id/price-template', () => {
     expect(fill(priceCol, first + 1)).toBe('FFFFF7C2');
 
     // The packing workbook walks the same order and carries the same labels,
-    // so bidder and picker find a product in the same place.
+    // so bidder and picker find a product in the same place. It prints the #
+    // the route gives each product by walking packSections, scrambled here.
+    const numbered = packSections(products).flatMap(s => s.rows).map((p, i) => ({ ...p, no: i + 1 }));
     const packWb = new ExcelJS.Workbook();
     await packWb.xlsx.load(
       await buildPackingListWorkbook(
         { id: 'SL-GRP', customerName: 'Acme', currencyCode: 'USD' },
-        [{ warehouse: 'LA1', products }],
+        [{ warehouse: 'LA1', products: [...numbered].reverse() }],
       ) as unknown as ArrayBuffer,
     );
     const pack = packWb.worksheets.find(w => w.name === 'Pack - LA1')!;
@@ -961,6 +963,38 @@ describe('packTabName', () => {
     expect(packTabName("Pack - DEN'", used)).toBe('Pack - DEN');
     expect(packTabName("'Pack - DEN", used)).toBe('Pack - DEN (2)');
     expect(packTabName('Pack - A/B', used)).toBe('Pack - A-B');
+  });
+
+  it('spreads a product from more PO lines than one row can show over merged rows, none above Excel\'s cap', async () => {
+    const many = Array.from({ length: 30 }, (_, i) => ({ po: `PO-${1000 + i}`, lineNo: 1, qty: 1 }));
+    const ram = { category: 'RAM', condition: null, imageUrl: null, specs: { type: 'Server', generation: 'DDR4' } };
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await buildPackingListWorkbook(
+      { id: 'SO-1', customerName: 'C', currencyCode: 'USD' },
+      [{ warehouse: 'LA1', products: [
+        { ...ram, label: 'Many', partNumber: 'MANY', qty: 30, poSources: many, no: 1 },
+        { ...ram, label: 'One', partNumber: 'ONE', qty: 1, poSources: [{ po: 'PO-1', lineNo: 2, qty: 1 }], no: 2 },
+      ] }],
+    ) as unknown as ArrayBuffer);
+    const ws = wb.worksheets[0]!;
+    let header = 0;
+    ws.eachRow((row, r) => { if (!header && (row.values as unknown[]).includes('From PO')) header = r; });
+    const col = (h: string) => (ws.getRow(header).values as unknown[]).indexOf(h);
+    const own = (r: number, c: number) => {
+      const cell = ws.getCell(r, c);
+      return cell.master.address === cell.address ? String(cell.value ?? '') : null;
+    };
+    const rows: number[] = [];
+    for (let r = header + 1; String(ws.getCell(r, col('#')).value ?? '') !== 'Subtotal'; r++) rows.push(r);
+
+    for (const r of rows) expect(ws.getRow(r).height ?? 0).toBeLessThanOrEqual(409);
+    // Every source shows exactly once, across the product's rows.
+    const sources = rows.flatMap(r => (own(r, col('From PO')) ?? '').split('\n')).filter(Boolean);
+    expect(sources).toEqual([...many.map(s => `${s.po} #1 × 1`), 'PO-1 #2']);
+    // One # and one tick box per product, merged down its rows.
+    const numbered = rows.filter(r => own(r, col('#')) !== null).map(r => [own(r, col('#')), own(r, col('Part #'))]);
+    expect(numbered).toEqual([['1', 'MANY'], ['2', 'ONE']]);
+    expect(ws.getCell(rows[1]!, col('Packed ✓')).master.address).toBe(ws.getCell(rows[0]!, col('Packed ✓')).address);
   });
 
   it('builds a workbook for a warehouse short Excel would refuse as-is', async () => {

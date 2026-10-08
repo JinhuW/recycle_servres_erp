@@ -308,6 +308,19 @@ export function packSections<T extends PriceTemplateProduct>(
     .map((category) => ({ category, rows: sortCategoryForSheet(category, byCategory.get(category)!) }));
 }
 
+// The same sections with their rows in # order, for products the route has
+// already numbered by walking packSections — so a tab never sorts on its own
+// and can't print #2 above #1.
+function numberedSections<T extends PriceTemplateProduct>(
+  products: T[],
+): { category: string; rows: T[] }[] {
+  const byCategory = groupByCategory(products);
+  return CATEGORY_ORDER.filter((cat) => byCategory.has(cat)).map((category) => ({
+    category,
+    rows: [...byCategory.get(category)!].sort((a, b) => (a.no ?? 0) - (b.no ?? 0)),
+  }));
+}
+
 export async function buildPriceTemplateWorkbook(
   head: PriceTemplateHead,
   products: PriceTemplateProduct[],
@@ -557,23 +570,32 @@ function whSectionCols(category: string, poCol: PoCol): WhCol[] {
   ];
 }
 
-// A product's PO lines in the order a picker walks them: POs in numeric order
-// (PO-999 before PO-1442), then line #, a hand-typed share last.
+// PO ids are unpadded, so they compare numerically: PO-999 before PO-1442.
+const PO_COLLATOR = new Intl.Collator(undefined, { numeric: true });
+export const comparePoIds = (a: string, b: string): number => PO_COLLATOR.compare(a, b);
+
+// A product's PO lines in the order a picker walks them: POs in numeric order,
+// then line #, a hand-typed share last.
 export function sortSources<T extends PoSource>(sources: readonly T[]): T[] {
   return [...sources].sort((a, b) => {
     if (!a.po || !b.po) return a.po ? -1 : b.po ? 1 : 0;
-    return a.po.localeCompare(b.po, undefined, { numeric: true }) || a.lineNo! - b.lineNo!;
+    return comparePoIds(a.po, b.po) || a.lineNo! - b.lineNo!;
   });
 }
+
+// Excel stops a row at 409pt and lays out none of the wrapped text it clips,
+// so a product with more PO lines than this (15pt a line) goes on over more
+// rows, its other cells merged down them.
+const MAX_STACKED_SOURCES = 25;
 
 // A product's source cell. One PO line reads as it always has; several are
 // stacked in the one cell, a line each with its share of the qty, so the
 // product keeps one row, one # and one tick box (user-requested 2026-10-07).
-function sourceCell(sources: readonly PoSource[], poCol: PoCol): string | number {
+function sourceCell(sources: readonly PoSource[], poCol: PoCol, stacked = sources.length > 1): string | number {
   const name = (x: PoSource) =>
     poCol === 'id' ? (x.lineNo != null ? `#${x.lineNo}` : '—')
       : x.po ? `${x.po} #${x.lineNo}` : 'No PO';
-  if (sources.length === 1) {
+  if (!stacked) {
     const [x] = sources;
     if (poCol === 'id') return x.lineNo ?? '';
     return x.po ? name(x) : '—';
@@ -599,7 +621,7 @@ function renderWarehouseSheet(
   // bid tabs at a glance and can never collide with RAM/SSD/HDD/Other.
   const ws = wb.addWorksheet(opts.tabName ?? `Pack - ${wh.warehouse}`);
 
-  const sections = packSections(wh.products);
+  const sections = numberedSections(wh.products);
 
   // Shared per-index widths: the widest column wins across sections.
   const widths: number[] = [];
@@ -661,19 +683,42 @@ function renderWarehouseSheet(
     });
 
     let sectionQty = 0;
-    // Same order as the bid tabs, so a picker walking the shelf and a manager
-    // reading the bid see a product in the same place. The group labels below
-    // merge runs of sectionRows, one row each.
+    // In # order, which is the bid tabs' order too, so a picker walking the
+    // shelf and a manager reading the bid see a product in the same place. The
+    // group labels below merge runs of physical rows, so a product spread over
+    // several rows is listed once per row there.
     const firstRow = r;
+    const physical: PriceTemplateProduct[] = [];
     for (const p of sectionRows) {
-      const row = ws.getRow(r++);
       // Wash under the group, tick box excluded — a tinted box reads as
       // already ticked once the sheet is printed.
       const wash = cat === 'RAM' ? tintFill(rowTint(p)) : null;
       const sources = sortSources(p.poSources ?? []);
       const stacked = sources.length > 1;
-      // Excel won't grow a row for wrapped text it didn't lay out itself.
-      if (stacked) row.height = 15 * sources.length;
+      const chunks: PoSource[][] = [];
+      for (let i = 0; i < Math.max(sources.length, 1); i += MAX_STACKED_SOURCES) {
+        chunks.push(sources.slice(i, i + MAX_STACKED_SOURCES));
+      }
+      const top = r;
+      chunks.forEach((chunk, k) => {
+        const row = ws.getRow(r++);
+        physical.push(p);
+        // Excel won't grow a row for wrapped text it didn't lay out itself.
+        if (stacked) row.height = 15 * chunk.length;
+        if (k === 0) return;
+        // A continuation row carries only the rest of the sources; the merges
+        // below give it the product's other cells.
+        cols.forEach((c, i) => {
+          const cell = row.getCell(i + 1 + PACK_GROUP_OFFSET);
+          if (wash && c.key !== 'packed') cell.fill = wash;
+          if (c.key === 'poLine' || c.key === 'poSource') {
+            cell.value = sourceCell(chunk, poCol, true);
+            cell.alignment = { vertical: 'top', wrapText: true, horizontal: c.key === 'poLine' ? 'center' : undefined };
+          }
+        });
+      });
+      const row = ws.getRow(top);
+      const shown = chunks[0]!;
       cols.forEach((c, i) => {
         const cell = row.getCell(i + 1 + PACK_GROUP_OFFSET);
         if (wash && c.key !== 'packed') cell.fill = wash;
@@ -689,7 +734,7 @@ function renderWarehouseSheet(
           case 'part': cell.value = p.partNumber ?? ''; break;
           case 'poLine':
           case 'poSource':
-            cell.value = sources.length ? sourceCell(sources, poCol) : '';
+            cell.value = shown.length ? sourceCell(shown, poCol, stacked) : '';
             cell.alignment = { vertical: 'top', wrapText: stacked, horizontal: c.key === 'poLine' ? 'center' : undefined };
             break;
           case 'qty':
@@ -700,11 +745,18 @@ function renderWarehouseSheet(
         }
         if (stacked && !cell.alignment) cell.alignment = { vertical: 'top' };
       });
+      if (r - 1 > top) {
+        cols.forEach((c, i) => {
+          if (c.key !== 'poLine' && c.key !== 'poSource') {
+            ws.mergeCells(top, i + 1 + PACK_GROUP_OFFSET, r - 1, i + 1 + PACK_GROUP_OFFSET);
+          }
+        });
+      }
       sectionQty += p.qty;
     }
-    // Merged across sectionRows only, so they stop at the section's last row
+    // Merged across this section's rows only, so they stop at its last row
     // and can never reach the subtotal below it.
-    if (cat === 'RAM') renderGroupLabels(ws, RAM_GROUP_COLS, sectionRows, firstRow);
+    if (cat === 'RAM') renderGroupLabels(ws, RAM_GROUP_COLS, physical, firstRow);
     totalQty += sectionQty;
 
     const subtotal = ws.getRow(r++);

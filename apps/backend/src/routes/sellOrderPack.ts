@@ -9,14 +9,19 @@ const packRoutes = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 // A line's pack identity. Saving the order's lines deletes and re-inserts
 // every row, so the row id can't carry progress: a picked line is its lot, a
 // hand-typed line its text. The occurrence number keeps two lines of one
-// identity apart — nothing stops the API from naming a lot twice.
+// identity apart — nothing stops the API from naming a lot twice. It counts
+// by warehouse and sub-label before position, because a save rewrites
+// position in packing-list order: two same-text lines in two warehouses
+// would otherwise trade numbers, and their ticks with them.
 function keyedLines(sql: SqlLike, orderId: string) {
   return sql`
     SELECT s.id, s.qty, s.inventory_id,
            s.base || '#' || ROW_NUMBER() OVER (
-             PARTITION BY s.base ORDER BY s.position, s.created_at, s.id) AS line_key
+             PARTITION BY s.base
+             ORDER BY s.warehouse_id, s.sub_label, s.position, s.created_at, s.id) AS line_key
     FROM (
       SELECT sol.id, sol.qty, sol.inventory_id, sol.position, sol.created_at,
+             sol.warehouse_id, sol.sub_label,
              COALESCE(sol.inventory_id::text, 'typed:' || md5(jsonb_build_array(
                sol.category, sol.label, sol.part_number, sol.condition)::text)) AS base
       FROM sell_order_lines sol WHERE sol.sell_order_id = ${orderId}
