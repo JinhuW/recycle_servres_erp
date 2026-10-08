@@ -66,8 +66,8 @@ export const isPackable = (l: Pick<CheckableLine, 'qty'>): boolean => l.qty > 0;
 
 export type PackRowView<L> = { line: L; no: number };
 
-// Every line in the order's own list order — the packing list's — with its
-// product's #, which the server counts over the whole order so a warehouse
+// Every line in the order's own list order — # order — with its product's
+// #, which the server counts over the whole order so a warehouse
 // filter doesn't renumber. A ticked line stays where it is: the packer and the
 // receiver both read the list by #.
 // `wh` '' means every warehouse.

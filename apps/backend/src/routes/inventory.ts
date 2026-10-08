@@ -6,7 +6,9 @@ import { getWorkspaceSetting } from '../lib/settings';
 import { nextHumanId } from '../lib/id-seq';
 import { canonPartCol, canonPartArg } from '../lib/part-number';
 import { invLabel } from '../lib/inventoryLabel';
-import { committedClaimsByLine, committedQtySql, openSellStatuses } from '../lib/sellCommitment';
+import {
+  committedClaimsByLine, committedQtySql, openSellStatuses, proposalSellStatuses,
+} from '../lib/sellCommitment';
 import { lockOrdersForLinesTx } from '../services/orderLocks';
 import { specVal, validateLineInput } from '../lib/orderInput';
 import { buildXlsxWorkbook, xlsxResponse, datedFilename, type XlsxColumn } from '../lib/xlsx';
@@ -1504,11 +1506,12 @@ inventory.post('/transfer', async (c) => {
       if (s.effective_wh === toWarehouseId) return { kind: 'alreadyThere', id: r.id };
     }
 
-    // A full move sends the line itself out In Transit, so a Draft that names
-    // it can no longer be promoted until the transfer is received. Nothing is
-    // wrong with that, but the manager drafting that sale should not find out
-    // at promotion: the drafts are named first, and the move goes ahead once
-    // the caller confirms. A partial move leaves the named line where it is.
+    // A full move sends the line itself out In Transit, so a Draft (or Packing
+    // order) that names it can no longer be promoted until the transfer is
+    // received. Nothing is wrong with that, but the manager drafting that sale
+    // should not find out at promotion: the drafts are named first, and the
+    // move goes ahead once the caller confirms. A partial move leaves the named
+    // line where it is.
     if (!confirmDrafts) {
       const fullMoves = reqLines.filter((r) => r.qty === byId.get(r.id)!.qty).map((r) => r.id);
       const drafts = fullMoves.length === 0 ? [] : await tx<{ id: string }[]>`
@@ -1516,7 +1519,7 @@ inventory.post('/transfer', async (c) => {
         FROM sell_order_lines sol
         JOIN sell_orders so ON so.id = sol.sell_order_id
         WHERE sol.inventory_id = ANY(${fullMoves}::uuid[])
-          AND so.status = 'Draft' AND so.archived_at IS NULL
+          AND so.status = ANY(${proposalSellStatuses()}::text[]) AND so.archived_at IS NULL
           -- Promotion skips a line held at 0, so it is not held up by the move.
           AND sol.qty > 0
         ORDER BY so.id

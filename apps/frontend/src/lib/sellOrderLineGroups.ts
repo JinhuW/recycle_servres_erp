@@ -20,9 +20,11 @@ export type SellOrderLineGroup<T> = {
   items: { line: T; idx: number }[];
 };
 
-// The server sends the lines in packing-list order, numbered by product, so
-// both groupings keep that order inside a group: a group lists its lines the
-// way the matching download does. Warehouse groups follow where the lot is
+// The server sends the lines in # order, numbered by product, so both
+// groupings keep that order inside a group. That is the matching download's
+// order too, except for a product added once the order was past Draft: it
+// comes last here, with its later #, and sits in its sorted row on the sheet.
+// Warehouse groups follow where the lot is
 // now, as the packing lists do — not the warehouse the line was saved with,
 // which a transfer leaves behind — and come in first-seen order; PO groups
 // read like the "Packing list by PO" download — numeric PO order (PO-999

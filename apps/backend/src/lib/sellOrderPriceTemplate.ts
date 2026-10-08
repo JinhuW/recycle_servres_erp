@@ -297,28 +297,18 @@ function groupByCategory<T extends PriceTemplateProduct>(products: T[]): Map<str
   return byCategory;
 }
 
-// A packing tab's sections and rows, in the order the tab shows them. The
-// route numbers products by walking exactly this, so the # a product gets and
-// the place its row takes cannot disagree.
+// A packing tab's sections and rows, in the order the tab shows them — the
+// bid tabs' order, so bidder and picker find a product in the same place. The
+// route numbers products by walking this, so the #s run down the tab, except
+// for a product added once the order was past Draft: it takes the next # after
+// all the others but still prints in its sorted row. The sorts are stable, so
+// a tie keeps the order the route handed over.
 export function packSections<T extends PriceTemplateProduct>(
   products: T[],
 ): { category: string; rows: T[] }[] {
   const byCategory = groupByCategory(products);
   return CATEGORY_ORDER.filter((cat) => byCategory.has(cat))
     .map((category) => ({ category, rows: sortCategoryForSheet(category, byCategory.get(category)!) }));
-}
-
-// The same sections with their rows in # order, for products the route has
-// already numbered by walking packSections — so a tab never sorts on its own
-// and can't print #2 above #1.
-function numberedSections<T extends PriceTemplateProduct>(
-  products: T[],
-): { category: string; rows: T[] }[] {
-  const byCategory = groupByCategory(products);
-  return CATEGORY_ORDER.filter((cat) => byCategory.has(cat)).map((category) => ({
-    category,
-    rows: [...byCategory.get(category)!].sort((a, b) => (a.no ?? 0) - (b.no ?? 0)),
-  }));
 }
 
 export async function buildPriceTemplateWorkbook(
@@ -621,7 +611,7 @@ function renderWarehouseSheet(
   // bid tabs at a glance and can never collide with RAM/SSD/HDD/Other.
   const ws = wb.addWorksheet(opts.tabName ?? `Pack - ${wh.warehouse}`);
 
-  const sections = numberedSections(wh.products);
+  const sections = packSections(wh.products);
 
   // Shared per-index widths: the widest column wins across sections.
   const widths: number[] = [];
@@ -683,8 +673,10 @@ function renderWarehouseSheet(
     });
 
     let sectionQty = 0;
-    // In # order, which is the bid tabs' order too, so a picker walking the
-    // shelf and a manager reading the bid see a product in the same place. The
+    // In the sheet's order, which is the bid tabs' order too, so a picker
+    // walking the shelf and a manager reading the bid see a product in the same
+    // place. The # column runs down with it, except for a product added once
+    // the order was past Draft: it keeps its sorted row and its later #. The
     // group labels below merge runs of physical rows, so a product spread over
     // several rows is listed once per row there.
     const firstRow = r;

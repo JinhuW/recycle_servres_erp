@@ -1,9 +1,10 @@
 import type postgres from 'postgres';
 import type { SqlLike } from '../db';
 
-// A sell order holds its inventory only once it leaves Draft. Draft orders are
-// proposals — several may name the same line and only the one that ships wins,
-// so the claim is staked when the order is promoted, not when it is written.
+// A sell order holds its inventory only once it leaves Draft or Packing. Those
+// orders are proposals — several may name the same line and only the one that
+// ships wins, so the claim is staked when the order is promoted, not when it is
+// written or boxed.
 // Done is absent because it already consumed the stock (order_lines.qty is
 // decremented and sold-out lines flip to 'Sold'); Closed is absent because it
 // released it.
@@ -21,12 +22,22 @@ export function committedSellStatuses(): string[] {
   return [...COMMITTED_SELL_STATUSES];
 }
 
-// Every status in which a sell order still *names* its lines — Draft included.
-// A Draft reserves nothing (above), but a line it names cannot vanish either:
-// the draft is re-validated on promotion and would fail then. Use this where
-// the question is "is anyone still pointing at this line", the committed set
-// where it is "how much of it is spoken for".
-const OPEN_SELL_STATUSES = ['Draft', ...COMMITTED_SELL_STATUSES] as const;
+// The proposals: Draft, and Packing — a Draft whose goods are being boxed.
+// Neither reserves anything; leaving either for a committed status or Done is
+// where the order is validated against the stock, and where Pack mode stops
+// writing its counts onto the lines.
+const PROPOSAL_SELL_STATUSES = ['Draft', 'Packing'] as const;
+
+export function proposalSellStatuses(): string[] {
+  return [...PROPOSAL_SELL_STATUSES];
+}
+
+// Every status in which a sell order still *names* its lines — the proposals
+// included. A proposal reserves nothing (above), but a line it names cannot
+// vanish either: it is re-validated on promotion and would fail then. Use this
+// where the question is "is anyone still pointing at this line", the committed
+// set where it is "how much of it is spoken for".
+const OPEN_SELL_STATUSES = [...PROPOSAL_SELL_STATUSES, ...COMMITTED_SELL_STATUSES] as const;
 
 export function openSellStatuses(): string[] {
   return [...OPEN_SELL_STATUSES];

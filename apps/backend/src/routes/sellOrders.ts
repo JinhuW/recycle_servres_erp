@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { CLOSE_REASON_IDS, isRealPhotoUrl } from '@recycle-erp/shared';
-import { getDb } from '../db';
+import { getDb, type SqlLike } from '../db';
 import { uploadAttachment, deleteAttachment } from '../r2';
 import { notify } from '../lib/notify';
 import { getUploadLimits } from '../lib/settings';
@@ -28,7 +28,9 @@ import { canonPartNumberJs } from '../lib/part-number';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { settleSoldTx } from '../services/orderSold';
 import { searchSellableInventory } from '../services/sellableInventory';
-import { committedQtySql, committedSellStatuses, openSellStatuses } from '../lib/sellCommitment';
+import {
+  committedQtySql, committedSellStatuses, openSellStatuses, proposalSellStatuses,
+} from '../lib/sellCommitment';
 import { lockOrdersForLinesTx } from '../services/orderLocks';
 import {
   buildXlsxBuffer, xlsxResponse, datedFilename, type XlsxColumn,
@@ -284,11 +286,12 @@ sellOrders.get('/:id', async (c) => {
     lot_category: string | null; brand: string | null; capacity: string | null;
     generation: string | null; description: string | null; lot_part_number: string | null;
     chip_number: string | null; lot_condition: string | null; rpm: number | null;
+    append_batch: number | null;
   }[]>`
     SELECT sol.id, sol.category, sol.label, sol.sub_label, sol.part_number,
            sol.qty, sol.unit_price::float AS unit_price,
            sol.source_unit_price::float AS source_unit_price,
-           sol.condition, sol.position,
+           sol.condition, sol.position, sol.append_batch,
            sol.inventory_id, sol.warehouse_id, ol.order_id AS source_order_id,
            ${poLineNo(sql, 'ol')} AS source_line_no,
            w.short AS warehouse_short, pw.short AS pack_warehouse_short,
@@ -342,12 +345,13 @@ sellOrders.get('/:id', async (c) => {
     () => loadMetaStatuses(sql),
     () => signoffState(sql, id),
   ] as const);
-  // The lines in packing-list order, each with its product's # — folded from
-  // this one read, so a save landing mid-request can't leave a line unnumbered.
+  // The lines in # order, each with its product's # — folded from this one
+  // read, so a save landing mid-request can't leave a line unnumbered.
   const { lineOrder, noByLine } = numberSheetLines(listed.map((l): SheetLineRow => ({
     sol_id: l.id, sell_qty: l.qty,
     sol_label: l.label, sol_sub: l.sub_label, sol_part: l.part_number,
     sol_category: l.category, sol_condition: l.condition,
+    append_batch: l.append_batch,
     pack_warehouse: l.pack_warehouse_short,
     inv_id: l.inventory_id, source_order_id: l.source_order_id, po_line_no: l.source_line_no,
     category: l.lot_category, brand: l.brand, capacity: l.capacity, generation: l.generation,
@@ -469,6 +473,7 @@ type SheetLineRow = {
   sol_id: string; sell_qty: number;
   sol_label: string; sol_sub: string | null; sol_part: string | null;
   sol_category: string; sol_condition: string | null;
+  append_batch: number | null;
   // The lot's current warehouse, not the one saved on the line: a transfer of
   // committed stock moves the lot, and the pick happens where it is.
   pack_warehouse: string | null;
@@ -587,10 +592,17 @@ function foldProducts(lines: readonly FoldLine[]): SheetProduct[] {
 const warehouseOf = (l: FoldLine) => text(l.row.pack_warehouse) || 'Unassigned';
 
 // The packing list's products, and the # each one carries — one per product,
-// counted 1..N in the order the packing list shows them (warehouse tab, then
-// its sections and rows) through the whole file. Every sell line takes its
-// product's # and `lineOrder` lists the lines in that order, which is how the
-// order page, Pack mode and every file agree on both.
+// counted 1..N through the whole file. Every sell line takes its product's #.
+//
+// Two orders come out. `numbered` keeps each warehouse tab's products in the
+// packing list's own order (its sections and rows), which is what the files
+// print. The #s walk that same order, but in tiers: first every product with a
+// line numbered with the sorted set, then each later append batch in turn. A
+// product added once the order was past Draft therefore takes the next # after
+// all the others — its items' neighbours may already carry their labels —
+// while the sheet still prints it in its sorted row. `lineOrder` lists the
+// lines in # order, which is how the order page and Pack mode show them. With
+// nothing appended the two orders are the same.
 //
 // A line held at 0 is folded and numbered like any other — zeroing a line
 // must not move a # — and only then left off the files.
@@ -609,26 +621,43 @@ function numberSheetLines(rows: readonly SheetLineRow[]) {
     return a.localeCompare(b);
   });
 
-  // Walk the packing list as it prints, numbering as it goes.
+  const numbered = warehouseOrder.map((warehouse) => {
+    const whLines = byWarehouse.get(warehouse)!;
+    const products = packSections(foldProducts(whLines)).flatMap((s) => s.rows);
+    return { warehouse, products, lines: whLines };
+  });
+
+  // A product's tier: null while any of its lines is numbered with the sorted
+  // set, so a lot added to a product already on the order joins its #; else
+  // the earliest batch among its lines. 0 lines count — zeroing moves nothing.
+  const batchByLine = new Map(lines.map((l) => [l.row.sol_id, l.row.append_batch]));
+  const tierOf = (p: SheetProduct): number => {
+    let tier = Infinity;
+    for (const src of p.poSources) {
+      for (const lineId of src.solIds) tier = Math.min(tier, batchByLine.get(lineId) ?? 0);
+    }
+    return tier;
+  };
+  const tiers = numbered.map(({ products }) => products.map(tierOf));
+  const tierOrder = [...new Set(tiers.flat())].sort((a, b) => a - b);
+
   let n = 0;
   const lineOrder: string[] = [];
   const noByLine = new Map<string, number>();
-  const numbered = warehouseOrder.map((warehouse) => {
-    const products: SheetProduct[] = [];
-    for (const { rows: section } of packSections(foldProducts(byWarehouse.get(warehouse)!))) {
-      for (const p of section) {
+  for (const tier of tierOrder) {
+    numbered.forEach(({ products }, w) => {
+      products.forEach((p, i) => {
+        if (tiers[w]![i] !== tier) return;
         p.no = ++n;
-        products.push(p);
         for (const src of p.poSources) {
-          for (const id of src.solIds) {
-            lineOrder.push(id);
-            noByLine.set(id, n);
+          for (const lineId of src.solIds) {
+            lineOrder.push(lineId);
+            noByLine.set(lineId, n);
           }
         }
-      }
-    }
-    return { warehouse, products, lines: byWarehouse.get(warehouse)! };
-  });
+      });
+    });
+  }
   return { numbered, lineOrder, noByLine, lines };
 }
 
@@ -708,6 +737,7 @@ async function loadSellOrderSheetData(sql: SqlClient, id: string) {
       sol.id AS sol_id, sol.qty AS sell_qty,
       sol.label AS sol_label, sol.sub_label AS sol_sub, sol.part_number AS sol_part,
       sol.category AS sol_category, sol.condition AS sol_condition,
+      sol.append_batch,
       w.short AS pack_warehouse,
       l.id AS inv_id, l.order_id AS source_order_id, ${poLineNo(sql, 'l')} AS po_line_no,
       l.category, l.brand, l.capacity, l.generation, l.type,
@@ -933,6 +963,44 @@ sellOrders.post('/', async (c) => {
   return c.json({ ok: true, id: result.id }, 201);
 });
 
+// A line as the editor saves it: the row it was, when it was on the order —
+// the rewrite below replaces every row, and the id is how a line keeps its
+// place in the numbering through it.
+type SaveLineInput = DraftLineInput & { id?: string | null };
+
+// The append batch each saved line is written with. A line that was on the
+// order keeps its own — found by the row the editor says it was, else by its
+// lot — so neither an edit nor the rewrite moves its #. A new line on a Draft
+// is numbered with the sorted set; once the order is past Draft its items may
+// already carry their labels, so this save's new lines get a batch of their
+// own, after every other.
+async function appendBatches(
+  tx: SqlLike, orderId: string, status: string,
+): Promise<(l: SaveLineInput) => number | null> {
+  const rows = await tx<{ id: string; inventory_id: string | null; append_batch: number | null }[]>`
+    SELECT id, inventory_id, append_batch FROM sell_order_lines WHERE sell_order_id = ${orderId}`;
+  const byRow = new Map(rows.map((r) => [r.id, r.append_batch]));
+  const byLot = new Map<string, number | null>();
+  for (const r of rows) {
+    if (!r.inventory_id) continue;
+    const lot = r.inventory_id.toLowerCase();
+    const had = byLot.get(lot);
+    // A lot on two lines keeps the earlier one's place; null is earliest.
+    if (!byLot.has(lot) || r.append_batch === null || (had != null && r.append_batch < had)) {
+      byLot.set(lot, r.append_batch);
+    }
+  }
+  const next = status === 'Draft'
+    ? null
+    : rows.reduce((max, r) => Math.max(max, r.append_batch ?? 0), 0) + 1;
+  return (l) => {
+    if (typeof l.id === 'string' && byRow.has(l.id)) return byRow.get(l.id)!;
+    const lot = l.inventoryId?.toLowerCase();
+    if (lot && byLot.has(lot)) return byLot.get(lot)!;
+    return next;
+  };
+}
+
 // Edit an existing sell order. Status / discount / notes are simple COALESCE
 // updates. Optionally the manager can also re-pick the customer and rewrite the
 // whole line set (same builder UI as a new order) — those edits replace
@@ -943,7 +1011,7 @@ sellOrders.patch('/:id', async (c) => {
   const id = c.req.param('id');
   const body = (await c.req.json().catch(() => null)) as
     | { status?: string; notes?: string;
-        customerId?: string; lines?: DraftLineInput[]; currency?: string;
+        customerId?: string; lines?: SaveLineInput[]; currency?: string;
         paymentReceivedBy?: string | null; bidParts?: BidPart[] }
     | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
@@ -1104,6 +1172,7 @@ sellOrders.patch('/:id', async (c) => {
     `;
     if (body.lines !== undefined && fx) {
       const isNonUsd = effectiveCurrency !== 'USD';
+      const batchFor = await appendBatches(tx, id, beforeHead.status);
       await tx`DELETE FROM sell_order_lines WHERE sell_order_id = ${id}`;
       for (let i = 0; i < body.lines.length; i++) {
         const l = body.lines[i];
@@ -1122,6 +1191,7 @@ sellOrders.patch('/:id', async (c) => {
           sourceCurrency: isNonUsd ? effectiveCurrency : null,
           sourceUnitPrice: isNonUsd ? l.unitPrice : null,
           sourceFxRate: isNonUsd ? fx.rate : null,
+          appendBatch: batchFor(l),
         });
       }
       if (body.bidParts?.length) {
@@ -1336,18 +1406,20 @@ sellOrders.delete('/:id/status-meta/:status/attachments/:attachmentId', async (c
 // are legal. Any open stage can jump straight to Awaiting payment, to Done
 // (the deal can be marked paid at any point), or to Closed. Done has no outgoing edges
 // (terminal happy path). Closed has exactly one outgoing edge (reopen →
-// Draft) and cannot go to Done. Adding a new status means editing this map
-// + the CHECK constraint + the seed — no parallel guards elsewhere (see
-// CLAUDE.md "Status guards").
+// Draft) and cannot go to Done. Packing can step back to Draft — Pack mode
+// moves a Draft there on opening, and a mistaken open must be undoable.
+// Adding a new status means editing this map + the CHECK constraint + the
+// seed — no parallel guards elsewhere (see CLAUDE.md "Status guards").
 const ALLOWED_TRANSITIONS: Record<string, Set<string>> = {
-  Draft:               new Set(['Shipped', 'Awaiting payment', 'Done', 'Closed']),
+  Draft:               new Set(['Packing', 'Shipped', 'Awaiting payment', 'Done', 'Closed']),
+  Packing:             new Set(['Draft', 'Shipped', 'Awaiting payment', 'Done', 'Closed']),
   Shipped:             new Set(['Awaiting payment', 'Done', 'Closed']),
   'Awaiting payment':  new Set(['Done', 'Closed']),
   Done:                new Set([]),
   Closed:              new Set(['Draft']),
 };
 const KNOWN_STATUSES = new Set<string>([
-  'Draft', 'Shipped', 'Awaiting payment', 'Done', 'Closed',
+  'Draft', 'Packing', 'Shipped', 'Awaiting payment', 'Done', 'Closed',
 ]);
 // Statuses that carry a per-status meta row (note + attachments). The DB
 // row sell_order_statuses.needs_meta tracks the same idea for the per-status
@@ -1366,7 +1438,7 @@ const CLOSE_REASONS = new Set<string>(CLOSE_REASON_IDS);
 // sold historical record and Closed is frozen until reopened — same reasoning
 // as the PATCH structural-edit lock, kept next to ALLOWED_TRANSITIONS per the
 // status-guard convention (CLAUDE.md).
-const ADJUSTABLE_STATUSES = new Set(['Draft', 'Shipped', 'Awaiting payment']);
+const ADJUSTABLE_STATUSES = new Set(['Draft', 'Packing', 'Shipped', 'Awaiting payment']);
 
 // Negotiated final-price adjustment: the buyer names one final total and we
 // prorate the delta across line unit prices server-side (client rounding
@@ -1563,12 +1635,14 @@ sellOrders.post('/:id/status', async (c) => {
       await lockOrdersForLinesTx(tx, sources.map((r) => r.inventory_id));
     }
 
-    // Leaving Draft is where the order actually claims its inventory, so it's
-    // where the one-committed-order-per-line rule is enforced. Drafts are
-    // proposals: rivals may name the same line, and the qty they were written
-    // against may have been sold since, so both checks run here rather than at
-    // create time. Closing claims nothing.
-    if (cur.status === 'Draft' && body.to !== 'Closed') {
+    // Leaving the proposals (Draft, Packing) is where the order actually claims
+    // its inventory, so it's where the one-committed-order-per-line rule is
+    // enforced. Rivals may name the same line, and the qty a proposal was
+    // written against may have been sold since, so both checks run here rather
+    // than at create time. Closing claims nothing, and neither does moving
+    // between the proposals.
+    const proposals = proposalSellStatuses();
+    if (proposals.includes(cur.status) && !proposals.includes(body.to) && body.to !== 'Closed') {
       const own = await tx<{ inventory_id: string | null; qty: number }[]>`
         SELECT inventory_id, qty FROM sell_order_lines WHERE sell_order_id = ${id}
       `;
@@ -1805,7 +1879,7 @@ async function setSellOrderArchived(c: SOCtx, archive: boolean) {
     if (wasArchived === archive) return { kind: 'noChange' };
     // Archive-only: a Draft reached by reopening an archived Closed order must
     // still be unarchivable, or it could never return to the inbox.
-    if (archive && existing.status === 'Draft') return { kind: 'isDraft' };
+    if (archive && proposalSellStatuses().includes(existing.status)) return { kind: 'isDraft' };
     // A committed order still reserves its units, and archived ones drop out
     // of the inbox — the stock would stay held by an order nobody sees.
     if (archive && committedSellStatuses().includes(existing.status)) {
@@ -1827,7 +1901,7 @@ async function setSellOrderArchived(c: SOCtx, archive: boolean) {
 
   if (outcome.kind === 'notFound') return c.json({ error: 'Not found' }, 404);
   if (outcome.kind === 'isDraft') {
-    return c.json({ error: 'Draft sell orders cannot be archived — delete instead' }, 403);
+    return c.json({ error: 'Draft or Packing sell orders cannot be archived — delete instead' }, 403);
   }
   if (outcome.kind === 'isCommitted') {
     return c.json({ error: 'close or complete this sell order before archiving it' }, 409);

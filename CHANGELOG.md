@@ -17,6 +17,45 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.230.0] - 2026-10-08
+
+Sell orders get a **Packing** status, and inventory added once packing has
+begun takes the next # instead of renumbering the order (RS-206).
+
+### Added
+
+- **A Packing status between Draft and Shipped.** Opening Pack mode moves a
+  Draft into it, and the stepper, status tiles, filter and chips show it.
+  - Like a Draft it reserves no stock: the stock check runs when it moves on
+    to Shipped, Awaiting payment or Done. That means opening Pack mode can
+    never fail on a rival's claim.
+  - Pack mode's count write-back (the tick, Untick and Undo, and Apply) and
+    Mark shipped work in Packing exactly as on a Draft.
+  - A Packing order can step back to Draft, so an accidental open can be
+    undone.
+
+### Changed
+
+- **Adding inventory no longer renumbers an order that is being packed.**
+  - **Why it mattered.** Since v1.220.3 a sell order's # was re-derived from
+    the packing-list sort on every read, so a product added later sorted in
+    among the rest and every # after it shifted. The packer writes those #s
+    on the items as they are counted, so an addition mid-pack relabelled
+    items that were already in the box.
+  - **The new rule.** Once an order is past Draft (Packing, Shipped,
+    Awaiting payment), each new product takes the next # after every other.
+    A new lot of a product already on the order joins its #. A Draft still
+    sorts everything in, as before.
+  - **Where an added product appears.** The order page and Pack mode list it
+    last. Both packing-list spreadsheets keep their sorted row order, so it
+    prints in its sorted place with its later #.
+  - **How it's stored.** Each line records which save added it
+    (`sell_order_lines.append_batch`, migration 0166). The editor now sends
+    each saved line's row id, so that mark survives the save's rewrite of
+    every row, and an edited hand-typed line keeps its place. Nothing
+    renumbers on deploy: every line already on an order counts as the sorted
+    set.
+
 ## [1.229.0] - 2026-10-08
 
 Pack mode can now send every short count a packer flagged to the sell order
