@@ -17,6 +17,44 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.222.0] - 2026-10-08
+
+Review mode and Pack mode find a line from any part of its part number
+(RS-197). Their scan box was built for a label scanner and matched only an
+exact part number, a prefix of six or more characters, or an exact serial. A
+manager who typed what they could read off a stick, such as `4K40` or
+`HMA84`, was told the part wasn't on the order.
+
+### Added
+
+- **The scan box filters the list as you type.** After a short pause the list
+  narrows to the lines whose part number holds the text anywhere, ignoring
+  separators and case. A label that extends a part number, and a serial
+  recorded on a line, keep that line too. A scanner's burst ends in Enter
+  inside the pause, so scanning never flashes a filter.
+- **Enter ticks (or packs) the line when the text names one part.** The exact
+  part number, the prefix and the serial still come first, so a scan lands
+  where it always did. A fragment that fits several part numbers ticks
+  nothing: the text and its filtered list stay up for the manager to pick
+  from, the box lets go so the arrow keys work, and the message names the
+  parts (the first five, then a count).
+- **Clearing the filter.** A × button in the box clears it, and so does
+  Escape: inside the box it clears the text before it blurs, and on the page
+  a leftover filter goes before the page does.
+
+### Changed
+
+- *Check all remaining* is disabled while a filter is up. It ticks the whole
+  PO, which a filter would hide most of. Counts, progress, Approve, Mark
+  shipped and Finish review never see the filter.
+- Pack mode's filter searches the whole order, as Enter does, even with a
+  *Packing from* warehouse picked. A typed fragment therefore never hides the
+  line Enter would pack.
+- Pack mode no longer guesses a lot when a fragment fits one part held on
+  several lots. It used to re-derive "was this a part-number scan" from the
+  prefix rules, so a fragment hit would have packed one lot on a guess. It now
+  asks whether the scan spells the hit's serial.
+
 ## [1.221.2] - 2026-10-08
 
 A closed PayPal dispute looks closed (RS-195). The stage ladder on an expanded

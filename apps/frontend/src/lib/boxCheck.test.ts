@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { ApiError } from './api';
 import {
-  asksToMoveToReviewing, boxCheckEventLines, checkBody, countOf, emptyCheck, entryAnswerFor, isAbsentChecked, isShortChecked, lineState, matchScan, nextOpenAfter, orderLines, readStageMoved, stashEntryAnswer, tally,
+  asksToMoveToReviewing, boxCheckEventLines, checkBody, countOf, emptyCheck, entryAnswerFor, filterScan, isAbsentChecked, isShortChecked, lineState, matchScan, nextOpenAfter, orderLines, partsNamed, readStageMoved, stashEntryAnswer, tally,
   type LineCheck,
 } from './boxCheck';
 
@@ -133,6 +133,61 @@ describe('matchScan', () => {
   it('falls back to a recorded serial, and misses cleanly', () => {
     expect(hit(matchScan(lines, new Map(), 'sn-222'))).toBe('b');
     expect(matchScan(lines, new Map(), 'NOPE-123')).toBeNull();
+  });
+
+  it('finds a part number from any piece of it, typed off the label', () => {
+    expect(hit(matchScan(lines, new Map(), '2046s1'))).toBe('b');
+    expect(hit(matchScan(lines, new Map(), 'KB960'))).toBe('c');
+  });
+
+  it('gives a piece of one part number to its first line still open', () => {
+    expect(hit(matchScan(lines, new Map([['a', C('a', 16, { checkedAt: AT })]]), '4K40'))).toBe('d');
+  });
+
+  it('hands back a piece that fits different part numbers, short ones included', () => {
+    const skus = [L('vk', 4, 'HMA84GR7AFR4N-VK'), L('uh', 4, 'HMA84GR7AFR4N-UH'), L('x', 1, 'SSDSC2KB960G8')];
+    expect(matchScan(skus, new Map(), 'HMA84')).toEqual({ ambiguous: ['HMA84GR7AFR4N-VK', 'HMA84GR7AFR4N-UH'] });
+    expect(hit(matchScan(skus, new Map(), 'R4N-UH'))).toBe('uh');
+  });
+
+  it('ticks the exact part number even when a longer one holds it', () => {
+    const two = [L('long', 2, 'M393A4K40DB3-CWE'), L('base', 2, 'M393A4K40DB3')];
+    expect(filterScan(two, 'M393A4K40DB3')?.map(l => l.id)).toEqual(['long', 'base']);
+    expect(hit(matchScan(two, new Map(), 'M393A4K40DB3'))).toBe('base');
+  });
+
+  it('puts a serial ahead of a part number that happens to hold it', () => {
+    const two = [L('pn', 2, 'ABC123XYZ'), L('sn', 2, 'OTHER-PART', '123X')];
+    expect(hit(matchScan(two, new Map(), '123x'))).toBe('sn');
+  });
+});
+
+describe('filterScan', () => {
+  const ids = (r: ReturnType<typeof filterScan<typeof lines[number]>>) => r?.map(l => l.id) ?? null;
+
+  it('filters nothing until the text holds a character of a part number', () => {
+    expect(filterScan(lines, '')).toBeNull();
+    expect(filterScan(lines, '  ')).toBeNull();
+    expect(filterScan(lines, '-')).toBeNull();
+  });
+
+  it('keeps every line Enter could land on', () => {
+    expect(ids(filterScan(lines, '4k40'))).toEqual(['a', 'd']);
+    // A label with a suffix keeps the line it extends.
+    expect(ids(filterScan(lines, 'SSDSC2KB960G801'))).toEqual(['c']);
+    // A whole recorded serial keeps its line; part of one does not.
+    expect(ids(filterScan(lines, 'SN-111'))).toEqual(['b']);
+    expect(ids(filterScan(lines, 'SN-1'))).toEqual([]);
+    expect(ids(filterScan(lines, 'NOPE'))).toEqual([]);
+  });
+});
+
+describe('partsNamed', () => {
+  const t = (k: string, v?: Record<string, string | number>) => (v ? `${k}:${JSON.stringify(v)}` : k);
+
+  it('names up to five, then counts the rest', () => {
+    expect(partsNamed(['A', 'B'], t)).toBe('A, B');
+    expect(partsNamed(['A', 'B', 'C', 'D', 'E', 'F', 'G'], t)).toBe('A, B, C, D, E acAndMore:{"n":2}');
   });
 });
 

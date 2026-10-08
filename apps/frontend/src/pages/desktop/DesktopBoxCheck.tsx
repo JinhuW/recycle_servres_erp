@@ -8,8 +8,8 @@ import { useManagerTakeover } from '../../components/ManagerTakeoverDialog';
 import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
 import { api, rawFetch } from '../../lib/api';
 import {
-  checkBody, countOf, emptyCheck, entryAnswerFor, isAbsentChecked, isShortChecked, lineState, matchScan, nextOpenAfter, orderLines,
-  readStageMoved, stashEntryAnswer, tally,
+  checkBody, countOf, emptyCheck, entryAnswerFor, filterScan, isAbsentChecked, isShortChecked, lineState, matchScan, nextOpenAfter,
+  orderLines, partsNamed, readStageMoved, stashEntryAnswer, tally,
   type ChecksResponse, type LineCheck,
 } from '../../lib/boxCheck';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
@@ -17,6 +17,7 @@ import { fmtUSD } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { useLineSaveQueue } from '../../lib/useLineSaveQueue';
+import { useScanFilterText } from '../../lib/useScanFilter';
 import { lineSpecLabel } from '../../lib/lineGroups';
 import { linePhotos } from '../../lib/linePhotos';
 import { lineRequirements, missingFieldNames } from '../../lib/lineRequirements';
@@ -75,6 +76,14 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   const lineById = useMemo(() => new Map(lines.map(l => [l.id, l])), [lines]);
   const lineByIdRef = useRef(lineById);
   lineByIdRef.current = lineById;
+
+  // The list follows what is typed once typing pauses; Enter matches the
+  // live text.
+  const filterText = useScanFilterText(scan);
+  const fit = useMemo(() => {
+    const hits = filterScan(lines, filterText);
+    return hits ? new Set(hits.map(l => l.id)) : null;
+  }, [lines, filterText]);
 
   // ── Writes, through the queue Pack mode shares. Nothing may write until
   // the saved count is in: an action taken against the full-count default
@@ -186,11 +195,18 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   const ordered = useMemo(() => orderLines(lines, checks), [lines, checks]);
   const sum = useMemo(() => tally(lines, checks), [lines, checks]);
   const remaining = ordered.open.length;
+  // Only the rows on screen follow the filter; every count and gate reads
+  // `ordered`, so a filter can never hide a line from Approve.
+  const listed = useMemo(() => (fit
+    ? { open: ordered.open.filter(l => fit.has(l.id)), done: ordered.done.filter(l => fit.has(l.id)) }
+    : ordered), [ordered, fit]);
   const visible = useMemo(
-    () => [...ordered.open, ...(showDone ? ordered.done : [])],
-    [ordered, showDone],
+    () => [...listed.open, ...(showDone ? listed.done : [])],
+    [listed, showDone],
   );
   const selected = (selectedId && lineById.get(selectedId)) || lines[0] || null;
+  // A selection the filter hides takes no keys; the arrows bring it back in.
+  const selectedShown = selected && (!fit || fit.has(selected.id)) ? selected : null;
 
   const checkAllRemaining = () => {
     if (!ready) return;
@@ -207,19 +223,23 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   // ── Scanner: a USB/Bluetooth scanner types the label and presses Enter.
   const onScan = (raw: string) => {
     const text = raw.trim();
-    setScan('');
-    if (scanFromPage.current) {
+    const m = text && ready ? matchScan(lines, checks, text) : null;
+    // Text that fits several parts stays, and with it the list it narrowed to,
+    // for the manager to pick from. The box lets go of it, so the arrows work
+    // and the next scan replaces it rather than running on from it.
+    const ambiguous = m !== null && 'ambiguous' in m;
+    if (!ambiguous) setScan('');
+    if (scanFromPage.current || ambiguous) {
       scanFromPage.current = false;
       scanRef.current?.blur();
     }
     if (!text || !ready) return;
-    const m = matchScan(lines, checks, text);
     if (!m) {
       setScanMsg({ tone: 'neg', text: t('bcScanNoMatch', { pn: text, id: order.id }) });
       return;
     }
     if ('ambiguous' in m) {
-      setScanMsg({ tone: 'neg', text: t('bcScanAmbiguous', { pn: text, pns: m.ambiguous.join(', ') }) });
+      setScanMsg({ tone: 'neg', text: t('bcScanAmbiguous', { pn: text, pns: partsNamed(m.ambiguous, t) }) });
       return;
     }
     const hit = m.line;
@@ -292,24 +312,35 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   // doesn't read as every row having moved.
   const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
   const lastTops = useRef(new Map<string, number>());
+  const lastFit = useRef(fit);
   useLayoutEffect(() => {
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    // A filter coming, going or narrowing moves rows without any of them
+    // changing group: measured, never animated.
+    const refiltered = lastFit.current !== fit;
+    lastFit.current = fit;
     const tops = new Map<string, number>();
     rowRefs.current.forEach((el, id) => {
       const top = el.offsetTop;
       tops.set(id, top);
       const was = lastTops.current.get(id);
-      if (!reduce && was !== undefined && Math.abs(was - top) > 2 && el.animate) {
+      if (!reduce && !refiltered && was !== undefined && Math.abs(was - top) > 2 && el.animate) {
         el.animate([{ transform: `translateY(${was - top}px)` }, { transform: 'none' }],
           { duration: 380, easing: 'cubic-bezier(.2,.8,.2,1)' });
       }
     });
     lastTops.current = tops;
-  }, [ordered, showDone]);
+  }, [ordered, showDone, fit]);
 
   // Escape joins the app's layer stack, so a dialog or the photo on top of
   // the page closes first and the page only leaves when it is the top layer.
-  useEscapeKey(() => { if (editing) setEditing(null); else onExit(); });
+  // Text left in the scan box goes before the page does: an ambiguous scan
+  // leaves its filter up with the box blurred.
+  useEscapeKey(() => {
+    if (editing) setEditing(null);
+    else if (scan) setScan('');
+    else onExit();
+  });
 
   // ── Keyboard. Ignored while typing, so the scan box stays a plain text
   // field, and while the drawer or a dialog is up.
@@ -336,12 +367,12 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
           if (target?.closest('button') && !target.closest('.bc-table')) return;
           e.preventDefault();
           if (target?.closest('button')) target.blur();
-          if (selected) toggle(selected);
+          if (selectedShown) toggle(selectedShown);
           break;
-        case '+': case '=': if (selected) setCount(selected, countOf(selected, checkOf(selected.id)) + 1); break;
-        case '-': if (selected) setCount(selected, countOf(selected, checkOf(selected.id)) - 1); break;
+        case '+': case '=': if (selectedShown) setCount(selectedShown, countOf(selectedShown, checkOf(selectedShown.id)) + 1); break;
+        case '-': if (selectedShown) setCount(selectedShown, countOf(selectedShown, checkOf(selectedShown.id)) - 1); break;
         // Lowercase only: scanners type labels in uppercase (F4-…, KVR…).
-        case 'e': e.preventDefault(); if (selected) openEdit(selected); break;
+        case 'e': e.preventDefault(); if (selectedShown) openEdit(selectedShown); break;
         case '/': e.preventDefault(); scanRef.current?.focus(); break;
         default:
           // A scanner types into whatever has focus. Its first character
@@ -503,7 +534,14 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
             <span className="chip muted dot">{t('bcLegendOpen', { n: sum.open })}</span>
           </div>
         </div>
-        <button type="button" className="btn" disabled={!ready || remaining === 0} onClick={checkAllRemaining}>
+        {/* It ticks the whole PO, which a filter would hide most of. */}
+        <button
+          type="button"
+          className="btn"
+          disabled={!ready || remaining === 0 || fit !== null}
+          title={fit ? t('bcCheckAllFiltered') : undefined}
+          onClick={checkAllRemaining}
+        >
           <Icon name="check2" size={13} /> {t('bcCheckAll')}
         </button>
       </div>
@@ -511,28 +549,39 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
       <div className="bc-grid">
         <div className="card bc-list-card">
           <div className="card-head bc-scan-head">
-            <label className="bc-scan" htmlFor="bc-scan">
-              <Icon name="scan" size={15} />
-              <input
-                id="bc-scan"
-                ref={scanRef}
-                className="input mono"
-                type="text"
-                autoComplete="off"
-                spellCheck={false}
-                value={scan}
-                disabled={!ready}
-                placeholder={t('bcScanPh')}
-                onChange={e => setScan(e.target.value)}
-                onBlur={() => { scanFromPage.current = false; }}
-                onKeyDown={e => {
-                  if (e.nativeEvent.isComposing) return;
-                  if (e.key === 'Enter') { e.preventDefault(); onScan(scan); }
-                  // Leaves the box, not the page.
-                  if (e.key === 'Escape') { e.stopPropagation(); e.currentTarget.blur(); }
-                }}
-              />
-            </label>
+            <div className="bc-scan-field">
+              <label className="bc-scan" htmlFor="bc-scan">
+                <Icon name="scan" size={15} />
+                <input
+                  id="bc-scan"
+                  ref={scanRef}
+                  className="input mono"
+                  type="text"
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={scan}
+                  disabled={!ready}
+                  placeholder={t('bcScanPh')}
+                  onChange={e => setScan(e.target.value)}
+                  onBlur={() => { scanFromPage.current = false; }}
+                  onKeyDown={e => {
+                    if (e.nativeEvent.isComposing) return;
+                    if (e.key === 'Enter') { e.preventDefault(); onScan(scan); }
+                    // Clears the box, then leaves it; never the page.
+                    if (e.key === 'Escape') {
+                      e.stopPropagation();
+                      if (scan) setScan('');
+                      else e.currentTarget.blur();
+                    }
+                  }}
+                />
+              </label>
+              {scan && (
+                <button type="button" className="bc-scan-clear" title={t('scanClear')} aria-label={t('scanClear')} onClick={() => setScan('')}>
+                  <Icon name="x" size={13} />
+                </button>
+              )}
+            </div>
             <div className={'bc-scan-msg ' + (scanMsg?.tone ?? 'muted')} aria-live="polite">
               {scanMsg ? scanMsg.text : t('bcScanHint')}
             </div>
@@ -558,21 +607,24 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
                 </tr>
               </thead>
               <tbody>
-                {ordered.open.map(row)}
-                {remaining === 0 && (
+                {listed.open.map(row)}
+                {fit?.size === 0 && (
+                  <tr className="bc-group-empty"><td colSpan={7}>{t('bcFilterNone', { pn: filterText, id: order.id })}</td></tr>
+                )}
+                {!fit && remaining === 0 && (
                   <tr className="bc-group-empty"><td colSpan={7}>{t('bcAllResolved')}</td></tr>
                 )}
-                {ordered.done.length > 0 && (
+                {listed.done.length > 0 && (
                   <tr className="bc-group">
                     <td colSpan={7}>
-                      {t('bcGroupChecked')} <span className="mono muted">{ordered.done.length}</span>
+                      {t('bcGroupChecked')} <span className="mono muted">{listed.done.length}</span>
                       <button type="button" className="bc-link" onClick={() => setShowDone(s => !s)}>
                         {showDone ? t('bcHide') : t('bcShow')}
                       </button>
                     </td>
                   </tr>
                 )}
-                {showDone && ordered.done.map(row)}
+                {showDone && listed.done.map(row)}
               </tbody>
             </table>
           )}

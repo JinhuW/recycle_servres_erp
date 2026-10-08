@@ -104,6 +104,16 @@ describe('packScan', () => {
     expect(packScan(ls, checks(C('a', 2, 'x')), 'M393A4K40DB3-CWE')).toEqual({ line: ls[1] });
   });
 
+  it('asks which lot when a piece of the part number fits lines from more than one lot', () => {
+    const ls = [
+      L('a', { partNumber: 'M393A4K40DB3-CWE', sourceOrderId: 'PO-1', sourceLineNo: 1 }),
+      L('b', { partNumber: 'M393A4K40DB3-CWE', sourceOrderId: 'PO-2', sourceLineNo: 4 }),
+      L('c', { partNumber: 'SSDSC2KB960G8' }),
+    ];
+    expect(packScan(ls, new Map(), '4k40')).toEqual({ choose: [ls[0], ls[1]] });
+    expect(packScan(ls, new Map(), 'KB960')).toEqual({ line: ls[2] });
+  });
+
   it('ticks by serial even when the part is on several lines', () => {
     const ls = [
       L('a', { partNumber: 'M393A4K40DB3-CWE', serialNumber: 'S1, S2' }),
