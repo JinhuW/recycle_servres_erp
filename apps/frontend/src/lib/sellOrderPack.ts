@@ -18,6 +18,9 @@ export type PackLine = CheckableLine & {
   packWarehouse?: string | null;
   sourceOrderId?: string | null;
   sourceLineNo?: number | null;
+  // The product's # on the order, which the packer labels the items with.
+  // Absent from a backend older than this bundle.
+  no?: number;
 };
 
 export type PackRow = { lineId: string; counted: number; packedAt: string | null; serialNumber: string | null };
@@ -34,8 +37,13 @@ export function packBody(c: LineCheck, qty: number): { counted: number; packed: 
 // The backend's own name for lines with no warehouse, on the packing-list tabs.
 export const UNASSIGNED = 'Unassigned';
 
+// Where the line's lot is now; null when it has no warehouse.
+export function lotWarehouse(l: Pick<PackLine, 'warehouse' | 'packWarehouse'>): string | null {
+  return l.packWarehouse === undefined ? l.warehouse : l.packWarehouse;
+}
+
 export function packWarehouseOf(l: Pick<PackLine, 'warehouse' | 'packWarehouse'>): string {
-  return (l.packWarehouse === undefined ? l.warehouse : l.packWarehouse) ?? UNASSIGNED;
+  return lotWarehouse(l) ?? UNASSIGNED;
 }
 
 // The warehouses an order is packed from, as the packing-list downloads split
@@ -53,13 +61,14 @@ export const isPackable = (l: Pick<CheckableLine, 'qty'>): boolean => l.qty > 0;
 
 export type PackRowView<L> = { line: L; no: number };
 
-// Every line in the order's own list order with its # (1-based, counted over
-// the whole order so a warehouse filter doesn't renumber). A ticked line stays
-// where it is: the packer and the receiver both read the list by #.
+// Every line in the order's own list order — the packing list's — with its
+// product's #, which the server counts over the whole order so a warehouse
+// filter doesn't renumber. A ticked line stays where it is: the packer and the
+// receiver both read the list by #.
 // `wh` '' means every warehouse.
 export function packView<L extends PackLine>(lines: readonly L[], wh: string): PackRowView<L>[] {
   return lines
-    .map((line, i) => ({ line, no: i + 1 }))
+    .map((line, i) => ({ line, no: line.no ?? i + 1 }))
     .filter(r => !wh || packWarehouseOf(r.line) === wh);
 }
 

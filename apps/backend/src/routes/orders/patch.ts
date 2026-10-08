@@ -540,7 +540,8 @@ patchRoutes.patch('/:id', async (c) => {
         // and so is moving an archived one back into either — what is left is
         // a Closed order reopened to Draft, which reserves nothing. A line held
         // at 0 holds nothing either: it lets the lot go the same way and stays
-        // on its order, with its #, as a typed line.
+        // on its order as a typed line — which re-folds it, so the products
+        // after it on that order are renumbered.
         const stillNamed = doomed.length ? await tx`
           SELECT DISTINCT sol.inventory_id AS line_id, sol.sell_order_id
           FROM sell_order_lines sol

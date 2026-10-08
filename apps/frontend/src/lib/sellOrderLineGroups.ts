@@ -1,10 +1,13 @@
+import { lotWarehouse } from './sellOrderPack';
+
 export type SellOrderLineGroupBy = 'warehouse' | 'po';
 
 type GroupableLine = {
-  warehouseId: string | null;
   warehouse: string | null;
+  // Where the lot is now; absent where the line's own warehouse is the answer
+  // (a hand-typed line, or a backend older than this bundle).
+  packWarehouse?: string | null;
   sourceOrderId?: string | null;
-  sourceLineNo?: number | null;
 };
 
 export type SellOrderLineGroup<T> = {
@@ -17,11 +20,14 @@ export type SellOrderLineGroup<T> = {
   items: { line: T; idx: number }[];
 };
 
-// Warehouse groups keep first-seen order — the order the lines were added in.
-// PO groups read like the "Packing list by PO" download: numeric PO order
-// (PO-999 before PO-1442), hand-typed lines last. Inside a PO group the lines
-// run in the PO page's own order (#1, #2, …), so a line picked in edit mode
-// lands in its slot rather than at the bottom.
+// The server sends the lines in packing-list order, numbered by product, so
+// both groupings keep that order inside a group: a group lists its lines the
+// way the matching download does. Warehouse groups follow where the lot is
+// now, as the packing lists do — not the warehouse the line was saved with,
+// which a transfer leaves behind — and come in first-seen order; PO groups
+// read like the "Packing list by PO" download — numeric PO order (PO-999
+// before PO-1442), hand-typed lines last. A line added in edit mode sits at
+// the bottom of its group until the save numbers it.
 export function groupSellOrderLines<T extends GroupableLine>(
   lines: readonly T[],
   by: SellOrderLineGroupBy,
@@ -29,10 +35,11 @@ export function groupSellOrderLines<T extends GroupableLine>(
   const map = new Map<string, SellOrderLineGroup<T>>();
   lines.forEach((line, idx) => {
     const poId = line.sourceOrderId ?? null;
-    const key = by === 'po' ? (poId ?? '__none') : (line.warehouseId ?? '__none');
+    const warehouse = lotWarehouse(line);
+    const key = by === 'po' ? (poId ?? '__none') : (warehouse ?? '__none');
     let g = map.get(key);
     if (!g) {
-      g = { key, warehouse: line.warehouse, poId: by === 'po' ? poId : null, items: [] };
+      g = { key, warehouse, poId: by === 'po' ? poId : null, items: [] };
       map.set(key, g);
     }
     g.items.push({ line, idx });
@@ -44,8 +51,6 @@ export function groupSellOrderLines<T extends GroupableLine>(
       if (b.poId === null) return -1;
       return a.poId.localeCompare(b.poId, undefined, { numeric: true });
     });
-    const no = (x: { line: T }) => x.line.sourceLineNo ?? Infinity;
-    for (const g of groups) g.items.sort((a, b) => no(a) - no(b) || a.idx - b.idx);
   }
   return groups;
 }

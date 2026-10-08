@@ -5,7 +5,9 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-192](./RS-192-fix-the-dev-to-main-review-findings-before-the-v1-22.md) | in-review | bug | P1 | Fix the dev to main review findings before the v1.220 release | — |
+| [RS-194](./RS-194-fix-the-dev-to-main-review-findings-before-the-v1-22.md) | in-progress | bug | P1 | Fix the dev to main review findings before the v1.221 release | — |
+| [RS-193](./RS-193-one-per-product-shared-by-the-packing-lists-the-sell.md) | done | story | P2 | One # per product, shared by the packing lists, the sell order page and Pack mode | 1.220.3 |
+| [RS-192](./RS-192-fix-the-dev-to-main-review-findings-before-the-v1-22.md) | done | bug | P1 | Fix the dev to main review findings before the v1.220 release | 1.220.2 |
 | [RS-191](./RS-191-take-the-photos-out-of-the-packing-list-spreadsheets.md) | done | story | P2 | Take the photos out of the packing-list spreadsheets | 1.220.1 |
 | [RS-190](./RS-190-packing-by-each-po-line-with-photos.md) | done | story | P2 | Packing by each PO line, with photos | 1.220.0 |
 | [RS-189](./RS-189-prompt-text-that-has-drifted-from-the-code-claude-md.md) | done | bug | P2 | Prompt text that has drifted from the code: CLAUDE.md facts, the session hook, MCP tool descriptions | 1.219.1 |
@@ -15,7 +17,7 @@ See [README.md](./README.md) for what the fields mean.
 | [RS-185](./RS-185-commission-payment-records-which-manager-paid-it.md) | done | story | P2 | Commission payment records which manager paid it | 1.217.0 |
 | [RS-184](./RS-184-a-po-line-may-be-counted-down-to-0-only-a-new-line-n.md) | done | story | P1 | A PO line may be counted down to 0; only a new line needs qty 1 | 1.213.0 |
 | [RS-183](./RS-183-review-mode-a-line-counted-to-0-is-not-in-the-box-an.md) | done | story | P2 | Review mode: a line counted to 0 is not in the box and is removed on Approve | 1.212.0 |
-| [RS-182](./RS-182-nightly-prod-to-dev-db-copy-fails-at-the-credential.md) | in-progress | bug | P1 | Nightly prod-to-dev DB copy fails at the credential scrub | — |
+| [RS-182](./RS-182-nightly-prod-to-dev-db-copy-fails-at-the-credential.md) | done | bug | P1 | Nightly prod-to-dev DB copy fails at the credential scrub | 1.211.1 |
 | [RS-178](./RS-178-ssd-capacity-offers-2tb-and-ram-class-offers-camm.md) | done | story | P2 | SSD capacity offers 2TB and RAM class offers CAMM | 1.211.0 |
 | [RS-176](./RS-176-vnc-bridge-and-mail-thread-hardening-from-the-v1-209.md) | backlog | task | P3 | VNC bridge and mail thread hardening from the v1.209 review | — |
 | [RS-175](./RS-175-pre-release-review-fixes-for-v1-204-0-v1-209-0.md) | done | bug | P1 | Pre-release review fixes for v1.204.0–v1.209.0 | 1.209.1 |

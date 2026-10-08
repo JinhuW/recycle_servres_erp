@@ -15,7 +15,7 @@ import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { useRoute, navigate, replaceRoute, match, matchSellOrderPack, sellOrderPackPath } from '../../lib/route';
 import { RouteLink } from '../../components/RouteLink';
 import { shareOrCopy } from '../../lib/shareOrCopy';
-import { fmtUSD, fmtUSD0, fmtMoney, fmtDate, fmtDateShort, CURRENCY_SYMBOL } from '../../lib/format';
+import { fmtUSD, fmtUSD0, fmtMoney, fmtDate, fmtDateShort, CURRENCY_SYMBOL, canonicalPartNumber } from '../../lib/format';
 import { fetchRateToUsd, type FxInfo } from '../../lib/fxRate';
 import { sellOrderStatuses } from '../../lib/lookups';
 import { closeReasonLabelKey } from '../../lib/closeReasons';
@@ -31,7 +31,7 @@ import { applyPriceRows, type BidPart, mergeBidParts } from '../../lib/priceImpo
 import { usePreference } from '../../lib/preferences';
 import { LineSpecChips, lineHasSpecChips } from '../../components/LineSpecChips';
 import { groupSellOrderLines, type SellOrderLineGroup } from '../../lib/sellOrderLineGroups';
-import { isPackable, packWarehouseOptions, UNASSIGNED } from '../../lib/sellOrderPack';
+import { isPackable, lotWarehouse, packWarehouseOptions, UNASSIGNED } from '../../lib/sellOrderPack';
 import { peekSellOrderPrefill, clearSellOrderPrefill } from '../../lib/sellOrderPrefill';
 
 // Its own chunk: only a packer opens it.
@@ -99,6 +99,9 @@ const specOf = (l: LineSpec): LineSpec => ({
 
 type SellOrderLine = LineSpec & {
   id: string;
+  // The product's # on this order, shared by its lines, the packing lists and
+  // Pack mode. Absent from a backend older than this bundle.
+  no?: number;
   category: 'RAM' | 'SSD' | 'HDD' | 'Other';
   label: string;
   sub: string | null;
@@ -129,6 +132,8 @@ type EditLine = LineSpec & {
   // instead of removed, so no line after it is renumbered; a line being added
   // needs at least 1.
   saved: boolean;
+  // The product's # as last saved; a line added here has none until the save.
+  no: number | null;
   inventoryId: string | null;
   sourceOrderId: string | null; // display only — the server derives it from the lot
   sourceLineNo: number | null;  // display only, as sourceOrderId
@@ -141,12 +146,17 @@ type EditLine = LineSpec & {
   unitPrice: number;        // native (order-currency) price — sent to the API
   warehouseId: string | null;
   warehouse: string | null;
+  // Where a saved line's lot is now. Left unset for a typed line, which goes by
+  // its own warehouse, and for a lot added here, whose warehouse is already
+  // where it is.
+  packWarehouse?: string | null;
   condition: string | null;
 };
 
 const toEditLine = (l: SellOrderLine): EditLine => ({
   _cid:        crypto.randomUUID(),
   saved:       true,
+  no:          l.no ?? null,
   inventoryId: l.inventoryId,
   category:    l.category,
   label:       l.label,
@@ -157,6 +167,7 @@ const toEditLine = (l: SellOrderLine): EditLine => ({
   unitPrice:   l.nativeUnitPrice,
   warehouseId: l.warehouseId,
   warehouse:   l.warehouse,
+  packWarehouse: l.inventoryId ? l.packWarehouse : undefined,
   condition:   l.condition,
   sourceOrderId: l.sourceOrderId ?? null,
   sourceLineNo: l.sourceLineNo ?? null,
@@ -164,9 +175,11 @@ const toEditLine = (l: SellOrderLine): EditLine => ({
 });
 
 // The same product can sit in several warehouses; price is a per-product
-// figure, keyed on (part, label, condition).
+// figure, keyed on (part, label, condition). The part is canonical because the
+// server folds products — and numbers them — that way, so two spellings of one
+// part share a # and must share a price.
 const productKey = (l: { partNumber: string | null; label: string; condition: string | null }) =>
-  `${l.partNumber ?? ''}|${l.label}|${l.condition ?? ''}`;
+  `${canonicalPartNumber(l.partNumber)}|${l.label}|${l.condition ?? ''}`;
 
 // Picked sellable lots as new lines. Price follows the per-product rule: reuse
 // the unit price the order already carries for that product, else 0 for the
@@ -179,6 +192,7 @@ function appendSellable(lines: EditLine[], picked: SellableItem[]): EditLine[] {
     .map(it => ({
       _cid:        crypto.randomUUID(),
       saved:       false,
+      no:          null,
       inventoryId: it.inventoryId,
       category:    it.category as EditLine['category'],
       label:       it.label,
@@ -697,8 +711,9 @@ type ItemCellLine = LineSpec & {
 
 function LineItemCell({ line, lineNo, sub, showPo, showLineNo, linkPo }: {
   line: ItemCellLine;
-  // The line's # on this sell order — the number its item is labelled with.
-  lineNo: number;
+  // The product's # on this sell order — the number its items are labelled
+  // with. Null for a line added in the editor: the save numbers it.
+  lineNo: number | null;
   // The spec text snapshot saved with the line — shown only when the lot
   // can't supply chips (a hand-typed line, a deleted lot, an "Other" item).
   sub: string | null;
@@ -717,13 +732,19 @@ function LineItemCell({ line, lineNo, sub, showPo, showLineNo, linkPo }: {
   return (
     <td>
       <div style={{ fontWeight: 500, fontSize: 13 }}>
-        <span
-          className="mono"
-          style={{ color: 'var(--fg-subtle)', fontWeight: 600, marginRight: 8 }}
-          title={t('sodLineNoTitle', { n: lineNo })}
-        >
-          #{lineNo}
-        </span>
+        {lineNo === null ? (
+          <span className="chip muted" style={{ fontSize: 10, padding: '1px 6px', marginRight: 8 }} title={t('sodLineNewTitle')}>
+            {t('sodLineNew')}
+          </span>
+        ) : (
+          <span
+            className="mono"
+            style={{ color: 'var(--fg-subtle)', fontWeight: 600, marginRight: 8 }}
+            title={t('sodLineNoTitle', { n: lineNo })}
+          >
+            #{lineNo}
+          </span>
+        )}
         {line.label}
         {showLineNo && n != null && line.sourceOrderId && (
           <span
@@ -1489,8 +1510,8 @@ function SellOrderDetail({ id, mode, onToast }: {
                         <tbody>
                           {g.items.map(({ line: l, idx }) => (
                             <tr key={l.id}>
-                              <LineItemCell line={l} lineNo={idx + 1} sub={l.sub} showPo={lineGroup === 'warehouse'} showLineNo={lineGroup === 'po'} linkPo />
-                              {lineGroup === 'po' && <td style={{ fontSize: 12 }}>{l.warehouse ?? t('sodNoWarehouse')}</td>}
+                              <LineItemCell line={l} lineNo={l.no ?? idx + 1} sub={l.sub} showPo={lineGroup === 'warehouse'} showLineNo={lineGroup === 'po'} linkPo />
+                              {lineGroup === 'po' && <td style={{ fontSize: 12 }}>{lotWarehouse(l) ?? t('sodNoWarehouse')}</td>}
                               <td className="num mono">{l.qty}</td>
                               <td className="num mono">{fmtMoney(l.nativeUnitPrice, order.currency, locale)}</td>
                               <td className="num mono" style={{ fontWeight: 500 }}>
@@ -1534,8 +1555,8 @@ function SellOrderDetail({ id, mode, onToast }: {
                             const cap = l.inventoryId === null ? Infinity : Math.max(0, l.maxQty);
                             return (
                             <tr key={l._cid}>
-                              <LineItemCell line={l} lineNo={idx + 1} sub={l.subLabel} showPo={lineGroup === 'warehouse'} showLineNo={lineGroup === 'po'} linkPo={false} />
-                              {lineGroup === 'po' && <td style={{ fontSize: 12 }}>{l.warehouse ?? t('sodNoWarehouse')}</td>}
+                              <LineItemCell line={l} lineNo={l.saved ? l.no ?? idx + 1 : null} sub={l.subLabel} showPo={lineGroup === 'warehouse'} showLineNo={lineGroup === 'po'} linkPo={false} />
+                              {lineGroup === 'po' && <td style={{ fontSize: 12 }}>{lotWarehouse(l) ?? t('sodNoWarehouse')}</td>}
                               <td className="num">
                                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
                                   <input

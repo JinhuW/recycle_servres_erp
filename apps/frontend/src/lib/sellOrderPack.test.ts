@@ -49,6 +49,11 @@ describe('packView', () => {
     expect(packView(lines, 'DEN').map(r => [r.line.id, r.no])).toEqual([['b2', 2]]);
     expect(packView(lines, 'LA1').map(r => r.no)).toEqual([1, 3, 4]);
   });
+
+  it('shows the server\'s product #, shared by the lines of one product', () => {
+    const numbered = [L('a', { no: 1 }), L('b', { no: 2 }), L('c', { no: 2 }), L('d', { no: 3 })];
+    expect(packView(numbered, '').map(r => [r.line.id, r.no])).toEqual([['a', 1], ['b', 2], ['c', 2], ['d', 3]]);
+  });
 });
 
 describe('sourceTag', () => {

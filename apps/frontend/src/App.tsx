@@ -9,11 +9,15 @@ import { DiscardConfirmHost, confirmDiscard } from './lib/unsavedGuard';
 // a desktop-only one.
 import './styles/desktop.css';
 
-// Phone-only, and they carry pwa.css with them.
+// They carry pwa.css with them. The install prompt and the service-worker
+// update toast are phone-only.
 const PwaInstallPrompt = lazy(() =>
   import('./components/PwaInstallPrompt').then(m => ({ default: m.PwaInstallPrompt })));
 const PwaUpdateToast = lazy(() =>
   import('./components/PwaUpdateToast').then(m => ({ default: m.PwaUpdateToast })));
+// The desktop shell's counterpart: no service worker there to announce a deploy.
+const BundleUpdateToast = lazy(() =>
+  import('./components/PwaUpdateToast').then(m => ({ default: m.BundleUpdateToast })));
 
 const DesktopApp = lazy(() => import('./DesktopApp').then(m => ({ default: m.DesktopApp })));
 const MobileApp  = lazy(() => import('./MobileApp').then(m => ({ default: m.MobileApp })));
@@ -58,12 +62,14 @@ export default function App() {
         <DiscardConfirmHost />
         {mismatch && <LayoutSwitch toPhone={fitsPhone} onSwitch={() => { void switchShell(); }} />}
       </ErrorBoundary>
-      {isPhone && (
-        <Suspense fallback={null}>
-          <PwaInstallPrompt />
-          <PwaUpdateToast />
-        </Suspense>
-      )}
+      <Suspense fallback={null}>
+        {isPhone ? (
+          <>
+            <PwaInstallPrompt />
+            <PwaUpdateToast />
+          </>
+        ) : <BundleUpdateToast />}
+      </Suspense>
     </LangProvider>
   );
 }

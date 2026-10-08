@@ -2,13 +2,13 @@
 id: RS-182
 title: Nightly prod-to-dev DB copy fails at the credential scrub
 type: bug
-status: in-progress
+status: done
 priority: P1
 created: 2026-10-05
 reporter: jinhu
 branch: fix/db-sync-scrub-search-path
-pr:
-version:
+pr: "#510"
+version: 1.211.1
 related: []
 ---
 
@@ -39,12 +39,12 @@ with the default `search_path`, so CI could not see it.
 
 ## Acceptance criteria
 
-- [ ] `scrub.sql` resolves every name with `search_path` empty.
-- [ ] `tests/sync-scrub.test.ts` runs the scrub with `search_path` emptied, so
+- [x] `scrub.sql` resolves every name with `search_path` empty.
+- [x] `tests/sync-scrub.test.ts` runs the scrub with `search_path` emptied, so
       an unqualified name fails CI.
-- [ ] The sync's restore block, run in `postgres:18-alpine` against a dump of
+- [x] The sync's restore block, run in `postgres:18-alpine` against a dump of
       the fully migrated schema, commits and leaves no tokens behind.
-- [ ] The next nightly run on Railway logs `[sync] done` and redeploys the dev
+- [x] The next nightly run on Railway logs `[sync] done` and redeploys the dev
       backend.
 
 ## Out of scope
@@ -57,3 +57,6 @@ with the default `search_path`, so CI could not see it.
 
 Reproduced in the sync image before the fix: same error, psql exit 3. See
 `docs/debug-notes/2026-10-05-db-sync-scrub-search-path.md`.
+
+Verified 2026-10-08: the 04:03 UTC run on Railway (`db-sync`, dev) logged
+`[sync] done` and `backend redeploy triggered`, no `ERROR` lines.
