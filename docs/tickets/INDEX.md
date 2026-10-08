@@ -16,7 +16,7 @@ See [README.md](./README.md) for what the fields mean.
 | [RS-185](./RS-185-commission-payment-records-which-manager-paid-it.md) | done | story | P2 | Commission payment records which manager paid it | 1.217.0 |
 | [RS-184](./RS-184-a-po-line-may-be-counted-down-to-0-only-a-new-line-n.md) | done | story | P1 | A PO line may be counted down to 0; only a new line needs qty 1 | 1.213.0 |
 | [RS-183](./RS-183-review-mode-a-line-counted-to-0-is-not-in-the-box-an.md) | done | story | P2 | Review mode: a line counted to 0 is not in the box and is removed on Approve | 1.212.0 |
-| [RS-182](./RS-182-nightly-prod-to-dev-db-copy-fails-at-the-credential.md) | done | bug | P1 | Nightly prod-to-dev DB copy fails at the credential scrub | — |
+| [RS-182](./RS-182-nightly-prod-to-dev-db-copy-fails-at-the-credential.md) | done | bug | P1 | Nightly prod-to-dev DB copy fails at the credential scrub | 1.211.1 |
 | [RS-178](./RS-178-ssd-capacity-offers-2tb-and-ram-class-offers-camm.md) | done | story | P2 | SSD capacity offers 2TB and RAM class offers CAMM | 1.211.0 |
 | [RS-176](./RS-176-vnc-bridge-and-mail-thread-hardening-from-the-v1-209.md) | backlog | task | P3 | VNC bridge and mail thread hardening from the v1.209 review | — |
 | [RS-175](./RS-175-pre-release-review-fixes-for-v1-204-0-v1-209-0.md) | done | bug | P1 | Pre-release review fixes for v1.204.0–v1.209.0 | 1.209.1 |
