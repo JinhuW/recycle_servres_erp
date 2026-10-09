@@ -7,7 +7,7 @@ import { diff, writeOrderEvent, META_FIELDS, LINE_FIELDS, type AuditChange, type
 import { autoTrackParts } from '../../lib/marketAutoTrack';
 import { effectiveRole } from '../../lib/role';
 import { committedClaimsByLine, openSellStatuses } from '../../lib/sellCommitment';
-import { specVal, validateLineInput } from '../../lib/orderInput';
+import { mergedSpec, specRuleErr, specVal, validateLineInput } from '../../lib/orderInput';
 import { revertOrderToDraftTx, LINE_STATUS_FOR_LIFECYCLE, isClosedBook } from '../../services/orderAdvance';
 import { syncOrderCategory } from '../../services/orderCategory';
 import { nameHandoffByChange, setOrderPackageTx, unlinkOrderPackagesTx, packageChanges, changeOrderOwnerTx, type HandoffPackage } from '../../services/orderHandoff';
@@ -190,6 +190,8 @@ patchRoutes.patch('/:id', async (c) => {
     if (issue) return c.json({ error: serialErr(`line ${i + 1}`, issue) }, 400);
     const labelErr = identityErr(`line ${i + 1}`, cat, l);
     if (labelErr) return c.json({ error: labelErr }, 400);
+    const specErr = specRuleErr(`line ${i + 1}`, cat, l);
+    if (specErr) return c.json({ error: specErr }, 400);
   }
 
   // One pre-read covering both the item-type and the serial rules. Each is
@@ -235,14 +237,18 @@ patchRoutes.patch('/:id', async (c) => {
     // Generation belongs to RAM alone, so a line leaving RAM has it cleared —
     // evaluate the post-clear value, or switching a DDR5 line to SSD would
     // still demand serials for a generation the line no longer has.
-    const clearing = l.category !== undefined && l.category !== row.category
-      ? new Set(staleSpecDbCols(l.category))
-      : new Set<string>();
+    const categoryMoved = l.category !== undefined && l.category !== row.category;
+    const clearing = new Set<string>(categoryMoved && l.category ? staleSpecDbCols(l.category) : []);
     const merged = {
       generation: clearing.has('generation') ? null : (l.generation ?? row.generation),
       qty: l.qty ?? row.qty,
       serialNumber: l.serialNumber ?? row.serial_number,
     };
+
+    // Unlike the serial merge above, a present null clears — as the UPDATE does.
+    const spec = mergedSpec(row, l as Record<string, unknown>, { clearing, categoryMoved });
+    const specErr = mergedCat ? specRuleErr(`line ${l.id}`, mergedCat, spec.merged, spec.changed) : null;
+    if (specErr) return c.json({ error: specErr }, 400);
     const changes =
       l.category !== undefined && l.category !== row.category ||
       (merged.generation ?? null) !== (row.generation ?? null) ||

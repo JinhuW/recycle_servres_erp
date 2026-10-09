@@ -10,13 +10,13 @@ import {
   committedClaimsByLine, committedQtySql, isSellableLineStatus, openSellStatuses, proposalSellStatuses,
 } from '../lib/sellCommitment';
 import { lockOrdersForLinesTx } from '../services/orderLocks';
-import { specVal, validateLineInput } from '../lib/orderInput';
+import { mergedSpec, specVal, validateLineInput } from '../lib/orderInput';
 import { buildXlsxWorkbook, xlsxResponse, datedFilename, type XlsxColumn } from '../lib/xlsx';
 import {
   CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields, categoryTabSheets,
   sortSheetRows, type ExportCategory,
 } from '../lib/categoryColumns';
-import { UNTYPED_ITEM, normSellPrice, SPEC_FIELD_TO_DB_COL } from '@recycle-erp/shared';
+import { UNTYPED_ITEM, normSellPrice, SPEC_FIELD_TO_DB_COL, specConflicts } from '@recycle-erp/shared';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { settleSoldTx } from '../services/orderSold';
 import { poLineNo } from '../lib/poLineNo';
@@ -1252,6 +1252,7 @@ inventory.patch('/:id', async (c) => {
     | { kind: 'doneLocked' }
     | { kind: 'soldLocked' }
     | { kind: 'archived' }
+    | { kind: 'specConflict'; error: string }
     | { kind: 'ok'; before: Record<string, unknown> };
   const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
     // Order before line (services/orderLocks.ts): a goods edit below rewrites
@@ -1302,6 +1303,10 @@ inventory.patch('/:id', async (c) => {
     if (parent?.lifecycle === 'sold' && body.status !== undefined && body.status !== 'Sold') {
       return { kind: 'soldLocked' };
     }
+    // Judged against the locked row: the stored specs are only read here.
+    const spec = mergedSpec(before, body as Record<string, unknown>);
+    const specErr = specConflicts(before.category as string, spec.merged, spec.changed);
+    if (specErr) return { kind: 'specConflict', error: specErr };
 
     // The mirror verdict has to be taken before qty/unit_cost move — afterwards
     // a stale mirror and a real negotiated price are indistinguishable and the
@@ -1389,6 +1394,7 @@ inventory.patch('/:id', async (c) => {
   if (outcome.kind === 'archived') {
     return c.json({ error: 'the purchase order is archived; unarchive it before editing its lines' }, 409);
   }
+  if (outcome.kind === 'specConflict') return c.json({ error: outcome.error }, 400);
   const before = outcome.before;
 
   // Margin guard rails (PRD §10): warn the manager — and drop a notification —

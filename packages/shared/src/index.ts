@@ -18,3 +18,4 @@ export * from "./paymentNote.js";
 export * from "./reporting.js";
 export * from "./ramSheetSegment.js";
 export * from "./materialEdit.js";
+export * from "./specCascade.js";

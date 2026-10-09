@@ -45,6 +45,15 @@ describe('buildRamLinePatches', () => {
     ]);
   });
 
+  it('settles a label read that contradicts itself, as the drawer would', () => {
+    const odd: ScanResponse = {
+      ...scan('M471A2K43DB1-CWE', 'a'),
+      extracted: { classification: 'SODIMM', type: 'Server', rank: '2Rx4', generation: 'DDR4' },
+    };
+    const [p] = buildRamLinePatches([{ scan: odd, qty: 1, unitCost: '9' }], { combineByPn: false });
+    expect(p).toMatchObject({ classification: 'SODIMM', type: 'Laptop', rank: '' });
+  });
+
   it('keeps every stick separate when combining is off', () => {
     const patches = buildRamLinePatches(
       [

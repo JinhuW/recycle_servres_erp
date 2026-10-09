@@ -704,6 +704,33 @@ on to Sold once every line has sold (v1.164.0).
     `D9`/`D8`/`C9`/`Z9` + three letters.
   - **Left as typed:** anything else, and other brands' chip numbers (only
     upper-cased).
+- **RAM and SSD spec selects cascade, so a line's specs can't contradict each
+  other** (v1.233.0, RS-210). One table (`shared/specCascade.ts`) drives the
+  desktop drawer (new PO, PO edit, Review mode), the phone form, the RAM sheet
+  scan, the inventory editor and the API.
+  - **Type and Class follow each other**, and whichever was picked last wins:
+    - Desktop → UDIMM.
+    - Laptop → SODIMM, but only on DDR3/DDR4. On DDR5 a laptop module can be
+      SODIMM or CAMM, so Class is left for you.
+    - Server clears a SODIMM/CAMM.
+    - RDIMM/LRDIMM → Server and SODIMM/CAMM → Laptop.
+    - UDIMM → Desktop, which may still be switched to Server (ECC UDIMM).
+  - **Neither list is filtered by the other.** Picking against the current
+    value fixes the partner field instead, so a SODIMM + Laptop line can still
+    become RDIMM in one pick.
+  - **Filtered lists:**
+    - CAMM is offered only on DDR5.
+    - Server-only ranks are dropped for UDIMM/SODIMM/CAMM or Desktop/Laptop:
+      x4, quad and octal, dual-die and 3DS.
+    - An SSD's form factor follows its interface: SATA 2.5"/M.2, SAS 2.5" only
+      (filled in), NVMe anything, U.2 U.2/2.5".
+  - **Fixed or cleared, never left contradicting:** a value a new pick rules
+    out. A label scan lands the same way, and the Class read off the label
+    wins over a scanned Type.
+  - **The API refuses a conflict**, but only for a rule whose own fields the
+    save changes. Prod holds lines from before the rules (SODIMM + 2Rx4,
+    UDIMM + Laptop), and a price edit on one still saves. Values the table
+    doesn't know (legacy `type: 'DDR4'`, a bare `M.2`) restrict nothing.
 - **Validation is shared between shells**, so desktop, mobile and the backend
   can't drift: all RAM spec fields required (v1.29.0); Chip # required only for
   Micron and Other, whose part numbers don't identify the module (v1.36.0);

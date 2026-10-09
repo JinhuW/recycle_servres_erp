@@ -17,6 +17,45 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.233.0] - 2026-10-09
+
+A RAM or SSD line's spec selects now cascade, so a line can't hold specs that
+contradict each other (RS-210). Picking **Desktop** fills **UDIMM**, and
+picking **RDIMM** makes the line **Server**. Before, Type and Class were two
+independent dropdowns, and about 60 prod lines carry a pair that can't exist
+(SODIMM + Server, UDIMM + Laptop, a server-only 2Rx4 rank on a SODIMM).
+
+### Added
+
+- **Type ↔ Class.** Each fills or fixes the other, and the last pick wins.
+  - Desktop → UDIMM.
+  - Laptop → SODIMM on DDR3/DDR4. On DDR5 Class is left open, because the
+    module could be SODIMM or CAMM.
+  - RDIMM/LRDIMM → Server and SODIMM/CAMM → Laptop.
+  - UDIMM → Desktop, which may be switched to Server for ECC UDIMMs.
+  - Neither list is filtered by the other, because filtering both ways would
+    lock a SODIMM + Laptop line out of RDIMM.
+- **Filtered lists.**
+  - Server-only ranks (x4, quad/octal, dual-die, 3DS) are offered only with
+    server memory.
+  - CAMM is offered only on DDR5.
+  - An SSD's form factor follows its interface: SAS offers, and fills,
+    2.5" only.
+- **Everywhere a spec is written.**
+  - The desktop drawer: new PO, PO edit, Review mode.
+  - The phone form.
+  - The inventory editor.
+  - A label scan and a RAM sheet scan. A scan that reads SODIMM next to
+    Server lands as Laptop with the impossible rank cleared, instead of a
+    PO the API turns away.
+- **The API enforces it.** `POST /api/orders`, `PATCH /api/orders/:id`
+  (lines and addLines) and `PATCH /api/inventory/:id` refuse a conflict
+  with a 400 that names it, e.g. `line 2: Laptop doesn't fit RDIMM (RDIMM is
+  Server)`. Only rules whose own fields the save changes are judged, so a
+  price edit on a legacy conflicting line still saves. The rules live in one
+  table, `packages/shared/src/specCascade.ts`, which the forms and the API
+  both read.
+
 ## [1.232.0] - 2026-10-09
 
 The lots table under an expanded inventory product names each lot by PO

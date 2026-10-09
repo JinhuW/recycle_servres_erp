@@ -5,7 +5,7 @@ import { getDb } from '../../db';
 import { nextHumanId } from '../../lib/id-seq';
 import { writeOrderEvent } from '../../services/orderAudit';
 import { autoTrackParts } from '../../lib/marketAutoTrack';
-import { validateLineInput } from '../../lib/orderInput';
+import { specRuleErr, validateLineInput } from '../../lib/orderInput';
 import { syncOrderCategory, deriveCategory } from '../../services/orderCategory';
 import { insertDraftOrderTx } from '../../services/orderDraft';
 import { linkPaypalTxnToOrder } from '../../banktx/sync';
@@ -93,6 +93,8 @@ createRoutes.post('/', async (c) => {
     if (issue) return c.json({ error: serialErr(`line ${i + 1}`, issue) }, 400);
     const labelErr = identityErr(`line ${i + 1}`, lineCats[i], l);
     if (labelErr) return c.json({ error: labelErr }, 400);
+    const specErr = specRuleErr(`line ${i + 1}`, lineCats[i], l);
+    if (specErr) return c.json({ error: specErr }, 400);
   }
 
   // Human-friendly id like PO-1289, allocated atomically (see id-seq.ts).

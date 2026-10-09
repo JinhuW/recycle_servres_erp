@@ -1,7 +1,7 @@
-import { canonicalPartNumber } from '@recycle-erp/shared';
+import { canonicalPartNumber, cascadePatch } from '@recycle-erp/shared';
 import { ApiError } from '../../../lib/api';
 import type { ScanResponse } from '../../../lib/types';
-import { scanToLinePatch, type Line } from './line';
+import { blankLine, scanToLinePatch, type Line } from './line';
 
 // Pure pieces of the "Scan RAM sheet" flow (RS-109): turning the per-stick
 // scan results into PO lines, and pacing the per-stick /api/scan/label calls.
@@ -29,8 +29,10 @@ export function buildRamLinePatches(
   const out: Array<Partial<Line>> = [];
   const byKey = new Map<string, Partial<Line>>();
   for (const r of rows) {
+    // These lines skip the drawer, so the spec cascade runs here: an OCR'd
+    // SODIMM next to a Server type would otherwise refuse the whole PO.
     const patch: Partial<Line> = {
-      ...scanToLinePatch(r.scan, 'RAM'),
+      ...cascadePatch<Line>('RAM', blankLine('RAM'), scanToLinePatch(r.scan, 'RAM')),
       qty: r.qty,
       unitCost: r.unitCost,
     };
