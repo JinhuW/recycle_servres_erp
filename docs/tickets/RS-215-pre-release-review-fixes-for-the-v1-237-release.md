@@ -2,13 +2,13 @@
 id: RS-215
 title: Pre-release review fixes for the v1.237 release
 type: bug
-status: in-progress
+status: done
 priority: P1
 created: 2026-10-09
 reporter: jinhu
 branch: fix/prerelease-rs215
-pr:
-version:
+pr: "#577"
+version: 1.237.1
 related: [RS-207, RS-208, RS-209, RS-210, RS-212, RS-213, RS-214, RS-217]
 ---
 
@@ -93,15 +93,15 @@ to RAM.
 
 ## Acceptance criteria
 
-- [ ] Inventory → Select all, with a brand chip on, selects only lots of that
+- [x] Inventory → Select all, with a brand chip on, selects only lots of that
       brand, also inside a product whose other lots are typed differently.
-- [ ] A lot sold, archived or emptied after the Inventory list loaded doesn't
+- [x] A lot sold, archived or emptied after the Inventory list loaded doesn't
       join Select all, or the export of the selection, when it sits past the
       200 listed products.
-- [ ] With Show sold on, select-all and the grouped view reach every matching
+- [x] With Show sold on, select-all and the grouped view reach every matching
       lot up to 5000 lines, and the backend logs a warning when the cap is hit.
-- [ ] A partial transfer's new lot keeps the source's Chip #.
-- [ ] dev is released to main, and prod health reports the release version.
+- [x] A partial transfer's new lot keeps the source's Chip #.
+- [x] dev is released to main (#579, 46790727), and prod health reports 1.237.1.
 
 ## Out of scope
 
@@ -114,3 +114,6 @@ to RAM.
   test designs that couldn't fail on the old code, tied the read cap to the
   selection ceiling instead of a bare 10000 (which would have made select-all
   413), and dropped finding #9.
+- The wait for #577's checks hung for six hours because the PR was born
+  conflicting and got no checks. See
+  `docs/debug-notes/2026-10-09-pr-check-wait-hangs-on-a-conflicting-pr.md`.
