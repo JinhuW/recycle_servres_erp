@@ -33,6 +33,17 @@ describe('groupLines', () => {
     expect(groupLines(lines).map(g => g.category)).toEqual(['RAM', 'SSD', 'Other']);
   });
 
+  it('counts a group\'s products by #, so a transfer clone is not a second product', () => {
+    const ram = groupLines([
+      { ...line('RAM', 6, 10), no: 3 },
+      { ...line('RAM', 4, 10), no: 3 },
+      { ...line('RAM', 1, 10), no: 5 },
+      line('RAM', 1, 10),
+    ])[0];
+    expect(ram.lines).toHaveLength(4);
+    expect(ram.products).toBe(3);
+  });
+
   it('keeps each line’s original index so row handlers still address the right line', () => {
     const ram = groupLines(lines).find(g => g.category === 'RAM')!;
     expect(ram.lines.map(m => m.index)).toEqual([1, 3]);

@@ -325,7 +325,7 @@ webSubmissions.post('/:id/convert', async (c) => {
         // CPU is not an enabled category — it files under Other by item type,
         // the way the PO form does it.
         const category = l.category === 'CPU' ? 'Other' : l.category;
-        const row = (await tx<{ id: string }[]>`
+        const row = (await tx<{ id: string; product_no: number }[]>`
           INSERT INTO order_lines (
             order_id, category, brand, capacity, type, classification, rank, speed,
             interface, form_factor, description, item_type, part_number, condition,
@@ -339,10 +339,10 @@ webSubmissions.post('/:id/convert', async (c) => {
             ${l.category === 'CPU' ? 'CPU' : null}, ${f.part_number ?? null}, 'Pulled — Untested',
             ${l.qty}, 0, 'Draft', ${i}
           )
-          RETURNING id
+          RETURNING id, product_no
         `)[0];
         await writeOrderEvent(tx, orderId, me.id, 'line_added', {
-          lineId: row.id, category, partNumber: f.part_number ?? null, qty: l.qty, unitCost: 0,
+          lineId: row.id, no: row.product_no, category, partNumber: f.part_number ?? null, qty: l.qty, unitCost: 0,
         });
         let pos = 0;
         for (const u of copies.filter(x => x.line === i)) {

@@ -36,7 +36,11 @@ const PO_LINE_TAIL_COLS: XlsxColumn[] = [
   { header: 'Profit',     key: 'profit',    width: 12, numFmt: '#,##0.00' },
 ];
 
+// Each row leads with its product's # on the PO, the one the page shows: a
+// PO spanning categories splits across sheets, so a row's place in its sheet
+// is not its #.
 const poLineCols = (cat: ExportCategory): XlsxColumn[] => [
+  { header: '#', key: 'no', width: 6 },
   ...SPEC_COLS_BY_CATEGORY[cat],
   ...PO_LINE_TAIL_COLS,
 ];
@@ -71,7 +75,7 @@ spreadsheetRoutes.get('/:id/spreadsheet', async (c) => {
   // fee basis and the projected profit with every sale — the same basis
   // lib/po-cost.ts and the goods-total mirror use.
   const lines = await sql`
-    SELECT category, brand, capacity, generation, type, classification, rank, speed,
+    SELECT product_no, category, brand, capacity, generation, type, classification, rank, speed,
            interface, form_factor, description, item_type, part_number, chip_number, serial_number,
            condition, COALESCE(qty_purchased, qty) AS qty, health::float AS health, rpm,
            unit_cost::float AS unit_cost, sell_price::float AS sell_price
@@ -103,6 +107,7 @@ spreadsheetRoutes.get('/:id/spreadsheet', async (c) => {
     const unitCost = Number(l.unit_cost ?? 0);
     const sellPrice = l.sell_price != null ? Number(l.sell_price) : null;
     return {
+      no: l.product_no,
       ...lineSpecFields(l),
       // Read by categoryTabSheets to pick the sheet; not a declared column on
       // any of them, so it never renders.

@@ -301,7 +301,7 @@ describe('the API refuses a spec conflict', () => {
       token, body: { addLines: [{ ...SSD_LINE, interface: 'SAS', formFactor: 'M.2 2280' }] },
     });
     expect(add.status).toBe(400);
-    expect(add.body.error).toBe("line 1: M.2 2280 doesn't fit a SAS SSD");
+    expect(add.body.error).toBe("new line 1: M.2 2280 doesn't fit a SAS SSD");
   });
 
   it('on a PO line edit that changes the conflicting fields, and only then', async () => {

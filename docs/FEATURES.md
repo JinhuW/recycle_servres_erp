@@ -83,6 +83,33 @@ The core object. A PO is a purchase from a vendor, built line by line, that
 moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done, and
 on to Sold once every line has sold (v1.164.0).
 
+- **Every product on a PO has a `#` that never changes** (v1.234.0). It is
+  given when the product is put on the PO — a new PO numbers its products
+  1..n in the order they came, and each one added later takes the PO's next
+  `#` — and stored (`order_lines.product_no`), not worked out from the list.
+  - **Removing a product leaves a gap.** `#1, #2, #3` with #2 removed reads
+    `#1, #3`, and the next product added is #4: a `#` is never handed to
+    another product, not even on a Draft.
+  - **A partial transfer keeps its `#`.** The units moved to another warehouse
+    become a second row with the source's `#`, so the PO page shows `#3`
+    twice, each with its warehouse, right after each other. Discarding the
+    transfer folds it back and leaves no gap.
+  - **"N products" counts `#`s**, so the PO list, the page head and the
+    category groups count a transferred product once.
+  - A product not saved yet reads *new* where its `#` would be, and messages
+    name it by its row ("New product on row 4") until the save gives it one.
+    Saved products are named by `#` — "#5 is missing: Generation", "This
+    Part # is already on #2, #7" — never by their place in the list. A
+    transfer's two rows of one product are not flagged as a duplicate part #.
+    The PO PATCH names an invalid product it was asked to add "new line n"
+    (n counts within that request).
+  - The `#` is the same on the PO page, the phone's Products screen, Review
+    mode, the PO list's drawer, the PO workbook (a leading `#` column on every
+    sheet, v1.234.0), each sell order's "From PO-1432 #3", Inventory and the
+    sellable picker. Products that existed before v1.234.0 kept the number
+    they showed.
+  - Transfer refusals name the product the same way ("PO-1432 #3 only has 5
+    units"), as does a sell order a lot can't go on.
 - **One PO can hold several categories** (v1.54.0), with its lines grouped by
   category and a per-category cost breakdown (v1.55.0).
 - **A new PO starts at a 50% commission rate** (v1.166.0). The column
@@ -346,9 +373,10 @@ on to Sold once every line has sold (v1.164.0).
   - Opening and leaving the check re-reads the PO, so neither page works from
     the other's stale copy. A PO page with unsaved edits refuses to open it
     (v1.189.1).
-  - Each row carries its PO line number (#1, #2… — the PO page's numbering,
-    kept while rows regroup), and a RAM row shows its device type (Desktop /
-    Server / Laptop) beside the class, rank and speed chips (v1.190.0).
+  - Each row carries its product's `#` on the PO (the stored one since
+    v1.234.0, so regrouping the rows never touches it), and a RAM row shows
+    its device type (Desktop / Server / Laptop) beside the class, rank and
+    speed chips (v1.190.0).
   - Every line's count starts at its full qty (v1.188.1). Ticking the
     checkbox confirms the line at the count it shows, and a ticked line sinks
     below a *Checked* divider, newest first, with an Undo.
@@ -675,8 +703,9 @@ on to Sold once every line has sold (v1.164.0).
   editor also refuses a qty below what committed sell orders hold, naming them
   to a manager.
 - **A line already on the PO can be counted down to 0** (v1.213.0), when none
-  of its units arrived. Deleting it would renumber every line after it, since
-  a line's `#` is its rank. The PO page drawer, the Review-mode drawer and the
+  of its units arrived: the product stays on the PO as ordered and never
+  received. (Removing it no longer renumbers anything — a removed product
+  leaves a gap since v1.234.0 — but a 0 keeps the record.) The PO page drawer, the Review-mode drawer and the
   phone line form on an existing order all take 0. A new line still needs at
   least 1: a new PO, *Add item*, and a line being captured on the phone. The
   inventory editor keeps 1 as its floor. For a purchaser past Draft, setting
@@ -1010,11 +1039,9 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   - By warehouse's reference reads "From PO-1432 #3".
   - Lines picked in edit mode, from the picker or Inventory → Add to sell order,
     show the number before saving.
-  - The number is computed live, not stored. It is the line's rank among the
-    PO's lines by position, then creation time, then id, which is also the order
-    the PO page lists them in. Removing a PO line renumbers both pages together.
-    A partial-transfer clone sorts after its source, so the source keeps its
-    number.
+  - The number is the product's stored `#` on its PO (v1.234.0; a live rank
+    before). Removing a PO product renumbers nothing on either page, and a
+    lot split off by a partial transfer shows its source's `#`.
 - **Each line shows its spec as tags** (v1.194.0).
   - RAM: Desktop / Server / Laptop, classification, rank and speed (rank and
     speed accented).

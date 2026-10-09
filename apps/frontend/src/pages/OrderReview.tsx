@@ -117,7 +117,9 @@ export function OrderReview({
               style={{ cursor: 'pointer' }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span className="lb-rank" style={{ width: 22, height: 22, fontSize: 11 }}>{i + 1}</span>
+                <span className="lb-rank" style={{ width: 22, height: 22, fontSize: l.no != null ? 11 : 9 }}>
+                  {l.no ?? t('lineNoNew')}
+                </span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {l.label || '—'}

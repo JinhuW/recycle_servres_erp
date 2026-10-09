@@ -329,7 +329,7 @@ export const packageFromJson = (p: PackageJson | null) => p && {
 // "120.00" string forms.
 export function lineAuditCols(sql: SqlLike) {
   return sql`
-    id, status, qty, category, brand, capacity, type, generation, classification,
+    id, product_no, status, qty, category, brand, capacity, type, generation, classification,
     rank, speed, interface, form_factor, description, item_type, part_number,
     serial_number, chip_number, condition, rpm,
     unit_cost::float AS unit_cost,
@@ -338,11 +338,14 @@ export function lineAuditCols(sql: SqlLike) {
 }
 
 // A line as the added / removed / reverted events snapshot it.
-export type LineSnapRow = { id: string; category: string; part_number: string | null; qty: number; unit_cost: number };
+export type LineSnapRow = {
+  id: string; product_no: number; category: string; part_number: string | null; qty: number; unit_cost: number;
+};
 
 export function lineSnapshot(r: LineSnapRow) {
   return {
     lineId: r.id,
+    no: r.product_no,
     category: r.category,
     partNumber: r.part_number,
     qty: r.qty,
@@ -550,6 +553,7 @@ export function changesMaterialField(
 // from a typed one when a line changes category.
 export type StoredLine = {
   id: string;
+  product_no: number;
   category: string | null;
   generation: string | null;
   qty: number;
@@ -568,6 +572,6 @@ export type StoredLine = {
 };
 export function storedLineCols(sql: SqlLike) {
   return sql`
-    id, category, generation, qty, serial_number, item_type, part_number,
+    id, product_no, category, generation, qty, serial_number, item_type, part_number,
     brand, capacity, interface, form_factor, speed, rpm, type, classification, rank`;
 }

@@ -739,7 +739,8 @@ export function DesktopOrders({ onToast }: Props) {
                                 const profit = l.sellPrice != null ? l.qty * (l.sellPrice - l.unitCost) : null;
                                 return (
                                   <tr key={l.id}>
-                                    <td className="muted mono">{i + 1}</td>
+                                    {/* An older backend sends no #; its lines came in # order. */}
+                                    <td className="muted mono">{l.no ?? i + 1}</td>
                                     <td>
                                       <div>{name}</div>
                                       {sub && <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)' }}>{sub}</div>}

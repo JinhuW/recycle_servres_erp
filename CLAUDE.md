@@ -249,6 +249,13 @@ switches the branch out from under the first.
 - **Order ID counters** are per-type sequences in `id_counters` (see
   `migrations/0029`).  Use `lib/id-seq.ts`; never compute an ID by counting
   rows.
+- **A PO product's `#` is `order_lines.product_no`, stored and never
+  renumbered** (v1.234.0).  A `BEFORE INSERT` trigger (0169) gives a row
+  that names none the PO's next `#` from `orders.next_product_no`, so app
+  inserts leave it out.  The one exception is a partial transfer's clone,
+  which names its source's `#`, so `(order_id, product_no)` is not unique.
+  Hand-written SQL that moves a row to another PO must give it the target's
+  next `#`, never carry the old one.
 - **`orders.category` and `orders.total_cost` are derived from the lines**, by
   `services/orderCategory.ts` and `services/orderGoodsTotal.ts`, at the end of
   every transaction that writes lines.  **Clients must not send `totalCost`** —

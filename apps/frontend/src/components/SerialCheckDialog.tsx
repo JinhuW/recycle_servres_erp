@@ -4,7 +4,8 @@ import { useT } from '../lib/i18n';
 import { useEscapeKey } from '../lib/useEscapeKey';
 
 export type SerialLineIssue = {
-  lineNo: number;
+  // How the line is named: lineRef — its # once saved.
+  line: string;
   label: string;
   issue: SerialIssue;
 };
@@ -42,9 +43,9 @@ export function SerialCheckDialog({ issues, onClose }: {
             {issues.map((it, i) => (
               <li key={i}>
                 {it.issue.kind === 'ddr5Required'
-                  ? t('serialDdr5Required', { line: it.lineNo, label: it.label })
+                  ? t('serialDdr5Required', { line: it.line, label: it.label })
                   : t('serialCountMismatch', {
-                      line: it.lineNo, label: it.label,
+                      line: it.line, label: it.label,
                       n: it.issue.count, qty: it.issue.qty,
                     })}
               </li>

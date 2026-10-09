@@ -83,6 +83,10 @@ export type OrderLine = {
   scanConfidence: number | null;
   scanImageUrl: string | null;
   position: number;
+  // The product's # on the PO: given when it was saved, never changed, so a
+  // removed product leaves a gap and a partial transfer's clone repeats its
+  // source's #. Optional for deploy skew: an older backend sends none.
+  no?: number;
   health: number | null;
   rpm: number | null;
 };
@@ -327,6 +331,8 @@ export type DraftLine = {
   id?: string;
   /** Stable client-side key for React lists; never sent to the API. */
   _cid?: string;
+  /** The product's # once saved — given by the server, never sent. */
+  no?: number | null;
   category: Category;
   brand?: string | null;
   capacity?: string | null;

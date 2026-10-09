@@ -6,10 +6,13 @@ import type { Line } from './line';
 // be scoped to what changed.
 export type EditLine = Line & { _id?: string; _dirty?: boolean };
 
-export function orderLineToEditLine(l: OrderLine): EditLine {
+// `i` is the line's place in the order's list, for an older backend that sends
+// no # — its lines came in # order.
+export function orderLineToEditLine(l: OrderLine, i?: number): EditLine {
   return {
     _cid:           crypto.randomUUID(),
     _id:            l.id,
+    no:             l.no ?? (i != null ? i + 1 : undefined),
     category:       l.category,
     photos:         l.photos ?? [],
     brand:          l.brand ?? undefined,

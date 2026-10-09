@@ -17,6 +17,42 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.234.0] - 2026-10-09
+
+A PO product's `#` is now stored and never changes (RS-213, part 1 of 3).
+Before, the `#` was a rank worked out on every read. Removing a product
+renumbered every product after it, and so did a partial transfer, whose
+split-off units ranked right behind their source. A received transfer shifted
+the PO's tail for good, and every sell order's "From PO-1432 #3" with it. That
+made the `#` useless as an id.
+
+### Changed
+
+- **Migration 0169 stores each product's `#`** in `order_lines.product_no`,
+  with a per-PO counter in `orders.next_product_no`.
+  - It backfills existing rows with the rank they showed, and refuses to apply
+    if any row would move.
+  - A `BEFORE INSERT` trigger gives each new row the PO's next `#`, in the
+    insert's order.
+- **Never reused.** A removed product leaves a gap, and the next one added
+  takes a new `#`, even within one save.
+- **A partial transfer keeps its `#`.** The units it moves keep their
+  source's `#` on the PO, and discarding the transfer leaves no gap.
+- **Every screen reads the stored `#`:** the desktop and phone PO pages,
+  Review mode, the PO list drawer, the capture page, sell orders' "From PO",
+  Inventory and the picker. A product not saved yet shows *new*.
+  - Messages name products by `#`, or by row ("New product on row 4") before
+    saving. They no longer count list positions. This fixes the part-number
+    confirm dialog, which printed a stray `{pn}`.
+  - A transfer's split is no longer flagged as a duplicate part #.
+  - PATCH errors about a product being added say "new line n".
+- **"N products" counts distinct `#`s,** so a transferred product counts once.
+- **The PO workbook gains a leading `#` column.** Its category sheets don't
+  close a removed product's gap.
+- **Names in place of UUIDs.** Transfer, re-open and discard refusals, sell-order lot
+  errors and the box-check notification name a product as "PO-1432 #3".
+  New PO line events carry `no`.
+
 ## [1.233.1] - 2026-10-09
 
 Micron lines that never had a die code recorded now carry one, looked up from
