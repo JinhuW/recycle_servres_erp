@@ -108,8 +108,7 @@ function foldLine(r: SheetLineRow): FoldLine {
 // share the #; a lot re-spec'd, or a typed line re-worded, keeps it — the items
 // may already carry that label — but prints as a row of its own under it, so
 // the sheet never shows one product's spec for another's items.
-const productIdOf = (l: FoldLine): string =>
-  l.row.product_no != null ? `#${l.row.product_no}\u0000${l.key}` : `key:${l.key}`;
+const productIdOf = (l: FoldLine): string => `#${l.row.product_no!}\u0000${l.key}`;
 const byKey = (l: FoldLine): string => l.key;
 
 // One product from its lines. Its place — category, label, placing specs — is
@@ -247,15 +246,20 @@ export function numberSheetLines(rows: readonly SheetLineRow[], nextNo: number) 
   placed.sort((a, b) => a.p.no! - b.p.no! || a.w - b.w || a.i - b.i);
   const lineOrder: string[] = [];
   const noByLine = new Map<string, number>();
+  // The product a line folds into — its # and what it reads as — so Pack mode
+  // groups lines as the sheet prints them: two lots that share a # but no
+  // longer read as one product are two rows under it.
+  const productByLine = new Map<string, string>();
   for (const { p } of placed) {
     for (const src of p.poSources) {
       for (const lineId of src.solIds) {
         lineOrder.push(lineId);
         noByLine.set(lineId, p.no!);
+        productByLine.set(lineId, p.id);
       }
     }
   }
-  return { numbered, lineOrder, noByLine, lines };
+  return { numbered, lineOrder, noByLine, productByLine, lines };
 }
 
 // What the files show, from the numbered products: a line held at 0 is
@@ -383,13 +387,15 @@ export async function assignSellProductNos(tx: SqlLike, soId: string): Promise<v
 // other gets its planned ones. Run before a save carries the #s across its
 // rewrite, and at boot. The caller holds the order's row lock.
 export async function healSellProductNos(tx: SqlLike, soId: string): Promise<void> {
-  const rows = await sheetRows(tx, soId);
-  if (!rows.some((r) => r.product_no == null)) return;
-  if (rows.some((r) => r.product_no != null)) {
+  const [{ unnumbered, numbered }] = await tx<{ unnumbered: boolean; numbered: boolean }[]>`
+    SELECT bool_or(product_no IS NULL) AS unnumbered, bool_or(product_no IS NOT NULL) AS numbered
+    FROM sell_order_lines WHERE sell_order_id = ${soId}`;
+  if (!unnumbered) return;
+  if (numbered) {
     await assignSellProductNos(tx, soId);
     return;
   }
-  const noByLine = legacyNumbers(rows);
+  const noByLine = legacyNumbers(await sheetRows(tx, soId));
   await writeNumbers(tx, soId, noByLine, Math.max(0, ...noByLine.values()) + 1);
 }
 

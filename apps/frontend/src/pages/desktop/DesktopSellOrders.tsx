@@ -163,7 +163,7 @@ const toEditLine = (l: SellOrderLine): EditLine => ({
   _cid:        crypto.randomUUID(),
   saved:       true,
   id:          l.id,
-  no:          l.no ?? null,
+  no:          l.no,
   inventoryId: l.inventoryId,
   category:    l.category,
   label:       l.label,

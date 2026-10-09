@@ -351,7 +351,7 @@ sellOrders.get('/:id', async (c) => {
   ] as const);
   // The lines in # order, each with its product's # — folded from this one
   // read, so a save landing mid-request can't split a product.
-  const { lineOrder, noByLine } = numberSheetLines(listed.map((l): SheetLineRow => ({
+  const { lineOrder, noByLine, productByLine } = numberSheetLines(listed.map((l): SheetLineRow => ({
     sol_id: l.id, sell_qty: l.qty,
     sol_label: l.label, sol_sub: l.sub_label, sol_part: l.part_number,
     sol_category: l.category, sol_condition: l.condition,
@@ -422,6 +422,9 @@ sellOrders.get('/:id', async (c) => {
         // with, and what both packing lists show. Lines of one product share
         // it.
         no: noByLine.get(l.id)!,
+        // Which product the line folds into on the packing list, opaque: two
+        // lots under one # print as two rows when they no longer read alike.
+        product: productByLine.get(l.id)!,
         category: l.category, label: l.label, sub: l.sub_label, partNumber: l.part_number,
         qty: l.qty, unitPrice: l.unit_price,
         // Native (order-currency) unit price; equals unitPrice for USD orders.

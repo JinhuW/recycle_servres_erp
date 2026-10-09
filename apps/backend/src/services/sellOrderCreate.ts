@@ -204,7 +204,8 @@ export async function createSellOrderDraft(
     await writeSellOrderEvent(tx, nextId, input.actorUserId, 'created', {
       source: input.source,
       status: 'Draft',
-      lineCount: products,
+      lineCount: input.lines.length,
+      productCount: products,
       customerId: input.customerId,
       currency: input.currency,
       fxRateToUsd: fx.rate,

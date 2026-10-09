@@ -14,8 +14,8 @@ import { sellOrderStatuses } from '../../lib/lookups';
 import { navigate, navigateBack } from '../../lib/route';
 import {
   flaggedLots, isPackable, nextOpenProduct, packBody, packGroups, packProducts, packScan, packView, packWarehouseOf,
-  packWarehouseOptions, productSummary, productTally, productTick, shipBlockers, sourceTag, toCheck, UNASSIGNED,
-  type PackLine, type PackProduct, type PackResponse,
+  packWarehouseOptions, productIdOf, productSummary, productTally, productTick, shipBlockers, sourceTag, toCheck,
+  UNASSIGNED, type PackLine, type PackProduct, type PackResponse,
 } from '../../lib/sellOrderPack';
 import type { Category } from '../../lib/types';
 import { useEscapeKey } from '../../lib/useEscapeKey';
@@ -86,7 +86,7 @@ type Props = {
 const toneFor = (s: string) => sellOrderStatuses.find(o => o.id === s)?.tone ?? 'muted';
 const pnOf = (l: Line) => l.partNumber ?? l.label;
 // A row is a lot (its line id) or a folded product's head row.
-const prodKey = (no: number) => 'p:' + no;
+const prodKey = (pid: string) => 'p:' + pid;
 const rowElId = (key: string) => (key.startsWith('p:') ? 'pk-prod-' + key.slice(2) : 'pk-row-' + key);
 const COLS = 6;
 
@@ -108,7 +108,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   // Lines a part-number scan could have meant, waiting for a tap.
   const [choose, setChoose] = useState<ReadonlySet<string>>(new Set());
   // Folded products the packer opened, by #.
-  const [open, setOpen] = useState<ReadonlySet<number>>(new Set());
+  const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const [selected, setSelected] = useState<string | null>(null);
   const [shipping, setShipping] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -214,8 +214,9 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   const picked = warehouses.includes(wh) ? wh : '';
   const allProducts = useMemo(() => packProducts(packView(lines, '')), [lines]);
   const products = useMemo(() => packProducts(packView(lines, picked)), [lines, picked]);
-  const productByNo = useMemo(() => new Map(allProducts.map(p => [p.no, p])), [allProducts]);
+  const productByPid = useMemo(() => new Map(allProducts.map(p => [p.pid, p])), [allProducts]);
   const lineNo = useMemo(() => new Map(lines.map(l => [l.id, l.no])), [lines]);
+  const linePid = useMemo(() => new Map(lines.map(l => [l.id, productIdOf(l)])), [lines]);
   // Typing narrows the list once it pauses. The filter searches the whole
   // order, packable lines only, as Enter does, so it never hides the line
   // Enter would pack; a product holding a match shows whole, opened. It
@@ -240,16 +241,16 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   const folds = (p: Product) => p.lots.length > 1;
   // Opened by the packer, or held open while the filter has a match in it.
   const forcedOpen = (p: Product) => !!fit && p.lots.some(l => fit.has(l.id));
-  const isOpen = (p: Product) => folds(p) && (open.has(p.no) || forcedOpen(p));
-  const keysOf = (p: Product) => (folds(p) ? [prodKey(p.no), ...(isOpen(p) ? p.lots.map(l => l.id) : [])] : [p.head.id]);
+  const isOpen = (p: Product) => folds(p) && (open.has(p.pid) || forcedOpen(p));
+  const keysOf = (p: Product) => (folds(p) ? [prodKey(p.pid), ...(isOpen(p) ? p.lots.map(l => l.id) : [])] : [p.head.id]);
   const groups = useMemo(() => packGroups(listed, checks), [listed, checks]);
   const visibleKeys = [...groups.open, ...(showPacked ? groups.packed : [])].flatMap(keysOf);
   const selKey = selected && visibleKeys.includes(selected) ? selected : visibleKeys[0] ?? null;
-  const productOf = (lineId: string) => productByNo.get(lineNo.get(lineId) ?? -1) ?? null;
+  const productOf = (lineId: string) => productByPid.get(linePid.get(lineId) ?? '') ?? null;
   // The row a line shows on: its own, or its product's while folded.
   const rowKeyOf = (lineId: string) => {
     const p = productOf(lineId);
-    return p && folds(p) && !isOpen(p) ? prodKey(p.no) : lineId;
+    return p && folds(p) && !isOpen(p) ? prodKey(p.pid) : lineId;
   };
 
   // ── FLIP: a row that changes group slides from where it was, as in Review
@@ -308,16 +309,16 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     undoTimer.current = setTimeout(() => setUndo(null), 5000);
   };
 
-  const setFold = (no: number, to: boolean) => {
+  const setFold = (pid: string, to: boolean) => {
     setOpen(prev => {
       const next = new Set(prev);
-      if (to) next.add(no); else next.delete(no);
+      if (to) next.add(pid); else next.delete(pid);
       return next;
     });
     // A lot can't stay selected inside a fold that closed over it.
-    if (!to && selKey && !selKey.startsWith('p:') && lineNo.get(selKey) === no) setSelected(prodKey(no));
+    if (!to && selKey && !selKey.startsWith('p:') && linePid.get(selKey) === pid) setSelected(prodKey(pid));
   };
-  const openFolds = (nos: Iterable<number>) => setOpen(prev => new Set([...prev, ...nos]));
+  const openFolds = (pids: Iterable<string>) => setOpen(prev => new Set([...prev, ...pids]));
 
   // The stepper only changes the number. Lowering a packed line takes the
   // tick away, so a short pick is always confirmed by a tick made after it.
@@ -335,7 +336,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   const moveOn = (lineId: string, after: ReadonlyMap<string, LineCheck>) => {
     const p = productOf(lineId);
     if (!p || productSummary(p.lots, after).state !== 'done') return;
-    const next = nextOpenProduct(products, after, p.no);
+    const next = nextOpenProduct(products, after, p.pid);
     if (next) setSelected(keysOf(next)[0]!);
   };
 
@@ -372,7 +373,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
       return;
     }
     if (plan.left.length) {
-      setFold(p.no, true);
+      setFold(p.pid, true);
       setScanMsg({ tone: 'warn', text: t('pkProductLeft', { pn, n: plan.left.length }) });
     }
     if (!plan.tick.length) return;
@@ -390,7 +391,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
 
   const toggleKey = (key: string) => {
     if (key.startsWith('p:')) {
-      const p = productByNo.get(Number(key.slice(2)));
+      const p = productByPid.get(key.slice(2));
       if (p) toggleProduct(p);
       return;
     }
@@ -422,14 +423,14 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
       });
       // The selection moves on as a tick's does, judged on the reply: a fold
       // that lost a lot to 0 may now be a single row, under another key.
-      const selNo = selKey ? (selKey.startsWith('p:') ? Number(selKey.slice(2)) : lineNo.get(selKey)) : undefined;
-      if (selNo !== undefined && applied.some(lineId => lineNo.get(lineId) === selNo)) {
+      const selPid = selKey ? (selKey.startsWith('p:') ? selKey.slice(2) : linePid.get(selKey)) : undefined;
+      if (selPid !== undefined && applied.some(lineId => linePid.get(lineId) === selPid)) {
         const qtyNow = new Map(r.lines.map(x => [x.lineId, x.qty]));
         const now = packProducts(packView(lines.map(l => ({ ...l, qty: qtyNow.get(l.id) ?? l.qty })), picked));
         const after = new Map(r.lines.map(x => [x.lineId, toCheck(x)]));
-        const p = now.find(x => x.no === selNo);
+        const p = now.find(x => x.pid === selPid);
         const state = p && productSummary(p.lots, after).state;
-        const target = state === 'open' || state === 'mixed' ? p : nextOpenProduct(now, after, selNo);
+        const target = state === 'open' || state === 'mixed' ? p : nextOpenProduct(now, after, selPid);
         setSelected(target ? keysOf(target)[0]! : null);
       }
     } catch (e) {
@@ -476,7 +477,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     if ('choose' in m) {
       // The candidates can sit in several products, and in another warehouse.
       setChoose(new Set(m.choose.map(l => l.id)));
-      openFolds(m.choose.map(l => lineNo.get(l.id) ?? -1));
+      openFolds(m.choose.map(l => linePid.get(l.id) ?? ''));
       setScanMsg({ tone: 'warn', text: t('pkScanChoose', { pn: text, n: m.choose.length, lots: m.choose.map(l => `#${lineNo.get(l.id)} ${fromText(l)}`).join(', ') }) });
       if (picked && m.choose.some(l => packWarehouseOf(l) !== picked)) setWh('');
       setSelected(m.choose[0]!.id);
@@ -517,7 +518,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
         setSelected(next);
         scrollTo(next);
       };
-      const foldOf = (key: string) => productByNo.get(key.startsWith('p:') ? Number(key.slice(2)) : lineNo.get(key) ?? -1);
+      const foldOf = (key: string) => productByPid.get(key.startsWith('p:') ? key.slice(2) : linePid.get(key) ?? '');
       switch (e.key) {
         case 'ArrowDown': e.preventDefault(); move(1); return;
         case 'ArrowUp': e.preventDefault(); move(-1); return;
@@ -526,7 +527,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
           const p = selKey ? foldOf(selKey) : undefined;
           if (!p || !folds(p)) return;
           e.preventDefault();
-          setFold(p.no, e.key === 'ArrowRight');
+          setFold(p.pid, e.key === 'ArrowRight');
           return;
         }
         case ' ':
@@ -704,7 +705,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     const s = productSummary(p.lots, checks);
     const pn = pnOf(p.head);
     const opened = isOpen(p);
-    const key = prodKey(p.no);
+    const key = prodKey(p.pid);
     const cls = 'pk-prod ' + (s.state === 'done' ? 'bc-done' : s.state === 'mixed' ? 'pk-mixed' : 'bc-open')
       + (s.zeroed ? ' pk-has-zero' : s.short ? ' pk-has-short' : '')
       + (p.lots.some(l => choose.has(l.id)) ? ' pk-choose' : '');
@@ -725,7 +726,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
               aria-label={t(opened ? 'pkFoldClose' : 'pkFoldOpen', { no: p.no, n: p.lots.length })}
               // The filter holds a fold with a match open.
               disabled={forcedOpen(p)}
-              onClick={() => setFold(p.no, !opened)}
+              onClick={() => setFold(p.pid, !opened)}
             >
               <Icon name="chevronDown" size={14} />
               <span className="pk-no">#{p.no}</span>
@@ -769,7 +770,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   const productRows = (p: Product) => (!p.lots.length ? zeroRow(p) : folds(p) ? foldRows(p) : singleRow(p));
 
   // ── The selected row, beside the list.
-  const selProduct = selKey?.startsWith('p:') ? productByNo.get(Number(selKey.slice(2))) ?? null : null;
+  const selProduct = selKey?.startsWith('p:') ? productByPid.get(selKey.slice(2)) ?? null : null;
   const selLine = selProduct ? selProduct.head : selKey ? lineById.get(selKey) ?? null : null;
   const selNo = selLine ? lineNo.get(selLine.id) : undefined;
   const selPhoto = (selProduct ? photoOf(selProduct) : selLine)?.imageUrl ?? null;

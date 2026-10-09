@@ -197,7 +197,7 @@ describe('productSummary', () => {
 });
 
 describe('packGroups', () => {
-  const P = (no: number, ...lots: PackLine[]): PackProduct<PackLine> => ({ no, lots, head: lots[0] ?? L('h' + no) });
+  const P = (no: number, ...lots: PackLine[]): PackProduct<PackLine> => ({ no, pid: String(no), lots, head: lots[0] ?? L('h' + no) });
   const products = [P(1, L('a')), P(2, L('b'), L('c')), P(3, L('d')), P(4), P(5, L('e'))];
   const nos = (ps: readonly PackProduct<PackLine>[]) => ps.map(p => p.no);
 
@@ -226,24 +226,24 @@ describe('packGroups', () => {
 });
 
 describe('nextOpenProduct', () => {
-  const P = (no: number, ...lots: PackLine[]): PackProduct<PackLine> => ({ no, lots, head: lots[0] ?? L('h' + no) });
+  const P = (no: number, ...lots: PackLine[]): PackProduct<PackLine> => ({ no, pid: String(no), lots, head: lots[0] ?? L('h' + no) });
   const products = [P(1, L('a')), P(2, L('b')), P(3), P(4, L('d'), L('e'))];
 
   it('moves on to the next product still to pack, skipping packed and empty ones', () => {
-    expect(nextOpenProduct(products, checks(C('a', 2, 'x'), C('b', 2, 'x')), 1)?.no).toBe(4);
+    expect(nextOpenProduct(products, checks(C('a', 2, 'x'), C('b', 2, 'x')), '1')?.no).toBe(4);
   });
 
   it('counts a partly packed product as still to pack', () => {
-    expect(nextOpenProduct(products, checks(C('a', 2, 'x'), C('b', 2, 'x'), C('d', 2, 'x')), 1)?.no).toBe(4);
+    expect(nextOpenProduct(products, checks(C('a', 2, 'x'), C('b', 2, 'x'), C('d', 2, 'x')), '1')?.no).toBe(4);
   });
 
   it('goes back to the top past the last', () => {
-    expect(nextOpenProduct(products, checks(C('d', 2, 'x'), C('e', 2, 'x')), 4)?.no).toBe(1);
+    expect(nextOpenProduct(products, checks(C('d', 2, 'x'), C('e', 2, 'x')), '4')?.no).toBe(1);
   });
 
   it('is null once everything is packed', () => {
     const all = checks(C('a', 2, 'x'), C('b', 2, 'x'), C('d', 2, 'x'), C('e', 2, 'x'));
-    expect(nextOpenProduct(products, all, 2)).toBeNull();
+    expect(nextOpenProduct(products, all, '2')).toBeNull();
   });
 });
 
@@ -291,5 +291,20 @@ describe('productTally', () => {
     expect(productTally(ps, cs)).toEqual({
       products: 4, done: 1, partial: 1, absent: 1, open: 1, units: 12, counted: 4,
     });
+  });
+});
+
+describe('a product is what the server folds, not its # alone', () => {
+  it('keeps two lots that share a # but no longer read alike as two products', () => {
+    const ls = [
+      L('a', { no: 1, product: '#1|TW' }), L('b', { no: 1, product: '#1|TX' }), L('c', { no: 2, product: '#2|Z' }),
+    ];
+    expect(packProducts(packView(ls, '')).map(p => [p.no, p.pid, p.lots.map(l => l.id)]))
+      .toEqual([[1, '#1|TW', ['a']], [1, '#1|TX', ['b']], [2, '#2|Z', ['c']]]);
+  });
+
+  it('falls back to the # for a backend that sends no product', () => {
+    const ls = [L('a', { no: 1 }), L('b', { no: 1 })];
+    expect(packProducts(packView(ls, '')).map(p => p.pid)).toEqual(['1']);
   });
 });

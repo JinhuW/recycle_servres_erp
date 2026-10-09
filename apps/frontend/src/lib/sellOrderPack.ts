@@ -20,7 +20,14 @@ export type PackLine = CheckableLine & {
   sourceLineNo?: number | null;
   // The product's # on the order, which the packer labels the items with.
   no: number;
+  // The product the line folds into, as the packing list prints it: two lots
+  // under one # that no longer read alike are two products. Opaque; absent
+  // from a backend older than this bundle.
+  product?: string;
 };
+
+// A line's product: the server's, else its # alone.
+export const productIdOf = (l: Pick<PackLine, 'no' | 'product'>): string => l.product ?? String(l.no);
 
 // `qty` is the line's on the order, which a tick on a Draft sets to the count.
 // Absent from a backend older than this bundle.
@@ -63,7 +70,7 @@ export function packWarehouseOptions(lines: readonly Pick<PackLine, 'warehouse' 
 // A line held at 0 stays on the order to keep its #, but has nothing to pack.
 export const isPackable = (l: Pick<CheckableLine, 'qty'>): boolean => l.qty > 0;
 
-export type PackRowView<L> = { line: L; no: number };
+export type PackRowView<L> = { line: L; no: number; pid: string };
 
 // Every line in the order's own list order — # order — with its product's
 // #, which the server counts over the whole order so a warehouse
@@ -72,7 +79,7 @@ export type PackRowView<L> = { line: L; no: number };
 // `wh` '' means every warehouse.
 export function packView<L extends PackLine>(lines: readonly L[], wh: string): PackRowView<L>[] {
   return lines
-    .map(line => ({ line, no: line.no }))
+    .map(line => ({ line, no: line.no, pid: productIdOf(line) }))
     .filter(r => !wh || packWarehouseOf(r.line) === wh);
 }
 
@@ -86,18 +93,18 @@ export function sourceTag(l: Pick<PackLine, 'sourceOrderId' | 'sourceLineNo'>): 
 // splits one. A lot held at 0 has nothing to pack and is left out, as the
 // packing lists leave it — unless every lot is, when `lots` is empty and the
 // product still stands, by its first line, to account for its #.
-export type PackProduct<L> = { no: number; lots: L[]; head: L };
+export type PackProduct<L> = { no: number; pid: string; lots: L[]; head: L };
 
 export function packProducts<L extends PackLine>(rows: readonly PackRowView<L>[]): PackProduct<L>[] {
-  const out: { no: number; lines: L[] }[] = [];
+  const out: { no: number; pid: string; lines: L[] }[] = [];
   for (const r of rows) {
     const last = out[out.length - 1];
-    if (last && last.no === r.no) last.lines.push(r.line);
-    else out.push({ no: r.no, lines: [r.line] });
+    if (last && last.pid === r.pid) last.lines.push(r.line);
+    else out.push({ no: r.no, pid: r.pid, lines: [r.line] });
   }
-  return out.map(({ no, lines }) => {
+  return out.map(({ no, pid, lines }) => {
     const lots = lines.filter(isPackable);
-    return { no, lots, head: lots[0] ?? lines[0]! };
+    return { no, pid, lots, head: lots[0] ?? lines[0]! };
   });
 }
 
@@ -150,13 +157,13 @@ export function packGroups<L extends CheckableLine>(
 // Where the selection goes once a tick packs the product it was on: the next
 // one still to pack, from the top again past the last.
 export function nextOpenProduct<L extends CheckableLine>(
-  products: readonly PackProduct<L>[], checks: ReadonlyMap<string, LineCheck>, fromNo: number,
+  products: readonly PackProduct<L>[], checks: ReadonlyMap<string, LineCheck>, fromPid: string,
 ): PackProduct<L> | null {
   const left = (p: PackProduct<L>) => {
     const s = productSummary(p.lots, checks).state;
     return s === 'open' || s === 'mixed';
   };
-  const from = products.findIndex(p => p.no === fromNo);
+  const from = products.findIndex(p => p.pid === fromPid);
   return products.find((p, i) => i > from && left(p)) ?? products.find(left) ?? null;
 }
 
