@@ -63,11 +63,16 @@ type FoldLine = {
 // labels it sits in.
 const PLACING_SPECS = ['brand', 'capacity', 'generation', 'type', 'speed'] as const;
 
-// The order a product's lines are read in: by PO and line # on it, never by
-// `position`, which every save of the editor rewrites. A hand-typed line came
-// from no PO and goes last, ordered by its text.
+// The order a product's lines are read in: by PO and product # on it, never
+// by `position`, which every save of the editor rewrites. A partial transfer's
+// clone shares its source's # on the PO, so the lot breaks that tie — it
+// outlives every save. A hand-typed line came from no PO and goes last,
+// ordered by its text.
 function byPoLine(a: FoldLine, b: FoldLine): number {
-  if (a.po && b.po) return comparePoIds(a.po, b.po) || a.lineNo! - b.lineNo!;
+  if (a.po && b.po) {
+    return comparePoIds(a.po, b.po) || a.lineNo! - b.lineNo!
+      || (a.row.inv_id! < b.row.inv_id! ? -1 : a.row.inv_id! > b.row.inv_id! ? 1 : 0);
+  }
   if (a.po || b.po) return a.po ? -1 : 1;
   return a.category.localeCompare(b.category) || (a.part ?? '').localeCompare(b.part ?? '');
 }
@@ -99,10 +104,12 @@ function foldLine(r: SheetLineRow): FoldLine {
   };
 }
 
-// A line's product: its stored # — lots of one product share it. A line not
-// numbered yet folds by its key until a save numbers it.
+// A line's product: its stored # and what it reads as. Lots of one product
+// share the #; a lot re-spec'd, or a typed line re-worded, keeps it — the items
+// may already carry that label — but prints as a row of its own under it, so
+// the sheet never shows one product's spec for another's items.
 const productIdOf = (l: FoldLine): string =>
-  l.row.product_no != null ? `#${l.row.product_no}` : `key:${l.key}`;
+  l.row.product_no != null ? `#${l.row.product_no}\u0000${l.key}` : `key:${l.key}`;
 const byKey = (l: FoldLine): string => l.key;
 
 // One product from its lines. Its place — category, label, placing specs — is
@@ -177,15 +184,59 @@ function byWarehouseTab(lines: readonly FoldLine[]): [string, FoldLine[]][] {
   });
 }
 
+// The # a line not numbered yet takes: a lot of a product already on the
+// order — same warehouse tab, same part|label|condition — joins its #; the
+// rest are new products which, folded among themselves, take the next #s in
+// packing-list order. So a new order reads 1..N down its sheet, and a later
+// save's products follow every other.
+function plannedNos(lines: readonly FoldLine[], next: number): { assigned: Map<string, number>; next: number } {
+  const slot = (l: FoldLine) => `${warehouseOf(l)}\u0000${l.key}`;
+  const existing = new Map<string, number>();
+  for (const l of lines) {
+    const no = l.row.product_no;
+    if (no == null) continue;
+    const had = existing.get(slot(l));
+    if (had == null || no < had) existing.set(slot(l), no);
+  }
+  const assigned = new Map<string, number>();
+  const newcomers: FoldLine[] = [];
+  for (const l of lines) {
+    if (l.row.product_no != null) continue;
+    const joins = existing.get(slot(l));
+    if (joins != null) assigned.set(l.row.sol_id, joins);
+    else newcomers.push(l);
+  }
+  for (const [, whLines] of byWarehouseTab(newcomers)) {
+    for (const p of packSections(foldProducts(whLines, byKey)).flatMap((s) => s.rows)) {
+      const no = next++;
+      for (const src of p.poSources) for (const lineId of src.solIds) assigned.set(lineId, no);
+    }
+  }
+  return { assigned, next };
+}
+
+// The # every line shows. A line not numbered yet shows what the next save
+// will store, so no screen ever shows a line without one: in an order with
+// none stored at all — written before 0170, or by the previous release's
+// instance while a deploy rolls — the # that release showed; otherwise the
+// # it is planned to take from `nextNo` on.
+function withNos(rows: readonly SheetLineRow[], nextNo: number): readonly SheetLineRow[] {
+  if (!rows.some((r) => r.product_no == null)) return rows;
+  const fill = rows.every((r) => r.product_no == null)
+    ? legacyNumbers(rows)
+    : plannedNos(rows.map(foldLine), nextNo).assigned;
+  return rows.map((r) => (r.product_no == null ? { ...r, product_no: fill.get(r.sol_id) ?? null } : r));
+}
+
 // The packing list's products per warehouse tab, each in its sheet row, with
-// its stored #; and the order's lines in # order, which is how the order page
-// and Pack mode list them. A product whose lots sit in two warehouses prints
-// on both tabs under its one #, and its lines stay together.
+// its #; and the order's lines in # order, which is how the order page and
+// Pack mode list them. A product whose lots sit in two warehouses prints on
+// both tabs under its one #, and its lines stay together.
 //
 // A line held at 0 is folded and numbered like any other, and only then left
 // off the files.
-export function numberSheetLines(rows: readonly SheetLineRow[]) {
-  const lines = rows.map(foldLine);
+export function numberSheetLines(rows: readonly SheetLineRow[], nextNo: number) {
+  const lines = withNos(rows, nextNo).map(foldLine);
   const numbered = byWarehouseTab(lines).map(([warehouse, whLines]) => ({
     warehouse,
     products: packSections(foldProducts(whLines)).flatMap((s) => s.rows),
@@ -193,22 +244,14 @@ export function numberSheetLines(rows: readonly SheetLineRow[]) {
   }));
 
   const placed = numbered.flatMap(({ products }, w) => products.map((p, i) => ({ p, w, i })));
-  placed.sort((a, b) => {
-    // Unnumbered products (a line an older instance wrote) come last.
-    if (a.p.no !== b.p.no) {
-      if (a.p.no == null) return 1;
-      if (b.p.no == null) return -1;
-      return a.p.no - b.p.no;
-    }
-    return a.w - b.w || a.i - b.i;
-  });
+  placed.sort((a, b) => a.p.no! - b.p.no! || a.w - b.w || a.i - b.i);
   const lineOrder: string[] = [];
   const noByLine = new Map<string, number>();
   for (const { p } of placed) {
     for (const src of p.poSources) {
       for (const lineId of src.solIds) {
         lineOrder.push(lineId);
-        if (p.no != null) noByLine.set(lineId, p.no);
+        noByLine.set(lineId, p.no!);
       }
     }
   }
@@ -218,8 +261,8 @@ export function numberSheetLines(rows: readonly SheetLineRow[]) {
 // What the files show, from the numbered products: a line held at 0 is
 // nothing to price or pick, and a tab or PO left empty goes. Its product
 // keeps its #.
-export function foldSheetLines(rows: readonly SheetLineRow[]) {
-  const { numbered, lines } = numberSheetLines(rows);
+export function foldSheetLines(rows: readonly SheetLineRow[], nextNo: number) {
+  const { numbered, lines } = numberSheetLines(rows, nextNo);
   const live = (p: SheetProduct): SheetProduct[] => {
     const poSources = p.poSources.filter((x) => x.qty > 0);
     return poSources.length ? [{ ...p, poSources }] : [];
@@ -321,50 +364,39 @@ async function writeNumbers(
   await tx`UPDATE sell_orders SET next_product_no = GREATEST(next_product_no, ${next}) WHERE id = ${soId}`;
 }
 
-// Numbers every line of the order that has no # yet. The caller holds the
-// order's row lock (sell_orders FOR UPDATE) or has just created it.
-//
-// A lot of a product already on the order — same warehouse tab, same
-// part|label|condition — joins its #. The rest are new products: folded among
-// themselves, they take the next #s in packing-list order, so a new order
-// reads 1..N down its sheet and a later save's products follow every other.
+// Numbers every line of the order that has no # yet, as plannedNos says:
+// from the counter, never reusing a #. The caller holds the order's row lock
+// (sell_orders FOR UPDATE) or has just created it.
 export async function assignSellProductNos(tx: SqlLike, soId: string): Promise<void> {
-  const lines = (await sheetRows(tx, soId)).map(foldLine);
-  const fresh = lines.filter((l) => l.row.product_no == null);
-  if (!fresh.length) return;
-
-  const slot = (l: FoldLine) => `${warehouseOf(l)}\u0000${l.key}`;
-  const existing = new Map<string, number>();
-  for (const l of lines) {
-    const no = l.row.product_no;
-    if (no == null) continue;
-    const had = existing.get(slot(l));
-    if (had == null || no < had) existing.set(slot(l), no);
-  }
-
+  const [{ any }] = await tx<{ any: boolean }[]>`
+    SELECT EXISTS (SELECT 1 FROM sell_order_lines WHERE sell_order_id = ${soId} AND product_no IS NULL) AS any`;
+  if (!any) return;
   const [{ next_product_no: start }] = await tx<{ next_product_no: number }[]>`
     SELECT next_product_no FROM sell_orders WHERE id = ${soId}`;
-  let next = start;
-  const assigned = new Map<string, number>();
-  const newcomers: FoldLine[] = [];
-  for (const l of fresh) {
-    const joins = existing.get(slot(l));
-    if (joins != null) assigned.set(l.row.sol_id, joins);
-    else newcomers.push(l);
-  }
-  for (const [, whLines] of byWarehouseTab(newcomers)) {
-    for (const p of packSections(foldProducts(whLines, byKey)).flatMap((s) => s.rows)) {
-      const no = next++;
-      for (const src of p.poSources) for (const lineId of src.solIds) assigned.set(lineId, no);
-    }
-  }
+  const { assigned, next } = plannedNos((await sheetRows(tx, soId)).map(foldLine), start);
   await writeNumbers(tx, soId, assigned, next);
+}
+
+// Stores the # an order's unnumbered lines show (withNos): an order with none
+// stored gets the numbers the previous release showed for it — from before
+// 0170, or a rewrite by that release's instance during a deploy — and any
+// other gets its planned ones. Run before a save carries the #s across its
+// rewrite, and at boot. The caller holds the order's row lock.
+export async function healSellProductNos(tx: SqlLike, soId: string): Promise<void> {
+  const rows = await sheetRows(tx, soId);
+  if (!rows.some((r) => r.product_no == null)) return;
+  if (rows.some((r) => r.product_no != null)) {
+    await assignSellProductNos(tx, soId);
+    return;
+  }
+  const noByLine = legacyNumbers(rows);
+  await writeNumbers(tx, soId, noByLine, Math.max(0, ...noByLine.values()) + 1);
 }
 
 // ── Before 0170 ─────────────────────────────────────────────────────────────
 // The # every order showed until it was stored: derived on each read from the
 // packing-list sort, one per (warehouse tab, part|label|condition), in tiers of
-// append_batch (RS-206) so a product added past Draft went after the rest.
+// append_batch so a product added past Draft went after the rest.
 // Kept only to freeze those numbers once (freezeLegacySellNumbers); delete it
 // with append_batch once prod holds no unnumbered line.
 export function legacyNumbers(rows: readonly SheetLineRow[]): Map<string, number> {
@@ -407,14 +439,7 @@ export async function freezeLegacySellNumbers(sql: postgres.Sql): Promise<number
   for (const { sell_order_id: id } of orders) {
     await sql.begin(async (tx) => {
       await tx`SELECT 1 FROM sell_orders WHERE id = ${id} FOR UPDATE`;
-      const rows = await sheetRows(tx, id);
-      if (rows.length === 0 || rows.some((r) => r.product_no != null)) {
-        await assignSellProductNos(tx, id);
-        return;
-      }
-      const noByLine = legacyNumbers(rows);
-      const top = Math.max(0, ...noByLine.values());
-      await writeNumbers(tx, id, noByLine, top + 1);
+      await healSellProductNos(tx, id);
     });
   }
   return orders.length;

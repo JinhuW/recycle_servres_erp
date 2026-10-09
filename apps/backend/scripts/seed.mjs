@@ -659,11 +659,11 @@ try {
               ${s.status === 'Done' ? created : null})
     `;
     // One # per product, as the backend gives it; seed data needn't follow the
-    // packing-list sort, so a product is just its part and condition.
+    // packing-list sort, so a product is its part, condition and warehouse.
     const noByProduct = new Map();
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i];
-      const productKey = `${l.part_number}|${l.condition}`;
+      const productKey = `${l.part_number ?? l.id}|${l.condition}|${l.warehouse_id}`;
       if (!noByProduct.has(productKey)) noByProduct.set(productKey, noByProduct.size + 1);
       const label = l.category === 'RAM' ? `${l.brand} ${l.capacity} ${l.type}`
                   : l.category === 'SSD' ? `${l.brand} ${l.capacity}`

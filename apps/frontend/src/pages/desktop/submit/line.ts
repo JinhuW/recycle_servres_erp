@@ -5,8 +5,6 @@ import { lineRequirements } from '../../../lib/lineRequirements';
 import { ramBrandNeedsConfirm } from '../../../lib/scanValidation';
 import { lineRef, productCount } from '../../../lib/productNo';
 
-export { lineRef };
-
 type Translate = (key: string, vars?: Record<string, string | number>) => string;
 
 // The line model shared by the capture form (DesktopSubmit), the edit page

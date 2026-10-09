@@ -51,6 +51,27 @@ included.
 - **Seeded orders get stored `#`s.** A PO archive's `line_removed` event
   carries the removed `#`.
 
+### Fixed before release (review)
+
+- **Deploy window.** An order the previous release's instance rewrote while
+  the deploy rolled shows that release's numbers. Its next save stores them,
+  instead of drawing new ones from the counter. Every line always shows a
+  `#`, so Pack mode never invents one.
+- **Corrected lots print separately.** A lot whose spec or part # is
+  corrected, or a typed line that is re-worded, keeps its product's `#` but
+  prints as its own row, so the sheet never shows one lot's spec for
+  another's items.
+- **Typed-line carry includes sub-label and warehouse.** The carry for a
+  hand-typed line now keys on those too, so a typed line joins a product
+  only in its own warehouse.
+- **Lot ties are stable.** A partial-transfer lot and its source tie on PO
+  and `#`; the lot now breaks the tie, so the row's details no longer flip
+  after a save.
+- **Rollback-safe.** `append_batch` is still written, so a rollback to
+  1.234.x renumbers nothing.
+- **MCP counts.** `create_sell_order_draft` keeps `lineCount` as the lines
+  it created and adds `productCount`.
+
 ## [1.234.0] - 2026-10-09
 
 A PO product's `#` is now stored and never changes (RS-213, part 1 of 3).

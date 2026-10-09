@@ -24,7 +24,7 @@ import {
   buildPriceTemplateWorkbook, buildPackingListWorkbook, buildPackingListByPoWorkbook,
 } from '../lib/sellOrderPriceTemplate';
 import {
-  assignSellProductNos, foldSheetLines, numberSheetLines, sheetRows, type SheetLineRow,
+  assignSellProductNos, foldSheetLines, healSellProductNos, numberSheetLines, sheetRows, type SheetLineRow,
 } from '../services/sellOrderNumbers';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { settleSoldTx } from '../services/orderSold';
@@ -257,8 +257,10 @@ sellOrders.get('/:id', async (c) => {
     payment_received_by: string | null; payment_received_by_name: string | null;
     pre_adjust_native_total: number | null; adjusted_at: string | null;
     adjusted_by: string | null; adjusted_by_name: string | null;
+    next_product_no: number;
   }[]>`
     SELECT so.id, so.status, so.notes, so.created_at, so.updated_at, so.archived_at, so.close_reason_id,
+           so.next_product_no,
            so.currency_code, so.fx_rate_to_usd::float AS fx_rate_to_usd, so.fx_source,
            so.created_by, so.payment_received_by, pu.name AS payment_received_by_name,
            so.pre_adjust_native_total::float AS pre_adjust_native_total,
@@ -361,7 +363,7 @@ sellOrders.get('/:id', async (c) => {
     interface: l.interface, form_factor: l.form_factor, description: l.description,
     part_number: l.lot_part_number, chip_number: l.chip_number, condition: l.lot_condition,
     health: l.health, rpm: l.rpm, image_url: l.image_url,
-  })));
+  })), head.next_product_no);
   const rank = new Map(lineOrder.map((lineId, i) => [lineId, i]));
   const lines = [...listed].sort((a, b) => rank.get(a.id)! - rank.get(b.id)!);
 
@@ -418,9 +420,8 @@ sellOrders.get('/:id', async (c) => {
         id: l.id,
         // The product's # on this order — what the packer labels its items
         // with, and what both packing lists show. Lines of one product share
-        // it. Null only for a line an older instance wrote mid-deploy, until
-        // a save numbers it.
-        no: noByLine.get(l.id) ?? null,
+        // it.
+        no: noByLine.get(l.id)!,
         category: l.category, label: l.label, sub: l.sub_label, partNumber: l.part_number,
         qty: l.qty, unitPrice: l.unit_price,
         // Native (order-currency) unit price; equals unitPrice for USD orders.
@@ -469,8 +470,8 @@ function customerSlug(name: string | null): string {
 // and the packing list so the two files can never disagree about what is on
 // the order.
 async function loadSellOrderSheetData(sql: SqlClient, id: string) {
-  const head = (await sql<{ id: string; currency_code: string; customer_name: string | null }[]>`
-    SELECT so.id, so.currency_code, c.name AS customer_name
+  const head = (await sql<{ id: string; currency_code: string; customer_name: string | null; next_product_no: number }[]>`
+    SELECT so.id, so.currency_code, c.name AS customer_name, so.next_product_no
     FROM sell_orders so
     JOIN customers c ON c.id = so.customer_id
     WHERE so.id = ${id} LIMIT 1
@@ -479,7 +480,7 @@ async function loadSellOrderSheetData(sql: SqlClient, id: string) {
 
   const rows = await sheetRows(sql, id);
 
-  const sheet = foldSheetLines(rows);
+  const sheet = foldSheetLines(rows, head.next_product_no);
 
   const slug = customerSlug(head.customer_name);
   return {
@@ -695,9 +696,10 @@ async function carriedProductNos(
 ): Promise<(l: SaveLineInput) => number | null> {
   const rows = await tx<{
     id: string; inventory_id: string | null; product_no: number | null;
-    category: string; label: string; part_number: string | null; condition: string | null;
+    category: string; label: string; sub_label: string | null; part_number: string | null;
+    condition: string | null; warehouse_id: string | null;
   }[]>`
-    SELECT id, inventory_id, product_no, category, label, part_number, condition
+    SELECT id, inventory_id, product_no, category, label, sub_label, part_number, condition, warehouse_id
     FROM sell_order_lines WHERE sell_order_id = ${orderId}`;
   const byRow = new Map(rows.map((r) => [r.id, r.product_no]));
   const lowest = (m: Map<string, number>, k: string, no: number | null) => {
@@ -705,19 +707,57 @@ async function carriedProductNos(
     const had = m.get(k);
     if (had == null || no < had) m.set(k, no);
   };
-  const typedKey = (l: { category: string; label: string; partNumber?: string | null; condition?: string | null }) =>
-    JSON.stringify([l.category, l.label, l.partNumber ?? null, l.condition ?? null]);
+  const typedKey = (l: {
+    category: string; label: string; subLabel?: string | null; partNumber?: string | null;
+    condition?: string | null; warehouseId?: string | null;
+  }) => JSON.stringify([
+    l.category, l.label, l.subLabel ?? null, l.partNumber ?? null, l.condition ?? null, l.warehouseId ?? null,
+  ]);
   const byLot = new Map<string, number>();
   const byText = new Map<string, number>();
   for (const r of rows) {
     if (r.inventory_id) lowest(byLot, r.inventory_id.toLowerCase(), r.product_no);
-    else lowest(byText, typedKey({ ...r, partNumber: r.part_number }), r.product_no);
+    else {
+      lowest(byText, typedKey({
+        ...r, subLabel: r.sub_label, partNumber: r.part_number, warehouseId: r.warehouse_id,
+      }), r.product_no);
+    }
   }
   return (l) => {
     if (typeof l.id === 'string' && byRow.has(l.id)) return byRow.get(l.id)!;
     const lot = l.inventoryId?.toLowerCase();
     if (lot) return byLot.get(lot) ?? null;
     return byText.get(typedKey(l)) ?? null;
+  };
+}
+
+// What the release before 0170 numbered a line by (sell_order_lines.append_batch),
+// still written so a rollback to it moves no #: a line keeps its own — by row,
+// else by lot — and a line new to an order past Draft gets the next batch. Drop
+// it with legacyNumbers.
+async function appendBatches(
+  tx: SqlLike, orderId: string, status: string,
+): Promise<(l: SaveLineInput) => number | null> {
+  const rows = await tx<{ id: string; inventory_id: string | null; append_batch: number | null }[]>`
+    SELECT id, inventory_id, append_batch FROM sell_order_lines WHERE sell_order_id = ${orderId}`;
+  const byRow = new Map(rows.map((r) => [r.id, r.append_batch]));
+  const byLot = new Map<string, number | null>();
+  for (const r of rows) {
+    if (!r.inventory_id) continue;
+    const lot = r.inventory_id.toLowerCase();
+    const had = byLot.get(lot);
+    if (!byLot.has(lot) || r.append_batch === null || (had != null && r.append_batch < had)) {
+      byLot.set(lot, r.append_batch);
+    }
+  }
+  const next = status === 'Draft'
+    ? null
+    : rows.reduce((max, r) => Math.max(max, r.append_batch ?? 0), 0) + 1;
+  return (l) => {
+    if (typeof l.id === 'string' && byRow.has(l.id)) return byRow.get(l.id)!;
+    const lot = l.inventoryId?.toLowerCase();
+    if (lot && byLot.has(lot)) return byLot.get(lot)!;
+    return next;
   };
 }
 
@@ -892,7 +932,11 @@ sellOrders.patch('/:id', async (c) => {
     `;
     if (body.lines !== undefined && fx) {
       const isNonUsd = effectiveCurrency !== 'USD';
+      // Lines an older instance rewrote mid-deploy carry no #: store the ones
+      // they show before carrying them across this rewrite.
+      await healSellProductNos(tx, id);
       const carriedNo = await carriedProductNos(tx, id);
+      const batchFor = await appendBatches(tx, id, beforeHead.status);
       await tx`DELETE FROM sell_order_lines WHERE sell_order_id = ${id}`;
       for (let i = 0; i < body.lines.length; i++) {
         const l = body.lines[i];
@@ -912,6 +956,7 @@ sellOrders.patch('/:id', async (c) => {
           sourceUnitPrice: isNonUsd ? l.unitPrice : null,
           sourceFxRate: isNonUsd ? fx.rate : null,
           productNo: carriedNo(l),
+          appendBatch: batchFor(l),
         });
       }
       await assignSellProductNos(tx, id);

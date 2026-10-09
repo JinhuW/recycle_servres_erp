@@ -105,8 +105,7 @@ type SellOrderLine = LineSpec & {
   id: string;
   // The product's # on this order, shared by its lines, the packing lists and
   // Pack mode: given when the product was put on the order, never changed.
-  // Null only for a line an older backend wrote mid-deploy, until a save.
-  no?: number | null;
+  no: number;
   category: 'RAM' | 'SSD' | 'HDD' | 'Other';
   label: string;
   sub: string | null;
@@ -1549,7 +1548,7 @@ function SellOrderDetail({ id, mode, onToast }: {
                         <tbody>
                           {g.items.map(({ line: l, idx }) => (
                             <tr key={l.id}>
-                              <LineItemCell line={l} lineNo={l.no ?? null} sub={l.sub} showPo={lineGroup === 'warehouse'} showLineNo={lineGroup === 'po'} linkPo />
+                              <LineItemCell line={l} lineNo={l.no} sub={l.sub} showPo={lineGroup === 'warehouse'} showLineNo={lineGroup === 'po'} linkPo />
                               {lineGroup === 'po' && <td style={{ fontSize: 12 }}>{lotWarehouse(l) ?? t('sodNoWarehouse')}</td>}
                               <td className="num mono">{l.qty}</td>
                               <td className="num mono">{fmtMoney(l.nativeUnitPrice, order.currency, locale)}</td>

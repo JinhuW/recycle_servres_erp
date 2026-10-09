@@ -984,15 +984,22 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
     #; within one save it keeps its #. A spec edit, a transfer, a warehouse
     change or archiving the source PO moves no #. A lot that moves to
     another warehouse prints under that warehouse's tab, so a product can
-    show its one # on two tabs. Setting a line to 0, editing a price, or
-    saving the order as shown never did.
+    show its one # on two tabs. A lot whose spec or part # is corrected — or
+    a hand-typed line re-worded — keeps its product's # (its items may
+    already carry the label) but prints as a row of its own under that #,
+    so the sheet never shows one lot's spec for another's items. Setting a
+    line to 0, editing a price, or saving the order as shown never did.
   - The # is stored (`sell_order_lines.product_no`), and so is the order's
     next one (`sell_orders.next_product_no`); the editor sends each saved
     line's row id, so a line keeps its # through the save's rewrite (by its
     lot, or a hand-typed line by its text, when an API caller sends no id).
     Orders that existed before v1.235.0 kept the numbers they showed: the
-    backend froze them on its first boot. A line added while editing reads
-    *new* until the save numbers it. "N products" on the order, the sell
+    backend froze them on its first boot, and an order the previous release
+    saves while a deploy rolls shows — and on its next save keeps — the
+    numbers that release showed. A line with no # stored yet always shows
+    the one it will get. A line added while editing reads *new* until the
+    save numbers it. A hand-typed line joins a product only in its own
+    warehouse. "N products" on the order, the sell
     orders list and its export count #s.
   - A product's place on the sheet comes from its first line by PO and
     product # — 0s included — and a tie on everything the sheet sorts by goes

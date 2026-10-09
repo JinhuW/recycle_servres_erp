@@ -19,8 +19,7 @@ export type PackLine = CheckableLine & {
   sourceOrderId?: string | null;
   sourceLineNo?: number | null;
   // The product's # on the order, which the packer labels the items with.
-  // Absent from a backend older than this bundle.
-  no?: number;
+  no: number;
 };
 
 // `qty` is the line's on the order, which a tick on a Draft sets to the count.
@@ -73,7 +72,7 @@ export type PackRowView<L> = { line: L; no: number };
 // `wh` '' means every warehouse.
 export function packView<L extends PackLine>(lines: readonly L[], wh: string): PackRowView<L>[] {
   return lines
-    .map((line, i) => ({ line, no: line.no ?? i + 1 }))
+    .map(line => ({ line, no: line.no }))
     .filter(r => !wh || packWarehouseOf(r.line) === wh);
 }
 

@@ -96,7 +96,7 @@ export type CreateDraftInput = {
 };
 
 export type CreateDraftResult =
-  | { ok: true; id: string; customerId: string; lineCount: number; currency: SupportedCurrency }
+  | { ok: true; id: string; customerId: string; lineCount: number; productCount: number; currency: SupportedCurrency }
   | { ok: false; error: string };
 
 // One sell_order_lines INSERT, shared by createSellOrderDraft and the sell-order
@@ -119,6 +119,8 @@ export interface SellOrderLineInsert {
   // The product's # when the line continues one already on the order; null
   // for a new product, which assignSellProductNos numbers after the insert.
   productNo: number | null;
+  // What the release before 0170 numbered by; see appendBatches.
+  appendBatch: number | null;
 }
 
 export async function insertSellOrderLine(
@@ -130,14 +132,14 @@ export async function insertSellOrderLine(
     INSERT INTO sell_order_lines
       (sell_order_id, inventory_id, category, label, sub_label, part_number,
        qty, unit_price, warehouse_id, condition, position,
-       source_currency, source_unit_price, source_fx_rate_to_usd, product_no)
+       source_currency, source_unit_price, source_fx_rate_to_usd, product_no, append_batch)
     VALUES
       (${sellOrderId}, ${line.inventoryId}, ${line.category}, ${line.label},
        ${line.subLabel}, ${line.partNumber},
        ${line.qty}, ${line.unitPriceUsd},
        ${line.warehouseId}, ${line.condition}, ${line.position},
        ${line.sourceCurrency}, ${line.sourceUnitPrice}, ${line.sourceFxRate},
-       ${line.productNo})
+       ${line.productNo}, ${line.appendBatch})
   `;
 }
 
@@ -156,7 +158,9 @@ export async function createSellOrderDraft(
 
   let nextId!: string;
   let products = 0;
-  let outcome: CreateDraftResult = { ok: true, id: '', customerId: input.customerId, lineCount: input.lines.length, currency: input.currency };
+  let outcome: CreateDraftResult = {
+    ok: true, id: '', customerId: input.customerId, lineCount: input.lines.length, productCount: 0, currency: input.currency,
+  };
 
   await sql.begin(async (tx) => {
     // Validated before the id is drawn: returning here commits the tx, so a
@@ -189,6 +193,7 @@ export async function createSellOrderDraft(
         sourceUnitPrice: isNonUsd ? l.unitPrice : null,
         sourceFxRate: isNonUsd ? fx.rate : null,
         productNo: null,
+        appendBatch: null,
       });
     }
     // Numbered once, in packing-list order, and never again.
@@ -208,5 +213,8 @@ export async function createSellOrderDraft(
   });
 
   if (!outcome.ok) return outcome;
-  return { ok: true, id: nextId, customerId: input.customerId, lineCount: products, currency: input.currency };
+  return {
+    ok: true, id: nextId, customerId: input.customerId, lineCount: input.lines.length,
+    productCount: products, currency: input.currency,
+  };
 }

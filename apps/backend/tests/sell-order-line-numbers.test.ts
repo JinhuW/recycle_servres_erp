@@ -545,8 +545,73 @@ describe('sell order #: the boot freezes the numbers older orders showed', () =>
     const sql = getTestDb();
     await sql`INSERT INTO sell_order_lines (sell_order_id, inventory_id, category, label, part_number, qty, unit_price, warehouse_id)
               VALUES (${id}, ${s4}, 'RAM', 'FRZ-S4', 'FRZ-S4', 1, 30, 'WH-LA1')`;
-    expect((await numbers(mgr, id)).map(([pn, no]) => [pn, no ?? null])).toEqual([['FRZ-K4', 1], ['FRZ-S4', null]]);
+    // Shown already as the # it will be stored with.
+    expect(await numbers(mgr, id)).toEqual([['FRZ-K4', 1], ['FRZ-S4', 2]]);
     await freezeLegacySellNumbers(sql);
     expect(await numbers(mgr, id)).toEqual([['FRZ-K4', 1], ['FRZ-S4', 2]]);
+    const [{ n }] = await sql<{ n: number }[]>`
+      SELECT COUNT(*)::int AS n FROM sell_order_lines WHERE sell_order_id = ${id} AND product_no IS NULL`;
+    expect(n).toBe(0);
+  });
+});
+
+describe('sell order #: what a deploy, a re-spec and a typed line can do', () => {
+  let mgr: string;
+  beforeEach(async () => {
+    await resetDb();
+    mgr = (await loginAs(ALEX)).token;
+  });
+
+  async function packingOrder() {
+    const [po] = await twoPos();
+    const [k4, s4, d3] = await lotsOn(po!, [
+      { pn: 'REV-K4', brand: 'Kingston', warehouse: 'WH-LA1' },
+      { pn: 'REV-S4', brand: 'Samsung', warehouse: 'WH-LA1' },
+      { pn: 'REV-D3', brand: 'Samsung', generation: 'DDR3', warehouse: 'WH-LA1' },
+    ]);
+    const id = await createOrder(mgr, [lotLine(k4!, 'REV-K4', 'WH-LA1'), lotLine(s4!, 'REV-S4', 'WH-LA1')]);
+    await moveTo(mgr, id, 'Packing');
+    await addLines(mgr, id, [lotLine(d3!, 'REV-D3', 'WH-LA1')]);
+    return { id, po: po!, k4: k4!, s4: s4!, d3: d3! };
+  }
+
+  it('an order the previous release rewrote mid-deploy shows, and keeps on its next save, the #s that release showed', async () => {
+    const { id } = await packingOrder();
+    const expected = [['REV-K4', 1], ['REV-S4', 2], ['REV-D3', 3]];
+    expect(await numbers(mgr, id)).toEqual(expected);
+    const sql = getTestDb();
+    // Still written, so the previous release numbers the added DDR3 module last too.
+    const batches = await sql<{ part_number: string; append_batch: number | null }[]>`
+      SELECT part_number, append_batch FROM sell_order_lines WHERE sell_order_id = ${id} ORDER BY part_number`;
+    expect(batches.map(b => [b.part_number, b.append_batch])).toEqual([['REV-D3', 1], ['REV-K4', null], ['REV-S4', null]]);
+
+    // The old instance's save: every line re-inserted with no #.
+    await sql`UPDATE sell_order_lines SET product_no = NULL WHERE sell_order_id = ${id}`;
+    expect(await numbers(mgr, id)).toEqual(expected);
+    // The new instance's next save stores those, not the counter's next three.
+    await addLines(mgr, id, []);
+    expect(await numbers(mgr, id)).toEqual(expected);
+    const stored = await sql<{ n: number }[]>`
+      SELECT COUNT(*)::int AS n FROM sell_order_lines WHERE sell_order_id = ${id} AND product_no IS NULL`;
+    expect(stored[0]!.n).toBe(0);
+  });
+
+  it('a lot re-spec\'d keeps its product\'s #, and the sheet prints it as a row of its own', async () => {
+    const [po, other] = await twoPos();
+    const [a] = await lotsOn(po!, [{ pn: 'REV-TW', brand: 'Kingston', warehouse: 'WH-LA1' }]);
+    const [b] = await lotsOn(other!, [{ pn: 'REV-TW', brand: 'Kingston', warehouse: 'WH-LA1' }]);
+    const id = await createOrder(mgr, [lotLine(a!, 'REV-TW', 'WH-LA1'), lotLine(b!, 'REV-TW', 'WH-LA1')]);
+    expect(await numbers(mgr, id)).toEqual([['REV-TW', 1], ['REV-TW', 1]]);
+
+    await getTestDb()`UPDATE order_lines SET part_number = 'REV-TX' WHERE id = ${b}`;
+    const plain = await workbook(mgr, `/api/sell-orders/${id}/packing-list`);
+    expect(packRows(plain.worksheets[0]!).sort()).toEqual([['1', 'REV-TW'], ['1', 'REV-TX']]);
+    expect((await detailLines(mgr, id)).map(l => l.no)).toEqual([1, 1]);
+  });
+
+  it('a typed line joins a product\'s # only in its own warehouse', async () => {
+    const id = await createOrder(mgr, [typedLine('REV-T1', 'WH-LA1')]);
+    await addLines(mgr, id, [typedLine('REV-T1', 'WH-NJ2')], false);
+    expect((await numbers(mgr, id)).sort()).toEqual([['REV-T1', 1], ['REV-T1', 2]]);
   });
 });
