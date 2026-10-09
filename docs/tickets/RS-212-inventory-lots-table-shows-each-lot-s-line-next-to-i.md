@@ -2,13 +2,13 @@
 id: RS-212
 title: Inventory lots table shows each lot's line # next to its PO
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-09
 reporter: jinhu
 branch: feat/inventory-lot-po-line-no
-pr:
-version:
+pr: 565
+version: 1.232.0
 related: [RS-145]
 ---
 
