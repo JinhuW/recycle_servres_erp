@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { lineRef, productCount } from './productNo';
+import { lineRef, newOrdinals, productCount } from './productNo';
 import { findDuplicateLine } from './dupParts';
 import { duplicatesByIndex, findDuplicatePartNumbers, lineBlockerMessages, type Line } from '../pages/desktop/submit/line';
 
@@ -9,11 +9,18 @@ const t = (key: string, vars?: Record<string, string | number>) =>
   key + (vars ? ' ' + JSON.stringify(vars) : '');
 
 describe('lineRef', () => {
-  it('names a saved product by its #, and an unsaved one as new — by its row when listed', () => {
-    expect(lineRef({ no: 7 }, t)).toBe('#7');
-    expect(lineRef({ no: 7 }, t, 2)).toBe('#7');
+  it('names a saved product by its #, and an unsaved one as new — by its part number or description', () => {
+    expect(lineRef({ no: 7, partNumber: 'M393' }, t)).toBe('#7');
     expect(lineRef({}, t)).toBe('lineRefNew');
-    expect(lineRef({ no: null }, t, 2)).toBe('lineRefNewRow {"n":3}');
+    expect(lineRef({ no: null, partNumber: ' M393 ' }, t)).toBe('lineRefNewNamed {"name":"M393"}');
+    expect(lineRef({ description: 'PSU 750W' }, t)).toBe('lineRefNewNamed {"name":"PSU 750W"}');
+  });
+
+  it('names an unsaved product by its place among the new rows, which the # column shows', () => {
+    expect(newOrdinals([{ no: 1 }, {}, { no: 3 }, { no: null }])).toEqual([null, 1, null, 2]);
+    expect(lineRef({ partNumber: 'B' }, t, 2)).toBe('lineRefNewNNamed {"n":2,"name":"B"}');
+    expect(lineRef({}, t, 1)).toBe('lineRefNewN {"n":1}');
+    expect(lineRef({ no: 4 }, t, null)).toBe('#4');
   });
 });
 
@@ -42,7 +49,7 @@ describe('duplicate part numbers', () => {
       { partNumber: 'A', idxs: [0, 2] },
       { partNumber: 'B', idxs: [1, 3] },
     ]);
-    expect(groups[1].idxs.map(i => lineRef(lines[i], t, i))).toEqual(['#3', 'lineRefNewRow {"n":4}']);
+    expect(groups[1].idxs.map(i => lineRef(lines[i], t))).toEqual(['#3', 'lineRefNewNamed {"name":"B"}']);
     expect(duplicatesByIndex(groups, lines).get(2)).toEqual([0]);
   });
 
@@ -69,7 +76,7 @@ describe('lineBlockerMessages', () => {
     const msgs = lineBlockerMessages(lines, t, () => false, () => 'Brand');
     expect(msgs).toEqual([
       'subMissingFieldsLine {"line":"#5","fields":"Brand"}',
-      'subMissingFieldsLine {"line":"lineRefNewRow {\\"n\\":2}","fields":"Brand"}',
+      'subMissingFieldsLine {"line":"lineRefNewN {\\"n\\":1}","fields":"Brand"}',
     ]);
   });
 });

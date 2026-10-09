@@ -9,7 +9,7 @@ import { handleFetchError } from '../../lib/errorToast';
 import { fmtDate, fmtUSD } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import {
-  createdEventParts, fieldLabel, linePhotoEventDetail, renderValue, type Translate,
+  createdEventParts, fieldLabel, linePhotoEventDetail, productsCount, renderValue, type Translate,
 } from '../../lib/orderPresentation';
 import { activityRecordHref, onLinkClick } from '../../lib/route';
 import { boxCheckEventLines } from '../../lib/boxCheck';
@@ -122,7 +122,7 @@ function summarise(e: Event, locale: string, t: Translate): { diff?: Change; not
   }
   if (e.kind === 'submitted') {
     return { plain: [
-      t('acNLines', { n: (d.lineCount as number) ?? 0 }),
+      productsCount(t, (d.lineCount as number) ?? 0),
       t('acNUnits', { n: (d.qty as number) ?? 0 }),
       fmtUSD((d.totalCost as number) ?? 0, locale),
     ].join(' · ') };

@@ -42,7 +42,7 @@ export function refusalResponse(c: Context, u: User, r: Refusal): Response {
     case 'forbidden':
       return c.json({ error: 'Forbidden' }, 403);
     case 'photoCap':
-      return c.json({ error: `at most ${r.cap} photos per line` }, 409);
+      return c.json({ error: `at most ${r.cap} photos per product` }, 409);
     case 'doneLocked':
       return c.json({ error: 'Order is Ready to Pay or Done and cannot be modified. Move it back to Reviewing first.' }, 409);
     case 'archived':
@@ -53,16 +53,16 @@ export function refusalResponse(c: Context, u: User, r: Refusal): Response {
     // these two: the lines that block, and no sell order named.
     case 'revertCommitted':
       return c.json({
-        error: 'Lines in this order are on open sell orders — a manager has to make this change.',
+        error: 'Products in this order are on open sell orders — a manager has to make this change.',
         offendingLineIds: r.lineIds,
       }, 409);
     case 'revertTransfer':
       return c.json({
-        error: 'Lines in this order are out on an open transfer order. Receive or discard that transfer before editing it.',
+        error: 'Products in this order are out on an open transfer order. Receive or discard that transfer before editing it.',
         offendingLineIds: r.lineIds,
       }, 409);
     case 'orderWouldBeEmpty':
-      return c.json({ error: 'An order must keep at least one line. Delete the order instead.' }, 409);
+      return c.json({ error: 'An order must keep at least one product. Delete the order instead.' }, 409);
     case 'trackingNeedsLabel':
       return c.json({ error: 'A tracking number belongs to a shipping label — set handoffMethod to label' }, 400);
     case 'trackingTaken':
@@ -73,11 +73,11 @@ export function refusalResponse(c: Context, u: User, r: Refusal): Response {
       return c.json({ error: PACKAGE_DELIVERED_MSG }, 409);
     case 'qtyBelowCommitted':
       return c.json(committedLinesBody(u, r.lineIds, r.sellOrderIds,
-        `A line's new qty is below what ${describeSellOrders(r.sellOrderIds)} already holds. Lower or close that sell order first.`,
-        'A line\'s new qty is below what an open sell order holds — a manager has to change it.'), 409);
+        `A product's new qty is below what ${describeSellOrders(r.sellOrderIds)} already holds. Lower or close that sell order first.`,
+        'A product\'s new qty is below what an open sell order holds — a manager has to change it.'), 409);
     case 'removeReferenced':
       return c.json(committedLinesBody(u, r.lineIds, r.sellOrderIds,
-        `A line you tried to remove is on ${describeSellOrders(r.sellOrderIds)} and cannot be deleted. Archive or cancel those sell orders first.`,
-        'A line you tried to remove is on an open sell order — a manager has to remove it.'), 409);
+        `A product you tried to remove is on ${describeSellOrders(r.sellOrderIds)} and cannot be deleted. Archive or cancel those sell orders first.`,
+        'A product you tried to remove is on an open sell order — a manager has to remove it.'), 409);
   }
 }

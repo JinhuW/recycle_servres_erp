@@ -526,14 +526,14 @@ sellOrders.get('/:id/packing-list', async (c) => {
   // Lines held at 0 have no row on either list, and a workbook without a
   // sheet is a file Excel calls corrupt.
   if (data.warehouses.length === 0) {
-    return c.json({ error: 'there is nothing to pack — no line on this order is above 0' }, 400);
+    return c.json({ error: 'there is nothing to pack — no product on this order is above 0' }, 400);
   }
   const byPo = c.req.query('groupBy') === 'po';
   const only = c.req.query('warehouse');
   const keep = (w: { warehouse: string }) => !only || w.warehouse === only;
   const warehouses = data.warehouses.filter(keep);
   if (only && warehouses.length === 0) {
-    return c.json({ error: `No lines in warehouse ${only} on this order` }, 400);
+    return c.json({ error: `No products in warehouse ${only} on this order` }, 400);
   }
 
   const buf = byPo
@@ -648,7 +648,7 @@ sellOrders.post('/', async (c) => {
         paymentReceivedBy?: string | null }
     | null;
   if (!body || !body.customerId || !Array.isArray(body.lines) || body.lines.length === 0) {
-    return c.json({ error: 'customerId and at least one line required' }, 400);
+    return c.json({ error: 'customerId and at least one product required' }, 400);
   }
   if (typeof body.customerId !== 'string' || !UUID_RE.test(body.customerId)) {
     return c.json({ error: 'customerId must be a uuid' }, 400);
@@ -817,7 +817,7 @@ sellOrders.patch('/:id', async (c) => {
   `)[0];
   if (!current) return c.json({ error: 'Not found' }, 404);
   if (editsStructure && STRUCTURE_LOCKED_STATUSES.has(current.status)) {
-    return c.json({ error: `cannot edit lines or customer of a ${current.status} order` }, 409);
+    return c.json({ error: `cannot edit products or customer of a ${current.status} order` }, 409);
   }
 
   // Resolve FX outside the transaction (a cold-cache frankfurter fetch must not
@@ -829,7 +829,7 @@ sellOrders.patch('/:id', async (c) => {
     : null;
 
   if (body.lines !== undefined && (!Array.isArray(body.lines) || body.lines.length === 0)) {
-    return c.json({ error: 'at least one line required' }, 400);
+    return c.json({ error: 'at least one product required' }, 400);
   }
   if (Array.isArray(body.lines)) {
     const lineErr = lineInputError(body.lines, { allowZeroQty: true });
@@ -872,7 +872,7 @@ sellOrders.patch('/:id', async (c) => {
     // Under the lock: a status move to Done committed between the read above
     // and here would otherwise let this rewrite the record of what was sold.
     if (editsStructure && STRUCTURE_LOCKED_STATUSES.has(beforeHead.status)) {
-      return { code: 409, msg: `cannot edit lines or customer of a ${beforeHead.status} order` };
+      return { code: 409, msg: `cannot edit products or customer of a ${beforeHead.status} order` };
     }
     // A line rewrite re-snapshots every line's USD value at the current rate.
     // Currency is the explicit new one (validated above) or the order's
@@ -898,7 +898,7 @@ sellOrders.patch('/:id', async (c) => {
       // has to come with at least 1, or a stale or made-up id reaches the FK.
       const onOrder = new Set(beforeLines.flatMap(l => (l.inventory_id ? [l.inventory_id.toLowerCase()] : [])));
       if (body.lines.some(l => l.qty === 0 && l.inventoryId && !onOrder.has(l.inventoryId.toLowerCase()))) {
-        return { code: 400, msg: 'a new line needs a qty of at least 1 — only a line already on the order can be held at 0' };
+        return { code: 400, msg: 'a new product needs a qty of at least 1 — only a lot already on the order can be held at 0' };
       }
       // Same sellability check as POST, run inside the tx with FOR UPDATE.
       // This order is excluded so keeping its own already-committed lines
@@ -1386,7 +1386,7 @@ sellOrders.post('/:id/status', async (c) => {
       const [{ any }] = await tx<{ any: boolean }[]>`
         SELECT EXISTS (SELECT 1 FROM sell_order_lines WHERE sell_order_id = ${id} AND qty > 0) AS any
       `;
-      if (!any) return { kind: 'conflict', msg: 'every line on this order is at 0 — there is nothing to sell' };
+      if (!any) return { kind: 'conflict', msg: 'every product on this order is at 0 — there is nothing to sell' };
     }
 
     // Done rewrites every source PO (goods total, sold settlement) after it

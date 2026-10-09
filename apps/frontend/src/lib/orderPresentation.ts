@@ -51,6 +51,10 @@ export function trackingNote(
 export const signedUSD0 = (n: number, locale = 'en-US'): string =>
   (n > 0 ? '+' : n < 0 ? '−' : '') + fmtUSD0(Math.abs(n), locale);
 
+// "N product(s)", the count the PO timeline and the activity page show.
+export const productsCount = (t: Translate, n: number): string =>
+  t(n === 1 ? 'acNLine' : 'acNLines', { n });
+
 /**
  * The `created` event's detail line.
  *
@@ -71,7 +75,7 @@ export function createdEventParts(detail: Record<string, unknown>, t: Translate)
   const behalf = typeof detail.onBehalfOfName === 'string' ? detail.onBehalfOfName : null;
   return [
     category,
-    lineCount > 0 ? t(lineCount === 1 ? 'acNLine' : 'acNLines', { n: lineCount }) : null,
+    lineCount > 0 ? productsCount(t, lineCount) : null,
     qty > 0 ? t(qty === 1 ? 'acNUnit' : 'acNUnits', { n: qty }) : null,
     behalf ? t('acCreatedFor', { name: behalf }) : null,
   ].filter((p): p is string => !!p);
@@ -162,7 +166,7 @@ const FIELD_LABEL: Record<string, string> = {
   payment_received_by: 'Payment received by',
   label:           'Label',
   sub_label:       'Sub-label',
-  inventory_id:    'Inventory item',
+  inventory_id:    'Inventory lot',
   status:          'Status',
 };
 

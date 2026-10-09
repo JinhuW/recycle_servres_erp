@@ -69,7 +69,7 @@ export const toAddLine = (l: DraftLine) => ({
 export function buildOrderSubmit(state: SubmitState): OrderSubmitRequest {
   if (!state.draftId) {
     if (!state.lines.length) {
-      return { kind: 'error', message: 'Add at least one item before submitting.' };
+      return { kind: 'error', message: 'Add at least one product before submitting.' };
     }
     return {
       kind: 'create',

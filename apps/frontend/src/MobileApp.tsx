@@ -40,7 +40,7 @@ import { confirmDiscard } from './lib/unsavedGuard';
 import type { Category, DraftLine, Notification, Order, OrderLine, OrderSummary, ScanResponse } from './lib/types';
 import { buildOrderSubmit, toAddLine } from './lib/orderSubmit';
 import { findDuplicateLine } from './lib/dupParts';
-import { lineRef } from './lib/productNo';
+import { lineRef, newOrdinals } from './lib/productNo';
 import { lineSpecLabel } from './lib/lineGroups';
 
 // Where a line form goes when it closes. 'detail' is an existing order: the
@@ -113,7 +113,7 @@ const toDraftLine = (l: OrderLine, i: number): DraftLine => ({
   scanImageUrl: l.scanImageUrl,
   health: l.health,
   rpm: l.rpm,
-  label: lineSpecLabel(l) ?? ((l.description ?? '').trim() || (l.partNumber ?? '').trim() || 'Item'),
+  label: lineSpecLabel(l) ?? ((l.description ?? '').trim() || (l.partNumber ?? '').trim() || 'Product'),
 });
 
 function Shell() {
@@ -420,7 +420,9 @@ function Shell() {
       if (dupLine != null && pn) {
         // Surface the alert immediately. The form still opens so the user
         // can compare against the existing line and decide whether to save.
-        showToast(t('dupPartScanWarn', { pn, line: lineRef(dupLine, t, capture.lines.indexOf(dupLine)) }), 'error');
+        showToast(t('dupPartScanWarn', {
+          pn, line: lineRef(dupLine, t, newOrdinals(capture.lines)[capture.lines.indexOf(dupLine)]),
+        }), 'error');
       }
     }
     setCapture(c => c.phase === 'camera' ? { ...c, phase: 'form', detected: s } : c);
@@ -767,6 +769,9 @@ function Shell() {
           detected={capture.detected}
           lineCount={capture.lines.length}
           editingLineIdx={capture.editingLineIdx ?? null}
+          newNo={capture.editingLineIdx != null
+            ? newOrdinals(capture.lines)[capture.editingLineIdx]
+            : newOrdinals(capture.lines).filter(n => n != null).length + 1}
           existingLine={existing}
           allowZeroQty={!!capture.editingId && !!existing?.id}
           onSaveLine={onSaveLine}

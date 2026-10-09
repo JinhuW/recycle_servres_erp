@@ -60,7 +60,7 @@ export function committedLinesBody(
 // Enforced here too so no client can write a violating line.
 export function serialErr(label: string, issue: SerialIssue): string {
   return issue.kind === 'ddr5Required'
-    ? `${label}: DDR5 RAM lines require serial numbers`
+    ? `${label}: DDR5 RAM products require serial numbers`
     : `${label}: serial number count (${issue.count}) must equal qty (${issue.qty})`;
 }
 
@@ -185,7 +185,7 @@ export const PG_INVALID_TEXT_REPRESENTATION = '22P02';
 // lives in lib/lineRequirements.ts, which both shells share.
 export function identityErr(label: string, category: string | undefined, l: { itemType?: string | null }): string | null {
   if (category !== 'Other') return null;
-  return (l.itemType ?? '').trim() ? null : `${label}: Other lines require an item type`;
+  return (l.itemType ?? '').trim() ? null : `${label}: Other products require an item type`;
 }
 
 // Order-level fees, shared by POST / and PATCH /:id so the two can't drift.

@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-09
 reporter: jinhu
 branch: feat/po-product-no
-pr: "#571"
+pr: "#571, #572"
 version:
 related: [RS-145, RS-184, RS-188, RS-193, RS-206, RS-212]
 ---

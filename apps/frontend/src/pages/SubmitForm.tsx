@@ -32,6 +32,9 @@ type Props = {
   detected: ScanResponse | null;
   lineCount: number;
   editingLineIdx?: number | null;
+  // The line's "new n" among the order's unsaved lines, as the review list
+  // shows it; null once it has a #.
+  newNo?: number | null;
   existingLine?: DraftLine;
   // A saved line of an existing order: it may be counted down to 0, where a
   // line being captured needs at least 1.
@@ -126,7 +129,7 @@ const aiDefaults = (category: Category, scan: ScanResponse): DraftLine => {
   };
 };
 
-export function SubmitForm({ category, detected, lineCount, editingLineIdx, existingLine, allowZeroQty = false, onSaveLine, onCancel, onBack, onRescan, rescanDraft, photoCtx }: Props) {
+export function SubmitForm({ category, detected, lineCount, editingLineIdx, newNo, existingLine, allowZeroQty = false, onSaveLine, onCancel, onBack, onRescan, rescanDraft, photoCtx }: Props) {
   const { t, lang, locale } = useT();
   const isEditing = editingLineIdx != null;
   const aiFilled = !!detected;
@@ -261,7 +264,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
     if (line.category === 'HDD') return [line.brand, line.capacity, line.rpm ? line.rpm + 'rpm' : null].filter(Boolean).join(' ');
     // Description is optional on an Other line, so the part number — which
     // isn't — carries the name when nobody wrote one.
-    return (line.description ?? '').trim() || (line.partNumber ?? '').trim() || 'Item';
+    return (line.description ?? '').trim() || (line.partNumber ?? '').trim() || 'Product';
   };
 
   const persist = (partNumber: string) => onSaveLine({ ...line, label: buildLabel(), partNumber });
@@ -291,7 +294,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
     const issue = serialIssue(line);
     if (issue) {
       setSerialIssues([{
-        line: lineRef(line, t),
+        line: lineRef(line, t, newNo),
         label: buildLabel(),
         issue,
       }]);

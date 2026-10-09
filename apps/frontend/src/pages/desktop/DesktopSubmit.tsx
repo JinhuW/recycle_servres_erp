@@ -21,7 +21,7 @@ import { addableCategories, aiCaptureEnabled } from '../../lib/lookups';
 import { eligibleDraftTargets } from './submit/eligibleTargets';
 import { DupPartDialog } from './submit/DupPartDialog';
 import { ProductNo } from './submit/ProductNo';
-import { lineRef, productCount } from '../../lib/productNo';
+import { lineRef, newOrdinals, productCount } from '../../lib/productNo';
 import {
   blankLine, brandConfirmPending, duplicatesByIndex, findDuplicatePartNumbers,
   lineBlockerMessages, lineSaveBlock, type DuplicatePartGroup, type Line,
@@ -308,6 +308,7 @@ function OrderForm({
   const priced = useMemo(() => pricedTotals(lines), [lines]);
 
   const dupGroups = useMemo(() => findDuplicatePartNumbers(lines), [lines]);
+  const newNos = useMemo(() => newOrdinals(lines), [lines]);
   const dupByIdx = useMemo(() => duplicatesByIndex(dupGroups, lines), [dupGroups, lines]);
   const [dupConfirm, setDupConfirm] = useState<DuplicatePartGroup[] | null>(null);
   // When the dup-part warning is reached via "add to existing", remember which
@@ -477,8 +478,9 @@ function OrderForm({
 
   // Serial rules for a set of lines; null when everything passes.
   const collectSerialIssues = (ls: Line[]): SerialLineIssue[] | null => {
+    const nos = newOrdinals(ls);
     const found = ls
-      .map((l, i) => ({ line: lineRef(l, t, i), label: lineLabel(l), issue: serialIssue(l) }))
+      .map((l, i) => ({ line: lineRef(l, t, nos[i]), label: lineLabel(l), issue: serialIssue(l) }))
       .filter((x): x is SerialLineIssue => x.issue !== null);
     return found.length ? found : null;
   };
@@ -599,7 +601,7 @@ function OrderForm({
     }
     const issue = block === 'serials' ? serialIssue(l) : null;
     if (issue) {
-      setSerialIssues([{ line: lineRef(l, t, idx), label: lineLabel(l), issue }]);
+      setSerialIssues([{ line: lineRef(l, t, newNos[idx]), label: lineLabel(l), issue }]);
       // Thrown (not returned) so the drawer's confirm handler keeps the
       // drawer open for the fix instead of closing on apparent success.
       throw new Error(t('serialCheckTitle'));
@@ -807,7 +809,7 @@ function OrderForm({
       .map((l, idx) => ({ idx, l, gen: (l.partNumber ?? '').trim() ? null : synthesizePartNumber(l.category, l) }))
       .filter(x => !(x.l.partNumber ?? '').trim());
     const blocking = blanks.find(x => !x.gen);
-    if (blocking) { showErrorDialog(t('pnRequiredLine', { line: lineRef(blocking.l, t, blocking.idx) })); return; }
+    if (blocking) { showErrorDialog(t('pnRequiredLine', { line: lineRef(blocking.l, t, newNos[blocking.idx]) })); return; }
     if (blanks.length > 0) {
       setPnConfirm(blanks.map(x => ({ idx: x.idx, value: x.gen! })));
       return;
@@ -905,7 +907,7 @@ function OrderForm({
                   style={{ cursor: 'pointer', background: isActive ? 'var(--accent-soft)' : undefined }}
                   onClick={() => setActiveIdx(i)}
                 >
-                  <td className="mono" style={{ color: isActive ? 'var(--accent-strong)' : 'var(--fg-subtle)', fontWeight: isActive ? 600 : 400 }}><ProductNo no={l.no} /></td>
+                  <td className="mono" style={{ color: isActive ? 'var(--accent-strong)' : 'var(--fg-subtle)', fontWeight: isActive ? 600 : 400 }}><ProductNo no={l.no} newNo={newNos[i]} /></td>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                       {filled ? (
@@ -977,7 +979,7 @@ function OrderForm({
                     <button
                       className="btn icon sm"
                       onClick={e => { e.stopPropagation(); void removeLine(i); }}
-                      title={t('soRemoveLineTooltip')}
+                      title={t('poRemoveProduct')}
                       disabled={lines.length <= 1}
                       style={lines.length <= 1 ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
                     >
@@ -1215,7 +1217,8 @@ function OrderForm({
           }}
           onConfirmLine={() => handleConfirmLine(activeIdx)}
           onConfirmError={showErrorDialog}
-          duplicateOnLines={dupByIdx.get(activeIdx)?.map(j => lineRef(lines[j], t, j))}
+          duplicateOnLines={dupByIdx.get(activeIdx)?.map(j => lineRef(lines[j], t, newNos[j]))}
+          newNo={newNos[activeIdx]}
         />
       )}
 
@@ -1306,7 +1309,7 @@ function OrderForm({
       {dupConfirm && (
         <DupPartDialog
           groups={dupConfirm}
-          refOf={j => lineRef(lines[j], t, j)}
+          refOf={j => lineRef(lines[j], t, newNos[j])}
           busy={submitting}
           confirmTone="accent"
           confirmLabel={t('dupPartSubmitAnyway')}
@@ -1343,7 +1346,7 @@ function OrderForm({
               <ul style={{ margin: 0, padding: '0 0 0 18px', display: 'grid', gap: 6, fontSize: 13 }}>
                 {pnConfirm.map(p => (
                   <li key={p.idx}>
-                    {t('pnConfirmRow', { line: lineRef(lines[p.idx], t, p.idx) })} <span className="mono" style={{ fontWeight: 600 }}>{p.value}</span>
+                    {t('pnConfirmRow', { line: lineRef(lines[p.idx], t, newNos[p.idx]) })} <span className="mono" style={{ fontWeight: 600 }}>{p.value}</span>
                   </li>
                 ))}
               </ul>
