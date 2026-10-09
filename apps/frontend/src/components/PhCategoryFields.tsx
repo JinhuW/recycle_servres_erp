@@ -1,6 +1,6 @@
 import type { Category, DraftLine } from '../lib/types';
 import { useT } from '../lib/i18n';
-import { synthesizePartNumber } from '@recycle-erp/shared';
+import { chipMarkingCanon, synthesizePartNumber } from '@recycle-erp/shared';
 import { Combobox } from './Combobox';
 import { PartNumberField } from './PartNumberField';
 import { ItemTypePicker } from './ItemTypePicker';
@@ -125,7 +125,15 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
         </div>
         <div className="ph-field">
           <label>{t('chipNumber')}{chipNumberRequired(value.brand) && <Req />}</label>
-          <input className={inputClsFor('chipNumber') + ' mono'} value={value.chipNumber ?? ''} onChange={e => onChange('chipNumber', e.target.value.toUpperCase())} />
+          <input
+            className={inputClsFor('chipNumber') + ' mono'}
+            value={value.chipNumber ?? ''}
+            onChange={e => onChange('chipNumber', e.target.value.toUpperCase())}
+            onBlur={e => {
+              const canon = chipMarkingCanon(e.target.value, value.brand);
+              if (canon !== (value.chipNumber ?? '')) onChange('chipNumber', canon);
+            }}
+          />
         </div>
         <div className="ph-field">
           <label>{t('partNumber')}<Req /></label>

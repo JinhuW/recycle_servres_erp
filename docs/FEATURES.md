@@ -690,6 +690,20 @@ on to Sold once every line has sold (v1.164.0).
   dual-die (`4DRx4`, `8DRx4`) and 3DS stacks (`2S2Rx4`, `2S4Rx4`, `4S2Rx4`),
   which a label scan now keeps instead of flattening to the plain rank
   (v1.139.0).
+- **A Micron line's Chip # is the 3-letter die code** (v1.231.0, RS-209).
+  - **What's stored:** the FBGA code's last three letters, VPP, TBH or CJV.
+    The price list buckets Micron sticks by this code.
+  - **What the chip shows:** a date/lot code above the FBGA code
+    (`8KE75` / `D9VPP`). Typing, pasting or scanning both lines stores `VPP`.
+  - **When it collapses:**
+    - The desktop drawer and the phone form collapse the value when the field
+      loses focus.
+    - The server applies the same rule on every write, and a label scan
+      arrives already cut.
+  - **Recognised by shape, not from a list:** a value ending in
+    `D9`/`D8`/`C9`/`Z9` + three letters.
+  - **Left as typed:** anything else, and other brands' chip numbers (only
+    upper-cased).
 - **Validation is shared between shells**, so desktop, mobile and the backend
   can't drift: all RAM spec fields required (v1.29.0); Chip # required only for
   Micron and Other, whose part numbers don't identify the module (v1.36.0);
@@ -1878,6 +1892,11 @@ inventory search, sell-order draft creation.
     dirty or goes back to Draft. Read-only lines never fill.
   - **Scan RAM sheet** fills known chips before its auto-save, so a Micron
     stick whose part # is on record saves at once.
+  - **For Micron the suggestion is a die code** (v1.231.0, RS-209). Before
+    that, each stored chip carried its own date code, so the "most POs" vote
+    picked one stick's marking. One part number can still ship with
+    different dies (`MTA16ATF2G64HZ-3G2J1` is recorded with WSM and VPP), so
+    check the suggestion against the chip.
 
 > Provider selection is silent: OpenRouter when `OPENROUTER_API_KEY` is set,
 > otherwise a deterministic stub. A prod deploy missing the key looks healthy

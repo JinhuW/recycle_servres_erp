@@ -81,6 +81,11 @@ describe('normalizeFields — RAM', () => {
     expect(normalizeFields('RAM', { chipNumber: 'K4a8g045wc-Bcwe' }).chipNumber).toBe('K4A8G045WC-BCWE');
   });
 
+  it('cuts a Micron chip marking to its die code', () => {
+    expect(normalizeFields('RAM', { brand: 'Micron', chipNumber: '8ke75 d9vpp' }).chipNumber).toBe('VPP');
+    expect(normalizeFields('RAM', { brand: 'Samsung', chipNumber: 'd9vpp' }).chipNumber).toBe('D9VPP');
+  });
+
   it('drops blank/whitespace-only fields', () => {
     const f = normalizeFields('RAM', { brand: '  ', capacity: '32 GB' });
     expect(f.brand).toBeUndefined();

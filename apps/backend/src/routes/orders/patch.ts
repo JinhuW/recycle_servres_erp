@@ -703,7 +703,7 @@ patchRoutes.patch('/:id', async (c) => {
               part_number    = COALESCE(${l.partNumber ?? null}, part_number),
               serial_number  = COALESCE(${l.serialNumber ?? null}, serial_number),
               chip_number    = CASE WHEN ${has('chipNumber')}::int = 1
-                                    THEN NULLIF(${canonChipNumber(l.chipNumber)}, '') ELSE chip_number END,
+                                    THEN NULLIF(${canonChipNumber(l.chipNumber, has('brand') ? specVal(l.brand) : stored?.brand)}, '') ELSE chip_number END,
               condition      = COALESCE(${l.condition ?? null}, condition),
               health         = CASE WHEN ${has('health')}::int = 1 THEN ${l.health ?? null} ELSE health END,
               rpm            = CASE WHEN ${has('rpm')}::int = 1    THEN ${l.rpm ?? null}    ELSE rpm END,

@@ -852,7 +852,7 @@ describe('order line serial numbers', () => {
         warehouseId: 'WH-LA1',
         payment: 'company',
         lines: [{
-          category: 'RAM', brand: 'Micron', capacity: '32GB', type: 'DDR4',
+          category: 'RAM', brand: 'Samsung', capacity: '32GB', type: 'DDR4',
           partNumber: 'CHIP-CASE-1', condition: 'Pulled — Tested',
           chipNumber: ' d9xpf ', qty: 1, unitCost: 10,
         }],

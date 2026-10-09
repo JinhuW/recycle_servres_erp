@@ -14,7 +14,7 @@
 // the canonical form rather than fuzzy-matching against a fetched catalog,
 // so it is safe to run on every scan with no extra query.
 
-import { stripPartPrefix } from '@recycle-erp/shared';
+import { chipMarkingCanon, stripPartPrefix } from '@recycle-erp/shared';
 import type { LineCategory } from '../types';
 
 const DEVICE_TYPES = new Set(['Desktop', 'Server', 'Laptop']);
@@ -121,9 +121,9 @@ export function normalizeFields(
       if (g) f.generation = g; else delete f.generation;
     }
     if (f.classification) f.classification = f.classification.toUpperCase();
-    // Chip markings are die codes (Micron D9XPF, Samsung K4A8G045WC…) — always
-    // printed upper-case; OCR case noise would fork one chip into two spellings.
-    if (f.chipNumber) f.chipNumber = f.chipNumber.toUpperCase();
+    // Stored form at read time (upper-case; a Micron marking cut to its die
+    // code), so the purchaser checks what will be saved.
+    if (f.chipNumber) f.chipNumber = chipMarkingCanon(f.chipNumber, f.brand);
     if (f.rank) f.rank = normRank(f.rank);
     if (f.speed) {
       const s = normSpeed(f.speed);

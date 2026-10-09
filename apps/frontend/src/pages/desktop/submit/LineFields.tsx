@@ -7,7 +7,7 @@ import {
 import { useT } from '../../../lib/i18n';
 import { chipNumberRequired } from '../../../lib/ramRequired';
 import { ssdBrandRequired, SSD_BRAND_REQUIRED_OVER_GB } from '../../../lib/lineRequirements';
-import { synthesizePartNumber } from '@recycle-erp/shared';
+import { chipMarkingCanon, synthesizePartNumber } from '@recycle-erp/shared';
 import { Combobox } from '../../../components/Combobox';
 import { PartNumberField } from '../../../components/PartNumberField';
 import { ItemTypePicker } from '../../../components/ItemTypePicker';
@@ -101,6 +101,12 @@ export function RamFields({ line, set, missing }: FieldsProps) {
           value={line.chipNumber ?? ''}
           aria-invalid={bad('chipNumber')}
           onChange={e => set({ chipNumber: e.target.value.toUpperCase() })}
+          // On blur, not per keystroke: a Micron marking collapses to its die
+          // code only once it is whole, whatever order it was typed in.
+          onBlur={e => {
+            const canon = chipMarkingCanon(e.target.value, line.brand);
+            if (canon !== (line.chipNumber ?? '')) set({ chipNumber: canon });
+          }}
         />
       </div>
       <div className={cls('partNumber')} style={{ gridColumn: 'span 2' }}>
