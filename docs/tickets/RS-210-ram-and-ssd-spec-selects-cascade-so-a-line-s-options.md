@@ -2,13 +2,13 @@
 id: RS-210
 title: RAM and SSD spec selects cascade, so a line's options can't conflict
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-09
 reporter: jinhu
 branch: feat/ram-ssd-spec-cascade
-pr:
-version:
+pr: 567
+version: 1.233.0
 related: [RS-208, RS-178]
 ---
 
@@ -55,23 +55,23 @@ field.
 
 ## Acceptance criteria
 
-- [ ] In every PO line form (new PO, PO edit, Review mode, phone) and the
+- [x] In every PO line form (new PO, PO edit, Review mode, phone) and the
       inventory editor, picking Type fills or clears Class:
   - Desktop → UDIMM.
   - Laptop → SODIMM, unless DDR5 makes CAMM possible too.
   - Server clears a non-server Class.
-- [ ] Picking Class fills or fixes Type:
+- [x] Picking Class fills or fixes Type:
   - RDIMM / LRDIMM → Server.
   - SODIMM / CAMM → Laptop.
   - UDIMM → Desktop, which can still be switched to Server.
-- [ ] Server-only ranks are offered only with server memory: x4, quad and
+- [x] Server-only ranks are offered only with server memory: x4, quad and
       octal ranks, DR, and 3DS.
-- [ ] CAMM is offered only with DDR5.
-- [ ] An SSD's form-factor list follows its interface. SAS offers only 2.5",
+- [x] CAMM is offered only with DDR5.
+- [x] An SSD's form-factor list follows its interface. SAS offers only 2.5",
       and it is filled in.
-- [ ] A label scan and a RAM sheet scan land on a consistent line. The Class
+- [x] A label scan and a RAM sheet scan land on a consistent line. The Class
       read off the label wins.
-- [ ] The backend refuses these conflicts, but only for a rule whose own
+- [x] The backend refuses these conflicts, but only for a rule whose own
       fields the save changes. A legacy conflicting line still saves on an
       unrelated edit.
 
