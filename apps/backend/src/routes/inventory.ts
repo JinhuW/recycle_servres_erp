@@ -887,7 +887,7 @@ inventory.get('/products', async (c) => {
   const canonCol = canonPartCol(sql, sql`l.part_number`);
 
   type Row = {
-    id: string; order_id: string; user_id: string;
+    id: string; order_id: string; po_line_no: number; user_id: string;
     category: string; brand: string | null; capacity: string | null;
     generation: string | null; type: string | null; classification: string | null;
     rank: string | null; speed: string | null; interface: string | null;
@@ -900,7 +900,7 @@ inventory.get('/products', async (c) => {
   };
 
   const rows = (await sql`
-    SELECT l.id, l.order_id, o.user_id,
+    SELECT l.id, l.order_id, ${poLineNo(sql, 'l')} AS po_line_no, o.user_id,
            l.category, l.brand, l.capacity, l.generation, l.type, l.classification,
            l.rank, l.speed, l.interface, l.form_factor, l.description, l.item_type,
            l.part_number, l.serial_number, ${canonCol} AS canon, l.rpm,
@@ -1057,7 +1057,7 @@ inventory.get('/products', async (c) => {
       created_at: head.created_at,
       submitters: [...submitters],
       lines: lots.map((l) => ({
-        id: l.id, order_id: l.order_id, created_at: l.created_at,
+        id: l.id, order_id: l.order_id, po_line_no: l.po_line_no, created_at: l.created_at,
         user_name: l.user_name, user_initials: l.user_initials,
         sell_price: l.sell_price, condition: l.condition, health: l.health,
         serial_number: l.serial_number,

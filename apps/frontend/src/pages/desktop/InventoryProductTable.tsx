@@ -10,6 +10,8 @@ import { SerialNumbers } from '../../components/SerialNumbers';
 export type ProductLot = {
   id: string;
   order_id: string;
+  // The lot's # on its PO's page. Absent from a backend older than this bundle.
+  po_line_no?: number | null;
   created_at: string;
   user_name: string;
   user_initials: string;
@@ -304,9 +306,20 @@ export function InventoryProductTable({
                                       }}
                                     />
                                   )}
-                                  <RouteLink to={'/purchase-orders/' + l.order_id} className="rec-link">
-                                    {l.order_id}
-                                  </RouteLink>
+                                  <span style={{ whiteSpace: 'nowrap' }}>
+                                    <RouteLink to={'/purchase-orders/' + l.order_id} className="rec-link">
+                                      {l.order_id}
+                                    </RouteLink>
+                                    {l.po_line_no != null && (
+                                      <span
+                                        className="muted"
+                                        style={{ marginLeft: 4 }}
+                                        title={t('sodPoLineTitle', { po: l.order_id, n: l.po_line_no })}
+                                      >
+                                        #{l.po_line_no}
+                                      </span>
+                                    )}
+                                  </span>
                                 </span>
                                 {l.serial_number && (
                                   <div style={{ marginTop: 5 }}>
