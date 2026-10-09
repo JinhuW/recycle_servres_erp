@@ -113,7 +113,8 @@ on to Sold once every line has sold (v1.164.0).
   - **A partial transfer keeps its `#`.** The units moved to another warehouse
     become a second row with the source's `#`, so the PO page shows `#3`
     twice, each with its warehouse, right after each other. Discarding the
-    transfer folds it back and leaves no gap.
+    transfer folds it back and leaves no gap. The second row keeps the
+    source's Chip # too (v1.237.1).
   - **"N products" counts `#`s**, so the PO list, the page head and the
     category groups count a transferred product once.
   - A product not saved yet reads *new 1*, *new 2*… (in list order) where its
@@ -965,7 +966,10 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   filter (v1.19.0). Select all takes every sellable lot the filters match,
   including products past the 200 the list shows, and the bulk actions and
   export receive the whole set; export posts the selection, up to 5000 lots
-  (v1.230.2).
+  (v1.230.2). Each lot is held to the warehouse and the attribute chips on its
+  own, so a lot typed differently inside a matching product stays out, and a
+  lot sold, archived or emptied since the list loaded doesn't join. The grouped
+  view reads up to 5000 lines, enough for Show sold (v1.237.1).
 - **The export and both screens read in the vendor bid sheet's order** — brand,
   then capacity, speed, numerically collated with blanks last (v1.107.0), and
   category rank ahead of it on the screens, which have no tabs to group by

@@ -51,9 +51,32 @@ what 0167 + 0168 will do to prod:
 - **The part-number key strips a P/N label differently.** No Micron part number on prod carries one, and both sides of the match strip the same characters.
 - **No order event, three-letter junk left, one of six fixes tested, six UPDATEs.** Kept. Data migrations here write no events; no lookup part carries three-letter junk; the migration is immutable now.
 
-**PR #571 / #572 / part 3 (RS-213)** were reviewed before they reached
-dev or right after. Their findings went to the session that owns that work and
-were fixed or answered in those PRs (see Notes).
+**RS-213 (#571, #572, #573).** Each PR was reviewed right after it reached
+dev (#571) or before it did, and every fix round was reviewed again. The
+findings went to the session that owns RS-213, which fixed them in its own PRs:
+
+- **#572 (stored sell-order #)**
+  - A save during the deploy overlap could renumber an order the old instance had rewritten. The # is now healed from the old derivation.
+  - The packing list grouped by # alone, folding a re-spec'd lot into another product's row. It now prints one row per # and key, and Pack shows each lot's own part # under its #.
+  - A typed line's # carry ignored warehouse and sub-label.
+  - Pack's `no ?? i + 1` fallback could collide with a real #. The server now always sends a #.
+  - MCP `lineCount` had changed meaning. It is back to lines, with `productCount` added beside it.
+  - `append_batch` is still written, so a rollback renumbers nothing.
+  - The seed numbered products the backend never would.
+  - One fix round grouped Pack by an opaque product id, which split a fold across warehouses. It was reverted before the merge.
+- **#571 (stored PO #)**
+  - A partial-transfer clone tied with its source in sell-order folding. It now breaks ties on lot id.
+  - A dead re-export and unused response fields were removed.
+- **#573 ("product" wording)**
+  - Unsaved products read "new n" in the # column, the drawer and every message, not a row number nobody can see.
+  - The server names an add by its part # (PATCH, which can't know the editor's n) or as "new product n" (create, which sends every row in order).
+  - The phone counts products by #.
+  - The archive log counts lots.
+  - A refusal still said "Lines…", and a one-product submit read "1 products".
+- **Kept:**
+  - Deploy-overlap windows of seconds: #571's trigger lock order, and #572's renumber of an all-unnumbered order.
+  - No trigger check on a supplied #.
+  - The boot-time freeze failing fast on an unmigrated database.
 
 ## Acceptance criteria
 
