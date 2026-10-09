@@ -2,13 +2,13 @@
 id: RS-218
 title: A PO goes back to Reviewing while some of its products are shipped; only those stay locked
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-09
 reporter: jinhu
 branch: feat/rs218-shipped-lines-stay-locked
-pr:
-version:
+pr: 578
+version: 1.238.0
 related: []
 ---
 
@@ -39,23 +39,23 @@ on sat on SO-4082 (Packing) and SO-4084 / SO-4086 (Draft).
 
 ## Acceptance criteria
 
-- [ ] A manager can move a Ready to Pay or Done PO back to Reviewing while some
+- [x] A manager can move a Ready to Pay or Done PO back to Reviewing while some
       of its lines are on a Shipped or Awaiting-payment sell order.  Those lines
       stay `Done`; every other unsold line goes to `Reviewing`.
-- [ ] A held line — `Done` on a Reviewing PO, claimed by a Shipped or
+- [x] A held line — `Done` on a Reviewing PO, claimed by a Shipped or
       Awaiting-payment sell order — is refused by `PATCH /api/orders/:id` when
       the edit actually changes it (409, naming the sell order to a manager).
       An unchanged echo of it is not refused.
-- [ ] The inventory editor refuses a qty or unit-cost change on a held line, as
+- [x] The inventory editor refuses a qty or unit-cost change on a held line, as
       it did while the PO was Ready to Pay.
-- [ ] `GET /api/orders/:id` gives a manager `shippedOn: [sell order ids]` on held
+- [x] `GET /api/orders/:id` gives a manager `shippedOn: [sell order ids]` on held
       lines only; nobody else gets the key.
-- [ ] The desktop PO page, the line drawer, Review mode and the phone PO page
+- [x] The desktop PO page, the line drawer, Review mode and the phone PO page
       show a held line as locked, naming the sell order; Review mode's Approve
       never zeroes one.
-- [ ] Moves to In Transit or Draft, the purchaser-edit revert, and removing a
+- [x] Moves to In Transit or Draft, the purchaser-edit revert, and removing a
       product are refused exactly as before.
-- [ ] Once the sell order is Done or Closed the line is no longer held and is
+- [x] Once the sell order is Done or Closed the line is no longer held and is
       editable again.
 
 ## Out of scope
