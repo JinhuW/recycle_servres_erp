@@ -101,9 +101,11 @@ createRoutes.post('/', async (c) => {
   // Allocated inside the transaction so a rollback also rolls back the counter.
   let newId!: string;
   // Returned so the client can attach per-line photos, which are buffered
-  // locally until the line it belongs to actually exists. Aligned 1:1 with
-  // the request's `lines` ordering, the same contract PATCH's addedLineIds has.
+  // locally until the line it belongs to actually exists, and show each
+  // product's #. Aligned 1:1 with the request's `lines` ordering, the same
+  // contract PATCH's addedLineIds has.
   const newLineIds: string[] = [];
+  const newLineNos: number[] = [];
   let derived: { category: string | null; categories: string[] } = { category: null, categories: [] };
   await sql.begin(async (tx) => {
     newId = await nextHumanId(tx, 'PO', 'PO');
@@ -123,11 +125,15 @@ createRoutes.post('/', async (c) => {
     const lineRows = body.lines.map((l, i) => newLineRow(newId, lineCats[i], l, {
       qty: l.qty, unitCost: l.unitCost, status: 'Draft', position: i,
     }));
-    // RETURNING carries no promise about row order; position is the request's.
-    const inserted = await tx<{ id: string; position: number }[]>`
-      INSERT INTO order_lines ${tx(lineRows)} RETURNING id, position
+    // RETURNING carries no promise about row order; the # (0169's trigger,
+    // numbering the VALUES in order) is the request's.
+    const inserted = await tx<{ id: string; product_no: number }[]>`
+      INSERT INTO order_lines ${tx(lineRows)} RETURNING id, product_no
     `;
-    for (const r of [...inserted].sort((a, b) => a.position - b.position)) newLineIds.push(r.id);
+    for (const r of [...inserted].sort((a, b) => a.product_no - b.product_no)) {
+      newLineIds.push(r.id);
+      newLineNos.push(r.product_no);
+    }
     await autoTrackParts(tx, body.lines.map((l, i) => trackInput(l, lineCats[i])));
 
     // Written before the event so `created` carries the value the order
@@ -160,7 +166,7 @@ createRoutes.post('/', async (c) => {
     if (newPaypalTxnId) await linkPaypalTxnToOrder(tx, newPaypalTxnId, newId, u.id);
   });
 
-  return c.json({ id: newId, lineIds: newLineIds }, 201);
+  return c.json({ id: newId, lineIds: newLineIds, lineNos: newLineNos }, 201);
 });
 
 // ── Create an empty Draft order so the submit screen can autosave lines as

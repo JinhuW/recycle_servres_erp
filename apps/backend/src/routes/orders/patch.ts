@@ -184,13 +184,13 @@ patchRoutes.patch('/:id', async (c) => {
   for (let i = 0; i < (body.addLines ?? []).length; i++) {
     const l = body.addLines![i];
     const cat = l.category ?? inheritedCat;
-    if (!cat) return c.json({ error: `line ${i + 1}: category is required` }, 400);
+    if (!cat) return c.json({ error: `new line ${i + 1}: category is required` }, 400);
     addCats.push(cat);
     const issue = serialIssue({ ...l, category: cat, qty: l.qty ?? 1 });
-    if (issue) return c.json({ error: serialErr(`line ${i + 1}`, issue) }, 400);
-    const labelErr = identityErr(`line ${i + 1}`, cat, l);
+    if (issue) return c.json({ error: serialErr(`new line ${i + 1}`, issue) }, 400);
+    const labelErr = identityErr(`new line ${i + 1}`, cat, l);
     if (labelErr) return c.json({ error: labelErr }, 400);
-    const specErr = specRuleErr(`line ${i + 1}`, cat, l);
+    const specErr = specRuleErr(`new line ${i + 1}`, cat, l);
     if (specErr) return c.json({ error: specErr }, 400);
   }
 
@@ -230,7 +230,7 @@ patchRoutes.patch('/:id', async (c) => {
     // item types hold NULL, so an untouched one is left alone.
     if (l.itemType !== undefined || l.category !== undefined) {
       const merged = l.itemType !== undefined ? l : { itemType: row.item_type };
-      const labelErr = identityErr(`line ${l.id}`, mergedCat, merged);
+      const labelErr = identityErr(`#${row.product_no}`, mergedCat, merged);
       if (labelErr) return c.json({ error: labelErr }, 400);
     }
 
@@ -247,7 +247,7 @@ patchRoutes.patch('/:id', async (c) => {
 
     // Unlike the serial merge above, a present null clears — as the UPDATE does.
     const spec = mergedSpec(row, l as Record<string, unknown>, { clearing, categoryMoved });
-    const specErr = mergedCat ? specRuleErr(`line ${l.id}`, mergedCat, spec.merged, spec.changed) : null;
+    const specErr = mergedCat ? specRuleErr(`#${row.product_no}`, mergedCat, spec.merged, spec.changed) : null;
     if (specErr) return c.json({ error: specErr }, 400);
     const changes =
       l.category !== undefined && l.category !== row.category ||
@@ -256,7 +256,7 @@ patchRoutes.patch('/:id', async (c) => {
       (merged.serialNumber ?? '') !== (row.serial_number ?? '');
     if (!changes) continue;
     const issue = serialIssue({ category: mergedCat ?? null, ...merged });
-    if (issue) return c.json({ error: serialErr(`line ${l.id}`, issue) }, 400);
+    if (issue) return c.json({ error: serialErr(`#${row.product_no}`, issue) }, 400);
   }
 
   const patchCatErr = await assertCategoriesEnabled(sql, touchedCats);
@@ -266,10 +266,11 @@ patchRoutes.patch('/:id', async (c) => {
   // commits (R2 isn't transactional; never delete on a rolled-back change).
   const removedScanKeys: string[] = [];
 
-  // Surfaced so the mobile autosave path can capture the new DB id of each
-  // appended line; aligns 1:1 with the request's `addLines` ordering. Populated
-  // inside the tx and only read after the tx commits.
+  // Surfaced so the mobile autosave path can capture the new DB id and # of
+  // each appended product; aligns 1:1 with the request's `addLines` ordering.
+  // Populated inside the tx and only read after the tx commits.
   const addedLineIds: string[] = [];
+  const addedLineNos: number[] = [];
 
   // Where the order ends up. Returned to the client so an edit that moved the
   // stage doesn't need a refetch to be shown correctly.
@@ -521,10 +522,13 @@ patchRoutes.patch('/:id', async (c) => {
       }
       if (Array.isArray(body.removeLineIds) && body.removeLineIds.length) {
         const doomed = await tx`
-          SELECT id, category, scan_image_id, part_number, qty, unit_cost::float AS unit_cost FROM order_lines
+          SELECT id, product_no, category, scan_image_id, part_number, qty, unit_cost::float AS unit_cost FROM order_lines
           WHERE order_id = ${id} AND id = ANY(${body.removeLineIds}::uuid[])
         ` as (LineSnapRow & { scan_image_id: string | null })[];
-        removedSnapshots = doomed.map(r => ({ id: r.id, category: r.category, part_number: r.part_number, qty: r.qty, unit_cost: r.unit_cost }));
+        removedSnapshots = doomed.map(r => ({
+          id: r.id, product_no: r.product_no, category: r.category, part_number: r.part_number,
+          qty: r.qty, unit_cost: r.unit_cost,
+        }));
         // Read before the DELETE cascades the rows away. Same list as the scan
         // keys, so the existing post-commit sweep covers both.
         //
@@ -728,15 +732,18 @@ patchRoutes.patch('/:id', async (c) => {
         const lineRows = body.addLines.map((l, i) => newLineRow(id, addCats[i], l, {
           qty: l.qty ?? 1, unitCost: l.unitCost ?? 0, status, position: posRow.p + 1 + i,
         }));
-        // Re-sorted so addedLineIds lines up 1:1 with the request's addLines.
-        const inserted = await tx<(LineSnapRow & { position: number })[]>`
+        // Re-sorted so addedLineIds lines up 1:1 with the request's addLines:
+        // 0169's trigger numbers the VALUES in order, each from the PO's
+        // counter, which the lock above serialises.
+        const inserted = await tx<LineSnapRow[]>`
           INSERT INTO order_lines ${tx(lineRows)}
-          RETURNING id, category, part_number, qty, unit_cost::float AS unit_cost, position
+          RETURNING id, product_no, category, part_number, qty, unit_cost::float AS unit_cost
         `;
-        addedRows = [...inserted]
-          .sort((a, b) => a.position - b.position)
-          .map(({ position: _position, ...row }) => row);
-        for (const r of addedRows) addedLineIds.push(r.id);
+        addedRows = [...inserted].sort((a, b) => a.product_no - b.product_no);
+        for (const r of addedRows) {
+          addedLineIds.push(r.id);
+          addedLineNos.push(r.product_no);
+        }
         await autoTrackParts(tx, body.addLines.map((l, i) => trackInput(l, addCats[i])));
       }
 
@@ -819,6 +826,7 @@ patchRoutes.patch('/:id', async (c) => {
           if (changes.length) {
             revertLinesEdited.push({
               lineId: patch.id,
+              no: after.product_no,
               partNumber: after.part_number ?? null,
               changes,
             });
@@ -875,7 +883,7 @@ patchRoutes.patch('/:id', async (c) => {
   // The link count is the Payments page's figure — managers only, and left
   // out rather than zeroed for everyone else.
   return c.json({
-    ok: true, addedLineIds, lifecycle: lifecycleAfter,
+    ok: true, addedLineIds, addedLineNos, lifecycle: lifecycleAfter,
     ...(effectiveRole(u) === 'manager' ? { paymentsLinked } : {}),
   });
 });

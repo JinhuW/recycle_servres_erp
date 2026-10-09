@@ -1,28 +1,21 @@
 import type { SqlLike } from '../db';
 
-// A line's number on its PO page — `#3` there must read `#3` everywhere else.
-// Nothing stores it: the PO page numbers lines by their index in
-// GET /api/orders/:id, so this is the same rank, by the same key that query
-// orders by. Not `position + 1`: removed lines leave gaps, and a partial
-// transfer clones a line at its source's position. created_at sits ahead of
-// id so that clone (fresh now(), random uuid) always ranks after its source,
-// and the source keeps the number a sell order already shows for it.
+// A product's # on its PO — `#3` there reads `#3` everywhere else. It is
+// stored (order_lines.product_no, migration 0169): given once when the product
+// is put on the PO and never recomputed, so removing a product leaves a gap and
+// a partial transfer's clone carries its source's #.
 //
 // Null when the aliased row is absent — a hand-typed sell-order line LEFT
-// JOINs no lot, and the bare count would call it line 1.
+// JOINs no lot.
 export function poLineNo(sql: SqlLike, alias: string) {
-  const l = sql(alias);
-  return sql`CASE WHEN ${l}.id IS NULL THEN NULL ELSE (
-    SELECT COUNT(*)::int + 1 FROM order_lines sib
-     WHERE sib.order_id = ${l}.order_id
-       AND (sib.position, sib.created_at, sib.id) < (${l}.position, ${l}.created_at, ${l}.id)
-  ) END`;
+  return sql`${sql(alias)}.product_no`;
 }
 
-// The order the PO page lists its lines in — poLineNo's rank, as ORDER BY.
+// The order the PO page lists its products in: by #, and a transfer clone —
+// same # — after its source.
 export function poLineOrder(sql: SqlLike, alias: string) {
   const l = sql(alias);
-  return sql`${l}.position ASC, ${l}.created_at ASC, ${l}.id ASC`;
+  return sql`${l}.product_no ASC, ${l}.created_at ASC, ${l}.id ASC`;
 }
 
 // The order a sell order's lines are read in. It is NOT their #: that is the
@@ -30,4 +23,7 @@ export function poLineOrder(sql: SqlLike, alias: string) {
 // routes/sellOrders.ts, which reads a product's lines by PO and line # and
 // so doesn't depend on this order at all. Every save writes `position` as the
 // editor's index; the tiebreak only settles rows older than that.
-export const sellLineOrder = poLineOrder;
+export function sellLineOrder(sql: SqlLike, alias: string) {
+  const l = sql(alias);
+  return sql`${l}.position ASC, ${l}.created_at ASC, ${l}.id ASC`;
+}

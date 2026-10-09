@@ -5,6 +5,8 @@ import type { DuplicatePartGroup } from './line';
 
 type Props = {
   groups: DuplicatePartGroup[];
+  /** How a line at a list index is named: lineRef over the page's lines. */
+  refOf: (idx: number) => string;
   busy: boolean;
   /** Button tone: the capture form submits (`accent`), the edit page saves (`primary`). */
   confirmTone: 'accent' | 'primary';
@@ -15,7 +17,7 @@ type Props = {
 
 // The warning shown before a PO with repeated part numbers goes to the server.
 export function DupPartDialog({
-  groups, busy, confirmTone, confirmLabel, onClose, onConfirm,
+  groups, refOf, busy, confirmTone, confirmLabel, onClose, onConfirm,
 }: Props) {
   const { t } = useT();
   return (
@@ -39,9 +41,7 @@ export function DupPartDialog({
         <ul style={{ margin: 0, padding: '0 0 0 18px', display: 'grid', gap: 6, fontSize: 13 }}>
           {groups.map(g => (
             <li key={g.partNumber.toLowerCase()}>
-              {(g.lineNums.length === 1 ? t('dupPartModalRowOne') : t('dupPartModalRowMany'))
-                .replace('{pn}', g.partNumber)
-                .replace('{nums}', g.lineNums.join(', '))}
+              {t('dupPartModalRow', { pn: g.partNumber, nums: [...new Set(g.idxs.map(refOf))].join(', ') })}
             </li>
           ))}
         </ul>

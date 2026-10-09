@@ -18,6 +18,7 @@ import { showErrorDialog, showWarnToast } from '../lib/errorToast';
 import { cascadePatch, synthesizePartNumber, serialIssue } from '@recycle-erp/shared';
 import { lineRequirements, missingFieldNames } from '../lib/lineRequirements';
 import { SerialCheckDialog, type SerialLineIssue } from '../components/SerialCheckDialog';
+import { lineRef } from '../lib/productNo';
 import { SnScanner } from '../components/SnScanner';
 import { SerialChipsField } from '../components/SerialChipsField';
 import { addSerials } from '../lib/serialField';
@@ -290,7 +291,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
     const issue = serialIssue(line);
     if (issue) {
       setSerialIssues([{
-        lineNo: (editingLineIdx ?? lineCount) + 1,
+        line: lineRef(line, t),
         label: buildLabel(),
         issue,
       }]);
@@ -306,7 +307,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
   // Header text:
   //   - Edit mode:  "Edit RAM item" / sub = existing label
   //   - First-item new order: "New RAM order" / sub = AI-review or fill-in
-  //   - Nth-item new order:  "Add RAM item" / sub = "Item N · adding..."
+  //   - Nth-item new order:  "Add RAM item" / sub = "New product · adding..."
   // The first line no longer names the order — a PO holds whatever kinds the
   // purchaser adds — so it is titled like every other line.
   const title = isEditing
@@ -317,7 +318,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
     ? buildLabel()
     : isFirst
       ? (aiFilled ? t('aiReview') : t('fillIn'))
-      : t('addingItem', { n: lineCount + 1 });
+      : t('addingItem');
 
   return (
     <div className="phone-app">

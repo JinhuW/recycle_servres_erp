@@ -84,20 +84,20 @@ describe('new line ids follow the request order', () => {
   beforeEach(async () => { await resetDb(); });
 
   type LineRow = {
-    id: string; position: number; qty: number; unit_cost: number; brand: string | null;
+    id: string; position: number; product_no: number; qty: number; unit_cost: number; brand: string | null;
     status: string; description: string | null;
   };
   async function linesOf(orderId: string): Promise<Map<string, LineRow>> {
     const rows = await getTestDb()<LineRow[]>`
-      SELECT id, position, qty, unit_cost::float AS unit_cost, brand, status, description
+      SELECT id, position, product_no, qty, unit_cost::float AS unit_cost, brand, status, description
       FROM order_lines WHERE order_id = ${orderId}`;
     return new Map(rows.map((r) => [r.id, r]));
   }
 
-  it('POST returns lineIds 1:1 with the request lines', async () => {
+  it('POST returns lineIds and lineNos 1:1 with the request lines', async () => {
     const { token } = await loginAs(MARCUS);
     const qtys = [5, 1, 4, 2, 3];
-    const r = await api<{ id: string; lineIds: string[] }>('POST', '/api/orders', {
+    const r = await api<{ id: string; lineIds: string[]; lineNos: number[] }>('POST', '/api/orders', {
       token,
       body: {
         category: 'RAM',
@@ -108,10 +108,11 @@ describe('new line ids follow the request order', () => {
     });
     expect(r.status).toBe(201);
     expect(r.body.lineIds).toHaveLength(qtys.length);
+    expect(r.body.lineNos).toEqual([1, 2, 3, 4, 5]);
     const lines = await linesOf(r.body.id);
     r.body.lineIds.forEach((lineId, i) => {
       expect(lines.get(lineId)).toMatchObject({
-        position: i, qty: qtys[i], unit_cost: 10 + i, brand: `B${i}`, status: 'Draft',
+        position: i, product_no: i + 1, qty: qtys[i], unit_cost: 10 + i, brand: `B${i}`, status: 'Draft',
       });
     });
   });
@@ -125,7 +126,7 @@ describe('new line ids follow the request order', () => {
     expect(created.status).toBe(201);
     const id = created.body.id;
 
-    const r = await api<{ addedLineIds: string[] }>('PATCH', `/api/orders/${id}`, {
+    const r = await api<{ addedLineIds: string[]; addedLineNos: number[] }>('PATCH', `/api/orders/${id}`, {
       token,
       body: { addLines: [
         { category: 'RAM', brand: 'X', qty: 7, unitCost: 3, condition: 'New' },
@@ -136,11 +137,12 @@ describe('new line ids follow the request order', () => {
     });
     expect(r.status).toBe(200);
     expect(r.body.addedLineIds).toHaveLength(3);
+    expect(r.body.addedLineNos).toEqual([2, 3, 4]);
     const lines = await linesOf(id);
     const [a, b, c] = r.body.addedLineIds.map((lineId) => lines.get(lineId));
-    expect(a).toMatchObject({ position: 1, qty: 7, unit_cost: 3, brand: 'X' });
-    expect(b).toMatchObject({ position: 2, qty: 1, unit_cost: 0, brand: null, description: null });
-    expect(c).toMatchObject({ position: 3, qty: 2, unit_cost: 9, brand: 'Z', description: 'last' });
+    expect(a).toMatchObject({ position: 1, product_no: 2, qty: 7, unit_cost: 3, brand: 'X' });
+    expect(b).toMatchObject({ position: 2, product_no: 3, qty: 1, unit_cost: 0, brand: null, description: null });
+    expect(c).toMatchObject({ position: 3, product_no: 4, qty: 2, unit_cost: 9, brand: 'Z', description: 'last' });
 
     // The timeline names each added line with the values it was added with.
     const events = await getTestDb()<{ detail: { lineId: string; qty: number } }[]>`

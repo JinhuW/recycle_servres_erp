@@ -151,10 +151,11 @@ listRoutes.get('/', async (c) => {
       -- priced lines alone and says outright that fees are not allocated there.
       (COALESCE(SUM((l.sell_price - l.unit_cost) * l.qty), 0)
          - o.other_fees)::float                                                     AS profit,
-      COUNT(l.id)::int                                                              AS line_count,
+      -- Products, by #: a partial transfer's clone is the same product.
+      COUNT(DISTINCT l.product_no)::int                                             AS line_count,
       -- So the UI can explain a revenue figure that looks low rather than
       -- leaving the reader to wonder.
-      COUNT(l.id) FILTER (WHERE l.sell_price IS NULL)::int                           AS unpriced_line_count,
+      COUNT(DISTINCT l.product_no) FILTER (WHERE l.sell_price IS NULL)::int          AS unpriced_line_count,
       -- The row chip needs every category present, not just the derived header
       -- value, so a mixed PO can show what it actually holds. Free here: the
       -- query already groups by o.id over the joined lines.

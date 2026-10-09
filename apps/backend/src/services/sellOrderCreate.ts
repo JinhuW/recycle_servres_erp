@@ -38,8 +38,10 @@ export async function validateSellLines(
   // different order would otherwise each hold one row while waiting on the
   // other's, and Postgres would abort one of them as a deadlock.
   const ids = [...demand.keys()].sort();
-  const locked = await tx<{ id: string; qty: number; status: string; archived_at: string | null }[]>`
-    SELECT l.id, l.qty, l.status, o.archived_at
+  const locked = await tx<{
+    id: string; order_id: string; product_no: number; qty: number; status: string; archived_at: string | null;
+  }[]>`
+    SELECT l.id, l.order_id, l.product_no, l.qty, l.status, o.archived_at
     FROM order_lines l JOIN orders o ON o.id = l.order_id
     WHERE l.id = ANY(${ids}::uuid[])
     ORDER BY l.id
@@ -51,10 +53,12 @@ export async function validateSellLines(
   for (const [inventoryId, qty] of demand) {
     const inv = byId.get(inventoryId.toLowerCase());
     if (!inv) return `inventory line ${inventoryId} not found`;
+    // Named the way the PO page and the sell order show it.
+    const ref = `${inv.order_id} #${inv.product_no}`;
     if (!isSellableLineStatus(inv.status))
-      return `inventory line not sellable (status=${inv.status})`;
-    if (inv.archived_at !== null) return `inventory line's order is archived`;
-    if (qty > inv.qty) return `qty ${qty} exceeds inventory available ${inv.qty}`;
+      return `${ref} is not sellable (status=${inv.status})`;
+    if (inv.archived_at !== null) return `${ref} is on an archived order`;
+    if (qty > inv.qty) return `qty ${qty} exceeds inventory available ${inv.qty} on ${ref}`;
     const claim = claims.get(inventoryId.toLowerCase());
     const remaining = inv.qty - (claim?.qty ?? 0);
     if (claim && qty > remaining) {

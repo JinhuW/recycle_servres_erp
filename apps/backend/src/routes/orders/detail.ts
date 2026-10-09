@@ -85,7 +85,7 @@ detailRoutes.get('/:id', async (c) => {
              ol.rank, ol.speed, ol.interface, ol.form_factor, ol.description, ol.item_type,
              ol.part_number, ol.serial_number, ol.chip_number, ol.condition, ol.qty,
              ol.unit_cost::float AS unit_cost, ol.sell_price::float AS sell_price,
-             ol.status, ol.scan_image_id, ol.scan_confidence, ol.position,
+             ol.status, ol.scan_image_id, ol.scan_confidence, ol.position, ol.product_no,
              ol.health::float AS health, ol.rpm,
              ls.delivery_url AS scan_image_url,
              fs.final_sell_price, fs.sold_qty
@@ -302,6 +302,7 @@ detailRoutes.get('/:id', async (c) => {
         scanConfidence: l.scan_confidence,
         scanImageUrl: l.scan_image_url ?? null,
         position: l.position,
+        no: l.product_no,
         health: l.health,
         rpm: l.rpm,
       })),

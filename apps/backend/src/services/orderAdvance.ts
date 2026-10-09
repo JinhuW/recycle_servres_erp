@@ -565,7 +565,7 @@ export async function advanceOrderTx(
   // delete or archive applies) reads exactly this.
   if (cur.lifecycle === 'draft' && nextStageId !== 'draft') {
     const snap = (await tx`
-      SELECT COUNT(*)::int AS line_count,
+      SELECT COUNT(DISTINCT product_no)::int AS line_count,
              COALESCE(SUM(qty), 0)::int AS qty,
              COALESCE(SUM(qty * unit_cost), 0)::float AS total_cost
       FROM order_lines WHERE order_id = ${id}

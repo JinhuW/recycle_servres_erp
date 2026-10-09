@@ -20,6 +20,8 @@ import { isPristineLine } from './submit/ramSheet';
 import { addableCategories, aiCaptureEnabled } from '../../lib/lookups';
 import { eligibleDraftTargets } from './submit/eligibleTargets';
 import { DupPartDialog } from './submit/DupPartDialog';
+import { ProductNo } from './submit/ProductNo';
+import { lineRef, productCount } from '../../lib/productNo';
 import {
   blankLine, brandConfirmPending, duplicatesByIndex, findDuplicatePartNumbers,
   lineBlockerMessages, lineSaveBlock, type DuplicatePartGroup, type Line,
@@ -306,7 +308,7 @@ function OrderForm({
   const priced = useMemo(() => pricedTotals(lines), [lines]);
 
   const dupGroups = useMemo(() => findDuplicatePartNumbers(lines), [lines]);
-  const dupByIdx = useMemo(() => duplicatesByIndex(dupGroups), [dupGroups]);
+  const dupByIdx = useMemo(() => duplicatesByIndex(dupGroups, lines), [dupGroups, lines]);
   const [dupConfirm, setDupConfirm] = useState<DuplicatePartGroup[] | null>(null);
   // When the dup-part warning is reached via "add to existing", remember which
   // target to merge into so confirming the warning doesn't fall back to new-PO.
@@ -421,11 +423,12 @@ function OrderForm({
     }
     try {
       const saved = await persistLines(ready.map(toWireLine), wireMeta());
-      const idByCid = new Map<string, string>();
-      ready.forEach((l, i) => { if (saved.lineIds[i]) idByCid.set(l._cid, saved.lineIds[i]); });
-      setLines(ls => ls.map(l => (idByCid.has(l._cid)
-        ? { ...l, _confirmed: true, _dbId: idByCid.get(l._cid)! }
-        : l)));
+      const idByCid = new Map<string, number>();
+      ready.forEach((l, i) => { if (saved.lineIds[i]) idByCid.set(l._cid, i); });
+      setLines(ls => ls.map(l => {
+        const i = idByCid.get(l._cid);
+        return i == null ? l : { ...l, _confirmed: true, _dbId: saved.lineIds[i], no: saved.lineNos[i] };
+      }));
       const held = needDetails + needSerials;
       if (held) {
         showWarnToast(t('subScanSavedSome', {
@@ -475,7 +478,7 @@ function OrderForm({
   // Serial rules for a set of lines; null when everything passes.
   const collectSerialIssues = (ls: Line[]): SerialLineIssue[] | null => {
     const found = ls
-      .map((l, idx) => ({ lineNo: idx + 1, label: lineLabel(l), issue: serialIssue(l) }))
+      .map((l, i) => ({ line: lineRef(l, t, i), label: lineLabel(l), issue: serialIssue(l) }))
       .filter((x): x is SerialLineIssue => x.issue !== null);
     return found.length ? found : null;
   };
@@ -539,13 +542,13 @@ function OrderForm({
   const persistLines = (
     wireLines: ReturnType<typeof toWireLine>[],
     m: WireMeta,
-  ): Promise<{ orderId: string; lineIds: string[] }> => {
+  ): Promise<{ orderId: string; lineIds: string[]; lineNos: (number | undefined)[] }> => {
     const run = async () => {
       const current = orderIdRef.current;
       if (current) {
-        const r = await api.patch<{ ok: true; addedLineIds?: string[] }>(
+        const r = await api.patch<{ ok: true; addedLineIds?: string[]; addedLineNos?: number[] }>(
           '/api/orders/' + current, { addLines: wireLines, ...m });
-        return { orderId: current, lineIds: r.addedLineIds ?? [] };
+        return { orderId: current, lineIds: r.addedLineIds ?? [], lineNos: r.addedLineNos ?? [] };
       }
       // Ownership travels only on the create — PATCH can't reassign an owner,
       // so appends deliberately leave it out.
@@ -555,7 +558,7 @@ function OrderForm({
       });
       orderIdRef.current = r.id;
       setOrderId(r.id);
-      return { orderId: r.id, lineIds: r.lineIds ?? [] };
+      return { orderId: r.id, lineIds: r.lineIds ?? [], lineNos: r.lineNos ?? [] };
     };
     const next = saveQueue.current.then(run, run);
     saveQueue.current = next.catch(() => undefined);
@@ -596,14 +599,14 @@ function OrderForm({
     }
     const issue = block === 'serials' ? serialIssue(l) : null;
     if (issue) {
-      setSerialIssues([{ lineNo: idx + 1, label: lineLabel(l), issue }]);
+      setSerialIssues([{ line: lineRef(l, t, idx), label: lineLabel(l), issue }]);
       // Thrown (not returned) so the drawer's confirm handler keeps the
       // drawer open for the fix instead of closing on apparent success.
       throw new Error(t('serialCheckTitle'));
     }
     const saved = await persistLines([toWireLine(l)], wireMeta());
     const dbId = saved.lineIds[0] ?? null;
-    updateLine(idx, { _confirmed: true, _dbId: dbId });
+    updateLine(idx, { _confirmed: true, _dbId: dbId, no: saved.lineNos[0] });
     // The line only just acquired an id, so this is the first moment its
     // buffered photos can be attached to anything.
     if (dbId) {
@@ -635,11 +638,13 @@ function OrderForm({
       // to attach the photos to, and a second submit must patch these lines
       // rather than append them a second time.
       const idByCid = new Map<string, string>();
+      const noByCid = new Map<string, number | undefined>();
       unconfirmedLines.forEach((l, i) => {
         if (saved.lineIds[i]) idByCid.set(l._cid, saved.lineIds[i]);
+        noByCid.set(l._cid, saved.lineNos[i]);
       });
       setLines(ls => ls.map(l => (idByCid.has(l._cid)
-        ? { ...l, _confirmed: true, _dbId: idByCid.get(l._cid)! }
+        ? { ...l, _confirmed: true, _dbId: idByCid.get(l._cid)!, no: noByCid.get(l._cid) }
         : l)));
       // Same deferral as a per-line confirm, for lines submitted without one,
       // plus any already-confirmed line still holding photos — one whose
@@ -802,7 +807,7 @@ function OrderForm({
       .map((l, idx) => ({ idx, l, gen: (l.partNumber ?? '').trim() ? null : synthesizePartNumber(l.category, l) }))
       .filter(x => !(x.l.partNumber ?? '').trim());
     const blocking = blanks.find(x => !x.gen);
-    if (blocking) { showErrorDialog(t('pnRequiredLine', { n: blocking.idx + 1 })); return; }
+    if (blocking) { showErrorDialog(t('pnRequiredLine', { line: lineRef(blocking.l, t, blocking.idx) })); return; }
     if (blanks.length > 0) {
       setPnConfirm(blanks.map(x => ({ idx: x.idx, value: x.gen! })));
       return;
@@ -900,7 +905,7 @@ function OrderForm({
                   style={{ cursor: 'pointer', background: isActive ? 'var(--accent-soft)' : undefined }}
                   onClick={() => setActiveIdx(i)}
                 >
-                  <td className="mono" style={{ color: isActive ? 'var(--accent-strong)' : 'var(--fg-subtle)', fontWeight: isActive ? 600 : 400 }}>{i + 1}</td>
+                  <td className="mono" style={{ color: isActive ? 'var(--accent-strong)' : 'var(--fg-subtle)', fontWeight: isActive ? 600 : 400 }}><ProductNo no={l.no} /></td>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                       {filled ? (
@@ -995,6 +1000,7 @@ function OrderForm({
             groups={groups}
             grouped={grouped}
             lineCount={lines.length}
+            productCount={productCount(lines)}
             units={totals.units}
             goods={cost.goods}
             fees={cost.fees}
@@ -1209,7 +1215,7 @@ function OrderForm({
           }}
           onConfirmLine={() => handleConfirmLine(activeIdx)}
           onConfirmError={showErrorDialog}
-          duplicateOnLines={dupByIdx.get(activeIdx)}
+          duplicateOnLines={dupByIdx.get(activeIdx)?.map(j => lineRef(lines[j], t, j))}
         />
       )}
 
@@ -1300,6 +1306,7 @@ function OrderForm({
       {dupConfirm && (
         <DupPartDialog
           groups={dupConfirm}
+          refOf={j => lineRef(lines[j], t, j)}
           busy={submitting}
           confirmTone="accent"
           confirmLabel={t('dupPartSubmitAnyway')}
@@ -1336,7 +1343,7 @@ function OrderForm({
               <ul style={{ margin: 0, padding: '0 0 0 18px', display: 'grid', gap: 6, fontSize: 13 }}>
                 {pnConfirm.map(p => (
                   <li key={p.idx}>
-                    {t('pnConfirmRow', { n: p.idx + 1 })} <span className="mono" style={{ fontWeight: 600 }}>{p.value}</span>
+                    {t('pnConfirmRow', { line: lineRef(lines[p.idx], t, p.idx) })} <span className="mono" style={{ fontWeight: 600 }}>{p.value}</span>
                   </li>
                 ))}
               </ul>

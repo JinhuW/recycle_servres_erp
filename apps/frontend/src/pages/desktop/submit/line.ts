@@ -3,6 +3,9 @@ import type { LinePhoto } from '../../../lib/linePhotos';
 import { serialIssue } from '@recycle-erp/shared';
 import { lineRequirements } from '../../../lib/lineRequirements';
 import { ramBrandNeedsConfirm } from '../../../lib/scanValidation';
+import { lineRef, productCount } from '../../../lib/productNo';
+
+export { lineRef };
 
 type Translate = (key: string, vars?: Record<string, string | number>) => string;
 
@@ -44,6 +47,9 @@ export type Line = {
   // DB id, once the line has been persisted. Null before that — which is why
   // photos are buffered rather than uploaded as they're picked.
   _dbId?: string | null;
+  // The product's # on the PO — the server gives it when the line is saved and
+  // never changes it, so it is read, never sent. Absent until then.
+  no?: number | null;
   photos?: LinePhoto[];
 };
 
@@ -56,14 +62,15 @@ export function blankLine(cat: Category): Line {
   };
 }
 
-export type DuplicatePartGroup = { partNumber: string; lineNums: number[] };
+// `idxs` are the 0-based places of the lines in the list; lineRef names them.
+export type DuplicatePartGroup = { partNumber: string; idxs: number[] };
 
 // Two lines sharing a part number on the same PO is almost always a paste-error
 // or a forgotten-already-added — surface it so the user can merge or confirm.
 // Comparison is case-insensitive and trims whitespace; blanks are ignored. The
 // returned `partNumber` carries the first-seen casing for display.
 export function findDuplicatePartNumbers(
-  lines: ReadonlyArray<{ partNumber?: string | null }>,
+  lines: ReadonlyArray<{ partNumber?: string | null; no?: number | null }>,
 ): DuplicatePartGroup[] {
   const groups = new Map<string, DuplicatePartGroup>();
   lines.forEach((l, i) => {
@@ -71,10 +78,12 @@ export function findDuplicatePartNumbers(
     if (!raw) return;
     const key = raw.toLowerCase();
     const g = groups.get(key);
-    if (g) g.lineNums.push(i + 1);
-    else groups.set(key, { partNumber: raw, lineNums: [i + 1] });
+    if (g) g.idxs.push(i);
+    else groups.set(key, { partNumber: raw, idxs: [i] });
   });
-  return [...groups.values()].filter(g => g.lineNums.length >= 2);
+  // A partial transfer's clone shares its source's part # and its #: one
+  // product in two warehouses, not a duplicate.
+  return [...groups.values()].filter(g => productCount(g.idxs.map(i => lines[i])) >= 2);
 }
 
 // Build a Line patch from an AI scan response — mirrors the mobile aiDefaults
@@ -125,15 +134,18 @@ export const brandConfirmPending = (l: Line): boolean =>
   && !!l._brandNeedsConfirm
   && ramBrandNeedsConfirm({ brand: l.brand ?? '' });
 
-/** Index → the other 1-based line numbers sharing that line's part number. */
+/**
+ * Index → the indexes of the other products sharing that line's part number,
+ * leaving out a line with the same # (a transfer's clone of it).
+ */
 export function duplicatesByIndex(
   groups: readonly DuplicatePartGroup[],
+  lines: ReadonlyArray<{ no?: number | null }>,
 ): Map<number, number[]> {
+  const sameProduct = (i: number, j: number) => lines[i].no != null && lines[i].no === lines[j].no;
   const m = new Map<number, number[]>();
   for (const g of groups) {
-    for (const ln of g.lineNums) {
-      m.set(ln - 1, g.lineNums.filter(n => n !== ln));
-    }
+    for (const i of g.idxs) m.set(i, g.idxs.filter(j => j !== i && !sameProduct(i, j)));
   }
   return m;
 }
@@ -152,16 +164,16 @@ export function lineBlockerMessages<L extends Line>(
     if (brandConfirmPending(l)) {
       return [lines.length === 1
         ? t('subConfirmBrandThis')
-        : t('subConfirmBrandLine', { n: i + 1 })];
+        : t('subConfirmBrandLine', { line: lineRef(l, t, i) })];
     }
     if (lineReady(l)) return [];
     const fields = missingNamesFor(l);
     if (fields) {
       return [lines.length === 1
         ? t('subMissingFieldsThis', { fields })
-        : t('subMissingFieldsLine', { n: i + 1, fields })];
+        : t('subMissingFieldsLine', { line: lineRef(l, t, i), fields })];
     }
-    return [lines.length === 1 ? t('subFillThisLine') : t('subFillLineN', { n: i + 1 })];
+    return [lines.length === 1 ? t('subFillThisLine') : t('subFillLineN', { line: lineRef(l, t, i) })];
   });
 }
 

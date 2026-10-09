@@ -4,6 +4,7 @@ import { getDb } from '../../db';
 import { UUID_RE } from '../../lib/pagination';
 import { writeOrderEvent, type SqlLike } from '../../services/orderAudit';
 import { notify } from '../../lib/notify';
+import { poLineOrder } from '../../lib/poLineNo';
 import { type OrdersEnv } from './shared';
 
 const checksRoutes = new Hono<OrdersEnv>();
@@ -160,13 +161,13 @@ checksRoutes.post('/:id/checks/send', async (c) => {
 
   const sent = await sql.begin(async (tx) => {
     const flags = await tx<{
-      line_id: string; part_number: string | null; qty: number; counted: number;
+      line_id: string; product_no: number; part_number: string | null; qty: number; counted: number;
       flag_reason: CheckFlagReason; flag_note: string | null;
     }[]>`
-      SELECT l.id AS line_id, l.part_number, l.qty, k.counted, k.flag_reason, k.flag_note
+      SELECT l.id AS line_id, l.product_no, l.part_number, l.qty, k.counted, k.flag_reason, k.flag_note
       FROM order_line_checks k JOIN order_lines l ON l.id = k.line_id
       WHERE l.order_id = ${id} AND k.flag_reason IS NOT NULL AND k.flag_sent_at IS NULL
-      ORDER BY l.position ASC, l.id ASC
+      ORDER BY ${poLineOrder(tx, 'l')}
       FOR UPDATE OF k`;
     const extras = await tx<{ id: string; part_number: string; note: string | null }[]>`
       SELECT id, part_number, note FROM order_check_extras
@@ -184,7 +185,7 @@ checksRoutes.post('/:id/checks/send', async (c) => {
 
     const detail = {
       flags: flags.map((f) => ({
-        lineId: f.line_id, partNumber: f.part_number, qty: f.qty, counted: f.counted,
+        lineId: f.line_id, no: f.product_no, partNumber: f.part_number, qty: f.qty, counted: f.counted,
         reason: f.flag_reason, note: f.flag_note,
       })),
       extras: extras.map((x) => ({ partNumber: x.part_number, note: x.note })),
@@ -199,7 +200,7 @@ checksRoutes.post('/:id/checks/send', async (c) => {
         icon: 'flag',
         title: `${id}: ${n} ${n === 1 ? 'problem' : 'problems'} found in the box`,
         body: [
-          ...flags.map((f) => `${f.part_number ?? 'Line'}: ${f.flag_reason.replace(/_/g, ' ')}`
+          ...flags.map((f) => `#${f.product_no}${f.part_number ? ` ${f.part_number}` : ''}: ${f.flag_reason.replace(/_/g, ' ')}`
             + (f.flag_note ? ` (${f.flag_note})` : '')),
           ...extras.map((x) => `Extra item ${x.part_number}` + (x.note ? ` (${x.note})` : '')),
         ].join('\n'),

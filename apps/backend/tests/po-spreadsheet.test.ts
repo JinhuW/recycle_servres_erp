@@ -205,6 +205,35 @@ describe('GET /api/orders/:id/spreadsheet', () => {
     expect(String(ws.getRow(2).getCell(chipC).value)).toBe('K4A8G085WC-BCTD');
   });
 
+  it('leads every row with its product # on the PO, across category sheets', async () => {
+    const { token } = await loginAs(MARCUS);
+    const ram = (brand: string) => ({ category: 'RAM', brand, qty: 1, unitCost: 10, condition: 'New' });
+    const created = await api<{ id: string; lineIds: string[] }>('POST', '/api/orders', {
+      token,
+      body: {
+        category: 'RAM',
+        lines: [ram('A'), { category: 'SSD', brand: 'S', qty: 1, unitCost: 10, condition: 'New' }, ram('B'), ram('C')],
+      },
+    });
+    expect(created.status).toBe(201);
+    // #3 goes: the sheets must not close the gap.
+    await api('PATCH', `/api/orders/${created.body.id}`, { token, body: { removeLineIds: [created.body.lineIds[2]] } });
+
+    const res = await getRaw(`/api/orders/${created.body.id}/spreadsheet`, token);
+    const { default: ExcelJS } = await import('exceljs');
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await res.arrayBuffer());
+    const nos = (sheet: string) => {
+      const ws = wb.getWorksheet(sheet)!;
+      expect(ws.getRow(1).getCell(1).value).toBe('#');
+      const out: unknown[] = [];
+      ws.eachRow((row, i) => { if (i > 1) out.push(row.getCell(1).value); });
+      return out;
+    };
+    expect(nos('RAM')).toEqual([1, 4]);
+    expect(nos('SSD')).toEqual([2]);
+  });
+
   it('splits a RAM PO into the full RAM spec columns', async () => {
     const { token } = await loginAs(MARCUS);
     const created = await api<{ id: string }>('POST', '/api/orders', {

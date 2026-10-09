@@ -815,6 +815,7 @@ inventory.get('/transfer-orders', async (c) => {
   const lines = orderIds.length === 0 ? [] : (await sql`
     SELECT l.id, l.transfer_order_id, l.category, l.brand, l.capacity, l.generation,
            l.type, l.description, l.part_number, l.qty, l.position, l.status,
+           l.order_id, l.product_no AS no,
            te.detail->>'from' AS from_wh,
            fw.short AS from_short,
            te.created_at AS transferred_at
@@ -830,7 +831,7 @@ inventory.get('/transfer-orders', async (c) => {
     ) te ON TRUE
     LEFT JOIN warehouses fw ON fw.id = te.detail->>'from'
     WHERE l.transfer_order_id = ANY(${orderIds}::text[])
-    ORDER BY l.position
+    ORDER BY l.order_id, l.product_no, l.created_at
   `) as unknown as LineRow[];
 
   const byOrder = new Map<string, LineRow[]>();
@@ -1513,6 +1514,7 @@ inventory.post('/transfer', async (c) => {
     sell_price: string | number | null;
     status: string;
     position: number;
+    product_no: number;
     health: number | null;
     rpm: number | null;
     scan_image_id: string | null;
@@ -1527,11 +1529,11 @@ inventory.post('/transfer', async (c) => {
   type Outcome =
     | { kind: 'missing' }
     | { kind: 'lineNotFound'; id: string }
-    | { kind: 'notSellable'; id: string; status: string }
-    | { kind: 'archived'; id: string }
-    | { kind: 'overQty'; id: string; have: number }
-    | { kind: 'committed'; id: string; free: number }
-    | { kind: 'alreadyThere'; id: string }
+    | { kind: 'notSellable'; ref: string; status: string }
+    | { kind: 'archived'; ref: string }
+    | { kind: 'overQty'; ref: string; have: number }
+    | { kind: 'committed'; ref: string; free: number }
+    | { kind: 'alreadyThere'; ref: string }
     | { kind: 'needsConfirm'; drafts: string[] }
     | { kind: 'ok'; transferOrderId: string; result: ResultLine[] };
 
@@ -1543,7 +1545,7 @@ inventory.post('/transfer', async (c) => {
     const sources = (await tx`
       SELECT l.id, l.order_id, l.category, l.brand, l.capacity, l.generation, l.type, l.classification,
              l.rank, l.speed, l.interface, l.form_factor, l.description, l.item_type, l.part_number,
-             l.condition, l.qty, l.unit_cost, l.sell_price, l.status, l.position,
+             l.condition, l.qty, l.unit_cost, l.sell_price, l.status, l.position, l.product_no,
              l.health, l.rpm, l.scan_image_id, l.scan_confidence,
              COALESCE(l.warehouse_id, o.warehouse_id) AS effective_wh,
              o.archived_at
@@ -1568,14 +1570,17 @@ inventory.post('/transfer', async (c) => {
     for (const r of reqLines) {
       const s = byId.get(r.id);
       if (!s) return { kind: 'lineNotFound', id: r.id };
+      // The transfer dialog shows these as they are: name the product the way
+      // the PO page does, not by its uuid.
+      const ref = `${s.order_id} #${s.product_no}`;
       if (s.status !== 'Reviewing' && s.status !== 'Done') {
-        return { kind: 'notSellable', id: r.id, status: s.status };
+        return { kind: 'notSellable', ref, status: s.status };
       }
-      if (s.archived_at !== null) return { kind: 'archived', id: r.id };
-      if (r.qty > s.qty) return { kind: 'overQty', id: r.id, have: s.qty };
+      if (s.archived_at !== null) return { kind: 'archived', ref };
+      if (r.qty > s.qty) return { kind: 'overQty', ref, have: s.qty };
       const free = s.qty - (committed.get(r.id.toLowerCase())?.qty ?? 0);
-      if (r.qty > free) return { kind: 'committed', id: r.id, free };
-      if (s.effective_wh === toWarehouseId) return { kind: 'alreadyThere', id: r.id };
+      if (r.qty > free) return { kind: 'committed', ref, free };
+      if (s.effective_wh === toWarehouseId) return { kind: 'alreadyThere', ref };
     }
 
     // A full move sends the line itself out In Transit, so a Draft (or Packing
@@ -1638,7 +1643,10 @@ inventory.post('/transfer', async (c) => {
         // The clone carries away units nothing has sold, so its own qty speaks
         // for what it cost and it needs no qty_purchased of its own — but the
         // source must hand over that share, or the two halves together would
-        // claim more than the order ever bought.
+        // claim more than the order ever bought. The clone is the same product
+        // in another warehouse, so it carries the source's # — naming it also
+        // keeps 0169's numbering trigger, which would lock the order after
+        // these lines, out of this lines-first transaction.
         await tx`
           UPDATE order_lines
              SET qty = qty - ${r.qty},
@@ -1651,7 +1659,7 @@ inventory.post('/transfer', async (c) => {
             order_id, category, brand, capacity, generation, type, classification, rank, speed,
             interface, form_factor, description, item_type, part_number, condition,
             qty, unit_cost, sell_price, status,
-            scan_image_id, scan_confidence, position,
+            scan_image_id, scan_confidence, position, product_no,
             health, rpm, warehouse_id, transfer_order_id
           )
           VALUES (
@@ -1659,7 +1667,7 @@ inventory.post('/transfer', async (c) => {
             ${s.classification}, ${s.rank}, ${s.speed}, ${s.interface},
             ${s.form_factor}, ${s.description}, ${s.item_type}, ${s.part_number}, ${s.condition},
             ${r.qty}, ${s.unit_cost}, ${s.sell_price}, 'In Transit',
-            ${s.scan_image_id}, ${s.scan_confidence}, ${s.position},
+            ${s.scan_image_id}, ${s.scan_confidence}, ${s.position}, ${s.product_no},
             ${s.health}, ${s.rpm}, ${toWarehouseId}, ${transferOrderId}
           )
           RETURNING id
@@ -1683,14 +1691,14 @@ inventory.post('/transfer', async (c) => {
   if (outcome.kind === 'missing') return c.json({ error: 'one or more lines not found' }, 404);
   if (outcome.kind === 'lineNotFound') return c.json({ error: `line ${outcome.id} not found` }, 404);
   if (outcome.kind === 'notSellable') {
-    return c.json({ error: `line ${outcome.id} is ${outcome.status}; only Reviewing/Done can be transferred` }, 400);
+    return c.json({ error: `${outcome.ref} is ${outcome.status}; only Reviewing/Done can be transferred` }, 400);
   }
-  if (outcome.kind === 'archived') return c.json({ error: `line ${outcome.id} belongs to an archived order` }, 400);
-  if (outcome.kind === 'overQty') return c.json({ error: `line ${outcome.id} only has ${outcome.have} units` }, 400);
+  if (outcome.kind === 'archived') return c.json({ error: `${outcome.ref} belongs to an archived order` }, 400);
+  if (outcome.kind === 'overQty') return c.json({ error: `${outcome.ref} only has ${outcome.have} units` }, 400);
   if (outcome.kind === 'committed') {
-    return c.json({ error: `line ${outcome.id} has only ${outcome.free} units not committed to a sell order` }, 409);
+    return c.json({ error: `${outcome.ref} has only ${outcome.free} units not committed to a sell order` }, 409);
   }
-  if (outcome.kind === 'alreadyThere') return c.json({ error: `line ${outcome.id} is already in ${toWarehouseId}` }, 400);
+  if (outcome.kind === 'alreadyThere') return c.json({ error: `${outcome.ref} is already in ${toWarehouseId}` }, 400);
   if (outcome.kind === 'needsConfirm') {
     return c.json({
       error: `Moving these lines whole takes them off draft sell order${outcome.drafts.length === 1 ? '' : 's'} `
@@ -1838,11 +1846,11 @@ inventory.post('/transfer-orders/:id/reopen', async (c) => {
     }
 
     const lines = (await tx`
-      SELECT l.id, l.status, ${committedQtySql(tx, tx`l.id`)} AS sell_count
+      SELECT l.id, l.order_id, l.product_no, l.status, ${committedQtySql(tx, tx`l.id`)} AS sell_count
       FROM order_lines l
       WHERE l.transfer_order_id = ${id}
       FOR UPDATE OF l
-    `) as unknown as Array<{ id: string; status: string; sell_count: number }>;
+    `) as unknown as Array<{ id: string; order_id: string; product_no: number; status: string; sell_count: number }>;
 
     if (lines.length === 0) {
       outcome = { code: 409, msg: `transfer order ${id} has no lines to re-open` };
@@ -1850,7 +1858,7 @@ inventory.post('/transfer-orders/:id/reopen', async (c) => {
     }
     const bad = lines.filter((l) => (l.status !== 'Reviewing' && l.status !== 'Done') || l.sell_count > 0);
     if (bad.length > 0) {
-      outcome = { code: 409, msg: `cannot re-open: line(s) ${bad.map((l) => l.id).join(', ')} have moved on since receipt` };
+      outcome = { code: 409, msg: `cannot re-open: ${bad.map((l) => `${l.order_id} #${l.product_no}`).join(', ')} have moved on since receipt` };
       return;
     }
 
@@ -1904,17 +1912,19 @@ inventory.delete('/transfer-orders/:id', async (c) => {
     }
 
     const lines = (await tx`
-      SELECT l.id, l.status, l.qty, (o.archived_at IS NOT NULL) AS archived,
+      SELECT l.id, l.order_id, l.product_no, l.status, l.qty, (o.archived_at IS NOT NULL) AS archived,
              ${committedQtySql(tx, tx`l.id`)} AS sell_count
       FROM order_lines l
       JOIN orders o ON o.id = l.order_id
       WHERE l.transfer_order_id = ${id}
       FOR UPDATE OF l
-    `) as unknown as Array<{ id: string; status: string; qty: number; archived: boolean; sell_count: number }>;
+    `) as unknown as Array<{
+      id: string; order_id: string; product_no: number; status: string; qty: number; archived: boolean; sell_count: number;
+    }>;
 
     const bad = lines.filter((l) => l.status !== 'In Transit' || l.sell_count > 0);
     if (bad.length > 0) {
-      outcome = { code: 409, msg: `cannot discard: line(s) ${bad.map((l) => l.id).join(', ')} have moved on` };
+      outcome = { code: 409, msg: `cannot discard: ${bad.map((l) => `${l.order_id} #${l.product_no}`).join(', ')} have moved on` };
       return;
     }
     // Unlike reopen (which 409s on an empty order), an empty Pending TO — every

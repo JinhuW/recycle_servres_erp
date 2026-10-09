@@ -305,8 +305,9 @@ export const createOrder = (body: {
   onBehalfOfUserId?: string;
   lines: unknown[];
   // lineIds comes back aligned 1:1 with `lines`, so the caller can attach
-  // per-line photos that were buffered while the lines had no id yet.
-}) => api.post<{ id: string; lineIds: string[] }>('/api/orders', body);
+  // per-line photos that were buffered while the lines had no id yet, and
+  // lineNos with each product's # (absent from an older backend).
+}) => api.post<{ id: string; lineIds: string[]; lineNos?: number[] }>('/api/orders', body);
 
 export const deleteOrder = (orderId: string) =>
   api.delete<{ ok: true }>(`/api/orders/${orderId}`);

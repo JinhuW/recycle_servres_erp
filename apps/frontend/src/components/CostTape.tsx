@@ -25,7 +25,10 @@ type Props = {
   /** Per-category goods subtotals. Rendered only when the PO spans categories. */
   groups: LineGroup<unknown>[];
   grouped: boolean;
+  /** Rows, the priced coverage's denominator. */
   lineCount: number;
+  /** Products by # — a transfer's clone repeats its source's — for the caption. */
+  productCount: number;
   units: number;
   goods: number;
   fees: number;
@@ -73,7 +76,7 @@ function Row({
 }
 
 export function CostTape({
-  groups, grouped, lineCount, units, goods, fees, total,
+  groups, grouped, lineCount, productCount, units, goods, fees, total,
   revenue, pricedCost, pricedProfit, pricedCount,
   locale, feeField, feeNoteField, goodsNote,
   showRealized = false, realized = null, commissionRate = null,
@@ -92,7 +95,7 @@ export function CostTape({
         <div className="tape-cap">
           <span>{t('costBreakdown')}</span>
           <span className="tape-cap-r">
-            {lineCount === 1 ? t('historyLineCountOne', { n: lineCount }) : t('historyLineCountMany', { n: lineCount })}
+            {productCount === 1 ? t('historyLineCountOne', { n: 1 }) : t('historyLineCountMany', { n: productCount })}
             {' · '}{t('grpUnits', { n: units.toLocaleString(locale) })}
           </span>
         </div>
@@ -104,7 +107,7 @@ export function CostTape({
           <Row
             key={g.category}
             dot={g.category}
-            label={<>{g.category}<span className="muted"> ×{g.lines.length}</span></>}
+            label={<>{g.category}<span className="muted"> ×{g.products}</span></>}
             value={fmtUSD(g.goods, locale)}
           />
         ))}

@@ -45,8 +45,8 @@ export function LineDrawer({
   editing?: boolean;
   onConfirmLine?: () => Promise<void>;
   onConfirmError?: (msg: string) => void;
-  // 1-based line numbers (excluding this one) that share this line's part #.
-  duplicateOnLines?: number[];
+  // The other lines sharing this line's part #, named as lineRef names them.
+  duplicateOnLines?: string[];
   // Locked order (Done, or a purchaser past their stage): the drawer still
   // opens so the line's full spec stays lookup-able, but nothing can change.
   readOnly?: boolean;
@@ -251,9 +251,9 @@ export function LineDrawer({
               width: 28, height: 28, borderRadius: 8,
               background: 'var(--bg-elev)', border: '1px solid var(--border)',
               display: 'grid', placeItems: 'center',
-              fontSize: 13, fontWeight: 600, color: 'var(--fg-muted)',
+              fontSize: line.no != null ? 13 : 10, fontWeight: 600, color: 'var(--fg-muted)',
               flexShrink: 0,
-            }}>{idx + 1}</div>
+            }}>{line.no ?? t('lineNoNew')}</div>
             <div style={{
               width: 56, height: 56, borderRadius: 8,
               background: 'var(--bg-elev)', border: '1px solid var(--border)',
