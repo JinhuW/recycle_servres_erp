@@ -35,7 +35,7 @@ import { CostTape } from '../../components/CostTape';
 import { useMarketLookup } from '../../lib/useMarketLookup';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { confirmDiscard, useUnsavedGuard } from '../../lib/unsavedGuard';
-import { derivePoPermissions } from '../../lib/poPermissions';
+import { derivePoPermissions, lineShippedOn } from '../../lib/poPermissions';
 import { ImageLightbox } from '../../components/ImageLightbox';
 import { serialIssue } from '@recycle-erp/shared';
 import { lineRequirements, missingFieldNames } from '../../lib/lineRequirements';
@@ -766,6 +766,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     () => new Map(order.lines.map(ol => [ol.id, ol] as const)),
     [order.lines],
   );
+  const activeLine = activeIdx !== null ? lines[activeIdx] : undefined;
+  const activeShippedOn = lineShippedOn(activeLine?._id ? serverLineById.get(activeLine._id) : undefined);
   const changesSerialFields = (l: EditLine): boolean => {
     const o = l._id ? originalById.get(l._id) : undefined;
     if (!o) return true;
@@ -1343,6 +1345,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                 const server = l._id ? serverLineById.get(l._id) : undefined;
                 const finalPrice = server?.finalSellPrice ?? null;
                 const finalQty = server?.finalSoldQty ?? null;
+                const shippedOn = lineShippedOn(server);
                 const filled = !!l.brand || !!l.description;
                 const isActive = i === activeIdx;
                 // A folded group still emits its header row, just none of its
@@ -1405,6 +1408,11 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                             <>
                               <div style={{ fontWeight: 500 }}>{itemType(l)}</div>
                               <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{itemSpec(l)}</div>
+                              {shippedOn.length > 0 && (
+                                <span className="chip info" style={{ marginTop: 4 }} title={t('lineShippedReadOnly', { so: shippedOn.join(', ') })}>
+                                  <Icon name="lock" size={10} /> {t('lineShippedChip', { so: shippedOn.join(', ') })}
+                                </span>
+                              )}
                             </>
                           ) : (
                             <span className="muted" style={{ fontStyle: 'italic' }}>
@@ -1436,9 +1444,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                         <button
                           className="btn icon sm"
                           onClick={e => { e.stopPropagation(); removeLine(i); }}
-                          title={t('poRemoveProduct')}
-                          disabled={lines.length <= 1}
-                          style={lines.length <= 1 ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
+                          title={shippedOn.length ? t('lineShippedReadOnly', { so: shippedOn.join(', ') }) : t('poRemoveProduct')}
+                          disabled={lines.length <= 1 || shippedOn.length > 0}
+                          style={lines.length <= 1 || shippedOn.length > 0 ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
                         >
                           <Icon name="trash" size={12} />
                         </button>
@@ -1807,12 +1815,14 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
           onChange={patch => updateLine(activeIdx, patch)}
           onClose={() => setActiveIdx(null)}
           onRemove={() => removeLine(activeIdx)}
-          canRemove={lines.length > 1}
+          canRemove={lines.length > 1 && activeShippedOn.length === 0}
           onConfirmLine={() => confirmLine(activeIdx)}
           onConfirmError={showErrorDialog}
           duplicateOnLines={dupByIdx.get(activeIdx)?.map(j => lineRef(lines[j], t, newNos[j]))}
           newNo={newNos[activeIdx]}
-          readOnly={!canEditOrder}
+          readOnly={!canEditOrder || activeShippedOn.length > 0}
+          readOnlyNote={canEditOrder && activeShippedOn.length > 0
+            ? t('lineShippedReadOnly', { so: activeShippedOn.join(', ') }) : undefined}
           sellPriceEditable={canEditSellPrice}
           missingFields={missingNamesFor(lines[activeIdx])}
           market={marketFor(lines[activeIdx].partNumber)}

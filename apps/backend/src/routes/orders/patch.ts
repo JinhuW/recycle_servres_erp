@@ -8,7 +8,7 @@ import { autoTrackParts } from '../../lib/marketAutoTrack';
 import { effectiveRole } from '../../lib/role';
 import { committedClaimsByLine, openSellStatuses } from '../../lib/sellCommitment';
 import { mergedSpec, specRuleErr, specVal, validateLineInput } from '../../lib/orderInput';
-import { revertOrderToDraftTx, LINE_STATUS_FOR_LIFECYCLE, isClosedBook } from '../../services/orderAdvance';
+import { revertOrderToDraftTx, LINE_STATUS_FOR_LIFECYCLE, isClosedBook, heldLines } from '../../services/orderAdvance';
 import { syncOrderCategory } from '../../services/orderCategory';
 import { nameHandoffByChange, setOrderPackageTx, unlinkOrderPackagesTx, packageChanges, changeOrderOwnerTx, type HandoffPackage } from '../../services/orderHandoff';
 import { linkPaypalTxnToOrder, unlinkPaypalTxnFromOrder } from '../../banktx/sync';
@@ -835,6 +835,17 @@ patchRoutes.patch('/:id', async (c) => {
               changes,
             });
           }
+        }
+        // A line held for a shipped sale is that sale's record until the sell
+        // order is Done or Closed. Judged on the diff, after the writes the
+        // throw rolls back: an editor echoing the line back unchanged is no edit.
+        const held = await heldLines(tx, revertLinesEdited.map(e => e.lineId as string));
+        if (held.size) {
+          throw new OrderRefusal({
+            kind: 'lineShipped',
+            lineIds: [...held.keys()],
+            sellOrderIds: [...new Set([...held.values()].flat())].sort(),
+          });
         }
       }
       // One statement for every per-line event: a wide edit used to cost a

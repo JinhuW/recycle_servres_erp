@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { ApiError } from './api';
-import { asksManagerTakeover, derivePoPermissions, readManagerChanged } from './poPermissions';
+import { asksManagerTakeover, derivePoPermissions, lineShippedOn, readManagerChanged } from './poPermissions';
 
 const order = (o: Partial<{ lifecycle: string; archivedAt: string | null; userId: string; everSubmitted: boolean }>) => ({
   lifecycle: 'draft', status: 'Draft', archivedAt: null, userId: 'owner', everSubmitted: false, ...o,
@@ -65,5 +65,16 @@ describe('readManagerChanged', () => {
     expect(readManagerChanged(new ApiError(400, 'x', {}, { code: 'managerChanged', manager: null }))).toBeUndefined();
     expect(readManagerChanged(refusal({ id: 'a' }))).toBeUndefined();
     expect(readManagerChanged(new Error('network'))).toBeUndefined();
+  });
+});
+
+describe('lineShippedOn', () => {
+  it('names the shipped sell orders a held line is kept for', () => {
+    expect(lineShippedOn({ shippedOn: ['SO-4080'] })).toEqual(['SO-4080']);
+  });
+
+  it('holds nothing when the server named nothing', () => {
+    expect(lineShippedOn({})).toEqual([]);
+    expect(lineShippedOn(undefined)).toEqual([]);
   });
 });

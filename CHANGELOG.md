@@ -17,6 +17,33 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.238.0] - 2026-10-09
+
+A Ready to Pay or Done PO has to go back to Reviewing before anything on it
+can change. That move was refused whenever any one of its products sat on a
+Shipped or Awaiting-payment sell order, so a single shipped product froze the
+whole PO (RS-218). On 2026-10-09 this stopped PO-1471 and PO-1477: a few of
+their products were on SO-4080, which had shipped that morning, while the ones
+being worked on sat on Draft and Packing sell orders.
+
+### Changed
+
+- **A PO goes back to Reviewing while some of its products are shipped.**
+  Products on a Shipped or Awaiting-payment sell order stay at Done, and the
+  rest go to Reviewing and are editable. Draft and Packing sell orders block
+  what they blocked before: a move to In Transit or Draft, the purchaser-edit
+  revert, and removing a product.
+- **A product left at Done this way is view-only until its sell order is Done
+  or Closed.**
+  - The desktop PO page, its line drawer, Review mode and the phone PO page
+    show it locked, naming the sell order (`shippedOn`, managers only).
+  - `PATCH /api/orders/:id` refuses a change to it with 409. An unchanged echo
+    of it is not a change.
+  - The inventory editor keeps its qty and unit cost.
+  - Review mode's Approve never zeroes it.
+- The lock is worked out from the sell orders each time, with no stored flag,
+  so it lifts by itself. A product that isn't sold out stays at Done until the
+  PO advances again.
 ## [1.237.1] - 2026-10-09
 
 Fixes from the reviews before the v1.237 release (RS-215). `/code-review high`

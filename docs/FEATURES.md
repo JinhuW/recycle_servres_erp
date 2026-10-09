@@ -699,12 +699,19 @@ on to Sold once every line has sold (v1.164.0).
   row until the last one lands. The mobile PO list and the sell-order list
   followed in v1.199.0.
 - Managers can reopen a Done PO back to Reviewing (v1.81.0), and since
-  v1.132.0 also Done → Ready to Pay and Ready to Pay → Reviewing. Since
-  v1.138.5 a move back to Reviewing is refused only while a line sits on a
-  Shipped or Awaiting-payment sell order — a Draft naming the line no longer
-  blocks it, since the draft still promotes against a Reviewing line. A move
-  to In Transit or Draft (including the purchaser-edit revert) is still
-  refused by a Draft. The refusal names the sell orders involved.
+  v1.132.0 also Done → Ready to Pay and Ready to Pay → Reviewing. A Draft
+  sell order naming a line stopped blocking the move back to Reviewing in
+  v1.138.5, since the draft still promotes against a Reviewing line. **Since
+  v1.238.0 a shipped one doesn't block it either**: a line on a Shipped or
+  Awaiting-payment sell order stays at Done while the rest of the PO goes back
+  to Reviewing, so one shipped product no longer freezes the others. That held
+  line is view-only — the PO page, its drawer, Review mode and the phone show
+  it locked with the sell order named, `PATCH /api/orders` refuses a change to
+  it, and the inventory editor keeps its qty and unit cost — until the sell
+  order is Done or Closed. (A line not sold out then stays Done until the PO
+  advances again.) A move to In Transit or Draft (including the purchaser-edit
+  revert) is still refused by any open sell order, Draft included. The
+  refusal names the sell orders involved.
 - **Costs split into a goods total and other fees** (v1.43.0); a goods overflow
   can be moved into Other fees (v1.45.0). Fees amortize per line, which is what
   commission is calculated from. `orders.category` and `orders.total_cost` are
