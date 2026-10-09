@@ -43,7 +43,7 @@ describe('POST /api/market/chips', () => {
 
     const r = await chips(token, ['zztest_chipmap-01', 'ZZTEST-UNKNOWN-99']);
     expect(r.status).toBe(200);
-    expect(r.body.items).toEqual({ 'zztest_chipmap-01': 'D9XPF' });
+    expect(r.body.items).toEqual({ 'zztest_chipmap-01': 'XPF' });
   });
 
   it('counts a PO once however many rows carry the part', async () => {
@@ -90,7 +90,7 @@ describe('POST /api/market/chips', () => {
     const marcus = await loginAs(MARCUS);
     const r = await chips(marcus.token, [PN]);
     expect(r.status).toBe(200);
-    expect(r.body.items[PN]).toBe('D9XPF');
+    expect(r.body.items[PN]).toBe('XPF');
   });
 
   it('rejects a malformed body and an oversized batch', async () => {

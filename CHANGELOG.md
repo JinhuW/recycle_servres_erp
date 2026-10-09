@@ -17,6 +17,34 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.231.0] - 2026-10-09
+
+A Micron line's **Chip #** now holds the die code (VPP, TBH, CJV…), not the
+whole marking copied off the chip (RS-209).
+
+### Changed
+
+- **Micron Chip # is cut to the die code.** A Micron chip prints a date/lot
+  code above its FBGA code (`8KE75` / `D9VPP`), and purchasers typed both.
+  The date code made every line's chip unique, so the column grouped
+  nothing. The DDR4 desktop and laptop price list buckets Micron by the die,
+  which is the FBGA code's last three letters.
+  - Every write keeps only those letters: typed, pasted, label OCR, or the
+    chip auto-fill. `8KE75 D9VPP` → `VPP`, `0DJ75C9BJR` → `BJR`.
+  - The die code is read by its shape, not from a list, so any Micron die is
+    kept.
+  - A value that doesn't end in a die code (`1`, `DDR5`, `MICRON`, a part
+    number in the wrong field) is left as typed.
+  - Other brands' chip numbers are only upper-cased, as before.
+- The desktop line drawer and the phone form collapse the value when the
+  field loses focus. Label scans arrive already cut.
+- Migration 0167 backfills existing lines: 243 of prod's 325 Micron chip
+  values.
+- **A tab still holding the old long marking doesn't send its PO back to
+  Draft on save.** The comparison judges the chip as it will be stored.
+- The rule lives once, as `chipMarkingCanon` in `@recycle-erp/shared`, and a
+  test runs the migration's SQL against it.
+
 ## [1.230.2] - 2026-10-08
 
 Inventory's **Select all** picks every lot the filters match, not just the

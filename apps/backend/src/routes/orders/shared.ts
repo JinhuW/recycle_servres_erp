@@ -8,7 +8,7 @@ import { specVal } from '../../lib/orderInput';
 import { activeMember, type HandoffPackage } from '../../services/orderHandoff';
 import { pickTrackingClient, carrierTrackingUrl } from '../../shipping';
 import { registerPackageTracking } from '../../shipping/track';
-import { synthesizePartNumber, normSellPrice, CARRIERS, PACKAGE_SOURCES, isValidTracking, normalizeTracking, type SerialIssue, type Carrier, type PackageSource } from '@recycle-erp/shared';
+import { synthesizePartNumber, chipMarkingCanon, normSellPrice, CARRIERS, PACKAGE_SOURCES, isValidTracking, normalizeTracking, type SerialIssue, type Carrier, type PackageSource } from '@recycle-erp/shared';
 import { type Env, type LineCategory, type User } from '../../types';
 import { normPaypalTxnId } from '../../ai/paypal';
 
@@ -29,12 +29,12 @@ export function resolvePartNumber(
   return synthesizePartNumber(category ?? '', l);
 }
 
-// Chip markings are die codes, always printed upper-case on the module; case
-// noise (typed or OCR'd) would fork one chip into two spellings, so the column
-// is normalised at every write. `''` passes through untouched — PATCH uses it
-// as the explicit "clear this field" sentinel, distinct from undefined/"keep".
-export function canonChipNumber(v: string | null | undefined): string | null {
-  return v == null ? null : v.trim().toUpperCase();
+// Every write of chip_number goes through here (chipMarkingCanon has the rule;
+// the brand decides whether a Micron marking is cut to its die code). `''`
+// passes through untouched — PATCH uses it as the explicit "clear this field"
+// sentinel, distinct from undefined/"keep".
+export function canonChipNumber(v: string | null | undefined, brand: string | null | undefined): string | null {
+  return v == null ? null : chipMarkingCanon(v, brand);
 }
 
 // "sell order SO-4056" / "sell orders SO-4056, SO-4057" for a committed-line
@@ -398,7 +398,7 @@ export function newLineRow(
     speed: l.speed ?? null, interface: l.interface ?? null, form_factor: l.formFactor ?? null,
     description: l.description ?? null, item_type: l.itemType?.trim() || null,
     part_number: resolvePartNumber(cat, l), serial_number: l.serialNumber ?? null,
-    chip_number: canonChipNumber(l.chipNumber), condition: l.condition ?? 'Pulled — Tested',
+    chip_number: canonChipNumber(l.chipNumber, l.brand), condition: l.condition ?? 'Pulled — Tested',
     qty: d.qty, unit_cost: d.unitCost, sell_price: normSellPrice(l.sellPrice), status: d.status,
     scan_image_id: l.scanImageId ?? null, scan_confidence: l.scanConfidence ?? null,
     position: d.position, health: l.health ?? null, rpm: l.rpm ?? null,
@@ -490,6 +490,8 @@ export function changesMaterialField(
   for (const patch of body.lines ?? []) {
     const row = linesBefore.get(patch.id);
     if (!row) continue;
+    // A chip lands by the brand the row ends up with, as the UPDATE writes it.
+    const brandAfter = patch.brand !== undefined ? specVal(patch.brand) : (row.brand as string | null);
     for (const [key, value] of Object.entries(patch)) {
       if (key === 'id') continue;
       const col = key.replace(/[A-Z]/g, m => `_${m.toLowerCase()}`);
@@ -501,7 +503,7 @@ export function changesMaterialField(
       // Comparing the raw value read an echoed null as a change and sent the
       // order back to Draft for an edit that never landed.
       if (!LINE_SENTINEL_COLS.has(col) && value == null) continue;
-      const landed = col === 'chip_number' ? (canonChipNumber(value as string | null) || null)
+      const landed = col === 'chip_number' ? (canonChipNumber(value as string | null, brandAfter) || null)
         : col === 'sell_price' ? normSellPrice(value as number | null)
         : LINE_SPEC_TEXT_COLS.has(col) ? specVal(value as string | null)
         : value;
