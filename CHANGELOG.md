@@ -17,6 +17,31 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.233.1] - 2026-10-09
+
+Micron lines that never had a die code recorded now carry one, looked up from
+their part number (RS-214).
+
+### Fixed
+
+- **Chip # filled in for Micron lines that had none.** RS-209 cut Micron chip
+  markings to the die code, but 164 live lines had no marking at all: a blank
+  Chip # or junk (`1`, `DDR5`, `MICRON`, `NA`, a part number in the wrong
+  field).
+  - Migration 0168 fills those lines' dies across 104 part numbers. The die
+    comes from our own sticks of that part, from the part number's decoded
+    die revision and speed bin, or from Micron's FBGA decoder.
+  - On a prod copy, that is 140 lines.
+  - A line that already holds a 3-letter code, another brand, and a part with
+    more than one plausible die are left alone. That covers 20 part numbers
+    for a stick re-check: J-revision modules that ship either J or E die,
+    and parts whose own sticks disagree.
+- **Six misread die codes corrected.** TBG, PFX, RGC, OBJ, MFL and WDO are
+  codes Micron's decoder places on no DDR DIMM. Each becomes the die its
+  part number decodes to.
+- The lookup sheet, with source and confidence per part number and no stock
+  data, is in `docs/tickets/assets/RS-214-micron-die-lookup.csv`.
+
 ## [1.233.0] - 2026-10-09
 
 A RAM or SSD line's spec selects now cascade, so a line can't hold specs that
