@@ -54,6 +54,10 @@ export function isSellableLineStatus(status: string): boolean {
   return (SELLABLE_LINE_STATUSES as readonly string[]).includes(status);
 }
 
+export function sellableLineStatuses(): string[] {
+  return [...SELLABLE_LINE_STATUSES];
+}
+
 type SqlFragment = postgres.PendingQuery<postgres.Row[]>;
 
 /**

@@ -155,6 +155,30 @@ describe('POST /api/inventory/transfer — creates a transfer order', () => {
       { from_warehouse_id: string | null };
     expect(ord.from_warehouse_id).toBeNull();
   });
+
+  it('a partial move\'s clone keeps the source\'s Chip #', async () => {
+    const { token } = await loginAs(ALEX);
+    const db = getTestDb();
+    const src = (await db`
+      SELECT l.id, COALESCE(l.warehouse_id, o.warehouse_id) AS wh
+      FROM order_lines l JOIN orders o ON o.id = l.order_id
+      WHERE l.status IN ('Reviewing','Done') AND o.archived_at IS NULL
+        AND COALESCE(l.warehouse_id, o.warehouse_id) IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM sell_order_lines sl WHERE sl.inventory_id = l.id)
+      LIMIT 1
+    `)[0] as { id: string; wh: string };
+    await db`UPDATE order_lines SET qty = 5, chip_number = 'VPP' WHERE id = ${src.id}`;
+    const to = WAREHOUSES.find((w) => w !== src.wh)!;
+    const r = await api<{ ok: true; transferOrderId: string }>(
+      'POST', '/api/inventory/transfer',
+      { token, body: { confirmDrafts: true, toWarehouseId: to, lines: [{ id: src.id, qty: 2 }] } },
+    );
+    expect(r.status).toBe(200);
+    const clone = (await db`
+      SELECT chip_number, qty FROM order_lines WHERE transfer_order_id = ${r.body.transferOrderId}
+    `)[0] as { chip_number: string | null; qty: number };
+    expect(clone).toEqual({ chip_number: 'VPP', qty: 2 });
+  });
 });
 
 describe('GET /api/inventory/transfer-orders', () => {

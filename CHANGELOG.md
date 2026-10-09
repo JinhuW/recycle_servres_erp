@@ -17,6 +17,44 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.237.1] - 2026-10-09
+
+Fixes from the reviews before the v1.237 release (RS-215). `/code-review high`
+ran over dev against main (RS-207 to RS-212) and over every PR that landed
+while the review was going on: RS-214's Micron lookup, RS-213's three parts
+and their fix rounds, and RS-217. Each finding was checked against the code,
+and each one about data against prod, read-only. RS-213 and RS-217 fixed their
+own findings before merging. The four below were left on dev; the rest are
+recorded in the ticket with why they stay.
+
+### Fixed
+
+- **Select all holds each lot to the filter chips.** On Inventory, a brand,
+  rank or other attribute chip keeps a product when *any* of its lots matches,
+  and select-all took every sellable lot of such a product. A lot typed with
+  another brand, inside a product that matched, was selected under a brand
+  chip that excludes it, and went on to the export or the sell order. Each lot
+  is now held to the warehouse and every chip on its own.
+- **A lot that went stale since the list loaded stays out of select-all.**
+  Select-all fetches the rows for lots past the 200 listed products, and that
+  fetch returned any lot it was asked for. A lot sold, archived or emptied in
+  the meantime joined the selection and its export. Only lots that are still
+  sellable come back now.
+- **The grouped Inventory view reads up to 5000 lines.** It stopped at the
+  newest 2000. With Show sold on, prod's lines already pass that, so the oldest
+  stock dropped out of the list and out of select-all without a word. The cap
+  is now the selection ceiling, and reaching it logs a warning.
+- **A partial transfer keeps the Chip #.** The lot split off to another
+  warehouse was written without it, though the Chip # is what Micron memory is
+  priced by since v1.231.0.
+
+### Changed
+
+- The sell-order price-template test pins the two lots it picks to RAM. The
+  packing list places a line by its lot's category, and the seed's lots come
+  in any category, so the by-PO tab test failed most runs that drew a non-RAM
+  lot.
+
 ## [1.237.0] - 2026-10-09
 
 The Rank list on desktop memory offered no x4 ranks, so a 2Rx4 desktop module

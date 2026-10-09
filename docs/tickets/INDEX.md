@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-217](./RS-217-rank-list-offers-x4-on-desktop-memory-and-ssds-gain.md) | done | bug | P2 | Rank list offers x4 on Desktop memory, and SSDs gain a 3.5in form | — |
+| [RS-217](./RS-217-rank-list-offers-x4-on-desktop-memory-and-ssds-gain.md) | done | bug | P2 | Rank list offers x4 on Desktop memory, and SSDs gain a 3.5in form | 1.237.0 |
+| [RS-215](./RS-215-pre-release-review-fixes-for-the-v1-237-release.md) | in-progress | bug | P1 | Pre-release review fixes for the v1.237 release | — |
 | [RS-214](./RS-214-fill-micron-chip-from-the-die-code-lookup.md) | done | task | P2 | Fill Micron Chip # from the die-code lookup | 1.233.1 |
 | [RS-213](./RS-213-a-po-row-is-a-product-and-its-is-a-stable-id-on-pos.md) | done | story | P2 | A PO row is a product, and its # is a stable id on POs and sell orders | 1.234.0 |
 | [RS-212](./RS-212-inventory-lots-table-shows-each-lot-s-line-next-to-i.md) | done | story | P2 | Inventory lots table shows each lot's line # next to its PO | 1.232.0 |

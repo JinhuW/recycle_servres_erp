@@ -658,8 +658,12 @@ describe('GET /api/sell-orders/:id/packing-list?groupBy=po', () => {
         SELECT order_id FROM order_lines WHERE id = ${line.id}`;
       if (!picked.some(p => p.po === po)) picked.push({ id: line.id, po });
     }
-    // The packing list places a line by where its lot is, so pin both lots.
-    await sql`UPDATE order_lines SET warehouse_id = 'WH-LA1' WHERE id IN ${sql(picked.map(p => p.id))}`;
+    // The packing list places a line by its lot's warehouse and category, not
+    // the sell line's, and the seed's lots come in any category: pin both.
+    await sql`
+      UPDATE order_lines SET warehouse_id = 'WH-LA1', category = 'RAM'
+       WHERE id IN ${sql(picked.map(p => p.id))}
+    `;
     return picked.sort((a, b) => a.po.localeCompare(b.po, undefined, { numeric: true }));
   }
 

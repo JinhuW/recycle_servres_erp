@@ -8,7 +8,9 @@ import { canonPartCol, canonPartArg } from '../lib/part-number';
 import { invLabel } from '../lib/inventoryLabel';
 import {
   committedClaimsByLine, committedQtySql, isSellableLineStatus, openSellStatuses, proposalSellStatuses,
+  sellableLineStatuses,
 } from '../lib/sellCommitment';
+import { log } from '../lib/log';
 import { lockOrdersForLinesTx } from '../services/orderLocks';
 import { mergedSpec, specVal, validateLineInput } from '../lib/orderInput';
 import { buildXlsxWorkbook, xlsxResponse, datedFilename, type XlsxColumn } from '../lib/xlsx';
@@ -231,6 +233,18 @@ function selectionIds(raw: readonly unknown[]): string[] {
   return [...new Set(raw.filter((id): id is string => typeof id === 'string' && UUID_RE.test(id)))];
 }
 
+// A selection's ids, or the refusal for one the selection routes can't take.
+function parseSelection(
+  raw: readonly unknown[],
+): { ids: string[] } | { error: string; status: 400 | 413 } {
+  const ids = selectionIds(raw);
+  if (raw.length > 0 && ids.length === 0) return { error: 'Invalid ids', status: 400 };
+  if (ids.length > SELECTION_MAX) {
+    return { error: `at most ${SELECTION_MAX} lots per selection`, status: 413 };
+  }
+  return { ids };
+}
+
 // List inventory with the same filters as the desktop screen.
 inventory.get('/', async (c) => {
   const u = c.var.user;
@@ -254,20 +268,22 @@ inventory.get('/', async (c) => {
 // product groups past the grouped view's cap, which the page never loaded, and
 // the bulk actions need each lot's row. POST because a few hundred uuids
 // overflow a query string. Ids bypass the list filters, never the scope: the
-// route is manager-only, as is every bulk action that reads it.
+// route is manager-only, as is every bulk action that reads it. Only lots that
+// are still sellable come back — one sold, archived or emptied since the list
+// loaded has no row, and select-all leaves it out.
 inventory.post('/rows', async (c) => {
   const u = c.var.user;
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const body = (await c.req.json().catch(() => null)) as { ids?: unknown } | null;
   if (!Array.isArray(body?.ids)) return c.json({ error: 'ids must be an array' }, 400);
-  const ids = selectionIds(body.ids);
-  if (body.ids.length > 0 && ids.length === 0) return c.json({ error: 'Invalid ids' }, 400);
-  if (ids.length > SELECTION_MAX) {
-    return c.json({ error: `at most ${SELECTION_MAX} lots per selection` }, 413);
-  }
-  if (ids.length === 0) return c.json({ items: [] });
+  const sel = parseSelection(body.ids);
+  if ('error' in sel) return c.json({ error: sel.error }, sel.status);
+  if (sel.ids.length === 0) return c.json({ items: [] });
   const sql = getDb(c.env);
-  const items = await selectInventoryRows(sql, sql`l.id = ANY(${ids}::uuid[])`, null);
+  const items = await selectInventoryRows(sql, sql`
+    l.id = ANY(${sel.ids}::uuid[]) AND l.status = ANY(${sellableLineStatuses()})
+      AND ${hasUnitsFrag(sql)} AND o.archived_at IS NULL
+  `, null);
   return c.json({ items });
 });
 
@@ -362,13 +378,9 @@ inventory.on(['GET', 'POST'], '/export', async (c) => {
   } else {
     rawIds = (c.req.query('ids') ?? '').split(',').filter(Boolean);
   }
-  const ids = selectionIds(rawIds);
-  if (rawIds.length > 0 && ids.length === 0) {
-    return c.json({ error: 'Invalid ids' }, 400);
-  }
-  if (ids.length > SELECTION_MAX) {
-    return c.json({ error: `at most ${SELECTION_MAX} lots per selection` }, 413);
-  }
+  const sel = parseSelection(rawIds);
+  if ('error' in sel) return c.json({ error: sel.error }, sel.status);
+  const { ids } = sel;
   const whereFrag = ids.length ? sql`l.id IN ${sql(ids)}` : inventoryWhereFrag(c, sql, u);
 
   // Grouped mode collapses lines by canonical part number into one row each,
@@ -865,7 +877,10 @@ inventory.get('/products', async (c) => {
   const attrs = parseAttrFilters((k) => c.req.query(k));
   const hidePending = c.req.query('hidePending') === '1';
 
-  const RAW_CAP = 2000;
+  // The cap is all the working set select-all sees, so it has to stay above
+  // the matching stock — Show sold already passes 2000 lines — and no higher
+  // than a selection /rows and /export accept.
+  const RAW_CAP = SELECTION_MAX;
   const GROUP_CAP = 200;
 
   const scopeFrag    = isManager ? sql`TRUE` : sql`o.user_id = ${u.id}`;
@@ -928,6 +943,7 @@ inventory.get('/products', async (c) => {
     ORDER BY l.created_at DESC
     LIMIT ${RAW_CAP}
   `) as unknown as Row[];
+  if (rows.length === RAW_CAP) log.warn('inventory products hit RAW_CAP', { cap: RAW_CAP });
 
   const groups = new Map<string, Row[]>();
   const order: string[] = [];
@@ -996,14 +1012,15 @@ inventory.get('/products', async (c) => {
   const filteredOrder = order.filter((k) => applyAll(groups.get(k)!));
 
   // What the desktop's select-all picks: every sellable lot the filters match,
-  // including groups past GROUP_CAP that the page never lists. Warehouse is a
-  // group-level match above ("any lot is there"), so it is re-applied per lot.
+  // including groups past GROUP_CAP that the page never lists. Warehouse and
+  // the attribute chips match a group when any lot does, so each lot is held to
+  // them on its own: a mis-typed lot in a matching group stays out.
   const sellableIds: string[] = [];
   if (isManager) {
     for (const key of filteredOrder) {
       for (const l of groups.get(key)!) {
         if (!isSellableLineStatus(l.status)) continue;
-        if (warehouse && l.warehouse_id !== warehouse) continue;
+        if (!applyAll([l])) continue;
         sellableIds.push(l.id);
       }
     }
@@ -1507,6 +1524,7 @@ inventory.post('/transfer', async (c) => {
     description: string | null;
     item_type: string | null;
     part_number: string | null;
+    chip_number: string | null;
     condition: string;
     qty: number;
     unit_cost: string | number;
@@ -1544,7 +1562,7 @@ inventory.post('/transfer', async (c) => {
     const sources = (await tx`
       SELECT l.id, l.order_id, l.category, l.brand, l.capacity, l.generation, l.type, l.classification,
              l.rank, l.speed, l.interface, l.form_factor, l.description, l.item_type, l.part_number,
-             l.condition, l.qty, l.unit_cost, l.sell_price, l.status, l.position, l.product_no,
+             l.chip_number, l.condition, l.qty, l.unit_cost, l.sell_price, l.status, l.position, l.product_no,
              l.health, l.rpm, l.scan_image_id, l.scan_confidence,
              COALESCE(l.warehouse_id, o.warehouse_id) AS effective_wh,
              o.archived_at
@@ -1656,7 +1674,7 @@ inventory.post('/transfer', async (c) => {
         const inserted = (await tx`
           INSERT INTO order_lines (
             order_id, category, brand, capacity, generation, type, classification, rank, speed,
-            interface, form_factor, description, item_type, part_number, condition,
+            interface, form_factor, description, item_type, part_number, chip_number, condition,
             qty, unit_cost, sell_price, status,
             scan_image_id, scan_confidence, position, product_no,
             health, rpm, warehouse_id, transfer_order_id
@@ -1664,7 +1682,7 @@ inventory.post('/transfer', async (c) => {
           VALUES (
             ${s.order_id}, ${s.category}, ${s.brand}, ${s.capacity}, ${s.generation}, ${s.type},
             ${s.classification}, ${s.rank}, ${s.speed}, ${s.interface},
-            ${s.form_factor}, ${s.description}, ${s.item_type}, ${s.part_number}, ${s.condition},
+            ${s.form_factor}, ${s.description}, ${s.item_type}, ${s.part_number}, ${s.chip_number}, ${s.condition},
             ${r.qty}, ${s.unit_cost}, ${s.sell_price}, 'In Transit',
             ${s.scan_image_id}, ${s.scan_confidence}, ${s.position}, ${s.product_no},
             ${s.health}, ${s.rpm}, ${toWarehouseId}, ${transferOrderId}

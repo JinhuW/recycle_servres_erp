@@ -412,10 +412,10 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   }, [selectedItems]);
 
   // "Select all" targets every sellable lot the filters match — the server's
-  // list, which reaches past the groups the page shows. Without it (an older
-  // backend), the sellable lots of the listed groups, narrowed to the active
-  // warehouse: the one filter the backend applies at group level ("any lot
-  // matches") rather than per lot.
+  // list, which reaches past the groups the page shows and holds each lot to
+  // the warehouse and attribute chips on its own. Without it (an older
+  // backend), the sellable lots of the listed groups, narrowed per lot to the
+  // active warehouse only.
   const filterSellableIds = useMemo(() => {
     if (sellableIds) return sellableIds;
     const ids: string[] = [];
@@ -458,7 +458,8 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     api.post<{ items: InventoryRow[] }>('/api/inventory/rows', { ids: [...missing] })
       .then(r => {
         const fetched = new Map(r.items.map(row => [row.id, row]));
-        // A lot gone since the list loaded comes back without a row; it stays out.
+        // A lot sold, archived or emptied since the list loaded comes back
+        // without a row; it stays out.
         // Selected before remembered: the remember-effect keeps only rows whose
         // ids are selected, and this merge lands on whatever it left.
         setSelected(prev => {

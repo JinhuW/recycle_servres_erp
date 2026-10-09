@@ -191,6 +191,25 @@ describe('select-all past the grouped cap', () => {
     expect(r.body.sellable_ids).toHaveLength(doneIds.length - 1);
   });
 
+  it('holds each lot to the attribute chips, not just its group', async () => {
+    // Two lots of one product (same part number), one with a brand typed
+    // differently: the search still finds it, the exact brand chip does not.
+    const [a, b] = doneIds.slice(2, 4);
+    const sql = getTestDb();
+    await sql`
+      UPDATE order_lines SET brand = ${`${BRAND}-X`},
+             part_number = (SELECT part_number FROM order_lines WHERE id = ${a})
+       WHERE id = ${b}
+    `;
+    const { token } = await loginAs(ALEX);
+    const r = await api<Products>(
+      'GET', `/api/inventory/products?q=${BRAND}&brand=${BRAND}`, { token });
+    expect(r.status).toBe(200);
+    expect(r.body.sellable_ids).toContain(a);
+    expect(r.body.sellable_ids).not.toContain(b);
+    expect(r.body.sellable_ids).toHaveLength(doneIds.length - 1);
+  });
+
   it('leaves sellable_ids off a purchaser response', async () => {
     const { token } = await loginAs(MARCUS);
     const r = await api<Products>('GET', `/api/inventory/products?q=${BRAND}`, { token });
@@ -209,6 +228,36 @@ describe('select-all past the grouped cap', () => {
       expect(row.po_line_no).toEqual(expect.any(Number));
       expect(row.committed_qty).toBe(0);
     }
+  });
+
+  it('leaves out of POST /rows a lot sold, archived or emptied since the list loaded', async () => {
+    const { token } = await loginAs(ALEX);
+    const sql = getTestDb();
+    const [sold, emptied, kept] = doneIds.slice(2, 5);
+    await sql`UPDATE order_lines SET status = 'Sold' WHERE id = ${sold}`;
+    await sql`UPDATE order_lines SET qty = 0 WHERE id = ${emptied}`;
+
+    const other = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: {
+        warehouseId: 'WH-LA1', paypalTxnId: 'TESTPAYTXN0000001', category: 'RAM',
+        lines: [{
+          category: 'RAM', brand: BRAND, capacity: '32GB', type: 'DDR4', classification: 'RDIMM',
+          speed: '3200', partNumber: 'SELALL-ARCH', condition: 'Pulled — Tested', qty: 1, unitCost: 50,
+        }],
+      },
+    });
+    expect(other.status).toBe(201);
+    const [archived] = (await sql<{ id: string }[]>`
+      UPDATE order_lines SET status = 'Done' WHERE order_id = ${other.body.id} RETURNING id
+    `).map((row) => row.id);
+    await sql`UPDATE orders SET archived_at = NOW() WHERE id = ${other.body.id}`;
+
+    const r = await api<{ items: Row[] }>('POST', '/api/inventory/rows', {
+      token, body: { ids: [sold, emptied, archived, kept, transitId] },
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.items.map((i) => i.id)).toEqual([kept]);
   });
 
   it('refuses POST /rows to purchasers and rejects malformed or oversized selections', async () => {
