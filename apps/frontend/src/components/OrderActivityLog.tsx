@@ -4,7 +4,7 @@ import { fmtDate, relTime, fmtUSD } from '../lib/format';
 import { useT } from '../lib/i18n';
 import {
   createdEventParts, linePhotoEventDetail, managerChangedLine, ownerChangedLine, changeLine, renderValue,
-  LIFECYCLE_LABEL, type Translate,
+  LIFECYCLE_LABEL, productsCount, type Translate,
 } from '../lib/orderPresentation';
 import type { OrderEvent, OrderEventChange } from '../lib/types';
 import type { OrderEvents } from '../lib/useOrderEvents';
@@ -89,8 +89,8 @@ const TONE_FG: Record<Tone, string> = {
 
 // A product event names the product by its # (events since v1.234.0 carry
 // it) and its part number.
-const productRef = (d: Record<string, unknown>): string =>
-  [typeof d.no === 'number' ? `#${d.no}` : null, (d.partNumber as string) ?? '(no part number)']
+const productRef = (d: Record<string, unknown>, t: Translate): string =>
+  [typeof d.no === 'number' ? `#${d.no}` : null, (d.partNumber as string) ?? t('acNoPartNumber')]
     .filter(Boolean).join(' ');
 
 function summary(ev: OrderEvent, locale: string, t: Translate): { title: string; lines: string[] } {
@@ -107,7 +107,7 @@ function summary(ev: OrderEvent, locale: string, t: Translate): { title: string;
       const total = (d.totalCost as number) ?? 0;
       return {
         title: 'Submitted for review',
-        lines: [`${t(lineCount === 1 ? 'acNLine' : 'acNLines', { n: lineCount })} · ${qty} units · ${fmtUSD(total, locale)}`],
+        lines: [`${productsCount(t, lineCount)} · ${qty} units · ${fmtUSD(total, locale)}`],
       };
     }
     case 'advanced': {
@@ -127,16 +127,16 @@ function summary(ev: OrderEvent, locale: string, t: Translate): { title: string;
     case 'line_added': {
       const qty = (d.qty as number) ?? 0;
       const unitCost = (d.unitCost as number) ?? 0;
-      return { title: `${t('historyAddedLine')} ${productRef(d)}`, lines: [`Qty ${qty} @ ${fmtUSD(unitCost, locale)}`] };
+      return { title: `${t('historyAddedLine')} ${productRef(d, t)}`, lines: [`Qty ${qty} @ ${fmtUSD(unitCost, locale)}`] };
     }
     case 'line_removed': {
       const qty = (d.qty as number) ?? 0;
       const unitCost = (d.unitCost as number) ?? 0;
-      return { title: `${t('historyRemovedLine')} ${productRef(d)}`, lines: [`Was qty ${qty} @ ${fmtUSD(unitCost, locale)}`] };
+      return { title: `${t('historyRemovedLine')} ${productRef(d, t)}`, lines: [`Was qty ${qty} @ ${fmtUSD(unitCost, locale)}`] };
     }
     case 'line_edited': {
       const changes = (d.changes as OrderEventChange[]) ?? [];
-      return { title: `${t('historyEditedLine')} ${productRef(d)}`, lines: changes.map(c => changeLine(c, locale)) };
+      return { title: `${t('historyEditedLine')} ${productRef(d, t)}`, lines: changes.map(c => changeLine(c, locale)) };
     }
     case 'meta_changed': {
       const changes = (d.changes as OrderEventChange[]) ?? [];

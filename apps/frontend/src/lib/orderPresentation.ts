@@ -58,6 +58,10 @@ export const signedUSD0 = (n: number, locale = 'en-US'): string =>
  * and holds no lines, and printing those absences gave "null · 0 lines · 0
  * units". Whatever the event doesn't know is left out.
  */
+// "N product(s)", the count the PO timeline and the activity page show.
+export const productsCount = (t: Translate, n: number): string =>
+  t(n === 1 ? 'acNLine' : 'acNLines', { n });
+
 export function createdEventParts(detail: Record<string, unknown>, t: Translate): string[] {
   const category = typeof detail.category === 'string' ? detail.category : null;
   // Rows synthesised by migration 0076 counted their lines at backfill time
@@ -71,7 +75,7 @@ export function createdEventParts(detail: Record<string, unknown>, t: Translate)
   const behalf = typeof detail.onBehalfOfName === 'string' ? detail.onBehalfOfName : null;
   return [
     category,
-    lineCount > 0 ? t(lineCount === 1 ? 'acNLine' : 'acNLines', { n: lineCount }) : null,
+    lineCount > 0 ? productsCount(t, lineCount) : null,
     qty > 0 ? t(qty === 1 ? 'acNUnit' : 'acNUnits', { n: qty }) : null,
     behalf ? t('acCreatedFor', { name: behalf }) : null,
   ].filter((p): p is string => !!p);

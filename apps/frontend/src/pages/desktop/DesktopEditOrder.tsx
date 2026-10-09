@@ -23,7 +23,7 @@ import {
 import { editLineToPatch, orderLineToEditLine, type EditLine } from './submit/editLine';
 import { DupPartDialog } from './submit/DupPartDialog';
 import { ProductNo } from './submit/ProductNo';
-import { lineRef, productCount } from '../../lib/productNo';
+import { lineRef, newOrdinals, productCount } from '../../lib/productNo';
 import { AddLineMenu } from './submit/AddLineMenu';
 import { OrderCategoryChips } from '../../components/OrderCategoryChips';
 import {
@@ -519,6 +519,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
 
   const dupGroups = useMemo(() => findDuplicatePartNumbers(lines), [lines]);
   const products = useMemo(() => productCount(lines), [lines]);
+  const newNos = useMemo(() => newOrdinals(lines), [lines]);
   // Lookup table keyed by line index → the other lines sharing its part #.
   // Drives the inline drawer warning.
   const dupByIdx = useMemo(() => duplicatesByIndex(dupGroups, lines), [dupGroups, lines]);
@@ -1026,7 +1027,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
 
   const save = async () => {
     const issues = lines
-      .map((l, i) => ({ line: lineRef(l, t), label: l.partNumber || itemType(l), issue: serialIssueFor(l) }))
+      .map((l, i) => ({ line: lineRef(l, t, newNos[i]), label: l.partNumber || itemType(l), issue: serialIssueFor(l) }))
       .filter((x): x is SerialLineIssue => x.issue !== null);
     if (issues.length) {
       takeBackMove();
@@ -1058,7 +1059,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     if (l._id && !l._dirty) return;
     const issue = serialIssueFor(l);
     if (issue) {
-      setSerialIssues([{ line: lineRef(l, t), label: l.partNumber || itemType(l), issue }]);
+      setSerialIssues([{ line: lineRef(l, t, newNos[i]), label: l.partNumber || itemType(l), issue }]);
       // Thrown so the drawer keeps itself open for the fix.
       throw new Error(t('serialCheckTitle'));
     }
@@ -1363,7 +1364,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                     }}
                     onClick={() => setActiveIdx(i)}
                   >
-                    <td className="mono" style={{ color: isActive ? 'var(--accent-strong)' : 'var(--fg-subtle)', fontWeight: isActive ? 600 : 400 }}><ProductNo no={l.no} /></td>
+                    <td className="mono" style={{ color: isActive ? 'var(--accent-strong)' : 'var(--fg-subtle)', fontWeight: isActive ? 600 : 400 }}><ProductNo no={l.no} newNo={newNos[i]} /></td>
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         {(() => {
@@ -1809,7 +1810,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
           canRemove={lines.length > 1}
           onConfirmLine={() => confirmLine(activeIdx)}
           onConfirmError={showErrorDialog}
-          duplicateOnLines={dupByIdx.get(activeIdx)?.map(j => lineRef(lines[j], t))}
+          duplicateOnLines={dupByIdx.get(activeIdx)?.map(j => lineRef(lines[j], t, newNos[j]))}
           readOnly={!canEditOrder}
           sellPriceEditable={canEditSellPrice}
           missingFields={missingNamesFor(lines[activeIdx])}
@@ -1971,7 +1972,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       {dupConfirm && (
         <DupPartDialog
           groups={dupConfirm}
-          refOf={j => lineRef(lines[j], t)}
+          refOf={j => lineRef(lines[j], t, newNos[j])}
           busy={saving}
           confirmTone="primary"
           confirmLabel={t('dupPartSaveAnyway')}

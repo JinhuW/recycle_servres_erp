@@ -615,9 +615,10 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     acPhotoAdded: 'Photo added to product',
     acPhotoRemoved: 'Photo removed from product',
     acArchivedLegacy: 'Hidden from the default order list',
-    acArchivedLines: '{n} products taken out of stock',
-    acArchivedRemovedFromSo: '{n} products removed from sell orders',
-    acUnarchivedLines: '{n} products back in stock',
+    acArchivedLines: '{n} lots taken out of stock',
+    acNoPartNumber: '(no part number)',
+    acArchivedRemovedFromSo: '{n} lots removed from sell orders',
+    acUnarchivedLines: '{n} lots back in stock',
     acUnarchivedLegacy: 'Restored to the active list',
     acLegendTitle: 'Reading the stripe.',
     acLegendBody: 'The bar at the start of every row names the ledger the event came from. Scroll and the four ledgers braid together; filter to one area and the braid collapses to a single colour.',
@@ -1896,7 +1897,10 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     // A PO product's # is given on save; until then a line is named and
     // numbered as new.
     lineRefNew: 'New product',
-    lineRefNewNamed: 'New product {name}',
+    lineRefNewNamed: 'New product ({name})',
+    lineRefNewN: 'New product {n}',
+    lineRefNewNNamed: 'New product {n} ({name})',
+    lineNoNewN: 'new {n}',
     lineNoNew: 'new',
     lineNoNewTitle: 'Gets its # when saved',
 

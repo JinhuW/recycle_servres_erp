@@ -23,6 +23,7 @@ import { confirmDiscard, useUnsavedGuard } from '../lib/unsavedGuard';
 import { OrderProductsBody, itemLabel } from './OrderProductsBody';
 import { handleFetchError, showErrorDialog } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
+import { productCount } from '../lib/productNo';
 import { profitTone } from '../lib/orderPresentation';
 import { isPricedSellPrice } from '@recycle-erp/shared';
 import { derivePoPermissions, type TakeoverAnswer } from '../lib/poPermissions';
@@ -609,7 +610,9 @@ export function OrderDetail({
 
   const doneMeta = order.statusMeta?.['Done'];
 
-  const itemsUnits = `${order.lines.length} ${order.lines.length === 1 ? t('item') : t('items')} · ${totals.qty} ${totals.qty === 1 ? t('unit') : t('units2')}`;
+  // Products by #, as desktop counts them: a transfer's split is one product.
+  const productTotal = productCount(order.lines);
+  const itemsUnits = `${productTotal} ${productTotal === 1 ? t('item') : t('items')} · ${totals.qty} ${totals.qty === 1 ? t('unit') : t('units2')}`;
   // The id is the title on both screens: it is what the purchaser searched
   // for and what they will say out loud. The stage sits under it, with
   // "locked" spelled out where the page used to hide the id behind "View
@@ -663,7 +666,7 @@ export function OrderDetail({
       const rows: typeof readiness = [{
         key: 'products', met: products.ok, target: 'products',
         label: products.ok
-          ? `${order.lines.length} ${order.lines.length === 1 ? t('item') : t('items')} · ${fmtUSD(cost.goods, locale)}`
+          ? `${productTotal} ${productTotal === 1 ? t('item') : t('items')} · ${fmtUSD(cost.goods, locale)}`
           : t(products.needKeys[0]),
       }, {
         key: 'delivery', met: deliveryItem.ok, target: 'delivery',
@@ -1146,7 +1149,7 @@ export function OrderDetail({
               {t('costBreakdown')}
             </div>
             <div style={{ fontSize: 11, color: 'var(--fg-subtle)', fontVariantNumeric: 'tabular-nums' }}>
-              {totals.qty} {totals.qty === 1 ? t('unit') : t('units2')} · {order.lines.length} {order.lines.length === 1 ? t('item') : t('items')}
+              {totals.qty} {totals.qty === 1 ? t('unit') : t('units2')} · {productTotal} {productTotal === 1 ? t('item') : t('items')}
             </div>
           </div>
 

@@ -51,13 +51,20 @@ the same thing.
   - The vendor bid sheet is untouched, since it is an import format.
 - **MCP.** Descriptions say what `sourceLineNo` and `lineCount` mean now. The
   wire names are unchanged.
-- **Unsaved products are named by what they are.** Messages call a product
-  that isn't saved yet "New product M393A4K40DB3-CWE" (its part number, else
-  its description), not "New product on row 4". The `#` column shows *new*,
-  so no row number is visible to count by.
+- **Unsaved products are numbered where you can see it.** The `#` column
+  reads *new 1*, *new 2*… for products not saved yet, in list order.
+  Messages name them the same way with what they are: "New product 2
+  (M393A4K40DB3-CWE)", where it used to say "Line 4". So two new rows of one
+  part number read apart in the duplicate-part dialog, the drawer, the serial
+  check and the scan toast.
 - **Server messages name the product.** A new PO's errors name the `#` the
-  product will get ("#2: …"). Errors on a product being added name its part
-  number.
+  product will get ("#2: …"). Errors on a product being added say "new
+  product 1 (SSDSC2KB960G8)": the editor sends its unsaved rows in list
+  order.
+- **Counts follow the `#`.** The phone's order header, folds and review count
+  products by `#`, as desktop does. The archive and unarchive entries count
+  lots, because a transfer can split one product into two. The activity page
+  says "1 product", not "1 products".
 - **Fixed:** the transfer manifest's Chinese read "{n} 件 · {n} 件", the unit
   word for a row count. It now says 个批次.
 

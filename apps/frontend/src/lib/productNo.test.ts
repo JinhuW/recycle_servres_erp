@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { lineRef, productCount } from './productNo';
+import { lineRef, newOrdinals, productCount } from './productNo';
 import { findDuplicateLine } from './dupParts';
 import { duplicatesByIndex, findDuplicatePartNumbers, lineBlockerMessages, type Line } from '../pages/desktop/submit/line';
 
@@ -14,6 +14,13 @@ describe('lineRef', () => {
     expect(lineRef({}, t)).toBe('lineRefNew');
     expect(lineRef({ no: null, partNumber: ' M393 ' }, t)).toBe('lineRefNewNamed {"name":"M393"}');
     expect(lineRef({ description: 'PSU 750W' }, t)).toBe('lineRefNewNamed {"name":"PSU 750W"}');
+  });
+
+  it('names an unsaved product by its place among the new rows, which the # column shows', () => {
+    expect(newOrdinals([{ no: 1 }, {}, { no: 3 }, { no: null }])).toEqual([null, 1, null, 2]);
+    expect(lineRef({ partNumber: 'B' }, t, 2)).toBe('lineRefNewNNamed {"n":2,"name":"B"}');
+    expect(lineRef({}, t, 1)).toBe('lineRefNewN {"n":1}');
+    expect(lineRef({ no: 4 }, t, null)).toBe('#4');
   });
 });
 
@@ -69,7 +76,7 @@ describe('lineBlockerMessages', () => {
     const msgs = lineBlockerMessages(lines, t, () => false, () => 'Brand');
     expect(msgs).toEqual([
       'subMissingFieldsLine {"line":"#5","fields":"Brand"}',
-      'subMissingFieldsLine {"line":"lineRefNew","fields":"Brand"}',
+      'subMissingFieldsLine {"line":"lineRefNewN {\\"n\\":1}","fields":"Brand"}',
     ]);
   });
 });

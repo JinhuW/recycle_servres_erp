@@ -387,8 +387,8 @@ function advanceRefusedResponse(
       }, 409);
     case 'committedLines':
       return c.json(committedLinesBody(c.var.user, outcome.offendingLineIds, outcome.sellOrderIds,
-        `Lines committed to ${describeSellOrders(outcome.sellOrderIds)} — cancel those sell orders first.`,
-        'Lines in this order are on open sell orders — a manager has to move it.'), 409);
+        `Products committed to ${describeSellOrders(outcome.sellOrderIds)} — cancel those sell orders first.`,
+        'Products in this order are on open sell orders — a manager has to move it.'), 409);
     case 'transferClaimed':
       return c.json({
         error: 'Products are out on an open transfer order — receive or discard that transfer first.',

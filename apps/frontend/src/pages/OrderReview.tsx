@@ -6,6 +6,7 @@ import { SerialNumbers } from '../components/SerialNumbers';
 import { useT } from '../lib/i18n';
 import { showErrorDialog } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
+import { newOrdinals, productCount } from '../lib/productNo';
 import type { Category, DraftLine } from '../lib/types';
 import { addableCategories, categoryTone } from '../lib/lookups';
 
@@ -60,6 +61,8 @@ export function OrderReview({
   const { t, locale } = useT();
   const [submitting, setSubmitting] = useState(false);
   const totalQty = lines.reduce((a, l) => a + l.qty, 0);
+  // What the review list calls each line not saved yet: new 1, new 2…
+  const newNos = newOrdinals(lines);
 
   const submit = async () => {
     setSubmitting(true);
@@ -90,7 +93,7 @@ export function OrderReview({
     <div className="phone-app">
       <PhHeader
         title={t('reviewOrder')}
-        sub={t('itemCount', { n: lines.length, label: lines.length === 1 ? t('item') : t('items'), q: totalQty })}
+        sub={t('itemCount', { n: productCount(lines), label: productCount(lines) === 1 ? t('item') : t('items'), q: totalQty })}
         leading={<button className="ph-icon-btn" onClick={onCancel}><Icon name="chevronLeft" size={16} /></button>}
       />
       <div className="ph-scroll" style={{ paddingBottom: 230 }}>
@@ -117,9 +120,13 @@ export function OrderReview({
               style={{ cursor: 'pointer' }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span className="lb-rank" style={{ width: 22, height: 22, fontSize: l.no != null ? 11 : 9 }}>
-                  {l.no ?? t('lineNoNew')}
-                </span>
+                {l.no != null
+                  ? <span className="lb-rank" style={{ width: 22, height: 22, fontSize: 11 }}>{l.no}</span>
+                  : (
+                    <span className="lb-rank" style={{ minWidth: 22, height: 22, padding: '0 6px', borderRadius: 11, fontSize: 9, whiteSpace: 'nowrap' }}>
+                      {t('lineNoNewN', { n: newNos[i]! })}
+                    </span>
+                  )}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {l.label || '—'}

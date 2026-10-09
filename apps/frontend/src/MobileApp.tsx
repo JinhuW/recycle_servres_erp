@@ -40,7 +40,7 @@ import { confirmDiscard } from './lib/unsavedGuard';
 import type { Category, DraftLine, Notification, Order, OrderLine, OrderSummary, ScanResponse } from './lib/types';
 import { buildOrderSubmit, toAddLine } from './lib/orderSubmit';
 import { findDuplicateLine } from './lib/dupParts';
-import { lineRef } from './lib/productNo';
+import { lineRef, newOrdinals } from './lib/productNo';
 import { lineSpecLabel } from './lib/lineGroups';
 
 // Where a line form goes when it closes. 'detail' is an existing order: the
@@ -420,7 +420,9 @@ function Shell() {
       if (dupLine != null && pn) {
         // Surface the alert immediately. The form still opens so the user
         // can compare against the existing line and decide whether to save.
-        showToast(t('dupPartScanWarn', { pn, line: lineRef(dupLine, t) }), 'error');
+        showToast(t('dupPartScanWarn', {
+          pn, line: lineRef(dupLine, t, newOrdinals(capture.lines)[capture.lines.indexOf(dupLine)]),
+        }), 'error');
       }
     }
     setCapture(c => c.phase === 'camera' ? { ...c, phase: 'form', detected: s } : c);

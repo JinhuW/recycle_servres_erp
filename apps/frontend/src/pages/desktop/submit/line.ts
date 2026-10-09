@@ -3,7 +3,7 @@ import type { LinePhoto } from '../../../lib/linePhotos';
 import { serialIssue } from '@recycle-erp/shared';
 import { lineRequirements } from '../../../lib/lineRequirements';
 import { ramBrandNeedsConfirm } from '../../../lib/scanValidation';
-import { lineRef, productCount } from '../../../lib/productNo';
+import { lineRef, newOrdinals, productCount } from '../../../lib/productNo';
 
 type Translate = (key: string, vars?: Record<string, string | number>) => string;
 
@@ -158,20 +158,20 @@ export function lineBlockerMessages<L extends Line>(
   lineReady: (l: L) => boolean,
   missingNamesFor: (l: L) => string | null,
 ): string[] {
+  const newNos = newOrdinals(lines);
   return lines.flatMap((l, i) => {
+    const line = lineRef(l, t, newNos[i]);
     if (brandConfirmPending(l)) {
-      return [lines.length === 1
-        ? t('subConfirmBrandThis')
-        : t('subConfirmBrandLine', { line: lineRef(l, t) })];
+      return [lines.length === 1 ? t('subConfirmBrandThis') : t('subConfirmBrandLine', { line })];
     }
     if (lineReady(l)) return [];
     const fields = missingNamesFor(l);
     if (fields) {
       return [lines.length === 1
         ? t('subMissingFieldsThis', { fields })
-        : t('subMissingFieldsLine', { line: lineRef(l, t), fields })];
+        : t('subMissingFieldsLine', { line, fields })];
     }
-    return [lines.length === 1 ? t('subFillThisLine') : t('subFillLineN', { line: lineRef(l, t) })];
+    return [lines.length === 1 ? t('subFillThisLine') : t('subFillLineN', { line })];
   });
 }
 
