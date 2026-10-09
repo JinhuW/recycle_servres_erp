@@ -2,13 +2,13 @@
 id: RS-213
 title: A PO row is a product, and its # is a stable id on POs and sell orders
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-09
 reporter: jinhu
 branch: feat/po-product-no
-pr: "#571, #572"
-version:
+pr: "#571, #572, #573"
+version: 1.234.0
 related: [RS-145, RS-184, RS-188, RS-193, RS-206, RS-212]
 ---
 
@@ -55,30 +55,30 @@ plan. Plan: `~/.claude/plans/precious-doodling-haven.md`.
 ## Acceptance criteria
 
 PR 1, PO:
-- [ ] Every PO product carries a stored `#` (`order_lines.product_no`). Existing
+- [x] Every PO product carries a stored `#` (`order_lines.product_no`). Existing
       rows keep the number they showed before (the migration checks this
       against the old rank and refuses to apply otherwise).
-- [ ] A new product takes the PO's next `#`; a removed one leaves a gap; no `#`
+- [x] A new product takes the PO's next `#`; a removed one leaves a gap; no `#`
       is reused.
-- [ ] A partial-transfer split keeps its source's `#`; a discard leaves no gap.
-- [ ] The PO page (desktop and phone), Review mode, the PO list drawer, the
+- [x] A partial-transfer split keeps its source's `#`; a discard leaves no gap.
+- [x] The PO page (desktop and phone), Review mode, the PO list drawer, the
       capture page, the sell-order "From PO-x #n" and inventory all show the
       stored `#`, and an unsaved product shows *new*.
-- [ ] "N products" on a PO counts distinct `#`s.
+- [x] "N products" on a PO counts distinct `#`s.
 
 PR 2, sell order:
-- [ ] Every sell-order product carries a stored `#`. Orders that existed before
+- [x] Every sell-order product carries a stored `#`. Orders that existed before
       keep the `#`s they showed.
-- [ ] A new order numbers its products once, in packing-list order; any later
+- [x] A new order numbers its products once, in packing-list order; any later
       add, in any status, takes the next `#`. A new lot of a product already
       on the order joins its `#`.
-- [ ] A remove, spec edit, transfer, warehouse change or PO archive moves no `#`.
-- [ ] "N products" on a sell order counts distinct `#`s.
+- [x] A remove, spec edit, transfer, warehouse change or PO archive moves no `#`.
+- [x] "N products" on a sell order counts distinct `#`s.
 
 PR 3, wording:
-- [ ] PO and sell-order rows read "product" / 产品 everywhere a person sees them,
-      and the product `#` reads `#n` / 产品 #n.
-- [ ] `docs/FEATURES.md` opens with a glossary.
+- [x] PO and sell-order rows read "product" / 产品 everywhere a person sees them,
+      and the product `#` reads `#n`; an unsaved one reads *new n* / 新 n.
+- [x] `docs/FEATURES.md` opens with a glossary.
 
 ## Out of scope
 
@@ -94,3 +94,25 @@ PR 3, wording:
   `product_no` from `orders.next_product_no`. Every insert path but the
   transfer clone (which passes its source's `#`) already holds or just created
   the orders row, so it adds no lock in a lines-first path.
+
+- **Shipped in three releases:** 1.234.0 (#571, the stored PO `#`, migration
+  0169), 1.235.0 (#572, the stored sell-order `#`, migration 0170 and the boot
+  freeze), 1.236.0 (#573, the wording). `version:` names the first.
+- **Verified on dev, which holds a copy of prod data.** For each release, a
+  snapshot was taken before the deploy and diffed against the stored values
+  after it:
+  - all 2,306 PO products kept their `#`;
+  - all 5,015 sell-order lines kept their `#` against v1.234.0's own
+    derivation (boot log: "sell-order numbers frozen orders=71").
+- **Reviewed before release.** Five review rounds (`/code-review high`) ran on
+  #571–#573; their fixes are in the PRs.
+  - A corrected lot keeps its `#` and prints as its own row on the sheet. Pack
+    mode still folds by `#` and shows the lot's own part number.
+  - An order the previous release's instance rewrote during a deploy keeps that
+    release's numbers.
+  - An unsaved product reads *new n*.
+- **Follow-ups (not ticketed):**
+  - Drop `sell_order_lines.append_batch`, `legacyNumbers` and the boot freeze
+    once prod has no `product_no IS NULL` row.
+  - Turn the sell-order PATCH into a row-id diff, which would also simplify
+    Pack identity and the event diff.
