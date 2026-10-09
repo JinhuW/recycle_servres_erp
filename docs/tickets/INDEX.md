@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-208](./RS-208-inventory-select-all-reaches-every-lot-the-filter-ma.md) | done | bug | P2 | Inventory select all reaches every lot the filter matches | — |
+| [RS-209](./RS-209-micron-chip-keeps-only-the-die-code-vpp-tbh.md) | done | story | P2 | Micron Chip # keeps only the die code (VPP, TBH, …) | — |
+| [RS-208](./RS-208-inventory-select-all-reaches-every-lot-the-filter-ma.md) | done | bug | P2 | Inventory select all reaches every lot the filter matches | 1.230.2 |
 | [RS-207](./RS-207-pack-mode-side-panel-can-t-be-scrolled-to-its-action.md) | done | bug | P2 | Pack mode side panel can't be scrolled to its actions | 1.230.1 |
 | [RS-206](./RS-206-sell-orders-get-a-packing-status-and-inventory-added.md) | done | story | P2 | Sell orders get a Packing status, and inventory added once packing has begun takes the next # | 1.230.0 |
 | [RS-205](./RS-205-pack-mode-applies-the-flagged-short-counts-to-the-se.md) | done | story | P2 | Pack mode applies the flagged short counts to the sell order | 1.229.0 |
