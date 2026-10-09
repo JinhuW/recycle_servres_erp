@@ -176,7 +176,7 @@ describe('Wave 2B backend fixes', () => {
 
   // ─── Fix 3: Backward-advance guard on committed inventory ─────────────────
 
-  it('Fix 3a — 409 with offendingLineIds and sellOrderIds when back-advance would break committed sell orders', async () => {
+  it('Fix 3a — 409 with offendingLineIds and sellOrderIds when a back-advance past Reviewing would break committed sell orders', async () => {
     const { token: mgr } = await loginAs(ALEX);
     const { token: pur } = await loginAs(MARCUS);
 
@@ -199,10 +199,16 @@ describe('Wave 2B backend fixes', () => {
       token: mgr, body: { to: 'Awaiting payment', note: 'a' },
     })).status).toBe(200);
 
-    // Try to back-advance from done → reviewing — should 409
+    // done → reviewing leaves the committed line at Done; past it to In
+    // Transit, the line would leave the sellable statuses — 409.
+    const back = await api<{ lifecycle: string }>('POST', `/api/orders/${orderId}/advance`, {
+      token: mgr, body: { toStage: 'reviewing' },
+    });
+    expect(back.status).toBe(200);
+    expect(back.body.lifecycle).toBe('reviewing');
     const r = await api<{ error: string; offendingLineIds: string[]; sellOrderIds: string[] }>(
       'POST', `/api/orders/${orderId}/advance`, {
-        token: mgr, body: { toStage: 'reviewing' },
+        token: mgr, body: { toStage: 'in_transit' },
       });
     expect(r.status).toBe(409);
     expect(r.body.error).toMatch(/cancel those sell orders/i);

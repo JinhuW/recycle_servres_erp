@@ -23,7 +23,7 @@ import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsT
 import { settleSoldTx } from '../services/orderSold';
 import { poLineNo } from '../lib/poLineNo';
 import type { Env, User } from '../types';
-import { isClosedBook, LINE_STATUS_FOR_LIFECYCLE, ARCHIVED_LINE_STATUS, REVIEWED_LIFECYCLES } from '../services/orderAdvance';
+import { isClosedBook, heldLines, LINE_STATUS_FOR_LIFECYCLE, ARCHIVED_LINE_STATUS, REVIEWED_LIFECYCLES } from '../services/orderAdvance';
 
 const LINE_STATUSES = new Set([...Object.values(LINE_STATUS_FOR_LIFECYCLE), 'Sold']);
 
@@ -1267,6 +1267,7 @@ inventory.patch('/:id', async (c) => {
     | { kind: 'notFound' }
     | { kind: 'committed'; committed: number }
     | { kind: 'doneLocked' }
+    | { kind: 'heldLocked' }
     | { kind: 'soldLocked' }
     | { kind: 'archived' }
     | { kind: 'specConflict'; error: string }
@@ -1313,6 +1314,10 @@ inventory.patch('/:id', async (c) => {
     // stay editable: that is the ordinary post-Done inventory workflow, and
     // none of them feed the goods total.
     if (touchesGoods && parent && isClosedBook(parent.lifecycle)) return { kind: 'doneLocked' };
+    // A lot a move back to Reviewing left at Done for a shipped sale keeps
+    // the closed book it had: the PO page shows it view-only, and this is the
+    // same lot one click away.
+    if (touchesGoods && (await heldLines(tx, [id])).size > 0) return { kind: 'heldLocked' };
     // A sold order's lines are its sales record: this is the one writer that
     // can walk a line off Sold (a Done sell order never reopens), and doing so
     // under a sold order would leave it sold with stock. Reopen the order to
@@ -1404,6 +1409,9 @@ inventory.patch('/:id', async (c) => {
   }
   if (outcome.kind === 'doneLocked') {
     return c.json({ error: 'the purchase order is past review; move it back to Reviewing before changing qty or unit cost' }, 409);
+  }
+  if (outcome.kind === 'heldLocked') {
+    return c.json({ error: 'this lot is on a shipped sell order; its qty and unit cost stay as reviewed until that order is Done or Closed' }, 409);
   }
   if (outcome.kind === 'soldLocked') {
     return c.json({ error: 'the purchase order is fully sold; move it back to Ready to Pay before changing a lot status' }, 409);

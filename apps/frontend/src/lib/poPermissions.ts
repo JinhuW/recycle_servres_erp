@@ -52,6 +52,13 @@ export function derivePoPermissions(opts: {
   };
 }
 
+// The shipped sell orders a line is held for — view-only on every PO editor
+// while any are named. The server decides which lines are held; an older one
+// sends nothing, and nothing is held.
+export function lineShippedOn(line: { shippedOn?: string[] } | null | undefined): string[] {
+  return line?.shippedOn ?? [];
+}
+
 // Whether moving this PO should first ask the mover to take it over: only a
 // manager (the real role — a previewing manager still moves as one) moving an
 // order someone else manages. An order with no manager is stamped with the

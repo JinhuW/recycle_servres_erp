@@ -1432,6 +1432,8 @@ const zh: Record<string, string> = {
   drawerCapturedLabel: '采集的标签',
   drawerLossyWarn: '售价低于单位成本',
   drawerReadOnly: '该订单已关闭 — 产品详情仅供查看。',
+  lineShippedReadOnly: '该产品在已发货的 {so} 上 — 该销售单完成或关闭前仅供查看。',
+  lineShippedChip: '已发货 · {so}',
   sellPriceStillEditable: '订单完成前仍可调整售价。',
   dupPartDrawerOne: '此零件号已出现在 {line}。',
   dupPartDrawerMany: '此零件号已出现在 {lines}。',
