@@ -815,7 +815,6 @@ inventory.get('/transfer-orders', async (c) => {
   const lines = orderIds.length === 0 ? [] : (await sql`
     SELECT l.id, l.transfer_order_id, l.category, l.brand, l.capacity, l.generation,
            l.type, l.description, l.part_number, l.qty, l.position, l.status,
-           l.order_id, l.product_no AS no,
            te.detail->>'from' AS from_wh,
            fw.short AS from_short,
            te.created_at AS transferred_at

@@ -17,9 +17,16 @@ import { startBankSyncLoop } from './banktx/sync';
 import { startWebSubmissionPurgeLoop } from './lib/webSubmissionPurge';
 import { attachVncBridge, closeVncBridges } from './vncBridge';
 import { startMailInboxLoop } from './mail/inbox';
+import { freezeLegacySellNumbers } from './services/sellOrderNumbers';
 
 const env = buildEnv();
 const port = Number(process.env.PORT ?? 8787);
+
+// Sell-order #s are stored since 0170; this freezes the ones every older order
+// showed — numbers already written on items — before any request can save it.
+// A failure stops the boot rather than serve orders that read unnumbered.
+const frozen = await freezeLegacySellNumbers(getDb(env));
+if (frozen) log.info('sell-order numbers frozen', { orders: frozen });
 
 const loops = [
   startFxRefreshLoop(getDb(env)),

@@ -658,8 +658,13 @@ try {
       VALUES (${id}, ${cust.id}, ${s.status}, ${protoToUuid['u1']}, ${created}, ${created},
               ${s.status === 'Done' ? created : null})
     `;
+    // One # per product, as the backend gives it; seed data needn't follow the
+    // packing-list sort, so a product is its part, condition and warehouse.
+    const noByProduct = new Map();
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i];
+      const productKey = `${l.part_number ?? l.id}|${l.condition}|${l.warehouse_id}`;
+      if (!noByProduct.has(productKey)) noByProduct.set(productKey, noByProduct.size + 1);
       const label = l.category === 'RAM' ? `${l.brand} ${l.capacity} ${l.type}`
                   : l.category === 'SSD' ? `${l.brand} ${l.capacity}`
                   : l.category === 'HDD' ? `${l.brand} ${l.capacity}`
@@ -671,13 +676,15 @@ try {
       await sql`
         INSERT INTO sell_order_lines (
           sell_order_id, inventory_id, category, label, sub_label, part_number,
-          qty, unit_price, warehouse_id, condition, position
+          qty, unit_price, warehouse_id, condition, position, product_no
         ) VALUES (
           ${id}, ${l.id}, ${l.category}, ${label}, ${sub}, ${l.part_number},
-          ${l.qty}, ${l.sell_price}, ${l.warehouse_id}, ${l.condition}, ${i}
+          ${l.qty}, ${l.sell_price}, ${l.warehouse_id}, ${l.condition}, ${i},
+          ${noByProduct.get(productKey)}
         )
       `;
     }
+    await sql`UPDATE sell_orders SET next_product_no = ${noByProduct.size + 1} WHERE id = ${id}`;
   }
 
   console.log('· Seeding inventory audit events…');

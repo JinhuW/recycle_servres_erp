@@ -40,6 +40,8 @@ import { useScanFilterText } from '../../lib/useScanFilter';
 
 type OrderLine = {
   id: string;
+  // The product's # on the order — the label the packer writes.
+  no: number;
   category: Category;
   label: string;
   sub: string | null;
@@ -213,7 +215,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   const allProducts = useMemo(() => packProducts(packView(lines, '')), [lines]);
   const products = useMemo(() => packProducts(packView(lines, picked)), [lines, picked]);
   const productByNo = useMemo(() => new Map(allProducts.map(p => [p.no, p])), [allProducts]);
-  const lineNo = useMemo(() => new Map(lines.map((l, i) => [l.id, l.no ?? i + 1])), [lines]);
+  const lineNo = useMemo(() => new Map(lines.map(l => [l.id, l.no])), [lines]);
   // Typing narrows the list once it pauses. The filter searches the whole
   // order, packable lines only, as Enter does, so it never hides the line
   // Enter would pack; a product holding a match shows whole, opened. It
@@ -753,6 +755,13 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
               <td className="pk-thumb-cell">{thumb(l)}</td>
               <td className="pk-item-cell pk-lot-cell">
                 <div className="pk-lot-src mono">{fromText(l)}</div>
+                {/* A lot corrected after its product was numbered keeps the #,
+                    so the row says what this lot is when it differs. */}
+                {(pnOf(l) !== pnOf(p.head) || l.condition !== p.head.condition) && (
+                  <div className="pk-meta mono">
+                    {pnOf(l)}{l.condition !== p.head.condition && l.condition ? ` · ${l.condition}` : ''}
+                  </div>
+                )}
                 {showWh && <div className="pk-meta">{whName(packWarehouseOf(l))}</div>}
               </td>
               <td className="pk-cond-cell" />

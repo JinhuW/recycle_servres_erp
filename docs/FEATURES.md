@@ -963,42 +963,50 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   - View and edit share one history entry, so browser Back returns to where
     the order was opened from.
 - **Every line shows its product's # on the order** (v1.219.0; one per
-  product since v1.220.3) — `#3` before the item name, in view and edit: the
-  number the packer labels the items with and the receiver checks the box by.
-  Products are numbered 1..N in the order the Packing list shows them —
-  warehouse tab, then category, device, DDR generation, brand / capacity /
-  speed — through the whole file, and **the order lists its lines in that same
-  order**, so the page, Pack mode and both packing lists read alike. Lines of
-  one product (several PO lines of one part) share its #. The number is worked
-  out from the sort each time the order is read.
-  - **On a Draft, adding a line sorts it in** and renumbers the products
-    after it.
-  - **Once the order is past Draft** (Packing, Shipped, Awaiting payment), a
-    save that adds inventory gives each new product the next # after every
-    other product, and **adding never moves a #** (v1.230.0). Products added
-    in one save are numbered among themselves in packing-list order, and a
-    later save's go after them.
-    - A new lot of a product already on the order joins that product's #.
-    - The order page and Pack mode list an added product last. Both packing
-      lists keep their sorted rows, so it prints there in its sorted place
-      with its later # (`#1, #2, #9, #3`).
-    - Each line records which save added it (`sell_order_lines.append_batch`,
-      NULL for the sorted set). The editor sends each saved line's row id, so
-      the mark survives the save's rewrite, and an edited hand-typed line
-      keeps its place. Lines already on an order when v1.230.0 shipped count
-      as the sorted set.
-  - **What still renumbers the products after it, in any status:** deleting a
-    lot, moving one to another warehouse, and editing a spec that re-sorts it.
-  - **What never renumbers:** setting a line to 0, editing a price, or saving
-    the order as shown (v1.221.0). A product's place comes
-  from its first line by PO and line # — 0s included, never the order the
-  page lists them in — and a tie on everything the sheet sorts by goes by
-  part #. Before v1.221.0 the first line by stored position decided, and a
-  save rewrote positions, so a price edit could renumber an order whose lots
-  of one part differed in type. A line added while editing reads *new* until
-  the save numbers it.
-- **A line that can't ship is set to 0, not removed** (v1.219.0), so no line
-  after it is renumbered. Any line already on the order may go to 0 in the
+  product since v1.220.3; stored and never renumbered since v1.235.0) — `#3`
+  before the item name, in view and edit: the number the packer labels the
+  items with and the receiver checks the box by. Lines of one product
+  (several PO lots of one part) share its #, and **the order lists its lines
+  in # order**, so the page and Pack mode read alike.
+  - **A new order numbers its products once, 1..N, in the order the Packing
+    list shows them** — warehouse tab, then category, device, DDR
+    generation, brand / capacity / speed — through the whole file.
+  - **Every product added later takes the next #, in any status** (v1.235.0;
+    past Draft only from v1.230.0). A Draft no longer sorts a new product in
+    among the others: a # never moves once given. Products added in one save
+    are numbered among themselves in packing-list order, and a later save's
+    go after them. A new lot of a product already on the order — same
+    warehouse tab, same part / label / condition — joins that product's #.
+    Both packing lists keep their sorted rows, so a later product prints in
+    its sorted place with its later # (`#1, #2, #9, #3`).
+  - **Nothing renumbers** (v1.235.0). Removing a lot leaves a gap. A lot
+    removed and added back in a later save is a new product with the next
+    #; within one save it keeps its #. A spec edit, a transfer, a warehouse
+    change or archiving the source PO moves no #. A lot that moves to
+    another warehouse prints under that warehouse's tab, so a product can
+    show its one # on two tabs. A lot whose spec or part # is corrected — or
+    a hand-typed line re-worded — keeps its product's # (its items may
+    already carry the label) but prints as a row of its own under that #,
+    so the sheet never shows one lot's spec for another's items. Setting a
+    line to 0, editing a price, or saving the order as shown never did.
+  - The # is stored (`sell_order_lines.product_no`), and so is the order's
+    next one (`sell_orders.next_product_no`); the editor sends each saved
+    line's row id, so a line keeps its # through the save's rewrite (by its
+    lot, or a hand-typed line by its text, when an API caller sends no id).
+    Orders that existed before v1.235.0 kept the numbers they showed: the
+    backend froze them on its first boot, and an order the previous release
+    saves while a deploy rolls shows — and on its next save keeps — the
+    numbers that release showed. A line with no # stored yet always shows
+    the one it will get. A line added while editing reads *new* until the
+    save numbers it. A hand-typed line joins a product only in its own
+    warehouse. "N products" on the order, the sell
+    orders list and its export count #s.
+  - A product's place on the sheet comes from its first line by PO and
+    product # — 0s included — and a tie on everything the sheet sorts by goes
+    by part # (v1.221.0).
+- **A line that can't ship can be set to 0** (v1.219.0), keeping a record
+  that it was on the order. (Removing it renumbers nothing either since
+  v1.235.0: it leaves a gap.) Any line already on the order may go to 0 in the
   editor, including one whose lot is gone; a line being added still needs at
   least 1, as does a new order (and the MCP create tool). Since v1.220.2 the
   server holds that rule too: a save may hold at 0 only a lot already on the
@@ -1010,10 +1018,9 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   all 0 can't move to Shipped, Awaiting payment or Done, and has nothing to
   pack: both packing-list buttons are off for it (v1.220.2). A hand-typed line is
   no longer capped at its saved qty. Archiving a PO leaves a sell line held
-  at 0 alone (v1.220.2): it is not a conflict and is not removed, so no #
-  after it moves. Removing the PO line it names doesn't block either, but the
-  sell line becomes a hand-typed line — a different product — so it and the
-  products after it are renumbered.
+  at 0 alone (v1.220.2): it is not a conflict and is not removed. Removing
+  the PO line it names doesn't block either: the sell line becomes a
+  hand-typed line and keeps its # (v1.235.0).
 - **Line items group By warehouse or By PO** (v1.194.0), in both view and edit.
   The switch on the Line items header is remembered per user (preference
   `sellOrders.lineGroup`, default by warehouse).
@@ -1167,10 +1174,10 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   being prepared.
 - **Both packing lists number their rows by the product's # on the order**
   (v1.219.0; per product since v1.220.3): a `#` column first, before the tick
-  box, so the label on an item matches its row. The count runs 1..N down the
-  file and never restarts on a new tab. A product added once the order was
-  past Draft is the exception: its row stays in its sorted place and carries
-  a later # (v1.230.0). The by-PO file and a one-warehouse
+  box, so the label on an item matches its row. A new order's count runs
+  1..N down the file and never restarts on a new tab. A product added later
+  keeps its row in its sorted place and carries its later # (v1.230.0; in
+  any status since v1.235.0), and a removed one leaves a gap. The by-PO file and a one-warehouse
   download show each product the same # as the full list, and a product held
   at 0 leaves a gap. The bid sheet's own `#` column is a plain row index per
   tab, not this number.
@@ -1214,7 +1221,9 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
     product's #, part, specs, how many lots and their PO tags
     (`PO-1111 #4, PO-1203 #1 +1`), and the summed count. It starts closed.
     The chevron (or ← / →) opens it to one row per lot, each with its own
-    photo, count and tick. Ticking the product row packs every lot still at
+    photo, count and tick — and its own part # and condition when they differ
+    from the product's, as a lot corrected after it was numbered does
+    (v1.235.0; the packing list prints such a lot as a row of its own). Ticking the product row packs every lot still at
     its full count. A lot that was lowered keeps waiting for its own tick, and
     the fold opens to show it. Once every lot is packed, the same tick unpacks
     them all. A product with some lots packed shows a dash in its tick. A lot

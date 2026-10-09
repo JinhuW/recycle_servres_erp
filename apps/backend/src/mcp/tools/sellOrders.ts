@@ -42,7 +42,8 @@ export const SELL_ORDER_TOOL_DEFS = [
       'currency). Descriptive fields (category, label, part number, warehouse, condition) are taken from the ' +
       'referenced inventory line — do not supply them. customerId defaults to the MCP customer when omitted. ' +
       'currency is USD (default) or CNY; unitPrice is the native price and is converted to USD on store. On ' +
-      'success returns { id, status, customerId, lineCount, currency }. Errors (an unknown inventoryId, a ' +
+      'success returns { id, status, customerId, lineCount (the lines created), productCount (the products ' +
+      'they make, by # — lots of one product share one), currency }. Errors (an unknown inventoryId, a ' +
       'line that is no longer sellable or whose PO is archived, a qty above what committed sell orders leave ' +
       'free, an unknown customerId) come back as a normal tool result with isError set and a message saying ' +
       'what failed — fix the arguments and ' +
@@ -174,5 +175,8 @@ export async function callCreateSellOrderDraft(
     source: ctx.source,
   });
   if (!result.ok) throw new Error(result.error);
-  return { id: result.id, status: 'Draft', customerId: result.customerId, lineCount: result.lineCount, currency: result.currency };
+  return {
+    id: result.id, status: 'Draft', customerId: result.customerId, lineCount: result.lineCount,
+    productCount: result.productCount, currency: result.currency,
+  };
 }
