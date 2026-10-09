@@ -478,7 +478,7 @@ function OrderForm({
   // Serial rules for a set of lines; null when everything passes.
   const collectSerialIssues = (ls: Line[]): SerialLineIssue[] | null => {
     const found = ls
-      .map((l, i) => ({ line: lineRef(l, t, i), label: lineLabel(l), issue: serialIssue(l) }))
+      .map((l, i) => ({ line: lineRef(l, t), label: lineLabel(l), issue: serialIssue(l) }))
       .filter((x): x is SerialLineIssue => x.issue !== null);
     return found.length ? found : null;
   };
@@ -599,7 +599,7 @@ function OrderForm({
     }
     const issue = block === 'serials' ? serialIssue(l) : null;
     if (issue) {
-      setSerialIssues([{ line: lineRef(l, t, idx), label: lineLabel(l), issue }]);
+      setSerialIssues([{ line: lineRef(l, t), label: lineLabel(l), issue }]);
       // Thrown (not returned) so the drawer's confirm handler keeps the
       // drawer open for the fix instead of closing on apparent success.
       throw new Error(t('serialCheckTitle'));
@@ -807,7 +807,7 @@ function OrderForm({
       .map((l, idx) => ({ idx, l, gen: (l.partNumber ?? '').trim() ? null : synthesizePartNumber(l.category, l) }))
       .filter(x => !(x.l.partNumber ?? '').trim());
     const blocking = blanks.find(x => !x.gen);
-    if (blocking) { showErrorDialog(t('pnRequiredLine', { line: lineRef(blocking.l, t, blocking.idx) })); return; }
+    if (blocking) { showErrorDialog(t('pnRequiredLine', { line: lineRef(blocking.l, t) })); return; }
     if (blanks.length > 0) {
       setPnConfirm(blanks.map(x => ({ idx: x.idx, value: x.gen! })));
       return;
@@ -1215,7 +1215,7 @@ function OrderForm({
           }}
           onConfirmLine={() => handleConfirmLine(activeIdx)}
           onConfirmError={showErrorDialog}
-          duplicateOnLines={dupByIdx.get(activeIdx)?.map(j => lineRef(lines[j], t, j))}
+          duplicateOnLines={dupByIdx.get(activeIdx)?.map(j => lineRef(lines[j], t))}
         />
       )}
 
@@ -1306,7 +1306,7 @@ function OrderForm({
       {dupConfirm && (
         <DupPartDialog
           groups={dupConfirm}
-          refOf={j => lineRef(lines[j], t, j)}
+          refOf={j => lineRef(lines[j], t)}
           busy={submitting}
           confirmTone="accent"
           confirmLabel={t('dupPartSubmitAnyway')}
@@ -1343,7 +1343,7 @@ function OrderForm({
               <ul style={{ margin: 0, padding: '0 0 0 18px', display: 'grid', gap: 6, fontSize: 13 }}>
                 {pnConfirm.map(p => (
                   <li key={p.idx}>
-                    {t('pnConfirmRow', { line: lineRef(lines[p.idx], t, p.idx) })} <span className="mono" style={{ fontWeight: 600 }}>{p.value}</span>
+                    {t('pnConfirmRow', { line: lineRef(lines[p.idx], t) })} <span className="mono" style={{ fontWeight: 600 }}>{p.value}</span>
                   </li>
                 ))}
               </ul>

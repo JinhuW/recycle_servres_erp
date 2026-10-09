@@ -1,12 +1,15 @@
 type Translate = (key: string, vars?: Record<string, string | number>) => string;
 
+type Named = { no?: number | null; partNumber?: string | null; description?: string | null };
+
 // How a message names a PO product: its # once saved — the server gives it on
-// save and never changes it. A product not saved yet has no #, so it is named
-// by its row (0-based `row`, when the caller lists several) to tell two new
-// ones apart.
-export function lineRef(l: { no?: number | null }, t: Translate, row?: number): string {
+// save and never changes it. A product not saved yet has no # and shows *new*
+// in the # column, so it is named by what it is: its part number, else its
+// description.
+export function lineRef(l: Named, t: Translate): string {
   if (l.no != null) return `#${l.no}`;
-  return row != null ? t('lineRefNewRow', { n: row + 1 }) : t('lineRefNew');
+  const name = (l.partNumber ?? '').trim() || (l.description ?? '').trim();
+  return name ? t('lineRefNewNamed', { name }) : t('lineRefNew');
 }
 
 // How many products a PO's lines are: one per #, since a partial transfer's

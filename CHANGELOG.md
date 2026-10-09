@@ -51,6 +51,13 @@ the same thing.
   - The vendor bid sheet is untouched, since it is an import format.
 - **MCP.** Descriptions say what `sourceLineNo` and `lineCount` mean now. The
   wire names are unchanged.
+- **Unsaved products are named by what they are.** Messages call a product
+  that isn't saved yet "New product M393A4K40DB3-CWE" (its part number, else
+  its description), not "New product on row 4". The `#` column shows *new*,
+  so no row number is visible to count by.
+- **Server messages name the product.** A new PO's errors name the `#` the
+  product will get ("#2: …"). Errors on a product being added name its part
+  number.
 - **Fixed:** the transfer manifest's Chinese read "{n} 件 · {n} 件", the unit
   word for a row count. It now says 个批次.
 

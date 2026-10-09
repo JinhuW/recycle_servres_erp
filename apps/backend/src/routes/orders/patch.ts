@@ -183,14 +183,16 @@ patchRoutes.patch('/:id', async (c) => {
   const addCats: string[] = [];
   for (let i = 0; i < (body.addLines ?? []).length; i++) {
     const l = body.addLines![i];
+    // Not saved yet, so no #: named by part number as the editor names it.
+    const ref = `new product ${l.partNumber?.trim() || i + 1}`;
     const cat = l.category ?? inheritedCat;
-    if (!cat) return c.json({ error: `new product ${i + 1}: category is required` }, 400);
+    if (!cat) return c.json({ error: `${ref}: category is required` }, 400);
     addCats.push(cat);
     const issue = serialIssue({ ...l, category: cat, qty: l.qty ?? 1 });
-    if (issue) return c.json({ error: serialErr(`new product ${i + 1}`, issue) }, 400);
-    const labelErr = identityErr(`new product ${i + 1}`, cat, l);
+    if (issue) return c.json({ error: serialErr(ref, issue) }, 400);
+    const labelErr = identityErr(ref, cat, l);
     if (labelErr) return c.json({ error: labelErr }, 400);
-    const specErr = specRuleErr(`new product ${i + 1}`, cat, l);
+    const specErr = specRuleErr(ref, cat, l);
     if (specErr) return c.json({ error: specErr }, 400);
   }
 

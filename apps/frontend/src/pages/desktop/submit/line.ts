@@ -162,16 +162,16 @@ export function lineBlockerMessages<L extends Line>(
     if (brandConfirmPending(l)) {
       return [lines.length === 1
         ? t('subConfirmBrandThis')
-        : t('subConfirmBrandLine', { line: lineRef(l, t, i) })];
+        : t('subConfirmBrandLine', { line: lineRef(l, t) })];
     }
     if (lineReady(l)) return [];
     const fields = missingNamesFor(l);
     if (fields) {
       return [lines.length === 1
         ? t('subMissingFieldsThis', { fields })
-        : t('subMissingFieldsLine', { line: lineRef(l, t, i), fields })];
+        : t('subMissingFieldsLine', { line: lineRef(l, t), fields })];
     }
-    return [lines.length === 1 ? t('subFillThisLine') : t('subFillLineN', { line: lineRef(l, t, i) })];
+    return [lines.length === 1 ? t('subFillThisLine') : t('subFillLineN', { line: lineRef(l, t) })];
   });
 }
 

@@ -86,7 +86,7 @@ describe('POST /api/orders — serial rules', () => {
     const r = await createPo(token, [ramLine({ generation: 'DDR5' })]);
     expect(r.status).toBe(400);
     expect(r.body.error).toContain('DDR5');
-    expect(r.body.error).toContain('product 1');
+    expect(r.body.error).toContain('#1');
   });
 
   it('accepts a DDR5 line whose serial count matches qty and persists it', async () => {

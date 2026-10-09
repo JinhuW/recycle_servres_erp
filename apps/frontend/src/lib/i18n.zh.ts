@@ -1457,7 +1457,7 @@ const zh: Record<string, string> = {
   drawerConfirmFailed: '确认产品失败',
   drawerLineSaved: '{line} 已保存',
   lineRefNew: '新产品',
-  lineRefNewRow: '第 {n} 行的新产品',
+  lineRefNewNamed: '新产品 {name}',
   lineNoNew: '新',
   lineNoNewTitle: '保存后获得编号',
   selectPlaceholder: '请选择…',

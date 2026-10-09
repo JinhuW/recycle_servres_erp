@@ -9,11 +9,11 @@ const t = (key: string, vars?: Record<string, string | number>) =>
   key + (vars ? ' ' + JSON.stringify(vars) : '');
 
 describe('lineRef', () => {
-  it('names a saved product by its #, and an unsaved one as new — by its row when listed', () => {
-    expect(lineRef({ no: 7 }, t)).toBe('#7');
-    expect(lineRef({ no: 7 }, t, 2)).toBe('#7');
+  it('names a saved product by its #, and an unsaved one as new — by its part number or description', () => {
+    expect(lineRef({ no: 7, partNumber: 'M393' }, t)).toBe('#7');
     expect(lineRef({}, t)).toBe('lineRefNew');
-    expect(lineRef({ no: null }, t, 2)).toBe('lineRefNewRow {"n":3}');
+    expect(lineRef({ no: null, partNumber: ' M393 ' }, t)).toBe('lineRefNewNamed {"name":"M393"}');
+    expect(lineRef({ description: 'PSU 750W' }, t)).toBe('lineRefNewNamed {"name":"PSU 750W"}');
   });
 });
 
@@ -42,7 +42,7 @@ describe('duplicate part numbers', () => {
       { partNumber: 'A', idxs: [0, 2] },
       { partNumber: 'B', idxs: [1, 3] },
     ]);
-    expect(groups[1].idxs.map(i => lineRef(lines[i], t, i))).toEqual(['#3', 'lineRefNewRow {"n":4}']);
+    expect(groups[1].idxs.map(i => lineRef(lines[i], t))).toEqual(['#3', 'lineRefNewNamed {"name":"B"}']);
     expect(duplicatesByIndex(groups, lines).get(2)).toEqual([0]);
   });
 
@@ -69,7 +69,7 @@ describe('lineBlockerMessages', () => {
     const msgs = lineBlockerMessages(lines, t, () => false, () => 'Brand');
     expect(msgs).toEqual([
       'subMissingFieldsLine {"line":"#5","fields":"Brand"}',
-      'subMissingFieldsLine {"line":"lineRefNewRow {\\"n\\":2}","fields":"Brand"}',
+      'subMissingFieldsLine {"line":"lineRefNew","fields":"Brand"}',
     ]);
   });
 });

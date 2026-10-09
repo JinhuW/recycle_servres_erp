@@ -73,9 +73,9 @@ createRoutes.post('/', async (c) => {
   const lineCats: string[] = [];
   for (let i = 0; i < body.lines.length; i++) {
     const inputErr = validateLineInput(body.lines[i] as Record<string, unknown>, 'create');
-    if (inputErr) return c.json({ error: `product ${i + 1}: ${inputErr}` }, 400);
+    if (inputErr) return c.json({ error: `#${i + 1}: ${inputErr}` }, 400);
     const cat = body.lines[i].category ?? body.category;
-    if (!cat) return c.json({ error: `product ${i + 1}: category is required` }, 400);
+    if (!cat) return c.json({ error: `#${i + 1}: category is required` }, 400);
     lineCats.push(cat);
   }
 
@@ -90,10 +90,10 @@ createRoutes.post('/', async (c) => {
   for (let i = 0; i < body.lines.length; i++) {
     const l = body.lines[i];
     const issue = serialIssue({ ...l, category: lineCats[i] });
-    if (issue) return c.json({ error: serialErr(`product ${i + 1}`, issue) }, 400);
-    const labelErr = identityErr(`product ${i + 1}`, lineCats[i], l);
+    if (issue) return c.json({ error: serialErr(`#${i + 1}`, issue) }, 400);
+    const labelErr = identityErr(`#${i + 1}`, lineCats[i], l);
     if (labelErr) return c.json({ error: labelErr }, 400);
-    const specErr = specRuleErr(`product ${i + 1}`, lineCats[i], l);
+    const specErr = specRuleErr(`#${i + 1}`, lineCats[i], l);
     if (specErr) return c.json({ error: specErr }, 400);
   }
 

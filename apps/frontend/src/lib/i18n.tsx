@@ -1896,7 +1896,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     // A PO product's # is given on save; until then a line is named and
     // numbered as new.
     lineRefNew: 'New product',
-    lineRefNewRow: 'New product on row {n}',
+    lineRefNewNamed: 'New product {name}',
     lineNoNew: 'new',
     lineNoNewTitle: 'Gets its # when saved',
 

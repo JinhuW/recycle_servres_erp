@@ -420,7 +420,7 @@ function Shell() {
       if (dupLine != null && pn) {
         // Surface the alert immediately. The form still opens so the user
         // can compare against the existing line and decide whether to save.
-        showToast(t('dupPartScanWarn', { pn, line: lineRef(dupLine, t, capture.lines.indexOf(dupLine)) }), 'error');
+        showToast(t('dupPartScanWarn', { pn, line: lineRef(dupLine, t) }), 'error');
       }
     }
     setCapture(c => c.phase === 'camera' ? { ...c, phase: 'form', detected: s } : c);

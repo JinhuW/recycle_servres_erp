@@ -117,12 +117,14 @@ on to Sold once every line has sold (v1.164.0).
   - **"N products" counts `#`s**, so the PO list, the page head and the
     category groups count a transferred product once.
   - A product not saved yet reads *new* where its `#` would be, and messages
-    name it by its row ("New product on row 4") until the save gives it one.
+    name it by its part number or description ("New product M393A4K40DB3-CWE",
+    v1.236.0) until the save gives it one.
     Saved products are named by `#` — "#5 is missing: Generation", "This
     Part # is already on #2, #7" — never by their place in the list. A
     transfer's two rows of one product are not flagged as a duplicate part #.
-    The PO PATCH names an invalid product it was asked to add "new line n"
-    (n counts within that request).
+    The server names a product the same way: on a new PO by the `#` it will
+    get ("#2: Laptop doesn't fit RDIMM"), and one being added by its part
+    number ("new product SSDSC2KB960G8: …", v1.236.0).
   - The `#` is the same on the PO page, the phone's Products screen, Review
     mode, the PO list's drawer, the PO workbook (a leading `#` column on every
     sheet, v1.234.0), each sell order's "From PO-1432 #3", Inventory and the
