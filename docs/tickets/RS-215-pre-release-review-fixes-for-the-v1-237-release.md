@@ -1,6 +1,6 @@
 ---
 id: RS-215
-title: Pre-release review fixes for the v1.236 release
+title: Pre-release review fixes for the v1.237 release
 type: bug
 status: in-progress
 priority: P1
@@ -9,7 +9,7 @@ reporter: jinhu
 branch: fix/prerelease-rs215
 pr:
 version:
-related: [RS-207, RS-208, RS-209, RS-210, RS-212, RS-213, RS-214]
+related: [RS-207, RS-208, RS-209, RS-210, RS-212, RS-213, RS-214, RS-217]
 ---
 
 ## Ask
@@ -77,6 +77,19 @@ findings went to the session that owns RS-213, which fixed them in its own PRs:
   - Deploy-overlap windows of seconds: #571's trigger lock order, and #572's renumber of an all-unnumbered order.
   - No trigger check on a supplied #.
   - The boot-time freeze failing fast on an unmigrated database.
+
+**RS-217 (#575)** started while the release was being prepared, so it was
+reviewed before it merged. Its first rank table let a full-size UDIMM take x4
+and quad ranks in every generation, and it treated triple-rank and 4Rx16 as
+consumer ranks. Before the merge, the rule became per-generation: only the
+pairings each generation actually sold (DDR3 x4, DDR5 4Rx8) are allowed. 0171's
+re-rank was checked against prod's SSD form list, read-only.
+
+The release also carries a test-only fix. The sell-order price-template test
+took two seeded lots of any category, and the packing list places a line by its
+lot's category, so the by-PO tab test failed most runs that drew a non-RAM lot.
+It failed on dev and in PR CI during this release. The test now pins both lots
+to RAM.
 
 ## Acceptance criteria
 
