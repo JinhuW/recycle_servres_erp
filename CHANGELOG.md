@@ -17,6 +17,40 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.235.0] - 2026-10-09
+
+A sell order's product `#` is now stored and never changes (RS-213, part 2 of
+3). It is the number the packer writes on each item and the receiver checks
+the box by. Before, it was derived on every read from the packing-list sort,
+so a Draft add, a removed lot, a transfer, a spec edit, a warehouse change or
+a PO archive could renumber the products after it, labels already written
+included.
+
+### Changed
+
+- **Migration 0170 stores each product's `#`** in
+  `sell_order_lines.product_no`, with a per-order counter in
+  `sell_orders.next_product_no`. Lots of one product share the `#`.
+- **A new order numbers its products once, 1..N, in packing-list order.**
+- **Every product added later takes the next `#`.** This applies in any
+  status, Draft included. A Draft no longer sorts new products in among the
+  others.
+- **A new lot of a product already on the order joins its `#`.**
+- **Nothing renumbers.** A removed lot leaves a gap. A spec edit, a transfer,
+  a warehouse change or a PO archive moves nothing. A product whose lots sit
+  in two warehouses prints its one `#` on both tabs.
+- **Existing orders keep the numbers they showed.** The derivation is
+  TypeScript, so the backend freezes them on boot, before it serves a
+  request. The freeze is idempotent, and a failure stops the boot.
+  `append_batch` is no longer written; a later release drops it.
+- **The rewrite carries each line's `#`.** The sell-order PATCH still
+  rewrites every line, so the `#` is carried by row id, else by lot, else, for
+  a hand-typed line saved without its id, by its text.
+- **"N products" counts `#`s** on the sell orders list, its export (the
+  column is now "Products"), the order page and the `created` event.
+- **Seeded orders get stored `#`s.** A PO archive's `line_removed` event
+  carries the removed `#`.
+
 ## [1.234.0] - 2026-10-09
 
 A PO product's `#` is now stored and never changes (RS-213, part 1 of 3).

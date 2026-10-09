@@ -36,6 +36,7 @@ import { peekSellOrderPrefill, clearSellOrderPrefill } from '../../lib/sellOrder
 import { missingSigners, signoffSig } from '../../lib/sellOrderSignoff';
 import type { SellOrderSignoff } from '../../lib/types';
 import { SellOrderSignoffCard } from './SellOrderSignoff';
+import { productCount } from '../../lib/productNo';
 
 // Its own chunk: only a packer opens it.
 const DesktopSellOrderPack = lazy(() => import('./DesktopSellOrderPack'));
@@ -103,8 +104,9 @@ const specOf = (l: LineSpec): LineSpec => ({
 type SellOrderLine = LineSpec & {
   id: string;
   // The product's # on this order, shared by its lines, the packing lists and
-  // Pack mode. Absent from a backend older than this bundle.
-  no?: number;
+  // Pack mode: given when the product was put on the order, never changed.
+  // Null only for a line an older backend wrote mid-deploy, until a save.
+  no?: number | null;
   category: 'RAM' | 'SSD' | 'HDD' | 'Other';
   label: string;
   sub: string | null;
@@ -132,11 +134,10 @@ type SellOrderLine = LineSpec & {
 type EditLine = LineSpec & {
   _cid: string;                 // stable client id for React keys (never sent to the API)
   // On the order before this edit. Only such a line may go to 0 — held there
-  // instead of removed, so no line after it is renumbered; a line being added
-  // needs at least 1.
+  // as a record that it was on the order; a line being added needs at least 1.
   saved: boolean;
-  // The row it was saved as, sent back so the server can keep the line's
-  // place in the numbering through the rewrite; null for a line added here.
+  // The row it was saved as, sent back so the server keeps the line's # through
+  // the rewrite; null for a line added here.
   id: string | null;
   // The product's # as last saved; a line added here has none until the save.
   no: number | null;
@@ -1230,15 +1231,15 @@ function SellOrderDetail({ id, mode, onToast }: {
     }
   };
 
-  const shownLines: readonly { qty: number }[] = editable ? (draft?.lines ?? []) : (order?.lines ?? []);
+  const shownLines: readonly { qty: number; no?: number | null }[] = editable ? (draft?.lines ?? []) : (order?.lines ?? []);
   const shownGroups = editable ? editGroups : viewGroups;
   const shownUnits = shownLines.reduce((a, l) => a + l.qty, 0);
   const lineSummary = lineGroup === 'po'
     ? t('sodLineSummaryByPo', {
-        units: shownUnits, lines: shownLines.length,
+        units: shownUnits, lines: productCount(shownLines),
         pos: shownGroups.filter(g => g.poId !== null).length,
       })
-    : t('sodLineSummary', { units: shownUnits, lines: shownLines.length, whs: shownGroups.length });
+    : t('sodLineSummary', { units: shownUnits, lines: productCount(shownLines), whs: shownGroups.length });
 
   const closeReasonLabel = order?.closeReasonId
     ? t(closeReasonLabelKey(order.closeReasonId))
@@ -1548,7 +1549,7 @@ function SellOrderDetail({ id, mode, onToast }: {
                         <tbody>
                           {g.items.map(({ line: l, idx }) => (
                             <tr key={l.id}>
-                              <LineItemCell line={l} lineNo={l.no ?? idx + 1} sub={l.sub} showPo={lineGroup === 'warehouse'} showLineNo={lineGroup === 'po'} linkPo />
+                              <LineItemCell line={l} lineNo={l.no ?? null} sub={l.sub} showPo={lineGroup === 'warehouse'} showLineNo={lineGroup === 'po'} linkPo />
                               {lineGroup === 'po' && <td style={{ fontSize: 12 }}>{lotWarehouse(l) ?? t('sodNoWarehouse')}</td>}
                               <td className="num mono">{l.qty}</td>
                               <td className="num mono">{fmtMoney(l.nativeUnitPrice, order.currency, locale)}</td>
@@ -1593,7 +1594,7 @@ function SellOrderDetail({ id, mode, onToast }: {
                             const cap = l.inventoryId === null ? Infinity : Math.max(0, l.maxQty);
                             return (
                             <tr key={l._cid}>
-                              <LineItemCell line={l} lineNo={l.saved ? l.no ?? idx + 1 : null} sub={l.subLabel} showPo={lineGroup === 'warehouse'} showLineNo={lineGroup === 'po'} linkPo={false} />
+                              <LineItemCell line={l} lineNo={l.saved ? l.no : null} sub={l.subLabel} showPo={lineGroup === 'warehouse'} showLineNo={lineGroup === 'po'} linkPo={false} />
                               {lineGroup === 'po' && <td style={{ fontSize: 12 }}>{lotWarehouse(l) ?? t('sodNoWarehouse')}</td>}
                               <td className="num">
                                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>

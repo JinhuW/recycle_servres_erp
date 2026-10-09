@@ -18,11 +18,10 @@ export function poLineOrder(sql: SqlLike, alias: string) {
   return sql`${l}.product_no ASC, ${l}.created_at ASC, ${l}.id ASC`;
 }
 
-// The order a sell order's lines are read in. It is NOT their #: that is the
-// product's place on the packing list, counted by the fold in
-// routes/sellOrders.ts, which reads a product's lines by PO and line # and
-// so doesn't depend on this order at all. Every save writes `position` as the
-// editor's index; the tiebreak only settles rows older than that.
+// The order a sell order's lines are read in. It is NOT their #, which is
+// stored on the line (product_no, services/sellOrderNumbers.ts). Every save
+// writes `position` as the editor's index; the tiebreak only settles rows
+// older than that.
 export function sellLineOrder(sql: SqlLike, alias: string) {
   const l = sql(alias);
   return sql`${l}.position ASC, ${l}.created_at ASC, ${l}.id ASC`;

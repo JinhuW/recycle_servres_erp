@@ -1,11 +1,11 @@
-// A sell order's # is one per product, counted 1..N in the order the packing
-// list walks them — warehouse tab, category, device, generation, brand… —
-// through the whole file. The order page lists its lines in # order and every
-// line carries its product's #, so the label on an item, the row on the sheet
-// and the line on the page all read the same number. Once the order is past
-// Draft its items may be labelled, so a product added then takes the next #
-// after every other: the page lists it last, while the sheet still prints it
-// in its sorted row.
+// A sell order's # is one per product and stored (migration 0170). A new
+// order numbers its products 1..N in the order the packing list walks them —
+// warehouse tab, category, device, generation, brand… — through the whole
+// file; every product added later, in any status, takes the next # after every
+// other, and no # ever moves. The order page lists its lines in # order and
+// every line carries its product's #, so the label on an item, the row on the
+// sheet and the line on the page all read the same number. The sheet keeps
+// printing a later product in its sorted row.
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import ExcelJS from 'exceljs';
@@ -14,6 +14,7 @@ import { resetDb, getTestDb } from './helpers/db';
 import { api, testEnv } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
 import { firstCustomerId } from './helpers/fixtures';
+import { freezeLegacySellNumbers } from '../src/services/sellOrderNumbers';
 
 type DetailLine = {
   id: string; no: number; inventoryId: string | null; category: string; label: string; sub: string | null;
@@ -329,7 +330,7 @@ describe('sell order #: one per product, in packing-list order', () => {
   });
 });
 
-describe('sell order #: once past Draft, an added product takes the next #', () => {
+describe('sell order #: an added product takes the next #, in any status', () => {
   let mgr: string;
   beforeEach(async () => {
     await resetDb();
@@ -364,10 +365,44 @@ describe('sell order #: once past Draft, an added product takes the next #', () 
     ]);
   });
 
-  it('on a Draft it still sorts in', async () => {
+  it('on a Draft it appends too: a # never moves once given', async () => {
     const { id, d3 } = await packingOrder('Draft');
     await addLines(mgr, id, [lotLine(d3, 'NUM-D3', 'WH-LA1')]);
+    expect(await numbers(mgr, id)).toEqual([['NUM-K4', 1], ['NUM-S4', 2], ['NUM-D3', 3]]);
+  });
+
+  it('a remove, a spec edit or a transfer of a lot moves no #', async () => {
+    const [po] = await twoPos();
+    const [k4, s4, d3] = await lotsOn(po!, [
+      { pn: 'NUM-K4', brand: 'Kingston', warehouse: 'WH-LA1' },
+      { pn: 'NUM-S4', brand: 'Samsung', warehouse: 'WH-LA1' },
+      { pn: 'NUM-D3', brand: 'Samsung', generation: 'DDR3', warehouse: 'WH-LA1' },
+    ]);
+    const id = await createOrder(mgr, [
+      lotLine(k4!, 'NUM-K4', 'WH-LA1'), lotLine(s4!, 'NUM-S4', 'WH-LA1'), lotLine(d3!, 'NUM-D3', 'WH-LA1'),
+    ]);
     expect(await numbers(mgr, id)).toEqual([['NUM-D3', 1], ['NUM-K4', 2], ['NUM-S4', 3]]);
+
+    // The Kingston lot comes off the order: a gap, nothing renumbered.
+    const kept = (await detailLines(mgr, id)).filter(l => l.inventoryId !== k4);
+    expect((await saveLines(mgr, id, kept)).status).toBe(200);
+    expect(await numbers(mgr, id)).toEqual([['NUM-D3', 1], ['NUM-S4', 3]]);
+
+    // The Samsung DDR4 lot is re-spec'd to sort first, and the DDR3 lot moves
+    // to another warehouse: both keep their #.
+    const sql = getTestDb();
+    await sql`UPDATE order_lines SET brand = 'Adata', generation = 'DDR2' WHERE id = ${s4}`;
+    await sql`UPDATE order_lines SET warehouse_id = 'WH-NJ2' WHERE id = ${d3}`;
+    expect(await numbers(mgr, id)).toEqual([['NUM-D3', 1], ['NUM-S4', 3]]);
+    const plain = await workbook(mgr, `/api/sell-orders/${id}/packing-list`);
+    expect(plain.worksheets.map(w => [w.name, packRows(w)])).toEqual([
+      ['Pack - LA1', [['3', 'NUM-S4']]],
+      ['Pack - NJ2', [['1', 'NUM-D3']]],
+    ]);
+
+    // Re-added later, the Kingston lot is a new product: the next #, not its old one.
+    await addLines(mgr, id, [lotLine(k4!, 'NUM-K4', 'WH-LA1')]);
+    expect(await numbers(mgr, id)).toEqual([['NUM-D3', 1], ['NUM-S4', 3], ['NUM-K4', 4]]);
   });
 
   it('on a Shipped order it appends too', async () => {
@@ -448,5 +483,70 @@ describe('sell order #: once past Draft, an added product takes the next #', () 
       ['Pack - LA1', [['3', 'NUM-D3'], ['1', 'NUM-LA']]],
       ['Pack - NJ2', [['2', 'NUM-NJ']]],
     ]);
+  });
+});
+
+// Orders that existed before 0170 showed a # derived on every read; the boot
+// freezes exactly that number — sorted set first, then each append batch — so
+// no label already written moves.
+describe('sell order #: the boot freezes the numbers older orders showed', () => {
+  let mgr: string;
+  beforeEach(async () => {
+    await resetDb();
+    mgr = (await loginAs(ALEX)).token;
+  });
+
+  it('numbers the sorted set by the packing list, then each append batch after it, tabs and 0s included', async () => {
+    const [po] = await twoPos();
+    const [k4, s4, d3, h4, a3, nj, zero] = await lotsOn(po!, [
+      { pn: 'FRZ-K4', brand: 'Kingston', warehouse: 'WH-LA1' },
+      { pn: 'FRZ-S4', brand: 'Samsung', warehouse: 'WH-LA1' },
+      { pn: 'FRZ-D3', brand: 'Samsung', generation: 'DDR3', warehouse: 'WH-LA1' },
+      { pn: 'FRZ-H4', brand: 'Hynix', warehouse: 'WH-LA1' },
+      { pn: 'FRZ-A3', brand: 'Adata', generation: 'DDR3', warehouse: 'WH-LA1' },
+      { pn: 'FRZ-NJ', brand: 'Kingston', warehouse: 'WH-NJ2' },
+      { pn: 'FRZ-Z0', brand: 'Crucial', warehouse: 'WH-LA1' },
+    ]);
+    const id = await createOrder(mgr, [
+      lotLine(k4!, 'FRZ-K4', 'WH-LA1'), lotLine(s4!, 'FRZ-S4', 'WH-LA1'), lotLine(nj!, 'FRZ-NJ', 'WH-NJ2'),
+      lotLine(zero!, 'FRZ-Z0', 'WH-LA1'), lotLine(d3!, 'FRZ-D3', 'WH-LA1'), lotLine(h4!, 'FRZ-H4', 'WH-LA1'),
+      lotLine(a3!, 'FRZ-A3', 'WH-LA1'),
+    ]);
+    // As the order stood before 0170: nothing stored; K4, S4, NJ and a line
+    // held at 0 in the sorted set, D3 and H4 added by the first save past
+    // Draft, A3 by the second.
+    const sql = getTestDb();
+    await sql`UPDATE sell_order_lines SET qty = 0 WHERE sell_order_id = ${id} AND inventory_id = ${zero}`;
+    await sql`UPDATE sell_order_lines SET product_no = NULL, append_batch = CASE
+                WHEN inventory_id IN (${d3}, ${h4}) THEN 1
+                WHEN inventory_id = ${a3} THEN 2 END
+              WHERE sell_order_id = ${id}`;
+    await sql`UPDATE sell_orders SET next_product_no = 1 WHERE id = ${id}`;
+
+    expect(await freezeLegacySellNumbers(sql)).toBeGreaterThanOrEqual(1);
+    // The sorted set walks LA1 (Crucial, Kingston, Samsung) then NJ2; batch 1
+    // in sheet order (DDR3 before DDR4); batch 2 last.
+    expect(await numbers(mgr, id)).toEqual([
+      ['FRZ-Z0', 1], ['FRZ-K4', 2], ['FRZ-S4', 3], ['FRZ-NJ', 4], ['FRZ-D3', 5], ['FRZ-H4', 6], ['FRZ-A3', 7],
+    ]);
+    // The counter picks up after them, and a second boot changes nothing.
+    await addLines(mgr, id, [typedLine('FRZ-T1')]);
+    expect((await numbers(mgr, id)).at(-1)).toEqual(['FRZ-T1', 8]);
+    expect(await freezeLegacySellNumbers(sql)).toBe(0);
+  });
+
+  it('numbers a line an older instance wrote unnumbered into a numbered order, as a save would', async () => {
+    const [po] = await twoPos();
+    const [k4, s4] = await lotsOn(po!, [
+      { pn: 'FRZ-K4', brand: 'Kingston', warehouse: 'WH-LA1' },
+      { pn: 'FRZ-S4', brand: 'Samsung', warehouse: 'WH-LA1' },
+    ]);
+    const id = await createOrder(mgr, [lotLine(k4!, 'FRZ-K4', 'WH-LA1')]);
+    const sql = getTestDb();
+    await sql`INSERT INTO sell_order_lines (sell_order_id, inventory_id, category, label, part_number, qty, unit_price, warehouse_id)
+              VALUES (${id}, ${s4}, 'RAM', 'FRZ-S4', 'FRZ-S4', 1, 30, 'WH-LA1')`;
+    expect((await numbers(mgr, id)).map(([pn, no]) => [pn, no ?? null])).toEqual([['FRZ-K4', 1], ['FRZ-S4', null]]);
+    await freezeLegacySellNumbers(sql);
+    expect(await numbers(mgr, id)).toEqual([['FRZ-K4', 1], ['FRZ-S4', 2]]);
   });
 });

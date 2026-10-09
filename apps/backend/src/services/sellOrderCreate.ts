@@ -3,6 +3,7 @@ import type { Sql } from 'postgres';
 import { nextHumanId } from '../lib/id-seq';
 import { committedClaimsByLine, isSellableLineStatus } from '../lib/sellCommitment';
 import { writeSellOrderEvent } from './sellOrderAudit';
+import { assignSellProductNos } from './sellOrderNumbers';
 import {
   convertToUsd, getLatestRateToUsd, type SupportedCurrency,
 } from '../lib/fx';
@@ -115,9 +116,9 @@ export interface SellOrderLineInsert {
   sourceCurrency: string | null;
   sourceUnitPrice: number | null;
   sourceFxRate: number | null;
-  // Which save past Draft added the line (sell_order_lines.append_batch), or
-  // null for a line numbered with the order's sorted set.
-  appendBatch: number | null;
+  // The product's # when the line continues one already on the order; null
+  // for a new product, which assignSellProductNos numbers after the insert.
+  productNo: number | null;
 }
 
 export async function insertSellOrderLine(
@@ -129,14 +130,14 @@ export async function insertSellOrderLine(
     INSERT INTO sell_order_lines
       (sell_order_id, inventory_id, category, label, sub_label, part_number,
        qty, unit_price, warehouse_id, condition, position,
-       source_currency, source_unit_price, source_fx_rate_to_usd, append_batch)
+       source_currency, source_unit_price, source_fx_rate_to_usd, product_no)
     VALUES
       (${sellOrderId}, ${line.inventoryId}, ${line.category}, ${line.label},
        ${line.subLabel}, ${line.partNumber},
        ${line.qty}, ${line.unitPriceUsd},
        ${line.warehouseId}, ${line.condition}, ${line.position},
        ${line.sourceCurrency}, ${line.sourceUnitPrice}, ${line.sourceFxRate},
-       ${line.appendBatch})
+       ${line.productNo})
   `;
 }
 
@@ -154,6 +155,7 @@ export async function createSellOrderDraft(
   const fx = await getLatestRateToUsd(sql, input.currency);
 
   let nextId!: string;
+  let products = 0;
   let outcome: CreateDraftResult = { ok: true, id: '', customerId: input.customerId, lineCount: input.lines.length, currency: input.currency };
 
   await sql.begin(async (tx) => {
@@ -186,13 +188,18 @@ export async function createSellOrderDraft(
         sourceCurrency: isNonUsd ? input.currency : null,
         sourceUnitPrice: isNonUsd ? l.unitPrice : null,
         sourceFxRate: isNonUsd ? fx.rate : null,
-        appendBatch: null,
+        productNo: null,
       });
     }
+    // Numbered once, in packing-list order, and never again.
+    await assignSellProductNos(tx, nextId);
+    // Products, by # — lots of one product share it.
+    [{ products }] = await tx<{ products: number }[]>`
+      SELECT COUNT(DISTINCT product_no)::int AS products FROM sell_order_lines WHERE sell_order_id = ${nextId}`;
     await writeSellOrderEvent(tx, nextId, input.actorUserId, 'created', {
       source: input.source,
       status: 'Draft',
-      lineCount: input.lines.length,
+      lineCount: products,
       customerId: input.customerId,
       currency: input.currency,
       fxRateToUsd: fx.rate,
@@ -201,5 +208,5 @@ export async function createSellOrderDraft(
   });
 
   if (!outcome.ok) return outcome;
-  return { ok: true, id: nextId, customerId: input.customerId, lineCount: input.lines.length, currency: input.currency };
+  return { ok: true, id: nextId, customerId: input.customerId, lineCount: products, currency: input.currency };
 }
