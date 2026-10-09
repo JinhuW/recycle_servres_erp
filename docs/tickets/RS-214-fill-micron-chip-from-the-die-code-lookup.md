@@ -2,13 +2,13 @@
 id: RS-214
 title: Fill Micron Chip # from the die-code lookup
 type: task
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-09
 reporter: jinhu
 branch: fix/micron-chip-die-lookup
-pr:
-version:
+pr: 569
+version: 1.233.1
 related: [RS-209, RS-122]
 ---
 
@@ -45,18 +45,18 @@ It carries no stock counts.
 
 ## Acceptance criteria
 
-- [ ] Migration 0168 writes the looked-up die onto Micron-brand RAM lines
+- [x] Migration 0168 writes the looked-up die onto Micron-brand RAM lines
       whose Chip # is blank or not a 3-letter code. That covers 104 part
       numbers, matched on the part number with every non-alphanumeric
       character stripped.
-- [ ] A line already holding a 3-letter code (any case or padding), another
+- [x] A line already holding a 3-letter code (any case or padding), another
       brand, a non-RAM line and a skipped part number are untouched.
-- [ ] Six misread codes are corrected to the die their part number decodes
+- [x] Six misread codes are corrected to the die their part number decodes
       to: TBG→TBJ, PFX→PFK, RGC→RGV, OBJ→QBJ, MFL→WFL, WDO→WDQ. Micron's
       decoder places each misread on no DDR DIMM (LPDDR4, RLDRAM, or
       nothing). A seventh, D9BPH→D8BPH, is already `BPH` after RS-209.
-- [ ] Running it twice changes nothing.
-- [ ] Dry-run on dev (prod copy, 2026-10-09): 140 lines change. Every value
+- [x] Running it twice changes nothing.
+- [x] Dry-run on dev (prod copy, 2026-10-09): 140 lines change. Every value
       overwritten is junk, a partial read that agrees (`7DB47 DGTGV`→TGV,
       `MICRON S9SRK`→SRK, `1HR75D8PJ`→BPJ), or one of the six misreads.
 

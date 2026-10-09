@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-214](./RS-214-fill-micron-chip-from-the-die-code-lookup.md) | done | task | P2 | Fill Micron Chip # from the die-code lookup | — |
 | [RS-212](./RS-212-inventory-lots-table-shows-each-lot-s-line-next-to-i.md) | done | story | P2 | Inventory lots table shows each lot's line # next to its PO | 1.232.0 |
 | [RS-210](./RS-210-ram-and-ssd-spec-selects-cascade-so-a-line-s-options.md) | done | story | P2 | RAM and SSD spec selects cascade, so a line's options can't conflict | 1.233.0 |
 | [RS-209](./RS-209-micron-chip-keeps-only-the-die-code-vpp-tbh.md) | done | story | P2 | Micron Chip # keeps only the die code (VPP, TBH, …) | 1.231.0 |
