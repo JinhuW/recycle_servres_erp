@@ -51,11 +51,18 @@ describe('one line validator', () => {
       token, body: { category: 'RAM', warehouseId: 'WH-LA1', payment: 'self', lines: [{ ...LINE, ...line }] },
     });
     for (const bad of [{ qty: 0 }, { qty: 1.5 }, { unitCost: -1 }, { sellPrice: -5 }, { health: 101 },
-      { rpm: 0 }, { brand: 'x'.repeat(121) }, { brand: 42 }]) {
+      { rpm: 0 }, { brand: 'x'.repeat(121) }, { brand: 42 },
+      // The refused field is also what the message would name the product by.
+      { partNumber: 42 }, { partNumber: '', description: 42 }]) {
       const r = await create(bad);
       expect(r.status, JSON.stringify(bad)).toBe(400);
       expect(r.body.error).toMatch(/^new product 1\b/);
     }
+    const notALine = await api<{ error: string }>('POST', '/api/orders', {
+      token, body: { category: 'RAM', warehouseId: 'WH-LA1', payment: 'self', lines: [null] },
+    });
+    expect(notALine.status).toBe(400);
+    expect(notALine.body.error).toMatch(/^new product 1\b/);
     const missing = await api<{ error: string }>('POST', '/api/orders', {
       token, body: { category: 'RAM', warehouseId: 'WH-LA1', payment: 'self', lines: [{ ...LINE, unitCost: undefined }] },
     });

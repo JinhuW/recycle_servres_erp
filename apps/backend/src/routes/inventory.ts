@@ -18,7 +18,7 @@ import {
   CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields, categoryTabSheets,
   sortSheetRows, type ExportCategory,
 } from '../lib/categoryColumns';
-import { UNTYPED_ITEM, normSellPrice, SPEC_FIELD_TO_DB_COL, specConflicts } from '@recycle-erp/shared';
+import { UNTYPED_ITEM, chipMarkingCanon, normSellPrice, SPEC_FIELD_TO_DB_COL, specConflicts } from '@recycle-erp/shared';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { settleSoldTx } from '../services/orderSold';
 import { poLineNo } from '../lib/poLineNo';
@@ -1150,6 +1150,10 @@ inventory.get('/:id', async (c) => {
   `)[0];
   if (!row) return c.json({ error: 'Not found' }, 404);
   if (u.role !== 'manager' && row.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
+  // A lot held for a shipped sale keeps its qty and cost as well (PATCH
+  // refuses them). Its own flag: the PO sits at Reviewing, so the closed
+  // book's "move it back to Reviewing" would be no advice.
+  row.line_held = (await heldLines(sql, [id])).size > 0;
 
   const events = await sql`
     SELECT e.id, e.kind, e.detail, e.created_at, u.name AS actor_name, u.initials AS actor_initials
@@ -1335,6 +1339,14 @@ inventory.patch('/:id', async (c) => {
     // column pins itself against the lines forever.
     const goodsFollowsLines = touchesGoods ? await goodsTotalIsMirror(tx, orderId) : false;
 
+    // The brand decides the chip's cut, and this editor sends only what
+    // moved: a lot turned Micron re-cuts the marking it already holds.
+    const chipBefore = before.chip_number == null ? null : String(before.chip_number);
+    const brandMoved = has('brand') === 1 && specVal(body.brand) !== (before.brand ?? null);
+    const chipAfter = brandMoved && chipBefore !== null
+      ? chipMarkingCanon(chipBefore, specVal(body.brand)) || null
+      : undefined;
+
     await tx`
       UPDATE order_lines SET
         status      = COALESCE(${body.status ?? null}, status),
@@ -1372,7 +1384,8 @@ inventory.patch('/:id', async (c) => {
         speed          = CASE WHEN ${has('speed')}::int = 1          THEN ${specVal(body.speed)}          ELSE speed END,
         interface      = CASE WHEN ${has('interface')}::int = 1      THEN ${specVal(body.interface)}      ELSE interface END,
         form_factor    = CASE WHEN ${has('formFactor')}::int = 1     THEN ${specVal(body.formFactor)}     ELSE form_factor END,
-        description    = CASE WHEN ${has('description')}::int = 1    THEN ${specVal(body.description)}    ELSE description END
+        description    = CASE WHEN ${has('description')}::int = 1    THEN ${specVal(body.description)}    ELSE description END,
+        chip_number    = CASE WHEN ${chipAfter !== undefined ? 1 : 0}::int = 1 THEN ${chipAfter ?? null} ELSE chip_number END
       WHERE id = ${id}
     `;
     // One event per changed field — keeps the timeline easy to skim.
@@ -1391,6 +1404,12 @@ inventory.patch('/:id', async (c) => {
       await tx`
         INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
         VALUES (${id}, ${u.id}, ${kind}, ${tx.json({ field: f, from: fromStr, to: toStr })})
+      `;
+    }
+    if (chipAfter !== undefined && chipAfter !== chipBefore) {
+      await tx`
+        INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
+        VALUES (${id}, ${u.id}, 'edited', ${tx.json({ field: 'chipNumber', from: chipBefore, to: chipAfter })})
       `;
     }
     if (touchesGoods) await syncOrderGoodsTotal(tx, orderId, goodsFollowsLines);

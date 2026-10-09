@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-220](./RS-220-pre-release-review-fixes-for-the-v1-238-release.md) | in-progress | bug | P1 | Pre-release review fixes for the v1.238 release | — |
 | [RS-218](./RS-218-a-po-goes-back-to-reviewing-while-some-of-its-produc.md) | done | story | P2 | A PO goes back to Reviewing while some of its products are shipped; only those stay locked | 1.238.0 |
 | [RS-217](./RS-217-rank-list-offers-x4-on-desktop-memory-and-ssds-gain.md) | done | bug | P2 | Rank list offers x4 on Desktop memory, and SSDs gain a 3.5in form | 1.237.0 |
 | [RS-215](./RS-215-pre-release-review-fixes-for-the-v1-237-release.md) | done | bug | P1 | Pre-release review fixes for the v1.237 release | 1.237.1 |

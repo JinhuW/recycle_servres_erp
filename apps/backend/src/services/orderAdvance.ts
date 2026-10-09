@@ -238,10 +238,13 @@ async function cascadeBlockers(
 // leaves behind: those a committed sell order claims stay confirmed. The lines
 // are locked first — after the orders row the caller holds, the one lock
 // order — so a promotion that commits while this waits is read here instead of
-// being cascaded under.
-async function heldBackLineIds(tx: SqlLike, orderId: string, newLineStatus: string): Promise<string[]> {
+// being cascaded under. Only a PO coming back from past review has Done lines
+// to leave, so a forward move into Reviewing takes no lock.
+async function heldBackLineIds(
+  tx: SqlLike, orderId: string, fromLifecycle: string, newLineStatus: string,
+): Promise<string[]> {
   const movingBack = statusesAheadOf(newLineStatus);
-  if (movingBack.length === 0 || !isSellableLineStatus(newLineStatus)) return [];
+  if (!isClosedBook(fromLifecycle) || movingBack.length === 0 || !isSellableLineStatus(newLineStatus)) return [];
   await tx`SELECT id FROM order_lines WHERE order_id = ${orderId} ORDER BY id FOR UPDATE`;
   return (await committedLines(tx, orderId, movingBack, committedSellStatuses())).lineIds;
 }
@@ -598,7 +601,7 @@ export async function advanceOrderTx(
   if (newLineStatus) {
     const blocked = await cascadeBlockers(tx, id, newLineStatus);
     if (blocked) return blocked;
-    heldBack = await heldBackLineIds(tx, id, newLineStatus);
+    heldBack = await heldBackLineIds(tx, id, cur.lifecycle, newLineStatus);
   }
   await tx`UPDATE orders SET lifecycle = ${nextStageId} WHERE id = ${id}`;
 
