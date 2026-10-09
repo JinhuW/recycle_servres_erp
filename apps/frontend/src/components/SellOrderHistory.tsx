@@ -105,6 +105,11 @@ function fieldLabel(t: TFn, raw: string): string {
 
 const MONEY_FIELDS = new Set(['unit_price']);
 
+// The products an order was created with, by #. Events from before v1.235.0
+// carry only the line count.
+const productsOf = (d: Record<string, unknown>): number =>
+  Number(d.productCount ?? d.lineCount);
+
 function renderValue(field: string, v: unknown, locale: string): string {
   if (v == null || v === '') return '—';
   if (MONEY_FIELDS.has(field) && typeof v === 'number') return fmtUSD(v, locale);
@@ -121,10 +126,10 @@ function summarize(event: SellOrderEvent, locale: string, t: TFn): React.ReactNo
         <>
           {t('historyCreatedPrefix')} (
           {t('historyByActor', { name: event.actor?.name ?? t('historyDefaultManager') })}
-          ){typeof d.lineCount === 'number'
-              ? <> · {d.lineCount === 1
-                  ? t('historyLineCountOne', { n: d.lineCount })
-                  : t('historyLineCountMany', { n: d.lineCount })}</>
+          ){typeof (d.productCount ?? d.lineCount) === 'number'
+              ? <> · {productsOf(d) === 1
+                  ? t('historyLineCountOne', { n: 1 })
+                  : t('historyLineCountMany', { n: productsOf(d) })}</>
               : null}
         </>
       );
