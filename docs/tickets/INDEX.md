@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-212](./RS-212-inventory-lots-table-shows-each-lot-s-line-next-to-i.md) | in-progress | story | P2 | Inventory lots table shows each lot's line # next to its PO | — |
+| [RS-212](./RS-212-inventory-lots-table-shows-each-lot-s-line-next-to-i.md) | done | story | P2 | Inventory lots table shows each lot's line # next to its PO | 1.232.0 |
 | [RS-209](./RS-209-micron-chip-keeps-only-the-die-code-vpp-tbh.md) | done | story | P2 | Micron Chip # keeps only the die code (VPP, TBH, …) | 1.231.0 |
 | [RS-208](./RS-208-inventory-select-all-reaches-every-lot-the-filter-ma.md) | done | bug | P2 | Inventory select all reaches every lot the filter matches | 1.230.2 |
 | [RS-207](./RS-207-pack-mode-side-panel-can-t-be-scrolled-to-its-action.md) | done | bug | P2 | Pack mode side panel can't be scrolled to its actions | 1.230.1 |
