@@ -32,7 +32,7 @@ import { cascadePatch } from '@recycle-erp/shared';
 // appears underneath — matching design/dashboard.jsx#EditOrderPage which
 // passes `editing={true}` to the shared OrderForm.
 export function LineDrawer({
-  line, idx, onChange, onClose, onRemove, canRemove, editing = false,
+  line, idx, newNo, onChange, onClose, onRemove, canRemove, editing = false,
   onConfirmLine, onConfirmError, duplicateOnLines, readOnly = false,
   sellPriceEditable = false, photoCtx, market, missingFields,
 }: {
@@ -47,6 +47,8 @@ export function LineDrawer({
   onConfirmError?: (msg: string) => void;
   // The other lines sharing this line's part #, named as lineRef names them.
   duplicateOnLines?: string[];
+  // The row's "new n" while it has no #, as the table numbers it.
+  newNo?: number | null;
   // Locked order (Done, or a purchaser past their stage): the drawer still
   // opens so the line's full spec stays lookup-able, but nothing can change.
   readOnly?: boolean;
@@ -252,8 +254,8 @@ export function LineDrawer({
               background: 'var(--bg-elev)', border: '1px solid var(--border)',
               display: 'grid', placeItems: 'center',
               fontSize: line.no != null ? 13 : 10, fontWeight: 600, color: 'var(--fg-muted)',
-              flexShrink: 0,
-            }}>{line.no ?? t('lineNoNew')}</div>
+              flexShrink: 0, textAlign: 'center', lineHeight: 1.1,
+            }}>{line.no ?? (newNo != null ? t('lineNoNewN', { n: newNo }) : t('lineNoNew'))}</div>
             <div style={{
               width: 56, height: 56, borderRadius: 8,
               background: 'var(--bg-elev)', border: '1px solid var(--border)',

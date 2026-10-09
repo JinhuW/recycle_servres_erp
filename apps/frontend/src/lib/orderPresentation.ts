@@ -51,6 +51,10 @@ export function trackingNote(
 export const signedUSD0 = (n: number, locale = 'en-US'): string =>
   (n > 0 ? '+' : n < 0 ? '−' : '') + fmtUSD0(Math.abs(n), locale);
 
+// "N product(s)", the count the PO timeline and the activity page show.
+export const productsCount = (t: Translate, n: number): string =>
+  t(n === 1 ? 'acNLine' : 'acNLines', { n });
+
 /**
  * The `created` event's detail line.
  *
@@ -58,10 +62,6 @@ export const signedUSD0 = (n: number, locale = 'en-US'): string =>
  * and holds no lines, and printing those absences gave "null · 0 lines · 0
  * units". Whatever the event doesn't know is left out.
  */
-// "N product(s)", the count the PO timeline and the activity page show.
-export const productsCount = (t: Translate, n: number): string =>
-  t(n === 1 ? 'acNLine' : 'acNLines', { n });
-
 export function createdEventParts(detail: Record<string, unknown>, t: Translate): string[] {
   const category = typeof detail.category === 'string' ? detail.category : null;
   // Rows synthesised by migration 0076 counted their lines at backfill time

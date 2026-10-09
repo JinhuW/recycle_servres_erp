@@ -57,10 +57,14 @@ the same thing.
   (M393A4K40DB3-CWE)", where it used to say "Line 4". So two new rows of one
   part number read apart in the duplicate-part dialog, the drawer, the serial
   check and the scan toast.
-- **Server messages name the product.** A new PO's errors name the `#` the
-  product will get ("#2: …"). Errors on a product being added say "new
-  product 1 (SSDSC2KB960G8)": the editor sends its unsaved rows in list
-  order.
+- **Server messages name the product.** A new PO's errors say "new product
+  2 (M471A2K43DB1-CWE)". The page sends every row in list order, so the
+  number matches the page. Errors on a product added to an existing PO name
+  it by what it is, "new product (SSDSC2KB960G8)", because a save may send
+  that one row alone.
+- **The drawer and the phone form agree.** The drawer badge reads "new n"
+  like the table. The phone's line form names its line as the review list
+  numbers it.
 - **Counts follow the `#`.** The phone's order header, folds and review count
   products by `#`, as desktop does. The archive and unarchive entries count
   lots, because a transfer can split one product into two. The activity page

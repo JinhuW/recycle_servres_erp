@@ -122,10 +122,11 @@ on to Sold once every line has sold (v1.164.0).
     Saved products are named by `#` — "#5 is missing: Generation", "This
     Part # is already on #2, #7" — never by their place in the list. A
     transfer's two rows of one product are not flagged as a duplicate part #.
-    The server names a product the same way: on a new PO by the `#` it will
-    get ("#2: Laptop doesn't fit RDIMM"), and one being added by its place
-    among the added ones and its part number ("new product 1 (SSDSC2KB960G8):
-    …", v1.236.0).
+    The server names a product not saved yet the same way when it can: a new
+    PO arrives with every row in list order ("new product 2
+    (M471A2K43DB1-CWE): Laptop doesn't fit RDIMM"). A product added to a PO
+    may arrive alone, so it is named by what it is ("new product
+    (SSDSC2KB960G8): …", v1.236.0).
   - The `#` is the same on the PO page, the phone's Products screen, Review
     mode, the PO list's drawer, the PO workbook (a leading `#` column on every
     sheet, v1.234.0), each sell order's "From PO-1432 #3", Inventory and the

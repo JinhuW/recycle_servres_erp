@@ -289,7 +289,7 @@ describe('the API refuses a spec conflict', () => {
     const { token } = await loginAs(MARCUS);
     const r = await createPo(token, [SSD_LINE, { ...RAM_LINE, classification: 'RDIMM', rank: '2Rx4' }]);
     expect(r.status).toBe(400);
-    expect(r.body.error).toBe("#2: Laptop doesn't fit RDIMM (RDIMM is Server)");
+    expect(r.body.error).toBe("new product 2 (M471A2K43DB1-CWE): Laptop doesn't fit RDIMM (RDIMM is Server)");
     const ok = await createPo(token, [{ ...RAM_LINE, classification: 'RDIMM', type: 'Server', rank: '2Rx4' }]);
     expect(ok.status).toBe(201);
   });
@@ -301,7 +301,7 @@ describe('the API refuses a spec conflict', () => {
       token, body: { addLines: [{ ...SSD_LINE, interface: 'SAS', formFactor: 'M.2 2280' }] },
     });
     expect(add.status).toBe(400);
-    expect(add.body.error).toBe("new product 1 (SSDSC2KB960G8): M.2 2280 doesn't fit a SAS SSD");
+    expect(add.body.error).toBe("new product (SSDSC2KB960G8): M.2 2280 doesn't fit a SAS SSD");
   });
 
   it('on a PO line edit that changes the conflicting fields, and only then', async () => {

@@ -183,10 +183,10 @@ patchRoutes.patch('/:id', async (c) => {
   const addCats: string[] = [];
   for (let i = 0; i < (body.addLines ?? []).length; i++) {
     const l = body.addLines![i];
-    // Not saved yet, so no #. Named as the editor names it: the editor sends
-    // its unsaved rows in list order, so the nth here is its "new n".
+    // Not saved yet, so no #. A save may send one row of several new ones, so
+    // its place here is not the "new n" the editor shows: named by what it is.
     const name = l.partNumber?.trim() || l.description?.trim();
-    const ref = name ? `new product ${i + 1} (${name})` : `new product ${i + 1}`;
+    const ref = name ? `new product (${name})` : 'new product';
     const cat = l.category ?? inheritedCat;
     if (!cat) return c.json({ error: `${ref}: category is required` }, 400);
     addCats.push(cat);

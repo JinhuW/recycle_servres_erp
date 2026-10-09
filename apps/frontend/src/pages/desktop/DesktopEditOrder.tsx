@@ -1811,6 +1811,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
           onConfirmLine={() => confirmLine(activeIdx)}
           onConfirmError={showErrorDialog}
           duplicateOnLines={dupByIdx.get(activeIdx)?.map(j => lineRef(lines[j], t, newNos[j]))}
+          newNo={newNos[activeIdx]}
           readOnly={!canEditOrder}
           sellPriceEditable={canEditSellPrice}
           missingFields={missingNamesFor(lines[activeIdx])}

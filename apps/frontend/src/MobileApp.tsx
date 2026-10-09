@@ -769,6 +769,9 @@ function Shell() {
           detected={capture.detected}
           lineCount={capture.lines.length}
           editingLineIdx={capture.editingLineIdx ?? null}
+          newNo={capture.editingLineIdx != null
+            ? newOrdinals(capture.lines)[capture.editingLineIdx]
+            : newOrdinals(capture.lines).filter(n => n != null).length + 1}
           existingLine={existing}
           allowZeroQty={!!capture.editingId && !!existing?.id}
           onSaveLine={onSaveLine}

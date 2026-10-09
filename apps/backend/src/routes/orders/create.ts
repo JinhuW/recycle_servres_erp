@@ -70,12 +70,17 @@ createRoutes.post('/', async (c) => {
   // The owner's, not the actor's: a manager filing on behalf ships to the
   // purchaser's location.
   const warehouseId = body.warehouseId ?? owner.ownerDefaultWarehouseId;
+  // A new PO sends every row in list order, so the nth is the page's "new n".
+  const refOf = (i: number): string => {
+    const name = body.lines[i].partNumber?.trim() || body.lines[i].description?.trim();
+    return name ? `new product ${i + 1} (${name})` : `new product ${i + 1}`;
+  };
   const lineCats: string[] = [];
   for (let i = 0; i < body.lines.length; i++) {
     const inputErr = validateLineInput(body.lines[i] as Record<string, unknown>, 'create');
-    if (inputErr) return c.json({ error: `#${i + 1}: ${inputErr}` }, 400);
+    if (inputErr) return c.json({ error: `${refOf(i)}: ${inputErr}` }, 400);
     const cat = body.lines[i].category ?? body.category;
-    if (!cat) return c.json({ error: `#${i + 1}: category is required` }, 400);
+    if (!cat) return c.json({ error: `${refOf(i)}: category is required` }, 400);
     lineCats.push(cat);
   }
 
@@ -90,10 +95,10 @@ createRoutes.post('/', async (c) => {
   for (let i = 0; i < body.lines.length; i++) {
     const l = body.lines[i];
     const issue = serialIssue({ ...l, category: lineCats[i] });
-    if (issue) return c.json({ error: serialErr(`#${i + 1}`, issue) }, 400);
-    const labelErr = identityErr(`#${i + 1}`, lineCats[i], l);
+    if (issue) return c.json({ error: serialErr(refOf(i), issue) }, 400);
+    const labelErr = identityErr(refOf(i), lineCats[i], l);
     if (labelErr) return c.json({ error: labelErr }, 400);
-    const specErr = specRuleErr(`#${i + 1}`, lineCats[i], l);
+    const specErr = specRuleErr(refOf(i), lineCats[i], l);
     if (specErr) return c.json({ error: specErr }, 400);
   }
 

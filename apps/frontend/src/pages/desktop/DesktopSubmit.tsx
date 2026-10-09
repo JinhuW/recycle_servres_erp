@@ -478,8 +478,9 @@ function OrderForm({
 
   // Serial rules for a set of lines; null when everything passes.
   const collectSerialIssues = (ls: Line[]): SerialLineIssue[] | null => {
+    const nos = newOrdinals(ls);
     const found = ls
-      .map((l, i) => ({ line: lineRef(l, t, newOrdinals(ls)[i]), label: lineLabel(l), issue: serialIssue(l) }))
+      .map((l, i) => ({ line: lineRef(l, t, nos[i]), label: lineLabel(l), issue: serialIssue(l) }))
       .filter((x): x is SerialLineIssue => x.issue !== null);
     return found.length ? found : null;
   };
@@ -1217,6 +1218,7 @@ function OrderForm({
           onConfirmLine={() => handleConfirmLine(activeIdx)}
           onConfirmError={showErrorDialog}
           duplicateOnLines={dupByIdx.get(activeIdx)?.map(j => lineRef(lines[j], t, newNos[j]))}
+          newNo={newNos[activeIdx]}
         />
       )}
 
