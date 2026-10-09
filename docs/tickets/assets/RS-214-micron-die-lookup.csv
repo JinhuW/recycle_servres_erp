@@ -1,0 +1,125 @@
+part_number,generation,capacity,rank,suggested_fbga,suggested_die,confidence,evidence,notes,written
+MTA36ASF4G72PZ-2G6E1QG,DDR4,32GB,2Rx4,D9VPS,VPS,decoded,rule [DDR4 8Gb x4 mono rev E spd mid] -> D9VPSx2; Micron D9VPS=MT40A2G4SA-075:E,,yes
+Micron 16GB DDR4-2400T,DDR4,16GB,2Rx4,,,unknown,,NOT A PART NUMBER (description). 16GB 2Rx4 DDR4-2400 RDIMM is most likely MTA36ASF2G72PZ-2G3B1 -> D9TGL (TGL); an A1 stick would be D9RGV. Read the label.,skipped: unknown
+MTA72ASS8G72LZ-2G3B2PG,DDR4,64GB,4DRx4,D9TGV,TGV,observed,observed D9TGVx1; Micron D9TGV=MT40A4G4NRE-083E:B,the purchaser's chip text agrees.,yes
+CT8G4SFS824A.M8FRS,DDR4,8GB,2Rx4,D8BPJ,BPJ,decoded,rule [CT-M 8Gb x8 R] -> D8BPJx1; Micron D8BPJ=MT40A1G8SA-062E:R,ERP rank 2Rx4 looks wrong; PN implies 1Rx8.,yes
+MTA36ASF2G72PZ-2G1A2KK,DDR4,16GB,2Rx4,D9RGV,RGV,decoded,rule [DDR4 4Gb x4 mono rev A spd lo] -> D9RGVx7; Micron D9RGV=MT40A1G4HX-093E:A,,yes
+MTC4C10163S1SC56BD1,DDR5,8GB,1Rx16,D8DKV,DKV,observed,observed D8DKVx1; Micron D8DKV=MT60B1G16HD-56B:D,,yes
+Na,DDR5,32GB,1Rx4,,,unknown,,"NOT A PART NUMBER. Also 32GB DDR5 UDIMM listed as 1Rx4, which does not exist for UDIMM. Re-check the stick.",skipped: unknown
+MTA4ATF1G64AZ-3G2E1,DDR4,8GB,1Rx16,D9ZFW,ZFW,observed,observed D9ZFWx1; Micron D9ZFW=MT40A1G16KD-062E:E,,yes
+MTA36ASF4G72PZ-2G6D1SI,DDR4,32GB,2Rx4,D9TZX,TZX,decoded,rule [DDR4 8Gb x4 mono rev D spd mid] -> D9TZXx11; Micron D9TZX=MT40A2G4WE-075E:D,,yes
+CT8G4SF832A.8FJ1,DDR4,8GB,2Rx4,D9WSM,WSM,decoded,"rule D4 8Gb x8 J hi (9x D9WSM, 2x D9VPP); Micron D9WSM=MT40A1G8SA-062E:J",PN TYPO: likely CT8G4SFS832A.8FJ1. 8GB with 8 chips = 8Gb x8 J. D9VPP is possible on J modules. ERP rank 2Rx4 looks wrong; PN implies 1Rx8.,skipped: J-revision: J die or E-die VPP
+MTC16C2085S1SC48BA1,DDR5,32GB,2Rx8,D8BNJ,BNJ,decoded,rule [DDR5 16Gb x8 mono rev A spd 48] -> D8BNJx2; Micron D8BNJ=MT60B2G8HB-48B:A,,yes
+MTC8C1084S1SC48BA1,DDR5,16GB,1Rx8,D8BNJ,BNJ,decoded,rule [DDR5 16Gb x8 mono rev A spd 48] -> D8BNJx2; Micron D8BNJ=MT60B2G8HB-48B:A,,yes
+CT32G4S266M.M16FF,DDR4,32GB,2Rx8,D8CJV,CJV,decoded,rule CT-M 16Gb x8 F (CT32G4DFD832A.M16FF observed D8CJV); Micron D8CJV=MT40A2G8SA-062E:F,"PN TYPO: likely CT32G4SFD8266.M16FF. 32GB DDR4-2666 SODIMM, 16Gb x8 F-die.",yes
+MTA18ASF2G72PZ-2G6D1SI,DDR4,16GB,1Rx4,D9TZX,TZX,decoded,rule [DDR4 8Gb x4 mono rev D spd mid] -> D9TZXx11; Micron D9TZX=MT40A2G4WE-075E:D,,yes
+MTC16C2085S1UC48BA1,DDR5,32GB,2Rx8,D8BNJ,BNJ,decoded,rule [DDR5 16Gb x8 mono rev A spd 48] -> D8BNJx2; Micron D8BNJ=MT60B2G8HB-48B:A,,yes
+CT16G4SFD8266.M16FRS,DDR4,16GB,2Rx8,D8BPJ,BPJ,observed,chip text on the line '1HR75D8PJ' (= D8BPJ minus B); rule R2 (CT M 8Gb x8 R -> D8BPJ); Micron D8BPJ=MT40A1G8SA-062E:R,Observed CT16G4SFRA32A.M16FRS once had D9WSM.,yes
+CP16G4DFRA32A.C8FF,DDR4,16GB,1Rx8,C9BMX,BMX,decoded,rule [CT-C 16Gb x8 F] -> C9BMXx2; Micron C9BMX=CT40A2G8SA-062E:F,,yes
+MTA16ATF2G64HZ-2G3B1,DDR4,16GB,2Rx8,D9VHP,VHP,observed,chip text on the line '7TH7509VHP' (= D9VHP); Micron decoder D9VHP=MT40A1G8SA-075:H,CONFLICT: the PN decodes to B-die D9TBH (MT40A1G8WE-083E:B). The purchaser read D9VHP (H-die) off the stick. Re-check one stick before pricing.,skipped: conflict: part # and stick disagree
+MTC4C10163S1UC56BD1,DDR5,8GB,1Rx16,D8DKV,DKV,decoded,rule [DDR5 16Gb x16 mono rev D spd 56] -> D8DKVx1; Micron D8DKV=MT60B1G16HD-56B:D,,yes
+CT32G4SFD832A.C16FE,DDR4,32GB,2Rx8,C9BKY,BKY,decoded,"rule CT-C 16Gb x8 E (CT16G4DFRA266.C8FE, CT16G4SFRA266.C8FE observed C9BKY); Micron C9BKY=CT2G8Z32DD8JC-062E (16Gb x8 JC=E-die, 3200)",,yes
+MTC8C1084S1UC56BD1,DDR5,16GB,1Rx8,D8DKS,DKS,decoded,rule [DDR5 16Gb x8 mono rev D spd 56] -> D8DKSx5 D8DKTx1; Micron D8DKS=MT60B2G8RZ-56B:D,,yes
+MTA4ATF1G64HZ-3G2E2,DDR4,8GB,1Rx16,D9ZFW,ZFW,observed,observed D9ZFWx2; Micron D9ZFW=MT40A1G16KD-062E:E,,yes
+MTA16ATF1G64AZ-2G1B1,DDR4,8GB,2Rx8,D9TGG,TGG,decoded,rule [DDR4 4Gb x8 mono rev B spd lo] -> D9TGGx4; Micron D9TGG=MT40A512M8RH-083E:B,,yes
+MTA8ATF1G64HZ-2G6E1,DDR4,8GB,1Rx8,D9VPP,VPP,observed,observed D9VPPx3; Micron D9VPP=MT40A1G8SA-075:E,,yes
+MTA4ATF51264HZ-2G6E1,DDR4,4GB,1Rx16,D9WFH,WFH,micron-official,Micron module API: 512Mb x16 x4 comps; Micron decoder MT40A512M16LY-075:E=D9WFH (https://www.micron.com/sales-support/design-tools/fbga-parts-decoder); chip text on the line 'WFH' agrees,"No observed rule for 8Gb x16 E-die; the purchaser typed WFH, which agrees.",yes
+CT16G4SFRA32A.C8FF,DDR4,16GB,2Rx4,C9BMX,BMX,observed,observed C9BMXx2; Micron C9BMX=CT40A2G8SA-062E:F,ERP rank 2Rx4 looks wrong; PN implies 1Rx8.,yes
+CRD.MEM.64GB.4800.16GX8.CAMM,DDR5,64GB,2Rx4,,,unknown,,"NOT A MICRON PART NUMBER: a Dell CAMM description. If the chips are Micron 16Gb x8 at 4800 they would be A-die D8BNJ, but CAMMs were also built by Samsung/SK hynix. Read the chips.",skipped: unknown
+CT16G4DFD824A.M16FE,DDR4,16GB,2Rx4,D9VPP,VPP,decoded,rule CT-M 8Gb x8 E (CT8G4SFS824A.M8FE etc. observed D9VPP); Micron D9VPP=MT40A1G8SA-075:E,"CONFLICT: chip text on the line 'K4AAG085WBBCWE' is a Samsung 16Gb x8 B-die, which a 16-chip 16GB stick cannot carry. The PN or chip note was probably recorded from a different stick. ERP says Laptop SODIMM but DFD is a desktop UDIMM. ERP rank 2Rx4 looks wrong; PN implies 2Rx8.",skipped: conflict: part # and stick disagree
+CT16G4SFD8213.16FA1,DDR4,16GB,2Rx8,D9SRJ,SRJ,decoded,rule D4 8Gb x8 A (MTA16ATF2G64AZ-2G1A1 observed D9SRJ); Micron D9SRJ=MT40A1G8PM-083E:A,"Weak: there is one observation, and MTA8ATF1G64HZ-2G3A1 was observed with B-die D9TBH.",yes
+MTA36ASF4G72PZ-2G1A1II,DDR4,32GB,2Rx4,D9SRK,SRK,observed,chip text on the line 'MICRON S9SRK' (= D9SRK); rule D4 8Gb x4 A lo (MTA36ASF4G72PZ-2G3A1IG observed D9SRK); Micron D9SRK=MT40A2G4PM-083E:A,,yes
+MTABATF1G64AZ-2G6E1,DDR4,8GB,1Rx8,D9VPP,VPP,observed,observed D9VPPx5 D9TBHx1; Micron D9VPP=MT40A1G8SA-075:E,PN TYPO: likely MTA8ATF1G64AZ-2G6E1.,skipped: several dies: VPP/TBH
+BLS16G4D240FSC.16FBD,DDR4,16GB,1Rx8,,,unknown,,"Ballistix Sport LT (Crucial enthusiast line). It has 16 chips, so 8Gb x8 dual rank, and the suffix suggests a B revision: D9TBH (Micron mark) or C9BGM (Crucial mark), but no source names the chip. Rank 1Rx8 in ERP is wrong: it is dual rank.",skipped: unknown
+MTC4C10163S1SC56BD1-KC,DDR5,8GB,1Rx16,D8DKV,DKV,decoded,rule [DDR5 16Gb x16 mono rev D spd 56] -> D8DKVx1; Micron D8DKV=MT60B1G16HD-56B:D,,yes
+MTC4C10163S1UC48BA1,DDR5,8GB,1Rx16,D8BNK,BNK,decoded,rule [DDR5 16Gb x16 mono rev A spd 48] -> D8BNKx3; Micron D8BNK=MT60B1G16HC-48B:A,,yes
+MTC8C1084S1SC4-BA1,DDR5,16GB,1Rx8,D8BNJ,BNJ,decoded,rule [DDR5 16Gb x8 mono rev A spd 48] -> D8BNJx2; Micron D8BNJ=MT60B2G8HB-48B:A,PN TYPO: likely MTC8C1084S1SC48BA1.,yes
+MTA8ATF1G64AZ-2G6E1,DDR4,8GB,1Rx8,D9VPP,VPP,observed,observed D9VPPx5 D9TBHx1; Micron D9VPP=MT40A1G8SA-075:E,,skipped: several dies: VPP/TBH
+MTA8ATF2G64HZ-3G2F1,DDR4,16GB,1Rx8,D8CJV,CJV,observed,observed D8CJVx6; Micron D8CJV=MT40A2G8SA-062E:F,,yes
+MTA18ASF2G72PDZ-2G3D1QI,DDR4,16GB,2Rx8,D9TZV,TZV,decoded,rule [DDR4 8Gb x8 mono rev D spd lo] -> D9TZVx2; Micron D9TZV=MT40A1G8WE-075E:D,,yes
+MTA8ATF1G64AZ-3G2J1,DDR4,8GB,1Rx8,D9WSM,WSM,observed,observed D9WSMx3; Micron D9WSM=MT40A1G8SA-062E:J,,yes
+MTA36ASF4G72PZ-2G3B1IK,DDR4,32GB,2Rx4,D9TBJ,TBJ,observed,observed D9TBJx1; Micron D9TBJ=MT40A2G4WE-083E:B,,yes
+MTA8ATF2G64HZ-3G2E2,DDR4,16GB,1Rx8,D9ZFV,ZFV,observed,observed D9ZFVx5 D8CJVx1 D9XPFx1; Micron D9ZFV=MT40A2G8JC-062E:E,,skipped: several dies: ZFV/CJV/XPF
+MT16KTF1G64HZ-1G6N1,DDR3,8GB,2Rx8,D9RVX,RVX,observed,observed D9RVXx1; Micron D9RVX=MT41K512M8RG-107:N,,yes
+MTA8ATF1G64HZ-2G6J1,DDR4,8GB,1Rx8,D9WSM|D9VPP,WSM|VPP,decoded,"rule D4 8Gb x8 J mid: MTA18ASF2G72PDZ-2G6J1QI=D9WSM, MTA16ATF2G64HZ-2G6J1=D9VPP","J-revision modules ship either J-die D9WSM (the only J part, 062E) or E-die D9VPP.",skipped: several dies: WSM/VPP
+MTA18ASF2G72PDZ-3G2R1TI,DDR4,16GB,2Rx8,D8BPJ,BPJ,decoded,rule [DDR4 8Gb x8 mono rev R spd hi] -> D8BPJx1; Micron D8BPJ=MT40A1G8SA-062E:R,,yes
+MTA36ASF4G72PZ-2G6E1RK,DDR4,32GB,2Rx4,D9VPS,VPS,decoded,rule [DDR4 8Gb x4 mono rev E spd mid] -> D9VPSx2; Micron D9VPS=MT40A2G4SA-075:E,,yes
+MTA8ATF1G64HZ-2G3E1,DDR4,8GB,1Rx8,D9VPP,VPP,decoded,rule [DDR4 8Gb x8 mono rev E spd lo] -> D9VPPx3; Micron D9VPP=MT40A1G8SA-075:E,,yes
+MTA18ASF2G72PZ-2G3A1MG,DDR4,16GB,1Rx4,D9SRK,SRK,decoded,rule [DDR4 8Gb x4 mono rev A spd lo] -> D9SRKx1; Micron D9SRK=MT40A2G4PM-083E:A,,yes
+MTC40F2046S1RC48BA1,DDR5,64GB,2Rx4,D8BNH,BNH,micron-official,Micron decoder MT60B4G4HB-48B:A=D8BNH (https://www.micron.com/sales-support/design-tools/fbga-parts-decoder),"DDR5 16Gb x4 A-die 4800. The x8 and x16 A-die siblings are observed as D8BNJ/D8BNK, so the -48B:A rule holds.",yes
+MTA4ATF51264AZ-2G6E1,DDR4,4GB,1Rx16,D9WFH,WFH,micron-official,Micron module API: 512Mb x16; Micron decoder MT40A512M16LY-075:E=D9WFH (https://www.micron.com/sales-support/design-tools/fbga-parts-decoder),8Gb x16 E-die 2666 bin. A purchaser typed WFH on the SODIMM sibling.,yes
+MTA4ATF51264HZ-2G3B1,DDR4,4GB,1Rx16,D9TBK,TBK,micron-official,Micron module API: 512Mb x16; Micron decoder MT40A512M16JY-083E:B=D9TBK (https://www.micron.com/sales-support/design-tools/fbga-parts-decoder),8Gb x16 B-die 2400 bin.,yes
+MTA4ATF51264HZ-3G2J1,DDR4,4GB,1Rx16,D9WWP,WWP,micron-official,Micron module API: 512Mb x16; Micron decoder MT40A512M16TB-062E:J=D9WWP (https://www.micron.com/sales-support/design-tools/fbga-parts-decoder),8Gb x16 J-die. The only J x16 part in the decoder.,skipped: J-revision: J die or E-die VPP
+MTA72ASS8G72LZ-2G3E2PI,DDR4,64GB,4Rx4,D9VQL,VQL,micron-official,Micron decoder MT40A4G4DVN-075H:E=D9VQL (https://www.micron.com/sales-support/design-tools/fbga-parts-decoder); DDP E-die list via Micron part search,16Gb x4 DDP (2x8Gb) E-die. The 2400 module is assumed to use the slowest E DDP bin (075H). Faster bins exist: D9XDV (068H) and D9WFT (062H). Unverified module->component link.,yes
+MTA8ATF1G64AZ-2G3H1,DDR4,8GB,1Rx8,D9VHP,VHP,observed,observed D9VHPx1; Micron D9VHP=MT40A1G8SA-075:H,,yes
+MTA8ATF1G64HZ-2G6H1,DDR4,8GB,1Rx8,D9VHP,VHP,observed,observed D9VHPx1; Micron D9VHP=MT40A1G8SA-075:H,,yes
+MTA8ATF1G64HZ-3G2J1,DDR4,8GB,1Rx8,D9WSM,WSM,decoded,rule [DDR4 8Gb x8 mono rev J spd hi] -> D9WSMx9 D9VPPx2; Micron D9WSM=MT40A1G8SA-062E:J,,skipped: J-revision: J die or E-die VPP
+MTA8ATF1G64HZ-3G2R1,DDR4,8GB,1Rx8,D8BPJ,BPJ,decoded,rule [DDR4 8Gb x8 mono rev R spd hi] -> D8BPJx1; Micron D8BPJ=MT40A1G8SA-062E:R,,yes
+MTA8ATF51264HZ-2G1A1,DDR4,4GB,1Rx8,D9RGQ,RGQ,decoded,rule [DDR4 4Gb x8 mono rev A spd lo] -> D9RGQx4; Micron D9RGQ=MT40A512M8HX-093E:A,,yes
+MTA9ASF1G72AZ-2G3B1ZI,DDR4,8GB,1Rx8,D9TBH,TBH,decoded,rule [DDR4 8Gb x8 mono rev B spd lo] -> D9TBHx6; Micron D9TBH=MT40A1G8WE-083E:B,,yes
+MTA9ASF1G72PZ-2G3B1IG,DDR4,8GB,1Rx8,D9TBH,TBH,decoded,rule [DDR4 8Gb x8 mono rev B spd lo] -> D9TBHx6; Micron D9TBH=MT40A1G8WE-083E:B,,yes
+MTA9ASF1G72PZ-2G3B1II,DDR4,8GB,1Rx8,D9TBH,TBH,decoded,rule [DDR4 8Gb x8 mono rev B spd lo] -> D9TBHx6; Micron D9TBH=MT40A1G8WE-083E:B,,yes
+MTA9ASF1G72PZ-2G6D1SG,DDR4,8GB,1Rx8,D9TZV,TZV,decoded,rule [DDR4 8Gb x8 mono rev D spd mid] -> D9TZVx4; Micron D9TZV=MT40A1G8WE-075E:D,,yes
+MTA9ASF1G72PZ-2G9E1TI,DDR4,8GB,1Rx8,D9WFL,WFL,observed,observed D9WFLx1; Micron D9WFL=MT40A1G8SA-062E:E,,yes
+MTA9ASF1G72PZ-2G9E1UI,DDR4,8GB,1Rx8,D9WFL,WFL,decoded,rule [DDR4 8Gb x8 mono rev E spd hi] -> D9WFLx6; Micron D9WFL=MT40A1G8SA-062E:E,,yes
+MTA9ASF1G72PZ-2G9E1VI,DDR4,8GB,1Rx8,D9WFL,WFL,observed,observed D9WFLx1; Micron D9WFL=MT40A1G8SA-062E:E,,yes
+MTA9ASF51272AZ-2G3B1ZG,DDR4,4GB,1Rx8,D9TGG,TGG,decoded,rule [DDR4 4Gb x8 mono rev B spd lo] -> D9TGGx4; Micron D9TGG=MT40A512M8RH-083E:B,,yes
+MTA9ASF51272PZ-2G1B1QK,DDR4,4GB,1Rx8,D9TGG,TGG,decoded,rule [DDR4 4Gb x8 mono rev B spd lo] -> D9TGGx4; Micron D9TGG=MT40A512M8RH-083E:B,,yes
+MTA9ASF51272PZ-2G3B1IG,DDR4,4GB,1Rx8,D9TGG,TGG,decoded,rule [DDR4 4Gb x8 mono rev B spd lo] -> D9TGGx4; Micron D9TGG=MT40A512M8RH-083E:B,,yes
+MTABATF1G64AZ-2G3H1,DDR4,8GB,1Rx8,D9VHP,VHP,observed,observed D9VHPx1; Micron D9VHP=MT40A1G8SA-075:H,PN TYPO: likely MTA8ATF1G64AZ-2G3H1.,yes
+MTC10F1084S1RC4BBAL,DDR5,16GB,1Rx8,D8BNJ,BNJ,decoded,rule [DDR5 16Gb x8 mono rev A spd 48] -> D8BNJx2; Micron D8BNJ=MT60B2G8HB-48B:A,PN TYPO: likely MTC10F1084S1RC48BA1.,yes
+MTC40F2046S1RC56BD1,DDR5,64GB,2Rx4,D8DKQ,DKQ,micron-official,Micron decoder MT60B4G4RZ-56B:D=D8DKQ (https://www.micron.com/sales-support/design-tools/fbga-parts-decoder),"DDR5 16Gb x4 D-die. A 5600 stick can carry 6400-bin chips: D8DKR (MT60B4G4RZ-64B:D) was seen on MTC40F2046S1RC64BD2, and D8DKT on a 5600 x8 SODIMM.",yes
+MTC40F2046S1RC56BD2-MPFF,DDR5,64GB,2Rx4,D8DKQ,DKQ,micron-official,Micron decoder MT60B4G4RZ-56B:D=D8DKQ (https://www.micron.com/sales-support/design-tools/fbga-parts-decoder),Same as BD1. D8DKR is possible.,yes
+MTC8C1084S1SC48BA1-BC,DDR5,16GB,1Rx8,D8BNJ,BNJ,decoded,rule [DDR5 16Gb x8 mono rev A spd 48] -> D8BNJx2; Micron D8BNJ=MT60B2G8HB-48B:A,,yes
+MTC8C1084S1SC56BD1,DDR5,16GB,1Rx8,D8DKS|D8DKT,DKS|DKT,observed,observed D8DKSx2 D8DKTx1; Micron D8DKS=MT60B2G8RZ-56B:D,Split: D8DKSx2 D8DKTx1,skipped: several dies: DKS/DKT
+MTC8C1084S1SC56BD1 NF,DDR5,16GB,1Rx8,D8DKS,DKS,decoded,rule [DDR5 16Gb x8 mono rev D spd 56] -> D8DKSx5 D8DKTx1; Micron D8DKS=MT60B2G8RZ-56B:D,,skipped: several dies: DKS/DKT
+MTC8C1084S1UC48BAL,DDR5,16GB,1Rx8,D8BNJ,BNJ,observed,observed D8BNJx1; Micron D8BNJ=MT60B2G8HB-48B:A,PN TYPO: likely MTC8C1084S1UC48BA1.,yes
+MTC20F2085S1RC64BD2 MWFF,DDR5,32GB,2Rx8,D8DKT,DKT,micron-official,Micron decoder MT60B2G8RZ-64B:D=D8DKT (https://www.micron.com/sales-support/design-tools/fbga-parts-decoder),DDR5 16Gb x8 D-die 6400 bin. Observed as a minority code on MTC8C1084S1SC56BD1.,yes
+CT4G4DFS824A.M8FE,DDR4,4GB,,D9WQL,WQL,micron-official,Micron decoder MT40A512M8WE-075E:E=D9WQL (https://www.micron.com/sales-support/design-tools/fbga-parts-decoder),"4GB with 8 chips means 4Gb x8 E-die, and this is the only 4Gb x8 E part in the decoder. Unverified module->component link.",yes
+CT4G4DFS824A.M8FF,DDR4,4GB,1Rx4,D9WTD,WTD,micron-official,Micron decoder MT40A512M8SA-075:F=D9WTD (https://www.micron.com/sales-support/design-tools/fbga-parts-decoder),4Gb x8 F-die. A 3200-bin D9XRZ (MT40A512M8SA-062E:F) is possible. ERP rank 1Rx4 looks wrong; PN implies 1Rx8.,yes
+CT4G4SFS624A.4FB1,DDR4,4GB,1Rx16,D9TBK,TBK,micron-official,Micron decoder MT40A512M16JY-083E:B=D9TBK (https://www.micron.com/sales-support/design-tools/fbga-parts-decoder),"'6' in the PN = x16, so 4 chips of 8Gb x16 B-die. Unverified module->component link.",yes
+CT4G4SFS8266.C8FB,DDR4,4GB,1Rx16,C9BGS,BGS,micron-official,Micron decoder CT40A512M8RH-075E:B=C9BGS (https://www.micron.com/sales-support/design-tools/fbga-parts-decoder),Crucial-marked (C9) 4Gb x8 B-die 2666. ERP rank 1Rx16 looks wrong; PN implies 1Rx8.,yes
+CT8G4DFD8213.C16FDR2,DDR4,8GB,2Rx8,C9BHB,BHB,observed,chip text on the line 'BHB'; Micron decoder C9BHB=CT40A512M8WE-075E:D 2R (https://www.micron.com/sales-support/design-tools/fbga-parts-decoder),Crucial 4Gb x8 D-die. The purchaser reading and Micron decoder agree.,yes
+CT8G4DFD824A.C16FF,DDR4,8GB,,C9BML,BML,micron-official,Micron decoder CT40A512M8SA-062E:F=C9BML (https://www.micron.com/sales-support/design-tools/fbga-parts-decoder),Crucial-marked 4Gb x8 F-die. The only Crucial 4Gb F part in the decoder.,yes
+CT8G4SFS832A.M8FR,DDR4,8GB,1Rx8,D8BPJ,BPJ,decoded,rule CT-M 8Gb x8 R (CT8G4DFS824A.M8FR observed D8BPJ; MTA* R x8 = D8BPJ; chip text on CT16G4SFD8266.M16FRS reads D8BPJ); Micron D8BPJ=MT40A1G8SA-062E:R,CT16G4SFRA32A.M16FRS was observed once with D9WSM (J-die).,yes
+MT18KDF1G72PZ-1G6P1KF,DDR3,8GB,1Rx4,D9SGP,SGP,decoded,Micron module API (process code KF SPD byte7=0x00 -> 1Rx4; config 1Gb x4); rule D3-P x4 (MT36KSF2G72PZ-1G6P1ME observed D9SGP); Micron D9SGP=MT41K1G4DA-107:P,"VLP RDIMM, 1Rx4 confirmed by Micron SPD for process code KF.",yes
+MT36JSF1G72PZ-1G4M1FE,DDR3,8GB,2Rx4,D9PFK,PFK,decoded,rule D3-M x4 (MT18JSF51272PZ-1G6M1FE observed D9PFK); Micron D9PFK=MT41K512M4DA-125:M,"Sibling MT36JSF1G72PZ-1G4M1HF was recorded as 'D9PFX', which Micron decodes as an RLDRAM3 part, so it is a typo, probably for D9PFK.",yes
+MT36JSF2G72PZ-1G6E1HE,DDR3,16GB,2Rx4,D9QBQ,QBQ,observed,observed D9QBQx1; Micron D9QBQ=MT41K1G4RH-107:E,,yes
+MT36JSF2G72PZ-1G6E1LF,DDR3,16GB,2Rx4,D9PQL,PQL,decoded,"observed suffix pattern: -FE/-FF/-LG=D9PQL, -H*=D9QBQ; Micron D9PQL=MT41K1G4RH-125:E","D9QBQ (same die, -107 bin) is possible.",yes
+MT36KSF1G72PZ-1G4K1,DDR3,8GB,,D9QMT,QMT,micron-official,Micron module API: 512Mb x4 x36; Micron decoder MT41K512M4DA-15E:K=D9QMT (https://www.micron.com/sales-support/design-tools/fbga-parts-decoder),DDR3L 2Gb x4 K-die 1333. Package letter DA assumed (only K x4 part found). ERP rank blank: it is 2Rx4.,yes
+MT36KSF2G72PZ-1G6E1,DDR4,16GB,,D9QBQ|D9PQL,QBQ|PQL,decoded,"observed MT36KSF2G72PZ-1G6E1FE=D9QBQ, -FG=D9PQL; Micron: both are MT41K1G4RH E-die (-107 / -125)",Both codes are 4Gb x4 E-die (two speed bins); which one ships depends on the missing process suffix. ERP says DDR4 but it is DDR3L (PC3L).,skipped: several dies: QBQ/PQL
+MTA16ATF2G64AZ-3G2J1,DDR4,16GB,2Rx8,D9WSM,WSM,observed,observed D9WSMx3; Micron D9WSM=MT40A1G8SA-062E:J,,yes
+MTA16ATF2G64HZ-2G3E1,DDR4,16GB,2Rx8,D9VPP,VPP,observed,observed D9VPPx2; Micron D9VPP=MT40A1G8SA-075:E,,yes
+MTA16ATF2G64HZ-2G6E1,DDR4,16GB,2Rx8,D9VPP,VPP,observed,observed D9VPPx8; Micron D9VPP=MT40A1G8SA-075:E,,yes
+MTA16ATF2G64HZ-3G2J1,DDR4,16GB,2Rx8,D9WSM|D9VPP,WSM|VPP,observed,observed D9WSMx3 D9VPPx2; Micron D9WSM=MT40A1G8SA-062E:J,Split: D9WSMx3 D9VPPx2,skipped: several dies: WSM/VPP
+MTA16ATF4G64HZ-3G2F1,DDR4,32GB,2Rx8,D8CJV,CJV,observed,observed D8CJVx4; Micron D8CJV=MT40A2G8SA-062E:F,,yes
+MTA18ASF1G72PDZ-2G1A1HK,DDR4,8GB,2Rx8,D9RGQ,RGQ,decoded,rule [DDR4 4Gb x8 mono rev A spd lo] -> D9RGQx4; Micron D9RGQ=MT40A512M8HX-093E:A,,yes
+MTA18ASF1G72PZ-2G1A2IG,DDR4,8GB,1Rx4,D9RGV,RGV,decoded,rule [DDR4 4Gb x4 mono rev A spd lo] -> D9RGVx7; Micron D9RGV=MT40A1G4HX-093E:A,,yes
+MTA18ASF1G72PZ-2G1A2IK,DDR4,8GB,1Rx4,D9RGV,RGV,decoded,rule [DDR4 4Gb x4 mono rev A spd lo] -> D9RGVx7; Micron D9RGV=MT40A1G4HX-093E:A,,yes
+MTA18ASF1G72PZ-2G3B1RG,DDR4,8GB,1Rx4,D9TGL,TGL,decoded,rule [DDR4 4Gb x4 mono rev B spd lo] -> D9TGLx5; Micron D9TGL=MT40A1G4RH-083E:B,,yes
+MTA18ASF2G72AZ-2G1A1ZI,DDR4,16GB,2Rx8,D9SRJ|D9TBH,SRJ|TBH,decoded,rule [DDR4 8Gb x8 mono rev A spd lo] -> D9SRJx1 D9TBHx1; Micron D9SRJ=MT40A1G8PM-083E:A,Split: D9SRJx1 D9TBHx1,skipped: several dies: SRJ/TBH
+MTA18ASF2G72AZ-2G3B1ZG,DDR4,16GB,2Rx8,D9TBH,TBH,decoded,rule [DDR4 8Gb x8 mono rev B spd lo] -> D9TBHx6; Micron D9TBH=MT40A1G8WE-083E:B,,yes
+MTA18ASF2G72PDZ-2G6E1RG,DDR4,16GB,2Rx8,D9VPP,VPP,observed,observed D9VPPx1; Micron D9VPP=MT40A1G8SA-075:E,,yes
+MTA18ASF2G72PDZ-2G6J1QG,DDR4,16GB,2Rx8,D9WSM,WSM,decoded,sibling MTA18ASF2G72PDZ-2G6J1QI observed D9WSM; Micron D9WSM=MT40A1G8SA-062E:J,D9VPP is possible on J modules.,skipped: J-revision: J die or E-die VPP
+MTA18ASF2G72PDZ-2G9E1TI,DDR4,16GB,2Rx8,D9WFL,WFL,decoded,rule [DDR4 8Gb x8 mono rev E spd hi] -> D9WFLx6; Micron D9WFL=MT40A1G8SA-062E:E,,yes
+MTA18ASF2G72PDZ-3G2E1TI,DDR4,16GB,2Rx8,D9WFL,WFL,observed,observed D9WFLx1; Micron D9WFL=MT40A1G8SA-062E:E,,yes
+MTA18ASF2G72PZ-2G3B1IK,DDR4,16GB,1Rx4,D9TBJ,TBJ,observed,observed D9TBJx1; Micron D9TBJ=MT40A2G4WE-083E:B,,yes
+MTA18ASF2G72PZ-2G6D1QG,DDR4,16GB,1Rx4,D9TZX,TZX,decoded,rule D4 8Gb x4 D (11x D9TZX); Micron module API: 2Gb x4; Micron D9TZX=MT40A2G4WE-075E:D,"CONFLICT: the observed set has one D9TZV for this exact PN, but D9TZV is an x8 part (MT40A1G8WE-075E:D) and cannot be on this x4 module. That stick was probably MTA18ASF2G72PDZ.",skipped: several dies: TZX/TZV
+MTA18ASF2G72PZ-2G6D1QI,DDR4,16GB,1Rx4,D9TZX,TZX,observed,observed D9TZXx1; Micron D9TZX=MT40A2G4WE-075E:D,,yes
+MTA18ASF2G72PZ-3G2J3UI,DDR4,16GB,1Rx4,D9WSL,WSL,observed,observed D9WSLx1; Micron D9WSL=MT40A2G4SA-062E:J,,yes
+MTA18ASF4G72PDZ-3G2B2TI,DDR4,32GB,2Rx8,D9XPF,XPF,decoded,rule [DDR4 16Gb x8 mono rev B spd hi] -> D9XPFx1; Micron D9XPF=MT40A2G8VA-062E:B,,yes
+MTA18ASF4G72PDZ-3G2B2VI,DDR4,32GB,2Rx8,D9XPF,XPF,decoded,rule [DDR4 16Gb x8 mono rev B spd hi] -> D9XPFx1; Micron D9XPF=MT40A2G8VA-062E:B,,yes
+MTA18ASF4G72PDZ-3G2F1UL,DDR4,32GB,2Rx8,D8CJV,CJV,decoded,rule [DDR4 16Gb x8 mono rev F spd hi] -> D8CJVx11; Micron D8CJV=MT40A2G8SA-062E:F,,yes
+MTA36ASF2G72PZ-2G1A2IG,DDR4,16GB,2Rx4,D9RGV,RGV,observed,observed D9RGVx1; Micron D9RGV=MT40A1G4HX-093E:A,,yes
+MTA36ASF2G72PZ-2G1A2IJ,DDR4,16GB,2Rx4,D9RGV,RGV,decoded,rule [DDR4 4Gb x4 mono rev A spd lo] -> D9RGVx7; Micron D9RGV=MT40A1G4HX-093E:A,,yes
+MTA36ASF2G72PZ-2G1A2IK,DDR4,16GB,2Rx4,D9RGV,RGV,observed,observed D9RGVx1; Micron D9RGV=MT40A1G4HX-093E:A,,yes
+MTA36ASF4G72PZ-2G3B1RG,DDR4,32GB,2Rx4,D9TBJ,TBJ,observed,observed D9TBJx1; Micron D9TBJ=MT40A2G4WE-083E:B,,yes
+MTA36ASF4G72PZ-2G3B1RI,DDR4,32GB,2Rx4,D9TBJ,TBJ,decoded,rule [DDR4 8Gb x4 mono rev B spd lo] -> D9TBJx10; Micron D9TBJ=MT40A2G4WE-083E:B,,yes
+MTA36ASF4G72PZ-2G6D1QG,DDR4,32GB,2Rx4,D9TZX,TZX,observed,observed D9TZXx3; Micron D9TZX=MT40A2G4WE-075E:D,,yes
+MTA36ASF4G72PZ-2G6D1SG,DDR4,32GB,2Rx4,D9TZX,TZX,observed,observed D9TZXx1; Micron D9TZX=MT40A2G4WE-075E:D,,yes
+MTA36ASF4G72PZ-2G6E1RG,DDR4,32GB,2Rx4,D9VPS,VPS,decoded,rule [DDR4 8Gb x4 mono rev E spd mid] -> D9VPSx2; Micron D9VPS=MT40A2G4SA-075:E,,yes
+MTA36ASF4G72PZ-2G9E2UI,DDR4,32GB,2Rx4,D9WFK,WFK,decoded,rule [DDR4 8Gb x4 mono rev E spd hi] -> D9WFKx8; Micron D9WFK=MT40A2G4SA-062E:E,,yes
+MTA36ASF4G72PZ-3G2R1UI,DDR4,32GB,2Rx4,D8BPH,BPH,decoded,rule [DDR4 8Gb x4 mono rev R spd hi] -> D8BPHx1; Micron D8BPH=MT40A2G4SA-062E:R,,yes
+MTA36ASF4G72PZ-3G2R1UL,DDR4,32GB,2Rx4,D8BPH,BPH,decoded,rule [DDR4 8Gb x4 mono rev R spd hi] -> D8BPHx1; Micron D8BPH=MT40A2G4SA-062E:R,,yes
+MTA4ATF1G64HZ-3G2B2,DDR4,8GB,1Rx16,D9XPG,XPG,micron-official,Micron module API: 1G x16; Micron decoder MT40A1G16RC-062E:B=D9XPG (https://www.micron.com/sales-support/design-tools/fbga-parts-decoder),16Gb x16 B-die.,yes
+MTA4ATF1G64HZ-3G2F1,DDR4,8GB,1Rx16,D8CJX,CJX,observed,observed D8CJXx1; Micron D8CJX=MT40A1G16TB-062E:F,,yes
