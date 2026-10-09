@@ -22,6 +22,8 @@ import {
 } from './submit/line';
 import { editLineToPatch, orderLineToEditLine, type EditLine } from './submit/editLine';
 import { DupPartDialog } from './submit/DupPartDialog';
+import { ProductNo } from './submit/ProductNo';
+import { lineRef, newOrdinals, productCount } from '../../lib/productNo';
 import { AddLineMenu } from './submit/AddLineMenu';
 import { OrderCategoryChips } from '../../components/OrderCategoryChips';
 import {
@@ -499,9 +501,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
             </span>
             <span className="grp-chip">{category}</span>
             <span className="grp-meta">
-              {g.lines.length === 1
-                ? t('historyLineCountOne', { n: g.lines.length })
-                : t('historyLineCountMany', { n: g.lines.length })}
+              {g.products === 1
+                ? t('historyLineCountOne', { n: g.products })
+                : t('historyLineCountMany', { n: g.products })}
               {' · '}{t('grpUnits', { n: g.units.toLocaleString(locale) })}
               {g.unpriced > 0 && <span className="grp-unpriced"> · {t('grpUnpriced', { n: g.unpriced })}</span>}
             </span>
@@ -516,9 +518,11 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   };
 
   const dupGroups = useMemo(() => findDuplicatePartNumbers(lines), [lines]);
-  // Lookup table keyed by line index → other 1-based line numbers sharing its
-  // part #. Drives the inline drawer warning.
-  const dupByIdx = useMemo(() => duplicatesByIndex(dupGroups), [dupGroups]);
+  const products = useMemo(() => productCount(lines), [lines]);
+  const newNos = useMemo(() => newOrdinals(lines), [lines]);
+  // Lookup table keyed by line index → the other lines sharing its part #.
+  // Drives the inline drawer warning.
+  const dupByIdx = useMemo(() => duplicatesByIndex(dupGroups, lines), [dupGroups, lines]);
 
   const totals = useMemo(() => {
     // An unpriced line still costs what it cost; it just earns nothing yet.
@@ -878,7 +882,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       const removeLineIds = persistedIds.filter(id => !presentIds.has(id));
       const addedLines = lines.filter(l => !l._id);
       const r = await api.patch<{
-        ok: true; addedLineIds: string[]; lifecycle: string; paymentsLinked?: number;
+        ok: true; addedLineIds: string[]; addedLineNos?: number[]; lifecycle: string; paymentsLinked?: number;
       }>(`/api/orders/${order.id}`, {
         notes:         notesDirty     ? notes                  : undefined,
         warehouseId:   warehouseDirty ? (warehouseId || null)  : undefined,
@@ -906,13 +910,20 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       // addedLineIds comes back aligned 1:1 with the addLines we sent, so a
       // photo buffered against a line that had no id can finally reach it.
       // Before onSaved, which navigates away and takes the buffer with it.
+      // addedLineNos the same way, with each new product's #.
       const idByCid = new Map<string, string>();
-      addedLines.forEach((l, i) => { if (r.addedLineIds[i]) idByCid.set(l._cid, r.addedLineIds[i]); });
+      const noByCid = new Map<string, number | undefined>();
+      addedLines.forEach((l, i) => {
+        if (r.addedLineIds[i]) idByCid.set(l._cid, r.addedLineIds[i]);
+        noByCid.set(l._cid, r.addedLineNos?.[i]);
+      });
       // Written back before anything can keep the user on this page: a second
       // save must patch these lines, not append them a second time.
       setLines(ls => ls.map(l => {
         const id = idByCid.get(l._cid);
-        return id ? { ...l, _id: id, _dirty: false } : (l._dirty ? { ...l, _dirty: false } : l);
+        return id
+          ? { ...l, _id: id, no: noByCid.get(l._cid), _dirty: false }
+          : (l._dirty ? { ...l, _dirty: false } : l);
       }));
       setPersistedIds([...persistedIds.filter(id => presentIds.has(id)), ...idByCid.values()]);
       let stillQueued = 0;
@@ -1016,7 +1027,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
 
   const save = async () => {
     const issues = lines
-      .map((l, idx) => ({ lineNo: idx + 1, label: l.partNumber || itemType(l), issue: serialIssueFor(l) }))
+      .map((l, i) => ({ line: lineRef(l, t, newNos[i]), label: l.partNumber || itemType(l), issue: serialIssueFor(l) }))
       .filter((x): x is SerialLineIssue => x.issue !== null);
     if (issues.length) {
       takeBackMove();
@@ -1048,7 +1059,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     if (l._id && !l._dirty) return;
     const issue = serialIssueFor(l);
     if (issue) {
-      setSerialIssues([{ lineNo: i + 1, label: l.partNumber || itemType(l), issue }]);
+      setSerialIssues([{ line: lineRef(l, t, newNos[i]), label: l.partNumber || itemType(l), issue }]);
       // Thrown so the drawer keeps itself open for the fix.
       throw new Error(t('serialCheckTitle'));
     }
@@ -1056,7 +1067,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     // but after the checks that can still abort, or a save that never happens
     // spends the once-per-visit acknowledgement.
     if (!(await askRevert())) throw new Error(t('revertWarnCancelled'));
-    const r = await api.patch<{ ok: true; addedLineIds: string[]; lifecycle: string }>(
+    const r = await api.patch<{ ok: true; addedLineIds: string[]; addedLineNos?: number[]; lifecycle: string }>(
       `/api/orders/${order.id}`,
       l._id
         ? { lines: [editLineToPatch(l)] }
@@ -1067,13 +1078,14 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     // stage, and there is no way to re-submit short of a reload.
     applyLifecycle(r.lifecycle);
     const newId = l._id ?? r.addedLineIds[0];
-    setLines(ls => ls.map((x, j) => (j === i ? { ...x, _id: newId, _dirty: false } : x)));
+    const no = l.no ?? r.addedLineNos?.[0];
+    setLines(ls => ls.map((x, j) => (j === i ? { ...x, _id: newId, no, _dirty: false } : x)));
     if (!l._id && newId) {
       setPersistedIds(ids => [...ids, newId]);
       if (await flushPendingPhotos(l._cid, newId)) showErrorDialog(t('linePhotoUploadFailed'));
     }
     setActivityKey(k => k + 1);
-    window.__showToast?.(t('drawerLineSaved', { n: i + 1 }), 'success');
+    window.__showToast?.(t('drawerLineSaved', { line: lineRef({ no }, t) }), 'success');
   };
 
   const itemType = (l: EditLine) =>
@@ -1206,7 +1218,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
             <OrderCategoryChips categories={order.categories} max={3} />
           </div>
           <div className="page-sub" style={{ marginTop: 6 }}>
-            {fmtDateShort(order.createdAt, locale)} · {t('submittedBy')} {order.userName.split(' ')[0]}{order.manager && <> · {t('poManager')} {order.manager.name.split(' ')[0]}</>} · {lines.length === 1 ? t('historyLineCountOne', { n: lines.length }) : t('historyLineCountMany', { n: lines.length })} · {t('editOrderSub')}
+            {fmtDateShort(order.createdAt, locale)} · {t('submittedBy')} {order.userName.split(' ')[0]}{order.manager && <> · {t('poManager')} {order.manager.name.split(' ')[0]}</>} · {products === 1 ? t('historyLineCountOne', { n: 1 }) : t('historyLineCountMany', { n: products })} · {t('editOrderSub')}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignSelf: 'flex-start', flexWrap: 'wrap' }}>
@@ -1352,7 +1364,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                     }}
                     onClick={() => setActiveIdx(i)}
                   >
-                    <td className="mono" style={{ color: isActive ? 'var(--accent-strong)' : 'var(--fg-subtle)', fontWeight: isActive ? 600 : 400 }}>{i + 1}</td>
+                    <td className="mono" style={{ color: isActive ? 'var(--accent-strong)' : 'var(--fg-subtle)', fontWeight: isActive ? 600 : 400 }}><ProductNo no={l.no} newNo={newNos[i]} /></td>
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         {(() => {
@@ -1424,7 +1436,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                         <button
                           className="btn icon sm"
                           onClick={e => { e.stopPropagation(); removeLine(i); }}
-                          title={t('soRemoveLineTooltip')}
+                          title={t('poRemoveProduct')}
                           disabled={lines.length <= 1}
                           style={lines.length <= 1 ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
                         >
@@ -1446,6 +1458,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
             groups={groups}
             grouped={grouped}
             lineCount={lines.length}
+            productCount={products}
             units={totals.qty}
             goods={cost.goods}
             fees={parsedOtherFees}
@@ -1797,7 +1810,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
           canRemove={lines.length > 1}
           onConfirmLine={() => confirmLine(activeIdx)}
           onConfirmError={showErrorDialog}
-          duplicateOnLines={dupByIdx.get(activeIdx)}
+          duplicateOnLines={dupByIdx.get(activeIdx)?.map(j => lineRef(lines[j], t, newNos[j]))}
+          newNo={newNos[activeIdx]}
           readOnly={!canEditOrder}
           sellPriceEditable={canEditSellPrice}
           missingFields={missingNamesFor(lines[activeIdx])}
@@ -1959,6 +1973,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       {dupConfirm && (
         <DupPartDialog
           groups={dupConfirm}
+          refOf={j => lineRef(lines[j], t, newNos[j])}
           busy={saving}
           confirmTone="primary"
           confirmLabel={t('dupPartSaveAnyway')}

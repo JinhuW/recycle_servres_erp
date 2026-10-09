@@ -5,7 +5,16 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-206](./RS-206-sell-orders-get-a-packing-status-and-inventory-added.md) | done | story | P2 | Sell orders get a Packing status, and inventory added once packing has begun takes the next # | — |
+| [RS-217](./RS-217-rank-list-offers-x4-on-desktop-memory-and-ssds-gain.md) | done | bug | P2 | Rank list offers x4 on Desktop memory, and SSDs gain a 3.5in form | 1.237.0 |
+| [RS-215](./RS-215-pre-release-review-fixes-for-the-v1-237-release.md) | in-progress | bug | P1 | Pre-release review fixes for the v1.237 release | — |
+| [RS-214](./RS-214-fill-micron-chip-from-the-die-code-lookup.md) | done | task | P2 | Fill Micron Chip # from the die-code lookup | 1.233.1 |
+| [RS-213](./RS-213-a-po-row-is-a-product-and-its-is-a-stable-id-on-pos.md) | done | story | P2 | A PO row is a product, and its # is a stable id on POs and sell orders | 1.234.0 |
+| [RS-212](./RS-212-inventory-lots-table-shows-each-lot-s-line-next-to-i.md) | done | story | P2 | Inventory lots table shows each lot's line # next to its PO | 1.232.0 |
+| [RS-210](./RS-210-ram-and-ssd-spec-selects-cascade-so-a-line-s-options.md) | done | story | P2 | RAM and SSD spec selects cascade, so a line's options can't conflict | 1.233.0 |
+| [RS-209](./RS-209-micron-chip-keeps-only-the-die-code-vpp-tbh.md) | done | story | P2 | Micron Chip # keeps only the die code (VPP, TBH, …) | 1.231.0 |
+| [RS-208](./RS-208-inventory-select-all-reaches-every-lot-the-filter-ma.md) | done | bug | P2 | Inventory select all reaches every lot the filter matches | 1.230.2 |
+| [RS-207](./RS-207-pack-mode-side-panel-can-t-be-scrolled-to-its-action.md) | done | bug | P2 | Pack mode side panel can't be scrolled to its actions | 1.230.1 |
+| [RS-206](./RS-206-sell-orders-get-a-packing-status-and-inventory-added.md) | done | story | P2 | Sell orders get a Packing status, and inventory added once packing has begun takes the next # | 1.230.0 |
 | [RS-205](./RS-205-pack-mode-applies-the-flagged-short-counts-to-the-se.md) | done | story | P2 | Pack mode applies the flagged short counts to the sell order | 1.229.0 |
 | [RS-204](./RS-204-pack-mode-packed-products-sink-to-the-bottom-and-the.md) | done | story | P2 | Pack mode: packed products sink to the bottom, and the tick writes the count onto the sell order | 1.228.0 |
 | [RS-203](./RS-203-pre-release-review-fixes-for-the-v1-227-release.md) | done | bug | P1 | Pre-release review fixes for the v1.227 release | 1.227.2 |

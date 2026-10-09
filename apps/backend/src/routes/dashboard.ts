@@ -315,7 +315,7 @@ dashboard.get('/', async (c) => {
                o.created_at, o.id AS order_id,
                u.id AS user_id, u.name AS user_name, u.initials AS user_initials
         FROM order_lines l JOIN orders o ON o.id = l.order_id JOIN users u ON u.id = o.user_id
-        WHERE ${poDateWin} AND ${poScopeFrag} ORDER BY o.created_at DESC, l.position ASC LIMIT 4
+        WHERE ${poDateWin} AND ${poScopeFrag} ORDER BY o.created_at DESC, l.product_no ASC, l.created_at ASC LIMIT 4
       `,
       // The first day there is anything to report — the left edge of the range
       // strip. LEAST skips a NULL side, so one empty table doesn't blank it.

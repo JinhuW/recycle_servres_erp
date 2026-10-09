@@ -63,12 +63,12 @@ PARTNUMBER — emit the part number including any speed-grade / rev suffix after
 ${CONFIDENCE_INSTRUCTION}
 Only include a field if you can read or derive it confidently. Omit any field you are unsure about — do NOT guess.`,
   SSD: `You are reading a server/desktop SSD label. Respond with a single minified JSON object and nothing else — no markdown, no code fences, no prose:
-{"brand":"Samsung|Intel|Micron|WD|Seagate|Kioxia","capacity":"number+GB or TB, NO space e.g. 960GB or 1.92TB","interface":"SATA|SAS|NVMe|U.2","formFactor":"2.5\\"|M.2 2280|M.2 22110|U.2|AIC","partNumber":"…","_confidence":0.0}
+{"brand":"Samsung|Intel|Micron|WD|Seagate|Kioxia","capacity":"number+GB or TB, NO space e.g. 960GB or 1.92TB","interface":"SATA|SAS|NVMe|U.2","formFactor":"2.5\\"|3.5\\"|M.2 2230|M.2 2280|M.2 22110|U.2|AIC","partNumber":"…","_confidence":0.0}
 BRAND — the drive maker as printed. Write "WD" for "Western Digital".
 CAPACITY — the printed capacity, number immediately followed by the unit, NO space: "960GB", "1.92TB". Copy the unit as printed — do NOT convert between GB and TB.
 INTERFACE — read the printed bus marking, never infer from brand:
   "SATA 6Gb/s" / "SATA III" = SATA. "SAS 12Gb/s" / "SAS3" = SAS. "PCIe" / "NVMe" / "Gen3 x4" / "Gen4 x4" = NVMe. Emit U.2 only when the label itself says U.2 or SFF-8639.
-FORMFACTOR — the physical shape: a cased drive = 2.5". A bare stick module = M.2; read the printed size code for M.2 2280 vs M.2 22110. U.2 = a 2.5" case whose label says U.2/SFF-8639. AIC = a PCIe add-in card.
+FORMFACTOR — the physical shape: a cased drive = 2.5", unless the case or its carrier is 3.5" or the label says LFF/3.5in = 3.5". A bare stick module = M.2; read the printed size code for M.2 2230 vs M.2 2280 vs M.2 22110. U.2 = a 2.5" case whose label says U.2/SFF-8639. AIC = a PCIe add-in card.
 PARTNUMBER — emit the maker's model/part number including any hyphen suffix, but drop anything after the first space (lot codes, date codes) and a leading "PN:" / "P/N" / "MODEL:" / "S/N" label prefix. Prefer the maker's part number over a Dell/HP/Lenovo sticker code. Examples:
   - "PN: MZ7LH960HAJR-00005 LOT123" → "MZ7LH960HAJR-00005"
   - "MODEL: SSDSC2KB960G8" → "SSDSC2KB960G8"

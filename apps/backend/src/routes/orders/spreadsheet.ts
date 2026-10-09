@@ -15,7 +15,7 @@ const fmtTs = (v: unknown): string =>
   v ? new Date(v as string).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : '';
 
 // ── PO spreadsheet (XLSX). Same access rules as GET /:id: owner + manager.
-// A Payment tab with the header/payment fields, and a Line items tab with the
+// A Payment tab with the header/payment fields, and a Products tab with the
 // costed lines. Reuses the shared exceljs builder.
 //
 // The line columns are a category's full spec set — the same table the
@@ -24,19 +24,23 @@ const fmtTs = (v: unknown): string =>
 // once every attribute has its own cell it only repeated them, unsorted.
 //
 // The sets are disjoint, so a PO spanning categories splits into one sheet per
-// category (categoryTabSheets). A single-category PO keeps its one 'Line items'
+// category (categoryTabSheets). A single-category PO keeps its one 'Products'
 // sheet exactly as before.
 const PO_LINE_TAIL_COLS: XlsxColumn[] = [
   { header: 'Serial #',   key: 'serial',    width: 24 },
   { header: 'Qty',        key: 'qty',       width: 8,  numFmt: '#,##0' },
   { header: 'Unit cost',  key: 'unitCost',  width: 12, numFmt: '#,##0.00' },
-  { header: 'Line total', key: 'lineTotal', width: 13, numFmt: '#,##0.00' },
+  { header: 'Cost total', key: 'lineTotal', width: 13, numFmt: '#,##0.00' },
   { header: 'Sell price', key: 'sellPrice', width: 12, numFmt: '#,##0.00' },
   { header: 'Sell total', key: 'sellTotal', width: 13, numFmt: '#,##0.00' },
   { header: 'Profit',     key: 'profit',    width: 12, numFmt: '#,##0.00' },
 ];
 
+// Each row leads with its product's # on the PO, the one the page shows: a
+// PO spanning categories splits across sheets, so a row's place in its sheet
+// is not its #.
 const poLineCols = (cat: ExportCategory): XlsxColumn[] => [
+  { header: '#', key: 'no', width: 6 },
   ...SPEC_COLS_BY_CATEGORY[cat],
   ...PO_LINE_TAIL_COLS,
 ];
@@ -71,7 +75,7 @@ spreadsheetRoutes.get('/:id/spreadsheet', async (c) => {
   // fee basis and the projected profit with every sale — the same basis
   // lib/po-cost.ts and the goods-total mirror use.
   const lines = await sql`
-    SELECT category, brand, capacity, generation, type, classification, rank, speed,
+    SELECT product_no, category, brand, capacity, generation, type, classification, rank, speed,
            interface, form_factor, description, item_type, part_number, chip_number, serial_number,
            condition, COALESCE(qty_purchased, qty) AS qty, health::float AS health, rpm,
            unit_cost::float AS unit_cost, sell_price::float AS sell_price
@@ -103,6 +107,7 @@ spreadsheetRoutes.get('/:id/spreadsheet', async (c) => {
     const unitCost = Number(l.unit_cost ?? 0);
     const sellPrice = l.sell_price != null ? Number(l.sell_price) : null;
     return {
+      no: l.product_no,
       ...lineSpecFields(l),
       // Read by categoryTabSheets to pick the sheet; not a declared column on
       // any of them, so it never renders.
@@ -151,7 +156,7 @@ spreadsheetRoutes.get('/:id/spreadsheet', async (c) => {
     { field: 'Total quantity',        value: totalQty },
     // Subtotal -> Other fees -> Total cost reads as an arithmetic column, which
     // is why the fee rows sit here rather than at the bottom.
-    { field: 'Subtotal (line costs)', value: subtotal },
+    { field: 'Subtotal (product costs)', value: subtotal },
     { field: 'Other fees',            value: otherFees },
     { field: 'Other fees note',       value: String(order.other_fees_note ?? '') },
     { field: 'Total cost',            value: totalCost },
@@ -166,8 +171,8 @@ spreadsheetRoutes.get('/:id/spreadsheet', async (c) => {
   const buf = await buildXlsxWorkbook([
     { name: 'Payment', columns: PO_PAYMENT_COLS, rows: paymentRows },
     ...categoryTabSheets(lineRows, poLineCols, {
-      singleSheetName: 'Line items',
-      emptySheetName: 'Line items',
+      singleSheetName: 'Products',
+      emptySheetName: 'Products',
     }),
   ]);
   return xlsxResponse(buf, `${order.id}.xlsx`);

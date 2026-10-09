@@ -12,6 +12,26 @@ source of truth for endpoints.
 Keep it current: when a change adds, removes or reshapes user-visible
 behaviour, edit the bullet here in the same PR and cite the new version.
 
+## Words this file and the app use (v1.236.0)
+
+- **Product** — a numbered row on a purchase order: one part bought, in one
+  condition, at one cost. On a sell order, a product is what the packer
+  labels: its lots share one `#`.
+- **Product `#`** — a product's id on its order. Given when the product is put
+  on the order, never changed or reused (POs since v1.234.0, sell orders since
+  v1.235.0). "N products" counts `#`s.
+- **Lot** — one inventory row: a PO product's units in one warehouse. A
+  partial transfer splits a product into two lots under its one `#`. A sell
+  order's rows are lots.
+- Inventory's grouped view keeps **Product** for the same goods across POs —
+  a part number with its lots under it.
+- Not renamed: **Item type** (the Other category's attribute), **Extra item**
+  (goods in the box that are not on the PO), physical **units** (件), and
+  "line" where it means a line of text (serial numbers, address line 2).
+- Code and the API keep their names: `order_lines`, `sell_order_lines`,
+  `lines`, `addLines`, `lineCount`, `sourceLineNo`, the `line_*` event kinds.
+  Chinese uses 产品 for a product and 批次 for a lot.
+
 ---
 
 ## Roles and access
@@ -83,6 +103,44 @@ The core object. A PO is a purchase from a vendor, built line by line, that
 moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done, and
 on to Sold once every line has sold (v1.164.0).
 
+- **Every product on a PO has a `#` that never changes** (v1.234.0). It is
+  given when the product is put on the PO — a new PO numbers its products
+  1..n in the order they came, and each one added later takes the PO's next
+  `#` — and stored (`order_lines.product_no`), not worked out from the list.
+  - **Removing a product leaves a gap.** `#1, #2, #3` with #2 removed reads
+    `#1, #3`, and the next product added is #4: a `#` is never handed to
+    another product, not even on a Draft.
+  - **A partial transfer keeps its `#`.** The units moved to another warehouse
+    become a second row with the source's `#`, so the PO page shows `#3`
+    twice, each with its warehouse, right after each other. Discarding the
+    transfer folds it back and leaves no gap. The second row keeps the
+    source's Chip # too (v1.237.1).
+  - **"N products" counts `#`s**, so the PO list, the page head and the
+    category groups count a transferred product once.
+  - A product not saved yet reads *new 1*, *new 2*… (in list order) where its
+    `#` would be, and messages name it the same way with what it is ("New
+    product 2 (M393A4K40DB3-CWE)", v1.236.0) until the save gives it a `#`.
+    Saved products are named by `#` — "#5 is missing: Generation", "This
+    Part # is already on #2, #7" — never by their place in the list. A
+    transfer's two rows of one product are not flagged as a duplicate part #.
+    The server names a product not saved yet the same way when it can: a new
+    PO arrives with every row in list order ("new product 2
+    (M471A2K43DB1-CWE): Laptop doesn't fit RDIMM"). A product added to a PO
+    may arrive alone, so it is named by what it is ("new product
+    (SSDSC2KB960G8): …", v1.236.0).
+  - The `#` is the same on the PO page, the phone's Products screen, Review
+    mode, the PO list's drawer, the PO workbook (a leading `#` column on every
+    sheet, v1.234.0), each sell order's "From PO-1432 #3", Inventory and the
+    sellable picker. Products that existed before v1.234.0 kept the number
+    they showed.
+  - Transfer refusals name the product the same way ("PO-1432 #3 only has 5
+    units"), as does a sell order a lot can't go on.
+  - **Everything says "product"** (v1.236.0) where it used to say line, line
+    item or item: the PO and sell-order pages, the phone screens, Review and
+    Pack mode, the activity log, error messages, and the PO workbook. Its
+    sheet is *Products*, its cost column *Cost total* and its payment row
+    *Subtotal (product costs)*. Chinese says 产品 throughout. See the word list
+    at the top of this file.
 - **One PO can hold several categories** (v1.54.0), with its lines grouped by
   category and a per-category cost breakdown (v1.55.0).
 - **A new PO starts at a 50% commission rate** (v1.166.0). The column
@@ -346,9 +404,10 @@ on to Sold once every line has sold (v1.164.0).
   - Opening and leaving the check re-reads the PO, so neither page works from
     the other's stale copy. A PO page with unsaved edits refuses to open it
     (v1.189.1).
-  - Each row carries its PO line number (#1, #2… — the PO page's numbering,
-    kept while rows regroup), and a RAM row shows its device type (Desktop /
-    Server / Laptop) beside the class, rank and speed chips (v1.190.0).
+  - Each row carries its product's `#` on the PO (the stored one since
+    v1.234.0, so regrouping the rows never touches it), and a RAM row shows
+    its device type (Desktop / Server / Laptop) beside the class, rank and
+    speed chips (v1.190.0).
   - Every line's count starts at its full qty (v1.188.1). Ticking the
     checkbox confirms the line at the count it shows, and a ticked line sinks
     below a *Checked* divider, newest first, with an Undo.
@@ -430,6 +489,10 @@ on to Sold once every line has sold (v1.164.0).
     PO's total cost* below for the banner and the question at Approve. Here
     the comparison is against the total the PO will have after Approve, so
     ticking a line at 0 can raise the warning or clear it before the click.
+  - The side panel (the selected line and Finish review) stays beside the
+    list as it scrolls and is never taller than the window; on a short screen
+    it scrolls by itself (v1.230.1). At 1100px wide and below it drops under
+    the list.
   - The endpoints (`/api/orders/:id/checks…`) 403 anyone whose real role is
     not manager. The page and button are hidden from a manager previewing as
     purchaser, and the route bounces them without leaving a Back entry
@@ -671,8 +734,9 @@ on to Sold once every line has sold (v1.164.0).
   editor also refuses a qty below what committed sell orders hold, naming them
   to a manager.
 - **A line already on the PO can be counted down to 0** (v1.213.0), when none
-  of its units arrived. Deleting it would renumber every line after it, since
-  a line's `#` is its rank. The PO page drawer, the Review-mode drawer and the
+  of its units arrived: the product stays on the PO as ordered and never
+  received. (Removing it no longer renumbers anything — a removed product
+  leaves a gap since v1.234.0 — but a 0 keeps the record.) The PO page drawer, the Review-mode drawer and the
   phone line form on an existing order all take 0. A new line still needs at
   least 1: a new PO, *Add item*, and a line being captured on the phone. The
   inventory editor keeps 1 as its floor. For a purchaser past Draft, setting
@@ -686,6 +750,63 @@ on to Sold once every line has sold (v1.164.0).
   dual-die (`4DRx4`, `8DRx4`) and 3DS stacks (`2S2Rx4`, `2S4Rx4`, `4S2Rx4`),
   which a label scan now keeps instead of flattening to the plain rank
   (v1.139.0).
+- **A Micron line's Chip # is the 3-letter die code** (v1.231.0, RS-209).
+  - **What's stored:** the FBGA code's last three letters, VPP, TBH or CJV.
+    The price list buckets Micron sticks by this code.
+  - **What the chip shows:** a date/lot code above the FBGA code
+    (`8KE75` / `D9VPP`). Typing, pasting or scanning both lines stores `VPP`.
+  - **When it collapses:**
+    - The desktop drawer and the phone form collapse the value when the field
+      loses focus.
+    - The server applies the same rule on every write, and a label scan
+      arrives already cut.
+  - **Recognised by shape, not from a list:** a value ending in
+    `D9`/`D8`/`C9`/`Z9` + three letters.
+  - **Left as typed:** anything else, and other brands' chip numbers (only
+    upper-cased).
+- **RAM and SSD spec selects cascade, so a line's specs can't contradict each
+  other** (v1.233.0, RS-210). One table (`shared/specCascade.ts`) drives the
+  desktop drawer (new PO, PO edit, Review mode), the phone form, the RAM sheet
+  scan, the inventory editor and the API.
+  - **Type and Class follow each other**, and whichever was picked last wins:
+    - Desktop → UDIMM.
+    - Laptop → SODIMM, but only on DDR3/DDR4. On DDR5 a laptop module can be
+      SODIMM or CAMM, so Class is left for you.
+    - Server clears a SODIMM/CAMM.
+    - RDIMM/LRDIMM → Server and SODIMM/CAMM → Laptop.
+    - UDIMM → Desktop, which may still be switched to Server (ECC UDIMM).
+  - **Neither list is filtered by the other.** Picking against the current
+    value fixes the partner field instead, so a SODIMM + Laptop line can still
+    become RDIMM in one pick.
+  - **Filtered lists:**
+    - CAMM is offered only on DDR5.
+    - Rank follows the module, judged by Class and by Type, whichever is
+      stricter (v1.237.0, RS-217):
+      - UDIMM / Desktop: 1–2 ranks of x8, x16 or x32, plus the full-size
+        ranks its generation sold:
+        - DDR3: 1Rx4 and 2Rx4 ("AMD only" high-density modules).
+        - DDR5: 4Rx8 (CQDIMM).
+        - DDR4: none.
+        - With no generation yet, both are offered. Picking the generation
+          clears a rank that doesn't fit it.
+      - SODIMM / CAMM / Laptop: 1–2 ranks of x8, x16 or x32.
+      - Triple rank, 4Rx4, 4Rx16, octal, dual-die and 3DS are
+        registered-only.
+      - RDIMM / LRDIMM / Server: anything.
+    - An SSD's form factor follows its interface:
+      - SATA: 2.5", 3.5" or M.2.
+      - SAS: 2.5" or 3.5"; 2.5" is filled in.
+      - NVMe: anything but 3.5".
+      - U.2: U.2 or 2.5".
+      - 3.5" is new in v1.237.0, for HPE's LFF SAS SSDs and native 3.5"
+        drives.
+  - **Fixed or cleared, never left contradicting:** a value a new pick rules
+    out. A label scan lands the same way, and the Class read off the label
+    wins over a scanned Type.
+  - **The API refuses a conflict**, but only for a rule whose own fields the
+    save changes. Prod holds lines from before the rules (SODIMM + 2Rx4,
+    UDIMM + Laptop), and a price edit on one still saves. Values the table
+    doesn't know (legacy `type: 'DDR4'`, a bare `M.2`) restrict nothing.
 - **Validation is shared between shells**, so desktop, mobile and the backend
   can't drift: all RAM spec fields required (v1.29.0); Chip # required only for
   Micron and Other, whose part numbers don't identify the module (v1.36.0);
@@ -828,6 +949,9 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
 - Flat and grouped views. Grouped is what goes outward to vendors and buyers,
   so it carries no cost, sell price or submitter (v1.51.0); flat keeps them for
   internal use.
+- **A product's lots table names each lot by PO and line** — `PO-1343 #2`, the
+  number the PO page shows for that line, with the PO id still the link
+  (v1.232.0).
 - **The phone Inventory list shows each line's sell price to every role**
   (v1.144.2), under the status chip, the way the desktop table and the phone
   Orders list already did. Unit cost, profit and margin stay manager-only
@@ -839,7 +963,13 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   (v1.179.0).
 - Export honours the row selection, one worksheet per category, with designed
   workbook styling (v1.30.0, v1.31.0). Select/unselect all lots in the current
-  filter (v1.19.0).
+  filter (v1.19.0). Select all takes every sellable lot the filters match,
+  including products past the 200 the list shows, and the bulk actions and
+  export receive the whole set; export posts the selection, up to 5000 lots
+  (v1.230.2). Each lot is held to the warehouse and the attribute chips on its
+  own, so a lot typed differently inside a matching product stays out, and a
+  lot sold, archived or emptied since the list loaded doesn't join. The grouped
+  view reads up to 5000 lines, enough for Show sold (v1.237.1).
 - **The export and both screens read in the vendor bid sheet's order** — brand,
   then capacity, speed, numerically collated with blanks last (v1.107.0), and
   category rank ahead of it on the screens, which have no tabs to group by
@@ -883,42 +1013,50 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   - View and edit share one history entry, so browser Back returns to where
     the order was opened from.
 - **Every line shows its product's # on the order** (v1.219.0; one per
-  product since v1.220.3) — `#3` before the item name, in view and edit: the
-  number the packer labels the items with and the receiver checks the box by.
-  Products are numbered 1..N in the order the Packing list shows them —
-  warehouse tab, then category, device, DDR generation, brand / capacity /
-  speed — through the whole file, and **the order lists its lines in that same
-  order**, so the page, Pack mode and both packing lists read alike. Lines of
-  one product (several PO lines of one part) share its #. The number is worked
-  out from the sort each time the order is read.
-  - **On a Draft, adding a line sorts it in** and renumbers the products
-    after it.
-  - **Once the order is past Draft** (Packing, Shipped, Awaiting payment), a
-    save that adds inventory gives each new product the next # after every
-    other product, and **adding never moves a #** (v1.230.0). Products added
-    in one save are numbered among themselves in packing-list order, and a
-    later save's go after them.
-    - A new lot of a product already on the order joins that product's #.
-    - The order page and Pack mode list an added product last. Both packing
-      lists keep their sorted rows, so it prints there in its sorted place
-      with its later # (`#1, #2, #9, #3`).
-    - Each line records which save added it (`sell_order_lines.append_batch`,
-      NULL for the sorted set). The editor sends each saved line's row id, so
-      the mark survives the save's rewrite, and an edited hand-typed line
-      keeps its place. Lines already on an order when v1.230.0 shipped count
-      as the sorted set.
-  - **What still renumbers the products after it, in any status:** deleting a
-    lot, moving one to another warehouse, and editing a spec that re-sorts it.
-  - **What never renumbers:** setting a line to 0, editing a price, or saving
-    the order as shown (v1.221.0). A product's place comes
-  from its first line by PO and line # — 0s included, never the order the
-  page lists them in — and a tie on everything the sheet sorts by goes by
-  part #. Before v1.221.0 the first line by stored position decided, and a
-  save rewrote positions, so a price edit could renumber an order whose lots
-  of one part differed in type. A line added while editing reads *new* until
-  the save numbers it.
-- **A line that can't ship is set to 0, not removed** (v1.219.0), so no line
-  after it is renumbered. Any line already on the order may go to 0 in the
+  product since v1.220.3; stored and never renumbered since v1.235.0) — `#3`
+  before the item name, in view and edit: the number the packer labels the
+  items with and the receiver checks the box by. Lines of one product
+  (several PO lots of one part) share its #, and **the order lists its lines
+  in # order**, so the page and Pack mode read alike.
+  - **A new order numbers its products once, 1..N, in the order the Packing
+    list shows them** — warehouse tab, then category, device, DDR
+    generation, brand / capacity / speed — through the whole file.
+  - **Every product added later takes the next #, in any status** (v1.235.0;
+    past Draft only from v1.230.0). A Draft no longer sorts a new product in
+    among the others: a # never moves once given. Products added in one save
+    are numbered among themselves in packing-list order, and a later save's
+    go after them. A new lot of a product already on the order — same
+    warehouse tab, same part / label / condition — joins that product's #.
+    Both packing lists keep their sorted rows, so a later product prints in
+    its sorted place with its later # (`#1, #2, #9, #3`).
+  - **Nothing renumbers** (v1.235.0). Removing a lot leaves a gap. A lot
+    removed and added back in a later save is a new product with the next
+    #; within one save it keeps its #. A spec edit, a transfer, a warehouse
+    change or archiving the source PO moves no #. A lot that moves to
+    another warehouse prints under that warehouse's tab, so a product can
+    show its one # on two tabs. A lot whose spec or part # is corrected — or
+    a hand-typed line re-worded — keeps its product's # (its items may
+    already carry the label) but prints as a row of its own under that #,
+    so the sheet never shows one lot's spec for another's items. Setting a
+    line to 0, editing a price, or saving the order as shown never did.
+  - The # is stored (`sell_order_lines.product_no`), and so is the order's
+    next one (`sell_orders.next_product_no`); the editor sends each saved
+    line's row id, so a line keeps its # through the save's rewrite (by its
+    lot, or a hand-typed line by its text, when an API caller sends no id).
+    Orders that existed before v1.235.0 kept the numbers they showed: the
+    backend froze them on its first boot, and an order the previous release
+    saves while a deploy rolls shows — and on its next save keeps — the
+    numbers that release showed. A line with no # stored yet always shows
+    the one it will get. A line added while editing reads *new* until the
+    save numbers it. A hand-typed line joins a product only in its own
+    warehouse. "N products" on the order, the sell
+    orders list and its export count #s.
+  - A product's place on the sheet comes from its first line by PO and
+    product # — 0s included — and a tie on everything the sheet sorts by goes
+    by part # (v1.221.0).
+- **A line that can't ship can be set to 0** (v1.219.0), keeping a record
+  that it was on the order. (Removing it renumbers nothing either since
+  v1.235.0: it leaves a gap.) Any line already on the order may go to 0 in the
   editor, including one whose lot is gone; a line being added still needs at
   least 1, as does a new order (and the MCP create tool). Since v1.220.2 the
   server holds that rule too: a save may hold at 0 only a lot already on the
@@ -930,12 +1068,11 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   all 0 can't move to Shipped, Awaiting payment or Done, and has nothing to
   pack: both packing-list buttons are off for it (v1.220.2). A hand-typed line is
   no longer capped at its saved qty. Archiving a PO leaves a sell line held
-  at 0 alone (v1.220.2): it is not a conflict and is not removed, so no #
-  after it moves. Removing the PO line it names doesn't block either, but the
-  sell line becomes a hand-typed line — a different product — so it and the
-  products after it are renumbered.
-- **Line items group By warehouse or By PO** (v1.194.0), in both view and edit.
-  The switch on the Line items header is remembered per user (preference
+  at 0 alone (v1.220.2): it is not a conflict and is not removed. Removing
+  the PO line it names doesn't block either: the sell line becomes a
+  hand-typed line and keeps its # (v1.235.0).
+- **Products group By warehouse or By PO** (v1.194.0), in both view and edit.
+  The switch on the Products header is remembered per user (preference
   `sellOrders.lineGroup`, default by warehouse).
   - By PO orders the groups numerically and puts hand-typed lines last under
     "No PO", matching the "Packing list by PO" download. It shows a Warehouse
@@ -959,11 +1096,9 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   - By warehouse's reference reads "From PO-1432 #3".
   - Lines picked in edit mode, from the picker or Inventory → Add to sell order,
     show the number before saving.
-  - The number is computed live, not stored. It is the line's rank among the
-    PO's lines by position, then creation time, then id, which is also the order
-    the PO page lists them in. Removing a PO line renumbers both pages together.
-    A partial-transfer clone sorts after its source, so the source keeps its
-    number.
+  - The number is the product's stored `#` on its PO (v1.234.0; a live rank
+    before). Removing a PO product renumbers nothing on either page, and a
+    lot split off by a partial transfer shows its source's `#`.
 - **Each line shows its spec as tags** (v1.194.0).
   - RAM: Desktop / Server / Laptop, classification, rank and speed (rank and
     speed accented).
@@ -1089,10 +1224,10 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   being prepared.
 - **Both packing lists number their rows by the product's # on the order**
   (v1.219.0; per product since v1.220.3): a `#` column first, before the tick
-  box, so the label on an item matches its row. The count runs 1..N down the
-  file and never restarts on a new tab. A product added once the order was
-  past Draft is the exception: its row stays in its sorted place and carries
-  a later # (v1.230.0). The by-PO file and a one-warehouse
+  box, so the label on an item matches its row. A new order's count runs
+  1..N down the file and never restarts on a new tab. A product added later
+  keeps its row in its sorted place and carries its later # (v1.230.0; in
+  any status since v1.235.0), and a removed one leaves a gap. The by-PO file and a one-warehouse
   download show each product the same # as the full list, and a product held
   at 0 leaves a gap. The bid sheet's own `#` column is a plain row index per
   tab, not this number.
@@ -1101,8 +1236,8 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   (`PO-1442 - DEN`), POs in numeric order, hand-typed lines on a
   `No PO - <warehouse>` tab. Each tab is a warehouse tab in miniature —
   category sections, the RAM device / DDR-generation labels and tints, tick
-  boxes, subtotals and a PO total. Each tab adds an **ID in PO** column after
-  Part # (v1.197.3): the line's # on that PO's page. A row that folds several
+  boxes, subtotals and a PO total. Each tab adds a **PO #** column after
+  Part # (v1.197.3; "ID in PO" until v1.236.0): the product's # on that PO. A row that folds several
   lots of the PO stacks their IDs in that cell the same way (`#2 × 13` above
   `#3 × 12`, v1.220.3); the tab already names the PO, so it has no `From PO`
   column. A tab is cut from the numbered products, so its rows run in the
@@ -1136,7 +1271,9 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
     product's #, part, specs, how many lots and their PO tags
     (`PO-1111 #4, PO-1203 #1 +1`), and the summed count. It starts closed.
     The chevron (or ← / →) opens it to one row per lot, each with its own
-    photo, count and tick. Ticking the product row packs every lot still at
+    photo, count and tick — and its own part # and condition when they differ
+    from the product's, as a lot corrected after it was numbered does
+    (v1.235.0; the packing list prints such a lot as a row of its own). Ticking the product row packs every lot still at
     its full count. A lot that was lowered keeps waiting for its own tick, and
     the fold opens to show it. Once every lot is packed, the same tick unpacks
     them all. A product with some lots packed shows a dash in its tick. A lot
@@ -1194,8 +1331,11 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
     Draft or Packing order it lists the lots flagged short with **Apply**
     (v1.229.0), and the
     lots ticked short before v1.228.0 with **Edit order**. It also holds
-    **Mark shipped**. Below 1024px wide (an iPad in portrait) the panel drops under
-    the list and the selected-item card is hidden.
+    **Mark shipped**. The panel stays beside the list as it scrolls and is
+    never taller than the window: on a short screen it scrolls by itself, so
+    Apply and Mark shipped are in reach mid-list (v1.230.1). Below 1024px wide
+    (an iPad in portrait) the panel drops under the list and the selected-item
+    card is hidden.
   - The scan box takes a Bluetooth or USB label scanner, with nothing focused,
     and matches a part number, a prefix, a recorded serial, then any part
     number holding the text, as Review mode does. Typing filters the list
@@ -1868,6 +2008,11 @@ inventory search, sell-order draft creation.
     dirty or goes back to Draft. Read-only lines never fill.
   - **Scan RAM sheet** fills known chips before its auto-save, so a Micron
     stick whose part # is on record saves at once.
+  - **For Micron the suggestion is a die code** (v1.231.0, RS-209). Before
+    that, each stored chip carried its own date code, so the "most POs" vote
+    picked one stick's marking. One part number can still ship with
+    different dies (`MTA16ATF2G64HZ-3G2J1` is recorded with WSM and VPP), so
+    check the suggestion against the chip.
 
 > Provider selection is silent: OpenRouter when `OPENROUTER_API_KEY` is set,
 > otherwise a deterministic stub. A prod deploy missing the key looks healthy

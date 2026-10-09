@@ -1,0 +1,130 @@
+-- Micron Chip # where nobody read a die code off the stick: the die looked up
+-- for the line's part number — from our own sticks of that part, its decoded die
+-- revision, or Micron's FBGA decoder. Part numbers with more than one plausible
+-- die are left alone. The keys strip every non-alphanumeric character.
+UPDATE order_lines l
+   SET chip_number = v.die
+  FROM (VALUES
+  ('MTA36ASF4G72PZ2G6E1QG', 'VPS'),
+  ('MTA72ASS8G72LZ2G3B2PG', 'TGV'),
+  ('CT8G4SFS824AM8FRS', 'BPJ'),
+  ('MTA36ASF2G72PZ2G1A2KK', 'RGV'),
+  ('MTC4C10163S1SC56BD1', 'DKV'),
+  ('MTA4ATF1G64AZ3G2E1', 'ZFW'),
+  ('MTA36ASF4G72PZ2G6D1SI', 'TZX'),
+  ('MTC16C2085S1SC48BA1', 'BNJ'),
+  ('MTC8C1084S1SC48BA1', 'BNJ'),
+  ('CT32G4S266MM16FF', 'CJV'),
+  ('MTA18ASF2G72PZ2G6D1SI', 'TZX'),
+  ('MTC16C2085S1UC48BA1', 'BNJ'),
+  ('CT16G4SFD8266M16FRS', 'BPJ'),
+  ('CP16G4DFRA32AC8FF', 'BMX'),
+  ('MTC4C10163S1UC56BD1', 'DKV'),
+  ('CT32G4SFD832AC16FE', 'BKY'),
+  ('MTC8C1084S1UC56BD1', 'DKS'),
+  ('MTA4ATF1G64HZ3G2E2', 'ZFW'),
+  ('MTA16ATF1G64AZ2G1B1', 'TGG'),
+  ('MTA8ATF1G64HZ2G6E1', 'VPP'),
+  ('MTA4ATF51264HZ2G6E1', 'WFH'),
+  ('CT16G4SFRA32AC8FF', 'BMX'),
+  ('CT16G4SFD821316FA1', 'SRJ'),
+  ('MTA36ASF4G72PZ2G1A1II', 'SRK'),
+  ('MTC4C10163S1SC56BD1KC', 'DKV'),
+  ('MTC4C10163S1UC48BA1', 'BNK'),
+  ('MTC8C1084S1SC4BA1', 'BNJ'),
+  ('MTA8ATF2G64HZ3G2F1', 'CJV'),
+  ('MTA18ASF2G72PDZ2G3D1QI', 'TZV'),
+  ('MTA8ATF1G64AZ3G2J1', 'WSM'),
+  ('MTA36ASF4G72PZ2G3B1IK', 'TBJ'),
+  ('MT16KTF1G64HZ1G6N1', 'RVX'),
+  ('MTA18ASF2G72PDZ3G2R1TI', 'BPJ'),
+  ('MTA36ASF4G72PZ2G6E1RK', 'VPS'),
+  ('MTA8ATF1G64HZ2G3E1', 'VPP'),
+  ('MTA18ASF2G72PZ2G3A1MG', 'SRK'),
+  ('MTC40F2046S1RC48BA1', 'BNH'),
+  ('MTA4ATF51264AZ2G6E1', 'WFH'),
+  ('MTA4ATF51264HZ2G3B1', 'TBK'),
+  ('MTA72ASS8G72LZ2G3E2PI', 'VQL'),
+  ('MTA8ATF1G64AZ2G3H1', 'VHP'),
+  ('MTA8ATF1G64HZ2G6H1', 'VHP'),
+  ('MTA8ATF1G64HZ3G2R1', 'BPJ'),
+  ('MTA8ATF51264HZ2G1A1', 'RGQ'),
+  ('MTA9ASF1G72AZ2G3B1ZI', 'TBH'),
+  ('MTA9ASF1G72PZ2G3B1IG', 'TBH'),
+  ('MTA9ASF1G72PZ2G3B1II', 'TBH'),
+  ('MTA9ASF1G72PZ2G6D1SG', 'TZV'),
+  ('MTA9ASF1G72PZ2G9E1TI', 'WFL'),
+  ('MTA9ASF1G72PZ2G9E1UI', 'WFL'),
+  ('MTA9ASF1G72PZ2G9E1VI', 'WFL'),
+  ('MTA9ASF51272AZ2G3B1ZG', 'TGG'),
+  ('MTA9ASF51272PZ2G1B1QK', 'TGG'),
+  ('MTA9ASF51272PZ2G3B1IG', 'TGG'),
+  ('MTABATF1G64AZ2G3H1', 'VHP'),
+  ('MTC10F1084S1RC4BBAL', 'BNJ'),
+  ('MTC40F2046S1RC56BD1', 'DKQ'),
+  ('MTC40F2046S1RC56BD2MPFF', 'DKQ'),
+  ('MTC8C1084S1SC48BA1BC', 'BNJ'),
+  ('MTC8C1084S1UC48BAL', 'BNJ'),
+  ('MTC20F2085S1RC64BD2MWFF', 'DKT'),
+  ('CT4G4DFS824AM8FE', 'WQL'),
+  ('CT4G4DFS824AM8FF', 'WTD'),
+  ('CT4G4SFS624A4FB1', 'TBK'),
+  ('CT4G4SFS8266C8FB', 'BGS'),
+  ('CT8G4DFD8213C16FDR2', 'BHB'),
+  ('CT8G4DFD824AC16FF', 'BML'),
+  ('CT8G4SFS832AM8FR', 'BPJ'),
+  ('MT18KDF1G72PZ1G6P1KF', 'SGP'),
+  ('MT36JSF1G72PZ1G4M1FE', 'PFK'),
+  ('MT36JSF2G72PZ1G6E1HE', 'QBQ'),
+  ('MT36JSF2G72PZ1G6E1LF', 'PQL'),
+  ('MT36KSF1G72PZ1G4K1', 'QMT'),
+  ('MTA16ATF2G64AZ3G2J1', 'WSM'),
+  ('MTA16ATF2G64HZ2G3E1', 'VPP'),
+  ('MTA16ATF2G64HZ2G6E1', 'VPP'),
+  ('MTA16ATF4G64HZ3G2F1', 'CJV'),
+  ('MTA18ASF1G72PDZ2G1A1HK', 'RGQ'),
+  ('MTA18ASF1G72PZ2G1A2IG', 'RGV'),
+  ('MTA18ASF1G72PZ2G1A2IK', 'RGV'),
+  ('MTA18ASF1G72PZ2G3B1RG', 'TGL'),
+  ('MTA18ASF2G72AZ2G3B1ZG', 'TBH'),
+  ('MTA18ASF2G72PDZ2G6E1RG', 'VPP'),
+  ('MTA18ASF2G72PDZ2G9E1TI', 'WFL'),
+  ('MTA18ASF2G72PDZ3G2E1TI', 'WFL'),
+  ('MTA18ASF2G72PZ2G3B1IK', 'TBJ'),
+  ('MTA18ASF2G72PZ2G6D1QI', 'TZX'),
+  ('MTA18ASF2G72PZ3G2J3UI', 'WSL'),
+  ('MTA18ASF4G72PDZ3G2B2TI', 'XPF'),
+  ('MTA18ASF4G72PDZ3G2B2VI', 'XPF'),
+  ('MTA18ASF4G72PDZ3G2F1UL', 'CJV'),
+  ('MTA36ASF2G72PZ2G1A2IG', 'RGV'),
+  ('MTA36ASF2G72PZ2G1A2IJ', 'RGV'),
+  ('MTA36ASF2G72PZ2G1A2IK', 'RGV'),
+  ('MTA36ASF4G72PZ2G3B1RG', 'TBJ'),
+  ('MTA36ASF4G72PZ2G3B1RI', 'TBJ'),
+  ('MTA36ASF4G72PZ2G6D1QG', 'TZX'),
+  ('MTA36ASF4G72PZ2G6D1SG', 'TZX'),
+  ('MTA36ASF4G72PZ2G6E1RG', 'VPS'),
+  ('MTA36ASF4G72PZ2G9E2UI', 'WFK'),
+  ('MTA36ASF4G72PZ3G2R1UI', 'BPH'),
+  ('MTA36ASF4G72PZ3G2R1UL', 'BPH'),
+  ('MTA4ATF1G64HZ3G2B2', 'XPG'),
+  ('MTA4ATF1G64HZ3G2F1', 'CJX')
+  ) AS v(pn, die)
+ WHERE l.category = 'RAM' AND lower(btrim(l.brand)) = 'micron'
+   AND upper(regexp_replace(coalesce(l.part_number, ''), '[^A-Za-z0-9]', '', 'g')) = v.pn
+   AND upper(btrim(coalesce(l.chip_number, ''))) !~ '^[A-Z]{3}$';
+
+-- Codes Micron's decoder places on no DDR DIMM (LPDDR4, RLDRAM, or nothing):
+-- misreads of the die the line's part number decodes to.
+UPDATE order_lines SET chip_number = 'TBJ'
+ WHERE category = 'RAM' AND lower(btrim(brand)) = 'micron' AND chip_number = 'TBG';
+UPDATE order_lines SET chip_number = 'PFK'
+ WHERE category = 'RAM' AND lower(btrim(brand)) = 'micron' AND chip_number = 'PFX';
+UPDATE order_lines SET chip_number = 'RGV'
+ WHERE category = 'RAM' AND lower(btrim(brand)) = 'micron' AND chip_number = 'RGC';
+UPDATE order_lines SET chip_number = 'QBJ'
+ WHERE category = 'RAM' AND lower(btrim(brand)) = 'micron' AND chip_number = 'OBJ';
+UPDATE order_lines SET chip_number = 'WFL'
+ WHERE category = 'RAM' AND lower(btrim(brand)) = 'micron' AND chip_number = 'MFL';
+UPDATE order_lines SET chip_number = 'WDQ'
+ WHERE category = 'RAM' AND lower(btrim(brand)) = 'micron' AND chip_number = 'WDO';

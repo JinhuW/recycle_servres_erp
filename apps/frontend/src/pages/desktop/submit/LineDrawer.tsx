@@ -24,6 +24,7 @@ import { type ResolvedMarketValue } from '../../../lib/useMarketLookup';
 import { addableCategories, aiCaptureEnabled, categoryTone } from '../../../lib/lookups';
 import { parseSerials } from '../../../components/SerialNumbers';
 import { useChipFill } from '../../../lib/useChipFill';
+import { cascadePatch } from '@recycle-erp/shared';
 
 // ─── LineDrawer ──────────────────────────────────────────────────────────────
 // When `editing` is true (e.g. used by DesktopEditOrder), the pricing grid
@@ -31,7 +32,7 @@ import { useChipFill } from '../../../lib/useChipFill';
 // appears underneath — matching design/dashboard.jsx#EditOrderPage which
 // passes `editing={true}` to the shared OrderForm.
 export function LineDrawer({
-  line, idx, onChange, onClose, onRemove, canRemove, editing = false,
+  line, idx, newNo, onChange, onClose, onRemove, canRemove, editing = false,
   onConfirmLine, onConfirmError, duplicateOnLines, readOnly = false,
   sellPriceEditable = false, photoCtx, market, missingFields,
 }: {
@@ -44,8 +45,10 @@ export function LineDrawer({
   editing?: boolean;
   onConfirmLine?: () => Promise<void>;
   onConfirmError?: (msg: string) => void;
-  // 1-based line numbers (excluding this one) that share this line's part #.
-  duplicateOnLines?: number[];
+  // The other lines sharing this line's part #, named as lineRef names them.
+  duplicateOnLines?: string[];
+  // The row's "new n" while it has no #, as the table numbers it.
+  newNo?: number | null;
   // Locked order (Done, or a purchaser past their stage): the drawer still
   // opens so the line's full spec stays lookup-able, but nothing can change.
   readOnly?: boolean;
@@ -87,7 +90,15 @@ export function LineDrawer({
   // The category was already chosen by the button that created this line, so
   // the switch stays out of the way until someone says they filed it wrong.
   const [catOpen, setCatOpen] = useState(false);
-  const set = (patch: Partial<Line>) => onChange(patch);
+  // Every spec edit — a pick or a scan — goes through the cascade, so a line
+  // never holds a Class its Type rules out. The scan lands after an upload, so
+  // it reads the line as it is then, not as it was when the scan began.
+  const lineRef = useRef<Line>(line);
+  lineRef.current = line;
+  const set = useCallback(
+    (patch: Partial<Line>) => onChange(cascadePatch<Line>(cat, lineRef.current, patch)),
+    [cat, onChange],
+  );
   useChipFill(line, { enabled: !readOnly, onFill: chipNumber => set({ chipNumber }) });
   const [lightbox, setLightbox] = useState(false);
   const [thumbBroken, setThumbBroken] = useState(false);
@@ -164,7 +175,7 @@ export function LineDrawer({
       form.append('file', file, file.name);
       form.append('category', cat);
       const scan = await api.upload<ScanResponse>('/api/scan/label', form);
-      onChange(scanToLinePatch(scan, cat));
+      set(scanToLinePatch(scan, cat));
       const conf = scan.confidence ?? 0;
       const noFields = Object.keys(scan.extracted ?? {}).length === 0;
       if (scan.provider === 'stub') {
@@ -185,7 +196,7 @@ export function LineDrawer({
     } finally {
       setAiBusy(false);
     }
-  }, [aiBusy, cat, onChange, t]);
+  }, [aiBusy, cat, set, t]);
 
   const onCamCapture = useCallback(async (file: File) => {
     scannedByCamRef.current = true;
@@ -242,9 +253,9 @@ export function LineDrawer({
               width: 28, height: 28, borderRadius: 8,
               background: 'var(--bg-elev)', border: '1px solid var(--border)',
               display: 'grid', placeItems: 'center',
-              fontSize: 13, fontWeight: 600, color: 'var(--fg-muted)',
-              flexShrink: 0,
-            }}>{idx + 1}</div>
+              fontSize: line.no != null ? 13 : 10, fontWeight: 600, color: 'var(--fg-muted)',
+              flexShrink: 0, textAlign: 'center', lineHeight: 1.1,
+            }}>{line.no ?? (newNo != null ? t('lineNoNewN', { n: newNo }) : t('lineNoNew'))}</div>
             <div style={{
               width: 56, height: 56, borderRadius: 8,
               background: 'var(--bg-elev)', border: '1px solid var(--border)',
@@ -688,7 +699,7 @@ export function LineDrawer({
                   disabled={!canRemove}
                   style={canRemove ? { color: 'var(--neg)' } : undefined}
                 >
-                  <Icon name="trash" size={13} /> {t('soRemoveLineTooltip')}
+                  <Icon name="trash" size={13} /> {t('poRemoveProduct')}
                 </button>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   {line._confirmed && (

@@ -123,7 +123,7 @@ lifecycleRoutes.delete('/:id', async (c) => {
     return c.json({ error: 'This order has already been submitted — archive it instead' }, 403);
   }
   if (outcome.kind === 'sold') {
-    return c.json({ error: 'A line in this order is referenced by a sell-order and cannot be deleted' }, 409);
+    return c.json({ error: 'A product in this order is on a sell order and cannot be deleted' }, 409);
   }
 
   // Best-effort: drop the images from R2 too (after the commit). One PO can
@@ -213,17 +213,17 @@ async function setArchived(c: OrderCtx, archive: boolean) {
   // above is a 409 too.
   if (outcome.kind === 'committedLines') {
     if (!isManager) {
-      return c.json({ error: 'Lines in this order are on open sell orders — a manager has to archive it.' }, 409);
+      return c.json({ error: 'Products in this order are on open sell orders — a manager has to archive it.' }, 409);
     }
     return c.json({
-      error: 'Lines in this order are on open sell orders. Remove them from those sell orders to archive it.',
+      error: 'Products in this order are on open sell orders. Remove them from those sell orders to archive it.',
       code: 'committedLines',
       sellOrders: outcome.sellOrders,
     }, 409);
   }
   if (outcome.kind === 'transferClaimed') {
     return c.json({
-      error: 'Lines are out on an open transfer order — receive or discard that transfer first.',
+      error: 'Products are out on an open transfer order — receive or discard that transfer first.',
       offendingLineIds: outcome.offendingLineIds,
     }, 409);
   }
@@ -360,9 +360,9 @@ function advanceRefusedResponse(
     case 'archived': return c.json({ error: 'Order is archived — unarchive it first' }, 409);
     case 'finalStage': return c.json({ error: 'Already at the final stage' }, 409);
     case 'soldIsAutomatic':
-      return c.json({ error: 'Sold is not a stage you can choose — an order becomes Sold on its own once it is Done and every line has sold.' }, 409);
+      return c.json({ error: 'Sold is not a stage you can choose — an order becomes Sold on its own once it is Done and every product has sold.' }, 409);
     case 'alreadySold':
-      return c.json({ error: 'This order is Done and every line has sold. To reopen it, move it back to Reviewing or Ready to Pay.' }, 409);
+      return c.json({ error: 'This order is Done and every product has sold. To reopen it, move it back to Reviewing or Ready to Pay.' }, 409);
     case 'sameStage':
       return c.json({
         error: `Order is already ${LIFECYCLE_LABEL[outcome.lifecycle] ?? outcome.lifecycle} — reload to see where it stands.`,
@@ -387,11 +387,11 @@ function advanceRefusedResponse(
       }, 409);
     case 'committedLines':
       return c.json(committedLinesBody(c.var.user, outcome.offendingLineIds, outcome.sellOrderIds,
-        `Lines committed to ${describeSellOrders(outcome.sellOrderIds)} — cancel those sell orders first.`,
-        'Lines in this order are on open sell orders — a manager has to move it.'), 409);
+        `Products committed to ${describeSellOrders(outcome.sellOrderIds)} — cancel those sell orders first.`,
+        'Products in this order are on open sell orders — a manager has to move it.'), 409);
     case 'transferClaimed':
       return c.json({
-        error: 'Lines are out on an open transfer order — receive or discard that transfer first.',
+        error: 'Products are out on an open transfer order — receive or discard that transfer first.',
         offendingLineIds: outcome.offendingLineIds,
       }, 409);
     case 'missingTxnId':
@@ -421,7 +421,7 @@ function advanceRefusedResponse(
       }, 409);
     case 'noCost':
       return c.json({
-        error: 'This PO has no cost — enter the unit cost on its lines before submitting it.',
+        error: 'This PO has no cost — enter the unit cost on its products before submitting it.',
       }, 409);
     case 'missingWarehouse':
       return c.json({ error: 'Pick the receiving warehouse before submitting it.' }, 409);

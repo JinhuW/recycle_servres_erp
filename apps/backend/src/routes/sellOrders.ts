@@ -22,9 +22,10 @@ import {
 } from '../services/sellOrderPriceImport';
 import {
   buildPriceTemplateWorkbook, buildPackingListWorkbook, buildPackingListByPoWorkbook,
-  comparePoIds, packSections, type PoSource, type PriceTemplateProduct,
 } from '../lib/sellOrderPriceTemplate';
-import { canonPartNumberJs } from '../lib/part-number';
+import {
+  assignSellProductNos, foldSheetLines, healSellProductNos, numberSheetLines, sheetRows, type SheetLineRow,
+} from '../services/sellOrderNumbers';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { settleSoldTx } from '../services/orderSold';
 import { searchSellableInventory } from '../services/sellableInventory';
@@ -35,7 +36,6 @@ import { lockOrdersForLinesTx } from '../services/orderLocks';
 import {
   buildXlsxBuffer, xlsxResponse, datedFilename, type XlsxColumn,
 } from '../lib/xlsx';
-import { invLabel } from '../lib/inventoryLabel';
 import {
   convertToUsd, getLatestRateToUsd, isSupportedCurrency,
   type SupportedCurrency, type FxLookup,
@@ -103,7 +103,8 @@ sellOrders.get('/', async (c) => {
       (so.adjusted_at IS NOT NULL) AS adjusted,
       c.id AS customer_id, c.name AS customer_name, c.short_name AS customer_short,
       pu.name AS payment_received_by_name,
-      COUNT(sol.id)::int                                AS line_count,
+      -- Products, by #; a line not numbered yet counts on its own.
+      COUNT(DISTINCT COALESCE(sol.product_no::text, sol.id::text))::int AS line_count,
       COALESCE(SUM(sol.qty), 0)::int                    AS qty,
       COALESCE(SUM(sol.qty * sol.unit_price), 0)::float AS subtotal
     FROM sell_orders so
@@ -173,7 +174,7 @@ const SO_EXPORT_COLS: XlsxColumn[] = [
   { header: 'Customer', key: 'customer', width: 28 },
   { header: 'Region',   key: 'region',   width: 14 },
   { header: 'Created',  key: 'created',  width: 12 },
-  { header: 'Lines',    key: 'lines',    width: 8,  numFmt: '#,##0' },
+  { header: 'Products', key: 'lines',    width: 9,  numFmt: '#,##0' },
   { header: 'Units',    key: 'qty',      width: 8,  numFmt: '#,##0' },
   { header: 'Total',    key: 'total',    width: 14, numFmt: '#,##0.00' },
   { header: 'Status',   key: 'status',   width: 16 },
@@ -192,7 +193,8 @@ sellOrders.get('/export', async (c) => {
     SELECT
       so.id, so.status, so.notes, so.created_at,
       c.name AS customer_name, c.region AS customer_region,
-      COUNT(sol.id)::int                                AS line_count,
+      -- Products, by #; a line not numbered yet counts on its own.
+      COUNT(DISTINCT COALESCE(sol.product_no::text, sol.id::text))::int AS line_count,
       COALESCE(SUM(sol.qty), 0)::int                    AS qty,
       COALESCE(SUM(sol.qty * sol.unit_price), 0)::float AS total
     FROM sell_orders so
@@ -255,8 +257,10 @@ sellOrders.get('/:id', async (c) => {
     payment_received_by: string | null; payment_received_by_name: string | null;
     pre_adjust_native_total: number | null; adjusted_at: string | null;
     adjusted_by: string | null; adjusted_by_name: string | null;
+    next_product_no: number;
   }[]>`
     SELECT so.id, so.status, so.notes, so.created_at, so.updated_at, so.archived_at, so.close_reason_id,
+           so.next_product_no,
            so.currency_code, so.fx_rate_to_usd::float AS fx_rate_to_usd, so.fx_source,
            so.created_by, so.payment_received_by, pu.name AS payment_received_by_name,
            so.pre_adjust_native_total::float AS pre_adjust_native_total,
@@ -286,12 +290,12 @@ sellOrders.get('/:id', async (c) => {
     lot_category: string | null; brand: string | null; capacity: string | null;
     generation: string | null; description: string | null; lot_part_number: string | null;
     chip_number: string | null; lot_condition: string | null; rpm: number | null;
-    append_batch: number | null;
+    product_no: number | null; append_batch: number | null;
   }[]>`
     SELECT sol.id, sol.category, sol.label, sol.sub_label, sol.part_number,
            sol.qty, sol.unit_price::float AS unit_price,
            sol.source_unit_price::float AS source_unit_price,
-           sol.condition, sol.position, sol.append_batch,
+           sol.condition, sol.position, sol.product_no, sol.append_batch,
            sol.inventory_id, sol.warehouse_id, ol.order_id AS source_order_id,
            ${poLineNo(sql, 'ol')} AS source_line_no,
            w.short AS warehouse_short, pw.short AS pack_warehouse_short,
@@ -346,12 +350,12 @@ sellOrders.get('/:id', async (c) => {
     () => signoffState(sql, id),
   ] as const);
   // The lines in # order, each with its product's # — folded from this one
-  // read, so a save landing mid-request can't leave a line unnumbered.
+  // read, so a save landing mid-request can't split a product.
   const { lineOrder, noByLine } = numberSheetLines(listed.map((l): SheetLineRow => ({
     sol_id: l.id, sell_qty: l.qty,
     sol_label: l.label, sol_sub: l.sub_label, sol_part: l.part_number,
     sol_category: l.category, sol_condition: l.condition,
-    append_batch: l.append_batch,
+    product_no: l.product_no, append_batch: l.append_batch,
     pack_warehouse: l.pack_warehouse_short,
     inv_id: l.inventory_id, source_order_id: l.source_order_id, po_line_no: l.source_line_no,
     category: l.lot_category, brand: l.brand, capacity: l.capacity, generation: l.generation,
@@ -359,7 +363,7 @@ sellOrders.get('/:id', async (c) => {
     interface: l.interface, form_factor: l.form_factor, description: l.description,
     part_number: l.lot_part_number, chip_number: l.chip_number, condition: l.lot_condition,
     health: l.health, rpm: l.rpm, image_url: l.image_url,
-  })));
+  })), head.next_product_no);
   const rank = new Map(lineOrder.map((lineId, i) => [lineId, i]));
   const lines = [...listed].sort((a, b) => rank.get(a.id)! - rank.get(b.id)!);
 
@@ -415,7 +419,8 @@ sellOrders.get('/:id', async (c) => {
       lines: lines.map(l => ({
         id: l.id,
         // The product's # on this order — what the packer labels its items
-        // with, and what both packing lists show. Lines of one product share it.
+        // with, and what both packing lists show. Lines of one product share
+        // it.
         no: noByLine.get(l.id)!,
         category: l.category, label: l.label, sub: l.sub_label, partNumber: l.part_number,
         qty: l.qty, unitPrice: l.unit_price,
@@ -448,11 +453,6 @@ sellOrders.get('/:id', async (c) => {
   });
 });
 
-// Category buckets for the price template: unknown categories fold into
-// Other so every line lands somewhere.
-const SO_CATEGORY_ORDER = ['RAM', 'SSD', 'HDD', 'Other'] as const;
-type SoCategory = (typeof SO_CATEGORY_ORDER)[number];
-
 // Prefix download filenames with the customer so a downloads folder full of
 // exports is scannable by who, not just by order id. Strip filesystem/header-
 // hostile characters and collapse whitespace to a single dash. \p{L}\p{N}
@@ -464,305 +464,23 @@ function customerSlug(name: string | null): string {
     .replace(/\s+/g, '-');
 }
 
-// One row of an order's lines as the sheets read them: the line, its lot's
-// spec, and where the lot is now. Both the sheet query below and GET /:id
-// produce these, so the order page and the files fold the same lines the same
-// way — spelled out field by field so a typo in either producer fails to
-// compile instead of quietly renumbering one of them.
-type SheetLineRow = {
-  sol_id: string; sell_qty: number;
-  sol_label: string; sol_sub: string | null; sol_part: string | null;
-  sol_category: string; sol_condition: string | null;
-  append_batch: number | null;
-  // The lot's current warehouse, not the one saved on the line: a transfer of
-  // committed stock moves the lot, and the pick happens where it is.
-  pack_warehouse: string | null;
-  inv_id: string | null; source_order_id: string | null; po_line_no: number | null;
-  category: string | null; brand: string | null; capacity: string | null;
-  generation: string | null; type: string | null; classification: string | null;
-  rank: string | null; speed: string | null; interface: string | null;
-  form_factor: string | null; description: string | null; part_number: string | null;
-  chip_number: string | null; condition: string | null; health: number | null;
-  rpm: number | null; image_url: string | null;
-};
-
-type SheetSource = PoSource & { solIds: string[] };
-type SheetProduct = Omit<PriceTemplateProduct, 'category' | 'poSources'>
-  & { category: SoCategory; key: string; poSources: SheetSource[] };
-
-// A line with what the fold reads off it, worked out once.
-type FoldLine = {
-  row: SheetLineRow; qty: number; key: string; label: string; category: SoCategory;
-  part: string | null; po: string | null; lineNo: number | null;
-};
-
-// The spec fields that place a product on the sheet — device and generation
-// group it, brand/capacity/speed order it. They come from the one line that
-// numbers the product, so the row prints where its # says and under the group
-// labels it sits in.
-const PLACING_SPECS = ['brand', 'capacity', 'generation', 'type', 'speed'] as const;
-
-// The order a product's lines are read in: by PO and line # on it, never by
-// `position`, which every save of the editor rewrites. A hand-typed line came
-// from no PO and goes last, ordered by its text.
-function byPoLine(a: FoldLine, b: FoldLine): number {
-  if (a.po && b.po) return comparePoIds(a.po, b.po) || a.lineNo! - b.lineNo!;
-  if (a.po || b.po) return a.po ? -1 : 1;
-  return a.category.localeCompare(b.category) || (a.part ?? '').localeCompare(b.part ?? '');
-}
-
-// Only real public URLs make the sheet — seeded/stub scans carry data: URLs
-// that would render as garbage text in the cell.
-const publicUrl = (v: unknown): string | null =>
-  typeof v === 'string' && /^https:\/\//i.test(v) ? v : null;
-const text = (v: unknown) => (v == null ? '' : String(v));
-
-function foldLine(r: SheetLineRow): FoldLine {
-  const hasInv = r.inv_id != null;
-  // Manual lines fold sub_label into the label — the sheet's spec columns
-  // only fill from an inventory row.
-  const label = hasInv ? invLabel(r) : [r.sol_label, r.sol_sub].filter(Boolean).join(' — ');
-  const rawCategory = text(r.category ?? r.sol_category);
-  const category: SoCategory = (SO_CATEGORY_ORDER as readonly string[]).includes(rawCategory)
-    ? (rawCategory as SoCategory)
-    : 'Other';
-  const part = r.part_number ?? r.sol_part ?? null;
-  const condition = r.condition ?? r.sol_condition ?? null;
-  return {
-    row: r, qty: Number(r.sell_qty ?? 0), label, category, part,
-    key: `${part ? canonPartNumberJs(part) : ''}|${label}|${condition ?? ''}`,
-    // Both null for a hand-typed line, both set for a lot: order_lines.order_id
-    // is NOT NULL and poLineNo is null only without a lot.
-    po: r.source_order_id || null,
-    lineNo: r.po_line_no,
-  };
-}
-
-// One product from its lines. Its place — category, label, placing specs — is
-// its first line by PO and line #, 0s included, so neither a save nor zeroing
-// a line can move it. What a picker checks against the lot in hand — health,
-// rank, the part # spelling, the photo — is the first line above 0's: a line
-// held at 0 is not what ships.
-function foldProduct(lines: readonly FoldLine[]): SheetProduct {
-  const ordered = [...lines].sort(byPoLine);
-  const first = ordered[0]!;
-  const live = ordered.filter((l) => l.qty > 0);
-  const shown = live[0] ?? first;
-  const lot = live.find((l) => l.row.inv_id != null)?.row;
-  const placing = first.row.inv_id != null ? first.row : null;
-  const specs: Record<string, string | number> = {};
-  if (placing) {
-    for (const k of PLACING_SPECS) specs[k] = text(placing[k]);
-    Object.assign(specs, {
-      classification: text(lot?.classification), rank: text(lot?.rank),
-      chip: text(lot?.chip_number), interface: text(lot?.interface),
-      formFactor: text(lot?.form_factor), health: lot?.health ?? '', rpm: lot?.rpm ?? '',
-    });
-  }
-  const poSources: SheetSource[] = [];
-  for (const l of ordered) {
-    const src = poSources.find((x) => x.po === l.po && x.lineNo === l.lineNo);
-    if (src) {
-      src.qty += l.qty;
-      src.solIds.push(l.row.sol_id);
-    } else {
-      poSources.push({ po: l.po, lineNo: l.lineNo, qty: l.qty, solIds: [l.row.sol_id] });
-    }
-  }
-  return {
-    category: first.category, key: first.key, label: first.label,
-    partNumber: shown.part, condition: first.row.condition ?? first.row.sol_condition ?? null,
-    qty: lines.reduce((a, l) => a + l.qty, 0),
-    imageUrl: live.map((l) => publicUrl(l.row.image_url)).find(Boolean) ?? null,
-    specs, poSources,
-  };
-}
-
-// Products in product-key order. Every sort after this is stable, so a tie
-// on everything the sheet sorts by goes by the key — never by input order.
-function foldProducts(lines: readonly FoldLine[]): SheetProduct[] {
-  const byKey = new Map<string, FoldLine[]>();
-  for (const l of lines) {
-    if (!byKey.has(l.key)) byKey.set(l.key, []);
-    byKey.get(l.key)!.push(l);
-  }
-  return [...byKey.keys()].sort().map((key) => foldProduct(byKey.get(key)!));
-}
-
-const warehouseOf = (l: FoldLine) => text(l.row.pack_warehouse) || 'Unassigned';
-
-// The packing list's products, and the # each one carries — one per product,
-// counted 1..N through the whole file. Every sell line takes its product's #.
-//
-// Two orders come out. `numbered` keeps each warehouse tab's products in the
-// packing list's own order (its sections and rows), which is what the files
-// print. The #s walk that same order, but in tiers: first every product with a
-// line numbered with the sorted set, then each later append batch in turn. A
-// product added once the order was past Draft therefore takes the next # after
-// all the others — its items' neighbours may already carry their labels —
-// while the sheet still prints it in its sorted row. `lineOrder` lists the
-// lines in # order, which is how the order page and Pack mode show them. With
-// nothing appended the two orders are the same.
-//
-// A line held at 0 is folded and numbered like any other — zeroing a line
-// must not move a # — and only then left off the files.
-function numberSheetLines(rows: readonly SheetLineRow[]) {
-  const lines = rows.map(foldLine);
-  // Warehouse-less lines land in an 'Unassigned' tab (old packing-list rule).
-  const byWarehouse = new Map<string, FoldLine[]>();
-  for (const l of lines) {
-    const wh = warehouseOf(l);
-    if (!byWarehouse.has(wh)) byWarehouse.set(wh, []);
-    byWarehouse.get(wh)!.push(l);
-  }
-  const warehouseOrder = [...byWarehouse.keys()].sort((a, b) => {
-    if (a === 'Unassigned') return 1;
-    if (b === 'Unassigned') return -1;
-    return a.localeCompare(b);
-  });
-
-  const numbered = warehouseOrder.map((warehouse) => {
-    const whLines = byWarehouse.get(warehouse)!;
-    const products = packSections(foldProducts(whLines)).flatMap((s) => s.rows);
-    return { warehouse, products, lines: whLines };
-  });
-
-  // A product's tier: null while any of its lines is numbered with the sorted
-  // set, so a lot added to a product already on the order joins its #; else
-  // the earliest batch among its lines. 0 lines count — zeroing moves nothing.
-  const batchByLine = new Map(lines.map((l) => [l.row.sol_id, l.row.append_batch]));
-  const tierOf = (p: SheetProduct): number => {
-    let tier = Infinity;
-    for (const src of p.poSources) {
-      for (const lineId of src.solIds) tier = Math.min(tier, batchByLine.get(lineId) ?? 0);
-    }
-    return tier;
-  };
-  const tiers = numbered.map(({ products }) => products.map(tierOf));
-  const tierOrder = [...new Set(tiers.flat())].sort((a, b) => a - b);
-
-  let n = 0;
-  const lineOrder: string[] = [];
-  const noByLine = new Map<string, number>();
-  for (const tier of tierOrder) {
-    numbered.forEach(({ products }, w) => {
-      products.forEach((p, i) => {
-        if (tiers[w]![i] !== tier) return;
-        p.no = ++n;
-        for (const src of p.poSources) {
-          for (const lineId of src.solIds) {
-            lineOrder.push(lineId);
-            noByLine.set(lineId, n);
-          }
-        }
-      });
-    });
-  }
-  return { numbered, lineOrder, noByLine, lines };
-}
-
-// What the files show, from the numbered products: a line held at 0 is
-// nothing to price or pick, and a tab or PO left empty goes. Its product
-// keeps the # it was given.
-function foldSheetLines(rows: readonly SheetLineRow[]) {
-  const { numbered, lines } = numberSheetLines(rows);
-  const live = (p: SheetProduct): SheetProduct[] => {
-    const poSources = p.poSources.filter((x) => x.qty > 0);
-    return poSources.length ? [{ ...p, poSources }] : [];
-  };
-  const warehouses = numbered
-    .map(({ warehouse, products }) => ({ warehouse, products: products.flatMap(live) }))
-    .filter((w) => w.products.length > 0);
-
-  // The by-PO tabs cut each numbered product by the PO its live lines came
-  // from. A cut keeps the product's #, place and group, and shows its own
-  // lots' details — the PO-2 tab doesn't print PO-1's health.
-  const poWarehouses = numbered
-    .map(({ warehouse, products, lines: whLines }) => {
-      const byPo = new Map<string, SheetProduct[]>();
-      const liveByKey = new Map<string, FoldLine[]>();
-      for (const l of whLines) {
-        if (l.qty === 0) continue;
-        if (!liveByKey.has(l.key)) liveByKey.set(l.key, []);
-        liveByKey.get(l.key)!.push(l);
-      }
-      for (const p of products) {
-        const cuts = new Map<string, FoldLine[]>();
-        for (const l of liveByKey.get(p.key) ?? []) {
-          const po = l.po ?? '';
-          if (!cuts.has(po)) cuts.set(po, []);
-          cuts.get(po)!.push(l);
-        }
-        for (const [po, cut] of cuts) {
-          const own = foldProduct(cut);
-          const placing = Object.fromEntries(PLACING_SPECS.map((k) => [k, p.specs[k] ?? '']));
-          if (!byPo.has(po)) byPo.set(po, []);
-          byPo.get(po)!.push({
-            ...own, category: p.category, label: p.label, no: p.no,
-            specs: Object.keys(p.specs).length ? { ...own.specs, ...placing } : own.specs,
-          });
-        }
-      }
-      const pos = [...byPo.entries()]
-        .sort(([a], [b]) => {
-          // Hand-typed lines came from no PO and go last.
-          if (!a) return 1;
-          if (!b) return -1;
-          return comparePoIds(a, b);
-        })
-        .map(([po, cutProducts]) => ({ po: po || null, products: cutProducts }));
-      return { warehouse, pos };
-    })
-    .filter((w) => w.pos.length > 0);
-
-  return { products: foldProducts(lines).flatMap(live), warehouses, poWarehouses };
-}
-
 // What both sell-order spreadsheets are built from: the product grouping the
 // edit form prices by (part|label|condition, qty summed across warehouses),
 // and the same grouping scoped per warehouse. One query feeds the bid sheet
 // and the packing list so the two files can never disagree about what is on
 // the order.
 async function loadSellOrderSheetData(sql: SqlClient, id: string) {
-  const head = (await sql<{ id: string; currency_code: string; customer_name: string | null }[]>`
-    SELECT so.id, so.currency_code, c.name AS customer_name
+  const head = (await sql<{ id: string; currency_code: string; customer_name: string | null; next_product_no: number }[]>`
+    SELECT so.id, so.currency_code, c.name AS customer_name, so.next_product_no
     FROM sell_orders so
     JOIN customers c ON c.id = so.customer_id
     WHERE so.id = ${id} LIMIT 1
   `)[0];
   if (!head) return null;
 
-  const rows = await sql<SheetLineRow[]>`
-    SELECT
-      sol.id AS sol_id, sol.qty AS sell_qty,
-      sol.label AS sol_label, sol.sub_label AS sol_sub, sol.part_number AS sol_part,
-      sol.category AS sol_category, sol.condition AS sol_condition,
-      sol.append_batch,
-      w.short AS pack_warehouse,
-      l.id AS inv_id, l.order_id AS source_order_id, ${poLineNo(sql, 'l')} AS po_line_no,
-      l.category, l.brand, l.capacity, l.generation, l.type,
-      l.classification, l.rank, l.speed, l.interface, l.form_factor, l.description,
-      l.part_number, l.chip_number, l.condition, l.health::float AS health,
-      l.rpm,
-      img.delivery_url AS image_url
-    FROM sell_order_lines sol
-    LEFT JOIN order_lines l ON l.id = sol.inventory_id
-    LEFT JOIN orders src ON src.id = l.order_id
-    -- The lot's current warehouse, not the one saved on the line: a transfer
-    -- of committed stock moves the lot, and the pick happens where it is.
-    LEFT JOIN warehouses w ON w.id = COALESCE(l.warehouse_id, src.warehouse_id, sol.warehouse_id)
-    LEFT JOIN LATERAL (
-      SELECT ls.delivery_url
-      FROM label_scans ls
-      WHERE ls.cf_image_id = l.scan_image_id
-      ORDER BY ls.created_at ASC
-      LIMIT 1
-    ) img ON TRUE
-    WHERE sol.sell_order_id = ${id}
-    ORDER BY ${sellLineOrder(sql, 'sol')}
-  `;
+  const rows = await sheetRows(sql, id);
 
-  const sheet = foldSheetLines(rows);
+  const sheet = foldSheetLines(rows, head.next_product_no);
 
   const slug = customerSlug(head.customer_name);
   return {
@@ -808,14 +526,14 @@ sellOrders.get('/:id/packing-list', async (c) => {
   // Lines held at 0 have no row on either list, and a workbook without a
   // sheet is a file Excel calls corrupt.
   if (data.warehouses.length === 0) {
-    return c.json({ error: 'there is nothing to pack — no line on this order is above 0' }, 400);
+    return c.json({ error: 'there is nothing to pack — no product on this order is above 0' }, 400);
   }
   const byPo = c.req.query('groupBy') === 'po';
   const only = c.req.query('warehouse');
   const keep = (w: { warehouse: string }) => !only || w.warehouse === only;
   const warehouses = data.warehouses.filter(keep);
   if (only && warehouses.length === 0) {
-    return c.json({ error: `No lines in warehouse ${only} on this order` }, 400);
+    return c.json({ error: `No products in warehouse ${only} on this order` }, 400);
   }
 
   const buf = byPo
@@ -930,7 +648,7 @@ sellOrders.post('/', async (c) => {
         paymentReceivedBy?: string | null }
     | null;
   if (!body || !body.customerId || !Array.isArray(body.lines) || body.lines.length === 0) {
-    return c.json({ error: 'customerId and at least one line required' }, 400);
+    return c.json({ error: 'customerId and at least one product required' }, 400);
   }
   if (typeof body.customerId !== 'string' || !UUID_RE.test(body.customerId)) {
     return c.json({ error: 'customerId must be a uuid' }, 400);
@@ -968,12 +686,55 @@ sellOrders.post('/', async (c) => {
 // place in the numbering through it.
 type SaveLineInput = DraftLineInput & { id?: string | null };
 
-// The append batch each saved line is written with. A line that was on the
-// order keeps its own — found by the row the editor says it was, else by its
-// lot — so neither an edit nor the rewrite moves its #. A new line on a Draft
-// is numbered with the sorted set; once the order is past Draft its items may
-// already carry their labels, so this save's new lines get a batch of their
-// own, after every other.
+// The # each saved line is written with. A line that was on the order keeps
+// its own — found by the row the editor says it was, else by its lot, else (a
+// hand-typed line saved without its row) by its text — so neither an edit nor
+// the rewrite moves it. Anything else is new and is numbered after the save
+// (assignSellProductNos).
+async function carriedProductNos(
+  tx: SqlLike, orderId: string,
+): Promise<(l: SaveLineInput) => number | null> {
+  const rows = await tx<{
+    id: string; inventory_id: string | null; product_no: number | null;
+    category: string; label: string; sub_label: string | null; part_number: string | null;
+    condition: string | null; warehouse_id: string | null;
+  }[]>`
+    SELECT id, inventory_id, product_no, category, label, sub_label, part_number, condition, warehouse_id
+    FROM sell_order_lines WHERE sell_order_id = ${orderId}`;
+  const byRow = new Map(rows.map((r) => [r.id, r.product_no]));
+  const lowest = (m: Map<string, number>, k: string, no: number | null) => {
+    if (no == null) return;
+    const had = m.get(k);
+    if (had == null || no < had) m.set(k, no);
+  };
+  const typedKey = (l: {
+    category: string; label: string; subLabel?: string | null; partNumber?: string | null;
+    condition?: string | null; warehouseId?: string | null;
+  }) => JSON.stringify([
+    l.category, l.label, l.subLabel ?? null, l.partNumber ?? null, l.condition ?? null, l.warehouseId ?? null,
+  ]);
+  const byLot = new Map<string, number>();
+  const byText = new Map<string, number>();
+  for (const r of rows) {
+    if (r.inventory_id) lowest(byLot, r.inventory_id.toLowerCase(), r.product_no);
+    else {
+      lowest(byText, typedKey({
+        ...r, subLabel: r.sub_label, partNumber: r.part_number, warehouseId: r.warehouse_id,
+      }), r.product_no);
+    }
+  }
+  return (l) => {
+    if (typeof l.id === 'string' && byRow.has(l.id)) return byRow.get(l.id)!;
+    const lot = l.inventoryId?.toLowerCase();
+    if (lot) return byLot.get(lot) ?? null;
+    return byText.get(typedKey(l)) ?? null;
+  };
+}
+
+// What the release before 0170 numbered a line by (sell_order_lines.append_batch),
+// still written so a rollback to it moves no #: a line keeps its own — by row,
+// else by lot — and a line new to an order past Draft gets the next batch. Drop
+// it with legacyNumbers.
 async function appendBatches(
   tx: SqlLike, orderId: string, status: string,
 ): Promise<(l: SaveLineInput) => number | null> {
@@ -985,7 +746,6 @@ async function appendBatches(
     if (!r.inventory_id) continue;
     const lot = r.inventory_id.toLowerCase();
     const had = byLot.get(lot);
-    // A lot on two lines keeps the earlier one's place; null is earliest.
     if (!byLot.has(lot) || r.append_batch === null || (had != null && r.append_batch < had)) {
       byLot.set(lot, r.append_batch);
     }
@@ -1057,7 +817,7 @@ sellOrders.patch('/:id', async (c) => {
   `)[0];
   if (!current) return c.json({ error: 'Not found' }, 404);
   if (editsStructure && STRUCTURE_LOCKED_STATUSES.has(current.status)) {
-    return c.json({ error: `cannot edit lines or customer of a ${current.status} order` }, 409);
+    return c.json({ error: `cannot edit products or customer of a ${current.status} order` }, 409);
   }
 
   // Resolve FX outside the transaction (a cold-cache frankfurter fetch must not
@@ -1069,7 +829,7 @@ sellOrders.patch('/:id', async (c) => {
     : null;
 
   if (body.lines !== undefined && (!Array.isArray(body.lines) || body.lines.length === 0)) {
-    return c.json({ error: 'at least one line required' }, 400);
+    return c.json({ error: 'at least one product required' }, 400);
   }
   if (Array.isArray(body.lines)) {
     const lineErr = lineInputError(body.lines, { allowZeroQty: true });
@@ -1112,7 +872,7 @@ sellOrders.patch('/:id', async (c) => {
     // Under the lock: a status move to Done committed between the read above
     // and here would otherwise let this rewrite the record of what was sold.
     if (editsStructure && STRUCTURE_LOCKED_STATUSES.has(beforeHead.status)) {
-      return { code: 409, msg: `cannot edit lines or customer of a ${beforeHead.status} order` };
+      return { code: 409, msg: `cannot edit products or customer of a ${beforeHead.status} order` };
     }
     // A line rewrite re-snapshots every line's USD value at the current rate.
     // Currency is the explicit new one (validated above) or the order's
@@ -1138,7 +898,7 @@ sellOrders.patch('/:id', async (c) => {
       // has to come with at least 1, or a stale or made-up id reaches the FK.
       const onOrder = new Set(beforeLines.flatMap(l => (l.inventory_id ? [l.inventory_id.toLowerCase()] : [])));
       if (body.lines.some(l => l.qty === 0 && l.inventoryId && !onOrder.has(l.inventoryId.toLowerCase()))) {
-        return { code: 400, msg: 'a new line needs a qty of at least 1 — only a line already on the order can be held at 0' };
+        return { code: 400, msg: 'a new product needs a qty of at least 1 — only a lot already on the order can be held at 0' };
       }
       // Same sellability check as POST, run inside the tx with FOR UPDATE.
       // This order is excluded so keeping its own already-committed lines
@@ -1172,6 +932,10 @@ sellOrders.patch('/:id', async (c) => {
     `;
     if (body.lines !== undefined && fx) {
       const isNonUsd = effectiveCurrency !== 'USD';
+      // Lines an older instance rewrote mid-deploy carry no #: store the ones
+      // they show before carrying them across this rewrite.
+      await healSellProductNos(tx, id);
+      const carriedNo = await carriedProductNos(tx, id);
       const batchFor = await appendBatches(tx, id, beforeHead.status);
       await tx`DELETE FROM sell_order_lines WHERE sell_order_id = ${id}`;
       for (let i = 0; i < body.lines.length; i++) {
@@ -1191,9 +955,11 @@ sellOrders.patch('/:id', async (c) => {
           sourceCurrency: isNonUsd ? effectiveCurrency : null,
           sourceUnitPrice: isNonUsd ? l.unitPrice : null,
           sourceFxRate: isNonUsd ? fx.rate : null,
+          productNo: carriedNo(l),
           appendBatch: batchFor(l),
         });
       }
+      await assignSellProductNos(tx, id);
       if (body.bidParts?.length) {
         await recordBidDataPoints(tx, id, u.id, body.bidParts);
       }
@@ -1620,7 +1386,7 @@ sellOrders.post('/:id/status', async (c) => {
       const [{ any }] = await tx<{ any: boolean }[]>`
         SELECT EXISTS (SELECT 1 FROM sell_order_lines WHERE sell_order_id = ${id} AND qty > 0) AS any
       `;
-      if (!any) return { kind: 'conflict', msg: 'every line on this order is at 0 — there is nothing to sell' };
+      if (!any) return { kind: 'conflict', msg: 'every product on this order is at 0 — there is nothing to sell' };
     }
 
     // Done rewrites every source PO (goods total, sold settlement) after it

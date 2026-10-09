@@ -174,6 +174,9 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   );
   const [products, setProducts] = useState<ProductGroup[]>([]);
   const [productsLoaded, setProductsLoaded] = useState(false);
+  // Every sellable lot the filters match, past the groups `products` lists.
+  // Null from a backend older than this bundle.
+  const [sellableIds, setSellableIds] = useState<string[] | null>(null);
 
   // Sub-filter state. Persisted PER CATEGORY so toggling RAM → SSD → RAM keeps
   // your RAM chips, but new category lookups start fresh. Fold-open is sticky
@@ -309,6 +312,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
         facets?: Record<string, Record<string, number>>;
         warehouse_counts?: Record<string, number>;
         total?: number;
+        sellable_ids?: string[];
       }>(`/api/inventory/products?${filterQuery}`)
         .then(r => {
           if (!alive) return;
@@ -317,9 +321,10 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
           setFacets(r.facets ?? {});
           setWhProductCounts(r.warehouse_counts ?? {});
           setWhProductTotal(r.total ?? r.products.length);
+          setSellableIds(r.sellable_ids ?? null);
         })
         .catch(err => {
-          if (alive) { setProducts([]); setProductsLoaded(true); }
+          if (alive) { setProducts([]); setProductsLoaded(true); setSellableIds(null); }
           handleFetchError(err);
         });
     }, 200);
@@ -377,7 +382,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
           warehouse_id: lot.warehouse_id, warehouse_short: lot.warehouse_short,
           warehouse_region: null,
           user_initials: lot.user_initials, user_name: lot.user_name,
-          created_at: lot.created_at, order_id: lot.order_id,
+          created_at: lot.created_at, order_id: lot.order_id, po_line_no: lot.po_line_no,
         });
       }
     }
@@ -406,10 +411,13 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     return { lines, qty, value };
   }, [selectedItems]);
 
-  // "Select all" targets the sellable lots of every listed group, narrowed to
-  // the active warehouse — the one filter the backend applies at group level
-  // ("any lot matches") rather than per lot, so it must be re-applied here.
+  // "Select all" targets every sellable lot the filters match — the server's
+  // list, which reaches past the groups the page shows and holds each lot to
+  // the warehouse and attribute chips on its own. Without it (an older
+  // backend), the sellable lots of the listed groups, narrowed per lot to the
+  // active warehouse only.
   const filterSellableIds = useMemo(() => {
+    if (sellableIds) return sellableIds;
     const ids: string[] = [];
     for (const g of products) {
       for (const l of g.lines) {
@@ -419,21 +427,50 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
       }
     }
     return ids;
-  }, [products, warehouseFilter]);
+  }, [sellableIds, products, warehouseFilter]);
   const selectAllState: 'empty' | 'none' | 'some' | 'all' = useMemo(() => {
     if (!filterSellableIds.length) return 'empty';
     const n = filterSellableIds.reduce((a, id) => a + (selected.has(id) ? 1 : 0), 0);
     return n === 0 ? 'none' : n === filterSellableIds.length ? 'all' : 'some';
   }, [filterSellableIds, selected]);
-  // Only removes the current filter's ids — selections made under other
-  // filters survive; "Clear" remains the full wipe.
+  const selectingAll = useRef(false);
+  // Only touches the current filter's ids — selections made under other
+  // filters survive; "Clear" remains the full wipe. Lots in groups the page
+  // doesn't list have no row here yet, and every bulk action needs one, so
+  // those are fetched before they join the selection.
   const toggleSelectAll = () => {
-    setSelected(prev => {
-      const next = new Set(prev);
-      const allOn = filterSellableIds.length > 0 && filterSellableIds.every(id => next.has(id));
-      for (const id of filterSellableIds) { if (allOn) next.delete(id); else next.add(id); }
-      return next;
-    });
+    if (selectingAll.current) return;
+    const ids = filterSellableIds;
+    if (ids.length > 0 && ids.every(id => selected.has(id))) {
+      setSelected(prev => {
+        const next = new Set(prev);
+        for (const id of ids) next.delete(id);
+        return next;
+      });
+      return;
+    }
+    const missing = new Set(ids.filter(id => !freshRowsById.has(id) && !selectedRows.has(id)));
+    if (missing.size === 0) {
+      setSelected(prev => new Set([...prev, ...ids]));
+      return;
+    }
+    selectingAll.current = true;
+    api.post<{ items: InventoryRow[] }>('/api/inventory/rows', { ids: [...missing] })
+      .then(r => {
+        const fetched = new Map(r.items.map(row => [row.id, row]));
+        // A lot sold, archived or emptied since the list loaded comes back
+        // without a row; it stays out.
+        // Selected before remembered: the remember-effect keeps only rows whose
+        // ids are selected, and this merge lands on whatever it left.
+        setSelected(prev => {
+          const next = new Set(prev);
+          for (const id of ids) if (!missing.has(id) || fetched.has(id)) next.add(id);
+          return next;
+        });
+        setSelectedRows(prev => new Map([...prev, ...fetched]));
+      })
+      .catch(handleFetchError)
+      .finally(() => { selectingAll.current = false; });
   };
 
   // ── Render helpers ──────────────────────────────────────────────────────────
@@ -461,19 +498,22 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   const [exporting, setExporting] = useState(false);
 
   // With rows selected, export exactly the selection (ids override the list
-  // filters server-side). Otherwise the FULL filtered set — the backend drops
-  // the 200-row list cap for the xlsx, and the live filterQuery keeps the file
-  // matching what's on screen. The grouped view exports one row per product.
+  // filters server-side), posted because a select-all's ids overflow a URL.
+  // Otherwise the FULL filtered set — the backend drops the 200-row list cap
+  // for the xlsx, and the live filterQuery keeps the file matching what's on
+  // screen. The grouped view exports one row per product.
   const runExport = async () => {
     if (exporting) return;
     setExporting(true);
     try {
       const params = new URLSearchParams(filterQuery);
       params.set('view', 'grouped');
+      const path = `/api/inventory/export?${params.toString()}`;
       if (selectedItems.length > 0) {
-        params.set('ids', selectedItems.map(r => r.id).join(','));
+        await api.download(path, 'inventory.xlsx', { ids: selectedItems.map(r => r.id) });
+      } else {
+        await api.download(path, 'inventory.xlsx');
       }
-      await api.download(`/api/inventory/export?${params.toString()}`, 'inventory.xlsx');
     } catch (e) {
       handleFetchError(e);
     } finally {

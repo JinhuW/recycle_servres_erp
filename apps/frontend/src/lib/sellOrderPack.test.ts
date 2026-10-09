@@ -7,7 +7,7 @@ import {
 } from './sellOrderPack';
 
 const L = (id: string, o: Partial<PackLine> = {}): PackLine => ({
-  id, qty: 2, partNumber: 'PN-' + id, serialNumber: null,
+  id, no: 1, qty: 2, partNumber: 'PN-' + id, serialNumber: null,
   warehouseId: 'WH-LA1', warehouse: 'LA1', sourceOrderId: null, sourceLineNo: null, ...o,
 });
 const C = (lineId: string, counted: number, checkedAt: string | null = null): LineCheck =>
@@ -36,10 +36,10 @@ describe('packWarehouseOptions', () => {
 
 describe('packView', () => {
   const lines = [
-    L('t', { sourceOrderId: null }),
-    L('b2', { sourceOrderId: 'PO-1442', sourceLineNo: 2, packWarehouse: 'DEN' }),
-    L('a3', { sourceOrderId: 'PO-999', sourceLineNo: 3 }),
-    L('z', { qty: 0 }),
+    L('t', { no: 1, sourceOrderId: null }),
+    L('b2', { no: 2, sourceOrderId: 'PO-1442', sourceLineNo: 2, packWarehouse: 'DEN' }),
+    L('a3', { no: 3, sourceOrderId: 'PO-999', sourceLineNo: 3 }),
+    L('z', { no: 4, qty: 0 }),
   ];
 
   it('lists every line in the order\'s own order with its #, ticked or not', () => {
@@ -169,10 +169,6 @@ describe('packProducts', () => {
     expect(ps.map(p => [p.no, p.head.id, p.lots.length])).toEqual([[1, 'a', 0], [2, 'c', 1]]);
   });
 
-  it('makes each line its own product when the server sends no #', () => {
-    const ls = [L('a'), L('b')];
-    expect(packProducts(packView(ls, '')).map(p => p.no)).toEqual([1, 2]);
-  });
 });
 
 describe('productSummary', () => {

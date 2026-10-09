@@ -149,7 +149,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   const openEdit = (l: OrderLine) => {
     if (!ready) return;
     setSelectedId(l.id);
-    const line = orderLineToEditLine(l);
+    const line = orderLineToEditLine(l, lines.indexOf(l));
     setEditing({ line, original: line });
   };
 
@@ -173,9 +173,9 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
       || Number(l.qty) !== Number(o.qty)
       || (l.serialNumber ?? '') !== (o.serialNumber ?? '');
     const issue = serialsMoved ? serialIssue(l) : null;
-    const n = lines.findIndex(x => x.id === id) + 1;
+    const n = l.no ?? lines.findIndex(x => x.id === id) + 1;
     if (issue) {
-      setSerialIssues([{ lineNo: n, label: l.partNumber || lineSpecLabel(l) || '—', issue }]);
+      setSerialIssues([{ line: `#${n}`, label: l.partNumber || lineSpecLabel(l) || '—', issue }]);
       throw new Error(t('serialCheckTitle'));
     }
     await api.patch(`/api/orders/${order.id}`, { lines: [editLineToPatch(l)] });
@@ -406,8 +406,9 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   const gap = paymentGap(order.linkedPaid, reviewApproveTotal(order, atReviewing ? toZero : []), order.payment);
   // Nothing on this PO arrived: there is nothing to pay for.
   const allAbsent = absent.length === lines.length;
-  // The PO page's numbering, which the regrouped rows would otherwise lose.
-  const lineNo = (l: OrderLine) => lines.indexOf(l) + 1;
+  // The product's # on the PO, which regrouping the rows doesn't touch. An
+  // older backend sends none; its lines came in # order.
+  const lineNo = (l: OrderLine) => l.no ?? lines.indexOf(l) + 1;
 
   const row = (l: OrderLine) => {
     const c = checkOf(l.id);
@@ -751,7 +752,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
         <LineDrawer
           key={editing.line._id}
           line={editing.line}
-          idx={lineNo(lineById.get(editing.line._id!)!) - 1}
+          idx={lines.findIndex(x => x.id === editing.line._id)}
           editing
           onChange={patch => setEditing(e => e && { ...e, line: { ...e.line, ...patch, _dirty: true } })}
           onClose={() => setEditing(null)}

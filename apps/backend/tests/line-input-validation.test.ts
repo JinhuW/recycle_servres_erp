@@ -54,7 +54,7 @@ describe('one line validator', () => {
       { rpm: 0 }, { brand: 'x'.repeat(121) }, { brand: 42 }]) {
       const r = await create(bad);
       expect(r.status, JSON.stringify(bad)).toBe(400);
-      expect(r.body.error).toMatch(/^line 1: /);
+      expect(r.body.error).toMatch(/^new product 1\b/);
     }
     const missing = await api<{ error: string }>('POST', '/api/orders', {
       token, body: { category: 'RAM', warehouseId: 'WH-LA1', payment: 'self', lines: [{ ...LINE, unitCost: undefined }] },

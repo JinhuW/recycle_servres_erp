@@ -1,5 +1,6 @@
 import { categoryRank, isPricedSellPrice } from '@recycle-erp/shared';
 import { categoryTone } from './lookups';
+import { productCount } from './productNo';
 
 // Grouping the lines of a mixed purchase order by category.
 //
@@ -15,6 +16,9 @@ import { categoryTone } from './lookups';
 
 export type GroupableLine = {
   category: string;
+  // The product's # once saved; lines sharing one (a transfer's clone and its
+  // source) are one product.
+  no?: number | null;
   qty: number | string;
   unitCost: number | string;
   sellPrice?: number | string | null;
@@ -23,6 +27,8 @@ export type GroupableLine = {
 export type LineGroup<T> = {
   category: string;
   lines: { line: T; index: number }[];
+  /** Products in the group: one per #, an unsaved line one of its own. */
+  products: number;
   units: number;
   goods: number;
   /** Profit over the group's PRICED lines only, matching the ledger's rule. */
@@ -63,7 +69,7 @@ export function groupLines<T extends GroupableLine>(lines: readonly T[]): LineGr
         if (isPriced(line)) profit += q * (num(line.sellPrice) - c);
         else unpriced += 1;
       }
-      return { category, lines: members, units, goods, profit, unpriced };
+      return { category, lines: members, products: productCount(members.map(m => m.line)), units, goods, profit, unpriced };
     });
 }
 

@@ -7,16 +7,18 @@ import { nextHumanId } from '../lib/id-seq';
 import { canonPartCol, canonPartArg } from '../lib/part-number';
 import { invLabel } from '../lib/inventoryLabel';
 import {
-  committedClaimsByLine, committedQtySql, openSellStatuses, proposalSellStatuses,
+  committedClaimsByLine, committedQtySql, isSellableLineStatus, openSellStatuses, proposalSellStatuses,
+  sellableLineStatuses,
 } from '../lib/sellCommitment';
+import { log } from '../lib/log';
 import { lockOrdersForLinesTx } from '../services/orderLocks';
-import { specVal, validateLineInput } from '../lib/orderInput';
+import { mergedSpec, specVal, validateLineInput } from '../lib/orderInput';
 import { buildXlsxWorkbook, xlsxResponse, datedFilename, type XlsxColumn } from '../lib/xlsx';
 import {
   CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields, categoryTabSheets,
   sortSheetRows, type ExportCategory,
 } from '../lib/categoryColumns';
-import { UNTYPED_ITEM, normSellPrice, SPEC_FIELD_TO_DB_COL } from '@recycle-erp/shared';
+import { UNTYPED_ITEM, normSellPrice, SPEC_FIELD_TO_DB_COL, specConflicts } from '@recycle-erp/shared';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { settleSoldTx } from '../services/orderSold';
 import { poLineNo } from '../lib/poLineNo';
@@ -182,13 +184,22 @@ function hasUnitsFrag(sql: ReturnType<typeof getDb>) {
   return sql`l.qty > 0`;
 }
 
-// List inventory with the same filters as the desktop screen.
-inventory.get('/', async (c) => {
-  const u = c.var.user;
-  const sql = getDb(c.env);
-  const isManager = u.role === 'manager';
-  const whereFrag = inventoryWhereFrag(c, sql, u);
+// A desktop selection travels as ids — select-all reaches lots past the
+// 200-group cap — so the routes that take one share this ceiling. It sits well
+// above today's whole sellable stock and well inside the 1 MiB JSON body cap.
+const SELECTION_MAX = 5000;
 
+// Rows in the flat list's shape, newest first, then put in the workbook's
+// order — category, then brand, capacity, speed — so a screen and an export
+// of the same stock read alike. A capped read stays recency-based on purpose:
+// reordering the N newest rows keeps *which* rows appear as it was, where
+// sorting in SQL would hand back the alphabetically-first N instead and hide
+// everything recent.
+async function selectInventoryRows(
+  sql: ReturnType<typeof getDb>,
+  whereFrag: ReturnType<typeof inventoryWhereFrag>,
+  limit: number | null,
+) {
   const rows = await sql`
     SELECT l.id, l.category, l.brand, l.capacity, l.generation, l.type, l.classification, l.rank, l.speed,
            l.interface, l.form_factor, l.description, l.item_type, l.part_number, l.serial_number, l.condition,
@@ -207,17 +218,39 @@ inventory.get('/', async (c) => {
     LEFT JOIN warehouses w ON w.id = COALESCE(l.warehouse_id, o.warehouse_id)
     WHERE ${whereFrag}
     ORDER BY l.created_at DESC
-    LIMIT 200
+    ${limit === null ? sql`` : sql`LIMIT ${limit}`}
   `;
-  // Ship the list in the workbook's order — category, then brand, capacity,
-  // speed — so a screen and an export of the same stock read alike. The cap
-  // above stays recency-based on purpose: reordering the 200 newest rows keeps
-  // *which* rows appear as it was, where sorting in SQL would hand back the
-  // alphabetically-first 200 instead and hide everything recent.
-  const items = sortSheetRows(
+  return sortSheetRows(
     rows as unknown as Record<string, unknown>[],
     (r) => ({ category: String(r.category ?? ''), specs: r, label: invLabel(r) }),
   );
+}
+
+// A selection's ids: the uuid-shaped ones, once each. Anything else in the
+// array is dropped — l.id is uuid-typed, so a mangled id would make Postgres
+// throw and 500 the request.
+function selectionIds(raw: readonly unknown[]): string[] {
+  return [...new Set(raw.filter((id): id is string => typeof id === 'string' && UUID_RE.test(id)))];
+}
+
+// A selection's ids, or the refusal for one the selection routes can't take.
+function parseSelection(
+  raw: readonly unknown[],
+): { ids: string[] } | { error: string; status: 400 | 413 } {
+  const ids = selectionIds(raw);
+  if (raw.length > 0 && ids.length === 0) return { error: 'Invalid ids', status: 400 };
+  if (ids.length > SELECTION_MAX) {
+    return { error: `at most ${SELECTION_MAX} lots per selection`, status: 413 };
+  }
+  return { ids };
+}
+
+// List inventory with the same filters as the desktop screen.
+inventory.get('/', async (c) => {
+  const u = c.var.user;
+  const sql = getDb(c.env);
+  const isManager = u.role === 'manager';
+  const items = await selectInventoryRows(sql, inventoryWhereFrag(c, sql, u), 200);
 
   // Purchasers MUST NOT see cost or profit fields (PRD §6.8). Strip them before
   // returning. Sell price stays visible — it is not sensitive.
@@ -228,6 +261,29 @@ inventory.get('/', async (c) => {
     });
     return c.json({ items: filtered });
   }
+  return c.json({ items });
+});
+
+// The rows behind a desktop selection, by id. Select-all reaches lots in
+// product groups past the grouped view's cap, which the page never loaded, and
+// the bulk actions need each lot's row. POST because a few hundred uuids
+// overflow a query string. Ids bypass the list filters, never the scope: the
+// route is manager-only, as is every bulk action that reads it. Only lots that
+// are still sellable come back — one sold, archived or emptied since the list
+// loaded has no row, and select-all leaves it out.
+inventory.post('/rows', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const body = (await c.req.json().catch(() => null)) as { ids?: unknown } | null;
+  if (!Array.isArray(body?.ids)) return c.json({ error: 'ids must be an array' }, 400);
+  const sel = parseSelection(body.ids);
+  if ('error' in sel) return c.json({ error: sel.error }, sel.status);
+  if (sel.ids.length === 0) return c.json({ items: [] });
+  const sql = getDb(c.env);
+  const items = await selectInventoryRows(sql, sql`
+    l.id = ANY(${sel.ids}::uuid[]) AND l.status = ANY(${sellableLineStatuses()})
+      AND ${hasUnitsFrag(sql)} AND o.archived_at IS NULL
+  `, null);
   return c.json({ items });
 });
 
@@ -301,7 +357,10 @@ async function buildCategoryTabs(
   return buildXlsxWorkbook(categoryTabSheets(sorted, colsFor, { emptySheetName: 'Inventory' }));
 }
 
-inventory.get('/export', async (c) => {
+// POST carries a row selection in its body: select-all reaches past a thousand
+// lots, whose ids overflow a query string. GET still takes `?ids=` for a tab
+// running an older bundle. Filters, view and category ride the query either way.
+inventory.on(['GET', 'POST'], '/export', async (c) => {
   const u = c.var.user;
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const sql = getDb(c.env);
@@ -309,15 +368,19 @@ inventory.get('/export', async (c) => {
   // those lines and ignores the list filters — the selection may deliberately
   // span warehouses or statuses the current filters would exclude. The route
   // is manager-only, so bypassing the filters loses no role scoping.
-  // Non-UUID tokens are rejected up front: l.id is uuid-typed, so a mangled
-  // id would otherwise make Postgres throw and 500 the export. A selection
-  // that yields NO valid id is a 400 — silently exporting the full set on a
-  // corrupted link would be worse than failing.
-  const rawIds = (c.req.query('ids') ?? '').split(',').filter(Boolean);
-  const ids = [...new Set(rawIds.filter((id) => UUID_RE.test(id)))].slice(0, 1000);
-  if (rawIds.length > 0 && ids.length === 0) {
-    return c.json({ error: 'Invalid ids' }, 400);
+  // A selection that yields NO valid id is a 400 — silently exporting the full
+  // set on a corrupted link would be worse than failing.
+  let rawIds: unknown[];
+  if (c.req.method === 'POST') {
+    const body = (await c.req.json().catch(() => null)) as { ids?: unknown } | null;
+    if (!Array.isArray(body?.ids)) return c.json({ error: 'ids must be an array' }, 400);
+    rawIds = body.ids;
+  } else {
+    rawIds = (c.req.query('ids') ?? '').split(',').filter(Boolean);
   }
+  const sel = parseSelection(rawIds);
+  if ('error' in sel) return c.json({ error: sel.error }, sel.status);
+  const { ids } = sel;
   const whereFrag = ids.length ? sql`l.id IN ${sql(ids)}` : inventoryWhereFrag(c, sql, u);
 
   // Grouped mode collapses lines by canonical part number into one row each,
@@ -779,7 +842,7 @@ inventory.get('/transfer-orders', async (c) => {
     ) te ON TRUE
     LEFT JOIN warehouses fw ON fw.id = te.detail->>'from'
     WHERE l.transfer_order_id = ANY(${orderIds}::text[])
-    ORDER BY l.position
+    ORDER BY l.order_id, l.product_no, l.created_at
   `) as unknown as LineRow[];
 
   const byOrder = new Map<string, LineRow[]>();
@@ -814,7 +877,10 @@ inventory.get('/products', async (c) => {
   const attrs = parseAttrFilters((k) => c.req.query(k));
   const hidePending = c.req.query('hidePending') === '1';
 
-  const RAW_CAP = 2000;
+  // The cap is all the working set select-all sees, so it has to stay above
+  // the matching stock — Show sold already passes 2000 lines — and no higher
+  // than a selection /rows and /export accept.
+  const RAW_CAP = SELECTION_MAX;
   const GROUP_CAP = 200;
 
   const scopeFrag    = isManager ? sql`TRUE` : sql`o.user_id = ${u.id}`;
@@ -836,7 +902,7 @@ inventory.get('/products', async (c) => {
   const canonCol = canonPartCol(sql, sql`l.part_number`);
 
   type Row = {
-    id: string; order_id: string; user_id: string;
+    id: string; order_id: string; po_line_no: number; user_id: string;
     category: string; brand: string | null; capacity: string | null;
     generation: string | null; type: string | null; classification: string | null;
     rank: string | null; speed: string | null; interface: string | null;
@@ -849,7 +915,7 @@ inventory.get('/products', async (c) => {
   };
 
   const rows = (await sql`
-    SELECT l.id, l.order_id, o.user_id,
+    SELECT l.id, l.order_id, ${poLineNo(sql, 'l')} AS po_line_no, o.user_id,
            l.category, l.brand, l.capacity, l.generation, l.type, l.classification,
            l.rank, l.speed, l.interface, l.form_factor, l.description, l.item_type,
            l.part_number, l.serial_number, ${canonCol} AS canon, l.rpm,
@@ -877,6 +943,7 @@ inventory.get('/products', async (c) => {
     ORDER BY l.created_at DESC
     LIMIT ${RAW_CAP}
   `) as unknown as Row[];
+  if (rows.length === RAW_CAP) log.warn('inventory products hit RAW_CAP', { cap: RAW_CAP });
 
   const groups = new Map<string, Row[]>();
   const order: string[] = [];
@@ -944,6 +1011,21 @@ inventory.get('/products', async (c) => {
     groupMatchesWarehouse(lots) && groupMatchesAttr(lots, null);
   const filteredOrder = order.filter((k) => applyAll(groups.get(k)!));
 
+  // What the desktop's select-all picks: every sellable lot the filters match,
+  // including groups past GROUP_CAP that the page never lists. Warehouse and
+  // the attribute chips match a group when any lot does, so each lot is held to
+  // them on its own: a mis-typed lot in a matching group stays out.
+  const sellableIds: string[] = [];
+  if (isManager) {
+    for (const key of filteredOrder) {
+      for (const l of groups.get(key)!) {
+        if (!isSellableLineStatus(l.status)) continue;
+        if (!applyAll([l])) continue;
+        sellableIds.push(l.id);
+      }
+    }
+  }
+
   const SPEC_KEYS = ['category','brand','capacity','generation','type','classification','rank','speed','interface','form_factor','description','item_type','rpm'] as const;
 
   const capped = filteredOrder.slice(0, GROUP_CAP).map((key) => {
@@ -992,7 +1074,7 @@ inventory.get('/products', async (c) => {
       created_at: head.created_at,
       submitters: [...submitters],
       lines: lots.map((l) => ({
-        id: l.id, order_id: l.order_id, created_at: l.created_at,
+        id: l.id, order_id: l.order_id, po_line_no: l.po_line_no, created_at: l.created_at,
         user_name: l.user_name, user_initials: l.user_initials,
         sell_price: l.sell_price, condition: l.condition, health: l.health,
         serial_number: l.serial_number,
@@ -1040,6 +1122,7 @@ inventory.get('/products', async (c) => {
     facets,
     warehouse_counts: warehouseProducts,
     total: totalProducts,
+    ...(isManager ? { sellable_ids: sellableIds } : {}),
   });
 });
 
@@ -1186,6 +1269,7 @@ inventory.patch('/:id', async (c) => {
     | { kind: 'doneLocked' }
     | { kind: 'soldLocked' }
     | { kind: 'archived' }
+    | { kind: 'specConflict'; error: string }
     | { kind: 'ok'; before: Record<string, unknown> };
   const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
     // Order before line (services/orderLocks.ts): a goods edit below rewrites
@@ -1236,6 +1320,10 @@ inventory.patch('/:id', async (c) => {
     if (parent?.lifecycle === 'sold' && body.status !== undefined && body.status !== 'Sold') {
       return { kind: 'soldLocked' };
     }
+    // Judged against the locked row: the stored specs are only read here.
+    const spec = mergedSpec(before, body as Record<string, unknown>);
+    const specErr = specConflicts(before.category as string, spec.merged, spec.changed);
+    if (specErr) return { kind: 'specConflict', error: specErr };
 
     // The mirror verdict has to be taken before qty/unit_cost move — afterwards
     // a stale mirror and a real negotiated price are indistinguishable and the
@@ -1309,7 +1397,7 @@ inventory.patch('/:id', async (c) => {
   if (outcome.kind === 'notFound') return c.json({ error: 'Not found' }, 404);
   if (outcome.kind === 'committed') {
     return c.json({
-      error: `${outcome.committed} units of this line are committed to an open sell order: `
+      error: `${outcome.committed} units of this lot are committed to an open sell order: `
         + 'its status cannot change, and its qty cannot drop below that, until the order is closed or the line unlinked',
       committedQty: outcome.committed,
     }, 409);
@@ -1318,11 +1406,12 @@ inventory.patch('/:id', async (c) => {
     return c.json({ error: 'the purchase order is past review; move it back to Reviewing before changing qty or unit cost' }, 409);
   }
   if (outcome.kind === 'soldLocked') {
-    return c.json({ error: 'the purchase order is fully sold; move it back to Ready to Pay before changing a line status' }, 409);
+    return c.json({ error: 'the purchase order is fully sold; move it back to Ready to Pay before changing a lot status' }, 409);
   }
   if (outcome.kind === 'archived') {
-    return c.json({ error: 'the purchase order is archived; unarchive it before editing its lines' }, 409);
+    return c.json({ error: 'the purchase order is archived; unarchive it before editing its products' }, 409);
   }
+  if (outcome.kind === 'specConflict') return c.json({ error: outcome.error }, 400);
   const before = outcome.before;
 
   // Margin guard rails (PRD §10): warn the manager — and drop a notification —
@@ -1347,7 +1436,7 @@ inventory.patch('/:id', async (c) => {
           kind: 'low_margin',
           tone: 'warn',
           icon: 'alert',
-          title: `Low margin on ${before.part_number ?? 'line'}`,
+          title: `Low margin on ${before.part_number ?? 'a product'}`,
           body: `Sell ${sp} vs cost ${cost} → ${(margin * 100).toFixed(1)}% margin`,
         });
       });
@@ -1435,12 +1524,14 @@ inventory.post('/transfer', async (c) => {
     description: string | null;
     item_type: string | null;
     part_number: string | null;
+    chip_number: string | null;
     condition: string;
     qty: number;
     unit_cost: string | number;
     sell_price: string | number | null;
     status: string;
     position: number;
+    product_no: number;
     health: number | null;
     rpm: number | null;
     scan_image_id: string | null;
@@ -1455,11 +1546,11 @@ inventory.post('/transfer', async (c) => {
   type Outcome =
     | { kind: 'missing' }
     | { kind: 'lineNotFound'; id: string }
-    | { kind: 'notSellable'; id: string; status: string }
-    | { kind: 'archived'; id: string }
-    | { kind: 'overQty'; id: string; have: number }
-    | { kind: 'committed'; id: string; free: number }
-    | { kind: 'alreadyThere'; id: string }
+    | { kind: 'notSellable'; ref: string; status: string }
+    | { kind: 'archived'; ref: string }
+    | { kind: 'overQty'; ref: string; have: number }
+    | { kind: 'committed'; ref: string; free: number }
+    | { kind: 'alreadyThere'; ref: string }
     | { kind: 'needsConfirm'; drafts: string[] }
     | { kind: 'ok'; transferOrderId: string; result: ResultLine[] };
 
@@ -1471,7 +1562,7 @@ inventory.post('/transfer', async (c) => {
     const sources = (await tx`
       SELECT l.id, l.order_id, l.category, l.brand, l.capacity, l.generation, l.type, l.classification,
              l.rank, l.speed, l.interface, l.form_factor, l.description, l.item_type, l.part_number,
-             l.condition, l.qty, l.unit_cost, l.sell_price, l.status, l.position,
+             l.chip_number, l.condition, l.qty, l.unit_cost, l.sell_price, l.status, l.position, l.product_no,
              l.health, l.rpm, l.scan_image_id, l.scan_confidence,
              COALESCE(l.warehouse_id, o.warehouse_id) AS effective_wh,
              o.archived_at
@@ -1496,14 +1587,17 @@ inventory.post('/transfer', async (c) => {
     for (const r of reqLines) {
       const s = byId.get(r.id);
       if (!s) return { kind: 'lineNotFound', id: r.id };
+      // The transfer dialog shows these as they are: name the product the way
+      // the PO page does, not by its uuid.
+      const ref = `${s.order_id} #${s.product_no}`;
       if (s.status !== 'Reviewing' && s.status !== 'Done') {
-        return { kind: 'notSellable', id: r.id, status: s.status };
+        return { kind: 'notSellable', ref, status: s.status };
       }
-      if (s.archived_at !== null) return { kind: 'archived', id: r.id };
-      if (r.qty > s.qty) return { kind: 'overQty', id: r.id, have: s.qty };
+      if (s.archived_at !== null) return { kind: 'archived', ref };
+      if (r.qty > s.qty) return { kind: 'overQty', ref, have: s.qty };
       const free = s.qty - (committed.get(r.id.toLowerCase())?.qty ?? 0);
-      if (r.qty > free) return { kind: 'committed', id: r.id, free };
-      if (s.effective_wh === toWarehouseId) return { kind: 'alreadyThere', id: r.id };
+      if (r.qty > free) return { kind: 'committed', ref, free };
+      if (s.effective_wh === toWarehouseId) return { kind: 'alreadyThere', ref };
     }
 
     // A full move sends the line itself out In Transit, so a Draft (or Packing
@@ -1566,7 +1660,10 @@ inventory.post('/transfer', async (c) => {
         // The clone carries away units nothing has sold, so its own qty speaks
         // for what it cost and it needs no qty_purchased of its own — but the
         // source must hand over that share, or the two halves together would
-        // claim more than the order ever bought.
+        // claim more than the order ever bought. The clone is the same product
+        // in another warehouse, so it carries the source's # — naming it also
+        // keeps 0169's numbering trigger, which would lock the order after
+        // these lines, out of this lines-first transaction.
         await tx`
           UPDATE order_lines
              SET qty = qty - ${r.qty},
@@ -1577,17 +1674,17 @@ inventory.post('/transfer', async (c) => {
         const inserted = (await tx`
           INSERT INTO order_lines (
             order_id, category, brand, capacity, generation, type, classification, rank, speed,
-            interface, form_factor, description, item_type, part_number, condition,
+            interface, form_factor, description, item_type, part_number, chip_number, condition,
             qty, unit_cost, sell_price, status,
-            scan_image_id, scan_confidence, position,
+            scan_image_id, scan_confidence, position, product_no,
             health, rpm, warehouse_id, transfer_order_id
           )
           VALUES (
             ${s.order_id}, ${s.category}, ${s.brand}, ${s.capacity}, ${s.generation}, ${s.type},
             ${s.classification}, ${s.rank}, ${s.speed}, ${s.interface},
-            ${s.form_factor}, ${s.description}, ${s.item_type}, ${s.part_number}, ${s.condition},
+            ${s.form_factor}, ${s.description}, ${s.item_type}, ${s.part_number}, ${s.chip_number}, ${s.condition},
             ${r.qty}, ${s.unit_cost}, ${s.sell_price}, 'In Transit',
-            ${s.scan_image_id}, ${s.scan_confidence}, ${s.position},
+            ${s.scan_image_id}, ${s.scan_confidence}, ${s.position}, ${s.product_no},
             ${s.health}, ${s.rpm}, ${toWarehouseId}, ${transferOrderId}
           )
           RETURNING id
@@ -1611,17 +1708,17 @@ inventory.post('/transfer', async (c) => {
   if (outcome.kind === 'missing') return c.json({ error: 'one or more lines not found' }, 404);
   if (outcome.kind === 'lineNotFound') return c.json({ error: `line ${outcome.id} not found` }, 404);
   if (outcome.kind === 'notSellable') {
-    return c.json({ error: `line ${outcome.id} is ${outcome.status}; only Reviewing/Done can be transferred` }, 400);
+    return c.json({ error: `${outcome.ref} is ${outcome.status}; only Reviewing/Done can be transferred` }, 400);
   }
-  if (outcome.kind === 'archived') return c.json({ error: `line ${outcome.id} belongs to an archived order` }, 400);
-  if (outcome.kind === 'overQty') return c.json({ error: `line ${outcome.id} only has ${outcome.have} units` }, 400);
+  if (outcome.kind === 'archived') return c.json({ error: `${outcome.ref} belongs to an archived order` }, 400);
+  if (outcome.kind === 'overQty') return c.json({ error: `${outcome.ref} only has ${outcome.have} units` }, 400);
   if (outcome.kind === 'committed') {
-    return c.json({ error: `line ${outcome.id} has only ${outcome.free} units not committed to a sell order` }, 409);
+    return c.json({ error: `${outcome.ref} has only ${outcome.free} units not committed to a sell order` }, 409);
   }
-  if (outcome.kind === 'alreadyThere') return c.json({ error: `line ${outcome.id} is already in ${toWarehouseId}` }, 400);
+  if (outcome.kind === 'alreadyThere') return c.json({ error: `${outcome.ref} is already in ${toWarehouseId}` }, 400);
   if (outcome.kind === 'needsConfirm') {
     return c.json({
-      error: `Moving these lines whole takes them off draft sell order${outcome.drafts.length === 1 ? '' : 's'} `
+      error: `Moving these lots whole takes them off draft sell order${outcome.drafts.length === 1 ? '' : 's'} `
         + `${outcome.drafts.join(', ')} until the transfer is received. Confirm to move them anyway.`,
       needsConfirm: true,
       drafts: outcome.drafts,
@@ -1766,11 +1863,11 @@ inventory.post('/transfer-orders/:id/reopen', async (c) => {
     }
 
     const lines = (await tx`
-      SELECT l.id, l.status, ${committedQtySql(tx, tx`l.id`)} AS sell_count
+      SELECT l.id, l.order_id, l.product_no, l.status, ${committedQtySql(tx, tx`l.id`)} AS sell_count
       FROM order_lines l
       WHERE l.transfer_order_id = ${id}
       FOR UPDATE OF l
-    `) as unknown as Array<{ id: string; status: string; sell_count: number }>;
+    `) as unknown as Array<{ id: string; order_id: string; product_no: number; status: string; sell_count: number }>;
 
     if (lines.length === 0) {
       outcome = { code: 409, msg: `transfer order ${id} has no lines to re-open` };
@@ -1778,7 +1875,7 @@ inventory.post('/transfer-orders/:id/reopen', async (c) => {
     }
     const bad = lines.filter((l) => (l.status !== 'Reviewing' && l.status !== 'Done') || l.sell_count > 0);
     if (bad.length > 0) {
-      outcome = { code: 409, msg: `cannot re-open: line(s) ${bad.map((l) => l.id).join(', ')} have moved on since receipt` };
+      outcome = { code: 409, msg: `cannot re-open: ${bad.map((l) => `${l.order_id} #${l.product_no}`).join(', ')} have moved on since receipt` };
       return;
     }
 
@@ -1832,17 +1929,19 @@ inventory.delete('/transfer-orders/:id', async (c) => {
     }
 
     const lines = (await tx`
-      SELECT l.id, l.status, l.qty, (o.archived_at IS NOT NULL) AS archived,
+      SELECT l.id, l.order_id, l.product_no, l.status, l.qty, (o.archived_at IS NOT NULL) AS archived,
              ${committedQtySql(tx, tx`l.id`)} AS sell_count
       FROM order_lines l
       JOIN orders o ON o.id = l.order_id
       WHERE l.transfer_order_id = ${id}
       FOR UPDATE OF l
-    `) as unknown as Array<{ id: string; status: string; qty: number; archived: boolean; sell_count: number }>;
+    `) as unknown as Array<{
+      id: string; order_id: string; product_no: number; status: string; qty: number; archived: boolean; sell_count: number;
+    }>;
 
     const bad = lines.filter((l) => l.status !== 'In Transit' || l.sell_count > 0);
     if (bad.length > 0) {
-      outcome = { code: 409, msg: `cannot discard: line(s) ${bad.map((l) => l.id).join(', ')} have moved on` };
+      outcome = { code: 409, msg: `cannot discard: ${bad.map((l) => `${l.order_id} #${l.product_no}`).join(', ')} have moved on` };
       return;
     }
     // Unlike reopen (which 409s on an empty order), an empty Pending TO — every

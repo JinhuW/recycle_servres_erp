@@ -15,9 +15,10 @@ import { LinePhotoStrip, type PendingPhoto } from '../components/LinePhotoStrip'
 import type { LinePhoto } from '../lib/linePhotos';
 import { parseSerials } from '../components/SerialNumbers';
 import { showErrorDialog, showWarnToast } from '../lib/errorToast';
-import { synthesizePartNumber, serialIssue } from '@recycle-erp/shared';
+import { cascadePatch, synthesizePartNumber, serialIssue } from '@recycle-erp/shared';
 import { lineRequirements, missingFieldNames } from '../lib/lineRequirements';
 import { SerialCheckDialog, type SerialLineIssue } from '../components/SerialCheckDialog';
+import { lineRef } from '../lib/productNo';
 import { SnScanner } from '../components/SnScanner';
 import { SerialChipsField } from '../components/SerialChipsField';
 import { addSerials } from '../lib/serialField';
@@ -31,6 +32,9 @@ type Props = {
   detected: ScanResponse | null;
   lineCount: number;
   editingLineIdx?: number | null;
+  // The line's "new n" among the order's unsaved lines, as the review list
+  // shows it; null once it has a #.
+  newNo?: number | null;
   existingLine?: DraftLine;
   // A saved line of an existing order: it may be counted down to 0, where a
   // line being captured needs at least 1.
@@ -125,7 +129,7 @@ const aiDefaults = (category: Category, scan: ScanResponse): DraftLine => {
   };
 };
 
-export function SubmitForm({ category, detected, lineCount, editingLineIdx, existingLine, allowZeroQty = false, onSaveLine, onCancel, onBack, onRescan, rescanDraft, photoCtx }: Props) {
+export function SubmitForm({ category, detected, lineCount, editingLineIdx, newNo, existingLine, allowZeroQty = false, onSaveLine, onCancel, onBack, onRescan, rescanDraft, photoCtx }: Props) {
   const { t, lang, locale } = useT();
   const isEditing = editingLineIdx != null;
   const aiFilled = !!detected;
@@ -150,10 +154,14 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
   const cleanDetected: ScanResponse | null = detected
     ? { ...detected, extracted: stripUnmatched(detected.extracted ?? {}, validation.unmatched) }
     : null;
+  // A scan lands through the spec cascade like a pick does, so a label read as
+  // SODIMM next to a Server type comes out Laptop, with the Class winning.
   const mergeBase = rescanDraft ?? (isEditing ? existingLine : undefined);
+  const scanned = (base: DraftLine, patch: Partial<DraftLine>): DraftLine =>
+    ({ ...base, ...cascadePatch(category, base, patch) });
   const initial: DraftLine = mergeBase
-    ? (cleanDetected ? { ...mergeBase, ...aiPatch(cleanDetected) } : mergeBase)
-    : (cleanDetected ? aiDefaults(category, cleanDetected) : blankDefaults(category));
+    ? (cleanDetected ? scanned(mergeBase, aiPatch(cleanDetected)) : mergeBase)
+    : (cleanDetected ? scanned(blankDefaults(category), aiDefaults(category, cleanDetected)) : blankDefaults(category));
 
   const [line, setLine] = useState<DraftLine>(initial);
   // Qty and unit cost are typed as raw text so a new line starts blank instead
@@ -222,12 +230,16 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
     onFill: chipNumber => setLine(prev => ({ ...prev, chipNumber })),
   });
 
+  // A field the cascade fills or clears counts as edited too: it now follows
+  // the purchaser's pick, not the scan.
   const set = <K extends keyof DraftLine>(k: K, v: DraftLine[K]) => {
-    setLine(prev => ({ ...prev, [k]: v }));
+    const patch = { [k]: v } as Partial<DraftLine>;
+    const keys = Object.keys(cascadePatch(category, line, patch)) as (keyof DraftLine)[];
+    setLine(prev => ({ ...prev, ...cascadePatch(category, prev, patch) }));
     setEdited(prev => {
-      if (prev.has(k)) return prev;
+      if (keys.every(key => prev.has(key))) return prev;
       const next = new Set(prev);
-      next.add(k);
+      for (const key of keys) next.add(key);
       return next;
     });
   };
@@ -252,7 +264,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
     if (line.category === 'HDD') return [line.brand, line.capacity, line.rpm ? line.rpm + 'rpm' : null].filter(Boolean).join(' ');
     // Description is optional on an Other line, so the part number — which
     // isn't — carries the name when nobody wrote one.
-    return (line.description ?? '').trim() || (line.partNumber ?? '').trim() || 'Item';
+    return (line.description ?? '').trim() || (line.partNumber ?? '').trim() || 'Product';
   };
 
   const persist = (partNumber: string) => onSaveLine({ ...line, label: buildLabel(), partNumber });
@@ -282,7 +294,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
     const issue = serialIssue(line);
     if (issue) {
       setSerialIssues([{
-        lineNo: (editingLineIdx ?? lineCount) + 1,
+        line: lineRef(line, t, newNo),
         label: buildLabel(),
         issue,
       }]);
@@ -298,7 +310,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
   // Header text:
   //   - Edit mode:  "Edit RAM item" / sub = existing label
   //   - First-item new order: "New RAM order" / sub = AI-review or fill-in
-  //   - Nth-item new order:  "Add RAM item" / sub = "Item N · adding..."
+  //   - Nth-item new order:  "Add RAM item" / sub = "New product · adding..."
   // The first line no longer names the order — a PO holds whatever kinds the
   // purchaser adds — so it is titled like every other line.
   const title = isEditing
@@ -309,7 +321,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
     ? buildLabel()
     : isFirst
       ? (aiFilled ? t('aiReview') : t('fillIn'))
-      : t('addingItem', { n: lineCount + 1 });
+      : t('addingItem');
 
   return (
     <div className="phone-app">

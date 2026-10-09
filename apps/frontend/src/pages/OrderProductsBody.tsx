@@ -84,7 +84,8 @@ export function OrderProductsBody({
           style={canEditOrder ? { cursor: 'pointer' } : undefined}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span className="lb-rank" style={{ width: 22, height: 22, fontSize: 11 }}>{i + 1}</span>
+            {/* An older backend sends no #; its lines came in # order. */}
+            <span className="lb-rank" style={{ width: 22, height: 22, fontSize: 11 }}>{l.no ?? i + 1}</span>
             {/* The photo is what the line is recognised by, so it leads. */}
             {lead && <PhotoTile photo={lead} label={t('linePhotos')} onOpen={onOpenPhoto} />}
             <div style={{ flex: 1, minWidth: 0 }}>

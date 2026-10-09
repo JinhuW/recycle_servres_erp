@@ -14,6 +14,7 @@ import { sellOrderStatuses } from '../../lib/lookups';
 import { useMarketLookup, type ResolvedMarketValue } from '../../lib/useMarketLookup';
 import { PartNumberField } from '../../components/PartNumberField';
 import { CatSelect, CatCombo } from './submit/LineFields';
+import { allowedOptions, cascadePatch } from '@recycle-erp/shared';
 import {
   CONDITIONS,
   RAM_BRANDS, RAM_CAP, RAM_GENERATIONS, RAM_DEVICE_TYPES, RAM_CLASS, RAM_RANK,
@@ -199,7 +200,10 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
   // Its PO is archived: the line is out of stock and the backend refuses
   // every edit until the PO is unarchived.
   const archived = item.status === 'Archived';
-  const set = (patch: Partial<Draft>) => setDraft(prev => ({ ...prev!, ...patch }));
+  // The same spec cascade as the PO line forms: a Class its Type rules out is
+  // fixed or cleared, and the diff-only save carries those fields along.
+  const set = (patch: Partial<Draft>) =>
+    setDraft(prev => ({ ...prev!, ...cascadePatch(item.category, prev!, patch) }));
 
   const qty = Number(draft.qty) || 0;
   const unitCost = Number(draft.unitCost) || 0;
@@ -453,8 +457,8 @@ function DetailsPanel({
               <Spec label={t('capacity')}    ><CatSelect value={draft.capacity}       options={RAM_CAP}         onChange={v => set({ capacity: v })} /></Spec>
               <Spec label={t('generation')}  ><CatSelect value={draft.generation}     options={RAM_GENERATIONS} onChange={v => set({ generation: v })} /></Spec>
               <Spec label={t('type')}        ><CatSelect value={draft.type}           options={RAM_DEVICE_TYPES} onChange={v => set({ type: v })} /></Spec>
-              <Spec label={t('klass')}       ><CatSelect value={draft.classification} options={RAM_CLASS}       onChange={v => set({ classification: v })} /></Spec>
-              <Spec label={t('rank')}        ><CatSelect value={draft.rank}           options={RAM_RANK}        onChange={v => set({ rank: v })} /></Spec>
+              <Spec label={t('klass')}       ><CatSelect value={draft.classification} options={allowedOptions('RAM', 'classification', draft, RAM_CLASS)} onChange={v => set({ classification: v })} /></Spec>
+              <Spec label={t('rank')}        ><CatSelect value={draft.rank}           options={allowedOptions('RAM', 'rank', draft, RAM_RANK)} onChange={v => set({ rank: v })} /></Spec>
               <Spec label={t('speedMhz')}    >
                 <input className="input" value={draft.speed} onChange={e => set({ speed: e.target.value })} />
               </Spec>
@@ -465,7 +469,7 @@ function DetailsPanel({
               <Spec label={t('brand')}        ><CatCombo  value={draft.brand}      options={SSD_BRANDS}    onChange={v => set({ brand: v })} /></Spec>
               <Spec label={t('capacity')}     ><CatSelect value={draft.capacity}   options={SSD_CAP}       onChange={v => set({ capacity: v })} /></Spec>
               <Spec label={t('interfaceLbl')} ><CatSelect value={draft.interface}  options={SSD_INTERFACE} onChange={v => set({ interface: v })} /></Spec>
-              <Spec label={t('formFactor')}   ><CatSelect value={draft.formFactor} options={SSD_FORM}      onChange={v => set({ formFactor: v })} /></Spec>
+              <Spec label={t('formFactor')}   ><CatSelect value={draft.formFactor} options={allowedOptions('SSD', 'formFactor', draft, SSD_FORM)} onChange={v => set({ formFactor: v })} /></Spec>
             </div>
           )}
           {cat === 'HDD' && (
@@ -548,7 +552,7 @@ function DetailsPanel({
                   <th>{t('warehouse')}</th>
                   <th style={{ textAlign: 'right' }}>{t('ieOnHand')}</th>
                   <th style={{ textAlign: 'right' }}>{t('ieInTransit')}</th>
-                  <th style={{ textAlign: 'right', width: 90 }}>{t('lines')}</th>
+                  <th style={{ textAlign: 'right', width: 90 }}>{t('ieLots')}</th>
                 </tr>
               </thead>
               <tbody>

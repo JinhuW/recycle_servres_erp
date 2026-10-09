@@ -7,7 +7,7 @@ import { diff, writeOrderEvent, META_FIELDS, LINE_FIELDS, type AuditChange, type
 import { autoTrackParts } from '../../lib/marketAutoTrack';
 import { effectiveRole } from '../../lib/role';
 import { committedClaimsByLine, openSellStatuses } from '../../lib/sellCommitment';
-import { specVal, validateLineInput } from '../../lib/orderInput';
+import { mergedSpec, specRuleErr, specVal, validateLineInput } from '../../lib/orderInput';
 import { revertOrderToDraftTx, LINE_STATUS_FOR_LIFECYCLE, isClosedBook } from '../../services/orderAdvance';
 import { syncOrderCategory } from '../../services/orderCategory';
 import { nameHandoffByChange, setOrderPackageTx, unlinkOrderPackagesTx, packageChanges, changeOrderOwnerTx, type HandoffPackage } from '../../services/orderHandoff';
@@ -183,13 +183,19 @@ patchRoutes.patch('/:id', async (c) => {
   const addCats: string[] = [];
   for (let i = 0; i < (body.addLines ?? []).length; i++) {
     const l = body.addLines![i];
+    // Not saved yet, so no #. A save may send one row of several new ones, so
+    // its place here is not the "new n" the editor shows: named by what it is.
+    const name = l.partNumber?.trim() || l.description?.trim();
+    const ref = name ? `new product (${name})` : 'new product';
     const cat = l.category ?? inheritedCat;
-    if (!cat) return c.json({ error: `line ${i + 1}: category is required` }, 400);
+    if (!cat) return c.json({ error: `${ref}: category is required` }, 400);
     addCats.push(cat);
     const issue = serialIssue({ ...l, category: cat, qty: l.qty ?? 1 });
-    if (issue) return c.json({ error: serialErr(`line ${i + 1}`, issue) }, 400);
-    const labelErr = identityErr(`line ${i + 1}`, cat, l);
+    if (issue) return c.json({ error: serialErr(ref, issue) }, 400);
+    const labelErr = identityErr(ref, cat, l);
     if (labelErr) return c.json({ error: labelErr }, 400);
+    const specErr = specRuleErr(ref, cat, l);
+    if (specErr) return c.json({ error: specErr }, 400);
   }
 
   // One pre-read covering both the item-type and the serial rules. Each is
@@ -228,21 +234,25 @@ patchRoutes.patch('/:id', async (c) => {
     // item types hold NULL, so an untouched one is left alone.
     if (l.itemType !== undefined || l.category !== undefined) {
       const merged = l.itemType !== undefined ? l : { itemType: row.item_type };
-      const labelErr = identityErr(`line ${l.id}`, mergedCat, merged);
+      const labelErr = identityErr(`#${row.product_no}`, mergedCat, merged);
       if (labelErr) return c.json({ error: labelErr }, 400);
     }
 
     // Generation belongs to RAM alone, so a line leaving RAM has it cleared —
     // evaluate the post-clear value, or switching a DDR5 line to SSD would
     // still demand serials for a generation the line no longer has.
-    const clearing = l.category !== undefined && l.category !== row.category
-      ? new Set(staleSpecDbCols(l.category))
-      : new Set<string>();
+    const categoryMoved = l.category !== undefined && l.category !== row.category;
+    const clearing = new Set<string>(categoryMoved && l.category ? staleSpecDbCols(l.category) : []);
     const merged = {
       generation: clearing.has('generation') ? null : (l.generation ?? row.generation),
       qty: l.qty ?? row.qty,
       serialNumber: l.serialNumber ?? row.serial_number,
     };
+
+    // Unlike the serial merge above, a present null clears — as the UPDATE does.
+    const spec = mergedSpec(row, l as Record<string, unknown>, { clearing, categoryMoved });
+    const specErr = mergedCat ? specRuleErr(`#${row.product_no}`, mergedCat, spec.merged, spec.changed) : null;
+    if (specErr) return c.json({ error: specErr }, 400);
     const changes =
       l.category !== undefined && l.category !== row.category ||
       (merged.generation ?? null) !== (row.generation ?? null) ||
@@ -250,7 +260,7 @@ patchRoutes.patch('/:id', async (c) => {
       (merged.serialNumber ?? '') !== (row.serial_number ?? '');
     if (!changes) continue;
     const issue = serialIssue({ category: mergedCat ?? null, ...merged });
-    if (issue) return c.json({ error: serialErr(`line ${l.id}`, issue) }, 400);
+    if (issue) return c.json({ error: serialErr(`#${row.product_no}`, issue) }, 400);
   }
 
   const patchCatErr = await assertCategoriesEnabled(sql, touchedCats);
@@ -260,10 +270,11 @@ patchRoutes.patch('/:id', async (c) => {
   // commits (R2 isn't transactional; never delete on a rolled-back change).
   const removedScanKeys: string[] = [];
 
-  // Surfaced so the mobile autosave path can capture the new DB id of each
-  // appended line; aligns 1:1 with the request's `addLines` ordering. Populated
-  // inside the tx and only read after the tx commits.
+  // Surfaced so the mobile autosave path can capture the new DB id and # of
+  // each appended product; aligns 1:1 with the request's `addLines` ordering.
+  // Populated inside the tx and only read after the tx commits.
   const addedLineIds: string[] = [];
+  const addedLineNos: number[] = [];
 
   // Where the order ends up. Returned to the client so an edit that moved the
   // stage doesn't need a refetch to be shown correctly.
@@ -515,10 +526,13 @@ patchRoutes.patch('/:id', async (c) => {
       }
       if (Array.isArray(body.removeLineIds) && body.removeLineIds.length) {
         const doomed = await tx`
-          SELECT id, category, scan_image_id, part_number, qty, unit_cost::float AS unit_cost FROM order_lines
+          SELECT id, product_no, category, scan_image_id, part_number, qty, unit_cost::float AS unit_cost FROM order_lines
           WHERE order_id = ${id} AND id = ANY(${body.removeLineIds}::uuid[])
         ` as (LineSnapRow & { scan_image_id: string | null })[];
-        removedSnapshots = doomed.map(r => ({ id: r.id, category: r.category, part_number: r.part_number, qty: r.qty, unit_cost: r.unit_cost }));
+        removedSnapshots = doomed.map(r => ({
+          id: r.id, product_no: r.product_no, category: r.category, part_number: r.part_number,
+          qty: r.qty, unit_cost: r.unit_cost,
+        }));
         // Read before the DELETE cascades the rows away. Same list as the scan
         // keys, so the existing post-commit sweep covers both.
         //
@@ -703,7 +717,7 @@ patchRoutes.patch('/:id', async (c) => {
               part_number    = COALESCE(${l.partNumber ?? null}, part_number),
               serial_number  = COALESCE(${l.serialNumber ?? null}, serial_number),
               chip_number    = CASE WHEN ${has('chipNumber')}::int = 1
-                                    THEN NULLIF(${canonChipNumber(l.chipNumber)}, '') ELSE chip_number END,
+                                    THEN NULLIF(${canonChipNumber(l.chipNumber, has('brand') ? specVal(l.brand) : stored?.brand)}, '') ELSE chip_number END,
               condition      = COALESCE(${l.condition ?? null}, condition),
               health         = CASE WHEN ${has('health')}::int = 1 THEN ${l.health ?? null} ELSE health END,
               rpm            = CASE WHEN ${has('rpm')}::int = 1    THEN ${l.rpm ?? null}    ELSE rpm END,
@@ -722,15 +736,18 @@ patchRoutes.patch('/:id', async (c) => {
         const lineRows = body.addLines.map((l, i) => newLineRow(id, addCats[i], l, {
           qty: l.qty ?? 1, unitCost: l.unitCost ?? 0, status, position: posRow.p + 1 + i,
         }));
-        // Re-sorted so addedLineIds lines up 1:1 with the request's addLines.
-        const inserted = await tx<(LineSnapRow & { position: number })[]>`
+        // Re-sorted so addedLineIds lines up 1:1 with the request's addLines:
+        // 0169's trigger numbers the VALUES in order, each from the PO's
+        // counter, which the lock above serialises.
+        const inserted = await tx<LineSnapRow[]>`
           INSERT INTO order_lines ${tx(lineRows)}
-          RETURNING id, category, part_number, qty, unit_cost::float AS unit_cost, position
+          RETURNING id, product_no, category, part_number, qty, unit_cost::float AS unit_cost
         `;
-        addedRows = [...inserted]
-          .sort((a, b) => a.position - b.position)
-          .map(({ position: _position, ...row }) => row);
-        for (const r of addedRows) addedLineIds.push(r.id);
+        addedRows = [...inserted].sort((a, b) => a.product_no - b.product_no);
+        for (const r of addedRows) {
+          addedLineIds.push(r.id);
+          addedLineNos.push(r.product_no);
+        }
         await autoTrackParts(tx, body.addLines.map((l, i) => trackInput(l, addCats[i])));
       }
 
@@ -813,6 +830,7 @@ patchRoutes.patch('/:id', async (c) => {
           if (changes.length) {
             revertLinesEdited.push({
               lineId: patch.id,
+              no: after.product_no,
               partNumber: after.part_number ?? null,
               changes,
             });
@@ -854,7 +872,7 @@ patchRoutes.patch('/:id', async (c) => {
     if (e instanceof OrderRefusal) return refusalResponse(c, u, e.refusal);
     // A line value outside a column's CHECK (health 0–100, rpm > 0, qty >= 0).
     if ((e as { code?: string }).code === '23514') {
-      return c.json({ error: 'A line value is out of range' }, 400);
+      return c.json({ error: 'A product value is out of range' }, 400);
     }
     throw e;
   }
@@ -869,7 +887,7 @@ patchRoutes.patch('/:id', async (c) => {
   // The link count is the Payments page's figure — managers only, and left
   // out rather than zeroed for everyone else.
   return c.json({
-    ok: true, addedLineIds, lifecycle: lifecycleAfter,
+    ok: true, addedLineIds, addedLineNos, lifecycle: lifecycleAfter,
     ...(effectiveRole(u) === 'manager' ? { paymentsLinked } : {}),
   });
 });

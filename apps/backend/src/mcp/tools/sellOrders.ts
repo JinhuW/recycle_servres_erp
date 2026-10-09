@@ -9,7 +9,7 @@ export const SELL_ORDER_TOOL_DEFS = [
   {
     name: 'search_sellable_inventory',
     description:
-      'Read-only. List inventory lines that can currently be put on a sell order — status Reviewing or Done, on ' +
+      'Read-only. List inventory lots (a PO\'s products, one row per lot) that can currently be put on a sell order — status Reviewing or Done, on ' +
       'an unarchived PO, with units left after every Shipped or Awaiting payment sell order takes the quantity it ' +
       'names — newest first. Use this to find the inventoryId ' +
       'values that create_sell_order_draft requires. Each row includes: inventoryId (pass this to ' +
@@ -20,7 +20,7 @@ export const SELL_ORDER_TOOL_DEFS = [
       'Draft or Packing orders already propose this line — they are proposals, so a line may appear on several ' +
       'and only the first one promoted keeps it), and sellPrice (the price already ' +
       'assigned to the line, in USD — advisory; you still choose each line\'s unitPrice), sourceOrderId (the PO ' +
-      'the line came in on), sourceLineNo (the line\'s # on that PO\'s page), and the structured spec behind subLabel: type (Desktop / Server / Laptop), ' +
+      'the line came in on), sourceLineNo (the product\'s # on that PO — stable: it never changes, and a lot split off by a transfer shares it), and the structured spec behind subLabel: type (Desktop / Server / Laptop), ' +
       'classification, rank, speed, interface, formFactor, health. Filter with query ' +
       '(matches brand / part number / description / category) and warehouseId. Requires the sellorder:read scope.',
     inputSchema: {
@@ -42,7 +42,8 @@ export const SELL_ORDER_TOOL_DEFS = [
       'currency). Descriptive fields (category, label, part number, warehouse, condition) are taken from the ' +
       'referenced inventory line — do not supply them. customerId defaults to the MCP customer when omitted. ' +
       'currency is USD (default) or CNY; unitPrice is the native price and is converted to USD on store. On ' +
-      'success returns { id, status, customerId, lineCount, currency }. Errors (an unknown inventoryId, a ' +
+      'success returns { id, status, customerId, lineCount (the lines created), productCount (the products ' +
+      'they make, by # — lots of one product share one), currency }. Errors (an unknown inventoryId, a ' +
       'line that is no longer sellable or whose PO is archived, a qty above what committed sell orders leave ' +
       'free, an unknown customerId) come back as a normal tool result with isError set and a message saying ' +
       'what failed — fix the arguments and ' +
@@ -174,5 +175,8 @@ export async function callCreateSellOrderDraft(
     source: ctx.source,
   });
   if (!result.ok) throw new Error(result.error);
-  return { id: result.id, status: 'Draft', customerId: result.customerId, lineCount: result.lineCount, currency: result.currency };
+  return {
+    id: result.id, status: 'Draft', customerId: result.customerId, lineCount: result.lineCount,
+    productCount: result.productCount, currency: result.currency,
+  };
 }

@@ -7,7 +7,7 @@ import {
 import { useT } from '../../../lib/i18n';
 import { chipNumberRequired } from '../../../lib/ramRequired';
 import { ssdBrandRequired, SSD_BRAND_REQUIRED_OVER_GB } from '../../../lib/lineRequirements';
-import { synthesizePartNumber } from '@recycle-erp/shared';
+import { allowedOptions, chipMarkingCanon, synthesizePartNumber } from '@recycle-erp/shared';
 import { Combobox } from '../../../components/Combobox';
 import { PartNumberField } from '../../../components/PartNumberField';
 import { ItemTypePicker } from '../../../components/ItemTypePicker';
@@ -79,11 +79,11 @@ export function RamFields({ line, set, missing }: FieldsProps) {
       </div>
       <div className={cls('klass')}>
         <label className="label">{t('klass')} <span className="req">*</span></label>
-        <CatSelect value={line.classification} options={RAM_CLASS} invalid={bad('klass')} onChange={v => set({ classification: v })} />
+        <CatSelect value={line.classification} options={allowedOptions('RAM', 'classification', line, RAM_CLASS)} invalid={bad('klass')} onChange={v => set({ classification: v })} />
       </div>
       <div className={cls('rank')}>
         <label className="label">{t('rank')} <span className="req">*</span></label>
-        <CatSelect value={line.rank} options={RAM_RANK} invalid={bad('rank')} onChange={v => set({ rank: v })} />
+        <CatSelect value={line.rank} options={allowedOptions('RAM', 'rank', line, RAM_RANK)} invalid={bad('rank')} onChange={v => set({ rank: v })} />
       </div>
       <div className={cls('speedMhz')}>
         <label className="label">{t('speedMhz')} <span className="req">*</span></label>
@@ -101,6 +101,12 @@ export function RamFields({ line, set, missing }: FieldsProps) {
           value={line.chipNumber ?? ''}
           aria-invalid={bad('chipNumber')}
           onChange={e => set({ chipNumber: e.target.value.toUpperCase() })}
+          // On blur, not per keystroke: a Micron marking collapses to its die
+          // code only once it is whole, whatever order it was typed in.
+          onBlur={e => {
+            const canon = chipMarkingCanon(e.target.value, line.brand);
+            if (canon !== (line.chipNumber ?? '')) set({ chipNumber: canon });
+          }}
         />
       </div>
       <div className={cls('partNumber')} style={{ gridColumn: 'span 2' }}>
@@ -145,7 +151,7 @@ export function SsdFields({ line, set }: FieldsProps) {
       </div>
       <div className="field">
         <label className="label">{t('formFactor')}</label>
-        <CatSelect value={line.formFactor} options={SSD_FORM} onChange={v => set({ formFactor: v })} />
+        <CatSelect value={line.formFactor} options={allowedOptions('SSD', 'formFactor', line, SSD_FORM)} onChange={v => set({ formFactor: v })} />
       </div>
       <div className="field" style={{ gridColumn: 'span 2' }}>
         <label className="label">{t('partNumber')}</label>

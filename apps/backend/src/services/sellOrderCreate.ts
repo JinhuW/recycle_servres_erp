@@ -3,6 +3,7 @@ import type { Sql } from 'postgres';
 import { nextHumanId } from '../lib/id-seq';
 import { committedClaimsByLine, isSellableLineStatus } from '../lib/sellCommitment';
 import { writeSellOrderEvent } from './sellOrderAudit';
+import { assignSellProductNos } from './sellOrderNumbers';
 import {
   convertToUsd, getLatestRateToUsd, type SupportedCurrency,
 } from '../lib/fx';
@@ -38,8 +39,10 @@ export async function validateSellLines(
   // different order would otherwise each hold one row while waiting on the
   // other's, and Postgres would abort one of them as a deadlock.
   const ids = [...demand.keys()].sort();
-  const locked = await tx<{ id: string; qty: number; status: string; archived_at: string | null }[]>`
-    SELECT l.id, l.qty, l.status, o.archived_at
+  const locked = await tx<{
+    id: string; order_id: string; product_no: number; qty: number; status: string; archived_at: string | null;
+  }[]>`
+    SELECT l.id, l.order_id, l.product_no, l.qty, l.status, o.archived_at
     FROM order_lines l JOIN orders o ON o.id = l.order_id
     WHERE l.id = ANY(${ids}::uuid[])
     ORDER BY l.id
@@ -50,11 +53,13 @@ export async function validateSellLines(
   const claims = await committedClaimsByLine(tx, ids, { excludeOrderId });
   for (const [inventoryId, qty] of demand) {
     const inv = byId.get(inventoryId.toLowerCase());
-    if (!inv) return `inventory line ${inventoryId} not found`;
+    if (!inv) return `inventory lot ${inventoryId} not found`;
+    // Named the way the PO page and the sell order show it.
+    const ref = `${inv.order_id} #${inv.product_no}`;
     if (!isSellableLineStatus(inv.status))
-      return `inventory line not sellable (status=${inv.status})`;
-    if (inv.archived_at !== null) return `inventory line's order is archived`;
-    if (qty > inv.qty) return `qty ${qty} exceeds inventory available ${inv.qty}`;
+      return `${ref} is not sellable (status=${inv.status})`;
+    if (inv.archived_at !== null) return `${ref} is on an archived order`;
+    if (qty > inv.qty) return `qty ${qty} exceeds inventory available ${inv.qty} on ${ref}`;
     const claim = claims.get(inventoryId.toLowerCase());
     const remaining = inv.qty - (claim?.qty ?? 0);
     if (claim && qty > remaining) {
@@ -91,7 +96,7 @@ export type CreateDraftInput = {
 };
 
 export type CreateDraftResult =
-  | { ok: true; id: string; customerId: string; lineCount: number; currency: SupportedCurrency }
+  | { ok: true; id: string; customerId: string; lineCount: number; productCount: number; currency: SupportedCurrency }
   | { ok: false; error: string };
 
 // One sell_order_lines INSERT, shared by createSellOrderDraft and the sell-order
@@ -111,8 +116,10 @@ export interface SellOrderLineInsert {
   sourceCurrency: string | null;
   sourceUnitPrice: number | null;
   sourceFxRate: number | null;
-  // Which save past Draft added the line (sell_order_lines.append_batch), or
-  // null for a line numbered with the order's sorted set.
+  // The product's # when the line continues one already on the order; null
+  // for a new product, which assignSellProductNos numbers after the insert.
+  productNo: number | null;
+  // What the release before 0170 numbered by; see appendBatches.
   appendBatch: number | null;
 }
 
@@ -125,14 +132,14 @@ export async function insertSellOrderLine(
     INSERT INTO sell_order_lines
       (sell_order_id, inventory_id, category, label, sub_label, part_number,
        qty, unit_price, warehouse_id, condition, position,
-       source_currency, source_unit_price, source_fx_rate_to_usd, append_batch)
+       source_currency, source_unit_price, source_fx_rate_to_usd, product_no, append_batch)
     VALUES
       (${sellOrderId}, ${line.inventoryId}, ${line.category}, ${line.label},
        ${line.subLabel}, ${line.partNumber},
        ${line.qty}, ${line.unitPriceUsd},
        ${line.warehouseId}, ${line.condition}, ${line.position},
        ${line.sourceCurrency}, ${line.sourceUnitPrice}, ${line.sourceFxRate},
-       ${line.appendBatch})
+       ${line.productNo}, ${line.appendBatch})
   `;
 }
 
@@ -150,7 +157,10 @@ export async function createSellOrderDraft(
   const fx = await getLatestRateToUsd(sql, input.currency);
 
   let nextId!: string;
-  let outcome: CreateDraftResult = { ok: true, id: '', customerId: input.customerId, lineCount: input.lines.length, currency: input.currency };
+  let products = 0;
+  let outcome: CreateDraftResult = {
+    ok: true, id: '', customerId: input.customerId, lineCount: input.lines.length, productCount: 0, currency: input.currency,
+  };
 
   await sql.begin(async (tx) => {
     // Validated before the id is drawn: returning here commits the tx, so a
@@ -182,13 +192,20 @@ export async function createSellOrderDraft(
         sourceCurrency: isNonUsd ? input.currency : null,
         sourceUnitPrice: isNonUsd ? l.unitPrice : null,
         sourceFxRate: isNonUsd ? fx.rate : null,
+        productNo: null,
         appendBatch: null,
       });
     }
+    // Numbered once, in packing-list order, and never again.
+    await assignSellProductNos(tx, nextId);
+    // Products, by # — lots of one product share it.
+    [{ products }] = await tx<{ products: number }[]>`
+      SELECT COUNT(DISTINCT product_no)::int AS products FROM sell_order_lines WHERE sell_order_id = ${nextId}`;
     await writeSellOrderEvent(tx, nextId, input.actorUserId, 'created', {
       source: input.source,
       status: 'Draft',
       lineCount: input.lines.length,
+      productCount: products,
       customerId: input.customerId,
       currency: input.currency,
       fxRateToUsd: fx.rate,
@@ -197,5 +214,8 @@ export async function createSellOrderDraft(
   });
 
   if (!outcome.ok) return outcome;
-  return { ok: true, id: nextId, customerId: input.customerId, lineCount: input.lines.length, currency: input.currency };
+  return {
+    ok: true, id: nextId, customerId: input.customerId, lineCount: input.lines.length,
+    productCount: products, currency: input.currency,
+  };
 }

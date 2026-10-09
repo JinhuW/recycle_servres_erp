@@ -8,7 +8,7 @@ import { specVal } from '../../lib/orderInput';
 import { activeMember, type HandoffPackage } from '../../services/orderHandoff';
 import { pickTrackingClient, carrierTrackingUrl } from '../../shipping';
 import { registerPackageTracking } from '../../shipping/track';
-import { synthesizePartNumber, normSellPrice, CARRIERS, PACKAGE_SOURCES, isValidTracking, normalizeTracking, type SerialIssue, type Carrier, type PackageSource } from '@recycle-erp/shared';
+import { synthesizePartNumber, chipMarkingCanon, normSellPrice, CARRIERS, PACKAGE_SOURCES, isValidTracking, normalizeTracking, type SerialIssue, type Carrier, type PackageSource } from '@recycle-erp/shared';
 import { type Env, type LineCategory, type User } from '../../types';
 import { normPaypalTxnId } from '../../ai/paypal';
 
@@ -29,12 +29,12 @@ export function resolvePartNumber(
   return synthesizePartNumber(category ?? '', l);
 }
 
-// Chip markings are die codes, always printed upper-case on the module; case
-// noise (typed or OCR'd) would fork one chip into two spellings, so the column
-// is normalised at every write. `''` passes through untouched — PATCH uses it
-// as the explicit "clear this field" sentinel, distinct from undefined/"keep".
-export function canonChipNumber(v: string | null | undefined): string | null {
-  return v == null ? null : v.trim().toUpperCase();
+// Every write of chip_number goes through here (chipMarkingCanon has the rule;
+// the brand decides whether a Micron marking is cut to its die code). `''`
+// passes through untouched — PATCH uses it as the explicit "clear this field"
+// sentinel, distinct from undefined/"keep".
+export function canonChipNumber(v: string | null | undefined, brand: string | null | undefined): string | null {
+  return v == null ? null : chipMarkingCanon(v, brand);
 }
 
 // "sell order SO-4056" / "sell orders SO-4056, SO-4057" for a committed-line
@@ -60,7 +60,7 @@ export function committedLinesBody(
 // Enforced here too so no client can write a violating line.
 export function serialErr(label: string, issue: SerialIssue): string {
   return issue.kind === 'ddr5Required'
-    ? `${label}: DDR5 RAM lines require serial numbers`
+    ? `${label}: DDR5 RAM products require serial numbers`
     : `${label}: serial number count (${issue.count}) must equal qty (${issue.qty})`;
 }
 
@@ -185,7 +185,7 @@ export const PG_INVALID_TEXT_REPRESENTATION = '22P02';
 // lives in lib/lineRequirements.ts, which both shells share.
 export function identityErr(label: string, category: string | undefined, l: { itemType?: string | null }): string | null {
   if (category !== 'Other') return null;
-  return (l.itemType ?? '').trim() ? null : `${label}: Other lines require an item type`;
+  return (l.itemType ?? '').trim() ? null : `${label}: Other products require an item type`;
 }
 
 // Order-level fees, shared by POST / and PATCH /:id so the two can't drift.
@@ -329,7 +329,7 @@ export const packageFromJson = (p: PackageJson | null) => p && {
 // "120.00" string forms.
 export function lineAuditCols(sql: SqlLike) {
   return sql`
-    id, status, qty, category, brand, capacity, type, generation, classification,
+    id, product_no, status, qty, category, brand, capacity, type, generation, classification,
     rank, speed, interface, form_factor, description, item_type, part_number,
     serial_number, chip_number, condition, rpm,
     unit_cost::float AS unit_cost,
@@ -338,11 +338,14 @@ export function lineAuditCols(sql: SqlLike) {
 }
 
 // A line as the added / removed / reverted events snapshot it.
-export type LineSnapRow = { id: string; category: string; part_number: string | null; qty: number; unit_cost: number };
+export type LineSnapRow = {
+  id: string; product_no: number; category: string; part_number: string | null; qty: number; unit_cost: number;
+};
 
 export function lineSnapshot(r: LineSnapRow) {
   return {
     lineId: r.id,
+    no: r.product_no,
     category: r.category,
     partNumber: r.part_number,
     qty: r.qty,
@@ -398,7 +401,7 @@ export function newLineRow(
     speed: l.speed ?? null, interface: l.interface ?? null, form_factor: l.formFactor ?? null,
     description: l.description ?? null, item_type: l.itemType?.trim() || null,
     part_number: resolvePartNumber(cat, l), serial_number: l.serialNumber ?? null,
-    chip_number: canonChipNumber(l.chipNumber), condition: l.condition ?? 'Pulled — Tested',
+    chip_number: canonChipNumber(l.chipNumber, l.brand), condition: l.condition ?? 'Pulled — Tested',
     qty: d.qty, unit_cost: d.unitCost, sell_price: normSellPrice(l.sellPrice), status: d.status,
     scan_image_id: l.scanImageId ?? null, scan_confidence: l.scanConfidence ?? null,
     position: d.position, health: l.health ?? null, rpm: l.rpm ?? null,
@@ -490,6 +493,8 @@ export function changesMaterialField(
   for (const patch of body.lines ?? []) {
     const row = linesBefore.get(patch.id);
     if (!row) continue;
+    // A chip lands by the brand the row ends up with, as the UPDATE writes it.
+    const brandAfter = patch.brand !== undefined ? specVal(patch.brand) : (row.brand as string | null);
     for (const [key, value] of Object.entries(patch)) {
       if (key === 'id') continue;
       const col = key.replace(/[A-Z]/g, m => `_${m.toLowerCase()}`);
@@ -501,7 +506,7 @@ export function changesMaterialField(
       // Comparing the raw value read an echoed null as a change and sent the
       // order back to Draft for an edit that never landed.
       if (!LINE_SENTINEL_COLS.has(col) && value == null) continue;
-      const landed = col === 'chip_number' ? (canonChipNumber(value as string | null) || null)
+      const landed = col === 'chip_number' ? (canonChipNumber(value as string | null, brandAfter) || null)
         : col === 'sell_price' ? normSellPrice(value as number | null)
         : LINE_SPEC_TEXT_COLS.has(col) ? specVal(value as string | null)
         : value;
@@ -544,10 +549,11 @@ export function changesMaterialField(
 }
 
 // The stored shape PATCH reads before writing: enough to merge a patch against
-// (category/serial/item-type rules) and to tell a synthetic part number from a
-// typed one when a line changes category.
+// (category/serial/item-type/spec rules) and to tell a synthetic part number
+// from a typed one when a line changes category.
 export type StoredLine = {
   id: string;
+  product_no: number;
   category: string | null;
   generation: string | null;
   qty: number;
@@ -560,9 +566,12 @@ export type StoredLine = {
   form_factor: string | null;
   speed: string | null;
   rpm: number | null;
+  type: string | null;
+  classification: string | null;
+  rank: string | null;
 };
 export function storedLineCols(sql: SqlLike) {
   return sql`
-    id, category, generation, qty, serial_number, item_type, part_number,
-    brand, capacity, interface, form_factor, speed, rpm`;
+    id, product_no, category, generation, qty, serial_number, item_type, part_number,
+    brand, capacity, interface, form_factor, speed, rpm, type, classification, rank`;
 }

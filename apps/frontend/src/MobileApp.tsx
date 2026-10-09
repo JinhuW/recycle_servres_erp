@@ -40,6 +40,7 @@ import { confirmDiscard } from './lib/unsavedGuard';
 import type { Category, DraftLine, Notification, Order, OrderLine, OrderSummary, ScanResponse } from './lib/types';
 import { buildOrderSubmit, toAddLine } from './lib/orderSubmit';
 import { findDuplicateLine } from './lib/dupParts';
+import { lineRef, newOrdinals } from './lib/productNo';
 import { lineSpecLabel } from './lib/lineGroups';
 
 // Where a line form goes when it closes. 'detail' is an existing order: the
@@ -78,8 +79,10 @@ type Toast = { msg: string; kind: 'success' | 'error' | 'warn' };
 
 // An order's line as the capture form wants it. Shared by the draft-resume
 // path and the detail screen's line edits so the two can't drift.
-const toDraftLine = (l: OrderLine): DraftLine => ({
+const toDraftLine = (l: OrderLine, i: number): DraftLine => ({
   id: l.id,
+  // An older backend sends no #; its lines came in # order.
+  no: l.no ?? i + 1,
   // It came out of the DB, so it is already there. Without this a resumed
   // draft's lines look brand new to buildOrderSubmit and it appends a second
   // copy of every one of them on submit.
@@ -110,7 +113,7 @@ const toDraftLine = (l: OrderLine): DraftLine => ({
   scanImageUrl: l.scanImageUrl,
   health: l.health,
   rpm: l.rpm,
-  label: lineSpecLabel(l) ?? ((l.description ?? '').trim() || (l.partNumber ?? '').trim() || 'Item'),
+  label: lineSpecLabel(l) ?? ((l.description ?? '').trim() || (l.partNumber ?? '').trim() || 'Product'),
 });
 
 function Shell() {
@@ -417,7 +420,9 @@ function Shell() {
       if (dupLine != null && pn) {
         // Surface the alert immediately. The form still opens so the user
         // can compare against the existing line and decide whether to save.
-        showToast(t('dupPartScanWarn', { pn, line: dupLine }), 'error');
+        showToast(t('dupPartScanWarn', {
+          pn, line: lineRef(dupLine, t, newOrdinals(capture.lines)[capture.lines.indexOf(dupLine)]),
+        }), 'error');
       }
     }
     setCapture(c => c.phase === 'camera' ? { ...c, phase: 'form', detected: s } : c);
@@ -529,10 +534,11 @@ function Shell() {
     try {
       // Capture the inserted row's id so a later re-edit UPDATEs it in place
       // (and the final submit updates rather than inserting a duplicate).
-      const res = await api.patch<{ addedLineIds?: string[] }>(
+      const res = await api.patch<{ addedLineIds?: string[]; addedLineNos?: number[] }>(
         '/api/orders/' + targetId, { addLines: [toAddLine(line)] },
       );
       const newId = res.addedLineIds?.[0];
+      const newNo = res.addedLineNos?.[0];
       if (newId) await flushLinePhotos(line, targetId, newId);
       if (backToDetail) { doneToDetail(); return; }
       // Match by stable client id, not array index: the user may have added,
@@ -540,7 +546,7 @@ function Shell() {
       setCapture(c => {
         if (c.phase === 'idle' || c.phase === 'draftPicker') return c;
         const updated = c.lines.map(l =>
-          l._cid === line._cid ? { ...l, _confirmed: true, id: newId ?? l.id } : l,
+          l._cid === line._cid ? { ...l, _confirmed: true, id: newId ?? l.id, no: newNo ?? l.no } : l,
         );
         // Track what the draft holds server-side, not just what the screen
         // shows: a line autosaved and then deleted here has to be named in
@@ -763,6 +769,9 @@ function Shell() {
           detected={capture.detected}
           lineCount={capture.lines.length}
           editingLineIdx={capture.editingLineIdx ?? null}
+          newNo={capture.editingLineIdx != null
+            ? newOrdinals(capture.lines)[capture.editingLineIdx]
+            : newOrdinals(capture.lines).filter(n => n != null).length + 1}
           existingLine={existing}
           allowZeroQty={!!capture.editingId && !!existing?.id}
           onSaveLine={onSaveLine}

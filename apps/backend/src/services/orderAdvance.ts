@@ -353,19 +353,21 @@ export async function archiveOrderLinesTx(
            (SELECT COUNT(*) FROM sell_order_lines x
              WHERE x.sell_order_id = so.id AND x.qty > 0)::int AS so_line_count,
            sol.inventory_id, sol.qty, sol.unit_price::float AS unit_price, sol.condition,
-           sol.category, sol.label, sol.sub_label, sol.part_number, sol.warehouse_id
+           sol.category, sol.label, sol.sub_label, sol.part_number, sol.warehouse_id,
+           sol.product_no
     FROM sell_order_lines sol
     JOIN sell_orders so ON so.id = sol.sell_order_id
     JOIN order_lines ol ON ol.id = sol.inventory_id
     WHERE ol.order_id = ${id}
       AND ol.status <> 'Sold'
       AND so.status = ANY(${openSellStatuses()}::text[])
-      -- A line held at 0 claims nothing, and it is held rather than removed
-      -- so the lines after it keep their #: the archive leaves it be.
+      -- A line held at 0 claims nothing, and it is held as a record of what
+      -- was on the order: the archive leaves it be.
       AND sol.qty > 0
     ORDER BY so.id, sol.position
   ` as unknown as (SOLineSnap & {
     sol_id: string; so_id: string; so_status: string; so_line_count: number; inventory_id: string;
+    product_no: number | null;
   })[];
 
   if (claimed.length > 0 && !opts.removeFromSellOrders) {
@@ -393,8 +395,9 @@ export async function archiveOrderLinesTx(
         category: r.category, label: r.label, sub_label: r.sub_label, part_number: r.part_number,
         warehouse_id: r.warehouse_id,
       };
+      // The product's # leaves a gap: nothing else on the order moves.
       await writeSellOrderEvent(tx, r.so_id, actor.id, 'line_removed', {
-        snapshot, reason: 'po_archived', orderId: id,
+        snapshot, no: r.product_no, reason: 'po_archived', orderId: id,
       });
     }
   }
@@ -565,7 +568,7 @@ export async function advanceOrderTx(
   // delete or archive applies) reads exactly this.
   if (cur.lifecycle === 'draft' && nextStageId !== 'draft') {
     const snap = (await tx`
-      SELECT COUNT(*)::int AS line_count,
+      SELECT COUNT(DISTINCT product_no)::int AS line_count,
              COALESCE(SUM(qty), 0)::int AS qty,
              COALESCE(SUM(qty * unit_cost), 0)::float AS total_cost
       FROM order_lines WHERE order_id = ${id}

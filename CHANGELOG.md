@@ -17,6 +17,384 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.237.1] - 2026-10-09
+
+Fixes from the reviews before the v1.237 release (RS-215). `/code-review high`
+ran over dev against main (RS-207 to RS-212) and over every PR that landed
+while the review was going on: RS-214's Micron lookup, RS-213's three parts
+and their fix rounds, and RS-217. Each finding was checked against the code,
+and each one about data against prod, read-only. RS-213 and RS-217 fixed their
+own findings before merging. The four below were left on dev; the rest are
+recorded in the ticket with why they stay.
+
+### Fixed
+
+- **Select all holds each lot to the filter chips.** On Inventory, a brand,
+  rank or other attribute chip keeps a product when *any* of its lots matches,
+  and select-all took every sellable lot of such a product. A lot typed with
+  another brand, inside a product that matched, was selected under a brand
+  chip that excludes it, and went on to the export or the sell order. Each lot
+  is now held to the warehouse and every chip on its own.
+- **A lot that went stale since the list loaded stays out of select-all.**
+  Select-all fetches the rows for lots past the 200 listed products, and that
+  fetch returned any lot it was asked for. A lot sold, archived or emptied in
+  the meantime joined the selection and its export. Only lots that are still
+  sellable come back now.
+- **The grouped Inventory view reads up to 5000 lines.** It stopped at the
+  newest 2000. With Show sold on, prod's lines already pass that, so the oldest
+  stock dropped out of the list and out of select-all without a word. The cap
+  is now the selection ceiling, and reaching it logs a warning.
+- **A partial transfer keeps the Chip #.** The lot split off to another
+  warehouse was written without it, though the Chip # is what Micron memory is
+  priced by since v1.231.0.
+
+### Changed
+
+- The sell-order price-template test pins the two lots it picks to RAM. The
+  packing list places a line by its lot's category, and the seed's lots come
+  in any category, so the by-PO tab test failed most runs that drew a non-RAM
+  lot.
+
+## [1.237.0] - 2026-10-09
+
+The Rank list on desktop memory offered no x4 ranks, so a 2Rx4 desktop module
+couldn't be recorded (RS-217). The select hid it, a label scan cleared it, and
+the API refused it as "a server rank". RS-210's rule had been written from bus
+theory, and it treated every x4 and every quad rank as server-only on every
+consumer module. The rules are now checked against the public record for
+DDR3–DDR5, and SSDs gain the 3.5" form the catalog was missing.
+
+### Fixed
+
+- **Desktop memory offers the x4 and quad ranks its generation sold.**
+  - DDR3 UDIMM / Desktop lines take 1Rx4 and 2Rx4, for the "AMD only"
+    high-density modules.
+  - DDR5 lines take 4Rx8, for 4-rank CQDIMMs.
+  - DDR4 sold neither, so a DDR4 "2Rx4 UDIMM" is still refused, as "2Rx4 is
+    a server rank on DDR4". Every one on record is an RDIMM label read wrong.
+  - A line with no generation yet is offered both. Picking the generation
+    then clears a rank that doesn't fit it.
+- **Rank rules that didn't change:**
+  - Quad-rank x4, 4Rx16, triple rank, octal, dual-die and 3DS stay
+    registered-only.
+  - Laptop memory (SODIMM, CAMM) stays at 1–2 ranks of x8/x16/x32, because
+    no x4 SODIMM was ever sold.
+- **A line is judged by the stricter of its Class and its Type.** An ECC
+  UDIMM in a server keeps the UDIMM list.
+- **Generation is now one of the rank rule's fields**, so changing it
+  re-judges the rank.
+- **A refused laptop rank now says why**, e.g. "2Rx4 needs a full-size DIMM
+  and doesn't fit SODIMM".
+
+### Added
+
+- **A 3.5" SSD form factor, for SATA and SAS.** HPE sells its LFF SAS SSDs
+  under 3.5" part numbers, and native 3.5" SSDs exist. NVMe and U.2 refuse
+  3.5". Picking SAS still fills 2.5".
+- **Migration 0171** adds `3.5"` to the SSD form list. It also carries
+  `M.2 2230`, which prod gained by hand, so every database has it.
+- **The SSD label scanner can read 3.5" and M.2 2230.**
+
+## [1.236.0] - 2026-10-09
+
+The rows of a PO are now called **products** everywhere a person reads them
+(RS-213, part 3 of 3). Jinhu's ask: "The line in the PO can be called
+products." The app was half-renamed before. Some English PO screens already
+said "Products", most PO, sell-order and Pack-mode screens said line, line
+item or item, and Chinese used about ten words (明细, 行, 项, 项目, 商品…) for
+the same thing.
+
+### Changed
+
+- **About 160 strings in English and Chinese now say product / 产品.** A
+  sell-order row reads **lot / 批次** where the lot is the point: Pack mode,
+  price import and Inventory → Add to sell order.
+- **Glossary.** `docs/FEATURES.md` opens with the word list. It also records
+  what keeps its name: Item type, Extra item, units, Inventory's grouped
+  "Product", and the API and table names.
+- **Split keys.** The PO pages get their own "Remove product"
+  (`poRemoveProduct`). The Inventory stock card's count column is "Lots"
+  (`ieLots`), not the shared "Products", because it counts lots.
+- **Activity log.** Added, removed and edited products now read in the
+  reader's language and show the product's `#` ("Added product #4
+  M393A4K40DB3-CWE"). The submitted entry's count is translated.
+- **Backend text.** Refusals and validation errors say product, or lot on the
+  inventory and Pack-mode paths: "Products in this order are on open sell
+  orders", "product 2: …", "new product 1: …". So does the low-margin
+  notification.
+- **xlsx headers.**
+  - The PO workbook's sheet is *Products*, its cost column *Cost total*
+    (next to *Sell total*), and its payment row *Subtotal (product costs)*.
+  - The packing list by PO calls its column *PO #* (was *ID in PO*).
+  - The vendor bid sheet is untouched, since it is an import format.
+- **MCP.** Descriptions say what `sourceLineNo` and `lineCount` mean now. The
+  wire names are unchanged.
+- **Unsaved products are numbered where you can see it.** The `#` column
+  reads *new 1*, *new 2*… for products not saved yet, in list order.
+  Messages name them the same way with what they are: "New product 2
+  (M393A4K40DB3-CWE)", where it used to say "Line 4". So two new rows of one
+  part number read apart in the duplicate-part dialog, the drawer, the serial
+  check and the scan toast.
+- **Server messages name the product.** A new PO's errors say "new product
+  2 (M471A2K43DB1-CWE)". The page sends every row in list order, so the
+  number matches the page. Errors on a product added to an existing PO name
+  it by what it is, "new product (SSDSC2KB960G8)", because a save may send
+  that one row alone.
+- **The drawer and the phone form agree.** The drawer badge reads "new n"
+  like the table. The phone's line form names its line as the review list
+  numbers it.
+- **Counts follow the `#`.** The phone's order header, folds and review count
+  products by `#`, as desktop does. The archive and unarchive entries count
+  lots, because a transfer can split one product into two. The activity page
+  says "1 product", not "1 products".
+- **Fixed:** the transfer manifest's Chinese read "{n} 件 · {n} 件", the unit
+  word for a row count. It now says 个批次.
+
+## [1.235.0] - 2026-10-09
+
+A sell order's product `#` is now stored and never changes (RS-213, part 2 of
+3). It is the number the packer writes on each item and the receiver checks
+the box by. Before, it was derived on every read from the packing-list sort,
+so a Draft add, a removed lot, a transfer, a spec edit, a warehouse change or
+a PO archive could renumber the products after it, labels already written
+included.
+
+### Changed
+
+- **Migration 0170 stores each product's `#`** in
+  `sell_order_lines.product_no`, with a per-order counter in
+  `sell_orders.next_product_no`. Lots of one product share the `#`.
+- **A new order numbers its products once, 1..N, in packing-list order.**
+- **Every product added later takes the next `#`.** This applies in any
+  status, Draft included. A Draft no longer sorts new products in among the
+  others.
+- **A new lot of a product already on the order joins its `#`.**
+- **Nothing renumbers.** A removed lot leaves a gap. A spec edit, a transfer,
+  a warehouse change or a PO archive moves nothing. A product whose lots sit
+  in two warehouses prints its one `#` on both tabs.
+- **Existing orders keep the numbers they showed.** The derivation is
+  TypeScript, so the backend freezes them on boot, before it serves a
+  request. The freeze is idempotent, and a failure stops the boot.
+  `append_batch` is no longer written; a later release drops it.
+- **The rewrite carries each line's `#`.** The sell-order PATCH still
+  rewrites every line, so the `#` is carried by row id, else by lot, else, for
+  a hand-typed line saved without its id, by its text.
+- **"N products" counts `#`s** on the sell orders list, its export (the
+  column is now "Products"), the order page and the `created` event.
+- **Seeded orders get stored `#`s.** A PO archive's `line_removed` event
+  carries the removed `#`.
+
+### Fixed before release (review)
+
+- **Deploy window.** An order the previous release's instance rewrote while
+  the deploy rolled shows that release's numbers. Its next save stores them,
+  instead of drawing new ones from the counter. Every line always shows a
+  `#`, so Pack mode never invents one.
+- **Corrected lots print separately.** A lot whose spec or part # is
+  corrected, or a typed line that is re-worded, keeps its product's `#` but
+  prints as its own row, so the sheet never shows one lot's spec for
+  another's items.
+- **Typed-line carry includes sub-label and warehouse.** The carry for a
+  hand-typed line now keys on those too, so a typed line joins a product
+  only in its own warehouse.
+- **Lot ties are stable.** A partial-transfer lot and its source tie on PO
+  and `#`; the lot now breaks the tie, so the row's details no longer flip
+  after a save.
+- **Rollback-safe.** `append_batch` is still written, so a rollback to
+  1.234.x renumbers nothing.
+- **MCP counts.** `create_sell_order_draft` keeps `lineCount` as the lines
+  it created and adds `productCount`. The `created` event records both.
+- **Corrected lots in Pack mode.** Pack mode keeps one fold per `#`, so its
+  counts and open folds stay stable. A corrected lot's row in the fold shows
+  its own part # and condition when they differ from the product's.
+
+## [1.234.0] - 2026-10-09
+
+A PO product's `#` is now stored and never changes (RS-213, part 1 of 3).
+Before, the `#` was a rank worked out on every read. Removing a product
+renumbered every product after it, and so did a partial transfer, whose
+split-off units ranked right behind their source. A received transfer shifted
+the PO's tail for good, and every sell order's "From PO-1432 #3" with it. That
+made the `#` useless as an id.
+
+### Changed
+
+- **Migration 0169 stores each product's `#`** in `order_lines.product_no`,
+  with a per-PO counter in `orders.next_product_no`.
+  - It backfills existing rows with the rank they showed, and refuses to apply
+    if any row would move.
+  - A `BEFORE INSERT` trigger gives each new row the PO's next `#`, in the
+    insert's order.
+- **Never reused.** A removed product leaves a gap, and the next one added
+  takes a new `#`, even within one save.
+- **A partial transfer keeps its `#`.** The units it moves keep their
+  source's `#` on the PO, and discarding the transfer leaves no gap.
+- **Every screen reads the stored `#`:** the desktop and phone PO pages,
+  Review mode, the PO list drawer, the capture page, sell orders' "From PO",
+  Inventory and the picker. A product not saved yet shows *new*.
+  - Messages name products by `#`, or by row ("New product on row 4") before
+    saving. They no longer count list positions. This fixes the part-number
+    confirm dialog, which printed a stray `{pn}`.
+  - A transfer's split is no longer flagged as a duplicate part #.
+  - PATCH errors about a product being added say "new line n".
+- **"N products" counts distinct `#`s,** so a transferred product counts once.
+- **The PO workbook gains a leading `#` column.** Its category sheets don't
+  close a removed product's gap.
+- **Names in place of UUIDs.** Transfer, re-open and discard refusals, sell-order lot
+  errors and the box-check notification name a product as "PO-1432 #3".
+  New PO line events carry `no`.
+
+## [1.233.1] - 2026-10-09
+
+Micron lines that never had a die code recorded now carry one, looked up from
+their part number (RS-214).
+
+### Fixed
+
+- **Chip # filled in for Micron lines that had none.** RS-209 cut Micron chip
+  markings to the die code, but 164 live lines had no marking at all: a blank
+  Chip # or junk (`1`, `DDR5`, `MICRON`, `NA`, a part number in the wrong
+  field).
+  - Migration 0168 fills those lines' dies across 104 part numbers. The die
+    comes from our own sticks of that part, from the part number's decoded
+    die revision and speed bin, or from Micron's FBGA decoder.
+  - On a prod copy, that is 140 lines.
+  - A line that already holds a 3-letter code, another brand, and a part with
+    more than one plausible die are left alone. That covers 20 part numbers
+    for a stick re-check: J-revision modules that ship either J or E die,
+    and parts whose own sticks disagree.
+- **Six misread die codes corrected.** TBG, PFX, RGC, OBJ, MFL and WDO are
+  codes Micron's decoder places on no DDR DIMM. Each becomes the die its
+  part number decodes to.
+- The lookup sheet, with source and confidence per part number and no stock
+  data, is in `docs/tickets/assets/RS-214-micron-die-lookup.csv`.
+
+## [1.233.0] - 2026-10-09
+
+A RAM or SSD line's spec selects now cascade, so a line can't hold specs that
+contradict each other (RS-210). Picking **Desktop** fills **UDIMM**, and
+picking **RDIMM** makes the line **Server**. Before, Type and Class were two
+independent dropdowns, and about 60 prod lines carry a pair that can't exist
+(SODIMM + Server, UDIMM + Laptop, a server-only 2Rx4 rank on a SODIMM).
+
+### Added
+
+- **Type ↔ Class.** Each fills or fixes the other, and the last pick wins.
+  - Desktop → UDIMM.
+  - Laptop → SODIMM on DDR3/DDR4. On DDR5 Class is left open, because the
+    module could be SODIMM or CAMM.
+  - RDIMM/LRDIMM → Server and SODIMM/CAMM → Laptop.
+  - UDIMM → Desktop, which may be switched to Server for ECC UDIMMs.
+  - Neither list is filtered by the other, because filtering both ways would
+    lock a SODIMM + Laptop line out of RDIMM.
+- **Filtered lists.**
+  - Server-only ranks (x4, quad/octal, dual-die, 3DS) are offered only with
+    server memory.
+  - CAMM is offered only on DDR5.
+  - An SSD's form factor follows its interface: SAS offers, and fills,
+    2.5" only.
+- **Everywhere a spec is written.**
+  - The desktop drawer: new PO, PO edit, Review mode.
+  - The phone form.
+  - The inventory editor.
+  - A label scan and a RAM sheet scan. A scan that reads SODIMM next to
+    Server lands as Laptop with the impossible rank cleared, instead of a
+    PO the API turns away.
+- **The API enforces it.** `POST /api/orders`, `PATCH /api/orders/:id`
+  (lines and addLines) and `PATCH /api/inventory/:id` refuse a conflict
+  with a 400 that names it, e.g. `line 2: Laptop doesn't fit RDIMM (RDIMM is
+  Server)`. Only rules whose own fields the save changes are judged, so a
+  price edit on a legacy conflicting line still saves. The rules live in one
+  table, `packages/shared/src/specCascade.ts`, which the forms and the API
+  both read.
+
+## [1.232.0] - 2026-10-09
+
+The lots table under an expanded inventory product names each lot by PO
+**and line**, `PO-1343 #2`, so it can be found on a long PO without scanning
+it by part number (RS-212).
+
+### Added
+
+- **Line # beside the PO in the lots table.** `GET /api/inventory/products`
+  now gives each lot `po_line_no`, from the same `poLineNo()` rank the PO page,
+  sell orders and the flat list already use, so the numbers can't disagree.
+  The PO id stays the link; the `#` carries a "Line 2 on PO-1343" tooltip.
+- A lot picked in the grouped view and added to a sell order now brings its
+  PO line # along. Before, a lot outside the flat list's 200 newest rows
+  arrived without one.
+
+## [1.231.0] - 2026-10-09
+
+A Micron line's **Chip #** now holds the die code (VPP, TBH, CJV…), not the
+whole marking copied off the chip (RS-209).
+
+### Changed
+
+- **Micron Chip # is cut to the die code.** A Micron chip prints a date/lot
+  code above its FBGA code (`8KE75` / `D9VPP`), and purchasers typed both.
+  The date code made every line's chip unique, so the column grouped
+  nothing. The DDR4 desktop and laptop price list buckets Micron by the die,
+  which is the FBGA code's last three letters.
+  - Every write keeps only those letters: typed, pasted, label OCR, or the
+    chip auto-fill. `8KE75 D9VPP` → `VPP`, `0DJ75C9BJR` → `BJR`.
+  - The die code is read by its shape, not from a list, so any Micron die is
+    kept.
+  - A value that doesn't end in a die code (`1`, `DDR5`, `MICRON`, a part
+    number in the wrong field) is left as typed.
+  - Other brands' chip numbers are only upper-cased, as before.
+- The desktop line drawer and the phone form collapse the value when the
+  field loses focus. Label scans arrive already cut.
+- Migration 0167 backfills existing lines: 243 of prod's 325 Micron chip
+  values.
+- **A tab still holding the old long marking doesn't send its PO back to
+  Draft on save.** The comparison judges the chip as it will be stored.
+- The rule lives once, as `chipMarkingCanon` in `@recycle-erp/shared`, and a
+  test runs the migration's SQL against it.
+
+## [1.230.2] - 2026-10-08
+
+Inventory's **Select all** picks every lot the filters match, not just the
+products on screen (RS-208).
+
+### Fixed
+
+- **Select all reaches past the 200 listed products.** The grouped Inventory
+  list shows at most 200 products, the newest first, and the header checkbox
+  and the selection bar's **Select all (n)** only picked lots from those. On
+  prod the default view holds 749 products, so select-all quietly left most
+  of the stock out, and with no visible paging it read as "only the current
+  page". The products endpoint now returns the id of every sellable lot
+  (Reviewing or Done) the filters match, with the warehouse filter applied per
+  lot as before. Select all takes the whole set, fetches the rows for lots the
+  page never loaded from a new `POST /api/inventory/rows`, and the counts,
+  totals, Create sell order, Transfer and Add to sell order all see them.
+- **Export takes a selection of any size.** The selection used to travel in the
+  export URL. About a thousand lots, now one click away, is a ~38 KB address,
+  past what the server accepts, and the server cut ids at 1000 anyway. The
+  desktop now posts the selection. `GET ?ids=` still works for tabs on an
+  older bundle, and a selection over 5000 lots is refused with a 413 instead of
+  being truncated.
+
+## [1.230.1] - 2026-10-08
+
+Pack mode's side panel scrolls on its own, so **Apply** and **Mark shipped**
+can be reached mid-list (RS-207).
+
+### Fixed
+
+- **The side panel no longer runs off the bottom of the screen.** It stays
+  pinned beside the list while the list scrolls, but it had no height of its
+  own: the selected item's photo and details plus the Finish card (the flagged
+  lots, Apply, Edit order, Mark shipped) come to about 1000px, taller than an
+  iPad in landscape or a laptop window. A pinned box that is taller than the
+  window only shows its bottom once the whole list has been scrolled past, so
+  the actions were out of reach while packing. The panel is now capped at the
+  window's height and scrolls by itself. Below 1024px, where it already drops
+  under the list, it flows with the page as before.
+- PO Review mode's side panel had the same rule and the same problem (its
+  serial and problem lists have no cap), and gets the same fix above 1100px.
+
 ## [1.230.0] - 2026-10-08
 
 Sell orders get a **Packing** status, and inventory added once packing has

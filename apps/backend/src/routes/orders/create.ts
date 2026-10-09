@@ -5,7 +5,7 @@ import { getDb } from '../../db';
 import { nextHumanId } from '../../lib/id-seq';
 import { writeOrderEvent } from '../../services/orderAudit';
 import { autoTrackParts } from '../../lib/marketAutoTrack';
-import { validateLineInput } from '../../lib/orderInput';
+import { specRuleErr, validateLineInput } from '../../lib/orderInput';
 import { syncOrderCategory, deriveCategory } from '../../services/orderCategory';
 import { insertDraftOrderTx } from '../../services/orderDraft';
 import { linkPaypalTxnToOrder } from '../../banktx/sync';
@@ -47,7 +47,7 @@ createRoutes.post('/', async (c) => {
       }
     | null;
   if (!body || !Array.isArray(body.lines) || body.lines.length === 0) {
-    return c.json({ error: 'at least one line is required' }, 400);
+    return c.json({ error: 'at least one product is required' }, 400);
   }
   const owner = await resolveOrderOwner(sql, u, body.onBehalfOfUserId);
   if ('error' in owner) return c.json({ error: owner.error }, owner.status);
@@ -70,12 +70,17 @@ createRoutes.post('/', async (c) => {
   // The owner's, not the actor's: a manager filing on behalf ships to the
   // purchaser's location.
   const warehouseId = body.warehouseId ?? owner.ownerDefaultWarehouseId;
+  // A new PO sends every row in list order, so the nth is the page's "new n".
+  const refOf = (i: number): string => {
+    const name = body.lines[i].partNumber?.trim() || body.lines[i].description?.trim();
+    return name ? `new product ${i + 1} (${name})` : `new product ${i + 1}`;
+  };
   const lineCats: string[] = [];
   for (let i = 0; i < body.lines.length; i++) {
     const inputErr = validateLineInput(body.lines[i] as Record<string, unknown>, 'create');
-    if (inputErr) return c.json({ error: `line ${i + 1}: ${inputErr}` }, 400);
+    if (inputErr) return c.json({ error: `${refOf(i)}: ${inputErr}` }, 400);
     const cat = body.lines[i].category ?? body.category;
-    if (!cat) return c.json({ error: `line ${i + 1}: category is required` }, 400);
+    if (!cat) return c.json({ error: `${refOf(i)}: category is required` }, 400);
     lineCats.push(cat);
   }
 
@@ -90,18 +95,22 @@ createRoutes.post('/', async (c) => {
   for (let i = 0; i < body.lines.length; i++) {
     const l = body.lines[i];
     const issue = serialIssue({ ...l, category: lineCats[i] });
-    if (issue) return c.json({ error: serialErr(`line ${i + 1}`, issue) }, 400);
-    const labelErr = identityErr(`line ${i + 1}`, lineCats[i], l);
+    if (issue) return c.json({ error: serialErr(refOf(i), issue) }, 400);
+    const labelErr = identityErr(refOf(i), lineCats[i], l);
     if (labelErr) return c.json({ error: labelErr }, 400);
+    const specErr = specRuleErr(refOf(i), lineCats[i], l);
+    if (specErr) return c.json({ error: specErr }, 400);
   }
 
   // Human-friendly id like PO-1289, allocated atomically (see id-seq.ts).
   // Allocated inside the transaction so a rollback also rolls back the counter.
   let newId!: string;
   // Returned so the client can attach per-line photos, which are buffered
-  // locally until the line it belongs to actually exists. Aligned 1:1 with
-  // the request's `lines` ordering, the same contract PATCH's addedLineIds has.
+  // locally until the line it belongs to actually exists, and show each
+  // product's #. Aligned 1:1 with the request's `lines` ordering, the same
+  // contract PATCH's addedLineIds has.
   const newLineIds: string[] = [];
+  const newLineNos: number[] = [];
   let derived: { category: string | null; categories: string[] } = { category: null, categories: [] };
   await sql.begin(async (tx) => {
     newId = await nextHumanId(tx, 'PO', 'PO');
@@ -121,11 +130,15 @@ createRoutes.post('/', async (c) => {
     const lineRows = body.lines.map((l, i) => newLineRow(newId, lineCats[i], l, {
       qty: l.qty, unitCost: l.unitCost, status: 'Draft', position: i,
     }));
-    // RETURNING carries no promise about row order; position is the request's.
-    const inserted = await tx<{ id: string; position: number }[]>`
-      INSERT INTO order_lines ${tx(lineRows)} RETURNING id, position
+    // RETURNING carries no promise about row order; the # (0169's trigger,
+    // numbering the VALUES in order) is the request's.
+    const inserted = await tx<{ id: string; product_no: number }[]>`
+      INSERT INTO order_lines ${tx(lineRows)} RETURNING id, product_no
     `;
-    for (const r of [...inserted].sort((a, b) => a.position - b.position)) newLineIds.push(r.id);
+    for (const r of [...inserted].sort((a, b) => a.product_no - b.product_no)) {
+      newLineIds.push(r.id);
+      newLineNos.push(r.product_no);
+    }
     await autoTrackParts(tx, body.lines.map((l, i) => trackInput(l, lineCats[i])));
 
     // Written before the event so `created` carries the value the order
@@ -158,7 +171,7 @@ createRoutes.post('/', async (c) => {
     if (newPaypalTxnId) await linkPaypalTxnToOrder(tx, newPaypalTxnId, newId, u.id);
   });
 
-  return c.json({ id: newId, lineIds: newLineIds }, 201);
+  return c.json({ id: newId, lineIds: newLineIds, lineNos: newLineNos }, 201);
 });
 
 // ── Create an empty Draft order so the submit screen can autosave lines as

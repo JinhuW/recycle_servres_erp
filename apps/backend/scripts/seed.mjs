@@ -91,10 +91,11 @@ const SSD_BRANDS = ['Samsung','Intel','Micron','WD','Seagate','Kioxia'];
 const SSD_IFACE  = ['SATA','SAS','NVMe','U.2'];
 const SSD_FORM   = ['2.5"','M.2 2280','M.2 22110','U.2','AIC'];
 const SSD_CAP    = ['120GB','128GB','240GB','256GB','400GB','480GB','512GB','800GB','960GB','1000GB','1TB','1.6TB','1.92TB','3.2TB','3.84TB','6.4TB','7.68TB','8TB','12.8TB','15.36TB','30.72TB'];
-// The dropdown lists (migration 0159) are longer than the generator's: pick()
+// The dropdown lists (migrations 0159, 0171) are longer than the generator's: pick()
 // indexes by array length, so adding an option here would reshuffle every
 // seeded line the tests have learned to expect.
 const SSD_CAP_OPTIONS = ['120GB','128GB','240GB','256GB','400GB','480GB','512GB','800GB','960GB','1000GB','1TB','1.6TB','1.92TB','2TB','3.2TB','3.84TB','6.4TB','7.68TB','8TB','12.8TB','15.36TB','30.72TB'];
+const SSD_FORM_OPTIONS = ['2.5"','3.5"','M.2 2230','M.2 2280','M.2 22110','U.2','AIC'];
 const HDD_BRANDS = ['Seagate','WD','Toshiba','HGST'];
 const HDD_IFACE  = ['SATA','SAS'];
 const HDD_FORM   = ['2.5"','3.5"'];
@@ -455,7 +456,7 @@ try {
     RAM_SPEED:     RAM_SPEED,
     SSD_BRAND:     [...SSD_BRANDS, 'Mixed'],
     SSD_INTERFACE: SSD_IFACE,
-    SSD_FORM:      SSD_FORM,
+    SSD_FORM:      SSD_FORM_OPTIONS,
     SSD_CAP:       SSD_CAP_OPTIONS,
     HDD_BRAND:     HDD_BRANDS,
     HDD_INTERFACE: HDD_IFACE,
@@ -658,8 +659,13 @@ try {
       VALUES (${id}, ${cust.id}, ${s.status}, ${protoToUuid['u1']}, ${created}, ${created},
               ${s.status === 'Done' ? created : null})
     `;
+    // One # per product, as the backend gives it; seed data needn't follow the
+    // packing-list sort, so a product is its part, condition and warehouse.
+    const noByProduct = new Map();
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i];
+      const productKey = `${l.part_number ?? l.id}|${l.condition}|${l.warehouse_id}`;
+      if (!noByProduct.has(productKey)) noByProduct.set(productKey, noByProduct.size + 1);
       const label = l.category === 'RAM' ? `${l.brand} ${l.capacity} ${l.type}`
                   : l.category === 'SSD' ? `${l.brand} ${l.capacity}`
                   : l.category === 'HDD' ? `${l.brand} ${l.capacity}`
@@ -671,13 +677,15 @@ try {
       await sql`
         INSERT INTO sell_order_lines (
           sell_order_id, inventory_id, category, label, sub_label, part_number,
-          qty, unit_price, warehouse_id, condition, position
+          qty, unit_price, warehouse_id, condition, position, product_no
         ) VALUES (
           ${id}, ${l.id}, ${l.category}, ${label}, ${sub}, ${l.part_number},
-          ${l.qty}, ${l.sell_price}, ${l.warehouse_id}, ${l.condition}, ${i}
+          ${l.qty}, ${l.sell_price}, ${l.warehouse_id}, ${l.condition}, ${i},
+          ${noByProduct.get(productKey)}
         )
       `;
     }
+    await sql`UPDATE sell_orders SET next_product_no = ${noByProduct.size + 1} WHERE id = ${id}`;
   }
 
   console.log('· Seeding inventory audit events…');
