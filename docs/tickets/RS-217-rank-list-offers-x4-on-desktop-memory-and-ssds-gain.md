@@ -2,13 +2,13 @@
 id: RS-217
 title: Rank list offers x4 on Desktop memory, and SSDs gain a 3.5in form
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-09
 reporter: jinhu
 branch: feat/spec-cascade-x4-desktop
-pr:
-version:
+pr: 575
+version: 1.237.0
 related: [RS-210, RS-178]
 ---
 
@@ -65,19 +65,19 @@ not used as evidence, because many of them are scanner misreads. Kingston
 
 ## Acceptance criteria
 
-- [ ] With Desktop or UDIMM, the Rank list offers the full-size ranks the
+- [x] With Desktop or UDIMM, the Rank list offers the full-size ranks the
       line's generation sold: 1Rx4/2Rx4 on DDR3, 4Rx8 on DDR5, none on DDR4,
       and both before a generation is picked. It still hides 4Rx4, 4Rx16,
       8Rx4, 8Rx8, 4DRx4, 8DRx4 and the 3DS ranks.
-- [ ] With Laptop, SODIMM or CAMM, the Rank list is unchanged: 1–2 ranks of
+- [x] With Laptop, SODIMM or CAMM, the Rank list is unchanged: 1–2 ranks of
       x8/x16/x32.
-- [ ] A DDR3 UDIMM/Desktop line saves with 2Rx4, and a label scan keeps it.
+- [x] A DDR3 UDIMM/Desktop line saves with 2Rx4, and a label scan keeps it.
       A DDR4 one is refused with "2Rx4 is a server rank on DDR4". SODIMM +
       2Rx4 is still cleared and refused, with "needs a full-size DIMM".
-- [ ] SSD form factor offers 3.5" for SATA and SAS, but not for NVMe or U.2.
+- [x] SSD form factor offers 3.5" for SATA and SAS, but not for NVMe or U.2.
       Picking SAS still fills 2.5".
-- [ ] The SSD label scanner can return 3.5" and M.2 2230.
-- [ ] `3.5"` reaches prod's catalog through a migration that is safe to
+- [x] The SSD label scanner can return 3.5" and M.2 2230.
+- [x] `3.5"` reaches prod's catalog through a migration that is safe to
       replay.
 
 ## Out of scope
