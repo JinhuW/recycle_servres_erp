@@ -14,8 +14,12 @@
 //
 // A rule judges only values its table names. Blank and unknown values (legacy
 // `type: 'DDR4'`, a bare `M.2`) restrict nothing, and a rule fires only when one
-// of its own fields changes — prod holds ~60 conflicting lines from before
-// these rules, and a price edit on one must still save.
+// of its own fields changes — prod holds conflicting lines from before these
+// rules, and a price edit on one must still save.
+//
+// A pairing is refused only when no DDR3–DDR5 part with it was ever sold. Prod
+// lines are no evidence either way: many are label scans that misread the rank
+// or the form.
 
 type SpecValue = string | null | undefined;
 
@@ -47,18 +51,30 @@ const FORM_DEVICES: Readonly<Record<string, readonly string[]>> = {
 const DEVICES = ['Desktop', 'Server', 'Laptop'];
 const FORM_GENERATIONS: Readonly<Record<string, readonly string[]>> = { CAMM: ['DDR5'] };
 const GENERATIONS = ['DDR2', 'DDR3', 'DDR4', 'DDR5'];
-// An unbuffered bus can't drive x4 chips or more than two ranks; those exist
-// only on registered and load-reduced modules.
-const CONSUMER_FORMS = ['UDIMM', 'SODIMM', 'CAMM'];
-const CONSUMER_DEVICES = ['Desktop', 'Laptop'];
 
-// M.2 2230 is a prod catalog value that no migration seeds.
+/**
+ * What a rank asks of its module, smallest first: `any` fits every module,
+ * `dimm` needs a full-size one, and `buffered` a registered or load-reduced one.
+ */
+export type RankNeed = 'any' | 'dimm' | 'buffered';
+const RANK_NEEDS: readonly RankNeed[] = ['any', 'dimm', 'buffered'];
+// The richest rank each unbuffered module or device takes. x4 and four ranks
+// reach a full-size UDIMM (DDR3 "AMD only" 2Rx4, DDR5 4Rx8 CQDIMM) but no
+// SODIMM or CAMM ever sold; registered memory and servers take anything.
+const RANK_LIMITS: Readonly<Record<string, RankNeed>> = {
+  UDIMM: 'dimm', SODIMM: 'any', CAMM: 'any', DESKTOP: 'dimm', LAPTOP: 'any',
+};
+
+// LFF SAS SSDs are 2.5" drives in a 3.5" carrier, sold under 3.5" part numbers.
 const SSD_INTERFACE_FORMS: Readonly<Record<string, readonly string[]>> = {
-  SATA: ['2.5"', 'M.2 2230', 'M.2 2280', 'M.2 22110'],
-  SAS: ['2.5"'],
+  SATA: ['2.5"', '3.5"', 'M.2 2230', 'M.2 2280', 'M.2 22110'],
+  SAS: ['2.5"', '3.5"'],
   NVME: ['2.5"', 'M.2 2230', 'M.2 2280', 'M.2 22110', 'U.2', 'AIC'],
   'U.2': ['U.2', '2.5"'],
 };
+// What picking an interface fills into a blank form factor: its only form, or
+// the one nearly every drive of that interface has.
+const SSD_DEFAULT_FORM: Readonly<Record<string, string>> = { SAS: '2.5"' };
 const SSD_INTERFACES = ['SATA', 'SAS', 'NVMe', 'U.2'];
 const SSD_FORMS = [...new Set(Object.values(SSD_INTERFACE_FORMS).flat())];
 
@@ -82,13 +98,17 @@ const has = (list: readonly string[], v: unknown): boolean => list.some((x) => k
 const RANK = /^(\d+)(S\d+)?(D)?RX(\d+)$/;
 
 /**
- * Whether a rank exists only on server memory: x4 chips, four or more ranks,
- * dual-die (`DR`) or 3DS stacks. Null for a spelling the pattern doesn't know.
+ * The module a rank needs. Dual-die (`DR`), 3DS, octal and quad-rank x4 are
+ * registered-only; other x4 and quad ranks need a full-size DIMM. Null for a
+ * spelling the pattern doesn't know.
  */
-export function rankIsServerOnly(rank: SpecValue): boolean | null {
+export function rankNeeds(rank: SpecValue): RankNeed | null {
   const m = keyOf(rank).match(RANK);
   if (!m) return null;
-  return Number(m[4]) === 4 || Number(m[1]) >= 4 || !!m[2] || !!m[3];
+  const ranks = Number(m[1]);
+  const x4 = Number(m[4]) === 4;
+  if (m[2] || m[3] || ranks >= 8 || (ranks >= 4 && x4)) return 'buffered';
+  return x4 || ranks >= 4 ? 'dimm' : 'any';
 }
 
 /** Whether `form` exists in `generation`; null when either is unknown. */
@@ -105,11 +125,27 @@ function deviceFitsForm(form: SpecValue, device: SpecValue): boolean | null {
   return has(devices, device);
 }
 
-/** The Form or Device that makes this line consumer memory, if any. */
-function consumerMark(spec: CascadeSpec): string | null {
-  if (has(CONSUMER_FORMS, spec.classification)) return text(spec.classification);
-  if (has(CONSUMER_DEVICES, spec.type)) return text(spec.type);
-  return null;
+/**
+ * The richest rank this line's Form and Device both take, and the field that
+ * sets it; null when neither limits the rank.
+ */
+function rankLimit(spec: CascadeSpec): { mark: string; need: RankNeed } | null {
+  let out: { mark: string; need: RankNeed } | null = null;
+  for (const v of [spec.classification, spec.type]) {
+    const need = RANK_LIMITS[keyOf(v)];
+    if (need && (!out || RANK_NEEDS.indexOf(need) < RANK_NEEDS.indexOf(out.need))) {
+      out = { mark: text(v), need };
+    }
+  }
+  return out;
+}
+
+/** Whether `rank` fits the line's module; null when either is unknown. */
+function rankFits(spec: CascadeSpec, rank: SpecValue): boolean | null {
+  const limit = rankLimit(spec);
+  const need = rankNeeds(rank);
+  if (!limit || !need) return null;
+  return RANK_NEEDS.indexOf(need) <= RANK_NEEDS.indexOf(limit.need);
 }
 
 /** Whether `formFactor` fits the SSD `iface`; null when either is unknown. */
@@ -133,8 +169,7 @@ export function allowedOptions(
     return options.filter((o) => formFitsGeneration(o, spec.generation) !== false);
   }
   if (category === 'RAM' && field === 'rank') {
-    if (!consumerMark(spec)) return options;
-    return options.filter((o) => rankIsServerOnly(o) !== true);
+    return options.filter((o) => rankFits(spec, o) !== false);
   }
   if (category === 'SSD' && field === 'formFactor') {
     return options.filter((o) => ssdFormFits(spec.interface, o) !== false);
@@ -185,17 +220,17 @@ export function cascadePatch<T extends CascadeSpec>(
     }
 
     if ((changed('classification') || changed('type') || changed('rank'))
-      && consumerMark(now()) && rankIsServerOnly(cur('rank')) === true) {
+      && rankFits(now(), cur('rank')) === false) {
       put('rank', '');
     }
   }
 
   if (category === 'SSD' && (changed('interface') || changed('formFactor'))) {
     if (ssdFormFits(cur('interface'), cur('formFactor')) === false) put('formFactor', '');
-    const forms = SSD_INTERFACE_FORMS[keyOf(cur('interface'))];
-    if (changed('interface') && forms?.length === 1 && text(cur('formFactor')) === '') {
-      put('formFactor', forms[0]);
-    }
+    const iface = keyOf(cur('interface'));
+    const fill = SSD_DEFAULT_FORM[iface]
+      ?? (SSD_INTERFACE_FORMS[iface]?.length === 1 ? SSD_INTERFACE_FORMS[iface][0] : undefined);
+    if (changed('interface') && fill && text(cur('formFactor')) === '') put('formFactor', fill);
   }
 
   return out as Partial<T>;
@@ -220,9 +255,9 @@ export function specConflicts(
     if (touched('classification', 'type') && deviceFitsForm(form, device) === false) {
       return `${text(device)} doesn't fit ${text(form)} (${text(form)} is ${FORM_DEVICES[keyOf(form)].join(' or ')})`;
     }
-    const consumer = consumerMark(merged);
-    if (touched('classification', 'type', 'rank') && consumer && rankIsServerOnly(rank) === true) {
-      return `${text(rank)} is a server rank and doesn't fit ${consumer}`;
+    if (touched('classification', 'type', 'rank') && rankFits(merged, rank) === false) {
+      const why = rankNeeds(rank) === 'buffered' ? 'is a server rank' : 'needs a full-size DIMM';
+      return `${text(rank)} ${why} and doesn't fit ${rankLimit(merged)!.mark}`;
     }
   }
 
