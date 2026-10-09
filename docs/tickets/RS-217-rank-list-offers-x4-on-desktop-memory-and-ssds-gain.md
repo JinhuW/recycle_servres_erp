@@ -65,13 +65,15 @@ not used as evidence, because many of them are scanner misreads. Kingston
 
 ## Acceptance criteria
 
-- [ ] With Desktop or UDIMM, the Rank list offers 1Rx4, 2Rx4, 4Rx8 and 4Rx16.
-      It still hides 4Rx4, 8Rx4, 8Rx8, 4DRx4, 8DRx4 and the 3DS ranks.
+- [ ] With Desktop or UDIMM, the Rank list offers the full-size ranks the
+      line's generation sold: 1Rx4/2Rx4 on DDR3, 4Rx8 on DDR5, none on DDR4,
+      and both before a generation is picked. It still hides 4Rx4, 4Rx16,
+      8Rx4, 8Rx8, 4DRx4, 8DRx4 and the 3DS ranks.
 - [ ] With Laptop, SODIMM or CAMM, the Rank list is unchanged: 1–2 ranks of
       x8/x16/x32.
-- [ ] A UDIMM/Desktop line saves with 2Rx4, and a label scan keeps it.
-      SODIMM + 2Rx4 is still cleared and refused, with "needs a full-size
-      DIMM".
+- [ ] A DDR3 UDIMM/Desktop line saves with 2Rx4, and a label scan keeps it.
+      A DDR4 one is refused with "2Rx4 is a server rank on DDR4". SODIMM +
+      2Rx4 is still cleared and refused, with "needs a full-size DIMM".
 - [ ] SSD form factor offers 3.5" for SATA and SAS, but not for NVMe or U.2.
       Picking SAS still fills 2.5".
 - [ ] The SSD label scanner can return 3.5" and M.2 2230.
@@ -87,9 +89,22 @@ not used as evidence, because many of them are scanner misreads. Kingston
 
 ## Notes
 
-- **The trade-off:** the old rule was the only automatic catch for an RDIMM
-  filed as UDIMM with a 2Rx4 rank. Now that x4 fits UDIMM, that misread
-  saves. A part-number prefix check (M393/M386, Micron …PZ, Hynix …R7/L7)
-  could catch it later.
+- **Ranks are gated by generation** (release review of #575). "Desktop yes"
+  was answered against DDR3 evidence, and every DDR4 "2Rx4 UDIMM" on record
+  is an RDIMM. So x4 fits a UDIMM only on DDR3, and 4Rx8 only on DDR5. A
+  blank generation is offered both, and the generation pick re-judges the
+  rank.
+- **What the gate gives up:** the old rule's catch for an RDIMM filed as
+  UDIMM with 2Rx4 now holds on DDR4 and DDR5. On DDR3, or before the
+  generation is set, that misread still saves. A part-number prefix check
+  (M393/M386, Micron …PZ, Hynix …R7/L7) could catch it later.
+- **Why 1Rx4 is offered and 4Rx16 is not:**
+  - 1Rx4 is the single-sided member of the same DDR3 x4 high-density family
+    as 2Rx4; chip width is what the record shows on DDR3 UDIMMs.
+  - x16 quad rank appears on no module at all, buffered or not.
+  - Triple rank was only ever a DDR3 RDIMM.
+- **Generation is one of the rank rule's fields now.** Editing only the
+  generation of a legacy SODIMM + x4 line clears the rank in the form, and
+  the API refuses that save.
 - Plan: `~/.claude/plans/virtual-leaping-coral.md`.
 - Debug note: `docs/debug-notes/2026-10-09-spec-cascade-rank-rule-from-theory.md`.

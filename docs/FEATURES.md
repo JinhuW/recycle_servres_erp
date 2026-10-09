@@ -781,10 +781,16 @@ on to Sold once every line has sold (v1.164.0).
     - CAMM is offered only on DDR5.
     - Rank follows the module, judged by Class and by Type, whichever is
       stricter (v1.237.0, RS-217):
-      - UDIMM / Desktop: up to x4 and quad rank. That covers 2Rx4 (DDR3
-        "AMD only" high-density modules) and 4Rx8 (DDR5 CQDIMM).
+      - UDIMM / Desktop: 1–2 ranks of x8, x16 or x32, plus the full-size
+        ranks its generation sold:
+        - DDR3: 1Rx4 and 2Rx4 ("AMD only" high-density modules).
+        - DDR5: 4Rx8 (CQDIMM).
+        - DDR4: none.
+        - With no generation yet, both are offered. Picking the generation
+          clears a rank that doesn't fit it.
       - SODIMM / CAMM / Laptop: 1–2 ranks of x8, x16 or x32.
-      - Quad-rank x4, octal, dual-die and 3DS are registered-only.
+      - Triple rank, 4Rx4, 4Rx16, octal, dual-die and 3DS are
+        registered-only.
       - RDIMM / LRDIMM / Server: anything.
     - An SSD's form factor follows its interface:
       - SATA: 2.5", 3.5" or M.2.

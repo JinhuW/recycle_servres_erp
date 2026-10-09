@@ -13,7 +13,8 @@
 // is filtered.
 //
 // A rule judges only values its table names. Blank and unknown values (legacy
-// `type: 'DDR4'`, a bare `M.2`) restrict nothing, and a rule fires only when one
+// `type: 'DDR4'`, a bare `M.2`, a generation the rank table doesn't name)
+// restrict nothing, and a rule fires only when one
 // of its own fields changes — prod holds conflicting lines from before these
 // rules, and a price edit on one must still save.
 //
@@ -58,9 +59,18 @@ const GENERATIONS = ['DDR2', 'DDR3', 'DDR4', 'DDR5'];
  */
 export type RankNeed = 'any' | 'dimm' | 'buffered';
 const RANK_NEEDS: readonly RankNeed[] = ['any', 'dimm', 'buffered'];
-// The richest rank each unbuffered module or device takes. x4 and four ranks
-// reach a full-size UDIMM (DDR3 "AMD only" 2Rx4, DDR5 4Rx8 CQDIMM) but no
-// SODIMM or CAMM ever sold; registered memory and servers take anything.
+// The x4 and quad ranks an unbuffered full-size DIMM was sold with, per
+// generation: DDR3 "AMD only" high-density modules, single- or double-sided,
+// and DDR5 4-rank CQDIMMs. DDR4 sold none. Outside these, they're registered.
+const FULL_SIZE_RANKS: Readonly<Record<string, readonly string[]>> = {
+  DDR3: ['1Rx4', '2Rx4'],
+  DDR4: [],
+  DDR5: ['4Rx8'],
+};
+const ANY_FULL_SIZE_RANK = Object.values(FULL_SIZE_RANKS).flat();
+// The richest rank each unbuffered module or device takes. No SODIMM or CAMM
+// was ever sold with a full-size rank; registered memory and servers take
+// anything.
 const RANK_LIMITS: Readonly<Record<string, RankNeed>> = {
   UDIMM: 'dimm', SODIMM: 'any', CAMM: 'any', DESKTOP: 'dimm', LAPTOP: 'any',
 };
@@ -72,8 +82,8 @@ const SSD_INTERFACE_FORMS: Readonly<Record<string, readonly string[]>> = {
   NVME: ['2.5"', 'M.2 2230', 'M.2 2280', 'M.2 22110', 'U.2', 'AIC'],
   'U.2': ['U.2', '2.5"'],
 };
-// What picking an interface fills into a blank form factor: its only form, or
-// the one nearly every drive of that interface has.
+// What picking an interface fills into a blank form factor: the form nearly
+// every drive of that interface has.
 const SSD_DEFAULT_FORM: Readonly<Record<string, string>> = { SAS: '2.5"' };
 const SSD_INTERFACES = ['SATA', 'SAS', 'NVMe', 'U.2'];
 const SSD_FORMS = [...new Set(Object.values(SSD_INTERFACE_FORMS).flat())];
@@ -98,17 +108,18 @@ const has = (list: readonly string[], v: unknown): boolean => list.some((x) => k
 const RANK = /^(\d+)(S\d+)?(D)?RX(\d+)$/;
 
 /**
- * The module a rank needs. Dual-die (`DR`), 3DS, octal and quad-rank x4 are
- * registered-only; other x4 and quad ranks need a full-size DIMM. Null for a
- * spelling the pattern doesn't know.
+ * The module a rank needs in `generation`. One or two ranks of x8 or wider fit
+ * anything; an x4 or 3+ rank needs a full-size DIMM if its generation sold one
+ * unbuffered, and a registered one otherwise. Null for a spelling the pattern
+ * doesn't know.
  */
-export function rankNeeds(rank: SpecValue): RankNeed | null {
+export function rankNeeds(rank: SpecValue, generation?: SpecValue): RankNeed | null {
   const m = keyOf(rank).match(RANK);
   if (!m) return null;
-  const ranks = Number(m[1]);
-  const x4 = Number(m[4]) === 4;
-  if (m[2] || m[3] || ranks >= 8 || (ranks >= 4 && x4)) return 'buffered';
-  return x4 || ranks >= 4 ? 'dimm' : 'any';
+  if (m[2] || m[3] || Number(m[1]) >= 8) return 'buffered';
+  if (Number(m[1]) <= 2 && Number(m[4]) !== 4) return 'any';
+  const fullSize = FULL_SIZE_RANKS[keyOf(generation)] ?? ANY_FULL_SIZE_RANK;
+  return has(fullSize, rank) ? 'dimm' : 'buffered';
 }
 
 /** Whether `form` exists in `generation`; null when either is unknown. */
@@ -143,7 +154,7 @@ function rankLimit(spec: CascadeSpec): { mark: string; need: RankNeed } | null {
 /** Whether `rank` fits the line's module; null when either is unknown. */
 function rankFits(spec: CascadeSpec, rank: SpecValue): boolean | null {
   const limit = rankLimit(spec);
-  const need = rankNeeds(rank);
+  const need = rankNeeds(rank, spec.generation);
   if (!limit || !need) return null;
   return RANK_NEEDS.indexOf(need) <= RANK_NEEDS.indexOf(limit.need);
 }
@@ -219,7 +230,7 @@ export function cascadePatch<T extends CascadeSpec>(
       }
     }
 
-    if ((changed('classification') || changed('type') || changed('rank'))
+    if ((changed('generation') || changed('classification') || changed('type') || changed('rank'))
       && rankFits(now(), cur('rank')) === false) {
       put('rank', '');
     }
@@ -227,9 +238,7 @@ export function cascadePatch<T extends CascadeSpec>(
 
   if (category === 'SSD' && (changed('interface') || changed('formFactor'))) {
     if (ssdFormFits(cur('interface'), cur('formFactor')) === false) put('formFactor', '');
-    const iface = keyOf(cur('interface'));
-    const fill = SSD_DEFAULT_FORM[iface]
-      ?? (SSD_INTERFACE_FORMS[iface]?.length === 1 ? SSD_INTERFACE_FORMS[iface][0] : undefined);
+    const fill = SSD_DEFAULT_FORM[keyOf(cur('interface'))];
     if (changed('interface') && fill && text(cur('formFactor')) === '') put('formFactor', fill);
   }
 
@@ -255,9 +264,13 @@ export function specConflicts(
     if (touched('classification', 'type') && deviceFitsForm(form, device) === false) {
       return `${text(device)} doesn't fit ${text(form)} (${text(form)} is ${FORM_DEVICES[keyOf(form)].join(' or ')})`;
     }
-    if (touched('classification', 'type', 'rank') && rankFits(merged, rank) === false) {
+    if (touched('generation', 'classification', 'type', 'rank') && rankFits(merged, rank) === false) {
+      const mark = rankLimit(merged)!.mark;
+      if (rankFits({ ...merged, generation: null }, rank)) {
+        return `${text(rank)} is a server rank on ${text(generation)} and doesn't fit ${mark}`;
+      }
       const why = rankNeeds(rank) === 'buffered' ? 'is a server rank' : 'needs a full-size DIMM';
-      return `${text(rank)} ${why} and doesn't fit ${rankLimit(merged)!.mark}`;
+      return `${text(rank)} ${why} and doesn't fit ${mark}`;
     }
   }
 

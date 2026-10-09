@@ -35,14 +35,23 @@ Neither of the two sources the rule was checked against could catch this:
 
 ## Fix (v1.237.0, RS-217)
 
-Rank now asks one question: which module does it need? The answer comes from
-the public record for DDR3–DDR5.
+Rank now asks one question: which module does it need in this generation?
+The answer comes from the public record for DDR3–DDR5, kept as data in
+`FULL_SIZE_RANKS`.
 
 | Rank | Needs | Evidence |
 |---|---|---|
 | 1–2 ranks of x8 / x16 / x32 | any module | common |
-| 1Rx4, 2Rx4; 4Rx8, 4Rx16 | full-size DIMM (UDIMM / Desktop) | DDR3 "AMD only" 2Rx4 UDIMMs; DDR5 CQDIMM 4Rx8 |
-| 4Rx4, 8R, dual-die `D`, 3DS `S` | registered / load-reduced | only RDIMM/LRDIMM part numbers, e.g. Samsung M386A8K40BM1 4DRx4, Hynix HMABAGL7M4R4N 2S4Rx4 |
+| DDR3 1Rx4, 2Rx4 | full-size DIMM (UDIMM / Desktop) | DDR3 "AMD only" high-density UDIMMs |
+| DDR5 4Rx8 | full-size DIMM | DDR5 4-rank CUDIMM ("CQDIMM") |
+| x4 on DDR4/DDR5, 4Rx8 on DDR3/DDR4, 3R, 4Rx4, 4Rx16, 8R, dual-die `D`, 3DS `S` | registered / load-reduced | only RDIMM/LRDIMM part numbers, e.g. Hynix HMA24GR7AFR4N (DDR4 2Rx4), Samsung M386A8K40BM1 4DRx4, Hynix HMABAGL7M4R4N 2S4Rx4 |
+
+A blank generation, or one the table doesn't name, is offered every full-size
+rank. The generation pick then re-judges it.
+
+The first cut of this fix forgot the generation, and a release review caught
+it. It let a DDR4 RDIMM misread as UDIMM 2Rx4 save, because DDR3 had sold
+2Rx4 UDIMMs. **Evidence is per generation, so a rule built from it is too.**
 
 SODIMM, CAMM and Laptop take only the first row. No x4 or quad-rank
 SODIMM/CAMM was found in any generation, and JEDEC's DDR4/DDR5 SODIMM raw

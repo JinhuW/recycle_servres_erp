@@ -28,15 +28,23 @@ DDR3–DDR5, and SSDs gain the 3.5" form the catalog was missing.
 
 ### Fixed
 
-- **Desktop memory offers x4 and quad ranks.** UDIMM / Desktop lines take
-  1Rx4, 2Rx4, 4Rx8 and 4Rx16. That covers DDR3 "AMD only" high-density 2Rx4
-  modules and DDR5 4-rank CQDIMMs.
+- **Desktop memory offers the x4 and quad ranks its generation sold.**
+  - DDR3 UDIMM / Desktop lines take 1Rx4 and 2Rx4, for the "AMD only"
+    high-density modules.
+  - DDR5 lines take 4Rx8, for 4-rank CQDIMMs.
+  - DDR4 sold neither, so a DDR4 "2Rx4 UDIMM" is still refused, as "2Rx4 is
+    a server rank on DDR4". Every one on record is an RDIMM label read wrong.
+  - A line with no generation yet is offered both. Picking the generation
+    then clears a rank that doesn't fit it.
 - **Rank rules that didn't change:**
-  - Quad-rank x4, octal, dual-die and 3DS stay registered-only.
+  - Quad-rank x4, 4Rx16, triple rank, octal, dual-die and 3DS stay
+    registered-only.
   - Laptop memory (SODIMM, CAMM) stays at 1–2 ranks of x8/x16/x32, because
     no x4 SODIMM was ever sold.
 - **A line is judged by the stricter of its Class and its Type.** An ECC
   UDIMM in a server keeps the UDIMM list.
+- **Generation is now one of the rank rule's fields**, so changing it
+  re-judges the rank.
 - **A refused laptop rank now says why**, e.g. "2Rx4 needs a full-size DIMM
   and doesn't fit SODIMM".
 
@@ -48,6 +56,7 @@ DDR3–DDR5, and SSDs gain the 3.5" form the catalog was missing.
 - **Migration 0171** adds `3.5"` to the SSD form list. It also carries
   `M.2 2230`, which prod gained by hand, so every database has it.
 - **The SSD label scanner can read 3.5" and M.2 2230.**
+
 ## [1.236.0] - 2026-10-09
 
 The rows of a PO are now called **products** everywhere a person reads them

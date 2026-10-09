@@ -20,9 +20,10 @@ const CATALOG_RANKS = [
   '1Rx4', '1Rx8', '1Rx16', '1Rx32', '2Rx4', '2Rx8', '2Rx16', '2Rx32',
   '4Rx4', '4Rx8', '4Rx16', '8Rx4', '8Rx8', '4DRx4', '8DRx4', '2S2Rx4', '2S4Rx4', '4S2Rx4',
 ];
-// What a SODIMM, CAMM or laptop takes, and what a UDIMM or desktop takes.
+// What a SODIMM, CAMM or laptop takes, and what a UDIMM or desktop takes
+// before its generation is known.
 const SMALL_RANKS = ['1Rx8', '1Rx16', '1Rx32', '2Rx8', '2Rx16', '2Rx32'];
-const UDIMM_RANKS = ['1Rx4', '1Rx8', '1Rx16', '1Rx32', '2Rx4', '2Rx8', '2Rx16', '2Rx32', '4Rx8', '4Rx16'];
+const UDIMM_RANKS = ['1Rx4', '1Rx8', '1Rx16', '1Rx32', '2Rx4', '2Rx8', '2Rx16', '2Rx32', '4Rx8'];
 
 describe('rankNeeds', () => {
   it('sorts every catalog rank', () => {
@@ -32,9 +33,23 @@ describe('rankNeeds', () => {
     }
   });
 
-  it('sorts a rank the catalog lacks by the same arithmetic', () => {
-    expect(rankNeeds('3Rx8')).toBe('any');
+  it('sorts a rank the catalog lacks by the same rules', () => {
+    // Triple rank was only ever a DDR3 RDIMM.
+    expect(rankNeeds('3Rx8')).toBe('buffered');
+    expect(rankNeeds('3Rx4')).toBe('buffered');
     expect(rankNeeds('2s8rx4')).toBe('buffered');
+  });
+
+  it('allows a full-size x4 or quad rank only in the generation that sold one', () => {
+    expect(['1Rx4', '2Rx4', '4Rx8'].map(r => rankNeeds(r, 'DDR3'))).toEqual(['dimm', 'dimm', 'buffered']);
+    expect(['1Rx4', '2Rx4', '4Rx8'].map(r => rankNeeds(r, 'DDR4'))).toEqual(['buffered', 'buffered', 'buffered']);
+    expect(['1Rx4', '2Rx4', '4Rx8'].map(r => rankNeeds(r, 'DDR5'))).toEqual(['buffered', 'buffered', 'dimm']);
+    // A generation the table doesn't name restricts nothing.
+    expect(['2Rx4', '4Rx8'].map(r => rankNeeds(r, 'DDR2'))).toEqual(['dimm', 'dimm']);
+    for (const g of ['DDR3', 'DDR4', 'DDR5', undefined]) {
+      expect(rankNeeds('4Rx16', g), String(g)).toBe('buffered');
+      expect(rankNeeds('2Rx8', g), String(g)).toBe('any');
+    }
   });
 
   it('does not judge a spelling it does not know', () => {
@@ -65,6 +80,14 @@ describe('specConflicts', () => {
     expect(ram({ classification: 'UDIMM', type: 'Server', rank: '4DRx4' }))
       .toBe("4DRx4 is a server rank and doesn't fit UDIMM");
     expect(ram({ type: 'Desktop', rank: '4Rx4' })).toBe("4Rx4 is a server rank and doesn't fit Desktop");
+    expect(ram({ type: 'Desktop', rank: '4Rx16' })).toBe("4Rx16 is a server rank and doesn't fit Desktop");
+    // Every DDR4 "2Rx4 UDIMM" on record is an RDIMM read wrong.
+    expect(ram({ classification: 'UDIMM', type: 'Desktop', rank: '2Rx4', generation: 'DDR4' }))
+      .toBe("2Rx4 is a server rank on DDR4 and doesn't fit UDIMM");
+    expect(ram({ classification: 'UDIMM', type: 'Desktop', rank: '4Rx8', generation: 'DDR4' }))
+      .toBe("4Rx8 is a server rank on DDR4 and doesn't fit UDIMM");
+    expect(ram({ classification: 'SODIMM', type: 'Laptop', rank: '2Rx4', generation: 'DDR3' }))
+      .toBe("2Rx4 needs a full-size DIMM and doesn't fit SODIMM");
     // DDR3 high-density desktop modules are 2Rx4; DDR5 CQDIMMs are 4Rx8.
     expect(ram({ classification: 'UDIMM', type: 'Desktop', rank: '2Rx4', generation: 'DDR3' })).toBeNull();
     expect(ram({ classification: 'UDIMM', type: 'Desktop', rank: '4Rx8', generation: 'DDR5' })).toBeNull();
@@ -117,7 +140,8 @@ describe('specConflicts', () => {
   it('judges only the rules whose fields changed', () => {
     const legacy = { classification: 'SODIMM', type: 'Laptop', rank: '2Rx4' };
     expect(specConflicts('RAM', legacy, new Set(['brand', 'speed']))).toBeNull();
-    expect(specConflicts('RAM', legacy, new Set(['generation']))).toBeNull();
+    // Which ranks a module takes depends on its generation too.
+    expect(specConflicts('RAM', legacy, new Set(['generation']))).toMatch(/needs a full-size DIMM/);
     expect(specConflicts('RAM', legacy, new Set(['rank']))).toMatch(/needs a full-size DIMM/);
     expect(specConflicts('RAM', { classification: 'RDIMM', type: 'Laptop' }, new Set(['rank']))).toBeNull();
   });
@@ -144,6 +168,16 @@ describe('allowedOptions', () => {
     expect(allowedOptions('RAM', 'rank', { classification: 'UDIMM', type: 'Laptop' }, CATALOG_RANKS)).toEqual(SMALL_RANKS);
     expect(allowedOptions('RAM', 'rank', { classification: 'RDIMM', type: 'Server' }, CATALOG_RANKS)).toEqual(CATALOG_RANKS);
     expect(allowedOptions('RAM', 'rank', {}, CATALOG_RANKS)).toEqual(CATALOG_RANKS);
+  });
+
+  it('offers a desktop module the x4 or quad ranks its generation sold', () => {
+    const desk = (generation: string) =>
+      allowedOptions('RAM', 'rank', { classification: 'UDIMM', type: 'Desktop', generation }, CATALOG_RANKS);
+    expect(desk('DDR3')).toEqual(['1Rx4', '1Rx8', '1Rx16', '1Rx32', '2Rx4', '2Rx8', '2Rx16', '2Rx32']);
+    expect(desk('DDR4')).toEqual(SMALL_RANKS);
+    expect(desk('DDR5')).toEqual([...SMALL_RANKS, '4Rx8']);
+    expect(allowedOptions('RAM', 'rank', { classification: 'RDIMM', generation: 'DDR4' }, CATALOG_RANKS))
+      .toEqual(CATALOG_RANKS);
   });
 
   it('follows the SSD interface, keeping options it does not know', () => {
@@ -209,6 +243,9 @@ describe('cascadePatch', () => {
 
   it('keeps or clears a full-size rank as the module changes', () => {
     const desk = { classification: 'UDIMM', type: 'Desktop', rank: '2Rx4', generation: 'DDR3' };
+    expect(ram(desk, { generation: 'DDR4' })).toEqual({ generation: 'DDR4', rank: '' });
+    expect(ram({ ...desk, rank: '4Rx8', generation: 'DDR5' }, { generation: 'DDR4' }))
+      .toEqual({ generation: 'DDR4', rank: '' });
     expect(ram(desk, { classification: 'SODIMM' })).toEqual({ classification: 'SODIMM', type: 'Laptop', rank: '' });
     expect(ram(desk, { type: 'Laptop' })).toEqual({ type: 'Laptop', classification: 'SODIMM', rank: '' });
     expect(ram({ ...desk, generation: 'DDR5' }, { classification: 'CAMM' }))
@@ -266,6 +303,7 @@ describe('cascadePatch', () => {
       { classification: 'RDIMM', type: 'Server', rank: '4DRx4', generation: 'DDR5' },
       { classification: 'CAMM', type: 'Laptop', generation: 'DDR5', rank: '1Rx16' },
       { classification: 'UDIMM', type: 'Desktop', generation: 'DDR3', rank: '2Rx4' },
+      { classification: 'UDIMM', type: 'Desktop', generation: 'DDR5', rank: '4Rx8' },
     ];
     const picks: Record<string, string>[] = [
       ...['UDIMM', 'RDIMM', 'LRDIMM', 'SODIMM', 'CAMM'].map(classification => ({ classification })),
@@ -377,6 +415,9 @@ describe('the API refuses a spec conflict', () => {
     const r = await createPo(token, [{ ...RAM_LINE, rank: '2Rx4' }]);
     expect(r.status).toBe(400);
     expect(r.body.error).toBe("new product 1 (M471A2K43DB1-CWE): 2Rx4 needs a full-size DIMM and doesn't fit SODIMM");
+    const ddr4 = await createPo(token, [{ ...desk, generation: 'DDR4' }]);
+    expect(ddr4.status).toBe(400);
+    expect(ddr4.body.error).toBe("new product 1 (M471A2K43DB1-CWE): 2Rx4 is a server rank on DDR4 and doesn't fit UDIMM");
   });
 
   it('on a line added to a PO', async () => {
