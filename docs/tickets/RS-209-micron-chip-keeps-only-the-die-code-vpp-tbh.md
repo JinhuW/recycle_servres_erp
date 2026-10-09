@@ -2,13 +2,13 @@
 id: RS-209
 title: Micron Chip # keeps only the die code (VPP, TBH, …)
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-09
 reporter: jinhu
 branch: feat/micron-chip-die-code
-pr:
-version:
+pr: 563
+version: 1.231.0
 related: [RS-122]
 ---
 
@@ -44,15 +44,15 @@ down to it. The other **82** don't, and stay as typed (see Notes).
 
 ## Acceptance criteria
 
-- [ ] A Micron line's Chip # is stored as the 3-letter die code, however it
+- [x] A Micron line's Chip # is stored as the 3-letter die code, however it
       arrives: typed, pasted, label OCR, or chip auto-fill. `8KE75 D9VPP` →
       `VPP`, `D9XPF` → `XPF`, `0DJ75C9BJR` → `BJR`.
-- [ ] Existing Micron lines are backfilled by a migration.
-- [ ] A value with no die code at its end is left as typed.
-- [ ] Other brands' chip numbers are only upper-cased, as before.
-- [ ] Re-saving a submitted PO that still holds a raw marking in an open tab
+- [x] Existing Micron lines are backfilled by a migration.
+- [x] A value with no die code at its end is left as typed.
+- [x] Other brands' chip numbers are only upper-cased, as before.
+- [x] Re-saving a submitted PO that still holds a raw marking in an open tab
       doesn't count as an edit, so the PO stays at its stage.
-- [ ] On the desktop line drawer and the phone form, leaving the Chip # field
+- [x] On the desktop line drawer and the phone form, leaving the Chip # field
       on a Micron line shows the die code.
 
 ## Out of scope
