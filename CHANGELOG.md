@@ -71,9 +71,9 @@ included.
   1.234.x renumbers nothing.
 - **MCP counts.** `create_sell_order_draft` keeps `lineCount` as the lines
   it created and adds `productCount`. The `created` event records both.
-- **Pack mode folds as the sheet prints.** It groups by the product each line
-  belongs to (the order's lines carry an opaque `product`), so a corrected lot
-  under a shared `#` is its own row there too.
+- **Corrected lots in Pack mode.** Pack mode keeps one fold per `#`, so its
+  counts and open folds stay stable. A corrected lot's row in the fold shows
+  its own part # and condition when they differ from the product's.
 
 ## [1.234.0] - 2026-10-09
 

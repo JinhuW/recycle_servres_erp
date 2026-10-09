@@ -224,7 +224,12 @@ function withNos(rows: readonly SheetLineRow[], nextNo: number): readonly SheetL
   const fill = rows.every((r) => r.product_no == null)
     ? legacyNumbers(rows)
     : plannedNos(rows.map(foldLine), nextNo).assigned;
-  return rows.map((r) => (r.product_no == null ? { ...r, product_no: fill.get(r.sol_id) ?? null } : r));
+  return rows.map((r) => {
+    if (r.product_no != null) return r;
+    const no = fill.get(r.sol_id);
+    if (no == null) throw new Error(`sell-order line ${r.sol_id} was left without a #`);
+    return { ...r, product_no: no };
+  });
 }
 
 // The packing list's products per warehouse tab, each in its sheet row, with
@@ -246,20 +251,15 @@ export function numberSheetLines(rows: readonly SheetLineRow[], nextNo: number) 
   placed.sort((a, b) => a.p.no! - b.p.no! || a.w - b.w || a.i - b.i);
   const lineOrder: string[] = [];
   const noByLine = new Map<string, number>();
-  // The product a line folds into — its # and what it reads as — so Pack mode
-  // groups lines as the sheet prints them: two lots that share a # but no
-  // longer read as one product are two rows under it.
-  const productByLine = new Map<string, string>();
   for (const { p } of placed) {
     for (const src of p.poSources) {
       for (const lineId of src.solIds) {
         lineOrder.push(lineId);
         noByLine.set(lineId, p.no!);
-        productByLine.set(lineId, p.id);
       }
     }
   }
-  return { numbered, lineOrder, noByLine, productByLine, lines };
+  return { numbered, lineOrder, noByLine, lines };
 }
 
 // What the files show, from the numbered products: a line held at 0 is

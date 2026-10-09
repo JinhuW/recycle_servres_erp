@@ -606,11 +606,8 @@ describe('sell order #: what a deploy, a re-spec and a typed line can do', () =>
     await getTestDb()`UPDATE order_lines SET part_number = 'REV-TX' WHERE id = ${b}`;
     const plain = await workbook(mgr, `/api/sell-orders/${id}/packing-list`);
     expect(packRows(plain.worksheets[0]!).sort()).toEqual([['1', 'REV-TW'], ['1', 'REV-TX']]);
-    // The page says so too, so Pack mode folds them as the sheet prints them.
-    const lines = await api<{ order: { lines: { no: number; product: string }[] } }>(
-      'GET', `/api/sell-orders/${id}`, { token: mgr });
-    expect(lines.body.order.lines.map(l => l.no)).toEqual([1, 1]);
-    expect(new Set(lines.body.order.lines.map(l => l.product)).size).toBe(2);
+    // On the page and in Pack mode it is still product #1, whose labels it carries.
+    expect((await detailLines(mgr, id)).map(l => l.no)).toEqual([1, 1]);
   });
 
   it('a typed line joins a product\'s # only in its own warehouse', async () => {

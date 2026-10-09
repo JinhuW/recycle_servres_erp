@@ -1221,7 +1221,9 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
     product's #, part, specs, how many lots and their PO tags
     (`PO-1111 #4, PO-1203 #1 +1`), and the summed count. It starts closed.
     The chevron (or ← / →) opens it to one row per lot, each with its own
-    photo, count and tick. Ticking the product row packs every lot still at
+    photo, count and tick — and its own part # and condition when they differ
+    from the product's, as a lot corrected after it was numbered does
+    (v1.235.0; the packing list prints such a lot as a row of its own). Ticking the product row packs every lot still at
     its full count. A lot that was lowered keeps waiting for its own tick, and
     the fold opens to show it. Once every lot is packed, the same tick unpacks
     them all. A product with some lots packed shows a dash in its tick. A lot
