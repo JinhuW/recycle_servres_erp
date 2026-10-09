@@ -552,7 +552,7 @@ function DetailsPanel({
                   <th>{t('warehouse')}</th>
                   <th style={{ textAlign: 'right' }}>{t('ieOnHand')}</th>
                   <th style={{ textAlign: 'right' }}>{t('ieInTransit')}</th>
-                  <th style={{ textAlign: 'right', width: 90 }}>{t('lines')}</th>
+                  <th style={{ textAlign: 'right', width: 90 }}>{t('ieLots')}</th>
                 </tr>
               </thead>
               <tbody>

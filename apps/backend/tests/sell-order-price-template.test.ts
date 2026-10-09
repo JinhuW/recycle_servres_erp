@@ -703,7 +703,7 @@ describe('GET /api/sell-orders/:id/packing-list?groupBy=po', () => {
 
   // One column's cells over a tab's data rows, every section. Found by header
   // text: the lot's own part number, not the sell line's, reaches the sheet.
-  const colCells = (ws: ExcelJS.Worksheet, header: 'ID in PO' | 'From PO' | '#'): string[] => {
+  const colCells = (ws: ExcelJS.Worksheet, header: 'PO #' | 'From PO' | '#'): string[] => {
     const out: string[] = [];
     let col = 0;
     ws.eachRow(row => {
@@ -747,7 +747,7 @@ describe('GET /api/sell-orders/:id/packing-list?groupBy=po', () => {
     return r.body.order.lines.findIndex(l => l.id === lineId) + 1;
   }
 
-  it('gives each row its ID in PO, listing every lot a row folds', async () => {
+  it('gives each row its PO #, listing every lot a row folds', async () => {
     const { token } = await loginAs(ALEX);
     const sql = getTestDb();
     const [a] = await linesFromTwoPos(token);
@@ -774,11 +774,11 @@ describe('GET /api/sell-orders/:id/packing-list?groupBy=po', () => {
     const tab = wb.worksheets.find(w => w.name === `${a.po} - LA1`)!;
     const [x, y] = (await Promise.all(twins.map(t => poPageNo(token, a.po, t)))).sort((m, n) => m - n);
     // The twins stay one row, their IDs stacked in its one cell.
-    expect(colCells(tab, 'ID in PO').sort())
+    expect(colCells(tab, 'PO #').sort())
       .toEqual([String(await poPageNo(token, a.po, a.id)), `#${x} × 1\n#${y} × 1`].sort());
     // A hand-typed line came from no PO: the column stays, empty.
     const noPo = wb.worksheets.find(w => w.name === 'No PO - LA1')!;
-    expect(colCells(noPo, 'ID in PO')).toEqual(['']);
+    expect(colCells(noPo, 'PO #')).toEqual(['']);
   });
 
   it('keeps a product from several PO lines on one row, its PO lines stacked in one cell', async () => {
@@ -838,10 +838,10 @@ describe('GET /api/sell-orders/:id/packing-list?groupBy=po', () => {
     expect(rowQty(tab, 'Warehouse total')).toEqual([6]);
 
     // Each list carries one source column: the by-PO tabs already name the PO.
-    expect(plain.worksheets.flatMap(cellStrings)).not.toContain('ID in PO');
+    expect(plain.worksheets.flatMap(cellStrings)).not.toContain('PO #');
     const byPo = await loadWorkbook(await getRaw(`/api/sell-orders/${id}/packing-list?groupBy=po`, token));
     const byPoCells = byPo.worksheets.flatMap(cellStrings);
-    expect(byPoCells).toContain('ID in PO');
+    expect(byPoCells).toContain('PO #');
     expect(byPoCells).not.toContain('From PO');
   });
 

@@ -9,7 +9,7 @@ export const SELL_ORDER_TOOL_DEFS = [
   {
     name: 'search_sellable_inventory',
     description:
-      'Read-only. List inventory lines that can currently be put on a sell order — status Reviewing or Done, on ' +
+      'Read-only. List inventory lots (a PO\'s products, one row per lot) that can currently be put on a sell order — status Reviewing or Done, on ' +
       'an unarchived PO, with units left after every Shipped or Awaiting payment sell order takes the quantity it ' +
       'names — newest first. Use this to find the inventoryId ' +
       'values that create_sell_order_draft requires. Each row includes: inventoryId (pass this to ' +
@@ -20,7 +20,7 @@ export const SELL_ORDER_TOOL_DEFS = [
       'Draft or Packing orders already propose this line — they are proposals, so a line may appear on several ' +
       'and only the first one promoted keeps it), and sellPrice (the price already ' +
       'assigned to the line, in USD — advisory; you still choose each line\'s unitPrice), sourceOrderId (the PO ' +
-      'the line came in on), sourceLineNo (the line\'s # on that PO\'s page), and the structured spec behind subLabel: type (Desktop / Server / Laptop), ' +
+      'the line came in on), sourceLineNo (the product\'s # on that PO — stable: it never changes, and a lot split off by a transfer shares it), and the structured spec behind subLabel: type (Desktop / Server / Laptop), ' +
       'classification, rank, speed, interface, formFactor, health. Filter with query ' +
       '(matches brand / part number / description / category) and warehouseId. Requires the sellorder:read scope.',
     inputSchema: {

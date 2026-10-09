@@ -1380,7 +1380,7 @@ inventory.patch('/:id', async (c) => {
   if (outcome.kind === 'notFound') return c.json({ error: 'Not found' }, 404);
   if (outcome.kind === 'committed') {
     return c.json({
-      error: `${outcome.committed} units of this line are committed to an open sell order: `
+      error: `${outcome.committed} units of this lot are committed to an open sell order: `
         + 'its status cannot change, and its qty cannot drop below that, until the order is closed or the line unlinked',
       committedQty: outcome.committed,
     }, 409);
@@ -1389,10 +1389,10 @@ inventory.patch('/:id', async (c) => {
     return c.json({ error: 'the purchase order is past review; move it back to Reviewing before changing qty or unit cost' }, 409);
   }
   if (outcome.kind === 'soldLocked') {
-    return c.json({ error: 'the purchase order is fully sold; move it back to Ready to Pay before changing a line status' }, 409);
+    return c.json({ error: 'the purchase order is fully sold; move it back to Ready to Pay before changing a lot status' }, 409);
   }
   if (outcome.kind === 'archived') {
-    return c.json({ error: 'the purchase order is archived; unarchive it before editing its lines' }, 409);
+    return c.json({ error: 'the purchase order is archived; unarchive it before editing its products' }, 409);
   }
   if (outcome.kind === 'specConflict') return c.json({ error: outcome.error }, 400);
   const before = outcome.before;
@@ -1419,7 +1419,7 @@ inventory.patch('/:id', async (c) => {
           kind: 'low_margin',
           tone: 'warn',
           icon: 'alert',
-          title: `Low margin on ${before.part_number ?? 'line'}`,
+          title: `Low margin on ${before.part_number ?? 'a product'}`,
           body: `Sell ${sp} vs cost ${cost} → ${(margin * 100).toFixed(1)}% margin`,
         });
       });
@@ -1700,7 +1700,7 @@ inventory.post('/transfer', async (c) => {
   if (outcome.kind === 'alreadyThere') return c.json({ error: `${outcome.ref} is already in ${toWarehouseId}` }, 400);
   if (outcome.kind === 'needsConfirm') {
     return c.json({
-      error: `Moving these lines whole takes them off draft sell order${outcome.drafts.length === 1 ? '' : 's'} `
+      error: `Moving these lots whole takes them off draft sell order${outcome.drafts.length === 1 ? '' : 's'} `
         + `${outcome.drafts.join(', ')} until the transfer is received. Confirm to move them anyway.`,
       needsConfirm: true,
       drafts: outcome.drafts,

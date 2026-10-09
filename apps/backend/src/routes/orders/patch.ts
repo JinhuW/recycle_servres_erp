@@ -184,13 +184,13 @@ patchRoutes.patch('/:id', async (c) => {
   for (let i = 0; i < (body.addLines ?? []).length; i++) {
     const l = body.addLines![i];
     const cat = l.category ?? inheritedCat;
-    if (!cat) return c.json({ error: `new line ${i + 1}: category is required` }, 400);
+    if (!cat) return c.json({ error: `new product ${i + 1}: category is required` }, 400);
     addCats.push(cat);
     const issue = serialIssue({ ...l, category: cat, qty: l.qty ?? 1 });
-    if (issue) return c.json({ error: serialErr(`new line ${i + 1}`, issue) }, 400);
-    const labelErr = identityErr(`new line ${i + 1}`, cat, l);
+    if (issue) return c.json({ error: serialErr(`new product ${i + 1}`, issue) }, 400);
+    const labelErr = identityErr(`new product ${i + 1}`, cat, l);
     if (labelErr) return c.json({ error: labelErr }, 400);
-    const specErr = specRuleErr(`new line ${i + 1}`, cat, l);
+    const specErr = specRuleErr(`new product ${i + 1}`, cat, l);
     if (specErr) return c.json({ error: specErr }, 400);
   }
 
@@ -868,7 +868,7 @@ patchRoutes.patch('/:id', async (c) => {
     if (e instanceof OrderRefusal) return refusalResponse(c, u, e.refusal);
     // A line value outside a column's CHECK (health 0–100, rpm > 0, qty >= 0).
     if ((e as { code?: string }).code === '23514') {
-      return c.json({ error: 'A line value is out of range' }, 400);
+      return c.json({ error: 'A product value is out of range' }, 400);
     }
     throw e;
   }

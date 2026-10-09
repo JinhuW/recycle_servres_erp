@@ -697,7 +697,7 @@ export function LineDrawer({
                   disabled={!canRemove}
                   style={canRemove ? { color: 'var(--neg)' } : undefined}
                 >
-                  <Icon name="trash" size={13} /> {t('soRemoveLineTooltip')}
+                  <Icon name="trash" size={13} /> {t('poRemoveProduct')}
                 </button>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   {line._confirmed && (

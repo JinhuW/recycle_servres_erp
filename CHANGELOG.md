@@ -17,6 +17,43 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.236.0] - 2026-10-09
+
+The rows of a PO are now called **products** everywhere a person reads them
+(RS-213, part 3 of 3). Jinhu's ask: "The line in the PO can be called
+products." The app was half-renamed before. Some English PO screens already
+said "Products", most PO, sell-order and Pack-mode screens said line, line
+item or item, and Chinese used about ten words (明细, 行, 项, 项目, 商品…) for
+the same thing.
+
+### Changed
+
+- **About 160 strings in English and Chinese now say product / 产品.** A
+  sell-order row reads **lot / 批次** where the lot is the point: Pack mode,
+  price import and Inventory → Add to sell order.
+- **Glossary.** `docs/FEATURES.md` opens with the word list. It also records
+  what keeps its name: Item type, Extra item, units, Inventory's grouped
+  "Product", and the API and table names.
+- **Split keys.** The PO pages get their own "Remove product"
+  (`poRemoveProduct`). The Inventory stock card's count column is "Lots"
+  (`ieLots`), not the shared "Products", because it counts lots.
+- **Activity log.** Added, removed and edited products now read in the
+  reader's language and show the product's `#` ("Added product #4
+  M393A4K40DB3-CWE"). The submitted entry's count is translated.
+- **Backend text.** Refusals and validation errors say product, or lot on the
+  inventory and Pack-mode paths: "Products in this order are on open sell
+  orders", "product 2: …", "new product 1: …". So does the low-margin
+  notification.
+- **xlsx headers.**
+  - The PO workbook's sheet is *Products*, its cost column *Cost total*
+    (next to *Sell total*), and its payment row *Subtotal (product costs)*.
+  - The packing list by PO calls its column *PO #* (was *ID in PO*).
+  - The vendor bid sheet is untouched, since it is an import format.
+- **MCP.** Descriptions say what `sourceLineNo` and `lineCount` mean now. The
+  wire names are unchanged.
+- **Fixed:** the transfer manifest's Chinese read "{n} 件 · {n} 件", the unit
+  word for a row count. It now says 个批次.
+
 ## [1.235.0] - 2026-10-09
 
 A sell order's product `#` is now stored and never changes (RS-213, part 2 of

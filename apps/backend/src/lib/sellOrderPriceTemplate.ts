@@ -536,13 +536,13 @@ type WhCol = { header: string; key: string; width: number; numFmt?: string };
 // Condition / Image URL here). The bid tabs still carry all of them.
 const PACK_OMITTED_SPECS = new Set(['classification', 'chip']);
 
-// Section layout: # | Packed ✓ | Part # | From PO or ID in PO | <category
+// Section layout: # | Packed ✓ | Part # | From PO or PO # | <category
 // specs> | Qty, shifted right by PACK_GROUP_OFFSET to leave room for the RAM
 // group labels. No prices by design (user-decided): a picker has no use
 // for them, and "Part #" (not "Part Number") plus the absence of any price
 // header is also what keeps findHeaders() from ever parsing these tabs. The
 // source column names where a row's units came from: "From PO" ("PO-1442 #3")
-// on a warehouse tab, whose rows mix POs; "ID in PO" (just the #) on a by-PO
+// on a warehouse tab, whose rows mix POs; "PO #" (just the #) on a by-PO
 // tab, where the tab already names the PO.
 type PoCol = 'source' | 'id';
 
@@ -553,7 +553,7 @@ function whSectionCols(category: string, poCol: PoCol): WhCol[] {
     { header: 'Packed ✓',  key: 'packed',    width: 9 },
     { header: 'Part #',    key: 'part',      width: 24 },
     poCol === 'id'
-      ? { header: 'ID in PO', key: 'poLine',   width: 12 }
+      ? { header: 'PO #',     key: 'poLine',   width: 12 }
       : { header: 'From PO',  key: 'poSource', width: 18 },
     ...(SPEC_COLS_BY_CATEGORY[category] ?? []).filter((c) => !PACK_OMITTED_SPECS.has(c.key)),
     { header: 'Qty',       key: 'qty',       width: 8, numFmt: '#,##0' },
@@ -603,7 +603,7 @@ function renderWarehouseSheet(
   head: PriceTemplateHead,
   wh: PriceTemplateWarehouse,
   // The by-PO workbook reuses this tab whole; only its name and wording move,
-  // and its source column narrows to ID in PO.
+  // and its source column narrows to PO #.
   opts: { tabName?: string; instruction?: string; totalLabel?: string; poCol?: PoCol } = {},
 ): void {
   const poCol = opts.poCol ?? 'source';

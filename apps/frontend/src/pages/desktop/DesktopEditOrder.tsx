@@ -1434,7 +1434,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                         <button
                           className="btn icon sm"
                           onClick={e => { e.stopPropagation(); removeLine(i); }}
-                          title={t('soRemoveLineTooltip')}
+                          title={t('poRemoveProduct')}
                           disabled={lines.length <= 1}
                           style={lines.length <= 1 ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
                         >

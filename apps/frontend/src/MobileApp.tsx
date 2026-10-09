@@ -113,7 +113,7 @@ const toDraftLine = (l: OrderLine, i: number): DraftLine => ({
   scanImageUrl: l.scanImageUrl,
   health: l.health,
   rpm: l.rpm,
-  label: lineSpecLabel(l) ?? ((l.description ?? '').trim() || (l.partNumber ?? '').trim() || 'Item'),
+  label: lineSpecLabel(l) ?? ((l.description ?? '').trim() || (l.partNumber ?? '').trim() || 'Product'),
 });
 
 function Shell() {

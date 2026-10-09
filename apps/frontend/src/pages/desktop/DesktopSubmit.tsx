@@ -977,7 +977,7 @@ function OrderForm({
                     <button
                       className="btn icon sm"
                       onClick={e => { e.stopPropagation(); void removeLine(i); }}
-                      title={t('soRemoveLineTooltip')}
+                      title={t('poRemoveProduct')}
                       disabled={lines.length <= 1}
                       style={lines.length <= 1 ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
                     >

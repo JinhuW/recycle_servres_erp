@@ -12,6 +12,26 @@ source of truth for endpoints.
 Keep it current: when a change adds, removes or reshapes user-visible
 behaviour, edit the bullet here in the same PR and cite the new version.
 
+## Words this file and the app use (v1.236.0)
+
+- **Product** — a numbered row on a purchase order: one part bought, in one
+  condition, at one cost. On a sell order, a product is what the packer
+  labels: its lots share one `#`.
+- **Product `#`** — a product's id on its order. Given when the product is put
+  on the order, never changed or reused (POs since v1.234.0, sell orders since
+  v1.235.0). "N products" counts `#`s.
+- **Lot** — one inventory row: a PO product's units in one warehouse. A
+  partial transfer splits a product into two lots under its one `#`. A sell
+  order's rows are lots.
+- Inventory's grouped view keeps **Product** for the same goods across POs —
+  a part number with its lots under it.
+- Not renamed: **Item type** (the Other category's attribute), **Extra item**
+  (goods in the box that are not on the PO), physical **units** (件), and
+  "line" where it means a line of text (serial numbers, address line 2).
+- Code and the API keep their names: `order_lines`, `sell_order_lines`,
+  `lines`, `addLines`, `lineCount`, `sourceLineNo`, the `line_*` event kinds.
+  Chinese uses 产品 for a product and 批次 for a lot.
+
 ---
 
 ## Roles and access
@@ -110,6 +130,12 @@ on to Sold once every line has sold (v1.164.0).
     they showed.
   - Transfer refusals name the product the same way ("PO-1432 #3 only has 5
     units"), as does a sell order a lot can't go on.
+  - **Everything says "product"** (v1.236.0) where it used to say line, line
+    item or item: the PO and sell-order pages, the phone screens, Review and
+    Pack mode, the activity log, error messages, and the PO workbook. Its
+    sheet is *Products*, its cost column *Cost total* and its payment row
+    *Subtotal (product costs)*. Chinese says 产品 throughout. See the word list
+    at the top of this file.
 - **One PO can hold several categories** (v1.54.0), with its lines grouped by
   category and a per-category cost breakdown (v1.55.0).
 - **A new PO starts at a 50% commission rate** (v1.166.0). The column
@@ -1021,8 +1047,8 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   at 0 alone (v1.220.2): it is not a conflict and is not removed. Removing
   the PO line it names doesn't block either: the sell line becomes a
   hand-typed line and keeps its # (v1.235.0).
-- **Line items group By warehouse or By PO** (v1.194.0), in both view and edit.
-  The switch on the Line items header is remembered per user (preference
+- **Products group By warehouse or By PO** (v1.194.0), in both view and edit.
+  The switch on the Products header is remembered per user (preference
   `sellOrders.lineGroup`, default by warehouse).
   - By PO orders the groups numerically and puts hand-typed lines last under
     "No PO", matching the "Packing list by PO" download. It shows a Warehouse
@@ -1186,8 +1212,8 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   (`PO-1442 - DEN`), POs in numeric order, hand-typed lines on a
   `No PO - <warehouse>` tab. Each tab is a warehouse tab in miniature —
   category sections, the RAM device / DDR-generation labels and tints, tick
-  boxes, subtotals and a PO total. Each tab adds an **ID in PO** column after
-  Part # (v1.197.3): the line's # on that PO's page. A row that folds several
+  boxes, subtotals and a PO total. Each tab adds a **PO #** column after
+  Part # (v1.197.3; "ID in PO" until v1.236.0): the product's # on that PO. A row that folds several
   lots of the PO stacks their IDs in that cell the same way (`#2 × 13` above
   `#3 × 12`, v1.220.3); the tab already names the PO, so it has no `From PO`
   column. A tab is cut from the numbered products, so its rows run in the

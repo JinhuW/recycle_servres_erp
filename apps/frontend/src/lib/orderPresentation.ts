@@ -162,7 +162,7 @@ const FIELD_LABEL: Record<string, string> = {
   payment_received_by: 'Payment received by',
   label:           'Label',
   sub_label:       'Sub-label',
-  inventory_id:    'Inventory item',
+  inventory_id:    'Inventory lot',
   status:          'Status',
 };
 

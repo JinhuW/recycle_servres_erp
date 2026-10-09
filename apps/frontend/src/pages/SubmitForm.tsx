@@ -261,7 +261,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
     if (line.category === 'HDD') return [line.brand, line.capacity, line.rpm ? line.rpm + 'rpm' : null].filter(Boolean).join(' ');
     // Description is optional on an Other line, so the part number — which
     // isn't — carries the name when nobody wrote one.
-    return (line.description ?? '').trim() || (line.partNumber ?? '').trim() || 'Item';
+    return (line.description ?? '').trim() || (line.partNumber ?? '').trim() || 'Product';
   };
 
   const persist = (partNumber: string) => onSaveLine({ ...line, label: buildLabel(), partNumber });

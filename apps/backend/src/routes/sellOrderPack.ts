@@ -161,7 +161,7 @@ packRoutes.put('/:id/pack/:lineId', async (c) => {
       && line.was_counted === line.qty && line.was_qty !== null && line.was_qty > line.qty;
     const restoring = lowered && !packed;
     const qty = restoring ? line.was_qty! : line.qty;
-    if (qty === 0) return { code: 409, msg: 'This line is at 0 — there is nothing of it to pack' };
+    if (qty === 0) return { code: 409, msg: 'This lot is at 0 — there is nothing of it to pack' };
     if (typeof counted !== 'number' || !Number.isInteger(counted) || counted < 0 || counted > qty) {
       return { code: 400, msg: `counted must be a whole number from 0 to ${qty}` };
     }

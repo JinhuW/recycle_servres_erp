@@ -53,7 +53,7 @@ export async function validateSellLines(
   const claims = await committedClaimsByLine(tx, ids, { excludeOrderId });
   for (const [inventoryId, qty] of demand) {
     const inv = byId.get(inventoryId.toLowerCase());
-    if (!inv) return `inventory line ${inventoryId} not found`;
+    if (!inv) return `inventory lot ${inventoryId} not found`;
     // Named the way the PO page and the sell order show it.
     const ref = `${inv.order_id} #${inv.product_no}`;
     if (!isSellableLineStatus(inv.status))

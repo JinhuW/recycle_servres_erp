@@ -469,7 +469,7 @@ describe('a purchase order cannot be emptied of its last line', () => {
       token, body: { removeLineIds: ids },
     });
     expect(r.status).toBe(409);
-    expect(r.body.error).toMatch(/at least one line/i);
+    expect(r.body.error).toMatch(/at least one product/i);
     expect((await get(token, id)).lines).toHaveLength(2);
   });
 

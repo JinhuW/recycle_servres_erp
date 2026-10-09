@@ -43,7 +43,7 @@ describe('GET /api/orders/:id/spreadsheet', () => {
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(buf as unknown as ArrayBuffer);
     expect(wb.getWorksheet('Payment')).toBeTruthy();
-    expect(wb.getWorksheet('Line items')).toBeTruthy();
+    expect(wb.getWorksheet('Products')).toBeTruthy();
   });
 
   it('includes the payment summary fields', async () => {
@@ -61,7 +61,7 @@ describe('GET /api/orders/:id/spreadsheet', () => {
     ws.eachRow((row) => fields.add(String(row.getCell(1).value ?? '')));
 
     for (const expected of [
-      'Payment method', 'Subtotal (line costs)', 'Other fees', 'Other fees note',
+      'Payment method', 'Subtotal (product costs)', 'Other fees', 'Other fees note',
       'Total cost', 'Commission rate', 'Total quantity',
       'Projected sell value', 'Projected profit', 'Commission amount',
     ]) {
@@ -98,7 +98,7 @@ describe('GET /api/orders/:id/spreadsheet', () => {
     const byField = new Map<string, unknown>();
     ws.eachRow(row => byField.set(String(row.getCell(1).value ?? ''), row.getCell(2).value));
 
-    const subtotal = Number(byField.get('Subtotal (line costs)'));
+    const subtotal = Number(byField.get('Subtotal (product costs)'));
     expect(subtotal).toBeCloseTo(UNIT_COST * QTY, 2);
     expect(Number(byField.get('Other fees'))).toBeCloseTo(FEE, 2);
     expect(String(byField.get('Other fees note'))).toBe('PayPal processing fee');
@@ -132,7 +132,7 @@ describe('GET /api/orders/:id/spreadsheet', () => {
     await wb.xlsx.load(await res.arrayBuffer());
     const byField = new Map<string, unknown>();
     wb.getWorksheet('Payment')!.eachRow(row => byField.set(String(row.getCell(1).value ?? ''), row.getCell(2).value));
-    expect(Number(byField.get('Subtotal (line costs)'))).toBeCloseTo(50, 2);
+    expect(Number(byField.get('Subtotal (product costs)'))).toBeCloseTo(50, 2);
     expect(Number(byField.get('Total quantity'))).toBe(10);
   });
 
@@ -151,7 +151,7 @@ describe('GET /api/orders/:id/spreadsheet', () => {
       const wb = new ExcelJS.Workbook();
       await wb.xlsx.load(await res.arrayBuffer());
 
-      const ws = wb.getWorksheet('Line items')!;
+      const ws = wb.getWorksheet('Products')!;
       const headers = ws.getRow(1).values as unknown[];
       for (const h of ['Sell price', 'Sell total', 'Profit']) {
         expect(headers).toContain(h);
@@ -198,7 +198,7 @@ describe('GET /api/orders/:id/spreadsheet', () => {
     const { default: ExcelJS } = await import('exceljs');
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(await res.arrayBuffer());
-    const ws = wb.getWorksheet('Line items')!;
+    const ws = wb.getWorksheet('Products')!;
     const headers = ws.getRow(1).values as unknown[];
     const chipC = headers.indexOf('Chip #');
     expect(chipC).toBeGreaterThan(0);
@@ -259,7 +259,7 @@ describe('GET /api/orders/:id/spreadsheet', () => {
     const { default: ExcelJS } = await import('exceljs');
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(await res.arrayBuffer());
-    const ws = wb.getWorksheet('Line items')!;
+    const ws = wb.getWorksheet('Products')!;
     const headers = ws.getRow(1).values as unknown[];
 
     // Every RAM spec is its own column.
@@ -313,7 +313,7 @@ describe('GET /api/orders/:id/spreadsheet', () => {
     const { default: ExcelJS } = await import('exceljs');
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(await res.arrayBuffer());
-    const ws = wb.getWorksheet('Line items')!;
+    const ws = wb.getWorksheet('Products')!;
     const headers = ws.getRow(1).values as unknown[];
 
     for (const h of ['Interface', 'Form factor', 'Health %']) {
