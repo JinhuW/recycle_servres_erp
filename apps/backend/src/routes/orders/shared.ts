@@ -546,8 +546,8 @@ export function changesMaterialField(
 }
 
 // The stored shape PATCH reads before writing: enough to merge a patch against
-// (category/serial/item-type rules) and to tell a synthetic part number from a
-// typed one when a line changes category.
+// (category/serial/item-type/spec rules) and to tell a synthetic part number
+// from a typed one when a line changes category.
 export type StoredLine = {
   id: string;
   category: string | null;
@@ -562,9 +562,12 @@ export type StoredLine = {
   form_factor: string | null;
   speed: string | null;
   rpm: number | null;
+  type: string | null;
+  classification: string | null;
+  rank: string | null;
 };
 export function storedLineCols(sql: SqlLike) {
   return sql`
     id, category, generation, qty, serial_number, item_type, part_number,
-    brand, capacity, interface, form_factor, speed, rpm`;
+    brand, capacity, interface, form_factor, speed, rpm, type, classification, rank`;
 }

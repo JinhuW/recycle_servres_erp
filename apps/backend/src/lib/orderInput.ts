@@ -13,6 +13,8 @@
 // down to 0 (`allowZeroQty`) when none of it arrived: deleting it instead
 // would renumber every line after it, since a line's # is its rank on the PO.
 
+import { CASCADE_FIELDS, type CascadeField, type CascadeSpec, specConflicts } from '@recycle-erp/shared';
+
 export type LineInputMode = 'create' | 'patch';
 
 // Generous next to what is stored (the longest prod brand is 19 characters,
@@ -71,4 +73,49 @@ export function validateLineInput(
  */
 export function specVal(v: string | null | undefined): string | null {
   return v == null || v.trim() === '' ? null : v.trim();
+}
+
+const SPEC_COLS: Readonly<Record<CascadeField, string>> = {
+  generation: 'generation', classification: 'classification', type: 'type',
+  rank: 'rank', interface: 'interface', formFactor: 'form_factor',
+};
+
+/**
+ * A stored line's specs after a patch, merged the way the UPDATE writes them —
+ * a present key lands (null included), an absent one keeps the column unless a
+ * category switch clears it — and which of them really change. The edit forms
+ * echo every field back, so presence alone says nothing.
+ */
+export function mergedSpec(
+  stored: Readonly<Record<string, unknown>>,
+  patch: Readonly<Record<string, unknown>>,
+  { clearing = new Set<string>(), categoryMoved = false }: { clearing?: ReadonlySet<string>; categoryMoved?: boolean } = {},
+): { merged: CascadeSpec; changed: Set<string> } {
+  const merged: CascadeSpec = {};
+  const changed = new Set<string>();
+  for (const f of CASCADE_FIELDS) {
+    const col = SPEC_COLS[f];
+    const before = specVal(stored[col] as string | null);
+    const after = patch[f] !== undefined
+      ? specVal(patch[f] as string | null)
+      : clearing.has(col) ? null : before;
+    merged[f] = after;
+    if (categoryMoved || after !== before) changed.add(f);
+  }
+  return { merged, changed };
+}
+
+/**
+ * The refusal for a line whose RAM/SSD specs contradict each other (shared
+ * specCascade), judging only the rules with a field in `changed` — prod holds
+ * conflicting lines from before the rules, and an unrelated edit must save.
+ */
+export function specRuleErr(
+  label: string,
+  category: string,
+  spec: CascadeSpec,
+  changed: ReadonlySet<string> = new Set(CASCADE_FIELDS),
+): string | null {
+  const e = specConflicts(category, spec, changed);
+  return e ? `${label}: ${e}` : null;
 }

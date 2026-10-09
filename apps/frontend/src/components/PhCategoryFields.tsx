@@ -1,6 +1,6 @@
 import type { Category, DraftLine } from '../lib/types';
 import { useT } from '../lib/i18n';
-import { chipMarkingCanon, synthesizePartNumber } from '@recycle-erp/shared';
+import { allowedOptions, chipMarkingCanon, synthesizePartNumber } from '@recycle-erp/shared';
 import { Combobox } from './Combobox';
 import { PartNumberField } from './PartNumberField';
 import { ItemTypePicker } from './ItemTypePicker';
@@ -112,11 +112,11 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
         <div className="ph-field-row">
           <div className="ph-field">
             <label>{t('klass')}<Req /></label>
-            <PhCatSelect className={selectClsFor('classification')} value={value.classification} options={RAM_CLASS} onChange={v => onChange('classification', v)} />
+            <PhCatSelect className={selectClsFor('classification')} value={value.classification} options={allowedOptions('RAM', 'classification', value, RAM_CLASS)} onChange={v => onChange('classification', v)} />
           </div>
           <div className="ph-field">
             <label>{t('rank')}<Req /></label>
-            <PhCatSelect className={selectClsFor('rank')} value={value.rank} options={RAM_RANK} onChange={v => onChange('rank', v)} />
+            <PhCatSelect className={selectClsFor('rank')} value={value.rank} options={allowedOptions('RAM', 'rank', value, RAM_RANK)} onChange={v => onChange('rank', v)} />
           </div>
         </div>
         <div className="ph-field">
@@ -170,7 +170,7 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
           </div>
           <div className="ph-field">
             <label>{t('formFactor')}</label>
-            <PhCatSelect className={selectClsFor('formFactor')} value={value.formFactor} options={SSD_FORM} onChange={v => onChange('formFactor', v)} />
+            <PhCatSelect className={selectClsFor('formFactor')} value={value.formFactor} options={allowedOptions('SSD', 'formFactor', value, SSD_FORM)} onChange={v => onChange('formFactor', v)} />
           </div>
         </div>
         <div className="ph-field">

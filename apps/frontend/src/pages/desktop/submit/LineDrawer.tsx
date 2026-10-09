@@ -24,6 +24,7 @@ import { type ResolvedMarketValue } from '../../../lib/useMarketLookup';
 import { addableCategories, aiCaptureEnabled, categoryTone } from '../../../lib/lookups';
 import { parseSerials } from '../../../components/SerialNumbers';
 import { useChipFill } from '../../../lib/useChipFill';
+import { cascadePatch } from '@recycle-erp/shared';
 
 // ─── LineDrawer ──────────────────────────────────────────────────────────────
 // When `editing` is true (e.g. used by DesktopEditOrder), the pricing grid
@@ -87,7 +88,15 @@ export function LineDrawer({
   // The category was already chosen by the button that created this line, so
   // the switch stays out of the way until someone says they filed it wrong.
   const [catOpen, setCatOpen] = useState(false);
-  const set = (patch: Partial<Line>) => onChange(patch);
+  // Every spec edit — a pick or a scan — goes through the cascade, so a line
+  // never holds a Class its Type rules out. The scan lands after an upload, so
+  // it reads the line as it is then, not as it was when the scan began.
+  const lineRef = useRef<Line>(line);
+  lineRef.current = line;
+  const set = useCallback(
+    (patch: Partial<Line>) => onChange(cascadePatch<Line>(cat, lineRef.current, patch)),
+    [cat, onChange],
+  );
   useChipFill(line, { enabled: !readOnly, onFill: chipNumber => set({ chipNumber }) });
   const [lightbox, setLightbox] = useState(false);
   const [thumbBroken, setThumbBroken] = useState(false);
@@ -164,7 +173,7 @@ export function LineDrawer({
       form.append('file', file, file.name);
       form.append('category', cat);
       const scan = await api.upload<ScanResponse>('/api/scan/label', form);
-      onChange(scanToLinePatch(scan, cat));
+      set(scanToLinePatch(scan, cat));
       const conf = scan.confidence ?? 0;
       const noFields = Object.keys(scan.extracted ?? {}).length === 0;
       if (scan.provider === 'stub') {
@@ -185,7 +194,7 @@ export function LineDrawer({
     } finally {
       setAiBusy(false);
     }
-  }, [aiBusy, cat, onChange, t]);
+  }, [aiBusy, cat, set, t]);
 
   const onCamCapture = useCallback(async (file: File) => {
     scannedByCamRef.current = true;

@@ -15,7 +15,7 @@ import { LinePhotoStrip, type PendingPhoto } from '../components/LinePhotoStrip'
 import type { LinePhoto } from '../lib/linePhotos';
 import { parseSerials } from '../components/SerialNumbers';
 import { showErrorDialog, showWarnToast } from '../lib/errorToast';
-import { synthesizePartNumber, serialIssue } from '@recycle-erp/shared';
+import { cascadePatch, synthesizePartNumber, serialIssue } from '@recycle-erp/shared';
 import { lineRequirements, missingFieldNames } from '../lib/lineRequirements';
 import { SerialCheckDialog, type SerialLineIssue } from '../components/SerialCheckDialog';
 import { SnScanner } from '../components/SnScanner';
@@ -150,10 +150,14 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
   const cleanDetected: ScanResponse | null = detected
     ? { ...detected, extracted: stripUnmatched(detected.extracted ?? {}, validation.unmatched) }
     : null;
+  // A scan lands through the spec cascade like a pick does, so a label read as
+  // SODIMM next to a Server type comes out Laptop, with the Class winning.
   const mergeBase = rescanDraft ?? (isEditing ? existingLine : undefined);
+  const scanned = (base: DraftLine, patch: Partial<DraftLine>): DraftLine =>
+    ({ ...base, ...cascadePatch(category, base, patch) });
   const initial: DraftLine = mergeBase
-    ? (cleanDetected ? { ...mergeBase, ...aiPatch(cleanDetected) } : mergeBase)
-    : (cleanDetected ? aiDefaults(category, cleanDetected) : blankDefaults(category));
+    ? (cleanDetected ? scanned(mergeBase, aiPatch(cleanDetected)) : mergeBase)
+    : (cleanDetected ? scanned(blankDefaults(category), aiDefaults(category, cleanDetected)) : blankDefaults(category));
 
   const [line, setLine] = useState<DraftLine>(initial);
   // Qty and unit cost are typed as raw text so a new line starts blank instead
@@ -222,12 +226,16 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
     onFill: chipNumber => setLine(prev => ({ ...prev, chipNumber })),
   });
 
+  // A field the cascade fills or clears counts as edited too: it now follows
+  // the purchaser's pick, not the scan.
   const set = <K extends keyof DraftLine>(k: K, v: DraftLine[K]) => {
-    setLine(prev => ({ ...prev, [k]: v }));
+    const patch = { [k]: v } as Partial<DraftLine>;
+    const keys = Object.keys(cascadePatch(category, line, patch)) as (keyof DraftLine)[];
+    setLine(prev => ({ ...prev, ...cascadePatch(category, prev, patch) }));
     setEdited(prev => {
-      if (prev.has(k)) return prev;
+      if (keys.every(key => prev.has(key))) return prev;
       const next = new Set(prev);
-      next.add(k);
+      for (const key of keys) next.add(key);
       return next;
     });
   };
