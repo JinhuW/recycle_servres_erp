@@ -382,7 +382,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
           warehouse_id: lot.warehouse_id, warehouse_short: lot.warehouse_short,
           warehouse_region: null,
           user_initials: lot.user_initials, user_name: lot.user_name,
-          created_at: lot.created_at, order_id: lot.order_id,
+          created_at: lot.created_at, order_id: lot.order_id, po_line_no: lot.po_line_no,
         });
       }
     }

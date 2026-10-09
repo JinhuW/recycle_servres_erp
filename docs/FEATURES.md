@@ -846,6 +846,9 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
 - Flat and grouped views. Grouped is what goes outward to vendors and buyers,
   so it carries no cost, sell price or submitter (v1.51.0); flat keeps them for
   internal use.
+- **A product's lots table names each lot by PO and line** — `PO-1343 #2`, the
+  number the PO page shows for that line, with the PO id still the link
+  (v1.232.0).
 - **The phone Inventory list shows each line's sell price to every role**
   (v1.144.2), under the status chip, the way the desktop table and the phone
   Orders list already did. Unit cost, profit and margin stay manager-only

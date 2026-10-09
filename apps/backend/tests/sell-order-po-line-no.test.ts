@@ -93,6 +93,13 @@ describe('PO line number on sell order lines', () => {
     for (const id of lots) {
       expect(inv.body.items.find(i => i.id === id)?.po_line_no).toBe(noOf(after, id));
     }
+    // So does the lots table under a product in the grouped view.
+    const grouped = await api<{ products: { lines: { id: string; po_line_no: number }[] }[] }>(
+      'GET', '/api/inventory/products?status=Reviewing', { token });
+    const groupedLots = grouped.body.products.flatMap(g => g.lines);
+    for (const id of lots) {
+      expect(groupedLots.find(l => l.id === id)?.po_line_no).toBe(noOf(after, id));
+    }
   });
 
   // Pack mode shows each line's photo: its lot's label scan.

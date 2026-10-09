@@ -17,6 +17,22 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.232.0] - 2026-10-09
+
+The lots table under an expanded inventory product names each lot by PO
+**and line**, `PO-1343 #2`, so it can be found on a long PO without scanning
+it by part number (RS-212).
+
+### Added
+
+- **Line # beside the PO in the lots table.** `GET /api/inventory/products`
+  now gives each lot `po_line_no`, from the same `poLineNo()` rank the PO page,
+  sell orders and the flat list already use, so the numbers can't disagree.
+  The PO id stays the link; the `#` carries a "Line 2 on PO-1343" tooltip.
+- A lot picked in the grouped view and added to a sell order now brings its
+  PO line # along. Before, a lot outside the flat list's 200 newest rows
+  arrived without one.
+
 ## [1.231.0] - 2026-10-09
 
 A Micron line's **Chip #** now holds the die code (VPP, TBH, CJV…), not the
