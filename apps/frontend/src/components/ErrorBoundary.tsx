@@ -27,7 +27,8 @@ function Fallback({ onReload }: { onReload: () => void }) {
   );
 }
 
-type Props = { children: ReactNode };
+// `fallback` replaces the reload card, for a subtree the page can do without.
+type Props = { children: ReactNode; fallback?: ReactNode };
 type State = { failed: boolean };
 
 export class ErrorBoundary extends Component<Props, State> {
@@ -53,6 +54,8 @@ export class ErrorBoundary extends Component<Props, State> {
 
   render(): ReactNode {
     if (!this.state.failed) return this.props.children;
+    // Not `??`: `fallback={null}` asks for nothing, and `null ?? card` is the card.
+    if (this.props.fallback !== undefined) return this.props.fallback;
     return <Fallback onReload={() => window.location.reload()} />;
   }
 }

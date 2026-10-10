@@ -4,14 +4,22 @@ compatibility_date = "2026-06-18"
 # Lets CI deploy with a scoped CLOUDFLARE_API_TOKEN (no OAuth session).
 account_id = "cf0e09b533b74d32407f6fe1b558165b"
 
-# Static SPA build output. The Worker must see every *navigable* request so
-# its http→https redirect runs before anything is served (a document loaded
-# over plain http can never store the backend's Secure auth cookies — see
+# Static SPA build output. The Worker sees every request, so its http→https
+# redirect runs before anything is served (a document loaded over plain http
+# can never store the backend's Secure auth cookies — see
 # docs/debug-notes/2026-08-22-mobile-login-bounce-http-secure-cookie.md).
-# Only the content-hashed asset directories skip the Worker invocation: they
-# are referenced relatively by an already-https page, so they never carry the
-# scheme bug and stay on the free asset path. Cache headers come from
-# apps/frontend/public/_headers. Inherited by both named environments below.
+#
+# That includes /assets/, /fonts/ and /icons/, which used to be excluded to
+# save the invocation. Excluded, a miss there was answered by the asset layer
+# with the `_headers` caching rule on it — a 404 stamped immutable for a year.
+# A deploy rolls out across the edge unevenly, so a page from the new build can
+# ask for its own chunk before the node it reaches holds it; that browser then
+# kept the 404 and showed a blank page on every reload (RS-221). Through the
+# Worker, a miss gets its no-store 404 and the next load fetches it for real.
+# Hits still come from ASSETS with `_headers` applied, and once cached they
+# are never re-requested, so the cost is one invocation per asset per browser.
+# Cache headers come from apps/frontend/public/_headers. Inherited by both
+# named environments below.
 #
 # not_found_handling is "none", and the Worker serves index.html itself for
 # document paths. With "single-page-application" the asset layer treats EVERY
@@ -19,18 +27,12 @@ account_id = "cf0e09b533b74d32407f6fe1b558165b"
 # ever a content-hashed chunk a deploy has replaced. That returned 200 with
 # `content-type: text/html` under the /assets/* `immutable, max-age=1y` rule, so
 # an open tab got a document where it asked for an ES module and cached the
-# result for a year. It also meant the Worker was never invoked for those paths,
-# so the http→https redirect never ran on them either.
+# result for a year.
 [assets]
 directory = "../../apps/frontend/dist"
 binding = "ASSETS"
 not_found_handling = "none"
-run_worker_first = [
-  "/*",
-  "!/assets/*",
-  "!/fonts/*",
-  "!/icons/*",
-]
+run_worker_first = true
 
 # Two deployments — one Worker per Railway backend environment. Deploy with:
 #   deploy/cloudflare/deploy.sh prod   # builds, deploys, smoke-checks the domains
