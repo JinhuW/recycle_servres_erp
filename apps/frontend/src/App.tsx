@@ -62,14 +62,19 @@ export default function App() {
         <DiscardConfirmHost />
         {mismatch && <LayoutSwitch toPhone={fitsPhone} onSwitch={() => { void switchShell(); }} />}
       </ErrorBoundary>
-      <Suspense fallback={null}>
-        {isPhone ? (
-          <>
-            <PwaInstallPrompt />
-            <PwaUpdateToast />
-          </>
-        ) : <BundleUpdateToast />}
-      </Suspense>
+      {/* Its own boundary: a toast chunk that fails to load is otherwise an
+          error no boundary catches, and React unmounts the whole root — a
+          blank page where the shell's Reload card should be. */}
+      <ErrorBoundary fallback={null}>
+        <Suspense fallback={null}>
+          {isPhone ? (
+            <>
+              <PwaInstallPrompt />
+              <PwaUpdateToast />
+            </>
+          ) : <BundleUpdateToast />}
+        </Suspense>
+      </ErrorBoundary>
     </LangProvider>
   );
 }
