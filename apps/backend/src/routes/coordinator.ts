@@ -27,15 +27,19 @@ const coordinator = new Hono<{ Bindings: Env; Variables: { user: User } }>()
   .use('*', requireManager);
 
 export function upstream(env: Env): { base: string; headers: Record<string, string> } | null {
-  const base = env.COORDINATOR_API_URL?.replace(/\/+$/, '');
-  const token = env.COORDINATOR_API_TOKEN;
+  const base = env.COORDINATOR_API_URL?.trim().replace(/\/+$/, '');
+  // Trimmed because a pasted secret often ends in a newline: fetch strips it
+  // from a header value, but the VNC bridge's socket refuses the whole header.
+  const token = env.COORDINATOR_API_TOKEN?.trim();
   if (!base || !token) return null;
   const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
   // The facade's tunnel hostname sits behind Cloudflare Access; the service
   // token gets this request past the edge, the bearer token past the facade.
-  if (env.COORDINATOR_ACCESS_CLIENT_ID && env.COORDINATOR_ACCESS_CLIENT_SECRET) {
-    headers['CF-Access-Client-Id'] = env.COORDINATOR_ACCESS_CLIENT_ID;
-    headers['CF-Access-Client-Secret'] = env.COORDINATOR_ACCESS_CLIENT_SECRET;
+  const accessId = env.COORDINATOR_ACCESS_CLIENT_ID?.trim();
+  const accessSecret = env.COORDINATOR_ACCESS_CLIENT_SECRET?.trim();
+  if (accessId && accessSecret) {
+    headers['CF-Access-Client-Id'] = accessId;
+    headers['CF-Access-Client-Secret'] = accessSecret;
   }
   return { base, headers };
 }
@@ -48,28 +52,50 @@ export function upstream(env: Env): { base: string; headers: Record<string, stri
 const UPSTREAM_AUTH_REFUSED =
   'The fleet console refused the ERP’s credentials — check COORDINATOR_API_TOKEN (and the Access service token)';
 const REFUSAL_DETAIL_MAX = 200;
+// What the facade's own bearer check says. Any other 401 it answers with is
+// the coordinator behind it refusing the *facade's* token, relayed verbatim —
+// pointing the operator at COORDINATOR_API_TOKEN then would send them to
+// reset a token that is fine.
+const FACADE_AUTH_DETAILS = new Set(['Missing bearer token', 'Invalid bearer token']);
+
+function upstreamWhy(body: { detail?: unknown; error?: unknown } | null): string | null {
+  return typeof body?.detail === 'string' ? body.detail
+    : typeof body?.error === 'string' ? body.error
+    : null;
+}
 
 /**
  * What to tell the manager when the facade answers 401/403; null for any
- * other status, whose body is left unread for the caller. A 401 is always
- * our credentials, and so is a 403 that comes bare or as Cloudflare Access's
- * HTML page. A 403 the facade explains in JSON means it declined this
- * request, and its own words are the useful part.
+ * other status, whose body is left unread for the caller. A 401 or 403 that
+ * comes bare, as Cloudflare Access's HTML page, or as the facade's own bearer
+ * check is our credentials. A 403 the facade explains in JSON means it
+ * declined this request, and a 401 it explains otherwise is relayed from the
+ * coordinator; either way their own words are the useful part.
  */
 export async function refusalMessage(res: Response): Promise<string | null> {
-  if (res.status === 401) return UPSTREAM_AUTH_REFUSED;
-  if (res.status !== 403) return null;
+  if (res.status !== 401 && res.status !== 403) return null;
   // Parsed whatever the Content-Type says; an HTML page simply fails to parse.
-  let body: { detail?: unknown; error?: unknown } | null;
+  let why: string | null;
   try {
-    body = JSON.parse(await res.text()) as { detail?: unknown; error?: unknown } | null;
+    why = upstreamWhy(JSON.parse(await res.text()) as { detail?: unknown; error?: unknown } | null);
   } catch {
     return UPSTREAM_AUTH_REFUSED;
   }
-  const why = typeof body?.detail === 'string' ? body.detail
-    : typeof body?.error === 'string' ? body.error
-    : null;
-  return why ? `The fleet console refused this request: ${why.slice(0, REFUSAL_DETAIL_MAX)}` : UPSTREAM_AUTH_REFUSED;
+  if (!why || FACADE_AUTH_DETAILS.has(why)) return UPSTREAM_AUTH_REFUSED;
+  if (res.status === 401) {
+    return `The fleet console’s coordinator refused its token — check RS_COORDINATOR_ADMIN_TOKEN on the console: ${why.slice(0, REFUSAL_DETAIL_MAX)}`;
+  }
+  return `The fleet console refused this request: ${why.slice(0, REFUSAL_DETAIL_MAX)}`;
+}
+
+// The facade and coordinator are FastAPI, whose errors read {detail}; the
+// SPA shows only `error`, so without this a 404/409 reads as 'HTTP 409'.
+function withError(payload: unknown): unknown {
+  if (payload && typeof payload === 'object' && !('error' in payload)) {
+    const why = upstreamWhy(payload as { detail?: unknown });
+    if (why) return { ...payload, error: why };
+  }
+  return payload;
 }
 
 function upstreamRefused(
@@ -115,7 +141,7 @@ async function forward(
   // Pass the upstream body and status through verbatim: the coordinator's 4xx
   // bodies carry actionable messages the UI shows as-is.
   const payload = await res.json().catch(() => ({ error: `coordinator returned ${res.status}` }));
-  return c.json(payload, res.status as ContentfulStatusCode);
+  return c.json(withError(payload), res.status as ContentfulStatusCode);
 }
 
 coordinator.get('/workers', (c) => forward(c, 'GET', '/v1/workers'));
@@ -220,7 +246,7 @@ coordinator.get('/challenges/:id/screenshot', async (c) => {
   if (refused) return upstreamRefused(c, res.status, path, refused);
   if (!res.ok) {
     const payload = await res.json().catch(() => ({ error: `coordinator returned ${res.status}` }));
-    return c.json(payload, res.status as ContentfulStatusCode);
+    return c.json(withError(payload), res.status as ContentfulStatusCode);
   }
 
   const bytes = await res.arrayBuffer();

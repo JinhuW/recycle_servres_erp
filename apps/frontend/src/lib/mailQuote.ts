@@ -8,31 +8,39 @@
 const HEADER_START = /^(From|发件人)\s*[:：]/;
 const HEADER_NEXT = /^(Sent|Date|To|Subject|Cc|发送时间|日期|时间|收件人|主题)\s*[:：]/;
 
-function isMarker(lines: string[], i: number): boolean {
+type Marker = 'block' | 'attribution';
+
+// `attribution` is a "… wrote:" line heading a `>`-quoted block, and how many
+// lines it spans; `block` quotes what follows unprefixed.
+function markerAt(lines: string[], i: number): { kind: Marker; span: number } | null {
   const l = lines[i].trim();
-  if (/^-{2,}\s*Original Message\s*-{2,}/i.test(l)) return true;
-  if (/^在.+写道[:：]\s*$/.test(l)) return true;
+  if (/^-{2,}\s*Original Message\s*-{2,}/i.test(l)) return { kind: 'block', span: 1 };
+  if (/^在.+写道[:：]\s*$/.test(l)) return { kind: 'attribution', span: 1 };
   // Gmail and Apple Mail, which wrap a long "On … <address> wrote:" over two
   // lines.
   if (/^On\s/.test(l)) {
-    if (/wrote:\s*$/.test(l)) return true;
+    if (/wrote:\s*$/.test(l)) return { kind: 'attribution', span: 1 };
     const next = lines[i + 1]?.trim() ?? '';
-    if (/wrote:\s*$/.test(next) && !/^On\s/.test(next)) return true;
+    if (/wrote:\s*$/.test(next) && !/^On\s/.test(next)) return { kind: 'attribution', span: 2 };
   }
   // Outlook and Lark start the quoted message with its own header block. A
-  // lone "From:" line is just text; a block has Sent/To/Subject under it.
-  if (HEADER_START.test(l)) {
-    return lines.slice(i + 1, i + 5).some((n) => HEADER_NEXT.test(n.trim()));
+  // "From:" with a To: somewhere under it is just as likely a pickup address,
+  // so the block has to be at least two header lines straight under it.
+  if (HEADER_START.test(l) && HEADER_NEXT.test(lines[i + 1]?.trim() ?? '') && HEADER_NEXT.test(lines[i + 2]?.trim() ?? '')) {
+    return { kind: 'block', span: 1 };
   }
-  return false;
+  return null;
 }
 
 export function splitQuotedReply(text: string): { reply: string; quoted: string } {
   const lines = text.split('\n');
   for (let i = 1; i < lines.length; i++) {
-    if (isMarker(lines, i)) {
-      return { reply: lines.slice(0, i).join('\n').trimEnd(), quoted: lines.slice(i).join('\n').trim() };
-    }
+    const m = markerAt(lines, i);
+    if (!m) continue;
+    // Answers written between the quoted lines are the sender's own, and
+    // folding them hides a price or a new address behind the toggle.
+    if (m.kind === 'attribution' && lines.slice(i + m.span).some((l) => l.trim() !== '' && !l.startsWith('>'))) continue;
+    return { reply: lines.slice(0, i).join('\n').trimEnd(), quoted: lines.slice(i).join('\n').trim() };
   }
   // Plain-text clients: a trailing run of `>` lines.
   let j = lines.length;

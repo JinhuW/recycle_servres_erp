@@ -288,7 +288,13 @@ export function match(template: string, path: string): Record<string, string> | 
   for (let i = 0; i < t.length; i++) {
     const seg = t[i]!;
     if (seg.startsWith(':')) {
-      params[seg.slice(1)] = decodeURIComponent(p[i]!);
+      // A hand-typed or truncated link can carry a stray `%`; that is a
+      // non-match, not a URIError thrown through every render.
+      try {
+        params[seg.slice(1)] = decodeURIComponent(p[i]!);
+      } catch {
+        return null;
+      }
     } else if (seg !== p[i]) {
       return null;
     }
@@ -451,7 +457,9 @@ export function isAuthorizePath(path: string): boolean {
 // `/\t/evil.com` passes a `//` test and still lands on //evil.com. Control
 // characters and backslashes are refused outright, and the survivor is
 // resolved against a placeholder origin and must still be on it — the
-// returned path is the parser's reading, not the raw input.
+// returned path is the parser's reading, not the raw input. That reading is
+// checked again: dot segments collapse, so `/.//evil.com` and `/%2e//evil.com`
+// pass the raw test and normalise to `//evil.com`.
 const UNSAFE_NEXT_CHARS = /[\x00-\x1f\\]/;
 const NEXT_BASE_ORIGIN = 'https://erp.invalid';
 
@@ -462,7 +470,9 @@ export function readSafeNext(search: string): string | null {
   if (!raw.startsWith('/') || raw.startsWith('//')) return null;
   const u = new URL(raw, NEXT_BASE_ORIGIN);
   if (u.origin !== NEXT_BASE_ORIGIN) return null;
-  return u.pathname + u.search + u.hash;
+  const out = u.pathname + u.search + u.hash;
+  if (!out.startsWith('/') || out.startsWith('//') || out.startsWith('/\\')) return null;
+  return out;
 }
 
 // Mobile view ids ↔ URL paths.

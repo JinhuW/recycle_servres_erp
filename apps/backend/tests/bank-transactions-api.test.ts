@@ -156,6 +156,19 @@ describe('bank transactions API', () => {
     expect(stats.body.unlinked.count).toBe(3);
   });
 
+  it('a transfer cannot be linked to a PO', async () => {
+    await syncBankTransactions(testEnv, [
+      fakeProvider('mercury', [{ externalId: 'm-xfer', amount: -1240, counterparty: 'PayPal', category: 'transfer' }]),
+    ]);
+    const { token } = await loginAs(ALEX);
+    const poId = await createPO(token);
+    const r = await api<{ error: string }>('POST', `/api/bank-transactions/${await idOf('m-xfer')}/link`, { token, body: { orderId: poId } });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toMatch(/transfer/i);
+    const [row] = await getTestDb()`SELECT order_id FROM bank_transactions WHERE external_id = 'm-xfer'`;
+    expect(row.order_id).toBeNull();
+  });
+
   it('mark-transfer / unmark-transfer flip the whole group with a sticky manual verdict', async () => {
     await seedPairedAndSingles();
     const { token } = await loginAs(ALEX);

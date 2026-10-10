@@ -207,7 +207,7 @@ function WarehouseEditModal({
     shipStreet1: string; shipStreet2: string;
     shipCity: string; shipState: string; shipZip: string; shipCountry: string;
   };
-  const [draft, setDraft] = useState<Draft>({
+  const [initial] = useState<Draft>(() => ({
     name: warehouse?.name ?? '',
     short: warehouse?.short ?? '',
     region: warehouse?.region ?? '',
@@ -221,7 +221,8 @@ function WarehouseEditModal({
     shipState: warehouse?.shipState ?? '',
     shipZip: warehouse?.shipZip ?? '',
     shipCountry: warehouse?.shipCountry ?? '',
-  });
+  }));
+  const [draft, setDraft] = useState<Draft>(initial);
   // Manager dropdown is sourced from the DB (users with role=manager).
   const [managers, setManagers] = useState<Member[]>([]);
   useEffect(() => {
@@ -248,6 +249,11 @@ function WarehouseEditModal({
         const t = s.trim();
         return t === '' ? null : t;
       };
+      // Sending the address parts recomputes the display line from them, and
+      // a warehouse that only has the old free-text address composes nothing
+      // — so it would be erased by a save that never touched the address.
+      const addressKeys = ['shipStreet1', 'shipStreet2', 'shipCity', 'shipState', 'shipZip', 'shipCountry'] as const;
+      const addressEdited = isNew || addressKeys.some(k => draft[k].trim() !== initial[k].trim());
       const body = {
         name: draft.name.trim(),
         short: draft.short.trim(),
@@ -256,12 +262,7 @@ function WarehouseEditModal({
         timezone: clean(draft.timezone),
         shipContactName: clean(draft.shipContactName),
         shipPhone: clean(draft.shipPhone),
-        shipStreet1: clean(draft.shipStreet1),
-        shipStreet2: clean(draft.shipStreet2),
-        shipCity: clean(draft.shipCity),
-        shipState: clean(draft.shipState),
-        shipZip: clean(draft.shipZip),
-        shipCountry: clean(draft.shipCountry),
+        ...(addressEdited ? Object.fromEntries(addressKeys.map(k => [k, clean(draft[k])])) : {}),
       };
       if (isNew) await api.post('/api/warehouses', body);
       else       await api.patch(`/api/warehouses/${warehouse!.id}`, body);

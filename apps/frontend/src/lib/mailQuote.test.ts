@@ -18,6 +18,27 @@ describe('splitQuotedReply', () => {
     expect(splitQuotedReply(prose)).toEqual({ reply: prose, quoted: '' });
   });
 
+  it('keeps answers written between quoted lines, folding only the quoted block after the last one', () => {
+    const inline = 'Hi Alex,\n\nOn Mon, Oct 3, 2026 at 5:01 PM ram4cash <sell@ram4cash.com> wrote:\n> How many sticks do you have?\n\n'
+      + '20 sticks, all 32GB.\n\n> What price?\n\n$40 each, PayPal to my new address pay@other.com.';
+    expect(splitQuotedReply(inline)).toEqual({ reply: inline, quoted: '' });
+    expect(mailSnippet(inline)).toContain('$40 each, PayPal to my new address pay@other.com.');
+    const trailing = `${inline}\n\n> Thanks,\n> Alex`;
+    expect(splitQuotedReply(trailing)).toEqual({ reply: inline, quoted: '> Thanks,\n> Alex' });
+    const twice = 'ok\nOn Mon a wrote:\n> q\nanswer\nOn Sun b wrote:\n> older';
+    expect(splitQuotedReply(twice)).toEqual({ reply: 'ok\nOn Mon a wrote:\n> q\nanswer', quoted: 'On Sun b wrote:\n> older' });
+    const prose = 'Thanks.\nOn second thought, my brother wrote:\nhe wants $45 each.';
+    expect(splitQuotedReply(prose)).toEqual({ reply: prose, quoted: '' });
+  });
+
+  it('reads From:/To: prose as text, not a header block', () => {
+    for (const prose of [
+      'Pickup details below.\nFrom: 1234 Main St, Denver\nTo: your Austin warehouse\nReady Friday, 20 sticks',
+      'Shipping plan:\nFrom: Denver\nDate: Friday\n20 sticks',
+      'Route:\nFrom: Denver\nvia I-25\nthen I-40\nTo: Austin',
+    ]) expect(splitQuotedReply(prose)).toEqual({ reply: prose, quoted: '' });
+  });
+
   it('folds "Original Message" and a trailing > run', () => {
     expect(splitQuotedReply('ok\n-----Original Message-----\nold').reply).toBe('ok');
     expect(splitQuotedReply('Sounds good\n\n> Offer\n> line 2\n')).toEqual({ reply: 'Sounds good', quoted: '> Offer\n> line 2' });

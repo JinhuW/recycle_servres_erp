@@ -7,6 +7,8 @@ import { useAuth } from '../../lib/auth';
 import { useEffectiveUser } from '../../lib/tweaks';
 import { api, deleteOrder, archiveOrder, unarchiveOrder, followLineTotal, ApiError } from '../../lib/api';
 import { readArchiveConflict, type ArchiveConflict } from '../../lib/archiveConflict';
+import { readStageMoved } from '../../lib/boxCheck';
+import { poStageName } from '../../lib/orderPresentation';
 import { ArchiveConflictList } from '../../components/ArchiveConflictList';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { fmtUSD, fmtDateShort } from '../../lib/format';
@@ -798,6 +800,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   const takeBackMove = () => { if (statusDirty) setStatus(savedStatus); };
 
   const attemptSave = () => {
+    if (saving) { takeBackMove(); return; }
     if (saveBlockers.length) {
       takeBackMove();
       showErrorDialog(t('errCantSaveMsg'), saveBlockers, t('errCantSaveTitle'));
@@ -828,7 +831,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     // A manager's move. False when the server named a new manager and the
     // second question was cancelled: the rest of the save stands and the move
     // is taken back.
-    const moveAsManager = (toStage: string | undefined) => takeover.advance(order, { toStage }, answer!);
+    // Named with the stage this page shows, so a page that sat open while
+    // someone else moved the order can't jump it from where it is now.
+    const moveAsManager = (toStage: string | undefined) =>
+      takeover.advance(order, { toStage, fromStage: lifecycleOf(savedStatus) }, answer!);
     let moved = false;
     setSaving(true);
     try {
@@ -994,6 +1000,15 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       }
       onSaved(msg);
     } catch (e) {
+      // The order moved under the page: the stage this page would move it
+      // from is gone, so the page is the thing to refresh.
+      const now = readStageMoved(e);
+      if (now !== null) {
+        takeBackMove();
+        showErrorDialog(t('poStageMovedReload', { id: order.id, s: poStageName(now, t) }));
+        if (onReload) await onReload().catch(handleFetchError);
+        return moved;
+      }
       // Keep the editor open and the user's edits intact on failure — calling
       // onSaved here would navigate away and discard unsaved work.
       showErrorDialog(e instanceof Error ? e.message : t('saveFailed'));
@@ -1069,19 +1084,29 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     // but after the checks that can still abort, or a save that never happens
     // spends the once-per-visit acknowledgement.
     if (!(await askRevert())) throw new Error(t('revertWarnCancelled'));
-    const r = await api.patch<{ ok: true; addedLineIds: string[]; addedLineNos?: number[]; lifecycle: string }>(
-      `/api/orders/${order.id}`,
-      l._id
-        ? { lines: [editLineToPatch(l)] }
-        : { addLines: [editLineToInsert(l, status)] },
-    );
+    // Save stays off until the new line's id is back: it would send the line
+    // again as new.
+    setSaving(true);
+    let r: { ok: true; addedLineIds: string[]; addedLineNos?: number[]; lifecycle: string };
+    try {
+      r = await api.patch(
+        `/api/orders/${order.id}`,
+        l._id
+          ? { lines: [editLineToPatch(l)] }
+          : { addLines: [editLineToInsert(l, status)] },
+      );
+    } finally {
+      setSaving(false);
+    }
     // A purchaser's confirm can send the order back to Draft. Without this the
     // page keeps showing the old stage, the stepper still offers only that
     // stage, and there is no way to re-submit short of a reload.
     applyLifecycle(r.lifecycle);
     const newId = l._id ?? r.addedLineIds[0];
     const no = l.no ?? r.addedLineNos?.[0];
-    setLines(ls => ls.map((x, j) => (j === i ? { ...x, _id: newId, no, _dirty: false } : x)));
+    // By the row's own key: a row added or removed while the write was out
+    // moves the index.
+    setLines(ls => ls.map(x => (x._cid === l._cid ? { ...x, _id: newId, no, _dirty: false } : x)));
     if (!l._id && newId) {
       setPersistedIds(ids => [...ids, newId]);
       if (await flushPendingPhotos(l._cid, newId)) showErrorDialog(t('linePhotoUploadFailed'));

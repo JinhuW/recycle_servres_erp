@@ -16,10 +16,14 @@ import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../../services/orderGoo
 import { synthesizePartNumber, serialIssue, staleSpecDbCols, normSellPrice, normalizeTracking, isMaterialPatch, type Carrier, type PackageSource } from '@recycle-erp/shared';
 import { normPaypalTxnId } from '../../ai/paypal';
 import { log } from '../../lib/log';
-import { type OrdersEnv, assertCategoriesEnabled, badFees, canonChipNumber, changesMaterialField, committedLinesBody, describeSellOrders, handoffByErr, handoffFactsAfter, identityErr, isOrderPayment, isPaymentMethod, lineAuditCols, type LineFields, type LinePatch, type LineSnapRow, lineSnapshot, newLineRow, normFeeNote, PACKAGE_DELIVERED_MSG, parseCommissionRate, registerIfNeeded, resolveOrderOwner, serialErr, sourceErr, type StoredLine, storedLineCols, supplierErr, TRACKING_TAKEN_STANDALONE_MSG, trackingErr, trackingTakenMsg, trackInput, warehouseErr } from './shared';
+import { type OrdersEnv, assertCategoriesEnabled, badFees, canonChipNumber, changesMaterialField, committedLinesBody, describeSellOrders, handoffByErr, handoffFactsAfter, identityErr, isOrderPayment, isPaymentMethod, lineAuditCols, type LineFields, type LinePatch, type LineSnapRow, lineSnapshot, newLineRow, normFeeNote, PACKAGE_DELIVERED_MSG, parseCommissionRate, registerIfNeeded, resolveOrderOwner, serialErr, sourceErr, stageMovedBody, type StoredLine, storedLineCols, supplierErr, TRACKING_TAKEN_STANDALONE_MSG, trackingErr, trackingTakenMsg, trackInput, warehouseErr } from './shared';
 import { OrderRefusal, refusalResponse } from './refusal';
 
 const patchRoutes = new Hono<OrdersEnv>();
+
+class StageMoved extends Error {
+  constructor(readonly lifecycle: string) { super('stage moved'); }
+}
 
 // ── Edit — update order meta + line item details. The order owner
 // (purchaser) or a manager may PATCH. Draft is purchaser-editable; later
@@ -57,9 +61,14 @@ patchRoutes.patch('/:id', async (c) => {
         handoffBy?: string | null;
         trackingNumber?: string;
         carrier?: Carrier;
+        // The stage the caller saw. Refused, untouched, if the PO has left it.
+        expectStage?: string;
       }
     | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
+  if (body.expectStage !== undefined && typeof body.expectStage !== 'string') {
+    return c.json({ error: 'expectStage must be a stage' }, 400);
+  }
   // order_lines.id is uuid-typed: a malformed id reaches `::uuid[]` inside the
   // transaction and surfaces as a 500 instead of the 400 the client can act on.
   const isLineId = (v: unknown) => typeof v === 'string' && UUID_RE.test(v);
@@ -333,6 +342,9 @@ patchRoutes.patch('/:id', async (c) => {
       // An archived order's lines sit at 'Archived'; a purchaser edit would
       // revert it to Draft and cascade them straight back into stock.
       if (orderBefore.archived_at) throw new OrderRefusal({ kind: 'archived' });
+      if (body.expectStage !== undefined && body.expectStage !== orderBefore.lifecycle) {
+        throw new StageMoved(orderBefore.lifecycle);
+      }
       lifecycleAfter = orderBefore.lifecycle;
       // From Ready to Pay on the PO is the closed-book record of what was
       // bought and what the purchaser is paid on. Any edit to lines, costs,
@@ -531,9 +543,15 @@ patchRoutes.patch('/:id', async (c) => {
         if (unlinked.gone.length) packageChanged = packageChanges(unlinked.gone[0], null);
       }
       if (Array.isArray(body.removeLineIds) && body.removeLineIds.length) {
+        // Locked, in id order after the order: a sell order locks the lines it
+        // names, a 0-held one included, before raising its claim, so a raise
+        // that commits while this waits is seen by the check below rather
+        // than having its lot deleted out from under it.
         const doomed = await tx`
           SELECT id, product_no, category, scan_image_id, part_number, qty, unit_cost::float AS unit_cost FROM order_lines
           WHERE order_id = ${id} AND id = ANY(${body.removeLineIds}::uuid[])
+          ORDER BY id
+          FOR UPDATE
         ` as (LineSnapRow & { scan_image_id: string | null })[];
         removedSnapshots = doomed.map(r => ({
           id: r.id, product_no: r.product_no, category: r.category, part_number: r.part_number,
@@ -892,6 +910,7 @@ patchRoutes.patch('/:id', async (c) => {
     });
   } catch (e) {
     if (e instanceof OrderRefusal) return refusalResponse(c, u, e.refusal);
+    if (e instanceof StageMoved) return c.json(stageMovedBody(u, e.lifecycle), 409);
     // A line value outside a column's CHECK (health 0–100, rpm > 0, qty >= 0).
     if ((e as { code?: string }).code === '23514') {
       return c.json({ error: 'A product value is out of range' }, 400);

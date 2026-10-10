@@ -6,6 +6,7 @@ import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { fmtUSD, fmtMoney, fmtDate } from '../../lib/format';
 import { fetchRateToUsd, type FxInfo } from '../../lib/fxRate';
 import { useT } from '../../lib/i18n';
+import { useEscapeKey } from '../../lib/useEscapeKey';
 
 type Currency = 'USD' | 'CNY';
 
@@ -531,6 +532,13 @@ export function CustomerPicker({
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
   }, [open]);
+
+  // The open menu is a layer of its own, so Escape closes it and not the
+  // dialog it sits in.
+  useEscapeKey(() => {
+    if (creating) { setCreating(false); setNewName(''); }
+    else setOpen(false);
+  }, open);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

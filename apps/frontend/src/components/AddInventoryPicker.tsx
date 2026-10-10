@@ -60,7 +60,9 @@ export function AddInventoryPicker({ excludeIds, locale, onClose, onAdd }: Props
   // The server caps the list, so a broad search can leave lots unseen; the
   // hint is the only sign of that.
   const [hasMore, setHasMore] = useState(false);
-  const [checked, setChecked] = useState<Set<string>>(new Set());
+  // Kept by lot, not looked up in `items`: a lot ticked under an earlier
+  // search is still picked after the list has moved on.
+  const [checked, setChecked] = useState<ReadonlyMap<string, SellableItem>>(new Map());
 
   useEscapeKey(onClose);
 
@@ -92,15 +94,15 @@ export function AddInventoryPicker({ excludeIds, locale, onClose, onAdd }: Props
     return [...map.values()];
   }, [items, excludeIds]);
 
-  const toggle = (id: string) =>
+  const toggle = (it: SellableItem) =>
     setChecked(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      const next = new Map(prev);
+      if (next.has(it.inventoryId)) next.delete(it.inventoryId); else next.set(it.inventoryId, it);
       return next;
     });
 
   const confirm = () => {
-    const picked = (items ?? []).filter(it => checked.has(it.inventoryId));
+    const picked = [...checked.values()].filter(it => !excludeIds.has(it.inventoryId));
     if (picked.length > 0) onAdd(picked);
     onClose();
   };
@@ -162,7 +164,7 @@ export function AddInventoryPicker({ excludeIds, locale, onClose, onAdd }: Props
                         cursor: 'pointer', background: on ? 'var(--accent-soft)' : 'transparent',
                       }}
                     >
-                      <input type="checkbox" checked={on} onChange={() => toggle(it.inventoryId)} />
+                      <input type="checkbox" checked={on} onChange={() => toggle(it)} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 13, fontWeight: 500 }}>{it.subLabel ?? it.label}</div>
                         <div style={{ fontSize: 11, color: 'var(--fg-subtle)', display: 'flex', gap: 8, marginTop: 1 }}>

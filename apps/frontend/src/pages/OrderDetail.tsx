@@ -36,7 +36,8 @@ import { PACKAGE_SOURCES, packageSourceLabelKey, type PackageSource } from '../l
 import { FMT_HINT_KEY } from '../lib/useAddPackageForm';
 import { refreshPackage } from '../lib/packages';
 import { lookbackFacts, type StageId } from '../lib/orderLookback';
-import { LIFECYCLE_LABEL } from '../lib/orderPresentation';
+import { LIFECYCLE_LABEL, poStageName } from '../lib/orderPresentation';
+import { readStageMoved } from '../lib/boxCheck';
 import { PackageJourney } from './desktop/PackageJourney';
 import { fmtDate } from '../lib/format';
 import { useOrderEvents } from '../lib/useOrderEvents';
@@ -499,15 +500,27 @@ export function OrderDetail({
   })();
   const canAdvance = !!nextStatus && !advancing && !saving;
 
+  // The move is relative — "the next stage" — so it names the stage this page
+  // shows: from a stale page it would otherwise step a PO one past where the
+  // server has it, skipping the sheet or dialog that stage asks for.
+  const advanceFromHere = (answer: TakeoverAnswer) =>
+    takeover.advance(order, { fromStage: order.lifecycle }, answer);
+  const advanceFailed = (e: unknown) => {
+    const now = readStageMoved(e);
+    if (now !== null) showErrorDialog(t('poStageMovedReload', { id: order.id, s: poStageName(now, t) }));
+    else showErrorDialog(e instanceof Error ? e.message : t('advanceFailed'));
+  };
+
   const doAdvance = async (answer: TakeoverAnswer) => {
     setAdvancing(true);
     try {
-      if (await takeover.advance(order, {}, answer)) {
+      if (await advanceFromHere(answer)) {
         await refetchOrder();
         setActivityRefreshKey(k => k + 1);
       }
     } catch (e) {
-      showErrorDialog(e instanceof Error ? e.message : t('advanceFailed'));
+      advanceFailed(e);
+      if (readStageMoved(e) !== null) await refetchOrder();
     } finally {
       setAdvancing(false);
       setTakeoverAnswer(null);
@@ -567,21 +580,30 @@ export function OrderDetail({
     // Set whenever the sheet is open: it is only opened after the question.
     if (!takeoverAnswer) return;
     setAdvancing(true);
+    let wrote = false;
     try {
       if (commission) {
         await api.patch(`/api/orders/${order.id}`, {
           onBehalfOfUserId: ownerDirty ? ownerId : undefined,
           commissionRate: commissionDirty ? commissionRateValue : undefined,
         });
+        wrote = true;
       }
       // A second question cancelled leaves the sheet up; its fields are saved.
-      if (!(await takeover.advance(order, {}, takeoverAnswer))) return;
+      if (!(await advanceFromHere(takeoverAnswer))) return;
       setCommissionOpen(false);
       setTakeoverAnswer(null);
       await refetchOrder();
       setActivityRefreshKey(k => k + 1);
     } catch (e) {
-      showErrorDialog(e instanceof Error ? e.message : t('advanceFailed'));
+      advanceFailed(e);
+      // The fields may have landed before the move failed, and the order may
+      // have moved: either way the page's copy is behind.
+      if (wrote || readStageMoved(e) !== null) {
+        await refetchOrder();
+        setActivityRefreshKey(k => k + 1);
+      }
+      if (readStageMoved(e) !== null) { setCommissionOpen(false); setTakeoverAnswer(null); }
     } finally {
       setAdvancing(false);
     }

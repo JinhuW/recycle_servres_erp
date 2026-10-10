@@ -3,12 +3,13 @@ import { Icon } from './Icon';
 import { applyPwaUpdate, pwaUpdatePending } from '../lib/pwa';
 import { BUNDLE_STALE_EVENT, bundleStale, watchBundleVersion } from '../lib/buildVersion';
 import { useT } from '../lib/i18n';
+import { confirmDiscard, withConfirmedUnload } from '../lib/unsavedGuard';
 
 import '../styles/pwa.css';
 
 // The phone shell's update arrives through its service worker.
 export function PwaUpdateToast() {
-  return <UpdateToast pending={pwaUpdatePending} event="pwa:needRefresh" apply={() => { void applyPwaUpdate(); }} />;
+  return <UpdateToast pending={pwaUpdatePending} event="pwa:needRefresh" apply={applyPwaUpdate} />;
 }
 
 // The desktop shell has no service worker; it compares its own build with the
@@ -21,7 +22,7 @@ export function BundleUpdateToast() {
 function UpdateToast({ pending, event, apply }: {
   pending: () => boolean;
   event: string;
-  apply: () => void;
+  apply: () => void | Promise<void>;
 }) {
   const { t } = useT();
   // Initial state, not just the event: this component is lazy-loaded, so an
@@ -48,9 +49,17 @@ function UpdateToast({ pending, event, apply }: {
 
   // Applying reloads the page, after a service-worker handoff on the phone;
   // keep the button busy in the meantime so the tap reads as acknowledged.
-  const reload = () => {
+  // iOS and iPadOS show no beforeunload prompt, so unsaved edits are guarded
+  // here, and the browser's own prompt is then skipped. Busy clears once apply
+  // returns: a handoff that never fired must leave the button usable.
+  const reload = async () => {
+    if (busy || !(await confirmDiscard())) return;
     setBusy(true);
-    apply();
+    try {
+      await withConfirmedUnload(apply);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -73,7 +82,7 @@ function UpdateToast({ pending, event, apply }: {
           <Icon name="x" size={15} />
         </button>
       </div>
-      <button type="button" className="pwa-update-cta" onClick={reload} data-busy={busy}>
+      <button type="button" className="pwa-update-cta" onClick={() => { void reload(); }} data-busy={busy}>
         <span className={busy ? 'pwa-update-spin' : undefined}>
           <Icon name="refresh" size={14} />
         </span>

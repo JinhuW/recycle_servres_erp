@@ -93,6 +93,23 @@ describe('Coordinator proxy routes (/api/coordinator)', () => {
     expect(r.body.detail).toMatch(/unreachable/);
   });
 
+  it('surfaces a FastAPI {detail} as the error the SPA shows', async () => {
+    const { token } = await loginAs(ALEX);
+    stubFacade(409, { detail: 'A re-login is already queued' });
+    const r = await api<{ error: string }>('POST', '/api/coordinator/workers/ne-1/relogin', { token, env: ENV });
+    expect(r.status).toBe(409);
+    expect(r.body.error).toBe('A re-login is already queued');
+  });
+
+  it('blames the console’s own token, not ours, for a coordinator 401 it relays', async () => {
+    const { token } = await loginAs(ALEX);
+    stubFacade(401, { detail: 'Invalid or missing admin token' });
+    const r = await api<{ error: string }>('GET', '/api/coordinator/fleet', { token, env: ENV });
+    expect(r.status).toBe(502);
+    expect(r.body.error).toMatch(/RS_COORDINATOR_ADMIN_TOKEN/);
+    expect(r.body.error).not.toMatch(/COORDINATOR_API_TOKEN/);
+  });
+
   it('queues a worker re-login upstream', async () => {
     const { token } = await loginAs(ALEX);
     const spy = stubFacade(200, { status: 'queued' });
@@ -139,6 +156,15 @@ describe('Coordinator proxy routes (/api/coordinator)', () => {
         token, env, headers: { Upgrade: 'websocket' },
       });
       expect(missing.status).toBe(403);
+      const own = await api('GET', '/api/coordinator/vnc/ne-1/ws', {
+        token, env, headers: { Upgrade: 'websocket', Origin: 'https://inventory.recycleservers.com' },
+      });
+      expect(own.status).toBe(204);
+    });
+
+    it('admits the app origin when the configured one ends in a slash', async () => {
+      const { token } = await loginAs(ALEX);
+      const env = { ...ENV, CORS_ALLOWED_ORIGINS: 'https://inventory.recycleservers.com/' };
       const own = await api('GET', '/api/coordinator/vnc/ne-1/ws', {
         token, env, headers: { Upgrade: 'websocket', Origin: 'https://inventory.recycleservers.com' },
       });

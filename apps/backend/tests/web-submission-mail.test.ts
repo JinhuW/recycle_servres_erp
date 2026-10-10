@@ -281,7 +281,7 @@ describe('matchSubmission', () => {
   });
 });
 
-type FakeMail = { uid: number; header: Partial<InboundHeader>; raw?: string };
+type FakeMail = { uid: number; header: Partial<InboundHeader>; raw?: string; at?: Date };
 
 // IMAP as runInboxTick sees it. `N:*` really does answer with the newest
 // message even when it's below N, so uidsAfter reproduces that.
@@ -294,6 +294,9 @@ class FakeInbox implements InboxClient {
     const all = this.mail.map((m) => m.uid).sort((a, b) => a - b);
     const above = all.filter((u) => u > uid);
     return above.length > 0 ? above : all.slice(-1);
+  }
+  async uidsSince(day: Date) {
+    return this.mail.filter((m) => (m.at ?? new Date()) >= day).map((m) => m.uid).sort((a, b) => a - b);
   }
   async headers(uids: number[]) {
     return this.mail.filter((m) => uids.includes(m.uid)).map((m) => hdr({ uid: m.uid, ...m.header }));
@@ -357,6 +360,23 @@ describe('runInboxTick', () => {
     expect(await runInboxTick(getTestDb(), cfg, box, new Map())).toEqual({ scanned: 0, stored: 0 });
     expect(await state()).toEqual({ v: 7, last: 98 });
     expect(box.sourceCalls).toEqual([]);
+  });
+
+  it('on first sight, goes back to the oldest recent thread we sent on', async () => {
+    const id = await insertSubmission();
+    const sql = getTestDb();
+    const ours = await seedSent(id);
+    const twoDaysAgo = new Date(Date.now() - 2 * 86_400_000);
+    const box = new FakeInbox([
+      { uid: 40, header: { subject: 'before any thread' }, at: twoDaysAgo },
+      { uid: 41, header: { messageId: '<early@x>', inReplyTo: ours }, raw: rawMail({ body: 'replied before the first poll' }) },
+      { uid: 42, header: { subject: 'unrelated' } },
+    ], 7, 43);
+    await runInboxTick(sql, cfg, box, new Map());
+    expect(await state()).toEqual({ v: 7, last: 40 });
+    await runInboxTick(sql, cfg, box, new Map());
+    expect((await replies(id)).map((m) => m.body_text)).toEqual(['replied before the first poll']);
+    expect((await state()).last).toBe(42);
   });
 
   it('stores a reply to our message, notifies, and never downloads unrelated mail', async () => {
@@ -457,6 +477,43 @@ describe('runInboxTick', () => {
     }
     await runInboxTick(sql, cfg, box, strikes);
     expect((await state()).last).toBe(2);
-    expect((await replies(id)).map((m) => m.body_text)).toEqual(['second']);
+    // The skipped one is still on the thread, without its text.
+    expect((await replies(id)).map((m) => m.body_text)).toEqual(['', 'second']);
+  });
+
+  it('retries a reply whose source could not be fetched instead of storing it empty', async () => {
+    const id = await insertSubmission();
+    const sql = getTestDb();
+    await sql`INSERT INTO mail_sync_state (account, mailbox, uid_validity, last_uid) VALUES (${BOX}, 'INBOX', 7, 0)`;
+    const box = new FakeInbox([{ uid: 1, header: { messageId: '<one@x>', inReplyTo: await seedSent(id) }, raw: rawMail({ body: '$40 each' }) }]);
+    box.failSource.add(1);
+    await runInboxTick(sql, cfg, box, new Map());
+    expect(await replies(id)).toHaveLength(0);
+    expect((await state()).last).toBe(0);
+    box.failSource.clear();
+    await runInboxTick(sql, cfg, box, new Map());
+    expect((await replies(id)).map((m) => m.body_text)).toEqual(['$40 each']);
+  });
+
+  it('stores what Postgres cannot hold without stalling the box', async () => {
+    const id = await insertSubmission();
+    const sql = getTestDb();
+    await sql`INSERT INTO mail_sync_state (account, mailbox, uid_validity, last_uid) VALUES (${BOX}, 'INBOX', 7, 0)`;
+    const ours = await seedSent(id);
+    const nul = rawMail({ body: 'x' }).replace('Content-Type: text/plain; charset=utf-8', 'Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: quoted-printable')
+      .replace(/\r\n\r\nx$/, '\r\n\r\nPrice ok=00 thanks');
+    const deep = rawMail({ html: '<span>'.repeat(5000) + 'deep' });
+    const box = new FakeInbox([
+      { uid: 1, header: { messageId: '<nul@x>', inReplyTo: ours, subject: 'Re:\u0000 offer \uD800', fromName: 'Sam\u0000' }, raw: nul },
+      { uid: 2, header: { messageId: '<deep@x>', inReplyTo: ours }, raw: deep },
+      { uid: 3, header: { messageId: '<ok@x>', inReplyTo: ours }, raw: rawMail({ body: 'after' }) },
+    ]);
+    expect(await runInboxTick(sql, cfg, box, new Map())).toEqual({ scanned: 3, stored: 3 });
+    const rows = await sql`
+      SELECT subject, body_text FROM web_submission_messages WHERE submission_id = ${id} AND direction = 'in' ORDER BY created_at
+    `;
+    expect(rows[0]).toEqual({ subject: 'Re: offer \uFFFD', body_text: 'Price ok thanks' });
+    expect(rows.slice(1).map((r) => r.body_text)).toEqual([expect.any(String), 'after']);
+    expect((await state()).last).toBe(3);
   });
 });

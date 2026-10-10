@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { CLOSE_REASON_IDS, isRealPhotoUrl } from '@recycle-erp/shared';
@@ -48,9 +49,24 @@ import { isActiveManager } from '../services/members';
 import {
   missingSigners, orderFingerprint, signoffState, type SignoffState,
 } from '../services/sellOrderSignoff';
+import { prunePackRows } from './sellOrderPack';
 import type { Env, User } from '../types';
 
 const sellOrders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
+
+// The line set as the editor loaded it, which its save sends back: anything
+// written to the lines since — Pack mode putting a short count on a line,
+// a price adjust, another save — would otherwise be reverted by the rewrite
+// without a word. A rewrite replaces every row, so its new ids change it too.
+// Folded from the rows the caller already read, so the version can't describe
+// a later state than the lines it went out with.
+type VersionedLine = { id: string; qty: number; unit_price: number; warehouse_id: string | null };
+function linesVersion(rows: readonly VersionedLine[]): string {
+  const parts = rows
+    .map(r => `${r.id}:${r.qty}:${r.unit_price}:${r.warehouse_id ?? ''}`)
+    .sort();
+  return createHash('sha1').update(parts.join(',')).digest('hex');
+}
 
 // Statuses that capture per-status evidence (text note + attachments). The set
 // lives in sell_order_statuses.needs_meta — fetched on demand so adding a new
@@ -396,6 +412,7 @@ sellOrders.get('/:id', async (c) => {
     order: {
       id: head.id, status: head.status, notes: head.notes, createdAt: head.created_at,
       updatedAt: head.updated_at,
+      linesVersion: linesVersion(listed),
       archivedAt: head.archived_at,
       closeReasonId: head.close_reason_id ?? null,
       createdBy: head.created_by,
@@ -611,6 +628,10 @@ sellOrders.post('/:id/price-import/preview', async (c) => {
 // order still needs at least 1 of everything. Which lot lines of a save are
 // new is checked under the lock in PATCH; a typed line has no identity apart
 // from its fields, qty included, so a typed 0 is the editor's to refuse.
+// The list and export sum an order's qty as an int; one typed line near the
+// int ceiling overflows that sum and breaks both pages for everyone.
+const MAX_LINE_QTY = 100_000;
+
 function lineInputError(lines: readonly unknown[], opts: { allowZeroQty?: boolean } = {}): string | null {
   for (const l of lines) {
     if (typeof l !== 'object' || l === null) return 'each line must be an object';
@@ -624,6 +645,7 @@ function lineInputError(lines: readonly unknown[], opts: { allowZeroQty?: boolea
     if (!Number.isInteger(qty) || (qty as number) < minQty) {
       return opts.allowZeroQty ? 'qty must be a whole number, 0 or more' : 'qty must be a positive integer';
     }
+    if ((qty as number) > MAX_LINE_QTY) return `qty must be at most ${MAX_LINE_QTY}`;
     if (!Number.isFinite(unitPrice) || (unitPrice as number) < 0) return 'unitPrice must be ≥ 0';
   }
   return null;
@@ -772,9 +794,12 @@ sellOrders.patch('/:id', async (c) => {
   const body = (await c.req.json().catch(() => null)) as
     | { status?: string; notes?: string;
         customerId?: string; lines?: SaveLineInput[]; currency?: string;
-        paymentReceivedBy?: string | null; bidParts?: BidPart[] }
+        paymentReceivedBy?: string | null; bidParts?: BidPart[]; linesVersion?: unknown }
     | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
+  if (body.linesVersion !== undefined && typeof body.linesVersion !== 'string') {
+    return c.json({ error: 'linesVersion must be a string' }, 400);
+  }
   // Status transitions are owned exclusively by POST /:id/status — that route
   // takes a FOR UPDATE row lock + an idempotency guard, so a Done order can't
   // be reverted (or be transitioned twice from a double-submit). The PATCH
@@ -856,7 +881,9 @@ sellOrders.patch('/:id', async (c) => {
     }
   }
 
-  type Outcome = { code: 400 | 404 | 409; msg: string } | { code: 200 };
+  type Outcome =
+    | { code: 400 | 404 | 409; msg: string; errCode?: string }
+    | { code: 200; linesVersion: string | null };
   const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
     // Snapshot BEFORE state for diffing. Lock the header row so a concurrent
     // edit can't slip an event we'd then miss; lines are read consistently
@@ -892,6 +919,17 @@ sellOrders.patch('/:id', async (c) => {
           FROM sell_order_lines WHERE sell_order_id = ${id} ORDER BY position
         `
       : [];
+    if (body.lines !== undefined && typeof body.linesVersion === 'string') {
+      const now = await tx<VersionedLine[]>`
+        SELECT id, qty, unit_price::float AS unit_price, warehouse_id
+        FROM sell_order_lines WHERE sell_order_id = ${id}`;
+      if (linesVersion(now) !== body.linesVersion) {
+        return {
+          code: 409, errCode: 'lines_changed',
+          msg: 'the products on this order changed since you opened it — reload it and make your edit again',
+        };
+      }
+    }
     if (body.lines !== undefined) {
       // A 0 is how a line already on the order keeps its # once its lot has
       // gone, so validateSellLines passes it unchecked. A lot new to the order
@@ -960,6 +998,9 @@ sellOrders.patch('/:id', async (c) => {
         });
       }
       await assignSellProductNos(tx, id);
+      // A tick belongs to a line on the order: one left behind by a removed
+      // line would read as packed when its lot is added back.
+      await prunePackRows(tx, id);
       if (body.bidParts?.length) {
         await recordBidDataPoints(tx, id, u.id, body.bidParts);
       }
@@ -999,10 +1040,19 @@ sellOrders.patch('/:id', async (c) => {
         });
       }
     }
-    return { code: 200 };
+    // The editor's next save in this session is checked against what this one
+    // wrote, not what it loaded.
+    const after = body.lines !== undefined
+      ? linesVersion(await tx<VersionedLine[]>`
+          SELECT id, qty, unit_price::float AS unit_price, warehouse_id
+          FROM sell_order_lines WHERE sell_order_id = ${id}`)
+      : null;
+    return { code: 200, linesVersion: after };
   });
-  if (outcome.code !== 200) return c.json({ error: outcome.msg }, outcome.code);
-  return c.json({ ok: true });
+  if (outcome.code !== 200) {
+    return c.json({ error: outcome.msg, ...(outcome.errCode ? { code: outcome.errCode } : {}) }, outcome.code);
+  }
+  return c.json({ ok: true, linesVersion: outcome.linesVersion });
 });
 
 // ─── Per-status evidence (note + attachments) ──────────────────────────────
@@ -1228,7 +1278,7 @@ sellOrders.post('/:id/adjust-price', async (c) => {
     | { kind: 'notFound' }
     | { kind: 'locked'; status: string }
     | { kind: 'invalid'; msg: string }
-    | { kind: 'done'; fromTotal: number; achievedTotal: number };
+    | { kind: 'done'; fromTotal: number; achievedTotal: number; linesVersion: string };
 
   const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
     const cur = (await tx<{
@@ -1291,7 +1341,12 @@ sellOrders.post('/:id/adjust-price', async (c) => {
       fromTotal, toTotal: achievedTotal, requestedTotal: targetTotal,
       currency: cur.currency_code, pct,
     });
-    return { kind: 'done', fromTotal, achievedTotal };
+    // The prices just moved, so an editor saving again after this needs the
+    // version they now carry, or its own adjust reads as someone else's edit.
+    const version = linesVersion(await tx<VersionedLine[]>`
+      SELECT id, qty, unit_price::float AS unit_price, warehouse_id
+      FROM sell_order_lines WHERE sell_order_id = ${id}`);
+    return { kind: 'done', fromTotal, achievedTotal, linesVersion: version };
   });
 
   switch (outcome.kind) {
@@ -1300,7 +1355,7 @@ sellOrders.post('/:id/adjust-price', async (c) => {
       return c.json({ error: `cannot adjust price of a ${outcome.status} order` }, 409);
     case 'invalid': return c.json({ error: outcome.msg }, 400);
     case 'done':
-      return c.json({ ok: true, achievedTotal: outcome.achievedTotal });
+      return c.json({ ok: true, achievedTotal: outcome.achievedTotal, linesVersion: outcome.linesVersion });
   }
 });
 
@@ -1454,8 +1509,11 @@ sellOrders.post('/:id/status', async (c) => {
                updated_at = NOW()
          WHERE id = ${id}
       `;
-      // A deal revived after it was closed is a new deal to approve.
+      // A deal revived after it was closed is a new deal to approve, and a new
+      // one to pack: ticks kept from before would let it ship with nothing
+      // re-counted.
       await tx`DELETE FROM sell_order_signoffs WHERE sell_order_id = ${id}`;
+      await tx`DELETE FROM sell_order_packs WHERE sell_order_id = ${id}`;
     } else {
       // done_at is the date the sale belongs to (dashboard, contributions).
       // Done is terminal, so it is set here once and never cleared.
@@ -1717,17 +1775,22 @@ async function setSignoff(c: SOCtx, signing: boolean) {
     if (!cur) return { kind: 'notFound' };
     if (!openSellStatuses().includes(cur.status)) return { kind: 'locked', status: cur.status };
 
+    // A second click before the page re-reads signs what is already signed:
+    // no new event, and no second round of notifications.
+    let signed = false;
     if (signing) {
       const current = (await orderFingerprint(tx, id))!;
       if (current !== reviewed) return { kind: 'changed' };
-      await tx`
+      signed = (await tx`
         INSERT INTO sell_order_signoffs (sell_order_id, user_id, fingerprint)
         VALUES (${id}, ${u.id}, ${current})
         ON CONFLICT (sell_order_id, user_id) DO UPDATE SET
           fingerprint = EXCLUDED.fingerprint,
           signed_at   = NOW()
-      `;
-      await writeSellOrderEvent(tx, id, u.id, 'signed_off', {});
+        WHERE sell_order_signoffs.fingerprint IS DISTINCT FROM EXCLUDED.fingerprint
+        RETURNING 1
+      `).length > 0;
+      if (signed) await writeSellOrderEvent(tx, id, u.id, 'signed_off', {});
     } else {
       const gone = await tx`
         DELETE FROM sell_order_signoffs WHERE sell_order_id = ${id} AND user_id = ${u.id}
@@ -1737,7 +1800,7 @@ async function setSignoff(c: SOCtx, signing: boolean) {
     }
 
     const signoff = await signoffState(tx, id);
-    if (signing) {
+    if (signed) {
       const signer = signoff.managers.find(m => m.id === u.id)?.name ?? u.name;
       for (const m of missingSigners(signoff.managers)) {
         if (m.id === u.id) continue;

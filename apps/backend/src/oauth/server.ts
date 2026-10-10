@@ -96,6 +96,11 @@ const DCR_PER_IP_HOUR = 10;
 const DCR_GLOBAL_HOUR = 60;
 const DCR_UNUSED_CAP = 200;
 const DCR_CLIENT_NAME_MAX = 80;
+// The row outlives the request and every redirect URI is re-read on each
+// /authorize and listed in Settings, so an anonymous registrant gets a bounded
+// write. Real connectors register one or two.
+const DCR_REDIRECT_URIS_MAX = 10;
+const DCR_REDIRECT_URI_MAX = 2048;
 
 const isStringArray = (v: unknown): v is string[] =>
   Array.isArray(v) && v.every((x) => typeof x === 'string');
@@ -167,6 +172,13 @@ oauth.post('/register', async (c) => {
     return c.json({
       error: 'invalid_client_metadata',
       error_description: 'redirect_uris and grant_types must be arrays of strings, scope a string',
+    }, 400);
+  }
+  if (redirectUris.length > DCR_REDIRECT_URIS_MAX
+      || redirectUris.some((r) => r.length > DCR_REDIRECT_URI_MAX)) {
+    return c.json({
+      error: 'invalid_redirect_uri',
+      error_description: `at most ${DCR_REDIRECT_URIS_MAX} redirect_uris of ${DCR_REDIRECT_URI_MAX} characters each`,
     }, 400);
   }
   for (const r of redirectUris) {
@@ -475,6 +487,8 @@ function tokenEndpointBusy(c: Context, clientId: string | undefined): Response |
   return c.json({ error: 'temporarily_unavailable' }, 429);
 }
 
+const GRANT_LABELS = new Set(['authorization_code', 'refresh_token', 'client_credentials']);
+
 oauth.post('/token', async (c) => {
   const env = c.env;
   const sql = getDb(env);
@@ -484,8 +498,11 @@ oauth.post('/token', async (c) => {
   if (busy) return busy;
   // Failed-mint counter: label with the requested grant_type if known, else
   // 'unknown' for top-of-handler rejects (no client/secret means we never
-  // got far enough to commit to a particular grant flow).
-  const labelGrant = (form.grant_type || 'unknown') as string;
+  // got far enough to commit to a particular grant flow). Only a supported
+  // grant may become a label: the caller's own text would mint a series per
+  // distinct value, held for the life of the process.
+  const labelGrant = !form.grant_type ? 'unknown'
+    : GRANT_LABELS.has(form.grant_type) ? form.grant_type : 'other';
   const fail = (grantType: string, body: Record<string, string>, status: 400 | 401) => {
     oauthGrantsTotal.inc({ grant_type: grantType, status: 'error' });
     return c.json(body, status);

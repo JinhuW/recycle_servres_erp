@@ -17,6 +17,73 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.239.2] - 2026-10-10
+
+Fixes from a full code review of the whole codebase, not just the week's diff
+(RS-224).  Three of them let a single request stall or crash the backend for
+everyone, and several let a stale page or a late save overwrite what someone
+else had just done to a PO or sell order.
+
+### Security
+
+- **Three inputs could freeze the backend.**
+  - The public intake and quote forms tested the email with a pattern that
+    backtracked on a crafted address: one request blocked every user for
+    seconds, a large one for minutes.  Email is now length-capped before a
+    linear check (`lib/email.ts`), also on suppliers, customers and members.
+  - The market lookup, chips and parts routes ran any logged-in user's part
+    number through the same kind of pattern.  The JavaScript side now uses a
+    linear rewrite that a brute-force comparison shows matches the SQL one,
+    and part numbers over 256 characters are skipped.
+  - `/oauth/token` stored any unknown `grant_type`, unauthenticated, as a
+    permanent metrics label.  Labels are now a closed set.
+- A NUL byte or broken Unicode in a public form is a 400 instead of a 500 that
+  wrote to the error log.  Open client registration caps redirect URIs at 10,
+  each at 2048 characters.
+- `/login?next=/.//evil.com` sent the user off-site after signing in, because
+  the check ran before the URL was normalised.  It now checks what it returns.
+- The OAuth consent screen re-ticked scopes the user had unticked on every
+  render.  It now sets them once per request, and the phone shell shows the
+  consent screen instead of dead-ending.
+- The members screen no longer changes your own password (that goes through
+  your profile, which asks for the current one).
+
+### Fixed
+
+- **Backend crashes and logouts.**  A coordinator or Cloudflare Access secret
+  with a trailing newline crashed the whole backend on the first Watch click;
+  the bridge now trims the values and closes only that viewer on a failure.  A
+  stale tracker token no longer logs the manager out in a loop: an upstream
+  401 is a 502 naming the token.
+- **Phone drafts.**  Back or Cancel on the capture Review screen deleted any
+  draft with no confirmed line, including one just reopened from the drafts
+  sheet or created from a package.  It now deletes only a draft that same
+  capture created.
+- **Stale PO pages.**  A manager's stage move, and every phone advance, now
+  names the stage the page showed, so a PO that moved meanwhile is refused
+  instead of jumping (Draft straight to Ready to Pay, say).  Review-mode
+  Approve zeroes lines only while the PO is still in Reviewing, stops when a
+  count failed to save, and keeps a raised qty's count after an edit.
+- **Sell orders and Pack mode.**  The editor's save no longer reverts what Pack
+  mode wrote back meanwhile: it is refused with "reload" when the lines changed
+  under it.  Reopening a Closed order clears its pack ticks, and a removed lot's
+  tick goes with it.  With "Packing from" set, Space and scans act only on that
+  warehouse's lots.  Cancel during the status dialog's save really cancels.  A
+  line qty over 100,000 is refused; one overflowed the list for everyone.
+- **Line removal race.**  Removing a PO line, or archiving the PO, now locks
+  the lines before checking for sell-order claims, so a concurrent raise of a
+  line held at 0 can't be orphaned.  A purchaser's qty or cost edit through the
+  inventory page now sends a submitted PO back to Draft, as the PO page does.
+- **Inbox.**  A dropped connection no longer stores a customer's reply with an
+  empty body, one unparseable reply no longer stalls the rest, and quoted-reply
+  folding no longer hides answers typed between quoted lines.
+- **Bank.**  A denied PayPal payment no longer leaves its PO reading as paid,
+  an Unignore stays put, and transfer rows can't be linked to a PO.
+- **Settings and editors.**  Saving a warehouse keeps its legacy free-text
+  address; archived members can be shown and restored, and re-inviting one is a
+  clear 409.  Escape in a menu closes just the menu, not the drawer or draft
+  under it.  The update toast asks before dropping unsaved edits.
+
 ## [1.239.1] - 2026-10-10
 
 Fixes from a review of v1.239.0's note icon before it went to prod (RS-223).

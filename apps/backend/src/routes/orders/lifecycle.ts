@@ -16,7 +16,7 @@ import { normalizeTracking, type Carrier, type PackageSource } from '@recycle-er
 import { type Env, type User } from '../../types';
 import { PAYPAL_TXN_STRICT, normPaypalTxnId } from '../../ai/paypal';
 import { log } from '../../lib/log';
-import { type OrdersEnv, committedLinesBody, describeSellOrders, handoffByErr, isOrderPayment, isPaymentMethod, PACKAGE_DELIVERED_MSG, parseCommissionRate, registerIfNeeded, resolveOrderOwner, sourceErr, TRACKING_TAKEN_STANDALONE_MSG, trackingErr, trackingTakenMsg, unackedRevertFrag, warehouseErr } from './shared';
+import { type OrdersEnv, committedLinesBody, describeSellOrders, handoffByErr, isOrderPayment, isPaymentMethod, PACKAGE_DELIVERED_MSG, parseCommissionRate, registerIfNeeded, resolveOrderOwner, sourceErr, stageMovedBody, TRACKING_TAKEN_STANDALONE_MSG, trackingErr, trackingTakenMsg, unackedRevertFrag, warehouseErr } from './shared';
 
 const lifecycleRoutes = new Hono<OrdersEnv>();
 
@@ -368,15 +368,8 @@ function advanceRefusedResponse(
         error: `Order is already ${LIFECYCLE_LABEL[outcome.lifecycle] ?? outcome.lifecycle} — reload to see where it stands.`,
         lifecycle: outcome.lifecycle,
       }, 409);
-    case 'stageMoved': {
-      // Any role may name a `fromStage`; a purchaser still never learns Sold.
-      const seen = visibleLifecycle(outcome.lifecycle, effectiveRole(c.var.user));
-      return c.json({
-        error: `Order is now ${LIFECYCLE_LABEL[seen] ?? seen} — reload to see where it stands.`,
-        code: 'stageMoved',
-        lifecycle: seen,
-      }, 409);
-    }
+    case 'stageMoved':
+      return c.json(stageMovedBody(c.var.user, outcome.lifecycle), 409);
     case 'managerChanged':
       return c.json({
         error: outcome.manager

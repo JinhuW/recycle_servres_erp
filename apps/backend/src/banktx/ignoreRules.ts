@@ -24,15 +24,17 @@ export function ignoreRuleMatchFrag(sql: Db, legAlias: string, rule: IgnoreRuleI
 }
 
 // Open rows only — the same set the Unlinked tile counts — minus rows a human
-// gave back (no_auto_ignore) and rows whose pair sibling is linked (a group is
-// one payment; ignoring half of it is the state /ignore refuses).
+// gave back (no_auto_ignore) and rows whose pair sibling is linked or was
+// given back (a group is one payment; ignoring half of it is the state
+// /ignore refuses, and the sibling's verdict is the payment's).
 function eligibleFrag(sql: Db, legAlias: string) {
   const bt = sql(legAlias);
   return sql`
     ${openRowFrag(sql, legAlias)} AND NOT ${bt}.no_auto_ignore
     AND NOT EXISTS (
       SELECT 1 FROM bank_transactions sib
-      WHERE ${bt}.pair_id IS NOT NULL AND sib.pair_id = ${bt}.pair_id AND sib.order_id IS NOT NULL)`;
+      WHERE ${bt}.pair_id IS NOT NULL AND sib.pair_id = ${bt}.pair_id
+        AND (sib.order_id IS NOT NULL OR sib.no_auto_ignore))`;
 }
 
 // Applies every rule. Returns the number of rows ignored by this pass.
@@ -52,7 +54,7 @@ export async function applyIgnoreRules(tx: Db): Promise<number> {
     FROM bank_transactions s
     WHERE s.ignore_rule_id IS NOT NULL AND s.ignored
       AND bt.pair_id = s.pair_id AND bt.id <> s.id
-      AND NOT bt.ignored AND bt.order_id IS NULL`;
+      AND NOT bt.ignored AND bt.order_id IS NULL AND NOT bt.no_auto_ignore`;
   return hit.count + spread.count;
 }
 
