@@ -181,6 +181,18 @@ describe('Warehouse DELETE handles transfer_orders FK', () => {
     expect(rows[0].to_warehouse_id).toBe('WH-LA1');
   });
 
+  it('moves users homed on the warehouse to transferTo', async () => {
+    const { token } = await loginAs(ALEX);
+    const db = getTestDb();
+    await db`UPDATE users SET default_warehouse_id = 'WH-DAL' WHERE email = ${MARCUS}`;
+
+    const r = await api('DELETE', '/api/warehouses/WH-DAL?transferTo=WH-LA1', { token });
+    expect(r.status).toBe(200);
+    const [u] = await db<{ default_warehouse_id: string | null }[]>`
+      SELECT default_warehouse_id FROM users WHERE email = ${MARCUS}`;
+    expect(u.default_warehouse_id).toBe('WH-LA1');
+  });
+
   it('clears nullable transfer_orders.from_warehouse_id when transferTo is omitted', async () => {
     const { token } = await loginAs(ALEX);
     const db = getTestDb();

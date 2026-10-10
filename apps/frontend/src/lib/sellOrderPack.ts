@@ -34,8 +34,11 @@ export function toCheck(r: PackRow): LineCheck {
   return { lineId: r.lineId, counted: r.counted, checkedAt: r.packedAt };
 }
 
-export function packBody(c: LineCheck, qty: number): { counted: number; packed: boolean } {
-  return { counted: Math.min(c.counted, qty), packed: c.checkedAt !== null };
+// Not clamped to the qty the page last saw: taking a short tick back puts the
+// line's qty back on the server, and a clamp against the lowered qty would
+// write a count below the one on screen. The server bounds it.
+export function packBody(c: LineCheck): { counted: number; packed: boolean } {
+  return { counted: c.counted, packed: c.checkedAt !== null };
 }
 
 // The backend's own name for lines with no warehouse, on the packing-list tabs.
@@ -238,7 +241,8 @@ export type PackScan<L> = ScanMatch<L> | { choose: L[] };
 // same part on several lines, and a part-number label can't say which one it
 // came off: rather than tick one of them on a guess, the lines still waiting
 // are handed back to choose from (a serial names its lot, so it ticks). And a
-// line held at 0 is never a match — there is nothing of it to pack.
+// line held at 0 is never a match — there is nothing of it to pack. Nor is a
+// lot counted down to 0 a choice: a tap on it would set its line to 0.
 export function packScan<L extends PackLine>(
   all: readonly L[], checks: ReadonlyMap<string, LineCheck>, raw: string,
 ): PackScan<L> | null {
@@ -247,7 +251,9 @@ export function packScan<L extends PackLine>(
   if (!m || !('line' in m)) return m;
   if (spellsSerial(m.line, canonicalPartNumber(raw))) return m;
   const pn = canonicalPartNumber(m.line.partNumber);
-  const waiting = lines.filter(l =>
-    canonicalPartNumber(l.partNumber) === pn && lineState(l, checks.get(l.id)) !== 'done');
+  const waiting = lines.filter(l => {
+    const c = checks.get(l.id);
+    return canonicalPartNumber(l.partNumber) === pn && lineState(l, c) !== 'done' && countOf(l, c) > 0;
+  });
   return waiting.length > 1 ? { choose: waiting } : m;
 }

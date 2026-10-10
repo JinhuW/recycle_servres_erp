@@ -208,6 +208,31 @@ describe('unsettled bank transactions', () => {
       expect(pairOf.get('m-2')).toBe(pairOf.get(TXN_A));
     });
 
+    // Paired, only the PayPal leg counts toward the PO. Dissolving must not
+    // leave the card charge standing alone with the link, reading as paid.
+    it('a denied PayPal leg takes the pair\'s link off its Mercury leg', async () => {
+      const poId = await createPO(TXN_A);
+      const sync = (paypal: 'pending' | 'failed') => syncBankTransactions(testEnv, [
+        fakeProvider('paypal', [{ externalId: TXN_A, amount: -1240, settleStatus: paypal }]),
+        fakeProvider('mercury', [{ externalId: 'm-1', amount: -1240, paypalTxnId: TXN_A }]),
+      ]);
+      await sync('pending');
+      const { token } = await loginAs(ALEX);
+      const linked = await getTestDb()<{ order_id: string | null; pair_id: string | null }[]>`
+        SELECT order_id, pair_id FROM bank_transactions`;
+      expect(linked.every((r) => r.order_id === poId && r.pair_id !== null)).toBe(true);
+
+      await sync('failed');
+      await sync('failed');
+      const [m] = await getTestDb()<{ order_id: string | null; pair_id: string | null; no_auto_link: boolean }[]>`
+        SELECT order_id, pair_id, no_auto_link FROM bank_transactions WHERE external_id = 'm-1'`;
+      expect(m).toEqual({ order_id: null, pair_id: null, no_auto_link: true });
+      const r = await api<{ net: number; payments: { settleStatus: string }[] }>(
+        'GET', `/api/bank-transactions/by-order/${poId}`, { token });
+      expect(r.body.payments.map((p) => p.settleStatus)).toEqual(['failed']);
+      expect(r.body.net).toBe(0);
+    });
+
     // Dead-first: the money did leave, then came back. The pair was real, and
     // the reversal must not be masked by a sibling that is merely pending.
     it('a reversed leg keeps its pair and still reads reversed', async () => {

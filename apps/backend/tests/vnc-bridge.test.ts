@@ -4,7 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
 import { createAdaptorServer } from '@hono/node-server';
 import app from '../src/index';
-import { attachVncBridge, openVncBridges, VNC_SESSION_LAPSED } from '../src/vncBridge';
+import { attachVncBridge, closeVncBridges, openVncBridges, VNC_SESSION_LAPSED } from '../src/vncBridge';
 import { getTestDb, resetDb } from './helpers/db';
 import { testEnv } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
@@ -41,6 +41,11 @@ beforeAll(async () => {
       access: req.headers['cf-access-client-id'] as string | undefined,
     };
     if (req.headers.authorization !== `Bearer ${FACADE_TOKEN}`) { res.writeHead(401).end(); return; }
+    // A path new WebSocket() throws on synchronously.
+    if (m[1] === 'frag-1') {
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ path: '/v1/vnc/frag-1/ws#x' }));
+      return;
+    }
     if (m[1] !== 'ne-1') {
       res.writeHead(404, { 'Content-Type': 'application/json' }).end('{"detail":"No VNC target for this worker"}');
       return;
@@ -241,5 +246,71 @@ describe('VNC bridge session re-check', () => {
     });
     expect(out.code).toBe(1008);
     expect(out.reason).toBe('You can no longer watch this worker');
+  });
+});
+
+// A pasted secret with a trailing newline passes fetch (which strips it) but
+// not a socket's handshake headers; and whatever the socket constructor
+// throws must close this viewer, not the process.
+describe('VNC bridge upstream setup failures', () => {
+  let crlf: Server;
+  let crlfPort: number;
+
+  beforeAll(async () => {
+    const env: Env = Object.assign(Object.create(testEnv), {
+      COORDINATOR_API_URL: facadeUrl,
+      COORDINATOR_API_TOKEN: `${FACADE_TOKEN}\r\n`,
+      COORDINATOR_ACCESS_CLIENT_ID: `${ACCESS_ID}\n`,
+      COORDINATOR_ACCESS_CLIENT_SECRET: `${ACCESS_SECRET}\r`,
+    });
+    crlf = createAdaptorServer({ fetch: (req) => app.fetch(req, env) }) as Server;
+    attachVncBridge(crlf, app, env);
+    crlfPort = await listen(crlf);
+  });
+
+  afterAll(async () => {
+    crlf.closeAllConnections();
+    await new Promise((r) => crlf.close(r));
+  });
+
+  function open(workerId: string, token: string, until?: (o: Outcome) => boolean): Promise<Outcome> {
+    return new Promise((resolve) => {
+      const out: Outcome = { messages: [] };
+      const ws = new WebSocket(`ws://127.0.0.1:${crlfPort}/api/coordinator/vnc/${workerId}/ws`, {
+        headers: { Cookie: `at=${token}`, Origin: 'http://localhost:5173' },
+      });
+      ws.on('message', (data) => { out.messages.push(String(data)); if (until?.(out)) ws.close(); });
+      ws.on('unexpected-response', (_req, res) => { out.status = res.statusCode; resolve(out); });
+      ws.on('close', (code, reason) => { out.close = { code, reason: String(reason) }; resolve(out); });
+      ws.on('error', () => { /* surfaced through close */ });
+    });
+  }
+
+  it('relays with credentials that carry a trailing CR/LF', async () => {
+    const { token } = await loginAs(ALEX);
+    const out = await open('ne-1', token, (o) => o.messages.length >= 1);
+    expect(out.messages).toEqual(['RFB 003.008\n']);
+    expect(seen.auth).toBe(`Bearer ${FACADE_TOKEN}`);
+    expect(seen.access).toBe(ACCESS_ID);
+  });
+
+  it('closes the viewer, and keeps serving, when the upstream socket cannot be built', async () => {
+    const { token } = await loginAs(ALEX);
+    const out = await open('frag-1', token);
+    expect(out.close?.code).toBe(1011);
+    expect(out.close?.reason).toMatch(/could not open/);
+    const again = await open('ne-1', token, (o) => o.messages.length >= 1);
+    expect(again.messages).toEqual(['RFB 003.008\n']);
+  });
+});
+
+// Last in the file: the shutdown flag is module state and never resets.
+describe('VNC bridge during shutdown', () => {
+  it('refuses a handshake admitted after the shutdown sweep', async () => {
+    const { token } = await loginAs(ALEX);
+    closeVncBridges();
+    const out = await connect('/api/coordinator/vnc/ne-1/ws', { token, origin: 'http://localhost:5173' });
+    expect(out.status).toBe(503);
+    expect(openVncBridges()).toBe(0);
   });
 });

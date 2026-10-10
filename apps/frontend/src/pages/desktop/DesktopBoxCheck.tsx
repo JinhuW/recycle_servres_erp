@@ -93,7 +93,11 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   // the saved count is in: an action taken against the full-count default
   // would overwrite a short count on file.
   const url = (lineId: string) => `/api/orders/${order.id}/checks/${lineId}`;
-  const bodyOf = (c: LineCheck) => checkBody(c, lineByIdRef.current.get(c.lineId)?.qty ?? c.counted);
+  // A qty the Edit drawer just saved, read before the reload brings it: the
+  // count reset it sends is clamped to the line's qty.
+  const editedQty = useRef(new Map<string, number>());
+  const bodyOf = (c: LineCheck) => checkBody(
+    c, editedQty.current.get(c.lineId) ?? lineByIdRef.current.get(c.lineId)?.qty ?? c.counted);
   const { checks, loadState, reload, save, flush } = useLineSaveQueue<ChecksResponse>({
     read: () => api.get<ChecksResponse>(`/api/orders/${order.id}/checks`),
     send: c => api.put<ChecksResponse>(url(c.lineId), bodyOf(c)),
@@ -184,8 +188,11 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     // Units added to the line were never counted, so its tick can't stand.
     // It replaces whatever was waiting for the line and goes out with the
     // rest before the reload: the remount reads the count straight back.
-    if (Number(l.qty) !== Number(o.qty)) save(emptyCheck(id, Number(l.qty)));
-    await flush().catch(handleFetchError);
+    if (Number(l.qty) !== Number(o.qty)) {
+      editedQty.current.set(id, Number(l.qty));
+      save(emptyCheck(id, Number(l.qty)));
+    }
+    await flush();
     showToast(t('bcLineSaved', { n }), 'success');
     await onReload();
   };
@@ -287,11 +294,19 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     let zeroed = false;
     const reloadIfZeroed = () => (zeroed ? onReload().catch(handleFetchError) : undefined);
     try {
-      await flush();
+      // A count the server never stored would be zeroed or approved as if it
+      // had been.
+      if (!(await flush())) {
+        showErrorDialog(t('bcCountsUnsaved'));
+        return;
+      }
       // Ahead of the move: from Ready to Pay the lines are closed book. Set to
-      // 0 rather than removed, so every line keeps its # on the PO.
+      // 0 rather than removed, so every line keeps its # on the PO. Refused
+      // unless the PO is still at Reviewing, like the move after it.
       if (toZero.length) {
-        await api.patch(`/api/orders/${order.id}`, { lines: toZero.map(l => ({ id: l.id, qty: 0 })) });
+        await api.patch(`/api/orders/${order.id}`, {
+          expectStage: 'reviewing', lines: toZero.map(l => ({ id: l.id, qty: 0 })),
+        });
         zeroed = true;
       }
       // The page may have sat open while someone else moved the PO; the jump

@@ -29,7 +29,9 @@ export function MembersPanel({ showToast }: { showToast: ToastFn }) {
   const [roleFilter, setRoleFilter] = useState<'all' | 'manager' | 'purchaser'>('all');
   const [showArchived, setShowArchived] = useState(false);
 
-  const reload = () => api.get<{ items: Member[] }>('/api/members')
+  // Archived members too: the Show archived toggle, the reactivate path and
+  // the invite form's duplicate-email check all read them from this list.
+  const reload = () => api.get<{ items: Member[] }>('/api/members?includeInactive=true')
     .then(r => setMembers(r.items))
     .catch(handleFetchError)
     .finally(() => setLoadedOnce(true));
@@ -469,6 +471,9 @@ function InviteMemberModal({
 
 function MemberEditModal({ member, onClose, onSaved }: { member: Member; onClose: () => void; onSaved: () => void }) {
   const { t, locale } = useT();
+  const { user: currentUser } = useAuth();
+  // Your own password changes from your profile, which asks for the current one.
+  const isMe = member.email === currentUser?.email;
   const [draft, setDraft] = useState<Partial<Member>>({});
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
@@ -584,6 +589,9 @@ function MemberEditModal({ member, onClose, onSaved }: { member: Member; onClose
                   <div className="security-card-sub">{t('memSecPwSub')}</div>
                 </div>
               </div>
+              {isMe ? (
+                <div className="help">{t('memSecPwSelf')}</div>
+              ) : (
               <div className="field">
                 <label className="label">{t('memSecNewPw')}</label>
                 <div className="pw-input">
@@ -607,6 +615,7 @@ function MemberEditModal({ member, onClose, onSaved }: { member: Member; onClose
                 <PasswordMeter password={password} labels={pwStrengthLabels(t)} />
                 <div className="help">{t('memSecPwHelp')}</div>
               </div>
+              )}
             </div>
 
             <div className="security-card">

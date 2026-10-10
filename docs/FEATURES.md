@@ -1283,7 +1283,9 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
     writes on the item, and names the lot it comes from (`From PO-1111 #1`,
     or *Typed in*). When
     the order's lots sit in more than one warehouse, a *Packing from* switch
-    narrows the list without renumbering it.
+    narrows the list without renumbering it. Space, the arrows and a scan act
+    only on the picked warehouse's lots; a scan that finds a waiting lot only
+    in another warehouse clears the switch and asks for a tap (v1.239.2).
   - **A product from several lots is one fold row** (v1.227.0). It shows the
     product's #, part, specs, how many lots and their PO tags
     (`PO-1111 #4, PO-1203 #1 +1`), and the summed count. It starts closed.
@@ -1318,7 +1320,10 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
     a lot below its qty sets that sell-order line's qty to the count:
     - it is an in-place edit, so the line keeps its id and its #;
     - History records it as the editor's own qty edit would be;
-    - it clears a price adjustment, as an editor save does.
+    - it clears a price adjustment, as an editor save does;
+    - an editor opened before it can't save over it: a save whose lines
+      changed since the editor loaded them is refused with "reload"
+      (v1.239.2).
 
     A short pick then reads as packed in full and no longer blocks Mark
     shipped. One packed at 0 becomes the product's *Qty 0* row at the same #,
@@ -1882,7 +1887,7 @@ inventory search, sell-order draft creation.
 - **Interactive consent lets the user choose which permissions a connector
   gets** (v1.48.0), ceilinged by role: a manager can grant any scope, everyone
   else keeps `market:read` only (v1.67.x). Manager-minted service clients are
-  exempt.
+  exempt. The phone shell shows the same consent screen (v1.239.2).
 - Purchasers can reach the connect page (v1.66.0).
 - Per-tool gating lives in `TOOL_SCOPES` and filters both `tools/list` and
   `tools/call` — a connector missing tools has a scope problem, not a missing
@@ -1894,7 +1899,8 @@ inventory search, sell-order draft creation.
   `set_market_price` use the most recently updated one, like the scraper push
   (v1.219.1).
 - DCR is open by default, rate-limited per IP (per /64 for IPv6 since
-  v1.200.1) and globally.
+  v1.200.1) and globally. A registration names at most 10 redirect URIs of up to 2048
+  characters each (v1.239.2).
 - **Consent says where the code goes** (v1.195.0). Any app can register itself
   under any name, "Claude" included. The consent page therefore names the
   redirect host and marks a self-registered client **Unverified**. The

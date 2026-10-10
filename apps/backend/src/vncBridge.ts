@@ -51,11 +51,17 @@ const REVALIDATE_MS = 60_000;
 // viewer (lib/coordinator.ts) reconnects on it with a refreshed cookie.
 export const VNC_SESSION_LAPSED = 4401;
 
+const RESTARTING = 'The ERP is restarting — reconnect in a moment';
+
 const vlog = log.child({ module: 'vnc' });
 
 type FetchApp = Pick<Hono<{ Bindings: Env }>, 'fetch'>;
 
 const open = new Set<WebSocket>();
+// Set by closeVncBridges. A handshake whose admit() was still in flight when
+// that swept `open` would otherwise add a bridge nothing closes, and
+// server.close() would wait on it until the hard deadline.
+let closing = false;
 
 function reject(socket: Duplex, status: number): void {
   socket.end(`HTTP/1.1 ${status} ${STATUS_CODES[status] ?? ''}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
@@ -196,7 +202,13 @@ function pump(client: WebSocket, env: Env, workerId: string): void {
       sock.terminate();
     });
     sock.on('error', () => finish(1011, 'The fleet console is unreachable'));
-  })();
+  })().catch((e: unknown) => {
+    // A floating rejection here would exit the whole backend, not just this
+    // viewer: new WebSocket() throws synchronously on a header or URL it
+    // cannot send.
+    vlog.error('vnc bridge failed to open upstream', e);
+    finish(1011, 'The ERP could not open the fleet console’s socket');
+  });
 }
 
 // Re-admits an open socket on its own handshake (step 4 above). Only a 401 or
@@ -254,11 +266,15 @@ export function attachVncBridge(
         reject(socket, status);
         return;
       }
-      if (open.size >= MAX_BRIDGES) {
+      if (closing || open.size >= MAX_BRIDGES) {
         reject(socket, 503);
         return;
       }
       wss.handleUpgrade(req, socket, head, (client) => {
+        if (closing) {
+          closeQuietly(client, 1001, RESTARTING);
+          return;
+        }
         open.add(client);
         vlog.info('vnc bridge opened', { workerId, open: open.size });
         pump(client, env, workerId);
@@ -275,7 +291,8 @@ export function attachVncBridge(
 
 /** Closes every relayed socket — for shutdown, so a viewer never pins the process. */
 export function closeVncBridges(): void {
-  for (const ws of open) closeQuietly(ws, 1001, 'The ERP is restarting — reconnect in a moment');
+  closing = true;
+  for (const ws of open) closeQuietly(ws, 1001, RESTARTING);
 }
 
 /** Open bridge count, for tests. */

@@ -5,6 +5,7 @@
 import { Hono } from 'hono';
 import { MAX_PASSWORD_LEN, MIN_PASSWORD_LEN } from '@recycle-erp/shared';
 import { getDb } from '../db';
+import { isEmail } from '../lib/email';
 import { requireManager } from '../lib/role';
 import {
   listMembers,
@@ -22,7 +23,6 @@ import type { Env, User } from '../types';
 const members = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
 const VALID_ROLES: MemberRole[] = ['manager', 'purchaser'];
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const TEXT_FIELDS = ['name', 'team', 'phone', 'title'] as const;
 
@@ -33,7 +33,7 @@ function validateMemberFields(f: {
   email?: unknown; role?: unknown; password?: unknown; active?: unknown;
   name?: unknown; team?: unknown; phone?: unknown; title?: unknown;
 }): string | null {
-  if (f.email !== undefined && (typeof f.email !== 'string' || !EMAIL_RE.test(f.email.trim()))) {
+  if (f.email !== undefined && (typeof f.email !== 'string' || !isEmail(f.email.trim()))) {
     return 'email is not a valid address';
   }
   if (f.role !== undefined && !VALID_ROLES.includes(f.role as MemberRole)) {
@@ -101,16 +101,28 @@ members.post('/', async (c) => {
   const invalid = validateMemberFields(body);
   if (invalid) return c.json({ error: invalid }, 400);
   const sql = getDb(c.env);
-  const r = await createMember(sql, {
-    email: body.email,
-    name: body.name,
-    role: body.role as MemberRole,
-    team: body.team,
-    phone: body.phone,
-    title: body.title,
-    password: body.password,
-  });
-  return c.json(r, 201);
+  try {
+    const r = await createMember(sql, {
+      email: body.email,
+      name: body.name,
+      role: body.role as MemberRole,
+      team: body.team,
+      phone: body.phone,
+      title: body.title,
+      password: body.password,
+    });
+    return c.json(r, 201);
+  } catch (err) {
+    if ((err as { code?: string }).code !== '23505') throw err;
+    const [dup] = await sql<{ active: boolean | null }[]>`
+      SELECT active FROM users WHERE email = ${body.email.trim().toLowerCase()}
+    `;
+    return c.json({
+      error: dup && dup.active === false
+        ? 'A member with this email is archived — reactivate them instead of inviting again'
+        : 'A member with this email already exists',
+    }, 409);
+  }
 });
 
 members.patch('/:id', async (c) => {
@@ -128,6 +140,11 @@ members.patch('/:id', async (c) => {
   const demoting = body.role !== undefined && body.role !== 'manager';
   if (deactivating && id === c.var.user.id) {
     return c.json({ error: "You can't deactivate yourself" }, 400);
+  }
+  // Your own password changes through /api/me/password, which asks for the
+  // current one; a stolen session must not be able to skip that here.
+  if (body.password !== undefined && id === c.var.user.id) {
+    return c.json({ error: 'Change your own password from your profile' }, 400);
   }
   if (deactivating || demoting) {
     const target = await getMemberStatus(sql, id);

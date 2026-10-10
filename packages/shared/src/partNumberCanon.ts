@@ -43,7 +43,21 @@ export function partPrefixPattern(ws: string): string {
   return `^${ws}*(P${ws}*/?${ws}*N|S${ws}*/?${ws}*N|PART${ws}*(NO|NUMBER)?)(${ws}*[:#]${ws}*|${ws}+)`;
 }
 
-const PREFIX_RE = new RegExp(partPrefixPattern(ASCII_WS), 'i');
+/**
+ * The same language and the same match as `partPrefixPattern`, rewritten so no
+ * two whitespace runs sit next to each other. The template's `${ws}*\/?${ws}*`
+ * and `PART${ws}*(NO|NUMBER)?` + `${ws}*` give a backtracker n ways to split
+ * one run of blanks, so 'P' + 64k spaces + 'X' took seconds — and the input is
+ * whatever an API caller posts. Postgres' engine doesn't backtrack that way and
+ * its index is built from the template's bytes, so SQL keeps the template.
+ * tests/part-number-canon.test.ts checks the two agree.
+ */
+export function partPrefixPatternLinear(ws: string): string {
+  const sep = `${ws}*(?:\/${ws}*)?`;
+  return `^${ws}*(?:P${sep}N|S${sep}N|PART(?:${ws}*(?:NO|NUMBER))?)(?:${ws}*[:#]${ws}*|${ws}+)`;
+}
+
+const PREFIX_RE = new RegExp(partPrefixPatternLinear(ASCII_WS), 'i');
 
 /**
  * The separators dropped from the key, parameterised by the *inside* of the

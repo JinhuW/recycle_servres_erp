@@ -191,10 +191,29 @@ const toEditLine = (l: SellOrderLine): EditLine => ({
 const productKey = (l: { partNumber: string | null; label: string; condition: string | null }) =>
   `${canonicalPartNumber(l.partNumber)}|${l.label}|${l.condition ?? ''}`;
 
-// Picked sellable lots as new lines. Price follows the per-product rule: reuse
-// the unit price the order already carries for that product, else 0 for the
-// user to fill in. Lots already on the draft are skipped (the server only
-// excludes lots on *saved* open orders, not session-local adds).
+// The server caps a line's qty here (the list sums qty as an int); a typed
+// line has no lot to cap it lower.
+const MAX_LINE_QTY = 100_000;
+
+// Picked sellable lots merged into the draft. Price follows the per-product
+// rule: reuse the unit price the order already carries for that product, else
+// 0 for the user to fill in. A lot already on the draft is not added twice
+// (the server only excludes lots on *saved* open orders, not session-local
+// adds) — but one held there at 0 was picked to be sold again, so it takes
+// what is available. `changed` counts both.
+function mergeSellable(lines: EditLine[], picked: SellableItem[]): { lines: EditLine[]; changed: number } {
+  const byLot = new Map(picked.map(it => [it.inventoryId, it]));
+  let changed = 0;
+  const merged = lines.map((l) => {
+    const it = l.inventoryId ? byLot.get(l.inventoryId) : undefined;
+    if (!it || l.qty !== 0 || it.availableQty <= 0) return l;
+    changed++;
+    return { ...l, qty: it.availableQty, maxQty: Math.max(l.maxQty, it.availableQty) };
+  });
+  const fresh = appendSellable(lines, picked);
+  return { lines: [...merged, ...fresh], changed: changed + fresh.length };
+}
+
 function appendSellable(lines: EditLine[], picked: SellableItem[]): EditLine[] {
   const have = new Set(lines.map(l => l.inventoryId).filter(Boolean));
   return picked
@@ -231,6 +250,10 @@ type SellOrderDetailType = {
   notes: string | null;
   createdAt: string;
   updatedAt: string;
+  // The line set as loaded; the editor's save sends it back so a write since
+  // (Pack mode's count, another save) is refused, not reverted. Absent from a
+  // backend older than this bundle.
+  linesVersion?: string;
   archivedAt: string | null;
   closeReasonId: string | null;
   createdBy: string | null;
@@ -1048,6 +1071,9 @@ function SellOrderDetail({ id, mode, onToast }: {
   const [pendingAdjust, setPendingAdjust] = useState<number | null>(null);
   const prefilled = useRef(false);
   const [prefillAllPresent, setPrefillAllPresent] = useState(false);
+  // What the next line save is checked against: the version loaded, then the
+  // one each save of this session wrote.
+  const linesBase = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     let alive = true;
@@ -1056,15 +1082,16 @@ function SellOrderDetail({ id, mode, onToast }: {
         if (!alive) return;
         setOrder(r.order);
         setStatusMeta(r.order.statusMeta);
-        const lines = r.order.lines.map(toEditLine);
+        linesBase.current = r.order.linesVersion;
+        const loaded = r.order.lines.map(toEditLine);
         // Marked here, past the `alive` check, not when the effect starts:
         // StrictMode's discarded first run would otherwise eat the prefill.
         const canPrefill = !!prefill && !prefilled.current && mode === 'edit'
           && r.order.status !== 'Done' && r.order.status !== 'Closed';
-        const fresh = canPrefill ? appendSellable(lines, prefill) : [];
+        const merged = canPrefill ? mergeSellable(loaded, prefill) : { lines: loaded, changed: 0 };
         if (canPrefill) {
           prefilled.current = true;
-          setPrefillAllPresent(fresh.length === 0);
+          setPrefillAllPresent(merged.changed === 0);
         }
         setDraft({
           status: r.order.status,
@@ -1072,7 +1099,7 @@ function SellOrderDetail({ id, mode, onToast }: {
           customerId: r.order.customer.id,
           paymentReceivedBy: r.order.paymentReceivedBy?.id ?? '',
           currency: r.order.currency,
-          lines: [...lines, ...fresh],
+          lines: merged.lines,
           bidParts: [],
         });
         setPendingAdjust(null);
@@ -1279,7 +1306,7 @@ function SellOrderDetail({ id, mode, onToast }: {
     setDraft(d => d && { ...d, lines: d.lines.filter((_, i) => i !== idx) });
 
   const addLines = (picked: SellableItem[]) =>
-    setDraft(d => d && { ...d, lines: [...d.lines, ...appendSellable(d.lines, picked)] });
+    setDraft(d => d && { ...d, lines: mergeSellable(d.lines, picked).lines });
 
   const save = async () => {
     if (!order || !draft) return;
@@ -1318,9 +1345,11 @@ function SellOrderDetail({ id, mode, onToast }: {
           condition:   l.condition,
         }));
         if (draft.bidParts.length > 0) patchBody.bidParts = draft.bidParts;
+        if (linesBase.current) patchBody.linesVersion = linesBase.current;
       }
       if (Object.keys(patchBody).length > 0) {
-        await api.patch(`/api/sell-orders/${order.id}`, patchBody);
+        const saved = await api.patch<{ linesVersion?: string | null }>(`/api/sell-orders/${order.id}`, patchBody);
+        if (saved.linesVersion) linesBase.current = saved.linesVersion;
         // The bids are recorded with that PATCH; if the adjust or status step
         // below fails, the retry must not record them again.
         setDraft(d => d && { ...d, bidParts: [] });
@@ -1331,9 +1360,10 @@ function SellOrderDetail({ id, mode, onToast }: {
       // transition consumes stock and records market datapoints from line
       // prices, which must already be the negotiated ones.
       if (pendingAdjust != null) {
-        await api.post(`/api/sell-orders/${order.id}/adjust-price`, {
+        const adjusted = await api.post<{ linesVersion?: string }>(`/api/sell-orders/${order.id}/adjust-price`, {
           targetTotal: pendingAdjust,
         });
+        if (adjusted.linesVersion) linesBase.current = adjusted.linesVersion;
         setHistoryKey(k => k + 1);
       }
       // Status transitions live on the dedicated endpoint — it takes a row
@@ -1357,7 +1387,9 @@ function SellOrderDetail({ id, mode, onToast }: {
     } catch (e) {
       // Keep the editor open with the user's edits intact — leaving here
       // would discard unsaved work.
-      showErrorDialog(e instanceof Error ? e.message : t('saveFailed'));
+      const code = e instanceof ApiError ? (e.body as { code?: unknown } | null)?.code : undefined;
+      showErrorDialog(code === 'lines_changed' ? t('sodLinesChangedReload')
+        : e instanceof Error ? e.message : t('saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -1723,7 +1755,7 @@ function SellOrderDetail({ id, mode, onToast }: {
                             const unavailable = l.inventoryId !== null && l.maxQty <= 0;
                             const minQty = l.saved ? 0 : 1;
                             // A typed line has no lot to run out of.
-                            const cap = l.inventoryId === null ? Infinity : Math.max(0, l.maxQty);
+                            const cap = l.inventoryId === null ? MAX_LINE_QTY : Math.max(0, Math.min(MAX_LINE_QTY, l.maxQty));
                             return (
                             <tr key={l._cid}>
                               <LineItemCell line={l} lineNo={l.saved ? l.no : null} sub={l.subLabel} showPo={lineGroup === 'warehouse'} showLineNo={lineGroup === 'po'} linkPo={false} />
@@ -1734,7 +1766,7 @@ function SellOrderDetail({ id, mode, onToast }: {
                                     className="so-mini-input"
                                     type="number"
                                     min={minQty}
-                                    max={cap === Infinity ? undefined : cap}
+                                    max={cap}
                                     value={l.qty}
                                     disabled={unavailable && !l.saved}
                                     onChange={e => setLine(idx, {

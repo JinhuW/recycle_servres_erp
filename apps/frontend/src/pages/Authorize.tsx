@@ -98,7 +98,10 @@ export function Authorize() {
       }
     })();
     return () => { alive = false; };
-  }, [req, t]);
+    // Once per request: `t` is a new function every render, and re-running
+    // would re-tick every requested scope over the user's unticking.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [req]);
 
   async function approve() {
     if (state.kind !== 'ready' || !req) return;

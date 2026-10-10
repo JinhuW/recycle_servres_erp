@@ -37,6 +37,27 @@ describe('member create/update input validation', () => {
     expect(r.body.password.length).toBeGreaterThanOrEqual(8);
   });
 
+  it('re-inviting an existing email is a 409 that says whether the member is archived', async () => {
+    const { token } = await loginAs(ALEX);
+    const created = await api<{ id: string }>('POST', '/api/members', { token, body: valid });
+    const again = await api<{ error: string }>('POST', '/api/members', { token, body: { ...valid, email: ' NewBie@recycleservers.io ' } });
+    expect(again.status).toBe(409);
+    expect(again.body.error).not.toMatch(/archived/);
+
+    expect((await api('DELETE', `/api/members/${created.body.id}`, { token })).status).toBe(200);
+    const archived = await api<{ error: string }>('POST', '/api/members', { token, body: valid });
+    expect(archived.status).toBe(409);
+    expect(archived.body.error).toMatch(/archived/);
+  });
+
+  it('rejects an email shaped to make the old pattern backtrack, quickly', async () => {
+    const { token } = await loginAs(ALEX);
+    const t0 = Date.now();
+    const r = await api('POST', '/api/members', { token, body: { ...valid, email: 'a@' + '.'.repeat(240) + '@' } });
+    expect(r.status).toBe(400);
+    expect(Date.now() - t0).toBeLessThan(1000);
+  });
+
   it('rejects an unknown role on PATCH', async () => {
     const { token } = await loginAs(ALEX);
     const created = await api<{ id: string }>('POST', '/api/members', { token, body: valid });

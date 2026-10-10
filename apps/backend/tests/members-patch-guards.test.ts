@@ -34,6 +34,19 @@ describe('PATCH /api/members/:id — lockout guards', () => {
     expect(after.active).toBe(true);
   });
 
+  it('refuses a manager setting their own password here, where the current one is never asked', async () => {
+    const { token } = await loginAs(ALEX);
+    const me = byEmail(await members(token), ALEX);
+    const [before] = await getTestDb()`SELECT password_hash FROM users WHERE id = ${me.id}`;
+
+    const r = await api('PATCH', `/api/members/${me.id}`, { token, body: { password: 'a-brand-new-pass-1' } });
+    expect(r.status).toBe(400);
+    const [after] = await getTestDb()`SELECT password_hash FROM users WHERE id = ${me.id}`;
+    expect(after.password_hash).toBe(before.password_hash);
+    // Other fields of one's own profile still save.
+    expect((await api('PATCH', `/api/members/${me.id}`, { token, body: { title: 'Boss' } })).status).toBe(200);
+  });
+
   it('rejects deactivating the last active manager', async () => {
     const { token } = await loginAs(ALEX);
     const sofia = byEmail(await members(token), SOFIA);

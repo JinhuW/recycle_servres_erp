@@ -33,6 +33,16 @@ function keyedLines(sql: SqlLike, orderId: string) {
     ) s`;
 }
 
+// Drop the ticks no line on the order answers to any more. Run by whatever
+// takes lines off an order, under the order's lock.
+export async function prunePackRows(sql: SqlLike, orderId: string) {
+  await sql`
+    DELETE FROM sell_order_packs p
+    WHERE p.sell_order_id = ${orderId}
+      AND NOT EXISTS (
+        SELECT 1 FROM (${keyedLines(sql, orderId)}) k WHERE k.line_key = p.line_key)`;
+}
+
 type PackRow = {
   line_id: string; qty: number; serial_number: string | null;
   line_qty: number | null; counted: number | null; packed_at: Date | null;

@@ -146,24 +146,18 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     );
   }, [order, id]);
 
-  const qtyById = useRef(new Map<string, number>());
-  qtyById.current = useMemo(
-    () => new Map((order?.lines ?? []).map(l => [l.id, qtys.get(l.id) ?? l.qty])),
-    [order, qtys],
-  );
   const url = (lineId: string) => `/api/sell-orders/${id}/pack/${lineId}`;
-  const bodyOf = (c: LineCheck) => packBody(c, qtyById.current.get(c.lineId) ?? c.counted);
 
   const { checks, loadState, reload, save, flush, accept } = useLineSaveQueue<PackResponse>({
     read: () => api.get<PackResponse>(`/api/sell-orders/${id}/pack`),
     // Only the written line's qty is taken from a write: writes of one line
     // land in order, while the rest of the reply can be older than theirs.
-    send: c => api.put<PackResponse>(url(c.lineId), bodyOf(c)).then(r => {
+    send: c => api.put<PackResponse>(url(c.lineId), packBody(c)).then(r => {
       const q = r.lines.find(x => x.lineId === c.lineId)?.qty;
       if (q !== undefined) setQtys(m => (m.get(c.lineId) === q ? m : new Map(m).set(c.lineId, q)));
       return r;
     }),
-    beacon: c => { void rawFetch('PUT', url(c.lineId), bodyOf(c), undefined, { keepalive: true }).catch(() => {}); },
+    beacon: c => { void rawFetch('PUT', url(c.lineId), packBody(c), undefined, { keepalive: true }).catch(() => {}); },
     checksOf: r => r.lines.map(toCheck),
     onServer: r => {
       setSerials(new Map(r.lines.map(x => [x.lineId, x.serialNumber])));
@@ -243,9 +237,23 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   const isOpen = (p: Product) => folds(p) && (open.has(p.no) || forcedOpen(p));
   const keysOf = (p: Product) => (folds(p) ? [prodKey(p.no), ...(isOpen(p) ? p.lots.map(l => l.id) : [])] : [p.head.id]);
   const groups = useMemo(() => packGroups(listed, checks), [listed, checks]);
+  // A product as its row shows it: under a picked warehouse, only that
+  // warehouse's lots, so a key acts on no lot the packer can't see.
+  const listedByNo = useMemo(() => new Map(listed.map(p => [p.no, p])), [listed]);
+  const shownProduct = (no: number) => listedByNo.get(no) ?? productByNo.get(no);
   const visibleKeys = [...groups.open, ...(showPacked ? groups.packed : [])].flatMap(keysOf);
-  const selKey = selected && visibleKeys.includes(selected) ? selected : visibleKeys[0] ?? null;
-  const productOf = (lineId: string) => productByNo.get(lineNo.get(lineId) ?? -1) ?? null;
+  const keyNo = (key: string) => (key.startsWith('p:') ? Number(key.slice(2)) : lineNo.get(key));
+  // A selected lot that left the list (ticked at 0, or folded away) leaves
+  // the selection on its product's row, not on the top row, where Space
+  // would pack another product.
+  const selKey = (() => {
+    if (selected && visibleKeys.includes(selected)) return selected;
+    const no = selected ? keyNo(selected) : undefined;
+    const p = no === undefined ? undefined : listedByNo.get(no);
+    const own = p && keysOf(p)[0];
+    return own && visibleKeys.includes(own) ? own : visibleKeys[0] ?? null;
+  })();
+  const productOf = (lineId: string) => shownProduct(lineNo.get(lineId) ?? -1) ?? null;
   // The row a line shows on: its own, or its product's while folded.
   const rowKeyOf = (lineId: string) => {
     const p = productOf(lineId);
@@ -390,7 +398,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
 
   const toggleKey = (key: string) => {
     if (key.startsWith('p:')) {
-      const p = productByNo.get(Number(key.slice(2)));
+      const p = shownProduct(Number(key.slice(2)));
       if (p) toggleProduct(p);
       return;
     }
@@ -406,8 +414,12 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     const before = new Map(flagged.map(l => [l.id, checkOf(l.id)]));
     setBusy(true);
     try {
-      // The counts being applied are the server's, so none may still be waiting.
-      await flush();
+      // The counts being applied are the server's, so none may still be
+      // waiting — and one that failed to save would apply the stale count.
+      if (!(await flush())) {
+        showWarnToast(t('pkCountsUnsaved'));
+        return;
+      }
       const r = await api.post<PackResponse>(`/api/sell-orders/${id}/pack/apply`, { lineIds: [...before.keys()] });
       accept(r);
       const applied = r.applied ?? [];
@@ -451,9 +463,22 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     requestAnimationFrame(() => document.getElementById(rowElId(key))?.scrollIntoView({ block: 'nearest' }));
 
   // ── Scanner: a Bluetooth or USB scanner types the label and presses Enter.
+  // Under a picked warehouse a scan resolves among its lots first. A lot it
+  // finds only in another warehouse is off screen, so it is shown to tap,
+  // never packed unseen.
+  const scanLines = (text: string) => {
+    if (!picked) return packScan(lines, checks, text);
+    const here = packScan(lines.filter(l => packWarehouseOf(l) === picked), checks, text);
+    if (here) return here;
+    const m = packScan(lines, checks, text);
+    if (m && 'line' in m && lineState(m.line, checks.get(m.line.id)) !== 'done'
+      && countOf(m.line, checks.get(m.line.id)) > 0) return { choose: [m.line] };
+    return m;
+  };
+
   const onScan = (raw: string) => {
     const text = raw.trim();
-    const m = text && ready ? packScan(lines, checks, text) : null;
+    const m = text && ready ? scanLines(text) : null;
     // Text that fits several parts stays, and with it the list it narrowed to,
     // to pick from. The box lets go of it, so the next scan replaces it rather
     // than running on from it.
@@ -477,7 +502,10 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
       // The candidates can sit in several products, and in another warehouse.
       setChoose(new Set(m.choose.map(l => l.id)));
       openFolds(m.choose.map(l => lineNo.get(l.id) ?? -1));
-      setScanMsg({ tone: 'warn', text: t('pkScanChoose', { pn: text, n: m.choose.length, lots: m.choose.map(l => `#${lineNo.get(l.id)} ${fromText(l)}`).join(', ') }) });
+      const lots = m.choose.map(l => `#${lineNo.get(l.id)} ${fromText(l)}`).join(', ');
+      setScanMsg({ tone: 'warn', text: m.choose.length === 1
+        ? t('pkScanOtherWarehouse', { pn: text, lots })
+        : t('pkScanChoose', { pn: text, n: m.choose.length, lots }) });
       if (picked && m.choose.some(l => packWarehouseOf(l) !== picked)) setWh('');
       setSelected(m.choose[0]!.id);
       scrollTo(m.choose[0]!.id);
@@ -517,7 +545,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
         setSelected(next);
         scrollTo(next);
       };
-      const foldOf = (key: string) => productByNo.get(key.startsWith('p:') ? Number(key.slice(2)) : lineNo.get(key) ?? -1);
+      const foldOf = (key: string) => shownProduct(keyNo(key) ?? -1);
       switch (e.key) {
         case 'ArrowDown': e.preventDefault(); move(1); return;
         case 'ArrowUp': e.preventDefault(); move(-1); return;
@@ -556,10 +584,8 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   // lands first, then the Shipped dialog takes the packing photos.
   const startShip = async () => {
     if (!canShip || busy) return;
-    try {
-      await flush();
-    } catch (e) {
-      handleFetchError(e);
+    if (!(await flush())) {
+      showWarnToast(t('pkCountsUnsaved'));
       return;
     }
     setShipping(true);
@@ -776,7 +802,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   const productRows = (p: Product) => (!p.lots.length ? zeroRow(p) : folds(p) ? foldRows(p) : singleRow(p));
 
   // ── The selected row, beside the list.
-  const selProduct = selKey?.startsWith('p:') ? productByNo.get(Number(selKey.slice(2))) ?? null : null;
+  const selProduct = selKey?.startsWith('p:') ? shownProduct(Number(selKey.slice(2))) ?? null : null;
   const selLine = selProduct ? selProduct.head : selKey ? lineById.get(selKey) ?? null : null;
   const selNo = selLine ? lineNo.get(selLine.id) : undefined;
   const selPhoto = (selProduct ? photoOf(selProduct) : selLine)?.imageUrl ?? null;

@@ -20,10 +20,13 @@ import {
 } from '../lib/categoryColumns';
 import { UNTYPED_ITEM, chipMarkingCanon, normSellPrice, SPEC_FIELD_TO_DB_COL, specConflicts } from '@recycle-erp/shared';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
+import { diff, writeOrderEvent } from '../services/orderAudit';
 import { settleSoldTx } from '../services/orderSold';
 import { poLineNo } from '../lib/poLineNo';
 import type { Env, User } from '../types';
-import { isClosedBook, heldLines, LINE_STATUS_FOR_LIFECYCLE, ARCHIVED_LINE_STATUS, REVIEWED_LIFECYCLES } from '../services/orderAdvance';
+import { isClosedBook, heldLines, revertOrderToDraftTx, LINE_STATUS_FOR_LIFECYCLE, ARCHIVED_LINE_STATUS, REVIEWED_LIFECYCLES } from '../services/orderAdvance';
+
+const GOODS_FIELDS = ['qty', 'unit_cost'] as const;
 
 const LINE_STATUSES = new Set([...Object.values(LINE_STATUS_FOR_LIFECYCLE), 'Sold']);
 
@@ -1275,12 +1278,26 @@ inventory.patch('/:id', async (c) => {
     | { kind: 'soldLocked' }
     | { kind: 'archived' }
     | { kind: 'specConflict'; error: string }
+    | { kind: 'revertCommitted'; lineIds: string[] }
+    | { kind: 'revertTransfer'; lineIds: string[] }
     | { kind: 'ok'; before: Record<string, unknown> };
+  // Thrown, not returned, once the UPDATE has run: returning would commit it.
+  class Refused extends Error {
+    constructor(readonly outcome: Outcome) { super(outcome.kind); }
+  }
   const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
     // Order before line (services/orderLocks.ts): a goods edit below rewrites
     // orders.total_cost, and taking that row after the line deadlocks
     // against PO PATCH, which holds the order and waits on the line.
     await lockOrdersForLinesTx(tx, [id]);
+    // A purchaser's goods edit may send the PO back to Draft below, which locks
+    // every line; take them all now, in id order, rather than this one first.
+    if (u.role !== 'manager' && (body.qty !== undefined || body.unitCost !== undefined)) {
+      await tx`
+        SELECT id FROM order_lines
+        WHERE order_id = (SELECT order_id FROM order_lines WHERE id = ${id})
+        ORDER BY id FOR UPDATE`;
+    }
     const before = (await tx<Record<string, unknown>[]>`
       SELECT * FROM order_lines WHERE id = ${id} LIMIT 1 FOR UPDATE
     `)[0];
@@ -1388,6 +1405,34 @@ inventory.patch('/:id', async (c) => {
         chip_number    = CASE WHEN ${chipAfter !== undefined ? 1 : 0}::int = 1 THEN ${chipAfter ?? null} ELSE chip_number END
       WHERE id = ${id}
     `;
+    // A purchaser's qty or cost edit sends a submitted order back to Draft, as
+    // the PO PATCH does: those are what the review checked. Spec, status and
+    // sell price stay the inventory page's ordinary edits, and past review the
+    // goods are closed-book for everyone (doneLocked above). Judged on what
+    // landed, so an echoed value is no edit.
+    if (u.role !== 'manager' && touchesGoods && parent && parent.lifecycle !== 'draft') {
+      const [after] = await tx<Record<string, unknown>[]>`SELECT * FROM order_lines WHERE id = ${id}`;
+      const changes = diff(before, after!, GOODS_FIELDS);
+      if (changes.length) {
+        const reverted = await revertOrderToDraftTx(tx, orderId, u, parent.lifecycle);
+        if (reverted.kind === 'committedLines') {
+          throw new Refused({ kind: 'revertCommitted', lineIds: reverted.offendingLineIds });
+        }
+        if (reverted.kind === 'transferClaimed') {
+          throw new Refused({ kind: 'revertTransfer', lineIds: reverted.offendingLineIds });
+        }
+        await writeOrderEvent(tx, orderId, u.id, 'reverted', {
+          from: reverted.from,
+          to: 'draft',
+          fields: [],
+          lines: {
+            added: [],
+            removed: [],
+            edited: [{ lineId: id, no: after!.product_no, partNumber: after!.part_number ?? null, changes }],
+          },
+        });
+      }
+    }
     // One event per changed field — keeps the timeline easy to skim.
     for (const f of PATCH_AUDIT_FIELDS) {
       const raw = (body as Record<string, unknown>)[f];
@@ -1416,9 +1461,24 @@ inventory.patch('/:id', async (c) => {
     // A hand-set Sold on the last unsold line settles the order like a sale.
     if (body.status === 'Sold') await settleSoldTx(tx, orderId, u.id);
     return { kind: 'ok', before };
+  }).catch((e: unknown) => {
+    if (e instanceof Refused) return e.outcome;
+    throw e;
   });
 
   if (outcome.kind === 'notFound') return c.json({ error: 'Not found' }, 404);
+  if (outcome.kind === 'revertCommitted') {
+    return c.json({
+      error: 'Products in this order are on open sell orders — a manager has to make this change.',
+      offendingLineIds: outcome.lineIds,
+    }, 409);
+  }
+  if (outcome.kind === 'revertTransfer') {
+    return c.json({
+      error: 'Products in this order are out on an open transfer order. Receive or discard that transfer before editing it.',
+      offendingLineIds: outcome.lineIds,
+    }, 409);
+  }
   if (outcome.kind === 'committed') {
     return c.json({
       error: `${outcome.committed} units of this lot are committed to an open sell order: `
