@@ -463,6 +463,67 @@ describe('GET /api/inventory — search by PO number', () => {
   });
 });
 
+describe('GET /api/inventory — search by product #', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  type Item = { id: string; order_id: string; po_line_no: number; part_number: string };
+
+  async function createPo(token: string, txn: string, n: number): Promise<string> {
+    const lines = Array.from({ length: n }, (_, i) => ({
+      category: 'RAM', brand: 'Zebrastripe', capacity: '32GB', type: 'DDR4',
+      classification: 'RDIMM', speed: '3200', partNumber: `ZS-NO-${i + 1}`,
+      condition: 'Pulled — Tested', qty: 1, unitCost: 40,
+    }));
+    const r = await api<{ id: string }>('POST', '/api/orders', {
+      token, body: { paypalTxnId: txn, category: 'RAM', lines },
+    });
+    expect(r.status).toBe(201);
+    return r.body.id;
+  }
+
+  async function list(token: string, q: string) {
+    return api<{ items: Item[] }>('GET', `/api/inventory?q=${encodeURIComponent(q)}`, { token });
+  }
+
+  it('#N lists every PO\'s product N, and only that #', async () => {
+    const { token } = await loginAs(ALEX);
+    const a = await createPo(token, 'TESTPAYTXN0000901', 3);
+    const b = await createPo(token, 'TESTPAYTXN0000902', 3);
+    const r = await list(token, '#2');
+    expect(r.status).toBe(200);
+    for (const it of r.body.items) expect(it.po_line_no).toBe(2);
+    const ours = r.body.items.filter(it => it.order_id === a || it.order_id === b);
+    expect(ours.map(it => it.part_number).sort()).toEqual(['ZS-NO-2', 'ZS-NO-2']);
+  });
+
+  it('is exact, not a substring: #1 does not bring back #10', async () => {
+    const { token } = await loginAs(ALEX);
+    const po = await createPo(token, 'TESTPAYTXN0000903', 10);
+    const r = await list(token, '#1');
+    const ours = r.body.items.filter(it => it.order_id === po);
+    expect(ours.map(it => it.po_line_no)).toEqual([1]);
+  });
+
+  it('"<PO> #N", as the lots table prints it, narrows to that one product', async () => {
+    const { token } = await loginAs(ALEX);
+    const a = await createPo(token, 'TESTPAYTXN0000904', 3);
+    await createPo(token, 'TESTPAYTXN0000905', 3);
+    const r = await list(token, `${a} #3`);
+    expect(r.body.items.map(it => [it.order_id, it.po_line_no])).toEqual([[a, 3]]);
+  });
+
+  it('the grouped products view takes #N too', async () => {
+    const { token } = await loginAs(ALEX);
+    const po = await createPo(token, 'TESTPAYTXN0000906', 3);
+    const r = await api<{ products: { lines: Item[] }[] }>(
+      'GET', `/api/inventory/products?q=${encodeURIComponent('#2')}`, { token });
+    expect(r.status).toBe(200);
+    const lines = r.body.products.flatMap(g => g.lines);
+    for (const l of lines) expect(l.po_line_no).toBe(2);
+    expect(lines.some(l => l.order_id === po)).toBe(true);
+  });
+});
+
 describe('GET /api/inventory — a line counted down to 0 is not stock', () => {
   beforeEach(async () => { await resetDb(); });
 

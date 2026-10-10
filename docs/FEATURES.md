@@ -966,6 +966,13 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   everywhere — the API does not send them to purchasers.
 - Search matches part number, serial number, brand, description and item type
   (v1.42.0), and the PO number, whole or partial (v1.143.0).
+- **`#30` finds every lot that is product #30 on its PO** (v1.240.0), as an
+  exact match, so `#3` does not also bring back #30. `PO-1483 #22`, as the lots
+  table prints it, narrows to that one product.
+- **A lot's PO link opens the PO at that product** (v1.240.0): the page
+  scrolls to the row with the lot's `#` and highlights it for a few seconds.
+  A sell-order line's "from PO" link does the same. The `#` is in the link
+  (`?line=22`), so a copied link lands there too.
 - After a transfer or add-to-order, the list and its facets reload with every
   active filter, including Show sold, Hide pending and the attribute chips
   (v1.179.0).
@@ -1369,6 +1376,9 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
     warehouse view. When the part is still waiting on more than one lot, the
     scan ticks nothing: it opens those products, highlights the lots, names
     them by # and asks for a tap on the one that was packed.
+  - **The filter also takes a PO number** (v1.241.0): `PO-1343`, `po1343` or
+    `1343` lists the lots that came from that PO. Enter on one keeps the
+    filter up and packs nothing, since a PO names lots, not one unit.
   - Progress is saved on the server (`sell_order_packs`), so a reload, a second
     iPad or coming back from another app picks up where the count stands; the
     page re-reads when it returns to the foreground. Last write per line wins.
