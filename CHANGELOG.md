@@ -17,6 +17,22 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.241.0] - 2026-10-10
+
+Pack mode's scan box now filters by PO number as well as part number (RS-226).
+A sell order draws its lots from several POs, and each pack row already says
+which one ("From PO-1319 #1"), but a packer pulling stock PO by PO had no way
+to list just one PO's lots.
+
+### Added
+
+- **Typing a PO number in Pack mode lists the lots from that PO.**
+  `PO-1343`, `po1343` and `1343` all work, and part-number and serial
+  filtering behave as before.  Enter on a PO number keeps the filter up
+  instead of reporting "nothing matches", and packs nothing, since a PO
+  number names lots, not one unit.  Review mode is unchanged: it only ever
+  covers one PO.
+
 ## [1.240.0] - 2026-10-10
 
 A product's `#` on its PO can now be searched for and linked to (RS-225).

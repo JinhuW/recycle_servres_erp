@@ -6,14 +6,14 @@ import { LineSpecChips, lineHasSpecChips } from '../../components/LineSpecChips'
 import { StatusChangeDialog, type StatusAttachment } from '../../components/StatusChangeDialog';
 import { api, ApiError, rawFetch } from '../../lib/api';
 import {
-  countOf, emptyCheck, filterScan, isAbsentChecked, isShortChecked, lineState, partsNamed, type LineCheck,
+  countOf, emptyCheck, isAbsentChecked, isShortChecked, lineState, partsNamed, type LineCheck,
 } from '../../lib/boxCheck';
 import { handleFetchError, showErrorDialog, showWarnToast } from '../../lib/errorToast';
 import { useT } from '../../lib/i18n';
 import { sellOrderStatuses } from '../../lib/lookups';
 import { navigate, navigateBack } from '../../lib/route';
 import {
-  flaggedLots, isPackable, nextOpenProduct, packBody, packGroups, packProducts, packScan, packView, packWarehouseOf,
+  fitsAnySourcePo, flaggedLots, isPackable, nextOpenProduct, packBody, packFilter, packGroups, packProducts, packScan, packView, packWarehouseOf,
   packWarehouseOptions, productSummary, productTally, productTick, shipBlockers, sourceTag, toCheck, UNASSIGNED,
   type PackLine, type PackProduct, type PackResponse,
 } from '../../lib/sellOrderPack';
@@ -217,7 +217,7 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
   // and `lines`.
   const filterText = useScanFilterText(scan);
   const fit = useMemo(() => {
-    const hits = filterScan(lines.filter(isPackable), filterText);
+    const hits = packFilter(lines.filter(isPackable), filterText);
     return hits ? new Set(hits.map(l => l.id)) : null;
   }, [lines, filterText]);
   const listed = useMemo(
@@ -483,13 +483,17 @@ export default function DesktopSellOrderPack({ id, onToast }: Props) {
     // to pick from. The box lets go of it, so the next scan replaces it rather
     // than running on from it.
     const ambiguous = m !== null && 'ambiguous' in m;
-    if (!ambiguous) setScan('');
-    if (scanFromPage.current || ambiguous) {
+    // A PO number keeps its filter up the same way: it names lots to pack,
+    // not one unit.
+    const poFilter = !m && !!text && fitsAnySourcePo(lines.filter(isPackable), text);
+    if (!ambiguous && !poFilter) setScan('');
+    if (scanFromPage.current || ambiguous || poFilter) {
       scanFromPage.current = false;
       scanRef.current?.blur();
     }
     if (!text || !ready) return;
     setChoose(new Set());
+    if (poFilter) return;
     if (!m) {
       setScanMsg({ tone: 'neg', text: t('pkScanNoMatch', { pn: text, id }) });
       return;

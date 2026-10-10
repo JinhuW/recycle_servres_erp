@@ -1376,6 +1376,9 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
     warehouse view. When the part is still waiting on more than one lot, the
     scan ticks nothing: it opens those products, highlights the lots, names
     them by # and asks for a tap on the one that was packed.
+  - **The filter also takes a PO number** (v1.241.0): `PO-1343`, `po1343` or
+    `1343` lists the lots that came from that PO. Enter on one keeps the
+    filter up and packs nothing, since a PO names lots, not one unit.
   - Progress is saved on the server (`sell_order_packs`), so a reload, a second
     iPad or coming back from another app picks up where the count stands; the
     page re-reads when it returns to the foreground. Last write per line wins.

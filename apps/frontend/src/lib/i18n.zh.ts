@@ -2058,7 +2058,7 @@ const zh: Record<string, string> = {
   pkFromPo: '来自 {po}',
   pkTypedIn: '手动录入，不来自 PO',
   pkZeroLine: '数量 0 · 无需打包',
-  pkScanPh: '扫描标签，或输入零件号的任意部分',
+  pkScanPh: '扫描标签，或输入零件号或 PO 号的任意部分',
   pkScanHint: '扫码枪会勾选扫到的那个批次。输入文字可筛选列表。也可点勾手动打包。',
   pkScanNoMatch: '{id} 上没有与 {pn} 匹配的产品。',
   pkScanAmbiguous: '{pn} 对应多个零件：{pns}。列表只显示这些产品。',
