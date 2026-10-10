@@ -289,13 +289,8 @@ const FILTER_SELECT: CSSProperties = {
   paddingTop: 0, paddingBottom: 0,
 };
 
-// Popover boxes, used only to decide whether one still fits below the row it
-// belongs to. The PO and record pickers are a search field plus the capped
-// list; the pair picker has no search field, so it is that much shorter.
 const PICKER_W = 320;
-const PICKER_H = 312;
 const PAIR_W = 380;
-const PAIR_H = 262;
 const GAP = 4;
 
 const SOURCE_LABEL: Record<PaymentRow['source'], string> = {
@@ -785,7 +780,7 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh
 }) {
   const { t } = useT();
   const [picking, setPicking] = useState(false);
-  const actionsRef = useRef<HTMLSpanElement>(null);
+  const linkBtnRef = useRef<HTMLButtonElement>(null);
   const [pairDismissed, setPairDismissed] = useState(false);
 
   // Not `stop`: that name is also window.stop(), so a deleted declaration
@@ -972,7 +967,7 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh
             every row shape — right-alignment pins only the right-most item, and
             rows carry two, three or no secondary buttons. */}
         <td className="pay-actions">
-          <span ref={actionsRef} className="pay-rail" onClick={stopClick}>
+          <span className="pay-rail" onClick={stopClick}>
             {row.orderId || dead ? null : row.ignored ? (
               <button type="button" className="btn sm ghost" onClick={() => void act(`${row.id}/unignore`)}>
                 {t('payUnignore')}
@@ -999,6 +994,7 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh
                   </button>
                 </span>
                 <button
+                  ref={linkBtnRef}
                   type="button" className={likely ? 'btn sm primary' : 'btn sm'}
                   onClick={() => setPicking(p => !p)}
                 >
@@ -1010,7 +1006,7 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh
           {picking && !row.orderId && (
             <PoPicker
               txnId={row.id}
-              anchor={actionsRef}
+              anchor={linkBtnRef}
               onPick={link}
               onClose={() => setPicking(false)}
               locale={locale}
@@ -1504,9 +1500,9 @@ function PoPicker({ txnId, anchor, onPick, onClose, locale }: {
   // `overflow-y: hidden` sheared the dropdown off at the table's bottom edge.
   // `overflow-y: visible` can't fix it — next to `overflow-x: auto` it computes
   // back to `auto` — so the popover has to leave the scroll container instead.
-  // Right-aligned: the anchor is the actions cell at the row's right edge.
+  // Right-aligned: the anchor is the Link button at the row's right edge.
   const pos = useFixedPopover(
-    anchor, ref, { width: PICKER_W, height: PICKER_H, align: 'right', gap: GAP }, onClose);
+    anchor, ref, { align: 'right', gap: GAP }, onClose);
 
   useEffect(() => {
     const id = ++reqId.current;
@@ -1530,8 +1526,8 @@ function PoPicker({ txnId, anchor, onPick, onClose, locale }: {
       ref={ref}
       onClick={e => e.stopPropagation()}
       style={{
-        position: 'fixed', top: pos?.top ?? 0, left: pos?.left ?? 0, width: PICKER_W,
-        visibility: pos ? 'visible' : 'hidden',
+        position: 'fixed', top: pos?.top ?? 0, left: pos?.left ?? 0, width: PICKER_W, maxHeight: pos?.maxHeight,
+        visibility: pos && !pos.hidden ? 'visible' : 'hidden',
         background: 'var(--bg-elev)', border: '1px solid var(--border)', borderRadius: 10,
         boxShadow: '0 12px 28px rgba(15,23,42,0.14)', zIndex: 90, overflow: 'hidden',
         cursor: 'default', textAlign: 'left',
@@ -1552,8 +1548,8 @@ function PoPicker({ txnId, anchor, onPick, onClose, locale }: {
         />
       </div>
       <div style={{ maxHeight: 260, overflowY: 'auto' }}>
-        {/* The heading scrolls with the list so the popover's outer height —
-            and PICKER_H, which RecordPicker shares — stay put. */}
+        {/* The heading scrolls with the list, so the 260px cap holds for the
+            whole panel below the search field. */}
         {rows !== null && rows.length > 0 && (
           <div className="muted" style={{ fontWeight: 600, fontSize: 11.5, padding: '8px 12px 2px' }}>
             {t(query.trim() ? 'payPickResults' : 'payMatchSuggested')}
@@ -1622,7 +1618,7 @@ function RecordPicker({ txnId, anchor, onDone, onClose }: {
   // Fixed for the same reason PoPicker is — see the comment there.
   // Left-aligned: the anchor is a small chip on the left of the expanded row.
   const pos = useFixedPopover(
-    anchor, ref, { width: PICKER_W, height: PICKER_H, align: 'left', gap: GAP }, onClose);
+    anchor, ref, { align: 'left', gap: GAP }, onClose);
 
   useEffect(() => {
     api.get<{ rows: InternalRecord[] }>('/api/internal-transactions?limit=20')
@@ -1647,8 +1643,8 @@ function RecordPicker({ txnId, anchor, onDone, onClose }: {
       ref={ref}
       onClick={e => e.stopPropagation()}
       style={{
-        position: 'fixed', top: pos?.top ?? 0, left: pos?.left ?? 0, width: PICKER_W,
-        visibility: pos ? 'visible' : 'hidden',
+        position: 'fixed', top: pos?.top ?? 0, left: pos?.left ?? 0, width: PICKER_W, maxHeight: pos?.maxHeight,
+        visibility: pos && !pos.hidden ? 'visible' : 'hidden',
         background: 'var(--bg-elev)', border: '1px solid var(--border)', borderRadius: 10,
         boxShadow: '0 12px 28px rgba(15,23,42,0.14)', zIndex: 90, overflow: 'hidden',
         cursor: 'default', textAlign: 'left',
@@ -1714,7 +1710,7 @@ function PairPicker({ txnId, anchor, locale, onPick, onClose }: {
   // the left of the expanded row, and right-aligning a 380px panel to it would
   // throw the panel off the button.
   const pos = useFixedPopover(
-    anchor, ref, { width: PAIR_W, height: PAIR_H, align: 'left', gap: GAP }, onClose);
+    anchor, ref, { align: 'left', gap: GAP }, onClose);
 
   useEffect(() => {
     let live = true;
@@ -1729,8 +1725,8 @@ function PairPicker({ txnId, anchor, locale, onPick, onClose }: {
       ref={ref}
       onClick={e => e.stopPropagation()}
       style={{
-        position: 'fixed', top: pos?.top ?? 0, left: pos?.left ?? 0, width: PAIR_W,
-        visibility: pos ? 'visible' : 'hidden',
+        position: 'fixed', top: pos?.top ?? 0, left: pos?.left ?? 0, width: PAIR_W, maxHeight: pos?.maxHeight,
+        visibility: pos && !pos.hidden ? 'visible' : 'hidden',
         background: 'var(--bg-elev)', border: '1px solid var(--border)', borderRadius: 10,
         boxShadow: '0 12px 28px rgba(15,23,42,0.14)', zIndex: 90, overflow: 'hidden',
         cursor: 'default', textAlign: 'left',

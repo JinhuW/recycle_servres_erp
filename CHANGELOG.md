@@ -17,6 +17,56 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.239.1] - 2026-10-10
+
+Fixes from a review of v1.239.0's note icon before it went to prod (RS-223).
+The card takes no pointer, so clicking it to dismiss it clicked the row
+underneath and opened a *different* sell order.  That happened on an iPad,
+which gets the desktop shell in landscape, and on a desktop after tabbing to
+the icon.  Most of the rest was in the popover hook the card shares with the
+Payments pickers, and had been on prod for a while.
+
+### Fixed
+
+- **A press on a note card no longer opens the order beneath it.**  It just
+  dismisses the card.
+- **Clicking or tapping the note icon toggles its card.**  A touch no longer
+  counts as a hover that never ends, so a tapped card can be closed again, and
+  a mouse click pins the card until the next click.  The icon's hit area is
+  wider, so a near miss doesn't open the order.  Escape closes the card opened
+  last, and screen readers now read the note on the icon itself.
+- **A Payments picker closes when its own button is pressed again.**  Before,
+  the press closed the picker and the click opened a new one, which refetched
+  and cleared the search.
+- **Popovers are measured, not given a guessed size.**  A short picker or note
+  card flipped above its row now sits against the row instead of floating up
+  to 220px above it.  One that fits on neither side takes the roomier side and
+  is capped to it, where before it was pinned to the top of the window and
+  covered its own row.  An open popover now follows its anchor through layout
+  changes as well as scrolling, and hides while the anchor is scrolled out of
+  sight.
+- **The sell-order list shows the customer's region** under the name again:
+  the list API had never returned it, so that line was always blank.
+
+## [1.239.0] - 2026-10-10
+
+The desktop Sell orders list now shows which orders carry internal notes, and
+what they say, without opening each one (RS-222).  Until now the list gave no
+sign of a note at all.
+
+### Added
+
+- **A note icon beside the customer** on every row whose internal note isn't
+  blank.  Hovering it — or tabbing to it — shows the note in a small card, line
+  breaks kept, clamped at 14 lines for a very long one.  Clicking the icon
+  doesn't open the order; the rest of the row still does.
+- The card takes no pointer, so running the mouse down the column moves from
+  one note to the next instead of getting stuck on the card covering the icon
+  below.  It leaves the table's scroll box, so the last row's card isn't cut off
+  and flips above the row when there's no room below.  It renders outside the
+  row, so an archived order's dimmed row doesn't fade it.  The list API already
+  returned each order's notes; nothing changed on the backend.
+
 ## [1.238.2] - 2026-10-10
 
 A deploy could leave a browser with a blank page that no reload fixed (RS-221).
