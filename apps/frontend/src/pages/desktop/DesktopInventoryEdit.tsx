@@ -39,6 +39,8 @@ type DetailRow = {
   created_at: string; order_id: string;
   // Its PO is at Ready to Pay or later: qty and unit cost are frozen.
   order_closed_book?: boolean;
+  // Held for a shipped sale on a PO back at Reviewing: frozen the same way.
+  line_held?: boolean;
 };
 
 type Event = {
@@ -742,7 +744,7 @@ function PricingPanel({
   // The route refuses qty and unit cost from Ready to Pay on (closed book);
   // every other field still saves. `=== true`: a backend without the flag
   // leaves the inputs open and the route stays the gate.
-  const goodsLocked = item.order_closed_book === true;
+  const goodsLocked = item.order_closed_book === true || item.line_held === true;
   // A bare disabled .input renders like an open one; this is .order-readonly's look.
   const lockedStyle = goodsLocked ? { opacity: 0.7, background: 'var(--bg-soft)' } : undefined;
   return (
@@ -752,7 +754,9 @@ function PricingPanel({
           <div>
             <div className="card-title">{t('iePricingQty')}</div>
             <div className="card-sub">
-              {goodsLocked
+              {item.line_held === true
+                ? t('ieGoodsHeldHint')
+                : goodsLocked
                 ? linkedSentence(t('ieGoodsLockedHint'), item.order_id, '/purchase-orders/' + item.order_id)
                 : t('iePricingQtySub')}
             </div>

@@ -71,6 +71,12 @@ patchRoutes.patch('/:id', async (c) => {
       && (!Array.isArray(body.removeLineIds) || !body.removeLineIds.every(isLineId))) {
     return c.json({ error: 'removeLineIds must be line ids' }, 400);
   }
+  // Lower-cased the way the database returns them: the snapshots, the
+  // material-edit check and the shipped-line hold are all keyed by stored id,
+  // while a uuid in any case matches its row — so an upper-case id would be
+  // written but skip every one of them.
+  for (const l of body.lines ?? []) l.id = l.id.toLowerCase();
+  if (body.removeLineIds) body.removeLineIds = body.removeLineIds.map(lineId => lineId.toLowerCase());
   if (!isOrderPayment(body.payment)) return c.json({ error: 'payment must be company or self' }, 400);
   if (!isPaymentMethod(body.paymentMethod)) {
     return c.json({ error: 'paymentMethod must be paypal or cash' }, 400);
@@ -678,6 +684,11 @@ patchRoutes.patch('/:id', async (c) => {
           const setSellPrice = l.sellPrice !== undefined ? 1 : 0;
           const lineBody = l as unknown as Record<string, unknown>;
           const has = (f: string) => (lineBody[f] !== undefined ? 1 : 0);
+          // The brand decides the chip's cut, so a patch that moves only the
+          // brand re-cuts the chip the line already holds.
+          const brandAfter = has('brand') ? specVal(l.brand) : (stored?.brand ?? null);
+          const brandMoved = has('brand') === 1 && brandAfter !== (stored?.brand ?? null);
+          const chipIn = has('chipNumber') ? l.chipNumber : brandMoved ? stored?.chip_number : undefined;
           // `status` is deliberately NOT settable here. Line status is driven
           // by the lifecycle (advance handler) and 'Sold' is a protected
           // terminal state; accepting a client-supplied status would let any
@@ -716,8 +727,8 @@ patchRoutes.patch('/:id', async (c) => {
               -- pricing are keyed on it.
               part_number    = COALESCE(${l.partNumber ?? null}, part_number),
               serial_number  = COALESCE(${l.serialNumber ?? null}, serial_number),
-              chip_number    = CASE WHEN ${has('chipNumber')}::int = 1
-                                    THEN NULLIF(${canonChipNumber(l.chipNumber, has('brand') ? specVal(l.brand) : stored?.brand)}, '') ELSE chip_number END,
+              chip_number    = CASE WHEN ${chipIn !== undefined ? 1 : 0}::int = 1
+                                    THEN NULLIF(${canonChipNumber(chipIn, brandAfter)}, '') ELSE chip_number END,
               condition      = COALESCE(${l.condition ?? null}, condition),
               health         = CASE WHEN ${has('health')}::int = 1 THEN ${l.health ?? null} ELSE health END,
               rpm            = CASE WHEN ${has('rpm')}::int = 1    THEN ${l.rpm ?? null}    ELSE rpm END,

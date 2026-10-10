@@ -560,6 +560,7 @@ export type StoredLine = {
   serial_number: string | null;
   item_type: string | null;
   part_number: string | null;
+  chip_number: string | null;
   brand: string | null;
   capacity: string | null;
   interface: string | null;
@@ -573,5 +574,5 @@ export type StoredLine = {
 export function storedLineCols(sql: SqlLike) {
   return sql`
     id, product_no, category, generation, qty, serial_number, item_type, part_number,
-    brand, capacity, interface, form_factor, speed, rpm, type, classification, rank`;
+    chip_number, brand, capacity, interface, form_factor, speed, rpm, type, classification, rank`;
 }

@@ -2236,6 +2236,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     iePricingQty: 'Pricing & quantity',
     iePricingQtySub: 'Quantity and unit cost stay editable while the line is open. Sell price drives margin once the item is reviewed.',
     ieGoodsLockedHint: 'Quantity and unit cost are locked once {id} reaches Ready to Pay — move it back to Reviewing to change them. Every other field still saves.',
+    ieGoodsHeldHint: 'Quantity and unit cost stay as reviewed while this lot is on a shipped sell order. Every other field still saves.',
     ieLossyBanner: 'Sell price is below unit cost — this line would book at a loss.',
     ieMarketReference: 'Market reference',
     ieMarketRefSub: 'Recent benchmarks for {label}.',

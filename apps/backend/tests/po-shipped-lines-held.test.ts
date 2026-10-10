@@ -88,6 +88,12 @@ describe('a PO back in Reviewing with shipped products', () => {
     expect(held.body.offendingLineIds).toEqual([a.id.toLowerCase()]);
     expect(held.body.sellOrderIds).toEqual([shipped]);
 
+    // A uuid matches in any case, so the guard has to as well.
+    const upper = await api('PATCH', `/api/orders/${id}`, {
+      token: alex.token, body: { lines: [{ id: a.id.toUpperCase(), unitCost: 11 }] },
+    });
+    expect(upper.status).toBe(409);
+
     const echo = await api('PATCH', `/api/orders/${id}`, {
       token: alex.token, body: { lines: [{ id: a.id, unitCost: 10, partNumber: 'HELD-A' }, { id: b.id, unitCost: 22 }] },
     });
@@ -108,6 +114,16 @@ describe('a PO back in Reviewing with shipped products', () => {
     expect((await api('PATCH', `/api/inventory/${a.id}`, {
       token: alex.token, body: { sellPrice: 45 },
     })).status).toBe(200);
+  });
+
+  it('the inventory editor is told which lot is held, so it locks qty and cost up front', async () => {
+    const { alex, a, b } = await heldOrder();
+    type Item = { item: { line_held?: boolean; order_closed_book?: boolean } };
+    const heldItem = (await api<Item>('GET', `/api/inventory/${a.id}`, { token: alex.token })).body.item;
+    expect(heldItem.line_held).toBe(true);
+    expect(heldItem.order_closed_book).toBe(false);
+    const freeItem = (await api<Item>('GET', `/api/inventory/${b.id}`, { token: alex.token })).body.item;
+    expect(freeItem.line_held).toBe(false);
   });
 
   it('GET names the holding sell order to a manager, on the held line only', async () => {

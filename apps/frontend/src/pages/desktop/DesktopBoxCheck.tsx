@@ -119,7 +119,8 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   // tick away, so a shortfall is always confirmed by a tick made after it —
   // and reaching the qty never ticks on its own, because the count starts there.
   const setCount = (l: OrderLine, n: number) => {
-    if (!ready) return;
+    // A held line's count is locked for the keys as well as the stepper.
+    if (!ready || lineShippedOn(l).length) return;
     const prev = checkOf(l.id);
     const counted = Math.max(0, Math.min(l.qty, n));
     if (counted === prev.counted) return;
@@ -404,6 +405,9 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   // and one held for a shipped sell order is that sale's record — its count
   // here is a box check, never a recount.
   const toZero = absent.filter(l => l.qty > 0 && lineShippedOn(l).length === 0);
+  // The Finish card lists what Approve zeroes apart from the absent lines it leaves.
+  const zeroing = atReviewing && toZero.length > 0;
+  const absentKept = zeroing ? absent.filter(l => !toZero.includes(l)) : absent;
   // Against the total the PO will have once Approve has zeroed those lines,
   // so a line counted 0 can open a gap, or close one, before the click.
   const gap = paymentGap(order.linkedPaid, reviewApproveTotal(order, atReviewing ? toZero : []), order.payment);
@@ -412,6 +416,16 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   // The product's # on the PO, which regrouping the rows doesn't touch. An
   // older backend sends none; its lines came in # order.
   const lineNo = (l: OrderLine) => l.no ?? lines.indexOf(l) + 1;
+  const absentList = (ls: OrderLine[]) => (
+    <ul className="bc-problem-list">
+      {ls.map(l => (
+        <li key={l.id}>
+          <span className="mono">#{lineNo(l)} {l.partNumber ?? lineLabel(l)}</span>
+          {' · '}{t('bcShortNote', { n: 0, of: l.qty })}
+        </li>
+      ))}
+    </ul>
+  );
 
   const row = (l: OrderLine) => {
     const c = checkOf(l.id);
@@ -703,20 +717,19 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
                 <p className="card-sub">{t('bcAllAbsent')}</p>
               ) : absent.length > 0 || short.length > 0 ? (
                 <>
-                  {absent.length > 0 && (
+                  {zeroing && (
                     <>
-                      <p className="card-sub">{t(atReviewing && toZero.length ? 'bcZeroIntro' : 'bcAbsentIntro', { n: absent.length })}</p>
-                      <ul className="bc-problem-list">
-                        {absent.map(l => (
-                          <li key={l.id}>
-                            <span className="mono">#{lineNo(l)} {l.partNumber ?? lineLabel(l)}</span>
-                            {' · '}{t('bcShortNote', { n: 0, of: l.qty })}
-                          </li>
-                        ))}
-                      </ul>
-                      {atReviewing && toZero.length > 0 && order.goodsFollowsLines === false && (
+                      <p className="card-sub">{t('bcZeroIntro', { n: toZero.length })}</p>
+                      {absentList(toZero)}
+                      {order.goodsFollowsLines === false && (
                         <p className="card-sub bc-lot-note">{t('bcLotPriceKept')}</p>
                       )}
+                    </>
+                  )}
+                  {absentKept.length > 0 && (
+                    <>
+                      <p className="card-sub">{t('bcAbsentIntro', { n: absentKept.length })}</p>
+                      {absentList(absentKept)}
                     </>
                   )}
                   {short.length > 0 && (
