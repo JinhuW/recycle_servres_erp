@@ -17,6 +17,7 @@
 import { Hono, type MiddlewareHandler } from 'hono';
 import { getDb, type SqlLike } from '../db';
 import { log } from '../lib/log';
+import { isEmail } from '../lib/email';
 import { nextHumanId } from '../lib/id-seq';
 import { createRateLimiter } from '../lib/rate-limit';
 import { clientIp } from '../lib/clientIp';
@@ -126,7 +127,28 @@ export type QuotePayload = {
 
 type Parsed<T> = { ok: T } | { error: string } | { honeypot: true };
 
-const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+// Postgres refuses a NUL in text and an unpaired surrogate in jsonb; either
+// would be a 500 (and an error-sink record) on an anonymous request.
+const UNSTORABLE = /\0|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/** True when any string anywhere in a parsed JSON body can't be stored. */
+export function hasUnstorableText(v: unknown): boolean {
+  const stack: unknown[] = [v];
+  while (stack.length) {
+    const x = stack.pop();
+    if (typeof x === 'string') {
+      if (UNSTORABLE.test(x)) return true;
+    } else if (x && typeof x === 'object') {
+      for (const [k, val] of Object.entries(x)) {
+        if (UNSTORABLE.test(k)) return true;
+        stack.push(val);
+      }
+    }
+  }
+  return false;
+}
+
+const UNSTORABLE_ERROR = 'text contains characters that cannot be stored';
 
 function text(v: unknown, max = MAX_TEXT): string | null {
   if (typeof v !== 'string') return null;
@@ -136,7 +158,7 @@ function text(v: unknown, max = MAX_TEXT): string | null {
 
 function email(v: unknown): string | null {
   const e = typeof v === 'string' ? v.trim().toLowerCase() : '';
-  return EMAIL_RE.test(e) && e.length <= MAX_TEXT ? e : null;
+  return e.length <= MAX_TEXT && isEmail(e) ? e : null;
 }
 
 // A filled honeypot is answered 200 and ignored, so a bot can't tell it was
@@ -299,6 +321,7 @@ publicForms.post('/intake', async (c) => {
     raw = await c.req.json().catch(() => null);
     if (raw === null) return c.json({ error: 'JSON body required' }, 400);
   }
+  if (hasUnstorableText(raw)) return c.json({ error: UNSTORABLE_ERROR }, 400);
 
   const parsed = parseSellLot(raw);
   if ('honeypot' in parsed) return c.json({ ref: null }, 200);
@@ -384,7 +407,7 @@ publicForms.post('/intake', async (c) => {
         await tx`
           INSERT INTO web_submission_photos
             (submission_id, line_index, filename, size_bytes, mime_type, storage_key, delivery_url, position)
-          VALUES (${id}, ${u.line}, ${(u.file.name || 'photo.jpg').slice(0, STORED_FILENAME_MAX)}, ${u.file.size},
+          VALUES (${id}, ${u.line}, ${(u.file.name.replace(/\0/g, '') || 'photo.jpg').slice(0, STORED_FILENAME_MAX)}, ${u.file.size},
                   ${u.file.type || 'image/jpeg'}, ${u.storageKey}, ${u.deliveryUrl}, ${u.pos})
         `;
       }
@@ -408,6 +431,7 @@ publicForms.post('/intake', async (c) => {
 publicForms.post('/quote', async (c) => {
   const raw = await c.req.json().catch(() => null);
   if (raw === null) return c.json({ error: 'JSON body required' }, 400);
+  if (hasUnstorableText(raw)) return c.json({ error: UNSTORABLE_ERROR }, 400);
   const parsed = parseQuote(raw);
   if ('honeypot' in parsed) return c.json({ ref: null }, 200);
   if ('error' in parsed) return c.json({ error: parsed.error }, 400);

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from './Icon';
 import { useT } from '../lib/i18n';
+import { useEscapeKey } from '../lib/useEscapeKey';
 
 /**
  * A single field that is both a dropdown and a free-text input: type any value,
@@ -72,8 +73,13 @@ export function Combobox({
 
   const choose = (v: string) => { onChange(v); setOpen(false); setActive(-1); };
 
+  // The open menu is a layer of its own, so Escape closes it and not the
+  // drawer or dialog it sits in. Handled here only: closing it from the
+  // input's keydown would unregister the layer before the press reached the
+  // stack, and the layer beneath would close too.
+  useEscapeKey(() => setOpen(false), open);
+
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Escape') { setOpen(false); return; }
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       if (!open) { setOpen(true); return; }
       if (!filtered.length) return;

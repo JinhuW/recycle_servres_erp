@@ -27,18 +27,25 @@ export async function validateSellLines(
   lines: SellLine[],
   excludeOrderId: string | null,
 ): Promise<string | null> {
+  // Keyed lower-case: two spellings of one uuid are one lot, and summed apart
+  // each would pass the cap on its own.
   const demand = new Map<string, number>();
+  const held = new Set<string>();
   for (const l of lines) {
+    if (!l.inventoryId) continue;
+    const lot = l.inventoryId.toLowerCase();
     // A manual line reserves nothing, and neither does one held at 0 — which
     // is how a line whose lot has since gone stays on the order with its #.
-    if (!l.inventoryId || l.qty === 0) continue;
-    demand.set(l.inventoryId, (demand.get(l.inventoryId) ?? 0) + l.qty);
+    // Its lot is still locked: a PO edit deleting it mid-save would otherwise
+    // fail the insert's FK.
+    if (l.qty === 0) { held.add(lot); continue; }
+    demand.set(lot, (demand.get(lot) ?? 0) + l.qty);
   }
-  if (demand.size === 0) return null;
+  if (demand.size === 0 && held.size === 0) return null;
   // One statement, in id order: two orders naming the same lines in a
   // different order would otherwise each hold one row while waiting on the
   // other's, and Postgres would abort one of them as a deadlock.
-  const ids = [...demand.keys()].sort();
+  const ids = [...new Set([...demand.keys(), ...held])].sort();
   const locked = await tx<{
     id: string; order_id: string; product_no: number; qty: number; status: string; archived_at: string | null;
   }[]>`
@@ -49,10 +56,14 @@ export async function validateSellLines(
     FOR UPDATE OF l
   `;
   const byId = new Map(locked.map(r => [r.id.toLowerCase(), r]));
+  for (const lot of held) {
+    if (!byId.has(lot)) return `inventory lot ${lot} not found — reload the order`;
+  }
+  if (demand.size === 0) return null;
   // Read after the locks, so no rival can commit units in between.
-  const claims = await committedClaimsByLine(tx, ids, { excludeOrderId });
+  const claims = await committedClaimsByLine(tx, [...demand.keys()], { excludeOrderId });
   for (const [inventoryId, qty] of demand) {
-    const inv = byId.get(inventoryId.toLowerCase());
+    const inv = byId.get(inventoryId);
     if (!inv) return `inventory lot ${inventoryId} not found`;
     // Named the way the PO page and the sell order show it.
     const ref = `${inv.order_id} #${inv.product_no}`;
@@ -60,7 +71,7 @@ export async function validateSellLines(
       return `${ref} is not sellable (status=${inv.status})`;
     if (inv.archived_at !== null) return `${ref} is on an archived order`;
     if (qty > inv.qty) return `qty ${qty} exceeds inventory available ${inv.qty} on ${ref}`;
-    const claim = claims.get(inventoryId.toLowerCase());
+    const claim = claims.get(inventoryId);
     const remaining = inv.qty - (claim?.qty ?? 0);
     if (claim && qty > remaining) {
       const name = claim.partNumber

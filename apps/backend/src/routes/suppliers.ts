@@ -11,6 +11,7 @@
 // history (services/supplierCrm.ts). Nothing here caches or stores them.
 
 import { Hono } from 'hono';
+import { isEmail } from '../lib/email';
 import { getDb } from '../db';
 import { clampLimit } from '../lib/pagination';
 import { effectiveRole } from '../lib/role';
@@ -677,7 +678,6 @@ const STRING_FIELDS = [
   'country', 'prefPayment', 'prefLogistics', 'prefContact', 'prefBestTime', 'prefPrice',
   'notes', 'source',
 ] as const;
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** Type-check before the UPDATE, or `body.status as string` lets anything
  *  through to a CHECK constraint and returns a 500 instead of a 400. */
@@ -687,7 +687,7 @@ function validate(b: Record<string, unknown>): string | null {
       return `${f} must be text`;
     }
   }
-  if (typeof b.email === 'string' && b.email.trim() !== '' && !EMAIL_RE.test(b.email.trim())) {
+  if (typeof b.email === 'string' && b.email.trim() !== '' && !isEmail(b.email.trim())) {
     return 'That email address does not look right';
   }
   if (b.supplies !== undefined && b.supplies !== null &&

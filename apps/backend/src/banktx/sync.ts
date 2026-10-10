@@ -397,8 +397,19 @@ async function syncOne(
     // leg or the retry finds its PayPal charge already taken. Only pair_id is
     // cleared: no_auto_pair is a human's Ungroup, and setting it here would
     // stop the retry pairing on its own. Transfer pairs are left alone.
+    // A linked pair counts only its PayPal leg toward the PO; the other leg
+    // was linked as the pair's shadow and, standing alone, would count too —
+    // a denied PayPal payment would leave its card charge reading the PO as
+    // paid. So the shadow lets go of the link, tombstoned against autoLink.
     const dissolved = await tx`
-      UPDATE bank_transactions SET pair_id = NULL
+      UPDATE bank_transactions
+      SET pair_id = NULL,
+          order_id = CASE WHEN source = 'paypal' THEN order_id END,
+          link_kind = CASE WHEN source = 'paypal' THEN link_kind END,
+          link_auto = CASE WHEN source = 'paypal' THEN link_auto ELSE FALSE END,
+          linked_by = CASE WHEN source = 'paypal' THEN linked_by END,
+          linked_at = CASE WHEN source = 'paypal' THEN linked_at END,
+          no_auto_link = no_auto_link OR (source <> 'paypal' AND order_id IS NOT NULL)
       WHERE pair_id IN (SELECT pair_id FROM bank_transactions
                         WHERE pair_id IS NOT NULL AND settle_status = 'failed'
                           AND category = 'external')

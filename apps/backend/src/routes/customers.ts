@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { isEmail } from '../lib/email';
 import { getDb } from '../db';
 import { committedSellStatuses } from '../lib/sellCommitment';
 import { clampLimit } from '../lib/pagination';
@@ -6,7 +7,6 @@ import type { Env, User } from '../types';
 
 const customers = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const STRING_FIELDS = [
   'name', 'shortName', 'contactName', 'contactEmail', 'contactPhone',
   'address', 'country', 'region', 'notes',
@@ -22,7 +22,7 @@ function validateCustomerFields(b: Record<string, unknown>): string | null {
     }
   }
   if (typeof b.contactEmail === 'string' && b.contactEmail.trim() !== '' &&
-      !EMAIL_RE.test(b.contactEmail.trim())) {
+      !isEmail(b.contactEmail.trim())) {
     return 'contactEmail is not a valid address';
   }
   if (b.tags !== undefined && b.tags !== null &&

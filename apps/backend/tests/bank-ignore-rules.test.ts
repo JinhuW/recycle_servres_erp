@@ -207,6 +207,38 @@ describe('bank ignore rules', () => {
     expect(p.body.count).toBe(0);
   });
 
+  it('an Unignore sticks when the other leg pairs with the row later, and through a second Unignore', async () => {
+    const { token } = await loginAs(ALEX);
+    await addRule(token, { pattern: 'shell station' });
+    await syncBankTransactions(testEnv, [
+      fakeProvider('paypal', [{ externalId: 'P-1', amount: -300, counterparty: 'Shell Station' }]),
+    ]);
+    expect((await rows()).get('P-1')).toMatchObject({ ignored: true });
+    await api('POST', `/api/bank-transactions/${await idOf('P-1')}/unignore`, { token });
+
+    await syncBankTransactions(testEnv, [
+      fakeProvider('mercury', [
+        { externalId: 'm-1', amount: -300, paypalTxnId: 'P-1', counterparty: 'PayPal', description: 'PAYPAL *SHELL STATION' },
+      ]),
+    ]);
+    let r = await rows();
+    expect(r.get('m-1')?.pair_id).not.toBeNull();
+    expect(r.get('m-1')?.pair_id).toBe(r.get('P-1')?.pair_id);
+    expect(r.get('P-1')).toMatchObject({ ignored: false, no_auto_ignore: true });
+    expect(r.get('m-1')).toMatchObject({ ignored: false });
+
+    // A hand Ignore and a second Unignore keep the tombstone.
+    await api('POST', `/api/bank-transactions/${await idOf('P-1')}/ignore`, { token });
+    await api('POST', `/api/bank-transactions/${await idOf('P-1')}/unignore`, { token });
+    await api('POST', `/api/bank-transactions/${await idOf('P-1')}/unignore`, { token });
+    await syncBankTransactions(testEnv, [
+      fakeProvider('paypal', [{ externalId: 'P-1', amount: -300, counterparty: 'Shell Station' }]),
+    ]);
+    r = await rows();
+    expect(r.get('P-1')).toMatchObject({ ignored: false, no_auto_ignore: true });
+    expect(r.get('m-1')).toMatchObject({ ignored: false });
+  });
+
   it('delete gives the rows back unless another rule claims them; a human ignore is untouched', async () => {
     await seedCardSpend();
     const { token } = await loginAs(ALEX);

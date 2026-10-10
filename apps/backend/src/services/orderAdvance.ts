@@ -14,6 +14,7 @@ import { notify, notifyManagers } from '../lib/notify';
 import { ENFORCED_EVERYWHERE, leaveDraftBlockers, type LeaveDraftBlocker } from './orderTxnRule';
 import type { SqlLike } from './orderAudit';
 import type { SOLineSnap } from './sellOrderLineMatch';
+import { prunePackRows } from '../routes/sellOrderPack';
 import { committedSellStatuses, isSellableLineStatus, openSellStatuses } from '../lib/sellCommitment';
 
 // Canonical lifecycle ordering. The workflow_stages table was removed; this
@@ -220,6 +221,11 @@ async function cascadeBlockers(
   | { kind: 'transferClaimed'; offendingLineIds: string[] }
   | null
 > {
+  // The lines first, after the orders row every caller holds (the one lock
+  // order). A sell order locks the lines it names, a 0-held one included,
+  // before it raises a claim on one, so a claim committed while this waits is
+  // read below instead of being cascaded under.
+  await tx`SELECT id FROM order_lines WHERE order_id = ${orderId} ORDER BY id FOR UPDATE`;
   const movingBack = statusesAheadOf(newLineStatus);
   if (movingBack.length > 0 && !isSellableLineStatus(newLineStatus)) {
     const committed = await committedLines(tx, orderId, movingBack, openSellStatuses());
@@ -235,17 +241,15 @@ async function cascadeBlockers(
 }
 
 // The lines a move back to a status sell orders still accept (Reviewing)
-// leaves behind: those a committed sell order claims stay confirmed. The lines
-// are locked first — after the orders row the caller holds, the one lock
-// order — so a promotion that commits while this waits is read here instead of
-// being cascaded under. Only a PO coming back from past review has Done lines
-// to leave, so a forward move into Reviewing takes no lock.
+// leaves behind: those a committed sell order claims stay confirmed. Runs
+// after cascadeBlockers, which has locked the lines. A forward move into
+// Reviewing can find one too: a line hand-set to Done on the inventory page,
+// or put back at Done by a transfer received while the PO was In Transit.
 async function heldBackLineIds(
-  tx: SqlLike, orderId: string, fromLifecycle: string, newLineStatus: string,
+  tx: SqlLike, orderId: string, newLineStatus: string,
 ): Promise<string[]> {
   const movingBack = statusesAheadOf(newLineStatus);
-  if (!isClosedBook(fromLifecycle) || movingBack.length === 0 || !isSellableLineStatus(newLineStatus)) return [];
-  await tx`SELECT id FROM order_lines WHERE order_id = ${orderId} ORDER BY id FOR UPDATE`;
+  if (movingBack.length === 0 || !isSellableLineStatus(newLineStatus)) return [];
   return (await committedLines(tx, orderId, movingBack, committedSellStatuses())).lineIds;
 }
 
@@ -387,6 +391,17 @@ export async function archiveOrderLinesTx(
   // 'Archived' is not a lifecycle status, so the committed-line half of this
   // guard is a no-op and only the transfer guard runs — the committed lines
   // are handled below, where the sell orders have to be named.
+  // The sell orders naming these lines before the lines themselves, the order
+  // a sell-order save takes them in: cascadeBlockers' line lock would otherwise
+  // sit between this PO and the sell_orders UPDATE below.
+  await tx`
+    SELECT so.id FROM sell_orders so
+    WHERE so.status = ANY(${openSellStatuses()}::text[])
+      AND EXISTS (SELECT 1 FROM sell_order_lines sol JOIN order_lines ol ON ol.id = sol.inventory_id
+                  WHERE sol.sell_order_id = so.id AND ol.order_id = ${id})
+    ORDER BY so.id
+    FOR NO KEY UPDATE
+  `;
   const blocked = await cascadeBlockers(tx, id, ARCHIVED_LINE_STATUS);
   if (blocked) return { kind: 'transferClaimed', offendingLineIds: blocked.offendingLineIds };
 
@@ -431,6 +446,9 @@ export async function archiveOrderLinesTx(
       SET pre_adjust_native_total = NULL, adjusted_at = NULL, adjusted_by = NULL, updated_at = NOW()
       WHERE id = ANY(${[...new Set(claimed.map(r => r.so_id))]}::text[])
     `;
+    // Under the row locks the UPDATE just took: a removed lot's pack tick
+    // would otherwise come back as packed if the lot is added again.
+    for (const soId of new Set(claimed.map(r => r.so_id))) await prunePackRows(tx, soId);
     for (const r of claimed) {
       const snapshot: SOLineSnap = {
         inventory_id: r.inventory_id, qty: r.qty, unit_price: r.unit_price, condition: r.condition,
@@ -601,7 +619,7 @@ export async function advanceOrderTx(
   if (newLineStatus) {
     const blocked = await cascadeBlockers(tx, id, newLineStatus);
     if (blocked) return blocked;
-    heldBack = await heldBackLineIds(tx, id, cur.lifecycle, newLineStatus);
+    heldBack = await heldBackLineIds(tx, id, newLineStatus);
   }
   await tx`UPDATE orders SET lifecycle = ${nextStageId} WHERE id = ${id}`;
 

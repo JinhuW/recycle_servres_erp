@@ -12,6 +12,19 @@ import { setLeaveGuard, splitHash } from './route';
 //
 // `keepsOn` names the routes the screen survives; by default, the one it was
 // on when it became dirty.
+// Set while a reload the user already agreed to through confirmDiscard() runs,
+// so the browser doesn't ask the same question a second time.
+let unloadConfirmed = false;
+
+export async function withConfirmedUnload(run: () => void | Promise<void>): Promise<void> {
+  unloadConfirmed = true;
+  try {
+    await run();
+  } finally {
+    unloadConfirmed = false;
+  }
+}
+
 export function useUnsavedGuard(dirty: boolean, keepsOn?: (path: string) => boolean): void {
   const keepsOnRef = useRef(keepsOn);
   keepsOnRef.current = keepsOn;
@@ -20,6 +33,7 @@ export function useUnsavedGuard(dirty: boolean, keepsOn?: (path: string) => bool
     const here = splitHash(window.location.hash).path || '/';
     const unregister = registerHolder((p) => (keepsOnRef.current ? keepsOnRef.current(p) : p === here));
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (unloadConfirmed) return;
       e.preventDefault();
       // Some browsers still need the legacy field set to show the prompt.
       e.returnValue = '';

@@ -153,4 +153,15 @@ describe('Tracker proxy routes (/api/tracker)', () => {
     expect(r.status).toBe(404);
     expect(spy).not.toHaveBeenCalled();
   });
+  it('never passes the tracker refusing our token through as a 401 the SPA reads as a lapsed session', async () => {
+    const { token } = await loginAs(ALEX);
+    for (const status of [401, 403]) {
+      stubTracker(status, { error: 'unauthorized' });
+      const r = await api<{ error: string }>('GET', '/api/tracker/workers', { token, env: TRACKER_ENV });
+      expect(r.status, `upstream ${status}`).toBe(502);
+      expect(r.body.error).toMatch(/TRACKER_API_TOKEN/);
+    }
+    stubTracker(401, {});
+    expect((await api('POST', '/api/tracker/rules', { token, env: TRACKER_ENV, body: {} })).status).toBe(502);
+  });
 });

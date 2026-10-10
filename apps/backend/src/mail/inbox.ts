@@ -33,6 +33,7 @@ const MAX_STRIKES = 5;
 // something the customer meant to send.
 const INLINE_LOGO_BYTES = 30_000;
 const IMAP_TIMEOUT_MS = 15_000;
+const BACKFILL_DAYS = 30;
 
 export type MailboxStatus = { uidValidity: bigint | number | string; uidNext: number };
 
@@ -41,7 +42,10 @@ export interface InboxClient {
   open(): Promise<MailboxStatus>;
   // UIDs strictly above `uid`, ascending.
   uidsAfter(uid: number): Promise<number[]>;
+  // UIDs of mail that arrived on or after `day`, ascending.
+  uidsSince(day: Date): Promise<number[]>;
   headers(uids: number[]): Promise<InboundHeader[]>;
+  // null only when the message is gone from the box; a lost connection throws.
   source(uid: number): Promise<Buffer | null>;
   close(): Promise<void>;
 }
@@ -95,6 +99,13 @@ export function imapClient(cfg: MailConfig): InboxClient & { abort(): void } {
   // An EventEmitter 'error' with no listener throws and takes the process
   // down; socket faults can land between ticks, after logout.
   client.on('error', (err: unknown) => mailLog.warn('imap connection error', err instanceof Error ? err : { error: String(err) }));
+  // imapflow turns a refused or interrupted SEARCH into `false`, which would
+  // read as an empty box on every poll while replies pile up unseen.
+  const search = async (query: Parameters<ImapFlow['search']>[0]): Promise<number[]> => {
+    const found = await client.search(query, { uid: true });
+    if (!Array.isArray(found)) throw new Error('IMAP SEARCH failed');
+    return found;
+  };
   return {
     async open() {
       await client.connect();
@@ -103,8 +114,10 @@ export function imapClient(cfg: MailConfig): InboxClient & { abort(): void } {
     },
     async uidsAfter(uid) {
       // `N:*` always answers with at least the newest message, even below N.
-      const found = await client.search({ uid: `${uid + 1}:*` }, { uid: true });
-      return (found || []).filter((u) => u > uid).sort((a, b) => a - b);
+      return (await search({ uid: `${uid + 1}:*` })).filter((u) => u > uid).sort((a, b) => a - b);
+    },
+    async uidsSince(day) {
+      return (await search({ since: day })).sort((a, b) => a - b);
     },
     async headers(uids) {
       if (uids.length === 0) return [];
@@ -115,6 +128,10 @@ export function imapClient(cfg: MailConfig): InboxClient & { abort(): void } {
     },
     async source(uid) {
       const m = await client.fetchOne(String(uid), { uid: true, source: true }, { uid: true });
+      // imapflow answers a dropped connection or a BYE the same way as a
+      // missing message, without throwing; storing that as an empty reply
+      // would hide the real one behind its Message-ID for good.
+      if (!m && (!client.usable || !client.mailbox)) throw new Error('IMAP connection lost before the message source was fetched');
       return m ? m.source ?? null : null;
     },
     async close() {
@@ -126,23 +143,40 @@ export function imapClient(cfg: MailConfig): InboxClient & { abort(): void } {
 
 export type ParsedInbound = { body: string; attachmentNames: string[] };
 
+// Postgres text can't hold NUL, and a lone surrogate fails UTF-8 encoding;
+// either would make the INSERT throw on every retry.
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
+export function pgText(s: string): string {
+  return s.replace(/\u0000/g, '').replace(LONE_SURROGATE, '\uFFFD');
+}
+
+function htmlBody(html: string): string {
+  try {
+    return htmlToText(html, { wordwrap: false, selectors: [{ selector: 'img', format: 'skip' }] });
+  } catch {
+    // Deep enough nesting overflows html-to-text's recursion.
+    return html.replace(/<[^>]*>/g, ' ');
+  }
+}
+
 export async function parseInbound(raw: Buffer | string): Promise<ParsedInbound> {
   const parsed = await simpleParser(raw, { skipImageLinks: true, skipTextToHtml: true, skipTextLinks: true });
   // mailparser derives `text` from HTML only when the whole message is HTML;
   // inside multipart/related (Outlook, Apple Mail with a logo) it leaves it
   // unset. The HTML itself is never kept: the page renders text only.
-  const text = parsed.text
-    ?? (typeof parsed.html === 'string' ? htmlToText(parsed.html, { wordwrap: false, selectors: [{ selector: 'img', format: 'skip' }] }) : '');
-  const body = text.replace(/\r\n/g, '\n').trim().slice(0, MAX_BODY_CHARS);
+  const text = parsed.text ?? (typeof parsed.html === 'string' ? htmlBody(parsed.html) : '');
+  const body = pgText(text.replace(/\r\n/g, '\n').trim().slice(0, MAX_BODY_CHARS));
   const attachmentNames = parsed.attachments
     .filter((a) => !(a.related && a.size < INLINE_LOGO_BYTES))
-    .map((a) => a.filename || a.contentType)
+    .map((a) => pgText(a.filename || a.contentType))
     .slice(0, 50);
   return { body, attachmentNames };
 }
 
 async function loadLookups(sql: Sql, headers: InboundHeader[], ownAddress: string): Promise<MatchLookups> {
-  const ids = [...new Set(headers.flatMap(threadIds))];
+  // An id Postgres can't bind isn't one of ours, and would fail every poll.
+  const ids = [...new Set(headers.flatMap(threadIds))].filter((id) => pgText(id) === id);
   // Only ids we generated: an inbound message's own Message-ID was chosen by
   // its sender, so it must never stand in for ours.
   const known = ids.length === 0 ? [] : await sql<{ message_id: string; submission_id: string }[]>`
@@ -153,19 +187,31 @@ async function loadLookups(sql: Sql, headers: InboundHeader[], ownAddress: strin
 }
 
 // Returns whether a new row was written.
+// `client` null stores the reply without its content.
 async function storeInbound(
-  sql: Sql, client: InboxClient, h: InboundHeader, submissionId: string, uidValidity: string, ownAddress: string,
+  sql: Sql, client: InboxClient | null, h: InboundHeader, submissionId: string, uidValidity: string, ownAddress: string,
 ): Promise<boolean> {
-  const messageId = h.messageId ?? `imap:${uidValidity}:${h.uid}`;
+  const messageId = pgText(h.messageId ?? `imap:${uidValidity}:${h.uid}`);
   const [seen] = await sql`SELECT 1 FROM web_submission_messages WHERE message_id = ${messageId}`;
   if (seen) return false;
 
-  // Too large to pull: the thread still shows that the customer wrote.
+  // Too large to pull, or unparseable: the thread still shows that the
+  // customer wrote, and the message itself is in the box.
   let parsed: ParsedInbound = { body: '', attachmentNames: [] };
-  if (h.size <= MAX_SOURCE_BYTES) {
+  if (client && h.size <= MAX_SOURCE_BYTES) {
     const raw = await client.source(h.uid);
-    if (raw) parsed = await parseInbound(raw);
+    if (raw) {
+      try {
+        parsed = await parseInbound(raw);
+      } catch (err) {
+        mailLog.child({ uid: h.uid }).warn('inbound message unparseable, stored without its body', err);
+      }
+    }
   }
+  const from = h.from === null ? null : pgText(h.from);
+  const fromName = h.fromName === null ? null : pgText(h.fromName);
+  const subject = pgText(h.subject);
+  const inReplyTo = h.inReplyTo === null ? null : pgText(h.inReplyTo);
 
   return sql.begin(async (tx) => {
     // Through the submission row: one purged since the match inserts nothing.
@@ -173,7 +219,7 @@ async function storeInbound(
       INSERT INTO web_submission_messages
         (submission_id, direction, from_addr, to_addr, subject, body_text, message_id, in_reply_to,
          status, dmarc, attachment_names)
-      SELECT ws.id, 'in', ${h.from}, ${ownAddress}, ${h.subject}, ${parsed.body}, ${messageId}, ${h.inReplyTo},
+      SELECT ws.id, 'in', ${from}, ${ownAddress}, ${subject}, ${parsed.body}, ${messageId}, ${inReplyTo},
              'received', ${dmarcVerdict(h.authResults)}, ${parsed.attachmentNames}::text[]
       FROM web_submissions ws WHERE ws.id = ${submissionId}
       ON CONFLICT (message_id) DO NOTHING
@@ -188,7 +234,7 @@ async function storeInbound(
       RETURNING id
     `;
     if (live) {
-      const who = (h.fromName ? `${h.fromName} <${h.from}>` : h.from ?? '').slice(0, 80);
+      const who = (fromName ? `${fromName} <${from}>` : from ?? '').slice(0, 80);
       await notifyManagers(tx, {
         kind: 'web_submission',
         tone: 'info',
@@ -217,13 +263,20 @@ export async function runInboxTick(
     SELECT uid_validity::text, last_uid::text FROM mail_sync_state
     WHERE account = ${account} AND mailbox = ${MAILBOX}
   `;
-  // First sight of the box, or the server renumbered it: start from now.
-  // Nothing before this point was sent from the ERP, so there is nothing
-  // earlier to thread.
+  // First sight of the box, or the server renumbered it: start from the
+  // first mail on or after the oldest recent thread we sent on, since
+  // replies to it may already be waiting (sending never depended on a poll
+  // having worked). The match is header-only, so rescanning is cheap.
   if (!state || state.uid_validity !== uidValidity) {
+    const [first] = await sql<{ since: Date | null }[]>`
+      SELECT date_trunc('day', MIN(created_at)) AS since FROM web_submission_messages
+      WHERE direction = 'out' AND created_at > NOW() - make_interval(days => ${BACKFILL_DAYS})
+    `;
+    const since = first?.since ? (await client.uidsSince(first.since))[0] : undefined;
+    const start = since !== undefined ? since - 1 : box.uidNext - 1;
     await sql`
       INSERT INTO mail_sync_state (account, mailbox, uid_validity, last_uid)
-      VALUES (${account}, ${MAILBOX}, ${uidValidity}, ${Math.max(0, box.uidNext - 1)})
+      VALUES (${account}, ${MAILBOX}, ${uidValidity}, ${Math.max(0, start)})
       ON CONFLICT (account, mailbox) DO UPDATE SET
         uid_validity = EXCLUDED.uid_validity, last_uid = EXCLUDED.last_uid, synced_at = NOW()
     `;
@@ -252,6 +305,13 @@ export async function runInboxTick(
       }
       strikes.delete(h.uid);
       mailLog.child({ uid: h.uid }).error('inbound message skipped after repeated failures', err);
+      // Still show that the customer wrote; the text stays in the box.
+      try {
+        const match = matchSubmission(h, lookups!);
+        if (match && await storeInbound(sql, null, h, match.submissionId, uidValidity, account)) stored++;
+      } catch (e) {
+        mailLog.child({ uid: h.uid }).error('inbound message placeholder failed', e);
+      }
     }
     upTo = h.uid;
   }

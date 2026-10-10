@@ -7,7 +7,9 @@
 // and the browser sends the session cookie on one from any site, so a socket
 // route has to refuse a foreign Origin itself — this is that check.
 export function allowedAppOrigin(origin: string | undefined, configured: string | undefined): string | null {
-  const allow = (configured ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  // An Origin header never ends in '/', so a configured 'https://host/' would
+  // otherwise match nothing — oauth/metadata.ts strips it the same way.
+  const allow = (configured ?? '').split(',').map((s) => s.trim().replace(/\/+$/, '')).filter(Boolean);
   if (allow.length > 0) return origin && allow.includes(origin) ? origin : null;
   if (!origin) return null;
   try {

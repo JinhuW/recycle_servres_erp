@@ -89,12 +89,39 @@ describe('readSafeNext', () => {
     '/\t/evil.com',
     '/\n/evil.com',
     '/\r/evil.com',
+    // Dot segments collapse in the parser, leaving //evil.com as the pathname.
+    '/.//evil.com',
+    '/..//evil.com',
+    '/%2e//evil.com',
+    '/%2E%2E//evil.com',
+    '/a/..//evil.com',
   ])('rejects %j', (candidate) => {
     expect(readSafeNext(`?next=${encodeURIComponent(candidate)}`)).toBeNull();
   });
 
   it('rejects the percent-encoded tab form as it arrives in the address bar', () => {
     expect(readSafeNext('?next=%2F%09%2Fevil.com')).toBeNull();
+  });
+
+  it('rejects the dot-segment form as it arrives in the address bar', () => {
+    expect(readSafeNext('?next=/.//evil.com')).toBeNull();
+  });
+
+  it('still accepts a path whose dot segments resolve on-origin', () => {
+    expect(readSafeNext('?next=' + encodeURIComponent('/a/../oauth/authorize?req=x')))
+      .toBe('/oauth/authorize?req=x');
+  });
+});
+
+describe('match', () => {
+  it('treats a malformed percent escape as a non-match instead of throwing', () => {
+    expect(() => matchPurchaseOrder('/purchase-orders/%E0%A4%A')).not.toThrow();
+    expect(matchPurchaseOrder('/purchase-orders/%E0%A4%A')).toBeNull();
+    expect(matchPurchaseOrder('/purchase-orders/100%')).toBeNull();
+  });
+
+  it('still decodes a well-formed escape', () => {
+    expect(matchPurchaseOrder('/purchase-orders/PO%2D1')).toEqual({ id: 'PO-1', screen: 'info' });
   });
 });
 

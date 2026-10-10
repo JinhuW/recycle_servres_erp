@@ -18,8 +18,13 @@ describe('toCheck / packBody', () => {
   it('maps packedAt onto the check and back to a body', () => {
     const c = toCheck({ lineId: 'a', counted: 1, packedAt: '2026-10-07T00:00:00Z', serialNumber: null });
     expect(c).toEqual({ lineId: 'a', counted: 1, checkedAt: '2026-10-07T00:00:00Z' });
-    expect(packBody(c, 2)).toEqual({ counted: 1, packed: true });
-    expect(packBody({ ...c, counted: 5, checkedAt: null }, 3)).toEqual({ counted: 3, packed: false });
+    expect(packBody(c)).toEqual({ counted: 1, packed: true });
+  });
+
+  it('sends the count as it stands, not clamped to a qty a short tick lowered', () => {
+    // Ticked at 3 of 5 (the line went to 3), then raised to 4 and unticked:
+    // taking the tick back restores 5 on the server, so 4 is a valid count.
+    expect(packBody(C('a', 4))).toEqual({ counted: 4, packed: false });
   });
 });
 
@@ -140,6 +145,19 @@ describe('packScan', () => {
     ];
     expect(packScan(ls, new Map(), 'M393A4K40DB3-CWE')).toEqual({ line: ls[1] });
     expect(packScan(ls, new Map(), 'S1')).toBeNull();
+  });
+
+  it('leaves a lot counted down to 0 out of the choice', () => {
+    const ls = [
+      L('z', { partNumber: 'M393A4K40DB3-CWE', sourceOrderId: 'PO-1', sourceLineNo: 1 }),
+      L('a', { partNumber: 'M393A4K40DB3-CWE', sourceOrderId: 'PO-2', sourceLineNo: 3 }),
+      L('b', { partNumber: 'M393A4K40DB3-CWE', sourceOrderId: 'PO-3', sourceLineNo: 2 }),
+    ];
+    expect(packScan(ls, checks(C('z', 0)), 'M393A4K40DB3-CWE')).toEqual({ choose: [ls[1], ls[2]] });
+    // With one other lot left, it is the match; the 0 lot is never picked over it.
+    expect(packScan(ls, checks(C('z', 0), C('b', 2, 'x')), 'M393A4K40DB3-CWE')).toEqual({ line: ls[1] });
+    // Only the 0 lot left: it is the match, which the page refuses to pack.
+    expect(packScan(ls, checks(C('z', 0), C('a', 2, 'x'), C('b', 2, 'x')), 'M393A4K40DB3-CWE')).toEqual({ line: ls[0] });
   });
 
   it('passes a miss and an ambiguous prefix through', () => {

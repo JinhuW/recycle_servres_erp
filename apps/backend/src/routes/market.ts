@@ -97,6 +97,10 @@ market.get('/', async (c) => {
 // rows that pre-date auto-tracking.
 const SUGGEST_LIMIT = 12;
 const SUGGEST_MIN = 2;
+// Above a PO line's 120 so a longer ref_prices entry can still be asked for,
+// but a ceiling: each asked string is canonicalised here and compared against
+// every row's REGEXP_REPLACE in SQL.
+const PART_NUMBER_ASK_MAX = 256;
 
 market.get('/parts', async (c) => {
   const sql = getDb(c.env);
@@ -104,7 +108,9 @@ market.get('/parts', async (c) => {
   // escapeLike doubles the length of a lone metacharacter, so escaping first
   // would let '?q=_' pass a check that exists to require two typed characters,
   // and the client's own gate (suggestQuery) measures the unescaped form.
-  const canon = canonPartNumberJs(c.req.query('q') ?? '');
+  const typed = c.req.query('q') ?? '';
+  if (typed.length > PART_NUMBER_ASK_MAX) return c.json({ items: [] });
+  const canon = canonPartNumberJs(typed);
   if (canon.length < SUGGEST_MIN) return c.json({ items: [] });
   // The canonical form leaves LIKE metacharacters alone, so a typed '%' would
   // otherwise match the whole table.
@@ -181,7 +187,7 @@ market.post('/lookup', async (c) => {
   // open tab the day the rule widened.
   const asked = new Map<string, string[]>();
   for (const p of raw) {
-    if (typeof p !== 'string') continue;
+    if (typeof p !== 'string' || p.length > PART_NUMBER_ASK_MAX) continue;
     const key = canonPartNumberJs(p);
     if (!key) continue;
     const under = asked.get(key);
@@ -234,7 +240,7 @@ market.post('/chips', async (c) => {
 
   const asked = new Map<string, string[]>();
   for (const p of raw) {
-    if (typeof p !== 'string') continue;
+    if (typeof p !== 'string' || p.length > PART_NUMBER_ASK_MAX) continue;
     const key = canonPartNumberJs(p);
     if (!key) continue;
     const under = asked.get(key);

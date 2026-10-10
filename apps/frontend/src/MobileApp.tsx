@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { Icon } from './components/Icon';
 import { PhTabBar, type View } from './components/PhTabBar';
 import { PhDraftPickerSheet } from './components/PhDraftPickerSheet';
@@ -34,7 +34,7 @@ import { api, ApiError, createDraftOrder, deleteOrder } from './lib/api';
 import { handleFetchError, showErrorDialog } from './lib/errorToast';
 import {
   navigate, navigateBack, useRoute, match, matchPurchaseOrder, poProductsPath, parseShippingRoute,
-  MOBILE_VIEW_TO_PATH, pathToMobileView, readSafeNext,
+  MOBILE_VIEW_TO_PATH, pathToMobileView, readSafeNext, isAuthorizePath,
 } from './lib/route';
 import { confirmDiscard } from './lib/unsavedGuard';
 import type { Category, DraftLine, Notification, Order, OrderLine, OrderSummary, ScanResponse } from './lib/types';
@@ -42,6 +42,10 @@ import { buildOrderSubmit, toAddLine } from './lib/orderSubmit';
 import { findDuplicateLine } from './lib/dupParts';
 import { lineRef, newOrdinals } from './lib/productNo';
 import { lineSpecLabel } from './lib/lineGroups';
+
+// Same consent page the desktop shell shows; a connector's popup on a phone
+// lands here too.
+const Authorize = lazy(() => import('./pages/Authorize').then(m => ({ default: m.Authorize })));
 
 // Where a line form goes when it closes. 'detail' is an existing order: the
 // form was opened from its detail screen, which owns the order, so the trip
@@ -330,25 +334,27 @@ function Shell() {
     startNewDraft();
   };
   const cancelCapture = () => {
-    // Best-effort delete an abandoned empty draft (nothing confirmed = no real
-    // inventory rows were written). Safe: backend 409s if lifecycle != 'draft'.
+    // Best-effort delete an abandoned draft, but only one this session minted
+    // (draftIdPromise is set by ensureDraftId alone) that holds no confirmed
+    // line. A resumed draft is never thrown away here: it may be empty and
+    // still carry payment screenshots or a linked package (Shipping › Create
+    // PO makes one with no lines), and Back is not a delete.
     if (
       capture.phase === 'camera' ||
       capture.phase === 'form' ||
       capture.phase === 'review'
     ) {
       const { draftId, lines } = capture;
-      if (!lines.some(l => l._confirmed)) {
-        // The id may not have landed in state yet — a draft POST fired by a
-        // save that is still in flight publishes it asynchronously. Resolve the
-        // in-flight promise rather than reading state, or cancelling during
-        // that window leaves the order (and the line the save is about to
-        // append to it) behind as a ghost PO in everyone's draft picker.
-        const pending = draftIdPromise.current;
-        if (draftId) deleteOrder(draftId).catch(() => {/* best-effort */});
-        else if (pending) {
-          pending.then(id => { if (id) return deleteOrder(id); }).catch(() => {/* best-effort */});
-        }
+      // The id may not have landed in state yet — a draft POST fired by a
+      // save that is still in flight publishes it asynchronously. Resolve the
+      // in-flight promise rather than reading state, or cancelling during
+      // that window leaves the order (and the line the save is about to
+      // append to it) behind as a ghost PO in everyone's draft picker.
+      const minted = draftIdPromise.current;
+      if (minted && !lines.some(l => l._confirmed)) {
+        minted
+          .then(id => { if (id && (!draftId || id === draftId)) return deleteOrder(id); })
+          .catch(() => {/* best-effort */});
       }
     }
     captureGen.current++;
@@ -398,6 +404,9 @@ function Shell() {
   // Accepts anything carrying the order id — the draft picker hands a full
   // OrderSummary, the shipping screen just the id the create-po call returned.
   const resumeDraft = async (summary: { id: string }) => {
+    // Whatever an earlier session minted is not this draft; cancel must not
+    // mistake it for one it may delete.
+    draftIdPromise.current = null;
     try {
       const { order } = await api.get<{ order: Order }>(`/api/orders/${summary.id}`);
       seedPhotos(order);
@@ -712,6 +721,11 @@ function Shell() {
   if (!user) return <Login />;
   // Fresh manager login: gate the app until they pick a role to enter as.
   if (pendingRoleChoice && user.role === 'manager') return <RolePicker variant="mobile" />;
+  // OAuth consent — standalone, no tab bar. Reached via the backend's
+  // `/oauth/authorize` 302 to `/authorize?req=…`.
+  if (isAuthorizePath(path)) {
+    return <Suspense fallback={<div className="phone-app" />}><Authorize /></Suspense>;
+  }
   // Web Share Target landing — the SW redirects POST /share-target here so
   // the page can claim the stashed file and forward it into the AI flow.
   // Placed after the auth gate so the downstream /api/scan/label call has a

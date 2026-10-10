@@ -1,8 +1,8 @@
-import { describe, it, expect, afterAll } from 'vitest';
+import { describe, it, expect, afterAll, beforeAll } from 'vitest';
 import postgres from 'postgres';
 import { canonicalPartNumber } from '@recycle-erp/shared';
 import { canonPartArg, canonPartNumberJs } from '../src/lib/part-number';
-import { TEST_DATABASE_URL } from './helpers/db';
+import { TEST_DATABASE_URL, resetDb } from './helpers/db';
 
 // Talks to this worker's database directly — it needs the SQL canon function,
 // not the HTTP surface. Must be TEST_DATABASE_URL, not process.env.DATABASE_URL:
@@ -10,6 +10,9 @@ import { TEST_DATABASE_URL } from './helpers/db';
 // database, and is absent in CI (and may point at an unrelated project's
 // database on a developer's machine).
 const sql = postgres(TEST_DATABASE_URL, { prepare: false, max: 2 });
+
+// Run alone, nothing else has created this worker's database yet.
+beforeAll(resetDb);
 
 async function canon(raw: string): Promise<string> {
   const rows = await sql<{ c: string }[]>`SELECT ${canonPartArg(sql, raw)} AS c`;

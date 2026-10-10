@@ -4,7 +4,7 @@
 // survive a parent-modal Cancel; (2) attachments come back as URLs the
 // frontend can render.
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Icon, type IconName } from './Icon';
 import { api, MAX_UPLOAD_BYTES } from '../lib/api';
 import { useEscapeKey } from '../lib/useEscapeKey';
@@ -109,8 +109,18 @@ export function StatusChangeDialog({
   const [error, setError] = useState<string | null>(null);
   const cfg = variant === 'purchase' ? poDonePreset(t) : presetsFor(t)[to];
 
+  const [saving, setSaving] = useState(false);
+  // Refs, not state: a second click and a Cancel both land before the
+  // in-flight PUT's continuation would see a re-render.
+  const savingRef = useRef(false);
+  const cancelled = useRef(false);
+  const cancel = () => {
+    cancelled.current = true;
+    onCancel();
+  };
+
   // Escape closes the dialog.
-  useEscapeKey(onCancel);
+  useEscapeKey(cancel);
 
   const addFiles = async (fileList: FileList | null) => {
     const files = Array.from(fileList || []);
@@ -158,6 +168,10 @@ export function StatusChangeDialog({
   // Persist the note (attachments already uploaded live), then tell the
   // parent the user accepted the transition.
   const confirm = async () => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    cancelled.current = false;
+    setSaving(true);
     setError(null);
     try {
       await api.put<{ ok: true }>(
@@ -165,16 +179,21 @@ export function StatusChangeDialog({
         { note: note.trim() },
       );
       onMutated?.();
+      // A Cancel pressed while the note was saving still cancels the move.
+      if (cancelled.current) return;
       onConfirm({ note: note.trim(), attachments });
     } catch (e) {
-      setError(e instanceof Error ? e.message : t('saveFailed'));
+      if (!cancelled.current) setError(e instanceof Error ? e.message : t('saveFailed'));
+    } finally {
+      savingRef.current = false;
+      if (!cancelled.current) setSaving(false);
     }
   };
 
   return (
     <div
       className="modal-backdrop"
-      onClick={e => { if (e.target === e.currentTarget) onCancel(); }}
+      onClick={e => { if (e.target === e.currentTarget) cancel(); }}
       style={{ zIndex: 110 }}
     >
       <div className="modal-shell" style={{ maxWidth: 560, width: 'calc(100vw - 80px)' }}>
@@ -201,7 +220,7 @@ export function StatusChangeDialog({
               <span className={'chip ' + cfg.tone} style={{ fontSize: 11 }}>{to}</span>
             </div>
           </div>
-          <button className="btn icon sm" onClick={onCancel} title={t('cancel')}>
+          <button className="btn icon sm" onClick={cancel} title={t('cancel')}>
             <Icon name="x" size={13} />
           </button>
         </div>
@@ -268,8 +287,8 @@ export function StatusChangeDialog({
             {t('editLaterHint')}
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn" onClick={onCancel}>{t('cancel')}</button>
-            <button className="btn accent" onClick={confirm} disabled={uploading}>
+            <button className="btn" onClick={cancel}>{t('cancel')}</button>
+            <button className="btn accent" onClick={confirm} disabled={uploading || saving}>
               {t('confirmAdvance')} <Icon name="check" size={13} />
             </button>
           </div>

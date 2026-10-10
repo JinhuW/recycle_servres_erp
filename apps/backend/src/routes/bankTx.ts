@@ -436,6 +436,11 @@ bankTx.post('/:id/link', async (c) => {
   if (group.some((l) => l.internal_txn_id)) {
     return c.json({ error: 'Remove the transaction from its internal transaction before linking it' }, 400);
   }
+  // Money moved between our own accounts paid no one; the PayPal leg of the
+  // same payment is what links.
+  if (group.some((l) => l.category === 'transfer')) {
+    return c.json({ error: 'A transfer cannot be linked to a purchase order' }, 400);
+  }
 
   const order = await sql<{ archived_at: Date | null }[]>`
     SELECT archived_at FROM orders WHERE id = ${orderId} LIMIT 1`;
@@ -661,7 +666,7 @@ bankTx.post('/:id/unignore', async (c) => {
   // rule's, and stays eligible for one.
   await sql`
     UPDATE bank_transactions
-    SET ignored = FALSE, no_auto_ignore = (ignore_rule_id IS NOT NULL), ignore_rule_id = NULL
+    SET ignored = FALSE, no_auto_ignore = no_auto_ignore OR ignore_rule_id IS NOT NULL, ignore_rule_id = NULL
     WHERE id IN ${sql(group.map((l) => l.id))}`;
   return c.json({ ok: true });
 });

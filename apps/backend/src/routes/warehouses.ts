@@ -349,6 +349,9 @@ warehouses.delete('/:id', async (c) => {
     await tx`UPDATE transfer_orders  SET from_warehouse_id = ${transferTo} WHERE from_warehouse_id = ${id}`;
     if (transferTo) {
       await tx`UPDATE transfer_orders SET to_warehouse_id  = ${transferTo} WHERE to_warehouse_id  = ${id}`;
+      // ON DELETE SET NULL would leave these purchasers with no home, so new
+      // POs stop defaulting to the warehouse their stock is moving to.
+      await tx`UPDATE users           SET default_warehouse_id = ${transferTo} WHERE default_warehouse_id = ${id}`;
     }
     const r = await tx`DELETE FROM warehouses WHERE id = ${id} RETURNING id`;
     deleted = r.length;
