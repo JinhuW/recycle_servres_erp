@@ -17,6 +17,25 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.239.0] - 2026-10-10
+
+The desktop Sell orders list now shows which orders carry internal notes, and
+what they say, without opening each one (RS-222).  Until now the list gave no
+sign of a note at all.
+
+### Added
+
+- **A note icon beside the customer** on every row whose internal note isn't
+  blank.  Hovering it — or tabbing to it — shows the note in a small card, line
+  breaks kept, clamped at 14 lines for a very long one.  Clicking the icon
+  doesn't open the order; the rest of the row still does.
+- The card takes no pointer, so running the mouse down the column moves from
+  one note to the next instead of getting stuck on the card covering the icon
+  below.  It leaves the table's scroll box, so the last row's card isn't cut off
+  and flips above the row when there's no room below.  It renders outside the
+  row, so an archived order's dimmed row doesn't fade it.  The list API already
+  returned each order's notes; nothing changed on the backend.
+
 ## [1.238.2] - 2026-10-10
 
 A deploy could leave a browser with a blank page that no reload fixed (RS-221).

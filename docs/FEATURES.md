@@ -1183,6 +1183,12 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   column with a managers-only receiver rule (v1.16.0). The receiver can be
   reassigned from the detail view in any status, Done and Closed included —
   the change saves at once and is logged in the order history (v1.135.0).
+- **The desktop list flags an order with internal notes** (v1.239.0): a note
+  icon beside the customer on each row whose note isn't blank.  Hovering or
+  tabbing to it shows the note in a card (line breaks kept, clamped at 14
+  lines); clicking it doesn't open the order.  To copy from a note, open the
+  order — the card takes no pointer, so it never blocks the icon on the row
+  below.
 - **Negotiated final-price adjustment** with an order-summary breakdown card
   (v1.22.0, v1.23.0).
 - **Vendor price round-trip**: export a bid-sheet XLSX, the vendor fills in

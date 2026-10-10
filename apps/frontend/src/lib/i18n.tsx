@@ -2523,6 +2523,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     'soAdjustedShort': 'adj',
     'soAdjustedTooltip': 'Adjusted by {name} · {when}',
     'soAdjustedListTooltip': 'Final price was adjusted',
+    'soNoteHintLabel': 'Internal notes',
     'historyPriceAdjusted': 'Final price adjusted',
     'fx.title': 'FX rates',
     'fx.refresh': 'Refresh now',
