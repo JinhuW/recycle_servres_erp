@@ -78,6 +78,10 @@ export type OrderLine = {
   // `linkedPaid`.
   finalSellPrice?: number | null;
   finalSoldQty?: number | null;
+  // The shipped sell orders holding this line: a move back to Reviewing left
+  // it at Done for them, and it is view-only until they are Done or Closed.
+  // Present only on such a line, and only for a manager.
+  shippedOn?: string[];
   status: string;
   scanImageId: string | null;
   scanConfidence: number | null;

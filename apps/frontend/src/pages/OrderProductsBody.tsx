@@ -5,6 +5,7 @@ import { useT } from '../lib/i18n';
 import { linePhotos, type LinePhoto } from '../lib/linePhotos';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
 import { lineSpecLabel } from '../lib/lineGroups';
+import { lineShippedOn } from '../lib/poPermissions';
 import type { Order, OrderLine } from '../lib/types';
 
 // How many of a line's photos the strip shows before it offers the rest. Four
@@ -75,13 +76,16 @@ export function OrderProductsBody({
         const [lead, ...rest] = linePhotos(l);
         const shown = expandedPhotos.has(l.id) ? rest : rest.slice(0, PHOTOS_COLLAPSED);
         const hidden = rest.length - shown.length;
+        // Held for a shipped sell order: view-only while the rest stay open.
+        const shippedOn = lineShippedOn(l);
+        const editable = canEditOrder && shippedOn.length === 0;
         return (
         <div
           key={l.id}
           id={'ph-line-' + l.id}
           className="ph-line"
-          onClick={canEditOrder ? () => { onEditLine(i); } : undefined}
-          style={canEditOrder ? { cursor: 'pointer' } : undefined}
+          onClick={editable ? () => { onEditLine(i); } : undefined}
+          style={editable ? { cursor: 'pointer' } : undefined}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             {/* An older backend sends no #; its lines came in # order. */}
@@ -107,8 +111,13 @@ export function OrderProductsBody({
                   <SerialNumbers raw={l.serialNumber} max={4} size={10.5} />
                 </div>
               )}
+              {shippedOn.length > 0 && (
+                <span className="chip info" style={{ marginTop: 5 }}>
+                  <Icon name="lock" size={10} /> {t('lineShippedChip', { so: shippedOn.join(', ') })}
+                </span>
+              )}
             </div>
-            {canEditOrder && (
+            {editable && (
               <>
                 <button
                   onClick={(e) => { e.stopPropagation(); onEditLine(i); }}

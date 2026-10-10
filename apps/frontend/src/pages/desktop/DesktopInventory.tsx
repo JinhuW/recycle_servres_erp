@@ -459,7 +459,9 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
       .then(r => {
         const fetched = new Map(r.items.map(row => [row.id, row]));
         // A lot sold, archived or emptied since the list loaded comes back
-        // without a row; it stays out.
+        // without a row; it stays out, and leaves the select-all set too, or
+        // the checkbox could never read "all" or clear.
+        setSellableIds(prev => prev?.filter(id => !missing.has(id) || fetched.has(id)) ?? prev);
         // Selected before remembered: the remember-effect keeps only rows whose
         // ids are selected, and this merge lands on whatever it left.
         setSelected(prev => {

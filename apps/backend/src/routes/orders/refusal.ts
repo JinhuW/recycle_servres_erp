@@ -26,7 +26,8 @@ export type Refusal =
   | { kind: 'trackingTakenStandalone' }
   | { kind: 'packageDelivered' }
   | { kind: 'qtyBelowCommitted'; lineIds: string[]; sellOrderIds: string[] }
-  | { kind: 'removeReferenced'; lineIds: string[]; sellOrderIds: string[] };
+  | { kind: 'removeReferenced'; lineIds: string[]; sellOrderIds: string[] }
+  | { kind: 'lineShipped'; lineIds: string[]; sellOrderIds: string[] };
 
 export class OrderRefusal extends Error {
   constructor(readonly refusal: Refusal) {
@@ -79,5 +80,9 @@ export function refusalResponse(c: Context, u: User, r: Refusal): Response {
       return c.json(committedLinesBody(u, r.lineIds, r.sellOrderIds,
         `A product you tried to remove is on ${describeSellOrders(r.sellOrderIds)} and cannot be deleted. Archive or cancel those sell orders first.`,
         'A product you tried to remove is on an open sell order — a manager has to remove it.'), 409);
+    case 'lineShipped':
+      return c.json(committedLinesBody(u, r.lineIds, r.sellOrderIds,
+        `A product you changed is on shipped ${describeSellOrders(r.sellOrderIds)} — it is view-only until that order is Done or Closed.`,
+        'A product you changed is on a shipped sell order — it is view-only until that order is Done or Closed.'), 409);
   }
 }

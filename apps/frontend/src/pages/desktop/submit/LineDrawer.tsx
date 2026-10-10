@@ -33,7 +33,7 @@ import { cascadePatch } from '@recycle-erp/shared';
 // passes `editing={true}` to the shared OrderForm.
 export function LineDrawer({
   line, idx, newNo, onChange, onClose, onRemove, canRemove, editing = false,
-  onConfirmLine, onConfirmError, duplicateOnLines, readOnly = false,
+  onConfirmLine, onConfirmError, duplicateOnLines, readOnly = false, readOnlyNote,
   sellPriceEditable = false, photoCtx, market, missingFields,
 }: {
   line: Line | EditLine;
@@ -52,6 +52,9 @@ export function LineDrawer({
   // Locked order (Done, or a purchaser past their stage): the drawer still
   // opens so the line's full spec stays lookup-able, but nothing can change.
   readOnly?: boolean;
+  // Why this one line is view-only when the order itself is not closed (a
+  // product held for a shipped sell order); the banner says it instead.
+  readOnlyNote?: string;
   // Sell price stays live inside a readOnly drawer (a manager at Ready to Pay).
   sellPriceEditable?: boolean;
   // Recorded market value for this line's part number, if the parent looked
@@ -335,7 +338,7 @@ export function LineDrawer({
                 }}
               >
                 <Icon name="lock" size={13} />
-                <span>{t('drawerReadOnly')}</span>
+                <span>{readOnlyNote ?? t('drawerReadOnly')}</span>
               </div>
             )}
             {showDropzone && (

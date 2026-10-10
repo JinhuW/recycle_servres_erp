@@ -128,6 +128,40 @@ describe('Chip # writes', () => {
     });
     expect((await get(id, token)).lines[0].chipNumber).toBe('CJV');
   });
+
+  it('cuts the stored marking when a PO PATCH turns only the brand to Micron', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await createPo(token, [{ ...LINE, brand: 'Other', chipNumber: '8KE75 D9VPP' }]);
+    const lineId = (await get(id, token)).lines[0].id;
+    const r = await api('PATCH', `/api/orders/${id}`, {
+      token, body: { lines: [{ id: lineId, brand: 'Micron' }] },
+    });
+    expect(r.status).toBe(200);
+    expect((await get(id, token)).lines[0].chipNumber).toBe('VPP');
+  });
+
+  // The inventory editor sends only the fields that moved.
+  it('cuts the stored marking when the inventory editor changes only the brand', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await createPo(token, [{ ...LINE, brand: 'Other', chipNumber: '8KE75 D9VPP' }]);
+    const lineId = (await get(id, token)).lines[0].id;
+    const r = await api('PATCH', `/api/inventory/${lineId}`, { token, body: { brand: 'Micron' } });
+    expect(r.status).toBe(200);
+    expect((await get(id, token)).lines[0].chipNumber).toBe('VPP');
+    const events = await getTestDb()<{ detail: { field: string; from: string | null; to: string | null } }[]>`
+      SELECT detail FROM inventory_events
+      WHERE order_line_id = ${lineId} AND detail->>'field' = 'chipNumber'`;
+    expect(events.map(e => e.detail)).toEqual([{ field: 'chipNumber', from: '8KE75 D9VPP', to: 'VPP' }]);
+  });
+
+  it('leaves a line with no chip without one when the inventory editor changes the brand', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await createPo(token, [{ ...LINE, brand: 'Other' }]);
+    const lineId = (await get(id, token)).lines[0].id;
+    const r = await api('PATCH', `/api/inventory/${lineId}`, { token, body: { brand: 'Micron' } });
+    expect(r.status).toBe(200);
+    expect((await get(id, token)).lines[0].chipNumber ?? null).toBeNull();
+  });
 });
 
 describe('0167: Micron Chip # backfill', () => {

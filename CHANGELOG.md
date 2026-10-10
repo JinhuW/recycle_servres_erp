@@ -17,6 +17,71 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.238.1] - 2026-10-09
+
+Fixes from the reviews before the v1.238 release (RS-220). `/code-review high`
+ran over dev against main (v1.230.0 → v1.237.1), and RS-218 got its own review
+after it reached dev. While the findings were being checked, v1.237.1 went to
+prod without these fixes, so they ship with RS-218. Each finding was checked
+against the code. The ones kept are recorded in the ticket with the reason.
+
+### Fixed
+
+- **Creating a PO with a malformed product is a 400, not a 500.** The error
+  names the product by its part # or description. A part # or description that
+  wasn't text, the very field just refused, threw while the message was built.
+  So did a product that was `null`.
+- **Select all can always finish and clear.** On Inventory, a lot sold, archived
+  or emptied after the list loaded was kept out of the selection, but it stayed
+  in the set the checkbox counts. The checkbox stuck half-checked, and each
+  click fetched again and added nothing. Such a lot now leaves the set.
+- **A lot turned Micron gets its die code even when only the brand changes.**
+  The inventory edit page sends only the fields that moved, so a brand change
+  left the full chip marking (`8KE75 D9VPP`) where the die code (`VPP`) belongs.
+  That kept the lot out of the price list's die buckets. Now the change cuts
+  the marking and logs a Chip # event. The PO PATCH does the same: its editors
+  always resend the chip, so this matters there only for API callers.
+- **A shipped product's lock holds for every caller and every input**
+  (RS-218).
+  - `PATCH /api/orders/:id` matched a line id written in upper case to its row,
+    but skipped the snapshot that the audit, the purchaser's back-to-Draft
+    check and the new hold all read. Line ids are now lower-cased on the way
+    in.
+  - The inventory edit page now locks qty and unit cost on a held lot up front,
+    with its own hint. Before, it offered the edit and the save was refused.
+  - In Review mode, the `+`/`-` keys no longer change a held line's count.
+  - The Finish card now lists only the products Approve will zero, with the
+    count Approve uses.
+  - A forward move into Reviewing no longer locks every line to look for held
+    products that can't exist yet.
+
+## [1.238.0] - 2026-10-09
+
+A Ready to Pay or Done PO has to go back to Reviewing before anything on it
+can change. That move was refused whenever any one of its products sat on a
+Shipped or Awaiting-payment sell order, so a single shipped product froze the
+whole PO (RS-218). On 2026-10-09 this stopped PO-1471 and PO-1477: a few of
+their products were on SO-4080, which had shipped that morning, while the ones
+being worked on sat on Draft and Packing sell orders.
+
+### Changed
+
+- **A PO goes back to Reviewing while some of its products are shipped.**
+  Products on a Shipped or Awaiting-payment sell order stay at Done, and the
+  rest go to Reviewing and are editable. Draft and Packing sell orders block
+  what they blocked before: a move to In Transit or Draft, the purchaser-edit
+  revert, and removing a product.
+- **A product left at Done this way is view-only until its sell order is Done
+  or Closed.**
+  - The desktop PO page, its line drawer, Review mode and the phone PO page
+    show it locked, naming the sell order (`shippedOn`, managers only).
+  - `PATCH /api/orders/:id` refuses a change to it with 409. An unchanged echo
+    of it is not a change.
+  - The inventory editor keeps its qty and unit cost.
+  - Review mode's Approve never zeroes it.
+- The lock is worked out from the sell orders each time, with no stored flag,
+  so it lifts by itself. A product that isn't sold out stays at Done until the
+  PO advances again.
 ## [1.237.1] - 2026-10-09
 
 Fixes from the reviews before the v1.237 release (RS-215). `/code-review high`

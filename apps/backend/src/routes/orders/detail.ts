@@ -4,7 +4,7 @@ import { linkedPaidFrag } from '../../banktx/match';
 import { getDb } from '../../db';
 import { wasEverSubmitted } from '../../services/orderAudit';
 import { effectiveRole } from '../../lib/role';
-import { LIFECYCLE_LABEL, visibleLifecycle } from '../../services/orderAdvance';
+import { heldLines, LIFECYCLE_LABEL, visibleLifecycle } from '../../services/orderAdvance';
 import { txnRequiredFor, chatShotRequiredFor, cashShotRequiredFor, readCutoffs, leaveDraftBlockers } from '../../services/orderTxnRule';
 import { allLimited } from '../../lib/concurrency';
 import { sortCategories } from '../../services/orderCategory';
@@ -178,6 +178,12 @@ detailRoutes.get('/:id', async (c) => {
     () => goodsTotalIsMirror(sql, id),
   ] as const);
 
+  // Lines held for a shipped sale: the PO page shows them view-only and names
+  // the sell order, which is a manager's to see. Only a Reviewing PO holds any.
+  const held = isManager && order.lifecycle === 'reviewing'
+    ? await heldLines(sql, lines.map(l => l.id as string))
+    : new Map<string, string[]>();
+
   const photosByLine = new Map<string, LinePhoto[]>();
   for (const p of photoRows) {
     const key = p.order_line_id as string;
@@ -297,6 +303,7 @@ detailRoutes.get('/:id', async (c) => {
         unitCost: l.unit_cost,
         sellPrice: l.sell_price,
         ...(isManager ? { finalSellPrice: l.final_sell_price, finalSoldQty: l.sold_qty } : {}),
+        ...(held.has(String(l.id).toLowerCase()) ? { shippedOn: held.get(String(l.id).toLowerCase()) } : {}),
         status: l.status,
         scanImageId: l.scan_image_id,
         scanConfidence: l.scan_confidence,

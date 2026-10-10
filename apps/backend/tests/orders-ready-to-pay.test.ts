@@ -133,7 +133,7 @@ describe('moves between Reviewing, Ready to Pay and Done', () => {
     expect(promoted.status).toBe(200);
   });
 
-  it('Ready to Pay ↔ Done both succeed while a Done line sits on a committed sell order; back to Reviewing refuses and names it', async () => {
+  it('Ready to Pay ↔ Done both succeed while a Done line sits on a committed sell order; back to Reviewing leaves that line Done', async () => {
     const { id, alex } = await orderAt('ready_to_pay');
     const order = await getOrder(alex.token, id);
     const customerId = await firstCustomerId(alex.token);
@@ -149,13 +149,9 @@ describe('moves between Reviewing, Ready to Pay and Done', () => {
 
     expect((await advance(alex.token, id)).body.lifecycle).toBe('done');
     expect((await advance(alex.token, id, 'ready_to_pay')).body.lifecycle).toBe('ready_to_pay');
-    const back = await api<{ error: string; sellOrderIds: string[] }>('POST', `/api/orders/${id}/advance`, {
-      token: alex.token, body: { toStage: 'reviewing' },
-    });
-    expect(back.status).toBe(409);
-    expect(back.body.error).toMatch(/committed/i);
-    expect(back.body.error).toContain(so.body.id);
-    expect(back.body.sellOrderIds).toEqual([so.body.id]);
+    const back = await advance(alex.token, id, 'reviewing');
+    expect(back.status).toBe(200);
+    expect(back.body.lifecycle).toBe('reviewing');
     expect((await getOrder(alex.token, id)).lines[0].status).toBe('Done');
   });
 

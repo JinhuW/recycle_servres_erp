@@ -24,6 +24,7 @@ import { linePhotos } from '../../lib/linePhotos';
 import { lineRequirements, missingFieldNames } from '../../lib/lineRequirements';
 import { paymentGap, reviewApproveTotal } from '../../lib/paymentGap';
 import { poStageName } from '../../lib/orderPresentation';
+import { lineShippedOn } from '../../lib/poPermissions';
 import { statusTone } from '../../lib/status';
 import type { Order, OrderLine } from '../../lib/types';
 import { LineDrawer } from './submit/LineDrawer';
@@ -118,7 +119,8 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   // tick away, so a shortfall is always confirmed by a tick made after it —
   // and reaching the qty never ticks on its own, because the count starts there.
   const setCount = (l: OrderLine, n: number) => {
-    if (!ready) return;
+    // A held line's count is locked for the keys as well as the stepper.
+    if (!ready || lineShippedOn(l).length) return;
     const prev = checkOf(l.id);
     const counted = Math.max(0, Math.min(l.qty, n));
     if (counted === prev.counted) return;
@@ -147,7 +149,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   // ── Edit: the line fixed to what actually arrived, through the PO page's
   // own drawer and the same PATCH, so the rules a save meets are the same.
   const openEdit = (l: OrderLine) => {
-    if (!ready) return;
+    if (!ready || lineShippedOn(l).length) return;
     setSelectedId(l.id);
     const line = orderLineToEditLine(l, lines.indexOf(l));
     setEditing({ line, original: line });
@@ -399,8 +401,13 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
 
   const short = ordered.done.filter(l => isShortChecked(l, checks.get(l.id)));
   const absent = ordered.done.filter(l => isAbsentChecked(l, checks.get(l.id)));
-  // What Approve still has to set to 0: a line already there needs nothing.
-  const toZero = absent.filter(l => l.qty > 0);
+  // What Approve still has to set to 0: a line already there needs nothing,
+  // and one held for a shipped sell order is that sale's record — its count
+  // here is a box check, never a recount.
+  const toZero = absent.filter(l => l.qty > 0 && lineShippedOn(l).length === 0);
+  // The Finish card lists what Approve zeroes apart from the absent lines it leaves.
+  const zeroing = atReviewing && toZero.length > 0;
+  const absentKept = zeroing ? absent.filter(l => !toZero.includes(l)) : absent;
   // Against the total the PO will have once Approve has zeroed those lines,
   // so a line counted 0 can open a gap, or close one, before the click.
   const gap = paymentGap(order.linkedPaid, reviewApproveTotal(order, atReviewing ? toZero : []), order.payment);
@@ -409,6 +416,16 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   // The product's # on the PO, which regrouping the rows doesn't touch. An
   // older backend sends none; its lines came in # order.
   const lineNo = (l: OrderLine) => l.no ?? lines.indexOf(l) + 1;
+  const absentList = (ls: OrderLine[]) => (
+    <ul className="bc-problem-list">
+      {ls.map(l => (
+        <li key={l.id}>
+          <span className="mono">#{lineNo(l)} {l.partNumber ?? lineLabel(l)}</span>
+          {' · '}{t('bcShortNote', { n: 0, of: l.qty })}
+        </li>
+      ))}
+    </ul>
+  );
 
   const row = (l: OrderLine) => {
     const c = checkOf(l.id);
@@ -416,6 +433,8 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     const shots = linePhotos(l);
     const isSel = selected?.id === l.id;
     const pn = l.partNumber ?? lineLabel(l);
+    const shippedOn = lineShippedOn(l);
+    const held = shippedOn.length > 0;
     return (
       <Fragment key={l.id}>
         <tr
@@ -450,19 +469,24 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
               <span>{lineLabel(l)}</span>
               <LineSpecChips line={l} withType />
             </div>
+            {held && (
+              <span className="chip info" title={t('lineShippedReadOnly', { so: shippedOn.join(', ') })}>
+                <Icon name="lock" size={10} /> {t('lineShippedChip', { so: shippedOn.join(', ') })}
+              </span>
+            )}
           </td>
           <td className="muted bc-cond">{l.condition}</td>
           <td className="num">
             <div className="bc-count" onClick={e => e.stopPropagation()}>
               <button type="button" className="btn ghost icon-only sm" aria-label={t('bcCountLess')}
-                disabled={!ready || countOf(l, c) === 0} onClick={() => { setSelectedId(l.id); setCount(l, countOf(l, c) - 1); }}>
+                disabled={!ready || held || countOf(l, c) === 0} onClick={() => { setSelectedId(l.id); setCount(l, countOf(l, c) - 1); }}>
                 <Icon name="minus" size={13} />
               </button>
               <span className="mono bc-count-n">
                 <b>{countOf(l, c)}</b><span className="muted"> / {l.qty}</span>
               </span>
               <button type="button" className="btn ghost icon-only sm" aria-label={t('bcCountMore')}
-                disabled={!ready || countOf(l, c) >= l.qty} onClick={() => { setSelectedId(l.id); setCount(l, countOf(l, c) + 1); }}>
+                disabled={!ready || held || countOf(l, c) >= l.qty} onClick={() => { setSelectedId(l.id); setCount(l, countOf(l, c) + 1); }}>
                 <Icon name="plus" size={13} />
               </button>
             </div>
@@ -472,9 +496,9 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
             <button
               type="button"
               className={'btn ghost icon-only sm bc-editbtn' + (editing?.line._id === l.id ? ' on' : '')}
-              title={t('bcEditTip')}
+              title={held ? t('lineShippedReadOnly', { so: shippedOn.join(', ') }) : t('bcEditTip')}
               aria-label={t('bcEditTip')}
-              disabled={!ready}
+              disabled={!ready || held}
               onClick={e => { e.stopPropagation(); openEdit(l); }}
             >
               <Icon name="edit" size={13} />
@@ -693,20 +717,19 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
                 <p className="card-sub">{t('bcAllAbsent')}</p>
               ) : absent.length > 0 || short.length > 0 ? (
                 <>
-                  {absent.length > 0 && (
+                  {zeroing && (
                     <>
-                      <p className="card-sub">{t(atReviewing && toZero.length ? 'bcZeroIntro' : 'bcAbsentIntro', { n: absent.length })}</p>
-                      <ul className="bc-problem-list">
-                        {absent.map(l => (
-                          <li key={l.id}>
-                            <span className="mono">#{lineNo(l)} {l.partNumber ?? lineLabel(l)}</span>
-                            {' · '}{t('bcShortNote', { n: 0, of: l.qty })}
-                          </li>
-                        ))}
-                      </ul>
-                      {atReviewing && toZero.length > 0 && order.goodsFollowsLines === false && (
+                      <p className="card-sub">{t('bcZeroIntro', { n: toZero.length })}</p>
+                      {absentList(toZero)}
+                      {order.goodsFollowsLines === false && (
                         <p className="card-sub bc-lot-note">{t('bcLotPriceKept')}</p>
                       )}
+                    </>
+                  )}
+                  {absentKept.length > 0 && (
+                    <>
+                      <p className="card-sub">{t('bcAbsentIntro', { n: absentKept.length })}</p>
+                      {absentList(absentKept)}
                     </>
                   )}
                   {short.length > 0 && (

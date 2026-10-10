@@ -71,12 +71,18 @@ createRoutes.post('/', async (c) => {
   // purchaser's location.
   const warehouseId = body.warehouseId ?? owner.ownerDefaultWarehouseId;
   // A new PO sends every row in list order, so the nth is the page's "new n".
+  // Read as unknown: a refused line is named by the very field it was refused for.
   const refOf = (i: number): string => {
-    const name = body.lines[i].partNumber?.trim() || body.lines[i].description?.trim();
+    const text = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+    const name = text(body.lines[i].partNumber) || text(body.lines[i].description);
     return name ? `new product ${i + 1} (${name})` : `new product ${i + 1}`;
   };
   const lineCats: string[] = [];
   for (let i = 0; i < body.lines.length; i++) {
+    const raw: unknown = body.lines[i];
+    if (typeof raw !== 'object' || raw === null) {
+      return c.json({ error: `new product ${i + 1}: must be an object` }, 400);
+    }
     const inputErr = validateLineInput(body.lines[i] as Record<string, unknown>, 'create');
     if (inputErr) return c.json({ error: `${refOf(i)}: ${inputErr}` }, 400);
     const cat = body.lines[i].category ?? body.category;

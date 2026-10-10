@@ -147,7 +147,8 @@ const MANAGED_STAGES = new Set(['reviewing', 'ready_to_pay', 'done']);
 // Line statuses in lifecycle order, so a cascade can tell which lines it would
 // move BACKWARDS. A committed line may never go backwards — not even from Done
 // to Reviewing, which validateSellLines would still accept: a sell order raised
-// against confirmed stock must not find it unconfirmed again.
+// against confirmed stock must not find it unconfirmed again. A move back to
+// Reviewing leaves those lines at Done rather than refusing the whole order.
 // Deduped: two stages share 'Done', and a repeated value would make
 // statusesAheadOf('Done') claim Done lines move backwards on a Ready to Pay ↔
 // Done move, refusing it whenever a Done line sits on an open sell order.
@@ -204,12 +205,12 @@ async function transferClaimedLineIds(tx: SqlLike, orderId: string): Promise<str
 // Every guard a status cascade has to clear, for both the backward advance and
 // the purchaser-edit revert. Returns null when the cascade is safe.
 //
-// Which sell orders may refuse depends on where the lines land. A committed
-// order (Shipped, Awaiting payment) was raised against confirmed stock and
-// must never find it unconfirmed again, so it refuses any backward move. A
-// Draft reserves nothing and is re-validated on promotion, so it only refuses
-// a landing status that validation would reject (Draft, In Transit) — a move
-// back to Reviewing leaves it promotable and must not be stopped by it.
+// Only a landing that sell-line validation would reject (Draft, In Transit)
+// refuses, and there every open sell order does: a committed one was raised
+// against confirmed stock, and a Draft would be stranded at promotion. A move
+// back to Reviewing refuses nothing — a Draft still promotes against a
+// Reviewing line, and the committed lines stay where they are
+// (heldBackLineIds), so one shipped product doesn't freeze the rest of the PO.
 async function cascadeBlockers(
   tx: SqlLike,
   orderId: string,
@@ -220,9 +221,8 @@ async function cascadeBlockers(
   | null
 > {
   const movingBack = statusesAheadOf(newLineStatus);
-  if (movingBack.length > 0) {
-    const sellStatuses = isSellableLineStatus(newLineStatus) ? committedSellStatuses() : openSellStatuses();
-    const committed = await committedLines(tx, orderId, movingBack, sellStatuses);
+  if (movingBack.length > 0 && !isSellableLineStatus(newLineStatus)) {
+    const committed = await committedLines(tx, orderId, movingBack, openSellStatuses());
     if (committed.lineIds.length > 0) {
       return { kind: 'committedLines', offendingLineIds: committed.lineIds, sellOrderIds: committed.sellOrderIds };
     }
@@ -234,8 +234,48 @@ async function cascadeBlockers(
   return null;
 }
 
+// The lines a move back to a status sell orders still accept (Reviewing)
+// leaves behind: those a committed sell order claims stay confirmed. The lines
+// are locked first — after the orders row the caller holds, the one lock
+// order — so a promotion that commits while this waits is read here instead of
+// being cascaded under. Only a PO coming back from past review has Done lines
+// to leave, so a forward move into Reviewing takes no lock.
+async function heldBackLineIds(
+  tx: SqlLike, orderId: string, fromLifecycle: string, newLineStatus: string,
+): Promise<string[]> {
+  const movingBack = statusesAheadOf(newLineStatus);
+  if (!isClosedBook(fromLifecycle) || movingBack.length === 0 || !isSellableLineStatus(newLineStatus)) return [];
+  await tx`SELECT id FROM order_lines WHERE order_id = ${orderId} ORDER BY id FOR UPDATE`;
+  return (await committedLines(tx, orderId, movingBack, committedSellStatuses())).lineIds;
+}
+
+/**
+ * Lines held for a shipped sale: left at Done by a move back to Reviewing
+ * because a committed sell order claims them (heldBackLineIds). The PO's
+ * editors leave them alone; the hold lifts on its own once that order is Done
+ * or Closed and the claim is gone. Keyed by lower-cased line id, with the
+ * sell orders holding each.
+ */
+export async function heldLines(tx: SqlLike, lineIds: readonly string[]): Promise<Map<string, string[]>> {
+  if (lineIds.length === 0) return new Map();
+  const rows = await tx`
+    SELECT ol.id, array_agg(DISTINCT so.id ORDER BY so.id) AS so_ids
+    FROM order_lines ol
+    JOIN orders o ON o.id = ol.order_id
+    JOIN sell_order_lines sol ON sol.inventory_id = ol.id
+    JOIN sell_orders so ON so.id = sol.sell_order_id
+    WHERE ol.id = ANY(${[...lineIds]}::uuid[])
+      AND o.lifecycle = 'reviewing'
+      AND ol.status = 'Done'
+      AND so.status = ANY(${committedSellStatuses()}::text[])
+      AND sol.qty > 0
+    GROUP BY ol.id
+  ` as unknown as { id: string; so_ids: string[] }[];
+  return new Map(rows.map(r => [r.id.toLowerCase(), r.so_ids]));
+}
+
 // Move every non-Sold line to `newLineStatus`, recording one inventory_events
-// row per line that actually moved.
+// row per line that actually moved. `keep` names lines that stay put.
 //
 // 'Sold' is a terminal post-sale state, not a lifecycle stage — a PO
 // re-advance/stage-jump must never resurrect a sold-out line.
@@ -249,6 +289,7 @@ async function cascadeLineStatusesTx(
   orderId: string,
   actorId: string | null,
   newLineStatus: string,
+  keep: readonly string[] = [],
 ): Promise<void> {
   await tx`
     WITH targets AS (
@@ -256,6 +297,7 @@ async function cascadeLineStatusesTx(
       FROM order_lines
       WHERE order_id = ${orderId} AND status <> 'Sold'
         AND status IS DISTINCT FROM ${newLineStatus}
+        AND NOT (id = ANY(${[...keep]}::uuid[]))
       FOR UPDATE
     ),
     upd AS (
@@ -555,9 +597,11 @@ export async function advanceOrderTx(
   // order that named them, and one that moves them off 'In Transit' strands an
   // open transfer order. Both refuse rather than corrupt the dependant.
   const newLineStatus = LINE_STATUS_FOR_LIFECYCLE[nextStageId];
+  let heldBack: string[] = [];
   if (newLineStatus) {
     const blocked = await cascadeBlockers(tx, id, newLineStatus);
     if (blocked) return blocked;
+    heldBack = await heldBackLineIds(tx, id, cur.lifecycle, newLineStatus);
   }
   await tx`UPDATE orders SET lifecycle = ${nextStageId} WHERE id = ${id}`;
 
@@ -592,7 +636,7 @@ export async function advanceOrderTx(
       cur.manager_id ? { id: cur.manager_id, name: cur.manager_name } : null);
   }
   if (newLineStatus) {
-    await cascadeLineStatusesTx(tx, id, actor.id, newLineStatus);
+    await cascadeLineStatusesTx(tx, id, actor.id, newLineStatus, heldBack);
   }
   // PRD §10: managers want to see when a purchaser finalises an order. Only
   // the move into In Transit fires it, so later manager-driven moves don't
