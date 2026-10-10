@@ -2,13 +2,13 @@
 id: RS-221
 title: a deploy can cache a 404 for the new build's chunks, blanking prod
 type: bug
-status: in-progress
+status: done
 priority: P1
 created: 2026-10-09
 reporter: Jinhu
 branch: fix/asset-404-no-store
-pr:
-version:
+pr: 585
+version: 1.238.2
 related: [RS-017]
 ---
 
@@ -107,15 +107,15 @@ the "(uncaught exception)" line.
 
 ## Acceptance criteria
 
-- [ ] A missing `/assets/`, `/fonts/` or `/icons/` file returns `404` with
+- [x] A missing `/assets/`, `/fonts/` or `/icons/` file returns `404` with
       `Cache-Control: no-store`, checked with curl on dev.
-- [ ] A real hashed asset still returns `200` + `immutable`, and a conditional
+- [x] A real hashed asset still returns `200` + `immutable`, and a conditional
       request still `304`s (dev).
-- [ ] A plain-http asset request `308`s to https (dev).
-- [ ] A toast chunk that fails to load leaves the app rendered, checked on a
+- [x] A plain-http asset request `308`s to https (dev).
+- [x] A toast chunk that fails to load leaves the app rendered, checked on a
       local build with the chunk deleted.  A shell chunk that fails shows the
       "Something went wrong / Reload" card, not a white page.
-- [ ] `wrangler.toml` routing an asset prefix past the Worker again fails a test.
+- [x] `wrangler.toml` routing an asset prefix past the Worker again fails a test.
 
 ## Out of scope
 
@@ -141,3 +141,15 @@ on top of about 3.7k a day that already do, across all three hosts.  The first
 load only, because hashed assets stay in the browser cache.
 
 See `docs/debug-notes/2026-10-10-deploy-skew-caches-a-404-for-the-new-chunk.md`.
+
+Verified on dev after #585 merged (v1.238.2, `bf341153`), with the Worker
+auto-deployed:
+
+    GET /assets/nope-zz9q.js, /fonts/nope.woff2, /icons/nope.png
+        →  404 text/plain, cache-control: no-store
+    GET /assets/index-<current>.js   →  200, public, max-age=31536000, immutable
+    GET /icons/icon-192.png          →  200, public, max-age=86400
+    If-None-Match on a chunk         →  304
+    http://…/assets/index-<current>.js  →  308 to https
+
+A browser load of dev showed every `/assets/` request answered `200`.
