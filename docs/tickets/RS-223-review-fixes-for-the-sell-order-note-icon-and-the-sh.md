@@ -2,13 +2,13 @@
 id: RS-223
 title: Review fixes for the sell-order note icon and the shared popover
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-10
 reporter: jinhu
 branch: fix/rs-222-note-hint-review
-pr:
-version:
+pr: 590
+version: 1.239.1
 related: [RS-222]
 ---
 
