@@ -251,6 +251,19 @@ export function poProductsPath(id: string): string {
   return '/purchase-orders/' + id + '/products';
 }
 
+// A PO opened at one of its products: the page scrolls to the row holding
+// that # and flags it. A transfer clone shares its source's #, so the first
+// row with it is the one landed on.
+export function poLinePath(id: string, no: number | null | undefined): string {
+  return '/purchase-orders/' + id + (no != null ? '?line=' + no : '');
+}
+
+/** The product # a PO link asked to land on, if any. */
+export function readPoLineQuery(): number | null {
+  const raw = readHashQuery().get('line');
+  return raw && /^\d{1,9}$/.test(raw) ? Number(raw) : null;
+}
+
 export function matchPurchaseOrder(path: string): { id: string; screen: PoScreen } | null {
   const info = match('/purchase-orders/:id', path);
   if (info) return { id: info.id!, screen: 'info' };

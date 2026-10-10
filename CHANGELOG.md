@@ -17,6 +17,25 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.240.0] - 2026-10-10
+
+A product's `#` on its PO can now be searched for and linked to (RS-225).
+The inventory lots table has printed `PO-1483 #22` since v1.232.0, but nothing
+could find a lot by that number, and the PO link opened the PO at the top.  On
+a 30-product order, #22 then had to be found by scrolling and reading.
+
+### Added
+
+- **The inventory search takes a product's `#`.**  `#30` lists every lot that
+  is #30 on its PO.  The match is exact, so `#3` does not also bring back #30
+  and #300.  `PO-1483 #22`, typed or pasted as the lots table prints it,
+  narrows the list to that one product.  The flat list, the grouped view and
+  the export all take it, since they share one search.
+- **A PO link names the product it came from.**  The PO link on an inventory
+  lot, and the "from PO" link on a sell-order line, open the PO scrolled to
+  that product's row, which is highlighted for a few seconds.  The `#` rides
+  in the link (`?line=22`), so a copied link lands on the same row.
+
 ## [1.239.2] - 2026-10-10
 
 Fixes from a full code review of the whole codebase, not just the week's diff

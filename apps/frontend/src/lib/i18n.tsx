@@ -1153,7 +1153,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     archivedLowercaseChip: 'archived',
     soSearchPlaceholder: 'Search order, customer…',
     soTrackingPlaceholder: 'Tracking number, shipping carrier, payment reference…',
-    invSearchPlaceholder: 'Search part #, serial #, brand, PO #…',
+    invSearchPlaceholder: 'Search part #, serial #, brand, PO #, #30…',
     invChooseColumnsTooltip: 'Choose columns to show',
     invQuickViewTooltip: 'Quick view',
     invFlatView: 'Flat',

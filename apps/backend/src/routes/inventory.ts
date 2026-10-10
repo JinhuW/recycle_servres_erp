@@ -166,8 +166,18 @@ function inventoryWhereFrag(
 // line, plus the PO id the line came in on — all substring, all
 // case-insensitive (`search` arrives lowercased). Shared by the flat list,
 // the export and the grouped view so the three can never disagree.
+//
+// `#30` is a product's # on its PO, matched exactly — every PO has a #3, so a
+// substring would bury #30 under #300. `PO-1343 #2`, the label the lots table
+// prints, narrows that to the POs the first half names.
 function lineSearchFrag(sql: ReturnType<typeof getDb>, search: string | undefined) {
   if (!search) return sql`TRUE`;
+  const productNo = /^(.*?)\s*#\s*(\d{1,9})$/.exec(search);
+  if (productNo) {
+    const po = productNo[1].trim();
+    const poFrag = po ? sql`LOWER(o.id) LIKE ${`%${escapeLike(po)}%`}` : sql`TRUE`;
+    return sql`(${poLineNo(sql, 'l')} = ${Number(productNo[2])} AND ${poFrag})`;
+  }
   const like = `%${escapeLike(search)}%`;
   return sql`(LOWER(COALESCE(l.brand,'')) LIKE ${like} OR LOWER(COALESCE(l.part_number,'')) LIKE ${like} OR LOWER(COALESCE(l.serial_number,'')) LIKE ${like} OR LOWER(COALESCE(l.description,'')) LIKE ${like} OR LOWER(COALESCE(l.item_type,'')) LIKE ${like} OR LOWER(o.id) LIKE ${like})`;
 }
