@@ -1,4 +1,4 @@
-import { Fragment, lazy, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { Fragment, lazy, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { Icon } from '../../components/Icon';
 import { Modal } from '../../components/Modal';
@@ -596,81 +596,113 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
 
 // ─── Note hint ───────────────────────────────────────────────────────────────
 // The order's internal notes behind an icon beside the customer, so a row
-// says it has one without being opened.
-function NoteHint({ note }: { note: string }) {
+// says it has one without being opened.  Memoized: the list re-renders on
+// every search keystroke, and a row's note doesn't change with it.
+const NoteHint = memo(function NoteHint({ note }: { note: string }) {
   const { t } = useT();
   const anchor = useRef<HTMLButtonElement | null>(null);
-  const cardId = useId();
+  const descId = useId();
   const [hover, setHover] = useState(false);
-  const [focus, setFocus] = useState(false);
-  const open = hover || focus;
+  // A click, a tap or keyboard focus pins the card; hover shows it only while
+  // the pointer is there.
+  const [pinned, setPinned] = useState(false);
+  const open = hover || pinned;
 
   const close = useCallback(() => {
     setHover(false);
-    setFocus(false);
+    setPinned(false);
   }, []);
-  useEscapeKey(close, open);
 
   return (
     <>
       <button
         ref={anchor}
         type="button"
-        aria-label={t('soNoteHintLabel')}
-        aria-describedby={open ? cardId : undefined}
-        onMouseEnter={() => setHover(true)}
-        onMouseLeave={() => setHover(false)}
-        // A mouse click focuses the button too; only keyboard focus may pin
-        // the card, or it would stay open after the pointer leaves.
-        onFocus={e => { if (e.currentTarget.matches(':focus-visible')) setFocus(true); }}
-        onBlur={() => setFocus(false)}
-        // Neither the row's click (it opens the order) nor the popover's
-        // outside-mousedown (it would close the card being pointed at).
-        onMouseDown={e => e.stopPropagation()}
-        onClick={e => e.stopPropagation()}
-        style={{ background: 'transparent', border: 'none', color: 'var(--fg-subtle)', padding: 0, lineHeight: 0, cursor: 'default' }}
+        aria-label={t('ieInternalNotes')}
+        aria-describedby={descId}
+        // Mouse only: a touch "hover" never gets its leave, so a tapped card
+        // could not be closed by tapping the icon again.
+        onPointerEnter={e => { if (e.pointerType === 'mouse') setHover(true); }}
+        onPointerLeave={e => { if (e.pointerType === 'mouse') setHover(false); }}
+        // A mouse click focuses the button too, and its click does the
+        // pinning; only keyboard focus pins here.
+        onFocus={e => { if (focusVisible(e.currentTarget)) setPinned(true); }}
+        onBlur={() => setPinned(false)}
+        // Not the row's click: that opens the order.
+        onClick={e => { e.stopPropagation(); setPinned(p => !p); }}
+        // The padding widens a 13px target in a row whose every other pixel
+        // opens the order; the margin keeps the layout as it was.
+        style={{
+          background: 'transparent', border: 'none', color: 'var(--fg-subtle)',
+          padding: 4, margin: -4, lineHeight: 0, cursor: 'pointer',
+        }}
       >
         <Icon name="note" size={13} />
+        {/* Always present, so a screen reader hears the note on the button
+            itself instead of depending on a card it can't see. */}
+        <span id={descId} hidden>{note}</span>
       </button>
-      {open && (
-        <NoteCard id={cardId} anchor={anchor} note={note} onClose={close} />
-      )}
+      {open && <NoteCard anchor={anchor} note={note} onClose={close} />}
     </>
   );
+});
+
+// `:focus-visible` in `matches()` throws before Safari 15.4.
+function focusVisible(el: Element): boolean {
+  try {
+    return el.matches(':focus-visible');
+  } catch {
+    return false;
+  }
 }
 
 // Portalled: an archived row's `opacity` would otherwise fade the card with it.
 // It takes no pointer: hanging below its row, it covers the next row's icon,
 // and a card the mouse could enter would block running down the column.
-function NoteCard({ id, anchor, note, onClose }: {
-  id: string;
+function NoteCard({ anchor, note, onClose }: {
   anchor: RefObject<HTMLButtonElement | null>;
   note: string;
   onClose: () => void;
 }) {
   const { t } = useT();
   const ref = useRef<HTMLDivElement | null>(null);
-  // Placement needs the box up front, and the note's length decides it.
-  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (el) setSize({ width: el.offsetWidth, height: el.offsetHeight });
-  }, [note]);
-  const pos = useFixedPopover(
-    anchor, ref, { width: size?.width ?? 0, height: size?.height ?? 0, align: 'left', gap: 6 }, onClose);
+  const pos = useFixedPopover(anchor, ref, { align: 'left', gap: 6 }, onClose);
+  // Here, not in NoteHint: the card exists only while open, so with two open
+  // the one opened last is the one Escape closes.
+  useEscapeKey(onClose);
+
+  // Taking no pointer, the card lets a press through to the row beneath it.
+  // The press still dismisses the card, but its click must not then open
+  // that other row's order.
+  const shown = !!pos && !pos.hidden;
+  useEffect(() => {
+    if (!shown) return;
+    const onDown = (e: PointerEvent) => {
+      const box = ref.current?.getBoundingClientRect();
+      if (!box || e.clientX < box.left || e.clientX > box.right
+        || e.clientY < box.top || e.clientY > box.bottom) return;
+      const swallow = (c: MouseEvent) => { c.stopPropagation(); c.preventDefault(); };
+      window.addEventListener('click', swallow, { capture: true, once: true });
+      // A press dragged off before release fires no click; the swallow must
+      // not wait around for the next one.
+      window.addEventListener('pointerdown', () => window.removeEventListener('click', swallow, true),
+        { capture: true, once: true });
+    };
+    document.addEventListener('pointerdown', onDown, true);
+    return () => document.removeEventListener('pointerdown', onDown, true);
+  }, [shown]);
 
   return createPortal(
     <div
       ref={ref}
-      id={id}
-      role="tooltip"
+      aria-hidden="true"
       style={{
-        position: 'fixed', top: pos?.top ?? 0, left: pos?.left ?? 0,
-        visibility: pos && size ? 'visible' : 'hidden', pointerEvents: 'none',
+        position: 'fixed', top: pos?.top ?? 0, left: pos?.left ?? 0, maxHeight: pos?.maxHeight,
+        visibility: shown ? 'visible' : 'hidden', pointerEvents: 'none', overflow: 'hidden',
         width: 'max-content', minWidth: 160, maxWidth: 320,
         padding: '10px 12px',
         background: 'var(--bg-elev)', border: '1px solid var(--border)', borderRadius: 10,
-        boxShadow: '0 12px 28px rgba(15,23,42,0.14)', zIndex: 90, textAlign: 'left',
+        boxShadow: '0 12px 28px rgba(15,23,42,0.14)', zIndex: 90,
       }}
     >
       <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)', marginBottom: 4 }}>
