@@ -2,12 +2,12 @@
 id: RS-226
 title: Pack mode filter also finds lots by PO number
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-10
 reporter: jinhu
 branch: feat/pack-search-po
-pr:
+pr: 598
 version: 1.241.0
 related: [RS-225]
 ---
