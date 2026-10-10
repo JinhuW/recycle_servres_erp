@@ -2,13 +2,13 @@
 id: RS-222
 title: Note icon on the sell-order list shows the order's note on hover
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-10
 reporter: jinhu
 branch: feat/so-list-note-hint
-pr:
-version:
+pr: 588
+version: 1.239.0
 related: []
 ---
 
