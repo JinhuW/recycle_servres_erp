@@ -101,7 +101,7 @@ sellOrders.get('/', async (c) => {
       so.id, so.status, so.notes, so.created_at, so.updated_at, so.archived_at, so.currency_code,
       ${cursorTsSelect(sql, sql`so.created_at`)} AS cursor_ts,
       (so.adjusted_at IS NOT NULL) AS adjusted,
-      c.id AS customer_id, c.name AS customer_name, c.short_name AS customer_short,
+      c.id AS customer_id, c.name AS customer_name, c.short_name AS customer_short, c.region AS customer_region,
       pu.name AS payment_received_by_name,
       -- Products, by #; a line not numbered yet counts on its own.
       COUNT(DISTINCT COALESCE(sol.product_no::text, sol.id::text))::int AS line_count,
@@ -129,7 +129,7 @@ sellOrders.get('/', async (c) => {
     notes: r.notes, createdAt: r.created_at, updatedAt: r.updated_at,
     archivedAt: r.archived_at,
     currency: r.currency_code,
-    customer: { id: r.customer_id, name: r.customer_name, short: r.customer_short },
+    customer: { id: r.customer_id, name: r.customer_name, short: r.customer_short, region: r.customer_region ?? '' },
     paymentReceiverName: r.payment_received_by_name ?? null,
     lineCount: r.line_count, qty: r.qty,
     // subtotal/total are USD — sol.unit_price is always the USD value, so the

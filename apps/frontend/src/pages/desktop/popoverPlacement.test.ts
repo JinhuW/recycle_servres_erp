@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { placePopover } from './popoverPlacement';
 
-// The two real callers, so a change to either constant is felt here.
+// Sizes of the two Payments pickers when full.
 const PO = { width: 320, height: 312, gap: 4 };   // PoPicker, right-aligned
 const PAIR = { width: 380, height: 262, gap: 4 }; // PairPicker, left-aligned
 
@@ -41,12 +41,32 @@ describe('placePopover', () => {
     expect(flips.top).toBe(335); // 601 - 262 - 4
   });
 
-  it('clamps to the gap rather than flipping off the top', () => {
-    // A short viewport: no room below, and flipping would land at -190.
-    const { top } = placePopover({
+  it('caps to the roomier side when it fits on neither', () => {
+    // A short viewport: 140px below, 64px above, a 262px panel.
+    const { top, maxHeight } = placePopover({
       anchor: rect(72, 24, 200, 90), viewport: { width: 1440, height: 240 }, align: 'left', ...PAIR,
     });
-    expect(top).toBe(4);
+    expect(top).toBe(100); // 72 + 24 + gap
+    expect(maxHeight).toBe(140); // 240 - 96 - gap
+  });
+
+  it('never covers its own anchor when capped above', () => {
+    // 287px below, 300px above, a 305px card with a 6px gap: neither fits.
+    // Pinning it to the viewport's top would have covered the anchor row.
+    const { top, maxHeight } = placePopover({
+      anchor: rect(300, 13, 200, 13), viewport: { width: 1440, height: 600 },
+      align: 'left', width: 320, height: 305, gap: 6,
+    });
+    expect(top).toBe(6);
+    expect(maxHeight).toBe(288); // 300 - 2 * gap
+    expect(top + maxHeight!).toBeLessThanOrEqual(300 - 6);
+  });
+
+  it('leaves maxHeight unset when the panel fits', () => {
+    const { maxHeight } = placePopover({
+      anchor: rect(100, 24, 200, 90), viewport: VIEWPORT, align: 'left', ...PAIR,
+    });
+    expect(maxHeight).toBeUndefined();
   });
 
   it('right-aligns the PO picker to the anchor', () => {

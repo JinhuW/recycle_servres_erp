@@ -320,6 +320,22 @@ describe('GET /api/sell-orders — archive filter', () => {
     expect(typeof row!.archivedAt).toBe('string');
   });
 
+  it('list rows carry the customer region', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await createDraftSellOrder(token);
+    const sql = getTestDb();
+    await sql`
+      UPDATE customers SET region = 'Denver, CO'
+      WHERE id = (SELECT customer_id FROM sell_orders WHERE id = ${id})
+    `;
+
+    const list = await api<{ items: { id: string; customer: { region: string } }[] }>(
+      'GET', '/api/sell-orders', { token },
+    );
+    expect(list.status).toBe(200);
+    expect(list.body.items.find(o => o.id === id)?.customer.region).toBe('Denver, CO');
+  });
+
   it('detail response includes archivedAt', async () => {
     const { token } = await loginAs(ALEX);
     const id = await createDraftSellOrder(token);
