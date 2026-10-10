@@ -75,8 +75,14 @@ The running build at the time was `index-BflUPgR4.js`; the deployed one was
       `run_worker_first`-excluded prefix.  Closed as written rather than as
       first drafted — the original wording asked for a redirect, but a 404
       carries nothing worth protecting, and the scheme bug this echoes was about
-      a *document* being served over http.
-- [x] The 404 is not cached — **accepted as-is, with reasoning.**  Measured on
+      a *document* being served over http.  *(Since RS-221 / v1.238.2 the
+      prefixes are no longer excluded, so this request gets the Worker's 308.)*
+- [x] The 404 is not cached — **accepted as-is, with reasoning.**
+      *Reversed by RS-221 (v1.238.2): the reasoning below did not hold.  A
+      deploy reaches the edge unevenly, so a page from the new build requested
+      its own chunk from a node that didn't have it yet, cached the immutable
+      404, and stayed blank.  `run_worker_first = true` now sends every miss to
+      the Worker's `no-store` 404.*  Measured on
       dev: it still carries `immutable, max-age=1y`, because the asset layer
       answers it and `_headers` applies.  Left alone deliberately.  The only
       ways to change it are routing `/assets/*` through the Worker, which adds
@@ -105,6 +111,9 @@ production: `/` returns the Worker's 308, while `/assets/nope-12345678.js` and
 
 Setting `not_found_handling = "none"` moves ownership of the SPA fallback to the
 Worker, which is why the acceptance criteria list the document paths explicitly.
+
+*RS-221 (v1.238.2) removed the `run_worker_first` exclusions described above.
+The Worker now runs for every path, static prefixes included.*
 
 Client-side recovery rides on Vite's own `vite:preloadError` event rather than
 wrapping each `lazy(() => import(...))` factory — `__vitePreload` already

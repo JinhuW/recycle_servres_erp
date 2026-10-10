@@ -152,15 +152,15 @@ compatibility_date = "2026-06-18"
 [assets]
 directory = "../../apps/frontend/dist"
 binding = "ASSETS"
-not_found_handling = "single-page-application"
+not_found_handling = "none"
 run_worker_first = true
-
-[vars]
-BACKEND_URL = "https://backend-production-7b10.up.railway.app"
 ```
 
 `deploy/cloudflare/worker.js` — routes `/api/*`, `/oauth/*`, `/.well-known/*` to
-the Railway backend; all other paths fall through to the SPA static assets.
+the Railway backend; every other path is served from the static assets, with
+`index.html` for the shell's own paths and an uncacheable 404 for everything
+else. The file itself is the reference — its comments say why each piece is
+there.
 
 ### 1. Build the frontend
 

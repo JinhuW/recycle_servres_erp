@@ -17,6 +17,35 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.238.2] - 2026-10-10
+
+A deploy could leave a browser with a blank page that no reload fixed (RS-221).
+Right after the v1.238.1 prod release, one user's tab went white and stayed
+white.  A deploy reaches Cloudflare's edge unevenly, so the new `index.html`
+was served while that user's request for one of its chunks hit a node that
+didn't have the chunk yet.  The static-asset layer answered the 404 itself, and
+`_headers` stamped it `immutable` for a year like any other `/assets/*`
+response.  The browser cached "this chunk doesn't exist" and replayed it on
+every reload.  The DevTools write-up that came with the report blamed a 503
+from a rate limiter.  There is no rate limiter, and Cloudflare recorded no 503.
+See `docs/debug-notes/2026-10-10-deploy-skew-caches-a-404-for-the-new-chunk.md`.
+
+### Fixed
+
+- **A missing static file is no longer cached.**  `run_worker_first` no longer
+  excludes `/assets/`, `/fonts/` and `/icons/`, so a miss there reaches the
+  Worker, whose 404 is `no-store`.  The next load fetches the file for real.
+  Files that exist are unchanged: they still come from the asset layer with
+  their `_headers` caching, and a conditional request still gets a 304.  The
+  cost is one Worker invocation per static file per browser.  A test now fails
+  if an exclusion is added back.
+- **A failed update-toast load no longer blanks the app.**  The toast's lazy
+  chunk loaded outside the app's error boundary, so its failure unmounted the
+  whole page, including the "Reload" card the boundary would have shown.  It
+  now has a boundary of its own that renders nothing.  This alone wouldn't have
+  saved the affected user, because the desktop shell chunk was cached as a 404
+  too.  The fix above is what prevents that.
+
 ## [1.238.1] - 2026-10-09
 
 Fixes from the reviews before the v1.238 release (RS-220). `/code-review high`

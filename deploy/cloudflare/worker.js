@@ -5,10 +5,10 @@
 import { isShellPath } from '../../apps/frontend/src/lib/shellPaths';
 
 const API_PREFIXES = ['/api', '/oauth', '/.well-known'];
-// Content-hashed by the build, and cached `immutable` for a year by
-// public/_headers. A miss under these is never a page the user typed — it is a
-// chunk from a build that has since been replaced — so it must 404 rather than
-// fall back to index.html.
+// Static build output, cached by public/_headers (`immutable` for a year under
+// /assets/ and /fonts/, a day under /icons/). A miss under these is never a
+// page the user typed — it is a file from another build — so it must 404
+// rather than fall back to index.html.
 const HASHED_PREFIXES = ['/assets/', '/fonts/', '/icons/'];
 
 export default {
@@ -35,11 +35,12 @@ export default {
       // it asked for a module, and the /assets/* rule in public/_headers would
       // then cache that answer as immutable for a year (RS-017).
       //
-      // Defensive rather than load-bearing: these three prefixes are excluded
-      // from run_worker_first, so in practice Cloudflare's asset layer returns
-      // the 404 itself and this branch never runs. It is here so that the
-      // fallback below can never claim a path that is plainly a build artifact,
-      // whichever layer ends up answering.
+      // And it must not be cached either. A deploy reaches the edge unevenly,
+      // so a page from the new build can ask for its own chunk before the node
+      // it reaches holds it. The asset layer's own 404 carries the `_headers`
+      // rule, which kept that miss in the browser for a year (RS-221);
+      // run_worker_first = true sends every miss here instead, and this
+      // response is built here, so `_headers` never touches it.
       if (HASHED_PREFIXES.some((p) => url.pathname.startsWith(p))) {
         return new Response('Not found', {
           status: 404,

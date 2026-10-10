@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 // @ts-expect-error — plain JS Worker module, no types.
 import worker from '../../../deploy/cloudflare/worker.js';
@@ -17,7 +18,17 @@ const env = {
       const { pathname } = new URL(input instanceof Request ? input.url : input);
       if (pathname === '/index.html') return new Response(INDEX, { headers: { 'content-type': 'text/html' } });
       if (pathname === '/sw.js') return new Response('sw', { headers: { 'content-type': 'text/javascript' } });
-      return new Response('', { status: 404 });
+      if (pathname === '/assets/index-abc123.js') {
+        return new Response('chunk', {
+          headers: { 'content-type': 'text/javascript', 'cache-control': 'public, max-age=31536000, immutable' },
+        });
+      }
+      // What the asset layer really sends for a miss: `_headers` stamps the
+      // prefix's caching rule on the 404 too.
+      return new Response('', {
+        status: 404,
+        headers: { 'cache-control': 'public, max-age=31536000, immutable' },
+      });
     },
   },
 };
@@ -57,10 +68,39 @@ describe('Worker document fallback', () => {
     expect(await res.text()).toBe('sw');
   });
 
-  it('keeps a missing hashed asset a plain 404', async () => {
-    const res = await get('/assets/gone-abc123.js');
-    expect(res.status).toBe(404);
-    expect(res.headers.get('content-type')).toBe('text/plain');
+  it('passes a real hashed asset through with its own headers', async () => {
+    const res = await get('/assets/index-abc123.js');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+    expect(await res.text()).toBe('chunk');
+  });
+
+  // RS-221: a deploy rolls out across the edge unevenly, so a page from the
+  // new build can ask for its own chunk before the node it reaches has it. A
+  // miss that carried the immutable rule stayed broken in that browser for a
+  // year, deploy finished or not.
+  it.each(['/assets/gone-abc123.js', '/fonts/gone.woff2', '/icons/gone.png'])(
+    'keeps a missing static file a plain, uncacheable 404: %s',
+    async (path) => {
+      const res = await get(path);
+      expect(res.status).toBe(404);
+      expect(res.headers.get('content-type')).toBe('text/plain');
+      expect(res.headers.get('cache-control')).toBe('no-store');
+    },
+  );
+});
+
+// The test above runs the Worker directly, so it says nothing about whether
+// Cloudflare ever hands it the request. A `!/assets/*` entry in
+// run_worker_first sends a miss straight to the asset layer, which 404s it
+// with the immutable header — the RS-221 outage, with every test still green.
+describe('wrangler.toml', () => {
+  const toml = readFileSync(new URL('../../../deploy/cloudflare/wrangler.toml', import.meta.url), 'utf8')
+    .replace(/#.*$/gm, '');
+
+  it('runs the Worker first for every path', () => {
+    expect(toml).toMatch(/^\s*run_worker_first\s*=\s*true\s*$/m);
+    expect(toml).not.toMatch(/"!\//);
   });
 });
 
