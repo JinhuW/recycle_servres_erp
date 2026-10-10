@@ -1,7 +1,8 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import {
   hrefFor, matchPoCheck, matchPurchaseOrder, matchSellOrderPack, navigate, navigateBack, onLinkClick,
-  parseShippingRoute, pathToDesktopView, poCheckPath, readSafeNext, replaceRoute, sellOrderPackPath,
+  parseShippingRoute, pathToDesktopView, poCheckPath, poLinePath, readPoLineQuery, readSafeNext,
+  replaceRoute, sellOrderPackPath, splitHash,
   type LinkClick,
 } from './route';
 
@@ -12,6 +13,26 @@ describe('box check route', () => {
     expect(matchPoCheck('/purchase-orders/PO-1448')).toBeNull();
     expect(matchPurchaseOrder('/purchase-orders/PO-1448/check')).toBeNull();
     expect(pathToDesktopView('/purchase-orders/PO-1448/check')).toBe('history');
+  });
+});
+
+describe('PO product link', () => {
+  afterEach(() => { delete (globalThis as { window?: unknown }).window; });
+
+  it('carries the # in the query, so the router still matches the PO', () => {
+    expect(poLinePath('PO-1483', 22)).toBe('/purchase-orders/PO-1483?line=22');
+    expect(poLinePath('PO-1483', null)).toBe('/purchase-orders/PO-1483');
+    expect(matchPurchaseOrder(splitHash(poLinePath('PO-1483', 22)).path))
+      .toEqual({ id: 'PO-1483', screen: 'info' });
+  });
+
+  it('reads back only a plain number', () => {
+    (globalThis as { window?: unknown }).window = { location: { hash: '#/purchase-orders/PO-1483?line=22' } };
+    expect(readPoLineQuery()).toBe(22);
+    (globalThis as { window?: unknown }).window = { location: { hash: '#/purchase-orders/PO-1483?line=x' } };
+    expect(readPoLineQuery()).toBeNull();
+    (globalThis as { window?: unknown }).window = { location: { hash: '#/purchase-orders/PO-1483' } };
+    expect(readPoLineQuery()).toBeNull();
   });
 });
 

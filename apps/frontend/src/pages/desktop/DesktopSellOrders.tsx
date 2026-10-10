@@ -13,7 +13,7 @@ import { forEachKeysetPage } from '../../lib/keysetPages';
 import { confirmDiscard, useUnsavedGuard } from '../../lib/unsavedGuard';
 import { api, ApiError, archiveSellOrder, unarchiveSellOrder } from '../../lib/api';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
-import { useRoute, navigate, replaceRoute, match, matchSellOrderPack, sellOrderPackPath } from '../../lib/route';
+import { useRoute, navigate, replaceRoute, match, matchSellOrderPack, sellOrderPackPath, poLinePath } from '../../lib/route';
 import { RouteLink } from '../../components/RouteLink';
 import { shareOrCopy } from '../../lib/shareOrCopy';
 import { fmtUSD, fmtUSD0, fmtMoney, fmtDate, fmtDateShort, CURRENCY_SYMBOL, canonicalPartNumber } from '../../lib/format';
@@ -930,7 +930,7 @@ function LineItemCell({ line, lineNo, sub, showPo, showLineNo, linkPo }: {
         {line.condition && (<><span>·</span><span>{line.condition}</span></>)}
         {po && (<><span>·</span>
           {linkPo
-            ? <RouteLink to={'/purchase-orders/' + po} className="mono rec-link">{from}</RouteLink>
+            ? <RouteLink to={poLinePath(po, n)} className="mono rec-link">{from}</RouteLink>
             : <span className="mono">{from}</span>}
         </>)}
       </div>

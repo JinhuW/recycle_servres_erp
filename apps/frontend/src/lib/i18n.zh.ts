@@ -725,7 +725,7 @@ const zh: Record<string, string> = {
   archivedLowercaseChip: '已归档',
   soSearchPlaceholder: '搜索订单、客户…',
   soTrackingPlaceholder: '运单号、承运商、付款参考号…',
-  invSearchPlaceholder: '搜索零件号、序列号、品牌、PO 号…',
+  invSearchPlaceholder: '搜索零件号、序列号、品牌、PO 号、#30…',
   invChooseColumnsTooltip: '选择要显示的列',
   invQuickViewTooltip: '快速查看',
   invFlatView: '平铺',

@@ -2,6 +2,7 @@ import { Fragment, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { ImageLightbox } from '../../components/ImageLightbox';
 import { RouteLink } from '../../components/RouteLink';
+import { poLinePath } from '../../lib/route';
 import { fmtUSD, fmtUSD0, fmtDateShort } from '../../lib/format';
 import { statusTone } from '../../lib/status';
 import { useT } from '../../lib/i18n';
@@ -307,7 +308,7 @@ export function InventoryProductTable({
                                     />
                                   )}
                                   <span style={{ whiteSpace: 'nowrap' }}>
-                                    <RouteLink to={'/purchase-orders/' + l.order_id} className="rec-link">
+                                    <RouteLink to={poLinePath(l.order_id, l.po_line_no)} className="rec-link">
                                       {l.order_id}
                                     </RouteLink>
                                     {l.po_line_no != null && (

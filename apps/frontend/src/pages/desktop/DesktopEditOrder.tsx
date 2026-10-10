@@ -48,7 +48,7 @@ import { HandoffDialog } from '../../components/HandoffDialog';
 import { PaymentFields } from '../../components/PaymentFields';
 import type { HandoffDelivery, HandoffMethod } from '../../lib/handoff';
 import { usePaymentProof } from '../../lib/usePaymentProof';
-import { readHashQuery, replaceHashQuery } from '../../lib/route';
+import { readHashQuery, readPoLineQuery, replaceHashQuery } from '../../lib/route';
 import { poReadiness, type ReadinessTab } from '../../lib/poReadiness';
 import { useOrderEvents } from '../../lib/useOrderEvents';
 import type { StageId } from '../../lib/orderLookback';
@@ -474,6 +474,21 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     if (next.has(cat)) next.delete(cat); else next.add(cat);
     return next;
   });
+
+  // A link naming a product (`?line=22`, from the inventory lots or a sell
+  // order) lands on its row: scrolled to and flagged for a few seconds. No
+  // group starts folded, so the row is always there to land on.
+  const [landingNo] = useState(readPoLineQuery);
+  const [flashNo, setFlashNo] = useState(landingNo);
+  useEffect(() => {
+    if (landingNo == null) return;
+    const frame = requestAnimationFrame(() => {
+      document.querySelector(`[data-product-no="${landingNo}"]`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    const timer = setTimeout(() => setFlashNo(null), 4000);
+    return () => { cancelAnimationFrame(frame); clearTimeout(timer); };
+  }, [landingNo]);
 
   // Which rows the table walks, and which the fold hides — see lib/lineGroups.
   // Kept out of the render so it can be tested without one.
@@ -1386,9 +1401,12 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                   {head && groupHead(head)}
                   <tr
                     className="row-hover"
+                    data-product-no={l.no ?? undefined}
                     style={{
                       cursor: 'pointer',
-                      background: isActive ? 'var(--accent-soft)' : undefined,
+                      background: isActive ? 'var(--accent-soft)'
+                        : flashNo != null && l.no === flashNo ? 'var(--warn-soft)' : undefined,
+                      transition: 'background-color 0.6s',
                     }}
                     onClick={() => setActiveIdx(i)}
                   >
