@@ -1,4 +1,5 @@
-import { Fragment, lazy, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, lazy, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 import { Icon } from '../../components/Icon';
 import { Modal } from '../../components/Modal';
 import {
@@ -37,6 +38,8 @@ import { missingSigners, signoffSig } from '../../lib/sellOrderSignoff';
 import type { SellOrderSignoff } from '../../lib/types';
 import { SellOrderSignoffCard } from './SellOrderSignoff';
 import { productCount } from '../../lib/productNo';
+import { useEscapeKey } from '../../lib/useEscapeKey';
+import { useFixedPopover } from './popoverPlacement';
 
 // Its own chunk: only a packer opens it.
 const DesktopSellOrderPack = lazy(() => import('./DesktopSellOrderPack'));
@@ -535,7 +538,10 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
                     </span>
                   </td>
                   <td>
-                    <div style={{ fontWeight: 500 }}>{o.customer.name}</div>
+                    <div style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {o.customer.name}
+                      {o.notes?.trim() && <NoteHint note={o.notes.trim()} />}
+                    </div>
                     <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{o.customer.region}</div>
                   </td>
                   <td className={o.paymentReceiverName ? undefined : 'muted'}>
@@ -585,6 +591,101 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
         </div>
       </div>
     </>
+  );
+}
+
+// ─── Note hint ───────────────────────────────────────────────────────────────
+// The order's internal notes behind an icon beside the customer, so a row
+// says it has one without being opened.
+function NoteHint({ note }: { note: string }) {
+  const { t } = useT();
+  const anchor = useRef<HTMLButtonElement | null>(null);
+  const cardId = useId();
+  const [hover, setHover] = useState(false);
+  const [focus, setFocus] = useState(false);
+  const open = hover || focus;
+
+  const close = useCallback(() => {
+    setHover(false);
+    setFocus(false);
+  }, []);
+  useEscapeKey(close, open);
+
+  return (
+    <>
+      <button
+        ref={anchor}
+        type="button"
+        aria-label={t('soNoteHintLabel')}
+        aria-describedby={open ? cardId : undefined}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        // A mouse click focuses the button too; only keyboard focus may pin
+        // the card, or it would stay open after the pointer leaves.
+        onFocus={e => { if (e.currentTarget.matches(':focus-visible')) setFocus(true); }}
+        onBlur={() => setFocus(false)}
+        // Neither the row's click (it opens the order) nor the popover's
+        // outside-mousedown (it would close the card being pointed at).
+        onMouseDown={e => e.stopPropagation()}
+        onClick={e => e.stopPropagation()}
+        style={{ background: 'transparent', border: 'none', color: 'var(--fg-subtle)', padding: 0, lineHeight: 0, cursor: 'default' }}
+      >
+        <Icon name="note" size={13} />
+      </button>
+      {open && (
+        <NoteCard id={cardId} anchor={anchor} note={note} onClose={close} />
+      )}
+    </>
+  );
+}
+
+// Portalled: an archived row's `opacity` would otherwise fade the card with it.
+// It takes no pointer: hanging below its row, it covers the next row's icon,
+// and a card the mouse could enter would block running down the column.
+function NoteCard({ id, anchor, note, onClose }: {
+  id: string;
+  anchor: RefObject<HTMLButtonElement | null>;
+  note: string;
+  onClose: () => void;
+}) {
+  const { t } = useT();
+  const ref = useRef<HTMLDivElement | null>(null);
+  // Placement needs the box up front, and the note's length decides it.
+  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el) setSize({ width: el.offsetWidth, height: el.offsetHeight });
+  }, [note]);
+  const pos = useFixedPopover(
+    anchor, ref, { width: size?.width ?? 0, height: size?.height ?? 0, align: 'left', gap: 6 }, onClose);
+
+  return createPortal(
+    <div
+      ref={ref}
+      id={id}
+      role="tooltip"
+      style={{
+        position: 'fixed', top: pos?.top ?? 0, left: pos?.left ?? 0,
+        visibility: pos && size ? 'visible' : 'hidden', pointerEvents: 'none',
+        width: 'max-content', minWidth: 160, maxWidth: 320,
+        padding: '10px 12px',
+        background: 'var(--bg-elev)', border: '1px solid var(--border)', borderRadius: 10,
+        boxShadow: '0 12px 28px rgba(15,23,42,0.14)', zIndex: 90, textAlign: 'left',
+      }}
+    >
+      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)', marginBottom: 4 }}>
+        {t('ieInternalNotes')}
+      </div>
+      {/* Clamped, not scrolled: a card that takes no pointer can't be scrolled.
+          The order page has the rest. */}
+      <div style={{
+        fontSize: 12.5, lineHeight: 1.5, color: 'var(--fg)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere',
+        display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 14, overflow: 'hidden',
+      }}>
+        {note}
+      </div>
+    </div>,
+    document.body,
   );
 }
 

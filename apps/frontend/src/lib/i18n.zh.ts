@@ -2010,6 +2010,7 @@ const zh: Record<string, string> = {
   'soAdjustedShort': '调价',
   'soAdjustedTooltip': '由 {name} 调整 · {when}',
   'soAdjustedListTooltip': '成交价已调整',
+  'soNoteHintLabel': '内部备注',
   'historyPriceAdjusted': '成交价已调整',
   'fx.title': '汇率',
   'fx.refresh': '立即刷新',
