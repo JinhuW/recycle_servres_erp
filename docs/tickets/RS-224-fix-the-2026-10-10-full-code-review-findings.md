@@ -2,13 +2,13 @@
 id: RS-224
 title: Fix the 2026-10-10 full code-review findings
 type: bug
-status: backlog
+status: done
 priority: P1
 created: 2026-10-10
 reporter: jinhu
 branch: fix/code-review-2026-10-10
-pr:
-version:
+pr: 593
+version: 1.239.2
 related: []
 ---
 

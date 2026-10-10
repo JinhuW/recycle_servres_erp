@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-224](./RS-224-fix-the-2026-10-10-full-code-review-findings.md) | backlog | bug | P1 | Fix the 2026-10-10 full code-review findings | — |
+| [RS-224](./RS-224-fix-the-2026-10-10-full-code-review-findings.md) | done | bug | P1 | Fix the 2026-10-10 full code-review findings | — |
 | [RS-223](./RS-223-review-fixes-for-the-sell-order-note-icon-and-the-sh.md) | done | bug | P2 | Review fixes for the sell-order note icon and the shared popover | 1.239.1 |
 | [RS-222](./RS-222-note-icon-on-the-sell-order-list-shows-the-order-s-n.md) | done | story | P2 | Note icon on the sell-order list shows the order's note on hover | 1.239.0 |
 | [RS-221](./RS-221-a-deploy-can-cache-a-404-for-the-new-build-s-chunks.md) | done | bug | P1 | a deploy can cache a 404 for the new build's chunks, blanking prod | 1.238.2 |
