@@ -2,12 +2,12 @@
 id: RS-225
 title: Inventory search finds a PO product by its #, and its PO link lands on that product
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-10
 reporter: jinhu
 branch: feat/search-product-no
-pr:
+pr: 596
 version: 1.240.0
 related: []
 ---
