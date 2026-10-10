@@ -2,13 +2,13 @@
 id: RS-220
 title: Pre-release review fixes for the v1.238 release
 type: bug
-status: in-progress
+status: done
 priority: P1
 created: 2026-10-09
 reporter: jinhu
 branch: fix/prerelease-rs220
-pr:
-version:
+pr: 582
+version: 1.238.1
 related: [RS-209, RS-210, RS-213, RS-215, RS-217, RS-218]
 ---
 
@@ -56,16 +56,16 @@ Each finding was checked against the code. The one about data was also checked r
 
 ## Acceptance criteria
 
-- [ ] `POST /api/orders` with a non-string `partNumber` or `description`, or a `null` line, returns 400
+- [x] `POST /api/orders` with a non-string `partNumber` or `description`, or a `null` line, returns 400
       naming `new product n`, not 500.
-- [ ] When `/rows` drops a lot, Select all still ends at "all", and the next click clears it.
-- [ ] Changing only the brand to Micron, on the inventory edit page or through the PO PATCH, stores the die
+- [x] When `/rows` drops a lot, Select all still ends at "all", and the next click clears it.
+- [x] Changing only the brand to Micron, on the inventory edit page or through the PO PATCH, stores the die
       code. The inventory route logs a `chipNumber` event for it. A line with no chip stays without one.
-- [ ] An upper-case line id gets the same held-line refusal as a lower-case one.
-- [ ] The inventory edit page locks qty and unit cost on a held lot before any save.
-- [ ] In Review mode, the keys can't change a held line's count, and the Finish card's zero list matches what
+- [x] An upper-case line id gets the same held-line refusal as a lower-case one.
+- [x] The inventory edit page locks qty and unit cost on a held lot before any save.
+- [x] In Review mode, the keys can't change a held line's count, and the Finish card's zero list matches what
       Approve zeroes.
-- [ ] A forward move into Reviewing doesn't lock the PO's lines.
+- [x] A forward move into Reviewing doesn't lock the PO's lines.
 
 ## Out of scope
 
