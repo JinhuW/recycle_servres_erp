@@ -2571,7 +2571,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     pkFromPo: 'From {po}',
     pkTypedIn: 'Typed in, not from a PO',
     pkZeroLine: 'Qty 0 · nothing to pack',
-    pkScanPh: 'Scan a label, or type any part of a part number',
+    pkScanPh: 'Scan a label, or type any part of a part number or PO number',
     pkScanHint: 'A scanner packs the lot it reads. Typing filters the list. Tap the check to pack by hand.',
     pkScanNoMatch: 'Nothing on {id} matches {pn}.',
     pkScanAmbiguous: '{pn} fits more than one part: {pns}. The list shows only those products.',

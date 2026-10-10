@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { LineCheck } from './boxCheck';
 import {
-  flaggedLots, isPackable, nextOpenProduct, packBody, packGroups, packProducts, packScan, packView, packWarehouseOptions,
+  fitsAnySourcePo, flaggedLots, isPackable, nextOpenProduct, packBody, packFilter, packGroups, packProducts, packScan, packView, packWarehouseOptions,
   productSummary, productTally, productTick, shipBlockers, sourceTag, toCheck,
   type PackLine, type PackProduct,
 } from './sellOrderPack';
@@ -25,6 +25,39 @@ describe('toCheck / packBody', () => {
     // Ticked at 3 of 5 (the line went to 3), then raised to 4 and unticked:
     // taking the tick back restores 5 on the server, so 4 is a valid count.
     expect(packBody(C('a', 4))).toEqual({ counted: 4, packed: false });
+  });
+});
+
+describe('packFilter', () => {
+  const lines = [
+    L('a', { partNumber: 'M393A4K40DB3', sourceOrderId: 'PO-1343' }),
+    L('b', { partNumber: 'HMA82GR7', sourceOrderId: 'PO-1343' }),
+    L('c', { partNumber: 'ST8000NM', sourceOrderId: 'PO-1401' }),
+    L('d', { partNumber: 'WD5000', sourceOrderId: null }),
+  ];
+  const ids = (raw: string) => packFilter(lines, raw)?.map(l => l.id) ?? null;
+
+  it('narrows to the lots a PO supplied, however the number is typed', () => {
+    expect(ids('PO-1343')).toEqual(['a', 'b']);
+    expect(ids('po1343')).toEqual(['a', 'b']);
+    expect(ids('1343')).toEqual(['a', 'b']);
+    expect(ids('14')).toEqual(['c']);
+  });
+
+  it('still matches part numbers, alongside any PO that fits', () => {
+    expect(ids('hma82')).toEqual(['b']);
+    expect(ids('5000')).toEqual(['d']);
+  });
+
+  it('is no filter on empty text', () => {
+    expect(ids('')).toBeNull();
+    expect(ids(' - ')).toBeNull();
+  });
+
+  it('tells a PO number apart from a scan that missed', () => {
+    expect(fitsAnySourcePo(lines, 'PO-1401')).toBe(true);
+    expect(fitsAnySourcePo(lines, 'PO-9999')).toBe(false);
+    expect(fitsAnySourcePo(lines, '')).toBe(false);
   });
 });
 

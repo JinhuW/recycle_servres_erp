@@ -1,6 +1,6 @@
 import { canonicalPartNumber } from '@recycle-erp/shared';
 import {
-  countOf, isAbsentChecked, isShortChecked, lineState, matchScan, spellsSerial, tally,
+  countOf, filterScan, isAbsentChecked, isShortChecked, lineState, matchScan, spellsSerial, tally,
   type CheckableLine, type LineCheck, type ScanMatch,
 } from './boxCheck';
 
@@ -77,6 +77,28 @@ export function packView<L extends PackLine>(lines: readonly L[], wh: string): P
   return lines
     .map(line => ({ line, no: line.no }))
     .filter(r => !wh || packWarehouseOf(r.line) === wh);
+}
+
+// What the list narrows to while text sits in the scan box: Review mode's
+// part/serial filter, plus the PO each lot came from — a sell order draws on
+// several POs, and a packer pulling stock goes PO by PO. `PO-1343`, `po1343`
+// and `1343` all fit PO-1343. Null is no filter.
+export function packFilter<L extends PackLine>(lines: readonly L[], raw: string): L[] | null {
+  const q = canonicalPartNumber(raw);
+  if (!q) return null;
+  const hits = new Set(filterScan(lines, raw));
+  return lines.filter(l => hits.has(l) || fitsSourcePo(l, q));
+}
+
+function fitsSourcePo(l: PackLine, q: string): boolean {
+  return !!l.sourceOrderId && canonicalPartNumber(l.sourceOrderId).includes(q);
+}
+
+// Whether some lot's PO fits the text — Enter on a PO number that no unit
+// answers to is a PO filter, not a scan that missed.
+export function fitsAnySourcePo(lines: readonly PackLine[], raw: string): boolean {
+  const q = canonicalPartNumber(raw);
+  return !!q && lines.some(l => fitsSourcePo(l, q));
 }
 
 export function sourceTag(l: Pick<PackLine, 'sourceOrderId' | 'sourceLineNo'>): { po: string; no: number | null } | null {
