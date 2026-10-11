@@ -275,7 +275,9 @@ const isUploadPath = (path: string): boolean =>
   /^\/api\/orders\/[^/]+\/lines\/[^/]+\/photos$/.test(path) ||
   // Vendor bid sheets round-trip our own template, which embeds item photos —
   // they routinely exceed the JSON cap. The route enforces its own 8 MB limit.
-  /^\/api\/sell-orders\/[^/]+\/price-import\/preview$/.test(path);
+  /^\/api\/sell-orders\/[^/]+\/price-import\/preview$/.test(path) ||
+  // A price list dropped on the Market page — the same sheets, same 8 MB limit.
+  path === '/api/market/price-import/preview';
 
 // All other routes: apply the 1 MiB JSON cap.
 const jsonBodyLimit = bodyLimit({

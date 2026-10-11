@@ -2,7 +2,8 @@
 // order's products by canonical part number. The file is untrusted: columns
 // may be reordered, rows added or deleted, prices typed as strings with
 // currency symbols. Nothing here relies on cell positions — columns are
-// located by header text, rows are matched by part number.
+// located by header text, rows are matched by part number. The Market page's
+// price import reads its sheets through the same readPriceSheetRows.
 
 import type ExcelJS from 'exceljs';
 import { canonPartNumberJs } from '../lib/part-number';
@@ -131,6 +132,7 @@ type HeaderHit = {
   headerRow: number;
   partCol: number;
   priceCol: number;
+  priceHeader: string;
 };
 
 // Every sheet with a recognizable header participates — the bid template
@@ -145,19 +147,73 @@ function findHeaders(wb: ExcelJS.Workbook): HeaderHit[] {
       const row = ws.getRow(r);
       let partCol: number | null = null;
       let priceCol: number | null = null;
+      let priceHeader = '';
       for (let c = 1; c <= row.cellCount; c++) {
-        const h = normHeader(cellText(row.getCell(c).value));
+        const text = cellText(row.getCell(c).value);
+        const h = normHeader(text);
         if (h === '') continue;
         if (partCol === null && isPartHeader(h)) partCol = c;
-        else if (priceCol === null && isPriceHeader(h)) priceCol = c;
+        else if (priceCol === null && isPriceHeader(h)) {
+          priceCol = c;
+          priceHeader = text;
+        }
       }
       if (partCol !== null && priceCol !== null) {
-        hits.push({ ws, headerRow: r, partCol, priceCol });
+        hits.push({ ws, headerRow: r, partCol, priceCol, priceHeader });
         break;
       }
     }
   }
   return hits;
+}
+
+// Yuan marks that parsePrice strips without a trace. Harmless on a bid sheet,
+// whose order names the currency; the USD-only Market board has to refuse them.
+const CNY_MARK = /[¥￥元]|cny|rmb|人民币/i;
+
+// One price-sheet row as read, before it is matched to anything: what its Part
+// Number and Unit Price cells held, wherever those columns sit.
+export type SheetPriceRow = {
+  sheet: string;
+  rowNumber: number;
+  rawPart: string;
+  canonPart: string;
+  price: number | null;
+  priceKind: ParsedPrice['kind'];
+  rawPrice: string;
+  currency: 'CNY' | null;
+};
+
+export function readPriceSheetRows(wb: ExcelJS.Workbook): SheetPriceRow[] {
+  const hits = findHeaders(wb);
+  if (hits.length === 0) throw new PriceColumnsNotFoundError();
+
+  const rows: SheetPriceRow[] = [];
+  for (const { ws, headerRow, partCol, priceCol, priceHeader } of hits) {
+    const headerCny = CNY_MARK.test(priceHeader);
+    for (let r = headerRow + 1; r <= ws.rowCount; r++) {
+      const row = ws.getRow(r);
+      const rawPart = cellText(row.getCell(partCol).value).trim();
+      if (rawPart === '') continue;
+
+      const cell = row.getCell(priceCol);
+      const price = parsePrice(cell.value);
+      const rawPrice = cellText(cell.value);
+      rows.push({
+        sheet: ws.name,
+        rowNumber: r,
+        rawPart,
+        canonPart: canonPartNumberJs(rawPart),
+        price: price.kind === 'ok' ? price.value : null,
+        priceKind: price.kind,
+        rawPrice,
+        // A typed number carries its currency only in the cell's format.
+        currency: headerCny || CNY_MARK.test(rawPrice) || CNY_MARK.test(cell.numFmt ?? '')
+          ? 'CNY' : null,
+      });
+    }
+  }
+  return rows;
 }
 
 export type SellOrderLineRow = {
@@ -199,8 +255,7 @@ export function parsePriceWorkbook(
   wb: ExcelJS.Workbook,
   orderProducts: OrderProduct[],
 ): PriceImportPreview {
-  const hits = findHeaders(wb);
-  if (hits.length === 0) throw new PriceColumnsNotFoundError();
+  const sheetRows = readPriceSheetRows(wb);
 
   const manualProducts: OrderProduct[] = [];
   const byCanon = new Map<string, { product: OrderProduct; index: number }[]>();
@@ -222,51 +277,43 @@ export function parsePriceWorkbook(
   // another tab demotes the first occurrence the same way.
   const winnerByProduct = new Map<number, ParsedPriceRow>();
 
-  for (const { ws, headerRow, partCol, priceCol } of hits) {
-    for (let r = headerRow + 1; r <= ws.rowCount; r++) {
-      const row = ws.getRow(r);
-      const rawPart = cellText(row.getCell(partCol).value).trim();
-      if (rawPart === '') continue;
+  for (const sheetRow of sheetRows) {
+    const parsed: ParsedPriceRow = {
+      sheet: sheetRow.sheet,
+      rowNumber: sheetRow.rowNumber,
+      rawPart: sheetRow.rawPart,
+      canonPart: sheetRow.canonPart,
+      price: sheetRow.price,
+      rawPrice: sheetRow.rawPrice,
+      status: 'no-price',
+    };
 
-      const priceValue = row.getCell(priceCol).value;
-      const price = parsePrice(priceValue);
-      const parsed: ParsedPriceRow = {
-        sheet: ws.name,
-        rowNumber: r,
-        rawPart,
-        canonPart: canonPartNumberJs(rawPart),
-        price: price.kind === 'ok' ? price.value : null,
-        rawPrice: cellText(priceValue),
-        status: 'no-price',
-      };
-
-      const candidates = byCanon.get(parsed.canonPart);
-      if (!candidates) {
-        parsed.status = 'not-in-order';
+    const candidates = byCanon.get(parsed.canonPart);
+    if (!candidates) {
+      parsed.status = 'not-in-order';
+    } else {
+      // A part under two labels (a typed line re-worded) can't be told
+      // apart by part number alone.
+      const target = candidates.length === 1 ? candidates[0] : null;
+      if (!target) {
+        parsed.status = 'ambiguous';
+      } else if (sheetRow.priceKind === 'empty') {
+        parsed.status = 'no-price';
+      } else if (sheetRow.priceKind === 'invalid') {
+        parsed.status = 'invalid-price';
       } else {
-        // A part under two labels (a typed line re-worded) can't be told
-        // apart by part number alone.
-        const target = candidates.length === 1 ? candidates[0] : null;
-        if (!target) {
-          parsed.status = 'ambiguous';
-        } else if (price.kind === 'empty') {
-          parsed.status = 'no-price';
-        } else if (price.kind === 'invalid') {
-          parsed.status = 'invalid-price';
-        } else {
-          parsed.status = 'matched';
-          parsed.partNumber = target.product.partNumber;
-          parsed.label = target.product.label;
-          parsed.oldPrice = target.product.oldPrice;
-          parsed.qty = target.product.qty;
-          parsed.lineCount = target.product.lineCount;
-          const prior = winnerByProduct.get(target.index);
-          if (prior) prior.status = 'duplicate';
-          winnerByProduct.set(target.index, parsed);
-        }
+        parsed.status = 'matched';
+        parsed.partNumber = target.product.partNumber;
+        parsed.label = target.product.label;
+        parsed.oldPrice = target.product.oldPrice;
+        parsed.qty = target.product.qty;
+        parsed.lineCount = target.product.lineCount;
+        const prior = winnerByProduct.get(target.index);
+        if (prior) prior.status = 'duplicate';
+        winnerByProduct.set(target.index, parsed);
       }
-      rows.push(parsed);
     }
+    rows.push(parsed);
   }
 
   const unmatchedProducts = orderProducts.filter(

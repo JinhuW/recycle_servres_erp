@@ -1745,12 +1745,20 @@ over MCP.
 - Paginated with infinite scroll (v1.12.0), sortable by clicking column headers
   (v1.67.0).
 - A line can be priced while the buy can still change (v1.54.0).
-- **Four feeds write `last_price`**, each tagged in the event's source: the
+- **Five feeds write `last_price`**, each tagged in the event's source: the
   scraper and MCP connectors (`scraper:`/`mcp:`), a manager's manual entry
   on the Market page (`manual:`), a sell order reaching Done (`sale:<order>`),
-  and a sell-order save that follows a confirmed vendor price import
-  (`bid:<order>`, v1.138.3). The Activity page shows the source per row; the
+  a sell-order save that follows a confirmed vendor price import
+  (`bid:<order>`, v1.138.3), and a price-list import on the Market page
+  (`import:<email>`, v1.247.0). The Activity page shows the source per row; the
   Market page shows only the price and its age.
+- **Import prices from a spreadsheet** (v1.247.0, managers, desktop). The
+  manager drops an `.xlsx`, and only its Part Number and Unit Price columns
+  are read. The preview shows current → new price and max buy for every part
+  already on the Market list. It lists the rows it skips: unknown parts (no
+  row is created), blank or 0 prices, prices marked in yuan, and an earlier
+  row for a part listed again. One click records the rest, with the file name
+  as the event note, and each part's max buy follows its new price.
 
 ## Activity and audit
 

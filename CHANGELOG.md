@@ -17,6 +17,39 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.247.0] - 2026-10-11
+
+A manager can re-price the Market board from a spreadsheet (RS-232). Until now
+the only way to record a market price was the pencil on one row at a time, so
+a broker's price list meant typing every part by hand. "Import prices" on the
+desktop Market page takes an `.xlsx`. Only its Part Number and Unit Price
+columns are read, located by header on any tab and below any title rows, and
+every other column is ignored. Each matched part gets a new recorded price,
+and its recommended max buy follows, because max buy is derived from that
+price.
+
+### Added
+- `POST /api/market/price-import/preview` matches each row to a part already
+  on the Market list by canonical part number. When two rows share one, the
+  most recently maintained wins, as for the scraper. The preview shows the
+  current → new price and max buy for each part, and lists every row it will
+  skip: not on the Market list, no price (blank or 0), not a price, priced in
+  yuan, or listed again further down. It writes nothing.
+- `POST /api/market/price-import/apply` records the prices the manager saw as
+  market data points (`import:<email>`, with the file name as the note, on
+  Activity). It locks the rows up front in one order and takes at most 1000
+  prices. Writing an unchanged price on purpose re-dates it and clears the
+  stale flag.
+
+### Changed
+- The bid-sheet reader is shared: `readPriceSheetRows` in
+  `services/sellOrderPriceImport.ts` serves both imports. It also reports a
+  yuan mark from the price header, the cell text or the cell's number
+  format, which a bid ignores (its order names the currency). The USD-only
+  Market board skips those rows.
+- The Market import preview is exempt from the 1 MiB JSON body cap, like the
+  bid preview, and keeps its own 8 MB limit.
+
 ## [1.246.0] - 2026-10-11
 
 Sold is now a flag beside a PO's stage, not a stage after Done (RS-231). Since
