@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-228](./RS-228-verify-ram-line-specs-against-the-part-number-and-cr.md) | done | story | P2 | Verify RAM line specs against the part number, and cross-check label scans | — |
+| [RS-229](./RS-229-group-ram-by-part-number-family-in-inventory.md) | in-progress | story | P2 | Group RAM by part-number family in inventory | — |
+| [RS-228](./RS-228-verify-ram-line-specs-against-the-part-number-and-cr.md) | done | story | P2 | Verify RAM line specs against the part number, and cross-check label scans | 1.243.0 |
 | [RS-227](./RS-227-sell-order-bid-sheet-prices-a-part-once-not-per-cond.md) | done | story | P2 | Sell-order bid sheet prices a part once, not per condition | 1.242.0 |
 | [RS-226](./RS-226-pack-mode-filter-also-finds-lots-by-po-number.md) | done | story | P2 | Pack mode filter also finds lots by PO number | 1.241.0 |
 | [RS-225](./RS-225-inventory-search-finds-a-po-product-by-its-and-its-p.md) | done | story | P2 | Inventory search finds a PO product by its #, and its PO link lands on that product | 1.240.0 |

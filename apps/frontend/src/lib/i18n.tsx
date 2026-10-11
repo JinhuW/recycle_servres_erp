@@ -2366,6 +2366,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     iptSelectAllSellable: 'Select all sellable lots',
     iptSpecsVary: 'Specs vary across lots',
     iptMixed: 'mixed',
+    iptPartNumbersN: '{n} part numbers',
     iptQtyBreakdown: '{stock} in stock · {transit} in transit',
     iptReviewingN: '{n} reviewing',
     iptLotPoSummary: '{lots} lots · {pos} POs',

@@ -17,6 +17,25 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.244.0] - 2026-10-11
+
+Inventory's grouped view now groups RAM by module family (RS-229). It used to
+merge lots only when their part numbers matched exactly, so one stick appeared
+as several products whenever the maker's trailing code differed:
+`M393A2K43BB1-CTD`, `-CTD7Q` and `-CTDQ` were three rows. The new
+`ramFamily` decoder (`@recycle-erp/shared`) keeps the part of a Samsung,
+SK Hynix (DDR3/4) or Micron part number that names the module form, dies,
+organisation, speed and (for Micron) die revision. It drops only the
+packaging and marking codes after it.
+
+### Changed
+- RAM suffix variants are one product in the grouped view and the grouped
+  export. The product shows `M393A2K43BB1-CTD*`, hovering lists its part
+  numbers, and its lots table gains a Part # column. RDIMM and ECC UDIMM
+  (`M393` vs `M391`) stay separate products, and so do different dies and
+  speeds. Part numbers the decoder can't read (OEM, Corsair, G.Skill,
+  Kingston, Hynix DDR5) group as before.
+
 ## [1.243.0] - 2026-10-11
 
 RAM lines are now checked against their own part number (RS-228). A new
