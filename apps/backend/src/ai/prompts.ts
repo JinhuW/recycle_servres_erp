@@ -108,3 +108,25 @@ export function parseModelJson(text: string): Record<string, unknown> | null {
     }
   }
 }
+
+// What a part number is, looked up on the web by an `:online` model, for a
+// PO line no maker's scheme decodes. The conventions ride up front: the
+// 2026-10-11 audit's web pass flagged correct DDR3 speeds and kit capacities
+// as mismatches until it was told how they are stored.
+const LOOKUP_FIELDS: Record<LineCategory, string> = {
+  RAM: '"brand","capacity","generation","classification","type","rank","speed"',
+  SSD: '"brand","capacity","interface","formFactor"',
+  HDD: '"brand","capacity","interface","formFactor","rpm"',
+  Other: '"description"',
+};
+
+export function partLookupPrompt(category: LineCategory, partNumber: string): string {
+  return `Search the web for the ${category === 'Other' ? 'server component' : category} part number "${partNumber}" and report what it is, from the maker's datasheet or a reseller listing that names this exact part number.
+Respond with a single minified JSON object and nothing else:
+{"specs":{${LOOKUP_FIELDS[category]}},"sourceUrls":["…"],"_confidence":0.0}
+Use the same vocabulary as these examples: capacity "32GB" / "1.92TB" (no space), generation "DDR4", classification "RDIMM|LRDIMM|UDIMM|SODIMM", type "Server|Desktop|Laptop", rank "2Rx4" (keep a D or Sn: "4DRx4", "2S2Rx4"), interface "SATA|SAS|NVMe", formFactor "2.5\\"|3.5\\"|M.2 2280".
+CONVENTIONS — these are how the records are kept, not mismatches:
+  - RAM capacity is PER MODULE. A kit part number (Corsair CMK…M2, G.Skill …D-/Q-, Kingston …K2/) names the kit total; divide by the stick count.
+  - RAM speed: for DDR3 give the PC3 rating (12800 for DDR3-1600, 10600 for DDR3-1333); for DDR4 and DDR5 give MT/s (3200).
+Omit any field the sources don't state for this exact part number. Never guess from a similar part number. sourceUrls lists the pages you used.`;
+}

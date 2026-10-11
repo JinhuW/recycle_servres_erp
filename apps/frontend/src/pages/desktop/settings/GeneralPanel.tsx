@@ -82,6 +82,9 @@ function monthLabel(month: string, lang: 'en' | 'zh'): string {
   return new Intl.DateTimeFormat(locale, { month: 'long' }).format(new Date(2024, idx, 1));
 }
 
+type AiReviewSetting = { enabled: boolean; webLookup: boolean; maxCostPerPoUsd: number; model: string | null };
+const AI_REVIEW_DEFAULT: AiReviewSetting = { enabled: false, webLookup: true, maxCostPerPoUsd: 0.5, model: null };
+
 export function GeneralPanel() {
   const { t, lang } = useT();
   const [data, setData] = useState({
@@ -92,6 +95,7 @@ export function GeneralPanel() {
     timezone: 'America/Los_Angeles',
     fxAuto: true,
     notify: { newOrder: true, weeklyDigest: true, lowMargin: true, capacityAlert: false },
+    aiReview: AI_REVIEW_DEFAULT,
   });
   type GeneralData = typeof data;
 
@@ -110,6 +114,9 @@ export function GeneralPanel() {
           lowMargin:     typeof s.notify_low_margin     === 'boolean' ? s.notify_low_margin     : d.notify.lowMargin,
           capacityAlert: typeof s.notify_capacity       === 'boolean' ? s.notify_capacity       : d.notify.capacityAlert,
         },
+        aiReview: s.po_ai_review && typeof s.po_ai_review === 'object'
+          ? { ...AI_REVIEW_DEFAULT, ...(s.po_ai_review as Partial<AiReviewSetting>) }
+          : d.aiReview,
       })))
       .catch(handleFetchError);
   useEffect(() => { reload(); }, []);
@@ -129,6 +136,13 @@ export function GeneralPanel() {
   const updNotify = <K extends keyof GeneralData['notify']>(k: K, v: GeneralData['notify'][K]) => {
     setData(d => ({ ...d, notify: { ...d.notify, [k]: v } }));
     persist({ [WS_NOTIFY_KEY[k]]: v });
+  };
+
+  // The server stores the whole object, so every change sends all of it.
+  const updAi = (patch: Partial<AiReviewSetting>, persistNow = true) => {
+    const next = { ...data.aiReview, ...patch };
+    setData(d => ({ ...d, aiReview: next }));
+    if (persistNow) persist({ po_ai_review: next });
   };
 
   const NOTIF: { k: keyof GeneralData['notify']; title: string; sub: string }[] = [
@@ -231,6 +245,51 @@ export function GeneralPanel() {
               <Toggle checked={data.notify[n.k]} onChange={v => updNotify(n.k, v)} />
             </div>
           ))}
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 'var(--gap)' }}>
+        <div className="card-head">
+          <div>
+            <div className="card-title">{t('aiRevSettingsTitle')}</div>
+            <div className="card-sub">{t('aiRevSettingsSub')}</div>
+          </div>
+        </div>
+        <div className="card-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          {([
+            ['enabled', t('aiRevSettingsEnabled'), t('aiRevSettingsEnabledSub')],
+            ['webLookup', t('aiRevSettingsWeb'), t('aiRevSettingsWebSub')],
+          ] as const).map(([k, title, sub]) => (
+            <div key={k} className="toggle-row" style={{ gridColumn: '1 / -1' }}>
+              <span>
+                <strong style={{ fontSize: 13 }}>{title}</strong>
+                <div style={{ fontSize: 12, color: 'var(--fg-subtle)', marginTop: 2 }}>{sub}</div>
+              </span>
+              <Toggle checked={data.aiReview[k]} onChange={v => updAi({ [k]: v })} />
+            </div>
+          ))}
+          <div className="field">
+            <label className="label">{t('aiRevSettingsCap')}</label>
+            <input
+              className="input mono" type="number" min={0.05} max={10} step={0.05}
+              value={data.aiReview.maxCostPerPoUsd}
+              onChange={e => updAi({ maxCostPerPoUsd: Number(e.target.value) }, false)}
+              onBlur={() => {
+                const v = data.aiReview.maxCostPerPoUsd;
+                updAi({ maxCostPerPoUsd: v > 0 && v <= 10 ? v : AI_REVIEW_DEFAULT.maxCostPerPoUsd });
+              }}
+            />
+          </div>
+          <div className="field">
+            <label className="label">{t('aiRevSettingsModel')}</label>
+            <input
+              className="input mono" placeholder="openai/gpt-6-luna"
+              value={data.aiReview.model ?? ''}
+              onChange={e => updAi({ model: e.target.value }, false)}
+              onBlur={() => updAi({ model: data.aiReview.model?.trim() || null })}
+            />
+            <div className="help">{t('aiRevSettingsModelHelp')}</div>
+          </div>
         </div>
       </div>
     </>

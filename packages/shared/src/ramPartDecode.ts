@@ -574,6 +574,11 @@ const norm = (f: RamPartField, v: string | null | undefined): string => {
   return f === 'speed' ? ramSpeedMts(t) : t;
 };
 
+/** Whether two values of `field` name the same thing (`12800` and `1600` do). */
+export function ramFieldsAgree(field: RamPartField, a: string | null | undefined, b: string | null | undefined): boolean {
+  return norm(field, a) === norm(field, b);
+}
+
 export type RamPartMismatch = { field: RamPartField; partSays: string; lineSays: string };
 
 /**

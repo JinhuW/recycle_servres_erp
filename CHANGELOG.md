@@ -17,6 +17,30 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.245.0] - 2026-10-11
+
+Purchase orders now get an AI review when they move to Reviewing (RS-230).
+The 2026-10-11 audit decoded every RAM line's part number by hand and found
+350 lots whose specs contradicted it. That audit ran long after the stock was
+bought, and nothing checked a PO while its box was still on the bench.
+
+- **Turning it on:** a new background loop picks up a review that the stage
+  move queues in its own transaction. It is off by default (a workspace
+  setting with a per-PO cost cap).
+- **What it checks:** every line against its decoded part number (RS-228's
+  decoder), its label read and its market value. Where the sources disagree,
+  it re-reads the label photo through OpenRouter. It looks a part number up on
+  the web (an `:online` model) only when no maker's scheme decodes it, and
+  caches the answer in `part_number_lookups`.
+- **How a manager sees it:** findings land in a new card in Review mode, with
+  an *AI n* chip on the rows they concern. The reviewer suggests and never
+  edits. Apply goes through the ordinary line PATCH, so the edit is audited
+  like any other. Dismissals survive a re-run.
+- **Runbook:** the manual procedure the reviewer automates is now written up
+  in `docs/po-spec-audit-runbook.md`.
+- **Transport changes:** `openRouterJson` takes any number of images and
+  reports billed usage, and a call can name its own model and timeout.
+
 ## [1.244.0] - 2026-10-11
 
 Inventory's grouped view now groups RAM by module family (RS-229). It used to
