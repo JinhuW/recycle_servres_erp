@@ -123,6 +123,27 @@ describe('GET /api/sell-orders/:id/price-template', () => {
     expect(Number(ws.getRow(dataRows[0]).getCell(qtyCol).value)).toBe(5);
   });
 
+  it('prices a part once: no Condition column, its conditions on one row', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await createOrder(token, {
+      lines: [
+        { category: 'RAM', label: 'DIMM A', partNumber: 'TPL-CND', qty: 2, unitPrice: 10, warehouseId: 'WH-LA1', condition: 'New' },
+        { category: 'RAM', label: 'DIMM A', partNumber: 'TPL-CND', qty: 3, unitPrice: 10, warehouseId: 'WH-LA1', condition: 'Used' },
+      ],
+    });
+    const res = await getRaw(`/api/sell-orders/${id}/price-template`, token);
+    const ws = (await loadWorkbook(res)).worksheets[0];
+    const { row: headerRow, cols } = findHeaderRow(ws);
+    expect([...cols.keys()]).not.toContain('Condition');
+    const partCol = cols.get('Part Number')!;
+    const dataRows = [];
+    for (let r = headerRow + 1; r <= ws.rowCount; r++) {
+      if (ws.getRow(r).getCell(partCol).value) dataRows.push(r);
+    }
+    expect(dataRows).toHaveLength(1);
+    expect(Number(ws.getRow(dataRows[0]).getCell(cols.get('Qty')!).value)).toBe(5);
+  });
+
   it('leaves Unit Price blank on an unprotected sheet, formulas Line Total', async () => {
     const { token } = await loginAs(ALEX);
     const id = await createOrder(token);
@@ -175,7 +196,7 @@ describe('GET /api/sell-orders/:id/price-template', () => {
 
   it('ships rows in the default order — brand, then capacity, speed', async () => {
     const ram = (label: string, specs: Record<string, string | number>) => ({
-      category: 'RAM', label, partNumber: label, condition: null,
+      category: 'RAM', label, partNumber: label,
       qty: 1, imageUrl: null, specs,
     });
     // Deliberately scrambled on the way in, including a manual line with no
@@ -207,11 +228,11 @@ describe('GET /api/sell-orders/:id/price-template', () => {
 
   it('groups the RAM tab by device then DDR generation with merged labels', async () => {
     const ram = (label: string, specs: Record<string, string | number>) => ({
-      category: 'RAM', label, partNumber: label, condition: null,
+      category: 'RAM', label, partNumber: label,
       qty: 1, imageUrl: null, specs,
     });
     const ssd = {
-      category: 'SSD', label: 'ssd', partNumber: 'ssd', condition: null,
+      category: 'SSD', label: 'ssd', partNumber: 'ssd',
       qty: 1, imageUrl: null, specs: { brand: 'Intel', capacity: '1TB' },
     };
     // Scrambled on the way in. Two DDR4 runs (one per device group) must
@@ -464,7 +485,7 @@ describe('GET /api/sell-orders/:id/price-template', () => {
     const buf = await buildPriceTemplateWorkbook(
       { id: 'SL-IMG', customerName: 'Acme', currencyCode: 'USD' },
       [{
-        category: 'RAM', label: 'DIMM A', partNumber: 'TPL-A1', condition: null,
+        category: 'RAM', label: 'DIMM A', partNumber: 'TPL-A1',
         qty: 2, imageUrl: 'https://static.recycleservers.com/label-scans/x.jpg',
         specs: { brand: 'Samsung', speed: 3200, chip: 'K4A8G085WB-BCTD' },
       }],
@@ -971,7 +992,7 @@ describe('packTabName', () => {
 
   it('spreads a product from more PO lines than one row can show over merged rows, none above Excel\'s cap', async () => {
     const many = Array.from({ length: 30 }, (_, i) => ({ po: `PO-${1000 + i}`, lineNo: 1, qty: 1 }));
-    const ram = { category: 'RAM', condition: null, imageUrl: null, specs: { type: 'Server', generation: 'DDR4' } };
+    const ram = { category: 'RAM', imageUrl: null, specs: { type: 'Server', generation: 'DDR4' } };
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(await buildPackingListWorkbook(
       { id: 'SO-1', customerName: 'C', currencyCode: 'USD' },

@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-227](./RS-227-sell-order-bid-sheet-prices-a-part-once-not-per-cond.md) | in-review | story | P2 | Sell-order bid sheet prices a part once, not per condition | — |
 | [RS-226](./RS-226-pack-mode-filter-also-finds-lots-by-po-number.md) | done | story | P2 | Pack mode filter also finds lots by PO number | 1.241.0 |
 | [RS-225](./RS-225-inventory-search-finds-a-po-product-by-its-and-its-p.md) | done | story | P2 | Inventory search finds a PO product by its #, and its PO link lands on that product | 1.240.0 |
 | [RS-224](./RS-224-fix-the-2026-10-10-full-code-review-findings.md) | done | bug | P1 | Fix the 2026-10-10 full code-review findings | 1.239.2 |

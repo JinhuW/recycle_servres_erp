@@ -17,6 +17,24 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.242.0] - 2026-10-11
+
+The vendor bid sheet no longer prices by condition (RS-227). It used to print
+a Condition column and give a part one row per condition, so a vendor quoted
+New and Used separately and the import matched each row back by part number
+and condition. Now a part is one bid row and gets one price.
+
+### Changed
+
+- **The bid sheet has no Condition column.** A part on the order in several
+  conditions prints as one row with its qty summed. The packing lists and the
+  order's product `#`s still keep conditions apart.
+- **The price import matches by part number alone.** The confirmed price goes
+  on every line of the part, whatever its condition, and the preview no longer
+  shows a condition. A Condition column in an older sheet is ignored. The
+  bid recorded on the Market board covers the whole part, and `bidParts` on
+  `PATCH /api/sell-orders/:id` is now `{ partNumber }`.
+
 ## [1.241.0] - 2026-10-10
 
 Pack mode's scan box now filters by PO number as well as part number (RS-226).

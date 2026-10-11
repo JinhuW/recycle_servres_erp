@@ -10,7 +10,6 @@ import { canonPartNumberJs } from '../lib/part-number';
 export type OrderProduct = {
   partNumber: string | null;
   label: string;
-  condition: string | null;
   qty: number;
   lineCount: number;
   oldPrice: number | null;
@@ -31,7 +30,6 @@ export type ParsedPriceRow = {
   rowNumber: number;
   rawPart: string;
   canonPart: string;
-  condition: string | null;
   price: number | null;
   rawPrice: string;
   status: ParsedRowStatus;
@@ -83,9 +81,6 @@ const isPriceHeader = (h: string) => {
   return h.includes('unitprice') || h.includes('单价') || h.includes('price') || h.includes('价格');
 };
 
-const COND_EXACT = new Set(['成色', '新旧']);
-const isConditionHeader = (h: string) => COND_EXACT.has(h) || h.includes('condition');
-
 function cellText(v: ExcelJS.CellValue): string {
   if (v === null || v === undefined) return '';
   if (typeof v === 'string') return v;
@@ -136,7 +131,6 @@ type HeaderHit = {
   headerRow: number;
   partCol: number;
   priceCol: number;
-  condCol: number | null;
 };
 
 // Every sheet with a recognizable header participates — the bid template
@@ -151,16 +145,14 @@ function findHeaders(wb: ExcelJS.Workbook): HeaderHit[] {
       const row = ws.getRow(r);
       let partCol: number | null = null;
       let priceCol: number | null = null;
-      let condCol: number | null = null;
       for (let c = 1; c <= row.cellCount; c++) {
         const h = normHeader(cellText(row.getCell(c).value));
         if (h === '') continue;
         if (partCol === null && isPartHeader(h)) partCol = c;
         else if (priceCol === null && isPriceHeader(h)) priceCol = c;
-        else if (condCol === null && isConditionHeader(h)) condCol = c;
       }
       if (partCol !== null && priceCol !== null) {
-        hits.push({ ws, headerRow: r, partCol, priceCol, condCol });
+        hits.push({ ws, headerRow: r, partCol, priceCol });
         break;
       }
     }
@@ -168,29 +160,23 @@ function findHeaders(wb: ExcelJS.Workbook): HeaderHit[] {
   return hits;
 }
 
-// Condition is free text on both the order and the sheet; the match ignores
-// case and whitespace the way the edit form's setPrice key does.
-export const normCondition = (s: string | null | undefined) =>
-  (s ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
-
 export type SellOrderLineRow = {
   label: string;
   part_number: string | null;
-  condition: string | null;
   qty: number;
   unit_price: number | null;
   source_unit_price: number | null;
 };
 
-// Same product key the edit form's setPrice uses (part|label|condition):
-// one price covers every line of a product across warehouses, so the vendor
-// prices each product once. oldPrice is native — what the vendor's new price
+// The bid sheet's product (part|label): one price covers every line of a
+// product across warehouses and conditions, so the vendor prices each part
+// once. oldPrice is native — what the vendor's new price
 // will be compared against.
 export function groupOrderProducts(rows: SellOrderLineRow[], isCny: boolean): OrderProduct[] {
   const byKey = new Map<string, OrderProduct>();
   for (const row of rows) {
     const canon = row.part_number ? canonPartNumberJs(row.part_number) : '';
-    const key = `${canon}|${row.label}|${row.condition ?? ''}`;
+    const key = `${canon}|${row.label}`;
     const native = isCny ? (row.source_unit_price ?? row.unit_price) : row.unit_price;
     const existing = byKey.get(key);
     if (existing) {
@@ -200,7 +186,6 @@ export function groupOrderProducts(rows: SellOrderLineRow[], isCny: boolean): Or
       byKey.set(key, {
         partNumber: row.part_number,
         label: row.label,
-        condition: row.condition,
         qty: row.qty,
         lineCount: 1,
         oldPrice: native,
@@ -237,7 +222,7 @@ export function parsePriceWorkbook(
   // another tab demotes the first occurrence the same way.
   const winnerByProduct = new Map<number, ParsedPriceRow>();
 
-  for (const { ws, headerRow, partCol, priceCol, condCol } of hits) {
+  for (const { ws, headerRow, partCol, priceCol } of hits) {
     for (let r = headerRow + 1; r <= ws.rowCount; r++) {
       const row = ws.getRow(r);
       const rawPart = cellText(row.getCell(partCol).value).trim();
@@ -245,13 +230,11 @@ export function parsePriceWorkbook(
 
       const priceValue = row.getCell(priceCol).value;
       const price = parsePrice(priceValue);
-      const fileCondition = condCol ? cellText(row.getCell(condCol).value).trim() || null : null;
       const parsed: ParsedPriceRow = {
         sheet: ws.name,
         rowNumber: r,
         rawPart,
         canonPart: canonPartNumberJs(rawPart),
-        condition: fileCondition,
         price: price.kind === 'ok' ? price.value : null,
         rawPrice: cellText(priceValue),
         status: 'no-price',
@@ -261,15 +244,9 @@ export function parsePriceWorkbook(
       if (!candidates) {
         parsed.status = 'not-in-order';
       } else {
-        let target: { product: OrderProduct; index: number } | null = null;
-        if (candidates.length === 1) {
-          target = candidates[0];
-        } else {
-          const matches = candidates.filter(
-            c => normCondition(c.product.condition) === normCondition(fileCondition),
-          );
-          target = matches.length === 1 ? matches[0] : null;
-        }
+        // A part under two labels (a typed line re-worded) can't be told
+        // apart by part number alone.
+        const target = candidates.length === 1 ? candidates[0] : null;
         if (!target) {
           parsed.status = 'ambiguous';
         } else if (price.kind === 'empty') {
@@ -280,7 +257,6 @@ export function parsePriceWorkbook(
           parsed.status = 'matched';
           parsed.partNumber = target.product.partNumber;
           parsed.label = target.product.label;
-          parsed.condition = target.product.condition;
           parsed.oldPrice = target.product.oldPrice;
           parsed.qty = target.product.qty;
           parsed.lineCount = target.product.lineCount;
