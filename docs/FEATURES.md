@@ -1205,8 +1205,11 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   (v1.51.2). Its header text is load-bearing for the import parser — don't
   move it. **Saving after a confirmed import records the accepted prices on
   the Market value board** as `bid:<order>` data points, USD at the saved
-  rate, one per confirmed part (v1.138.3) from the lines in the condition the
-  sheet priced (v1.138.4); hand-typed price edits record nothing.
+  rate, one per confirmed part (v1.138.3); hand-typed price edits record
+  nothing. **The sheet prices a part once, not per condition**: there is no
+  Condition column, a part held in two conditions is one row with its qty
+  summed, and the import applies its price to every line of the part
+  (v1.242.0).
 - The price template splits into one worksheet per category with per-attribute
   spec columns and image URLs (v1.25.0, v1.27.0). **The RAM tab groups its rows
   with merged label columns left of `#`** — "Desktop & laptop" / "Server", then

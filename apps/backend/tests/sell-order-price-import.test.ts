@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import ExcelJS from 'exceljs';
 import {
+  groupOrderProducts,
   parsePriceWorkbook,
   PriceColumnsNotFoundError,
   type OrderProduct,
@@ -38,7 +39,6 @@ function product(over: Partial<OrderProduct>): OrderProduct {
   return {
     partNumber: 'ABC123',
     label: 'RAM 16GB',
-    condition: null,
     qty: 4,
     lineCount: 1,
     oldPrice: null,
@@ -184,30 +184,37 @@ describe('part-number matching', () => {
     expect(res.summary).toMatchObject({ matched: 1, duplicate: 1 });
   });
 
-  it('disambiguates same part with two conditions via the Condition column', () => {
+  it('ignores a Condition column: a part is priced once, the last row winning', () => {
     const wb = wbWith([
       ['Part Number', 'Condition', 'Unit Price (USD)'],
       ['ABC123', 'New', 100],
       ['ABC123', 'Used', 60],
     ]);
-    const products = [
-      product({ condition: 'New', oldPrice: 90 }),
-      product({ condition: 'Used', oldPrice: 50 }),
-    ];
-    const res = parsePriceWorkbook(wb, products);
-    expect(res.rows[0]).toMatchObject({ status: 'matched', condition: 'New', price: 100, oldPrice: 90 });
-    expect(res.rows[1]).toMatchObject({ status: 'matched', condition: 'Used', price: 60, oldPrice: 50 });
+    const res = parsePriceWorkbook(wb, [product({ oldPrice: 90 })]);
+    expect(res.rows.map(r => r.status)).toEqual(['duplicate', 'matched']);
+    expect(res.rows[1]).toMatchObject({ price: 60, oldPrice: 90 });
+    expect(res.rows[1]).not.toHaveProperty('condition');
   });
 
-  it('marks ambiguous when conditions collide and the column is gone', () => {
+  it('marks ambiguous when one part sits under two labels', () => {
     const wb = wbWith([
       ['Part Number', 'Unit Price (USD)'],
       ['ABC123', 100],
     ]);
-    const products = [product({ condition: 'New' }), product({ condition: 'Used' })];
+    const products = [product({}), product({ label: 'RAM 16GB (typed)' })];
     const res = parsePriceWorkbook(wb, products);
     expect(res.rows[0].status).toBe('ambiguous');
     expect(res.summary.ambiguous).toBe(1);
+  });
+
+  it('folds one part in two conditions into one product', () => {
+    const products = groupOrderProducts([
+      { label: 'RAM 16GB', part_number: 'ABC-123', qty: 10, unit_price: 40, source_unit_price: null },
+      { label: 'RAM 16GB', part_number: 'abc123', qty: 5, unit_price: 40, source_unit_price: null },
+    ], false);
+    expect(products).toEqual([
+      { partNumber: 'ABC-123', label: 'RAM 16GB', qty: 15, lineCount: 2, oldPrice: 40 },
+    ]);
   });
 
   it('reports order products the file never priced', () => {
@@ -484,9 +491,9 @@ const BID_LINES = [
 const repriced = (a: number, b: number) => [
   { ...BID_LINES[0], unitPrice: a }, { ...BID_LINES[1], unitPrice: b },
 ];
-// A confirmed product with no condition: the row covers every line of the part.
-const bid = (...parts: string[]) => parts.map(partNumber => ({ partNumber, condition: null }));
-// The same part in two conditions — the import prices each separately.
+// A confirmed part: the bid covers every line of it.
+const bid = (...parts: string[]) => parts.map(partNumber => ({ partNumber }));
+// The same part in two conditions — the import prices them as one.
 const COND_LINES = [
   { category: 'RAM', label: 'DIMM C', partNumber: 'BID-C3', qty: 10, unitPrice: 40, warehouseId: 'WH-LA1', condition: 'New' },
   { category: 'RAM', label: 'DIMM C', partNumber: 'BID-C3', qty: 5, unitPrice: 40, warehouseId: 'WH-LA1', condition: 'Used' },
@@ -547,25 +554,7 @@ describe('PATCH /api/sell-orders/:id with bidParts', () => {
     expect(await eventsFor(a!.id)).toHaveLength(1);
   });
 
-  it('records only the confirmed condition of a part sold in two conditions', async () => {
-    const { token } = await loginAs(ALEX);
-    const id = await createOrder(token, COND_LINES);
-    // The sheet priced the New units at $100; the Used line keeps its $40.
-    const res = await api('PATCH', `/api/sell-orders/${id}`, {
-      token,
-      body: {
-        lines: [{ ...COND_LINES[0], unitPrice: 100 }, COND_LINES[1]],
-        bidParts: [{ partNumber: 'bid-c3', condition: ' new ' }],
-      },
-    });
-    expect(res.status).toBe(200);
-    const c = await refPrice('BID-C3');
-    // Not the qty-weighted blend (10·100 + 5·40)/15 = 80: the vendor never quoted that.
-    expect(c?.last_price).toBe(100);
-    expect(await eventsFor(c!.id)).toEqual([{ price: 100, source: `bid:${id}` }]);
-  });
-
-  it('a null condition covers every line of the part', async () => {
+  it('a confirmed part covers every condition of it', async () => {
     const { token } = await loginAs(ALEX);
     const id = await createOrder(token, COND_LINES);
     const res = await api('PATCH', `/api/sell-orders/${id}`, {

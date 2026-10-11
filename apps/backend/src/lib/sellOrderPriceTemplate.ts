@@ -38,8 +38,12 @@
 // re-locates columns by header text and matches rows by part number, so a
 // vendor who reorders, retypes or inserts still round-trips (see
 // services/sellOrderPriceImport.ts; safe here because no spec header matches
-// its part/price/condition heuristics: "chip#" and "note备注" contain none of
-// partnumber/price/单价/condition/成色 etc.).
+// its part/price heuristics: "chip#" and "note备注" contain none of
+// partnumber/price/单价 etc.).
+//
+// There is no Condition column (user-requested 2026-10-11: "remove the
+// condition from the sell order bid price"): a part is one bid row, its
+// conditions folded together, and the import prices every line of it.
 //
 // The RAM sections read the way the desk's own sheet does (user-requested
 // 2026-09-06, from a screenshot of that sheet): two merged label columns to
@@ -70,7 +74,6 @@ export type PriceTemplateProduct = {
   category: string;
   label: string;
   partNumber: string | null;
-  condition: string | null;
   qty: number;
   imageUrl: string | null;
   // Keyed by SPEC_COLS_BY_CATEGORY keys; absent/blank for manual lines.
@@ -412,18 +415,17 @@ function renderCategorySheet(
     item: 3 + g,
     specStart: 4 + g,
     part: 4 + g + specCols.length,
-    condition: 5 + g + specCols.length,
-    qty: 6 + g + specCols.length,
-    price: 7 + g + specCols.length,
-    total: 8 + g + specCols.length,
-    note: 9 + g + specCols.length,
+    qty: 5 + g + specCols.length,
+    price: 6 + g + specCols.length,
+    total: 7 + g + specCols.length,
+    note: 8 + g + specCols.length,
   };
 
   ws.columns = [
     ...groupCols.map((c) => ({ width: c.width })),
     { width: 5 }, { width: 40 }, { width: 34 },
     ...specCols.map((c) => ({ width: c.width })),
-    { width: 24 }, { width: 18 }, { width: 8 }, { width: 16 }, { width: 14 },
+    { width: 24 }, { width: 8 }, { width: 16 }, { width: 14 },
     { width: 28 },
   ];
 
@@ -452,7 +454,7 @@ function renderCategorySheet(
   const headers: [number, string][] = [
     [IDX.index, '#'], [IDX.image, 'Image URL'], [IDX.item, 'Item'],
     ...specCols.map((c, i): [number, string] => [IDX.specStart + i, c.header]),
-    [IDX.part, 'Part Number'], [IDX.condition, 'Condition'], [IDX.qty, 'Qty'],
+    [IDX.part, 'Part Number'], [IDX.qty, 'Qty'],
     [IDX.price, `Unit Price (${cur})`], [IDX.total, `Line Total (${cur})`],
     [IDX.note, 'Note / 备注'],
   ];
@@ -490,7 +492,6 @@ function renderCategorySheet(
       row.getCell(IDX.specStart + j).value = p.specs[c.key] ?? '';
     });
     row.getCell(IDX.part).value = p.partNumber ?? '';
-    row.getCell(IDX.condition).value = p.condition ?? '';
     const qtyCell = row.getCell(IDX.qty);
     qtyCell.value = p.qty;
     qtyCell.numFmt = '#,##0';
