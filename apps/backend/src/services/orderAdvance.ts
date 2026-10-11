@@ -16,6 +16,7 @@ import type { SqlLike } from './orderAudit';
 import type { SOLineSnap } from './sellOrderLineMatch';
 import { prunePackRows } from '../routes/sellOrderPack';
 import { committedSellStatuses, isSellableLineStatus, openSellStatuses } from '../lib/sellCommitment';
+import { poAiReviewSetting, queuePoAiReviewTx, supersedePoAiReviewsTx } from './poAiReview';
 
 // Canonical lifecycle ordering. The workflow_stages table was removed; this
 // map's key order (draft → in_transit → reviewing → ready_to_pay → done) is
@@ -344,6 +345,7 @@ export async function revertOrderToDraftTx(
 
   await tx`UPDATE orders SET lifecycle = 'draft' WHERE id = ${id}`;
   await cascadeLineStatusesTx(tx, id, actor.id, LINE_STATUS_FOR_LIFECYCLE.draft);
+  await supersedePoAiReviewsTx(tx, id);
   // The forward half of this transition notifies; so must the reverse, or a
   // manager mid-review is never told the order left their queue. The review
   // dialog alone only fires if they happen to reopen that exact order.
@@ -655,6 +657,12 @@ export async function advanceOrderTx(
   }
   if (newLineStatus) {
     await cascadeLineStatusesTx(tx, id, actor.id, newLineStatus, heldBack);
+  }
+  // Queued in this transaction, so the move and its review commit together.
+  if (nextStageId === 'reviewing') {
+    if ((await poAiReviewSetting(tx)).enabled) await queuePoAiReviewTx(tx, id, 'stage', actor.id);
+  } else if (stages.indexOf(nextStageId) < stages.indexOf('reviewing')) {
+    await supersedePoAiReviewsTx(tx, id);
   }
   // PRD §10: managers want to see when a purchaser finalises an order. Only
   // the move into In Transit fires it, so later manager-driven moves don't

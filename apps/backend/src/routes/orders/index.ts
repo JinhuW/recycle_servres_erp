@@ -11,6 +11,7 @@ import createRoutes from './create';
 import patchRoutes from './patch';
 import evidenceRoutes from './evidence';
 import checksRoutes from './checks';
+import aiReviewRoutes from './aiReview';
 
 const orders = new Hono<OrdersEnv>();
 orders.route('/', listRoutes);
@@ -21,5 +22,6 @@ orders.route('/', createRoutes);
 orders.route('/', patchRoutes);
 orders.route('/', evidenceRoutes);
 orders.route('/', checksRoutes);
+orders.route('/', aiReviewRoutes);
 
 export default orders;

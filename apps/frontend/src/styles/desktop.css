@@ -4358,3 +4358,16 @@ body:has(.pk-page) .tweaks-fab, body:has(.pk-page) .tweaks-pop { display: none; 
 .rp-scan.is-conflict { background: var(--warn-soft); border-color: var(--warn); color: var(--warn-strong); }
 .rp-scan svg { flex-shrink: 0; margin-top: 2px; }
 .rp-scan-body { display: grid; gap: 6px; justify-items: start; }
+
+/* Review mode: the AI review card. */
+.bc-ai .card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.bc-ai-body { display: grid; gap: 10px; }
+.bc-ai-body .neg { color: var(--neg); }
+.bc-ai-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.bc-ai-item { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: start; font-size: 13px; }
+.bc-ai-item.done { opacity: .6; }
+.bc-ai-item > .chip.dot { padding: 0; background: none; margin-top: 5px; }
+.bc-ai-text { min-width: 0; overflow-wrap: anywhere; }
+.bc-ai-actions { display: flex; gap: 4px; align-items: center; }
+.bc-ai-others { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.bc-ai-jump { cursor: pointer; border: 0; }

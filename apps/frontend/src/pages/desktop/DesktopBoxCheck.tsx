@@ -8,6 +8,7 @@ import { useManagerTakeover } from '../../components/ManagerTakeoverDialog';
 import { PaymentMismatchBanner, usePaymentMismatchConfirm } from '../../components/PaymentMismatch';
 import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
 import { api, rawFetch } from '../../lib/api';
+import { applyPatch, openIssuesByLine, useAiReview, type AiFinding } from '../../lib/aiReview';
 import {
   checkBody, countOf, emptyCheck, entryAnswerFor, filterScan, isAbsentChecked, isShortChecked, lineState, matchScan, nextOpenAfter,
   orderLines, partsNamed, readStageMoved, stashEntryAnswer, tally,
@@ -27,6 +28,7 @@ import { poStageName } from '../../lib/orderPresentation';
 import { lineShippedOn } from '../../lib/poPermissions';
 import { statusTone } from '../../lib/status';
 import type { Order, OrderLine } from '../../lib/types';
+import { AiReviewCard } from './AiReviewCard';
 import { LineDrawer } from './submit/LineDrawer';
 import { editLineToPatch, orderLineToEditLine, type EditLine } from './submit/editLine';
 import { brandConfirmPending } from './submit/line';
@@ -78,6 +80,8 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const lineById = useMemo(() => new Map(lines.map(l => [l.id, l])), [lines]);
+  const ai = useAiReview(order.id);
+  const aiIssues = useMemo(() => openIssuesByLine(ai.data?.findings ?? []), [ai.data]);
   const lineByIdRef = useRef(lineById);
   lineByIdRef.current = lineById;
 
@@ -442,6 +446,17 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     </ul>
   );
 
+  // The line PATCH any edit on this page sends, then the answer recorded; the
+  // reload remounts the page on the edited line.
+  const applyFinding = async (f: AiFinding) => {
+    const l = lineById.get(f.lineId!);
+    if (!l) return;
+    await api.patch(`/api/orders/${order.id}`, { lines: [applyPatch(f)], expectStage: order.lifecycle });
+    await ai.resolve(f.id, 'applied');
+    showToast(t('aiRevAppliedToast', { n: lineNo(l) }), 'success');
+    await onReload();
+  };
+
   const row = (l: OrderLine) => {
     const c = checkOf(l.id);
     const state = lineState(l, c);
@@ -487,6 +502,11 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
             {held && (
               <span className="chip info" title={t('lineShippedReadOnly', { so: shippedOn.join(', ') })}>
                 <Icon name="lock" size={10} /> {t('lineShippedChip', { so: shippedOn.join(', ') })}
+              </span>
+            )}
+            {aiIssues.has(l.id) && (
+              <span className="chip warn" title={t('aiRevLineChipTip', { n: aiIssues.get(l.id)! })}>
+                <Icon name="sparkles" size={10} /> {t('aiRevLineChip', { n: aiIssues.get(l.id)! })}
               </span>
             )}
           </td>
@@ -722,6 +742,18 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
               </div>
             </div>
           )}
+
+          <AiReviewCard
+            data={ai.data}
+            selectedId={selected?.id ?? null}
+            lineNo={id => { const l = lineById.get(id); return l ? lineNo(l) : null; }}
+            onSelect={setSelectedId}
+            onRun={async () => { await ai.run(); showToast(t('aiRevQueuedToast'), 'success'); }}
+            onApply={applyFinding}
+            onResolve={ai.resolve}
+            isHeld={id => { const l = lineById.get(id); return !!l && lineShippedOn(l).length > 0; }}
+            ready={ready}
+          />
 
           <div className="card bc-finish">
             <div className="card-head"><span className="card-title">{t('bcFinishTitle')}</span></div>

@@ -18,6 +18,7 @@ import { startWebSubmissionPurgeLoop } from './lib/webSubmissionPurge';
 import { attachVncBridge, closeVncBridges } from './vncBridge';
 import { startMailInboxLoop } from './mail/inbox';
 import { freezeLegacySellNumbers } from './services/sellOrderNumbers';
+import { startPoAiReviewLoop } from './services/poAiReview';
 
 const env = buildEnv();
 const port = Number(process.env.PORT ?? 8787);
@@ -34,6 +35,7 @@ const loops = [
   startBankSyncLoop(env),
   startWebSubmissionPurgeLoop(getDb(env), env),
   startMailInboxLoop(getDb(env), env),
+  startPoAiReviewLoop(getDb(env), env),
 ];
 
 const server = serve({ fetch: (request) => app.fetch(request, env), port }, (info) => {

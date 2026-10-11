@@ -41,7 +41,10 @@ export type EventKind =
   | 'unarchived'
   // A box check found problems and sent them to the purchaser. The stage
   // does not move; the flags and extras ride in the detail.
-  | 'box_check_flagged';
+  | 'box_check_flagged'
+  // The AI review finished; counts by severity ride in the detail, the
+  // findings themselves in po_ai_findings.
+  | 'ai_review_done';
 
 // Order-level fields whose mutation we surface as `meta_changed`. These are
 // exactly the fields PATCH /api/orders/:id may touch on the orders row.

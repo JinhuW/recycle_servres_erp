@@ -497,6 +497,40 @@ on to Sold once every line has sold (v1.164.0).
     not manager. The page and button are hidden from a manager previewing as
     purchaser, and the route bounces them without leaving a Back entry
     (v1.189.1).
+- **AI review checks every product of a PO in Review mode** (v1.245.0, desktop,
+  managers). Off by default; **Settings → General → AI review of purchase
+  orders** turns it on and sets a per-PO cost cap, the OpenRouter model, and
+  whether part numbers may be looked up on the web.
+  - Moving a PO to Reviewing queues a review in the same transaction. A
+    background loop runs it within seconds. Moving the PO back to Draft or In
+    Transit cancels a review that hasn't run yet. **Re-run** in the card runs
+    one on demand, even with the automatic review off.
+  - Each line is checked against four sources:
+    - its **part number**, decoded by the makers' schemes;
+    - its **label read**: the scan's own extraction, or the photo read again
+      when there was no scan or the part number disputes the line;
+    - the **web**, only for a RAM part number no scheme decodes, or a drive
+      with no label read, and cached per part number;
+    - its **market value**.
+  - The part number and the label agreeing against the line is an error. One
+    source alone is a warning. A blank field gets a suggestion. When the label
+    backs the line against its part number, the part number is flagged as a
+    possible misread (HMAA/HMA8, PZ/PDZ, O/0) instead of the spec.
+  - DDR3 speeds stored as the PC3 rating and kit part numbers' per-module
+    capacity are not flagged.
+  - The **AI review** card in Review mode shows the run's state and the
+    selected product's findings, with a jump to other flagged products. Rows
+    with open findings carry an *AI n* chip.
+  - **Apply** writes the suggestion through the ordinary line edit, so it is
+    audited as `line_edited`. **Dismiss** hides the finding, and a re-run keeps
+    it dismissed. Nothing changes a line without a manager.
+  - A finding whose line has been edited since the review shows as changed
+    and can't be applied.
+  - When a review finishes, the PO's manager is notified (all managers if the
+    PO has none) and an `ai_review_done` event joins the PO's history. Each
+    run records its cost.
+  - The manual sweep it automates is written up in
+    `docs/po-spec-audit-runbook.md`.
 - **A company-paid PO names the payment that funded it before it leaves
   Draft** (v1.115.0) — the transaction ID is required, and the advance is
   refused without it for every actor, a manager stage-jump and carrier movement
