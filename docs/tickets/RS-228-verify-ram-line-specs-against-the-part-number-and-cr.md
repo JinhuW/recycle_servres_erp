@@ -2,13 +2,13 @@
 id: RS-228
 title: Verify RAM line specs against the part number, and cross-check label scans
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-11
 reporter: jinhu
 branch: feat/ram-pn-decode
-pr:
-version:
+pr: "#603"
+version: 1.243.0
 related: []
 ---
 
