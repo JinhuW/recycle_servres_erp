@@ -2,13 +2,13 @@
 id: RS-230
 title: AI reviewer checks every PO on move to Reviewing
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-11
 reporter: jinhu
 branch: feat/po-ai-review
-pr:
-version:
+pr: "#607"
+version: 1.245.0
 related: []
 ---
 
