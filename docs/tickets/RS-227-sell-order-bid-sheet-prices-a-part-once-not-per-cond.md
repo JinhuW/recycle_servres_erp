@@ -2,13 +2,13 @@
 id: RS-227
 title: Sell-order bid sheet prices a part once, not per condition
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-10-11
 reporter: jinhu
 branch: feat/bid-price-no-condition
-pr:
-version:
+pr: 601
+version: 1.242.0
 related: []
 ---
 
