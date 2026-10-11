@@ -1883,6 +1883,7 @@ const zh: Record<string, string> = {
   iptSelectAllSellable: '全选可售批次',
   iptSpecsVary: '不同批次规格不同',
   iptMixed: '多种',
+  iptPartNumbersN: '{n} 个料号',
   iptQtyBreakdown: '库存 {stock} · 在途 {transit}',
   iptReviewingN: '审核中 {n}',
   iptLotPoSummary: '{lots} 批 · {pos} 个采购单',

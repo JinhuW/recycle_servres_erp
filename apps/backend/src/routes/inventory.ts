@@ -18,7 +18,7 @@ import {
   CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields, categoryTabSheets,
   sortSheetRows, type ExportCategory,
 } from '../lib/categoryColumns';
-import { UNTYPED_ITEM, chipMarkingCanon, normSellPrice, SPEC_FIELD_TO_DB_COL, specConflicts } from '@recycle-erp/shared';
+import { UNTYPED_ITEM, chipMarkingCanon, normSellPrice, ramFamily, ramFamilyLabel, SPEC_FIELD_TO_DB_COL, specConflicts } from '@recycle-erp/shared';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { diff, writeOrderEvent } from '../services/orderAudit';
 import { settleSoldTx } from '../services/orderSold';
@@ -396,8 +396,8 @@ inventory.on(['GET', 'POST'], '/export', async (c) => {
   const { ids } = sel;
   const whereFrag = ids.length ? sql`l.id IN ${sql(ids)}` : inventoryWhereFrag(c, sql, u);
 
-  // Grouped mode collapses lines by canonical part number into one row each,
-  // matching the desktop grouped view. Same filters/cap-drop as the flat path.
+  // Grouped mode collapses lines by canonical part number (RAM: module family)
+  // into one row each, matching the desktop grouped view. Same filters/cap-drop as the flat path.
   if (c.req.query('view') === 'grouped') {
     // Object.hasOwn: the category comes from the query string, so a value
     // like 'constructor' must miss rather than hit a prototype key. Only the
@@ -422,8 +422,7 @@ inventory.on(['GET', 'POST'], '/export', async (c) => {
     const groups = new Map<string, Record<string, unknown>[]>();
     const order: string[] = [];
     for (const r of rows) {
-      const canon = typeof r.canon === 'string' ? r.canon : '';
-      const key = canon.length > 0 ? canon : `line:${r.id}`;
+      const key = productGroupKey(r as GroupKeyRow);
       const b = groups.get(key);
       if (b) b.push(r); else { groups.set(key, [r]); order.push(key); }
     }
@@ -451,13 +450,14 @@ inventory.on(['GET', 'POST'], '/export', async (c) => {
         if (repPn === null && l.part_number) repPn = String(l.part_number);
         if (repChip === null && l.chip_number) repChip = String(l.chip_number);
       }
+      const part = repPn ? groupPartLabel(repPn, lots as GroupKeyRow[]) : '';
       // Lines in a group share their attributes by construction (same canonical
-      // part number), so the head row is representative — except for part/chip,
+      // part number or RAM module family), so the head row is representative — except for part/chip,
       // where the head may be the row that left them blank, and condition,
       // which legitimately varies across lots in one group.
       return {
         ...lineSpecFields(head),
-        part: repPn ?? '',
+        part,
         chip: repChip ?? '',
         condition: [...conds].join(', '),
         category: head.category ?? '',
@@ -870,10 +870,40 @@ inventory.get('/transfer-orders', async (c) => {
   });
 });
 
+type GroupKeyRow = { id: unknown; category: unknown; part_number: unknown; canon: unknown };
+
+// RAM groups by module family, so packaging suffixes (-CTD, -CTD7Q, -CTDQ)
+// stop splitting one stick into several products; everything else, and RAM
+// no scheme reads, by canonical part number.
+function productGroupKey(r: GroupKeyRow): string {
+  if (r.category === 'RAM' && typeof r.part_number === 'string') {
+    const fam = ramFamily(r.part_number);
+    if (fam) return fam.key;
+  }
+  return typeof r.canon === 'string' && r.canon.length > 0 ? r.canon : `line:${r.id}`;
+}
+
+function groupPartNumbers(lots: GroupKeyRow[]): string[] {
+  const seen = new Map<string, string>();
+  for (const l of lots) {
+    if (typeof l.part_number !== 'string' || typeof l.canon !== 'string' || !l.canon) continue;
+    if (!seen.has(l.canon)) seen.set(l.canon, l.part_number);
+  }
+  return [...seen.values()];
+}
+
+/** One part number as written, or the family's `M393A2K43BB1-CTD*` when lots differ. */
+function groupPartLabel(repPn: string, lots: GroupKeyRow[]): string {
+  if (groupPartNumbers(lots).length < 2) return repPn;
+  const fam = ramFamily(repPn);
+  return fam ? ramFamilyLabel(repPn, fam) : repPn;
+}
+
 // Product-grouped inventory (PRD §5.10 follow-up). Same scoping/filters/cost-
 // stripping as the flat list, but collapses lines that share a canonical part
-// number into one product row, with each PO/lot embedded. Lines with no part
-// number are NOT grouped — each is its own singleton (key `line:<id>`).
+// number — or, for RAM, a module family — into one product row, with each
+// PO/lot embedded. Lines with no part number are NOT grouped — each is its
+// own singleton (key `line:<id>`).
 //
 // Grouping is done in JS over the scoped line set (ordered newest-first).
 // RAW_CAP bounds memory; GROUP_CAP bounds the response — matches the flat
@@ -961,7 +991,7 @@ inventory.get('/products', async (c) => {
   const groups = new Map<string, Row[]>();
   const order: string[] = [];
   for (const r of rows) {
-    const key = r.canon && r.canon.length > 0 ? r.canon : `line:${r.id}`;
+    const key = productGroupKey(r);
     const bucket = groups.get(key);
     if (bucket) bucket.push(r);
     else { groups.set(key, [r]); order.push(key); }
@@ -1071,7 +1101,8 @@ inventory.get('/products', async (c) => {
 
     const base = {
       key,
-      part_number: repPn,
+      part_number: repPn ? groupPartLabel(repPn, lots) : repPn,
+      part_numbers: groupPartNumbers(lots),
       category: head.category, brand: head.brand, capacity: head.capacity,
       generation: head.generation, type: head.type, classification: head.classification,
       rank: head.rank, speed: head.speed, interface: head.interface,
@@ -1090,7 +1121,7 @@ inventory.get('/products', async (c) => {
         id: l.id, order_id: l.order_id, po_line_no: l.po_line_no, created_at: l.created_at,
         user_name: l.user_name, user_initials: l.user_initials,
         sell_price: l.sell_price, condition: l.condition, health: l.health,
-        serial_number: l.serial_number,
+        serial_number: l.serial_number, part_number: l.part_number,
         warehouse_id: l.warehouse_id, warehouse_short: l.warehouse_short,
         qty: l.qty, status: l.status, image_url: l.image_url,
         ...(isManager ? { unit_cost: l.unit_cost } : {}),

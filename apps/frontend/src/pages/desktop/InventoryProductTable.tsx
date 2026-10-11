@@ -26,11 +26,16 @@ export type ProductLot = {
   status: string;
   image_url: string | null;
   serial_number: string | null;
+  // Absent from a backend older than this bundle.
+  part_number?: string | null;
 };
 
 export type ProductGroup = {
   key: string;
+  // A RAM family's `M393A2K43BB1-CTD*` when its lots carry several part numbers.
   part_number: string | null;
+  // Absent from a backend older than this bundle.
+  part_numbers?: string[];
   category: string;
   brand: string | null;
   capacity: string | null;
@@ -170,6 +175,8 @@ export function InventoryProductTable({
       <tbody>
         {groups.map((g) => {
           const isOpen = open.has(g.key);
+          const pns = g.part_numbers ?? [];
+          const manyPns = pns.length > 1;
           const sellableLots = g.lines.filter((l) => SELLABLE.has(l.status));
           const allSelected = sellableLots.length > 0 && sellableLots.every((l) => selected.has(l.id));
           return (
@@ -216,8 +223,13 @@ export function InventoryProductTable({
                   </div>
                 </td>
                 {cols.partNumber && (
-                  <td className="mono muted" style={{ fontSize: 11.5 }}>
+                  <td className="mono muted" style={{ fontSize: 11.5 }} title={manyPns ? pns.join('\n') : undefined}>
                     {g.part_number ?? '—'}
+                    {manyPns && (
+                      <div style={{ fontSize: 10.5, color: 'var(--fg-subtle)', marginTop: 2 }}>
+                        {t('iptPartNumbersN', { n: pns.length })}
+                      </div>
+                    )}
                   </td>
                 )}
                 {cols.qty && (
@@ -267,6 +279,7 @@ export function InventoryProductTable({
                         <tr>
                           <th style={{ width: 36 }} />
                           <th>{t('iptPO')}</th>
+                          {manyPns && <th>{t('partNumber')}</th>}
                           <th>{t('date')}</th>
                           <th>{t('iptBy')}</th>
                           {showCost && <th className="num">{t('eoCost')}</th>}
@@ -328,6 +341,9 @@ export function InventoryProductTable({
                                   </div>
                                 )}
                               </td>
+                              {manyPns && (
+                                <td className="mono muted" style={{ fontSize: 11.5 }}>{l.part_number ?? '—'}</td>
+                              )}
                               <td className="muted">{fmtDateShort(l.created_at, locale)}</td>
                               <td>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

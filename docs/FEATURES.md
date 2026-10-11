@@ -957,6 +957,15 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
 - Flat and grouped views. Grouped is what goes outward to vendors and buyers,
   so it carries no cost, sell price or submitter (v1.51.0); flat keeps them for
   internal use.
+- **The grouped view groups RAM by module family** (v1.244.0). Part numbers
+  that differ only in the maker's trailing packaging or marking code
+  (`M393A2K43BB1-CTD` / `-CTD7Q` / `-CTDQ`, Micron `-2G1A2II` / `-2G1A2KJ`)
+  are one product, shown as `M393A2K43BB1-CTD*`. Hovering lists the member
+  part numbers, and the lots table adds a Part # column. Module form, dies,
+  organisation and speed still separate products, so RDIMM `M393…` and ECC
+  UDIMM `M391…` are two. Samsung, SK Hynix DDR3/4 and Micron are read; other
+  part numbers group by exact canonical part number as before. The export
+  groups the same way.
 - **A product's lots table names each lot by PO and line** — `PO-1343 #2`, the
   number the PO page shows for that line, with the PO id still the link
   (v1.232.0).
