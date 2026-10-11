@@ -100,8 +100,9 @@ portal was removed in v1.191.0; no bid had ever been placed through it.
 ## Purchase orders
 
 The core object. A PO is a purchase from a vendor, built line by line, that
-moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done, and
-on to Sold once every line has sold (v1.164.0).
+moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done. Sold
+is not a stage but a flag beside one, set once every line has sold
+(v1.246.0).
 
 - **Every product on a PO has a `#` that never changes** (v1.234.0). It is
   given when the product is put on the PO — a new PO numbers its products
@@ -317,24 +318,36 @@ on to Sold once every line has sold (v1.164.0).
   page's line drawer while the PO is at Ready to Pay, so the commission
   projection can be corrected during payment review; Save stays on the PO
   (v1.191.1).
-- **Sold is Done with every line sold** (v1.164.0). Nobody picks it: a PO
-  lands on it when a manager marks it Done and every line already sits at the
-  `Sold` line status, or when a sell order reaching Done consumes the last
-  unsold line of a PO already at Done. A fully-sold PO still at Ready to Pay
-  waits for the commission to be paid. Managers see it as its own chip in the
-  PO list (hidden with Done by default) and on the PO page, where it sits on
-  Done's step under the Sold label with a "Sold out" panel; purchasers — and a
-  manager previewing as one — see the same PO as Done, in the list, the
-  filters, the detail and the activity log. A manager can reopen it to
-  Reviewing or Ready to Pay like Done; the way back to Done re-settles it.
-  The inventory editor refuses to walk a line off Sold while its PO is sold.
-  Existing Done POs that had already sold out were backfilled with an
-  activity row.
-  **The Sold panel names the sell orders that sold it** (v1.174.0): each Done
-  sell order naming one of the PO's lines is shown with its customer and
-  units, and on desktop it links to the sell order. The Done panel shows the
-  same list once part of the PO has sold, and the phone lists the ids beside
-  the sold count. Managers only.
+- **Sold is a flag beside the stage, not a stage** (v1.246.0). A PO at In
+  Transit, Reviewing, Ready to Pay or Done whose every line with units is at
+  the `Sold` line status is sold; a Draft never is. Nobody sets it: it is
+  read off the lines each time (`soldFlagSql` in `services/orderSold.ts`), so
+  a line added, transferred, re-counted or walked off Sold changes it with
+  nothing else to do, and the stage never moves because of a sale. A PO that
+  sells out at Ready to Pay is "Ready to Pay · Sold" and still waits for the
+  commission; reaching Done it reads "Done · Sold".
+  - **Where it shows.** A Sold badge beside the stage pill on the desktop and
+    phone PO lists and beside *Order status* on both PO pages. The desktop
+    list's stage chips count every PO under its real stage, and a separate
+    Sold chip narrows whatever stage is picked (Done + Sold, Ready to Pay +
+    Sold); the phone has a Sold chip after the stages. `GET /api/orders`
+    takes `status=Sold` and `excludeStatus=Sold` as the flag; `status=Done`
+    means the stage, sold or not. The spreadsheet's Status cell reads
+    `Done · Sold`.
+  - **Managers only.** `sold` is sent to managers alone; everyone else,
+    a manager previewing as a purchaser included, gets no key and an empty
+    Sold filter.
+  - **Before v1.246.0** Sold was a lifecycle after Done (v1.164.0): the
+    desktop chip rail split Done in two and the inventory editor refused to
+    walk a line off Sold. Migration 0173 moved those POs back to Done; their
+    old `Done → Sold` activity rows are no longer shown, and a reopen from
+    Sold reads as one from Done.
+  **The Sold-out panel names the sell orders that sold it** (v1.174.0): each
+  Done sell order naming one of the PO's lines is shown with its customer and
+  units, and on desktop it links to the sell order. On the desktop PO page it
+  sits above the stage panel at whatever stage the PO is sold (v1.246.0); the
+  Done panel shows the same list while the PO is only partly sold, and the
+  phone lists the ids beside the sold count. Managers only.
 - **Any manager takes a PO into Reviewing and Ready to Pay, whatever its
   warehouse** (v1.168.0). The v1.132.0 rule that reserved those two moves for
   the manager linked to the PO's warehouse is gone, on both shells and in the
@@ -360,8 +373,7 @@ on to Sold once every line has sold (v1.164.0).
     Each move sends the manager the page showed. If another manager has taken
     the PO since, the server refuses the move, the page asks about the
     manager it named, and then moves.
-  - **Where it doesn't ask.** The hand-off (Draft → In Transit) and the
-    automatic Done → Sold settle never ask.
+  - **Where it doesn't ask.** The hand-off (Draft → In Transit) never asks.
   - **It sticks.** The manager stays through a send-back to Draft, so a
     re-submission returns to the same manager. It changes only through a
     takeover; there is no picker.
@@ -712,7 +724,7 @@ on to Sold once every line has sold (v1.164.0).
     - Self-paid POs: their bank money is the purchaser's reimbursement plus
       commission.
     - POs with nothing linked.
-    - Moves between Ready to Pay, Done and Sold.
+    - Moves between Ready to Pay and Done.
     - The phone.
   - **Who sees it.** Managers only. `GET /api/orders/:id` now carries
     `linkedPaid` for them, and leaves the key out for everyone else, a
@@ -783,7 +795,7 @@ on to Sold once every line has sold (v1.164.0).
   inventory editor keeps 1 as its floor. For a purchaser past Draft, setting
   0 is a qty edit like any other and sends the PO back to Draft. A DDR5 line
   at 0 needs no serials. A 0-qty line costs nothing, isn't stock, and doesn't
-  keep a Done PO from settling to Sold.
+  keep a PO from reading Sold.
 - Line specs are per-category: RAM carries Part #, Chip #, Brand, Capacity,
   Generation, Type, Class, Rank and Speed; SSD/HDD carry Interface, Form
   factor, Health % and RPM; Other carries a free item type (v1.47.0).
@@ -983,8 +995,8 @@ log and `orders.supplier_id`.
 
 There is **no inventory table**. Stock is `order_lines` whose PO is Done or In
 Transit. A line counted down to 0 stays on its PO but is never stock: the list,
-the export, the grouped view and the analysis page leave it out (v1.213.0). A PO whose every line has sold reads
-Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an archived PO sit at the
+the export, the grouped view and the analysis page leave it out (v1.213.0). A PO whose every line has sold carries
+the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Lines of an archived PO sit at the
 `Archived` status and are out of every stock view until the PO is unarchived
 (v1.137.0); like Sold, they are reachable through an explicit status filter.
 
@@ -1042,7 +1054,7 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
 - Spec fields on an inventory line are editable in place on desktop.
   **The inventory editor saves whatever stage the PO is at** (v1.192.1):
   sell price, status, condition, part #, health, RPM and specs land on a
-  Ready to Pay, Done or Sold PO too. Only qty and unit cost freeze from
+  Ready to Pay or Done PO too, sold or not. Only qty and unit cost freeze from
   Ready to Pay on. They show dimmed, with a line linking the PO and saying
   to move it back to Reviewing. A save sends only the fields that changed.
 - **Committed sell orders reserve the units they name**, not the whole lot.
@@ -1817,7 +1829,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   on a toggle, by the commission those POs earned (`?lb=cost|commission` on
   `GET /api/dashboard`, cost by default; v1.141.0, ranked by projected profit
   from v1.0.1). Both lenses count a PO from Ready to Pay on, when its
-  commission becomes owed (v1.132.0), Sold included (v1.164.0). A purchaser sees every peer's rank but
+  commission becomes owed (v1.132.0), sold or not. A purchaser sees every peer's rank but
   only their own money, so the ranking is computed server-side.
 
 ## Oversight extras

@@ -910,7 +910,7 @@ patchRoutes.patch('/:id', async (c) => {
     });
   } catch (e) {
     if (e instanceof OrderRefusal) return refusalResponse(c, u, e.refusal);
-    if (e instanceof StageMoved) return c.json(stageMovedBody(u, e.lifecycle), 409);
+    if (e instanceof StageMoved) return c.json(stageMovedBody(e.lifecycle), 409);
     // A line value outside a column's CHECK (health 0–100, rpm > 0, qty >= 0).
     if ((e as { code?: string }).code === '23514') {
       return c.json({ error: 'A product value is out of range' }, 400);

@@ -5,7 +5,7 @@ import { getDb } from '../../db';
 import { deleteAttachments } from '../../r2';
 import { diff, writeOrderEvent, wasEverSubmitted } from '../../services/orderAudit';
 import { effectiveRole } from '../../lib/role';
-import { advanceOrderTx, archiveOrderLinesTx, unarchiveOrderLinesTx, LIFECYCLE_LABEL, visibleLifecycle, type ArchiveSellOrderConflict } from '../../services/orderAdvance';
+import { advanceOrderTx, archiveOrderLinesTx, unarchiveOrderLinesTx, LIFECYCLE_LABEL, type ArchiveSellOrderConflict } from '../../services/orderAdvance';
 import { companyPayTxnUnknown } from '../../services/orderTxnRule';
 import { handoffOrderTx, HandoffRefused, type HandoffInput } from '../../services/orderHandoff';
 import { pickBankProviders } from '../../banktx';
@@ -359,17 +359,13 @@ function advanceRefusedResponse(
     case 'badStage': return c.json({ error: outcome.msg }, 400);
     case 'archived': return c.json({ error: 'Order is archived — unarchive it first' }, 409);
     case 'finalStage': return c.json({ error: 'Already at the final stage' }, 409);
-    case 'soldIsAutomatic':
-      return c.json({ error: 'Sold is not a stage you can choose — an order becomes Sold on its own once it is Done and every product has sold.' }, 409);
-    case 'alreadySold':
-      return c.json({ error: 'This order is Done and every product has sold. To reopen it, move it back to Reviewing or Ready to Pay.' }, 409);
     case 'sameStage':
       return c.json({
         error: `Order is already ${LIFECYCLE_LABEL[outcome.lifecycle] ?? outcome.lifecycle} — reload to see where it stands.`,
         lifecycle: outcome.lifecycle,
       }, 409);
     case 'stageMoved':
-      return c.json(stageMovedBody(c.var.user, outcome.lifecycle), 409);
+      return c.json(stageMovedBody(outcome.lifecycle), 409);
     case 'managerChanged':
       return c.json({
         error: outcome.manager
@@ -567,7 +563,7 @@ lifecycleRoutes.post('/:id/handoff', async (c) => {
       case 'forbidden': return c.json({ error: 'Forbidden' }, 403);
       case 'archived': return c.json({ error: 'Order is archived — unarchive it first' }, 409);
       case 'notDraft':
-        return c.json({ error: `Order is already ${LIFECYCLE_LABEL[visibleLifecycle(r.lifecycle, effectiveRole(u))] ?? r.lifecycle}` }, 409);
+        return c.json({ error: `Order is already ${LIFECYCLE_LABEL[r.lifecycle] ?? r.lifecycle}` }, 409);
       case 'trackingTaken':
         return c.json({ error: trackingTakenMsg(r.otherOrderId), otherOrderId: r.otherOrderId }, 409);
       case 'trackingTakenStandalone': return c.json({ error: TRACKING_TAKEN_STANDALONE_MSG }, 409);

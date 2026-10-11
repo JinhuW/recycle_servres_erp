@@ -128,6 +128,9 @@ export type OrderSummary = {
   payment: 'company' | 'self';
   notes: string | null;
   lifecycle: string;
+  // Every line with units has sold — a flag beside the stage, not a stage, so
+  // a Ready to Pay or Done order can carry it. Managers only; absent otherwise.
+  sold?: boolean;
   archivedAt: string | null;
   createdAt: string;
   // The goods cost — a negotiated override of the line subtotal, or null for

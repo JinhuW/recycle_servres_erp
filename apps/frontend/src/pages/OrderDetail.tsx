@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { Icon } from '../components/Icon';
 import { PhHeader } from '../components/PhHeader';
+import { SoldBadge } from '../components/SoldBadge';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { OrderActivityLog } from '../components/OrderActivityLog';
 import { PhFold, type PhFoldMark } from '../components/PhFold';
@@ -47,7 +48,7 @@ import { PaymentFields } from '../components/PaymentFields';
 import { CommissionPaymentFields, type CommissionShots } from '../components/CommissionPaymentFields';
 import { useCommissionPaidBy } from '../lib/useCommissionPaidBy';
 import {
-  ORDER_STATUSES, statusTone, spineStatus,
+  ORDER_STATUSES, statusTone,
 } from '../lib/status';
 import { addableCategories, categoryTone } from '../lib/lookups';
 import type { Category, Order, Warehouse } from '../lib/types';
@@ -495,7 +496,7 @@ export function OrderDetail({
     if (isArchived) return null;
     if (effectiveStatus === 'Draft') return 'In Transit';
     if (isPurchaser) return null;
-    const i = ORDER_STATUSES.indexOf(spineStatus(effectiveStatus) as typeof ORDER_STATUSES[number]);
+    const i = ORDER_STATUSES.indexOf(effectiveStatus as typeof ORDER_STATUSES[number]);
     return i >= 0 ? ORDER_STATUSES[i + 1] ?? null : null;
   })();
   const canAdvance = !!nextStatus && !advancing && !saving;
@@ -797,7 +798,7 @@ export function OrderDetail({
   // dock too, and a single docked row cannot wrap to hold it.
   const cats = addableCategories();
 
-  const currentIdx = ORDER_STATUSES.indexOf(spineStatus(effectiveStatus) as typeof ORDER_STATUSES[number]);
+  const currentIdx = ORDER_STATUSES.indexOf(effectiveStatus as typeof ORDER_STATUSES[number]);
   // The furthest dot this user could reach: purchasers stop at In Transit.
   const canReachIdx = isPurchaser
     ? (effectiveStatus === 'Draft' ? ORDER_STATUSES.indexOf('In Transit') : currentIdx)
@@ -914,6 +915,7 @@ export function OrderDetail({
         )}
         <div className="ph-section-h" style={{ paddingTop: 10 }}>
           <span>{t('orderStatus')}</span>
+          <SoldBadge sold={order.sold} style={{ textTransform: 'none', letterSpacing: 0 }} />
         </div>
 
         <div className="ph-card" style={{ padding: '14px 16px' }}>
@@ -921,9 +923,7 @@ export function OrderDetail({
             {ORDER_STATUSES.map((s, i) => {
               const reached = currentIdx >= 0 && i <= currentIdx;
               const active = i === currentIdx;
-              // A sold order sits on Done's step under its own name.
-              const label = active && effectiveStatus === 'Sold' ? 'Sold' : s;
-              const tone = statusTone(label);
+              const tone = statusTone(s);
               const locked = i > canReachIdx;
               const dotColor = active
                 ? `var(--${tone === 'warn' ? 'warn' : tone === 'pos' ? 'pos' : tone === 'info' ? 'info-strong, var(--info)' : tone === 'accent' ? 'accent' : tone === 'cool' ? 'cool' : 'fg'})`
@@ -963,7 +963,7 @@ export function OrderDetail({
                     fontSize: 10.5, fontWeight: active ? 600 : 500,
                     color: active ? 'var(--fg)' : 'var(--fg-subtle)',
                     textAlign: 'center', lineHeight: 1.1,
-                  }}>{label}</span>
+                  }}>{s}</span>
                 </div>
               );
             })}
@@ -994,7 +994,6 @@ export function OrderDetail({
                         case 'handoffLabel':
                           return <div key={i}>{t('acHandoffLabel')} <span className="mono" style={{ color: 'var(--fg-subtle)' }}>· {[f.carrier, f.trackingNumber].filter(Boolean).join(' ')}</span></div>;
                         case 'advanced':
-                          if (f.to === 'sold') return <div key={i}>{t('eoLookbackSoldOut', { when: fmtDate(f.when, locale) })}</div>;
                           return <div key={i}>{t('eoLookbackAdvanced', { who: f.who ?? t('eoSomeone'), when: fmtDate(f.when, locale), to: LIFECYCLE_LABEL[f.to] ?? f.to })}</div>;
                         case 'doneNote':
                           return <div key={i} style={{ whiteSpace: 'pre-wrap' }}>{f.note}</div>;
@@ -1092,8 +1091,7 @@ export function OrderDetail({
               border: '1px solid var(--border)',
             }}>
               <Icon name="lock" size={12} />
-              {effectiveStatus === 'Ready to Pay' ? t('lifecycleReadyToPayNote')
-                : effectiveStatus === 'Sold' ? t('lifecycleSoldNote') : t('lifecycleDoneNote')}
+              {effectiveStatus === 'Ready to Pay' ? t('lifecycleReadyToPayNote') : t('lifecycleDoneNote')}
             </div>
           )}
           {!nextStatus && !orderLocked && isPurchaser && effectiveStatus === 'Reviewing' && (

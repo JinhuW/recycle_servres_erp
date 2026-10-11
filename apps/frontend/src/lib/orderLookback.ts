@@ -7,9 +7,9 @@
 
 import type { OrderEvent } from './types';
 
-export type StageId = 'draft' | 'in_transit' | 'reviewing' | 'ready_to_pay' | 'done' | 'sold';
+export type StageId = 'draft' | 'in_transit' | 'reviewing' | 'ready_to_pay' | 'done';
 
-const STAGE_ORDER: StageId[] = ['draft', 'in_transit', 'reviewing', 'ready_to_pay', 'done', 'sold'];
+const STAGE_ORDER: StageId[] = ['draft', 'in_transit', 'reviewing', 'ready_to_pay', 'done'];
 const isForward = (from: unknown, to: unknown) =>
   STAGE_ORDER.indexOf(from as StageId) >= 0
   && STAGE_ORDER.indexOf(to as StageId) > STAGE_ORDER.indexOf(from as StageId);
@@ -89,12 +89,7 @@ export function lookbackFacts(stage: StageId, events: OrderEvent[]): LookbackFac
           out.push({ kind: 'doneFile', filename: e.detail.filename, when: e.createdAt });
         }
       }
-      // Sold shares Done's step, so its settle is Done's last fact.
-      pushAdvance(last(events, e => e.kind === 'advanced' && e.detail.from === 'done' && e.detail.to === 'sold'));
       return out;
     }
-    case 'sold':
-      pushAdvance(advancedTo('sold'));
-      return out;
   }
 }

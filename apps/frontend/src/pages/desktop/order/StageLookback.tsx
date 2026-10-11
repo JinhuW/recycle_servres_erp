@@ -59,15 +59,12 @@ export function StageLookback(p: Props) {
                 case 'handoffLabel':
                   return <li key={i}>{t('acHandoffLabel')}<span className="mono muted"> · {[f.carrier, f.trackingNumber].filter(Boolean).join(' ')}</span></li>;
                 case 'advanced':
-                  // The move to Sold is the system's, not anyone's.
                   return (
                     <li key={i}>
-                      {f.to === 'sold'
-                        ? t('eoLookbackSoldOut', { when: fmtDate(f.when, p.locale) })
-                        : t('eoLookbackAdvanced', {
-                          who: who(f.who), when: fmtDate(f.when, p.locale),
-                          to: LIFECYCLE_LABEL[f.to] ?? f.to,
-                        })}
+                      {t('eoLookbackAdvanced', {
+                        who: who(f.who), when: fmtDate(f.when, p.locale),
+                        to: LIFECYCLE_LABEL[f.to] ?? f.to,
+                      })}
                     </li>
                   );
                 case 'doneNote':

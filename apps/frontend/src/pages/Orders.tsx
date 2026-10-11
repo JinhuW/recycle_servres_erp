@@ -9,7 +9,8 @@ import { useEffectiveUser } from '../lib/tweaks';
 import { shareOrCopy } from '../lib/shareOrCopy';
 import { fmtUSD0, fmtDateShort } from '../lib/format';
 import { profitTone, signedUSD0 } from '../lib/orderPresentation';
-import { ORDER_STATUSES, PO_STATUSES, isCompleted, isClosedBook, statusTone } from '../lib/status';
+import { ORDER_STATUSES, SOLD_LABEL, isCompleted, isClosedBook, statusTone } from '../lib/status';
+import { SoldBadge } from '../components/SoldBadge';
 import { categoryFilterOptions } from '../lib/lookups';
 import { usePhScrolled } from '../lib/usePhScrolled';
 import { navigate } from '../lib/route';
@@ -56,9 +57,9 @@ export function Orders({ onToast }: Props) {
     if (!isManager) params.set('mine', 'true');
     if (filter !== 'all') params.set('category', filter);
     if (statusFilter !== 'all') params.set('status', statusFilter);
-    // Org-wide, the default view would drown in finished POs — hide Done and
-    // Sold until their chips ask for them explicitly.
-    else if (isManager) { params.append('excludeStatus', 'Done'); params.append('excludeStatus', 'Sold'); }
+    // Org-wide, the default view would drown in finished POs — hide Done
+    // until its chip asks for it explicitly. A sold PO short of Done stays.
+    else if (isManager) params.append('excludeStatus', 'Done');
     if (showArchived) params.set('includeArchived', 'true');
     params.set('limit', '200');
     // The list filters and counts client-side, so it holds every PO in scope;
@@ -126,11 +127,17 @@ export function Orders({ onToast }: Props) {
           <button className={'ph-chip-btn ' + (statusFilter === 'all' ? 'active' : '')} onClick={() => setStatusFilter('all')}>
             {t('anyStatus')}
           </button>
-          {(effRole === 'manager' ? PO_STATUSES : ORDER_STATUSES).map(s => (
+          {ORDER_STATUSES.map(s => (
             <button key={s} className={'ph-chip-btn ' + (statusFilter === s ? 'active' : '')} onClick={() => setStatusFilter(s)}>
               {s}
             </button>
           ))}
+          {/* Not a stage but the flag beside one; the server reads it as such. */}
+          {effRole === 'manager' && (
+            <button className={'ph-chip-btn ' + (statusFilter === SOLD_LABEL ? 'active' : '')} onClick={() => setStatusFilter(SOLD_LABEL)}>
+              {t('soldBadge')}
+            </button>
+          )}
           <button
             className={'ph-chip-btn ' + (showArchived ? 'active' : '')}
             onClick={() => setShowArchived(v => !v)}
@@ -208,6 +215,7 @@ export function Orders({ onToast }: Props) {
                       </span>
                     )}
                     <span className={'chip ' + statusTone(o.status) + ' dot'}>{o.status}</span>
+                    <SoldBadge sold={o.sold} />
                     <span
                       className="ph-owner-coin"
                       style={{ ['--h' as string]: hueFromId(o.userId) }}

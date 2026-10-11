@@ -222,9 +222,9 @@ describe('the book closes at Ready to Pay', () => {
       sell_price: 45, condition: 'Used', part_number: 'M393A2K40BB1-CRC', brand: 'Samsung',
     });
 
-    // A hand-set Sold on the only line settles the PO; a reprice still lands.
+    // A hand-set Sold on the only line leaves the PO Done and sold; a reprice still lands.
     expect((await patch({ status: 'Sold' })).status).toBe(200);
-    expect((await getOrder(alex.token, id)).lifecycle).toBe('sold');
+    expect((await getOrder(alex.token, id)).lifecycle).toBe('done');
     expect((await patch({ sellPrice: 50 })).status).toBe(200);
     expect(await item()).toMatchObject({ sell_price: 50, order_closed_book: true });
   });

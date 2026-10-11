@@ -3,21 +3,17 @@
 // here as a static constant rather than a manager-editable table.
 //
 //   Draft (purchaser is preparing) → In Transit → Reviewing → Ready to Pay
-//   (review finished, commission owed) → Done (commission paid) → Sold (every
-//   line sold; set by the system, shown to managers only).
+//   (review finished, commission owed) → Done (commission paid).
+//
+// Sold is not a stage: it is the `sold` flag beside one (every line sold),
+// which can hold from In Transit on and is shown to managers only.
 
-export type OrderStatus = 'Draft' | 'In Transit' | 'Reviewing' | 'Ready to Pay' | 'Done' | 'Sold';
+export type OrderStatus = 'Draft' | 'In Transit' | 'Reviewing' | 'Ready to Pay' | 'Done';
 
-// The stepper spine: the stages someone drives. Sold is not one — the backend
-// writes it once a Done order has no unsold line — so it is absent here, and
-// every stepper shows a sold order on Done's step under the Sold label.
 export const ORDER_STATUSES: OrderStatus[] = ['Draft', 'In Transit', 'Reviewing', 'Ready to Pay', 'Done'];
 
-// Every status a PO can carry, for filter chips.
-export const PO_STATUSES: OrderStatus[] = [...ORDER_STATUSES, 'Sold'];
-
-// The step a status sits on, for index math over ORDER_STATUSES.
-export const spineStatus = (s: string): string => (s === 'Sold' ? 'Done' : s);
+// The label and tone of the Sold flag's badge and filter chip.
+export const SOLD_LABEL = 'Sold';
 
 // What a *line* can be. Ready to Pay is a PO stage only: its lines read Done,
 // because the stock and sellable buckets key on line status and review has
@@ -38,7 +34,6 @@ export const WORKFLOW_STAGES: WorkflowStage[] = [
   { id: 'reviewing',    label: 'Reviewing' },
   { id: 'ready_to_pay', label: 'Ready to Pay' },
   { id: 'done',         label: 'Done' },
-  { id: 'sold',         label: 'Sold' },
 ];
 
 // lifecycle slug → stage label. `order.status` can collapse to 'Mixed' when a
@@ -66,10 +61,9 @@ const TONE: Record<string, 'info' | 'warn' | 'pos' | 'accent' | 'muted' | 'cool'
 };
 
 export const statusTone = (s: string) => TONE[s] ?? 'info';
-// Done and Sold are the finished states — the "hide Done" filters and the
-// view/edit icon key on them. A Ready to Pay order is still on the manager's
-// plate.
-export const isCompleted = (s: string) => s === 'Done' || s === 'Sold';
+// Done is the finished state — the "hide Done" filters and the view/edit icon
+// key on it. A Ready to Pay order is still on the manager's plate.
+export const isCompleted = (s: string) => s === 'Done';
 // The book closes when the review does: from Ready to Pay on, lines, costs
 // and ownership are read-only for everyone (managers keep the stage moves).
 export const isClosedBook = (s: string) => s === 'Ready to Pay' || isCompleted(s);
