@@ -228,7 +228,7 @@ describe('asksToMoveToReviewing', () => {
   it('asks only before Reviewing', () => {
     expect(asksToMoveToReviewing({ lifecycle: 'draft', archived: false })).toBe(true);
     expect(asksToMoveToReviewing({ lifecycle: 'in_transit', archived: false })).toBe(true);
-    for (const lifecycle of ['reviewing', 'ready_to_pay', 'done', 'sold']) {
+    for (const lifecycle of ['reviewing', 'ready_to_pay', 'done']) {
       expect(asksToMoveToReviewing({ lifecycle, archived: false })).toBe(false);
     }
   });

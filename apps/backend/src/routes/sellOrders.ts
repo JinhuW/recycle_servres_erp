@@ -28,7 +28,6 @@ import {
   assignSellProductNos, foldSheetLines, healSellProductNos, numberSheetLines, sheetRows, type SheetLineRow,
 } from '../services/sellOrderNumbers';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
-import { settleSoldTx } from '../services/orderSold';
 import { searchSellableInventory } from '../services/sellableInventory';
 import {
   committedQtySql, committedSellStatuses, openSellStatuses, proposalSellStatuses,
@@ -1616,10 +1615,6 @@ sellOrders.post('/:id/status', async (c) => {
       `;
       for (const [orderId, isMirror] of goodsFollowsLines) {
         await syncOrderGoodsTotal(tx, orderId, isMirror);
-      }
-      // A source PO already at Done whose last unsold line just went is sold.
-      for (const o of sourceOrders) {
-        await settleSoldTx(tx, o.order_id, u.id);
       }
       const submitters = await tx<{ user_id: string }[]>`
         SELECT DISTINCT o.user_id

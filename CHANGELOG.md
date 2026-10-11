@@ -17,6 +17,35 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.246.0] - 2026-10-11
+
+Sold is now a flag beside a PO's stage, not a stage after Done (RS-231). Since
+v1.164.0 a Done PO whose every line had sold moved on to a `sold` lifecycle.
+That split the desktop list's Done chip in two, relabelled Done as Sold on the
+stepper, and gave a PO that sold out at Ready to Pay no sign of it. Selling
+isn't a workflow step, because stock is sellable before the PO is Done. The
+flag is now read off the lines whenever it's needed, at any stage from In
+Transit on, so a "Done · Sold" or "Ready to Pay · Sold" PO shows both.
+
+### Changed
+- A PO at In Transit, Reviewing, Ready to Pay or Done whose every line with
+  units is at the Sold line status carries `sold` (managers only). It is
+  derived, never stored. Adding a line or walking one off Sold clears it, so
+  the inventory editor's lock against walking a line off Sold is gone.
+- The desktop PO list counts every PO under its real stage. A separate Sold
+  chip narrows whatever stage is picked. Rows show a Sold badge beside the
+  stage pill, on the phone too, and the phone's default view now hides only
+  Done.
+- The PO page keeps the real stage on the stepper, shows a Sold badge, and on
+  desktop puts the Sold-out panel (with the sell orders that sold it) above
+  the stage panel at any stage.
+- `GET /api/orders`: `status=Sold` and `excludeStatus=Sold` filter on the
+  flag; `status=Done` is the stage, sold or not. The spreadsheet's Status
+  reads `Done · Sold` for managers.
+- Migration 0173 moves existing `sold` POs back to `done`. Their old
+  `Done → Sold` activity rows are hidden, and a reopen from Sold reads as one
+  from Done.
+
 ## [1.245.0] - 2026-10-11
 
 Purchase orders now get an AI review when they move to Reviewing (RS-230).

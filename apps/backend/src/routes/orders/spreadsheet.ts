@@ -4,7 +4,8 @@ import { getDb } from '../../db';
 import { effectiveRole } from '../../lib/role';
 import { buildXlsxWorkbook, xlsxResponse, type XlsxColumn } from '../../lib/xlsx';
 import { SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields, categoryTabSheets, type ExportCategory } from '../../lib/categoryColumns';
-import { LIFECYCLE_LABEL, visibleLifecycle } from '../../services/orderAdvance';
+import { LIFECYCLE_LABEL } from '../../services/orderAdvance';
+import { soldFlagSql } from '../../services/orderSold';
 import { sortCategories } from '../../services/orderCategory';
 import { poLineOrder } from '../../lib/poLineNo';
 import { type OrdersEnv } from './shared';
@@ -55,8 +56,10 @@ spreadsheetRoutes.get('/:id/spreadsheet', async (c) => {
   const id = c.req.param('id');
   const sql = getDb(c.env);
 
+  const isManager = effectiveRole(u) === 'manager';
   const order = (await sql`
-    SELECT o.id, o.user_id, o.category, o.payment, o.notes, o.lifecycle, o.created_at,
+    SELECT ${isManager ? soldFlagSql(sql, sql`o`) : sql`FALSE`} AS sold,
+           o.id, o.user_id, o.category, o.payment, o.notes, o.lifecycle, o.created_at,
            o.total_cost::float AS total_cost, o.commission_rate::float AS commission_rate,
            o.other_fees::float AS other_fees, o.other_fees_note, o.paypal_txn_id,
            u.name AS user_name,
@@ -68,7 +71,7 @@ spreadsheetRoutes.get('/:id/spreadsheet', async (c) => {
     LIMIT 1
   `)[0] as Record<string, unknown> | undefined;
   if (!order) return c.json({ error: 'Not found' }, 404);
-  if (effectiveRole(u) !== 'manager' && order.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
+  if (!isManager && order.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
 
   // The sheet is the PO as bought. A partial sale decrements `qty` and parks
   // the original in `qty_purchased`, so reading `qty` shrank the subtotal, the
@@ -148,7 +151,7 @@ spreadsheetRoutes.get('/:id/spreadsheet', async (c) => {
   const paymentRows = [
     { field: 'PO ID',                 value: String(order.id) },
     { field: 'Date',                  value: fmtTs(order.created_at).slice(0, 10) },
-    { field: 'Status',                value: LIFECYCLE_LABEL[visibleLifecycle(String(order.lifecycle), effectiveRole(u))] ?? String(order.lifecycle) },
+    { field: 'Status',                value: `${LIFECYCLE_LABEL[String(order.lifecycle)] ?? String(order.lifecycle)}${order.sold ? ' · Sold' : ''}` },
     { field: 'Buyer',                 value: String(order.user_name ?? '') },
     { field: 'Category',              value: lineCats.length > 1 ? lineCats.join(' · ') : String(order.category ?? '') },
     { field: 'Warehouse',             value: warehouse },

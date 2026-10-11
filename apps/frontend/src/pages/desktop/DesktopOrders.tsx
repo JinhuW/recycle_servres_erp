@@ -15,11 +15,12 @@ import { RouteLink } from '../../components/RouteLink';
 import { fmtUSD0, fmtUSD, fmtDateShort, fmt0 } from '../../lib/format';
 import { lineSpecLabel } from '../../lib/lineGroups';
 import { inTransitDetail, profitTone, trackingNote } from '../../lib/orderPresentation';
-import { statusTone, isCompleted, LIFECYCLE_STATUS, WORKFLOW_STAGES } from '../../lib/status';
+import { statusTone, isCompleted, LIFECYCLE_STATUS, SOLD_LABEL, WORKFLOW_STAGES } from '../../lib/status';
 import { categoryFilterOptions } from '../../lib/lookups';
 import type { OrderSummary, Order } from '../../lib/types';
 import { TableSkeleton } from '../../components/Skeleton';
 import { OrderCategoryChips } from '../../components/OrderCategoryChips';
+import { SoldBadge } from '../../components/SoldBadge';
 import { useReviewModeEntry } from './ReviewModeEntry';
 
 // Map a stage tone keyword to a usable CSS variable. Same lookup as the
@@ -143,6 +144,9 @@ export function DesktopOrders({ onToast }: Props) {
   // (including Done itself) is an explicit request, so the prune only applies
   // to the all-stages view — same contract as the sell-order list.
   const [showDone, setShowDone] = usePersisted<boolean>('desktop.orders.showDone', false);
+  // Sold is a flag beside the stage, so its chip narrows whatever stage is
+  // picked rather than replacing it: Done + Sold, Ready to Pay + Sold.
+  const [soldOnly, setSoldOnly] = usePersisted<boolean>('desktop.orders.soldOnly', false);
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   // A move that finds the PO elsewhere asks again from there; the row takes
   // that stage too, or the next click would ask about the old one again.
@@ -252,16 +256,23 @@ export function DesktopOrders({ onToast }: Props) {
 
   // The all-stages view hides Done POs unless the toggle is on; the stage
   // rail's own Done chip still shows them because a stage pick bypasses the
-  // prune — same contract as the sell-order list.
+  // prune — same contract as the sell-order list. So does the Sold chip: most
+  // sold POs are Done.
   const activeVisible = useMemo(
-    () => showDone ? visible : visible.filter(o => !isCompleted(o.status)),
-    [visible, showDone],
+    () => showDone || soldOnly ? visible : visible.filter(o => !isCompleted(o.status)),
+    [visible, showDone, soldOnly],
   );
 
-  // Apply stage filter on top of scope/search.
-  const stageFiltered = useMemo(
+  // What the stage chip alone leaves; the Sold chip counts and narrows this.
+  const stagePicked = useMemo(
     () => stageFilter === 'all' ? activeVisible : visible.filter(o => o.lifecycle === stageFilter),
     [visible, activeVisible, stageFilter],
+  );
+  const soldCount = useMemo(() => stagePicked.filter(o => o.sold).length, [stagePicked]);
+
+  const stageFiltered = useMemo(
+    () => soldOnly ? stagePicked.filter(o => o.sold) : stagePicked,
+    [stagePicked, soldOnly],
   );
 
   // Sort comes last — after all filters.
@@ -326,8 +337,8 @@ export function DesktopOrders({ onToast }: Props) {
               className="btn"
               onClick={() => setShowDone(v => !v)}
               aria-pressed={showDone}
-              disabled={stageFilter !== 'all'}
-              title={stageFilter !== 'all'
+              disabled={stageFilter !== 'all' || soldOnly}
+              title={stageFilter !== 'all' || soldOnly
                 ? t('closedDoneToggleAllOnly')
                 : showDone ? t('hideDonePOs') : t('showDonePOs')}
               style={{
@@ -479,6 +490,17 @@ export function DesktopOrders({ onToast }: Props) {
                 </button>
               );
             })}
+            <span className="status-rail-sep" aria-hidden />
+            <button
+              type="button"
+              className={'status-chip' + (soldCount === 0 ? ' empty' : '')}
+              aria-pressed={soldOnly}
+              onClick={() => setSoldOnly(v => !v)}
+            >
+              <span className="sc-dot" style={{ background: TONE_VAR[statusTone(SOLD_LABEL)] }} />
+              {t('soldBadge')}
+              <span className="mono sc-n">{soldCount}</span>
+            </button>
           </div>
         )}
 
@@ -645,9 +667,10 @@ export function DesktopOrders({ onToast }: Props) {
                           // carrier, as a link to its tracking page, or Local.
                           const d = inTransitDetail(o, t);
                           const cls = 'chip dot ' + statusTone(o.status);
-                          if (!d) return <span className={cls}>{o.status}</span>;
+                          const sold = <SoldBadge sold={o.sold} style={{ marginLeft: 4 }} />;
+                          if (!d) return <><span className={cls}>{o.status}</span>{sold}</>;
                           const trk = o.tracking;
-                          if (!trk?.trackingUrl) return <span className={cls}>{o.status} | {d.text}</span>;
+                          if (!trk?.trackingUrl) return <><span className={cls}>{o.status} | {d.text}</span>{sold}</>;
                           // The row's own click toggles the line drawer, hence
                           // the stop — same as the payment chip-link beside it.
                           const link = {
@@ -660,6 +683,7 @@ export function DesktopOrders({ onToast }: Props) {
                               <a className={cls + ' chip-link'} {...link} title={t('shipTrackOnCarrier', { carrier: d.text })}>
                                 {o.status} | {d.text}
                               </a>
+                              {sold}
                               {/* The number itself, and where the box stands:
                                   the ETA, or delivered / failed once the
                                   carrier says so. */}

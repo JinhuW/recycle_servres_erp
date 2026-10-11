@@ -5,7 +5,8 @@ import { linkedPaidFrag } from '../../banktx/match';
 import { getDb } from '../../db';
 import { clampLimit, cursorTs, cursorTsSelect, decodeCursor, encodeCursor, parseSort } from '../../lib/pagination';
 import { effectiveRole } from '../../lib/role';
-import { LIFECYCLE_LABEL, lifecyclesForLabel, visibleLifecycle } from '../../services/orderAdvance';
+import { LIFECYCLE_LABEL, lifecyclesForLabel } from '../../services/orderAdvance';
+import { soldFlagSql } from '../../services/orderSold';
 import { sortCategories } from '../../services/orderCategory';
 import { poRealizedLateral } from '../../lib/po-cost';
 import { realizedFromRow } from '../../services/poRealized';
@@ -60,24 +61,30 @@ listRoutes.get('/', async (c) => {
   const categoryFrag = category
     ? sql`EXISTS (SELECT 1 FROM order_lines ocf WHERE ocf.order_id = o.id AND ocf.category = ${category})`
     : sql`TRUE`;
-  // The mobile filter chip sends the order's stage label — map to lifecycle,
-  // per reader: a purchaser's Done is done and sold together. Filtering on
-  // per-line status (an earlier design) silently hid empty drafts and drafts
-  // whose lines had already advanced past 'Draft'.
-  const statusSlugs = status ? lifecyclesForLabel(status, role) : null;
-  const statusFrag = statusSlugs === null
-    ? sql`TRUE`
-    : statusSlugs.length
-      ? sql`o.lifecycle = ANY(${statusSlugs}::text[])`
-      : sql`FALSE`;
+  // The mobile filter chip sends the order's stage label — map to lifecycle.
+  // Filtering on per-line status (an earlier design) silently hid empty
+  // drafts and drafts whose lines had already advanced past 'Draft'.
+  // "Sold" is not a stage but the flag beside it, and a word only managers
+  // are shown: for anyone else it matches nothing.
+  const soldFrag = isManager ? soldFlagSql(sql, sql`o`) : sql`FALSE`;
+  const statusSlugs = status && status !== 'Sold' ? lifecyclesForLabel(status) : null;
+  const statusFrag = status === 'Sold'
+    ? soldFrag
+    : statusSlugs === null
+      ? sql`TRUE`
+      : statusSlugs.length
+        ? sql`o.lifecycle = ANY(${statusSlugs}::text[])`
+        : sql`FALSE`;
   // The org-wide default view drowns in finished POs, so clients can carve
-  // stages out (mobile sends excludeStatus=Done&excludeStatus=Sold unless a
-  // chip is active). An unknown label excludes nothing — the mirror of
-  // `status`, where an unknown label matches nothing.
-  const excludeSlugs = (c.req.queries('excludeStatus') ?? []).flatMap((l) => lifecyclesForLabel(l, role));
+  // stages out (mobile sends excludeStatus=Done unless a chip is active). An
+  // unknown label excludes nothing — the mirror of `status`, where an unknown
+  // label matches nothing.
+  const excludeLabels = c.req.queries('excludeStatus') ?? [];
+  const excludeSlugs = excludeLabels.flatMap((l) => lifecyclesForLabel(l));
   const excludeFrag = excludeSlugs.length
     ? sql`o.lifecycle <> ALL(${excludeSlugs}::text[])`
     : sql`TRUE`;
+  const excludeSoldFrag = excludeLabels.includes('Sold') ? sql`NOT ${soldFrag}` : sql`TRUE`;
   // Archived orders drop out of the default view; clients opt in to see them.
   const archivedFrag = includeArchived ? sql`TRUE` : sql`o.archived_at IS NULL`;
 
@@ -123,6 +130,7 @@ listRoutes.get('/', async (c) => {
       o.other_fees_note,
       o.paypal_txn_id,
       ${linkedPaidSel}::float AS linked_paid,
+      ${soldFrag} AS sold,
       o.handoff_method,
       mg.id AS manager_id, mg.name AS manager_name,
       ${newestPackageJson(sql)} AS pkg,
@@ -169,7 +177,7 @@ listRoutes.get('/', async (c) => {
                           AND (${isManager} OR sup.owner_id IS NULL OR sup.owner_id = ${u.id})
     ${poRealizedLateral(sql, isManager)}
     LEFT JOIN order_lines l ON l.order_id = o.id
-    WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${excludeFrag} AND ${archivedFrag} ${cursorFrag}
+    WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${excludeFrag} AND ${excludeSoldFrag} AND ${archivedFrag} ${cursorFrag}
     GROUP BY o.id, u.name, u.initials, mg.id, w.id, w.short, w.region, sup.name,
              rz.sold_qty, rz.bought_qty, rz.revenue, rz.cost, rz.projected_profit
     ORDER BY ${sortExpr} ${dirSql}, o.id ${dirSql}
@@ -198,7 +206,7 @@ listRoutes.get('/', async (c) => {
       categories: sortCategories((r.categories as string[] | null) ?? []),
       payment: r.payment,
       notes: r.notes,
-      lifecycle: visibleLifecycle(r.lifecycle as string, role),
+      lifecycle: r.lifecycle,
       archivedAt: r.archived_at,
       createdAt: r.created_at,
       totalCost: r.total_cost,
@@ -208,6 +216,8 @@ listRoutes.get('/', async (c) => {
       // Managers only, and left out rather than nulled: the key alone would
       // name the Payments page it links to.
       ...(isManager ? { linkedPaid: r.linked_paid } : {}),
+      // Every line sold, at whatever stage. Managers only, left out otherwise.
+      ...(isManager ? { sold: r.sold } : {}),
       handoffMethod: r.handoff_method,
       // Optional and additive, like handoffMethod: a stale SPA renders the
       // plain status chip.
@@ -240,7 +250,7 @@ listRoutes.get('/', async (c) => {
       // PO status is authoritative — derive from o.lifecycle, not from line
       // aggregation. Per-line `Sold` (set when inventory ships out via a sell
       // order) is intentional divergence and must not surface as "Mixed".
-      status: LIFECYCLE_LABEL[visibleLifecycle(r.lifecycle as string, role)] ?? r.lifecycle,
+      status: LIFECYCLE_LABEL[r.lifecycle as string] ?? r.lifecycle,
     })),
     nextCursor,
   });

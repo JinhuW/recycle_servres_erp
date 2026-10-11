@@ -21,7 +21,6 @@ import {
 import { UNTYPED_ITEM, chipMarkingCanon, normSellPrice, ramFamily, ramFamilyLabel, SPEC_FIELD_TO_DB_COL, specConflicts } from '@recycle-erp/shared';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { diff, writeOrderEvent } from '../services/orderAudit';
-import { settleSoldTx } from '../services/orderSold';
 import { poLineNo } from '../lib/poLineNo';
 import type { Env, User } from '../types';
 import { isClosedBook, heldLines, revertOrderToDraftTx, LINE_STATUS_FOR_LIFECYCLE, ARCHIVED_LINE_STATUS, REVIEWED_LIFECYCLES } from '../services/orderAdvance';
@@ -1181,7 +1180,7 @@ inventory.get('/:id', async (c) => {
     SELECT l.*, l.unit_cost::float AS unit_cost, l.sell_price::float AS sell_price,
            o.id AS order_id, o.user_id,
            -- The editor locks qty/unit cost on this, which PATCH refuses past
-           -- review. A flag, not the lifecycle, so a purchaser never reads 'sold'.
+           -- review.
            o.lifecycle = ANY(${REVIEWED_LIFECYCLES}::text[]) AS order_closed_book,
            COALESCE(l.warehouse_id, o.warehouse_id) AS warehouse_id,
            u.name AS user_name, u.initials AS user_initials,
@@ -1316,7 +1315,6 @@ inventory.patch('/:id', async (c) => {
     | { kind: 'committed'; committed: number }
     | { kind: 'doneLocked' }
     | { kind: 'heldLocked' }
-    | { kind: 'soldLocked' }
     | { kind: 'archived' }
     | { kind: 'specConflict'; error: string }
     | { kind: 'revertCommitted'; lineIds: string[] }
@@ -1380,13 +1378,6 @@ inventory.patch('/:id', async (c) => {
     // the closed book it had: the PO page shows it view-only, and this is the
     // same lot one click away.
     if (touchesGoods && (await heldLines(tx, [id])).size > 0) return { kind: 'heldLocked' };
-    // A sold order's lines are its sales record: this is the one writer that
-    // can walk a line off Sold (a Done sell order never reopens), and doing so
-    // under a sold order would leave it sold with stock. Reopen the order to
-    // Ready to Pay first — the reopen target that keeps the lines at Done.
-    if (parent?.lifecycle === 'sold' && body.status !== undefined && body.status !== 'Sold') {
-      return { kind: 'soldLocked' };
-    }
     // Judged against the locked row: the stored specs are only read here.
     const spec = mergedSpec(before, body as Record<string, unknown>);
     const specErr = specConflicts(before.category as string, spec.merged, spec.changed);
@@ -1499,8 +1490,6 @@ inventory.patch('/:id', async (c) => {
       `;
     }
     if (touchesGoods) await syncOrderGoodsTotal(tx, orderId, goodsFollowsLines);
-    // A hand-set Sold on the last unsold line settles the order like a sale.
-    if (body.status === 'Sold') await settleSoldTx(tx, orderId, u.id);
     return { kind: 'ok', before };
   }).catch((e: unknown) => {
     if (e instanceof Refused) return e.outcome;
@@ -1532,9 +1521,6 @@ inventory.patch('/:id', async (c) => {
   }
   if (outcome.kind === 'heldLocked') {
     return c.json({ error: 'this lot is on a shipped sell order; its qty and unit cost stay as reviewed until that order is Done or Closed' }, 409);
-  }
-  if (outcome.kind === 'soldLocked') {
-    return c.json({ error: 'the purchase order is fully sold; move it back to Ready to Pay before changing a lot status' }, 409);
   }
   if (outcome.kind === 'archived') {
     return c.json({ error: 'the purchase order is archived; unarchive it before editing its products' }, 409);

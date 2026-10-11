@@ -4,7 +4,8 @@ import { linkedPaidFrag } from '../../banktx/match';
 import { getDb } from '../../db';
 import { wasEverSubmitted } from '../../services/orderAudit';
 import { effectiveRole } from '../../lib/role';
-import { heldLines, LIFECYCLE_LABEL, visibleLifecycle } from '../../services/orderAdvance';
+import { heldLines, LIFECYCLE_LABEL } from '../../services/orderAdvance';
+import { soldFlagSql } from '../../services/orderSold';
 import { txnRequiredFor, chatShotRequiredFor, cashShotRequiredFor, readCutoffs, leaveDraftBlockers } from '../../services/orderTxnRule';
 import { allLimited } from '../../lib/concurrency';
 import { sortCategories } from '../../services/orderCategory';
@@ -43,7 +44,8 @@ detailRoutes.get('/:id', async (c) => {
            w.id AS warehouse_id, w.short AS warehouse_short, w.region AS warehouse_region,
            ${newestPackageJson(sql)} AS pkg,
            rz.sold_qty, rz.bought_qty, rz.revenue AS rz_revenue, rz.cost AS rz_cost,
-           rz.projected_profit
+           rz.projected_profit,
+           ${isManager ? soldFlagSql(sql, sql`o`) : sql`FALSE`} AS sold
     FROM orders o
     JOIN users u ON u.id = o.user_id
     LEFT JOIN users hb ON hb.id = o.handoff_by
@@ -64,7 +66,7 @@ detailRoutes.get('/:id', async (c) => {
   if (!order) return c.json({ error: 'Not found' }, 404);
   if (!isManager && order.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
 
-  const lifecycle = visibleLifecycle(order.lifecycle as string, role);
+  const lifecycle = order.lifecycle as string;
   const status = LIFECYCLE_LABEL[lifecycle] ?? lifecycle;
 
   // Both feed several reads below, so each is read once up front.
@@ -227,6 +229,8 @@ detailRoutes.get('/:id', async (c) => {
       lifecycle,
       archivedAt: order.archived_at,
       status,
+      // Every line sold, at whatever stage. Managers only, left out otherwise.
+      ...(isManager ? { sold: order.sold } : {}),
       statusMeta,
       ...(pendingRevert ? { pendingRevert } : {}),
       everSubmitted,
@@ -347,21 +351,23 @@ detailRoutes.get('/:id/events', async (c) => {
     actor_initials: string | null;
   }>;
 
-  // A purchaser is shown Done for Sold everywhere else, so here the settle
-  // row is dropped rather than shown as Done → Done, and a reopen from Sold
-  // reads as a reopen from Done.
-  // Sell orders are a manager's: the archive refusal names none to a
-  // purchaser, so the archive event mustn't count them either.
-  const visible = role === 'manager' ? rows : rows.flatMap((r) => {
-    if (r.kind === 'archived') {
-      const { removedSellOrderLines: _dropped, ...rest } = r.detail;
-      return [{ ...r, detail: rest }];
-    }
+  // Sold was once a stage after Done (v1.164.0). Its history stays
+  // in the table but reads in today's terms: the settle row is dropped rather
+  // than shown as Done → Done, and a reopen from Sold reads as one from Done.
+  const unSold = (v: string | undefined) => (v === 'sold' ? 'done' : v);
+  const restaged = rows.flatMap((r) => {
     if (r.kind !== 'advanced') return [r];
     const d = r.detail as { from?: string; to?: string };
     if (d.from === 'done' && d.to === 'sold') return [];
     if (d.from !== 'sold' && d.to !== 'sold') return [r];
-    return [{ ...r, detail: { ...d, from: visibleLifecycle(d.from ?? '', role), to: visibleLifecycle(d.to ?? '', role) } }];
+    return [{ ...r, detail: { ...d, from: unSold(d.from), to: unSold(d.to) } }];
+  });
+  // Sell orders are a manager's: the archive refusal names none to a
+  // purchaser, so the archive event mustn't count them either.
+  const visible = role === 'manager' ? restaged : restaged.map((r) => {
+    if (r.kind !== 'archived') return r;
+    const { removedSellOrderLines: _dropped, ...rest } = r.detail;
+    return { ...r, detail: rest };
   });
 
   return c.json({

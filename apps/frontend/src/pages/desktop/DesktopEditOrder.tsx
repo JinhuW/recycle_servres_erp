@@ -10,10 +10,11 @@ import { readArchiveConflict, type ArchiveConflict } from '../../lib/archiveConf
 import { readStageMoved } from '../../lib/boxCheck';
 import { poStageName } from '../../lib/orderPresentation';
 import { ArchiveConflictList } from '../../components/ArchiveConflictList';
+import { SoldBadge } from '../../components/SoldBadge';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { fmtUSD, fmtDateShort } from '../../lib/format';
 import {
-  ORDER_STATUSES, LIFECYCLE_STATUS, lifecycleOf, spineStatus,
+  ORDER_STATUSES, LIFECYCLE_STATUS, lifecycleOf,
 } from '../../lib/status';
 import { poEffectiveCost, parseFeeInput, feeEq, rateEq, readStoredGoodsTotal } from '../../lib/poTotals';
 import type { Category, Order, OrderLine, Warehouse } from '../../lib/types';
@@ -92,10 +93,8 @@ const STAGE_TAB: Partial<Record<string, TabId>> = {
   'Ready to Pay': 'commission',
 };
 
-// Sold is never a right-hand value: the backend alone writes it.
 const REOPEN_TARGETS: Record<string, string[]> = {
   'Done': ['Reviewing', 'Ready to Pay'],
-  'Sold': ['Reviewing', 'Ready to Pay'],
   'Ready to Pay': ['Reviewing', 'Done'],
 };
 
@@ -830,10 +829,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     // take it over. Cancel stops the whole save — the move is part of it.
     const asks = statusDirty && !isPurchaser;
     // Approving for payment is the move that matters: into Ready to Pay or
-    // past it from before it. Through spineStatus, so reopening a Sold PO
-    // (it sits on Done's step) doesn't read as one.
+    // past it from before it.
     const readyIdx = ORDER_STATUSES.indexOf('Ready to Pay');
-    const stageIdx = (s: string) => ORDER_STATUSES.indexOf(spineStatus(s) as typeof ORDER_STATUSES[number]);
+    const stageIdx = (s: string) => ORDER_STATUSES.indexOf(s as typeof ORDER_STATUSES[number]);
     const approving = asks && stageIdx(savedStatus) < readyIdx && stageIdx(status) >= readyIdx;
     // A payment-section edit links or unlinks bank rows inside the PATCH (a
     // PayPal id reconciles; Cash or Self pay drops the id), so what the bank
@@ -1139,7 +1137,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     : (l.condition ?? '');
 
   // ── The status section's model ──────────────────────────────────────────
-  const currentIdx = ORDER_STATUSES.indexOf(spineStatus(status) as typeof ORDER_STATUSES[number]);
+  const currentIdx = ORDER_STATUSES.indexOf(status as typeof ORDER_STATUSES[number]);
   const viewStageId = view === null ? null
     : (lifecycleOf(view) as StageId | undefined) ?? null;
   // On a closed order every move is off except the manager's ways out of it
@@ -1584,6 +1582,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
         <div className="oe-status-head">
           <SectionHead icon="flag">
             {t('orderStatus')}
+            <SoldBadge sold={order.sold} style={{ textTransform: 'none', letterSpacing: 0 }} />
             <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
               {view !== null
                 ? t('eoLookingBack', { s: view })
@@ -1592,9 +1591,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
           </SectionHead>
           <div className="so-stepper">
             {ORDER_STATUSES.map((s, i) => {
-              const active = s === spineStatus(status);
-              // A sold order sits on Done's step under its own name.
-              const label = active && status === 'Sold' ? 'Sold' : s;
+              const active = s === status;
               const reached = currentIdx >= 0 && i < currentIdx;
               const isNext = i === currentIdx + 1;
               const movable = !stepDisabled(s);
@@ -1608,8 +1605,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                   <button
                     type="button"
                     className={'so-step' + (active ? ' active' : '') + (reached ? ' reached' : '')
-                      + (locked ? ' locked' : '') + (viewingThis ? ' viewing' : '')
-                      + (active && status === 'Sold' ? ' sold' : '')}
+                      + (locked ? ' locked' : '') + (viewingThis ? ' viewing' : '')}
                     onClick={() => {
                       if (reached) { setView(s); return; }
                       if (active) { setView(null); return; }
@@ -1628,7 +1624,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
                     <span className="so-step-dot">
                       {reached ? <Icon name="check" size={10} stroke={3} /> : locked && !movable && isNext ? <Icon name="lock" size={10} /> : (i + 1)}
                     </span>
-                    <span className="so-step-label">{label}</span>
+                    <span className="so-step-label">{s}</span>
                   </button>
                   {i < ORDER_STATUSES.length - 1 && (
                     <span className={'so-step-bar' + (i < currentIdx ? ' reached' : '')} />

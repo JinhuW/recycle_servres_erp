@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-230](./RS-230-ai-reviewer-checks-every-po-on-move-to-reviewing.md) | done | story | P2 | AI reviewer checks every PO on move to Reviewing | — |
+| [RS-231](./RS-231-po-sold-is-a-flag-beside-the-stage-not-a-stage.md) | backlog | story | P2 | PO Sold is a flag beside the stage, not a stage | — |
+| [RS-230](./RS-230-ai-reviewer-checks-every-po-on-move-to-reviewing.md) | done | story | P2 | AI reviewer checks every PO on move to Reviewing | 1.245.0 |
 | [RS-229](./RS-229-group-ram-by-part-number-family-in-inventory.md) | done | story | P2 | Group RAM by part-number family in inventory | 1.244.0 |
 | [RS-228](./RS-228-verify-ram-line-specs-against-the-part-number-and-cr.md) | done | story | P2 | Verify RAM line specs against the part number, and cross-check label scans | 1.243.0 |
 | [RS-227](./RS-227-sell-order-bid-sheet-prices-a-part-once-not-per-cond.md) | done | story | P2 | Sell-order bid sheet prices a part once, not per condition | 1.242.0 |
