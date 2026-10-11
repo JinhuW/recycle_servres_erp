@@ -137,3 +137,44 @@ describe('POST /api/scan/label — per-user rate limit', () => {
     expect(r.headers.get('retry-after')).not.toBeNull();
   });
 });
+
+describe('POST /api/scan/label — part # cross-check', () => {
+  beforeEach(async () => { await resetDb(); });
+  afterEach(() => vi.unstubAllGlobals());
+
+  const scanWith = async (fields: Record<string, string>) => {
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ ...fields, _confidence: 0.9 }) } }] }), { status: 200 }),
+    ));
+    const { token } = await loginAs(MARCUS);
+    return multipart('/api/scan/label', { file: jpeg(), category: 'RAM' }, { token, env: { OPENROUTER_API_KEY: 'test-key' } });
+  };
+  type Body = { extracted: Record<string, string>; partCheck?: { partCorrected?: { from: string; to: string }; filled: string[]; conflicts: { field: string }[] } };
+
+  it('corrects a misread part # the printed specs agree with, and stores what the model read', async () => {
+    const r = await scanWith({
+      brand: 'SK Hynix', capacity: '32GB', generation: 'DDR4', type: 'Server',
+      classification: 'RDIMM', rank: '2Rx8', speed: '3200', partNumber: 'HMA84GR7AJR8N-XN',
+    });
+    expect(r.status).toBe(200);
+    const body = r.body as Body;
+    expect(body.extracted.partNumber).toBe('HMAA4GR7AJR8N-XN');
+    expect(body.partCheck?.partCorrected?.from).toBe('HMA84GR7AJR8N-XN');
+    const [row] = await getTestDb()`SELECT extracted FROM label_scans ORDER BY created_at DESC LIMIT 1`;
+    expect((row.extracted as Record<string, string>).partNumber).toBe('HMA84GR7AJR8N-XN');
+  });
+
+  it('fills what the model skipped and reports what still contradicts', async () => {
+    const r = await scanWith({ brand: 'Samsung', capacity: '32GB', partNumber: 'M393A2K40BB1-CRC0Q' });
+    const body = r.body as Body;
+    expect(body.extracted.rank).toBe('1Rx4');
+    expect(body.partCheck?.filled).toContain('rank');
+    expect(body.partCheck?.conflicts.map(m => m.field)).toEqual(['capacity']);
+  });
+
+  it('leaves SSD scans alone', async () => {
+    const { token } = await loginAs(MARCUS);
+    const r = await multipart('/api/scan/label', { file: jpeg(), category: 'SSD' }, { token });
+    expect((r.body as Body).partCheck).toBeUndefined();
+  });
+});

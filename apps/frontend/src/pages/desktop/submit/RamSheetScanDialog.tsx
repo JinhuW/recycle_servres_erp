@@ -4,6 +4,7 @@ import { Modal } from '../../../components/Modal';
 import { api } from '../../../lib/api';
 import { useT } from '../../../lib/i18n';
 import { missingRamFields } from '../../../lib/ramRequired';
+import { RAM_PART_LABEL_KEY } from '../../../components/RamPartCheck';
 import { scanErrorMessage } from '../../../lib/scanError';
 import { BridgeError, bridgeHealth, bridgeScan, type BridgeHealth } from '../../../lib/scannerBridge';
 import { splitSheet } from '../../../lib/sheetImage';
@@ -720,7 +721,24 @@ function StickRow({
                       {t('rsheetStillNeeds', { fields: missing.map(k => t(k)).join(lang === 'zh' ? '、' : ', ') })}
                     </span>
                   )}
+                  {r.scan?.partCheck?.partCorrected && (
+                    <span className="chip" title={t('rpScanCorrected', r.scan.partCheck.partCorrected)}>
+                      {t('rsheetPartCorrected')}
+                    </span>
+                  )}
                 </div>
+                {/* The label contradicts itself: a re-read of the same crop
+                    usually lands differently on the misread glyph. */}
+                {!!r.scan?.partCheck?.conflicts.length && (
+                  <span style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span className="chip warn" style={{ whiteSpace: 'normal', height: 'auto' }}>
+                      {t('rsheetPartConflict', {
+                        fields: r.scan.partCheck.conflicts.map(m => t(RAM_PART_LABEL_KEY[m.field])).join(lang === 'zh' ? '、' : ', '),
+                      })}
+                    </span>
+                    <button type="button" className="btn sm" onClick={onRetry}>{t('rsheetRetry')}</button>
+                  </span>
+                )}
               </>
             )}
             {r.box.maybeMerged && <span className="chip warn" style={{ whiteSpace: 'normal', height: 'auto' }}>{t('rsheetMaybeMerged')}</span>}
