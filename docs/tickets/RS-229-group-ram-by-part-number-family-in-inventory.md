@@ -2,13 +2,13 @@
 id: RS-229
 title: Group RAM by part-number family in inventory
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-11
 reporter: jinhu
 branch: feat/ram-part-families
-pr:
-version:
+pr: "#605"
+version: 1.244.0
 related: [RS-228]
 ---
 
