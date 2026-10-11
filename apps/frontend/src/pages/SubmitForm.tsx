@@ -26,6 +26,7 @@ import { BrandConfirmDialog } from '../components/BrandConfirmDialog';
 import { MarketAssist } from '../components/MarketAssist';
 import { useMarketLookup } from '../lib/useMarketLookup';
 import { useChipFill } from '../lib/useChipFill';
+import { RamPartMismatchDialog, ScanPartNotice, mismatchKey, ramPartCheck, useRamPartFill } from '../components/RamPartCheck';
 
 type Props = {
   category: Category;
@@ -198,6 +199,9 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, newN
   // look at the photo again and say what it is before the line can be saved.
   const [brandConfirmed, setBrandConfirmed] = useState(false);
   const [brandDialog, setBrandDialog] = useState(false);
+  // Save asks once per set of part # disagreements (see RamPartCheck).
+  const [partDialog, setPartDialog] = useState(false);
+  const [partKept, setPartKept] = useState<string | null>(null);
 
   // Prefer the freshest scan (a new/re-scan's delivery URL) over the existing
   // line's stored image. Stub/dev placeholders are not real images.
@@ -228,6 +232,13 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, newN
     enabled: true,
     savedPartNumber: isEditing ? existingLine?.partNumber : '',
     onFill: chipNumber => setLine(prev => ({ ...prev, chipNumber })),
+  });
+  // Same: a spec the part # filled in wasn't the user's edit, but it still
+  // goes through the cascade so it can't contradict the rest of the line.
+  useRamPartFill({ ...line, category }, {
+    enabled: true,
+    savedPartNumber: isEditing ? existingLine?.partNumber : '',
+    onFill: patch => setLine(prev => ({ ...prev, ...cascadePatch(category, prev, patch as Partial<DraftLine>) })),
   });
 
   // A field the cascade fills or clears counts as edited too: it now follows
@@ -273,7 +284,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, newN
   // (e.g. a Mixed-brand SSD) prompts the confirm sheet; an un-fillable blank is
   // a hard stop. RAM lines additionally require every spec field — the toast
   // names the blanks (which include Part #, so the synth path never fires).
-  const attemptSave = () => {
+  const attemptSave = (kept: string | null = partKept) => {
     // Brand first, ahead of the missing-field check: what they pick here can
     // change what else the line owes (an Other module has to carry a chip #),
     // so asking afterwards would name a set of gaps that's about to move.
@@ -300,6 +311,8 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, newN
       }]);
       return;
     }
+    const { mismatches } = ramPartCheck({ ...line, category });
+    if (mismatches.length && mismatchKey(line, mismatches) !== kept) { setPartDialog(true); return; }
     const typed = (line.partNumber ?? '').trim();
     if (typed) { persist(typed); return; }
     const gen = synthesizePartNumber(line.category, line);
@@ -359,6 +372,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, newN
             </span>
           </button>
         )}
+        {category === 'RAM' && <ScanPartNotice check={detected?.partCheck} onRetake={() => onRescan(line)} />}
         {aiFilled && (() => {
           // Banner has four severities, escalating:
           //   stub      → demo data, not a real reading        (amber)
@@ -687,7 +701,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, newN
 
       <div className="ph-action-bar">
         <button className="ph-btn ghost" onClick={leave}>{t('cancel')}</button>
-        <button className="ph-btn dark" onClick={attemptSave}>
+        <button className="ph-btn dark" onClick={() => attemptSave()}>
           <Icon name="check" size={16} /> {isEditing ? t('saveChanges') : (isFirst ? t('addToOrder') : t('addItem'))}
         </button>
       </div>
@@ -714,6 +728,23 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, newN
           onRetake={() => { setBrandDialog(false); onRescan(line); }}
           retakeLabel={t('brandConfirmRetake')}
           onCancel={() => setBrandDialog(false)}
+        />
+      )}
+      {partDialog && (
+        <RamPartMismatchDialog
+          line={{ ...line, category }}
+          onUse={patch => {
+            for (const [k, v] of Object.entries(patch)) set(k as keyof DraftLine, v);
+            setPartDialog(false);
+          }}
+          onUsePart={v => { set('partNumber', v); setPartDialog(false); }}
+          onKeep={() => {
+            const key = mismatchKey(line, ramPartCheck({ ...line, category }).mismatches);
+            setPartKept(key);
+            setPartDialog(false);
+            attemptSave(key);
+          }}
+          onCancel={() => setPartDialog(false)}
         />
       )}
       {pnGen && (

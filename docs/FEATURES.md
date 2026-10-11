@@ -2031,6 +2031,29 @@ inventory search, sell-order draft creation.
   - **Open camera automatically** (`scan.deskCamera`) starts every scanless
     line's drawer with the camera live, so a pallet goes stick → fields →
     Confirm → next line.
+- **A RAM line is checked against its own part number** (v1.243.0, RS-228).
+  `decodeRamPart` (`shared/ramPartDecode.ts`) reads the makers' numbering
+  schemes — Samsung, SK Hynix, Micron/Crucial, Kingston (retail and HP OEM),
+  G.Skill, Corsair — and gives only the fields the number fixes. OEM numbers
+  with no spec in them (Kingston `9995…`, `KKRVFX…`) decode to nothing.
+  - **Readout:** under Part # (desktop drawer, phone form) the decoded spec,
+    with the module family marked: `M393A2K40`BB1-CRC0Q → Samsung 16GB DDR4 ·
+    Server · RDIMM · 1Rx4 · 2400.
+  - **Fill:** typing or scanning a part # fills blank specs. Picked or scanned
+    values are never replaced; the part # a line opened with never fills.
+  - **Confirm asks** when a named field contradicts the part #: use the part
+    #'s specs or keep as entered (once per set of disagreements). The readout
+    has a per-field fix.
+  - **Misreads:** a part # that decodes only one look-alike character away
+    (O/0, HMAA/HMA8, PZ/PDZ…) is decoded through that reading with a button to
+    correct it, and when the form disagrees, readings that agree with it are
+    offered.
+  - **Label scans cross-check themselves:** a RAM scan whose part # is one
+    misread from agreeing with the label's printed specs comes back corrected;
+    blanks are filled from the part #; a contradiction that remains is shown
+    with Retake (desk camera stays open; RAM sheet offers a re-read).
+  - Compared loosely where the trade does: DDR3 speed by MT/s (`12800` =
+    `1600`); consumer kits per stick (`F4-3200C16D-32GVK` → 16GB).
 - **Chip # fills itself from the part number** (v1.186.0, RS-122). Once a
   part number's chip # is on record, a RAM line never needs it typed again.
   The map is learnt from past PO lines (`POST /api/market/chips`): the chip #

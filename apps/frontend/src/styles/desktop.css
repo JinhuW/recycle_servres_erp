@@ -4326,3 +4326,35 @@ body:has(.pk-page) .tweaks-fab, body:has(.pk-page) .tweaks-pop { display: none; 
 .ws-mail-draft-note { margin: 10px 14px 0; }
 
 .ws-mail-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* What the RAM part # decodes to, under the Part # field in both shells.
+   The family the decode recognised is marked, as a label reads it. */
+.rp-readout {
+  margin-top: 6px; padding: 8px 10px; border-radius: 8px;
+  font-size: 12px; line-height: 1.45;
+  background: var(--bg-soft); border: 1px solid var(--border);
+  color: var(--fg-muted);
+  display: grid; gap: 6px; justify-items: start;
+}
+.rp-readout.is-mismatch { background: var(--warn-soft); color: var(--warn-strong); }
+.rp-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.rp-head svg { flex-shrink: 0; }
+.rp-pn { overflow-wrap: anywhere; color: var(--fg-subtle); }
+.rp-pn mark { background: var(--accent-soft); color: var(--fg); border-radius: 3px; padding: 0 2px; }
+.rp-sum { color: var(--fg); font-weight: 500; }
+.rp-note { font-size: 11.5px; }
+.rp-table { border-collapse: collapse; font-size: 12px; }
+.rp-table th { font-weight: 500; text-align: left; color: var(--fg-subtle); padding: 0 12px 2px 0; }
+.rp-table td { padding: 2px 12px 2px 0; color: var(--fg); }
+.rp-table td.rp-bad { text-decoration: line-through; color: var(--fg-subtle); }
+.rp-readings { display: grid; gap: 4px; }
+.rp-reading { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--fg); }
+.rp-dialog { display: grid; gap: 10px; font-size: 13px; }
+.rp-scan {
+  display: flex; gap: 8px; align-items: flex-start;
+  padding: 8px 12px; border-radius: 8px; font-size: 12.5px; line-height: 1.45;
+  background: var(--bg-soft); border: 1px solid var(--border); color: var(--fg-muted);
+}
+.rp-scan.is-conflict { background: var(--warn-soft); border-color: var(--warn); color: var(--warn-strong); }
+.rp-scan svg { flex-shrink: 0; margin-top: 2px; }
+.rp-scan-body { display: grid; gap: 6px; justify-items: start; }

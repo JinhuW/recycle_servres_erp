@@ -17,6 +17,39 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.243.0] - 2026-10-11
+
+RAM lines are now checked against their own part number (RS-228). A new
+decoder in `@recycle-erp/shared` reads the makers' part-numbering schemes
+(Samsung, SK Hynix, Micron and Crucial, Kingston, G.Skill, Corsair) and says
+what the stick is, so the form no longer has to take the purchaser's or the
+scanner's word for every select. Checked against prod after today's audit,
+it decodes 1,744 of 2,023 RAM lines and disagrees with them only where the
+line was wrong.
+
+### Added
+
+- **Part # readout.** Under a RAM line's Part # (desktop drawer and phone
+  form) the decoded spec is shown with the module family marked —
+  `M393A2K40`BB1-CRC0Q → Samsung 16GB DDR4 · Server · RDIMM · 1Rx4 · 2400.
+- **Blank specs fill from the part #** as it is typed or scanned. A value the
+  user picked or the scan read is never replaced, and opening an existing line
+  fills nothing.
+- **Confirm asks when the form contradicts the part #.** The readout lists each
+  disagreeing field with a one-click fix; Confirm (and the phone's Add to
+  order) asks once: use the part #'s specs, or keep as entered.
+- **Misread part numbers.** A part # that only decodes one look-alike character
+  away (O/0, I/1, HMAA/HMA8, PZ/PDZ, …) is decoded through that reading, and
+  the readout offers to correct it. When the form disagrees with the part #,
+  readings that would agree with it are offered too.
+- **Label scans cross-check themselves.** `/api/scan/label` compares a RAM
+  label's part # with its printed specs and returns `partCheck`: a part # whose
+  one-character correction makes the two agree is corrected, fields the model
+  skipped are filled from it, and a contradiction neither explains is reported.
+  The desktop drawer and the phone form show it with a Retake button (the desk
+  camera stays open for a re-seat); the RAM sheet flags the stick and offers a
+  re-read. `label_scans` still stores what the model read.
+
 ## [1.242.0] - 2026-10-11
 
 The vendor bid sheet no longer prices by condition (RS-227). It used to print

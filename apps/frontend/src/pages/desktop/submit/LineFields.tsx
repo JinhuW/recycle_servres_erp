@@ -11,6 +11,7 @@ import { allowedOptions, chipMarkingCanon, synthesizePartNumber } from '@recycle
 import { Combobox } from '../../../components/Combobox';
 import { PartNumberField } from '../../../components/PartNumberField';
 import { ItemTypePicker } from '../../../components/ItemTypePicker';
+import { RamPartReadout } from '../../../components/RamPartCheck';
 import type { Line } from './line';
 
 // ─── Field groups ────────────────────────────────────────────────────────────
@@ -117,6 +118,7 @@ export function RamFields({ line, set, missing }: FieldsProps) {
           onChange={v => set({ partNumber: v })}
           placeholder="M393A4K40DB3-CWE"
         />
+        <RamPartReadout line={line} onUse={set} onUsePart={partNumber => set({ partNumber })} />
       </div>
       <div className="field" style={{ gridColumn: 'span 2' }}>
         <label className="label">{t('condition')} <span className="req">*</span></label>

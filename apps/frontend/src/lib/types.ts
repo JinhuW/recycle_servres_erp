@@ -5,6 +5,7 @@
 import type { LinePhoto } from './linePhotos';
 import type { PackageSource } from './packageSource';
 import type { TrackedPackage } from './packages';
+import type { RamScanCheck } from '@recycle-erp/shared';
 export type { LinePhoto };
 
 export type Role = 'manager' | 'purchaser';
@@ -374,6 +375,8 @@ export type ScanResponse = {
   extracted: Record<string, string>;
   confidence: number;
   provider: 'stub' | 'openrouter';
+  /** RAM only: the label's part # cross-checked against its printed specs. */
+  partCheck?: RamScanCheck;
 };
 
 export type RefPrice = {

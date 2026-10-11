@@ -6,6 +6,7 @@ import { extractPaypalTxn } from '../ai/paypal';
 import { extractSerial } from '../ai/serial';
 import { normalizeFields } from '../ai/normalize';
 import { EXPECTED_FIELDS_BY_CATEGORY } from '../ai/prompts';
+import { reconcileRamScan } from '@recycle-erp/shared';
 import { appendErrorRecord, redactSensitivePath, redactSensitiveQuery } from '../lib/error-log';
 import { log } from '../lib/log';
 import { createRateLimiter } from '../lib/rate-limit';
@@ -185,6 +186,8 @@ scan.post('/label', async (c) => {
     }
   }
 
+  // label_scans keeps what the model read; the cross-check below is ours,
+  // and the record is what shows how often the model needs it.
   await sql`
     INSERT INTO label_scans (user_id, cf_image_id, delivery_url, category, extracted, confidence, provider)
     VALUES (
@@ -193,12 +196,27 @@ scan.post('/label', async (c) => {
     )
   `;
 
+  const { fields, check } = category === 'RAM'
+    ? reconcileRamScan(result.fields)
+    : { fields: result.fields, check: null };
+  if (check && (check.partCorrected || check.conflicts.length)) {
+    // Field names only, like the partial-fill line: the values transcribe a
+    // customer's label.
+    scanLog.info('scan part check', {
+      corrected: !!check.partCorrected,
+      filled: check.filled,
+      conflicts: check.conflicts.map((m) => m.field),
+      storageKey: uploaded.storageKey,
+    });
+  }
+
   return c.json({
     imageId: uploaded.storageKey,
     deliveryUrl,
-    extracted: result.fields,
+    extracted: fields,
     confidence: result.confidence,
     provider: result.provider,
+    ...(check ? { partCheck: check } : {}),
   });
 });
 

@@ -19,3 +19,4 @@ export * from "./reporting.js";
 export * from "./ramSheetSegment.js";
 export * from "./materialEdit.js";
 export * from "./specCascade.js";
+export * from "./ramPartDecode.js";
