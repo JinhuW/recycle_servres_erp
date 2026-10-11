@@ -12,6 +12,7 @@ import { TableSkeleton } from '../../components/Skeleton';
 import { staleness, STALE_DAYS } from '../../lib/marketStaleness';
 import { TARGET_MARGIN_FALLBACK } from '../../lib/useMarketLookup';
 import { usePreference } from '../../lib/preferences';
+import { MarketPriceImportDialog } from './MarketPriceImportDialog';
 
 // ─── Sparkline ───────────────────────────────────────────────────────────────
 function Sparkline({
@@ -107,6 +108,9 @@ export function DesktopMarket() {
   const [showStaleOnly, setShowStaleOnly] = usePreference('market.showStaleOnly', false);
   const [total, setTotal] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [importing, setImporting] = useState(false);
+  // Bumped after a price import so the first page refetches with the new prices.
+  const [reloadKey, setReloadKey] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLTableRowElement>(null);
   // Bumped on every first-page (re)load; lets an in-flight loadMore drop its
@@ -163,7 +167,7 @@ export function DesktopMarket() {
         .finally(() => setLoadedOnce(true));
     }, 200);
     return () => clearTimeout(handle);
-  }, [buildParams]);
+  }, [buildParams, reloadKey]);
 
   const hasMore = items.length < total;
 
@@ -218,12 +222,21 @@ export function DesktopMarket() {
         .mkt-table td { overflow-wrap: anywhere; }
       `}</style>
       <div className="page-head">
-        <div>
+        {/* Shrinkable, so the long subtitle wraps instead of pushing the
+            import button onto a line of its own. */}
+        <div style={{ flex: '1 1 320px', minWidth: 0 }}>
           <h1 className="page-title">{t('marketValue')}</h1>
           <div className="page-sub">
             {t('mktSubPre')}<strong style={{ color: 'var(--accent-strong)' }}>{t('mktSubEmphasis')}</strong>{t('mktSubPost')}
           </div>
         </div>
+        {isManager && (
+          <div className="page-actions">
+            <button className="btn" onClick={() => setImporting(true)}>
+              <Icon name="upload" size={14} /> {t('mktImportButton')}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* How-to banner */}
@@ -517,6 +530,16 @@ export function DesktopMarket() {
           />
         )}
       </div>
+
+      {importing && (
+        <MarketPriceImportDialog
+          onClose={() => setImporting(false)}
+          onApplied={() => {
+            setImporting(false);
+            setReloadKey(k => k + 1);
+          }}
+        />
+      )}
     </>
   );
 }
