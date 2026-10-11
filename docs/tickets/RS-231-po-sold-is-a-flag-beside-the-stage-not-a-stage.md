@@ -2,13 +2,13 @@
 id: RS-231
 title: PO Sold is a flag beside the stage, not a stage
 type: story
-status: backlog
+status: done
 priority: P2
 created: 2026-10-11
 reporter: jinhu
 branch: feat/po-sold-flag
-pr:
-version:
+pr: "#609"
+version: 1.246.0
 related: []
 ---
 
