@@ -2,13 +2,13 @@
 id: RS-232
 title: Market page: import a part number + unit price sheet to update market prices
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-10-11
 reporter: Jinhu
 branch: feat/market-price-import
-pr:
-version:
+pr: "#611"
+version: 1.247.0
 related: []
 ---
 

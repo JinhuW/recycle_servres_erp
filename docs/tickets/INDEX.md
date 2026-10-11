@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-232](./RS-232-market-page-import-a-part-number-unit-price-sheet-to.md) | in-review | story | P2 | Market page: import a part number + unit price sheet to update market prices | — |
+| [RS-232](./RS-232-market-page-import-a-part-number-unit-price-sheet-to.md) | done | story | P2 | Market page: import a part number + unit price sheet to update market prices | 1.247.0 |
 | [RS-231](./RS-231-po-sold-is-a-flag-beside-the-stage-not-a-stage.md) | done | story | P2 | PO Sold is a flag beside the stage, not a stage | 1.246.0 |
 | [RS-230](./RS-230-ai-reviewer-checks-every-po-on-move-to-reviewing.md) | done | story | P2 | AI reviewer checks every PO on move to Reviewing | 1.245.0 |
 | [RS-229](./RS-229-group-ram-by-part-number-family-in-inventory.md) | done | story | P2 | Group RAM by part-number family in inventory | 1.244.0 |
