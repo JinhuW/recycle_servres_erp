@@ -1109,9 +1109,10 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   - **The order's History is the last card in the right-hand column, folded**
     (v1.248.0; in the side column since v1.248.2); a click on its heading
     opens it.
-  - **Editing puts Vendor price import first in the card** (v1.248.1), above
-    the status stepper, so the bid sheet's round trip doesn't need a scroll
-    past every line. It was under the products.
+  - **Editing puts Vendor price import at the top of the right-hand column**,
+    above the order summary (v1.248.3; first in the left card in v1.248.1,
+    under the products before that), so the bid sheet's round trip doesn't
+    need a scroll past every line.
   - **A search box over the products narrows the list** (v1.248.0), in view
     and edit, like Pack mode's: a part #, serial or PO number matches with or
     without its dashes, and words match the item's name and spec chips

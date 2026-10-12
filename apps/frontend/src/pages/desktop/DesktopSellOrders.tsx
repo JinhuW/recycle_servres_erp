@@ -1555,20 +1555,6 @@ function SellOrderDetail({ id, mode, onToast }: {
           <div className="so-page-body">
             <div className="so-page-main">
               <div className="card so-page-card">
-                {/* First in the card: on a long order it was a scroll past every line. */}
-                {editable && (
-                  <PriceImportSection
-                    orderId={order.id}
-                    currency={draft.currency}
-                    locale={locale}
-                    onApply={rows =>
-                      setDraft(d => d && {
-                        ...d,
-                        lines: applyPriceRows(d.lines, rows),
-                        bidParts: mergeBidParts(d.bidParts, rows),
-                      })}
-                  />
-                )}
                 {order.status === 'Closed' && (
                   <div style={{
                     marginBottom: 18, padding: '10px 14px', borderRadius: 8,
@@ -1909,6 +1895,22 @@ function SellOrderDetail({ id, mode, onToast }: {
               </div>
             </div>
             <div className="so-page-side">
+              {/* Above the summary: on a long order, under the lines was a scroll past every one. */}
+              {editable && (
+                <div className="card so-page-card">
+                  <PriceImportSection
+                    orderId={order.id}
+                    currency={draft.currency}
+                    locale={locale}
+                    onApply={rows =>
+                      setDraft(d => d && {
+                        ...d,
+                        lines: applyPriceRows(d.lines, rows),
+                        bidParts: mergeBidParts(d.bidParts, rows),
+                      })}
+                  />
+                </div>
+              )}
               {summary && (
               <div className="so-summary">
                 <div
