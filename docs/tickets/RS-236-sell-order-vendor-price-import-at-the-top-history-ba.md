@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-12
 reporter: jinhu
 branch: fix/so-price-import-top
-pr:
+pr: 620
 version: 1.248.1
 related: [RS-235]
 ---
