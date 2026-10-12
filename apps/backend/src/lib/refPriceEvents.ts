@@ -47,3 +47,35 @@ export async function appendPriceEvent(
     createdAt: ev.created_at,
   };
 }
+
+/**
+ * The same write for a whole price list: one INSERT and one UPDATE, so the
+ * caller's row locks are held for two statements rather than two per price.
+ * Every row gets the same source, note and actor. Returns how many it wrote.
+ */
+export async function appendPriceEvents(
+  tx: postgres.TransactionSql,
+  prices: ReadonlyMap<string, number>,
+  meta: Omit<AppendPriceEventArgs, 'refPriceId' | 'price'>,
+): Promise<number> {
+  if (prices.size === 0) return 0;
+  const ids = [...prices.keys()];
+  const values = ids.map((id) => prices.get(id)!);
+  const rows = await tx`
+    WITH ev AS (
+      INSERT INTO ref_price_events (ref_price_id, price, source, note, actor_user_id)
+      SELECT v.id, v.price, ${meta.source}, ${meta.note}, ${meta.actorUserId}::uuid
+      FROM unnest(${ids}::text[], ${values}::numeric[]) AS v(id, price)
+      RETURNING ref_price_id, price, created_at
+    )
+    UPDATE ref_prices rp
+       SET last_price        = ev.price,
+           last_price_at     = ev.created_at,
+           last_price_source = ${meta.source},
+           updated_at        = NOW()
+      FROM ev
+     WHERE rp.id = ev.ref_price_id
+    RETURNING rp.id
+  `;
+  return rows.length;
+}

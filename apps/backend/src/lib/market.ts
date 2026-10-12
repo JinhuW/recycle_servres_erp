@@ -82,6 +82,10 @@ export type MarketValue = {
   recentPrices: { ts: string; price: number }[];
 };
 
+export function maxBuyFor(basis: number | null, targetMargin: number): number | null {
+  return basis === null ? null : +(basis * (1 - targetMargin)).toFixed(2);
+}
+
 export function formatRefPrice(r: MarketValueRow, targetMargin: number): MarketValue {
   // maxBuy migrates to last_price as the basis (more meaningful with few
   // samples). Falls back to avg_sell when no recorded last_price yet — same
@@ -113,7 +117,7 @@ export function formatRefPrice(r: MarketValueRow, targetMargin: number): MarketV
     demand: r.demand,
     history: r.history,
     updatedAt: r.updated_at.toISOString(),
-    maxBuy: basis === null ? null : +(basis * (1 - targetMargin)).toFixed(2),
+    maxBuy: maxBuyFor(basis, targetMargin),
     health: r.health,
     rpm: r.rpm,
     internalSales: {

@@ -100,8 +100,9 @@ portal was removed in v1.191.0; no bid had ever been placed through it.
 ## Purchase orders
 
 The core object. A PO is a purchase from a vendor, built line by line, that
-moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done, and
-on to Sold once every line has sold (v1.164.0).
+moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done. Sold
+is not a stage but a flag beside one, set once every line has sold
+(v1.246.0).
 
 - **Every product on a PO has a `#` that never changes** (v1.234.0). It is
   given when the product is put on the PO — a new PO numbers its products
@@ -317,24 +318,40 @@ on to Sold once every line has sold (v1.164.0).
   page's line drawer while the PO is at Ready to Pay, so the commission
   projection can be corrected during payment review; Save stays on the PO
   (v1.191.1).
-- **Sold is Done with every line sold** (v1.164.0). Nobody picks it: a PO
-  lands on it when a manager marks it Done and every line already sits at the
-  `Sold` line status, or when a sell order reaching Done consumes the last
-  unsold line of a PO already at Done. A fully-sold PO still at Ready to Pay
-  waits for the commission to be paid. Managers see it as its own chip in the
-  PO list (hidden with Done by default) and on the PO page, where it sits on
-  Done's step under the Sold label with a "Sold out" panel; purchasers — and a
-  manager previewing as one — see the same PO as Done, in the list, the
-  filters, the detail and the activity log. A manager can reopen it to
-  Reviewing or Ready to Pay like Done; the way back to Done re-settles it.
-  The inventory editor refuses to walk a line off Sold while its PO is sold.
-  Existing Done POs that had already sold out were backfilled with an
-  activity row.
-  **The Sold panel names the sell orders that sold it** (v1.174.0): each Done
-  sell order naming one of the PO's lines is shown with its customer and
-  units, and on desktop it links to the sell order. The Done panel shows the
-  same list once part of the PO has sold, and the phone lists the ids beside
-  the sold count. Managers only.
+- **Sold is a flag beside the stage, not a stage** (v1.246.0). A PO at In
+  Transit, Reviewing, Ready to Pay or Done whose every line with units is at
+  the `Sold` line status is sold; a Draft never is. Nobody sets it: it is
+  read off the lines each time (`soldFlagSql` in `services/orderSold.ts`), so
+  a line added, transferred, re-counted or walked off Sold changes it with
+  nothing else to do, and the stage never moves because of a sale. A PO that
+  sells out at Ready to Pay is "Ready to Pay · Sold" and still waits for the
+  commission; reaching Done it reads "Done · Sold".
+  - **Where it shows.** A Sold badge beside the stage pill on the desktop and
+    phone PO lists and beside *Order status* on both PO pages. The desktop
+    list's stage chips count every PO under its real stage, and a separate
+    Sold); the phone has a Sold chip after the stages. The Sold chip's count
+    includes Done POs before it is clicked, and is what the click shows
+    (v1.247.1). `GET /api/orders` takes `status=Sold` as the flag;
+    `excludeStatus=Sold`, which an older phone bundle sends beside Done,
+    excludes nothing (v1.247.1). `status=Done` means the stage, sold or not.
+    The spreadsheet's Status cell reads `Done · Sold`.
+  - **Managers only.** `sold` is sent to managers alone; everyone else,
+    a manager previewing as a purchaser included, gets no key and an empty
+    Sold filter. A Sold chip left on drops when the desktop list is
+    previewed as a purchaser, instead of emptying it (v1.247.1).
+  - **Before v1.246.0** Sold was a lifecycle after Done (v1.164.0): the
+    desktop chip rail split Done in two and the inventory editor refused to
+    walk a line off Sold. Migration 0173 moved those POs back to Done; their
+    old `Done → Sold` activity rows are no longer shown, on the PO or on the
+    Activity page (v1.247.1), and a reopen from Sold reads as one from Done.
+    A `sold` written after 0173 — by the old instance still serving through
+    a deploy, or after a rollback — lands as `done` (0174, v1.247.1).
+  **The Sold-out panel names the sell orders that sold it** (v1.174.0): each
+  Done sell order naming one of the PO's lines is shown with its customer and
+  units, and on desktop it links to the sell order. On the desktop PO page it
+  sits above the stage panel at whatever stage the PO is sold (v1.246.0); the
+  Done panel shows the same list while the PO is only partly sold, and the
+  phone lists the ids beside the sold count. Managers only.
 - **Any manager takes a PO into Reviewing and Ready to Pay, whatever its
   warehouse** (v1.168.0). The v1.132.0 rule that reserved those two moves for
   the manager linked to the PO's warehouse is gone, on both shells and in the
@@ -360,8 +377,7 @@ on to Sold once every line has sold (v1.164.0).
     Each move sends the manager the page showed. If another manager has taken
     the PO since, the server refuses the move, the page asks about the
     manager it named, and then moves.
-  - **Where it doesn't ask.** The hand-off (Draft → In Transit) and the
-    automatic Done → Sold settle never ask.
+  - **Where it doesn't ask.** The hand-off (Draft → In Transit) never asks.
   - **It sticks.** The manager stays through a send-back to Draft, so a
     re-submission returns to the same manager. It changes only through a
     takeover; there is no picker.
@@ -497,6 +513,55 @@ on to Sold once every line has sold (v1.164.0).
     not manager. The page and button are hidden from a manager previewing as
     purchaser, and the route bounces them without leaving a Back entry
     (v1.189.1).
+- **AI review checks every product of a PO in Review mode** (v1.245.0, desktop,
+  managers). Off by default; **Settings → General → AI review of purchase
+  orders** turns it on and sets a per-PO cost cap, the OpenRouter model, and
+  whether part numbers may be looked up on the web.
+  - Moving a PO to Reviewing queues a review in the same transaction. A
+    background loop runs it within seconds. Moving the PO back to Draft or In
+    Transit cancels a review that hasn't run yet, and so does archiving it
+    (v1.247.1). **Re-run** in the card runs one on demand, even with the
+    automatic review off. The card keeps the last finished review's findings
+    however many runs failed after it (v1.247.1).
+  - Each line is checked against four sources:
+    - its **part number**, decoded by the makers' schemes;
+    - its **label read**: the scan's own extraction, or the photo read again
+      when there was no scan or the part number disputes the line. A RAM read
+      goes through the same part-number correction the scan form applied, so
+      a part # the scan already fixed is not disputed with its misread
+      (v1.247.1). Only RAM, SSD and HDD photos are read again;
+    - the **web**, only for a RAM part number no scheme decodes, or a drive
+      with no label read, and cached per part number. Never for a placeholder
+      (`N/A`) or a Mixed lot's synthetic part number, and a listing's brand
+      (often the server maker's) is not taken (v1.247.1);
+    - its **market value**, the Market board's basis: the last price, else
+      the average sell (v1.247.1).
+  - The part number and the label agreeing against the line is an error. One
+    source alone is a warning. A blank field gets a suggestion. When the label
+    backs the line against its part number, the part number is flagged as a
+    possible misread (HMAA/HMA8, PZ/PDZ, O/0) instead of the spec. When one
+    such reading fits every spec the line names, the specs are judged by
+    that reading, so only the part number is flagged (v1.247.1).
+  - DDR3 speeds stored as the PC3 rating and kit part numbers' per-module
+    capacity are not flagged.
+  - The **AI review** card in Review mode shows the run's state and the
+    selected product's findings, with a jump to other flagged products. Rows
+    with open findings carry an *AI n* chip.
+  - **Apply** writes the suggestion through the ordinary line edit, so it is
+    audited as `line_edited`. It goes through the editors' spec cascade, so a
+    Form fix brings its Device along (and answers that finding too) instead
+    of being refused half-way (v1.247.1). **Dismiss** hides the finding, and a
+    re-run keeps it dismissed. Nothing changes a line without a manager.
+  - A finding whose line has been edited since the review shows as changed
+    and can't be applied; Apply reads the findings again first, so an edit
+    made in another tab is not written over (v1.247.1). A cost finding goes
+    stale once the unit cost changes (v1.247.1).
+  - When a review finishes, the PO's manager is notified (all managers if the
+    PO has none) and an `ai_review_done` event joins the PO's history, worded
+    on the PO and on the Activity page and shown to managers only (v1.247.1).
+    Each run records its cost.
+  - The manual sweep it automates is written up in
+    `docs/po-spec-audit-runbook.md`.
 - **A company-paid PO names the payment that funded it before it leaves
   Draft** (v1.115.0) — the transaction ID is required, and the advance is
   refused without it for every actor, a manager stage-jump and carrier movement
@@ -678,7 +743,7 @@ on to Sold once every line has sold (v1.164.0).
     - Self-paid POs: their bank money is the purchaser's reimbursement plus
       commission.
     - POs with nothing linked.
-    - Moves between Ready to Pay, Done and Sold.
+    - Moves between Ready to Pay and Done.
     - The phone.
   - **Who sees it.** Managers only. `GET /api/orders/:id` now carries
     `linkedPaid` for them, and leaves the key out for everyone else, a
@@ -749,7 +814,7 @@ on to Sold once every line has sold (v1.164.0).
   inventory editor keeps 1 as its floor. For a purchaser past Draft, setting
   0 is a qty edit like any other and sends the PO back to Draft. A DDR5 line
   at 0 needs no serials. A 0-qty line costs nothing, isn't stock, and doesn't
-  keep a Done PO from settling to Sold.
+  keep a PO from reading Sold.
 - Line specs are per-category: RAM carries Part #, Chip #, Brand, Capacity,
   Generation, Type, Class, Rank and Speed; SSD/HDD carry Interface, Form
   factor, Health % and RPM; Other carries a free item type (v1.47.0).
@@ -949,14 +1014,26 @@ log and `orders.supplier_id`.
 
 There is **no inventory table**. Stock is `order_lines` whose PO is Done or In
 Transit. A line counted down to 0 stays on its PO but is never stock: the list,
-the export, the grouped view and the analysis page leave it out (v1.213.0). A PO whose every line has sold reads
-Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an archived PO sit at the
+the export, the grouped view and the analysis page leave it out (v1.213.0). A PO whose every line has sold carries
+the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Lines of an archived PO sit at the
 `Archived` status and are out of every stock view until the PO is unarchived
 (v1.137.0); like Sold, they are reachable through an explicit status filter.
 
 - Flat and grouped views. Grouped is what goes outward to vendors and buyers,
   so it carries no cost, sell price or submitter (v1.51.0); flat keeps them for
   internal use.
+- **The grouped view groups RAM by module family** (v1.244.0). Part numbers
+  that differ only in the maker's trailing packaging or marking code
+  (`M393A2K43BB1-CTD` / `-CTD7Q` / `-CTDQ`, Micron `-2G1A2II` / `-2G1A2KJ`)
+  are one product, shown as `M393A2K43BB1-CTD*`. Hovering lists the member
+  part numbers, and the lots table adds a Part # column. A dashed tail
+  (`HMA82GR7CJR8N-VK-TF`) groups with its dash-free spelling (v1.247.1). Lots
+  picked in the grouped view carry their own part number into a sell order
+  or Quick View, never the family's `…*` (v1.247.1). Module form, dies,
+  organisation and speed still separate products, so RDIMM `M393…` and ECC
+  UDIMM `M391…` are two. Samsung, SK Hynix DDR3/4 and Micron are read; other
+  part numbers group by exact canonical part number as before. The export
+  groups the same way.
 - **A product's lots table names each lot by PO and line** — `PO-1343 #2`, the
   number the PO page shows for that line, with the PO id still the link
   (v1.232.0).
@@ -999,7 +1076,7 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
 - Spec fields on an inventory line are editable in place on desktop.
   **The inventory editor saves whatever stage the PO is at** (v1.192.1):
   sell price, status, condition, part #, health, RPM and specs land on a
-  Ready to Pay, Done or Sold PO too. Only qty and unit cost freeze from
+  Ready to Pay or Done PO too, sold or not. Only qty and unit cost freeze from
   Ready to Pay on. They show dimmed, with a line linking the PO and saying
   to move it back to Reviewing. A save sends only the fields that changed.
 - **Committed sell orders reserve the units they name**, not the whole lot.
@@ -1205,8 +1282,15 @@ Sold rather than Done (v1.164.0); nothing about its lines changes. Lines of an a
   (v1.51.2). Its header text is load-bearing for the import parser — don't
   move it. **Saving after a confirmed import records the accepted prices on
   the Market value board** as `bid:<order>` data points, USD at the saved
-  rate, one per confirmed part (v1.138.3) from the lines in the condition the
-  sheet priced (v1.138.4); hand-typed price edits record nothing.
+  rate, one per confirmed part (v1.138.3); hand-typed price edits record
+  nothing. **The sheet prices a part once, not per condition**: there is no
+  Condition column, a part held in two conditions is one row with its qty
+  summed, and the import applies its price to every line of the part
+  (v1.242.0), whatever label its lines were added under (v1.247.1). A 0 in
+  the price column is no bid, not a $0 price (v1.247.1). A sheet made before
+  v1.242.0 that priced a part's conditions apart leaves that part for the
+  manager to price, flagged as such, instead of taking its last row
+  (v1.247.1).
 - The price template splits into one worksheet per category with per-attribute
   spec columns and image URLs (v1.25.0, v1.27.0). **The RAM tab groups its rows
   with merged label columns left of `#`** — "Desktop & laptop" / "Server", then
@@ -1687,12 +1771,31 @@ over MCP.
 - Paginated with infinite scroll (v1.12.0), sortable by clicking column headers
   (v1.67.0).
 - A line can be priced while the buy can still change (v1.54.0).
-- **Four feeds write `last_price`**, each tagged in the event's source: the
+- **Five feeds write `last_price`**, each tagged in the event's source: the
   scraper and MCP connectors (`scraper:`/`mcp:`), a manager's manual entry
   on the Market page (`manual:`), a sell order reaching Done (`sale:<order>`),
-  and a sell-order save that follows a confirmed vendor price import
-  (`bid:<order>`, v1.138.3). The Activity page shows the source per row; the
+  a sell-order save that follows a confirmed vendor price import
+  (`bid:<order>`, v1.138.3), and a price-list import on the Market page
+  (`import:<email>`, v1.247.0). The Activity page shows the source per row; the
   Market page shows only the price and its age.
+- **Import prices from a spreadsheet** (v1.247.0, managers, desktop). The
+  manager drops an `.xlsx`, and only its Part Number and Unit Price columns
+  are read. The preview shows current → new price and max buy for every part
+  already on the Market list. It lists the rows it skips: unknown parts (no
+  row is created), blank or 0 prices, prices marked in yuan, and an earlier
+  row for a part listed again. One click records the rest, with the file name
+  as the event note, and each part's max buy follows its new price.
+  - **Reading the sheet** (v1.247.1, shared with the bid import): a Unit
+    Price column wins over another price column (List, Last) and an Ext. or
+    Total one is never read; 型号 wins over a row-number 编号; hidden tabs
+    and a merged title row are passed over; a second header further down a
+    tab starts a section read by its own columns; a decimal comma reads as
+    one (`12,50` is 12.50). A row marked in any currency but US dollars — by
+    its cell, the cell's format, the column header or the tab name — is
+    skipped, and 美元 reads as dollars.
+  - A list with more than 5,000 matched parts is refused at the preview, the
+    same cap the apply holds, and the apply writes the whole list in two
+    statements (v1.247.1).
 
 ## Activity and audit
 
@@ -1771,7 +1874,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   on a toggle, by the commission those POs earned (`?lb=cost|commission` on
   `GET /api/dashboard`, cost by default; v1.141.0, ranked by projected profit
   from v1.0.1). Both lenses count a PO from Ready to Pay on, when its
-  commission becomes owed (v1.132.0), Sold included (v1.164.0). A purchaser sees every peer's rank but
+  commission becomes owed (v1.132.0), sold or not. A purchaser sees every peer's rank but
   only their own money, so the ranking is computed server-side.
 
 ## Oversight extras
@@ -2028,6 +2131,38 @@ inventory search, sell-order draft creation.
   - **Open camera automatically** (`scan.deskCamera`) starts every scanless
     line's drawer with the camera live, so a pallet goes stick → fields →
     Confirm → next line.
+- **A RAM line is checked against its own part number** (v1.243.0, RS-228).
+  `decodeRamPart` (`shared/ramPartDecode.ts`) reads the makers' numbering
+  schemes — Samsung, SK Hynix, Micron/Crucial, Kingston (retail and HP OEM),
+  G.Skill, Corsair — and gives only the fields the number fixes. OEM numbers
+  with no spec in them (Kingston `9995…`, `KKRVFX…`) decode to nothing.
+  - **Readout:** under Part # (desktop drawer, phone form) the decoded spec,
+    with the module family marked: `M393A2K40`BB1-CRC0Q → Samsung 16GB DDR4 ·
+    Server · RDIMM · 1Rx4 · 2400.
+  - **Fill:** typing or scanning a part # fills blank specs. Picked or scanned
+    values are never replaced; the part # a line opened with never fills.
+  - **Confirm asks** when a named field contradicts the part #: use the part
+    #'s specs or keep as entered (once per set of disagreements). The readout
+    has a per-field fix.
+  - **Misreads:** a part # that decodes only one look-alike character away
+    (O/0, HMAA/HMA8, PZ/PDZ…) is decoded through that reading with a button to
+    correct it, and when the form disagrees, readings that agree with it are
+    offered. One that decodes only through a look-alike may be a scheme the
+    decoder lacks, so nothing fills from it or rewrites it unasked; and when
+    two readings both decode further, neither is picked (v1.247.1).
+  - **Label scans cross-check themselves:** a RAM scan whose part # is one
+    misread from agreeing with the label's printed specs comes back corrected;
+    blanks are filled from the part #; a contradiction that remains is shown
+    with Retake (desk camera stays open; RAM sheet offers a re-read). On the
+    desktop drawer the scan owns what it wrote: a part # typed or read
+    afterwards fills blanks only (v1.247.1).
+  - Compared loosely where the trade does: DDR3 speed by MT/s (`12800` =
+    `1600`), and a DDR4/DDR5 speed printed as its PC4/PC5 rate the same way
+    (`25600` = `3200`, v1.247.1); consumer kits per stick
+    (`F4-3200C16D-32GVK` → 16GB), Kingston kits too (`KVR26N19S8K2/16` → 8GB,
+    v1.247.1).
+  - Also read since v1.247.1: Kingston DDR3L (`KVR16LR11D4/16`,
+    `KCP3L16SD8/8`) and SK Hynix VLP RDIMMs (`HMA81GV7AFR8N-VK`).
 - **Chip # fills itself from the part number** (v1.186.0, RS-122). Once a
   part number's chip # is on record, a RAM line never needs it typed again.
   The map is learnt from past PO lines (`POST /api/market/chips`): the chip #

@@ -38,7 +38,7 @@ export function StagePanel(p: Props) {
   const wh = o.warehouse?.short ?? '';
 
   // A Done PO can have sold part of its units already, so the list shows on
-  // Done as well as Sold — wherever there is something to link to.
+  // Done too; once every unit has sold it moves to the Sold-out box.
   const soldOn = o.sellOrders?.length ? (
     <div className="oe-sold-on">
       <span className="muted">{t('eoSoldOn')}</span>
@@ -148,21 +148,12 @@ export function StagePanel(p: Props) {
         {p.doneEvidence}
       </div>
     );
-  } else if (p.status === 'Sold') {
-    left = (
-      <div className="oe-box">
-        <div className="oe-box-h"><span>{t('eoStageSold')}</span></div>
-        <div className="oe-box-lead">{t('eoSoldLead', { n: o.realized?.soldQty ?? 0, name: o.userName })}</div>
-        {soldOn}
-        {p.doneEvidence}
-      </div>
-    );
   } else {
     left = (
       <div className="oe-box">
         <div className="oe-box-h"><span>{t('eoStageDone')}</span></div>
         <div className="oe-box-lead">{t('eoDoneLead', { name: o.userName })}</div>
-        {soldOn}
+        {!o.sold && soldOn}
         {p.doneEvidence}
       </div>
     );
@@ -171,6 +162,14 @@ export function StagePanel(p: Props) {
   return (
     <div className="oe-stage">
       {p.children}
+      {/* Sold sits beside the stage, not on it: it can hold from In Transit on. */}
+      {o.sold && (
+        <div className="oe-box">
+          <div className="oe-box-h"><span>{t('eoStageSold')}</span></div>
+          <div className="oe-box-lead">{t('eoSoldLead', { n: o.realized?.soldQty ?? 0 })}</div>
+          {soldOn}
+        </div>
+      )}
       <div className="oe-stage-cols">
         {left}
         <div className="oe-box plain oe-stage-next">
@@ -179,8 +178,7 @@ export function StagePanel(p: Props) {
             p.status === 'Draft' ? 'eoNextDraft'
             : p.status === 'In Transit' ? 'eoNextInTransit'
             : p.status === 'Reviewing' ? 'eoNextReviewing'
-            : p.status === 'Ready to Pay' ? 'eoNextReadyToPay'
-            : p.status === 'Sold' ? 'eoNextSold' : 'eoNextDone',
+            : p.status === 'Ready to Pay' ? 'eoNextReadyToPay' : 'eoNextDone',
             { wh, name: o.userName, date: fmtDateShort(o.createdAt, p.locale) },
           )}</div>
           {p.next && (

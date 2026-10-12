@@ -45,6 +45,23 @@ describe('global JSON body-size limit', () => {
     expect(res.status).toBe(413);
   });
 
+  it('exempts only the Market price-import preview, not its JSON apply', async () => {
+    const big = 'x'.repeat(OVER_1MIB_SIZE);
+    const post = (path: string, body: string, contentType: string) => app.fetch(
+      new Request(`http://test${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': contentType, 'X-Requested-By': 'recycle-erp' },
+        body,
+      }),
+      testEnv,
+    );
+    // Unauthenticated, so a body that clears the cap stops at auth instead.
+    const preview = await post('/api/market/price-import/preview', big, 'application/octet-stream');
+    expect(preview.status).toBe(401);
+    const apply = await post('/api/market/price-import/apply', JSON.stringify({ x: big }), 'application/json');
+    expect(apply.status).toBe(413);
+  });
+
   it('accepts a POST body under 1 MiB on a JSON route (passes through to route logic)', async () => {
     // A normal-sized login attempt — wrong credentials, but NOT a 413.
     const payload = JSON.stringify({ email: 'nobody@example.com', password: 'wrong' });

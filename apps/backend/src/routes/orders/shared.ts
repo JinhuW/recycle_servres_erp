@@ -11,18 +11,17 @@ import { registerPackageTracking } from '../../shipping/track';
 import { synthesizePartNumber, chipMarkingCanon, normSellPrice, CARRIERS, PACKAGE_SOURCES, isValidTracking, normalizeTracking, type SerialIssue, type Carrier, type PackageSource } from '@recycle-erp/shared';
 import { type Env, type LineCategory, type User } from '../../types';
 import { normPaypalTxnId } from '../../ai/paypal';
-import { LIFECYCLE_LABEL, visibleLifecycle } from '../../services/orderAdvance';
+import { LIFECYCLE_LABEL } from '../../services/orderAdvance';
 
 export type OrdersEnv = { Bindings: Env; Variables: { user: User } };
 
 // The 409 for a write that named the stage it saw (`fromStage` on a move,
-// `expectStage` on a PATCH) after the PO left it. A purchaser never learns Sold.
-export function stageMovedBody(u: User, lifecycle: string) {
-  const seen = visibleLifecycle(lifecycle, effectiveRole(u));
+// `expectStage` on a PATCH) after the PO left it.
+export function stageMovedBody(lifecycle: string) {
   return {
-    error: `Order is now ${LIFECYCLE_LABEL[seen] ?? seen} — reload to see where it stands.`,
+    error: `Order is now ${LIFECYCLE_LABEL[lifecycle] ?? lifecycle} — reload to see where it stands.`,
     code: 'stageMoved',
-    lifecycle: seen,
+    lifecycle,
   };
 }
 

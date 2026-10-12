@@ -1,12 +1,15 @@
 import { Hono } from 'hono';
 import { getDb } from '../db';
 import { getWorkspaceSetting } from '../lib/settings';
-import { formatRefPrice, marketValueSelect } from '../lib/market';
+import { formatRefPrice, marketValueSelect, maxBuyFor } from '../lib/market';
 import { applyMarketWrites } from '../lib/marketWrite';
-import { appendPriceEvent } from '../lib/refPriceEvents';
+import { appendPriceEvent, appendPriceEvents } from '../lib/refPriceEvents';
 import { escapeLike } from '../lib/pagination';
 import { canonPartCol, canonPartNumberJs } from '../lib/part-number';
 import { bearerGuard } from '../oauth/guard';
+import {
+  readPriceSheetRows, PriceColumnsNotFoundError, type SheetPriceRow,
+} from '../services/sellOrderPriceImport';
 import type { Env, User } from '../types';
 
 const market = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -271,6 +274,185 @@ market.post('/chips', async (c) => {
     for (const spelling of under) items[spelling] = r.chip;
   }
   return c.json({ items });
+});
+
+// Price-list import from the Market page, step 1 of 2: read a sheet's Part
+// Number and Unit Price columns — every other column is ignored — and report
+// what each row would do to the board. Writes nothing. The file is parsed and
+// dropped, never stored, so its cap is its own rather than the attachment
+// limits in getUploadLimits.
+const PRICE_IMPORT_MAX_BYTES = 8 * 1024 * 1024;
+// Prices one import writes, and so how many matches a preview may offer: a
+// preview the apply would refuse is one the manager can do nothing with.
+const PRICE_IMPORT_MAX_ROWS = 5000;
+const PRICE_IMPORT_MAX_PRICE = 10_000_000;
+
+type ImportRowStatus =
+  | 'matched' | 'not-on-market' | 'no-price' | 'invalid-price' | 'not-usd' | 'duplicate';
+
+type ImportRow = {
+  sheet: string;
+  rowNumber: number;
+  rawPart: string;
+  rawPrice: string;
+  price: number | null;
+  status: ImportRowStatus;
+  refPriceId?: string;
+  partNumber?: string | null;
+  label?: string;
+  oldPrice?: number | null;
+  oldMaxBuy?: number | null;
+  newMaxBuy?: number | null;
+};
+
+type ImportRef = {
+  canon: string;
+  id: string;
+  part_number: string | null;
+  label: string;
+  last_price: number | null;
+  avg_sell: number | null;
+};
+
+market.post('/price-import/preview', async (c) => {
+  if (c.var.user.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+
+  const form = await c.req.formData().catch(() => null);
+  if (!form) return c.json({ error: 'multipart/form-data required' }, 400);
+  const file = form.get('file');
+  if (!(file instanceof File)) return c.json({ error: 'file is required' }, 400);
+  if (file.size > PRICE_IMPORT_MAX_BYTES) {
+    return c.json({ error: `file too large (max ${PRICE_IMPORT_MAX_BYTES} bytes)` }, 413);
+  }
+
+  const { default: ExcelJS } = await import('exceljs');
+  const wb = new ExcelJS.Workbook();
+  try {
+    await wb.xlsx.load(await file.arrayBuffer());
+  } catch {
+    return c.json({ error: 'not a valid .xlsx file' }, 400);
+  }
+  let sheetRows: SheetPriceRow[];
+  try {
+    sheetRows = readPriceSheetRows(wb);
+  } catch (e) {
+    if (e instanceof PriceColumnsNotFoundError) {
+      return c.json({ error: e.message, code: 'columns-not-found' }, 400);
+    }
+    throw e;
+  }
+
+  const sql = getDb(c.env);
+  // Junk like '-' canonicalises to '', and part_number is nullable — an empty
+  // key would match every row that has none.
+  const canons = [...new Set(sheetRows.map(r => r.canonPart).filter(Boolean))];
+  const canonCol = canonPartCol(sql, sql`part_number`);
+  // Two rows can share a canonical part number; the most recently maintained
+  // one is the one written, as for the scraper push.
+  const [refs, targetMargin] = await Promise.all([
+    canons.length === 0 ? Promise.resolve([] as ImportRef[]) : sql<ImportRef[]>`
+      SELECT DISTINCT ON (canon) ${canonCol} AS canon, id, part_number, label,
+             last_price::float AS last_price, avg_sell::float AS avg_sell
+        FROM ref_prices
+       WHERE ${canonCol} = ANY(${canons}::text[])
+       ORDER BY canon, updated_at DESC, id
+    `,
+    getWorkspaceSetting(sql, 'target_margin', 0.30),
+  ]);
+  const refByCanon = new Map(refs.map(r => [r.canon, r]));
+
+  const rows: ImportRow[] = [];
+  // A later valid price for the same part demotes the earlier row, across tabs
+  // too — price lists get corrected by re-listing the part further down.
+  const winnerByRef = new Map<string, ImportRow>();
+  for (const s of sheetRows) {
+    const row: ImportRow = {
+      sheet: s.sheet, rowNumber: s.rowNumber, rawPart: s.rawPart,
+      rawPrice: s.rawPrice, price: s.price, status: 'not-on-market',
+    };
+    const ref = refByCanon.get(s.canonPart);
+    if (!ref) {
+      row.status = 'not-on-market';
+    } else if (s.priceKind === 'empty' || s.price === 0) {
+      // A 0 on a price list means "not buying", and as a price it would zero
+      // the part's max buy.
+      row.status = 'no-price';
+    } else if (s.priceKind === 'invalid') {
+      row.status = 'invalid-price';
+    } else if (s.currency !== null) {
+      row.status = 'not-usd';
+    } else {
+      row.status = 'matched';
+      row.refPriceId = ref.id;
+      row.partNumber = ref.part_number;
+      row.label = ref.label;
+      row.oldPrice = ref.last_price;
+      row.oldMaxBuy = maxBuyFor(ref.last_price ?? ref.avg_sell, targetMargin);
+      row.newMaxBuy = maxBuyFor(s.price, targetMargin);
+      const prior = winnerByRef.get(ref.id);
+      if (prior) prior.status = 'duplicate';
+      winnerByRef.set(ref.id, row);
+    }
+    rows.push(row);
+  }
+
+  const summary = { matched: 0, notOnMarket: 0, noPrice: 0, invalid: 0, notUsd: 0, duplicate: 0 };
+  for (const r of rows) {
+    if (r.status === 'matched') summary.matched++;
+    else if (r.status === 'not-on-market') summary.notOnMarket++;
+    else if (r.status === 'no-price') summary.noPrice++;
+    else if (r.status === 'invalid-price') summary.invalid++;
+    else if (r.status === 'not-usd') summary.notUsd++;
+    else summary.duplicate++;
+  }
+  if (summary.matched > PRICE_IMPORT_MAX_ROWS) {
+    return c.json({
+      error: `at most ${PRICE_IMPORT_MAX_ROWS} prices per import`, code: 'too-many-prices', max: PRICE_IMPORT_MAX_ROWS,
+    }, 413);
+  }
+  return c.json({ targetMargin, rows, summary });
+});
+
+// Step 2: write the prices the manager saw in the preview, each as a market
+// data point. A price that didn't change is written too — the list confirms it
+// is current, which is what clears the stale flag.
+market.post('/price-import/apply', async (c) => {
+  const user = c.var.user;
+  if (user.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+
+  const body = (await c.req.json().catch(() => null)) as null | { fileName?: unknown; prices?: unknown };
+  const raw = Array.isArray(body?.prices) ? body!.prices : null;
+  if (!raw || raw.length === 0) return c.json({ error: 'prices must be a non-empty array' }, 400);
+  if (raw.length > PRICE_IMPORT_MAX_ROWS) {
+    return c.json({ error: `at most ${PRICE_IMPORT_MAX_ROWS} prices per import` }, 413);
+  }
+  const priceById = new Map<string, number>();
+  for (const item of raw) {
+    const { id, price } = (item ?? {}) as { id?: unknown; price?: unknown };
+    if (typeof id !== 'string' || id === '') return c.json({ error: 'each price needs an id' }, 400);
+    if (typeof price !== 'number' || !Number.isFinite(price)
+        || price <= 0 || price > PRICE_IMPORT_MAX_PRICE) {
+      return c.json({ error: 'invalid_price' }, 400);
+    }
+    if (priceById.has(id)) return c.json({ error: 'duplicate id' }, 400);
+    priceById.set(id, price);
+  }
+  const fileName = typeof body?.fileName === 'string'
+    ? body.fileName.trim().slice(0, 280) || null
+    : null;
+
+  const ids = [...priceById.keys()];
+  const sql = getDb(c.env);
+  const updated = await sql.begin(async (tx) => {
+    // Every row locked up front, in one order, before the write.
+    const found = await tx<{ id: string }[]>`
+      SELECT id FROM ref_prices WHERE id = ANY(${ids}::text[]) ORDER BY id FOR NO KEY UPDATE
+    `;
+    return appendPriceEvents(tx, new Map(found.map(({ id }) => [id, priceById.get(id)!])), {
+      source: `import:${user.email}`, note: fileName, actorUserId: user.id,
+    });
+  });
+  return c.json({ updated, notFound: ids.length - updated });
 });
 
 // Manual price entry from the Market page. Manager-only; auth + CSRF are

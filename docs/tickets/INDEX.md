@@ -5,6 +5,13 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-233](./RS-233-pre-release-review-fixes-for-the-v1-247-release.md) | done | bug | P1 | Pre-release review fixes for the v1.247 release | 1.247.1 |
+| [RS-232](./RS-232-market-page-import-a-part-number-unit-price-sheet-to.md) | done | story | P2 | Market page: import a part number + unit price sheet to update market prices | 1.247.0 |
+| [RS-231](./RS-231-po-sold-is-a-flag-beside-the-stage-not-a-stage.md) | done | story | P2 | PO Sold is a flag beside the stage, not a stage | 1.246.0 |
+| [RS-230](./RS-230-ai-reviewer-checks-every-po-on-move-to-reviewing.md) | done | story | P2 | AI reviewer checks every PO on move to Reviewing | 1.245.0 |
+| [RS-229](./RS-229-group-ram-by-part-number-family-in-inventory.md) | done | story | P2 | Group RAM by part-number family in inventory | 1.244.0 |
+| [RS-228](./RS-228-verify-ram-line-specs-against-the-part-number-and-cr.md) | done | story | P2 | Verify RAM line specs against the part number, and cross-check label scans | 1.243.0 |
+| [RS-227](./RS-227-sell-order-bid-sheet-prices-a-part-once-not-per-cond.md) | done | story | P2 | Sell-order bid sheet prices a part once, not per condition | 1.242.0 |
 | [RS-226](./RS-226-pack-mode-filter-also-finds-lots-by-po-number.md) | done | story | P2 | Pack mode filter also finds lots by PO number | 1.241.0 |
 | [RS-225](./RS-225-inventory-search-finds-a-po-product-by-its-and-its-p.md) | done | story | P2 | Inventory search finds a PO product by its #, and its PO link lands on that product | 1.240.0 |
 | [RS-224](./RS-224-fix-the-2026-10-10-full-code-review-findings.md) | done | bug | P1 | Fix the 2026-10-10 full code-review findings | 1.239.2 |

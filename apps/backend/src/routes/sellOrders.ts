@@ -28,7 +28,6 @@ import {
   assignSellProductNos, foldSheetLines, healSellProductNos, numberSheetLines, sheetRows, type SheetLineRow,
 } from '../services/sellOrderNumbers';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
-import { settleSoldTx } from '../services/orderSold';
 import { searchSellableInventory } from '../services/sellableInventory';
 import {
   committedQtySql, committedSellStatuses, openSellStatuses, proposalSellStatuses,
@@ -481,9 +480,9 @@ function customerSlug(name: string | null): string {
     .replace(/\s+/g, '-');
 }
 
-// What both sell-order spreadsheets are built from: the product grouping the
-// edit form prices by (part|label|condition, qty summed across warehouses),
-// and the same grouping scoped per warehouse. One query feeds the bid sheet
+// What both sell-order spreadsheets are built from: the bid sheet's product
+// grouping (part|label, qty summed across warehouses and conditions), and the
+// packing list's (part|label|condition) scoped per warehouse. One query feeds the bid sheet
 // and the packing list so the two files can never disagree about what is on
 // the order.
 async function loadSellOrderSheetData(sql: SqlClient, id: string) {
@@ -600,7 +599,7 @@ sellOrders.post('/:id/price-import/preview', async (c) => {
   }
 
   const lines = (await sql`
-    SELECT label, part_number, condition, qty,
+    SELECT label, part_number, qty,
            unit_price::float AS unit_price,
            source_unit_price::float AS source_unit_price
     FROM sell_order_lines
@@ -861,20 +860,18 @@ sellOrders.patch('/:id', async (c) => {
     if (lineErr) return c.json({ error: lineErr }, 400);
   }
 
-  // A confirmed vendor price import names the products whose saved prices
-  // are the customer's bid — a product being a (part, condition), since the
-  // sheet prices New and Used separately. It only means something alongside
-  // the lines it prices, so it is refused on its own.
+  // A confirmed vendor price import names the parts whose saved prices are
+  // the customer's bid — every condition of the part, since the sheet prices
+  // a part once. It only means something alongside the lines it prices, so
+  // it is refused on its own.
   if (body.bidParts !== undefined) {
     const badPart = (p: unknown) => {
       if (typeof p !== 'object' || p === null) return true;
-      const { partNumber, condition } = p as { partNumber?: unknown; condition?: unknown };
-      if (typeof partNumber !== 'string' || partNumber.trim() === '' || partNumber.length > 200) return true;
-      return !(condition === null || condition === undefined
-        || (typeof condition === 'string' && condition.length > 0 && condition.length <= 200));
+      const { partNumber } = p as { partNumber?: unknown };
+      return typeof partNumber !== 'string' || partNumber.trim() === '' || partNumber.length > 200;
     };
     if (!Array.isArray(body.bidParts) || body.bidParts.length > 1000 || body.bidParts.some(badPart)) {
-      return c.json({ error: 'bidParts must be an array of { partNumber, condition } objects' }, 400);
+      return c.json({ error: 'bidParts must be an array of { partNumber } objects' }, 400);
     }
     if (body.lines === undefined) {
       return c.json({ error: 'bidParts requires lines' }, 400);
@@ -1618,10 +1615,6 @@ sellOrders.post('/:id/status', async (c) => {
       `;
       for (const [orderId, isMirror] of goodsFollowsLines) {
         await syncOrderGoodsTotal(tx, orderId, isMirror);
-      }
-      // A source PO already at Done whose last unsold line just went is sold.
-      for (const o of sourceOrders) {
-        await settleSoldTx(tx, o.order_id, u.id);
       }
       const submitters = await tx<{ user_id: string }[]>`
         SELECT DISTINCT o.user_id

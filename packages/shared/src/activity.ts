@@ -46,6 +46,7 @@ export const ACTIVITY_KIND_MAP: Record<
     archived:            'archived',
     unarchived:          'archived',
     box_check_flagged:   'note',
+    ai_review_done:      'note',
   },
   so: {
     created:             'created',

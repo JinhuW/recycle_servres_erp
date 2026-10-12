@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import ExcelJS from 'exceljs';
 import {
+  groupOrderProducts,
   parsePriceWorkbook,
   PriceColumnsNotFoundError,
   type OrderProduct,
@@ -38,7 +39,6 @@ function product(over: Partial<OrderProduct>): OrderProduct {
   return {
     partNumber: 'ABC123',
     label: 'RAM 16GB',
-    condition: null,
     qty: 4,
     lineCount: 1,
     oldPrice: null,
@@ -143,6 +143,45 @@ describe('header detection', () => {
     expect(res.rows[0].price).toBe(100);
   });
 
+  it('prefers Unit Price over another price column, and 型号 over a row-number 编号', () => {
+    const list = parsePriceWorkbook(wbWith([
+      ['Part Number', 'List Price', 'Ext. Price', 'Unit Price'],
+      ['ABC123', 100, 400, 50],
+    ]), [product({})]);
+    expect(list.rows[0]).toMatchObject({ status: 'matched', price: 50 });
+    const zh = parsePriceWorkbook(wbWith([
+      ['编号', '品名', '型号', '数量', '单价'],
+      [1, '内存', 'ABC123', 4, 40],
+    ]), [product({})]);
+    expect(zh.rows[0]).toMatchObject({ rawPart: 'ABC123', status: 'matched', price: 40 });
+  });
+
+  it('reads past a merged title that names both columns', () => {
+    const wb = wbWith([
+      ['Part Number Price List', null, null],
+      ['Item', 'Part Number', 'Unit Price'],
+      ['ram', 'ABC123', 10],
+    ]);
+    wb.worksheets[0]!.mergeCells('A1:C1');
+    expect(parsePriceWorkbook(wb, [product({})]).rows).toMatchObject([{ rawPart: 'ABC123', price: 10 }]);
+  });
+
+  it('leaves out a hidden tab', () => {
+    const wb = wbWith([['Part Number', 'Unit Price'], ['ABC123', 40]], 'Current');
+    const old = wb.addWorksheet('old', { state: 'hidden' });
+    old.addRow(['Part Number', 'Unit Price']);
+    old.addRow(['ABC123', 95]);
+    const res = parsePriceWorkbook(wb, [product({})]);
+    expect(res.rows).toHaveLength(1);
+    expect(res.rows[0]).toMatchObject({ sheet: 'Current', price: 40, status: 'matched' });
+  });
+
+  it('reads only the rows a sheet has, however far down a stray cell sits', () => {
+    const wb = wbWith([['Part Number', 'Unit Price'], ['ABC123', 40]]);
+    wb.worksheets[0]!.getCell('C1048576').value = 'x';
+    expect(parsePriceWorkbook(wb, [product({})]).rows).toHaveLength(1);
+  });
+
   it('throws PriceColumnsNotFoundError when no header row exists', () => {
     const wb = wbWith([
       ['just', 'some', 'cells'],
@@ -184,30 +223,75 @@ describe('part-number matching', () => {
     expect(res.summary).toMatchObject({ matched: 1, duplicate: 1 });
   });
 
-  it('disambiguates same part with two conditions via the Condition column', () => {
+  it('prices a part once: an older sheet\'s Condition rows at one price read as one', () => {
+    const wb = wbWith([
+      ['Part Number', 'Condition', 'Unit Price (USD)'],
+      ['ABC123', 'New', 100],
+      ['ABC123', 'Used', 100],
+    ]);
+    const res = parsePriceWorkbook(wb, [product({ oldPrice: 90 })]);
+    expect(res.rows.map(r => r.status)).toEqual(['duplicate', 'matched']);
+    expect(res.rows[1]).toMatchObject({ price: 100, oldPrice: 90 });
+    expect(res.rows[1]).not.toHaveProperty('condition');
+  });
+
+  it('leaves to the manager a part an older sheet priced apart per condition', () => {
+    // Sent before v1.242.0 and returned after it: New and Used priced apart.
     const wb = wbWith([
       ['Part Number', 'Condition', 'Unit Price (USD)'],
       ['ABC123', 'New', 100],
       ['ABC123', 'Used', 60],
     ]);
-    const products = [
-      product({ condition: 'New', oldPrice: 90 }),
-      product({ condition: 'Used', oldPrice: 50 }),
-    ];
-    const res = parsePriceWorkbook(wb, products);
-    expect(res.rows[0]).toMatchObject({ status: 'matched', condition: 'New', price: 100, oldPrice: 90 });
-    expect(res.rows[1]).toMatchObject({ status: 'matched', condition: 'Used', price: 60, oldPrice: 50 });
+    const res = parsePriceWorkbook(wb, [product({ oldPrice: 90 })]);
+    expect(res.rows.map(r => r.status)).toEqual(['per-condition', 'per-condition']);
+    expect(res.summary).toMatchObject({ matched: 0, ambiguous: 2 });
+    expect(res.unmatchedProducts).toHaveLength(1);
   });
 
-  it('marks ambiguous when conditions collide and the column is gone', () => {
+  it('reads a second section of a sheet by its own header', () => {
+    const res = parsePriceWorkbook(wbWith([
+      ['Part Number', 'Description', 'Unit Price'],
+      ['ABC123', 'RAM', 40],
+      [],
+      ['Part Number', 'Unit Price', 'Qty Avail'],
+      ['XYZ-9', 140, 250],
+    ]), [product({}), product({ partNumber: 'XYZ-9', label: 'SSD' })]);
+    expect(res.rows.map(r => [r.rawPart, r.price])).toEqual([['ABC123', 40], ['XYZ-9', 140]]);
+  });
+
+  it('marks ambiguous when one part sits under two labels', () => {
     const wb = wbWith([
       ['Part Number', 'Unit Price (USD)'],
       ['ABC123', 100],
     ]);
-    const products = [product({ condition: 'New' }), product({ condition: 'Used' })];
+    const products = [product({}), product({ label: 'RAM 16GB (typed)' })];
     const res = parsePriceWorkbook(wb, products);
     expect(res.rows[0].status).toBe('ambiguous');
     expect(res.summary.ambiguous).toBe(1);
+  });
+
+  it('folds one part in two conditions into one product', () => {
+    const products = groupOrderProducts([
+      { label: 'RAM 16GB', part_number: 'ABC-123', qty: 10, unit_price: 40, source_unit_price: null },
+      { label: 'RAM 16GB', part_number: 'abc123', qty: 5, unit_price: 40, source_unit_price: null },
+    ], false);
+    expect(products).toEqual([
+      { partNumber: 'ABC-123', label: 'RAM 16GB', qty: 15, lineCount: 2, oldPrice: 40 },
+    ]);
+  });
+
+  it('folds one part under two line labels into one product, so its one sheet row prices both', () => {
+    const products = groupOrderProducts([
+      { label: 'a1b2c3d4', part_number: 'SR3B9', qty: 2, unit_price: 50, source_unit_price: null },
+      { label: 'e5f6a7b8', part_number: 'SR3B9', qty: 3, unit_price: 45, source_unit_price: null },
+      { label: 'Loose cable', part_number: null, qty: 1, unit_price: 5, source_unit_price: null },
+    ], false);
+    expect(products).toEqual([
+      { partNumber: 'SR3B9', label: 'a1b2c3d4', qty: 5, lineCount: 2, oldPrice: null },
+      { partNumber: null, label: 'Loose cable', qty: 1, lineCount: 1, oldPrice: 5 },
+    ]);
+    const res = parsePriceWorkbook(wbWith([['Part Number', 'Unit Price'], ['SR3B9', 60]]), products);
+    expect(res.rows[0]).toMatchObject({ status: 'matched', price: 60, qty: 5, lineCount: 2 });
   });
 
   it('reports order products the file never priced', () => {
@@ -241,6 +325,15 @@ describe('cell reading', () => {
     expect(res.rows.every(r => r.status === 'matched')).toBe(true);
   });
 
+  it('reads a decimal comma as the decimal point, and refuses a malformed grouping', () => {
+    const res = parsePriceWorkbook(wbWith([
+      ['Part Number', 'Unit Price'],
+      ['A-1', '12,50'], ['A-2', '1.234,50'], ['A-3', '1,234'], ['A-4', '1,234.50'], ['A-5', '1,2345'],
+    ]), ['A-1', 'A-2', 'A-3', 'A-4', 'A-5'].map(pn => product({ partNumber: pn, label: pn })));
+    expect(res.rows.map(r => r.price)).toEqual([12.5, 1234.5, 1234, 1234.5, null]);
+    expect(res.rows[4]).toMatchObject({ status: 'invalid-price' });
+  });
+
   it('reads rich-text part numbers', () => {
     const wb = wbWith([
       ['Part Number', 'Unit Price (USD)'],
@@ -248,6 +341,13 @@ describe('cell reading', () => {
     ]);
     const res = parsePriceWorkbook(wb, [product({})]);
     expect(res.rows[0]).toMatchObject({ status: 'matched', canonPart: 'ABC123' });
+  });
+
+  it('reads a 0 as no bid, not as a price', () => {
+    const res = parsePriceWorkbook(wbWith([['Part Number', 'Unit Price'], ['ABC123', 0], ['XYZ-9', '0']]),
+      [product({}), product({ partNumber: 'XYZ-9', label: 'SSD' })]);
+    expect(res.rows.map(r => r.status)).toEqual(['no-price', 'no-price']);
+    expect(res.summary.matched).toBe(0);
   });
 
   it('flags empty and invalid prices without dropping the row', () => {
@@ -484,9 +584,9 @@ const BID_LINES = [
 const repriced = (a: number, b: number) => [
   { ...BID_LINES[0], unitPrice: a }, { ...BID_LINES[1], unitPrice: b },
 ];
-// A confirmed product with no condition: the row covers every line of the part.
-const bid = (...parts: string[]) => parts.map(partNumber => ({ partNumber, condition: null }));
-// The same part in two conditions — the import prices each separately.
+// A confirmed part: the bid covers every line of it.
+const bid = (...parts: string[]) => parts.map(partNumber => ({ partNumber }));
+// The same part in two conditions — the import prices them as one.
 const COND_LINES = [
   { category: 'RAM', label: 'DIMM C', partNumber: 'BID-C3', qty: 10, unitPrice: 40, warehouseId: 'WH-LA1', condition: 'New' },
   { category: 'RAM', label: 'DIMM C', partNumber: 'BID-C3', qty: 5, unitPrice: 40, warehouseId: 'WH-LA1', condition: 'Used' },
@@ -547,25 +647,7 @@ describe('PATCH /api/sell-orders/:id with bidParts', () => {
     expect(await eventsFor(a!.id)).toHaveLength(1);
   });
 
-  it('records only the confirmed condition of a part sold in two conditions', async () => {
-    const { token } = await loginAs(ALEX);
-    const id = await createOrder(token, COND_LINES);
-    // The sheet priced the New units at $100; the Used line keeps its $40.
-    const res = await api('PATCH', `/api/sell-orders/${id}`, {
-      token,
-      body: {
-        lines: [{ ...COND_LINES[0], unitPrice: 100 }, COND_LINES[1]],
-        bidParts: [{ partNumber: 'bid-c3', condition: ' new ' }],
-      },
-    });
-    expect(res.status).toBe(200);
-    const c = await refPrice('BID-C3');
-    // Not the qty-weighted blend (10·100 + 5·40)/15 = 80: the vendor never quoted that.
-    expect(c?.last_price).toBe(100);
-    expect(await eventsFor(c!.id)).toEqual([{ price: 100, source: `bid:${id}` }]);
-  });
-
-  it('a null condition covers every line of the part', async () => {
+  it('a confirmed part covers every condition of it', async () => {
     const { token } = await loginAs(ALEX);
     const id = await createOrder(token, COND_LINES);
     const res = await api('PATCH', `/api/sell-orders/${id}`, {

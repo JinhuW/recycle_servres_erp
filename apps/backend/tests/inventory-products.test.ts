@@ -54,6 +54,26 @@ describe('GET /api/inventory/products', () => {
     expect(g.unit_cost_avg).toBeCloseTo((4 * 70 + 6 * 90 + 1 * 80) / 11, 4);
   });
 
+  it('groups RAM by module family: suffix variants merge, module forms stay apart', async () => {
+    const { token } = await loginAs(ALEX);
+    await po(token, { brand: 'Samsung', partNumber: 'M393A2K43BB1-CTD7Q', qty: 23 });
+    await po(token, { brand: 'Samsung', partNumber: 'M393A2K43BB1-CTD', qty: 2 });
+    await po(token, { brand: 'Samsung', partNumber: 'M391A2K43BB1-CTDQ', qty: 1 });
+
+    const r = await api<{ products: (Group & { part_numbers: string[]; lines: (Lot & { part_number: string })[] })[] }>(
+      'GET', '/api/inventory/products?q=A2K43BB1', { token });
+    expect(r.status).toBe(200);
+    expect(r.body.products.length).toBe(2);
+    const rdimm = r.body.products.find((g) => g.part_number?.startsWith('M393'))!;
+    expect(rdimm.part_number).toBe('M393A2K43BB1-CTD*');
+    expect(rdimm.qty).toBe(25);
+    expect([...rdimm.part_numbers].sort()).toEqual(['M393A2K43BB1-CTD', 'M393A2K43BB1-CTD7Q']);
+    expect(rdimm.lines.map((l) => l.part_number).sort()).toEqual(['M393A2K43BB1-CTD', 'M393A2K43BB1-CTD7Q']);
+    const udimm = r.body.products.find((g) => g.part_number?.startsWith('M391'))!;
+    expect(udimm.part_number).toBe('M391A2K43BB1-CTDQ');
+    expect(udimm.part_numbers).toEqual(['M391A2K43BB1-CTDQ']);
+  });
+
   it('treats part-number-less lines as their own singleton groups', async () => {
     const { token } = await loginAs(ALEX);
     await po(token, { brand: 'NULLBRANDX' });

@@ -7,8 +7,6 @@
 // and all writes happen under one FOR NO KEY UPDATE lock on the orders row.
 
 import { writeOrderEvent } from './orderAudit';
-import { settleSoldTx } from './orderSold';
-import type { Role } from '../types';
 import { writeSellOrderEvent } from './sellOrderAudit';
 import { notify, notifyManagers } from '../lib/notify';
 import { ENFORCED_EVERYWHERE, leaveDraftBlockers, type LeaveDraftBlocker } from './orderTxnRule';
@@ -16,6 +14,7 @@ import type { SqlLike } from './orderAudit';
 import type { SOLineSnap } from './sellOrderLineMatch';
 import { prunePackRows } from '../routes/sellOrderPack';
 import { committedSellStatuses, isSellableLineStatus, openSellStatuses } from '../lib/sellCommitment';
+import { poAiReviewSetting, queuePoAiReviewTx, supersedePoAiReviewsTx } from './poAiReview';
 
 // Canonical lifecycle ordering. The workflow_stages table was removed; this
 // map's key order (draft → in_transit → reviewing → ready_to_pay → done) is
@@ -42,47 +41,26 @@ export const LIFECYCLE_LABEL: Record<string, string> = {
   reviewing: 'Reviewing',
   ready_to_pay: 'Ready to Pay',
   done: 'Done',
-  sold: 'Sold',
 };
-
-// 'sold' is Done with every line sold — settled by services/orderSold.ts,
-// never chosen. It is deliberately absent from LINE_STATUS_FOR_LIFECYCLE: that
-// map's key order is the stages a manager drives, and a stage there gets a
-// line cascade, which a sale must remain the only writer of. For stage
-// arithmetic a sold order IS at Done: same index, same gates, nothing further
-// to advance to.
-const stageOf = (lifecycle: string): string => (lifecycle === 'sold' ? 'done' : lifecycle);
 
 // The book closes when the review does: from Ready to Pay on, the figure is
 // what the purchaser gets paid on, so lines, costs and ownership freeze. The
 // same set is "commission owed" for the dashboard and leaderboard. A plain
 // string[] so postgres.js binds it as an array parameter.
-export const REVIEWED_LIFECYCLES: string[] = ['ready_to_pay', 'done', 'sold'];
+export const REVIEWED_LIFECYCLES: string[] = ['ready_to_pay', 'done'];
 
 export function isClosedBook(lifecycle: string): boolean {
   return REVIEWED_LIFECYCLES.includes(lifecycle);
-}
-
-// Purchasers are told Done, not Sold: the sale is the manager's book. Read
-// paths pass effectiveRole() so a manager previewing as a purchaser sees what
-// the purchaser sees.
-export function visibleLifecycle(lifecycle: string, role: Role): string {
-  return lifecycle === 'sold' && role !== 'manager' ? 'done' : lifecycle;
 }
 
 const LABEL_TO_LIFECYCLE: Record<string, string> = Object.fromEntries(
   Object.entries(LIFECYCLE_LABEL).map(([id, label]) => [label, id]),
 );
 
-// The stages a status label names for this reader. A purchaser's "Done" is
-// done and sold together, and "Sold" is not a word they are shown; an unknown
-// label names nothing.
-export function lifecyclesForLabel(label: string, role: Role): string[] {
+// The stage a status label names; an unknown label names nothing.
+export function lifecyclesForLabel(label: string): string[] {
   const slug = LABEL_TO_LIFECYCLE[label];
-  if (!slug) return [];
-  if (role === 'manager') return [slug];
-  if (slug === 'sold') return [];
-  return slug === 'done' ? ['done', 'sold'] : [slug];
+  return slug ? [slug] : [];
 }
 
 // An archived PO's goods are gone from the business, so its lines leave every
@@ -107,8 +85,6 @@ export type AdvanceOutcome =
   | { kind: 'badStage'; msg: string }
   | { kind: 'archived' }
   | { kind: 'finalStage' }
-  | { kind: 'soldIsAutomatic' }
-  | { kind: 'alreadySold' }
   | { kind: 'sameStage'; lifecycle: string }
   | { kind: 'stageMoved'; lifecycle: string }
   | { kind: 'managerChanged'; manager: { id: string; name: string } | null }
@@ -344,6 +320,7 @@ export async function revertOrderToDraftTx(
 
   await tx`UPDATE orders SET lifecycle = 'draft' WHERE id = ${id}`;
   await cascadeLineStatusesTx(tx, id, actor.id, LINE_STATUS_FOR_LIFECYCLE.draft);
+  await supersedePoAiReviewsTx(tx, id);
   // The forward half of this transition notifies; so must the reverse, or a
   // manager mid-review is never told the order left their queue. The review
   // dialog alone only fires if they happen to reopen that exact order.
@@ -570,20 +547,16 @@ export async function advanceOrderTx(
     };
   }
 
-  const curIdx = stages.indexOf(stageOf(cur.lifecycle));
+  const curIdx = stages.indexOf(cur.lifecycle);
   let nextStageId: string;
   if (toStage) {
     if (actor.role !== 'manager') return { kind: 'forbidden', msg: 'Only managers can jump stages' };
-    if (toStage === 'sold') return { kind: 'soldIsAutomatic' };
     if (!stages.includes(toStage)) return { kind: 'badStage', msg: 'Unknown stage' };
     nextStageId = toStage;
   } else {
     if (curIdx < 0 || curIdx >= stages.length - 1) return { kind: 'finalStage' };
     nextStageId = stages[curIdx + 1];
   }
-  // A sold order asked for Done is already there; reopening means Reviewing
-  // or Ready to Pay, and the way back to Done re-settles it.
-  if (cur.lifecycle === 'sold' && nextStageId === 'done') return { kind: 'alreadySold' };
   // A jump to where the order already is moves nothing, but would still write
   // an `advanced` event for a transition that never happened — the stale page
   // that sent it is better told the order has moved.
@@ -656,6 +629,12 @@ export async function advanceOrderTx(
   if (newLineStatus) {
     await cascadeLineStatusesTx(tx, id, actor.id, newLineStatus, heldBack);
   }
+  // Queued in this transaction, so the move and its review commit together.
+  if (nextStageId === 'reviewing') {
+    if ((await poAiReviewSetting(tx)).enabled) await queuePoAiReviewTx(tx, id, 'stage', actor.id);
+  } else if (stages.indexOf(nextStageId) < stages.indexOf('reviewing')) {
+    await supersedePoAiReviewsTx(tx, id);
+  }
   // PRD §10: managers want to see when a purchaser finalises an order. Only
   // the move into In Transit fires it, so later manager-driven moves don't
   // spam — but a re-submission after a purchaser edit does, deliberately:
@@ -682,10 +661,6 @@ export async function advanceOrderTx(
     };
     await notifyManagers(tx, n);
     await notify(tx, { userId: cur.user_id, ...n });
-  }
-  // Landing on Done with nothing left to sell settles straight through.
-  if (nextStageId === 'done' && await settleSoldTx(tx, id, actor.id)) {
-    return { kind: 'ok', nextStageId: 'sold' };
   }
   return { kind: 'ok', nextStageId };
 }

@@ -4,6 +4,7 @@ import { allowedOptions, chipMarkingCanon, synthesizePartNumber } from '@recycle
 import { Combobox } from './Combobox';
 import { PartNumberField } from './PartNumberField';
 import { ItemTypePicker } from './ItemTypePicker';
+import { RamPartReadout } from './RamPartCheck';
 import { chipNumberRequired } from '../lib/ramRequired';
 import { ssdBrandRequired, SSD_BRAND_REQUIRED_OVER_GB } from '../lib/lineRequirements';
 import {
@@ -138,6 +139,13 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
         <div className="ph-field">
           <label>{t('partNumber')}<Req /></label>
           <PartNumberField className={inputClsFor('partNumber') + ' mono'} value={value.partNumber} onChange={v => onChange('partNumber', v)} />
+          <RamPartReadout
+            line={{ ...value, category }}
+            onUse={patch => {
+              for (const [k, v] of Object.entries(patch)) onChange(k as keyof DraftLine, v);
+            }}
+            onUsePart={v => onChange('partNumber', v)}
+          />
         </div>
       </>
     );

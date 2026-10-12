@@ -111,7 +111,6 @@ const PO_STAGE_KEY: Record<string, string> = {
   reviewing: 'poStageReviewing',
   ready_to_pay: 'poStageReadyToPay',
   done: 'poStageDone',
-  sold: 'poStageSold',
 };
 
 /** A PO stage named inside a sentence, from the lifecycle slug — never from

@@ -661,6 +661,8 @@ html.desktop, body.desktop, .desktop #root {
 .status-chip .sc-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
 .status-chip .sc-n { font-size: 11px; font-weight: 600; color: var(--fg-subtle); }
 .status-chip[aria-pressed="true"] .sc-n { color: var(--fg); }
+/* Sets the Sold chip apart: a flag beside the stages, not one of them. */
+.status-rail-sep { width: 1px; align-self: stretch; margin: 2px 2px; background: var(--border); }
 
 /* ===== KPIs ===== */
 .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--gap, 16px); }
@@ -1246,14 +1248,6 @@ html.desktop, body.desktop, .desktop #root {
 }
 .so-step.reached .so-step-dot { background: var(--fg-muted); color: var(--bg-elev); }
 .so-step.active .so-step-dot { background: var(--accent); color: white; }
-/* A sold order sits on Done's step in the chip's own colour. */
-.so-step.active.sold {
-  border-color: var(--cool);
-  background: var(--cool-soft);
-  color: oklch(0.45 0.16 295);
-  box-shadow: 0 0 0 3px var(--cool-soft);
-}
-.so-step.active.sold .so-step-dot { background: var(--cool); }
 .so-step-label { font-size: 12px; }
 .so-step-bar {
   flex: 1 1 auto;
@@ -4326,3 +4320,48 @@ body:has(.pk-page) .tweaks-fab, body:has(.pk-page) .tweaks-pop { display: none; 
 .ws-mail-draft-note { margin: 10px 14px 0; }
 
 .ws-mail-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* What the RAM part # decodes to, under the Part # field in both shells.
+   The family the decode recognised is marked, as a label reads it. */
+.rp-readout {
+  margin-top: 6px; padding: 8px 10px; border-radius: 8px;
+  font-size: 12px; line-height: 1.45;
+  background: var(--bg-soft); border: 1px solid var(--border);
+  color: var(--fg-muted);
+  display: grid; gap: 6px; justify-items: start;
+}
+.rp-readout.is-mismatch { background: var(--warn-soft); color: var(--warn-strong); }
+.rp-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.rp-head svg { flex-shrink: 0; }
+.rp-pn { overflow-wrap: anywhere; color: var(--fg-subtle); }
+.rp-pn mark { background: var(--accent-soft); color: var(--fg); border-radius: 3px; padding: 0 2px; }
+.rp-sum { color: var(--fg); font-weight: 500; }
+.rp-note { font-size: 11.5px; }
+.rp-table { border-collapse: collapse; font-size: 12px; }
+.rp-table th { font-weight: 500; text-align: left; color: var(--fg-subtle); padding: 0 12px 2px 0; }
+.rp-table td { padding: 2px 12px 2px 0; color: var(--fg); }
+.rp-table td.rp-bad { text-decoration: line-through; color: var(--fg-subtle); }
+.rp-readings { display: grid; gap: 4px; }
+.rp-reading { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--fg); }
+.rp-dialog { display: grid; gap: 10px; font-size: 13px; }
+.rp-scan {
+  display: flex; gap: 8px; align-items: flex-start;
+  padding: 8px 12px; border-radius: 8px; font-size: 12.5px; line-height: 1.45;
+  background: var(--bg-soft); border: 1px solid var(--border); color: var(--fg-muted);
+}
+.rp-scan.is-conflict { background: var(--warn-soft); border-color: var(--warn); color: var(--warn-strong); }
+.rp-scan svg { flex-shrink: 0; margin-top: 2px; }
+.rp-scan-body { display: grid; gap: 6px; justify-items: start; }
+
+/* Review mode: the AI review card. */
+.bc-ai .card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.bc-ai-body { display: grid; gap: 10px; }
+.bc-ai-body .neg { color: var(--neg); }
+.bc-ai-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.bc-ai-item { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: start; font-size: 13px; }
+.bc-ai-item.done { opacity: .6; }
+.bc-ai-item > .chip.dot { padding: 0; background: none; margin-top: 5px; }
+.bc-ai-text { min-width: 0; overflow-wrap: anywhere; }
+.bc-ai-actions { display: flex; gap: 4px; align-items: center; }
+.bc-ai-others { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.bc-ai-jump { cursor: pointer; border: 0; }

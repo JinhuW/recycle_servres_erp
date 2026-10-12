@@ -24,6 +24,7 @@ import { type ResolvedMarketValue } from '../../../lib/useMarketLookup';
 import { addableCategories, aiCaptureEnabled, categoryTone } from '../../../lib/lookups';
 import { parseSerials } from '../../../components/SerialNumbers';
 import { useChipFill } from '../../../lib/useChipFill';
+import { RamPartMismatchDialog, ScanPartNotice, mismatchKey, ramPartCheck, useRamPartFill } from '../../../components/RamPartCheck';
 import { cascadePatch } from '@recycle-erp/shared';
 
 // ─── LineDrawer ──────────────────────────────────────────────────────────────
@@ -103,6 +104,11 @@ export function LineDrawer({
     [cat, onChange],
   );
   useChipFill(line, { enabled: !readOnly, onFill: chipNumber => set({ chipNumber }) });
+  const ramFill = useRamPartFill(line, { enabled: !readOnly, onFill: set });
+  // Confirm asks once per set of disagreements; keeping the form as entered
+  // covers exactly what was shown, so a later edit that adds one asks again.
+  const [partDialog, setPartDialog] = useState(false);
+  const [partKept, setPartKept] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState(false);
   const [thumbBroken, setThumbBroken] = useState(false);
   const scanUrl = line.scanImageUrl ?? null;
@@ -147,6 +153,7 @@ export function LineDrawer({
   // Open while the purchaser is being asked to name the brand off the photo.
   const [brandDialog, setBrandDialog] = useState(false);
   const [aiNoticeSeverity, setAiNoticeSeverity] = useState<'info' | 'warn' | 'severe'>('info');
+  const [partCheck, setPartCheck] = useState<ScanResponse['partCheck'] | null>(null);
   // Desk scanner (live camera in place of the dropzone). With auto-open on,
   // every scanless line's drawer starts with it live, so a pallet goes stick
   // → fields → Confirm → next line without touching the mouse between sticks.
@@ -173,12 +180,15 @@ export function LineDrawer({
     setAiBusy(true);
     setAiError(null);
     setAiNotice(null);
+    setPartCheck(null);
     try {
       const form = new FormData();
       form.append('file', file, file.name);
       form.append('category', cat);
       const scan = await api.upload<ScanResponse>('/api/scan/label', form);
+      ramFill.forgetFills();
       set(scanToLinePatch(scan, cat));
+      setPartCheck(scan.partCheck ?? null);
       const conf = scan.confidence ?? 0;
       const noFields = Object.keys(scan.extracted ?? {}).length === 0;
       if (scan.provider === 'stub') {
@@ -192,7 +202,9 @@ export function LineDrawer({
         setAiNotice(t('lowConfVerify', { pct: Math.round(conf * 100) }));
         setAiNoticeSeverity('warn');
       }
-      return true;
+      // A label that contradicts itself keeps the desk camera open, so
+      // re-seating the stick is the retake.
+      return !scan.partCheck?.conflicts.length;
     } catch (err) {
       setAiError(scanErrorMessage(err, t));
       return false;
@@ -219,6 +231,35 @@ export function LineDrawer({
   };
   const onAiKeyDown: React.KeyboardEventHandler<HTMLDivElement> = (e) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onAiUpload(); }
+  };
+
+  const confirmLine = async (kept: string | null) => {
+    if (line._confirmed) { onClose(); return; }
+    // Brand before the gap list: confirming "Other" adds Chip # to what the
+    // line owes, so the gaps named below are only final once the brand is
+    // settled.
+    if (brandConfirmPending(line)) { setBrandDialog(true); return; }
+    // Name the gaps here rather than letting the round-trip fail into a
+    // dialog: the fields are on screen and the drawer stays open on top of
+    // them.
+    if (missingFields) {
+      showWarnToast(t('drawerStillNeeded', { fields: missingFields }));
+      return;
+    }
+    // Last, on a complete line: the question is whether its specs are the
+    // stick's, which only makes sense once they are all there.
+    const { mismatches } = ramPartCheck(line);
+    if (mismatches.length && mismatchKey(line, mismatches) !== kept) { setPartDialog(true); return; }
+    if (!onConfirmLine) { onClose(); return; }
+    setConfirming(true);
+    try {
+      await onConfirmLine();
+      onClose();
+    } catch (e) {
+      onConfirmError?.(e instanceof Error ? e.message : t('drawerConfirmFailed'));
+    } finally {
+      setConfirming(false);
+    }
   };
 
   const snCount = parseSerials(line.serialNumber).length;
@@ -459,6 +500,14 @@ export function LineDrawer({
                   </div>
                 )}
               </>
+            )}
+            {cat === 'RAM' && !readOnly && (
+              <ScanPartNotice
+                check={partCheck}
+                onRetake={showDropzone
+                  ? () => { if (scannedByCamRef.current) setCamOpen(true); else onAiUpload(); }
+                  : undefined}
+              />
             )}
             {duplicateOnLines && duplicateOnLines.length > 0 && (
               <div
@@ -714,30 +763,7 @@ export function LineDrawer({
                   <button
                     className="btn accent"
                     disabled={confirming || line._confirmed}
-                    onClick={async () => {
-                      if (line._confirmed) { onClose(); return; }
-                      // Brand before the gap list: confirming "Other" adds
-                      // Chip # to what the line owes, so the gaps named below
-                      // are only final once the brand is settled.
-                      if (brandConfirmPending(line)) { setBrandDialog(true); return; }
-                      // Name the gaps here rather than letting the round-trip
-                      // fail into a dialog: the fields are on screen and the
-                      // drawer stays open on top of them.
-                      if (missingFields) {
-                        showWarnToast(t('drawerStillNeeded', { fields: missingFields }));
-                        return;
-                      }
-                      if (!onConfirmLine) { onClose(); return; }
-                      setConfirming(true);
-                      try {
-                        await onConfirmLine();
-                        onClose();
-                      } catch (e) {
-                        onConfirmError?.(e instanceof Error ? e.message : t('drawerConfirmFailed'));
-                      } finally {
-                        setConfirming(false);
-                      }
-                    }}
+                    onClick={() => { void confirmLine(partKept); }}
                   >
                     <Icon name="check" size={13} /> {confirming ? t('drawerConfirming') : t('drawerConfirmLine')}
                   </button>
@@ -765,6 +791,20 @@ export function LineDrawer({
             }
             : undefined}
           onCancel={() => setBrandDialog(false)}
+        />
+      )}
+      {partDialog && (
+        <RamPartMismatchDialog
+          line={line}
+          onUse={patch => { set(patch); setPartDialog(false); }}
+          onUsePart={partNumber => { set({ partNumber }); setPartDialog(false); }}
+          onKeep={() => {
+            const key = mismatchKey(line, ramPartCheck(line).mismatches);
+            setPartKept(key);
+            setPartDialog(false);
+            void confirmLine(key);
+          }}
+          onCancel={() => setPartDialog(false)}
         />
       )}
       {lightbox && scanUrl && (

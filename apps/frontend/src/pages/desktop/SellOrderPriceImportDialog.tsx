@@ -15,7 +15,7 @@ import type { PriceApplyRow } from '../../lib/priceImport';
 // confirming fills the edit form's inputs, and the manager saves as usual.
 
 type PreviewRowStatus =
-  | 'matched' | 'not-in-order' | 'no-price' | 'invalid-price' | 'duplicate' | 'ambiguous';
+  | 'matched' | 'not-in-order' | 'no-price' | 'invalid-price' | 'duplicate' | 'ambiguous' | 'per-condition';
 
 type PreviewRow = {
   // The template ships one tab per category, so a row's identity is
@@ -24,7 +24,6 @@ type PreviewRow = {
   rowNumber: number;
   rawPart: string;
   canonPart: string;
-  condition: string | null;
   price: number | null;
   rawPrice: string;
   status: PreviewRowStatus;
@@ -35,7 +34,7 @@ type PreviewRow = {
   lineCount?: number;
 };
 
-type ProductRef = { partNumber: string | null; label: string; condition: string | null };
+type ProductRef = { partNumber: string | null; label: string };
 
 type PreviewResponse = {
   currency: string;
@@ -181,6 +180,7 @@ const WARNING_LABEL_KEY: Record<Exclude<PreviewRowStatus, 'matched'>, string> = 
   'invalid-price': 'soPriceImportInvalid',
   duplicate: 'soPriceImportDuplicate',
   ambiguous: 'soPriceImportAmbiguous',
+  'per-condition': 'soPriceImportPerCondition',
 };
 
 function PriceImportPreviewDialog({
@@ -211,7 +211,6 @@ function PriceImportPreviewDialog({
   const confirm = () =>
     onConfirm(included.map(r => ({
       canonPart: r.canonPart,
-      condition: r.condition ?? null,
       price: r.price ?? 0,
     })));
 
@@ -254,7 +253,6 @@ function PriceImportPreviewDialog({
                     <div style={{ fontWeight: 500, fontSize: 13 }}>{r.label}</div>
                     <div style={{ fontSize: 11, color: 'var(--fg-subtle)', display: 'flex', gap: 8, marginTop: 2 }}>
                       <span className="mono">{r.partNumber ?? '—'}</span>
-                      {r.condition && <span>{r.condition}</span>}
                       {(r.lineCount ?? 1) > 1 && (
                         <span>{t('soPriceImportAppliesTo', { n: String(r.lineCount) })}</span>
                       )}

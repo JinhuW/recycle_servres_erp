@@ -15,7 +15,6 @@ import { isEmail } from '../lib/email';
 import { getDb } from '../db';
 import { clampLimit } from '../lib/pagination';
 import { effectiveRole } from '../lib/role';
-import { visibleLifecycle } from '../services/orderAdvance';
 import type { Env, User } from '../types';
 import {
   loadCrmSettings, tierFor, cadenceFor, healthFor, effectiveGap, dueStateFor,
@@ -506,7 +505,7 @@ suppliers.get('/:id', async (c) => {
     ...toApi(rows[0], s),
     canEdit: canWrite(u, rows[0].owner_id),
     timeline,
-    orders: orders.map((o) => ({ ...o, lifecycle: visibleLifecycle(o.lifecycle as string, effectiveRole(u)) })),
+    orders,
     sold,
   });
 });

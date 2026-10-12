@@ -5,6 +5,7 @@
 import type { LinePhoto } from './linePhotos';
 import type { PackageSource } from './packageSource';
 import type { TrackedPackage } from './packages';
+import type { RamScanCheck } from '@recycle-erp/shared';
 export type { LinePhoto };
 
 export type Role = 'manager' | 'purchaser';
@@ -127,6 +128,9 @@ export type OrderSummary = {
   payment: 'company' | 'self';
   notes: string | null;
   lifecycle: string;
+  // Every line with units has sold — a flag beside the stage, not a stage, so
+  // a Ready to Pay or Done order can carry it. Managers only; absent otherwise.
+  sold?: boolean;
   archivedAt: string | null;
   createdAt: string;
   // The goods cost — a negotiated override of the line subtotal, or null for
@@ -286,7 +290,8 @@ export type OrderEventKind =
   | 'line_photo_removed'
   | 'archived'
   | 'unarchived'
-  | 'box_check_flagged';
+  | 'box_check_flagged'
+  | 'ai_review_done';
 
 export type OrderEventChange = { field: string; from: unknown; to: unknown };
 
@@ -374,6 +379,8 @@ export type ScanResponse = {
   extracted: Record<string, string>;
   confidence: number;
   provider: 'stub' | 'openrouter';
+  /** RAM only: the label's part # cross-checked against its printed specs. */
+  partCheck?: RamScanCheck;
 };
 
 export type RefPrice = {

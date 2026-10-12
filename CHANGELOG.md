@@ -17,6 +17,239 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.247.1] - 2026-10-11
+
+Fixes from the review before the v1.247 release (RS-233). `/code-review max`
+ran over dev against main (v1.241.0 → v1.247.0: RS-227 to RS-232). Sixteen
+finders, then verifiers, then a sweep; every finding was checked against the
+code, most with a failing test first. The ones kept are recorded in the
+ticket with the reason.
+
+### Fixed
+
+- **The AI review no longer undoes the scan's own part-number fixes.** Its
+  label witness was the scan's raw read, which the scan keeps on record, while
+  the line holds the part number the scan corrected (O for 0, HMA8 for HMAA).
+  Every corrected line came back as an error whose Apply wrote the misread
+  back. The witness, and a photo read again, now go through the same
+  correction.
+- **A misread part number is flagged once, not "fixed" into the specs.** When
+  one look-alike reading fits every spec the line names, the specs are judged
+  by that reading, so the review no longer offers to rewrite a right rank to
+  the misread's.
+- **Apply works on a Form/Device pair.** It now goes through the editors'
+  spec cascade, so SODIMM → RDIMM brings Laptop → Server with it (and answers
+  that finding) instead of being refused as a half-moved line either way
+  round. Apply reads the findings again first, so an edit made in another tab
+  since the card loaded is not written over.
+- **The review worker:** takes the PO's row before the review's row, so a
+  move or revert racing a finished review can't deadlock; drops findings for
+  lines removed mid-run instead of failing the whole review on the foreign
+  key; stops claiming reviews once shutdown starts; fences a review a second
+  instance took over after it went stale; holds the cost cap when four lines
+  reach for a model call at once; never pays a web lookup for a placeholder
+  or a Mixed lot's synthetic part number; takes no brand from a web listing
+  and reads `10K` RPM as 10000; reads old scans that stored numbers; and
+  re-reads only RAM, SSD and HDD photos. Its market value is now the Market
+  board's basis (last price, else average sell). A cost finding goes stale
+  once the unit cost changes, and a missing part number names the label's.
+  Archiving a PO cancels its waiting review; the card keeps the last finished
+  review's findings however many runs failed after it; and Apply sends Review
+  mode's waiting count ticks before the page reloads.
+- **The `ai_review_done` event reads as words**, on the PO and on the Activity
+  page, and only managers see it — purchasers were shown the raw kind and the
+  issue counts of a manager-only check.
+- **A `sold` written after 0173 lands as `done`** (migration 0174). 0173 ran
+  at the new container's boot while the old instance, still serving, could
+  settle a sold-out PO to `sold`: an unknown stage the new code shows raw to
+  the purchaser, leaves open on the closed book and drops from commission.
+- **Sold-flag rough edges:** the phone Inventory KPIs count Sold lots out
+  again; the desktop Sold chip counts Done POs before it is clicked; a Sold
+  chip left on no longer empties the list under the purchaser preview;
+  `excludeStatus=Sold` from an older phone bundle no longer hides sold POs
+  still waiting on review or payment; and the Activity page drops the old
+  `Done → Sold` rows, as the PO's own history already did.
+- **Grouped Inventory hands a sell order each lot's own part number**, not the
+  family's `M393A2K43BB1-CTD*`, which was saved on the sell-order lines, minted
+  a junk Market row on Done and blanked Quick View. A dashed SK Hynix tail
+  (`-VK-TF`) groups with its dash-free spelling again.
+- **RAM part numbers:** Kingston DDR3L and kits, SK Hynix VLP RDIMMs and
+  DDR4/DDR5 speeds printed as a PC4/PC5 rate are read. A part number that
+  decodes only through a look-alike is no longer rewritten by a scan or used
+  to fill on its own, and when two readings both decode further, neither is
+  picked. On the desktop drawer a scan owns the values it wrote.
+- **Price sheets, for both imports:** a Unit Price column wins over List or
+  Last Price and an Ext. Price is never read; 型号 wins over a row-number
+  编号; hidden tabs, merged titles and a sparse sheet's empty rows are passed
+  over (a stray cell at row 1,048,576 used to cost gigabytes); a second header
+  further down starts its own section; a decimal comma reads as one.
+- **The Market import** refuses rows in any currency but dollars — by cell,
+  format, header or tab — and reads 美元 as dollars; a list with more matches
+  than an apply takes (now 5,000) is refused at the preview, not after it;
+  the apply writes the list in two statements.
+- **The bid import** reads a 0 as no bid instead of a $0 price that zeroed the
+  part's max buy; prices a part once across the labels its lines were added
+  under; and leaves to the manager a part an older per-condition sheet priced
+  apart, instead of applying its last row to every condition.
+- **Settings:** the AI review's cost cap is read on blur, so typing `.5` no
+  longer stores $5.
+
+## [1.247.0] - 2026-10-11
+
+A manager can re-price the Market board from a spreadsheet (RS-232). Until now
+the only way to record a market price was the pencil on one row at a time, so
+a broker's price list meant typing every part by hand. "Import prices" on the
+desktop Market page takes an `.xlsx`. Only its Part Number and Unit Price
+columns are read, located by header on any tab and below any title rows, and
+every other column is ignored. Each matched part gets a new recorded price,
+and its recommended max buy follows, because max buy is derived from that
+price.
+
+### Added
+- `POST /api/market/price-import/preview` matches each row to a part already
+  on the Market list by canonical part number. When two rows share one, the
+  most recently maintained wins, as for the scraper. The preview shows the
+  current → new price and max buy for each part, and lists every row it will
+  skip: not on the Market list, no price (blank or 0), not a price, priced in
+  yuan, or listed again further down. It writes nothing.
+- `POST /api/market/price-import/apply` records the prices the manager saw as
+  market data points (`import:<email>`, with the file name as the note, on
+  Activity). It locks the rows up front in one order and takes at most 1000
+  prices. Writing an unchanged price on purpose re-dates it and clears the
+  stale flag.
+
+### Changed
+- The bid-sheet reader is shared: `readPriceSheetRows` in
+  `services/sellOrderPriceImport.ts` serves both imports. It also reports a
+  yuan mark from the price header, the cell text or the cell's number
+  format, which a bid ignores (its order names the currency). The USD-only
+  Market board skips those rows.
+- The Market import preview is exempt from the 1 MiB JSON body cap, like the
+  bid preview, and keeps its own 8 MB limit.
+
+## [1.246.0] - 2026-10-11
+
+Sold is now a flag beside a PO's stage, not a stage after Done (RS-231). Since
+v1.164.0 a Done PO whose every line had sold moved on to a `sold` lifecycle.
+That split the desktop list's Done chip in two, relabelled Done as Sold on the
+stepper, and gave a PO that sold out at Ready to Pay no sign of it. Selling
+isn't a workflow step, because stock is sellable before the PO is Done. The
+flag is now read off the lines whenever it's needed, at any stage from In
+Transit on, so a "Done · Sold" or "Ready to Pay · Sold" PO shows both.
+
+### Changed
+- A PO at In Transit, Reviewing, Ready to Pay or Done whose every line with
+  units is at the Sold line status carries `sold` (managers only). It is
+  derived, never stored. Adding a line or walking one off Sold clears it, so
+  the inventory editor's lock against walking a line off Sold is gone.
+- The desktop PO list counts every PO under its real stage. A separate Sold
+  chip narrows whatever stage is picked. Rows show a Sold badge beside the
+  stage pill, on the phone too, and the phone's default view now hides only
+  Done.
+- The PO page keeps the real stage on the stepper, shows a Sold badge, and on
+  desktop puts the Sold-out panel (with the sell orders that sold it) above
+  the stage panel at any stage.
+- `GET /api/orders`: `status=Sold` and `excludeStatus=Sold` filter on the
+  flag; `status=Done` is the stage, sold or not. The spreadsheet's Status
+  reads `Done · Sold` for managers.
+- Migration 0173 moves existing `sold` POs back to `done`. Their old
+  `Done → Sold` activity rows are hidden, and a reopen from Sold reads as one
+  from Done.
+
+## [1.245.0] - 2026-10-11
+
+Purchase orders now get an AI review when they move to Reviewing (RS-230).
+The 2026-10-11 audit decoded every RAM line's part number by hand and found
+350 lots whose specs contradicted it. That audit ran long after the stock was
+bought, and nothing checked a PO while its box was still on the bench.
+
+- **Turning it on:** a new background loop picks up a review that the stage
+  move queues in its own transaction. It is off by default (a workspace
+  setting with a per-PO cost cap).
+- **What it checks:** every line against its decoded part number (RS-228's
+  decoder), its label read and its market value. Where the sources disagree,
+  it re-reads the label photo through OpenRouter. It looks a part number up on
+  the web (an `:online` model) only when no maker's scheme decodes it, and
+  caches the answer in `part_number_lookups`.
+- **How a manager sees it:** findings land in a new card in Review mode, with
+  an *AI n* chip on the rows they concern. The reviewer suggests and never
+  edits. Apply goes through the ordinary line PATCH, so the edit is audited
+  like any other. Dismissals survive a re-run.
+- **Runbook:** the manual procedure the reviewer automates is now written up
+  in `docs/po-spec-audit-runbook.md`.
+- **Transport changes:** `openRouterJson` takes any number of images and
+  reports billed usage, and a call can name its own model and timeout.
+
+## [1.244.0] - 2026-10-11
+
+Inventory's grouped view now groups RAM by module family (RS-229). It used to
+merge lots only when their part numbers matched exactly, so one stick appeared
+as several products whenever the maker's trailing code differed:
+`M393A2K43BB1-CTD`, `-CTD7Q` and `-CTDQ` were three rows. The new
+`ramFamily` decoder (`@recycle-erp/shared`) keeps the part of a Samsung,
+SK Hynix (DDR3/4) or Micron part number that names the module form, dies,
+organisation, speed and (for Micron) die revision. It drops only the
+packaging and marking codes after it.
+
+### Changed
+- RAM suffix variants are one product in the grouped view and the grouped
+  export. The product shows `M393A2K43BB1-CTD*`, hovering lists its part
+  numbers, and its lots table gains a Part # column. RDIMM and ECC UDIMM
+  (`M393` vs `M391`) stay separate products, and so do different dies and
+  speeds. Part numbers the decoder can't read (OEM, Corsair, G.Skill,
+  Kingston, Hynix DDR5) group as before.
+
+## [1.243.0] - 2026-10-11
+
+RAM lines are now checked against their own part number (RS-228). A new
+decoder in `@recycle-erp/shared` reads the makers' part-numbering schemes
+(Samsung, SK Hynix, Micron and Crucial, Kingston, G.Skill, Corsair) and says
+what the stick is, so the form no longer has to take the purchaser's or the
+scanner's word for every select. Checked against prod after today's audit,
+it decodes 1,744 of 2,023 RAM lines and disagrees with them only where the
+line was wrong.
+
+### Added
+
+- **Part # readout.** Under a RAM line's Part # (desktop drawer and phone
+  form) the decoded spec is shown with the module family marked —
+  `M393A2K40`BB1-CRC0Q → Samsung 16GB DDR4 · Server · RDIMM · 1Rx4 · 2400.
+- **Blank specs fill from the part #** as it is typed or scanned. A value the
+  user picked or the scan read is never replaced, and opening an existing line
+  fills nothing.
+- **Confirm asks when the form contradicts the part #.** The readout lists each
+  disagreeing field with a one-click fix; Confirm (and the phone's Add to
+  order) asks once: use the part #'s specs, or keep as entered.
+- **Misread part numbers.** A part # that only decodes one look-alike character
+  away (O/0, I/1, HMAA/HMA8, PZ/PDZ, …) is decoded through that reading, and
+  the readout offers to correct it. When the form disagrees with the part #,
+  readings that would agree with it are offered too.
+- **Label scans cross-check themselves.** `/api/scan/label` compares a RAM
+  label's part # with its printed specs and returns `partCheck`: a part # whose
+  one-character correction makes the two agree is corrected, fields the model
+  skipped are filled from it, and a contradiction neither explains is reported.
+  The desktop drawer and the phone form show it with a Retake button (the desk
+  camera stays open for a re-seat); the RAM sheet flags the stick and offers a
+  re-read. `label_scans` still stores what the model read.
+
+## [1.242.0] - 2026-10-11
+
+The vendor bid sheet no longer prices by condition (RS-227). It used to print
+a Condition column and give a part one row per condition, so a vendor quoted
+New and Used separately and the import matched each row back by part number
+and condition. Now a part is one bid row and gets one price.
+
+### Changed
+
+- **The bid sheet has no Condition column.** A part on the order in several
+  conditions prints as one row with its qty summed. The packing lists and the
+  order's product `#`s still keep conditions apart.
+- **The price import matches by part number alone.** The confirmed price goes
+  on every line of the part, whatever its condition, and the preview no longer
+  shows a condition. A Condition column in an older sheet is ignored. The
+  bid recorded on the Market board covers the whole part, and `bidParts` on
+  `PATCH /api/sell-orders/:id` is now `{ partNumber }`.
+
 ## [1.241.0] - 2026-10-10
 
 Pack mode's scan box now filters by PO number as well as part number (RS-226).

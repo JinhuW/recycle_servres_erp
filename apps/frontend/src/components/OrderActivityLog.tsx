@@ -9,6 +9,7 @@ import {
 import type { OrderEvent, OrderEventChange } from '../lib/types';
 import type { OrderEvents } from '../lib/useOrderEvents';
 import { boxCheckEventLines } from '../lib/boxCheck';
+import { aiReviewEventText } from '../lib/aiReview';
 
 type Props = {
   // Lets a host lay the card out by class rather than by position. The desktop
@@ -43,6 +44,7 @@ const KIND_ICON: Record<OrderEvent['kind'], IconName> = {
   archived:     'box',
   unarchived:   'rotate',
   box_check_flagged: 'flag',
+  ai_review_done: 'sparkles',
 };
 
 type Tone = 'pos' | 'info' | 'warn' | 'muted';
@@ -69,6 +71,7 @@ const KIND_TONE: Record<OrderEvent['kind'], Tone> = {
   archived:     'muted',
   unarchived:   'info',
   box_check_flagged: 'warn',
+  ai_review_done: 'muted',
 };
 
 // Tone palette mirrors the .chip rules in tokens.css so the bubbles read as
@@ -197,6 +200,8 @@ function summary(ev: OrderEvent, locale: string, t: Translate): { title: string;
       const { count, lines } = boxCheckEventLines(d, t);
       return { title: t('acBoxCheckFlagged', { n: String(count) }), lines };
     }
+    case 'ai_review_done':
+      return { title: aiReviewEventText(d, t), lines: [] };
     // The backend and this bundle deploy independently, so a browser holding
     // an older build can be handed a kind it has never heard of. Returning
     // undefined here would throw on `s.title` and unmount the whole app —

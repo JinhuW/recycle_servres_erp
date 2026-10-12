@@ -22,41 +22,35 @@ describe('applyPriceRows', () => {
       line({ warehouse: 'NJ' }),
       line({ partNumber: 'OTHER-9', unitPrice: 7 }),
     ];
-    const out = applyPriceRows(lines, [{ canonPart: 'ABC123', condition: null, price: 55 }]);
+    const out = applyPriceRows(lines, [{ canonPart: 'ABC123', price: 55 }]);
     expect(out.map(l => l.unitPrice)).toEqual([55, 55, 7]);
     expect(out[0].warehouse).toBe('LA');
   });
 
   it('matches through prefixes, separators, and case in the draft line', () => {
     const lines = [line({ partNumber: 'pn: abc_123' })];
-    const out = applyPriceRows(lines, [{ canonPart: 'ABC123', condition: null, price: 10 }]);
+    const out = applyPriceRows(lines, [{ canonPart: 'ABC123', price: 10 }]);
     expect(out[0].unitPrice).toBe(10);
   });
 
-  it('uses the condition to disambiguate colliding parts', () => {
+  it('prices every condition of the part alike', () => {
     const lines = [
       line({ condition: 'New', unitPrice: 1 }),
       line({ condition: 'Used', unitPrice: 2 }),
     ];
-    const out = applyPriceRows(lines, [{ canonPart: 'ABC123', condition: 'new', price: 100 }]);
-    expect(out.map(l => l.unitPrice)).toEqual([100, 2]);
-  });
-
-  it('a row without a condition applies to any condition', () => {
-    const lines = [line({ condition: 'New' }), line({ condition: 'Used' })];
-    const out = applyPriceRows(lines, [{ canonPart: 'ABC123', condition: null, price: 9 }]);
-    expect(out.map(l => l.unitPrice)).toEqual([9, 9]);
+    const out = applyPriceRows(lines, [{ canonPart: 'ABC123', price: 100 }]);
+    expect(out.map(l => l.unitPrice)).toEqual([100, 100]);
   });
 
   it('never touches lines without a part number', () => {
     const lines = [line({ partNumber: null, unitPrice: 3 })];
-    const out = applyPriceRows(lines, [{ canonPart: '', condition: null, price: 99 }]);
+    const out = applyPriceRows(lines, [{ canonPart: '', price: 99 }]);
     expect(out[0].unitPrice).toBe(3);
   });
 
   it('returns a new array and leaves the input untouched', () => {
     const lines = [line({})];
-    const out = applyPriceRows(lines, [{ canonPart: 'ABC123', condition: null, price: 42 }]);
+    const out = applyPriceRows(lines, [{ canonPart: 'ABC123', price: 42 }]);
     expect(out).not.toBe(lines);
     expect(lines[0].unitPrice).toBe(0);
     expect(out[0].unitPrice).toBe(42);
@@ -64,22 +58,13 @@ describe('applyPriceRows', () => {
 });
 
 describe('mergeBidParts', () => {
-  it('keys on (part, normalised condition) so a re-import replaces, not repeats', () => {
+  it('keys on the part so a re-import replaces, not repeats', () => {
     const first = mergeBidParts([], [
-      { canonPart: 'ABC123', condition: 'New', price: 10 },
-      { canonPart: 'ABC123', condition: 'Used', price: 5 },
+      { canonPart: 'ABC123', price: 10 },
+      { canonPart: 'XYZ9', price: 5 },
     ]);
-    expect(first).toHaveLength(2);
-    const again = mergeBidParts(first, [{ canonPart: 'ABC123', condition: ' new ', price: 12 }]);
-    expect(again).toHaveLength(2);
-    expect(again.find(p => p.condition?.trim().toLowerCase() === 'new')?.condition).toBe(' new ');
-  });
-  it('keeps a null-condition row distinct from a conditioned one', () => {
-    const out = mergeBidParts([{ partNumber: 'ABC123', condition: null }],
-      [{ canonPart: 'ABC123', condition: 'New', price: 10 }]);
-    expect(out).toEqual([
-      { partNumber: 'ABC123', condition: null },
-      { partNumber: 'ABC123', condition: 'New' },
-    ]);
+    expect(first).toEqual([{ partNumber: 'ABC123' }, { partNumber: 'XYZ9' }]);
+    const again = mergeBidParts(first, [{ canonPart: 'ABC123', price: 12 }]);
+    expect(again).toEqual([{ partNumber: 'ABC123' }, { partNumber: 'XYZ9' }]);
   });
 });

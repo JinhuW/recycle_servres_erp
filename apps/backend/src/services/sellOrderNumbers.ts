@@ -53,8 +53,8 @@ type SheetProduct = Omit<PriceTemplateProduct, 'category' | 'poSources'>
 
 // A line with what the fold reads off it, worked out once.
 type FoldLine = {
-  row: SheetLineRow; qty: number; key: string; label: string; category: SoCategory;
-  part: string | null; po: string | null; lineNo: number | null;
+  row: SheetLineRow; qty: number; key: string; bidKey: string; label: string;
+  category: SoCategory; part: string | null; po: string | null; lineNo: number | null;
 };
 
 // The spec fields that place a product on the sheet — device and generation
@@ -94,9 +94,12 @@ function foldLine(r: SheetLineRow): FoldLine {
     : 'Other';
   const part = r.part_number ?? r.sol_part ?? null;
   const condition = r.condition ?? r.sol_condition ?? null;
+  const canon = part ? canonPartNumberJs(part) : '';
   return {
     row: r, qty: Number(r.sell_qty ?? 0), label, category, part,
-    key: `${part ? canonPartNumberJs(part) : ''}|${label}|${condition ?? ''}`,
+    key: `${canon}|${label}|${condition ?? ''}`,
+    // The bid sheet prices a part once, whatever its condition.
+    bidKey: `${canon}|${label}`,
     // Both null for a hand-typed line, both set for a lot: order_lines.order_id
     // is NOT NULL and poLineNo is null only without a lot.
     po: r.source_order_id || null,
@@ -110,6 +113,7 @@ function foldLine(r: SheetLineRow): FoldLine {
 // the sheet never shows one product's spec for another's items.
 const productIdOf = (l: FoldLine): string => `#${l.row.product_no!}\u0000${l.key}`;
 const byKey = (l: FoldLine): string => l.key;
+const byBidKey = (l: FoldLine): string => l.bidKey;
 
 // One product from its lines. Its place — category, label, placing specs — is
 // its first line by PO and line #, 0s included, so neither a save nor zeroing
@@ -144,7 +148,7 @@ function foldProduct(id: string, lines: readonly FoldLine[]): SheetProduct {
   }
   return {
     id, category: first.category, key: first.key, label: first.label,
-    partNumber: shown.part, condition: first.row.condition ?? first.row.sol_condition ?? null,
+    partNumber: shown.part,
     qty: lines.reduce((a, l) => a + l.qty, 0),
     imageUrl: live.map((l) => publicUrl(l.row.image_url)).find(Boolean) ?? null,
     specs, poSources,
@@ -317,7 +321,7 @@ export function foldSheetLines(rows: readonly SheetLineRow[], nextNo: number) {
     })
     .filter((w) => w.pos.length > 0);
 
-  return { products: foldProducts(lines, byKey).flatMap(live), warehouses, poWarehouses };
+  return { products: foldProducts(lines, byBidKey).flatMap(live), warehouses, poWarehouses };
 }
 
 // An order's lines as the fold reads them. Read under the order's lock by the

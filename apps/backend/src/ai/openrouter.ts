@@ -88,6 +88,22 @@ function sniffMime(b: Uint8Array): string {
   return 'image/jpeg';
 }
 
+export type AiUsage = { promptTokens: number; completionTokens: number; costUsd: number };
+
+export type AiCallOptions = {
+  /** Overrides OPENROUTER_OCR_MODEL for this call. */
+  model?: string;
+  /** Called once per model turn with what OpenRouter billed for it. */
+  onUsage?: (u: AiUsage) => void;
+  /** Per-attempt cap; a web-search turn reads pages before it answers. */
+  timeoutMs?: number;
+};
+
+/** The model a call with `opts` would use. */
+export function aiModel(env: Env, opts: AiCallOptions = {}): string {
+  return opts.model ?? env.OPENROUTER_OCR_MODEL ?? DEFAULT_MODEL;
+}
+
 // Generic image→JSON transport: send one image plus a prompt, get back the
 // parsed JSON object. Shared by the label scanner and the receipt renamer so
 // timeout/model/retry tuning stays in one place. Throws on missing key, HTTP
@@ -96,27 +112,42 @@ export async function openRouterImageJson(
   env: Env,
   prompt: string,
   imageBytes: ArrayBuffer,
+  opts: AiCallOptions = {},
+): Promise<Record<string, unknown>> {
+  return openRouterJson(env, prompt, [imageBytes], opts);
+}
+
+// The same transport with any number of images, none included: a text-only
+// ask (a part-number lookup on an `:online` model) is the zero-image case.
+export async function openRouterJson(
+  env: Env,
+  prompt: string,
+  images: readonly ArrayBuffer[],
+  opts: AiCallOptions = {},
 ): Promise<Record<string, unknown>> {
   const apiKey = env.OPENROUTER_API_KEY;
   if (!apiKey) throw new Error('OPENROUTER_API_KEY is not set');
 
-  const bytes = new Uint8Array(imageBytes);
-  const dataUrl = `data:${sniffMime(bytes)};base64,${Buffer.from(bytes).toString('base64')}`;
-
   type ChatMessage = { role: 'user' | 'assistant'; content: string | Array<Record<string, unknown>> };
 
-  const model = env.OPENROUTER_OCR_MODEL ?? DEFAULT_MODEL;
-  const tuning = requestTuning(model);
+  const model = aiModel(env, opts);
+  // The `:online` suffix is a routing flag; the family is the model's own.
+  const tuning = requestTuning(model.replace(/:online$/, ''));
   const baseContent: Array<Record<string, unknown>> = [
     { type: 'text', text: prompt },
-    {
-      type: 'image_url',
-      image_url: tuning.imageDetail ? { url: dataUrl, detail: tuning.imageDetail } : { url: dataUrl },
-    },
+    ...images.map((img) => {
+      const bytes = new Uint8Array(img);
+      const url = `data:${sniffMime(bytes)};base64,${Buffer.from(bytes).toString('base64')}`;
+      return {
+        type: 'image_url',
+        image_url: tuning.imageDetail ? { url, detail: tuning.imageDetail } : { url },
+      };
+    }),
   ];
 
-  const deadline = Date.now() + OCR_DEADLINE_MS;
-  const remaining = () => Math.min(OCR_TIMEOUT_MS, deadline - Date.now());
+  const attemptMs = opts.timeoutMs ?? OCR_TIMEOUT_MS;
+  const deadline = Date.now() + Math.max(OCR_DEADLINE_MS, attemptMs * 2);
+  const remaining = () => Math.min(attemptMs, deadline - Date.now());
 
   async function askOnce(messages: ChatMessage[]): Promise<string> {
     const budget = remaining();
@@ -133,6 +164,7 @@ export async function openRouterImageJson(
         model,
         max_tokens: MAX_TOKENS,
         ...tuning.body,
+        ...(opts.onUsage ? { usage: { include: true } } : {}),
         messages,
       }),
       signal: AbortSignal.timeout(budget),
@@ -141,7 +173,17 @@ export async function openRouterImageJson(
       const errBody = await res.text().catch(() => '');
       throw new Error(`OpenRouter ${res.status}: ${errBody}`);
     }
-    const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+    const data = (await res.json()) as {
+      choices?: { message?: { content?: string } }[];
+      usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number };
+    };
+    if (opts.onUsage && data.usage) {
+      opts.onUsage({
+        promptTokens: data.usage.prompt_tokens ?? 0,
+        completionTokens: data.usage.completion_tokens ?? 0,
+        costUsd: data.usage.cost ?? 0,
+      });
+    }
     const content = data.choices?.[0]?.message?.content;
     if (!content) throw new EmptyAnswerError();
     return content;
@@ -181,8 +223,9 @@ export async function openRouterScan(
   env: Env,
   category: LineCategory,
   imageBytes: ArrayBuffer,
+  opts: AiCallOptions = {},
 ): Promise<ScanResult> {
-  const json = await openRouterImageJson(env, PROMPT_BY_CATEGORY[category], imageBytes);
+  const json = await openRouterImageJson(env, PROMPT_BY_CATEGORY[category], imageBytes, opts);
 
   // Pull the model's self-rated confidence out of the JSON. If it's missing or
   // not a finite number, default to 0.45 — just below the verify floor so a

@@ -1,33 +1,39 @@
-import type { SqlLike } from './orderAudit';
+import type postgres from 'postgres';
+import type { SqlLike } from '../db';
 
-// The one place a PO becomes 'sold': a Done order with at least one line and
-// no line that is not Sold, counting only lines with units. Called from every
-// transaction that can make that true — a sell order reaching Done, a PO
-// landing on Done, a line hand-set to Sold — and a no-op otherwise, so callers
-// need not check first. Never set by hand. Archive is orthogonal: every caller
-// already refuses an archived order, and a sale cannot consume an archived
-// order's lines.
+type SqlFragment = postgres.PendingQuery<postgres.Row[]>;
+
+// Sold sits beside the stage, not on it: a PO from In Transit on whose every
+// line with units is at line status Sold. Derived on read and never stored, so
+// a line added, transferred, re-counted or walked off Sold changes the answer
+// with nothing to keep in step. A 0-qty line never arrived, so there is
+// nothing of it to sell. Managers only — the sale is the manager's book; the
+// callers mask it for everyone else.
 //
-// One statement so the flip and its audit row cannot disagree. The row is
-// stamped clock_timestamp() rather than the transaction's NOW(): the caller
-// has usually just written the `advanced … → done` row in the same
-// transaction, and two rows with an identical created_at sort by id.
-export async function settleSoldTx(tx: SqlLike, orderId: string, actorId: string | null): Promise<boolean> {
-  const rows = await tx`
-    WITH flip AS (
-      UPDATE orders o SET lifecycle = 'sold'
-      WHERE o.id = ${orderId}
-        AND o.lifecycle = 'done'
-        -- A 0-qty line never arrived: there is nothing of it to sell.
-        AND EXISTS (SELECT 1 FROM order_lines l WHERE l.order_id = o.id AND l.qty > 0)
-        AND NOT EXISTS (SELECT 1 FROM order_lines l WHERE l.order_id = o.id AND l.status <> 'Sold' AND l.qty > 0)
-      RETURNING o.id
-    )
-    INSERT INTO order_events (order_id, actor_id, kind, detail, created_at)
-    SELECT f.id, ${actorId}::uuid, 'advanced',
-           '{"from":"done","to":"sold"}'::jsonb, clock_timestamp()
-    FROM flip f
-    RETURNING order_id
-  ` as unknown as { order_id: string }[];
-  return rows.length > 0;
+// `orderAlias` is the outer query's `orders` alias (`sql\`o\``). Inner aliases
+// are odd on purpose so they never shadow the caller's.
+export function soldFlagSql(sql: SqlLike, orderAlias: SqlFragment): SqlFragment {
+  return sql`(${orderAlias}.lifecycle IN ('in_transit', 'reviewing', 'ready_to_pay', 'done')
+      AND EXISTS (SELECT 1 FROM order_lines s_l
+                   WHERE s_l.order_id = ${orderAlias}.id AND s_l.qty > 0)
+      AND NOT EXISTS (SELECT 1 FROM order_lines s_l
+                       WHERE s_l.order_id = ${orderAlias}.id AND s_l.qty > 0
+                         AND s_l.status <> 'Sold'))`;
+}
+
+// Sold was a stage after Done from v1.164.0 until v1.246.0. Its history stays
+// in order_events but reads in today's terms: the settle row (`advanced
+// done→sold`) moved nothing and is dropped, and a reopen from Sold reads as
+// one from Done. Every reader of order_events goes through this.
+export function restageSoldEvent<T extends { kind: string; detail: Record<string, unknown> }>(r: T): T | null {
+  if (r.kind !== 'advanced') return r;
+  const d = r.detail as { from?: unknown; to?: unknown };
+  if (d.to === 'sold') return null;
+  if (d.from !== 'sold') return r;
+  return { ...r, detail: { ...r.detail, from: 'done' } };
+}
+
+/** The SQL twin of restageSoldEvent's drop, for a reader that pages in SQL. */
+export function soldSettleEventSql(sql: SqlLike, eventAlias: SqlFragment): SqlFragment {
+  return sql`(${eventAlias}.kind = 'advanced' AND ${eventAlias}.detail->>'to' IS NOT DISTINCT FROM 'sold')`;
 }

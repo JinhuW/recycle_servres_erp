@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { getDb } from '../db';
 import { SAFE_UPLOAD_MIME, UPLOAD_HARD_CAP_BYTES } from '../lib/settings';
 import type { Env, User } from '../types';
+import { isPoAiReviewSetting } from '../services/poAiReview';
 
 const workspace = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
@@ -21,6 +22,7 @@ const KNOWN_SETTINGS: Record<string, (v: unknown) => boolean> = {
   low_margin_floor: isFrac,
   target_margin: isFrac,
   category_default_margin: v => typeof v === 'number' && Number.isFinite(v) && v >= 0,
+  po_ai_review: isPoAiReviewSetting,
 };
 
 // Most settings expose internal pricing/margin/upload config and stay
