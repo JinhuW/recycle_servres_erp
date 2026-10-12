@@ -19,6 +19,7 @@ at the last commit that carried each version.
 
 ## [1.250.0] - 2026-10-12
 
+<<<<<<< HEAD
 Add inventory moves to the top of a sell order's products (RS-240).
 
 ### Changed
@@ -30,6 +31,37 @@ Add inventory moves to the top of a sell order's products (RS-240).
   group, often off screen, so the page scrolls to the first one and each new
   line flashes. The search box clears too, so a filter left in it can't hide
   them.
+=======
+After-sales cases (RS-240): a record for the goods a customer comes back
+about, with its own workflow and page.
+
+### Added
+
+- **After-sales cases.** A manager opens a case against a Shipped, Awaiting
+  payment or Done sell order, naming the products and quantities the
+  customer is returning or disputing and what they report. Draft, Packing
+  and Closed orders are refused: nothing has shipped or nothing was sold.
+  Cases are numbered `AS-1001`… and keep a snapshot of their lines, so a
+  later save of the sell order (which rewrites its line rows) leaves the
+  case intact.
+- **The workflow.** Open → In progress → Awaiting return → Resolved, with
+  Cancel from any open stage and Reopen from Resolved or Cancelled. The
+  resolution is Return or Discount, with the refund or price reduction as
+  the amount. Awaiting return needs the resolution set to Return; Resolved
+  needs both the resolution and the amount. A closed case is read-only until
+  reopened; its timeline still takes notes.
+- **The After-sales page** (`#/after-sales`, managers only): status tiles
+  that count every case and sum its amounts, a status filter, a search over
+  case id, sell order, customer and issue, and a case page with the issue,
+  the products, the resolution fields, the stage buttons and a timeline of
+  every move, edit and note with who and when.
+- **On the sell order**, an After-sales button on an eligible order opens
+  the form with the order preselected, and a card in the side column lists
+  the order's cases.
+
+A case is a record only: it moves no stock back and changes no revenue or
+dashboard figure. Restocking a return is still an inventory edit.
+>>>>>>> a80fb2f0 (feat: after-sales cases track returns and discounts on sold orders (v1.250.0) [RS-240])
 
 ## [1.249.0] - 2026-10-12
 

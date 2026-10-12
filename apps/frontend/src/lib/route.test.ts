@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import {
-  hrefFor, matchPoCheck, matchPurchaseOrder, matchSellOrderPack, navigate, navigateBack, onLinkClick,
+  afterSalesCasePath, afterSalesNewPath, hrefFor, matchPoCheck, matchPurchaseOrder, matchSellOrderPack, navigate, navigateBack, onLinkClick,
   parseShippingRoute, pathToDesktopView, poCheckPath, poLinePath, readPoLineQuery, readSafeNext,
   replaceRoute, sellOrderPackPath, splitHash,
   type LinkClick,
@@ -43,6 +43,17 @@ describe('pack mode route', () => {
     expect(matchSellOrderPack('/sell-orders/SO-0042')).toBeNull();
     expect(matchSellOrderPack('/sell-orders/SO-0042/edit')).toBeNull();
     expect(pathToDesktopView('/sell-orders/SO-0042/pack')).toBe('sellorders');
+  });
+});
+
+describe('after-sales routes', () => {
+  it('are one desktop view for the list, a case and the new form', () => {
+    expect(afterSalesCasePath('AS-1001')).toBe('/after-sales/AS-1001');
+    expect(afterSalesNewPath('SO-0042')).toBe('/after-sales/new?order=SO-0042');
+    expect(afterSalesNewPath()).toBe('/after-sales/new');
+    expect(pathToDesktopView('/after-sales')).toBe('aftersales');
+    expect(pathToDesktopView('/after-sales/AS-1001')).toBe('aftersales');
+    expect(pathToDesktopView('/after-sales/new')).toBe('aftersales');
   });
 });
 

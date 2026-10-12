@@ -40,6 +40,7 @@ export const DESKTOP_NAV: readonly NavGroup[] = [
       { id: 'market',     tKey: 'nav_market',     icon: 'tag',        roles: ['manager', 'purchaser'] },
       { id: 'inventory',  tKey: 'nav_inventory',  icon: 'inventory',  roles: ['manager'], alsoActiveOn: ['analysis'] },
       { id: 'sellorders', tKey: 'nav_sellorders', icon: 'tag',        roles: ['manager'] },
+      { id: 'aftersales', tKey: 'nav_aftersales', icon: 'refresh',    roles: ['manager'] },
       { id: 'transfers',  tKey: 'nav_transfers',  icon: 'truck',      roles: ['manager'] },
       { id: 'websubmissions', tKey: 'nav_websubmissions', icon: 'mail', roles: ['manager'] },
     ],
