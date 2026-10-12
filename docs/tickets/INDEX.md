@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-239](./RS-239-sell-order-internal-notes-editable-at-any-time.md) | done | story | P2 | Sell order internal notes editable at any time | — |
+| [RS-240](./RS-240-sell-order-add-inventory-button-in-the-products-tool.md) | done | story | P2 | Sell order Add inventory button in the products toolbar | — |
+| [RS-239](./RS-239-sell-order-internal-notes-editable-at-any-time.md) | done | story | P2 | Sell order internal notes editable at any time | 1.249.0 |
 | [RS-238](./RS-238-sell-order-vendor-price-import-in-the-side-column-ab.md) | done | story | P2 | Sell order vendor price import in the side column, above the summary | 1.248.3 |
 | [RS-237](./RS-237-sell-order-history-at-the-bottom-of-the-side-column.md) | done | story | P2 | Sell order History at the bottom of the side column | 1.248.2 |
 | [RS-236](./RS-236-sell-order-vendor-price-import-at-the-top-history-ba.md) | done | bug | P2 | Sell order: vendor price import at the top, History back at the bottom | 1.248.1 |

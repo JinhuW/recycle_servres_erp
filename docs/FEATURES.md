@@ -1106,6 +1106,10 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     full. Saving refuses such a line above 0.
   - View and edit share one history entry, so browser Back returns to where
     the order was opened from.
+  - **Add inventory sits in the products toolbar while editing** (v1.250.0),
+    the accent button beside the search box, where it was a small button
+    under the last line. Adding clears the search, scrolls to the first line
+    added and flashes each new one.
   - **Internal notes can be written at any time** (v1.249.0), from the
     order's view page in any status, Done and Closed included: the notes
     box is live, and Save / Cancel appear once it differs from what is

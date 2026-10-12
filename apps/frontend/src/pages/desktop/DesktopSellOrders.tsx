@@ -1344,8 +1344,25 @@ function SellOrderDetail({ id, mode, onToast }: {
   const removeLine = (idx: number) =>
     setDraft(d => d && { ...d, lines: d.lines.filter((_, i) => i !== idx) });
 
-  const addLines = (picked: SellableItem[]) =>
-    setDraft(d => d && { ...d, lines: mergeSellable(d.lines, picked).lines });
+  // A filter left in the search box would hide the lines just added, and a
+  // line lands in its warehouse's or PO's group, often below the fold — so
+  // the first one is scrolled to and every one flashes.
+  const [justAdded, setJustAdded] = useState<ReadonlySet<string>>(new Set());
+  const addLines = (picked: SellableItem[]) => {
+    if (!draft) return;
+    setLineSearch('');
+    const { lines } = mergeSellable(draft.lines, picked);
+    const before = new Map(draft.lines.map(l => [l._cid, l.qty]));
+    setJustAdded(new Set(lines.filter(l => before.get(l._cid) !== l.qty).map(l => l._cid)));
+    setDraft({ ...draft, lines });
+  };
+  useEffect(() => {
+    if (justAdded.size === 0) return;
+    const first = document.querySelector('tr.so-line-added');
+    first?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    const timer = setTimeout(() => setJustAdded(new Set()), 2400);
+    return () => clearTimeout(timer);
+  }, [justAdded]);
 
   const save = async () => {
     if (!order || !draft) return;
@@ -1736,34 +1753,49 @@ function SellOrderDetail({ id, mode, onToast }: {
                     <LineGroupSwitch value={lineGroup} onChange={setLineGroup} />
                   </div>
 
-                  <div className="bc-scan-field" style={{ marginBottom: 12 }}>
-                    <label className="bc-scan" htmlFor="so-line-search">
-                      <Icon name="search" size={14} />
-                      <input
-                        id="so-line-search"
-                        ref={lineSearchRef}
-                        className="input mono"
-                        type="text"
-                        autoComplete="off"
-                        autoCorrect="off"
-                        spellCheck={false}
-                        value={lineSearch}
-                        placeholder={t('sodLineSearchPh')}
-                        onChange={e => setLineSearch(e.target.value)}
-                        onKeyDown={e => {
-                          if (e.nativeEvent.isComposing) return;
-                          // Clears the box, then leaves it; never the page.
-                          if (e.key === 'Escape') {
-                            e.stopPropagation();
-                            if (lineSearch) setLineSearch('');
-                            else e.currentTarget.blur();
-                          }
-                        }}
-                      />
-                    </label>
-                    {lineSearch && (
-                      <button type="button" className="bc-scan-clear" title={t('scanClear')} aria-label={t('scanClear')} onClick={() => setLineSearch('')}>
-                        <Icon name="x" size={13} />
+                  {/* Search and Add share the toolbar over the lines, so adding
+                      never means scrolling past a long order to its foot. */}
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 12 }}>
+                    <div className="bc-scan-field" style={{ flex: 1, minWidth: 0 }}>
+                      <label className="bc-scan" htmlFor="so-line-search">
+                        <Icon name="search" size={14} />
+                        <input
+                          id="so-line-search"
+                          ref={lineSearchRef}
+                          className="input mono"
+                          type="text"
+                          autoComplete="off"
+                          autoCorrect="off"
+                          spellCheck={false}
+                          value={lineSearch}
+                          placeholder={t('sodLineSearchPh')}
+                          onChange={e => setLineSearch(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.nativeEvent.isComposing) return;
+                            // Clears the box, then leaves it; never the page.
+                            if (e.key === 'Escape') {
+                              e.stopPropagation();
+                              if (lineSearch) setLineSearch('');
+                              else e.currentTarget.blur();
+                            }
+                          }}
+                        />
+                      </label>
+                      {lineSearch && (
+                        <button type="button" className="bc-scan-clear" title={t('scanClear')} aria-label={t('scanClear')} onClick={() => setLineSearch('')}>
+                          <Icon name="x" size={13} />
+                        </button>
+                      )}
+                    </div>
+                    {editable && (
+                      <button
+                        type="button"
+                        className="btn accent"
+                        title={t('soAddInventoryTitle')}
+                        onClick={() => setAdding(true)}
+                        style={{ flexShrink: 0, whiteSpace: 'nowrap' }}
+                      >
+                        <Icon name="plus" size={14} /> {t('soAddInventory')}
                       </button>
                     )}
                   </div>
@@ -1833,7 +1865,7 @@ function SellOrderDetail({ id, mode, onToast }: {
                             // A typed line has no lot to run out of.
                             const cap = l.inventoryId === null ? MAX_LINE_QTY : Math.max(0, Math.min(MAX_LINE_QTY, l.maxQty));
                             return (
-                            <tr key={l._cid}>
+                            <tr key={l._cid} className={justAdded.has(l._cid) ? 'so-line-added' : undefined}>
                               <LineItemCell line={l} lineNo={l.saved ? l.no : null} sub={l.subLabel} showPo={lineGroup === 'warehouse'} showLineNo={lineGroup === 'po'} linkPo={false} />
                               {lineGroup === 'po' && <td style={{ fontSize: 12 }}>{lotWarehouse(l) ?? t('sodNoWarehouse')}</td>}
                               <td className="num">
@@ -1894,15 +1926,6 @@ function SellOrderDetail({ id, mode, onToast }: {
                     <div className="help" style={{ marginTop: 10 }}>
                       {t('soPrefillAllPresent', { id: order.id })}
                     </div>
-                  )}
-                  {editable && (
-                    <button
-                      className="btn sm"
-                      onClick={() => setAdding(true)}
-                      style={{ marginTop: 10 }}
-                    >
-                      <Icon name="plus" size={13} /> {t('soAddInventory')}
-                    </button>
                   )}
                 </div>
 

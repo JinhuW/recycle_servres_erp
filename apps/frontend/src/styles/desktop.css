@@ -1010,6 +1010,8 @@ html.desktop, body.desktop, .desktop #root {
   display: flex; flex-direction: column; gap: 14px;
 }
 .so-section { margin-bottom: 22px; }
+.so-line-added td { animation: so-line-added 2.4s ease-out; }
+@keyframes so-line-added { from { background: var(--accent-soft); } to { background: transparent; } }
 .so-section:last-child { margin-bottom: 0; }
 .so-section-head {
   display: flex; align-items: center; gap: 7px;
