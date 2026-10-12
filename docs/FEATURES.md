@@ -1106,9 +1106,11 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     full. Saving refuses such a line above 0.
   - View and edit share one history entry, so browser Back returns to where
     the order was opened from.
-  - **The order's History sits at the top of the left column, folded**
-    (v1.248.0). It was at the foot of the page and open; a click on its
-    heading opens it.
+  - **The order's History sits at the foot of the left column, folded**
+    (v1.248.0); a click on its heading opens it.
+  - **Editing puts Vendor price import first in the card** (v1.248.1), above
+    the status stepper, so the bid sheet's round trip doesn't need a scroll
+    past every line. It was under the products.
   - **A search box over the products narrows the list** (v1.248.0), in view
     and edit, like Pack mode's: a part #, serial or PO number matches with or
     without its dashes, and words match the item's name and spec chips
