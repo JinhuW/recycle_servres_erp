@@ -2,13 +2,13 @@
 id: RS-234
 title: Every save of a RAM line asks the part # question
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-11
 reporter: jinhu
 branch: fix/ram-part-question-on-save
-pr:
-version:
+pr: 616
+version: 1.247.2
 related: [RS-228, RS-233]
 ---
 
