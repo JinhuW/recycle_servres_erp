@@ -17,6 +17,18 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.248.3] - 2026-10-12
+
+Vendor price import joins History in the side column (RS-238).
+
+### Changed
+
+- **While editing a sell order, Vendor price import is the first card in the
+  right-hand column**, above the order summary. It had moved to the top of
+  the left card in v1.248.1, where it pushed the status stepper, customer and
+  products down. In the narrow column its drop zone stacks under the three
+  steps.
+
 ## [1.248.2] - 2026-10-12
 
 History moves to the side column (RS-237).
