@@ -1997,6 +1997,8 @@ const zh: Record<string, string> = {
   sodNewDraftOverline: '新销售订单 · 草稿',
   sodItemsFromInventory: '从库存中选取 {n} 个产品',
   sodLineItems: '产品',
+  sodLineSearchPh: '按料号、序列号、PO 编号、品名或规格搜索（/）',
+  sodLineSearchNone: '此订单没有符合 {q} 的产品。',
   sodLineSummary: '{units} 件 · {lines} 个产品 · 跨 {whs} 个仓库',
   sodLineSummaryByPo: '{units} 件 · {lines} 个产品 · 来自 {pos} 个采购单',
   sodGroupLabel: '产品分组',

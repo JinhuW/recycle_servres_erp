@@ -31,7 +31,7 @@ import { PriceImportSection } from './SellOrderPriceImportDialog';
 import { applyPriceRows, type BidPart, mergeBidParts } from '../../lib/priceImport';
 import { usePreference } from '../../lib/preferences';
 import { LineSpecChips, lineHasSpecChips } from '../../components/LineSpecChips';
-import { groupSellOrderLines, type SellOrderLineGroup } from '../../lib/sellOrderLineGroups';
+import { filterLineGroups, groupSellOrderLines, type SellOrderLineGroup } from '../../lib/sellOrderLineGroups';
 import { isPackable, lotWarehouse, packWarehouseOptions, UNASSIGNED } from '../../lib/sellOrderPack';
 import { peekSellOrderPrefill, clearSellOrderPrefill } from '../../lib/sellOrderPrefill';
 import { missingSigners, signoffSig } from '../../lib/sellOrderSignoff';
@@ -39,6 +39,7 @@ import type { SellOrderSignoff } from '../../lib/types';
 import { SellOrderSignoffCard } from './SellOrderSignoff';
 import { productCount } from '../../lib/productNo';
 import { useEscapeKey } from '../../lib/useEscapeKey';
+import { useScanFilterText } from '../../lib/useScanFilter';
 import { useFixedPopover } from './popoverPlacement';
 
 // Its own chunk: only a packer opens it.
@@ -1295,6 +1296,24 @@ function SellOrderDetail({ id, mode, onToast }: {
     () => (draft ? groupSellOrderLines(draft.lines, lineGroup) : []),
     [draft, lineGroup],
   );
+  // Pack mode's filter on the order page: it narrows what is listed, never
+  // what the summary counts or what Save sends.
+  const [lineSearch, setLineSearch] = useState('');
+  const lineSearchRef = useRef<HTMLInputElement>(null);
+  const lineFilter = useScanFilterText(lineSearch);
+  const listedViewGroups = useMemo(() => filterLineGroups(viewGroups, lineFilter), [viewGroups, lineFilter]);
+  const listedEditGroups = useMemo(() => filterLineGroups(editGroups, lineFilter), [editGroups, lineFilter]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey) return;
+      if ((e.target as HTMLElement | null)?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      if (document.querySelector('[aria-modal="true"]') || !lineSearchRef.current) return;
+      e.preventDefault();
+      lineSearchRef.current.focus();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const setLine = (idx: number, patch: Partial<EditLine>) =>
     setDraft(d => d && { ...d, lines: d.lines.map((l, i) => (i === idx ? { ...l, ...patch } : l)) });
@@ -1535,6 +1554,16 @@ function SellOrderDetail({ id, mode, onToast }: {
         <>
           <div className="so-page-body">
             <div className="so-page-main">
+              <div className="card so-page-card" style={{ paddingTop: 8, paddingBottom: 8 }}>
+                <details>
+                  <summary style={{ cursor: 'pointer', fontWeight: 600, padding: '8px 0' }}>
+                    {t('sodHistory')}
+                  </summary>
+                  <div style={{ marginTop: 8, marginBottom: 10 }}>
+                    <SellOrderHistory sellOrderId={order.id} refreshKey={historyKey} />
+                  </div>
+                </details>
+              </div>
               <div className="card so-page-card">
                 {order.status === 'Closed' && (
                   <div style={{
@@ -1697,7 +1726,44 @@ function SellOrderDetail({ id, mode, onToast }: {
                     <LineGroupSwitch value={lineGroup} onChange={setLineGroup} />
                   </div>
 
-                  {!editable && viewGroups.map(g => (
+                  <div className="bc-scan-field" style={{ marginBottom: 12 }}>
+                    <label className="bc-scan" htmlFor="so-line-search">
+                      <Icon name="search" size={14} />
+                      <input
+                        id="so-line-search"
+                        ref={lineSearchRef}
+                        className="input mono"
+                        type="text"
+                        autoComplete="off"
+                        autoCorrect="off"
+                        spellCheck={false}
+                        value={lineSearch}
+                        placeholder={t('sodLineSearchPh')}
+                        onChange={e => setLineSearch(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.nativeEvent.isComposing) return;
+                          // Clears the box, then leaves it; never the page.
+                          if (e.key === 'Escape') {
+                            e.stopPropagation();
+                            if (lineSearch) setLineSearch('');
+                            else e.currentTarget.blur();
+                          }
+                        }}
+                      />
+                    </label>
+                    {lineSearch && (
+                      <button type="button" className="bc-scan-clear" title={t('scanClear')} aria-label={t('scanClear')} onClick={() => setLineSearch('')}>
+                        <Icon name="x" size={13} />
+                      </button>
+                    )}
+                  </div>
+                  {lineFilter && (editable ? listedEditGroups : listedViewGroups).length === 0 && (
+                    <div className="help" style={{ marginBottom: 12 }}>
+                      {t('sodLineSearchNone', { q: lineFilter })}
+                    </div>
+                  )}
+
+                  {!editable && listedViewGroups.map(g => (
                     <div key={g.key} style={{ marginBottom: 14 }}>
                       <LineGroupHead group={g} by={lineGroup} linkPo />
                       <table className="so-line-table">
@@ -1732,7 +1798,7 @@ function SellOrderDetail({ id, mode, onToast }: {
                     </div>
                   ))}
 
-                  {editable && editGroups.map(g => (
+                  {editable && listedEditGroups.map(g => (
                     <div key={g.key} style={{ marginBottom: 14 }}>
                       <LineGroupHead group={g} by={lineGroup} linkPo={false} />
                       <table className="so-line-table">
@@ -1849,16 +1915,6 @@ function SellOrderDetail({ id, mode, onToast }: {
                       })}
                   />
                 )}
-              </div>
-              <div className="card so-page-card">
-                <details open>
-                  <summary style={{ cursor: 'pointer', fontWeight: 600, padding: '8px 0' }}>
-                    {t('sodHistory')}
-                  </summary>
-                  <div style={{ marginTop: 12 }}>
-                    <SellOrderHistory sellOrderId={order.id} refreshKey={historyKey} />
-                  </div>
-                </details>
               </div>
             </div>
             <div className="so-page-side">
