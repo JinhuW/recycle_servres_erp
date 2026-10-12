@@ -2082,6 +2082,9 @@ inventory search, sell-order draft creation.
     - Every stick that passes Confirm's rule (required fields, brand
       confirmation, DDR5 serials) is saved in one go when **Add** is clicked.
       The first save creates the draft PO.
+    - A stick whose part # contradicts its specs is asked about first, as its
+      Confirm would be (v1.247.2). Cancelling holds that stick and every later
+      one in question unsaved, and the message counts them.
     - The rest stay on the page, marked **Not saved**, and a message says what
       they still need. The Status column shows **Saved** for lines that are on
       the PO.
@@ -2141,9 +2144,19 @@ inventory search, sell-order draft creation.
     Server · RDIMM · 1Rx4 · 2400.
   - **Fill:** typing or scanning a part # fills blank specs. Picked or scanned
     values are never replaced; the part # a line opened with never fills.
-  - **Confirm asks** when a named field contradicts the part #: use the part
-    #'s specs or keep as entered (once per set of disagreements). The readout
-    has a per-field fix.
+  - **Every save asks** when a named field contradicts the part #: use the
+    part #'s specs, take a corrected part #, or keep as entered. The readout
+    has a per-field fix. Since v1.247.2 that is every save of a RAM line, not
+    only the drawer's Confirm and the phone form: Submit order and adding the
+    next line on a new PO, the RAM sheet's auto-save, Save on the PO page and
+    the inventory editor's Save. A save over several products asks product by
+    product, naming each; cancelling a question stops the save.
+  - **Asked once per disagreement** (v1.247.2): keeping one as entered is
+    recorded on the line, so Submit or Save doesn't ask again what the drawer
+    asked, and fixing one field doesn't reopen the others. A saved line's own
+    disagreements count as answered: editing its price or qty doesn't ask,
+    changing a spec or the part # does. Recording the answer alone doesn't
+    make a PO line an edit.
   - **Misreads:** a part # that decodes only one look-alike character away
     (O/0, HMAA/HMA8, PZ/PDZ…) is decoded through that reading with a button to
     correct it, and when the form disagrees, readings that agree with it are

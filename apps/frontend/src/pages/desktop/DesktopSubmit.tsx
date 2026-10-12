@@ -16,6 +16,8 @@ import type { Category, Warehouse, OrderSummary } from '../../lib/types';
 import { LineDrawer } from './submit/LineDrawer';
 import { AddLineMenu } from './submit/AddLineMenu';
 import { RamSheetScanDialog } from './submit/RamSheetScanDialog';
+import { usePartQuestion } from '../../components/RamPartCheck';
+import { settlePartQuestion, settlePartQuestions } from '../../lib/ramPartQuestion';
 import { isPristineLine } from './submit/ramSheet';
 import { addableCategories, aiCaptureEnabled } from '../../lib/lookups';
 import { eligibleDraftTargets } from './submit/eligibleTargets';
@@ -32,7 +34,7 @@ import { useMarketLookup } from '../../lib/useMarketLookup';
 import { groupLines, shouldGroup, pricedTotals, lineSpecLabel } from '../../lib/lineGroups';
 import { CostTape } from '../../components/CostTape';
 import { useAuth } from '../../lib/auth';
-import { synthesizePartNumber, serialIssue } from '@recycle-erp/shared';
+import { cascadePatch, synthesizePartNumber, serialIssue } from '@recycle-erp/shared';
 import { lineRequirements, missingFieldNames } from '../../lib/lineRequirements';
 import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
 import { loadWarehouses } from '../../lib/warehouses';
@@ -325,6 +327,18 @@ function OrderForm({
   const updateLine = (i: number, patch: Partial<Line>) =>
     setLines(ls => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
 
+  // The part # question for the saves that don't go through the drawer's
+  // Confirm. An answer is written to its line as it is given, so it stands
+  // when a later question is cancelled.
+  const partQ = usePartQuestion();
+  const askPart = (l: Line, newNo: number | null | undefined) =>
+    partQ.ask(l, lineRef({ no: l.no }, t, newNo));
+  const answerPart = (l: Line, patch: Partial<Line>): Line => {
+    const p = cascadePatch<Line>(l.category, l, patch);
+    setLines(ls => ls.map(x => (x._cid === l._cid ? { ...x, ...p } : x)));
+    return { ...l, ...p };
+  };
+
   // Adding the next line first auto-saves the line the user was filling out,
   // so they don't lose work by forgetting to press Confirm. If the active line
   // isn't ready yet, surface the reason and don't append — otherwise the user
@@ -347,8 +361,18 @@ function OrderForm({
       showWarnToast(fields ? t('drawerStillNeeded', { fields }) : t('subFillThisLine'));
       return false;
     }
+    // Last, as the drawer's Confirm asks it: whether a complete line's specs
+    // are the stick's.
+    const settled = await settlePartQuestion(cur, l => askPart(l, newNos[activeIdx]), answerPart);
+    if (!settled) return false;
+    // A value taken from the part # can clear one the cascade rules out.
+    if (!lineReady(settled)) {
+      const fields = missingNamesFor(settled);
+      showWarnToast(fields ? t('drawerStillNeeded', { fields }) : t('subFillThisLine'));
+      return false;
+    }
     try {
-      await handleConfirmLine(activeIdx);
+      await handleConfirmLine(activeIdx, settled);
     } catch (e) {
       showErrorDialog(e instanceof Error ? e.message : t('subSubmitFailed'));
       return false;
@@ -408,18 +432,27 @@ function OrderForm({
       return { ...blankLine('RAM'), ...p, ...(chip ? { chipNumber: chip } : {}) };
     });
     setLastCat('RAM');
+    const before = lines.length === 1 && isPristineLine(lines[0]) ? [] : lines;
     setLines(ls => [
       ...(ls.length === 1 && isPristineLine(ls[0]) ? [] : ls),
       ...added,
     ]);
     setActiveIdx(null);
 
-    const blocks = added.map(lineSaveBlock);
-    const ready = added.filter((_, i) => blocks[i] === null);
+    // A stick whose part # contradicts its specs is asked about first, as its
+    // Confirm would be. Backing out holds that stick, and every later one in
+    // question, on the page unsaved; the drawer or Submit asks again.
+    const nos = newOrdinals([...before, ...added]);
+    const { lines: answered, unsettled } = await settlePartQuestions(
+      added, (l, i) => askPart(l, nos[before.length + i]), answerPart, l => lineSaveBlock(l) === null);
+    // Read after the answers: a value taken from the part # can clear another.
+    const blocks = answered.map((l, i) => (unsettled.includes(i) ? 'part' as const : lineSaveBlock(l)));
+    const ready = answered.filter((_, i) => blocks[i] === null);
     const needDetails = blocks.filter(b => b === 'fields' || b === 'brand').length;
     const needSerials = blocks.filter(b => b === 'serials').length;
+    const needPart = unsettled.length;
     if (!ready.length) {
-      showWarnToast(t('subScanNoneSaved', { details: needDetails, serials: needSerials }));
+      showWarnToast(t('subScanNoneSaved', { details: needDetails, serials: needSerials, parts: needPart }));
       return;
     }
     try {
@@ -430,10 +463,10 @@ function OrderForm({
         const i = idByCid.get(l._cid);
         return i == null ? l : { ...l, _confirmed: true, _dbId: saved.lineIds[i], no: saved.lineNos[i] };
       }));
-      const held = needDetails + needSerials;
+      const held = needDetails + needSerials + needPart;
       if (held) {
         showWarnToast(t('subScanSavedSome', {
-          n: ready.length, po: saved.orderId, details: needDetails, serials: needSerials,
+          n: ready.length, po: saved.orderId, details: needDetails, serials: needSerials, parts: needPart,
         }));
       } else {
         showSuccessToast(t('subScanSavedAll', { n: ready.length, po: saved.orderId }));
@@ -581,8 +614,8 @@ function OrderForm({
   // work safe — closing the tab after confirming a line leaves nothing
   // unsaved. The first confirm is what creates the PO. (Submit Order remains
   // as the navigate-away trigger.)
-  const handleConfirmLine = async (idx: number): Promise<void> => {
-    const l = lines[idx];
+  // `l` is passed in when the line was just answered for: state lags the answer.
+  const handleConfirmLine = async (idx: number, l: Line = lines[idx]): Promise<void> => {
     if (l._confirmed) return;
     // Backstop: the drawer opens the confirm dialog before it gets here, and
     // addLine bails earlier still. Nothing should reach this — but this is the
@@ -802,10 +835,10 @@ function OrderForm({
     void doSubmit(submitLines);
   };
 
-  const attemptSubmit = () => {
-    const issues = collectSerialIssues(lines);
+  const attemptSubmit = (ls: Line[]) => {
+    const issues = collectSerialIssues(ls);
     if (issues) { setSerialIssues(issues); return; }
-    const blanks = lines
+    const blanks = ls
       .map((l, idx) => ({ idx, l, gen: (l.partNumber ?? '').trim() ? null : synthesizePartNumber(l.category, l) }))
       .filter(x => !(x.l.partNumber ?? '').trim());
     const blocking = blanks.find(x => !x.gen);
@@ -814,7 +847,7 @@ function OrderForm({
       setPnConfirm(blanks.map(x => ({ idx: x.idx, value: x.gen! })));
       return;
     }
-    proceedSubmit();
+    proceedSubmit(ls);
   };
 
   // What Submit is still waiting on, one entry per problem. The button stays
@@ -828,12 +861,23 @@ function OrderForm({
   : !meta.warehouseId       ? [t('reviewPickWarehouseHint')]
   : lineBlockerMessages(lines, t, lineReady, missingNamesFor);
 
-  const onSubmitClick = () => {
+  const onSubmitClick = async () => {
     if (submitBlockers.length) {
       showErrorDialog(t('errCantSubmitMsg'), submitBlockers, t('errCantSubmitTitle'));
       return;
     }
-    attemptSubmit();
+    // A line confirmed in the drawer was asked there. Any other is asked here,
+    // as its Confirm would have; cancelling a question stops the submit.
+    const { lines: ls, unsettled } = await settlePartQuestions(
+      lines, (l, i) => askPart(l, newNos[i]), answerPart, l => !l._confirmed);
+    if (unsettled.length) return;
+    // A value taken from the part # can clear one the cascade rules out.
+    const after = lineBlockerMessages(ls, t, lineReady, missingNamesFor);
+    if (after.length) {
+      showErrorDialog(t('errCantSubmitMsg'), after, t('errCantSubmitTitle'));
+      return;
+    }
+    attemptSubmit(ls);
   };
 
   return (
@@ -1305,6 +1349,7 @@ function OrderForm({
       {serialIssues && (
         <SerialCheckDialog issues={serialIssues} onClose={() => setSerialIssues(null)} />
       )}
+      {partQ.dialog}
 
       {dupConfirm && (
         <DupPartDialog

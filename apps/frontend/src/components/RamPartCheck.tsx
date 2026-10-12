@@ -1,53 +1,29 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  canonicalPartNumber, decodeRamPart, ramPartDecodesAsWritten, ramPartFill, ramPartMismatches, ramPartReadingsMatching,
+  canonicalPartNumber, decodeRamPart, ramPartDecodesAsWritten, ramPartFill,
   splitRamPartFamily, RAM_PART_FIELDS,
-  type RamPartDecode, type RamPartField, type RamPartMismatch, type RamPartSpec, type RamScanCheck,
+  type RamPartField, type RamPartMismatch, type RamPartSpec, type RamScanCheck,
 } from '@recycle-erp/shared';
 import { Icon } from './Icon';
 import { Modal } from './Modal';
 import { useT } from '../lib/i18n';
+import { ramPartCheck, ramPartPatch, type PartAnswer, type RamPartLine } from '../lib/ramPartQuestion';
 
 // What the part number says about a RAM line, shown under the Part # field
-// in both shells, and the confirm-time question when it disagrees with the
-// form. Decoding is local (shared/ramPartDecode.ts), so nothing here waits on
-// the network.
-
-export type RamPartLine = Partial<Record<RamPartField | 'partNumber' | 'category', string | null | undefined>>;
+// in both shells, and the save-time question when it disagrees with the
+// form (its rule is lib/ramPartQuestion.ts). Decoding is local
+// (shared/ramPartDecode.ts), so nothing here waits on the network.
 
 export const RAM_PART_LABEL_KEY: Readonly<Record<RamPartField, string>> = {
   brand: 'brand', capacity: 'capacity', generation: 'generation', type: 'type',
   classification: 'klass', rank: 'rank', speed: 'speedMhz',
 };
 
-/** The decode, its disagreements with the line, and readings that would agree. */
-export function ramPartCheck(line: RamPartLine): {
-  decode: RamPartDecode | null;
-  mismatches: RamPartMismatch[];
-  readings: string[];
-} {
-  if (line.category !== 'RAM') return { decode: null, mismatches: [], readings: [] };
-  const decode = decodeRamPart(line.partNumber);
-  const mismatches = ramPartMismatches(decode, line);
-  const readings = mismatches.length ? ramPartReadingsMatching(line.partNumber, line) : [];
-  return { decode, mismatches, readings };
-}
-
 /** One-line summary in the order a label prints it: `Samsung 16GB DDR4 · Server · RDIMM · 1Rx4 · 2400`. */
 export function ramPartSummary(spec: RamPartSpec): string {
   const head = [spec.brand, spec.capacity, spec.generation].filter(Boolean).join(' ');
   const tail = [spec.type, spec.classification, spec.rank, spec.speed].filter(Boolean);
   return [head, ...tail].filter(Boolean).join(' · ');
-}
-
-/** Signature of a set of mismatches, so "keep mine" covers exactly what was shown. */
-export function mismatchKey(line: RamPartLine, mismatches: RamPartMismatch[]): string {
-  return canonicalPartNumber(line.partNumber) + '|' + mismatches.map(m => `${m.field}=${m.lineSays}`).join(',');
-}
-
-/** The patch that makes the line agree with its part number. */
-export function ramPartPatch(mismatches: RamPartMismatch[]): RamPartSpec {
-  return Object.fromEntries(mismatches.map(m => [m.field, m.partSays]));
 }
 
 const DEBOUNCE_MS = 300;
@@ -215,14 +191,16 @@ function ReadingList({ readings, onUsePart, disabled }: {
 }
 
 /**
- * Asked on Confirm when the part number contradicts the form. Either side may
- * be the misread one, so both stay possible: take the part #'s values, take
- * a corrected part #, or keep the form as entered.
+ * Asked when a save would write a part number that contradicts the form.
+ * Either side may be the misread one, so both stay possible: take the part
+ * #'s values, take a corrected part #, or keep the form as entered.
+ * `subject` names the line where the save covers more than one.
  */
 export function RamPartMismatchDialog({
-  line, onUse, onUsePart, onKeep, onCancel,
+  line, subject, onUse, onUsePart, onKeep, onCancel,
 }: {
   line: RamPartLine;
+  subject?: string;
   onUse: (patch: RamPartSpec) => void;
   onUsePart: (partNumber: string) => void;
   onKeep: () => void;
@@ -242,10 +220,11 @@ export function RamPartMismatchDialog({
         </button>
       </div>
       <div className="modal-body rp-dialog">
-        {decode && (
+        {(decode || subject) && (
           <div className="rp-head">
+            {subject && <span className="chip">{subject}</span>}
             <span className="rp-pn mono">{(line.partNumber ?? '').trim()}</span>
-            <span className="rp-sum">{ramPartSummary(decode.spec)}</span>
+            {decode && <span className="rp-sum">{ramPartSummary(decode.spec)}</span>}
           </div>
         )}
         <MismatchList mismatches={mismatches} onUse={onUse} useAll={false} />
@@ -257,6 +236,49 @@ export function RamPartMismatchDialog({
       </div>
     </Modal>
   );
+}
+
+/**
+ * The question as a call a save can wait on, for the saves that reach a line
+ * without the drawer's Confirm: Submit, Save, a scanned sheet. Render
+ * `dialog` once in the page.
+ */
+export function usePartQuestion(): {
+  ask: (line: RamPartLine, subject?: string) => Promise<PartAnswer | null>;
+  dialog: ReactNode;
+} {
+  const [open, setOpen] = useState<{
+    line: RamPartLine;
+    subject?: string;
+    seq: number;
+    resolve: (answer: PartAnswer | null) => void;
+  } | null>(null);
+  const seq = useRef(0);
+  const ask = useCallback((line: RamPartLine, subject?: string) =>
+    new Promise<PartAnswer | null>(resolve => {
+      setOpen({ line, subject, seq: ++seq.current, resolve });
+    }), []);
+  // By its own seq: a second click on this dialog lands after the save has
+  // already asked about the next line, and must not close that one.
+  const answer = (a: PartAnswer | null) => {
+    if (!open) return;
+    const { seq: s, resolve } = open;
+    setOpen(cur => (cur?.seq === s ? null : cur));
+    resolve(a);
+  };
+  const dialog = open && (
+    <RamPartMismatchDialog
+      // One dialog per question: the next line's must not inherit this one's focus.
+      key={open.seq}
+      line={open.line}
+      subject={open.subject}
+      onUse={patch => answer({ kind: 'use', patch })}
+      onUsePart={partNumber => answer({ kind: 'usePart', partNumber })}
+      onKeep={() => answer({ kind: 'keep' })}
+      onCancel={() => answer(null)}
+    />
+  );
+  return { ask, dialog };
 }
 
 /**
