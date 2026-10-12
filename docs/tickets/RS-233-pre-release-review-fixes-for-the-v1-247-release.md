@@ -2,13 +2,13 @@
 id: RS-233
 title: Pre-release review fixes for the v1.247 release
 type: bug
-status: in-progress
+status: done
 priority: P1
 created: 2026-10-11
 reporter: jinhu
 branch: fix/release-1.247-review
-pr:
-version:
+pr: 613
+version: 1.247.1
 related: [RS-227, RS-228, RS-229, RS-230, RS-231, RS-232]
 ---
 
