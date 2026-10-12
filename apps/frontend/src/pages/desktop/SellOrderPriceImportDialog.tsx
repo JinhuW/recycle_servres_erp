@@ -126,7 +126,7 @@ export function PriceImportSection({
   };
 
   return (
-    <div className="so-section" style={{ marginTop: 18 }}>
+    <div className="so-section">
       <div className="so-section-head">
         <Icon name="upload" size={14} /> {t('soPriceImportTitle')}
       </div>

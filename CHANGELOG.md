@@ -17,6 +17,17 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.248.1] - 2026-10-12
+
+v1.248.0 moved the wrong card (RS-236).
+
+### Fixed
+
+- **Vendor price import is the first thing in an order being edited**, not
+  the last. The request behind v1.248.0 was about this block, under every
+  product line, not History. History goes back to the foot of the page and
+  keeps starting folded.
+
 ## [1.248.0] - 2026-10-12
 
 A sell order's page gets its History out of the way and a search box over its

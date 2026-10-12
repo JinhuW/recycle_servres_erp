@@ -1554,17 +1554,21 @@ function SellOrderDetail({ id, mode, onToast }: {
         <>
           <div className="so-page-body">
             <div className="so-page-main">
-              <div className="card so-page-card" style={{ paddingTop: 8, paddingBottom: 8 }}>
-                <details>
-                  <summary style={{ cursor: 'pointer', fontWeight: 600, padding: '8px 0' }}>
-                    {t('sodHistory')}
-                  </summary>
-                  <div style={{ marginTop: 8, marginBottom: 10 }}>
-                    <SellOrderHistory sellOrderId={order.id} refreshKey={historyKey} />
-                  </div>
-                </details>
-              </div>
               <div className="card so-page-card">
+                {/* First in the card: on a long order it was a scroll past every line. */}
+                {editable && (
+                  <PriceImportSection
+                    orderId={order.id}
+                    currency={draft.currency}
+                    locale={locale}
+                    onApply={rows =>
+                      setDraft(d => d && {
+                        ...d,
+                        lines: applyPriceRows(d.lines, rows),
+                        bidParts: mergeBidParts(d.bidParts, rows),
+                      })}
+                  />
+                )}
                 {order.status === 'Closed' && (
                   <div style={{
                     marginBottom: 18, padding: '10px 14px', borderRadius: 8,
@@ -1902,19 +1906,16 @@ function SellOrderDetail({ id, mode, onToast }: {
                   </div>
                 )}
 
-                {editable && (
-                  <PriceImportSection
-                    orderId={order.id}
-                    currency={draft.currency}
-                    locale={locale}
-                    onApply={rows =>
-                      setDraft(d => d && {
-                        ...d,
-                        lines: applyPriceRows(d.lines, rows),
-                        bidParts: mergeBidParts(d.bidParts, rows),
-                      })}
-                  />
-                )}
+              </div>
+              <div className="card so-page-card" style={{ paddingTop: 8, paddingBottom: 8 }}>
+                <details>
+                  <summary style={{ cursor: 'pointer', fontWeight: 600, padding: '8px 0' }}>
+                    {t('sodHistory')}
+                  </summary>
+                  <div style={{ marginTop: 8, marginBottom: 10 }}>
+                    <SellOrderHistory sellOrderId={order.id} refreshKey={historyKey} />
+                  </div>
+                </details>
               </div>
             </div>
             <div className="so-page-side">
