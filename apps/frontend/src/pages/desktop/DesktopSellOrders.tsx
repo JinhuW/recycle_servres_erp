@@ -1272,6 +1272,26 @@ function SellOrderDetail({ id, mode, onToast }: {
   // View-mode receiver change: no draft, no Save button — it hits the server
   // at once (the edit form folds the receiver into its PATCH instead). The
   // detail and history reload.
+  // View-mode notes save on their own, in any status, as the receiver does:
+  // the server locks only products and customer once an order is Done.
+  const [notesDraft, setNotesDraft] = useState('');
+  const [notesSaving, setNotesSaving] = useState(false);
+  const savedNotes = order?.notes ?? '';
+  useEffect(() => { setNotesDraft(savedNotes); }, [savedNotes]);
+  const saveNotes = async () => {
+    if (!order || notesDraft === savedNotes) return;
+    setNotesSaving(true);
+    try {
+      await api.patch(`/api/sell-orders/${order.id}`, { notes: notesDraft });
+      setRefreshKey(k => k + 1);
+      setHistoryKey(k => k + 1);
+    } catch (e) {
+      handleFetchError(e);
+    } finally {
+      setNotesSaving(false);
+    }
+  };
+
   const saveReceiver = async (userId: string) => {
     if (!order || userId === (order.paymentReceivedBy?.id ?? '')) return;
     setReceiverSaving(true);
@@ -2096,21 +2116,27 @@ function SellOrderDetail({ id, mode, onToast }: {
                 </div>
               )}
 
-              {/* Internal notes — section in both modes; read-only text when viewing */}
+              {/* Internal notes — writable in both modes. Editing folds them
+                  into the form's Save; viewing saves them on their own. */}
               <div className="card so-page-card">
                 <div className="so-section-head"><Icon name="edit" size={14} /> {t('ieInternalNotes')}</div>
-                {editable ? (
-                  <textarea
-                    className="input"
-                    rows={3}
-                    value={draft.notes}
-                    onChange={e => setDraft({ ...draft, notes: e.target.value })}
-                    placeholder={t('soTrackingPlaceholder')}
-                    style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
-                  />
-                ) : (
-                  <div style={{ fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap', color: order.notes ? 'var(--fg)' : 'var(--fg-subtle)' }}>
-                    {order.notes || t('none')}
+                <textarea
+                  className="input"
+                  rows={3}
+                  value={editable ? draft.notes : notesDraft}
+                  disabled={!editable && notesSaving}
+                  onChange={e => (editable ? setDraft({ ...draft, notes: e.target.value }) : setNotesDraft(e.target.value))}
+                  placeholder={t('soTrackingPlaceholder')}
+                  style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
+                />
+                {!editable && notesDraft !== savedNotes && (
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+                    <button className="btn sm" disabled={notesSaving} onClick={() => setNotesDraft(savedNotes)}>
+                      {t('cancel')}
+                    </button>
+                    <button className="btn sm accent" disabled={notesSaving} onClick={saveNotes}>
+                      <Icon name="check" size={12} /> {t('save')}
+                    </button>
                   </div>
                 )}
               </div>

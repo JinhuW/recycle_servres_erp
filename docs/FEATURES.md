@@ -1106,6 +1106,10 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     full. Saving refuses such a line above 0.
   - View and edit share one history entry, so browser Back returns to where
     the order was opened from.
+  - **Internal notes can be written at any time** (v1.249.0), from the
+    order's view page in any status, Done and Closed included: the notes
+    box is live, and Save / Cancel appear once it differs from what is
+    saved. Edit mode still folds notes into the form's own Save.
   - **The order's History is the last card in the right-hand column, folded**
     (v1.248.0; in the side column since v1.248.2); a click on its heading
     opens it.

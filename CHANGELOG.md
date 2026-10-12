@@ -17,6 +17,20 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.249.0] - 2026-10-12
+
+Internal notes without entering edit mode (RS-239).
+
+### Added
+
+- **A sell order's internal notes are editable from its view page, in any
+  status.** They were read-only text unless the order was opened for editing,
+  and a Done or Closed order can't be, so a tracking number or payment
+  reference that arrived after the deal closed had nowhere to go. The notes
+  box now saves on its own, as the payment receiver already did; Save and
+  Cancel show once the text differs from what is saved. The backend already
+  allowed it: only products and customer lock at Done.
+
 ## [1.248.3] - 2026-10-12
 
 Vendor price import joins History in the side column (RS-238).
