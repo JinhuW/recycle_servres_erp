@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-12
 reporter: jinhu
 branch: fix/so-history-top
-pr:
+pr: 619
 version: 1.248.0
 related: []
 ---
