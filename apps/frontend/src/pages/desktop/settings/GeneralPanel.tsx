@@ -138,6 +138,10 @@ export function GeneralPanel() {
     persist({ [WS_NOTIFY_KEY[k]]: v });
   };
 
+  // The cap is typed as text and read on blur: a number input reports '' for
+  // a half-typed '.5', and storing that as 0 would rewrite the field mid-entry.
+  const [capDraft, setCapDraft] = useState<string | null>(null);
+
   // The server stores the whole object, so every change sends all of it.
   const updAi = (patch: Partial<AiReviewSetting>, persistNow = true) => {
     const next = { ...data.aiReview, ...patch };
@@ -272,11 +276,13 @@ export function GeneralPanel() {
             <label className="label">{t('aiRevSettingsCap')}</label>
             <input
               className="input mono" type="number" min={0.05} max={10} step={0.05}
-              value={data.aiReview.maxCostPerPoUsd}
-              onChange={e => updAi({ maxCostPerPoUsd: Number(e.target.value) }, false)}
+              value={capDraft ?? data.aiReview.maxCostPerPoUsd}
+              onChange={e => setCapDraft(e.target.value)}
               onBlur={() => {
-                const v = data.aiReview.maxCostPerPoUsd;
-                updAi({ maxCostPerPoUsd: v > 0 && v <= 10 ? v : AI_REVIEW_DEFAULT.maxCostPerPoUsd });
+                if (capDraft === null) return;
+                const v = Number(capDraft);
+                setCapDraft(null);
+                if (capDraft.trim() !== '' && v > 0 && v <= 10) updAi({ maxCostPerPoUsd: v });
               }}
             />
           </div>

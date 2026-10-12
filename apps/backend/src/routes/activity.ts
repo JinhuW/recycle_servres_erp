@@ -4,6 +4,7 @@ import {
   type ActivityAction, type ActivityArea,
 } from '@recycle-erp/shared';
 import { getDb } from '../db';
+import { restageSoldEvent, soldSettleEventSql } from '../services/orderSold';
 import { clampLimit, cursorTs, cursorTsParam, cursorTsSelect, decodeCursor, encodeCursor } from '../lib/pagination';
 import type { Env, User } from '../types';
 
@@ -82,6 +83,7 @@ activity.get('/', async (c) => {
 
   const WHERE = {
     po: sql`${sinceFrag} AND ${kindFrag('po')} AND ${actorFrag('actor_id')}
+            AND NOT ${soldSettleEventSql(sql, sql`e`)}
             AND (${searchFrag(['e.order_id', 'act.name'])})`,
     so: sql`${sinceFrag} AND ${kindFrag('so')} AND ${actorFrag('actor_id')}
             AND (${searchFrag(['e.sell_order_id', 'act.name'])})`,
@@ -188,7 +190,7 @@ activity.get('/', async (c) => {
   }
 
   return c.json({
-    events: slice.map(r => ({
+    events: slice.map(r => (r.area === 'po' ? restageSoldEvent(r) ?? r : r)).map(r => ({
       id: r.id,
       area: r.area,
       createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at,

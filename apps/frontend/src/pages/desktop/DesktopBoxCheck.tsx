@@ -8,7 +8,7 @@ import { useManagerTakeover } from '../../components/ManagerTakeoverDialog';
 import { PaymentMismatchBanner, usePaymentMismatchConfirm } from '../../components/PaymentMismatch';
 import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
 import { api, rawFetch } from '../../lib/api';
-import { applyPatch, openIssuesByLine, useAiReview, type AiFinding } from '../../lib/aiReview';
+import { applyPatch, canApply, openIssuesByLine, settledBy, useAiReview, type AiFinding } from '../../lib/aiReview';
 import {
   checkBody, countOf, emptyCheck, entryAnswerFor, filterScan, isAbsentChecked, isShortChecked, lineState, matchScan, nextOpenAfter,
   orderLines, partsNamed, readStageMoved, stashEntryAnswer, tally,
@@ -447,12 +447,26 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   );
 
   // The line PATCH any edit on this page sends, then the answer recorded; the
-  // reload remounts the page on the edited line.
+  // reload remounts the page on the edited line. The findings are read again
+  // first: one loaded before somebody else edited the line no longer
+  // describes it, and applying it would write over that edit.
   const applyFinding = async (f: AiFinding) => {
     const l = lineById.get(f.lineId!);
     if (!l) return;
-    await api.patch(`/api/orders/${order.id}`, { lines: [applyPatch(f)], expectStage: order.lifecycle });
-    await ai.resolve(f.id, 'applied');
+    const now = (await ai.reload()).findings;
+    const fresh = now.find(x => x.id === f.id);
+    if (!fresh || !canApply(fresh)) {
+      showToast(t('aiRevChangedToast'), 'warn');
+      return;
+    }
+    const patch = applyPatch(fresh, { ...l, category: l.category });
+    await api.patch(`/api/orders/${order.id}`, { lines: [patch], expectStage: order.lifecycle });
+    await ai.resolve(fresh.id, 'applied');
+    // A Form fix that brought its Device along answers that finding too.
+    for (const o of settledBy(patch, fresh, now)) await ai.resolve(o.id, 'applied');
+    // Ticks still waiting go out before the remount reads them back, as for
+    // a drawer edit.
+    await flush();
     showToast(t('aiRevAppliedToast', { n: lineNo(l) }), 'success');
     await onReload();
   };

@@ -3,7 +3,7 @@ import { getDb } from '../db';
 import { getWorkspaceSetting } from '../lib/settings';
 import { formatRefPrice, marketValueSelect, maxBuyFor } from '../lib/market';
 import { applyMarketWrites } from '../lib/marketWrite';
-import { appendPriceEvent } from '../lib/refPriceEvents';
+import { appendPriceEvent, appendPriceEvents } from '../lib/refPriceEvents';
 import { escapeLike } from '../lib/pagination';
 import { canonPartCol, canonPartNumberJs } from '../lib/part-number';
 import { bearerGuard } from '../oauth/guard';
@@ -282,7 +282,9 @@ market.post('/chips', async (c) => {
 // dropped, never stored, so its cap is its own rather than the attachment
 // limits in getUploadLimits.
 const PRICE_IMPORT_MAX_BYTES = 8 * 1024 * 1024;
-const PRICE_IMPORT_MAX_ROWS = 1000;
+// Prices one import writes, and so how many matches a preview may offer: a
+// preview the apply would refuse is one the manager can do nothing with.
+const PRICE_IMPORT_MAX_ROWS = 5000;
 const PRICE_IMPORT_MAX_PRICE = 10_000_000;
 
 type ImportRowStatus =
@@ -403,6 +405,11 @@ market.post('/price-import/preview', async (c) => {
     else if (r.status === 'not-usd') summary.notUsd++;
     else summary.duplicate++;
   }
+  if (summary.matched > PRICE_IMPORT_MAX_ROWS) {
+    return c.json({
+      error: `at most ${PRICE_IMPORT_MAX_ROWS} prices per import`, code: 'too-many-prices', max: PRICE_IMPORT_MAX_ROWS,
+    }, 413);
+  }
   return c.json({ targetMargin, rows, summary });
 });
 
@@ -437,20 +444,13 @@ market.post('/price-import/apply', async (c) => {
   const ids = [...priceById.keys()];
   const sql = getDb(c.env);
   const updated = await sql.begin(async (tx) => {
-    // Every row locked up front, in one order, before the first write.
+    // Every row locked up front, in one order, before the write.
     const found = await tx<{ id: string }[]>`
       SELECT id FROM ref_prices WHERE id = ANY(${ids}::text[]) ORDER BY id FOR NO KEY UPDATE
     `;
-    for (const { id } of found) {
-      await appendPriceEvent(tx, {
-        refPriceId: id,
-        price: priceById.get(id)!,
-        source: `import:${user.email}`,
-        note: fileName,
-        actorUserId: user.id,
-      });
-    }
-    return found.length;
+    return appendPriceEvents(tx, new Map(found.map(({ id }) => [id, priceById.get(id)!])), {
+      source: `import:${user.email}`, note: fileName, actorUserId: user.id,
+    });
   });
   return c.json({ updated, notFound: ids.length - updated });
 });

@@ -59,6 +59,18 @@ describe('checkLine (RAM)', () => {
     expect(f).toMatchObject({ severity: 'error', field: 'partNumber', suggestedValue: PN });
   });
 
+  it('blames a misread part number, not the specs it would rewrite', () => {
+    // HMAA read as HMA8: the misread decodes to 4Rx4, the line is a 2Rx4 stick.
+    const hynix = ram({
+      brand: 'SK Hynix', capacity: '64GB', rank: '2Rx4', speed: '3200', partNumber: 'HMA88GR7AJR4N-XN',
+    });
+    const out = checkLine(hynix);
+    expect(out.filter((x) => x.code === 'spec_mismatch')).toEqual([]);
+    expect(out.find((x) => x.code === 'pn_misread')).toMatchObject({
+      field: 'partNumber', suggestedValue: 'HMAA8GR7AJR4N-XN',
+    });
+  });
+
   it('notes a line with no part number', () => {
     expect(checkLine(ram({ partNumber: null }))[0]).toMatchObject({ code: 'pn_missing', severity: 'info' });
   });
@@ -85,6 +97,12 @@ describe('checkLine (drives and cost)', () => {
     expect(needsWebLookup(ssd, true)).toBe(false);
   });
 
+  it('never looks up a placeholder or a Mixed lot\'s synthetic part number', () => {
+    expect(needsWebLookup({ ...ssd, partNumber: 'N/A' }, false)).toBe(false);
+    const mixed = { ...ssd, brand: 'Mixed', capacity: '960GB', interface: 'SATA', formFactor: '2.5"' };
+    expect(needsWebLookup({ ...mixed, partNumber: 'MIXED_960GB_SATA_2.5' }, false)).toBe(false);
+  });
+
   it('warns on a label that disagrees, errors when the web agrees with it', () => {
     const lab = label({ capacity: '1.92TB' });
     expect(checkLine(ssd, { label: lab }).find((x) => x.field === 'capacity')).toMatchObject({ severity: 'warn' });
@@ -100,6 +118,12 @@ describe('checkLine (drives and cost)', () => {
 });
 
 describe('findingIsCurrent', () => {
+  it('lets a cost finding go stale once the unit cost moves', () => {
+    const f = { field: null, code: 'cost_missing', currentValue: '0' };
+    expect(findingIsCurrent(f, { unitCost: 0 })).toBe(true);
+    expect(findingIsCurrent(f, { unitCost: 45 })).toBe(false);
+  });
+
   it('holds while the field still has the value the review read', () => {
     const f = { field: 'capacity', currentValue: '16GB' };
     expect(findingIsCurrent(f, { capacity: '16 GB' })).toBe(true);

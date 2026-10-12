@@ -78,13 +78,13 @@ listRoutes.get('/', async (c) => {
   // The org-wide default view drowns in finished POs, so clients can carve
   // stages out (mobile sends excludeStatus=Done unless a chip is active). An
   // unknown label excludes nothing — the mirror of `status`, where an unknown
-  // label matches nothing.
-  const excludeLabels = c.req.queries('excludeStatus') ?? [];
-  const excludeSlugs = excludeLabels.flatMap((l) => lifecyclesForLabel(l));
+  // label matches nothing. "Sold" is one: a phone still on an older bundle
+  // sends it beside Done, meaning the sold-out Done POs Done already covers,
+  // not the sold POs still waiting on a review or a payment.
+  const excludeSlugs = (c.req.queries('excludeStatus') ?? []).flatMap((l) => lifecyclesForLabel(l));
   const excludeFrag = excludeSlugs.length
     ? sql`o.lifecycle <> ALL(${excludeSlugs}::text[])`
     : sql`TRUE`;
-  const excludeSoldFrag = excludeLabels.includes('Sold') ? sql`NOT ${soldFrag}` : sql`TRUE`;
   // Archived orders drop out of the default view; clients opt in to see them.
   const archivedFrag = includeArchived ? sql`TRUE` : sql`o.archived_at IS NULL`;
 
@@ -177,7 +177,7 @@ listRoutes.get('/', async (c) => {
                           AND (${isManager} OR sup.owner_id IS NULL OR sup.owner_id = ${u.id})
     ${poRealizedLateral(sql, isManager)}
     LEFT JOIN order_lines l ON l.order_id = o.id
-    WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${excludeFrag} AND ${excludeSoldFrag} AND ${archivedFrag} ${cursorFrag}
+    WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${excludeFrag} AND ${archivedFrag} ${cursorFrag}
     GROUP BY o.id, u.name, u.initials, mg.id, w.id, w.short, w.region, sup.name,
              rz.sold_qty, rz.bought_qty, rz.revenue, rz.cost, rz.projected_profit
     ORDER BY ${sortExpr} ${dirSql}, o.id ${dirSql}

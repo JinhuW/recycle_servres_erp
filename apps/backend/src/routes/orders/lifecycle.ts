@@ -12,6 +12,7 @@ import { pickBankProviders } from '../../banktx';
 import { reportSyncResult, syncBankTransactions } from '../../banktx/sync';
 import { createRateLimiter } from '../../lib/rate-limit';
 import { syncOrderGoodsTotal } from '../../services/orderGoodsTotal';
+import { supersedePoAiReviewsTx } from '../../services/poAiReview';
 import { normalizeTracking, type Carrier, type PackageSource } from '@recycle-erp/shared';
 import { type Env, type User } from '../../types';
 import { PAYPAL_TXN_STRICT, normPaypalTxnId } from '../../ai/paypal';
@@ -192,6 +193,9 @@ async function setArchived(c: OrderCtx, archive: boolean) {
       const lines = await archiveOrderLinesTx(tx, id, actor, { removeFromSellOrders });
       if (lines.kind !== 'ok') return lines;
       await tx`UPDATE orders SET archived_at = NOW() WHERE id = ${id}`;
+      // An archived PO can't be reviewed or acted on; a review still waiting
+      // would only spend credit and notify about it.
+      await supersedePoAiReviewsTx(tx, id);
       await writeOrderEvent(tx, id, u.id, 'archived', {
         lines: lines.lines, removedSellOrderLines: lines.removedSellOrderLines,
       });

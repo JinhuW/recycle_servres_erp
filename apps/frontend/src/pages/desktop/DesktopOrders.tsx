@@ -254,25 +254,35 @@ export function DesktopOrders({ onToast }: Props) {
     return orders.filter(o => o.id.toLowerCase().includes(q) || o.userName.toLowerCase().includes(q));
   }, [orders, search]);
 
+  // `sold` only reaches managers, and the chip lives in their rail: the role
+  // preview must not keep filtering on a flag it can no longer see or clear.
+  const soldPicked = isManager && soldOnly;
+
   // The all-stages view hides Done POs unless the toggle is on; the stage
   // rail's own Done chip still shows them because a stage pick bypasses the
   // prune — same contract as the sell-order list. So does the Sold chip: most
   // sold POs are Done.
   const activeVisible = useMemo(
-    () => showDone || soldOnly ? visible : visible.filter(o => !isCompleted(o.status)),
-    [visible, showDone, soldOnly],
+    () => showDone || soldPicked ? visible : visible.filter(o => !isCompleted(o.status)),
+    [visible, showDone, soldPicked],
   );
 
-  // What the stage chip alone leaves; the Sold chip counts and narrows this.
+  // What the stage chip alone leaves; the Sold chip narrows this.
   const stagePicked = useMemo(
     () => stageFilter === 'all' ? activeVisible : visible.filter(o => o.lifecycle === stageFilter),
     [visible, activeVisible, stageFilter],
   );
-  const soldCount = useMemo(() => stagePicked.filter(o => o.sold).length, [stagePicked]);
+  // Counted before the Done prune, since a click on the chip lifts it: the
+  // number is what the click will show.
+  const soldCount = useMemo(
+    () => (stageFilter === 'all' ? visible : visible.filter(o => o.lifecycle === stageFilter))
+      .filter(o => o.sold).length,
+    [visible, stageFilter],
+  );
 
   const stageFiltered = useMemo(
-    () => soldOnly ? stagePicked.filter(o => o.sold) : stagePicked,
-    [stagePicked, soldOnly],
+    () => soldPicked ? stagePicked.filter(o => o.sold) : stagePicked,
+    [stagePicked, soldPicked],
   );
 
   // Sort comes last — after all filters.
@@ -337,8 +347,8 @@ export function DesktopOrders({ onToast }: Props) {
               className="btn"
               onClick={() => setShowDone(v => !v)}
               aria-pressed={showDone}
-              disabled={stageFilter !== 'all' || soldOnly}
-              title={stageFilter !== 'all' || soldOnly
+              disabled={stageFilter !== 'all' || soldPicked}
+              title={stageFilter !== 'all' || soldPicked
                 ? t('closedDoneToggleAllOnly')
                 : showDone ? t('hideDonePOs') : t('showDonePOs')}
               style={{

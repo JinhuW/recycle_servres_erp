@@ -43,6 +43,13 @@ function digitsOnly(v: string): string {
   return m ? m[0] : '';
 }
 
+// "7,200 RPM", "10K", "15k rpm": the first digit run alone would read 7 or 10.
+function normRpm(v: string): string {
+  const t = v.replace(/[,\s]/g, '');
+  const k = t.match(/^(\d+(?:\.\d+)?)k/i);
+  return k ? String(Math.round(Number(k[1]) * 1000)) : digitsOnly(t);
+}
+
 // Trust the label. Whatever number is printed after DDRx-/PCx-/MT-s is what
 // goes in. Both encodings appear in the wild (modern "PC4-3200" = MT/s, legacy
 // "PC3-12800" = bandwidth in MB/s); converting between them is a guess that
@@ -139,7 +146,7 @@ export function normalizeFields(
   if (category === 'SSD' || category === 'HDD') {
     if (f.interface) f.interface = f.interface.toUpperCase().replace('NVME', 'NVMe');
     if (f.rpm) {
-      const r = digitsOnly(f.rpm);
+      const r = normRpm(f.rpm);
       if (r) f.rpm = r; else delete f.rpm;
     }
   }

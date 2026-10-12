@@ -5,7 +5,7 @@ import { getDb } from '../../db';
 import { wasEverSubmitted } from '../../services/orderAudit';
 import { effectiveRole } from '../../lib/role';
 import { heldLines, LIFECYCLE_LABEL } from '../../services/orderAdvance';
-import { soldFlagSql } from '../../services/orderSold';
+import { restageSoldEvent, soldFlagSql } from '../../services/orderSold';
 import { txnRequiredFor, chatShotRequiredFor, cashShotRequiredFor, readCutoffs, leaveDraftBlockers } from '../../services/orderTxnRule';
 import { allLimited } from '../../lib/concurrency';
 import { sortCategories } from '../../services/orderCategory';
@@ -351,23 +351,15 @@ detailRoutes.get('/:id/events', async (c) => {
     actor_initials: string | null;
   }>;
 
-  // Sold was once a stage after Done (v1.164.0). Its history stays
-  // in the table but reads in today's terms: the settle row is dropped rather
-  // than shown as Done → Done, and a reopen from Sold reads as one from Done.
-  const unSold = (v: string | undefined) => (v === 'sold' ? 'done' : v);
-  const restaged = rows.flatMap((r) => {
-    if (r.kind !== 'advanced') return [r];
-    const d = r.detail as { from?: string; to?: string };
-    if (d.from === 'done' && d.to === 'sold') return [];
-    if (d.from !== 'sold' && d.to !== 'sold') return [r];
-    return [{ ...r, detail: { ...d, from: unSold(d.from), to: unSold(d.to) } }];
-  });
+  const restaged = rows.flatMap((r) => restageSoldEvent(r) ?? []);
   // Sell orders are a manager's: the archive refusal names none to a
-  // purchaser, so the archive event mustn't count them either.
-  const visible = role === 'manager' ? restaged : restaged.map((r) => {
-    if (r.kind !== 'archived') return r;
+  // purchaser, so the archive event mustn't count them either. The AI review
+  // is a manager's tool too; its runs are not the purchaser's history.
+  const visible = role === 'manager' ? restaged : restaged.flatMap((r) => {
+    if (r.kind === 'ai_review_done') return [];
+    if (r.kind !== 'archived') return [r];
     const { removedSellOrderLines: _dropped, ...rest } = r.detail;
-    return { ...r, detail: rest };
+    return [{ ...r, detail: rest }];
   });
 
   return c.json({

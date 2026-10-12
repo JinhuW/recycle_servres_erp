@@ -32,19 +32,27 @@ type FindingRow = {
 async function currentLines(sql: SqlLike, id: string): Promise<Map<string, Record<string, unknown>>> {
   const rows = await sql<Record<string, unknown>[]>`
     SELECT id, brand, capacity, generation, type, classification, rank, speed, interface,
-           form_factor AS "formFactor", rpm, part_number AS "partNumber"
+           form_factor AS "formFactor", rpm, part_number AS "partNumber", unit_cost::float AS "unitCost"
     FROM order_lines WHERE order_id = ${id}`;
   return new Map(rows.map((r) => [r.id as string, r]));
 }
 
 async function readAiReview(sql: SqlLike, id: string) {
+  // The newest run, and the newest finished one: a re-run in flight — or any
+  // number of failed or superseded ones — leaves the last finished review's
+  // findings on screen.
   const reviews = await sql<ReviewRow[]>`
-    SELECT id, status, trigger, model, cost_usd::float AS cost_usd, error,
-           created_at, started_at, finished_at
-    FROM po_ai_reviews WHERE order_id = ${id}
-    ORDER BY created_at DESC LIMIT 5`;
+    (SELECT id, status, trigger, model, cost_usd::float AS cost_usd, error,
+            created_at, started_at, finished_at
+       FROM po_ai_reviews WHERE order_id = ${id}
+      ORDER BY created_at DESC LIMIT 1)
+    UNION
+    (SELECT id, status, trigger, model, cost_usd::float AS cost_usd, error,
+            created_at, started_at, finished_at
+       FROM po_ai_reviews WHERE order_id = ${id} AND status = 'done'
+      ORDER BY created_at DESC LIMIT 1)
+    ORDER BY created_at DESC`;
   const latest = reviews[0] ?? null;
-  // A re-run in flight leaves the last finished review's findings on screen.
   const shown = reviews.find((r) => r.status === 'done') ?? null;
   const findings = shown ? await sql<FindingRow[]>`
     SELECT f.id, f.review_id, f.line_id, f.severity, f.code, f.field, f.current_value,
@@ -69,7 +77,7 @@ async function readAiReview(sql: SqlLike, id: string) {
       resolvedAt: f.resolved_at, resolvedBy: f.resolved_by_name,
       // The line moved since the review read it: applying would overwrite that edit.
       stale: f.line_id !== null && !findingIsCurrent(
-        { field: f.field, currentValue: f.current_value }, lines.get(f.line_id)),
+        { field: f.field, code: f.code, currentValue: f.current_value }, lines.get(f.line_id)),
     })),
   };
 }

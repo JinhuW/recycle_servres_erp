@@ -25,6 +25,7 @@ describe('decodeRamPart', () => {
     ['HMA82GR7DJR4N-XN', { brand: 'SK Hynix', capacity: '16GB', generation: 'DDR4', classification: 'RDIMM', type: 'Server', rank: '1Rx4', speed: '3200' }],
     ['HMAA4GR7AJR8N-XN', { brand: 'SK Hynix', capacity: '32GB', generation: 'DDR4', classification: 'RDIMM', type: 'Server', rank: '2Rx8', speed: '3200' }],
     ['HMA82GS6JJR8N-VK', { brand: 'SK Hynix', capacity: '16GB', generation: 'DDR4', classification: 'SODIMM', type: 'Laptop', rank: '2Rx8', speed: '2666' }],
+    ['HMA81GV7AFR8N-VK', { brand: 'SK Hynix', capacity: '8GB', generation: 'DDR4', classification: 'RDIMM', type: 'Server', rank: '1Rx8', speed: '2666' }],
     ['HMCG88MEBRA116N', { brand: 'SK Hynix', capacity: '32GB', generation: 'DDR5', classification: 'RDIMM', type: 'Server', rank: '2Rx8' }],
     ['MTA18ASF2G72PZ-2G3B1', { brand: 'Micron', capacity: '16GB', generation: 'DDR4', classification: 'RDIMM', type: 'Server', rank: '1Rx4', speed: '2400' }],
     ['MTA18ASF2G72PDZ-2G1A1HK', { brand: 'Micron', capacity: '16GB', generation: 'DDR4', classification: 'RDIMM', type: 'Server', rank: '2Rx8', speed: '2133' }],
@@ -34,6 +35,11 @@ describe('decodeRamPart', () => {
     ['CT8G4DFD8213.C16FAR2', { capacity: '8GB', generation: 'DDR4', classification: 'UDIMM', type: 'Desktop', rank: '2Rx8', speed: '2133' }],
     ['KSM32RD4/32HDR', { brand: 'Kingston', capacity: '32GB', generation: 'DDR4', classification: 'RDIMM', type: 'Server', rank: '2Rx4', speed: '3200' }],
     ['KCP426SS6/8', { brand: 'Kingston', capacity: '8GB', generation: 'DDR4', classification: 'SODIMM', type: 'Laptop', rank: '1Rx16', speed: '2666' }],
+    // DDR3L: the L is the voltage, after the speed or after KCP3.
+    ['KVR16LR11D4/16', { brand: 'Kingston', capacity: '16GB', generation: 'DDR3', classification: 'RDIMM', type: 'Server', rank: '2Rx4', speed: '12800' }],
+    ['KCP3L16SD8/8', { brand: 'Kingston', capacity: '8GB', generation: 'DDR3', classification: 'SODIMM', type: 'Laptop', rank: '2Rx8', speed: '12800' }],
+    // A kit names its total after the stick count; capacity is per stick.
+    ['KVR26N19S8K2/16', { brand: 'Kingston', capacity: '8GB', generation: 'DDR4', classification: 'UDIMM', type: 'Desktop', rank: '1Rx8', speed: '2666' }],
     ['HP24D4U7S8MBP-8', { brand: 'Kingston', capacity: '8GB', generation: 'DDR4', classification: 'UDIMM', rank: '1Rx8', speed: '2400' }],
     ['F4-3200C16D-32GVK', { capacity: '16GB', generation: 'DDR4', speed: '3200' }],
     ['F4-3200C22D-64GRS', { capacity: '32GB', generation: 'DDR4', classification: 'SODIMM', type: 'Laptop', speed: '3200' }],
@@ -133,6 +139,25 @@ describe('reconcileRamScan', () => {
     expect(fields.capacity).toBe('16GB');
     expect(fields.partNumber).toBe('HMAA4GR7AJR8N-XN');
     expect(check?.conflicts.map(m => m.field).sort()).toEqual(['capacity', 'rank']);
+  });
+
+  it('reads a DDR4 label printed as a PC4 rate as its transfer rate', () => {
+    const { check } = reconcileRamScan({ partNumber: 'HMA82GR7DJR4N-XN', capacity: '16GB', generation: 'DDR4', speed: '25600' });
+    expect(check?.conflicts).toEqual([]);
+  });
+
+  it('does not pick between two readings that both decode further', () => {
+    // KSM32RDA: the A could be a misread 4 (2Rx4) or 8 (2Rx8).
+    const raw = { partNumber: 'KSM32RDA/32HDR', brand: 'Kingston', capacity: '32GB' };
+    expect(reconcileRamScan(raw).fields.partNumber).toBe('KSM32RDA/32HDR');
+  });
+
+  it('leaves alone a part number that decodes only one look-alike away', () => {
+    // Might be a misread, might be a scheme the decoder doesn't know; with no
+    // printed spec to choose, the label's own reading stands.
+    const raw = { partNumber: 'KCP3I16SD8/8', brand: 'Kingston', capacity: '8GB', generation: 'DDR3' };
+    expect(decodeRamPart(raw.partNumber)?.readAs).toBeDefined();
+    expect(reconcileRamScan(raw)).toEqual({ fields: raw, check: null });
   });
 
   it('has nothing to say about a label without a decodable part number', () => {

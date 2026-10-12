@@ -290,7 +290,8 @@ export type OrderEventKind =
   | 'line_photo_removed'
   | 'archived'
   | 'unarchived'
-  | 'box_check_flagged';
+  | 'box_check_flagged'
+  | 'ai_review_done';
 
 export type OrderEventChange = { field: string; from: unknown; to: unknown };
 

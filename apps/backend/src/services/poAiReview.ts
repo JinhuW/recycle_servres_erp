@@ -11,7 +11,7 @@
 // dismissed by a manager.
 
 import { createHash } from 'node:crypto';
-import { canonicalPartNumber, isRealPhotoUrl } from '@recycle-erp/shared';
+import { canonicalPartNumber, isRealPhotoUrl, reconcileRamScan } from '@recycle-erp/shared';
 import type { Sql } from 'postgres';
 import type { SqlLike } from '../db';
 import type { Env, LineCategory } from '../types';
@@ -91,7 +91,7 @@ type LineRow = {
   classification: string | null; rank: string | null; speed: string | null; interface: string | null;
   form_factor: string | null; rpm: number | null; part_number: string | null;
   qty: number; unit_cost: number;
-  scan_url: string | null; scan_fields: Record<string, string> | null; photo_url: string | null;
+  scan_url: string | null; scan_fields: Record<string, unknown> | null; photo_url: string | null;
 };
 
 async function loadLines(sql: SqlLike, orderId: string): Promise<LineRow[]> {
@@ -130,13 +130,16 @@ export function linesHash(rows: readonly ReviewLine[]): string {
 async function marketRefs(sql: SqlLike, lines: readonly ReviewLine[]): Promise<Map<string, MarketRef>> {
   const canons = [...new Set(lines.map((l) => canonicalPartNumber(l.partNumber ?? '')).filter(Boolean))];
   if (canons.length === 0) return new Map();
+  // The Market board's basis (lib/market.ts: last price, else the average
+  // sell), from the most recently maintained row of a canonical part.
   const rows = await sql<{ canon: string; value: number; label: string }[]>`
-    SELECT canon, value, label FROM (
+    SELECT DISTINCT ON (canon) canon, value, label FROM (
       SELECT ${canonPartCol(sql, sql`rp.part_number`)} AS canon,
-             COALESCE(rp.avg_sell, rp.target)::float AS value, rp.label
+             COALESCE(rp.last_price, rp.avg_sell)::float AS value, rp.label, rp.updated_at
       FROM ref_prices rp WHERE rp.part_number IS NOT NULL AND rp.part_number <> ''
     ) x
     WHERE canon = ANY(${canons}::text[]) AND value IS NOT NULL AND value > 0
+    ORDER BY canon, updated_at DESC
   `;
   return new Map(rows.map((r) => [r.canon, { value: r.value, label: r.label }]));
 }
@@ -148,23 +151,73 @@ async function cachedLookup(sql: SqlLike, canon: string): Promise<WebSpec | null
   return row ? { specs: row.specs, sourceUrls: row.source_urls } : null;
 }
 
-/** Spend so far on one review, and whether the next model call still fits. */
-class Budget {
+/**
+ * Spend so far on one review, and whether the next model call still fits.
+ * Lines run four at a time and a call's cost lands only when it returns, so
+ * each call still under way holds a place at the dearest cost seen so far,
+ * and until one call has said what a call costs they go one at a time — a
+ * first wave of four could otherwise blow through the cap before any cost
+ * is known.
+ */
+export class Budget {
   promptTokens = 0;
   completionTokens = 0;
   costUsd = 0;
   skipped = 0;
+  private inFlight = 0;
+  private dearest = 0;
+  private priced = false;
+  private waiters: (() => void)[] = [];
   constructor(private readonly capUsd: number) {}
   add = (u: AiUsage) => {
     this.promptTokens += u.promptTokens;
     this.completionTokens += u.completionTokens;
     this.costUsd += u.costUsd;
+    this.dearest = Math.max(this.dearest, u.costUsd);
+    this.priced = true;
   };
-  canSpend(): boolean {
-    if (this.costUsd < this.capUsd) return true;
+  /** Takes a place for one model call if it still fits; false (counted as skipped) if not. */
+  async begin(): Promise<boolean> {
+    while (this.inFlight > 0 && !this.priced) {
+      await new Promise<void>((resolve) => this.waiters.push(resolve));
+    }
+    if (this.costUsd + this.inFlight * this.dearest < this.capUsd) {
+      this.inFlight++;
+      return true;
+    }
     this.skipped++;
     return false;
   }
+  /** Gives back the place begin() took, once the call is over. */
+  end(): void {
+    this.inFlight--;
+    for (const wake of this.waiters.splice(0)) wake();
+  }
+}
+
+// The categories the label prompt reads; any other line's photo has nothing
+// to be read for.
+const READABLE_LABELS: ReadonlySet<string> = new Set(['RAM', 'SSD', 'HDD']);
+
+/** label_scans.extracted as text: rows from before reads were normalised can hold numbers. */
+function textFields(raw: Record<string, unknown> | null): Record<string, string> {
+  if (!raw) return {};
+  return Object.fromEntries(Object.entries(raw)
+    .filter(([, v]) => typeof v === 'string' || typeof v === 'number')
+    .map(([k, v]) => [k, String(v)]));
+}
+
+/**
+ * A RAM label read the way the scan form took it. label_scans keeps the
+ * model's raw read, but the line was filled after reconcileRamScan corrected
+ * a misread part number; a witness holding the misread would dispute every
+ * such correction and offer to undo it. Only the part number is taken — the
+ * blanks reconcile fills come from the decode, not the label.
+ */
+export function labelAsRead(category: string, fields: Record<string, string>): Record<string, string> {
+  if (category !== 'RAM') return fields;
+  const to = reconcileRamScan(fields).check?.partCorrected?.to;
+  return to ? { ...fields, partNumber: to } : fields;
 }
 
 type ReviewOutcome = { findings: Finding[]; hash: string; lineCount: number };
@@ -183,14 +236,15 @@ async function reviewLines(
     const line = lines[i]!;
     const category = r.category as LineCategory;
     const canon = canonicalPartNumber(line.partNumber ?? '');
-    const scanLabel: LabelRead | null = r.scan_fields && Object.keys(r.scan_fields).length > 0
-      ? { fields: r.scan_fields, read: 'scan', url: isRealPhotoUrl(r.scan_url) ? r.scan_url : null }
+    const scanFields = textFields(r.scan_fields);
+    const scanLabel: LabelRead | null = Object.keys(scanFields).length > 0
+      ? { fields: labelAsRead(category, scanFields), read: 'scan', url: isRealPhotoUrl(r.scan_url) ? r.scan_url : null }
       : null;
     const ev: LineEvidence = { label: scanLabel, market: canon ? market.get(canon) ?? null : null };
 
     if (setting.webLookup && needsWebLookup(line, !!scanLabel)) {
       ev.web = await cachedLookup(sql, canon);
-      if (!ev.web && llm && budget.canSpend()) {
+      if (!ev.web && llm && await budget.begin()) {
         try {
           ev.web = await lookUpPartNumber(env, category, line.partNumber!, callOpts);
           if (ev.web) {
@@ -202,6 +256,8 @@ async function reviewLines(
           }
         } catch (e) {
           reviewLog.warn('part lookup failed', { orderId, lineId: line.id, error: (e as Error).message });
+        } finally {
+          budget.end();
         }
       }
     }
@@ -209,12 +265,16 @@ async function reviewLines(
     let findings = checkLine(line, ev);
     // The photo settles a dispute, or stands in for a scan the line never had.
     const photo = [r.scan_url, r.photo_url].find(isRealPhotoUrl);
-    if (llm && photo && category !== 'Other' && (!scanLabel || findings.some(isDisputed)) && budget.canSpend()) {
+    if (llm && photo && READABLE_LABELS.has(category) && (!scanLabel || findings.some(isDisputed)) && await budget.begin()) {
       try {
         const fields = await rereadLabel(env, category, photo, callOpts);
-        if (fields) findings = checkLine(line, { ...ev, label: { fields, read: 'reread', url: photo } });
+        if (fields) {
+          findings = checkLine(line, { ...ev, label: { fields: labelAsRead(category, fields), read: 'reread', url: photo } });
+        }
       } catch (e) {
         reviewLog.warn('label reread failed', { orderId, lineId: line.id, error: (e as Error).message });
+      } finally {
+        budget.end();
       }
     }
     return findings;
@@ -227,8 +287,10 @@ async function reviewLines(
 const SEVERITY_RANK = { error: 0, warn: 1, info: 2 } as const;
 
 /** Runs a claimed review to completion: findings written, event logged, manager told. */
+type ClaimedReview = { id: string; order_id: string; attempts: number };
+
 export async function runPoAiReview(
-  sql: Sql<{}>, env: Env, review: { id: string; order_id: string },
+  sql: Sql<{}>, env: Env, review: ClaimedReview,
 ): Promise<void> {
   const setting = await poAiReviewSetting(sql);
   const budget = new Budget(setting.maxCostPerPoUsd);
@@ -237,7 +299,7 @@ export async function runPoAiReview(
   if (linesHash((await loadLines(sql, review.order_id)).map(toReviewLine)) !== outcome.hash) {
     outcome = await reviewLines(sql, env, review.order_id, setting, budget);
   }
-  const findings = [...outcome.findings];
+  let findings = [...outcome.findings];
   if (budget.skipped > 0) {
     findings.push({
       lineId: null, severity: 'info', code: 'budget_exhausted', field: null,
@@ -250,10 +312,23 @@ export async function runPoAiReview(
   const model = pickProvider(env) === 'openrouter' ? aiModel(env, { model: setting.model ?? undefined }) : 'stub';
 
   await sql.begin(async (tx) => {
-    const cur = (await tx<{ status: string }[]>`
-      SELECT status FROM po_ai_reviews WHERE id = ${review.id} FOR UPDATE`)[0];
+    // The orders row before the review row: a move or revert holds the order
+    // and its lines, then supersedes this review, and the findings' foreign
+    // keys reach for those same lines — taken the other way round, the two
+    // deadlock.
+    await tx`SELECT 1 FROM orders WHERE id = ${review.order_id} FOR NO KEY UPDATE`;
+    const cur = (await tx<{ status: string; attempts: number }[]>`
+      SELECT status, attempts FROM po_ai_reviews WHERE id = ${review.id} FOR UPDATE`)[0];
     // Superseded while it ran: the order left review, and nobody wants these.
-    if (cur?.status !== 'running') return;
+    // A different attempt count means this run went stale and another
+    // instance took the review over; its result is the one to keep.
+    if (cur?.status !== 'running' || cur.attempts !== review.attempts) return;
+
+    // A line removed or moved off the PO since it was read has nothing left to
+    // fix, and its finding would fail the whole write on the foreign key.
+    const live = new Set((await tx<{ id: string }[]>`
+      SELECT id FROM order_lines WHERE order_id = ${review.order_id}`).map((r) => r.id));
+    findings = findings.filter((f) => f.lineId === null || live.has(f.lineId));
 
     if (findings.length > 0) {
       const rows = findings.map((f) => ({
@@ -319,14 +394,14 @@ const MAX_ATTEMPTS = 3;
 const MAX_PER_TICK = 5;
 
 /** Takes the oldest waiting review, or one whose runner died. */
-export async function claimPoAiReview(sql: SqlLike): Promise<{ id: string; order_id: string } | null> {
+export async function claimPoAiReview(sql: SqlLike): Promise<ClaimedReview | null> {
   await sql`
     UPDATE po_ai_reviews SET status = 'failed', finished_at = NOW(),
            error = 'gave up after ' || attempts || ' attempts'
     WHERE status = 'running' AND started_at < NOW() - ${STALE_AFTER}::interval
       AND attempts >= ${MAX_ATTEMPTS}
   `;
-  const row = (await sql<{ id: string; order_id: string }[]>`
+  const row = (await sql<ClaimedReview[]>`
     UPDATE po_ai_reviews SET status = 'running', started_at = NOW(), attempts = attempts + 1
     WHERE id = (
       SELECT id FROM po_ai_reviews
@@ -336,25 +411,31 @@ export async function claimPoAiReview(sql: SqlLike): Promise<{ id: string; order
       FOR UPDATE SKIP LOCKED
       LIMIT 1
     )
-    RETURNING id, order_id
+    RETURNING id, order_id, attempts
   `)[0];
   return row ?? null;
 }
 
-/** Claims and runs reviews until the queue is empty or the tick's share is spent. */
-export async function drainPoAiReviews(sql: Sql<{}>, env: Env, max = MAX_PER_TICK): Promise<number> {
+/**
+ * Claims and runs reviews until the queue is empty, the tick's share is spent,
+ * or the process is shutting down — a review claimed then would be cut off
+ * mid-run and sit 'running' until it goes stale.
+ */
+export async function drainPoAiReviews(
+  sql: Sql<{}>, env: Env, max = MAX_PER_TICK, stopping: () => boolean = () => false,
+): Promise<number> {
   let ran = 0;
-  for (; ran < max; ran++) {
+  for (; ran < max && !stopping(); ran++) {
     const review = await claimPoAiReview(sql);
     if (!review) break;
     try {
       await runPoAiReview(sql, env, review);
     } catch (e) {
-      reviewLog.error('po ai review failed', { reviewId: review.id, orderId: review.order_id, error: e });
+      reviewLog.child({ reviewId: review.id, orderId: review.order_id }).error('po ai review failed', e as Error);
       await sql`
         UPDATE po_ai_reviews SET status = 'failed', finished_at = NOW(),
                error = ${String((e as Error).message ?? e).slice(0, 500)}
-        WHERE id = ${review.id} AND status = 'running'
+        WHERE id = ${review.id} AND status = 'running' AND attempts = ${review.attempts}
       `;
     }
   }
@@ -368,7 +449,7 @@ export function startPoAiReviewLoop(sql: Sql<{}>, env: Env): { stop(): void } {
     if (stopped || busy) return;
     busy = true;
     try {
-      await drainPoAiReviews(sql, env);
+      await drainPoAiReviews(sql, env, MAX_PER_TICK, () => stopped);
     } catch (e) {
       reviewLog.error('po ai review loop failed', e);
     } finally {
