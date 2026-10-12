@@ -17,6 +17,26 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.248.0] - 2026-10-12
+
+A sell order's page gets its History out of the way and a search box over its
+products (RS-235).
+
+### Changed
+
+- **History moved to the top of the page and starts folded.** It sat under
+  the products, so reading it meant scrolling past every line of a long order.
+  It is now the first card in the left column, one line high until opened.
+
+### Added
+
+- **Quick search over a sell order's products**, in view and edit, modelled on
+  Pack mode's scan box. A part #, serial or PO number fits with or without its
+  dashes; other words match the item name and spec chips, all of them
+  somewhere in the row. Groups with nothing left drop out. `/` focuses the box
+  and Esc clears it without leaving the page. The summary and Save still
+  cover the whole order.
+
 ## [1.247.2] - 2026-10-11
 
 The part # question on every save of a RAM line (RS-234). The v1.247.1 review

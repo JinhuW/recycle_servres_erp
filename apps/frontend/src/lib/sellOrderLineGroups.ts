@@ -1,3 +1,4 @@
+import { canonicalPartNumber } from '@recycle-erp/shared';
 import { lotWarehouse } from './sellOrderPack';
 
 export type SellOrderLineGroupBy = 'warehouse' | 'po';
@@ -55,4 +56,39 @@ export function groupSellOrderLines<T extends GroupableLine>(
     });
   }
   return groups;
+}
+
+// What a row shows in words: its name, the spec chips under it, the spec text
+// a line without chips falls back to, and its condition.
+const WORD_FIELDS = [
+  'label', 'sub', 'subLabel', 'generation', 'type', 'classification', 'rank',
+  'speed', 'interface', 'formFactor', 'condition',
+] as const;
+
+type SearchableLine = {
+  partNumber?: string | null;
+  serialNumber?: string | null;
+  sourceOrderId?: string | null;
+} & { [K in typeof WORD_FIELDS[number]]?: string | null };
+
+// The order page's quick search, Pack mode's filter widened to what the row
+// says: part numbers, serials and PO numbers compare canonicalised, so a label
+// read with or without its dashes fits; every word typed must appear somewhere
+// in the row's text. A group nothing in fits drops out; no text leaves the
+// groups alone.
+export function filterLineGroups<T extends SearchableLine>(
+  groups: readonly SellOrderLineGroup<T>[],
+  raw: string,
+): SellOrderLineGroup<T>[] {
+  const q = canonicalPartNumber(raw);
+  const words = raw.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!q && !words.length) return [...groups];
+  const fits = (l: T) => {
+    if (q && [l.partNumber, l.serialNumber, l.sourceOrderId].some(v => canonicalPartNumber(v).includes(q))) return true;
+    const text = WORD_FIELDS.map(f => l[f] ?? '').join(' ').toLowerCase();
+    return words.length > 0 && words.every(w => text.includes(w));
+  };
+  return groups
+    .map(g => ({ ...g, items: g.items.filter(it => fits(it.line)) }))
+    .filter(g => g.items.length > 0);
 }

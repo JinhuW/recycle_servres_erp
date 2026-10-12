@@ -2504,6 +2504,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     sodNewDraftOverline: 'New sell order · Draft',
     sodItemsFromInventory: '{n} product(s) from inventory',
     sodLineItems: 'Products',
+    sodLineSearchPh: 'Search by part #, serial, PO number, name or spec  ( / )',
+    sodLineSearchNone: 'No product on this order fits {q}.',
     sodLineSummary: '{units} units · {lines} products · across {whs} warehouse(s)',
     sodLineSummaryByPo: '{units} units · {lines} products · across {pos} PO(s)',
     sodGroupLabel: 'Group products',

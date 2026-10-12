@@ -1106,6 +1106,15 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     full. Saving refuses such a line above 0.
   - View and edit share one history entry, so browser Back returns to where
     the order was opened from.
+  - **The order's History sits at the top of the left column, folded**
+    (v1.248.0). It was at the foot of the page and open; a click on its
+    heading opens it.
+  - **A search box over the products narrows the list** (v1.248.0), in view
+    and edit, like Pack mode's: a part #, serial or PO number matches with or
+    without its dashes, and words match the item's name and spec chips
+    (`sodimm 2666`), every word somewhere in the row. `/` jumps to it and Esc
+    clears it. It changes only what is listed — the line count, the order
+    total and what Save sends still cover every line.
 - **Every line shows its product's # on the order** (v1.219.0; one per
   product since v1.220.3; stored and never renumbered since v1.235.0) — `#3`
   before the item name, in view and edit: the number the packer labels the
