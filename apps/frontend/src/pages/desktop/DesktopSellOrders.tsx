@@ -9,11 +9,15 @@ import {
   CloseSellOrderDialog, ReopenSellOrderDialog,
 } from '../../components/CloseSellOrderDialog';
 import { useT } from '../../lib/i18n';
+import { statusTone } from '../../lib/status';
 import { forEachKeysetPage } from '../../lib/keysetPages';
 import { confirmDiscard, useUnsavedGuard } from '../../lib/unsavedGuard';
-import { api, ApiError, archiveSellOrder, unarchiveSellOrder } from '../../lib/api';
+import { api, afterSalesForOrder, type AfterSalesOrderCase, ApiError, archiveSellOrder, unarchiveSellOrder } from '../../lib/api';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
-import { useRoute, navigate, replaceRoute, match, matchSellOrderPack, sellOrderPackPath, poLinePath } from '../../lib/route';
+import {
+  useRoute, navigate, replaceRoute, match, matchSellOrderPack, sellOrderPackPath, poLinePath,
+  afterSalesCasePath, afterSalesNewPath, hrefFor, onLinkClick,
+} from '../../lib/route';
 import { RouteLink } from '../../components/RouteLink';
 import { shareOrCopy } from '../../lib/shareOrCopy';
 import { fmtUSD, fmtUSD0, fmtMoney, fmtDate, fmtDateShort, CURRENCY_SYMBOL, canonicalPartNumber } from '../../lib/format';
@@ -282,6 +286,9 @@ type SellOrderDetailType = {
 
 // Driven by sell_order_statuses; ids match sell_orders.status CHECK constraint.
 type SellStatusId = SellOrderSummary['status'];
+// The sell-order statuses that have goods out with the customer.
+const AS_ELIGIBLE_STATUSES = new Set(['Shipped', 'Awaiting payment', 'Done']);
+
 const toneFor  = (s: string) => sellOrderStatuses.find(o => o.id === s)?.tone  ?? 'muted';
 const shortFor = (s: string) => sellOrderStatuses.find(o => o.id === s)?.short ?? s;
 
@@ -1141,6 +1148,19 @@ function SellOrderDetail({ id, mode, onToast }: {
     return () => { alive = false; };
   }, []);
 
+  // After-sales cases on this order. Read whenever the page opens: a case
+  // made from the button comes back here through the browser's Back.
+  const [asCases, setAsCases] = useState<AfterSalesOrderCase[]>([]);
+  useEffect(() => {
+    if (mode !== 'view') return;
+    let alive = true;
+    afterSalesForOrder(id)
+      .then(r => { if (alive) setAsCases(r.cases); })
+      .catch(handleFetchError);
+    return () => { alive = false; };
+  }, [id, mode]);
+  const asEligible = !!order && AS_ELIGIBLE_STATUSES.has(order.status);
+
   // "locked" = no structural edits or status moves allowed. Done is the
   // terminal happy path; Closed is the off-ramp (line set + customer + status
   // are all frozen until the order is Reopened). Both the list-page edit
@@ -1569,6 +1589,11 @@ function SellOrderDetail({ id, mode, onToast }: {
                 title={t('soReopenTooltip')}
               >
                 <Icon name="edit" size={14} /> {t('sodReopen')}
+              </button>
+            )}
+            {!editable && !prefill && asEligible && (
+              <button className="btn" onClick={() => navigate(afterSalesNewPath(order.id))}>
+                <Icon name="refresh" size={14} /> {t('soAfterSales')}
               </button>
             )}
             {!editable && !prefill && (
@@ -2136,6 +2161,37 @@ function SellOrderDetail({ id, mode, onToast }: {
                     disabled={receiverSaving}
                     onChange={saveReceiver}
                   />
+                </div>
+              )}
+
+              {/* After-sales cases — view mode only; a sold order can take a
+                  new one, an older order shows what it already has. */}
+              {!editable && (asEligible || asCases.length > 0) && (
+                <div className="card so-page-card">
+                  <div className="so-section-head"><Icon name="refresh" size={14} /> {t('soAfterSalesCases')}</div>
+                  {asCases.length === 0 ? (
+                    <div style={{ fontSize: 13, color: 'var(--fg-subtle)' }}>{t('soAfterSalesNone')}</div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {asCases.map(c => (
+                        <a
+                          key={c.id}
+                          href={hrefFor(afterSalesCasePath(c.id))}
+                          onClick={onLinkClick(afterSalesCasePath(c.id))}
+                          style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 13, textDecoration: 'none', color: 'inherit' }}
+                        >
+                          <span className="mono" style={{ fontWeight: 600 }}>{c.id}</span>
+                          <span className={'chip ' + statusTone(c.status)} style={{ fontSize: 10.5 }}>
+                            {t('asStatus_' + c.status.replace(/ /g, '_'))}
+                          </span>
+                          <span style={{ color: 'var(--fg-subtle)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                            {c.issue}
+                          </span>
+                          {c.amount != null && <span className="mono">{fmtUSD(c.amount, locale)}</span>}
+                        </a>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 

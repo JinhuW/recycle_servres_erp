@@ -338,6 +338,7 @@ export const DESKTOP_VIEW_TO_PATH = {
   inventory:  '/inventory',
   analysis:   '/inventory/analysis',
   sellorders: '/sell-orders',
+  aftersales: '/after-sales',
   transfers:  '/transfers',
   websubmissions: '/web-submissions',
   activity:   '/activity',
@@ -363,6 +364,7 @@ export function pathToDesktopView(path: string): DesktopViewId {
   if (path === '/inventory' || match('/inventory/:id', path)) return 'inventory';
   if (path === '/sell-orders' || match('/sell-orders/:id', path) || match('/sell-orders/:id/edit', path)
     || matchSellOrderPack(path)) return 'sellorders';
+  if (path === '/after-sales' || match('/after-sales/:id', path)) return 'aftersales';
   if (path === '/transfers') return 'transfers';
   if (path === '/web-submissions' || match('/web-submissions/:id', path)) return 'websubmissions';
   if (path === '/activity') return 'activity';
@@ -373,6 +375,16 @@ export function pathToDesktopView(path: string): DesktopViewId {
   if (path === '/fleet' || matchFleetWatch(path)) return 'coordinator';
   if (path === '/settings') return 'settings';
   return 'dashboard';
+}
+
+// An after-sales case's page. `new` is the create form; `?order=SO-…`
+// preselects the sell order it is opened from.
+export function afterSalesCasePath(id: string): string {
+  return `/after-sales/${encodeURIComponent(id)}`;
+}
+
+export function afterSalesNewPath(sellOrderId?: string): string {
+  return '/after-sales/new' + (sellOrderId ? `?order=${encodeURIComponent(sellOrderId)}` : '');
 }
 
 // The fleet page's live-browser viewer for one Facebook worker. A sub-route of

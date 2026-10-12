@@ -1508,6 +1508,50 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     real role is not manager. An archived or Closed order opens read-only and its writes 409; a
     Done order can still be packed, since an order can be paid before it ships.
 
+- **After-sales** (v1.250.0). A Shipped, Awaiting payment or Done order's
+  page has an **After-sales** button that opens the new-case form with the
+  order preselected, and a card in the side column listing the order's
+  cases with their status, issue and amount. See [After-sales](#after-sales).
+
+## After-sales
+
+Managers only. A case is the record of a customer coming back about goods
+on a sold order: what they report, which products and how many, and how it
+ends — the goods come back (**Return**) or the customer keeps them at a
+lower price (**Discount**). Purchasers never see the page or the API.
+
+- **Opening a case** (v1.250.0). `#/after-sales/new`, or the After-sales
+  button on a sell order. The form loads the order, refuses one that is
+  Draft, Packing or Closed (nothing has shipped, or nothing was sold), and
+  lists its products with a checkbox and a quantity capped at the line's
+  qty. The issue is required; resolution, amount and assignee are optional
+  at this point. Cases are numbered `AS-1001`, `AS-1002`… from their own
+  counter. The products are snapshotted (label, part #, qty, unit price):
+  a sell-order save rewrites its line rows, so the case keeps its own copy
+  and the link to the live line only while that row exists.
+- **The workflow.** Open → In progress → Awaiting return → Resolved.
+  Cancel is allowed from any open stage; Reopen (to Open) from Resolved or
+  Cancelled; Awaiting return can step back to In progress. Awaiting return
+  needs the resolution set to Return (a discount has no goods to wait for);
+  Resolved needs the resolution and the amount (0 is allowed). An illegal
+  move is a 409 with the stages named. Resolved and Cancelled stamp
+  `closed_at`; Reopen clears it.
+- **The case page** (`#/after-sales/AS-1001`): issue, products, resolution
+  / amount / assignee (managers only), the stage buttons for the moves the
+  case allows (each asks for an optional note), and a timeline of every
+  event — opened, moved (from → to), edited (which fields), noted — with
+  who and when. A Resolved or Cancelled case is read-only until reopened;
+  the timeline still takes notes.
+- **The list** (`#/after-sales`): five tiles (one per status, clicking one
+  filters) counting every case and summing its amounts, a status select, a
+  search over case id, sell order id, customer and issue, and a table with
+  case, sell order (a link), customer, issue, units, resolution, amount,
+  assignee, status and last update. A row opens the case.
+- **Record only.** The amount is stored on the case and summed on the
+  tiles; nothing moves stock back to a PO, changes the sell order's revenue
+  or the dashboard's realized profit. Restocking a return is an inventory
+  edit.
+
 ## Shipping
 
 The Shipping page is a ledger of **inbound packages**: tracking numbers for

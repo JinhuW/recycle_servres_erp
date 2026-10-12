@@ -315,6 +315,51 @@ export const deleteOrder = (orderId: string) =>
 export const discardTransferOrder = (id: string) =>
   api.delete<{ ok: true; id: string }>(`/api/inventory/transfer-orders/${id}`);
 
+// ── After-sales cases (manager-only) ──
+export type AfterSalesStatus = 'Open' | 'In progress' | 'Awaiting return' | 'Resolved' | 'Cancelled';
+export type AfterSalesResolution = 'return' | 'discount';
+export type AfterSalesRow = {
+  id: string; status: AfterSalesStatus; resolution: AfterSalesResolution | null; issue: string;
+  amount: number | null; createdAt: string; updatedAt: string; closedAt: string | null;
+  sellOrder: { id: string; status: string; currency: string };
+  customer: { id: string; name: string; short: string | null };
+  assignee: { id: string; name: string } | null;
+  lineCount: number; qty: number;
+};
+export type AfterSalesCase = Omit<AfterSalesRow, 'lineCount' | 'qty'> & {
+  createdBy: { id: string; name: string } | null;
+  lines: { id: string; sellOrderLineId: string | null; label: string; partNumber: string | null; qty: number; unitPrice: number }[];
+  events: {
+    id: string; kind: 'created' | 'status' | 'edited' | 'note'; from: string | null; to: string | null;
+    note: string | null; detail: { changes?: Record<string, { from: unknown; to: unknown }> }; at: string;
+    actor: { id: string; name: string } | null;
+  }[];
+  allowedTo: AfterSalesStatus[];
+};
+export type AfterSalesOrderCase = {
+  id: string; status: AfterSalesStatus; resolution: AfterSalesResolution | null; amount: number | null;
+  issue: string; createdAt: string; closedAt: string | null;
+};
+export const listAfterSalesCases = (query: string) =>
+  api.get<{ rows: AfterSalesRow[]; nextCursor: string | null }>('/api/after-sales' + (query ? '?' + query : ''));
+export const afterSalesSummary = () =>
+  api.get<{ byStatus: Record<string, { count: number; amount: number }> }>('/api/after-sales/summary');
+export const getAfterSalesCase = (id: string) =>
+  api.get<{ case: AfterSalesCase }>(`/api/after-sales/${encodeURIComponent(id)}`);
+export const createAfterSalesCase = (body: {
+  sellOrderId: string; issue: string; lines: { sellOrderLineId: string; qty: number }[];
+  resolution?: AfterSalesResolution | null; amount?: number | null; assigneeId?: string | null;
+}) => api.post<{ id: string }>('/api/after-sales', body);
+export const patchAfterSalesCase = (id: string, body: {
+  issue?: string; resolution?: AfterSalesResolution | null; amount?: number | null; assigneeId?: string | null;
+}) => api.patch<{ ok: true }>(`/api/after-sales/${encodeURIComponent(id)}`, body);
+export const setAfterSalesStatus = (id: string, to: AfterSalesStatus, note?: string) =>
+  api.post<{ ok: true; status: AfterSalesStatus }>(`/api/after-sales/${encodeURIComponent(id)}/status`, { to, note });
+export const addAfterSalesNote = (id: string, note: string) =>
+  api.post<{ ok: true }>(`/api/after-sales/${encodeURIComponent(id)}/notes`, { note });
+export const afterSalesForOrder = (sellOrderId: string) =>
+  api.get<{ cases: AfterSalesOrderCase[] }>(`/api/after-sales/by-order/${encodeURIComponent(sellOrderId)}`);
+
 // `removeFromSellOrders` is the user's answer to the 409 the first call
 // returns when the goods sit on open sell orders (see lib/archiveConflict.ts).
 export const archiveOrder = (orderId: string, opts: { removeFromSellOrders?: boolean } = {}) =>
