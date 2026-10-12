@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-12
 reporter: jinhu
 branch: feat/so-add-inventory-toolbar
-pr:
+pr: 625
 version: 1.250.0
 related: [RS-235]
 ---
