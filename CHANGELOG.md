@@ -17,6 +17,20 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.250.0] - 2026-10-12
+
+Add inventory moves to the top of a sell order's products (RS-240).
+
+### Changed
+
+- **Add inventory is the accent button beside the products' search box**
+  while editing, in place of a small button under the last line — on a long
+  order, a scroll to the page's foot to reach.
+- **Adding shows what was added.** A line lands in its warehouse's or PO's
+  group, often off screen, so the page scrolls to the first one and each new
+  line flashes. The search box clears too, so a filter left in it can't hide
+  them.
+
 ## [1.249.0] - 2026-10-12
 
 Internal notes without entering edit mode (RS-239).
