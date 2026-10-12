@@ -21,8 +21,10 @@ import type { Category, Order, OrderLine, Warehouse } from '../../lib/types';
 import { LineDrawer } from './submit/LineDrawer';
 import {
   blankLine, brandConfirmPending, duplicatesByIndex, findDuplicatePartNumbers, lineBlockerMessages,
-  type DuplicatePartGroup, type Line,
+  patchEditsLine, type DuplicatePartGroup, type Line,
 } from './submit/line';
+import { usePartQuestion } from '../../components/RamPartCheck';
+import { settlePartQuestions } from '../../lib/ramPartQuestion';
 import { editLineToPatch, orderLineToEditLine, type EditLine } from './submit/editLine';
 import { DupPartDialog } from './submit/DupPartDialog';
 import { ProductNo } from './submit/ProductNo';
@@ -40,7 +42,7 @@ import { useEscapeKey } from '../../lib/useEscapeKey';
 import { confirmDiscard, useUnsavedGuard } from '../../lib/unsavedGuard';
 import { derivePoPermissions, lineShippedOn } from '../../lib/poPermissions';
 import { ImageLightbox } from '../../components/ImageLightbox';
-import { serialIssue } from '@recycle-erp/shared';
+import { cascadePatch, serialIssue } from '@recycle-erp/shared';
 import { lineRequirements, missingFieldNames } from '../../lib/lineRequirements';
 import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
 import { OrderActivityLog } from '../../components/OrderActivityLog';
@@ -442,8 +444,11 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     onMutated: () => setActivityKey(k => k + 1),
   });
 
+  // A patch of `_` bookkeeping alone (the part # question's answer) changes
+  // nothing Save would write, so it must not count as an edit: on a
+  // submitted PO that would cost the purchaser the stage.
   const updateLine = (i: number, patch: Partial<EditLine>) =>
-    setLines(ls => ls.map((l, j) => (j === i ? { ...l, ...patch, _dirty: true } : l)));
+    setLines(ls => ls.map((l, j) => (j === i ? { ...l, ...patch, _dirty: l._dirty || patchEditsLine(patch) } : l)));
 
   const addLine = (cat: Category) => {
     setLines(ls => [...ls, { ...blankLine(cat), _dirty: true }]);
@@ -824,7 +829,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   };
 
   // True when it wrote the stage move.
-  const doSave = async (): Promise<boolean> => {
+  // `saveLines` is passed in when Save just answered for some: state lags them.
+  const doSave = async (saveLines: EditLine[] = lines): Promise<boolean> => {
     // A manager moving an order someone else manages is asked first whether to
     // take it over. Cancel stops the whole save — the move is part of it.
     const asks = statusDirty && !isPurchaser;
@@ -863,7 +869,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
         // after a mid-loop failure re-sends only what didn't.
         let pricesWritten = false;
         if (canEditSellPrice) {
-          for (const l of lines) {
+          for (const l of saveLines) {
             if (!l._id || !l._dirty) continue;
             const sp = l.sellPrice == null || l.sellPrice === '' ? null : Number(l.sellPrice);
             // A price typed back to its old value would still log a 'priced'
@@ -899,9 +905,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
         onSaved(t('eoSavedToast', { id: order.id }));
         return moved;
       }
-      const presentIds = new Set(lines.filter(l => l._id).map(l => l._id!));
+      const presentIds = new Set(saveLines.filter(l => l._id).map(l => l._id!));
       const removeLineIds = persistedIds.filter(id => !presentIds.has(id));
-      const addedLines = lines.filter(l => !l._id);
+      const addedLines = saveLines.filter(l => !l._id);
       const r = await api.patch<{
         ok: true; addedLineIds: string[]; addedLineNos?: number[]; lifecycle: string; paymentsLinked?: number;
       }>(`/api/orders/${order.id}`, {
@@ -922,7 +928,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
         otherFeesNote: otherFeesNoteDirty ? (otherFeesNote.trim() || null) : undefined,
         // Only what was edited: the server takes a line's status from the
         // stage, never from here.
-        lines: lines
+        lines: saveLines
           .filter(l => l._id && l._dirty)
           .map(l => editLineToPatch(l, statusDirty ? status : undefined)),
         addLines: addedLines.map(l => editLineToInsert(l, status)),
@@ -951,7 +957,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       for (const [cid, newId] of idByCid) stillQueued += await flushPendingPhotos(cid, newId);
       // A photo picked for an existing line whose upload failed is queued too,
       // and this is its last chance before the page goes away.
-      for (const l of lines) {
+      for (const l of saveLines) {
         if (l._id && photos.queuedFor(l._cid).length) {
           stillQueued += await flushPendingPhotos(l._cid, l._id);
         }
@@ -1041,6 +1047,18 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     setSavedStatus(next);
   };
 
+  // The part # question for what Save writes without a Confirm line. An
+  // answer is written to its line as it is given, so it stands when a later
+  // question is cancelled.
+  const partQ = usePartQuestion();
+  const askPart = (l: EditLine, newNo: number | null | undefined) =>
+    partQ.ask(l, lineRef({ no: l.no }, t, newNo));
+  const answerPart = (l: EditLine, patch: Partial<EditLine>): EditLine => {
+    const p = cascadePatch<EditLine>(l.category, l, patch);
+    setLines(cur => cur.map(x => (x._cid === l._cid ? { ...x, ...p, _dirty: x._dirty || patchEditsLine(p) } : x)));
+    return { ...l, ...p, _dirty: l._dirty || patchEditsLine(p) };
+  };
+
   // A purchaser's first write to a submitted order costs it the stage, so ask
   // once per visit before any of the paths that write — Save, and the drawer's
   // own Confirm. Answering resolves whichever call is waiting.
@@ -1056,7 +1074,23 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   };
 
   const save = async () => {
-    const issues = lines
+    let ls = lines;
+    if (canEditOrder && linesDirty) {
+      // What this save writes that no Confirm line asked about is asked here,
+      // as that Confirm would have; cancelling a question stops the save.
+      const asked = await settlePartQuestions(
+        lines, (l, i) => askPart(l, newNos[i]), answerPart, l => !l._id || !!l._dirty);
+      if (asked.unsettled.length) { takeBackMove(); return; }
+      ls = asked.lines;
+      // A value taken from the part # can clear one the cascade rules out.
+      const after = lineBlockerMessages(ls, t, lineReady, missingNamesFor);
+      if (after.length) {
+        takeBackMove();
+        showErrorDialog(t('errCantSaveMsg'), after, t('errCantSaveTitle'));
+        return;
+      }
+    }
+    const issues = ls
       .map((l, i) => ({ line: lineRef(l, t, newNos[i]), label: l.partNumber || itemType(l), issue: serialIssueFor(l) }))
       .filter((x): x is SerialLineIssue => x.issue !== null);
     if (issues.length) {
@@ -1065,12 +1099,13 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       return;
     }
     // A duplicate this save doesn't write isn't news.
-    if (linesDirty && dupGroups.length > 0) {
-      setDupConfirm(dupGroups);
+    const dups = ls === lines ? dupGroups : findDuplicatePartNumbers(ls);
+    if (linesDirty && dups.length > 0) {
+      setDupConfirm(dups);
       return;
     }
     if (!(await askRevert(materialDirty))) return;
-    if (!(await doSave())) takeBackMove();
+    if (!(await doSave(ls))) takeBackMove();
   };
 
   // Drawer "Confirm line" writes that one line straight to the DB instead of
@@ -2018,6 +2053,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
       {reviewPrompt}
       {takeover.dialog}
       {mismatch.dialog}
+      {partQ.dialog}
 
       {dupConfirm && (
         <DupPartDialog

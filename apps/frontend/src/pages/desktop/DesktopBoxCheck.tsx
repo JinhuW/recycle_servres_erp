@@ -31,7 +31,7 @@ import type { Order, OrderLine } from '../../lib/types';
 import { AiReviewCard } from './AiReviewCard';
 import { LineDrawer } from './submit/LineDrawer';
 import { editLineToPatch, orderLineToEditLine, type EditLine } from './submit/editLine';
-import { brandConfirmPending } from './submit/line';
+import { brandConfirmPending, patchEditsLine } from './submit/line';
 
 // Review mode: the manager's bench view of one PO. Each line starts at its
 // full qty and is ticked when found (lowered first when short); a ticked line
@@ -838,7 +838,9 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
           line={editing.line}
           idx={lines.findIndex(x => x.id === editing.line._id)}
           editing
-          onChange={patch => setEditing(e => e && { ...e, line: { ...e.line, ...patch, _dirty: true } })}
+          onChange={patch => setEditing(e => e && {
+            ...e, line: { ...e.line, ...patch, _dirty: e.line._dirty || patchEditsLine(patch) },
+          })}
           onClose={() => setEditing(null)}
           onRemove={() => {}}
           canRemove={false}

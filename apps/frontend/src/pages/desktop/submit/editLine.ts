@@ -1,4 +1,5 @@
 import type { OrderLine } from '../../../lib/types';
+import { partQuestionKey } from '../../../lib/ramPartQuestion';
 import type { Line } from './line';
 
 // A PO line being edited in the drawer: the shared `Line` plus the original DB
@@ -9,7 +10,7 @@ export type EditLine = Line & { _id?: string; _dirty?: boolean };
 // `i` is the line's place in the order's list, for an older backend that sends
 // no # — its lines came in # order.
 export function orderLineToEditLine(l: OrderLine, i?: number): EditLine {
-  return {
+  const line: EditLine = {
     _cid:           crypto.randomUUID(),
     _id:            l.id,
     no:             l.no ?? (i != null ? i + 1 : undefined),
@@ -40,6 +41,10 @@ export function orderLineToEditLine(l: OrderLine, i?: number): EditLine {
     health:         l.health,
     rpm:            l.rpm,
   };
+  // A disagreement the line was saved with was that save's to ask about, so
+  // an edit here asks only when it changes one or adds one.
+  line._partKept = partQuestionKey(line);
+  return line;
 }
 
 export function editLineToPatch(l: EditLine, status?: string) {

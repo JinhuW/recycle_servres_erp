@@ -24,7 +24,8 @@ import { type ResolvedMarketValue } from '../../../lib/useMarketLookup';
 import { addableCategories, aiCaptureEnabled, categoryTone } from '../../../lib/lookups';
 import { parseSerials } from '../../../components/SerialNumbers';
 import { useChipFill } from '../../../lib/useChipFill';
-import { RamPartMismatchDialog, ScanPartNotice, mismatchKey, ramPartCheck, useRamPartFill } from '../../../components/RamPartCheck';
+import { RamPartMismatchDialog, ScanPartNotice, useRamPartFill } from '../../../components/RamPartCheck';
+import { partQuestionKey, partQuestionPending } from '../../../lib/ramPartQuestion';
 import { cascadePatch } from '@recycle-erp/shared';
 
 // ─── LineDrawer ──────────────────────────────────────────────────────────────
@@ -105,10 +106,10 @@ export function LineDrawer({
   );
   useChipFill(line, { enabled: !readOnly, onFill: chipNumber => set({ chipNumber }) });
   const ramFill = useRamPartFill(line, { enabled: !readOnly, onFill: set });
-  // Confirm asks once per set of disagreements; keeping the form as entered
-  // covers exactly what was shown, so a later edit that adds one asks again.
+  // Confirm asks about each disagreement once; keeping the form as entered
+  // covers what was shown, so a later edit that adds one asks again. What
+  // was kept lives on the line, where Submit and Save read it too.
   const [partDialog, setPartDialog] = useState(false);
-  const [partKept, setPartKept] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState(false);
   const [thumbBroken, setThumbBroken] = useState(false);
   const scanUrl = line.scanImageUrl ?? null;
@@ -233,7 +234,7 @@ export function LineDrawer({
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onAiUpload(); }
   };
 
-  const confirmLine = async (kept: string | null) => {
+  const confirmLine = async (kept: string | null | undefined) => {
     if (line._confirmed) { onClose(); return; }
     // Brand before the gap list: confirming "Other" adds Chip # to what the
     // line owes, so the gaps named below are only final once the brand is
@@ -248,8 +249,7 @@ export function LineDrawer({
     }
     // Last, on a complete line: the question is whether its specs are the
     // stick's, which only makes sense once they are all there.
-    const { mismatches } = ramPartCheck(line);
-    if (mismatches.length && mismatchKey(line, mismatches) !== kept) { setPartDialog(true); return; }
+    if (partQuestionPending({ ...line, _partKept: kept })) { setPartDialog(true); return; }
     if (!onConfirmLine) { onClose(); return; }
     setConfirming(true);
     try {
@@ -763,7 +763,7 @@ export function LineDrawer({
                   <button
                     className="btn accent"
                     disabled={confirming || line._confirmed}
-                    onClick={() => { void confirmLine(partKept); }}
+                    onClick={() => { void confirmLine(line._partKept); }}
                   >
                     <Icon name="check" size={13} /> {confirming ? t('drawerConfirming') : t('drawerConfirmLine')}
                   </button>
@@ -799,8 +799,9 @@ export function LineDrawer({
           onUse={patch => { set(patch); setPartDialog(false); }}
           onUsePart={partNumber => { set({ partNumber }); setPartDialog(false); }}
           onKeep={() => {
-            const key = mismatchKey(line, ramPartCheck(line).mismatches);
-            setPartKept(key);
+            // Passed on as well: the write to the line lands after this runs.
+            const key = partQuestionKey(line);
+            set({ _partKept: key });
             setPartDialog(false);
             void confirmLine(key);
           }}
