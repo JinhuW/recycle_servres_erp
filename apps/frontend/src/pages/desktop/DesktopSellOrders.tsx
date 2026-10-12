@@ -1907,16 +1907,6 @@ function SellOrderDetail({ id, mode, onToast }: {
                 )}
 
               </div>
-              <div className="card so-page-card" style={{ paddingTop: 8, paddingBottom: 8 }}>
-                <details>
-                  <summary style={{ cursor: 'pointer', fontWeight: 600, padding: '8px 0' }}>
-                    {t('sodHistory')}
-                  </summary>
-                  <div style={{ marginTop: 8, marginBottom: 10 }}>
-                    <SellOrderHistory sellOrderId={order.id} refreshKey={historyKey} />
-                  </div>
-                </details>
-              </div>
             </div>
             <div className="so-page-side">
               {summary && (
@@ -2121,6 +2111,16 @@ function SellOrderDetail({ id, mode, onToast }: {
                     {order.notes || t('none')}
                   </div>
                 )}
+              </div>
+              <div className="card so-page-card" style={{ paddingTop: 8, paddingBottom: 8 }}>
+                <details>
+                  <summary style={{ cursor: 'pointer', fontWeight: 600, padding: '8px 0' }}>
+                    {t('sodHistory')}
+                  </summary>
+                  <div style={{ marginTop: 8, marginBottom: 10 }}>
+                    <SellOrderHistory sellOrderId={order.id} refreshKey={historyKey} />
+                  </div>
+                </details>
               </div>
             </div>
           </div>
