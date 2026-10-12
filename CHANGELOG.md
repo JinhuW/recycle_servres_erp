@@ -17,22 +17,9 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
-## [1.250.0] - 2026-10-12
+## [1.251.0] - 2026-10-12
 
-<<<<<<< HEAD
-Add inventory moves to the top of a sell order's products (RS-240).
-
-### Changed
-
-- **Add inventory is the accent button beside the products' search box**
-  while editing, in place of a small button under the last line — on a long
-  order, a scroll to the page's foot to reach.
-- **Adding shows what was added.** A line lands in its warehouse's or PO's
-  group, often off screen, so the page scrolls to the first one and each new
-  line flashes. The search box clears too, so a filter left in it can't hide
-  them.
-=======
-After-sales cases (RS-240): a record for the goods a customer comes back
+After-sales cases (RS-241): a record for the goods a customer comes back
 about, with its own workflow and page.
 
 ### Added
@@ -61,7 +48,20 @@ about, with its own workflow and page.
 
 A case is a record only: it moves no stock back and changes no revenue or
 dashboard figure. Restocking a return is still an inventory edit.
->>>>>>> a80fb2f0 (feat: after-sales cases track returns and discounts on sold orders (v1.250.0) [RS-240])
+
+## [1.250.0] - 2026-10-12
+
+Add inventory moves to the top of a sell order's products (RS-240).
+
+### Changed
+
+- **Add inventory is the accent button beside the products' search box**
+  while editing, in place of a small button under the last line — on a long
+  order, a scroll to the page's foot to reach.
+- **Adding shows what was added.** A line lands in its warehouse's or PO's
+  group, often off screen, so the page scrolls to the first one and each new
+  line flashes. The search box clears too, so a filter left in it can't hide
+  them.
 
 ## [1.249.0] - 2026-10-12
 

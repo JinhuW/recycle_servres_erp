@@ -2,13 +2,13 @@
 id: RS-241
 title: After-sales cases: track returns and discounts on sold orders
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-12
 reporter: jinhu
 branch: feat/after-sales
-pr:
-version:
+pr: 624
+version: 1.251.0
 related: []
 ---
 
