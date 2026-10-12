@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-12
 reporter: jinhu
 branch: feat/so-notes-anytime
-pr:
+pr: 623
 version: 1.249.0
 related: []
 ---
