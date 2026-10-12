@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { cascadePatch, type CascadeSpec } from '@recycle-erp/shared';
 import { api } from './api';
 import { handleFetchError } from './errorToast';
 import { fmtUSD } from './format';
@@ -65,21 +66,50 @@ export function openIssuesByLine(findings: readonly AiFinding[]): Map<string, nu
   return out;
 }
 
-/** The line PATCH body that applies `f`. RPM is the one numeric field a finding names. */
-export function applyPatch(f: AiFinding): { id: string } & Record<string, string | number> {
+export type ApplyLine = CascadeSpec & { category: string };
+
+/**
+ * The line PATCH body that applies `f`. A spec fix goes through the editors'
+ * cascade from the line as it stands, so a Form moved alone brings its Device
+ * along instead of being refused as a line half-way between two forms; a field
+ * the cascade clears goes as null, which clears it. RPM is the one numeric
+ * field a finding names.
+ */
+export function applyPatch(f: AiFinding, line?: ApplyLine): { id: string } & Record<string, string | number | null> {
   const v = f.field === 'rpm' ? Number(f.suggestedValue) : f.suggestedValue!;
-  return { id: f.lineId!, [f.field!]: v };
+  const own: Record<string, string | number> = { [f.field!]: v };
+  const patch: Record<string, unknown> = line ? cascadePatch(line.category, line, own as CascadeSpec) : own;
+  return {
+    id: f.lineId!,
+    ...Object.fromEntries(Object.entries(patch).map(([k, x]) => [k, x === '' ? null : x as string | number | null])),
+  };
+}
+
+/** Other open findings on the line that a patch already carries out. */
+export function settledBy(patch: Record<string, unknown>, f: AiFinding, all: readonly AiFinding[]): AiFinding[] {
+  const flat = (x: unknown) => String(x ?? '').trim().toUpperCase().replace(/\s+/g, '');
+  return all.filter((o) => o.id !== f.id && o.lineId === f.lineId && isOpen(o) && o.field !== null
+    && o.field in patch && o.suggestedValue !== null && flat(patch[o.field]) === flat(o.suggestedValue));
 }
 
 export function isPending(r: AiReviewResponse | null): boolean {
   return r?.latest?.status === 'queued' || r?.latest?.status === 'running';
 }
 
+/** An `ai_review_done` order event, worded alike on the PO's log and the Activity page. */
+export function aiReviewEventText(d: Record<string, unknown>, t: Translate): string {
+  const lines = String(Number(d.lines) || 0);
+  const n = (Number(d.errors) || 0) + (Number(d.warnings) || 0);
+  return n > 0 ? t('acAiReviewDone', { lines, n: String(n) }) : t('acAiReviewClear', { lines });
+}
+
 /** One finding, worded for the page. */
 export function findingText(f: AiFinding, t: Translate, locale: string): string {
   const market = f.sources.find((s) => s.kind === 'market');
   const current = f.code === 'above_market' ? fmtUSD(Number(f.currentValue), locale) : f.currentValue ?? '';
-  return t('aiRevCode_' + f.code, {
+  // Apply writes the label's part # into an empty field, so the text names it.
+  const key = f.code === 'pn_missing' && f.suggestedValue ? 'aiRevCode_pn_missing_label' : 'aiRevCode_' + f.code;
+  return t(key, {
     field: f.field ? t('aiRevField_' + f.field) : '',
     current,
     suggested: f.suggestedValue ?? '',
@@ -99,7 +129,7 @@ const POLL_MS = 5_000;
 export function useAiReview(orderId: string) {
   const [data, setData] = useState<AiReviewResponse | null>(null);
   const reload = useCallback(
-    () => api.get<AiReviewResponse>(`/api/orders/${orderId}/ai-review`).then(setData),
+    () => api.get<AiReviewResponse>(`/api/orders/${orderId}/ai-review`).then((d) => { setData(d); return d; }),
     [orderId],
   );
   useEffect(() => { reload().catch(handleFetchError); }, [reload]);

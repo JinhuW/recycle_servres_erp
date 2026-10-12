@@ -15,7 +15,7 @@ import type { PriceApplyRow } from '../../lib/priceImport';
 // confirming fills the edit form's inputs, and the manager saves as usual.
 
 type PreviewRowStatus =
-  | 'matched' | 'not-in-order' | 'no-price' | 'invalid-price' | 'duplicate' | 'ambiguous';
+  | 'matched' | 'not-in-order' | 'no-price' | 'invalid-price' | 'duplicate' | 'ambiguous' | 'per-condition';
 
 type PreviewRow = {
   // The template ships one tab per category, so a row's identity is
@@ -180,6 +180,7 @@ const WARNING_LABEL_KEY: Record<Exclude<PreviewRowStatus, 'matched'>, string> = 
   'invalid-price': 'soPriceImportInvalid',
   duplicate: 'soPriceImportDuplicate',
   ambiguous: 'soPriceImportAmbiguous',
+  'per-condition': 'soPriceImportPerCondition',
 };
 
 function PriceImportPreviewDialog({

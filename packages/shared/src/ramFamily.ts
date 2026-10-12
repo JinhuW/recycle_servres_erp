@@ -32,8 +32,8 @@ const SAMSUNG_RE = /^M[34]\d\d[ABR]\w{2}\w{2}\w{3}[A-Z][A-Z][A-Z0-9]/;
 // HMA82GR7CJR8N-VK: everything before the dash, then the two-letter speed.
 // Written without the dash, the organisation digit and the letter after it
 // mark where the speed starts.
-const HYNIX_HEAD_RE = /^HM[AT][1-58A]\w\w[URLSP][67]\w+$/;
-const HYNIX_NODASH_RE = /^HM[AT][1-58A]\w\w[URLSP][67]\w\w[A-Z][468][A-Z][A-Z][A-Z0-9]/;
+const HYNIX_HEAD_RE = /^HM[AT][1-58A]\w\w[URLSPV][67]\w+$/;
+const HYNIX_NODASH_RE = /^HM[AT][1-58A]\w\w[URLSPV][67]\w\w[A-Z][468][A-Z][A-Z][A-Z0-9]/;
 
 // MTA36ASF2G72PZ-2G1A2II: chips · family · depth · width · module · speed ·
 // die revision (A2) · marking (II).
@@ -41,8 +41,9 @@ const MICRON_RE = /^MTA?\d{1,2}[A-Z]{2,3}(?:256|512|1G|2G|4G|8G|16G)(?:64|72)[A-
 
 function hynixLength(raw: string, canon: string): number | null {
   const body = stripPartPrefix(raw).trim().toUpperCase();
-  const dash = body.lastIndexOf('-');
-  if (dash > 0) {
+  // The first dash after a whole head, not the last: a dashed packaging tail
+  // (…-VK-TF) must key the same as its dash-free spelling (…-VKTF).
+  for (let dash = body.indexOf('-'); dash > 0; dash = body.indexOf('-', dash + 1)) {
     const head = canonicalPartNumber(body.slice(0, dash));
     const speed = canonicalPartNumber(body.slice(dash + 1)).slice(0, 2);
     if (HYNIX_HEAD_RE.test(head) && /^[A-Z][A-Z0-9]$/.test(speed)) return head.length + 2;

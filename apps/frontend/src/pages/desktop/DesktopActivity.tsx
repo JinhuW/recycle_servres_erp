@@ -13,6 +13,7 @@ import {
 } from '../../lib/orderPresentation';
 import { activityRecordHref, onLinkClick } from '../../lib/route';
 import { boxCheckEventLines } from '../../lib/boxCheck';
+import { aiReviewEventText } from '../../lib/aiReview';
 import { useSentinel } from '../../lib/useSentinel';
 
 // The global audit register — every change made across all four ledgers, in
@@ -104,6 +105,7 @@ function summarise(e: Event, locale: string, t: Translate): { diff?: Change; not
     const { count, lines } = boxCheckEventLines(d, t);
     return { plain: t('acBoxCheckFlagged', { n: String(count) }), note: lines.join(' · ') || undefined };
   }
+  if (e.kind === 'ai_review_done') return { plain: aiReviewEventText(d, t) };
   if (e.kind === 'line_photo_added' || e.kind === 'line_photo_removed') {
     return {
       plain: t(e.kind === 'line_photo_added' ? 'acPhotoAdded' : 'acPhotoRemoved'),

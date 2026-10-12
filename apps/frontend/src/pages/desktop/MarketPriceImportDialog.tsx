@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api } from '../../lib/api';
+import { api, ApiError } from '../../lib/api';
 import { useT } from '../../lib/i18n';
 import { fmtUSD } from '../../lib/format';
 import { handleFetchError, showErrorDialog, showSuccessToast } from '../../lib/errorToast';
@@ -79,7 +79,10 @@ export function MarketPriceImportDialog({
       const data = await api.upload<Preview>('/api/market/price-import/preview', form);
       setPreview({ fileName: file.name, data });
     } catch (e) {
-      if (e instanceof Error && /column/i.test(e.message)) {
+      const body = e instanceof ApiError ? e.body as { code?: string; max?: number } | undefined : undefined;
+      if (body?.code === 'too-many-prices') {
+        showErrorDialog(t('mktImportTooMany', { n: body.max ?? '' }));
+      } else if (e instanceof Error && /column/i.test(e.message)) {
         showErrorDialog(t('soPriceImportColumnsNotFound'));
       } else {
         handleFetchError(e);

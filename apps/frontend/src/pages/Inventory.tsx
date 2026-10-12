@@ -9,7 +9,7 @@ import { fmtUSD0 } from '../lib/format';
 import { lineSpecLabel } from '../lib/lineGroups';
 import { categoryFilterOptions } from '../lib/lookups';
 import { wsNumber } from '../lib/workspace';
-import { isCompleted, statusTone } from '../lib/status';
+import { statusTone } from '../lib/status';
 import { usePhScrolled } from '../lib/usePhScrolled';
 import type { Category } from '../lib/types';
 import { PhoneListSkeleton } from '../components/Skeleton';
@@ -63,7 +63,9 @@ export function Inventory({ onNewEntry }: Props) {
 
   const isManager = user?.role === 'manager';
   const { activeItems, activeUnits } = useMemo(() => {
-    const inStock = items.filter(r => !isCompleted(r.status));
+    // Line statuses, not PO stages: a Sold lot left with its sale, so it
+    // counts no more than a Done one does.
+    const inStock = items.filter(r => r.status !== 'Done' && r.status !== 'Sold');
     return {
       activeItems: inStock.length,
       activeUnits: inStock.reduce((a, r) => a + r.qty, 0),

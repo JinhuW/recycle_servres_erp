@@ -111,5 +111,9 @@ describe('normalizeFields — SSD/HDD', () => {
   });
   it('reduces rpm to digits', () => {
     expect(normalizeFields('HDD', { rpm: '7200 RPM' }).rpm).toBe('7200');
+    // A web listing writes it with a grouping comma or a K.
+    expect(normalizeFields('HDD', { rpm: '7,200 RPM' }).rpm).toBe('7200');
+    expect(normalizeFields('HDD', { rpm: '10K' }).rpm).toBe('10000');
+    expect(normalizeFields('HDD', { rpm: '15k rpm' }).rpm).toBe('15000');
   });
 });

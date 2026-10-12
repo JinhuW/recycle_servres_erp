@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import {
-  canonicalPartNumber, decodeRamPart, ramPartFill, ramPartMismatches, ramPartReadingsMatching,
+  canonicalPartNumber, decodeRamPart, ramPartDecodesAsWritten, ramPartFill, ramPartMismatches, ramPartReadingsMatching,
   splitRamPartFamily, RAM_PART_FIELDS,
   type RamPartDecode, type RamPartField, type RamPartMismatch, type RamPartSpec, type RamScanCheck,
 } from '@recycle-erp/shared';
@@ -66,7 +66,7 @@ export function useRamPartFill(
     onFill: (patch: RamPartSpec) => void;
     savedPartNumber?: string | null;
   },
-): void {
+): { forgetFills: () => void } {
   const mem = useRef({
     mountPart: canonicalPartNumber(savedPartNumber ?? ''),
     filled: {} as RamPartSpec,
@@ -89,7 +89,9 @@ export function useRamPartFill(
       for (const f of RAM_PART_FIELDS) {
         if (own[f] && (cur[f] ?? '') === own[f]) asBlank[f] = '';
       }
-      const decode = decodeRamPart(cur.partNumber);
+      // Read only through a look-alike, the part # may be a scheme the decoder
+      // doesn't know: the readout offers the reading, but nothing fills from it.
+      const decode = ramPartDecodesAsWritten(cur.partNumber) ? decodeRamPart(cur.partNumber) : null;
       const fill = ramPartFill(decode, asBlank);
       const patch: RamPartSpec = { ...fill };
       for (const f of RAM_PART_FIELDS) {
@@ -101,6 +103,10 @@ export function useRamPartFill(
     }, DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [active, canon]);
+
+  // A scan that lands on the line owns every value it wrote, even one equal
+  // to an earlier fill: the next part # must not take it back.
+  return { forgetFills: () => { mem.current.filled = {}; } };
 }
 
 /**

@@ -22,6 +22,11 @@ describe('ramFamily', () => {
     }
   });
 
+  it('keys a dashed packaging tail the same as its dash-free spelling', () => {
+    expect(ramFamily('HMA82GR7CJR8N-VK-TF')?.key).toBe(ramFamily('HMA82GR7CJR8N-VKTF')?.key);
+    expect(ramFamily('HMA82GR7CJR8N-VK-TF')?.key).toBe(ramFamily('HMA82GR7CJR8N-VK')?.key);
+  });
+
   it('keeps module form, die, organisation and speed apart', () => {
     const apart: [string, string][] = [
       ['M393A2K43BB1-CTD', 'M391A2K43BB1-CTD'], // RDIMM vs ECC UDIMM

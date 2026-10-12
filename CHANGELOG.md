@@ -17,6 +17,83 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.247.1] - 2026-10-11
+
+Fixes from the review before the v1.247 release (RS-233). `/code-review max`
+ran over dev against main (v1.241.0 → v1.247.0: RS-227 to RS-232). Sixteen
+finders, then verifiers, then a sweep; every finding was checked against the
+code, most with a failing test first. The ones kept are recorded in the
+ticket with the reason.
+
+### Fixed
+
+- **The AI review no longer undoes the scan's own part-number fixes.** Its
+  label witness was the scan's raw read, which the scan keeps on record, while
+  the line holds the part number the scan corrected (O for 0, HMA8 for HMAA).
+  Every corrected line came back as an error whose Apply wrote the misread
+  back. The witness, and a photo read again, now go through the same
+  correction.
+- **A misread part number is flagged once, not "fixed" into the specs.** When
+  one look-alike reading fits every spec the line names, the specs are judged
+  by that reading, so the review no longer offers to rewrite a right rank to
+  the misread's.
+- **Apply works on a Form/Device pair.** It now goes through the editors'
+  spec cascade, so SODIMM → RDIMM brings Laptop → Server with it (and answers
+  that finding) instead of being refused as a half-moved line either way
+  round. Apply reads the findings again first, so an edit made in another tab
+  since the card loaded is not written over.
+- **The review worker:** takes the PO's row before the review's row, so a
+  move or revert racing a finished review can't deadlock; drops findings for
+  lines removed mid-run instead of failing the whole review on the foreign
+  key; stops claiming reviews once shutdown starts; fences a review a second
+  instance took over after it went stale; holds the cost cap when four lines
+  reach for a model call at once; never pays a web lookup for a placeholder
+  or a Mixed lot's synthetic part number; takes no brand from a web listing
+  and reads `10K` RPM as 10000; reads old scans that stored numbers; and
+  re-reads only RAM, SSD and HDD photos. Its market value is now the Market
+  board's basis (last price, else average sell). A cost finding goes stale
+  once the unit cost changes, and a missing part number names the label's.
+  Archiving a PO cancels its waiting review; the card keeps the last finished
+  review's findings however many runs failed after it; and Apply sends Review
+  mode's waiting count ticks before the page reloads.
+- **The `ai_review_done` event reads as words**, on the PO and on the Activity
+  page, and only managers see it — purchasers were shown the raw kind and the
+  issue counts of a manager-only check.
+- **A `sold` written after 0173 lands as `done`** (migration 0174). 0173 ran
+  at the new container's boot while the old instance, still serving, could
+  settle a sold-out PO to `sold`: an unknown stage the new code shows raw to
+  the purchaser, leaves open on the closed book and drops from commission.
+- **Sold-flag rough edges:** the phone Inventory KPIs count Sold lots out
+  again; the desktop Sold chip counts Done POs before it is clicked; a Sold
+  chip left on no longer empties the list under the purchaser preview;
+  `excludeStatus=Sold` from an older phone bundle no longer hides sold POs
+  still waiting on review or payment; and the Activity page drops the old
+  `Done → Sold` rows, as the PO's own history already did.
+- **Grouped Inventory hands a sell order each lot's own part number**, not the
+  family's `M393A2K43BB1-CTD*`, which was saved on the sell-order lines, minted
+  a junk Market row on Done and blanked Quick View. A dashed SK Hynix tail
+  (`-VK-TF`) groups with its dash-free spelling again.
+- **RAM part numbers:** Kingston DDR3L and kits, SK Hynix VLP RDIMMs and
+  DDR4/DDR5 speeds printed as a PC4/PC5 rate are read. A part number that
+  decodes only through a look-alike is no longer rewritten by a scan or used
+  to fill on its own, and when two readings both decode further, neither is
+  picked. On the desktop drawer a scan owns the values it wrote.
+- **Price sheets, for both imports:** a Unit Price column wins over List or
+  Last Price and an Ext. Price is never read; 型号 wins over a row-number
+  编号; hidden tabs, merged titles and a sparse sheet's empty rows are passed
+  over (a stray cell at row 1,048,576 used to cost gigabytes); a second header
+  further down starts its own section; a decimal comma reads as one.
+- **The Market import** refuses rows in any currency but dollars — by cell,
+  format, header or tab — and reads 美元 as dollars; a list with more matches
+  than an apply takes (now 5,000) is refused at the preview, not after it;
+  the apply writes the list in two statements.
+- **The bid import** reads a 0 as no bid instead of a $0 price that zeroed the
+  part's max buy; prices a part once across the labels its lines were added
+  under; and leaves to the manager a part an older per-condition sheet priced
+  apart, instead of applying its last row to every condition.
+- **Settings:** the AI review's cost cap is read on blur, so typing `.5` no
+  longer stores $5.
+
 ## [1.247.0] - 2026-10-11
 
 A manager can re-price the Market board from a spreadsheet (RS-232). Until now

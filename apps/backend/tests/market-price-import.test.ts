@@ -108,6 +108,21 @@ describe('readPriceSheetRows', () => {
     expect(byFormat[0]).toMatchObject({ price: 300, currency: 'CNY' });
   });
 
+  it('reads 美元 as dollars, and marks other currencies and a yuan tab', async () => {
+    const usd = readPriceSheetRows(wbWith([['型号', '单价（美元）'], ['PN-1', 300]]));
+    expect(usd[0]).toMatchObject({ price: 300, currency: null });
+
+    const tab = readPriceSheetRows(wbWith([['Part Number', 'Unit Price'], ['PN-1', 280]], 'RMB'));
+    expect(tab[0]).toMatchObject({ currency: 'CNY' });
+
+    const eur = readPriceSheetRows(wbWith([['Part Number', 'Unit Price (EUR)'], ['PN-1', 40]]));
+    expect(eur[0]).toMatchObject({ currency: 'EUR' });
+
+    const formatted = wbWith([['Part Number', 'Unit Price'], ['PN-1', 40]]);
+    formatted.worksheets[0].getCell('B2').numFmt = '[$€-407]#,##0.00';
+    expect((readPriceSheetRows(await reload(formatted)))[0]).toMatchObject({ currency: 'EUR' });
+  });
+
   it('throws when no tab has both columns', () => {
     expect(() => readPriceSheetRows(wbWith([['Item', 'Qty'], ['x', 1]])))
       .toThrow(PriceColumnsNotFoundError);
@@ -289,7 +304,7 @@ describe('POST /api/market/price-import/apply', () => {
     expect((await post({ prices: [{ id: 'rp-a1', price: '85' }] })).status).toBe(400);
     expect((await post({ prices: [{ price: 85 }] })).status).toBe(400);
     expect((await post({ prices: [{ id: 'rp-a1', price: 1 }, { id: 'rp-a1', price: 2 }] })).status).toBe(400);
-    const many = Array.from({ length: 1001 }, (_, i) => ({ id: `rp-${i}`, price: 1 }));
+    const many = Array.from({ length: 5001 }, (_, i) => ({ id: `rp-${i}`, price: 1 }));
     expect((await post({ prices: many })).status).toBe(413);
 
     const sql = getTestDb();

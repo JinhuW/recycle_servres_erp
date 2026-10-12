@@ -374,7 +374,10 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
           brand: g.brand, capacity: g.capacity, generation: g.generation,
           type: g.type, classification: g.classification, rank: g.rank,
           speed: g.speed, interface: g.interface, form_factor: g.form_factor,
-          description: g.description, item_type: g.item_type, part_number: g.part_number,
+          description: g.description, item_type: g.item_type,
+          // The group's part number can be a RAM family's `…-CTD*` label; a
+          // sell order or a market lookup needs the lot's own.
+          part_number: lot.part_number ?? g.part_number,
           serial_number: lot.serial_number,
           condition: lot.condition, qty: lot.qty,
           unit_cost: lot.unit_cost ?? 0, sell_price: lot.sell_price,

@@ -16,8 +16,9 @@
 // no spec at all.
 //
 // The part number itself is often the misread part (HMAA vs HMA8, PZ vs PDZ,
-// O for 0), so a disagreement is a question for the person holding the stick,
-// never an automatic overwrite.
+// O for 0), so a disagreement on a form is a question for the person holding
+// the stick, never an automatic overwrite. Only a label scan corrects itself,
+// and only when its own printed specs pick the one reading (reconcileRamScan).
 
 import { canonicalPartNumber, stripPartPrefix } from './partNumberCanon.js';
 
@@ -69,14 +70,22 @@ function speedFor(generation: string, mts: string | undefined): string | undefin
   return generation === 'DDR3' ? DDR3_PC_RATE[mts] ?? mts : mts;
 }
 
+// A DDR4 or DDR5 label can print its rate the same way (PC4-25600), and a
+// scan keeps the number as printed. None of these collides with a transfer
+// rate, so they fold back whatever the generation.
+const PC_RATE_MTS: Readonly<Record<string, string>> = {
+  ...Object.fromEntries(Object.entries(DDR3_PC_RATE).map(([mts, pc]) => [pc, mts])),
+  '19200': '2400', '21300': '2666', '23400': '2933', '25600': '3200',
+  '38400': '4800', '41600': '5200', '44800': '5600', '48000': '6000', '51200': '6400',
+};
+
 /**
- * The module's MT/s, folding a DDR3 PC3 rate back to its transfer rate so
- * `12800` and `1600` compare equal.
+ * The module's MT/s, folding a PC module rate back to its transfer rate so
+ * `12800` and `1600` (or `25600` and `3200`) compare equal.
  */
 export function ramSpeedMts(speed: string | null | undefined): string {
   const s = (speed ?? '').trim().toUpperCase().replace(/^PC\d?L?-?/, '').replace(/MHZ$|MT\/S$/, '').trim();
-  const back = Object.entries(DDR3_PC_RATE).find(([, pc]) => pc === s);
-  return back ? back[0] : s;
+  return PC_RATE_MTS[s] ?? s;
 }
 
 /** `8` → `8GB`, and a fractional or zero size → undefined. */
@@ -166,6 +175,8 @@ const HYNIX_FORM: Readonly<Record<string, readonly [Form, Form]>> = {
   // [non-ECC, ECC]
   U: ['UDIMM', 'ECC-UDIMM'], R: ['RDIMM', 'RDIMM'], L: ['LRDIMM', 'LRDIMM'],
   S: ['SODIMM', 'ECC-SODIMM'], P: ['RDIMM', 'RDIMM'],
+  // VLP: a very-low-profile registered module, still an RDIMM.
+  V: ['RDIMM', 'RDIMM'],
 };
 const HYNIX_DIE: Readonly<Record<string, number>> = { '4': 4, '8': 8, A: 16 };
 const HYNIX_WIDTH: Readonly<Record<string, number>> = { '4': 4, '8': 8, '6': 16 };
@@ -179,7 +190,7 @@ const HYNIX_SPEED: Readonly<Record<string, string>> = {
 function hynix(pn: string): RamPartDecode | null {
   const ddr5 = hynixDdr5(pn);
   if (ddr5) return ddr5;
-  const m = pn.match(/^HM([AT])([1-58A])(\w\w)([URLSP])([67])(\w\w)[A-Z]([468])/);
+  const m = pn.match(/^HM([AT])([1-58A])(\w\w)([URLSPV])([67])(\w\w)[A-Z]([468])/);
   if (!m) return null;
   const generation = m[1] === 'A' ? 'DDR4' : 'DDR3';
   const forms = HYNIX_FORM[m[4]];
@@ -333,6 +344,8 @@ const WIDTH_DIGIT: Readonly<Record<string, number>> = { '4': 4, '8': 8, '6': 16 
 // ── Kingston ──────────────────────────────────────────────────────────────
 // KVR26N19S8/8, KSM32RD4/32HDR, KCP426NS8/8, KVR48U40BS8-16: speed (2 or 3
 // digits), module letter, rank (S/D/Q) and width, then "/" or "-" and the size.
+// DDR3L adds an L, after the speed (KVR16LR11D4/16) or after KCP3
+// (KCP3L16SD8/8): a voltage, not a module letter.
 const KINGSTON_FORM: Readonly<Record<string, Form>> = {
   N: 'UDIMM', U: 'UDIMM', E: 'ECC-UDIMM', S: 'SODIMM', R: 'RDIMM', L: 'LRDIMM', ES: 'ECC-SODIMM',
 };
@@ -342,7 +355,9 @@ function kingston(raw: string): RamPartDecode | null {
   // the part as written.
   const pn = stripPartPrefix(raw).trim().toUpperCase().replace(/\s+/g, '');
   // KCP and KTx numbers carry the generation digit first: KCP426NS8/8.
-  const m = pn.match(/^K(?:VR|SM|CP[345]|T[DLHW][345]|F)?(\d{2,3})(ES|[NUESRL])\d{0,2}[A-Z]?([SDQ])([468])\w*?[/-](\d{1,3})/);
+  // A kit (…S8K2/16) names its total after the stick count, like the
+  // consumer kits below: one stick is the size over the count.
+  const m = pn.match(/^K(?:VR|SM|CP[345]L?|T[DLHW][345]|F)?(\d{2,3})L?(ES|[NUESRL])\d{0,2}[A-Z]?([SDQ])([468])\w*?(?:K(\d))?[/-](\d{1,3})/);
   if (!m) return null;
   const s = m[1];
   const mts = s.length === 3 ? `${s.slice(0, 2)}00`
@@ -354,7 +369,7 @@ function kingston(raw: string): RamPartDecode | null {
   const form = KINGSTON_FORM[m[2]];
   const ranks = { S: 1, D: 2, Q: 4 }[m[3]];
   const spec: RamPartSpec = {
-    brand: 'Kingston', generation, ...FORM_SPEC[form], capacity: gb(Number(m[5])),
+    brand: 'Kingston', generation, ...FORM_SPEC[form], capacity: gb(Number(m[6]) / Number(m[5] ?? 1)),
     rank: ranks ? `${ranks}Rx${WIDTH_DIGIT[m[4]]}` : undefined, speed: speedFor(generation, mts),
   };
   // The family is everything before the size separator.
@@ -430,6 +445,15 @@ function clean(spec: RamPartSpec): RamPartSpec {
   return out;
 }
 
+/**
+ * Whether the part number decodes as written, if only in part. One that
+ * doesn't may still decode one look-alike away, but it may as well be a
+ * scheme this decoder doesn't know, so nothing should rewrite it unasked.
+ */
+export function ramPartDecodesAsWritten(raw: string | null | undefined): boolean {
+  return !!raw && decodeExact(raw) !== null;
+}
+
 function decodeExact(raw: string): RamPartDecode | null {
   const pn = canonicalPartNumber(raw);
   if (pn.length < 6) return null;
@@ -480,6 +504,19 @@ export function decodeRamPart(raw: string | null | undefined): RamPartDecode | n
     if (d && (!exact || extends_(d.spec, exact.spec))) return { ...d, readAs: alt };
   }
   return exact;
+}
+
+/** Every distinct reading one misread away that decodes further than `raw` as written. */
+function readingsBeyond(raw: string): string[] {
+  const exact = decodeExact(raw);
+  const seen = new Map<string, string>();
+  for (const alt of ramPartLookalikes(raw)) {
+    const d = decodeExact(alt);
+    if (!d || (exact && !extends_(d.spec, exact.spec))) continue;
+    const key = canonicalPartNumber(alt);
+    if (!seen.has(key)) seen.set(key, alt);
+  }
+  return [...seen.values()];
 }
 
 /** Whether `more` names every field `base` does, the same, and at least one more. */
@@ -547,15 +584,26 @@ export function reconcileRamScan(fields: Record<string, string>): {
 
   let decode = decodeRamPart(pn);
   if (!decode) return { fields, check: null };
+  // Read only through a look-alike, the part number may be right and the
+  // decoder short of its scheme: a correction then needs the printed specs
+  // to pick it, and the look-alike's specs prove nothing on their own.
+  const asWritten = ramPartDecodesAsWritten(pn);
   if (ramPartMismatches(decode, out).length > 0) {
     const readings = ramPartReadingsMatching(pn, out);
     // Two readings that both fit leave nothing to choose between.
     if (readings.length === 1) {
       out.partNumber = readings[0];
       decode = decodeRamPart(readings[0])!;
+    } else if (!asWritten) {
+      return { fields, check: null };
     }
   } else if (decode.readAs) {
-    out.partNumber = decode.readAs;
+    if (!asWritten) return { fields, check: null };
+    // decodeRamPart takes the first reading that decodes further; when two
+    // different ones do, the label hasn't said which, so the part number
+    // stays as read and only what it decodes to as written is used.
+    if (readingsBeyond(pn).length === 1) out.partNumber = decode.readAs;
+    else decode = decodeExact(pn)!;
   }
   if (out.partNumber !== fields.partNumber) {
     check.partCorrected = { from: fields.partNumber, to: out.partNumber };

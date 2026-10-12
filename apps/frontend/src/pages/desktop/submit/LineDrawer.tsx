@@ -104,7 +104,7 @@ export function LineDrawer({
     [cat, onChange],
   );
   useChipFill(line, { enabled: !readOnly, onFill: chipNumber => set({ chipNumber }) });
-  useRamPartFill(line, { enabled: !readOnly, onFill: set });
+  const ramFill = useRamPartFill(line, { enabled: !readOnly, onFill: set });
   // Confirm asks once per set of disagreements; keeping the form as entered
   // covers exactly what was shown, so a later edit that adds one asks again.
   const [partDialog, setPartDialog] = useState(false);
@@ -186,6 +186,7 @@ export function LineDrawer({
       form.append('file', file, file.name);
       form.append('category', cat);
       const scan = await api.upload<ScanResponse>('/api/scan/label', form);
+      ramFill.forgetFills();
       set(scanToLinePatch(scan, cat));
       setPartCheck(scan.partCheck ?? null);
       const conf = scan.confidence ?? 0;

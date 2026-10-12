@@ -7,7 +7,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { getTestDb, resetDb } from './helpers/db';
 import { api, testEnv } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
-import { drainPoAiReviews } from '../src/services/poAiReview';
+import { Budget, drainPoAiReviews } from '../src/services/poAiReview';
 
 // Decodes to Samsung 32GB DDR4 RDIMM Server 2Rx4 2400.
 const PN = 'M393A4K40BB1-CRC0Q';
@@ -94,6 +94,13 @@ describe('PO AI review', () => {
       SELECT n.title FROM notifications n JOIN users u ON u.id = n.user_id
       WHERE u.email = ${ALEX} AND n.kind = 'ai_review'`;
     expect(n[0]!.title).toBe(`AI review: 1 issue on ${id}`);
+
+    // The run is in the manager's history of the PO, not the purchaser's.
+    type Evs = { events: { kind: string }[] };
+    const kinds = async (token: string) =>
+      (await api<Evs>('GET', `/api/orders/${id}/events`, { token })).body.events.map((e) => e.kind);
+    expect(await kinds(mgr)).toContain('ai_review_done');
+    expect(await kinds(pur)).not.toContain('ai_review_done');
   });
 
   it('records Apply only once the line holds the suggestion, and keeps a dismissal across re-runs', async () => {
@@ -126,6 +133,67 @@ describe('PO AI review', () => {
     expect(after.findings.find((f) => f.field === 'rank')!.resolution).toBe('dismissed');
   });
 
+  it('reads a scan through the part-number correction the form applied, not the raw misread', async () => {
+    await enable();
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token: pur,
+      body: {
+        paypalTxnId: 'TESTPAYTXN0000002', category: 'RAM', warehouseId: 'WH-LA1', payment: 'company',
+        lines: [
+          // Saved from a scan whose model read had an O for the 0 in "40";
+          // reconcileRamScan corrected it before the form saw it.
+          { category: 'RAM', brand: 'Samsung', capacity: '16GB', generation: 'DDR4', type: 'Server',
+            classification: 'RDIMM', rank: '1Rx4', speed: '2400', partNumber: 'M393A2K40BB1-CRC0Q',
+            condition: 'Pulled — Tested', qty: 2, unitCost: 30 },
+        ],
+      },
+    });
+    expect(created.status).toBe(201);
+    const id = created.body.id;
+    const sql = getTestDb();
+    const [owner] = await sql<{ id: string }[]>`SELECT id FROM users WHERE email = ${MARCUS}`;
+    await sql`
+      INSERT INTO label_scans (user_id, cf_image_id, delivery_url, category, extracted, confidence, provider)
+      VALUES (${owner!.id}, 'label-scans/misread', NULL, 'RAM', ${sql.json({
+        partNumber: 'M393A2K4OBB1-CRC0Q', brand: 'Samsung', capacity: '16GB', generation: 'DDR4',
+        type: 'Server', classification: 'RDIMM', rank: '1Rx4', speed: '2400',
+      })}, 0.9, 'openrouter')`;
+    await sql`UPDATE order_lines SET scan_image_id = 'label-scans/misread' WHERE order_id = ${id}`;
+    expect((await api('POST', `/api/orders/${id}/advance`, { token: pur })).status).toBe(200);
+    expect((await toReviewing(id, mgr)).status).toBe(200);
+    await drain();
+    const r = (await read(id, mgr)).body;
+    expect(r.latest).toMatchObject({ status: 'done' });
+    expect(r.findings.filter((f) => f.field === 'partNumber')).toEqual([]);
+  });
+
+  it('supersedes a waiting review when the order is archived', async () => {
+    await enable();
+    const { id } = await createInTransit(pur);
+    await toReviewing(id, mgr);
+    expect((await api('POST', `/api/orders/${id}/archive`, { token: mgr, body: {} })).status).toBe(200);
+    expect((await read(id, mgr)).body.latest!.status).toBe('superseded');
+    expect(await drain()).toBe(0);
+  });
+
+  it('keeps showing the last finished review behind any number of failed runs', async () => {
+    await enable();
+    const { id } = await createInTransit(pur);
+    await toReviewing(id, mgr);
+    await drain();
+    const done = (await read(id, mgr)).body;
+    expect(done.findings.length).toBeGreaterThan(0);
+    const sql = getTestDb();
+    for (let i = 0; i < 6; i++) {
+      await sql`INSERT INTO po_ai_reviews (order_id, trigger, status, error, created_at)
+                VALUES (${id}, 'manual', 'failed', 'boom', NOW() + ${`${i + 1} seconds`}::interval)`;
+    }
+    const after = (await read(id, mgr)).body;
+    expect(after.latest).toMatchObject({ status: 'failed' });
+    expect(after.shown!.id).toBe(done.shown!.id);
+    expect(after.findings).toHaveLength(done.findings.length);
+  });
+
   it('supersedes a waiting review when the order goes back before Reviewing', async () => {
     await enable();
     const { id } = await createInTransit(pur);
@@ -147,5 +215,24 @@ describe('PO AI review', () => {
     const { id } = await createInTransit(pur);
     expect((await read(id, pur)).status).toBe(403);
     expect((await api('POST', `/api/orders/${id}/ai-review/run`, { token: pur })).status).toBe(403);
+  });
+});
+
+describe('the per-PO cost cap', () => {
+  it('holds when four lines reach for a model call at once', async () => {
+    const budget = new Budget(0.1);
+    const call = async () => {
+      if (!(await budget.begin())) return;
+      try {
+        await new Promise((r) => setTimeout(r, 5));
+        budget.add({ promptTokens: 1, completionTokens: 1, costUsd: 0.06 });
+      } finally {
+        budget.end();
+      }
+    };
+    await Promise.all(Array.from({ length: 6 }, call));
+    // One call over the cap at most, never a whole first wave.
+    expect(budget.costUsd).toBeCloseTo(0.12);
+    expect(budget.skipped).toBe(4);
   });
 });

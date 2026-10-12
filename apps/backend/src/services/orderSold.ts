@@ -20,3 +20,20 @@ export function soldFlagSql(sql: SqlLike, orderAlias: SqlFragment): SqlFragment 
                        WHERE s_l.order_id = ${orderAlias}.id AND s_l.qty > 0
                          AND s_l.status <> 'Sold'))`;
 }
+
+// Sold was a stage after Done from v1.164.0 until v1.246.0. Its history stays
+// in order_events but reads in today's terms: the settle row (`advanced
+// done→sold`) moved nothing and is dropped, and a reopen from Sold reads as
+// one from Done. Every reader of order_events goes through this.
+export function restageSoldEvent<T extends { kind: string; detail: Record<string, unknown> }>(r: T): T | null {
+  if (r.kind !== 'advanced') return r;
+  const d = r.detail as { from?: unknown; to?: unknown };
+  if (d.to === 'sold') return null;
+  if (d.from !== 'sold') return r;
+  return { ...r, detail: { ...r.detail, from: 'done' } };
+}
+
+/** The SQL twin of restageSoldEvent's drop, for a reader that pages in SQL. */
+export function soldSettleEventSql(sql: SqlLike, eventAlias: SqlFragment): SqlFragment {
+  return sql`(${eventAlias}.kind = 'advanced' AND ${eventAlias}.detail->>'to' IS NOT DISTINCT FROM 'sold')`;
+}

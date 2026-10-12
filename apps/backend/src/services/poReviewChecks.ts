@@ -14,6 +14,7 @@
 import {
   RAM_PART_FIELDS,
   canonicalPartNumber,
+  synthesizePartNumber,
   decodeRamPart,
   ramFieldsAgree,
   ramPartMismatches,
@@ -102,7 +103,10 @@ function storedOf(l: ReviewLine, f: string): string {
  */
 export function needsWebLookup(l: ReviewLine, hasLabel: boolean): boolean {
   const pn = l.partNumber?.trim();
-  if (!pn) return false;
+  // Nothing to search for: a placeholder ("-", "N/A") or the synthetic part
+  // number a Mixed lot is filed under, which no listing will ever name.
+  if (!pn || canonicalPartNumber(pn).length < 4) return false;
+  if (pn === synthesizePartNumber(l.category, { ...l, rpm: l.rpm })) return false;
   if (l.category === 'RAM') return decodeRamPart(pn) === null;
   return (l.category === 'SSD' || l.category === 'HDD') && !hasLabel;
 }
@@ -154,7 +158,8 @@ function checkRam(l: ReviewLine, ev: LineEvidence): Finding[] {
   }
   const decode = pn ? decodeRamPart(pn) : null;
   let pnSuspect = false;
-  if (pn && labelPn && canonicalPartNumber(labelPn) !== canonicalPartNumber(pn)) {
+  const labelDiffers = !!pn && !!labelPn && canonicalPartNumber(labelPn) !== canonicalPartNumber(pn);
+  if (labelDiffers) {
     // The label's own part number agreeing with the line's specs is the
     // strongest sign the stored one was typed or scanned wrong.
     const labelDecode = decodeRamPart(labelPn);
@@ -169,13 +174,23 @@ function checkRam(l: ReviewLine, ev: LineEvidence): Finding[] {
     pnSuspect = true;
   }
 
+  // A part number one look-alike away from a reading that fits every spec
+  // the line names is the misread, not the specs: its decode is what the
+  // specs are judged by, or each field would be "fixed" to the misread's.
+  const decodeOff = decode !== null && ramPartMismatches(decode, stored).length > 0;
+  const readings = pn && !labelDiffers && decodeOff ? ramPartReadingsMatching(pn, stored) : [];
+  const reading = readings.length === 1 ? decodeRamPart(readings[0]) : null;
+  const judgeBy = reading ?? decode;
+
   // ── Each spec field against the decode and the label.
-  if (decode || label) {
+  if (judgeBy || label) {
     for (const f of RAM_PART_FIELDS) {
       const s = stored[f];
-      const d = decode?.spec[f];
+      const d = judgeBy?.spec[f];
       const lv = label?.fields[f]?.trim() || undefined;
-      const dSrc = (): FindingSource => ({ kind: 'decoder', partNumber: pn, readAs: decode?.readAs, value: d });
+      const dSrc = (): FindingSource => ({
+        kind: 'decoder', partNumber: pn, readAs: reading ? readings[0] : decode?.readAs, value: d,
+      });
       if (!s) {
         if (d && lv && !ramFieldsAgree(f, d, lv)) continue;
         const v = d ?? lv;
@@ -210,19 +225,24 @@ function checkRam(l: ReviewLine, ev: LineEvidence): Finding[] {
   }
 
   // ── A part number one look-alike away that fits every spec.
-  if (pn && !out.some((x) => x.code === 'pn_label_differs')) {
-    const decodeOff = decode !== null && ramPartMismatches(decode, stored).length > 0;
-    const readings = pnSuspect || decodeOff ? ramPartReadingsMatching(pn, stored) : [];
+  if (pn && !labelDiffers) {
     const readAs = decode?.readAs;
     const suggestion = readings.length === 1 ? readings[0]
       : readAs && !decodeOff ? readAs
       : null;
     if (suggestion && canonicalPartNumber(suggestion) !== canonicalPartNumber(pn)) {
+      // A label that backs the line where the part number as written doesn't
+      // is a second witness against the part number.
+      const labelBacks = !!label && RAM_PART_FIELDS.some((f) => {
+        const d = decode?.spec[f];
+        const lv = label.fields[f]?.trim();
+        return !!d && !!lv && !!stored[f] && !ramFieldsAgree(f, d, stored[f]) && ramFieldsAgree(f, lv, stored[f]);
+      });
       out.push({
         lineId: l.id, severity: 'warn', code: 'pn_misread', field: 'partNumber',
         currentValue: pn, suggestedValue: suggestion,
         message: `${lineNo(l)} part number ${pn} may be misread as ${suggestion}`,
-        confidence: pnSuspect ? 0.7 : 0.5,
+        confidence: pnSuspect || labelBacks ? 0.7 : 0.5,
         sources: [{ kind: 'decoder', partNumber: pn, readAs: suggestion }],
       });
     }
@@ -317,10 +337,16 @@ function mismatch(
  * applying it would overwrite an edit made since.
  */
 export function findingIsCurrent(
-  f: { field: string | null; currentValue: string | null },
+  f: { field: string | null; code?: string; currentValue: string | null },
   line: Record<string, unknown> | undefined,
 ): boolean {
   if (!line) return false;
-  if (!f.field) return true;
+  // A cost finding names no field to apply, but it stops being true once the
+  // unit cost it was about has been changed.
+  if (!f.field) {
+    return f.code === 'cost_missing' || f.code === 'above_market'
+      ? Number(line.unitCost) === Number(f.currentValue)
+      : true;
+  }
   return flat(line[f.field]) === flat(f.currentValue);
 }

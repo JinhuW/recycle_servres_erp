@@ -58,6 +58,9 @@ export async function lookUpPartNumber(
   const sourceUrls = Array.isArray(json.sourceUrls)
     ? json.sourceUrls.filter((u): u is string => typeof u === 'string' && /^https?:\/\//.test(u)).slice(0, 5)
     : [];
+  // A listing's brand is often the server maker's (HPE, Dell) for a module
+  // or drive someone else built, and no catalog brand: it witnesses nothing.
+  delete strs.brand;
   const specs = category === 'Other' ? strs : keep(category, strs);
   if (sourceUrls.length === 0 || Object.keys(specs).length === 0) return null;
   return { specs, sourceUrls };

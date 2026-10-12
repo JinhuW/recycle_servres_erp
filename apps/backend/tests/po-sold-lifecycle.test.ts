@@ -201,8 +201,11 @@ describe('the list filters', () => {
     const active = await listIds(t, '?excludeStatus=Done');
     expect(active).toContain(rtp.id);
     expect(active).not.toContain(done.id);
-    expect(await listIds(t, '?excludeStatus=Sold')).toEqual(expect.arrayContaining([plain.id]));
-    expect(await listIds(t, '?excludeStatus=Sold')).not.toContain(rtp.id);
+    // An older phone bundle also sends excludeStatus=Sold; Sold is no stage,
+    // so it excludes nothing, and a sold PO still waiting on payment stays.
+    const legacy = await listIds(t, '?excludeStatus=Done&excludeStatus=Sold');
+    expect(legacy).toContain(rtp.id);
+    expect(legacy).not.toContain(done.id);
   });
 });
 
@@ -265,6 +268,16 @@ const M0173 = readFileSync(join(MIGRATIONS, '0173_po_sold_is_a_flag.sql'), 'utf8
 describe('0173 — the sold lifecycle goes back to done', () => {
   beforeEach(async () => { await resetDb(); });
 
+  it('lands a sold written after the migration (an old instance mid-deploy) as done', async () => {
+    const db = getTestDb();
+    const { id, alex } = await soldOrder();
+    // What the old settle path writes.
+    await db`UPDATE orders SET lifecycle = 'sold' WHERE id = ${id} AND lifecycle = 'done'`;
+    const [row] = await db<{ lifecycle: string }[]>`SELECT lifecycle FROM orders WHERE id = ${id}`;
+    expect(row!.lifecycle).toBe('done');
+    expect(await getOrder(alex.token, id)).toMatchObject({ lifecycle: 'done', status: 'Done', sold: true });
+  });
+
   it('moves sold POs to done, idempotently, and the old settle history reads in today\'s terms', async () => {
     const db = getTestDb();
     const { id, alex } = await soldOrder();
@@ -282,5 +295,12 @@ describe('0173 — the sold lifecycle goes back to done', () => {
     expect(moves).not.toContain('done>sold');
     expect(moves).toContain('done>reviewing');
     expect(moves.join(' ')).not.toMatch(/sold/);
+
+    // The workspace Activity feed reads the same history the same way.
+    const feed = await api<{ events: { kind: string; detail: { from?: string; to?: string }; targetRef: string | null; target: string }[] }>(
+      'GET', '/api/activity?area=po&limit=200', { token: alex.token });
+    const mine = feed.body.events.filter(e => e.kind === 'advanced' && JSON.stringify(e).includes(id));
+    expect(mine.map(e => `${e.detail.from}>${e.detail.to}`)).toContain('done>reviewing');
+    expect(JSON.stringify(mine)).not.toMatch(/"sold"/);
   });
 });
