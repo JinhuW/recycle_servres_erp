@@ -1508,7 +1508,7 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     real role is not manager. An archived or Closed order opens read-only and its writes 409; a
     Done order can still be packed, since an order can be paid before it ships.
 
-- **After-sales** (v1.250.0). A Shipped, Awaiting payment or Done order's
+- **After-sales** (v1.251.0). A Shipped, Awaiting payment or Done order's
   page has an **After-sales** button that opens the new-case form with the
   order preselected, and a card in the side column listing the order's
   cases with their status, issue and amount. See [After-sales](#after-sales).
@@ -1520,7 +1520,7 @@ on a sold order: what they report, which products and how many, and how it
 ends — the goods come back (**Return**) or the customer keeps them at a
 lower price (**Discount**). Purchasers never see the page or the API.
 
-- **Opening a case** (v1.250.0). `#/after-sales/new`, or the After-sales
+- **Opening a case** (v1.251.0). `#/after-sales/new`, or the After-sales
   button on a sell order. The form loads the order, refuses one that is
   Draft, Packing or Closed (nothing has shipped, or nothing was sold), and
   lists its products with a checkbox and a quantity capped at the line's
