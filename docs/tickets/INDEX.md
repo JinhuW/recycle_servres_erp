@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-236](./RS-236-sell-order-vendor-price-import-at-the-top-history-ba.md) | done | bug | P2 | Sell order: vendor price import at the top, History back at the bottom | — |
+| [RS-237](./RS-237-sell-order-history-at-the-bottom-of-the-side-column.md) | done | story | P2 | Sell order History at the bottom of the side column | — |
+| [RS-236](./RS-236-sell-order-vendor-price-import-at-the-top-history-ba.md) | done | bug | P2 | Sell order: vendor price import at the top, History back at the bottom | 1.248.1 |
 | [RS-235](./RS-235-move-sell-order-history-to-the-top-folded-by-default.md) | done | story | P2 | Move sell-order History to the top, folded by default | 1.248.0 |
 | [RS-234](./RS-234-every-save-of-a-ram-line-asks-the-part-question.md) | done | bug | P2 | Every save of a RAM line asks the part # question | 1.247.2 |
 | [RS-233](./RS-233-pre-release-review-fixes-for-the-v1-247-release.md) | done | bug | P1 | Pre-release review fixes for the v1.247 release | 1.247.1 |

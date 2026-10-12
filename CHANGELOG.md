@@ -17,6 +17,17 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.248.2] - 2026-10-12
+
+History moves to the side column (RS-237).
+
+### Changed
+
+- **A sell order's History is the last card in the right-hand column**, under
+  Internal notes, instead of under the products. Still folded until clicked.
+  The left column is now only the order itself, and the history no longer
+  sits at the end of a long line list.
+
 ## [1.248.1] - 2026-10-12
 
 v1.248.0 moved the wrong card (RS-236).
