@@ -17,6 +17,33 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.247.2] - 2026-10-11
+
+The part # question on every save of a RAM line (RS-234). The v1.247.1 review
+kept this one for a follow-up (RS-233, finding 26).
+
+### Fixed
+
+- **Submit, Save and a scanned sheet ask whether a RAM line's specs match its
+  part #.** Since v1.243.0 only the desktop drawer's Confirm and the phone
+  form asked. A line that reached the PO any other way went in with the
+  contradiction unasked: Submit order on a new PO, adding the next line, the
+  RAM sheet's auto-save, Save on the PO page, the inventory editor. Each now
+  asks before it writes, product by product and naming the product, and
+  Cancel stops the save. On a RAM sheet, cancelling holds that stick and the
+  rest still in question unsaved, and the message counts them. A value taken
+  from the part # that makes the spec cascade clear another field stops the
+  save with the usual "still needed" message.
+- **Each disagreement is asked about once.** "Keep as entered" is recorded on
+  the line rather than in the drawer, so Submit or Save doesn't ask again what
+  the drawer asked, and closing the drawer no longer forgets the answer.
+  Keeping covers each disagreement shown, so fixing one field no longer
+  reopens the rest. A saved line's own disagreements count as answered:
+  editing its price or qty doesn't ask (PO page, Review mode, inventory editor,
+  phone form), and changing a spec or the part # does. Recording the answer
+  alone doesn't mark a PO line edited, so it can't send a purchaser's
+  submitted PO back to Draft.
+
 ## [1.247.1] - 2026-10-11
 
 Fixes from the review before the v1.247 release (RS-233). `/code-review max`

@@ -41,6 +41,9 @@ export type Line = {
   // confirms it against the photo. Lives on the line, not in drawer state, so
   // closing and reopening the drawer can't shake the question off.
   _brandNeedsConfirm?: boolean;
+  // The part # disagreements "keep as entered" let stand (lib/ramPartQuestion).
+  // On the line too, so Submit and Save don't ask what the drawer already did.
+  _partKept?: string | null;
   _cid: string;                  // stable client id for React keys (never sent to the API)
   // DB id, once the line has been persisted. Null before that — which is why
   // photos are buffered rather than uploaded as they're picked.
@@ -127,6 +130,10 @@ export function scanToLinePatch(scan: ScanResponse, category?: Category): Partia
  * stays `true` on a line settled this way — only the dialog's confirm clears
  * it — but nothing else reads it and it never reaches the API.
  */
+/** Whether a patch changes what the line says, not only its `_` bookkeeping. */
+export const patchEditsLine = (patch: object): boolean =>
+  Object.keys(patch).some(k => !k.startsWith('_'));
+
 export const brandConfirmPending = (l: Line): boolean =>
   l.category === 'RAM'
   && !!l._brandNeedsConfirm

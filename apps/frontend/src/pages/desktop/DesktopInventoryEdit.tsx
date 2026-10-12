@@ -13,6 +13,8 @@ import { LINE_STATUSES, statusTone } from '../../lib/status';
 import { sellOrderStatuses } from '../../lib/lookups';
 import { useMarketLookup, type ResolvedMarketValue } from '../../lib/useMarketLookup';
 import { PartNumberField } from '../../components/PartNumberField';
+import { usePartQuestion } from '../../components/RamPartCheck';
+import { partQuestionKey, settlePartQuestion } from '../../lib/ramPartQuestion';
 import { CatSelect, CatCombo } from './submit/LineFields';
 import { allowedOptions, cascadePatch } from '@recycle-erp/shared';
 import {
@@ -121,6 +123,10 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const initialRef = useRef<Draft | null>(null);
   const [saving, setSaving] = useState(false);
+  // The part # disagreements "keep as entered" let stand, seeded with the
+  // ones the line was saved with: those were that save's to ask about.
+  const [partKept, setPartKept] = useState<string | null>(null);
+  const partQ = usePartQuestion();
 
   const [peers, setPeers] = useState<PeerRow[]>([]);
   const [linkedSellOrders, setLinkedSellOrders] = useState<LinkedSellOrder[]>([]);
@@ -150,6 +156,7 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
         };
         setDraft(d);
         initialRef.current = d;
+        setPartKept(partQuestionKey({ ...d, category: r.item.category }));
       })
       .catch(handleFetchError);
     return () => { alive = false; };
@@ -246,10 +253,30 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
   const currentWhId = peers.find(p => p.id === item.id)?.warehouse_id ?? null;
 
   const save = async () => {
+    // The editor has no Confirm of its own, so Save asks what the PO drawer's
+    // Confirm would. An answer lands in the form as it is given.
+    let next = draft;
+    if (cat === 'RAM') {
+      const settled = await settlePartQuestion(
+        { ...draft, category: cat, _partKept: partKept },
+        l => partQ.ask(l),
+        (l, patch) => {
+          if ('_partKept' in patch) {
+            setPartKept(patch._partKept ?? null);
+            return { ...l, ...patch };
+          }
+          set(patch);
+          return { ...l, ...cascadePatch(cat, l, patch) };
+        },
+      );
+      if (!settled) return;
+      const { category: _category, _partKept: _kept, ...answered } = settled;
+      next = answered;
+    }
     setSaving(true);
     setBlocked(null);
     try {
-      await api.patch(`/api/inventory/${itemId}`, inventoryEditPatch(initialRef.current!, draft));
+      await api.patch(`/api/inventory/${itemId}`, inventoryEditPatch(initialRef.current!, next));
       onSaved();
     } catch (err) {
       // 409 with the committed-to-open-sell-order message is structured: a
@@ -258,8 +285,8 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
       if (err instanceof ApiError && err.status === 409 && /committed to an open sell order/.test(err.message)) {
         const openOrders = linkedSellOrders.filter(so => so.status !== 'Done');
         const fields: string[] = [];
-        if (Number(draft.qty) !== item.qty) fields.push('qty');
-        if (draft.status !== item.status) fields.push('status');
+        if (Number(next.qty) !== item.qty) fields.push('qty');
+        if (next.status !== item.status) fields.push('status');
         setBlocked({ orders: openOrders, fields });
       } else {
         showErrorDialog(err instanceof Error ? err.message : 'Save failed');
@@ -420,6 +447,7 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
           </div>
         </div>
       )}
+      {partQ.dialog}
     </>
   );
 }

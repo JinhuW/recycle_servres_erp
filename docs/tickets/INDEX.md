@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-234](./RS-234-every-save-of-a-ram-line-asks-the-part-question.md) | in-progress | bug | P2 | Every save of a RAM line asks the part # question | — |
 | [RS-233](./RS-233-pre-release-review-fixes-for-the-v1-247-release.md) | done | bug | P1 | Pre-release review fixes for the v1.247 release | 1.247.1 |
 | [RS-232](./RS-232-market-page-import-a-part-number-unit-price-sheet-to.md) | done | story | P2 | Market page: import a part number + unit price sheet to update market prices | 1.247.0 |
 | [RS-231](./RS-231-po-sold-is-a-flag-beside-the-stage-not-a-stage.md) | done | story | P2 | PO Sold is a flag beside the stage, not a stage | 1.246.0 |

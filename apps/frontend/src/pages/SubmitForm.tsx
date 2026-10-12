@@ -26,7 +26,8 @@ import { BrandConfirmDialog } from '../components/BrandConfirmDialog';
 import { MarketAssist } from '../components/MarketAssist';
 import { useMarketLookup } from '../lib/useMarketLookup';
 import { useChipFill } from '../lib/useChipFill';
-import { RamPartMismatchDialog, ScanPartNotice, mismatchKey, ramPartCheck, useRamPartFill } from '../components/RamPartCheck';
+import { RamPartMismatchDialog, ScanPartNotice, useRamPartFill } from '../components/RamPartCheck';
+import { partQuestionKey, partQuestionPending } from '../lib/ramPartQuestion';
 
 type Props = {
   category: Category;
@@ -199,9 +200,12 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, newN
   // look at the photo again and say what it is before the line can be saved.
   const [brandConfirmed, setBrandConfirmed] = useState(false);
   const [brandDialog, setBrandDialog] = useState(false);
-  // Save asks once per set of part # disagreements (see RamPartCheck).
+  // Save asks about each part # disagreement once (lib/ramPartQuestion). A
+  // saved line's own were asked when it was saved, so an edit asks only about
+  // one it changes or adds.
   const [partDialog, setPartDialog] = useState(false);
-  const [partKept, setPartKept] = useState<string | null>(null);
+  const [partKept, setPartKept] = useState<string | null>(
+    () => (isEditing && existingLine ? partQuestionKey({ ...existingLine, category }) : null));
 
   // Prefer the freshest scan (a new/re-scan's delivery URL) over the existing
   // line's stored image. Stub/dev placeholders are not real images.
@@ -311,8 +315,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, newN
       }]);
       return;
     }
-    const { mismatches } = ramPartCheck({ ...line, category });
-    if (mismatches.length && mismatchKey(line, mismatches) !== kept) { setPartDialog(true); return; }
+    if (partQuestionPending({ ...line, category, _partKept: kept })) { setPartDialog(true); return; }
     const typed = (line.partNumber ?? '').trim();
     if (typed) { persist(typed); return; }
     const gen = synthesizePartNumber(line.category, line);
@@ -739,7 +742,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, newN
           }}
           onUsePart={v => { set('partNumber', v); setPartDialog(false); }}
           onKeep={() => {
-            const key = mismatchKey(line, ramPartCheck({ ...line, category }).mismatches);
+            const key = partQuestionKey({ ...line, category });
             setPartKept(key);
             setPartDialog(false);
             attemptSave(key);
