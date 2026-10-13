@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-12
 reporter: jinhu
 branch: fix/inventory-warehouse-lots
-pr:
+pr: 628
 version: 1.252.1
 related: []
 ---
