@@ -2,13 +2,13 @@
 id: RS-246
 title: Sell-order bid sheet groups DDR5 RAM by spec
 type: story
-status: backlog
+status: done
 priority: P2
 created: 2026-10-13
 reporter: jinhu
 branch: feat/ddr5-spec-bid-sheet
-pr:
-version:
+pr: 632
+version: 1.255.0
 related: [RS-245]
 ---
 
@@ -34,16 +34,16 @@ stands for and the import has to read them all.
 
 ## Acceptance criteria
 
-- [ ] On the bid sheet's RAM tab, DDR5 lots from inventory fold by the RS-245
+- [x] On the bid sheet's RAM tab, DDR5 lots from inventory fold by the RS-245
       spec key: one row, qty summed, whatever their part numbers.
-- [ ] That row's Part Number cell lists each distinct part number,
+- [x] That row's Part Number cell lists each distinct part number,
       comma-separated, in the order the lines are read; a row of one part
       number reads as before.
-- [ ] The price import reads a comma-separated Part Number cell as one price
+- [x] The price import reads a comma-separated Part Number cell as one price
       for every part number in it, so a bid on the folded row prices every
       line it folds; the preview shows one line per part number.
-- [ ] DDR3/DDR4 rows, hand-typed lines and the packing lists are unchanged.
-- [ ] Route test for the template; parser test for the split cell.
+- [x] DDR3/DDR4 rows, hand-typed lines and the packing lists are unchanged.
+- [x] Route test for the template; parser test for the split cell.
 
 ## Out of scope
 
