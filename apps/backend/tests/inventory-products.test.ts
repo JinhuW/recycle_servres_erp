@@ -5,11 +5,11 @@ import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import { expectSheetOrder, type SheetOrdered } from './helpers/inventory';
 
-type Lot = { id: string; unit_cost?: number; qty: number; status: string };
+type Lot = { id: string; unit_cost?: number; qty: number; status: string; warehouse_id: string | null };
 type Group = {
   key: string; part_number: string | null; qty: number; lot_count: number;
   po_count: number; qty_in_transit: number; qty_in_stock: number;
-  unit_cost_avg?: number; lines: Lot[];
+  unit_cost_avg?: number; unit_cost_max?: number; warehouses: string[]; lines: Lot[];
 };
 
 async function po(token: string, opts: { brand: string; partNumber?: string; qty?: number; unitCost?: number }) {
@@ -209,6 +209,39 @@ describe('select-all past the grouped cap', () => {
     expect(r.status).toBe(200);
     expect(r.body.sellable_ids).not.toContain(dallasId);
     expect(r.body.sellable_ids).toHaveLength(doneIds.length - 1);
+  });
+
+  it('lists and sums only the warehouse pill\'s lots of a product kept for one of them', async () => {
+    // Two lots of one product, one moved to Dallas: under the LA1 pill the
+    // product stays (its LA1 lot matches) but opens to that lot alone, and
+    // its row counts that lot alone.
+    const [a, b] = doneIds.slice(2, 4);
+    const sql = getTestDb();
+    await sql`
+      UPDATE order_lines SET warehouse_id = 'WH-DAL', unit_cost = 500,
+             part_number = (SELECT part_number FROM order_lines WHERE id = ${a})
+       WHERE id = ${b}
+    `;
+    const { token } = await loginAs(ALEX);
+    const all = await api<Products>('GET', `/api/inventory/products?q=${BRAND}`, { token });
+    expect(all.status).toBe(200);
+    const whole = all.body.products.find((g) => g.lines.some((l) => l.id === a))!;
+    expect(whole.lines.map((l) => l.id).sort()).toEqual([a, b].sort());
+    expect(whole.lot_count).toBe(2);
+    expect(whole.warehouses.sort()).toEqual(['DAL', 'LA1']);
+
+    const la = await api<Products>(
+      'GET', `/api/inventory/products?q=${BRAND}&warehouse=WH-LA1`, { token });
+    expect(la.status).toBe(200);
+    const narrowed = la.body.products.find((g) => g.key === whole.key)!;
+    expect(narrowed.lines.map((l) => l.id)).toEqual([a]);
+    expect(narrowed.lot_count).toBe(1);
+    expect(narrowed.qty).toBe(2);
+    expect(narrowed.warehouses).toEqual(['LA1']);
+    expect(narrowed.unit_cost_max).toBe(50);
+    for (const g of la.body.products) {
+      for (const l of g.lines) expect(l.warehouse_id).toBe('WH-LA1');
+    }
   });
 
   it('holds each lot to the attribute chips, not just its group', async () => {

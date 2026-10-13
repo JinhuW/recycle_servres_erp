@@ -17,6 +17,21 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.252.1] - 2026-10-12
+
+The grouped inventory view's lots follow the warehouse pill (RS-243).
+
+### Fixed
+
+- **A product's "Lots in …" table lists only the selected warehouse's lots.**
+  With DEN picked, a product kept because one of its lots is in DEN opened
+  to every lot it has, BOSTON included, and its row summed them all: qty,
+  the in-stock split, lot and PO counts, the cost range and a Warehouses
+  column reading "DEN, BOSTON". The products endpoint now narrows each
+  listed group to the pill's lots before it sums anything, so the row and
+  the table it opens to can't disagree. All warehouses, the pill counts and
+  the attribute chips are unchanged.
+
 ## [1.252.0] - 2026-10-12
 
 Warehouse and payment filters on the desktop PO list (RS-242).

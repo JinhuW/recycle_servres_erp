@@ -1046,6 +1046,11 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
 - **A product's lots table names each lot by PO and line** — `PO-1343 #2`, the
   number the PO page shows for that line, with the PO id still the link
   (v1.232.0).
+- **The warehouse pill scopes the grouped view's lots, not just its products**
+  (v1.252.1). With one warehouse picked, a product opens to that warehouse's
+  lots alone, and its row — qty and the in-stock split, lot and PO counts,
+  cost range, Warehouses — sums those alone. The attribute chips still show
+  a matching product whole, so a mis-typed lot stays findable.
 - **The phone Inventory list shows each line's sell price to every role**
   (v1.144.2), under the status chip, the way the desktop table and the phone
   Orders list already did. Unit cost, profit and margin stay manager-only

@@ -1071,7 +1071,14 @@ inventory.get('/products', async (c) => {
   const SPEC_KEYS = ['category','brand','capacity','generation','type','classification','rank','speed','interface','form_factor','description','item_type','rpm'] as const;
 
   const capped = filteredOrder.slice(0, GROUP_CAP).map((key) => {
-    const lots = groups.get(key)!;
+    // The warehouse pill scopes what the page shows, not just which products
+    // it lists: a product kept for its DEN lot opens to its DEN lots alone,
+    // and its row sums them alone, so the two can't disagree. The attribute
+    // chips stay group-wide — a mis-typed lot is easier to find when its
+    // product still lists it.
+    const lots = warehouse
+      ? groups.get(key)!.filter((l) => l.warehouse_id === warehouse)
+      : groups.get(key)!;
     const head = lots[0];
     const isSingleton = !(head.canon && head.canon.length > 0);
 
