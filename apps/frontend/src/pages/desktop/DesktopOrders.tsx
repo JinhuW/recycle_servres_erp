@@ -262,29 +262,37 @@ export function DesktopOrders({ onToast }: Props) {
     return orders.filter(o => o.id.toLowerCase().includes(q) || o.userName.toLowerCase().includes(q));
   }, [orders, search]);
 
+  // Chips come from the loaded POs, not the search, so the row holds still
+  // while typing; a pick that search then leaves empty stays clearable.
+  const warehouses = useMemo(() => warehouseOptions(orders), [orders]);
+  // A remembered pick can name a warehouse this scope has no PO in (a role
+  // preview, or every PO there since moved): its chip is gone, so the table
+  // would sit empty with nothing pressed to explain it. Such a pick reads as
+  // All; the stored value stays, so it comes back with the scope that has it.
+  const warehouseFacet = warehousePick !== 'all' && loadedAll && !warehouses.some(w => w.id === warehousePick)
+    ? 'all'
+    : warehousePick;
+
   // The warehouse and payment picks sit with search, ahead of the stage rail,
   // so the stage counts say what each stage holds for this warehouse.
   const visible = useMemo(
-    () => warehousePick === 'all' && paymentPick === 'all'
+    () => warehouseFacet === 'all' && paymentPick === 'all'
       ? searched
-      : searched.filter(o => matchesWarehouse(o, warehousePick) && matchesPayment(o, paymentPick)),
-    [searched, warehousePick, paymentPick],
+      : searched.filter(o => matchesWarehouse(o, warehouseFacet) && matchesPayment(o, paymentPick)),
+    [searched, warehouseFacet, paymentPick],
   );
 
   // `sold` only reaches managers, and the chip lives in their rail: the role
   // preview must not keep filtering on a flag it can no longer see or clear.
   const soldPicked = isManager && soldOnly;
 
-  // Chips come from the loaded POs, not the search, so the row holds still
-  // while typing; a pick that search then leaves empty stays clearable.
-  const warehouses = useMemo(() => warehouseOptions(orders), [orders]);
   const facets = useMemo(() => facetCounts(
     searched,
-    { warehouse: warehousePick, payment: paymentPick },
+    { warehouse: warehouseFacet, payment: paymentPick },
     o => (stageFilter === 'all'
       ? showDone || soldPicked || !isCompleted(o.status)
       : o.lifecycle === stageFilter) && (!soldPicked || !!o.sold),
-  ), [searched, warehousePick, paymentPick, stageFilter, showDone, soldPicked]);
+  ), [searched, warehouseFacet, paymentPick, stageFilter, showDone, soldPicked]);
 
   // The all-stages view hides Done POs unless the toggle is on; the stage
   // rail's own Done chip still shows them because a stage pick bypasses the
@@ -549,7 +557,7 @@ export function DesktopOrders({ onToast }: Props) {
           <button
             type="button"
             className="status-chip"
-            aria-pressed={warehousePick === 'all'}
+            aria-pressed={warehouseFacet === 'all'}
             onClick={() => setWarehousePick('all')}
           >
             {t('all')}
@@ -557,7 +565,7 @@ export function DesktopOrders({ onToast }: Props) {
           </button>
           {warehouses.map(w => {
             const n = facets.warehouse[w.id] ?? 0;
-            const active = warehousePick === w.id;
+            const active = warehouseFacet === w.id;
             return (
               <button
                 key={w.id}
@@ -595,7 +603,7 @@ export function DesktopOrders({ onToast }: Props) {
           {!loadedOnce ? (
             <TableSkeleton rows={10} cols={9} />
           ) : (
-          <table className="table facet-swap" key={warehousePick + '|' + paymentPick}>
+          <table className="table facet-swap" key={warehouseFacet + '|' + paymentPick}>
             <thead>
               <tr>
                 <th style={{ width: 28 }}></th>

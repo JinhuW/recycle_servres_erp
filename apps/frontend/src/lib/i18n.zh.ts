@@ -2846,6 +2846,7 @@ const zh: Record<string, string> = {
   asRes_return: '退货',
   asRes_discount: '折价',
   asResNone: '未定',
+  asResLockedAwaiting: '等待退货的案件保持“退货”处理方式。要更改，请先移回“处理中”。',
   asColCase: '案例',
   asColOrder: '销售单',
   asColCustomer: '客户',

@@ -6,6 +6,7 @@
 // Either way paths stay relative (same-origin), so cookies ride along.
 
 import type { OrderSummary } from './types';
+import type { AfterSalesStatus, AfterSalesResolution } from '@recycle-erp/shared';
 
 const CSRF_HEADER = 'X-Requested-By';
 const CSRF_VALUE = 'recycle-erp';
@@ -316,8 +317,7 @@ export const discardTransferOrder = (id: string) =>
   api.delete<{ ok: true; id: string }>(`/api/inventory/transfer-orders/${id}`);
 
 // ── After-sales cases (manager-only) ──
-export type AfterSalesStatus = 'Open' | 'In progress' | 'Awaiting return' | 'Resolved' | 'Cancelled';
-export type AfterSalesResolution = 'return' | 'discount';
+export type { AfterSalesStatus, AfterSalesResolution } from '@recycle-erp/shared';
 export type AfterSalesRow = {
   id: string; status: AfterSalesStatus; resolution: AfterSalesResolution | null; issue: string;
   amount: number | null; createdAt: string; updatedAt: string; closedAt: string | null;

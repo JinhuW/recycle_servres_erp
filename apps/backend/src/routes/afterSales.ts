@@ -6,15 +6,16 @@ import {
   clampLimit, cursorTs, cursorTsParam, cursorTsSelect, decodeCursor, encodeCursor, escapeLike, UUID_RE,
 } from '../lib/pagination';
 import type { Env, User } from '../types';
+import {
+  AFTER_SALES_STATUSES, AFTER_SALES_RESOLUTIONS, CASEABLE_SELL_STATUSES, type AfterSalesStatus as CaseStatus,
+} from '@recycle-erp/shared';
 
 // After-sales: a customer comes back about goods on a sold order. The case
 // runs until the goods come back (return) or a price is agreed (discount).
 // It is a record only — it moves no stock and changes no revenue.
 const afterSales = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
-const STATUSES = ['Open', 'In progress', 'Awaiting return', 'Resolved', 'Cancelled'] as const;
-type CaseStatus = typeof STATUSES[number];
-const KNOWN_STATUSES = new Set<string>(STATUSES);
+const KNOWN_STATUSES = new Set<string>(AFTER_SALES_STATUSES);
 
 const ALLOWED_TRANSITIONS: Record<CaseStatus, Set<CaseStatus>> = {
   Open:              new Set(['In progress', 'Awaiting return', 'Resolved', 'Cancelled']),
@@ -24,11 +25,7 @@ const ALLOWED_TRANSITIONS: Record<CaseStatus, Set<CaseStatus>> = {
   Cancelled:         new Set(['Open']),
 };
 const CLOSED_STATUSES = new Set<string>(['Resolved', 'Cancelled']);
-const RESOLUTIONS = new Set<string>(['return', 'discount']);
-
-// A case is about goods the customer has: a proposal (Draft, Packing) has
-// shipped nothing and a Closed order sold nothing.
-const CASEABLE_SELL_STATUSES = new Set<string>(['Shipped', 'Awaiting payment', 'Done']);
+const RESOLUTIONS = new Set<string>(AFTER_SALES_RESOLUTIONS);
 
 const MAX_TEXT = 4000;
 const MAX_AMOUNT = 1_000_000_000;
@@ -127,7 +124,7 @@ afterSales.get('/summary', async (c) => {
     FROM after_sales_cases GROUP BY status
   `;
   const byStatus: Record<string, { count: number; amount: number }> = {};
-  for (const s of STATUSES) byStatus[s] = { count: 0, amount: 0 };
+  for (const s of AFTER_SALES_STATUSES) byStatus[s] = { count: 0, amount: 0 };
   for (const r of rows) byStatus[r.status] = { count: r.count, amount: r.amount };
   return c.json({ byStatus });
 });
@@ -353,7 +350,11 @@ afterSales.patch('/:id', async (c) => {
     return c.json({ error: 'assigneeId must be an active manager' }, 400);
   }
 
-  type Outcome = { kind: 'notFound' } | { kind: 'closed'; status: string } | { kind: 'ok' };
+  type Outcome =
+    | { kind: 'notFound' }
+    | { kind: 'closed'; status: string }
+    | { kind: 'needs'; msg: string }
+    | { kind: 'ok' };
   const outcome = await sql.begin(async (tx): Promise<Outcome> => {
     const cur = (await tx<{
       status: string; issue: string; resolution: string | null; amount: number | null; assignee_id: string | null;
@@ -363,6 +364,12 @@ afterSales.patch('/:id', async (c) => {
     `)[0];
     if (!cur) return { kind: 'notFound' };
     if (CLOSED_STATUSES.has(cur.status)) return { kind: 'closed', status: cur.status };
+    // The status route lets only a return await the goods; an edit must not
+    // take that back from under it. (The page sends the resolution on every
+    // save, so an unchanged 'return' passes.)
+    if (patch.resolution !== undefined && cur.status === 'Awaiting return' && patch.resolution !== 'return') {
+      return { kind: 'needs', msg: 'a case awaiting its goods keeps the Return resolution — move it back to In progress first' };
+    }
 
     const changes: Record<string, { from: unknown; to: unknown }> = {};
     for (const k of Object.keys(patch) as (keyof typeof patch)[]) {
@@ -380,6 +387,7 @@ afterSales.patch('/:id', async (c) => {
   switch (outcome.kind) {
     case 'notFound': return c.json({ error: 'Not found' }, 404);
     case 'closed': return c.json({ error: `a ${outcome.status} case is read-only — reopen it first` }, 409);
+    case 'needs': return c.json({ error: outcome.msg }, 409);
     case 'ok': return c.json({ ok: true });
   }
 });
@@ -391,9 +399,9 @@ afterSales.post('/:id/status', async (c) => {
   const body = (await c.req.json().catch(() => null)) as { to?: unknown; note?: unknown } | null;
   const to = typeof body?.to === 'string' ? body.to : '';
   if (!KNOWN_STATUSES.has(to)) return c.json({ error: `unknown status: ${to}` }, 400);
-  if (body?.note !== undefined && body.note !== null && body.note !== '' && !cleanText(body.note)) {
-    return c.json({ error: 'note is too long' }, 400);
-  }
+  if (body?.note != null && typeof body.note !== 'string') return c.json({ error: 'invalid note' }, 400);
+  if (typeof body?.note === 'string' && body.note.length > MAX_TEXT) return c.json({ error: 'note is too long' }, 400);
+  // A blank note is no note, as the timeline reads it.
   const note = cleanText(body?.note);
 
   const sql = getDb(c.env);

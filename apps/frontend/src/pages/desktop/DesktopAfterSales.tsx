@@ -14,13 +14,13 @@ import {
 } from '../../lib/route';
 import { Icon } from '../../components/Icon';
 import { Modal } from '../../components/Modal';
-import type { MemberOption } from './DesktopSellOrderDraft';
+import { sellOrderStatusShort } from '../../lib/lookups';
+import { useManagerOptions } from '../../lib/useManagers';
+import {
+  AFTER_SALES_RESOLUTIONS as RESOLUTIONS, AFTER_SALES_STATUSES as STATUSES, CASEABLE_SELL_STATUSES,
+} from '@recycle-erp/shared';
 
-const STATUSES: AfterSalesStatus[] = ['Open', 'In progress', 'Awaiting return', 'Resolved', 'Cancelled'];
-const RESOLUTIONS: AfterSalesResolution[] = ['return', 'discount'];
 const CLOSED = new Set<string>(['Resolved', 'Cancelled']);
-// The sell-order statuses that have goods out with the customer.
-const ELIGIBLE_SELL_STATUSES = new Set(['Shipped', 'Awaiting payment', 'Done']);
 
 const statusKey = (s: string) => 'asStatus_' + s.replace(/ /g, '_');
 
@@ -34,19 +34,6 @@ export function DesktopAfterSales({ onToast }: Props = {}) {
   if (m?.id === 'new') return <NewCaseForm onToast={onToast} />;
   if (m?.id) return <CaseDetail id={m.id} onToast={onToast} />;
   return <CaseList />;
-}
-
-// Managers back the assignee picker; a case is handed to one of them.
-function useManagers(): MemberOption[] {
-  const [members, setMembers] = useState<MemberOption[]>([]);
-  useEffect(() => {
-    let alive = true;
-    api.get<{ items: (MemberOption & { role: string })[] }>('/api/members')
-      .then(r => { if (alive) setMembers(r.items.filter(x => x.role === 'manager')); })
-      .catch(handleFetchError);
-    return () => { alive = false; };
-  }, []);
-  return members;
 }
 
 function StatusChip({ status }: { status: string }) {
@@ -101,11 +88,12 @@ function CaseList() {
     ).catch(handleFetchError);
   }, [query]);
 
+  // The tiles count every case, whatever the search or pick: once per visit.
   useEffect(() => {
     let alive = true;
     afterSalesSummary().then(r => { if (alive) setStats(r.byStatus); }).catch(handleFetchError);
     return () => { alive = false; };
-  }, [query]);
+  }, []);
 
   return (
     <>
@@ -228,7 +216,7 @@ const ACTION_LABEL: Record<AfterSalesStatus, string> = {
 
 function CaseDetail({ id, onToast }: { id: string } & Props) {
   const { t, locale } = useT();
-  const managers = useManagers();
+  const managers = useManagerOptions();
   const [c, setC] = useState<AfterSalesCase | null>(null);
   const [draft, setDraft] = useState<{ issue: string; resolution: '' | AfterSalesResolution; amount: string; assigneeId: string }>({
     issue: '', resolution: '', amount: '', assigneeId: '',
@@ -259,6 +247,9 @@ function CaseDetail({ id, onToast }: { id: string } & Props) {
   if (!c) return <div style={{ padding: 60, color: 'var(--fg-subtle)' }}>…</div>;
 
   const closed = CLOSED.has(c.status);
+  // The status route lets only a return await the goods, so the resolution
+  // holds still until the case leaves that stage.
+  const awaitingReturn = c.status === 'Awaiting return';
   const dirty = draft.issue.trim() !== c.issue
     || (draft.resolution || null) !== c.resolution
     || (draft.amount === '' ? null : Number(draft.amount)) !== c.amount
@@ -408,7 +399,8 @@ function CaseDetail({ id, onToast }: { id: string } & Props) {
             <div style={{ display: 'grid', gap: 10 }}>
               <label style={{ display: 'grid', gap: 4, fontSize: 12.5 }}>
                 <span>{t('asResolution')}</span>
-                <select className="select" disabled={closed} value={draft.resolution}
+                <select className="select" disabled={closed || awaitingReturn} value={draft.resolution}
+                        title={awaitingReturn ? t('asResLockedAwaiting') : undefined}
                         onChange={e => setDraft({ ...draft, resolution: e.target.value as '' | AfterSalesResolution })}>
                   <option value="">{t('asResNone')}</option>
                   {RESOLUTIONS.map(r => <option key={r} value={r}>{t('asRes_' + r)}</option>)}
@@ -501,12 +493,15 @@ type OrderHead = { id: string; status: string; customer: { name: string }; lines
 
 function NewCaseForm({ onToast }: Props) {
   const { t, locale } = useT();
-  const managers = useManagers();
+  const managers = useManagerOptions();
   const preset = readHashQuery().get('order') ?? '';
   const [orderId, setOrderId] = useState(preset);
   const [order, setOrder] = useState<OrderHead | null>(null);
   const [loadingOrder, setLoadingOrder] = useState(false);
   const [picked, setPicked] = useState<Record<string, number>>({});
+  // What the qty field shows while it is being typed in: clamping on every
+  // keystroke made it impossible to clear the field or start a number with 0.
+  const [qtyText, setQtyText] = useState<Record<string, string>>({});
   const [issue, setIssue] = useState('');
   const [resolution, setResolution] = useState<'' | AfterSalesResolution>('');
   const [amount, setAmount] = useState('');
@@ -521,6 +516,7 @@ function NewCaseForm({ onToast }: Props) {
       const r = await api.get<{ order: OrderHead }>(`/api/sell-orders/${encodeURIComponent(trimmed)}`);
       setOrder(r.order);
       setPicked({});
+      setQtyText({});
     } catch (e) {
       setOrder(null);
       handleFetchError(e);
@@ -530,7 +526,7 @@ function NewCaseForm({ onToast }: Props) {
   }, []);
   useEffect(() => { if (preset) void loadOrder(preset); }, [preset, loadOrder]);
 
-  const eligible = !!order && ELIGIBLE_SELL_STATUSES.has(order.status);
+  const eligible = !!order && CASEABLE_SELL_STATUSES.has(order.status);
   const lines = useMemo(() => (order?.lines ?? []).filter(l => l.qty > 0), [order]);
   const anyPicked = Object.values(picked).some(q => q > 0);
 
@@ -590,13 +586,13 @@ function NewCaseForm({ onToast }: Props) {
               </button>
               {order && (
                 <span style={{ fontSize: 13, color: 'var(--fg-subtle)' }}>
-                  {order.customer.name} · <span className={'chip ' + statusTone(order.status)} style={{ fontSize: 10.5 }}>{order.status}</span>
+                  {order.customer.name} · <span className={'chip ' + statusTone(order.status)} style={{ fontSize: 10.5 }}>{sellOrderStatusShort(order.status)}</span>
                 </span>
               )}
             </div>
             {order && !eligible && (
               <div style={{ marginTop: 10, fontSize: 13, color: 'var(--neg)' }}>
-                {t('asOrderNotEligible', { status: order.status })}
+                {t('asOrderNotEligible', { status: sellOrderStatusShort(order.status) })}
               </div>
             )}
           </div>
@@ -620,7 +616,10 @@ function NewCaseForm({ onToast }: Props) {
                       <tr key={l.id}>
                         <td>
                           <input type="checkbox" checked={on}
-                                 onChange={e => setPicked({ ...picked, [l.id]: e.target.checked ? l.qty : 0 })} />
+                                 onChange={e => {
+                                   setPicked({ ...picked, [l.id]: e.target.checked ? l.qty : 0 });
+                                   setQtyText(({ [l.id]: _, ...rest }) => rest);
+                                 }} />
                         </td>
                         <td>
                           <span className="mono" style={{ color: 'var(--fg-subtle)', marginRight: 8 }}>#{l.no}</span>
@@ -633,10 +632,19 @@ function NewCaseForm({ onToast }: Props) {
                             className="input mono"
                             type="number" min={1} max={l.qty} step={1}
                             disabled={!on}
-                            value={on ? picked[l.id] : ''}
+                            value={on ? (qtyText[l.id] ?? String(picked[l.id])) : ''}
                             onChange={e => {
-                              const n = Math.max(1, Math.min(l.qty, Math.floor(Number(e.target.value) || 1)));
+                              const text = e.target.value;
+                              setQtyText({ ...qtyText, [l.id]: text });
+                              const n = Number(text);
+                              if (/^\d+$/.test(text) && n >= 1 && n <= l.qty) setPicked({ ...picked, [l.id]: n });
+                            }}
+                            onBlur={() => {
+                              const typed = qtyText[l.id];
+                              if (typed === undefined) return;
+                              const n = Math.max(1, Math.min(l.qty, Math.floor(Number(typed) || 1)));
                               setPicked({ ...picked, [l.id]: n });
+                              setQtyText(({ [l.id]: _, ...rest }) => rest);
                             }}
                             style={{ width: 80, textAlign: 'right' }}
                           />

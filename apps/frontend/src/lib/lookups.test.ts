@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { aiCaptureEnabled, categories, resetLookups } from './lookups';
+import { aiCaptureEnabled, categories, resetLookups, sellOrderStatuses, sellOrderStatusShort } from './lookups';
 
 const cat = (id: string, aiCapture: boolean, position: number) => ({
   id, label: id, icon: id.toLowerCase(), enabled: true, aiCapture, defaultMargin: 0.3, position,
@@ -19,5 +19,16 @@ describe('aiCaptureEnabled', () => {
     expect(aiCaptureEnabled('SSD')).toBe(true);
     expect(aiCaptureEnabled('HDD')).toBe(false);
     expect(aiCaptureEnabled('Other')).toBe(false);
+  });
+});
+
+describe('sellOrderStatusShort', () => {
+  afterEach(() => resetLookups());
+
+  it('is the id until the lookups land, then the short label', () => {
+    expect(sellOrderStatusShort('Awaiting payment')).toBe('Awaiting payment');
+    sellOrderStatuses.push({ id: 'Awaiting payment', label: 'Awaiting payment', short: 'Awaiting', tone: 'warn', needsMeta: false, position: 4 });
+    expect(sellOrderStatusShort('Awaiting payment')).toBe('Awaiting');
+    expect(sellOrderStatusShort('Nope')).toBe('Nope');
   });
 });

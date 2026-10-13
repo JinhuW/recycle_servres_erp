@@ -326,6 +326,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     asRes_return: 'Return',
     asRes_discount: 'Discount',
     asResNone: 'Undecided',
+    asResLockedAwaiting: 'A case awaiting its goods keeps the Return resolution. Move it back to In progress to change it.',
     asColCase: 'Case',
     asColOrder: 'Sell order',
     asColCustomer: 'Customer',

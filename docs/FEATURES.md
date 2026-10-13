@@ -895,8 +895,11 @@ is not a stage but a flag beside one, set once every line has sold
     same synthetic-id path as a Mixed SSD: previewed in the Part # field,
     offered at Submit, applied by the API for the PO editor. Only the two
     required fields make the id, so lots filled to different depths group as
-    one inventory product; a typed or scanned part number still wins. Box
-    check matches scans by part #, so such a line is counted by hand.
+    one inventory product, and both are needed (v1.255.1): a line with one
+    of them blank gets no synthetic id rather than a one-field one that
+    would be a product of its own. A typed or scanned part number still
+    wins. Box check matches scans by part #, so such a line is counted by
+    hand.
   - **Condition is optional on every category** (v1.253.0). It never was
     enforced — the label's star was the only thing that said so.
 - **Part numbers are canonical** — one part number however it was typed
@@ -919,8 +922,10 @@ is not a stage but a flag beside one, set once every line has sold
   would show given every other filter — search, Done, stage, Sold and the
   other group; the active chip clicked again clears its group. The filter is
   client-side, so the table swaps in place with no refetch, and the picks
-  persist across the open-PO → back round-trip. The phone list has no
-  equivalent.
+  persist across the open-PO → back round-trip. A remembered warehouse
+  that the current scope has no PO in (after a category or role switch)
+  reads as All rather than leaving the table empty, and comes back with
+  the scope that has it (v1.255.1). The phone list has no equivalent.
 - **Archiving a PO takes its goods out of stock** (v1.137.0). Archive still
   hides the order from the default list and is still reversible, but it now
   also moves every non-Sold line to the `Archived` line status, which drops
@@ -1149,7 +1154,8 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   - **Internal notes can be written at any time** (v1.249.0), from the
     order's view page in any status, Done and Closed included: the notes
     box is live, and Save / Cancel appear once it differs from what is
-    saved. Edit mode still folds notes into the form's own Save.
+    saved; leaving the page with it unsaved asks first (v1.255.1), as the
+    edit form does. Edit mode still folds notes into the form's own Save.
   - **The order's History is the last card in the right-hand column, folded**
     (v1.248.0; in the side column since v1.248.2); a click on its heading
     opens it.
@@ -1566,7 +1572,8 @@ lower price (**Discount**). Purchasers never see the page or the API.
   button on a sell order. The form loads the order, refuses one that is
   Draft, Packing or Closed (nothing has shipped, or nothing was sold), and
   lists its products with a checkbox and a quantity capped at the line's
-  qty. The issue is required; resolution, amount and assignee are optional
+  qty (typed freely, clamped when the field loses focus — v1.255.1). The
+  issue is required; resolution, amount and assignee are optional
   at this point. Cases are numbered `AS-1001`, `AS-1002`… from their own
   counter. The products are snapshotted (label, part #, qty, unit price):
   a sell-order save rewrites its line rows, so the case keeps its own copy
@@ -1574,10 +1581,13 @@ lower price (**Discount**). Purchasers never see the page or the API.
 - **The workflow.** Open → In progress → Awaiting return → Resolved.
   Cancel is allowed from any open stage; Reopen (to Open) from Resolved or
   Cancelled; Awaiting return can step back to In progress. Awaiting return
-  needs the resolution set to Return (a discount has no goods to wait for);
-  Resolved needs the resolution and the amount (0 is allowed). An illegal
-  move is a 409 with the stages named. Resolved and Cancelled stamp
-  `closed_at`; Reopen clears it.
+  needs the resolution set to Return (a discount has no goods to wait for),
+  and keeps it: while the case awaits its goods an edit cannot change or
+  clear the resolution (409; the select is disabled on the page), so step
+  back to In progress first (v1.255.1). Resolved needs the resolution and
+  the amount (0 is allowed). An illegal move is a 409 with the stages
+  named. Each move takes an optional note; a blank one is no note. Resolved
+  and Cancelled stamp `closed_at`; Reopen clears it.
 - **The case page** (`#/after-sales/AS-1001`): issue, products, resolution
   / amount / assignee (managers only), the stage buttons for the moves the
   case allows (each asks for an optional note), and a timeline of every

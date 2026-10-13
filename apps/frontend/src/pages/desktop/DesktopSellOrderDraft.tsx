@@ -7,6 +7,7 @@ import { fmtUSD, fmtMoney, fmtDate } from '../../lib/format';
 import { fetchRateToUsd, type FxInfo } from '../../lib/fxRate';
 import { useT } from '../../lib/i18n';
 import { useEscapeKey } from '../../lib/useEscapeKey';
+import { useManagerOptions } from '../../lib/useManagers';
 
 type Currency = 'USD' | 'CNY';
 
@@ -36,12 +37,6 @@ export type Customer = {
   region: string | null;
 };
 
-// Minimal slice of GET /api/members — the picker only needs id + name.
-export type MemberOption = {
-  id: string;
-  name: string;
-};
-
 type Line = {
   inventoryId: string;
   category: 'RAM' | 'SSD' | 'HDD' | 'Other';
@@ -68,7 +63,8 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
   const { t, locale } = useT();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [customerId, setCustomerId] = useState<string>('');
-  const [members, setMembers] = useState<MemberOption[]>([]);
+  // Receivers are managers only — the backend rejects anyone else.
+  const members = useManagerOptions();
   const [paymentReceivedBy, setPaymentReceivedBy] = useState<string>('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
@@ -113,10 +109,6 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
           setCustomerId(r.items[0].id);
         }
       })
-      .catch(handleFetchError);
-    // Receivers are managers only — the backend rejects anyone else.
-    api.get<{ items: (MemberOption & { role: string })[] }>('/api/members')
-      .then(r => setMembers(r.items.filter(m => m.role === 'manager')))
       .catch(handleFetchError);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 

@@ -21,3 +21,4 @@ export * from "./materialEdit.js";
 export * from "./specCascade.js";
 export * from "./ramPartDecode.js";
 export * from "./ramFamily.js";
+export * from "./afterSales.js";

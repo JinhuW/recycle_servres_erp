@@ -148,6 +148,39 @@ describe('after-sales cases', () => {
     expect((await api('PATCH', `/api/after-sales/${id}`, { token, body: { issue: 'changed' } })).status).toBe(200);
   });
 
+  it('keeps the Return resolution while the goods are awaited', async () => {
+    const { token } = await loginAs(ALEX);
+    const so = await shippedOrder(token);
+    const id = await openCase(token, so, { resolution: 'return' });
+    expect((await move(token, id, 'Awaiting return')).status).toBe(200);
+
+    const patch = (body: Record<string, unknown>) =>
+      api<{ error?: string }>('PATCH', `/api/after-sales/${id}`, { token, body });
+    const discount = await patch({ resolution: 'discount' });
+    expect(discount.status).toBe(409);
+    expect(discount.body.error).toMatch(/Return/);
+    expect((await patch({ resolution: '' })).status).toBe(409);
+    // The page sends the resolution on every save: an unchanged Return passes.
+    expect((await patch({ issue: 'one stick came back', resolution: 'return', amount: 20 })).status).toBe(200);
+    expect((await patch({ assigneeId: null })).status).toBe(200);
+
+    expect((await move(token, id, 'In progress')).status).toBe(200);
+    expect((await patch({ resolution: 'discount' })).status).toBe(200);
+    const got = await api<Detail>('GET', `/api/after-sales/${id}`, { token });
+    expect(got.body.case.resolution).toBe('discount');
+  });
+
+  it('reads a blank move note as no note and refuses a bad one', async () => {
+    const { token } = await loginAs(ALEX);
+    const so = await shippedOrder(token);
+    const id = await openCase(token, so);
+    expect((await move(token, id, 'In progress', '   ')).status).toBe(200);
+    const got = await api<Detail>('GET', `/api/after-sales/${id}`, { token });
+    expect(got.body.case.events.at(-1)).toMatchObject({ kind: 'status', to: 'In progress', note: null });
+    expect((await api('POST', `/api/after-sales/${id}/status`, { token, body: { to: 'Cancelled', note: 5 } })).status).toBe(400);
+    expect((await move(token, id, 'Cancelled', 'x'.repeat(4001))).status).toBe(400);
+  });
+
   it('cancels from any open stage and repeats a move harmlessly', async () => {
     const { token } = await loginAs(ALEX);
     const so = await shippedOrder(token);
