@@ -1056,6 +1056,15 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   UDIMM `M391…` are two. Samsung, SK Hynix DDR3/4 and Micron are read; other
   part numbers group by exact canonical part number as before. The export
   groups the same way.
+- **DDR5 RAM groups by spec, not part number** (v1.254.0). A DDR5 lot keys
+  on Brand + Type + Capacity + Rank + Speed + Class — what a DDR5 buyer asks
+  for — so part number and chip # never split a product, and a lot with no
+  part number joins the group its spec names. A lot with one of the six
+  blank is its own product. A group whose lots carry different part numbers
+  shows no single number in its Part # cell, just the "N part numbers" line
+  with the members on hover (the export lists them comma-separated); the
+  lots table and anything picked from it keep each lot's own part number.
+  DDR3 and DDR4 stay on the family rule above.
 - **A product's lots table names each lot by PO and line** — `PO-1343 #2`, the
   number the PO page shows for that line, with the PO id still the link
   (v1.232.0).
