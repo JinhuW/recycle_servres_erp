@@ -17,6 +17,30 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.253.0] - 2026-10-12
+
+A DDR3 line needs only its capacity and type, and Condition is never
+required (RS-244).
+
+### Changed
+
+- **A DDR3 RAM line can be saved and submitted with just Capacity and
+  Type.** Brand, Class, Rank, Speed, Chip # and Part # are optional there —
+  DDR3 is end-of-life stock that trades by capacity and module form, so the
+  label details that identify a DDR4/DDR5 part were busy work. The red stars
+  on the desktop drawer, the PO editor and the phone form now follow the same
+  rule as the "Still needed" list, so a starred field is always one the save
+  will ask for; DDR4 and DDR5 lines keep the full rule.
+- **A DDR3 line with no part number is filed as `DDR3_<capacity>_<type>`**
+  (`DDR3_8GB_Server`), the way a Mixed-brand SSD gets `MIXED_…`: the Part #
+  field previews it, Submit offers it in the existing "Use auto-generated
+  part #?" dialog, and the API applies it to a line added from the PO editor.
+  Only the two required fields go in the id, so DDR3 lots filled to
+  different depths land in one inventory product. A typed or scanned part
+  number still wins.
+- **Condition carries no required star on any category**, in both shells.
+  Nothing ever enforced it — production already holds lines with a blank
+  condition — so the star was a promise the save never kept.
 ## [1.252.1] - 2026-10-12
 
 The grouped inventory view's lots follow the warehouse pill (RS-243).

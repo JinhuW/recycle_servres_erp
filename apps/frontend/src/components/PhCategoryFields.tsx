@@ -5,7 +5,7 @@ import { Combobox } from './Combobox';
 import { PartNumberField } from './PartNumberField';
 import { ItemTypePicker } from './ItemTypePicker';
 import { RamPartReadout } from './RamPartCheck';
-import { chipNumberRequired } from '../lib/ramRequired';
+import { ramFieldRequired } from '../lib/ramRequired';
 import { ssdBrandRequired, SSD_BRAND_REQUIRED_OVER_GB } from '../lib/lineRequirements';
 import {
   RAM_BRANDS, RAM_GENERATIONS, RAM_DEVICE_TYPES, RAM_CLASS, RAM_RANK, RAM_CAP,
@@ -88,21 +88,21 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
       <>
         <div className="ph-field-row">
           <div className="ph-field">
-            <label>{t('brand')}<Req /></label>
+            <label>{t('brand')}{ramFieldRequired(value, 'brand') && <Req />}</label>
             <PhCatSelect className={selectClsFor('brand')} value={value.brand} options={RAM_BRANDS} onChange={v => onChange('brand', v)} />
           </div>
           <div className="ph-field">
-            <label>{t('generation')}<Req /></label>
+            <label>{t('generation')}{ramFieldRequired(value, 'generation') && <Req />}</label>
             <PhCatSelect className={selectClsFor('generation')} value={value.generation} options={RAM_GENERATIONS} onChange={v => onChange('generation', v)} />
           </div>
         </div>
         <div className="ph-field-row">
           <div className="ph-field">
-            <label>{t('capacity')}<Req /></label>
+            <label>{t('capacity')}{ramFieldRequired(value, 'capacity') && <Req />}</label>
             <PhCatSelect className={selectClsFor('capacity')} value={value.capacity} options={RAM_CAP} onChange={v => onChange('capacity', v)} />
           </div>
           <div className="ph-field">
-            <label>{t('speedMhz')}<Req /></label>
+            <label>{t('speedMhz')}{ramFieldRequired(value, 'speed') && <Req />}</label>
             <input
               className={inputClsFor('speed')}
               value={value.speed ?? ''}
@@ -112,20 +112,20 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
         </div>
         <div className="ph-field-row">
           <div className="ph-field">
-            <label>{t('klass')}<Req /></label>
+            <label>{t('klass')}{ramFieldRequired(value, 'classification') && <Req />}</label>
             <PhCatSelect className={selectClsFor('classification')} value={value.classification} options={allowedOptions('RAM', 'classification', value, RAM_CLASS)} onChange={v => onChange('classification', v)} />
           </div>
           <div className="ph-field">
-            <label>{t('rank')}<Req /></label>
+            <label>{t('rank')}{ramFieldRequired(value, 'rank') && <Req />}</label>
             <PhCatSelect className={selectClsFor('rank')} value={value.rank} options={allowedOptions('RAM', 'rank', value, RAM_RANK)} onChange={v => onChange('rank', v)} />
           </div>
         </div>
         <div className="ph-field">
-          <label>{t('type')}<Req /></label>
+          <label>{t('type')}{ramFieldRequired(value, 'type') && <Req />}</label>
           <PhCatSelect className={selectClsFor('type')} value={value.type} options={RAM_DEVICE_TYPES} onChange={v => onChange('type', v)} />
         </div>
         <div className="ph-field">
-          <label>{t('chipNumber')}{chipNumberRequired(value.brand) && <Req />}</label>
+          <label>{t('chipNumber')}{ramFieldRequired(value, 'chipNumber') && <Req />}</label>
           <input
             className={inputClsFor('chipNumber') + ' mono'}
             value={value.chipNumber ?? ''}
@@ -137,8 +137,8 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
           />
         </div>
         <div className="ph-field">
-          <label>{t('partNumber')}<Req /></label>
-          <PartNumberField className={inputClsFor('partNumber') + ' mono'} value={value.partNumber} onChange={v => onChange('partNumber', v)} />
+          <label>{t('partNumber')}{ramFieldRequired(value, 'partNumber') && <Req />}</label>
+          <PartNumberField className={inputClsFor('partNumber') + ' mono'} value={value.partNumber} placeholder={synthesizePartNumber('RAM', value) ?? undefined} onChange={v => onChange('partNumber', v)} />
           <RamPartReadout
             line={{ ...value, category }}
             onUse={patch => {

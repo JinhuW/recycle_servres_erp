@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chipNumberRequired, missingRamFields } from './ramRequired';
+import { chipNumberRequired, missingRamFields, ramFieldRequired } from './ramRequired';
 
 const full = {
   brand: 'Micron',
@@ -41,6 +41,39 @@ describe('missingRamFields', () => {
   it('keeps display order regardless of which fields are missing', () => {
     expect(missingRamFields({ ...full, partNumber: '', brand: null }))
       .toEqual(['brand', 'partNumber']);
+  });
+
+  // DDR3 trades by capacity and module form; everything else on the label is
+  // optional there, the chip # of a Micron stick included.
+  it('asks a DDR3 line for capacity and type only', () => {
+    expect(missingRamFields({ generation: 'DDR3', capacity: '8GB', type: 'Server' })).toEqual([]);
+    expect(missingRamFields({ generation: 'DDR3', brand: 'Micron', capacity: '8GB', type: 'Server' })).toEqual([]);
+    expect(missingRamFields({ generation: 'DDR3' })).toEqual(['capacity', 'type']);
+    expect(missingRamFields({ generation: 'DDR3', capacity: '8GB', brand: 'Samsung', speed: '1600' }))
+      .toEqual(['type']);
+    expect(missingRamFields({ generation: ' ddr3 ', capacity: '8GB', type: 'Desktop' })).toEqual([]);
+  });
+
+  it('keeps the full rule for every other generation and for none yet', () => {
+    expect(missingRamFields({ ...full, generation: 'DDR4', speed: '' })).toEqual(['speedMhz']);
+    expect(missingRamFields({ ...full, generation: 'DDR5', brand: '' })).toEqual(['brand']);
+    expect(missingRamFields({ capacity: '8GB', type: 'Server' }))
+      .toEqual(['brand', 'generation', 'klass', 'rank', 'speedMhz', 'partNumber']);
+  });
+});
+
+describe('ramFieldRequired', () => {
+  it('stars what the save will ask for', () => {
+    const ddr3 = { generation: 'DDR3', brand: 'Micron' };
+    expect(ramFieldRequired(ddr3, 'capacity')).toBe(true);
+    expect(ramFieldRequired(ddr3, 'type')).toBe(true);
+    expect(ramFieldRequired(ddr3, 'brand')).toBe(false);
+    expect(ramFieldRequired(ddr3, 'partNumber')).toBe(false);
+    expect(ramFieldRequired(ddr3, 'chipNumber')).toBe(false);
+    const ddr4 = { generation: 'DDR4', brand: 'Micron' };
+    expect(ramFieldRequired(ddr4, 'brand')).toBe(true);
+    expect(ramFieldRequired(ddr4, 'chipNumber')).toBe(true);
+    expect(ramFieldRequired({ ...ddr4, brand: 'Samsung' }, 'chipNumber')).toBe(false);
   });
 });
 

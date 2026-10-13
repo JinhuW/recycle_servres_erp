@@ -886,6 +886,19 @@ is not a stage but a flag beside one, set once every line has sold
   DDR5 lines must carry serial numbers, and once any line has serials their
   count must equal the line qty (v1.42.0); SSD lines drop health/serials and
   require brand above 800 GB (v1.76.0).
+  - **A DDR3 line needs only Capacity and Type** (v1.253.0, RS-244): brand,
+    class, rank, speed, chip # and part # are optional, because DDR3 trades
+    by capacity and module form. The red stars follow the same rule as the
+    "Still needed" list (`lib/ramRequired.ts` `ramFieldRequired`), so a star
+    is always a field the save will ask for. A DDR3 line left without a part
+    number is filed as `DDR3_<capacity>_<type>` (`DDR3_8GB_Server`) by the
+    same synthetic-id path as a Mixed SSD: previewed in the Part # field,
+    offered at Submit, applied by the API for the PO editor. Only the two
+    required fields make the id, so lots filled to different depths group as
+    one inventory product; a typed or scanned part number still wins. Box
+    check matches scans by part #, so such a line is counted by hand.
+  - **Condition is optional on every category** (v1.253.0). It never was
+    enforced — the label's star was the only thing that said so.
 - **Part numbers are canonical** — one part number however it was typed
   (v1.104.0) — and the submit form suggests existing ones as you type
   (v1.101.0).

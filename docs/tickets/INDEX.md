@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-244](./RS-244-ram-form-ddr3-lines-need-only-capacity-and-type-cond.md) | in-progress | story | P2 | RAM form: DDR3 lines need only capacity and type, condition never required | — |
 | [RS-243](./RS-243-grouped-inventory-lots-follow-the-warehouse-pill.md) | done | bug | P2 | Grouped inventory lots follow the warehouse pill | 1.252.1 |
 | [RS-242](./RS-242-purchase-orders-list-filters-by-warehouse-and-paymen.md) | done | story | P2 | Purchase orders list filters by warehouse and payment method | 1.252.0 |
 | [RS-241](./RS-241-after-sales-cases-track-returns-and-discounts-on-sol.md) | done | story | P2 | After-sales cases: track returns and discounts on sold orders | 1.251.0 |

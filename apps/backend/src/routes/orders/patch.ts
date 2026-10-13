@@ -674,7 +674,7 @@ patchRoutes.patch('/:id', async (c) => {
               && stored.part_number === synthesizePartNumber(stored.category ?? '', {
                 brand: stored.brand, capacity: stored.capacity, interface: stored.interface,
                 formFactor: stored.form_factor, generation: stored.generation,
-                speed: stored.speed, rpm: stored.rpm,
+                type: stored.type, speed: stored.speed, rpm: stored.rpm,
               });
             if (wasSynthetic) {
               const keep = (col: string) => !stale.includes(col);
@@ -690,6 +690,7 @@ patchRoutes.patch('/:id', async (c) => {
                 interface:   after('interface', 'interface', l.interface),
                 formFactor:  after('formFactor', 'form_factor', l.formFactor),
                 generation:  after('generation', 'generation', l.generation),
+                type:        after('type', 'type', l.type),
                 speed:       after('speed', 'speed', l.speed),
                 rpm:         sent.rpm !== undefined ? (l.rpm ?? null) : (keep('rpm') ? stored.rpm : null),
               });
