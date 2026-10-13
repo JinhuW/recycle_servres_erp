@@ -2904,6 +2904,7 @@ const zh: Record<string, string> = {
   soAfterSales: '售后',
   soAfterSalesCases: '售后案例',
   soAfterSalesNone: '此订单没有案例。',
+  soAfterSalesOpen: '创建售后案例',
 };
 
 export default zh;

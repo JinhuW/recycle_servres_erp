@@ -17,6 +17,19 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.256.0] - 2026-10-13
+
+The sell-order list gets a quick After-sales button (RS-248).
+
+### Added
+
+- **An After-sales button in the sell-order list's Actions column**, on
+  every Shipped, Awaiting payment or Done row. It opens the new-case form
+  with that order preselected, so a manager working from the list filtered
+  to Done no longer has to open each order to reach the button RS-241 put on
+  the order page. Draft, Packing and Closed rows don't get it, since a case
+  can't be opened on them.
+
 ## [1.255.1] - 2026-10-13
 
 Pre-release review fixes for the v1.254 release (RS-247): what
