@@ -395,7 +395,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
 
     // ── Payments — bank-transaction reconciliation against POs ──
     payTitle: 'Payments',
-    paySub: 'Money paid to sellers via Mercury and PayPal, reconciled against purchase orders. Link each transaction to its PO, or ignore the ones that are not seller payments.',
+    paySub: 'Mercury and PayPal transactions, reconciled against orders. Link each one to the purchase order it paid, the commission it settled or the sell order it collected, or ignore the ones that are none of those.',
     paySyncNow: 'Sync now',
     paySyncing: 'Syncing…',
     payLastSynced: 'Synced {when}',
@@ -430,6 +430,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payStatusTransfer: 'Transfer',
     payKindPayment: 'Payment',
     payKindRefund: 'Refund',
+    payKindCommission: 'Commission',
     payAuto: 'auto',
     unsavedTitle: 'Discard unsaved changes?',
     unsavedMsg: 'You have edits that have not been saved. Leaving now throws them away.',
@@ -461,12 +462,24 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payPickNone: 'No matching purchase orders',
     payPickResults: 'Search results',
     payPickNoSuggest: 'No suggestions yet — search by PO id or purchaser',
+    // The picker's three targets. The sell-order tab opens first on money in.
+    payPickTargetPo: 'Purchase order',
+    payPickTargetCommission: 'Commission',
+    payPickTargetSo: 'Sell order',
+    payPickSearchSo: 'Search SO id or customer…',
+    payPickNoneSo: 'No matching sell orders',
+    payPickRecentSo: 'Open sell orders',
+    payPickNoRecentSo: 'No sell order awaiting payment — search by SO id or customer',
+    payPickRecentCommission: 'Commission owed',
+    payPickNoRecentCommission: 'No PO at Ready to Pay or Done — search by PO id or purchaser',
+    payCommissionOf: 'commission {amt}',
+    payCommissionPaid: 'paid {amt}',
     payReasonTxn: 'Txn id match',
     payReasonExact: 'Amount match',
     payReasonNear: 'Close amount',
     payTileSuggested: 'Suggested',
     payTileSuggestedSub: 'with a likely PO',
-    payTileLinkedSub: 'matched to a PO',
+    payTileLinkedSub: 'matched to an order',
     payTileTransfersSub: 'between our accounts',
     payTileIgnoredSub: 'not seller payments',
     payFilterHasMatch: 'Has match',
@@ -534,6 +547,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payMatchAffinity: 'usual purchaser',
     payLinkedToast: 'Linked to {id}',
     payLinkedFilledToast: 'Linked to {id} — its transaction ID was filled in',
+    payLinkedCommissionToast: "Linked to {id}'s commission",
     payUnlinkedToast: 'Link removed',
     payEmpty: 'No transactions',
     payEmptyUnlinked: 'Nothing left to reconcile',
@@ -542,6 +556,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payLedgerTitle: 'Bank payments',
     payLedgerOpen: 'Open Payments',
     payLedgerNet: 'Net paid',
+    payLedgerNetReceived: 'Net received',
     payLinkOpen: "Open this PO's payments",
     // The bank's net paid against the PO's goods + fees, warned of in Review
     // mode and on the PO page, and asked about before approving for payment.
@@ -556,6 +571,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payFocusOrder: 'Payments for {id}',
     payFocusClear: 'Show all payments',
     payFocusNet: 'Net paid {amt}',
+    payFocusNetReceived: 'Net received {amt}',
     // Internal transactions — the record that groups an internal movement's
     // bank rows and carries the note explaining it.
     payIntTitle: 'Internal transactions',

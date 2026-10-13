@@ -15,6 +15,7 @@ import { authMiddleware } from '../auth';
 import { requireManager } from '../lib/role';
 import { getDb } from '../db';
 import { isDead } from '../banktx/types';
+import { isLinked } from '../banktx/match';
 import { clampLimit, cursorTs, cursorTsParam, cursorTsSelect, decodeCursor, encodeCursor, escapeLike, UUID_RE } from '../lib/pagination';
 import type { Env, User } from '../types';
 
@@ -183,16 +184,17 @@ async function addMembers(
   txnIds: string[],
 ): Promise<{ error: string } | { added: number }> {
   const legs = await sql<{
-    id: string; order_id: string | null; internal_txn_id: string | null; settle_status: string;
+    id: string; order_id: string | null; sell_order_id: string | null;
+    internal_txn_id: string | null; settle_status: string;
   }[]>`
-    SELECT id, order_id, internal_txn_id, settle_status
+    SELECT id, order_id, sell_order_id, internal_txn_id, settle_status
     FROM bank_transactions
     WHERE id IN ${sql(txnIds)}
        OR pair_id IN (SELECT pair_id FROM bank_transactions
                       WHERE id IN ${sql(txnIds)} AND pair_id IS NOT NULL)`;
   if (legs.length === 0) return { error: 'Not found' };
-  if (legs.some((l) => l.order_id)) {
-    return { error: 'Unlink the transaction from its purchase order before filing it' };
+  if (legs.some(isLinked)) {
+    return { error: 'Unlink the transaction from its order before filing it' };
   }
   // A record groups the legs of one real movement. A payment that never left,
   // or came back, has no leg to group.

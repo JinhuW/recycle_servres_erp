@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { CommissionPaymentFields, type CommissionShots } from '../../../components/CommissionPaymentFields';
 import { Icon } from '../../../components/Icon';
 import type { CommissionPaidBy } from '../../../lib/useCommissionPaidBy';
@@ -34,6 +35,8 @@ type Props = {
   /** Which manager paid it — writes through the same way. */
   commissionPaidBy: CommissionPaidBy;
   canEditCommissionPayment: boolean;
+  /** The bank rows linked as this PO's commission — manager-only, so the host decides. */
+  ledger?: ReactNode;
 };
 
 export function CommissionTab(p: Props) {
@@ -193,6 +196,7 @@ export function CommissionTab(p: Props) {
           shots={p.commissionShots}
           editable={p.canEditCommissionPayment}
         />
+        {p.ledger}
       </div>
     </div>
   );

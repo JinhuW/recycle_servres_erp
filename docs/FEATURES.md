@@ -216,7 +216,10 @@ is not a stage but a flag beside one, set once every line has sold
   order starts at — the screenshot's uploader need not be the payer, so
   nothing is guessed. Files write through as they are dropped and the pick
   as it is made — managers at any stage, closed book included — and
-  purchasers see both read-only. Each pick is one *Commission paid by:
+  purchasers see both read-only. Under the drop box, managers also see the
+  **bank payments linked as this PO's commission** on the Payments page,
+  with their net, the same ledger the Cost Payment tab shows for the cost
+  (v1.257.0). Each pick is one *Commission paid by:
   ‹from› → ‹to›* line in Activity, the names as they were at the time. **Ready to Pay →
   Done asks for it only when it is missing** (v1.165.0): with a screenshot
   on file the move is as plain as any other; without one the *Mark order as
@@ -1330,6 +1333,10 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   column with a managers-only receiver rule (v1.16.0). The receiver can be
   reassigned from the detail view in any status, Done and Closed included —
   the change saves at once and is logged in the order history (v1.135.0).
+- **The detail view lists the bank payments linked to the order**
+  (v1.257.0), under the payment receiver: each row a link back to the
+  Payments page pinned to this order, with the net received. Nothing shows
+  until a manager links a payment there.
 - **The desktop list flags an order with internal notes** (v1.239.0): a note
   icon beside the customer on each row whose note isn't blank.  Hovering or
   tabbing to it shows the note in a card (line breaks kept, clamped at 14
@@ -1657,7 +1664,8 @@ when it arrives.  The system never buys a label.
 
 ## Payments and reconciliation
 
-Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
+Manager-only. Links **Mercury and PayPal transactions to purchase orders**,
+to a PO's commission, or to sell orders (v1.257.0).
 
 - Transaction ingest with auto-pair and auto-link (v1.90.0), a background sync
   loop behind a manager-only API (v1.91.0), and a Payments page (v1.92.0).
@@ -1702,6 +1710,25 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
   fail to load, is simply retried on the next run: checking and savings keep
   syncing, and payoffs stay transfers (v1.176.1).
 - Unlinked transactions get **suggested matching POs** (v1.99.0).
+- **A row links to one of three targets** (v1.257.0): the purchase order it
+  paid (as before), that PO's **commission** — what the purchaser was paid,
+  kept apart from what the supplier was — or a **sell order**, the money a
+  buyer sent. *Link…* opens on three tabs; an incoming payment opens on
+  *Sell order*, an outgoing one on *Purchase order*. The PO tab keeps its
+  ranked suggestions; the other two list recent candidates (sell orders at
+  Shipped, Awaiting payment or Done; POs at Ready to Pay or Done, with the
+  purchaser's projected commission) and search by id, customer or
+  purchaser, an exact amount badged and sorted first. A linked row reads the
+  SO pill with the order's total, or the PO pill with a *Commission* chip. A
+  commission link never counts toward the PO's cost paid — the Cost Payment
+  ledger, the list's Payment cell and the payment-gap banner ignore it — and
+  never fills the PO's transaction ID. A sell order's link reads by sign the
+  other way round: money in is the buyer's payment, money out our refund.
+  Unlink, group, ignore, assign and transfer treat every link alike, and
+  grouping carries a sell-order link onto the sibling leg. A closed or
+  archived sell order refuses the link. `#/payments/so/<id>` pins the page to
+  a sell order with its net received; a pinned PO shows its cost and
+  commission rows together, the net still the cost net.
 - The queue **opens on money out**, and the Unlinked and Suggested tiles take
   the same direction lens as the rows beneath them, so the count and the list
   can never disagree (v1.114.1).

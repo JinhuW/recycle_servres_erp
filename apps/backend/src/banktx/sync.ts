@@ -11,7 +11,7 @@ import { log } from '../lib/log';
 import type { Env } from '../types';
 import { applyIgnoreRules } from './ignoreRules';
 import { pickBankProviders, type BankProviderPick } from './index';
-import { PAIR_AUTO_WINDOW_DAYS } from './match';
+import { PAIR_AUTO_WINDOW_DAYS, isLinked, unlinkedFrag } from './match';
 import { PAYPAL_ACH_DESCRIPTOR } from './mercury';
 import type { BankProvider, BankSource, NormalizedDispute, NormalizedTxn } from './types';
 
@@ -70,6 +70,7 @@ type LegRow = {
   category: string;
   category_manual: boolean;
   order_id: string | null;
+  sell_order_id: string | null;
   link_kind: string | null;
   link_auto: boolean;
   linked_by: string | null;
@@ -346,7 +347,7 @@ async function syncOne(
           -- A human verdict wins, and so does a link: re-classifying a row
           -- someone tied to an order would drop it out of payment pairing
           -- behind their back (the state mark-transfer refuses to create).
-          category = CASE WHEN bank_transactions.category_manual OR bank_transactions.order_id IS NOT NULL
+          category = CASE WHEN bank_transactions.category_manual OR bank_transactions.linked_at IS NOT NULL
                           THEN bank_transactions.category ELSE EXCLUDED.category END,
           raw = EXCLUDED.raw
         RETURNING (xmax = 0) AS fresh`;
@@ -361,7 +362,7 @@ async function syncOne(
       UPDATE bank_transactions bt SET category = 'transfer'
       FROM bank_transfer_counterparties r
       WHERE bt.source = r.source AND bt.counterparty = r.counterparty
-        AND bt.category = 'external' AND NOT bt.category_manual AND bt.order_id IS NULL
+        AND bt.category = 'external' AND NOT bt.category_manual AND ${unlinkedFrag(tx, 'bt')}
         -- Money that never moved is not a transfer; reclassifying it would put
         -- it back into a tile it is deliberately kept out of.
         AND bt.settle_status = 'settled'`;
@@ -405,11 +406,12 @@ async function syncOne(
       UPDATE bank_transactions
       SET pair_id = NULL,
           order_id = CASE WHEN source = 'paypal' THEN order_id END,
+          sell_order_id = CASE WHEN source = 'paypal' THEN sell_order_id END,
           link_kind = CASE WHEN source = 'paypal' THEN link_kind END,
           link_auto = CASE WHEN source = 'paypal' THEN link_auto ELSE FALSE END,
           linked_by = CASE WHEN source = 'paypal' THEN linked_by END,
           linked_at = CASE WHEN source = 'paypal' THEN linked_at END,
-          no_auto_link = no_auto_link OR (source <> 'paypal' AND order_id IS NOT NULL)
+          no_auto_link = no_auto_link OR (source <> 'paypal' AND linked_at IS NOT NULL)
       WHERE pair_id IN (SELECT pair_id FROM bank_transactions
                         WHERE pair_id IS NOT NULL AND settle_status = 'failed'
                           AND category = 'external')
@@ -468,8 +470,8 @@ async function copyNoteAcrossPair(tx: Tx, pairId: string): Promise<void> {
 async function autoPair(tx: Tx): Promise<number> {
   const legs = await tx<LegRow[]>`
     SELECT id, source, external_id, amount::text AS amount, posted_at, paypal_txn_id, description,
-           counterparty, category, category_manual, order_id, link_kind, link_auto, linked_by, linked_at,
-           settle_status, ignored
+           counterparty, category, category_manual, order_id, sell_order_id, link_kind, link_auto,
+           linked_by, linked_at, settle_status, ignored
     FROM bank_transactions
     -- A human's Ignore is a verdict on the row and takes it out of pairing. A
     -- rule's is not: the PayPal charge a rule dismissed still has a Mercury
@@ -535,8 +537,9 @@ async function autoPair(tx: Tx): Promise<number> {
   for (const [m, p] of pairs) {
     // A leg already linked to an order shares that link with its new sibling;
     // conflicting links mean the match is wrong — leave it to a human.
-    const linked = [m, p].filter((l) => l.order_id);
-    if (linked.length === 2 && m.order_id !== p.order_id) continue;
+    const linked = [m, p].filter(isLinked);
+    if (linked.length === 2 && (m.order_id !== p.order_id || m.sell_order_id !== p.sell_order_id
+      || m.link_kind !== p.link_kind)) continue;
     // Spreading a link onto a rule-ignored leg would make a row that is both
     // linked and ignored — the state /ignore and /link each refuse to create.
     if (linked.length === 1 && (m.ignored || p.ignored)) continue;
@@ -547,9 +550,10 @@ async function autoPair(tx: Tx): Promise<number> {
       const src = linked[0];
       await tx`
         UPDATE bank_transactions
-        SET order_id = ${src.order_id}, link_kind = ${src.link_kind}, link_auto = ${src.link_auto},
+        SET order_id = ${src.order_id}, sell_order_id = ${src.sell_order_id},
+            link_kind = ${src.link_kind}, link_auto = ${src.link_auto},
             linked_by = ${src.linked_by}, linked_at = ${src.linked_at}
-        WHERE pair_id = ${pairId} AND order_id IS NULL`;
+        WHERE pair_id = ${pairId} AND linked_at IS NULL`;
     }
   }
 
@@ -565,7 +569,7 @@ async function autoPair(tx: Tx): Promise<number> {
 // the window pairs; the Mercury side is then a transfer too — unless a human
 // already ruled otherwise.
 async function transferPair(tx: Tx, legs: LegRow[], taken: Set<string>): Promise<number> {
-  const free = legs.filter((l) => !taken.has(l.id) && !l.order_id);
+  const free = legs.filter((l) => !taken.has(l.id) && !isLinked(l));
   // PayPal candidates must already be transfers (event code). A Mercury one
   // must carry the PayPal ACH descriptor, which names its sibling as PayPal; a
   // plain external Mercury row of the opposite amount is just as likely an
@@ -678,7 +682,7 @@ export async function linkPaypalTxnToOrder(
   const groups = await tx<{ ids: string[]; amount: string }[]>`
     SELECT ARRAY_AGG(id::text) AS ids, MAX(amount::text) AS amount
     FROM bank_transactions bt
-    WHERE order_id IS NULL AND NOT no_auto_link AND NOT ignored
+    WHERE ${unlinkedFrag(tx, 'bt')} AND NOT no_auto_link AND NOT ignored
       AND category <> 'transfer'
       -- Every PO is in USD.
       AND currency = 'USD'
@@ -693,7 +697,7 @@ export async function linkPaypalTxnToOrder(
       AND NOT EXISTS (
         SELECT 1 FROM bank_transactions sib
         WHERE bt.pair_id IS NOT NULL AND sib.pair_id = bt.pair_id
-          AND sib.order_id IS NOT NULL)
+          AND sib.linked_at IS NOT NULL)
     GROUP BY COALESCE(pair_id, id)`;
 
   for (const g of groups) {
@@ -725,12 +729,13 @@ export async function unlinkPaypalTxnFromOrder(
   const freed = await tx`
     WITH hit AS (
       SELECT bt.id, bt.pair_id FROM bank_transactions bt
-      WHERE bt.order_id = ${orderId} AND UPPER(bt.paypal_txn_id) = UPPER(${oldTxnId})
+      WHERE bt.order_id = ${orderId} AND bt.link_kind <> 'commission'
+        AND UPPER(bt.paypal_txn_id) = UPPER(${oldTxnId})
         AND NOT EXISTS (SELECT 1 FROM users m WHERE m.id = bt.linked_by AND m.role = 'manager')
     )
     UPDATE bank_transactions t
     SET order_id = NULL, link_kind = NULL, link_auto = FALSE, linked_by = NULL, linked_at = NULL
-    WHERE t.order_id = ${orderId}
+    WHERE t.order_id = ${orderId} AND t.link_kind <> 'commission'
       AND (t.id IN (SELECT id FROM hit)
            OR t.pair_id IN (SELECT pair_id FROM hit WHERE pair_id IS NOT NULL))
       AND NOT EXISTS (SELECT 1 FROM users m WHERE m.id = t.linked_by AND m.role = 'manager')
@@ -741,8 +746,8 @@ export async function unlinkPaypalTxnFromOrder(
 async function autoLink(tx: Tx): Promise<number> {
   const groups = await tx<{ ptxn: string }[]>`
     SELECT MAX(paypal_txn_id) AS ptxn
-    FROM bank_transactions
-    WHERE order_id IS NULL AND NOT no_auto_link AND NOT ignored
+    FROM bank_transactions bt
+    WHERE ${unlinkedFrag(tx, 'bt')} AND NOT no_auto_link AND NOT ignored
       AND paypal_txn_id IS NOT NULL AND category <> 'transfer'
       AND settle_status IN ('settled', 'pending')
     GROUP BY COALESCE(pair_id, id)`;

@@ -370,7 +370,7 @@ export function pathToDesktopView(path: string): DesktopViewId {
   if (path === '/activity') return 'activity';
   // A tab under Payments, like Analysis under Inventory.
   if (path === '/payments/internal') return 'internaltx';
-  if (path === '/payments' || match('/payments/po/:id', path)) return 'payments';
+  if (path === '/payments' || match('/payments/po/:id', path) || match('/payments/so/:id', path)) return 'payments';
   if (path === '/tracker') return 'tracker';
   if (path === '/fleet' || matchFleetWatch(path)) return 'coordinator';
   if (path === '/settings') return 'settings';
@@ -404,6 +404,13 @@ export function matchFleetWatch(path: string): { workerId: string } | null {
 // With a transaction id the page opens that row instead of the first.
 export function paymentsForOrderPath(orderId: string, txnId?: string): string {
   const base = `/payments/po/${encodeURIComponent(orderId)}`;
+  return txnId ? `${base}?txn=${encodeURIComponent(txnId)}` : base;
+}
+
+// The same page pinned to a sell order's payments, read back with
+// match('/payments/so/:id').
+export function paymentsForSellOrderPath(sellOrderId: string, txnId?: string): string {
+  const base = `/payments/so/${encodeURIComponent(sellOrderId)}`;
   return txnId ? `${base}?txn=${encodeURIComponent(txnId)}` : base;
 }
 
