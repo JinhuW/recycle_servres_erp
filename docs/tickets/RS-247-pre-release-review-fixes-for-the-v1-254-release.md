@@ -2,13 +2,13 @@
 id: RS-247
 title: Pre-release review fixes for the v1.254 release
 type: bug
-status: in-progress
+status: done
 priority: P1
 created: 2026-10-13
 reporter: jinhu
 branch: fix/prerelease-rs246
-pr:
-version:
+pr: 633
+version: 1.255.1
 related: [RS-239, RS-240, RS-241, RS-242, RS-243, RS-244, RS-245]
 ---
 
