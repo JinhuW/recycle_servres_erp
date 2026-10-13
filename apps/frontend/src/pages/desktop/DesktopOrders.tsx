@@ -17,6 +17,8 @@ import { lineSpecLabel } from '../../lib/lineGroups';
 import { inTransitDetail, profitTone, trackingNote } from '../../lib/orderPresentation';
 import { statusTone, isCompleted, LIFECYCLE_STATUS, SOLD_LABEL, WORKFLOW_STAGES } from '../../lib/status';
 import { categoryFilterOptions } from '../../lib/lookups';
+import { NO_WAREHOUSE, facetCounts, matchesPayment, matchesWarehouse, warehouseOptions } from '../../lib/poFacets';
+import type { PaymentPick, WarehousePick } from '../../lib/poFacets';
 import type { OrderSummary, Order } from '../../lib/types';
 import { TableSkeleton } from '../../components/Skeleton';
 import { OrderCategoryChips } from '../../components/OrderCategoryChips';
@@ -147,6 +149,12 @@ export function DesktopOrders({ onToast }: Props) {
   // Sold is a flag beside the stage, so its chip narrows whatever stage is
   // picked rather than replacing it: Done + Sold, Ready to Pay + Sold.
   const [soldOnly, setSoldOnly] = usePersisted<boolean>('desktop.orders.soldOnly', false);
+  // Warehouse and payment are plain predicates over the loaded array (see
+  // lib/poFacets): a click re-renders the table with no refetch. The table
+  // is keyed on the pair so a pick fades the new set in; search typing keeps
+  // the key and stays instant.
+  const [warehousePick, setWarehousePick] = usePersisted<WarehousePick>('desktop.orders.warehouse', 'all');
+  const [paymentPick, setPaymentPick] = usePersisted<PaymentPick>('desktop.orders.payment', 'all');
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   // A move that finds the PO elsewhere asks again from there; the row takes
   // that stage too, or the next click would ask about the old one again.
@@ -248,15 +256,35 @@ export function DesktopOrders({ onToast }: Props) {
 
   // Search filter — server already scopes by user (managers see all, others
   // see only their own).
-  const visible = useMemo(() => {
+  const searched = useMemo(() => {
     if (!search.trim()) return orders;
     const q = search.toLowerCase();
     return orders.filter(o => o.id.toLowerCase().includes(q) || o.userName.toLowerCase().includes(q));
   }, [orders, search]);
 
+  // The warehouse and payment picks sit with search, ahead of the stage rail,
+  // so the stage counts say what each stage holds for this warehouse.
+  const visible = useMemo(
+    () => warehousePick === 'all' && paymentPick === 'all'
+      ? searched
+      : searched.filter(o => matchesWarehouse(o, warehousePick) && matchesPayment(o, paymentPick)),
+    [searched, warehousePick, paymentPick],
+  );
+
   // `sold` only reaches managers, and the chip lives in their rail: the role
   // preview must not keep filtering on a flag it can no longer see or clear.
   const soldPicked = isManager && soldOnly;
+
+  // Chips come from the loaded POs, not the search, so the row holds still
+  // while typing; a pick that search then leaves empty stays clearable.
+  const warehouses = useMemo(() => warehouseOptions(orders), [orders]);
+  const facets = useMemo(() => facetCounts(
+    searched,
+    { warehouse: warehousePick, payment: paymentPick },
+    o => (stageFilter === 'all'
+      ? showDone || soldPicked || !isCompleted(o.status)
+      : o.lifecycle === stageFilter) && (!soldPicked || !!o.sold),
+  ), [searched, warehousePick, paymentPick, stageFilter, showDone, soldPicked]);
 
   // The all-stages view hides Done POs unless the toggle is on; the stage
   // rail's own Done chip still shows them because a stage pick bypasses the
@@ -330,7 +358,7 @@ export function DesktopOrders({ onToast }: Props) {
       </div>
 
       <div className="card orders-card">
-        <div className={'card-head' + (isManager ? ' has-rail' : '')}>
+        <div className="card-head has-rail">
           <div className="orders-toolbar-l">
             <div className="card-title">{t('allOrders')}</div>
             <div className="seg">
@@ -469,7 +497,7 @@ export function DesktopOrders({ onToast }: Props) {
             in one place. Per-stage revenue rides along in the tooltip; the KPI
             row above already recomputes it for whatever stage is selected. */}
         {isManager && (
-          <div className="status-rail" role="group" aria-label={t('statusFilters')}>
+          <div className="status-rail stacked" role="group" aria-label={t('statusFilters')}>
             <button
               type="button"
               className="status-chip"
@@ -514,11 +542,60 @@ export function DesktopOrders({ onToast }: Props) {
           </div>
         )}
 
+        {/* Warehouse and payment chips, every role. A click on the active chip
+            clears its group; the counts are what each click would show. */}
+        <div className="status-rail facet-rail" role="group" aria-label={t('poFacetFilters')}>
+          <span className="rail-label"><Icon name="warehouse" size={12} />{t('warehouse')}</span>
+          <button
+            type="button"
+            className="status-chip"
+            aria-pressed={warehousePick === 'all'}
+            onClick={() => setWarehousePick('all')}
+          >
+            {t('all')}
+            <span className="mono sc-n">{facets.warehouse.all ?? 0}</span>
+          </button>
+          {warehouses.map(w => {
+            const n = facets.warehouse[w.id] ?? 0;
+            const active = warehousePick === w.id;
+            return (
+              <button
+                key={w.id}
+                type="button"
+                className={'status-chip' + (n === 0 ? ' empty' : '')}
+                aria-pressed={active}
+                onClick={() => setWarehousePick(active ? 'all' : w.id)}
+              >
+                {w.id === NO_WAREHOUSE ? t('sodNoWarehouse') : w.short}
+                <span className="mono sc-n">{n}</span>
+              </button>
+            );
+          })}
+          <span className="status-rail-sep" aria-hidden />
+          <span className="rail-label"><Icon name="dollar" size={12} />{t('payment')}</span>
+          {(['all', 'company', 'self'] as const).map(p => {
+            const n = facets.payment[p];
+            const active = paymentPick === p;
+            return (
+              <button
+                key={p}
+                type="button"
+                className={'status-chip' + (n === 0 ? ' empty' : '')}
+                aria-pressed={active}
+                onClick={() => setPaymentPick(active && p !== 'all' ? 'all' : p)}
+              >
+                {p === 'all' ? t('all') : p === 'company' ? t('payCompanyShort') : t('paySelfShort')}
+                <span className="mono sc-n">{n}</span>
+              </button>
+            );
+          })}
+        </div>
+
         <div className="table-scroll" ref={tableScrollRef}>
           {!loadedOnce ? (
             <TableSkeleton rows={10} cols={9} />
           ) : (
-          <table className="table">
+          <table className="table facet-swap" key={warehousePick + '|' + paymentPick}>
             <thead>
               <tr>
                 <th style={{ width: 28 }}></th>

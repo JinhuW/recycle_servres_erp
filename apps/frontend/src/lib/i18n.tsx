@@ -899,6 +899,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     allOrders: 'All orders',
     mineOnly: 'Mine only',
     statusFilters: 'Status filters',
+    poFacetFilters: 'Warehouse and payment filters',
     orderId: 'Order ID',
     date: 'Date',
     submitter: 'Submitter',

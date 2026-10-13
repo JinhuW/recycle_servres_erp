@@ -17,6 +17,27 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.252.0] - 2026-10-12
+
+Warehouse and payment filters on the desktop PO list (RS-242).
+
+### Added
+
+- **A chip row under the stage rail** on the desktop Purchase orders list:
+  a Warehouse group (All, one chip per warehouse the loaded POs use, and
+  No warehouse when any PO has none) and a Payment group (All, Company,
+  Self-paid). Every role gets the row; the stage rail above it stays
+  manager-only. Each chip carries the number of POs its click would show,
+  counted with every other filter on the page applied — search, the Done
+  toggle, the stage, Sold and the other group — and a chip at zero recedes
+  but stays clickable. Clicking the active chip clears its group. The stage
+  counts and the products caption follow the pick, and both picks survive
+  the open-PO → back round-trip with the other filters.
+- The filter is client-side: the page already holds every PO in scope, so a
+  click re-renders the table in place with no refetch and no skeleton, and
+  the new set settles in with a short fade (off under reduced motion). The
+  facet maths lives in `lib/poFacets.ts`, with unit tests.
+
 ## [1.251.0] - 2026-10-12
 
 After-sales cases (RS-241): a record for the goods a customer comes back

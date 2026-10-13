@@ -899,6 +899,15 @@ is not a stage but a flag beside one, set once every line has sold
 - The PO list hides Done orders by default with a toggle (v1.89.0); mobile
   managers see the whole org's POs (v1.88.0). The stage filter lives in the
   table toolbar as status chips (v1.39.0).
+- **Warehouse and payment chips** under the desktop list's stage rail
+  (v1.252.0): a Warehouse group (All, one chip per warehouse the loaded POs
+  use, No warehouse when some PO has none) and a Payment group (All,
+  Company, Self-paid), for every role. Each chip's count is what its click
+  would show given every other filter — search, Done, stage, Sold and the
+  other group; the active chip clicked again clears its group. The filter is
+  client-side, so the table swaps in place with no refetch, and the picks
+  persist across the open-PO → back round-trip. The phone list has no
+  equivalent.
 - **Archiving a PO takes its goods out of stock** (v1.137.0). Archive still
   hides the order from the default list and is still reversible, but it now
   also moves every non-Sold line to the `Archived` line status, which drops
