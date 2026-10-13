@@ -2,13 +2,13 @@
 id: RS-245
 title: Inventory groups DDR5 RAM by spec, not part number
 type: story
-status: backlog
+status: done
 priority: P2
 created: 2026-10-13
 reporter: jinhu
 branch: feat/ddr5-spec-grouping
-pr:
-version:
+pr: 631
+version: 1.254.0
 related: [RS-244]
 ---
 
@@ -39,19 +39,19 @@ fields gives the buyer-facing view one row per thing they would buy.
 
 ## Acceptance criteria
 
-- [ ] DDR5 RAM lots group by Brand + Type + Capacity + Rank + Speed + Class;
+- [x] DDR5 RAM lots group by Brand + Type + Capacity + Rank + Speed + Class;
       the part number and chip # play no part. A DDR5 lot with no part
       number joins the group its spec names.
-- [ ] A DDR5 group whose lots carry different part numbers shows no single
+- [x] A DDR5 group whose lots carry different part numbers shows no single
       part number in its row — the "N part numbers" line and its hover list
       them — and the grouped export lists them comma-separated.
-- [ ] A DDR5 lot with one of the six fields blank is its own product (blank
+- [x] A DDR5 lot with one of the six fields blank is its own product (blank
       keys on blank), never merged into a filled one.
-- [ ] DDR3 and DDR4 lots group exactly as before (family, then canonical
+- [x] DDR3 and DDR4 lots group exactly as before (family, then canonical
       part number, then singleton).
-- [ ] Picking a DDR5 lot into a sell order or Quick View still carries that
+- [x] Picking a DDR5 lot into a sell order or Quick View still carries that
       lot's own part number.
-- [ ] Unit tests cover the key; a route test covers the grouping.
+- [x] Unit tests cover the key; a route test covers the grouping.
 
 ## Out of scope
 
