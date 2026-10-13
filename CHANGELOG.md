@@ -17,6 +17,26 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.254.0] - 2026-10-13
+
+Inventory's grouped view groups DDR5 RAM by spec, not by part number
+(RS-245).
+
+### Changed
+
+- **A DDR5 RAM lot groups by Brand, Type, Capacity, Rank, Speed and Class.**
+  DDR5 buyers shop by spec — a Samsung 32GB 2Rx4 4800 RDIMM is the same
+  product whether the stick reads `M321R4GA3BB6-CQK` or `-CQKET` — so the
+  part number and chip # no longer split one product into several, and a
+  lot with no part number joins the group its spec names. A lot with one of
+  the six fields blank stays its own product rather than being merged into a
+  guess. When a group's lots carry different part numbers, its row shows the
+  "N part numbers" line with the members on hover instead of a single
+  number, and the grouped export lists them comma-separated in the Part #
+  cell; the lots table still names each lot's own part number, and a lot
+  picked into a sell order or Quick View carries its own. DDR3 and DDR4 keep
+  the module-family rule.
+
 ## [1.253.0] - 2026-10-12
 
 A DDR3 line needs only its capacity and type, and Condition is never

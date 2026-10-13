@@ -18,7 +18,8 @@ import {
   CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields, categoryTabSheets,
   sortSheetRows, type ExportCategory,
 } from '../lib/categoryColumns';
-import { UNTYPED_ITEM, chipMarkingCanon, normSellPrice, ramFamily, ramFamilyLabel, SPEC_FIELD_TO_DB_COL, specConflicts } from '@recycle-erp/shared';
+import { UNTYPED_ITEM, chipMarkingCanon, ddr5SpecKey, normSellPrice, ramFamily, ramFamilyLabel, SPEC_FIELD_TO_DB_COL, specConflicts } from '@recycle-erp/shared';
+import type { Ddr5SpecRow } from '@recycle-erp/shared';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { diff, writeOrderEvent } from '../services/orderAudit';
 import { poLineNo } from '../lib/poLineNo';
@@ -449,7 +450,10 @@ inventory.on(['GET', 'POST'], '/export', async (c) => {
         if (repPn === null && l.part_number) repPn = String(l.part_number);
         if (repChip === null && l.chip_number) repChip = String(l.chip_number);
       }
-      const part = repPn ? groupPartLabel(repPn, lots as GroupKeyRow[]) : '';
+      // A sheet has no hover, so a spec group lists its part numbers in the cell.
+      const part = repPn
+        ? (groupPartLabel(key, repPn, lots as GroupKeyRow[]) ?? groupPartNumbers(lots as GroupKeyRow[]).join(', '))
+        : '';
       // Lines in a group share their attributes by construction (same canonical
       // part number or RAM module family), so the head row is representative — except for part/chip,
       // where the head may be the row that left them blank, and condition,
@@ -869,18 +873,25 @@ inventory.get('/transfer-orders', async (c) => {
   });
 });
 
-type GroupKeyRow = { id: unknown; category: unknown; part_number: unknown; canon: unknown };
+type GroupKeyRow = Ddr5SpecRow & { id: unknown; category: unknown; part_number: unknown; canon: unknown };
 
-// RAM groups by module family, so packaging suffixes (-CTD, -CTD7Q, -CTDQ)
-// stop splitting one stick into several products; everything else, and RAM
-// no scheme reads, by canonical part number.
+// DDR5 groups by spec — buyers take any stick of the same brand, type,
+// capacity, rank, speed and form — so its part number never splits a product
+// and a lot without one still joins. Other RAM groups by module family, so
+// packaging suffixes (-CTD, -CTD7Q, -CTDQ) stop splitting one stick into
+// several products; everything else, and RAM no scheme reads, by canonical
+// part number.
 function productGroupKey(r: GroupKeyRow): string {
+  const spec = ddr5SpecKey(r);
+  if (spec) return spec;
   if (r.category === 'RAM' && typeof r.part_number === 'string') {
     const fam = ramFamily(r.part_number);
     if (fam) return fam.key;
   }
   return typeof r.canon === 'string' && r.canon.length > 0 ? r.canon : `line:${r.id}`;
 }
+
+const isSpecGroup = (key: string): boolean => key.startsWith('ddr5:');
 
 function groupPartNumbers(lots: GroupKeyRow[]): string[] {
   const seen = new Map<string, string>();
@@ -891,9 +902,15 @@ function groupPartNumbers(lots: GroupKeyRow[]): string[] {
   return [...seen.values()];
 }
 
-/** One part number as written, or the family's `M393A2K43BB1-CTD*` when lots differ. */
-function groupPartLabel(repPn: string, lots: GroupKeyRow[]): string {
-  if (groupPartNumbers(lots).length < 2) return repPn;
+/**
+ * One part number as written, or the family's `M393A2K43BB1-CTD*` when lots
+ * differ. A spec group's members share no family, so differing part numbers
+ * give it none: the row shows its count and the lots table names each one.
+ */
+function groupPartLabel(key: string, repPn: string, lots: GroupKeyRow[]): string | null {
+  const pns = groupPartNumbers(lots);
+  if (pns.length < 2) return repPn;
+  if (isSpecGroup(key)) return null;
   const fam = ramFamily(repPn);
   return fam ? ramFamilyLabel(repPn, fam) : repPn;
 }
@@ -1080,7 +1097,7 @@ inventory.get('/products', async (c) => {
       ? groups.get(key)!.filter((l) => l.warehouse_id === warehouse)
       : groups.get(key)!;
     const head = lots[0];
-    const isSingleton = !(head.canon && head.canon.length > 0);
+    const isSingleton = key.startsWith('line:');
 
     let qty = 0, inTransit = 0, inStock = 0, reviewing = 0;
     let costMin = Infinity, costMax = -Infinity, costWeighted = 0;
@@ -1107,7 +1124,7 @@ inventory.get('/products', async (c) => {
 
     const base = {
       key,
-      part_number: repPn ? groupPartLabel(repPn, lots) : repPn,
+      part_number: repPn ? groupPartLabel(key, repPn, lots) : repPn,
       part_numbers: groupPartNumbers(lots),
       category: head.category, brand: head.brand, capacity: head.capacity,
       generation: head.generation, type: head.type, classification: head.classification,

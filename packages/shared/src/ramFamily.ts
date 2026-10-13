@@ -71,3 +71,26 @@ export function ramFamily(raw: string | null | undefined): RamFamily | null {
 export function ramFamilyLabel(raw: string, family: RamFamily): string {
   return `${splitRamPartFamily(raw, family.length)[0]}*`;
 }
+
+// DDR5 trades by spec, not by stick: a buyer asking for Samsung 32GB 2Rx4
+// 4800 RDIMM takes M321R4GA3BB6-CQK and -CQKET alike, and the family rule
+// above reads only three makers anyway. So a DDR5 lot keys on the six fields
+// the buyer names — brand, device type, capacity, rank, speed, module form —
+// and the part number drops out. Blank keys on blank: a lot missing its rank
+// is its own product rather than a guess at one.
+
+export type Ddr5SpecRow = {
+  category?: unknown; generation?: unknown; brand?: unknown; type?: unknown;
+  capacity?: unknown; rank?: unknown; speed?: unknown; classification?: unknown;
+};
+
+const DDR5_KEY_FIELDS = ['brand', 'type', 'capacity', 'rank', 'speed', 'classification'] as const;
+
+const norm = (v: unknown): string =>
+  v == null ? '' : String(v).trim().toUpperCase().replace(/\s+/g, ' ');
+
+/** The spec key of a DDR5 RAM line; null for any other line. */
+export function ddr5SpecKey(r: Ddr5SpecRow): string | null {
+  if (r.category !== 'RAM' || norm(r.generation) !== 'DDR5') return null;
+  return `ddr5:${DDR5_KEY_FIELDS.map((f) => norm(r[f])).join('|')}`;
+}
