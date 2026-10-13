@@ -5,7 +5,7 @@ import {
   CONDITIONS,
 } from '../../../lib/catalog';
 import { useT } from '../../../lib/i18n';
-import { chipNumberRequired } from '../../../lib/ramRequired';
+import { ramFieldRequired } from '../../../lib/ramRequired';
 import { ssdBrandRequired, SSD_BRAND_REQUIRED_OVER_GB } from '../../../lib/lineRequirements';
 import { allowedOptions, chipMarkingCanon, synthesizePartNumber } from '@recycle-erp/shared';
 import { Combobox } from '../../../components/Combobox';
@@ -60,34 +60,38 @@ export function CatCombo({ value, options, onChange, invalid }: { value: string 
 export function RamFields({ line, set, missing }: FieldsProps) {
   const { t } = useT();
   const { cls, bad } = gapMarks(missing);
+  // A star is a promise the save will ask for the field, so it follows the
+  // same rule as the blockers: a DDR3 line stars capacity and type only.
+  const req = (key: Parameters<typeof ramFieldRequired>[1]) =>
+    ramFieldRequired(line, key) && <span className="req">*</span>;
   return (
     <div className="grid-2">
       <div className={cls('brand')}>
-        <label className="label">{t('brand')} <span className="req">*</span></label>
+        <label className="label">{t('brand')} {req('brand')}</label>
         <CatSelect value={line.brand} options={RAM_BRANDS} invalid={bad('brand')} onChange={v => set({ brand: v })} />
       </div>
       <div className={cls('capacity')}>
-        <label className="label">{t('capacity')} <span className="req">*</span></label>
+        <label className="label">{t('capacity')} {req('capacity')}</label>
         <CatSelect value={line.capacity} options={RAM_CAP} invalid={bad('capacity')} onChange={v => set({ capacity: v })} />
       </div>
       <div className={cls('generation')}>
-        <label className="label">{t('generation')} <span className="req">*</span></label>
+        <label className="label">{t('generation')} {req('generation')}</label>
         <CatSelect value={line.generation} options={RAM_GENERATIONS} invalid={bad('generation')} onChange={v => set({ generation: v })} />
       </div>
       <div className={cls('type')}>
-        <label className="label">{t('type')} <span className="req">*</span></label>
+        <label className="label">{t('type')} {req('type')}</label>
         <CatSelect value={line.type} options={RAM_DEVICE_TYPES} invalid={bad('type')} onChange={v => set({ type: v })} />
       </div>
       <div className={cls('klass')}>
-        <label className="label">{t('klass')} <span className="req">*</span></label>
+        <label className="label">{t('klass')} {req('classification')}</label>
         <CatSelect value={line.classification} options={allowedOptions('RAM', 'classification', line, RAM_CLASS)} invalid={bad('klass')} onChange={v => set({ classification: v })} />
       </div>
       <div className={cls('rank')}>
-        <label className="label">{t('rank')} <span className="req">*</span></label>
+        <label className="label">{t('rank')} {req('rank')}</label>
         <CatSelect value={line.rank} options={allowedOptions('RAM', 'rank', line, RAM_RANK)} invalid={bad('rank')} onChange={v => set({ rank: v })} />
       </div>
       <div className={cls('speedMhz')}>
-        <label className="label">{t('speedMhz')} <span className="req">*</span></label>
+        <label className="label">{t('speedMhz')} {req('speed')}</label>
         <input
           className="input"
           value={line.speed ?? ''}
@@ -96,7 +100,7 @@ export function RamFields({ line, set, missing }: FieldsProps) {
         />
       </div>
       <div className={cls('chipNumber')}>
-        <label className="label">{t('chipNumber')} {chipNumberRequired(line.brand) && <span className="req">*</span>}</label>
+        <label className="label">{t('chipNumber')} {req('chipNumber')}</label>
         <input
           className="input mono"
           value={line.chipNumber ?? ''}
@@ -111,17 +115,17 @@ export function RamFields({ line, set, missing }: FieldsProps) {
         />
       </div>
       <div className={cls('partNumber')} style={{ gridColumn: 'span 2' }}>
-        <label className="label">{t('partNumber')} <span className="req">*</span></label>
+        <label className="label">{t('partNumber')} {req('partNumber')}</label>
         <PartNumberField
           value={line.partNumber}
           invalid={bad('partNumber')}
           onChange={v => set({ partNumber: v })}
-          placeholder="M393A4K40DB3-CWE"
+          placeholder={synthesizePartNumber('RAM', line) ?? 'M393A4K40DB3-CWE'}
         />
         <RamPartReadout line={line} onUse={set} onUsePart={partNumber => set({ partNumber })} />
       </div>
       <div className="field" style={{ gridColumn: 'span 2' }}>
-        <label className="label">{t('condition')} <span className="req">*</span></label>
+        <label className="label">{t('condition')}</label>
         <CatSelect value={line.condition} options={CONDITIONS} onChange={v => set({ condition: v })} />
       </div>
     </div>
@@ -164,7 +168,7 @@ export function SsdFields({ line, set }: FieldsProps) {
         />
       </div>
       <div className="field" style={{ gridColumn: 'span 2' }}>
-        <label className="label">{t('condition')} <span className="req">*</span></label>
+        <label className="label">{t('condition')}</label>
         <CatSelect value={line.condition} options={CONDITIONS} onChange={v => set({ condition: v })} />
       </div>
     </div>
@@ -216,7 +220,7 @@ export function HddFields({ line, set }: FieldsProps) {
         />
       </div>
       <div className="field" style={{ gridColumn: 'span 2' }}>
-        <label className="label">{t('condition')} <span className="req">*</span></label>
+        <label className="label">{t('condition')}</label>
         <CatSelect value={line.condition} options={CONDITIONS} onChange={v => set({ condition: v })} />
       </div>
     </div>
@@ -251,7 +255,7 @@ export function OtherFields({ line, set }: FieldsProps) {
         />
       </div>
       <div className="field">
-        <label className="label">{t('condition')} <span className="req">*</span></label>
+        <label className="label">{t('condition')}</label>
         <CatSelect value={line.condition} options={CONDITIONS} onChange={v => set({ condition: v })} />
       </div>
     </div>

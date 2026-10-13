@@ -560,7 +560,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, newN
             />
           </div>
           <div className="ph-field">
-            <label>{t('condition')}<span style={{ color: 'var(--neg)', marginLeft: 2 }}>*</span></label>
+            <label>{t('condition')}</label>
             <select className="select" value={line.condition ?? 'Pulled — Tested'} onChange={e => set('condition', e.target.value)}>
               {/* Orphan-safe: if the stored value isn't in the live catalog
                   (renamed or removed), render it as a one-off option so the
