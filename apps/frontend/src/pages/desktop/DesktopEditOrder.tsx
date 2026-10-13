@@ -1779,7 +1779,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
               />
               {/* Bank payments linked to this PO on the Payments page. Manager-only
                   (the API 403s everyone else) and invisible until something links. */}
-              {user?.role === 'manager' && <PoPaymentsLedger orderId={order.id} locale={locale} />}
+              {user?.role === 'manager' && <PoPaymentsLedger scope={{ orderId: order.id, kind: 'cost' }} locale={locale} />}
             </div>
           ),
           commission: (
@@ -1803,6 +1803,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
               commissionShots={commissionShots}
               commissionPaidBy={commissionPaidBy}
               canEditCommissionPayment={!isPurchaser}
+              ledger={user?.role === 'manager' && (
+                <PoPaymentsLedger scope={{ orderId: order.id, kind: 'commission' }} locale={locale} />
+              )}
             />
           ),
           notes: (

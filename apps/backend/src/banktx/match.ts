@@ -194,14 +194,28 @@ function sellerNameFrag(sql: SqlClient, legAlias: string, orderAlias = 'o') {
 // id, so a linked row can turn into money that came back; failed and reversed
 // rows stay out. NULL, not 0, when nothing is linked, so "unpaid" and "paid
 // and fully refunded" read apart.
+// Cost money only: the purchaser's commission links to the same PO under its
+// own kind, and counting it here would read the PO as over-paid.
 export function linkedPaidFrag(sql: SqlClient, orderAlias = 'o') {
   const o = sql(orderAlias);
   return sql`(
     SELECT -SUM(bt.amount) FROM bank_transactions bt
-    WHERE bt.order_id = ${o}.id AND NOT bt.ignored
+    WHERE bt.order_id = ${o}.id AND bt.link_kind <> 'commission' AND NOT bt.ignored
       AND (bt.pair_id IS NULL OR bt.source = 'paypal')
       AND bt.settle_status <> 'failed' AND bt.settle_status <> 'reversed'
   )`;
+}
+
+// A row links to one target — a purchase order (cost or commission) or a sell
+// order — so "not linked" is both columns empty. One fragment and one
+// predicate, so a guard that reads `order_id` alone cannot creep back in.
+export function unlinkedFrag(sql: SqlClient | TransactionSql, legAlias: string) {
+  const a = sql(legAlias);
+  return sql`${a}.order_id IS NULL AND ${a}.sell_order_id IS NULL`;
+}
+
+export function isLinked(leg: { order_id: string | null; sell_order_id: string | null }): boolean {
+  return leg.order_id !== null || leg.sell_order_id !== null;
 }
 
 // A row the manager can still act on. Defined once so the status filter, the
@@ -211,7 +225,7 @@ export function linkedPaidFrag(sql: SqlClient, orderAlias = 'o') {
 // Also runs inside a sync transaction (banktx/ignoreRules.ts), hence the union.
 export function openRowFrag(sql: SqlClient | TransactionSql, legAlias: string) {
   const a = sql(legAlias);
-  return sql`${a}.order_id IS NULL AND NOT ${a}.ignored AND ${a}.category = 'external'
+  return sql`${unlinkedFrag(sql, legAlias)} AND NOT ${a}.ignored AND ${a}.category = 'external'
     -- Every PO is in USD; a row in another currency has nothing to be
     -- reconciled against, and its number would match the wrong payment.
     AND ${a}.currency = 'USD'
@@ -280,7 +294,9 @@ function pairEligibleFrag(sql: SqlClient, legAlias: string, candAlias: string) {
     AND ${c}.settle_status <> 'failed' AND ${c}.settle_status <> 'reversed'
     AND ${c}.source <> ${l}.source
     AND ${c}.amount = ${l}.amount
-    AND (${c}.order_id IS NULL OR ${l}.order_id IS NULL OR ${c}.order_id = ${l}.order_id)`;
+    AND (${c}.order_id IS NULL OR ${l}.order_id IS NULL OR ${c}.order_id = ${l}.order_id)
+    AND (${c}.sell_order_id IS NULL OR ${l}.sell_order_id IS NULL
+         OR ${c}.sell_order_id = ${l}.sell_order_id)`;
 }
 
 // The suggestion mirrors autoPair's window because it is the same claim made
@@ -294,6 +310,7 @@ export type PairLeg = {
   amount: number;
   posted_at: Date;
   order_id: string | null;
+  sell_order_id: string | null;
 };
 
 export type PairCandidate = {
@@ -354,8 +371,10 @@ export async function pairCandidatesBatch(
         amount: x.amount,
         posted_at: x.posted_at,
         order_id: x.order_id,
+        sell_order_id: x.sell_order_id,
       })))}::jsonb)
-      AS t(id uuid, source text, amount numeric, posted_at timestamptz, order_id text)
+      AS t(id uuid, source text, amount numeric, posted_at timestamptz, order_id text,
+           sell_order_id text)
     )
     SELECT l.id AS leg_id, c.id, c.source, c.external_id, c.posted_at,
            c.amount::float AS amount, c.counterparty, c.description,

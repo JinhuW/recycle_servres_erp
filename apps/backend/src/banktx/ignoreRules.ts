@@ -4,7 +4,7 @@
 // match must keep its ignore when one of them goes.
 
 import type { SqlLike } from '../db';
-import { openRowFrag } from './match';
+import { openRowFrag, unlinkedFrag } from './match';
 
 type Db = SqlLike;
 
@@ -34,7 +34,7 @@ function eligibleFrag(sql: Db, legAlias: string) {
     AND NOT EXISTS (
       SELECT 1 FROM bank_transactions sib
       WHERE ${bt}.pair_id IS NOT NULL AND sib.pair_id = ${bt}.pair_id
-        AND (sib.order_id IS NOT NULL OR sib.no_auto_ignore))`;
+        AND (sib.linked_at IS NOT NULL OR sib.no_auto_ignore))`;
 }
 
 // Applies every rule. Returns the number of rows ignored by this pass.
@@ -54,7 +54,7 @@ export async function applyIgnoreRules(tx: Db): Promise<number> {
     FROM bank_transactions s
     WHERE s.ignore_rule_id IS NOT NULL AND s.ignored
       AND bt.pair_id = s.pair_id AND bt.id <> s.id
-      AND NOT bt.ignored AND bt.order_id IS NULL AND NOT bt.no_auto_ignore`;
+      AND NOT bt.ignored AND ${unlinkedFrag(tx, 'bt')} AND NOT bt.no_auto_ignore`;
   return hit.count + spread.count;
 }
 

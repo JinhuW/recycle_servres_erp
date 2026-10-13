@@ -171,7 +171,7 @@ describe('internal transactions API', () => {
       token, body: { txnIds: [outId] },
     });
     expect(r.status).toBe(400);
-    expect(r.body.error).toMatch(/purchase order/i);
+    expect(r.body.error).toMatch(/order/i);
 
     // And the refused member left no empty record behind.
     const list = await api<{ rows: RecordRow[] }>('GET', '/api/internal-transactions', { token });

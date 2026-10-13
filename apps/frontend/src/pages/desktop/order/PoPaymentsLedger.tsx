@@ -2,18 +2,29 @@ import { useEffect, useState } from 'react';
 import { api } from '../../../lib/api';
 import { fmtUSD, fmtDateShort } from '../../../lib/format';
 import { useT } from '../../../lib/i18n';
-import { paymentsForOrderPath } from '../../../lib/route';
+import { paymentsForOrderPath, paymentsForSellOrderPath } from '../../../lib/route';
 import { RouteLink } from '../../../components/RouteLink';
 
-// Read-only ledger of bank transactions linked to this PO on the Payments
-// page. Renders nothing until a payment is linked, so most POs pay no cost.
+// Which of a bank row's three link targets this ledger reads: a PO's cost
+// (what the supplier was paid), a PO's commission (what the purchaser was),
+// or a sell order (what the buyer sent).
+export type LedgerScope =
+  | { orderId: string; kind: 'cost' | 'commission' }
+  | { sellOrderId: string };
+
+type LinkKind = 'payment' | 'refund' | 'commission' | null;
+
+// Read-only ledger of bank transactions linked to an order on the Payments
+// page. Renders nothing until a payment is linked, so most orders pay no cost.
 // Manager-only by its API (everyone else 403s), so the host gates it.
-export function PoPaymentsLedger({ orderId, locale }: { orderId: string; locale: string }) {
+export function PoPaymentsLedger({ scope, locale, className }: {
+  scope: LedgerScope; locale: string; className?: string;
+}) {
   const { t } = useT();
   const [ledger, setLedger] = useState<{
     payments: {
       id: string; source: string; postedAt: string; amount: number;
-      counterparty: string | null; linkKind: 'payment' | 'refund' | null; linkAuto: boolean;
+      counterparty: string | null; linkKind: LinkKind; linkAuto: boolean;
       // Added in v1.127.0; optional because the SPA and the API deploy on
       // independent pipelines. Absent means settled — nothing else used to be
       // ingested at all.
@@ -22,22 +33,32 @@ export function PoPaymentsLedger({ orderId, locale }: { orderId: string; locale:
     net: number;
   } | null>(null);
 
+  const url = 'sellOrderId' in scope
+    ? `/api/bank-transactions/by-sell-order/${encodeURIComponent(scope.sellOrderId)}`
+    : `/api/bank-transactions/by-order/${encodeURIComponent(scope.orderId)}`
+      + (scope.kind === 'commission' ? '?kind=commission' : '');
+  const openPath = (txnId?: string) => 'sellOrderId' in scope
+    ? paymentsForSellOrderPath(scope.sellOrderId, txnId)
+    : paymentsForOrderPath(scope.orderId, txnId);
+  // A sell order's money comes in, so its net reads as received.
+  const netKey = 'sellOrderId' in scope ? 'payLedgerNetReceived' : 'payLedgerNet';
+
   useEffect(() => {
     let alive = true;
-    api.get<NonNullable<typeof ledger>>(`/api/bank-transactions/by-order/${encodeURIComponent(orderId)}`)
+    api.get<NonNullable<typeof ledger>>(url)
       .then(r => { if (alive) setLedger(r); })
       // Silent: the ledger is a side panel, not the page — a fetch hiccup
       // must not throw a dialog over an otherwise working order edit.
       .catch(() => {});
     return () => { alive = false; };
-  }, [orderId]);
+  }, [url]);
 
   if (!ledger || ledger.payments.length === 0) return null;
   return (
-    <div className="oe-ledger">
+    <div className={className ?? 'oe-ledger'}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
         <div style={{ fontSize: 13, fontWeight: 600 }}>{t('payLedgerTitle')}</div>
-        <RouteLink to={paymentsForOrderPath(orderId)} className="btn sm ghost" style={{ marginLeft: 'auto' }}>
+        <RouteLink to={openPath()} className="btn sm ghost" style={{ marginLeft: 'auto' }}>
           {t('payLedgerOpen')}
         </RouteLink>
       </div>
@@ -45,9 +66,10 @@ export function PoPaymentsLedger({ orderId, locale }: { orderId: string; locale:
         {ledger.payments.map(p => (
           <div key={p.id} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
             <span className={'chip dot ' + (p.linkKind === 'refund' ? 'cool' : 'pos')} style={{ fontSize: 10.5 }}>
-              {t(p.linkKind === 'refund' ? 'payKindRefund' : 'payKindPayment')}
+              {t(p.linkKind === 'refund' ? 'payKindRefund'
+                : p.linkKind === 'commission' ? 'payKindCommission' : 'payKindPayment')}
             </span>
-            {/* Without this the PO reads as paid by money that is still in
+            {/* Without this the order reads as paid by money that is still in
                 flight, or that came back — the net below already excludes the
                 second kind, and the chip is what explains the difference. */}
             {p.settleStatus && p.settleStatus !== 'settled' && (
@@ -60,9 +82,9 @@ export function PoPaymentsLedger({ orderId, locale }: { orderId: string; locale:
               </span>
             )}
             {/* Each row is the way back to its transaction: the Payments page
-                pinned to this PO, that row open. */}
+                pinned to this order, that row open. */}
             <RouteLink
-              to={paymentsForOrderPath(orderId, p.id)}
+              to={openPath(p.id)}
               className="muted rec-link"
               title={t('payLedgerOpen')}
               style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
@@ -80,7 +102,7 @@ export function PoPaymentsLedger({ orderId, locale }: { orderId: string; locale:
           display: 'flex', justifyContent: 'space-between',
           paddingTop: 6, borderTop: '1px dashed var(--border)', fontWeight: 600,
         }}>
-          <span>{t('payLedgerNet')}</span>
+          <span>{t(netKey)}</span>
           <span className="mono">{(ledger.net < 0 ? '−' : '+') + fmtUSD(Math.abs(ledger.net), locale)}</span>
         </div>
       </div>

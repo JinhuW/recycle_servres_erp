@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-249](./RS-249-bank-payments-link-to-a-sell-order-or-a-po-s-commiss.md) | done | story | P2 | Bank payments link to a sell order or a PO's commission | 1.257.0 |
 | [RS-248](./RS-248-sell-order-list-quick-after-sales-button-on-done-ord.md) | done | task | P2 | Sell-order list: quick After-sales button on Done orders | 1.256.0 |
 | [RS-247](./RS-247-pre-release-review-fixes-for-the-v1-254-release.md) | done | bug | P1 | Pre-release review fixes for the v1.254 release | 1.255.1 |
 | [RS-246](./RS-246-sell-order-bid-sheet-groups-ddr5-ram-by-spec.md) | done | story | P2 | Sell-order bid sheet groups DDR5 RAM by spec | 1.255.0 |

@@ -17,6 +17,36 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.257.0] - 2026-10-13
+
+Bank payments link to a sell order or to a PO's commission, not only to a
+PO's cost (RS-249).
+
+### Added
+
+- **A payment links to one of three targets.** The Payments page's *Link…*
+  now opens on three tabs: the purchase order a payment paid (as before),
+  that PO's **commission** — what the purchaser was paid, which until now
+  could only be linked as if it were cost money and made the PO read as
+  over-paid — or a **sell order**, the money a buyer sent, which had no home
+  on the page at all. An incoming payment opens on the sell-order tab. The
+  PO tab keeps its ranked suggestions; the two new ones list recent
+  candidates and search by id, customer or purchaser, an exact amount
+  badged first. A commission link never counts toward the PO's cost paid
+  and never fills its transaction ID; a sell order's link reads money in as
+  the buyer's payment and money out as our refund. Every other verdict —
+  unlink, group, ignore, assign, transfer — treats the three alike.
+- **Each target has its ledger.** The PO's Commission box lists the
+  payments linked as its commission, the sell-order page lists what the
+  bank received for it with the net, and `#/payments/so/<id>` pins the
+  Payments page to a sell order the way `#/payments/po/<id>` does to a PO.
+
+### Changed
+
+- `bank_transactions` gains `sell_order_id` (migration 0176) and a
+  `commission` link kind; the table's link CHECKs now say a row is linked
+  when `linked_at` is set and exactly one target is named.
+
 ## [1.256.0] - 2026-10-13
 
 The sell-order list gets a quick After-sales button (RS-248).
