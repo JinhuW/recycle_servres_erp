@@ -1347,7 +1347,13 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   the price column is no bid, not a $0 price (v1.247.1). A sheet made before
   v1.242.0 that priced a part's conditions apart leaves that part for the
   manager to price, flagged as such, instead of taking its last row
-  (v1.247.1).
+  (v1.247.1). **A DDR5 lot folds by spec, not part number** (v1.255.0): the
+  same Brand + Type + Capacity + Rank + Speed + Class key as Inventory's
+  grouped view, so lots of several part numbers are one row with their qty
+  summed. The row's Part Number cell lists each part number it folds,
+  comma-separated, and the import reads that cell as one price for every
+  part in it, one preview line each. The packing lists and the product `#`
+  keep folding by part number.
 - The price template splits into one worksheet per category with per-attribute
   spec columns and image URLs (v1.25.0, v1.27.0). **The RAM tab groups its rows
   with merged label columns left of `#`** — "Desktop & laptop" / "Server", then

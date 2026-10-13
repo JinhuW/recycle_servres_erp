@@ -201,6 +201,19 @@ describe('part-number matching', () => {
     expect(res.rows[0]).toMatchObject({ status: 'matched', canonPart: 'CABC123', price: 75 });
   });
 
+  it('reads a cell listing several part numbers as one price for each', () => {
+    const products = [product({ partNumber: 'D5-A', label: 'Samsung 32GB DDR5', qty: 3 }),
+      product({ partNumber: 'D5-B', label: 'Samsung 32GB DDR5', qty: 2 }),
+      product({ partNumber: 'D5-C', label: 'Samsung 32GB DDR5', qty: 1 })];
+    const wb = wbWith([['Part Number', 'Unit Price (USD)'], ['D5-A, D5-B', 42], ['D5-C', 7]]);
+    const r = parsePriceWorkbook(wb, products);
+    expect(r.rows.map(x => [x.rowNumber, x.rawPart, x.status, x.price])).toEqual([
+      [2, 'D5-A', 'matched', 42], [2, 'D5-B', 'matched', 42], [3, 'D5-C', 'matched', 7],
+    ]);
+    expect(r.summary.matched).toBe(3);
+    expect(r.unmatchedProducts).toEqual([]);
+  });
+
   it('flags parts that are not in the order', () => {
     const wb = wbWith([
       ['Part Number', 'Unit Price (USD)'],

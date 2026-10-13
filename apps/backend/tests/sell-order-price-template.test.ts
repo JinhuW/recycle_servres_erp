@@ -34,7 +34,7 @@ async function createOrder(token: string, opts: { currency?: string; lines?: obj
       ],
     },
   });
-  expect(r.status).toBe(201);
+  expect(r.status, JSON.stringify(r.body)).toBe(201);
   return r.body.id;
 }
 
@@ -121,6 +121,52 @@ describe('GET /api/sell-orders/:id/price-template', () => {
     }
     expect(dataRows).toHaveLength(1);
     expect(Number(ws.getRow(dataRows[0]).getCell(qtyCol).value)).toBe(5);
+  });
+
+  it('folds DDR5 lots by spec: one row, qty summed, every part number in the cell', async () => {
+    const { token } = await loginAs(ALEX);
+    const ddr5 = async (partNumber: string, qty: number, rank: string) => {
+      const r = await api<{ id: string }>('POST', '/api/orders', {
+        token,
+        body: {
+          warehouseId: 'WH-LA1', paypalTxnId: 'TPLD5TXN' + partNumber.slice(-4) + rank, category: 'RAM',
+          lines: [{
+            category: 'RAM', brand: 'Samsung', capacity: '32GB', generation: 'DDR5', type: 'Server',
+            classification: 'RDIMM', rank, speed: '4800', partNumber,
+            serialNumber: Array.from({ length: qty }, (_, i) => `SN-${partNumber}-${rank}-${i}`).join('\n'),
+            condition: 'Pulled — Tested', qty, unitCost: 50,
+          }],
+        },
+      });
+      expect(r.status, JSON.stringify(r.body)).toBe(201);
+      // Draft → In Transit → Reviewing: only a Reviewing or Done lot sells.
+      for (let i = 0; i < 2; i++) expect((await api('POST', `/api/orders/${r.body.id}/advance`, { token })).status).toBe(200);
+      const got = await api<{ order: { lines: { id: string; status: string }[] } }>('GET', `/api/orders/${r.body.id}`, { token });
+      expect(got.body.order.lines[0].status).toBe('Reviewing');
+      return got.body.order.lines[0].id;
+    };
+    const a = await ddr5('M321R4GA3BB6-CQK', 3, '2Rx4');
+    const b = await ddr5('M321R4GA3BB6-CQKET', 2, '2Rx4');
+    const c = await ddr5('M321R4GA3BB6-CQK', 1, '1Rx4');
+    const line = (inventoryId: string, partNumber: string, qty: number) =>
+      ({ inventoryId, category: 'RAM', label: 'Samsung 32GB DDR5', partNumber, qty, unitPrice: 60 });
+    const id = await createOrder(token, {
+      lines: [
+        line(a, 'M321R4GA3BB6-CQK', 3), line(b, 'M321R4GA3BB6-CQKET', 2), line(c, 'M321R4GA3BB6-CQK', 1),
+      ],
+    });
+    const res = await getRaw(`/api/sell-orders/${id}/price-template`, token);
+    const ws = (await loadWorkbook(res)).worksheets.find(w => w.name === 'RAM')!;
+    const { row: headerRow, cols } = findHeaderRow(ws);
+    const cell = (r: number, h: string) => ws.getRow(r).getCell(cols.get(h)!).value;
+    const rows: { part: string; qty: number; rank: string }[] = [];
+    for (let r = headerRow + 1; r <= ws.rowCount; r++) {
+      if (cell(r, 'Part Number')) rows.push({ part: String(cell(r, 'Part Number')), qty: Number(cell(r, 'Qty')), rank: String(cell(r, 'Rank')) });
+    }
+    expect(rows).toEqual([
+      { part: 'M321R4GA3BB6-CQK', qty: 1, rank: '1Rx4' },
+      { part: 'M321R4GA3BB6-CQK, M321R4GA3BB6-CQKET', qty: 5, rank: '2Rx4' },
+    ]);
   });
 
   it('prices a part once: no Condition column, its conditions on one row', async () => {
