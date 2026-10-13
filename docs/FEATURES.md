@@ -1560,6 +1560,8 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   page has an **After-sales** button that opens the new-case form with the
   order preselected, and a card in the side column listing the order's
   cases with their status, issue and amount. See [After-sales](#after-sales).
+  The list has the same button in each eligible row's Actions column
+  (v1.256.0), so a case can be opened without visiting the order first.
 
 ## After-sales
 
@@ -1569,7 +1571,7 @@ ends — the goods come back (**Return**) or the customer keeps them at a
 lower price (**Discount**). Purchasers never see the page or the API.
 
 - **Opening a case** (v1.251.0). `#/after-sales/new`, or the After-sales
-  button on a sell order. The form loads the order, refuses one that is
+  button on a sell order's page or its row in the list (v1.256.0). The form loads the order, refuses one that is
   Draft, Packing or Closed (nothing has shipped, or nothing was sold), and
   lists its products with a checkbox and a quantity capped at the line's
   qty (typed freely, clamped when the field loses focus — v1.255.1). The

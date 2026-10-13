@@ -604,6 +604,11 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
                           <Icon name="edit" size={12} />
                         </RouteLink>
                       )}
+                      {CASEABLE_SELL_STATUSES.has(o.status) && (
+                        <RouteLink to={afterSalesNewPath(o.id)} className="btn icon sm" title={t('soAfterSalesOpen')} aria-label={t('soAfterSalesOpen')}>
+                          <Icon name="refresh" size={12} />
+                        </RouteLink>
+                      )}
                     </div>
                   </td>
                 </tr>

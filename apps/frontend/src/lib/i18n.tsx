@@ -384,6 +384,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     soAfterSales: 'After-sales',
     soAfterSalesCases: 'After-sales cases',
     soAfterSalesNone: 'No cases on this order.',
+    soAfterSalesOpen: 'Open after-sales case',
     nav_analysis: 'Analysis',
     nav_group_oversight: 'Oversight',
     nav_activity: 'Activity',
