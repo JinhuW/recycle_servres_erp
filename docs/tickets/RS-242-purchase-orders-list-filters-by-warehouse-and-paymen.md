@@ -2,12 +2,12 @@
 id: RS-242
 title: Purchase orders list filters by warehouse and payment method
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-10-12
 reporter: jinhu
 branch: feat-payment-warehouse-filter
-pr:
+pr: 627
 version: 1.252.0
 related: []
 ---

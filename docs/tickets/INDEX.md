@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-242](./RS-242-purchase-orders-list-filters-by-warehouse-and-paymen.md) | in-review | story | P2 | Purchase orders list filters by warehouse and payment method | 1.252.0 |
+| [RS-242](./RS-242-purchase-orders-list-filters-by-warehouse-and-paymen.md) | done | story | P2 | Purchase orders list filters by warehouse and payment method | 1.252.0 |
 | [RS-241](./RS-241-after-sales-cases-track-returns-and-discounts-on-sol.md) | done | story | P2 | After-sales cases: track returns and discounts on sold orders | 1.251.0 |
 | [RS-240](./RS-240-sell-order-add-inventory-button-in-the-products-tool.md) | done | story | P2 | Sell order Add inventory button in the products toolbar | 1.250.0 |
 | [RS-239](./RS-239-sell-order-internal-notes-editable-at-any-time.md) | done | story | P2 | Sell order internal notes editable at any time | 1.249.0 |
