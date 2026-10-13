@@ -408,7 +408,7 @@ const zh: Record<string, string> = {
   role: '角色',
   commission: '佣金',
   purchaseOrders: '采购订单',
-  allOrders: '全部订单', mineOnly: '仅自己', statusFilters: '状态筛选',
+  allOrders: '全部订单', mineOnly: '仅自己', statusFilters: '状态筛选', poFacetFilters: '仓库与付款方式筛选',
   orderId: '订单号', date: '日期', submitter: '提交人',
   lines: '产品', qty: '数量', actions: '操作',
   searchOrderPart: '搜索订单号或零件号',

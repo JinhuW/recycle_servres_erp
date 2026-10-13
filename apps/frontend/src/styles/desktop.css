@@ -663,6 +663,21 @@ html.desktop, body.desktop, .desktop #root {
 .status-chip[aria-pressed="true"] .sc-n { color: var(--fg); }
 /* Sets the Sold chip apart: a flag beside the stages, not one of them. */
 .status-rail-sep { width: 1px; align-self: stretch; margin: 2px 2px; background: var(--border); }
+/* The stage rail with a facet rail under it: one block, no rule between. */
+.status-rail.stacked { border-bottom: none; padding-bottom: 8px; }
+.facet-rail .rail-label {
+  display: inline-flex; align-items: center; gap: 5px;
+  margin-right: 2px;
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--fg-subtle);
+}
+.facet-rail .status-rail-sep { margin: 2px 6px; }
+/* The table after a facet pick: a short settle, not a hard cut. */
+.facet-swap { animation: facet-swap 0.18s ease-out; }
+@keyframes facet-swap { from { opacity: 0.35; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .facet-swap { animation: none; }
+}
 
 /* ===== KPIs ===== */
 .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--gap, 16px); }
