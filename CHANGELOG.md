@@ -17,6 +17,23 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.255.0] - 2026-10-13
+
+The sell order's bid sheet folds DDR5 RAM by spec, the way Inventory's
+grouped view does (RS-246).
+
+### Changed
+
+- **A DDR5 lot on the bid sheet folds by Brand, Type, Capacity, Rank, Speed
+  and Class, whatever its part number.** The buyer prices a Samsung 32GB
+  2Rx4 4800 RDIMM once, not once per stick, so lots from several part
+  numbers are one row with their qty summed. The row's Part Number cell
+  lists every part number it folds, comma-separated, and the price import
+  reads such a cell as one price for each of them, so the vendor's bid still
+  prices every line of the order; the import preview shows one line per
+  part number. DDR3 and DDR4 rows, hand-typed lines, the packing lists and
+  the product # are unchanged.
+
 ## [1.254.0] - 2026-10-13
 
 Inventory's grouped view groups DDR5 RAM by spec, not by part number
