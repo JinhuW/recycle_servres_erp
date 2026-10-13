@@ -366,7 +366,17 @@ export function parsePriceWorkbook(
   const perCondition = new Set<number>();
   const condKey = (c: string | null | undefined) => (c ?? '').trim().toLowerCase();
 
-  for (const sheetRow of sheetRows) {
+  // A bid row that folds several part numbers (a DDR5 spec row) lists them
+  // comma-separated in one cell; its one price is each part's price, so the
+  // cell reads as one row per part, all at the row's number.
+  const partCells = sheetRows.flatMap((sheetRow) => {
+    const parts = sheetRow.rawPart.split(/[,;\n]+/).map((s) => s.trim()).filter(Boolean);
+    return parts.length > 1
+      ? parts.map((rawPart) => ({ ...sheetRow, rawPart, canonPart: canonPartNumberJs(rawPart) }))
+      : [sheetRow];
+  });
+
+  for (const sheetRow of partCells) {
     const parsed: ParsedPriceRow = {
       sheet: sheetRow.sheet,
       rowNumber: sheetRow.rowNumber,

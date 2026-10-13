@@ -9,21 +9,27 @@ import {
   CloseSellOrderDialog, ReopenSellOrderDialog,
 } from '../../components/CloseSellOrderDialog';
 import { useT } from '../../lib/i18n';
+import { statusTone } from '../../lib/status';
 import { forEachKeysetPage } from '../../lib/keysetPages';
 import { confirmDiscard, useUnsavedGuard } from '../../lib/unsavedGuard';
-import { api, ApiError, archiveSellOrder, unarchiveSellOrder } from '../../lib/api';
+import { api, afterSalesForOrder, type AfterSalesOrderCase, ApiError, archiveSellOrder, unarchiveSellOrder } from '../../lib/api';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
-import { useRoute, navigate, replaceRoute, match, matchSellOrderPack, sellOrderPackPath, poLinePath } from '../../lib/route';
+import {
+  useRoute, navigate, replaceRoute, match, matchSellOrderPack, sellOrderPackPath, poLinePath,
+  afterSalesCasePath, afterSalesNewPath, hrefFor, onLinkClick,
+} from '../../lib/route';
 import { RouteLink } from '../../components/RouteLink';
 import { shareOrCopy } from '../../lib/shareOrCopy';
 import { fmtUSD, fmtUSD0, fmtMoney, fmtDate, fmtDateShort, CURRENCY_SYMBOL, canonicalPartNumber } from '../../lib/format';
 import { fetchRateToUsd, type FxInfo } from '../../lib/fxRate';
-import { sellOrderStatuses } from '../../lib/lookups';
+import { sellOrderStatuses, sellOrderStatusShort } from '../../lib/lookups';
+import { useManagerOptions, type MemberOption } from '../../lib/useManagers';
+import { CASEABLE_SELL_STATUSES } from '@recycle-erp/shared';
 import { closeReasonLabelKey } from '../../lib/closeReasons';
 import { usePersisted } from '../../lib/listMemory';
 import { TableSkeleton, FormSkeleton } from '../../components/Skeleton';
 import { SellOrderHistory } from '../../components/SellOrderHistory';
-import { CustomerPicker, CurrencyPicker, type Customer, type MemberOption } from './DesktopSellOrderDraft';
+import { CustomerPicker, CurrencyPicker, type Customer } from './DesktopSellOrderDraft';
 import { useAuth } from '../../lib/auth';
 import { AddInventoryPicker, type SellableItem } from '../../components/AddInventoryPicker';
 import { AttachmentChip } from '../../components/AttachmentChip';
@@ -31,7 +37,7 @@ import { PriceImportSection } from './SellOrderPriceImportDialog';
 import { applyPriceRows, type BidPart, mergeBidParts } from '../../lib/priceImport';
 import { usePreference } from '../../lib/preferences';
 import { LineSpecChips, lineHasSpecChips } from '../../components/LineSpecChips';
-import { groupSellOrderLines, type SellOrderLineGroup } from '../../lib/sellOrderLineGroups';
+import { filterLineGroups, groupSellOrderLines, type SellOrderLineGroup } from '../../lib/sellOrderLineGroups';
 import { isPackable, lotWarehouse, packWarehouseOptions, UNASSIGNED } from '../../lib/sellOrderPack';
 import { peekSellOrderPrefill, clearSellOrderPrefill } from '../../lib/sellOrderPrefill';
 import { missingSigners, signoffSig } from '../../lib/sellOrderSignoff';
@@ -39,6 +45,7 @@ import type { SellOrderSignoff } from '../../lib/types';
 import { SellOrderSignoffCard } from './SellOrderSignoff';
 import { productCount } from '../../lib/productNo';
 import { useEscapeKey } from '../../lib/useEscapeKey';
+import { useScanFilterText } from '../../lib/useScanFilter';
 import { useFixedPopover } from './popoverPlacement';
 
 // Its own chunk: only a packer opens it.
@@ -282,7 +289,7 @@ type SellOrderDetailType = {
 // Driven by sell_order_statuses; ids match sell_orders.status CHECK constraint.
 type SellStatusId = SellOrderSummary['status'];
 const toneFor  = (s: string) => sellOrderStatuses.find(o => o.id === s)?.tone  ?? 'muted';
-const shortFor = (s: string) => sellOrderStatuses.find(o => o.id === s)?.short ?? s;
+const shortFor = sellOrderStatusShort;
 
 // Closed & Done are the terminal statuses — orders that have left the working
 // pipeline. They're hidden from the default list (which shows only orders still
@@ -1039,7 +1046,7 @@ function SellOrderDetail({ id, mode, onToast }: {
   // FX snapshot for the draft's currency (null for USD or until it loads).
   const [fx, setFx] = useState<FxInfo | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [members, setMembers] = useState<MemberOption[]>([]);
+  const members = useManagerOptions();
   const [saving, setSaving] = useState(false);
   // Per-status evidence — loaded from the order, mutated live by the dialog,
   // and used to render paperclip badges on each step.
@@ -1130,15 +1137,18 @@ function SellOrderDetail({ id, mode, onToast }: {
     return () => { alive = false; };
   }, [mode]);
 
-  // Members back the receiver picker, which is offered in both modes — the
-  // receiver is the one field that stays assignable after the deal closes.
+  // After-sales cases on this order. Read whenever the page opens: a case
+  // made from the button comes back here through the browser's Back.
+  const [asCases, setAsCases] = useState<AfterSalesOrderCase[]>([]);
   useEffect(() => {
+    if (mode !== 'view') return;
     let alive = true;
-    api.get<{ items: (MemberOption & { role: string })[] }>('/api/members')
-      .then(r => { if (alive) setMembers(r.items.filter(m => m.role === 'manager')); })
+    afterSalesForOrder(id)
+      .then(r => { if (alive) setAsCases(r.cases); })
       .catch(handleFetchError);
     return () => { alive = false; };
-  }, []);
+  }, [id, mode]);
+  const asEligible = !!order && CASEABLE_SELL_STATUSES.has(order.status);
 
   // "locked" = no structural edits or status moves allowed. Done is the
   // terminal happy path; Closed is the off-ramp (line set + customer + status
@@ -1163,9 +1173,6 @@ function SellOrderDetail({ id, mode, onToast }: {
     || draft.bidParts.length > 0
     || pendingAdjust != null
   );
-  // Back and Cancel left the edit page with its edits and no word.
-  useUnsavedGuard(mode === 'edit' && !!dirty);
-
   // Done waits on every manager's sign-off of the order as saved. Edits that
   // void it are read the way the server reads them: a reorder or a warehouse
   // move doesn't, so linesChanged would over-warn.
@@ -1271,6 +1278,29 @@ function SellOrderDetail({ id, mode, onToast }: {
   // View-mode receiver change: no draft, no Save button — it hits the server
   // at once (the edit form folds the receiver into its PATCH instead). The
   // detail and history reload.
+  // View-mode notes save on their own, in any status, as the receiver does:
+  // the server locks only products and customer once an order is Done.
+  const [notesDraft, setNotesDraft] = useState('');
+  const [notesSaving, setNotesSaving] = useState(false);
+  const savedNotes = order?.notes ?? '';
+  useEffect(() => { setNotesDraft(savedNotes); }, [savedNotes]);
+  // Back and Cancel left the edit page with its edits and no word — and the
+  // view page with a typed note.
+  useUnsavedGuard((mode === 'edit' && !!dirty) || (mode === 'view' && notesDraft !== savedNotes));
+  const saveNotes = async () => {
+    if (!order || notesDraft === savedNotes) return;
+    setNotesSaving(true);
+    try {
+      await api.patch(`/api/sell-orders/${order.id}`, { notes: notesDraft });
+      setRefreshKey(k => k + 1);
+      setHistoryKey(k => k + 1);
+    } catch (e) {
+      handleFetchError(e);
+    } finally {
+      setNotesSaving(false);
+    }
+  };
+
   const saveReceiver = async (userId: string) => {
     if (!order || userId === (order.paymentReceivedBy?.id ?? '')) return;
     setReceiverSaving(true);
@@ -1295,6 +1325,24 @@ function SellOrderDetail({ id, mode, onToast }: {
     () => (draft ? groupSellOrderLines(draft.lines, lineGroup) : []),
     [draft, lineGroup],
   );
+  // Pack mode's filter on the order page: it narrows what is listed, never
+  // what the summary counts or what Save sends.
+  const [lineSearch, setLineSearch] = useState('');
+  const lineSearchRef = useRef<HTMLInputElement>(null);
+  const lineFilter = useScanFilterText(lineSearch);
+  const listedViewGroups = useMemo(() => filterLineGroups(viewGroups, lineFilter), [viewGroups, lineFilter]);
+  const listedEditGroups = useMemo(() => filterLineGroups(editGroups, lineFilter), [editGroups, lineFilter]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey) return;
+      if ((e.target as HTMLElement | null)?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      if (document.querySelector('[aria-modal="true"]') || !lineSearchRef.current) return;
+      e.preventDefault();
+      lineSearchRef.current.focus();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const setLine = (idx: number, patch: Partial<EditLine>) =>
     setDraft(d => d && { ...d, lines: d.lines.map((l, i) => (i === idx ? { ...l, ...patch } : l)) });
@@ -1305,8 +1353,25 @@ function SellOrderDetail({ id, mode, onToast }: {
   const removeLine = (idx: number) =>
     setDraft(d => d && { ...d, lines: d.lines.filter((_, i) => i !== idx) });
 
-  const addLines = (picked: SellableItem[]) =>
+  // A filter left in the search box would hide the lines just added, and a
+  // line lands in its warehouse's or PO's group, often below the fold — so
+  // the first one is scrolled to and every one flashes.
+  // Keyed by lot, not row: the rows are made inside the updater (fresh
+  // `_cid`s), which runs on the latest draft rather than this render's.
+  const [justAdded, setJustAdded] = useState<ReadonlySet<string>>(new Set());
+  const addLines = (picked: SellableItem[]) => {
+    if (!draft) return;
+    setLineSearch('');
+    setJustAdded(new Set(picked.filter(it => it.availableQty > 0).map(it => it.inventoryId)));
     setDraft(d => d && { ...d, lines: mergeSellable(d.lines, picked).lines });
+  };
+  useEffect(() => {
+    if (justAdded.size === 0) return;
+    const first = document.querySelector('tr.so-line-added');
+    first?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    const timer = setTimeout(() => setJustAdded(new Set()), 2400);
+    return () => clearTimeout(timer);
+  }, [justAdded]);
 
   const save = async () => {
     if (!order || !draft) return;
@@ -1515,6 +1580,11 @@ function SellOrderDetail({ id, mode, onToast }: {
                 <Icon name="edit" size={14} /> {t('sodReopen')}
               </button>
             )}
+            {!editable && !prefill && asEligible && (
+              <button className="btn" onClick={() => navigate(afterSalesNewPath(order.id))}>
+                <Icon name="refresh" size={14} /> {t('soAfterSales')}
+              </button>
+            )}
             {!editable && !prefill && (
               <button className="btn" onClick={() => navigate(sellOrderPackPath(order.id))} title={t('pkOpenTip')}>
                 <Icon name="package" size={14} /> {t('pkOpen')}
@@ -1697,7 +1767,59 @@ function SellOrderDetail({ id, mode, onToast }: {
                     <LineGroupSwitch value={lineGroup} onChange={setLineGroup} />
                   </div>
 
-                  {!editable && viewGroups.map(g => (
+                  {/* Search and Add share the toolbar over the lines, so adding
+                      never means scrolling past a long order to its foot. */}
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 12 }}>
+                    <div className="bc-scan-field" style={{ flex: 1, minWidth: 0 }}>
+                      <label className="bc-scan" htmlFor="so-line-search">
+                        <Icon name="search" size={14} />
+                        <input
+                          id="so-line-search"
+                          ref={lineSearchRef}
+                          className="input mono"
+                          type="text"
+                          autoComplete="off"
+                          autoCorrect="off"
+                          spellCheck={false}
+                          value={lineSearch}
+                          placeholder={t('sodLineSearchPh')}
+                          onChange={e => setLineSearch(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.nativeEvent.isComposing) return;
+                            // Clears the box, then leaves it; never the page.
+                            if (e.key === 'Escape') {
+                              e.stopPropagation();
+                              if (lineSearch) setLineSearch('');
+                              else e.currentTarget.blur();
+                            }
+                          }}
+                        />
+                      </label>
+                      {lineSearch && (
+                        <button type="button" className="bc-scan-clear" title={t('scanClear')} aria-label={t('scanClear')} onClick={() => setLineSearch('')}>
+                          <Icon name="x" size={13} />
+                        </button>
+                      )}
+                    </div>
+                    {editable && (
+                      <button
+                        type="button"
+                        className="btn accent"
+                        title={t('soAddInventoryTitle')}
+                        onClick={() => setAdding(true)}
+                        style={{ flexShrink: 0, whiteSpace: 'nowrap' }}
+                      >
+                        <Icon name="plus" size={14} /> {t('soAddInventory')}
+                      </button>
+                    )}
+                  </div>
+                  {lineFilter && (editable ? listedEditGroups : listedViewGroups).length === 0 && (
+                    <div className="help" style={{ marginBottom: 12 }}>
+                      {t('sodLineSearchNone', { q: lineFilter })}
+                    </div>
+                  )}
+
+                  {!editable && listedViewGroups.map(g => (
                     <div key={g.key} style={{ marginBottom: 14 }}>
                       <LineGroupHead group={g} by={lineGroup} linkPo />
                       <table className="so-line-table">
@@ -1732,7 +1854,7 @@ function SellOrderDetail({ id, mode, onToast }: {
                     </div>
                   ))}
 
-                  {editable && editGroups.map(g => (
+                  {editable && listedEditGroups.map(g => (
                     <div key={g.key} style={{ marginBottom: 14 }}>
                       <LineGroupHead group={g} by={lineGroup} linkPo={false} />
                       <table className="so-line-table">
@@ -1757,7 +1879,7 @@ function SellOrderDetail({ id, mode, onToast }: {
                             // A typed line has no lot to run out of.
                             const cap = l.inventoryId === null ? MAX_LINE_QTY : Math.max(0, Math.min(MAX_LINE_QTY, l.maxQty));
                             return (
-                            <tr key={l._cid}>
+                            <tr key={l._cid} className={l.inventoryId !== null && justAdded.has(l.inventoryId) ? 'so-line-added' : undefined}>
                               <LineItemCell line={l} lineNo={l.saved ? l.no : null} sub={l.subLabel} showPo={lineGroup === 'warehouse'} showLineNo={lineGroup === 'po'} linkPo={false} />
                               {lineGroup === 'po' && <td style={{ fontSize: 12 }}>{lotWarehouse(l) ?? t('sodNoWarehouse')}</td>}
                               <td className="num">
@@ -1819,15 +1941,6 @@ function SellOrderDetail({ id, mode, onToast }: {
                       {t('soPrefillAllPresent', { id: order.id })}
                     </div>
                   )}
-                  {editable && (
-                    <button
-                      className="btn sm"
-                      onClick={() => setAdding(true)}
-                      style={{ marginTop: 10 }}
-                    >
-                      <Icon name="plus" size={13} /> {t('soAddInventory')}
-                    </button>
-                  )}
                 </div>
 
                 {editable && (
@@ -1836,7 +1949,12 @@ function SellOrderDetail({ id, mode, onToast }: {
                   </div>
                 )}
 
-                {editable && (
+              </div>
+            </div>
+            <div className="so-page-side">
+              {/* Above the summary: on a long order, under the lines was a scroll past every one. */}
+              {editable && (
+                <div className="card so-page-card">
                   <PriceImportSection
                     orderId={order.id}
                     currency={draft.currency}
@@ -1848,20 +1966,8 @@ function SellOrderDetail({ id, mode, onToast }: {
                         bidParts: mergeBidParts(d.bidParts, rows),
                       })}
                   />
-                )}
-              </div>
-              <div className="card so-page-card">
-                <details open>
-                  <summary style={{ cursor: 'pointer', fontWeight: 600, padding: '8px 0' }}>
-                    {t('sodHistory')}
-                  </summary>
-                  <div style={{ marginTop: 12 }}>
-                    <SellOrderHistory sellOrderId={order.id} refreshKey={historyKey} />
-                  </div>
-                </details>
-              </div>
-            </div>
-            <div className="so-page-side">
+                </div>
+              )}
               {summary && (
               <div className="so-summary">
                 <div
@@ -2047,23 +2153,70 @@ function SellOrderDetail({ id, mode, onToast }: {
                 </div>
               )}
 
-              {/* Internal notes — section in both modes; read-only text when viewing */}
+              {/* After-sales cases — view mode only; a sold order can take a
+                  new one, an older order shows what it already has. */}
+              {!editable && (asEligible || asCases.length > 0) && (
+                <div className="card so-page-card">
+                  <div className="so-section-head"><Icon name="refresh" size={14} /> {t('soAfterSalesCases')}</div>
+                  {asCases.length === 0 ? (
+                    <div style={{ fontSize: 13, color: 'var(--fg-subtle)' }}>{t('soAfterSalesNone')}</div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {asCases.map(c => (
+                        <a
+                          key={c.id}
+                          href={hrefFor(afterSalesCasePath(c.id))}
+                          onClick={onLinkClick(afterSalesCasePath(c.id))}
+                          style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 13, textDecoration: 'none', color: 'inherit' }}
+                        >
+                          <span className="mono" style={{ fontWeight: 600 }}>{c.id}</span>
+                          <span className={'chip ' + statusTone(c.status)} style={{ fontSize: 10.5 }}>
+                            {t('asStatus_' + c.status.replace(/ /g, '_'))}
+                          </span>
+                          <span style={{ color: 'var(--fg-subtle)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                            {c.issue}
+                          </span>
+                          {c.amount != null && <span className="mono">{fmtUSD(c.amount, locale)}</span>}
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Internal notes — writable in both modes. Editing folds them
+                  into the form's Save; viewing saves them on their own. */}
               <div className="card so-page-card">
                 <div className="so-section-head"><Icon name="edit" size={14} /> {t('ieInternalNotes')}</div>
-                {editable ? (
-                  <textarea
-                    className="input"
-                    rows={3}
-                    value={draft.notes}
-                    onChange={e => setDraft({ ...draft, notes: e.target.value })}
-                    placeholder={t('soTrackingPlaceholder')}
-                    style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
-                  />
-                ) : (
-                  <div style={{ fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap', color: order.notes ? 'var(--fg)' : 'var(--fg-subtle)' }}>
-                    {order.notes || t('none')}
+                <textarea
+                  className="input"
+                  rows={3}
+                  value={editable ? draft.notes : notesDraft}
+                  disabled={!editable && notesSaving}
+                  onChange={e => (editable ? setDraft({ ...draft, notes: e.target.value }) : setNotesDraft(e.target.value))}
+                  placeholder={t('soTrackingPlaceholder')}
+                  style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
+                />
+                {!editable && notesDraft !== savedNotes && (
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+                    <button className="btn sm" disabled={notesSaving} onClick={() => setNotesDraft(savedNotes)}>
+                      {t('cancel')}
+                    </button>
+                    <button className="btn sm accent" disabled={notesSaving} onClick={saveNotes}>
+                      <Icon name="check" size={12} /> {t('save')}
+                    </button>
                   </div>
                 )}
+              </div>
+              <div className="card so-page-card" style={{ paddingTop: 8, paddingBottom: 8 }}>
+                <details>
+                  <summary style={{ cursor: 'pointer', fontWeight: 600, padding: '8px 0' }}>
+                    {t('sodHistory')}
+                  </summary>
+                  <div style={{ marginTop: 8, marginBottom: 10 }}>
+                    <SellOrderHistory sellOrderId={order.id} refreshKey={historyKey} />
+                  </div>
+                </details>
               </div>
             </div>
           </div>

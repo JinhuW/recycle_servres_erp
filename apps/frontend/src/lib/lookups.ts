@@ -48,6 +48,9 @@ export type SellOrderStatusInfo = {
   position: number;
 };
 export const sellOrderStatuses: SellOrderStatusInfo[] = [];
+// The chip label for a status id; the id itself before the lookups land.
+export const sellOrderStatusShort = (id: string): string =>
+  sellOrderStatuses.find(o => o.id === id)?.short ?? id;
 
 // ── Order/inventory categories (RAM/SSD/HDD/… ) ─────────────────────────────
 // Backed by the `categories` table; replaces the list the UI used to hardcode

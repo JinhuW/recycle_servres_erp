@@ -13,6 +13,7 @@
 import type postgres from 'postgres';
 import type { SqlLike } from '../db';
 import { comparePoIds, packSections, type PoSource, type PriceTemplateProduct } from '../lib/sellOrderPriceTemplate';
+import { ddr5SpecKey } from '@recycle-erp/shared';
 import { canonPartNumberJs } from '../lib/part-number';
 import { invLabel } from '../lib/inventoryLabel';
 import { poLineNo, sellLineOrder } from '../lib/poLineNo';
@@ -98,8 +99,11 @@ function foldLine(r: SheetLineRow): FoldLine {
   return {
     row: r, qty: Number(r.sell_qty ?? 0), label, category, part,
     key: `${canon}|${label}|${condition ?? ''}`,
-    // The bid sheet prices a part once, whatever its condition.
-    bidKey: `${canon}|${label}`,
+    // The bid sheet prices a part once, whatever its condition — and a DDR5
+    // lot by its spec, whatever its part number, as Inventory's grouped view
+    // does: the buyer takes any stick of that brand, type, capacity, rank,
+    // speed and form. The row then names every part number it folds.
+    bidKey: (hasInv && ddr5SpecKey(r)) || `${canon}|${label}`,
     // Both null for a hand-typed line, both set for a lot: order_lines.order_id
     // is NOT NULL and poLineNo is null only without a lot.
     po: r.source_order_id || null,
@@ -146,9 +150,21 @@ function foldProduct(id: string, lines: readonly FoldLine[]): SheetProduct {
       poSources.push({ po: l.po, lineNo: l.lineNo, qty: l.qty, solIds: [l.row.sol_id] });
     }
   }
+  // Lines of one product share a part number, except on a DDR5 bid row,
+  // which folds by spec: there the cell lists each one, the spelling of the
+  // first line that carries it, so the vendor's sheet round-trips every part.
+  const parts: string[] = [];
+  const seenCanon = new Set<string>();
+  for (const l of [shown, ...live, ...ordered]) {
+    if (!l.part) continue;
+    const canon = canonPartNumberJs(l.part);
+    if (seenCanon.has(canon)) continue;
+    seenCanon.add(canon);
+    parts.push(l.part);
+  }
   return {
     id, category: first.category, key: first.key, label: first.label,
-    partNumber: shown.part,
+    partNumber: parts.length ? parts.join(', ') : null,
     qty: lines.reduce((a, l) => a + l.qty, 0),
     imageUrl: live.map((l) => publicUrl(l.row.image_url)).find(Boolean) ?? null,
     specs, poSources,

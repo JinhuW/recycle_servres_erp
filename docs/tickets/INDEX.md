@@ -5,6 +5,19 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-247](./RS-247-pre-release-review-fixes-for-the-v1-254-release.md) | done | bug | P1 | Pre-release review fixes for the v1.254 release | 1.255.1 |
+| [RS-246](./RS-246-sell-order-bid-sheet-groups-ddr5-ram-by-spec.md) | done | story | P2 | Sell-order bid sheet groups DDR5 RAM by spec | 1.255.0 |
+| [RS-245](./RS-245-inventory-groups-ddr5-ram-by-spec-not-part-number.md) | done | story | P2 | Inventory groups DDR5 RAM by spec, not part number | 1.254.0 |
+| [RS-244](./RS-244-ram-form-ddr3-lines-need-only-capacity-and-type-cond.md) | done | story | P2 | RAM form: DDR3 lines need only capacity and type, condition never required | 1.253.0 |
+| [RS-243](./RS-243-grouped-inventory-lots-follow-the-warehouse-pill.md) | done | bug | P2 | Grouped inventory lots follow the warehouse pill | 1.252.1 |
+| [RS-242](./RS-242-purchase-orders-list-filters-by-warehouse-and-paymen.md) | done | story | P2 | Purchase orders list filters by warehouse and payment method | 1.252.0 |
+| [RS-241](./RS-241-after-sales-cases-track-returns-and-discounts-on-sol.md) | done | story | P2 | After-sales cases: track returns and discounts on sold orders | 1.251.0 |
+| [RS-240](./RS-240-sell-order-add-inventory-button-in-the-products-tool.md) | done | story | P2 | Sell order Add inventory button in the products toolbar | 1.250.0 |
+| [RS-239](./RS-239-sell-order-internal-notes-editable-at-any-time.md) | done | story | P2 | Sell order internal notes editable at any time | 1.249.0 |
+| [RS-238](./RS-238-sell-order-vendor-price-import-in-the-side-column-ab.md) | done | story | P2 | Sell order vendor price import in the side column, above the summary | 1.248.3 |
+| [RS-237](./RS-237-sell-order-history-at-the-bottom-of-the-side-column.md) | done | story | P2 | Sell order History at the bottom of the side column | 1.248.2 |
+| [RS-236](./RS-236-sell-order-vendor-price-import-at-the-top-history-ba.md) | done | bug | P2 | Sell order: vendor price import at the top, History back at the bottom | 1.248.1 |
+| [RS-235](./RS-235-move-sell-order-history-to-the-top-folded-by-default.md) | done | story | P2 | Move sell-order History to the top, folded by default | 1.248.0 |
 | [RS-234](./RS-234-every-save-of-a-ram-line-asks-the-part-question.md) | done | bug | P2 | Every save of a RAM line asks the part # question | 1.247.2 |
 | [RS-233](./RS-233-pre-release-review-fixes-for-the-v1-247-release.md) | done | bug | P1 | Pre-release review fixes for the v1.247 release | 1.247.1 |
 | [RS-232](./RS-232-market-page-import-a-part-number-unit-price-sheet-to.md) | done | story | P2 | Market page: import a part number + unit price sheet to update market prices | 1.247.0 |

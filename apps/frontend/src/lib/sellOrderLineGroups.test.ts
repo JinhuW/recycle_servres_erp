@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { groupSellOrderLines } from './sellOrderLineGroups';
+import { filterLineGroups, groupSellOrderLines } from './sellOrderLineGroups';
 
 const line = (id: string, warehouseId: string | null, sourceOrderId: string | null) => {
   const warehouse = warehouseId && warehouseId.replace('WH-', '');
@@ -73,5 +73,48 @@ describe('groupSellOrderLines', () => {
     const g = groupSellOrderLines([{ warehouseId: 'WH-DEN', warehouse: 'DEN' }], 'po');
     expect(g).toHaveLength(1);
     expect(g[0].poId).toBeNull();
+  });
+});
+
+describe('filterLineGroups', () => {
+  const items = [
+    { ...line('a', 'WH-DEN', 'PO-1442'), label: 'Samsung 64GB DDR4', partNumber: 'M393A8G40AB2-CWE', serialNumber: null },
+    { ...line('b', 'WH-LA1', null), label: 'Intel Xeon Gold 6248', partNumber: null, serialNumber: 'SN-77X' },
+    { ...line('c', 'WH-DEN', 'PO-999'), label: 'Hynix 32GB DDR4', partNumber: 'HMA84GR7CJR4N-XN', serialNumber: null },
+  ];
+  const groups = groupSellOrderLines(items, 'warehouse');
+  const ids = (raw: string) => filterLineGroups(groups, raw).flatMap(g => g.items.map(i => i.line.id));
+
+  it('leaves every group alone with no text', () => {
+    expect(filterLineGroups(groups, '  ')).toEqual(groups);
+  });
+
+  it('fits a part number with or without its dashes, any case', () => {
+    expect(ids('m393a8g40ab2cwe')).toEqual(['a']);
+    expect(ids('8G40AB2-C')).toEqual(['a']);
+  });
+
+  it('fits a serial, a PO number and the item name', () => {
+    expect(ids('sn77x')).toEqual(['b']);
+    expect(ids('PO-999')).toEqual(['c']);
+    expect(ids('ddr4')).toEqual(['a', 'c']);
+    expect(ids('xeon gold')).toEqual(['b']);
+  });
+
+  it('fits the spec chips, every word somewhere in the row', () => {
+    const chips = groupSellOrderLines([
+      { ...items[0], label: 'Samsung 32GB Laptop', type: 'DDR4', formFactor: 'SODIMM', speed: '2666MHz' },
+      { ...items[2], label: 'Hynix 32GB', type: 'DDR5', formFactor: 'RDIMM' },
+    ], 'warehouse');
+    const hit = (raw: string) => filterLineGroups(chips, raw).flatMap(g => g.items.map(i => i.line.id));
+    expect(hit('sodimm 2666')).toEqual(['a']);
+    expect(hit('32gb rdimm')).toEqual(['c']);
+    expect(hit('samsung rdimm')).toEqual([]);
+  });
+
+  it('drops a group nothing in fits and keeps each line its flat index', () => {
+    const out = filterLineGroups(groups, 'HMA84');
+    expect(out.map(g => g.key)).toEqual(['DEN']);
+    expect(out[0].items).toEqual([{ line: items[2], idx: 2 }]);
   });
 });

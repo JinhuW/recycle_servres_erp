@@ -29,6 +29,13 @@ describe('lineRequirements', () => {
       .toEqual(['brand', 'rank', 'qty']);
   });
 
+  it('still wants qty and unit cost from a DDR3 line that needs no label fields', () => {
+    expect(lineRequirements({ category: 'RAM', generation: 'DDR3', capacity: '8GB', type: 'Server', qty: 0, unitCost: 0 }).missingKeys)
+      .toEqual(['qty', 'unitCost']);
+    expect(lineRequirements({ category: 'RAM', generation: 'DDR3', capacity: '8GB', type: 'Server', qty: 4, unitCost: 2 }).ready)
+      .toBe(true);
+  });
+
   it('asks Micron for its chip number and other brands not at all', () => {
     expect(lineRequirements(ram({ brand: 'Micron' })).missingKeys).toEqual(['chipNumber']);
     expect(lineRequirements(ram({ chipNumber: '' })).ready).toBe(true);

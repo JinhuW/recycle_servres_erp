@@ -33,7 +33,7 @@ export function resolvePartNumber(
   category: string | undefined,
   l: { partNumber?: string | null; brand?: string | null; capacity?: string | null;
        interface?: string | null; formFactor?: string | null; generation?: string | null;
-       speed?: string | null; rpm?: string | number | null },
+       type?: string | null; speed?: string | null; rpm?: string | number | null },
 ): string | null {
   const typed = l.partNumber?.trim();
   if (typed) return typed;

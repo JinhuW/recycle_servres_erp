@@ -17,19 +17,29 @@ export type SynthLine = {
   interface?: string | null;
   formFactor?: string | null;
   generation?: string | null;
+  type?: string | null;
   speed?: string | null;
   rpm?: string | number | null;
 };
 
 // When `guard` matches a line, build `${prefix}_${parts…}` from the listed
-// fields, skipping blanks. One rule per category.
+// fields, skipping blanks — unless `requireAll`, where any blank means no
+// part number at all. One rule per category.
 export type SynthRule = {
   guard: (line: SynthLine) => boolean;
   prefix: string;
   parts: readonly (keyof SynthLine)[];
+  requireAll?: boolean;
 };
 
 const isMixedBrand = (l: SynthLine) => (l.brand ?? '').trim().toLowerCase() === 'mixed';
+
+// DDR3 is end-of-life stock that trades by capacity and module form, so a
+// line needs only those two to be saved, and a lot without a label part
+// number is filed by them. The forms' required-field rule reads this too, so
+// what counts as DDR3 is decided once.
+export const isDdr3 = (generation?: string | null): boolean =>
+  (generation ?? '').trim().toUpperCase() === 'DDR3';
 
 // A part number is a single token: no spaces, no quotes. Component values from
 // the catalog carry both (e.g. `2.5"`, `M.2 2280`), so drop quote/prime marks
@@ -44,7 +54,12 @@ function sanitizeSegment(v: string): string {
 
 export const SYNTH_PN_RULES: Partial<Record<string, SynthRule>> = {
   SSD: { guard: isMixedBrand, prefix: 'MIXED', parts: ['capacity', 'interface', 'formFactor'] },
-  // Future: HDD → ['capacity','interface','formFactor'], RAM → ['capacity','generation','speed'], …
+  // Only the two fields a DDR3 line must carry, so lots filled to different
+  // depths still land in one inventory product. Both or nothing: a lot with
+  // one of them blank is not yet a product, and filing it under `DDR3_8GB`
+  // would split it from the complete `DDR3_8GB_Server` it belongs with.
+  RAM: { guard: (l) => isDdr3(l.generation), prefix: 'DDR3', parts: ['capacity', 'type'], requireAll: true },
+  // Future: HDD → ['capacity','interface','formFactor'], …
 };
 
 // Derive a synthetic part number for `line`, or null if no rule applies. This
@@ -54,6 +69,8 @@ export const SYNTH_PN_RULES: Partial<Record<string, SynthRule>> = {
 export function synthesizePartNumber(category: string, line: SynthLine): string | null {
   const rule = SYNTH_PN_RULES[category];
   if (!rule || !rule.guard(line)) return null;
-  const segs = rule.parts.map((k) => sanitizeSegment(String(line[k] ?? ''))).filter(Boolean);
-  return segs.length ? [rule.prefix, ...segs].join('_') : null;
+  const all = rule.parts.map((k) => sanitizeSegment(String(line[k] ?? '')));
+  const segs = all.filter(Boolean);
+  if (segs.length === 0 || (rule.requireAll && segs.length < all.length)) return null;
+  return [rule.prefix, ...segs].join('_');
 }

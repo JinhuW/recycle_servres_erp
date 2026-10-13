@@ -886,6 +886,22 @@ is not a stage but a flag beside one, set once every line has sold
   DDR5 lines must carry serial numbers, and once any line has serials their
   count must equal the line qty (v1.42.0); SSD lines drop health/serials and
   require brand above 800 GB (v1.76.0).
+  - **A DDR3 line needs only Capacity and Type** (v1.253.0, RS-244): brand,
+    class, rank, speed, chip # and part # are optional, because DDR3 trades
+    by capacity and module form. The red stars follow the same rule as the
+    "Still needed" list (`lib/ramRequired.ts` `ramFieldRequired`), so a star
+    is always a field the save will ask for. A DDR3 line left without a part
+    number is filed as `DDR3_<capacity>_<type>` (`DDR3_8GB_Server`) by the
+    same synthetic-id path as a Mixed SSD: previewed in the Part # field,
+    offered at Submit, applied by the API for the PO editor. Only the two
+    required fields make the id, so lots filled to different depths group as
+    one inventory product, and both are needed (v1.255.1): a line with one
+    of them blank gets no synthetic id rather than a one-field one that
+    would be a product of its own. A typed or scanned part number still
+    wins. Box check matches scans by part #, so such a line is counted by
+    hand.
+  - **Condition is optional on every category** (v1.253.0). It never was
+    enforced — the label's star was the only thing that said so.
 - **Part numbers are canonical** — one part number however it was typed
   (v1.104.0) — and the submit form suggests existing ones as you type
   (v1.101.0).
@@ -899,6 +915,17 @@ is not a stage but a flag beside one, set once every line has sold
 - The PO list hides Done orders by default with a toggle (v1.89.0); mobile
   managers see the whole org's POs (v1.88.0). The stage filter lives in the
   table toolbar as status chips (v1.39.0).
+- **Warehouse and payment chips** under the desktop list's stage rail
+  (v1.252.0): a Warehouse group (All, one chip per warehouse the loaded POs
+  use, No warehouse when some PO has none) and a Payment group (All,
+  Company, Self-paid), for every role. Each chip's count is what its click
+  would show given every other filter — search, Done, stage, Sold and the
+  other group; the active chip clicked again clears its group. The filter is
+  client-side, so the table swaps in place with no refetch, and the picks
+  persist across the open-PO → back round-trip. A remembered warehouse
+  that the current scope has no PO in (after a category or role switch)
+  reads as All rather than leaving the table empty, and comes back with
+  the scope that has it (v1.255.1). The phone list has no equivalent.
 - **Archiving a PO takes its goods out of stock** (v1.137.0). Archive still
   hides the order from the default list and is still reversible, but it now
   also moves every non-Sold line to the `Archived` line status, which drops
@@ -1034,9 +1061,23 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   UDIMM `M391…` are two. Samsung, SK Hynix DDR3/4 and Micron are read; other
   part numbers group by exact canonical part number as before. The export
   groups the same way.
+- **DDR5 RAM groups by spec, not part number** (v1.254.0). A DDR5 lot keys
+  on Brand + Type + Capacity + Rank + Speed + Class — what a DDR5 buyer asks
+  for — so part number and chip # never split a product, and a lot with no
+  part number joins the group its spec names. A lot with one of the six
+  blank is its own product. A group whose lots carry different part numbers
+  shows no single number in its Part # cell, just the "N part numbers" line
+  with the members on hover (the export lists them comma-separated); the
+  lots table and anything picked from it keep each lot's own part number.
+  DDR3 and DDR4 stay on the family rule above.
 - **A product's lots table names each lot by PO and line** — `PO-1343 #2`, the
   number the PO page shows for that line, with the PO id still the link
   (v1.232.0).
+- **The warehouse pill scopes the grouped view's lots, not just its products**
+  (v1.252.1). With one warehouse picked, a product opens to that warehouse's
+  lots alone, and its row — qty and the in-stock split, lot and PO counts,
+  cost range, Warehouses — sums those alone. The attribute chips still show
+  a matching product whole, so a mis-typed lot stays findable.
 - **The phone Inventory list shows each line's sell price to every role**
   (v1.144.2), under the status chip, the way the desktop table and the phone
   Orders list already did. Unit cost, profit and margin stay manager-only
@@ -1106,6 +1147,28 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     full. Saving refuses such a line above 0.
   - View and edit share one history entry, so browser Back returns to where
     the order was opened from.
+  - **Add inventory sits in the products toolbar while editing** (v1.250.0),
+    the accent button beside the search box, where it was a small button
+    under the last line. Adding clears the search, scrolls to the first line
+    added and flashes each new one.
+  - **Internal notes can be written at any time** (v1.249.0), from the
+    order's view page in any status, Done and Closed included: the notes
+    box is live, and Save / Cancel appear once it differs from what is
+    saved; leaving the page with it unsaved asks first (v1.255.1), as the
+    edit form does. Edit mode still folds notes into the form's own Save.
+  - **The order's History is the last card in the right-hand column, folded**
+    (v1.248.0; in the side column since v1.248.2); a click on its heading
+    opens it.
+  - **Editing puts Vendor price import at the top of the right-hand column**,
+    above the order summary (v1.248.3; first in the left card in v1.248.1,
+    under the products before that), so the bid sheet's round trip doesn't
+    need a scroll past every line.
+  - **A search box over the products narrows the list** (v1.248.0), in view
+    and edit, like Pack mode's: a part #, serial or PO number matches with or
+    without its dashes, and words match the item's name and spec chips
+    (`sodimm 2666`), every word somewhere in the row. `/` jumps to it and Esc
+    clears it. It changes only what is listed — the line count, the order
+    total and what Save sends still cover every line.
 - **Every line shows its product's # on the order** (v1.219.0; one per
   product since v1.220.3; stored and never renumbered since v1.235.0) — `#3`
   before the item name, in view and edit: the number the packer labels the
@@ -1290,7 +1353,13 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   the price column is no bid, not a $0 price (v1.247.1). A sheet made before
   v1.242.0 that priced a part's conditions apart leaves that part for the
   manager to price, flagged as such, instead of taking its last row
-  (v1.247.1).
+  (v1.247.1). **A DDR5 lot folds by spec, not part number** (v1.255.0): the
+  same Brand + Type + Capacity + Rank + Speed + Class key as Inventory's
+  grouped view, so lots of several part numbers are one row with their qty
+  summed. The row's Part Number cell lists each part number it folds,
+  comma-separated, and the import reads that cell as one price for every
+  part in it, one preview line each. The packing lists and the product `#`
+  keep folding by part number.
 - The price template splits into one worksheet per category with per-attribute
   spec columns and image URLs (v1.25.0, v1.27.0). **The RAM tab groups its rows
   with merged label columns left of `#`** — "Desktop & laptop" / "Server", then
@@ -1486,6 +1555,54 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     `POST /api/sell-orders/:id/pack/apply` on a Draft or Packing order only) 403 anyone whose
     real role is not manager. An archived or Closed order opens read-only and its writes 409; a
     Done order can still be packed, since an order can be paid before it ships.
+
+- **After-sales** (v1.251.0). A Shipped, Awaiting payment or Done order's
+  page has an **After-sales** button that opens the new-case form with the
+  order preselected, and a card in the side column listing the order's
+  cases with their status, issue and amount. See [After-sales](#after-sales).
+
+## After-sales
+
+Managers only. A case is the record of a customer coming back about goods
+on a sold order: what they report, which products and how many, and how it
+ends — the goods come back (**Return**) or the customer keeps them at a
+lower price (**Discount**). Purchasers never see the page or the API.
+
+- **Opening a case** (v1.251.0). `#/after-sales/new`, or the After-sales
+  button on a sell order. The form loads the order, refuses one that is
+  Draft, Packing or Closed (nothing has shipped, or nothing was sold), and
+  lists its products with a checkbox and a quantity capped at the line's
+  qty (typed freely, clamped when the field loses focus — v1.255.1). The
+  issue is required; resolution, amount and assignee are optional
+  at this point. Cases are numbered `AS-1001`, `AS-1002`… from their own
+  counter. The products are snapshotted (label, part #, qty, unit price):
+  a sell-order save rewrites its line rows, so the case keeps its own copy
+  and the link to the live line only while that row exists.
+- **The workflow.** Open → In progress → Awaiting return → Resolved.
+  Cancel is allowed from any open stage; Reopen (to Open) from Resolved or
+  Cancelled; Awaiting return can step back to In progress. Awaiting return
+  needs the resolution set to Return (a discount has no goods to wait for),
+  and keeps it: while the case awaits its goods an edit cannot change or
+  clear the resolution (409; the select is disabled on the page), so step
+  back to In progress first (v1.255.1). Resolved needs the resolution and
+  the amount (0 is allowed). An illegal move is a 409 with the stages
+  named. Each move takes an optional note; a blank one is no note. Resolved
+  and Cancelled stamp `closed_at`; Reopen clears it.
+- **The case page** (`#/after-sales/AS-1001`): issue, products, resolution
+  / amount / assignee (managers only), the stage buttons for the moves the
+  case allows (each asks for an optional note), and a timeline of every
+  event — opened, moved (from → to), edited (which fields), noted — with
+  who and when. A Resolved or Cancelled case is read-only until reopened;
+  the timeline still takes notes.
+- **The list** (`#/after-sales`): five tiles (one per status, clicking one
+  filters) counting every case and summing its amounts, a status select, a
+  search over case id, sell order id, customer and issue, and a table with
+  case, sell order (a link), customer, issue, units, resolution, amount,
+  assignee, status and last update. A row opens the case.
+- **Record only.** The amount is stored on the case and summed on the
+  tiles; nothing moves stock back to a PO, changes the sell order's revenue
+  or the dashboard's realized profit. Restocking a return is an inventory
+  edit.
 
 ## Shipping
 

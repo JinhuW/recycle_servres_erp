@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ramFamily, ramFamilyLabel } from '@recycle-erp/shared';
+import { ddr5SpecKey, ramFamily, ramFamilyLabel, type Ddr5SpecRow } from '@recycle-erp/shared';
 
 const key = (pn: string) => ramFamily(pn)?.key ?? null;
 
@@ -58,5 +58,33 @@ describe('ramFamily', () => {
     expect(lbl('M393A2K43BB1-CTD7Q')).toBe('M393A2K43BB1-CTD*');
     expect(lbl('HMA82GR7CJR8N-VKTF')).toBe('HMA82GR7CJR8N-VK*');
     expect(lbl('MTA36ASF2G72PZ-2G1A2II')).toBe('MTA36ASF2G72PZ-2G1A2*');
+  });
+});
+
+describe('ddr5SpecKey', () => {
+  const row = (over: Partial<Ddr5SpecRow> = {}): Ddr5SpecRow => ({
+    category: 'RAM', generation: 'DDR5', brand: 'Samsung', type: 'Server',
+    capacity: '32GB', rank: '2Rx4', speed: '4800', classification: 'RDIMM', ...over,
+  });
+
+  it('keys a DDR5 line on brand, type, capacity, rank, speed and form, however they were typed', () => {
+    const k = ddr5SpecKey(row());
+    expect(k).toMatch(/^ddr5:/);
+    expect(ddr5SpecKey(row({ brand: ' samsung ', speed: ' 4800', generation: 'ddr5' }))).toBe(k);
+  });
+
+  it('separates lines that differ on any key field, and keys blank on blank', () => {
+    const k = ddr5SpecKey(row());
+    for (const f of ['brand', 'type', 'capacity', 'rank', 'speed', 'classification'] as const) {
+      expect(ddr5SpecKey(row({ [f]: 'X' })), f).not.toBe(k);
+      expect(ddr5SpecKey(row({ [f]: null })), f).not.toBe(k);
+      expect(ddr5SpecKey(row({ [f]: null })), f).toBe(ddr5SpecKey(row({ [f]: '' })));
+    }
+  });
+
+  it('gives no key to other generations or categories', () => {
+    expect(ddr5SpecKey(row({ generation: 'DDR4' }))).toBeNull();
+    expect(ddr5SpecKey(row({ generation: null }))).toBeNull();
+    expect(ddr5SpecKey(row({ category: 'SSD' }))).toBeNull();
   });
 });

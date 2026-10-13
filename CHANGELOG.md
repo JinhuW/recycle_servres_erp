@@ -17,6 +17,266 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.255.1] - 2026-10-13
+
+Pre-release review fixes for the v1.254 release (RS-247): what
+`/code-review high` found over the after-sales cases, the sell-order page,
+the PO list's warehouse chips and the DDR3 part-number rule.
+
+### Fixed
+
+- **An after-sales case awaiting its goods keeps the Return resolution.**
+  The status route only lets a return await the goods, but an edit could
+  then set the resolution to Discount or clear it, leaving a case that
+  awaited a return which was no longer one. The edit is refused with a 409
+  while the case is in *Awaiting return*, and the page's resolution select
+  is disabled there with a hint to step back to In progress first.
+- **A blank note on a case status move is no note.** Whitespace alone was
+  refused as "too long"; it now moves the case with no note, as the page
+  already sent it. A note that isn't text is still a 400.
+- **A DDR3 synthetic part number needs both capacity and type.** The rule
+  built the id from whichever field was filled, so a lot sent through the
+  API with only its capacity was filed as `DDR3_8GB` — a different
+  inventory product from the `DDR3_8GB_Server` the forms produce. One
+  field alone now yields no part number; the two-field id is unchanged.
+- **The new-case qty field can be cleared and retyped.** It clamped on
+  every keystroke, so a backspace snapped it to 1 and a value could not be
+  started from empty. The text stays while typing and is clamped to
+  `1..qty` when the field loses focus.
+- **Leaving a sell order's view page with an unsaved internal note asks
+  first**, as the edit form does — a link, Back or a reload no longer
+  drops the typed note silently.
+- **A remembered warehouse pick with no PO in the current scope reads as
+  All.** After a category or role switch that left the picked warehouse
+  with nothing, the PO list sat empty with no chip pressed and no way to
+  see why. The stored pick is kept, so it comes back with the scope that
+  has it.
+- **The after-sales summary tiles are fetched once per visit**, not on
+  every search keystroke and status pick.
+- **The new-case form shows the sell order's status as the other pages
+  do**, by its short label, in the chip and in the "no goods to come back"
+  message.
+
+### Changed
+
+- The after-sales statuses, resolutions and the caseable sell-order
+  statuses live in `@recycle-erp/shared`, read by the backend route, the
+  API client and both desktop pages; the manager picker's fetch is one
+  hook (`lib/useManagers.ts`) across the sell-order draft, the sell-order
+  page and the after-sales pages. Adding inventory to a sell order updates
+  the draft functionally, so a pending edit in the same tick is not
+  overwritten.
+## [1.255.0] - 2026-10-13
+
+The sell order's bid sheet folds DDR5 RAM by spec, the way Inventory's
+grouped view does (RS-246).
+
+### Changed
+
+- **A DDR5 lot on the bid sheet folds by Brand, Type, Capacity, Rank, Speed
+  and Class, whatever its part number.** The buyer prices a Samsung 32GB
+  2Rx4 4800 RDIMM once, not once per stick, so lots from several part
+  numbers are one row with their qty summed. The row's Part Number cell
+  lists every part number it folds, comma-separated, and the price import
+  reads such a cell as one price for each of them, so the vendor's bid still
+  prices every line of the order; the import preview shows one line per
+  part number. DDR3 and DDR4 rows, hand-typed lines, the packing lists and
+  the product # are unchanged.
+
+## [1.254.0] - 2026-10-13
+
+Inventory's grouped view groups DDR5 RAM by spec, not by part number
+(RS-245).
+
+### Changed
+
+- **A DDR5 RAM lot groups by Brand, Type, Capacity, Rank, Speed and Class.**
+  DDR5 buyers shop by spec — a Samsung 32GB 2Rx4 4800 RDIMM is the same
+  product whether the stick reads `M321R4GA3BB6-CQK` or `-CQKET` — so the
+  part number and chip # no longer split one product into several, and a
+  lot with no part number joins the group its spec names. A lot with one of
+  the six fields blank stays its own product rather than being merged into a
+  guess. When a group's lots carry different part numbers, its row shows the
+  "N part numbers" line with the members on hover instead of a single
+  number, and the grouped export lists them comma-separated in the Part #
+  cell; the lots table still names each lot's own part number, and a lot
+  picked into a sell order or Quick View carries its own. DDR3 and DDR4 keep
+  the module-family rule.
+
+## [1.253.0] - 2026-10-12
+
+A DDR3 line needs only its capacity and type, and Condition is never
+required (RS-244).
+
+### Changed
+
+- **A DDR3 RAM line can be saved and submitted with just Capacity and
+  Type.** Brand, Class, Rank, Speed, Chip # and Part # are optional there —
+  DDR3 is end-of-life stock that trades by capacity and module form, so the
+  label details that identify a DDR4/DDR5 part were busy work. The red stars
+  on the desktop drawer, the PO editor and the phone form now follow the same
+  rule as the "Still needed" list, so a starred field is always one the save
+  will ask for; DDR4 and DDR5 lines keep the full rule.
+- **A DDR3 line with no part number is filed as `DDR3_<capacity>_<type>`**
+  (`DDR3_8GB_Server`), the way a Mixed-brand SSD gets `MIXED_…`: the Part #
+  field previews it, Submit offers it in the existing "Use auto-generated
+  part #?" dialog, and the API applies it to a line added from the PO editor.
+  Only the two required fields go in the id, so DDR3 lots filled to
+  different depths land in one inventory product. A typed or scanned part
+  number still wins.
+- **Condition carries no required star on any category**, in both shells.
+  Nothing ever enforced it — production already holds lines with a blank
+  condition — so the star was a promise the save never kept.
+## [1.252.1] - 2026-10-12
+
+The grouped inventory view's lots follow the warehouse pill (RS-243).
+
+### Fixed
+
+- **A product's "Lots in …" table lists only the selected warehouse's lots.**
+  With DEN picked, a product kept because one of its lots is in DEN opened
+  to every lot it has, BOSTON included, and its row summed them all: qty,
+  the in-stock split, lot and PO counts, the cost range and a Warehouses
+  column reading "DEN, BOSTON". The products endpoint now narrows each
+  listed group to the pill's lots before it sums anything, so the row and
+  the table it opens to can't disagree. All warehouses, the pill counts and
+  the attribute chips are unchanged.
+
+## [1.252.0] - 2026-10-12
+
+Warehouse and payment filters on the desktop PO list (RS-242).
+
+### Added
+
+- **A chip row under the stage rail** on the desktop Purchase orders list:
+  a Warehouse group (All, one chip per warehouse the loaded POs use, and
+  No warehouse when any PO has none) and a Payment group (All, Company,
+  Self-paid). Every role gets the row; the stage rail above it stays
+  manager-only. Each chip carries the number of POs its click would show,
+  counted with every other filter on the page applied — search, the Done
+  toggle, the stage, Sold and the other group — and a chip at zero recedes
+  but stays clickable. Clicking the active chip clears its group. The stage
+  counts and the products caption follow the pick, and both picks survive
+  the open-PO → back round-trip with the other filters.
+- The filter is client-side: the page already holds every PO in scope, so a
+  click re-renders the table in place with no refetch and no skeleton, and
+  the new set settles in with a short fade (off under reduced motion). The
+  facet maths lives in `lib/poFacets.ts`, with unit tests.
+
+## [1.251.0] - 2026-10-12
+
+After-sales cases (RS-241): a record for the goods a customer comes back
+about, with its own workflow and page.
+
+### Added
+
+- **After-sales cases.** A manager opens a case against a Shipped, Awaiting
+  payment or Done sell order, naming the products and quantities the
+  customer is returning or disputing and what they report. Draft, Packing
+  and Closed orders are refused: nothing has shipped or nothing was sold.
+  Cases are numbered `AS-1001`… and keep a snapshot of their lines, so a
+  later save of the sell order (which rewrites its line rows) leaves the
+  case intact.
+- **The workflow.** Open → In progress → Awaiting return → Resolved, with
+  Cancel from any open stage and Reopen from Resolved or Cancelled. The
+  resolution is Return or Discount, with the refund or price reduction as
+  the amount. Awaiting return needs the resolution set to Return; Resolved
+  needs both the resolution and the amount. A closed case is read-only until
+  reopened; its timeline still takes notes.
+- **The After-sales page** (`#/after-sales`, managers only): status tiles
+  that count every case and sum its amounts, a status filter, a search over
+  case id, sell order, customer and issue, and a case page with the issue,
+  the products, the resolution fields, the stage buttons and a timeline of
+  every move, edit and note with who and when.
+- **On the sell order**, an After-sales button on an eligible order opens
+  the form with the order preselected, and a card in the side column lists
+  the order's cases.
+
+A case is a record only: it moves no stock back and changes no revenue or
+dashboard figure. Restocking a return is still an inventory edit.
+
+## [1.250.0] - 2026-10-12
+
+Add inventory moves to the top of a sell order's products (RS-240).
+
+### Changed
+
+- **Add inventory is the accent button beside the products' search box**
+  while editing, in place of a small button under the last line — on a long
+  order, a scroll to the page's foot to reach.
+- **Adding shows what was added.** A line lands in its warehouse's or PO's
+  group, often off screen, so the page scrolls to the first one and each new
+  line flashes. The search box clears too, so a filter left in it can't hide
+  them.
+
+## [1.249.0] - 2026-10-12
+
+Internal notes without entering edit mode (RS-239).
+
+### Added
+
+- **A sell order's internal notes are editable from its view page, in any
+  status.** They were read-only text unless the order was opened for editing,
+  and a Done or Closed order can't be, so a tracking number or payment
+  reference that arrived after the deal closed had nowhere to go. The notes
+  box now saves on its own, as the payment receiver already did; Save and
+  Cancel show once the text differs from what is saved. The backend already
+  allowed it: only products and customer lock at Done.
+
+## [1.248.3] - 2026-10-12
+
+Vendor price import joins History in the side column (RS-238).
+
+### Changed
+
+- **While editing a sell order, Vendor price import is the first card in the
+  right-hand column**, above the order summary. It had moved to the top of
+  the left card in v1.248.1, where it pushed the status stepper, customer and
+  products down. In the narrow column its drop zone stacks under the three
+  steps.
+
+## [1.248.2] - 2026-10-12
+
+History moves to the side column (RS-237).
+
+### Changed
+
+- **A sell order's History is the last card in the right-hand column**, under
+  Internal notes, instead of under the products. Still folded until clicked.
+  The left column is now only the order itself, and the history no longer
+  sits at the end of a long line list.
+
+## [1.248.1] - 2026-10-12
+
+v1.248.0 moved the wrong card (RS-236).
+
+### Fixed
+
+- **Vendor price import is the first thing in an order being edited**, not
+  the last. The request behind v1.248.0 was about this block, under every
+  product line, not History. History goes back to the foot of the page and
+  keeps starting folded.
+
+## [1.248.0] - 2026-10-12
+
+A sell order's page gets its History out of the way and a search box over its
+products (RS-235).
+
+### Changed
+
+- **History moved to the top of the page and starts folded.** It sat under
+  the products, so reading it meant scrolling past every line of a long order.
+  It is now the first card in the left column, one line high until opened.
+
+### Added
+
+- **Quick search over a sell order's products**, in view and edit, modelled on
+  Pack mode's scan box. A part #, serial or PO number fits with or without its
+  dashes; other words match the item name and spec chips, all of them
+  somewhere in the row. Groups with nothing left drop out. `/` focuses the box
+  and Esc clears it without leaving the page. The summary and Save still
+  cover the whole order.
+
 ## [1.247.2] - 2026-10-11
 
 The part # question on every save of a RAM line (RS-234). The v1.247.1 review

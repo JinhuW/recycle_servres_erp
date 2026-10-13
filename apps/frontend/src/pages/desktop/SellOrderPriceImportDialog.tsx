@@ -126,7 +126,7 @@ export function PriceImportSection({
   };
 
   return (
-    <div className="so-section" style={{ marginTop: 18 }}>
+    <div className="so-section">
       <div className="so-section-head">
         <Icon name="upload" size={14} /> {t('soPriceImportTitle')}
       </div>
@@ -196,7 +196,9 @@ function PriceImportPreviewDialog({
 
   const matched = preview.rows.filter(r => r.status === 'matched');
   const warnings = preview.rows.filter(r => r.status !== 'matched');
-  const rowKey = (r: PreviewRow) => `${r.sheet ?? ''}:${r.rowNumber}`;
+  // A cell listing several part numbers comes back as one row per part, so
+  // the part is part of the key.
+  const rowKey = (r: PreviewRow) => `${r.sheet ?? ''}:${r.rowNumber}:${r.canonPart}`;
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
 
   const toggle = (key: string) =>
