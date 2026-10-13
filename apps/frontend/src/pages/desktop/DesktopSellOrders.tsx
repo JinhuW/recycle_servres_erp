@@ -22,12 +22,14 @@ import { RouteLink } from '../../components/RouteLink';
 import { shareOrCopy } from '../../lib/shareOrCopy';
 import { fmtUSD, fmtUSD0, fmtMoney, fmtDate, fmtDateShort, CURRENCY_SYMBOL, canonicalPartNumber } from '../../lib/format';
 import { fetchRateToUsd, type FxInfo } from '../../lib/fxRate';
-import { sellOrderStatuses } from '../../lib/lookups';
+import { sellOrderStatuses, sellOrderStatusShort } from '../../lib/lookups';
+import { useManagerOptions, type MemberOption } from '../../lib/useManagers';
+import { CASEABLE_SELL_STATUSES } from '@recycle-erp/shared';
 import { closeReasonLabelKey } from '../../lib/closeReasons';
 import { usePersisted } from '../../lib/listMemory';
 import { TableSkeleton, FormSkeleton } from '../../components/Skeleton';
 import { SellOrderHistory } from '../../components/SellOrderHistory';
-import { CustomerPicker, CurrencyPicker, type Customer, type MemberOption } from './DesktopSellOrderDraft';
+import { CustomerPicker, CurrencyPicker, type Customer } from './DesktopSellOrderDraft';
 import { useAuth } from '../../lib/auth';
 import { AddInventoryPicker, type SellableItem } from '../../components/AddInventoryPicker';
 import { AttachmentChip } from '../../components/AttachmentChip';
@@ -286,11 +288,8 @@ type SellOrderDetailType = {
 
 // Driven by sell_order_statuses; ids match sell_orders.status CHECK constraint.
 type SellStatusId = SellOrderSummary['status'];
-// The sell-order statuses that have goods out with the customer.
-const AS_ELIGIBLE_STATUSES = new Set(['Shipped', 'Awaiting payment', 'Done']);
-
 const toneFor  = (s: string) => sellOrderStatuses.find(o => o.id === s)?.tone  ?? 'muted';
-const shortFor = (s: string) => sellOrderStatuses.find(o => o.id === s)?.short ?? s;
+const shortFor = sellOrderStatusShort;
 
 // Closed & Done are the terminal statuses — orders that have left the working
 // pipeline. They're hidden from the default list (which shows only orders still
@@ -1047,7 +1046,7 @@ function SellOrderDetail({ id, mode, onToast }: {
   // FX snapshot for the draft's currency (null for USD or until it loads).
   const [fx, setFx] = useState<FxInfo | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [members, setMembers] = useState<MemberOption[]>([]);
+  const members = useManagerOptions();
   const [saving, setSaving] = useState(false);
   // Per-status evidence — loaded from the order, mutated live by the dialog,
   // and used to render paperclip badges on each step.
@@ -1138,16 +1137,6 @@ function SellOrderDetail({ id, mode, onToast }: {
     return () => { alive = false; };
   }, [mode]);
 
-  // Members back the receiver picker, which is offered in both modes — the
-  // receiver is the one field that stays assignable after the deal closes.
-  useEffect(() => {
-    let alive = true;
-    api.get<{ items: (MemberOption & { role: string })[] }>('/api/members')
-      .then(r => { if (alive) setMembers(r.items.filter(m => m.role === 'manager')); })
-      .catch(handleFetchError);
-    return () => { alive = false; };
-  }, []);
-
   // After-sales cases on this order. Read whenever the page opens: a case
   // made from the button comes back here through the browser's Back.
   const [asCases, setAsCases] = useState<AfterSalesOrderCase[]>([]);
@@ -1159,7 +1148,7 @@ function SellOrderDetail({ id, mode, onToast }: {
       .catch(handleFetchError);
     return () => { alive = false; };
   }, [id, mode]);
-  const asEligible = !!order && AS_ELIGIBLE_STATUSES.has(order.status);
+  const asEligible = !!order && CASEABLE_SELL_STATUSES.has(order.status);
 
   // "locked" = no structural edits or status moves allowed. Done is the
   // terminal happy path; Closed is the off-ramp (line set + customer + status
@@ -1184,9 +1173,6 @@ function SellOrderDetail({ id, mode, onToast }: {
     || draft.bidParts.length > 0
     || pendingAdjust != null
   );
-  // Back and Cancel left the edit page with its edits and no word.
-  useUnsavedGuard(mode === 'edit' && !!dirty);
-
   // Done waits on every manager's sign-off of the order as saved. Edits that
   // void it are read the way the server reads them: a reorder or a warehouse
   // move doesn't, so linesChanged would over-warn.
@@ -1298,6 +1284,9 @@ function SellOrderDetail({ id, mode, onToast }: {
   const [notesSaving, setNotesSaving] = useState(false);
   const savedNotes = order?.notes ?? '';
   useEffect(() => { setNotesDraft(savedNotes); }, [savedNotes]);
+  // Back and Cancel left the edit page with its edits and no word — and the
+  // view page with a typed note.
+  useUnsavedGuard((mode === 'edit' && !!dirty) || (mode === 'view' && notesDraft !== savedNotes));
   const saveNotes = async () => {
     if (!order || notesDraft === savedNotes) return;
     setNotesSaving(true);
@@ -1367,14 +1356,14 @@ function SellOrderDetail({ id, mode, onToast }: {
   // A filter left in the search box would hide the lines just added, and a
   // line lands in its warehouse's or PO's group, often below the fold — so
   // the first one is scrolled to and every one flashes.
+  // Keyed by lot, not row: the rows are made inside the updater (fresh
+  // `_cid`s), which runs on the latest draft rather than this render's.
   const [justAdded, setJustAdded] = useState<ReadonlySet<string>>(new Set());
   const addLines = (picked: SellableItem[]) => {
     if (!draft) return;
     setLineSearch('');
-    const { lines } = mergeSellable(draft.lines, picked);
-    const before = new Map(draft.lines.map(l => [l._cid, l.qty]));
-    setJustAdded(new Set(lines.filter(l => before.get(l._cid) !== l.qty).map(l => l._cid)));
-    setDraft({ ...draft, lines });
+    setJustAdded(new Set(picked.filter(it => it.availableQty > 0).map(it => it.inventoryId)));
+    setDraft(d => d && { ...d, lines: mergeSellable(d.lines, picked).lines });
   };
   useEffect(() => {
     if (justAdded.size === 0) return;
@@ -1890,7 +1879,7 @@ function SellOrderDetail({ id, mode, onToast }: {
                             // A typed line has no lot to run out of.
                             const cap = l.inventoryId === null ? MAX_LINE_QTY : Math.max(0, Math.min(MAX_LINE_QTY, l.maxQty));
                             return (
-                            <tr key={l._cid} className={justAdded.has(l._cid) ? 'so-line-added' : undefined}>
+                            <tr key={l._cid} className={l.inventoryId !== null && justAdded.has(l.inventoryId) ? 'so-line-added' : undefined}>
                               <LineItemCell line={l} lineNo={l.saved ? l.no : null} sub={l.subLabel} showPo={lineGroup === 'warehouse'} showLineNo={lineGroup === 'po'} linkPo={false} />
                               {lineGroup === 'po' && <td style={{ fontSize: 12 }}>{lotWarehouse(l) ?? t('sodNoWarehouse')}</td>}
                               <td className="num">

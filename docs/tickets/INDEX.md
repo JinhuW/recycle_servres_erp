@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-247](./RS-247-pre-release-review-fixes-for-the-v1-254-release.md) | in-progress | bug | P1 | Pre-release review fixes for the v1.254 release | — |
 | [RS-246](./RS-246-sell-order-bid-sheet-groups-ddr5-ram-by-spec.md) | done | story | P2 | Sell-order bid sheet groups DDR5 RAM by spec | 1.255.0 |
 | [RS-245](./RS-245-inventory-groups-ddr5-ram-by-spec-not-part-number.md) | done | story | P2 | Inventory groups DDR5 RAM by spec, not part number | 1.254.0 |
 | [RS-244](./RS-244-ram-form-ddr3-lines-need-only-capacity-and-type-cond.md) | done | story | P2 | RAM form: DDR3 lines need only capacity and type, condition never required | 1.253.0 |

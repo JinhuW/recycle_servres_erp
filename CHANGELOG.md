@@ -17,6 +17,55 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.255.1] - 2026-10-13
+
+Pre-release review fixes for the v1.254 release (RS-247): what
+`/code-review high` found over the after-sales cases, the sell-order page,
+the PO list's warehouse chips and the DDR3 part-number rule.
+
+### Fixed
+
+- **An after-sales case awaiting its goods keeps the Return resolution.**
+  The status route only lets a return await the goods, but an edit could
+  then set the resolution to Discount or clear it, leaving a case that
+  awaited a return which was no longer one. The edit is refused with a 409
+  while the case is in *Awaiting return*, and the page's resolution select
+  is disabled there with a hint to step back to In progress first.
+- **A blank note on a case status move is no note.** Whitespace alone was
+  refused as "too long"; it now moves the case with no note, as the page
+  already sent it. A note that isn't text is still a 400.
+- **A DDR3 synthetic part number needs both capacity and type.** The rule
+  built the id from whichever field was filled, so a lot sent through the
+  API with only its capacity was filed as `DDR3_8GB` — a different
+  inventory product from the `DDR3_8GB_Server` the forms produce. One
+  field alone now yields no part number; the two-field id is unchanged.
+- **The new-case qty field can be cleared and retyped.** It clamped on
+  every keystroke, so a backspace snapped it to 1 and a value could not be
+  started from empty. The text stays while typing and is clamped to
+  `1..qty` when the field loses focus.
+- **Leaving a sell order's view page with an unsaved internal note asks
+  first**, as the edit form does — a link, Back or a reload no longer
+  drops the typed note silently.
+- **A remembered warehouse pick with no PO in the current scope reads as
+  All.** After a category or role switch that left the picked warehouse
+  with nothing, the PO list sat empty with no chip pressed and no way to
+  see why. The stored pick is kept, so it comes back with the scope that
+  has it.
+- **The after-sales summary tiles are fetched once per visit**, not on
+  every search keystroke and status pick.
+- **The new-case form shows the sell order's status as the other pages
+  do**, by its short label, in the chip and in the "no goods to come back"
+  message.
+
+### Changed
+
+- The after-sales statuses, resolutions and the caseable sell-order
+  statuses live in `@recycle-erp/shared`, read by the backend route, the
+  API client and both desktop pages; the manager picker's fetch is one
+  hook (`lib/useManagers.ts`) across the sell-order draft, the sell-order
+  page and the after-sales pages. Adding inventory to a sell order updates
+  the draft functionally, so a pending edit in the same tick is not
+  overwritten.
 ## [1.255.0] - 2026-10-13
 
 The sell order's bid sheet folds DDR5 RAM by spec, the way Inventory's

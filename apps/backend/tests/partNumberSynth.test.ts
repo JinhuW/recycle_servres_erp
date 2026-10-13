@@ -92,8 +92,11 @@ describe('synthesizePartNumber — DDR3 RAM', () => {
     expect(synthesizePartNumber('RAM', { capacity: '32GB', type: 'Server' })).toBeNull();
   });
 
-  it('returns null when neither capacity nor type is filled', () => {
+  it('needs both capacity and type — one alone is not yet a product', () => {
     expect(synthesizePartNumber('RAM', { generation: 'DDR3' })).toBeNull();
+    expect(synthesizePartNumber('RAM', { generation: 'DDR3', capacity: '8GB' })).toBeNull();
+    expect(synthesizePartNumber('RAM', { generation: 'DDR3', capacity: '8GB', type: '' })).toBeNull();
+    expect(synthesizePartNumber('RAM', { generation: 'DDR3', type: 'Server' })).toBeNull();
   });
 });
 
