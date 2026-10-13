@@ -2,13 +2,13 @@
 id: RS-244
 title: RAM form: DDR3 lines need only capacity and type, condition never required
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-12
 reporter: jinhu
 branch: feat/ddr3-required-fields
-pr:
-version:
+pr: 629
+version: 1.253.0
 related: [RS-217]
 ---
 
