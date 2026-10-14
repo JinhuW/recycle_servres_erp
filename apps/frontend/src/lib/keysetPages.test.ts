@@ -40,16 +40,40 @@ describe('forEachKeysetPage', () => {
     ]);
   });
 
-  it('stops at maxPages on a cursor that never ends, marking that page done', async () => {
+  it('stops on a cursor it has already followed, marking that page done', async () => {
     const { fetchPage, calls } = endpoint({
       first: { items: [1], nextCursor: 'loop' },
       loop: { items: [1], nextCursor: 'loop' },
     });
     const onPage = vi.fn();
-    await forEachKeysetPage(fetchPage, onPage, 3);
-    expect(calls).toEqual([null, 'loop', 'loop']);
-    expect(onPage).toHaveBeenCalledTimes(3);
-    expect(onPage.mock.calls[2][1]).toEqual({ first: false, done: true });
+    await forEachKeysetPage(fetchPage, onPage);
+    expect(calls).toEqual([null, 'loop']);
+    expect(onPage).toHaveBeenCalledTimes(2);
+    expect(onPage.mock.calls[1][1]).toEqual({ first: false, done: true });
+  });
+
+  // An older backend answers `{ items }` with no cursor field at all.
+  it('ends the walk on a reply that omits nextCursor', async () => {
+    const fetchPage = vi.fn(async () => ({ items: [1, 2] }) as unknown as Page);
+    const onPage = vi.fn();
+    await forEachKeysetPage(fetchPage, onPage);
+    expect(fetchPage).toHaveBeenCalledTimes(1);
+    expect(onPage).toHaveBeenCalledWith([1, 2], { first: true, done: true });
+  });
+
+  // A page cap once ended a real list at 25 pages and called it complete.
+  it('follows a long list to its real end', async () => {
+    const pages: Record<string, Page> = {};
+    for (let i = 0; i < 40; i++) {
+      pages[i === 0 ? 'first' : `c${i}`] = { items: [i], nextCursor: i === 39 ? null : `c${i + 1}` };
+    }
+    const { fetchPage, calls } = endpoint(pages);
+    const onPage = vi.fn();
+    await forEachKeysetPage(fetchPage, onPage);
+    expect(calls).toHaveLength(40);
+    expect(onPage).toHaveBeenCalledTimes(40);
+    expect(onPage.mock.calls[39][1]).toEqual({ first: false, done: true });
+    expect(onPage.mock.calls[38][1]).toEqual({ first: false, done: false });
   });
 
   it('stops fetching when onPage returns false', async () => {

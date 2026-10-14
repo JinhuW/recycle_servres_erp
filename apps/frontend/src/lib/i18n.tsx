@@ -256,6 +256,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     units2: 'units',
     perUnit: 'unit',
     reviewNoLinesHint: 'Add at least one product before submitting.',
+    reviewSavingHint: 'A product is still saving — one moment.',
+    lineUnsaved: 'Not saved yet',
     reviewPickWarehouseHint: 'Pick a warehouse before submitting.',
     transferPickDestinationHint: 'Pick a destination warehouse before transferring.',
     transferQtyOutOfRangeHint: 'One or more lines has an invalid quantity (must be ≥ 1 and ≤ stock).',
@@ -384,6 +386,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     soAfterSales: 'After-sales',
     soAfterSalesCases: 'After-sales cases',
     soAfterSalesNone: 'No cases on this order.',
+    soAfterSalesOpen: 'Open after-sales case',
     nav_analysis: 'Analysis',
     nav_group_oversight: 'Oversight',
     nav_activity: 'Activity',
@@ -394,7 +397,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
 
     // ── Payments — bank-transaction reconciliation against POs ──
     payTitle: 'Payments',
-    paySub: 'Money paid to sellers via Mercury and PayPal, reconciled against purchase orders. Link each transaction to its PO, or ignore the ones that are not seller payments.',
+    paySub: 'Mercury and PayPal transactions, reconciled against orders. Link each one to the purchase order it paid, the commission it settled or the sell order it collected, or ignore the ones that are none of those.',
     paySyncNow: 'Sync now',
     paySyncing: 'Syncing…',
     payLastSynced: 'Synced {when}',
@@ -429,6 +432,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payStatusTransfer: 'Transfer',
     payKindPayment: 'Payment',
     payKindRefund: 'Refund',
+    payKindCommission: 'Commission',
     payAuto: 'auto',
     unsavedTitle: 'Discard unsaved changes?',
     unsavedMsg: 'You have edits that have not been saved. Leaving now throws them away.',
@@ -460,12 +464,24 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payPickNone: 'No matching purchase orders',
     payPickResults: 'Search results',
     payPickNoSuggest: 'No suggestions yet — search by PO id or purchaser',
+    // The picker's three targets. The sell-order tab opens first on money in.
+    payPickTargetPo: 'Purchase order',
+    payPickTargetCommission: 'Commission',
+    payPickTargetSo: 'Sell order',
+    payPickSearchSo: 'Search SO id or customer…',
+    payPickNoneSo: 'No matching sell orders',
+    payPickRecentSo: 'Open sell orders',
+    payPickNoRecentSo: 'No sell order awaiting payment — search by SO id or customer',
+    payPickRecentCommission: 'Commission owed',
+    payPickNoRecentCommission: 'No PO at Ready to Pay or Done — search by PO id or purchaser',
+    payCommissionOf: 'commission {amt}',
+    payCommissionPaid: 'paid {amt}',
     payReasonTxn: 'Txn id match',
     payReasonExact: 'Amount match',
     payReasonNear: 'Close amount',
     payTileSuggested: 'Suggested',
     payTileSuggestedSub: 'with a likely PO',
-    payTileLinkedSub: 'matched to a PO',
+    payTileLinkedSub: 'matched to an order',
     payTileTransfersSub: 'between our accounts',
     payTileIgnoredSub: 'not seller payments',
     payFilterHasMatch: 'Has match',
@@ -533,6 +549,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payMatchAffinity: 'usual purchaser',
     payLinkedToast: 'Linked to {id}',
     payLinkedFilledToast: 'Linked to {id} — its transaction ID was filled in',
+    payLinkedCommissionToast: "Linked to {id}'s commission",
     payUnlinkedToast: 'Link removed',
     payEmpty: 'No transactions',
     payEmptyUnlinked: 'Nothing left to reconcile',
@@ -541,6 +558,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payLedgerTitle: 'Bank payments',
     payLedgerOpen: 'Open Payments',
     payLedgerNet: 'Net paid',
+    payLedgerNetReceived: 'Net received',
     payLinkOpen: "Open this PO's payments",
     // The bank's net paid against the PO's goods + fees, warned of in Review
     // mode and on the PO page, and asked about before approving for payment.
@@ -555,6 +573,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payFocusOrder: 'Payments for {id}',
     payFocusClear: 'Show all payments',
     payFocusNet: 'Net paid {amt}',
+    payFocusNetReceived: 'Net received {amt}',
     // Internal transactions — the record that groups an internal movement's
     // bank rows and carries the note explaining it.
     payIntTitle: 'Internal transactions',
@@ -2493,6 +2512,25 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     mktWithinTarget: 'within target',
     mktAboveCeiling: 'above ceiling — push back',
     mktBrokerQuotes: 'Recent broker quotes',
+    sharedPhotoReady: 'Shared photo ready — add a product and tap Scan.',
+    sharedPhotoLost: "The shared photo couldn't be kept — add a product and take it with Scan.",
+    acCreatedTitle: 'Order created',
+    acSubmittedTitle: 'Submitted for review',
+    acAdvancedTitle: 'Advanced {from} → {to}',
+    acMetaChangedTitle: 'Updated order details',
+    acNoteOnTitle: 'Note on {status}',
+    acAttachmentAddedTitle: 'Attachment added on {status}',
+    acAttachmentRemovedTitle: 'Attachment removed on {status}',
+    acQtyAt: 'Qty {qty} @ {cost}',
+    acWasQtyAt: 'Was qty {qty} @ {cost}',
+    acUnitsCount: '{n} units',
+    rhythmNoneAria: 'No purchase orders yet',
+    rhythmNoneShort: 'no orders yet',
+    rhythmAria: '{count} purchase orders, last one {last} days ago',
+    rhythmAriaGap: ', usually every {gap} days',
+    mktNoCostData: 'No cost data yet',
+    mktNoFeed: 'No feed connected',
+    profitUnknownCost: '{n} sold without a recorded cost ({amount} of revenue)',
     mktCurrentStock: 'Current stock',
     mktStockHigh: 'well-stocked — go light',
     mktStockLow: 'low — replenish',
@@ -3230,11 +3268,39 @@ const Ctx = createContext<LangCtx>({
   t: (k) => k,
 });
 
+// "Follow the system language" is a per-device choice (the phone's language
+// sheet writes it). It used to be read only by that sheet: the app booted
+// into the profile language regardless and never noticed the device changing
+// its language.
+export const LANG_FOLLOW_SYSTEM_KEY = 'rs.langFollowSystem';
+
+export function systemLang(): Lang {
+  if (typeof navigator === 'undefined') return 'en';
+  const n = (navigator.language || 'en').toLowerCase();
+  return n.startsWith('zh') ? 'zh' : 'en';
+}
+
+export function followsSystemLang(): boolean {
+  try { return localStorage.getItem(LANG_FOLLOW_SYSTEM_KEY) === '1'; } catch { return false; }
+}
+
+export function setFollowsSystemLang(on: boolean): void {
+  try { localStorage.setItem(LANG_FOLLOW_SYSTEM_KEY, on ? '1' : '0'); } catch { /* ignore */ }
+}
+
 export function LangProvider({ children }: { children: ReactNode }) {
   const { user, setLanguage } = useAuth();
-  // Initialize from the user profile when it loads.
+  // Initialize from the user profile when it loads — or from the device,
+  // when the user asked to follow it.
   const [lang, setLangLocal] = useState<Lang>('en');
-  useEffect(() => { if (user?.language) setLangLocal(user.language); }, [user?.language]);
+  useEffect(() => {
+    if (user?.language) setLangLocal(followsSystemLang() ? systemLang() : user.language);
+  }, [user?.language]);
+  useEffect(() => {
+    const onChange = () => { if (followsSystemLang()) setLangLocal(systemLang()); };
+    window.addEventListener('languagechange', onChange);
+    return () => window.removeEventListener('languagechange', onChange);
+  }, []);
 
   // Non-English tables are separate chunks. Until one lands t() falls through
   // to English, which is what already happened on first paint: lang starts

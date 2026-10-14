@@ -6,6 +6,7 @@ import { useAuth } from '../../lib/auth';
 import { usePreference } from '../../lib/preferences';
 import { usePersisted, useScrollMemory, forgetPersisted } from '../../lib/listMemory';
 import { api } from '../../lib/api';
+import { forEachKeysetPage } from '../../lib/keysetPages';
 import { UNTYPED_ITEM } from '@recycle-erp/shared';
 import { handleFetchError } from '../../lib/errorToast';
 import { useEscapeKey } from '../../lib/useEscapeKey';
@@ -295,8 +296,17 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   useEffect(() => {
     let alive = true;
     const handle = setTimeout(() => {
-      api.get<{ items: InventoryRow[] }>(`/api/inventory?${filterQuery}`)
-        .then(r => { if (alive) setItems(r.items); })
+      // Every page: the list used to end at the 200 newest lots with no sign
+      // that it had.
+      forEachKeysetPage<InventoryRow>(
+        (cursor) => api.get<{ items: InventoryRow[]; nextCursor: string | null }>(
+          `/api/inventory?${filterQuery}&limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`),
+        (page, meta) => {
+          if (!alive) return false;
+          setItems(prev => (meta.first ? page : [...prev, ...page]));
+          setLoadedOnce(true);
+        },
+      )
         .catch(handleFetchError)
         .finally(() => { if (alive) setLoadedOnce(true); });
     }, 200);
@@ -990,7 +1000,6 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
           fontSize: 12, color: 'var(--fg-subtle)',
         }}>
           <div>{loadedOnce ? `Showing ${items.length} ${items.length === 1 ? 'entry' : 'entries'}` : 'Loading inventory…'}</div>
-          <div style={{ fontSize: 11 }}>Server cap 200 · refine filters to narrow further</div>
         </div>
       </div>
 

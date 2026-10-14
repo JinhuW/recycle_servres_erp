@@ -19,6 +19,7 @@ import {
   type ReactNode,
 } from 'react';
 import { api } from './api';
+import { createPrefSaver, type PrefSaver } from './prefSaver';
 import { useAuth } from './auth';
 
 // ── Schema ─────────────────────────────────────────────────────────────────
@@ -86,7 +87,8 @@ type Ctx = {
 const PreferencesCtx = createContext<Ctx | null>(null);
 
 export function PreferencesProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
+  const signedOut = !user && !loading;
   const [prefs, setPrefs] = useState<PrefBag>(() => readCache());
 
   // Pending changes waiting to flush.
@@ -98,11 +100,55 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
   const rollbackRef = useRef<PrefBag>({});
   const rollbackAbsentRef = useRef<Set<string>>(new Set());
   const timerRef = useRef<number | null>(null);
-  const inflightRef = useRef<Promise<unknown> | null>(null);
+  // Who the next save is for. The saver reads it when a reply lands, so a
+  // reply started for one user is dropped once another has signed in.
+  const userIdRef = useRef<string | null>(user?.id ?? null);
+  userIdRef.current = user?.id ?? null;
+  const saverRef = useRef<PrefSaver | null>(null);
+  saverRef.current ??= createPrefSaver({
+    patch: (batch) => api.patch<{ user: { preferences: PrefBag } }>('/api/me/preferences', batch)
+      .then((r) => r.user.preferences ?? {}),
+    identity: () => userIdRef.current,
+    // The server's bag, with the newer edits on top — those queued behind
+    // this save and those still waiting for their own flush: a reply never
+    // undoes a newer local choice.
+    onServer: (server, queued) => {
+      setPrefs(() => {
+        const next = { ...server, ...queued, ...pendingRef.current };
+        writeCache(next);
+        return next;
+      });
+    },
+    onRollback: (keys, rollback) => {
+      setPrefs((cur) => {
+        const next = { ...cur };
+        for (const k of keys) {
+          if (rollback.absent.has(k)) delete next[k];
+          else if (k in rollback.values) next[k] = rollback.values[k];
+        }
+        writeCache(next);
+        return next;
+      });
+    },
+  });
 
   // Whenever auth resolves with a user, reconcile against the server blob.
+  // On sign-out, drop the lot: a pending timer would otherwise fire a save
+  // for a session that is gone, and the cache would show the previous user's
+  // settings to the next one at this browser. Not while auth is still
+  // asking: every cold load starts with no user, and wiping then threw away
+  // the cached bag the first paint is built from.
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      if (!signedOut) return;
+      if (timerRef.current !== null) { window.clearTimeout(timerRef.current); timerRef.current = null; }
+      pendingRef.current = {};
+      rollbackRef.current = {};
+      rollbackAbsentRef.current = new Set();
+      setPrefs({});
+      writeCache({});
+      return;
+    }
     const server: PrefBag = (user.preferences ?? {}) as PrefBag;
     setPrefs(server);
     writeCache(server);
@@ -112,7 +158,7 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
     // this for a same-user object churn — setLang does `setUser({...user})` —
     // would reset every preference saved since login back to that snapshot.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
+  }, [user?.id, signedOut]);
 
   const flush = useCallback(async () => {
     timerRef.current = null;
@@ -120,34 +166,16 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
     pendingRef.current = {};
     // Snapshot and reset the rollback records alongside the batch so a
     // concurrent edit starts a fresh cycle.
-    const rollback = rollbackRef.current;
-    const rollbackAbsent = rollbackAbsentRef.current;
+    const rollback = { values: rollbackRef.current, absent: rollbackAbsentRef.current };
     rollbackRef.current = {};
     rollbackAbsentRef.current = new Set();
     if (Object.keys(batch).length === 0) return;
-    const send = api.patch<{ user: { preferences: PrefBag } }>('/api/me/preferences', batch)
-      .then((r) => {
-        const merged = r.user.preferences ?? {};
-        setPrefs(merged);
-        writeCache(merged);
-      })
-      .catch((err) => {
-        // Roll back the touched keys to their true pre-edit values.
-        setPrefs((cur) => {
-          const next = { ...cur };
-          for (const k of Object.keys(batch)) {
-            if (rollbackAbsent.has(k)) delete next[k];
-            else if (k in rollback) next[k] = rollback[k];
-          }
-          writeCache(next);
-          return next;
-        });
-        // eslint-disable-next-line no-console
-        console.warn('Preference save failed; rolled back.', err);
-      })
-      .finally(() => { inflightRef.current = null; });
-    inflightRef.current = send;
-    await send;
+    try {
+      await saverRef.current!.save(batch, rollback);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('Preference save failed; rolled back.', err);
+    }
   }, []);
 
   const setPref = useCallback(<K extends PrefKey>(key: K, value: PrefMap[K]) => {

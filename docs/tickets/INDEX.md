@@ -5,6 +5,12 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-253](./RS-253-fix-the-dev-to-prod-pre-release-review-findings.md) | done | bug | P1 | Fix the dev to prod pre-release review findings | 1.258.9 |
+| [RS-252](./RS-252-fix-the-2026-10-13-full-code-review-findings.md) | done | bug | P1 | Fix the 2026-10-13 full code-review findings | 1.258.8 |
+| [RS-251](./RS-251-po-list-payment-gap-mark-hover-note-that-opens-at-on.md) | done | bug | P2 | PO list payment-gap mark: hover note that opens at once | 1.258.1 |
+| [RS-250](./RS-250-po-list-red-mark-when-linked-payment-differs-from-to.md) | done | story | P2 | PO list: red ! mark when linked payment differs from total cost | 1.258.0 |
+| [RS-249](./RS-249-bank-payments-link-to-a-sell-order-or-a-po-s-commiss.md) | done | story | P2 | Bank payments link to a sell order or a PO's commission | 1.257.0 |
+| [RS-248](./RS-248-sell-order-list-quick-after-sales-button-on-done-ord.md) | done | task | P2 | Sell-order list: quick After-sales button on Done orders | 1.256.0 |
 | [RS-247](./RS-247-pre-release-review-fixes-for-the-v1-254-release.md) | done | bug | P1 | Pre-release review fixes for the v1.254 release | 1.255.1 |
 | [RS-246](./RS-246-sell-order-bid-sheet-groups-ddr5-ram-by-spec.md) | done | story | P2 | Sell-order bid sheet groups DDR5 RAM by spec | 1.255.0 |
 | [RS-245](./RS-245-inventory-groups-ddr5-ram-by-spec-not-part-number.md) | done | story | P2 | Inventory groups DDR5 RAM by spec, not part number | 1.254.0 |

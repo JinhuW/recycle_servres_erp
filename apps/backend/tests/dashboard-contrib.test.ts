@@ -85,7 +85,8 @@ async function insertDoneSale(id: string, customerId: string, lines: { inventory
 // Nobody: one HDD PO with no supplier, 50.
 // Sales: Cust A bought Alpha's RAM line at 150 (profit 50); Cust B bought
 // Beta's HDD line at 260 (profit 60) plus a line with no inventory link at
-// 999, which the revenue tile has never counted.
+// 999 — real revenue with no PO line to price it, so it is in sales and the
+// count but carries no profit.
 async function fixture() {
   await clearWindow();
   const alpha = await supplier('Alpha Corp');
@@ -154,26 +155,31 @@ describe('GET /api/dashboard — contributions', () => {
     }
   });
 
-  it('sales and profit cards equal the tiles; a line with no inventory link is in neither', async () => {
+  it('sales and profit cards equal the tiles; a line with no inventory link is in sales, not profit', async () => {
     await fixture();
     const { token } = await loginAs(ALEX);
     const r = await api<Body>('GET', '/api/dashboard?range=7d', { token });
     const { revenue, profit } = r.body.contrib;
-    expect(r.body.kpis.revenue).toBeCloseTo(410, 2);
+    // 150 + 260 + the 999 manual line: revenue is the sale's own figure.
+    expect(r.body.kpis.revenue).toBeCloseTo(1409, 2);
     expect(revenue.total).toBeCloseTo(r.body.kpis.revenue, 2);
     expect(profit.total).toBeCloseTo(r.body.kpis.profit, 2);
     // Realized profit is on what the unit cost the company: PO-CT-1's $950
     // lot price over its one $100 line makes that sale -$800, and the HDD
-    // earns $60. The same figure the PO page's Realized column shows.
+    // earns $60. The same figure the PO page's Realized column shows. The
+    // manual line has no cost to price it against and adds nothing here.
     expect(profit.total).toBeCloseTo(-740, 2);
     expect(revenue.count).toBe(r.body.kpis.count);
-    for (const dim of Object.values(revenue.byDim)) expect(sum(dim)).toBeCloseTo(410, 2);
+    for (const dim of Object.values(revenue.byDim)) expect(sum(dim)).toBeCloseTo(1409, 2);
     for (const dim of Object.values(profit.byDim)) expect(sum(dim)).toBeCloseTo(-740, 2);
     expect(byName(revenue.byDim.customer!, 'Cust A').amount).toBeCloseTo(150, 2);
-    expect(byName(revenue.byDim.customer!, 'Cust B').amount).toBeCloseTo(260, 2);
+    expect(byName(revenue.byDim.customer!, 'Cust B').amount).toBeCloseTo(1259, 2);
     expect(byName(profit.byDim.customer!, 'Cust B').amount).toBeCloseTo(60, 2);
     expect(byName(revenue.byDim.category!, 'HDD').amount).toBeCloseTo(260, 2);
-    expect(revenue.byDim.category!.rows.some(x => x.name === 'SSD')).toBe(false);
+    expect(byName(revenue.byDim.category!, 'SSD').amount).toBeCloseTo(999, 2);
+    // No PO, so no purchaser: the manual line sits on the no-purchaser row,
+    // the no-supplier row's twin, and the tab still sums to the tile.
+    expect(byName(revenue.byDim.purchaser!, null)).toMatchObject({ id: null, amount: 999 });
     expect(Object.keys(revenue.byDim).sort()).toEqual(['category', 'customer', 'purchaser']);
   });
 

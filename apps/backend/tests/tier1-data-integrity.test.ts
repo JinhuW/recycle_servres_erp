@@ -25,9 +25,12 @@ async function driveToDone(token: string, soId: string) {
 describe('Tier 1 #3 — closing a sell order decrements inventory qty', () => {
   beforeEach(async () => { await resetDb(); });
 
+  // Three or more units, so two sold is a partial sale whatever the seed
+  // dealt: on an exactly-two-unit lot the full-sale rule below keeps the qty
+  // and marks the lot Sold, and this assertion flipped with the random seed.
   it('subtracts the sold qty from the source order_line on Done', async () => {
     const { token } = await loginAs(ALEX);
-    const line = await sellableLine(token, 2);
+    const line = await sellableLine(token, 3);
     const customerId = await firstCustomerId(token);
 
     const create = await api<{ id: string }>('POST', '/api/sell-orders', {
@@ -42,6 +45,22 @@ describe('Tier 1 #3 — closing a sell order decrements inventory qty', () => {
     expect(done.status).toBe(200);
 
     expect(await lineQty(token, line.id)).toBe(line.qty - 2);
+  });
+
+  it('selling the whole lot keeps its purchased qty and marks it Sold', async () => {
+    const { token } = await loginAs(ALEX);
+    const line = await sellableLine(token, 1);
+    const customerId = await firstCustomerId(token);
+    const create = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token,
+      body: { customerId, lines: [{ inventoryId: line.id, category: 'RAM', label: 'x',
+        partNumber: 'pn', qty: line.qty, unitPrice: line.price }] },
+    });
+    expect(create.status).toBe(201);
+    expect((await driveToDone(token, create.body.id)).status).toBe(200);
+    const r = await api<{ item: { qty: number; status: string } }>('GET', `/api/inventory/${line.id}`, { token });
+    expect(r.body.item.status).toBe('Sold');
+    expect(r.body.item.qty).toBe(line.qty);
   });
 });
 

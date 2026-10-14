@@ -11,6 +11,27 @@ import { effUnitCost, poFeeBasis } from '../lib/po-cost';
 
 export type MemberRole = 'manager' | 'purchaser';
 
+export class LastManagerError extends Error {
+  constructor() {
+    super("Can't remove the last active manager");
+    this.name = 'LastManagerError';
+  }
+}
+
+// Every change to active-manager membership runs under one advisory lock and
+// counts under it: the count is only true for as long as the lock is held.
+// Locking each target's own row did not protect the invariant — two managers
+// demoting themselves at once each saw the other still standing, and both
+// succeeded, leaving nobody who could put either back.
+async function assertNotLastManagerTx(tx: SqlLike, id: string): Promise<void> {
+  await tx`SELECT pg_advisory_xact_lock(hashtext('members:active-managers'))`;
+  const [target] = await tx<{ role: MemberRole; active: boolean }[]>`
+    SELECT role, active FROM users WHERE id = ${id}
+  `;
+  if (!target || target.role !== 'manager' || !target.active) return;
+  if ((await countOtherActiveManagers(tx, id)) === 0) throw new LastManagerError();
+}
+
 export interface MemberSummary {
   id: string;
   email: string;
@@ -129,7 +150,9 @@ export async function updateMember(
   // with it, atomically: a crash between the two writes would leave old
   // (possibly stolen) tokens working against the new state.
   const endsSessions = hash !== null || input.active === false;
+  const endsManagership = input.active === false || (input.role !== undefined && input.role !== 'manager');
   await sql.begin(async (tx) => {
+    if (endsManagership) await assertNotLastManagerTx(tx, id);
     await tx`
       UPDATE users SET
         name               = COALESCE(${input.name ?? null},       name),
@@ -139,7 +162,8 @@ export async function updateMember(
         role               = COALESCE(${input.role ?? null},       role),
         active             = COALESCE(${input.active ?? null},     active),
         password_hash      = COALESCE(${hash},                     password_hash),
-        tokens_valid_after = COALESCE(to_timestamp(${resetAt}),    tokens_valid_after)
+        tokens_valid_after = COALESCE(to_timestamp(${resetAt}),    tokens_valid_after),
+        credential_version = credential_version + (CASE WHEN ${endsSessions} THEN 1 ELSE 0 END)
       WHERE id = ${id}
     `;
     if (endsSessions) {
@@ -161,7 +185,7 @@ export async function getMemberStatus(
 
 // Number of active managers other than the given id. Used by the soft-delete
 // safeguard so we don't deactivate the last manager.
-export async function countOtherActiveManagers(sql: Sql, exceptId: string): Promise<number> {
+export async function countOtherActiveManagers(sql: SqlLike, exceptId: string): Promise<number> {
   const r = await sql`
     SELECT COUNT(*)::int AS n FROM users
     WHERE role = 'manager' AND active = TRUE AND id <> ${exceptId}
@@ -187,7 +211,13 @@ export async function deactivateMember(sql: Sql, id: string): Promise<boolean> {
   // always consistent: a crash between the two would leave a deactivated
   // user whose refresh tokens can still mint new access tokens.
   await sql.begin(async (tx) => {
-    const r = await tx`UPDATE users SET active = FALSE WHERE id = ${id} RETURNING id`;
+    await assertNotLastManagerTx(tx, id);
+    // The version bump outlives a later reactivation: tokens minted before
+    // the deactivation stay dead instead of coming back with the account.
+    const r = await tx`
+      UPDATE users SET active = FALSE, credential_version = credential_version + 1
+      WHERE id = ${id} RETURNING id
+    `;
     if (r.length === 0) return; // no such user — nothing to revoke
     updated = true;
     // Close the refresh path immediately so they can't mint new access tokens.

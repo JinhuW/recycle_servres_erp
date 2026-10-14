@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { LangProvider, useT } from './lib/i18n';
+import { useAuth } from './lib/auth';
 import { PHONE_BREAKPOINT } from './lib/viewport';
 import { DiscardConfirmHost, confirmDiscard } from './lib/unsavedGuard';
 
@@ -53,11 +54,21 @@ function LayoutSwitch({ toPhone, onSwitch }: { toPhone: boolean; onSwitch: () =>
 
 export default function App() {
   const { isPhone, mismatch, fitsPhone, switchShell } = useShell();
+  // The shell is remounted whenever the signed-in identity changes. Its
+  // state — the PO open in the editor, a phone capture in progress, loaded
+  // notifications — used to live above the login gate, so a manager's PO
+  // stayed in memory through a logout and rendered, private notes included,
+  // for whoever signed in next under the same URL, before any GET of their
+  // own. A fresh mount starts with nothing and fetches under the new session;
+  // a reply to the old instance's in-flight request lands on an unmounted
+  // component and is dropped.
+  const { user } = useAuth();
+  const shellKey = user?.id ?? 'anon';
   return (
     <LangProvider>
       <ErrorBoundary>
         <Suspense fallback={<div className="app-loading" />}>
-          {isPhone ? <MobileApp /> : <DesktopApp />}
+          {isPhone ? <MobileApp key={shellKey} /> : <DesktopApp key={shellKey} />}
         </Suspense>
         <DiscardConfirmHost />
         {mismatch && <LayoutSwitch toPhone={fitsPhone} onSwitch={() => { void switchShell(); }} />}

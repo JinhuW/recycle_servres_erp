@@ -371,6 +371,8 @@ export type DraftLine = {
   // Set to true once this line has been persisted to the server-side draft;
   // prevents double-insert on final submit.
   _confirmed?: boolean;
+  /** Saved before and edited since, and that save failed: Submit retries it by id instead of dropping it as already confirmed. */
+  _dirty?: boolean;
 };
 
 export type ScanResponse = {
@@ -457,6 +459,9 @@ export type DashboardData = {
   kpis: {
     count: number; cost: number; revenue: number; profit: number; commission: number;
     prev: { revenue: number; profit: number };
+    // Sale lines with no PO line to price them (manual sales, deleted
+    // sources): in revenue and the count, not in cost or profit.
+    unknownCost?: { lines: number; revenue: number };
   };
   // The window every figure below was computed over — calendar dates in the
   // business time zone — and the bucket the series is cut in.

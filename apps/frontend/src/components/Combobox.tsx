@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useId } from 'react';
 import { Icon } from './Icon';
 import { useT } from '../lib/i18n';
 import { useEscapeKey } from '../lib/useEscapeKey';
@@ -13,8 +13,7 @@ import { useEscapeKey } from '../lib/useEscapeKey';
  */
 export function Combobox({
   value, options, onChange, placeholder, className = 'input', invalid = false,
-  filterOptions = true, meta, loading = false, emptyText,
-}: {
+  filterOptions = true, meta, loading = false, emptyText, id,}: {
   value: string | null | undefined;
   options: readonly string[];
   onChange: (v: string) => void;
@@ -34,6 +33,7 @@ export function Combobox({
   loading?: boolean;
   /** Replaces "No matches." — a searched menu is empty for a different reason. */
   emptyText?: string;
+  id?: string;
 }) {
   const { t } = useT();
   const [open, setOpen] = useState(false);
@@ -72,6 +72,11 @@ export function Combobox({
   useEffect(() => { setActive(-1); }, [q, open, optionsKey]);
 
   const choose = (v: string) => { onChange(v); setOpen(false); setActive(-1); };
+  // The list and the highlighted option are named to the input, so a screen
+  // reader announces what the arrow keys move over instead of a silent
+  // highlight.
+  const listId = useId();
+  const optionId = (i: number) => `${listId}-${i}`;
 
   // The open menu is a layer of its own, so Escape closes it and not the
   // drawer or dialog it sits in. Handled here only: closing it from the
@@ -103,6 +108,7 @@ export function Combobox({
     <div ref={ref} style={{ position: 'relative' }}>
       <input
         ref={inputRef}
+        id={id}
         className={className}
         value={value ?? ''}
         placeholder={placeholder}
@@ -111,6 +117,9 @@ export function Combobox({
         onKeyDown={onKeyDown}
         role="combobox"
         aria-expanded={open}
+        aria-controls={listId}
+        aria-autocomplete="list"
+        aria-activedescendant={open && active >= 0 ? optionId(active) : undefined}
         aria-invalid={invalid || undefined}
         autoComplete="off"
         style={{ paddingRight: 30 }}
@@ -149,7 +158,8 @@ export function Combobox({
           {offerCustom && (
             <button
               type="button"
-              onMouseDown={e => { e.preventDefault(); setOpen(false); }}
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => setOpen(false)}
               style={{
                 width: '100%', textAlign: 'left', padding: '10px 12px',
                 border: 'none', background: 'var(--bg-soft)', cursor: 'pointer',
@@ -170,7 +180,7 @@ export function Combobox({
               {t('comboSearching')}
             </div>
           )}
-          <div style={{ maxHeight: 240, overflowY: 'auto' }}>
+          <div id={listId} role="listbox" style={{ maxHeight: 240, overflowY: 'auto' }}>
             {filtered.map((o, i) => {
               const selected = o === value;
               const highlit = i === active;
@@ -179,9 +189,14 @@ export function Combobox({
                 <button
                   key={o}
                   type="button"
-                  // mousedown (not click) so the option registers before the
-                  // input blurs and the menu unmounts.
-                  onMouseDown={e => { e.preventDefault(); choose(o); }}
+                  id={optionId(i)}
+                  role="option"
+                  aria-selected={selected}
+                  // mousedown only keeps focus in the input (so the menu does
+                  // not unmount under the click); the choice is on click, which
+                  // a Tab-focused option also gets from Enter and Space.
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={() => choose(o)}
                   onMouseEnter={() => setActive(i)}
                   style={{
                     width: '100%', textAlign: 'left', padding: '9px 12px',

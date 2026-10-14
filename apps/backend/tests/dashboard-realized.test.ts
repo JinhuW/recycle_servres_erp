@@ -65,6 +65,39 @@ describe('GET /api/dashboard — realized financials', () => {
     expect(r.body.kpis.count).toBe(1); // one Done sell order in window
   });
 
+  // A manual sale line (sold with nothing on the shelf) names no PO line.
+  // The INNER JOIN to order_lines dropped it from every tile: $100 of real
+  // revenue and a Done order that the sell-orders screen showed and the
+  // dashboard did not.
+  it('counts a manual (inventory-free) sale in revenue and the order count, and reports it as uncosted', async () => {
+    const db = getTestDb();
+    await db`DELETE FROM sell_order_lines`;
+    await db`DELETE FROM sell_orders`;
+    const customerId = (await db<{ id: string }[]>`SELECT id FROM customers LIMIT 1`)[0].id;
+    await db`
+      INSERT INTO sell_orders (id, customer_id, status, created_by, created_at, updated_at, done_at)
+      VALUES ('SO-TEST-DASH-M', ${customerId}, 'Done',
+              (SELECT id FROM users WHERE email = ${MARCUS}), NOW(), NOW(), NOW())
+    `;
+    await db`
+      INSERT INTO sell_order_lines (sell_order_id, inventory_id, category, label, qty, unit_price, position)
+      VALUES ('SO-TEST-DASH-M', NULL, 'Other', 'rails', 2, 50, 0)
+    `;
+    const { token } = await loginAs(ALEX);
+    const r = await api<{
+      kpis: { count: number; revenue: number; profit: number; unknownCost: { lines: number; revenue: number } };
+      byCat: Record<string, { count: number; revenue: number; profit: number }>;
+      contrib: { revenue: { total: number } };
+    }>('GET', '/api/dashboard?range=30d', { token });
+    expect(r.status).toBe(200);
+    expect(r.body.kpis.revenue).toBeCloseTo(100, 2);
+    expect(r.body.kpis.count).toBe(1);
+    expect(r.body.kpis.profit).toBe(0);
+    expect(r.body.kpis.unknownCost).toEqual({ lines: 1, revenue: 100 });
+    expect(r.body.byCat.Other.revenue).toBeCloseTo(100, 2);
+    expect(r.body.contrib.revenue.total).toBeCloseTo(100, 2);
+  });
+
   // The contributor leaderboard is PO-based (per-purchaser total cost or
   // projected commission), independent of role — see dashboard-projected.test.ts.
 

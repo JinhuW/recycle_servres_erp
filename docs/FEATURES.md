@@ -216,7 +216,10 @@ is not a stage but a flag beside one, set once every line has sold
   order starts at — the screenshot's uploader need not be the payer, so
   nothing is guessed. Files write through as they are dropped and the pick
   as it is made — managers at any stage, closed book included — and
-  purchasers see both read-only. Each pick is one *Commission paid by:
+  purchasers see both read-only. Under the drop box, managers also see the
+  **bank payments linked as this PO's commission** on the Payments page,
+  with their net, the same ledger the Cost Payment tab shows for the cost
+  (v1.257.0). Each pick is one *Commission paid by:
   ‹from› → ‹to›* line in Activity, the names as they were at the time. **Ready to Pay →
   Done asks for it only when it is missing** (v1.165.0): with a screenshot
   on file the move is as plain as any other; without one the *Mark order as
@@ -727,6 +730,12 @@ is not a stage but a flag beside one, set once every line has sold
     page's Order status card, at any stage.
     - The PO page compares against its live cost, so a fee typed to cover the
       gap clears the warning before Save.
+    - The desktop PO list puts a red circled `!` ahead of the order id of
+      every such PO, so the off rows stand out without opening each one
+      (v1.258.0). Hovering or focusing it opens the banner's note at once:
+      both figures to the cent, the difference and *Open Payments* — the
+      list's cells are whole dollars, so a cents gap is invisible without it
+      (v1.258.1).
   - **Asked again at approval.** Moving a PO from before Ready to Pay into
     Ready to Pay or Done asks *Continue anyway?* first. That covers Review
     mode's Approve and the PO page's Save.
@@ -985,6 +994,16 @@ is not a stage but a flag beside one, set once every line has sold
 
 ## Clients (the people we buy from)
 
+- **A client link opens that client** (v1.258.7): `/#/clients/<id>` drives
+  the drawer, a row click writes the id to the URL and closing returns to
+  the list, so a copied link and Back/Forward land on the same client.
+- **The list filters and counts the whole book, then pages it** (v1.258.5).
+  Follow-up and health were applied after a 200-row cap, so a book whose
+  "soon" clients all sat past the cap showed none and counted none.
+  `GET /api/suppliers?limit=&offset=` answers `nextOffset`; the Clients page
+  walks the pages. A box from a non-Latin seller lands on the right client:
+  package → PO matches the seller on the same name key every other client
+  lookup uses, where it had read every all-Chinese name as the same.
 - **Clients named in other scripts no longer collide** (v1.198.3). A name's
   key kept only A–Z and 0–9, so every Chinese or Vietnamese name keyed as
   empty. A second such client at the same zip was refused, and every
@@ -1078,6 +1097,8 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   lots alone, and its row — qty and the in-stock split, lot and PO counts,
   cost range, Warehouses — sums those alone. The attribute chips still show
   a matching product whole, so a mis-typed lot stays findable.
+- **The phone Inventory list is one category → brand → capacity order across
+  every page it loads** (v1.258.9), the order the exports use.
 - **The phone Inventory list shows each line's sell price to every role**
   (v1.144.2), under the status chip, the way the desktop table and the phone
   Orders list already did. Unit cost, profit and margin stay manager-only
@@ -1108,9 +1129,10 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
 - **The export and both screens read in the vendor bid sheet's order** — brand,
   then capacity, speed, numerically collated with blanks last (v1.107.0), and
   category rank ahead of it on the screens, which have no tabs to group by
-  (v1.111.0). One implementation serves the workbooks and the lists. The screens
-  still take the newest 200 rows from the database; only their arrangement
-  changed. The bid sheet's RAM tab (and its packing tabs) put a device-group /
+  (v1.111.0). One implementation serves the workbooks and the lists. The
+  screens read the whole book in pages of 200 (`GET /api/inventory?limit=&cursor=`,
+  v1.258.5); until then they took the newest 200 rows and ended there with no
+  sign that they had, the phone's totals included. The bid sheet's RAM tab (and its packing tabs) put a device-group /
   DDR-generation grouping ahead of that order (v1.129.0); the export and the
   screens do not.
 - Other-type stock can be filtered by Untyped (v1.49.0).
@@ -1330,6 +1352,10 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   column with a managers-only receiver rule (v1.16.0). The receiver can be
   reassigned from the detail view in any status, Done and Closed included —
   the change saves at once and is logged in the order history (v1.135.0).
+- **The detail view lists the bank payments linked to the order**
+  (v1.257.0), under the payment receiver: each row a link back to the
+  Payments page pinned to this order, with the net received. Nothing shows
+  until a manager links a payment there.
 - **The desktop list flags an order with internal notes** (v1.239.0): a note
   icon beside the customer on each row whose note isn't blank.  Hovering or
   tabbing to it shows the note in a card (line breaks kept, clamped at 14
@@ -1560,6 +1586,8 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   page has an **After-sales** button that opens the new-case form with the
   order preselected, and a card in the side column listing the order's
   cases with their status, issue and amount. See [After-sales](#after-sales).
+  The list has the same button in each eligible row's Actions column
+  (v1.256.0), so a case can be opened without visiting the order first.
 
 ## After-sales
 
@@ -1569,7 +1597,7 @@ ends — the goods come back (**Return**) or the customer keeps them at a
 lower price (**Discount**). Purchasers never see the page or the API.
 
 - **Opening a case** (v1.251.0). `#/after-sales/new`, or the After-sales
-  button on a sell order. The form loads the order, refuses one that is
+  button on a sell order's page or its row in the list (v1.256.0). The form loads the order, refuses one that is
   Draft, Packing or Closed (nothing has shipped, or nothing was sold), and
   lists its products with a checkbox and a quantity capped at the line's
   qty (typed freely, clamped when the field loses focus — v1.255.1). The
@@ -1655,7 +1683,8 @@ when it arrives.  The system never buys a label.
 
 ## Payments and reconciliation
 
-Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
+Manager-only. Links **Mercury and PayPal transactions to purchase orders**,
+to a PO's commission, or to sell orders (v1.257.0).
 
 - Transaction ingest with auto-pair and auto-link (v1.90.0), a background sync
   loop behind a manager-only API (v1.91.0), and a Payments page (v1.92.0).
@@ -1700,6 +1729,25 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
   fail to load, is simply retried on the next run: checking and savings keep
   syncing, and payoffs stay transfers (v1.176.1).
 - Unlinked transactions get **suggested matching POs** (v1.99.0).
+- **A row links to one of three targets** (v1.257.0): the purchase order it
+  paid (as before), that PO's **commission** — what the purchaser was paid,
+  kept apart from what the supplier was — or a **sell order**, the money a
+  buyer sent. *Link…* opens on three tabs; an incoming payment opens on
+  *Sell order*, an outgoing one on *Purchase order*. The PO tab keeps its
+  ranked suggestions; the other two list recent candidates (sell orders at
+  Shipped, Awaiting payment or Done; POs at Ready to Pay or Done, with the
+  purchaser's projected commission) and search by id, customer or
+  purchaser, an exact amount badged and sorted first. A linked row reads the
+  SO pill with the order's total, or the PO pill with a *Commission* chip. A
+  commission link never counts toward the PO's cost paid — the Cost Payment
+  ledger, the list's Payment cell and the payment-gap banner ignore it — and
+  never fills the PO's transaction ID. A sell order's link reads by sign the
+  other way round: money in is the buyer's payment, money out our refund.
+  Unlink, group, ignore, assign and transfer treat every link alike, and
+  grouping carries a sell-order link onto the sibling leg. A closed or
+  archived sell order refuses the link. `#/payments/so/<id>` pins the page to
+  a sell order with its net received; a pinned PO shows its cost and
+  commission rows together, the net still the cost net.
 - The queue **opens on money out**, and the Unlinked and Suggested tiles take
   the same direction lens as the rows beneath them, so the count and the list
   can never disagree (v1.114.1).
@@ -1887,6 +1935,11 @@ over MCP.
 
 - Paginated with infinite scroll (v1.12.0), sortable by clicking column headers
   (v1.67.0).
+- **The expanded row shows no invented figures** (v1.258.5). It used to chart
+  70% of each sell price as Cost beside real sales and list the average sell
+  price nudged by a few percent under each price-source name, counting those
+  as sources in its confidence note. It says "no cost data" and "no feed
+  connected" instead, and counts only the team's own sales.
 - A line can be priced while the buy can still change (v1.54.0).
 - **Five feeds write `last_price`**, each tagged in the event's source: the
   scraper and MCP connectors (`scraper:`/`mcp:`), a manager's manual entry
@@ -1929,6 +1982,18 @@ over MCP.
 ## Dashboard
 
 Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
+
+- **Every sale counts, costed or not** (v1.258.5). A manual sale line — sold
+  with nothing on the shelf — and a line whose PO source was since deleted
+  used to fall out of revenue, the order count, the chart, the category
+  rollup and the contribution cards, so the sell-orders screen showed Done
+  orders the dashboard did not. Revenue and counts now include every line;
+  cost, profit and commission are summed only where a PO line exists to
+  price them, and the gross-profit tile says how many sales, and how much
+  revenue, carry no recorded cost. On the contribution cards such a sale
+  sits on the no-purchaser row, the no-supplier row's twin. The phone's
+  profit sparkline keeps a loss period on the chart, with the zero line
+  drawn when there is one.
 
 - **The money reads the right facts** (v1.198.0):
   - A sale belongs to the day its sell order became Done
@@ -2325,6 +2390,17 @@ inventory search, sell-order draft creation.
 
 ## The two shells
 
+- **Installed-app shortcuts and shared photos land where they say**
+  (v1.258.7). The manifest's Submit, Inventory and Sell orders shortcuts and
+  the share-target landing are real paths the hash router now reads as the
+  route they name; on the phone, Submit opens the capture flow and a shared
+  photo is scanned the moment the camera opens for the next new product —
+  never for a rescan of an existing line — compressed first, and dropped
+  when the capture ends (v1.258.9). The
+  phone can zoom. Dialogs and phone sheets keep Tab inside them; proof
+  uploads and item-type picks work from the keyboard; the phone's capture
+  button and every hardware field have accessible names.
+
 One bundle, two lazy-loaded shells chosen in `App.tsx`: viewport under 720px →
 `MobileApp`; else `DesktopApp`. The third, the `/v/<token>` vendor portal, was
 removed in v1.191.0.
@@ -2410,6 +2486,11 @@ removed in v1.191.0.
   of JavaScript has parsed.
 
 ## Observability
+
+- **`/api/health` reports whether attachment storage is configured**
+  (`providers.attachments`: `r2` or `none`, v1.258.8). In production a
+  missing bucket refuses uploads with a 503 instead of recording a stub;
+  a partial R2 configuration refuses to boot.
 
 - Unhandled 500s write JSONL to `ERROR_LOG_DIR/errors.jsonl`, rotating at
   10 MB.

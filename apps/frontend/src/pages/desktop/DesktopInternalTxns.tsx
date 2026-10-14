@@ -8,6 +8,7 @@ import { fmtDate, fmtDateShort, fmtSigned } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { usePersisted } from '../../lib/listMemory';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
+import { confirmDiscard, useUnsavedGuard } from '../../lib/unsavedGuard';
 import { RouteLink } from '../../components/RouteLink';
 
 // The records that explain internal money movement — a Mercury→PayPal
@@ -161,7 +162,13 @@ export function DesktopInternalTxns({ onToast }: { onToast: (msg: string) => voi
                     key={row.id}
                     row={row}
                     open={openId === row.id}
-                    onToggle={() => setOpenId(openId === row.id ? null : row.id)}
+                    // Collapsing or switching unmounts the open record's
+                    // panel, and its unsaved title or note with it.
+                    onToggle={() => {
+                      void confirmDiscard().then((ok) => {
+                        if (ok) setOpenId(openId === row.id ? null : row.id);
+                      });
+                    }}
                     locale={locale}
                     onChanged={reload}
                     onToast={onToast}
@@ -239,10 +246,14 @@ function RecordDetailPanel({ id, locale, onChanged, onToast }: {
   const [saving, setSaving] = useState(false);
   const [adding, setAdding] = useState(false);
 
-  const load = useCallback(() => {
+  // `keepDraft`: a membership change reloads the record for its members, but
+  // an unsaved title or note is the user's and stays — attaching a payment
+  // used to replace it with the saved one.
+  const load = useCallback((opts: { keepDraft?: boolean } = {}) => {
     api.get<RecordDetail>(`/api/internal-transactions/${id}`)
       .then(r => {
         setRec(r);
+        if (opts.keepDraft) return;
         setTitle(r.title ?? '');
         setNote(r.note ?? '');
         setDirty(false);
@@ -251,6 +262,7 @@ function RecordDetailPanel({ id, locale, onChanged, onToast }: {
   }, [id]);
 
   useEffect(() => { load(); }, [load]);
+  useUnsavedGuard(dirty);
 
   const save = async () => {
     setSaving(true);
@@ -267,7 +279,7 @@ function RecordDetailPanel({ id, locale, onChanged, onToast }: {
     try {
       await api.delete(`/api/internal-transactions/${id}/members/${txnId}`);
       onToast(t('payIntRemovedToast'));
-      load();
+      load({ keepDraft: true });
       onChanged();
     } catch (e) { handleFetchError(e); }
   };
@@ -276,7 +288,7 @@ function RecordDetailPanel({ id, locale, onChanged, onToast }: {
     try {
       await api.post(`/api/internal-transactions/${id}/members`, { txnIds: [txnId] });
       setAdding(false);
-      load();
+      load({ keepDraft: true });
       onChanged();
     } catch (e) { handleFetchError(e); }
   };

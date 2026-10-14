@@ -31,10 +31,13 @@ import { lineRequirements, missingFieldNames } from './lib/lineRequirements';
 import { useAuth } from './lib/auth';
 import { useT, translateIn } from './lib/i18n';
 import { api, ApiError, createDraftOrder, deleteOrder } from './lib/api';
+import { takeSharedFile } from './lib/sharedFile';
 import { handleFetchError, showErrorDialog } from './lib/errorToast';
 import {
   navigate, navigateBack, useRoute, match, matchPurchaseOrder, poProductsPath, parseShippingRoute,
   MOBILE_VIEW_TO_PATH, pathToMobileView, readSafeNext, isAuthorizePath,
+  readHashQuery,
+  replaceRoute,
 } from './lib/route';
 import { confirmDiscard } from './lib/unsavedGuard';
 import type { Category, DraftLine, Notification, Order, OrderLine, OrderSummary, ScanResponse } from './lib/types';
@@ -149,6 +152,49 @@ function Shell() {
   // across the draft-creation round trip reads this after the await to tell
   // whether the session it belongs to is still the live one.
   const captureGen = useRef(0);
+  // Every write to the draft — its creation, each line's autosave — runs
+  // through one queue, and Submit waits for the queue before it reads the
+  // list. Saving a line opened Review while its PATCH was still in flight,
+  // and a quick Submit built its request from the list as it stood: the
+  // unconfirmed line was appended a second time, or, with the draft POST
+  // still pending, a second PO was created. Same shape as the desktop
+  // editor's save queue.
+  const writeQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const [pendingWrites, setPendingWrites] = useState(0);
+  const enqueueWrite = <T,>(run: () => Promise<T>): Promise<T> => {
+    setPendingWrites(n => n + 1);
+    const next = writeQueue.current.then(run, run);
+    writeQueue.current = next.catch(() => undefined).finally(() => setPendingWrites(n => n - 1));
+    return next;
+  };
+  // The list as it stands when an awaited write settles, for Submit.
+  const captureRef = useRef(capture);
+  captureRef.current = capture;
+  // A photo shared into the app, waiting for the next new product's camera.
+  // Held by the session, not left in sessionStorage: the camera used to take
+  // it on any mount, so a share abandoned earlier was scanned into whatever
+  // camera opened next — a rescan of an existing line included. A ref the
+  // camera takes from, not a prop: StrictMode runs the camera's mount effect
+  // twice, and a prop would still hold the photo the second time.
+  const sharedPhotoRef = useRef<string | null>(null);
+  const takeSharedPhoto = () => {
+    const shared = sharedPhotoRef.current;
+    sharedPhotoRef.current = null;
+    return shared;
+  };
+  useEffect(() => {
+    if (capture.phase === 'idle') sharedPhotoRef.current = null;
+  }, [capture.phase]);
+  // A saved line whose later save failed stays on the list marked unsaved,
+  // so Submit retries it rather than dropping it as already confirmed.
+  const markDirty = (line: DraftLine, dirty: boolean) => {
+    const same = (l: DraftLine) => (line._cid && l._cid === line._cid) || (line.id && l.id === line.id);
+    setCapture(c =>
+      c.phase === 'idle' || c.phase === 'draftPicker'
+        ? c
+        : { ...c, lines: c.lines.map(l => same(l) ? { ...l, _dirty: dirty } : l) },
+    );
+  };
   // ── Line photos ──────────────────────────────────────────────────────────
   // Held here rather than in SubmitForm: that screen unmounts the moment a line
   // is saved, and a picked file has to outlive it — a line has nowhere to put a
@@ -182,6 +228,24 @@ function Shell() {
   // here for the same reason: the form unmounts that screen.
   const [productsLanding, setProductsLanding] = useState<ProductsLanding | null>(null);
   const orderDetailMatch = matchPurchaseOrder(path);
+
+  // The PWA's Submit shortcut and the share-target landing both arrive at
+  // `/submit`, which is no screen: it opens the capture flow and lands on the
+  // dashboard underneath. A shared photo (lib/sharedFile.ts) waits for the
+  // camera, which the next product's Scan opens. A capture already open is
+  // left as it is — the photo joins it — rather than reset under the user.
+  useEffect(() => {
+    if (path !== '/submit' || !user) return;
+    const lost = readHashQuery().has('sharedLost');
+    replaceRoute('/dashboard');
+    const shared = takeSharedFile();
+    if (shared) sharedPhotoRef.current = shared;
+    if (captureRef.current.phase === 'idle') startNewDraft();
+    if (shared) showToast(t('sharedPhotoReady'));
+    else if (lost) showToast(t('sharedPhotoLost'), 'warn');
+    // startNewDraft and showToast are stable for the component's lifetime.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [path, user?.id]);
 
   // Load notifications when the user is signed in.
   useEffect(() => {
@@ -477,109 +541,117 @@ function Shell() {
       setCapture({ phase: 'review', detected: null, lines: newLines, draftId, originalLineIds });
     }
 
-    // A line that already exists in the DB carries an id — an existing-order
-    // line opened for edit, or a draft line we autosaved earlier. Re-saving it
-    // must UPDATE that row so the edit syncs now, instead of sitting
-    // browser-only until final submit (or being dropped as a "confirmed" line).
-    if (line.id) {
-      const blocked = lineSyncBlock(line, !!editingId);
+    await enqueueWrite(async () => {
+      // A line that already exists in the DB carries an id — an existing-order
+      // line opened for edit, or a draft line we autosaved earlier. Re-saving it
+      // must UPDATE that row so the edit syncs now, instead of sitting
+      // browser-only until final submit (or being dropped as a "confirmed" line).
+      if (line.id) {
+        const blocked = lineSyncBlock(line, !!editingId);
+        if (blocked) {
+          showToast(blocked, 'error');
+          // Review already shows the edit; it stays marked unsaved so Submit
+          // refuses with this reason rather than shipping the old row.
+          if (!backToDetail) markDirty(line, true);
+          return;
+        }
+        const orderId = editingId ?? draftId ?? await ensureDraftId();
+        if (!orderId) {
+          showToast(t('syncNoDraft'), 'error');
+          return;
+        }
+        // Cancelled while the draft POST was in flight — cancelCapture is already
+        // deleting that order, so writing to it now would resurrect a PO the user
+        // discarded.
+        if (gen !== captureGen.current) return;
+        try {
+          // Omit status: the backend COALESCEs it, so leaving it out preserves
+          // the line's lifecycle (Done, etc.) instead of forcing In Transit.
+          const { status, ...fields } = toAddLine(line);
+          void status;
+          // toAddLine reads a 0 qty as 1, as a new line must; an existing
+          // order's line may stand at 0.
+          const qty = editingId ? Number(line.qty) || 0 : fields.qty;
+          await api.patch('/api/orders/' + orderId, { lines: [{ id: line.id, ...fields, qty }] });
+          await flushLinePhotos(line, orderId, line.id);
+          if (backToDetail) doneToDetail();
+          else markDirty(line, false);
+        } catch (e) {
+          // A purchaser may edit until Done; past Draft it costs the order its
+          // stage, and the detail screen warns before it sends anyone here. What
+          // still refuses is a line an open sell or transfer order has claimed.
+          handleFetchError(e);
+          // The edit stays on the list, marked unsaved; Submit retries it by id.
+          if (!backToDetail) markDirty(line, true);
+        }
+        return;
+      }
+
+      // Brand-new line (no DB id yet). Autosave it whether this is a fresh draft
+      // or an existing order opened for edit — both append via addLines. Without
+      // targeting editingId here, a line added to an existing order sat
+      // browser-only until final submit (the reported "Add item doesn't sync").
+
+      // Never skip silently: if the line isn't complete enough to persist, tell
+      // the user exactly which field is missing.
+      const blocked = lineSyncBlock(line);
       if (blocked) {
         showToast(blocked, 'error');
         return;
       }
-      const orderId = editingId ?? draftId ?? await ensureDraftId();
-      if (!orderId) {
+
+      // The existing order being edited, or the new draft — whose creation is
+      // async, so on a fast Save await the in-flight POST instead of dropping the
+      // line to local-only.
+      const mintedHere = !editingId && !draftId;
+      const targetId = editingId ?? draftId ?? await ensureDraftId();
+      if (!targetId) {
         showToast(t('syncNoDraft'), 'error');
         return;
       }
-      // Cancelled while the draft POST was in flight — cancelCapture is already
-      // deleting that order, so writing to it now would resurrect a PO the user
-      // discarded.
       if (gen !== captureGen.current) return;
+
       try {
-        // Omit status: the backend COALESCEs it, so leaving it out preserves
-        // the line's lifecycle (Done, etc.) instead of forcing In Transit.
-        const { status, ...fields } = toAddLine(line);
-        void status;
-        // toAddLine reads a 0 qty as 1, as a new line must; an existing
-        // order's line may stand at 0.
-        const qty = editingId ? Number(line.qty) || 0 : fields.qty;
-        await api.patch('/api/orders/' + orderId, { lines: [{ id: line.id, ...fields, qty }] });
-        await flushLinePhotos(line, orderId, line.id);
-        if (backToDetail) doneToDetail();
+        // Capture the inserted row's id so a later re-edit UPDATEs it in place
+        // (and the final submit updates rather than inserting a duplicate).
+        const res = await api.patch<{ addedLineIds?: string[]; addedLineNos?: number[] }>(
+          '/api/orders/' + targetId, { addLines: [toAddLine(line)] },
+        );
+        const newId = res.addedLineIds?.[0];
+        const newNo = res.addedLineNos?.[0];
+        if (newId) await flushLinePhotos(line, targetId, newId);
+        if (backToDetail) { doneToDetail(); return; }
+        // Match by stable client id, not array index: the user may have added,
+        // removed, or navigated past this line before the PATCH resolved.
+        setCapture(c => {
+          if (c.phase === 'idle' || c.phase === 'draftPicker') return c;
+          const updated = c.lines.map(l =>
+            l._cid === line._cid ? { ...l, _confirmed: true, id: newId ?? l.id, no: newNo ?? l.no } : l,
+          );
+          // Track what the draft holds server-side, not just what the screen
+          // shows: a line autosaved and then deleted here has to be named in
+          // removeLineIds at submit or it ships as stock nobody bought.
+          const known = c.originalLineIds ?? [];
+          const originalLineIds = newId && !known.includes(newId) ? [...known, newId] : known;
+          return { ...c, lines: updated, originalLineIds };
+        });
       } catch (e) {
-        // A purchaser may edit until Done; past Draft it costs the order its
-        // stage, and the detail screen warns before it sends anyone here. What
-        // still refuses is a line an open sell or transfer order has claimed.
-        handleFetchError(e);
+        // Keep the line locally unconfirmed; it will be sent on final submit.
+        // On the detail path there is no final submit, so the reason matters.
+        if (backToDetail) { handleFetchError(e); return; }
+        showToast(t('syncFailed'), 'error');
+        // The order was minted for this line and the line didn't land, so the
+        // order is empty and nothing points at it — take it back out. Submit
+        // creates it again, atomically, from the whole list.
+        if (mintedHere) {
+          deleteOrder(targetId).catch(() => {/* best-effort */});
+          draftIdPromise.current = null;
+          setCapture(c =>
+            c.phase === 'idle' || c.phase === 'draftPicker' ? c : { ...c, draftId: undefined },
+          );
+        }
       }
-      return;
-    }
-
-    // Brand-new line (no DB id yet). Autosave it whether this is a fresh draft
-    // or an existing order opened for edit — both append via addLines. Without
-    // targeting editingId here, a line added to an existing order sat
-    // browser-only until final submit (the reported "Add item doesn't sync").
-
-    // Never skip silently: if the line isn't complete enough to persist, tell
-    // the user exactly which field is missing.
-    const blocked = lineSyncBlock(line);
-    if (blocked) {
-      showToast(blocked, 'error');
-      return;
-    }
-
-    // The existing order being edited, or the new draft — whose creation is
-    // async, so on a fast Save await the in-flight POST instead of dropping the
-    // line to local-only.
-    const mintedHere = !editingId && !draftId;
-    const targetId = editingId ?? draftId ?? await ensureDraftId();
-    if (!targetId) {
-      showToast(t('syncNoDraft'), 'error');
-      return;
-    }
-    if (gen !== captureGen.current) return;
-
-    try {
-      // Capture the inserted row's id so a later re-edit UPDATEs it in place
-      // (and the final submit updates rather than inserting a duplicate).
-      const res = await api.patch<{ addedLineIds?: string[]; addedLineNos?: number[] }>(
-        '/api/orders/' + targetId, { addLines: [toAddLine(line)] },
-      );
-      const newId = res.addedLineIds?.[0];
-      const newNo = res.addedLineNos?.[0];
-      if (newId) await flushLinePhotos(line, targetId, newId);
-      if (backToDetail) { doneToDetail(); return; }
-      // Match by stable client id, not array index: the user may have added,
-      // removed, or navigated past this line before the PATCH resolved.
-      setCapture(c => {
-        if (c.phase === 'idle' || c.phase === 'draftPicker') return c;
-        const updated = c.lines.map(l =>
-          l._cid === line._cid ? { ...l, _confirmed: true, id: newId ?? l.id, no: newNo ?? l.no } : l,
-        );
-        // Track what the draft holds server-side, not just what the screen
-        // shows: a line autosaved and then deleted here has to be named in
-        // removeLineIds at submit or it ships as stock nobody bought.
-        const known = c.originalLineIds ?? [];
-        const originalLineIds = newId && !known.includes(newId) ? [...known, newId] : known;
-        return { ...c, lines: updated, originalLineIds };
-      });
-    } catch (e) {
-      // Keep the line locally unconfirmed; it will be sent on final submit.
-      // On the detail path there is no final submit, so the reason matters.
-      if (backToDetail) { handleFetchError(e); return; }
-      showToast(t('syncFailed'), 'error');
-      // The order was minted for this line and the line didn't land, so the
-      // order is empty and nothing points at it — take it back out. Submit
-      // creates it again, atomically, from the whole list.
-      if (mintedHere) {
-        deleteOrder(targetId).catch(() => {/* best-effort */});
-        draftIdPromise.current = null;
-        setCapture(c =>
-          c.phase === 'idle' || c.phase === 'draftPicker' ? c : { ...c, draftId: undefined },
-        );
-      }
-    }
+    });
   };
 
   // `cat` comes from the four-button row on the review screen, so adding a
@@ -677,11 +749,18 @@ function Shell() {
 
   const submitOrder = async () => {
     if (capture.phase !== 'review') return;
+    // Every save still in flight lands first, and the list is read as it
+    // stands after them: a line still being appended is then confirmed, and
+    // a draft still being created has its id.
+    await writeQueue.current.catch(() => undefined);
+    const cur = captureRef.current;
+    if (cur.phase !== 'review') return;
 
-    // A line whose sync was refused stays on the list unconfirmed and would
-    // ship from here without ever passing the rule — the phone's last door.
-    for (const l of capture.lines) {
-      const blocked = l.id ? null : lineSyncBlock(l);
+    // A line whose sync was refused stays on the list unconfirmed, or marked
+    // unsaved, and would ship from here without ever passing the rule — the
+    // phone's last door.
+    for (const l of cur.lines) {
+      const blocked = l.id && !l._dirty ? null : lineSyncBlock(l);
       if (blocked) { showToast(blocked, 'error'); return; }
     }
 
@@ -689,7 +768,7 @@ function Shell() {
     // no order was ever created) POSTs the whole thing at once — atomic, so an
     // invalid line 400s without leaving an empty PO behind.
     const req = buildOrderSubmit(
-      { draftId: capture.draftId, lines: capture.lines, originalLineIds: capture.originalLineIds },
+      { draftId: cur.draftId, lines: cur.lines, originalLineIds: cur.originalLineIds },
     );
     if (req.kind === 'error') {
       showToast(req.message, 'error');
@@ -703,7 +782,7 @@ function Shell() {
         id = (await api.post<{ id: string }>(req.url, req.body)).id;
       } else {
         if (req.kind === 'patch') await api.patch(req.url, req.body);
-        id = capture.draftId!;
+        id = cur.draftId!;
       }
       setCapture({ phase: 'idle' });
       navigate('/purchase-orders/' + id);
@@ -766,6 +845,9 @@ function Shell() {
       <>
         <Camera
           category={capture.category}
+          // A new product only: an existing line's rescan must never be
+          // filled from a photo shared for something else.
+          takeSharedPhoto={capture.editingLineIdx == null ? takeSharedPhoto : undefined}
           onDetected={onDetected}
           onClose={cancelCapture}
           onBack={goBack}
@@ -810,6 +892,7 @@ function Shell() {
     return (
       <>
         <OrderReview
+          saving={pendingWrites > 0}
           lines={capture.lines}
           onAddItem={addAnotherItem}
           onEditLine={editLine}

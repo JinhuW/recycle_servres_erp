@@ -155,16 +155,25 @@ async function fileSize(path: string): Promise<number> {
   }
 }
 
+// Seconds alone collided: two rotations in one second renamed onto the same
+// archive, and the first one's records were gone despite the retention count.
+// A per-process sequence makes names unique within a run; the existence check
+// covers a restart, which resets it.
+let rotateSeq = 0;
+
 async function rotate(dir: string, livePath: string, maxFiles: number): Promise<void> {
   const stamp = timestamp();
-  const target = join(dir, `errors-${stamp}.jsonl`);
+  let target: string;
+  do {
+    target = join(dir, `errors-${stamp}-${String(++rotateSeq).padStart(3, '0')}.jsonl`);
+  } while (await fileSize(target) > 0);
   await fs.rename(livePath, target);
   await pruneOldest(dir, maxFiles);
 }
 
 async function pruneOldest(dir: string, maxFiles: number): Promise<void> {
   const entries = await fs.readdir(dir);
-  const rotated = entries.filter((f) => /^errors-\d{8}-\d{6}\.jsonl$/.test(f));
+  const rotated = entries.filter((f) => /^errors-\d{8}-\d{6}(?:-\d+)?\.jsonl$/.test(f));
   if (rotated.length <= maxFiles) return;
 
   const withMtime = await Promise.all(

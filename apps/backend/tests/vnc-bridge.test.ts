@@ -6,7 +6,7 @@ import { createAdaptorServer } from '@hono/node-server';
 import app from '../src/index';
 import { attachVncBridge, closeVncBridges, openVncBridges, VNC_SESSION_LAPSED } from '../src/vncBridge';
 import { getTestDb, resetDb } from './helpers/db';
-import { testEnv } from './helpers/app';
+import { api, testEnv } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import type { Env } from '../src/types';
 
@@ -149,6 +149,17 @@ describe('VNC bridge (/api/coordinator/vnc/:workerId/ws)', () => {
     expect(out.close?.reason).toMatch(/no VNC target for se-1/);
   });
 
+  // Input is key and pointer events; ws accepted frames up to 100 MiB and
+  // queued every byte sent before the upstream opened, in the shared ERP
+  // process.
+  it('closes a viewer that sends a frame past the cap', async () => {
+    const { token } = await loginAs(ALEX);
+    const out = await connect('/api/coordinator/vnc/ne-1/ws', {
+      token, origin: 'http://localhost:5173', send: ['x'.repeat(300 * 1024)],
+    });
+    expect(out.close?.code).toBe(1009);
+  });
+
   it('refuses the handshake without a manager session, before any ticket is minted', async () => {
     const before = issued.size;
     expect((await connect('/api/coordinator/vnc/ne-1/ws', { origin: 'http://localhost:5173' })).status).toBe(401);
@@ -234,6 +245,16 @@ describe('VNC bridge session re-check', () => {
     const { token } = await loginAs(ALEX);
     const out = await watch(token, async () => {
       await getTestDb()`UPDATE users SET active = FALSE WHERE email = ${ALEX}`;
+    });
+    expect(out.code).toBe(VNC_SESSION_LAPSED);
+    expect(out.reason).toBe('Your sign-in has run out');
+  });
+
+  it('closes with 4401 once the manager logs out', async () => {
+    const { token, cookies } = await loginAs(ALEX);
+    const out = await watch(token, async () => {
+      const r = await api('POST', '/api/auth/logout', { cookies: { rt: cookies.rt } });
+      expect(r.status).toBe(200);
     });
     expect(out.code).toBe(VNC_SESSION_LAPSED);
     expect(out.reason).toBe('Your sign-in has run out');

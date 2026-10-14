@@ -11,6 +11,7 @@ import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { shareOrCopy } from '../../lib/shareOrCopy';
 import { paymentsForOrderPath } from '../../lib/route';
+import { paymentGap } from '../../lib/paymentGap';
 import { RouteLink } from '../../components/RouteLink';
 import { fmtUSD0, fmtUSD, fmtDateShort, fmt0 } from '../../lib/format';
 import { lineSpecLabel } from '../../lib/lineGroups';
@@ -23,6 +24,7 @@ import type { OrderSummary, Order } from '../../lib/types';
 import { TableSkeleton } from '../../components/Skeleton';
 import { OrderCategoryChips } from '../../components/OrderCategoryChips';
 import { SoldBadge } from '../../components/SoldBadge';
+import { PaymentGapMark } from '../../components/PaymentMismatch';
 import { useReviewModeEntry } from './ReviewModeEntry';
 
 // Map a stage tone keyword to a usable CSS variable. Same lookup as the
@@ -637,6 +639,9 @@ export function DesktopOrders({ onToast }: Props) {
                 const commission = commissionFor(o);
                 const unpriced = o.unpricedLineCount ?? 0;
                 const isOpen = openId === o.id;
+                // The same gap the PO page's banner warns of, so the off rows
+                // can be picked out of the list without opening each one.
+                const gap = paymentGap(o.linkedPaid, totalCostFor(o), o.payment);
                 return (
                   <Fragment key={o.id}>
                     <tr
@@ -658,6 +663,7 @@ export function DesktopOrders({ onToast }: Props) {
                       </td>
                       <td className="mono col-id" style={{ fontWeight: 600, display: isVis('id') ? undefined : 'none' }}>
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                          {gap && <PaymentGapMark orderId={o.id} gap={gap} />}
                           {o.id}
                           <button
                             onClick={(e) => {

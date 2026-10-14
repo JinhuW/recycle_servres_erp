@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { CLOSE_REASON_IDS, isRealPhotoUrl } from '@recycle-erp/shared';
 import { getDb, type SqlLike } from '../db';
-import { uploadAttachment, deleteAttachment } from '../r2';
+import { uploadAttachment, deleteAttachment, StorageUnavailableError } from '../r2';
 import { notify } from '../lib/notify';
 import { getUploadLimits } from '../lib/settings';
 import { allLimited } from '../lib/concurrency';
@@ -32,7 +32,7 @@ import { searchSellableInventory } from '../services/sellableInventory';
 import {
   committedQtySql, committedSellStatuses, openSellStatuses, proposalSellStatuses,
 } from '../lib/sellCommitment';
-import { lockOrdersForLinesTx } from '../services/orderLocks';
+import { lockOrdersTx } from '../services/orderLocks';
 import {
   buildXlsxBuffer, xlsxResponse, datedFilename, type XlsxColumn,
 } from '../lib/xlsx';
@@ -1136,14 +1136,21 @@ sellOrders.post('/:id/status-meta/:status/attachments', async (c) => {
 
   // R2 upload happens outside the transaction — it's the slow part. A tx open
   // across it would hold a row lock for the whole upload. If the DB INSERT
-  // below fails the uploaded object is orphaned in R2; r2.ts treats orphans
-  // as a separate concern.
+  // below fails the object is taken back down (nothing else would ever find
+  // it), as the PO evidence route does.
   const uploaded = await uploadAttachment(c.env, stored, `sell-orders/${id}/${status}`)
-    .catch(e => { log.error('attachment upload', e); return null; });
+    .catch(e => { log.error('attachment upload', e); return e instanceof StorageUnavailableError ? 'unavailable' as const : null; });
+  if (uploaded === 'unavailable') return c.json({ error: 'attachment storage is not configured on this server' }, 503);
   if (!uploaded) return c.json({ error: 'upload failed' }, 502);
 
-  const row = await sql.begin(async (tx) => {
-    const r = (await tx`
+  type AttachmentRow = {
+    id: string; filename: string; size_bytes: number; mime_type: string;
+    delivery_url: string; uploaded_at: Date;
+  };
+  let row: AttachmentRow;
+  try {
+    row = await sql.begin(async (tx) => {
+    const r = (await tx<AttachmentRow[]>`
       INSERT INTO sell_order_status_attachments
         (sell_order_id, status, filename, size_bytes, mime_type, storage_key, delivery_url, uploaded_by)
       VALUES
@@ -1157,7 +1164,12 @@ sellOrders.post('/:id/status-meta/:status/attachments', async (c) => {
       attachmentId: r.id, filename: r.filename, size: r.size_bytes, mime: r.mime_type,
     });
     return r;
-  });
+    });
+  } catch (e) {
+    await deleteAttachment(c.env, uploaded.storageKey)
+      .catch((err) => log.warn('receipt cleanup after a failed insert', { storageKey: uploaded.storageKey, err }));
+    throw e;
+  }
 
   return c.json({
     attachment: {
@@ -1397,6 +1409,21 @@ sellOrders.post('/:id/status', async (c) => {
     | { kind: 'done' };
 
   const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
+    // Done rewrites every source PO (goods total, sold settlement), so those
+    // orders are locked before this header: orders, then sell orders, then
+    // lines is the one order every writer takes (services/orderLocks.ts).
+    // Archive holds its PO and then locks the sell orders on it; taking the
+    // header first here deadlocked against it (40P01 → 500).
+    let lockedSources: string[] = [];
+    if (body.to === 'Done') {
+      const owners = await tx<{ order_id: string }[]>`
+        SELECT DISTINCT ol.order_id FROM sell_order_lines sol
+        JOIN order_lines ol ON ol.id = sol.inventory_id
+        WHERE sol.sell_order_id = ${id}
+      `;
+      lockedSources = owners.map((r) => r.order_id);
+      await lockOrdersTx(tx, lockedSources);
+    }
     const cur = (await tx<{ status: string; created_by: string | null; archived_at: string | null }[]>`
       SELECT status, created_by, archived_at FROM sell_orders WHERE id = ${id} LIMIT 1 FOR UPDATE
     `)[0];
@@ -1441,16 +1468,19 @@ sellOrders.post('/:id/status', async (c) => {
       if (!any) return { kind: 'conflict', msg: 'every product on this order is at 0 — there is nothing to sell' };
     }
 
-    // Done rewrites every source PO (goods total, sold settlement) after it
-    // has locked their lines, so those orders are locked first: lines-then-
-    // orders is the order PO PATCH deadlocks against (services/orderLocks.ts).
-    // Before the Draft check below too, which locks the lines.
+    // The source POs were read before this header was locked; a line moved
+    // to another PO in between would need a lock this transaction can no
+    // longer take in order, so it starts over rather than take it out of
+    // order.
     if (body.to === 'Done') {
-      const sources = await tx<{ inventory_id: string }[]>`
-        SELECT inventory_id FROM sell_order_lines
-        WHERE sell_order_id = ${id} AND inventory_id IS NOT NULL
+      const owners = await tx<{ order_id: string }[]>`
+        SELECT DISTINCT ol.order_id FROM sell_order_lines sol
+        JOIN order_lines ol ON ol.id = sol.inventory_id
+        WHERE sol.sell_order_id = ${id}
       `;
-      await lockOrdersForLinesTx(tx, sources.map((r) => r.inventory_id));
+      if (owners.some((r) => !lockedSources.includes(r.order_id))) {
+        return { kind: 'conflict', msg: 'products on this order moved between purchase orders — try again' };
+      }
     }
 
     // Leaving the proposals (Draft, Packing) is where the order actually claims

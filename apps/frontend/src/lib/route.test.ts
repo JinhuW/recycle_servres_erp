@@ -1,10 +1,35 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import {
   afterSalesCasePath, afterSalesNewPath, hrefFor, matchPoCheck, matchPurchaseOrder, matchSellOrderPack, navigate, navigateBack, onLinkClick,
-  parseShippingRoute, pathToDesktopView, poCheckPath, poLinePath, readPoLineQuery, readSafeNext,
+  parseShippingRoute, pathToDesktopView, pathToMobileView, poCheckPath, poLinePath, readPath, readPoLineQuery, readSafeNext,
   replaceRoute, sellOrderPackPath, splitHash,
   type LinkClick,
 } from './route';
+
+// The PWA's shortcuts and the share-target landing are real document paths.
+// Read as `/`, every one of them landed on the dashboard.
+describe('real-path launches', () => {
+  afterEach(() => { delete (globalThis as { window?: unknown }).window; });
+  const at = (pathname: string, hash = '') => {
+    (globalThis as { window?: unknown }).window = { location: { hash, pathname, search: '' } };
+  };
+
+  it('reads a manifest shortcut or the share landing as the route it names', () => {
+    at('/inventory'); expect(readPath()).toBe('/inventory');
+    at('/sell-orders'); expect(readPath()).toBe('/sell-orders');
+    at('/submit'); expect(readPath()).toBe('/submit');
+    at('/share-target'); expect(readPath()).toBe('/share-target');
+  });
+
+  it('still reads any other real path as home, and the hash first', () => {
+    at('/vnc/homelab-1'); expect(readPath()).toBe('/');
+    at('/inventory', '#/market'); expect(readPath()).toBe('/market');
+  });
+
+  it('opens the phone Submit shortcut on the dashboard, where the capture flow starts', () => {
+    expect(pathToMobileView('/submit')).toBe('dashboard');
+  });
+});
 
 describe('box check route', () => {
   it('is its own desktop route under the PO, not a phone screen', () => {
@@ -81,6 +106,7 @@ describe('parseShippingRoute', () => {
     expect(pathToDesktopView('/payments/internal')).toBe('internaltx');
     // A PO's deep link is the payments list, focused — same view, same sidebar.
     expect(pathToDesktopView('/payments/po/PO-1372')).toBe('payments');
+    expect(pathToDesktopView('/payments/so/SO-4089')).toBe('payments');
   });
 
   // A client is a shareable link, so the detail path has to resolve too.

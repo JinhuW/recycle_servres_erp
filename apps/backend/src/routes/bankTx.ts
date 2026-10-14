@@ -12,14 +12,16 @@ import type { TransactionSql } from 'postgres';
 import { authMiddleware } from '../auth';
 import { requireManager } from '../lib/role';
 import {
-  fetchCandidates, groupSettleFrag, hasMatchFrag, matchSummaries, openRowFrag, pairCandidatesBatch,
-  PAIR_AUTO_WINDOW_DAYS, PAIR_PICK_WINDOW_DAYS,
+  fetchCandidates, groupSettleFrag, hasMatchFrag, isLinked, matchSummaries, openRowFrag,
+  pairCandidatesBatch, unlinkedFrag, PAIR_AUTO_WINDOW_DAYS, PAIR_PICK_WINDOW_DAYS,
   type MatchLeg, type PairCandidate, type PairLeg,
 } from '../banktx/match';
 import { applyIgnoreRules, ignoreRuleMatchFrag, revertIgnoreRule } from '../banktx/ignoreRules';
 import { syncBankTransactions } from '../banktx/sync';
 import { SETTLE_DEAD, isDead } from '../banktx/types';
-import { getDb } from '../db';
+import { getDb, type SqlLike } from '../db';
+import { poRealizedLateral } from '../lib/po-cost';
+import { lockBankGroupTx } from '../services/bankTxLocks';
 import { writeOrderEvent } from '../services/orderAudit';
 import { clampLimit, cursorTs, cursorTsParam, cursorTsSelect, decodeCursor, encodeCursor, escapeLike, UUID_RE } from '../lib/pagination';
 import type { Env, User } from '../types';
@@ -30,6 +32,16 @@ const bankTx = new Hono<{ Bindings: Env; Variables: { user: User } }>()
   .use('*', requireManager);
 
 type SqlClient = ReturnType<typeof getDb>;
+
+// A refusal raised inside a write's transaction, once the legs are locked:
+// the read that justified it can no longer go stale. Thrown so the rollback
+// comes for free, answered as the 4xx it names.
+class BankRefusal extends Error {
+  constructor(readonly status: 400 | 404 | 409, message: string) {
+    super(message);
+    this.name = 'BankRefusal';
+  }
+}
 
 const SETTLE_FILTERS = ['all', 'settled', 'pending', 'failed', 'reversed'];
 
@@ -45,6 +57,7 @@ type LegRow = {
   paypal_txn_id: string | null;
   pair_id: string | null;
   order_id: string | null;
+  sell_order_id: string | null;
   link_kind: string | null;
   link_auto: boolean;
   linked_by: string | null;
@@ -83,11 +96,12 @@ function soleCandidate(list: PairCandidate[] | undefined) {
   return shown;
 }
 
-// All legs of the logical payment `id` belongs to (1 row when unpaired).
-async function groupOf(sql: SqlClient, id: string): Promise<LegRow[]> {
+// All legs of the logical payment `id` belongs to (1 row when unpaired). A
+// write reads it through its transaction after lockBankGroupTx.
+async function groupOf(sql: SqlLike, id: string): Promise<LegRow[]> {
   return sql<LegRow[]>`
     SELECT id, source, external_id, posted_at, amount::float AS amount, currency, counterparty,
-           description, paypal_txn_id, pair_id, order_id, link_kind, link_auto,
+           description, paypal_txn_id, pair_id, order_id, sell_order_id, link_kind, link_auto,
            linked_by, linked_at, ignored, category, settle_status, internal_txn_id, assignee_id,
            note, note_by, note_at
     FROM bank_transactions
@@ -108,6 +122,7 @@ bankTx.get('/', async (c) => {
   // and a substring would also fetch PO-10001 for PO-1000 or any note that
   // mentions the id.
   const orderId = c.req.query('orderId')?.trim() ?? '';
+  const sellOrderId = c.req.query('sellOrderId')?.trim() ?? '';
   const assignee = c.req.query('assignee')?.trim() ?? '';
   if (assignee && assignee !== 'unassigned' && !UUID_RE.test(assignee)) {
     return c.json({ error: 'assignee must be a user id or "unassigned"' }, 400);
@@ -123,7 +138,7 @@ bankTx.get('/', async (c) => {
 
   const statusFrag =
     status === 'unlinked' ? openRowFrag(sql, 'bt')
-    : status === 'linked' ? sql`bt.order_id IS NOT NULL`
+    : status === 'linked' ? sql`bt.linked_at IS NOT NULL`
     : status === 'ignored' ? sql`bt.ignored`
     : status === 'transfer' ? sql`bt.category = 'transfer'`
     : sql`TRUE`;
@@ -139,7 +154,7 @@ bankTx.get('/', async (c) => {
     : sql`TRUE`;
   const like = `%${escapeLike(q)}%`;
   const qFrag = q
-    ? sql`(bt.order_id ILIKE ${like} OR EXISTS (
+    ? sql`(bt.order_id ILIKE ${like} OR bt.sell_order_id ILIKE ${like} OR EXISTS (
         SELECT 1 FROM bank_transactions ql
         WHERE (ql.id = bt.id OR (bt.pair_id IS NOT NULL AND ql.pair_id = bt.pair_id))
           AND (ql.counterparty ILIKE ${like} OR ql.description ILIKE ${like}
@@ -183,10 +198,14 @@ bankTx.get('/', async (c) => {
     SELECT bt.id, bt.source, bt.external_id, bt.posted_at, ${cursorTsSelect(sql, sql`bt.posted_at`)} AS cursor_ts,
            bt.amount::float AS amount, bt.currency,
            bt.counterparty, bt.description, bt.paypal_txn_id, bt.pair_id,
-           bt.order_id, bt.link_kind, bt.link_auto, bt.linked_at, bt.ignored, bt.category,
+           bt.order_id, bt.sell_order_id, bt.link_kind, bt.link_auto, bt.linked_at, bt.ignored,
+           bt.category,
            ${groupSettleFrag(sql, 'bt')} AS settle_status,
            u.name AS linked_by_name,
            (po.total_cost + po.other_fees)::float AS order_cost,
+           so.currency_code AS sell_order_currency,
+           (SELECT COALESCE(SUM(sol.qty * sol.unit_price), 0)::float FROM sell_order_lines sol
+            WHERE sol.sell_order_id = so.id) AS sell_order_total,
            -- Money-out only, matching the tile and the ?dispute=1 filter below.
            -- fetchDisputes takes every case on the account, so a chargeback
            -- filed *against* us lands on an incoming payment: ungated, that row
@@ -209,6 +228,7 @@ bankTx.get('/', async (c) => {
     FROM bank_transactions bt
     LEFT JOIN users u ON u.id = bt.linked_by
     LEFT JOIN orders po ON po.id = bt.order_id
+    LEFT JOIN sell_orders so ON so.id = bt.sell_order_id
     LEFT JOIN users au ON au.id = bt.assignee_id
     LEFT JOIN internal_transactions it ON it.id = bt.internal_txn_id
     LEFT JOIN users nu ON nu.id = bt.note_by
@@ -216,6 +236,7 @@ bankTx.get('/', async (c) => {
     WHERE (bt.pair_id IS NULL OR bt.source = 'paypal')
       AND ${statusFrag} AND ${sourceFrag} AND ${directionFrag} AND ${qFrag}
       AND ${orderId ? sql`bt.order_id = ${orderId}` : sql`TRUE`}
+      AND ${sellOrderId ? sql`bt.sell_order_id = ${sellOrderId}` : sql`TRUE`}
       AND ${assigneeFrag} AND ${matchFrag} AND ${disputeFrag} AND ${settleFrag} ${cursorFrag}
     ORDER BY bt.posted_at DESC, bt.id DESC
     LIMIT ${limit + 1}
@@ -232,8 +253,8 @@ bankTx.get('/', async (c) => {
   // Only the rows the manager can still act on need candidates; a linked,
   // ignored or transfer row is already off the queue.
   const openLegs: MatchLeg[] = slice
-    .filter((r) => !r.order_id && !r.ignored && r.category === 'external' && !isDead(r)
-      && r.currency === 'USD')
+    .filter((r) => !r.order_id && !r.sell_order_id && !r.ignored && r.category === 'external'
+      && !isDead(r) && r.currency === 'USD')
     .map((r) => ({
       id: r.id as string,
       amount: Number(r.amount),
@@ -250,14 +271,15 @@ bankTx.get('/', async (c) => {
   const pairLegs: PairLeg[] = slice
     // Same rule autoPair and pairEligibleFrag follow: pending is a real leg,
     // failed and reversed are records.
-    .filter((r) => !r.pair_id && !r.order_id && !r.ignored && r.category === 'external'
-      && !isDead(r) && r.currency === 'USD')
+    .filter((r) => !r.pair_id && !r.order_id && !r.sell_order_id && !r.ignored
+      && r.category === 'external' && !isDead(r) && r.currency === 'USD')
     .map((r) => ({
       id: r.id as string,
       source: r.source as string,
       amount: Number(r.amount),
       posted_at: r.posted_at as Date,
       order_id: null,
+      sell_order_id: null,
     }));
   const pairs = await pairCandidatesBatch(sql, pairLegs, {
     windowDays: PAIR_AUTO_WINDOW_DAYS,
@@ -280,6 +302,9 @@ bankTx.get('/', async (c) => {
       legs: (r.pair_legs as ReturnType<typeof shapeLeg>[] | null) ?? [shapeLeg(r as unknown as LegRow)],
       orderId: r.order_id,
       orderCost: r.order_cost,
+      sellOrderId: r.sell_order_id,
+      sellOrderTotal: r.sell_order_id ? r.sell_order_total : null,
+      sellOrderCurrency: r.sell_order_currency ?? null,
       linkKind: r.link_kind,
       linkAuto: r.link_auto,
       linkedAt: r.linked_at,
@@ -330,7 +355,9 @@ bankTx.get('/stats', async (c) => {
       COUNT(*) FILTER (WHERE ${open} ${dirFragBt})::int AS unlinked_count,
       COALESCE(SUM(ABS(bt.amount)) FILTER (WHERE ${open} ${dirFragBt}), 0)::float AS unlinked_amount,
       COUNT(*) FILTER (WHERE bt.category = 'transfer')::int                            AS transfer_count,
-      COUNT(*) FILTER (WHERE bt.order_id IS NOT NULL)::int                             AS linked_count,
+      COUNT(*) FILTER (WHERE bt.linked_at IS NOT NULL)::int                            AS linked_count,
+      -- PO refunds only: a sell-order refund is money OUT, and netting it in made
+      -- the tile disagree with the list it opens (linked, money in).
       COUNT(*) FILTER (WHERE bt.order_id IS NOT NULL AND bt.link_kind = 'refund')::int  AS refund_count,
       COALESCE(SUM(bt.amount) FILTER (WHERE bt.order_id IS NOT NULL AND bt.link_kind = 'refund'), 0)::float AS refund_amount,
       COUNT(*) FILTER (WHERE bt.ignored)::int                                          AS ignored_count,
@@ -390,15 +417,30 @@ bankTx.post('/sync', async (c) => {
 // Lives here (not routes/orders/) so the manager-only boundary stays in one
 // place; the PO detail renders the section only for managers.
 
+// The PO's two payments are two ledgers: `kind=commission` is what the
+// purchaser was paid, the default is what the supplier was.
 bankTx.get('/by-order/:orderId', async (c) => {
   const sql = getDb(c.env);
   const orderId = c.req.param('orderId');
+  const kindFrag = c.req.query('kind') === 'commission'
+    ? sql`link_kind = 'commission'`
+    : sql`link_kind <> 'commission'`;
+  return c.json(await ledgerOf(sql, sql`order_id = ${orderId} AND ${kindFrag}`));
+});
+
+bankTx.get('/by-sell-order/:sellOrderId', async (c) => {
+  const sql = getDb(c.env);
+  const sellOrderId = c.req.param('sellOrderId');
+  return c.json(await ledgerOf(sql, sql`sell_order_id = ${sellOrderId}`));
+});
+
+async function ledgerOf(sql: SqlClient, targetFrag: ReturnType<SqlClient>) {
   const rows = await sql<LegRow[]>`
     SELECT id, source, external_id, posted_at, amount::float AS amount, currency, counterparty,
-           description, paypal_txn_id, pair_id, order_id, link_kind, link_auto,
+           description, paypal_txn_id, pair_id, order_id, sell_order_id, link_kind, link_auto,
            linked_by, linked_at, ignored, settle_status, internal_txn_id, assignee_id
     FROM bank_transactions
-    WHERE order_id = ${orderId} AND (pair_id IS NULL OR source = 'paypal')
+    WHERE ${targetFrag} AND (pair_id IS NULL OR source = 'paypal')
     ORDER BY posted_at DESC, id DESC`;
   const payments = rows.map((r) => ({
     ...shapeLeg(r),
@@ -411,83 +453,130 @@ bankTx.get('/by-order/:orderId', async (c) => {
   // money it represents is no longer part of what the PO has been paid.
   const net = payments.reduce(
     (sum, p) => (SETTLE_DEAD.includes(p.settleStatus) ? sum : sum + p.amount), 0);
-  return c.json({ payments, net: Math.round(net * 100) / 100 });
-});
+  return { payments, net: Math.round(net * 100) / 100 };
+}
 
 // ─── Link / unlink ───────────────────────────────────────────────────────────
 
+// One of three targets: a PO's cost (the default), a PO's commission — what
+// the purchaser was paid, kept apart from what the supplier was so the PO's
+// paid figure never counts it — or a sell order, money the buyer sent us.
 bankTx.post('/:id/link', async (c) => {
   const sql = getDb(c.env);
-  const body = await c.req.json<{ orderId?: string }>().catch(() => ({} as { orderId?: string }));
+  type Body = { orderId?: string; sellOrderId?: string; kind?: string };
+  const body = await c.req.json<Body>().catch(() => ({} as Body));
   const orderId = body.orderId?.trim();
-  if (!orderId) return c.json({ error: 'orderId is required' }, 400);
-
-  const group = await groupOf(sql, c.req.param('id'));
-  if (group.length === 0) return c.json({ error: 'Not found' }, 404);
-  if (group.some((l) => l.ignored)) return c.json({ error: 'Unignore the transaction before linking it' }, 400);
-  // The money never left, or came back. Linking it would make the PO read as
-  // paid by a payment that did not happen.
-  if (group.some(isDead)) return c.json({ error: 'This payment did not settle' }, 400);
-  // Every PO is in USD.
-  const foreign = group.find((l) => l.currency !== 'USD');
-  if (foreign) return c.json({ error: `A ${foreign.currency} transaction cannot be linked to a purchase order` }, 400);
-  // A membership is part of a record someone wrote a note on, so it is refused
-  // rather than cleared. The owner tag below has no such home and goes quietly.
-  if (group.some((l) => l.internal_txn_id)) {
-    return c.json({ error: 'Remove the transaction from its internal transaction before linking it' }, 400);
+  const sellOrderId = body.sellOrderId?.trim();
+  if (!orderId === !sellOrderId) return c.json({ error: 'orderId or sellOrderId is required' }, 400);
+  const commission = body.kind === 'commission';
+  if (body.kind !== undefined && body.kind !== 'cost' && !commission) {
+    return c.json({ error: 'kind must be cost or commission' }, 400);
   }
-  // Money moved between our own accounts paid no one; the PayPal leg of the
-  // same payment is what links.
-  if (group.some((l) => l.category === 'transfer')) {
-    return c.json({ error: 'A transfer cannot be linked to a purchase order' }, 400);
-  }
+  if (commission && !orderId) return c.json({ error: 'A commission links to a purchase order' }, 400);
 
-  const order = await sql<{ archived_at: Date | null }[]>`
-    SELECT archived_at FROM orders WHERE id = ${orderId} LIMIT 1`;
-  if (order.length === 0) return c.json({ error: 'Order not found' }, 404);
-  // The picker never offers an archived PO; a typed or stale id is refused
-  // the same way, since an archived PO is out of every money reader and a
-  // payment linked to it would vanish from both sides.
-  if (order[0].archived_at) return c.json({ error: 'Order is archived — unarchive it first' }, 409);
+  // The legs are locked before they are judged: the verdicts above are on
+  // the rows as this transaction holds them, not on a snapshot a rival
+  // ignore, pair or link could have moved past.
+  let done: { kind: string; orderTxnFilled: boolean };
+  try {
+    done = await sql.begin(async (tx) => {
+      await lockBankGroupTx(tx, [c.req.param('id')]);
+      const group = await groupOf(tx, c.req.param('id'));
+      if (group.length === 0) throw new BankRefusal(404, 'Not found');
+      if (group.some((l) => l.ignored)) throw new BankRefusal(400, 'Unignore the transaction before linking it');
+      // The money never left, or came back. Linking it would make the order read
+      // as paid by a payment that did not happen.
+      if (group.some(isDead)) throw new BankRefusal(400, 'This payment did not settle');
+      // Every PO is in USD, and a sell order's total is read in USD.
+      const foreign = group.find((l) => l.currency !== 'USD');
+      if (foreign) throw new BankRefusal(400, `A ${foreign.currency} transaction cannot be linked to an order`);
+      // A membership is part of a record someone wrote a note on, so it is refused
+      // rather than cleared. The owner tag below has no such home and goes quietly.
+      if (group.some((l) => l.internal_txn_id)) {
+        throw new BankRefusal(400, 'Remove the transaction from its internal transaction before linking it');
+      }
+      // Money moved between our own accounts paid no one; the PayPal leg of the
+      // same payment is what links.
+      if (group.some((l) => l.category === 'transfer')) {
+        throw new BankRefusal(400, 'A transfer cannot be linked to an order');
+      }
 
-  const kind = group[0].amount < 0 ? 'payment' : 'refund';
-  const txnId = group.find((l) => l.paypal_txn_id)?.paypal_txn_id ?? null;
-  const orderTxnFilled = await sql.begin(async (tx) => {
-    await tx`
-      UPDATE bank_transactions
-      SET order_id = ${orderId}, link_kind = ${kind}, link_auto = FALSE,
-          linked_by = ${c.var.user.id}, linked_at = NOW(),
-          assignee_id = NULL, assigned_by = NULL, assigned_at = NULL
-      WHERE id IN ${tx(group.map((l) => l.id))}`;
-    if (!txnId) return false;
-    // Only into an empty field: a PO already naming a transaction was told so
-    // by the purchaser who paid, and a manager linking here is not a
-    // correction of that. The link stands either way.
-    const filled = await tx`
-      UPDATE orders SET paypal_txn_id = ${txnId}
-      WHERE id = ${orderId} AND paypal_txn_id IS NULL
-      RETURNING id`;
-    if (filled.length === 0) return false;
-    await writeOrderEvent(tx, orderId, c.var.user.id, 'meta_changed', {
-      changes: [{ field: 'paypal_txn_id', from: null, to: txnId }],
+      if (orderId) {
+        const order = await tx<{ archived_at: Date | null }[]>`
+          SELECT archived_at FROM orders WHERE id = ${orderId} LIMIT 1`;
+        if (order.length === 0) throw new BankRefusal(404, 'Order not found');
+        // The picker never offers an archived PO; a typed or stale id is refused
+        // the same way, since an archived PO is out of every money reader and a
+        // payment linked to it would vanish from both sides.
+        if (order[0].archived_at) throw new BankRefusal(409, 'Order is archived — unarchive it first');
+      } else {
+        const so = await tx<{ archived_at: Date | null; status: string }[]>`
+          SELECT archived_at, status FROM sell_orders WHERE id = ${sellOrderId!} LIMIT 1`;
+        if (so.length === 0) throw new BankRefusal(404, 'Sell order not found');
+        if (so[0].archived_at) throw new BankRefusal(409, 'Sell order is archived — unarchive it first');
+        // A closed sell order is a deal that did not happen; money against it is
+        // a question for a person, not a link.
+        if (so[0].status === 'Closed') throw new BankRefusal(409, 'Sell order is closed');
+      }
+
+      // A sell order reads by sign too: money in is the buyer's payment, money
+      // out is our refund to them.
+      const out = group[0].amount < 0;
+      const kind = commission ? 'commission' : (orderId ? out : !out) ? 'payment' : 'refund';
+      const txnId = group.find((l) => l.paypal_txn_id)?.paypal_txn_id ?? null;
+      await tx`
+        UPDATE bank_transactions
+        SET order_id = ${orderId ?? null}, sell_order_id = ${sellOrderId ?? null},
+            link_kind = ${kind}, link_auto = FALSE,
+            linked_by = ${c.var.user.id}, linked_at = NOW(),
+            assignee_id = NULL, assigned_by = NULL, assigned_at = NULL
+        WHERE id IN ${tx(group.map((l) => l.id))} AND NOT ignored`;
+      // The PO's transaction id names the payment that funded its cost; a
+      // commission or a sell order says nothing about that.
+      if (!txnId || !orderId || commission) return { kind, orderTxnFilled: false };
+      // Only into an empty field: a PO already naming a transaction was told so
+      // by the purchaser who paid, and a manager linking here is not a
+      // correction of that. The link stands either way.
+      const filled = await tx`
+        UPDATE orders SET paypal_txn_id = ${txnId}
+        WHERE id = ${orderId} AND paypal_txn_id IS NULL
+        RETURNING id`;
+      if (filled.length === 0) return { kind, orderTxnFilled: false };
+      await writeOrderEvent(tx, orderId, c.var.user.id, 'meta_changed', {
+        changes: [{ field: 'paypal_txn_id', from: null, to: txnId }],
+      });
+      return { kind, orderTxnFilled: true };
     });
-    return true;
+  } catch (e) {
+    if (e instanceof BankRefusal) return c.json({ error: e.message }, e.status);
+    throw e;
+  }
+  return c.json({
+    ok: true, orderId: orderId ?? null, sellOrderId: sellOrderId ?? null,
+    linkKind: done.kind, orderTxnFilled: done.orderTxnFilled,
   });
-  return c.json({ ok: true, orderId, linkKind: kind, orderTxnFilled });
 });
 
 bankTx.post('/:id/unlink', async (c) => {
   const sql = getDb(c.env);
-  const group = await groupOf(sql, c.req.param('id'));
-  if (group.length === 0) return c.json({ error: 'Not found' }, 404);
-  if (!group.some((l) => l.order_id)) return c.json({ error: 'Not linked' }, 400);
-  // The tombstone keeps auto-link from resurrecting the removed link on the
-  // next sync; a manual re-link is unaffected.
-  await sql`
-    UPDATE bank_transactions
-    SET order_id = NULL, link_kind = NULL, link_auto = FALSE,
-        linked_by = NULL, linked_at = NULL, no_auto_link = TRUE
-    WHERE id IN ${sql(group.map((l) => l.id))}`;
+  try {
+    await sql.begin(async (tx) => {
+      await lockBankGroupTx(tx, [c.req.param('id')]);
+      const group = await groupOf(tx, c.req.param('id'));
+      if (group.length === 0) throw new BankRefusal(404, 'Not found');
+      if (!group.some(isLinked)) throw new BankRefusal(400, 'Not linked');
+      // The tombstone keeps auto-link from resurrecting the removed link on the
+      // next sync; a manual re-link is unaffected.
+      await tx`
+        UPDATE bank_transactions
+        SET order_id = NULL, sell_order_id = NULL, link_kind = NULL, link_auto = FALSE,
+            linked_by = NULL, linked_at = NULL, no_auto_link = TRUE
+        WHERE id IN ${tx(group.map((l) => l.id))}`;
+    });
+  } catch (e) {
+    if (e instanceof BankRefusal) return c.json({ error: e.message }, e.status);
+    throw e;
+  }
   return c.json({ ok: true });
 });
 
@@ -515,6 +604,7 @@ bankTx.get('/:id/pair-candidates', async (c) => {
       amount: Number(leg.amount),
       posted_at: leg.posted_at,
       order_id: leg.order_id,
+      sell_order_id: leg.sell_order_id,
     }],
     { windowDays: PAIR_PICK_WINDOW_DAYS, limit: 20, skipTombstoned: false },
   );
@@ -525,121 +615,143 @@ bankTx.post('/:id/pair', async (c) => {
   const sql = getDb(c.env);
   const body = await c.req.json<{ otherId?: string }>().catch(() => ({} as { otherId?: string }));
   if (!body.otherId) return c.json({ error: 'otherId is required' }, 400);
+  const otherId = body.otherId;
 
-  const [a] = await groupOf(sql, c.req.param('id'));
-  const [b] = await groupOf(sql, body.otherId);
-  if (!a || !b) return c.json({ error: 'Not found' }, 404);
-  if (a.pair_id || b.pair_id) return c.json({ error: 'Already paired' }, 400);
-  // Pairing spreads the other leg's link onto this one; /link refuses ignored
-  // rows and /ignore refuses linked ones, so this is the one path to a row
-  // that is both — which the PO's paid figure would then count.
-  if (a.ignored || b.ignored) return c.json({ error: 'Unignore the transaction before grouping it' }, 400);
-  if (a.source === b.source) return c.json({ error: 'A pair needs one Mercury and one PayPal leg' }, 400);
-  if (a.currency !== 'USD' || b.currency !== 'USD') {
-    return c.json({ error: 'Only USD transactions can be grouped' }, 400);
-  }
-  // A pending leg is a real half of a payment; a failed or reversed one is a
-  // record of money that never moved, or came back. Same rule autoPair and
-  // pairEligibleFrag follow, so the picker never offers this either.
-  if (isDead(a) || isDead(b)) {
-    return c.json({ error: 'A failed or reversed payment cannot be grouped' }, 400);
-  }
-  if (Number(a.amount) !== Number(b.amount)) return c.json({ error: 'Amounts differ' }, 400);
-  if (a.order_id && b.order_id && a.order_id !== b.order_id) {
-    return c.json({ error: 'Legs are linked to different orders — unlink one first' }, 400);
-  }
-  // Pairing merges two groups, so every piece of per-group state has to end up
-  // agreeing: a lone value spreads, two different ones are a decision only the
-  // manager can make. Without this the feed — which renders the PayPal leg
-  // alone — would silently swallow whatever sat on the Mercury one.
-  if (a.assignee_id && b.assignee_id && a.assignee_id !== b.assignee_id) {
-    return c.json({ error: 'Legs are assigned to different members — unassign one first' }, 400);
-  }
-  if (a.internal_txn_id && b.internal_txn_id && a.internal_txn_id !== b.internal_txn_id) {
-    return c.json({ error: 'Legs belong to different internal transactions — remove one first' }, 400);
-  }
-  if (a.note && b.note && a.note !== b.note) {
-    return c.json({ error: 'Legs carry different notes — clear one first' }, 400);
-  }
-  if ((a.internal_txn_id || b.internal_txn_id) && (a.order_id || b.order_id)) {
-    return c.json({ error: 'A leg in an internal transaction cannot be paired with one linked to a purchase order' }, 400);
-  }
+  try {
+    await sql.begin(async (tx) => {
+      // Both legs and whatever either is already grouped with, before any of
+      // the rules below read them: two pairs of one leg used to both pass
+      // and leave the loser's partner alone under its own pair_id.
+      await lockBankGroupTx(tx, [c.req.param('id'), otherId]);
+      const [a] = await groupOf(tx, c.req.param('id'));
+      const [b] = await groupOf(tx, otherId);
+      if (!a || !b) throw new BankRefusal(404, 'Not found');
+      if (a.pair_id || b.pair_id) throw new BankRefusal(400, 'Already paired');
+      // Pairing spreads the other leg's link onto this one; /link refuses ignored
+      // rows and /ignore refuses linked ones, so this is the one path to a row
+      // that is both — which the PO's paid figure would then count.
+      if (a.ignored || b.ignored) throw new BankRefusal(400, 'Unignore the transaction before grouping it');
+      if (a.source === b.source) throw new BankRefusal(400, 'A pair needs one Mercury and one PayPal leg');
+      if (a.currency !== 'USD' || b.currency !== 'USD') {
+        throw new BankRefusal(400, 'Only USD transactions can be grouped');
+      }
+      // A pending leg is a real half of a payment; a failed or reversed one is a
+      // record of money that never moved, or came back. Same rule autoPair and
+      // pairEligibleFrag follow, so the picker never offers this either.
+      if (isDead(a) || isDead(b)) {
+        throw new BankRefusal(400, 'A failed or reversed payment cannot be grouped');
+      }
+      if (Number(a.amount) !== Number(b.amount)) throw new BankRefusal(400, 'Amounts differ');
+      if (isLinked(a) && isLinked(b)
+        && (a.order_id !== b.order_id || a.sell_order_id !== b.sell_order_id || a.link_kind !== b.link_kind)) {
+        throw new BankRefusal(400, 'Legs are linked to different orders — unlink one first');
+      }
+      // Pairing merges two groups, so every piece of per-group state has to end up
+      // agreeing: a lone value spreads, two different ones are a decision only the
+      // manager can make. Without this the feed — which renders the PayPal leg
+      // alone — would silently swallow whatever sat on the Mercury one.
+      if (a.assignee_id && b.assignee_id && a.assignee_id !== b.assignee_id) {
+        throw new BankRefusal(400, 'Legs are assigned to different members — unassign one first');
+      }
+      if (a.internal_txn_id && b.internal_txn_id && a.internal_txn_id !== b.internal_txn_id) {
+        throw new BankRefusal(400, 'Legs belong to different internal transactions — remove one first');
+      }
+      if (a.note && b.note && a.note !== b.note) {
+        throw new BankRefusal(400, 'Legs carry different notes — clear one first');
+      }
+      if ((a.internal_txn_id || b.internal_txn_id) && (isLinked(a) || isLinked(b))) {
+        throw new BankRefusal(400, 'A leg in an internal transaction cannot be paired with one linked to an order');
+      }
 
-  const linked = a.order_id ? a : b.order_id ? b : null;
-  const assigned = a.assignee_id ? a : b.assignee_id ? b : null;
-  const filed = a.internal_txn_id ? a : b.internal_txn_id ? b : null;
-  const noted = a.note ? a : b.note ? b : null;
-  await sql.begin(async (tx) => {
-    const pairId = crypto.randomUUID();
-    await tx`UPDATE bank_transactions SET pair_id = ${pairId} WHERE id IN (${a.id}, ${b.id})`;
-    if (noted) {
-      await tx`
-        UPDATE bank_transactions
-        SET note = ${noted.note}, note_by = ${noted.note_by}, note_at = ${noted.note_at}
-        WHERE pair_id = ${pairId} AND note IS NULL`;
-    }
-    if (filed) {
-      await tx`
-        UPDATE bank_transactions
-        SET internal_txn_id = ${filed.internal_txn_id},
-            category = 'transfer', category_manual = TRUE
-        WHERE pair_id = ${pairId} AND internal_txn_id IS NULL`;
-    }
-    if (linked) {
-      // Clears the owner in the same statement: the CHECK refuses a row that is
-      // both linked and assigned, so propagating the link onto an assigned leg
-      // would abort the transaction.
-      await tx`
-        UPDATE bank_transactions
-        SET order_id = ${linked.order_id}, link_kind = ${linked.link_kind},
-            link_auto = ${linked.link_auto}, linked_by = ${linked.linked_by},
-            linked_at = ${linked.linked_at},
-            assignee_id = NULL, assigned_by = NULL, assigned_at = NULL
-        WHERE pair_id = ${pairId} AND order_id IS NULL`;
-    } else if (assigned) {
-      await tx`
-        UPDATE bank_transactions
-        SET assignee_id = ${assigned.assignee_id}, assigned_by = ${c.var.user.id},
-            assigned_at = NOW()
-        WHERE pair_id = ${pairId} AND assignee_id IS NULL`;
-    }
-  });
+      const linked = isLinked(a) ? a : isLinked(b) ? b : null;
+      const assigned = a.assignee_id ? a : b.assignee_id ? b : null;
+      const filed = a.internal_txn_id ? a : b.internal_txn_id ? b : null;
+      const noted = a.note ? a : b.note ? b : null;
+      const pairId = crypto.randomUUID();
+      const paired = await tx`
+        UPDATE bank_transactions SET pair_id = ${pairId}
+        WHERE id IN (${a.id}, ${b.id}) AND pair_id IS NULL`;
+      if (paired.count !== 2) throw new BankRefusal(409, 'Already paired');
+      if (noted) {
+        await tx`
+          UPDATE bank_transactions
+          SET note = ${noted.note}, note_by = ${noted.note_by}, note_at = ${noted.note_at}
+          WHERE pair_id = ${pairId} AND note IS NULL`;
+      }
+      if (filed) {
+        await tx`
+          UPDATE bank_transactions
+          SET internal_txn_id = ${filed.internal_txn_id},
+              category = 'transfer', category_manual = TRUE
+          WHERE pair_id = ${pairId} AND internal_txn_id IS NULL`;
+      }
+      if (linked) {
+        // Clears the owner in the same statement: the CHECK refuses a row that is
+        // both linked and assigned, so propagating the link onto an assigned leg
+        // would abort the transaction.
+        await tx`
+          UPDATE bank_transactions
+          SET order_id = ${linked.order_id}, sell_order_id = ${linked.sell_order_id},
+              link_kind = ${linked.link_kind},
+              link_auto = ${linked.link_auto}, linked_by = ${linked.linked_by},
+              linked_at = ${linked.linked_at},
+              assignee_id = NULL, assigned_by = NULL, assigned_at = NULL
+          WHERE pair_id = ${pairId} AND linked_at IS NULL`;
+      } else if (assigned) {
+        await tx`
+          UPDATE bank_transactions
+          SET assignee_id = ${assigned.assignee_id}, assigned_by = ${c.var.user.id},
+              assigned_at = NOW()
+          WHERE pair_id = ${pairId} AND assignee_id IS NULL`;
+      }
+    });
+  } catch (e) {
+    if (e instanceof BankRefusal) return c.json({ error: e.message }, e.status);
+    throw e;
+  }
   return c.json({ ok: true });
 });
 
 bankTx.post('/:id/unpair', async (c) => {
   const sql = getDb(c.env);
-  const group = await groupOf(sql, c.req.param('id'));
-  if (group.length === 0) return c.json({ error: 'Not found' }, 404);
-  if (!group[0].pair_id) return c.json({ error: 'Not paired' }, 400);
-  // Pairing spread the link, the owner and the internal transaction onto every
-  // leg (/pair, autoPair). Ungrouping has to take them back off all but one, or
-  // two unpaired rows stay linked to one PO and its paid figure counts the
-  // payment twice. They stay on the PayPal leg, the one the feed shows for a
-  // pair and the one carrying the payee.
-  //
-  // A Mercury leg parses the same PayPal id out of its description, so freed
-  // like that the next sync's autoLink would hand it straight back to the PO.
-  // It gets the tombstone /unlink leaves; a leg carrying a different id was
-  // never this payment and stays linkable.
-  const keep = group.find((l) => l.source === 'paypal') ?? group[0];
-  const others = group.filter((l) => l.id !== keep.id).map((l) => l.id);
-  await sql.begin(async (tx) => {
-    await tx`
-      UPDATE bank_transactions
-      SET pair_id = NULL, no_auto_pair = TRUE
-      WHERE id IN ${tx(group.map((l) => l.id))}`;
-    if (others.length) {
+  try {
+    await sql.begin(async (tx) => {
+      await lockBankGroupTx(tx, [c.req.param('id')]);
+      const group = await groupOf(tx, c.req.param('id'));
+      if (group.length === 0) throw new BankRefusal(404, 'Not found');
+      if (!group[0].pair_id) throw new BankRefusal(400, 'Not paired');
+      // Pairing spread the link, the owner and the internal transaction onto every
+      // leg (/pair, autoPair). Ungrouping has to take them back off all but one, or
+      // two unpaired rows stay linked to one PO and its paid figure counts the
+      // payment twice. They stay on the PayPal leg, the one the feed shows for a
+      // pair and the one carrying the payee.
+      //
+      // A Mercury leg parses the same PayPal id out of its description, so freed
+      // like that the next sync's autoLink would hand it straight back to the PO.
+      // It gets the tombstone /unlink leaves; a leg carrying a different id was
+      // never this payment and stays linkable.
+      const keep = group.find((l) => l.source === 'paypal') ?? group[0];
+      const others = group.filter((l) => l.id !== keep.id).map((l) => l.id);
       await tx`
         UPDATE bank_transactions
-        SET order_id = NULL, link_kind = NULL, link_auto = FALSE, linked_by = NULL, linked_at = NULL,
-            assignee_id = NULL, assigned_by = NULL, assigned_at = NULL,
-            internal_txn_id = NULL,
-            no_auto_link = no_auto_link
-              OR COALESCE(UPPER(paypal_txn_id) = UPPER(${keep.paypal_txn_id}::text), FALSE)
-        WHERE id IN ${tx(others)}`;
-    }
-  });
+        SET pair_id = NULL, no_auto_pair = TRUE
+        WHERE id IN ${tx(group.map((l) => l.id))} AND pair_id = ${group[0].pair_id}`;
+      if (others.length) {
+        await tx`
+          UPDATE bank_transactions
+          SET order_id = NULL, sell_order_id = NULL, link_kind = NULL, link_auto = FALSE,
+              linked_by = NULL, linked_at = NULL,
+              assignee_id = NULL, assigned_by = NULL, assigned_at = NULL,
+              internal_txn_id = NULL,
+              no_auto_link = no_auto_link
+                OR COALESCE(UPPER(paypal_txn_id) = UPPER(${keep.paypal_txn_id}::text), FALSE)
+          WHERE id IN ${tx(others)}`;
+      }
+    });
+  } catch (e) {
+    if (e instanceof BankRefusal) return c.json({ error: e.message }, e.status);
+    throw e;
+  }
   return c.json({ ok: true });
 });
 
@@ -647,27 +759,43 @@ bankTx.post('/:id/unpair', async (c) => {
 
 bankTx.post('/:id/ignore', async (c) => {
   const sql = getDb(c.env);
-  const group = await groupOf(sql, c.req.param('id'));
-  if (group.length === 0) return c.json({ error: 'Not found' }, 404);
-  if (group.some((l) => l.order_id)) return c.json({ error: 'Unlink the transaction before ignoring it' }, 400);
-  await sql`
-    UPDATE bank_transactions SET ignored = TRUE
-    WHERE id IN ${sql(group.map((l) => l.id))}`;
+  try {
+    await sql.begin(async (tx) => {
+      await lockBankGroupTx(tx, [c.req.param('id')]);
+      const group = await groupOf(tx, c.req.param('id'));
+      if (group.length === 0) throw new BankRefusal(404, 'Not found');
+      if (group.some(isLinked)) throw new BankRefusal(400, 'Unlink the transaction before ignoring it');
+      await tx`
+        UPDATE bank_transactions SET ignored = TRUE
+        WHERE id IN ${tx(group.map((l) => l.id))} AND order_id IS NULL AND sell_order_id IS NULL`;
+    });
+  } catch (e) {
+    if (e instanceof BankRefusal) return c.json({ error: e.message }, e.status);
+    throw e;
+  }
   return c.json({ ok: true });
 });
 
 bankTx.post('/:id/unignore', async (c) => {
   const sql = getDb(c.env);
-  const group = await groupOf(sql, c.req.param('id'));
-  if (group.length === 0) return c.json({ error: 'Not found' }, 404);
-  // Giving back a rule-ignored row is a verdict on the row, not the rule: the
-  // tombstone keeps every later sync from re-ignoring it while the rule stays.
-  // A row a human ignored and restored carries no tombstone — it was never a
-  // rule's, and stays eligible for one.
-  await sql`
-    UPDATE bank_transactions
-    SET ignored = FALSE, no_auto_ignore = no_auto_ignore OR ignore_rule_id IS NOT NULL, ignore_rule_id = NULL
-    WHERE id IN ${sql(group.map((l) => l.id))}`;
+  try {
+    await sql.begin(async (tx) => {
+      await lockBankGroupTx(tx, [c.req.param('id')]);
+      const group = await groupOf(tx, c.req.param('id'));
+      if (group.length === 0) throw new BankRefusal(404, 'Not found');
+      // Giving back a rule-ignored row is a verdict on the row, not the rule: the
+      // tombstone keeps every later sync from re-ignoring it while the rule stays.
+      // A row a human ignored and restored carries no tombstone — it was never a
+      // rule's, and stays eligible for one.
+      await tx`
+        UPDATE bank_transactions
+        SET ignored = FALSE, no_auto_ignore = no_auto_ignore OR ignore_rule_id IS NOT NULL, ignore_rule_id = NULL
+        WHERE id IN ${tx(group.map((l) => l.id))}`;
+    });
+  } catch (e) {
+    if (e instanceof BankRefusal) return c.json({ error: e.message }, e.status);
+    throw e;
+  }
   return c.json({ ok: true });
 });
 
@@ -821,65 +949,85 @@ function counterpartyRulesOf(group: { source: string; counterparty: string | nul
   });
 }
 
+// Mark, unmark and assign lock the group and judge it inside the transaction,
+// like every other verdict: judged on a pool read, a /link that committed in
+// between left a row both linked and a transfer, or tripped the assignee CHECK
+// as a 500.
 bankTx.post('/:id/mark-transfer', async (c) => {
   const sql = getDb(c.env);
-  const group = await groupOf(sql, c.req.param('id'));
-  if (group.length === 0) return c.json({ error: 'Not found' }, 404);
-  if (group.some((l) => l.order_id)) return c.json({ error: 'Unlink the transaction before marking it a transfer' }, 400);
+  const id = c.req.param('id');
+  let done: { ruleCounterparty: string | null; alsoMarked: number };
+  try {
+    done = await sql.begin(async (tx) => {
+      await lockBankGroupTx(tx, [id]);
+      const group = await groupOf(tx, id);
+      if (group.length === 0) throw new BankRefusal(404, 'Not found');
+      if (group.some(isLinked)) throw new BankRefusal(400, 'Unlink the transaction before marking it a transfer');
 
-  const rules = counterpartyRulesOf(group);
-  let alsoMarked = 0;
-  await sql.begin(async (tx) => {
-    await tx`
-      UPDATE bank_transactions SET category = 'transfer', category_manual = TRUE
-      WHERE id IN ${tx(group.map((l) => l.id))}`;
-    for (const r of rules) {
+      const rules = counterpartyRulesOf(group);
+      let alsoMarked = 0;
       await tx`
-        INSERT INTO bank_transfer_counterparties (source, counterparty, created_by)
-        VALUES (${r.source}, ${r.counterparty}, ${c.var.user.id})
-        ON CONFLICT (source, counterparty) DO NOTHING`;
-      const updated = await tx`
-        UPDATE bank_transactions SET category = 'transfer'
-        WHERE source = ${r.source} AND counterparty = ${r.counterparty}
-          AND category = 'external' AND NOT category_manual AND order_id IS NULL
-          -- Money that never moved is not a transfer, and reclassifying it
-          -- would count it in the Transfers tile it is kept out of.
-          AND settle_status = 'settled'`;
-      alsoMarked += updated.count;
-    }
-  });
-  return c.json({ ok: true, ruleCounterparty: rules[0]?.counterparty ?? null, alsoMarked });
+        UPDATE bank_transactions SET category = 'transfer', category_manual = TRUE
+        WHERE id IN ${tx(group.map((l) => l.id))} AND ${unlinkedFrag(tx, 'bank_transactions')}`;
+      for (const r of rules) {
+        await tx`
+          INSERT INTO bank_transfer_counterparties (source, counterparty, created_by)
+          VALUES (${r.source}, ${r.counterparty}, ${c.var.user.id})
+          ON CONFLICT (source, counterparty) DO NOTHING`;
+        const updated = await tx`
+          UPDATE bank_transactions SET category = 'transfer'
+          WHERE source = ${r.source} AND counterparty = ${r.counterparty}
+            AND category = 'external' AND NOT category_manual AND ${unlinkedFrag(tx, 'bank_transactions')}
+            -- Money that never moved is not a transfer, and reclassifying it
+            -- would count it in the Transfers tile it is kept out of.
+            AND settle_status = 'settled'`;
+        alsoMarked += updated.count;
+      }
+      return { ruleCounterparty: rules[0]?.counterparty ?? null, alsoMarked };
+    });
+  } catch (e) {
+    if (e instanceof BankRefusal) return c.json({ error: e.message }, e.status);
+    throw e;
+  }
+  return c.json({ ok: true, ...done });
 });
 
 bankTx.post('/:id/unmark-transfer', async (c) => {
   const sql = getDb(c.env);
-  const group = await groupOf(sql, c.req.param('id'));
-  if (group.length === 0) return c.json({ error: 'Not found' }, 404);
-  // Otherwise the row is filed under an internal transaction and back in the
-  // unlinked queue at the same time.
-  if (group.some((l) => l.internal_txn_id)) {
-    return c.json({ error: 'Remove the transaction from its internal transaction first' }, 400);
-  }
-
-  const rules = counterpartyRulesOf(group);
+  const id = c.req.param('id');
   let ruleRemoved = false;
-  await sql.begin(async (tx) => {
-    await tx`
-      UPDATE bank_transactions SET category = 'external', category_manual = TRUE
-      WHERE id IN ${tx(group.map((l) => l.id))}`;
-    for (const r of rules) {
-      const del = await tx`
-        DELETE FROM bank_transfer_counterparties
-        WHERE source = ${r.source} AND counterparty = ${r.counterparty}`;
-      if (del.count === 0) continue;
-      ruleRemoved = true;
-      // Rows the rule classified carry no manual flag — revert them with it.
+  try {
+    await sql.begin(async (tx) => {
+      await lockBankGroupTx(tx, [id]);
+      const group = await groupOf(tx, id);
+      if (group.length === 0) throw new BankRefusal(404, 'Not found');
+      // Otherwise the row is filed under an internal transaction and back in the
+      // unlinked queue at the same time.
+      if (group.some((l) => l.internal_txn_id)) {
+        throw new BankRefusal(400, 'Remove the transaction from its internal transaction first');
+      }
+
+      const rules = counterpartyRulesOf(group);
       await tx`
-        UPDATE bank_transactions SET category = 'external'
-        WHERE source = ${r.source} AND counterparty = ${r.counterparty}
-          AND category = 'transfer' AND NOT category_manual AND order_id IS NULL`;
-    }
-  });
+        UPDATE bank_transactions SET category = 'external', category_manual = TRUE
+        WHERE id IN ${tx(group.map((l) => l.id))}`;
+      for (const r of rules) {
+        const del = await tx`
+          DELETE FROM bank_transfer_counterparties
+          WHERE source = ${r.source} AND counterparty = ${r.counterparty}`;
+        if (del.count === 0) continue;
+        ruleRemoved = true;
+        // Rows the rule classified carry no manual flag — revert them with it.
+        await tx`
+          UPDATE bank_transactions SET category = 'external'
+          WHERE source = ${r.source} AND counterparty = ${r.counterparty}
+            AND category = 'transfer' AND NOT category_manual AND ${unlinkedFrag(tx, 'bank_transactions')}`;
+      }
+    });
+  } catch (e) {
+    if (e instanceof BankRefusal) return c.json({ error: e.message }, e.status);
+    throw e;
+  }
   return c.json({ ok: true, ruleRemoved });
 });
 
@@ -894,23 +1042,34 @@ bankTx.post('/:id/assign', async (c) => {
   const body = await c.req.json<{ userId?: string }>().catch(() => ({} as { userId?: string }));
   const userId = body.userId?.trim();
   if (!userId || !UUID_RE.test(userId)) return c.json({ error: 'userId is required' }, 400);
+  const id = c.req.param('id');
 
-  const group = await groupOf(sql, c.req.param('id'));
-  if (group.length === 0) return c.json({ error: 'Not found' }, 404);
-  if (group.some((l) => l.order_id)) return c.json({ error: 'Unlink the transaction before assigning it' }, 400);
-  // Nothing to explain: no money moved, so there is no payment to own.
-  if (group.some(isDead)) return c.json({ error: 'This payment did not settle' }, 400);
+  let name: string;
+  try {
+    name = await sql.begin(async (tx) => {
+      await lockBankGroupTx(tx, [id]);
+      const group = await groupOf(tx, id);
+      if (group.length === 0) throw new BankRefusal(404, 'Not found');
+      if (group.some(isLinked)) throw new BankRefusal(400, 'Unlink the transaction before assigning it');
+      // Nothing to explain: no money moved, so there is no payment to own.
+      if (group.some(isDead)) throw new BankRefusal(400, 'This payment did not settle');
 
-  // Deactivated members are soft-deleted, so an id alone isn't enough.
-  const [member] = await sql<{ name: string }[]>`
-    SELECT name FROM users WHERE id = ${userId} AND active LIMIT 1`;
-  if (!member) return c.json({ error: 'Member not found' }, 404);
+      // Deactivated members are soft-deleted, so an id alone isn't enough.
+      const [member] = await tx<{ name: string }[]>`
+        SELECT name FROM users WHERE id = ${userId} AND active LIMIT 1`;
+      if (!member) throw new BankRefusal(404, 'Member not found');
 
-  await sql`
-    UPDATE bank_transactions
-    SET assignee_id = ${userId}, assigned_by = ${c.var.user.id}, assigned_at = NOW()
-    WHERE id IN ${sql(group.map((l) => l.id))}`;
-  return c.json({ ok: true, assignee: { id: userId, name: member.name } });
+      await tx`
+        UPDATE bank_transactions
+        SET assignee_id = ${userId}, assigned_by = ${c.var.user.id}, assigned_at = NOW()
+        WHERE id IN ${tx(group.map((l) => l.id))} AND ${unlinkedFrag(tx, 'bank_transactions')}`;
+      return member.name;
+    });
+  } catch (e) {
+    if (e instanceof BankRefusal) return c.json({ error: e.message }, e.status);
+    throw e;
+  }
+  return c.json({ ok: true, assignee: { id: userId, name } });
 });
 
 bankTx.post('/:id/unassign', async (c) => {
@@ -967,6 +1126,10 @@ bankTx.get('/:id/suggestions', async (c) => {
   const [leg] = await groupOf(sql, c.req.param('id'));
   if (!leg) return c.json({ error: 'Not found' }, 404);
   const q = c.req.query('q')?.trim() ?? '';
+  const target = c.req.query('target') ?? 'po';
+  if (target === 'so') return c.json({ suggestions: await sellOrderCandidates(sql, leg, q) });
+  if (target === 'commission') return c.json({ suggestions: await commissionCandidates(sql, leg, q) });
+  if (target !== 'po') return c.json({ error: 'target must be po, commission or so' }, 400);
 
   if (!q) {
     const { ranked, total } = await fetchCandidates(sql, {
@@ -1026,5 +1189,84 @@ bankTx.get('/:id/suggestions', async (c) => {
     total: rows.length,
   });
 });
+
+// ─── Sell-order and commission candidates ────────────────────────────────────
+// A search, not a matcher: neither target carries a transaction id, and the
+// amount/date engine above is built around a PO's cost. Recent open candidates
+// with nothing typed, a name or id search otherwise; the one hint offered is
+// an exact amount, which sorts first and is badged.
+
+async function sellOrderCandidates(sql: SqlClient, leg: LegRow, q: string) {
+  const like = `%${escapeLike(q)}%`;
+  const abs = Math.abs(Number(leg.amount));
+  const scope = q
+    ? sql`(so.id ILIKE ${like} OR cu.name ILIKE ${like})`
+    // The statuses a payment arrives in: shipped and waiting, or already closed
+    // out and being reconciled after the fact.
+    : sql`so.status IN ('Shipped', 'Awaiting payment', 'Done')`;
+  const rows = await sql<{
+    id: string; status: string; customer_name: string; currency: string;
+    total: number; created_at: Date; exact: boolean;
+  }[]>`
+    SELECT so.id, so.status, cu.name AS customer_name, so.currency_code AS currency,
+           t.total, so.created_at, ROUND(t.total::numeric, 2) = ${abs} AS exact
+    FROM sell_orders so
+    JOIN customers cu ON cu.id = so.customer_id
+    JOIN LATERAL (
+      SELECT COALESCE(SUM(sol.qty * sol.unit_price), 0)::float AS total
+      FROM sell_order_lines sol WHERE sol.sell_order_id = so.id
+    ) t ON TRUE
+    WHERE so.archived_at IS NULL AND so.status <> 'Closed' AND ${scope}
+    ORDER BY exact DESC, so.created_at DESC
+    LIMIT 10`;
+  return rows.map((r) => ({
+    id: r.id,
+    status: r.status,
+    customerName: r.customer_name,
+    currency: r.currency,
+    total: Number(r.total),
+    createdAt: r.created_at,
+    reason: (r.exact ? 'exact' : q ? 'search' : 'recent') as 'exact' | 'search' | 'recent',
+  }));
+}
+
+async function commissionCandidates(sql: SqlClient, leg: LegRow, q: string) {
+  const like = `%${escapeLike(q)}%`;
+  const abs = Math.abs(Number(leg.amount));
+  const scope = q
+    ? sql`(o.id ILIKE ${like} OR u.name ILIKE ${like})`
+    // Review finished: the commission is owed from Ready to Pay on.
+    : sql`o.lifecycle IN ('ready_to_pay', 'done')`;
+  // The projected commission — the same basis as the PO's realized figure
+  // (services/poRealized.ts): the per-line margin as bought, clamped at zero,
+  // times the rate. A hint for the picker, not a gate.
+  const rows = await sql<{
+    id: string; lifecycle: string; created_by_name: string; created_at: Date;
+    commission: number | null; linked_total: number; exact: boolean;
+  }[]>`
+    SELECT o.id, o.lifecycle, u.name AS created_by_name, o.created_at,
+           (GREATEST(rz.projected_profit, 0) * o.commission_rate)::float AS commission,
+           COALESCE((SELECT -SUM(bt.amount) FROM bank_transactions bt
+                     WHERE bt.order_id = o.id AND bt.link_kind = 'commission' AND NOT bt.ignored
+                       AND (bt.pair_id IS NULL OR bt.source = 'paypal')
+                       AND bt.settle_status <> 'failed' AND bt.settle_status <> 'reversed'), 0)::float
+             AS linked_total,
+           ROUND((GREATEST(rz.projected_profit, 0) * o.commission_rate)::numeric, 2) = ${abs} AS exact
+    FROM orders o
+    JOIN users u ON u.id = o.user_id
+    ${poRealizedLateral(sql, true)}
+    WHERE o.archived_at IS NULL AND ${scope}
+    ORDER BY exact DESC NULLS LAST, o.created_at DESC
+    LIMIT 10`;
+  return rows.map((r) => ({
+    id: r.id,
+    lifecycle: r.lifecycle,
+    createdByName: r.created_by_name,
+    createdAt: r.created_at,
+    commission: r.commission === null ? null : Number(r.commission),
+    linkedTotal: Number(r.linked_total),
+    reason: (r.exact ? 'exact' : q ? 'search' : 'recent') as 'exact' | 'search' | 'recent',
+  }));
+}
 
 export default bankTx;

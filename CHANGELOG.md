@@ -17,6 +17,469 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.258.9] - 2026-10-14
+
+Fixes from the pre-release review of v1.258.8 against prod (RS-253). Most are
+regressions the RS-252 batches introduced and that never reached prod; the
+release to prod carries them together.
+
+### Fixed
+
+- **A list walk ends on a reply with no cursor.** The lists that page through
+  the API ended only on an explicit `nextCursor: null`, so a backend that
+  predates paging (the minutes a release spends with the Worker ahead of
+  Railway, or a rolled-back backend) answered `{ items }` and page one was
+  fetched and shown twice.
+- **The nightly prod→dev copy no longer aborts on a dev without its marker
+  table.** The safety probe named the table inside a `CASE`, and Postgres
+  resolves every relation before it runs, so the very first run would have
+  failed — and every run after it, since only a restore creates the table.
+- **The Payments Refunds tile counts purchase-order refunds again.** Since
+  payments could link to sell orders, a refund paid back to a buyer (money
+  out) was netted into the tile, which then disagreed with the list it opens
+  and could show a negative total.
+- **Mark transfer, unmark transfer and assign take the payment's lock** and
+  judge it inside their transaction, as link, pair and ignore do. A link
+  landing between the check and the write could leave a row linked and
+  marked a transfer at once, or surface the assignee rule as a 500.
+- **A shared photo is scanned only for the product it was shared for.** The
+  camera took it on any open, so a share abandoned earlier was scanned into
+  the next camera — a rescan of an existing line included, overwriting its
+  fields. The capture session now holds it, hands it only to a new
+  product's camera, and drops it when the session ends.
+- **Shared photos are compressed before they are stored.** A full-size phone
+  photo overflowed the browser's session storage and the share vanished
+  without a word; it is now compressed as a shutter photo is, and a share
+  that still cannot be kept says so.
+- **Back after a share no longer resets the capture.** The share landing
+  stayed in history and replayed on Back, starting a new PO over the one
+  being built; it is now replaced, and `/submit` leaves an open capture
+  alone.
+- **The phone Inventory list keeps one order across pages.** Each 200-row
+  page was sorted on its own, so category, brand and capacity restarted at
+  every page boundary — on prod, seven times over for a manager. The list
+  re-sorts what it has loaded with the same comparator the exports use,
+  now in the shared package.
+- **A failed first inventory page shows the empty state** on both shells
+  instead of a loading skeleton that never ends.
+- **An error raised from a dialog keeps Tab in the error.** The error dialog
+  kept its own Tab handling outside the shared dialog stack, so the dialog
+  under it pulled focus behind the error. Shift+Tab right after a dialog
+  opens also stays inside it instead of escaping to the page.
+- **A reload paints the saved layout.** The preferences provider cleared
+  its cache on every cold load before sign-in had resolved, so the first
+  paint used default columns and density and then jumped.
+- **A preference change made while an earlier save is in flight stays on
+  screen** instead of flicking back until its own save returns.
+- **An oversized staff photo whose extension names another image format is
+  shrunk again** (a JPEG saved as `.png`). The format check added for the
+  public form also refused to shrink these, so they failed as too large; the
+  anonymous path keeps the strict refusal.
+- **Collapsing or switching an internal-transaction record asks first** when
+  its title or note has unsaved edits.
+
+## [1.258.8] - 2026-10-14
+
+Batch G of the 2026-10-13 review fixes (RS-252), the last: external side
+effects and operations.
+
+### Security
+
+- **Production refuses attachments it cannot store.** With no R2
+  configured — or four of its five variables — an upload used to succeed as
+  a stub whose bytes went nowhere, and the receipt or photo was recorded as
+  stored. Partial configuration now refuses to boot; none at all makes
+  every upload and copy a 503 that names the problem, and `/api/health`
+  reports `providers.attachments` (SEC-05).
+- **The VNC bridge is bounded in both directions**: a frame cap (256 KiB,
+  input is key and pointer events), a cap on what may queue before the
+  console's socket opens (1 MiB), and the same back-pressure rule toward the
+  worker that the screen stream already had toward the browser (SEC-06).
+- **The public forms' daily budget is reserved, not read.** It was checked
+  before the slow part (image decoding, uploads) and counted only stored
+  rows, so every request in flight saw the same room and a burst at the
+  last slot all got in. A request now reserves its place under one advisory
+  lock before any work; the budget counts live reservations, which are
+  released as the request settles (SEC-07).
+- **Anonymous OAuth registration counts and inserts under one lock**, so a
+  burst at the last slot admits one (SEC-08).
+- **The stale-submission purge claims its rows first.** It selected, deleted
+  photos, then deleted rows by id alone; a manager's reopen in between
+  resurrected a submission whose photos were already gone, or purged one
+  just reopened. Triage and conversion refuse a claimed row, and the final
+  delete is conditional on the claim and the state it was claimed in
+  (SEC-09).
+- **A sell-order receipt whose row fails to insert is taken back down**
+  from the public bucket, as the PO evidence route already did (SEC-15).
+
+### Fixed
+
+- **A tracking number is registered with Shippo once.** The add-time call
+  and the sweep (and two backends through a deploy) both read the NULL stamp
+  and could register the same number — two update streams for one box. A
+  registrant claims the row in the database first; a refusal frees the
+  claim, a timed-out call keeps it until it expires (INF-03).
+- **The AI review reads a label image up to its cap and no further**, where
+  it buffered the whole response before checking the size (INT-02). A model
+  reply that is not a JSON object is no reading, and only the fields the
+  prompt asked for lift the confidence floor — eight unknown strings used to
+  (INT-03).
+- **A failed seed leaves the append-only protections on**: each
+  disable-delete-enable runs in one transaction (SUP-04).
+- **Export tab names are unique the way Excel judges them** — case-insensitive,
+  the suffix reserved before the 31-character cut, every minted name
+  reserved — and an edge apostrophe is stripped (SUP-05).
+
+### Operations
+
+- The frontend deploy waits on the same commit's typecheck, tests and build;
+  a change to the Cloudflare Worker runs the backend suite (INF-01).
+- The R2 CORS policy names every served hostname (INF-02; `terraform apply`
+  is a separate, manual step).
+- The prod→dev sync requires its target pin and refuses a target database
+  marked anything but `dev`; the restore leaves that marker (INF-04). The
+  uptime alert is valid JSON and its delivery is checked (INF-05).
+- A weekly dependency audit (and one on every lockfile change) runs in CI,
+  with dispositions in `pnpm-workspace.yaml` (DEP-03).
+
+## [1.258.7] - 2026-10-14
+
+Batch F of the 2026-10-13 review fixes (RS-252): routes, editors and
+accessibility.
+
+### Fixed
+
+- **The installed app's shortcuts and a shared photo land where they say.**
+  The manifest launches `/submit`, `/inventory` and `/sell-orders` as real
+  paths, and the share target lands on `/share-target`; the hash router read
+  every one of them as home. They now read as the route they name and move
+  into the hash on first render. On the phone `/submit` opens the capture
+  flow; a photo shared into the app is held for the camera, which scans it
+  the moment it opens for the next product. The share flow has unit
+  coverage only and wants a real installed-phone check (FE-04, FE-05).
+- **The inventory edit page asks before dropping an edit** — a sidebar
+  link, Back, Cancel, a reload or the layout switch used to discard an
+  edited price or quantity with no confirmation — and its *Internal notes*
+  box, which nothing loaded or saved, is gone until a persisted note exists
+  (FE-07, FE-08).
+- **Dialogs and phone sheets keep the keyboard inside them.** Tab left the
+  shared modal for the page behind it, where navigation and actions still
+  worked while the dialog stayed open; the phone's bottom sheets moved focus
+  nowhere. One focus boundary (`lib/useFocusTrap.ts`) serves the shared
+  Modal, the phone sheet and the hand-built close, hand-off, serial-check,
+  sell-order-picker and lightbox overlays, with nested dialogs answering Tab
+  before their parents. Comboboxes name their list and active option to the
+  input (FE-10).
+- **The phone can zoom** — the viewport no longer forbids it (FE-11).
+- **A client link opens that client.** `/clients/:id` drives the drawer, a
+  row click writes the id and closing returns to the list, so a copied link
+  and Back/Forward land on the same client (FE-12).
+- **An unsaved internal-transaction note survives attaching or removing a
+  payment**, which used to reload the record over it, and the editor asks
+  before a navigation drops it (FE-16).
+- **Proof uploads and item-type picks work from the keyboard**: the
+  dropzone is a focusable button that opens the picker on Enter or Space,
+  and the item-type and combobox options act on click so a Tab-focused
+  option answers Enter (UI-01).
+- **Capture controls and hardware fields have names**: the tab bar's scan
+  button carries its label and every phone RAM/SSD/HDD/Other field's label is
+  tied to its control (UI-02).
+- **Follow System for the language can be turned off and is honoured on
+  boot**, and the app follows a device language change while it is on
+  (UI-04).
+- **The PO timeline's titles and the client rhythm strip read in the chosen
+  language** — order created, submitted, advanced, details updated, notes
+  and attachments on a status, quantities, and the rhythm strip's text and
+  descriptions were English only (UI-05).
+
+## [1.258.6] - 2026-10-14
+
+Batch E of the 2026-10-13 review fixes (RS-252): the browser's session and
+the phone's capture flow.
+
+### Security
+
+- **The app shell belongs to one signed-in identity.** Its state — the PO
+  open in the editor, a phone capture in progress, loaded notifications —
+  lived above the login gate, so a manager's PO stayed in memory through a
+  logout and rendered, private notes included, for whoever signed in next
+  under the same URL, before any request of their own. The shell is now
+  remounted whenever the identity changes and starts empty; the preferences
+  cache and any pending preference save go with the old session (FE-01).
+
+### Fixed
+
+- **A phone PO is finalised only after its line saves have landed.** Saving
+  a line opened Review while its save was still in flight, and a quick
+  Submit built its request from the list as it stood: the line was appended
+  a second time, or, with the draft still being created, a second PO was
+  made. Every write to the draft now runs through one queue; Submit waits
+  for it, then reads the list, and says "still saving" if asked sooner
+  (FE-02).
+- **A failed edit to an already-saved line is kept and retried.** Review
+  held the edited line as confirmed, so Submit left it out, returned nothing
+  to send and navigated away as if the change had been made. The line now
+  stays on the list marked *Not saved yet*; Submit refuses while a required
+  field is missing and otherwise updates the row by its id (FE-03).
+- **Preference saves go one at a time and to the right person.** Two edits
+  400 ms apart could settle out of order and the older reply undo the newer
+  choice; a reply started for one user could land after the next had signed
+  in. Saves are queued, a reply never overrides an edit still waiting for its
+  own flush, and a reply for a user who is gone is dropped (FE-06).
+- **A cancelled scan completes nothing.** A label scan's result, and the
+  pause before it opened the form, outlived the camera screen: backing out
+  mid-upload and opening a new capture got the earlier label. The serial
+  scanner's success flash had the same hand-off. Both are cancelled with the
+  screen (FE-14, UI-06).
+
+## [1.258.5] - 2026-10-14
+
+Batch D of the 2026-10-13 review fixes (RS-252): financial facts and
+complete lists.
+
+### Fixed
+
+- **The dashboard counts every sale, costed or not.** A manual sale line —
+  sold with nothing on the shelf — and a line whose PO source was since
+  deleted name no PO line, and an inner join dropped them from revenue, the
+  order count, the chart, the category rollup and the customer and category
+  contributions: the sell-orders screen showed a Done $100 order the
+  dashboard did not. Revenue and counts now include every line; cost, profit
+  and commission are summed only where a PO line exists to price them, and
+  the gross-profit tile says how many sales, and how much revenue, carry no
+  recorded cost (BD-04; also the 2026-08-24 review's #4).
+- **Lists reach their real end.** The keyset walk stopped after 25 pages and
+  reported the list complete, so past 5,000 POs (or sell orders, transfers,
+  internal transactions) the rest were silently gone from counts, totals and
+  search. It now stops only where the server does, or on a cursor it has
+  already followed. The inventory list is paged the same way (`limit`,
+  `cursor`, `nextCursor`), and both the phone and the desktop flat list walk
+  it — a book past 200 lots used to end there with no sign that it had, phone
+  totals included (FE-09, FE-13; the 2026-08-24 review's #7).
+- **The CRM filters the whole book, then pages it.** Follow-up and health
+  were applied after a 200-row cap, so a book whose "soon" clients all sat
+  past the cap showed none and counted none, and the counts changed with the
+  limit. The list now filters and counts every scoped client and pages the
+  result (`offset`, `nextOffset`); the Clients page walks the pages (SUP-03).
+- **A box from a non-Latin seller lands on the right client.** Package → PO
+  matched the seller on an ASCII-only compression of the name, which read
+  every all-Chinese name as the same empty string: 李 RAM's box was filed
+  under 王 RAM. It matches on `supplier_name_key()` now, the key every other
+  client lookup uses (SUP-02).
+- **The phone profit sparkline keeps a loss on the chart.** It scaled from
+  zero to the largest value, so a loss period plotted below the baseline and
+  off the canvas, and an all-loss range plotted thousands of units under it.
+  The scale now spans the lowest value, zero and the highest, with the zero
+  line drawn when there is a loss (UI-03).
+- **Market no longer invents a cost series or broker quotes.** The expanded
+  row charted 70% of each sell price as Cost and listed the average sell
+  price nudged by a few percent under each price-source name, and counted
+  those as sources in its confidence note. It says "no cost data" and "no
+  feed connected" instead, and counts only the team's own sales (FE-15).
+- **Sell-order history keeps edits to a lot named twice.** The line diff
+  keyed one entry per lot, so the second occurrence overwrote the first and an
+  edit to it was never recorded; occurrences now pair up in order (BD-07).
+- **Creating a category or a customer validates like editing one.** A
+  negative default margin or a malformed contact email was accepted by POST
+  and refused by every PATCH after it (BD-08).
+- The partial-sale integrity test asks for a lot of three or more units, so
+  the seed can no longer hand it an exact full sale and fail the suite
+  (BD-10).
+
+## [1.258.4] - 2026-10-14
+
+Batch C of the 2026-10-13 review fixes (RS-252): one lock protocol for the
+writers that judged an unlocked read and then wrote.
+
+### Fixed
+
+- **A payment's legs are locked before they are judged.** Pair, unpair,
+  link, unlink, ignore, unignore and filing under an internal transaction
+  each read a leg's group, applied their rules and then wrote — and a rival
+  between the read and the write was never seen: two pairs of one Mercury
+  leg both returned 200 and left a PayPal leg alone under its own
+  `pair_id`; a link racing an ignore produced a payment that was both, which
+  the PO's paid figure then left out. Every one of those writes now locks
+  the whole group first (`services/bankTxLocks.ts`, the shape of the PO lock
+  helper), judges what it locked and writes conditionally; the loser gets
+  the ordinary 400. The automatic pairing and linking in bank sync skip a
+  leg a manager holds and never overwrite a verdict committed since their
+  read. A `CHECK` (0178, `NOT VALID`) is the backstop against a linked and
+  ignored row (BD-01, BD-03, INT-01).
+- **Transfer reopen and discard read sell commitments after their lock,**
+  not inside the locking SELECT, whose snapshot predated the wait: a sale
+  that shipped while reopen waited on the lot was missed, and the lot went
+  to In Transit under a Shipped order. The same interleaving is a 409 now
+  (BD-02).
+- **A PO's owner is checked again under the lock** in PO PATCH, the
+  inventory line editor and the status-note write. A hand-off moves a PO
+  between purchasers, and the previous owner's in-flight edit used to land on
+  the new owner's order (BD-05).
+- **Clients, the same way:** PATCH, logging a contact and deleting a note
+  judge ownership under the row lock a reassign waits on, so a purchaser's
+  save cannot land on a client a manager has just handed to someone else
+  (SUP-01).
+- **One header lock order — purchase orders, then sell orders, then
+  lines.** A sell order's Done locked its header first and then the source
+  POs; archive locked its PO and then the sell orders on it, and the two
+  deadlocked (40P01 → 500). Done now locks the source POs first and starts
+  over if a line moved between POs in the meantime (BD-06).
+- **An item-type rename locks the row before reading the old name** it
+  sweeps the lines for; two renames racing left the lines on the first one's
+  name while the catalog showed the second (BD-09).
+
+## [1.258.3] - 2026-10-14
+
+Batch B of the 2026-10-13 review fixes (RS-252): session and credential
+validity.
+
+### Security
+
+- **An OAuth authorization code is redeemed against the user as they are
+  now, not as they were at consent.** A code lives ten minutes; a password
+  reset or deactivation in between revoked the user's refresh tokens but
+  left the code redeemable, to a fresh token and a new refresh family. The
+  token endpoint now reads the user's live state under a share lock taken in
+  the same order a reset takes its locks, refuses a deactivated or reset
+  account, narrows a demoted manager's scopes to the role's, and mints the
+  refresh token inside that transaction; revocation also deletes the user's
+  unredeemed codes (SEC-01).
+- **An access cookie dies with its session.** Logout and refresh-token reuse
+  detection revoked only the refresh rows, so a copied `at` cookie kept
+  authorising for the rest of its hour, and an open fleet-console viewer with
+  it. Every authenticated request now checks that the token's refresh family
+  is still live; a token minted before the family claim existed is refused
+  (SEC-02).
+- **Two managers demoting themselves at once can no longer leave the system
+  with none.** The last-manager count ran before the update's transaction,
+  so concurrent demotions or deactivations each saw the other manager still
+  standing. The count now runs inside the transaction under one advisory lock
+  shared by every change to manager membership (SEC-04).
+- **The password change reserves its attempt before bcrypt**, through the
+  same durable `login_attempts` reservation login takes (now
+  `lib/loginAttempts`), so a concurrent burst of current-password guesses
+  cannot all pass one stale count and reach bcrypt past the five-attempt
+  budget (SEC-10).
+
+## [1.258.2] - 2026-10-14
+
+Batch A of the 2026-10-13 review fixes (RS-252): dependencies and the small
+hardening items. The review's 66 findings land in seven batches under that
+ticket; `docs/review-2026-10-13/` is checked in with this one and each batch
+ticks what it closes.
+
+### Security
+
+- **A token minted in the very second of a password change is refused.**
+  `tokens_valid_after` and a token's `iat` share whole-second grain, so a
+  token issued just before the change compared as not older and lived out its
+  hour (bearer tokens their fifteen minutes). Every credential change now
+  bumps `users.credential_version`; cookie and bearer tokens carry the version
+  they were minted under and die when it moves on — a deactivation included,
+  so reactivating an account does not revive its old tokens. The timestamp
+  check stays for tokens minted before the claim existed (SEC-03).
+- **Dependencies patched; `pnpm audit --prod` is clean.** sharp 0.35.5
+  (libheif and librsvg advisories), hono 4.13.13 and @hono/node-server
+  1.19.17, tsx 4.23.15 for its bundled esbuild, and workspace overrides for the
+  two brace-expansion lines exceljs drags in through archiver. The anonymous
+  intake form also checks the format sharp *detected* against the declared
+  MIME, so an AVIF or SVG renamed `.png` is refused instead of reaching a
+  decoder the allowlist was meant to keep out (DEP-01, DEP-02).
+- **A login body is bounded before anything durable happens**: an email past
+  254 characters or not shaped like one, or a password past the shared cap,
+  is a 400 with no `login_attempts` row and no bcrypt call. Until now a
+  near-megabyte "email" was lowercased, queried and written to the attempts
+  table on every anonymous request (SEC-14).
+- **Inherited object keys are not preferences.** `SCHEMA[key]` on a plain
+  object found `toString` and `constructor` on `Object.prototype`, accepted
+  them as validators and persisted the key; `__proto__` reached a
+  non-callable and 500ed. All four are the ordinary 400 now (SEC-11).
+
+### Fixed
+
+- **Preference saves merge against the live row.** Each PATCH wrote back the
+  whole document auth had loaded at request start, so two tabs saving
+  different settings kept only the later one's, and an unrelated save could
+  revert a concurrent language change. The merge is one JSONB update now, and
+  `language` is written only when the patch carries it (SEC-12).
+- **Error-log rotation never overwrites an archive.** Rotated files were
+  named to the second; a second rotation in the same second renamed onto the
+  first and its records were gone despite the ten-file retention. Names carry
+  a sequence now (SEC-13).
+
+## [1.258.1] - 2026-10-14
+
+The PO list's payment-gap mark explains itself on hover (RS-251).
+
+### Fixed
+
+- **The red `!`'s note opens the moment the pointer or focus lands on it**,
+  beside the mark, as the PO page's amber banner: what the bank paid and what
+  the PO totals to the cent, the difference, and *Open Payments*. v1.258.0
+  hung the same words on a native `title`, which browsers show late and never
+  on touch or focus — so a mark on a row whose whole-dollar figures agreed
+  (PO-1491: $5,835.28 against $5,835.25 paid) looked wrong rather than three
+  cents off. The note floats above the table's scroll box, so a bottom row's
+  isn't clipped, and neither the mark nor the note toggles the row's drawer.
+
+## [1.258.0] - 2026-10-14
+
+The desktop PO list marks a PO whose linked payment is off (RS-250).
+
+### Added
+
+- **A red circled `!` ahead of the order id** on every company-paid PO whose
+  linked net paid differs from its total cost — the same comparison the PO
+  page's banner and Review mode make (v1.225.0), goods + fees to the cent.
+  Until now the list showed both figures side by side and said nothing when
+  they disagreed, so finding the off POs meant reading every row. Hovering
+  the mark gives what the bank paid, what the PO totals and the difference.
+  Self-paid POs, POs with nothing linked and purchasers' rows carry no mark,
+  for the reasons the banner has.
+
+## [1.257.0] - 2026-10-13
+
+Bank payments link to a sell order or to a PO's commission, not only to a
+PO's cost (RS-249).
+
+### Added
+
+- **A payment links to one of three targets.** The Payments page's *Link…*
+  now opens on three tabs: the purchase order a payment paid (as before),
+  that PO's **commission** — what the purchaser was paid, which until now
+  could only be linked as if it were cost money and made the PO read as
+  over-paid — or a **sell order**, the money a buyer sent, which had no home
+  on the page at all. An incoming payment opens on the sell-order tab. The
+  PO tab keeps its ranked suggestions; the two new ones list recent
+  candidates and search by id, customer or purchaser, an exact amount
+  badged first. A commission link never counts toward the PO's cost paid
+  and never fills its transaction ID; a sell order's link reads money in as
+  the buyer's payment and money out as our refund. Every other verdict —
+  unlink, group, ignore, assign, transfer — treats the three alike.
+- **Each target has its ledger.** The PO's Commission box lists the
+  payments linked as its commission, the sell-order page lists what the
+  bank received for it with the net, and `#/payments/so/<id>` pins the
+  Payments page to a sell order the way `#/payments/po/<id>` does to a PO.
+
+### Changed
+
+- `bank_transactions` gains `sell_order_id` (migration 0176) and a
+  `commission` link kind; the table's link CHECKs now say a row is linked
+  when `linked_at` is set and exactly one target is named.
+
+## [1.256.0] - 2026-10-13
+
+The sell-order list gets a quick After-sales button (RS-248).
+
+### Added
+
+- **An After-sales button in the sell-order list's Actions column**, on
+  every Shipped, Awaiting payment or Done row. It opens the new-case form
+  with that order preselected, so a manager working from the list filtered
+  to Done no longer has to open each order to reach the button RS-241 put on
+  the order page. Draft, Packing and Closed rows don't get it, since a case
+  can't be opened on them.
+
 ## [1.255.1] - 2026-10-13
 
 Pre-release review fixes for the v1.254 release (RS-247): what

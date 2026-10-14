@@ -11,6 +11,9 @@ type Props = {
   onDetected: (s: ScanResponse) => void;
   onClose: () => void;
   onBack?: () => void;
+  // A photo shared into the app, scanned the moment the camera opens as if it
+  // had just been shot. The shell hands it only to a new product's camera.
+  takeSharedPhoto?: () => string | null;
 };
 
 
@@ -21,7 +24,7 @@ type Props = {
 //   done      — got a result, showing the green pill briefly
 type Phase = 'framing' | 'capturing' | 'scanning' | 'done';
 
-export function Camera({ category, onDetected, onClose, onBack }: Props) {
+export function Camera({ category, onDetected, onClose, onBack, takeSharedPhoto }: Props) {
   const { t } = useT();
   const [phase, setPhase] = useState<Phase>('framing');
   const [error, setError] = useState<string | null>(null);
@@ -35,6 +38,18 @@ export function Camera({ category, onDetected, onClose, onBack }: Props) {
   const [captured, setCaptured] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  // A scan outlives this screen when the user backs out mid-upload. Its
+  // result, and the pause before handing it over, used to complete whatever
+  // capture was open by then — a later session got the earlier label.
+  const aliveRef = useRef(true);
+  const handoffTimer = useRef<number | null>(null);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+      if (handoffTimer.current !== null) window.clearTimeout(handoffTimer.current);
+    };
+  }, []);
 
   // Acquire the camera stream whenever facingMode changes. We only set state
   // here; attaching the stream to the <video> element happens in the effect
@@ -111,6 +126,23 @@ export function Camera({ category, onDetected, onClose, onBack }: Props) {
     return placeholder;
   };
 
+  useEffect(() => {
+    const shared = takeSharedPhoto?.() ?? null;
+    if (!shared) return;
+    void (async () => {
+      try {
+        const blob = await (await fetch(shared)).blob();
+        if (!aliveRef.current) return;
+        setCaptured(shared);
+        await runScan(blob, 'shared.jpg');
+      } catch {
+        if (aliveRef.current) setError(t('cameraUnavailable'));
+      }
+    })();
+    // Once, on mount: the shared photo is taken, not read.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const runScan = async (file: File | Blob, filename = 'label.jpg') => {
     setPhase('scanning');
     setError(null);
@@ -119,10 +151,14 @@ export function Camera({ category, onDetected, onClose, onBack }: Props) {
       form.append('file', file, filename);
       form.append('category', category);
       const res = await api.upload<ScanResponse>('/api/scan/label', form);
+      if (!aliveRef.current) return;
       setPhase('done');
       // brief celebratory pause before handing off to the form
-      setTimeout(() => onDetected(res), 450);
+      handoffTimer.current = window.setTimeout(() => {
+        if (aliveRef.current) onDetected(res);
+      }, 450);
     } catch (e) {
+      if (!aliveRef.current) return;
       setPhase('framing');
       setError(scanErrorMessage(e, t));
       setCaptured(null);

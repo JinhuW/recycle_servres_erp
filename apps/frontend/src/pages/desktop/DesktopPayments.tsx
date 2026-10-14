@@ -182,7 +182,12 @@ type PaymentRow = Omit<Leg, 'source'> & {
   // pay. Added in v1.117.0, so optional for the same deploy-skew reason as
   // Stats.suggested below.
   orderCost?: number | null;
-  linkKind: 'payment' | 'refund' | null;
+  // The linked sell order and its USD total. Added in v1.257.0, optional for
+  // the same deploy-skew reason as Stats.suggested below.
+  sellOrderId?: string | null;
+  sellOrderTotal?: number | null;
+  // `commission` is a PO link that settled the purchaser, not the supplier.
+  linkKind: 'payment' | 'refund' | 'commission' | null;
   linkAuto: boolean;
   linkedAt: string | null;
   linkedByName: string | null;
@@ -216,6 +221,12 @@ type PaymentRow = Omit<Leg, 'source'> & {
 };
 
 type Feed = { rows: PaymentRow[]; nextCursor: string | null };
+
+// Linked to anything — a PO's cost, a PO's commission or a sell order.
+const isLinkedRow = (r: PaymentRow): boolean => !!r.orderId || !!r.sellOrderId;
+
+// What /link is asked for. A PO defaults to its cost.
+type LinkTarget = { orderId: string; kind?: 'cost' | 'commission' } | { sellOrderId: string };
 
 type Stats = {
   unlinked: { count: number; amount: number };
@@ -260,6 +271,18 @@ type Suggestion = {
   affinity: boolean;
   covered: boolean;
 };
+
+// The picker's two search-only targets. `exact` is the one hint the server
+// offers: the figure equals the row's amount.
+type SoSuggestion = {
+  id: string; status: string; customerName: string; currency: string; total: number;
+  createdAt: string; reason: 'exact' | 'search' | 'recent';
+};
+type CommissionSuggestion = {
+  id: string; lifecycle: string; createdByName: string | null; createdAt: string;
+  commission: number | null; linkedTotal: number; reason: 'exact' | 'search' | 'recent';
+};
+type PickTarget = 'po' | 'commission' | 'so';
 
 type Member = { id: string; name: string; active?: boolean };
 
@@ -342,6 +365,9 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
   // set them, so clearing the focus hands the page back exactly as it was.
   const { path } = useRoute();
   const focusOrder = match('/payments/po/:id', path)?.id ?? null;
+  // `/payments/so/<id>` — the same page pinned to a sell order instead.
+  const focusSo = match('/payments/so/:id', path)?.id ?? null;
+  const focusId = focusOrder ?? focusSo;
   // What the PO list's chip showed — the ledger's net with failed and
   // reversed legs left out — so the manager can reconcile it against the rows
   // below, which list every linked leg, dead ones badged. by-order reports
@@ -349,18 +375,24 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
   const [focusNet, setFocusNet] = useState<number | null>(null);
   useEffect(() => {
     setFocusNet(null);
-    if (!focusOrder) return;
+    if (!focusId) return;
     let alive = true;
-    api.get<{ net: number }>(`/api/bank-transactions/by-order/${encodeURIComponent(focusOrder)}`)
-      .then(r => { if (alive) setFocusNet(-r.net); })
+    // A sell order's money comes in, so its net is shown as received, unsigned.
+    const url = focusOrder
+      ? `/api/bank-transactions/by-order/${encodeURIComponent(focusOrder)}`
+      : `/api/bank-transactions/by-sell-order/${encodeURIComponent(focusId)}`;
+    api.get<{ net: number }>(url)
+      .then(r => { if (alive) setFocusNet(focusOrder ? -r.net : r.net); })
       .catch(handleFetchError);
     return () => { alive = false; };
-  }, [focusOrder]);
+  }, [focusOrder, focusId]);
 
   const params = useCallback((cursor?: string) => {
     const p = new URLSearchParams();
     if (focusOrder) {
       p.set('orderId', focusOrder);
+    } else if (focusSo) {
+      p.set('sellOrderId', focusSo);
     } else {
       if (status !== 'all') p.set('status', status);
       if (source !== 'all') p.set('source', source);
@@ -373,7 +405,7 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
     }
     if (cursor) p.set('cursor', cursor);
     return p.toString();
-  }, [focusOrder, status, source, direction, settledQ, hasMatch, disputed, settle, assignee]);
+  }, [focusOrder, focusSo, status, source, direction, settledQ, hasMatch, disputed, settle, assignee]);
 
   // The owner picker and the filter share one list; the page is manager-only,
   // so /api/members is readable here.
@@ -410,12 +442,12 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
   const expandedFor = useRef<string | null>(null);
   useEffect(() => {
     // Leaving focus re-arms it, so coming back to the same PO expands again.
-    if (!focusOrder) { expandedFor.current = null; return; }
-    if (!feed || expandedFor.current === focusOrder) return;
-    expandedFor.current = focusOrder;
+    if (!focusId) { expandedFor.current = null; return; }
+    if (!feed || expandedFor.current === focusId) return;
+    expandedFor.current = focusId;
     const want = readHashQuery().get('txn');
     setOpenId((want && feed.rows.some(r => r.id === want) ? want : feed.rows[0]?.id) ?? null);
-  }, [focusOrder, feed]);
+  }, [focusId, feed]);
 
   const loadMore = useCallback(() => {
     if (!feed?.nextCursor || loadingMore) return;
@@ -562,16 +594,16 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
         </div>
       </div>
 
-      {focusOrder ? (
+      {focusId ? (
         // The tiles and filters describe the whole queue; while the page is
         // pinned to one PO they would count and offer things the list below
         // does not show, so the focus banner stands in for both.
         <div className="card" style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
           <Icon name="cash" size={14} style={{ color: 'var(--fg-subtle)' }} />
-          <span style={{ fontSize: 13, fontWeight: 600 }}>{t('payFocusOrder', { id: focusOrder })}</span>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>{t('payFocusOrder', { id: focusId })}</span>
           {focusNet != null && (
             <span className="mono" style={{ fontSize: 13, color: 'var(--fg-subtle)' }}>
-              {t('payFocusNet', { amt: fmtUSD(focusNet, locale) })}
+              {t(focusOrder ? 'payFocusNet' : 'payFocusNetReceived', { amt: fmtUSD(focusNet, locale) })}
             </span>
           )}
           <RouteLink to="/payments" className="btn sm ghost" style={{ marginLeft: 'auto' }}>
@@ -599,7 +631,7 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
       )}
 
       <div className="card">
-        {!focusOrder && (
+        {!focusId && (
         <div className="card-head" style={{ flexWrap: 'wrap', gap: 12 }}>
           <div className="seg" role="tablist">
             {(['all', 'unlinked', 'linked', 'transfer', 'ignored'] as const).map(s => (
@@ -717,7 +749,7 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
           <div style={{ padding: '36px 16px', textAlign: 'center', color: 'var(--fg-subtle)', fontSize: 13 }}>
             {/* An empty money-out queue IS the drained queue; only the
                 money-in lens makes "nothing left to reconcile" a lie. */}
-            {!focusOrder && status === 'unlinked' && direction !== 'in' ? t('payEmptyUnlinked') : t('payEmpty')}
+            {!focusId && status === 'unlinked' && direction !== 'in' ? t('payEmptyUnlinked') : t('payEmpty')}
           </div>
         ) : (
           <div className="table-scroll">
@@ -788,12 +820,14 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh
   // failing to compile.
   const stopClick = (e: React.MouseEvent) => e.stopPropagation();
 
-  const link = async (orderId: string) => {
-    const r = await act(`${row.id}/link`, { orderId });
+  const link = async (target: LinkTarget) => {
+    const r = await act(`${row.id}/link`, target);
     if (r) {
       // The link filled the PO's empty transaction field, which is a second
       // thing that happened to a screen the manager isn't looking at.
-      onToast(t(r.orderTxnFilled ? 'payLinkedFilledToast' : 'payLinkedToast', { id: orderId }));
+      const id = 'orderId' in target ? target.orderId : target.sellOrderId;
+      onToast(t('orderId' in target && target.kind === 'commission' ? 'payLinkedCommissionToast'
+        : r.orderTxnFilled ? 'payLinkedFilledToast' : 'payLinkedToast', { id }));
       setPicking(false);
     }
   };
@@ -898,20 +932,36 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh
             prose everywhere else. */}
         <td className="pay-link">
           <span className="pay-link-in">
-            {row.orderId ? (
+            {row.sellOrderId ? (
+              <>
+                <RouteLink to={`/sell-orders/${row.sellOrderId}`} className="ship-po-pill">
+                  {row.sellOrderId}
+                </RouteLink>
+                {row.sellOrderTotal != null && (
+                  <span className="mono muted" style={{ fontSize: 12 }}>
+                    {fmtUSD(row.sellOrderTotal, locale)}
+                  </span>
+                )}
+                <span className={'chip dot ' + (row.linkKind === 'refund' ? 'cool' : 'pos')}>
+                  {t(row.linkKind === 'refund' ? 'payKindRefund' : 'payKindPayment')}
+                </span>
+              </>
+            ) : row.orderId ? (
               <>
                 <RouteLink to={`/purchase-orders/${row.orderId}`} className="ship-po-pill">
                   {row.orderId}
                 </RouteLink>
                 {/* What the PO cost, beside what was paid for it — the row is
-                    otherwise unreadable against its own amount. */}
-                {row.orderCost != null && (
+                    otherwise unreadable against its own amount. A commission
+                    is not that cost, so it shows the chip alone. */}
+                {row.orderCost != null && row.linkKind !== 'commission' && (
                   <span className="mono muted" style={{ fontSize: 12 }}>
                     {fmtUSD(row.orderCost, locale)}
                   </span>
                 )}
-                <span className={'chip dot ' + (row.linkKind === 'refund' ? 'cool' : 'pos')}>
-                  {t(row.linkKind === 'refund' ? 'payKindRefund' : 'payKindPayment')}
+                <span className={'chip dot ' + (row.linkKind === 'refund' ? 'cool' : row.linkKind === 'commission' ? 'accent' : 'pos')}>
+                  {t(row.linkKind === 'refund' ? 'payKindRefund'
+                    : row.linkKind === 'commission' ? 'payKindCommission' : 'payKindPayment')}
                 </span>
                 {row.linkAuto && <span className="chip info" style={{ fontSize: 10.5 }}>{t('payAuto')}</span>}
               </>
@@ -968,7 +1018,7 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh
             rows carry two, three or no secondary buttons. */}
         <td className="pay-actions">
           <span className="pay-rail" onClick={stopClick}>
-            {row.orderId || dead ? null : row.ignored ? (
+            {isLinkedRow(row) || dead ? null : row.ignored ? (
               <button type="button" className="btn sm ghost" onClick={() => void act(`${row.id}/unignore`)}>
                 {t('payUnignore')}
               </button>
@@ -1003,9 +1053,10 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh
               </>
             )}
           </span>
-          {picking && !row.orderId && (
-            <PoPicker
+          {picking && !isLinkedRow(row) && (
+            <LinkPicker
               txnId={row.id}
+              amount={row.amount}
               anchor={linkBtnRef}
               onPick={link}
               onClose={() => setPicking(false)}
@@ -1035,7 +1086,7 @@ function ExpandedDetail({ row, locale, act, onToast, onLink, onGroup, members, r
   refresh: () => void;
   act: (path: string, body?: unknown) => Promise<ActResult | null>;
   onToast: (msg: string) => void;
-  onLink: (orderId: string) => void;
+  onLink: (target: LinkTarget) => void;
   onGroup: (otherId: string) => void;
 }) {
   const { t } = useT();
@@ -1065,7 +1116,7 @@ function ExpandedDetail({ row, locale, act, onToast, onLink, onGroup, members, r
       {(row.disputes ?? []).map(d => (
         <DisputeDetail key={d.disputeId} dispute={d} locale={locale} />
       ))}
-      {row.match && !row.orderId && !row.ignored && !dead && (
+      {row.match && !isLinkedRow(row) && !row.ignored && !dead && (
         <MatchList txnId={row.id} ownerId={row.assignee?.id ?? null} locale={locale} onLink={onLink} />
       )}
       <div style={{ display: 'grid', gap: 4 }}>
@@ -1089,7 +1140,7 @@ function ExpandedDetail({ row, locale, act, onToast, onLink, onGroup, members, r
       </div>
       <div className="pay-detail-actions">
         <span className="pay-detail-group">
-          {row.orderId && (
+          {isLinkedRow(row) && (
             <>
               <span className="muted">
                 {row.linkAuto
@@ -1135,7 +1186,7 @@ function ExpandedDetail({ row, locale, act, onToast, onLink, onGroup, members, r
               )}
             </span>
           )}
-          {!row.orderId && !row.internalTxn && !dead && (
+          {!isLinkedRow(row) && !row.internalTxn && !dead && (
             row.category === 'transfer' ? (
               <button
                 type="button" className="btn sm"
@@ -1181,7 +1232,7 @@ function ExpandedDetail({ row, locale, act, onToast, onLink, onGroup, members, r
                 {t('payIntRemove')}
               </button>
             </>
-          ) : !row.orderId && !dead && (
+          ) : !isLinkedRow(row) && !dead && (
             <span ref={recordAnchorRef} style={{ display: 'inline-flex' }}>
               <button
                 type="button" className="btn sm"
@@ -1201,7 +1252,7 @@ function ExpandedDetail({ row, locale, act, onToast, onLink, onGroup, members, r
               )}
             </span>
           )}
-          {!row.orderId && !dead && (
+          {!isLinkedRow(row) && !dead && (
             row.assignee ? (
               <button
                 type="button" className="btn sm"
@@ -1391,7 +1442,7 @@ function MatchList({ txnId, ownerId, locale, onLink }: {
   txnId: string;
   ownerId: string | null;
   locale: string;
-  onLink: (orderId: string) => void;
+  onLink: (target: LinkTarget) => void;
 }) {
   const { t } = useT();
   const [rows, setRows] = useState<Suggestion[] | null>(null);
@@ -1469,7 +1520,7 @@ function MatchList({ txnId, ownerId, locale, onLink }: {
               acts on is the row it sits in. */}
           <button
             type="button" className="btn sm" style={{ marginLeft: 'auto' }}
-            onClick={() => onLink(s.id)}
+            onClick={() => onLink({ orderId: s.id })}
           >
             {t('payLinkTo', { id: s.id })}
           </button>
@@ -1482,16 +1533,23 @@ function MatchList({ txnId, ownerId, locale, onLink }: {
 // Searchable PO dropdown (CustomerPicker shape). Opens with the server's
 // ranked suggestions — txn-id match first, then same-amount orders — and
 // switches to free search as the manager types.
-function PoPicker({ txnId, anchor, onPick, onClose, locale }: {
+// Three targets behind one search box: the PO's cost (ranked suggestions,
+// then search), the PO's commission, or a sell order. The last two are a
+// search over recent candidates — neither carries a transaction id — with an
+// exact amount badged. Money in opens on the sell-order tab, money out on the
+// PO, because that is what each almost always is.
+function LinkPicker({ txnId, amount, anchor, onPick, onClose, locale }: {
   txnId: string;
+  amount: number;
   anchor: React.RefObject<HTMLElement | null>;
-  onPick: (orderId: string) => void;
+  onPick: (target: LinkTarget) => void;
   onClose: () => void;
   locale: string;
 }) {
   const { t } = useT();
+  const [target, setTarget] = useState<PickTarget>(amount > 0 ? 'so' : 'po');
   const [query, setQuery] = useState('');
-  const [rows, setRows] = useState<Suggestion[] | null>(null);
+  const [rows, setRows] = useState<Suggestion[] | SoSuggestion[] | CommissionSuggestion[] | null>(null);
   const [total, setTotal] = useState(0);
   const ref = useRef<HTMLDivElement | null>(null);
   const reqId = useRef(0);
@@ -1506,20 +1564,48 @@ function PoPicker({ txnId, anchor, onPick, onClose, locale }: {
 
   useEffect(() => {
     const id = ++reqId.current;
+    setRows(null);
     const timer = setTimeout(() => {
-      const qs = query.trim() ? `?q=${encodeURIComponent(query.trim())}` : '';
-      api.get<{ suggestions: Suggestion[]; total?: number }>(`/api/bank-transactions/${txnId}/suggestions${qs}`)
+      const qs = new URLSearchParams();
+      if (target !== 'po') qs.set('target', target);
+      if (query.trim()) qs.set('q', query.trim());
+      const q = qs.toString();
+      api.get<{ suggestions: Suggestion[] | SoSuggestion[] | CommissionSuggestion[]; total?: number }>(
+        `/api/bank-transactions/${txnId}/suggestions${q ? `?${q}` : ''}`)
         .then(r => {
           if (id !== reqId.current) return;
           setRows(r.suggestions);
-          // Only the ranked path reports the uncapped pool; a search is its own
-          // top ten and "showing 10 of 10" would say nothing.
-          setTotal(qs ? 0 : r.total ?? 0);
+          // Only the ranked PO path reports the uncapped pool; a search is its
+          // own top ten and "showing 10 of 10" would say nothing.
+          setTotal(query.trim() || target !== 'po' ? 0 : r.total ?? 0);
         })
         .catch(handleFetchError);
     }, query ? 250 : 0);
     return () => clearTimeout(timer);
-  }, [txnId, query]);
+  }, [txnId, query, target]);
+
+  const searching = query.trim() !== '';
+  const heading = searching ? 'payPickResults'
+    : target === 'po' ? 'payMatchSuggested'
+    : target === 'so' ? 'payPickRecentSo' : 'payPickRecentCommission';
+  const empty = searching
+    ? (target === 'so' ? 'payPickNoneSo' : 'payPickNone')
+    : target === 'po' ? 'payPickNoSuggest'
+    : target === 'so' ? 'payPickNoRecentSo' : 'payPickNoRecentCommission';
+  const rowStyle: CSSProperties = {
+    width: '100%', textAlign: 'left', padding: '8px 12px',
+    border: 'none', background: 'transparent', cursor: 'pointer',
+    fontFamily: 'inherit', display: 'grid', gap: 2,
+  };
+  // Two lines: the id and why it is here, then the figures. The popover is
+  // 320px and the actions cell it renders in is `white-space: nowrap`, so one
+  // flex line clipped the chip.
+  const head = (id: string, chip: string | null) => (
+    <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <span className="mono" style={{ fontWeight: 600 }}>{id}</span>
+      {chip && <span className="chip info" style={{ marginLeft: 'auto', fontSize: 10.5 }}>{chip}</span>}
+    </span>
+  );
 
   return (
     <div
@@ -1533,6 +1619,18 @@ function PoPicker({ txnId, anchor, onPick, onClose, locale }: {
         cursor: 'default', textAlign: 'left',
       }}
     >
+      <div className="seg" style={{ margin: '8px 8px 0', display: 'flex' }}>
+        {(['po', 'commission', 'so'] as const).map(k => (
+          <button
+            key={k} type="button"
+            className={target === k ? 'active' : undefined}
+            style={{ flex: 1 }}
+            onClick={() => setTarget(k)}
+          >
+            {t(k === 'po' ? 'payPickTargetPo' : k === 'so' ? 'payPickTargetSo' : 'payPickTargetCommission')}
+          </button>
+        ))}
+      </div>
       <div style={{ padding: 8, borderBottom: '1px solid var(--border)', position: 'relative' }}>
         <Icon name="search" size={13} style={{
           position: 'absolute', left: 18, top: '50%', transform: 'translateY(-50%)',
@@ -1543,7 +1641,7 @@ function PoPicker({ txnId, anchor, onPick, onClose, locale }: {
           className="input"
           value={query}
           onChange={e => setQuery(e.target.value)}
-          placeholder={t('payPickSearch')}
+          placeholder={t(target === 'so' ? 'payPickSearchSo' : 'payPickSearch')}
           style={{ paddingLeft: 30, height: 32, fontSize: 13 }}
         />
       </div>
@@ -1552,7 +1650,7 @@ function PoPicker({ txnId, anchor, onPick, onClose, locale }: {
             whole panel below the search field. */}
         {rows !== null && rows.length > 0 && (
           <div className="muted" style={{ fontWeight: 600, fontSize: 11.5, padding: '8px 12px 2px' }}>
-            {t(query.trim() ? 'payPickResults' : 'payMatchSuggested')}
+            {t(heading)}
             {total > rows.length && (
               <span style={{ fontWeight: 400, marginLeft: 6 }}>
                 ({t('payMatchShowing', { shown: rows.length, total })})
@@ -1563,31 +1661,12 @@ function PoPicker({ txnId, anchor, onPick, onClose, locale }: {
         {rows === null ? (
           <div style={{ padding: 12, color: 'var(--fg-subtle)', fontSize: 12.5 }}>{t('payMoreLoading')}</div>
         ) : rows.length === 0 ? (
-          <div style={{ padding: 12, color: 'var(--fg-subtle)', fontSize: 12.5 }}>
-            {t(query.trim() ? 'payPickNone' : 'payPickNoSuggest')}
-          </div>
-        ) : rows.map(s => {
+          <div style={{ padding: 12, color: 'var(--fg-subtle)', fontSize: 12.5 }}>{t(empty)}</div>
+        ) : target === 'po' ? (rows as Suggestion[]).map(s => {
           const reasonKey = REASON_TKEY[s.reason];
           return (
-            <button
-              key={s.id}
-              type="button"
-              onClick={() => onPick(s.id)}
-              style={{
-                width: '100%', textAlign: 'left', padding: '8px 12px',
-                border: 'none', background: 'transparent', cursor: 'pointer',
-                fontFamily: 'inherit', display: 'grid', gap: 2,
-              }}
-            >
-              {/* Two lines: the id and why it is here, then the figures. The
-                  popover is 320px and the actions cell it renders in is
-                  `white-space: nowrap`, so one flex line clipped the chip. */}
-              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span className="mono" style={{ fontWeight: 600 }}>{s.id}</span>
-                {reasonKey && (
-                  <span className="chip info" style={{ marginLeft: 'auto', fontSize: 10.5 }}>{t(reasonKey)}</span>
-                )}
-              </span>
+            <button key={s.id} type="button" onClick={() => onPick({ orderId: s.id })} style={rowStyle}>
+              {head(s.id, reasonKey && t(reasonKey))}
               <span className="muted" style={{ fontSize: 12, whiteSpace: 'normal' }}>
                 {fmtUSD(s.totalCost, locale)} · {fmtDateShort(s.createdAt, locale)}
                 {s.dayGap !== null ? ` · ${gapLabel(s.dayGap, t)}` : ''}
@@ -1595,14 +1674,31 @@ function PoPicker({ txnId, anchor, onPick, onClose, locale }: {
               </span>
             </button>
           );
-        })}
+        }) : target === 'so' ? (rows as SoSuggestion[]).map(s => (
+          <button key={s.id} type="button" onClick={() => onPick({ sellOrderId: s.id })} style={rowStyle}>
+            {head(s.id, s.reason === 'exact' ? t('payReasonExact') : null)}
+            <span className="muted" style={{ fontSize: 12, whiteSpace: 'normal' }}>
+              {fmtUSD(s.total, locale)} · {s.status} · {fmtDateShort(s.createdAt, locale)} · {s.customerName}
+            </span>
+          </button>
+        )) : (rows as CommissionSuggestion[]).map(s => (
+          <button key={s.id} type="button" onClick={() => onPick({ orderId: s.id, kind: 'commission' })} style={rowStyle}>
+            {head(s.id, s.reason === 'exact' ? t('payReasonExact') : null)}
+            <span className="muted" style={{ fontSize: 12, whiteSpace: 'normal' }}>
+              {s.commission != null ? t('payCommissionOf', { amt: fmtUSD(s.commission, locale) }) : '—'}
+              {s.linkedTotal > 0 ? ` · ${t('payCommissionPaid', { amt: fmtUSD(s.linkedTotal, locale) })}` : ''}
+              {' · '}{fmtDateShort(s.createdAt, locale)}
+              {s.createdByName ? ` · ${s.createdByName}` : ''}
+            </span>
+          </button>
+        ))}
       </div>
     </div>
   );
 }
 
 // The internal transactions this payment can be filed under, plus the option to
-// start a new one. Fixed-position like PoPicker rather than absolute like
+// start a new one. Fixed-position like LinkPicker rather than absolute like
 // PairPicker: the list grows with the number of records, and `.table-scroll`'s
 // `overflow-y: hidden` shears a tall absolute popover off at the table's edge.
 function RecordPicker({ txnId, anchor, onDone, onClose }: {
@@ -1615,7 +1711,7 @@ function RecordPicker({ txnId, anchor, onDone, onClose }: {
   const [rows, setRows] = useState<InternalRecord[] | null>(null);
   const ref = useRef<HTMLDivElement | null>(null);
 
-  // Fixed for the same reason PoPicker is — see the comment there.
+  // Fixed for the same reason LinkPicker is — see the comment there.
   // Left-aligned: the anchor is a small chip on the left of the expanded row.
   const pos = useFixedPopover(
     anchor, ref, { align: 'left', gap: GAP }, onClose);
@@ -1690,7 +1786,7 @@ function RecordPicker({ txnId, anchor, onDone, onClose }: {
 }
 
 // The counterparts this transaction may be grouped with. Same popover shape as
-// PoPicker, without the search box: the server's rules — opposite source, the
+// LinkPicker, without the search box: the server's rules — opposite source, the
 // same amount to the cent, neither leg already grouped — leave a set small
 // enough to read, and nothing about it is searchable anyway.
 function PairPicker({ txnId, anchor, locale, onPick, onClose }: {
@@ -1704,7 +1800,7 @@ function PairPicker({ txnId, anchor, locale, onPick, onClose }: {
   const [rows, setRows] = useState<PairCandidate[] | null>(null);
   const ref = useRef<HTMLDivElement | null>(null);
 
-  // Fixed for the same reason PoPicker is — see the comment there. This one
+  // Fixed for the same reason LinkPicker is — see the comment there. This one
   // sits deeper still, in the expanded row's `<td colSpan>`, so it was clipped
   // for every row below the fold. Left-aligned: the anchor is a small button on
   // the left of the expanded row, and right-aligning a 380px panel to it would

@@ -13,8 +13,10 @@
 import { Hono } from 'hono';
 import { authMiddleware } from '../auth';
 import { requireManager } from '../lib/role';
-import { getDb } from '../db';
+import { lockBankGroupTx } from '../services/bankTxLocks';
+import { getDb, type SqlLike } from '../db';
 import { isDead } from '../banktx/types';
+import { isLinked } from '../banktx/match';
 import { clampLimit, cursorTs, cursorTsParam, cursorTsSelect, decodeCursor, encodeCursor, escapeLike, UUID_RE } from '../lib/pagination';
 import type { Env, User } from '../types';
 
@@ -178,21 +180,26 @@ internalTx.get('/:id', async (c) => {
 // to one leg of a pair would be invisible from the other.
 
 async function addMembers(
-  sql: SqlClient,
+  tx: SqlLike,
   recordId: string,
   txnIds: string[],
 ): Promise<{ error: string } | { added: number }> {
-  const legs = await sql<{
-    id: string; order_id: string | null; internal_txn_id: string | null; settle_status: string;
+  // The legs are locked before they are judged: the "belongs elsewhere" and
+  // "linked" verdicts below used to run on an unlocked read, and two records
+  // filing the same leg both passed, the later writer stealing it.
+  await lockBankGroupTx(tx, txnIds);
+  const legs = await tx<{
+    id: string; order_id: string | null; sell_order_id: string | null;
+    internal_txn_id: string | null; settle_status: string;
   }[]>`
-    SELECT id, order_id, internal_txn_id, settle_status
+    SELECT id, order_id, sell_order_id, internal_txn_id, settle_status
     FROM bank_transactions
-    WHERE id IN ${sql(txnIds)}
+    WHERE id IN ${tx(txnIds)}
        OR pair_id IN (SELECT pair_id FROM bank_transactions
-                      WHERE id IN ${sql(txnIds)} AND pair_id IS NOT NULL)`;
+                      WHERE id IN ${tx(txnIds)} AND pair_id IS NOT NULL)`;
   if (legs.length === 0) return { error: 'Not found' };
-  if (legs.some((l) => l.order_id)) {
-    return { error: 'Unlink the transaction from its purchase order before filing it' };
+  if (legs.some(isLinked)) {
+    return { error: 'Unlink the transaction from its order before filing it' };
   }
   // A record groups the legs of one real movement. A payment that never left,
   // or came back, has no leg to group.
@@ -202,10 +209,12 @@ async function addMembers(
   const other = legs.find((l) => l.internal_txn_id && l.internal_txn_id !== recordId);
   if (other) return { error: 'The transaction already belongs to another internal transaction' };
 
-  const r = await sql`
+  const r = await tx`
     UPDATE bank_transactions
     SET internal_txn_id = ${recordId}, category = 'transfer', category_manual = TRUE
-    WHERE id IN ${sql(legs.map((l) => l.id))}`;
+    WHERE id IN ${tx(legs.map((l) => l.id))}
+      AND (internal_txn_id IS NULL OR internal_txn_id = ${recordId})
+      AND order_id IS NULL AND sell_order_id IS NULL`;
   return { added: r.count };
 }
 
@@ -233,7 +242,7 @@ internalTx.post('/', async (c) => {
       RETURNING id`;
     id = row.id;
     if (txnIds.length > 0) {
-      const r = await addMembers(tx as unknown as SqlClient, id, txnIds);
+      const r = await addMembers(tx, id, txnIds);
       if ('error' in r) {
         failure = r.error;
         // The record and its members are one action: a refused member must not
@@ -278,7 +287,7 @@ internalTx.post('/:id/members', async (c) => {
   const [record] = await sql`SELECT id FROM internal_transactions WHERE id = ${id}`;
   if (!record) return c.json({ error: 'Not found' }, 404);
 
-  const r = await addMembers(sql, id, txnIds);
+  const r = await sql.begin((tx) => addMembers(tx, id, txnIds));
   if ('error' in r) return c.json({ error: r.error }, 400);
   return c.json({ ok: true, added: r.added });
 });

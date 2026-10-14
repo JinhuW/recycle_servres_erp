@@ -15,18 +15,19 @@ import { useT } from '../lib/i18n';
  * genuinely never bought.
  */
 export function PartNumberField({
-  value, onChange, placeholder, className = 'input mono', invalid,
+  value, onChange, placeholder, className = 'input mono', invalid, id,
 }: {
   value: string | null | undefined;
   onChange: (v: string) => void;
   placeholder?: string;
   className?: string;
   invalid?: boolean;
+  id?: string;
 }) {
   const { t } = useT();
   const { options, meta, loading } = usePartSuggest(value);
   return (
-    <Combobox
+    <Combobox id={id}
       value={value}
       options={options}
       onChange={onChange}

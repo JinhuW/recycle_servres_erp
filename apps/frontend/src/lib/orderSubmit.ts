@@ -82,14 +82,25 @@ export function buildOrderSubmit(state: SubmitState): OrderSubmitRequest {
   // Lines the user deleted after they autosaved are still in the draft and
   // have to be named, or they ship as stock nobody bought.
   const unconfirmed = state.lines.filter(l => !l._confirmed);
+  // A line saved earlier whose later edit failed to save: it already has a
+  // row, so it is an update by id, never a second insert — and never
+  // dropped, which is what filtering on `_confirmed` alone did.
+  const dirty = state.lines.filter(l => l._confirmed && l._dirty && l.id);
   const survivingIds = new Set(state.lines.filter(l => l.id).map(l => l.id));
   const removed = (state.originalLineIds ?? []).filter(id => !survivingIds.has(id));
-  if (!unconfirmed.length && !removed.length) return { kind: 'noop' };
+  if (!unconfirmed.length && !removed.length && !dirty.length) return { kind: 'noop' };
   return {
     kind: 'patch',
     url: '/api/orders/' + state.draftId,
     body: {
       ...(unconfirmed.length ? { addLines: unconfirmed.map(toAddLine) } : {}),
+      ...(dirty.length ? {
+        lines: dirty.map(l => {
+          // Omit status, as the autosave does: the backend keeps the row's.
+          const { status: _status, ...fields } = toAddLine(l);
+          return { id: l.id, ...fields };
+        }),
+      } : {}),
       ...(removed.length ? { removeLineIds: removed } : {}),
     },
   };

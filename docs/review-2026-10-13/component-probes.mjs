@@ -1,0 +1,26 @@
+// Read-only reproduction of current component defects; no DB/network writes.
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+const source = name => readFileSync(new URL(`../../apps/frontend/src/components/${name}.tsx`, import.meta.url), 'utf8');
+const spark = source('PhSparkline');
+const math = spark.slice(spark.indexOf('  const max ='), spark.indexOf('  const linePath')).replaceAll(': number', '');
+const ys = new Function('data', `${math}; return data.map(d => y(d.profit));`);
+assert.equal(ys([{profit:-100},{profit:100}])[0],176);
+assert.equal(ys([{profit:-100},{profit:-50}])[0],8492);
+console.log('UI-03: negative profit points lie outside the SVG');
+const language = source('PhLanguageSheet');
+assert.match(language, /disabled=\{!followSystem && draft === lang\}/);
+const initialFollow = true, followSystem = false, draft = 'en', lang = 'en';
+assert.notEqual(initialFollow, followSystem);
+assert.equal(!followSystem && draft === lang, true);
+console.log('UI-04: disabling Follow System alone disables Done');
+const scanner = source('SnScanner');
+const finish = scanner.slice(scanner.indexOf('  const finish ='), scanner.indexOf('  const switchMode =')).replaceAll(': string', '');
+let scheduled, calls=0;
+const makeFinish = new Function('setCaptured','setLastHit','navigator','window','onDoneRef', `${finish}; return finish;`);
+const aliveRef = {current:true};
+makeFinish(()=>{},()=>{}, {vibrate(){}}, {setTimeout(fn){scheduled=fn;}}, {current(){calls++;}})('SERIAL');
+aliveRef.current=false;
+scheduled();
+assert.equal(calls,1);
+console.log('UI-06: completion timer calls the parent after lifetime ends');

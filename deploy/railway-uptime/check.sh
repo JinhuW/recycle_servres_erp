@@ -41,10 +41,20 @@ msg="recycle-erp prod DOWN: $PUBLIC_URL -> HTTP $public_status. Failing layer: $
 echo "[uptime] ALERT: $msg"
 
 if [ -n "${ALERT_WEBHOOK_URL:-}" ]; then
-  curl -sS -m 15 -X POST "$ALERT_WEBHOOK_URL" \
-    -H 'Content-Type: application/json' \
-    -d "{\"msg_type\":\"text\",\"content\":{\"text\":\"$msg\"}}" \
-    || echo "[uptime] webhook post failed"
+  # The message is escaped for JSON (a URL with a quote used to make an
+  # invalid body), the HTTP status is checked (-f), and Lark's own verdict is
+  # read: it answers 200 with a non-zero code when it rejects a message.
+  text=$(printf '%s' "$msg" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  if resp=$(curl -fsS -m 15 -X POST "$ALERT_WEBHOOK_URL" \
+      -H 'Content-Type: application/json' \
+      -d "{\"msg_type\":\"text\",\"content\":{\"text\":\"$text\"}}"); then
+    case "$resp" in
+      *'"code":0'*) echo "[uptime] alert delivered" ;;
+      *) echo "[uptime] webhook rejected the alert: $resp" ;;
+    esac
+  else
+    echo "[uptime] webhook post failed"
+  fi
 fi
 
 exit 1

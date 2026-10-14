@@ -1,28 +1,22 @@
 import { useState } from 'react';
 import { Icon } from './Icon';
-import { useT } from '../lib/i18n';
+import { followsSystemLang, setFollowsSystemLang, systemLang, useT } from '../lib/i18n';
 import type { Lang } from '../lib/types';
 import { PhSheet } from './PhSheet';
 
 type Props = { onClose: (picked: Lang | null) => void };
 
-const LS_KEY = 'rs.langFollowSystem';
-
-function systemLang(): Lang {
-  if (typeof navigator === 'undefined') return 'en';
-  const n = (navigator.language || 'en').toLowerCase();
-  return n.startsWith('zh') ? 'zh' : 'en';
-}
-
 export function PhLanguageSheet({ onClose }: Props) {
   const { lang, setLang, t } = useT();
   const [draft, setDraft] = useState<Lang>(lang);
-  const [followSystem, setFollowSystem] = useState<boolean>(() => {
-    try { return localStorage.getItem(LS_KEY) === '1'; } catch { return false; }
-  });
+  const [initialFollow] = useState(followsSystemLang);
+  const [followSystem, setFollowSystem] = useState<boolean>(initialFollow);
+  // Turning Follow System off with the language unchanged is a change too:
+  // Done used to stay disabled for it, so the switch could never be saved off.
+  const dirty = followSystem !== initialFollow || (!followSystem && draft !== lang);
 
   const apply = () => {
-    try { localStorage.setItem(LS_KEY, followSystem ? '1' : '0'); } catch { /* ignore */ }
+    setFollowsSystemLang(followSystem);
     const final: Lang = followSystem ? systemLang() : draft;
     setLang(final);
     onClose(final);
@@ -68,12 +62,12 @@ export function PhLanguageSheet({ onClose }: Props) {
         <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.01em' }}>{t('langTitle')}</div>
         <button
           onClick={apply}
-          disabled={!followSystem && draft === lang}
+          disabled={!dirty}
           style={{
             background: 'transparent', border: 'none',
-            color: (!followSystem && draft === lang) ? 'var(--fg-subtle)' : 'var(--accent-strong)',
+            color: !dirty ? 'var(--fg-subtle)' : 'var(--accent-strong)',
             fontSize: 14, fontWeight: 600, fontFamily: 'inherit', padding: 4,
-            cursor: (!followSystem && draft === lang) ? 'default' : 'pointer',
+            cursor: !dirty ? 'default' : 'pointer',
           }}
         >
           {t('langDone')}

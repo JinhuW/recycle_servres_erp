@@ -549,15 +549,22 @@ try {
   // Delete children before parents to satisfy FK constraints on re-seed.
   // inventory_events is append-only (trigger blocks DELETE), so briefly
   // disable its delete-lock for the seed reset only.
-  await sql`ALTER TABLE inventory_events DISABLE TRIGGER inventory_events_no_delete`;
-  await sql`DELETE FROM inventory_events`;   // → order_lines
-  await sql`ALTER TABLE inventory_events ENABLE TRIGGER inventory_events_no_delete`;
+  // Disable, delete and re-enable in ONE transaction (DDL is transactional):
+  // as three autocommit statements, a DELETE that failed — or a seed killed
+  // between them — left the append-only lock off for good.
+  await sql.begin(async (tx) => {
+    await tx`ALTER TABLE inventory_events DISABLE TRIGGER inventory_events_no_delete`;
+    await tx`DELETE FROM inventory_events`;   // → order_lines
+    await tx`ALTER TABLE inventory_events ENABLE TRIGGER inventory_events_no_delete`;
+  });
   await sql`DELETE FROM sell_order_lines`;   // → sell_orders, order_lines (inventory_id)
   // sell_order_events is append-only (BEFORE DELETE trigger). The DELETE on
   // sell_orders cascades into it, so disable the lock just for this reset.
-  await sql`ALTER TABLE sell_order_events DISABLE TRIGGER sell_order_events_no_delete`;
-  await sql`DELETE FROM sell_orders`;        // → customers, sell_order_events
-  await sql`ALTER TABLE sell_order_events ENABLE TRIGGER sell_order_events_no_delete`;
+  await sql.begin(async (tx) => {
+    await tx`ALTER TABLE sell_order_events DISABLE TRIGGER sell_order_events_no_delete`;
+    await tx`DELETE FROM sell_orders`;        // → customers, sell_order_events
+    await tx`ALTER TABLE sell_order_events ENABLE TRIGGER sell_order_events_no_delete`;
+  });
   await sql`DELETE FROM order_lines`;        // → orders (cascade to inventory_events now empty)
   await sql`DELETE FROM orders`;
   const orders = buildOrders(buildSubmissions());

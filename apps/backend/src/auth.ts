@@ -66,9 +66,18 @@ export const epochSeconds = (): number => Math.floor(Date.now() / 1000);
 
 // `fid` names the refresh family this access token was minted alongside. The
 // `rt` cookie is scoped to /api/auth, so outside that path this claim is the
-// only way a request can tell which session it belongs to.
+// only way a request can tell which session it belongs to — and the way the
+// token dies with the session: once the family is revoked (logout, or a
+// replayed refresh token) authMiddleware refuses it instead of letting it
+// live out its hour. A token without the claim predates it and is refused.
+// `cv` is the users.credential_version the token was minted under: a
+// password change or deactivation bumps it, and authMiddleware refuses a
+// token whose version has moved on. The second-resolution tokens_valid_after
+// check stays beside it for tokens minted before the claim existed.
 export async function signToken(
-  env: Env, user: { id: string; email: string; role: string }, familyId?: string,
+  env: Env,
+  user: { id: string; email: string; role: string; credentialVersion: number },
+  familyId?: string,
 ): Promise<string> {
   const now = epochSeconds();
   return jwt.sign(
@@ -76,6 +85,7 @@ export async function signToken(
       sub: user.id,
       email: user.email,
       role: user.role,
+      cv: user.credentialVersion,
       ...(familyId ? { fid: familyId } : {}),
       iss: env.JWT_ISSUER ?? 'recycle-erp',
       iat: now,
@@ -85,19 +95,26 @@ export async function signToken(
   );
 }
 
-export type AccessTokenPayload = { sub: string; role?: string; fid?: string; iat: number };
+export type AccessTokenPayload = {
+  sub: string; role?: string; fid?: string; cv?: number; iat: number;
+};
 
 export async function verifyToken(env: Env, token: string): Promise<AccessTokenPayload | null> {
   try {
     // verify() returns the decoded token when valid, undefined when not — no
     // need for a second decode() parse.
-    const decoded = await jwt.verify<{ sub: string; role?: string; fid?: string }>(token, env.JWT_SECRET);
+    const decoded = await jwt.verify<{ sub: string; role?: string; fid?: string; cv?: number }>(
+      token, env.JWT_SECRET,
+    );
     if (!decoded) return null;
     const { payload } = decoded;
     // signToken always stamps iat; a token without one can't be placed
     // against a password change, so it isn't honoured.
     if (typeof payload.iat !== 'number') return null;
-    return { ...payload, iat: payload.iat };
+    return {
+      ...payload, iat: payload.iat,
+      ...(typeof payload.cv === 'number' ? { cv: payload.cv } : {}),
+    };
   } catch {
     return null;
   }
@@ -116,21 +133,29 @@ export const authMiddleware: MiddlewareHandler<{
   if (!payload) return c.json({ error: 'Invalid auth token' }, 401);
 
   const sql = getDb(c.env);
-  const rows = await sql<(User & { stale: boolean })[]>`
+  const rows = await sql<(User & { stale: boolean; sessionLive: boolean })[]>`
     SELECT id, email, name, initials, role, team, language,
            default_warehouse_id AS "defaultWarehouseId",
            COALESCE(preferences, '{}'::jsonb) AS preferences,
-           (tokens_valid_after IS NOT NULL
-             AND to_timestamp(${payload.iat}) < tokens_valid_after) AS stale
+           ((tokens_valid_after IS NOT NULL
+              AND to_timestamp(${payload.iat}) < tokens_valid_after)
+            OR (${payload.cv ?? null}::int IS NOT NULL
+                AND credential_version <> ${payload.cv ?? null}::int)) AS stale,
+           EXISTS (
+             SELECT 1 FROM refresh_tokens rt
+             WHERE rt.family_id = ${payload.fid ?? null}::uuid
+               AND rt.revoked_at IS NULL AND rt.expires_at > NOW()
+           ) AS "sessionLive"
     FROM users
     WHERE id = ${payload.sub} AND active = TRUE
     LIMIT 1
   `;
   if (rows.length === 0) return c.json({ error: 'User not found' }, 401);
-  const { stale, ...user } = rows[0];
-  // Minted before the password last changed. A plain 401, so a session that
-  // kept its refresh family (the one that made the change) refreshes past it.
-  if (stale) return c.json({ error: 'Session expired' }, 401);
+  const { stale, sessionLive, ...user } = rows[0];
+  // Minted before the credentials last changed, or after its session ended.
+  // A plain 401, so a session that kept its refresh family (the one that made
+  // the change) refreshes past it.
+  if (stale || !sessionLive) return c.json({ error: 'Session expired' }, 401);
 
   c.set('user', user);
   addLogContext({ userId: user.id });

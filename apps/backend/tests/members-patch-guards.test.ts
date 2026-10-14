@@ -70,6 +70,39 @@ describe('PATCH /api/members/:id — lockout guards', () => {
     expect(byEmail(await members(token), ALEX).role).toBe('manager');
   });
 
+  // The count ran before the update's transaction, so two self-demotions
+  // racing each saw the other manager still standing and both went through.
+  it('serialises concurrent demotions so one active manager always remains', async () => {
+    const alex = await loginAs(ALEX);
+    const sofia = await loginAs(SOFIA);
+    const results = await Promise.all([
+      api('PATCH', `/api/members/${alex.user.id}`, { token: alex.token, body: { role: 'purchaser' } }),
+      api('PATCH', `/api/members/${sofia.user.id}`, { token: sofia.token, body: { role: 'purchaser' } }),
+    ]);
+    expect(results.map((r) => r.status).sort()).toEqual([200, 400]);
+    const [{ n }] = await getTestDb()<{ n: number }[]>`
+      SELECT COUNT(*)::int AS n FROM users WHERE role = 'manager' AND active`;
+    expect(n).toBe(1);
+  });
+
+  it('a concurrent deactivation and demotion of the last two managers leave one', async () => {
+    const alex = await loginAs(ALEX);
+    const sofia = await loginAs(SOFIA);
+    const results = await Promise.all([
+      api('DELETE', `/api/members/${sofia.user.id}`, { token: alex.token }),
+      api('PATCH', `/api/members/${alex.user.id}`, { token: sofia.token, body: { role: 'purchaser' } }),
+    ]);
+    // The loser is refused either as the last-manager 400 or, when the
+    // deactivation lands first, as the 401 a deactivated manager's own
+    // request gets — her credentials ended with her account.
+    const statuses = results.map((r) => r.status).sort();
+    expect(statuses[0]).toBe(200);
+    expect([400, 401]).toContain(statuses[1]);
+    const [{ n }] = await getTestDb()<{ n: number }[]>`
+      SELECT COUNT(*)::int AS n FROM users WHERE role = 'manager' AND active`;
+    expect(n).toBe(1);
+  });
+
   it('still allows deactivating a non-last manager', async () => {
     const { token } = await loginAs(ALEX);
     const sofia = byEmail(await members(token), SOFIA);

@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import type { SqlLike } from '../db';
 import { randomBytes } from 'node:crypto';
 import { getCookie } from 'hono/cookie';
 import type { Context } from 'hono';
@@ -95,6 +96,30 @@ export function redirectUriMatches(registered: string[], presented: string): boo
 const DCR_PER_IP_HOUR = 10;
 const DCR_GLOBAL_HOUR = 60;
 const DCR_UNUSED_CAP = 200;
+
+// Anonymous registrations over the limiter's windows: per address this hour,
+// everyone this hour, and registered-but-never-used this day.
+async function dcrOverQuota(sql: SqlLike, ipKey: string | null, ipKnown: boolean): Promise<boolean> {
+  const [counts] = await sql<{ per_ip: number; global_n: number; unused: number }[]>`
+    SELECT
+      COUNT(*) FILTER (
+        WHERE COALESCE(created_ip_key, created_ip) IS NOT DISTINCT FROM ${ipKey}
+          AND created_at > NOW() - INTERVAL '1 hour'
+      )::int AS per_ip,
+      COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '1 hour')::int AS global_n,
+      COUNT(*) FILTER (
+        WHERE created_at > NOW() - INTERVAL '24 hours'
+          AND NOT EXISTS (
+            SELECT 1 FROM oauth_refresh_tokens rt WHERE rt.client_id = oauth_clients.id
+          )
+      )::int AS unused
+    FROM oauth_clients
+    WHERE created_by IS NULL AND revoked_at IS NULL
+  `;
+  return (ipKnown && counts.per_ip >= DCR_PER_IP_HOUR)
+    || counts.global_n >= DCR_GLOBAL_HOUR
+    || counts.unused >= DCR_UNUSED_CAP;
+}
 const DCR_CLIENT_NAME_MAX = 80;
 // The row outlives the request and every redirect URI is re-read on each
 // /authorize and listed in Settings, so an anonymous registrant gets a bounded
@@ -118,26 +143,10 @@ oauth.post('/register', async (c) => {
   // `unused` reclaims the case where a script registers repeatedly but never
   // completes a flow — those clients never mint a refresh token. It is
   // windowed like the others: counted over all time, abandoned registrations
-  // pile up until the cap shuts registration for good.
-  const [counts] = await sql<{ per_ip: number; global_n: number; unused: number }[]>`
-    SELECT
-      COUNT(*) FILTER (
-        WHERE COALESCE(created_ip_key, created_ip) IS NOT DISTINCT FROM ${ipKey}
-          AND created_at > NOW() - INTERVAL '1 hour'
-      )::int AS per_ip,
-      COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '1 hour')::int AS global_n,
-      COUNT(*) FILTER (
-        WHERE created_at > NOW() - INTERVAL '24 hours'
-          AND NOT EXISTS (
-            SELECT 1 FROM oauth_refresh_tokens rt WHERE rt.client_id = oauth_clients.id
-          )
-      )::int AS unused
-    FROM oauth_clients
-    WHERE created_by IS NULL AND revoked_at IS NULL
-  `;
-  if ((ip !== null && counts.per_ip >= DCR_PER_IP_HOUR)
-    || counts.global_n >= DCR_GLOBAL_HOUR
-    || counts.unused >= DCR_UNUSED_CAP) {
+  // pile up until the cap shuts registration for good. Read once here, so a
+  // flood is refused before the body is parsed; read again under the lock
+  // that guards the insert, so a burst at the last slot admits one.
+  if (await dcrOverQuota(sql, ipKey, ip !== null)) {
     c.header('Retry-After', '3600');
     return c.json({
       error: 'temporarily_unavailable',
@@ -210,16 +219,29 @@ oauth.post('/register', async (c) => {
     : body.token_endpoint_auth_method === 'client_secret_post' ? 'client_secret_post'
     : 'client_secret_basic';
   const isPublic = authMethod === 'none';
-  const out = await createOAuthClient(sql, {
-    name: clientName,
-    redirectUris,
-    grantTypes: grants,
-    scopes,
-    createdBy: null,
-    createdIp: ip,
-    createdIpKey: ipKey,
-    public: isPublic,
+  // The count and the insert are one step: counted outside a lock, every
+  // registration in a burst saw the same room and all of them were stored.
+  const out = await sql.begin(async (tx) => {
+    await tx`SELECT pg_advisory_xact_lock(hashtext('oauth:dcr'))`;
+    if (await dcrOverQuota(tx, ipKey, ip !== null)) return null;
+    return createOAuthClient(tx, {
+      name: clientName,
+      redirectUris,
+      grantTypes: grants,
+      scopes,
+      createdBy: null,
+      createdIp: ip,
+      createdIpKey: ipKey,
+      public: isPublic,
+    });
   });
+  if (!out) {
+    c.header('Retry-After', '3600');
+    return c.json({
+      error: 'temporarily_unavailable',
+      error_description: 'registration rate limit reached',
+    }, 429);
+  }
   return c.json({
     client_id: out.clientId,
     client_id_issued_at: Math.floor(Date.now() / 1000),
@@ -534,9 +556,24 @@ oauth.post('/token', async (c) => {
     }
     type CodeRow = {
       client_id: string; user_id: string; redirect_uri: string;
-      scopes: OAuthScope[]; code_challenge: string;
+      scopes: OAuthScope[]; code_challenge: string; user_cv: number;
+      rt: { raw: string } | null;
     };
     const row = await sql.begin<CodeRow | null>(async (tx): Promise<CodeRow | null> => {
+      // The user row first, shared, then the code — the order a password
+      // reset or deactivation takes (its UPDATE of users, then its DELETE of
+      // the user's codes), so the two serialise instead of deadlocking. A
+      // code redeemed against an in-flight reset either waits and finds the
+      // code gone, or commits its whole grant (refresh token included) before
+      // the reset's revocation runs over it. The user's live state, not the
+      // code's, decides: a deactivated account or a demoted role since consent
+      // is refused or narrowed here, not left to the next rotation.
+      const u = (await tx<{ active: boolean; role: string; credential_version: number }[]>`
+        SELECT active, role, credential_version FROM users
+        WHERE id = (SELECT user_id FROM oauth_authorization_codes WHERE code_hash = ${sha256hex(code)})
+        FOR SHARE
+      `)[0];
+      if (!u || !u.active) return null;
       const r = (await tx<{
         client_id: string; user_id: string; redirect_uri: string;
         scopes: OAuthScope[]; code_challenge: string; expired: boolean;
@@ -558,33 +595,33 @@ oauth.post('/token', async (c) => {
       // redeemed against another.
       if (r.redirect_uri !== redirect_uri) return null;
       if (!verifyChallenge(r.code_challenge, code_verifier)) return null;
+      const scopes = restrictScopesToRole(r.scopes, u.role) as OAuthScope[];
+      if (scopes.length === 0) return null;
       await tx`
         UPDATE oauth_authorization_codes
         SET consumed_at = NOW()
         WHERE code_hash = ${sha256hex(code)}
       `;
+      const rt = client.grant_types.includes('refresh_token')
+        ? await issueRefreshToken(tx, env, { clientId: client.id, userId: r.user_id, scopes })
+        : null;
       return {
         client_id: r.client_id, user_id: r.user_id, redirect_uri: r.redirect_uri,
-        scopes: r.scopes, code_challenge: r.code_challenge,
+        scopes, code_challenge: r.code_challenge, user_cv: u.credential_version, rt,
       };
     });
     if (!row) {
       return fail('authorization_code', { error: 'invalid_grant' }, 400);
     }
     const at = await signAccessToken(env, {
-      clientId: client.id, userId: row.user_id, scopes: row.scopes,
+      clientId: client.id, userId: row.user_id, scopes: row.scopes, credentialVersion: row.user_cv,
     });
-    const rt = client.grant_types.includes('refresh_token')
-      ? await issueRefreshToken(sql, env, {
-          clientId: client.id, userId: row.user_id, scopes: row.scopes,
-        })
-      : null;
     oauthGrantsTotal.inc({ grant_type: 'authorization_code', status: 'ok' });
     return c.json({
       access_token: at,
       token_type: 'Bearer',
       expires_in: Number.parseInt(env.OAUTH_ACCESS_TOKEN_TTL_SEC ?? '900', 10),
-      refresh_token: rt?.raw,
+      refresh_token: row.rt?.raw,
       scope: row.scopes.join(' '),
     });
   }
@@ -602,7 +639,7 @@ oauth.post('/token', async (c) => {
       return fail('refresh_token', { error: 'invalid_grant' }, 400);
     }
     const at = await signAccessToken(env, {
-      clientId: client.id, userId: res.userId, scopes: res.scopes,
+      clientId: client.id, userId: res.userId, scopes: res.scopes, credentialVersion: res.credentialVersion,
     });
     oauthGrantsTotal.inc({ grant_type: 'refresh_token', status: 'ok' });
     return c.json({

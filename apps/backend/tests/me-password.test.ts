@@ -76,6 +76,20 @@ describe('POST /api/me/password', () => {
     expect(refreshB.status).toBe(401);
   });
 
+  // Counting failures first let a burst all pass the same stale count and
+  // reach bcrypt; the reservation makes concurrent guesses count against
+  // one another, as login's does.
+  it('a concurrent burst of wrong guesses stops at the budget', async () => {
+    const { token } = await loginAs(ALEX);
+    const results = await Promise.all(
+      Array.from({ length: 10 }, (_, i) => changePw(token, 'wrong-' + i, NEW_PW)),
+    );
+    const statuses = results.map((r) => r.status);
+    expect(statuses.filter((s) => s === 403).length).toBeLessThanOrEqual(5);
+    expect(statuses.filter((s) => s === 429).length).toBeGreaterThanOrEqual(5);
+    expect(statuses.every((s) => s === 403 || s === 429)).toBe(true);
+  });
+
   it('locks the endpoint after 5 wrong-current-password attempts', async () => {
     const { token } = await loginAs(ALEX);
     for (let i = 0; i < 5; i++) {

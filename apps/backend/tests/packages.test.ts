@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS, PRIYA } from './helpers/auth';
-import { refreshPackageTracking, registerUntrackedPackages, startPackageTrackingLoop } from '../src/shipping/track';
+import { refreshPackageTracking, registerPackageTracking, registerUntrackedPackages, startPackageTrackingLoop } from '../src/shipping/track';
 import { pickTrackingClient } from '../src/shipping';
 import { stubTrackingSource } from '../src/shipping/stub';
 import type { TrackingSource } from '../src/shipping/types';
@@ -532,6 +532,44 @@ describe('packages — webhook registration', () => {
     expect(rows.find(r => r.id === b.id)!.tracking_registered_at).toBeNull();
   });
 
+  // The add-time call and the sweep both read the NULL stamp and could
+  // register the same number — two update streams for one box. The claim is
+  // taken in the database.
+  it('registers a number once when two registrants race', async () => {
+    const { token } = await loginAs(MARCUS);
+    const pkg = await addPackage(token);
+    const sql = getTestDb();
+    const [row] = await sql<{ id: string; tracking_number: string; carrier: string }[]>`
+      SELECT id, tracking_number, carrier FROM packages WHERE id = ${pkg.id}`;
+    let calls = 0;
+    const client = { registerTracking: async () => { calls++; await new Promise((r) => setTimeout(r, 50)); } };
+    const results = await Promise.all([
+      registerPackageTracking(sql, client, row),
+      registerPackageTracking(sql, client, row),
+    ]);
+    expect(results.sort()).toEqual([false, true]);
+    expect(calls).toBe(1);
+  });
+
+  it('keeps the claim of a timed-out registration and frees a refused one', async () => {
+    const { token } = await loginAs(MARCUS);
+    const pkg = await addPackage(token);
+    const sql = getTestDb();
+    const [row] = await sql<{ id: string; tracking_number: string; carrier: string }[]>`
+      SELECT id, tracking_number, carrier FROM packages WHERE id = ${pkg.id}`;
+    // A timed-out POST may have been delivered: the claim stands, so the
+    // next registrant does nothing until it expires.
+    expect(await registerPackageTracking(sql, { registerTracking: async () => { throw new Error('shippo POST /tracks/ timeout'); } }, row)).toBe(false);
+    let calls = 0;
+    expect(await registerPackageTracking(sql, { registerTracking: async () => { calls++; } }, row)).toBe(false);
+    expect(calls).toBe(0);
+    await sql`UPDATE packages SET tracking_claimed_at = NULL WHERE id = ${pkg.id}`;
+    // A refusal frees the claim for the next sweep.
+    expect(await registerPackageTracking(sql, { registerTracking: async () => { throw new Error('shippo POST /tracks/ failed: HTTP 400'); } }, row)).toBe(false);
+    expect(await registerPackageTracking(sql, { registerTracking: async () => { calls++; } }, row)).toBe(true);
+    expect(calls).toBe(1);
+  });
+
   it('does not re-register a number, and does not stamp one that threw', async () => {
     const { token } = await loginAs(MARCUS);
     await addPackage(token);
@@ -567,5 +605,43 @@ describe('shipping — which tracking provider is in play', () => {
 
     const dark = startPackageTrackingLoop(sql, {} as never);
     dark.stop();
+  });
+});
+
+// Attribution matched on an ASCII-only compression of the name, which read
+// every all-Chinese name as the same empty string: a box from 李 RAM was
+// filed under 王 RAM, the older client.
+describe('packages — create-po attributes the seller by the client name key', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('does not attach a non-Latin seller to a different non-Latin client', async () => {
+    const sql = getTestDb();
+    const mgr = await loginAs(ALEX);
+    const [other] = await sql<{ id: string }[]>`
+      INSERT INTO suppliers (name, owner_id) VALUES ('王 RAM', ${mgr.user.id}) RETURNING id`;
+    const [mine] = await sql<{ id: string }[]>`
+      INSERT INTO suppliers (name, owner_id) VALUES ('李 RAM', ${mgr.user.id}) RETURNING id`;
+    const [pkg] = await sql<{ id: string }[]>`
+      INSERT INTO packages (tracking_number, carrier, seller_name, created_by)
+      VALUES ('999999999991', 'UPS', '李 RAM', ${mgr.user.id}) RETURNING id`;
+    const res = await api<{ orderId: string }>('POST', `/api/packages/${pkg.id}/create-po`, { token: mgr.token, body: {} });
+    expect(res.status).toBe(201);
+    const [order] = await sql<{ supplier_id: string | null }[]>`SELECT supplier_id FROM orders WHERE id = ${res.body.orderId}`;
+    expect(order.supplier_id).toBe(mine.id);
+    expect(order.supplier_id).not.toBe(other.id);
+  });
+
+  it('still matches an ASCII name through its spacing and case', async () => {
+    const sql = getTestDb();
+    const mgr = await loginAs(ALEX);
+    const [client] = await sql<{ id: string }[]>`
+      INSERT INTO suppliers (name, owner_id) VALUES ('Acme Parts', ${mgr.user.id}) RETURNING id`;
+    const [pkg] = await sql<{ id: string }[]>`
+      INSERT INTO packages (tracking_number, carrier, seller_name, created_by)
+      VALUES ('999999999992', 'UPS', 'ACME  parts', ${mgr.user.id}) RETURNING id`;
+    const res = await api<{ orderId: string }>('POST', `/api/packages/${pkg.id}/create-po`, { token: mgr.token, body: {} });
+    expect(res.status).toBe(201);
+    const [order] = await sql<{ supplier_id: string | null }[]>`SELECT supplier_id FROM orders WHERE id = ${res.body.orderId}`;
+    expect(order.supplier_id).toBe(client.id);
   });
 });

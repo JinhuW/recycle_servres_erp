@@ -339,6 +339,10 @@ patchRoutes.patch('/:id', async (c) => {
             pkg: { trackingNumber: string; carrier: string } | null }
         | undefined;
       if (!orderBefore) throw new Error('order disappeared mid-edit');
+      // The owner checked before the lock can be stale by now: a hand-off
+      // (changeOrderOwnerTx) moves a PO between purchasers, and the previous
+      // owner's edit must not land on the new owner's order.
+      if (u.role !== 'manager' && orderBefore.user_id !== u.id) throw new OrderRefusal({ kind: 'forbidden' });
       // An archived order's lines sit at 'Archived'; a purchaser edit would
       // revert it to Draft and cascade them straight back into stock.
       if (orderBefore.archived_at) throw new OrderRefusal({ kind: 'archived' });

@@ -197,7 +197,9 @@ function rollup(sql: ReturnType<typeof getDb>, floor: number, u: User) {
 
 // ── List ───────────────────────────────────────────────────────────────────
 // `follow` and `health` are the rail's filters. They are applied after the
-// rollup because both are derived, not columns.
+// rollup because both are derived, not columns — over the whole scoped book,
+// then paged: filtering the first N rows showed a book with every "soon"
+// client past the cap as having none, and the counts changed with the limit.
 suppliers.get('/', async (c) => {
   const u = c.var.user;
   const sql = getDb(c.env);
@@ -207,6 +209,7 @@ suppliers.get('/', async (c) => {
   const follow = c.req.query('follow') ?? 'all';    // due | soon | all
   const health = c.req.query('health') ?? 'all';    // quiet | all
   const limit = clampLimit(c.req.query('limit'), 200, 500);
+  const offset = Math.max(0, Number.parseInt(c.req.query('offset') ?? '0', 10) || 0);
 
   const rows = (await sql`
     ${rollup(sql, s.tierFloorUsd, u)}
@@ -227,7 +230,6 @@ suppliers.get('/', async (c) => {
         OR EXISTS (SELECT 1 FROM unnest(s.supplies) t WHERE LOWER(t) LIKE '%' || ${q ?? ''} || '%')
       )
     ORDER BY (s.next_follow_up_at IS NULL), s.next_follow_up_at, s.name
-    LIMIT ${limit}
   `) as unknown as Row[];
 
   const items = rows.map((r) => toApi(r, s));
@@ -244,7 +246,9 @@ suppliers.get('/', async (c) => {
     if (health === 'quiet' && !(i.health === 'quiet' || i.health === 'lost')) return false;
     return true;
   });
-  return c.json({ items: filtered, counts, settings: { cadenceDays: s.cadenceDays } });
+  const page = filtered.slice(offset, offset + limit);
+  const nextOffset = offset + limit < filtered.length ? offset + limit : null;
+  return c.json({ items: page, counts, nextOffset, settings: { cadenceDays: s.cadenceDays } });
 });
 
 // ── Suggestions ────────────────────────────────────────────────────────────
@@ -523,13 +527,6 @@ suppliers.patch('/:id', async (c) => {
   const bad = validate(body);
   if (bad) return c.json({ error: bad }, 400);
 
-  const cur = (await sql`SELECT id, owner_id FROM suppliers WHERE id = ${id}`)[0] as
-    { id: string; owner_id: string | null } | undefined;
-  if (!cur) return c.json({ error: 'Not found' }, 404);
-  if (!canWrite(u, cur.owner_id)) return c.json({ error: 'Forbidden' }, 403);
-  if (body.tierOverride !== undefined && u.role !== 'manager') {
-    return c.json({ error: 'Only managers can pin a tier' }, 403);
-  }
   // Not "managers may do it here too": a handover has to leave a trace, and
   // only POST /:id/reassign writes the `owner_changed` timeline row, checks the
   // target purchaser exists, and turns a match_key collision into a 409. Writing
@@ -541,23 +538,38 @@ suppliers.patch('/:id', async (c) => {
       400,
     );
   }
+  if (body.tierOverride !== undefined && u.role !== 'manager') {
+    return c.json({ error: 'Only managers can pin a tier' }, 403);
+  }
 
-  const set = (k: string, col: string) => body[k] !== undefined
-    ? sql`, ${sql.unsafe(col)} = ${body[k] === null ? null : (body[k] as never)}`
-    : sql``;
-  await sql`
-    UPDATE suppliers SET updated_at = NOW()
-      ${set('name', 'name')}${set('company', 'company')}${set('phone', 'phone')}
-      ${set('email', 'email')}${set('street1', 'street1')}${set('street2', 'street2')}
-      ${set('city', 'city')}${set('state', 'state')}${set('zip', 'zip')}
-      ${set('country', 'country')}${set('status', 'status')}${set('supplies', 'supplies')}
-      ${set('prefPayment', 'pref_payment')}${set('prefLogistics', 'pref_logistics')}
-      ${set('prefContact', 'pref_contact')}${set('prefBestTime', 'pref_best_time')}
-      ${set('prefPrice', 'pref_price')}${set('notes', 'notes')}
-      ${set('cadenceDays', 'cadence_days')}${set('tierOverride', 'tier_override')}
-      ${set('nextFollowUpAt', 'next_follow_up_at')}
-    WHERE id = ${id}
-  `;
+  // The owner is read under the row lock reassign's UPDATE waits on, in the
+  // transaction that writes: judged on an unlocked read, a purchaser's save
+  // landed on the client after a manager had handed it to someone else.
+  const refused = await sql.begin(async (tx): Promise<403 | 404 | null> => {
+    const cur = (await tx`SELECT id, owner_id FROM suppliers WHERE id = ${id} FOR NO KEY UPDATE`)[0] as
+      { id: string; owner_id: string | null } | undefined;
+    if (!cur) return 404;
+    if (!canWrite(u, cur.owner_id)) return 403;
+    const set = (k: string, col: string) => body[k] !== undefined
+      ? tx`, ${tx.unsafe(col)} = ${body[k] === null ? null : (body[k] as never)}`
+      : tx``;
+    await tx`
+      UPDATE suppliers SET updated_at = NOW()
+        ${set('name', 'name')}${set('company', 'company')}${set('phone', 'phone')}
+        ${set('email', 'email')}${set('street1', 'street1')}${set('street2', 'street2')}
+        ${set('city', 'city')}${set('state', 'state')}${set('zip', 'zip')}
+        ${set('country', 'country')}${set('status', 'status')}${set('supplies', 'supplies')}
+        ${set('prefPayment', 'pref_payment')}${set('prefLogistics', 'pref_logistics')}
+        ${set('prefContact', 'pref_contact')}${set('prefBestTime', 'pref_best_time')}
+        ${set('prefPrice', 'pref_price')}${set('notes', 'notes')}
+        ${set('cadenceDays', 'cadence_days')}${set('tierOverride', 'tier_override')}
+        ${set('nextFollowUpAt', 'next_follow_up_at')}
+      WHERE id = ${id}
+    `;
+    return null;
+  });
+  if (refused === 404) return c.json({ error: 'Not found' }, 404);
+  if (refused === 403) return c.json({ error: 'Forbidden' }, 403);
   return c.json({ ok: true });
 });
 
@@ -593,7 +605,12 @@ suppliers.post('/:id/notes', async (c) => {
     ? body.nextFollowUpAt
     : (body?.reschedule === false ? cur.next_follow_up_at : isoDatePlus(view.cadenceDays));
 
-  await sql.begin(async (tx) => {
+  const refused = await sql.begin(async (tx): Promise<403 | null> => {
+    // Owner again, under the row lock a reassign waits on (see PATCH).
+    const owner = (await tx<{ owner_id: string | null }[]>`
+      SELECT owner_id FROM suppliers WHERE id = ${id} FOR NO KEY UPDATE
+    `)[0];
+    if (!owner || !canWrite(u, owner.owner_id)) return 403;
     await tx`
       INSERT INTO supplier_notes (supplier_id, author_id, kind, body)
       VALUES (${id}, ${u.id}, ${kind}, ${text || defaultBody(kind)})
@@ -603,7 +620,9 @@ suppliers.post('/:id/notes', async (c) => {
       SET last_contacted_at = NOW(), next_follow_up_at = ${next}, updated_at = NOW()
       WHERE id = ${id}
     `;
+    return null;
   });
+  if (refused === 403) return c.json({ error: 'Forbidden' }, 403);
   return c.json({ ok: true, nextFollowUpAt: next });
 });
 
@@ -622,7 +641,15 @@ suppliers.delete('/:id/notes/:noteId', async (c) => {
   if (u.role !== 'manager' && row.author_id !== u.id) {
     return c.json({ error: 'Only the person who wrote a note can delete it' }, 403);
   }
-  await sql`DELETE FROM supplier_notes WHERE id = ${c.req.param('noteId')}`;
+  const refused = await sql.begin(async (tx): Promise<404 | null> => {
+    const owner = (await tx<{ owner_id: string | null }[]>`
+      SELECT owner_id FROM suppliers WHERE id = ${c.req.param('id')} FOR NO KEY UPDATE
+    `)[0];
+    if (!owner || !canWrite(u, owner.owner_id)) return 404;
+    await tx`DELETE FROM supplier_notes WHERE id = ${c.req.param('noteId')}`;
+    return null;
+  });
+  if (refused === 404) return c.json({ error: 'Not found' }, 404);
   return c.json({ ok: true });
 });
 

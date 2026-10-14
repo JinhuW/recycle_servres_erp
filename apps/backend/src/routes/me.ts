@@ -3,6 +3,7 @@ import { getCookie } from 'hono/cookie';
 import { MIN_PASSWORD_LEN, MAX_PASSWORD_LEN } from '@recycle-erp/shared';
 import { getDb } from '../db';
 import { clientIp } from '../lib/clientIp';
+import { reserveAttempt } from '../lib/loginAttempts';
 import { epochSeconds, hashPassword, verifyPassword, verifyToken } from '../auth';
 import { revokeUserOAuthTokens } from '../oauth/tokens';
 import { validatePreferencePatch } from '../preferences';
@@ -87,31 +88,37 @@ me.patch('/preferences', async (c) => {
   const u = c.var.user;
   const sql = getDb(c.env);
 
-  // Read-modify-write. Per-user concurrency is effectively nil (the only
-  // writer is the user themselves), and this keeps the merge logic in TS.
-  const next: Record<string, unknown> = { ...(u.preferences ?? {}) };
+  // Merged in SQL against the live row, not the copy auth loaded at request
+  // start: two tabs saving different keys would otherwise each write back the
+  // whole document and the later one erase the other's change.
+  const sets: Record<string, unknown> = {};
+  const removed: string[] = [];
   for (const [k, v] of Object.entries(result.cleaned)) {
-    if (v === null) delete next[k];
-    else next[k] = v;
+    if (v === null) removed.push(k);
+    else sets[k] = v;
   }
-
-  // Mirror language to the column so legacy code paths keep working.
+  // Mirror language to the column so legacy code paths keep working — only
+  // when this patch carries it, so an unrelated save can't revert a
+  // concurrent language change.
   const nextLanguage =
     'language' in result.cleaned && result.cleaned['language'] !== null
       ? (result.cleaned['language'] as 'en' | 'zh')
-      : u.language;
+      : null;
 
   // Allowlist values are JSON-safe (strings, string unions, string arrays),
   // but TS's strict JSONValue rejects `unknown`; cast at the boundary.
-  await sql`
+  const [row] = await sql<{ preferences: Record<string, unknown>; language: 'en' | 'zh' }[]>`
     UPDATE users
-       SET preferences = ${sql.json(next as Record<string, never>)}::jsonb,
-           language    = ${nextLanguage}
+       SET preferences = (COALESCE(preferences, '{}'::jsonb)
+                          || ${sql.json(sets as Record<string, never>)}::jsonb)
+                         - ${removed}::text[],
+           language    = COALESCE(${nextLanguage}, language)
      WHERE id = ${u.id}
+     RETURNING COALESCE(preferences, '{}'::jsonb) AS preferences, language
   `;
 
   return c.json({
-    user: { ...u, preferences: next, language: nextLanguage },
+    user: { ...u, preferences: row.preferences, language: row.language },
   });
 });
 
@@ -121,11 +128,8 @@ me.patch('/preferences', async (c) => {
 // stops working, this session's included; this session keeps its refresh
 // family, so its next request 401s once and refreshes instead of bouncing the
 // user to login. Failed currentPassword attempts are
-// throttled through the same durable login_attempts table the login route
-// uses, so the defence survives restarts and is shared across replicas
-// (an in-memory map would be per-process and reset on every deploy).
-
-const PW_MAX_FAILS = 5;
+// throttled through the same durable login_attempts reservation the login
+// route uses, so the defence survives restarts and is shared across replicas.
 
 me.post('/password', async (c) => {
   const u = c.var.user;
@@ -147,68 +151,62 @@ me.post('/password', async (c) => {
   const sql = getDb(c.env);
   const ip = clientIp((n) => c.req.header(n));
 
-  // Throttle check before any bcrypt work — keeps it un-timeable. Counts
-  // failed attempts on this account since its last success, in a 15-min
-  // window, sharing the login route's table and semantics.
-  const recentFails = (await sql<{ n: number }[]>`
-    SELECT COUNT(*)::int AS n FROM login_attempts
-    WHERE email = ${u.email} AND success IS NOT TRUE
-      AND attempted_at > NOW() - INTERVAL '15 minutes'
-      AND attempted_at > COALESCE(
-        (SELECT MAX(attempted_at) FROM login_attempts
-          WHERE email = ${u.email} AND success = TRUE),
-        'epoch'::timestamptz)
-  `)[0].n;
-  if (recentFails >= PW_MAX_FAILS) {
+  // The same durable reservation login takes (lib/loginAttempts), before any
+  // bcrypt work: counting first let a concurrent burst of guesses all pass one
+  // stale count and reach bcrypt past the five-attempt budget.
+  const attempt = await reserveAttempt(sql, {
+    email: u.email, ip, ipKnown: !!c.req.header('x-client-ip'),
+  });
+  if (attempt.locked) {
     c.header('Retry-After', '900');
     return c.json({ error: 'Too many failed attempts; try again later' }, 429);
   }
+  try {
+    const row = (await sql<{ password_hash: string }[]>`
+      SELECT password_hash FROM users WHERE id = ${u.id} AND active = TRUE LIMIT 1
+    `)[0];
+    if (!row) return c.json({ error: 'User not found' }, 404);
 
-  const recordAttempt = (success: boolean) =>
-    sql`INSERT INTO login_attempts (email, ip, ip_key, success) VALUES (${u.email}, ${ip.full}, ${ip.key}, ${success})`
-      .catch((e) => log.error('login_attempts write failed', e));
-
-  const row = (await sql<{ password_hash: string }[]>`
-    SELECT password_hash FROM users WHERE id = ${u.id} AND active = TRUE LIMIT 1
-  `)[0];
-  if (!row) return c.json({ error: 'User not found' }, 404);
-
-  if (!(await verifyPassword(currentPassword, row.password_hash))) {
-    await recordAttempt(false);
-    // 403 (not 401) — the JWT is still valid, only this specific action
-    // failed. The frontend treats 401 as session-expired and would bounce
-    // the user to the login screen on a mistyped current password.
-    return c.json({ error: 'Current password is incorrect' }, 403);
-  }
-  await recordAttempt(true);
-
-  const newHash = await hashPassword(newPassword);
-  // The caller's session is the refresh family its access token was minted
-  // with. The `rt` cookie itself never reaches this path (it is scoped to
-  // /api/auth), so reading it here found nothing and revoked the caller too.
-  // A token minted before the claim existed has no fid: every family goes.
-  const currentFamilyId = (await verifyToken(c.env, getCookie(c, 'at') ?? ''))?.fid ?? null;
-
-  await sql.begin(async (tx) => {
-    // No fresh cookies are set here: setAuthCookies also rewrites `rt`, which
-    // this path never sees, so the caller is left to refresh into a new token.
-    await tx`UPDATE users
-             SET password_hash = ${newHash}, tokens_valid_after = to_timestamp(${epochSeconds()})
-             WHERE id = ${u.id}`;
-    if (currentFamilyId) {
-      await tx`UPDATE refresh_tokens SET revoked_at = NOW()
-               WHERE user_id = ${u.id} AND revoked_at IS NULL
-                 AND family_id != ${currentFamilyId}`;
-    } else {
-      await tx`UPDATE refresh_tokens SET revoked_at = NOW()
-               WHERE user_id = ${u.id} AND revoked_at IS NULL`;
+    if (!(await verifyPassword(currentPassword, row.password_hash))) {
+      await attempt.settle(false);
+      // 403 (not 401) — the JWT is still valid, only this specific action
+      // failed. The frontend treats 401 as session-expired and would bounce
+      // the user to the login screen on a mistyped current password.
+      return c.json({ error: 'Current password is incorrect' }, 403);
     }
-    // OAuth grants must die with the old password too — they otherwise keep
-    // minting access tokens through rotation regardless of the credential change.
-    await revokeUserOAuthTokens(tx, u.id);
-  });
+    await attempt.settle(true);
 
-  return c.json({ ok: true });
+    const newHash = await hashPassword(newPassword);
+    // The caller's session is the refresh family its access token was minted
+    // with. The `rt` cookie itself never reaches this path (it is scoped to
+    // /api/auth), so reading it here found nothing and revoked the caller too.
+    // A token minted before the claim existed has no fid: every family goes.
+    const currentFamilyId = (await verifyToken(c.env, getCookie(c, 'at') ?? ''))?.fid ?? null;
+
+    await sql.begin(async (tx) => {
+      // No fresh cookies are set here: setAuthCookies also rewrites `rt`, which
+      // this path never sees, so the caller is left to refresh into a new token.
+      await tx`UPDATE users
+               SET password_hash = ${newHash}, tokens_valid_after = to_timestamp(${epochSeconds()}),
+                   credential_version = credential_version + 1
+               WHERE id = ${u.id}`;
+      if (currentFamilyId) {
+        await tx`UPDATE refresh_tokens SET revoked_at = NOW()
+                 WHERE user_id = ${u.id} AND revoked_at IS NULL
+                   AND family_id != ${currentFamilyId}`;
+      } else {
+        await tx`UPDATE refresh_tokens SET revoked_at = NOW()
+                 WHERE user_id = ${u.id} AND revoked_at IS NULL`;
+      }
+      // OAuth grants must die with the old password too — they otherwise keep
+      // minting access tokens through rotation regardless of the credential change.
+      await revokeUserOAuthTokens(tx, u.id);
+    });
+
+    return c.json({ ok: true });
+  } finally {
+    await attempt.release();
+  }
 });
 
 export default me;

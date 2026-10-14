@@ -16,13 +16,13 @@ import { itemTypes, addItemType, type ItemType } from '../lib/lookups';
  * "CPU" / "cpu" / "Cpu".
  */
 export function ItemTypePicker({
-  value, onChange, disabled = false, invalid = false, onError,
-}: {
+  value, onChange, disabled = false, invalid = false, onError, id,}: {
   value: string | null | undefined;
   onChange: (v: string) => void;
   disabled?: boolean;
   invalid?: boolean;
   onError?: (msg: string) => void;
+  id?: string;
 }) {
   const { t } = useT();
   const [open, setOpen] = useState(false);
@@ -97,6 +97,7 @@ export function ItemTypePicker({
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       <input
+        id={id}
         ref={inputRef}
         className="input"
         value={shown}
@@ -150,7 +151,8 @@ export function ItemTypePicker({
             <button
               type="button"
               disabled={creating}
-              onMouseDown={e => { e.preventDefault(); void create(); }}
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => { void create(); }}
               style={{
                 width: '100%', textAlign: 'left', padding: '10px 12px',
                 border: 'none', background: 'var(--bg-soft)',
@@ -172,7 +174,10 @@ export function ItemTypePicker({
                 <button
                   key={l.id}
                   type="button"
-                  onMouseDown={e => { e.preventDefault(); pick(l); }}
+                  // mousedown only keeps focus in the input; the pick is on
+                  // click, which a Tab-focused option also gets from Enter.
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={() => pick(l)}
                   onMouseEnter={() => setActive(i)}
                   style={{
                     width: '100%', textAlign: 'left', padding: '9px 12px',

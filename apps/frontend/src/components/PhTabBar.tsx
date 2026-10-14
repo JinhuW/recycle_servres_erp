@@ -42,7 +42,7 @@ export function PhTabBar({ view, onCenterPress }: Props) {
         const cls = 'ph-tab ' + (view === tab.id ? 'active' : '');
         if (tab.center) {
           return (
-            <button key={tab.id} className={cls + ' center'} onClick={onCenterPress}>
+            <button key={tab.id} className={cls + ' center'} onClick={onCenterPress} aria-label={tab.label}>
               <div className="center-fab"><Icon name={tab.icon} size={22} /></div>
             </button>
           );

@@ -243,6 +243,35 @@ describe('DCR /oauth/register', () => {
     expect((last.body as Record<string, unknown>).error).toBe('temporarily_unavailable');
   });
 
+  // The count and the insert were two statements with nothing between them:
+  // a burst at the last slot was all stored.
+  it('admits exactly one of two registrations at the last global slot', async () => {
+    const sql = getTestDb();
+    const { createOAuthClient } = await import('../src/oauth/clients');
+    // This describe resets the database once; fill to exactly one slot short
+    // of the global hour cap (60) counting what earlier tests registered, and
+    // take the filler back out afterwards.
+    const [{ n }] = await sql<{ n: number }[]>`
+      SELECT COUNT(*)::int AS n FROM oauth_clients
+      WHERE created_by IS NULL AND revoked_at IS NULL AND created_at > NOW() - INTERVAL '1 hour'`;
+    for (let i = n; i < 59; i++) {
+      await createOAuthClient(sql, {
+        name: `fill-${i}`, redirectUris: ['https://example.com/cb'], grantTypes: ['authorization_code'],
+        scopes: ['market:read'], createdBy: null, public: true,
+      });
+    }
+    const register = (ip: string) => api('POST', '/oauth/register', {
+      headers: { 'X-Forwarded-For': ip },
+      body: { client_name: 'last', redirect_uris: ['https://example.com/cb'], token_endpoint_auth_method: 'none' },
+    });
+    try {
+      const [a, b] = await Promise.all([register('203.0.113.10'), register('203.0.113.11')]);
+      expect([a.status, b.status].sort()).toEqual([201, 429]);
+    } finally {
+      await sql`DELETE FROM oauth_clients WHERE name LIKE 'fill-%' OR name = 'last'`;
+    }
+  });
+
   it('rejects non-https + non-localhost redirect URIs', async () => {
     const r = await api('POST', '/oauth/register', {
       body: { client_name: 'evil', redirect_uris: ['http://evil.example.com/cb'] },
@@ -690,6 +719,75 @@ describe('/oauth/token', () => {
     expect(r.status).toBe(200);
     return (r.body as Record<string, unknown>).scope as string;
   }
+
+  // Parks and consents like interactiveGrant, but hands the code back
+  // unredeemed so the user's state can change in between. The consenter is a
+  // throwaway manager with the seed password: this describe resets the
+  // database once, and the seed manager has to keep signing in after these.
+  async function consentedCode() {
+    const sql = getTestDb();
+    const u = (await sql<{ id: string }[]>`SELECT id FROM users WHERE active LIMIT 1`)[0].id;
+    const consenter = `late-${crypto.randomUUID().slice(0, 8)}@test.local`;
+    await sql`
+      INSERT INTO users (email, name, initials, role, password_hash, active)
+      SELECT ${consenter}, 'Late Consenter', 'LC', 'manager', password_hash, TRUE
+      FROM users WHERE email = ${ALEX}
+    `;
+    const { createOAuthClient } = await import('../src/oauth/clients');
+    const c = await createOAuthClient(sql, {
+      name: 'tk-late', redirectUris: ['https://example.com/cb'],
+      grantTypes: ['authorization_code', 'refresh_token'],
+      scopes: ['market:read', 'market:write'],
+      createdBy: u, public: false,
+    });
+    const verifier = generateVerifier();
+    const challenge = challengeS256(verifier);
+    const session = await loginAs(consenter);
+    const start = await api('GET',
+      `/oauth/authorize?response_type=code&client_id=${c.clientId}&redirect_uri=https://example.com/cb&code_challenge=${challenge}&code_challenge_method=S256&scope=market:read%20market:write&state=st`,
+      { token: session.token, redirect: 'manual' },
+    );
+    const req = new URL(start.headers.get('location')!, 'http://localhost').searchParams.get('req')!;
+    const consent = await api('POST', '/oauth/authorize/consent', { body: { req }, token: session.token, redirect: 'manual' });
+    const code = new URL(consent.headers.get('location')!).searchParams.get('code')!;
+    const redeem = () => api('POST', '/oauth/token', {
+      form: {
+        grant_type: 'authorization_code', code, code_verifier: verifier,
+        redirect_uri: 'https://example.com/cb',
+        client_id: c.clientId, client_secret: c.clientSecret!, // pragma: allowlist secret
+      },
+    });
+    return { userId: session.user.id, redeem };
+  }
+  const SOFIA = 'sofia@recycleservers.io';
+
+  // Reset revoked refresh tokens and stamped the cutoff, but a code minted
+  // before it still redeemed within its ten minutes — to a token whose fresh
+  // iat passed the cutoff, and a new refresh family.
+  it('a code consented before a password reset is invalid_grant after it', async () => {
+    const { userId, redeem } = await consentedCode();
+    const manager = await loginAs(SOFIA);
+    expect((await api('PATCH', `/api/members/${userId}`, { token: manager.token, body: { password: 'Hunter2-NewPass' } })).status).toBe(200);
+    const r = await redeem();
+    expect(r.status).toBe(400);
+    expect((r.body as { error: string }).error).toBe('invalid_grant');
+  });
+
+  it('a code consented before a deactivation is invalid_grant after it', async () => {
+    const { userId, redeem } = await consentedCode();
+    const manager = await loginAs(SOFIA);
+    expect((await api('DELETE', `/api/members/${userId}`, { token: manager.token })).status).toBe(200);
+    expect((await redeem()).status).toBe(400);
+  });
+
+  it('a code consented as a manager redeems with the demoted role\'s scopes', async () => {
+    const { userId, redeem } = await consentedCode();
+    const manager = await loginAs(SOFIA);
+    expect((await api('PATCH', `/api/members/${userId}`, { token: manager.token, body: { role: 'purchaser' } })).status).toBe(200);
+    const r = await redeem();
+    expect(r.status).toBe(200);
+    expect(((r.body as Record<string, unknown>).scope as string).split(' ')).toEqual(['market:read']);
+  });
 
   it('interactive flow grants market:write when the consenter is a manager', async () => {
     const scope = await interactiveGrant(ALEX);

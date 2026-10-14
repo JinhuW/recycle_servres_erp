@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Icon } from './Icon';
 import { useT } from '../lib/i18n';
 import { useEscapeKey } from '../lib/useEscapeKey';
+import { useFocusTrap } from '../lib/useFocusTrap';
 
 export type ErrorDialogContent = {
   msg: string;
@@ -45,8 +46,6 @@ export function useErrorDialogQueue() {
   return { current: queue[0] ?? null, push, dismiss };
 }
 
-const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
-
 // The single surface for errors: a blocking dialog, not a corner toast that
 // scrolls a validation message past the user in 2.6s. Both shells render one
 // of these and register it on window (see lib/errorToast.ts).
@@ -69,15 +68,9 @@ export function ErrorDialog({ content, onClose }: {
 
   // Tab must not reach the drawer behind an opaque backdrop: the fields are
   // invisible, so a keyboard user would be typing into a form they can't see.
-  const trapTab = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== 'Tab') return;
-    const items = [...(shellRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])];
-    if (!items.length) return;
-    const edge = e.shiftKey ? items[0] : items[items.length - 1];
-    if (document.activeElement !== edge) return;
-    e.preventDefault();
-    (e.shiftKey ? items[items.length - 1] : items[0]).focus();
-  };
+  // The shared trap, not one of its own: the Modal or sheet that raised the
+  // error is on the same stack, and only the top entry answers Tab.
+  useFocusTrap(shellRef);
 
   return (
     // Above every other modal (drawers sit at 80, dialogs at 100–120): an error
@@ -91,7 +84,6 @@ export function ErrorDialog({ content, onClose }: {
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={bodyId}
-        onKeyDown={trapTab}
         onClick={e => e.stopPropagation()}
       >
         <div className="modal-head">

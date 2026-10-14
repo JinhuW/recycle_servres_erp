@@ -65,6 +65,10 @@ export type Suggestion = {
 export type ClientList = {
   items: Client[];
   counts: { due: number; soon: number; quiet: number; total: number };
+  // The next page's offset, or null on the last one: the book is paged at
+  // 500 and the page walks it (DesktopClients) so the rail's search and
+  // filters see every client.
+  nextOffset?: number | null;
   settings: { cadenceDays: Record<string, number> };
 };
 

@@ -46,6 +46,10 @@ export const MAX_BRIDGES = 8;
 // Bytes queued for a slow browser before the bridge gives up on it rather than
 // buffering a framebuffer stream without bound.
 const MAX_BUFFERED = 16 * 1024 * 1024;
+// Input is small (key and pointer events); a frame past this is not a viewer.
+const MAX_FRAME_BYTES = 256 * 1024;
+// What may queue before the upstream socket is open.
+const MAX_PENDING_BYTES = 1024 * 1024;
 const REVALIDATE_MS = 60_000;
 // Close code for "the handshake's session no longer admits this socket"; the
 // viewer (lib/coordinator.ts) reconnects on it with a refreshed cookie.
@@ -137,8 +141,11 @@ function pump(client: WebSocket, env: Env, workerId: string): void {
   let toWorker = 0;
   let upstreamSocket: WebSocket | null = null;
   // RFB has the server speak first, so a client message before the upstream
-  // is open is unusual — but buffered rather than lost.
+  // is open is unusual — but buffered rather than lost, up to a bound: an
+  // authenticated viewer that floods before the ticket lands used to grow
+  // this array without limit, in the shared ERP process.
   const pending: Buffer[] = [];
+  let pendingBytes = 0;
 
   const finish = (code: number, reason: string) => {
     closeQuietly(client, code, reason);
@@ -148,8 +155,22 @@ function pump(client: WebSocket, env: Env, workerId: string): void {
   client.on('message', (data: RawData) => {
     const chunk = Array.isArray(data) ? Buffer.concat(data) : Buffer.from(data as ArrayBuffer);
     toWorker += chunk.length;
-    if (upstreamSocket?.readyState === WebSocket.OPEN) upstreamSocket.send(chunk, { binary: true });
-    else pending.push(chunk);
+    if (upstreamSocket?.readyState === WebSocket.OPEN) {
+      // The same back-pressure rule as the screen stream, the other way.
+      if (upstreamSocket.bufferedAmount > MAX_BUFFERED) {
+        finish(1013, 'The worker is not keeping up with the input stream');
+        return;
+      }
+      upstreamSocket.send(chunk, { binary: true });
+    } else {
+      pendingBytes += chunk.length;
+      if (pendingBytes > MAX_PENDING_BYTES) {
+        pending.length = 0;
+        finish(1009, 'Too much input before the console connected');
+        return;
+      }
+      pending.push(chunk);
+    }
   });
   client.on('close', () => {
     open.delete(client);
@@ -239,7 +260,8 @@ function recheck(client: WebSocket, workerId: string, check: () => Promise<numbe
 export function attachVncBridge(
   server: Server, app: FetchApp, env: Env, { revalidateMs = REVALIDATE_MS }: { revalidateMs?: number } = {},
 ): WebSocketServer {
-  const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false });
+  // A frame cap too: ws would otherwise accept up to 100 MiB per message.
+  const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false, maxPayload: MAX_FRAME_BYTES });
 
   server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     socket.on('error', () => socket.destroy());

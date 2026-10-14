@@ -7,5 +7,15 @@ allowBuilds:
   workerd: true
 # uuid@8 (via exceljs) carries GHSA-w5hq-g745-h8pq; exceljs only calls v4(),
 # which is API-compatible across the bump.
+# Advisories judged unreachable are listed here with the reason, and the
+# weekly audit (.github/workflows/dependency-audit.yml) ignores them. Empty
+# as of 2026-10-14: the locked production tree audits clean.
+auditConfig:
+  ignoreGhsas: []
 overrides:
   "exceljs>uuid": "^11.1.1"
+  # exceljs → archiver → glob/minimatch pin brace-expansion 1.x and 2.x below
+  # their ReDoS fixes. Nothing in that chain sees user input; the lockfile is
+  # what the audit reads.
+  "brace-expansion@1": "^1.1.21"
+  "brace-expansion@2": "^2.1.7"

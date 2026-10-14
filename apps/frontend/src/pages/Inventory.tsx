@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { sortSheetRows } from '@recycle-erp/shared';
 import { Icon } from '../components/Icon';
 import { PhHeader } from '../components/PhHeader';
 import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
+import { forEachKeysetPage } from '../lib/keysetPages';
 import { handleFetchError } from '../lib/errorToast';
 import { fmtUSD0 } from '../lib/format';
 import { lineSpecLabel } from '../lib/lineGroups';
@@ -21,6 +23,7 @@ type InventoryItem = {
   brand: string | null;
   capacity: string | null;
   generation: string | null;
+  speed: string | null;
   type: string | null;
   interface: string | null;
   description: string | null;
@@ -38,6 +41,13 @@ type Props = {
   onNewEntry: () => void;
 };
 
+// The server sorts each page on its own, so the pages laid end to end restart
+// the category → brand → capacity order at every boundary. The list is sorted
+// again as a whole, with the same comparator.
+const sortStock = (rows: InventoryItem[]) => sortSheetRows(rows, (r) => ({
+  category: r.category, specs: r, label: r.part_number ?? r.description ?? '',
+}));
+
 export function Inventory({ onNewEntry }: Props) {
   const { t, locale } = useT();
   const { user } = useAuth();
@@ -46,6 +56,8 @@ export function Inventory({ onNewEntry }: Props) {
   const [showSold, setShowSold] = useState(false);
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [loadedOnce, setLoadedOnce] = useState(false);
+  // Pages still arriving: the totals above the list cover what has landed.
+  const [walking, setWalking] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrolled = usePhScrolled(scrollRef);
 
@@ -54,10 +66,24 @@ export function Inventory({ onNewEntry }: Props) {
     const params = new URLSearchParams();
     if (filter !== 'all') params.set('category', filter);
     if (showSold) params.set('includeSold', '1');
-    api.get<{ items: InventoryItem[] }>(`/api/inventory?${params}`)
-      .then(r => { if (alive) setItems(r.items); })
-      .catch(handleFetchError)
-      .finally(() => { if (alive) setLoadedOnce(true); });
+    params.set('limit', '200');
+    // Every page, not the first 200: a book past that used to end there
+    // silently, totals included.
+    setWalking(true);
+    forEachKeysetPage<InventoryItem>(
+      (cursor) => api.get<{ items: InventoryItem[]; nextCursor: string | null }>(
+        `/api/inventory?${params}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`),
+      (page, meta) => {
+        if (!alive) return false;
+        setItems(prev => sortStock(meta.first ? page : [...prev, ...page]));
+        setLoadedOnce(true);
+        if (meta.done) setWalking(false);
+      },
+    )
+      .catch((e) => { if (alive) handleFetchError(e); })
+      // A first page that never lands still ends the loading state: the
+      // skeleton otherwise stays up claiming work that has already failed.
+      .finally(() => { if (alive) { setLoadedOnce(true); setWalking(false); } });
     return () => { alive = false; };
   }, [filter, showSold]);
 
@@ -126,6 +152,7 @@ export function Inventory({ onNewEntry }: Props) {
         </div>
 
         {!loadedOnce && <PhoneListSkeleton rows={6} />}
+        {loadedOnce && walking && <PhoneListSkeleton rows={2} />}
         {loadedOnce && items.map(r => {
           const label = lineSpecLabel(r) ?? (r.description ?? '');
           const lowHealth = r.health != null && r.health < wsNumber('low_health_pct', 50);

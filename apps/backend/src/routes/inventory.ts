@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { getDb, type SqlLike } from '../db';
-import { UUID_RE, clampLimit, decodeCursor, encodeCursor, escapeLike } from '../lib/pagination';
+import { UUID_RE, clampLimit, decodeCursor, encodeCursor, escapeLike, type Cursor } from '../lib/pagination';
 import { notify } from '../lib/notify';
 import { getWorkspaceSetting } from '../lib/settings';
 import { nextHumanId } from '../lib/id-seq';
@@ -213,6 +213,21 @@ async function selectInventoryRows(
   whereFrag: ReturnType<typeof inventoryWhereFrag>,
   limit: number | null,
 ) {
+  return (await selectInventoryPage(sql, whereFrag, limit, null)).items;
+}
+
+// One page of the flat list, keyset on (created_at, id) like the transfer
+// list. The cursor is taken from the rows in SQL order, before the sheet
+// sort rearranges them for display.
+async function selectInventoryPage(
+  sql: ReturnType<typeof getDb>,
+  whereFrag: ReturnType<typeof inventoryWhereFrag>,
+  limit: number | null,
+  cursor: Cursor | null,
+) {
+  const cursorFrag = cursor
+    ? sql`AND (l.created_at, l.id) < ((${cursor.ts}::text)::timestamptz, ${cursor.id}::uuid)`
+    : sql``;
   const rows = await sql`
     SELECT l.id, l.category, l.brand, l.capacity, l.generation, l.type, l.classification, l.rank, l.speed,
            l.interface, l.form_factor, l.description, l.item_type, l.part_number, l.serial_number, l.condition,
@@ -224,19 +239,25 @@ async function selectInventoryRows(
            u.name AS user_name, u.initials AS user_initials,
            w.short AS warehouse_short, w.region AS warehouse_region,
            -- What the transfer modal may move: units no committed sell order holds.
-           ${committedQtySql(sql, sql`l.id`)} AS committed_qty
+           ${committedQtySql(sql, sql`l.id`)} AS committed_qty,
+           to_char(l.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_ts
     FROM order_lines l
     JOIN orders o ON o.id = l.order_id
     JOIN users  u ON u.id = o.user_id
     LEFT JOIN warehouses w ON w.id = COALESCE(l.warehouse_id, o.warehouse_id)
-    WHERE ${whereFrag}
-    ORDER BY l.created_at DESC
-    ${limit === null ? sql`` : sql`LIMIT ${limit}`}
-  `;
-  return sortSheetRows(
-    rows as unknown as Record<string, unknown>[],
+    WHERE ${whereFrag} ${cursorFrag}
+    ORDER BY l.created_at DESC, l.id DESC
+    ${limit === null ? sql`` : sql`LIMIT ${limit + 1}`}
+  ` as unknown as Array<Record<string, unknown> & { id: string; cursor_ts: string }>;
+  const hasMore = limit !== null && rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+  const last = page[page.length - 1];
+  const nextCursor = hasMore ? encodeCursor({ ts: last.cursor_ts, id: last.id }) : null;
+  const items = sortSheetRows(
+    page.map(({ cursor_ts: _ts, ...r }) => r) as Record<string, unknown>[],
     (r) => ({ category: String(r.category ?? ''), specs: r, label: invLabel(r) }),
   );
+  return { items, nextCursor };
 }
 
 // A selection's ids: the uuid-shaped ones, once each. Anything else in the
@@ -258,12 +279,19 @@ function parseSelection(
   return { ids };
 }
 
-// List inventory with the same filters as the desktop screen.
+// List inventory with the same filters as the desktop screen. Paged: a book
+// of more than 200 lots used to end at the 200 newest with no sign that it
+// had, so the phone's totals and the older lots were simply gone.
 inventory.get('/', async (c) => {
   const u = c.var.user;
   const sql = getDb(c.env);
   const isManager = u.role === 'manager';
-  const items = await selectInventoryRows(sql, inventoryWhereFrag(c, sql, u), 200);
+  const limit = clampLimit(c.req.query('limit'), 200, 200);
+  // Only a cursor this route minted (see the transfer list).
+  const raw = decodeCursor(c.req.query('cursor'));
+  const cursor = raw && typeof raw.ts === 'string' && TRANSFER_CURSOR_TS_RE.test(raw.ts)
+    && UUID_RE.test(raw.id) ? raw : null;
+  const { items, nextCursor } = await selectInventoryPage(sql, inventoryWhereFrag(c, sql, u), limit, cursor);
 
   // Purchasers MUST NOT see cost or profit fields (PRD §6.8). Strip them before
   // returning. Sell price stays visible — it is not sensitive.
@@ -272,9 +300,9 @@ inventory.get('/', async (c) => {
       const { unit_cost: _uc, profit: _p, margin: _m, committed_qty: _cq, ...rest } = r;
       return rest;
     });
-    return c.json({ items: filtered });
+    return c.json({ items: filtered, nextCursor });
   }
-  return c.json({ items });
+  return c.json({ items, nextCursor });
 });
 
 // The rows behind a desktop selection, by id. Select-all reaches lots in
@@ -1309,8 +1337,9 @@ inventory.patch('/:id', async (c) => {
     return c.json({ error: 'status must be one of ' + [...LINE_STATUSES].join(', ') }, 400);
   }
 
-  // Permission probe runs outside the tx — it doesn't write and the user_id
-  // on the parent order doesn't change under us.
+  // Permission probe, for the cheap answer; the owner is read again under
+  // the order lock below, because a hand-off (changeOrderOwnerTx) does move a
+  // PO between purchasers while an edit is in flight.
   const probe = (await sql<{ user_id: string }[]>`
     SELECT o.user_id FROM order_lines ol
     JOIN orders o ON o.id = ol.order_id
@@ -1336,6 +1365,7 @@ inventory.patch('/:id', async (c) => {
   // we'd silently change qty/status out from under the deal.
   type Outcome =
     | { kind: 'notFound' }
+    | { kind: 'forbidden' }
     | { kind: 'committed'; committed: number }
     | { kind: 'doneLocked' }
     | { kind: 'heldLocked' }
@@ -1353,6 +1383,12 @@ inventory.patch('/:id', async (c) => {
     // orders.total_cost, and taking that row after the line deadlocks
     // against PO PATCH, which holds the order and waits on the line.
     await lockOrdersForLinesTx(tx, [id]);
+    const owner = (await tx<{ user_id: string }[]>`
+      SELECT o.user_id FROM order_lines ol JOIN orders o ON o.id = ol.order_id
+      WHERE ol.id = ${id} LIMIT 1
+    `)[0];
+    if (!owner) return { kind: 'notFound' };
+    if (u.role !== 'manager' && owner.user_id !== u.id) return { kind: 'forbidden' };
     // A purchaser's goods edit may send the PO back to Draft below, which locks
     // every line; take them all now, in id order, rather than this one first.
     if (u.role !== 'manager' && (body.qty !== undefined || body.unitCost !== undefined)) {
@@ -1521,6 +1557,7 @@ inventory.patch('/:id', async (c) => {
   });
 
   if (outcome.kind === 'notFound') return c.json({ error: 'Not found' }, 404);
+  if (outcome.kind === 'forbidden') return c.json({ error: 'Forbidden' }, 403);
   if (outcome.kind === 'revertCommitted') {
     return c.json({
       error: 'Products in this order are on open sell orders — a manager has to make this change.',
@@ -2001,17 +2038,23 @@ inventory.post('/transfer-orders/:id/reopen', async (c) => {
     }
 
     const lines = (await tx`
-      SELECT l.id, l.order_id, l.product_no, l.status, ${committedQtySql(tx, tx`l.id`)} AS sell_count
+      SELECT l.id, l.order_id, l.product_no, l.status
       FROM order_lines l
       WHERE l.transfer_order_id = ${id}
       FOR UPDATE OF l
-    `) as unknown as Array<{ id: string; order_id: string; product_no: number; status: string; sell_count: number }>;
+    `) as unknown as Array<{ id: string; order_id: string; product_no: number; status: string }>;
 
     if (lines.length === 0) {
       outcome = { code: 409, msg: `transfer order ${id} has no lines to re-open` };
       return;
     }
-    const bad = lines.filter((l) => (l.status !== 'Reviewing' && l.status !== 'Done') || l.sell_count > 0);
+    // Read after the locks, as a separate statement: folded into the locking
+    // SELECT, the claim count came from that statement's snapshot — taken
+    // before it waited on the row — and missed a sale that committed while it
+    // waited (the same rule validateSellLines follows).
+    const claims = await committedClaimsByLine(tx, lines.map((l) => l.id));
+    const sold = (l: { id: string }) => claims.get(l.id.toLowerCase())?.qty ?? 0;
+    const bad = lines.filter((l) => (l.status !== 'Reviewing' && l.status !== 'Done') || sold(l) > 0);
     if (bad.length > 0) {
       outcome = { code: 409, msg: `cannot re-open: ${bad.map((l) => `${l.order_id} #${l.product_no}`).join(', ')} have moved on since receipt` };
       return;
@@ -2067,17 +2110,19 @@ inventory.delete('/transfer-orders/:id', async (c) => {
     }
 
     const lines = (await tx`
-      SELECT l.id, l.order_id, l.product_no, l.status, l.qty, (o.archived_at IS NOT NULL) AS archived,
-             ${committedQtySql(tx, tx`l.id`)} AS sell_count
+      SELECT l.id, l.order_id, l.product_no, l.status, l.qty, (o.archived_at IS NOT NULL) AS archived
       FROM order_lines l
       JOIN orders o ON o.id = l.order_id
       WHERE l.transfer_order_id = ${id}
       FOR UPDATE OF l
     `) as unknown as Array<{
-      id: string; order_id: string; product_no: number; status: string; qty: number; archived: boolean; sell_count: number;
+      id: string; order_id: string; product_no: number; status: string; qty: number; archived: boolean;
     }>;
 
-    const bad = lines.filter((l) => l.status !== 'In Transit' || l.sell_count > 0);
+    // After the locks, as a separate statement (see reopen).
+    const claims = await committedClaimsByLine(tx, lines.map((l) => l.id));
+    const sold = (l: { id: string }) => claims.get(l.id.toLowerCase())?.qty ?? 0;
+    const bad = lines.filter((l) => l.status !== 'In Transit' || sold(l) > 0);
     if (bad.length > 0) {
       outcome = { code: 409, msg: `cannot discard: ${bad.map((l) => `${l.order_id} #${l.product_no}`).join(', ')} have moved on` };
       return;

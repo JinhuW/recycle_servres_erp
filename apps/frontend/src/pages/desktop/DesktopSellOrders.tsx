@@ -43,6 +43,7 @@ import { peekSellOrderPrefill, clearSellOrderPrefill } from '../../lib/sellOrder
 import { missingSigners, signoffSig } from '../../lib/sellOrderSignoff';
 import type { SellOrderSignoff } from '../../lib/types';
 import { SellOrderSignoffCard } from './SellOrderSignoff';
+import { PoPaymentsLedger } from './order/PoPaymentsLedger';
 import { productCount } from '../../lib/productNo';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { useScanFilterText } from '../../lib/useScanFilter';
@@ -602,6 +603,11 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
                       {o.status !== 'Done' && o.status !== 'Closed' && (
                         <RouteLink to={'/sell-orders/' + o.id + '/edit'} className="btn icon sm" title={t('editOrder')}>
                           <Icon name="edit" size={12} />
+                        </RouteLink>
+                      )}
+                      {CASEABLE_SELL_STATUSES.has(o.status) && (
+                        <RouteLink to={afterSalesNewPath(o.id)} className="btn icon sm" title={t('soAfterSalesOpen')} aria-label={t('soAfterSalesOpen')}>
+                          <Icon name="refresh" size={12} />
                         </RouteLink>
                       )}
                     </div>
@@ -2151,6 +2157,12 @@ function SellOrderDetail({ id, mode, onToast }: {
                     onChange={saveReceiver}
                   />
                 </div>
+              )}
+
+              {/* What the bank received for this order, linked on the Payments
+                  page. Renders nothing until something is linked. */}
+              {!editable && (
+                <PoPaymentsLedger scope={{ sellOrderId: order.id }} locale={locale} className="card so-page-card" />
               )}
 
               {/* After-sales cases — view mode only; a sold order can take a

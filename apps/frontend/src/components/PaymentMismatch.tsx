@@ -3,7 +3,7 @@
 // once more at the door that approves it for payment. Warns, never blocks: a
 // gap can be a fee nobody entered yet, and the manager is the one to judge.
 
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { Icon } from './Icon';
 import { Modal } from './Modal';
 import { RouteLink } from './RouteLink';
@@ -11,6 +11,7 @@ import { fmtUSD } from '../lib/format';
 import { useT } from '../lib/i18n';
 import type { PaymentGap } from '../lib/paymentGap';
 import { paymentsForOrderPath } from '../lib/route';
+import { useFixedPopover } from '../pages/desktop/popoverPlacement';
 
 function useGapText(): (g: PaymentGap) => { paid: string; total: string; gap: string } {
   const { t, locale } = useT();
@@ -96,4 +97,87 @@ export function usePaymentMismatchConfirm(): {
   );
 
   return { confirm, asking: pending !== null, dialog };
+}
+
+// The PO list's red `!`: the banner's warning folded to one glyph, with the
+// banner's text as a note that opens the moment the pointer or focus lands.
+// Not a `title` — the browser shows that late and never on touch or focus,
+// and the figures beside the mark are whole dollars, so a cents gap looks
+// like no gap until the note says otherwise.
+export function PaymentGapMark({ orderId, gap }: { orderId: string; gap: PaymentGap }) {
+  const { t } = useT();
+  const text = useGapText()(gap);
+  const anchor = useRef<HTMLSpanElement>(null);
+  const [open, setOpen] = useState(false);
+  // Leaving the mark for the note crosses a gap of a few pixels; the close
+  // waits long enough for that, and a re-enter cancels it.
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const show = () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    closeTimer.current = null;
+    setOpen(true);
+  };
+  const hide = () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    closeTimer.current = setTimeout(() => setOpen(false), 120);
+  };
+  useEffect(() => () => { if (closeTimer.current) clearTimeout(closeTimer.current); }, []);
+
+  const label = `${t('payGapBanner', text)} (${text.gap})`;
+  return (
+    <span
+      ref={anchor}
+      className="pay-gap-mark"
+      role="img"
+      tabIndex={0}
+      aria-label={label}
+      onMouseEnter={show}
+      onMouseLeave={hide}
+      onFocus={show}
+      onBlur={hide}
+      // The row's click toggles its line drawer.
+      onClick={e => e.stopPropagation()}
+    >
+      !
+      {open && (
+        <PaymentGapNote anchor={anchor} orderId={orderId} label={label} onEnter={show} onLeave={hide} onClose={() => setOpen(false)} />
+      )}
+    </span>
+  );
+}
+
+// Mounted only while open: the placement hook re-measures every frame.
+function PaymentGapNote({ anchor, orderId, label, onEnter, onLeave, onClose }: {
+  anchor: RefObject<HTMLSpanElement | null>;
+  orderId: string;
+  label: string;
+  onEnter: () => void;
+  onLeave: () => void;
+  onClose: () => void;
+}) {
+  const { t } = useT();
+  const ref = useRef<HTMLDivElement>(null);
+  // Fixed because the list sits in `.table-scroll`, which clips anything that
+  // hangs past the table's edge — see popoverPlacement.ts.
+  const pos = useFixedPopover(anchor, ref, { align: 'left', gap: 6 }, onClose);
+  return (
+    <div
+      ref={ref}
+      role="tooltip"
+      className="pay-gap-note"
+      style={{
+        position: 'fixed', top: pos?.top ?? 0, left: pos?.left ?? 0,
+        visibility: pos && !pos.hidden ? 'visible' : 'hidden',
+      }}
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+      onClick={e => e.stopPropagation()}
+    >
+      <Icon name="alert" size={13} style={{ flexShrink: 0 }} />
+      <span>{label}</span>
+      <RouteLink to={paymentsForOrderPath(orderId)} className="rec-link" style={{ whiteSpace: 'nowrap' }}>
+        {t('payLedgerOpen')}
+      </RouteLink>
+    </div>
+  );
 }

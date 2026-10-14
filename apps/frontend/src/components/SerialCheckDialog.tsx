@@ -1,7 +1,9 @@
+import { useRef } from 'react';
 import type { SerialIssue } from '@recycle-erp/shared';
 import { Icon } from './Icon';
 import { useT } from '../lib/i18n';
 import { useEscapeKey } from '../lib/useEscapeKey';
+import { useFocusTrap } from '../lib/useFocusTrap';
 
 export type SerialLineIssue = {
   // How the line is named: lineRef — its # once saved.
@@ -19,10 +21,12 @@ export function SerialCheckDialog({ issues, onClose }: {
 }) {
   const { t } = useT();
   useEscapeKey(onClose);
+  const trapRef = useRef<HTMLDivElement | null>(null);
+  useFocusTrap(trapRef);
   return (
     // Above the line drawer (z 80) so it reads as a reply to the save click.
     <div className="modal-backdrop" style={{ zIndex: 120 }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="modal-shell" style={{ maxWidth: 480 }} onClick={e => e.stopPropagation()}>
+      <div ref={trapRef} className="modal-shell" style={{ maxWidth: 480 }} onClick={e => e.stopPropagation()}>
         <div className="modal-head">
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
             <div style={{

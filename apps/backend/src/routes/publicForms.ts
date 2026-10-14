@@ -54,34 +54,65 @@ const DEFAULT_DAILY_SUBMISSIONS = 300;
 const DEFAULT_DAILY_BYTES = 2_000_000_000;
 const DAILY_PER_ADDRESS = 20;
 
+type BudgetReservation = { retryAfter: number } | { release: () => Promise<void> };
+
 /**
- * Seconds until the budget resets, or null while there is room. `address` is
- * the caller's limiter key (an IPv6 /64, not the address), or null when the
- * Worker did not name the caller — then every request shares a Cloudflare
- * address, and a per-address share would be everyone's.
+ * Reserves one submission (and `incomingBytes` of photos) in today's budget,
+ * or says how many seconds until it resets. `address` is the caller's
+ * limiter key (an IPv6 /64, not the address), or null when the Worker did
+ * not name the caller — then every request shares a Cloudflare address, and
+ * a per-address share would be everyone's.
+ *
+ * Check and reservation are one step under an advisory lock, so two
+ * requests at the last slot cannot both see room; the budget counts live
+ * reservations beside the stored rows, so a request still decoding its
+ * photos holds its place. The caller releases the reservation once the row
+ * is stored or the request has failed.
  */
-async function overDailyBudget(
-  sql: SqlLike, incomingBytes: number, address: string | null,
-): Promise<number | null> {
+async function reserveDailyBudget(
+  sql: ReturnType<typeof getDb>, incomingBytes: number, address: string | null,
+): Promise<BudgetReservation> {
   const [maxSubmissions, maxBytes] = await Promise.all([
     getWorkspaceSetting(sql, 'public_form_daily_submissions', DEFAULT_DAILY_SUBMISSIONS),
     getWorkspaceSetting(sql, 'public_form_daily_bytes', DEFAULT_DAILY_BYTES),
   ]);
-  const [{ n, bytes, mine }] = await sql<{ n: number; bytes: string; mine: number }[]>`
-    SELECT
-      (SELECT COUNT(*)::int FROM web_submissions
-        WHERE created_at >= date_trunc('day', NOW(), 'UTC')) AS n,
-      (SELECT COALESCE(SUM(size_bytes), 0)::text FROM web_submission_photos
-        WHERE created_at >= date_trunc('day', NOW(), 'UTC')) AS bytes,
-      (SELECT COUNT(*)::int FROM web_submissions
-        WHERE ${address}::text IS NOT NULL AND COALESCE(ip_key, ip) = ${address}::text
-          AND created_at >= date_trunc('day', NOW(), 'UTC')) AS mine
-  `;
-  if (n < maxSubmissions && Number(bytes) + incomingBytes <= maxBytes
-      && mine < DAILY_PER_ADDRESS) return null;
-  const now = new Date();
-  const midnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
-  return Math.max(1, Math.ceil((midnight - now.getTime()) / 1000));
+  const reserved = await sql.begin(async (tx): Promise<number | null> => {
+    await tx`SELECT pg_advisory_xact_lock(hashtext('public-form-budget'))`;
+    const [{ n, bytes, mine }] = await tx<{ n: number; bytes: string; mine: number }[]>`
+      SELECT
+        ((SELECT COUNT(*) FROM web_submissions
+           WHERE created_at >= date_trunc('day', NOW(), 'UTC'))
+         + (SELECT COUNT(*) FROM public_form_reservations
+             WHERE created_at > NOW() - INTERVAL '10 minutes'))::int AS n,
+        ((SELECT COALESCE(SUM(size_bytes), 0) FROM web_submission_photos
+           WHERE created_at >= date_trunc('day', NOW(), 'UTC'))
+         + (SELECT COALESCE(SUM(bytes), 0) FROM public_form_reservations
+             WHERE created_at > NOW() - INTERVAL '10 minutes'))::text AS bytes,
+        ((SELECT COUNT(*) FROM web_submissions
+           WHERE ${address}::text IS NOT NULL AND COALESCE(ip_key, ip) = ${address}::text
+             AND created_at >= date_trunc('day', NOW(), 'UTC'))
+         + (SELECT COUNT(*) FROM public_form_reservations
+             WHERE ${address}::text IS NOT NULL AND sender = ${address}::text
+               AND created_at > NOW() - INTERVAL '10 minutes'))::int AS mine
+    `;
+    if (!(n < maxSubmissions && Number(bytes) + incomingBytes <= maxBytes
+        && mine < DAILY_PER_ADDRESS)) return null;
+    const [r] = await tx<{ id: number }[]>`
+      INSERT INTO public_form_reservations (sender, bytes) VALUES (${address}, ${incomingBytes}) RETURNING id
+    `;
+    return r.id;
+  });
+  if (reserved === null) {
+    const now = new Date();
+    const midnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
+    return { retryAfter: Math.max(1, Math.ceil((midnight - now.getTime()) / 1000)) };
+  }
+  return {
+    release: async () => {
+      await sql`DELETE FROM public_form_reservations WHERE id = ${reserved}`
+        .catch((e) => log.warn('public form reservation release', e));
+    },
+  };
 }
 
 export const SELL_CATEGORIES = ['RAM', 'SSD', 'CPU'] as const;
@@ -346,14 +377,18 @@ publicForms.post('/intake', async (c) => {
   // for what it can cost, not for the size it arrived at. Still worked out
   // before anything is decoded.
   const incoming = photos.flat().reduce((n, f) => n + Math.min(f.size, maxBytes), 0);
-  const full = await overDailyBudget(sql, incoming, namedSender(c));
-  if (full !== null) {
-    c.header('Retry-After', String(full));
+  const budget = await reserveDailyBudget(sql, incoming, namedSender(c));
+  if ('retryAfter' in budget) {
+    c.header('Retry-After', String(budget.retryAfter));
     return c.json({ error: 'we are not taking more submissions today; try again tomorrow' }, 429);
   }
   const uploaded: { line: number; pos: number; file: File; storageKey: string; deliveryUrl: string }[] = [];
-  const cleanup = () => deleteAttachments(c.env, uploaded.map(u => u.storageKey))
-    .catch(e => log.warn('intake photo cleanup', e));
+  // Every failure path: the objects go, and the reservation with them.
+  const cleanup = async () => {
+    await deleteAttachments(c.env, uploaded.map(u => u.storageKey))
+      .catch(e => log.warn('intake photo cleanup', e));
+    await budget.release();
+  };
   const batch = `web-submissions/${new Date().toISOString().slice(0, 7).replace('-', '')}/${crypto.randomUUID()}`;
   for (let i = 0; i < photos.length; i++) {
     for (let n = 0; n < photos[i].length; n++) {
@@ -424,6 +459,8 @@ publicForms.post('/intake', async (c) => {
     await cleanup();
     throw e;
   }
+  // Stored, so the row itself now counts; the reservation has done its job.
+  await budget.release();
 
   return c.json({ ref, lines: payload.lines.length, units }, 201);
 });
@@ -438,12 +475,14 @@ publicForms.post('/quote', async (c) => {
   const q = parsed.ok;
 
   const sql = getDb(c.env);
-  const full = await overDailyBudget(sql, 0, namedSender(c));
-  if (full !== null) {
-    c.header('Retry-After', String(full));
+  const budget = await reserveDailyBudget(sql, 0, namedSender(c));
+  if ('retryAfter' in budget) {
+    c.header('Retry-After', String(budget.retryAfter));
     return c.json({ error: 'we are not taking more submissions today; try again tomorrow' }, 429);
   }
-  const ref = await sql.begin(async (tx) => {
+  let ref: string;
+  try {
+    ref = await sql.begin(async (tx) => {
     const id = await nextHumanId(tx, 'WS', 'WS');
     const from = storedAddress(c);
     await tx`
@@ -461,6 +500,9 @@ publicForms.post('/quote', async (c) => {
     });
     return id;
   });
+  } finally {
+    await budget.release();
+  }
   return c.json({ ref }, 201);
 });
 
