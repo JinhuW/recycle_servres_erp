@@ -16,8 +16,7 @@ import {
   countOtherActiveManagers,
   type MemberRole,
   type CreateMemberInput,
-  type UpdateMemberInput,
-} from '../services/members';
+  type UpdateMemberInput, LastManagerError } from '../services/members';
 import type { Env, User } from '../types';
 
 const members = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -153,7 +152,14 @@ members.patch('/:id', async (c) => {
     if (lastManager) return c.json({ error: lastManager }, 400);
   }
 
-  await updateMember(sql, id, body);
+  // The pre-check above answers the ordinary case cheaply; the transaction's
+  // own count, under the membership lock, is the one that holds under a race.
+  try {
+    await updateMember(sql, id, body);
+  } catch (e) {
+    if (e instanceof LastManagerError) return c.json({ error: e.message }, 400);
+    throw e;
+  }
   return c.json({ ok: true });
 });
 
@@ -170,7 +176,13 @@ members.delete('/:id', async (c) => {
   if (!target) return c.json({ error: 'Member not found' }, 404);
   const lastManager = await lastManagerError(sql, id, target);
   if (lastManager) return c.json({ error: lastManager }, 400);
-  const updated = await deactivateMember(sql, id);
+  let updated: boolean;
+  try {
+    updated = await deactivateMember(sql, id);
+  } catch (e) {
+    if (e instanceof LastManagerError) return c.json({ error: e.message }, 400);
+    throw e;
+  }
   if (!updated) return c.json({ error: 'Member not found' }, 404);
   return c.json({ ok: true });
 });

@@ -122,6 +122,36 @@ describe('login/refresh/logout cookies', () => {
     });
     expect(afterLogout.status).toBe(401);
   });
+
+  // Logout and reuse detection revoked only the refresh rows; a copied `at`
+  // cookie kept authorising for the rest of its hour.
+  it('an access cookie dies with its refresh family', async () => {
+    const cookiesOf = (r: { headers: Headers }) => {
+      const sc = r.headers.get('set-cookie') ?? '';
+      return {
+        at: /(?:^|[ ,;])at=([^;]+)/.exec(sc)?.[1] ?? '',
+        rt: /(?:^|[ ,;])rt=([^;]+)/.exec(sc)?.[1] ?? '',
+      };
+    };
+    const me = (at: string) => api('GET', '/api/me', { headers: { Cookie: `at=${at}` } });
+    const csrf = { 'X-Requested-By': 'recycle-erp' };
+
+    // Logout.
+    const l1 = cookiesOf(await api('POST', '/api/auth/login', { body: { email: ALEX, password: 'demo' }, headers: csrf }));
+    expect((await me(l1.at)).status).toBe(200);
+    await api('POST', '/api/auth/logout', { headers: { Cookie: `rt=${l1.rt}`, ...csrf } });
+    expect((await me(l1.at)).status).toBe(401);
+
+    // Replay of a rotated refresh token revokes the family: the newest access
+    // token goes with it, and an unrelated session is untouched.
+    const other = cookiesOf(await api('POST', '/api/auth/login', { body: { email: ALEX, password: 'demo' }, headers: csrf }));
+    const l2 = cookiesOf(await api('POST', '/api/auth/login', { body: { email: ALEX, password: 'demo' }, headers: csrf }));
+    const rotated = cookiesOf(await api('POST', '/api/auth/refresh', { headers: { Cookie: `rt=${l2.rt}`, ...csrf } }));
+    expect((await me(rotated.at)).status).toBe(200);
+    expect((await api('POST', '/api/auth/refresh', { headers: { Cookie: `rt=${l2.rt}`, ...csrf } })).status).toBe(401);
+    expect((await me(rotated.at)).status).toBe(401);
+    expect((await me(other.at)).status).toBe(200);
+  });
 });
 
 import { csrfGuard } from '../src/csrf';

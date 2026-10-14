@@ -237,11 +237,17 @@ export async function revokeRefreshFamily(
 
 // Kill every OAuth grant a user holds. Offboarding and password resets must
 // close this path too — revoking only the cookie refresh_tokens would leave
-// MCP/API access alive indefinitely through rotation.
+// MCP/API access alive indefinitely through rotation. An authorization code
+// not yet redeemed goes with them: within its ten minutes it would otherwise
+// mint a fresh grant after the reset.
 export async function revokeUserOAuthTokens(sql: AnySql, userId: string): Promise<void> {
   await sql`
     UPDATE oauth_refresh_tokens SET revoked_at = NOW()
     WHERE user_id = ${userId} AND revoked_at IS NULL
+  `;
+  await sql`
+    DELETE FROM oauth_authorization_codes
+    WHERE user_id = ${userId} AND consumed_at IS NULL
   `;
   oauthRefreshRevocationsTotal.inc({ reason: 'manual' });
 }
