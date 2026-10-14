@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ActivityArea } from '@recycle-erp/shared';
+import { SHELL_PATHS } from './shellPaths';
 
 /**
  * Tiny hash-based router. No external deps. The app's "URL" is the part after
@@ -16,7 +17,15 @@ export function splitHash(hash: string): { path: string; query: string } {
   return q < 0 ? { path: raw, query: '' } : { path: raw.slice(0, q), query: raw.slice(q + 1) };
 }
 
-function readPath(): string {
+// The real document paths that name a route of ours: the PWA's manifest
+// shortcuts (/submit, /inventory, /sell-orders) and the share-target landing
+// the service worker redirects to. The app is hash-routed, so a cold load at
+// one of these used to read as `/` and land on the dashboard — every shortcut
+// and every shared image did. They read as the route they name, and useRoute
+// moves them into the hash on first render so what follows builds on `/#/…`.
+const LAUNCH_PATHS = new Set(SHELL_PATHS.filter((p) => p !== '/' && p !== '/authorize' && p !== '/login'));
+
+export function readPath(): string {
   if (typeof window === 'undefined') return '/';
   const h = window.location.hash || '';
   if (h.startsWith('#')) return splitHash(h).path || '/';
@@ -25,7 +34,17 @@ function readPath(): string {
   // pathname so the SPA can recognise that route on the cold load.
   const p = window.location.pathname || '/';
   if (p === '/authorize') return '/authorize';
+  if (LAUNCH_PATHS.has(p)) return p;
   return '/';
+}
+
+// Moves a real-path launch into the hash, query included, so a reload lands
+// on the same screen and the next navigation has a hash to build on.
+export function adoptLaunchPath(): void {
+  if (typeof window === 'undefined' || window.location.hash) return;
+  const p = window.location.pathname || '/';
+  if (!LAUNCH_PATHS.has(p)) return;
+  window.history.replaceState(window.history.state, '', '/#' + p + window.location.search);
 }
 
 // How many entries this app has pushed, stamped onto each one. A back button
@@ -229,7 +248,10 @@ function subscribeRoute(notify: () => void): () => void {
 
 export function useRoute(): { path: string } {
   const [path, setPath] = useState<string>(readPath);
-  useEffect(() => subscribeRoute(() => setPath(readPath())), []);
+  useEffect(() => {
+    adoptLaunchPath();
+    return subscribeRoute(() => setPath(readPath()));
+  }, []);
   return { path };
 }
 
@@ -520,7 +542,9 @@ export const MOBILE_VIEW_TO_PATH = {
 export type MobileViewId = keyof typeof MOBILE_VIEW_TO_PATH;
 
 export function pathToMobileView(path: string): MobileViewId {
-  if (path === '/' || path === '/dashboard') return 'dashboard';
+  // The Submit shortcut has no screen of its own: the shell opens the capture
+  // flow on it and lands on the dashboard.
+  if (path === '/' || path === '/dashboard' || path === '/submit') return 'dashboard';
   if (path === '/purchase-orders' || matchPurchaseOrder(path)) return 'history';
   if (parseShippingRoute(path)) return 'shipping';
   if (path === '/market') return 'market';

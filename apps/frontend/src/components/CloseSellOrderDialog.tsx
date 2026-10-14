@@ -5,10 +5,11 @@
 // + modal-shell, useEscapeKey, inline error banner) so users get the same
 // modal feel across all status transitions.
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Icon } from './Icon';
 import { api } from '../lib/api';
 import { useEscapeKey } from '../lib/useEscapeKey';
+import { useFocusTrap } from '../lib/useFocusTrap';
 import { CLOSE_REASON_IDS, closeReasonLabelKey } from '../lib/closeReasons';
 import { useT } from '../lib/i18n';
 
@@ -29,6 +30,8 @@ export function CloseSellOrderDialog({ orderId, currentStatus, onCancel, onClose
   const [error, setError] = useState<string | null>(null);
 
   useEscapeKey(onCancel);
+  const trapRef = useRef<HTMLDivElement | null>(null);
+  useFocusTrap(trapRef);
 
   const canSubmit = reasonId.length > 0 && note.trim().length > 0 && !submitting;
 
@@ -55,7 +58,7 @@ export function CloseSellOrderDialog({ orderId, currentStatus, onCancel, onClose
       onClick={e => { if (e.target === e.currentTarget) onCancel(); }}
       style={{ zIndex: 110 }}
     >
-      <div className="modal-shell" style={{ maxWidth: 520, width: 'calc(100vw - 80px)' }}>
+      <div ref={trapRef} className="modal-shell" style={{ maxWidth: 520, width: 'calc(100vw - 80px)' }}>
         {/* Header */}
         <div style={{
           padding: '18px 24px', borderBottom: '1px solid var(--border)',
@@ -157,6 +160,8 @@ export function ReopenSellOrderDialog({ orderId, onCancel, onReopened }: ReopenP
   const [error, setError] = useState<string | null>(null);
 
   useEscapeKey(onCancel);
+  const trapRef2 = useRef<HTMLDivElement | null>(null);
+  useFocusTrap(trapRef2);
 
   const canSubmit = note.trim().length > 0 && !submitting;
 
@@ -182,7 +187,7 @@ export function ReopenSellOrderDialog({ orderId, onCancel, onReopened }: ReopenP
       onClick={e => { if (e.target === e.currentTarget) onCancel(); }}
       style={{ zIndex: 110 }}
     >
-      <div className="modal-shell" style={{ maxWidth: 480, width: 'calc(100vw - 80px)' }}>
+      <div ref={trapRef2} className="modal-shell" style={{ maxWidth: 480, width: 'calc(100vw - 80px)' }}>
         <div style={{
           padding: '18px 24px', borderBottom: '1px solid var(--border)',
           display: 'flex', alignItems: 'flex-start', gap: 14,

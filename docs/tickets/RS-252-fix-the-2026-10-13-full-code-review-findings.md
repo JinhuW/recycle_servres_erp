@@ -82,9 +82,9 @@ Batch E
 - [x] The newest preference edit wins over an older reply; a cancelled scan never lands in a later capture.
 
 Batch F
-- [ ] Each PWA shortcut lands on its screen in both shells; a shared image reaches the scanner once.
-- [ ] Inventory edits prompt before discard; Tab stays inside an open dialog; the phone zooms; `/clients/:id` opens that client; an internal-transaction note survives adding a payment.
-- [ ] Proof upload and item-type pick work by keyboard; capture controls and hardware fields have names; Chinese UI has no English timeline titles.
+- [x] Each PWA shortcut lands on its screen in both shells; a shared image reaches the scanner once.
+- [x] Inventory edits prompt before discard; Tab stays inside an open dialog; the phone zooms; `/clients/:id` opens that client; an internal-transaction note survives adding a payment.
+- [x] Proof upload and item-type pick work by keyboard; capture controls and hardware fields have names; Chinese UI has no English timeline titles.
 
 Batch G
 - [ ] Production without R2 refuses uploads with 503 and `/api/health` says so; public-form quota admits exactly its budget under concurrency; DCR at the last slot yields one 201.
@@ -97,6 +97,8 @@ Batch G
 - The `architecture-todo.md` consolidations beyond what the batches already do.
 - The review's "Follow-up questions excluded" and "Unverified concerns" sections: not findings.
 - FE-07 is resolved by removing the dead *Internal notes* field; a persisted inventory note is a story if wanted.
+- FE-05's share-target hand-off is routed and consumed in code with unit coverage; a real installed-phone smoke test (share an image while signed in and while signed out) is still owed.
+- FE-01, FE-10 and the mobile write queue have no rendered tests: the frontend suite has no DOM environment or testing library, and adding one is its own change.
 
 ## Notes
 

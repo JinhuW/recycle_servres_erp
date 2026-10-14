@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode, useRef } from 'react';
 import { Icon } from './Icon';
 import { PaymentFields } from './PaymentFields';
 import { fmtUSD } from '../lib/format';
@@ -9,6 +9,7 @@ import type { ReadinessItem, ReadinessTab } from '../lib/poReadiness';
 import { FMT_HINT_KEY } from '../lib/useAddPackageForm';
 import { useHandoffForm, type HandoffInit } from '../lib/useHandoffForm';
 import { useEscapeKey } from '../lib/useEscapeKey';
+import { useFocusTrap } from '../lib/useFocusTrap';
 
 // The Draft → In Transit checkpoint. One body (`HandoffFields`) for both
 // shells, wrapped here in the desktop modal and in PhHandoffSheet on the phone.
@@ -225,11 +226,13 @@ export function HandoffDialog({ init, onCancel, onDone }: Props) {
   const { t } = useT();
   const f = useHandoffForm(init, onDone);
   useEscapeKey(() => { if (!f.busy) onCancel(); });
+  const trapRef = useRef<HTMLDivElement | null>(null);
+  useFocusTrap(trapRef);
   const missing = f.blockerKeys.length;
 
   return (
     <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget && !f.busy) onCancel(); }}>
-      <div className="modal-shell ho-shell" role="dialog" aria-modal="true" aria-labelledby="ho-title">
+      <div ref={trapRef} className="modal-shell ho-shell" role="dialog" aria-modal="true" aria-labelledby="ho-title">
         <div className="modal-head">
           <div>
             <div className="modal-title" id="ho-title">{t('hoTitle')}</div>

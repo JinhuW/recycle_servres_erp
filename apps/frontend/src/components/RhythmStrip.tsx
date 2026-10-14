@@ -1,3 +1,4 @@
+import { useT } from '../lib/i18n';
 // A client's purchase history as marks on a year, with the run of silence
 // since the last one drawn as a bar.
 //
@@ -20,14 +21,15 @@ type Props = {
 const YEAR = 365;
 
 export function RhythmStrip({ poDaysAgo, gapDays, health, size = 'row', label }: Props) {
+  const { t } = useT();
   const big = size === 'detail';
   const cls = `rhythm rhythm-${size}`;
   if (!poDaysAgo.length) {
     return (
-      <div className={cls} role="img" aria-label={label ?? 'No purchase orders yet'}>
+      <div className={cls} role="img" aria-label={label ?? t('rhythmNoneAria')}>
         <i className="rhythm-base" />
         <i className="rhythm-now" />
-        <span className="rhythm-none">no orders yet</span>
+        <span className="rhythm-none">{t('rhythmNoneShort')}</span>
       </div>
     );
   }
@@ -37,7 +39,7 @@ export function RhythmStrip({ poDaysAgo, gapDays, health, size = 'row', label }:
   const tone = health === 'lost' ? 'lost' : health === 'quiet' ? 'quiet' : 'ok';
 
   return (
-    <div className={cls} role="img" aria-label={label ?? ariaFor(poDaysAgo.length, last, gapDays)}>
+    <div className={cls} role="img" aria-label={label ?? (t('rhythmAria', { count: poDaysAgo.length, last }) + (gapDays ? t('rhythmAriaGap', { gap: gapDays }) : ''))}>
       <i className="rhythm-base" />
       {poDaysAgo.map((d, i) => (
         <i key={`${d}-${i}`} className="rhythm-po" style={{ left: `${x(d).toFixed(2)}%` }} />
@@ -54,7 +56,3 @@ export function RhythmStrip({ poDaysAgo, gapDays, health, size = 'row', label }:
   );
 }
 
-function ariaFor(count: number, last: number, gap: number | null): string {
-  const rhythm = gap ? `, usually every ${gap} days` : '';
-  return `${count} purchase order${count === 1 ? '' : 's'}, last one ${last} days ago${rhythm}`;
-}

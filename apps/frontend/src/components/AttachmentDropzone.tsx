@@ -39,11 +39,22 @@ export function AttachmentDropzone({
           {acceptHint && <span style={{ fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 400 }}>{acceptHint}</span>}
         </label>
       )}
+      {/* A button to the keyboard too: the only way to the hidden file
+          input was a click on this box, so Tab never reached it. */}
       <div
+        role="button"
+        tabIndex={uploading ? -1 : 0}
+        aria-label={label ?? t('clickToUpload')}
+        aria-disabled={uploading || undefined}
         onDragOver={e => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
-        onDrop={e => { e.preventDefault(); setDragOver(false); onFiles(e.dataTransfer.files); }}
-        onClick={() => inputRef.current?.click()}
+        onDrop={e => { e.preventDefault(); setDragOver(false); if (!uploading) onFiles(e.dataTransfer.files); }}
+        onClick={() => { if (!uploading) inputRef.current?.click(); }}
+        onKeyDown={e => {
+          if (e.key !== 'Enter' && e.key !== ' ') return;
+          e.preventDefault();
+          if (!uploading) inputRef.current?.click();
+        }}
         style={{
           border: '1.5px dashed ' + (dragOver ? 'var(--accent)' : 'var(--border-strong)'),
           background: dragOver ? 'var(--accent-soft)' : 'var(--bg-soft)',
