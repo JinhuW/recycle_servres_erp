@@ -11,6 +11,13 @@ import type { SqlLike } from '../db';
 // FOR NO KEY UPDATE, like every other non-deleting order lock: it still
 // serialises PO writers, but it does not block the FOR KEY SHARE an FK check
 // takes when a transfer inserts a line under the order.
+//
+// The whole order, for a writer that touches more than one kind of header:
+//   orders (sorted) → sell_orders (sorted) → order_lines (sorted).
+// Archive takes its PO, then the open sell orders on it, then the lines; a
+// sell order's save takes the header, then the lines; a sell order's Done
+// takes every source PO, then its header, then the lines. Taking a sell order
+// before the POs its lines belong to deadlocked against archive.
 
 export async function lockOrdersTx(tx: SqlLike, orderIds: readonly string[]): Promise<void> {
   const ids = [...new Set(orderIds)].sort();

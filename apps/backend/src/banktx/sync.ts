@@ -496,7 +496,12 @@ async function autoPair(tx: Tx): Promise<number> {
       -- Every unpaired row ever was read on every sync; one that has waited
       -- four months for its sibling is a human's now. A pending row stays in
       -- however old, since its sibling is by definition still on the way.
-      AND (posted_at > NOW() - make_interval(days => ${PAIR_REACH_DAYS}) OR settle_status = 'pending')`;
+      AND (posted_at > NOW() - make_interval(days => ${PAIR_REACH_DAYS}) OR settle_status = 'pending')
+    -- A leg a manager is pairing, linking or ignoring right now is theirs:
+    -- skipped, not waited for, so their verdict lands and the next sync
+    -- reads it. The writes below stay conditional on what was selected, so
+    -- a verdict committed between this read and them is never overwritten.
+    FOR NO KEY UPDATE SKIP LOCKED`;
 
   // Payment pairing is external-only: a transfer leg's sibling has the
   // OPPOSITE sign (money leaving Mercury lands in PayPal), so it would only
@@ -544,7 +549,10 @@ async function autoPair(tx: Tx): Promise<number> {
     // linked and ignored — the state /ignore and /link each refuse to create.
     if (linked.length === 1 && (m.ignored || p.ignored)) continue;
     const pairId = crypto.randomUUID();
-    await tx`UPDATE bank_transactions SET pair_id = ${pairId} WHERE id IN (${m.id}, ${p.id})`;
+    const paired = await tx`
+      UPDATE bank_transactions SET pair_id = ${pairId}
+      WHERE id IN (${m.id}, ${p.id}) AND pair_id IS NULL`;
+    if (paired.count !== 2) continue;
     await copyNoteAcrossPair(tx, pairId);
     if (linked.length === 1) {
       const src = linked[0];
@@ -582,9 +590,14 @@ async function transferPair(tx: Tx, legs: LegRow[], taken: Set<string>): Promise
     (l) => Math.abs(Number(l.amount)).toFixed(2),
   ).filter(([m, p]) => Number(m.amount) === -Number(p.amount));
 
+  let made = 0;
   for (const [m, p] of found) {
     const pairId = crypto.randomUUID();
-    await tx`UPDATE bank_transactions SET pair_id = ${pairId} WHERE id IN (${m.id}, ${p.id})`;
+    const paired = await tx`
+      UPDATE bank_transactions SET pair_id = ${pairId}
+      WHERE id IN (${m.id}, ${p.id}) AND pair_id IS NULL`;
+    if (paired.count !== 2) continue;
+    made++;
     await copyNoteAcrossPair(tx, pairId);
     await tx`
       UPDATE bank_transactions SET category = 'transfer'
@@ -592,7 +605,7 @@ async function transferPair(tx: Tx, legs: LegRow[], taken: Set<string>): Promise
     taken.add(m.id);
     taken.add(p.id);
   }
-  return found.length;
+  return made;
 }
 
 // A Mercury row that names PayPal: the card descriptor ("PAYPAL *…") or the
@@ -710,7 +723,10 @@ export async function linkPaypalTxnToOrder(
       SET order_id = ${orderId}, link_kind = ${kind}, link_auto = ${actorId === null},
           linked_by = ${actorId}, linked_at = NOW(),
           assignee_id = NULL, assigned_by = NULL, assigned_at = NULL
-      WHERE id IN ${tx(g.ids)}`;
+      WHERE id IN ${tx(g.ids)}
+        -- The conditions the group was selected on, again: a manager's link,
+        -- ignore or tombstone committed since that read stands.
+        AND ${unlinkedFrag(tx, 'bank_transactions')} AND NOT no_auto_link AND NOT ignored`;
   }
   return groups.length;
 }
