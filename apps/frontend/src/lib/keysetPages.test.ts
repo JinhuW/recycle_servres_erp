@@ -52,6 +52,15 @@ describe('forEachKeysetPage', () => {
     expect(onPage.mock.calls[1][1]).toEqual({ first: false, done: true });
   });
 
+  // An older backend answers `{ items }` with no cursor field at all.
+  it('ends the walk on a reply that omits nextCursor', async () => {
+    const fetchPage = vi.fn(async () => ({ items: [1, 2] }) as unknown as Page);
+    const onPage = vi.fn();
+    await forEachKeysetPage(fetchPage, onPage);
+    expect(fetchPage).toHaveBeenCalledTimes(1);
+    expect(onPage).toHaveBeenCalledWith([1, 2], { first: true, done: true });
+  });
+
   // A page cap once ended a real list at 25 pages and called it complete.
   it('follows a long list to its real end', async () => {
     const pages: Record<string, Page> = {};

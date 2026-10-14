@@ -2513,6 +2513,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     mktAboveCeiling: 'above ceiling — push back',
     mktBrokerQuotes: 'Recent broker quotes',
     sharedPhotoReady: 'Shared photo ready — add a product and tap Scan.',
+    sharedPhotoLost: "The shared photo couldn't be kept — add a product and take it with Scan.",
     acCreatedTitle: 'Order created',
     acSubmittedTitle: 'Submitted for review',
     acAdvancedTitle: 'Advanced {from} → {to}',

@@ -16,19 +16,30 @@ export type PrefSaver = {
 export function createPrefSaver(opts: {
   patch: (batch: PrefBag) => Promise<PrefBag>;
   identity: () => string | null;
-  onServer: (server: PrefBag) => void;
+  // `queued` is every batch handed over and still waiting behind this one:
+  // it is in neither the reply nor the provider's pending edits, so a reply
+  // laid over the screen without it undoes those edits for a round trip.
+  onServer: (server: PrefBag, queued: PrefBag) => void;
   onRollback: (keys: string[], rollback: PrefRollback) => void;
 }): PrefSaver {
   let chain: Promise<unknown> = Promise.resolve();
+  const waiting: PrefBag[] = [];
   return {
     save(batch, rollback) {
       const forUser = opts.identity();
+      waiting.push(batch);
+      const answered = () => {
+        const at = waiting.indexOf(batch);
+        if (at >= 0) waiting.splice(at, 1);
+      };
       const run = async () => {
         try {
           const server = await opts.patch(batch);
+          answered();
           if (opts.identity() !== forUser) return;
-          opts.onServer(server);
+          opts.onServer(server, Object.assign({}, ...waiting));
         } catch (err) {
+          answered();
           if (opts.identity() !== forUser) return;
           opts.onRollback(Object.keys(batch), rollback);
           throw err;

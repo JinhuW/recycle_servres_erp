@@ -8,7 +8,7 @@ import { fmtDate, fmtDateShort, fmtSigned } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { usePersisted } from '../../lib/listMemory';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
-import { useUnsavedGuard } from '../../lib/unsavedGuard';
+import { confirmDiscard, useUnsavedGuard } from '../../lib/unsavedGuard';
 import { RouteLink } from '../../components/RouteLink';
 
 // The records that explain internal money movement — a Mercury→PayPal
@@ -162,7 +162,13 @@ export function DesktopInternalTxns({ onToast }: { onToast: (msg: string) => voi
                     key={row.id}
                     row={row}
                     open={openId === row.id}
-                    onToggle={() => setOpenId(openId === row.id ? null : row.id)}
+                    // Collapsing or switching unmounts the open record's
+                    // panel, and its unsaved title or note with it.
+                    onToggle={() => {
+                      void confirmDiscard().then((ok) => {
+                        if (ok) setOpenId(openId === row.id ? null : row.id);
+                      });
+                    }}
                     locale={locale}
                     onChanged={reload}
                     onToast={onToast}

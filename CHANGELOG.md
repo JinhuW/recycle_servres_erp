@@ -17,6 +17,67 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.258.9] - 2026-10-14
+
+Fixes from the pre-release review of v1.258.8 against prod (RS-253). Most are
+regressions the RS-252 batches introduced and that never reached prod; the
+release to prod carries them together.
+
+### Fixed
+
+- **A list walk ends on a reply with no cursor.** The lists that page through
+  the API ended only on an explicit `nextCursor: null`, so a backend that
+  predates paging (the minutes a release spends with the Worker ahead of
+  Railway, or a rolled-back backend) answered `{ items }` and page one was
+  fetched and shown twice.
+- **The nightly prod→dev copy no longer aborts on a dev without its marker
+  table.** The safety probe named the table inside a `CASE`, and Postgres
+  resolves every relation before it runs, so the very first run would have
+  failed — and every run after it, since only a restore creates the table.
+- **The Payments Refunds tile counts purchase-order refunds again.** Since
+  payments could link to sell orders, a refund paid back to a buyer (money
+  out) was netted into the tile, which then disagreed with the list it opens
+  and could show a negative total.
+- **Mark transfer, unmark transfer and assign take the payment's lock** and
+  judge it inside their transaction, as link, pair and ignore do. A link
+  landing between the check and the write could leave a row linked and
+  marked a transfer at once, or surface the assignee rule as a 500.
+- **A shared photo is scanned only for the product it was shared for.** The
+  camera took it on any open, so a share abandoned earlier was scanned into
+  the next camera — a rescan of an existing line included, overwriting its
+  fields. The capture session now holds it, hands it only to a new
+  product's camera, and drops it when the session ends.
+- **Shared photos are compressed before they are stored.** A full-size phone
+  photo overflowed the browser's session storage and the share vanished
+  without a word; it is now compressed as a shutter photo is, and a share
+  that still cannot be kept says so.
+- **Back after a share no longer resets the capture.** The share landing
+  stayed in history and replayed on Back, starting a new PO over the one
+  being built; it is now replaced, and `/submit` leaves an open capture
+  alone.
+- **The phone Inventory list keeps one order across pages.** Each 200-row
+  page was sorted on its own, so category, brand and capacity restarted at
+  every page boundary — on prod, seven times over for a manager. The list
+  re-sorts what it has loaded with the same comparator the exports use,
+  now in the shared package.
+- **A failed first inventory page shows the empty state** on both shells
+  instead of a loading skeleton that never ends.
+- **An error raised from a dialog keeps Tab in the error.** The error dialog
+  kept its own Tab handling outside the shared dialog stack, so the dialog
+  under it pulled focus behind the error. Shift+Tab right after a dialog
+  opens also stays inside it instead of escaping to the page.
+- **A reload paints the saved layout.** The preferences provider cleared
+  its cache on every cold load before sign-in had resolved, so the first
+  paint used default columns and density and then jumped.
+- **A preference change made while an earlier save is in flight stays on
+  screen** instead of flicking back until its own save returns.
+- **An oversized staff photo whose extension names another image format is
+  shrunk again** (a JPEG saved as `.png`). The format check added for the
+  public form also refused to shrink these, so they failed as too large; the
+  anonymous path keeps the strict refusal.
+- **Collapsing or switching an internal-transaction record asks first** when
+  its title or note has unsaved edits.
+
 ## [1.258.8] - 2026-10-14
 
 Batch G of the 2026-10-13 review fixes (RS-252), the last: external side

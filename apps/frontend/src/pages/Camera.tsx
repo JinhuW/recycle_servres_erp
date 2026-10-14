@@ -4,7 +4,6 @@ import { useT } from '../lib/i18n';
 import { api } from '../lib/api';
 import { compressForUpload, blobToDataUrl } from '../lib/image-compress';
 import { scanErrorMessage } from '../lib/scanError';
-import { takeSharedFile } from '../lib/sharedFile';
 import type { Category, ScanResponse } from '../lib/types';
 
 type Props = {
@@ -12,6 +11,9 @@ type Props = {
   onDetected: (s: ScanResponse) => void;
   onClose: () => void;
   onBack?: () => void;
+  // A photo shared into the app, scanned the moment the camera opens as if it
+  // had just been shot. The shell hands it only to a new product's camera.
+  takeSharedPhoto?: () => string | null;
 };
 
 
@@ -22,7 +24,7 @@ type Props = {
 //   done      — got a result, showing the green pill briefly
 type Phase = 'framing' | 'capturing' | 'scanning' | 'done';
 
-export function Camera({ category, onDetected, onClose, onBack }: Props) {
+export function Camera({ category, onDetected, onClose, onBack, takeSharedPhoto }: Props) {
   const { t } = useT();
   const [phase, setPhase] = useState<Phase>('framing');
   const [error, setError] = useState<string | null>(null);
@@ -124,10 +126,8 @@ export function Camera({ category, onDetected, onClose, onBack }: Props) {
     return placeholder;
   };
 
-  // A photo shared into the app (lib/sharedFile.ts) is scanned the moment the
-  // camera opens, as if it had just been shot.
   useEffect(() => {
-    const shared = takeSharedFile();
+    const shared = takeSharedPhoto?.() ?? null;
     if (!shared) return;
     void (async () => {
       try {
@@ -139,7 +139,7 @@ export function Camera({ category, onDetected, onClose, onBack }: Props) {
         if (aliveRef.current) setError(t('cameraUnavailable'));
       }
     })();
-    // Once, on mount: the stored file is taken, not read.
+    // Once, on mount: the shared photo is taken, not read.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -11,6 +11,7 @@ export * from "./linePhotoUrl.js";
 export * from "./sellPrice.js";
 export * from "./goodsTotal.js";
 export * from "./categoryOrder.js";
+export * from "./sheetSort.js";
 export * from "./marketStaleness.js";
 export * from "./carriers.js";
 export * from "./packageSource.js";

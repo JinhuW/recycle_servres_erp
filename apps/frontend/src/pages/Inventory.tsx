@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { sortSheetRows } from '@recycle-erp/shared';
 import { Icon } from '../components/Icon';
 import { PhHeader } from '../components/PhHeader';
 import { useT } from '../lib/i18n';
@@ -22,6 +23,7 @@ type InventoryItem = {
   brand: string | null;
   capacity: string | null;
   generation: string | null;
+  speed: string | null;
   type: string | null;
   interface: string | null;
   description: string | null;
@@ -38,6 +40,13 @@ type InventoryItem = {
 type Props = {
   onNewEntry: () => void;
 };
+
+// The server sorts each page on its own, so the pages laid end to end restart
+// the category → brand → capacity order at every boundary. The list is sorted
+// again as a whole, with the same comparator.
+const sortStock = (rows: InventoryItem[]) => sortSheetRows(rows, (r) => ({
+  category: r.category, specs: r, label: r.part_number ?? r.description ?? '',
+}));
 
 export function Inventory({ onNewEntry }: Props) {
   const { t, locale } = useT();
@@ -66,11 +75,15 @@ export function Inventory({ onNewEntry }: Props) {
         `/api/inventory?${params}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`),
       (page, meta) => {
         if (!alive) return false;
-        setItems(prev => (meta.first ? page : [...prev, ...page]));
+        setItems(prev => sortStock(meta.first ? page : [...prev, ...page]));
         setLoadedOnce(true);
         if (meta.done) setWalking(false);
       },
-    ).catch((e) => { if (alive) { setWalking(false); handleFetchError(e); } });
+    )
+      .catch((e) => { if (alive) handleFetchError(e); })
+      // A first page that never lands still ends the loading state: the
+      // skeleton otherwise stays up claiming work that has already failed.
+      .finally(() => { if (alive) { setLoadedOnce(true); setWalking(false); } });
     return () => { alive = false; };
   }, [filter, showSold]);
 

@@ -1940,6 +1940,7 @@ const zh: Record<string, string> = {
   mktAboveCeiling: '高于上限 —— 应议价',
   mktBrokerQuotes: '近期经纪报价',
   sharedPhotoReady: '已收到分享的照片——添加产品后点击扫描。',
+  sharedPhotoLost: '无法保留分享的照片——请添加产品后点击扫描拍摄。',
   acCreatedTitle: '订单已创建',
   acSubmittedTitle: '已提交审核',
   acAdvancedTitle: '推进 {from} → {to}',

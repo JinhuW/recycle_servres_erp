@@ -1,11 +1,13 @@
 import { useEffect } from 'react';
-import { navigate } from '../lib/route';
-import { blobToDataUrl } from '../lib/image-compress';
+import { replaceRoute } from '../lib/route';
+import { blobToDataUrl, compressForUpload } from '../lib/image-compress';
 import { storeSharedFile } from '../lib/sharedFile';
 
-// The file is handed on through lib/sharedFile.ts: the phone's camera screen
-// reads it the moment it opens and scans it. sessionStorage so a reload
-// during the hand-off doesn't drop the file; cleared once consumed.
+// The file is handed on through lib/sharedFile.ts to `/submit`, which keeps it
+// for the next new product's camera. sessionStorage so a reload during the
+// hand-off doesn't drop the file; cleared once consumed. Compressed first, as
+// the shutter path is: a full-size phone photo as a data URL overflows the
+// storage quota, and the share used to vanish without a word.
 
 export function ShareTarget() {
   useEffect(() => {
@@ -28,8 +30,17 @@ export function ShareTarget() {
         }, 2000);
       });
 
-      if (file) storeSharedFile(await blobToDataUrl(file));
-      navigate('/submit');
+      let stored = false;
+      if (file) {
+        try {
+          stored = storeSharedFile(await blobToDataUrl(await compressForUpload(file)));
+        } catch {
+          stored = false;
+        }
+      }
+      // Replaced, not pushed: a landing left in history replayed on Back and
+      // reset the capture session it had opened.
+      replaceRoute(file && !stored ? '/submit?sharedLost=1' : '/submit');
     })();
   }, []);
 

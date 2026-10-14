@@ -60,7 +60,13 @@ fi
 # none, once it has one — is not the dev database whatever its hostname. A
 # target with no marker table at all is a dev that predates the marker; the
 # first restore gives it one.
-marker=$(psql -tA "$DEV_DATABASE_URL" -c "SELECT CASE WHEN to_regclass('public.env_marker') IS NULL THEN 'absent' ELSE COALESCE((SELECT name FROM public.env_marker LIMIT 1), 'none') END")
+# Two statements, not one CASE: Postgres resolves every relation a query names
+# before it runs, so naming a missing env_marker in the untaken branch still
+# errors, and set -e then aborts the sync on exactly the dev it should heal.
+marker=absent
+if [ "$(psql -tA "$DEV_DATABASE_URL" -c "SELECT to_regclass('public.env_marker') IS NOT NULL")" = "t" ]; then
+  marker=$(psql -tA "$DEV_DATABASE_URL" -c "SELECT COALESCE((SELECT name FROM public.env_marker LIMIT 1), 'none')")
+fi
 if [ "$marker" != "absent" ] && [ "$marker" != "dev" ]; then
   echo "[sync] REFUSING: target database is marked '${marker}', not 'dev'" >&2
   exit 1

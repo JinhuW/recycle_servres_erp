@@ -1097,6 +1097,8 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   lots alone, and its row — qty and the in-stock split, lot and PO counts,
   cost range, Warehouses — sums those alone. The attribute chips still show
   a matching product whole, so a mis-typed lot stays findable.
+- **The phone Inventory list is one category → brand → capacity order across
+  every page it loads** (v1.258.9), the order the exports use.
 - **The phone Inventory list shows each line's sell price to every role**
   (v1.144.2), under the status chip, the way the desktop table and the phone
   Orders list already did. Unit cost, profit and margin stay manager-only
@@ -2392,7 +2394,9 @@ inventory search, sell-order draft creation.
   (v1.258.7). The manifest's Submit, Inventory and Sell orders shortcuts and
   the share-target landing are real paths the hash router now reads as the
   route they name; on the phone, Submit opens the capture flow and a shared
-  photo is scanned the moment the camera opens for the next product. The
+  photo is scanned the moment the camera opens for the next new product —
+  never for a rescan of an existing line — compressed first, and dropped
+  when the capture ends (v1.258.9). The
   phone can zoom. Dialogs and phone sheets keep Tab inside them; proof
   uploads and item-type picks work from the keyboard; the phone's capture
   button and every hardware field have accessible names.
