@@ -13,6 +13,8 @@ import {
 } from '../auth';
 import { log } from '../lib/log';
 import { clientIp } from '../lib/clientIp';
+import { isEmail } from '../lib/email';
+import { MAX_PASSWORD_LEN } from '@recycle-erp/shared';
 import type { Env } from '../types';
 
 const auth = new Hono<{ Bindings: Env }>();
@@ -27,6 +29,13 @@ auth.post('/login', async (c) => {
   }
   const email = body.email.toLowerCase().trim();
   const password = body.password;
+  // Bounded before anything durable: an arbitrary near-megabyte "email" was
+  // otherwise lowercased, queried and written to login_attempts, and the
+  // password handed to bcrypt whatever its length. No account can match
+  // either, so the refusal gives nothing away.
+  if (!isEmail(email) || password.length > MAX_PASSWORD_LEN) {
+    return c.json({ error: 'email and password required' }, 400);
+  }
   const ip = clientIp((n) => c.req.header(n));
   // Only the Worker's X-Client-IP names one caller; without it every request
   // shares a Cloudflare egress address, and a per-address budget would lock
@@ -94,12 +103,13 @@ auth.post('/login', async (c) => {
         role: string; team: string | null; language: string;
         defaultWarehouseId: string | null;
         preferences: Record<string, unknown>; password_hash: string;
+        credential_version: number;
       }[]
     >`
       SELECT id, email, name, initials, role, team, language,
              default_warehouse_id AS "defaultWarehouseId",
              COALESCE(preferences, '{}'::jsonb) AS preferences,
-             password_hash
+             password_hash, credential_version
       FROM users
       WHERE email = ${email} AND active = TRUE
       LIMIT 1
@@ -120,7 +130,9 @@ auth.post('/login', async (c) => {
     await sql`UPDATE users SET last_seen_at = NOW() WHERE id = ${u.id}`;
 
     const { raw: refreshRaw, familyId } = await issueRefresh(sql, u.id);
-    const token = await signToken(c.env, { id: u.id, email: u.email, role: u.role }, familyId);
+    const token = await signToken(
+      c.env, { id: u.id, email: u.email, role: u.role, credentialVersion: u.credential_version }, familyId,
+    );
     setAuthCookies(c, c.env as Env, token, refreshRaw);
     return c.json({
       user: {
@@ -169,15 +181,17 @@ auth.post('/refresh', async (c) => {
     return c.json({ error: 'invalid refresh' }, 401);
   }
 
-  const u = (await sql<{ id: string; email: string; role: string }[]>`
-    SELECT id, email, role FROM users WHERE id = ${res.userId} AND active LIMIT 1
+  const u = (await sql<{ id: string; email: string; role: string; credential_version: number }[]>`
+    SELECT id, email, role, credential_version FROM users WHERE id = ${res.userId} AND active LIMIT 1
   `)[0];
   if (!u) {
     clearAuthCookies(c, c.env as Env);
     return c.json({ error: 'invalid refresh' }, 401);
   }
 
-  const at = await signToken(c.env, { id: u.id, email: u.email, role: u.role }, res.familyId);
+  const at = await signToken(
+    c.env, { id: u.id, email: u.email, role: u.role, credentialVersion: u.credential_version }, res.familyId,
+  );
   setAuthCookies(c, c.env as Env, at, res.raw);
   return c.json({ ok: true });
 });

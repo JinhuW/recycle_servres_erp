@@ -29,6 +29,19 @@ describe('login brute-force throttle', () => {
     expect(await count()).toBe(before);
   });
 
+  // Bounded before anything durable: a near-megabyte "email" was lowercased,
+  // queried and written to login_attempts; the password reached bcrypt whatever
+  // its length. Nothing in the body is a reservation here.
+  it('refuses an oversized or malformed email without writing an attempt', async () => {
+    const count = async () => (await getTestDb()<{ n: number }[]>`
+      SELECT COUNT(*)::int AS n FROM login_attempts`)[0].n;
+    const before = await count();
+    expect((await login('a'.repeat(300_000) + '@example.com', 'demo')).status).toBe(400);
+    expect((await login('not-an-email', 'demo')).status).toBe(400);
+    expect((await login(ALEX, 'p'.repeat(5_000))).status).toBe(400);
+    expect(await count()).toBe(before);
+  });
+
   it('does not throttle a normal successful login', async () => {
     const r = await login(ALEX, 'demo');
     expect(r.status).toBe(200);

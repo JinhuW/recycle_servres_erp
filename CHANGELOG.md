@@ -17,6 +17,52 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.258.2] - 2026-10-14
+
+Batch A of the 2026-10-13 review fixes (RS-252): dependencies and the small
+hardening items. The review's 66 findings land in seven batches under that
+ticket; `docs/review-2026-10-13/` is checked in with this one and each batch
+ticks what it closes.
+
+### Security
+
+- **A token minted in the very second of a password change is refused.**
+  `tokens_valid_after` and a token's `iat` share whole-second grain, so a
+  token issued just before the change compared as not older and lived out its
+  hour (bearer tokens their fifteen minutes). Every credential change now
+  bumps `users.credential_version`; cookie and bearer tokens carry the version
+  they were minted under and die when it moves on — a deactivation included,
+  so reactivating an account does not revive its old tokens. The timestamp
+  check stays for tokens minted before the claim existed (SEC-03).
+- **Dependencies patched; `pnpm audit --prod` is clean.** sharp 0.35.5
+  (libheif and librsvg advisories), hono 4.13.13 and @hono/node-server
+  1.19.17, tsx 4.23.15 for its bundled esbuild, and workspace overrides for the
+  two brace-expansion lines exceljs drags in through archiver. The anonymous
+  intake form also checks the format sharp *detected* against the declared
+  MIME, so an AVIF or SVG renamed `.png` is refused instead of reaching a
+  decoder the allowlist was meant to keep out (DEP-01, DEP-02).
+- **A login body is bounded before anything durable happens**: an email past
+  254 characters or not shaped like one, or a password past the shared cap,
+  is a 400 with no `login_attempts` row and no bcrypt call. Until now a
+  near-megabyte "email" was lowercased, queried and written to the attempts
+  table on every anonymous request (SEC-14).
+- **Inherited object keys are not preferences.** `SCHEMA[key]` on a plain
+  object found `toString` and `constructor` on `Object.prototype`, accepted
+  them as validators and persisted the key; `__proto__` reached a
+  non-callable and 500ed. All four are the ordinary 400 now (SEC-11).
+
+### Fixed
+
+- **Preference saves merge against the live row.** Each PATCH wrote back the
+  whole document auth had loaded at request start, so two tabs saving
+  different settings kept only the later one's, and an unrelated save could
+  revert a concurrent language change. The merge is one JSONB update now, and
+  `language` is written only when the patch carries it (SEC-12).
+- **Error-log rotation never overwrites an archive.** Rotated files were
+  named to the second; a second rotation in the same second renamed onto the
+  first and its records were gone despite the ten-file retention. Names carry
+  a sequence now (SEC-13).
+
 ## [1.258.1] - 2026-10-14
 
 The PO list's payment-gap mark explains itself on hover (RS-251).

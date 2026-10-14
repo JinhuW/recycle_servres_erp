@@ -60,18 +60,26 @@ export type AccessClaims = {
   jti: string;
   exp: number;
   iat: number;
+  // users.credential_version at mint time; absent for service clients and for
+  // tokens minted before the claim existed. bearerGuard refuses a user token
+  // whose version has moved on (a password change or deactivation).
+  cv?: number;
   aud: 'recycle-erp-api';
 };
 
 export async function signAccessToken(env: Env, input: {
   clientId: string; userId: string | null; scopes: OAuthScope[];
+  credentialVersion?: number | null;
 }): Promise<string> {
   if (!env.OAUTH_SIGNING_KEY_CURRENT) throw new Error('OAUTH_SIGNING_KEY_CURRENT not set');
   const key = loadPrivateKey(env.OAUTH_SIGNING_KEY_CURRENT);
   const kid = keyKid(env.OAUTH_SIGNING_KEY_CURRENT);
   const ttl = sec(env.OAUTH_ACCESS_TOKEN_TTL_SEC, 900);
   const now = Math.floor(Date.now() / 1000);
-  return new SignJWT({ cid: input.clientId, scopes: input.scopes })
+  return new SignJWT({
+    cid: input.clientId, scopes: input.scopes,
+    ...(input.credentialVersion != null ? { cv: input.credentialVersion } : {}),
+  })
     .setProtectedHeader({ alg: 'EdDSA', typ: 'at+jwt', kid })
     .setIssuedAt(now)
     .setExpirationTime(now + ttl)
@@ -100,6 +108,7 @@ export async function verifyAccessToken(env: Env, token: string): Promise<Access
         jti: payload.jti as string,
         exp: payload.exp as number,
         iat: payload.iat as number,
+        ...(typeof payload.cv === 'number' ? { cv: payload.cv } : {}),
         aud: 'recycle-erp-api',
       };
     } catch { /* try next key in ring */ }
@@ -148,7 +157,10 @@ export async function issueRefreshToken(
 }
 
 export type RotateRefreshResult =
-  | { ok: true; raw: string; clientId: string; userId: string | null; scopes: OAuthScope[]; familyId: string }
+  | {
+      ok: true; raw: string; clientId: string; userId: string | null; scopes: OAuthScope[];
+      familyId: string; credentialVersion: number | null;
+    }
   | { ok: false; reason: 'not_found' | 'expired' | 'revoked' | 'reused' };
 
 // `expectedClientId` is the client that authenticated at /token. A token held
@@ -165,11 +177,11 @@ export async function rotateRefreshToken(
     const row = (await tx<{
       id: number; client_id: string; user_id: string | null; scopes: OAuthScope[];
       family_id: string; revoked_at: Date | null; expired: boolean;
-      user_active: boolean | null; user_role: string | null;
+      user_active: boolean | null; user_role: string | null; user_cv: number | null;
     }[]>`
       SELECT rt.id, rt.client_id, rt.user_id, rt.scopes, rt.family_id, rt.revoked_at,
              (rt.expires_at <= NOW()) AS expired,
-             u.active AS user_active, u.role AS user_role
+             u.active AS user_active, u.role AS user_role, u.credential_version AS user_cv
       FROM oauth_refresh_tokens rt
       LEFT JOIN users u ON u.id = rt.user_id
       WHERE rt.token_hash = ${sha256hex(raw)}
@@ -204,7 +216,7 @@ export async function rotateRefreshToken(
     });
     return {
       ok: true, raw: next.raw, clientId: row.client_id, userId: row.user_id,
-      scopes, familyId: row.family_id,
+      scopes, familyId: row.family_id, credentialVersion: row.user_cv,
     };
   });
 }

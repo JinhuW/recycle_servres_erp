@@ -91,7 +91,10 @@ describe('bearerGuard', () => {
       grantTypes: ['authorization_code', 'refresh_token'], scopes: ['market:read'],
       createdBy: null, public: false,
     });
-    const at = await signAccessToken(env, { clientId: c.clientId, userId: u.id, scopes: ['market:read'] });
+    // Minted under the row's current version, as the token endpoint does.
+    const at = await signAccessToken(env, {
+      clientId: c.clientId, userId: u.id, scopes: ['market:read'], credentialVersion: 1,
+    });
     const iat = (await verifyAccessToken(env, at))!.iat;
     const call = () => buildApp(['market:read']).request('/ok', {
       headers: { authorization: `Bearer ${at}` },
@@ -124,7 +127,18 @@ describe('bearerGuard', () => {
     expect((await g.call()).status).toBe(401);
   });
 
-  it('200 for a token issued in the same second as the change (iat has no finer grain)', async () => {
+  // iat has whole-second grain, so a token minted in the very second of a
+  // password change compares as not older; the credential version catches it.
+  it('401 for a token issued in the same second as the change', async () => {
+    const g = await userGrant();
+    await getTestDb()`
+      UPDATE users SET tokens_valid_after = to_timestamp(${g.iat}),
+                       credential_version = credential_version + 1
+      WHERE id = ${g.userId}`;
+    expect((await g.call()).status).toBe(401);
+  });
+
+  it('200 for a token minted under the current credential version', async () => {
     const g = await userGrant();
     await getTestDb()`UPDATE users SET tokens_valid_after = to_timestamp(${g.iat}) WHERE id = ${g.userId}`;
     expect((await g.call()).status).toBe(200);

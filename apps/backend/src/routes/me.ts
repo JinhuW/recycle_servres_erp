@@ -87,31 +87,37 @@ me.patch('/preferences', async (c) => {
   const u = c.var.user;
   const sql = getDb(c.env);
 
-  // Read-modify-write. Per-user concurrency is effectively nil (the only
-  // writer is the user themselves), and this keeps the merge logic in TS.
-  const next: Record<string, unknown> = { ...(u.preferences ?? {}) };
+  // Merged in SQL against the live row, not the copy auth loaded at request
+  // start: two tabs saving different keys would otherwise each write back the
+  // whole document and the later one erase the other's change.
+  const sets: Record<string, unknown> = {};
+  const removed: string[] = [];
   for (const [k, v] of Object.entries(result.cleaned)) {
-    if (v === null) delete next[k];
-    else next[k] = v;
+    if (v === null) removed.push(k);
+    else sets[k] = v;
   }
-
-  // Mirror language to the column so legacy code paths keep working.
+  // Mirror language to the column so legacy code paths keep working — only
+  // when this patch carries it, so an unrelated save can't revert a
+  // concurrent language change.
   const nextLanguage =
     'language' in result.cleaned && result.cleaned['language'] !== null
       ? (result.cleaned['language'] as 'en' | 'zh')
-      : u.language;
+      : null;
 
   // Allowlist values are JSON-safe (strings, string unions, string arrays),
   // but TS's strict JSONValue rejects `unknown`; cast at the boundary.
-  await sql`
+  const [row] = await sql<{ preferences: Record<string, unknown>; language: 'en' | 'zh' }[]>`
     UPDATE users
-       SET preferences = ${sql.json(next as Record<string, never>)}::jsonb,
-           language    = ${nextLanguage}
+       SET preferences = (COALESCE(preferences, '{}'::jsonb)
+                          || ${sql.json(sets as Record<string, never>)}::jsonb)
+                         - ${removed}::text[],
+           language    = COALESCE(${nextLanguage}, language)
      WHERE id = ${u.id}
+     RETURNING COALESCE(preferences, '{}'::jsonb) AS preferences, language
   `;
 
   return c.json({
-    user: { ...u, preferences: next, language: nextLanguage },
+    user: { ...u, preferences: row.preferences, language: row.language },
   });
 });
 
@@ -193,7 +199,8 @@ me.post('/password', async (c) => {
     // No fresh cookies are set here: setAuthCookies also rewrites `rt`, which
     // this path never sees, so the caller is left to refresh into a new token.
     await tx`UPDATE users
-             SET password_hash = ${newHash}, tokens_valid_after = to_timestamp(${epochSeconds()})
+             SET password_hash = ${newHash}, tokens_valid_after = to_timestamp(${epochSeconds()}),
+                 credential_version = credential_version + 1
              WHERE id = ${u.id}`;
     if (currentFamilyId) {
       await tx`UPDATE refresh_tokens SET revoked_at = NOW()

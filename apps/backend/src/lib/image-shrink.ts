@@ -11,7 +11,14 @@ import sharp from 'sharp';
 import { log } from './log';
 import { createSemaphore } from './semaphore';
 
-const SHRINKABLE = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp']);
+// The declared type names the decoder the caller expects; what sharp detects
+// from the bytes decides. Sharp opens anything libvips can read — HEIF, SVG,
+// GIF, TIFF — so a file renamed to .png would otherwise reach a decoder the
+// MIME allowlist was meant to keep out.
+const FORMAT_FOR_MIME: Record<string, string> = {
+  'image/png': 'png', 'image/jpeg': 'jpeg', 'image/jpg': 'jpeg', 'image/webp': 'webp',
+};
+const SHRINKABLE = new Set(Object.keys(FORMAT_FOR_MIME));
 
 // Each pass scales dimensions down and (for lossy formats) lowers quality;
 // byte size falls roughly with the pixel count, so a handful of passes covers
@@ -36,7 +43,7 @@ const runStaffShrink = createSemaphore(2, 60_000, () => new ImageRejectedError('
 // Why a strict caller's image was refused. Non-strict callers never see it:
 // for them every problem falls back to the original file.
 export class ImageRejectedError extends Error {
-  constructor(readonly reason: 'too_many_pixels' | 'undecodable' | 'busy') {
+  constructor(readonly reason: 'too_many_pixels' | 'undecodable' | 'wrong_format' | 'busy') {
     super(`image rejected: ${reason}`);
     this.name = 'ImageRejectedError';
   }
@@ -78,6 +85,10 @@ async function shrink(file: File, maxBytes: number, maxPixels: number, strict: b
   const meta = await open().metadata();
   if (!meta.width || !meta.height) {
     if (strict) throw new ImageRejectedError('undecodable');
+    return file;
+  }
+  if (meta.format !== FORMAT_FOR_MIME[file.type]) {
+    if (strict) throw new ImageRejectedError('wrong_format');
     return file;
   }
   if (meta.width * meta.height > maxPixels) throw new ImageRejectedError('too_many_pixels');

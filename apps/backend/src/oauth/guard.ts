@@ -37,7 +37,9 @@ export function bearerGuard(opts: { scopes: OAuthScope[] }): MiddlewareHandler<{
           SELECT 1 FROM users u
           WHERE u.id = ${claims.sub} AND u.active
             AND (u.tokens_valid_after IS NULL
-                 OR to_timestamp(${claims.iat}) >= u.tokens_valid_after))`
+                 OR to_timestamp(${claims.iat}) >= u.tokens_valid_after)
+            AND (${claims.cv ?? null}::int IS NULL
+                 OR u.credential_version = ${claims.cv ?? null}::int))`
       : sql``;
     const live = await sql`
       SELECT 1 FROM oauth_clients

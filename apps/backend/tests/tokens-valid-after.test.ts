@@ -5,11 +5,9 @@ import { loginAs, ALEX, MARCUS } from './helpers/auth';
 
 const NEW_PW = 'Hunter2-NewPass';
 
-// tokens_valid_after has whole-second resolution, the same as iat, so a token
-// minted in the very second of a password change still passes. Step past that
-// second so the tokens under test are unambiguously older than the change.
-const nextSecond = () =>
-  new Promise<void>((resolve) => setTimeout(resolve, 1000 - (Date.now() % 1000) + 20));
+// No stepping past the second: tokens_valid_after and iat share whole-second
+// grain, so a token minted in the very second of the change used to survive it.
+// The credential version is what ends it now, so these run back to back.
 
 const me = (token: string) => api<{ error?: string }>('GET', '/api/me', { token });
 const refresh = (rt: string) => api('POST', '/api/auth/refresh', { cookies: { rt } });
@@ -20,7 +18,6 @@ describe('access tokens die with the password', () => {
   it('a self change ends every access token, and the caller refreshes back in', async () => {
     const caller = await loginAs(ALEX);
     const other = await loginAs(ALEX);
-    await nextSecond();
 
     const r = await api('POST', '/api/me/password', {
       token: caller.token,
@@ -48,7 +45,6 @@ describe('access tokens die with the password', () => {
   it('a manager reset ends the member’s access tokens and refresh families', async () => {
     const target = await loginAs(MARCUS);
     const manager = await loginAs(ALEX);
-    await nextSecond();
 
     const r = await api('PATCH', `/api/members/${target.user.id}`, {
       token: manager.token,
@@ -77,7 +73,6 @@ describe('access tokens die with the password', () => {
   it('a metadata-only member edit does not end sessions', async () => {
     const target = await loginAs(MARCUS);
     const manager = await loginAs(ALEX);
-    await nextSecond();
 
     const r = await api('PATCH', `/api/members/${target.user.id}`, {
       token: manager.token,
