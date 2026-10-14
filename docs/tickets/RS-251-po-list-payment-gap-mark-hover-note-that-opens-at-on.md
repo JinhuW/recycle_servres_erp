@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-14
 reporter: jinhu
 branch: fix/po-list-payment-gap-hover
-pr:
+pr: 640
 version: 1.258.1
 related: [RS-250, RS-200]
 ---
