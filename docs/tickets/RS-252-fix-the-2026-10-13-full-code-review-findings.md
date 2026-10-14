@@ -77,9 +77,9 @@ Batch D
 - [x] Duplicate-lot edits appear once in sell-order history; POST and PATCH validate categories and customers alike; non-Latin seller names never cross-attach a package.
 
 Batch E
-- [ ] A login under a different identity renders none of the previous user's PO or capture data.
-- [ ] Save-then-Submit on a slow line PATCH makes one PO with one line; a failed edit stays visible as unsaved and submits once on retry.
-- [ ] The newest preference edit wins over an older reply; a cancelled scan never lands in a later capture.
+- [x] A login under a different identity renders none of the previous user's PO or capture data.
+- [x] Save-then-Submit on a slow line PATCH makes one PO with one line; a failed edit stays visible as unsaved and submits once on retry.
+- [x] The newest preference edit wins over an older reply; a cancelled scan never lands in a later capture.
 
 Batch F
 - [ ] Each PWA shortcut lands on its screen in both shells; a shared image reaches the scanner once.

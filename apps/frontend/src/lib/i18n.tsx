@@ -256,6 +256,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     units2: 'units',
     perUnit: 'unit',
     reviewNoLinesHint: 'Add at least one product before submitting.',
+    reviewSavingHint: 'A product is still saving — one moment.',
+    lineUnsaved: 'Not saved yet',
     reviewPickWarehouseHint: 'Pick a warehouse before submitting.',
     transferPickDestinationHint: 'Pick a destination warehouse before transferring.',
     transferQtyOutOfRangeHint: 'One or more lines has an invalid quantity (must be ≥ 1 and ≤ stock).',

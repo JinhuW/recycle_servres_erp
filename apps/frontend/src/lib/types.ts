@@ -371,6 +371,8 @@ export type DraftLine = {
   // Set to true once this line has been persisted to the server-side draft;
   // prevents double-insert on final submit.
   _confirmed?: boolean;
+  /** Saved before and edited since, and that save failed: Submit retries it by id instead of dropping it as already confirmed. */
+  _dirty?: boolean;
 };
 
 export type ScanResponse = {

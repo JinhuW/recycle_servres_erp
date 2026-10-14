@@ -157,6 +157,8 @@ const zh: Record<string, string> = {
   feesHint: '运费、税费等货款之外由供应商收取的费用——上方总额已包含。',
   inclFees: '含 {fees} 费用',
   reviewNoLinesHint: '请先添加至少一个产品再提交。',
+  reviewSavingHint: '产品仍在保存中，请稍候。',
+  lineUnsaved: '尚未保存',
   reviewPickWarehouseHint: '请先选择仓库再提交。',
   transferPickDestinationHint: '请先选择目标仓库再调拨。',
   transferQtyOutOfRangeHint: '有数量无效（必须 ≥ 1 且 ≤ 库存）。',

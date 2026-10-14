@@ -22,6 +22,8 @@ type Props = {
   onRemoveLine: (idx: number) => void;
   onSubmit: () => Promise<void>;
   onCancel: () => void;
+  /** A line's save is still in flight: Submit says so instead of sending. */
+  saving?: boolean;
 };
 
 // One target per category. A single "Add another RAM" button would put the
@@ -56,7 +58,7 @@ function CategoryGrid({ onPick }: { onPick: (cat: Category) => void }) {
 }
 
 export function OrderReview({
-  lines, onAddItem, onEditLine, onRemoveLine, onSubmit, onCancel,
+  lines, onAddItem, onEditLine, onRemoveLine, onSubmit, onCancel, saving = false,
 }: Props) {
   const { t, locale } = useT();
   const [submitting, setSubmitting] = useState(false);
@@ -79,6 +81,7 @@ export function OrderReview({
   const submitBlockers: string[] =
     submitting         ? []
   : lines.length === 0 ? [t('reviewNoLinesHint')]
+  : saving             ? [t('reviewSavingHint')]
   : [];
 
   const onSubmitClick = () => {
@@ -133,6 +136,9 @@ export function OrderReview({
                   </div>
                   {l.partNumber && (
                     <div style={{ fontSize: 11, color: 'var(--fg-subtle)', fontFamily: 'JetBrains Mono, monospace', marginTop: 2 }}>{l.partNumber}</div>
+                  )}
+                  {l._dirty && (
+                    <span className="chip warn" style={{ fontSize: 10, marginTop: 2 }}>{t('lineUnsaved')}</span>
                   )}
                   <LineSpecChips line={l} />
                   {l.serialNumber && (

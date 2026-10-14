@@ -42,9 +42,15 @@ export function SnScanner({ existing, onDone, title, hint, aiRead = false }: Pro
   // Re-armed on mount: StrictMode's mount→unmount→mount would otherwise
   // leave it false for the scanner's whole life.
   const aliveRef = useRef(true);
+  // The success flash's hand-off, cancelled with the screen: navigating away
+  // during the flash used to call the old parent's completion anyway.
+  const finishTimer = useRef<number | null>(null);
   useEffect(() => {
     aliveRef.current = true;
-    return () => { aliveRef.current = false; };
+    return () => {
+      aliveRef.current = false;
+      if (finishTimer.current !== null) window.clearTimeout(finishTimer.current);
+    };
   }, []);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const existingRef = useRef<Set<string>>(new Set(existing));
@@ -151,7 +157,9 @@ export function SnScanner({ existing, onDone, title, hint, aiRead = false }: Pro
     setCaptured(value);
     setLastHit({ value, dup: false, tick: performance.now() });
     navigator.vibrate?.(35);
-    window.setTimeout(() => onDoneRef.current([value]), 650);
+    finishTimer.current = window.setTimeout(() => {
+      if (aliveRef.current) onDoneRef.current([value]);
+    }, 650);
   };
 
   const switchMode = (next: Mode) => {
