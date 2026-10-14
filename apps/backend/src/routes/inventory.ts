@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { getDb, type SqlLike } from '../db';
-import { UUID_RE, clampLimit, decodeCursor, encodeCursor, escapeLike } from '../lib/pagination';
+import { UUID_RE, clampLimit, decodeCursor, encodeCursor, escapeLike, type Cursor } from '../lib/pagination';
 import { notify } from '../lib/notify';
 import { getWorkspaceSetting } from '../lib/settings';
 import { nextHumanId } from '../lib/id-seq';
@@ -213,6 +213,21 @@ async function selectInventoryRows(
   whereFrag: ReturnType<typeof inventoryWhereFrag>,
   limit: number | null,
 ) {
+  return (await selectInventoryPage(sql, whereFrag, limit, null)).items;
+}
+
+// One page of the flat list, keyset on (created_at, id) like the transfer
+// list. The cursor is taken from the rows in SQL order, before the sheet
+// sort rearranges them for display.
+async function selectInventoryPage(
+  sql: ReturnType<typeof getDb>,
+  whereFrag: ReturnType<typeof inventoryWhereFrag>,
+  limit: number | null,
+  cursor: Cursor | null,
+) {
+  const cursorFrag = cursor
+    ? sql`AND (l.created_at, l.id) < ((${cursor.ts}::text)::timestamptz, ${cursor.id}::uuid)`
+    : sql``;
   const rows = await sql`
     SELECT l.id, l.category, l.brand, l.capacity, l.generation, l.type, l.classification, l.rank, l.speed,
            l.interface, l.form_factor, l.description, l.item_type, l.part_number, l.serial_number, l.condition,
@@ -224,19 +239,25 @@ async function selectInventoryRows(
            u.name AS user_name, u.initials AS user_initials,
            w.short AS warehouse_short, w.region AS warehouse_region,
            -- What the transfer modal may move: units no committed sell order holds.
-           ${committedQtySql(sql, sql`l.id`)} AS committed_qty
+           ${committedQtySql(sql, sql`l.id`)} AS committed_qty,
+           to_char(l.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_ts
     FROM order_lines l
     JOIN orders o ON o.id = l.order_id
     JOIN users  u ON u.id = o.user_id
     LEFT JOIN warehouses w ON w.id = COALESCE(l.warehouse_id, o.warehouse_id)
-    WHERE ${whereFrag}
-    ORDER BY l.created_at DESC
-    ${limit === null ? sql`` : sql`LIMIT ${limit}`}
-  `;
-  return sortSheetRows(
-    rows as unknown as Record<string, unknown>[],
+    WHERE ${whereFrag} ${cursorFrag}
+    ORDER BY l.created_at DESC, l.id DESC
+    ${limit === null ? sql`` : sql`LIMIT ${limit + 1}`}
+  ` as unknown as Array<Record<string, unknown> & { id: string; cursor_ts: string }>;
+  const hasMore = limit !== null && rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+  const last = page[page.length - 1];
+  const nextCursor = hasMore ? encodeCursor({ ts: last.cursor_ts, id: last.id }) : null;
+  const items = sortSheetRows(
+    page.map(({ cursor_ts: _ts, ...r }) => r) as Record<string, unknown>[],
     (r) => ({ category: String(r.category ?? ''), specs: r, label: invLabel(r) }),
   );
+  return { items, nextCursor };
 }
 
 // A selection's ids: the uuid-shaped ones, once each. Anything else in the
@@ -258,12 +279,19 @@ function parseSelection(
   return { ids };
 }
 
-// List inventory with the same filters as the desktop screen.
+// List inventory with the same filters as the desktop screen. Paged: a book
+// of more than 200 lots used to end at the 200 newest with no sign that it
+// had, so the phone's totals and the older lots were simply gone.
 inventory.get('/', async (c) => {
   const u = c.var.user;
   const sql = getDb(c.env);
   const isManager = u.role === 'manager';
-  const items = await selectInventoryRows(sql, inventoryWhereFrag(c, sql, u), 200);
+  const limit = clampLimit(c.req.query('limit'), 200, 200);
+  // Only a cursor this route minted (see the transfer list).
+  const raw = decodeCursor(c.req.query('cursor'));
+  const cursor = raw && typeof raw.ts === 'string' && TRANSFER_CURSOR_TS_RE.test(raw.ts)
+    && UUID_RE.test(raw.id) ? raw : null;
+  const { items, nextCursor } = await selectInventoryPage(sql, inventoryWhereFrag(c, sql, u), limit, cursor);
 
   // Purchasers MUST NOT see cost or profit fields (PRD §6.8). Strip them before
   // returning. Sell price stays visible — it is not sensitive.
@@ -272,9 +300,9 @@ inventory.get('/', async (c) => {
       const { unit_cost: _uc, profit: _p, margin: _m, committed_qty: _cq, ...rest } = r;
       return rest;
     });
-    return c.json({ items: filtered });
+    return c.json({ items: filtered, nextCursor });
   }
-  return c.json({ items });
+  return c.json({ items, nextCursor });
 });
 
 // The rows behind a desktop selection, by id. Select-all reaches lots in

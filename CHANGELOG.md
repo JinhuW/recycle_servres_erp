@@ -17,6 +17,60 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.258.5] - 2026-10-14
+
+Batch D of the 2026-10-13 review fixes (RS-252): financial facts and
+complete lists.
+
+### Fixed
+
+- **The dashboard counts every sale, costed or not.** A manual sale line —
+  sold with nothing on the shelf — and a line whose PO source was since
+  deleted name no PO line, and an inner join dropped them from revenue, the
+  order count, the chart, the category rollup and the customer and category
+  contributions: the sell-orders screen showed a Done $100 order the
+  dashboard did not. Revenue and counts now include every line; cost, profit
+  and commission are summed only where a PO line exists to price them, and
+  the gross-profit tile says how many sales, and how much revenue, carry no
+  recorded cost (BD-04; also the 2026-08-24 review's #4).
+- **Lists reach their real end.** The keyset walk stopped after 25 pages and
+  reported the list complete, so past 5,000 POs (or sell orders, transfers,
+  internal transactions) the rest were silently gone from counts, totals and
+  search. It now stops only where the server does, or on a cursor it has
+  already followed. The inventory list is paged the same way (`limit`,
+  `cursor`, `nextCursor`), and both the phone and the desktop flat list walk
+  it — a book past 200 lots used to end there with no sign that it had, phone
+  totals included (FE-09, FE-13; the 2026-08-24 review's #7).
+- **The CRM filters the whole book, then pages it.** Follow-up and health
+  were applied after a 200-row cap, so a book whose "soon" clients all sat
+  past the cap showed none and counted none, and the counts changed with the
+  limit. The list now filters and counts every scoped client and pages the
+  result (`offset`, `nextOffset`); the Clients page walks the pages (SUP-03).
+- **A box from a non-Latin seller lands on the right client.** Package → PO
+  matched the seller on an ASCII-only compression of the name, which read
+  every all-Chinese name as the same empty string: 李 RAM's box was filed
+  under 王 RAM. It matches on `supplier_name_key()` now, the key every other
+  client lookup uses (SUP-02).
+- **The phone profit sparkline keeps a loss on the chart.** It scaled from
+  zero to the largest value, so a loss period plotted below the baseline and
+  off the canvas, and an all-loss range plotted thousands of units under it.
+  The scale now spans the lowest value, zero and the highest, with the zero
+  line drawn when there is a loss (UI-03).
+- **Market no longer invents a cost series or broker quotes.** The expanded
+  row charted 70% of each sell price as Cost and listed the average sell
+  price nudged by a few percent under each price-source name, and counted
+  those as sources in its confidence note. It says "no cost data" and "no
+  feed connected" instead, and counts only the team's own sales (FE-15).
+- **Sell-order history keeps edits to a lot named twice.** The line diff
+  keyed one entry per lot, so the second occurrence overwrote the first and an
+  edit to it was never recorded; occurrences now pair up in order (BD-07).
+- **Creating a category or a customer validates like editing one.** A
+  negative default margin or a malformed contact email was accepted by POST
+  and refused by every PATCH after it (BD-08).
+- The partial-sale integrity test asks for a lot of three or more units, so
+  the seed can no longer hand it an exact full sale and fail the suite
+  (BD-10).
+
 ## [1.258.4] - 2026-10-14
 
 Batch C of the 2026-10-13 review fixes (RS-252): one lock protocol for the

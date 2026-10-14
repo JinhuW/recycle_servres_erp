@@ -320,15 +320,18 @@ packages.post('/:id/create-po', async (c) => {
       ? ownerRow?.defaultWarehouseId ?? null
       : u.defaultWarehouseId;
     // Attribute the PO if this seller is already one of the owner's clients.
-    // Matched on the compressed name — a package carries no address to match
-    // on. No match just means the seller shows up in the Clients suggestion
-    // rail instead; we never auto-create a client from a single box.
+    // Matched on the client's identity key, supplier_name_key() — the one
+    // the duplicate check, adoption and suggestions use — because a package
+    // carries no address to match on. An ASCII-only compression here read
+    // every all-Chinese name as the same empty string, and a box from 李 RAM
+    // was filed under 王 RAM. No match just means the seller shows up in the
+    // Clients suggestion rail instead; we never auto-create a client from a
+    // single box.
     const client = row.seller_name
       ? (await tx`
           SELECT id FROM suppliers
           WHERE owner_id IS NOT DISTINCT FROM ${ownerId}
-            AND regexp_replace(upper(name), '[^A-Z0-9]', '', 'g')
-              = regexp_replace(upper(${row.seller_name}), '[^A-Z0-9]', '', 'g')
+            AND supplier_name_key(name) = supplier_name_key(${row.seller_name})
           ORDER BY created_at
           LIMIT 1
         `)[0] as { id: string } | undefined

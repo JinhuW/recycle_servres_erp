@@ -212,6 +212,21 @@ describe('clients — the follow-up loop', () => {
 
     const due = await api<ListBody>('GET', '/api/suppliers?follow=due', { token: marcus.token });
     expect(due.body.items.map((i) => i.name)).toEqual(['Late Co']);
+
+    // The filter and the counts used to run over the first `limit` rows:
+    // with the overdue client sorted first, limit=1 showed no "soon" client
+    // and counted none.
+    type Paged = ListBody & { nextOffset: number | null };
+    const paged = await api<Paged>('GET', '/api/suppliers?limit=1&follow=soon', { token: marcus.token });
+    expect(paged.body.items.map((i) => i.name)).toEqual(['Soon Co']);
+    expect(paged.body.counts.soon).toBe(1);
+    expect(paged.body.counts.due).toBe(1);
+    const first = await api<Paged>('GET', '/api/suppliers?limit=1', { token: marcus.token });
+    expect(first.body.items).toHaveLength(1);
+    expect(first.body.nextOffset).toBe(1);
+    const second = await api<Paged>('GET', `/api/suppliers?limit=1&offset=${first.body.nextOffset}`, { token: marcus.token });
+    expect(second.body.items).toHaveLength(1);
+    expect(second.body.items[0].name).not.toBe(first.body.items[0].name);
   });
 
   it('lets the author delete their own note but not someone else\'s', async () => {

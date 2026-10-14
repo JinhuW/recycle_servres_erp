@@ -4,6 +4,7 @@ import { PhHeader } from '../components/PhHeader';
 import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
+import { forEachKeysetPage } from '../lib/keysetPages';
 import { handleFetchError } from '../lib/errorToast';
 import { fmtUSD0 } from '../lib/format';
 import { lineSpecLabel } from '../lib/lineGroups';
@@ -46,6 +47,8 @@ export function Inventory({ onNewEntry }: Props) {
   const [showSold, setShowSold] = useState(false);
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [loadedOnce, setLoadedOnce] = useState(false);
+  // Pages still arriving: the totals above the list cover what has landed.
+  const [walking, setWalking] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrolled = usePhScrolled(scrollRef);
 
@@ -54,10 +57,20 @@ export function Inventory({ onNewEntry }: Props) {
     const params = new URLSearchParams();
     if (filter !== 'all') params.set('category', filter);
     if (showSold) params.set('includeSold', '1');
-    api.get<{ items: InventoryItem[] }>(`/api/inventory?${params}`)
-      .then(r => { if (alive) setItems(r.items); })
-      .catch(handleFetchError)
-      .finally(() => { if (alive) setLoadedOnce(true); });
+    params.set('limit', '200');
+    // Every page, not the first 200: a book past that used to end there
+    // silently, totals included.
+    setWalking(true);
+    forEachKeysetPage<InventoryItem>(
+      (cursor) => api.get<{ items: InventoryItem[]; nextCursor: string | null }>(
+        `/api/inventory?${params}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`),
+      (page, meta) => {
+        if (!alive) return false;
+        setItems(prev => (meta.first ? page : [...prev, ...page]));
+        setLoadedOnce(true);
+        if (meta.done) setWalking(false);
+      },
+    ).catch((e) => { if (alive) { setWalking(false); handleFetchError(e); } });
     return () => { alive = false; };
   }, [filter, showSold]);
 
@@ -126,6 +139,7 @@ export function Inventory({ onNewEntry }: Props) {
         </div>
 
         {!loadedOnce && <PhoneListSkeleton rows={6} />}
+        {loadedOnce && walking && <PhoneListSkeleton rows={2} />}
         {loadedOnce && items.map(r => {
           const label = lineSpecLabel(r) ?? (r.description ?? '');
           const lowHealth = r.health != null && r.health < wsNumber('low_health_pct', 50);

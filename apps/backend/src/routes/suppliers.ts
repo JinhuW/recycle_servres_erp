@@ -197,7 +197,9 @@ function rollup(sql: ReturnType<typeof getDb>, floor: number, u: User) {
 
 // ── List ───────────────────────────────────────────────────────────────────
 // `follow` and `health` are the rail's filters. They are applied after the
-// rollup because both are derived, not columns.
+// rollup because both are derived, not columns — over the whole scoped book,
+// then paged: filtering the first N rows showed a book with every "soon"
+// client past the cap as having none, and the counts changed with the limit.
 suppliers.get('/', async (c) => {
   const u = c.var.user;
   const sql = getDb(c.env);
@@ -207,6 +209,7 @@ suppliers.get('/', async (c) => {
   const follow = c.req.query('follow') ?? 'all';    // due | soon | all
   const health = c.req.query('health') ?? 'all';    // quiet | all
   const limit = clampLimit(c.req.query('limit'), 200, 500);
+  const offset = Math.max(0, Number.parseInt(c.req.query('offset') ?? '0', 10) || 0);
 
   const rows = (await sql`
     ${rollup(sql, s.tierFloorUsd, u)}
@@ -227,7 +230,6 @@ suppliers.get('/', async (c) => {
         OR EXISTS (SELECT 1 FROM unnest(s.supplies) t WHERE LOWER(t) LIKE '%' || ${q ?? ''} || '%')
       )
     ORDER BY (s.next_follow_up_at IS NULL), s.next_follow_up_at, s.name
-    LIMIT ${limit}
   `) as unknown as Row[];
 
   const items = rows.map((r) => toApi(r, s));
@@ -244,7 +246,9 @@ suppliers.get('/', async (c) => {
     if (health === 'quiet' && !(i.health === 'quiet' || i.health === 'lost')) return false;
     return true;
   });
-  return c.json({ items: filtered, counts, settings: { cadenceDays: s.cadenceDays } });
+  const page = filtered.slice(offset, offset + limit);
+  const nextOffset = offset + limit < filtered.length ? offset + limit : null;
+  return c.json({ items: page, counts, nextOffset, settings: { cadenceDays: s.cadenceDays } });
 });
 
 // ── Suggestions ────────────────────────────────────────────────────────────

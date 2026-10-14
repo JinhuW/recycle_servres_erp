@@ -39,15 +39,27 @@ export function DesktopClients({ showToast }: { showToast: (m: string, k?: 'succ
   const [suggOpen, setSuggOpen] = usePersisted('desktop.clients.suggOpen', true);
   const [busy, setBusy] = useState<string | null>(null);
 
+  // The whole scoped book: the list is paged at 500 and the rail filters and
+  // searches what it holds, so it holds everything.
+  const loadBook = useCallback(async (): Promise<ClientList> => {
+    const items: Client[] = [];
+    let offset = 0;
+    for (;;) {
+      const page = await api.get<ClientList>(`/api/suppliers?limit=500&offset=${offset}`);
+      items.push(...page.items);
+      if (page.nextOffset == null) return { ...page, items, nextOffset: null };
+      offset = page.nextOffset;
+    }
+  }, []);
   const reload = useCallback(() => {
     return Promise.all([
-      api.get<ClientList>('/api/suppliers'),
+      loadBook(),
       api.get<{ items: Suggestion[] }>('/api/suppliers/suggestions'),
     ])
       .then(([list, sugg]) => { setData(list); setSuggestions(sugg.items); })
       .catch(handleFetchError)
       .finally(() => setLoaded(true));
-  }, []);
+  }, [loadBook]);
   useEffect(() => { void reload(); }, [reload]);
 
   const rows = useMemo(() => {
