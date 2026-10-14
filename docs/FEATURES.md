@@ -994,6 +994,13 @@ is not a stage but a flag beside one, set once every line has sold
 
 ## Clients (the people we buy from)
 
+- **The list filters and counts the whole book, then pages it** (v1.258.5).
+  Follow-up and health were applied after a 200-row cap, so a book whose
+  "soon" clients all sat past the cap showed none and counted none.
+  `GET /api/suppliers?limit=&offset=` answers `nextOffset`; the Clients page
+  walks the pages. A box from a non-Latin seller lands on the right client:
+  package → PO matches the seller on the same name key every other client
+  lookup uses, where it had read every all-Chinese name as the same.
 - **Clients named in other scripts no longer collide** (v1.198.3). A name's
   key kept only A–Z and 0–9, so every Chinese or Vietnamese name keyed as
   empty. A second such client at the same zip was refused, and every
@@ -1117,9 +1124,10 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
 - **The export and both screens read in the vendor bid sheet's order** — brand,
   then capacity, speed, numerically collated with blanks last (v1.107.0), and
   category rank ahead of it on the screens, which have no tabs to group by
-  (v1.111.0). One implementation serves the workbooks and the lists. The screens
-  still take the newest 200 rows from the database; only their arrangement
-  changed. The bid sheet's RAM tab (and its packing tabs) put a device-group /
+  (v1.111.0). One implementation serves the workbooks and the lists. The
+  screens read the whole book in pages of 200 (`GET /api/inventory?limit=&cursor=`,
+  v1.258.5); until then they took the newest 200 rows and ended there with no
+  sign that they had, the phone's totals included. The bid sheet's RAM tab (and its packing tabs) put a device-group /
   DDR-generation grouping ahead of that order (v1.129.0); the export and the
   screens do not.
 - Other-type stock can be filtered by Untyped (v1.49.0).
@@ -1922,6 +1930,11 @@ over MCP.
 
 - Paginated with infinite scroll (v1.12.0), sortable by clicking column headers
   (v1.67.0).
+- **The expanded row shows no invented figures** (v1.258.5). It used to chart
+  70% of each sell price as Cost beside real sales and list the average sell
+  price nudged by a few percent under each price-source name, counting those
+  as sources in its confidence note. It says "no cost data" and "no feed
+  connected" instead, and counts only the team's own sales.
 - A line can be priced while the buy can still change (v1.54.0).
 - **Five feeds write `last_price`**, each tagged in the event's source: the
   scraper and MCP connectors (`scraper:`/`mcp:`), a manager's manual entry
@@ -1964,6 +1977,18 @@ over MCP.
 ## Dashboard
 
 Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
+
+- **Every sale counts, costed or not** (v1.258.5). A manual sale line — sold
+  with nothing on the shelf — and a line whose PO source was since deleted
+  used to fall out of revenue, the order count, the chart, the category
+  rollup and the contribution cards, so the sell-orders screen showed Done
+  orders the dashboard did not. Revenue and counts now include every line;
+  cost, profit and commission are summed only where a PO line exists to
+  price them, and the gross-profit tile says how many sales, and how much
+  revenue, carry no recorded cost. On the contribution cards such a sale
+  sits on the no-purchaser row, the no-supplier row's twin. The phone's
+  profit sparkline keeps a loss period on the chart, with the zero line
+  drawn when there is one.
 
 - **The money reads the right facts** (v1.198.0):
   - A sale belongs to the day its sell order became Done
