@@ -17,6 +17,21 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.258.1] - 2026-10-14
+
+The PO list's payment-gap mark explains itself on hover (RS-251).
+
+### Fixed
+
+- **The red `!`'s note opens the moment the pointer or focus lands on it**,
+  beside the mark, as the PO page's amber banner: what the bank paid and what
+  the PO totals to the cent, the difference, and *Open Payments*. v1.258.0
+  hung the same words on a native `title`, which browsers show late and never
+  on touch or focus — so a mark on a row whose whole-dollar figures agreed
+  (PO-1491: $5,835.28 against $5,835.25 paid) looked wrong rather than three
+  cents off. The note floats above the table's scroll box, so a bottom row's
+  isn't clipped, and neither the mark nor the note toggles the row's drawer.
+
 ## [1.258.0] - 2026-10-14
 
 The desktop PO list marks a PO whose linked payment is off (RS-250).

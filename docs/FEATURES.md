@@ -731,8 +731,11 @@ is not a stage but a flag beside one, set once every line has sold
     - The PO page compares against its live cost, so a fee typed to cover the
       gap clears the warning before Save.
     - The desktop PO list puts a red circled `!` ahead of the order id of
-      every such PO, so the off rows stand out without opening each one;
-      hovering it names both figures and the difference (v1.258.0).
+      every such PO, so the off rows stand out without opening each one
+      (v1.258.0). Hovering or focusing it opens the banner's note at once:
+      both figures to the cent, the difference and *Open Payments* — the
+      list's cells are whole dollars, so a cents gap is invisible without it
+      (v1.258.1).
   - **Asked again at approval.** Moving a PO from before Ready to Pay into
     Ready to Pay or Done asks *Continue anyway?* first. That covers Review
     mode's Approve and the PO page's Save.

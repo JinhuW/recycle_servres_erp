@@ -4392,3 +4392,16 @@ body:has(.pk-page) .tweaks-fab, body:has(.pk-page) .tweaks-pop { display: none; 
   font-family: 'Inter', system-ui, sans-serif; font-size: 10.5px; font-weight: 800; line-height: 1;
   cursor: help;
 }
+.pay-gap-mark:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* The mark's note: the PO page's amber banner, floated. Normal weight and
+   font — the mark sits in the mono, bold order-id cell. */
+.pay-gap-note {
+  z-index: 90; max-width: 420px;
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; border-radius: 8px;
+  background: var(--warn-soft); color: var(--warn-strong);
+  border: 1px solid color-mix(in oklch, var(--warn) 45%, transparent);
+  box-shadow: 0 12px 28px rgba(15,23,42,0.14);
+  font-family: 'Inter', system-ui, sans-serif; font-size: 12.5px; font-weight: 500; line-height: 1.4;
+  text-align: left; cursor: default;
+}

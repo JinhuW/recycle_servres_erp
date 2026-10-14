@@ -24,6 +24,7 @@ import type { OrderSummary, Order } from '../../lib/types';
 import { TableSkeleton } from '../../components/Skeleton';
 import { OrderCategoryChips } from '../../components/OrderCategoryChips';
 import { SoldBadge } from '../../components/SoldBadge';
+import { PaymentGapMark } from '../../components/PaymentMismatch';
 import { useReviewModeEntry } from './ReviewModeEntry';
 
 // Map a stage tone keyword to a usable CSS variable. Same lookup as the
@@ -641,8 +642,6 @@ export function DesktopOrders({ onToast }: Props) {
                 // The same gap the PO page's banner warns of, so the off rows
                 // can be picked out of the list without opening each one.
                 const gap = paymentGap(o.linkedPaid, totalCostFor(o), o.payment);
-                const gapText = gap && t('payGapBanner', { paid: fmtUSD(gap.paid, locale), total: fmtUSD(gap.total, locale) })
-                  + ` (${t(gap.diff > 0 ? 'payGapMore' : 'payGapLess', { amt: fmtUSD(Math.abs(gap.diff), locale) })})`;
                 return (
                   <Fragment key={o.id}>
                     <tr
@@ -664,9 +663,7 @@ export function DesktopOrders({ onToast }: Props) {
                       </td>
                       <td className="mono col-id" style={{ fontWeight: 600, display: isVis('id') ? undefined : 'none' }}>
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                          {gapText && (
-                            <span className="pay-gap-mark" role="img" aria-label={gapText} title={gapText}>!</span>
-                          )}
+                          {gap && <PaymentGapMark orderId={o.id} gap={gap} />}
                           {o.id}
                           <button
                             onClick={(e) => {
