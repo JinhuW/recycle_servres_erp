@@ -29,17 +29,31 @@ export async function purgeStaleWebSubmissions(
 ): Promise<PurgeBatch> {
   const olderThanDays = opts.olderThanDays ?? PURGE_AFTER_DAYS;
   const afterId = opts.afterId ?? null;
+  // Claimed before anything is deleted: triage and conversion refuse a
+  // claimed row (routes/webSubmissions.ts), so a manager's reopen cannot
+  // land between the photos going and the row going. A claim an earlier run
+  // left behind (a crash mid-batch) expires after an hour.
   const rows = await sql<{ id: string; keys: string[] }[]>`
-    SELECT ws.id,
+    WITH claimed AS (
+      UPDATE web_submissions ws SET purge_claimed_at = NOW()
+      WHERE ws.id IN (
+        SELECT id FROM web_submissions
+        WHERE status IN ('spam', 'archived') AND order_id IS NULL
+          AND updated_at < NOW() - make_interval(days => ${olderThanDays})
+          AND (purge_claimed_at IS NULL OR purge_claimed_at < NOW() - INTERVAL '1 hour')
+          AND (${afterId}::text IS NULL OR id > ${afterId}::text)
+        ORDER BY id
+        LIMIT ${BATCH}
+        FOR UPDATE SKIP LOCKED
+      )
+      RETURNING ws.id
+    )
+    SELECT c.id,
            COALESCE(array_agg(p.storage_key) FILTER (WHERE p.storage_key IS NOT NULL), '{}') AS keys
-    FROM web_submissions ws
-    LEFT JOIN web_submission_photos p ON p.submission_id = ws.id
-    WHERE ws.status IN ('spam', 'archived') AND ws.order_id IS NULL
-      AND ws.updated_at < NOW() - make_interval(days => ${olderThanDays})
-      AND (${afterId}::text IS NULL OR ws.id > ${afterId}::text)
-    GROUP BY ws.id
-    ORDER BY ws.id
-    LIMIT ${BATCH}
+    FROM claimed c
+    LEFT JOIN web_submission_photos p ON p.submission_id = c.id
+    GROUP BY c.id
+    ORDER BY c.id
   `;
   if (rows.length === 0) return { submissions: 0, photos: 0, scanned: 0, lastId: null };
   // deleteAttachments reports success for every key when R2 isn't configured,
@@ -52,7 +66,17 @@ export async function purgeStaleWebSubmissions(
   // retries them rather than orphaning objects nothing points at any more.
   const done = rows.filter((r) => r.keys.every(gone));
   if (done.length > 0) {
-    await sql`DELETE FROM web_submissions WHERE id = ANY(${done.map((r) => r.id)}::text[])`;
+    // Conditional on the claim and on the state the row was claimed in.
+    await sql`
+      DELETE FROM web_submissions
+      WHERE id = ANY(${done.map((r) => r.id)}::text[])
+        AND purge_claimed_at IS NOT NULL
+        AND status IN ('spam', 'archived') AND order_id IS NULL
+    `;
+  }
+  const kept = rows.filter((r) => !r.keys.every(gone)).map((r) => r.id);
+  if (kept.length > 0) {
+    await sql`UPDATE web_submissions SET purge_claimed_at = NULL WHERE id = ANY(${kept}::text[])`;
   }
   return {
     submissions: done.length,

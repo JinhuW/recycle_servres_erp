@@ -29,6 +29,9 @@ on:
       - ".github/workflows/backend-tests.yml"
       # tests/sync-scrub.test.ts runs this against the migrated schema.
       - "deploy/railway-sync/scrub.sql"
+      # The Worker is the backend's trusted edge (forwarded headers, client
+      # IP): a change to it runs the suite too.
+      - "deploy/cloudflare/**"
       # Root manifests: a lockfile, workspace or Node change alters what every
       # package builds and runs with, without touching a file under apps/.
       - "pnpm-lock.yaml"
@@ -45,6 +48,9 @@ on:
       - ".github/workflows/backend-tests.yml"
       # tests/sync-scrub.test.ts runs this against the migrated schema.
       - "deploy/railway-sync/scrub.sql"
+      # The Worker is the backend's trusted edge (forwarded headers, client
+      # IP): a change to it runs the suite too.
+      - "deploy/cloudflare/**"
       # Root manifests: a lockfile, workspace or Node change alters what every
       # package builds and runs with, without touching a file under apps/.
       - "pnpm-lock.yaml"

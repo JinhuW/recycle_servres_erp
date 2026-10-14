@@ -3,6 +3,7 @@
 // :5173 can call us; set CORS_ALLOWED_ORIGINS in prod to lock it down.
 
 import { Hono } from 'hono';
+import { r2Configured } from './r2';
 import { cors } from 'hono/cors';
 import { bodyLimit } from 'hono/body-limit';
 
@@ -238,7 +239,10 @@ app.get('/api/health', async (c) => {
   // someone notices packages never move. Modes only — no key values, no more
   // than set/unset.
   const ship = describeShipping(c.env as Env);
-  const providers = { ...ship, ocr: describeOcr(c.env as Env), ...describeMail(c.env as Env) };
+  const providers = {
+    ...ship, ocr: describeOcr(c.env as Env), ...describeMail(c.env as Env),
+    attachments: r2Configured(c.env as Env) ? 'r2' : 'none',
+  };
   try {
     await getDb(c.env)`SELECT 1`;
     return c.json({ status: 'ok', version, commit, builtAt, providers });

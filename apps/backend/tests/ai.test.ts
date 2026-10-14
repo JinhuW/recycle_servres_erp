@@ -18,6 +18,14 @@ describe('parseModelJson', () => {
   it('returns null when no JSON present', () => {
     expect(parseModelJson('no json here')).toBeNull();
   });
+  // A number, an array or a string parse as JSON and used to come back cast
+  // as a record.
+  it('returns null for JSON that is not an object', () => {
+    expect(parseModelJson('42')).toBeNull();
+    expect(parseModelJson('[]')).toBeNull();
+    expect(parseModelJson('"text"')).toBeNull();
+    expect(parseModelJson('null')).toBeNull();
+  });
 });
 
 describe('PROMPT_BY_CATEGORY', () => {
@@ -103,6 +111,15 @@ describe('openRouterScan', () => {
     const r = await openRouterScan({ OPENROUTER_API_KEY: 'k' } as Env, 'RAM', img);
     expect(r.confidence).toBe(0.45);
     expect(r.fields._confidence).toBeUndefined();
+  });
+
+  // Eight unknown strings used to lift a reply with no usable RAM field to
+  // the coverage floor's maximum.
+  it('counts only the expected fields toward the coverage floor', async () => {
+    const junk = Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`x${i}`, 'filler']));
+    mockFetch(200, { choices: [{ message: { content: JSON.stringify({ ...junk, _confidence: 0 }) } }] });
+    const r = await openRouterScan({ OPENROUTER_API_KEY: 'k' } as Env, 'RAM', img);
+    expect(r.confidence).toBe(0);
   });
 
   it('lifts a harsh self-rating when field coverage is high', async () => {

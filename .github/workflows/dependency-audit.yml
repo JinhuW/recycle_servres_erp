@@ -1,0 +1,44 @@
+# Audit the locked production dependencies on a schedule and on every
+# lockfile change. Until now the only audit was an opt-in git hook that ran
+# when a developer who had installed it changed the lockfile: an advisory
+# published against an unchanged lockfile reached nobody.
+#
+# High and critical only. An advisory judged unreachable is dispositioned in
+# pnpm-workspace.yaml (auditConfig.ignoreGhsas) with the reason beside it,
+# never by lowering the level here.
+name: dependency-audit
+
+on:
+  schedule:
+    - cron: "17 6 * * 1" # Mondays 06:17 UTC
+  push:
+    branches: [dev, main]
+    paths:
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/dependency-audit.yml"
+  pull_request:
+    paths:
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/dependency-audit.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4 — version comes from packageManager in package.json
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --prod --audit-level high

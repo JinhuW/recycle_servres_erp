@@ -243,6 +243,35 @@ describe('DCR /oauth/register', () => {
     expect((last.body as Record<string, unknown>).error).toBe('temporarily_unavailable');
   });
 
+  // The count and the insert were two statements with nothing between them:
+  // a burst at the last slot was all stored.
+  it('admits exactly one of two registrations at the last global slot', async () => {
+    const sql = getTestDb();
+    const { createOAuthClient } = await import('../src/oauth/clients');
+    // This describe resets the database once; fill to exactly one slot short
+    // of the global hour cap (60) counting what earlier tests registered, and
+    // take the filler back out afterwards.
+    const [{ n }] = await sql<{ n: number }[]>`
+      SELECT COUNT(*)::int AS n FROM oauth_clients
+      WHERE created_by IS NULL AND revoked_at IS NULL AND created_at > NOW() - INTERVAL '1 hour'`;
+    for (let i = n; i < 59; i++) {
+      await createOAuthClient(sql, {
+        name: `fill-${i}`, redirectUris: ['https://example.com/cb'], grantTypes: ['authorization_code'],
+        scopes: ['market:read'], createdBy: null, public: true,
+      });
+    }
+    const register = (ip: string) => api('POST', '/oauth/register', {
+      headers: { 'X-Forwarded-For': ip },
+      body: { client_name: 'last', redirect_uris: ['https://example.com/cb'], token_endpoint_auth_method: 'none' },
+    });
+    try {
+      const [a, b] = await Promise.all([register('203.0.113.10'), register('203.0.113.11')]);
+      expect([a.status, b.status].sort()).toEqual([201, 429]);
+    } finally {
+      await sql`DELETE FROM oauth_clients WHERE name LIKE 'fill-%' OR name = 'last'`;
+    }
+  });
+
   it('rejects non-https + non-localhost redirect URIs', async () => {
     const r = await api('POST', '/oauth/register', {
       body: { client_name: 'evil', redirect_uris: ['http://evil.example.com/cb'] },

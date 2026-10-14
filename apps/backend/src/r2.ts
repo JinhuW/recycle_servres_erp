@@ -42,6 +42,17 @@ let cached: { key: string; client: S3Client } | null = null;
 type R2Env = Env & Required<Pick<Env,
   'R2_S3_ENDPOINT' | 'R2_ACCESS_KEY_ID' | 'R2_SECRET_ACCESS_KEY' | 'R2_BUCKET' | 'R2_ATTACHMENTS_PUBLIC_URL'>>;
 
+// Production with no bucket: an upload must fail, not succeed as a stub whose
+// bytes nobody stored. Dev and tests keep the stub.
+export class StorageUnavailableError extends Error {
+  constructor() {
+    super('attachment storage (R2) is not configured on this server');
+    this.name = 'StorageUnavailableError';
+  }
+}
+
+const stubAllowed = (env: Env) => env.NODE_ENV !== 'production';
+
 export function r2Configured(env: Env): env is R2Env {
   return !!(env.R2_S3_ENDPOINT && env.R2_ACCESS_KEY_ID && env.R2_SECRET_ACCESS_KEY
     && env.R2_BUCKET && env.R2_ATTACHMENTS_PUBLIC_URL);
@@ -94,6 +105,7 @@ export async function uploadAttachment(
 
   const s3 = client(env);
   if (!s3) {
+    if (!stubAllowed(env)) throw new StorageUnavailableError();
     const stubId = 'stub-' + crypto.randomUUID();
     return {
       storageKey: stubId,
@@ -163,6 +175,7 @@ export async function copyAttachment(
 ): Promise<UploadResult> {
   const s3 = client(env);
   if (storageKey.startsWith('stub-') || !s3) {
+    if (!s3 && !stubAllowed(env)) throw new StorageUnavailableError();
     return { storageKey: 'stub-' + crypto.randomUUID(), deliveryUrl, provider: 'stub' };
   }
   const base = storageKey.split('/').pop() ?? 'photo';

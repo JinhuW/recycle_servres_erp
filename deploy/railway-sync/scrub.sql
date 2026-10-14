@@ -19,3 +19,9 @@ TRUNCATE public.refresh_tokens, public.oauth_refresh_tokens,
          public.oauth_authorization_codes, public.oauth_pending_consent,
          public.login_attempts;
 UPDATE public.oauth_clients SET secret_hash = NULL, revoked_at = COALESCE(revoked_at, NOW());
+
+-- The restored copy says what it is, for sync.sh's target check: a database
+-- marked anything but 'dev' is refused as a restore target whatever its
+-- hostname. Prod carries no marker table, so the dump never brings one.
+CREATE TABLE public.env_marker (name TEXT PRIMARY KEY);
+INSERT INTO public.env_marker (name) VALUES ('dev');

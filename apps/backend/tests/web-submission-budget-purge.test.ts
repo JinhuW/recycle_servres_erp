@@ -29,6 +29,20 @@ describe('public form daily budget', () => {
     expect(Number(r.headers.get('Retry-After'))).toBeGreaterThan(0);
   });
 
+  // The budget was read before the slow part and counted only stored rows,
+  // so every request in flight saw the same room: a burst at the last slot
+  // all got in. Reserved under one lock now.
+  it('admits exactly one of two requests at the last slot', async () => {
+    await getTestDb()`
+      INSERT INTO workspace_settings (key, value) VALUES ('public_form_daily_submissions', '1'::jsonb)
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+    `;
+    const [a, b] = await Promise.all([send(), send()]);
+    expect([a.status, b.status].sort()).toEqual([201, 429]);
+    const [{ n }] = await getTestDb()<{ n: number }[]>`SELECT COUNT(*)::int AS n FROM public_form_reservations`;
+    expect(n).toBe(0);
+  });
+
   // Pacing under the per-minute limit, one sender would otherwise use up the
   // whole day's budget by itself.
   it('gives one address its own daily share, and only when the Worker named it', async () => {
@@ -104,6 +118,38 @@ describe('public form daily budget', () => {
     const [row] = await sql<{ size_bytes: number }[]>`
       SELECT size_bytes FROM web_submission_photos WHERE submission_id = ${(r.body as { ref: string }).ref}`;
     expect(row.size_bytes).toBeLessThanOrEqual(cap);
+  });
+});
+
+describe('purge claims and triage', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  // The purge selected, deleted photos, then deleted rows by id alone; a
+  // manager's reopen in between resurrected a submission whose photos were
+  // gone. A claimed row refuses triage until the purge is done with it.
+  it('refuses triage of a submission the purge has claimed, and purges only what it claimed', async () => {
+    const sql = getTestDb();
+    const { loginAs, ALEX } = await import('./helpers/auth');
+    const { token } = await loginAs(ALEX);
+    await sql`
+      INSERT INTO web_submissions (id, site, kind, email, payload, status, updated_at, purge_claimed_at)
+      VALUES ('WS-CLAIMED', 'recycleservers', 'quote', 'x@example.com', '{}'::jsonb, 'spam',
+              NOW() - INTERVAL '40 days', NOW())
+    `;
+    const r = await api<{ error: string }>('PATCH', '/api/web-submissions/WS-CLAIMED', { token, body: { status: 'new' } });
+    expect(r.status).toBe(409);
+    expect(r.body.error).toMatch(/being purged/);
+    // An unclaimed stale row is claimed and goes; a fresh one is left alone.
+    await sql`
+      INSERT INTO web_submissions (id, site, kind, email, payload, status, updated_at)
+      VALUES ('WS-STALE', 'recycleservers', 'quote', 'x@example.com', '{}'::jsonb, 'archived', NOW() - INTERVAL '40 days'),
+             ('WS-FRESH', 'recycleservers', 'quote', 'x@example.com', '{}'::jsonb, 'archived', NOW())
+    `;
+    const out = await purgeStaleWebSubmissions(sql, testEnv);
+    expect(out.submissions).toBeGreaterThanOrEqual(1);
+    const left = (await sql<{ id: string }[]>`SELECT id FROM web_submissions ORDER BY id`).map((r) => r.id);
+    expect(left).not.toContain('WS-STALE');
+    expect(left).toContain('WS-FRESH');
   });
 });
 

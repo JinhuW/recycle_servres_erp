@@ -17,6 +17,70 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.258.8] - 2026-10-14
+
+Batch G of the 2026-10-13 review fixes (RS-252), the last: external side
+effects and operations.
+
+### Security
+
+- **Production refuses attachments it cannot store.** With no R2
+  configured — or four of its five variables — an upload used to succeed as
+  a stub whose bytes went nowhere, and the receipt or photo was recorded as
+  stored. Partial configuration now refuses to boot; none at all makes
+  every upload and copy a 503 that names the problem, and `/api/health`
+  reports `providers.attachments` (SEC-05).
+- **The VNC bridge is bounded in both directions**: a frame cap (256 KiB,
+  input is key and pointer events), a cap on what may queue before the
+  console's socket opens (1 MiB), and the same back-pressure rule toward the
+  worker that the screen stream already had toward the browser (SEC-06).
+- **The public forms' daily budget is reserved, not read.** It was checked
+  before the slow part (image decoding, uploads) and counted only stored
+  rows, so every request in flight saw the same room and a burst at the
+  last slot all got in. A request now reserves its place under one advisory
+  lock before any work; the budget counts live reservations, which are
+  released as the request settles (SEC-07).
+- **Anonymous OAuth registration counts and inserts under one lock**, so a
+  burst at the last slot admits one (SEC-08).
+- **The stale-submission purge claims its rows first.** It selected, deleted
+  photos, then deleted rows by id alone; a manager's reopen in between
+  resurrected a submission whose photos were already gone, or purged one
+  just reopened. Triage and conversion refuse a claimed row, and the final
+  delete is conditional on the claim and the state it was claimed in
+  (SEC-09).
+- **A sell-order receipt whose row fails to insert is taken back down**
+  from the public bucket, as the PO evidence route already did (SEC-15).
+
+### Fixed
+
+- **A tracking number is registered with Shippo once.** The add-time call
+  and the sweep (and two backends through a deploy) both read the NULL stamp
+  and could register the same number — two update streams for one box. A
+  registrant claims the row in the database first; a refusal frees the
+  claim, a timed-out call keeps it until it expires (INF-03).
+- **The AI review reads a label image up to its cap and no further**, where
+  it buffered the whole response before checking the size (INT-02). A model
+  reply that is not a JSON object is no reading, and only the fields the
+  prompt asked for lift the confidence floor — eight unknown strings used to
+  (INT-03).
+- **A failed seed leaves the append-only protections on**: each
+  disable-delete-enable runs in one transaction (SUP-04).
+- **Export tab names are unique the way Excel judges them** — case-insensitive,
+  the suffix reserved before the 31-character cut, every minted name
+  reserved — and an edge apostrophe is stripped (SUP-05).
+
+### Operations
+
+- The frontend deploy waits on the same commit's typecheck, tests and build;
+  a change to the Cloudflare Worker runs the backend suite (INF-01).
+- The R2 CORS policy names every served hostname (INF-02; `terraform apply`
+  is a separate, manual step).
+- The prod→dev sync requires its target pin and refuses a target database
+  marked anything but `dev`; the restore leaves that marker (INF-04). The
+  uptime alert is valid JSON and its delivery is checked (INF-05).
+- A weekly dependency audit (and one on every lockfile change) runs in CI,
+  with dispositions in `pnpm-workspace.yaml` (DEP-03).
+
 ## [1.258.7] - 2026-10-14
 
 Batch F of the 2026-10-13 review fixes (RS-252): routes, editors and

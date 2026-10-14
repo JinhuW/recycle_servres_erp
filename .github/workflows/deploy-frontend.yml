@@ -37,7 +37,29 @@ permissions:
   contents: read
 
 jobs:
+  # The same commit's typecheck, frontend tests and build, in this workflow:
+  # backend-tests.yml runs beside this one, not ahead of it, so a push whose
+  # checks failed used to deploy anyway.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4 — version comes from packageManager in package.json
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @recycle-erp/shared typecheck
+      - run: pnpm --filter recycle-erp-frontend typecheck
+      - run: pnpm --filter recycle-erp-frontend test
+      - run: pnpm --filter recycle-erp-frontend build
+
   deploy:
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

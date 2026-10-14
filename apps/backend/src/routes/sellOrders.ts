@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { CLOSE_REASON_IDS, isRealPhotoUrl } from '@recycle-erp/shared';
 import { getDb, type SqlLike } from '../db';
-import { uploadAttachment, deleteAttachment } from '../r2';
+import { uploadAttachment, deleteAttachment, StorageUnavailableError } from '../r2';
 import { notify } from '../lib/notify';
 import { getUploadLimits } from '../lib/settings';
 import { allLimited } from '../lib/concurrency';
@@ -1136,14 +1136,21 @@ sellOrders.post('/:id/status-meta/:status/attachments', async (c) => {
 
   // R2 upload happens outside the transaction — it's the slow part. A tx open
   // across it would hold a row lock for the whole upload. If the DB INSERT
-  // below fails the uploaded object is orphaned in R2; r2.ts treats orphans
-  // as a separate concern.
+  // below fails the object is taken back down (nothing else would ever find
+  // it), as the PO evidence route does.
   const uploaded = await uploadAttachment(c.env, stored, `sell-orders/${id}/${status}`)
-    .catch(e => { log.error('attachment upload', e); return null; });
+    .catch(e => { log.error('attachment upload', e); return e instanceof StorageUnavailableError ? 'unavailable' as const : null; });
+  if (uploaded === 'unavailable') return c.json({ error: 'attachment storage is not configured on this server' }, 503);
   if (!uploaded) return c.json({ error: 'upload failed' }, 502);
 
-  const row = await sql.begin(async (tx) => {
-    const r = (await tx`
+  type AttachmentRow = {
+    id: string; filename: string; size_bytes: number; mime_type: string;
+    delivery_url: string; uploaded_at: Date;
+  };
+  let row: AttachmentRow;
+  try {
+    row = await sql.begin(async (tx) => {
+    const r = (await tx<AttachmentRow[]>`
       INSERT INTO sell_order_status_attachments
         (sell_order_id, status, filename, size_bytes, mime_type, storage_key, delivery_url, uploaded_by)
       VALUES
@@ -1157,7 +1164,12 @@ sellOrders.post('/:id/status-meta/:status/attachments', async (c) => {
       attachmentId: r.id, filename: r.filename, size: r.size_bytes, mime: r.mime_type,
     });
     return r;
-  });
+    });
+  } catch (e) {
+    await deleteAttachment(c.env, uploaded.storageKey)
+      .catch((err) => log.warn('receipt cleanup after a failed insert', { storageKey: uploaded.storageKey, err }));
+    throw e;
+  }
 
   return c.json({
     attachment: {

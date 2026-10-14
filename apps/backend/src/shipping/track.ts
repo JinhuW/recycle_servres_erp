@@ -127,18 +127,41 @@ export async function refreshPackageTracking(
 // webhooks are NOT idempotent, so a second registration means two update
 // streams for one box. Returns whether the number is now subscribed; a failure
 // leaves the stamp NULL so the sweep below retries it.
+//
+// One registrant per number: the claim is taken in the database, so it holds
+// across the add-time call, the sweep and a second backend through a deploy.
+// A refusal frees the claim for the next sweep. A timed-out call may have
+// been delivered, so its claim stands until it expires rather than register
+// the number again at once.
+const CLAIM_EXPIRES = (sql: Sql) => sql`INTERVAL '5 minutes'`;
+
 export async function registerPackageTracking(
   sql: Sql,
   client: Pick<ShippoClient, 'registerTracking'>,
   pkg: { id: string; tracking_number: string; carrier: string },
 ): Promise<boolean> {
+  const claimed = await sql`
+    UPDATE packages SET tracking_claimed_at = NOW()
+    WHERE id = ${pkg.id} AND tracking_registered_at IS NULL
+      AND (tracking_claimed_at IS NULL OR tracking_claimed_at < NOW() - ${CLAIM_EXPIRES(sql)})
+    RETURNING id
+  `;
+  if (claimed.length === 0) return false;
   try {
     await client.registerTracking(pkg.tracking_number, pkg.carrier, `package ${pkg.id}`);
-    await sql`UPDATE packages SET tracking_registered_at = NOW() WHERE id = ${pkg.id}`;
+    await sql`
+      UPDATE packages SET tracking_registered_at = NOW(), tracking_claimed_at = NULL WHERE id = ${pkg.id}
+    `;
     return true;
   } catch (err) {
+    const uncertain = err instanceof Error && /timeout|timed out|abort/i.test(err.message);
+    if (!uncertain) {
+      await sql`UPDATE packages SET tracking_claimed_at = NULL WHERE id = ${pkg.id}`;
+    }
     shipLog.child({ packageId: pkg.id })
-      .warn('tracking registration failed; the sweep will retry', err);
+      .warn(uncertain
+        ? 'tracking registration timed out; its claim stands until it expires'
+        : 'tracking registration failed; the sweep will retry', err);
     return false;
   }
 }
@@ -161,6 +184,7 @@ export async function registerUntrackedPackages(
     SELECT id, tracking_number, carrier
     FROM packages
     WHERE tracking_registered_at IS NULL
+      AND (tracking_claimed_at IS NULL OR tracking_claimed_at < NOW() - ${CLAIM_EXPIRES(sql)})
       AND status IN ('purchased','in_transit','exception')
     ORDER BY created_at
     LIMIT ${REGISTER_BATCH}

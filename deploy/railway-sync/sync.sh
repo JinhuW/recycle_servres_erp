@@ -44,11 +44,25 @@ if [ "$prod_host" = "$dev_host" ]; then
   exit 1
 fi
 
-# Optional pin: when EXPECTED_DEV_DB_HOST is set on the service, the target host
-# must match it exactly (host:port). Turns "trust the env var" into "assert the
-# env var", so no future credential edit can silently redirect the restore.
-if [ -n "${EXPECTED_DEV_DB_HOST:-}" ] && [ "$dev_host" != "$EXPECTED_DEV_DB_HOST" ]; then
+# The pin is required: the target host must match EXPECTED_DEV_DB_HOST exactly
+# (host:port). "Trust the env var" becomes "assert the env var", so no future
+# credential edit can silently redirect the restore. It was optional, and the
+# two string checks above pass the same database reached through its public
+# proxy and its private hostname.
+: "${EXPECTED_DEV_DB_HOST:?EXPECTED_DEV_DB_HOST is required: the dev database host:port this job may restore onto}"
+if [ "$dev_host" != "$EXPECTED_DEV_DB_HOST" ]; then
   echo "[sync] REFUSING: target host (${dev_host}) != EXPECTED_DEV_DB_HOST (${EXPECTED_DEV_DB_HOST})" >&2
+  exit 1
+fi
+
+# And the database says what it is: scrub.sql leaves a marker row in every
+# restored dev, and a target that carries a marker naming anything else — or
+# none, once it has one — is not the dev database whatever its hostname. A
+# target with no marker table at all is a dev that predates the marker; the
+# first restore gives it one.
+marker=$(psql -tA "$DEV_DATABASE_URL" -c "SELECT CASE WHEN to_regclass('public.env_marker') IS NULL THEN 'absent' ELSE COALESCE((SELECT name FROM public.env_marker LIMIT 1), 'none') END")
+if [ "$marker" != "absent" ] && [ "$marker" != "dev" ]; then
+  echo "[sync] REFUSING: target database is marked '${marker}', not 'dev'" >&2
   exit 1
 fi
 
