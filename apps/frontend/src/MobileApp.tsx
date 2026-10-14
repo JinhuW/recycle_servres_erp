@@ -31,10 +31,12 @@ import { lineRequirements, missingFieldNames } from './lib/lineRequirements';
 import { useAuth } from './lib/auth';
 import { useT, translateIn } from './lib/i18n';
 import { api, ApiError, createDraftOrder, deleteOrder } from './lib/api';
+import { hasSharedFile } from './lib/sharedFile';
 import { handleFetchError, showErrorDialog } from './lib/errorToast';
 import {
   navigate, navigateBack, useRoute, match, matchPurchaseOrder, poProductsPath, parseShippingRoute,
   MOBILE_VIEW_TO_PATH, pathToMobileView, readSafeNext, isAuthorizePath,
+  replaceRoute,
 } from './lib/route';
 import { confirmDiscard } from './lib/unsavedGuard';
 import type { Category, DraftLine, Notification, Order, OrderLine, OrderSummary, ScanResponse } from './lib/types';
@@ -210,6 +212,19 @@ function Shell() {
   // here for the same reason: the form unmounts that screen.
   const [productsLanding, setProductsLanding] = useState<ProductsLanding | null>(null);
   const orderDetailMatch = matchPurchaseOrder(path);
+
+  // The PWA's Submit shortcut and the share-target landing both arrive at
+  // `/submit`, which is no screen: it opens the capture flow and lands on the
+  // dashboard underneath. A shared photo (lib/sharedFile.ts) waits for the
+  // camera, which the next product's Scan opens.
+  useEffect(() => {
+    if (path !== '/submit' || !user) return;
+    replaceRoute('/dashboard');
+    startNewDraft();
+    if (hasSharedFile()) showToast(t('sharedPhotoReady'));
+    // startNewDraft and showToast are stable for the component's lifetime.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [path, user?.id]);
 
   // Load notifications when the user is signed in.
   useEffect(() => {

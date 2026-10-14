@@ -2512,6 +2512,21 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     mktWithinTarget: 'within target',
     mktAboveCeiling: 'above ceiling — push back',
     mktBrokerQuotes: 'Recent broker quotes',
+    sharedPhotoReady: 'Shared photo ready — add a product and tap Scan.',
+    acCreatedTitle: 'Order created',
+    acSubmittedTitle: 'Submitted for review',
+    acAdvancedTitle: 'Advanced {from} → {to}',
+    acMetaChangedTitle: 'Updated order details',
+    acNoteOnTitle: 'Note on {status}',
+    acAttachmentAddedTitle: 'Attachment added on {status}',
+    acAttachmentRemovedTitle: 'Attachment removed on {status}',
+    acQtyAt: 'Qty {qty} @ {cost}',
+    acWasQtyAt: 'Was qty {qty} @ {cost}',
+    acUnitsCount: '{n} units',
+    rhythmNoneAria: 'No purchase orders yet',
+    rhythmNoneShort: 'no orders yet',
+    rhythmAria: '{count} purchase orders, last one {last} days ago',
+    rhythmAriaGap: ', usually every {gap} days',
     mktNoCostData: 'No cost data yet',
     mktNoFeed: 'No feed connected',
     profitUnknownCost: '{n} sold without a recorded cost ({amount} of revenue)',
@@ -3252,11 +3267,39 @@ const Ctx = createContext<LangCtx>({
   t: (k) => k,
 });
 
+// "Follow the system language" is a per-device choice (the phone's language
+// sheet writes it). It used to be read only by that sheet: the app booted
+// into the profile language regardless and never noticed the device changing
+// its language.
+export const LANG_FOLLOW_SYSTEM_KEY = 'rs.langFollowSystem';
+
+export function systemLang(): Lang {
+  if (typeof navigator === 'undefined') return 'en';
+  const n = (navigator.language || 'en').toLowerCase();
+  return n.startsWith('zh') ? 'zh' : 'en';
+}
+
+export function followsSystemLang(): boolean {
+  try { return localStorage.getItem(LANG_FOLLOW_SYSTEM_KEY) === '1'; } catch { return false; }
+}
+
+export function setFollowsSystemLang(on: boolean): void {
+  try { localStorage.setItem(LANG_FOLLOW_SYSTEM_KEY, on ? '1' : '0'); } catch { /* ignore */ }
+}
+
 export function LangProvider({ children }: { children: ReactNode }) {
   const { user, setLanguage } = useAuth();
-  // Initialize from the user profile when it loads.
+  // Initialize from the user profile when it loads — or from the device,
+  // when the user asked to follow it.
   const [lang, setLangLocal] = useState<Lang>('en');
-  useEffect(() => { if (user?.language) setLangLocal(user.language); }, [user?.language]);
+  useEffect(() => {
+    if (user?.language) setLangLocal(followsSystemLang() ? systemLang() : user.language);
+  }, [user?.language]);
+  useEffect(() => {
+    const onChange = () => { if (followsSystemLang()) setLangLocal(systemLang()); };
+    window.addEventListener('languagechange', onChange);
+    return () => window.removeEventListener('languagechange', onChange);
+  }, []);
 
   // Non-English tables are separate chunks. Until one lands t() falls through
   // to English, which is what already happened on first paint: lang starts

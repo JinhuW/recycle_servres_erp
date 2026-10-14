@@ -15,6 +15,7 @@ import { fmtUSD0, fmtDate } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { usePersisted } from '../../lib/listMemory';
 import { useAuth } from '../../lib/auth';
+import { match, navigate, useRoute } from '../../lib/route';
 import {
   type Client, type ClientList, type Suggestion,
   TIER_KEY, HEALTH_KEY, HEALTH_TONE, dueLabel, dueTone, rhythmMarks,
@@ -34,7 +35,13 @@ export function DesktopClients({ showToast }: { showToast: (m: string, k?: 'succ
   const [loaded, setLoaded] = useState(false);
   const [filter, setFilter] = usePersisted<Filter>('desktop.clients.filter', 'due');
   const [search, setSearch] = useState('');
-  const [openId, setOpenId] = useState<string | null>(null);
+  // The open client is the URL's: `/clients/:id` opens its drawer on a cold
+  // load or a pasted link, a row click writes the id, and closing goes back
+  // to the list. The page used to start the drawer closed whatever the URL
+  // said, so a copied client link showed the general list.
+  const { path } = useRoute();
+  const openId = match('/clients/:id', path)?.id ?? null;
+  const setOpenId = (id: string | null) => navigate(id ? `/clients/${id}` : '/clients');
   const [adding, setAdding] = useState(false);
   const [suggOpen, setSuggOpen] = usePersisted('desktop.clients.suggOpen', true);
   const [busy, setBusy] = useState<string | null>(null);

@@ -1,11 +1,11 @@
 import { useEffect } from 'react';
 import { navigate } from '../lib/route';
 import { blobToDataUrl } from '../lib/image-compress';
+import { storeSharedFile } from '../lib/sharedFile';
 
-// Hand-off key the desktop LineDrawer reads on mount to hydrate the AI
-// dropzone with the shared image. sessionStorage so reload-during-handoff
-// doesn't drop the file, but it's cleared once consumed.
-const SHARED_FILE_KEY = 'pwa:sharedFile';
+// The file is handed on through lib/sharedFile.ts: the phone's camera screen
+// reads it the moment it opens and scans it. sessionStorage so a reload
+// during the hand-off doesn't drop the file; cleared once consumed.
 
 export function ShareTarget() {
   useEffect(() => {
@@ -28,13 +28,7 @@ export function ShareTarget() {
         }, 2000);
       });
 
-      if (file) {
-        try {
-          sessionStorage.setItem(SHARED_FILE_KEY, await blobToDataUrl(file));
-        } catch {
-          /* quota or unavailable — proceed without persistence */
-        }
-      }
+      if (file) storeSharedFile(await blobToDataUrl(file));
       navigate('/submit');
     })();
   }, []);

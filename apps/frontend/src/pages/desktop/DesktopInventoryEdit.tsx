@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Icon, type IconName } from '../../components/Icon';
 import { RouteLink, linkedSentence } from '../../components/RouteLink';
 import { useT } from '../../lib/i18n';
+import { confirmDiscard, useUnsavedGuard } from '../../lib/unsavedGuard';
 import { api, ApiError } from '../../lib/api';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { fmtUSD, fmtUSD0, fmtDate, relTime } from '../../lib/format';
@@ -130,7 +131,6 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
 
   const [peers, setPeers] = useState<PeerRow[]>([]);
   const [linkedSellOrders, setLinkedSellOrders] = useState<LinkedSellOrder[]>([]);
-  const [internalNotes, setInternalNotes] = useState('');
   // When the backend rejects a qty/status change because the line is committed
   // to an open sell order, render an inline workflow banner that names the
   // blocking orders. Cleared at the start of each save attempt.
@@ -197,6 +197,14 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
     return () => { alive = false; };
   }, [itemId]);
 
+  // Before the early return, so the hook order is stable. The page computed
+  // `dirty` but never told the shared guard: a sidebar link, Back, a reload
+  // or the layout switch dropped an edited price without the confirmation
+  // the PO and sell-order editors give.
+  const dirty = !!draft && JSON.stringify(draft) !== JSON.stringify(initialRef.current);
+  useUnsavedGuard(dirty);
+  const cancel = () => { void confirmDiscard().then((ok) => { if (ok) onCancel(); }); };
+
   if (!item || !draft) {
     return (
       <div style={{ padding: '24px 28px', maxWidth: 720 }}>
@@ -205,7 +213,6 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
     );
   }
 
-  const dirty = JSON.stringify(draft) !== JSON.stringify(initialRef.current);
   // Its PO is archived: the line is out of stock and the backend refuses
   // every edit until the PO is unarchived.
   const archived = item.status === 'Archived';
@@ -306,7 +313,7 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
     <>
       {/* Breadcrumb */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--fg-subtle)', marginBottom: 10 }}>
-        <button onClick={onCancel} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--fg-subtle)', cursor: 'pointer', fontSize: 'inherit', fontFamily: 'inherit' }}>{t('inventoryTitle')}</button>
+        <button onClick={cancel} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--fg-subtle)', cursor: 'pointer', fontSize: 'inherit', fontFamily: 'inherit' }}>{t('inventoryTitle')}</button>
         <Icon name="chevronRight" size={12} />
         <span className="mono">{item.id.slice(0, 8)}</span>
         <Icon name="chevronRight" size={12} />
@@ -338,7 +345,7 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
           </div>
         </div>
         <div className="page-actions">
-          <button className="btn" onClick={onCancel}>{t('cancel')}</button>
+          <button className="btn" onClick={cancel}>{t('cancel')}</button>
           <button className="btn accent" disabled={!dirty || saving || archived} onClick={save}>
             <Icon name="check" size={13} /> {saving ? '…' : t('save')}
           </button>
@@ -428,8 +435,6 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
           revenue={revenue}
           profit={profit}
           margin={margin}
-          internalNotes={internalNotes}
-          setInternalNotes={setInternalNotes}
         />
       </div>
 
@@ -440,7 +445,7 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
             <span>{t('ieUnsavedChangesPre')} <strong>{itemTitle || item.id.slice(0, 8)}</strong>{t('ieUnsavedChangesPost')}</span>
           </div>
           <div className="save-bar-actions">
-            <button className="btn" onClick={onCancel}>{t('cancel')}</button>
+            <button className="btn" onClick={cancel}>{t('cancel')}</button>
             <button className="btn accent" disabled={saving} onClick={save}>
               <Icon name="check" size={13} /> {saving ? '…' : t('save')}
             </button>
@@ -989,15 +994,13 @@ function summarizeEvent(e: Event, locale = 'en-US'): string {
 
 // ─── Right summary column ────────────────────────────────────────────────────
 function SummaryColumn({
-  item, draft, revenue, profit, margin, internalNotes, setInternalNotes,
+  item, draft, revenue, profit, margin,
 }: {
   item: DetailRow;
   draft: Draft;
   revenue: number;
   profit: number;
   margin: number;
-  internalNotes: string;
-  setInternalNotes: (v: string) => void;
 }) {
   const { t, locale } = useT();
   const sellable = draft.status === 'Reviewing' || draft.status === 'Done';
@@ -1021,21 +1024,6 @@ function SummaryColumn({
         </div>
       </div>
 
-      <div className="card">
-        <div className="card-head">
-          <div className="card-title">{t('ieInternalNotes')}</div>
-        </div>
-        <div className="card-body">
-          <textarea
-            className="textarea"
-            placeholder={t('ieInternalNotesPh')}
-            value={internalNotes}
-            onChange={(e) => setInternalNotes(e.target.value)}
-            rows={4}
-            style={{ resize: 'vertical', width: '100%', fontSize: 12.5 }}
-          />
-        </div>
-      </div>
 
       <div className="card">
         <div className="card-head">

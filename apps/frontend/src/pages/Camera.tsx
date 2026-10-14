@@ -4,6 +4,7 @@ import { useT } from '../lib/i18n';
 import { api } from '../lib/api';
 import { compressForUpload, blobToDataUrl } from '../lib/image-compress';
 import { scanErrorMessage } from '../lib/scanError';
+import { takeSharedFile } from '../lib/sharedFile';
 import type { Category, ScanResponse } from '../lib/types';
 
 type Props = {
@@ -122,6 +123,25 @@ export function Camera({ category, onDetected, onClose, onBack }: Props) {
     const placeholder = new Blob([new Uint8Array([137,80,78,71,13,10,26,10])], { type: 'image/png' });
     return placeholder;
   };
+
+  // A photo shared into the app (lib/sharedFile.ts) is scanned the moment the
+  // camera opens, as if it had just been shot.
+  useEffect(() => {
+    const shared = takeSharedFile();
+    if (!shared) return;
+    void (async () => {
+      try {
+        const blob = await (await fetch(shared)).blob();
+        if (!aliveRef.current) return;
+        setCaptured(shared);
+        await runScan(blob, 'shared.jpg');
+      } catch {
+        if (aliveRef.current) setError(t('cameraUnavailable'));
+      }
+    })();
+    // Once, on mount: the stored file is taken, not read.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const runScan = async (file: File | Blob, filename = 'label.jpg') => {
     setPhase('scanning');

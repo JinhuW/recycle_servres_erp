@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode, type CSSProperties } from 'react';
 import { useEscapeKey } from '../lib/useEscapeKey';
+import { useFocusTrap } from '../lib/useFocusTrap';
 
 type ModalProps = {
   onClose: () => void;
@@ -29,6 +30,7 @@ export function Modal({ onClose, children, shellStyle, shellClassName, ariaLabel
   const pressedBackdrop = useRef(false);
 
   useEscapeKey(onClose, closeOnEscape);
+  useFocusTrap(panelRef);
 
   // Read during the first render, not in the effect: by the time effects run,
   // a child's `autoFocus` has already moved focus, and the opener is lost.

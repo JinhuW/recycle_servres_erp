@@ -1,5 +1,7 @@
+import { useRef } from 'react';
 import { Icon } from './Icon';
 import { useEscapeKey } from '../lib/useEscapeKey';
+import { useFocusTrap } from '../lib/useFocusTrap';
 import { useT } from '../lib/i18n';
 
 type Props = {
@@ -16,9 +18,15 @@ type Props = {
 export function ImageLightbox({ url, alt, onClose, zIndex = 100 }: Props) {
   const { t } = useT();
   useEscapeKey(onClose);
+  const trapRef = useRef<HTMLDivElement | null>(null);
+  useFocusTrap(trapRef);
 
   return (
     <div
+      ref={trapRef}
+      role="dialog"
+      aria-modal="true"
+      tabIndex={-1}
       onClick={(e) => { e.stopPropagation(); onClose(); }}
       style={{
         position: 'fixed',

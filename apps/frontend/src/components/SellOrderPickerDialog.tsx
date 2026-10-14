@@ -2,11 +2,12 @@
 // Draft / Shipped / Awaiting payment orders; the caller opens the chosen one
 // in the sell-order edit modal with the selection appended.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { Icon } from './Icon';
 import { api } from '../lib/api';
 import { handleFetchError } from '../lib/errorToast';
 import { useEscapeKey } from '../lib/useEscapeKey';
+import { useFocusTrap } from '../lib/useFocusTrap';
 import { useT } from '../lib/i18n';
 import { fmtUSD0, fmtDateShort } from '../lib/format';
 import { sellOrderStatuses } from '../lib/lookups';
@@ -27,6 +28,8 @@ export function SellOrderPickerDialog({ lineCount, locale, onClose, onPick }: Pr
   const [q, setQ] = useState('');
   const [rows, setRows] = useState<SellOrderPick[] | null>(null);
   useEscapeKey(onClose);
+  const trapRef = useRef<HTMLDivElement | null>(null);
+  useFocusTrap(trapRef);
 
   useEffect(() => {
     let alive = true;
@@ -52,7 +55,7 @@ export function SellOrderPickerDialog({ lineCount, locale, onClose, onPick }: Pr
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
       style={{ zIndex: 120 }}
     >
-      <div className="modal-shell" style={{ maxWidth: 640, width: 'calc(100vw - 80px)', display: 'flex', flexDirection: 'column', maxHeight: 'calc(100vh - 80px)' }}>
+      <div ref={trapRef} className="modal-shell" style={{ maxWidth: 640, width: 'calc(100vw - 80px)', display: 'flex', flexDirection: 'column', maxHeight: 'calc(100vh - 80px)' }}>
         <div style={{ padding: '18px 24px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12 }}>
           <Icon name="tag" size={18} />
           <div style={{ flex: 1 }}>

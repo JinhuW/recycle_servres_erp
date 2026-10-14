@@ -17,6 +17,56 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.258.7] - 2026-10-14
+
+Batch F of the 2026-10-13 review fixes (RS-252): routes, editors and
+accessibility.
+
+### Fixed
+
+- **The installed app's shortcuts and a shared photo land where they say.**
+  The manifest launches `/submit`, `/inventory` and `/sell-orders` as real
+  paths, and the share target lands on `/share-target`; the hash router read
+  every one of them as home. They now read as the route they name and move
+  into the hash on first render. On the phone `/submit` opens the capture
+  flow; a photo shared into the app is held for the camera, which scans it
+  the moment it opens for the next product. The share flow has unit
+  coverage only and wants a real installed-phone check (FE-04, FE-05).
+- **The inventory edit page asks before dropping an edit** — a sidebar
+  link, Back, Cancel, a reload or the layout switch used to discard an
+  edited price or quantity with no confirmation — and its *Internal notes*
+  box, which nothing loaded or saved, is gone until a persisted note exists
+  (FE-07, FE-08).
+- **Dialogs and phone sheets keep the keyboard inside them.** Tab left the
+  shared modal for the page behind it, where navigation and actions still
+  worked while the dialog stayed open; the phone's bottom sheets moved focus
+  nowhere. One focus boundary (`lib/useFocusTrap.ts`) serves the shared
+  Modal, the phone sheet and the hand-built close, hand-off, serial-check,
+  sell-order-picker and lightbox overlays, with nested dialogs answering Tab
+  before their parents. Comboboxes name their list and active option to the
+  input (FE-10).
+- **The phone can zoom** — the viewport no longer forbids it (FE-11).
+- **A client link opens that client.** `/clients/:id` drives the drawer, a
+  row click writes the id and closing returns to the list, so a copied link
+  and Back/Forward land on the same client (FE-12).
+- **An unsaved internal-transaction note survives attaching or removing a
+  payment**, which used to reload the record over it, and the editor asks
+  before a navigation drops it (FE-16).
+- **Proof uploads and item-type picks work from the keyboard**: the
+  dropzone is a focusable button that opens the picker on Enter or Space,
+  and the item-type and combobox options act on click so a Tab-focused
+  option answers Enter (UI-01).
+- **Capture controls and hardware fields have names**: the tab bar's scan
+  button carries its label and every phone RAM/SSD/HDD/Other field's label is
+  tied to its control (UI-02).
+- **Follow System for the language can be turned off and is honoured on
+  boot**, and the app follows a device language change while it is on
+  (UI-04).
+- **The PO timeline's titles and the client rhythm strip read in the chosen
+  language** — order created, submitted, advanced, details updated, notes
+  and attachments on a status, quantities, and the rhythm strip's text and
+  descriptions were English only (UI-05).
+
 ## [1.258.6] - 2026-10-14
 
 Batch E of the 2026-10-13 review fixes (RS-252): the browser's session and

@@ -994,6 +994,9 @@ is not a stage but a flag beside one, set once every line has sold
 
 ## Clients (the people we buy from)
 
+- **A client link opens that client** (v1.258.7): `/#/clients/<id>` drives
+  the drawer, a row click writes the id to the URL and closing returns to
+  the list, so a copied link and Back/Forward land on the same client.
 - **The list filters and counts the whole book, then pages it** (v1.258.5).
   Follow-up and health were applied after a 200-row cap, so a book whose
   "soon" clients all sat past the cap showed none and counted none.
@@ -2384,6 +2387,15 @@ inventory search, sell-order draft creation.
 > Railway; a non-OpenAI model gets the old request.
 
 ## The two shells
+
+- **Installed-app shortcuts and shared photos land where they say**
+  (v1.258.7). The manifest's Submit, Inventory and Sell orders shortcuts and
+  the share-target landing are real paths the hash router now reads as the
+  route they name; on the phone, Submit opens the capture flow and a shared
+  photo is scanned the moment the camera opens for the next product. The
+  phone can zoom. Dialogs and phone sheets keep Tab inside them; proof
+  uploads and item-type picks work from the keyboard; the phone's capture
+  button and every hardware field have accessible names.
 
 One bundle, two lazy-loaded shells chosen in `App.tsx`: viewport under 720px →
 `MobileApp`; else `DesktopApp`. The third, the `/v/<token>` vendor portal, was

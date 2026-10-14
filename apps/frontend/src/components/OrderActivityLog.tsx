@@ -102,21 +102,21 @@ function summary(ev: OrderEvent, locale: string, t: Translate): { title: string;
     case 'created': {
       // Shared with DesktopActivity so the same event doesn't read two ways.
       const parts = createdEventParts(d, t);
-      return { title: 'Order created', lines: parts.length ? [parts.join(' · ')] : [] };
+      return { title: t('acCreatedTitle'), lines: parts.length ? [parts.join(' · ')] : [] };
     }
     case 'submitted': {
       const lineCount = (d.lineCount as number) ?? 0;
       const qty = (d.qty as number) ?? 0;
       const total = (d.totalCost as number) ?? 0;
       return {
-        title: 'Submitted for review',
-        lines: [`${productsCount(t, lineCount)} · ${qty} units · ${fmtUSD(total, locale)}`],
+        title: t('acSubmittedTitle'),
+        lines: [`${productsCount(t, lineCount)} · ${t('acUnitsCount', { n: qty })} · ${fmtUSD(total, locale)}`],
       };
     }
     case 'advanced': {
       const from = LIFECYCLE_LABEL[(d.from as string) ?? ''] ?? (d.from as string);
       const to = LIFECYCLE_LABEL[(d.to as string) ?? ''] ?? (d.to as string);
-      return { title: `Advanced ${from} → ${to}`, lines: [] };
+      return { title: t('acAdvancedTitle', { from, to }), lines: [] };
     }
     case 'reverted': {
       // The change set itself is written out by the sibling meta/line events
@@ -130,12 +130,12 @@ function summary(ev: OrderEvent, locale: string, t: Translate): { title: string;
     case 'line_added': {
       const qty = (d.qty as number) ?? 0;
       const unitCost = (d.unitCost as number) ?? 0;
-      return { title: `${t('historyAddedLine')} ${productRef(d, t)}`, lines: [`Qty ${qty} @ ${fmtUSD(unitCost, locale)}`] };
+      return { title: `${t('historyAddedLine')} ${productRef(d, t)}`, lines: [t('acQtyAt', { qty, cost: fmtUSD(unitCost, locale) })] };
     }
     case 'line_removed': {
       const qty = (d.qty as number) ?? 0;
       const unitCost = (d.unitCost as number) ?? 0;
-      return { title: `${t('historyRemovedLine')} ${productRef(d, t)}`, lines: [`Was qty ${qty} @ ${fmtUSD(unitCost, locale)}`] };
+      return { title: `${t('historyRemovedLine')} ${productRef(d, t)}`, lines: [t('acWasQtyAt', { qty, cost: fmtUSD(unitCost, locale) })] };
     }
     case 'line_edited': {
       const changes = (d.changes as OrderEventChange[]) ?? [];
@@ -143,7 +143,7 @@ function summary(ev: OrderEvent, locale: string, t: Translate): { title: string;
     }
     case 'meta_changed': {
       const changes = (d.changes as OrderEventChange[]) ?? [];
-      return { title: 'Updated order details', lines: changes.map(c => changeLine(c, locale)) };
+      return { title: t('acMetaChangedTitle'), lines: changes.map(c => changeLine(c, locale)) };
     }
     case 'handoff': {
       // The details are what the hand-off recorded: who collected it, or the
@@ -170,10 +170,13 @@ function summary(ev: OrderEvent, locale: string, t: Translate): { title: string;
         : String(d.status ?? '');
       const field = String(d.field);
       if (field === 'note') {
-        return { title: `Note on ${status}`, lines: [renderValue('note', d.to, locale)] };
+        return { title: t('acNoteOnTitle', { status }), lines: [renderValue('note', d.to, locale)] };
       }
-      const verb = field === 'attachment_removed' ? 'removed' : 'added';
-      return { title: `Attachment ${verb} on ${status}`, lines: [String(d.filename ?? '')] };
+      const removed = field === 'attachment_removed';
+      return {
+        title: t(removed ? 'acAttachmentRemovedTitle' : 'acAttachmentAddedTitle', { status }),
+        lines: [String(d.filename ?? '')],
+      };
     }
     case 'line_photo_added':
     case 'line_photo_removed': {
