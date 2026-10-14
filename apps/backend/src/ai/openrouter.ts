@@ -1,7 +1,7 @@
 // src/ai/openrouter.ts
 import type { Env, LineCategory } from '../types';
 import type { ScanResult } from './types';
-import { PROMPT_BY_CATEGORY, parseModelJson, EXPECTED_FIELD_COUNT } from './prompts';
+import { PROMPT_BY_CATEGORY, parseModelJson, EXPECTED_FIELD_COUNT, EXPECTED_FIELDS_BY_CATEGORY } from './prompts';
 
 // Cap on the coverage-derived confidence floor: even when the model returns
 // every expected field, observable coverage alone shouldn't claim more than
@@ -241,7 +241,10 @@ export async function openRouterScan(
   // being unduly harsh on itself: if it filled 7 of 8 expected RAM fields, the
   // label was clearly readable even if its self-rating is mid-range.
   const fields = rest as Record<string, string>;
-  const filled = Object.values(fields).filter((v) => typeof v === 'string' && v.trim() !== '').length;
+  // Only the fields the prompt asked for count: eight unknown keys used to
+  // lift a reply with no usable RAM field to the floor's maximum.
+  const filled = EXPECTED_FIELDS_BY_CATEGORY[category]
+    .filter((k) => typeof fields[k] === 'string' && fields[k].trim() !== '').length;
   const expected = EXPECTED_FIELD_COUNT[category];
   const coverageFloor = expected > 0
     ? Math.min(COVERAGE_FLOOR_MAX, (filled / expected) * COVERAGE_FLOOR_MAX)

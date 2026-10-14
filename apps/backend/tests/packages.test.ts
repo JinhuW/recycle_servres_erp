@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS, PRIYA } from './helpers/auth';
-import { refreshPackageTracking, registerUntrackedPackages, startPackageTrackingLoop } from '../src/shipping/track';
+import { refreshPackageTracking, registerPackageTracking, registerUntrackedPackages, startPackageTrackingLoop } from '../src/shipping/track';
 import { pickTrackingClient } from '../src/shipping';
 import { stubTrackingSource } from '../src/shipping/stub';
 import type { TrackingSource } from '../src/shipping/types';
@@ -530,6 +530,44 @@ describe('packages — webhook registration', () => {
     `;
     expect(rows.find(r => r.id === a.id)!.tracking_registered_at).not.toBeNull();
     expect(rows.find(r => r.id === b.id)!.tracking_registered_at).toBeNull();
+  });
+
+  // The add-time call and the sweep both read the NULL stamp and could
+  // register the same number — two update streams for one box. The claim is
+  // taken in the database.
+  it('registers a number once when two registrants race', async () => {
+    const { token } = await loginAs(MARCUS);
+    const pkg = await addPackage(token);
+    const sql = getTestDb();
+    const [row] = await sql<{ id: string; tracking_number: string; carrier: string }[]>`
+      SELECT id, tracking_number, carrier FROM packages WHERE id = ${pkg.id}`;
+    let calls = 0;
+    const client = { registerTracking: async () => { calls++; await new Promise((r) => setTimeout(r, 50)); } };
+    const results = await Promise.all([
+      registerPackageTracking(sql, client, row),
+      registerPackageTracking(sql, client, row),
+    ]);
+    expect(results.sort()).toEqual([false, true]);
+    expect(calls).toBe(1);
+  });
+
+  it('keeps the claim of a timed-out registration and frees a refused one', async () => {
+    const { token } = await loginAs(MARCUS);
+    const pkg = await addPackage(token);
+    const sql = getTestDb();
+    const [row] = await sql<{ id: string; tracking_number: string; carrier: string }[]>`
+      SELECT id, tracking_number, carrier FROM packages WHERE id = ${pkg.id}`;
+    // A timed-out POST may have been delivered: the claim stands, so the
+    // next registrant does nothing until it expires.
+    expect(await registerPackageTracking(sql, { registerTracking: async () => { throw new Error('shippo POST /tracks/ timeout'); } }, row)).toBe(false);
+    let calls = 0;
+    expect(await registerPackageTracking(sql, { registerTracking: async () => { calls++; } }, row)).toBe(false);
+    expect(calls).toBe(0);
+    await sql`UPDATE packages SET tracking_claimed_at = NULL WHERE id = ${pkg.id}`;
+    // A refusal frees the claim for the next sweep.
+    expect(await registerPackageTracking(sql, { registerTracking: async () => { throw new Error('shippo POST /tracks/ failed: HTTP 400'); } }, row)).toBe(false);
+    expect(await registerPackageTracking(sql, { registerTracking: async () => { calls++; } }, row)).toBe(true);
+    expect(calls).toBe(1);
   });
 
   it('does not re-register a number, and does not stamp one that threw', async () => {

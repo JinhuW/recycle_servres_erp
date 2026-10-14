@@ -88,6 +88,11 @@ No prose.`,
 
 // Models sometimes wrap JSON in ``` fences or add stray prose. Strip fences,
 // try a direct parse, then fall back to the first {…} block.
+// Only a plain object is a reading: `42`, `[]` or `"text"` parse, and used
+// to come back cast as a record and flow into every consumer.
+const asRecord = (v: unknown): Record<string, unknown> | null =>
+  v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+
 export function parseModelJson(text: string): Record<string, unknown> | null {
   let cleaned = text.trim();
   if (cleaned.startsWith('```')) {
@@ -97,12 +102,12 @@ export function parseModelJson(text: string): Record<string, unknown> | null {
       .trim();
   }
   try {
-    return JSON.parse(cleaned) as Record<string, unknown>;
+    return asRecord(JSON.parse(cleaned));
   } catch {
     const match = cleaned.match(/\{[\s\S]*\}/);
     if (!match) return null;
     try {
-      return JSON.parse(match[0]) as Record<string, unknown>;
+      return asRecord(JSON.parse(match[0]));
     } catch {
       return null;
     }

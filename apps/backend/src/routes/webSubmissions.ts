@@ -175,16 +175,23 @@ webSubmissions.patch('/:id', async (c) => {
   const status = (body.status as Status | undefined) ?? null;
   const hasNote = body.staffNote !== undefined;
   const note = typeof body.staffNote === 'string' ? body.staffNote.trim().slice(0, 2000) || null : null;
+  // A row the purge has claimed is on its way out, photos first: a change
+  // to it now would reopen a submission whose pictures are already gone.
   const updated = await sql`
     UPDATE web_submissions SET
       status = COALESCE(${status}, status),
       staff_note = CASE WHEN ${hasNote} THEN ${note} ELSE staff_note END,
       handled_by = ${c.var.user.id},
       updated_at = NOW()
-    WHERE id = ${id}
+    WHERE id = ${id} AND purge_claimed_at IS NULL
     RETURNING id
   `;
-  if (updated.length === 0) return c.json({ error: 'Not found' }, 404);
+  if (updated.length === 0) {
+    const [row] = await sql<{ purge_claimed_at: Date | null }[]>`
+      SELECT purge_claimed_at FROM web_submissions WHERE id = ${id}`;
+    if (row?.purge_claimed_at) return c.json({ error: 'This submission is being purged' }, 409);
+    return c.json({ error: 'Not found' }, 404);
+  }
   return c.json({ submission: await loadOne(sql, id) });
 });
 
@@ -287,10 +294,11 @@ webSubmissions.post('/:id/convert', async (c) => {
     orderId = await sql.begin(async (tx) => {
       // Re-checked under a row lock: two managers clicking at once must not
       // mint two POs for one lot.
-      const [live] = await tx<{ order_id: string | null }[]>`
-        SELECT order_id FROM web_submissions WHERE id = ${id} FOR UPDATE
+      const [live] = await tx<{ order_id: string | null; purge_claimed_at: Date | null }[]>`
+        SELECT order_id, purge_claimed_at FROM web_submissions WHERE id = ${id} FOR UPDATE
       `;
       if (live?.order_id) throw new Error(`__ALREADY__${live.order_id}`);
+      if (live?.purge_claimed_at) throw new Error('__PURGING__');
 
       const supplier = await webSellerSupplierTx(tx, id, p, categories,
         isoDatePlus(crm.cadenceDays.prospect), me.id);
@@ -370,6 +378,9 @@ webSubmissions.post('/:id/convert', async (c) => {
     await cleanup();
     const m = e instanceof Error ? /^__ALREADY__(.+)$/.exec(e.message) : null;
     if (m) return c.json({ error: `already converted to ${m[1]}`, orderId: m[1] }, 409);
+    if (e instanceof Error && e.message === '__PURGING__') {
+      return c.json({ error: 'This submission is being purged' }, 409);
+    }
     throw e;
   }
 

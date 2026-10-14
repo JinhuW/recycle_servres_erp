@@ -26,8 +26,16 @@ module "cloudflare" {
 
   cloudflare_account_id = var.cloudflare_account_id
   cloudflare_zone_id    = var.cloudflare_zone_id
+  # Every hostname the frontend Worker serves (deploy/cloudflare/wrangler.toml):
+  # the page fetches stored photos to carry them into a replacement line, and
+  # an origin missing here cannot. The canonical host goes first.
+  cors_allowed_origins = [
+    "https://inventory.recycleservers.com",
+    "https://inventory-prod.recycleservers.com",
+    "https://inventory-dev.recycleservers.com",
+  ]
   # All other inputs use the module defaults (bucket name, enam location,
-  # custom domain, CORS origin, lifecycle disabled).
+  # custom domain, lifecycle disabled).
 }
 
 output "bucket_name" {

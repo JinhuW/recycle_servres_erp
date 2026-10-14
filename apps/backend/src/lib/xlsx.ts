@@ -20,8 +20,29 @@ export type XlsxSheet = {
 // codes are clean, but sanitize anyway so a future odd code can't corrupt the
 // workbook.
 function safeSheetName(name: string): string {
-  const cleaned = name.replace(/[\\/?*:[\]]/g, ' ').trim().slice(0, 31);
+  // Excel also refuses a leading or trailing apostrophe.
+  const cleaned = name.replace(/[\\/?*:[\]]/g, ' ').trim().replace(/^'+|'+$/g, '').trim().slice(0, 31);
   return cleaned || 'Sheet';
+}
+
+// Unique the way Excel judges it — case-insensitively — with the suffix
+// reserved before the 31-character cut, so a duplicate maximum-length name
+// is not truncated straight back onto its twin, and every allocated name
+// (suffixed ones included) is reserved against the next.
+function allocateSheetName(base: string, used: Set<string>): string {
+  const first = safeSheetName(base);
+  if (!used.has(first.toLowerCase())) {
+    used.add(first.toLowerCase());
+    return first;
+  }
+  for (let n = 2; ; n++) {
+    const suffix = ` ${n}`;
+    const cand = (safeSheetName(base).slice(0, 31 - suffix.length).trimEnd() + suffix).trim();
+    if (!used.has(cand.toLowerCase())) {
+      used.add(cand.toLowerCase());
+      return cand;
+    }
+  }
 }
 
 export async function buildXlsxWorkbook(sheets: XlsxSheet[]): Promise<Buffer> {
@@ -31,16 +52,9 @@ export async function buildXlsxWorkbook(sheets: XlsxSheet[]): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   // Two tabs can't share a name; suffix collisions so a duplicate warehouse
   // code (or one sanitized into another) can't throw mid-write.
-  const used = new Map<string, number>();
+  const used = new Set<string>();
   for (const sheet of sheets) {
-    let name = safeSheetName(sheet.name);
-    const seen = used.get(name);
-    if (seen != null) {
-      used.set(name, seen + 1);
-      name = safeSheetName(`${name} ${seen + 1}`);
-    } else {
-      used.set(name, 1);
-    }
+    const name = allocateSheetName(sheet.name, used);
     const ws = wb.addWorksheet(name);
     ws.columns = sheet.columns.map((col) => ({
       header: col.header,

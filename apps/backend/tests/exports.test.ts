@@ -91,6 +91,34 @@ function expectSortedLikeBidSheet(ws: ExcelJS.Worksheet, headers: string[]): voi
   }
 }
 
+// The allocator suffixed a duplicate and then truncated it straight back onto
+// its twin, compared case-sensitively (Excel does not), and never reserved
+// the suffixed names it minted.
+describe('xlsx sheet names', () => {
+  const names = async (input: string[]) => {
+    const { buildXlsxWorkbook } = await import('../src/lib/xlsx');
+    const buf = await buildXlsxWorkbook(input.map((name) => ({ name, columns: [{ header: 'a', key: 'a' }], rows: [] })));
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf as unknown as ArrayBuffer);
+    return wb.worksheets.map((w) => w.name);
+  };
+
+  it('keeps duplicate maximum-length names, case variants and pre-suffixed names unique', async () => {
+    const long = 'A'.repeat(31);
+    const a = await names([long, long]);
+    expect(new Set(a.map((n) => n.toLowerCase())).size).toBe(2);
+    expect(a.every((n) => n.length <= 31)).toBe(true);
+    const b = await names(['RAM', 'ram']);
+    expect(new Set(b.map((n) => n.toLowerCase())).size).toBe(2);
+    const c = await names(['A', 'A', 'A 2']);
+    expect(new Set(c.map((n) => n.toLowerCase())).size).toBe(3);
+  });
+
+  it('strips an edge apostrophe', async () => {
+    expect(await names(["'Quoted'"])).toEqual(['Quoted']);
+  });
+});
+
 describe('GET /api/inventory/export', () => {
   beforeEach(async () => { await resetDb(); });
 

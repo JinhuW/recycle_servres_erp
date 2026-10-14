@@ -55,6 +55,17 @@ export function buildEnv(src: NodeJS.ProcessEnv = process.env): Env {
   if (src.NODE_ENV === 'production' && !src.OAUTH_SIGNING_KEY_CURRENT) {
     throw new Error('OAUTH_SIGNING_KEY_CURRENT must be set in production');
   }
+  // Attachments: all of R2 or none of it. Four of the five variables used
+  // to fall back to the stub as quietly as none did, and every receipt and
+  // photo uploaded in production was recorded as stored while its bytes went
+  // nowhere. With none set, uploads refuse (r2.ts) and /api/health says so.
+  if (src.NODE_ENV === 'production') {
+    const r2 = ['R2_S3_ENDPOINT', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET', 'R2_ATTACHMENTS_PUBLIC_URL'];
+    const missing = r2.filter((k) => !src[k]);
+    if (missing.length > 0 && missing.length < r2.length) {
+      throw new Error(`R2 is partially configured: missing ${missing.join(', ')}`);
+    }
+  }
   return {
     DATABASE_URL: src.DATABASE_URL,
     JWT_SECRET: src.JWT_SECRET,

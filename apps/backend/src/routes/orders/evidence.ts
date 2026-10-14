@@ -1,7 +1,7 @@
 // Per-status evidence (notes, attachments) and line photos.
 import { Hono } from 'hono';
 import { getDb } from '../../db';
-import { uploadAttachment, deleteAttachment } from '../../r2';
+import { uploadAttachment, deleteAttachment, StorageUnavailableError } from '../../r2';
 import { UUID_RE } from '../../lib/pagination';
 import { writeOrderEvent, type SqlLike } from '../../services/orderAudit';
 import { getUploadLimits } from '../../lib/settings';
@@ -173,7 +173,8 @@ evidenceRoutes.post('/:id/status-meta/:status/attachments', async (c) => {
 
   // R2 upload happens outside the transaction — it's the slow part.
   const uploaded = await uploadAttachment(c.env, stored, `orders/${id}/${status}`)
-    .catch(e => { log.error('attachment upload', e); return null; });
+    .catch(e => { log.error('attachment upload', e); return e instanceof StorageUnavailableError ? 'unavailable' as const : null; });
+  if (uploaded === 'unavailable') return c.json({ error: 'attachment storage is not configured on this server' }, 503);
   if (!uploaded) return c.json({ error: 'upload failed' }, 502);
 
   type AttachmentRow = {

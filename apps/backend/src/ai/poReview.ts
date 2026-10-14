@@ -23,11 +23,29 @@ function keep(category: LineCategory, fields: Record<string, string>): Record<st
   );
 }
 
+// Read as a stream and stopped at the cap: `arrayBuffer()` buffered the whole
+// response before the size was checked, so the cap bounded nothing, and a few
+// concurrent rereads multiplied the allocation.
 async function fetchImage(url: string): Promise<ArrayBuffer | null> {
   const res = await fetch(url, { signal: AbortSignal.timeout(IMAGE_TIMEOUT_MS) });
-  if (!res.ok) return null;
-  const buf = await res.arrayBuffer();
-  return buf.byteLength > 0 && buf.byteLength <= IMAGE_MAX_BYTES ? buf : null;
+  if (!res.ok || !res.body) return null;
+  const declared = Number(res.headers.get('content-length') ?? 0);
+  if (declared > IMAGE_MAX_BYTES) { await res.body.cancel(); return null; }
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > IMAGE_MAX_BYTES) { await reader.cancel(); return null; }
+    chunks.push(value);
+  }
+  if (total === 0) return null;
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const c of chunks) { out.set(c, at); at += c.byteLength; }
+  return out.buffer;
 }
 
 /** The label photo at `url`, read again with the scan prompt for `category`. */

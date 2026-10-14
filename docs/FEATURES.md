@@ -2483,6 +2483,11 @@ removed in v1.191.0.
 
 ## Observability
 
+- **`/api/health` reports whether attachment storage is configured**
+  (`providers.attachments`: `r2` or `none`, v1.258.8). In production a
+  missing bucket refuses uploads with a 503 instead of recording a stub;
+  a partial R2 configuration refuses to boot.
+
 - Unhandled 500s write JSONL to `ERROR_LOG_DIR/errors.jsonl`, rotating at
   10 MB.
 - **Client-side failures are reported** rather than lost: `ApiError` carries
