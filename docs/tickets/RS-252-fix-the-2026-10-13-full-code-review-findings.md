@@ -64,10 +64,10 @@ Batch B
 - [x] A burst of password-change guesses stops at the five-attempt budget.
 
 Batch C
-- [ ] Pairing A+B against A+C, link against ignore, and reassign against PATCH each yield one winner and one 409/403; sync never overwrites a manager's committed verdict.
-- [ ] Transfer reopen under a racing Shipped sale is 409 and the lot stays received.
-- [ ] Archive against sell-order Done never raises 40P01.
-- [ ] Parallel item-type renames leave every line on the final name.
+- [x] Pairing A+B against A+C, link against ignore, and reassign against PATCH each yield one winner and one 409/403; sync never overwrites a manager's committed verdict.
+- [x] Transfer reopen under a racing Shipped sale is 409 and the lot stays received.
+- [x] Archive against sell-order Done never raises 40P01.
+- [x] Parallel item-type renames leave every line on the final name.
 
 Batch D
 - [ ] Dashboard revenue and counts include manual (inventory-free) sell lines and match the sell-orders screen; lines without a cost are counted and labelled.

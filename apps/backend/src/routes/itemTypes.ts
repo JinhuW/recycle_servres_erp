@@ -78,8 +78,11 @@ itemTypes.patch('/:id', async (c) => {
   try {
     type Updated = { id: string; name: string; active: boolean } | null;
     const updated: Updated = await sql.begin(async (tx): Promise<Updated> => {
+      // Locked: the sweep below matches lines on the name read here, and two
+      // renames reading the same old name would each sweep for it — the
+      // second finding nothing, leaving the lines on the first's name.
       const [existing] = await tx<{ id: string; name: string }[]>`
-        SELECT id, name FROM item_types WHERE id = ${id}
+        SELECT id, name FROM item_types WHERE id = ${id} FOR UPDATE
       `;
       if (!existing) return null;
 

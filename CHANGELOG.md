@@ -17,6 +17,48 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.258.4] - 2026-10-14
+
+Batch C of the 2026-10-13 review fixes (RS-252): one lock protocol for the
+writers that judged an unlocked read and then wrote.
+
+### Fixed
+
+- **A payment's legs are locked before they are judged.** Pair, unpair,
+  link, unlink, ignore, unignore and filing under an internal transaction
+  each read a leg's group, applied their rules and then wrote — and a rival
+  between the read and the write was never seen: two pairs of one Mercury
+  leg both returned 200 and left a PayPal leg alone under its own
+  `pair_id`; a link racing an ignore produced a payment that was both, which
+  the PO's paid figure then left out. Every one of those writes now locks
+  the whole group first (`services/bankTxLocks.ts`, the shape of the PO lock
+  helper), judges what it locked and writes conditionally; the loser gets
+  the ordinary 400. The automatic pairing and linking in bank sync skip a
+  leg a manager holds and never overwrite a verdict committed since their
+  read. A `CHECK` (0178, `NOT VALID`) is the backstop against a linked and
+  ignored row (BD-01, BD-03, INT-01).
+- **Transfer reopen and discard read sell commitments after their lock,**
+  not inside the locking SELECT, whose snapshot predated the wait: a sale
+  that shipped while reopen waited on the lot was missed, and the lot went
+  to In Transit under a Shipped order. The same interleaving is a 409 now
+  (BD-02).
+- **A PO's owner is checked again under the lock** in PO PATCH, the
+  inventory line editor and the status-note write. A hand-off moves a PO
+  between purchasers, and the previous owner's in-flight edit used to land on
+  the new owner's order (BD-05).
+- **Clients, the same way:** PATCH, logging a contact and deleting a note
+  judge ownership under the row lock a reassign waits on, so a purchaser's
+  save cannot land on a client a manager has just handed to someone else
+  (SUP-01).
+- **One header lock order — purchase orders, then sell orders, then
+  lines.** A sell order's Done locked its header first and then the source
+  POs; archive locked its PO and then the sell orders on it, and the two
+  deadlocked (40P01 → 500). Done now locks the source POs first and starts
+  over if a line moved between POs in the meantime (BD-06).
+- **An item-type rename locks the row before reading the old name** it
+  sweeps the lines for; two renames racing left the lines on the first one's
+  name while the catalog showed the second (BD-09).
+
 ## [1.258.3] - 2026-10-14
 
 Batch B of the 2026-10-13 review fixes (RS-252): session and credential

@@ -83,7 +83,12 @@ evidenceRoutes.put('/:id/status-meta/:status', async (c) => {
   if (!canWriteMeta(u, status, existing)) return c.json({ error: 'Forbidden' }, 403);
 
   const note = (body.note ?? '').trim() || null;
-  await sql.begin(async (tx) => {
+  // The same row under the lock, as the upload and delete routes take it:
+  // the owner or the lifecycle can have moved since the read above.
+  const refused = await sql.begin(async (tx): Promise<403 | 404 | null> => {
+    const locked = await lockOrderAccess(tx, id);
+    if (!locked) return 404;
+    if (!canWriteMeta(u, status, locked)) return 403;
     const before = (await tx<{ note: string | null }[]>`
       SELECT note FROM order_status_meta
       WHERE order_id = ${id} AND status = ${status} LIMIT 1
@@ -100,7 +105,10 @@ evidenceRoutes.put('/:id/status-meta/:status', async (c) => {
         status, field: 'note', from: fromNote, to: note,
       });
     }
+    return null;
   });
+  if (refused === 404) return c.json({ error: 'Not found' }, 404);
+  if (refused === 403) return c.json({ error: 'Forbidden' }, 403);
   return c.json({ ok: true });
 });
 

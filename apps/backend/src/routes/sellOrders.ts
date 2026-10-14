@@ -32,7 +32,7 @@ import { searchSellableInventory } from '../services/sellableInventory';
 import {
   committedQtySql, committedSellStatuses, openSellStatuses, proposalSellStatuses,
 } from '../lib/sellCommitment';
-import { lockOrdersForLinesTx } from '../services/orderLocks';
+import { lockOrdersTx } from '../services/orderLocks';
 import {
   buildXlsxBuffer, xlsxResponse, datedFilename, type XlsxColumn,
 } from '../lib/xlsx';
@@ -1397,6 +1397,21 @@ sellOrders.post('/:id/status', async (c) => {
     | { kind: 'done' };
 
   const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
+    // Done rewrites every source PO (goods total, sold settlement), so those
+    // orders are locked before this header: orders, then sell orders, then
+    // lines is the one order every writer takes (services/orderLocks.ts).
+    // Archive holds its PO and then locks the sell orders on it; taking the
+    // header first here deadlocked against it (40P01 → 500).
+    let lockedSources: string[] = [];
+    if (body.to === 'Done') {
+      const owners = await tx<{ order_id: string }[]>`
+        SELECT DISTINCT ol.order_id FROM sell_order_lines sol
+        JOIN order_lines ol ON ol.id = sol.inventory_id
+        WHERE sol.sell_order_id = ${id}
+      `;
+      lockedSources = owners.map((r) => r.order_id);
+      await lockOrdersTx(tx, lockedSources);
+    }
     const cur = (await tx<{ status: string; created_by: string | null; archived_at: string | null }[]>`
       SELECT status, created_by, archived_at FROM sell_orders WHERE id = ${id} LIMIT 1 FOR UPDATE
     `)[0];
@@ -1441,16 +1456,19 @@ sellOrders.post('/:id/status', async (c) => {
       if (!any) return { kind: 'conflict', msg: 'every product on this order is at 0 — there is nothing to sell' };
     }
 
-    // Done rewrites every source PO (goods total, sold settlement) after it
-    // has locked their lines, so those orders are locked first: lines-then-
-    // orders is the order PO PATCH deadlocks against (services/orderLocks.ts).
-    // Before the Draft check below too, which locks the lines.
+    // The source POs were read before this header was locked; a line moved
+    // to another PO in between would need a lock this transaction can no
+    // longer take in order, so it starts over rather than take it out of
+    // order.
     if (body.to === 'Done') {
-      const sources = await tx<{ inventory_id: string }[]>`
-        SELECT inventory_id FROM sell_order_lines
-        WHERE sell_order_id = ${id} AND inventory_id IS NOT NULL
+      const owners = await tx<{ order_id: string }[]>`
+        SELECT DISTINCT ol.order_id FROM sell_order_lines sol
+        JOIN order_lines ol ON ol.id = sol.inventory_id
+        WHERE sol.sell_order_id = ${id}
       `;
-      await lockOrdersForLinesTx(tx, sources.map((r) => r.inventory_id));
+      if (owners.some((r) => !lockedSources.includes(r.order_id))) {
+        return { kind: 'conflict', msg: 'products on this order moved between purchase orders — try again' };
+      }
     }
 
     // Leaving the proposals (Draft, Packing) is where the order actually claims
