@@ -2,13 +2,13 @@
 id: RS-253
 title: Fix the dev to prod pre-release review findings
 type: bug
-status: in-progress
+status: done
 priority: P1
 created: 2026-10-14
 reporter: jinhu
 branch: fix/prerelease-review-rs253
-pr:
-version:
+pr: 649
+version: 1.258.9
 related: [RS-252]
 ---
 
@@ -44,20 +44,20 @@ batch) are gaps those batches set out to close and left open.
 
 ## Acceptance criteria
 
-- [ ] A list endpoint reply without `nextCursor` ends the walk after one fetch.
-- [ ] The sync marker probe succeeds on a database with and without `public.env_marker`.
-- [ ] A sell-order refund does not change the Refunds tile.
-- [ ] A shared photo is scanned only by the next new product's camera, never by a rescan of an existing line, and is gone once the capture is cancelled or submitted.
-- [ ] A shared photo is compressed before it is stored, and a failed store says so.
-- [ ] Back after a share does not reset an open capture session.
-- [ ] The phone inventory list is in one category→brand→capacity order across every page.
-- [ ] Tab inside an ErrorDialog opened over a Modal stays in the ErrorDialog; Shift+Tab right after a Modal opens stays in the Modal.
-- [ ] A signed-in reload paints from the cached preferences.
-- [ ] A failed first inventory request shows the empty state, not the skeleton.
-- [ ] Mark transfer, unmark transfer and assign lock the group and refuse a linked row from inside the transaction.
-- [ ] A preference reply never reverts a batch still queued behind it.
-- [ ] An oversized staff upload whose extension names a different allowed image format is shrunk, not refused.
-- [ ] Collapsing or switching a dirty internal-transaction record asks first.
+- [x] A list endpoint reply without `nextCursor` ends the walk after one fetch.
+- [x] The sync marker probe succeeds on a database with and without `public.env_marker`.
+- [x] A sell-order refund does not change the Refunds tile.
+- [x] A shared photo is scanned only by the next new product's camera, never by a rescan of an existing line, and is gone once the capture is cancelled or submitted.
+- [x] A shared photo is compressed before it is stored, and a failed store says so.
+- [x] Back after a share does not reset an open capture session.
+- [x] The phone inventory list is in one category→brand→capacity order across every page.
+- [x] Tab inside an ErrorDialog opened over a Modal stays in the ErrorDialog; Shift+Tab right after a Modal opens stays in the Modal.
+- [x] A signed-in reload paints from the cached preferences.
+- [x] A failed first inventory request shows the empty state, not the skeleton.
+- [x] Mark transfer, unmark transfer and assign lock the group and refuse a linked row from inside the transaction.
+- [x] A preference reply never reverts a batch still queued behind it.
+- [x] An oversized staff upload whose extension names a different allowed image format is shrunk, not refused.
+- [x] Collapsing or switching a dirty internal-transaction record asks first.
 
 ## Out of scope
 
@@ -70,3 +70,15 @@ out (zero affected prod rows).
 ## Notes
 
 Plan: `~/.claude/plans/federated-squishing-token.md`.
+
+- The shared photo is handed to the camera only when no existing line is being
+  edited.  A new product's Scan goes through the rescan path with a draft
+  attached, so gating on "no rescan draft" would have dropped every share.
+- The camera takes the photo from a ref, not a prop: StrictMode runs its
+  mount effect twice, and a prop would have scanned the photo twice.
+- The staff-upload shrink encodes a mislabelled image into the *declared*
+  format, as before RS-252, so the stored type is always one the route's
+  allowlist accepted.
+- Verified by the suites (frontend 809, backend 2407), the marker probe run
+  against a scratch database in all three states, and seven headless-Chrome
+  checks on the local stack.
