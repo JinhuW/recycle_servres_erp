@@ -11,6 +11,7 @@ import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { shareOrCopy } from '../../lib/shareOrCopy';
 import { paymentsForOrderPath } from '../../lib/route';
+import { paymentGap } from '../../lib/paymentGap';
 import { RouteLink } from '../../components/RouteLink';
 import { fmtUSD0, fmtUSD, fmtDateShort, fmt0 } from '../../lib/format';
 import { lineSpecLabel } from '../../lib/lineGroups';
@@ -637,6 +638,11 @@ export function DesktopOrders({ onToast }: Props) {
                 const commission = commissionFor(o);
                 const unpriced = o.unpricedLineCount ?? 0;
                 const isOpen = openId === o.id;
+                // The same gap the PO page's banner warns of, so the off rows
+                // can be picked out of the list without opening each one.
+                const gap = paymentGap(o.linkedPaid, totalCostFor(o), o.payment);
+                const gapText = gap && t('payGapBanner', { paid: fmtUSD(gap.paid, locale), total: fmtUSD(gap.total, locale) })
+                  + ` (${t(gap.diff > 0 ? 'payGapMore' : 'payGapLess', { amt: fmtUSD(Math.abs(gap.diff), locale) })})`;
                 return (
                   <Fragment key={o.id}>
                     <tr
@@ -658,6 +664,9 @@ export function DesktopOrders({ onToast }: Props) {
                       </td>
                       <td className="mono col-id" style={{ fontWeight: 600, display: isVis('id') ? undefined : 'none' }}>
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                          {gapText && (
+                            <span className="pay-gap-mark" role="img" aria-label={gapText} title={gapText}>!</span>
+                          )}
                           {o.id}
                           <button
                             onClick={(e) => {
