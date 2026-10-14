@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-14
 reporter: jinhu
 branch: feat/po-list-payment-gap-mark
-pr:
+pr: 639
 version: 1.258.0
 related: [RS-200]
 ---
