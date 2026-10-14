@@ -4382,3 +4382,13 @@ body:has(.pk-page) .tweaks-fab, body:has(.pk-page) .tweaks-pop { display: none; 
 .bc-ai-actions { display: flex; gap: 4px; align-items: center; }
 .bc-ai-others { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .bc-ai-jump { cursor: pointer; border: 0; }
+
+/* PO list: the bank paid something other than the PO's total cost. Red
+   because the figures beside it are both black and read as agreeing. */
+.pay-gap-mark {
+  display: inline-grid; place-items: center; flex-shrink: 0;
+  width: 15px; height: 15px; border-radius: 999px;
+  background: var(--neg); color: white;
+  font-family: 'Inter', system-ui, sans-serif; font-size: 10.5px; font-weight: 800; line-height: 1;
+  cursor: help;
+}

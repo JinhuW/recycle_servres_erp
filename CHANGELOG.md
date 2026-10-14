@@ -17,6 +17,21 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.258.0] - 2026-10-14
+
+The desktop PO list marks a PO whose linked payment is off (RS-250).
+
+### Added
+
+- **A red circled `!` ahead of the order id** on every company-paid PO whose
+  linked net paid differs from its total cost — the same comparison the PO
+  page's banner and Review mode make (v1.225.0), goods + fees to the cent.
+  Until now the list showed both figures side by side and said nothing when
+  they disagreed, so finding the off POs meant reading every row. Hovering
+  the mark gives what the bank paid, what the PO totals and the difference.
+  Self-paid POs, POs with nothing linked and purchasers' rows carry no mark,
+  for the reasons the banner has.
+
 ## [1.257.0] - 2026-10-13
 
 Bank payments link to a sell order or to a PO's commission, not only to a
