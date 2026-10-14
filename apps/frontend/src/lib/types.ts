@@ -457,6 +457,9 @@ export type DashboardData = {
   kpis: {
     count: number; cost: number; revenue: number; profit: number; commission: number;
     prev: { revenue: number; profit: number };
+    // Sale lines with no PO line to price them (manual sales, deleted
+    // sources): in revenue and the count, not in cost or profit.
+    unknownCost?: { lines: number; revenue: number };
   };
   // The window every figure below was computed over — calendar dates in the
   // business time zone — and the bucket the series is cut in.

@@ -569,3 +569,41 @@ describe('shipping — which tracking provider is in play', () => {
     dark.stop();
   });
 });
+
+// Attribution matched on an ASCII-only compression of the name, which read
+// every all-Chinese name as the same empty string: a box from 李 RAM was
+// filed under 王 RAM, the older client.
+describe('packages — create-po attributes the seller by the client name key', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('does not attach a non-Latin seller to a different non-Latin client', async () => {
+    const sql = getTestDb();
+    const mgr = await loginAs(ALEX);
+    const [other] = await sql<{ id: string }[]>`
+      INSERT INTO suppliers (name, owner_id) VALUES ('王 RAM', ${mgr.user.id}) RETURNING id`;
+    const [mine] = await sql<{ id: string }[]>`
+      INSERT INTO suppliers (name, owner_id) VALUES ('李 RAM', ${mgr.user.id}) RETURNING id`;
+    const [pkg] = await sql<{ id: string }[]>`
+      INSERT INTO packages (tracking_number, carrier, seller_name, created_by)
+      VALUES ('999999999991', 'UPS', '李 RAM', ${mgr.user.id}) RETURNING id`;
+    const res = await api<{ orderId: string }>('POST', `/api/packages/${pkg.id}/create-po`, { token: mgr.token, body: {} });
+    expect(res.status).toBe(201);
+    const [order] = await sql<{ supplier_id: string | null }[]>`SELECT supplier_id FROM orders WHERE id = ${res.body.orderId}`;
+    expect(order.supplier_id).toBe(mine.id);
+    expect(order.supplier_id).not.toBe(other.id);
+  });
+
+  it('still matches an ASCII name through its spacing and case', async () => {
+    const sql = getTestDb();
+    const mgr = await loginAs(ALEX);
+    const [client] = await sql<{ id: string }[]>`
+      INSERT INTO suppliers (name, owner_id) VALUES ('Acme Parts', ${mgr.user.id}) RETURNING id`;
+    const [pkg] = await sql<{ id: string }[]>`
+      INSERT INTO packages (tracking_number, carrier, seller_name, created_by)
+      VALUES ('999999999992', 'UPS', 'ACME  parts', ${mgr.user.id}) RETURNING id`;
+    const res = await api<{ orderId: string }>('POST', `/api/packages/${pkg.id}/create-po`, { token: mgr.token, body: {} });
+    expect(res.status).toBe(201);
+    const [order] = await sql<{ supplier_id: string | null }[]>`SELECT supplier_id FROM orders WHERE id = ${res.body.orderId}`;
+    expect(order.supplier_id).toBe(client.id);
+  });
+});

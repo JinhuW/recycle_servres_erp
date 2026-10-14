@@ -76,20 +76,26 @@ export async function contributions(
   if (opts.role === 'manager') {
     // Same sale date and realized cost as the dashboard tiles it breaks down.
     const saleWin = sql`so.status = 'Done' AND so.done_at >= ${start} AND so.done_at < ${end}`;
+    // A manual sale line, or one whose PO line was since deleted, names no
+    // PO line: its revenue counts, its profit cannot be priced and stays out
+    // (NULL, which SUM skips) — the dashboard tile's own rule.
     const salesFrom = sql`
       sell_order_lines sol
       JOIN sell_orders so ON so.id = sol.sell_order_id
-      JOIN order_lines ol ON ol.id = sol.inventory_id
-      JOIN orders po      ON po.id = ol.order_id
+      LEFT JOIN order_lines ol ON ol.id = sol.inventory_id
+      LEFT JOIN orders po      ON po.id = ol.order_id
       ${feeBasis}`;
     const revenue = sql`sol.unit_price * sol.qty`;
-    const profit  = sql`(sol.unit_price - ${paidUnitCost(sql)}) * sol.qty`;
+    const profit  = sql`CASE WHEN ol.id IS NOT NULL THEN (sol.unit_price - ${paidUnitCost(sql)}) * sol.qty END`;
     const soCount = sql`COUNT(DISTINCT so.id)`;
     const saleDims = (amount: Frag): Record<'customer' | 'purchaser' | 'category', Grouping> => ({
       customer:  { key: sql`so.customer_id`, name: sql`cu.name`, amount, count: soCount, where: saleWin,
                    from: sql`${salesFrom} JOIN customers cu ON cu.id = so.customer_id` },
+      // LEFT: a manual sale has no PO and so no purchaser; it lands on the
+      // no-purchaser row (the no-supplier row's twin) so the tabs still sum
+      // to the tile.
       purchaser: { key: sql`po.user_id`, name: sql`u.name`, amount, count: soCount, where: saleWin,
-                   from: sql`${salesFrom} JOIN users u ON u.id = po.user_id` },
+                   from: sql`${salesFrom} LEFT JOIN users u ON u.id = po.user_id` },
       category:  { key: sql`sol.category`, name: sql`sol.category`, amount, count: soCount, where: saleWin,
                    from: salesFrom },
     });

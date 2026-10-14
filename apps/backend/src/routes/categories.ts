@@ -49,6 +49,13 @@ categories.post('/', async (c) => {
         aiCapture?: boolean; requiresPn?: boolean; defaultMargin?: number; position?: number }
     | null;
   if (!body?.id || !body?.label) return c.json({ error: 'id and label required' }, 400);
+  if (typeof body.id !== 'string' || typeof body.label !== 'string') {
+    return c.json({ error: 'id and label must be strings' }, 400);
+  }
+  // The same field rules PATCH applies: a negative margin landed through
+  // POST and was then refused by every PATCH that touched the row.
+  const invalid = validateCategoryFields(body as Record<string, unknown>);
+  if (invalid) return c.json({ error: invalid }, 400);
   const sql = getDb(c.env);
   // Fallback margin is workspace-configurable (workspace_settings); fall back
   // to 30 only if the key is missing.

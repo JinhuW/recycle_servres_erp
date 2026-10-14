@@ -549,8 +549,9 @@ function DetailExpand({
   row, sellHistory, targetMargin,
 }: { row: RefPrice; sellHistory: number[]; targetMargin: number }) {
   const { t, locale } = useT();
-  // Cost series is still synthetic — out of scope for this slice.
-  const buyHistory = (row.recentPrices ?? []).map(p => +(p.price * 0.7).toFixed(2));
+  // No cost series: the chart used to draw one as 70% of each sell price and
+  // label it Cost, beside real sales. Until a cost feed exists the chart says
+  // so instead of inventing one.
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: 18 }}>
       <div className="card" style={{ padding: 16, background: 'var(--bg-elev)' }}>
@@ -567,12 +568,10 @@ function DetailExpand({
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
               <span style={{ width: 10, height: 2, background: 'var(--pos)', display: 'inline-block' }} /> {t('mktLegendSell')}
             </span>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-              <span style={{ width: 10, height: 2, background: 'var(--fg-muted)', display: 'inline-block' }} /> {t('eoCost')}
-            </span>
+            <span style={{ color: 'var(--fg-subtle)' }}>{t('mktNoCostData')}</span>
           </div>
         </div>
-        <DualLineChart sell={sellHistory} cost={buyHistory} />
+        <DualLineChart sell={sellHistory} cost={[]} />
       </div>
 
       <div className="card" style={{ padding: 16, background: 'var(--bg-elev)' }}>
@@ -598,18 +597,16 @@ function DetailExpand({
           {t('mktPriceSources')}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {priceSources.map((s, i) => {
+          {priceSources.map((s) => {
             // 'internal-sales' is the team's own number — pulled from PO
-            // sell_price projections in the last 30d. Other rows remain
-            // synthetic broker placeholders pending a real feed.
+            // sell_price projections in the last 30d. Every other source has
+            // no feed yet and says so: it used to show the average sell price
+            // nudged by a few percent, dressed as a broker quote.
             const isInternal = s.id === 'internal-sales';
-            const offset = (i - (priceSources.length - 1) / 2) * 0.04;
-            const v = isInternal
-              ? row.internalSales.avgPrice
-              : (row.avgSell == null ? null : row.avgSell * (1 + offset));
-            const sub = isInternal && row.internalSales.samples > 0
-              ? t('mktSourceSamples', { n: row.internalSales.samples })
-              : null;
+            const v = isInternal ? row.internalSales.avgPrice : null;
+            const sub = isInternal
+              ? (row.internalSales.samples > 0 ? t('mktSourceSamples', { n: row.internalSales.samples }) : null)
+              : t('mktNoFeed');
             return (
               <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12.5 }}>
                 <span style={{ color: 'var(--fg-muted)' }}>{s.label}</span>
@@ -632,7 +629,7 @@ function DetailExpand({
           return (
             <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border)', fontSize: 11, color: 'var(--fg-subtle)' }}>
               {t('mktConfidenceLabel')} <strong style={{ color }}>{label}</strong>{' '}
-              {t('mktConfBasedOn', { n: row.samples, sources: priceSources.length })}
+              {t('mktConfBasedOn', { n: row.samples, sources: priceSources.filter((s) => s.id === 'internal-sales').length })}
             </div>
           );
         })()}
@@ -678,11 +675,15 @@ function DualLineChart({ sell, cost }: { sell: number[]; cost: number[] }) {
           </text>
         </g>
       ))}
-      <path d={path(cost)} fill="none" stroke="var(--fg-muted)" strokeWidth={1.5} strokeDasharray="3 3" />
+      {cost.length > 0 && (
+        <path d={path(cost)} fill="none" stroke="var(--fg-muted)" strokeWidth={1.5} strokeDasharray="3 3" />
+      )}
       <path d={`${path(sell)} L ${x(sell.length - 1)} ${y(min)} L ${x(0)} ${y(min)} Z`} fill="var(--pos)" fillOpacity="0.08" />
       <path d={path(sell)} fill="none" stroke="var(--pos)" strokeWidth={2} />
       <circle cx={x(sell.length - 1)} cy={y(sell[sell.length - 1])} r={3.5} fill="white" stroke="var(--pos)" strokeWidth={2} />
-      <circle cx={x(cost.length - 1)} cy={y(cost[cost.length - 1])} r={3}   fill="white" stroke="var(--fg-muted)" strokeWidth={1.5} />
+      {cost.length > 0 && (
+        <circle cx={x(cost.length - 1)} cy={y(cost[cost.length - 1])} r={3}   fill="white" stroke="var(--fg-muted)" strokeWidth={1.5} />
+      )}
       {[0, Math.floor(sell.length / 2), sell.length - 1].map(i => (
         <text key={i} x={x(i)} y={h - 6} fontSize={9} textAnchor="middle" fill="var(--fg-subtle)">W{i + 1}</text>
       ))}

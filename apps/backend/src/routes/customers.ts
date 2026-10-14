@@ -81,6 +81,10 @@ customers.post('/', async (c) => {
         tags?: string[]; notes?: string }
     | null;
   if (!body?.name) return c.json({ error: 'name is required' }, 400);
+  // The same field rules PATCH applies, so a contact email POST accepted is
+  // not one PATCH refuses.
+  const invalid = validateCustomerFields(body as unknown as Record<string, unknown>);
+  if (invalid) return c.json({ error: invalid }, 400);
 
   const sql = getDb(c.env);
   const r = await sql`

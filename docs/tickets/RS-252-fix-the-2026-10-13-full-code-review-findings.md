@@ -70,11 +70,11 @@ Batch C
 - [x] Parallel item-type renames leave every line on the final name.
 
 Batch D
-- [ ] Dashboard revenue and counts include manual (inventory-free) sell lines and match the sell-orders screen; lines without a cost are counted and labelled.
-- [ ] CRM `?follow=soon` finds clients beyond the first 200; counts cover the whole owner-scoped book.
-- [ ] A 26-page PO walk reaches page 26; the phone inventory reaches lot 51+.
-- [ ] The phone profit sparkline keeps negative periods on canvas; Market shows no simulated cost or broker series.
-- [ ] Duplicate-lot edits appear once in sell-order history; POST and PATCH validate categories and customers alike; non-Latin seller names never cross-attach a package.
+- [x] Dashboard revenue and counts include manual (inventory-free) sell lines and match the sell-orders screen; lines without a cost are counted and labelled.
+- [x] CRM `?follow=soon` finds clients beyond the first 200; counts cover the whole owner-scoped book.
+- [x] A 26-page PO walk reaches page 26; the phone inventory reaches lot 51+.
+- [x] The phone profit sparkline keeps negative periods on canvas; Market shows no simulated cost or broker series.
+- [x] Duplicate-lot edits appear once in sell-order history; POST and PATCH validate categories and customers alike; non-Latin seller names never cross-attach a package.
 
 Batch E
 - [ ] A login under a different identity renders none of the previous user's PO or capture data.

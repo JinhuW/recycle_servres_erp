@@ -95,6 +95,13 @@ export function DesktopDashboard() {
           <div className="kpi-label">{t('grossProfit')}</div>
           <div className="kpi-value mono" style={{ color: 'var(--pos)' }}>{fmtUSD0(k.profit, locale)}</div>
           <TrendChip current={k.profit} prev={k.prev.profit} label={t('vsLastPeriod')} />
+          {(k.unknownCost?.lines ?? 0) > 0 && (
+            <div className="kpi-trend">
+              <span style={{ color: 'var(--fg-subtle)' }}>
+                {t('profitUnknownCost', { n: k.unknownCost!.lines, amount: fmtUSD0(k.unknownCost!.revenue, locale) })}
+              </span>
+            </div>
+          )}
         </div>
         <div className="kpi">
           <div className="kpi-label">{isManager ? t('commissionPaid') : t('commissionEarned')}</div>
