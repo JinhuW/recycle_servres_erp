@@ -19,6 +19,7 @@ const FORMAT_FOR_MIME: Record<string, string> = {
   'image/png': 'png', 'image/jpeg': 'jpeg', 'image/jpg': 'jpeg', 'image/webp': 'webp',
 };
 const SHRINKABLE = new Set(Object.keys(FORMAT_FOR_MIME));
+const DECODABLE = new Set(Object.values(FORMAT_FOR_MIME));
 
 // Each pass scales dimensions down and (for lossy formats) lowers quality;
 // byte size falls roughly with the pixel count, so a handful of passes covers
@@ -89,7 +90,12 @@ async function shrink(file: File, maxBytes: number, maxPixels: number, strict: b
   }
   if (meta.format !== FORMAT_FOR_MIME[file.type]) {
     if (strict) throw new ImageRejectedError('wrong_format');
-    return file;
+    // A staff photo whose extension names another of the three formats (a
+    // JPEG saved as .png) still has to fit, or the route answers 413. It is
+    // decoded as what it is and encoded below as what it claims, so the
+    // stored bytes match the type the route's allowlist already accepted.
+    // Anything else keeps the pass-through.
+    if (!DECODABLE.has(meta.format ?? '')) return file;
   }
   if (meta.width * meta.height > maxPixels) throw new ImageRejectedError('too_many_pixels');
   if (file.size <= maxBytes) return file;

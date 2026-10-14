@@ -356,8 +356,10 @@ bankTx.get('/stats', async (c) => {
       COALESCE(SUM(ABS(bt.amount)) FILTER (WHERE ${open} ${dirFragBt}), 0)::float AS unlinked_amount,
       COUNT(*) FILTER (WHERE bt.category = 'transfer')::int                            AS transfer_count,
       COUNT(*) FILTER (WHERE bt.linked_at IS NOT NULL)::int                            AS linked_count,
-      COUNT(*) FILTER (WHERE bt.link_kind = 'refund')::int                             AS refund_count,
-      COALESCE(SUM(bt.amount) FILTER (WHERE bt.link_kind = 'refund'), 0)::float          AS refund_amount,
+      -- PO refunds only: a sell-order refund is money OUT, and netting it in made
+      -- the tile disagree with the list it opens (linked, money in).
+      COUNT(*) FILTER (WHERE bt.order_id IS NOT NULL AND bt.link_kind = 'refund')::int  AS refund_count,
+      COALESCE(SUM(bt.amount) FILTER (WHERE bt.order_id IS NOT NULL AND bt.link_kind = 'refund'), 0)::float AS refund_amount,
       COUNT(*) FILTER (WHERE bt.ignored)::int                                          AS ignored_count,
       -- Money-out is baked into the predicate, not left to the direction lens:
       -- an incoming disputed payment is a case against us, not one we filed,
@@ -947,65 +949,85 @@ function counterpartyRulesOf(group: { source: string; counterparty: string | nul
   });
 }
 
+// Mark, unmark and assign lock the group and judge it inside the transaction,
+// like every other verdict: judged on a pool read, a /link that committed in
+// between left a row both linked and a transfer, or tripped the assignee CHECK
+// as a 500.
 bankTx.post('/:id/mark-transfer', async (c) => {
   const sql = getDb(c.env);
-  const group = await groupOf(sql, c.req.param('id'));
-  if (group.length === 0) return c.json({ error: 'Not found' }, 404);
-  if (group.some(isLinked)) return c.json({ error: 'Unlink the transaction before marking it a transfer' }, 400);
+  const id = c.req.param('id');
+  let done: { ruleCounterparty: string | null; alsoMarked: number };
+  try {
+    done = await sql.begin(async (tx) => {
+      await lockBankGroupTx(tx, [id]);
+      const group = await groupOf(tx, id);
+      if (group.length === 0) throw new BankRefusal(404, 'Not found');
+      if (group.some(isLinked)) throw new BankRefusal(400, 'Unlink the transaction before marking it a transfer');
 
-  const rules = counterpartyRulesOf(group);
-  let alsoMarked = 0;
-  await sql.begin(async (tx) => {
-    await tx`
-      UPDATE bank_transactions SET category = 'transfer', category_manual = TRUE
-      WHERE id IN ${tx(group.map((l) => l.id))}`;
-    for (const r of rules) {
+      const rules = counterpartyRulesOf(group);
+      let alsoMarked = 0;
       await tx`
-        INSERT INTO bank_transfer_counterparties (source, counterparty, created_by)
-        VALUES (${r.source}, ${r.counterparty}, ${c.var.user.id})
-        ON CONFLICT (source, counterparty) DO NOTHING`;
-      const updated = await tx`
-        UPDATE bank_transactions SET category = 'transfer'
-        WHERE source = ${r.source} AND counterparty = ${r.counterparty}
-          AND category = 'external' AND NOT category_manual AND ${unlinkedFrag(tx, 'bank_transactions')}
-          -- Money that never moved is not a transfer, and reclassifying it
-          -- would count it in the Transfers tile it is kept out of.
-          AND settle_status = 'settled'`;
-      alsoMarked += updated.count;
-    }
-  });
-  return c.json({ ok: true, ruleCounterparty: rules[0]?.counterparty ?? null, alsoMarked });
+        UPDATE bank_transactions SET category = 'transfer', category_manual = TRUE
+        WHERE id IN ${tx(group.map((l) => l.id))} AND ${unlinkedFrag(tx, 'bank_transactions')}`;
+      for (const r of rules) {
+        await tx`
+          INSERT INTO bank_transfer_counterparties (source, counterparty, created_by)
+          VALUES (${r.source}, ${r.counterparty}, ${c.var.user.id})
+          ON CONFLICT (source, counterparty) DO NOTHING`;
+        const updated = await tx`
+          UPDATE bank_transactions SET category = 'transfer'
+          WHERE source = ${r.source} AND counterparty = ${r.counterparty}
+            AND category = 'external' AND NOT category_manual AND ${unlinkedFrag(tx, 'bank_transactions')}
+            -- Money that never moved is not a transfer, and reclassifying it
+            -- would count it in the Transfers tile it is kept out of.
+            AND settle_status = 'settled'`;
+        alsoMarked += updated.count;
+      }
+      return { ruleCounterparty: rules[0]?.counterparty ?? null, alsoMarked };
+    });
+  } catch (e) {
+    if (e instanceof BankRefusal) return c.json({ error: e.message }, e.status);
+    throw e;
+  }
+  return c.json({ ok: true, ...done });
 });
 
 bankTx.post('/:id/unmark-transfer', async (c) => {
   const sql = getDb(c.env);
-  const group = await groupOf(sql, c.req.param('id'));
-  if (group.length === 0) return c.json({ error: 'Not found' }, 404);
-  // Otherwise the row is filed under an internal transaction and back in the
-  // unlinked queue at the same time.
-  if (group.some((l) => l.internal_txn_id)) {
-    return c.json({ error: 'Remove the transaction from its internal transaction first' }, 400);
-  }
-
-  const rules = counterpartyRulesOf(group);
+  const id = c.req.param('id');
   let ruleRemoved = false;
-  await sql.begin(async (tx) => {
-    await tx`
-      UPDATE bank_transactions SET category = 'external', category_manual = TRUE
-      WHERE id IN ${tx(group.map((l) => l.id))}`;
-    for (const r of rules) {
-      const del = await tx`
-        DELETE FROM bank_transfer_counterparties
-        WHERE source = ${r.source} AND counterparty = ${r.counterparty}`;
-      if (del.count === 0) continue;
-      ruleRemoved = true;
-      // Rows the rule classified carry no manual flag — revert them with it.
+  try {
+    await sql.begin(async (tx) => {
+      await lockBankGroupTx(tx, [id]);
+      const group = await groupOf(tx, id);
+      if (group.length === 0) throw new BankRefusal(404, 'Not found');
+      // Otherwise the row is filed under an internal transaction and back in the
+      // unlinked queue at the same time.
+      if (group.some((l) => l.internal_txn_id)) {
+        throw new BankRefusal(400, 'Remove the transaction from its internal transaction first');
+      }
+
+      const rules = counterpartyRulesOf(group);
       await tx`
-        UPDATE bank_transactions SET category = 'external'
-        WHERE source = ${r.source} AND counterparty = ${r.counterparty}
-          AND category = 'transfer' AND NOT category_manual AND ${unlinkedFrag(tx, 'bank_transactions')}`;
-    }
-  });
+        UPDATE bank_transactions SET category = 'external', category_manual = TRUE
+        WHERE id IN ${tx(group.map((l) => l.id))}`;
+      for (const r of rules) {
+        const del = await tx`
+          DELETE FROM bank_transfer_counterparties
+          WHERE source = ${r.source} AND counterparty = ${r.counterparty}`;
+        if (del.count === 0) continue;
+        ruleRemoved = true;
+        // Rows the rule classified carry no manual flag — revert them with it.
+        await tx`
+          UPDATE bank_transactions SET category = 'external'
+          WHERE source = ${r.source} AND counterparty = ${r.counterparty}
+            AND category = 'transfer' AND NOT category_manual AND ${unlinkedFrag(tx, 'bank_transactions')}`;
+      }
+    });
+  } catch (e) {
+    if (e instanceof BankRefusal) return c.json({ error: e.message }, e.status);
+    throw e;
+  }
   return c.json({ ok: true, ruleRemoved });
 });
 
@@ -1020,23 +1042,34 @@ bankTx.post('/:id/assign', async (c) => {
   const body = await c.req.json<{ userId?: string }>().catch(() => ({} as { userId?: string }));
   const userId = body.userId?.trim();
   if (!userId || !UUID_RE.test(userId)) return c.json({ error: 'userId is required' }, 400);
+  const id = c.req.param('id');
 
-  const group = await groupOf(sql, c.req.param('id'));
-  if (group.length === 0) return c.json({ error: 'Not found' }, 404);
-  if (group.some(isLinked)) return c.json({ error: 'Unlink the transaction before assigning it' }, 400);
-  // Nothing to explain: no money moved, so there is no payment to own.
-  if (group.some(isDead)) return c.json({ error: 'This payment did not settle' }, 400);
+  let name: string;
+  try {
+    name = await sql.begin(async (tx) => {
+      await lockBankGroupTx(tx, [id]);
+      const group = await groupOf(tx, id);
+      if (group.length === 0) throw new BankRefusal(404, 'Not found');
+      if (group.some(isLinked)) throw new BankRefusal(400, 'Unlink the transaction before assigning it');
+      // Nothing to explain: no money moved, so there is no payment to own.
+      if (group.some(isDead)) throw new BankRefusal(400, 'This payment did not settle');
 
-  // Deactivated members are soft-deleted, so an id alone isn't enough.
-  const [member] = await sql<{ name: string }[]>`
-    SELECT name FROM users WHERE id = ${userId} AND active LIMIT 1`;
-  if (!member) return c.json({ error: 'Member not found' }, 404);
+      // Deactivated members are soft-deleted, so an id alone isn't enough.
+      const [member] = await tx<{ name: string }[]>`
+        SELECT name FROM users WHERE id = ${userId} AND active LIMIT 1`;
+      if (!member) throw new BankRefusal(404, 'Member not found');
 
-  await sql`
-    UPDATE bank_transactions
-    SET assignee_id = ${userId}, assigned_by = ${c.var.user.id}, assigned_at = NOW()
-    WHERE id IN ${sql(group.map((l) => l.id))}`;
-  return c.json({ ok: true, assignee: { id: userId, name: member.name } });
+      await tx`
+        UPDATE bank_transactions
+        SET assignee_id = ${userId}, assigned_by = ${c.var.user.id}, assigned_at = NOW()
+        WHERE id IN ${tx(group.map((l) => l.id))} AND ${unlinkedFrag(tx, 'bank_transactions')}`;
+      return member.name;
+    });
+  } catch (e) {
+    if (e instanceof BankRefusal) return c.json({ error: e.message }, e.status);
+    throw e;
+  }
+  return c.json({ ok: true, assignee: { id: userId, name } });
 });
 
 bankTx.post('/:id/unassign', async (c) => {

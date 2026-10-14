@@ -306,7 +306,9 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
           setItems(prev => (meta.first ? page : [...prev, ...page]));
           setLoadedOnce(true);
         },
-      ).catch(handleFetchError);
+      )
+        .catch(handleFetchError)
+        .finally(() => { if (alive) setLoadedOnce(true); });
     }, 200);
     return () => { alive = false; clearTimeout(handle); };
   }, [filterQuery, reloadKey]);
@@ -998,7 +1000,6 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
           fontSize: 12, color: 'var(--fg-subtle)',
         }}>
           <div>{loadedOnce ? `Showing ${items.length} ${items.length === 1 ? 'entry' : 'entries'}` : 'Loading inventory…'}</div>
-          <div style={{ fontSize: 11 }}>Server cap 200 · refine filters to narrow further</div>
         </div>
       </div>
 

@@ -30,7 +30,9 @@ export function useFocusTrap(ref: RefObject<HTMLElement | null>, active = true):
       const first = items[0];
       const last = items[items.length - 1];
       const current = document.activeElement;
-      if (!(current instanceof HTMLElement) || !root.contains(current)) {
+      // The panel itself holds focus right after opening (tabIndex -1, so not
+      // in `items`); from there the browser's own Shift+Tab leaves the dialog.
+      if (!(current instanceof HTMLElement) || !root.contains(current) || current === root) {
         e.preventDefault();
         (e.shiftKey ? last : first).focus();
       } else if (e.shiftKey && current === first) {

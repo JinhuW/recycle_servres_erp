@@ -31,11 +31,12 @@ import { lineRequirements, missingFieldNames } from './lib/lineRequirements';
 import { useAuth } from './lib/auth';
 import { useT, translateIn } from './lib/i18n';
 import { api, ApiError, createDraftOrder, deleteOrder } from './lib/api';
-import { hasSharedFile } from './lib/sharedFile';
+import { takeSharedFile } from './lib/sharedFile';
 import { handleFetchError, showErrorDialog } from './lib/errorToast';
 import {
   navigate, navigateBack, useRoute, match, matchPurchaseOrder, poProductsPath, parseShippingRoute,
   MOBILE_VIEW_TO_PATH, pathToMobileView, readSafeNext, isAuthorizePath,
+  readHashQuery,
   replaceRoute,
 } from './lib/route';
 import { confirmDiscard } from './lib/unsavedGuard';
@@ -169,6 +170,21 @@ function Shell() {
   // The list as it stands when an awaited write settles, for Submit.
   const captureRef = useRef(capture);
   captureRef.current = capture;
+  // A photo shared into the app, waiting for the next new product's camera.
+  // Held by the session, not left in sessionStorage: the camera used to take
+  // it on any mount, so a share abandoned earlier was scanned into whatever
+  // camera opened next — a rescan of an existing line included. A ref the
+  // camera takes from, not a prop: StrictMode runs the camera's mount effect
+  // twice, and a prop would still hold the photo the second time.
+  const sharedPhotoRef = useRef<string | null>(null);
+  const takeSharedPhoto = () => {
+    const shared = sharedPhotoRef.current;
+    sharedPhotoRef.current = null;
+    return shared;
+  };
+  useEffect(() => {
+    if (capture.phase === 'idle') sharedPhotoRef.current = null;
+  }, [capture.phase]);
   // A saved line whose later save failed stays on the list marked unsaved,
   // so Submit retries it rather than dropping it as already confirmed.
   const markDirty = (line: DraftLine, dirty: boolean) => {
@@ -216,12 +232,17 @@ function Shell() {
   // The PWA's Submit shortcut and the share-target landing both arrive at
   // `/submit`, which is no screen: it opens the capture flow and lands on the
   // dashboard underneath. A shared photo (lib/sharedFile.ts) waits for the
-  // camera, which the next product's Scan opens.
+  // camera, which the next product's Scan opens. A capture already open is
+  // left as it is — the photo joins it — rather than reset under the user.
   useEffect(() => {
     if (path !== '/submit' || !user) return;
+    const lost = readHashQuery().has('sharedLost');
     replaceRoute('/dashboard');
-    startNewDraft();
-    if (hasSharedFile()) showToast(t('sharedPhotoReady'));
+    const shared = takeSharedFile();
+    if (shared) sharedPhotoRef.current = shared;
+    if (captureRef.current.phase === 'idle') startNewDraft();
+    if (shared) showToast(t('sharedPhotoReady'));
+    else if (lost) showToast(t('sharedPhotoLost'), 'warn');
     // startNewDraft and showToast are stable for the component's lifetime.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, user?.id]);
@@ -824,6 +845,9 @@ function Shell() {
       <>
         <Camera
           category={capture.category}
+          // A new product only: an existing line's rescan must never be
+          // filled from a photo shared for something else.
+          takeSharedPhoto={capture.editingLineIdx == null ? takeSharedPhoto : undefined}
           onDetected={onDetected}
           onClose={cancelCapture}
           onBack={goBack}

@@ -87,7 +87,8 @@ type Ctx = {
 const PreferencesCtx = createContext<Ctx | null>(null);
 
 export function PreferencesProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
+  const signedOut = !user && !loading;
   const [prefs, setPrefs] = useState<PrefBag>(() => readCache());
 
   // Pending changes waiting to flush.
@@ -108,11 +109,12 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
     patch: (batch) => api.patch<{ user: { preferences: PrefBag } }>('/api/me/preferences', batch)
       .then((r) => r.user.preferences ?? {}),
     identity: () => userIdRef.current,
-    // The server's bag, with the edits still waiting for their own flush on
-    // top: a reply never undoes a newer local choice.
-    onServer: (server) => {
+    // The server's bag, with the newer edits on top — those queued behind
+    // this save and those still waiting for their own flush: a reply never
+    // undoes a newer local choice.
+    onServer: (server, queued) => {
       setPrefs(() => {
-        const next = { ...server, ...pendingRef.current };
+        const next = { ...server, ...queued, ...pendingRef.current };
         writeCache(next);
         return next;
       });
@@ -133,9 +135,12 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
   // Whenever auth resolves with a user, reconcile against the server blob.
   // On sign-out, drop the lot: a pending timer would otherwise fire a save
   // for a session that is gone, and the cache would show the previous user's
-  // settings to the next one at this browser.
+  // settings to the next one at this browser. Not while auth is still
+  // asking: every cold load starts with no user, and wiping then threw away
+  // the cached bag the first paint is built from.
   useEffect(() => {
     if (!user) {
+      if (!signedOut) return;
       if (timerRef.current !== null) { window.clearTimeout(timerRef.current); timerRef.current = null; }
       pendingRef.current = {};
       rollbackRef.current = {};
@@ -153,7 +158,7 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
     // this for a same-user object churn — setLang does `setUser({...user})` —
     // would reset every preference saved since login back to that snapshot.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
+  }, [user?.id, signedOut]);
 
   const flush = useCallback(async () => {
     timerRef.current = null;

@@ -90,8 +90,12 @@ describe('bank transactions: sell-order and commission links', () => {
     expect(row).toMatchObject({ sellOrderId: soId, orderId: null, sellOrderTotal: 90 });
     const linked = await api<{ rows: Row[] }>('GET', '/api/bank-transactions?status=linked&direction=all', { token });
     expect(linked.body.rows.map((r) => r.sellOrderId)).toEqual([soId, soId]);
-    const stats = await api<{ linked: { count: number } }>('GET', '/api/bank-transactions/stats', { token });
+    const stats = await api<{ linked: { count: number }; refunds: { count: number; amount: number } }>(
+      'GET', '/api/bank-transactions/stats', { token });
     expect(stats.body.linked.count).toBe(2);
+    // The Refunds tile is PO refunds (money in) and opens that list; the
+    // sell order's refund is money out and stays off it.
+    expect(stats.body.refunds).toEqual({ count: 0, amount: 0 });
 
     // The guards that read "linked" see it.
     const assign = await api<{ error: string }>('POST', `/api/bank-transactions/${await idOf('m-in')}/assign`,
@@ -99,6 +103,10 @@ describe('bank transactions: sell-order and commission links', () => {
     expect(assign.status).toBe(400);
     const ignore = await api('POST', `/api/bank-transactions/${await idOf('m-in')}/ignore`, { token });
     expect(ignore.status).toBe(400);
+    const transfer = await api('POST', `/api/bank-transactions/${await idOf('m-in')}/mark-transfer`, { token });
+    expect(transfer.status).toBe(400);
+    const untouched = await db`SELECT category, assignee_id FROM bank_transactions WHERE external_id = 'm-in'`;
+    expect(untouched[0]).toMatchObject({ category: 'external', assignee_id: null });
 
     const unlink = await api('POST', `/api/bank-transactions/${await idOf('m-in')}/unlink`, { token });
     expect(unlink.status).toBe(200);

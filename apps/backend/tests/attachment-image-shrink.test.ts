@@ -110,6 +110,18 @@ describe('shrinkImageToFit', () => {
     expect(out.type).toBe('image/png');
   });
 
+  // The browser types a picked file from its extension, so a JPEG saved as
+  // .png arrives as image/png; a staff upload still has to fit the cap.
+  it('shrinks an oversized staff image whose extension names another format', async () => {
+    const big = await noiseJpeg(1400, 1400);
+    expect(big.byteLength).toBeGreaterThan(120_000);
+    const out = await shrinkImageToFit(asFile(big, 'photo.png', 'image/png'), 120_000);
+    expect(out.size).toBeLessThanOrEqual(120_000);
+    expect(out.type).toBe('image/png');
+    const meta = await sharp(Buffer.from(await out.arrayBuffer())).metadata();
+    expect(meta.format).toBe('png');
+  });
+
   it('returns the original when the bytes are not decodable as an image', async () => {
     const file = asFile(Buffer.alloc(150_000, 0xab), 'broken.png', 'image/png');
     expect(await shrinkImageToFit(file, 100_000)).toBe(file);
