@@ -6,7 +6,7 @@ import { createAdaptorServer } from '@hono/node-server';
 import app from '../src/index';
 import { attachVncBridge, closeVncBridges, openVncBridges, VNC_SESSION_LAPSED } from '../src/vncBridge';
 import { getTestDb, resetDb } from './helpers/db';
-import { testEnv } from './helpers/app';
+import { api, testEnv } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import type { Env } from '../src/types';
 
@@ -234,6 +234,16 @@ describe('VNC bridge session re-check', () => {
     const { token } = await loginAs(ALEX);
     const out = await watch(token, async () => {
       await getTestDb()`UPDATE users SET active = FALSE WHERE email = ${ALEX}`;
+    });
+    expect(out.code).toBe(VNC_SESSION_LAPSED);
+    expect(out.reason).toBe('Your sign-in has run out');
+  });
+
+  it('closes with 4401 once the manager logs out', async () => {
+    const { token, cookies } = await loginAs(ALEX);
+    const out = await watch(token, async () => {
+      const r = await api('POST', '/api/auth/logout', { cookies: { rt: cookies.rt } });
+      expect(r.status).toBe(200);
     });
     expect(out.code).toBe(VNC_SESSION_LAPSED);
     expect(out.reason).toBe('Your sign-in has run out');

@@ -58,10 +58,10 @@ Batch A
 - [x] An oversized or malformed login email is a 400 with no `login_attempts` row and no bcrypt call.
 
 Batch B
-- [ ] An authorization code redeemed after a password reset, deactivation or demotion is `invalid_grant` or carries only the role's scopes.
-- [ ] A saved `at` cookie is 401 after logout and after refresh-reuse revocation; an open VNC viewer closes.
-- [ ] Two concurrent self-demotions of the last two managers leave one manager and one 400.
-- [ ] A burst of password-change guesses stops at the five-attempt budget.
+- [x] An authorization code redeemed after a password reset, deactivation or demotion is `invalid_grant` or carries only the role's scopes.
+- [x] A saved `at` cookie is 401 after logout and after refresh-reuse revocation; an open VNC viewer closes.
+- [x] Two concurrent self-demotions of the last two managers leave one manager and one 400.
+- [x] A burst of password-change guesses stops at the five-attempt budget.
 
 Batch C
 - [ ] Pairing A+B against A+C, link against ignore, and reassign against PATCH each yield one winner and one 409/403; sync never overwrites a manager's committed verdict.

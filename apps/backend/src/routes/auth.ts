@@ -11,8 +11,8 @@ import {
   clearAuthCookies,
   sha256hex,
 } from '../auth';
-import { log } from '../lib/log';
 import { clientIp } from '../lib/clientIp';
+import { reserveAttempt } from '../lib/loginAttempts';
 import { isEmail } from '../lib/email';
 import { MAX_PASSWORD_LEN } from '@recycle-erp/shared';
 import type { Env } from '../types';
@@ -44,59 +44,15 @@ auth.post('/login', async (c) => {
 
   const sql = getDb(c.env);
 
-  // Brute-force throttle: once an email has FAILED_LIMIT failures in the
-  // window since its last success it is locked, and an address that has failed
-  // IP_FAILED_LIMIT times across any emails is too. The attempt is reserved
-  // BEFORE the count — a NULL success row — so concurrent guesses count against
-  // one another; counting first let a whole burst pass before any was recorded.
-  // The reservation is settled once bcrypt answers, or deleted if this request
-  // is refused or fails first, so a refusal never lengthens the lockout.
-  //
-  // An email or address already locked is refused on a read alone, before any
-  // reservation: a flood against it would otherwise cost an insert, a count
-  // and a delete per request, for an answer that is already known.
-  const FAILED_LIMIT = 5;
-  const IP_FAILED_LIMIT = 30;
-  const locked = async (excludeId: string | null): Promise<boolean> => {
-    const [{ fails, ipFails }] = await sql<{ fails: number; ipFails: number }[]>`
-      SELECT
-        (SELECT COUNT(*)::int FROM login_attempts
-          WHERE email = ${email} AND success IS NOT TRUE
-            AND (${excludeId}::bigint IS NULL OR id <> ${excludeId}::bigint)
-            AND attempted_at > NOW() - INTERVAL '15 minutes'
-            AND attempted_at > COALESCE(
-              (SELECT MAX(attempted_at) FROM login_attempts
-                WHERE email = ${email} AND success = TRUE),
-              'epoch'::timestamptz)) AS fails,
-        (SELECT COUNT(*)::int FROM login_attempts
-          WHERE ${ipKnown} AND ip_key = ${ip.key} AND success IS NOT TRUE
-            AND (${excludeId}::bigint IS NULL OR id <> ${excludeId}::bigint)
-            AND attempted_at > NOW() - INTERVAL '15 minutes') AS "ipFails"
-    `;
-    return fails >= FAILED_LIMIT || ipFails >= IP_FAILED_LIMIT;
-  };
+  // Brute-force throttle, shared with the password change (lib/loginAttempts):
+  // reserved before the count so a concurrent burst counts against itself.
   const tooMany = () => {
     c.header('Retry-After', '900');
     return c.json({ error: 'too many failed attempts; try again later' }, 429);
   };
-  if (await locked(null)) return tooMany();
-
-  const [{ id: attemptId }] = await sql<{ id: string }[]>`
-    INSERT INTO login_attempts (email, ip, ip_key, success)
-    VALUES (${email}, ${ip.full}, ${ip.key}, NULL)
-    RETURNING id
-  `;
-  let settled = false;
-  // A failed write leaves `settled` false, so the finally below deletes the
-  // reservation instead of leaving a NULL row that counts as a failure.
-  const settle = async (success: boolean) => {
-    await sql`UPDATE login_attempts SET success = ${success} WHERE id = ${attemptId}`
-      .then(() => { settled = true; })
-      .catch((e) => log.error('login_attempts write failed', e));
-  };
+  const attempt = await reserveAttempt(sql, { email, ip, ipKnown });
+  if (attempt.locked) return tooMany();
   try {
-    if (await locked(attemptId)) return tooMany();
-
     const rows = await sql<
       {
         id: string; email: string; name: string; initials: string;
@@ -119,12 +75,12 @@ auth.post('/login', async (c) => {
       // Burn the same bcrypt work as the known-user path so response timing
       // doesn't reveal whether the email exists (fixed hash of a throwaway value).
       await verifyPassword(password, '$2a$10$/fcBigHOjk6nVxcvSz4qvephw3ZjwoDPD5zFkLsPu4mMpgzGnlt9G');
-      await settle(false);
+      await attempt.settle(false);
       return c.json({ error: 'Invalid credentials' }, 401);
     }
 
     const ok = await verifyPassword(password, u.password_hash);
-    await settle(ok);
+    await attempt.settle(ok);
     if (!ok) return c.json({ error: 'Invalid credentials' }, 401);
 
     await sql`UPDATE users SET last_seen_at = NOW() WHERE id = ${u.id}`;
@@ -143,10 +99,7 @@ auth.post('/login', async (c) => {
       },
     });
   } finally {
-    if (!settled) {
-      await sql`DELETE FROM login_attempts WHERE id = ${attemptId}`
-        .catch((e) => log.error('login_attempts cleanup failed', e));
-    }
+    await attempt.release();
   }
 });
 

@@ -534,17 +534,31 @@ oauth.post('/token', async (c) => {
     }
     type CodeRow = {
       client_id: string; user_id: string; redirect_uri: string;
-      scopes: OAuthScope[]; code_challenge: string; user_cv: number | null;
+      scopes: OAuthScope[]; code_challenge: string; user_cv: number;
+      rt: { raw: string } | null;
     };
     const row = await sql.begin<CodeRow | null>(async (tx): Promise<CodeRow | null> => {
+      // The user row first, shared, then the code — the order a password
+      // reset or deactivation takes (its UPDATE of users, then its DELETE of
+      // the user's codes), so the two serialise instead of deadlocking. A
+      // code redeemed against an in-flight reset either waits and finds the
+      // code gone, or commits its whole grant (refresh token included) before
+      // the reset's revocation runs over it. The user's live state, not the
+      // code's, decides: a deactivated account or a demoted role since consent
+      // is refused or narrowed here, not left to the next rotation.
+      const u = (await tx<{ active: boolean; role: string; credential_version: number }[]>`
+        SELECT active, role, credential_version FROM users
+        WHERE id = (SELECT user_id FROM oauth_authorization_codes WHERE code_hash = ${sha256hex(code)})
+        FOR SHARE
+      `)[0];
+      if (!u || !u.active) return null;
       const r = (await tx<{
         client_id: string; user_id: string; redirect_uri: string;
         scopes: OAuthScope[]; code_challenge: string; expired: boolean;
-        consumed_at: Date | null; user_cv: number | null;
+        consumed_at: Date | null;
       }[]>`
         SELECT client_id, user_id, redirect_uri, scopes, code_challenge,
-               (expires_at <= NOW()) AS expired, consumed_at,
-               (SELECT u.credential_version FROM users u WHERE u.id = user_id) AS user_cv
+               (expires_at <= NOW()) AS expired, consumed_at
         FROM oauth_authorization_codes
         WHERE code_hash = ${sha256hex(code)}
         FOR UPDATE
@@ -559,14 +573,19 @@ oauth.post('/token', async (c) => {
       // redeemed against another.
       if (r.redirect_uri !== redirect_uri) return null;
       if (!verifyChallenge(r.code_challenge, code_verifier)) return null;
+      const scopes = restrictScopesToRole(r.scopes, u.role) as OAuthScope[];
+      if (scopes.length === 0) return null;
       await tx`
         UPDATE oauth_authorization_codes
         SET consumed_at = NOW()
         WHERE code_hash = ${sha256hex(code)}
       `;
+      const rt = client.grant_types.includes('refresh_token')
+        ? await issueRefreshToken(tx, env, { clientId: client.id, userId: r.user_id, scopes })
+        : null;
       return {
         client_id: r.client_id, user_id: r.user_id, redirect_uri: r.redirect_uri,
-        scopes: r.scopes, code_challenge: r.code_challenge, user_cv: r.user_cv,
+        scopes, code_challenge: r.code_challenge, user_cv: u.credential_version, rt,
       };
     });
     if (!row) {
@@ -575,17 +594,12 @@ oauth.post('/token', async (c) => {
     const at = await signAccessToken(env, {
       clientId: client.id, userId: row.user_id, scopes: row.scopes, credentialVersion: row.user_cv,
     });
-    const rt = client.grant_types.includes('refresh_token')
-      ? await issueRefreshToken(sql, env, {
-          clientId: client.id, userId: row.user_id, scopes: row.scopes,
-        })
-      : null;
     oauthGrantsTotal.inc({ grant_type: 'authorization_code', status: 'ok' });
     return c.json({
       access_token: at,
       token_type: 'Bearer',
       expires_in: Number.parseInt(env.OAUTH_ACCESS_TOKEN_TTL_SEC ?? '900', 10),
-      refresh_token: rt?.raw,
+      refresh_token: row.rt?.raw,
       scope: row.scopes.join(' '),
     });
   }

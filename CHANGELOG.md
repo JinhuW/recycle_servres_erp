@@ -17,6 +17,39 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.258.3] - 2026-10-14
+
+Batch B of the 2026-10-13 review fixes (RS-252): session and credential
+validity.
+
+### Security
+
+- **An OAuth authorization code is redeemed against the user as they are
+  now, not as they were at consent.** A code lives ten minutes; a password
+  reset or deactivation in between revoked the user's refresh tokens but
+  left the code redeemable, to a fresh token and a new refresh family. The
+  token endpoint now reads the user's live state under a share lock taken in
+  the same order a reset takes its locks, refuses a deactivated or reset
+  account, narrows a demoted manager's scopes to the role's, and mints the
+  refresh token inside that transaction; revocation also deletes the user's
+  unredeemed codes (SEC-01).
+- **An access cookie dies with its session.** Logout and refresh-token reuse
+  detection revoked only the refresh rows, so a copied `at` cookie kept
+  authorising for the rest of its hour, and an open fleet-console viewer with
+  it. Every authenticated request now checks that the token's refresh family
+  is still live; a token minted before the family claim existed is refused
+  (SEC-02).
+- **Two managers demoting themselves at once can no longer leave the system
+  with none.** The last-manager count ran before the update's transaction,
+  so concurrent demotions or deactivations each saw the other manager still
+  standing. The count now runs inside the transaction under one advisory lock
+  shared by every change to manager membership (SEC-04).
+- **The password change reserves its attempt before bcrypt**, through the
+  same durable `login_attempts` reservation login takes (now
+  `lib/loginAttempts`), so a concurrent burst of current-password guesses
+  cannot all pass one stale count and reach bcrypt past the five-attempt
+  budget (SEC-10).
+
 ## [1.258.2] - 2026-10-14
 
 Batch A of the 2026-10-13 review fixes (RS-252): dependencies and the small
