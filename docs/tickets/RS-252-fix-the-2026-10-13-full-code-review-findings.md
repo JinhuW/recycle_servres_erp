@@ -2,12 +2,12 @@
 id: RS-252
 title: Fix the 2026-10-13 full code-review findings
 type: bug
-status: in-progress
+status: in-review
 priority: P1
 created: 2026-10-14
 reporter: jinhu
 branch: fix/review-2026-10-13-a
-pr:
+pr: 641
 version:
 related: [RS-224]
 ---

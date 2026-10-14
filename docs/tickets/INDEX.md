@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-252](./RS-252-fix-the-2026-10-13-full-code-review-findings.md) | in-progress | bug | P1 | Fix the 2026-10-13 full code-review findings | — |
+| [RS-252](./RS-252-fix-the-2026-10-13-full-code-review-findings.md) | in-review | bug | P1 | Fix the 2026-10-13 full code-review findings | — |
 | [RS-251](./RS-251-po-list-payment-gap-mark-hover-note-that-opens-at-on.md) | done | bug | P2 | PO list payment-gap mark: hover note that opens at once | 1.258.1 |
 | [RS-250](./RS-250-po-list-red-mark-when-linked-payment-differs-from-to.md) | done | story | P2 | PO list: red ! mark when linked payment differs from total cost | 1.258.0 |
 | [RS-249](./RS-249-bank-payments-link-to-a-sell-order-or-a-po-s-commiss.md) | done | story | P2 | Bank payments link to a sell order or a PO's commission | 1.257.0 |
