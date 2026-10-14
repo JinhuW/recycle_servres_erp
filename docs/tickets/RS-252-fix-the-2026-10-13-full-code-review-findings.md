@@ -2,13 +2,13 @@
 id: RS-252
 title: Fix the 2026-10-13 full code-review findings
 type: bug
-status: in-review
+status: done
 priority: P1
 created: 2026-10-14
 reporter: jinhu
 branch: fix/review-2026-10-13-a
-pr: 641
-version:
+pr: 641, 642, 643, 644, 645, 646, 647
+version: 1.258.8
 related: [RS-224]
 ---
 
@@ -36,15 +36,15 @@ reviewed commit, so the review's line numbers are re-located per batch.
 The 62 P1/P2/cheap-P3 findings ship as seven area PRs under this ticket, in
 risk order; each PR strikes its items in the review's TODO files:
 
-| Batch | Findings | Theme |
-|---|---|---|
-| A | DEP-01, DEP-02, SEC-03, SEC-11–14 | dependencies and small hardening |
-| B | SEC-01, SEC-02, SEC-04, SEC-10 | session and credential validity |
-| C | BD-01–03, BD-05, BD-06, BD-09, SUP-01, INT-01 | one domain lock protocol |
-| D | BD-04, BD-07, BD-08, BD-10, SUP-02, SUP-03, FE-09, FE-13, FE-15, UI-03 | financial facts and complete lists |
-| E | FE-01–03, FE-06, FE-14, UI-06 | frontend session and mobile capture |
-| F | FE-04, FE-05, FE-07, FE-08, FE-10–12, FE-16, UI-01, UI-02, UI-04, UI-05 | frontend workflow and accessibility |
-| G | SEC-05–09, SEC-15, INF-01–05, INT-02, INT-03, SUP-04, SUP-05, DEP-03 | external side effects and ops |
+| Batch | Findings | Theme | PR | Version |
+|---|---|---|---|---|
+| A | DEP-01, DEP-02, SEC-03, SEC-11–14 | dependencies and small hardening | #641 | 1.258.2 |
+| B | SEC-01, SEC-02, SEC-04, SEC-10 | session and credential validity | #642 | 1.258.3 |
+| C | BD-01–03, BD-05, BD-06, BD-09, SUP-01, INT-01 | one domain lock protocol | #643 | 1.258.4 |
+| D | BD-04, BD-07, BD-08, BD-10, SUP-02, SUP-03, FE-09, FE-13, FE-15, UI-03 | financial facts and complete lists | #644 | 1.258.5 |
+| E | FE-01–03, FE-06, FE-14, UI-06 | frontend session and mobile capture | #645 | 1.258.6 |
+| F | FE-04, FE-05, FE-07, FE-08, FE-10–12, FE-16, UI-01, UI-02, UI-04, UI-05 | frontend workflow and accessibility | #646 | 1.258.7 |
+| G | SEC-05–09, SEC-15, INF-01–05, INT-02, INT-03, SUP-04, SUP-05, DEP-03 | external side effects and ops | #647 | 1.258.8 |
 
 ## Acceptance criteria
 
