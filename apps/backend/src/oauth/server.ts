@@ -534,16 +534,17 @@ oauth.post('/token', async (c) => {
     }
     type CodeRow = {
       client_id: string; user_id: string; redirect_uri: string;
-      scopes: OAuthScope[]; code_challenge: string;
+      scopes: OAuthScope[]; code_challenge: string; user_cv: number | null;
     };
     const row = await sql.begin<CodeRow | null>(async (tx): Promise<CodeRow | null> => {
       const r = (await tx<{
         client_id: string; user_id: string; redirect_uri: string;
         scopes: OAuthScope[]; code_challenge: string; expired: boolean;
-        consumed_at: Date | null;
+        consumed_at: Date | null; user_cv: number | null;
       }[]>`
         SELECT client_id, user_id, redirect_uri, scopes, code_challenge,
-               (expires_at <= NOW()) AS expired, consumed_at
+               (expires_at <= NOW()) AS expired, consumed_at,
+               (SELECT u.credential_version FROM users u WHERE u.id = user_id) AS user_cv
         FROM oauth_authorization_codes
         WHERE code_hash = ${sha256hex(code)}
         FOR UPDATE
@@ -565,14 +566,14 @@ oauth.post('/token', async (c) => {
       `;
       return {
         client_id: r.client_id, user_id: r.user_id, redirect_uri: r.redirect_uri,
-        scopes: r.scopes, code_challenge: r.code_challenge,
+        scopes: r.scopes, code_challenge: r.code_challenge, user_cv: r.user_cv,
       };
     });
     if (!row) {
       return fail('authorization_code', { error: 'invalid_grant' }, 400);
     }
     const at = await signAccessToken(env, {
-      clientId: client.id, userId: row.user_id, scopes: row.scopes,
+      clientId: client.id, userId: row.user_id, scopes: row.scopes, credentialVersion: row.user_cv,
     });
     const rt = client.grant_types.includes('refresh_token')
       ? await issueRefreshToken(sql, env, {
@@ -602,7 +603,7 @@ oauth.post('/token', async (c) => {
       return fail('refresh_token', { error: 'invalid_grant' }, 400);
     }
     const at = await signAccessToken(env, {
-      clientId: client.id, userId: res.userId, scopes: res.scopes,
+      clientId: client.id, userId: res.userId, scopes: res.scopes, credentialVersion: res.credentialVersion,
     });
     oauthGrantsTotal.inc({ grant_type: 'refresh_token', status: 'ok' });
     return c.json({

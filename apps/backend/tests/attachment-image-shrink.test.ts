@@ -241,6 +241,26 @@ describe('shrinkImageToFit limits', () => {
       .rejects.toBeInstanceOf(ImageRejectedError);
   });
 
+  // The MIME allowlist names the decoder the caller expects; the bytes decide.
+  // A TIFF or WebP renamed to .png otherwise reached a decoder the allowlist
+  // was meant to keep out of the anonymous path.
+  it('refuses a strict file whose bytes are not the declared format', async () => {
+    const { default: sharp } = await import('sharp');
+    const { shrinkImageToFit, ImageRejectedError } = await import('../src/lib/image-shrink');
+    const tiff = await sharp({ create: { width: 8, height: 8, channels: 3, background: '#808080' } })
+      .tiff().toBuffer();
+    const forged = new File([new Uint8Array(tiff)], 'forged.png', { type: 'image/png' });
+    await expect(shrinkImageToFit(forged, 10 * 1024 * 1024, { strict: true }))
+      .rejects.toEqual(new ImageRejectedError('wrong_format'));
+    const webp = await sharp({ create: { width: 8, height: 8, channels: 3, background: '#808080' } })
+      .webp().toBuffer();
+    const asJpeg = new File([new Uint8Array(webp)], 'forged.jpg', { type: 'image/jpeg' });
+    await expect(shrinkImageToFit(asJpeg, 10 * 1024 * 1024, { strict: true }))
+      .rejects.toEqual(new ImageRejectedError('wrong_format'));
+    // Non-strict staff uploads keep the pass-through contract.
+    expect(await shrinkImageToFit(forged, 1, {})).toBe(forged);
+  });
+
   it('returns a small, valid strict image untouched', async () => {
     const { shrinkImageToFit } = await import('../src/lib/image-shrink');
     const file = await png(64, 64);

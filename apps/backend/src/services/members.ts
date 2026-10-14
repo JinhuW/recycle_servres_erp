@@ -139,7 +139,8 @@ export async function updateMember(
         role               = COALESCE(${input.role ?? null},       role),
         active             = COALESCE(${input.active ?? null},     active),
         password_hash      = COALESCE(${hash},                     password_hash),
-        tokens_valid_after = COALESCE(to_timestamp(${resetAt}),    tokens_valid_after)
+        tokens_valid_after = COALESCE(to_timestamp(${resetAt}),    tokens_valid_after),
+        credential_version = credential_version + (CASE WHEN ${endsSessions} THEN 1 ELSE 0 END)
       WHERE id = ${id}
     `;
     if (endsSessions) {
@@ -187,7 +188,12 @@ export async function deactivateMember(sql: Sql, id: string): Promise<boolean> {
   // always consistent: a crash between the two would leave a deactivated
   // user whose refresh tokens can still mint new access tokens.
   await sql.begin(async (tx) => {
-    const r = await tx`UPDATE users SET active = FALSE WHERE id = ${id} RETURNING id`;
+    // The version bump outlives a later reactivation: tokens minted before
+    // the deactivation stay dead instead of coming back with the account.
+    const r = await tx`
+      UPDATE users SET active = FALSE, credential_version = credential_version + 1
+      WHERE id = ${id} RETURNING id
+    `;
     if (r.length === 0) return; // no such user — nothing to revoke
     updated = true;
     // Close the refresh path immediately so they can't mint new access tokens.

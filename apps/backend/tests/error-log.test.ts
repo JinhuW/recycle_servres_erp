@@ -78,6 +78,22 @@ describe('appendErrorRecord', () => {
     expect(JSON.parse(liveLines[0]).requestId).toBe('r');
   });
 
+  // Archive names carried seconds only: a second rotation in the same second
+  // renamed onto the first archive and its records were gone.
+  it('keeps every archive when several rotations land in one second', async () => {
+    const live = join(dir, 'errors.jsonl');
+    for (let i = 0; i < 3; i++) {
+      writeFileSync(live, `{"requestId":"old${i}"}\n` + 'x'.repeat(1000));
+      await appendErrorRecord(dir, { ts: 't', requestId: `r${i}`, method: 'GET', path: '/x', message: 'm' }, {
+        maxBytes: 1000, maxFiles: 10,
+      });
+    }
+    const rotated = readdirSync(dir).filter((f) => f.startsWith('errors-')).sort();
+    expect(rotated).toHaveLength(3);
+    const kept = rotated.map((f) => readFileSync(join(dir, f), 'utf8').split('\n')[0]);
+    expect(kept).toEqual(['{"requestId":"old0"}', '{"requestId":"old1"}', '{"requestId":"old2"}']);
+  });
+
   it('prunes oldest rotated files beyond maxFiles', async () => {
     // Seed 3 rotated files with mtimes 3s/2s/1s ago.
     const now = Date.now();

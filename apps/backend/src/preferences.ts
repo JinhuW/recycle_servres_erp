@@ -50,9 +50,12 @@ export function validatePreferencePatch(body: unknown): PreferencePatchResult {
   if (body === null || typeof body !== 'object' || Array.isArray(body)) {
     return { ok: false, status: 400, error: 'body must be a JSON object' };
   }
-  const cleaned: Record<string, unknown> = {};
+  // Null-prototype on both sides: JSON.parse makes `__proto__` an own key,
+  // and a plain-object lookup would hand `constructor` or `toString` back as a
+  // "validator" and persist the key.
+  const cleaned: Record<string, unknown> = Object.create(null);
   for (const [key, value] of Object.entries(body as Record<string, unknown>)) {
-    const validator = SCHEMA[key];
+    const validator = Object.hasOwn(SCHEMA, key) ? SCHEMA[key] : undefined;
     if (!validator) {
       return { ok: false, status: 400, error: `unknown preference: ${key}` };
     }
