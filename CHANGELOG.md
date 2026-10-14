@@ -17,6 +17,46 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.258.6] - 2026-10-14
+
+Batch E of the 2026-10-13 review fixes (RS-252): the browser's session and
+the phone's capture flow.
+
+### Security
+
+- **The app shell belongs to one signed-in identity.** Its state — the PO
+  open in the editor, a phone capture in progress, loaded notifications —
+  lived above the login gate, so a manager's PO stayed in memory through a
+  logout and rendered, private notes included, for whoever signed in next
+  under the same URL, before any request of their own. The shell is now
+  remounted whenever the identity changes and starts empty; the preferences
+  cache and any pending preference save go with the old session (FE-01).
+
+### Fixed
+
+- **A phone PO is finalised only after its line saves have landed.** Saving
+  a line opened Review while its save was still in flight, and a quick
+  Submit built its request from the list as it stood: the line was appended
+  a second time, or, with the draft still being created, a second PO was
+  made. Every write to the draft now runs through one queue; Submit waits
+  for it, then reads the list, and says "still saving" if asked sooner
+  (FE-02).
+- **A failed edit to an already-saved line is kept and retried.** Review
+  held the edited line as confirmed, so Submit left it out, returned nothing
+  to send and navigated away as if the change had been made. The line now
+  stays on the list marked *Not saved yet*; Submit refuses while a required
+  field is missing and otherwise updates the row by its id (FE-03).
+- **Preference saves go one at a time and to the right person.** Two edits
+  400 ms apart could settle out of order and the older reply undo the newer
+  choice; a reply started for one user could land after the next had signed
+  in. Saves are queued, a reply never overrides an edit still waiting for its
+  own flush, and a reply for a user who is gone is dropped (FE-06).
+- **A cancelled scan completes nothing.** A label scan's result, and the
+  pause before it opened the form, outlived the camera screen: backing out
+  mid-upload and opening a new capture got the earlier label. The serial
+  scanner's success flash had the same hand-off. Both are cancelled with the
+  screen (FE-14, UI-06).
+
 ## [1.258.5] - 2026-10-14
 
 Batch D of the 2026-10-13 review fixes (RS-252): financial facts and
