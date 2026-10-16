@@ -3,8 +3,9 @@
 # The ERP dashboard (running on Railway) reaches it through a Cloudflare
 # tunnel; the coordinator itself stays loopback-only. The facade forwards a
 # closed allowlist (fleet health, checkpoint queue + resolve, review stats,
-# the filter prompt, the composed fleet view) to the coordinator over the
-# rs-fleet network and holds the admin token so it never leaves the VM.
+# the filter prompt, the composed fleet view, and the account pool's
+# create/edit — secrets go in, never come back out) to the coordinator over
+# the rs-fleet network and holds the admin token so it never leaves the VM.
 #
 # It also serves the standalone fleet dashboard at `/` — the same tunnel
 # hostname opened in a browser, with the console token pasted in once.

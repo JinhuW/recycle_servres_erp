@@ -8,7 +8,7 @@ own shapes, so the pieces fit without coordination.
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class WorkerState(str, Enum):
@@ -345,6 +345,34 @@ class AccountOut(BaseModel):
 
 class AccountList(BaseModel):
     accounts: List[AccountOut]
+
+
+# -- accounts (vault, console writes) -----------------------------------------
+
+
+class AccountWrite(BaseModel):
+    """A change to one vault account from the console.
+
+    A field left out is kept; an explicit null clears it — for the plain fields
+    and for each secret alike. Secrets go in and never come back out (the
+    response is an `AccountOut`). Password login, the proxy and the VNC link
+    are deliberately not here: they stay on the VM's CLI (routers/accounts.py
+    says why).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    fb_username: str | None = Field(default=None, max_length=320)
+    worker_id: str | None = Field(default=None, max_length=128)
+    region: str | None = Field(default=None, max_length=64)
+    # secret field name -> new value, or null to remove the stored one.
+    secrets: Dict[str, str | None] = Field(default_factory=dict)
+    # Who made the change, for the log line and the re-assignment alert.
+    changed_by: str = Field(min_length=1, max_length=120)
+
+
+class AccountCreate(AccountWrite):
+    account_id: str = Field(max_length=128)
 
 
 class StatusResponse(BaseModel):

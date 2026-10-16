@@ -6,6 +6,8 @@ prompt endpoint returns exactly three fields from the mounted TOML; and no
 route outside the allowlist exists at all.
 """
 
+import json
+
 import httpx
 import pytest
 from fastapi.testclient import TestClient
@@ -28,12 +30,13 @@ def client(monkeypatch, tmp_path):
         'rating_prompt = "rate 1-5"\npassword = "SECRET"\n'
     )
 
-    # Capture upstream calls instead of making them.
+    # Capture upstream calls instead of making them; a test may change the reply.
     calls = []
+    reply = {"status": 200, "json": {"workers": []}}
 
     async def fake_forward_transport(request):
         calls.append(request)
-        return httpx.Response(200, json={"workers": []})
+        return httpx.Response(reply["status"], json=reply["json"])
 
     real_client = httpx.AsyncClient
 
@@ -46,6 +49,7 @@ def client(monkeypatch, tmp_path):
 
     test_client = TestClient(console.app)
     test_client.calls = calls
+    test_client.reply = reply
     yield test_client
 
 
@@ -57,10 +61,14 @@ def test_token_required_everywhere(client):
         "/v1/stats/reviews",
         "/v1/stats/alert-hits",
         "/v1/config/filter-prompt",
+        "/v1/accounts",
     ):
         assert client.get(path).status_code == 401, path
     assert client.post("/v1/challenges/1/resolve").status_code == 401
     assert client.post("/v1/vnc/homelab-1/ticket").status_code == 401
+    assert client.post("/v1/accounts", json={}).status_code == 401
+    assert client.patch("/v1/accounts/a", json={}).status_code == 401
+    assert client.calls == []
 
 
 def test_unset_token_fails_closed(client, monkeypatch):
@@ -145,6 +153,63 @@ def test_no_auth_routes_exist(client):
     for path in ("/v1/auth/code", "/v1/auth/credentials", "/v1/session/x/restore"):
         assert client.post(path, headers=AUTH).status_code in (404, 405), path
         assert client.get(path, headers=AUTH).status_code in (404, 405), path
+
+
+def test_accounts_list_is_forwarded(client):
+    res = client.get("/v1/accounts", headers=AUTH)
+    assert res.status_code == 200
+    request = client.calls[-1]
+    assert request.method == "GET"
+    assert str(request.url) == "http://upstream:8500/v1/accounts"
+    assert request.headers["Authorization"] == "Bearer admin-secret"
+
+
+def test_account_writes_carry_only_the_allowlisted_keys(client):
+    body = {
+        "account_id": "ne-2",
+        "fb_username": "buyer@example.com",
+        "worker_id": None,
+        "region": "ne",
+        "secrets": {"password": "pw", "imap_host": None, "api_key": "x"},
+        "changed_by": "Alex",
+        "allow_password_login": True,
+        "proxy": "http://evil:1",
+        "vnc_url": "https://phish.example",
+    }
+    assert client.post("/v1/accounts", json=body, headers=AUTH).status_code == 200
+    request = client.calls[-1]
+    assert request.method == "POST"
+    assert request.url.path == "/v1/accounts"
+    assert request.headers["Authorization"] == "Bearer admin-secret"
+    assert json.loads(request.content) == {
+        "account_id": "ne-2",
+        "fb_username": "buyer@example.com",
+        "worker_id": None,
+        "region": "ne",
+        "secrets": {"password": "pw", "imap_host": None},
+        "changed_by": "Alex",
+    }
+
+    assert client.patch("/v1/accounts/a@b.c", json=body, headers=AUTH).status_code == 200
+    request = client.calls[-1]
+    assert request.method == "PATCH"
+    assert request.url.raw_path == b"/v1/accounts/a%40b.c"
+    sent = json.loads(request.content)
+    assert "account_id" not in sent
+    assert set(sent) == {"fb_username", "worker_id", "region", "secrets", "changed_by"}
+
+
+def test_account_write_status_passes_through(client):
+    detail = {"detail": "Worker 'ne-1' already has account 'x'."}
+    client.reply.update(status=409, json=detail)
+    res = client.patch("/v1/accounts/a", json={"worker_id": "ne-1", "changed_by": "A"}, headers=AUTH)
+    assert res.status_code == 409
+    assert res.json() == detail
+
+
+def test_accounts_cannot_be_deleted_here(client):
+    assert client.delete("/v1/accounts/a", headers=AUTH).status_code in (404, 405)
+    assert client.calls == []
 
 
 def test_healthz_is_open(client):

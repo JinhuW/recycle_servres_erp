@@ -3,15 +3,20 @@
 Why this service exists: the coordinator holds every Facebook account's
 secrets and answers 2FA/credential requests, so it stays loopback-only on the
 VM — deliberately unreachable from anywhere. The ERP dashboard still needs the
-harmless slice of it (fleet health, the checkpoint queue, review stats), so
-this facade is what gets exposed through the Cloudflare tunnel instead.
+harmless slice of it (fleet health, the checkpoint queue, review stats) and a
+write-only way into the account pool, so this facade is what gets exposed
+through the Cloudflare tunnel instead.
 
 The safety property, stated once: **the coordinator admin token never leaves
-this process, and no auth/credential/session route is forwarded.** The routes
-below are a closed allowlist — nine reads and two writes (resolving a
-checkpoint, and queuing a worker re-login). Neither write moves a credential
-or names an account. A full compromise of this service's own token yields
-fleet metadata, not accounts.
+this process, no auth/credential/session route is forwarded, and no route
+returns a secret.** The routes below are a closed allowlist: reads, plus the
+writes that resolve a checkpoint, queue a worker re-login, and create or edit
+a vault account (`/v1/accounts`). The account writes are the one place a
+credential crosses this service, and only inwards — a password or TOTP key
+goes into the vault and nothing here ever reads one back. A full compromise of
+this service's own token can therefore overwrite accounts, but never read a
+secret, delete an account, or turn password release on; the coordinator
+refuses all three (its routers/accounts.py also states the residual risk).
 
 It also serves the fleet dashboard: a single static page (`/`, assets under
 `/static`) that calls the routes below with the console token the operator
@@ -53,6 +58,7 @@ import secrets as pysecrets
 import tomllib
 from pathlib import Path
 from typing import Any, Dict, Optional
+from urllib.parse import quote
 
 import httpx
 from fastapi import (
@@ -196,6 +202,52 @@ async def worker_relogin(worker_id: str) -> Response:
     login on its next heartbeat — it moves no credentials and names no account.
     """
     return await _forward("POST", f"/v1/workers/{worker_id}/relogin")
+
+
+@app.get("/v1/accounts", dependencies=[Depends(require_token)])
+async def accounts() -> Response:
+    """Every vault account, assigned or not: identity and presence flags only."""
+    return await _forward("GET", "/v1/accounts")
+
+
+# What an account write may carry into the vault, and nothing else. Rebuilt
+# here rather than passed through, so a key this hop does not know — password
+# login, the proxy, a column added later — is dropped here as well as refused
+# by the coordinator.
+_ACCOUNT_WRITE_KEYS = ("fb_username", "worker_id", "region", "changed_by")
+_SECRET_FIELDS = ("password", "email", "email_password", "totp_secret", "imap_host", "imap_port")
+
+
+async def _account_write(request: Request, *, with_id: bool) -> Dict[str, Any]:
+    try:
+        raw = await request.json()
+    except Exception:
+        raw = {}
+    if not isinstance(raw, dict):
+        raw = {}
+    keys = _ACCOUNT_WRITE_KEYS + (("account_id",) if with_id else ())
+    # Present-but-null is kept: it is how a write clears a field.
+    body = {key: raw[key] for key in keys if key in raw}
+    secrets = raw.get("secrets")
+    if isinstance(secrets, dict):
+        body["secrets"] = {k: v for k, v in secrets.items() if k in _SECRET_FIELDS}
+    return body
+
+
+@app.post("/v1/accounts", dependencies=[Depends(require_token)])
+async def create_account(request: Request) -> Response:
+    return await _forward(
+        "POST", "/v1/accounts", json_body=await _account_write(request, with_id=True)
+    )
+
+
+@app.patch("/v1/accounts/{account_id}", dependencies=[Depends(require_token)])
+async def update_account(account_id: str, request: Request) -> Response:
+    return await _forward(
+        "PATCH",
+        f"/v1/accounts/{quote(account_id, safe='')}",
+        json_body=await _account_write(request, with_id=False),
+    )
 
 
 @app.get("/v1/challenges", dependencies=[Depends(require_token)])

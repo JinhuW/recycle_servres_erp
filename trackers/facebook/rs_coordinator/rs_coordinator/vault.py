@@ -13,7 +13,7 @@ accounts never touches plaintext.
 
 import json
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from .db import Database
 
@@ -29,6 +29,9 @@ SECRET_FIELDS = (
     "imap_host",
     "imap_port",
 )
+
+# The plain (unsealed) account columns `put_account` can set or clear.
+PLAIN_FIELDS = ("worker_id", "fb_username", "region", "proxy", "vnc_url")
 
 
 class VaultError(RuntimeError):
@@ -99,13 +102,21 @@ class AccountStore:
         vnc_url: str | None = None,
         allow_password_login: bool = False,
         merge_secrets: bool = True,
+        clear_fields: Sequence[str] = (),
     ) -> None:
         """Create or update an account.
 
         `merge_secrets` keeps any previously stored secret that this call does
         not mention, so updating just a proxy never silently drops the TOTP
         secret.
+
+        A plain field passed as None is left as it is; `clear_fields` names the
+        plain fields to empty instead — un-assigning an account from its worker
+        is the case that needs it.
         """
+        for name in clear_fields:
+            if name not in PLAIN_FIELDS:
+                raise VaultError(f"Unknown account field '{name}'. Known: {', '.join(PLAIN_FIELDS)}")
         payload: Dict[str, Any] = {}
         if merge_secrets:
             existing = self.db.get_account_row(account_id)
@@ -134,6 +145,8 @@ class AccountStore:
         ):
             if value is not None:
                 fields[name] = value
+        for name in clear_fields:
+            fields[name] = None
         self.db.put_account(account_id, fields)
 
     def get_account(self: "AccountStore", account_id: str) -> Optional[Dict[str, Any]]:

@@ -160,6 +160,25 @@ def parse_secret(raw: str, account_id: str) -> TotpConfig:
     )
 
 
+def normalize_totp_secret(raw: str) -> str:
+    """The value to store for a pasted TOTP key.
+
+    Normally the bare base32 key. A URI carrying non-default parameters is kept
+    verbatim instead: the vault has no field for digits/period/algorithm, and
+    `parse_secret` honours a stored URI, so flattening one would produce codes
+    that are silently wrong. Raises CodeUnavailable for a key that cannot mint
+    codes, so nothing unusable is ever stored.
+    """
+    config = parse_secret(raw, "(new)")
+    if (config.digits, config.period, config.algorithm) != (
+        DEFAULT_DIGITS,
+        DEFAULT_PERIOD,
+        DEFAULT_ALGORITHM,
+    ):
+        return raw.strip()
+    return config.secret
+
+
 def config_for(account_id: str) -> TotpConfig:
     """The account's TOTP parameters, straight from the vault."""
     secrets: Dict[str, Any] = deps.get_account_store().get_secret(account_id)

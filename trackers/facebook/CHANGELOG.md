@@ -20,6 +20,20 @@ deployed?" harder to answer.
 
 ### Added
 
+- **The vault can be kept from the ERP's new Account Pool page.** The
+  coordinator gains `POST /v1/accounts` (create) and `PATCH
+  /v1/accounts/{account_id}` (edit: Facebook login, worker, region and the six
+  secrets; a field left out is kept, an explicit `null` clears it, so
+  `worker_id: null` returns an account to the pool). rs-console forwards them,
+  and `GET /v1/accounts`, rebuilding each write body from a key allowlist.
+  Secrets are write-only: a response, like the listing, says only *which* are
+  stored. There is deliberately no delete (`rsc vault rm` stays the only way),
+  and password login, the proxy and the VNC link stay CLI-only. A TOTP key is
+  validated and normalised exactly as `rsc vault set-account` does it; a
+  worker that already has an account is refused rather than given two.
+  - Deploy the coordinator **and** the console before the ERP page; against an
+    older console the page shows a "not supported yet" notice.
+
 - **A "Re-login" button in the VNC console** that makes a worker re-run its
   full Facebook login — username, password and 2FA/TOTP code, all filled
   automatically — without waiting for the session to lapse. The button
@@ -49,6 +63,26 @@ deployed?" harder to answer.
   so `/v1/heartbeat` would have raised `AttributeError` for every worker.
   Both methods are now in `pg.py` too; `test_the_two_backends_expose_the_same_api`
   caught it, and the round-trip was checked against a real Postgres 16.
+
+### Security
+
+- **rs-console now has a write path into the vault, and its safety property
+  changes accordingly.** It used to be "no write moves a credential or names an
+  account"; it is now "no route returns a secret": a stolen console token can
+  create or overwrite accounts, but cannot read a secret back, delete an
+  account, or turn password release on. The coordinator enforces the edges:
+  - Changing an account's worker (including un-assigning it) turns its
+    password login **off**, so a re-assignment never hands a stored password to
+    a different machine; re-enable it on the VM if the move was intended.
+  - Every re-assignment raises an ops alert naming who made it. A console
+    token *plus* a compromised worker VM could still assign another account to
+    that worker and receive its 2FA codes — the alert is how that is noticed.
+  - Setting a new mailbox address, IMAP host or port must re-send the mailbox
+    password in the same save. The code service combines stored values, so a
+    changed host with the stored password would otherwise send that password to
+    whoever runs the host. Clearing them needs nothing (a cleared host falls
+    back to the address's well-known one).
+  - Each write logs who made it and which fields changed — names, never values.
 
 ## [0.5.5] - 2026-09-05
 
