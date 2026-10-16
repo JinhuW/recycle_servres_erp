@@ -17,6 +17,28 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.260.0] - 2026-10-16
+
+Review mode's count can be typed as well as stepped (RS-257).
+
+### Added
+
+- **Type the count in a Review mode row.** The number between − and + is now
+  a field. Click it and the number is selected, so typing replaces it. Enter,
+  or leaving the field, saves the count; Escape puts the old one back without
+  leaving Review mode. Before this, a short box took one click of − per
+  missing unit, so 67 sticks with 40 in the box was 27 clicks.
+  - The typed count goes through the same rules as −. It is held between 0
+    and the line's qty, and a count below qty takes the line's tick away.
+    The field is locked wherever − and + are.
+  - − / + and the + − keys are unchanged, and both ways work on the same
+    number. Inside the field, the + − keys step the typed number, and Enter
+    saves it.
+  - Nothing is saved per keystroke, so the 6 of a 67 never lands. Switching
+    to another window mid-edit saves nothing either.
+  - A scanner firing while the field has focus goes to the scan box, digits
+    already typed included, and the count is left alone.
+
 ## [1.259.1] - 2026-10-16
 
 Loose ends from folding the two trackers into this repo (RS-256).
