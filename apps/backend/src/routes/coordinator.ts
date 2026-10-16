@@ -114,7 +114,7 @@ async function forward(
     json: (body: unknown, status?: number) => Response;
     body: (data: null, status: StatusCode) => Response;
   },
-  method: 'GET' | 'POST',
+  method: 'GET' | 'POST' | 'PUT',
   path: string,
   body?: unknown,
 ): Promise<Response> {
@@ -170,6 +170,48 @@ coordinator.get('/fleet', (c) => forward(c, 'GET', '/v1/fleet'));
 // names no account, which is why the facade lets it through.
 coordinator.post('/workers/:id/relogin', (c) =>
   forward(c, 'POST', `/v1/workers/${encodeURIComponent(c.req.param('id'))}/relogin`));
+
+// ── Vault account credentials ───────────────────────────────────────────────
+// The "Edit credentials" form: what a worker signs in with when Re-login runs.
+// This is the one route here that carries a credential, and it carries it one
+// way — the body goes up reduced to the fields below, the answer is the vault's
+// presence-flag view (which secrets are stored, never a value), and nothing on
+// this side logs the body. A field left out keeps its stored value; an empty
+// secret keeps what is stored and a null clears it, as the coordinator reads
+// them. The facade's own token can therefore set a login but never read one.
+export const ACCOUNT_ID = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,63}$/;
+const ACCOUNT_FIELDS = ['worker_id', 'fb_username', 'region', 'allow_password_login'] as const;
+const ACCOUNT_SECRET_FIELDS = [
+  'password', 'totp_secret', 'email', 'email_password', 'imap_host', 'imap_port',
+] as const;
+
+coordinator.put('/accounts/:id', async (c) => {
+  const id = c.req.param('id');
+  if (!ACCOUNT_ID.test(id)) return c.json({ error: 'Not a valid account id' }, 400);
+  const raw: unknown = await c.req.json().catch(() => null);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return c.json({ error: 'Expected a JSON object' }, 400);
+  }
+  const given = raw as Record<string, unknown>;
+  const body: Record<string, unknown> = {};
+  for (const key of ACCOUNT_FIELDS) if (key in given) body[key] = given[key];
+  const secrets = given.secrets;
+  if (secrets && typeof secrets === 'object' && !Array.isArray(secrets)) {
+    const kept: Record<string, string | null> = {};
+    for (const key of ACCOUNT_SECRET_FIELDS) {
+      const value = (secrets as Record<string, unknown>)[key];
+      if (value === null || typeof value === 'string') kept[key] = value;
+    }
+    body.secrets = kept;
+  }
+  // Field names only — the audit value is who changed what, never to what.
+  log.info('vault account written', {
+    module: 'coordinator', accountId: id, fields: Object.keys(body).filter(k => k !== 'secrets'),
+    secrets: Object.keys((body.secrets as Record<string, unknown> | undefined) ?? {}),
+    by: c.var.user.email,
+  });
+  return forward(c, 'PUT', `/v1/accounts/${encodeURIComponent(id)}`, body);
+});
 
 // ── Watching a worker's browser ──────────────────────────────────────────────
 // The bytes themselves are relayed by vncBridge.ts, which owns the HTTP

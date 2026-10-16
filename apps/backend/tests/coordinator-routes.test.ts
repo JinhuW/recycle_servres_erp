@@ -223,3 +223,74 @@ describe('Coordinator proxy routes (/api/coordinator)', () => {
   });
 });
 
+
+describe('Vault account writes (PUT /api/coordinator/accounts/:id)', () => {
+  beforeEach(async () => {
+    await resetDb();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('requires a manager', async () => {
+    expect((await api('PUT', '/api/coordinator/accounts/ne-1', { body: {} })).status).toBe(401);
+    const { token } = await loginAs(MARCUS);
+    expect((await api('PUT', '/api/coordinator/accounts/ne-1', { token, body: {} })).status).toBe(403);
+  });
+
+  it('forwards the write reduced to the allowed fields, and only presence flags come back', async () => {
+    const { token } = await loginAs(ALEX);
+    const upstreamAnswer = {
+      account_id: 'ne-1', worker_id: 'ne-1', fb_username: 'lisa@example.com',
+      allow_password_login: true, proxy_configured: false,
+      secrets: { password: true, totp_secret: true, email: false },
+    };
+    const spy = stubFacade(200, upstreamAnswer);
+
+    const r = await api<typeof upstreamAnswer>('PUT', '/api/coordinator/accounts/ne-1', {
+      token, env: ENV,
+      body: {
+        worker_id: 'ne-1',
+        fb_username: 'lisa@example.com',
+        allow_password_login: true,
+        proxy: 'http://user:pass@proxy.example:10002', // not settable from the ERP
+        vnc_url: 'vnc://nope',
+        secrets: { password: 's3cret-pw', totp_secret: 'JBSWY3DP', email: null, bogus: 'x', imap_port: 993 },
+      },
+    });
+
+    expect(r.status).toBe(200);
+    expect(r.body.secrets.password).toBe(true);
+    expect(JSON.stringify(r.body)).not.toContain('s3cret-pw');
+
+    const [url, init] = spy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://facade.internal:8600/v1/accounts/ne-1');
+    expect(init.method).toBe('PUT');
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer console-secret');
+    expect(JSON.parse(init.body as string)).toEqual({
+      worker_id: 'ne-1',
+      fb_username: 'lisa@example.com',
+      allow_password_login: true,
+      secrets: { password: 's3cret-pw', totp_secret: 'JBSWY3DP', email: null },
+    });
+  });
+
+  it('refuses a bad id or body before anything is forwarded', async () => {
+    const { token } = await loginAs(ALEX);
+    const spy = stubFacade(200, {});
+    expect((await api('PUT', '/api/coordinator/accounts/bad%20id', { token, env: ENV, body: {} })).status).toBe(400);
+    expect((await api('PUT', '/api/coordinator/accounts/ne-1', { token, env: ENV, body: ['x'] })).status).toBe(400);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('relays the coordinator refusal verbatim (a worker owned by another account)', async () => {
+    const { token } = await loginAs(ALEX);
+    stubFacade(409, { detail: "Worker 'homelab-1' already belongs to account 'personal'." });
+    const r = await api<{ error: string }>('PUT', '/api/coordinator/accounts/spare', {
+      token, env: ENV, body: { worker_id: 'homelab-1' },
+    });
+    expect(r.status).toBe(409);
+    expect(r.body.error).toMatch(/already belongs to account 'personal'/);
+  });
+});
