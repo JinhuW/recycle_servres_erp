@@ -60,6 +60,7 @@ def test_token_required_everywhere(client):
     ):
         assert client.get(path).status_code == 401, path
     assert client.post("/v1/challenges/1/resolve").status_code == 401
+    assert client.post("/v1/vnc/homelab-1/ticket").status_code == 401
 
 
 def test_unset_token_fails_closed(client, monkeypatch):
@@ -125,6 +126,19 @@ def test_missing_config_is_404(client, monkeypatch, tmp_path):
     assert client.get("/v1/config/filter-prompt", headers=AUTH).status_code == 404
 
 
+def test_relogin_forwards_to_coordinator_with_admin_token(client):
+    assert client.post("/v1/workers/homelab-1/relogin").status_code == 401
+
+    res = client.post("/v1/workers/homelab-1/relogin", headers=AUTH)
+    assert res.status_code == 200
+
+    (request,) = client.calls
+    assert request.method == "POST"
+    assert request.url.path == "/v1/workers/homelab-1/relogin"
+    assert request.headers["Authorization"] == "Bearer admin-secret"
+    assert "admin-secret" not in res.text
+
+
 def test_no_auth_routes_exist(client):
     # The coordinator's dangerous surface must not exist here at all — 404,
     # not 401, so a future catch-all proxy would fail this loudly.
@@ -135,3 +149,60 @@ def test_no_auth_routes_exist(client):
 
 def test_healthz_is_open(client):
     assert client.get("/healthz").status_code == 200
+
+
+def test_shells_version_their_assets_and_static_revalidates(client, monkeypatch):
+    # A stale cached fleet.css hid the whole viewer once; the shells must
+    # point at a URL that changes with the asset, and /static must not be
+    # cached without asking.
+    monkeypatch.setenv("RS_VNC_TARGETS", "w=127.0.0.1:1")
+    for path in ("/", "/vnc/w"):
+        res = client.get(path)
+        assert res.status_code == 200, path
+        assert f"/static/fleet.css?v={console.ASSET_VERSION}" in res.text, path
+        assert "__ASSET_V__" not in res.text
+        assert res.headers["cache-control"] == "no-cache"
+    assert client.get("/static/fleet.css").headers["cache-control"] == "no-cache"
+    assert client.get("/static/novnc/core/rfb.js").headers["cache-control"] == "no-cache"
+    assert len(console.ASSET_VERSION) == 10
+
+
+def test_put_account_forwards_only_the_allowed_fields(client):
+    body = {
+        "worker_id": "ne-1",
+        "fb_username": "lisa@example.com",
+        "allow_password_login": True,
+        "proxy": "http://user:pass@proxy.example:10002",  # not settable from here
+        "vnc_url": "vnc://x",
+        "secrets": {"password": "s3cret-pw", "totp_secret": "JBSWY3DP", "bogus": "x", "email": None},
+    }
+    assert client.put("/v1/accounts/ne-1", json=body).status_code == 401
+
+    res = client.put("/v1/accounts/ne-1", json=body, headers=AUTH)
+    assert res.status_code == 200
+
+    (request,) = client.calls
+    assert request.method == "PUT"
+    assert request.url.path == "/v1/accounts/ne-1"
+    assert request.headers["Authorization"] == "Bearer admin-secret"
+    import json
+
+    sent = json.loads(request.content)
+    assert sent == {
+        "worker_id": "ne-1",
+        "fb_username": "lisa@example.com",
+        "allow_password_login": True,
+        "secrets": {"password": "s3cret-pw", "totp_secret": "JBSWY3DP", "email": None},
+    }
+    # The upstream answer is passed through; this service adds nothing of its own.
+    assert "admin-secret" not in res.text
+    assert "s3cret-pw" not in res.text
+
+
+def test_put_account_refuses_a_bad_id_or_body_before_forwarding(client):
+    assert client.put("/v1/accounts/bad%20id", json={}, headers=AUTH).status_code == 400
+    assert client.put("/v1/accounts/ne-1", json=["not", "an", "object"], headers=AUTH).status_code == 400
+    assert client.put(
+        "/v1/accounts/ne-1", content=b"not json", headers={**AUTH, "Content-Type": "application/json"}
+    ).status_code == 400
+    assert client.calls == []

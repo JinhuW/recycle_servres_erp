@@ -42,9 +42,10 @@ docker ps --filter name=$C --filter name=$COORD --format '{{.Names}}  {{.Status}
 echo
 echo '=== fleet registry (coordinator) ==='
 docker exec $COORD rsc status 2>&1 | head -20
-echo '(a heartbeat hours old is NORMAL: the monitor heartbeats once per SWEEP,'
-echo ' at the top of search(), and one sweep over the full city list runs for'
-echo ' hours. Judge liveness by the log timestamp below, not by this.)'
+echo '(the monitor re-sends its last state every 5 minutes, so a heartbeat older'
+echo ' than ~10 minutes means the process is gone or cannot reach the coordinator.'
+echo ' The STATE is only re-checked at the top of each search, though: a session'
+echo ' that dies mid-sweep still reads HEALTHY until the next search starts.)'
 
 echo
 echo '=== coordinator health ==='
