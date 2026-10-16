@@ -15,6 +15,3 @@ secrets.env
 *.tfvars
 !*.tfvars.example
 crash.log
-
-# per-session git worktrees created by scripts/new-session.sh
-.claude/worktrees/
