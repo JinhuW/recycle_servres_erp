@@ -2,7 +2,7 @@
 id: RS-254
 title: Manage each worker's Facebook login and password from the fleet page
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-10-13
 reporter: Jinhu
