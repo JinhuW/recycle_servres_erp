@@ -1,4 +1,4 @@
-# facebook_tracker
+# Facebook tracker
 
 Facebook Marketplace tooling for Recycle Servers LLC. Three halves:
 
@@ -13,7 +13,7 @@ Facebook Marketplace tooling for Recycle Servers LLC. Three halves:
   human gets to the alert.
 
 Python (the two upstream projects it builds on are Python), unlike the
-TypeScript trackers elsewhere in this workspace.
+TypeScript ERP and Reddit tracker elsewhere in this monorepo.
 
 ## Layout
 
@@ -25,9 +25,12 @@ TypeScript trackers elsewhere in this workspace.
 | `rs_console/` | Read-mostly facade the ERP and the fleet dashboard read through; serves the dashboard at `/`. Loopback + Cloudflare tunnel only. |
 | `rs_poster/` | Buy-ad poster (Playwright). CLIs: `rs-poster`, and `rs-session` for password-free Facebook sessions. |
 | `rs_messenger/` | Marketplace inbox bridge (Playwright). CLI: `rs-messenger`. Reports conversations to the coordinator, which routes them to Telegram and queues (optional, default-off) auto-replies for it to send. |
+| `rs_router/` | Messenger router (stdlib only): bridges mautrix-meta Matrix rooms to the coordinator's messages API and sends the replies queued for the bridge. CLI: `rs-router`. |
 | `configs/` | `master.toml` (what the fleet searches), `fleet.toml` (which VM searches where), generated per-worker shards. |
 | `deploy/` | Docker Compose files and the per-node bringup checklist. |
 | `scripts/` | Deploy, measurement probes, and the release/vendor/secret checks. |
+| `infra/` | Terraform for the coordinator's own Railway Postgres (project `facebook-tracker`), and why it is not shared. |
+| `docs/` | `architecture.drawio`: the whole system as one draw.io diagram. |
 | `CHANGELOG.md` · `VERSION` · `VENDOR.md` | What changed, which version, and which revision of the vendored projects it expects. |
 
 ## How it fits together
@@ -668,17 +671,28 @@ workers.
 
 ### Daily keyword review
 
-A launchd job reads the last 24h of `logs/monitor.out.log` each morning at 08:00
-and writes `reports/keywords-<date>.md` — a review of which phrases are earning
-their slot, which listings the gates are silently dropping, and where the fleet
-has drifted from `master.toml`. It is **report-only**: it never edits configs,
-never runs `rsc gen-configs`, and never touches a worker.
+A launchd job on the Mac runs each morning at 08:00. It pulls the last 24h of
+the live monitor's log from the homelab VM (`docker logs --since 24h rs-monitor`
+over `ssh jinhu@10.10.10.73`, saved as `logs/monitor-live.log`;
+`RS_MONITOR_HOST` / `RS_MONITOR_CONTAINER` override the host and container) and
+writes `reports/keywords-<date>.md`: a review of which phrases are earning their
+slot, which listings the gates are silently dropping, and where the fleet has
+drifted from `master.toml`. It is **report-only**: it never edits configs,
+never runs `rsc gen-configs`, and never touches a worker. When the VM or the
+container cannot be read, it fails rather than review a stale local log.
 
 ```bash
 scripts/eval-keywords.sh            # run it now, last 24h
 scripts/eval-keywords.sh 72         # a wider window
+```
 
-cp deploy/com.recycleservers.keyword-eval.plist ~/Library/LaunchAgents/
+The plist hardcodes the main checkout,
+`~/Development/recycle_servers/recycle_servres_erp/trackers/facebook`, so install
+it from there:
+
+```bash
+cp ~/Development/recycle_servers/recycle_servres_erp/trackers/facebook/deploy/com.recycleservers.keyword-eval.plist \
+    ~/Library/LaunchAgents/
 launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.recycleservers.keyword-eval.plist
 ```
 
@@ -721,7 +735,9 @@ scripts/probe-search-url.py --item server_ram --city dc \
     --phrase "samsung micron sk hynix ram"                    # one specific search
 scripts/probe-search-url.py --all-phrases                     # everything, slow
 
-cp deploy/com.recycleservers.search-probe.plist ~/Library/LaunchAgents/
+# Like the keyword review's plist, this one hardcodes the main checkout.
+cp ~/Development/recycle_servers/recycle_servres_erp/trackers/facebook/deploy/com.recycleservers.search-probe.plist \
+    ~/Library/LaunchAgents/
 launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.recycleservers.search-probe.plist
 ```
 
@@ -761,10 +777,20 @@ refresh the pin with `scripts/check-vendor.sh update`.
 
 ## Version control
 
-This repository tracks the locally-authored tree. The two vendored projects —
-`ai-marketplace-monitor` and `facebook-marketplace-bot` — have their own git
-repositories and are gitignored here; [VENDOR.md](VENDOR.md) says which commit
-of each a given release expects, and why they are kept separate.
+This tree lives at `trackers/facebook/` in the ERP monorepo
+(`JinhuW/recycle_servres_erp`), and its releases are tagged
+`facebook-tracker/vX.Y.Z`, kept apart from the ERP's own `v*` tags. Releases are
+judged on this subtree alone — ERP commits and edits elsewhere in the repo never
+block one. It was imported on 2026-10-16 from the now-archived
+`JinhuW/facebook_tracker` with its history rewritten, so commit hashes cited
+before then resolve only in that archived repo.
+
+Only the locally-authored tree is tracked. The two vendored projects —
+`ai-marketplace-monitor` and `facebook-marketplace-bot` — are separate git
+checkouts, gitignored here; [VENDOR.md](VENDOR.md) says which commit of each a
+given release expects, and why they are kept separate. The vendored monitor has
+no remote of ours: `recycle-patches` must never be pushed to
+`ai-marketplace-monitor`'s `origin`, which is the upstream author's repository.
 
 Two guards run on demand and again on every release:
 
@@ -783,16 +809,6 @@ allowlist secret` to the line. It has a test of its own
 (`scripts/tests/test-check-secrets.sh`) that plants real-shaped secrets and
 demands they be caught, which is how it was found to miss a Playwright
 `storage_state` file entirely.
-
-This tree lives at `trackers/facebook/` in the ERP monorepo
-(`JinhuW/recycle_servres_erp`); it was imported from the now-archived
-`JinhuW/facebook_tracker` with its history, so commit hashes cited before
-2026-10-16 resolve only in that archived repo. Releases are judged on this
-subtree alone — ERP commits and edits elsewhere in the repo never block one —
-and its tags are `facebook-tracker/vX.Y.Z`, kept apart from the ERP's own `v*`
-tags. The vendored monitor still has no remote of ours: `recycle-patches` must
-never be pushed to `ai-marketplace-monitor`'s `origin`, which is the upstream
-author's repository.
 
 ## Releases
 

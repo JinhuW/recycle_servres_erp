@@ -66,6 +66,8 @@ backups/
 # Tracked SQL lives under apps/backend/, so scoping these to the root is safe.
 /*.sql
 /po*_backup_*/
+# Undo SQL exported from prod before a data migration or fix (real prod ids).
+rollback/
 
 # Playwright MCP browser-automation scratch (snapshots, screenshots, console logs).
 .playwright-mcp/

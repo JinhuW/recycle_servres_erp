@@ -57,7 +57,7 @@ const SAMPLE_ALERTS_7D = 14;
 type Unavailable = 'unavailable';
 
 // Fallback snapshot of the monitor's AI evaluation prompt
-// (facebook_tracker/configs/master.toml). Shown, badged as sample, only when
+// (trackers/facebook/configs/master.toml). Shown, badged as sample, only when
 // the facade's live filter-prompt endpoint is unreachable; the live copy is
 // read from the monitor's actual mounted config.
 const FILTER_PROMPT = `You are a purchasing agent for Recycle Servers LLC, a used-server hardware reseller in Denver, CO.

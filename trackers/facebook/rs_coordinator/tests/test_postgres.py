@@ -4,8 +4,8 @@
 is set**, so this file stays green on a laptop with no Postgres. To run the
 real thing:
 
-    docker run --rm -e POSTGRES_PASSWORD=x -p 55432:5432 postgres:16
-    RS_TEST_DATABASE_URL=postgresql://postgres:x@localhost:55432/postgres \
+    docker run --rm -e POSTGRES_PASSWORD=x -p 127.0.0.1:55439:5432 postgres:16
+    RS_TEST_DATABASE_URL=postgresql://postgres:x@127.0.0.1:55439/postgres \
         pytest rs_coordinator/tests/test_postgres.py -q
 
 The behavioural tests are *parametrized over both backends*: the same

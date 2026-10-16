@@ -2,9 +2,10 @@
 sg_compartment_ocid = "ocid1.tenancy.oc1..xxxx" # Singapore tenancy/compartment
 to_compartment_ocid = "ocid1.tenancy.oc1..xxxx" # Toronto tenancy/compartment
 ssh_public_key      = "ssh-ed25519 AAAA... user@host"
-ssh_ingress_cidr    = "0.0.0.0/0"               # or your.ip.addr.0/32
-# Fleet sizing (defaults shown; see variables.tf):
+ssh_ingress_cidr    = "0.0.0.0/0" # or your.ip.addr.0/32
+# Fleet sizing, matching the live fleet. Commented counts are the
+# variables.tf defaults; see variables.tf for the limits.
 # sg_arm_count = 4
-# sg_amd_count = 2
+sg_amd_count = 0 # 4 A1 boot volumes already fill the 200 GB free cap
 # to_arm_count = 0   # raise after checking toronto_arm_availability output
-# to_amd_count = 2
+to_amd_count = 1 # Toronto's E2.1.Micro quota is 1, not the documented 2

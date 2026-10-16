@@ -8,15 +8,15 @@ budget — the fleet exists to multiply IPs, not compute.
 ```
 Railway: Postgres ── api (HTTP admin/UI) ── worker (1, Railway's IP range)
    ▲ public TCP proxy
-   └── OCI VMs: 4× A1 arm64 + 2× micro amd64 (Singapore)
-                            + 2× micro amd64 (Toronto)
+   └── OCI VMs: 4× A1 arm64 (Singapore) + 1× micro amd64 (Toronto)
 ```
 
 ## Layout
 
 - `terraform/` — the fleet. Two provider aliases (`DEFAULT` → ap-singapore-1,
   `jinhuwang112` → ca-toronto-1, api-key auth from `~/.oci/config`), one VCN
-  per region, and 4 pool instantiations of `modules/oci-worker-pool`.
+  per region, and 4 pool instantiations of `modules/oci-worker-pool`
+  (`sg_amd` and `to_arm` are sized 0).
 - `../scripts/deploy-workers.sh` — pushes the env file + starts/updates the
   container on every VM. Day 1 and day 2 are the same command.
 - `../scripts/secrets.env.example` — template for the secrets the script needs.
@@ -39,12 +39,17 @@ Railway: Postgres ── api (HTTP admin/UI) ── worker (1, Railway's IP rang
   47 = 188 GB — full; that is why `sg_amd_count = 0` (2 micros were destroyed
   on 2026-08-14 when this was caught). Toronto: 150 (Vaultwarden) + 47 = 197 GB
   — also effectively full.
+- **Toronto's micro quota is 1, not 2.** OCI reports 0 E2.1.Micro remaining
+  after the first instance, so `to_amd_count = 1` in `terraform.tfvars` even
+  though `variables.tf` defaults it to 2.
 - **Toronto A1 quota is fully used by the Vaultwarden VM**
   (`instance-20220516-2257`) — which this stack must NEVER touch or import.
   `to_arm_count` stays 0 unless the `toronto_arm_availability` output shows
   headroom.
 
 ## Runbook
+
+From `trackers/reddit/`:
 
 ```bash
 cd infra/terraform
@@ -58,7 +63,7 @@ scripts/deploy-workers.sh <git-sha-tag>        # deploy a specific version / rol
 On **"Out of host capacity"**: lower the failing pool's count in
 `terraform.tfvars`, apply what fits, re-raise later — applies are additive.
 
-Image publishing (multi-arch, from the app repo):
+Image publishing (multi-arch, run from `trackers/reddit/`):
 
 ```bash
 docker buildx build --platform linux/arm64,linux/amd64 \

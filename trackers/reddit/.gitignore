@@ -12,6 +12,8 @@ secrets.env
 # terraform
 .terraform/
 *.tfstate*
+*.tfplan
+tf.plan
 *.tfvars
 !*.tfvars.example
 crash.log

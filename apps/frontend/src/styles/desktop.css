@@ -3327,7 +3327,8 @@ html.desktop, body.desktop, .desktop #root {
 /* ===== Facebook fleet (coordinator page) =====
    The accounts table, per-item search phrases, settings list and coverage map
    on the Facebook-tracker page. Shared with the standalone dashboard rs-console
-   serves — keep the class names in step with facebook_tracker/rs_console. */
+   serves — keep the class names in step with
+   trackers/facebook/rs_console/rs_console/static/fleet.css. */
 .fl-status { display: inline-flex; align-items: center; gap: 8px; }
 .fl-status .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
 .fl-status .dot.stale { background: var(--warn); }

@@ -105,7 +105,23 @@ sh scripts/tests/test-version-gate.sh && sh scripts/tests/test-check-secrets.sh
 ```
 
 Without `AIMM_PYTHON`, the generated-config tests skip silently. Running
-`scripts/release.sh --dry-run patch` is the one-shot full check.
+`scripts/release.sh --dry-run patch` is the one-shot check of the gates, the
+suites above and the vendored monitor's.
+
+- **Run rs_console's suite from inside `rs_console/`**:
+  `cd rs_console && ../.venv-coordinator/bin/python -m pytest tests -q`. From
+  this folder, `python -m pytest` puts the cwd first on `sys.path`, so the outer
+  `rs_console/` (no `__init__.py`) imports as a namespace package and shadows
+  the real one. Collection then fails with `No module named 'rs_console.app'`,
+  or `cannot import name '__version__' from 'rs_console' (unknown location)` if
+  the package is installed. `release.sh` runs neither this suite nor
+  `rs_router/tests`, so run them by hand when you touch either.
+- **Never point `RS_TEST_DATABASE_URL` at port 5432 or 55432.** Those are the
+  ERP's local databases (its compose Postgres and the `recycle-erp-testdb`
+  container), and `test_postgres.py` drops every table it touches.
+  `conftest.py` only refuses a URL equal to `RS_DATABASE_URL` /
+  `DATABASE_URL`, so it cannot catch this. Use a throwaway on a free port, as
+  in `rs_coordinator/POSTGRES.md`.
 
 ## Constraints
 

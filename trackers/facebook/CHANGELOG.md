@@ -899,6 +899,18 @@ rather than reconstructed — the entries below say what exists, not what change
   an evidence pack. The conclusions live in `configs/master.toml`'s comments,
   which is why that file reads the way it does.
 
-<!-- This repository has no remote yet (see VENDOR.md), so there is nothing to
-     link a version to. Compare two releases locally with `git diff v0.1.0..v0.2.0`,
-     or add the link definitions here once it has one. -->
+<!-- scripts/release.sh does not maintain these; add each new version's line by
+     hand. 0.1.0 and 0.4.0 were never tagged, so they have no link, and 0.5.0's
+     compare spans 0.4.0 as well. GitHub compares are not path-filtered: one
+     that crosses the 2026-10-16 import into the monorepo lists the whole ERP
+     history, which is why [Unreleased] has no link, and later ones list the ERP
+     commits in between. `git log <from>..<to> -- trackers/facebook` shows only
+     this tree. -->
+[0.5.5]: https://github.com/JinhuW/recycle_servres_erp/compare/facebook-tracker/v0.5.4...facebook-tracker/v0.5.5
+[0.5.4]: https://github.com/JinhuW/recycle_servres_erp/compare/facebook-tracker/v0.5.3...facebook-tracker/v0.5.4
+[0.5.3]: https://github.com/JinhuW/recycle_servres_erp/compare/facebook-tracker/v0.5.2...facebook-tracker/v0.5.3
+[0.5.2]: https://github.com/JinhuW/recycle_servres_erp/compare/facebook-tracker/v0.5.1...facebook-tracker/v0.5.2
+[0.5.1]: https://github.com/JinhuW/recycle_servres_erp/compare/facebook-tracker/v0.5.0...facebook-tracker/v0.5.1
+[0.5.0]: https://github.com/JinhuW/recycle_servres_erp/compare/facebook-tracker/v0.3.0...facebook-tracker/v0.5.0
+[0.3.0]: https://github.com/JinhuW/recycle_servres_erp/compare/facebook-tracker/v0.2.0...facebook-tracker/v0.3.0
+[0.2.0]: https://github.com/JinhuW/recycle_servres_erp/tree/facebook-tracker/v0.2.0
