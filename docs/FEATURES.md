@@ -433,6 +433,13 @@ is not a stage but a flag beside one, set once every line has sold
   - Checked is its own state, never inferred from the count. Lowering a line
     with − turns it amber and takes its tick away; ticking it then confirms
     the short count (v1.190.0). Finish review lists the lines checked short.
+  - **The count can be typed as well as stepped** (v1.260.0). Clicking the
+    number between − and + selects it. Enter or leaving the field saves it,
+    and Escape restores it. The count is held between 0 and qty and meets
+    the same rules as −, and − / + still step it; inside the field the + −
+    keys step the typed number. A switch to another window
+    mid-edit saves nothing. A scanner firing into the field goes to the scan
+    box instead.
   - **A line lowered to 0 is *Not in the box*** (v1.212.0). It shows in red
     with its own legend chip, not as partly counted. It still needs its own
     tick, and the row keeps the tag once ticked.

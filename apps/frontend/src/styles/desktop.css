@@ -4043,6 +4043,16 @@ button.rsheet-box:hover { background: color-mix(in oklch, var(--accent) 10%, tra
 .bc-count { display: inline-flex; align-items: center; gap: 2px; }
 .bc-count-n { min-width: 58px; text-align: center; font-size: 13px; font-variant-numeric: tabular-nums; }
 .bc-count-n b { font-weight: 600; }
+/* Reads as the plain number until pointed at; it takes the row's colour from
+   the <b> around it. */
+.bc-count-in {
+  width: 5ch; padding: 1px 3px; text-align: right;
+  font: inherit; color: inherit; background: transparent;
+  border: 1px solid transparent; border-radius: 4px; outline: none;
+  transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
+}
+.bc-count-in:not(:disabled):hover { border-color: var(--border-strong); }
+.bc-count-in:focus { border-color: var(--accent); background: var(--bg-elev); box-shadow: 0 0 0 2px var(--accent-soft); }
 .bc-partial .bc-count-n b { color: var(--warn-strong); }
 .bc-absent .bc-count-n b { color: var(--neg); }
 .bc-absent-tag { margin-top: 2px; font-size: 11px; font-weight: 500; color: var(--neg); }

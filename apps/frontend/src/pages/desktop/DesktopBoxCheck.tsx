@@ -237,6 +237,14 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   };
 
   // ── Scanner: a USB/Bluetooth scanner types the label and presses Enter.
+  // A label that starts outside the box is moved into it, and the box gives
+  // focus back once the scan is in.
+  const startScan = (text: string) => {
+    scanFromPage.current = true;
+    setScan(text);
+    scanRef.current?.focus();
+  };
+
   const onScan = (raw: string) => {
     const text = raw.trim();
     const m = text && ready ? matchScan(lines, checks, text) : null;
@@ -406,9 +414,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
           // the label never runs as shortcuts.
           if (ready && e.key.length === 1 && e.key.trim()) {
             e.preventDefault();
-            scanFromPage.current = true;
-            setScan(e.key);
-            scanRef.current?.focus();
+            startScan(e.key);
           }
       }
     };
@@ -532,7 +538,17 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
                 <Icon name="minus" size={13} />
               </button>
               <span className="mono bc-count-n">
-                <b>{countOf(l, c)}</b><span className="muted"> / {l.qty}</span>
+                <b>
+                  <CountField
+                    value={countOf(l, c)}
+                    max={l.qty}
+                    disabled={!ready || held || l.qty === 0}
+                    label={t('bcCountInput', { pn })}
+                    onFocus={() => setSelectedId(l.id)}
+                    onCommit={n => setCount(l, n)}
+                    onScanKey={startScan}
+                  />
+                </b><span className="muted"> / {l.qty}</span>
               </span>
               <button type="button" className="btn ghost icon-only sm" aria-label={t('bcCountMore')}
                 disabled={!ready || held || countOf(l, c) >= l.qty} onClick={() => { setSelectedId(l.id); setCount(l, countOf(l, c) + 1); }}>
@@ -859,4 +875,82 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
 
 function lineLabel(l: OrderLine): string {
   return lineSpecLabel(l) || l.description || l.category;
+}
+
+// The count, typed beside − / +. It lands on Enter or on leaving the field,
+// never per keystroke: the 6 of a 67 would be saved, and take the line's tick
+// away on the way.
+function CountField({ value, max, disabled, label, onFocus, onCommit, onScanKey }: {
+  value: number;
+  max: number;
+  disabled: boolean;
+  label: string;
+  onFocus: () => void;
+  onCommit: (n: number) => void;
+  onScanKey: (text: string) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  // Set right before blur(), whose handler still sees the draft as it was.
+  const cancelled = useRef(false);
+  const typed = useRef(false);
+  const leave = (el: HTMLInputElement) => {
+    cancelled.current = true;
+    el.blur();
+  };
+  return (
+    <input
+      className="mono bc-count-in"
+      type="text"
+      inputMode="numeric"
+      autoComplete="off"
+      spellCheck={false}
+      aria-label={label}
+      disabled={disabled}
+      value={draft ?? String(value)}
+      onFocus={e => {
+        // Back from another window, what was typed before is still the draft.
+        if (draft !== null) return;
+        setDraft(String(value));
+        typed.current = false;
+        e.target.select();
+        onFocus();
+      }}
+      onChange={e => {
+        typed.current = true;
+        setDraft(e.target.value.replace(/\D/g, ''));
+      }}
+      onBlur={e => {
+        // The window lost focus, not the field.
+        if (document.activeElement === e.currentTarget) return;
+        if (!cancelled.current && draft) onCommit(Number(draft));
+        cancelled.current = false;
+        setDraft(null);
+      }}
+      onKeyDown={e => {
+        if (e.nativeEvent.isComposing || e.metaKey || e.ctrlKey || e.altKey) return;
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          e.currentTarget.blur();
+        } else if (e.key === 'Escape') {
+          // Puts the count back; never leaves the page.
+          e.stopPropagation();
+          leave(e.currentTarget);
+        } else if (e.key === '+' || e.key === '=' || e.key === '-') {
+          // The page's count keys keep their meaning here: they step what is
+          // typed, and Enter saves it.
+          e.preventDefault();
+          typed.current = true;
+          const n = Number(draft || value) + (e.key === '-' ? -1 : 1);
+          setDraft(String(Math.max(0, Math.min(max, n))));
+        } else if (e.key.length === 1 && e.key.trim() && !/\d/.test(e.key)) {
+          // A scanner typing a label here: it goes to the scan box, digits
+          // it had already typed included, and the count stays as it was.
+          e.preventDefault();
+          const head = typed.current ? draft ?? '' : '';
+          leave(e.currentTarget);
+          onScanKey(head + e.key);
+        }
+      }}
+    />
+  );
 }
