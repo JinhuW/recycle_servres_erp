@@ -139,8 +139,8 @@ The Postgres half of `tests/test_postgres.py` skips unless
 it for real:
 
 ```bash
-docker run --rm -e POSTGRES_PASSWORD=x -p 55432:5432 postgres:16
-RS_TEST_DATABASE_URL=postgresql://postgres:x@localhost:55432/postgres \
+docker run --rm -e POSTGRES_PASSWORD=x -p 127.0.0.1:55439:5432 postgres:16
+RS_TEST_DATABASE_URL=postgresql://postgres:x@127.0.0.1:55439/postgres \
     python -m pytest rs_coordinator/tests/test_postgres.py -q
 ```
 

@@ -6,7 +6,7 @@ import { requireManager } from '../lib/role';
 import type { Env, User } from '../types';
 
 // ─── Reddit tracker proxy ─────────────────────────────────────────────────────
-// Manager-only pass-through to the reddits_tracker admin API, so its bearer
+// Manager-only pass-through to the `trackers/reddit` admin API, so its bearer
 // token never reaches the browser. Explicit allowlist rather than a catch-all:
 // the tracker also exposes settings and requeue endpoints this UI has no
 // business calling. Self-applies authMiddleware (oauthAdmin pattern), so

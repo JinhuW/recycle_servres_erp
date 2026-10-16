@@ -1,6 +1,7 @@
 // Typed client for the Reddit tracker admin proxy (/api/tracker/*, manager-
-// only). The backend forwards these calls to the reddits_tracker API with its
-// bearer token; a 501 from any of them means the proxy env vars are unset.
+// only). The backend forwards these calls to the `trackers/reddit` admin API
+// with its bearer token; a 501 from any of them means the proxy env vars are
+// unset.
 
 import { api } from './api';
 

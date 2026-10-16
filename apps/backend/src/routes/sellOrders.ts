@@ -1234,7 +1234,8 @@ sellOrders.delete('/:id/status-meta/:status/attachments/:attachmentId', async (c
 // Draft) and cannot go to Done. Packing can step back to Draft — Pack mode
 // moves a Draft there on opening, and a mistaken open must be undoable.
 // Adding a new status means editing this map + the CHECK constraint + the
-// seed — no parallel guards elsewhere (see CLAUDE.md "Status guards").
+// seed — no parallel guards elsewhere ("Status guards" in
+// apps/backend/AGENTS.md).
 const ALLOWED_TRANSITIONS: Record<string, Set<string>> = {
   Draft:               new Set(['Packing', 'Shipped', 'Awaiting payment', 'Done', 'Closed']),
   Packing:             new Set(['Draft', 'Shipped', 'Awaiting payment', 'Done', 'Closed']),
@@ -1262,7 +1263,7 @@ const CLOSE_REASONS = new Set<string>(CLOSE_REASON_IDS);
 // Statuses in which the negotiated final total may still change. Done is the
 // sold historical record and Closed is frozen until reopened — same reasoning
 // as the PATCH structural-edit lock, kept next to ALLOWED_TRANSITIONS per the
-// status-guard convention (CLAUDE.md).
+// status-guard convention (apps/backend/AGENTS.md).
 const ADJUSTABLE_STATUSES = new Set(['Draft', 'Packing', 'Shipped', 'Awaiting payment']);
 
 // Negotiated final-price adjustment: the buyer names one final total and we

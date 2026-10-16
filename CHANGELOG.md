@@ -17,6 +17,35 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.259.1] - 2026-10-16
+
+Loose ends from folding the two trackers into this repo (RS-256).
+
+### Fixed
+
+- **The fleet page's "build not stamped" tooltip names `trackers/facebook`.**
+  It told the operator to rebuild with `scripts/build-monitor-image.sh` in
+  `facebook_tracker`, a repo that is now archived; the script lives in
+  `trackers/facebook/` here. English and Chinese both.
+
+### Changed
+
+- **Comments and docs point at what exists today.** Code comments that named
+  the retired `reddits_tracker` and `facebook_tracker` repos name
+  `trackers/reddit` and `trackers/facebook` — the filter-prompt fallback's
+  source and the fleet stylesheet the shared class names must match. The
+  sell-order status-guard comments and the tickets README cite the
+  `AGENTS.md` files that replaced the single `CLAUDE.md`, and the backup note
+  gives `backup/` as the cron's build root rather than a draft folder deleted
+  long ago.
+- **The 2026-10-13 review's probe and reproduction scripts are removed.** They
+  asserted the defects RS-252 has since fixed, so they no longer describe the
+  code; the regression tests that replaced them run in the normal suites, and
+  the review's README says where.
+- **`rollback/` is git-ignored.** Undo SQL exported from prod before a data
+  fix is kept there with real row ids; only staging by path kept it out of
+  commits.
+
 ## [1.259.0] - 2026-10-16
 
 Each worker's Facebook login, password and 2FA secret are set from the fleet

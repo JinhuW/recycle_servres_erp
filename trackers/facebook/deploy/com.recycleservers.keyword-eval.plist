@@ -5,7 +5,8 @@
     <key>Label</key>
     <string>com.recycleservers.keyword-eval</string>
 
-    <!-- Reads the last 24h of monitor.out.log and writes reports/keywords-<date>.md.
+    <!-- Pulls the last 24h of `docker logs rs-monitor` from the homelab VM and
+         writes reports/keywords-<date>.md.
          Report only: it never edits master.toml, regenerates shards, or touches
          the fleet. See scripts/eval-keywords.sh. -->
     <key>ProgramArguments</key>
