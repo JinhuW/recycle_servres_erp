@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "rs-messenger"
+version = "0.5.5"
+description = "Bridges the Facebook Marketplace inbox to the Recycle Servers coordinator"
+requires-python = ">=3.11"
+dependencies = [
+  # Same floor as rs-poster; the session layer is shared with it.
+  "playwright>=1.51.0",
+  # The browser session, account lock, and typed session errors live in
+  # rs_poster — one Facebook account must never post and message at once, and
+  # sharing the lock (and its session file) is what enforces that.
+  "rs-poster",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+rs-messenger = "rs_messenger.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["rs_messenger"]

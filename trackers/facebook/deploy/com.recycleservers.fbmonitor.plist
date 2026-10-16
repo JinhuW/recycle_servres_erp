@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+    RETIRED — do not load on the laptop.
+
+    The live monitor is a container on the homelab VM, started by
+    deploy/docker-compose.homelab.yml. This agent starts a SECOND monitor on the
+    same Facebook account from the same public IP (the VM is behind this
+    machine's NAT), and two monitors on one account double that IP's request
+    rate — the pattern most likely to get the account checkpointed.
+
+    launchd loads everything in ~/Library/LaunchAgents at login, and this file
+    has RunAtLoad + KeepAlive, so an installed copy starts itself after a
+    reboot whether or not anyone asked. If a copy is still installed, take it
+    out of the login path for good:
+
+        launchctl bootout gui/$UID/com.recycleservers.fbmonitor 2>/dev/null
+        launchctl disable gui/$UID/com.recycleservers.fbmonitor
+        rm ~/Library/LaunchAgents/com.recycleservers.fbmonitor.plist
+
+    `launchctl disable` survives reboots and re-installs, which `bootout` alone
+    does not. Kept in the repo as the reference for a single-machine
+    deployment.
+-->
+<dict>
+    <key>Label</key>
+    <string>com.recycleservers.fbmonitor</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/sh</string>
+        <string>/Users/jinhu/Development/recycle_servers/recycle_servres_erp/trackers/facebook/scripts/run-monitor.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/jinhu/Development/recycle_servers/recycle_servres_erp/trackers/facebook</string>
+
+    <!-- Start at login and keep it running; relaunch if it ever exits. -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <!-- Don't hammer-restart on a crash loop. -->
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Users/jinhu/Development/recycle_servers/recycle_servres_erp/trackers/facebook/logs/monitor.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jinhu/Development/recycle_servers/recycle_servres_erp/trackers/facebook/logs/monitor.err.log</string>
+</dict>
+</plist>

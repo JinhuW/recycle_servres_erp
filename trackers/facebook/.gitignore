@@ -1,0 +1,76 @@
+# Secrets — never commit.
+#
+# Everything in this first block is a live credential. `scripts/check-secrets.sh`
+# re-checks it before every release, because the cost of getting it wrong here is
+# not a bad commit — it is a Facebook account, a vault key, or the coordinator's
+# bearer token in a history that cannot be rewritten quietly.
+configs/secrets.env
+configs/secrets.env.*
+configs/secrets.*.env
+!configs/secrets.env.example
+configs/*.local.toml
+*.pem
+*.key
+
+# Generated per-worker configs (regenerate with `rsc gen-configs`)
+configs/generated/*.toml
+
+# Facebook sessions — live credentials, never commit
+configs/sessions/
+*.meta.json
+cookies.txt
+cookies.json
+
+# Matrix bridge runtime config — carries the appservice as_token/hs_token and,
+# in mautrix-meta's config + state db, the live Facebook session. The setup docs
+# (configs/matrix/README.md) and the example config are committed; these are not.
+configs/matrix/**/config.yaml
+configs/matrix/**/registration.yaml
+configs/matrix/**/*.db
+
+# Runtime state
+*.db
+*.sqlite
+*.sqlite3
+data/
+fb_state*.json
+rs_poster/ads/state.json
+rs_poster/ads/photos/*
+!rs_poster/ads/photos/.gitkeep
+screenshots/
+
+# Vendored upstream projects — each has its OWN git repository, and is not
+# tracked here.
+#
+# ai-marketplace-monitor is a fork of an AGPL-3 project we rebase onto new
+# upstream releases; folding it into this repo would throw away the upstream
+# history that makes `git rebase` cheap, and a gitlink would record a commit
+# that does not contain our patches. It is pinned in VENDOR.md instead, and
+# `scripts/check-vendor.sh` verifies the working copies match that pin.
+/ai-marketplace-monitor/
+/facebook-marketplace-bot/
+
+# Generated evidence. The eval job writes one report + one evidence pack per day
+# and prunes both after 60 days, so they are deliberately ephemeral. The
+# conclusions worth keeping get written into master.toml's comments, which is
+# where the measurements this project reasons from actually live.
+reports/
+
+# Monitor logs, including logs/monitor-live.log, which eval-keywords.sh fetches
+# from the VM's container on every run.
+logs/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv*/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+configs/proxies.decodo.txt
+configs/data.txt
+configs/account_info.txt*

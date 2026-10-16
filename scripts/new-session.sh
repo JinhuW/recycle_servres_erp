@@ -34,7 +34,7 @@
 #   2. Reuse an idle worktree, or `git worktree add -b <branch> … <base>`.
 #      (--checkout instead adopts, or checks out, the branch you named.)
 #   3. Sweep any remaining idle worktrees.
-#   4. Copy the gitignored local files a worktree needs to run (.env).
+#   4. Copy the gitignored local files a worktree needs to run (.env files).
 #   5. `pnpm install` inside it (hardlinks from the pnpm store, so it is cheap).
 #   6. Inside tmux, rename the tab to the session (`feat/x` → `x`;
 #      a timestamp branch → `erp-<HH:MM>`).
@@ -76,7 +76,7 @@ WORKTREE_ROOT="$REPO_ROOT/.claude/worktrees"
 BASE_REF="origin/dev"
 
 # Gitignored files a fresh worktree needs before anything will run.
-LOCAL_FILES=(".env")
+LOCAL_FILES=(".env" "trackers/reddit/.env" "trackers/reddit/.api-token")
 
 MODE="launch"
 DO_INSTALL=1

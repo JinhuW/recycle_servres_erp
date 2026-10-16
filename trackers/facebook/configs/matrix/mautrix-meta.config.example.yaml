@@ -1,0 +1,52 @@
+# mautrix-meta — the load-bearing overrides, for reference.
+#
+# This is NOT the whole config. Generate the full default first
+# (`docker run --rm -v $PWD:/data dock.mau.dev/mautrix/meta:latest -g`), then
+# change the keys shown here. The generated config.yaml + registration.yaml
+# carry the appservice tokens and, once logged in, the Facebook session, so they
+# are gitignored — only this example is committed.
+#
+# See configs/matrix/README.md for the full bring-up order.
+
+homeserver:
+    # Conduit, by its compose service name, on the rs-fleet network.
+    address: http://conduit:6167
+    domain: rs.local
+
+appservice:
+    # Where Conduit reaches the bridge (service name : port). Must match the
+    # url in registration.yaml that Conduit loads.
+    address: http://mautrix-meta:29319
+    hostname: 0.0.0.0
+    port: 29319
+    # as_token / hs_token are generated; keep them only in the real config.
+    database:
+        type: sqlite3-fk-wal
+        uri: file:/data/mautrix-meta.db?_txlock=immediate
+
+network:
+    # Messenger only. The Instagram bridge is a separate binary since mid-2026;
+    # do not enable it here — we bridge the Marketplace inbox, nothing else.
+    mode: messenger
+
+bridge:
+    # The router bot must be an admin to read every buyer portal; ordinary
+    # Matrix users on this private server get plain user rights.
+    permissions:
+        "rs.local": user
+        "@rs-router:rs.local": admin
+
+    # See the buyer's real name/avatar on each portal, and let the router bot in
+    # automatically so new conversations need no manual invite.
+    autocreate_dm_portal: true
+    # Double-puppeting: replies the router sends go out as the seller account
+    # itself, not as a bridge bot. Configure login_shared_secret_map / the
+    # double-puppet appservice per the upstream docs for rs.local.
+    double_puppet_allowed: true
+
+# Log to stdout so `docker logs rs-mautrix-meta` is the whole story.
+logging:
+    min_level: info
+    writers:
+        - type: stdout
+          format: pretty-colored

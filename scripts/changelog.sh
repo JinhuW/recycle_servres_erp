@@ -20,6 +20,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT"
 
+# trackers/ carries the listing monitors, imported with their own histories and
+# versioned on their own; their commits are not ERP release notes.
+ERP_PATHS=(. ':(exclude)trackers')
+
 CHANGELOG="CHANGELOG.md"
 
 # Owner/repo for PR links, off the remote so a fork doesn't link to upstream.
@@ -80,7 +84,7 @@ generate_section() {
       fix*)  fmt_subject "$subj" >> "$fix";  printf '\n' >> "$fix" ;;
       *)     fmt_subject "$subj" >> "$other"; printf '\n' >> "$other" ;;
     esac
-  done < <(git log --no-merges --pretty=tformat:'%s' "$range")
+  done < <(git log --no-merges --pretty=tformat:'%s' "$range" -- "${ERP_PATHS[@]}")
 
   printf '## [%s] - %s\n\n' "$version" "$date"
   local f title
@@ -252,7 +256,7 @@ draft() {
   while IFS= read -r subj; do
     [[ -z "$subj" ]] && continue
     printf -- '- %s\n' "$(fmt_subject "$subj")"
-  done < <(git log --no-merges --pretty=tformat:'%s' "$since..HEAD")
+  done < <(git log --no-merges --pretty=tformat:'%s' "$since..HEAD" -- "${ERP_PATHS[@]}")
   cat >&2 <<'EOF'
 
 Rewrite the bullets above as one entry per user-visible change: what changed,

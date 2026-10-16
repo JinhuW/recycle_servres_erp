@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+    RETIRED alongside com.recycleservers.fbmonitor — see that file.
+
+    scripts/watchdog.sh now refuses to start a monitor that is not already
+    loaded, so an installed copy of this agent is inert rather than dangerous.
+    Remove it anyway:
+
+        launchctl bootout gui/$UID/com.recycleservers.fbmonitor-watchdog 2>/dev/null
+        launchctl disable gui/$UID/com.recycleservers.fbmonitor-watchdog
+        rm ~/Library/LaunchAgents/com.recycleservers.fbmonitor-watchdog.plist
+
+    The VM's equivalent is `restart: unless-stopped` plus the container
+    healthcheck in deploy/docker-compose.homelab.yml.
+-->
+<dict>
+    <key>Label</key>
+    <string>com.recycleservers.fbmonitor-watchdog</string>
+
+    <!-- Restarts the monitor when it hangs rather than exits — see
+         scripts/watchdog.sh for why KeepAlive cannot cover that case. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/sh</string>
+        <string>/Users/jinhu/Development/recycle_servers/recycle_servres_erp/trackers/facebook/scripts/watchdog.sh</string>
+    </array>
+
+    <!-- Every 10 minutes. The check is a single stat() when all is well, and
+         RunAtLoad makes a sleeping Mac get checked promptly on wake. -->
+    <key>StartInterval</key>
+    <integer>600</integer>
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/jinhu/Development/recycle_servers/recycle_servres_erp/trackers/facebook/logs/watchdog.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jinhu/Development/recycle_servers/recycle_servres_erp/trackers/facebook/logs/watchdog.err.log</string>
+</dict>
+</plist>

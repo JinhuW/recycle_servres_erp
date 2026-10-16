@@ -1,0 +1,28 @@
+# Photo sets for buy ads. Files live in ads/photos/.
+#
+# Use real photos of your own operation — warehouse shelves, a pallet of pulled
+# servers, your truck, staff loading gear. Stock imagery reads as a scam and
+# gets ads reported. Facebook accepts at most 10 photos per listing; the first
+# is the thumbnail, so make it the strongest one.
+
+[photo_set.servers]
+files = [
+    "warehouse-racks.jpg",
+    "pallet-servers.jpg",
+    "poweredge-stack.jpg",
+    "cash-payment.jpg",
+]
+
+[photo_set.ram_cpus]
+files = [
+    "ram-trays.jpg",
+    "xeon-lot.jpg",
+    "warehouse-racks.jpg",
+]
+
+[photo_set.datacenter_cleanout]
+files = [
+    "datacenter-pull.jpg",
+    "box-truck.jpg",
+    "warehouse-racks.jpg",
+]

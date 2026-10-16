@@ -223,7 +223,7 @@ Backend tests are integration tests against a real Postgres (130+ files).
 `vitest.config.ts` runs test files in parallel (`pool: 'forks'`, up to 8
 workers); each worker owns a private database and `resetDb()` re-clones it
 from a migrated+seeded template, so the suite finishes in ~15s.  See the
-Tests section in `CLAUDE.md` for the mechanics.
+Tests section in `apps/backend/AGENTS.md` for the mechanics.
 
 ## Metrics
 
@@ -300,5 +300,6 @@ Per-feature design and implementation docs live under
 at design time; plans (`plans/YYYY-MM-DD-*.md`) track the build.  Finished
 plans graduate to `plans/finished/`.
 
-See also `CLAUDE.md` for conventions and quirks future contributors (human
-or AI) should know before changing things.
+See also `AGENTS.md` (the repo map, plus one per area: `apps/backend/`,
+`apps/frontend/`, `trackers/*/`) for conventions and quirks future
+contributors (human or AI) should know before changing things.

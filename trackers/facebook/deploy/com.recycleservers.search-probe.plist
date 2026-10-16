@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.recycleservers.search-probe</string>
+
+    <!-- Runs the fleet's own search URL in a browser and writes
+         reports/search-probe-<date>.md: how many results came back, how many
+         the title gate rejects without opening a page, and where Facebook
+         stops matching the query. Report only — it never edits master.toml or
+         touches a worker. See scripts/probe-search-url.sh. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/sh</string>
+        <string>/Users/jinhu/Development/recycle_servers/recycle_servres_erp/trackers/facebook/scripts/probe-search-url.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/jinhu/Development/recycle_servers/recycle_servres_erp/trackers/facebook</string>
+
+    <!-- 07:45, so the report is on disk before the 08:00 keyword review reads
+         the same morning's state. StartCalendarInterval, like that job, so a
+         sleeping Mac runs it on wake instead of skipping the day. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>7</integer>
+        <key>Minute</key>
+        <integer>45</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/jinhu/Development/recycle_servers/recycle_servres_erp/trackers/facebook/logs/search-probe.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jinhu/Development/recycle_servers/recycle_servres_erp/trackers/facebook/logs/search-probe.err.log</string>
+</dict>
+</plist>
