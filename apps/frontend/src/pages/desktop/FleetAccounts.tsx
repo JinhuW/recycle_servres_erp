@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { Icon } from '../../components/Icon';
 import { Modal } from '../../components/Modal';
 import {
@@ -10,8 +10,8 @@ import { handleFetchError, showSuccessToast } from '../../lib/errorToast';
 import {
   accountAlerts, accountHaystack, browserLabel, canWatch, externalVncUrl, hitsByCity, isActive,
   isUnstampedBuild, liveness,
-  matchesTerms, needsAttention, queryTerms, reloginIsAutomatic, reviewedToday, searchersByCity,
-  splitHighlights,
+  matchesTerms, needsAttention, queryTerms, reloginIsAutomatic, reloginWouldBeAutomatic, reviewedToday,
+  searchersByCity, splitHighlights, vaultAccountIdFor,
   whoIs, type AccountLiveness, type CityHits,
 } from '../../lib/fleetView';
 import { relTime } from '../../lib/format';
@@ -172,6 +172,147 @@ export function ReloginButton({ workerId, account, onQueued, className = 'btn sm
         </Modal>
       )}
     </>
+  );
+}
+
+// ─── Edit credentials ─────────────────────────────────────────────────────────
+// What a worker signs in with when Re-login runs, set from here instead of
+// `rsc vault set-account` on the VM. Secrets are write-only end to end: the
+// form shows whether one is stored and never its value; a box left blank keeps
+// what is stored; "clear" sends an explicit null. Saving refreshes the fleet
+// view, so the stored-secret badges and the Re-login dialog follow at once.
+
+export function EditCredentialsButton({ account, onSaved, className = 'btn sm' }: {
+  account: FleetAccount;
+  onSaved?: () => void;
+  className?: string;
+}) {
+  const { t } = useT();
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" className={className} title={t('fbcEditCredsHint')}
+        onClick={e => { e.stopPropagation(); setOpen(true); }}>
+        <Icon name="edit" size={13} />
+        {t('fbcEditCreds')}
+      </button>
+      {open && (
+        <EditCredentialsModal account={account} onClose={() => setOpen(false)}
+          onSaved={() => { setOpen(false); onSaved?.(); }} />
+      )}
+    </>
+  );
+}
+
+function EditCredentialsModal({ account: w, onClose, onSaved }: {
+  account: FleetAccount; onClose: () => void; onSaved: () => void;
+}) {
+  const { t } = useT();
+  const acct = w.account;
+  const accountId = vaultAccountIdFor(w);
+  const passwordStored = Boolean(acct?.secrets.password);
+  const totpStored = Boolean(acct?.secrets.totp_secret);
+  const [login, setLogin] = useState(acct?.fb_username ?? '');
+  const [password, setPassword] = useState('');
+  const [clearPassword, setClearPassword] = useState(false);
+  const [totp, setTotp] = useState('');
+  const [clearTotp, setClearTotp] = useState(false);
+  const [allowPw, setAllowPw] = useState(acct?.allow_password_login ?? false);
+  const [busy, setBusy] = useState(false);
+
+  // What will be true once this form is saved, so the note below is a
+  // promise the worker can keep.
+  const passwordAfter = clearPassword ? false : (password.length > 0 || passwordStored);
+  const automatic = reloginWouldBeAutomatic(allowPw, passwordAfter);
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (busy) return;
+    const secrets: Partial<Record<'password' | 'totp_secret', string | null>> = {};
+    if (clearPassword) secrets.password = null;
+    else if (password) secrets.password = password;
+    if (clearTotp) secrets.totp_secret = null;
+    else if (totp.trim()) secrets.totp_secret = totp.trim();
+    setBusy(true);
+    coordinatorApi.saveAccount(accountId, {
+      worker_id: w.worker_id,
+      fb_username: login.trim(),
+      allow_password_login: allowPw,
+      secrets,
+    })
+      .then(() => {
+        showSuccessToast(t('fbcCredSaved', { id: w.worker_id }));
+        onSaved();
+      })
+      .catch(handleFetchError)
+      .finally(() => setBusy(false));
+  };
+
+  const field = (label: string, hint: string | undefined, control: ReactNode) => (
+    <label style={{ display: 'grid', gap: 4 }}>
+      <span style={{ fontSize: 12.5, color: 'var(--fg-muted)' }}>{label}</span>
+      {control}
+      {hint && <span className="muted" style={{ fontSize: 11.5 }}>{hint}</span>}
+    </label>
+  );
+  const secretBox = (
+    value: string, setValue: (v: string) => void, stored: boolean,
+    clear: boolean, setClear: (v: boolean) => void, autoComplete: string,
+  ) => (
+    <>
+      <input type="password" className="input" value={value} autoComplete={autoComplete}
+        placeholder={stored ? t('fbcCredStored') : t('fbcCredNotStored')}
+        disabled={clear} onChange={e => setValue(e.target.value)} />
+      {stored && (
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12.5 }}>
+          <input type="checkbox" checked={clear} onChange={e => setClear(e.target.checked)} />
+          {t('fbcCredClear')}
+        </label>
+      )}
+    </>
+  );
+
+  return (
+    <Modal onClose={() => { if (!busy) onClose(); }} shellStyle={{ maxWidth: 480 }}>
+      <form onSubmit={submit}>
+        <div className="modal-head">
+          <div>
+            <div className="modal-title">{t('fbcCredTitle', { id: w.worker_id })}</div>
+          </div>
+        </div>
+        <div className="modal-body" style={{ display: 'grid', gap: 14 }}>
+          <p style={{ margin: 0, fontSize: 13.5, color: 'var(--fg-muted)' }}>{t('fbcCredIntro')}</p>
+          {!acct && (
+            <div className="card-note" style={{ padding: '10px 12px' }}>
+              <Icon name="info" size={16} />
+              <span>{t('fbcCredNewAccount', { id: accountId })}</span>
+            </div>
+          )}
+          {field(t('fbcCredLogin'), t('fbcCredLoginHint'),
+            <input type="text" className="input" value={login} autoComplete="off"
+              onChange={e => setLogin(e.target.value)} />)}
+          {field(t('fbcCredPassword'), undefined,
+            secretBox(password, setPassword, passwordStored, clearPassword, setClearPassword, 'new-password'))}
+          {field(t('fbcCredTotp'), t('fbcCredTotpHint'),
+            secretBox(totp, setTotp, totpStored, clearTotp, setClearTotp, 'off'))}
+          <label style={{ display: 'grid', gap: 4 }}>
+            <span style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13.5 }}>
+              <input type="checkbox" checked={allowPw} onChange={e => setAllowPw(e.target.checked)} />
+              {t('fbcCredAllowPw')}
+            </span>
+            <span className="muted" style={{ fontSize: 11.5 }}>{t('fbcCredAllowPwHint')}</span>
+          </label>
+          <div className="card-note" style={{ padding: '10px 12px' }}>
+            <Icon name={automatic ? 'check' : 'info'} size={16} />
+            <span>{automatic ? t('fbcCredWillBeAutomatic') : t('fbcCredWillBeManual')}</span>
+          </div>
+        </div>
+        <div className="modal-foot" style={{ justifyContent: 'flex-end' }}>
+          <button type="button" className="btn" disabled={busy} onClick={onClose}>{t('cancel')}</button>
+          <button type="submit" className="btn primary" disabled={busy}>{t('save')}</button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
@@ -575,8 +716,10 @@ function AccountDetail({ account: w, hits, terms, locale }: {
 // each row's expandable detail. A worker with nothing to identify it (configured,
 // never logged in) is left out; the Accounts card above still lists it.
 
-export function AccountInfoCard({ fleet, query, filter, locale }: {
+export function AccountInfoCard({ fleet, query, filter, locale, onSaved }: {
   fleet: FleetDoc | null; query: string; filter: FleetFilter; locale: string;
+  // Called after credentials are saved, so the page reloads the fleet view.
+  onSaved?: () => void;
 }) {
   const { t } = useT();
   if (!fleet) return null;
@@ -619,6 +762,7 @@ export function AccountInfoCard({ fleet, query, filter, locale }: {
               <th title={t('fbcInfoColBrowserHint')}>{t('fbcDetailUa')}</th>
               <th title={t('fbcInfoColBackupHint')}>{t('fbcDetailBackup')}</th>
               <th title={t('fbcInfoColExpiresHint')}>{t('fbcInfoColExpires')}</th>
+              <th>{t('fbcInfoColEdit')}</th>
             </tr>
           </thead>
           <tbody>
@@ -677,6 +821,7 @@ export function AccountInfoCard({ fleet, query, filter, locale }: {
                   <td title={h?.session_expiry ?? sess?.session_expiry ?? undefined}>
                     {h?.session_days_left != null ? fmtDays(t, h.session_days_left) : none}
                   </td>
+                  <td><EditCredentialsButton account={w} onSaved={onSaved} /></td>
                 </tr>
               );
             })}

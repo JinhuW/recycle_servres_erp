@@ -127,6 +127,19 @@ export type VaultAccount = {
   secrets: Record<string, boolean>;
 };
 
+// What the "Edit credentials" form may set on a vault account (PUT
+// /api/coordinator/accounts/:id). A field left out keeps its stored value. In
+// `secrets`, a string is stored, null clears the field, and an empty string
+// keeps what is there — what a password box left blank means.
+export type VaultSecretField = 'password' | 'totp_secret' | 'email' | 'email_password' | 'imap_host' | 'imap_port';
+export type VaultAccountWrite = {
+  worker_id?: string;
+  fb_username?: string;
+  region?: string;
+  allow_password_login?: boolean;
+  secrets?: Partial<Record<VaultSecretField, string | null>>;
+};
+
 // Metadata of the worker's backed-up browser session. `fb_user_id` is the
 // session's `c_user` cookie — the public Facebook profile id, not a credential.
 export type SessionMeta = {
@@ -214,6 +227,11 @@ export const coordinatorApi = {
   // and 2FA code from the vault on its next cycle.
   relogin: (workerId: string) =>
     api.post<unknown>(`/api/coordinator/workers/${encodeURIComponent(workerId)}/relogin`, {}),
+
+  // Set what a worker signs in with. Secrets are write-only end to end: the
+  // answer is the vault's presence-flag view, never a value.
+  saveAccount: (accountId: string, body: VaultAccountWrite) =>
+    api.put<VaultAccount>(`/api/coordinator/accounts/${encodeURIComponent(accountId)}`, body),
 };
 
 /**
