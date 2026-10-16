@@ -12,3 +12,6 @@ docs
 *.md
 # Bind-mounted Postgres cluster — never copy into the build context.
 data
+# The listing monitors build from their own folders with their own Dockerfiles;
+# the ERP images never need them in context.
+trackers
