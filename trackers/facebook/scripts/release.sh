@@ -160,7 +160,8 @@ printf '%s\n' "$NEW" > VERSION
 # The local packages carry the system version too, so `pip show` and an
 # installed console script agree with the tag instead of reporting a number
 # frozen at whenever the pyproject was written.
-for f in rs_coordinator/pyproject.toml rs_poster/pyproject.toml rs_messenger/pyproject.toml; do
+for f in rs_coordinator/pyproject.toml rs_poster/pyproject.toml rs_messenger/pyproject.toml \
+         rs_console/pyproject.toml; do
     python3 - "$f" "$NEW" <<'PY'
 import re, sys
 path, new = sys.argv[1], sys.argv[2]
@@ -175,7 +176,7 @@ PY
 done
 
 for f in rs_coordinator/rs_coordinator/__init__.py rs_poster/rs_poster/__init__.py \
-         rs_messenger/rs_messenger/__init__.py; do
+         rs_messenger/rs_messenger/__init__.py rs_console/rs_console/__init__.py; do
     python3 - "$f" "$NEW" <<'PY'
 import re, sys
 path, new = sys.argv[1], sys.argv[2]

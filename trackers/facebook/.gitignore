@@ -6,6 +6,7 @@
 # bearer token in a history that cannot be rewritten quietly.
 configs/secrets.env
 configs/secrets.env.*
+configs/secrets.*.env
 !configs/secrets.env.example
 configs/*.local.toml
 *.pem
@@ -70,3 +71,6 @@ build/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+configs/proxies.decodo.txt
+configs/data.txt
+configs/account_info.txt*

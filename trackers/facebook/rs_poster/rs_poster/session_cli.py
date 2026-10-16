@@ -22,6 +22,7 @@ Once a secret is stored, `capture` fills the 2FA prompt in by itself.
 import argparse
 import json
 import os
+import random
 import sys
 import time
 from pathlib import Path
@@ -284,6 +285,90 @@ def cmd_import(args: argparse.Namespace) -> int:
     return 0
 
 
+ACCOUNTS_FILE = "configs/account_info.txt"
+
+
+def _account_row(uid: str, path: Optional[Path] = None) -> Dict[str, str]:
+    """Return the full record for a UID from the gitignored accounts file.
+
+    The file is a pipe-delimited table with a header row (uid|password|twofa|
+    cookie|email|email_password|...). Columns are located BY HEADER NAME, so the
+    order can change without breaking this. A headerless file (no 'uid' in the
+    first line) falls back to positional uid|password|twofa. The file holds live
+    credentials and is gitignored; reading from it keeps secrets off the command
+    line (out of ``ps`` and shell history).
+    """
+    if path is None:
+        path = Path(__file__).resolve().parents[2] / ACCOUNTS_FILE
+    if not path.exists():
+        raise SystemExit(f"--account given but {ACCOUNTS_FILE} not found")
+    lines = [ln for ln in path.read_text(encoding="utf-8-sig").splitlines()
+             if ln.strip() and not ln.lstrip().startswith("#")]
+    if not lines:
+        raise SystemExit(f"{ACCOUNTS_FILE} is empty")
+    first = [h.strip().lower() for h in lines[0].split("|")]
+    if "uid" in first:
+        cols, data = first, lines[1:]
+    else:
+        cols, data = ["uid", "password", "twofa"], lines            # headerless
+    for line in data:
+        parts = [c.strip() for c in line.split("|")]
+        if parts and parts[0] == uid:
+            return {cols[i]: parts[i] for i in range(min(len(cols), len(parts)))}
+    raise SystemExit(f"account {uid} not found in {ACCOUNTS_FILE}")
+
+
+def _lookup_account(uid: str, path: Optional[Path] = None) -> tuple:
+    """(username, password) for a UID — the pair the capture auto-fill needs."""
+    row = _account_row(uid, path)
+    return uid, row.get("password", "")
+
+
+def _human_type(field: Any, text: str) -> None:
+    """Type into a field one character at a time, at an uneven human pace.
+
+    Facebook watches for machine-speed input at login. So this never uses a
+    fixed cadence: each keystroke waits a randomized 60-190ms, with an
+    occasional longer 'thinking' pause, and a click+settle before the first
+    key. It is deliberately slower than a bot and about as fast as a person.
+    """
+    field.click()
+    time.sleep(random.uniform(0.3, 0.8))
+    for ch in text:
+        field.type(ch)
+        time.sleep(random.uniform(0.06, 0.19))
+        if random.random() < 0.08:            # a person shifting / glancing away
+            time.sleep(random.uniform(0.25, 0.7))
+
+
+def _autofill_login(page: Any, username: str, password: str) -> None:
+    """Open the login form and type the credentials at a human pace, then submit.
+
+    Best-effort by design: the browser window is visible, so on ANY hiccup
+    (a changed form, a checkpoint, a 2FA prompt) it stops and leaves the page
+    for the operator to finish by hand. The outer wait loop still picks up the
+    c_user cookie whenever login completes, however it completes.
+    """
+    try:
+        page.goto(sel.LOGIN_URL, wait_until="domcontentloaded", timeout=45000)
+        page.wait_for_timeout(int(random.uniform(1200, 2500)))
+        email = page.wait_for_selector(sel.LOGIN_EMAIL_INPUT, timeout=20000)
+        _human_type(email, username)
+        time.sleep(random.uniform(0.4, 1.0))
+        pw = page.query_selector(sel.LOGIN_PASSWORD_INPUT)
+        _human_type(pw, password)
+        time.sleep(random.uniform(0.6, 1.4))
+        button = page.query_selector('button[name="login"], button[type="submit"]')
+        if button:
+            button.click()
+        else:
+            pw.press("Enter")
+        print("  submitted the login at human pace — waiting for it to land.")
+    except Exception as error:  # noqa: BLE001 — hand off to the human on any snag
+        print(f"  auto-fill did not complete ({error}); finish the login by hand.",
+              file=sys.stderr)
+
+
 def cmd_capture(args: argparse.Namespace) -> int:
     """Open a real browser, let a human log in, keep only the resulting session."""
     from playwright.sync_api import sync_playwright
@@ -293,6 +378,18 @@ def cmd_capture(args: argparse.Namespace) -> int:
 
     if args.proxy:
         print(f"Using proxy {args.proxy} — the session will be bound to that IP.\n")
+
+    # --account pulls username + password + 2FA from configs/account_info.txt.
+    # Resolved FIRST so the 2FA seed reaches _resolve_totp_or_warn below and the
+    # login's 2FA prompt is auto-filled too, not just username/password.
+    username = getattr(args, "username", None)
+    password = getattr(args, "password", None)
+    if getattr(args, "account", None):
+        row = _account_row(args.account)
+        username = args.account
+        password = row.get("password", "")
+        if not getattr(args, "secret", None) and row.get("twofa"):
+            args.secret = row["twofa"]
 
     totp_config = _resolve_totp_or_warn(args.storage_state, getattr(args, "secret", None))
     if totp_config is not None:
@@ -306,6 +403,11 @@ def cmd_capture(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
 
+    if username:
+        print(f"Auto-filling the login for {username} at a human pace "
+              f"""{"(2FA too)" if totp_config is not None else ""} """
+              "— finish by hand if it stops on a checkpoint.\n")
+
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(
             headless=False, args=["--disable-blink-features=AutomationControlled"]
@@ -318,7 +420,10 @@ def cmd_capture(args: argparse.Namespace) -> int:
             viewport={"width": 1440, "height": 900},
         )
         page = context.new_page()
-        page.goto(MARKETPLACE_URL)
+        if username and not (existing.exists() and args.reuse):
+            _autofill_login(page, username, password)
+        else:
+            page.goto(MARKETPLACE_URL)
 
         print(f"Waiting up to {args.timeout}s for a logged-in session...")
         print("(Press Enter here once you are logged in, or just wait.)")
@@ -348,22 +453,52 @@ def cmd_capture(args: argparse.Namespace) -> int:
             )
             return 1
 
-        # Take the whole state, not just cookies: `origins` carries Facebook's
-        # localStorage and (with indexed_db) its IndexedDB device state. A
-        # cookies-only capture starts every worker off missing that, which is
-        # the opposite of the "look like the browser this session was born in"
-        # goal. The cookies still go through our own validation below.
-        state = context.storage_state(indexed_db=True)
-        cookies = state.get("cookies", [])
-        origins = state.get("origins", [])
-
-        # Record the browser's real user agent so workers can present the same
-        # one; a mismatch is a known session-hijack heuristic.
+        # Record the browser's real user agent NOW, while the page is alive —
+        # in --stay-open mode the operator may close the window before we read
+        # it. A mismatch is a known session-hijack heuristic, so workers must
+        # present the same one.
         try:
             user_agent = page.evaluate("() => navigator.userAgent")
         except Exception:
             user_agent = args.user_agent
-        browser.close()
+
+        # --stay-open: don't snap the session and close the instant login lands.
+        # Open Marketplace and leave the window up so the operator can VERIFY
+        # the account can actually search before we commit — the empty-results
+        # / "confirm you're human" failures are invisible at login time and
+        # only show when you search. Capture the state every few seconds so the
+        # newest good state survives even when the window is just closed.
+        if getattr(args, "stay_open", False):
+            try:
+                page.goto("https://www.facebook.com/marketplace/",
+                          wait_until="domcontentloaded", timeout=60000)
+            except Exception:
+                pass
+            print("\nLogged in. Marketplace is open — SEARCH to confirm the "
+                  "account works, then CLOSE THE BROWSER WINDOW to save.",
+                  flush=True)
+            state = context.storage_state(indexed_db=True)
+            hold = time.time() + max(args.timeout, 600)
+            while time.time() < hold:
+                try:
+                    if not browser.is_connected() or not context.pages:
+                        break
+                    state = context.storage_state(indexed_db=True)
+                except Exception:
+                    break
+                time.sleep(3)
+        else:
+            # Take the whole state, not just cookies: `origins` carries
+            # Facebook's localStorage and (with indexed_db) its IndexedDB device
+            # state. A cookies-only capture starts every worker off missing that.
+            state = context.storage_state(indexed_db=True)
+
+        cookies = state.get("cookies", [])
+        origins = state.get("origins", [])
+        try:
+            browser.close()
+        except Exception:
+            pass
 
     info = write_storage_state(cookies, args.storage_state, origins=origins)
     write_session_meta(
@@ -557,6 +692,22 @@ def build_parser() -> argparse.ArgumentParser:
     cap.add_argument(
         "--secret",
         help="TOTP secret to fill the 2FA prompt with, instead of the stored one",
+    )
+    cap.add_argument("--username", help="Login id (email/phone/UID) to auto-fill, human-paced")
+    cap.add_argument(
+        "--password",
+        help="Password to auto-fill; prefer --account to keep it off the command line",
+    )
+    cap.add_argument(
+        "--account",
+        help="UID to look up in configs/account_info.txt and auto-fill (username+password)",
+    )
+    cap.add_argument(
+        "--stay-open",
+        action="store_true",
+        dest="stay_open",
+        help="After login, open Marketplace and keep the window up to verify "
+        "access; saves when you close the browser (not the instant login lands)",
     )
     cap.set_defaults(func=cmd_capture)
 

@@ -241,3 +241,49 @@ def test_proxy_settings_percent_decodes_userinfo():
         "username": "alice",
         "password": "p@ss+word",
     }
+
+
+# -- auto-fill login (human-paced) ------------------------------------------
+# rs-session capture can fill a UID + password from configs/accounts.txt and
+# type them at a human pace (Facebook flags machine-speed login input).
+
+def test_lookup_account_reads_uid_password(tmp_path):
+    f = tmp_path / "accounts.txt"
+    f.write_text("# comment\n100008960563344|Ranrover@997|\n"
+                 "100006308048423|ABC@1234|SOMETOTP\n")
+    assert session_cli._lookup_account("100008960563344", f) == ("100008960563344", "Ranrover@997")
+    assert session_cli._lookup_account("100006308048423", f) == ("100006308048423", "ABC@1234")
+
+
+def test_lookup_account_missing_uid_exits(tmp_path):
+    f = tmp_path / "accounts.txt"
+    f.write_text("100008960563344|pw|\n")
+    with pytest.raises(SystemExit):
+        session_cli._lookup_account("999", f)
+
+
+def test_human_type_enters_every_character_one_at_a_time(monkeypatch):
+    # No real sleeping in the test.
+    monkeypatch.setattr(session_cli.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(session_cli.random, "random", lambda: 1.0)  # never the extra pause
+
+    class FakeField:
+        def __init__(self): self.clicked = False; self.typed = ""
+        def click(self): self.clicked = True
+        def type(self, ch): self.typed += ch
+
+    field = FakeField()
+    session_cli._human_type(field, "Ranrover@997")
+    assert field.clicked
+    assert field.typed == "Ranrover@997"   # every char, in order, nothing dropped
+
+
+def test_account_row_locates_columns_by_header(tmp_path):
+    f = tmp_path / "account_info.txt"
+    f.write_text("uid|password|twofa|cookie|email|email_password\n"
+                 "100008960563344|Ranrover@997|X7BHSEED|c_user=1;datr=z|a@b.com|epw\n")
+    row = session_cli._account_row("100008960563344", f)
+    assert row["password"] == "Ranrover@997"
+    assert row["twofa"] == "X7BHSEED"
+    assert row["email"] == "a@b.com"
+    assert session_cli._lookup_account("100008960563344", f) == ("100008960563344", "Ranrover@997")

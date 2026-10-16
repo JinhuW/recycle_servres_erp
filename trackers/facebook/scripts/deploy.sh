@@ -184,7 +184,13 @@ if [ "$MODE" != "sync" ]; then
     # The output goes to a file so the tail is still short on success and the
     # whole thing is there to read on failure.
     build_log=$(mktemp)
-    if ssh "$VM" "cd $REMOTE/ai-marketplace-monitor && docker build -t $IMAGE ." \
+    # The image carries its build identity (reported in every heartbeat, shown
+    # per worker on the fleet dashboard). The commit is read here, not on the
+    # VM: rsync ships no .git, so the VM cannot know what it is running.
+    MONITOR_COMMIT=$(git -C "$ROOT/ai-marketplace-monitor" rev-parse --short HEAD 2>/dev/null || echo unknown)
+    if ssh "$VM" "cd $REMOTE/ai-marketplace-monitor && docker build \
+            --build-arg RS_VERSION=$VERSION --build-arg RS_MONITOR_COMMIT=$MONITOR_COMMIT \
+            -t $IMAGE ." \
             > "$build_log" 2>&1; then
         tail -5 "$build_log"
         rm -f "$build_log"
