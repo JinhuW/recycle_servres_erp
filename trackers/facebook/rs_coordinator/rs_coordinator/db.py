@@ -111,6 +111,23 @@ CREATE TABLE IF NOT EXISTS alert_messages (
 
 CREATE INDEX IF NOT EXISTS idx_alert_messages_sent ON alert_messages(sent_at);
 
+-- Fleet-wide incident ledger (see incidents.py). One row per incident key
+-- ("ai_unavailable"); `reporters` is a JSON map of worker id -> when it last
+-- voted `down`. `last_alerted_at` outlives the incident so a relapse inside
+-- the cooldown re-opens silently, and `alerted` says whether the current
+-- opening was paged, which decides whether closing it speaks.
+CREATE TABLE IF NOT EXISTS incidents (
+    key              TEXT PRIMARY KEY,
+    is_open          INTEGER NOT NULL DEFAULT 0,
+    opened_at        TEXT,
+    closed_at        TEXT,
+    last_reported_at TEXT,
+    last_alerted_at  TEXT,
+    alerted          INTEGER NOT NULL DEFAULT 0,
+    detail           TEXT,
+    reporters        TEXT NOT NULL DEFAULT '{}'
+);
+
 -- Every reaction change Telegram delivers, verbatim. Append-only: this is the
 -- long-term source data for prompt/region tuning, so nothing is interpreted
 -- here — old_reaction/new_reaction hold Telegram's raw JSON.
@@ -304,10 +321,16 @@ WORKER_HEALTH_COLUMNS = (
     ("browser_ok", "INTEGER"),
     ("proxy_ok", "INTEGER"),
     ("vnc_url", "TEXT"),
+    # The build the worker reported ("0.5.6 (d3e9a30)").
+    ("version", "TEXT"),
     # The liveness the sweeper last alerted on ("dead", or NULL). Persisted so a
     # coordinator restart does not re-page ops about a worker it already
     # reported dead.
     ("alerted_liveness", "TEXT"),
+    # Set to a UTC timestamp when an operator presses "Re-login" in the console;
+    # cleared the moment the worker's next heartbeat picks up the directive. A
+    # pending request survives a coordinator restart so the worker still gets it.
+    ("relogin_requested_at", "TEXT"),
 )
 
 # Columns added to `listings` after the first release, same mechanism.
@@ -318,6 +341,14 @@ LISTING_EXTRA_COLUMNS = (
 
 # Columns added to `threads` for the mautrix-meta router, same mechanism. A
 # field database created before the router picks them up on next start.
+# The Facebook numeric user id (the `c_user` cookie) of the session a worker
+# backed up. Public profile identity, not a credential — it is what the
+# dashboards show as "which account is this", and what an operator matches
+# against Facebook's own "account 1000…" wording in a checkpoint notice.
+SNAPSHOT_EXTRA_COLUMNS = (
+    ("fb_user_id", "TEXT"),
+)
+
 THREAD_EXTRA_COLUMNS = (
     ("matrix_room_id", "TEXT"),
     ("telegram_topic_id", "INTEGER"),
@@ -462,6 +493,7 @@ class Database:
             self._migrate_listings()
             self._migrate_columns("threads", THREAD_EXTRA_COLUMNS)
             self._migrate_columns("outbound_messages", OUTBOUND_EXTRA_COLUMNS)
+            self._migrate_columns("session_snapshots", SNAPSHOT_EXTRA_COLUMNS)
             # Created after the migration adds the columns they index.
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_threads_room ON threads(matrix_room_id)"
@@ -906,6 +938,34 @@ class Database:
                 (worker_id, *updates.values()),
             )
 
+    def request_relogin(self: "Database", worker_id: str) -> None:
+        """Flag a worker to re-run its Facebook login on its next heartbeat.
+
+        Upserts the row so a request can be queued for a worker the
+        coordinator has not heard from yet (e.g. one still starting up).
+        """
+        now = utcnow()
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO workers (worker_id, relogin_requested_at) VALUES (?, ?) "
+                "ON CONFLICT(worker_id) DO UPDATE SET relogin_requested_at = excluded.relogin_requested_at",
+                (worker_id, now),
+            )
+
+    def take_relogin(self: "Database", worker_id: str) -> bool:
+        """Consume a pending re-login request, returning whether one was set.
+
+        Clearing and testing in a single UPDATE makes the directive fire
+        exactly once even if two heartbeats race.
+        """
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE workers SET relogin_requested_at = NULL "
+                "WHERE worker_id = ? AND relogin_requested_at IS NOT NULL",
+                (worker_id,),
+            )
+            return cur.rowcount > 0
+
     # -- review stats ------------------------------------------------------
 
     def add_review_stats(
@@ -950,6 +1010,37 @@ class Database:
                 }
                 for row in cur.fetchall()
             ]
+
+    # -- incidents ---------------------------------------------------------
+
+    _INCIDENT_COLUMNS = (
+        "key", "is_open", "opened_at", "closed_at", "last_reported_at",
+        "last_alerted_at", "alerted", "detail", "reporters",
+    )
+
+    def get_incident(self: "Database", key: str) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM incidents WHERE key = ?", (key,))
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def save_incident(self: "Database", row: Dict[str, Any]) -> None:
+        """Upsert the whole row; `incidents.apply` computed every column."""
+        record = {name: row.get(name) for name in self._INCIDENT_COLUMNS}
+        columns = ", ".join(record)
+        placeholders = ", ".join(f":{name}" for name in record)
+        updates = ", ".join(f"{name} = excluded.{name}" for name in record if name != "key")
+        with self.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO incidents ({columns}) VALUES ({placeholders}) "
+                f"ON CONFLICT(key) DO UPDATE SET {updates}",
+                record,
+            )
+
+    def list_incidents(self: "Database") -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM incidents ORDER BY key")
+            return [dict(row) for row in cur.fetchall()]
 
     # -- alert hit tracking ------------------------------------------------
 

@@ -6,7 +6,7 @@ own shapes, so the pieces fit without coordination.
 """
 
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -201,6 +201,9 @@ class HeartbeatRequest(BaseModel):
     browser_ok: bool | None = None
     proxy_ok: bool | None = None
     vnc_url: str | None = None
+    # The build the worker runs ("0.5.6 (d3e9a30)"); absent from workers on
+    # images that predate it.
+    version: str | None = None
     detail: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -223,6 +226,7 @@ class WorkerOut(BaseModel):
     last_listing_at: str | None = None
     error_count: int | None = None
     vnc_url: str | None = None
+    version: str | None = None
     # Derived by the control plane, not reported: live / stale / dead.
     liveness: str | None = None
     needs_attention: bool = False
@@ -277,6 +281,27 @@ class AlertMessageReport(BaseModel):
     prompt_hash: str | None = None
 
 
+class IncidentReport(BaseModel):
+    """A worker's view of one system fault: it is down, or working again.
+
+    `key` names the fault ("ai_unavailable"); the coordinator decides whether
+    the report is news (see incidents.py). `detail` is the last error, shown
+    only in the note that opens the incident.
+    """
+
+    worker_id: str | None = None
+    key: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9_.-]+$")
+    state: Literal["down", "up"]
+    detail: str | None = Field(default=None, max_length=1000)
+
+
+class IncidentResponse(BaseModel):
+    status: str = "ok"
+    open: bool
+    # True when this report is the one that paged ops (or closed the loop).
+    alerted: bool
+
+
 class AlertHitRow(BaseModel):
     """Sent vs reacted counts for one (day, priority, item, city) bucket."""
 
@@ -310,9 +335,61 @@ class SessionBackupRequest(BaseModel):
 class SessionMeta(BaseModel):
     worker_id: str
     account_id: str | None = None
+    # The session's Facebook numeric user id (`c_user` cookie): the public
+    # profile identity, never a credential.
+    fb_user_id: str | None = None
     user_agent: str | None = None
     session_expiry: str | None = None
     backed_up_at: str | None = None
+
+
+# -- accounts (vault, non-secret view) ----------------------------------------
+
+
+class AccountOut(BaseModel):
+    """One vault account as the console may see it: identity and *which*
+    secrets are stored, never a secret value."""
+
+    account_id: str
+    worker_id: str | None = None
+    fb_username: str | None = None
+    region: str | None = None
+    vnc_url: str | None = None
+    allow_password_login: bool = False
+    # Whether a proxy is registered — the value itself carries credentials.
+    proxy_configured: bool = False
+    # secret field name -> stored or not.
+    secrets: Dict[str, bool] = Field(default_factory=dict)
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class AccountList(BaseModel):
+    accounts: List[AccountOut]
+
+
+# What a vault account or worker may be called: what fleet.toml, RS_WORKER_ID
+# and `rsc vault set-account --account-id` already use. Keeps a label out of
+# the URL space and the audit log that could not be typed on a command line.
+ACCOUNT_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._@-]{0,63}$"
+WORKER_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+
+
+class AccountUpsert(BaseModel):
+    """What the console may write to a vault account (PUT /v1/accounts/{id}).
+
+    Everything is optional so the ERP can change one thing at a time: a field
+    left out keeps its stored value. `secrets` is write-only — a value is
+    stored, `null` clears the field, and an empty string keeps whatever is
+    there (what a password box left blank in a form means). Nothing in the
+    response ever echoes a secret back; the caller sees presence flags only.
+    """
+
+    worker_id: str | None = Field(default=None, pattern=WORKER_ID_PATTERN)
+    fb_username: str | None = Field(default=None, max_length=200)
+    region: str | None = Field(default=None, max_length=64)
+    allow_password_login: bool | None = None
+    secrets: Dict[str, Optional[str]] = Field(default_factory=dict)
 
 
 class StatusResponse(BaseModel):

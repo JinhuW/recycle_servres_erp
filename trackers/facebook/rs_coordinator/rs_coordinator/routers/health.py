@@ -53,6 +53,7 @@ def heartbeat(
         ("last_search_at", payload.last_search_at),
         ("error_count", payload.error_count),
         ("vnc_url", payload.vnc_url),
+        ("version", payload.version),
     ):
         if value is not None:
             health_fields[name] = value
@@ -80,7 +81,25 @@ def heartbeat(
             # costs an alert; failing it would make workers retry and thrash.
             logger.exception("Ops alert failed for worker %s", worker_id)
 
-    return HeartbeatResponse()
+    # Deliver any push-style directives the console has queued for this worker.
+    # `take_relogin` clears the flag as it reads it, so the worker re-logs in
+    # once per button press rather than on every heartbeat that follows it.
+    directives: list[str] = []
+    if db.take_relogin(worker_id):
+        directives.append("relogin")
+        logger.info("Delivered re-login directive to worker %s", worker_id)
+
+    return HeartbeatResponse(directives=directives)
+
+
+@router.post("/v1/workers/{worker_id}/relogin", dependencies=[Depends(require_admin)])
+def request_relogin(worker_id: str) -> Dict[str, Any]:
+    """Queue a re-login for a worker; its next heartbeat picks it up.
+
+    Admin-only: the console facade forwards an operator's button press here.
+    """
+    deps.db.request_relogin(worker_id)
+    return {"status": "ok", "worker_id": worker_id, "relogin": "requested"}
 
 
 @router.get("/api/v1/workers")

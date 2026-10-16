@@ -37,6 +37,7 @@ from .db import (
     LISTING_EXTRA_COLUMNS,
     OUTBOUND_EXTRA_COLUMNS,
     SCHEMA,
+    SNAPSHOT_EXTRA_COLUMNS,
     THREAD_EXTRA_COLUMNS,
     UNMATCHED_REACTIONS_SQL,
     WORKER_HEALTH_COLUMNS,
@@ -189,6 +190,7 @@ class PostgresDatabase:
                 self._migrate_listings(conn)
                 self._migrate_columns(conn, "threads", THREAD_EXTRA_COLUMNS)
                 self._migrate_columns(conn, "outbound_messages", OUTBOUND_EXTRA_COLUMNS)
+                self._migrate_columns(conn, "session_snapshots", SNAPSHOT_EXTRA_COLUMNS)
                 # Created after the migration adds the columns they index.
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_threads_room ON threads(matrix_room_id)"
@@ -618,6 +620,26 @@ class PostgresDatabase:
                 (worker_id, *updates.values()),
             )
 
+    def request_relogin(self: "PostgresDatabase", worker_id: str) -> None:
+        """Flag a worker to re-run its Facebook login on its next heartbeat."""
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO workers (worker_id, relogin_requested_at) VALUES (%s, %s) "
+                "ON CONFLICT(worker_id) DO UPDATE "
+                "SET relogin_requested_at = excluded.relogin_requested_at",
+                (worker_id, utcnow()),
+            )
+
+    def take_relogin(self: "PostgresDatabase", worker_id: str) -> bool:
+        """Consume a pending re-login request, returning whether one was set."""
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE workers SET relogin_requested_at = NULL "
+                "WHERE worker_id = %s AND relogin_requested_at IS NOT NULL",
+                (worker_id,),
+            )
+            return cur.rowcount > 0
+
     # -- review stats ------------------------------------------------------
 
     def add_review_stats(
@@ -661,6 +683,36 @@ class PostgresDatabase:
             }
             for row in rows
         ]
+
+    # -- incidents ---------------------------------------------------------
+
+    _INCIDENT_COLUMNS = (
+        "key", "is_open", "opened_at", "closed_at", "last_reported_at",
+        "last_alerted_at", "alerted", "detail", "reporters",
+    )
+
+    def get_incident(self: "PostgresDatabase", key: str) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM incidents WHERE key = %s", (key,))
+            return _row(cur.fetchone())
+
+    def save_incident(self: "PostgresDatabase", row: Dict[str, Any]) -> None:
+        """See `Database.save_incident`."""
+        record = {name: row.get(name) for name in self._INCIDENT_COLUMNS}
+        columns = ", ".join(record)
+        placeholders = ", ".join(f"%({name})s" for name in record)
+        updates = ", ".join(f"{name} = EXCLUDED.{name}" for name in record if name != "key")
+        with self.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO incidents ({columns}) VALUES ({placeholders}) "
+                f"ON CONFLICT (key) DO UPDATE SET {updates}",
+                record,
+            )
+
+    def list_incidents(self: "PostgresDatabase") -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM incidents ORDER BY key")
+            return [_row(r) for r in cur.fetchall()]
 
     # -- alert hit tracking ------------------------------------------------
 

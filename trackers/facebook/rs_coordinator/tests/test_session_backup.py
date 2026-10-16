@@ -205,6 +205,7 @@ def test_meta_returns_non_secret_fields_only(env):
     assert set(body) == {
         "worker_id",
         "account_id",
+        "fb_user_id",
         "user_agent",
         "session_expiry",
         "backed_up_at",
@@ -213,12 +214,40 @@ def test_meta_returns_non_secret_fields_only(env):
     assert body["account_id"] == "denver"
     assert body["session_expiry"] == "2026-11-01T00:00:00+00:00"
     assert body["backed_up_at"]
+    # The one field read out of the session document: the public profile id
+    # (`c_user`), which is identity, not a credential.
+    assert body["fb_user_id"] == "100000000000001"
 
-    # Neither the blob nor anything derived from it may appear on the wire.
+    # Neither the blob nor any credential in it may appear on the wire.
     raw = response.text
     assert "state_blob" not in raw
     assert SESSION_COOKIE not in raw
-    assert "100000000000001" not in raw
+    assert "another-secret" not in raw
+
+
+def test_meta_reads_the_user_id_out_of_an_older_snapshot(env):
+    # A snapshot sealed before the fb_user_id column existed: the id is only
+    # inside the blob, and meta still answers without waiting for a re-backup.
+    env.db.upsert_snapshot(
+        "denver-1",
+        {
+            "account_id": "denver",
+            "state_blob": env.vault.encrypt(sample_state()),
+            "user_agent": "ua",
+            "session_expiry": "2026-11-01T00:00:00+00:00",
+        },
+    )
+    assert env.db.get_snapshot("denver-1").get("fb_user_id") is None
+    body = env.get("/v1/session/denver-1/meta", headers=ADMIN_AUTH).json()
+    assert body["fb_user_id"] == "100000000000001"
+
+
+def test_meta_has_no_user_id_when_the_session_lacks_one(env):
+    state = sample_state()
+    state["cookies"] = [c for c in state["cookies"] if c["name"] != "c_user"]
+    backup(env, storage_state=state)
+    body = env.get("/v1/session/denver-1/meta", headers=ADMIN_AUTH).json()
+    assert body["fb_user_id"] is None
 
 
 def test_meta_404s_for_a_worker_with_no_snapshot(env):

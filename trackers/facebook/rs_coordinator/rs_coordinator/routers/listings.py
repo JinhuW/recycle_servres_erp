@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, Query, Response
 
-from .. import deps
+from .. import __version__, deps
 from ..db import utcnow
 from ..dedupe import Verdict, classify, dedupe_key
 from ..deps import require_worker
@@ -51,7 +51,13 @@ def healthz(response: Response) -> Dict[str, Any]:
     Answers 503 when the database is unreachable, so the healthcheck fails
     instead of the operator having to notice.
     """
-    body: Dict[str, Any] = {"status": "ok", "telegram": deps.notifier.enabled}
+    body: Dict[str, Any] = {
+        "status": "ok",
+        # The build this process runs, so the dashboards can name it next to
+        # each worker's.
+        "version": __version__,
+        "telegram": deps.notifier.enabled,
+    }
 
     try:
         # The open itself is lazy and can fail (unreachable Postgres at boot);

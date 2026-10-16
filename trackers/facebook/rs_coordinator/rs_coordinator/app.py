@@ -22,7 +22,18 @@ from fastapi import FastAPI
 
 from . import deps
 from .background import Background
-from .routers import alerts, auth, escalation, health, listings, messages, session, stats
+from .routers import (
+    accounts,
+    alerts,
+    auth,
+    escalation,
+    health,
+    incidents,
+    listings,
+    messages,
+    session,
+    stats,
+)
 from .telegram_consumer import TelegramUpdateConsumer
 
 logging.basicConfig(level=os.environ.get("RS_LOG_LEVEL", "INFO"))
@@ -86,6 +97,8 @@ app.include_router(session.router, tags=["session"])
 app.include_router(messages.router, tags=["messages"])
 app.include_router(stats.router, tags=["stats"])
 app.include_router(alerts.router, tags=["alerts"])
+app.include_router(accounts.router, tags=["accounts"])
+app.include_router(incidents.router, tags=["incidents"])
 
 
 def __getattr__(name: str) -> Any:

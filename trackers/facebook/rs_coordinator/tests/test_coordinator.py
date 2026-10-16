@@ -206,6 +206,18 @@ def test_heartbeat_and_listing_query(client):
     workers = client.get("/api/v1/workers", headers=AUTH).json()["workers"]
     assert workers[0]["region"] == "rs_texas"
 
+    # A worker names its build; the row keeps it and healthz names the
+    # coordinator's own, so the dashboard can show every build side by side.
+    client.post(
+        "/api/v1/heartbeat",
+        json={"worker_id": "tx-1", "status": "ok", "version": "0.5.6 (d3e9a30)"},
+        headers=AUTH,
+    )
+    workers = client.get("/api/v1/workers", headers=AUTH).json()["workers"]
+    assert workers[0]["version"] == "0.5.6 (d3e9a30)"
+    from rs_coordinator import __version__
+    assert client.get("/healthz").json()["version"] == __version__
+
     client.post(
         "/api/v1/listings",
         json={"worker_id": "tx-1", "listings": [sample_listing(ai_score=5)]},
@@ -214,6 +226,29 @@ def test_heartbeat_and_listing_query(client):
     found = client.get("/api/v1/listings?min_score=5", headers=AUTH).json()["listings"]
     assert len(found) == 1
     assert client.get("/api/v1/listings?min_score=1", headers=AUTH).json()["listings"]
+
+
+def test_relogin_request_rides_back_on_one_heartbeat(client):
+    # An operator presses "Re-login"; the console forwards it to the admin
+    # route, which queues the flag. (Queued directly here so the test needs no
+    # admin token — the route itself is a one-line wrapper over request_relogin.)
+    client.db.request_relogin("relogin-1")
+
+    first = client.post(
+        "/api/v1/heartbeat",
+        json={"worker_id": "relogin-1", "status": "ok"},
+        headers=AUTH,
+    ).json()
+    assert "relogin" in first["directives"]
+
+    # Fire once: the very next heartbeat no longer carries it, so the worker
+    # re-authenticates a single time per button press, not on every poll.
+    second = client.post(
+        "/api/v1/heartbeat",
+        json={"worker_id": "relogin-1", "status": "ok"},
+        headers=AUTH,
+    ).json()
+    assert "relogin" not in second["directives"]
 
 
 def test_unknown_payload_fields_are_ignored(client):

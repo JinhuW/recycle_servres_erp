@@ -42,6 +42,21 @@ router = APIRouter()
 MAX_STATE_BYTES = 5 * 1024 * 1024
 
 
+def fb_user_id_of(storage_state: Dict[str, Any] | None) -> Optional[str]:
+    """The Facebook numeric user id in a storage_state, from its `c_user` cookie.
+
+    This is the one thing read out of the session document, and it is chosen
+    because it is not a secret: `c_user` is the public profile id that appears
+    in every profile URL. The login tokens (`xs`, `datr`, localStorage) are
+    never touched.
+    """
+    for cookie in (storage_state or {}).get("cookies") or []:
+        if isinstance(cookie, dict) and cookie.get("name") == "c_user":
+            value = str(cookie.get("value") or "").strip()
+            return value or None
+    return None
+
+
 def _account_for(worker_id: str, claimed: Optional[str]) -> Optional[str]:
     """The account label to file this snapshot under.
 
@@ -94,6 +109,7 @@ def backup_session(
             "state_blob": state_blob,
             "user_agent": payload.user_agent,
             "session_expiry": payload.session_expiry,
+            "fb_user_id": fb_user_id_of(payload.storage_state),
         },
     )
     # Size and identity only — never the state itself, since logs are the one
@@ -126,9 +142,20 @@ def session_meta(worker_id: str) -> SessionMeta:
             status_code=404,
             detail=f"No session snapshot for worker '{worker_id}'. It has never backed one up.",
         )
+    # Snapshots sealed before the column existed carry the id only inside the
+    # blob; read it out rather than wait for the worker's next backup. It is
+    # not persisted here — the next backup fills the column — so the admin
+    # read path never writes.
+    fb_user_id = snapshot.get("fb_user_id")
+    if not fb_user_id and snapshot.get("state_blob") is not None:
+        try:
+            fb_user_id = fb_user_id_of(deps.get_vault().decrypt(snapshot["state_blob"]))
+        except VaultError:
+            fb_user_id = None
     return SessionMeta(
         worker_id=worker_id,
         account_id=snapshot.get("account_id"),
+        fb_user_id=fb_user_id,
         user_agent=snapshot.get("user_agent"),
         session_expiry=snapshot.get("session_expiry"),
         backed_up_at=snapshot.get("backed_up_at"),
