@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-16
 reporter: jinhu
 branch: chore/tracker-migration-cleanup
-pr: "#657"
+pr: 657
 version: 1.259.1
 related: [RS-255, RS-171]
 ---
