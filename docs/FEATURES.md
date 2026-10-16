@@ -6,7 +6,7 @@ that introduced it.
 
 Written for whoever — human or agent — has to change this system without
 having watched it get built. It describes behaviour, not implementation:
-`CLAUDE.md` covers conventions and tripwires, and the route files are the
+`AGENTS.md` (root, plus one per area) covers conventions and tripwires, and the route files are the
 source of truth for endpoints.
 
 Keep it current: when a change adds, removes or reshapes user-visible
