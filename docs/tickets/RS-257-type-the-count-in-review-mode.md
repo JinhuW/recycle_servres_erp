@@ -2,12 +2,12 @@
 id: RS-257
 title: Type the count in Review mode
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-16
 reporter: jinhu
 branch: feat/review-count-input
-pr:
+pr: 658
 version: 1.260.0
 related: []
 ---
