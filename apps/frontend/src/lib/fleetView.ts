@@ -211,3 +211,16 @@ export function reloginIsAutomatic(w: FleetAccount | null | undefined): boolean 
   const acct = w?.account;
   return Boolean(acct?.allow_password_login && acct.secrets.password);
 }
+
+// The vault account a worker's credentials are filed under: its own account
+// when it has one, otherwise a new one named after the worker — the one id an
+// operator already knows it by (`rsc vault set-account --account-id <worker>`).
+export function vaultAccountIdFor(w: FleetAccount): string {
+  return w.account?.account_id ?? w.worker_id;
+}
+
+// What the credentials form is about to make true: Re-login finishes by
+// itself only with a password stored AND password login allowed.
+export function reloginWouldBeAutomatic(allowPasswordLogin: boolean, passwordStored: boolean): boolean {
+  return allowPasswordLogin && passwordStored;
+}

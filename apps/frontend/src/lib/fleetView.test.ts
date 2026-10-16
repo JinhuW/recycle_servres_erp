@@ -3,7 +3,7 @@ import { vncSocketUrl, type Challenge, type FleetAccount, type FleetDoc, type Fl
 import {
   accountAlerts, accountHaystack, attentionEntries, attentionReason, browserLabel, canWatch,
   externalVncUrl, hitsByCity, isUnstampedBuild, reloginIsAutomatic, matchesTerms, offersRelogin, queryTerms, reviewedToday, searchersByCity,
-  splitHighlights, whoIs,
+  splitHighlights, reloginWouldBeAutomatic, vaultAccountIdFor, whoIs,
 } from './fleetView';
 
 const account = (over: Partial<FleetAccount>): FleetAccount => ({
@@ -179,3 +179,24 @@ describe('fleetView', () => {
   });
 });
 
+
+describe('vaultAccountIdFor', () => {
+  const vault = { account_id: 'personal', fb_username: 'x@example.com', region: null, vnc_url: null,
+    allow_password_login: false, proxy_configured: false, secrets: { password: false } };
+
+  it('files credentials under the worker\'s own vault account when it has one', () => {
+    expect(vaultAccountIdFor(account({ worker_id: 'homelab-1', account: vault }))).toBe('personal');
+  });
+
+  it('names a new account after the worker otherwise', () => {
+    expect(vaultAccountIdFor(account({ worker_id: 'ne-1', account: null }))).toBe('ne-1');
+  });
+});
+
+describe('reloginWouldBeAutomatic', () => {
+  it('needs both a stored password and password login allowed', () => {
+    expect(reloginWouldBeAutomatic(true, true)).toBe(true);
+    expect(reloginWouldBeAutomatic(true, false)).toBe(false);
+    expect(reloginWouldBeAutomatic(false, true)).toBe(false);
+  });
+});

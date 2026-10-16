@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-254](./RS-254-manage-each-worker-s-facebook-login-and-password-fro.md) | done | story | P2 | Manage each worker's Facebook login and password from the fleet page | 1.259.0 |
 | [RS-253](./RS-253-fix-the-dev-to-prod-pre-release-review-findings.md) | done | bug | P1 | Fix the dev to prod pre-release review findings | 1.258.9 |
 | [RS-252](./RS-252-fix-the-2026-10-13-full-code-review-findings.md) | done | bug | P1 | Fix the 2026-10-13 full code-review findings | 1.258.8 |
 | [RS-251](./RS-251-po-list-payment-gap-mark-hover-note-that-opens-at-on.md) | done | bug | P2 | PO list payment-gap mark: hover note that opens at once | 1.258.1 |

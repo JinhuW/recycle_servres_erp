@@ -2083,7 +2083,14 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   expiring — plus **Re-login** where the session is the problem.  An
   **Account information** table lists each account's Facebook identity,
   proxy, stored secrets, browser and backup age, and the fourth KPI is
-  listings reviewed today, matching the console (v1.204.0).
+  listings reviewed today, matching the console (v1.204.0).  Each row of
+  that table has **Credentials → Edit**: a form that sets the worker's
+  Facebook login, password, 2FA (TOTP) secret and whether password login is
+  allowed — the credentials Re-login then signs in with.  Secrets are
+  write-only (the form shows only whether one is stored; blank keeps it,
+  "clear" removes it), a worker without a vault account gets one named after
+  it, and the form says before saving whether Re-login will finish by itself
+  or still needs the login finished in Watch (v1.259.0).
 - **Watching a worker's browser** — `/fleet/watch/<worker>` shows the live
   Chromium a Facebook worker is driving, through noVNC, view-only until
   "Take control" is ticked (and handed back when the tab is hidden), with

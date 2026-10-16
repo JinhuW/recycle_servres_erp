@@ -17,6 +17,27 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.259.0] - 2026-10-16
+
+Each worker's Facebook login, password and 2FA secret are set from the fleet
+page, and Re-login uses them (RS-254).
+
+### Added
+
+- **Credentials → Edit on the Account information table.** A form per worker
+  sets the Facebook login, password, 2FA (TOTP) secret and whether password
+  login is allowed. The password and 2FA boxes show only whether a value is
+  stored — blank keeps it, "clear" removes it — and the form says, before
+  saving, whether Re-login will then finish by itself (a stored password with
+  password login allowed) or still needs the login finished in Watch. A worker
+  with no vault account gets one named after the worker. Saving refreshes the
+  fleet view, so the stored-secret badges and the Re-login dialog's wording
+  follow. Backed by `PUT /api/coordinator/accounts/:id` (manager-only), which
+  forwards to the facade reduced to the allowed fields — a proxy or VNC URL
+  cannot be set from the ERP — logs field names only, and relays the
+  coordinator's refusal when a worker already belongs to another account.
+  Needs the facebook_tracker coordinator and console that serve
+  `PUT /v1/accounts/{id}`; against an older facade the form reports the 404.
 ## [1.258.9] - 2026-10-14
 
 Fixes from the pre-release review of v1.258.8 against prod (RS-253). Most are

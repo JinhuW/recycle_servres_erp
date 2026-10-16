@@ -256,7 +256,7 @@ function FleetPage({ showToast }: Props) {
             expanded={expanded} onToggle={toggleRow} locale={locale} />
 
           {/* ── The Facebook identity behind each worker, in one table ── */}
-          <AccountInfoCard fleet={fleet} query={query} filter={filter} locale={locale} />
+          <AccountInfoCard fleet={fleet} query={query} filter={filter} locale={locale} onSaved={load} />
 
           {/* ── What each account searches for, and the shared settings ── */}
           <div className="grid-2" style={{ marginBottom: 16 }}>
