@@ -23,6 +23,11 @@ set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# This tree is trackers/facebook/ inside the ERP monorepo: every git operation
+# below is scoped to it (pathspec `.`), and its tags are prefixed so they never
+# mix with the ERP's own v* release tags.
+TAG_PREFIX="facebook-tracker/v"
+
 DRY=""
 if [ "${1:-}" = "--dry-run" ]; then DRY=1; shift; fi
 BUMP="${1:-}"
@@ -63,14 +68,14 @@ step "preflight"
 
 git rev-parse --git-dir >/dev/null 2>&1 || { echo "  not a git repository" >&2; exit 1; }
 
-if [ -n "$(git status --porcelain)" ]; then
+if [ -n "$(git status --porcelain -- .)" ]; then
     echo "  working tree is dirty; commit or stash first:" >&2
-    git status --short | sed 's/^/      /' >&2
+    git status --short -- . | sed 's/^/      /' >&2
     exit 1
 fi
 
-if git rev-parse "v$NEW" >/dev/null 2>&1; then
-    echo "  tag v$NEW already exists" >&2
+if git rev-parse -q --verify "refs/tags/$TAG_PREFIX$NEW" >/dev/null; then
+    echo "  tag $TAG_PREFIX$NEW already exists" >&2
     exit 1
 fi
 
@@ -149,7 +154,7 @@ run_suite ai-marketplace-monitor "$AIMM_PYTHON" -m pytest tests/ -q \
 
 if [ -n "$DRY" ]; then
     step "dry run — nothing written"
-    echo "  would set VERSION to $NEW, move [Unreleased] into [$NEW], commit and tag v$NEW"
+    echo "  would set VERSION to $NEW, move [Unreleased] into [$NEW], commit and tag $TAG_PREFIX$NEW"
     exit 0
 fi
 
@@ -209,9 +214,10 @@ print(f"  [Unreleased] -> [{new}] - {today}")
 PY
 
 step "commit and tag"
-git add -A
+git add -A -- .
 sh scripts/check-secrets.sh
-git commit -q -m "Release v$NEW
+# `-- .` commits this tree only, even if ERP changes happen to be staged.
+git commit -q -m "Release facebook-tracker v$NEW
 
 $(awk -v v="$NEW" '
     $0 ~ "^## \\[" v "\\]" {f=1; next}
@@ -221,10 +227,10 @@ $(awk -v v="$NEW" '
 
 Vendored monitor pinned at $(git -C ai-marketplace-monitor rev-parse --short HEAD) (see VENDOR.md).
 
-Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>" -- .
 
-git tag -a "v$NEW" -m "v$NEW"
-echo "  tagged v$NEW"
+git tag -a "$TAG_PREFIX$NEW" -m "$TAG_PREFIX$NEW"
+echo "  tagged $TAG_PREFIX$NEW"
 
 step "done"
 echo "  $CURRENT -> $NEW"

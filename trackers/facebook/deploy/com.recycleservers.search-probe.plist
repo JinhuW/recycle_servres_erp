@@ -13,11 +13,11 @@
     <key>ProgramArguments</key>
     <array>
         <string>/bin/sh</string>
-        <string>/Users/jinhu/Projects/recycle_servers/facebook_tracker/scripts/probe-search-url.sh</string>
+        <string>/Users/jinhu/Development/recycle_servers/recycle_servres_erp/trackers/facebook/scripts/probe-search-url.sh</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/jinhu/Projects/recycle_servers/facebook_tracker</string>
+    <string>/Users/jinhu/Development/recycle_servers/recycle_servres_erp/trackers/facebook</string>
 
     <!-- 07:45, so the report is on disk before the 08:00 keyword review reads
          the same morning's state. StartCalendarInterval, like that job, so a
@@ -31,8 +31,8 @@
     </dict>
 
     <key>StandardOutPath</key>
-    <string>/Users/jinhu/Projects/recycle_servers/facebook_tracker/logs/search-probe.out.log</string>
+    <string>/Users/jinhu/Development/recycle_servers/recycle_servres_erp/trackers/facebook/logs/search-probe.out.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/jinhu/Projects/recycle_servers/facebook_tracker/logs/search-probe.err.log</string>
+    <string>/Users/jinhu/Development/recycle_servers/recycle_servres_erp/trackers/facebook/logs/search-probe.err.log</string>
 </dict>
 </plist>

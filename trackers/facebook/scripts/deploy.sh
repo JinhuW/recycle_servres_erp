@@ -115,7 +115,7 @@ VERSION=$(cat "$ROOT/VERSION")
 SHA=$(git -C "$ROOT" rev-parse --short HEAD)
 REDEPLOY_NOTE=""
 
-# A tag at HEAD proves the version was bumped once. It does not stop the same
+# A current tag proves the version was bumped once. It does not stop the same
 # tag being deployed twice, which is still a deploy with no bump behind it —
 # and repeated same-version lines are exactly what made the release log
 # unreadable. The VM is the only honest record of what it is running.

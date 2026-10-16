@@ -4,7 +4,7 @@
 # by hand to reproduce exactly what the service does.
 set -eu
 
-ROOT="/Users/jinhu/Projects/recycle_servers/facebook_tracker"
+ROOT="/Users/jinhu/Development/recycle_servers/recycle_servres_erp/trackers/facebook"
 cd "$ROOT"
 
 # Load secrets (OPENROUTER_API_KEY, TELEGRAM_*) into the environment.

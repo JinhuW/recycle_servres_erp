@@ -222,9 +222,9 @@ plus one question for the VM — and all four conditions have to hold:
 
 | | |
 | --- | --- |
-| clean working tree | rsync ships the working tree, not the tag, so uncommitted edits make the tag a lie about what is running |
-| `v$(cat VERSION)` exists | only `scripts/release.sh` writes those tags, and it refuses to reuse one |
-| the tag is `HEAD` | commits made after the tag would otherwise ship wearing the previous release's number |
+| clean working tree (this tree only) | rsync ships the working tree, not the tag, so uncommitted edits make the tag a lie about what is running |
+| `facebook-tracker/v$(cat VERSION)` exists | only `scripts/release.sh` writes those tags, and it refuses to reuse one |
+| nothing under this tree changed since the tag | commits made after the tag would otherwise ship wearing the previous release's number |
 | the VM does not already run it | a tag deployed twice is still a deploy with no bump behind it |
 
 So the working order is always: write `CHANGELOG.md` under `[Unreleased]`, run
@@ -784,10 +784,15 @@ allowlist secret` to the line. It has a test of its own
 demands they be caught, which is how it was found to miss a Playwright
 `storage_state` file entirely.
 
-Neither repository has a remote. Give this one a private remote before treating
-a clone as enough to redeploy from — and note that `recycle-patches` must never
-be pushed to `ai-marketplace-monitor`'s `origin`, which is the upstream author's
-repository.
+This tree lives at `trackers/facebook/` in the ERP monorepo
+(`JinhuW/recycle_servres_erp`); it was imported from the now-archived
+`JinhuW/facebook_tracker` with its history, so commit hashes cited before
+2026-10-16 resolve only in that archived repo. Releases are judged on this
+subtree alone — ERP commits and edits elsewhere in the repo never block one —
+and its tags are `facebook-tracker/vX.Y.Z`, kept apart from the ERP's own `v*`
+tags. The vendored monitor still has no remote of ours: `recycle-patches` must
+never be pushed to `ai-marketplace-monitor`'s `origin`, which is the upstream
+author's repository.
 
 ## Releases
 

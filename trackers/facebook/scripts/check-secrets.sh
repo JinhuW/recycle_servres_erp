@@ -25,7 +25,9 @@ STATUS=0
 # a scanner is only worth having if someone has watched it fail.
 case "${1:-}" in
     --all)  FILES=$(git ls-files); shift ;;
-    "")     FILES=$(git diff --cached --name-only --diff-filter=ACMR) ;;
+    # --relative: this tree is trackers/facebook/ in the ERP monorepo, and the
+    # path rules below are written relative to it.
+    "")     FILES=$(git diff --cached --name-only --relative --diff-filter=ACMR) ;;
     -*)     echo "usage: $0 [--all | <file>...]" >&2; exit 2 ;;
     *)      FILES="$*" ;;
 esac

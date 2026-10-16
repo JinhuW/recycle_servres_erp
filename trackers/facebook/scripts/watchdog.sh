@@ -22,7 +22,7 @@
 # the guard the very first tick after a reboot does exactly that.
 set -eu
 
-ROOT="/Users/jinhu/Projects/recycle_servers/facebook_tracker"
+ROOT="/Users/jinhu/Development/recycle_servers/recycle_servres_erp/trackers/facebook"
 AGENT_LABEL="com.recycleservers.fbmonitor"
 AGENT="$HOME/Library/LaunchAgents/${AGENT_LABEL}.plist"
 LOG="$HOME/.ai-marketplace-monitor/ai-marketplace-monitor.log"

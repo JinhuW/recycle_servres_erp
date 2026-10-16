@@ -63,6 +63,22 @@ allows "the committed secrets.env template" "$ROOT/configs/secrets.env.example"
 # The suites are full of password-shaped fixtures and must not trip it.
 allows "the coordinator test suite" "$(git -C "$ROOT" ls-files 'rs_coordinator/tests/*.py' | tr '\n' ' ')"
 
+# -- staged mode, nested in the monorepo ------------------------------------
+# This tree lives at trackers/facebook/, so git reports staged paths as
+# trackers/facebook/configs/... — the path rules are written relative to this
+# tree and must still match them.
+MONO="$WORK/mono"
+mkdir -p "$MONO/trackers/facebook/scripts" "$MONO/trackers/facebook/configs"
+cp "$CHECK" "$MONO/trackers/facebook/scripts/"
+git -C "$MONO" init -q
+printf 'TOKEN=value\n' > "$MONO/trackers/facebook/configs/secrets.env"
+git -C "$MONO" add -f trackers/facebook/configs/secrets.env
+if sh "$MONO/trackers/facebook/scripts/check-secrets.sh" >/dev/null 2>&1; then
+    fail "nested: a staged configs/secrets.env (was allowed)"
+else
+    ok "nested: a staged configs/secrets.env"
+fi
+
 if [ "$FAILURES" -ne 0 ]; then
     echo "$FAILURES check-secrets assertion(s) failed" >&2
     exit 1

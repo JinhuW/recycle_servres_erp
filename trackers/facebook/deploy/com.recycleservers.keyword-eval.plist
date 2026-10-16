@@ -11,12 +11,12 @@
     <key>ProgramArguments</key>
     <array>
         <string>/bin/sh</string>
-        <string>/Users/jinhu/Projects/recycle_servers/facebook_tracker/scripts/eval-keywords.sh</string>
+        <string>/Users/jinhu/Development/recycle_servers/recycle_servres_erp/trackers/facebook/scripts/eval-keywords.sh</string>
         <string>24</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/jinhu/Projects/recycle_servers/facebook_tracker</string>
+    <string>/Users/jinhu/Development/recycle_servers/recycle_servres_erp/trackers/facebook</string>
 
     <!-- 08:00 local, after a full overnight of searching. StartCalendarInterval
          (not StartInterval) so it lands once a day at a predictable hour, and so
@@ -38,8 +38,8 @@
     </dict>
 
     <key>StandardOutPath</key>
-    <string>/Users/jinhu/Projects/recycle_servers/facebook_tracker/logs/keyword-eval.out.log</string>
+    <string>/Users/jinhu/Development/recycle_servers/recycle_servres_erp/trackers/facebook/logs/keyword-eval.out.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/jinhu/Projects/recycle_servers/facebook_tracker/logs/keyword-eval.err.log</string>
+    <string>/Users/jinhu/Development/recycle_servers/recycle_servres_erp/trackers/facebook/logs/keyword-eval.err.log</string>
 </dict>
 </plist>
