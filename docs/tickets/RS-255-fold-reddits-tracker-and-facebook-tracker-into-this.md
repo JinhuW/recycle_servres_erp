@@ -2,13 +2,13 @@
 id: RS-255
 title: Fold reddits_tracker and facebook_tracker into this repo; AGENTS.md per area
 type: task
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-16
 reporter: jinhu
 branch: chore/monorepo-trackers
-pr:
-version:
+pr: 654
+version: n/a — imported trackers, docs and CI only, no ERP release
 related: [RS-048, RS-164, RS-165, RS-170]
 ---
 
@@ -53,20 +53,20 @@ The user chose the following:
 
 ## Acceptance criteria
 
-- [ ] `trackers/reddit/` and `trackers/facebook/` are present with their full
+- [x] `trackers/reddit/` and `trackers/facebook/` are present with their full
       commit history. facebook_tracker's tags are imported as
       `facebook-tracker/v*`.
-- [ ] No `tf.plan`, `proxies.decodo.txt`, `ai-marketplace-monitor/` blob or
+- [x] No `tf.plan`, `proxies.decodo.txt`, `ai-marketplace-monitor/` blob or
       proxy credential string is reachable in this repo's history.
-- [ ] The reddit tracker's `pnpm typecheck`, `pnpm test` and `docker build`
+- [x] The reddit tracker's `pnpm typecheck`, `pnpm test` and `docker build`
       pass from `trackers/reddit/`.
-- [ ] facebook_tracker's release-gate and secret-scan tests pass in the nested
+- [x] facebook_tracker's release-gate and secret-scan tests pass in the nested
       layout. Tags are prefixed and scans are scoped to `trackers/facebook/`.
-- [ ] The root `pnpm-lock.yaml`, workspace and CI triggers are unchanged. Only
+- [x] The root `pnpm-lock.yaml`, workspace and CI triggers are unchanged. Only
       `version-check` runs on the PR.
-- [ ] Every heading of the old root `CLAUDE.md` lands in exactly one new doc,
+- [x] Every heading of the old root `CLAUDE.md` lands in exactly one new doc,
       and every relative link in the new docs resolves.
-- [ ] The old GitHub repos are archived with a "moved" banner.
+- [x] The old GitHub repos are archived with a "moved" banner.
 
 ## Out of scope
 
@@ -88,3 +88,17 @@ The user chose the following:
   facebook_tracker repo's history.
 - **The PR has to merge with a merge commit, not a squash.** A squash would
   collapse the imported history into a single commit.
+- **Shipped in #654** (merge commit `a08b8916`; facebook tags pushed as
+  `facebook-tracker/v0.2.0…v0.5.5`). Then:
+  - the old GitHub repos were archived with a "moved" banner;
+  - the local checkouts went to `recycle_servers/_archived/`;
+  - `trackers/reddit` was re-linked to Railway `reddits-tracker` (production).
+- **Deviation from the plan: CI.** The per-area docs under `apps/` would have
+  counted as ERP code. So `version-check`, `backend-tests` and
+  `deploy-frontend` now ignore `*.md`.
+- **Found, not fixed (needs its own tickets):**
+  - `check-secrets.sh --all` false-positives on `fleet.js:16` / `vnc.js:13`,
+    which blocks the next facebook release until they carry
+    `pragma: allowlist secret`.
+  - `rs_coordinator/routers/session.py` `backup_session` accepts the fleet-wide
+    token with a client-chosen `worker_id`.
