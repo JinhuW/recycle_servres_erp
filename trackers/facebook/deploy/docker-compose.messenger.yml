@@ -1,0 +1,75 @@
+# The Messenger bridge on the homelab node.
+#
+# Reads the same Facebook account the monitor searches from — the single-node
+# "personal" account — so it mounts the same session directory read-write and
+# shares an account lock with the poster (FB_LOCK on the session volume), so one
+# account never posts and messages at the same moment.
+#
+# IMPORTANT — one account, one IP. The monitor already drives a browser on this
+# account continuously. This adds a second, intermittent browser on the same
+# cookies from the same NAT IP. That is tolerable the way a phone plus a laptop
+# is, but it is not free: keep the poll interval conservative, and watch the
+# first live cycles over VNC (scripts/monitor-view.sh) before trusting the loop
+# unattended. A checkpoint here also stops the monitor — same account.
+#
+# Before first start (all already present for the monitor):
+#   configs/sessions/homelab/fb_state.json   (+ .meta.json sidecar)
+#   configs/secrets.env                       (RS_COORDINATOR_URL/TOKEN,
+#                                              RS_WORKER_ID; RS_AUTOREPLY_* live
+#                                              on the coordinator, not here)
+#
+# Validate before looping:
+#   docker compose -f deploy/docker-compose.messenger.yml run --rm \
+#       messenger poll --dry-run
+# Start the loop only once that reads the inbox cleanly:
+#   docker compose -f deploy/docker-compose.messenger.yml up -d
+
+services:
+  messenger:
+    image: rs-messenger:latest
+    container_name: rs-messenger
+    # No restart:unless-stopped until the loop is trusted — an unattended crash
+    # loop reopening a browser on a live account is the pattern to avoid. Switch
+    # to unless-stopped once the first cycles are clean.
+    restart: "no"
+
+    env_file:
+      - ../configs/secrets.env
+
+    environment:
+      # The saved session and its lock. The lock lives on the shared session
+      # volume so the poster (when it runs on this node) and this bridge see the
+      # same file and cannot both drive the account at once.
+      FB_STATE: /data/fb_state.json
+      FB_LOCK: /data/account.lock
+      # A generous default poll: the inbox does not change fast, and every poll
+      # is a browser open on the live account.
+      RS_MESSENGER_INTERVAL: "300"
+
+    # run --interval is its own scheduler; --depth keeps each poll to the recent
+    # threads. The entrypoint starts Xvfb then execs this, so name the binary.
+    # Validate instead with:
+    #   docker compose ... run --rm messenger rs-messenger poll --dry-run
+    command: ["rs-messenger", "run", "--interval", "300", "--depth", "10"]
+
+    volumes:
+      - ../configs/sessions/homelab:/data
+
+    shm_size: 1gb
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    networks:
+      - rs-fleet
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  rs-fleet:
+    name: rs-fleet
+    external: true
