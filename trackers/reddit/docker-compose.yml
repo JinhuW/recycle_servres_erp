@@ -1,0 +1,40 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: reddits_tracker_pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tracker
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tracker}
+      POSTGRES_DB: reddits_tracker
+    # Published on 5433 so it never collides with the ERP's Postgres or a
+    # local system install on 5432. Tests default to this port too.
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tracker -d reddits_tracker"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 512m
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # Optional: run a worker in compose to rehearse the VM deployment. Day-to-day
+  # development is `docker compose up postgres` plus `pnpm dev` on the host.
+  worker:
+    build: .
+    profiles: ["worker"]
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://tracker:${POSTGRES_PASSWORD:-tracker}@postgres:5432/reddits_tracker
+      ROLE: worker
+    depends_on:
+      postgres:
+        condition: service_healthy

@@ -1,0 +1,28 @@
+#cloud-config
+# Prepares a worker VM: docker with log rotation, a 1G swapfile (the AMD
+# micros have only 1 GB RAM), and the app directory. Deliberately NO secrets
+# and NO app start here — this file lives in terraform state and instance
+# metadata, both of which must stay secret-free. scripts/deploy-workers.sh
+# pushes the env file and starts the container over SSH.
+
+package_update: true
+packages:
+  - docker.io
+
+swap:
+  filename: /swapfile
+  size: 1073741824 # 1 GiB
+
+write_files:
+  - path: /etc/docker/daemon.json
+    permissions: "0644"
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": { "max-size": "50m", "max-file": "3" }
+      }
+
+runcmd:
+  - mkdir -p /opt/reddits_tracker
+  - systemctl enable docker
+  - systemctl restart docker

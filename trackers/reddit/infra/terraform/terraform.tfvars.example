@@ -1,0 +1,10 @@
+# Copy to terraform.tfvars (gitignored) and fill in.
+sg_compartment_ocid = "ocid1.tenancy.oc1..xxxx" # Singapore tenancy/compartment
+to_compartment_ocid = "ocid1.tenancy.oc1..xxxx" # Toronto tenancy/compartment
+ssh_public_key      = "ssh-ed25519 AAAA... user@host"
+ssh_ingress_cidr    = "0.0.0.0/0"               # or your.ip.addr.0/32
+# Fleet sizing (defaults shown; see variables.tf):
+# sg_arm_count = 4
+# sg_amd_count = 2
+# to_arm_count = 0   # raise after checking toronto_arm_availability output
+# to_amd_count = 2
