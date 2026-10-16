@@ -22,6 +22,7 @@ TypeScript trackers elsewhere in this workspace.
 | `ai-marketplace-monitor/` | Upstream monitor engine (AGPL-3). Our changes live on the `recycle-patches` branch — see below. |
 | `facebook-marketplace-bot/` | Reference only. Stale Selenium; never run it. Its posting flow was reimplemented in `rs_poster`. |
 | `rs_coordinator/` | Coordinator service (FastAPI + SQLite) and the config sharding generator. CLI: `rsc`. |
+| `rs_console/` | Read-mostly facade the ERP and the fleet dashboard read through; serves the dashboard at `/`. Loopback + Cloudflare tunnel only. |
 | `rs_poster/` | Buy-ad poster (Playwright). CLIs: `rs-poster`, and `rs-session` for password-free Facebook sessions. |
 | `rs_messenger/` | Marketplace inbox bridge (Playwright). CLI: `rs-messenger`. Reports conversations to the coordinator, which routes them to Telegram and queues (optional, default-off) auto-replies for it to send. |
 | `configs/` | `master.toml` (what the fleet searches), `fleet.toml` (which VM searches where), generated per-worker shards. |
@@ -109,8 +110,11 @@ python scripts/check-cities.py rs_west    # or just one
 
 ## Authentication: sessions, not passwords
 
-No Facebook password is stored anywhere in this system. Each account is logged
-into once by hand, and the resulting browser session is what the fleet uses.
+Workers hold no Facebook password. Each account is logged into once by hand,
+and the resulting browser session is what the fleet uses. (The coordinator's
+vault *can* hold a password per account, opt-in, so that the console's
+"Re-login" can finish without a person — see "Managing logins from the ERP"
+under the fleet dashboard. The worker still never keeps it.)
 
 ```bash
 # Log in manually; only the resulting cookies are kept.
@@ -305,11 +309,98 @@ The same verdict is emitted as a `listing_alert` structured event
 (`delivered`, `score`, `threshold`, `listing_id`, `url`), so it is queryable in
 the OpenSearch dashboards alongside the skip reasons.
 
+### System faults page once
+
+When something the whole fleet depends on breaks — OpenRouter out of credits is
+the usual one — every worker sees it on every listing. The ops chat used to get
+a *"AI evaluation DOWN"* / *"recovered"* pair from each worker each time the
+provider flapped: hundreds of messages in a day, which is how an alert channel
+gets muted.
+
+Now a worker only *reports* the crossing, and the coordinator decides whether
+it is news:
+
+- A worker calls the AI down after 3 straight failed evaluations (each of which
+  already retried 10 times), and back up after 3 straight successes. One flaky
+  call is not an incident.
+- The coordinator (`POST /v1/incidents`, `rs_coordinator/incidents.py`) keeps
+  one incident per key. The first `down` report pages ops once, naming the
+  worker and the error; every further `down` from any worker is absorbed. The
+  incident closes, with one *recovered* note, when every worker that voted
+  `down` has reported `up` (a vote nobody renews for 24 h expires, so a worker
+  stopped mid-outage cannot hold it open).
+- A relapse inside `RS_INCIDENT_COOLDOWN_HOURS` (default 6) re-opens silently
+  and closes silently. So a provider that flaps all day costs **two messages per
+  six hours, fleet-wide**, and a genuine "it broke again tonight" still pages.
+
+The page rides the durable outbox as an `ops` alert, so a Telegram hiccup delays
+it rather than losing it. A worker with no control plane configured (or one
+that cannot reach it) applies the same one-page-per-cooldown rule locally, so no
+single process can flood the chat either way. Listings are still withheld, not
+alerted, for as long as the AI is down, and re-scanned when it returns.
+
+```bash
+curl -s -H "Authorization: Bearer $RS_ADMIN_TOKEN" http://127.0.0.1:8500/v1/incidents
+```
+
+### Daily fleet verification
+
+HEALTHY in `rsc status` only means the container is up and heartbeating. A
+checkpointed or freshly-flagged account heartbeats HEALTHY all day while every
+search comes back empty, so productivity has to be checked separately.
+`scripts/fleet-verify.py` does that once a day on the VM, from `jinhu`'s
+crontab at 21:05 UTC (after the 10:00 UTC sweep has had 6–9 h to finish), and
+posts one table to the Telegram chat:
+
+```
+Fleet verify — 4/5 OK, 1 need attention
+window 09-07 09:50 – 09-08 01:38 UTC
+
+worker    verdict      beat     srch empty  eval alrt
+denver-1  OK           live       36     0   580    1
+mw-1      ATTENTION    live       47     0   759   12
+...
+mw-1: container exited
+```
+
+Per worker it joins three local sources — the coordinator (liveness, state,
+session expiry, open challenges), OpenSearch `fb-tracker-*` events since the
+sweep started (`search_start` / `search_empty` / `ai_eval` / `listing_alert`),
+and `docker ps -a` — and flags a worker that is not running, stale, non-HEALTHY,
+expiring within 14 days, carrying an open challenge, that started no search in
+the window, that got any empty search (the checkpoint signature), or that
+searched but evaluated nothing. It reads the shipped events, not the
+container's `ai-marketplace-monitor.log`, which an inotify loop floods.
+
+```bash
+python3 scripts/fleet-verify.py --dry-run          # print, send nothing
+python3 scripts/fleet-verify.py --mute mw-1        # a worker parked on purpose
+python3 scripts/fleet-verify.py --hours 24         # fixed window
+tail logs/fleet-verify.log                         # on the VM: every run
+```
+
+Exit 0 is all clear, 2 is "something needs attention", 1 is "the check itself
+could not run" — so a silent day in the chat is never a broken check. This is
+an on-VM cron rather than a `/schedule` cloud routine because a cloud agent can
+reach neither the coordinator (loopback-only) nor docker on the VM, and could
+not fix anything it found. `scripts/sweep-report.py` (the by-city funnel) is
+the same shape and can be added to the same crontab when wanted.
+
 ### Watching the browser
 
 The homelab monitor drives a real Chromium on a virtual display, and you can
 watch it live — the fastest way to tell a selector break apart from a
 checkpoint, an empty result page, or a session that quietly logged out.
+
+The quickest way in is the fleet dashboard: every worker row has a **Watch**
+button (and the *Needs a human* card links straight to the stuck worker),
+which opens `https://fbc-api.recycleservers.com/vnc/<worker-id>` — the live
+screen in a browser tab, no tunnel and no VNC client. It opens view-only;
+tick **Take control** to clear a checkpoint, and it drops back to watching
+when the tab is hidden. See [Fleet dashboard](#fleet-dashboard) for how the
+console reaches the browser and which workers are listed.
+
+From a terminal, the older route still works:
 
 ```bash
 scripts/monitor-view.sh          # prints the ssh tunnel command for a viewer
@@ -403,6 +494,115 @@ than one send per minute, and acked back only after the text is seen in the
 conversation pane. Messenger's DOM is the least stable thing this project
 reads; `rs-messenger poll --dry-run` prints exactly what the selectors
 extracted and is the first thing to run when the bridge goes quiet.
+
+### Fleet dashboard
+
+One page answers "which account is searching which cities for which phrases,
+and is it alive?" — served by the console facade itself, at the tunnel
+hostname's root (`https://fbc-api.recycleservers.com/`, or
+`http://127.0.0.1:8600/` on the VM). Paste the VM's `RS_CONSOLE_TOKEN` once;
+the browser keeps it.
+
+What is on it, top to bottom: four KPIs (accounts live, cities searched now,
+active search phrases, listings reviewed today); a **Needs a human** card that
+appears only when a checkpoint is open or the control plane flagged an
+account; the **Accounts** table (liveness, state, session days left, last
+search, heartbeat, alerts from its cities in 7 days, and who the account is:
+the vault's Facebook login and the session's Facebook user id — click a row
+for its city list, vault account, stored secrets, browser identity, backup
+age, proxy env var, session file and pacing); the **Search phrases**
+card (per item: the literal search-bar text, the title gate, the reject
+list); the shared **Search settings**; and **Coverage** — every centre by
+region, lit when a reporting worker searches it, with a count of alerts each
+city produced this week. The search box filters accounts, cities and phrases
+at once.
+
+Behind it is one new facade route, `GET /v1/fleet`, which joins what the
+dashboard could not otherwise see together: `fleet.toml` (worker → region,
+proxy env, pacing), `master.toml` (regions, items, settings), the mounted
+`homelab.toml` (what the phase-1 monitor actually searches — matched to a
+region by city set, so the ramp reads as "Southeast" rather than "28
+cities"), and from the coordinator: worker health, the vault's account list
+(`GET /v1/accounts` — identity and which secrets are stored, never a value or
+a proxy URL) and each worker's session metadata (`fb_user_id` is the `c_user`
+cookie of the backed-up session, i.e. the public profile id). Proxies leave
+only as env-var *names*; a literal URL in a config is dropped, not exposed.
+The document degrades rather than fails: a coordinator outage sets
+`health.error` and the configured fleet still renders, which is when someone
+is most likely looking; an older coordinator without `/v1/accounts` simply
+yields no account block.
+
+**Watching a worker's browser from the page.** The **Watch** button on a row
+opens `/vnc/<worker-id>`, a page that runs the vendored noVNC client
+(`rs_console/rs_console/static/novnc`, MPL-2.0, version in its `VERSION`
+file) against a WebSocket the console itself bridges to the worker's
+x11vnc. Every monitor container already runs x11vnc on its own port 5900,
+unauthenticated and unpublished; the console shares the `rs-fleet` network
+with them, so `rs-monitor-ne:5900` resolves by container name and no VNC
+port is ever exposed. Which workers are reachable is the closed list in
+`RS_VNC_TARGETS` (`deploy/docker-compose.console.yml`, `<RS_WORKER_ID>=
+<container>:5900` pairs) — a worker not on it gets no page, no ticket and
+no socket. The browser cannot put a bearer header on a WebSocket, so the
+page first POSTs `/v1/vnc/<worker>/ticket` with the console token and opens
+the socket with the single-use, 60-second ticket it gets back; the token
+never enters a URL. The viewer is view-only until **Take control** is
+ticked, because the session is shared with the scraper. To make the
+coordinator's Telegram escalation alerts link there too, register the
+public page on the account:
+
+```bash
+rsc vault set-account --account <id> --vnc-url https://fbc-api.recycleservers.com/vnc/<worker-id>
+```
+
+`deploy/docker-compose.console.yml` mounts all three configs read-only and
+reads `RS_WORKER_ID` from `secrets.env` to join the monitor's heartbeat row.
+Neither the console nor the coordinator is part of `scripts/deploy.sh`'s
+restart, so after a deploy rebuild both by hand (the coordinator for
+`/v1/accounts` and `fb_user_id`, the console for the page and `/v1/fleet`):
+
+```bash
+ssh jinhu@10.10.10.73 'cd ~/recycle_servers/facebook_tracker && \
+    docker compose -f deploy/docker-compose.coordinator.yml up -d --build coordinator && \
+    docker compose -f deploy/docker-compose.console.yml up -d --build console'
+```
+
+**It is built to be absorbed by the ERP.** The page is plain HTML/JS with no
+build step, and its markup uses the ERP's own tokens and classes (`card`,
+`kpi`, `chip`, `data-table`, `seg`), so moving it means adding a
+`coordinator.get('/fleet')` forward to the ERP's `/api/coordinator` proxy
+and re-expressing `fleet.js`'s render functions as React components on the
+existing Facebook-tracker page. The data contract is `/v1/fleet`; nothing in
+the page depends on the facade beyond that route and the three it already
+forwards (`/v1/challenges`, `/v1/stats/reviews`, `/v1/stats/alert-hits`).
+
+**Re-login, and where its credentials come from.** The **Re-login** button
+(on the console's viewer page and the ERP's fleet page) queues a one-shot
+`relogin` directive on the coordinator (`POST /v1/workers/<id>/relogin`,
+forwarded by the console); the worker picks it up on its next heartbeat,
+within about five minutes, drops its session cookies — keeping the browser's
+device cookies, so Facebook sees the same browser signing in again rather
+than a new device — and runs the full login. Username and password come
+from the vault through `/v1/auth/credentials`, which releases them only
+when the account has a password stored **and** `allow_password_login` set;
+the 2FA code comes from the vault's TOTP secret. Without those, the login
+form is left open for a person to finish in Watch → Take control, and the
+worker adopts that session within about 15 seconds.
+
+**Managing logins from the ERP.** The ERP's Account information table has
+an **Edit credentials** form per worker that writes to the vault through
+the console: `PUT /v1/accounts/<account-id>` (coordinator, admin token;
+console, console token) with any of `worker_id`, `fb_username`, `region`,
+`allow_password_login` and a write-only `secrets` object (`password`,
+`totp_secret`, and the e-mail code fields). A field left out keeps its
+value; an empty secret keeps what is stored; `null` clears it. The TOTP key
+is validated as `rsc vault set-account` validates it, a worker cannot be
+registered on an account another account owns (409), and the answer is the
+same presence-flag view `GET /v1/accounts` serves — no value is ever read
+back, and the coordinator's audit line names fields, not values. This is
+the one route on the console's allowlist through which a credential enters
+the fleet, which is the trade: the ERP's console token can now set a
+worker's login, but still cannot read one. `rsc vault set-account` on the
+VM remains the fallback and the only way to set a proxy or VNC URL.
 
 ### Messenger router (mautrix-meta → Telegram forum topics)
 
@@ -552,6 +752,9 @@ full result page per phrase in Facebook traffic, so keep the phrase count small.
 | Priority-grouped alerts — the AI's `unit_count` buckets each alert (🔥 high 50+, ⚡ medium 10-49, 🐢 low 5-9), the emoji prefixes the title, and Telegram routes each bucket to its own forum topic (`telegram_topic_high/medium/low` = `message_thread_id`s, shown as the group's sidebar; create them with `scripts/setup-telegram-topics.py`). Unset topics and uncounted listings fall back to the General topic | `notification.py` (`alert_priority`, `PRIORITY_EMOJI`, `notify`), `telegram.py` (`telegram_topic_*`, `_topic_for_priority`), other backends accept and ignore `priority` |
 | The sweep counter stays out of the AI cache key — `ItemConfig.searched_count` increments every sweep and was hashed into `item_config.hash`, rotating the AI-verdict cache key so it never hit across sweeps and every lingering listing was re-billed each sweep (~10× spend, measured 43k evals / 4k unique listings over 3 days); the `ai_eval` event now also reports `cached` so spend is auditable | `marketplace.py` (`ItemConfig.hash`), `monitor.py` (`ai_eval` event) |
 | Alert delivery report — each successfully sent Telegram alert's `message_id` (captured from the Bot API response, previously discarded) is POSTed fail-open to the coordinator's `/v1/alerts/telegram` with the listing id, search city/phrase, priority topic and AI verdict, so partner emoji reactions can be joined back to listings for the alert hit rate. Off unless `alert_report_url`/`alert_report_token` are set; a timed-out send (delivered-unknown, no Message) reports nothing by design | `telegram.py` (`_sent_messages` capture, `_after_listing_alert`, `_post_alert_report`, `alert_report_*` fields), `notification.py` (`_after_listing_alert` hook in `notify`) |
+| Heartbeat repeater — the first `report_state` starts a daemon thread that re-sends the last reported state to the coordinator every 5 minutes (`heartbeat_interval`). Before this a worker heartbeated once per search, at the top of `search()`, and one sweep over the city list runs for hours, so a healthy worker spent most of the day looking silent. The repeater only restates what the main thread last said (it never touches the Playwright page, which is not thread-safe); the login is still re-checked only at the top of each search | `facebook.py` (`heartbeat_interval`, `report_state`, `_send_heartbeat`, `_heartbeat_loop`, `stop`) |
+
+| System faults page once, fleet-wide — an AI outage is declared only after `RS_INCIDENT_DOWN_AFTER` (3) straight failed evaluations and cleared after `RS_INCIDENT_UP_AFTER` (3) straight successes, and the crossing is POSTed to the coordinator's `/v1/incidents`, which dedupes across every worker (one DOWN page per key per `RS_INCIDENT_COOLDOWN_HOURS`, one recovered note per paged DOWN). Without a control plane, or when it is unreachable, a local gate applies the same one-per-cooldown rule to this process. Replaces the per-process flag that sent a DOWN/recovered pair for every listing while OpenRouter flapped | `ops_incidents.py` (new: `OutageTracker`, `LocalIncidentGate`), `monitor.py` (`_report_incident`, `evaluate_by_ai`), `control_plane.py` (`report_incident`) |
 
 Before pulling upstream, rebase that branch rather than merging into it, then
 refresh the pin with `scripts/check-vendor.sh update`.

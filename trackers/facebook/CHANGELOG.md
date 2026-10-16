@@ -18,6 +18,191 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Removed
+
+- **The `server_cpu` item is gone from `master.toml`** (and the regenerated
+  `homelab.toml`, `homelab-ne.toml` and `configs/generated/*`). It had been
+  `enabled = false` for weeks; CPU lots are still rejected by the AI prompt,
+  which never changed. The title gate comment no longer lists `xeon`/`epyc`.
+  Regenerate on the VM: `sh deploy/make-homelab-config.sh` (deploy.sh does
+  this) and `rsc gen-configs`.
+
+### Changed
+
+- **System faults page ops once, fleet-wide, instead of flooding the chat.**
+  An AI outage used to send an "AI evaluation DOWN" / "recovered" pair from
+  every worker every time OpenRouter flapped — 98 to 130 DOWN notes per worker
+  were in the logs. Workers now declare the AI down only after 3 straight
+  failed evaluations (up after 3 straight successes) and report that crossing
+  to a new coordinator endpoint, `POST /v1/incidents`, which keeps one
+  incident per key: the first `down` pages once, later reports from any worker
+  are absorbed, one "recovered" note closes it once every voter is back, and a
+  relapse inside `RS_INCIDENT_COOLDOWN_HOURS` (default 6) stays silent. A
+  worker without a reachable control plane applies the same one-per-cooldown
+  rule locally. New `incidents` table (created on start, both backends);
+  `GET /v1/incidents` (admin) lists the ledger. Tuning knobs, all optional:
+  `RS_INCIDENT_COOLDOWN_HOURS`, `RS_INCIDENT_VOTE_TTL_HOURS` (coordinator),
+  `RS_INCIDENT_DOWN_AFTER`, `RS_INCIDENT_UP_AFTER` (workers). Both the
+  coordinator and the monitor image change, so restart rs-coordinator after
+  the deploy (deploy.sh only ships the monitor). See README "System faults
+  page once".
+
+- **Workers now heartbeat every 5 minutes** instead of once per search. The
+  first `report_state` starts a daemon thread in the monitor that re-sends the
+  last reported state on a timer, so the coordinator (and the fleet dashboard)
+  hear from a worker throughout an hours-long sweep and across the idle gap
+  between sweeps. The repeater only restates the last state — it never touches
+  the page — so the login is still re-checked at the top of each search, and
+  a session that dies mid-sweep reads HEALTHY until the next search starts.
+  The coordinator's liveness lines (2 h stale, 6 h dead) are unchanged; they
+  can now be tightened in a later release. `scripts/worker-status.sh` no longer
+  says a heartbeat hours old is normal, because it is not any more.
+
+### Added
+
+- **Worker Facebook logins are managed from the ERP.** `PUT
+  /v1/accounts/{account_id}` (coordinator, admin token) creates or updates a
+  vault account: its worker, Facebook login, `allow_password_login`, and the
+  write-only secrets (`password`, `totp_secret`, and the e-mail code fields).
+  An empty secret keeps the stored value, `null` clears it, and a TOTP key is
+  checked the same way `rsc vault set-account` does (the parser moved to
+  `rs_coordinator/totp.py`). A worker cannot be moved onto an account another
+  account already owns (409). The console forwards it as the one
+  credential-bearing route on its allowlist, reduced to those fields before it
+  goes upstream; the answer is presence flags only, and the audit line names
+  the fields that changed, never a value. With a password stored and password
+  login allowed, "Re-login" finishes by itself — which is what the ERP's new
+  "Edit credentials" form on the Account information table is for. The
+  coordinator **and** the console change; the monitor does not.
+
+- **A "Re-login" button in the VNC console** that makes a worker re-run its
+  full Facebook login — username, password and 2FA/TOTP code, all filled
+  automatically — without waiting for the session to lapse. The button
+  (`rs_console`) POSTs to the coordinator, which rides a `relogin` directive
+  back on the worker's next heartbeat (consumed once); the worker then drops
+  its restored session and re-authenticates at once, between sweeps. Use it
+  when a session is stuck or expired. The 2FA secret is set per account via the
+  web UI's new **2FA secret key (TOTP)** field (`totp_secret`).
+  - Spans all three services, so a full deploy is the monitor **and** the
+    coordinator **and** the console. (Ported from the VM's own checkout,
+    commits `8b6c28d` and `34c4116`, where it has run since 2026-10-04.)
+
+- **`scripts/build-monitor-image.sh`** builds `aimm-recycle:latest` on the VM
+  stamped with its version and commit, so a by-hand build no longer reports
+  "unknown (unknown)" on the fleet dashboard.
+
+- **`scripts/fleet-verify.py` — a per-worker post-sweep check, cron'd on the
+  VM.** Joins the coordinator (liveness, state, session expiry, open
+  challenges), the OpenSearch `fb-tracker-*` funnel since the 10:00 UTC sweep
+  started, and `docker ps -a`, and posts one table to Telegram at 21:05 UTC
+  daily. Flags what `rsc status` cannot: a HEALTHY worker whose searches come
+  back empty (the checkpoint signature) or that evaluates nothing. Verdict
+  logic is pure and covered by `scripts/tests/test_fleet_verify.py`. See
+  README "Daily fleet verification".
+
+- **Watch a worker's browser from the dashboard.** Every row in the fleet
+  dashboard's Accounts table has a **Watch** button, and the *Needs a human*
+  card links to the stuck worker's screen: `/vnc/<worker-id>` on the console
+  shows the live Chromium in the tab, view-only until **Take control** is
+  ticked. No tunnel, no VNC client, no published VNC port. The console
+  bridges a token-gated WebSocket (`POST /v1/vnc/<worker>/ticket` for a
+  single-use 60-second ticket, then `/v1/vnc/<worker>/ws`) to the worker's
+  x11vnc over the `rs-fleet` network, reaching only the workers listed in the
+  new `RS_VNC_TARGETS` env in `deploy/docker-compose.console.yml`. The client
+  is noVNC 1.7.0, vendored under `rs_console/rs_console/static/novnc`.
+  `/v1/fleet` now carries `vnc_url` (the console page when reachable,
+  otherwise whatever config said) and `vnc_live` per worker. **Rebuild
+  `rs-console`** — the image gains a `websockets` dependency uvicorn needs
+  before it will accept the socket.
+
+- **A second account can now run on the homelab VM, covering a different region
+  through its own dedicated proxy — no shared IP, no city overlap.** This is the
+  fleet model the user asked for (each account = one region + one proxy). The
+  Northeast worker (`rs-monitor-ne`, `deploy/docker-compose.homelab-ne.yml`,
+  `configs/homelab-ne.toml`) searches the 24 Northeast centres through Decodo
+  port 10002 (its own residential exit IP), while `rs-monitor` keeps the
+  Southeast on port 10001. Facebook sees two different IPs from one box, which
+  is the point — accounts kept dying on the shared house IP.
+
+  `deploy/make-region-config.py <region> <proxy_var> <out>` generates the
+  region-scoped config from `master.toml`, changing only the phase-1 city
+  arrays, the proxy var, and the session path — everything else (AI prompt,
+  buying criteria, the twice-a-day `start_at`, filters) is inherited, so the
+  two workers cannot silently diverge. The NE list is verified disjoint from
+  the SE list.
+
+  The second worker's identity (`RS_WORKER_ID=homelab-ne` + its control-plane
+  token) lives in a gitignored `configs/secrets.homelab-ne.env`, a second
+  env_file so it never collides with `rs-monitor`'s identity in the shared one.
+  `configs/secrets.*.env` is now gitignored. Alerts stay direct-to-Telegram
+  (disjoint regions need no cross-worker dedupe). The container starts only
+  after its account's session is captured *through* port 10002.
+
+### Added
+
+- **Fleet dashboard.** `rs-console` now serves a standalone page at `/`
+  showing every Facebook account: liveness and state, the region and city
+  list it searches, session days left, last search and heartbeat, the search
+  phrases and gates per item, the shared search settings, and a coverage map
+  of all 127 centres lit by whichever worker is actually searching them, with
+  per-city alert counts for the week. One search box filters accounts, cities
+  and phrases together. Built on the ERP's design tokens and class names so
+  it can move into the ERP's Facebook-tracker page later.
+- `GET /v1/fleet` on the facade: `fleet.toml` + `master.toml` + the mounted
+  monitor config joined to the coordinator's worker health, the vault's
+  account list and each worker's session metadata. Proxies appear only as
+  env-var names; a coordinator outage degrades to `health.error` instead of a
+  failed request. `deploy/docker-compose.console.yml` now mounts `master.toml`
+  and `fleet.toml` read-only — rebuild the console container after deploying
+  (it is outside `deploy.sh`'s restart).
+- **Account information per worker.** The coordinator gains
+  `GET /v1/accounts` (admin): each vault account's label, worker, Facebook
+  login, region, VNC link, whether password login is allowed, whether a proxy
+  is registered, and *which* secrets are stored — never a value, never the
+  proxy URL. Session metadata (`/v1/session/<worker>/meta`) now carries
+  `fb_user_id`, the Facebook numeric user id read from the backed-up session's
+  `c_user` cookie (the public profile id, not a credential); it is stored in a
+  new `session_snapshots.fb_user_id` column on backup and read out of older
+  snapshots on demand. Both dashboards show the login, the user id (linked to
+  the profile), the vault account, stored secrets, the browser identity and
+  the backup age under each account. **Restart `rs-coordinator`** after
+  deploying — the facade tolerates an older coordinator (no accounts, no user
+  id) until then.
+- **Every build is visible on the dashboard.** The monitor image now bakes
+  in its build identity (`RS_VERSION` + the vendored monitor commit, passed
+  as build args by `deploy.sh`) and reports it as `version` in every
+  heartbeat; the coordinator stores it on the worker row (`workers.version`),
+  serves it on `/v1/workers`, and names its own build on `/healthz`. The
+  facade adds a `versions` block (console + coordinator) to `/v1/fleet`, and
+  both dashboards show a Build column per worker — flagged when it differs
+  from the coordinator's, "pre-0.5.6" for images that predate reporting — plus
+  chips naming the coordinator and console builds. `rs_console` now carries
+  the system version too, and `release.sh` bumps it with the others.
+
+### Fixed
+
+- **A worker whose session lapsed showed a blank screen in "Watch", and
+  "Re-login" could not log it back in.** With no credentials in the TOML,
+  `login()` closed its only page, leaving Xvfb empty (homelab-1, black since
+  2026-09-16), and nothing ever asked the vault for credentials, so a forced
+  re-login just cleared cookies and gave up. The worker now falls back to
+  `/v1/auth/credentials` (still opt-in per account: `allow_password_login`
+  plus a stored password), and when there is still no way in it parks the
+  page on the Facebook login form instead of closing it. An operator can then
+  "Take control" and log in by hand; the worker adopts and saves that session
+  within about 15 seconds.
+- **A forced re-login no longer presents as a brand-new device.** It cleared
+  every cookie, `datr` included, so each press of "Re-login" was a new browser
+  signing in right after a session problem — the takeover signature that has
+  cost sessions before. The session cookies are dropped and the device cookies
+  (`datr`, `sb`) put back.
+- **The Re-login coordinator change would have failed every heartbeat in
+  production.** `request_relogin` / `take_relogin` were added only to the
+  SQLite backend, but the live coordinator runs on Postgres (`RS_DATABASE_URL`),
+  so `/v1/heartbeat` would have raised `AttributeError` for every worker.
+  Both methods are now in `pg.py` too; `test_the_two_backends_expose_the_same_api`
+  caught it, and the round-trip was checked against a real Postgres 16.
+
 ## [0.5.5] - 2026-09-05
 
 ### Changed
