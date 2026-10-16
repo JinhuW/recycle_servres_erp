@@ -27,6 +27,9 @@ on:
       - "tsconfig.base.json"
       - ".npmrc"
       - ".nvmrc"
+      # Agent docs (apps/*/AGENTS.md, CLAUDE.md) and other markdown never
+      # change what builds or runs.
+      - "!**/*.md"
   workflow_dispatch: # manual re-deploy without a code change
 
 concurrency:
