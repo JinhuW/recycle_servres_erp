@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-17
+
 ### Added
 
 - **Busy cities are searched more often** (RS-277). The coordinator ranks
