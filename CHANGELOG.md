@@ -17,6 +17,26 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.269.0] - 2026-10-17
+
+A fleet account in the Account pool now belongs to a worker you pick, and its
+status is that worker's (RS-268).
+
+### Changed
+
+- **Holder is a worker, status follows it.** The account editor has a Fleet
+  worker select listing the fleet's workers. Picking one makes the account
+  Fleet with that worker as holder; picking None puts it back at Available.
+  Fleet is no longer a manual status choice, and a stored holder that is no
+  longer in the fleet stays selectable so a save doesn't drop it.
+- **Fleet rows show the worker.** In the manager's table a fleet account's
+  holder links to the worker's page, and its Status is the worker's own Live /
+  Stale / Attention / Offline chip with the same note as the Fleet tab. Without
+  the coordinator the rows read as before.
+- **Click a password to see it.** The table's masked Password and Email
+  password cells reveal on click (and hide on a second click) without opening
+  the editor; each reveal is logged like the purchaser's.
+
 ## [1.268.0] - 2026-10-17
 
 The Fleet table's row fold drops its Pacing block, and each worker's build

@@ -1295,3 +1295,19 @@
 .ff-skel-lines .skeleton + .skeleton {
   margin-top: 5px;
 }
+/* A masked secret in the manager's table: the cell itself is the reveal. */
+.fp-reveal {
+  max-width: 180px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fp-reveal.fp-masked {
+  color: var(--fg-subtle);
+}

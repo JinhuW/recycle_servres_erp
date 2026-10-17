@@ -57,6 +57,15 @@ export function DesktopCoordinator({ showToast }: Props) {
   useEffect(() => {
     poolApi.snapshot().then(setPool).catch(handleFetchError);
   }, []);
+  // A fleet account's holder is a worker: the Pool tab links it and shows its
+  // health. Without the coordinator those rows read as plain text.
+  const [fleet, setFleet] = useState<FleetDoc | null>(null);
+  const [challenges, setChallenges] = useState<Challenge[] | null>(null);
+  useEffect(() => {
+    if (!manager || !poolOpen) return;
+    coordinatorApi.fleet().then(setFleet).catch(() => undefined);
+    coordinatorApi.listOpenChallenges().then(setChallenges).catch(() => undefined);
+  }, [manager, poolOpen]);
   if (watch) {
     return (
       <Suspense fallback={<FormSkeleton fields={4} />}>
@@ -83,7 +92,8 @@ export function DesktopCoordinator({ showToast }: Props) {
     {head}
     {tabs}
     {pool
-      ? <FacebookAccountPool key={user?.role} snapshot={pool} onSnapshot={setPool} showToast={showToast} />
+      ? <FacebookAccountPool key={user?.role} snapshot={pool} onSnapshot={setPool} showToast={showToast}
+          fleet={manager ? fleet : null} challenges={challenges} />
       : <FormSkeleton fields={4} />}
   </> : <FleetPage head={head} tabs={tabs} />;
 }

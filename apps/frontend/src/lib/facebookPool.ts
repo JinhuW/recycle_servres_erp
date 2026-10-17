@@ -69,6 +69,15 @@ export const emptyPoolDraft = (): PoolDraft => ({
   status: 'available',
   holder: null,
 });
+/**
+ * A fleet account's holder is the worker using it, so picking the worker is
+ * what makes the account Fleet; picking none puts a fleet account back on the
+ * rack and leaves any other status alone.
+ */
+export function assignWorker(draft: PoolDraft, workerId: string | null): PoolDraft {
+  if (workerId) return { ...draft, status: 'fleet', holder: workerId };
+  return draft.status === 'fleet' ? { ...draft, status: 'available', holder: null } : draft;
+}
 export function cookieHealth(
   a: Pick<PoolAccount, 'uid' | 'cookie' | 'cookieAt'>,
   now = Date.now(),

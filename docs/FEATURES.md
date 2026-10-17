@@ -2146,7 +2146,12 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   production without `FB_POOL_KEY` the pool routes answer 503 and name the
   variable. The pool is the human side of the picture; the fleet's own vault
   of worker logins (RS-254) stays a separate, write-only store, and `fleet`
-  here is the label saying which worker an account went to. A cookie may be
+  here says which worker an account went to. Since v1.269.0 that worker is
+  picked from the fleet in the editor (picking one is what makes an account
+  Fleet; None returns it to Available), the table links the holder to the
+  worker's page and shows the worker's Live / Stale / Attention / Offline
+  status in place of Fleet, and a click on a masked password in the table
+  reveals it (logged). A cookie may be
   pasted as a header line or as the JSON a cookie extension exports, and a
   2FA key as the base32 key or an `otpauth://` link, on the Pool tab as on
   the Fleet tab (v1.262.1).
