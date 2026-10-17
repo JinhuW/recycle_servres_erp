@@ -18,6 +18,16 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A new worker no longer searches logged out on its first start**
+  (RS-275). With no session file, the monitor could not record that it had
+  parked on the login page (the parked state is the file's fingerprint), so
+  the next item searched Marketplace logged out. The new workers' compose
+  headers now require an empty storage state in their session dir before
+  first start. The monitor gap itself is described in
+  `docs/debug-notes/2026-10-17-new-worker-without-session-file-searches-logged-out.md`.
+
 ## [0.7.0] - 2026-10-17
 
 ### Added
