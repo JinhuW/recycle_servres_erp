@@ -10,7 +10,7 @@ import type { Translate } from '../../lib/orderPresentation';
 // the cheap keyword gates first, the model only on what survives them. Each
 // stage names the code behind it and the settings it reads from the fleet
 // document; settings are read-only here because nothing writes master.toml
-// from the ERP yet. Counts exist only where the coordinator keeps them.
+// from the ERP yet. Counts are today's fleet totals from /v1/stats/reviews.
 
 type Setting = { label: string; value: string; fixed?: boolean };
 

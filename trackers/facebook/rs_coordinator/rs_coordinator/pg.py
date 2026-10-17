@@ -36,11 +36,15 @@ from .db import (
     ALERT_HIT_SQL,
     LISTING_EXTRA_COLUMNS,
     OUTBOUND_EXTRA_COLUMNS,
+    REVIEW_STATS_EXTRA_COLUMNS,
+    REVIEW_STATS_SUMS,
     SCHEMA,
     SNAPSHOT_EXTRA_COLUMNS,
     THREAD_EXTRA_COLUMNS,
     UNMATCHED_REACTIONS_SQL,
     WORKER_HEALTH_COLUMNS,
+    review_stat_deltas,
+    review_stats_row,
     stats_cutoff,
     utcnow,
 )
@@ -191,6 +195,7 @@ class PostgresDatabase:
                 self._migrate_columns(conn, "threads", THREAD_EXTRA_COLUMNS)
                 self._migrate_columns(conn, "outbound_messages", OUTBOUND_EXTRA_COLUMNS)
                 self._migrate_columns(conn, "session_snapshots", SNAPSHOT_EXTRA_COLUMNS)
+                self._migrate_columns(conn, "review_stats", REVIEW_STATS_EXTRA_COLUMNS)
                 # Created after the migration adds the columns they index.
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_threads_room ON threads(matrix_room_id)"
@@ -643,46 +648,34 @@ class PostgresDatabase:
     # -- review stats ------------------------------------------------------
 
     def add_review_stats(
-        self: "PostgresDatabase",
-        worker_id: str,
-        reviewed: int = 0,
-        alerted: int = 0,
-        day: str | None = None,
+        self: "PostgresDatabase", worker_id: str, day: str | None = None, **counts: int
     ) -> None:
+        """See `Database.add_review_stats`."""
+        columns, values = review_stat_deltas(counts)
+        if not columns:
+            return
         day = day or utcnow()[:10]
+        names = ", ".join(columns)
+        updates = ", ".join(f"{c} = review_stats.{c} + excluded.{c}" for c in columns)
         with self.cursor() as cur:
             cur.execute(
-                "INSERT INTO review_stats (day, worker_id, reviewed, alerted, updated_at) "
-                "VALUES (%s, %s, %s, %s, %s) "
-                "ON CONFLICT(day, worker_id) DO UPDATE SET "
-                "  reviewed = review_stats.reviewed + excluded.reviewed,"
-                "  alerted = review_stats.alerted + excluded.alerted,"
+                f"INSERT INTO review_stats (day, worker_id, {names}, updated_at) "
+                f"VALUES (%s, %s, {', '.join('%s' for _ in columns)}, %s) "
+                f"ON CONFLICT(day, worker_id) DO UPDATE SET {updates}, "
                 "  updated_at = excluded.updated_at",
-                (day, worker_id, reviewed, alerted, utcnow()),
+                (day, worker_id, *values, utcnow()),
             )
 
     def review_stats_daily(
         self: "PostgresDatabase", days: int = 14
     ) -> List[Dict[str, Any]]:
-        cutoff = (
-            datetime.now(timezone.utc) - timedelta(days=max(1, days) - 1)
-        ).strftime("%Y-%m-%d")
         with self.cursor() as cur:
             cur.execute(
-                "SELECT day, SUM(reviewed) AS reviewed, SUM(alerted) AS alerted "
-                "FROM review_stats WHERE day >= %s GROUP BY day ORDER BY day",
-                (cutoff,),
+                f"SELECT day, {REVIEW_STATS_SUMS} FROM review_stats "
+                "WHERE day >= %s GROUP BY day ORDER BY day",
+                (stats_cutoff(days),),
             )
-            rows = _rows(cur.fetchall())
-        # SUM comes back as Decimal from psycopg; the API contract is int.
-        return [
-            {
-                "day": row["day"],
-                "reviewed": int(row["reviewed"]),
-                "alerted": int(row["alerted"]),
-            }
-            for row in rows
-        ]
+            return [review_stats_row(row) for row in _rows(cur.fetchall())]
 
     # -- incidents ---------------------------------------------------------
 

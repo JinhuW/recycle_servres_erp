@@ -27,7 +27,7 @@ from contextlib import contextmanager
 import pytest
 
 from rs_coordinator import db as db_module
-from rs_coordinator.db import Database, open_database, postgres_url
+from rs_coordinator.db import Database, open_database, postgres_url, utcnow
 from rs_coordinator.pg import (
     ADVISORY_LOCK_KEY,
     PostgresDatabase,
@@ -49,6 +49,7 @@ TABLES = (
     "challenges",
     "session_snapshots",
     "code_audit",
+    "review_stats",
 )
 
 
@@ -314,7 +315,46 @@ def test_cursor_commits_on_exit(backend):
         assert cur.fetchone()["n"] == 1
 
 
+def test_review_stats_accumulate_every_counter(backend):
+    backend.add_review_stats("denver-1", searches=3, cards=40, reviewed=2)
+    backend.add_review_stats("denver-1", searches=1, opened=5, alerted=1)
+    backend.add_review_stats("coordinator", sent=1)
+    backend.add_review_stats("denver-1")  # nothing to add, no row touched
+
+    (day,) = backend.review_stats_daily(1)
+    assert {k: v for k, v in day.items() if k != "day" and v} == {
+        "searches": 4, "cards": 40, "opened": 5, "reviewed": 2, "alerted": 1, "sent": 1,
+    }
+    assert all(isinstance(v, int) for k, v in day.items() if k != "day")
+
+
 # -- Postgres-specific -----------------------------------------------------
+
+
+@requires_postgres
+def test_migration_adds_funnel_counters_to_old_review_stats():
+    import psycopg
+
+    _drop_everything()
+    with psycopg.connect(normalize_url(TEST_URL), autocommit=True) as conn:
+        conn.execute(
+            "CREATE TABLE review_stats ("
+            "  day TEXT NOT NULL, worker_id TEXT NOT NULL,"
+            "  reviewed INTEGER NOT NULL DEFAULT 0, alerted INTEGER NOT NULL DEFAULT 0,"
+            "  updated_at TEXT NOT NULL, PRIMARY KEY (day, worker_id))"
+        )
+        conn.execute(
+            "INSERT INTO review_stats VALUES (%s, 'denver-1', 7, 1, 'x')",
+            (utcnow()[:10],),
+        )
+
+    handle = PostgresDatabase(TEST_URL)
+    try:
+        handle.add_review_stats("denver-1", searches=2)
+        (day,) = handle.review_stats_daily(1)
+        assert (day["reviewed"], day["alerted"], day["searches"], day["sent"]) == (7, 1, 2, 0)
+    finally:
+        handle.close()
 
 
 @requires_postgres

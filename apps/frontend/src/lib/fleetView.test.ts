@@ -139,11 +139,24 @@ describe('fleetView', () => {
     });
   });
 
-  it('counts only the stages the coordinator counts', () => {
+  it('counts every stage from today’s funnel row', () => {
+    const now = Date.parse('2026-10-04T12:00:00Z');
+    const today = {
+      day: '2026-10-04', searches: 12, cards: 300, title_pass: 60, opened: 25, keyword_pass: 14,
+      fresh: 9, reviewed: 8, alerted: 3, coordinated: 2, sent: 2,
+    };
+    expect(flowCounts([{ ...today, day: '2026-10-03', searches: 99 }, today], now)).toEqual({
+      search: 12, cards: 300, title: 60, open: 25, keywords: 14, fresh: 9, ai: 8, coordinator: 2, alert: 2,
+    });
+    // Reported yesterday, quiet so far today: every stage reads 0.
+    expect(flowCounts([{ ...today, day: '2026-10-03' }], now).search).toBe(0);
+    expect(flowCounts([], now).alert).toBe(0);
+    expect(flowCounts(null, now)).toEqual({});
+  });
+
+  it('falls back to the two old counters against an older console', () => {
     const now = Date.parse('2026-10-04T12:00:00Z');
     expect(flowCounts([{ day: '2026-10-04', reviewed: 40, alerted: 3 }], now)).toEqual({ ai: 40, alert: 3 });
-    expect(flowCounts([], now)).toEqual({ ai: 0, alert: 0 });
-    expect(flowCounts(null, now)).toEqual({});
   });
 
   it('watches only what the facade can bridge to', () => {

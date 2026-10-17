@@ -17,6 +17,27 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.264.0] - 2026-10-17
+
+Every stage of the Facebook fleet's search-to-alert card now has a number
+(RS-262).
+
+### Added
+
+- **The search-to-alert card counts all nine stages.** Before, seven of them
+  read "not counted yet", because the coordinator only kept fresh AI verdicts
+  and alerts. Workers now count searches, cards seen, title-gate passes, real
+  page visits, keyword-gate passes and listings new to us. The coordinator
+  counts the matches it takes in and the Telegram alerts actually sent. Every
+  tile shows today's fleet-wide total, and all of it comes from the
+  `/stats/reviews` call the page already made.
+- **The counting costs fewer requests than before.** Workers buffer their
+  counts and report once per search page instead of once per AI verdict and
+  once per alert. The coordinator adds one row upsert per ingest and per
+  delivered alert.
+- **Older consoles still work.** Against a console older than the counters,
+  the card falls back to the old two numbers.
+
 ## [1.263.0] - 2026-10-17
 
 The Facebook Fleet tab redesigned to the Account pool tab's layout, with a
