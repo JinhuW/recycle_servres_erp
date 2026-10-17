@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-278](./RS-278-release-review-findings-on-the-edit-cities-frequency.md) | in-progress | bug | P2 | Release review findings on the Edit cities frequency form | — |
+| [RS-278](./RS-278-release-review-findings-on-the-edit-cities-frequency.md) | in-review | bug | P2 | Release review findings on the Edit cities frequency form | 1.274.2 |
 | [RS-277](./RS-277-busy-cities-searched-more-often-tiered-daily-city-fr.md) | done | story | P2 | Busy cities searched more often — tiered daily city frequency | 1.274.0 |
 | [RS-275](./RS-275-add-4-facebook-workers-with-erp-editable-cities-and.md) | done | story | P2 | Add 4 Facebook workers with ERP-editable cities and pool-assigned logins | 1.272.0 |
 | [RS-274](./RS-274-fix-the-release-review-findings-on-fleet-rules-city.md) | done | bug | P2 | Fix the release review findings on Fleet rules, city chips and the pool picker | 1.271.3 |
