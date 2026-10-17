@@ -598,6 +598,13 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
                             </div>
                           );
                         })}
+                        <div>
+                          <dt>{t('fpAliveCheck')}</dt>
+                          <dd className="fp-muted">
+                            {a.aliveCheckedAt === null ? t('fpAliveNever') : ago(a.aliveCheckedAt)}
+                          </dd>
+                          <span className="fp-row" />
+                        </div>
                       </dl>
                       <div className="fp-credential-foot">
                         <button

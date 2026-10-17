@@ -2199,6 +2199,16 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   finished in Watch. The cookie is never sent, and nothing secret reaches the
   browser. The ledger records it as `assigned`. A worker that already holds
   another account, or an account with no password, is refused (RS-275).
+  Since v1.280.0 the backend checks every Available, Taken and Fleet account on
+  Facebook once a week, through the public profile-picture lookup (anonymous,
+  no login, so it says nothing about the account's sessions). An account
+  Facebook reports as disabled or gone moves to **Needs attention**, keeps its
+  holder, and logs "Weekly check reported #n · disabled". A lookup that fails
+  changes nothing and is retried within the hour. This is not a cron job: an
+  hourly backend loop picks the accounts whose last check is over 7 days old,
+  so deploys don't reset the week. The account's detail panel shows when it was
+  last checked. A checkpointed account still looks alive to this lookup
+  (RS-284).
 - **Watching a worker's browser** — `/fleet/watch/<worker>` shows the live
   Chromium a Facebook worker is driving, through noVNC, view-only until
   "Take control" is ticked (and handed back when the tab is hidden), with

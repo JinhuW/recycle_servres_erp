@@ -57,6 +57,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     fpCookieMismatch: "UID mismatch",
     fpCookieUnknown: "Age unknown",
     fpCookieAge: "{n} d old",
+    fpAliveCheck: "Facebook check",
+    fpAliveNever: "Not checked yet",
     fpWorker: "Monitor worker",
     fpOverdue: "Held over 7 days",
     fpSince: "Since {time}",

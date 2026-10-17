@@ -42,6 +42,8 @@ const zh: Record<string, string> = {
     fpCookieMismatch: "UID 不匹配",
     fpCookieUnknown: "保存时间未知",
     fpCookieAge: "已保存 {n} 天",
+    fpAliveCheck: "Facebook 检查",
+    fpAliveNever: "尚未检查",
     fpWorker: "监控机器人",
     fpOverdue: "已持有超过 7 天",
     fpSince: "始于 {time}",

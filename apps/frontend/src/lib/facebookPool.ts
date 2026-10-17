@@ -38,6 +38,7 @@ export type PoolAccount = {
   since: number | null;
   addedAt: number;
   cookieAt: number | null;
+  aliveCheckedAt: number | null;
   batch: string;
 };
 export type PoolActivity = {
