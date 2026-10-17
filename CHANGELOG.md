@@ -17,6 +17,25 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.277.0] - 2026-10-17
+
+### Added
+
+- **Re-login starts within seconds, and Watch shows how it is going**
+  (RS-280). Pressing Re-login used to look like nothing happened. The worker
+  only learned of the request on its five-minute heartbeat, and the page said
+  nothing after a four-second "queued". On va-2 the login started 4½ minutes
+  later and stopped on a captcha nobody was watching for. With
+  facebook-tracker v0.9.0 the worker collects the request within about 10
+  seconds and reports each step. The Watch page shows those steps in a strip
+  above the viewer and the Sign-in panel (queued, signing in, needs you,
+  signed in, did not finish), re-reading the fleet every 3 seconds instead of
+  30 until the login settles. When Facebook asks for a captcha or a code, the
+  strip offers Take control. On the worker's page the Re-login dialog leads
+  with **Re-login & watch**. The copy now says "about 10 seconds" instead of
+  "about 5 minutes". Against an older coordinator the strip stays hidden, and
+  Re-login works as before.
+
 ## [1.276.0] - 2026-10-17
 
 ### Added

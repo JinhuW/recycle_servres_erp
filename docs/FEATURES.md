@@ -2221,7 +2221,16 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   typed secrets go to the pool's activity ledger.  A worker whose login
   isn't in the pool gets the vault summary and a link to the pool instead.
   The panel can be hidden, which is saved per user, and it stacks under the
-  browser below 1100px (v1.276.0).
+  browser below 1100px (v1.276.0).  Since v1.277.0 a re-login can be
+  followed as it runs (RS-280). From the worker's page, **Re-login & watch**
+  queues it and opens this view (**Re-login only** keeps the old behaviour).
+  A strip above the viewer then says where the login is: queued, signing in,
+  needs you (a captcha, a code or a login form left open, with a Take control
+  button), signed in, or did not finish. While a login is in flight the page
+  re-reads the fleet every 3 seconds instead of every 30. The worker collects
+  the request within about 10 seconds between sweeps (facebook-tracker
+  v0.9.0); mid-sweep it starts at its next search. A coordinator older than
+  v0.9.0 reports no steps, and the strip stays hidden.
 
 - **Web submissions** — the manager inbox for the public website forms
   (v1.187.0). The ram4cash.com sell form (`POST /api/public/intake`) and the

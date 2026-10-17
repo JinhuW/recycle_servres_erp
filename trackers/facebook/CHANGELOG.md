@@ -20,7 +20,7 @@ deployed?" harder to answer.
 
 ### Added
 
-- **Re-login starts within seconds, and says how it is going** (RS-279).
+- **Re-login starts within seconds, and says how it is going** (RS-280).
   A re-login rode only on the five-minute heartbeat, so the button looked
   dead: on 2026-10-17 va-2 took 4½ minutes to start, then stopped on a
   captcha that nobody was watching for. Workers now poll the new

@@ -155,7 +155,7 @@ export function FleetWorker({ workerId }: { workerId: string }) {
                 : configVnc
                   ? <a className="btn" href={configVnc} target="_blank" rel="noopener"><Icon name="eye" size={13} />{t('fbcOpenVnc')}</a>
                   : <span className="fp-muted" style={{ fontSize: 12 }}>{t('fbcNoVnc')}</span>}
-              {h && <ReloginButton workerId={w.worker_id} account={w} className="btn" onQueued={load} />}
+              {h && <ReloginButton workerId={w.worker_id} account={w} className="btn" onQueued={load} offerWatch={canWatch(w)} />}
               <EditCredentialsButton account={w} onSaved={load} className="btn" />
               {w.cities_editable && <EditCitiesButton worker={w} fleet={fleet} onSaved={load} />}
             </div>
