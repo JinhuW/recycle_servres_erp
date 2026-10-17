@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-17
 reporter: jinhu
 branch: fix/linked-payment-owner
-pr:
+pr: 701
 version: 1.275.2
 related: []
 ---
