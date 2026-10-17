@@ -202,6 +202,18 @@ deployed?" harder to answer.
   so `/v1/heartbeat` would have raised `AttributeError` for every worker.
   Both methods are now in `pg.py` too; `test_the_two_backends_expose_the_same_api`
   caught it, and the round-trip was checked against a real Postgres 16.
+- **A deploy no longer deletes the VM's own files or ships the dev machine's
+  logins.** `deploy.sh` syncs with `rsync --delete`, and its excludes covered
+  only `configs/secrets.env` and `configs/sessions`. A deploy from any checkout
+  that lacked the VM's hand-written per-worker tokens
+  (`configs/secrets.homelab-*.env`), `secrets.env` backups, proxy list,
+  `accounts/` or `generated/` deleted them on the VM, and a stale dev copy
+  replaced the live one. The same sync copied
+  `configs/account_info.txt*` (Facebook logins and 2FA, read only by
+  `rs-session capture` on dev) and `configs/data.txt` to the VM. The rules now
+  live in `scripts/deploy.rsync-filter`, which never sends and never deletes
+  either set, and `scripts/tests/test-deploy-filter.sh` (run by `release.sh`)
+  proves it with a real rsync between two trees.
 
 ## [0.5.5] - 2026-09-05
 

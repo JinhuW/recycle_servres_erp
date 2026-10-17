@@ -97,6 +97,9 @@ sh scripts/tests/test-check-secrets.sh
 step "deploy version gate still works"
 sh scripts/tests/test-version-gate.sh
 
+step "deploy filter still protects the VM"
+sh scripts/tests/test-deploy-filter.sh
+
 step "vendored checkouts match VENDOR.md"
 sh scripts/check-vendor.sh
 
