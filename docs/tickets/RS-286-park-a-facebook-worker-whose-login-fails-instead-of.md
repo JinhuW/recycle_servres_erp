@@ -2,13 +2,13 @@
 id: RS-286
 title: Park a Facebook worker whose login fails instead of searching logged out
 type: bug
-status: in-progress
+status: done
 priority: P1
 created: 2026-10-17
 reporter: jinhu
 branch: fix/monitor-park-gaps
-pr:
-version:
+pr: 714
+version: facebook-tracker 0.10.1
 related: [RS-275, RS-280]
 ---
 
