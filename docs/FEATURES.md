@@ -2088,12 +2088,16 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   any page is opened, the cached page visit, the keyword gate with the
   description, the already-notified skip, the AI rating with its unit and
   score gates, the coordinator's dedupe and the Telegram topic — with each
-  stage's code, its settings from `master.toml` (read-only; code constants
-  are marked as such), the item phrases, keyword rules and prompt, and
+  stage's code, its settings (code constants are marked as such), the item
+  phrases, keyword rules and prompt, and
   today's fleet-wide count for every stage. Workers count searches, cards
   seen, title and keyword passes, real page visits, new listings and fresh AI
   verdicts; the coordinator counts what it takes in and the Telegram alerts
-  actually sent (v1.264.0). The eye
+  actually sent (v1.264.0). Each stage that reads a setting (search, result
+  cards, title gate, keyword gate, AI rating) has an **Edit** form for those
+  settings, prompt and rubric included. A save goes through the fleet
+  console into every worker's config. Workers pick it up between jobs and
+  start a sweep, and deploys keep the saved values (v1.265.0). The eye
   on a row is the one way to a worker's page, `/fleet/worker/<worker>`: its
   Facebook login and user id, vault account and stored secrets by name,
   session expiry, browser and backup, proxy, cities, pacing, session file and

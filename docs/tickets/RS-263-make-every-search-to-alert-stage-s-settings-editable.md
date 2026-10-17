@@ -2,13 +2,13 @@
 id: RS-263
 title: Make every search-to-alert stage's settings editable from the ERP
 type: story
-status: in-progress
+status: in-review
 priority: P2
 created: 2026-10-17
 reporter: jinhu
 branch: feat/editable-stage-config
 pr:
-version:
+version: 1.265.0
 related: [RS-261, RS-262]
 ---
 
@@ -42,7 +42,7 @@ the vendored monitor reloads its config when the file's hash changes
 
 ## Acceptance criteria
 
-- [ ] Each stage that reads a setting has an Edit button in the flow card; the
+- [x] Each stage that reads a setting has an Edit button in the flow card; the
       form edits exactly the settings that stage shows:
   - Search: sweep times (`start_at`), listing window, delivery, results per
     search, interval, and each item's search phrases.
@@ -52,19 +52,19 @@ the vendored monitor reloads its config when the file's hash changes
     rating, unrated sellers.
   - AI rating: alert rating, minimum units, AI model, evaluation prompt,
     rating rubric.
-- [ ] Stages with no setting (open, new to us, coordinator, alert) keep their
+- [x] Stages with no setting (open, new to us, coordinator, alert) keep their
       "code, not a setting" chips and offer no form.
-- [ ] Saving goes `PUT /api/coordinator/settings` (manager-only, field
+- [x] Saving goes `PUT /api/coordinator/settings` (manager-only, field
       allowlist, editor logged by field name) → rs_console
       `PUT /v1/config/settings`, which validates, stores the values in a
       console-owned volume and rewrites every worker config in place.
-- [ ] `/v1/fleet` shows the effective values (master.toml + saved settings)
+- [x] `/v1/fleet` shows the effective values (master.toml + saved settings)
       and says whether the console can save; an older console shows the card
       read-only as before.
-- [ ] A deploy keeps the saved settings: worker configs pass through the
+- [x] A deploy keeps the saved settings: worker configs pass through the
       console's renderer on the way to the VM, and verify compares against
       that.
-- [ ] Bad input (unknown item, rating 7, an empty phrase list, a malformed
+- [x] Bad input (unknown item, rating 7, an empty phrase list, a malformed
       time) is a 400 with the reason, and nothing is written.
 
 ## Out of scope
