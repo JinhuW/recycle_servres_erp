@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-17
 reporter: jinhu
 branch: feat/fleet-skeleton-loading
-pr:
+pr: 679
 version: 1.267.0
 related: []
 ---
