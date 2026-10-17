@@ -17,6 +17,192 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.271.3] - 2026-10-17
+
+Fixes from the review of the pending release (RS-274).
+
+### Fixed
+
+- **Enter in "Try a listing" no longer saves.** The tester sits inside the
+  stage's settings form, so pressing Enter in its title or description saved
+  the draft rules to every worker and started a sweep. Enter there now does
+  nothing.
+- **Quoted terms added to a group match again.** Adding `"solid state"` to
+  `ssd OR nvme` quoted it a second time, which searched for the quote
+  characters and never matched. A term already written as an operand is kept
+  as typed.
+- **City chips work before the tracker update lands.** With a facade that does
+  not yet report the cities searched today, every chip went grey. They now fall
+  back to the worker's liveness until the report arrives.
+- **Reordering a list can be saved.** Search phrases run in order, but a
+  reorder-only edit read as "No changes yet" and left Save disabled. A reorder
+  now counts as one change, and one change reads "1 unsaved change".
+- **One worker, one fleet account.** The pool editor's worker picker no longer
+  offers a worker that already holds another account, and with the fleet
+  unreachable the holder help asks for the worker ID on a Fleet account.
+
+## [1.271.2] - 2026-10-17
+
+The folded sidebar shows one plus on Submit order, not two (RS-273).
+
+### Fixed
+
+- **One green + on Submit order.** In the 64px icon rail, Submit order showed its
+  plus-shaped nav icon and its green `+` badge side by side. The rail now hides
+  the icon of any entry that carries a badge, so Submit order is just the green
+  `+`. The expanded sidebar keeps both, where the icon holds the column the
+  other labels line up on.
+
+## [1.271.1] - 2026-10-17
+
+The flow card's stage detail is one fixed height again, the tallest stage's
+(RS-272).
+
+### Fixed
+
+- **Same height for every stage, no scrolling.** v1.270.1 let a long stage grow
+  the detail under "From a search to an alert", so clicking between stages
+  resized the card. Every stage's detail now renders into the same cell with
+  only the picked one visible, so the card is always as tall as its tallest
+  stage: nothing scrolls and nothing moves. The height follows the content,
+  with no fixed pixel value. The Edit form still sizes to itself.
+
+## [1.271.0] - 2026-10-17
+
+A worker's city chips now say which cities it has searched today (RS-271).
+
+### Changed
+
+- **Green means searched today.** The Fleet tab's row fold and the worker
+  page colored every city green whenever the worker was live, so a sweep 11
+  searches into a 50-search day looked finished. A chip is now green only once
+  the worker has searched that city in its region's local day; the rest stay
+  grey, whatever the worker's status. The cities come from the fleet
+  document's new `today.cities`. A facade that predates it leaves every chip
+  grey.
+- **The tracker side of it** (Facebook tracker, next release). The monitor
+  names the city on the funnel report that counts each search. The
+  coordinator keeps the last search per worker and city and serves the rows
+  at `/v1/stats/search-cities`. rs_console cuts each worker's local day from
+  them into `today.cities`.
+
+## [1.270.1] - 2026-10-17
+
+The flow card's stage detail grows to fit instead of scrolling (RS-270).
+
+### Fixed
+
+- **No scrolling inside a stage.** The stage detail under "From a search to an
+  alert" was a fixed 300px, which the keyword-rule chips on the search, title
+  gate and keyword gate stages outgrew, so the rules hid behind an inner
+  scrollbar. 300px is now a floor: short stages keep the card steady as you
+  click through them, and longer ones grow it to show everything.
+
+## [1.270.0] - 2026-10-17
+
+The fleet's keyword rules are now easy to read, edit and test on the flow card
+(RS-269).
+
+### Added
+
+- **Rules as chips, one item at a time.** On the search, title-gate and
+  keyword-gate stages, the phrases and keyword rules moved out of a narrow side
+  column into a wide pane. Tabs pick the item and show its rule counts.
+  *Must match one of* and *Drops the listing* sit side by side. One-word rules
+  share a chip cloud, an `a OR b OR c` rule is a group of chips, and a rule
+  using AND, NOT or parentheses shows whole, tagged as an expression. A term
+  listed twice in one list is outlined. The Title gate no longer shows an empty
+  Keywords heading.
+- **Editing without the syntax.** Edit gives each chip a ×. Enter adds a term
+  (commas and pasted lines add several), `+` adds a term to an OR group, and an
+  expression can be clicked and rewritten. *Edit as text* falls back to the
+  old one-per-line box. Only the rule you touched is rewritten, so every other
+  rule saves exactly as it was loaded.
+- **Try a listing.** On the title and keyword gates, a title (plus an optional
+  description) is checked against every item, the way the worker would check
+  it. Each item shows passes, the anti-keyword that drops the listing, or no
+  keyword matched, and the matching chip lights up. While editing it reads the
+  unsaved draft, so a rule change can be tried before a save starts a sweep.
+  The matcher is a TypeScript port of the monitor's `is_substring` and agrees
+  with it on a differential test set.
+
+### Changed
+
+- **Save waits for a change and asks before dropping one.** Save stays disabled
+  until something changed, and it shows how many changes there are. Clicking
+  another stage, Cancel, leaving the page or reloading with unsaved edits now
+  asks first. Before, a click on the stage row silently threw the draft away.
+
+## [1.269.0] - 2026-10-17
+
+A fleet account in the Account pool now belongs to a worker you pick, and its
+status is that worker's (RS-268).
+
+### Changed
+
+- **Holder is a worker, status follows it.** The account editor has a Fleet
+  worker select listing the fleet's workers. Picking one makes the account
+  Fleet with that worker as holder; picking None puts it back at Available.
+  Fleet is no longer a manual status choice, and a stored holder that is no
+  longer in the fleet stays selectable so a save doesn't drop it.
+- **Fleet rows show the worker.** In the manager's table a fleet account's
+  holder links to the worker's page, and its Status is the worker's own Live /
+  Stale / Attention / Offline chip with the same note as the Fleet tab. Without
+  the coordinator the rows read as before.
+- **Click a password to see it.** The table's masked Password and Email
+  password cells reveal on click (and hide on a second click) without opening
+  the editor; each reveal is logged like the purchaser's.
+
+## [1.268.0] - 2026-10-17
+
+The Fleet table's row fold drops its Pacing block, and each worker's build
+shows in its row (RS-267).
+
+### Changed
+
+- **Fold shows cities only.** Every worker runs the fleet default pacing, so
+  the Pacing block repeated the same interval, proxy and daily plan on every
+  row. Those details stay on the worker's page.
+- **Build in the row subtitle.** The worker's reported build now follows its
+  id and region ("denver-1 · Mountain / Plains · v0.5.6"), with the commit in
+  the tooltip, so a worker left on an old image shows without opening it.
+
+## [1.267.0] - 2026-10-17
+
+The Fleet tab shows skeletons while it loads (RS-266). It is the first page in
+a system-wide move to skeleton loading.
+
+### Added
+
+- **Skeletons on the Fleet tab.** The fleet document comes through the tunnel
+  proxy and can take seconds. Until it lands, the workers table used to sit
+  empty, the legend counted `0` for every status, and the flow stages read `—`.
+  Those zeros and dashes looked like real data. Now the table shows rows
+  shaped like the real ones, cell for cell, and the Recent activity aside shows
+  placeholder entries. The legend counts, the summary line, the "Fleet as of"
+  footer and the stage counts each shimmer until their own data arrives.
+  Skeleton rows match the real row height, so nothing jumps on load. A fleet
+  that fails to load drops its skeletons for the existing unavailable note,
+  and the 30-second refresh never brings them back.
+
+## [1.266.1] - 2026-10-17
+
+The two Facebook tabs now share one layout, and the flow card keeps its height
+(RS-265).
+
+### Fixed
+
+- **Fleet and Account pool line up.** The Fleet tab nested its title and tabs
+  inside its own column, so their margins stacked on the column's gap and the
+  status legend sat 18px lower than on the Pool tab. Both tabs now render the
+  head and tabs the same way, so switching tabs changes only the content.
+  The Recent activity header also puts its subtitle under the title on both
+  tabs. Before, it wrapped on one tab and not the other.
+- **The flow card holds still.** The stage detail under "From a search to an
+  alert" is a fixed 300px tall, and a longer stage scrolls inside it, so
+  picking a stage no longer resizes the card. The Edit form still grows to
+  fit.
+
 ## [1.266.0] - 2026-10-17
 
 The Facebook fleet table shows each worker's day: Today, Searches and Posts

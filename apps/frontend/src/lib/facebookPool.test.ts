@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   activityKey,
+  assignWorker,
   base32Bytes,
   cookieHealth,
   cookieUid,
@@ -156,5 +157,22 @@ describe('live six-digit TOTP', () => {
   it('does not invent a code for an invalid or missing key', async () => {
     expect(await poolTotp('')).toBeNull();
     expect(await poolTotp('invalid8key')).toBeNull();
+  });
+});
+
+describe('assignWorker', () => {
+  it('makes the account Fleet, held by the worker', () => {
+    expect(assignWorker({ ...emptyPoolDraft(), holder: 'Ann' }, 'denver-1')).toMatchObject({
+      status: 'fleet',
+      holder: 'denver-1',
+    });
+  });
+  it('puts a fleet account back on the rack when no worker is picked', () => {
+    const draft = { ...emptyPoolDraft(), status: 'fleet' as const, holder: 'denver-1' };
+    expect(assignWorker(draft, null)).toMatchObject({ status: 'available', holder: null });
+  });
+  it('leaves a purchaser-held account alone when no worker is picked', () => {
+    const draft = { ...emptyPoolDraft(), status: 'taken' as const, holder: 'Ann' };
+    expect(assignWorker(draft, null)).toBe(draft);
   });
 });

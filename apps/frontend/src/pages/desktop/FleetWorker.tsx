@@ -8,7 +8,7 @@ import {
 } from '../../lib/coordinator';
 import { handleFetchError, showSuccessToast } from '../../lib/errorToast';
 import {
-  accountAlerts, browserLabel, canWatch, externalVncUrl, fleetActivity, fleetStatus, hitsByCity, parkedWorkers, whoIs,
+  accountAlerts, browserLabel, canWatch, externalVncUrl, fleetActivity, fleetStatus, hitsByCity, parkedWorkers, searchedToday, whoIs,
 } from '../../lib/fleetView';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
@@ -75,6 +75,7 @@ export function FleetWorker({ workerId }: { workerId: string }) {
   const name = who.login ?? who.label ?? w.worker_id;
   const status = fleetStatus(w, parked);
   const note = statusNote(t, w, parked, locale);
+  const searched = searchedToday(w, status);
   const mine = (challenges ?? []).filter(c => c.worker_id === w.worker_id);
   const events = fleetActivity({ ...fleet, workers: [w] }, mine);
   const acct = w.account;
@@ -104,7 +105,7 @@ export function FleetWorker({ workerId }: { workerId: string }) {
     [t('fbcDetailBackup'), sess?.backed_up_at ? <span title={sess.backed_up_at}>{relTime(sess.backed_up_at, locale)}</span> : muted(t('fbcNeverBackedUp'))],
     [t('fbcDetailProxy'), w.proxy_env ? <span className="mono">${w.proxy_env}</span> : muted(t('fbcOwnIp'))],
     [t('fbcColCities'), w.cities.length
-      ? <span className="fl-cities ff-wrap-cell">{w.cities.map(c => <CityChip key={c.slug} city={c} hits={byCity} terms={[]} tone={status === 'live' || status === 'stale' ? 'accent' : 'muted'} />)}</span>
+      ? <span className="fl-cities ff-wrap-cell">{w.cities.map(c => <CityChip key={c.slug} city={c} hits={byCity} terms={[]} tone={searched(c.slug) ? 'accent' : 'muted'} />)}</span>
       : muted(t('fbcNoCities'))],
     [t('fbcFoldPacing'), pace],
     [t('fbcDetailSessionFile'), w.session_file ? <span className="mono">{w.session_file}</span> : muted('—')],

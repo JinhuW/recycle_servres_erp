@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { Icon } from '../../../components/Icon';
 import { Modal } from '../../../components/Modal';
+import type { Challenge, FleetDoc } from '../../../lib/coordinator';
 import {
+  assignWorker,
   emptyPoolDraft,
   POOL_STATUSES,
   totpKey,
@@ -10,14 +12,18 @@ import {
   type PoolDraft,
   type PoolActivity,
 } from '../../../lib/facebookPool';
+import { fleetStatus, parkedWorkers, whoIs } from '../../../lib/fleetView';
 import { relTime } from '../../../lib/format';
 import { useT } from '../../../lib/i18n';
+import { StatusChip as WorkerStatusChip } from '../FleetWorkers';
 import { CloseButton, CookieLabel, STATUS_KEYS, StatusChip } from './shared';
 
 export function AccountEditor({
   account,
   accounts,
   activity,
+  fleet,
+  challenges,
   onClose,
   onSave,
   onRemove,
@@ -26,6 +32,8 @@ export function AccountEditor({
   account: PoolAccount | null;
   accounts: PoolAccount[];
   activity: PoolActivity[];
+  fleet: FleetDoc | null;
+  challenges: Challenge[] | null;
   onClose: () => void;
   onSave: (draft: PoolDraft) => void;
   onRemove: () => void;
@@ -38,6 +46,18 @@ export function AccountEditor({
   const [errors, setErrors] = useState<string[]>([]);
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
   const [removing, setRemoving] = useState(false);
+  // With the fleet loaded, a worker is picked rather than typed, and Fleet is
+  // what picking one means; without it the status and holder stay manual.
+  const workers = fleet?.workers ?? null;
+  const workerId = draft.status === 'fleet' ? draft.holder : null;
+  const worker = workers?.find((w) => w.worker_id === workerId);
+  const holderStatuses = workers ? ['taken', 'problem'] : ['taken', 'fleet', 'problem'];
+  // A worker runs one login: one held elsewhere is shown but not offered.
+  const heldBy = new Map(
+    accounts
+      .filter((a) => a.status === 'fleet' && a.holder && a.no !== account?.no)
+      .map((a) => [a.holder as string, a.no]),
+  );
   const field = (
     name: keyof PoolDraft,
     label: string,
@@ -156,34 +176,70 @@ export function AccountEditor({
               </small>
             </label>
             {field('note', 'fpNotes', { full: true })}
+            {workers && (
+              <label className="fp-field fp-full">
+                <span>{t('fpWorkerSelect')}</span>
+                <select
+                  className="input"
+                  value={workerId ?? ''}
+                  onChange={(e) => setDraft((d) => assignWorker(d, e.target.value || null))}
+                >
+                  <option value="">{t('fpWorkerNone')}</option>
+                  {workerId && !worker && (
+                    <option value={workerId}>{t('fpWorkerMissing', { id: workerId })}</option>
+                  )}
+                  {workers.map((w) => {
+                    const no = heldBy.get(w.worker_id);
+                    return (
+                      <option key={w.worker_id} value={w.worker_id} disabled={no !== undefined}>
+                        {no !== undefined
+                          ? t('fpWorkerHeld', { id: w.worker_id, no })
+                          : `${w.worker_id} · ${whoIs(w).login ?? w.region.name}`}
+                      </option>
+                    );
+                  })}
+                </select>
+                <small>{t('fpWorkerHelp')}</small>
+              </label>
+            )}
             <label className="fp-field">
               <span>{t('fpStatus')}</span>
-              <select
-                className="input"
-                value={draft.status}
-                onChange={(e) =>
-                  setDraft((d) => ({ ...d, status: e.target.value as PoolDraft['status'] }))
-                }
-              >
-                {POOL_STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {t(STATUS_KEYS[s])}
-                  </option>
-                ))}
-              </select>
+              {workers && draft.status === 'fleet' ? (
+                <span className="fp-row">
+                  {worker ? (
+                    <WorkerStatusChip status={fleetStatus(worker, parkedWorkers(challenges))} />
+                  ) : (
+                    <StatusChip status="fleet" />
+                  )}
+                </span>
+              ) : (
+                <select
+                  className="input"
+                  value={draft.status}
+                  onChange={(e) =>
+                    setDraft((d) => ({ ...d, status: e.target.value as PoolDraft['status'] }))
+                  }
+                >
+                  {POOL_STATUSES.filter((s) => !workers || s !== 'fleet').map((s) => (
+                    <option key={s} value={s}>
+                      {t(STATUS_KEYS[s])}
+                    </option>
+                  ))}
+                </select>
+              )}
             </label>
-            <label className="fp-field">
-              <span>{t('fpHolder')}</span>
-              <input
-                className="input"
-                value={
-                  ['taken', 'fleet', 'problem'].includes(draft.status) ? (draft.holder ?? '') : ''
-                }
-                disabled={!['taken', 'fleet', 'problem'].includes(draft.status)}
-                onChange={(e) => setDraft((d) => ({ ...d, holder: e.target.value }))}
-              />
-              <small>{t('fpHolderHelp')}</small>
-            </label>
+            {!(workers && draft.status === 'fleet') && (
+              <label className="fp-field">
+                <span>{t('fpHolder')}</span>
+                <input
+                  className="input"
+                  value={holderStatuses.includes(draft.status) ? (draft.holder ?? '') : ''}
+                  disabled={!holderStatuses.includes(draft.status)}
+                  onChange={(e) => setDraft((d) => ({ ...d, holder: e.target.value }))}
+                />
+                <small>{t(draft.status === 'fleet' ? 'fpHolderWorkerHelp' : 'fpHolderHelp')}</small>
+              </label>
+            )}
           </div>
           {account && (
             <>

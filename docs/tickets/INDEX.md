@@ -5,6 +5,16 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-274](./RS-274-fix-the-release-review-findings-on-fleet-rules-city.md) | done | bug | P2 | Fix the release review findings on Fleet rules, city chips and the pool picker | 1.271.3 |
+| [RS-273](./RS-273-folded-sidebar-shows-one-green-on-submit-order.md) | done | bug | P3 | Folded sidebar shows one green + on Submit order | 1.271.2 |
+| [RS-272](./RS-272-size-the-flow-stage-detail-to-its-tallest-stage.md) | done | bug | P2 | Size the flow stage detail to its tallest stage | 1.271.1 |
+| [RS-271](./RS-271-fleet-fold-shows-only-today-s-searched-cities-in-gre.md) | done | story | P2 | Fleet fold shows only today's searched cities in green | 1.271.0 |
+| [RS-270](./RS-270-let-the-flow-stage-detail-grow-instead-of-scrolling.md) | done | bug | P2 | Let the flow stage detail grow instead of scrolling | 1.270.1 |
+| [RS-269](./RS-269-make-the-fleet-s-keyword-rules-easy-to-read-edit-and.md) | done | story | P2 | Make the fleet's keyword rules easy to read, edit and test | 1.270.0 |
+| [RS-268](./RS-268-link-pool-accounts-to-fleet-workers.md) | done | story | P2 | Link pool accounts to fleet workers | 1.269.0 |
+| [RS-267](./RS-267-drop-the-fleet-fold-s-pacing-block-show-each-worker.md) | done | story | P2 | Drop the fleet fold's Pacing block, show each worker's build in its subtitle | 1.268.0 |
+| [RS-266](./RS-266-skeleton-loading-on-the-fleet-tab.md) | done | story | P2 | Skeleton loading on the Fleet tab | 1.267.0 |
+| [RS-265](./RS-265-facebook-tabs-same-spacing-on-fleet-and-pool-fixed-h.md) | done | bug | P3 | Facebook tabs: same spacing on Fleet and Pool, fixed-height flow detail | 1.266.1 |
 | [RS-264](./RS-264-fleet-table-today-strip-searches-budget-and-posts-pe.md) | done | story | P2 | Fleet table: Today strip, Searches budget and Posts per worker | 1.266.0 |
 | [RS-263](./RS-263-make-every-search-to-alert-stage-s-settings-editable.md) | done | story | P2 | Make every search-to-alert stage's settings editable from the ERP | 1.265.0 |
 | [RS-262](./RS-262-count-every-stage-of-the-search-to-alert-funnel.md) | done | story | P2 | Count every stage of the search-to-alert funnel | 1.264.0 |

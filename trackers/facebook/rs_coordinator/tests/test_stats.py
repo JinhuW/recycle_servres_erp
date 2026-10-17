@@ -82,6 +82,26 @@ def test_zero_delta_report_leaves_no_row(client):
     assert days == []
 
 
+def test_a_counted_search_stamps_its_city(client):
+    for body in (
+        {"worker_id": "mw-1", "searches": 1, "cards": 4, "search_city": "chicago"},
+        {"worker_id": "mw-1", "searches": 1, "search_city": "chicago"},
+        {"worker_id": "mw-1", "searches": 1, "search_city": "peoria"},
+        # A page that counted no search names no searched city.
+        {"worker_id": "mw-1", "reviewed": 1, "search_city": "detroit"},
+    ):
+        assert client.post("/v1/stats/reviews", json=body, headers=WORKER_AUTH).status_code == 200
+
+    rows = client.get("/v1/stats/search-cities", headers=ADMIN_AUTH).json()["rows"]
+    assert [(r["worker_id"], r["city"]) for r in rows] == [("mw-1", "chicago"), ("mw-1", "peoria")]
+    days = client.get("/v1/stats/reviews", headers=ADMIN_AUTH).json()["days"]
+    assert days == [row(today(), searches=3, cards=4, reviewed=1)]
+
+
+def test_search_cities_are_admin_only(client):
+    assert client.get("/v1/stats/search-cities", headers=WORKER_AUTH).status_code in (401, 403)
+
+
 def test_window_excludes_old_days(client):
     old_day = (datetime.now(timezone.utc) - timedelta(days=40)).strftime("%Y-%m-%d")
     client.db.add_review_stats("denver-1", reviewed=99, alerted=9, day=old_day)

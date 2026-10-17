@@ -57,6 +57,15 @@ export function DesktopCoordinator({ showToast }: Props) {
   useEffect(() => {
     poolApi.snapshot().then(setPool).catch(handleFetchError);
   }, []);
+  // A fleet account's holder is a worker: the Pool tab links it and shows its
+  // health. Without the coordinator those rows read as plain text.
+  const [fleet, setFleet] = useState<FleetDoc | null>(null);
+  const [challenges, setChallenges] = useState<Challenge[] | null>(null);
+  useEffect(() => {
+    if (!manager || !poolOpen) return;
+    coordinatorApi.fleet().then(setFleet).catch(() => undefined);
+    coordinatorApi.listOpenChallenges().then(setChallenges).catch(() => undefined);
+  }, [manager, poolOpen]);
   if (watch) {
     return (
       <Suspense fallback={<FormSkeleton fields={4} />}>
@@ -83,7 +92,8 @@ export function DesktopCoordinator({ showToast }: Props) {
     {head}
     {tabs}
     {pool
-      ? <FacebookAccountPool key={user?.role} snapshot={pool} onSnapshot={setPool} showToast={showToast} />
+      ? <FacebookAccountPool key={user?.role} snapshot={pool} onSnapshot={setPool} showToast={showToast}
+          fleet={manager ? fleet : null} challenges={challenges} />
       : <FormSkeleton fields={4} />}
   </> : <FleetPage head={head} tabs={tabs} />;
 }
@@ -157,9 +167,12 @@ function FleetPage({ head, tabs }: { head: React.ReactNode; tabs: React.ReactNod
     return out;
   }, [fleet, challenges]);
 
-  return (
+  // Head and tabs sit outside .fp-pool, as on the Pool tab: inside it their
+  // margins stack on its gap, and switching tabs would shift the content.
+  return <>
+    {head}
+    {tabs}
     <div className="fp-pool">
-      <div>{head}{tabs}</div>
       {notConfigured ? (
         <div className="card">
           <div className="card-body" style={{ display: 'flex', gap: 10, alignItems: 'flex-start', color: 'var(--fg-muted)' }}>
@@ -169,15 +182,15 @@ function FleetPage({ head, tabs }: { head: React.ReactNode; tabs: React.ReactNod
         </div>
       ) : (
         <>
-          <FleetLegend counts={counts} filter={filter} onFilter={setFilter} />
+          <FleetLegend counts={counts} loading={!fleet && !fleetUnavailable} filter={filter} onFilter={setFilter} />
           <div className="fp-split ff-split">
             <WorkersCard fleet={fleet} unavailable={fleetUnavailable} hits={hits} challenges={challenges}
               filter={filter} onClearFilter={() => setFilter('all')} locale={locale} />
-            <ActivityAside fleet={fleet} challenges={challenges} locale={locale} />
+            <ActivityAside fleet={fleet} unavailable={fleetUnavailable} challenges={challenges} locale={locale} />
           </div>
           <FlowCard fleet={fleet} stats={stats} prompt={prompt} onSaved={load} />
         </>
       )}
     </div>
-  );
+  </>;
 }

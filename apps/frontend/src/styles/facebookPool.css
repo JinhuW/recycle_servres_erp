@@ -348,9 +348,12 @@
   color: var(--fg-muted);
   white-space: normal !important;
 }
+/* Stacked, not wrapped: whether a subtitle fits beside the title depends on
+   its length, and the Fleet and Pool asides must read the same. */
 .fp-activity .card-head {
   padding: 13px 15px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: flex-start;
   gap: 4px;
 }
 .fp-activity .card-sub {
@@ -810,7 +813,7 @@
   width: 32px;
   padding-right: 0 !important;
 }
-.ff-table tbody tr:not(.ff-fold):hover td {
+.ff-table tbody tr:not(.ff-fold, .ff-skel):hover td {
   background: var(--bg-soft);
 }
 .ff-table tr.ff-open td {
@@ -820,21 +823,6 @@
   background: var(--bg-soft);
   white-space: normal;
   padding: 12px 16px 14px 44px !important;
-}
-.ff-fold-body {
-  display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
-  gap: 12px 24px;
-}
-.ff-fold-text {
-  margin-top: 6px;
-  font-size: 12px;
-  color: var(--fg-muted);
-}
-.ff-fold-hint {
-  margin-top: 8px;
-  font-size: 11px;
-  color: var(--fg-subtle);
 }
 .ff-fold .fp-section-label {
   margin-bottom: 6px;
@@ -983,7 +971,18 @@
   grid-template-columns: minmax(0, 1fr) minmax(0, 340px);
   gap: 16px 28px;
   padding: 14px 15px 16px;
+  align-content: start;
+}
+/* FleetFlow.tsx stacks every stage in one cell; see the comment there. */
+.ff-flow-stack {
+  display: grid;
   border-top: 1px solid var(--border);
+}
+.ff-flow-stack > .ff-flow-detail {
+  grid-area: 1 / 1;
+}
+.ff-flow-ghost {
+  visibility: hidden;
 }
 .ff-flow-head {
   display: flex;
@@ -1035,20 +1034,246 @@
   gap: 8px;
   min-width: 0;
 }
-.ff-flow-group {
+/* A stage's phrase and keyword lists (FleetRules.tsx): one item at a time,
+   the lists side by side, entries as chips instead of code. */
+.ff-flow-detail.ff-flow-detail-rules,
+.ff-flow-detail.ff-flow-detail-rules:has(.ff-edit) {
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.7fr);
+}
+.ff-rules {
   display: flex;
   flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.ff-rules-items {
+  align-self: flex-start;
+  flex-wrap: wrap;
+}
+.ff-rules-items button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: baseline;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 11.5px;
+}
+.ff-rules-count {
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-subtle);
+}
+.ff-rules-cols {
+  display: grid;
+  gap: 14px 22px;
+  align-items: start;
+}
+.ff-rules-cols.two {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+}
+.ff-rule-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+.ff-rule-list-head {
+  display: flex;
+  align-items: baseline;
   gap: 6px;
 }
-.ff-rule {
+.ff-rule-hint {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--fg-subtle);
+}
+.ff-rule-mode {
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 11px;
+  color: var(--accent-strong);
+  cursor: pointer;
+}
+.ff-rule-mode:hover {
+  text-decoration: underline;
+}
+.ff-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.ff-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 100%;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-soft);
+  font-size: 11.5px;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+.ff-chip.dup {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+  color: var(--warn-strong);
+}
+.ff-chip.hit {
+  border-color: var(--accent-strong);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+.ff-chip-x,
+.ff-chip-add {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-right: -4px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--fg-subtle);
+  cursor: pointer;
+}
+.ff-chip-x:hover {
+  background: var(--neg-soft);
+  color: var(--neg);
+}
+.ff-chip-add {
+  margin: 0;
+  border: 1px dashed var(--border-strong, var(--border));
+}
+.ff-chip-add:hover {
+  color: var(--fg);
+  border-style: solid;
+}
+.ff-chip-input {
+  width: 160px;
+  min-height: 0;
+  padding: 2px 8px;
+  font-size: 11.5px;
+}
+.ff-rule-group,
+.ff-rule-expr {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.ff-rule-group.hit,
+.ff-rule-expr.hit {
+  border-color: var(--accent-strong);
+}
+.ff-rule-or {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+}
+.ff-or {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+}
+.ff-expr-tag {
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--bg-soft);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+}
+.ff-expr-text {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
   font-family: var(--mono, ui-monospace, monospace);
   font-size: 11px;
-  padding: 3px 7px;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  background: var(--bg-soft);
-  color: var(--fg-muted);
+  color: var(--fg);
   overflow-wrap: anywhere;
+}
+button.ff-expr-text {
+  cursor: text;
+}
+.ff-rule-add {
+  min-height: 0;
+  padding: 5px 9px;
+  font-size: 12px;
+}
+/* Try a listing: on top of the lists it lights up */
+.ff-try {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 6px 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px dashed var(--border);
+}
+.ff-try.title-only {
+  grid-template-columns: minmax(0, 1fr);
+}
+.ff-try > .fp-section-label {
+  grid-column: 1 / -1;
+}
+.ff-try .input {
+  min-height: 0;
+  padding: 5px 9px;
+  font-size: 12px;
+}
+.ff-try-draft {
+  font-size: 11px;
+  color: var(--warn-strong);
+}
+.ff-try-out {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ff-try-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 4px 8px;
+  border: 0;
+  border-left: 3px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-soft);
+  text-align: left;
+  font-size: 12px;
+  color: var(--fg);
+  cursor: pointer;
+}
+.ff-try-row .mono {
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.ff-try-row.pass {
+  border-left-color: var(--pos);
+}
+.ff-try-row.anti,
+.ff-try-row.missing {
+  border-left-color: var(--neg);
+}
+.ff-try-row.deferred {
+  border-left-color: var(--warn);
 }
 .ff-prompt {
   margin: 0;
@@ -1112,8 +1337,19 @@
 }
 .ff-edit-actions {
   display: flex;
+  align-items: center;
   gap: 8px;
   margin-top: 10px;
+  /* Long lists push Save off screen; it follows the reader down. */
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  padding: 8px 0;
+  background: var(--bg-elev);
+}
+.ff-edit-count {
+  font-size: 11.5px;
+  color: var(--fg-subtle);
 }
 /* One worker's page */
 .ff-worker-card .fp-stub {
@@ -1215,8 +1451,11 @@
   .ff-split > .ff-workers {
     min-height: 0;
   }
-  .ff-flow-detail,
-  .ff-fold-body {
+  .ff-flow-detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ff-flow-detail.ff-flow-detail-rules,
+  .ff-flow-detail.ff-flow-detail-rules:has(.ff-edit) {
     grid-template-columns: minmax(0, 1fr);
   }
 }
@@ -1242,6 +1481,9 @@
   }
 }
 @media (max-width: 800px) {
+  .ff-rules-cols.two {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .fp-take {
     grid-template-columns: minmax(0, 1fr);
     padding: 16px;
@@ -1281,4 +1523,30 @@
   .fp-tag {
     transition: none;
   }
+}
+
+/* Loading skeletons: stacked like the two-line holders they stand in for. */
+.fp-holder .skeleton,
+.ff-skel-lines .skeleton {
+  display: block;
+}
+.fp-holder .skeleton + .skeleton,
+.ff-skel-lines .skeleton + .skeleton {
+  margin-top: 5px;
+}
+/* A masked secret in the manager's table: the cell itself is the reveal. */
+.fp-reveal {
+  max-width: 180px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fp-reveal.fp-masked {
+  color: var(--fg-subtle);
 }

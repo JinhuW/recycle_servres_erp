@@ -2089,8 +2089,13 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   (enabled phrases × cities × daily runs; amber once met, "—" when its
   monitor does not count searches) and its **Posts** (listings freshly
   reviewed today, and the week's alerts); the summary line adds the fleet's
-  new posts today. A fold per row shows the worker's cities (each with its
-  alerts), pacing and the daily search budget; and a **From a search to an alert** card that walks the
+  new posts today. Since v1.268.0 the row's subtitle carries the worker's
+  reported build next to its region, and the fold per row shows only the
+  worker's cities (each with its alerts). Since v1.271.0 a city chip there
+  and on the worker page is green only once the worker has searched that
+  city today, in its region's time zone; the rest stay grey (v1.271.3: a
+  facade that does not report searched cities falls back to green for a live
+  or stale worker); and a **From a search to an alert** card that walks the
   pipeline as the code runs it — search, result cards, the title gate before
   any page is opened, the cached page visit, the keyword gate with the
   description, the already-notified skip, the AI rating with its unit and
@@ -2104,7 +2109,14 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   cards, title gate, keyword gate, AI rating) has an **Edit** form for those
   settings, prompt and rubric included. A save goes through the fleet
   console into every worker's config. Workers pick it up between jobs and
-  start a sweep, and deploys keep the saved values (v1.265.0). The eye
+  start a sweep, and deploys keep the saved values (v1.265.0). The phrase and keyword lists show one item at a time, as chips: an OR rule
+  is a group of chips, an AND/NOT rule an expression, and a repeated term is
+  outlined. Editing is by chip (× to remove, Enter or paste to add, `+` to
+  grow a group), with a text fallback. A **Try a listing** box on the title
+  and keyword gates says per item whether a listing passes, which
+  anti-keyword drops it, or that no keyword matched, using the unsaved draft
+  while editing. Save stays off until something changed, and leaving a dirty
+  form asks first (v1.270.0). The eye
   on a row is the one way to a worker's page, `/fleet/worker/<worker>`: its
   Facebook login and user id, vault account and stored secrets by name,
   session expiry, browser and backup, proxy, cities, pacing, session file and
@@ -2120,7 +2132,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   `/v1/fleet` document, checkpoints, review stats, alert hits and prompt
   through the manager-only `/api/coordinator` proxy; without the proxy's
   credentials the tab says so and the rest of the ERP is unaffected
-  (v1.140.0). Editing cities, pacing, stages and the model from the ERP is
+  (v1.140.0). While that data loads, the table, the activity aside, the
+  legend counts and the stage counts show skeletons shaped like their content
+  (v1.267.0). Editing cities, pacing, stages and the model from the ERP is
   not built yet: nothing writes `master.toml` from here (RS-261).
 - **Facebook account pool** — a second tab at **Monitors ▸ Facebook**,
   linked directly at `/#/fleet/pool` (v1.261.0). Managers see a status legend
@@ -2143,7 +2157,12 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   production without `FB_POOL_KEY` the pool routes answer 503 and name the
   variable. The pool is the human side of the picture; the fleet's own vault
   of worker logins (RS-254) stays a separate, write-only store, and `fleet`
-  here is the label saying which worker an account went to. A cookie may be
+  here says which worker an account went to. Since v1.269.0 that worker is
+  picked from the fleet in the editor (picking one is what makes an account
+  Fleet; None returns it to Available), the table links the holder to the
+  worker's page and shows the worker's Live / Stale / Attention / Offline
+  status in place of Fleet, and a click on a masked password in the table
+  reveals it (logged). A cookie may be
   pasted as a header line or as the JSON a cookie extension exports, and a
   2FA key as the base32 key or an `otpauth://` link, on the Pool tab as on
   the Fleet tab (v1.262.1).
@@ -2493,7 +2512,7 @@ removed in v1.191.0.
   the brand row (v1.208.0). It is a per-user preference (`sidebar.folded`), so
   it follows the user across reloads and devices. Under 900px the rail is
   forced and the toggle hidden. In the rail every link keeps its name for
-  screen readers.
+  screen readers, and Submit order shows only its green `+` badge (v1.271.2).
 - **The sidebar has a second level** (v1.207.0). A parent entry opens while
   you are on one of its pages and is one row with a › caret everywhere else;
   clicking it opens its first child. The one parent today is **Oversight ▸
