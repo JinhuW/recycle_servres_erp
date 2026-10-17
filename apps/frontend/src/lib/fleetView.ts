@@ -132,6 +132,9 @@ export const canWatch = (w: FleetAccount | null | undefined): boolean => Boolean
 
 // Why a flagged worker is flagged, most urgent first — the order the
 // facade's own dashboard reads them in.
+// A session this close to lapsing is worth a note; one further out is not.
+export const SESSION_WARN_DAYS = 7;
+
 export type AttentionReason =
   | { kind: 'dead'; since: string | null }
   | { kind: 'state'; state: string }
@@ -145,7 +148,9 @@ export function attentionReason(w: FleetAccount): AttentionReason {
   if (h.liveness === 'dead') return { kind: 'dead', since: h.last_heartbeat_at };
   if (h.state && h.state !== 'HEALTHY') return { kind: 'state', state: h.state };
   if (h.session_days_left !== null && h.session_days_left <= 0) return { kind: 'expired' };
-  if (h.session_days_left !== null) return { kind: 'expiring', days: h.session_days_left };
+  if (h.session_days_left !== null && h.session_days_left <= SESSION_WARN_DAYS) {
+    return { kind: 'expiring', days: h.session_days_left };
+  }
   return { kind: 'other' };
 }
 

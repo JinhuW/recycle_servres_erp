@@ -327,6 +327,25 @@ describe('VNC bridge upstream setup failures', () => {
 
 // Last in the file: the shutdown flag is module state and never resets.
 describe('VNC bridge during shutdown', () => {
+  it('cuts a viewer that never answers the close frame', async () => {
+    const { token } = await loginAs(ALEX);
+    const ws = new WebSocket(`ws://127.0.0.1:${erpPort}/api/coordinator/vnc/ne-1/ws`, {
+      headers: { Cookie: `at=${token}`, Origin: 'http://localhost:5173' },
+    });
+    await new Promise((r) => ws.once('message', r));
+    expect(openVncBridges()).toBe(1);
+    // A sleeping laptop: the close frame arrives but is never read.
+    (ws as unknown as { _socket: { pause(): void } })._socket.pause();
+    const closed = new Promise((r) => ws.once('close', r));
+    closeVncBridges({ graceMs: 100 });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(openVncBridges()).toBe(1);
+    await new Promise((r) => setTimeout(r, 150));
+    expect(openVncBridges()).toBe(0);
+    ws.terminate();
+    await closed;
+  });
+
   it('refuses a handshake admitted after the shutdown sweep', async () => {
     const { token } = await loginAs(ALEX);
     closeVncBridges();
