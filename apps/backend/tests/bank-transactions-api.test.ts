@@ -919,6 +919,25 @@ describe('assigning a payment to a member', () => {
     expect(bad.status).toBe(400);
   });
 
+  it('reads a linked payment as owned by its PO owner', async () => {
+    const txnId = await seedOne();
+    const { token, user } = await loginAs(ALEX);
+    const poId = await createPO(token);
+    await api('POST', `/api/bank-transactions/${txnId}/link`, { token, body: { orderId: poId } });
+
+    const all = await api<{ rows: { id: string; assignee: { id: string } | null }[] }>(
+      'GET', '/api/bank-transactions?direction=all', { token });
+    expect(all.body.rows.find((r) => r.id === txnId)?.assignee?.id).toBe(user.id);
+
+    const mine = await api<{ rows: { id: string }[] }>(
+      'GET', `/api/bank-transactions?direction=all&assignee=${user.id}`, { token });
+    expect(mine.body.rows.map((r) => r.id)).toContain(txnId);
+
+    const none = await api<{ rows: { id: string }[] }>(
+      'GET', '/api/bank-transactions?direction=all&assignee=unassigned', { token });
+    expect(none.body.rows.map((r) => r.id)).not.toContain(txnId);
+  });
+
   it('refuses a PO-linked row, an unknown member, and a deactivated one', async () => {
     const txnId = await seedOne();
     const { token, user } = await loginAs(ALEX);

@@ -1817,9 +1817,9 @@ to a PO's commission, or to sell orders (v1.257.0).
   existed only to escape the one-click path.
 - **Owner is a column** (v1.121.0), between Amount and Status — avatar and first
   name, full name on hover, a dash where nobody owns it. Owner and PO are
-  mutually exclusive by constraint, so the column is empty by design on the
-  Linked tab and behind the Refunds tile. Assigning still happens in the
-  expanded row.
+  mutually exclusive by constraint, so a linked payment shows its PO's owner
+  instead, and the owner filter counts it under that member (v1.275.2).
+  Assigning still happens in the expanded row, on unlinked payments only.
 - **A payment with no PO can be assigned to a member** (v1.119.0), and the queue
   filters by owner or by Unassigned. Assigning deliberately does *not* resolve
   the row: a payment that needs explaining still needs explaining, it just has

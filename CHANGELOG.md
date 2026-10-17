@@ -17,10 +17,10 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
-## [1.275.2] - 2026-10-17
+## [1.275.3] - 2026-10-17
 
 Release review fixes for the Edit cities dialog's search frequency and the
-worker page's Assign account (RS-278). As shipped in 1.274.0 the cities dialog
+worker page's Assign account (RS-279). As shipped in 1.274.0 the cities dialog
 could lose edits and erase pins it did not own.
 
 ### Fixed
@@ -53,6 +53,18 @@ could lose edits and erase pins it did not own.
   account on the worker at the moment of the swap is moved, not only the one
   read first. The picker names a mismatched or unreadable cookie instead of
   "no cookie".
+
+## [1.275.2] - 2026-10-17
+
+### Fixed
+
+- **A linked payment's Owner is its PO's owner** (RS-278). The Owner column on
+  Payments showed a dash on every linked row. Linking clears the manual
+  assignee (the two are exclusive by constraint), and nothing took its place,
+  so the person whose money it was went unshown. The column now falls back to
+  the linked PO's owner, and the owner filter agrees with it: picking a member
+  also returns payments linked to their POs, and Unassigned leaves those out.
+  Manual assignment is unchanged.
 
 ## [1.275.1] - 2026-10-17
 
