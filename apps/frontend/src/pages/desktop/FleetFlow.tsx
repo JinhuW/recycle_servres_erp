@@ -1,4 +1,5 @@
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { Skeleton } from '../../components/Skeleton';
 import { coordinatorApi, type FilterPrompt, type FleetDoc, type ReviewStatsDay } from '../../lib/coordinator';
 import { handleFetchError, showSuccessToast } from '../../lib/errorToast';
 import {
@@ -232,6 +233,14 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
       ));
     }
     if (stage === 'ai') {
+      if (prompt === null) {
+        return (
+          <div className="ff-flow-group" aria-busy="true">
+            <Skeleton width={110} height={10} />
+            {['92%', '85%', '96%', '70%', '88%', '60%'].map((w, i) => <Skeleton key={i} width={w} height={11} />)}
+          </div>
+        );
+      }
       if (!loadedPrompt) return <span className="fp-muted">{t('fbcFlowPromptUnavailable')}</span>;
       return (
         <>
@@ -267,10 +276,15 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
             <button key={k} type="button" role="tab" aria-selected={stage === k}
               className={`ff-stage${k === 'ai' || k === 'alert' ? ' ff-stage-key' : ''}`} onClick={() => pick(k)}>
               <span className="ff-stage-title">{t(`fbcFlow_${k}`)}</span>
-              <span className="ff-stage-n" title={n === undefined ? t('fbcFlowNotCounted') : undefined}>
-                {n === undefined ? '—' : fmt.format(n)}
-              </span>
-              <span className="ff-stage-unit">{n === undefined ? t('fbcFlowNotCounted') : t(`fbcFlowUnit_${k}`)}</span>
+              {stats === null ? <>
+                <span className="ff-stage-n"><Skeleton width={34} height={22} /></span>
+                <span className="ff-stage-unit"><Skeleton width={70} height={10} /></span>
+              </> : <>
+                <span className="ff-stage-n" title={n === undefined ? t('fbcFlowNotCounted') : undefined}>
+                  {n === undefined ? '—' : fmt.format(n)}
+                </span>
+                <span className="ff-stage-unit">{n === undefined ? t('fbcFlowNotCounted') : t(`fbcFlowUnit_${k}`)}</span>
+              </>}
             </button>
           );
         })}

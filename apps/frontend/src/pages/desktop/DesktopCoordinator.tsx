@@ -150,6 +150,9 @@ function FleetPage({ head, tabs }: { head: React.ReactNode; tabs: React.ReactNod
     };
   }, [load]);
 
+  // Only the first load: a refresh keeps the last document on screen.
+  const fleetLoading = fleet === null && !fleetUnavailable;
+
   const counts = useMemo(() => {
     const parked = parkedWorkers(challenges);
     const out = Object.fromEntries(FLEET_STATUSES.map(s => [s, 0])) as Record<FleetStatus, number>;
@@ -172,11 +175,11 @@ function FleetPage({ head, tabs }: { head: React.ReactNode; tabs: React.ReactNod
         </div>
       ) : (
         <>
-          <FleetLegend counts={counts} filter={filter} onFilter={setFilter} />
+          <FleetLegend counts={counts} loading={fleetLoading} filter={filter} onFilter={setFilter} />
           <div className="fp-split ff-split">
-            <WorkersCard fleet={fleet} unavailable={fleetUnavailable} hits={hits} challenges={challenges}
+            <WorkersCard fleet={fleet} loading={fleetLoading} unavailable={fleetUnavailable} hits={hits} challenges={challenges}
               filter={filter} onClearFilter={() => setFilter('all')} locale={locale} />
-            <ActivityAside fleet={fleet} challenges={challenges} locale={locale} />
+            <ActivityAside fleet={fleet} loading={fleetLoading} challenges={challenges} locale={locale} />
           </div>
           <FlowCard fleet={fleet} stats={stats} prompt={prompt} onSaved={load} />
         </>

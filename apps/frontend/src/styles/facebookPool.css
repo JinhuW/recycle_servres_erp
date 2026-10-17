@@ -375,6 +375,11 @@
 .fp-log .fp-dot {
   margin-top: 5px;
 }
+/* Skeleton lines need the breathing room text gets from its line height. */
+.ff-skel .fp-holder,
+.fp-log .fp-holder {
+  gap: 6px;
+}
 .fp-log b {
   font-weight: 550;
 }

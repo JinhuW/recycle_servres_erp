@@ -1,5 +1,6 @@
 import { Fragment, useMemo, useState } from 'react';
 import { Icon } from '../../components/Icon';
+import { Skeleton } from '../../components/Skeleton';
 import type { AlertHitRow, Challenge, FleetAccount, FleetDoc } from '../../lib/coordinator';
 import {
   accountAlerts, accountHaystack, attentionReason, dayStrip, FLEET_STATUSES, fleetActivity, fleetPostsToday, fleetStatus,
@@ -42,8 +43,9 @@ export function statusNote(t: Translate, w: FleetAccount, parked: ReadonlySet<st
   return null;
 }
 
-export function FleetLegend({ counts, filter, onFilter }: {
+export function FleetLegend({ counts, loading, filter, onFilter }: {
   counts: Record<FleetStatus, number>;
+  loading: boolean;
   filter: FleetStatus | 'all';
   onFilter: (f: FleetStatus | 'all') => void;
 }) {
@@ -55,15 +57,16 @@ export function FleetLegend({ counts, filter, onFilter }: {
           onClick={() => onFilter(filter === s ? 'all' : s)}>
           <i className="fp-dot" />
           <span>{t(STATUS_KEY[s])}</span>
-          <b>{counts[s]}</b>
+          <b>{loading ? <Skeleton width={14} height={14} /> : counts[s]}</b>
         </button>
       ))}
     </div>
   );
 }
 
-export function WorkersCard({ fleet, unavailable, hits, challenges, filter, onClearFilter, locale }: {
+export function WorkersCard({ fleet, loading, unavailable, hits, challenges, filter, onClearFilter, locale }: {
   fleet: FleetDoc | null;
+  loading: boolean;
   // The facade answered with something other than a fleet document (an older
   // facade, or the tunnel is down): say so in the card, keep the page.
   unavailable: boolean;
@@ -111,7 +114,7 @@ export function WorkersCard({ fleet, unavailable, hits, challenges, filter, onCl
           </button>
         )}
         <span className="ff-summary">
-          {!fleet ? '…' : posts === null
+          {!fleet ? (loading ? <Skeleton width={260} height={12} /> : '…') : posts === null
             ? t('fbcWorkersSummary', { n: all.length, cities, alerts, days: HITS_DAYS })
             : t('fbcWorkersSummaryPosts', { n: all.length, posts, cities, alerts, days: HITS_DAYS })}
         </span>
@@ -128,7 +131,7 @@ export function WorkersCard({ fleet, unavailable, hits, challenges, filter, onCl
       )}
 
       <div className="fp-table-wrap">
-        <table className="fp-table ff-table">
+        <table className="fp-table ff-table" aria-busy={loading}>
           <thead>
             <tr>
               <th aria-label={t('fbcColCities')} />
@@ -142,6 +145,7 @@ export function WorkersCard({ fleet, unavailable, hits, challenges, filter, onCl
             </tr>
           </thead>
           <tbody>
+            {loading && Array.from({ length: SKELETON_ROWS }, (_, i) => <SkeletonRow key={i} />)}
             {shown.map(w => (
               <WorkerRow key={w.worker_id} account={w} hits={byCity} parked={parked} terms={terms} startAt={startAt}
                 open={open.has(w.worker_id)} onToggle={() => toggle(w.worker_id)} locale={locale} />
@@ -153,9 +157,30 @@ export function WorkersCard({ fleet, unavailable, hits, challenges, filter, onCl
         </table>
       </div>
       <div className="fp-table-foot">
-        {fleet ? t('fbcAsOf', { age: relTime(fleet.generated_at, locale) }) : '…'}
+        {fleet
+          ? t('fbcAsOf', { age: relTime(fleet.generated_at, locale) })
+          : loading ? <Skeleton width={90} height={11} /> : '…'}
       </div>
     </section>
+  );
+}
+
+// Roughly a fleet's worth, in the real columns, so the table keeps its height
+// when the document lands.
+const SKELETON_ROWS = 8;
+
+function SkeletonRow() {
+  return (
+    <tr className="ff-skel" aria-hidden="true">
+      <td className="ff-chev"><Skeleton width={13} height={13} radius={3} /></td>
+      <td><span className="fp-holder"><Skeleton width={190} height={12} /><Skeleton width={150} height={10} /></span></td>
+      <td><Skeleton width={78} height={20} radius={999} /></td>
+      <td><Skeleton width={28} height={10} /></td>
+      <td><Skeleton width={22} height={22} radius={999} /></td>
+      <td><Skeleton width={64} height={12} /></td>
+      <td><span className="fp-holder"><Skeleton width={44} height={12} /><Skeleton width={78} height={10} /></span></td>
+      <td><Skeleton width={16} height={16} radius={999} /></td>
+    </tr>
   );
 }
 
@@ -321,8 +346,8 @@ const EVENT_KEY = {
   search: 'fbcActSearch', listing: 'fbcActListing', backup: 'fbcActBackup', silent: 'fbcActSilent', checkpoint: 'fbcActCheckpoint',
 } as const;
 
-export function ActivityAside({ fleet, challenges, locale }: {
-  fleet: FleetDoc | null; challenges: Challenge[] | null; locale: string;
+export function ActivityAside({ fleet, loading, challenges, locale }: {
+  fleet: FleetDoc | null; loading: boolean; challenges: Challenge[] | null; locale: string;
 }) {
   const { t } = useT();
   const parked = parkedWorkers(challenges);
@@ -334,7 +359,13 @@ export function ActivityAside({ fleet, challenges, locale }: {
         <h2 className="card-title">{t('fpRecent')}</h2>
         <span className="card-sub">{t('fbcActivitySub')}</span>
       </div>
-      <ul className="fp-log">
+      <ul className="fp-log" aria-busy={loading}>
+        {loading && Array.from({ length: 6 }, (_, i) => (
+          <li key={i} aria-hidden="true">
+            <Skeleton width={7} height={7} radius={999} style={{ marginTop: 5 }} />
+            <span className="fp-holder"><Skeleton width={170} height={12} /><Skeleton width={70} height={10} /></span>
+          </li>
+        ))}
         {events.map((e, i) => {
           const w = byId.get(e.workerId);
           return (

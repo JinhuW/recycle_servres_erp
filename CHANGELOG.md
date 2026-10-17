@@ -17,6 +17,23 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.267.0] - 2026-10-17
+
+The Facebook fleet page draws its frame first and fills each card as its data
+arrives (RS-266).
+
+### Changed
+
+- **Fleet loads frame first.** The fleet document comes over the rs-console
+  tunnel and can take seconds. Until it arrived, the page showed a legend of
+  real-looking zeros, an empty table, a blank activity list and funnel tiles
+  reading "not counted", so it looked empty or broken. Each card now shows
+  skeletons for the part it is still waiting on: legend counts, eight worker
+  rows in the real columns, activity entries, stage counts and the AI prompt.
+  Each card fills in when its own fetch resolves, and a failed fetch still
+  ends in that card's existing unavailable note. The 30-second refresh keeps
+  what is already on screen rather than flashing skeletons again.
+
 ## [1.266.1] - 2026-10-17
 
 The two Facebook tabs now share one layout, and the flow card keeps its height
