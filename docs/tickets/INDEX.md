@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-264](./RS-264-fleet-table-today-strip-searches-budget-and-posts-pe.md) | in-progress | story | P2 | Fleet table: Today strip, Searches budget and Posts per worker | — |
+| [RS-264](./RS-264-fleet-table-today-strip-searches-budget-and-posts-pe.md) | done | story | P2 | Fleet table: Today strip, Searches budget and Posts per worker | 1.266.0 |
 | [RS-263](./RS-263-make-every-search-to-alert-stage-s-settings-editable.md) | done | story | P2 | Make every search-to-alert stage's settings editable from the ERP | 1.265.0 |
 | [RS-262](./RS-262-count-every-stage-of-the-search-to-alert-funnel.md) | done | story | P2 | Count every stage of the search-to-alert funnel | 1.264.0 |
 | [RS-261](./RS-261-facebook-fleet-tab-redesign-to-the-pool-s-layout-wor.md) | done | story | P2 | Facebook fleet tab: redesign to the pool's layout, worker pages | 1.263.0 |

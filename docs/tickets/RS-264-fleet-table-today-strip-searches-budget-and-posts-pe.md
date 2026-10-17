@@ -2,13 +2,13 @@
 id: RS-264
 title: Fleet table: Today strip, Searches budget and Posts per worker
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-17
 reporter: jinhu
 branch: feat/fleet-today-posts-searches
-pr:
-version:
+pr: 673
+version: 1.266.0
 related: [RS-261, RS-262, RS-263]
 ---
 
