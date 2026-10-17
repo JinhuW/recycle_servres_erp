@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-17
 reporter: jinhu
 branch: feat/account-holder-worker
-pr:
+pr: 683
 version: 1.269.0
 related: []
 ---
