@@ -1,0 +1,31 @@
+# What scripts/deploy.sh never pushes to the VM, and never deletes there.
+# deploy.sh and scripts/tests/test-deploy-filter.sh both merge this file, so
+# the test checks the same rules the deploy runs.
+#
+# The deploy runs rsync with --delete. A plain exclude does two jobs: it stops
+# the dev copy being sent, and it protects the VM's copy from --delete. Rules
+# that start with / are anchored at the deploy's sources (configs, scripts, ...).
+# The older rules without one match any path that ends with the pattern.
+- .git
+- .venv*
+- __pycache__
+- *.egg-info
+- .pytest_cache
+- configs/secrets.env
+- configs/sessions
+- data
+- logs
+- reports
+- *.png
+
+# Tracked template. It has to come before the secrets.env.* exclude below.
++ /configs/secrets.env.example
+# VM-owned: written by hand on the VM. Never sent, never deleted.
+- /configs/secrets.*.env
+- /configs/secrets.env.*
+- /configs/proxies.decodo.txt
+- /configs/accounts/
+- /configs/generated/
+# Dev-only: Facebook logins and 2FA for `rs-session capture`. Never sent.
+- /configs/account_info.txt*
+- /configs/data.txt

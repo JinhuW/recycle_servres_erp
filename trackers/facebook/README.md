@@ -279,9 +279,13 @@ Two traps the script handles that a manual `up -d` does not:
   variable from compose leaves 0.0.0.0 in force. It has to be overridden, not
   omitted — and 0.0.0.0 does not expose the web UI, it stops it starting.
 
-`configs/secrets.env` and `configs/sessions/` are never pushed. The VM's copies
-are live credentials — the worker's Facebook cookies and its coordinator token
-— and the laptop's belong to a different account and IP.
+The sync runs with `--delete`, and `scripts/deploy.rsync-filter` lists what it
+never pushes and never deletes. The VM's own files are live credentials written
+there by hand: its secrets, sessions, per-worker tokens and proxy list. A dev
+checkout's copies belong to a different account and IP, and a checkout without
+them would have `--delete` remove the VM's. The dev machine's Facebook logins
+and 2FA, read by `rs-session capture`, never leave it.
+`scripts/tests/test-deploy-filter.sh` checks both with a real rsync.
 
 ### Did it alert, and did the alert arrive?
 

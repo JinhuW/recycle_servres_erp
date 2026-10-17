@@ -101,7 +101,8 @@ commands are in README → *Tests*:
 ```bash
 AIMM_PYTHON=$PWD/.venv-aimm/bin/python .venv-coordinator/bin/python -m pytest \
     rs_coordinator/tests rs_poster/tests rs_messenger/tests
-sh scripts/tests/test-version-gate.sh && sh scripts/tests/test-check-secrets.sh
+sh scripts/tests/test-version-gate.sh && sh scripts/tests/test-check-secrets.sh \
+    && sh scripts/tests/test-deploy-filter.sh
 ```
 
 Without `AIMM_PYTHON`, the generated-config tests skip silently. Running

@@ -21,9 +21,11 @@
 # it compares the actual bytes of every module in the container against this
 # tree, and it is run automatically at the end of every deploy.
 #
-# What is deliberately NOT pushed: configs/secrets.env and configs/sessions/.
-# The VM's copies are live credentials — the worker's Facebook cookies and its
-# coordinator token — and the laptop's are for a different account and IP.
+# What is deliberately never pushed, and never deleted on the VM, is listed in
+# scripts/deploy.rsync-filter. The VM's secrets, sessions and per-worker tokens
+# are live credentials written there by hand. A dev checkout's copies belong to
+# a different account and IP, and a checkout without them would have --delete
+# remove the VM's. The dev machine's Facebook logins and 2FA never leave it.
 set -eu
 
 VM="${RS_MONITOR_HOST:-jinhu@10.10.10.73}"
@@ -161,10 +163,7 @@ sh deploy/make-homelab-config.sh
 
 # ---------------------------------------------------------------- sync
 step "sync -> $VM:$REMOTE"
-rsync -az --delete --itemize-changes \
-    --exclude '.git' --exclude '.venv*' --exclude '__pycache__' --exclude '*.egg-info' \
-    --exclude '.pytest_cache' --exclude 'configs/secrets.env' --exclude 'configs/sessions' \
-    --exclude 'data' --exclude 'logs' --exclude 'reports' --exclude '*.png' \
+rsync -az --delete --itemize-changes --filter="merge scripts/deploy.rsync-filter" \
     ai-marketplace-monitor configs deploy scripts \
     rs_coordinator rs_poster rs_messenger rs_console \
     CHANGELOG.md README.md VENDOR.md VERSION \
