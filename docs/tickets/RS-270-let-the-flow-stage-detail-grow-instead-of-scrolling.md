@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-17
 reporter: jinhu
 branch: fix/flow-detail-height
-pr:
+pr: 684
 version: 1.270.1
 related: []
 ---
