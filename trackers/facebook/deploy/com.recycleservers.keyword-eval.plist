@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.recycleservers.keyword-eval</string>
+
+    <!-- Pulls the last 24h of `docker logs rs-monitor` from the homelab VM and
+         writes reports/keywords-<date>.md.
+         Report only: it never edits master.toml, regenerates shards, or touches
+         the fleet. See scripts/eval-keywords.sh. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/sh</string>
+        <string>/Users/jinhu/Development/recycle_servers/recycle_servres_erp/trackers/facebook/scripts/eval-keywords.sh</string>
+        <string>24</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/jinhu/Development/recycle_servers/recycle_servres_erp/trackers/facebook</string>
+
+    <!-- 08:00 local, after a full overnight of searching. StartCalendarInterval
+         (not StartInterval) so it lands once a day at a predictable hour, and so
+         a sleeping Mac runs it on wake rather than skipping the day. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>8</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!-- The claude CLI lives in ~/.local/bin, which launchd does not have on
+         PATH by default; without this the job fails immediately. -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/Users/jinhu/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/jinhu/Development/recycle_servers/recycle_servres_erp/trackers/facebook/logs/keyword-eval.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jinhu/Development/recycle_servers/recycle_servres_erp/trackers/facebook/logs/keyword-eval.err.log</string>
+</dict>
+</plist>

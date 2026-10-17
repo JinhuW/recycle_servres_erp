@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "rs-router"
+version = "0.1.0"
+description = "Bridges mautrix-meta Marketplace rooms to the Recycle Servers coordinator"
+requires-python = ">=3.11"
+# Deliberately dependency-free: unlike rs-messenger this drives no browser and
+# shares no session with the poster. It speaks the Matrix Client-Server API and
+# the coordinator's HTTP API, both over stdlib urllib, so it stays a small
+# container that never touches the Facebook account directly.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+rs-router = "rs_router.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["rs_router"]

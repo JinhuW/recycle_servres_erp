@@ -1,0 +1,117 @@
+# Console facade: the ONLY fleet surface exposed beyond this host.
+#
+# The ERP dashboard (running on Railway) reaches it through a Cloudflare
+# tunnel; the coordinator itself stays loopback-only. The facade forwards a
+# closed allowlist (fleet health, checkpoint queue + resolve, review stats,
+# the filter prompt, the composed fleet view) to the coordinator over the
+# rs-fleet network and holds the admin token so it never leaves the VM.
+#
+# It also serves the standalone fleet dashboard at `/` — the same tunnel
+# hostname opened in a browser, with the console token pasted in once.
+#
+# Bound to 127.0.0.1: only the local cloudflared process may reach it, and
+# cloudflared only ever makes outbound connections to Cloudflare's edge.
+
+services:
+  console:
+    build:
+      context: ../rs_console
+      dockerfile: ../deploy/Dockerfile.console
+    image: rs-console:latest
+    container_name: rs-console
+    restart: unless-stopped
+
+    ports:
+      - "127.0.0.1:8600:8600"
+
+    # RS_CONSOLE_TOKEN and RS_ADMIN_TOKEN both come from here; the facade
+    # accepts RS_ADMIN_TOKEN directly as its upstream credential.
+    env_file:
+      - ../configs/secrets.env
+
+    environment:
+      RS_COORDINATOR_URL: http://coordinator:8500
+      RS_MONITOR_CONFIG: /config/monitor.toml
+      RS_MASTER_CONFIG: /config/master.toml
+      RS_FLEET_CONFIG: /config/fleet.toml
+      # RS_WORKER_ID arrives from secrets.env above — the same value the
+      # monitor reports under — so the dashboard can join the phase-1
+      # monitor's heartbeat row to its config.
+      #
+      # Which workers' browsers the dashboard's "Watch" button can reach:
+      # `<RS_WORKER_ID>=<container_name>:5900`. The id is what the container
+      # heartbeats as (`docker exec <name> printenv RS_WORKER_ID` — the
+      # regional workers use their fleet.toml names, not "homelab-<region>").
+      # Every monitor container runs x11vnc on 5900 inside its own namespace,
+      # and this service shares the rs-fleet network with them, so the
+      # container name resolves directly. The bridge (rs_console/vnc.py) is
+      # token-gated and ticketed; nothing here publishes a VNC port. Add a
+      # line when a worker is added; a listed container that is not running
+      # just reads "not answering" in the viewer.
+      RS_VNC_TARGETS: >-
+        homelab-1=rs-monitor:5900,
+        ne-1=rs-monitor-ne:5900,
+        denver-1=rs-monitor-denver:5900,
+        sc-1=rs-monitor-sc:5900,
+        mw-1=rs-monitor-mw:5900,
+        west-1=rs-monitor-west:5900
+      # Optional: set to the tunnel hostname to make `vnc_url` in /v1/fleet
+      # absolute for a page on another origin (the ERP). Left unset, links
+      # are paths on this host, which is right for the standalone dashboard
+      # whether it is opened through the tunnel or an ssh forward to :8600.
+      # RS_CONSOLE_PUBLIC_URL: https://fbc-api.recycleservers.com
+
+    volumes:
+      # The monitor's live config, for the filter-prompt endpoint and the
+      # phase-1 city list. Read-only: this service must never be a path to
+      # changing what the monitor does.
+      - ../configs/homelab.toml:/config/monitor.toml:ro
+      # Regions, items and search settings; and which worker owns which
+      # region. Same read-only rule.
+      - ../configs/master.toml:/config/master.toml:ro
+      - ../configs/fleet.toml:/config/fleet.toml:ro
+
+    networks:
+      - rs-fleet
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8600/healthz')"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # The outbound-only path in: cloudflared keeps connections open to
+  # Cloudflare's edge and delivers fbc-api.recycleservers.com to the console
+  # over the docker network. No listening port anywhere. The tunnel identity
+  # lives in ~/.cloudflared (cert created by `cloudflared tunnel login`,
+  # credentials by `cloudflared tunnel create rs-console`).
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: rs-console-tunnel
+    restart: unless-stopped
+    # The image's default nonroot user (65532) cannot read the 0700
+    # ~/.cloudflared mount; run as the host user that owns it instead.
+    user: "1000:1000"
+    command: tunnel --config /etc/cloudflared/config.yml run
+    volumes:
+      - ~/.cloudflared:/etc/cloudflared:ro
+    networks:
+      - rs-fleet
+    depends_on:
+      - console
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  rs-fleet:
+    name: rs-fleet
+    external: true

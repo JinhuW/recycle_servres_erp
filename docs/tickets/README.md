@@ -67,7 +67,7 @@ prints a warning: rename one file and edit its `id:` line.
 4. Shipped → `done`, `version:` filled, and the release's `CHANGELOG.md`
    section references the ticket.
 
-See the "Tickets, changelog & features" section of the root `CLAUDE.md`.
+See the "Tickets, changelog & features" section of the root `AGENTS.md`.
 
 ## Reference images
 

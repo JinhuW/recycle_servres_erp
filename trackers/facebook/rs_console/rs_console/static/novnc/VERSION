@@ -1,0 +1,6 @@
+noVNC 1.7.0 (https://github.com/novnc/noVNC/releases/tag/v1.7.0)
+
+Vendored 2026-09-06: core/ and vendor/pako only — the RFB client library the
+console's /vnc/<worker> page imports. The upstream HTML/CSS app is not used.
+Licensed under MPL 2.0 (LICENSE.txt). To upgrade, replace core/ and
+vendor/pako from the release tarball and bump this file.

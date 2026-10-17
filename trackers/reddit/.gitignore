@@ -1,0 +1,19 @@
+node_modules/
+.env
+.env.local
+data/
+*.log
+.DS_Store
+
+# secrets kept next to the deploy tooling — never committed
+secrets.env
+.api-token
+
+# terraform
+.terraform/
+*.tfstate*
+*.tfplan
+tf.plan
+*.tfvars
+!*.tfvars.example
+crash.log

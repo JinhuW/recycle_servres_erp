@@ -17,6 +17,57 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.260.0] - 2026-10-16
+
+Review mode's count can be typed as well as stepped (RS-257).
+
+### Added
+
+- **Type the count in a Review mode row.** The number between − and + is now
+  a field. Click it and the number is selected, so typing replaces it. Enter,
+  or leaving the field, saves the count; Escape puts the old one back without
+  leaving Review mode. Before this, a short box took one click of − per
+  missing unit, so 67 sticks with 40 in the box was 27 clicks.
+  - The typed count goes through the same rules as −. It is held between 0
+    and the line's qty, and a count below qty takes the line's tick away.
+    The field is locked wherever − and + are.
+  - − / + and the + − keys are unchanged, and both ways work on the same
+    number. Inside the field, the + − keys step the typed number, and Enter
+    saves it.
+  - Nothing is saved per keystroke, so the 6 of a 67 never lands. Switching
+    to another window mid-edit saves nothing either.
+  - A scanner firing while the field has focus goes to the scan box, digits
+    already typed included, and the count is left alone.
+
+## [1.259.1] - 2026-10-16
+
+Loose ends from folding the two trackers into this repo (RS-256).
+
+### Fixed
+
+- **The fleet page's "build not stamped" tooltip names `trackers/facebook`.**
+  It told the operator to rebuild with `scripts/build-monitor-image.sh` in
+  `facebook_tracker`, a repo that is now archived; the script lives in
+  `trackers/facebook/` here. English and Chinese both.
+
+### Changed
+
+- **Comments and docs point at what exists today.** Code comments that named
+  the retired `reddits_tracker` and `facebook_tracker` repos name
+  `trackers/reddit` and `trackers/facebook` — the filter-prompt fallback's
+  source and the fleet stylesheet the shared class names must match. The
+  sell-order status-guard comments and the tickets README cite the
+  `AGENTS.md` files that replaced the single `CLAUDE.md`, and the backup note
+  gives `backup/` as the cron's build root rather than a draft folder deleted
+  long ago.
+- **The 2026-10-13 review's probe and reproduction scripts are removed.** They
+  asserted the defects RS-252 has since fixed, so they no longer describe the
+  code; the regression tests that replaced them run in the normal suites, and
+  the review's README says where.
+- **`rollback/` is git-ignored.** Undo SQL exported from prod before a data
+  fix is kept there with real row ids; only staging by path kept it out of
+  commits.
+
 ## [1.259.0] - 2026-10-16
 
 Each worker's Facebook login, password and 2FA secret are set from the fleet

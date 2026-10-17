@@ -67,12 +67,4 @@ Real device cameras/scanner bridge, installed-app Web Share, browser rendering/a
 
 ## Replay artifacts
 
-From the repository root after the frozen dependency install:
-
-```sh
-node docs/review-2026-10-13/frontend-probes.mjs
-node docs/review-2026-10-13/component-probes.mjs
-pnpm --filter recycle-erp-backend exec node --import tsx ../../docs/review-2026-10-13/integration-probes.mjs
-```
-
-[Domain reproductions](backend-domain-reproductions.ts) and [supporting-domain reproductions](supporting-domain-repro.test.ts) contain disposable-database replay instructions. They are kept outside normal CI because they assert defects. Convert them to corrected-behavior regression tests while implementing each repair.
+The probe and reproduction files this review shipped (`frontend-probes.mjs`, `component-probes.mjs`, `integration-probes.mjs`, `backend-domain-reproductions.ts`, `supporting-domain-repro.test.ts`) were removed in v1.259.1. They asserted the defects; RS-252 (v1.258.2–v1.258.8) fixed the findings it took on and turned each case it covered into a regression test of the corrected behavior. Those tests run in the normal suites: backend cases under `apps/backend/tests/` (the lock-protocol races in `review-lock-protocol.test.ts`, the rest in the test file of the route or module they cover), frontend cases next to their helpers in `apps/frontend/src/lib/` (for example `orderSubmit.test.ts`, `prefSaver.test.ts`, `keysetPages.test.ts`, `route.test.ts`). The TODO files still cite the originals as evidence; read them at `v1.259.0`, for example `git show v1.259.0:docs/review-2026-10-13/frontend-probes.mjs`.

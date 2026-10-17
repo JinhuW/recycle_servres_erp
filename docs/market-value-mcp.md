@@ -527,5 +527,5 @@ context first.
 
 - Design spec: `docs/superpowers/specs/2026-05-22-market-value-mcp-design.md`
 - Implementation plan: `docs/superpowers/plans/2026-05-22-market-value-mcp.md`
-- Project conventions: `CLAUDE.md` (sections on Auth & CSRF, Database
-  & migrations, Storage & OCR).
+- Project conventions: `apps/backend/AGENTS.md` (sections on Auth & CSRF,
+  Database & migrations, Storage & OCR).

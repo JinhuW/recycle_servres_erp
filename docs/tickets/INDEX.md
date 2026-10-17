@@ -5,6 +5,9 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-257](./RS-257-type-the-count-in-review-mode.md) | done | story | P2 | Type the count in Review mode | 1.260.0 |
+| [RS-256](./RS-256-clean-up-after-the-tracker-migration.md) | done | chore | P2 | Clean up after the tracker migration | 1.259.1 |
+| [RS-255](./RS-255-fold-reddits-tracker-and-facebook-tracker-into-this.md) | done | task | P2 | Fold reddits_tracker and facebook_tracker into this repo; AGENTS.md per area | n/a — imported trackers, docs and CI only, no ERP release |
 | [RS-254](./RS-254-manage-each-worker-s-facebook-login-and-password-fro.md) | done | story | P2 | Manage each worker's Facebook login and password from the fleet page | 1.259.0 |
 | [RS-253](./RS-253-fix-the-dev-to-prod-pre-release-review-findings.md) | done | bug | P1 | Fix the dev to prod pre-release review findings | 1.258.9 |
 | [RS-252](./RS-252-fix-the-2026-10-13-full-code-review-findings.md) | done | bug | P1 | Fix the 2026-10-13 full code-review findings | 1.258.8 |

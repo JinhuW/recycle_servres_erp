@@ -77,7 +77,7 @@ terraform output -raw r2_secret_access_key  # → RCLONE_CONFIG_R2_SECRET_ACCESS
 In the `recycle-erp-experiment` project, add a service `db-backup`:
 
 - **Source:** the GitHub branch (same repo as `backend`).
-- **Build:** root directory `deploy/railway-backup`, Dockerfile `Dockerfile`.
+- **Build:** root directory `backup`, Dockerfile `Dockerfile`.
 - **Cron schedule:** `0 3 * * *` (daily 03:00 UTC).
 - **Restart policy:** `NEVER` (cron triggers the next run; don't loop on exit).
 - **Variables:**

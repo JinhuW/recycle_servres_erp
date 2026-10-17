@@ -1,0 +1,23 @@
+# The Messenger router: a small, dependency-free Python service.
+#
+# Unlike rs-messenger it drives no browser and shares no Facebook session — it
+# speaks only the Matrix Client-Server API and the coordinator's HTTP API, both
+# over stdlib urllib. So it is a plain slim-python image, not the heavy
+# Playwright base.
+#
+# Build from the rs_router package directory:
+#   docker build -f deploy/Dockerfile.router -t rs-router:latest rs_router
+# (docker-compose.matrix.yml sets that context.)
+FROM python:3.12-slim-bookworm
+
+WORKDIR /app
+
+COPY pyproject.toml ./
+COPY rs_router ./rs_router
+
+RUN pip install --no-cache-dir .
+
+# The sync cursor lives here so a restart resumes instead of replaying.
+VOLUME ["/data"]
+
+CMD ["rs-router", "run", "--interval", "2"]

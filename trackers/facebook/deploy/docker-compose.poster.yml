@@ -1,0 +1,61 @@
+# The buy-ad poster on the homelab node — renewal on a schedule.
+#
+# `rs-poster renew` is a one-shot (it reposts only ads whose renew_days is due,
+# then exits), so unlike the monitor and the bridge it is not a loop — it wants
+# a timer. Two ways to drive it, both using the rs-messenger image because that
+# image already installs rs_poster and its `rs-poster` console script:
+#
+#   1. A host cron entry (simplest on this VM):
+#        # 09:15 daily — repost only what is due
+#        15 9 * * *  cd ~/recycle_servers/facebook_tracker && \
+#          docker compose -f deploy/docker-compose.poster.yml run --rm \
+#            poster rs-poster renew
+#
+#   2. By hand while validating:
+#        docker compose -f deploy/docker-compose.poster.yml run --rm \
+#          poster rs-poster renew
+#
+# BLOCKED UNTIL PHOTOS EXIST. `rs-poster validate` fails today because
+# rs_poster/ads/photos/ is empty — the ads reference real photos of our own
+# inventory that are intentionally not in git. Drop the files named in
+# rs_poster/ads/manifest.toml into that directory, confirm with
+#   docker compose -f deploy/docker-compose.poster.yml run --rm \
+#     poster rs-poster validate
+# and only then enable the cron line above.
+#
+# Shares the session and the account lock with the bridge, so the two never
+# drive the account at the same instant.
+
+services:
+  poster:
+    image: rs-messenger:latest
+    container_name: rs-poster
+    restart: "no"
+
+    env_file:
+      - ../configs/secrets.env
+
+    environment:
+      FB_STATE: /data/fb_state.json
+      FB_LOCK: /data/account.lock
+
+    # This service exists for its wiring (session, lock, secrets, ads); the real
+    # command is always passed to `docker compose ... run --rm poster` —
+    # `rs-poster renew`, `rs-poster validate`, `rs-poster status`. The shared
+    # xvfb-entrypoint (from the image) starts a display first. `up` would just
+    # print help and exit, by design.
+    command: ["rs-poster", "--help"]
+
+    volumes:
+      - ../configs/sessions/homelab:/data
+      - ../rs_poster/ads:/opt/rs_poster/ads
+
+    shm_size: 1gb
+
+    networks:
+      - rs-fleet
+
+networks:
+  rs-fleet:
+    name: rs-fleet
+    external: true
