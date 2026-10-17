@@ -17,6 +17,20 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.271.1] - 2026-10-17
+
+The flow card's stage detail is one fixed height again, the tallest stage's
+(RS-272).
+
+### Fixed
+
+- **Same height for every stage, no scrolling.** v1.270.1 let a long stage grow
+  the detail under "From a search to an alert", so clicking between stages
+  resized the card. Every stage's detail now renders into the same cell with
+  only the picked one visible, so the card is always as tall as its tallest
+  stage: nothing scrolls and nothing moves. The height follows the content,
+  with no fixed pixel value. The Edit form still sizes to itself.
+
 ## [1.271.0] - 2026-10-17
 
 A worker's city chips now say which cities it has searched today (RS-271).

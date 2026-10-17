@@ -108,13 +108,11 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
   const counts = flowCounts(Array.isArray(stats) ? stats : null);
   const fmt = useMemo(() => new Intl.NumberFormat(locale), [locale]);
   const items = (fleet?.items ?? []).filter(i => i.enabled);
-  const form = STAGE_FORMS[stage];
   const editable = !!fleet?.settings?.editable;
   const loadedPrompt = prompt && prompt !== 'unavailable' ? prompt : null;
 
   const changes = draft && base ? draftChanges(base, draft) : 0;
   useUnsavedGuard(changes > 0);
-  const lists = STAGE_LISTS[stage];
   const ruleItems: ItemRules[] = draft
     ? Object.entries(draft.items).map(([name, f]) => ({ name, ...f }))
     : items.map(i => ({
@@ -124,7 +122,6 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
       antikeywords: i.antikeywords.join('\n'),
     }));
   const prefilter = draft ? draft.title_prefilter : !!fleet?.search?.title_prefilter;
-  const verdicts = probeVerdicts(stage, ruleItems, probe, prefilter);
 
   // Leaving a dirty form asks first: the stage tabs sit right above it, and a
   // stray click used to drop every edit.
@@ -209,9 +206,11 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
     }
   };
 
-  const editingExtra: ReactNode = draft && form?.ai ? (
-    <>
-      {form.ai && (loadedPrompt ? (
+  const extraFor = (k: FlowStage): ReactNode => {
+    const form = STAGE_FORMS[k];
+    if (draft && form?.ai) {
+      if (!loadedPrompt) return <span className="fp-muted">{t('fbcEditPromptUnavailable')}</span>;
+      return (
         <>
           <label className="ff-edit-field">
             <span className="fp-section-label">{t('fbcPromptMain')}</span>
@@ -224,25 +223,22 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
               onChange={e => set('rating_prompt', e.target.value)} />
           </label>
         </>
-      ) : <span className="fp-muted">{t('fbcEditPromptUnavailable')}</span>)}
-    </>
-  ) : null;
-
-  const extra: ReactNode = (() => {
-    if (editingExtra) return editingExtra;
-    if (lists) {
+      );
+    }
+    if (STAGE_LISTS[k]) {
+      const verdicts = probeVerdicts(k, ruleItems, probe, prefilter);
       return (
         <>
-          {(stage === 'title' || stage === 'keywords') && (
-            <ListingTester stage={stage} probe={probe} onProbe={setProbe} verdicts={verdicts}
+          {(k === 'title' || k === 'keywords') && (
+            <ListingTester stage={k} probe={probe} onProbe={setProbe} verdicts={verdicts}
               onPick={setActiveItem} editing={!!draft} />
           )}
-          <RulesPanel stage={stage} items={ruleItems} active={activeItem} onActive={setActiveItem}
+          <RulesPanel stage={k} items={ruleItems} active={activeItem} onActive={setActiveItem}
             editing={!!draft} onChange={setItem} verdicts={verdicts} />
         </>
       );
     }
-    if (stage === 'ai') {
+    if (k === 'ai') {
       if (!loadedPrompt) return <span className="fp-muted">{t('fbcFlowPromptUnavailable')}</span>;
       return (
         <>
@@ -256,7 +252,7 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
       );
     }
     return null;
-  })();
+  };
 
   const saved = fleet?.settings?.updated_at
     ? t('fbcEditLastSaved', {
@@ -291,63 +287,76 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
           );
         })}
       </div>
-      <form className={`ff-flow-detail${lists ? ' ff-flow-detail-rules' : ''}`} role="tabpanel" onSubmit={save}>
-        <div>
-          <div className="ff-flow-head">
-            <h3>{t(`fbcFlow_${stage}`)}</h3>
-            <span className="mono fp-muted">{t(`fbcFlowWhere_${stage}`)}</span>
-            {form && !draft && (
-              <button type="button" className="btn sm ff-edit-btn" disabled={!editable || !fleet}
-                title={editable ? undefined : t('fbcSettingsReadOnly')}
-                onClick={startEdit}>
-                {t('fbcEditStage')}
-              </button>
-            )}
-          </div>
-          <p className="ff-flow-what">{t(`fbcFlowWhat_${stage}`)}</p>
-          {draft && form ? (
-            <div className="ff-edit">
-              <div className="ff-edit-grid">
-                {form.search.map(key => (
-                  <label key={key} className="ff-edit-field">
-                    <span>{t(SEARCH_LABEL[key])}</span>
-                    {control(key)}
-                    {key === 'start_at' && <span className="fp-muted ff-edit-hint">{t('fbcEditStartAtHint')}</span>}
-                  </label>
-                ))}
-                {form.ai && (
-                  <label className="ff-edit-field">
-                    <span>{t('fbcSetModel')}</span>
-                    <input className="input" value={draft.ai_model} spellCheck={false}
-                      onChange={e => set('ai_model', e.target.value)} />
-                  </label>
+      {/* Every stage renders into the same cell and only the picked one shows,
+          so the card is always as tall as its tallest stage: picking a stage
+          never moves the page and nothing scrolls. The Edit form renders alone. */}
+      <form className="ff-flow-stack" onSubmit={save}>
+        {(draft ? [stage] : FLOW_STAGES).map(k => {
+          const form = STAGE_FORMS[k];
+          const extra = extraFor(k);
+          const shown = k === stage;
+          return (
+            <div key={k} className={`ff-flow-detail${STAGE_LISTS[k] ? ' ff-flow-detail-rules' : ''}${shown ? '' : ' ff-flow-ghost'}`}
+              role={shown ? 'tabpanel' : undefined} aria-hidden={!shown || undefined} {...(shown ? {} : { inert: '' })}>
+              <div>
+                <div className="ff-flow-head">
+                  <h3>{t(`fbcFlow_${k}`)}</h3>
+                  <span className="mono fp-muted">{t(`fbcFlowWhere_${k}`)}</span>
+                  {form && !draft && (
+                    <button type="button" className="btn sm ff-edit-btn" disabled={!editable || !fleet}
+                      title={editable ? undefined : t('fbcSettingsReadOnly')}
+                      onClick={startEdit}>
+                      {t('fbcEditStage')}
+                    </button>
+                  )}
+                </div>
+                <p className="ff-flow-what">{t(`fbcFlowWhat_${k}`)}</p>
+                {draft && form ? (
+                  <div className="ff-edit">
+                    <div className="ff-edit-grid">
+                      {form.search.map(key => (
+                        <label key={key} className="ff-edit-field">
+                          <span>{t(SEARCH_LABEL[key])}</span>
+                          {control(key)}
+                          {key === 'start_at' && <span className="fp-muted ff-edit-hint">{t('fbcEditStartAtHint')}</span>}
+                        </label>
+                      ))}
+                      {form.ai && (
+                        <label className="ff-edit-field">
+                          <span>{t('fbcSetModel')}</span>
+                          <input className="input" value={draft.ai_model} spellCheck={false}
+                            onChange={e => set('ai_model', e.target.value)} />
+                        </label>
+                      )}
+                    </div>
+                    <p className="ff-edit-note">{t('fbcEditSweepNote')}</p>
+                    <div className="ff-edit-actions">
+                      <button type="button" className="btn" disabled={busy} onClick={() => leaveEdit(() => {})}>{t('cancel')}</button>
+                      <button type="submit" className="btn primary" disabled={busy || changes === 0}>
+                        {busy ? t('fbcEditSaving') : t('fbcEditSave')}
+                      </button>
+                      <span className="ff-edit-count">
+                        {changes === 0 ? t('fbcEditNoChanges') : t('fbcEditChanges', { n: changes })}
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="ff-settings">
+                    {stageSettings(t, k, fleet).map(s => (
+                      <span key={s.label} className={`ff-setting${s.fixed ? ' ff-fixed' : ''}`}
+                        title={s.fixed ? t('fbcFixedHint') : editable ? t('fbcSettingsEditable') : t('fbcSettingsReadOnly')}>
+                        {s.label} <b>{s.value}</b>
+                      </span>
+                    ))}
+                  </div>
                 )}
+                {!form && <p className="ff-edit-note">{t('fbcEditNothing')}</p>}
+                {form && saved && !draft && <p className="ff-edit-note">{saved}</p>}
               </div>
-              <p className="ff-edit-note">{t('fbcEditSweepNote')}</p>
-              <div className="ff-edit-actions">
-                <button type="button" className="btn" disabled={busy} onClick={() => leaveEdit(() => {})}>{t('cancel')}</button>
-                <button type="submit" className="btn primary" disabled={busy || changes === 0}>
-                  {busy ? t('fbcEditSaving') : t('fbcEditSave')}
-                </button>
-                <span className="ff-edit-count">
-                  {changes === 0 ? t('fbcEditNoChanges') : t('fbcEditChanges', { n: changes })}
-                </span>
-              </div>
+              {extra && <div className="ff-flow-extra">{extra}</div>}
             </div>
-          ) : (
-            <div className="ff-settings">
-              {stageSettings(t, stage, fleet).map(s => (
-                <span key={s.label} className={`ff-setting${s.fixed ? ' ff-fixed' : ''}`}
-                  title={s.fixed ? t('fbcFixedHint') : editable ? t('fbcSettingsEditable') : t('fbcSettingsReadOnly')}>
-                  {s.label} <b>{s.value}</b>
-                </span>
-              ))}
-            </div>
-          )}
-          {!form && <p className="ff-edit-note">{t('fbcEditNothing')}</p>}
-          {form && saved && !draft && <p className="ff-edit-note">{saved}</p>}
-        </div>
-        {extra && <div className="ff-flow-extra">{extra}</div>}
+          );
+        })}
       </form>
     </section>
   );
