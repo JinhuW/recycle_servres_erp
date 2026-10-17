@@ -7,7 +7,7 @@ priority: P3
 created: 2026-10-04
 reporter: Jinhu
 branch: claude/project-thread-plu2yn
-pr:
+pr: 703
 version: 1.274.1
 related: [RS-175, RS-164, RS-161]
 ---
