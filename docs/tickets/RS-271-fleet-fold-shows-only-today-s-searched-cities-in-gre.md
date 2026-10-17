@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-17
 reporter: jinhu
 branch: feat/fleet-city-searched
-pr:
+pr: 685
 version: 1.271.0
 related: []
 ---
