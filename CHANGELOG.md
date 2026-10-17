@@ -17,6 +17,24 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.267.0] - 2026-10-17
+
+The Fleet tab shows skeletons while it loads (RS-266). It is the first page in
+a system-wide move to skeleton loading.
+
+### Added
+
+- **Skeletons on the Fleet tab.** The fleet document comes through the tunnel
+  proxy and can take seconds. Until it lands, the workers table used to sit
+  empty, the legend counted `0` for every status, and the flow stages read `—`.
+  Those zeros and dashes looked like real data. Now the table shows rows
+  shaped like the real ones, cell for cell, and the Recent activity aside shows
+  placeholder entries. The legend counts, the summary line, the "Fleet as of"
+  footer and the stage counts each shimmer until their own data arrives.
+  Skeleton rows match the real row height, so nothing jumps on load. A fleet
+  that fails to load drops its skeletons for the existing unavailable note,
+  and the 30-second refresh never brings them back.
+
 ## [1.266.1] - 2026-10-17
 
 The two Facebook tabs now share one layout, and the flow card keeps its height
