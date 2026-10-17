@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-268](./RS-268-link-pool-accounts-to-fleet-workers.md) | done | story | P2 | Link pool accounts to fleet workers | — |
 | [RS-267](./RS-267-drop-the-fleet-fold-s-pacing-block-show-each-worker.md) | done | story | P2 | Drop the fleet fold's Pacing block, show each worker's build in its subtitle | 1.268.0 |
 | [RS-266](./RS-266-skeleton-loading-on-the-fleet-tab.md) | done | story | P2 | Skeleton loading on the Fleet tab | 1.267.0 |
 | [RS-265](./RS-265-facebook-tabs-same-spacing-on-fleet-and-pool-fixed-h.md) | done | bug | P3 | Facebook tabs: same spacing on Fleet and Pool, fixed-height flow detail | 1.266.1 |

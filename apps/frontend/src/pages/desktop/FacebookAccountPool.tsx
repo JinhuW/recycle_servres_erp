@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { FbPoolSecretField, FbReportReason } from '@recycle-erp/shared';
 import { Icon } from '../../components/Icon';
 import { ApiError } from '../../lib/api';
+import type { Challenge, FleetDoc } from '../../lib/coordinator';
 import { handleFetchError, showWarnToast } from '../../lib/errorToast';
 import {
   activityKey,
@@ -17,23 +18,29 @@ import {
   type PoolSnapshot,
   type PoolStatus,
 } from '../../lib/facebookPool';
+import { fleetStatus, parkedWorkers, whoIs } from '../../lib/fleetView';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
+import { fleetWorkerPath, hrefFor, onLinkClick } from '../../lib/route';
 import { useEffectiveUser } from '../../lib/tweaks';
 import { AccountEditor } from './accountPool/AccountEditor';
 import { AccountImport } from './accountPool/AccountImport';
 import { CookieLabel, PoolCode, STATUS_KEYS, StatusChip } from './accountPool/shared';
+import { StatusChip as WorkerStatusChip, statusNote } from './FleetWorkers';
 import '../../styles/facebookPool.css';
 
 type Props = {
   snapshot: PoolSnapshot;
   onSnapshot: (snapshot: PoolSnapshot) => void;
   showToast?: (message: string, kind?: 'success' | 'error') => void;
+  // Managers only, and null until (or unless) the coordinator answers.
+  fleet?: FleetDoc | null;
+  challenges?: Challenge[] | null;
 };
 // Refusals the API names with one of the page's own keys read as a warning,
 // not as the blocking error dialog: the pool moved under the user, that's all.
 const KNOWN_REFUSALS = new Set(['fpAtLimit', 'fpDuplicate', 'fpTakenElsewhere', 'fpNotTaken']);
-export function FacebookAccountPool({ snapshot, onSnapshot, showToast }: Props) {
+export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = null, challenges = null }: Props) {
   const { t, locale } = useT();
   const user = useEffectiveUser()!;
   const manager = user.role === 'manager';
@@ -71,6 +78,20 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast }: Props) 
   const [picked, setPicked] = useState<number | null>(null);
   const [reporting, setReporting] = useState<number | null>(null);
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
+  const workers = useMemo(() => new Map((fleet?.workers ?? []).map((w) => [w.worker_id, w])), [fleet]);
+  const parked = useMemo(() => parkedWorkers(challenges), [challenges]);
+  const workerOf = (a: PoolAccount) =>
+    a.status === 'fleet' && a.holder ? workers.get(a.holder) : undefined;
+  const toggleReveal = (no: number, field: 'password' | 'emailPassword') => {
+    const key = `${no}:${field}`;
+    const shown = revealed.has(key);
+    setRevealed((prev) => {
+      const next = new Set(prev);
+      shown ? next.delete(key) : next.add(key);
+      return next;
+    });
+    if (!shown) audit(no, 'revealed', field);
+  };
   const ago = (at: number) => relTime(new Date(at).toISOString(), locale);
   const save = async (draft: PoolDraft) => {
     if (!manager || busy) return;
@@ -178,6 +199,73 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast }: Props) 
       <Icon name="copy" size={13} />
     </button>
   );
+  // A fleet account's status is its worker's; the link and the reveal sit
+  // inside a clickable row, so their clicks and keys stop short of the editor.
+  const statusCell = (a: PoolAccount) => {
+    const w = workerOf(a);
+    if (!w) return <StatusChip status={a.status} />;
+    const status = fleetStatus(w, parked);
+    const note = statusNote(t, w, parked, locale);
+    return (
+      <span className="fp-holder">
+        <span><WorkerStatusChip status={status} /></span>
+        {note && <small className={status === 'attention' || status === 'offline' ? 'fp-warn' : ''}>{note}</small>}
+      </span>
+    );
+  };
+  const holderCell = (a: PoolAccount) => {
+    const w = workerOf(a);
+    if (w) {
+      const path = fleetWorkerPath(w.worker_id);
+      return (
+        <span className="fp-holder">
+          <a
+            className="mono"
+            href={hrefFor(path)}
+            onClick={onLinkClick(path)}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            {w.worker_id}
+          </a>
+          <small>{whoIs(w).login ?? w.region.name}</small>
+        </span>
+      );
+    }
+    return (
+      <span className="fp-holder">
+        {a.holder ?? '—'}
+        {a.status === 'fleet' ? (
+          <small>{t('fpWorker')}</small>
+        ) : (
+          a.since && (
+            <small className={Date.now() - a.since > 7 * DAY ? 'fp-warn' : ''}>
+              {Date.now() - a.since > 7 * DAY ? t('fpOverdue') : ago(a.since)}
+            </small>
+          )
+        )}
+      </span>
+    );
+  };
+  const secretCell = (a: PoolAccount, field: 'password' | 'emailPassword', label: string) => {
+    if (!a[field]) return <span className="fp-muted">—</span>;
+    const shown = revealed.has(`${a.no}:${field}`);
+    const name = t(shown ? 'fpHide' : 'fpShow', { field: t(label) });
+    return (
+      <button
+        type="button"
+        className={`fp-reveal ${shown ? 'mono' : 'fp-masked'}`}
+        aria-label={name}
+        title={name}
+        onClick={(e) => {
+          e.stopPropagation();
+          toggleReveal(a.no, field);
+        }}
+        onKeyDown={(e) => e.stopPropagation()}
+      >
+        {shown ? a[field] : '••••••••'}
+      </button>
+    );
+  };
   return (
     <div className="fp-pool">
       {manager ? (
@@ -258,29 +346,14 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast }: Props) 
                       >
                         <td className="fp-row-number">{a.no}</td>
                         <td className="mono">{a.uid}</td>
-                        <td>
-                          <StatusChip status={a.status} />
-                        </td>
-                        <td>
-                          <span className="fp-holder">
-                            {a.holder ?? '—'}
-                            {a.status === 'fleet' ? (
-                              <small>{t('fpWorker')}</small>
-                            ) : (
-                              a.since && (
-                                <small className={Date.now() - a.since > 7 * DAY ? 'fp-warn' : ''}>
-                                  {Date.now() - a.since > 7 * DAY ? t('fpOverdue') : ago(a.since)}
-                                </small>
-                              )
-                            )}
-                          </span>
-                        </td>
-                        <td className="fp-masked">••••••••</td>
+                        <td>{statusCell(a)}</td>
+                        <td>{holderCell(a)}</td>
+                        <td>{secretCell(a, 'password', 'fpPassword')}</td>
                         <td>
                           <PoolCode secret={a.totp} />
                         </td>
                         <td>{a.email || '—'}</td>
-                        <td className="fp-masked">{a.emailPassword ? '••••••••' : '—'}</td>
+                        <td>{secretCell(a, 'emailPassword', 'fpEmailPassword')}</td>
                         <td className="fp-muted">{a.recovery || '—'}</td>
                         <td>
                           <CookieLabel account={a} />
@@ -476,16 +549,7 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast }: Props) 
                                     type="button"
                                     className="btn ghost icon sm"
                                     aria-label={t(shown ? 'fpHide' : 'fpShow', { field: t(label) })}
-                                    onClick={() => {
-                                      setRevealed((prev) => {
-                                        const next = new Set(prev);
-                                        shown
-                                          ? next.delete(`${a.no}:${field}`)
-                                          : next.add(`${a.no}:${field}`);
-                                        return next;
-                                      });
-                                      if (!shown) audit(a.no, 'revealed', field);
-                                    }}
+                                    onClick={() => toggleReveal(a.no, field)}
                                   >
                                     <Icon name={shown ? 'eyeOff' : 'eye'} size={14} />
                                   </button>
@@ -571,6 +635,8 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast }: Props) 
           account={editor === 'new' ? null : editor}
           accounts={accounts}
           activity={activity}
+          fleet={fleet}
+          challenges={challenges}
           onClose={() => setEditor(null)}
           onSave={(draft) => void save(draft)}
           onRetire={() => {
