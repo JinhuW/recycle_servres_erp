@@ -2,12 +2,12 @@
 id: RS-273
 title: Folded sidebar shows one green + on Submit order
 type: bug
-status: backlog
+status: done
 priority: P3
 created: 2026-10-17
 reporter: jinhu
 branch: fix/sidebar-single-plus
-pr:
+pr: 690
 version: 1.271.2
 related: []
 ---

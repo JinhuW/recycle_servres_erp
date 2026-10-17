@@ -5,6 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-273](./RS-273-folded-sidebar-shows-one-green-on-submit-order.md) | done | bug | P3 | Folded sidebar shows one green + on Submit order | 1.271.2 |
+| [RS-272](./RS-272-size-the-flow-stage-detail-to-its-tallest-stage.md) | done | bug | P2 | Size the flow stage detail to its tallest stage | 1.271.1 |
 | [RS-271](./RS-271-fleet-fold-shows-only-today-s-searched-cities-in-gre.md) | done | story | P2 | Fleet fold shows only today's searched cities in green | 1.271.0 |
 | [RS-270](./RS-270-let-the-flow-stage-detail-grow-instead-of-scrolling.md) | done | bug | P2 | Let the flow stage detail grow instead of scrolling | 1.270.1 |
 | [RS-269](./RS-269-make-the-fleet-s-keyword-rules-easy-to-read-edit-and.md) | done | story | P2 | Make the fleet's keyword rules easy to read, edit and test | 1.270.0 |
