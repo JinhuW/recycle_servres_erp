@@ -2,13 +2,13 @@
 id: RS-259
 title: Facebook account pool: backend store for the pool UI
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-17
 reporter: jinhu
 branch: feat/fb-pool-backend
-pr:
-version:
+pr: 663
+version: 1.262.0
 related: [RS-254]
 ---
 
@@ -44,22 +44,22 @@ Two things shaped the design:
 
 ## Acceptance criteria
 
-- [ ] A manager's add, import, edit, retire and remove at `/fleet/pool`
+- [x] A manager's add, import, edit, retire and remove at `/fleet/pool`
       persist across reloads and are visible to every other user.
-- [ ] A purchaser's take, return and report persist; they see every account's
+- [x] A purchaser's take, return and report persist; they see every account's
       status, holder, age and cookie check, but the login of an account only
       while they hold it; the activity log is not sent to them.
-- [ ] The API refuses the third take (`409 fpAtLimit`), a take of an account
+- [x] The API refuses the third take (`409 fpAtLimit`), a take of an account
       someone else just took (`409 fpTakenElsewhere`), a return or report by
       anyone but the holder or a manager (403), and a manager route called by
       a purchaser (403).
-- [ ] An import is all-or-nothing and names the rows whose uid collided.
-- [ ] Passwords, 2FA keys, e-mail passwords and cookies are stored as sealed
+- [x] An import is all-or-nothing and names the rows whose uid collided.
+- [x] Passwords, 2FA keys, e-mail passwords and cookies are stored as sealed
       blobs, never in clear; the nightly prod→dev scrub blanks them.
-- [ ] Every action lands in an append-only ledger with who, which account,
+- [x] Every action lands in an append-only ledger with who, which account,
       what and the status after; copies and reveals of a login are recorded too.
-- [ ] The `#` is never reused: a removed account leaves a gap.
-- [ ] Without `FB_POOL_KEY` in production the pool routes answer 503 and name
+- [x] The `#` is never reused: a removed account leaves a gap.
+- [x] Without `FB_POOL_KEY` in production the pool routes answer 503 and name
       the variable; nothing else is affected.
 
 ## Out of scope
@@ -73,7 +73,14 @@ Two things shaped the design:
 
 ## Notes
 
-- Plan: `~/.claude/plans/delegated-crunching-gadget.md` (this session).
+- Shipped in #663 as v1.262.0. `FB_POOL_KEY` was set on the Railway `backend`
+  service in both `dev` and `production` (no redeploy; each picks it up on its
+  next deploy).
+- Verification: backend suite files `facebook-pool`, `sealed`, `sync-scrub`,
+  `fk-indexes`, `env`, `coordinator-routes`; full frontend suite; `vite build`;
+  the local stack driven over the API as Alex / Marcus / Priya through import →
+  edit → take ×2 → limit → forbidden return → copy audit → return → report,
+  with the ledger and the sealed blobs checked in Postgres.
 - Secrets at rest were the one decision put to the requester; they chose
   encryption with a dedicated key over plain columns.
 - `FB_POOL_KEY` is 64 hex characters (`openssl rand -hex 32`), one per
