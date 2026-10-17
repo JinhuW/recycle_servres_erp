@@ -181,6 +181,41 @@ export function fleetStatus(w: FleetAccount, parked: ReadonlySet<string>): Fleet
 export const parkedWorkers = (challenges: readonly Challenge[] | null): Set<string> =>
   new Set((challenges ?? []).map(ch => ch.worker_id));
 
+// The Fleet table's sortable columns. Today has no single value of its own —
+// the day bar is a shape — so it sorts by the heartbeat its tooltip shows.
+export type FleetSortCol = 'worker' | 'status' | 'today' | 'searches' | 'session' | 'posts';
+
+export function fleetSortValue(col: FleetSortCol, w: FleetAccount, status: FleetStatus): string | number | null {
+  switch (col) {
+    case 'worker': {
+      const who = whoIs(w);
+      return (who.login ?? who.label ?? w.worker_id).toLowerCase();
+    }
+    case 'status': return FLEET_STATUSES.indexOf(status);
+    case 'today': {
+      const at = w.health?.last_heartbeat_at;
+      return at ? Date.parse(at) : null;
+    }
+    case 'searches': return w.today?.searches ?? null;
+    case 'session': return w.health?.session_days_left ?? null;
+    case 'posts': return w.today?.posts ?? null;
+  }
+}
+
+// Unknowns go last whichever way the column sorts, so flipping the order
+// never fills the top of the table with dashes.
+export function sortFleet(
+  workers: readonly FleetAccount[], col: FleetSortCol, dir: 'asc' | 'desc', parked: ReadonlySet<string>,
+): FleetAccount[] {
+  const sign = dir === 'asc' ? 1 : -1;
+  const keyed = workers.map(w => ({ w, v: fleetSortValue(col, w, fleetStatus(w, parked)) }));
+  keyed.sort((a, b) => {
+    if (a.v === null || b.v === null) return a.v === b.v ? 0 : a.v === null ? 1 : -1;
+    return a.v < b.v ? -sign : a.v > b.v ? sign : 0;
+  });
+  return keyed.map(k => k.w);
+}
+
 // The Recent activity feed. The coordinator keeps no event log the ERP can
 // read, so it is rebuilt from the timestamps it does serve: each worker's
 // latest search, listing and session backup, the moment a dead worker last
