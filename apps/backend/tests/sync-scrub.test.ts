@@ -27,6 +27,9 @@ describe('prod→dev sync scrub', () => {
       scopes: ['market:read'], createdBy: null, public: false,
     });
     const users = (await sql<{ n: number }[]>`SELECT COUNT(*)::int AS n FROM users`)[0].n;
+    await sql`
+      INSERT INTO fb_pool_accounts (uid, password_enc, totp_enc, email_password_enc, cookie_enc, cookie_uid, batch)
+      VALUES ('61556203481174', 'v1.a.b.c', 'v1.a.b.c', 'v1.a.b.c', 'v1.a.b.c', '61556203481174', 'Batch')`;
 
     await sql.begin(async (tx) => {
       await tx`SELECT pg_catalog.set_config('search_path', '', true)`;
@@ -44,5 +47,10 @@ describe('prod→dev sync scrub', () => {
     `;
     expect(left).toEqual({ refresh: 0, oauth_refresh: 0, codes: 0, pending: 0, attempts: 0, live_clients: 0 });
     expect((await sql<{ n: number }[]>`SELECT COUNT(*)::int AS n FROM users`)[0].n).toBe(users);
+    // The pool's rows survive the copy; their sealed logins do not.
+    expect(await sql`
+      SELECT uid, cookie_uid, password_enc, totp_enc, email_password_enc, cookie_enc FROM fb_pool_accounts`,
+    ).toEqual([{ uid: '61556203481174', cookie_uid: '61556203481174', password_enc: null, totp_enc: null,
+      email_password_enc: null, cookie_enc: null }]);
   });
 });

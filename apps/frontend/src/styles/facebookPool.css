@@ -23,25 +23,6 @@
 .fp-muted {
   color: var(--fg-subtle);
 }
-.fp-demo {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-  color: var(--fg-muted);
-  font-size: 12px;
-}
-.fp-demo-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 3px 7px;
-  background: var(--bg-soft);
-  font-weight: 550;
-  white-space: nowrap;
-}
 .fp-view-tabs .tab {
   display: inline-flex;
   align-items: center;

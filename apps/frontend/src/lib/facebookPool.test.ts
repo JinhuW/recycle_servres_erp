@@ -1,16 +1,49 @@
 import { describe, expect, it } from 'vitest';
 import {
+  activityKey,
   cookieHealth,
-  createPoolSample,
   DAY,
   emptyPoolDraft,
   nextPoolAccount,
   parsePoolImport,
   poolTotp,
   validatePoolDraft,
+  type PoolAccount,
+  type PoolStatus,
 } from './facebookPool';
 
 const uid = '61560221947310';
+// [uid, status, days in pool, cookie age in days or null]
+const fixture = (
+  rows: [string, PoolStatus, number, number | null][],
+  now = Date.now(),
+): PoolAccount[] =>
+  rows.map(([uid, status, age, cookieDays], i) => ({
+    no: i + 1,
+    uid,
+    password: `pw${i}`,
+    totp: 'JBSWY3DPEHPK3PXP',
+    email: `a${i}@outlook.example`,
+    emailPassword: '',
+    recovery: '',
+    cookie: cookieDays === null ? '' : `c_user=${uid}; xs=s${i}`,
+    cookieAt: cookieDays === null ? null : now - cookieDays * DAY,
+    note: '',
+    status,
+    holder: status === 'taken' ? 'Lina' : null,
+    holderId: null,
+    since: null,
+    addedAt: now - age * DAY,
+    batch: 'Batch',
+  }));
+const SAMPLE = fixture([
+  ['61556203481174', 'available', 41, 18],
+  ['61557718820365', 'available', 33, 9],
+  ['61558841020993', 'available', 30, 25],
+  ['61559300174528', 'available', 28, null],
+  ['61560014557821', 'available', 21, 4],
+  ['61556678013442', 'taken', 44, 6],
+]);
 const row = `${uid}|demo-password|JBSWY3DPEHPK3PXP|person@outlook.example|mail-password||c_user=${uid}; xs=demo|Aged 2y`;
 describe('supplier account import', () => {
   it.each(['|', '\t', '----'])(
@@ -30,7 +63,7 @@ describe('supplier account import', () => {
   it('rejects existing and repeated UIDs, preserving source line numbers', () => {
     const result = parsePoolImport(
       `\n${row}\n${row}\n61556203481174|pass|||||||`,
-      createPoolSample().accounts,
+      SAMPLE,
     );
     expect(result.map((r) => r.line)).toEqual([2, 3, 4]);
     expect(result[1].errors).toContain('fpRepeated');
@@ -54,26 +87,36 @@ describe('supplier account import', () => {
 });
 describe('pool allocation and editing', () => {
   it('prefers the oldest account with a fresh matching cookie', () => {
-    const accounts = createPoolSample().accounts;
+    const accounts = SAMPLE;
     expect(nextPoolAccount(accounts)?.no).toBe(1);
     expect(nextPoolAccount(accounts.filter((a) => a.no !== 1 && a.no !== 2))?.no).toBe(5);
     expect(nextPoolAccount(accounts.map((a) => ({ ...a, status: 'retired' })))).toBeUndefined();
   });
   it('validates the holder and excludes the edited account from duplicate checks', () => {
-    const accounts = createPoolSample().accounts;
+    const accounts = SAMPLE;
     expect(validatePoolDraft(accounts[0], accounts, 1)).toEqual([]);
+    expect(validatePoolDraft(accounts[0], accounts)).toEqual(['fpDuplicate']);
+    expect(
+      validatePoolDraft({ ...emptyPoolDraft(), uid, password: 'x'.repeat(501) }, []),
+    ).toEqual(['fpTooLong']);
     expect(
       validatePoolDraft({ ...emptyPoolDraft(), uid, password: 'pass', status: 'taken' }, []),
     ).toContain('fpHolderRequired');
   });
   it('marks cookies stale after 21 full days and validates c_user as a whole value', () => {
     const now = Date.now(),
-      account = createPoolSample(now).accounts[0];
+      account = fixture([['61556203481174', 'available', 41, 18]], now)[0];
     expect(cookieHealth({ ...account, cookieAt: now - 22 * DAY }, now).kind).toBe('stale');
     expect(cookieHealth({ ...account, cookieAt: null }, now).kind).toBe('unknown');
     expect(
       cookieHealth({ ...account, cookie: `c_user=${account.uid}invalid; xs=demo` }, now).kind,
     ).toBe('missing');
+  });
+});
+describe('activity verbs', () => {
+  it('maps the API verb onto the translation key', () => {
+    expect(activityKey('took')).toBe('fpLogTook');
+    expect(activityKey('imported')).toBe('fpLogImported');
   });
 });
 describe('live six-digit TOTP', () => {

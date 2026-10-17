@@ -33,6 +33,7 @@ import scanRoutes from './routes/scan';
 import notificationsRoutes from './routes/notifications';
 import trackerRoutes from './routes/tracker';
 import coordinatorRoutes from './routes/coordinator';
+import facebookPoolRoutes from './routes/facebookPool';
 import bankTxRoutes from './routes/bankTx';
 import internalTxRoutes from './routes/internalTx';
 import suppliersRoutes from './routes/suppliers';
@@ -412,6 +413,9 @@ app.route('/api/tracker', trackerRoutes);
 app.route('/api/web-submissions', webSubmissionsRoutes);
 // Same shape: self-applied authMiddleware + manager gate.
 app.route('/api/coordinator', coordinatorRoutes);
+// Self-applies authMiddleware; the take/return/report routes are for every
+// role and the rest is manager-gated inside the module.
+app.route('/api/facebook-pool', facebookPoolRoutes);
 // Same shape: self-applied authMiddleware + manager gate.
 app.route('/api/bank-transactions', bankTxRoutes);
 app.route('/api/internal-transactions', internalTxRoutes);

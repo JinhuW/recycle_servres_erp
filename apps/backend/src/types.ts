@@ -24,6 +24,9 @@ export type Env = {
   // Optional: without them the proxy still works against an unguarded URL.
   COORDINATOR_ACCESS_CLIENT_ID?: string;
   COORDINATOR_ACCESS_CLIENT_SECRET?: string;
+  // Seals the Facebook account pool's credentials (lib/sealed.ts): 64 hex
+  // chars. Unset in production disables the pool routes (503), nothing else.
+  FB_POOL_KEY?: string;
   // Shippo tracking (tracking only — never buys labels). Unset means tracking
   // is a stub that never ticks.
   SHIPPO_API_URL?: string;
