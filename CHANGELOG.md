@@ -17,6 +17,23 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.274.1] - 2026-10-17
+
+Hardening left over from the v1.209 release review (RS-176).
+
+### Fixed
+
+- **IMAP never logs in without TLS.** On any port but 993 the inbox poller now
+  requires STARTTLS. Before, `MAIL_IMAP_PORT=143` against a server that didn't
+  offer it (or a network that stripped it) sent the mailbox password in clear.
+- **Shutdown no longer hangs on a sleeping VNC viewer.** A viewer that never
+  answers the close frame is cut 2 seconds later, so `server.close()` returns
+  inside the drain window and the database pool is closed instead of the
+  process exiting on the hard deadline.
+- **One session-expiry threshold for the fleet.** A worker's attention reason
+  only reads "expiring" within 7 days of its session lapsing; the fleet table
+  and worker page take that limit from the same constant.
+
 ## [1.274.0] - 2026-10-17
 
 Busy cities are searched more often (RS-277). Until now every city was

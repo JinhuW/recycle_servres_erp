@@ -101,6 +101,7 @@ describe('fleetView', () => {
       expect(attentionReason(account({ health: health({ session_days_left: 0 }) })).kind).toBe('expired');
       expect(attentionReason(account({ health: health({ session_days_left: 2 }) })))
         .toEqual({ kind: 'expiring', days: 2 });
+      expect(attentionReason(account({ health: health({ session_days_left: 40 }) })).kind).toBe('other');
     });
 
     it('offers a re-login only where the session is the problem', () => {

@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-275](./RS-275-add-4-facebook-workers-with-erp-editable-cities-and.md) | done | story | P2 | Add 4 Facebook workers with ERP-editable cities and pool-assigned logins | — |
+| [RS-277](./RS-277-busy-cities-searched-more-often-tiered-daily-city-fr.md) | in-progress | story | P2 | Busy cities searched more often — tiered daily city frequency | — |
+| [RS-275](./RS-275-add-4-facebook-workers-with-erp-editable-cities-and.md) | done | story | P2 | Add 4 Facebook workers with ERP-editable cities and pool-assigned logins | 1.272.0 |
 | [RS-274](./RS-274-fix-the-release-review-findings-on-fleet-rules-city.md) | done | bug | P2 | Fix the release review findings on Fleet rules, city chips and the pool picker | 1.271.3 |
 | [RS-273](./RS-273-folded-sidebar-shows-one-green-on-submit-order.md) | done | bug | P3 | Folded sidebar shows one green + on Submit order | 1.271.2 |
 | [RS-272](./RS-272-size-the-flow-stage-detail-to-its-tallest-stage.md) | done | bug | P2 | Size the flow stage detail to its tallest stage | 1.271.1 |
@@ -95,7 +96,7 @@ See [README.md](./README.md) for what the fields mean.
 | [RS-183](./RS-183-review-mode-a-line-counted-to-0-is-not-in-the-box-an.md) | done | story | P2 | Review mode: a line counted to 0 is not in the box and is removed on Approve | 1.212.0 |
 | [RS-182](./RS-182-nightly-prod-to-dev-db-copy-fails-at-the-credential.md) | done | bug | P1 | Nightly prod-to-dev DB copy fails at the credential scrub | 1.211.1 |
 | [RS-178](./RS-178-ssd-capacity-offers-2tb-and-ram-class-offers-camm.md) | done | story | P2 | SSD capacity offers 2TB and RAM class offers CAMM | 1.211.0 |
-| [RS-176](./RS-176-vnc-bridge-and-mail-thread-hardening-from-the-v1-209.md) | backlog | task | P3 | VNC bridge and mail thread hardening from the v1.209 review | — |
+| [RS-176](./RS-176-vnc-bridge-and-mail-thread-hardening-from-the-v1-209.md) | done | task | P3 | VNC bridge and mail thread hardening from the v1.209 review | — |
 | [RS-175](./RS-175-pre-release-review-fixes-for-v1-204-0-v1-209-0.md) | done | bug | P1 | Pre-release review fixes for v1.204.0–v1.209.0 | 1.209.1 |
 | [RS-173](./RS-173-web-submission-email-can-run-on-dev-behind-a-test-re.md) | done | story | P2 | Web-submission email can run on dev behind a test-recipient list | 1.209.2 |
 | [RS-170](./RS-170-re-login-looks-broken-it-waits-for-the-next-sweep-an.md) | done | bug | P2 | Re-login looks broken: it waits for the next sweep and cannot sign in without a stored password | 1.208.2 |

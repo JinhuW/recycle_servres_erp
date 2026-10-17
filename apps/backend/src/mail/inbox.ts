@@ -88,6 +88,9 @@ export function imapClient(cfg: MailConfig): InboxClient & { abort(): void } {
     host: cfg.imap.host,
     port: cfg.imap.port,
     secure: cfg.imap.port === 993,
+    // Off implicit TLS, insist on the upgrade: imapflow otherwise logs in in
+    // the clear when a server (or whoever strips it) doesn't offer STARTTLS.
+    doSTARTTLS: cfg.imap.port !== 993,
     auth: { user: cfg.user, pass: cfg.password },
     // Its own logger writes JSON to stdout for every command.
     logger: false,
