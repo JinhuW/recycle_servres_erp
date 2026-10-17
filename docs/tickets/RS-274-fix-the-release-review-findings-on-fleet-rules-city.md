@@ -2,12 +2,12 @@
 id: RS-274
 title: Fix the release review findings on Fleet rules, city chips and the pool picker
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-17
 reporter: jinhu
 branch: fix/release-review-findings
-pr:
+pr: 692
 version: 1.271.3
 related: []
 ---
