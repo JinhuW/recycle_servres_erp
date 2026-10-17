@@ -2,13 +2,13 @@
 id: RS-260
 title: Facebook account pool: review fixes for the pool page
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-17
 reporter: jinhu
 branch: fix/fb-pool-review
-pr:
-version:
+pr: 665
+version: 1.262.1
 related: [RS-259]
 ---
 
