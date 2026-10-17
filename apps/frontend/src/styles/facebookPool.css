@@ -824,21 +824,6 @@
   white-space: normal;
   padding: 12px 16px 14px 44px !important;
 }
-.ff-fold-body {
-  display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
-  gap: 12px 24px;
-}
-.ff-fold-text {
-  margin-top: 6px;
-  font-size: 12px;
-  color: var(--fg-muted);
-}
-.ff-fold-hint {
-  margin-top: 8px;
-  font-size: 11px;
-  color: var(--fg-subtle);
-}
 .ff-fold .fp-section-label {
   margin-bottom: 6px;
 }
@@ -1230,8 +1215,7 @@
   .ff-split > .ff-workers {
     min-height: 0;
   }
-  .ff-flow-detail,
-  .ff-fold-body {
+  .ff-flow-detail {
     grid-template-columns: minmax(0, 1fr);
   }
   .ff-flow-detail {

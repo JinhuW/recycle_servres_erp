@@ -2089,8 +2089,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   (enabled phrases × cities × daily runs; amber once met, "—" when its
   monitor does not count searches) and its **Posts** (listings freshly
   reviewed today, and the week's alerts); the summary line adds the fleet's
-  new posts today. A fold per row shows the worker's cities (each with its
-  alerts), pacing and the daily search budget; and a **From a search to an alert** card that walks the
+  new posts today. Since v1.268.0 the row's subtitle carries the worker's
+  reported build next to its region, and the fold per row shows only the
+  worker's cities (each with its alerts); and a **From a search to an alert** card that walks the
   pipeline as the code runs it — search, result cards, the title gate before
   any page is opened, the cached page visit, the keyword gate with the
   description, the already-notified skip, the AI rating with its unit and
