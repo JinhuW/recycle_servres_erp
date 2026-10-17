@@ -2,13 +2,13 @@
 id: RS-261
 title: Facebook fleet tab: redesign to the pool's layout, worker pages
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-17
 reporter: jinhu
 branch: feat/fleet-page-redesign
-pr:
-version:
+pr: 669
+version: 1.263.0
 related: [RS-164, RS-254, RS-259, RS-260]
 ---
 
