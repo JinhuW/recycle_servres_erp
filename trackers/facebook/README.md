@@ -163,7 +163,9 @@ rs-session totp --storage-state configs/sessions/sc-1.json --raw | pbcopy
 The secret is the base32 key Facebook shows under Settings → Security →
 Two-factor → Authentication app → "Set up another way", or the whole
 `otpauth://` URI from the QR code. Codes are plain RFC 6238, computed locally —
-nothing is sent anywhere.
+nothing is sent anywhere. Web generators sellers link to, such as
+client.2zie.com/2fa, run the same arithmetic in the browser; see
+[the 2zie note](../../docs/debug-notes/2026-10-17-2zie-2fa-is-plain-totp.md).
 
 Secrets live in the same `<session>.json.meta.json` sidecar as the user agent
 and proxy: 0600, gitignored, sitting beside cookies that are an equally live
