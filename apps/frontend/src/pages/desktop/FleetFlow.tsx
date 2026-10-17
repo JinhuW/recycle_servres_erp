@@ -336,7 +336,7 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
                         {busy ? t('fbcEditSaving') : t('fbcEditSave')}
                       </button>
                       <span className="ff-edit-count">
-                        {changes === 0 ? t('fbcEditNoChanges') : t('fbcEditChanges', { n: changes })}
+                        {changes === 0 ? t('fbcEditNoChanges') : changes === 1 ? t('fbcEditChangesOne') : t('fbcEditChanges', { n: changes })}
                       </span>
                     </div>
                   </div>

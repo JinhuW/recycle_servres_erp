@@ -17,6 +17,30 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.271.3] - 2026-10-17
+
+Fixes from the review of the pending release (RS-274).
+
+### Fixed
+
+- **Enter in "Try a listing" no longer saves.** The tester sits inside the
+  stage's settings form, so pressing Enter in its title or description saved
+  the draft rules to every worker and started a sweep. Enter there now does
+  nothing.
+- **Quoted terms added to a group match again.** Adding `"solid state"` to
+  `ssd OR nvme` quoted it a second time, which searched for the quote
+  characters and never matched. A term already written as an operand is kept
+  as typed.
+- **City chips work before the tracker update lands.** With a facade that does
+  not yet report the cities searched today, every chip went grey. They now fall
+  back to the worker's liveness until the report arrives.
+- **Reordering a list can be saved.** Search phrases run in order, but a
+  reorder-only edit read as "No changes yet" and left Save disabled. A reorder
+  now counts as one change, and one change reads "1 unsaved change".
+- **One worker, one fleet account.** The pool editor's worker picker no longer
+  offers a worker that already holds another account, and with the fleet
+  unreachable the holder help asks for the worker ID on a Fleet account.
+
 ## [1.271.2] - 2026-10-17
 
 The folded sidebar shows one plus on Submit order, not two (RS-273).
