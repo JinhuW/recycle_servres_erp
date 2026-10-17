@@ -972,18 +972,10 @@
   gap: 16px 28px;
   padding: 14px 15px 16px;
   border-top: 1px solid var(--border);
-  /* One height for every stage, so picking a stage never moves the page;
-     a longer stage scrolls inside its column. The edit form grows freely. */
-  height: 300px;
-  grid-template-rows: minmax(0, 1fr);
-}
-.ff-flow-detail > * {
-  overflow-y: auto;
-  scrollbar-width: thin;
-}
-.ff-flow-detail:has(.ff-edit) {
-  height: auto;
-  grid-template-rows: none;
+  /* A floor so short stages don't shrink the card as you click through them;
+     a longer stage grows the card rather than scrolling inside it. */
+  min-height: 300px;
+  align-content: start;
 }
 .ff-flow-head {
   display: flex;
@@ -1456,8 +1448,7 @@ button.ff-expr-text {
     grid-template-columns: minmax(0, 1fr);
   }
   .ff-flow-detail {
-    height: auto;
-    grid-template-rows: none;
+    min-height: 0;
   }
   .ff-flow-detail.ff-flow-detail-rules,
   .ff-flow-detail.ff-flow-detail-rules:has(.ff-edit) {
