@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-17
 reporter: jinhu
 branch: feat/tracker-worker-sort
-pr:
+pr: 713
 version: 1.281.0
 related: []
 ---
