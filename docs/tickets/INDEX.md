@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-277](./RS-277-busy-cities-searched-more-often-tiered-daily-city-fr.md) | done | story | P2 | Busy cities searched more often — tiered daily city frequency | — |
+| [RS-277](./RS-277-busy-cities-searched-more-often-tiered-daily-city-fr.md) | done | story | P2 | Busy cities searched more often — tiered daily city frequency | 1.274.0 |
+| [RS-276](./RS-276-worker-page-assigns-a-pool-account-instead-of-typed.md) | done | story | P2 | Worker page assigns a pool account instead of typed credentials | — |
 | [RS-275](./RS-275-add-4-facebook-workers-with-erp-editable-cities-and.md) | done | story | P2 | Add 4 Facebook workers with ERP-editable cities and pool-assigned logins | 1.272.0 |
 | [RS-274](./RS-274-fix-the-release-review-findings-on-fleet-rules-city.md) | done | bug | P2 | Fix the release review findings on Fleet rules, city chips and the pool picker | 1.271.3 |
 | [RS-273](./RS-273-folded-sidebar-shows-one-green-on-submit-order.md) | done | bug | P3 | Folded sidebar shows one green + on Submit order | 1.271.2 |
