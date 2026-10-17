@@ -17,6 +17,18 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.270.1] - 2026-10-17
+
+The flow card's stage detail grows to fit instead of scrolling (RS-270).
+
+### Fixed
+
+- **No scrolling inside a stage.** The stage detail under "From a search to an
+  alert" was a fixed 300px, which the keyword-rule chips on the search, title
+  gate and keyword gate stages outgrew, so the rules hid behind an inner
+  scrollbar. 300px is now a floor: short stages keep the card steady as you
+  click through them, and longer ones grow it to show everything.
+
 ## [1.270.0] - 2026-10-17
 
 The fleet's keyword rules are now easy to read, edit and test on the flow card
