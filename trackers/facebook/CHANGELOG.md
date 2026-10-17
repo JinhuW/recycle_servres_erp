@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-10-17
+
 ### Fixed
 
 - **A new worker no longer searches logged out on its first start**
