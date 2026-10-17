@@ -157,9 +157,12 @@ function FleetPage({ head, tabs }: { head: React.ReactNode; tabs: React.ReactNod
     return out;
   }, [fleet, challenges]);
 
-  return (
+  // Head and tabs sit outside .fp-pool, as on the Pool tab: inside it their
+  // margins stack on its gap, and switching tabs would shift the content.
+  return <>
+    {head}
+    {tabs}
     <div className="fp-pool">
-      <div>{head}{tabs}</div>
       {notConfigured ? (
         <div className="card">
           <div className="card-body" style={{ display: 'flex', gap: 10, alignItems: 'flex-start', color: 'var(--fg-muted)' }}>
@@ -179,5 +182,5 @@ function FleetPage({ head, tabs }: { head: React.ReactNode; tabs: React.ReactNod
         </>
       )}
     </div>
-  );
+  </>;
 }

@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-265](./RS-265-facebook-tabs-same-spacing-on-fleet-and-pool-fixed-h.md) | done | bug | P3 | Facebook tabs: same spacing on Fleet and Pool, fixed-height flow detail | 1.266.1 |
 | [RS-264](./RS-264-fleet-table-today-strip-searches-budget-and-posts-pe.md) | done | story | P2 | Fleet table: Today strip, Searches budget and Posts per worker | 1.266.0 |
 | [RS-263](./RS-263-make-every-search-to-alert-stage-s-settings-editable.md) | done | story | P2 | Make every search-to-alert stage's settings editable from the ERP | 1.265.0 |
 | [RS-262](./RS-262-count-every-stage-of-the-search-to-alert-funnel.md) | done | story | P2 | Count every stage of the search-to-alert funnel | 1.264.0 |
