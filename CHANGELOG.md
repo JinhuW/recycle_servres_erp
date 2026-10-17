@@ -17,6 +17,19 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.279.0] - 2026-10-17
+
+### Changed
+
+- **Click a value in the pool table to copy it** (RS-282). In the manager's
+  Facebook account pool, UID, password, 2FA code, e-mail, e-mail password,
+  recovery e-mail, cookie and notes now copy on click, with a "copied" toast.
+  Getting a login out used to mean opening the editor or selecting text by
+  hand. Passwords copy while still masked; the eye beside them reveals. The
+  2FA cell copies the current six-digit code, not the key. Copying a password,
+  2FA code or cookie is logged as before. Because a click now copies, a row
+  click no longer opens the editor: a pencil at the end of each row does.
+
 ## [1.278.0] - 2026-10-17
 
 ### Added
