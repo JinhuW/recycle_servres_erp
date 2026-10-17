@@ -18,7 +18,10 @@ import {
 } from '../../lib/fleetView';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
-import { matchFleetWatch, useRoute } from '../../lib/route';
+import { hrefFor, matchFleetWatch, onLinkClick, useRoute } from '../../lib/route';
+import { useEffectiveUser } from '../../lib/tweaks';
+import { createPoolSample } from '../../lib/facebookPool';
+import { FacebookAccountPool } from './FacebookAccountPool';
 import { FormSkeleton } from '../../components/Skeleton';
 import {
   AccountInfoCard, AccountsCard, CoverageCard, FleetKpis, fmtDays, HITS_DAYS, PhrasesCard,
@@ -133,7 +136,12 @@ type Props = { showToast?: (msg: string, kind?: 'success' | 'error') => void };
 
 export function DesktopCoordinator({ showToast }: Props) {
   const { path } = useRoute();
-  const watch = matchFleetWatch(path);
+  const user = useEffectiveUser();
+  const { t } = useT();
+  const [pool, setPool] = useState(createPoolSample);
+  const manager = user?.role === 'manager';
+  const poolOpen = !manager || path === '/fleet/pool';
+  const watch = manager ? matchFleetWatch(path) : null;
   if (watch) {
     return (
       <Suspense fallback={<FormSkeleton fields={4} />}>
@@ -141,10 +149,18 @@ export function DesktopCoordinator({ showToast }: Props) {
       </Suspense>
     );
   }
-  return <FleetPage showToast={showToast} />;
+  const tabs = manager ? <nav className="tabs fp-view-tabs" aria-label={t('fpViews')}>
+    <a className={`tab ${!poolOpen ? 'active' : ''}`} href={hrefFor('/fleet')} onClick={onLinkClick('/fleet')} aria-current={!poolOpen ? 'page' : undefined}><Icon name="shield" size={14} />{t('fpFleet')}</a>
+    <a className={`tab ${poolOpen ? 'active' : ''}`} href={hrefFor('/fleet/pool')} onClick={onLinkClick('/fleet/pool')} aria-current={poolOpen ? 'page' : undefined}><Icon name="users" size={14} />{t('fpPool')}<span className="chip muted">{pool.accounts.length}</span></a>
+  </nav> : null;
+  return poolOpen ? <>
+    <div className="page-head"><div><div className="page-sub">{t('nav_monitors')} / {t('nav_coordinator')}</div><h1 className="page-title">{t('fpTitle')}</h1></div></div>
+    {tabs}
+    <FacebookAccountPool key={user?.role} snapshot={pool} setSnapshot={setPool} showToast={showToast} />
+  </> : <FleetPage showToast={showToast} tabs={tabs} />;
 }
 
-function FleetPage({ showToast }: Props) {
+function FleetPage({ showToast, tabs }: Props & { tabs: React.ReactNode }) {
   const { t, locale } = useT();
 
   const [fleet, setFleet] = useState<FleetDoc | null>(null);
@@ -220,6 +236,7 @@ function FleetPage({ showToast }: Props) {
   return (
     <>
       <PageHead query={query} onQuery={setQuery} filter={filter} onFilter={setFilter} />
+      {tabs}
 
       {!notConfigured && <FleetKpis fleet={fleet} stats={stats} locale={locale} />}
 

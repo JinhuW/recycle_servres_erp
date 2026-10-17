@@ -2098,6 +2098,16 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   "clear" removes it), a worker without a vault account gets one named after
   it, and the form says before saving whether Re-login will finish by itself
   or still needs the login finished in Watch (v1.259.0).
+- **Facebook account pool** — a second tab at **Monitors ▸ Facebook**,
+  linked directly at `/#/fleet/pool` (v1.261.0). Managers see a numbered key-tag
+  rack with counts/status filters, a searchable account table, supplier-row
+  import with duplicate/credential checks, an editor, retirement/removal,
+  cookie freshness and UID checks, and recent activity. Purchasers see the pool
+  instead of the Fleet controls: take up to two accounts, reveal/copy their
+  credentials and live six-digit 2FA codes, return them or report a login problem.
+  This is a labelled frontend demo: accounts and edits live only while the
+  Facebook page is open, with no secrets stored in browser persistence and no
+  account-pool backend calls yet. Fleet retains its existing manager-only API.
 - **Watching a worker's browser** — `/fleet/watch/<worker>` shows the live
   Chromium a Facebook worker is driving, through noVNC, view-only until
   "Take control" is ticked (and handed back when the tab is hidden), with

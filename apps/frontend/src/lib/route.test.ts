@@ -564,3 +564,10 @@ describe('leaving unsaved edits', () => {
     expect(w.hash()).toBe('#/inventory');
   });
 });
+
+describe('Facebook pool route', () => {
+  it('keeps the Facebook sidebar entry active on the pool', () => {
+    expect(pathToDesktopView('/fleet/pool')).toBe('coordinator');
+    expect(pathToDesktopView('/fleet')).toBe('coordinator');
+  });
+});
