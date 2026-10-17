@@ -49,7 +49,10 @@ portal was removed in v1.191.0; no bid had ever been placed through it.
   since the name alone would advertise the feature. Whole-endpoint manager
   features (sell orders, customers, transfers, activity, members,
   bank and internal transactions, tracker, coordinator, connectors, FX rates,
-  inventory export and analysis, a line's linked sell orders) answer 403;
+  inventory export and analysis, a line's linked sell orders) answer 403. The
+  Facebook account pool (`/api/facebook-pool`, v1.262.0) is the exception
+  under Monitors: every role reads the rack and may take, return and report,
+  while add, import, edit, retire and remove answer 403 to a purchaser;
   shared reads are scoped to the caller's own rows and leave the manager-only
   fields out: the PO figures `finalSellPrice`, `finalSoldQty`, `realized` and
   `sellOrders` (v1.177.1), and the linked-payment total, the pending
@@ -2105,9 +2108,20 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   cookie freshness and UID checks, and recent activity. Purchasers see the pool
   instead of the Fleet controls: take up to two accounts, reveal/copy their
   credentials and live six-digit 2FA codes, return them or report a login problem.
-  This is a labelled frontend demo: accounts and edits live only while the
-  Facebook page is open, with no secrets stored in browser persistence and no
-  account-pool backend calls yet. Fleet retains its existing manager-only API.
+  Since v1.262.0 the pool is stored by the backend (`/api/facebook-pool`):
+  every change is shared and survives a reload, the two-account limit and the
+  "holder or manager" rule on return/report are enforced in the transaction,
+  an import lands whole or not at all (naming the rows whose UID collided),
+  and the `#` is never reused. Logins (password, 2FA key, e-mail password,
+  cookie) are sealed at rest under `FB_POOL_KEY`; the nightly prod→dev copy
+  blanks them. A purchaser's read carries the login of the accounts they hold
+  and only the rack — status, holder, age, the cookie's `c_user` — for the
+  rest; the activity ledger (every add, import, edit, take, return, report,
+  retire, remove, plus copies and reveals of a login) is manager-only. In
+  production without `FB_POOL_KEY` the pool routes answer 503 and name the
+  variable. The pool is the human side of the picture; the fleet's own vault
+  of worker logins (RS-254) stays a separate, write-only store, and `fleet`
+  here is the label saying which worker an account went to.
 - **Watching a worker's browser** — `/fleet/watch/<worker>` shows the live
   Chromium a Facebook worker is driving, through noVNC, view-only until
   "Take control" is ticked (and handed back when the tab is hidden), with

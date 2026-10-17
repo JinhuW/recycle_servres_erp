@@ -25,3 +25,8 @@ UPDATE public.oauth_clients SET secret_hash = NULL, revoked_at = COALESCE(revoke
 -- hostname. Prod carries no marker table, so the dump never brings one.
 CREATE TABLE public.env_marker (name TEXT PRIMARY KEY);
 INSERT INTO public.env_marker (name) VALUES ('dev');
+-- The Facebook account pool's logins are sealed under prod's FB_POOL_KEY,
+-- which dev doesn't have; blanked so dev holds neither the secrets nor blobs
+-- it can't open. The rows themselves stay, so the rack still looks real.
+UPDATE public.fb_pool_accounts
+   SET password_enc = NULL, totp_enc = NULL, email_password_enc = NULL, cookie_enc = NULL;

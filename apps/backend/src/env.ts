@@ -55,6 +55,9 @@ export function buildEnv(src: NodeJS.ProcessEnv = process.env): Env {
   if (src.NODE_ENV === 'production' && !src.OAUTH_SIGNING_KEY_CURRENT) {
     throw new Error('OAUTH_SIGNING_KEY_CURRENT must be set in production');
   }
+  if (src.FB_POOL_KEY && !/^[0-9a-fA-F]{64}$/.test(src.FB_POOL_KEY.trim())) {
+    throw new Error('FB_POOL_KEY must be 64 hex characters (openssl rand -hex 32)');
+  }
   // Attachments: all of R2 or none of it. Four of the five variables used
   // to fall back to the stub as quietly as none did, and every receipt and
   // photo uploaded in production was recorded as stored while its bytes went
@@ -77,6 +80,7 @@ export function buildEnv(src: NodeJS.ProcessEnv = process.env): Env {
     TRACKER_API_TOKEN: src.TRACKER_API_TOKEN,
     COORDINATOR_API_URL: src.COORDINATOR_API_URL,
     COORDINATOR_API_TOKEN: src.COORDINATOR_API_TOKEN,
+    FB_POOL_KEY: src.FB_POOL_KEY,
     COORDINATOR_ACCESS_CLIENT_ID: src.COORDINATOR_ACCESS_CLIENT_ID,
     COORDINATOR_ACCESS_CLIENT_SECRET: src.COORDINATOR_ACCESS_CLIENT_SECRET,
     SHIPPO_API_URL: src.SHIPPO_API_URL,

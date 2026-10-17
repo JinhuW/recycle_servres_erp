@@ -20,7 +20,7 @@ import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { hrefFor, matchFleetWatch, onLinkClick, useRoute } from '../../lib/route';
 import { useEffectiveUser } from '../../lib/tweaks';
-import { createPoolSample } from '../../lib/facebookPool';
+import { poolApi, type PoolSnapshot } from '../../lib/facebookPool';
 import { FacebookAccountPool } from './FacebookAccountPool';
 import { FormSkeleton } from '../../components/Skeleton';
 import {
@@ -138,10 +138,14 @@ export function DesktopCoordinator({ showToast }: Props) {
   const { path } = useRoute();
   const user = useEffectiveUser();
   const { t } = useT();
-  const [pool, setPool] = useState(createPoolSample);
+  const [pool, setPool] = useState<PoolSnapshot | null>(null);
   const manager = user?.role === 'manager';
   const poolOpen = !manager || path === '/fleet/pool';
   const watch = manager ? matchFleetWatch(path) : null;
+  // Loaded on both tabs: the Pool tab's count chip reads it too.
+  useEffect(() => {
+    poolApi.snapshot().then(setPool).catch(handleFetchError);
+  }, []);
   if (watch) {
     return (
       <Suspense fallback={<FormSkeleton fields={4} />}>
@@ -151,12 +155,14 @@ export function DesktopCoordinator({ showToast }: Props) {
   }
   const tabs = manager ? <nav className="tabs fp-view-tabs" aria-label={t('fpViews')}>
     <a className={`tab ${!poolOpen ? 'active' : ''}`} href={hrefFor('/fleet')} onClick={onLinkClick('/fleet')} aria-current={!poolOpen ? 'page' : undefined}><Icon name="shield" size={14} />{t('fpFleet')}</a>
-    <a className={`tab ${poolOpen ? 'active' : ''}`} href={hrefFor('/fleet/pool')} onClick={onLinkClick('/fleet/pool')} aria-current={poolOpen ? 'page' : undefined}><Icon name="users" size={14} />{t('fpPool')}<span className="chip muted">{pool.accounts.length}</span></a>
+    <a className={`tab ${poolOpen ? 'active' : ''}`} href={hrefFor('/fleet/pool')} onClick={onLinkClick('/fleet/pool')} aria-current={poolOpen ? 'page' : undefined}><Icon name="users" size={14} />{t('fpPool')}{pool && <span className="chip muted">{pool.accounts.length}</span>}</a>
   </nav> : null;
   return poolOpen ? <>
     <div className="page-head"><div><div className="page-sub">{t('nav_monitors')} / {t('nav_coordinator')}</div><h1 className="page-title">{t('fpTitle')}</h1></div></div>
     {tabs}
-    <FacebookAccountPool key={user?.role} snapshot={pool} setSnapshot={setPool} showToast={showToast} />
+    {pool
+      ? <FacebookAccountPool key={user?.role} snapshot={pool} onSnapshot={setPool} showToast={showToast} />
+      : <FormSkeleton fields={4} />}
   </> : <FleetPage showToast={showToast} tabs={tabs} />;
 }
 

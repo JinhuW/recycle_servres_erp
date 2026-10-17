@@ -17,6 +17,41 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.262.0] - 2026-10-17
+
+The Facebook account pool stops being a demo (RS-259). v1.261.0 shipped the
+page with its accounts held in React state; this release gives it a backend,
+so what a manager imports and what a purchaser takes is the same pool for
+everyone and survives a reload.
+
+### Added
+
+- **`/api/facebook-pool`** stores the pool in Postgres: an accounts table whose
+  `#` is an identity that is never reused, and an append-only ledger of who
+  added, imported, edited, took, returned, reported, retired or removed which
+  account — including who copied or revealed a login. Every write answers with
+  the whole pool, which the page swaps in. Purchasers may take (at most two,
+  enforced in the transaction, two hands on one tag settled by a row lock),
+  return and report; add, import, edit, retire and remove are manager-only.
+  A purchaser's read carries the login of the accounts they hold and, for the
+  rest, only the rack: status, holder, age and the cookie's `c_user`.
+- **Logins are sealed at rest.** Passwords, 2FA setup keys, e-mail passwords
+  and cookies are AES-256-GCM blobs under a dedicated `FB_POOL_KEY`
+  (`openssl rand -hex 32`), separate from `JWT_SECRET` so that one can rotate
+  without orphaning the stored logins. Production without the key answers 503
+  on the pool routes and nothing else; dev, CI and the tests derive a key from
+  `JWT_SECRET`. The nightly prod→dev copy blanks the four sealed columns.
+- **Shared rules.** `@recycle-erp/shared` now holds the pool's statuses, the
+  two-account limit, the report reasons and the draft validation, so the page
+  and the API refuse the same rows with the same codes.
+
+### Changed
+
+- The pool page calls the API for every action instead of patching local
+  state, loses its "demo pool" banner, and reads a refusal the API names with
+  one of its own codes (`fpAtLimit`, `fpDuplicate`, `fpTakenElsewhere`,
+  `fpNotTaken`) as a warning toast rather than the error dialog.
+
 ## [1.261.0] - 2026-10-16
 
 ### Added

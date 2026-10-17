@@ -1,13 +1,18 @@
-import { useState, type Dispatch, type SetStateAction } from 'react';
+import { useState } from 'react';
+import type { FbPoolSecretField, FbReportReason } from '@recycle-erp/shared';
 import { Icon } from '../../components/Icon';
+import { ApiError } from '../../lib/api';
+import { handleFetchError, showWarnToast } from '../../lib/errorToast';
 import {
+  activityKey,
   DAY,
   nextPoolAccount,
   POOL_LIMIT,
   POOL_STATUSES,
+  poolApi,
   poolTotp,
+  REPORT_REASON_KEYS,
   type PoolAccount,
-  type PoolActivity,
   type PoolDraft,
   type PoolSnapshot,
   type PoolStatus,
@@ -22,14 +27,43 @@ import '../../styles/facebookPool.css';
 
 type Props = {
   snapshot: PoolSnapshot;
-  setSnapshot: Dispatch<SetStateAction<PoolSnapshot>>;
+  onSnapshot: (snapshot: PoolSnapshot) => void;
   showToast?: (message: string, kind?: 'success' | 'error') => void;
 };
-export function FacebookAccountPool({ snapshot, setSnapshot, showToast }: Props) {
+// Refusals the API names with one of the page's own keys read as a warning,
+// not as the blocking error dialog: the pool moved under the user, that's all.
+const KNOWN_REFUSALS = new Set(['fpAtLimit', 'fpDuplicate', 'fpTakenElsewhere', 'fpNotTaken']);
+export function FacebookAccountPool({ snapshot, onSnapshot, showToast }: Props) {
   const { t, locale } = useT();
   const user = useEffectiveUser()!;
   const manager = user.role === 'manager';
   const { accounts, activity } = snapshot;
+  const [busy, setBusy] = useState(false);
+  // Every write answers with the whole pool; a refusal with a known code is a
+  // warning toast, anything else is the usual error dialog.
+  const run = async (
+    request: Promise<PoolSnapshot>,
+    toast?: string | ((s: PoolSnapshot) => string),
+  ): Promise<PoolSnapshot | null> => {
+    setBusy(true);
+    try {
+      const next = await request;
+      onSnapshot(next);
+      if (toast) showToast?.(typeof toast === 'function' ? toast(next) : toast);
+      return next;
+    } catch (err) {
+      const code = err instanceof ApiError ? (err.body as { code?: string } | undefined)?.code : undefined;
+      if (err instanceof ApiError && err.status === 409 && code && KNOWN_REFUSALS.has(code)) {
+        showWarnToast(t(code));
+        void poolApi.snapshot().then(onSnapshot).catch(() => undefined);
+      } else handleFetchError(err);
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  };
+  const audit = (no: number, kind: 'copied' | 'revealed', field: FbPoolSecretField) =>
+    void poolApi.event(no, kind, field).catch(() => undefined);
   const [filter, setFilter] = useState<PoolStatus | 'all'>('all');
   const [query, setQuery] = useState('');
   const [editor, setEditor] = useState<PoolAccount | 'new' | null>(null);
@@ -38,91 +72,22 @@ export function FacebookAccountPool({ snapshot, setSnapshot, showToast }: Props)
   const [reporting, setReporting] = useState<number | null>(null);
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
   const ago = (at: number) => relTime(new Date(at).toISOString(), locale);
-  const log = (
-    action: string,
-    status: PoolStatus,
-    accountNo?: number,
-    detail?: string,
-  ): PoolActivity => ({ at: Date.now(), who: user.name, action, status, accountNo, detail });
-  const update = (no: number, patch: Partial<PoolAccount>, action: string) => {
-    setSnapshot((s) => ({
-      ...s,
-      accounts: s.accounts.map((a) => (a.no === no ? { ...a, ...patch } : a)),
-      activity: [
-        log(action, patch.status ?? accounts.find((a) => a.no === no)!.status, no),
-        ...s.activity,
-      ],
-    }));
-  };
-  const addActivity = (action: string, a: PoolAccount) =>
-    setSnapshot((s) => ({ ...s, activity: [log(action, a.status, a.no), ...s.activity] }));
-  const save = (draft: PoolDraft) => {
-    if (!manager) return;
+  const save = async (draft: PoolDraft) => {
+    if (!manager || busy) return;
     const original = editor === 'new' ? null : editor;
-    const holder = ['taken', 'fleet', 'problem'].includes(draft.status) ? draft.holder : null;
-    const now = Date.now();
-    if (original) {
-      update(
-        original.no,
-        {
-          ...draft,
-          holder,
-          holderId:
-            holder === user.name ? user.id : holder === original.holder ? original.holderId : null,
-          since: holder === original.holder ? original.since : holder ? now : null,
-          cookieAt:
-            draft.cookie === original.cookie ? original.cookieAt : draft.cookie ? now : null,
-        },
-        'fpLogEdited',
-      );
-      showToast?.(t('fpSaved', { n: original.no }));
-    } else {
-      setSnapshot((s) => ({
-        ...s,
-        nextNo: s.nextNo + 1,
-        accounts: [
-          ...s.accounts,
-          {
-            ...draft,
-            holder,
-            holderId: holder === user.name ? user.id : null,
-            no: s.nextNo,
-            since: holder ? now : null,
-            addedAt: now,
-            cookieAt: draft.cookie ? now : null,
-            batch: t('fpManualBatch'),
-          },
-        ],
-        activity: [log('fpLogAdded', draft.status, s.nextNo), ...s.activity],
-      }));
-      showToast?.(t('fpSaved', { n: snapshot.nextNo }));
-    }
-    setEditor(null);
+    const saved = await (original
+      ? run(poolApi.update(original.no, draft), t('fpSaved', { n: original.no }))
+      : run(poolApi.create(draft, t('fpManualBatch')), (s) =>
+          t('fpSaved', { n: s.accounts.find((a) => a.uid === draft.uid)?.no ?? '' }),
+        ));
+    if (saved) setEditor(null);
   };
   const mine = accounts.filter((a) => a.status === 'taken' && a.holderId === user.id);
   const chosen =
     accounts.find((a) => a.no === picked && a.status === 'available') ?? nextPoolAccount(accounts);
-  const take = (no: number) => {
-    setSnapshot((s) => {
-      const account = s.accounts.find((a) => a.no === no);
-      if (
-        account?.status !== 'available' ||
-        s.accounts.filter((a) => a.status === 'taken' && a.holderId === user.id).length >=
-          POOL_LIMIT
-      )
-        return s;
-      return {
-        ...s,
-        accounts: s.accounts.map((a) =>
-          a.no === no
-            ? { ...a, status: 'taken', holder: user.name, holderId: user.id, since: Date.now() }
-            : a,
-        ),
-        activity: [log('fpLogTook', 'taken', no), ...s.activity],
-      };
-    });
-    setPicked(null);
-    showToast?.(t('fpTakenToast', { n: no }));
+  const take = async (no: number) => {
+    if (busy) return;
+    if (await run(poolApi.take(no), t('fpTakenToast', { n: no }))) setPicked(null);
   };
   const clearReveals = (no: number) =>
     setRevealed((prev) => new Set([...prev].filter((key) => !key.startsWith(`${no}:`))));
@@ -136,7 +101,7 @@ export function FacebookAccountPool({ snapshot, setSnapshot, showToast }: Props)
     try {
       await navigator.clipboard.writeText(value);
       showToast?.(t('fpCopied', { field: t(label) }));
-      if (!['uid', 'email', 'recovery'].includes(field)) addActivity('fpLogCopied', a);
+      if (field !== 'uid' && field !== 'email' && field !== 'recovery') audit(a.no, 'copied', field);
     } catch {
       showToast?.(t('fpCopyFailed'), 'error');
     }
@@ -212,13 +177,6 @@ export function FacebookAccountPool({ snapshot, setSnapshot, showToast }: Props)
   );
   return (
     <div className="fp-pool">
-      <div className="fp-demo">
-        <span className="fp-demo-badge">
-          <Icon name="info" size={13} />
-          {t('fpDemo')}
-        </span>
-        <span>{t('fpDemoNote')}</span>
-      </div>
       {manager ? (
         <>
           {rack()}
@@ -353,7 +311,7 @@ export function FacebookAccountPool({ snapshot, setSnapshot, showToast }: Props)
                   <li key={i}>
                     <i className={`fp-dot fp-${entry.status}`} />
                     <div>
-                      <b>{entry.who}</b> {t(entry.action)}
+                      <b>{entry.who}</b> {t(activityKey(entry.action))}
                       {entry.accountNo !== undefined && ` #${entry.accountNo}`}
                       {entry.detail && ` · ${entry.detail}`}
                       <time>{ago(entry.at)}</time>
@@ -523,7 +481,7 @@ export function FacebookAccountPool({ snapshot, setSnapshot, showToast }: Props)
                                           : next.add(`${a.no}:${field}`);
                                         return next;
                                       });
-                                      if (!shown) addActivity('fpLogRevealed', a);
+                                      if (!shown) audit(a.no, 'revealed', field);
                                     }}
                                   >
                                     <Icon name={shown ? 'eyeOff' : 'eye'} size={14} />
@@ -539,15 +497,15 @@ export function FacebookAccountPool({ snapshot, setSnapshot, showToast }: Props)
                         <button
                           type="button"
                           className="btn"
+                          disabled={busy}
                           onClick={() => {
-                            update(
-                              a.no,
-                              { status: 'available', holder: null, holderId: null, since: null },
-                              'fpLogReturned',
+                            void run(poolApi.giveBack(a.no), t('fpReturnedToast', { n: a.no })).then(
+                              (ok) => {
+                                if (!ok) return;
+                                clearReveals(a.no);
+                                setReporting(null);
+                              },
                             );
-                            clearReveals(a.no);
-                            setReporting(null);
-                            showToast?.(t('fpReturnedToast', { n: a.no }));
                           }}
                         >
                           <Icon name="rotate" size={14} />
@@ -566,30 +524,27 @@ export function FacebookAccountPool({ snapshot, setSnapshot, showToast }: Props)
                       {reporting === a.no && (
                         <div className="fp-report">
                           <p>{t('fpReportHelp')}</p>
-                          {['fpCheckpoint', 'fpWrongPassword', 'fpBadCode', 'fpDisabled'].map(
-                            (reason) => (
-                              <button
-                                type="button"
-                                className="btn sm"
-                                key={reason}
-                                onClick={() => {
-                                  update(
-                                    a.no,
-                                    {
-                                      status: 'problem',
-                                      note: `${t(reason)} (${user.name})${a.note ? ` · ${a.note}` : ''}`,
-                                    },
-                                    'fpLogReported',
-                                  );
+                          {(Object.keys(REPORT_REASON_KEYS) as FbReportReason[]).map((reason) => (
+                            <button
+                              type="button"
+                              className="btn sm"
+                              key={reason}
+                              disabled={busy}
+                              onClick={() => {
+                                const note = `${t(REPORT_REASON_KEYS[reason])} (${user.name})${a.note ? ` · ${a.note}` : ''}`;
+                                void run(
+                                  poolApi.report(a.no, reason, note),
+                                  t('fpReportedToast', { n: a.no }),
+                                ).then((ok) => {
+                                  if (!ok) return;
                                   clearReveals(a.no);
                                   setReporting(null);
-                                  showToast?.(t('fpReportedToast', { n: a.no }));
-                                }}
-                              >
-                                {t(reason)}
-                              </button>
-                            ),
-                          )}
+                                });
+                              }}
+                            >
+                              {t(REPORT_REASON_KEYS[reason])}
+                            </button>
+                          ))}
                           <button
                             type="button"
                             className="btn ghost sm"
@@ -614,24 +569,14 @@ export function FacebookAccountPool({ snapshot, setSnapshot, showToast }: Props)
           accounts={accounts}
           activity={activity}
           onClose={() => setEditor(null)}
-          onSave={save}
+          onSave={(draft) => void save(draft)}
           onRetire={() => {
-            if (editor !== 'new')
-              update(
-                editor.no,
-                { status: 'retired', holder: null, holderId: null, since: null },
-                'fpLogRetired',
-              );
-            setEditor(null);
+            if (editor === 'new' || busy) return;
+            void run(poolApi.retire(editor.no)).then((ok) => ok && setEditor(null));
           }}
           onRemove={() => {
-            if (editor !== 'new')
-              setSnapshot((s) => ({
-                ...s,
-                accounts: s.accounts.filter((a) => a.no !== editor.no),
-                activity: [log('fpLogRemoved', 'retired', editor.no), ...s.activity],
-              }));
-            setEditor(null);
+            if (editor === 'new' || busy) return;
+            void run(poolApi.remove(editor.no)).then((ok) => ok && setEditor(null));
           }}
         />
       )}
@@ -640,30 +585,16 @@ export function FacebookAccountPool({ snapshot, setSnapshot, showToast }: Props)
           accounts={accounts}
           onClose={() => setImporting(false)}
           onImport={(drafts, batch) => {
-            const now = Date.now();
-            setSnapshot((s) => ({
-              nextNo: s.nextNo + drafts.length,
-              accounts: [
-                ...s.accounts,
-                ...drafts.map((draft, i) => ({
-                  ...draft,
-                  no: s.nextNo + i,
-                  holderId: null,
-                  since: null,
-                  addedAt: now,
-                  cookieAt: draft.cookie ? now : null,
-                  batch,
-                })),
-              ],
-              activity: [
-                log('fpLogImported', 'available', undefined, `${drafts.length} · ${batch}`),
-                ...s.activity,
-              ],
-            }));
-            setImporting(false);
-            setFilter('all');
-            setQuery('');
-            showToast?.(t('fpImportedToast', { n: drafts.length }));
+            if (busy) return;
+            void run(
+              poolApi.importRows(batch, drafts),
+              t('fpImportedToast', { n: drafts.length }),
+            ).then((ok) => {
+              if (!ok) return;
+              setImporting(false);
+              setFilter('all');
+              setQuery('');
+            });
           }}
         />
       )}
