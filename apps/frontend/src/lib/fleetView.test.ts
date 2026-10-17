@@ -256,6 +256,7 @@ describe('how often a city is searched', () => {
     expect(tierSettingsValid({ ...s, per_day: [2, 3, 1] })).toBe(false);
     expect(tierSettingsValid({ ...s, top_pct: 60, mid_pct: 50 })).toBe(false);
     expect(tierSettingsValid({ ...s, window_days: 0 })).toBe(false);
+    expect(tierSettingsValid({ ...s, per_day: [3, 2, NaN] })).toBe(false);
     expect(tierSettingsValid({ ...s, top_pct: 0, mid_pct: 0 })).toBe(true);
   });
 });

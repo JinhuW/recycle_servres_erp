@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { Fragment, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { Icon } from '../../components/Icon';
 import { Modal } from '../../components/Modal';
 import {
@@ -25,6 +25,10 @@ import { useT } from '../../lib/i18n';
 
 const DEFAULT_RADIUS_KM = 100;
 const PIN_CHOICES = [3, 2, 1] as const;
+
+// An emptied box stays empty (NaN) rather than turning into 0, and the rule
+// check refuses it.
+const boxValue = (v: string) => (v.trim() === '' ? NaN : Number(v));
 
 export function EditCitiesButton({ worker, fleet, onSaved, className = 'btn' }: {
   worker: FleetAccount;
@@ -245,16 +249,26 @@ function CityFrequency({ cities, ranked, tiers, pins, setPins, settings, setSett
     return next;
   });
   const num = (key: 'top_pct' | 'mid_pct' | 'window_days', value: string) =>
-    setSettings({ ...settings, [key]: Number(value) });
+    setSettings({ ...settings, [key]: boxValue(value) });
   const perDay = (i: number, value: string) => {
     const next = [...settings.per_day] as CityTierSettings['per_day'];
-    next[i] = Number(value);
+    next[i] = boxValue(value);
     setSettings({ ...settings, per_day: next });
   };
-  const numberBox = (value: number, onChange: (v: string) => void, label: string, max: number) => (
-    <input className="input" type="number" min={0} max={max} style={{ width: 64 }} value={value}
-      aria-label={label} title={label} onChange={e => onChange(e.target.value)} />
+  // A box with its unit beside it, so every row's boxes line up in one column.
+  const numberBox = (value: number, onChange: (v: string) => void, label: string, max: number, unit: string) => (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+      <input className="input" type="number" min={0} max={max} style={{ width: 72, textAlign: 'right' }}
+        value={Number.isNaN(value) ? '' : value} aria-label={label} title={label} onChange={e => onChange(e.target.value)} />
+      <span className="muted" style={{ minWidth: 28 }}>{unit}</span>
+    </span>
   );
+  const restPct = Math.max(0, 100 - settings.top_pct - settings.mid_pct);
+  const tierRows: [string, ReactNode, number][] = [
+    [t('fbcTiersTop'), numberBox(settings.top_pct, v => num('top_pct', v), t('fbcTiersTop'), 100, '%'), 0],
+    [t('fbcTiersNext'), numberBox(settings.mid_pct, v => num('mid_pct', v), t('fbcTiersNext'), 100, '%'), 1],
+    [t('fbcTiersRest'), <span className="muted" style={{ paddingRight: 34, textAlign: 'right' }}>{restPct}%</span>, 2],
+  ];
 
   return (
     <div style={{ display: 'grid', gap: 8 }}>
@@ -275,7 +289,7 @@ function CityFrequency({ cities, ranked, tiers, pins, setPins, settings, setSett
               <tr key={c.slug}>
                 <td>{c.name}</td>
                 <td className="muted">{t('fbcTiersAlerts', { n: score, days: tiers.settings.window_days })}</td>
-                <td style={{ width: 130 }}>
+                <td style={{ width: 150 }}>
                   <select className="input" value={pins[c.slug] ?? ''} aria-label={t('fbcTiersPin', { name: c.name })}
                     onChange={e => pin(c.slug, e.target.value)}>
                     <option value="">{auto ? t('fbcTiersAutoN', { n: auto }) : t('fbcTiersAuto')}</option>
@@ -289,20 +303,26 @@ function CityFrequency({ cities, ranked, tiers, pins, setPins, settings, setSett
       </table>
       <details>
         <summary style={{ fontSize: 12.5, cursor: 'pointer' }}>{t('fbcTiersRule')}</summary>
-        <div style={{ display: 'grid', gap: 6, marginTop: 8, fontSize: 12.5 }}>
-          <div className="fp-row" style={{ gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-            {t('fbcTiersTop')} {numberBox(settings.top_pct, v => num('top_pct', v), t('fbcTiersTop'), 100)}%
-            → {numberBox(settings.per_day[0], v => perDay(0, v), t('fbcTiersPerDay'), 6)}×
+        <div style={{ display: 'grid', gap: 10, marginTop: 10, fontSize: 12.5 }}>
+          <div style={{
+            display: 'grid', gridTemplateColumns: 'minmax(80px, 1fr) auto auto', columnGap: 24, rowGap: 8,
+            alignItems: 'center', justifyItems: 'end', padding: '10px 12px',
+            border: '1px solid var(--border)', borderRadius: 8,
+          }}>
+            <span />
+            <span className="muted" style={{ fontSize: 11.5 }}>{t('fbcTiersShare')}</span>
+            <span className="muted" style={{ fontSize: 11.5 }}>{t('fbcTiersPerDay')}</span>
+            {tierRows.map(([label, share, i]) => (
+              <Fragment key={i}>
+                <span style={{ justifySelf: 'start' }}>{label}</span>
+                {share}
+                {numberBox(settings.per_day[i], v => perDay(i, v), `${label}: ${t('fbcTiersPerDay')}`, 6, '×')}
+              </Fragment>
+            ))}
           </div>
-          <div className="fp-row" style={{ gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-            {t('fbcTiersNext')} {numberBox(settings.mid_pct, v => num('mid_pct', v), t('fbcTiersNext'), 100)}%
-            → {numberBox(settings.per_day[1], v => perDay(1, v), t('fbcTiersPerDay'), 6)}×
-          </div>
-          <div className="fp-row" style={{ gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-            {t('fbcTiersRest')} → {numberBox(settings.per_day[2], v => perDay(2, v), t('fbcTiersPerDay'), 6)}×
-          </div>
-          <div className="fp-row" style={{ gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-            {t('fbcTiersWindow')} {numberBox(settings.window_days, v => num('window_days', v), t('fbcTiersWindow'), 92)}
+          <div className="fp-row" style={{ gap: 8, alignItems: 'center' }}>
+            <span>{t('fbcTiersWindow')}</span>
+            {numberBox(settings.window_days, v => num('window_days', v), t('fbcTiersWindow'), 92, t('fbcTiersDays'))}
           </div>
           <span className="muted" style={{ fontSize: 11.5 }}>{t('fbcTiersRuleHint')}</span>
           {!settingsOk && <span role="alert" style={{ fontSize: 12, color: 'var(--neg)' }}>{t('fbcTiersInvalid')}</span>}

@@ -41,6 +41,9 @@ own.
 - **The Auto option shows what the worker actually does.** It is capped by the
   worker's start times like the chips, and a worker paced by an interval is
   told it searches every city each round, not "0 search times a day".
+- **The ranking rule reads as a table.** Each tier's share of cities and
+  searches a day sit in aligned columns with their units, the rest's share is
+  worked out for you, and an emptied box stays empty instead of turning into 0.
 
 ## [1.274.0] - 2026-10-17
 
