@@ -4,7 +4,7 @@ import {
   accountAlerts, accountHaystack, attentionReason, browserLabel, canWatch, dayStrip, fleetPostsToday,
   externalVncUrl, fleetActivity, fleetStatus, flowCounts, hitsByCity, isUnstampedBuild, parkedWorkers, reloginIsAutomatic,
   matchesTerms, offersRelogin, queryTerms, reviewedToday, searchedToday,
-  splitHighlights, reloginWouldBeAutomatic, vaultAccountIdFor, whoIs,
+  splitHighlights, vaultAccountIdFor, whoIs,
   FLOW_STAGES, STAGE_FORMS, draftChanges, settingsDraft, settingsPatch,
   citiesDiffer, cityOwners, isCitySlug, marketplaceCityUrl, normalizeCitySlug,
   applyPinEdits, pinEdits, searchesPerDay, tierSettingsEdits, tierSettingsValid,
@@ -290,14 +290,6 @@ describe('a worker\'s cities', () => {
     expect(citiesDiffer(a, [...a].reverse())).toBe(true);
     expect(citiesDiffer(a, [a[0], { ...a[1], radius: 60 }])).toBe(true);
     expect(citiesDiffer(a, [a[0]])).toBe(true);
-  });
-});
-
-describe('reloginWouldBeAutomatic', () => {
-  it('needs both a stored password and password login allowed', () => {
-    expect(reloginWouldBeAutomatic(true, true)).toBe(true);
-    expect(reloginWouldBeAutomatic(true, false)).toBe(false);
-    expect(reloginWouldBeAutomatic(false, true)).toBe(false);
   });
 });
 

@@ -8,7 +8,7 @@ created: 2026-10-17
 reporter: jinhu
 branch: claude/project-thread-b1tn16
 pr: 704
-version: 1.274.2
+version: 1.275.1
 related: [RS-277]
 ---
 

@@ -523,12 +523,6 @@ export function vaultAccountIdFor(w: FleetAccount): string {
   return w.account?.account_id ?? w.worker_id;
 }
 
-// What the credentials form is about to make true: Re-login finishes by
-// itself only with a password stored AND password login allowed.
-export function reloginWouldBeAutomatic(allowPasswordLogin: boolean, passwordStored: boolean): boolean {
-  return allowPasswordLogin && passwordStored;
-}
-
 // ── A worker's cities ─────────────────────────────────────────────────────────
 
 // The monitor's rule for a Marketplace location: the segment after
