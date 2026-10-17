@@ -2,13 +2,13 @@
 id: RS-284
 title: Weekly liveness check for the Facebook account pool
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-17
 reporter: jinhu
 branch: feat/fb-pool-alive-check
-pr:
-version:
+pr: 711
+version: 1.280.0
 related: [RS-259]
 ---
 
