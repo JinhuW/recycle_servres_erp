@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-260](./RS-260-facebook-account-pool-review-fixes-for-the-pool-page.md) | in-progress | bug | P2 | Facebook account pool: review fixes for the pool page | — |
 | [RS-259](./RS-259-facebook-account-pool-backend-store-for-the-pool-ui.md) | done | story | P2 | Facebook account pool: backend store for the pool UI | 1.262.0 |
 | [RS-258](./RS-258-facebook-deploy-must-not-delete-vm-only-files-or-pus.md) | done | bug | P2 | Facebook deploy must not delete VM-only files or push dev-only logins | n/a — trackers/facebook [Unreleased] |
 | [RS-257](./RS-257-type-the-count-in-review-mode.md) | done | story | P2 | Type the count in Review mode | 1.260.0 |

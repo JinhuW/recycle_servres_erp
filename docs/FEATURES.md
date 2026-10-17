@@ -2121,7 +2121,10 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   production without `FB_POOL_KEY` the pool routes answer 503 and name the
   variable. The pool is the human side of the picture; the fleet's own vault
   of worker logins (RS-254) stays a separate, write-only store, and `fleet`
-  here is the label saying which worker an account went to.
+  here is the label saying which worker an account went to. A cookie may be
+  pasted as a header line or as the JSON a cookie extension exports, and a
+  2FA key as the base32 key or an `otpauth://` link, on the Pool tab as on
+  the Fleet tab (v1.262.1).
 - **Watching a worker's browser** — `/fleet/watch/<worker>` shows the live
   Chromium a Facebook worker is driving, through noVNC, view-only until
   "Take control" is ticked (and handed back when the tab is hidden), with

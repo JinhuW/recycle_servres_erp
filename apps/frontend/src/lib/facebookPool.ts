@@ -6,6 +6,7 @@ import {
   FB_POOL_STATUSES,
   base32Bytes,
   cookieUid,
+  totpKey,
   validateFbPoolDraft,
   type FbPoolDraft,
   type FbPoolEventKind,
@@ -15,7 +16,7 @@ import {
 } from '@recycle-erp/shared';
 import { api } from './api';
 
-export { base32Bytes, cookieUid };
+export { base32Bytes, cookieUid, totpKey };
 export const POOL_STATUSES = FB_POOL_STATUSES;
 export const POOL_LIMIT = FB_POOL_LIMIT;
 export type PoolStatus = FbPoolStatus;
@@ -141,7 +142,7 @@ export function parsePoolImport(text: string, accounts: readonly PoolAccount[]) 
       ...emptyPoolDraft(),
       uid,
       password,
-      totp: totp.replace(/\s/g, '').toUpperCase(),
+      totp: totpKey(totp),
       email,
       emailPassword,
       recovery,

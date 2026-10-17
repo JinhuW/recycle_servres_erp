@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { Icon } from '../../../components/Icon';
 import {
+  base32Bytes,
   cookieHealth,
   poolTotp,
   type PoolAccount,
@@ -45,30 +46,67 @@ export function CookieLabel({
     </span>
   );
 }
+
+// One clock for every code on the page. Each code used to own a one-second
+// interval, so a table of N accounts ran N timers.
+const clock = {
+  now: Date.now(),
+  listeners: new Set<() => void>(),
+  timer: undefined as ReturnType<typeof setInterval> | undefined,
+};
+function subscribeClock(listener: () => void) {
+  clock.listeners.add(listener);
+  if (clock.listeners.size === 1) {
+    clock.now = Date.now();
+    clock.timer = setInterval(() => {
+      clock.now = Date.now();
+      clock.listeners.forEach((fn) => fn());
+    }, 1000);
+  }
+  return () => {
+    clock.listeners.delete(listener);
+    if (!clock.listeners.size) clearInterval(clock.timer);
+  };
+}
+const readClock = () => clock.now;
+const usePoolClock = () => useSyncExternalStore(subscribeClock, readClock, readClock);
+
 export function PoolCode({ secret, large = false }: { secret: string; large?: boolean }) {
   const { t } = useT();
-  const [now, setNow] = useState(Date.now);
-  const [code, setCode] = useState<string | null>(null);
+  const now = usePoolClock();
   const slot = Math.floor(now / 30_000);
+  const hasKey = useMemo(() => base32Bytes(secret) !== null, [secret]);
+  // The last code computed, with the key it came from: it stays on screen
+  // while the next slot's code is being computed, instead of blinking through
+  // an empty state at every :00 and :30. `value` null after a computation
+  // means crypto.subtle is missing, which is an http page.
+  const [code, setCode] = useState<{ secret: string; value: string | null } | null>(null);
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, []);
-  useEffect(() => {
+    if (!hasKey) return;
     let active = true;
-    setCode(null);
     void poolTotp(secret, slot * 30_000).then((value) => {
-      if (active) setCode(value);
+      if (active) setCode({ secret, value });
     });
     return () => {
       active = false;
     };
-  }, [secret, slot]);
+  }, [secret, slot, hasKey]);
+  const className = `fp-code ${large ? 'fp-code-large' : ''}`;
+  if (!hasKey) {
+    return (
+      <span className={className}>
+        <span className="mono">{t('fpNoKey')}</span>
+      </span>
+    );
+  }
+  const current = code?.secret === secret ? code : null;
+  const unavailable = current !== null && current.value === null;
+  const value = current?.value ?? null;
   const left = 30 - (Math.floor(now / 1000) % 30);
   return (
-    <span className={`fp-code ${large ? 'fp-code-large' : ''}`}>
-      <span className="mono">{code ? `${code.slice(0, 3)} ${code.slice(3)}` : t('fpNoKey')}</span>
-      {code && (
+    <span className={className} title={unavailable ? t('fpCodeUnavailable') : undefined}>
+      <span className="mono">{value ? `${value.slice(0, 3)} ${value.slice(3)}` : '··· ···'}</span>
+      {value && (
         <span className={`fp-countdown ${left <= 5 ? 'fp-low' : ''}`} title={`${left}s`}>
           <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
             <circle cx="11" cy="11" r="8" className="fp-ring-bg" />
@@ -94,43 +132,4 @@ export function CloseButton({ onClose }: { onClose: () => void }) {
       <Icon name="x" size={16} />
     </button>
   );
-}
-
-// The shared Modal restores focus and handles Escape. Keep Tab inside these
-// forms as well, including when a secret's reveal control is added or removed.
-export function usePoolDialogFocus() {
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Tab') return;
-      const panel = document.querySelector<HTMLElement>('.fp-dialog');
-      if (!panel) return;
-      const targets = Array.from(
-        panel.querySelectorAll<HTMLElement>(
-          'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href]',
-        ),
-      ).filter((element) => element.getClientRects().length);
-      const first = targets[0],
-        last = targets[targets.length - 1];
-      if (!first || !last) {
-        event.preventDefault();
-        panel.focus();
-        return;
-      }
-      if (
-        event.shiftKey &&
-        (document.activeElement === first || document.activeElement === panel)
-      ) {
-        event.preventDefault();
-        last.focus();
-      } else if (
-        !event.shiftKey &&
-        (document.activeElement === last || document.activeElement === panel)
-      ) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, []);
 }

@@ -4,6 +4,7 @@ import { Modal } from '../../../components/Modal';
 import {
   emptyPoolDraft,
   POOL_STATUSES,
+  totpKey,
   validatePoolDraft,
   type PoolAccount,
   type PoolDraft,
@@ -11,7 +12,7 @@ import {
 } from '../../../lib/facebookPool';
 import { relTime } from '../../../lib/format';
 import { useT } from '../../../lib/i18n';
-import { CloseButton, CookieLabel, STATUS_KEYS, StatusChip, usePoolDialogFocus } from './shared';
+import { CloseButton, CookieLabel, STATUS_KEYS, StatusChip } from './shared';
 
 export function AccountEditor({
   account,
@@ -31,7 +32,6 @@ export function AccountEditor({
   onRetire: () => void;
 }) {
   const { t, locale } = useT();
-  usePoolDialogFocus();
   const [draft, setDraft] = useState<PoolDraft>(() =>
     account ? { ...account } : emptyPoolDraft(),
   );
@@ -92,7 +92,7 @@ export function AccountEditor({
             email: draft.email.trim(),
             recovery: draft.recovery.trim(),
             cookie: draft.cookie.trim(),
-            totp: draft.totp.replace(/\s/g, '').toUpperCase(),
+            totp: totpKey(draft.totp),
             holder: draft.holder?.trim() || null,
           };
           const issues = validatePoolDraft(normalized, accounts, account?.no);
