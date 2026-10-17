@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-279](./RS-279-show-the-worker-s-account-and-live-2fa-code-beside-t.md) | done | story | P2 | Show the worker's account and live 2FA code beside the Watch browser | — |
 | [RS-278](./RS-278-linked-payments-show-the-po-owner-in-the-owner-colum.md) | done | bug | P2 | Linked payments show the PO owner in the Owner column | 1.275.2 |
 | [RS-277](./RS-277-busy-cities-searched-more-often-tiered-daily-city-fr.md) | done | story | P2 | Busy cities searched more often — tiered daily city frequency | 1.274.0 |
 | [RS-276](./RS-276-worker-page-assigns-a-pool-account-instead-of-typed.md) | done | story | P2 | Worker page assigns a pool account instead of typed credentials | 1.275.0 |

@@ -2,13 +2,13 @@
 id: RS-279
 title: Show the worker's account and live 2FA code beside the Watch browser
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-17
 reporter: jinhu
 branch: feat/fleet-watch-account-panel
-pr:
-version:
+pr: 707
+version: 1.276.0
 related: []
 ---
 
