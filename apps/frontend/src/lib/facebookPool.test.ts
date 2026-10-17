@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   activityKey,
+  base32Bytes,
   cookieHealth,
+  cookieUid,
   DAY,
   emptyPoolDraft,
   nextPoolAccount,
   parsePoolImport,
   poolTotp,
+  totpKey,
   validatePoolDraft,
   type PoolAccount,
   type PoolStatus,
@@ -83,6 +86,27 @@ describe('supplier account import', () => {
     expect(
       parsePoolImport(row.replace(`c_user=${uid}`, 'c_user=61550000000000'), [])[0].warnings,
     ).toContain('fpCookieMismatch');
+  });
+});
+describe('supplier formats', () => {
+  it('reads c_user from a header line with loose spacing and from exported JSON', () => {
+    expect(cookieUid(`c_user=${uid} ; xs=demo`)).toBe(uid);
+    expect(cookieUid(`xs=demo;c_user = ${uid}`)).toBe(uid);
+    expect(cookieUid(JSON.stringify([{ name: 'xs', value: 'demo' }, { name: 'c_user', value: uid }]))).toBe(uid);
+    expect(cookieUid(JSON.stringify({ xs: 'demo', c_user: uid }))).toBe(uid);
+    expect(cookieUid('[not json')).toBeNull();
+    expect(cookieUid(JSON.stringify([{ name: 'c_user', value: 'abc' }]))).toBeNull();
+  });
+  it('accepts an otpauth:// link wherever a setup key goes', async () => {
+    const uri = 'otpauth://totp/Facebook:person?secret=jbsw%20y3dp-ehpk3pxp&issuer=Facebook';
+    expect(totpKey(uri)).toBe('JBSWY3DPEHPK3PXP');
+    expect(totpKey(' jbsw y3dp ehpk 3pxp ')).toBe('JBSWY3DPEHPK3PXP');
+    expect(base32Bytes(uri)).not.toBeNull();
+    expect(base32Bytes('otpauth://totp/Facebook?issuer=Facebook')).toBeNull();
+    expect(parsePoolImport(`${uid}|password|${uri}`, [])[0].draft.totp).toBe('JBSWY3DPEHPK3PXP');
+    expect(
+      await poolTotp('otpauth://totp/x?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', 59_000),
+    ).toBe('287082');
   });
 });
 describe('pool allocation and editing', () => {

@@ -17,6 +17,34 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.262.1] - 2026-10-17
+
+The review of the account pool page, applied to the v1.262.0 code (RS-260).
+
+### Fixed
+
+- **Supplier formats.** A cookie's `c_user` is now read from a header line
+  with spaces around `;` or `=`, from the JSON list a cookie extension exports
+  and from a JSON object keyed by name; before, anything but a bare `k=v; k=v`
+  line was reported as "No c_user" and the account was ranked behind ones whose
+  cookie parsed. A 2FA key may be pasted as an `otpauth://` link, in the editor
+  and in an import row, as the Fleet tab already allowed; the base32 secret is
+  what gets stored, and a link without one is refused as an invalid key.
+- **The code column no longer reads "No 2FA key" for an account that has one.**
+  The previous code stays on screen until the next slot's is computed, instead
+  of blinking through the empty state at every :00 and :30. On a page without
+  `crypto.subtle` (plain http) the column shows a placeholder with the reason,
+  and the copy button says so instead of copying nothing.
+- The table's `#` header and the purchaser card's UID label go through the
+  translation table; the header was hard-coded Chinese in every language.
+
+### Changed
+
+- One shared clock ticks every live code on the page; each `PoolCode` ran its
+  own one-second interval, so a table of N accounts ran N timers.
+- The pool dialogs drop their page-local Tab trap and rely on the shared
+  Modal's, which has handled Tab since v1.258.7.
+
 ## [1.262.0] - 2026-10-17
 
 The Facebook account pool stops being a demo (RS-259). v1.261.0 shipped the

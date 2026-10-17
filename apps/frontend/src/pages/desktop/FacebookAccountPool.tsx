@@ -97,7 +97,12 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast }: Props) 
     label: string,
   ) => {
     const value = field === 'totp' ? await poolTotp(a.totp) : a[field];
-    if (!value) return;
+    if (!value) {
+      // A key that decodes but yields no code: crypto.subtle is missing, which
+      // is an http page. Say so rather than copy nothing in silence.
+      if (field === 'totp' && a.totp) showToast?.(t('fpCodeUnavailable'), 'error');
+      return;
+    }
     try {
       await navigator.clipboard.writeText(value);
       showToast?.(t('fpCopied', { field: t(label) }));
@@ -235,7 +240,7 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast }: Props) 
                         'fpCookie',
                         'fpNotes',
                       ].map((key) => (
-                        <th key={key}>{key === '#' ? '# 序号' : t(key)}</th>
+                        <th key={key}>{key === '#' ? t('fpNo') : t(key)}</th>
                       ))}
                     </tr>
                   </thead>
@@ -348,7 +353,7 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast }: Props) 
                     </span>
                   </div>
                   <dl>
-                    <dt>UID</dt>
+                    <dt>{t('fpUid')}</dt>
                     <dd className="mono">
                       {chosen.uid.slice(0, 4)}…{chosen.uid.slice(-4)}
                     </dd>

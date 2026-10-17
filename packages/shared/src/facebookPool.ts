@@ -60,13 +60,60 @@ export const FB_POOL_FIELD_MAX: Record<Exclude<keyof FbPoolDraft, 'status'>, num
 
 export const fbUidValid = (uid: string): boolean => /^\d{10,20}$/.test(uid);
 
-/** The `c_user` cookie is the account's numeric id; the rest of the cookie is the session. */
-export const cookieUid = (cookie: string): string | null =>
-  /(?:^|;\s*)c_user=(\d+)(?=;|$)/.exec(cookie)?.[1] ?? null;
+const digits = (value: unknown): string | null =>
+  (typeof value === 'string' || typeof value === 'number') && /^\d+$/.test(String(value))
+    ? String(value)
+    : null;
 
-/** Decodes a base32 TOTP setup key; null when a character is outside the alphabet. */
+/**
+ * The `c_user` cookie is the account's numeric id; the rest of the cookie is
+ * the session. Suppliers hand a cookie over as a header line (`k=v; k=v`) or
+ * as the JSON a browser extension exports — a list of `{name, value}` objects
+ * or one object keyed by name — so all three are read.
+ */
+export function cookieUid(cookie: string): string | null {
+  const text = cookie.trim();
+  if (text.startsWith('[') || text.startsWith('{')) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return null;
+    }
+    if (Array.isArray(parsed)) {
+      const entry = (parsed as { name?: unknown; value?: unknown }[]).find(
+        (c) => c && typeof c === 'object' && c.name === 'c_user',
+      );
+      return digits(entry?.value);
+    }
+    return digits((parsed as Record<string, unknown> | null)?.c_user);
+  }
+  return /(?:^|;)\s*c_user\s*=\s*(\d+)\s*(?=;|$)/.exec(text)?.[1] ?? null;
+}
+
+/**
+ * The base32 setup key behind what was pasted: the key itself without the
+ * spaces and dashes authenticator apps print, or the `secret` of an
+ * `otpauth://` link — the form the fleet credential form already takes. A
+ * link without a secret is returned as typed, so validation refuses it.
+ */
+export function totpKey(input: string): string {
+  const text = input.trim();
+  if (/^otpauth:\/\//i.test(text)) {
+    const secret = /[?&]secret=([^&#]+)/i.exec(text)?.[1];
+    if (!secret) return text;
+    try {
+      return decodeURIComponent(secret).replace(/[\s=-]/g, '').toUpperCase();
+    } catch {
+      return text;
+    }
+  }
+  return text.replace(/[\s=-]/g, '').toUpperCase();
+}
+
+/** Decodes a base32 TOTP setup key or otpauth link; null when a character is outside the alphabet. */
 export function base32Bytes(secret: string): Uint8Array<ArrayBuffer> | null {
-  const normalized = secret.replace(/[\s=-]/g, '').toUpperCase();
+  const normalized = totpKey(secret);
   let bits = 0;
   let value = 0;
   const bytes: number[] = [];
@@ -88,7 +135,7 @@ export function normalizeFbPoolDraft(draft: FbPoolDraft): FbPoolDraft {
   return {
     uid: draft.uid.trim(),
     password: draft.password,
-    totp: draft.totp.replace(/\s/g, '').toUpperCase(),
+    totp: totpKey(draft.totp),
     email: draft.email.trim(),
     emailPassword: draft.emailPassword,
     recovery: draft.recovery.trim(),

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Modal } from '../../../components/Modal';
 import { parsePoolImport, type PoolAccount, type PoolDraft } from '../../../lib/facebookPool';
 import { useT } from '../../../lib/i18n';
-import { CloseButton, usePoolDialogFocus } from './shared';
+import { CloseButton } from './shared';
 const EXAMPLES = [
   '13\t61560221947310\tDemoOnly!13\tJBSWY3DPEHPK3PXP\tnora.vance@outlook.example\tDemoMail!13\tnora.rec@mail.example\tc_user=61560221947310; xs=demo\tAged 2y, Marketplace on',
   '14----61560388120456----DemoOnly!14----KRSXG5CTMVRXEZLU----d.ferris@hotmail.example----DemoMail!14----dferris.rec@mail.example----c_user=61560388120456; xs=demo----Profile photo set',
@@ -19,7 +19,6 @@ export function AccountImport({
   onImport: (drafts: PoolDraft[], batch: string) => void;
 }) {
   const { t } = useT();
-  usePoolDialogFocus();
   const [text, setText] = useState('');
   const [batch, setBatch] = useState(`Batch ${new Date().toISOString().slice(0, 10)}`);
   const rows = useMemo(() => parsePoolImport(text, accounts), [text, accounts]);
