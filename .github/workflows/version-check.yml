@@ -43,8 +43,9 @@ jobs:
           # behind dev, so comparing it against dev's newest tag would fail every
           # push to main — including docs-only ones — with "version is lower than
           # the latest tag". On dev the two are identical, since every tag is an
-          # ancestor of dev.
-          LAST_TAG="$(git tag -l 'v*' --merged HEAD --sort=-v:refname | head -1)"
+          # ancestor of dev. `sed -n 1p` rather than `head -1`: head exits after
+          # one line, git then dies of SIGPIPE, and pipefail fails the job (141).
+          LAST_TAG="$(git tag -l 'v*' --merged HEAD --sort=-v:refname | sed -n 1p)"
 
           if [ -n "$LAST_TAG" ]; then
             LAST_VERSION="${LAST_TAG#v}"
