@@ -629,12 +629,15 @@ class PostgresDatabase:
 
     def request_relogin(self: "PostgresDatabase", worker_id: str) -> None:
         """Flag a worker to re-run its Facebook login on its next heartbeat."""
+        now = utcnow()
         with self.cursor() as cur:
             cur.execute(
-                "INSERT INTO workers (worker_id, relogin_requested_at) VALUES (%s, %s) "
+                "INSERT INTO workers (worker_id, relogin_requested_at, relogin_last_requested_at) "
+                "VALUES (%s, %s, %s) "
                 "ON CONFLICT(worker_id) DO UPDATE "
-                "SET relogin_requested_at = excluded.relogin_requested_at",
-                (worker_id, utcnow()),
+                "SET relogin_requested_at = excluded.relogin_requested_at, "
+                "relogin_last_requested_at = excluded.relogin_last_requested_at",
+                (worker_id, now, now),
             )
 
     def take_relogin(self: "PostgresDatabase", worker_id: str) -> bool:

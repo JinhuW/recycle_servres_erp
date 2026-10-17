@@ -204,12 +204,23 @@ class HeartbeatRequest(BaseModel):
     # The build the worker runs ("0.5.6 (d3e9a30)"); absent from workers on
     # images that predate it.
     version: str | None = None
+    # Sent once per step while a login runs, so the ERP's Watch page can say
+    # what the worker is doing as it does it. A plain string, not an enum: a
+    # worker that learns a new step must not have its whole heartbeat refused.
+    login_step: str | None = Field(default=None, max_length=32)
+    login_step_at: str | None = Field(default=None, max_length=40)
     detail: Dict[str, Any] = Field(default_factory=dict)
 
 
 class HeartbeatResponse(BaseModel):
     status: str = "ok"
-    # Reserved for future push-style instructions (pause, rotate proxy, …).
+    # Push-style instructions queued for this worker ("relogin").
+    directives: List[str] = Field(default_factory=list)
+
+
+class DirectivesResponse(BaseModel):
+    """The directives alone, for a worker polling between heartbeats."""
+
     directives: List[str] = Field(default_factory=list)
 
 
@@ -227,6 +238,13 @@ class WorkerOut(BaseModel):
     error_count: int | None = None
     vnc_url: str | None = None
     version: str | None = None
+    # Set while a re-login waits for the worker to pick it up.
+    relogin_requested_at: str | None = None
+    # When the latest re-login was asked for, kept after the hand-off so the
+    # login steps reported since can be told apart from older ones.
+    relogin_last_requested_at: str | None = None
+    login_step: str | None = None
+    login_step_at: str | None = None
     # Derived by the control plane, not reported: live / stale / dead.
     liveness: str | None = None
     needs_attention: bool = False

@@ -118,6 +118,9 @@ HOMELAB_ROW = {
     "liveness": "live",
     "needs_attention": False,
     "last_heartbeat_at": "2026-09-05T21:43:35+00:00",
+    "relogin_last_requested_at": "2026-09-05T21:40:00+00:00",
+    "login_step": "challenge",
+    "login_step_at": "2026-09-05T21:40:31+00:00",
 }
 
 
@@ -219,6 +222,10 @@ def test_fleet_joins_config_to_health(client):
     assert [c["slug"] for c in monitor["cities"]] == ["dc", "miami"]
     assert monitor["proxy_env"] == "PROXY_HOMELAB"
     assert monitor["health"]["liveness"] == "live"
+    # Re-login progress reaches the ERP's Watch page as the coordinator says it.
+    assert monitor["health"]["login_step"] == "challenge"
+    assert monitor["health"]["login_step_at"] == "2026-09-05T21:40:31+00:00"
+    assert monitor["health"]["relogin_last_requested_at"] == "2026-09-05T21:40:00+00:00"
     assert monitor["account"] == {
         "account_id": "personal",
         "fb_username": "someone@example.com",
