@@ -2,13 +2,13 @@
 id: RS-276
 title: Worker page assigns a pool account instead of typed credentials
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-17
 reporter: jinhu
 branch: feat/fleet-dynamic-cities
-pr:
-version:
+pr: "#698"
+version: 1.275.0
 related: [RS-254, RS-268, RS-275]
 ---
 
@@ -29,11 +29,11 @@ account (`fpWorkerTaken`) — so swapping a broken account meant two trips.
 
 ## Acceptance criteria
 
-- [ ] The worker page's dialog (now **Assign account**) lists only available pool accounts that have a password, searchable by #, UID, e-mail or batch; no free-typed login or password remains.
-- [ ] Assigning goes through `/assign`: vault written, Re-login queued, the account marked Fleet for that worker.
-- [ ] If the worker already holds a pool account, the dialog requires a choice — Available, Problem or Retired — and `/assign` moves that account there in the same transaction that marks the new one; a Problem account keeps the worker as holder.
-- [ ] Without `previous`, `/assign` still refuses a worker that holds another account (`fpWorkerTaken`), so the pool page's flow is unchanged.
-- [ ] Backend test covers the swap to Problem and to Available and a bad `previous`.
+- [x] The worker page's dialog (now **Assign account**) lists only available pool accounts that have a password, searchable by #, UID, e-mail or batch; no free-typed login or password remains.
+- [x] Assigning goes through `/assign`: vault written, Re-login queued, the account marked Fleet for that worker.
+- [x] If the worker already holds a pool account, the dialog requires a choice — Available, Problem or Retired — and `/assign` moves that account there in the same transaction that marks the new one; a Problem account keeps the worker as holder.
+- [x] Without `previous`, `/assign` still refuses a worker that holds another account (`fpWorkerTaken`), so the pool page's flow is unchanged.
+- [x] Backend test covers the swap to Problem and to Available and a bad `previous`.
 
 ## Out of scope
 
@@ -48,3 +48,5 @@ account (`fpWorkerTaken`) — so swapping a broken account meant two trips.
   ticket. RS-275 shipped per-worker city editing in the meantime.
 - A first cut added its own `/install` route and collided with RS-275 landing
   on `dev` mid-session (same migration number); it was rebuilt on `/assign`.
+- Rebased over RS-277 (v1.274.0), so it shipped as 1.275.0, not the 1.273.0
+  it was written for.
