@@ -38,6 +38,10 @@ has the repo map and workflow.
   [docs/debug-notes/telegram-supergroup-migration.md](docs/debug-notes/telegram-supergroup-migration.md).
   A group upgraded to a supergroup gets a new `-100…` chat id, and every alert
   to the old id fails.
+- **`scripts/deploy-workers.sh` or `GHCR_READ_TOKEN`** →
+  [docs/debug-notes/ghcr-read-token-dead.md](docs/debug-notes/ghcr-read-token-dead.md).
+  The pull token is a classic PAT that dies silently; check it with one
+  `curl` before deploying.
 
 ## Design invariants
 
