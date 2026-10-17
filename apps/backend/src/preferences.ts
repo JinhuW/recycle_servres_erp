@@ -37,6 +37,7 @@ const SCHEMA: Record<string, Validator> = {
   'scan.cameraLabel':         isShortString,
   'sellOrders.lineGroup':     isOneOf('warehouse', 'po'),
   'sidebar.folded':           isBoolean,
+  'fleetWatch.accountHidden': isBoolean,
 };
 
 export type PreferencePatchResult =

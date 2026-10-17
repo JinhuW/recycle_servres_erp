@@ -3,11 +3,14 @@ import type RFB from '@novnc/novnc';
 import { Icon } from '../../components/Icon';
 import { api } from '../../lib/api';
 import { coordinatorApi, VNC_SESSION_LAPSED, vncSocketUrl, type FleetAccount } from '../../lib/coordinator';
-import { liveness } from '../../lib/fleetView';
+import { heldByWorker, poolApi } from '../../lib/facebookPool';
+import { keysymsFor, liveness } from '../../lib/fleetView';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
+import { usePreference } from '../../lib/preferences';
 import { fleetWorkerPath, hrefFor, onLinkClick } from '../../lib/route';
 import { ReloginButton, stateLabel } from './FleetAccounts';
+import { FleetWatchAccount, type PoolLookup } from './FleetWatchAccount';
 
 // ─── Watch a worker's browser ─────────────────────────────────────────────────
 // The live Chromium a Facebook worker is driving, through noVNC. The socket is
@@ -22,6 +25,8 @@ import { ReloginButton, stateLabel } from './FleetAccounts';
 //
 // noVNC (~200 KB, with a top-level await) is imported here, on demand, so it
 // never weighs on the fleet page itself.
+
+const FLEET_REFRESH_MS = 30_000;
 
 type Phase =
   | { kind: 'connecting' }
@@ -44,13 +49,34 @@ export function FleetWatch({ workerId }: { workerId: string }) {
   const [attempt, setAttempt] = useState(0);
   // undefined while loading; null when the fleet document has no such worker.
   const [account, setAccount] = useState<FleetAccount | null | undefined>(undefined);
+  const [coordinatorVersion, setCoordinatorVersion] = useState<string | null>(null);
+  const [pool, setPool] = useState<PoolLookup>({ kind: 'loading' });
+  const [accountHidden, setAccountHidden] = usePreference('fleetWatch.accountHidden', false);
+
+  // Polled so the panel sees a worker drop into CHALLENGE_2FA while watched.
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      if (document.hidden) return;
+      coordinatorApi.fleet()
+        .then(doc => {
+          if (cancelled) return;
+          setAccount(doc.workers.find(w => w.worker_id === workerId) ?? null);
+          setCoordinatorVersion(doc.versions.coordinator);
+        })
+        // The header and panel are help; the viewer works without them.
+        .catch(() => { if (!cancelled) setAccount(a => a ?? null); });
+    };
+    load();
+    const timer = setInterval(load, FLEET_REFRESH_MS);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [workerId]);
 
   useEffect(() => {
     let cancelled = false;
-    coordinatorApi.fleet()
-      .then(doc => { if (!cancelled) setAccount(doc.workers.find(w => w.worker_id === workerId) ?? null); })
-      // The header is decoration; the viewer works without it.
-      .catch(() => { if (!cancelled) setAccount(null); });
+    poolApi.snapshot()
+      .then(snap => { if (!cancelled) setPool({ kind: 'ok', account: heldByWorker(snap.accounts, workerId) ?? null }); })
+      .catch(() => { if (!cancelled) setPool({ kind: 'unavailable' }); });
     return () => { cancelled = true; };
   }, [workerId]);
 
@@ -131,6 +157,16 @@ export function FleetWatch({ workerId }: { workerId: string }) {
     return () => document.removeEventListener('visibilitychange', onHide);
   }, []);
 
+  // Types into whichever field has focus in the remote browser, then hands
+  // the keyboard back to the viewer so Enter goes to Facebook too.
+  const typeText = (text: string): boolean => {
+    const rfb = rfbRef.current;
+    if (!rfb || rfb.viewOnly) return false;
+    for (const keysym of keysymsFor(text)) rfb.sendKey(keysym, null);
+    rfb.focus();
+    return true;
+  };
+
   const h = account?.health ?? null;
   const status = phase.kind === 'connected'
     ? { tone: 'pos', text: control ? t('fbcWatchInControl') : t('fbcWatchWatching') }
@@ -173,22 +209,33 @@ export function FleetWatch({ workerId }: { workerId: string }) {
               {t('fbcWatchReconnect')}
             </button>
           )}
+          <button type="button" className="btn sm" aria-pressed={!accountHidden}
+            onClick={() => setAccountHidden(!accountHidden)}>
+            <Icon name="panelRight" size={13} />
+            {t(accountHidden ? 'fbcWatchAcctShow' : 'fbcWatchAcctHide')}
+          </button>
         </div>
       </div>
 
-      <div className={`card fl-watch${control ? ' in-control' : ''}`}>
-        <div className="fl-watch-stage">
-          <div className="fl-watch-screen" ref={screenRef} />
-          {phase.kind === 'closed' && (
-            <div className="fl-watch-overlay">
-              <div className="fl-watch-overlay-card" role="alert">
-                <div className="fl-watch-overlay-title">{phase.title}</div>
-                <p>{phase.text}</p>
-                <button type="button" className="btn primary" onClick={() => setAttempt(n => n + 1)}>
-                  {t('fbcWatchReconnect')}
-                </button>
+      <div className={`card fl-watch${control ? ' in-control' : ''}${accountHidden ? '' : ' with-account'}`}>
+        <div className="fl-watch-body">
+          <div className="fl-watch-stage">
+            <div className="fl-watch-screen" ref={screenRef} />
+            {phase.kind === 'closed' && (
+              <div className="fl-watch-overlay">
+                <div className="fl-watch-overlay-card" role="alert">
+                  <div className="fl-watch-overlay-title">{phase.title}</div>
+                  <p>{phase.text}</p>
+                  <button type="button" className="btn primary" onClick={() => setAttempt(n => n + 1)}>
+                    {t('fbcWatchReconnect')}
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
+          </div>
+          {!accountHidden && (
+            <FleetWatchAccount worker={account} coordinatorVersion={coordinatorVersion} pool={pool}
+              canType={phase.kind === 'connected' && control} onType={typeText} />
           )}
         </div>
         <div className="fl-watch-note">

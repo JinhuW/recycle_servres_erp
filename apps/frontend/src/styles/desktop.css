@@ -3380,6 +3380,64 @@ html.desktop, body.desktop, .desktop #root {
 .fl-watch-toggle:has(input:checked) { background: var(--warn-soft); color: var(--warn-strong); border-color: transparent; }
 .fl-watch-toggle input { margin: 0; accent-color: var(--warn-strong); }
 
+/* The sign-in panel shares the stage's height and scrolls on its own, so the
+   code stays beside the browser however long the field list runs. */
+.fl-watch-body { display: grid; grid-template-columns: minmax(0, 1fr); }
+.fl-watch.with-account .fl-watch-body { grid-template-columns: minmax(0, 1fr) 340px; }
+.fl-wa {
+  height: calc(100vh - 250px); min-height: 360px; overflow-y: auto;
+  border-left: 1px solid var(--border); background: var(--bg-elev);
+}
+.fl-wa-head {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+  padding: 14px 16px 2px; font-size: 13px; font-weight: 600;
+}
+.fl-wa-head.fl-wa-sub { padding-top: 18px; padding-bottom: 6px; font-size: 12px; color: var(--fg-muted); }
+.fl-wa-pool { font-size: 12px; font-weight: 500; color: var(--fg-muted); text-decoration: none; }
+.fl-wa-pool:hover { color: var(--accent-strong); text-decoration: underline; }
+.fl-wa-code {
+  display: grid; gap: 10px; margin: 10px 12px 12px; padding: 14px 16px;
+  border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-soft);
+  transition: background-color 0.2s, border-color 0.2s, box-shadow 0.2s;
+}
+.fl-wa-code.is-asking {
+  background: var(--accent-soft); border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 18%, transparent);
+}
+.fl-wa-code-label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-muted); }
+.fl-wa-code.is-asking .fl-wa-code-label { color: var(--accent-strong); font-weight: 600; }
+.fl-wa-code-value {
+  justify-self: start; padding: 2px 4px; margin: 0 -4px; border: 0; border-radius: var(--radius-sm);
+  background: none; color: var(--fg); cursor: copy; font: inherit;
+}
+.fl-wa-code-value .fp-code-large > .mono {
+  font-size: 34px; font-weight: 600; letter-spacing: 0.08em; font-variant-numeric: tabular-nums;
+}
+.fl-wa-code-value:hover .mono { color: var(--accent-strong); }
+.fl-wa-code-value:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.fl-wa-code-actions { display: flex; gap: 8px; }
+.fl-wa-code-actions .btn { justify-content: center; white-space: nowrap; }
+.fl-wa-code-actions .btn.primary { flex: 1; }
+.fl-wa-hint { font-size: 11.5px; line-height: 1.45; color: var(--fg-subtle); }
+.fl-wa-nokey { font-size: 13px; color: var(--fg-subtle); }
+.fl-wa .fp-fields > div { grid-template-columns: 104px minmax(0, 1fr) auto; padding: 6px 16px; min-height: 38px; }
+.fl-wa .fp-fields > div:last-child { border-bottom: 0; }
+.fl-wa-facts dd { white-space: normal; }
+.fl-wa .fl-build { max-width: 100%; }
+.fl-wa-empty { display: grid; gap: 10px; justify-items: start; padding: 10px 16px 4px; font-size: 12.5px; color: var(--fg-muted); }
+.fl-wa-empty p { margin: 0; line-height: 1.5; }
+.fl-wa-empty .fp-fields { justify-self: stretch; }
+.fl-wa-empty .fp-fields > div { padding-inline: 0; }
+/* Stacked, the stage gives up height so the code is still on screen. */
+@media (max-width: 1100px) {
+  .fl-watch.with-account .fl-watch-body { grid-template-columns: minmax(0, 1fr); }
+  .fl-watch.with-account .fl-watch-stage { height: 56vh; }
+  .fl-wa { height: auto; min-height: 0; border-left: 0; border-top: 1px solid var(--border); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fl-wa-code { transition: none; }
+}
+
 .card-note {
   display: flex; gap: 10px; align-items: flex-start;
   padding: 14px 18px; color: var(--fg-muted); font-size: 12.5px;

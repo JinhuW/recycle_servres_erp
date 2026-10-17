@@ -17,6 +17,23 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.276.0] - 2026-10-17
+
+### Added
+
+- **The Watch page shows the worker's login and live 2FA code beside its
+  browser** (RS-279). Clearing a Facebook checkpoint used to mean leaving the
+  viewer, finding the login in the Account pool and reading the code there.
+  A Sign-in panel now sits next to the live browser. It shows the worker's
+  pool login, password and email password behind a reveal, the live 2FA code
+  with its countdown, and the worker's state, session, heartbeat, proxy and
+  build. The code band lights up when the worker is in a 2FA challenge.
+  Clipboard text doesn't reach the VNC session, so while Take control is on,
+  "Type into browser" types the code, login or password straight into the
+  focused field. Copies, reveals and typed secrets are logged to the pool's
+  activity ledger. The panel can be hidden, which is saved as a per-user
+  preference, and it stacks under the browser on narrow screens.
+
 ## [1.275.2] - 2026-10-17
 
 ### Fixed

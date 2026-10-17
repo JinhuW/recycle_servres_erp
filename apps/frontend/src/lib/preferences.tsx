@@ -46,6 +46,8 @@ export type PrefMap = {
   // Desktop sidebar folded to its icon rail at any width (under 900px the
   // rail is forced regardless).
   'sidebar.folded': boolean;
+  // The account panel beside a worker's live browser, folded away.
+  'fleetWatch.accountHidden': boolean;
 };
 
 export type PrefKey = keyof PrefMap;
