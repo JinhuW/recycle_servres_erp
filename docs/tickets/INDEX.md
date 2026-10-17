@@ -5,6 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-271](./RS-271-fleet-fold-shows-only-today-s-searched-cities-in-gre.md) | done | story | P2 | Fleet fold shows only today's searched cities in green | 1.271.0 |
+| [RS-270](./RS-270-let-the-flow-stage-detail-grow-instead-of-scrolling.md) | done | bug | P2 | Let the flow stage detail grow instead of scrolling | 1.270.1 |
 | [RS-269](./RS-269-make-the-fleet-s-keyword-rules-easy-to-read-edit-and.md) | done | story | P2 | Make the fleet's keyword rules easy to read, edit and test | 1.270.0 |
 | [RS-268](./RS-268-link-pool-accounts-to-fleet-workers.md) | done | story | P2 | Link pool accounts to fleet workers | 1.269.0 |
 | [RS-267](./RS-267-drop-the-fleet-fold-s-pacing-block-show-each-worker.md) | done | story | P2 | Drop the fleet fold's Pacing block, show each worker's build in its subtitle | 1.268.0 |

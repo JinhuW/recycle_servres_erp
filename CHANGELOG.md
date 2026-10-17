@@ -17,6 +17,25 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.271.0] - 2026-10-17
+
+A worker's city chips now say which cities it has searched today (RS-271).
+
+### Changed
+
+- **Green means searched today.** The Fleet tab's row fold and the worker
+  page colored every city green whenever the worker was live, so a sweep 11
+  searches into a 50-search day looked finished. A chip is now green only once
+  the worker has searched that city in its region's local day; the rest stay
+  grey, whatever the worker's status. The cities come from the fleet
+  document's new `today.cities`. A facade that predates it leaves every chip
+  grey.
+- **The tracker side of it** (Facebook tracker, next release). The monitor
+  names the city on the funnel report that counts each search. The
+  coordinator keeps the last search per worker and city and serves the rows
+  at `/v1/stats/search-cities`. rs_console cuts each worker's local day from
+  them into `today.cities`.
+
 ## [1.270.1] - 2026-10-17
 
 The flow card's stage detail grows to fit instead of scrolling (RS-270).

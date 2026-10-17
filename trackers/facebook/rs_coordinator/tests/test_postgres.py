@@ -51,6 +51,7 @@ TABLES = (
     "code_audit",
     "review_stats",
     "search_cycles",
+    "search_cities",
 )
 
 
@@ -327,6 +328,17 @@ def test_review_stats_accumulate_every_counter(backend):
         "searches": 4, "cards": 40, "opened": 5, "reviewed": 2, "alerted": 1, "sent": 1,
     }
     assert all(isinstance(v, int) for k, v in day.items() if k != "day")
+
+
+def test_search_cities_keep_one_row_per_worker_and_city(backend):
+    backend.touch_search_city("mw-1", "chicago")
+    first = backend.search_cities()[0]["last_at"]
+    backend.touch_search_city("mw-1", "chicago")
+    backend.touch_search_city("mw-1", "peoria")
+
+    rows = backend.search_cities()
+    assert [(r["worker_id"], r["city"]) for r in rows] == [("mw-1", "chicago"), ("mw-1", "peoria")]
+    assert rows[0]["last_at"] >= first
 
 
 # -- Postgres-specific -----------------------------------------------------

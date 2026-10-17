@@ -1,14 +1,14 @@
 ---
-id: RS-270
+id: RS-271
 title: Fleet fold shows only today's searched cities in green
 type: story
-status: backlog
+status: done
 priority: P2
 created: 2026-10-17
 reporter: jinhu
 branch: feat/fleet-city-searched
 pr:
-version:
+version: 1.271.0
 related: []
 ---
 
@@ -32,10 +32,10 @@ that count.
 
 ## Acceptance criteria
 
-- [ ] The monitor sends the search page's `search_city` with each funnel report.
-- [ ] The coordinator keeps the latest search time per (worker, city) and serves it to admins at `/v1/stats/search-cities`.
-- [ ] rs_console's `/v1/fleet` carries `today.cities`: the slugs searched in the worker's local day, null against an older coordinator.
-- [ ] On the Fleet fold and the worker page a chip is green only when its slug is in `today.cities`. Every other chip is grey, whatever the worker's status.
+- [x] The monitor sends the search page's `search_city` with each funnel report.
+- [x] The coordinator keeps the latest search time per (worker, city) and serves it to admins at `/v1/stats/search-cities`.
+- [x] rs_console's `/v1/fleet` carries `today.cities`: the slugs searched in the worker's local day, null against an older coordinator.
+- [x] On the Fleet fold and the worker page a chip is green only when its slug is in `today.cities`. Every other chip is grey, whatever the worker's status.
 
 ## Out of scope
 
