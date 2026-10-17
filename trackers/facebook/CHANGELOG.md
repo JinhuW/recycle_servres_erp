@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-10-17
+
 ### Fixed
 
 - **A worker that cannot log in parks instead of searching logged out**
