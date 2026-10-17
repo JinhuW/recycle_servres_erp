@@ -17,6 +17,18 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.271.2] - 2026-10-17
+
+The folded sidebar shows one plus on Submit order, not two (RS-273).
+
+### Fixed
+
+- **One green + on Submit order.** In the 64px icon rail, Submit order showed its
+  plus-shaped nav icon and its green `+` badge side by side. The rail now hides
+  the icon of any entry that carries a badge, so Submit order is just the green
+  `+`. The expanded sidebar keeps both, where the icon holds the column the
+  other labels line up on.
+
 ## [1.271.1] - 2026-10-17
 
 The flow card's stage detail is one fixed height again, the tallest stage's
