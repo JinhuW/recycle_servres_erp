@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-17
+
 ### Added
 
 - **Four more workers, one per unused Decodo port** (RS-275): `nyc-1` (10007,
