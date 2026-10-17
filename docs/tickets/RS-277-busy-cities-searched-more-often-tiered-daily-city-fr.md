@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-17
 reporter: jinhu
 branch: feat/fleet-city-tiers
-pr: 700
+pr: "#700"
 version: 1.274.0
 related: [RS-271, RS-275, RS-276]
 ---
@@ -38,11 +38,11 @@ full sweep — on any change. So the tier is asked at search time instead.
 
 ## Acceptance criteria
 
-- [ ] The coordinator ranks a worker's cities by alerts sent + alerts reacted to over a window (default 30 days); the top 20% are searched 3×/day, the next 20% 2×/day, the rest 1×/day. A city with no alerts in the window is never promoted.
-- [ ] A city can be pinned to 3×, 2× or 1× regardless of its rank; percentages, per-day counts and window are editable.
-- [ ] A worker running `start_at` with N daily times searches, at each time, only the cities due in that slot; an N-per-day city is spread evenly over the slots, and 1×/day cities are spread across slots by a stable hash so no slot carries them all.
-- [ ] A worker that cannot reach the coordinator, or runs interval pacing instead of `start_at`, searches every city as before. With one `start_at` time, behaviour is unchanged.
-- [ ] The ERP's Edit cities dialog shows each city's alerts in the window, its frequency and whether it is pinned, and can pin; the fleet's city chips mark 3× and 2× cities; a manager can edit the tier settings.
+- [x] The coordinator ranks a worker's cities by alerts sent + alerts reacted to over a window (default 30 days); the top 20% are searched 3×/day, the next 20% 2×/day, the rest 1×/day. A city with no alerts in the window is never promoted.
+- [x] A city can be pinned to 3×, 2× or 1× regardless of its rank; percentages, per-day counts and window are editable.
+- [x] A worker running `start_at` with N daily times searches, at each time, only the cities due in that slot; an N-per-day city is spread evenly over the slots, and 1×/day cities are spread across slots by a stable hash so no slot carries them all.
+- [x] A worker that cannot reach the coordinator, or runs interval pacing instead of `start_at`, searches every city as before. With one `start_at` time, behaviour is unchanged.
+- [x] The ERP's Edit cities dialog shows each city's alerts in the window, its frequency and whether it is pinned, and can pin; the fleet's city chips mark 3× and 2× cities; a manager can edit the tier settings.
 
 ## Out of scope
 
@@ -68,3 +68,7 @@ full sweep — on any change. So the tier is asked at search time instead.
 - Monitor fork commits on `recycle-patches`; the deployed fork lives in
   `~/Projects/recycle_servers/facebook_tracker/ai-marketplace-monitor`, not the
   monorepo checkout's copy, which is behind the `VENDOR.md` pin.
+- Shipped with facebook-tracker v0.8.0 (fork `3d6dc96`), deployed 2026-10-17:
+  coordinator, console and all ten workers rebuilt. `deploy.sh` recreates only
+  `rs-monitor`; the coordinator, console and the nine `rs-monitor-*` workers were
+  rebuilt by hand. Tiers take effect once the search settings list 2+ start times.
