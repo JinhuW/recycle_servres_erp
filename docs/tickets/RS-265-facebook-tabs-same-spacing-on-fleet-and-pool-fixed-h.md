@@ -7,7 +7,7 @@ priority: P3
 created: 2026-10-17
 reporter: jinhu
 branch: fix/facebook-tab-spacing
-pr:
+pr: "#677"
 version: 1.266.1
 related: [RS-264]
 ---
