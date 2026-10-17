@@ -17,6 +17,41 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.270.0] - 2026-10-17
+
+The fleet's keyword rules are now easy to read, edit and test on the flow card
+(RS-269).
+
+### Added
+
+- **Rules as chips, one item at a time.** On the search, title-gate and
+  keyword-gate stages, the phrases and keyword rules moved out of a narrow side
+  column into a wide pane. Tabs pick the item and show its rule counts.
+  *Must match one of* and *Drops the listing* sit side by side. One-word rules
+  share a chip cloud, an `a OR b OR c` rule is a group of chips, and a rule
+  using AND, NOT or parentheses shows whole, tagged as an expression. A term
+  listed twice in one list is outlined. The Title gate no longer shows an empty
+  Keywords heading.
+- **Editing without the syntax.** Edit gives each chip a ×. Enter adds a term
+  (commas and pasted lines add several), `+` adds a term to an OR group, and an
+  expression can be clicked and rewritten. *Edit as text* falls back to the
+  old one-per-line box. Only the rule you touched is rewritten, so every other
+  rule saves exactly as it was loaded.
+- **Try a listing.** On the title and keyword gates, a title (plus an optional
+  description) is checked against every item, the way the worker would check
+  it. Each item shows passes, the anti-keyword that drops the listing, or no
+  keyword matched, and the matching chip lights up. While editing it reads the
+  unsaved draft, so a rule change can be tried before a save starts a sweep.
+  The matcher is a TypeScript port of the monitor's `is_substring` and agrees
+  with it on a differential test set.
+
+### Changed
+
+- **Save waits for a change and asks before dropping one.** Save stays disabled
+  until something changed, and it shows how many changes there are. Clicking
+  another stage, Cancel, leaving the page or reloading with unsaved edits now
+  asks first. Before, a click on the stage row silently threw the draft away.
+
 ## [1.269.0] - 2026-10-17
 
 A fleet account in the Account pool now belongs to a worker you pick, and its

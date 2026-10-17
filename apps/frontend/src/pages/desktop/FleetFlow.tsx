@@ -3,11 +3,13 @@ import { Skeleton } from '../../components/Skeleton';
 import { coordinatorApi, type FilterPrompt, type FleetDoc, type ReviewStatsDay } from '../../lib/coordinator';
 import { handleFetchError, showSuccessToast } from '../../lib/errorToast';
 import {
-  FLOW_STAGES, STAGE_FORMS, flowCounts, settingsDraft, settingsPatch,
+  FLOW_STAGES, STAGE_FORMS, draftChanges, flowCounts, settingsDraft, settingsPatch,
   type FlowStage, type ItemField, type SearchField, type SettingsDraft,
 } from '../../lib/fleetView';
 import { useT } from '../../lib/i18n';
 import type { Translate } from '../../lib/orderPresentation';
+import { confirmDiscard, useUnsavedGuard } from '../../lib/unsavedGuard';
+import { ListingTester, RulesPanel, STAGE_LISTS, probeVerdicts, type ItemRules, type Probe } from './FleetRules';
 
 // ─── From a search to an alert ────────────────────────────────────────────────
 // The pipeline a Marketplace listing goes through, stage by stage, as the
@@ -16,6 +18,7 @@ import type { Translate } from '../../lib/orderPresentation';
 // stage names the code behind it and the settings it reads; a stage with
 // settings has an Edit form (STAGE_FORMS) that the console writes into every
 // worker's config. Counts are today's fleet totals from /v1/stats/reviews.
+// The phrase and keyword lists are FleetRules.tsx.
 
 type Setting = { label: string; value: string; fixed?: boolean };
 
@@ -88,12 +91,6 @@ const SEARCH_LABEL: Record<SearchField, string> = {
   min_unit_count: 'fbcSetMinUnits',
 };
 
-const ITEM_LABEL: Record<ItemField, string> = {
-  search_phrases: 'fbcFlowPhrasesOf',
-  keywords: 'fbcFlowKeywordsOf',
-  antikeywords: 'fbcFlowAntiOf',
-};
-
 export function FlowCard({ fleet, stats, prompt, onSaved }: {
   fleet: FleetDoc | null;
   stats: ReviewStatsDay[] | 'unavailable' | null;
@@ -103,7 +100,11 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
   const { t, locale } = useT();
   const [stage, setStage] = useState<FlowStage>('ai');
   const [draft, setDraft] = useState<SettingsDraft | null>(null);
+  // The draft as Edit opened it, so Save knows whether there is anything to send.
+  const [base, setBase] = useState<SettingsDraft | null>(null);
   const [busy, setBusy] = useState(false);
+  const [activeItem, setActiveItem] = useState('');
+  const [probe, setProbe] = useState<Probe>({ title: '', description: '' });
   const counts = flowCounts(Array.isArray(stats) ? stats : null);
   const fmt = useMemo(() => new Intl.NumberFormat(locale), [locale]);
   const items = (fleet?.items ?? []).filter(i => i.enabled);
@@ -111,10 +112,37 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
   const editable = !!fleet?.settings?.editable;
   const loadedPrompt = prompt && prompt !== 'unavailable' ? prompt : null;
 
-  const pick = (k: FlowStage) => {
+  const changes = draft && base ? draftChanges(base, draft) : 0;
+  useUnsavedGuard(changes > 0);
+  const lists = STAGE_LISTS[stage];
+  const ruleItems: ItemRules[] = draft
+    ? Object.entries(draft.items).map(([name, f]) => ({ name, ...f }))
+    : items.map(i => ({
+      name: i.name,
+      search_phrases: i.search_phrases.join('\n'),
+      keywords: i.keywords.join('\n'),
+      antikeywords: i.antikeywords.join('\n'),
+    }));
+  const prefilter = draft ? draft.title_prefilter : !!fleet?.search?.title_prefilter;
+  const verdicts = probeVerdicts(stage, ruleItems, probe, prefilter);
+
+  // Leaving a dirty form asks first: the stage tabs sit right above it, and a
+  // stray click used to drop every edit.
+  const leaveEdit = (then: () => void) => {
     if (busy) return;
-    setStage(k);
-    setDraft(null);
+    void confirmDiscard().then(ok => {
+      if (!ok) return;
+      setDraft(null);
+      setBase(null);
+      then();
+    });
+  };
+  const pick = (k: FlowStage) => { if (k !== stage) leaveEdit(() => setStage(k)); };
+  const startEdit = () => {
+    if (!fleet) return;
+    const d = settingsDraft(fleet, loadedPrompt);
+    setBase(d);
+    setDraft(d);
   };
   const set = <K extends keyof SettingsDraft>(key: K, value: SettingsDraft[K]) =>
     setDraft(d => (d ? { ...d, [key]: value } : d));
@@ -123,12 +151,13 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
 
   const save = (e: FormEvent) => {
     e.preventDefault();
-    if (!draft || busy) return;
+    if (!draft || busy || changes === 0) return;
     setBusy(true);
     coordinatorApi.saveSettings(settingsPatch(stage, draft, !!loadedPrompt))
       .then(() => {
         showSuccessToast(t('fbcEditSaved', { stage: t(`fbcFlow_${stage}`) }));
         setDraft(null);
+        setBase(null);
         onSaved();
       })
       .catch(handleFetchError)
@@ -180,21 +209,8 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
     }
   };
 
-  const editingExtra: ReactNode = draft && form ? (
+  const editingExtra: ReactNode = draft && form?.ai ? (
     <>
-      {form.items.length > 0 && Object.entries(draft.items).map(([name, fields]) => (
-        <div key={name} className="ff-flow-group">
-          {form.items.map(f => (
-            <label key={f} className="ff-edit-field">
-              <span className="fp-section-label">{t(ITEM_LABEL[f], { item: name })}</span>
-              <textarea className="input ff-edit-list" value={fields[f]} spellCheck={false}
-                rows={Math.min(10, Math.max(3, fields[f].split('\n').length + 1))}
-                onChange={e => setItem(name, f, e.target.value)} />
-            </label>
-          ))}
-        </div>
-      ))}
-      {form.items.length > 0 && <span className="fp-muted ff-edit-hint">{t('fbcEditOnePerLine')}</span>}
       {form.ai && (loadedPrompt ? (
         <>
           <label className="ff-edit-field">
@@ -214,23 +230,17 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
 
   const extra: ReactNode = (() => {
     if (editingExtra) return editingExtra;
-    if (stage === 'search') {
-      return items.map(i => (
-        <div key={i.name} className="ff-flow-group">
-          <div className="fp-section-label">{t('fbcFlowPhrasesOf', { item: i.name })}</div>
-          <div className="fl-cities">{i.search_phrases.map(p => <span key={p} className="chip muted">{p}</span>)}</div>
-        </div>
-      ));
-    }
-    if (stage === 'title' || stage === 'keywords') {
-      return items.map(i => (
-        <div key={i.name} className="ff-flow-group">
-          <div className="fp-section-label">{t('fbcFlowKeywordsOf', { item: i.name })}</div>
-          {stage === 'keywords' && i.keywords.map(k => <div key={k} className="ff-rule">{k}</div>)}
-          <div className="fp-section-label">{t('fbcFlowAntiOf', { item: i.name })}</div>
-          {i.antikeywords.length ? i.antikeywords.map(k => <div key={k} className="ff-rule">{k}</div>) : <span className="fp-muted">{t('fbcNone')}</span>}
-        </div>
-      ));
+    if (lists) {
+      return (
+        <>
+          {(stage === 'title' || stage === 'keywords') && (
+            <ListingTester stage={stage} probe={probe} onProbe={setProbe} verdicts={verdicts}
+              onPick={setActiveItem} editing={!!draft} />
+          )}
+          <RulesPanel stage={stage} items={ruleItems} active={activeItem} onActive={setActiveItem}
+            editing={!!draft} onChange={setItem} verdicts={verdicts} />
+        </>
+      );
     }
     if (stage === 'ai') {
       if (!loadedPrompt) return <span className="fp-muted">{t('fbcFlowPromptUnavailable')}</span>;
@@ -281,7 +291,7 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
           );
         })}
       </div>
-      <form className="ff-flow-detail" role="tabpanel" onSubmit={save}>
+      <form className={`ff-flow-detail${lists ? ' ff-flow-detail-rules' : ''}`} role="tabpanel" onSubmit={save}>
         <div>
           <div className="ff-flow-head">
             <h3>{t(`fbcFlow_${stage}`)}</h3>
@@ -289,7 +299,7 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
             {form && !draft && (
               <button type="button" className="btn sm ff-edit-btn" disabled={!editable || !fleet}
                 title={editable ? undefined : t('fbcSettingsReadOnly')}
-                onClick={() => fleet && setDraft(settingsDraft(fleet, loadedPrompt))}>
+                onClick={startEdit}>
                 {t('fbcEditStage')}
               </button>
             )}
@@ -315,8 +325,13 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
               </div>
               <p className="ff-edit-note">{t('fbcEditSweepNote')}</p>
               <div className="ff-edit-actions">
-                <button type="button" className="btn" disabled={busy} onClick={() => setDraft(null)}>{t('cancel')}</button>
-                <button type="submit" className="btn primary" disabled={busy}>{busy ? t('fbcEditSaving') : t('fbcEditSave')}</button>
+                <button type="button" className="btn" disabled={busy} onClick={() => leaveEdit(() => {})}>{t('cancel')}</button>
+                <button type="submit" className="btn primary" disabled={busy || changes === 0}>
+                  {busy ? t('fbcEditSaving') : t('fbcEditSave')}
+                </button>
+                <span className="ff-edit-count">
+                  {changes === 0 ? t('fbcEditNoChanges') : t('fbcEditChanges', { n: changes })}
+                </span>
               </div>
             </div>
           ) : (

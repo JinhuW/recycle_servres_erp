@@ -2105,7 +2105,14 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   cards, title gate, keyword gate, AI rating) has an **Edit** form for those
   settings, prompt and rubric included. A save goes through the fleet
   console into every worker's config. Workers pick it up between jobs and
-  start a sweep, and deploys keep the saved values (v1.265.0). The eye
+  start a sweep, and deploys keep the saved values (v1.265.0). The phrase and keyword lists show one item at a time, as chips: an OR rule
+  is a group of chips, an AND/NOT rule an expression, and a repeated term is
+  outlined. Editing is by chip (× to remove, Enter or paste to add, `+` to
+  grow a group), with a text fallback. A **Try a listing** box on the title
+  and keyword gates says per item whether a listing passes, which
+  anti-keyword drops it, or that no keyword matched, using the unsaved draft
+  while editing. Save stays off until something changed, and leaving a dirty
+  form asks first (v1.270.0). The eye
   on a row is the one way to a worker's page, `/fleet/worker/<worker>`: its
   Facebook login and user id, vault account and stored secrets by name,
   session expiry, browser and backup, proxy, cities, pacing, session file and
