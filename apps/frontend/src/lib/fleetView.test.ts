@@ -5,7 +5,7 @@ import {
   externalVncUrl, fleetActivity, fleetStatus, flowCounts, hitsByCity, isUnstampedBuild, parkedWorkers, reloginIsAutomatic,
   matchesTerms, offersRelogin, queryTerms, reviewedToday,
   splitHighlights, reloginWouldBeAutomatic, vaultAccountIdFor, whoIs,
-  FLOW_STAGES, STAGE_FORMS, settingsDraft, settingsPatch,
+  FLOW_STAGES, STAGE_FORMS, draftChanges, settingsDraft, settingsPatch,
 } from './fleetView';
 
 const account = (over: Partial<FleetAccount>): FleetAccount => ({
@@ -280,6 +280,15 @@ describe('stage settings forms', () => {
       ai_model: 'openai/gpt-5.6-luna',
     });
     expect(settingsPatch('ai', settingsDraft(doc, null), false).search).toEqual({ rating: 4, min_unit_count: 5 });
+  });
+
+  it('counts settings changed and list entries added or removed, not reordering', () => {
+    const base = settingsDraft(doc, prompt);
+    expect(draftChanges(base, base)).toBe(0);
+    const d = { ...base, rating: '3', items: { server_ram: { ...base.items.server_ram, antikeywords: 'hdd\nusb' } } };
+    expect(draftChanges(base, d)).toBe(3);
+    const swapped = { ...base, items: { server_ram: { ...base.items.server_ram, keywords: 'ram OR ddr4\n' } } };
+    expect(draftChanges(base, swapped)).toBe(0);
   });
 
   it('offers a form exactly on the stages that read a setting', () => {

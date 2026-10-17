@@ -292,6 +292,30 @@ export function settingsPatch(stage: FlowStage, draft: SettingsDraft, promptLoad
   return body;
 }
 
+/**
+ * How many edits separate a draft from the one it started as: each setting
+ * changed, plus each list entry added or removed. Zero means Save has nothing
+ * to send — and a save that sends nothing still starts a sweep.
+ */
+export function draftChanges(base: SettingsDraft, draft: SettingsDraft): number {
+  let n = 0;
+  for (const key of Object.keys(base) as (keyof SettingsDraft)[]) {
+    if (key !== 'items' && base[key] !== draft[key]) n++;
+  }
+  for (const [name, fields] of Object.entries(draft.items)) {
+    for (const f of Object.keys(fields) as ItemField[]) {
+      const left = lines(base.items[name]?.[f] ?? '');
+      for (const entry of lines(fields[f])) {
+        const i = left.indexOf(entry);
+        if (i >= 0) left.splice(i, 1);
+        else n++;
+      }
+      n += left.length;
+    }
+  }
+  return n;
+}
+
 // The coordinator column behind each stage. Workers count the first seven,
 // the coordinator the last two (ingest, then Telegram delivery).
 const FLOW_COUNTER: Record<FlowStage, keyof ReviewStatsDay> = {
