@@ -913,8 +913,8 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh
         <td className="num mono" style={{ color: row.amount > 0 ? 'var(--pos)' : undefined, whiteSpace: 'nowrap' }}>
           {fmtSigned(row.amount, locale)}
         </td>
-        {/* Owner and PO are mutually exclusive by constraint (migration 0116),
-            so this column is all dashes on the Linked tab by design. */}
+        {/* A linked payment can't carry an assignee (migration 0116), so the
+            API fills this with the PO's owner instead. */}
         <td className="pay-owner">
           {row.assignee ? (
             <span className="pay-owner-in" title={row.assignee.name}>

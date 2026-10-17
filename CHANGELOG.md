@@ -17,6 +17,18 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.275.2] - 2026-10-17
+
+### Fixed
+
+- **A linked payment's Owner is its PO's owner** (RS-278). The Owner column on
+  Payments showed a dash on every linked row. Linking clears the manual
+  assignee (the two are exclusive by constraint), and nothing took its place,
+  so the person whose money it was went unshown. The column now falls back to
+  the linked PO's owner, and the owner filter agrees with it: picking a member
+  also returns payments linked to their POs, and Unassigned leaves those out.
+  Manual assignment is unchanged.
+
 ## [1.275.1] - 2026-10-17
 
 Hardening left over from the v1.209 release review (RS-176).
