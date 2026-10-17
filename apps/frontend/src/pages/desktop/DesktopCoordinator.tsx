@@ -175,7 +175,7 @@ function FleetPage({ head, tabs }: { head: React.ReactNode; tabs: React.ReactNod
               filter={filter} onClearFilter={() => setFilter('all')} locale={locale} />
             <ActivityAside fleet={fleet} challenges={challenges} locale={locale} />
           </div>
-          <FlowCard fleet={fleet} stats={stats} prompt={prompt} />
+          <FlowCard fleet={fleet} stats={stats} prompt={prompt} onSaved={load} />
         </>
       )}
     </div>

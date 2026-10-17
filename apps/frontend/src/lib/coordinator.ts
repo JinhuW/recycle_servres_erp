@@ -95,6 +95,9 @@ export type FleetItem = {
 };
 
 export type FleetSearchSettings = Partial<{
+  // Sweep times, HH:MM in UTC (the workers' clock). When set they drive the
+  // cadence and the intervals do not.
+  start_at: string[];
   rating: number;
   min_unit_count: number;
   min_seller_rating: number;
@@ -189,6 +192,23 @@ export type FleetDoc = {
   items: FleetItem[];
   regions: FleetRegion[];
   workers: FleetAccount[];
+  // Absent from a facade that predates saved settings; the flow card then
+  // stays read-only.
+  settings?: {
+    editable: boolean;
+    updated_at: string | null;
+    updated_by: string | null;
+    error: string | null;
+  };
+};
+
+// What the flow card's Edit forms may save (PUT /api/coordinator/settings).
+// A key left out keeps its value; the facade validates every one and writes
+// them into each worker's config.
+export type SearchSettingsWrite = {
+  search?: FleetSearchSettings & { prompt?: string; rating_prompt?: string };
+  ai_model?: string;
+  items?: Record<string, Partial<Pick<FleetItem, 'search_phrases' | 'keywords' | 'antikeywords'>>>;
 };
 
 // Sent-vs-reacted counts for one (day, priority, item, city) bucket.
@@ -212,6 +232,12 @@ export const coordinatorApi = {
   filterPrompt: () => api.get<FilterPrompt>('/api/coordinator/filter-prompt'),
 
   fleet: () => api.get<FleetDoc>('/api/coordinator/fleet'),
+
+  // A save reaches every worker between jobs, and starts a sweep there.
+  saveSettings: (body: SearchSettingsWrite) =>
+    api.put<{ updated_at: string; updated_by: string | null; changed: string[] }>(
+      '/api/coordinator/settings', body,
+    ),
 
   alertHits: (days: number) =>
     api.get<{ rows: AlertHitRow[]; unmatched_reactions: number }>(

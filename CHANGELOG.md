@@ -17,6 +17,38 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.265.0] - 2026-10-17
+
+The Facebook fleet's search settings can be changed from the ERP, stage by
+stage (RS-263).
+
+### Added
+
+- **Every stage that reads a setting has an Edit form.** On the *From a
+  search to an alert* card, Search edits the sweep times, listing window,
+  delivery, results per search, intervals and each item's phrases. Result
+  cards edits the results cap. Title gate edits the title prefilter and the
+  anti-keywords. Keyword gate edits keywords, anti-keywords and the seller
+  rating rules. AI rating edits the alert rating, minimum units, model, prompt
+  and rubric. Before, all of it lived only in `master.toml`, and changing a
+  threshold took an edit, a regenerate and a deploy.
+- **A save reaches every worker.** `PUT /api/coordinator/settings`
+  (manager-only, field allowlist, signed with the session's name) goes to the
+  fleet console. The console validates the values, keeps them on its own
+  volume and writes them into each worker's config, which the worker reloads
+  between jobs. The form says that this starts a sweep straight away.
+- **Deploys keep what was saved.** The tracker's deploy now writes the worker
+  configs through the console instead of copying `master.toml`'s values over
+  them.
+
+### Changed
+
+- **The four stages with no setting say so.** Open the listing, New to us,
+  Coordinator and Telegram alert are code, not config. They keep their dashed
+  "code" chips and now read "Nothing to configure here".
+- **An older console stays read-only.** The Edit button is disabled until the
+  console reports that it can save.
+
 ## [1.264.0] - 2026-10-17
 
 Every stage of the Facebook fleet's search-to-alert card now has a number

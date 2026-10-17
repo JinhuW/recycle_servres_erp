@@ -3,7 +3,7 @@
 // city, the derived activity feed and the pipeline's stages.
 // Kept out of the components so they can be unit-tested without React.
 
-import type { AlertHitRow, Challenge, FleetAccount, FleetDoc, ReviewStatsDay } from './coordinator';
+import type { AlertHitRow, Challenge, FleetAccount, FleetDoc, ReviewStatsDay, SearchSettingsWrite } from './coordinator';
 
 export type AccountLiveness = 'live' | 'stale' | 'dead' | 'unknown' | 'none';
 
@@ -189,6 +189,108 @@ export function fleetActivity(fleet: FleetDoc | null, challenges: readonly Chall
 // dedupe by item id; the Telegram alert.
 export type FlowStage = 'search' | 'cards' | 'title' | 'open' | 'keywords' | 'fresh' | 'ai' | 'coordinator' | 'alert';
 export const FLOW_STAGES: readonly FlowStage[] = ['search', 'cards', 'title', 'open', 'keywords', 'fresh', 'ai', 'coordinator', 'alert'];
+
+// ── Editing a stage's settings ──
+// What each stage's Edit form changes: the same settings its chips show. The
+// stages left out (open, fresh, coordinator, alert) read no setting; what
+// they do is code in the monitor or the coordinator.
+export type SearchField =
+  | 'start_at' | 'date_listed' | 'delivery_method' | 'max_results' | 'search_interval'
+  | 'max_search_interval' | 'title_prefilter' | 'min_seller_rating' | 'exclude_unrated_sellers'
+  | 'rating' | 'min_unit_count';
+export type ItemField = 'search_phrases' | 'keywords' | 'antikeywords';
+type StageForm = { search: readonly SearchField[]; items: readonly ItemField[]; ai?: boolean };
+
+export const STAGE_FORMS: Partial<Record<FlowStage, StageForm>> = {
+  search: {
+    search: ['start_at', 'date_listed', 'delivery_method', 'max_results', 'search_interval', 'max_search_interval'],
+    items: ['search_phrases'],
+  },
+  cards: { search: ['max_results'], items: [] },
+  title: { search: ['title_prefilter'], items: ['antikeywords'] },
+  keywords: { search: ['min_seller_rating', 'exclude_unrated_sellers'], items: ['keywords', 'antikeywords'] },
+  ai: { search: ['rating', 'min_unit_count'], items: [], ai: true },
+};
+
+// The form's state: text as typed, so a half-typed number is not coerced.
+// Lists are one entry per line; sweep times are comma- or space-separated.
+export type SettingsDraft = Record<Exclude<SearchField, 'title_prefilter' | 'exclude_unrated_sellers'>, string> & {
+  title_prefilter: boolean;
+  exclude_unrated_sellers: boolean;
+  ai_model: string;
+  prompt: string;
+  rating_prompt: string;
+  items: Record<string, Record<ItemField, string>>;
+};
+
+const text = (v: unknown) => (v === undefined || v === null ? '' : String(v));
+
+export function settingsDraft(
+  fleet: FleetDoc,
+  prompt: { prompt: string | null; rating_prompt: string | null } | null,
+): SettingsDraft {
+  const s = fleet.search;
+  const window = Array.isArray(s.date_listed) ? s.date_listed[s.date_listed.length - 1] : s.date_listed;
+  return {
+    start_at: (s.start_at ?? []).join(', '),
+    date_listed: text(window),
+    delivery_method: text(s.delivery_method),
+    max_results: text(s.max_results),
+    search_interval: text(s.search_interval),
+    max_search_interval: text(s.max_search_interval),
+    title_prefilter: !!s.title_prefilter,
+    min_seller_rating: text(s.min_seller_rating),
+    exclude_unrated_sellers: !!s.exclude_unrated_sellers,
+    rating: text(s.rating),
+    min_unit_count: text(s.min_unit_count),
+    ai_model: text(fleet.ai_model),
+    prompt: text(prompt?.prompt),
+    rating_prompt: text(prompt?.rating_prompt),
+    items: Object.fromEntries(fleet.items.filter(i => i.enabled).map(i => [i.name, {
+      search_phrases: i.search_phrases.join('\n'),
+      keywords: i.keywords.join('\n'),
+      antikeywords: i.antikeywords.join('\n'),
+    }])),
+  };
+}
+
+const lines = (v: string) => v.split('\n').map(l => l.trim()).filter(Boolean);
+// A number the facade can check; anything else goes as typed, so its 400
+// names the field instead of this side guessing.
+const num = (v: string): number | string => (v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : v.trim());
+
+/**
+ * The PUT body for one stage's form: only the settings that stage edits.
+ * The prompts go only when they were loaded, so a save from a card that
+ * could not read them never blanks them.
+ */
+export function settingsPatch(stage: FlowStage, draft: SettingsDraft, promptLoaded: boolean): SearchSettingsWrite {
+  const form = STAGE_FORMS[stage];
+  if (!form) return {};
+  const search: Record<string, unknown> = {};
+  for (const key of form.search) {
+    const v = draft[key];
+    if (typeof v === 'boolean') search[key] = v;
+    else if (key === 'start_at') search[key] = v.split(/[\s,]+/).filter(Boolean);
+    else if (key === 'date_listed' || key === 'delivery_method' || key === 'search_interval' || key === 'max_search_interval') search[key] = v.trim();
+    else search[key] = num(v);
+  }
+  const body: SearchSettingsWrite = {};
+  if (form.ai) {
+    if (promptLoaded) {
+      search.prompt = draft.prompt;
+      if (draft.rating_prompt.trim()) search.rating_prompt = draft.rating_prompt;
+    }
+    body.ai_model = draft.ai_model.trim();
+  }
+  if (Object.keys(search).length) body.search = search as SearchSettingsWrite['search'];
+  if (form.items.length) {
+    body.items = Object.fromEntries(Object.entries(draft.items).map(([name, fields]) => [
+      name, Object.fromEntries(form.items.map(f => [f, lines(fields[f])])),
+    ]));
+  }
+  return body;
+}
 
 // The coordinator column behind each stage. Workers count the first seven,
 // the coordinator the last two (ingest, then Telegram delivery).

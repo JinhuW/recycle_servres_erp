@@ -213,6 +213,50 @@ coordinator.put('/accounts/:id', async (c) => {
   return forward(c, 'PUT', `/v1/accounts/${encodeURIComponent(id)}`, body);
 });
 
+// ── Search settings ──────────────────────────────────────────────────────────
+// The flow card's Edit forms. The facade validates every value and writes
+// them into the worker configs; this side only narrows the body to the keys
+// that form edits, so a key the facade learns later is a decision made here.
+// `updated_by` is the session's, never the client's.
+export const SEARCH_SETTING_FIELDS = [
+  'start_at', 'date_listed', 'delivery_method', 'max_results', 'search_interval',
+  'max_search_interval', 'title_prefilter', 'min_seller_rating', 'exclude_unrated_sellers',
+  'rating', 'min_unit_count', 'prompt', 'rating_prompt',
+] as const;
+const ITEM_SETTING_FIELDS = ['search_phrases', 'keywords', 'antikeywords'] as const;
+
+const isObject = (v: unknown): v is Record<string, unknown> =>
+  !!v && typeof v === 'object' && !Array.isArray(v);
+
+coordinator.put('/settings', async (c) => {
+  const raw: unknown = await c.req.json().catch(() => null);
+  if (!isObject(raw)) return c.json({ error: 'Expected a JSON object' }, 400);
+  const body: Record<string, unknown> = {};
+  if (isObject(raw.search)) {
+    const search: Record<string, unknown> = {};
+    for (const key of SEARCH_SETTING_FIELDS) if (key in raw.search) search[key] = raw.search[key];
+    body.search = search;
+  }
+  if ('ai_model' in raw) body.ai_model = raw.ai_model;
+  if (isObject(raw.items)) {
+    const items: Record<string, Record<string, unknown>> = {};
+    for (const [name, fields] of Object.entries(raw.items)) {
+      if (!isObject(fields)) continue;
+      items[name] = {};
+      for (const key of ITEM_SETTING_FIELDS) if (key in fields) items[name][key] = fields[key];
+    }
+    body.items = items;
+  }
+  body.updated_by = c.var.user.name || c.var.user.email;
+  log.info('fleet search settings saved', {
+    module: 'coordinator', by: c.var.user.email,
+    search: Object.keys((body.search as Record<string, unknown> | undefined) ?? {}),
+    aiModel: 'ai_model' in body,
+    items: Object.keys((body.items as Record<string, unknown> | undefined) ?? {}),
+  });
+  return forward(c, 'PUT', '/v1/config/settings', body);
+});
+
 // ── Watching a worker's browser ──────────────────────────────────────────────
 // The bytes themselves are relayed by vncBridge.ts, which owns the HTTP
 // upgrade. Before it accepts a socket it replays the handshake through the

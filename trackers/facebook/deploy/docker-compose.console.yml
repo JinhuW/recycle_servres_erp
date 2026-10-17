@@ -31,9 +31,19 @@ services:
 
     environment:
       RS_COORDINATOR_URL: http://coordinator:8500
-      RS_MONITOR_CONFIG: /config/monitor.toml
+      RS_MONITOR_CONFIG: /config/workers/homelab.toml
       RS_MASTER_CONFIG: /config/master.toml
       RS_FLEET_CONFIG: /config/fleet.toml
+      # Settings saved from the ERP's flow card (rs_console/settings.py) are
+      # kept here and written into every worker config below.
+      RS_SETTINGS_STATE: /state/settings.json
+      RS_WORKER_CONFIGS: >-
+        /config/workers/homelab.toml,
+        /config/workers/homelab-ne.toml,
+        /config/workers/homelab-denver.toml,
+        /config/workers/homelab-sc.toml,
+        /config/workers/homelab-mw.toml,
+        /config/workers/homelab-west.toml
       # RS_WORKER_ID arrives from secrets.env above — the same value the
       # monitor reports under — so the dashboard can join the phase-1
       # monitor's heartbeat row to its config.
@@ -62,14 +72,22 @@ services:
       # RS_CONSOLE_PUBLIC_URL: https://fbc-api.recycleservers.com
 
     volumes:
-      # The monitor's live config, for the filter-prompt endpoint and the
-      # phase-1 city list. Read-only: this service must never be a path to
-      # changing what the monitor does.
-      - ../configs/homelab.toml:/config/monitor.toml:ro
-      # Regions, items and search settings; and which worker owns which
-      # region. Same read-only rule.
+      # Every worker's live config. Writable so a settings save reaches the
+      # workers, file by file rather than the configs directory, because that
+      # directory also holds secrets.env and the Facebook sessions. A
+      # single-file mount pins an inode: settings.py rewrites in place, and
+      # scripts/deploy.sh recreates this container after a sync.
+      - ../configs/homelab.toml:/config/workers/homelab.toml
+      - ../configs/homelab-ne.toml:/config/workers/homelab-ne.toml
+      - ../configs/homelab-denver.toml:/config/workers/homelab-denver.toml
+      - ../configs/homelab-sc.toml:/config/workers/homelab-sc.toml
+      - ../configs/homelab-mw.toml:/config/workers/homelab-mw.toml
+      - ../configs/homelab-west.toml:/config/workers/homelab-west.toml
+      # Regions, items and the default search settings; and which worker owns
+      # which region. Read-only: saved settings overlay master, never edit it.
       - ../configs/master.toml:/config/master.toml:ro
       - ../configs/fleet.toml:/config/fleet.toml:ro
+      - rs-console-state:/state
 
     networks:
       - rs-fleet
@@ -110,6 +128,11 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  # Settings saved from the ERP. Not in the tree, so no deploy touches it.
+  rs-console-state:
+    name: rs-console-state
 
 networks:
   rs-fleet:

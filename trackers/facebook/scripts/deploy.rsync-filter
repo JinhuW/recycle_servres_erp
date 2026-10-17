@@ -26,6 +26,10 @@
 - /configs/proxies.decodo.txt
 - /configs/accounts/
 - /configs/generated/
+# Worker configs: deploy.sh sends them through rs-console, which writes in
+# the settings saved from the ERP, and writes them in place. Never sent or
+# deleted by the rsync itself.
+- /configs/homelab*.toml
 # Dev-only: Facebook logins and 2FA for `rs-session capture`. Never sent.
 - /configs/account_info.txt*
 - /configs/data.txt

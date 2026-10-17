@@ -10,6 +10,9 @@ dependencies = [
     # uvicorn speaks WebSocket only with a protocol library installed; the
     # VNC bridge (/v1/vnc/<worker>/ws) needs one.
     "websockets>=12",
+    # Writes saved settings into the worker configs without losing their
+    # comments, which are most of master.toml.
+    "tomlkit>=0.12",
 ]
 
 [project.optional-dependencies]

@@ -35,6 +35,14 @@ deployed?" harder to answer.
     fewer requests than before. This needs the new pin in `VENDOR.md`.
   - **Deploy the coordinator first.** An older coordinator still takes the new
     report's `reviewed`/`alerted`, because it ignores fields it does not know.
+- **Search settings can be saved from the ERP.** rs_console has a new
+  `PUT /v1/config/settings` (`rs_console/settings.py`). It validates the
+  settings the ERP's *From a search to an alert* card edits, keeps them in
+  `/state/settings.json` on a new `rs-console-state` volume, and writes them
+  into every worker config in place. A worker picks the change up between jobs
+  and sweeps straight away. `/v1/fleet` now reports the effective values
+  (`master.toml` plus saved values), includes `start_at`, and says whether the
+  console can save (`settings.editable`).
 
 ### Removed
 
@@ -47,6 +55,16 @@ deployed?" harder to answer.
 
 ### Changed
 
+- **Deploys send the worker configs through the console.**
+  `configs/homelab*.toml` are no longer in the rsync (`deploy.rsync-filter`).
+  `scripts/deploy.sh` rebuilds and recreates rs-console, renders each worker
+  config with the saved settings written in, and writes it in place. Verify
+  compares the running config against that render. Without this, every deploy
+  would have put `master.toml`'s values back over the saved ones.
+- **rs-console mounts every worker config writable** (one file at a time,
+  never the `configs/` directory with its secrets and sessions), and
+  `RS_MONITOR_CONFIG` moves to `/config/workers/homelab.toml`. It depends on
+  `tomlkit`, which keeps the configs' comments when it writes.
 - **System faults page ops once, fleet-wide, instead of flooding the chat.**
   An AI outage used to send an "AI evaluation DOWN" / "recovered" pair from
   every worker every time OpenRouter flapped — 98 to 130 DOWN notes per worker

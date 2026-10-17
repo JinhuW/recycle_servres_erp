@@ -294,3 +294,67 @@ describe('Vault account writes (PUT /api/coordinator/accounts/:id)', () => {
     expect(r.body.error).toMatch(/already belongs to account 'personal'/);
   });
 });
+
+describe('Search settings (PUT /api/coordinator/settings)', () => {
+  beforeEach(async () => {
+    await resetDb();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('requires a manager', async () => {
+    expect((await api('PUT', '/api/coordinator/settings', { body: {} })).status).toBe(401);
+    const { token } = await loginAs(MARCUS);
+    expect((await api('PUT', '/api/coordinator/settings', { token, body: {} })).status).toBe(403);
+  });
+
+  it('forwards only the editable keys, signed by the session', async () => {
+    const { token } = await loginAs(ALEX);
+    const spy = stubFacade(200, { updated_at: '2026-10-17T10:00:00+00:00', updated_by: 'Alex', changed: ['homelab.toml'] });
+
+    const r = await api<{ changed: string[] }>('PUT', '/api/coordinator/settings', {
+      token, env: ENV,
+      body: {
+        search: { rating: 3, prompt: 'judge it', proxy_server: 'http://evil' },
+        ai_model: 'openai/other',
+        items: { server_ram: { keywords: ['ram'], description: 'nope' }, junk: 'x' },
+        telegram_chat_id: '123',
+        updated_by: 'someone else',
+      },
+    });
+
+    expect(r.status).toBe(200);
+    expect(r.body.changed).toEqual(['homelab.toml']);
+    const [url, init] = spy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://facade.internal:8600/v1/config/settings');
+    expect(init.method).toBe('PUT');
+    const sent = JSON.parse(init.body as string);
+    expect(sent).toEqual({
+      search: { rating: 3, prompt: 'judge it' },
+      ai_model: 'openai/other',
+      items: { server_ram: { keywords: ['ram'] } },
+      updated_by: sent.updated_by,
+    });
+    expect(sent.updated_by).toBeTruthy();
+    expect(sent.updated_by).not.toBe('someone else');
+  });
+
+  it('relays the facade’s validation message', async () => {
+    const { token } = await loginAs(ALEX);
+    stubFacade(400, { detail: 'rating must be a whole number from 1 to 5' });
+    const r = await api<{ error: string }>('PUT', '/api/coordinator/settings', {
+      token, env: ENV, body: { search: { rating: 7 } },
+    });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toBe('rating must be a whole number from 1 to 5');
+  });
+
+  it('refuses a body that is not an object', async () => {
+    const { token } = await loginAs(ALEX);
+    const spy = stubFacade(200, {});
+    expect((await api('PUT', '/api/coordinator/settings', { token, env: ENV, body: ['x'] })).status).toBe(400);
+    expect(spy).not.toHaveBeenCalled();
+  });
+});

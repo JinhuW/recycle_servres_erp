@@ -8,13 +8,16 @@ this facade is what gets exposed through the Cloudflare tunnel instead.
 
 The safety property, stated once: **the coordinator admin token never leaves
 this process, and no auth/credential/session route is forwarded.** The routes
-below are a closed allowlist — nine reads and three writes (resolving a
-checkpoint, queuing a worker re-login, and setting a vault account's login
-details). The first two move no credential and name no account. The third is
-the one route through which a credential enters the fleet, and it is blind:
-a value goes upstream, a presence flag comes back, and nothing here can read
-a stored secret. A full compromise of this service's own token can therefore
-overwrite a worker's login, but still yields fleet metadata, not accounts.
+below are a closed allowlist — nine reads and four writes (resolving a
+checkpoint, queuing a worker re-login, setting a vault account's login
+details, and saving search settings). The first two move no credential and
+name no account. The third is the one route through which a credential
+enters the fleet, and it is blind: a value goes upstream, a presence flag
+comes back, and nothing here can read a stored secret. The fourth changes
+what the workers search for and how they judge it — never where, as whom,
+through which proxy or to which chat (settings.py lists what it can reach).
+A full compromise of this service's own token can therefore overwrite a
+worker's login or its search, but still yields fleet metadata, not accounts.
 
 It also serves the fleet dashboard: a single static page (`/`, assets under
 `/static`) that calls the routes below with the console token the operator
@@ -40,6 +43,10 @@ Configuration (env):
                                 default /config/master.toml
     RS_FLEET_CONFIG             fleet.toml (worker -> region), default
                                 /config/fleet.toml
+    RS_WORKER_CONFIGS           comma-separated worker configs a settings
+                                save writes into, default RS_MONITOR_CONFIG
+    RS_SETTINGS_STATE           the saved settings (settings.py), default
+                                /state/settings.json
     RS_MONITOR_WORKER_ID        the phase-1 monitor's control-plane id, so its
                                 heartbeat row joins its config; falls back to
                                 RS_WORKER_ID (the same variable the monitor
@@ -61,12 +68,14 @@ import hashlib
 import os
 import re
 import secrets as pysecrets
+import threading
 import tomllib
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 import httpx
 from fastapi import (
+    Body,
     Depends,
     FastAPI,
     Header,
@@ -81,7 +90,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from . import fleet as fleet_view
-from . import vnc
+from . import settings, vnc
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -379,7 +388,12 @@ async def fleet() -> Dict[str, Any]:
     exactly when someone is looking.
     """
     base, headers = _upstream()
-    master = _read_toml(_env("RS_MASTER_CONFIG", "/config/master.toml"))
+    try:
+        saved = settings.load()
+    except (OSError, ValueError):
+        saved = {"values": {}, "updated_at": None, "updated_by": None, "error": "Saved settings are unreadable"}
+    # The values the workers run: master.toml with what the ERP saved on top.
+    master = settings.overlay(_read_toml(_env("RS_MASTER_CONFIG", "/config/master.toml")), saved["values"])
     fleet_cfg = _read_toml(_env("RS_FLEET_CONFIG", "/config/fleet.toml"))
     monitor = _read_toml(_env("RS_MONITOR_CONFIG", "/config/monitor.toml"))
     monitor_worker_id = _env("RS_MONITOR_WORKER_ID") or _env("RS_WORKER_ID")
@@ -422,7 +436,7 @@ async def fleet() -> Dict[str, Any]:
     except (httpx.HTTPError, ValueError):
         error = "Coordinator is unreachable"
 
-    return fleet_view.compose(
+    doc = fleet_view.compose(
         master=master,
         fleet=fleet_cfg,
         monitor=monitor,
@@ -434,6 +448,53 @@ async def fleet() -> Dict[str, Any]:
         versions={"console": __version__, "coordinator": coordinator_version},
         vnc_pages=_vnc_pages(),
     )
+    doc["settings"] = {
+        "editable": master is not None and "error" not in saved and settings.writable(),
+        "updated_at": saved.get("updated_at"),
+        "updated_by": saved.get("updated_by"),
+        "error": saved.get("error"),
+    }
+    return doc
+
+
+# One save at a time: two interleaved saves would each write the worker
+# configs from a different merge.
+_settings_lock = threading.Lock()
+
+
+@app.put("/v1/config/settings", dependencies=[Depends(require_token)])
+def put_settings(body: Any = Body(default=None)) -> Dict[str, Any]:
+    """Save search settings the ERP's flow card edits, and write them into
+    every worker config.
+
+    Only the keys in settings.py can change. Every config is rendered before
+    any is written, so a bad value changes nothing; a worker picks the change
+    up between jobs (its monitor hashes the file) and sweeps straight away.
+    """
+    master = _read_toml(_env("RS_MASTER_CONFIG", "/config/master.toml"))
+    if master is None:
+        raise HTTPException(status_code=503, detail="master.toml is not mounted")
+    if not settings.writable():
+        raise HTTPException(
+            status_code=409,
+            detail="This console mounts the worker configs read-only; redeploy it to save settings",
+        )
+    with _settings_lock:
+        try:
+            saved = settings.load()
+            effective = settings.overlay(master, saved["values"]) or {}
+            current = {"search": fleet_view.search_settings(effective)}
+            patch = settings.validate(body, list((master.get("item") or {}).keys()), current)
+            values = settings.merge(saved["values"], patch)
+            changed = settings.apply(values)
+        except settings.SettingsError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        except OSError:
+            raise HTTPException(status_code=500, detail="A worker config could not be written") from None
+        by = body.get("updated_by") if isinstance(body.get("updated_by"), str) else None
+        state = settings.stamp(values, (by or "").strip()[:120] or None)
+        settings.save(state)
+    return {"updated_at": state["updated_at"], "updated_by": state["updated_by"], "changed": changed}
 
 
 @app.get("/v1/config/filter-prompt", dependencies=[Depends(require_token)])
