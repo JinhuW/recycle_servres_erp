@@ -26,6 +26,7 @@ export function AccountEditor({
   challenges,
   onClose,
   onSave,
+  onSendLogin,
   onRemove,
   onRetire,
 }: {
@@ -36,6 +37,7 @@ export function AccountEditor({
   challenges: Challenge[] | null;
   onClose: () => void;
   onSave: (draft: PoolDraft) => void;
+  onSendLogin: (workerId: string) => void;
   onRemove: () => void;
   onRetire: () => void;
 }) {
@@ -200,6 +202,20 @@ export function AccountEditor({
                   })}
                 </select>
                 <small>{t('fpWorkerHelp')}</small>
+                {/* Saving a newly picked worker sends the login; this resends
+                    it to the worker the account is already on. */}
+                {account?.status === 'fleet' && account.holder && account.holder === workerId && (
+                  <button
+                    type="button"
+                    className="btn sm"
+                    style={{ justifySelf: 'start' }}
+                    title={t('fpSendLoginHint')}
+                    onClick={() => onSendLogin(account.holder as string)}
+                  >
+                    <Icon name="refresh" size={13} />
+                    {t('fpSendLogin', { id: account.holder })}
+                  </button>
+                )}
               </label>
             )}
             <label className="fp-field">

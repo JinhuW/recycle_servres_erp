@@ -114,7 +114,8 @@ export type FleetSearchSettings = Partial<{
 // 'monitor' is the phase-1 single-machine monitor described from its own
 // config; 'fleet' a sharded worker from fleet.toml; 'unconfigured' a row the
 // coordinator knows that no config describes.
-export type FleetAccountSource = 'monitor' | 'fleet' | 'unconfigured';
+// 'config': a worker known only from the config the console writes for it.
+export type FleetAccountSource = 'monitor' | 'fleet' | 'config' | 'unconfigured';
 
 // How a worker's city list relates to master.toml's regions. The phase-1
 // monitor searches a list of its own, so the facade names it by matching
@@ -183,7 +184,13 @@ export type FleetAccount = {
   plan?: FleetSearchPlan;
   // null when the coordinator serves no search log or per-worker reviews.
   today?: FleetToday | null;
+  // Whether the console holds this worker's config and so can save its
+  // cities; absent from a facade that predates per-worker cities.
+  cities_editable?: boolean;
 };
+
+// One city as a worker config holds it. `radius` is in kilometres.
+export type CityWrite = { slug: string; name: string; radius: number };
 
 // The daily search budget: every enabled phrase in every city, once per
 // `start_at` time. `per_day` is null for an interval loop or an empty region.
@@ -293,6 +300,12 @@ export const coordinatorApi = {
   // answer is the vault's presence-flag view, never a value.
   saveAccount: (accountId: string, body: VaultAccountWrite) =>
     api.put<VaultAccount>(`/api/coordinator/accounts/${encodeURIComponent(accountId)}`, body),
+
+  // Replace the cities one worker searches; it picks them up between jobs.
+  saveCities: (workerId: string, cities: CityWrite[]) =>
+    api.put<{ cities: CityWrite[]; changed: string[] }>(
+      `/api/coordinator/workers/${encodeURIComponent(workerId)}/cities`, { cities },
+    ),
 };
 
 /**

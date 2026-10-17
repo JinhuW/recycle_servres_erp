@@ -238,6 +238,17 @@ def monitor_worker(
     }
 
 
+def describe_from_config(
+    worker: Dict[str, Any], config: Dict[str, Any], region_list: List[Dict[str, Any]]
+) -> None:
+    """Describe `worker` from the config it actually runs, which is the only
+    place its cities live once they are edited per worker."""
+    described = monitor_worker(config, worker["worker_id"], region_list)
+    for key in ("region", "cities", "proxy_env", "pacing"):
+        worker[key] = described[key]
+    worker["cities_editable"] = True
+
+
 def region_timezone(region_key: Optional[str]) -> str:
     return REGION_TIMEZONES.get(region_key or "", DEFAULT_TIMEZONE)
 
@@ -342,12 +353,13 @@ def known_worker_ids(
     fleet: Optional[Dict[str, Any]],
     monitor_worker_id: Optional[str],
     health_rows: Optional[List[Dict[str, Any]]],
+    worker_configs: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> List[str]:
     """Every worker id the document will carry a row for, config or live."""
     ids: List[str] = []
     if monitor_worker_id:
         ids.append(monitor_worker_id)
-    for worker_id in ((fleet or {}).get("worker") or {}):
+    for worker_id in [*((fleet or {}).get("worker") or {}), *(worker_configs or {})]:
         if worker_id not in ids:
             ids.append(str(worker_id))
     for row in health_rows or []:
@@ -384,6 +396,7 @@ def compose(
     monitor: Optional[Dict[str, Any]],
     monitor_worker_id: Optional[str],
     health_rows: Optional[List[Dict[str, Any]]],
+    worker_configs: Optional[Dict[str, Dict[str, Any]]] = None,
     health_error: Optional[str] = None,
     accounts: Optional[List[Dict[str, Any]]] = None,
     sessions: Optional[Dict[str, Dict[str, Any]]] = None,
@@ -410,6 +423,10 @@ def compose(
     city; each worker's `today` is cut from them in its region's zone
     (`timezone`), and `plan` is its daily search budget.
 
+    `worker_configs` maps a worker id to the config it runs. Such a worker
+    is described from that file rather than from fleet.toml's region, and is
+    `cities_editable`; one no other source knows gets a row of its own.
+
     `vnc_pages` maps a worker id to the console's own viewer page for it
     (see vnc.py). It wins over a `vnc_url` from config: the console page is
     the one link known to open from this dashboard without a tunnel, and a
@@ -424,10 +441,21 @@ def compose(
         workers.append(monitor_worker(monitor, monitor_worker_id or "monitor", region_list))
     if fleet:
         workers.extend(fleet_workers(fleet, master, region_list))
+    for worker in workers:
+        worker["cities_editable"] = False
+
+    by_id = {w["worker_id"]: w for w in workers}
+    for worker_id, config in (worker_configs or {}).items():
+        target = by_id.get(worker_id)
+        if target is None:
+            target = monitor_worker(config, worker_id, region_list)
+            target["source"] = "config"
+            workers.append(target)
+            by_id[worker_id] = target
+        describe_from_config(target, config, region_list)
 
     # A row the coordinator knows that no config describes is still a real
     # process somewhere — surface it rather than drop it.
-    by_id = {w["worker_id"]: w for w in workers}
     for row in health_rows or []:
         worker_id = str(row.get("worker_id") or "")
         if not worker_id:
@@ -446,6 +474,7 @@ def compose(
                 "health": None,
                 "account": None,
                 "session": None,
+                "cities_editable": False,
             }
             workers.append(target)
             by_id[worker_id] = target

@@ -18,7 +18,7 @@ import {
   type PoolSnapshot,
   type PoolStatus,
 } from '../../lib/facebookPool';
-import { fleetStatus, parkedWorkers, whoIs } from '../../lib/fleetView';
+import { fleetStatus, parkedWorkers, vaultAccountIdFor, whoIs } from '../../lib/fleetView';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { fleetWorkerPath, hrefFor, onLinkClick } from '../../lib/route';
@@ -39,7 +39,9 @@ type Props = {
 };
 // Refusals the API names with one of the page's own keys read as a warning,
 // not as the blocking error dialog: the pool moved under the user, that's all.
-const KNOWN_REFUSALS = new Set(['fpAtLimit', 'fpDuplicate', 'fpTakenElsewhere', 'fpNotTaken']);
+const KNOWN_REFUSALS = new Set([
+  'fpAtLimit', 'fpDuplicate', 'fpTakenElsewhere', 'fpNotTaken', 'fpWorkerTaken', 'fpNoPassword', 'fpAssignRetired',
+]);
 export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = null, challenges = null }: Props) {
   const { t, locale } = useT();
   const user = useEffectiveUser()!;
@@ -93,6 +95,15 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
     if (!shown) audit(no, 'revealed', field);
   };
   const ago = (at: number) => relTime(new Date(at).toISOString(), locale);
+  // Picking a worker is only a label until its login reaches the worker; this
+  // writes it into the worker's vault and queues Re-login.
+  const sendLogin = (no: number, workerId: string) => {
+    const w = workers.get(workerId);
+    return run(
+      poolApi.assign(no, workerId, w ? vaultAccountIdFor(w) : undefined),
+      t('fpAssignedToast', { n: no, id: workerId }),
+    );
+  };
   const save = async (draft: PoolDraft) => {
     if (!manager || busy) return;
     const original = editor === 'new' ? null : editor;
@@ -101,7 +112,13 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
       : run(poolApi.create(draft, t('fpManualBatch')), (s) =>
           t('fpSaved', { n: s.accounts.find((a) => a.uid === draft.uid)?.no ?? '' }),
         ));
-    if (saved) setEditor(null);
+    if (!saved) return;
+    setEditor(null);
+    const no = original?.no ?? saved.accounts.find((a) => a.uid === draft.uid)?.no;
+    const moved = !(original?.status === 'fleet' && original.holder === draft.holder);
+    if (fleet && no !== undefined && draft.status === 'fleet' && draft.holder && moved) {
+      await sendLogin(no, draft.holder);
+    }
   };
   const mine = accounts.filter((a) => a.status === 'taken' && a.holderId === user.id);
   const chosen =
@@ -639,6 +656,10 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
           challenges={challenges}
           onClose={() => setEditor(null)}
           onSave={(draft) => void save(draft)}
+          onSendLogin={(workerId) => {
+            if (editor === 'new' || busy) return;
+            void sendLogin(editor.no, workerId).then((ok) => ok && setEditor(null));
+          }}
           onRetire={() => {
             if (editor === 'new' || busy) return;
             void run(poolApi.retire(editor.no)).then((ok) => ok && setEditor(null));

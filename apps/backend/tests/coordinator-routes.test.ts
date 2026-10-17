@@ -358,3 +358,58 @@ describe('Search settings (PUT /api/coordinator/settings)', () => {
     expect(spy).not.toHaveBeenCalled();
   });
 });
+
+describe('Worker cities (PUT /api/coordinator/workers/:id/cities)', () => {
+  beforeEach(async () => {
+    await resetDb();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const PATH = '/api/coordinator/workers/nyc-1/cities';
+
+  it('requires a manager', async () => {
+    expect((await api('PUT', PATH, { body: { cities: [] } })).status).toBe(401);
+    const { token } = await loginAs(MARCUS);
+    expect((await api('PUT', PATH, { token, body: { cities: [] } })).status).toBe(403);
+  });
+
+  it('forwards each city narrowed to slug, name and radius, signed by the session', async () => {
+    const { token } = await loginAs(ALEX);
+    const spy = stubFacade(200, { worker_id: 'nyc-1', cities: [], changed: ['homelab-nyc.toml'] });
+    const r = await api<{ changed: string[] }>('PUT', PATH, {
+      token, env: ENV,
+      body: {
+        cities: [{ slug: 'longisland', name: 'Long Island, NY', radius: 60, proxy: 'http://evil' }],
+        proxy_server: 'http://evil',
+        updated_by: 'someone else',
+      },
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.changed).toEqual(['homelab-nyc.toml']);
+    const [url, init] = spy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://facade.internal:8600/v1/workers/nyc-1/cities');
+    expect(init.method).toBe('PUT');
+    const sent = JSON.parse(init.body as string);
+    expect(sent.cities).toEqual([{ slug: 'longisland', name: 'Long Island, NY', radius: 60 }]);
+    expect(Object.keys(sent).sort()).toEqual(['cities', 'updated_by']);
+    expect(sent.updated_by).not.toBe('someone else');
+  });
+
+  it('relays the facade’s validation message and refuses a bad id or body', async () => {
+    const { token } = await loginAs(ALEX);
+    stubFacade(400, { detail: "'New York' is not a Marketplace location" });
+    const r = await api<{ error: string }>('PUT', PATH, {
+      token, env: ENV, body: { cities: [{ slug: 'New York', name: 'NY', radius: 60 }] },
+    });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toMatch(/not a Marketplace location/);
+
+    const spy = stubFacade(200, {});
+    expect((await api('PUT', '/api/coordinator/workers/a.b/cities', { token, env: ENV, body: { cities: [] } })).status).toBe(400);
+    expect((await api('PUT', PATH, { token, env: ENV, body: { cities: 'nyc' } })).status).toBe(400);
+    expect(spy).not.toHaveBeenCalled();
+  });
+});

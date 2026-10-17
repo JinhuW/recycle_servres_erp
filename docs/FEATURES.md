@@ -2134,8 +2134,14 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   credentials the tab says so and the rest of the ERP is unaffected
   (v1.140.0). While that data loads, the table, the activity aside, the
   legend counts and the stage counts show skeletons shaped like their content
-  (v1.267.0). Editing cities, pacing, stages and the model from the ERP is
-  not built yet: nothing writes `master.toml` from here (RS-261).
+  (v1.267.0). Since v1.272.0 a worker whose config the console holds also
+  has **Edit cities**. Cities come from the regions or are typed as a
+  Marketplace slug or numeric id, with a name and radius. A city another
+  worker already searches is amber, because it would alert twice. Each city
+  links to its Marketplace page so a wrong slug can be caught, since Facebook
+  otherwise searches the account's own area in silence. Saving writes that
+  worker's config only, and it searches the new list from its next run
+  (RS-275). Pacing still lives in `fleet.toml`.
 - **Facebook account pool** — a second tab at **Monitors ▸ Facebook**,
   linked directly at `/#/fleet/pool` (v1.261.0). Managers see a status legend
   with counts that filters (the key-tag rail left the manager's view in
@@ -2165,7 +2171,14 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   reveals it (logged). A cookie may be
   pasted as a header line or as the JSON a cookie extension exports, and a
   2FA key as the base32 key or an `otpauth://` link, on the Pool tab as on
-  the Fleet tab (v1.262.1).
+  the Fleet tab (v1.262.1). Since v1.272.0 the pick does more than label the
+  account. Saving a newly picked worker, or **Send the login again**, writes
+  the account's login, password, 2FA key and e-mail into that worker's vault
+  account with password login allowed, and queues Re-login. The worker then
+  signs in inside its own browser, through its own proxy; any checkpoint is
+  finished in Watch. The cookie is never sent, and nothing secret reaches the
+  browser. The ledger records it as `assigned`. A worker that already holds
+  another account, or an account with no password, is refused (RS-275).
 - **Watching a worker's browser** — `/fleet/watch/<worker>` shows the live
   Chromium a Facebook worker is driving, through noVNC, view-only until
   "Take control" is ticked (and handed back when the tab is hidden), with
