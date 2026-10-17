@@ -161,11 +161,15 @@ bankTx.get('/', async (c) => {
                OR ql.paypal_txn_id ILIKE ${like} OR ql.external_id ILIKE ${like}
                OR ql.note ILIKE ${like})))`
     : sql`TRUE`;
-  // The owner lives on every leg, so the display leg alone answers this.
+  // A linked payment's owner is its PO's: linking clears the assignee (0116),
+  // and the PO already names whose money it is. The assignee lives on every
+  // leg and the link is spread onto every leg, so the display leg alone
+  // answers this.
+  const ownerExpr = sql`COALESCE(bt.assignee_id, po.user_id)`;
   const assigneeFrag =
     assignee === '' ? sql`TRUE`
-    : assignee === 'unassigned' ? sql`bt.assignee_id IS NULL`
-    : sql`bt.assignee_id = ${assignee}::uuid`;
+    : assignee === 'unassigned' ? sql`${ownerExpr} IS NULL`
+    : sql`${ownerExpr} = ${assignee}::uuid`;
   const afterTs = cursorTs(cursor);
   const cursorFrag = afterTs && cursor
     ? sql`AND (bt.posted_at, bt.id) < (${cursorTsParam(sql, afterTs)}, ${cursor.id}::uuid)`
@@ -214,7 +218,9 @@ bankTx.get('/', async (c) => {
            -- filer PayPal gives us.
            CASE WHEN bt.amount < 0 THEN bt.dispute END AS dispute,
            bt.internal_txn_id, it.title AS internal_txn_title,
-           bt.assignee_id, au.name AS assignee_name, au.initials AS assignee_initials,
+           bt.assignee_id, COALESCE(bt.assignee_id, po.user_id) AS owner_id,
+           COALESCE(au.name, pou.name) AS owner_name,
+           COALESCE(au.initials, pou.initials) AS owner_initials,
            bt.note, bt.note_at, nu.name AS note_by_name,
            COALESCE(NULLIF(ir.label, ''), ir.pattern) AS ignore_rule_label,
            (SELECT json_agg(json_build_object(
@@ -230,6 +236,7 @@ bankTx.get('/', async (c) => {
     LEFT JOIN orders po ON po.id = bt.order_id
     LEFT JOIN sell_orders so ON so.id = bt.sell_order_id
     LEFT JOIN users au ON au.id = bt.assignee_id
+    LEFT JOIN users pou ON pou.id = po.user_id
     LEFT JOIN internal_transactions it ON it.id = bt.internal_txn_id
     LEFT JOIN users nu ON nu.id = bt.note_by
     LEFT JOIN bank_ignore_rules ir ON ir.id = bt.ignore_rule_id
@@ -320,8 +327,8 @@ bankTx.get('/', async (c) => {
       internalTxn: r.internal_txn_id
         ? { id: r.internal_txn_id, title: r.internal_txn_title ?? null }
         : null,
-      assignee: r.assignee_id
-        ? { id: r.assignee_id, name: r.assignee_name, initials: r.assignee_initials }
+      assignee: r.owner_id
+        ? { id: r.owner_id, name: r.owner_name, initials: r.owner_initials }
         : null,
       note: r.note
         ? { text: r.note, at: r.note_at, byName: r.note_by_name ?? null }
