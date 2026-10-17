@@ -18,6 +18,17 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A worker that cannot log in parks instead of searching logged out**
+  (RS-286). A worker with no session file at all now parks like one with a
+  lapsed file, so a new worker no longer needs an empty storage state before
+  first start. A password login that stops on a checkpoint now parks too, and a
+  checkpoint finished by hand in Watch is adopted and saved within seconds;
+  before, the worker never noticed, kept reading "Session expired", and its
+  next job searched from wherever the login had stopped. A Re-login that works
+  reports healthy at once instead of at the next sweep.
+
 ## [0.10.0] - 2026-10-17
 
 ### Added

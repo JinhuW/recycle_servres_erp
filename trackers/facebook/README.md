@@ -819,7 +819,7 @@ full result page per phrase in Facebook traffic, so keep the phrase count small.
 
 | Change | Files |
 | --- | --- |
-| Session auth — restore `storage_state`, present the session's pinned user agent, and fail with an actionable error rather than searching logged out | `utils.py` (`MonitorConfig.storage_state_path`), `marketplace.py` (`create_page`, `save_storage_state`, `get_session_user_agent`), `facebook.py` (`login`, `is_logged_in`) |
+| Session auth — restore `storage_state`, present the session's pinned user agent, and fail with an actionable error rather than searching logged out. A worker that cannot log in — no session file, a lapsed one, or a password login stuck on a checkpoint — parks on that page until a session lands or an operator finishes it in Watch | `utils.py` (`MonitorConfig.storage_state_path`), `marketplace.py` (`create_page`, `save_storage_state`, `get_session_user_agent`), `facebook.py` (`login`, `is_logged_in`) |
 | TOTP 2FA auto-fill + "trust this device", for the optional password fallback | `facebook.py` (`handle_two_factor_auth`, `trust_this_device`) |
 | Coordinator notification channel | `coordinator_notify.py` (new), `user.py` (registered on `UserConfig`) |
 | Collect search results while scrolling. Marketplace unmounts cards that scroll out of view, so parsing after the scroll returned the tail of the ranking (ranks 56-115 of 115, none of the top 24) and dropped the best matches | `facebook.py` (`FacebookSearchResultPage._parse_visible_listings`, `get_listings`) |

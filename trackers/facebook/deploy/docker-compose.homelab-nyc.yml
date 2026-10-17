@@ -23,10 +23,6 @@
 # and RS_VNC_TARGETS.
 #
 # Before first start, on the VM:
-#   configs/sessions/homelab-nyc/fb_state.json  — an EMPTY storage state,
-#       {"cookies": [], "origins": []}. Without any session file the monitor
-#       cannot record that it is parked and searches logged out (debug note
-#       docs/debug-notes/2026-10-17-new-worker-without-session-file-searches-logged-out.md).
 #   configs/secrets.env               — PROXY_HOMELAB_NYC=http://isp.decodo.com:10007
 #   configs/secrets.homelab-nyc.env  — RS_WORKER_ID=nyc-1 and its own
 #       RS_CONTROL_PLANE_TOKEN (rsc mint-token --worker nyc-1)
