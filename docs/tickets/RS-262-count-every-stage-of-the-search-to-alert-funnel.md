@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-17
 reporter: jinhu
 branch: feat/account-pool-datasources
-pr:
+pr: 671
 version: 1.264.0
 related: []
 ---
