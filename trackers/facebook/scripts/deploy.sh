@@ -21,9 +21,11 @@
 # it compares the actual bytes of every module in the container against this
 # tree, and it is run automatically at the end of every deploy.
 #
-# What is deliberately NOT pushed: configs/secrets.env and configs/sessions/.
-# The VM's copies are live credentials — the worker's Facebook cookies and its
-# coordinator token — and the laptop's are for a different account and IP.
+# What is deliberately never pushed, and never deleted on the VM, is listed in
+# scripts/deploy.rsync-filter. The VM's secrets, sessions and per-worker tokens
+# are live credentials written there by hand. A dev checkout's copies belong to
+# a different account and IP, and a checkout without them would have --delete
+# remove the VM's. The dev machine's Facebook logins and 2FA never leave it.
 set -eu
 
 VM="${RS_MONITOR_HOST:-jinhu@10.10.10.73}"
@@ -48,6 +50,17 @@ for arg in "$@"; do
 done
 
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
+
+# A worker config as the VM should hold it: this tree's copy with the settings
+# saved from the ERP written in (rs_console/settings.py). A console that
+# predates saved settings has none, so the tree's copy is then the answer.
+render_config() {
+    if ssh "$VM" "docker exec rs-console python -c 'import rs_console.settings'" >/dev/null 2>&1; then
+        ssh "$VM" "docker exec -i rs-console python -m rs_console.settings render" < "$1"
+    else
+        cat "$1"
+    fi
+}
 
 # ---------------------------------------------------------------- verify
 # Compares the container's installed modules with this tree, file by file.
@@ -74,13 +87,16 @@ verify() {
     fi
 
     # The config is bind-mounted, so it can drift independently of the image.
+    expected=$(mktemp)
+    render_config "$ROOT/configs/homelab.toml" > "$expected"
     if ssh "$VM" "docker exec $C cat /root/.ai-marketplace-monitor/config.toml" \
-        | diff -q - "$ROOT/configs/homelab.toml" >/dev/null 2>&1; then
+        | diff -q - "$expected" >/dev/null 2>&1; then
         echo "  config: MATCH"
     else
-        echo "  config: DRIFT — configs/homelab.toml differs from the mounted config"
+        echo "  config: DRIFT — configs/homelab.toml (plus saved settings) differs from the mounted config"
         DRIFT=1
     fi
+    rm -f "$expected"
 
     # A restart that half-failed still leaves the old process running.
     ssh "$VM" "docker inspect $C --format '  uptime: started {{.State.StartedAt}}, restarts {{.RestartCount}}, running {{.State.Running}}'"
@@ -161,14 +177,27 @@ sh deploy/make-homelab-config.sh
 
 # ---------------------------------------------------------------- sync
 step "sync -> $VM:$REMOTE"
-rsync -az --delete --itemize-changes \
-    --exclude '.git' --exclude '.venv*' --exclude '__pycache__' --exclude '*.egg-info' \
-    --exclude '.pytest_cache' --exclude 'configs/secrets.env' --exclude 'configs/sessions' \
-    --exclude 'data' --exclude 'logs' --exclude 'reports' --exclude '*.png' \
+rsync -az --delete --itemize-changes --filter="merge scripts/deploy.rsync-filter" \
     ai-marketplace-monitor configs deploy scripts \
     rs_coordinator rs_poster rs_messenger rs_console \
     CHANGELOG.md README.md VENDOR.md VERSION \
     "$VM:$REMOTE/"
+
+# ---------------------------------------------------------------- worker configs
+# The rsync above skips configs/homelab*.toml (deploy.rsync-filter). They go
+# through the console instead, which writes in the settings saved from the
+# ERP; a plain sync would put master.toml's values back. They are written in
+# place because each is a single-file bind mount, which pins an inode: a
+# replaced file stays invisible to the containers that mount it. The console
+# is recreated first, for its own mounts and so it has this tree's renderer.
+step "worker configs, through rs-console"
+CONSOLE_BUILD=""
+[ "$MODE" = "sync" ] || CONSOLE_BUILD="--build"
+ssh "$VM" "cd $REMOTE && docker compose -f deploy/docker-compose.console.yml up -d $CONSOLE_BUILD --force-recreate console"
+for config in configs/homelab*.toml; do
+    ssh "$VM" "out=\$(mktemp) && docker exec -i rs-console python -m rs_console.settings render > \$out && cat \$out > $REMOTE/$config && rm -f \$out" < "$config"
+    echo "  $config"
+done
 
 # ---------------------------------------------------------------- build
 if [ "$MODE" != "sync" ]; then

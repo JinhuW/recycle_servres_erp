@@ -240,21 +240,64 @@ class WorkerList(BaseModel):
 
 
 class ReviewStatsReport(BaseModel):
-    """One search cycle's deltas: listings freshly AI-evaluated, and alerted."""
+    """One search page's funnel deltas, in pipeline order.
+
+    Older workers send only `reviewed` and `alerted`; the rest default to 0.
+    """
 
     worker_id: str | None = None
+    searches: int = Field(default=0, ge=0)
+    cards: int = Field(default=0, ge=0)
+    title_pass: int = Field(default=0, ge=0)
+    opened: int = Field(default=0, ge=0)
+    keyword_pass: int = Field(default=0, ge=0)
+    fresh: int = Field(default=0, ge=0)
     reviewed: int = Field(default=0, ge=0)
     alerted: int = Field(default=0, ge=0)
 
 
 class ReviewStatsDay(BaseModel):
     day: str
+    searches: int = 0
+    cards: int = 0
+    title_pass: int = 0
+    opened: int = 0
+    keyword_pass: int = 0
+    fresh: int = 0
     reviewed: int
     alerted: int
+    # Counted by the coordinator itself, at ingest and at Telegram delivery.
+    coordinated: int = 0
+    sent: int = 0
 
 
 class ReviewStatsList(BaseModel):
     days: List[ReviewStatsDay]
+
+
+class WorkerReviewStatsDay(ReviewStatsDay):
+    worker_id: str
+    # The last time any counter on this row moved.
+    updated_at: str | None = None
+
+
+class WorkerReviewStatsList(BaseModel):
+    rows: List[WorkerReviewStatsDay]
+
+
+# -- search cycles -------------------------------------------------------------
+
+
+class SearchCycleRow(BaseModel):
+    """A worker starting on an item: a heartbeat's new `last_search_at`."""
+
+    worker_id: str
+    at: str
+    item: str | None = None
+
+
+class SearchCycleList(BaseModel):
+    rows: List[SearchCycleRow]
 
 
 # -- alert hit tracking ------------------------------------------------------

@@ -42,6 +42,8 @@ Forwarded today:
   `/v1/challenges/{id}/screenshot`
 - `POST /v1/workers/{id}/relogin`, `/v1/challenges/{id}/resolve`
 - `PUT /v1/accounts/{id}` (credentials write)
+- `PUT /v1/config/settings` (search settings; `rs_console/settings.py` lists
+  the keys, and the README's *Settings saved from the ERP* says where they live)
 - the VNC websocket
 
 Renaming or reshaping any of these is a change to both sides (root AGENTS.md →
@@ -101,7 +103,8 @@ commands are in README → *Tests*:
 ```bash
 AIMM_PYTHON=$PWD/.venv-aimm/bin/python .venv-coordinator/bin/python -m pytest \
     rs_coordinator/tests rs_poster/tests rs_messenger/tests
-sh scripts/tests/test-version-gate.sh && sh scripts/tests/test-check-secrets.sh
+sh scripts/tests/test-version-gate.sh && sh scripts/tests/test-check-secrets.sh \
+    && sh scripts/tests/test-deploy-filter.sh
 ```
 
 Without `AIMM_PYTHON`, the generated-config tests skip silently. Running
@@ -122,6 +125,12 @@ suites above and the vendored monitor's.
   `conftest.py` only refuses a URL equal to `RS_DATABASE_URL` /
   `DATABASE_URL`, so it cannot catch this. Use a throwaway on a free port, as
   in `rs_coordinator/POSTGRES.md`.
+- **Running the coordinator by hand from an ERP shell** picks up the ERP's
+  `DATABASE_URL` (the root `.env` points it at the `recycle-erp-testdb`
+  container on 55432), so `RS_COORDINATOR_DB` is ignored and the coordinator
+  creates its tables in the ERP's test database. Start it with
+  `env -u DATABASE_URL -u RS_DATABASE_URL …` and check that `/healthz` says
+  `"backend":"sqlite"`.
 
 ## Constraints
 

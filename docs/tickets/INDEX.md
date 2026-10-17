@@ -5,6 +5,13 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-264](./RS-264-fleet-table-today-strip-searches-budget-and-posts-pe.md) | done | story | P2 | Fleet table: Today strip, Searches budget and Posts per worker | 1.266.0 |
+| [RS-263](./RS-263-make-every-search-to-alert-stage-s-settings-editable.md) | done | story | P2 | Make every search-to-alert stage's settings editable from the ERP | 1.265.0 |
+| [RS-262](./RS-262-count-every-stage-of-the-search-to-alert-funnel.md) | done | story | P2 | Count every stage of the search-to-alert funnel | 1.264.0 |
+| [RS-261](./RS-261-facebook-fleet-tab-redesign-to-the-pool-s-layout-wor.md) | done | story | P2 | Facebook fleet tab: redesign to the pool's layout, worker pages | 1.263.0 |
+| [RS-260](./RS-260-facebook-account-pool-review-fixes-for-the-pool-page.md) | done | bug | P2 | Facebook account pool: review fixes for the pool page | 1.262.1 |
+| [RS-259](./RS-259-facebook-account-pool-backend-store-for-the-pool-ui.md) | done | story | P2 | Facebook account pool: backend store for the pool UI | 1.262.0 |
+| [RS-258](./RS-258-facebook-deploy-must-not-delete-vm-only-files-or-pus.md) | done | bug | P2 | Facebook deploy must not delete VM-only files or push dev-only logins | n/a — trackers/facebook [Unreleased] |
 | [RS-257](./RS-257-type-the-count-in-review-mode.md) | done | story | P2 | Type the count in Review mode | 1.260.0 |
 | [RS-256](./RS-256-clean-up-after-the-tracker-migration.md) | done | chore | P2 | Clean up after the tracker migration | 1.259.1 |
 | [RS-255](./RS-255-fold-reddits-tracker-and-facebook-tracker-into-this.md) | done | task | P2 | Fold reddits_tracker and facebook_tracker into this repo; AGENTS.md per area | n/a — imported trackers, docs and CI only, no ERP release |

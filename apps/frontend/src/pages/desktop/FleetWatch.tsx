@@ -6,7 +6,7 @@ import { coordinatorApi, VNC_SESSION_LAPSED, vncSocketUrl, type FleetAccount } f
 import { liveness } from '../../lib/fleetView';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
-import { hrefFor, onLinkClick } from '../../lib/route';
+import { fleetWorkerPath, hrefFor, onLinkClick } from '../../lib/route';
 import { ReloginButton, stateLabel } from './FleetAccounts';
 
 // ─── Watch a worker's browser ─────────────────────────────────────────────────
@@ -142,9 +142,9 @@ export function FleetWatch({ workerId }: { workerId: string }) {
     <>
       <div className="page-head">
         <div>
-          <a className="fl-back" href={hrefFor('/fleet')} onClick={onLinkClick('/fleet')}>
+          <a className="fl-back" href={hrefFor(fleetWorkerPath(workerId))} onClick={onLinkClick(fleetWorkerPath(workerId))}>
             <Icon name="chevronLeft" size={13} />
-            {t('fbcTitle')}
+            {account ? (account.account?.fb_username ?? workerId) : workerId}
           </a>
           <h1 className="page-title mono">{workerId}</h1>
           <div className="page-sub">

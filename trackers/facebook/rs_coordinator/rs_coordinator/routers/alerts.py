@@ -36,5 +36,9 @@ def report_alert_message(
     record = payload.model_dump(exclude_none=True)
     record["worker_id"] = worker_id
     # Claim-style insert: a retried report of the same message is a no-op.
-    deps.db.add_alert_message(record)
+    # A direct-send worker's alert bypasses ingest and the outbox, so this is
+    # where both of the coordinator's funnel stages see it; once per alert, not
+    # per part of a split message.
+    if deps.db.add_alert_message(record) and payload.part == 1:
+        deps.db.add_review_stats(worker_id, coordinated=1, sent=1)
     return StatusResponse()

@@ -60,8 +60,12 @@ export const challengeScreenshotUrl = (id: number) =>
 
 export type FleetFilter = 'all' | 'active' | 'attention';
 
-// One row per UTC day the fleet reported anything; gap days are absent.
-export type ReviewStatsDay = { day: string; reviewed: number; alerted: number };
+// One row per UTC day the fleet reported anything; gap days are absent. The
+// funnel counters are optional because a console older than them sends only
+// `reviewed` and `alerted`.
+export type FunnelCounter =
+  | 'searches' | 'cards' | 'title_pass' | 'opened' | 'keyword_pass' | 'fresh' | 'coordinated' | 'sent';
+export type ReviewStatsDay = { day: string; reviewed: number; alerted: number } & Partial<Record<FunnelCounter, number>>;
 
 export type FilterPrompt = {
   prompt: string | null;
@@ -91,6 +95,9 @@ export type FleetItem = {
 };
 
 export type FleetSearchSettings = Partial<{
+  // Sweep times, HH:MM in UTC (the workers' clock). When set they drive the
+  // cadence and the intervals do not.
+  start_at: string[];
   rating: number;
   min_unit_count: number;
   min_seller_rating: number;
@@ -170,6 +177,35 @@ export type FleetAccount = {
   // Either is null when nothing is on file (or the coordinator predates them).
   account: VaultAccount | null;
   session: SessionMeta | null;
+  // The zone of the worker's region, which its "today" is counted in. This
+  // and the two below are absent from a facade that predates them.
+  timezone?: string;
+  plan?: FleetSearchPlan;
+  // null when the coordinator serves no search log or per-worker reviews.
+  today?: FleetToday | null;
+};
+
+// The daily search budget: every enabled phrase in every city, once per
+// `start_at` time. `per_day` is null for an interval loop or an empty region.
+export type FleetSearchPlan = {
+  phrases: number;
+  cities: number;
+  runs_per_day: number | null;
+  per_day: number | null;
+};
+
+// The worker's local day so far: `first_at` is when it started on its first
+// item, `last_at` its latest counted search page. `searches` is null for a
+// monitor that predates the funnel counters. `posts` are listings freshly
+// put to the AI today, `alerts` those it alerted on.
+export type FleetToday = {
+  day: string;
+  first_at: string | null;
+  last_at: string | null;
+  cycles: number | null;
+  searches: number | null;
+  posts: number | null;
+  alerts: number | null;
 };
 
 export type FleetDoc = {
@@ -185,6 +221,23 @@ export type FleetDoc = {
   items: FleetItem[];
   regions: FleetRegion[];
   workers: FleetAccount[];
+  // Absent from a facade that predates saved settings; the flow card then
+  // stays read-only.
+  settings?: {
+    editable: boolean;
+    updated_at: string | null;
+    updated_by: string | null;
+    error: string | null;
+  };
+};
+
+// What the flow card's Edit forms may save (PUT /api/coordinator/settings).
+// A key left out keeps its value; the facade validates every one and writes
+// them into each worker's config.
+export type SearchSettingsWrite = {
+  search?: FleetSearchSettings & { prompt?: string; rating_prompt?: string };
+  ai_model?: string;
+  items?: Record<string, Partial<Pick<FleetItem, 'search_phrases' | 'keywords' | 'antikeywords'>>>;
 };
 
 // Sent-vs-reacted counts for one (day, priority, item, city) bucket.
@@ -208,6 +261,12 @@ export const coordinatorApi = {
   filterPrompt: () => api.get<FilterPrompt>('/api/coordinator/filter-prompt'),
 
   fleet: () => api.get<FleetDoc>('/api/coordinator/fleet'),
+
+  // A save reaches every worker between jobs, and starts a sweep there.
+  saveSettings: (body: SearchSettingsWrite) =>
+    api.put<{ updated_at: string; updated_by: string | null; changed: string[] }>(
+      '/api/coordinator/settings', body,
+    ),
 
   alertHits: (days: number) =>
     api.get<{ rows: AlertHitRow[]; unmatched_reactions: number }>(

@@ -17,6 +17,190 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.266.0] - 2026-10-17
+
+The Facebook fleet table shows each worker's day: Today, Searches and Posts
+(RS-264).
+
+### Added
+
+- **Today, Searches and Posts columns on the Fleet tab.** The table could say
+  when a worker last started a search, but not whether today's sweep had run,
+  how far it got or what it found. Each row now has a 24-hour strip in the
+  worker's own time zone (sweep start, progress, the now tick, an estimated
+  end while it runs, the next scheduled start before it does, hatching for a
+  worker that is down), a ring of searches done against the day's budget
+  (phrases × cities × daily runs, from `master.toml`), and the posts the AI
+  reviewed for the first time today next to the week's alerts. The summary
+  line adds the fleet's new posts today, and each fold states the daily
+  budget. The old Last search and Alerts columns fold into these.
+- **The tracker serves it.** The coordinator logs when each worker starts on
+  an item (a heartbeat with a new `last_search_at`) and serves its funnel
+  counters per worker; rs_console cuts both into each worker's local day in
+  `/v1/fleet`. Until that tracker release is deployed, the new columns show
+  "—".
+
+## [1.265.0] - 2026-10-17
+
+The Facebook fleet's search settings can be changed from the ERP, stage by
+stage (RS-263).
+
+### Added
+
+- **Every stage that reads a setting has an Edit form.** On the *From a
+  search to an alert* card, Search edits the sweep times, listing window,
+  delivery, results per search, intervals and each item's phrases. Result
+  cards edits the results cap. Title gate edits the title prefilter and the
+  anti-keywords. Keyword gate edits keywords, anti-keywords and the seller
+  rating rules. AI rating edits the alert rating, minimum units, model, prompt
+  and rubric. Before, all of it lived only in `master.toml`, and changing a
+  threshold took an edit, a regenerate and a deploy.
+- **A save reaches every worker.** `PUT /api/coordinator/settings`
+  (manager-only, field allowlist, signed with the session's name) goes to the
+  fleet console. The console validates the values, keeps them on its own
+  volume and writes them into each worker's config, which the worker reloads
+  between jobs. The form says that this starts a sweep straight away.
+- **Deploys keep what was saved.** The tracker's deploy now writes the worker
+  configs through the console instead of copying `master.toml`'s values over
+  them.
+
+### Changed
+
+- **The four stages with no setting say so.** Open the listing, New to us,
+  Coordinator and Telegram alert are code, not config. They keep their dashed
+  "code" chips and now read "Nothing to configure here".
+- **An older console stays read-only.** The Edit button is disabled until the
+  console reports that it can save.
+
+## [1.264.0] - 2026-10-17
+
+Every stage of the Facebook fleet's search-to-alert card now has a number
+(RS-262).
+
+### Added
+
+- **The search-to-alert card counts all nine stages.** Before, seven of them
+  read "not counted yet", because the coordinator only kept fresh AI verdicts
+  and alerts. Workers now count searches, cards seen, title-gate passes, real
+  page visits, keyword-gate passes and listings new to us. The coordinator
+  counts the matches it takes in and the Telegram alerts actually sent. Every
+  tile shows today's fleet-wide total, and all of it comes from the
+  `/stats/reviews` call the page already made.
+- **The counting costs fewer requests than before.** Workers buffer their
+  counts and report once per search page instead of once per AI verdict and
+  once per alert. The coordinator adds one row upsert per ingest and per
+  delivered alert.
+- **Older consoles still work.** Against a console older than the counters,
+  the card falls back to the old two numbers.
+
+## [1.263.0] - 2026-10-17
+
+The Facebook Fleet tab redesigned to the Account pool tab's layout, with a
+page per worker and a picture of how a listing becomes an alert (RS-261).
+
+### Changed
+
+- **The Fleet tab reads like the Pool tab.** The KPI tiles, the Needs-a-human
+  card, the two account tables, the phrases and settings cards, the coverage
+  map, the review chart, the prompt card and the clicks placeholder are gone.
+  In their place: a status legend (Live, Stale, Needs attention, Offline) that
+  filters, one workers table that fits without a horizontal scroll, a fold per
+  row with the worker's cities and pacing, and a Recent activity aside the
+  height of the table that scrolls. "Searching" versus "idle" is deliberately
+  not shown: the coordinator stamps the start of a sweep that runs for hours,
+  so it cannot say which a worker is doing now.
+- **From a search to an alert.** A card walks the nine stages a listing goes
+  through, confirmed against the monitor and coordinator code: keyword gates
+  first (on the card, then with the description), the model only on what
+  survives, then the coordinator's dedupe and the Telegram topic. Each stage
+  names its code, shows its settings from `master.toml` and marks what is a
+  code constant; the reviewed and alerted counts are today's. The other
+  stages are not counted anywhere the ERP can read, and say so.
+- **A page per worker**, at `/fleet/worker/<worker>`, opened only from the eye
+  on its row: identity, vault account, session, proxy, cities, pacing and
+  build in the pool's card style, its open checkpoints with Mark resolved, its
+  recent events, and Watch browser, Re-login and Edit credentials. The Watch
+  page's back link returns to it.
+- The manager's Account pool tab drops the key-tag rail; the legend stays.
+  Purchasers keep the rail, which is how they pick a particular account.
+
+## [1.262.1] - 2026-10-17
+
+The review of the account pool page, applied to the v1.262.0 code (RS-260).
+
+### Fixed
+
+- **Supplier formats.** A cookie's `c_user` is now read from a header line
+  with spaces around `;` or `=`, from the JSON list a cookie extension exports
+  and from a JSON object keyed by name; before, anything but a bare `k=v; k=v`
+  line was reported as "No c_user" and the account was ranked behind ones whose
+  cookie parsed. A 2FA key may be pasted as an `otpauth://` link, in the editor
+  and in an import row, as the Fleet tab already allowed; the base32 secret is
+  what gets stored, and a link without one is refused as an invalid key.
+- **The code column no longer reads "No 2FA key" for an account that has one.**
+  The previous code stays on screen until the next slot's is computed, instead
+  of blinking through the empty state at every :00 and :30. On a page without
+  `crypto.subtle` (plain http) the column shows a placeholder with the reason,
+  and the copy button says so instead of copying nothing.
+- The table's `#` header and the purchaser card's UID label go through the
+  translation table; the header was hard-coded Chinese in every language.
+
+### Changed
+
+- One shared clock ticks every live code on the page; each `PoolCode` ran its
+  own one-second interval, so a table of N accounts ran N timers.
+- The pool dialogs drop their page-local Tab trap and rely on the shared
+  Modal's, which has handled Tab since v1.258.7.
+
+## [1.262.0] - 2026-10-17
+
+The Facebook account pool stops being a demo (RS-259). v1.261.0 shipped the
+page with its accounts held in React state; this release gives it a backend,
+so what a manager imports and what a purchaser takes is the same pool for
+everyone and survives a reload.
+
+### Added
+
+- **`/api/facebook-pool`** stores the pool in Postgres: an accounts table whose
+  `#` is an identity that is never reused, and an append-only ledger of who
+  added, imported, edited, took, returned, reported, retired or removed which
+  account — including who copied or revealed a login. Every write answers with
+  the whole pool, which the page swaps in. Purchasers may take (at most two,
+  enforced in the transaction, two hands on one tag settled by a row lock),
+  return and report; add, import, edit, retire and remove are manager-only.
+  A purchaser's read carries the login of the accounts they hold and, for the
+  rest, only the rack: status, holder, age and the cookie's `c_user`.
+- **Logins are sealed at rest.** Passwords, 2FA setup keys, e-mail passwords
+  and cookies are AES-256-GCM blobs under a dedicated `FB_POOL_KEY`
+  (`openssl rand -hex 32`), separate from `JWT_SECRET` so that one can rotate
+  without orphaning the stored logins. Production without the key answers 503
+  on the pool routes and nothing else; dev, CI and the tests derive a key from
+  `JWT_SECRET`. The nightly prod→dev copy blanks the four sealed columns.
+- **Shared rules.** `@recycle-erp/shared` now holds the pool's statuses, the
+  two-account limit, the report reasons and the draft validation, so the page
+  and the API refuse the same rows with the same codes.
+
+### Changed
+
+- The pool page calls the API for every action instead of patching local
+  state, loses its "demo pool" banner, and reads a refusal the API names with
+  one of its own codes (`fpAtLimit`, `fpDuplicate`, `fpTakenElsewhere`,
+  `fpNotTaken`) as a warning toast rather than the error dialog.
+
+## [1.261.0] - 2026-10-16
+
+### Added
+
+- **Facebook account pool** beside the existing Fleet view at Monitors →
+  Facebook. Managers get the numbered key-tag rack, status filters, search,
+  supplier import preview with validation, account editor, retirement/removal,
+  cookie checks and recent activity. Purchasers can take up to two accounts,
+  see live 2FA codes, reveal/copy credentials, return accounts or report a problem.
+- The pool uses clearly labelled sample data held only while the Facebook page
+  is open; backend storage and allocation are deferred. The live Fleet view
+  remains manager-only. English/Chinese labels, responsive layouts and keyboard
+  access follow the existing ERP shell.
+
 ## [1.260.0] - 2026-10-16
 
 Review mode's count can be typed as well as stepped (RS-257).

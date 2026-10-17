@@ -49,7 +49,10 @@ portal was removed in v1.191.0; no bid had ever been placed through it.
   since the name alone would advertise the feature. Whole-endpoint manager
   features (sell orders, customers, transfers, activity, members,
   bank and internal transactions, tracker, coordinator, connectors, FX rates,
-  inventory export and analysis, a line's linked sell orders) answer 403;
+  inventory export and analysis, a line's linked sell orders) answer 403. The
+  Facebook account pool (`/api/facebook-pool`, v1.262.0) is the exception
+  under Monitors: every role reads the rack and may take, return and report,
+  while add, import, edit, retire and remove answer 403 to a purchaser;
   shared reads are scoped to the caller's own rows and leave the manager-only
   fields out: the PO figures `finalSellPrice`, `finalSoldQty`, `realized` and
   `sellOrders` (v1.177.1), and the linked-payment total, the pending
@@ -2071,33 +2074,79 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
 - **Tracker** — admin page and API proxy for the Reddit listing monitor, with a
   fleet status filter and infinite scroll (v1.64.0, v1.65.0).  In the sidebar
   it is **Monitors ▸ Reddit** (v1.207.0).
-- **Coordinator** — Facebook tracker page with live fleet, review stats and a
-  filter prompt (v1.83.1), reached from **Monitors ▸ Facebook** in the sidebar
-  (v1.207.0).  The fleet view shows one row per Facebook account
-  (liveness, state, session days left, last search, heartbeat, the week's
-  alerts from its cities, the vault login and Facebook user id, expandable to
-  cities, secrets by name, browser identity, backup age, proxy, session file
-  and pacing), the literal search phrases per item with their title gate and
-  reject rules, the shared search settings, a coverage map of every centre
-  lit by whichever worker searches it now, and each worker's build; one
-  search box filters accounts, cities and phrases at once.  The data is the
-  rs-console facade's `/v1/fleet` document through the manager-only
-  `/api/coordinator` proxy — until that facade is deployed the cards read
-  "fleet view unavailable" and the rest of the page works (v1.140.0).
-  A **Needs a human** card leads the live part of the page: open checkpoints
-  (capture, Watch, Mark resolved) and every account the control plane flags,
-  with why — stopped reporting, a non-healthy state, a session expired or
-  expiring — plus **Re-login** where the session is the problem.  An
-  **Account information** table lists each account's Facebook identity,
-  proxy, stored secrets, browser and backup age, and the fourth KPI is
-  listings reviewed today, matching the console (v1.204.0).  Each row of
-  that table has **Credentials → Edit**: a form that sets the worker's
-  Facebook login, password, 2FA (TOTP) secret and whether password login is
-  allowed — the credentials Re-login then signs in with.  Secrets are
-  write-only (the form shows only whether one is stored; blank keeps it,
-  "clear" removes it), a worker without a vault account gets one named after
-  it, and the form says before saving whether Re-login will finish by itself
-  or still needs the login finished in Watch (v1.259.0).
+- **Coordinator** — the Facebook fleet, reached from **Monitors ▸ Facebook**
+  in the sidebar (v1.207.0), managers only. Since v1.263.0 the Fleet tab
+  shares the Account pool tab's chrome: a status legend (Live, Stale, Needs
+  attention, Offline) whose counts filter the table; a workers table that
+  fits beside a **Recent activity** aside of the same height (latest sweeps,
+  listings, session backups, workers gone silent and open checkpoints, rebuilt
+  from the timestamps the coordinator serves) — login, region, status with
+  its reason, session days left, and since v1.266.0 the worker's **Today**
+  (a 24-hour strip in its region's time zone: when the sweep started, how far
+  it got, the now tick, the estimated end while it runs, the next scheduled
+  start when nothing has run, and a hatched day for a worker that is down,
+  with "start–end · local time"), its **Searches** against the day's budget
+  (enabled phrases × cities × daily runs; amber once met, "—" when its
+  monitor does not count searches) and its **Posts** (listings freshly
+  reviewed today, and the week's alerts); the summary line adds the fleet's
+  new posts today. A fold per row shows the worker's cities (each with its
+  alerts), pacing and the daily search budget; and a **From a search to an alert** card that walks the
+  pipeline as the code runs it — search, result cards, the title gate before
+  any page is opened, the cached page visit, the keyword gate with the
+  description, the already-notified skip, the AI rating with its unit and
+  score gates, the coordinator's dedupe and the Telegram topic — with each
+  stage's code, its settings (code constants are marked as such), the item
+  phrases, keyword rules and prompt, and
+  today's fleet-wide count for every stage. Workers count searches, cards
+  seen, title and keyword passes, real page visits, new listings and fresh AI
+  verdicts; the coordinator counts what it takes in and the Telegram alerts
+  actually sent (v1.264.0). Each stage that reads a setting (search, result
+  cards, title gate, keyword gate, AI rating) has an **Edit** form for those
+  settings, prompt and rubric included. A save goes through the fleet
+  console into every worker's config. Workers pick it up between jobs and
+  start a sweep, and deploys keep the saved values (v1.265.0). The eye
+  on a row is the one way to a worker's page, `/fleet/worker/<worker>`: its
+  Facebook login and user id, vault account and stored secrets by name,
+  session expiry, browser and backup, proxy, cities, pacing, session file and
+  build, its open checkpoints (capture, Watch, Mark resolved) and its recent
+  events, and the actions — **Watch browser**, **Re-login** and **Edit
+  credentials**. The credentials form sets the worker's Facebook login,
+  password, 2FA (TOTP) secret and whether password login is allowed, the
+  credentials Re-login then signs in with; secrets are write-only (the form
+  shows only whether one is stored; blank keeps it, "clear" removes it), a
+  worker without a vault account gets one named after it, and the form says
+  before saving whether Re-login will finish by itself or still needs the
+  login finished in Watch (v1.259.0). The data is the rs-console facade's
+  `/v1/fleet` document, checkpoints, review stats, alert hits and prompt
+  through the manager-only `/api/coordinator` proxy; without the proxy's
+  credentials the tab says so and the rest of the ERP is unaffected
+  (v1.140.0). Editing cities, pacing, stages and the model from the ERP is
+  not built yet: nothing writes `master.toml` from here (RS-261).
+- **Facebook account pool** — a second tab at **Monitors ▸ Facebook**,
+  linked directly at `/#/fleet/pool` (v1.261.0). Managers see a status legend
+  with counts that filters (the key-tag rail left the manager's view in
+  v1.263.0; purchasers still pick from it), a searchable account table, supplier-row
+  import with duplicate/credential checks, an editor, retirement/removal,
+  cookie freshness and UID checks, and recent activity. Purchasers see the pool
+  instead of the Fleet controls: take up to two accounts, reveal/copy their
+  credentials and live six-digit 2FA codes, return them or report a login problem.
+  Since v1.262.0 the pool is stored by the backend (`/api/facebook-pool`):
+  every change is shared and survives a reload, the two-account limit and the
+  "holder or manager" rule on return/report are enforced in the transaction,
+  an import lands whole or not at all (naming the rows whose UID collided),
+  and the `#` is never reused. Logins (password, 2FA key, e-mail password,
+  cookie) are sealed at rest under `FB_POOL_KEY`; the nightly prod→dev copy
+  blanks them. A purchaser's read carries the login of the accounts they hold
+  and only the rack — status, holder, age, the cookie's `c_user` — for the
+  rest; the activity ledger (every add, import, edit, take, return, report,
+  retire, remove, plus copies and reveals of a login) is manager-only. In
+  production without `FB_POOL_KEY` the pool routes answer 503 and name the
+  variable. The pool is the human side of the picture; the fleet's own vault
+  of worker logins (RS-254) stays a separate, write-only store, and `fleet`
+  here is the label saying which worker an account went to. A cookie may be
+  pasted as a header line or as the JSON a cookie extension exports, and a
+  2FA key as the base32 key or an `otpauth://` link, on the Pool tab as on
+  the Fleet tab (v1.262.1).
 - **Watching a worker's browser** — `/fleet/watch/<worker>` shows the live
   Chromium a Facebook worker is driving, through noVNC, view-only until
   "Take control" is ticked (and handed back when the tab is hidden), with
@@ -2110,7 +2159,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   manager's session every minute.  A manager who is signed out, deactivated
   or demoted loses the view within a minute.  When the access token behind
   the socket runs out, the viewer reconnects on its own with a fresh one and
-  keeps control if it had it (v1.209.1).
+  keeps control if it had it (v1.209.1).  It is opened from the worker's page,
+  and its back link returns there (v1.263.0).
 
 - **Web submissions** — the manager inbox for the public website forms
   (v1.187.0). The ram4cash.com sell form (`POST /api/public/intake`) and the

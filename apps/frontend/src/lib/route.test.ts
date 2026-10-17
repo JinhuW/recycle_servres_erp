@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import {
-  afterSalesCasePath, afterSalesNewPath, hrefFor, matchPoCheck, matchPurchaseOrder, matchSellOrderPack, navigate, navigateBack, onLinkClick,
+  afterSalesCasePath, afterSalesNewPath, fleetWorkerPath, hrefFor, matchFleetWorker, matchPoCheck, matchPurchaseOrder, matchSellOrderPack, navigate, navigateBack, onLinkClick,
   parseShippingRoute, pathToDesktopView, pathToMobileView, poCheckPath, poLinePath, readPath, readPoLineQuery, readSafeNext,
   replaceRoute, sellOrderPackPath, splitHash,
   type LinkClick,
@@ -562,5 +562,19 @@ describe('leaving unsaved edits', () => {
     await new Promise((r) => setTimeout(r, 0));
     flush();
     expect(w.hash()).toBe('#/inventory');
+  });
+});
+
+describe('Facebook pool route', () => {
+  it('keeps the Facebook sidebar entry active on the pool', () => {
+    expect(pathToDesktopView('/fleet/pool')).toBe('coordinator');
+    expect(pathToDesktopView('/fleet')).toBe('coordinator');
+  });
+
+  it('routes a worker page under the fleet and round-trips odd ids', () => {
+    expect(pathToDesktopView(fleetWorkerPath('denver-1'))).toBe('coordinator');
+    expect(matchFleetWorker(fleetWorkerPath('ne 1/x'))).toEqual({ workerId: 'ne 1/x' });
+    expect(matchFleetWorker('/fleet/watch/denver-1')).toBeNull();
+    expect(matchFleetWorker('/fleet')).toBeNull();
   });
 });

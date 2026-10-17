@@ -1,6 +1,6 @@
 [project]
 name = "rs-console"
-version = "0.5.5"
+version = "0.6.0"
 description = "Read-mostly console facade for the Recycle Servers fleet coordinator"
 requires-python = ">=3.12"
 dependencies = [
@@ -10,6 +10,12 @@ dependencies = [
     # uvicorn speaks WebSocket only with a protocol library installed; the
     # VNC bridge (/v1/vnc/<worker>/ws) needs one.
     "websockets>=12",
+    # Writes saved settings into the worker configs without losing their
+    # comments, which are most of master.toml.
+    "tomlkit>=0.12",
+    # Each worker's day is bucketed in its region's zone; slim images may
+    # ship without the system zoneinfo database.
+    "tzdata>=2024.1",
 ]
 
 [project.optional-dependencies]

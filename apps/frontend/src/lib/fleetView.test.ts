@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { vncSocketUrl, type Challenge, type FleetAccount, type FleetDoc, type FleetWorker } from './coordinator';
 import {
-  accountAlerts, accountHaystack, attentionEntries, attentionReason, browserLabel, canWatch,
-  externalVncUrl, hitsByCity, isUnstampedBuild, reloginIsAutomatic, matchesTerms, offersRelogin, queryTerms, reviewedToday, searchersByCity,
+  accountAlerts, accountHaystack, attentionReason, browserLabel, canWatch, dayStrip, fleetPostsToday,
+  externalVncUrl, fleetActivity, fleetStatus, flowCounts, hitsByCity, isUnstampedBuild, parkedWorkers, reloginIsAutomatic,
+  matchesTerms, offersRelogin, queryTerms, reviewedToday,
   splitHighlights, reloginWouldBeAutomatic, vaultAccountIdFor, whoIs,
+  FLOW_STAGES, STAGE_FORMS, settingsDraft, settingsPatch,
 } from './fleetView';
 
 const account = (over: Partial<FleetAccount>): FleetAccount => ({
@@ -76,14 +78,6 @@ describe('fleetView', () => {
     expect(m.size).toBe(1);
   });
 
-  it('indexes searchers per city', () => {
-    const a = account({ worker_id: 'a' });
-    const b = account({ worker_id: 'b', cities: [{ slug: 'dc', name: 'Washington, DC', radius_km: 100 }] });
-    const m = searchersByCity([a, b]);
-    expect(m.get('dc')?.map(w => w.worker_id)).toEqual(['a', 'b']);
-    expect(m.get('tampa')?.map(w => w.worker_id)).toEqual(['a']);
-  });
-
   it('credits alerts only to a worker that has reported', () => {
     const hits = hitsByCity([{ day: 'd', priority: null, item_name: null, search_city: 'tampa', sent: 3, hit: 0 }]);
     expect(accountAlerts(account({}), hits)).toBe(0);
@@ -115,18 +109,55 @@ describe('fleetView', () => {
       expect(offersRelogin(account({}))).toBe(false);
     });
 
-    it('lists checkpoints first and does not repeat a parked worker', () => {
-      const ne = account({ worker_id: 'ne-1', vnc_live: true, health: health({ needs_attention: true }) });
-      const mw = account({ worker_id: 'mw-1', health: health({ needs_attention: true }) });
-      const ok = account({ worker_id: 'sc-1', health: health({}) });
-      const fleet = { workers: [ne, mw, ok] } as unknown as FleetDoc;
-      const ch = { id: 7, worker_id: 'ne-1', kind: 'captcha' } as Challenge;
-      const entries = attentionEntries(fleet, [ch]);
-      expect(entries.map(e => e.kind === 'challenge' ? `c:${e.challenge.id}` : `w:${e.account.worker_id}`))
-        .toEqual(['c:7', 'w:mw-1']);
-      expect(entries[0]?.kind === 'challenge' && entries[0].account?.worker_id).toBe('ne-1');
-      expect(attentionEntries(null, null)).toEqual([]);
+    it('puts a worker in one legend bucket, attention over liveness', () => {
+      const parked = parkedWorkers([{ id: 7, worker_id: 'ne-1', kind: 'captcha' } as Challenge]);
+      const status = (over: Partial<FleetWorker>, id = 'w') => fleetStatus(account({ worker_id: id, health: health(over) }), parked);
+      expect(status({})).toBe('live');
+      expect(status({ liveness: 'stale' })).toBe('stale');
+      expect(status({}, 'ne-1')).toBe('attention');
+      expect(status({ needs_attention: true })).toBe('attention');
+      expect(status({ state: 'SESSION_EXPIRED' })).toBe('attention');
+      expect(status({ liveness: 'dead', needs_attention: true })).toBe('offline');
+      expect(status({ liveness: 'unknown' })).toBe('offline');
+      expect(status({ state: 'DEAD' })).toBe('offline');
+      expect(fleetStatus(account({}), parked)).toBe('offline');
+      expect(parkedWorkers(null).size).toBe(0);
     });
+
+    it('rebuilds recent activity from the timestamps, newest first', () => {
+      const a = account({
+        worker_id: 'a',
+        health: health({ last_search_at: '2026-10-04T08:00:00Z', last_listing_at: '2026-10-04T08:30:00Z' }),
+        session: { account_id: null, fb_user_id: null, user_agent: null, session_expiry: null, backed_up_at: '2026-10-03T12:00:00Z' },
+      });
+      const b = account({ worker_id: 'b', health: health({ liveness: 'dead', last_heartbeat_at: '2026-10-02T00:00:00Z' }) });
+      const c = account({ worker_id: 'c', health: health({ last_heartbeat_at: '2026-10-04T09:00:00Z' }) });
+      const fleet = { workers: [a, b, c] } as unknown as FleetDoc;
+      const ch = { id: 7, worker_id: 'c', kind: 'captcha', created_at: '2026-10-04T09:10:00Z' } as Challenge;
+      expect(fleetActivity(fleet, [ch]).map(e => `${e.workerId}:${e.kind}`))
+        .toEqual(['c:checkpoint', 'a:listing', 'a:search', 'a:backup', 'b:silent']);
+      expect(fleetActivity(null, null)).toEqual([]);
+    });
+  });
+
+  it('counts every stage from today’s funnel row', () => {
+    const now = Date.parse('2026-10-04T12:00:00Z');
+    const today = {
+      day: '2026-10-04', searches: 12, cards: 300, title_pass: 60, opened: 25, keyword_pass: 14,
+      fresh: 9, reviewed: 8, alerted: 3, coordinated: 2, sent: 2,
+    };
+    expect(flowCounts([{ ...today, day: '2026-10-03', searches: 99 }, today], now)).toEqual({
+      search: 12, cards: 300, title: 60, open: 25, keywords: 14, fresh: 9, ai: 8, coordinator: 2, alert: 2,
+    });
+    // Reported yesterday, quiet so far today: every stage reads 0.
+    expect(flowCounts([{ ...today, day: '2026-10-03' }], now).search).toBe(0);
+    expect(flowCounts([], now).alert).toBe(0);
+    expect(flowCounts(null, now)).toEqual({});
+  });
+
+  it('falls back to the two old counters against an older console', () => {
+    const now = Date.parse('2026-10-04T12:00:00Z');
+    expect(flowCounts([{ day: '2026-10-04', reviewed: 40, alerted: 3 }], now)).toEqual({ ai: 40, alert: 3 });
   });
 
   it('watches only what the facade can bridge to', () => {
@@ -198,5 +229,113 @@ describe('reloginWouldBeAutomatic', () => {
     expect(reloginWouldBeAutomatic(true, true)).toBe(true);
     expect(reloginWouldBeAutomatic(true, false)).toBe(false);
     expect(reloginWouldBeAutomatic(false, true)).toBe(false);
+  });
+});
+
+describe('stage settings forms', () => {
+  const doc = {
+    ai_model: 'openai/gpt-5.6-luna',
+    search: {
+      start_at: ['10:00'], date_listed: ['last 7 days', 'last 7 days'], delivery_method: 'local_pick_up',
+      max_results: 120, search_interval: '45m', max_search_interval: '75m', title_prefilter: true,
+      min_seller_rating: 4.5, exclude_unrated_sellers: false, rating: 4, min_unit_count: 5,
+    },
+    items: [
+      { name: 'server_ram', enabled: true, search_phrases: ['server ram'], keywords: ['ram OR ddr4'], antikeywords: [] },
+      { name: 'server_cpu', enabled: false, search_phrases: ['xeon'], keywords: [], antikeywords: [] },
+    ],
+  } as unknown as FleetDoc;
+  const prompt = { prompt: 'judge it', rating_prompt: 'rate 1-5' };
+
+  it('drafts what the chips show, enabled items only', () => {
+    const d = settingsDraft(doc, prompt);
+    expect(d.start_at).toBe('10:00');
+    expect(d.date_listed).toBe('last 7 days');
+    expect(d.rating).toBe('4');
+    expect(Object.keys(d.items)).toEqual(['server_ram']);
+    expect(d.items.server_ram.keywords).toBe('ram OR ddr4');
+  });
+
+  it('sends only the settings the stage edits', () => {
+    const d = { ...settingsDraft(doc, prompt), start_at: '09:00, 21:00', max_results: '60' };
+    d.items = { server_ram: { search_phrases: 'server ram\n\n  ddr4 lot  ', keywords: 'x', antikeywords: '' } };
+    expect(settingsPatch('search', d, true)).toEqual({
+      search: {
+        start_at: ['09:00', '21:00'], date_listed: 'last 7 days', delivery_method: 'local_pick_up',
+        max_results: 60, search_interval: '45m', max_search_interval: '75m',
+      },
+      items: { server_ram: { search_phrases: ['server ram', 'ddr4 lot'] } },
+    });
+    expect(settingsPatch('cards', d, true)).toEqual({ search: { max_results: 60 } });
+    expect(settingsPatch('title', d, true)).toEqual({
+      search: { title_prefilter: true }, items: { server_ram: { antikeywords: [] } },
+    });
+    expect(settingsPatch('open', d, true)).toEqual({});
+  });
+
+  it('sends the prompts only when they were loaded, and a half-typed number as typed', () => {
+    const d = { ...settingsDraft(doc, prompt), rating: '3', min_unit_count: 'ten' };
+    expect(settingsPatch('ai', d, true)).toEqual({
+      search: { rating: 3, min_unit_count: 'ten', prompt: 'judge it', rating_prompt: 'rate 1-5' },
+      ai_model: 'openai/gpt-5.6-luna',
+    });
+    expect(settingsPatch('ai', settingsDraft(doc, null), false).search).toEqual({ rating: 4, min_unit_count: 5 });
+  });
+
+  it('offers a form exactly on the stages that read a setting', () => {
+    expect(FLOW_STAGES.filter(s => STAGE_FORMS[s])).toEqual(['search', 'cards', 'title', 'keywords', 'ai']);
+  });
+});
+
+describe('dayStrip', () => {
+  // 13:40 in Denver (MDT, UTC-6).
+  const NOW = Date.parse('2026-10-17T19:40:00Z');
+  const today = (over: Partial<NonNullable<FleetAccount['today']>>): FleetAccount['today'] => ({
+    day: '2026-10-17', first_at: null, last_at: null, cycles: 0, searches: 0, posts: 0, alerts: 0, ...over,
+  });
+  const denver = (over: Partial<FleetAccount>) => account({
+    timezone: 'America/Denver',
+    plan: { phrases: 8, cities: 5, runs_per_day: 1, per_day: 40 },
+    ...over,
+  });
+
+  it('draws a running sweep to now, with the tail to its estimated end', () => {
+    // 07:25 → 13:40 local, 30 of 40 done: 375 min for 30, so 125 min to go.
+    const w = denver({ today: today({ first_at: '2026-10-17T13:25:00Z', last_at: '2026-10-17T19:35:00Z', searches: 30 }) });
+    const s = dayStrip(w, 'live', ['10:00'], NOW)!;
+    expect(s).toMatchObject({ zone: 'MT', localNow: '13:40', start: '07:25', end: null, running: true, eta: '15:45', next: null });
+    expect(s.segments.map(x => x.kind)).toEqual(['done', 'eta']);
+    expect(s.segments[0].from).toBeCloseTo((7 * 60 + 25) / 1440);
+    expect(s.segments[0].to).toBeCloseTo(s.nowAt);
+  });
+
+  it('ends a sweep at its last search once the budget is met or it goes quiet', () => {
+    const done = denver({ today: today({ first_at: '2026-10-17T13:10:00Z', last_at: '2026-10-17T18:50:00Z', searches: 40 }) });
+    expect(dayStrip(done, 'live', ['10:00'], NOW)).toMatchObject({ start: '07:10', end: '12:50', running: false, eta: null });
+    const quiet = denver({ today: today({ first_at: '2026-10-17T13:10:00Z', last_at: '2026-10-17T18:50:00Z', searches: 12 }) });
+    expect(dayStrip(quiet, 'live', ['10:00'], NOW)).toMatchObject({ end: '12:50', running: false });
+  });
+
+  it('gives only a start when the monitor reports cycles, not searches', () => {
+    const w = denver({ today: today({ first_at: '2026-10-17T13:25:00Z', last_at: '2026-10-17T16:00:00Z', searches: null, cycles: 2 }) });
+    expect(dayStrip(w, 'live', ['10:00'], NOW)).toMatchObject({ start: '07:25', end: null, running: false, searches: null });
+  });
+
+  it('names the next sweep when nothing ran today, and hatches a worker that is down', () => {
+    const w = denver({ today: today({}) });
+    // 10:00 UTC has passed: tomorrow, 04:00 Denver.
+    expect(dayStrip(w, 'live', ['10:00'], NOW)!.next).toEqual({ time: '04:00', tomorrow: true });
+    const early = Date.parse('2026-10-17T08:00:00Z');
+    expect(dayStrip(w, 'live', ['10:00'], early)!.next).toEqual({ time: '04:00', tomorrow: false });
+    expect(dayStrip(w, 'offline', ['10:00'], NOW)!.segments).toEqual([{ from: 0, to: 1, kind: 'rest' }]);
+  });
+
+  it('is null against a facade that serves no today', () => {
+    expect(dayStrip(account({}), 'live', ['10:00'], NOW)).toBeNull();
+  });
+
+  it('sums the fleet’s posts only over workers that carry a count', () => {
+    expect(fleetPostsToday([denver({ today: today({ posts: 23 }) }), denver({ today: today({ posts: 5 }) }), account({})])).toBe(28);
+    expect(fleetPostsToday([account({})])).toBeNull();
   });
 });

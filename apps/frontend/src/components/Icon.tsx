@@ -17,7 +17,7 @@ export type IconName =
   | 'book' | 'star' | 'zap' | 'globe' | 'mail' | 'grip'
   | 'truck' | 'cash' | 'refresh' | 'label' | 'package'
   | 'paperclip' | 'file' | 'image' | 'invoice' | 'analytics' | 'calendar'
-  | 'note';
+  | 'note' | 'copy' | 'key' | 'eyeOff' | 'users';
 
 type Props = {
   name: IconName;
@@ -28,6 +28,10 @@ type Props = {
 };
 
 const PATHS: Record<IconName, JSX.Element> = {
+  copy: <><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></>,
+  key: <><circle cx="16" cy="8" r="5"/><path d="m12 12-9 9H1v-4l3-3h3v-3h3"/><path d="M17 7h.01"/></>,
+  eyeOff: <><path d="m3 3 18 18M10.6 5.1A10 10 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.1 3.9M6.6 6.6C3.9 8.3 2 12 2 12s3.6 7 10 7a9.6 9.6 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></>,
+  users: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M22 21v-2a4 4 0 0 0-3-3.9"/><circle cx="9" cy="7" r="4"/><path d="M16 3.1a4 4 0 0 1 0 7.8"/></>,
   dashboard: <><rect x="3" y="3" width="7" height="9" rx="1.2"/><rect x="14" y="3" width="7" height="5" rx="1.2"/><rect x="14" y="12" width="7" height="9" rx="1.2"/><rect x="3" y="16" width="7" height="5" rx="1.2"/></>,
   analytics: <><path d="M3 3v18h18"/><rect x="7" y="11" width="3" height="6" rx="0.6"/><rect x="12" y="7" width="3" height="10" rx="0.6"/><rect x="17" y="13" width="3" height="4" rx="0.6"/></>,
   submit: <><path d="M12 5v14M5 12h14"/></>,

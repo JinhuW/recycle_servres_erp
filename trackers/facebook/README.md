@@ -163,7 +163,9 @@ rs-session totp --storage-state configs/sessions/sc-1.json --raw | pbcopy
 The secret is the base32 key Facebook shows under Settings → Security →
 Two-factor → Authentication app → "Set up another way", or the whole
 `otpauth://` URI from the QR code. Codes are plain RFC 6238, computed locally —
-nothing is sent anywhere.
+nothing is sent anywhere. Web generators sellers link to, such as
+client.2zie.com/2fa, run the same arithmetic in the browser; see
+[the 2zie note](../../docs/debug-notes/2026-10-17-2zie-2fa-is-plain-totp.md).
 
 Secrets live in the same `<session>.json.meta.json` sidecar as the user agent
 and proxy: 0600, gitignored, sitting beside cookies that are an equally live
@@ -279,9 +281,13 @@ Two traps the script handles that a manual `up -d` does not:
   variable from compose leaves 0.0.0.0 in force. It has to be overridden, not
   omitted — and 0.0.0.0 does not expose the web UI, it stops it starting.
 
-`configs/secrets.env` and `configs/sessions/` are never pushed. The VM's copies
-are live credentials — the worker's Facebook cookies and its coordinator token
-— and the laptop's belong to a different account and IP.
+The sync runs with `--delete`, and `scripts/deploy.rsync-filter` lists what it
+never pushes and never deletes. The VM's own files are live credentials written
+there by hand: its secrets, sessions, per-worker tokens and proxy list. A dev
+checkout's copies belong to a different account and IP, and a checkout without
+them would have `--delete` remove the VM's. The dev machine's Facebook logins
+and 2FA, read by `rs-session capture`, never leave it.
+`scripts/tests/test-deploy-filter.sh` checks both with a real rsync.
 
 ### Did it alert, and did the alert arrive?
 
@@ -557,17 +563,37 @@ public page on the account:
 rsc vault set-account --account <id> --vnc-url https://fbc-api.recycleservers.com/vnc/<worker-id>
 ```
 
-`deploy/docker-compose.console.yml` mounts all three configs read-only and
-reads `RS_WORKER_ID` from `secrets.env` to join the monitor's heartbeat row.
-Neither the console nor the coordinator is part of `scripts/deploy.sh`'s
-restart, so after a deploy rebuild both by hand (the coordinator for
-`/v1/accounts` and `fb_user_id`, the console for the page and `/v1/fleet`):
+`deploy/docker-compose.console.yml` mounts `master.toml` and `fleet.toml`
+read-only and reads `RS_WORKER_ID` from `secrets.env` to join the monitor's
+heartbeat row. It mounts every worker config (`configs/homelab*.toml`)
+writable, one file at a time, for saved settings (below). `scripts/deploy.sh`
+rebuilds and recreates the console; the coordinator is not part of its
+restart, so after a deploy rebuild that by hand when it changed (for
+`/v1/accounts` and `fb_user_id`):
 
 ```bash
 ssh jinhu@10.10.10.73 'cd ~/recycle_servers/facebook_tracker && \
     docker compose -f deploy/docker-compose.coordinator.yml up -d --build coordinator && \
     docker compose -f deploy/docker-compose.console.yml up -d --build console'
 ```
+
+**Settings saved from the ERP.** The ERP's *From a search to an alert* card
+edits the search settings each stage reads: sweep times, listing window,
+delivery, results per search, intervals, the title prefilter, seller rating
+rules, the alert rating, minimum units, the AI model, the prompt and rubric,
+and each item's phrases, keywords and anti-keywords. It saves through
+`PUT /v1/config/settings`. `rs_console/settings.py` lists exactly what can
+change; regions, proxies, sessions, credentials and notification targets
+cannot. Saved values are kept in `/state/settings.json` on the
+`rs-console-state` volume, not in `master.toml`, which stays the default for
+anything never saved. The console writes them into every worker config in
+place, and the monitor reloads its config between jobs. That reload restarts
+its jobs, so **a save starts a sweep straight away**. `scripts/deploy.sh`
+sends the worker configs through `python -m rs_console.settings render`, so a
+deploy keeps saved values instead of putting master's back. To see the saved
+values: `docker exec rs-console cat /state/settings.json`. To drop all of
+them, delete that file and run `scripts/deploy.sh sync`, which renders the
+worker configs from the tree again.
 
 **It is built to be absorbed by the ERP.** The page is plain HTML/JS with no
 build step, and its markup uses the ERP's own tokens and classes (`card`,
@@ -771,6 +797,7 @@ full result page per phrase in Facebook traffic, so keep the phrase count small.
 | Heartbeat repeater — the first `report_state` starts a daemon thread that re-sends the last reported state to the coordinator every 5 minutes (`heartbeat_interval`). Before this a worker heartbeated once per search, at the top of `search()`, and one sweep over the city list runs for hours, so a healthy worker spent most of the day looking silent. The repeater only restates what the main thread last said (it never touches the Playwright page, which is not thread-safe); the login is still re-checked only at the top of each search | `facebook.py` (`heartbeat_interval`, `report_state`, `_send_heartbeat`, `_heartbeat_loop`, `stop`) |
 
 | System faults page once, fleet-wide — an AI outage is declared only after `RS_INCIDENT_DOWN_AFTER` (3) straight failed evaluations and cleared after `RS_INCIDENT_UP_AFTER` (3) straight successes, and the crossing is POSTed to the coordinator's `/v1/incidents`, which dedupes across every worker (one DOWN page per key per `RS_INCIDENT_COOLDOWN_HOURS`, one recovered note per paged DOWN). Without a control plane, or when it is unreachable, a local gate applies the same one-per-cooldown rule to this process. Replaces the per-process flag that sent a DOWN/recovered pair for every listing while OpenRouter flapped | `ops_incidents.py` (new: `OutageTracker`, `LocalIncidentGate`), `monitor.py` (`_report_incident`, `evaluate_by_ai`), `control_plane.py` (`report_incident`) |
+| Funnel counts — each search page, card, title-gate pass, real page visit, keyword-gate pass, not-yet-alerted listing, fresh AI verdict and delivered alert is counted into a buffer and POSTed to `/v1/stats/reviews` once per search page (previously one POST per verdict and one per alert), feeding the ERP's search-to-alert card | `facebook.py` (`count_stage`, `flush_stage_counts`, `_examine_listings`), `monitor.py` (`_count_stage`), `marketplace.py` (`count_stage`), `control_plane.py` (`report_review_stats`) |
 
 Before pulling upstream, rebase that branch rather than merging into it, then
 refresh the pin with `scripts/check-vendor.sh update`.

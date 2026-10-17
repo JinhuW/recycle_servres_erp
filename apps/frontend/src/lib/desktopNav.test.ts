@@ -28,9 +28,12 @@ const allLeaves: NavLeaf[] = DESKTOP_NAV.flatMap(g =>
   g.items.flatMap(i => ('children' in i ? [...i.children] : [i])));
 
 describe('shownNav', () => {
-  it('gives purchasers no Monitors entry, and only Settings under Oversight', () => {
+  it('gives purchasers the Facebook pool and Settings, with no Reddit monitor', () => {
     const items = oversight('purchaser', 'dashboard')?.items ?? [];
-    expect(items.map(i => (i.kind === 'leaf' ? i.leaf.id : i.parent.tKey))).toEqual(['settings']);
+    expect(items.map(i => (i.kind === 'leaf' ? i.leaf.id : i.parent.tKey))).toEqual(['nav_monitors', 'settings']);
+    const parent = items.find((i): i is ShownParent => i.kind === 'parent');
+    expect(parent?.children.map(c => c.leaf.id)).toEqual(['coordinator']);
+    expect(parent?.target).toBe('coordinator');
   });
 
   it('shows Monitors closed elsewhere, pointing at Facebook', () => {

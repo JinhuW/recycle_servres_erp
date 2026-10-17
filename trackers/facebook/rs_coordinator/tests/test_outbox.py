@@ -58,6 +58,18 @@ def test_a_queued_alert_is_delivered_and_marked(tmp_path):
     assert db.due_alerts() == []
 
 
+def test_only_delivered_listing_alerts_count_as_sent(tmp_path):
+    db = Database(tmp_path / "outbox.db")
+    db.enqueue_alert("listing_new", "first")
+    db.enqueue_alert("listing_new", "second")
+    db.enqueue_alert("ops_worker_down", "ops")
+
+    make_pump(db, StubNotifier([True, False])).drain_outbox(db)
+
+    (day,) = db.review_stats_daily(1)
+    assert day["sent"] == 1
+
+
 def test_a_failed_send_is_retried_not_lost(tmp_path):
     db = Database(tmp_path / "outbox.db")
     alert_id = db.enqueue_alert("listing_new", "hello")

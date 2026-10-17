@@ -18,6 +18,48 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-17
+
+### Added
+
+- **Every stage from a search to an alert is now counted** (RS-262), so the
+  ERP's funnel card shows numbers instead of "not counted yet".
+  - `review_stats` gains `searches`, `cards`, `title_pass`, `opened`,
+    `keyword_pass`, `fresh`, `coordinated` and `sent`. The columns are added
+    in place on SQLite and Postgres when the coordinator starts.
+  - Workers report the first seven stages. The coordinator counts
+    `coordinated` (ingest found the match new or changed, or a direct-send
+    worker reported its alert) and `sent` (a listing alert delivered from the
+    outbox, or a reported direct send).
+  - `GET /v1/stats/reviews` returns daily sums of all of them.
+  - The vendored monitor now buffers its counts and sends **one report per
+    search page** instead of one per AI verdict and one per alert, so it makes
+    fewer requests than before. This needs the new pin in `VENDOR.md`.
+  - **Deploy the coordinator first.** An older coordinator still takes the new
+    report's `reviewed`/`alerted`, because it ignores fields it does not know.
+- **Search settings can be saved from the ERP.** rs_console has a new
+  `PUT /v1/config/settings` (`rs_console/settings.py`). It validates the
+  settings the ERP's *From a search to an alert* card edits, keeps them in
+  `/state/settings.json` on a new `rs-console-state` volume, and writes them
+  into every worker config in place. A worker picks the change up between jobs
+  and sweeps straight away. `/v1/fleet` now reports the effective values
+  (`master.toml` plus saved values), includes `start_at`, and says whether the
+  console can save (`settings.editable`).
+- **Each worker’s day on the fleet table** (RS-264): when it started, how many
+  of its searches it has done, and how many new posts it found.
+  - New `search_cycles` table (created on start, both backends): a heartbeat
+    whose `last_search_at` differs from the stored one logs when the worker
+    started on an item. Rows older than 14 days are pruned on insert.
+  - New admin reads: `GET /v1/stats/search-cycles?hours=` and
+    `GET /v1/stats/reviews/workers?days=` (the funnel counters per worker per
+    UTC day, with `updated_at`).
+  - rs_console's `/v1/fleet` gives each worker `timezone` (its region's),
+    `plan` (enabled phrases × cities × `start_at` runs = searches a day) and
+    `today` (first and last activity in its local day, cycles, searches,
+    reviewed as posts, alerted). `search.start_at` is now exposed. Against an
+    older coordinator `today` is null and the page shows "—".
+  - rs_console now depends on `tzdata`, so the slim image can resolve zones.
+
 ### Removed
 
 - **The `server_cpu` item is gone from `master.toml`** (and the regenerated
@@ -29,6 +71,16 @@ deployed?" harder to answer.
 
 ### Changed
 
+- **Deploys send the worker configs through the console.**
+  `configs/homelab*.toml` are no longer in the rsync (`deploy.rsync-filter`).
+  `scripts/deploy.sh` rebuilds and recreates rs-console, renders each worker
+  config with the saved settings written in, and writes it in place. Verify
+  compares the running config against that render. Without this, every deploy
+  would have put `master.toml`'s values back over the saved ones.
+- **rs-console mounts every worker config writable** (one file at a time,
+  never the `configs/` directory with its secrets and sessions), and
+  `RS_MONITOR_CONFIG` moves to `/config/workers/homelab.toml`. It depends on
+  `tomlkit`, which keeps the configs' comments when it writes.
 - **System faults page ops once, fleet-wide, instead of flooding the chat.**
   An AI outage used to send an "AI evaluation DOWN" / "recovered" pair from
   every worker every time OpenRouter flapped — 98 to 130 DOWN notes per worker
@@ -202,6 +254,18 @@ deployed?" harder to answer.
   so `/v1/heartbeat` would have raised `AttributeError` for every worker.
   Both methods are now in `pg.py` too; `test_the_two_backends_expose_the_same_api`
   caught it, and the round-trip was checked against a real Postgres 16.
+- **A deploy no longer deletes the VM's own files or ships the dev machine's
+  logins.** `deploy.sh` syncs with `rsync --delete`, and its excludes covered
+  only `configs/secrets.env` and `configs/sessions`. A deploy from any checkout
+  that lacked the VM's hand-written per-worker tokens
+  (`configs/secrets.homelab-*.env`), `secrets.env` backups, proxy list,
+  `accounts/` or `generated/` deleted them on the VM, and a stale dev copy
+  replaced the live one. The same sync copied
+  `configs/account_info.txt*` (Facebook logins and 2FA, read only by
+  `rs-session capture` on dev) and `configs/data.txt` to the VM. The rules now
+  live in `scripts/deploy.rsync-filter`, which never sends and never deletes
+  either set, and `scripts/tests/test-deploy-filter.sh` (run by `release.sh`)
+  proves it with a real rsync between two trees.
 
 ## [0.5.5] - 2026-09-05
 
