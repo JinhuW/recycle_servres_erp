@@ -563,17 +563,37 @@ public page on the account:
 rsc vault set-account --account <id> --vnc-url https://fbc-api.recycleservers.com/vnc/<worker-id>
 ```
 
-`deploy/docker-compose.console.yml` mounts all three configs read-only and
-reads `RS_WORKER_ID` from `secrets.env` to join the monitor's heartbeat row.
-Neither the console nor the coordinator is part of `scripts/deploy.sh`'s
-restart, so after a deploy rebuild both by hand (the coordinator for
-`/v1/accounts` and `fb_user_id`, the console for the page and `/v1/fleet`):
+`deploy/docker-compose.console.yml` mounts `master.toml` and `fleet.toml`
+read-only and reads `RS_WORKER_ID` from `secrets.env` to join the monitor's
+heartbeat row. It mounts every worker config (`configs/homelab*.toml`)
+writable, one file at a time, for saved settings (below). `scripts/deploy.sh`
+rebuilds and recreates the console; the coordinator is not part of its
+restart, so after a deploy rebuild that by hand when it changed (for
+`/v1/accounts` and `fb_user_id`):
 
 ```bash
 ssh jinhu@10.10.10.73 'cd ~/recycle_servers/facebook_tracker && \
     docker compose -f deploy/docker-compose.coordinator.yml up -d --build coordinator && \
     docker compose -f deploy/docker-compose.console.yml up -d --build console'
 ```
+
+**Settings saved from the ERP.** The ERP's *From a search to an alert* card
+edits the search settings each stage reads: sweep times, listing window,
+delivery, results per search, intervals, the title prefilter, seller rating
+rules, the alert rating, minimum units, the AI model, the prompt and rubric,
+and each item's phrases, keywords and anti-keywords. It saves through
+`PUT /v1/config/settings`. `rs_console/settings.py` lists exactly what can
+change; regions, proxies, sessions, credentials and notification targets
+cannot. Saved values are kept in `/state/settings.json` on the
+`rs-console-state` volume, not in `master.toml`, which stays the default for
+anything never saved. The console writes them into every worker config in
+place, and the monitor reloads its config between jobs. That reload restarts
+its jobs, so **a save starts a sweep straight away**. `scripts/deploy.sh`
+sends the worker configs through `python -m rs_console.settings render`, so a
+deploy keeps saved values instead of putting master's back. To see the saved
+values: `docker exec rs-console cat /state/settings.json`. To drop all of
+them, delete that file and run `scripts/deploy.sh sync`, which renders the
+worker configs from the tree again.
 
 **It is built to be absorbed by the ERP.** The page is plain HTML/JS with no
 build step, and its markup uses the ERP's own tokens and classes (`card`,

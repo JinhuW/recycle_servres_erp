@@ -5,6 +5,7 @@ import {
   externalVncUrl, fleetActivity, fleetStatus, flowCounts, hitsByCity, isUnstampedBuild, parkedWorkers, reloginIsAutomatic,
   matchesTerms, offersRelogin, queryTerms, reviewedToday,
   splitHighlights, reloginWouldBeAutomatic, vaultAccountIdFor, whoIs,
+  FLOW_STAGES, STAGE_FORMS, settingsDraft, settingsPatch,
 } from './fleetView';
 
 const account = (over: Partial<FleetAccount>): FleetAccount => ({
@@ -228,5 +229,60 @@ describe('reloginWouldBeAutomatic', () => {
     expect(reloginWouldBeAutomatic(true, true)).toBe(true);
     expect(reloginWouldBeAutomatic(true, false)).toBe(false);
     expect(reloginWouldBeAutomatic(false, true)).toBe(false);
+  });
+});
+
+describe('stage settings forms', () => {
+  const doc = {
+    ai_model: 'openai/gpt-5.6-luna',
+    search: {
+      start_at: ['10:00'], date_listed: ['last 7 days', 'last 7 days'], delivery_method: 'local_pick_up',
+      max_results: 120, search_interval: '45m', max_search_interval: '75m', title_prefilter: true,
+      min_seller_rating: 4.5, exclude_unrated_sellers: false, rating: 4, min_unit_count: 5,
+    },
+    items: [
+      { name: 'server_ram', enabled: true, search_phrases: ['server ram'], keywords: ['ram OR ddr4'], antikeywords: [] },
+      { name: 'server_cpu', enabled: false, search_phrases: ['xeon'], keywords: [], antikeywords: [] },
+    ],
+  } as unknown as FleetDoc;
+  const prompt = { prompt: 'judge it', rating_prompt: 'rate 1-5' };
+
+  it('drafts what the chips show, enabled items only', () => {
+    const d = settingsDraft(doc, prompt);
+    expect(d.start_at).toBe('10:00');
+    expect(d.date_listed).toBe('last 7 days');
+    expect(d.rating).toBe('4');
+    expect(Object.keys(d.items)).toEqual(['server_ram']);
+    expect(d.items.server_ram.keywords).toBe('ram OR ddr4');
+  });
+
+  it('sends only the settings the stage edits', () => {
+    const d = { ...settingsDraft(doc, prompt), start_at: '09:00, 21:00', max_results: '60' };
+    d.items = { server_ram: { search_phrases: 'server ram\n\n  ddr4 lot  ', keywords: 'x', antikeywords: '' } };
+    expect(settingsPatch('search', d, true)).toEqual({
+      search: {
+        start_at: ['09:00', '21:00'], date_listed: 'last 7 days', delivery_method: 'local_pick_up',
+        max_results: 60, search_interval: '45m', max_search_interval: '75m',
+      },
+      items: { server_ram: { search_phrases: ['server ram', 'ddr4 lot'] } },
+    });
+    expect(settingsPatch('cards', d, true)).toEqual({ search: { max_results: 60 } });
+    expect(settingsPatch('title', d, true)).toEqual({
+      search: { title_prefilter: true }, items: { server_ram: { antikeywords: [] } },
+    });
+    expect(settingsPatch('open', d, true)).toEqual({});
+  });
+
+  it('sends the prompts only when they were loaded, and a half-typed number as typed', () => {
+    const d = { ...settingsDraft(doc, prompt), rating: '3', min_unit_count: 'ten' };
+    expect(settingsPatch('ai', d, true)).toEqual({
+      search: { rating: 3, min_unit_count: 'ten', prompt: 'judge it', rating_prompt: 'rate 1-5' },
+      ai_model: 'openai/gpt-5.6-luna',
+    });
+    expect(settingsPatch('ai', settingsDraft(doc, null), false).search).toEqual({ rating: 4, min_unit_count: 5 });
+  });
+
+  it('offers a form exactly on the stages that read a setting', () => {
+    expect(FLOW_STAGES.filter(s => STAGE_FORMS[s])).toEqual(['search', 'cards', 'title', 'keywords', 'ai']);
   });
 });

@@ -32,6 +32,7 @@ _PLACEHOLDER = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 # Fleet-wide search settings worth showing. Listed rather than dumped, because
 # the same table also holds the prompt (its own route) and credentials.
 SEARCH_SETTING_KEYS = (
+    "start_at",
     "rating",
     "min_unit_count",
     "min_seller_rating",

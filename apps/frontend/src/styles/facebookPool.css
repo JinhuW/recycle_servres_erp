@@ -984,6 +984,58 @@
   border: 1px solid var(--border);
   border-radius: 7px;
 }
+/* A stage's Edit form */
+.ff-flow-detail:has(.ff-edit) {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 480px);
+}
+.ff-flow-head .ff-edit-btn {
+  margin-left: auto;
+}
+.ff-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 10px 14px;
+  max-width: 75ch;
+}
+.ff-edit-field {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  font-size: 12px;
+  color: var(--fg-muted);
+  min-width: 0;
+}
+.ff-edit-check {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-height: 32px;
+  font-size: 12.5px;
+  color: var(--fg);
+}
+.ff-edit-hint {
+  font-size: 11px;
+  line-height: 1.4;
+}
+.ff-edit-list,
+.ff-edit-prompt {
+  width: 100%;
+  resize: vertical;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.ff-edit-note {
+  margin: 10px 0 0;
+  max-width: 75ch;
+  font-size: 11.5px;
+  color: var(--fg-subtle);
+}
+.ff-edit-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
 /* One worker's page */
 .ff-worker-card .fp-stub {
   --ff-stub: var(--accent);
