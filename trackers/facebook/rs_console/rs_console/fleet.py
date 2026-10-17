@@ -268,6 +268,32 @@ def search_plan(
     return {"phrases": phrases, "cities": city_count, "runs_per_day": runs, "per_day": per_day}
 
 
+def apply_tiers(doc: Dict[str, Any], ranked: Dict[str, Any]) -> None:
+    """Mark each worker's cities with how often the coordinator has them
+    searched (`per_day`, `pin`, `score`), and recount the daily budget.
+
+    A worker's `start_at` times are its slots, so a city ranked above them is
+    searched once per slot and no more; with one time everything is once a
+    day, which is what the budget then says.
+    """
+    by_worker = ranked.get("workers") or {}
+    for worker in doc["workers"]:
+        rows = {r["slug"]: r for r in by_worker.get(worker["worker_id"]) or []}
+        if not rows:
+            continue
+        for city in worker["cities"]:
+            row = rows.get(city["slug"])
+            if row:
+                city.update(per_day=row["per_day"], pin=row["pin"], score=row["score"])
+        plan = worker["plan"]
+        runs = plan["runs_per_day"]
+        if runs and plan["per_day"]:
+            plan["per_day"] = plan["phrases"] * sum(
+                min(c.get("per_day", runs), runs) for c in worker["cities"]
+            )
+    doc["city_tiers"] = ranked.get("settings")
+
+
 def _parse_time(value: Any) -> Optional[datetime]:
     if not isinstance(value, str):
         return None

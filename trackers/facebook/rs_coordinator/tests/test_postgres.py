@@ -341,6 +341,18 @@ def test_search_cities_keep_one_row_per_worker_and_city(backend):
     assert rows[0]["last_at"] >= first
 
 
+def test_city_tier_config_saves_settings_and_replaces_pins(backend):
+    assert backend.city_tier_config() == {
+        "settings": {}, "pins": {}, "updated_at": None, "updated_by": None,
+    }
+    backend.put_city_tier_config({"top_pct": 10}, {"denver": 3, "boise": 1}, "alex")
+    backend.put_city_tier_config(None, {"reno": 2}, None)
+    config = backend.city_tier_config()
+    assert config["settings"] == {"top_pct": 10}
+    assert config["pins"] == {"reno": 2}
+    assert config["updated_by"] == "alex" and config["updated_at"]
+
+
 # -- Postgres-specific -----------------------------------------------------
 
 

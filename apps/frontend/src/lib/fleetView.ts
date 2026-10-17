@@ -3,7 +3,9 @@
 // city, the derived activity feed and the pipeline's stages.
 // Kept out of the components so they can be unit-tested without React.
 
-import type { AlertHitRow, Challenge, CityWrite, FleetAccount, FleetDoc, ReviewStatsDay, SearchSettingsWrite } from './coordinator';
+import type {
+  AlertHitRow, Challenge, CityWrite, FleetAccount, FleetCity, FleetDoc, ReviewStatsDay, SearchSettingsWrite,
+} from './coordinator';
 import { ruleLines } from './keywordRules';
 
 export type AccountLiveness = 'live' | 'stale' | 'dead' | 'unknown' | 'none';
@@ -554,4 +556,38 @@ export function cityOwners(fleet: FleetDoc, workerId: string): Map<string, strin
 export function citiesDiffer(a: readonly CityWrite[], b: readonly CityWrite[]): boolean {
   return a.length !== b.length
     || a.some((c, i) => c.slug !== b[i].slug || c.name !== b[i].name || c.radius !== b[i].radius);
+}
+
+// ── How often a city is searched ──────────────────────────────────────────────
+
+/**
+ * How many times a day a city is actually searched: its ranked or pinned
+ * count, capped by the worker's `start_at` times, since a city is searched at
+ * most once per time. Null when the facade does not say.
+ */
+export function searchesPerDay(city: FleetCity, runsPerDay: number | null | undefined): number | null {
+  if (city.per_day === undefined || !runsPerDay) return null;
+  return Math.min(city.per_day, runsPerDay);
+}
+
+/**
+ * The fleet-wide pin map after one worker's form: pins on `workerSlugs` (the
+ * cities the worker had and has, so a dropped city loses its pin too) are
+ * replaced by `chosen`; pins elsewhere are kept.
+ */
+export function mergePins(
+  all: Readonly<Record<string, number>>,
+  workerSlugs: readonly string[],
+  chosen: Readonly<Record<string, number>>,
+): Record<string, number> {
+  const mine = new Set(workerSlugs);
+  const out: Record<string, number> = {};
+  for (const [slug, n] of Object.entries(all)) if (!mine.has(slug)) out[slug] = n;
+  for (const [slug, n] of Object.entries(chosen)) out[slug] = n;
+  return out;
+}
+
+export function pinsDiffer(a: Readonly<Record<string, number>>, b: Readonly<Record<string, number>>): boolean {
+  const ka = Object.keys(a);
+  return ka.length !== Object.keys(b).length || ka.some(k => a[k] !== b[k]);
 }

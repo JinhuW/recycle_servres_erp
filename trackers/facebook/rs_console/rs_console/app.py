@@ -478,6 +478,22 @@ async def fleet() -> Dict[str, Any]:
         worker_reviews=worker_reviews,
         search_cities=search_cities,
     )
+    if rows is not None:
+        # How often each city is searched. An older coordinator answers 404,
+        # which leaves the cities unmarked rather than the page broken.
+        try:
+            async with httpx.AsyncClient(timeout=TIMEOUT_S, base_url=base, headers=headers) as client:
+                res = await client.post(
+                    "/v1/city-tiers/rank",
+                    json={"workers": {
+                        w["worker_id"]: [c["slug"] for c in w["cities"]]
+                        for w in doc["workers"] if w["cities"]
+                    }},
+                )
+            if res.status_code == 200:
+                fleet_view.apply_tiers(doc, res.json() or {})
+        except (httpx.HTTPError, ValueError):
+            pass
     doc["settings"] = {
         "editable": master is not None and "error" not in saved and settings.writable(),
         "updated_at": saved.get("updated_at"),
@@ -559,6 +575,27 @@ def put_worker_cities(worker_id: str, body: Any = Body(default=None)) -> Dict[st
         "updated_by": state["updated_by"],
         "changed": changed,
     }
+
+
+@app.get("/v1/city-tiers", dependencies=[Depends(require_token)])
+async def city_tiers() -> Response:
+    """How often cities are searched: the tier settings, the pins, and each
+    city's alert score over the window."""
+    return await _forward("GET", "/v1/city-tiers")
+
+
+@app.put("/v1/city-tiers", dependencies=[Depends(require_token)])
+async def put_city_tiers(body: Any = Body(default=None)) -> Response:
+    """Save the tier settings and/or the whole pin map. The coordinator
+    validates both; only these keys cross. Workers follow from their next
+    search, with no config rewrite."""
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Expected a JSON object")
+    upstream_body = {k: body[k] for k in ("settings", "pins") if k in body}
+    by = body.get("updated_by")
+    if isinstance(by, str) and by.strip():
+        upstream_body["updated_by"] = by.strip()[:120]
+    return await _forward("PUT", "/v1/city-tiers", json_body=upstream_body)
 
 
 @app.get("/v1/config/filter-prompt", dependencies=[Depends(require_token)])

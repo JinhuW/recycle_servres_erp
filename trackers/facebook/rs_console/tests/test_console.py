@@ -63,6 +63,29 @@ def test_token_required_everywhere(client):
     assert client.post("/v1/vnc/homelab-1/ticket").status_code == 401
 
 
+def test_city_tiers_forward_only_settings_pins_and_who(client):
+    assert client.get("/v1/city-tiers").status_code == 401
+    assert client.put("/v1/city-tiers", json={}).status_code == 401
+    assert client.get("/v1/city-tiers", headers=AUTH).status_code == 200
+    res = client.put(
+        "/v1/city-tiers",
+        json={"settings": {"top_pct": 10}, "pins": {"denver": 3}, "updated_by": " alex ",
+              "worker_id": "se-1"},
+        headers=AUTH,
+    )
+    assert res.status_code == 200
+    get, put = client.calls
+    assert (get.method, get.url.path) == ("GET", "/v1/city-tiers")
+    assert (put.method, put.url.path) == ("PUT", "/v1/city-tiers")
+    assert put.headers["Authorization"] == "Bearer admin-secret"
+    import json
+
+    assert json.loads(put.content) == {
+        "settings": {"top_pct": 10}, "pins": {"denver": 3}, "updated_by": "alex",
+    }
+    assert client.put("/v1/city-tiers", json=[1], headers=AUTH).status_code == 400
+
+
 def test_unset_token_fails_closed(client, monkeypatch):
     monkeypatch.delenv("RS_CONSOLE_TOKEN")
     assert client.get("/v1/workers", headers=AUTH).status_code == 503

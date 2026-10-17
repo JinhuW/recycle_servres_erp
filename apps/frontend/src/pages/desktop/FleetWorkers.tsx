@@ -269,7 +269,7 @@ function WorkerRow({ account: w, hits, parked, terms, startAt, open, onToggle, l
             <div className="fl-cities">
               {w.cities.length
                 ? w.cities.map(c => <CityChip key={c.slug} city={c} hits={hits} terms={terms}
-                    tone={searched(c.slug) ? 'accent' : 'muted'} />)
+                    tone={searched(c.slug) ? 'accent' : 'muted'} runsPerDay={w.plan?.runs_per_day} />)
                 : <span className="fp-muted">{t('fbcNoCities')}</span>}
             </div>
           </td>

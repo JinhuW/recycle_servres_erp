@@ -601,6 +601,25 @@ values: `docker exec rs-console cat /state/settings.json`. To drop all of
 them, delete that file and run `scripts/deploy.sh sync`, which renders the
 worker configs from the tree again.
 
+**Busy cities are searched more often.** A worker's config says *which*
+cities it searches; the coordinator decides *how often*, at search time, so a
+change never rewrites a config or restarts a sweep. It ranks each worker's
+cities by alerts sent plus alerts a partner reacted to over a window (default
+30 days): the top 20% are searched 3 times a day, the next 20% twice, the rest
+once, and a city with no alerts in the window is never promoted. A manager can
+pin a city to a count. The day is split into the worker's `start_at` times:
+before each item's sweep the monitor sends its config cities and the slot it
+is in to `POST /v1/workers/<id>/search-plan` and searches only the cities due
+in that slot, a 3×/day city in every slot and a once-a-day city in one slot
+picked by a hash of its slug. **With one `start_at` time everything is searched
+once a day**, as before; set three (e.g. `["02:00", "10:00", "18:00"]`) from the
+ERP's search settings to turn the tiers on. A monitor that cannot reach the
+coordinator, or runs on an interval instead of `start_at`, searches every city.
+The rule and the pins live in the coordinator's `city_tier_settings` and
+`city_tier_pins` tables; the ERP edits them through the console's
+`GET/PUT /v1/city-tiers`, and `/v1/fleet` marks each city with its `per_day`,
+`pin` and `score`.
+
 **It is built to be absorbed by the ERP.** The page is plain HTML/JS with no
 build step, and its markup uses the ERP's own tokens and classes (`card`,
 `kpi`, `chip`, `data-table`, `seg`), so moving it means adding a

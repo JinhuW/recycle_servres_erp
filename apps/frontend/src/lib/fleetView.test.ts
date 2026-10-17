@@ -7,6 +7,7 @@ import {
   splitHighlights, reloginWouldBeAutomatic, vaultAccountIdFor, whoIs,
   FLOW_STAGES, STAGE_FORMS, draftChanges, settingsDraft, settingsPatch,
   citiesDiffer, cityOwners, isCitySlug, marketplaceCityUrl, normalizeCitySlug,
+  mergePins, pinsDiffer, searchesPerDay,
 } from './fleetView';
 
 const account = (over: Partial<FleetAccount>): FleetAccount => ({
@@ -222,6 +223,31 @@ describe('vaultAccountIdFor', () => {
 
   it('names a new account after the worker otherwise', () => {
     expect(vaultAccountIdFor(account({ worker_id: 'ne-1', account: null }))).toBe('ne-1');
+  });
+});
+
+describe('how often a city is searched', () => {
+  const city = { slug: 'denver', name: 'Denver', radius_km: 100 };
+
+  it('is its count, capped by the start times, and unknown without both', () => {
+    expect(searchesPerDay({ ...city, per_day: 3 }, 3)).toBe(3);
+    expect(searchesPerDay({ ...city, per_day: 3 }, 2)).toBe(2);
+    expect(searchesPerDay({ ...city, per_day: 1 }, 3)).toBe(1);
+    expect(searchesPerDay(city, 3)).toBeNull();
+    expect(searchesPerDay({ ...city, per_day: 3 }, null)).toBeNull();
+  });
+
+  it('replaces only this worker\'s pins, dropping removed cities', () => {
+    const all = { denver: 3, boise: 1, seattle: 2 };
+    expect(mergePins(all, ['denver', 'boise', 'reno'], { reno: 2 })).toEqual({ seattle: 2, reno: 2 });
+    expect(mergePins(all, ['denver'], { denver: 3 })).toEqual(all);
+  });
+
+  it('notices any added, removed or changed pin', () => {
+    expect(pinsDiffer({ a: 1 }, { a: 1 })).toBe(false);
+    expect(pinsDiffer({ a: 1 }, { a: 2 })).toBe(true);
+    expect(pinsDiffer({ a: 1 }, {})).toBe(true);
+    expect(pinsDiffer({}, { b: 1 })).toBe(true);
   });
 });
 
