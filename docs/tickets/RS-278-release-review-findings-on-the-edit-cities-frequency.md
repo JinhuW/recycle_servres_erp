@@ -36,6 +36,8 @@ scope*.
 - [x] A ranking rule the coordinator would refuse (empty box, out of range, top + next over 100, a tier searched more than the one above) disables Save with a note, and the tiers are written before the cities, so a refused tier write no longer leaves the city list half-saved.
 - [x] The Auto option shows the searches a day the worker actually makes (capped by its start times), and an interval-paced worker gets a note that it searches every city each round instead of "0 search times".
 
+- [x] Assign account (RS-276, #698, also in this release) refuses an account that a purchaser or another worker holds (`fpAssignHeld`), refreshes the pool after any refusal, moves every account on the worker at swap time, and labels mismatched or unreadable cookies.
+
 ## Out of scope
 
 Tracker-side findings, each needing a facebook-tracker release and a homelab
@@ -44,4 +46,5 @@ deploy, left for a separate decision:
 - `search-plan` re-runs the 30-day alert aggregate on every call; a short cache would cut it.
 - The rank can change between items of the same slot, so items in one slot may get different city sets (the docstring claims otherwise).
 - The console's fleet poll asks for the rank after its other stats calls rather than alongside them, so a slow coordinator doubles the poll's wait.
+- From the #698 review, not fixed: the vault write and Re-login still happen before the pool transaction, so a DB failure after them leaves the pool behind the vault (pre-existing in the assign route); `PUT /api/coordinator/accounts/:id` has no ERP caller left but is a tracker contract route; the "replaced by #N" audit detail is English; the previous-fate list and the candidate sort are duplicated between files.
 - The console matches ranked rows to config slugs case-sensitively while the coordinator lowercases; every slug written by the ERP or in `master.toml` is lowercase today, so it is not reachable.

@@ -2,7 +2,8 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Icon } from '../../components/Icon';
 import { Modal } from '../../components/Modal';
 import { coordinatorApi, type FleetAccount, type FleetCity, type WorkerState } from '../../lib/coordinator';
-import { handleFetchError, showSuccessToast } from '../../lib/errorToast';
+import { ApiError } from '../../lib/api';
+import { handleFetchError, showSuccessToast, showWarnToast } from '../../lib/errorToast';
 import {
   PREVIOUS_FATES, cookieHealth, heldByWorker, installCandidates, poolApi,
   type PoolAccount, type PreviousFate,
@@ -187,6 +188,9 @@ const FATE_KEYS: Record<PreviousFate, string> = {
   retired: 'fbcCredFateRetired',
 };
 
+const POOL_REFUSALS = new Set(['fpWorkerTaken', 'fpNoPassword', 'fpAssignRetired', 'fpAssignHeld']);
+const COOKIE_PROBLEM = { missing: 'fpCookieMissing', mismatch: 'fpCookieMismatch', unknown: 'fpCookieUnknown' } as const;
+
 function EditCredentialsModal({ account: w, onClose, onSaved }: {
   account: FleetAccount; onClose: () => void; onSaved: () => void;
 }) {
@@ -199,8 +203,9 @@ function EditCredentialsModal({ account: w, onClose, onSaved }: {
   const [fate, setFate] = useState<PreviousFate | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const reload = () => poolApi.snapshot().then(s => setPool(s.accounts));
   useEffect(() => {
-    poolApi.snapshot().then(s => setPool(s.accounts)).catch(e => { handleFetchError(e); setPool([]); });
+    reload().catch(e => { handleFetchError(e); setPool([]); });
   }, []);
 
   const held = pool ? heldByWorker(pool, w.worker_id) : undefined;
@@ -217,7 +222,16 @@ function EditCredentialsModal({ account: w, onClose, onSaved }: {
         showSuccessToast(t('fpAssignedToast', { n: picked.no, id: w.worker_id }));
         onSaved();
       })
-      .catch(handleFetchError)
+      .catch(err => {
+        // The pool moved under the dialog: say why and show it as it is now,
+        // so the question about the worker's current account can appear.
+        const code = err instanceof ApiError ? (err.body as { code?: string } | undefined)?.code : undefined;
+        if (err instanceof ApiError && err.status === 409 && code && POOL_REFUSALS.has(code)) {
+          showWarnToast(t(code));
+          setPick(null);
+          void reload().catch(() => undefined);
+        } else handleFetchError(err);
+      })
       .finally(() => setBusy(false));
   };
 
@@ -273,7 +287,7 @@ function EditCredentialsModal({ account: w, onClose, onSaved }: {
                         <td className="muted" style={{ fontSize: 12 }}>
                           {cookie.kind === 'fresh' || cookie.kind === 'stale'
                             ? t('fbcCredCookieAge', { days: cookie.days })
-                            : t('fbcCredNoCookie')}
+                            : cookie.kind === 'none' ? t('fbcCredNoCookie') : t(COOKIE_PROBLEM[cookie.kind])}
                         </td>
                         <td className="muted" style={{ fontSize: 12 }}>{a.batch}</td>
                       </tr>

@@ -19,9 +19,9 @@ at the last commit that carried each version.
 
 ## [1.275.1] - 2026-10-17
 
-Release review fixes for the Edit cities dialog's search frequency (RS-278).
-As shipped in 1.274.0 the dialog could lose edits and erase pins it did not
-own.
+Release review fixes for the Edit cities dialog's search frequency and the
+worker page's Assign account (RS-278). As shipped in 1.274.0 the cities dialog
+could lose edits and erase pins it did not own.
 
 ### Fixed
 
@@ -44,6 +44,15 @@ own.
 - **The ranking rule reads as a table.** Each tier's share of cities and
   searches a day sit in aligned columns with their units, the rest's share is
   worked out for you, and an emptied box stays empty instead of turning into 0.
+- **Assigning a pool account to a worker refuses one someone took meanwhile.**
+  The worker page's Assign account picks from the pool as it was when the
+  dialog opened; an account a purchaser or another worker took since was
+  still sent, putting one login on two machines. It is now refused with a
+  note and the list refreshes, as it does after any refusal, so the question
+  about the worker's current account appears when that changed too. Every
+  account on the worker at the moment of the swap is moved, not only the one
+  read first. The picker names a mismatched or unreadable cookie instead of
+  "no cookie".
 ## [1.275.0] - 2026-10-17
 
 A worker's Facebook login now comes from the account pool on the worker page

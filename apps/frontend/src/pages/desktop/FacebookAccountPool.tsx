@@ -40,7 +40,7 @@ type Props = {
 // Refusals the API names with one of the page's own keys read as a warning,
 // not as the blocking error dialog: the pool moved under the user, that's all.
 const KNOWN_REFUSALS = new Set([
-  'fpAtLimit', 'fpDuplicate', 'fpTakenElsewhere', 'fpNotTaken', 'fpWorkerTaken', 'fpNoPassword', 'fpAssignRetired',
+  'fpAtLimit', 'fpDuplicate', 'fpTakenElsewhere', 'fpNotTaken', 'fpWorkerTaken', 'fpNoPassword', 'fpAssignRetired', 'fpAssignHeld',
 ]);
 export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = null, challenges = null }: Props) {
   const { t, locale } = useT();
