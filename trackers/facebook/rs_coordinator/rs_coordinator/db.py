@@ -99,6 +99,16 @@ CREATE TABLE IF NOT EXISTS search_cycles (
 );
 CREATE INDEX IF NOT EXISTS idx_search_cycles_at ON search_cycles(at);
 
+-- When each worker last searched each city: the funnel report that counts a
+-- search names its city. One row per worker x city, so it needs no pruning;
+-- the console keeps the ones inside the worker's local day.
+CREATE TABLE IF NOT EXISTS search_cities (
+    worker_id  TEXT NOT NULL,
+    city       TEXT NOT NULL,
+    last_at    TEXT NOT NULL,
+    PRIMARY KEY (worker_id, city)
+);
+
 -- Alert hit tracking ---------------------------------------------------------
 -- The homelab monitor sends listing alerts straight to Telegram and reports
 -- each delivered message here (fail-open, after the send). Partners mark an
@@ -1104,6 +1114,21 @@ class Database:
             cur.execute(
                 "SELECT worker_id, at, item FROM search_cycles WHERE at >= ? ORDER BY at",
                 (since,),
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+    def touch_search_city(self: "Database", worker_id: str, city: str) -> None:
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO search_cities (worker_id, city, last_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(worker_id, city) DO UPDATE SET last_at = excluded.last_at",
+                (worker_id, city, utcnow()),
+            )
+
+    def search_cities(self: "Database") -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT worker_id, city, last_at FROM search_cities ORDER BY worker_id, city"
             )
             return [dict(row) for row in cur.fetchall()]
 

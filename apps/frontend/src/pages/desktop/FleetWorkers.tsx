@@ -4,7 +4,7 @@ import { Skeleton } from '../../components/Skeleton';
 import type { AlertHitRow, Challenge, FleetAccount, FleetDoc } from '../../lib/coordinator';
 import {
   accountAlerts, accountHaystack, attentionReason, dayStrip, FLEET_STATUSES, fleetActivity, fleetPostsToday, fleetStatus,
-  hitsByCity, isUnstampedBuild, matchesTerms, parkedWorkers, queryTerms, whoIs, type CityHits, type DayStrip, type FleetStatus,
+  hitsByCity, isUnstampedBuild, matchesTerms, parkedWorkers, queryTerms, searchedToday, whoIs, type CityHits, type DayStrip, type FleetStatus,
 } from '../../lib/fleetView';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
@@ -209,6 +209,7 @@ function WorkerRow({ account: w, hits, parked, terms, startAt, open, onToggle, l
   const strip = dayStrip(w, status, startAt);
   const plan = w.plan;
   const build = h?.version && !isUnstampedBuild(h.version) ? h.version : null;
+  const searched = searchedToday(w);
 
   return (
     <Fragment>
@@ -268,7 +269,7 @@ function WorkerRow({ account: w, hits, parked, terms, startAt, open, onToggle, l
             <div className="fl-cities">
               {w.cities.length
                 ? w.cities.map(c => <CityChip key={c.slug} city={c} hits={hits} terms={terms}
-                    tone={status === 'live' || status === 'stale' ? 'accent' : 'muted'} />)
+                    tone={searched.has(c.slug) ? 'accent' : 'muted'} />)
                 : <span className="fp-muted">{t('fbcNoCities')}</span>}
             </div>
           </td>

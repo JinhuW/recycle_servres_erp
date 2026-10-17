@@ -197,7 +197,8 @@ export type FleetSearchPlan = {
 // The worker's local day so far: `first_at` is when it started on its first
 // item, `last_at` its latest counted search page. `searches` is null for a
 // monitor that predates the funnel counters. `posts` are listings freshly
-// put to the AI today, `alerts` those it alerted on.
+// put to the AI today, `alerts` those it alerted on. `cities` are the slugs
+// it has searched today; null or absent from a coordinator that predates it.
 export type FleetToday = {
   day: string;
   first_at: string | null;
@@ -206,6 +207,7 @@ export type FleetToday = {
   searches: number | null;
   posts: number | null;
   alerts: number | null;
+  cities?: string[] | null;
 };
 
 export type FleetDoc = {

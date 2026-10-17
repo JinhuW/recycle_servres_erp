@@ -109,6 +109,10 @@ export function accountAlerts(w: FleetAccount, hits: Map<string, CityHits>): num
   return w.cities.reduce((n, c) => n + (hits.get(c.slug)?.sent ?? 0), 0);
 }
 
+// The cities a worker has searched in its local day: the green chips. A
+// facade that does not report them leaves every chip grey.
+export const searchedToday = (w: FleetAccount): ReadonlySet<string> => new Set(w.today?.cities ?? []);
+
 // Whether the ERP's own viewer can show this worker's browser: only a worker
 // the facade bridges to (RS_VNC_TARGETS). A config-only vnc_url points at a
 // host the ERP cannot reach on the manager's behalf.

@@ -143,6 +143,7 @@ def client(monkeypatch, tmp_path):
         "sessions": {"homelab-1": httpx.Response(200, json=HOMELAB_SESSION)},
         "cycles": httpx.Response(200, json={"rows": []}),
         "reviews": httpx.Response(200, json={"rows": []}),
+        "cities": httpx.Response(200, json={"rows": []}),
     }
 
     async def fake_transport(request):
@@ -154,6 +155,8 @@ def client(monkeypatch, tmp_path):
             return upstream["cycles"]
         if path == "/v1/stats/reviews/workers":
             return upstream["reviews"]
+        if path == "/v1/stats/search-cities":
+            return upstream["cities"]
         if path == "/v1/accounts":
             return upstream["accounts"]
         if path.startswith("/v1/session/"):
@@ -337,9 +340,13 @@ def test_fleet_carries_each_workers_today_and_plan(client):
         {"day": eastern, "worker_id": "se-1", "searches": 7, "reviewed": 4, "alerted": 1,
          "updated_at": moved},
     ]})
+    client.upstream["cities"] = httpx.Response(200, json={"rows": [
+        {"worker_id": "se-1", "city": "atlanta", "last_at": moved},
+    ]})
     doc = client.get("/v1/fleet", headers=AUTH).json()
     paths = [r.url.path for r in client.calls]
     assert "/v1/stats/search-cycles" in paths and "/v1/stats/reviews/workers" in paths
+    assert "/v1/stats/search-cities" in paths
 
     by_id = {w["worker_id"]: w for w in doc["workers"]}
     se = by_id["se-1"]
@@ -351,6 +358,8 @@ def test_fleet_carries_each_workers_today_and_plan(client):
     assert se["today"]["searches"] == 7
     assert (se["today"]["posts"], se["today"]["alerts"]) == (4, 1)
     assert se["today"]["last_at"] is not None
+    assert se["today"]["cities"] == ["atlanta"]
+    assert by_id["wc-1"]["today"]["cities"] == []
     # A worker with no searches counted says so with null, not zero.
     assert by_id["wc-1"]["today"]["searches"] is None
     assert by_id["wc-1"]["today"]["posts"] == 0
@@ -359,6 +368,7 @@ def test_fleet_carries_each_workers_today_and_plan(client):
 def test_fleet_today_is_null_against_an_older_coordinator(client):
     client.upstream["cycles"] = httpx.Response(404, json={"detail": "Not Found"})
     client.upstream["reviews"] = httpx.Response(404, json={"detail": "Not Found"})
+    client.upstream["cities"] = httpx.Response(404, json={"detail": "Not Found"})
     doc = client.get("/v1/fleet", headers=AUTH).json()
     assert doc["health"]["ok"] is True
     assert all(w["today"] is None for w in doc["workers"])
@@ -403,7 +413,17 @@ def test_worker_today_buckets_by_the_regions_local_day():
         "searches": 31,
         "posts": 23,
         "alerts": 2,
+        "cities": None,
     }
+
+    # Cities searched in Denver's today, not yesterday evening's, nor another worker's.
+    cities = [
+        {"worker_id": "denver-1", "city": "denver", "last_at": "2026-10-17T15:02:00+00:00"},
+        {"worker_id": "denver-1", "city": "boulder", "last_at": "2026-10-17T05:30:00+00:00"},
+        {"worker_id": "ne-1", "city": "boston", "last_at": "2026-10-17T19:00:00+00:00"},
+    ]
+    assert fleet.worker_today("denver-1", "America/Denver", cycles, reviews, now, cities)["cities"] == ["denver"]
+    assert fleet.worker_today("denver-1", "America/Denver", cycles, reviews, now, [])["cities"] == []
 
     # No counters served: the window still draws from cycles, counts unknown.
     today = fleet.worker_today("denver-1", "America/Denver", cycles, None, now)

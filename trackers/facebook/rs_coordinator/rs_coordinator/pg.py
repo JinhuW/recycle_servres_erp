@@ -715,6 +715,21 @@ class PostgresDatabase:
             )
             return _rows(cur.fetchall())
 
+    def touch_search_city(self: "PostgresDatabase", worker_id: str, city: str) -> None:
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO search_cities (worker_id, city, last_at) VALUES (%s, %s, %s) "
+                "ON CONFLICT(worker_id, city) DO UPDATE SET last_at = excluded.last_at",
+                (worker_id, city, utcnow()),
+            )
+
+    def search_cities(self: "PostgresDatabase") -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT worker_id, city, last_at FROM search_cities ORDER BY worker_id, city"
+            )
+            return _rows(cur.fetchall())
+
     # -- incidents ---------------------------------------------------------
 
     _INCIDENT_COLUMNS = (
