@@ -971,11 +971,18 @@
   grid-template-columns: minmax(0, 1fr) minmax(0, 340px);
   gap: 16px 28px;
   padding: 14px 15px 16px;
-  border-top: 1px solid var(--border);
-  /* A floor so short stages don't shrink the card as you click through them;
-     a longer stage grows the card rather than scrolling inside it. */
-  min-height: 300px;
   align-content: start;
+}
+/* FleetFlow.tsx stacks every stage in one cell; see the comment there. */
+.ff-flow-stack {
+  display: grid;
+  border-top: 1px solid var(--border);
+}
+.ff-flow-stack > .ff-flow-detail {
+  grid-area: 1 / 1;
+}
+.ff-flow-ghost {
+  visibility: hidden;
 }
 .ff-flow-head {
   display: flex;
@@ -1446,9 +1453,6 @@ button.ff-expr-text {
   }
   .ff-flow-detail {
     grid-template-columns: minmax(0, 1fr);
-  }
-  .ff-flow-detail {
-    min-height: 0;
   }
   .ff-flow-detail.ff-flow-detail-rules,
   .ff-flow-detail.ff-flow-detail-rules:has(.ff-edit) {
