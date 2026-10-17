@@ -17,6 +17,20 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.261.0] - 2026-10-16
+
+### Added
+
+- **Facebook account pool** beside the existing Fleet view at Monitors →
+  Facebook. Managers get the numbered key-tag rack, status filters, search,
+  supplier import preview with validation, account editor, retirement/removal,
+  cookie checks and recent activity. Purchasers can take up to two accounts,
+  see live 2FA codes, reveal/copy credentials, return accounts or report a problem.
+- The pool uses clearly labelled sample data held only while the Facebook page
+  is open; backend storage and allocation are deferred. The live Fleet view
+  remains manager-only. English/Chinese labels, responsive layouts and keyboard
+  access follow the existing ERP shell.
+
 ## [1.260.0] - 2026-10-16
 
 Review mode's count can be typed as well as stepped (RS-257).
