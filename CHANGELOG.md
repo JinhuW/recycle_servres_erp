@@ -17,6 +17,20 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.278.0] - 2026-10-17
+
+### Added
+
+- **A Facebook worker's page shows where its proxy comes out** (RS-281). The
+  Proxy row used to name only the env var holding the proxy
+  (`$PROXY_HOMELAB_NE`), which said nothing about where the account appears to
+  Facebook, and a region's account has to look like it is in that region. It
+  now shows the proxy URL (login removed), then the exit IP and city, region
+  and country, with the ISP on hover; a worker on the VM's own IP shows that
+  address instead. A proxy whose lookup failed says so. The Watch page's
+  Sign-in panel shows the same. Needs rs_console with
+  the matching change; an older console still shows the env var name.
+
 ## [1.277.0] - 2026-10-17
 
 ### Added

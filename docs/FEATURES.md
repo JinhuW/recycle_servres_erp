@@ -2119,8 +2119,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   form asks first (v1.270.0). The eye
   on a row is the one way to a worker's page, `/fleet/worker/<worker>`: its
   Facebook login and user id, vault account and stored secrets by name,
-  session expiry, browser and backup, proxy, cities, pacing, session file and
-  build, its open checkpoints (capture, Watch, Mark resolved) and its recent
+  session expiry, browser and backup, proxy (since v1.278.0 its URL without
+  the login, and the exit IP and city a lookup through it finds — RS-281),
+  cities, pacing, session file and build, its open checkpoints (capture, Watch, Mark resolved) and its recent
   events, and the actions — **Watch browser**, **Re-login** and **Assign
   account**. Since v1.275.0 the worker's login comes only from the account
   pool (RS-276): the dialog lists the available pool accounts that have a

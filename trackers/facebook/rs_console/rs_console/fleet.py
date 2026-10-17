@@ -17,15 +17,18 @@ This module joins them into one document. It is pure: it takes parsed TOML
 and the coordinator's rows and returns a dict, so it can be tested without a
 filesystem or an HTTP client. The router in app.py does the reading.
 
-What never leaves here: proxy URLs (only the *name* of the env var that holds
-one), API keys, tokens, and the AI prompt (that has its own route). A config
-value that is not a `${VAR}` placeholder is dropped rather than exposed, so a
-proxy pasted inline by mistake cannot reach the browser.
+What never leaves here: credentials of any kind (a proxy's login, API keys,
+tokens) and the AI prompt (that has its own route). A proxy leaves as the name
+of its env var and, once app.py has resolved it, as its URL with the login cut
+out (`public_proxy_url`) plus where it exits (proxy_exit.py). A config value
+that is not a `${VAR}` placeholder is dropped rather than exposed, so a proxy
+pasted inline by mistake cannot reach the browser.
 """
 
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 _PLACEHOLDER = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
@@ -84,6 +87,62 @@ def env_name(value: Any) -> Optional[str]:
         return None
     match = _PLACEHOLDER.match(value.strip())
     return match.group(1) if match else None
+
+
+# Which env vars hold a worker's proxy login, as its config names them. Only
+# app.py reads them, to dial the proxy; apply_proxies drops them.
+_NO_PROXY_LOGIN = {"proxy_user_env": None, "proxy_pass_env": None}
+
+
+def public_proxy_url(raw: Optional[str]) -> Optional[str]:
+    """`scheme://host:port` of a proxy URL, without any login written into it."""
+    if not raw:
+        return None
+    try:
+        parts = urlsplit(raw.strip())
+        port = parts.port
+    except ValueError:
+        return None
+    if not parts.scheme or not parts.hostname:
+        return None
+    host = f"[{parts.hostname}]" if ":" in parts.hostname else parts.hostname
+    return f"{parts.scheme}://{host}" + (f":{port}" if port else "")
+
+
+def proxy_targets(
+    doc: Dict[str, Any], environ: Dict[str, str]
+) -> Dict[str, Tuple[Optional[str], Optional[str], Optional[str]]]:
+    """Each worker's proxy as its process dials it: (URL, username, password),
+    all None for one on the VM's own IP. An env var named but unset is no
+    proxy, which is what the monitor makes of it too."""
+    def read(name: Optional[str]) -> Optional[str]:
+        if not name:
+            return None
+        return (environ.get(name) or "").strip() or None
+
+    out = {}
+    for worker in doc["workers"]:
+        url = read(worker.get("proxy_env"))
+        user, password = read(worker.get("proxy_user_env")), read(worker.get("proxy_pass_env"))
+        out[worker["worker_id"]] = (url, user, password) if url else (None, None, None)
+    return out
+
+
+def apply_proxies(
+    doc: Dict[str, Any],
+    targets: Dict[str, Tuple[Optional[str], Optional[str], Optional[str]]],
+    exits: Dict[Tuple[Optional[str], Optional[str], Optional[str]], Dict[str, Any]],
+) -> None:
+    """Set each worker's `proxy`: the URL it dials, login cut out (None on the
+    VM's own IP), and where it exits — ip, city, region, country, org, or
+    `error` / `pending`."""
+    for worker in doc["workers"]:
+        for key in _NO_PROXY_LOGIN:
+            worker.pop(key, None)
+        target = targets.get(worker["worker_id"])
+        if target is None:
+            continue
+        worker["proxy"] = {"url": public_proxy_url(target[0]), **exits.get(target, {"pending": True})}
 
 
 def cities(block: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -196,6 +255,7 @@ def fleet_workers(
                 "cities": region["cities"] if region else [],
                 "session_file": block.get("session") or None,
                 "proxy_env": proxy_env,
+                **_NO_PROXY_LOGIN,
                 "pacing": {
                     "search_interval": block.get("search_interval") or settings.get("search_interval"),
                     "max_search_interval": block.get("max_search_interval")
@@ -218,7 +278,8 @@ def monitor_worker(
     facebook = (monitor.get("marketplace") or {}).get("facebook") or {}
     city_list = cities(facebook)
     region = _match_region((c["slug"] for c in city_list), region_list)
-    proxy_env = env_name((monitor.get("monitor") or {}).get("proxy_server"))
+    monitor_block = monitor.get("monitor") or {}
+    proxy_env = env_name(monitor_block.get("proxy_server"))
     return {
         "worker_id": worker_id,
         "source": "monitor",
@@ -226,6 +287,8 @@ def monitor_worker(
         "cities": city_list,
         "session_file": None,
         "proxy_env": proxy_env,
+        "proxy_user_env": env_name(monitor_block.get("proxy_username")),
+        "proxy_pass_env": env_name(monitor_block.get("proxy_password")),
         "pacing": {
             "search_interval": facebook.get("search_interval"),
             "max_search_interval": facebook.get("max_search_interval"),
@@ -244,7 +307,7 @@ def describe_from_config(
     """Describe `worker` from the config it actually runs, which is the only
     place its cities live once they are edited per worker."""
     described = monitor_worker(config, worker["worker_id"], region_list)
-    for key in ("region", "cities", "proxy_env", "pacing"):
+    for key in ("region", "cities", "proxy_env", *_NO_PROXY_LOGIN, "pacing"):
         worker[key] = described[key]
     worker["cities_editable"] = True
 
@@ -495,6 +558,7 @@ def compose(
                 "cities": [],
                 "session_file": None,
                 "proxy_env": None,
+                **_NO_PROXY_LOGIN,
                 "pacing": {"search_interval": None, "max_search_interval": None, "overridden": False},
                 "vnc_url": row.get("vnc_url"),
                 "health": None,

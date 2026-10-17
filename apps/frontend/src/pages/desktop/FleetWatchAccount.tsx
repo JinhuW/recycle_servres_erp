@@ -10,6 +10,7 @@ import { useT } from '../../lib/i18n';
 import { hrefFor, onLinkClick } from '../../lib/route';
 import { PoolCode } from './accountPool/shared';
 import { BuildChip, fmtDays, stateLabel } from './FleetAccounts';
+import { ProxyExit } from './FleetWorker';
 import '../../styles/facebookPool.css';
 
 // ─── The sign-in panel beside a worker's live browser ─────────────────────────
@@ -234,7 +235,7 @@ export function FleetWatchAccount({ worker, coordinatorVersion, pool, canType, o
               ? <span title={h.session_expiry}>{fmtDays(t, h.session_days_left)}</span> : muted('—'))}
             {fact('heartbeat', t('fbcWatchAcctHeartbeat'), h?.last_heartbeat_at
               ? <span title={h.last_heartbeat_at}>{relTime(h.last_heartbeat_at, locale)}</span> : muted(t('fbcNever')))}
-            {fact('proxy', t('fbcDetailProxy'), worker.proxy_env ? <span className="mono">${worker.proxy_env}</span> : muted(t('fbcOwnIp')))}
+            {fact('proxy', t('fbcDetailProxy'), <ProxyExit worker={worker} />)}
             {fact('build', t('fbcColBuild'), <BuildChip health={h} coordinatorVersion={coordinatorVersion} />)}
           </dl>
         </>

@@ -534,8 +534,14 @@ region by city set, so the ramp reads as "Southeast" rather than "28
 cities"), and from the coordinator: worker health, the vault's account list
 (`GET /v1/accounts` — identity and which secrets are stored, never a value or
 a proxy URL) and each worker's session metadata (`fb_user_id` is the `c_user`
-cookie of the backed-up session, i.e. the public profile id). Proxies leave
-only as env-var *names*; a literal URL in a config is dropped, not exposed.
+cookie of the backed-up session, i.e. the public profile id). A proxy leaves
+as its env-var name and as `proxy`: the URL with any login cut out, plus the
+IP, city, region, country and ISP it exits from. The console asks
+`ipinfo.io` *through* the proxy (`rs_console/proxy_exit.py`), caches the
+answer 6 h (a failure 5 min), and waits at most 3 s for it, so a slow proxy
+reads `pending` instead of holding the page; a worker with no proxy shows the
+VM's own exit. A proxy's username and password never leave, and a literal URL
+in a config is still dropped, not exposed.
 The document degrades rather than fails: a coordinator outage sets
 `health.error` and the configured fleet still renders, which is when someone
 is most likely looking; an older coordinator without `/v1/accounts` simply
