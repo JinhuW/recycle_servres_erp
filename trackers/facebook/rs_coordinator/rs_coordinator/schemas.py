@@ -275,6 +275,31 @@ class ReviewStatsList(BaseModel):
     days: List[ReviewStatsDay]
 
 
+class WorkerReviewStatsDay(ReviewStatsDay):
+    worker_id: str
+    # The last time any counter on this row moved.
+    updated_at: str | None = None
+
+
+class WorkerReviewStatsList(BaseModel):
+    rows: List[WorkerReviewStatsDay]
+
+
+# -- search cycles -------------------------------------------------------------
+
+
+class SearchCycleRow(BaseModel):
+    """A worker starting on an item: a heartbeat's new `last_search_at`."""
+
+    worker_id: str
+    at: str
+    item: str | None = None
+
+
+class SearchCycleList(BaseModel):
+    rows: List[SearchCycleRow]
+
+
 # -- alert hit tracking ------------------------------------------------------
 
 

@@ -50,6 +50,7 @@ TABLES = (
     "session_snapshots",
     "code_audit",
     "review_stats",
+    "search_cycles",
 )
 
 
@@ -571,7 +572,7 @@ def test_schema_translation():
     # ...replaced by their Postgres equivalents.
     assert "secret_blob          BYTEA" in ddl
     assert "state_blob     BYTEA" in ddl
-    assert ddl.count("INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY") == 6
+    assert ddl.count("INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY") == 7
 
     # Table and column names are untouched — a dedicated database means there
     # is nothing to rename around.

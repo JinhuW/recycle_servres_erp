@@ -84,6 +84,21 @@ CREATE TABLE IF NOT EXISTS review_stats (
     PRIMARY KEY (day, worker_id)
 );
 
+-- Search cycles --------------------------------------------------------------
+-- When each worker started searching an item: a heartbeat carrying a new
+-- `last_search_at` (the monitor stamps one per item, then walks every city x
+-- phrase, and its repeater re-sends the same stamp). review_stats counts what
+-- a sweep did per UTC day but not when it began; this is the start of the
+-- fleet table's day strip. Pruned to SEARCH_CYCLE_DAYS; nothing in the alert
+-- path reads it.
+CREATE TABLE IF NOT EXISTS search_cycles (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    worker_id  TEXT NOT NULL,
+    at         TEXT NOT NULL,
+    item       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_search_cycles_at ON search_cycles(at);
+
 -- Alert hit tracking ---------------------------------------------------------
 -- The homelab monitor sends listing alerts straight to Telegram and reports
 -- each delivered message here (fail-open, after the send). Partners mark an
@@ -450,6 +465,29 @@ DATABASE_URL_VARS = ("RS_DATABASE_URL", "DATABASE_URL")
 
 def utcnow() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+# How long search cycles are kept. The fleet table reads today's; a week
+# beyond that is room to answer "did it search on Tuesday".
+SEARCH_CYCLE_DAYS = 14
+
+
+def as_utc_stamp(value: Optional[str]) -> str:
+    """A worker-sent ISO time in `utcnow()`'s form, or now if it does not parse.
+
+    Workers write `...Z`; `utcnow()` writes `+00:00`. Search cycles are
+    filtered by string comparison, so both must land in one form.
+    """
+    if value:
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            parsed = None
+        if parsed is not None:
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc).isoformat(timespec="seconds")
+    return utcnow()
 
 
 def postgres_url(env: Optional[Dict[str, str]] = None) -> Optional[str]:
@@ -1032,6 +1070,42 @@ class Database:
                 (stats_cutoff(days),),
             )
             return [review_stats_row(row) for row in cur.fetchall()]
+
+    def review_stats_by_worker(self: "Database", days: int = 2) -> List[Dict[str, Any]]:
+        """Per-worker rows for the last `days` UTC days, oldest first, with
+        when each was last added to — the latest search page it counted."""
+        with self.cursor() as cur:
+            cur.execute(
+                f"SELECT day, worker_id, {', '.join(REVIEW_STAT_COUNTERS)}, updated_at "
+                "FROM review_stats WHERE day >= ? ORDER BY day, worker_id",
+                (stats_cutoff(days),),
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+    # -- search cycles -----------------------------------------------------
+
+    def log_search_cycle(
+        self: "Database", worker_id: str, at: str, item: str | None = None
+    ) -> None:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=SEARCH_CYCLE_DAYS)).isoformat(
+            timespec="seconds"
+        )
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO search_cycles (worker_id, at, item) VALUES (?, ?, ?)",
+                (worker_id, at, item),
+            )
+            # A few rows a day per worker: a cheap place to keep the table
+            # bounded without a timer of its own.
+            cur.execute("DELETE FROM search_cycles WHERE at < ?", (cutoff,))
+
+    def search_cycles_since(self: "Database", since: str) -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT worker_id, at, item FROM search_cycles WHERE at >= ? ORDER BY at",
+                (since,),
+            )
+            return [dict(row) for row in cur.fetchall()]
 
     # -- incidents ---------------------------------------------------------
 

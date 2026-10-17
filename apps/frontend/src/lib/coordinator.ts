@@ -177,6 +177,35 @@ export type FleetAccount = {
   // Either is null when nothing is on file (or the coordinator predates them).
   account: VaultAccount | null;
   session: SessionMeta | null;
+  // The zone of the worker's region, which its "today" is counted in. This
+  // and the two below are absent from a facade that predates them.
+  timezone?: string;
+  plan?: FleetSearchPlan;
+  // null when the coordinator serves no search log or per-worker reviews.
+  today?: FleetToday | null;
+};
+
+// The daily search budget: every enabled phrase in every city, once per
+// `start_at` time. `per_day` is null for an interval loop or an empty region.
+export type FleetSearchPlan = {
+  phrases: number;
+  cities: number;
+  runs_per_day: number | null;
+  per_day: number | null;
+};
+
+// The worker's local day so far: `first_at` is when it started on its first
+// item, `last_at` its latest counted search page. `searches` is null for a
+// monitor that predates the funnel counters. `posts` are listings freshly
+// put to the AI today, `alerts` those it alerted on.
+export type FleetToday = {
+  day: string;
+  first_at: string | null;
+  last_at: string | null;
+  cycles: number | null;
+  searches: number | null;
+  posts: number | null;
+  alerts: number | null;
 };
 
 export type FleetDoc = {

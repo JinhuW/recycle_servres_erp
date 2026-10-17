@@ -11,11 +11,13 @@ Nothing in the alert path depends on this: a worker that never reports simply
 contributes nothing to the chart.
 """
 
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from .. import deps
+from ..db import SEARCH_CYCLE_DAYS
 from ..deps import require_admin, require_worker
 from ..schemas import (
     AlertHitList,
@@ -23,7 +25,11 @@ from ..schemas import (
     ReviewStatsDay,
     ReviewStatsList,
     ReviewStatsReport,
+    SearchCycleList,
+    SearchCycleRow,
     StatusResponse,
+    WorkerReviewStatsDay,
+    WorkerReviewStatsList,
 )
 
 router = APIRouter()
@@ -53,6 +59,35 @@ def report_reviews(
 def daily_reviews(days: int = Query(default=14, ge=1, le=MAX_DAYS)) -> ReviewStatsList:
     return ReviewStatsList(
         days=[ReviewStatsDay(**row) for row in deps.db.review_stats_daily(days)]
+    )
+
+
+@router.get(
+    "/v1/stats/reviews/workers",
+    response_model=WorkerReviewStatsList,
+    dependencies=[Depends(require_admin)],
+)
+def worker_reviews(days: int = Query(default=2, ge=1, le=MAX_DAYS)) -> WorkerReviewStatsList:
+    """The same counters per worker, with when each row last moved: the
+    fleet table's searches, new posts and end of a sweep."""
+    return WorkerReviewStatsList(
+        rows=[WorkerReviewStatsDay(**row) for row in deps.db.review_stats_by_worker(days)]
+    )
+
+
+@router.get(
+    "/v1/stats/search-cycles",
+    response_model=SearchCycleList,
+    dependencies=[Depends(require_admin)],
+)
+def search_cycles(
+    hours: int = Query(default=48, ge=1, le=SEARCH_CYCLE_DAYS * 24),
+) -> SearchCycleList:
+    """Raw rows, oldest first. The console buckets them into each worker's
+    local day, which no single UTC cutoff here could do."""
+    since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat(timespec="seconds")
+    return SearchCycleList(
+        rows=[SearchCycleRow(**row) for row in deps.db.search_cycles_since(since)]
     )
 
 

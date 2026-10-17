@@ -2,8 +2,8 @@ import { Fragment, useMemo, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import type { AlertHitRow, Challenge, FleetAccount, FleetDoc } from '../../lib/coordinator';
 import {
-  accountAlerts, accountHaystack, attentionReason, FLEET_STATUSES, fleetActivity, fleetStatus, hitsByCity,
-  matchesTerms, parkedWorkers, queryTerms, whoIs, type CityHits, type FleetStatus,
+  accountAlerts, accountHaystack, attentionReason, dayStrip, FLEET_STATUSES, fleetActivity, fleetPostsToday, fleetStatus,
+  hitsByCity, matchesTerms, parkedWorkers, queryTerms, whoIs, type CityHits, type DayStrip, type FleetStatus,
 } from '../../lib/fleetView';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
@@ -84,6 +84,8 @@ export function WorkersCard({ fleet, unavailable, hits, challenges, filter, onCl
     (filter === 'all' || fleetStatus(w, parked) === filter) && matchesTerms(accountHaystack(w), terms));
   const cities = new Set(all.flatMap(w => w.cities.map(c => c.slug))).size;
   const alerts = all.reduce((n, w) => n + accountAlerts(w, byCity), 0);
+  const posts = fleetPostsToday(all);
+  const startAt = fleet?.search.start_at;
   const missing = fleet
     ? [!fleet.sources.fleet && 'fleet.toml', !fleet.sources.master && 'master.toml'].filter(Boolean) as string[]
     : [];
@@ -109,7 +111,9 @@ export function WorkersCard({ fleet, unavailable, hits, challenges, filter, onCl
           </button>
         )}
         <span className="ff-summary">
-          {fleet ? t('fbcWorkersSummary', { n: all.length, cities, alerts, days: HITS_DAYS }) : '…'}
+          {!fleet ? '…' : posts === null
+            ? t('fbcWorkersSummary', { n: all.length, cities, alerts, days: HITS_DAYS })
+            : t('fbcWorkersSummaryPosts', { n: all.length, posts, cities, alerts, days: HITS_DAYS })}
         </span>
       </div>
 
@@ -130,19 +134,20 @@ export function WorkersCard({ fleet, unavailable, hits, challenges, filter, onCl
               <th aria-label={t('fbcColCities')} />
               <th>{t('fbcColWorker')}</th>
               <th>{t('fbcColStatus')}</th>
-              <th>{t('fbcColLastSearch')}</th>
+              <th title={t('fbcColTodayHint')}>{t('fbcColToday')}</th>
+              <th title={t('fbcColSearchesHint')}>{t('fbcColSearches')}</th>
               <th>{t('fbcColSession')}</th>
-              <th className="num" title={t('fbcColAlertsHint', { days: HITS_DAYS })}>{t('fbcColAlerts', { days: HITS_DAYS })}</th>
+              <th title={t('fbcColPostsHint', { days: HITS_DAYS })}>{t('fbcColPosts')}</th>
               <th aria-label={t('fbcOpenWorker')} />
             </tr>
           </thead>
           <tbody>
             {shown.map(w => (
-              <WorkerRow key={w.worker_id} account={w} hits={byCity} parked={parked} terms={terms}
+              <WorkerRow key={w.worker_id} account={w} hits={byCity} parked={parked} terms={terms} startAt={startAt}
                 open={open.has(w.worker_id)} onToggle={() => toggle(w.worker_id)} locale={locale} />
             ))}
             {fleet && shown.length === 0 && (
-              <tr><td colSpan={7} className="fp-empty">{terms.length || filter !== 'all' ? t('fbcAccEmptySearch') : t('fbcAccEmptyAll')}</td></tr>
+              <tr><td colSpan={8} className="fp-empty">{terms.length || filter !== 'all' ? t('fbcAccEmptySearch') : t('fbcAccEmptyAll')}</td></tr>
             )}
           </tbody>
         </table>
@@ -154,11 +159,12 @@ export function WorkersCard({ fleet, unavailable, hits, challenges, filter, onCl
   );
 }
 
-function WorkerRow({ account: w, hits, parked, terms, open, onToggle, locale }: {
+function WorkerRow({ account: w, hits, parked, terms, startAt, open, onToggle, locale }: {
   account: FleetAccount;
   hits: Map<string, CityHits>;
   parked: ReadonlySet<string>;
   terms: readonly string[];
+  startAt: readonly string[] | undefined;
   open: boolean;
   onToggle: () => void;
   locale: string;
@@ -170,6 +176,8 @@ function WorkerRow({ account: w, hits, parked, terms, open, onToggle, locale }: 
   const note = statusNote(t, w, parked, locale);
   const days = h?.session_days_left ?? null;
   const path = fleetWorkerPath(w.worker_id);
+  const strip = dayStrip(w, status, startAt);
+  const plan = w.plan;
   const pace = w.pacing.search_interval
     ? `${w.pacing.search_interval} – ${w.pacing.max_search_interval ?? w.pacing.search_interval}`
     : null;
@@ -195,17 +203,28 @@ function WorkerRow({ account: w, hits, parked, terms, open, onToggle, locale }: 
             {note && <small className={status === 'attention' || status === 'offline' ? 'fp-warn' : ''}>{note}</small>}
           </span>
         </td>
-        <td title={h?.last_search_at ?? undefined}>
-          <span className="fp-holder">
-            <span>{h?.last_search_at ? relTime(h.last_search_at, locale) : '—'}</span>
-            <small>{t('fbcHeartbeatAge', { age: h?.last_heartbeat_at ? relTime(h.last_heartbeat_at, locale) : t('fbcNever') })}</small>
-          </span>
+        <td className="ff-wrap" title={h?.last_heartbeat_at
+          ? t('fbcHeartbeatAge', { age: relTime(h.last_heartbeat_at, locale) })
+          : undefined}>
+          {strip
+            ? <span className="fp-holder"><DayBar strip={strip} status={status} /><small>{todayLabel(t, strip)}</small></span>
+            : <span className="fp-muted" title={t('fbcTodayUnknown')}>—</span>}
+        </td>
+        <td>
+          <SearchRing done={strip?.searches ?? null} budget={strip?.budget ?? plan?.per_day ?? null} />
         </td>
         <td title={h?.session_expiry ?? undefined}
           className={days === null ? 'fp-muted' : days <= 7 ? 'fp-warn' : 'fp-ok'}>
           {fmtDays(t, days)}
         </td>
-        <td className="num">{h ? accountAlerts(w, hits) : '—'}</td>
+        <td>
+          <span className="fp-holder">
+            <span className="ff-posts">
+              <b className="mono">{w.today?.posts ?? '—'}</b> {t('fbcPostsNew')}
+            </span>
+            <small>{t('fbcPostsAlerts', { n: h ? accountAlerts(w, hits) : 0, days: HITS_DAYS })}</small>
+          </span>
+        </td>
         <td>
           <a className="btn ghost icon sm" href={hrefFor(path)} onClick={onLinkClick(path)}
             aria-label={t('fbcOpenWorkerOf', { id: w.worker_id })} title={t('fbcOpenWorkerOf', { id: w.worker_id })}>
@@ -215,7 +234,7 @@ function WorkerRow({ account: w, hits, parked, terms, open, onToggle, locale }: 
       </tr>
       {open && (
         <tr className="ff-fold">
-          <td colSpan={7}>
+          <td colSpan={8}>
             <div className="ff-fold-body">
               <div>
                 <div className="fp-section-label">{t('fbcFoldCities', { n: w.cities.length })}</div>
@@ -233,6 +252,12 @@ function WorkerRow({ account: w, hits, parked, terms, open, onToggle, locale }: 
                   {w.pacing.overridden && ` · ${t('fbcPacingOverride')}`}
                   {' · '}{w.proxy_env ? t('fbcViaProxy', { env: w.proxy_env }) : t('fbcOwnIp')}
                 </div>
+                {plan?.per_day != null && (
+                  <div className="ff-fold-text">
+                    {t(plan.runs_per_day === 1 ? 'fbcPlanText' : 'fbcPlanTextRuns',
+                      { phrases: plan.phrases, cities: plan.cities, runs: plan.runs_per_day ?? 0, perDay: plan.per_day })}
+                  </div>
+                )}
                 <div className="ff-fold-hint">{t('fbcFoldHint')}</div>
               </div>
             </div>
@@ -240,6 +265,55 @@ function WorkerRow({ account: w, hits, parked, terms, open, onToggle, locale }: 
         </tr>
       )}
     </Fragment>
+  );
+}
+
+// "07:25–now, ≈15:24 · 13:40 MT": the searched window, then the worker's own
+// local time, so a manager in Denver reads an east-coast sweep in its hours.
+function todayLabel(t: Translate, s: DayStrip): string {
+  const span = s.start === null
+    ? s.next ? t(s.next.tomorrow ? 'fbcTodayNextTomorrow' : 'fbcTodayNext', { time: s.next.time }) : t('fbcTodayNone')
+    : s.running ? `${s.start}–${t('fbcTodayNow')}${s.eta ? `, ≈${s.eta}` : ''}`
+    : s.end ? `${s.start}–${s.end}`
+    : t('fbcTodayFrom', { time: s.start });
+  return `${span} · ${s.localNow} ${s.zone}`;
+}
+
+function DayBar({ strip, status }: { strip: DayStrip; status: FleetStatus }) {
+  const pct = (n: number) => `${(n * 100).toFixed(2)}%`;
+  return (
+    <span className={`ff-day ff-${status}`} aria-hidden>
+      {strip.segments.map((seg, i) => (
+        <i key={i} className={`ff-day-${seg.kind}`}
+          style={{ left: pct(seg.from), width: pct(Math.max(seg.to - seg.from, 0.004)) }} />
+      ))}
+      <i className="ff-day-now" style={{ left: pct(strip.nowAt) }} />
+    </span>
+  );
+}
+
+// Done against the day's budget. Amber once the budget is met — the sweep is
+// over for the day — and a dash when the monitor does not report searches.
+function SearchRing({ done, budget }: { done: number | null; budget: number | null }) {
+  const { t } = useT();
+  const r = 8;
+  const c = 2 * Math.PI * r;
+  const frac = done !== null && budget ? Math.min(done / budget, 1) : 0;
+  const tone = done === null || done === 0 ? 'idle' : budget !== null && done >= budget ? 'full' : 'part';
+  const title = done === null
+    ? t('fbcSearchesUnknown')
+    : budget !== null ? t('fbcSearchesOf', { done, budget }) : undefined;
+  return (
+    <span className={`ff-searches ff-ring-${tone}`} title={title}>
+      <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden>
+        <circle cx="11" cy="11" r={r} className="ff-ring-track" />
+        {frac > 0 && (
+          <circle cx="11" cy="11" r={r} className="ff-ring-fill"
+            strokeDasharray={`${frac * c} ${c}`} transform="rotate(-90 11 11)" />
+        )}
+      </svg>
+      <span className="mono"><b>{done ?? '—'}</b>{budget !== null && <span className="ff-ring-of">/{budget}</span>}</span>
+    </span>
   );
 }
 

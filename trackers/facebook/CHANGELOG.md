@@ -43,6 +43,20 @@ deployed?" harder to answer.
   and sweeps straight away. `/v1/fleet` now reports the effective values
   (`master.toml` plus saved values), includes `start_at`, and says whether the
   console can save (`settings.editable`).
+- **Each worker’s day on the fleet table** (RS-264): when it started, how many
+  of its searches it has done, and how many new posts it found.
+  - New `search_cycles` table (created on start, both backends): a heartbeat
+    whose `last_search_at` differs from the stored one logs when the worker
+    started on an item. Rows older than 14 days are pruned on insert.
+  - New admin reads: `GET /v1/stats/search-cycles?hours=` and
+    `GET /v1/stats/reviews/workers?days=` (the funnel counters per worker per
+    UTC day, with `updated_at`).
+  - rs_console's `/v1/fleet` gives each worker `timezone` (its region's),
+    `plan` (enabled phrases × cities × `start_at` runs = searches a day) and
+    `today` (first and last activity in its local day, cycles, searches,
+    reviewed as posts, alerted). `search.start_at` is now exposed. Against an
+    older coordinator `today` is null and the page shows "—".
+  - rs_console now depends on `tzdata`, so the slim image can resolve zones.
 
 ### Removed
 

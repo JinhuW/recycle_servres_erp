@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends
 
 from .. import deps, health
+from ..db import as_utc_stamp
 from ..deps import require_admin, require_worker
 from ..schemas import HeartbeatRequest, HeartbeatResponse, WorkerList, WorkerOut
 
@@ -63,6 +64,20 @@ def heartbeat(
 
     if health_fields:
         db.update_worker_health(worker_id, health_fields)
+
+    # The monitor stamps last_search_at once per item cycle and its repeater
+    # re-sends that stamp every few minutes, so only a changed stamp is a new
+    # cycle. It is what the fleet table's day strip starts from.
+    if payload.last_search_at and payload.last_search_at != (previous or {}).get("last_search_at"):
+        item = payload.detail.get("item")
+        try:
+            db.log_search_cycle(
+                worker_id,
+                as_utc_stamp(payload.last_search_at),
+                item if isinstance(item, str) else None,
+            )
+        except Exception:  # noqa: BLE001 - the strip is a nicety; the heartbeat is not
+            logger.exception("Could not log a search cycle for worker %s", worker_id)
 
     # The stored row, not the payload: a partial heartbeat still carries the
     # account and VNC link an earlier one reported, and the alert needs them.

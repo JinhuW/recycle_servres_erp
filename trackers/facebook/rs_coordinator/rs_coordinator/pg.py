@@ -36,9 +36,11 @@ from .db import (
     ALERT_HIT_SQL,
     LISTING_EXTRA_COLUMNS,
     OUTBOUND_EXTRA_COLUMNS,
+    REVIEW_STAT_COUNTERS,
     REVIEW_STATS_EXTRA_COLUMNS,
     REVIEW_STATS_SUMS,
     SCHEMA,
+    SEARCH_CYCLE_DAYS,
     SNAPSHOT_EXTRA_COLUMNS,
     THREAD_EXTRA_COLUMNS,
     UNMATCHED_REACTIONS_SQL,
@@ -676,6 +678,42 @@ class PostgresDatabase:
                 (stats_cutoff(days),),
             )
             return [review_stats_row(row) for row in _rows(cur.fetchall())]
+
+    def review_stats_by_worker(
+        self: "PostgresDatabase", days: int = 2
+    ) -> List[Dict[str, Any]]:
+        """See `Database.review_stats_by_worker`."""
+        with self.cursor() as cur:
+            cur.execute(
+                f"SELECT day, worker_id, {', '.join(REVIEW_STAT_COUNTERS)}, updated_at "
+                "FROM review_stats WHERE day >= %s ORDER BY day, worker_id",
+                (stats_cutoff(days),),
+            )
+            return _rows(cur.fetchall())
+
+    # -- search cycles -----------------------------------------------------
+
+    def log_search_cycle(
+        self: "PostgresDatabase", worker_id: str, at: str, item: str | None = None
+    ) -> None:
+        """See `Database.log_search_cycle`."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=SEARCH_CYCLE_DAYS)).isoformat(
+            timespec="seconds"
+        )
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO search_cycles (worker_id, at, item) VALUES (%s, %s, %s)",
+                (worker_id, at, item),
+            )
+            cur.execute("DELETE FROM search_cycles WHERE at < %s", (cutoff,))
+
+    def search_cycles_since(self: "PostgresDatabase", since: str) -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT worker_id, at, item FROM search_cycles WHERE at >= %s ORDER BY at",
+                (since,),
+            )
+            return _rows(cur.fetchall())
 
     # -- incidents ---------------------------------------------------------
 
