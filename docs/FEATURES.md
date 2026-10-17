@@ -2510,7 +2510,7 @@ removed in v1.191.0.
   the brand row (v1.208.0). It is a per-user preference (`sidebar.folded`), so
   it follows the user across reloads and devices. Under 900px the rail is
   forced and the toggle hidden. In the rail every link keeps its name for
-  screen readers.
+  screen readers, and Submit order shows only its green `+` badge (v1.271.2).
 - **The sidebar has a second level** (v1.207.0). A parent entry opens while
   you are on one of its pages and is one row with a › caret everywhere else;
   clicking it opens its first child. The one parent today is **Oversight ▸

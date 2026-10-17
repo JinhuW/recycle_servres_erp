@@ -936,6 +936,8 @@ html.desktop, body.desktop, .desktop #root {
   .sidebar .sidebar-foot > div:not(.avatar) { display: none; }
   .sidebar .nav-item { justify-content: center; padding: 10px 0; }
   .sidebar .nav-item .badge { margin-left: 0; }
+  /* Submit order's icon is a plus too; two pluses in a 64px column read as a glitch. */
+  .sidebar .nav-item:has(.badge) .nav-icon { display: none; }
   .sidebar .nav-item .nav-icon { width: 18px; height: 18px; }
   .sidebar .nav-group + .nav-group { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
   .sidebar .sidebar-foot { flex-direction: column; gap: 8px; padding: 12px 0; }
