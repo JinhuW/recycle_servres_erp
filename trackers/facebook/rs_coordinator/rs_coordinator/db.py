@@ -109,6 +109,20 @@ CREATE TABLE IF NOT EXISTS search_cities (
     PRIMARY KEY (worker_id, city)
 );
 
+-- How often each city is searched (city_tiers.py): the tier settings as one
+-- JSON row, and the cities a manager pinned to a searches-a-day count. The
+-- rank itself is computed on read from alert_messages, never stored.
+CREATE TABLE IF NOT EXISTS city_tier_settings (
+    id          INTEGER PRIMARY KEY CHECK (id = 1),
+    body        TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    updated_by  TEXT
+);
+CREATE TABLE IF NOT EXISTS city_tier_pins (
+    city     TEXT PRIMARY KEY,
+    per_day  INTEGER NOT NULL
+);
+
 -- Alert hit tracking ---------------------------------------------------------
 -- The homelab monitor sends listing alerts straight to Telegram and reports
 -- each delivered message here (fail-open, after the send). Partners mark an
@@ -1131,6 +1145,41 @@ class Database:
                 "SELECT worker_id, city, last_at FROM search_cities ORDER BY worker_id, city"
             )
             return [dict(row) for row in cur.fetchall()]
+
+    def city_tier_config(self: "Database") -> Dict[str, Any]:
+        """{settings (stored keys only), pins, updated_at, updated_by}."""
+        with self.cursor() as cur:
+            cur.execute("SELECT body, updated_at, updated_by FROM city_tier_settings WHERE id = 1")
+            row = cur.fetchone()
+            cur.execute("SELECT city, per_day FROM city_tier_pins ORDER BY city")
+            pins = {r["city"]: int(r["per_day"]) for r in cur.fetchall()}
+        return {
+            "settings": json.loads(row["body"]) if row else {},
+            "pins": pins,
+            "updated_at": row["updated_at"] if row else None,
+            "updated_by": row["updated_by"] if row else None,
+        }
+
+    def put_city_tier_config(
+        self: "Database",
+        settings: Optional[Dict[str, Any]],
+        pins: Optional[Dict[str, int]],
+        updated_by: Optional[str],
+    ) -> None:
+        """Replace the settings and/or the whole pin map, whichever is given."""
+        with self.cursor() as cur:
+            if settings is not None:
+                cur.execute(
+                    "INSERT INTO city_tier_settings (id, body, updated_at, updated_by) "
+                    "VALUES (1, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET body = excluded.body, "
+                    "updated_at = excluded.updated_at, updated_by = excluded.updated_by",
+                    (json.dumps(settings), utcnow(), updated_by),
+                )
+            if pins is not None:
+                cur.execute("DELETE FROM city_tier_pins")
+                cur.executemany(
+                    "INSERT INTO city_tier_pins (city, per_day) VALUES (?, ?)", list(pins.items())
+                )
 
     # -- incidents ---------------------------------------------------------
 

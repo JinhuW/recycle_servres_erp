@@ -18,6 +18,25 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Added
+
+- **Busy cities are searched more often** (RS-277). The coordinator ranks
+  each worker's cities by alerts sent plus alerts reacted to over a window
+  (default 30 days): the top 20% are searched 3 times a day, the next 20%
+  twice, the rest once; a city with no alerts is never promoted, and a pin
+  fixes a city's count. The monitor asks `POST /v1/workers/{id}/search-plan`
+  before each item's sweep and searches only the cities due in the current
+  `start_at` slot. Nothing is written into a config, so a change restarts no
+  sweep. The rule and pins are new tables (`city_tier_settings`,
+  `city_tier_pins`, created on start); the console forwards
+  `GET/PUT /v1/city-tiers` and marks `/v1/fleet`'s cities with `per_day`,
+  `pin` and `score`. Vendored monitor repinned to `3d6dc96`.
+
+  **To turn it on**, give the search settings three daily start times (e.g.
+  02:00, 10:00, 18:00) from the ERP. With one time, as today, every city is
+  still searched once a day, so this release changes nothing until then. A
+  monitor that cannot reach the coordinator searches every city.
+
 ## [0.7.1] - 2026-10-17
 
 ### Fixed

@@ -79,7 +79,39 @@ export type FilterPrompt = {
 // config (what the phase-1 monitor actually searches) and the coordinator's
 // worker health. Field names are the facade's, verbatim.
 
-export type FleetCity = { slug: string; name: string; radius_km: number | null };
+// `per_day`, `pin` and `score` are how often the coordinator has a worker's
+// city searched, and why: its alerts over the tier window, or a manager's
+// pin. Absent from a facade or coordinator that predates city tiers, and from
+// the regions' own lists.
+export type FleetCity = {
+  slug: string;
+  name: string;
+  radius_km: number | null;
+  per_day?: number;
+  pin?: number | null;
+  score?: number;
+};
+
+// The rank behind each city's searches a day: the top `top_pct` percent of a
+// worker's cities by alerts over `window_days` get `per_day[0]`, the next
+// `mid_pct` percent `per_day[1]`, the rest `per_day[2]`.
+export type CityTierSettings = {
+  top_pct: number;
+  mid_pct: number;
+  per_day: [number, number, number];
+  window_days: number;
+};
+
+// GET /api/coordinator/city-tiers. `scores` is alerts sent + reacted to per
+// city slug over the window; `pins` maps a slug to a fixed searches a day.
+export type CityTiers = {
+  settings: CityTierSettings;
+  defaults: CityTierSettings;
+  pins: Record<string, number>;
+  scores: Record<string, number>;
+  updated_at: string | null;
+  updated_by: string | null;
+};
 
 export type FleetRegion = { key: string; name: string; cities: FleetCity[] };
 
@@ -230,6 +262,8 @@ export type FleetDoc = {
   items: FleetItem[];
   regions: FleetRegion[];
   workers: FleetAccount[];
+  // The tier settings the cities' `per_day` came from; absent with them.
+  city_tiers?: CityTierSettings;
   // Absent from a facade that predates saved settings; the flow card then
   // stays read-only.
   settings?: {
@@ -306,6 +340,12 @@ export const coordinatorApi = {
     api.put<{ cities: CityWrite[]; changed: string[] }>(
       `/api/coordinator/workers/${encodeURIComponent(workerId)}/cities`, { cities },
     ),
+
+  // How often cities are searched. Pins replace the whole map, so a caller
+  // editing one worker's cities merges into the map it read.
+  cityTiers: () => api.get<CityTiers>('/api/coordinator/city-tiers'),
+  saveCityTiers: (body: { settings?: Partial<CityTierSettings>; pins?: Record<string, number> }) =>
+    api.put<CityTiers>('/api/coordinator/city-tiers', body),
 };
 
 /**

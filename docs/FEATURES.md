@@ -2141,7 +2141,20 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   links to its Marketplace page so a wrong slug can be caught, since Facebook
   otherwise searches the account's own area in silence. Saving writes that
   worker's config only, and it searches the new list from its next run
-  (RS-275). Pacing still lives in `fleet.toml`.
+  (RS-275). Since v1.274.0 the same dialog sets **how often each city is
+  searched** (RS-277). The coordinator ranks a worker's cities by alerts sent
+  plus alerts reacted to over a window (30 days by default). The top 20% are
+  searched 3 times a day, the next 20% twice and the rest once, and a city
+  with no alerts in the window is never promoted. Each city row shows its
+  alerts in the window and an Auto / 3× / 2× / 1× pin. A collapsible **Ranking
+  rule** sets the percentages, the counts and the window for every worker.
+  The worker's `start_at` times are its slots: a city is searched at most
+  once per time, so the tiers take effect only once the search settings list
+  two or more times (the dialog says so with one). A city's chip shows `3×`
+  or `2×` when it is searched more than once a day, and the hover names the
+  count and whether it is pinned. Saving restarts no sweep: workers ask the
+  coordinator for their plan before each one. Pacing still lives in
+  `fleet.toml`.
 - **Facebook account pool** — a second tab at **Monitors ▸ Facebook**,
   linked directly at `/#/fleet/pool` (v1.261.0). Managers see a status legend
   with counts that filters (the key-tag rail left the manager's view in

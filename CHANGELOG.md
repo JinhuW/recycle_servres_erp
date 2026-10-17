@@ -17,6 +17,27 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.274.0] - 2026-10-17
+
+Busy cities are searched more often (RS-277). Until now every city was
+searched once a day, however many alerts it produced. Needs facebook-tracker
+with city tiers; against an older console the cities dialog is unchanged.
+
+### Added
+
+- **How often each city is searched, on the Edit cities dialog.** The
+  coordinator ranks a worker's cities by alerts sent plus alerts reacted to
+  over a window: the top 20% are searched 3 times a day, the next 20% twice,
+  the rest once. A city with no alerts is never promoted, so a quiet fleet is
+  not split by list order. Each city row shows its alerts in the window and an
+  Auto / 3× / 2× / 1× pin, and a collapsible Ranking rule edits the
+  percentages, counts and window for every worker
+  (`GET/PUT /api/coordinator/city-tiers`). The dialog warns when the worker
+  has a single daily start time, which keeps every city at once a day.
+- **City chips show `3×` / `2×`** for a city searched more than once a day,
+  capped by the worker's start times, and the search budget on the fleet
+  table counts the extra searches.
+
 ## [1.272.0] - 2026-10-17
 
 A worker's cities and its Facebook login are now both set from the ERP, so

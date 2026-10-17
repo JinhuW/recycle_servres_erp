@@ -144,6 +144,7 @@ def client(monkeypatch, tmp_path):
         "cycles": httpx.Response(200, json={"rows": []}),
         "reviews": httpx.Response(200, json={"rows": []}),
         "cities": httpx.Response(200, json={"rows": []}),
+        "rank": httpx.Response(404, json={"detail": "Not Found"}),
     }
 
     async def fake_transport(request):
@@ -151,6 +152,8 @@ def client(monkeypatch, tmp_path):
         path = request.url.path
         if path == "/healthz":
             return httpx.Response(200, json={"status": "ok", "version": "0.5.6"})
+        if path == "/v1/city-tiers/rank":
+            return upstream["rank"]
         if path == "/v1/stats/search-cycles":
             return upstream["cycles"]
         if path == "/v1/stats/reviews/workers":
@@ -372,6 +375,52 @@ def test_fleet_today_is_null_against_an_older_coordinator(client):
     doc = client.get("/v1/fleet", headers=AUTH).json()
     assert doc["health"]["ok"] is True
     assert all(w["today"] is None for w in doc["workers"])
+
+
+def test_fleet_marks_each_city_with_how_often_it_is_searched(client):
+    client.upstream["rank"] = httpx.Response(200, json={
+        "settings": {"top_pct": 20, "mid_pct": 20, "per_day": [3, 2, 1], "window_days": 30},
+        "workers": {"se-1": [
+            {"slug": "dc", "score": 4, "computed": 3, "pin": None, "per_day": 3},
+            {"slug": "miami", "score": 0, "computed": 1, "pin": 2, "per_day": 2},
+        ]},
+    })
+    doc = client.get("/v1/fleet", headers=AUTH).json()
+    rank_call = next(r for r in client.calls if r.url.path == "/v1/city-tiers/rank")
+    assert rank_call.method == "POST"
+    asked = __import__("json").loads(rank_call.content)["workers"]
+    assert asked["se-1"] == ["dc", "miami"]
+
+    se = next(w for w in doc["workers"] if w["worker_id"] == "se-1")
+    assert [(c["slug"], c["per_day"], c["pin"], c["score"]) for c in se["cities"]] == [
+        ("dc", 3, None, 4), ("miami", 2, 2, 0),
+    ]
+    assert doc["city_tiers"]["per_day"] == [3, 2, 1]
+    wc = next(w for w in doc["workers"] if w["worker_id"] == "wc-1")
+    assert all("per_day" not in c for c in wc["cities"])
+
+
+def test_fleet_leaves_cities_unmarked_against_an_older_coordinator(client):
+    doc = client.get("/v1/fleet", headers=AUTH).json()
+    assert doc["health"]["ok"] is True
+    assert "city_tiers" not in doc
+    assert all("per_day" not in c for w in doc["workers"] for c in w["cities"])
+
+
+def test_apply_tiers_recounts_the_budget_capped_at_the_slots():
+    doc = {"workers": [{
+        "worker_id": "se-1",
+        "cities": [{"slug": "dc"}, {"slug": "miami"}, {"slug": "tampa"}],
+        "plan": fleet.search_plan([{"search_phrases": ["a", "b"]}], 3, ["02:00", "10:00"]),
+    }]}
+    rows = [
+        {"slug": "dc", "score": 9, "pin": None, "per_day": 3},
+        {"slug": "miami", "score": 1, "pin": None, "per_day": 2},
+        {"slug": "tampa", "score": 0, "pin": None, "per_day": 1},
+    ]
+    fleet.apply_tiers(doc, {"settings": {}, "workers": {"se-1": rows}})
+    # Two phrases x (dc twice — two slots is the cap — + miami twice + tampa once).
+    assert doc["workers"][0]["plan"]["per_day"] == 2 * (2 + 2 + 1)
 
 
 def test_search_plan_counts_enabled_phrases_cities_and_runs():

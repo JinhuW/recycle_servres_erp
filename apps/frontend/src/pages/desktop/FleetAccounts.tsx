@@ -4,7 +4,7 @@ import { Modal } from '../../components/Modal';
 import { coordinatorApi, type FleetAccount, type FleetCity, type WorkerState } from '../../lib/coordinator';
 import { handleFetchError, showSuccessToast } from '../../lib/errorToast';
 import {
-  isUnstampedBuild, reloginIsAutomatic, reloginWouldBeAutomatic, splitHighlights, vaultAccountIdFor,
+  isUnstampedBuild, reloginIsAutomatic, reloginWouldBeAutomatic, searchesPerDay, splitHighlights, vaultAccountIdFor,
   type AccountLiveness, type CityHits,
 } from '../../lib/fleetView';
 import { useT } from '../../lib/i18n';
@@ -288,19 +288,25 @@ function EditCredentialsModal({ account: w, onClose, onSaved }: {
   );
 }
 
-export function CityChip({ city, hits, terms, tone }: {
+// `runsPerDay` is the worker's `start_at` count: a busy city is marked with
+// how many of those times it is searched, a once-a-day city is left plain.
+export function CityChip({ city, hits, terms, tone, runsPerDay }: {
   city: FleetCity; hits: Map<string, CityHits>; terms: readonly string[]; tone: 'accent' | 'muted';
+  runsPerDay?: number | null;
 }) {
   const { t } = useT();
   const hit = hits.get(city.slug);
+  const times = searchesPerDay(city, runsPerDay);
   const title = [
     city.slug,
     city.radius_km ? `${city.radius_km} km` : null,
     hit ? t('fbcCityHint', { sent: hit.sent, days: HITS_DAYS }) : null,
+    times ? t(city.pin ? 'fbcCityTimesPinned' : 'fbcCityTimes', { n: times }) : null,
   ].filter(Boolean).join(' · ');
   return (
     <span className={`chip ${tone}`} title={title}>
       <span><Hi text={city.name} terms={terms} /></span>
+      {times !== null && times > 1 && <span className="mono" style={{ fontSize: 10.5, opacity: 0.8 }}>{times}×</span>}
       {hit && hit.sent > 0 && <span className="n">{hit.sent}</span>}
     </span>
   );

@@ -106,7 +106,7 @@ export function FleetWorker({ workerId }: { workerId: string }) {
     [t('fbcDetailBackup'), sess?.backed_up_at ? <span title={sess.backed_up_at}>{relTime(sess.backed_up_at, locale)}</span> : muted(t('fbcNeverBackedUp'))],
     [t('fbcDetailProxy'), w.proxy_env ? <span className="mono">${w.proxy_env}</span> : muted(t('fbcOwnIp'))],
     [t('fbcColCities'), w.cities.length
-      ? <span className="fl-cities ff-wrap-cell">{w.cities.map(c => <CityChip key={c.slug} city={c} hits={byCity} terms={[]} tone={searched(c.slug) ? 'accent' : 'muted'} />)}</span>
+      ? <span className="fl-cities ff-wrap-cell">{w.cities.map(c => <CityChip key={c.slug} city={c} hits={byCity} terms={[]} tone={searched(c.slug) ? 'accent' : 'muted'} runsPerDay={w.plan?.runs_per_day} />)}</span>
       : muted(t('fbcNoCities'))],
     [t('fbcFoldPacing'), pace],
     [t('fbcDetailSessionFile'), w.session_file ? <span className="mono">{w.session_file}</span> : muted('—')],
