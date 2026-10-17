@@ -296,7 +296,9 @@ export function attachVncBridge(
       }
       wss.handleUpgrade(req, socket, head, (client) => {
         if (closing) {
+          // Not in `open`, so closeVncBridges' terminate sweep never sees it.
           closeQuietly(client, 1001, RESTARTING);
+          setTimeout(() => client.terminate(), TERMINATE_GRACE_MS).unref();
           return;
         }
         open.add(client);

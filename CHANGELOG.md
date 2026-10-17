@@ -53,6 +53,10 @@ could lose edits and erase pins it did not own.
   account on the worker at the moment of the swap is moved, not only the one
   read first. The picker names a mismatched or unreadable cookie instead of
   "no cookie".
+- **A viewer that connects during a restart is cut too.** A VNC handshake
+  that finished after shutdown began was sent a close but left out of the
+  2-second terminate sweep, so a sleeping viewer could still hold the
+  shutdown past its deadline.
 
 ## [1.275.2] - 2026-10-17
 

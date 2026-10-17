@@ -37,6 +37,7 @@ scope*.
 - [x] The Auto option shows the searches a day the worker actually makes (capped by its start times), and an interval-paced worker gets a note that it searches every city each round instead of "0 search times".
 
 - [x] Assign account (RS-276, #698, also in this release) refuses an account that a purchaser or another worker holds (`fpAssignHeld`), refreshes the pool after any refusal, moves every account on the worker at swap time, and labels mismatched or unreadable cookies.
+- [x] A VNC handshake that completes after shutdown began is terminated after the grace period, like the open bridges (RS-176, #703, also in this release).
 
 ## Out of scope
 
@@ -47,4 +48,5 @@ deploy, left for a separate decision:
 - The rank can change between items of the same slot, so items in one slot may get different city sets (the docstring claims otherwise).
 - The console's fleet poll asks for the rank after its other stats calls rather than alongside them, so a slow coordinator doubles the poll's wait.
 - From the #698 review, not fixed: the vault write and Re-login still happen before the pool transaction, so a DB failure after them leaves the pool behind the vault (pre-existing in the assign route); `PUT /api/coordinator/accounts/:id` has no ERP caller left but is a tracker contract route; the "replaced by #N" audit detail is English; the previous-fate list and the candidate sort are duplicated between files.
+- From the #701 and #703 review, not fixed: a payment linked to a sell order still shows no owner and stays under Unassigned (RS-278 asked for PO links only); picking a member in the owner filter now also returns their PO-linked payments, as #701 intended; the owner filter's COALESCE cannot use the assignee index; the new VNC shutdown test waits on fixed sleeps.
 - The console matches ranked rows to config slugs case-sensitively while the coordinator lowercases; every slug written by the ERP or in `master.toml` is lowercase today, so it is not reachable.
