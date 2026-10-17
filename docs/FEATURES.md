@@ -2209,7 +2209,19 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   or demoted loses the view within a minute.  When the access token behind
   the socket runs out, the viewer reconnects on its own with a fresh one and
   keeps control if it had it (v1.209.1).  It is opened from the worker's page,
-  and its back link returns there (v1.263.0).
+  and its back link returns there (v1.263.0).  A **Sign-in** panel beside the
+  browser shows the worker's Account pool login (login, password and email
+  password behind a reveal, account UID, recovery email, Facebook profile),
+  its live 2FA code with a countdown, and the worker's state, region,
+  session, heartbeat, proxy and build.  The code band lights up while the
+  worker is in a 2FA challenge.  A click on the code copies it.  While
+  "Take control" is on, **Type into browser** sends the code, login or
+  password as keystrokes into the focused field of the remote browser,
+  because a copied value doesn't reach the VNC session.  Copies, reveals and
+  typed secrets go to the pool's activity ledger.  A worker whose login
+  isn't in the pool gets the vault summary and a link to the pool instead.
+  The panel can be hidden, which is saved per user, and it stacks under the
+  browser below 1100px (v1.276.0).
 
 - **Web submissions** — the manager inbox for the public website forms
   (v1.187.0). The ram4cash.com sell form (`POST /api/public/intake`) and the

@@ -590,3 +590,16 @@ export function pinsDiffer(a: Readonly<Record<string, number>>, b: Readonly<Reco
   const ka = Object.keys(a);
   return ka.length !== Object.keys(b).length || ka.some(k => a[k] !== b[k]);
 }
+
+// Keysyms for typing text into a VNC session. Latin-1 keysyms equal their
+// code point; everything else is the Unicode range X11 reserves. Control
+// characters are dropped: a stray Return would submit Facebook's form.
+export function keysymsFor(text: string): number[] {
+  const out: number[] = [];
+  for (const ch of text) {
+    const cp = ch.codePointAt(0)!;
+    if (cp < 0x20 || cp === 0x7f) continue;
+    out.push(cp <= 0xff ? cp : 0x01000000 + cp);
+  }
+  return out;
+}

@@ -7,8 +7,19 @@ import {
   splitHighlights, vaultAccountIdFor, whoIs,
   FLOW_STAGES, STAGE_FORMS, draftChanges, settingsDraft, settingsPatch,
   citiesDiffer, cityOwners, isCitySlug, marketplaceCityUrl, normalizeCitySlug,
-  mergePins, pinsDiffer, searchesPerDay,
+  mergePins, pinsDiffer, searchesPerDay, keysymsFor,
 } from './fleetView';
+
+describe('keysymsFor', () => {
+  it('maps Latin-1 to its code point and the rest to the Unicode keysym range', () => {
+    expect(keysymsFor('a1Z')).toEqual([0x61, 0x31, 0x5a]);
+    expect(keysymsFor('é')).toEqual([0xe9]);
+    expect(keysymsFor('€')).toEqual([0x010020ac]);
+  });
+  it('drops control characters so a pasted line break cannot submit a form', () => {
+    expect(keysymsFor('12\n34\t')).toEqual([0x31, 0x32, 0x33, 0x34]);
+  });
+});
 
 const account = (over: Partial<FleetAccount>): FleetAccount => ({
   worker_id: 'w',

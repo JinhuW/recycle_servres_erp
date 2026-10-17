@@ -12,5 +12,7 @@ declare module '@novnc/novnc' {
     focusOnClick: boolean;
     disconnect(): void;
     focus(): void;
+    // Press and release when `down` is left out. Dropped while viewOnly.
+    sendKey(keysym: number, code: string | null, down?: boolean): void;
   }
 }
