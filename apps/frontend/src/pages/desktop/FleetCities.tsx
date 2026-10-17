@@ -6,7 +6,8 @@ import {
 } from '../../lib/coordinator';
 import { handleFetchError, showSuccessToast } from '../../lib/errorToast';
 import {
-  citiesDiffer, cityOwners, isCitySlug, marketplaceCityUrl, mergePins, normalizeCitySlug, pinsDiffer,
+  applyPinEdits, citiesDiffer, cityOwners, isCitySlug, marketplaceCityUrl, normalizeCitySlug, pinEdits,
+  searchesPerDay, tierSettingsEdits, tierSettingsValid,
 } from '../../lib/fleetView';
 import { useT } from '../../lib/i18n';
 
@@ -67,16 +68,17 @@ function EditCitiesModal({ worker: w, fleet, onClose, onSaved }: {
   const [settings, setSettings] = useState<CityTierSettings | null>(null);
 
   // Without the tiers (an older console or coordinator) the form is the
-  // city list alone, as it was.
+  // city list alone, as it was. Read once per opening: the page's refresh
+  // hands this modal a new `w` and must not reset unsaved edits.
   useEffect(() => {
     coordinatorApi.cityTiers()
       .then(r => {
         setTiers(r);
         setSettings(r.settings);
-        setPins(Object.fromEntries(w.cities.filter(c => c.slug in r.pins).map(c => [c.slug, r.pins[c.slug]])));
+        setPins(r.pins);
       })
       .catch(() => setTiers(null));
-  }, [w.cities]);
+  }, [w.worker_id]);
 
   const has = (s: string) => cities.some(c => c.slug === s);
   const add = (city: CityWrite) => {
@@ -101,25 +103,30 @@ function EditCitiesModal({ worker: w, fleet, onClose, onSaved }: {
   };
 
   const citiesChanged = citiesDiffer(base, cities);
-  const keptPins = Object.fromEntries(Object.entries(pins).filter(([slug]) => has(slug)));
-  const nextPins = tiers
-    ? mergePins(tiers.pins, [...base.map(c => c.slug), ...cities.map(c => c.slug)], keptPins)
-    : null;
-  const pinsChanged = !!tiers && !!nextPins && pinsDiffer(tiers.pins, nextPins);
-  const settingsChanged = !!tiers && !!settings && JSON.stringify(settings) !== JSON.stringify(tiers.settings);
+  // A dropped city's pin goes with it only when no other worker searches it.
+  const dropped = base.filter(c => !has(c.slug) && !owners.has(c.slug)).map(c => c.slug);
+  const formPins = Object.fromEntries(Object.entries(pins).filter(([slug]) => has(slug)));
+  const edits = tiers ? pinEdits(tiers.pins, formPins, [...cities.map(c => c.slug), ...dropped]) : {};
+  const pinsChanged = Object.keys(edits).length > 0;
+  const settingsEdits = tiers && settings ? tierSettingsEdits(tiers.settings, settings) : {};
+  const settingsChanged = Object.keys(settingsEdits).length > 0;
+  const settingsOk = !settings || tierSettingsValid(settings);
   const changed = citiesChanged || pinsChanged || settingsChanged;
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (busy || !changed || cities.length === 0) return;
+    if (busy || !changed || !settingsOk || cities.length === 0) return;
     setBusy(true);
     try {
-      if (citiesChanged) await coordinatorApi.saveCities(w.worker_id, cities);
+      // Tiers first: a refused tier write then leaves nothing half-saved,
+      // and pins for a city not yet in the list are harmless.
       if (pinsChanged || settingsChanged) {
+        const pinMap = pinsChanged ? applyPinEdits((await coordinatorApi.cityTiers()).pins, edits) : null;
         await coordinatorApi.saveCityTiers({
-          ...(pinsChanged && nextPins ? { pins: nextPins } : {}),
-          ...(settingsChanged && settings ? { settings } : {}),
+          ...(pinMap ? { pins: pinMap } : {}),
+          ...(settingsChanged ? { settings: settingsEdits } : {}),
         });
       }
+      if (citiesChanged) await coordinatorApi.saveCities(w.worker_id, cities);
       showSuccessToast(citiesChanged
         ? t('fbcCitiesSaved', { n: cities.length, id: w.worker_id })
         : t('fbcTiersSaved'));
@@ -200,7 +207,7 @@ function EditCitiesModal({ worker: w, fleet, onClose, onSaved }: {
 
           {tiers && settings && (
             <CityFrequency cities={cities} ranked={ranked} tiers={tiers} pins={pins} setPins={setPins}
-              settings={settings} setSettings={setSettings} runs={runs} />
+              settings={settings} setSettings={setSettings} settingsOk={settingsOk} runs={runs} />
           )}
 
           {problem && (
@@ -212,14 +219,14 @@ function EditCitiesModal({ worker: w, fleet, onClose, onSaved }: {
         </div>
         <div className="modal-foot" style={{ justifyContent: 'flex-end' }}>
           <button type="button" className="btn" disabled={busy} onClick={onClose}>{t('cancel')}</button>
-          <button type="submit" className="btn primary" disabled={busy || !changed || cities.length === 0}>{t('save')}</button>
+          <button type="submit" className="btn primary" disabled={busy || !changed || !settingsOk || cities.length === 0}>{t('save')}</button>
         </div>
       </form>
     </Modal>
   );
 }
 
-function CityFrequency({ cities, ranked, tiers, pins, setPins, settings, setSettings, runs }: {
+function CityFrequency({ cities, ranked, tiers, pins, setPins, settings, setSettings, settingsOk, runs }: {
   cities: CityWrite[];
   ranked: Map<string, FleetAccount['cities'][number]>;
   tiers: CityTiers;
@@ -227,6 +234,7 @@ function CityFrequency({ cities, ranked, tiers, pins, setPins, settings, setSett
   setPins: (fn: (p: Record<string, number>) => Record<string, number>) => void;
   settings: CityTierSettings;
   setSettings: (s: CityTierSettings) => void;
+  settingsOk: boolean;
   runs: number | null;
 }) {
   const { t } = useT();
@@ -254,7 +262,7 @@ function CityFrequency({ cities, ranked, tiers, pins, setPins, settings, setSett
       {(!runs || runs < 2) && (
         <div className="card-note" style={{ padding: '8px 10px' }}>
           <Icon name="info" size={14} />
-          <span style={{ fontSize: 12.5 }}>{t('fbcTiersNeedTimes', { n: runs ?? 0 })}</span>
+          <span style={{ fontSize: 12.5 }}>{runs ? t('fbcTiersNeedTimes', { n: runs }) : t('fbcTiersInterval')}</span>
         </div>
       )}
       <table className="table" style={{ width: '100%', fontSize: 12.5 }}>
@@ -262,7 +270,7 @@ function CityFrequency({ cities, ranked, tiers, pins, setPins, settings, setSett
           {cities.map(c => {
             const row = ranked.get(c.slug);
             const score = tiers.scores[c.slug] ?? 0;
-            const auto = row?.per_day !== undefined && !row.pin ? row.per_day : null;
+            const auto = row && !row.pin ? searchesPerDay(row, runs) : null;
             return (
               <tr key={c.slug}>
                 <td>{c.name}</td>
@@ -297,6 +305,7 @@ function CityFrequency({ cities, ranked, tiers, pins, setPins, settings, setSett
             {t('fbcTiersWindow')} {numberBox(settings.window_days, v => num('window_days', v), t('fbcTiersWindow'), 92)}
           </div>
           <span className="muted" style={{ fontSize: 11.5 }}>{t('fbcTiersRuleHint')}</span>
+          {!settingsOk && <span role="alert" style={{ fontSize: 12, color: 'var(--neg)' }}>{t('fbcTiersInvalid')}</span>}
         </div>
       </details>
     </div>

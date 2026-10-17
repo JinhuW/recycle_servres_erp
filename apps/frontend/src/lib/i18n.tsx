@@ -3443,6 +3443,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     fbcTiersPerDay: 'Searches a day',
     fbcTiersWindow: 'Alerts counted over days:',
     fbcTiersRuleHint: 'Each worker’s cities are ranked by alerts sent plus alerts a partner reacted to. A city with no alerts in the window stays at the rest’s count, and no city is searched more than once per start time.',
+    fbcTiersInterval: 'This worker searches on an interval, so every city is searched each round. Busy cities are searched more often once the search settings list two or more start times (e.g. 02:00, 10:00, 18:00) instead.',
+    fbcTiersInvalid: 'The ranking rule can’t be saved: percentages are 0–100 and add up to at most 100, searches a day are 1–6 and don’t grow from the busiest tier to the rest, and alerts are counted over 1–92 days.',
     fbcAttnParked: 'is parked on a {kind}',
     fbcAttnClearIt: 'a person has to clear it in the worker’s browser',
     fbcWatchSub: 'The worker’s live browser',

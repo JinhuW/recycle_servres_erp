@@ -2834,6 +2834,8 @@ const zh: Record<string, string> = {
   fbcTiersPerDay: '每天搜索次数',
   fbcTiersWindow: '统计提醒的天数：',
   fbcTiersRuleHint: '每个节点的城市按已发送提醒数加合作伙伴回应过的提醒数排名。统计期内没有提醒的城市保持“其余”的次数；每个开始时间内同一城市最多搜索一次。',
+  fbcTiersInterval: '该节点按间隔搜索，每一轮都会搜索所有城市。在搜索设置中改为列出两个或更多开始时间（如 02:00、10:00、18:00）后，热门城市才会被更频繁地搜索。',
+  fbcTiersInvalid: '排名规则无法保存：百分比为 0–100 且合计不超过 100，每天搜索次数为 1–6 且从最热门到其余不递增，统计天数为 1–92。',
   fbcAttnParked: '停在 {kind} 验证上',
   fbcAttnClearIt: '需要有人在该节点的浏览器中处理',
   fbcWatchSub: '该节点的实时浏览器',

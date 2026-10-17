@@ -342,7 +342,7 @@ export const coordinatorApi = {
     ),
 
   // How often cities are searched. Pins replace the whole map, so a caller
-  // editing one worker's cities merges into the map it read.
+  // re-reads it just before saving and applies only its own edits.
   cityTiers: () => api.get<CityTiers>('/api/coordinator/city-tiers'),
   saveCityTiers: (body: { settings?: Partial<CityTierSettings>; pins?: Record<string, number> }) =>
     api.put<CityTiers>('/api/coordinator/city-tiers', body),

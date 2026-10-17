@@ -17,6 +17,31 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.274.2] - 2026-10-17
+
+Release review fixes for the Edit cities dialog's search frequency (RS-278).
+As shipped in 1.274.0 the dialog could lose edits and erase pins it did not
+own.
+
+### Fixed
+
+- **Unsaved pins and rule edits survive the page's refresh.** The worker page
+  reloads the fleet every 30 seconds, and each reload reset the dialog's pins
+  and ranking rule to the saved values.
+- **Saving changes only what the form changed.** Pins are read again just
+  before the write and only this form's edits are applied, and the ranking
+  rule sends only the changed fields, so another manager's pins or rule edits
+  made meanwhile are kept. Removing a city another worker still searches no
+  longer erases its pin, and adding a city that is already pinned shows and
+  keeps the pin.
+- **A rule the coordinator would refuse disables Save.** An empty box, a
+  per-day count out of 1–6 or growing toward the rest, or percentages over 100
+  show a note instead of failing on save. Tiers are written before cities, so a
+  refused write no longer leaves the city list saved and the dialog stale.
+- **The Auto option shows what the worker actually does.** It is capped by the
+  worker's start times like the chips, and a worker paced by an interval is
+  told it searches every city each round, not "0 search times a day".
+
 ## [1.274.0] - 2026-10-17
 
 Busy cities are searched more often (RS-277). Until now every city was

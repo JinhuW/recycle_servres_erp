@@ -2,13 +2,13 @@
 id: RS-277
 title: Busy cities searched more often — tiered daily city frequency
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-17
 reporter: jinhu
 branch: feat/fleet-city-tiers
-pr:
-version:
+pr: 700
+version: 1.274.0
 related: [RS-271, RS-275, RS-276]
 ---
 
