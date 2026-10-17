@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-17
+
 ### Added
 
 - **Which cities each worker has searched today** (RS-271), for the ERP's
