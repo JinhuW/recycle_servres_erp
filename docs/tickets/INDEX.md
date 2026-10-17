@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-281](./RS-281-fleet-worker-page-shows-the-proxy-url-exit-ip-and-ci.md) | done | story | P2 | Fleet worker page shows the proxy URL, exit IP and city | 1.278.0 |
 | [RS-280](./RS-280-re-login-starts-within-seconds-and-shows-its-progres.md) | in-progress | story | P2 | Re-login starts within seconds and shows its progress on Watch | 1.277.0 |
 | [RS-279](./RS-279-show-the-worker-s-account-and-live-2fa-code-beside-t.md) | done | story | P2 | Show the worker's account and live 2FA code beside the Watch browser | 1.276.0 |
 | [RS-278](./RS-278-linked-payments-show-the-po-owner-in-the-owner-colum.md) | done | bug | P2 | Linked payments show the PO owner in the Owner column | 1.275.2 |

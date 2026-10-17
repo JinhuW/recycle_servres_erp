@@ -18,6 +18,16 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Added
+
+- **The fleet document says where each worker exits** (RS-281). `/v1/fleet`
+  gives every worker a `proxy`: its proxy URL with the login cut out, and the
+  IP, city, region, country and ISP an IP-geo lookup made *through* that proxy
+  returns (the VM's own, for a worker without one). Only the env-var name used
+  to leave, which said nothing about whether a region's account looks like it
+  is in that region. Lookups are cached and never hold the page; credentials
+  still never leave the console. `proxy_env` stays for older ERPs.
+
 ## [0.9.0] - 2026-10-17
 
 ### Added
