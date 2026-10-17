@@ -111,6 +111,8 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast }: Props) 
       showToast?.(t('fpCopyFailed'), 'error');
     }
   };
+  // Managers read the legend and the table; the rail of tags stays only as the
+  // purchaser's picker, the one way to take a particular account.
   const rack = () => (
     <section className="fp-rack" aria-label={t('fpRack')}>
       <div className="fp-legend">
@@ -129,7 +131,7 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast }: Props) 
           </button>
         ))}
       </div>
-      <div className="fp-rail">
+      {!manager && <div className="fp-rail">
         {accounts.map((a) => {
           const name =
             a.status === 'taken' || a.status === 'fleet'
@@ -144,21 +146,17 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast }: Props) 
               type="button"
               title={title}
               aria-label={title}
-              className={`fp-tag fp-${a.status} ${manager ? (filter !== 'all' && a.status !== filter ? 'fp-dim' : '') : a.status !== 'available' ? 'fp-dim' : ''}`}
-              disabled={!manager && a.status !== 'available'}
-              aria-pressed={
-                !manager
-                  ? chosen?.no === a.no
-                  : editor !== null && editor !== 'new' && editor.no === a.no
-              }
-              onClick={() => (manager ? setEditor(a) : setPicked(a.no))}
+              className={`fp-tag fp-${a.status} ${a.status !== 'available' ? 'fp-dim' : ''}`}
+              disabled={a.status !== 'available'}
+              aria-pressed={chosen?.no === a.no}
+              onClick={() => setPicked(a.no)}
             >
               <span className="fp-number">{a.no}</span>
               <span className="fp-who">{name}</span>
             </button>
           );
         })}
-      </div>
+      </div>}
     </section>
   );
   const visible = accounts.filter(

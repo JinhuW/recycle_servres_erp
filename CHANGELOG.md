@@ -17,6 +17,37 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.263.0] - 2026-10-17
+
+The Facebook Fleet tab redesigned to the Account pool tab's layout, with a
+page per worker and a picture of how a listing becomes an alert (RS-261).
+
+### Changed
+
+- **The Fleet tab reads like the Pool tab.** The KPI tiles, the Needs-a-human
+  card, the two account tables, the phrases and settings cards, the coverage
+  map, the review chart, the prompt card and the clicks placeholder are gone.
+  In their place: a status legend (Live, Stale, Needs attention, Offline) that
+  filters, one workers table that fits without a horizontal scroll, a fold per
+  row with the worker's cities and pacing, and a Recent activity aside the
+  height of the table that scrolls. "Searching" versus "idle" is deliberately
+  not shown: the coordinator stamps the start of a sweep that runs for hours,
+  so it cannot say which a worker is doing now.
+- **From a search to an alert.** A card walks the nine stages a listing goes
+  through, confirmed against the monitor and coordinator code: keyword gates
+  first (on the card, then with the description), the model only on what
+  survives, then the coordinator's dedupe and the Telegram topic. Each stage
+  names its code, shows its settings from `master.toml` and marks what is a
+  code constant; the reviewed and alerted counts are today's. The other
+  stages are not counted anywhere the ERP can read, and say so.
+- **A page per worker**, at `/fleet/worker/<worker>`, opened only from the eye
+  on its row: identity, vault account, session, proxy, cities, pacing and
+  build in the pool's card style, its open checkpoints with Mark resolved, its
+  recent events, and Watch browser, Re-login and Edit credentials. The Watch
+  page's back link returns to it.
+- The manager's Account pool tab drops the key-tag rail; the legend stays.
+  Purchasers keep the rail, which is how they pick a particular account.
+
 ## [1.262.1] - 2026-10-17
 
 The review of the account pool page, applied to the v1.262.0 code (RS-260).

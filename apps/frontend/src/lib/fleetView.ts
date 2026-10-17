@@ -1,6 +1,6 @@
-// Pure helpers behind the Facebook fleet cards: liveness shorthand, the
-// search-box matcher and its highlighter, and the two joins the coverage and
-// accounts cards need (alert hits per city, active searchers per city).
+// Pure helpers behind the Facebook fleet tab: liveness shorthand and the
+// legend's status, the search-box matcher and its highlighter, alert hits per
+// city, the derived activity feed and the pipeline's stages.
 // Kept out of the components so they can be unit-tested without React.
 
 import type { AlertHitRow, Challenge, FleetAccount, FleetDoc } from './coordinator';
@@ -101,19 +101,6 @@ export function hitsByCity(rows: readonly AlertHitRow[]): Map<string, CityHits> 
   return out;
 }
 
-// Which of the given workers list a city — used with the active subset for
-// "searched now" and with the fleet.toml subset for "assigned to".
-export function searchersByCity(workers: readonly FleetAccount[]): Map<string, FleetAccount[]> {
-  const out = new Map<string, FleetAccount[]>();
-  for (const w of workers) {
-    for (const c of w.cities) {
-      const list = out.get(c.slug);
-      if (list) list.push(w); else out.set(c.slug, [w]);
-    }
-  }
-  return out;
-}
-
 // Alerts a worker can be credited with: hits are keyed by search city, so
 // only a worker that has actually reported owns any — an undeployed worker
 // sharing a region would otherwise be credited with the live monitor's.
@@ -154,24 +141,65 @@ export function offersRelogin(w: FleetAccount): boolean {
   return h.state === 'SESSION_EXPIRED' || (h.session_days_left !== null && h.session_days_left <= 0);
 }
 
-// The "Needs a human" list: every open checkpoint, then every flagged worker
-// that is not already there because of one. A checkpoint row borrows its
-// worker's account so it can offer the viewer.
-export type AttentionEntry =
-  | { kind: 'challenge'; challenge: Challenge; account: FleetAccount | null }
-  | { kind: 'worker'; account: FleetAccount };
+// The fleet tab's one status per worker, the legend's buckets. "Searching"
+// versus "idle" is not offered: last_search_at stamps the start of a sweep
+// that runs for hours, so it cannot say whether a worker is mid-sweep now.
+// Attention outranks liveness — a live worker parked on a checkpoint is the
+// one a manager has to act on.
+export type FleetStatus = 'live' | 'stale' | 'attention' | 'offline';
+export const FLEET_STATUSES: readonly FleetStatus[] = ['live', 'stale', 'attention', 'offline'];
 
-export function attentionEntries(fleet: FleetDoc | null, challenges: readonly Challenge[] | null): AttentionEntry[] {
-  const workers = fleet?.workers ?? [];
-  const byId = new Map(workers.map(w => [w.worker_id, w]));
-  const out: AttentionEntry[] = (challenges ?? []).map(ch => ({
-    kind: 'challenge', challenge: ch, account: byId.get(ch.worker_id) ?? null,
-  }));
-  const parked = new Set((challenges ?? []).map(ch => ch.worker_id));
-  for (const w of workers) {
-    if (needsAttention(w) && !parked.has(w.worker_id)) out.push({ kind: 'worker', account: w });
+export function fleetStatus(w: FleetAccount, parked: ReadonlySet<string>): FleetStatus {
+  const lv = liveness(w);
+  if (lv === 'dead' || lv === 'unknown' || lv === 'none' || w.health?.state === 'DEAD') return 'offline';
+  if (parked.has(w.worker_id) || needsAttention(w) || (w.health?.state && w.health.state !== 'HEALTHY')) return 'attention';
+  return lv === 'stale' ? 'stale' : 'live';
+}
+
+// Workers with an open checkpoint, by id.
+export const parkedWorkers = (challenges: readonly Challenge[] | null): Set<string> =>
+  new Set((challenges ?? []).map(ch => ch.worker_id));
+
+// The Recent activity feed. The coordinator keeps no event log the ERP can
+// read, so it is rebuilt from the timestamps it does serve: each worker's
+// latest search, listing and session backup, the moment a dead worker last
+// reported, and every open checkpoint.
+export type FleetEventKind = 'search' | 'listing' | 'backup' | 'silent' | 'checkpoint';
+export type FleetEvent = { at: string; workerId: string; kind: FleetEventKind; detail?: string };
+
+export function fleetActivity(fleet: FleetDoc | null, challenges: readonly Challenge[] | null): FleetEvent[] {
+  const out: FleetEvent[] = [];
+  for (const w of fleet?.workers ?? []) {
+    const h = w.health;
+    if (h?.last_search_at) out.push({ at: h.last_search_at, workerId: w.worker_id, kind: 'search' });
+    if (h?.last_listing_at) out.push({ at: h.last_listing_at, workerId: w.worker_id, kind: 'listing' });
+    if (w.session?.backed_up_at) out.push({ at: w.session.backed_up_at, workerId: w.worker_id, kind: 'backup' });
+    if (h?.liveness === 'dead' && h.last_heartbeat_at) out.push({ at: h.last_heartbeat_at, workerId: w.worker_id, kind: 'silent' });
   }
-  return out;
+  for (const ch of challenges ?? []) {
+    out.push({ at: ch.created_at, workerId: ch.worker_id, kind: 'checkpoint', detail: ch.kind });
+  }
+  return out.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+}
+
+// The pipeline a listing goes through, in the order the monitor and the
+// coordinator run it: facebook.py search() → get_listings() → check_listing()
+// on the card, the page visit, check_listing() with the description;
+// monitor.py's already-notified skip and evaluate_by_ai(); the coordinator's
+// dedupe by item id; the Telegram alert.
+export type FlowStage = 'search' | 'cards' | 'title' | 'open' | 'keywords' | 'fresh' | 'ai' | 'coordinator' | 'alert';
+export const FLOW_STAGES: readonly FlowStage[] = ['search', 'cards', 'title', 'open', 'keywords', 'fresh', 'ai', 'coordinator', 'alert'];
+
+// What the coordinator counts today. Only two stages are counted anywhere the
+// ERP can read: fresh model verdicts and delivered alerts. The rest are worker
+// events that stay in OpenSearch, so they have no number here.
+export function flowCounts(
+  days: ReadonlyArray<{ day: string; reviewed: number; alerted: number }> | null,
+  now: number = Date.now(),
+): Partial<Record<FlowStage, number>> {
+  if (!days) return {};
+  const r = reviewedToday(days, now);
+  return { ai: r.today, alert: r.alertedToday };
 }
 
 // Listings reviewed on the current UTC day (the coordinator buckets in UTC),
