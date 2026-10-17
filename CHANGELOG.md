@@ -17,6 +17,17 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.281.0] - 2026-10-17
+
+The Fleet workers table under **Monitors ▸ Facebook** sorts by column
+(RS-285). Worker, Status, Today, Searches, Session and Posts each cycle
+descending → ascending → the fleet's own order, and the choice holds while
+you move between tabs. Workers with no value for the column — undeployed, or
+on a monitor that does not count — stay at the bottom in both directions, so
+flipping the order never fills the top with dashes. Today sorts by last
+heartbeat, the time its tooltip shows. The sortable header Orders already
+used moved to a shared component.
+
 ## [1.280.0] - 2026-10-17
 
 ### Added

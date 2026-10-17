@@ -4,7 +4,7 @@ import {
   accountAlerts, accountHaystack, attentionReason, browserLabel, canWatch, dayStrip, fleetPostsToday,
   externalVncUrl, fleetActivity, fleetStatus, flowCounts, hitsByCity, isUnstampedBuild, parkedWorkers, reloginIsAutomatic, reloginProgress,
   matchesTerms, offersRelogin, queryTerms, reviewedToday, searchedToday,
-  splitHighlights, vaultAccountIdFor, whoIs,
+  sortFleet, splitHighlights, vaultAccountIdFor, whoIs,
   FLOW_STAGES, STAGE_FORMS, draftChanges, settingsDraft, settingsPatch,
   citiesDiffer, cityOwners, isCitySlug, marketplaceCityUrl, normalizeCitySlug,
   mergePins, pinsDiffer, searchesPerDay, keysymsFor,
@@ -458,5 +458,31 @@ describe('dayStrip', () => {
     expect(searchedToday(denver({ today: today({}) }), 'live')('denver')).toBe(true);
     expect(searchedToday(denver({ today: today({ cities: null }) }), 'stale')('denver')).toBe(true);
     expect(searchedToday(account({}), 'offline')('denver')).toBe(false);
+  });
+});
+
+describe('sortFleet', () => {
+  const posts = (worker_id: string, n: number | null) => account({
+    worker_id,
+    today: n === null ? null : { day: '2026-10-17', first_at: null, last_at: null, cycles: 0, searches: 0, posts: n, alerts: 0 },
+  });
+  const ids = (ws: FleetAccount[]) => ws.map(w => w.worker_id);
+  const none = new Set<string>();
+
+  it('keeps unknowns last in both directions', () => {
+    const ws = [posts('a', 3), posts('b', null), posts('c', 9), posts('d', 0)];
+    expect(ids(sortFleet(ws, 'posts', 'desc', none))).toEqual(['c', 'a', 'd', 'b']);
+    expect(ids(sortFleet(ws, 'posts', 'asc', none))).toEqual(['d', 'a', 'c', 'b']);
+  });
+
+  it('sorts workers by login, then id, case-insensitively', () => {
+    const ws = [account({ worker_id: 'Zed' }), account({ worker_id: 'alpha' }), account({ worker_id: 'Mid' })];
+    expect(ids(sortFleet(ws, 'worker', 'asc', none))).toEqual(['alpha', 'Mid', 'Zed']);
+  });
+
+  it('sorts status in legend order, a parked worker as attention', () => {
+    const live = { liveness: 'live', state: 'HEALTHY' } as never;
+    const ws = [account({ worker_id: 'off' }), account({ worker_id: 'parked', health: live }), account({ worker_id: 'ok', health: live })];
+    expect(ids(sortFleet(ws, 'status', 'asc', new Set(['parked'])))).toEqual(['ok', 'parked', 'off']);
   });
 });
