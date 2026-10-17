@@ -39,7 +39,7 @@ export function statusNote(t: Translate, w: FleetAccount, parked: ReadonlySet<st
   if (r.kind === 'dead') return t('fbcNoteSilent', { age: r.since ? relTime(r.since, locale) : t('fbcNever') });
   if (r.kind === 'state') return stateLabel(t, r.state);
   if (r.kind === 'expired') return t('fbcSessionExpired');
-  if (h.session_days_left !== null && h.session_days_left <= 7) return t('fbcNoteExpiring', { days: fmtDays(t, h.session_days_left) });
+  if (r.kind === 'expiring') return t('fbcNoteExpiring', { days: fmtDays(t, r.days) });
   return null;
 }
 

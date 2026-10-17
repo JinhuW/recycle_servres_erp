@@ -8,10 +8,12 @@ const fake = vi.hoisted(() => ({
   mailbox: {} as unknown,
   fetchOne: undefined as unknown,
   search: [] as unknown,
+  options: null as null | Record<string, unknown>,
 }));
 
 vi.mock('imapflow', () => ({
   ImapFlow: class {
+    constructor(options: Record<string, unknown>) { fake.options = options; }
     on() {}
     get usable() { return fake.usable; }
     get mailbox() { return fake.mailbox; }
@@ -25,7 +27,9 @@ const { mailConfig } = await import('../src/mail');
 const { testEnv } = await import('./helpers/app');
 
 describe('imapClient', () => {
-  const client = () => imapClient(mailConfig({ ...testEnv, MAIL_USER: 'sales@recycleservers.com', MAIL_PASSWORD: 'pw' })!);
+  const client = (port?: string) => imapClient(mailConfig({
+    ...testEnv, MAIL_USER: 'sales@recycleservers.com', MAIL_PASSWORD: 'pw', MAIL_IMAP_PORT: port,
+  })!);
   beforeEach(() => {
     Object.assign(fake, { usable: true, mailbox: {}, fetchOne: undefined, search: [] });
   });
@@ -48,5 +52,12 @@ describe('imapClient', () => {
     await expect(client().uidsAfter(3)).rejects.toThrow(/SEARCH failed/);
     fake.search = [9, 4, 3];
     expect(await client().uidsAfter(3)).toEqual([4, 9]);
+  });
+
+  it('uses implicit TLS on 993 and requires STARTTLS on any other port', () => {
+    client();
+    expect(fake.options).toMatchObject({ port: 993, secure: true, doSTARTTLS: false });
+    client('143');
+    expect(fake.options).toMatchObject({ port: 143, secure: false, doSTARTTLS: true });
   });
 });

@@ -17,7 +17,7 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
-## [1.275.1] - 2026-10-17
+## [1.275.2] - 2026-10-17
 
 Release review fixes for the Edit cities dialog's search frequency and the
 worker page's Assign account (RS-278). As shipped in 1.274.0 the cities dialog
@@ -53,6 +53,24 @@ could lose edits and erase pins it did not own.
   account on the worker at the moment of the swap is moved, not only the one
   read first. The picker names a mismatched or unreadable cookie instead of
   "no cookie".
+
+## [1.275.1] - 2026-10-17
+
+Hardening left over from the v1.209 release review (RS-176).
+
+### Fixed
+
+- **IMAP never logs in without TLS.** On any port but 993 the inbox poller now
+  requires STARTTLS. Before, `MAIL_IMAP_PORT=143` against a server that didn't
+  offer it (or a network that stripped it) sent the mailbox password in clear.
+- **Shutdown no longer hangs on a sleeping VNC viewer.** A viewer that never
+  answers the close frame is cut 2 seconds later, so `server.close()` returns
+  inside the drain window and the database pool is closed instead of the
+  process exiting on the hard deadline.
+- **One session-expiry threshold for the fleet.** A worker's attention reason
+  only reads "expiring" within 7 days of its session lapsing; the fleet table
+  and worker page take that limit from the same constant.
+
 ## [1.275.0] - 2026-10-17
 
 A worker's Facebook login now comes from the account pool on the worker page
