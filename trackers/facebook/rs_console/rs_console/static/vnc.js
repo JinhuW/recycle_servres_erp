@@ -10,7 +10,7 @@
 
 import RFB from '/static/novnc/core/rfb.js';
 
-const TOKEN_KEY = 'rs-console-token';
+const TOKEN_KEY = 'rs-console-token'; // pragma: allowlist secret
 
 const $ = (sel) => document.querySelector(sel);
 

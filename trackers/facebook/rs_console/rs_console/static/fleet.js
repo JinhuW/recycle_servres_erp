@@ -13,7 +13,7 @@
 const REFRESH_MS = 30_000;
 const STATS_DAYS = 14;
 const HITS_DAYS = 7;
-const TOKEN_KEY = 'rs-console-token';
+const TOKEN_KEY = 'rs-console-token'; // pragma: allowlist secret
 
 // ── State ──────────────────────────────────────────────────────────────────────
 
