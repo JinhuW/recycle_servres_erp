@@ -394,7 +394,7 @@ export function pathToDesktopView(path: string): DesktopViewId {
   if (path === '/payments/internal') return 'internaltx';
   if (path === '/payments' || match('/payments/po/:id', path) || match('/payments/so/:id', path)) return 'payments';
   if (path === '/tracker') return 'tracker';
-  if (path === '/fleet' || path === '/fleet/pool' || matchFleetWatch(path)) return 'coordinator';
+  if (path === '/fleet' || path === '/fleet/pool' || matchFleetWatch(path) || matchFleetWorker(path)) return 'coordinator';
   if (path === '/settings') return 'settings';
   return 'dashboard';
 }
@@ -418,6 +418,17 @@ export function fleetWatchPath(workerId: string): string {
 
 export function matchFleetWatch(path: string): { workerId: string } | null {
   const m = match('/fleet/watch/:workerId', path);
+  return m?.workerId ? { workerId: m.workerId } : null;
+}
+
+// One Facebook worker's page: its account, session, cities and the actions
+// that change it. The fleet list only shows and folds; every edit lives here.
+export function fleetWorkerPath(workerId: string): string {
+  return `/fleet/worker/${encodeURIComponent(workerId)}`;
+}
+
+export function matchFleetWorker(path: string): { workerId: string } | null {
+  const m = match('/fleet/worker/:workerId', path);
   return m?.workerId ? { workerId: m.workerId } : null;
 }
 

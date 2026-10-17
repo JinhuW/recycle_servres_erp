@@ -2074,36 +2074,44 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
 - **Tracker** — admin page and API proxy for the Reddit listing monitor, with a
   fleet status filter and infinite scroll (v1.64.0, v1.65.0).  In the sidebar
   it is **Monitors ▸ Reddit** (v1.207.0).
-- **Coordinator** — Facebook tracker page with live fleet, review stats and a
-  filter prompt (v1.83.1), reached from **Monitors ▸ Facebook** in the sidebar
-  (v1.207.0).  The fleet view shows one row per Facebook account
-  (liveness, state, session days left, last search, heartbeat, the week's
-  alerts from its cities, the vault login and Facebook user id, expandable to
-  cities, secrets by name, browser identity, backup age, proxy, session file
-  and pacing), the literal search phrases per item with their title gate and
-  reject rules, the shared search settings, a coverage map of every centre
-  lit by whichever worker searches it now, and each worker's build; one
-  search box filters accounts, cities and phrases at once.  The data is the
-  rs-console facade's `/v1/fleet` document through the manager-only
-  `/api/coordinator` proxy — until that facade is deployed the cards read
-  "fleet view unavailable" and the rest of the page works (v1.140.0).
-  A **Needs a human** card leads the live part of the page: open checkpoints
-  (capture, Watch, Mark resolved) and every account the control plane flags,
-  with why — stopped reporting, a non-healthy state, a session expired or
-  expiring — plus **Re-login** where the session is the problem.  An
-  **Account information** table lists each account's Facebook identity,
-  proxy, stored secrets, browser and backup age, and the fourth KPI is
-  listings reviewed today, matching the console (v1.204.0).  Each row of
-  that table has **Credentials → Edit**: a form that sets the worker's
-  Facebook login, password, 2FA (TOTP) secret and whether password login is
-  allowed — the credentials Re-login then signs in with.  Secrets are
-  write-only (the form shows only whether one is stored; blank keeps it,
-  "clear" removes it), a worker without a vault account gets one named after
-  it, and the form says before saving whether Re-login will finish by itself
-  or still needs the login finished in Watch (v1.259.0).
+- **Coordinator** — the Facebook fleet, reached from **Monitors ▸ Facebook**
+  in the sidebar (v1.207.0), managers only. Since v1.263.0 the Fleet tab
+  shares the Account pool tab's chrome: a status legend (Live, Stale, Needs
+  attention, Offline) whose counts filter the table; a workers table that
+  fits beside a **Recent activity** aside of the same height (latest sweeps,
+  listings, session backups, workers gone silent and open checkpoints, rebuilt
+  from the timestamps the coordinator serves) — login, region, status with
+  its reason, last search and heartbeat, session days left and the week's
+  alerts, with a fold per row for the worker's cities (each with its alerts)
+  and pacing; and a **From a search to an alert** card that walks the
+  pipeline as the code runs it — search, result cards, the title gate before
+  any page is opened, the cached page visit, the keyword gate with the
+  description, the already-notified skip, the AI rating with its unit and
+  score gates, the coordinator's dedupe and the Telegram topic — with each
+  stage's code, its settings from `master.toml` (read-only; code constants
+  are marked as such), the item phrases, keyword rules and prompt, and a
+  count where the coordinator keeps one (reviewed and alerted today). The eye
+  on a row is the one way to a worker's page, `/fleet/worker/<worker>`: its
+  Facebook login and user id, vault account and stored secrets by name,
+  session expiry, browser and backup, proxy, cities, pacing, session file and
+  build, its open checkpoints (capture, Watch, Mark resolved) and its recent
+  events, and the actions — **Watch browser**, **Re-login** and **Edit
+  credentials**. The credentials form sets the worker's Facebook login,
+  password, 2FA (TOTP) secret and whether password login is allowed, the
+  credentials Re-login then signs in with; secrets are write-only (the form
+  shows only whether one is stored; blank keeps it, "clear" removes it), a
+  worker without a vault account gets one named after it, and the form says
+  before saving whether Re-login will finish by itself or still needs the
+  login finished in Watch (v1.259.0). The data is the rs-console facade's
+  `/v1/fleet` document, checkpoints, review stats, alert hits and prompt
+  through the manager-only `/api/coordinator` proxy; without the proxy's
+  credentials the tab says so and the rest of the ERP is unaffected
+  (v1.140.0). Editing cities, pacing, stages and the model from the ERP is
+  not built yet: nothing writes `master.toml` from here (RS-261).
 - **Facebook account pool** — a second tab at **Monitors ▸ Facebook**,
-  linked directly at `/#/fleet/pool` (v1.261.0). Managers see a numbered key-tag
-  rack with counts/status filters, a searchable account table, supplier-row
+  linked directly at `/#/fleet/pool` (v1.261.0). Managers see a status legend
+  with counts that filters (the key-tag rail left the manager's view in
+  v1.263.0; purchasers still pick from it), a searchable account table, supplier-row
   import with duplicate/credential checks, an editor, retirement/removal,
   cookie freshness and UID checks, and recent activity. Purchasers see the pool
   instead of the Fleet controls: take up to two accounts, reveal/copy their
@@ -2137,7 +2145,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   manager's session every minute.  A manager who is signed out, deactivated
   or demoted loses the view within a minute.  When the access token behind
   the socket runs out, the viewer reconnects on its own with a fresh one and
-  keeps control if it had it (v1.209.1).
+  keeps control if it had it (v1.209.1).  It is opened from the worker's page,
+  and its back link returns there (v1.263.0).
 
 - **Web submissions** — the manager inbox for the public website forms
   (v1.187.0). The ram4cash.com sell form (`POST /api/public/intake`) and the

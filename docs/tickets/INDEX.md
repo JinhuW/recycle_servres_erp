@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-261](./RS-261-facebook-fleet-tab-redesign-to-the-pool-s-layout-wor.md) | in-progress | story | P2 | Facebook fleet tab: redesign to the pool's layout, worker pages | — |
 | [RS-260](./RS-260-facebook-account-pool-review-fixes-for-the-pool-page.md) | done | bug | P2 | Facebook account pool: review fixes for the pool page | 1.262.1 |
 | [RS-259](./RS-259-facebook-account-pool-backend-store-for-the-pool-ui.md) | done | story | P2 | Facebook account pool: backend store for the pool UI | 1.262.0 |
 | [RS-258](./RS-258-facebook-deploy-must-not-delete-vm-only-files-or-pus.md) | done | bug | P2 | Facebook deploy must not delete VM-only files or push dev-only logins | n/a — trackers/facebook [Unreleased] |
