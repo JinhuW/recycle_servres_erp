@@ -17,7 +17,7 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
-## [1.274.1] - 2026-10-17
+## [1.275.1] - 2026-10-17
 
 Hardening left over from the v1.209 release review (RS-176).
 
@@ -33,6 +33,27 @@ Hardening left over from the v1.209 release review (RS-176).
 - **One session-expiry threshold for the fleet.** A worker's attention reason
   only reads "expiring" within 7 days of its session lapsing; the fleet table
   and worker page take that limit from the same constant.
+
+## [1.275.0] - 2026-10-17
+
+A worker's Facebook login now comes from the account pool on the worker page
+too, so nobody types a password into the ERP any more (RS-276).
+
+### Changed
+
+- **Edit credentials is now Assign account.** The worker page's dialog lists
+  the pool's available accounts that have a password, searchable by #, UID,
+  e-mail or batch, and assigning one goes through the same
+  `POST /api/facebook-pool/:no/assign` the pool page uses: vault written,
+  Re-login queued, account marked Fleet. The typed login, password and 2FA
+  fields are gone, so the pool and the vault can no longer drift apart.
+- **Swapping a worker's account is one step.** `/assign` takes an optional
+  `previous` — `available`, `problem` or `retired` — and moves the account
+  the worker held there in the same transaction that marks the new one; a
+  Problem account keeps naming the worker it failed on. The dialog asks every
+  time, with no default, because a broken account and a routine rotation end
+  in different places. Without `previous` the route still refuses a worker
+  that holds another account, so the pool page behaves as before.
 
 ## [1.274.0] - 2026-10-17
 

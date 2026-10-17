@@ -413,15 +413,30 @@ pool.put('/:no', async (c) => {
 // server to server; the answer is the pool, which a manager already reads.
 // The cookie stays behind: replayed from the worker's IP it would be a
 // location change on a live session, the signal that gets accounts revoked.
+// A worker that already holds another account keeps it unless the caller says
+// where it goes (`previous`); there is no default, because "it broke" and
+// "we're rotating" end in different places.
+const PREVIOUS_FATES = ['available', 'problem', 'retired'] as const;
+type PreviousFate = (typeof PREVIOUS_FATES)[number];
+const PREVIOUS_EVENT: Record<PreviousFate, FbPoolEventKind> = {
+  available: 'returned',
+  problem: 'reported',
+  retired: 'retired',
+};
+
 pool.post('/:no/assign', async (c) => {
   const no = parseNo(c.req.param('no'));
   if (no === null) return c.json({ error: 'Not found' }, 404);
-  const body = (await c.req.json().catch(() => null)) as { worker?: unknown; account?: unknown } | null;
+  const body = (await c.req.json().catch(() => null)) as
+    { worker?: unknown; account?: unknown; previous?: unknown } | null;
   const worker = body?.worker;
   if (typeof worker !== 'string' || !WORKER_ID.test(worker)) return c.json({ error: 'Not a valid worker id' }, 400);
   // The vault account the worker already signs in with, else one named after it.
   const account = body?.account ?? worker;
   if (typeof account !== 'string' || !ACCOUNT_ID.test(account)) return c.json({ error: 'Not a valid account id' }, 400);
+  const previous = body?.previous ?? null;
+  if (previous !== null && !PREVIOUS_FATES.includes(previous as PreviousFate))
+    return c.json({ error: 'Unknown previous status' }, 400);
 
   const sql = getDb(c.env);
   const user = c.var.user;
@@ -429,10 +444,11 @@ pool.post('/:no/assign', async (c) => {
   const [row] = await sql<Row[]>`SELECT * FROM fb_pool_accounts WHERE no = ${no}`;
   if (!row) return c.json({ error: 'Not found' }, 404);
   if (row.status === 'retired') return c.json({ error: 'This account is retired', code: 'fpAssignRetired' }, 409);
-  const [other] = await sql<{ no: number }[]>`
+  const held = await sql<{ no: number }[]>`
     SELECT no FROM fb_pool_accounts
     WHERE status = 'fleet' AND lower(holder_name) = lower(${worker}) AND no <> ${no}`;
-  if (other) return c.json({ error: `#${other.no} is already on ${worker}`, code: 'fpWorkerTaken' }, 409);
+  if (held.length && previous === null)
+    return c.json({ error: `#${held[0].no} is already on ${worker}`, code: 'fpWorkerTaken' }, 409);
   const password = unsealOrEmpty(row.password_enc, key);
   if (!password) return c.json({ error: 'This account has no password to sign in with', code: 'fpNoPassword' }, 409);
 
@@ -464,6 +480,21 @@ pool.post('/:no/assign', async (c) => {
         updated_at = NOW()
       WHERE no = ${no}`;
     await writeEvent(tx, user, 'assigned', 'fleet', no, worker);
+    if (!held.length) return;
+    const fate = previous as PreviousFate;
+    // Re-checked under the lock: only what is still on this worker moves.
+    // A problem account keeps the worker as holder, naming where it failed.
+    const moved = await tx<{ no: number }[]>`
+      UPDATE fb_pool_accounts SET
+        status = ${fate}, holder_user_id = NULL,
+        holder_name = ${fate === 'problem' ? tx`holder_name` : null},
+        held_since = ${fate === 'problem' ? tx`held_since` : null},
+        updated_at = NOW()
+      WHERE no IN ${tx(held.map((h) => h.no))} AND status = 'fleet' AND lower(holder_name) = lower(${worker})
+      RETURNING no`;
+    for (const m of moved) {
+      await writeEvent(tx, user, PREVIOUS_EVENT[fate], fate, m.no, `replaced by #${no} on ${worker}`);
+    }
   });
   return c.json(await snapshot(sql, key, user));
 });

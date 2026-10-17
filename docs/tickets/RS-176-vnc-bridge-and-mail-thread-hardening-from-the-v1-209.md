@@ -8,7 +8,7 @@ created: 2026-10-04
 reporter: Jinhu
 branch: claude/project-thread-plu2yn
 pr: 703
-version: 1.274.1
+version: 1.275.1
 related: [RS-175, RS-164, RS-161]
 ---
 
