@@ -2185,8 +2185,10 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   picked from the fleet in the editor (picking one is what makes an account
   Fleet; None returns it to Available), the table links the holder to the
   worker's page and shows the worker's Live / Stale / Attention / Offline
-  status in place of Fleet, and a click on a masked password in the table
-  reveals it (logged). A cookie may be
+  status in place of Fleet. Since v1.279.0 a click on any value in the
+  table — UID, password, 2FA code, e-mail, e-mail password, recovery, cookie,
+  notes — copies it (secrets are logged), masked passwords reveal from the eye
+  beside them, and the editor opens from the pencil at the row's end. A cookie may be
   pasted as a header line or as the JSON a cookie extension exports, and a
   2FA key as the base32 key or an `otpauth://` link, on the Pool tab as on
   the Fleet tab (v1.262.1). Since v1.272.0 the pick does more than label the
