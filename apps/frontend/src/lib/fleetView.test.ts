@@ -282,13 +282,15 @@ describe('stage settings forms', () => {
     expect(settingsPatch('ai', settingsDraft(doc, null), false).search).toEqual({ rating: 4, min_unit_count: 5 });
   });
 
-  it('counts settings changed and list entries added or removed, not reordering', () => {
+  it('counts settings changed, list entries added or removed, and a reorder', () => {
     const base = settingsDraft(doc, prompt);
     expect(draftChanges(base, base)).toBe(0);
     const d = { ...base, rating: '3', items: { server_ram: { ...base.items.server_ram, antikeywords: 'hdd\nusb' } } };
     expect(draftChanges(base, d)).toBe(3);
     const swapped = { ...base, items: { server_ram: { ...base.items.server_ram, keywords: 'ram OR ddr4\n' } } };
     expect(draftChanges(base, swapped)).toBe(0);
+    const reordered = { ...d, items: { server_ram: { ...d.items.server_ram, antikeywords: 'usb\nhdd' } } };
+    expect(draftChanges(d, reordered)).toBe(1);
   });
 
   it('offers a form exactly on the stages that read a setting', () => {
@@ -348,9 +350,12 @@ describe('dayStrip', () => {
     expect(fleetPostsToday([account({})])).toBeNull();
   });
 
-  it('knows the cities searched today, and none without a report', () => {
-    expect([...searchedToday(denver({ today: today({ cities: ['denver', 'boulder'] }) }))]).toEqual(['denver', 'boulder']);
-    expect(searchedToday(denver({ today: today({}) })).size).toBe(0);
-    expect(searchedToday(account({})).size).toBe(0);
+  it('knows the cities searched today, and falls back to liveness without a report', () => {
+    const searched = searchedToday(denver({ today: today({ cities: ['denver'] }) }), 'live');
+    expect([searched('denver'), searched('boulder')]).toEqual([true, false]);
+    expect(searchedToday(denver({ today: today({ cities: [] }) }), 'live')('denver')).toBe(false);
+    expect(searchedToday(denver({ today: today({}) }), 'live')('denver')).toBe(true);
+    expect(searchedToday(denver({ today: today({ cities: null }) }), 'stale')('denver')).toBe(true);
+    expect(searchedToday(account({}), 'offline')('denver')).toBe(false);
   });
 });

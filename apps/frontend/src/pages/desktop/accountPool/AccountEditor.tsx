@@ -52,6 +52,12 @@ export function AccountEditor({
   const workerId = draft.status === 'fleet' ? draft.holder : null;
   const worker = workers?.find((w) => w.worker_id === workerId);
   const holderStatuses = workers ? ['taken', 'problem'] : ['taken', 'fleet', 'problem'];
+  // A worker runs one login: one held elsewhere is shown but not offered.
+  const heldBy = new Map(
+    accounts
+      .filter((a) => a.status === 'fleet' && a.holder && a.no !== account?.no)
+      .map((a) => [a.holder as string, a.no]),
+  );
   const field = (
     name: keyof PoolDraft,
     label: string,
@@ -182,11 +188,16 @@ export function AccountEditor({
                   {workerId && !worker && (
                     <option value={workerId}>{t('fpWorkerMissing', { id: workerId })}</option>
                   )}
-                  {workers.map((w) => (
-                    <option key={w.worker_id} value={w.worker_id}>
-                      {w.worker_id} · {whoIs(w).login ?? w.region.name}
-                    </option>
-                  ))}
+                  {workers.map((w) => {
+                    const no = heldBy.get(w.worker_id);
+                    return (
+                      <option key={w.worker_id} value={w.worker_id} disabled={no !== undefined}>
+                        {no !== undefined
+                          ? t('fpWorkerHeld', { id: w.worker_id, no })
+                          : `${w.worker_id} · ${whoIs(w).login ?? w.region.name}`}
+                      </option>
+                    );
+                  })}
                 </select>
                 <small>{t('fpWorkerHelp')}</small>
               </label>
@@ -226,7 +237,7 @@ export function AccountEditor({
                   disabled={!holderStatuses.includes(draft.status)}
                   onChange={(e) => setDraft((d) => ({ ...d, holder: e.target.value }))}
                 />
-                <small>{t('fpHolderHelp')}</small>
+                <small>{t(draft.status === 'fleet' ? 'fpHolderWorkerHelp' : 'fpHolderHelp')}</small>
               </label>
             )}
           </div>

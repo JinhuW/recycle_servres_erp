@@ -3,7 +3,7 @@ import { Icon } from '../../components/Icon';
 import type { FlowStage, ItemField } from '../../lib/fleetView';
 import { useT } from '../../lib/i18n';
 import {
-  MIN_TITLE_WORDS, checkListing, duplicateTerms, formatRule, formatTerm, ruleLines, ruleShape, splitEntry,
+  MIN_TITLE_WORDS, addToGroup, checkListing, duplicateTerms, formatRule, ruleLines, ruleShape, splitEntry,
   termKey, type ListingVerdict, type RuleHit,
 } from '../../lib/keywordRules';
 
@@ -108,9 +108,8 @@ function RuleList({ field, stage, value, editing, hit, onChange }: {
     replace(i, shape.kind === 'terms' ? formatRule(shape.raw.filter((_, j) => j !== k)) || null : null);
   };
   const addTo = (i: number, raw: string) => {
-    const shape = ruleShape(rules[i]);
-    const terms = splitEntry(raw.replace(/\n/g, ','));
-    if (shape.kind === 'terms' && terms.length) replace(i, formatRule([...shape.raw, ...terms.map(formatTerm)]));
+    const next = addToGroup(rules[i], raw);
+    if (next) replace(i, next);
   };
   const commit = (raw: string) => {
     const added = plain ? raw.split(/[\n,]/).map(s => s.trim()).filter(Boolean) : splitEntry(raw);
@@ -241,6 +240,12 @@ function RuleList({ field, stage, value, editing, hit, onChange }: {
 }
 
 /** A listing title (and description) checked against every item, live. */
+// The tester sits inside the stage's settings form: Enter in it must not
+// submit, which would save the draft to every worker and start a sweep.
+const keepForm = (e: KeyboardEvent<HTMLInputElement>) => {
+  if (e.key === 'Enter') e.preventDefault();
+};
+
 export function ListingTester({ stage, probe, onProbe, verdicts, onPick, editing }: {
   stage: FlowStage;
   probe: Probe;
@@ -265,10 +270,10 @@ export function ListingTester({ stage, probe, onProbe, verdicts, onPick, editing
         {editing && <span className="ff-try-draft"> · {t('fbcTryDraft')}</span>}
       </span>
       <input className="input" value={probe.title} spellCheck={false} placeholder={t('fbcTryTitlePh')}
-        aria-label={t('fbcTryTitlePh')} onChange={e => onProbe({ ...probe, title: e.target.value })} />
+        aria-label={t('fbcTryTitlePh')} onKeyDown={keepForm} onChange={e => onProbe({ ...probe, title: e.target.value })} />
       {stage === 'keywords' && (
         <input className="input" value={probe.description} spellCheck={false} placeholder={t('fbcTryDescPh')}
-          aria-label={t('fbcTryDescPh')} onChange={e => onProbe({ ...probe, description: e.target.value })} />
+          aria-label={t('fbcTryDescPh')} onKeyDown={keepForm} onChange={e => onProbe({ ...probe, description: e.target.value })} />
       )}
       {verdicts && (
         <ul className="ff-try-out">

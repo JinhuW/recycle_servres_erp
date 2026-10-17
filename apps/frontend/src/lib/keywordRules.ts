@@ -106,7 +106,21 @@ export function ruleMatches(rule: string, text: string): boolean {
  */
 export type RuleShape = { kind: 'terms'; terms: string[]; raw: string[] } | { kind: 'expr' };
 
+// The flow card re-reads every rule on each render, hidden stages included,
+// and a list holds the same few dozen strings between edits.
+const shapes = new Map<string, RuleShape>();
+
 export function ruleShape(rule: string): RuleShape {
+  let shape = shapes.get(rule);
+  if (!shape) {
+    if (shapes.size > 500) shapes.clear();
+    shape = readShape(rule);
+    shapes.set(rule, shape);
+  }
+  return shape;
+}
+
+function readShape(rule: string): RuleShape {
   const text = rule.trim();
   if (parseExpr(text) === null) return { kind: 'terms', terms: [text], raw: [text] };
   const toks = tokenize(text) ?? [];
@@ -138,6 +152,20 @@ export function formatRule(operands: readonly string[]): string {
   return e === null || typeof e === 'string' ? ts[0] : formatTerm(ts[0]);
 }
 
+/**
+ * A group with typed terms appended, or null when `rule` is not a group. A
+ * chunk already written as operands (`"solid state"`, `a OR b`) keeps them;
+ * quoting it again would search for the quote characters.
+ */
+export function addToGroup(rule: string, raw: string): string | null {
+  const shape = ruleShape(rule);
+  const added = splitEntry(raw.replace(/\n/g, ',')).flatMap(term => {
+    const own = parseExpr(term) === null ? null : ruleShape(term);
+    return own?.kind === 'terms' ? own.raw : [formatTerm(term)];
+  });
+  return shape.kind === 'terms' && added.length ? formatRule([...shape.raw, ...added]) : null;
+}
+
 /** The draft's newline-joined list as its entries, as the save sends them. */
 export const ruleLines = (v: string): string[] => v.split('\n').map(l => l.trim()).filter(Boolean);
 
@@ -151,6 +179,8 @@ export function splitEntry(raw: string): string[] {
   });
 }
 
+export const termKey = (t: string) => normalize(t).trim();
+
 /**
  * Terms that appear in more than one place in a list, by lowercased term, so
  * a second copy (which only costs a reader time) can be pointed out.
@@ -162,15 +192,13 @@ export function duplicateTerms(rules: readonly string[]): Set<string> {
     const shape = ruleShape(rule);
     if (shape.kind !== 'terms') continue;
     for (const t of shape.terms) {
-      const k = normalize(t).trim();
+      const k = termKey(t);
       if (seen.has(k)) dup.add(k);
       seen.add(k);
     }
   }
   return dup;
 }
-
-export const termKey = (t: string) => normalize(t).trim();
 
 // ── What a listing would do ──
 

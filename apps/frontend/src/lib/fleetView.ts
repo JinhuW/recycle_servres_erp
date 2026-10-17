@@ -4,6 +4,7 @@
 // Kept out of the components so they can be unit-tested without React.
 
 import type { AlertHitRow, Challenge, FleetAccount, FleetDoc, ReviewStatsDay, SearchSettingsWrite } from './coordinator';
+import { ruleLines } from './keywordRules';
 
 export type AccountLiveness = 'live' | 'stale' | 'dead' | 'unknown' | 'none';
 
@@ -109,9 +110,18 @@ export function accountAlerts(w: FleetAccount, hits: Map<string, CityHits>): num
   return w.cities.reduce((n, c) => n + (hits.get(c.slug)?.sent ?? 0), 0);
 }
 
-// The cities a worker has searched in its local day: the green chips. A
-// facade that does not report them leaves every chip grey.
-export const searchedToday = (w: FleetAccount): ReadonlySet<string> => new Set(w.today?.cities ?? []);
+// Whether a city chip is green: searched in the worker's local day. A facade
+// that predates the report serves null, and falls back to the worker's
+// liveness so an ERP released ahead of the tracker does not grey every chip.
+export function searchedToday(w: FleetAccount, status: FleetStatus): (slug: string) => boolean {
+  const cities = w.today?.cities;
+  if (cities == null) {
+    const on = status === 'live' || status === 'stale';
+    return () => on;
+  }
+  const done = new Set(cities);
+  return slug => done.has(slug);
+}
 
 // Whether the ERP's own viewer can show this worker's browser: only a worker
 // the facade bridges to (RS_VNC_TARGETS). A config-only vnc_url points at a
@@ -258,7 +268,6 @@ export function settingsDraft(
   };
 }
 
-const lines = (v: string) => v.split('\n').map(l => l.trim()).filter(Boolean);
 // A number the facade can check; anything else goes as typed, so its 400
 // names the field instead of this side guessing.
 const num = (v: string): number | string => (v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : v.trim());
@@ -290,7 +299,7 @@ export function settingsPatch(stage: FlowStage, draft: SettingsDraft, promptLoad
   if (Object.keys(search).length) body.search = search as SearchSettingsWrite['search'];
   if (form.items.length) {
     body.items = Object.fromEntries(Object.entries(draft.items).map(([name, fields]) => [
-      name, Object.fromEntries(form.items.map(f => [f, lines(fields[f])])),
+      name, Object.fromEntries(form.items.map(f => [f, ruleLines(fields[f])])),
     ]));
   }
   return body;
@@ -298,8 +307,9 @@ export function settingsPatch(stage: FlowStage, draft: SettingsDraft, promptLoad
 
 /**
  * How many edits separate a draft from the one it started as: each setting
- * changed, plus each list entry added or removed. Zero means Save has nothing
- * to send — and a save that sends nothing still starts a sweep.
+ * changed, each list entry added or removed, and one for a list only
+ * reordered, since the monitor runs search phrases in order. Zero means Save
+ * has nothing to send — and a save that sends nothing still starts a sweep.
  */
 export function draftChanges(base: SettingsDraft, draft: SettingsDraft): number {
   let n = 0;
@@ -308,13 +318,17 @@ export function draftChanges(base: SettingsDraft, draft: SettingsDraft): number 
   }
   for (const [name, fields] of Object.entries(draft.items)) {
     for (const f of Object.keys(fields) as ItemField[]) {
-      const left = lines(base.items[name]?.[f] ?? '');
-      for (const entry of lines(fields[f])) {
+      const was = ruleLines(base.items[name]?.[f] ?? '');
+      const now = ruleLines(fields[f]);
+      const left = [...was];
+      let edits = 0;
+      for (const entry of now) {
         const i = left.indexOf(entry);
         if (i >= 0) left.splice(i, 1);
-        else n++;
+        else edits++;
       }
-      n += left.length;
+      edits += left.length;
+      n += edits || Number(was.join('\n') !== now.join('\n'));
     }
   }
   return n;

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  checkListing, containsTerm, duplicateTerms, formatRule, formatTerm, parseExpr, ruleMatches, ruleShape, splitEntry,
+  addToGroup, checkListing, containsTerm, duplicateTerms, formatRule, formatTerm, parseExpr, ruleMatches, ruleShape, splitEntry,
 } from './keywordRules';
 
 // Live rules from the fleet's server_ram item.
@@ -99,5 +99,19 @@ describe('checkListing', () => {
     expect(t('Harmonica set with case', true)).toEqual({ kind: 'missing' });
     expect(t('Harmonica set with case', false)).toEqual({ kind: 'deferred', reason: 'prefilter' });
     expect(t('Server lot', true)).toEqual({ kind: 'deferred', reason: 'short' });
+  });
+});
+
+describe('addToGroup', () => {
+  it('keeps operands already quoted instead of quoting them again', () => {
+    expect(addToGroup('ssd OR nvme', '"solid state"')).toBe('ssd OR nvme OR "solid state"');
+    expect(addToGroup('ssd OR nvme', '"m.2"')).toBe('ssd OR nvme OR "m.2"');
+    expect(ruleMatches(addToGroup('ssd OR nvme', '"solid state"')!, 'solid state drive')).toBe(true);
+  });
+
+  it('quotes a bare phrase, and leaves an expression alone', () => {
+    expect(addToGroup('ssd OR nvme', 'hard drive')).toBe('ssd OR nvme OR "hard drive"');
+    expect(addToGroup('ssd', 'sata, sas')).toBe('ssd OR sata OR sas');
+    expect(addToGroup('ssd AND NOT used', 'nvme')).toBeNull();
   });
 });
