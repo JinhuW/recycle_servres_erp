@@ -1,5 +1,6 @@
 import { Fragment, useMemo, useState } from 'react';
 import { Icon } from '../../components/Icon';
+import { Skeleton } from '../../components/Skeleton';
 import type { AlertHitRow, Challenge, FleetAccount, FleetDoc } from '../../lib/coordinator';
 import {
   accountAlerts, accountHaystack, attentionReason, dayStrip, FLEET_STATUSES, fleetActivity, fleetPostsToday, fleetStatus,
@@ -42,8 +43,9 @@ export function statusNote(t: Translate, w: FleetAccount, parked: ReadonlySet<st
   return null;
 }
 
-export function FleetLegend({ counts, filter, onFilter }: {
+export function FleetLegend({ counts, loading, filter, onFilter }: {
   counts: Record<FleetStatus, number>;
+  loading: boolean;
   filter: FleetStatus | 'all';
   onFilter: (f: FleetStatus | 'all') => void;
 }) {
@@ -55,7 +57,7 @@ export function FleetLegend({ counts, filter, onFilter }: {
           onClick={() => onFilter(filter === s ? 'all' : s)}>
           <i className="fp-dot" />
           <span>{t(STATUS_KEY[s])}</span>
-          <b>{counts[s]}</b>
+          <b>{loading ? <Skeleton width={14} height={13} radius={4} /> : counts[s]}</b>
         </button>
       ))}
     </div>
@@ -74,6 +76,7 @@ export function WorkersCard({ fleet, unavailable, hits, challenges, filter, onCl
   locale: string;
 }) {
   const { t } = useT();
+  const loading = !fleet && !unavailable;
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
   const terms = queryTerms(query);
@@ -111,7 +114,7 @@ export function WorkersCard({ fleet, unavailable, hits, challenges, filter, onCl
           </button>
         )}
         <span className="ff-summary">
-          {!fleet ? '…' : posts === null
+          {!fleet ? (loading ? <Skeleton width={220} height={11} /> : '…') : posts === null
             ? t('fbcWorkersSummary', { n: all.length, cities, alerts, days: HITS_DAYS })
             : t('fbcWorkersSummaryPosts', { n: all.length, posts, cities, alerts, days: HITS_DAYS })}
         </span>
@@ -128,7 +131,7 @@ export function WorkersCard({ fleet, unavailable, hits, challenges, filter, onCl
       )}
 
       <div className="fp-table-wrap">
-        <table className="fp-table ff-table">
+        <table className="fp-table ff-table" aria-busy={loading}>
           <thead>
             <tr>
               <th aria-label={t('fbcColCities')} />
@@ -146,6 +149,7 @@ export function WorkersCard({ fleet, unavailable, hits, challenges, filter, onCl
               <WorkerRow key={w.worker_id} account={w} hits={byCity} parked={parked} terms={terms} startAt={startAt}
                 open={open.has(w.worker_id)} onToggle={() => toggle(w.worker_id)} locale={locale} />
             ))}
+            {loading && SKELETON_ROWS.map(i => <WorkerRowSkeleton key={i} />)}
             {fleet && shown.length === 0 && (
               <tr><td colSpan={8} className="fp-empty">{terms.length || filter !== 'all' ? t('fbcAccEmptySearch') : t('fbcAccEmptyAll')}</td></tr>
             )}
@@ -153,9 +157,35 @@ export function WorkersCard({ fleet, unavailable, hits, challenges, filter, onCl
         </table>
       </div>
       <div className="fp-table-foot">
-        {fleet ? t('fbcAsOf', { age: relTime(fleet.generated_at, locale) }) : '…'}
+        {fleet ? t('fbcAsOf', { age: relTime(fleet.generated_at, locale) })
+          : loading ? <Skeleton width={110} height={11} /> : '…'}
       </div>
     </section>
+  );
+}
+
+const SKELETON_ROWS = [0, 1, 2, 3, 4, 5];
+
+// Cell for cell the shape of a WorkerRow, two-line holders included, so the
+// table keeps its height when the fleet document lands.
+function WorkerRowSkeleton() {
+  const pair = (top: number, bottom: number, topH = 13) => (
+    <span className="fp-holder">
+      <Skeleton width={top} height={topH} />
+      <Skeleton width={bottom} height={10} />
+    </span>
+  );
+  return (
+    <tr className="ff-skel" aria-hidden>
+      <td className="ff-chev"><Skeleton width={13} height={13} radius={4} /></td>
+      <td>{pair(150, 170)}</td>
+      <td>{pair(86, 90, 20)}</td>
+      <td>{pair(178, 140, 8)}</td>
+      <td><span className="ff-searches"><Skeleton width={20} height={20} radius={999} /><Skeleton width={34} height={12} /></span></td>
+      <td><Skeleton width={58} height={12} /></td>
+      <td>{pair(50, 80)}</td>
+      <td><Skeleton width={16} height={16} radius={4} /></td>
+    </tr>
   );
 }
 
@@ -321,15 +351,15 @@ const EVENT_KEY = {
   search: 'fbcActSearch', listing: 'fbcActListing', backup: 'fbcActBackup', silent: 'fbcActSilent', checkpoint: 'fbcActCheckpoint',
 } as const;
 
-export function ActivityAside({ fleet, challenges, locale }: {
-  fleet: FleetDoc | null; challenges: Challenge[] | null; locale: string;
+export function ActivityAside({ fleet, unavailable, challenges, locale }: {
+  fleet: FleetDoc | null; unavailable: boolean; challenges: Challenge[] | null; locale: string;
 }) {
   const { t } = useT();
   const parked = parkedWorkers(challenges);
   const byId = new Map((fleet?.workers ?? []).map(w => [w.worker_id, w]));
   const events = fleetActivity(fleet, challenges);
   return (
-    <aside className="card fp-activity ff-activity" aria-label={t('fpRecent')}>
+    <aside className="card fp-activity ff-activity" aria-label={t('fpRecent')} aria-busy={!fleet && !unavailable}>
       <div className="card-head">
         <h2 className="card-title">{t('fpRecent')}</h2>
         <span className="card-sub">{t('fbcActivitySub')}</span>
@@ -347,6 +377,15 @@ export function ActivityAside({ fleet, challenges, locale }: {
             </li>
           );
         })}
+        {!fleet && !unavailable && SKELETON_ROWS.map(i => (
+          <li key={i} aria-hidden>
+            <Skeleton width={8} height={8} radius={999} style={{ marginTop: 4 }} />
+            <div className="ff-skel-lines">
+              <Skeleton width={i % 2 ? 150 : 175} height={12} />
+              <Skeleton width={70} height={10} />
+            </div>
+          </li>
+        ))}
         {fleet && events.length === 0 && <li className="fp-muted">{t('fbcActivityEmpty')}</li>}
       </ul>
     </aside>

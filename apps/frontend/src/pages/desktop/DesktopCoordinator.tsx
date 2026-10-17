@@ -172,11 +172,11 @@ function FleetPage({ head, tabs }: { head: React.ReactNode; tabs: React.ReactNod
         </div>
       ) : (
         <>
-          <FleetLegend counts={counts} filter={filter} onFilter={setFilter} />
+          <FleetLegend counts={counts} loading={!fleet && !fleetUnavailable} filter={filter} onFilter={setFilter} />
           <div className="fp-split ff-split">
             <WorkersCard fleet={fleet} unavailable={fleetUnavailable} hits={hits} challenges={challenges}
               filter={filter} onClearFilter={() => setFilter('all')} locale={locale} />
-            <ActivityAside fleet={fleet} challenges={challenges} locale={locale} />
+            <ActivityAside fleet={fleet} unavailable={fleetUnavailable} challenges={challenges} locale={locale} />
           </div>
           <FlowCard fleet={fleet} stats={stats} prompt={prompt} onSaved={load} />
         </>

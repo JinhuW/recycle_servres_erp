@@ -813,7 +813,7 @@
   width: 32px;
   padding-right: 0 !important;
 }
-.ff-table tbody tr:not(.ff-fold):hover td {
+.ff-table tbody tr:not(.ff-fold, .ff-skel):hover td {
   background: var(--bg-soft);
 }
 .ff-table tr.ff-open td {
@@ -1300,4 +1300,14 @@
   .fp-tag {
     transition: none;
   }
+}
+
+/* Loading skeletons: stacked like the two-line holders they stand in for. */
+.fp-holder .skeleton,
+.ff-skel-lines .skeleton {
+  display: block;
+}
+.fp-holder .skeleton + .skeleton,
+.ff-skel-lines .skeleton + .skeleton {
+  margin-top: 5px;
 }

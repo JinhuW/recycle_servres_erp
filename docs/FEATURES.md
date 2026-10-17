@@ -2120,7 +2120,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   `/v1/fleet` document, checkpoints, review stats, alert hits and prompt
   through the manager-only `/api/coordinator` proxy; without the proxy's
   credentials the tab says so and the rest of the ERP is unaffected
-  (v1.140.0). Editing cities, pacing, stages and the model from the ERP is
+  (v1.140.0). While that data loads, the table, the activity aside, the
+  legend counts and the stage counts show skeletons shaped like their content
+  (v1.267.0). Editing cities, pacing, stages and the model from the ERP is
   not built yet: nothing writes `master.toml` from here (RS-261).
 - **Facebook account pool** — a second tab at **Monitors ▸ Facebook**,
   linked directly at `/#/fleet/pool` (v1.261.0). Managers see a status legend
