@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-263](./RS-263-make-every-search-to-alert-stage-s-settings-editable.md) | in-review | story | P2 | Make every search-to-alert stage's settings editable from the ERP | — |
+| [RS-263](./RS-263-make-every-search-to-alert-stage-s-settings-editable.md) | done | story | P2 | Make every search-to-alert stage's settings editable from the ERP | 1.265.0 |
 | [RS-262](./RS-262-count-every-stage-of-the-search-to-alert-funnel.md) | done | story | P2 | Count every stage of the search-to-alert funnel | 1.264.0 |
 | [RS-261](./RS-261-facebook-fleet-tab-redesign-to-the-pool-s-layout-wor.md) | done | story | P2 | Facebook fleet tab: redesign to the pool's layout, worker pages | 1.263.0 |
 | [RS-260](./RS-260-facebook-account-pool-review-fixes-for-the-pool-page.md) | done | bug | P2 | Facebook account pool: review fixes for the pool page | 1.262.1 |
