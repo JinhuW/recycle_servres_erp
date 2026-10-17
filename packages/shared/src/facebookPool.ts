@@ -26,6 +26,7 @@ export const FB_POOL_EVENT_KINDS = [
   'removed',
   'copied',
   'revealed',
+  'assigned',
 ] as const;
 export type FbPoolEventKind = (typeof FB_POOL_EVENT_KINDS)[number];
 

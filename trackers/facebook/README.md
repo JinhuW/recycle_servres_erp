@@ -584,7 +584,13 @@ rules, the alert rating, minimum units, the AI model, the prompt and rubric,
 and each item's phrases, keywords and anti-keywords. It saves through
 `PUT /v1/config/settings`. `rs_console/settings.py` lists exactly what can
 change; regions, proxies, sessions, credentials and notification targets
-cannot. Saved values are kept in `/state/settings.json` on the
+cannot. One worker's cities can too: the ERP's worker page saves them through
+`PUT /v1/workers/<id>/cities` into that worker's config only. That needs the
+config named by worker in the console's `RS_WORKER_CONFIGS`
+(`ne-1=/config/workers/homelab-ne.toml`); a bare path takes the fleet-wide
+values only. Any Marketplace location is accepted, not just master.toml's
+regions, and a wrong slug fails silently, so check a new one on Marketplace.
+Saved values are kept in `/state/settings.json` on the
 `rs-console-state` volume, not in `master.toml`, which stays the default for
 anything never saved. The console writes them into every worker config in
 place, and the monitor reloads its config between jobs. That reload restarts

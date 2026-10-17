@@ -18,6 +18,31 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Added
+
+- **Four more workers, one per unused Decodo port** (RS-275): `nyc-1` (10007,
+  Brooklyn), `phl-1` (10008, Folcroft PA), `va-1` and `va-2` (10009, 10010,
+  Leesburg VA). Each is `deploy/docker-compose.homelab-<x>.yml` with its own
+  config, session dir, cache volume and VNC target. Every master.toml region
+  already has a worker, so their cities are set from the ERP; the config only
+  seeds the city at the exit. A worker searches nothing until it has a login,
+  so set its cities before giving it an account.
+- **A worker's cities can be set from the ERP** (RS-275). rs_console takes
+  `PUT /v1/workers/{id}/cities` and writes the list into that worker's config
+  only, kept in the settings state so a deploy keeps it. `/v1/fleet` now
+  describes each named worker from the config it runs, with
+  `cities_editable`. Any Marketplace slug or numeric id is accepted.
+- `deploy/make-region-config.py` takes `'slug=Name;slug=Name'` in place of a
+  region, for a worker with cities of its own.
+
+### Changed
+
+- The console's `RS_WORKER_CONFIGS` names each config by worker
+  (`id=path`). A bare path still works, without editable cities.
+- `scripts/deploy.sh` renders each worker config with `--config <file>`, so
+  that worker's saved cities stay, and copies a new worker's config to the VM
+  before the console mounts it (a missing mount source becomes a directory).
+
 ## [0.6.1] - 2026-10-17
 
 ### Added

@@ -6,6 +6,7 @@ import {
   matchesTerms, offersRelogin, queryTerms, reviewedToday, searchedToday,
   splitHighlights, reloginWouldBeAutomatic, vaultAccountIdFor, whoIs,
   FLOW_STAGES, STAGE_FORMS, draftChanges, settingsDraft, settingsPatch,
+  citiesDiffer, cityOwners, isCitySlug, marketplaceCityUrl, normalizeCitySlug,
 } from './fleetView';
 
 const account = (over: Partial<FleetAccount>): FleetAccount => ({
@@ -221,6 +222,38 @@ describe('vaultAccountIdFor', () => {
 
   it('names a new account after the worker otherwise', () => {
     expect(vaultAccountIdFor(account({ worker_id: 'ne-1', account: null }))).toBe('ne-1');
+  });
+});
+
+describe('a worker\'s cities', () => {
+  it('accepts a slug or a numeric id, lowercased, and nothing else', () => {
+    expect(isCitySlug(normalizeCitySlug(' LongIsland '))).toBe(true);
+    expect(isCitySlug('108398645850982')).toBe(true);
+    expect(isCitySlug('fort-myers-fl')).toBe(true);
+    expect(isCitySlug('new york')).toBe(false);
+    expect(isCitySlug('../etc')).toBe(false);
+    expect(isCitySlug('')).toBe(false);
+    expect(marketplaceCityUrl('portland_maine')).toBe('https://www.facebook.com/marketplace/portland_maine/');
+  });
+
+  it('names the other workers that already search a city', () => {
+    const fleet = { workers: [
+      account({ worker_id: 'nyc-1', cities: [{ slug: 'dc', name: 'Washington, DC', radius_km: 100 }] }),
+      account({ worker_id: 'homelab-1' }),
+      account({ worker_id: 'ne-1', cities: [{ slug: 'dc', name: 'Washington, DC', radius_km: 100 }] }),
+      account({ worker_id: 'ghost', source: 'unconfigured' }),
+    ] } as unknown as FleetDoc;
+    const owners = cityOwners(fleet, 'nyc-1');
+    expect(owners.get('dc')).toEqual(['homelab-1', 'ne-1']);
+    expect(owners.get('tampa')).toEqual(['homelab-1']);
+  });
+
+  it('sees a reorder, a rename or a new radius as a change', () => {
+    const a = [{ slug: 'dc', name: 'DC', radius: 100 }, { slug: 'tampa', name: 'Tampa', radius: 100 }];
+    expect(citiesDiffer(a, a.map(c => ({ ...c })))).toBe(false);
+    expect(citiesDiffer(a, [...a].reverse())).toBe(true);
+    expect(citiesDiffer(a, [a[0], { ...a[1], radius: 60 }])).toBe(true);
+    expect(citiesDiffer(a, [a[0]])).toBe(true);
   });
 });
 

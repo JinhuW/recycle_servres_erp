@@ -144,6 +144,39 @@ async function forward(
   return c.json(withError(payload), res.status as ContentfulStatusCode);
 }
 
+/**
+ * One facade call for a route that acts on the answer instead of relaying it:
+ * `error` is set, already worded for the manager, unless the facade said 2xx.
+ * `status` is what to answer with in that case.
+ */
+export async function callFacade(
+  env: Env, method: 'POST' | 'PUT', path: string, body?: unknown,
+): Promise<{ error: string | null; status: ContentfulStatusCode }> {
+  const up = upstream(env);
+  if (!up) return { error: NOT_CONFIGURED, status: 501 };
+  const headers: Record<string, string> = { ...up.headers };
+  const init: RequestInit = { method, headers, signal: AbortSignal.timeout(TIMEOUT_MS) };
+  if (body !== undefined) {
+    headers['Content-Type'] = 'application/json';
+    init.body = JSON.stringify(body);
+  }
+  let res: Response;
+  try {
+    res = await fetch(up.base + path, init);
+  } catch {
+    return { error: UNREACHABLE, status: 502 };
+  }
+  const refused = await refusalMessage(res);
+  if (refused) {
+    log.warn('coordinator upstream refused the request', { module: 'coordinator', upstreamStatus: res.status, upstreamPath: path });
+    return { error: refused, status: 502 };
+  }
+  if (res.ok) return { error: null, status: 200 };
+  const payload = await res.json().catch(() => null) as { detail?: unknown; error?: unknown } | null;
+  const status = res.status >= 400 && res.status < 600 ? res.status : 502;
+  return { error: upstreamWhy(payload) ?? `coordinator returned ${res.status}`, status: status as ContentfulStatusCode };
+}
+
 coordinator.get('/workers', (c) => forward(c, 'GET', '/v1/workers'));
 
 coordinator.get('/stats/reviews', (c) => {
@@ -255,6 +288,34 @@ coordinator.put('/settings', async (c) => {
     items: Object.keys((body.items as Record<string, unknown> | undefined) ?? {}),
   });
   return forward(c, 'PUT', '/v1/config/settings', body);
+});
+
+// ── One worker's cities ──────────────────────────────────────────────────────
+// The worker page's Edit cities form. The facade validates the slugs and
+// writes them into that worker's config only; each city is narrowed to the
+// three fields a config holds.
+export const WORKER_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+const CITY_FIELDS = ['slug', 'name', 'radius'] as const;
+
+coordinator.put('/workers/:id/cities', async (c) => {
+  const id = c.req.param('id');
+  if (!WORKER_ID.test(id)) return c.json({ error: 'Not a valid worker id' }, 400);
+  const raw: unknown = await c.req.json().catch(() => null);
+  if (!isObject(raw) || !Array.isArray(raw.cities)) {
+    return c.json({ error: 'Expected an object with a cities list' }, 400);
+  }
+  const cities = raw.cities.map((city) => {
+    if (!isObject(city)) return city;
+    const kept: Record<string, unknown> = {};
+    for (const key of CITY_FIELDS) if (key in city) kept[key] = city[key];
+    return kept;
+  });
+  log.info('fleet worker cities saved', {
+    module: 'coordinator', workerId: id, cities: cities.length, by: c.var.user.email,
+  });
+  return forward(c, 'PUT', `/v1/workers/${encodeURIComponent(id)}/cities`, {
+    cities, updated_by: c.var.user.name || c.var.user.email,
+  });
 });
 
 // ── Watching a worker's browser ──────────────────────────────────────────────

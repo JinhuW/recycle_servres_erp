@@ -8,16 +8,17 @@ this facade is what gets exposed through the Cloudflare tunnel instead.
 
 The safety property, stated once: **the coordinator admin token never leaves
 this process, and no auth/credential/session route is forwarded.** The routes
-below are a closed allowlist — nine reads and four writes (resolving a
+below are a closed allowlist — nine reads and five writes (resolving a
 checkpoint, queuing a worker re-login, setting a vault account's login
-details, and saving search settings). The first two move no credential and
-name no account. The third is the one route through which a credential
-enters the fleet, and it is blind: a value goes upstream, a presence flag
-comes back, and nothing here can read a stored secret. The fourth changes
-what the workers search for and how they judge it — never where, as whom,
-through which proxy or to which chat (settings.py lists what it can reach).
-A full compromise of this service's own token can therefore overwrite a
-worker's login or its search, but still yields fleet metadata, not accounts.
+details, saving search settings, and saving one worker's cities). The first
+two move no credential and name no account. The third is the one route
+through which a credential enters the fleet, and it is blind: a value goes
+upstream, a presence flag comes back, and nothing here can read a stored
+secret. The last two change what the workers search for, where, and how they
+judge it — never as whom, through which proxy or to which chat (settings.py
+lists what they can reach). A full compromise of this service's own token can
+therefore overwrite a worker's login or its search, but still yields fleet
+metadata, not accounts.
 
 It also serves the fleet dashboard: a single static page (`/`, assets under
 `/static`) that calls the routes below with the console token the operator
@@ -43,8 +44,9 @@ Configuration (env):
                                 default /config/master.toml
     RS_FLEET_CONFIG             fleet.toml (worker -> region), default
                                 /config/fleet.toml
-    RS_WORKER_CONFIGS           comma-separated worker configs a settings
-                                save writes into, default RS_MONITOR_CONFIG
+    RS_WORKER_CONFIGS           comma-separated `worker_id=path` worker configs
+                                a settings save writes into (a bare path has
+                                no editable cities), default RS_MONITOR_CONFIG
     RS_SETTINGS_STATE           the saved settings (settings.py), default
                                 /state/settings.json
     RS_MONITOR_WORKER_ID        the phase-1 monitor's control-plane id, so its
@@ -397,6 +399,11 @@ async def fleet() -> Dict[str, Any]:
     fleet_cfg = _read_toml(_env("RS_FLEET_CONFIG", "/config/fleet.toml"))
     monitor = _read_toml(_env("RS_MONITOR_CONFIG", "/config/monitor.toml"))
     monitor_worker_id = _env("RS_MONITOR_WORKER_ID") or _env("RS_WORKER_ID")
+    # What each named worker actually runs, cities included.
+    worker_cfgs = {
+        wid: cfg for wid, path in settings.targets()
+        if wid and (cfg := _read_toml(str(path))) is not None
+    }
 
     rows: Optional[list] = None
     accounts: Optional[list] = None
@@ -428,7 +435,7 @@ async def fleet() -> Dict[str, Any]:
                 acc = await client.get("/v1/accounts")
                 if acc.status_code == 200:
                     accounts = (acc.json() or {}).get("accounts") or []
-                worker_ids = fleet_view.known_worker_ids(fleet_cfg, monitor_worker_id, rows)
+                worker_ids = fleet_view.known_worker_ids(fleet_cfg, monitor_worker_id, rows, worker_cfgs)
                 metas = await asyncio.gather(
                     *(client.get(f"/v1/session/{wid}/meta") for wid in worker_ids),
                     return_exceptions=True,
@@ -460,6 +467,7 @@ async def fleet() -> Dict[str, Any]:
         fleet=fleet_cfg,
         monitor=monitor,
         monitor_worker_id=monitor_worker_id,
+        worker_configs=worker_cfgs,
         health_rows=rows,
         health_error=error,
         accounts=accounts,
@@ -517,6 +525,40 @@ def put_settings(body: Any = Body(default=None)) -> Dict[str, Any]:
         state = settings.stamp(values, (by or "").strip()[:120] or None)
         settings.save(state)
     return {"updated_at": state["updated_at"], "updated_by": state["updated_by"], "changed": changed}
+
+
+@app.put("/v1/workers/{worker_id}/cities", dependencies=[Depends(require_token)])
+def put_worker_cities(worker_id: str, body: Any = Body(default=None)) -> Dict[str, Any]:
+    """Save the cities one worker searches, and write them into its config
+    only. The worker picks them up between jobs and sweeps straight away."""
+    path = settings.config_for(worker_id)
+    if path is None:
+        raise HTTPException(status_code=404, detail=f"No config is mounted for worker {worker_id}")
+    if not settings.writable():
+        raise HTTPException(
+            status_code=409,
+            detail="This console mounts the worker configs read-only; redeploy it to save cities",
+        )
+    with _settings_lock:
+        try:
+            city_list = settings.validate_cities(body)
+            saved = settings.load()
+            values = settings.merge(saved["values"], {"workers": {worker_id: {"cities": city_list}}})
+            changed = settings.apply(values, [(worker_id, path)])
+        except settings.SettingsError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        except OSError:
+            raise HTTPException(status_code=500, detail="The worker config could not be written") from None
+        by = body.get("updated_by") if isinstance(body.get("updated_by"), str) else None
+        state = settings.stamp(values, (by or "").strip()[:120] or None)
+        settings.save(state)
+    return {
+        "worker_id": worker_id,
+        "cities": city_list,
+        "updated_at": state["updated_at"],
+        "updated_by": state["updated_by"],
+        "changed": changed,
+    }
 
 
 @app.get("/v1/config/filter-prompt", dependencies=[Depends(require_token)])

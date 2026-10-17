@@ -14,6 +14,7 @@ import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { hrefFor, onLinkClick } from '../../lib/route';
 import { BuildChip, CityChip, EditCredentialsButton, fmtDays, HITS_DAYS, ReloginButton, WatchButton } from './FleetAccounts';
+import { EditCitiesButton } from './FleetCities';
 import { StatusChip, statusNote } from './FleetWorkers';
 import '../../styles/facebookPool.css';
 
@@ -21,8 +22,8 @@ import '../../styles/facebookPool.css';
 // Opened from the eye on the fleet list. Everything known about one Facebook
 // worker in the Account pool's credential-card style, its open checkpoints
 // and recent events, and every action the control plane offers on it today:
-// watch its browser, queue a re-login, set its credentials, clear a
-// checkpoint. Edits that need master.toml (cities, pacing) are not here yet.
+// watch its browser, queue a re-login, set its credentials, set its cities
+// (FleetCities.tsx), clear a checkpoint. Pacing still lives in fleet.toml.
 
 const REFRESH_MS = 30_000;
 const STUB_TONE = { live: 'accent', stale: 'warn', attention: 'warn', offline: 'neg' } as const;
@@ -156,6 +157,7 @@ export function FleetWorker({ workerId }: { workerId: string }) {
                   : <span className="fp-muted" style={{ fontSize: 12 }}>{t('fbcNoVnc')}</span>}
               {h && <ReloginButton workerId={w.worker_id} account={w} className="btn" onQueued={load} />}
               <EditCredentialsButton account={w} onSaved={load} className="btn" />
+              {w.cities_editable && <EditCitiesButton worker={w} fleet={fleet} onSaved={load} />}
             </div>
           </div>
         </div>

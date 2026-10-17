@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { afterEach, describe, it, expect, beforeEach, vi } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS, PRIYA } from './helpers/auth';
@@ -269,6 +269,88 @@ describe('facebook account pool', () => {
     const db = getTestDb();
     await expect(db`UPDATE fb_pool_events SET detail = 'x'`).rejects.toThrow(/append-only/);
     await expect(db`DELETE FROM fb_pool_events`).rejects.toThrow(/append-only/);
+  });
+
+  describe('sending a login to a fleet worker', () => {
+    const ENV = { COORDINATOR_API_URL: 'http://facade.internal:8600', COORDINATOR_API_TOKEN: 'console-secret' };
+    afterEach(() => { vi.unstubAllGlobals(); });
+
+    function stubFacade(...answers: [number, unknown][]) {
+      const spy = vi.fn(async () => {
+        const [status, body] = answers.length > 1 ? answers.shift()! : answers[0];
+        return new Response(JSON.stringify(body), { status });
+      });
+      vi.stubGlobal('fetch', spy);
+      return spy;
+    }
+    const sent = (spy: ReturnType<typeof vi.fn>, i: number) => {
+      const [url, init] = spy.mock.calls[i] as [string, RequestInit];
+      return { url, method: init.method, body: init.body ? JSON.parse(init.body as string) : undefined };
+    };
+
+    it('writes the login into the worker’s vault account, queues Re-login and marks the account', async () => {
+      const token = await manager();
+      await seedPool(token, 2);
+      await api('PUT', `${BASE}/2`, { token, body: { draft: draft(2, { totp: '', emailPassword: '' }) } });
+      const spy = stubFacade([200, { account_id: 'nyc-1' }], [202, { queued: true }]);
+
+      const r = await api<Snapshot>('POST', `${BASE}/1/assign`, { token, env: ENV, body: { worker: 'nyc-1' } });
+      expect(r.status).toBe(200);
+      expect(sent(spy, 0)).toEqual({
+        url: 'http://facade.internal:8600/v1/accounts/nyc-1',
+        method: 'PUT',
+        body: {
+          worker_id: 'nyc-1',
+          fb_username: 'acct1@outlook.example',
+          allow_password_login: true,
+          secrets: { password: 'DemoOnly!1', totp_secret: 'JBSWY3DPEHPK3PXP', email: 'acct1@outlook.example', email_password: 'Mail!1' },
+        },
+      });
+      expect(JSON.stringify(sent(spy, 0).body)).not.toContain('session-1');
+      expect(sent(spy, 1)).toMatchObject({ url: 'http://facade.internal:8600/v1/workers/nyc-1/relogin', method: 'POST' });
+      expect(r.body.accounts[0]).toMatchObject({ status: 'fleet', holder: 'nyc-1', holderId: null });
+      expect(r.body.activity[0]).toMatchObject({ action: 'assigned', accountNo: 1, detail: 'nyc-1', status: 'fleet' });
+
+      // A missing 2FA key or e-mail password clears the worker's old one; an
+      // existing vault account is written under its own id.
+      const spy2 = stubFacade([200, {}], [202, {}]);
+      const r2 = await api('POST', `${BASE}/2/assign`, { token, env: ENV, body: { worker: 'va-1', account: 'personal' } });
+      expect(r2.status).toBe(200);
+      expect(sent(spy2, 0).url).toBe('http://facade.internal:8600/v1/accounts/personal');
+      expect(sent(spy2, 0).body.secrets).toMatchObject({ totp_secret: null, email_password: null });
+    });
+
+    it('changes nothing when the facade refuses, and says why', async () => {
+      const token = await manager();
+      await seedPool(token, 1);
+      stubFacade([409, { detail: "worker nyc-1 already belongs to account 'other'" }]);
+      const r = await api<{ error: string }>('POST', `${BASE}/1/assign`, { token, env: ENV, body: { worker: 'nyc-1' } });
+      expect(r.status).toBe(409);
+      expect(r.body.error).toMatch(/already belongs/);
+      const after = await api<Snapshot>('GET', BASE, { token });
+      expect(after.body.accounts[0].status).toBe('available');
+      expect(after.body.activity.some((e) => e.action === 'assigned')).toBe(false);
+
+      stubFacade([200, {}], [503, { detail: 'Coordinator upstream is not configured' }]);
+      const half = await api<{ error: string }>('POST', `${BASE}/1/assign`, { token, env: ENV, body: { worker: 'nyc-1' } });
+      expect(half.status).toBe(503);
+      expect(half.body.error).toMatch(/reached nyc-1, but Re-login was not queued/);
+    });
+
+    it('refuses a worker that already holds another account, a bad id, and purchasers', async () => {
+      const token = await manager();
+      await seedPool(token, 2);
+      await api('PUT', `${BASE}/2`, { token, body: { draft: draft(2, { status: 'fleet', holder: 'nyc-1' }) } });
+      const spy = stubFacade([200, {}]);
+      const taken = await api<{ code: string }>('POST', `${BASE}/1/assign`, { token, env: ENV, body: { worker: 'NYC-1' } });
+      expect(taken.status).toBe(409);
+      expect(taken.body.code).toBe('fpWorkerTaken');
+      expect((await api('POST', `${BASE}/1/assign`, { token, env: ENV, body: { worker: 'a.b' } })).status).toBe(400);
+      expect((await api('POST', `${BASE}/9/assign`, { token, env: ENV, body: { worker: 'va-1' } })).status).toBe(404);
+      const marcus = (await loginAs(MARCUS)).token;
+      expect((await api('POST', `${BASE}/1/assign`, { token: marcus, env: ENV, body: { worker: 'va-1' } })).status).toBe(403);
+      expect(spy).not.toHaveBeenCalled();
+    });
   });
 
   it('keeps the manager routes from purchasers and refuses everything without a key in production', async () => {

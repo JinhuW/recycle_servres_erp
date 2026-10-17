@@ -7,10 +7,16 @@ written into each worker's config (RS_WORKER_CONFIGS) on save and again by
 every deploy (`render`). master.toml stays the default for anything never
 saved.
 
-Only the keys listed here can change. Regions, cities, proxies, credentials,
-notification targets and the session path are not reachable from this module,
-which is what keeps the console's token from being a way to point a worker at
-another account or another chat.
+Only the keys listed here can change. One worker's cities can change too
+(`workers.<id>.cities`), because a worker with its own proxy and account
+searches its own cities. Proxies, credentials, notification targets and the
+session path are not reachable from this module, which is what keeps the
+console's token from being a way to point a worker at another account or
+another chat.
+
+RS_WORKER_CONFIGS names each config `worker_id=path`, so a worker's cities go
+into its own file and nowhere else. A bare path still works, and takes the
+fleet-wide values only.
 
 Worker configs are single-file bind mounts. Docker binds the inode, so a file
 replaced by rename stays invisible to a running container: they are rewritten
@@ -18,7 +24,9 @@ in place. The vendored monitor hashes its config between jobs and restarts
 them on a change, which also runs a sweep straight away.
 
     python -m rs_console.settings apply     write the saved values into every worker config
-    python -m rs_console.settings render    stdin config -> stdout, saved values applied
+    python -m rs_console.settings render [--config homelab-x.toml]
+                                            stdin config -> stdout, saved values applied
+                                            (and that file's worker's cities)
 """
 
 import copy
@@ -29,7 +37,7 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import tomlkit
 from tomlkit.items import Item
@@ -50,6 +58,13 @@ _MODEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$")
 MAX_RULE = 500
 MAX_RULES = 100
 MAX_PROMPT = 20_000
+MAX_CITIES = 200
+MAX_CITY_NAME = 80
+
+# The monitor's own rule for a Marketplace location: a slug or numeric id,
+# lowercase letters and digits with `_` and `-`.
+_CITY_SLUG = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+_WORKER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 
 
 class SettingsError(ValueError):
@@ -202,6 +217,38 @@ def validate(body: Any, item_names: List[str], saved: Optional[Dict[str, Any]] =
     return patch
 
 
+def validate_cities(body: Any) -> List[Dict[str, Any]]:
+    """One worker's city list, normalised; SettingsError on anything off.
+
+    Any Marketplace location is accepted, not only master.toml's regions: a
+    worker added beside a full fleet needs cities nobody else searches.
+    """
+    if not isinstance(body, dict) or set(body) - {"cities", "updated_by"}:
+        raise SettingsError("Expected an object with cities")
+    value = body.get("cities")
+    if not isinstance(value, list) or not 1 <= len(value) <= MAX_CITIES:
+        # The monitor refuses a config with no city at all.
+        raise SettingsError(f"cities must list 1 to {MAX_CITIES} cities")
+    out: List[Dict[str, Any]] = []
+    for city in value:
+        if not isinstance(city, dict) or set(city) - {"slug", "name", "radius"}:
+            raise SettingsError("each city is {slug, name, radius}")
+        slug = city.get("slug").strip().lower() if isinstance(city.get("slug"), str) else ""
+        if not _CITY_SLUG.match(slug):
+            raise SettingsError(
+                f"{city.get('slug')!r} is not a Marketplace location: use the part after "
+                "/marketplace/ in a search URL (lowercase letters, digits, _ and -)"
+            )
+        if any(c["slug"] == slug for c in out):
+            raise SettingsError(f"{slug} is listed twice")
+        name = city.get("name").strip() if isinstance(city.get("name"), str) else ""
+        if not name or len(name) > MAX_CITY_NAME:
+            raise SettingsError(f"{slug}: name must be text of 1 to {MAX_CITY_NAME} characters")
+        radius = _int(1, 500)(f"{slug}: radius", city.get("radius"))
+        out.append({"slug": slug, "name": name, "radius": radius})
+    return out
+
+
 def merge(values: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
     out = copy.deepcopy(values)
     if "search" in patch:
@@ -210,6 +257,8 @@ def merge(values: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
         out["ai_model"] = patch["ai_model"]
     for name, fields in (patch.get("items") or {}).items():
         out.setdefault("items", {}).setdefault(name, {}).update(fields)
+    for worker_id, fields in (patch.get("workers") or {}).items():
+        out.setdefault("workers", {}).setdefault(worker_id, {}).update(fields)
     return out
 
 
@@ -252,12 +301,33 @@ def stamp(values: Dict[str, Any], by: Optional[str]) -> Dict[str, Any]:
     }
 
 
-def worker_configs() -> List[Path]:
+Target = Tuple[Optional[str], Path]
+
+
+def targets() -> List[Target]:
+    """Every worker config as (worker id or None, path)."""
     raw = os.environ.get("RS_WORKER_CONFIGS", "").strip()
     if not raw:
         monitor = os.environ.get("RS_MONITOR_CONFIG", "").strip()
-        return [Path(monitor)] if monitor else []
-    return [Path(p.strip()) for p in raw.split(",") if p.strip()]
+        return [(None, Path(monitor))] if monitor else []
+    out: List[Target] = []
+    for entry in (e.strip() for e in raw.split(",")):
+        if not entry:
+            continue
+        worker_id, sep, path = entry.partition("=")
+        if sep and _WORKER_ID.match(worker_id.strip()):
+            out.append((worker_id.strip(), Path(path.strip())))
+        else:
+            out.append((None, Path(entry)))
+    return out
+
+
+def worker_configs() -> List[Path]:
+    return [path for _, path in targets()]
+
+
+def config_for(worker_id: str) -> Optional[Path]:
+    return next((path for wid, path in targets() if wid == worker_id), None)
 
 
 def writable() -> bool:
@@ -321,8 +391,12 @@ def _toml_value(key: str, value: Any) -> Any:
     return value
 
 
-def render(text: str, values: Dict[str, Any]) -> str:
-    """A worker config's text with the saved values written in.
+CITY_KEYS = (("search_city", "slug"), ("city_name", "name"), ("radius", "radius"))
+
+
+def render(text: str, values: Dict[str, Any], worker_id: Optional[str] = None) -> str:
+    """A worker config's text with the saved values written in, and
+    `worker_id`'s own cities when it has saved some.
 
     Untouched keys keep their bytes, comments included, so a config with no
     saved values renders to itself — which is what lets the deploy's verify
@@ -340,6 +414,13 @@ def render(text: str, values: Dict[str, Any]) -> str:
             elif _same(current, value):
                 continue
             facebook[key] = _toml_value(key, value)
+        city_list = (((values.get("workers") or {}).get(worker_id or "") or {}).get("cities")) or []
+        if city_list:
+            # The three arrays are index-aligned, so they are written together.
+            for key, field in CITY_KEYS:
+                value = [c[field] for c in city_list]
+                if not _same(facebook.get(key), value):
+                    facebook[key] = _toml_value(key, value)
     if values.get("ai_model"):
         for table in (doc.get("ai") or {}).values():
             if "model" in table and not _same(table["model"], values["ai_model"]):
@@ -365,18 +446,22 @@ def write_in_place(path: Path, text: str) -> bool:
     return True
 
 
-def apply(values: Dict[str, Any], paths: Optional[List[Path]] = None) -> List[str]:
-    """Write the values into every worker config. Every file is rendered
-    before any is written, so a config that cannot take them changes nothing."""
-    paths = worker_configs() if paths is None else paths
-    rendered = [(p, render(p.read_text(encoding="utf-8"), values)) for p in paths]
+def apply(values: Dict[str, Any], only: Optional[List[Target]] = None) -> List[str]:
+    """Write the values into every worker config (or `only` these). Every file
+    is rendered before any is written, so a config that cannot take them
+    changes nothing."""
+    chosen = targets() if only is None else only
+    rendered = [(p, render(p.read_text(encoding="utf-8"), values, wid)) for wid, p in chosen]
     return [p.name for p, text in rendered if write_in_place(p, text)]
 
 
 def main(argv: List[str]) -> int:
     command = argv[1] if len(argv) > 1 else ""
     if command == "render":
-        sys.stdout.write(render(sys.stdin.read(), load()["values"]))
+        # Named by file, so the deploy needs no copy of the id map.
+        name = argv[3] if len(argv) > 3 and argv[2] == "--config" else None
+        worker_id = next((wid for wid, p in targets() if name and p.name == name), None)
+        sys.stdout.write(render(sys.stdin.read(), load()["values"], worker_id))
         return 0
     if command == "apply":
         changed = apply(load()["values"])

@@ -6,6 +6,7 @@ import {
   FB_REPORT_REASONS,
   cookieUid,
   normalizeFbPoolDraft,
+  totpKey,
   validateFbPoolDraft,
   type FbPoolDraft,
   type FbPoolEventKind,
@@ -13,16 +14,19 @@ import {
 } from '@recycle-erp/shared';
 import { authMiddleware } from '../auth';
 import { getDb, type SqlLike } from '../db';
+import { log } from '../lib/log';
 import { effectiveRole, requireManager } from '../lib/role';
 import { poolKey, sealOrNull, unsealOrEmpty } from '../lib/sealed';
 import type { Env, User } from '../types';
+import { ACCOUNT_ID, WORKER_ID, callFacade } from './coordinator';
 
 // ─── Facebook account pool ────────────────────────────────────────────────────
 // Shared Marketplace logins. Purchasers take, return and report; managers add,
 // import, edit, retire and remove. Every write returns the whole pool, which
 // is dozens of rows, so the page replaces its snapshot instead of patching it.
 // The fleet's own vault (trackers/facebook, worker logins) is a separate store:
-// `fleet` here is a label saying which worker an account went to.
+// `fleet` here says which worker an account went to, and `/assign` is the one
+// route that copies a login across.
 
 type Vars = { user: User; key: Buffer };
 type Tx = SqlLike;
@@ -400,6 +404,67 @@ pool.put('/:no', async (c) => {
     return null;
   });
   if (result) return c.json(result.body, result.status);
+  return c.json(await snapshot(sql, key, user));
+});
+
+// Sends an account's login to a fleet worker: written into the worker's vault
+// account with password login allowed, then a Re-login queued, so the worker
+// signs in inside its own browser, through its own proxy. The login goes
+// server to server; the answer is the pool, which a manager already reads.
+// The cookie stays behind: replayed from the worker's IP it would be a
+// location change on a live session, the signal that gets accounts revoked.
+pool.post('/:no/assign', async (c) => {
+  const no = parseNo(c.req.param('no'));
+  if (no === null) return c.json({ error: 'Not found' }, 404);
+  const body = (await c.req.json().catch(() => null)) as { worker?: unknown; account?: unknown } | null;
+  const worker = body?.worker;
+  if (typeof worker !== 'string' || !WORKER_ID.test(worker)) return c.json({ error: 'Not a valid worker id' }, 400);
+  // The vault account the worker already signs in with, else one named after it.
+  const account = body?.account ?? worker;
+  if (typeof account !== 'string' || !ACCOUNT_ID.test(account)) return c.json({ error: 'Not a valid account id' }, 400);
+
+  const sql = getDb(c.env);
+  const user = c.var.user;
+  const key = c.var.key;
+  const [row] = await sql<Row[]>`SELECT * FROM fb_pool_accounts WHERE no = ${no}`;
+  if (!row) return c.json({ error: 'Not found' }, 404);
+  if (row.status === 'retired') return c.json({ error: 'This account is retired', code: 'fpAssignRetired' }, 409);
+  const [other] = await sql<{ no: number }[]>`
+    SELECT no FROM fb_pool_accounts
+    WHERE status = 'fleet' AND lower(holder_name) = lower(${worker}) AND no <> ${no}`;
+  if (other) return c.json({ error: `#${other.no} is already on ${worker}`, code: 'fpWorkerTaken' }, 409);
+  const password = unsealOrEmpty(row.password_enc, key);
+  if (!password) return c.json({ error: 'This account has no password to sign in with', code: 'fpNoPassword' }, 409);
+
+  // Every secret is set, empty ones cleared: what the worker held before
+  // belongs to the previous account.
+  const orNull = (v: string) => v || null;
+  const write = await callFacade(c.env, 'PUT', `/v1/accounts/${encodeURIComponent(account)}`, {
+    worker_id: worker,
+    fb_username: row.email || row.uid,
+    allow_password_login: true,
+    secrets: {
+      password,
+      totp_secret: orNull(totpKey(unsealOrEmpty(row.totp_enc, key))),
+      email: orNull(row.email),
+      email_password: orNull(unsealOrEmpty(row.email_password_enc, key)),
+    },
+  });
+  if (write.error) return c.json({ error: write.error }, write.status);
+  const relogin = await callFacade(c.env, 'POST', `/v1/workers/${encodeURIComponent(worker)}/relogin`);
+  if (relogin.error) return c.json({ error: `The login reached ${worker}, but Re-login was not queued: ${relogin.error}` }, relogin.status);
+  log.info('fleet worker given a pool login', { module: 'facebookPool', accountNo: no, workerId: worker, by: user.email });
+
+  await sql.begin(async (tx) => {
+    await tx`
+      UPDATE fb_pool_accounts SET
+        status = 'fleet', holder_user_id = NULL, holder_name = ${worker},
+        held_since = CASE WHEN status = 'fleet' AND lower(holder_name) = lower(${worker})
+                          THEN held_since ELSE NOW() END,
+        updated_at = NOW()
+      WHERE no = ${no}`;
+    await writeEvent(tx, user, 'assigned', 'fleet', no, worker);
+  });
   return c.json(await snapshot(sql, key, user));
 });
 

@@ -190,6 +190,10 @@ export const poolApi = {
     api.post<{ ok: true }>(`${BASE}/${no}/events`, { kind, field }),
   create: (draft: PoolDraft, batch: string) => api.post<PoolSnapshot>(BASE, { draft, batch }),
   update: (no: number, draft: PoolDraft) => api.put<PoolSnapshot>(`${BASE}/${no}`, { draft }),
+  // The login goes to the worker server-side; nothing secret comes back.
+  // `account` is the worker's existing vault account, when it has one.
+  assign: (no: number, worker: string, account?: string) =>
+    api.post<PoolSnapshot>(`${BASE}/${no}/assign`, { worker, account }),
   retire: (no: number) => api.post<PoolSnapshot>(`${BASE}/${no}/retire`, {}),
   remove: (no: number) => api.delete<PoolSnapshot>(`${BASE}/${no}`),
   importRows: (batch: string, rows: PoolDraft[]) =>

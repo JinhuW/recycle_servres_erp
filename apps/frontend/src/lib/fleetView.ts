@@ -3,7 +3,7 @@
 // city, the derived activity feed and the pipeline's stages.
 // Kept out of the components so they can be unit-tested without React.
 
-import type { AlertHitRow, Challenge, FleetAccount, FleetDoc, ReviewStatsDay, SearchSettingsWrite } from './coordinator';
+import type { AlertHitRow, Challenge, CityWrite, FleetAccount, FleetDoc, ReviewStatsDay, SearchSettingsWrite } from './coordinator';
 import { ruleLines } from './keywordRules';
 
 export type AccountLiveness = 'live' | 'stale' | 'dead' | 'unknown' | 'none';
@@ -525,4 +525,33 @@ export function vaultAccountIdFor(w: FleetAccount): string {
 // itself only with a password stored AND password login allowed.
 export function reloginWouldBeAutomatic(allowPasswordLogin: boolean, passwordStored: boolean): boolean {
   return allowPasswordLogin && passwordStored;
+}
+
+// ── A worker's cities ─────────────────────────────────────────────────────────
+
+// The monitor's rule for a Marketplace location: the segment after
+// /marketplace/ in a search URL, a slug or a numeric id. Lowercased first,
+// as the console does.
+export const normalizeCitySlug = (raw: string): string => raw.trim().toLowerCase();
+export const isCitySlug = (slug: string): boolean => /^[a-z0-9][a-z0-9_-]{0,63}$/.test(slug);
+
+// Where to check by eye that a slug is the place it claims: a wrong one
+// silently searches the account's own area instead.
+export const marketplaceCityUrl = (slug: string): string =>
+  `https://www.facebook.com/marketplace/${encodeURIComponent(slug)}/`;
+
+// Every city another worker searches, by slug. Those workers send their
+// alerts straight to Telegram, so a city two workers share alerts twice.
+export function cityOwners(fleet: FleetDoc, workerId: string): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const w of fleet.workers) {
+    if (w.worker_id === workerId || w.source === 'unconfigured') continue;
+    for (const c of w.cities) out.set(c.slug, [...(out.get(c.slug) ?? []), w.worker_id]);
+  }
+  return out;
+}
+
+export function citiesDiffer(a: readonly CityWrite[], b: readonly CityWrite[]): boolean {
+  return a.length !== b.length
+    || a.some((c, i) => c.slug !== b[i].slug || c.name !== b[i].name || c.radius !== b[i].radius);
 }

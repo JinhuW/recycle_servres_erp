@@ -56,7 +56,7 @@ step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 # predates saved settings has none, so the tree's copy is then the answer.
 render_config() {
     if ssh "$VM" "docker exec rs-console python -c 'import rs_console.settings'" >/dev/null 2>&1; then
-        ssh "$VM" "docker exec -i rs-console python -m rs_console.settings render" < "$1"
+        ssh "$VM" "docker exec -i rs-console python -m rs_console.settings render --config $(basename "$1")" < "$1"
     else
         cat "$1"
     fi
@@ -193,9 +193,14 @@ rsync -az --delete --itemize-changes --filter="merge scripts/deploy.rsync-filter
 step "worker configs, through rs-console"
 CONSOLE_BUILD=""
 [ "$MODE" = "sync" ] || CONSOLE_BUILD="--build"
+# A new worker's config must exist before the console mounts it: Docker turns
+# a missing single-file mount source into a directory.
+for config in configs/homelab*.toml; do
+    ssh "$VM" "[ -e $REMOTE/$config ] || cat > $REMOTE/$config" < "$config"
+done
 ssh "$VM" "cd $REMOTE && docker compose -f deploy/docker-compose.console.yml up -d $CONSOLE_BUILD --force-recreate console"
 for config in configs/homelab*.toml; do
-    ssh "$VM" "out=\$(mktemp) && docker exec -i rs-console python -m rs_console.settings render > \$out && cat \$out > $REMOTE/$config && rm -f \$out" < "$config"
+    ssh "$VM" "out=\$(mktemp) && docker exec -i rs-console python -m rs_console.settings render --config $(basename "$config") > \$out && cat \$out > $REMOTE/$config && rm -f \$out" < "$config"
     echo "  $config"
 done
 
