@@ -2,13 +2,13 @@
 id: RS-258
 title: Facebook deploy must not delete VM-only files or push dev-only logins
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-16
 reporter: jinhu
 branch: fix/fb-deploy-rsync-filter
-pr:
-version:
+pr: 661
+version: n/a — trackers/facebook [Unreleased]
 related: [RS-256]
 ---
 
@@ -43,21 +43,21 @@ so excluding it is safe.
 `scripts/tests/test-deploy-filter.sh` proves each of these by running rsync
 with the shared filter file from a fake dev tree into a fake VM tree:
 
-- [ ] VM-only files survive a deploy from a checkout that lacks them:
+- [x] VM-only files survive a deploy from a checkout that lacks them:
       `configs/secrets.homelab-x.env`, `configs/secrets.env.bak-1`,
       `configs/proxies.decodo.txt`, `configs/accounts/` with its contents, and
       `configs/generated/w.toml`.
-- [ ] A dev copy never overwrites a VM-owned file: `secrets.homelab-y.env`,
+- [x] A dev copy never overwrites a VM-owned file: `secrets.homelab-y.env`,
       `proxies.decodo.txt` and `generated/z.toml` keep the VM's content.
-- [ ] Dev-only files never reach the VM: `configs/account_info.txt`,
+- [x] Dev-only files never reach the VM: `configs/account_info.txt`,
       `configs/account_info.txt.bak` and `configs/data.txt`.
-- [ ] The old rules still hold: `configs/secrets.env` and `configs/sessions/`
+- [x] The old rules still hold: `configs/secrets.env` and `configs/sessions/`
       are neither sent nor deleted, `logs/` and `data/` are not sent, and
       `*.png` is not sent.
-- [ ] A normal sync still works: the tracked `configs/secrets.env.example` and
+- [x] A normal sync still works: the tracked `configs/secrets.env.example` and
       `configs/master.toml` arrive with dev's content, and a file removed on
       dev (`scripts/old.sh`) is deleted on the VM.
-- [ ] `deploy.sh` reads its rules from `scripts/deploy.rsync-filter`, and
+- [x] `deploy.sh` reads its rules from `scripts/deploy.rsync-filter`, and
       `release.sh` runs the new test.
 
 ## Out of scope
@@ -100,3 +100,8 @@ dev. It flags `const TOKEN_KEY = 'rs-console-token'` in
 `rs_console/rs_console/static/fleet.js` and `vnc.js`. Those are localStorage
 key names, not secrets, but `release.sh` stops at its first gate until they
 carry `pragma: allowlist secret`.
+
+**`dev` was deleted while this PR was being opened.** Merging release PR
+#656 deleted it, because `delete_branch_on_merge` removes every merged PR's
+head branch. It was restored and deletion-protected, and this PR carries
+`docs/debug-notes/2026-10-16-auto-delete-head-branch-deleted-dev.md`.
