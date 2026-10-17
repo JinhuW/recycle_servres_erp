@@ -351,6 +351,38 @@ describe('facebook account pool', () => {
       expect((await api('POST', `${BASE}/1/assign`, { token: marcus, env: ENV, body: { worker: 'va-1' } })).status).toBe(403);
       expect(spy).not.toHaveBeenCalled();
     });
+
+    it('moves the account a worker held to the status the caller names', async () => {
+      const token = await manager();
+      await seedPool(token, 3);
+      await api('PUT', `${BASE}/1`, { token, body: { draft: draft(1, { status: 'fleet', holder: 'nyc-1' }) } });
+      expect((await api('POST', `${BASE}/2/assign`, {
+        token, env: ENV, body: { worker: 'nyc-1', previous: 'taken' },
+      })).status).toBe(400);
+
+      stubFacade([200, {}], [202, {}]);
+      const r = await api<Snapshot>('POST', `${BASE}/2/assign`, {
+        token, env: ENV, body: { worker: 'nyc-1', previous: 'problem' },
+      });
+      expect(r.status).toBe(200);
+      const byNo = new Map(r.body.accounts.map((a) => [a.no, a]));
+      expect(byNo.get(2)).toMatchObject({ status: 'fleet', holder: 'nyc-1' });
+      // A problem account keeps naming the worker it failed on.
+      expect(byNo.get(1)).toMatchObject({ status: 'problem', holder: 'nyc-1' });
+      // Both lines share the transaction's NOW(), so their order is not fixed.
+      expect(r.body.activity.slice(0, 2)).toEqual(expect.arrayContaining([
+        expect.objectContaining({ action: 'reported', accountNo: 1, detail: 'replaced by #2 on nyc-1' }),
+        expect.objectContaining({ action: 'assigned', accountNo: 2, detail: 'nyc-1' }),
+      ]));
+
+      stubFacade([200, {}], [202, {}]);
+      const back = await api<Snapshot>('POST', `${BASE}/3/assign`, {
+        token, env: ENV, body: { worker: 'nyc-1', previous: 'available' },
+      });
+      expect(back.status).toBe(200);
+      expect(back.body.accounts.find((a) => a.no === 2)).toMatchObject({ status: 'available', holder: null, since: null });
+      expect(back.body.accounts.find((a) => a.no === 1)).toMatchObject({ status: 'problem' });
+    });
   });
 
   it('keeps the manager routes from purchasers and refuses everything without a key in production', async () => {

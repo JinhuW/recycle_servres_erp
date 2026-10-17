@@ -1,10 +1,14 @@
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Icon } from '../../components/Icon';
 import { Modal } from '../../components/Modal';
 import { coordinatorApi, type FleetAccount, type FleetCity, type WorkerState } from '../../lib/coordinator';
 import { handleFetchError, showSuccessToast } from '../../lib/errorToast';
 import {
-  isUnstampedBuild, reloginIsAutomatic, reloginWouldBeAutomatic, searchesPerDay, splitHighlights, vaultAccountIdFor,
+  PREVIOUS_FATES, cookieHealth, heldByWorker, installCandidates, poolApi,
+  type PoolAccount, type PreviousFate,
+} from '../../lib/facebookPool';
+import {
+  isUnstampedBuild, reloginIsAutomatic, searchesPerDay, splitHighlights, vaultAccountIdFor,
   type AccountLiveness, type CityHits,
 } from '../../lib/fleetView';
 import { useT } from '../../lib/i18n';
@@ -16,7 +20,7 @@ import { fleetWatchPath, hrefFor, onLinkClick } from '../../lib/route';
 // (FleetWorker.tsx) and the viewer share: highlighted text, state and
 // liveness chips, a city chip with its alert count, the build chip, and the
 // three actions the control plane can take today — watch the browser, queue a
-// re-login, and set the credentials Re-login signs in with.
+// re-login, and assign the pool account Re-login signs in with.
 
 export const HITS_DAYS = 7;
 
@@ -147,12 +151,13 @@ export function ReloginButton({ workerId, account, onQueued, className = 'btn sm
   );
 }
 
-// ─── Edit credentials ─────────────────────────────────────────────────────────
-// What a worker signs in with when Re-login runs, set from here instead of
-// `rsc vault set-account` on the VM. Secrets are write-only end to end: the
-// form shows whether one is stored and never its value; a box left blank keeps
-// what is stored; "clear" sends an explicit null. Saving refreshes the fleet
-// view, so the stored-secret badges and the Re-login dialog follow at once.
+// ─── Assign account ───────────────────────────────────────────────────────────
+// What a worker signs in with comes from the account pool: the manager picks a
+// spare and the backend writes its login into the worker's vault, marks it
+// Fleet and queues Re-login (`/api/facebook-pool/:no/assign`). Nothing is typed
+// here, so the pool and the vault can't drift. A worker that already holds a
+// pool account needs a decision about where that one goes — there is no
+// default, because "it broke" and "we're rotating" end in different places.
 
 export function EditCredentialsButton({ account, onSaved, className = 'btn sm' }: {
   account: FleetAccount;
@@ -176,76 +181,52 @@ export function EditCredentialsButton({ account, onSaved, className = 'btn sm' }
   );
 }
 
+const FATE_KEYS: Record<PreviousFate, string> = {
+  available: 'fbcCredFateAvailable',
+  problem: 'fbcCredFateProblem',
+  retired: 'fbcCredFateRetired',
+};
+
 function EditCredentialsModal({ account: w, onClose, onSaved }: {
   account: FleetAccount; onClose: () => void; onSaved: () => void;
 }) {
   const { t } = useT();
   const acct = w.account;
   const accountId = vaultAccountIdFor(w);
-  const passwordStored = Boolean(acct?.secrets.password);
-  const totpStored = Boolean(acct?.secrets.totp_secret);
-  const [login, setLogin] = useState(acct?.fb_username ?? '');
-  const [password, setPassword] = useState('');
-  const [clearPassword, setClearPassword] = useState(false);
-  const [totp, setTotp] = useState('');
-  const [clearTotp, setClearTotp] = useState(false);
-  const [allowPw, setAllowPw] = useState(acct?.allow_password_login ?? false);
+  const [pool, setPool] = useState<PoolAccount[] | null>(null);
+  const [query, setQuery] = useState('');
+  const [pick, setPick] = useState<number | null>(null);
+  const [fate, setFate] = useState<PreviousFate | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // What will be true once this form is saved, so the note below is a
-  // promise the worker can keep.
-  const passwordAfter = clearPassword ? false : (password.length > 0 || passwordStored);
-  const automatic = reloginWouldBeAutomatic(allowPw, passwordAfter);
+  useEffect(() => {
+    poolApi.snapshot().then(s => setPool(s.accounts)).catch(e => { handleFetchError(e); setPool([]); });
+  }, []);
+
+  const held = pool ? heldByWorker(pool, w.worker_id) : undefined;
+  const candidates = pool ? installCandidates(pool, query) : [];
+  const picked = candidates.find(a => a.no === pick);
+  const ready = !!picked && (!held || fate !== null);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (busy) return;
-    const secrets: Partial<Record<'password' | 'totp_secret', string | null>> = {};
-    if (clearPassword) secrets.password = null;
-    else if (password) secrets.password = password;
-    if (clearTotp) secrets.totp_secret = null;
-    else if (totp.trim()) secrets.totp_secret = totp.trim();
+    if (busy || !ready || !picked) return;
     setBusy(true);
-    coordinatorApi.saveAccount(accountId, {
-      worker_id: w.worker_id,
-      fb_username: login.trim(),
-      allow_password_login: allowPw,
-      secrets,
-    })
+    poolApi.assign(picked.no, w.worker_id, acct ? accountId : undefined, held ? fate ?? undefined : undefined)
       .then(() => {
-        showSuccessToast(t('fbcCredSaved', { id: w.worker_id }));
+        showSuccessToast(t('fpAssignedToast', { n: picked.no, id: w.worker_id }));
         onSaved();
       })
       .catch(handleFetchError)
       .finally(() => setBusy(false));
   };
 
-  const field = (label: string, hint: string | undefined, control: ReactNode) => (
-    <label style={{ display: 'grid', gap: 4 }}>
-      <span style={{ fontSize: 12.5, color: 'var(--fg-muted)' }}>{label}</span>
-      {control}
-      {hint && <span className="muted" style={{ fontSize: 11.5 }}>{hint}</span>}
-    </label>
-  );
-  const secretBox = (
-    value: string, setValue: (v: string) => void, stored: boolean,
-    clear: boolean, setClear: (v: boolean) => void, autoComplete: string,
-  ) => (
-    <>
-      <input type="password" className="input" value={value} autoComplete={autoComplete}
-        placeholder={stored ? t('fbcCredStored') : t('fbcCredNotStored')}
-        disabled={clear} onChange={e => setValue(e.target.value)} />
-      {stored && (
-        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12.5 }}>
-          <input type="checkbox" checked={clear} onChange={e => setClear(e.target.checked)} />
-          {t('fbcCredClear')}
-        </label>
-      )}
-    </>
-  );
+  const current = held
+    ? `#${held.no} · ${held.email || held.uid}`
+    : acct?.fb_username ? t('fbcCredNotFromPool', { login: acct.fb_username }) : t('fbcCredNone');
 
   return (
-    <Modal onClose={() => { if (!busy) onClose(); }} shellStyle={{ maxWidth: 480 }}>
+    <Modal onClose={() => { if (!busy) onClose(); }} shellStyle={{ maxWidth: 640 }}>
       <form onSubmit={submit}>
         <div className="modal-head">
           <div>
@@ -254,34 +235,77 @@ function EditCredentialsModal({ account: w, onClose, onSaved }: {
         </div>
         <div className="modal-body" style={{ display: 'grid', gap: 14 }}>
           <p style={{ margin: 0, fontSize: 13.5, color: 'var(--fg-muted)' }}>{t('fbcCredIntro')}</p>
+          <div style={{ fontSize: 13.5 }}>
+            <span className="muted">{t('fbcCredCurrent')}</span> {current}
+          </div>
           {!acct && (
             <div className="card-note" style={{ padding: '10px 12px' }}>
               <Icon name="info" size={16} />
               <span>{t('fbcCredNewAccount', { id: accountId })}</span>
             </div>
           )}
-          {field(t('fbcCredLogin'), t('fbcCredLoginHint'),
-            <input type="text" className="input" value={login} autoComplete="off"
-              onChange={e => setLogin(e.target.value)} />)}
-          {field(t('fbcCredPassword'), undefined,
-            secretBox(password, setPassword, passwordStored, clearPassword, setClearPassword, 'new-password'))}
-          {field(t('fbcCredTotp'), t('fbcCredTotpHint'),
-            secretBox(totp, setTotp, totpStored, clearTotp, setClearTotp, 'off'))}
-          <label style={{ display: 'grid', gap: 4 }}>
-            <span style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13.5 }}>
-              <input type="checkbox" checked={allowPw} onChange={e => setAllowPw(e.target.checked)} />
-              {t('fbcCredAllowPw')}
-            </span>
-            <span className="muted" style={{ fontSize: 11.5 }}>{t('fbcCredAllowPwHint')}</span>
-          </label>
+          <input type="search" className="input" value={query} placeholder={t('fbcCredSearch')}
+            onChange={e => setQuery(e.target.value)} />
+          <div style={{ maxHeight: 280, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
+            {pool === null ? (
+              <div className="muted" style={{ padding: 12, fontSize: 13 }}>{t('fbcCredLoading')}</div>
+            ) : candidates.length === 0 ? (
+              <div className="muted" style={{ padding: 12, fontSize: 13 }}>{t('fbcCredNoSpares')}</div>
+            ) : (
+              <table className="table" style={{ width: '100%' }}>
+                <tbody>
+                  {candidates.map(a => {
+                    const cookie = cookieHealth(a);
+                    return (
+                      <tr key={a.no} onClick={() => setPick(a.no)} style={{ cursor: 'pointer' }}>
+                        <td style={{ width: 28 }}>
+                          <input type="radio" name="pool-account" checked={pick === a.no}
+                            onChange={() => setPick(a.no)} aria-label={`#${a.no}`} />
+                        </td>
+                        <td className="mono">#{a.no}</td>
+                        <td>
+                          <div>{a.email || a.uid}</div>
+                          {a.email && <div className="mono muted" style={{ fontSize: 11.5 }}>{a.uid}</div>}
+                        </td>
+                        <td>
+                          <span className={`chip ${a.totp ? 'pos' : 'muted'}`}>{a.totp ? '2FA' : t('fbcCredNo2fa')}</span>
+                        </td>
+                        <td className="muted" style={{ fontSize: 12 }}>
+                          {cookie.kind === 'fresh' || cookie.kind === 'stale'
+                            ? t('fbcCredCookieAge', { days: cookie.days })
+                            : t('fbcCredNoCookie')}
+                        </td>
+                        <td className="muted" style={{ fontSize: 12 }}>{a.batch}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+          {picked && held && (
+            <fieldset style={{ border: 0, padding: 0, margin: 0, display: 'grid', gap: 6 }}>
+              <legend style={{ fontSize: 13.5, marginBottom: 6 }}>
+                {t('fbcCredFateQuestion', { n: held.no })}
+              </legend>
+              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                {PREVIOUS_FATES.map(f => (
+                  <label key={f} style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13.5 }}>
+                    <input type="radio" name="previous-fate" checked={fate === f} onChange={() => setFate(f)} />
+                    {t(FATE_KEYS[f])}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          )}
           <div className="card-note" style={{ padding: '10px 12px' }}>
-            <Icon name={automatic ? 'check' : 'info'} size={16} />
-            <span>{automatic ? t('fbcCredWillBeAutomatic') : t('fbcCredWillBeManual')}</span>
+            <Icon name="info" size={16} />
+            <span>{t('fbcCredReloginNote')}</span>
           </div>
         </div>
         <div className="modal-foot" style={{ justifyContent: 'flex-end' }}>
           <button type="button" className="btn" disabled={busy} onClick={onClose}>{t('cancel')}</button>
-          <button type="submit" className="btn primary" disabled={busy}>{t('save')}</button>
+          <button type="submit" className="btn primary" disabled={busy || !ready}>{t('fbcCredAssign')}</button>
         </div>
       </form>
     </Modal>
