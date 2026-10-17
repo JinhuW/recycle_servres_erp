@@ -2121,14 +2121,18 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   Facebook login and user id, vault account and stored secrets by name,
   session expiry, browser and backup, proxy, cities, pacing, session file and
   build, its open checkpoints (capture, Watch, Mark resolved) and its recent
-  events, and the actions — **Watch browser**, **Re-login** and **Edit
-  credentials**. The credentials form sets the worker's Facebook login,
-  password, 2FA (TOTP) secret and whether password login is allowed, the
-  credentials Re-login then signs in with; secrets are write-only (the form
-  shows only whether one is stored; blank keeps it, "clear" removes it), a
-  worker without a vault account gets one named after it, and the form says
-  before saving whether Re-login will finish by itself or still needs the
-  login finished in Watch (v1.259.0). The data is the rs-console facade's
+  events, and the actions — **Watch browser**, **Re-login** and **Assign
+  account**. Since v1.275.0 the worker's login comes only from the account
+  pool (RS-276): the dialog lists the available pool accounts that have a
+  password (search by #, UID, e-mail or batch; 2FA, cookie age and batch
+  shown) and assigning one sends its login to the worker the same way the
+  pool page does — vault written with password login allowed, Re-login
+  queued, account marked Fleet. If the worker already holds a pool account,
+  the dialog asks where that one goes — back to Available, to Problem (still
+  naming the worker) or Retired — with no default, and both moves land
+  together. A worker without a vault account gets one named after it. Until
+  then (v1.259.0) the login, password and 2FA secret were typed into a
+  credentials form. The data is the rs-console facade's
   `/v1/fleet` document, checkpoints, review stats, alert hits and prompt
   through the manager-only `/api/coordinator` proxy; without the proxy's
   credentials the tab says so and the rest of the ERP is unaffected
