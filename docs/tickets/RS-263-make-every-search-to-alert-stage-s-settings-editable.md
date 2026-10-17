@@ -2,12 +2,12 @@
 id: RS-263
 title: Make every search-to-alert stage's settings editable from the ERP
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-10-17
 reporter: jinhu
 branch: feat/editable-stage-config
-pr:
+pr: 672
 version: 1.265.0
 related: [RS-261, RS-262]
 ---
