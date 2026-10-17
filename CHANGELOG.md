@@ -17,6 +17,25 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.280.0] - 2026-10-17
+
+### Added
+
+- **The account pool checks itself on Facebook every week** (RS-284). Until
+  now a pool account changed status only when someone acted on it, so an
+  account Facebook had disabled sat as Available until a purchaser took it and
+  found out. A backend loop now looks up every Available, Taken and Fleet
+  account at Facebook's public profile-picture endpoint once a week. The lookup
+  is anonymous, no login and no token. A real account answers with a photo,
+  and a disabled or deleted one with a placeholder or "does not exist". A dead
+  account moves to Needs attention with a "Weekly check · disabled" line in the
+  ledger. A lookup that fails or can't be read changes nothing and is retried
+  on the next hourly tick. The week is kept per account in
+  `fb_pool_accounts.alive_checked_at` (migration 0184), not in a timer, so
+  deploys don't restart it. Each account is claimed before it is probed, so two
+  instances never probe the same one. A manager's edit made during a pass
+  wins. The account's detail panel shows when it was last checked.
+
 ## [1.279.0] - 2026-10-17
 
 ### Changed

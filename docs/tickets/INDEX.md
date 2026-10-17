@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-284](./RS-284-weekly-liveness-check-for-the-facebook-account-pool.md) | in-progress | story | P2 | Weekly liveness check for the Facebook account pool | — |
 | [RS-282](./RS-282-click-a-pool-table-cell-to-copy-it-edit-icon-opens-t.md) | done | story | P2 | Click a pool table cell to copy it; edit icon opens the editor | 1.279.0 |
 | [RS-281](./RS-281-fleet-worker-page-shows-the-proxy-url-exit-ip-and-ci.md) | done | story | P2 | Fleet worker page shows the proxy URL, exit IP and city | 1.278.0 |
 | [RS-280](./RS-280-re-login-starts-within-seconds-and-shows-its-progres.md) | in-progress | story | P2 | Re-login starts within seconds and shows its progress on Watch | 1.277.0 |
