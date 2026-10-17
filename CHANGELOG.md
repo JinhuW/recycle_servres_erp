@@ -17,6 +17,34 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.272.0] - 2026-10-17
+
+A worker's cities and its Facebook login are now both set from the ERP, so
+the four new fleet workers on the spare Decodo ports (RS-275) are set up from
+**Monitors ▸ Facebook** rather than in TOML files and `rsc` on the VM. Needs
+facebook-tracker 0.7.0.
+
+### Added
+
+- **Edit cities on a worker's page.** Cities come from the regions or are
+  typed as a Marketplace location (slug or numeric id, name, radius). A city
+  another worker already searches is amber, because the regional workers
+  alert straight to Telegram and a shared city would alert twice. Each city
+  links to its Marketplace page, because a wrong slug fails silently:
+  Facebook searches the account's own area instead. The save goes through
+  the new `PUT /api/coordinator/workers/:id/cities` into that worker's config
+  only.
+- **Assigning a pool account to a worker now gives the worker its login.**
+  Saving a newly picked worker in the account editor, or **Send the login
+  again**, writes the account's login, password, 2FA key and e-mail into the
+  worker's vault account with password login allowed, then queues Re-login.
+  The worker signs in inside its own browser, through its own proxy, so the
+  session starts on the IP it keeps. The cookie is not sent, because
+  replaying it from a new IP is the kind of location change that gets
+  accounts revoked. The login moves server to server
+  (`POST /api/facebook-pool/:no/assign`), and the pool's activity records an
+  `assigned` event (migration 0183).
+
 ## [1.271.3] - 2026-10-17
 
 Fixes from the review of the pending release (RS-274).

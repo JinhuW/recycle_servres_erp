@@ -44,6 +44,7 @@ Forwarded today:
 - `PUT /v1/accounts/{id}` (credentials write)
 - `PUT /v1/config/settings` (search settings; `rs_console/settings.py` lists
   the keys, and the README's *Settings saved from the ERP* says where they live)
+- `PUT /v1/workers/{id}/cities` (one worker's cities, into its own config)
 - the VNC websocket
 
 Renaming or reshaping any of these is a change to both sides (root AGENTS.md →

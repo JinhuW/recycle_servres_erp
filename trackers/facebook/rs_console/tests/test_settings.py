@@ -199,3 +199,109 @@ def test_a_corrupt_state_file_is_an_error_not_empty(env):
     with pytest.raises(settings.SettingsError):
         settings.load()
     assert env["client"].get("/v1/fleet", headers=AUTH).json()["settings"]["editable"] is False
+
+
+# ── One worker's cities ────────────────────────────────────────────────────────
+
+CITIES = [
+    {"slug": "longisland", "name": "Long Island, NY", "radius": 60},
+    {"slug": "108398645850982", "name": "Newark, NJ", "radius": 100},
+]
+
+
+@pytest.fixture()
+def named(env, monkeypatch):
+    """The same two configs, named by worker id the way the console compose does."""
+    home, ne = env["workers"]
+    monkeypatch.setenv("RS_WORKER_CONFIGS", f"homelab-1={home}, nyc-1={ne}")
+    return env
+
+
+def test_cities_go_into_that_workers_config_only(named):
+    home, ne = named["workers"]
+    before_home, inode = home.read_text(), os.stat(ne).st_ino
+    res = named["client"].put(
+        "/v1/workers/nyc-1/cities",
+        json={"cities": [{**CITIES[0], "slug": " LongIsland "}, CITIES[1]], "updated_by": "Jinhu"},
+        headers=AUTH,
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["changed"] == ["homelab-ne.toml"]
+    assert res.json()["cities"][0]["slug"] == "longisland"
+
+    assert home.read_text() == before_home
+    assert os.stat(ne).st_ino == inode, "a replaced file is invisible to a bind mount"
+    fb = tomllib.loads(ne.read_text())["marketplace"]["facebook"]
+    assert fb["search_city"] == ["longisland", "108398645850982"]
+    assert fb["city_name"] == ["Long Island, NY", "Newark, NJ"]
+    assert fb["radius"] == [60, 100]
+    assert fb["proxy_server"] == "${PROXY_HOMELAB}"
+    saved = json.loads(named["state"].read_text())
+    assert saved["values"]["workers"]["nyc-1"]["cities"][1]["name"] == "Newark, NJ"
+
+
+def test_a_fleet_wide_save_keeps_each_workers_cities(named):
+    client = named["client"]
+    client.put("/v1/workers/nyc-1/cities", json={"cities": CITIES}, headers=AUTH)
+    client.put("/v1/config/settings", json={"search": {"rating": 3}}, headers=AUTH)
+    fb = tomllib.loads(named["workers"][1].read_text())["marketplace"]["facebook"]
+    assert (fb["rating"], fb["search_city"]) == (3, ["longisland", "108398645850982"])
+    assert "search_city" not in tomllib.loads(named["workers"][0].read_text())["marketplace"]["facebook"]
+
+
+def test_fleet_describes_a_named_worker_from_its_config(named):
+    client = named["client"]
+    client.put("/v1/workers/nyc-1/cities", json={"cities": CITIES}, headers=AUTH)
+    workers = {w["worker_id"]: w for w in client.get("/v1/fleet", headers=AUTH).json()["workers"]}
+    nyc = workers["nyc-1"]
+    assert nyc["cities_editable"] is True
+    assert nyc["source"] == "config"
+    assert [c["slug"] for c in nyc["cities"]] == ["longisland", "108398645850982"]
+    assert nyc["cities"][0] == {"slug": "longisland", "name": "Long Island, NY", "radius_km": 60}
+    assert nyc["region"]["scope"] == "custom"
+
+
+def test_an_unnamed_config_has_no_editable_cities(env):
+    assert env["client"].put("/v1/workers/nyc-1/cities", json={"cities": CITIES}, headers=AUTH).status_code == 404
+    workers = env["client"].get("/v1/fleet", headers=AUTH).json()["workers"]
+    assert all(w["cities_editable"] is False for w in workers)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"cities": []},
+        {"cities": [{"slug": "New York", "name": "NY", "radius": 60}]},
+        {"cities": [{"slug": "../etc", "name": "x", "radius": 60}]},
+        {"cities": [CITIES[0], CITIES[0]]},
+        {"cities": [{**CITIES[0], "radius": 0}]},
+        {"cities": [{**CITIES[0], "radius": True}]},
+        {"cities": [{**CITIES[0], "name": " "}]},
+        {"cities": [{**CITIES[0], "proxy": "http://evil"}]},
+        {"cities": CITIES, "proxy_server": "http://evil"},
+        {"cities": "nyc"},
+        [],
+    ],
+)
+def test_bad_cities_are_a_400_and_write_nothing(named, body):
+    before = [w.read_text() for w in named["workers"]]
+    res = named["client"].put("/v1/workers/nyc-1/cities", json=body, headers=AUTH)
+    assert res.status_code == 400, body
+    assert res.json()["detail"]
+    assert [w.read_text() for w in named["workers"]] == before
+    assert not named["state"].exists()
+
+
+def test_cities_need_the_token(named):
+    assert named["client"].put("/v1/workers/nyc-1/cities", json={"cities": CITIES}).status_code == 401
+
+
+def test_render_cli_writes_the_named_workers_cities(named, monkeypatch, capsys):
+    settings.save(settings.stamp({"workers": {"nyc-1": {"cities": CITIES}}}, "x"))
+    monkeypatch.setattr("sys.stdin", __import__("io").StringIO(MASTER))
+    assert settings.main(["settings", "render", "--config", "homelab-ne.toml"]) == 0
+    fb = tomllib.loads(capsys.readouterr().out)["marketplace"]["facebook"]
+    assert fb["search_city"] == ["longisland", "108398645850982"]
+    monkeypatch.setattr("sys.stdin", __import__("io").StringIO(MASTER))
+    assert settings.main(["settings", "render"]) == 0
+    assert capsys.readouterr().out == MASTER
