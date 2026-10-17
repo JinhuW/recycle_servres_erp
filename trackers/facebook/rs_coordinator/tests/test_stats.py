@@ -165,3 +165,98 @@ def test_direct_alert_report_counts_once_per_alert(client):
     # message 8 (part 1) counted once despite the retry; part 2 not at all.
     days = client.get("/v1/stats/reviews", headers=ADMIN_AUTH).json()["days"]
     assert days == [row(today(), coordinated=1, sent=1)]
+
+
+# -- per-worker review rows ---------------------------------------------------
+
+
+def test_worker_review_rows_keep_workers_apart(client):
+    client.post(
+        "/v1/stats/reviews",
+        json={"worker_id": "denver-1", "searches": 3, "reviewed": 12, "alerted": 1},
+        headers=WORKER_AUTH,
+    )
+    report(client, 3, 2, worker_id="ne-1")
+
+    res = client.get("/v1/stats/reviews/workers?days=2", headers=ADMIN_AUTH)
+    assert res.status_code == 200
+    rows = res.json()["rows"]
+    assert [r["worker_id"] for r in rows] == ["denver-1", "ne-1"]
+    denver = {k: v for k, v in rows[0].items() if k not in ("worker_id", "updated_at")}
+    assert denver == row(today(), searches=3, reviewed=12, alerted=1)
+    # When the row last moved: the end of a sweep on the fleet table.
+    assert rows[0]["updated_at"].startswith(today())
+
+
+def test_worker_review_rows_are_admin_only(client):
+    assert client.get("/v1/stats/reviews/workers", headers=WORKER_AUTH).status_code == 401
+
+
+# -- search cycles -------------------------------------------------------------
+
+
+def heartbeat(client, last_search_at, item="server_ram", worker_id="denver-1"):
+    return client.post(
+        "/v1/heartbeat",
+        json={
+            "worker_id": worker_id,
+            "state": "HEALTHY",
+            "last_search_at": last_search_at,
+            "detail": {"item": item},
+        },
+        headers=WORKER_AUTH,
+    )
+
+
+def cycle_rows(client, hours=48):
+    res = client.get(f"/v1/stats/search-cycles?hours={hours}", headers=ADMIN_AUTH)
+    assert res.status_code == 200
+    return res.json()["rows"]
+
+
+def test_a_new_last_search_at_logs_one_cycle(client):
+    stamp = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat().replace("+00:00", "Z")
+    # The repeater re-sends the same stamp: one cycle, not three.
+    for _ in range(3):
+        assert heartbeat(client, stamp).status_code == 200
+
+    rows = cycle_rows(client)
+    assert len(rows) == 1
+    assert rows[0]["item"] == "server_ram"
+    # Stored in utcnow()'s form, so string comparison against cutoffs holds.
+    assert rows[0]["at"].endswith("+00:00")
+
+    later = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    heartbeat(client, later, item="enterprise_ssd")
+    assert [r["item"] for r in cycle_rows(client)] == ["server_ram", "enterprise_ssd"]
+
+
+def test_a_heartbeat_without_a_search_stamp_logs_nothing(client):
+    client.post(
+        "/v1/heartbeat", json={"worker_id": "denver-1", "state": "HEALTHY"}, headers=WORKER_AUTH
+    )
+    assert cycle_rows(client) == []
+
+
+def test_search_cycle_window_and_pruning(client):
+    db = client.db
+    old = (datetime.now(timezone.utc) - timedelta(days=20)).isoformat(timespec="seconds")
+    yesterday = (datetime.now(timezone.utc) - timedelta(hours=30)).isoformat(timespec="seconds")
+    with db.cursor() as cur:
+        cur.execute(
+            "INSERT INTO search_cycles (worker_id, at, item) VALUES (?, ?, ?)",
+            ("denver-1", old, "server_ram"),
+        )
+    db.log_search_cycle("denver-1", yesterday, "server_ram")
+
+    assert len(cycle_rows(client, hours=48)) == 1
+    assert len(cycle_rows(client, hours=24)) == 0
+    # The insert above pruned the 20-day-old row.
+    assert len(cycle_rows(client, hours=24 * 14)) == 1
+    with db.cursor() as cur:
+        cur.execute("SELECT COUNT(*) AS n FROM search_cycles")
+        assert cur.fetchone()["n"] == 1
+
+
+def test_search_cycles_are_admin_only(client):
+    assert client.get("/v1/stats/search-cycles", headers=WORKER_AUTH).status_code == 401

@@ -2081,9 +2081,16 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   fits beside a **Recent activity** aside of the same height (latest sweeps,
   listings, session backups, workers gone silent and open checkpoints, rebuilt
   from the timestamps the coordinator serves) — login, region, status with
-  its reason, last search and heartbeat, session days left and the week's
-  alerts, with a fold per row for the worker's cities (each with its alerts)
-  and pacing; and a **From a search to an alert** card that walks the
+  its reason, session days left, and since v1.266.0 the worker's **Today**
+  (a 24-hour strip in its region's time zone: when the sweep started, how far
+  it got, the now tick, the estimated end while it runs, the next scheduled
+  start when nothing has run, and a hatched day for a worker that is down,
+  with "start–end · local time"), its **Searches** against the day's budget
+  (enabled phrases × cities × daily runs; amber once met, "—" when its
+  monitor does not count searches) and its **Posts** (listings freshly
+  reviewed today, and the week's alerts); the summary line adds the fleet's
+  new posts today. A fold per row shows the worker's cities (each with its
+  alerts), pacing and the daily search budget; and a **From a search to an alert** card that walks the
   pipeline as the code runs it — search, result cards, the title gate before
   any page is opened, the cached page visit, the keyword gate with the
   description, the already-notified skip, the AI rating with its unit and

@@ -326,6 +326,130 @@ export function reviewedToday(
   };
 }
 
+// ── Today ─────────────────────────────────────────────────────────────────────
+// A worker's day, drawn 00:00–24:00 in its region's zone: the window it has
+// searched, the now tick, and while a sweep runs, the tail to its estimated
+// end. Positions are fractions of the local day.
+
+const ZONE_LABEL: Record<string, string> = {
+  'America/New_York': 'ET', 'America/Chicago': 'CT', 'America/Denver': 'MT', 'America/Los_Angeles': 'PT',
+};
+const DEFAULT_ZONE = 'America/New_York';
+
+// A search reported this recently means the sweep is still under way. One
+// search is a few minutes through the proxy; a quiet half hour is not.
+export const SWEEP_IDLE_MS = 30 * 60_000;
+
+function localClock(ms: number, zone: string): { date: string; minutes: number } {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(new Date(ms));
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find(p => p.type === type)?.value ?? '0';
+  return { date: `${get('year')}-${get('month')}-${get('day')}`, minutes: Number(get('hour')) * 60 + Number(get('minute')) };
+}
+
+const hhmm = (minutes: number): string =>
+  `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+
+export type StripSegment = { from: number; to: number; kind: 'done' | 'eta' | 'rest' };
+export type DayStrip = {
+  zone: string;
+  localNow: string;
+  nowAt: number;
+  segments: StripSegment[];
+  start: string | null;
+  // null while the sweep runs, and when only cycle starts are known (a
+  // monitor that does not report single searches cannot say when it stopped).
+  end: string | null;
+  running: boolean;
+  eta: string | null;
+  // The next scheduled sweep, given only when nothing has run yet today.
+  next: { time: string; tomorrow: boolean } | null;
+  searches: number | null;
+  budget: number | null;
+};
+
+// The next of the daily `start_at` times (UTC "HH:MM") after `now`.
+function nextStart(startAt: readonly string[], now: number): number | null {
+  let best: number | null = null;
+  for (const hm of startAt) {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(hm.trim());
+    if (!m) continue;
+    const d = new Date(now);
+    let at = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), Number(m[1]), Number(m[2]));
+    if (at <= now) at += 86_400_000;
+    if (best === null || at < best) best = at;
+  }
+  return best;
+}
+
+export function dayStrip(
+  w: FleetAccount,
+  status: FleetStatus,
+  startAt: readonly string[] | undefined,
+  now: number = Date.now(),
+): DayStrip | null {
+  const today = w.today;
+  if (!today) return null;
+  const zone = w.timezone ?? DEFAULT_ZONE;
+  const clock = localClock(now, zone);
+  // Clamped to the day: a first search before local midnight starts at 0.
+  const at = (ms: number) => {
+    const c = localClock(ms, zone);
+    return c.date < clock.date ? 0 : c.date > clock.date ? 1 : c.minutes / 1440;
+  };
+  const first = today.first_at ? Date.parse(today.first_at) : null;
+  const last = today.last_at ? Date.parse(today.last_at) : null;
+  const budget = w.plan?.per_day ?? null;
+  const searches = today.searches;
+  const working = status === 'live' || status === 'stale';
+  const running = working && searches !== null && last !== null
+    && now - last < SWEEP_IDLE_MS && (budget === null || searches < budget);
+
+  const segments: StripSegment[] = [];
+  let eta: string | null = null;
+  if (first !== null && last !== null) {
+    segments.push({ from: at(first), to: at(running ? now : last), kind: 'done' });
+    if (running && budget !== null && searches !== null && searches > 0) {
+      const e = localClock(now + ((now - first) / searches) * (budget - searches), zone);
+      if (e.date === clock.date) {
+        eta = hhmm(e.minutes);
+        segments.push({ from: clock.minutes / 1440, to: e.minutes / 1440, kind: 'eta' });
+      }
+    }
+  }
+  if (!working) segments.push({ from: segments[0]?.to ?? 0, to: 1, kind: 'rest' });
+
+  let next: DayStrip['next'] = null;
+  if (first === null && startAt?.length) {
+    const ms = nextStart(startAt, now);
+    if (ms !== null) {
+      const c = localClock(ms, zone);
+      next = { time: hhmm(c.minutes), tomorrow: c.date !== clock.date };
+    }
+  }
+
+  return {
+    zone: ZONE_LABEL[zone] ?? zone,
+    localNow: hhmm(clock.minutes),
+    nowAt: clock.minutes / 1440,
+    segments,
+    start: first !== null ? hhmm(localClock(first, zone).minutes) : null,
+    end: !running && searches !== null && last !== null ? hhmm(localClock(last, zone).minutes) : null,
+    running,
+    eta,
+    next,
+    searches,
+    budget,
+  };
+}
+
+// Today's new posts across the fleet, or null when no worker carries a count.
+export function fleetPostsToday(workers: readonly FleetAccount[]): number | null {
+  const counts = workers.map(w => w.today?.posts).filter((n): n is number => typeof n === 'number');
+  return counts.length ? counts.reduce((a, b) => a + b, 0) : null;
+}
+
 // A VNC link written into config, usable from the ERP only if it is absolute.
 // The facade hands out its own viewer as a path ("/vnc/homelab-1") meant for
 // its own page; opened here it resolves against the ERP's origin and lands on

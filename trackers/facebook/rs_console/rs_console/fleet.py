@@ -24,8 +24,9 @@ proxy pasted inline by mistake cannot reach the browser.
 """
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 _PLACEHOLDER = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 
@@ -45,6 +46,20 @@ SEARCH_SETTING_KEYS = (
     "max_search_interval",
     "currency",
 )
+
+# The zone a region's day is counted in: where its cities' sellers live, which
+# is when its sweep is "today". A region spanning two zones takes the one most
+# of its centres sit in. `start_at` is pinned to Eastern (see master.toml), so
+# that is the default for anything not listed — the phase-1 monitor included.
+REGION_TIMEZONES = {
+    "rs_northeast": "America/New_York",
+    "rs_southeast": "America/New_York",
+    "rs_midwest": "America/Chicago",
+    "rs_south_central": "America/Chicago",
+    "rs_mountain": "America/Denver",
+    "rs_west": "America/Los_Angeles",
+}
+DEFAULT_TIMEZONE = "America/New_York"
 
 ITEM_KEYS = (
     "search_phrases",
@@ -223,6 +238,100 @@ def monitor_worker(
     }
 
 
+def region_timezone(region_key: Optional[str]) -> str:
+    return REGION_TIMEZONES.get(region_key or "", DEFAULT_TIMEZONE)
+
+
+def search_plan(
+    item_list: List[Dict[str, Any]], city_count: int, start_at: Any
+) -> Dict[str, Any]:
+    """How many searches a worker owes a day: every enabled phrase in every
+    one of its cities, once per `start_at` time.
+
+    `per_day` is None when the schedule is not a list of times (an interval
+    loop has no daily budget) or there is nothing to search.
+    """
+    phrases = sum(len(i.get("search_phrases") or []) for i in item_list if i.get("enabled", True))
+    runs = len(start_at) if isinstance(start_at, list) and start_at else None
+    per_day = phrases * city_count * runs if runs and phrases and city_count else None
+    return {"phrases": phrases, "cities": city_count, "runs_per_day": runs, "per_day": per_day}
+
+
+def _parse_time(value: Any) -> Optional[datetime]:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _stamp(moment: datetime) -> str:
+    return moment.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def worker_today(
+    worker_id: str,
+    zone: str,
+    cycle_rows: Optional[List[Dict[str, Any]]],
+    review_rows: Optional[List[Dict[str, Any]]],
+    now: datetime,
+) -> Optional[Dict[str, Any]]:
+    """This worker's local day so far. None when the coordinator served
+    neither of the two inputs.
+
+    `cycle_rows` are the coordinator's search cycles: when the worker started
+    on an item, which is where a sweep begins. `review_rows` are its per-worker
+    funnel counters: searches done, listings freshly reviewed (the new posts)
+    and alerted, with `updated_at` — the latest search page counted, so the
+    sweep's latest activity.
+
+    Counters are kept per UTC day. The daily sweep runs inside UTC daytime in
+    every US zone, so the row dated with the local date is the one holding
+    today's sweep.
+
+    `searches` is None, not 0, for a worker with no searches counted in the
+    window fetched: its monitor predates the funnel counters, and "0 searched"
+    would read as a worker doing nothing.
+    """
+    if cycle_rows is None and review_rows is None:
+        return None
+    try:
+        tz = ZoneInfo(zone)
+    except ZoneInfoNotFoundError:
+        tz = timezone.utc
+    local_now = now.astimezone(tz)
+    day = local_now.date().isoformat()
+    day_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    def today_stamp(value: Any) -> Optional[datetime]:
+        at = _parse_time(value)
+        return at if at is not None and day_start <= at <= now + timedelta(minutes=5) else None
+
+    starts = [
+        at for r in cycle_rows or []
+        if r.get("worker_id") == worker_id and (at := today_stamp(r.get("at"))) is not None
+    ]
+
+    mine = [r for r in review_rows or [] if r.get("worker_id") == worker_id]
+    row = next((r for r in mine if r.get("day") == day), None)
+    counts = lambda name: int((row or {}).get(name) or 0)
+    reports_searches = any(int(r.get("searches") or 0) > 0 for r in mine)
+    moved = today_stamp((row or {}).get("updated_at"))
+
+    stamps = starts + ([moved] if moved else [])
+    return {
+        "day": day,
+        "first_at": _stamp(min(stamps)) if stamps else None,
+        "last_at": _stamp(max(stamps)) if stamps else None,
+        "cycles": len(starts) if cycle_rows is not None else None,
+        "searches": counts("searches") if reports_searches else None,
+        "posts": counts("reviewed") if review_rows is not None else None,
+        "alerts": counts("alerted") if review_rows is not None else None,
+    }
+
+
 def known_worker_ids(
     fleet: Optional[Dict[str, Any]],
     monitor_worker_id: Optional[str],
@@ -274,6 +383,8 @@ def compose(
     sessions: Optional[Dict[str, Dict[str, Any]]] = None,
     versions: Optional[Dict[str, Optional[str]]] = None,
     vnc_pages: Optional[Dict[str, str]] = None,
+    search_cycles: Optional[List[Dict[str, Any]]] = None,
+    worker_reviews: Optional[List[Dict[str, Any]]] = None,
     now: Optional[datetime] = None,
 ) -> Dict[str, Any]:
     """Join config and health into the document the dashboard renders.
@@ -286,6 +397,10 @@ def compose(
     `accounts` is the vault's non-secret account list (joined to a worker by
     its `worker_id`), `sessions` the per-worker session metadata keyed by
     worker id. Both become `account` / `session` on the worker row, or None.
+
+    `search_cycles` and `worker_reviews` are the coordinator's search cycles
+    and per-worker funnel rows; each worker's `today` is cut from them in its
+    region's zone (`timezone`), and `plan` is its daily search budget.
 
     `vnc_pages` maps a worker id to the console's own viewer page for it
     (see vnc.py). It wins over a `vnc_url` from config: the console page is
@@ -328,10 +443,18 @@ def compose(
             by_id[worker_id] = target
         target["health"] = row
 
+    moment = now or datetime.now(timezone.utc)
+    item_list = items(master) or (items(monitor) if monitor else [])
+    settings = search_settings(master) or (search_settings(monitor) if monitor else {})
+
     by_worker = {
         str(a.get("worker_id")): a for a in (accounts or []) if a.get("worker_id")
     }
     for worker in workers:
+        zone = region_timezone(worker["region"].get("key"))
+        worker["timezone"] = zone
+        worker["plan"] = search_plan(item_list, len(worker["cities"]), settings.get("start_at"))
+        worker["today"] = worker_today(worker["worker_id"], zone, search_cycles, worker_reviews, moment)
         worker["account"] = _pick(by_worker.get(worker["worker_id"]), ACCOUNT_KEYS)
         worker["session"] = _pick((sessions or {}).get(worker["worker_id"]), SESSION_KEYS)
         page = (vnc_pages or {}).get(worker["worker_id"])
@@ -340,7 +463,6 @@ def compose(
         # link someone wrote in config; the dashboard labels the two apart.
         worker["vnc_live"] = bool(page)
 
-    moment = now or datetime.now(timezone.utc)
     return {
         "generated_at": moment.isoformat().replace("+00:00", "Z"),
         "monitor_worker_id": monitor_worker_id,
@@ -354,8 +476,8 @@ def compose(
         # rides on its health row (`health.version`).
         "versions": {"console": None, "coordinator": None, **(versions or {})},
         "ai_model": ai_model(master) or (ai_model(monitor) if monitor else None),
-        "search": search_settings(master) or (search_settings(monitor) if monitor else {}),
-        "items": items(master) or (items(monitor) if monitor else []),
+        "search": settings,
+        "items": item_list,
         "regions": region_list,
         "workers": workers,
     }

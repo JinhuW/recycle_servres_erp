@@ -7,6 +7,9 @@ and the dashboard shell itself is public while every data route stays
 token-guarded.
 """
 
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
 import httpx
 import pytest
 from fastapi.testclient import TestClient
@@ -138,6 +141,8 @@ def client(monkeypatch, tmp_path):
         "response": httpx.Response(200, json={"workers": [HOMELAB_ROW]}),
         "accounts": httpx.Response(200, json={"accounts": [PERSONAL_ACCOUNT]}),
         "sessions": {"homelab-1": httpx.Response(200, json=HOMELAB_SESSION)},
+        "cycles": httpx.Response(200, json={"rows": []}),
+        "reviews": httpx.Response(200, json={"rows": []}),
     }
 
     async def fake_transport(request):
@@ -145,6 +150,10 @@ def client(monkeypatch, tmp_path):
         path = request.url.path
         if path == "/healthz":
             return httpx.Response(200, json={"status": "ok", "version": "0.5.6"})
+        if path == "/v1/stats/search-cycles":
+            return upstream["cycles"]
+        if path == "/v1/stats/reviews/workers":
+            return upstream["reviews"]
         if path == "/v1/accounts":
             return upstream["accounts"]
         if path.startswith("/v1/session/"):
@@ -310,3 +319,98 @@ def test_monitor_scope_names_subsets_and_everything():
         "key": None, "name": "All regions", "scope": "all",
     }
     assert fleet._match_region([], region_list)["scope"] == "empty"
+
+
+# -- today and the daily search budget ----------------------------------------
+
+
+def test_fleet_carries_each_workers_today_and_plan(client):
+    now = datetime.now(timezone.utc)
+    started = (now - timedelta(minutes=50)).isoformat(timespec="seconds")
+    moved = (now - timedelta(minutes=5)).isoformat(timespec="seconds")
+    client.upstream["cycles"] = httpx.Response(200, json={"rows": [
+        {"worker_id": "se-1", "at": started, "item": "server_ram"},
+    ]})
+    # Dated with Eastern's local date, the day se-1 is counted in.
+    eastern = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+    client.upstream["reviews"] = httpx.Response(200, json={"rows": [
+        {"day": eastern, "worker_id": "se-1", "searches": 7, "reviewed": 4, "alerted": 1,
+         "updated_at": moved},
+    ]})
+    doc = client.get("/v1/fleet", headers=AUTH).json()
+    paths = [r.url.path for r in client.calls]
+    assert "/v1/stats/search-cycles" in paths and "/v1/stats/reviews/workers" in paths
+
+    by_id = {w["worker_id"]: w for w in doc["workers"]}
+    se = by_id["se-1"]
+    assert se["timezone"] == "America/New_York"
+    assert by_id["wc-1"]["timezone"] == "America/Los_Angeles"
+    # One enabled phrase (server_cpu is disabled) in two cities; the fixture's
+    # master has no start_at, so there is no daily budget.
+    assert se["plan"] == {"phrases": 1, "cities": 2, "runs_per_day": None, "per_day": None}
+    assert se["today"]["searches"] == 7
+    assert (se["today"]["posts"], se["today"]["alerts"]) == (4, 1)
+    assert se["today"]["last_at"] is not None
+    # A worker with no searches counted says so with null, not zero.
+    assert by_id["wc-1"]["today"]["searches"] is None
+    assert by_id["wc-1"]["today"]["posts"] == 0
+
+
+def test_fleet_today_is_null_against_an_older_coordinator(client):
+    client.upstream["cycles"] = httpx.Response(404, json={"detail": "Not Found"})
+    client.upstream["reviews"] = httpx.Response(404, json={"detail": "Not Found"})
+    doc = client.get("/v1/fleet", headers=AUTH).json()
+    assert doc["health"]["ok"] is True
+    assert all(w["today"] is None for w in doc["workers"])
+
+
+def test_search_plan_counts_enabled_phrases_cities_and_runs():
+    item_list = [
+        {"name": "ram", "enabled": True, "search_phrases": ["a", "b"]},
+        {"name": "ssd", "enabled": True, "search_phrases": ["c"]},
+        {"name": "cpu", "enabled": False, "search_phrases": ["d", "e"]},
+    ]
+    assert fleet.search_plan(item_list, 5, ["10:00"]) == {
+        "phrases": 3, "cities": 5, "runs_per_day": 1, "per_day": 15,
+    }
+    assert fleet.search_plan(item_list, 5, ["10:00", "18:00"])["per_day"] == 30
+    # An interval loop has no daily budget, and neither does an empty region.
+    assert fleet.search_plan(item_list, 5, None)["per_day"] is None
+    assert fleet.search_plan(item_list, 0, ["10:00"])["per_day"] is None
+
+
+def test_worker_today_buckets_by_the_regions_local_day():
+    # 13:40 in Denver (MDT, UTC-6).
+    now = datetime(2026, 10, 17, 19, 40, tzinfo=timezone.utc)
+    cycles = [
+        # 23:30 Denver yesterday: not today, though it is the same UTC day.
+        {"worker_id": "denver-1", "at": "2026-10-17T05:30:00+00:00", "item": "server_ram"},
+        {"worker_id": "denver-1", "at": "2026-10-17T13:25:00+00:00", "item": "server_ram"},
+        {"worker_id": "denver-1", "at": "2026-10-17T16:10:00Z", "item": "enterprise_ssd"},
+        {"worker_id": "ne-1", "at": "2026-10-17T19:00:00+00:00", "item": "server_ram"},
+    ]
+    reviews = [
+        {"day": "2026-10-17", "worker_id": "denver-1", "searches": 31, "reviewed": 23,
+         "alerted": 2, "updated_at": "2026-10-17T19:31:00+00:00"},
+        {"day": "2026-10-16", "worker_id": "denver-1", "searches": 36, "reviewed": 50,
+         "alerted": 9, "updated_at": "2026-10-16T22:00:00+00:00"},
+    ]
+    assert fleet.worker_today("denver-1", "America/Denver", cycles, reviews, now) == {
+        "day": "2026-10-17",
+        "first_at": "2026-10-17T13:25:00Z",
+        "last_at": "2026-10-17T19:31:00Z",
+        "cycles": 2,
+        "searches": 31,
+        "posts": 23,
+        "alerts": 2,
+    }
+
+    # No counters served: the window still draws from cycles, counts unknown.
+    today = fleet.worker_today("denver-1", "America/Denver", cycles, None, now)
+    assert today["searches"] is None and today["cycles"] == 2
+    assert today["posts"] is None
+    assert today["last_at"] == "2026-10-17T16:10:00Z"
+
+    # Searches counted yesterday but none yet today: a real zero.
+    early = datetime(2026, 10, 17, 7, 0, tzinfo=timezone.utc)  # 01:00 Denver
+    assert fleet.worker_today("denver-1", "America/Denver", [], reviews[1:], early)["searches"] == 0

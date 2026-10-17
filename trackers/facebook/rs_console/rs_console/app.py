@@ -402,6 +402,8 @@ async def fleet() -> Dict[str, Any]:
     accounts: Optional[list] = None
     sessions: Dict[str, Dict[str, Any]] = {}
     coordinator_version: Optional[str] = None
+    search_cycles: Optional[list] = None
+    worker_reviews: Optional[list] = None
     error: Optional[str] = None
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT_S, base_url=base, headers=headers) as client:
@@ -433,6 +435,19 @@ async def fleet() -> Dict[str, Any]:
                 for wid, meta in zip(worker_ids, metas):
                     if isinstance(meta, httpx.Response) and meta.status_code == 200:
                         sessions[wid] = meta.json()
+
+                # Each worker's "today". Two days of rows cover every US
+                # zone's local day; an older coordinator answers 404, which
+                # leaves `today` null rather than the page broken.
+                cycles, reviews = await asyncio.gather(
+                    client.get("/v1/stats/search-cycles", params={"hours": 48}),
+                    client.get("/v1/stats/reviews/workers", params={"days": 2}),
+                    return_exceptions=True,
+                )
+                if isinstance(cycles, httpx.Response) and cycles.status_code == 200:
+                    search_cycles = (cycles.json() or {}).get("rows") or []
+                if isinstance(reviews, httpx.Response) and reviews.status_code == 200:
+                    worker_reviews = (reviews.json() or {}).get("rows") or []
     except (httpx.HTTPError, ValueError):
         error = "Coordinator is unreachable"
 
@@ -447,6 +462,8 @@ async def fleet() -> Dict[str, Any]:
         sessions=sessions,
         versions={"console": __version__, "coordinator": coordinator_version},
         vnc_pages=_vnc_pages(),
+        search_cycles=search_cycles,
+        worker_reviews=worker_reviews,
     )
     doc["settings"] = {
         "editable": master is not None and "error" not in saved and settings.writable(),

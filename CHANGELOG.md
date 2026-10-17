@@ -17,6 +17,29 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.266.0] - 2026-10-17
+
+The Facebook fleet table shows each worker's day: Today, Searches and Posts
+(RS-264).
+
+### Added
+
+- **Today, Searches and Posts columns on the Fleet tab.** The table could say
+  when a worker last started a search, but not whether today's sweep had run,
+  how far it got or what it found. Each row now has a 24-hour strip in the
+  worker's own time zone (sweep start, progress, the now tick, an estimated
+  end while it runs, the next scheduled start before it does, hatching for a
+  worker that is down), a ring of searches done against the day's budget
+  (phrases × cities × daily runs, from `master.toml`), and the posts the AI
+  reviewed for the first time today next to the week's alerts. The summary
+  line adds the fleet's new posts today, and each fold states the daily
+  budget. The old Last search and Alerts columns fold into these.
+- **The tracker serves it.** The coordinator logs when each worker starts on
+  an item (a heartbeat with a new `last_search_at`) and serves its funnel
+  counters per worker; rs_console cuts both into each worker's local day in
+  `/v1/fleet`. Until that tracker release is deployed, the new columns show
+  "—".
+
 ## [1.265.0] - 2026-10-17
 
 The Facebook fleet's search settings can be changed from the ERP, stage by

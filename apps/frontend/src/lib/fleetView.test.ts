@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { vncSocketUrl, type Challenge, type FleetAccount, type FleetDoc, type FleetWorker } from './coordinator';
 import {
-  accountAlerts, accountHaystack, attentionReason, browserLabel, canWatch,
+  accountAlerts, accountHaystack, attentionReason, browserLabel, canWatch, dayStrip, fleetPostsToday,
   externalVncUrl, fleetActivity, fleetStatus, flowCounts, hitsByCity, isUnstampedBuild, parkedWorkers, reloginIsAutomatic,
   matchesTerms, offersRelogin, queryTerms, reviewedToday,
   splitHighlights, reloginWouldBeAutomatic, vaultAccountIdFor, whoIs,
@@ -284,5 +284,58 @@ describe('stage settings forms', () => {
 
   it('offers a form exactly on the stages that read a setting', () => {
     expect(FLOW_STAGES.filter(s => STAGE_FORMS[s])).toEqual(['search', 'cards', 'title', 'keywords', 'ai']);
+  });
+});
+
+describe('dayStrip', () => {
+  // 13:40 in Denver (MDT, UTC-6).
+  const NOW = Date.parse('2026-10-17T19:40:00Z');
+  const today = (over: Partial<NonNullable<FleetAccount['today']>>): FleetAccount['today'] => ({
+    day: '2026-10-17', first_at: null, last_at: null, cycles: 0, searches: 0, posts: 0, alerts: 0, ...over,
+  });
+  const denver = (over: Partial<FleetAccount>) => account({
+    timezone: 'America/Denver',
+    plan: { phrases: 8, cities: 5, runs_per_day: 1, per_day: 40 },
+    ...over,
+  });
+
+  it('draws a running sweep to now, with the tail to its estimated end', () => {
+    // 07:25 → 13:40 local, 30 of 40 done: 375 min for 30, so 125 min to go.
+    const w = denver({ today: today({ first_at: '2026-10-17T13:25:00Z', last_at: '2026-10-17T19:35:00Z', searches: 30 }) });
+    const s = dayStrip(w, 'live', ['10:00'], NOW)!;
+    expect(s).toMatchObject({ zone: 'MT', localNow: '13:40', start: '07:25', end: null, running: true, eta: '15:45', next: null });
+    expect(s.segments.map(x => x.kind)).toEqual(['done', 'eta']);
+    expect(s.segments[0].from).toBeCloseTo((7 * 60 + 25) / 1440);
+    expect(s.segments[0].to).toBeCloseTo(s.nowAt);
+  });
+
+  it('ends a sweep at its last search once the budget is met or it goes quiet', () => {
+    const done = denver({ today: today({ first_at: '2026-10-17T13:10:00Z', last_at: '2026-10-17T18:50:00Z', searches: 40 }) });
+    expect(dayStrip(done, 'live', ['10:00'], NOW)).toMatchObject({ start: '07:10', end: '12:50', running: false, eta: null });
+    const quiet = denver({ today: today({ first_at: '2026-10-17T13:10:00Z', last_at: '2026-10-17T18:50:00Z', searches: 12 }) });
+    expect(dayStrip(quiet, 'live', ['10:00'], NOW)).toMatchObject({ end: '12:50', running: false });
+  });
+
+  it('gives only a start when the monitor reports cycles, not searches', () => {
+    const w = denver({ today: today({ first_at: '2026-10-17T13:25:00Z', last_at: '2026-10-17T16:00:00Z', searches: null, cycles: 2 }) });
+    expect(dayStrip(w, 'live', ['10:00'], NOW)).toMatchObject({ start: '07:25', end: null, running: false, searches: null });
+  });
+
+  it('names the next sweep when nothing ran today, and hatches a worker that is down', () => {
+    const w = denver({ today: today({}) });
+    // 10:00 UTC has passed: tomorrow, 04:00 Denver.
+    expect(dayStrip(w, 'live', ['10:00'], NOW)!.next).toEqual({ time: '04:00', tomorrow: true });
+    const early = Date.parse('2026-10-17T08:00:00Z');
+    expect(dayStrip(w, 'live', ['10:00'], early)!.next).toEqual({ time: '04:00', tomorrow: false });
+    expect(dayStrip(w, 'offline', ['10:00'], NOW)!.segments).toEqual([{ from: 0, to: 1, kind: 'rest' }]);
+  });
+
+  it('is null against a facade that serves no today', () => {
+    expect(dayStrip(account({}), 'live', ['10:00'], NOW)).toBeNull();
+  });
+
+  it('sums the fleet’s posts only over workers that carry a count', () => {
+    expect(fleetPostsToday([denver({ today: today({ posts: 23 }) }), denver({ today: today({ posts: 5 }) }), account({})])).toBe(28);
+    expect(fleetPostsToday([account({})])).toBeNull();
   });
 });

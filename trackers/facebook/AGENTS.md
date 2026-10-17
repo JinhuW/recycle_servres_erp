@@ -125,6 +125,12 @@ suites above and the vendored monitor's.
   `conftest.py` only refuses a URL equal to `RS_DATABASE_URL` /
   `DATABASE_URL`, so it cannot catch this. Use a throwaway on a free port, as
   in `rs_coordinator/POSTGRES.md`.
+- **Running the coordinator by hand from an ERP shell** picks up the ERP's
+  `DATABASE_URL` (the root `.env` points it at the `recycle-erp-testdb`
+  container on 55432), so `RS_COORDINATOR_DB` is ignored and the coordinator
+  creates its tables in the ERP's test database. Start it with
+  `env -u DATABASE_URL -u RS_DATABASE_URL …` and check that `/healthz` says
+  `"backend":"sqlite"`.
 
 ## Constraints
 
