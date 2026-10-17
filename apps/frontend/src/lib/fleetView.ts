@@ -3,7 +3,7 @@
 // city, the derived activity feed and the pipeline's stages.
 // Kept out of the components so they can be unit-tested without React.
 
-import type { AlertHitRow, Challenge, FleetAccount, FleetDoc } from './coordinator';
+import type { AlertHitRow, Challenge, FleetAccount, FleetDoc, ReviewStatsDay } from './coordinator';
 
 export type AccountLiveness = 'live' | 'stale' | 'dead' | 'unknown' | 'none';
 
@@ -190,16 +190,22 @@ export function fleetActivity(fleet: FleetDoc | null, challenges: readonly Chall
 export type FlowStage = 'search' | 'cards' | 'title' | 'open' | 'keywords' | 'fresh' | 'ai' | 'coordinator' | 'alert';
 export const FLOW_STAGES: readonly FlowStage[] = ['search', 'cards', 'title', 'open', 'keywords', 'fresh', 'ai', 'coordinator', 'alert'];
 
-// What the coordinator counts today. Only two stages are counted anywhere the
-// ERP can read: fresh model verdicts and delivered alerts. The rest are worker
-// events that stay in OpenSearch, so they have no number here.
-export function flowCounts(
-  days: ReadonlyArray<{ day: string; reviewed: number; alerted: number }> | null,
-  now: number = Date.now(),
-): Partial<Record<FlowStage, number>> {
+// The coordinator column behind each stage. Workers count the first seven,
+// the coordinator the last two (ingest, then Telegram delivery).
+const FLOW_COUNTER: Record<FlowStage, keyof ReviewStatsDay> = {
+  search: 'searches', cards: 'cards', title: 'title_pass', open: 'opened', keywords: 'keyword_pass',
+  fresh: 'fresh', ai: 'reviewed', coordinator: 'coordinated', alert: 'sent',
+};
+
+// Today's count per stage (UTC, as the coordinator buckets). A console older
+// than the funnel counters sends rows without them: those stages stay
+// uncounted, and the alert stage falls back to the workers' own `alerted`.
+export function flowCounts(days: readonly ReviewStatsDay[] | null, now: number = Date.now()): Partial<Record<FlowStage, number>> {
   if (!days) return {};
-  const r = reviewedToday(days, now);
-  return { ai: r.today, alert: r.alertedToday };
+  const funnel = days.length === 0 || days.some(d => d.searches !== undefined);
+  const today = days.find(d => d.day === new Date(now).toISOString().slice(0, 10));
+  if (!funnel) return { ai: today?.reviewed ?? 0, alert: today?.alerted ?? 0 };
+  return Object.fromEntries(FLOW_STAGES.map(s => [s, today?.[FLOW_COUNTER[s]] ?? 0])) as Record<FlowStage, number>;
 }
 
 // Listings reviewed on the current UTC day (the coordinator buckets in UTC),

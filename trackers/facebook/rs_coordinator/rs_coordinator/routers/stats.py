@@ -1,9 +1,11 @@
-"""Review-volume stats: workers report, the console reads.
+"""Funnel stats: workers report, the console reads.
 
-The daily totals behind the ERP dashboard's review-volume card. Workers POST
-per-cycle deltas (how many listings the AI filter freshly evaluated, how many
-alerted) after each search sweep; the coordinator accumulates them into one row
-per worker per UTC day, and the admin route serves fleet-wide daily sums.
+The daily totals behind the ERP dashboard's review-volume card and its
+search-to-alert funnel. Workers POST per-search-page deltas for each stage they
+run (searches, cards, gates, page visits, fresh AI verdicts, matches); the
+coordinator adds the two stages it runs itself (ingest, Telegram delivery).
+Everything accumulates into one row per worker per UTC day, and the admin route
+serves fleet-wide daily sums.
 
 Nothing in the alert path depends on this: a worker that never reports simply
 contributes nothing to the chart.
@@ -41,10 +43,7 @@ def report_reviews(
     worker_id = worker or payload.worker_id
     if not worker_id:
         raise HTTPException(status_code=422, detail="worker_id is required")
-    if payload.reviewed or payload.alerted:
-        deps.db.add_review_stats(
-            worker_id, reviewed=payload.reviewed, alerted=payload.alerted
-        )
+    deps.db.add_review_stats(worker_id, **payload.model_dump(exclude={"worker_id"}))
     return StatusResponse()
 
 

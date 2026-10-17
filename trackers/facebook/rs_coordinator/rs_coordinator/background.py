@@ -134,8 +134,11 @@ class Background(threading.Thread):
                 db.mark_alert_delivered(alert["id"])
                 # notified_at means "the alert actually reached Telegram", so a
                 # Telegram inbox can be reconciled against the listings table.
-                if kind.startswith("listing") and alert.get("dedupe_key"):
-                    db.update_listing(alert["dedupe_key"], {"notified_at": utcnow()})
+                if kind.startswith("listing"):
+                    if alert.get("dedupe_key"):
+                        db.update_listing(alert["dedupe_key"], {"notified_at": utcnow()})
+                    # The outbox row does not keep the reporting worker.
+                    db.add_review_stats("coordinator", sent=1)
             else:
                 retry_at = _retry_stamp(backoff_seconds(int(alert["attempts"] or 0)))
                 db.mark_alert_failed(alert["id"], error, retry_at)

@@ -132,6 +132,7 @@ def report_listings(
             accepted += 1
 
     db.upsert_worker(worker_id, status="ok", heartbeat=True, saw_listing=True)
+    db.add_review_stats(worker_id, coordinated=queued)
     result = {"accepted": accepted, "duplicates": duplicates, "queued": queued}
     if failed:
         result["failed"] = failed

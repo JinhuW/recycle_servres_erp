@@ -60,8 +60,12 @@ export const challengeScreenshotUrl = (id: number) =>
 
 export type FleetFilter = 'all' | 'active' | 'attention';
 
-// One row per UTC day the fleet reported anything; gap days are absent.
-export type ReviewStatsDay = { day: string; reviewed: number; alerted: number };
+// One row per UTC day the fleet reported anything; gap days are absent. The
+// funnel counters are optional because a console older than them sends only
+// `reviewed` and `alerted`.
+export type FunnelCounter =
+  | 'searches' | 'cards' | 'title_pass' | 'opened' | 'keyword_pass' | 'fresh' | 'coordinated' | 'sent';
+export type ReviewStatsDay = { day: string; reviewed: number; alerted: number } & Partial<Record<FunnelCounter, number>>;
 
 export type FilterPrompt = {
   prompt: string | null;

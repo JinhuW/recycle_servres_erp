@@ -18,6 +18,24 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Added
+
+- **Every stage from a search to an alert is now counted** (RS-262), so the
+  ERP's funnel card shows numbers instead of "not counted yet".
+  - `review_stats` gains `searches`, `cards`, `title_pass`, `opened`,
+    `keyword_pass`, `fresh`, `coordinated` and `sent`. The columns are added
+    in place on SQLite and Postgres when the coordinator starts.
+  - Workers report the first seven stages. The coordinator counts
+    `coordinated` (ingest found the match new or changed, or a direct-send
+    worker reported its alert) and `sent` (a listing alert delivered from the
+    outbox, or a reported direct send).
+  - `GET /v1/stats/reviews` returns daily sums of all of them.
+  - The vendored monitor now buffers its counts and sends **one report per
+    search page** instead of one per AI verdict and one per alert, so it makes
+    fewer requests than before. This needs the new pin in `VENDOR.md`.
+  - **Deploy the coordinator first.** An older coordinator still takes the new
+    report's `reviewed`/`alerted`, because it ignores fields it does not know.
+
 ### Removed
 
 - **The `server_cpu` item is gone from `master.toml`** (and the regenerated

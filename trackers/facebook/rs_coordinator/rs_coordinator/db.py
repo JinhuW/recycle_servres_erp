@@ -70,10 +70,11 @@ CREATE INDEX IF NOT EXISTS idx_listings_score ON listings(ai_score);
 CREATE INDEX IF NOT EXISTS idx_sightings_key ON sightings(dedupe_key);
 
 -- Review stats --------------------------------------------------------------
--- Daily counts of listings the AI content filter freshly evaluated (and how
--- many alerted), one row per worker per UTC day. Workers report per-cycle
--- deltas; the upsert accumulates. Feeds the ERP dashboard's review-volume
--- card and nothing in the alert path reads it.
+-- Daily counts of each stage a listing passes on its way from a search to an
+-- alert, one row per worker per UTC day (columns in REVIEW_STAT_COUNTERS; the
+-- later ones are added by migration). Workers report per-page deltas and the
+-- coordinator adds its own two stages; the upsert accumulates. Feeds the ERP
+-- dashboard and nothing in the alert path reads it.
 CREATE TABLE IF NOT EXISTS review_stats (
     day        TEXT NOT NULL,
     worker_id  TEXT NOT NULL,
@@ -349,6 +350,20 @@ SNAPSHOT_EXTRA_COLUMNS = (
     ("fb_user_id", "TEXT"),
 )
 
+# Funnel stages, in pipeline order. The first six and `reviewed` / `alerted`
+# are worker-reported; `coordinated` and `sent` are counted here, at ingest and
+# at delivery. Fixed literals, so they are safe to interpolate into SQL.
+REVIEW_STAT_COUNTERS = (
+    "searches", "cards", "title_pass", "opened", "keyword_pass", "fresh",
+    "reviewed", "alerted", "coordinated", "sent",
+)
+
+REVIEW_STATS_EXTRA_COLUMNS = tuple(
+    (name, "INTEGER NOT NULL DEFAULT 0")
+    for name in REVIEW_STAT_COUNTERS
+    if name not in ("reviewed", "alerted")
+)
+
 THREAD_EXTRA_COLUMNS = (
     ("matrix_room_id", "TEXT"),
     ("telegram_topic_id", "INTEGER"),
@@ -407,6 +422,23 @@ def stats_cutoff(days: int) -> str:
     return (
         datetime.now(timezone.utc) - timedelta(days=max(1, days) - 1)
     ).strftime("%Y-%m-%d")
+
+
+REVIEW_STATS_SUMS = ", ".join(f"SUM({c}) AS {c}" for c in REVIEW_STAT_COUNTERS)
+
+
+def review_stat_deltas(counts: Dict[str, int]) -> tuple:
+    """The positive known counters in `counts`, as (columns, values)."""
+    unknown = set(counts) - set(REVIEW_STAT_COUNTERS)
+    if unknown:
+        raise ValueError(f"unknown review-stat counters: {sorted(unknown)}")
+    kept = [(c, int(counts[c])) for c in REVIEW_STAT_COUNTERS if counts.get(c, 0) > 0]
+    return tuple(c for c, _ in kept), tuple(v for _, v in kept)
+
+
+def review_stats_row(row: Any) -> Dict[str, Any]:
+    # psycopg returns SUM as Decimal; the API contract is int.
+    return {"day": row["day"], **{c: int(row[c]) for c in REVIEW_STAT_COUNTERS}}
 
 
 DEFAULT_DB_PATH = "data/coordinator.db"
@@ -494,6 +526,7 @@ class Database:
             self._migrate_columns("threads", THREAD_EXTRA_COLUMNS)
             self._migrate_columns("outbound_messages", OUTBOUND_EXTRA_COLUMNS)
             self._migrate_columns("session_snapshots", SNAPSHOT_EXTRA_COLUMNS)
+            self._migrate_columns("review_stats", REVIEW_STATS_EXTRA_COLUMNS)
             # Created after the migration adds the columns they index.
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_threads_room ON threads(matrix_room_id)"
@@ -969,23 +1002,22 @@ class Database:
     # -- review stats ------------------------------------------------------
 
     def add_review_stats(
-        self: "Database",
-        worker_id: str,
-        reviewed: int = 0,
-        alerted: int = 0,
-        day: str | None = None,
+        self: "Database", worker_id: str, day: str | None = None, **counts: int
     ) -> None:
-        """Accumulate one cycle's counts into the worker's row for `day` (UTC)."""
+        """Accumulate stage deltas (REVIEW_STAT_COUNTERS) into `day` (UTC)."""
+        columns, values = review_stat_deltas(counts)
+        if not columns:
+            return
         day = day or utcnow()[:10]
+        names = ", ".join(columns)
+        updates = ", ".join(f"{c} = review_stats.{c} + excluded.{c}" for c in columns)
         with self.cursor() as cur:
             cur.execute(
-                "INSERT INTO review_stats (day, worker_id, reviewed, alerted, updated_at) "
-                "VALUES (?, ?, ?, ?, ?) "
-                "ON CONFLICT(day, worker_id) DO UPDATE SET "
-                "  reviewed = review_stats.reviewed + excluded.reviewed,"
-                "  alerted = review_stats.alerted + excluded.alerted,"
+                f"INSERT INTO review_stats (day, worker_id, {names}, updated_at) "
+                f"VALUES (?, ?, {', '.join('?' for _ in columns)}, ?) "
+                f"ON CONFLICT(day, worker_id) DO UPDATE SET {updates}, "
                 "  updated_at = excluded.updated_at",
-                (day, worker_id, reviewed, alerted, utcnow()),
+                (day, worker_id, *values, utcnow()),
             )
 
     def review_stats_daily(self: "Database", days: int = 14) -> List[Dict[str, Any]]:
@@ -993,23 +1025,13 @@ class Database:
 
         Days with no reports are simply absent; the consumer fills gaps.
         """
-        cutoff = (
-            datetime.now(timezone.utc) - timedelta(days=max(1, days) - 1)
-        ).strftime("%Y-%m-%d")
         with self.cursor() as cur:
             cur.execute(
-                "SELECT day, SUM(reviewed) AS reviewed, SUM(alerted) AS alerted "
-                "FROM review_stats WHERE day >= ? GROUP BY day ORDER BY day",
-                (cutoff,),
+                f"SELECT day, {REVIEW_STATS_SUMS} FROM review_stats "
+                "WHERE day >= ? GROUP BY day ORDER BY day",
+                (stats_cutoff(days),),
             )
-            return [
-                {
-                    "day": row["day"],
-                    "reviewed": int(row["reviewed"]),
-                    "alerted": int(row["alerted"]),
-                }
-                for row in cur.fetchall()
-            ]
+            return [review_stats_row(row) for row in cur.fetchall()]
 
     # -- incidents ---------------------------------------------------------
 
