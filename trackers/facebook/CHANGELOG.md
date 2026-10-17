@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-17
+
 ### Added
 
 - **Re-login starts within seconds, and says how it is going** (RS-280).
