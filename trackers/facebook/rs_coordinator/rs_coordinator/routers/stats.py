@@ -25,6 +25,8 @@ from ..schemas import (
     ReviewStatsDay,
     ReviewStatsList,
     ReviewStatsReport,
+    SearchCityList,
+    SearchCityRow,
     SearchCycleList,
     SearchCycleRow,
     StatusResponse,
@@ -49,7 +51,11 @@ def report_reviews(
     worker_id = worker or payload.worker_id
     if not worker_id:
         raise HTTPException(status_code=422, detail="worker_id is required")
-    deps.db.add_review_stats(worker_id, **payload.model_dump(exclude={"worker_id"}))
+    deps.db.add_review_stats(
+        worker_id, **payload.model_dump(exclude={"worker_id", "search_city"})
+    )
+    if payload.search_city and payload.searches:
+        deps.db.touch_search_city(worker_id, payload.search_city)
     return StatusResponse()
 
 
@@ -89,6 +95,17 @@ def search_cycles(
     return SearchCycleList(
         rows=[SearchCycleRow(**row) for row in deps.db.search_cycles_since(since)]
     )
+
+
+@router.get(
+    "/v1/stats/search-cities",
+    response_model=SearchCityList,
+    dependencies=[Depends(require_admin)],
+)
+def search_cities() -> SearchCityList:
+    """Every worker x city with its last search; the console cuts each
+    worker's local day from them, as with the search cycles."""
+    return SearchCityList(rows=[SearchCityRow(**row) for row in deps.db.search_cities()])
 
 
 @router.get(

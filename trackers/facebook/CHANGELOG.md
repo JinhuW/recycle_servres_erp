@@ -18,6 +18,18 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Added
+
+- **Which cities each worker has searched today** (RS-271), for the ERP's
+  fleet fold, which now greens only those.
+  - The monitor's funnel report for a search page names its `search_city`
+    (vendored pin `37da00f`).
+  - The coordinator keeps one `search_cities` row per worker and city with
+    the last search time, and serves them at `GET /v1/stats/search-cities`
+    (admin). The table is created on start on SQLite and Postgres.
+  - rs_console's `/v1/fleet` adds `today.cities`: the slugs searched in the
+    worker's local day, or null against a coordinator without the endpoint.
+
 ## [0.6.0] - 2026-10-17
 
 ### Added

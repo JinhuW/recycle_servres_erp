@@ -3,7 +3,7 @@ import { vncSocketUrl, type Challenge, type FleetAccount, type FleetDoc, type Fl
 import {
   accountAlerts, accountHaystack, attentionReason, browserLabel, canWatch, dayStrip, fleetPostsToday,
   externalVncUrl, fleetActivity, fleetStatus, flowCounts, hitsByCity, isUnstampedBuild, parkedWorkers, reloginIsAutomatic,
-  matchesTerms, offersRelogin, queryTerms, reviewedToday,
+  matchesTerms, offersRelogin, queryTerms, reviewedToday, searchedToday,
   splitHighlights, reloginWouldBeAutomatic, vaultAccountIdFor, whoIs,
   FLOW_STAGES, STAGE_FORMS, draftChanges, settingsDraft, settingsPatch,
 } from './fleetView';
@@ -346,5 +346,11 @@ describe('dayStrip', () => {
   it('sums the fleet’s posts only over workers that carry a count', () => {
     expect(fleetPostsToday([denver({ today: today({ posts: 23 }) }), denver({ today: today({ posts: 5 }) }), account({})])).toBe(28);
     expect(fleetPostsToday([account({})])).toBeNull();
+  });
+
+  it('knows the cities searched today, and none without a report', () => {
+    expect([...searchedToday(denver({ today: today({ cities: ['denver', 'boulder'] }) }))]).toEqual(['denver', 'boulder']);
+    expect(searchedToday(denver({ today: today({}) })).size).toBe(0);
+    expect(searchedToday(account({})).size).toBe(0);
   });
 });

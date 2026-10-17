@@ -277,6 +277,7 @@ def worker_today(
     cycle_rows: Optional[List[Dict[str, Any]]],
     review_rows: Optional[List[Dict[str, Any]]],
     now: datetime,
+    city_rows: Optional[List[Dict[str, Any]]] = None,
 ) -> Optional[Dict[str, Any]]:
     """This worker's local day so far. None when the coordinator served
     neither of the two inputs.
@@ -285,7 +286,8 @@ def worker_today(
     on an item, which is where a sweep begins. `review_rows` are its per-worker
     funnel counters: searches done, listings freshly reviewed (the new posts)
     and alerted, with `updated_at` — the latest search page counted, so the
-    sweep's latest activity.
+    sweep's latest activity. `city_rows` say when it last searched each city;
+    `cities` is the ones searched today, or None when they were not served.
 
     Counters are kept per UTC day. The daily sweep runs inside UTC daytime in
     every US zone, so the row dated with the local date is the one holding
@@ -329,6 +331,10 @@ def worker_today(
         "searches": counts("searches") if reports_searches else None,
         "posts": counts("reviewed") if review_rows is not None else None,
         "alerts": counts("alerted") if review_rows is not None else None,
+        "cities": None if city_rows is None else [
+            str(r.get("city")) for r in city_rows
+            if r.get("worker_id") == worker_id and today_stamp(r.get("last_at")) is not None
+        ],
     }
 
 
@@ -385,6 +391,7 @@ def compose(
     vnc_pages: Optional[Dict[str, str]] = None,
     search_cycles: Optional[List[Dict[str, Any]]] = None,
     worker_reviews: Optional[List[Dict[str, Any]]] = None,
+    search_cities: Optional[List[Dict[str, Any]]] = None,
     now: Optional[datetime] = None,
 ) -> Dict[str, Any]:
     """Join config and health into the document the dashboard renders.
@@ -398,9 +405,10 @@ def compose(
     its `worker_id`), `sessions` the per-worker session metadata keyed by
     worker id. Both become `account` / `session` on the worker row, or None.
 
-    `search_cycles` and `worker_reviews` are the coordinator's search cycles
-    and per-worker funnel rows; each worker's `today` is cut from them in its
-    region's zone (`timezone`), and `plan` is its daily search budget.
+    `search_cycles`, `worker_reviews` and `search_cities` are the
+    coordinator's search cycles, per-worker funnel rows and last search per
+    city; each worker's `today` is cut from them in its region's zone
+    (`timezone`), and `plan` is its daily search budget.
 
     `vnc_pages` maps a worker id to the console's own viewer page for it
     (see vnc.py). It wins over a `vnc_url` from config: the console page is
@@ -454,7 +462,9 @@ def compose(
         zone = region_timezone(worker["region"].get("key"))
         worker["timezone"] = zone
         worker["plan"] = search_plan(item_list, len(worker["cities"]), settings.get("start_at"))
-        worker["today"] = worker_today(worker["worker_id"], zone, search_cycles, worker_reviews, moment)
+        worker["today"] = worker_today(
+            worker["worker_id"], zone, search_cycles, worker_reviews, moment, search_cities
+        )
         worker["account"] = _pick(by_worker.get(worker["worker_id"]), ACCOUNT_KEYS)
         worker["session"] = _pick((sessions or {}).get(worker["worker_id"]), SESSION_KEYS)
         page = (vnc_pages or {}).get(worker["worker_id"])

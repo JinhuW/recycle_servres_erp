@@ -2091,7 +2091,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   reviewed today, and the week's alerts); the summary line adds the fleet's
   new posts today. Since v1.268.0 the row's subtitle carries the worker's
   reported build next to its region, and the fold per row shows only the
-  worker's cities (each with its alerts); and a **From a search to an alert** card that walks the
+  worker's cities (each with its alerts). Since v1.271.0 a city chip there
+  and on the worker page is green only once the worker has searched that
+  city today, in its region's time zone; the rest stay grey; and a **From a search to an alert** card that walks the
   pipeline as the code runs it — search, result cards, the title gate before
   any page is opened, the cached page visit, the keyword gate with the
   description, the already-notified skip, the AI rating with its unit and

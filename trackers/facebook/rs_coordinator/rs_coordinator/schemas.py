@@ -254,6 +254,8 @@ class ReviewStatsReport(BaseModel):
     fresh: int = Field(default=0, ge=0)
     reviewed: int = Field(default=0, ge=0)
     alerted: int = Field(default=0, ge=0)
+    # The city of the page that counted a search; older workers leave it out.
+    search_city: str | None = None
 
 
 class ReviewStatsDay(BaseModel):
@@ -298,6 +300,18 @@ class SearchCycleRow(BaseModel):
 
 class SearchCycleList(BaseModel):
     rows: List[SearchCycleRow]
+
+
+class SearchCityRow(BaseModel):
+    """When a worker last searched a city."""
+
+    worker_id: str
+    city: str
+    last_at: str
+
+
+class SearchCityList(BaseModel):
+    rows: List[SearchCityRow]
 
 
 # -- alert hit tracking ------------------------------------------------------
