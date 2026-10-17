@@ -39,6 +39,10 @@ A Python stdlib reimplementation (`base64.b32decode`, `hmac`, `hashlib.sha1`,
 8-byte big-endian counter) reproduces the RFC 6238 SHA-1 test vector `287082`
 at T=59, and gives the same live code the page shows for the same key. Any
 standard TOTP library (pyotp, WebCrypto HMAC-SHA1) is interchangeable with it.
+The pool's own generator is pinned to that vector:
+`apps/frontend/src/lib/facebookPool.test.ts` asserts `poolTotp` returns
+`287082` at T=59, so the pool and the site are verified equivalent, not just
+similar.
 
 ## Where the same algorithm already lives here
 
