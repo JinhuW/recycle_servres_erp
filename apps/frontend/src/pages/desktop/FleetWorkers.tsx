@@ -4,7 +4,7 @@ import { Skeleton } from '../../components/Skeleton';
 import type { AlertHitRow, Challenge, FleetAccount, FleetDoc } from '../../lib/coordinator';
 import {
   accountAlerts, accountHaystack, attentionReason, dayStrip, FLEET_STATUSES, fleetActivity, fleetPostsToday, fleetStatus,
-  hitsByCity, matchesTerms, parkedWorkers, queryTerms, whoIs, type CityHits, type DayStrip, type FleetStatus,
+  hitsByCity, isUnstampedBuild, matchesTerms, parkedWorkers, queryTerms, whoIs, type CityHits, type DayStrip, type FleetStatus,
 } from '../../lib/fleetView';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
@@ -16,7 +16,7 @@ import '../../styles/facebookPool.css';
 // ─── Fleet list ───────────────────────────────────────────────────────────────
 // The Fleet tab in the Account pool's chrome: a status legend that filters, a
 // table of workers that fits beside the activity aside, a fold per row with
-// the worker's cities and pacing, and the eye — the one way to a worker's
+// the worker's cities, and the eye — the one way to a worker's
 // page, where every edit lives. Rows themselves do not navigate.
 
 export const STATUS_KEY: Record<FleetStatus, string> = {
@@ -208,23 +208,22 @@ function WorkerRow({ account: w, hits, parked, terms, startAt, open, onToggle, l
   const path = fleetWorkerPath(w.worker_id);
   const strip = dayStrip(w, status, startAt);
   const plan = w.plan;
-  const pace = w.pacing.search_interval
-    ? `${w.pacing.search_interval} – ${w.pacing.max_search_interval ?? w.pacing.search_interval}`
-    : null;
+  const build = h?.version && !isUnstampedBuild(h.version) ? h.version : null;
 
   return (
     <Fragment>
       <tr className={open ? 'ff-open' : undefined}>
         <td className="ff-chev">
           <button type="button" className="btn ghost icon sm" aria-expanded={open} onClick={onToggle}
-            aria-label={t(open ? 'fbcHideCities' : 'fbcShowCities', { id: w.worker_id })} title={t('fbcCitiesAndPacing')}>
+            aria-label={t(open ? 'fbcHideCities' : 'fbcShowCities', { id: w.worker_id })} title={t('fbcCitiesTitle')}>
             <Icon name={open ? 'chevronUp' : 'chevronDown'} size={13} />
           </button>
         </td>
         <td className="ff-wrap">
           <span className="fp-holder">
             <span><Hi text={who.login ?? who.label ?? w.worker_id} terms={terms} /></span>
-            <small><span className="mono"><Hi text={w.worker_id} terms={terms} /></span> · <Hi text={w.region.name} terms={terms} /></small>
+            <small><span className="mono"><Hi text={w.worker_id} terms={terms} /></span> · <Hi text={w.region.name} terms={terms} />
+              {build && <> · <span className="mono" title={build}>v{build.split(' ')[0]}</span></>}</small>
           </span>
         </td>
         <td className="ff-wrap">
@@ -265,31 +264,12 @@ function WorkerRow({ account: w, hits, parked, terms, startAt, open, onToggle, l
       {open && (
         <tr className="ff-fold">
           <td colSpan={8}>
-            <div className="ff-fold-body">
-              <div>
-                <div className="fp-section-label">{t('fbcFoldCities', { n: w.cities.length })}</div>
-                <div className="fl-cities">
-                  {w.cities.length
-                    ? w.cities.map(c => <CityChip key={c.slug} city={c} hits={hits} terms={terms}
-                        tone={status === 'live' || status === 'stale' ? 'accent' : 'muted'} />)
-                    : <span className="fp-muted">{t('fbcNoCities')}</span>}
-                </div>
-              </div>
-              <div>
-                <div className="fp-section-label">{t('fbcFoldPacing')}</div>
-                <div className="ff-fold-text">
-                  {pace ? t('fbcPacingText', { pace }) : t('fbcPacingDefault')}
-                  {w.pacing.overridden && ` · ${t('fbcPacingOverride')}`}
-                  {' · '}{w.proxy_env ? t('fbcViaProxy', { env: w.proxy_env }) : t('fbcOwnIp')}
-                </div>
-                {plan?.per_day != null && (
-                  <div className="ff-fold-text">
-                    {t(plan.runs_per_day === 1 ? 'fbcPlanText' : 'fbcPlanTextRuns',
-                      { phrases: plan.phrases, cities: plan.cities, runs: plan.runs_per_day ?? 0, perDay: plan.per_day })}
-                  </div>
-                )}
-                <div className="ff-fold-hint">{t('fbcFoldHint')}</div>
-              </div>
+            <div className="fp-section-label">{t('fbcFoldCities', { n: w.cities.length })}</div>
+            <div className="fl-cities">
+              {w.cities.length
+                ? w.cities.map(c => <CityChip key={c.slug} city={c} hits={hits} terms={terms}
+                    tone={status === 'live' || status === 'stale' ? 'accent' : 'muted'} />)
+                : <span className="fp-muted">{t('fbcNoCities')}</span>}
             </div>
           </td>
         </tr>

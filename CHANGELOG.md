@@ -17,6 +17,20 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.268.0] - 2026-10-17
+
+The Fleet table's row fold drops its Pacing block, and each worker's build
+shows in its row (RS-267).
+
+### Changed
+
+- **Fold shows cities only.** Every worker runs the fleet default pacing, so
+  the Pacing block repeated the same interval, proxy and daily plan on every
+  row. Those details stay on the worker's page.
+- **Build in the row subtitle.** The worker's reported build now follows its
+  id and region ("denver-1 · Mountain / Plains · v0.5.6"), with the commit in
+  the tooltip, so a worker left on an old image shows without opening it.
+
 ## [1.267.0] - 2026-10-17
 
 The Fleet tab shows skeletons while it loads (RS-266). It is the first page in
