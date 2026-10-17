@@ -521,6 +521,57 @@ export function reloginIsAutomatic(w: FleetAccount | null | undefined): boolean 
   return Boolean(acct?.allow_password_login && acct.secrets.password);
 }
 
+// Where an operator's re-login has got to, for the strip on the Watch page.
+// `relogin_requested_at` is set only while the request waits for the worker,
+// so "queued" needs no clock comparison. After the hand-off, a login step
+// counts only if it was stamped after the request; the worker stamps steps
+// with its own clock, so a minute's slack absorbs drift from the
+// coordinator's. Each phase is shown for a bounded time, so a strip never
+// outlives the re-login it describes.
+export type ReloginPhase = 'queued' | 'signing_in' | 'needs_you' | 'done' | 'failed';
+export type ReloginProgress = { phase: ReloginPhase; since: string; active: boolean };
+
+const RELOGIN_CLOCK_SLACK_MS = 60_000;
+const RELOGIN_SHOW_MS: Record<ReloginPhase, number> = {
+  queued: 30 * 60_000,
+  signing_in: 10 * 60_000,
+  needs_you: 15 * 60_000,
+  done: 60_000,
+  failed: 10 * 60_000,
+};
+const LOGIN_STEP_PHASE: Record<string, ReloginPhase> = {
+  picked_up: 'signing_in',
+  typing: 'signing_in',
+  submitted: 'signing_in',
+  challenge: 'needs_you',
+  waiting_for_human: 'needs_you',
+  logged_in: 'done',
+  failed: 'failed',
+};
+
+export function reloginProgress(
+  w: FleetAccount | null | undefined, now: number = Date.now(),
+): ReloginProgress | null {
+  const h = w?.health;
+  if (!h) return null;
+  const shown = (phase: ReloginPhase, since: string): ReloginProgress | null => {
+    const at = Date.parse(since);
+    if (!Number.isFinite(at) || now - at > RELOGIN_SHOW_MS[phase]) return null;
+    return { phase, since, active: phase !== 'done' && phase !== 'failed' };
+  };
+  if (h.relogin_requested_at) return shown('queued', h.relogin_requested_at);
+  const requested = h.relogin_last_requested_at;
+  if (!requested) return null;
+  const step = h.login_step;
+  const stepAt = h.login_step_at;
+  const stepMs = stepAt ? Date.parse(stepAt) : NaN;
+  if (!step || !stepAt || !(stepMs >= Date.parse(requested) - RELOGIN_CLOCK_SLACK_MS)) {
+    // Handed out, nothing reported yet — or a worker too old to report steps.
+    return shown('signing_in', requested);
+  }
+  return shown(LOGIN_STEP_PHASE[step] ?? 'signing_in', stepAt);
+}
+
 // The vault account a worker's credentials are filed under: its own account
 // when it has one, otherwise a new one named after the worker — the one id an
 // operator already knows it by (`rsc vault set-account --account-id <worker>`).

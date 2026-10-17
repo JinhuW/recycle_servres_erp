@@ -371,6 +371,13 @@ WORKER_HEALTH_COLUMNS = (
     # cleared the moment the worker's next heartbeat picks up the directive. A
     # pending request survives a coordinator restart so the worker still gets it.
     ("relogin_requested_at", "TEXT"),
+    # The same stamp, kept after the worker picks the request up: the ERP
+    # compares it with `login_step_at` to tell "queued" from "under way".
+    ("relogin_last_requested_at", "TEXT"),
+    # Where the worker's latest login has got to (picked_up, typing, submitted,
+    # challenge, waiting_for_human, logged_in, failed) and when it got there.
+    ("login_step", "TEXT"),
+    ("login_step_at", "TEXT"),
 )
 
 # Columns added to `listings` after the first release, same mechanism.
@@ -1042,9 +1049,11 @@ class Database:
         now = utcnow()
         with self.cursor() as cur:
             cur.execute(
-                "INSERT INTO workers (worker_id, relogin_requested_at) VALUES (?, ?) "
-                "ON CONFLICT(worker_id) DO UPDATE SET relogin_requested_at = excluded.relogin_requested_at",
-                (worker_id, now),
+                "INSERT INTO workers (worker_id, relogin_requested_at, relogin_last_requested_at) "
+                "VALUES (?, ?, ?) "
+                "ON CONFLICT(worker_id) DO UPDATE SET relogin_requested_at = excluded.relogin_requested_at, "
+                "relogin_last_requested_at = excluded.relogin_last_requested_at",
+                (worker_id, now, now),
             )
 
     def take_relogin(self: "Database", worker_id: str) -> bool:

@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import type RFB from '@novnc/novnc';
-import { Icon } from '../../components/Icon';
+import { Icon, type IconName } from '../../components/Icon';
 import { api } from '../../lib/api';
 import { coordinatorApi, VNC_SESSION_LAPSED, vncSocketUrl, type FleetAccount } from '../../lib/coordinator';
 import { heldByWorker, poolApi } from '../../lib/facebookPool';
-import { keysymsFor, liveness } from '../../lib/fleetView';
+import { keysymsFor, liveness, reloginProgress, type ReloginPhase } from '../../lib/fleetView';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { usePreference } from '../../lib/preferences';
@@ -27,6 +27,17 @@ import { FleetWatchAccount, type PoolLookup } from './FleetWatchAccount';
 // never weighs on the fleet page itself.
 
 const FLEET_REFRESH_MS = 30_000;
+// While a re-login is in flight the fleet is re-read this often, so the strip
+// above the viewer flags a captcha while the worker still waits for a human.
+const RELOGIN_REFRESH_MS = 3000;
+
+const RELOGIN_STRIP: Record<ReloginPhase, { tone: string; icon: IconName; key: string }> = {
+  queued: { tone: '', icon: 'clock', key: 'fbcReloginStripQueued' },
+  signing_in: { tone: '', icon: 'refresh', key: 'fbcReloginStripSigningIn' },
+  needs_you: { tone: 'warn', icon: 'alert', key: 'fbcReloginStripNeedsYou' },
+  done: { tone: 'pos', icon: 'check', key: 'fbcReloginStripDone' },
+  failed: { tone: 'neg', icon: 'alert', key: 'fbcReloginStripFailed' },
+};
 
 type Phase =
   | { kind: 'connecting' }
@@ -52,8 +63,14 @@ export function FleetWatch({ workerId }: { workerId: string }) {
   const [coordinatorVersion, setCoordinatorVersion] = useState<string | null>(null);
   const [pool, setPool] = useState<PoolLookup>({ kind: 'loading' });
   const [accountHidden, setAccountHidden] = usePreference('fleetWatch.accountHidden', false);
+  // Bumped to re-read the fleet at once, after a re-login is queued.
+  const [fleetRead, setFleetRead] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
+  const relogin = reloginProgress(account, now);
+  const following = relogin?.active ?? false;
 
-  // Polled so the panel sees a worker drop into CHALLENGE_2FA while watched.
+  // Polled so the panel sees a worker drop into CHALLENGE_2FA while watched,
+  // and faster while a re-login is in flight.
   useEffect(() => {
     let cancelled = false;
     const load = () => {
@@ -63,14 +80,15 @@ export function FleetWatch({ workerId }: { workerId: string }) {
           if (cancelled) return;
           setAccount(doc.workers.find(w => w.worker_id === workerId) ?? null);
           setCoordinatorVersion(doc.versions.coordinator);
+          setNow(Date.now());
         })
         // The header and panel are help; the viewer works without them.
         .catch(() => { if (!cancelled) setAccount(a => a ?? null); });
     };
     load();
-    const timer = setInterval(load, FLEET_REFRESH_MS);
+    const timer = setInterval(load, following ? RELOGIN_REFRESH_MS : FLEET_REFRESH_MS);
     return () => { cancelled = true; clearInterval(timer); };
-  }, [workerId]);
+  }, [workerId, following, fleetRead]);
 
   useEffect(() => {
     let cancelled = false;
@@ -202,7 +220,7 @@ export function FleetWatch({ workerId }: { workerId: string }) {
             <input type="checkbox" checked={control} onChange={e => setControl(e.target.checked)} />
             <span>{t('fbcWatchControl')}</span>
           </label>
-          <ReloginButton workerId={workerId} account={account} />
+          <ReloginButton workerId={workerId} account={account} onQueued={() => setFleetRead(n => n + 1)} />
           {phase.kind === 'closed' && (
             <button type="button" className="btn sm" onClick={() => setAttempt(n => n + 1)}>
               <Icon name="rotate" size={13} />
@@ -216,6 +234,16 @@ export function FleetWatch({ workerId }: { workerId: string }) {
           </button>
         </div>
       </div>
+
+      {relogin && (
+        <div className={`fl-relogin ${RELOGIN_STRIP[relogin.phase].tone}`} role="status" aria-live="polite">
+          <Icon name={RELOGIN_STRIP[relogin.phase].icon} size={15} />
+          <span>{t(RELOGIN_STRIP[relogin.phase].key, { age: relTime(relogin.since, locale) })}</span>
+          {relogin.phase === 'needs_you' && !control && phase.kind === 'connected' && (
+            <button type="button" className="btn sm" onClick={() => setControl(true)}>{t('fbcWatchControl')}</button>
+          )}
+        </div>
+      )}
 
       <div className={`card fl-watch${control ? ' in-control' : ''}${accountHidden ? '' : ' with-account'}`}>
         <div className="fl-watch-body">

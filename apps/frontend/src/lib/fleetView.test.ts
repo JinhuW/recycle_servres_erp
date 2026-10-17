@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { vncSocketUrl, type Challenge, type FleetAccount, type FleetDoc, type FleetWorker } from './coordinator';
 import {
   accountAlerts, accountHaystack, attentionReason, browserLabel, canWatch, dayStrip, fleetPostsToday,
-  externalVncUrl, fleetActivity, fleetStatus, flowCounts, hitsByCity, isUnstampedBuild, parkedWorkers, reloginIsAutomatic,
+  externalVncUrl, fleetActivity, fleetStatus, flowCounts, hitsByCity, isUnstampedBuild, parkedWorkers, reloginIsAutomatic, reloginProgress,
   matchesTerms, offersRelogin, queryTerms, reviewedToday, searchedToday,
   splitHighlights, vaultAccountIdFor, whoIs,
   FLOW_STAGES, STAGE_FORMS, draftChanges, settingsDraft, settingsPatch,
@@ -221,6 +221,44 @@ describe('fleetView', () => {
     expect(reloginIsAutomatic(vault(true, { totp_secret: true }))).toBe(false);
     expect(reloginIsAutomatic(account({}))).toBe(false);
     expect(reloginIsAutomatic(null)).toBe(false);
+  });
+
+  it('follows a re-login from the queue to its outcome', () => {
+    const asked = '2026-10-17T20:32:48+00:00';
+    const t0 = Date.parse(asked);
+    const at = (seconds: number) => new Date(t0 + seconds * 1000).toISOString();
+    const w = (h: Partial<FleetWorker>) => account({ health: h as FleetWorker });
+
+    expect(reloginProgress(null)).toBeNull();
+    expect(reloginProgress(account({}))).toBeNull();
+    // A coordinator that predates re-login progress says nothing.
+    expect(reloginProgress(w({ state: 'HEALTHY' }), t0)).toBeNull();
+
+    const queued = reloginProgress(w({ relogin_requested_at: asked, relogin_last_requested_at: asked }), t0 + 5000);
+    expect(queued).toEqual({ phase: 'queued', since: asked, active: true });
+
+    // Picked up, no step reported yet: signing in from the request.
+    expect(reloginProgress(w({ relogin_last_requested_at: asked }), t0 + 9000)?.phase).toBe('signing_in');
+
+    const step = (login_step: string, seconds: number, now = seconds + 1) =>
+      reloginProgress(w({ relogin_last_requested_at: asked, login_step, login_step_at: at(seconds) }), t0 + now * 1000);
+    expect(step('typing', 11)?.phase).toBe('signing_in');
+    expect(step('challenge', 40)).toEqual({ phase: 'needs_you', since: at(40), active: true });
+    expect(step('waiting_for_human', 41)?.phase).toBe('needs_you');
+    expect(step('logged_in', 90)).toEqual({ phase: 'done', since: at(90), active: false });
+    expect(step('failed', 160)?.phase).toBe('failed');
+    expect(step('some_future_step', 20)?.phase).toBe('signing_in');
+
+    // A step from an earlier login is not this one's — but a worker clock a
+    // few seconds behind the coordinator's still counts.
+    expect(step('logged_in', -600, 5)?.phase).toBe('signing_in');
+    expect(step('typing', -20, 5)?.phase).toBe('signing_in');
+    expect(step('challenge', -20, 5)?.phase).toBe('needs_you');
+
+    // Each phase is shown for a bounded time.
+    expect(step('logged_in', 90, 90 + 61)).toBeNull();
+    expect(step('challenge', 40, 40 + 16 * 60)).toBeNull();
+    expect(reloginProgress(w({ relogin_requested_at: asked }), t0 + 31 * 60_000)).toBeNull();
   });
 });
 

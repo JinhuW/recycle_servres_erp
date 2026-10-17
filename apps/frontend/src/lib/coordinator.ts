@@ -34,6 +34,12 @@ export type FleetWorker = {
   // The build the worker reported ("0.5.6 (d3e9a30)"); null from images
   // that predate build reporting.
   version?: string | null;
+  // Re-login progress (see reloginProgress). Absent from a coordinator that
+  // predates it, which leaves the Watch page as it was.
+  relogin_requested_at?: string | null;
+  relogin_last_requested_at?: string | null;
+  login_step?: string | null;
+  login_step_at?: string | null;
   liveness: WorkerLiveness;
   needs_attention: boolean;
 };

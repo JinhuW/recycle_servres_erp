@@ -3372,6 +3372,16 @@ html.desktop, body.desktop, .desktop #root {
 .fl-watch-status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fg-subtle); }
 .fl-watch-status.pos .dot { background: var(--pos); }
 .fl-watch-status.neg .dot { background: var(--neg); }
+.fl-relogin {
+  display: flex; align-items: center; gap: 10px; padding: 9px 14px;
+  font-size: 13px; color: var(--fg-muted);
+  background: var(--bg-soft); border: 1px solid var(--border); border-radius: var(--radius-lg);
+}
+.fl-relogin .icon { flex-shrink: 0; }
+.fl-relogin > span { flex: 1; }
+.fl-relogin.warn { background: var(--warn-soft); color: var(--warn-strong); border-color: transparent; }
+.fl-relogin.pos { background: var(--pos-soft); color: var(--accent-strong); border-color: transparent; }
+.fl-relogin.neg { background: var(--neg-soft); color: var(--neg); border-color: transparent; }
 .fl-watch-toggle {
   display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
   font-size: 12.5px; font-weight: 500; color: var(--fg-muted);
