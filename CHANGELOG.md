@@ -17,6 +17,24 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.266.1] - 2026-10-17
+
+The two Facebook tabs now share one layout, and the flow card keeps its height
+(RS-265).
+
+### Fixed
+
+- **Fleet and Account pool line up.** The Fleet tab nested its title and tabs
+  inside its own column, so their margins stacked on the column's gap and the
+  status legend sat 18px lower than on the Pool tab. Both tabs now render the
+  head and tabs the same way, so switching tabs changes only the content.
+  The Recent activity header also puts its subtitle under the title on both
+  tabs. Before, it wrapped on one tab and not the other.
+- **The flow card holds still.** The stage detail under "From a search to an
+  alert" is a fixed 300px tall, and a longer stage scrolls inside it, so
+  picking a stage no longer resizes the card. The Edit form still grows to
+  fit.
+
 ## [1.266.0] - 2026-10-17
 
 The Facebook fleet table shows each worker's day: Today, Searches and Posts
