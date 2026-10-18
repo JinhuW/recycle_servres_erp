@@ -2091,9 +2091,11 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   post to an alert** card with Poll, Evaluate and Notify stages. Subreddits
   are edited under Poll and alert rules under Evaluate. Since v1.284.0 the
   proxy forwards `/matches` and `/stats`, so the aside lists matched posts
-  and the stages show all-time counts (collected, matched, alerted; waiting,
-  rejected and oldest waiting under Evaluate). If either read fails, that
-  part shows a dash or a note.
+  and the stages show post counts (collected, matched, alerted; waiting,
+  rejected and oldest waiting under Evaluate). Since v1.287.0 those counts
+  cover the posts discovered in the past 24 hours, not all time. Oldest
+  waiting and the failed list still look at every post. If either read
+  fails, that part shows a dash or a note.
 - **Coordinator** — the Facebook fleet, reached from **Monitors ▸ Facebook**
   in the sidebar (v1.207.0), managers only. Since v1.263.0 the Fleet tab
   shares the Account pool tab's chrome: a status legend (Live, Stale, Needs

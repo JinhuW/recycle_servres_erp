@@ -131,12 +131,12 @@ Everything except `/health` needs `Authorization: Bearer $API_TOKEN`.
 | `DELETE` | `/api/rules/:id` | Remove one. |
 | `GET` | `/api/settings` | All runtime settings. |
 | `PUT` | `/api/settings/:key` | Change one. `{"value": …}` |
-| `GET` | `/api/stats` | Counts by status, per-subreddit health, failed posts. |
+| `GET` | `/api/stats?since` | Counts by status (only posts discovered since `since`, when given), per-subreddit health, the oldest pending post, failed posts. |
 | `POST` | `/api/posts/:id/requeue` | Retry a post that gave up. |
 | `POST` | `/api/telegram/test` | Send a test message to the configured chats. |
 
-The ERP's Monitors ▸ Reddit page drives the workers, rules and subreddits
-routes through its backend proxy; see *Contracts* in the root `AGENTS.md`
+The ERP's Monitors ▸ Reddit page drives the workers, rules, subreddits,
+matches and stats routes through its backend proxy; see *Contracts* in the root `AGENTS.md`
 before changing their shapes.
 
 ```bash

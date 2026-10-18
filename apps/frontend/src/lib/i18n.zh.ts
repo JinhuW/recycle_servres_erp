@@ -2501,7 +2501,7 @@ const zh: Record<string, string> = {
   trkMatchesEmpty: '暂无命中。规则标记的帖子会显示在这里。',
   trkMatchesUnavailable: '命中列表未能加载，页面其他部分不受影响。',
   trkFlowTitle: '从帖子到提醒',
-  trkFlowSub: '每个节点都运行这三个循环 · 累计 · 点击阶段查看',
+  trkFlowSub: '每个节点都运行这三个循环 · 近 24 小时 · 点击阶段查看',
   trkFlowNotCounted: '未统计',
   trkFlowUnit_poll: '条帖子已收录',
   trkFlowUnit_evaluate: '条命中',

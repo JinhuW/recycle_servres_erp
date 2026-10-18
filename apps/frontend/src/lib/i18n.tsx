@@ -3110,7 +3110,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     trkMatchesEmpty: 'No matches yet. Posts your rules flag show up here.',
     trkMatchesUnavailable: 'Matches did not load. The rest of the page is unaffected.',
     trkFlowTitle: 'From a post to an alert',
-    trkFlowSub: 'every worker runs all three loops · all time · click a stage',
+    trkFlowSub: 'every worker runs all three loops · past 24 hours · click a stage',
     trkFlowNotCounted: 'not counted',
     trkFlowUnit_poll: 'posts collected',
     trkFlowUnit_evaluate: 'matched',

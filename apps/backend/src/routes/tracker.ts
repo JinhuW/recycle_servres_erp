@@ -91,7 +91,8 @@ tracker.delete('/rules/:id', (c) =>
 
 tracker.get('/matches', (c) =>
   forward(c, 'GET', `/api/matches${new URL(c.req.url).search}`, false));
-tracker.get('/stats', (c) => forward(c, 'GET', '/api/stats', false));
+tracker.get('/stats', (c) =>
+  forward(c, 'GET', `/api/stats${new URL(c.req.url).search}`, false));
 
 tracker.get('/subreddits', (c) => forward(c, 'GET', '/api/subreddits', false));
 tracker.post('/subreddits', (c) => forward(c, 'POST', '/api/subreddits', true));
