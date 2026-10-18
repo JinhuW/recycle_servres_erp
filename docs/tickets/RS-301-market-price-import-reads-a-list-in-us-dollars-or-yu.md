@@ -2,12 +2,12 @@
 id: RS-301
 title: Market price import reads a list in US dollars or yuan
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-10-18
 reporter: jinhu
 branch: fx-currency-price-adjust
-pr:
+pr: "#746"
 version: 1.286.0
 related: [RS-232]
 ---
@@ -17,6 +17,10 @@ related: [RS-232]
 > [Image #1]
 >
 > This should also able to adjust the price by the concurrency uds / yuan
+
+Later, while it was being built:
+
+> only rmb and USD
 
 ![The Import market prices dialog before the change](assets/RS-301-import-market-prices.png)
 

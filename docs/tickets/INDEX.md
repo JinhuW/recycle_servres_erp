@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-301](./RS-301-market-price-import-reads-a-list-in-us-dollars-or-yu.md) | in-review | story | P2 | Market price import reads a list in US dollars or yuan | 1.286.0 |
+| [RS-301](./RS-301-market-price-import-reads-a-list-in-us-dollars-or-yu.md) | done | story | P2 | Market price import reads a list in US dollars or yuan | 1.286.0 |
 | [RS-300](./RS-300-fleet-recent-activity-records-worker-status-changes.md) | in-review | story | P2 | Fleet Recent activity records worker status changes | 1.285.0 |
 | [RS-299](./RS-299-proxy-the-reddit-tracker-s-matches-and-stats-to-the.md) | done | story | P2 | Proxy the Reddit tracker's matches and stats to the ERP | 1.284.0 |
 | [RS-298](./RS-298-fleet-status-column-shows-the-last-heartbeat-time.md) | done | task | P2 | Fleet status column shows the last heartbeat time | 1.283.1 |
