@@ -17,6 +17,19 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.283.1] - 2026-10-18
+
+The Facebook fleet's Status column shows when each worker last heartbeated
+(RS-298).
+
+### Changed
+
+- **The status says where it comes from.** Live, Stale and Offline are judged
+  from heartbeat age, but that age was only a tooltip on the Today cell. Each
+  row's Status cell now carries a "heartbeat 3 min. ago" line under the chip,
+  with the exact time on hover. A silent worker keeps its "Silent since" note
+  instead, and an undeployed or never-reported worker shows no line.
+
 ## [1.283.0] - 2026-10-18
 
 Monitors ▸ Reddit takes the Facebook fleet page's layout (RS-297).

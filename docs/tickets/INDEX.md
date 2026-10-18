@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-298](./RS-298-fleet-status-column-shows-the-last-heartbeat-time.md) | done | task | P2 | Fleet status column shows the last heartbeat time | — |
 | [RS-297](./RS-297-reddit-tracker-page-follows-the-facebook-fleet-layou.md) | in-review | story | P2 | Reddit tracker page follows the Facebook fleet layout | 1.283.0 |
 | [RS-296](./RS-296-full-screen-for-the-fleet-watch-view.md) | in-review | story | P2 | Full screen for the fleet watch view | 1.282.0 |
 | [RS-295](./RS-295-fit-the-worker-vnc-view-to-the-browser-window.md) | in-review | bug | P2 | Fit the worker VNC view to the browser window | — |

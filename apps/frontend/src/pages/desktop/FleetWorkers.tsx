@@ -212,6 +212,8 @@ function WorkerRow({ account: w, hits, parked, terms, startAt, open, onToggle, l
   const who = whoIs(w);
   const status = fleetStatus(w, parked);
   const note = statusNote(t, w, parked, locale);
+  // The status is judged from this beat; a silent worker's note already dates it.
+  const beat = h?.last_heartbeat_at && h.liveness !== 'dead' ? h.last_heartbeat_at : null;
   const days = h?.session_days_left ?? null;
   const path = fleetWorkerPath(w.worker_id);
   const strip = dayStrip(w, status, startAt);
@@ -239,6 +241,8 @@ function WorkerRow({ account: w, hits, parked, terms, startAt, open, onToggle, l
           <span className="fp-holder">
             <span><StatusChip status={status} /></span>
             {note && <small className={status === 'attention' || status === 'offline' ? 'fp-warn' : ''}>{note}</small>}
+            {beat && <small className="fp-muted" title={new Date(beat).toLocaleString(locale)}>
+              {t('fbcHeartbeatAge', { age: relTime(beat, locale) })}</small>}
           </span>
         </td>
         <td className="ff-wrap" title={h?.last_heartbeat_at
