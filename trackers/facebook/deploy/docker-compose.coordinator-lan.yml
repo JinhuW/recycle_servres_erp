@@ -1,0 +1,18 @@
+# Publishes the coordinator on the homelab LAN, for worker hosts other than
+# this VM (their rs-fleetd agents and their workers). An override, applied by
+# scripts/deploy.sh only when configs/secrets.coordinator-lan.env exists on the
+# VM, holding the address to bind:
+#   RS_LAN_IP=10.10.10.73
+#
+# Every route already needs a worker, host or admin token, but this widens who
+# can reach the service that holds every account's secrets from "this VM" to
+# "this LAN". Restrict the port to the worker hosts with the VM's firewall
+# (e.g. `ufw allow from 10.10.10.80 to any port 8500 proto tcp`).
+#
+#   docker compose --env-file configs/secrets.coordinator-lan.env \
+#     -f deploy/docker-compose.coordinator.yml -f deploy/docker-compose.coordinator-lan.yml up -d
+
+services:
+  coordinator:
+    ports:
+      - "${RS_LAN_IP:?set RS_LAN_IP}:8500:8500"

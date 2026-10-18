@@ -63,6 +63,7 @@ def heartbeat(
         ("version", payload.version),
         ("login_step", payload.login_step),
         ("login_step_at", payload.login_step_at),
+        ("host_id", payload.host_id),
     ):
         if value is not None:
             health_fields[name] = value

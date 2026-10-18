@@ -6,9 +6,11 @@
 # compromise of this host reaches every Facebook account at once.
 #
 # Bound to 127.0.0.1 deliberately. Workers on this host reach it over the
-# `rs-fleet` docker network by name; workers on other machines must come in over
-# a tailnet/WireGuard, never a LAN or public port. The bearer tokens guard
-# against stray requests, not against a reachable port.
+# `rs-fleet` docker network by name. Worker hosts elsewhere on the homelab LAN
+# reach it through docker-compose.coordinator-lan.yml, an explicit override
+# that deploy.sh applies only when the VM holds its address; never a public
+# port. The bearer tokens guard against stray requests, not against a
+# reachable port, so firewall that one to the worker hosts.
 
 services:
   coordinator:

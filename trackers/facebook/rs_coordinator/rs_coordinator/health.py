@@ -166,6 +166,9 @@ def liveness_sweep(
     moment = _moment(now)
     alerts: List[Tuple[str, str, Optional[str]]] = []
     for row in rows:
+        if row.get("retired_at"):
+            # Stopped by the fleet on purpose: its silence needs nobody.
+            continue
         worker_id = str(row.get("worker_id") or "")
         state = liveness(row.get("last_heartbeat_at"), moment)
         alerted = row.get("alerted_liveness")

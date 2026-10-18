@@ -32,6 +32,9 @@ set -eu
 VM="${RS_MONITOR_HOST:-jinhu@10.10.10.73}"
 REMOTE="${RS_REMOTE_ROOT:-recycle_servers/facebook_tracker}"
 IMAGE="${RS_MONITOR_IMAGE:-aimm-recycle:latest}"
+# A private registry other worker hosts pull from (deploy/docker-compose.registry.yml),
+# e.g. 10.10.10.73:5000. Unset: the image exists on this VM only.
+REGISTRY="${RS_REGISTRY:-}"
 PKG=/usr/local/lib/python3.12/site-packages/ai_marketplace_monitor
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 # What the VM says it is running. It lives at the root of $REMOTE, outside every
@@ -50,6 +53,13 @@ for arg in "$@"; do
 done
 
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
+
+# Whether the VM runs its workers through rs-fleetd. Then a deploy rolls the
+# new image out through the coordinator instead of recreating compose workers:
+# recreating one the agent has adopted would put its session in two browsers.
+fleet_mode() {
+    ssh "$VM" "docker inspect rs-fleetd >/dev/null 2>&1" </dev/null
+}
 
 # Every worker on the VM, one per line: "<compose file> <service> <container>
 # <config>". Read from the compose files themselves, so a worker added by
@@ -135,7 +145,35 @@ coordinator_version() {
     ssh "$VM" "docker exec rs-coordinator python -c 'import json,urllib.request;print(json.load(urllib.request.urlopen(\"http://127.0.0.1:8500/healthz\"))[\"version\"])'" 2>/dev/null </dev/null
 }
 
+# A fleet deploy only starts the rollout, which moves one worker at a time and
+# waits for each to heartbeat on the new version. So this checks the workers
+# already on it, and names the ones the rollout has yet to reach.
+verify_fleet() {
+    FAILED=0
+    target="aimm-recycle:$(cat "$ROOT/VERSION")"
+    [ -z "$REGISTRY" ] || target="$REGISTRY/$target"
+    for c in $(ssh "$VM" "docker ps --filter label=rs.fleet.managed=1 --format '{{.Names}}'" </dev/null); do
+        image=$(ssh "$VM" "docker inspect $c --format '{{index .Config.Labels \"rs.fleet.image\"}}'" </dev/null)
+        if [ "$image" = "$target" ]; then
+            DRIFT=0
+            verify_worker "$c" none
+            [ "$DRIFT" = "0" ] || FAILED=1
+        else
+            step "verify: $c"
+            echo "  still on $image; the rollout reaches it in turn"
+        fi
+    done
+    step "the rollout"
+    ssh "$VM" "docker exec rs-coordinator rsc fleet state" </dev/null | sed 's/^/  /'
+}
+
 verify() {
+    if fleet_mode; then
+        verify_fleet
+        DRIFT=$FAILED
+        verify_coordinator
+        return
+    fi
     # A for loop, not `homelab_workers | while read`: every ssh in
     # verify_worker would read the rest of the list from that pipe as stdin.
     FAILED=0
@@ -152,6 +190,10 @@ verify() {
     done
     IFS=$old_ifs
     DRIFT=$FAILED
+    verify_coordinator
+}
+
+verify_coordinator() {
     # `sync` rebuilds no image, the coordinator's included.
     if [ "$MODE" != "sync" ]; then
         step "verify: rs-coordinator"
@@ -231,7 +273,7 @@ sh deploy/make-homelab-config.sh
 step "sync -> $VM:$REMOTE"
 rsync -az --delete --itemize-changes --filter="merge scripts/deploy.rsync-filter" \
     ai-marketplace-monitor configs deploy scripts \
-    rs_coordinator rs_poster rs_messenger rs_console \
+    rs_coordinator rs_poster rs_messenger rs_console rs_fleetd \
     CHANGELOG.md README.md VENDOR.md VERSION \
     "$VM:$REMOTE/"
 
@@ -255,6 +297,11 @@ for config in configs/homelab*.toml; do
     ssh "$VM" "out=\$(mktemp) && docker exec -i rs-console python -m rs_console.settings render --config $(basename "$config") > \$out && cat \$out > $REMOTE/$config && rm -f \$out" < "$config"
     echo "  $config"
 done
+# A worker rs-fleetd runs reads its config from the coordinator, not from the
+# file above; this hands it the same rendering.
+if fleet_mode; then
+    ssh "$VM" "docker exec rs-console python -m rs_console.settings publish" | sed 's/^/  /'
+fi
 
 # ---------------------------------------------------------------- build
 if [ "$MODE" != "sync" ]; then
@@ -274,9 +321,11 @@ if [ "$MODE" != "sync" ]; then
     # per worker on the fleet dashboard). The commit is read here, not on the
     # VM: rsync ships no .git, so the VM cannot know what it is running.
     MONITOR_COMMIT=$(git -C "$ROOT/ai-marketplace-monitor" rev-parse --short HEAD 2>/dev/null || echo unknown)
+    # Tagged with the version too: a fleet release names the exact image, and
+    # rolling back is releasing the previous tag, still on the host.
     if ssh "$VM" "cd $REMOTE/ai-marketplace-monitor && docker build \
             --build-arg RS_VERSION=$VERSION --build-arg RS_MONITOR_COMMIT=$MONITOR_COMMIT \
-            -t $IMAGE ." \
+            -t $IMAGE -t aimm-recycle:$VERSION ." \
             > "$build_log" 2>&1; then
         tail -5 "$build_log"
         rm -f "$build_log"
@@ -286,6 +335,10 @@ if [ "$MODE" != "sync" ]; then
         rm -f "$build_log"
         exit 1
     fi
+    if [ -n "$REGISTRY" ]; then
+        step "push to $REGISTRY"
+        ssh "$VM" "docker tag aimm-recycle:$VERSION $REGISTRY/aimm-recycle:$VERSION && docker push -q $REGISTRY/aimm-recycle:$VERSION"
+    fi
 fi
 
 # ---------------------------------------------------------------- coordinator
@@ -294,7 +347,12 @@ fi
 # the old coordinator keeps answering until compose swaps it.
 if [ "$MODE" != "sync" ]; then
     step "rebuild and restart rs-coordinator"
-    ssh "$VM" "cd $REMOTE && docker compose -f deploy/docker-compose.coordinator.yml up -d --build --force-recreate coordinator"
+    # Published on the LAN too when the VM says so, for worker hosts other
+    # than this one (deploy/docker-compose.coordinator-lan.yml).
+    ssh "$VM" "cd $REMOTE && if [ -e configs/secrets.coordinator-lan.env ]; then \
+        docker compose --env-file configs/secrets.coordinator-lan.env -f deploy/docker-compose.coordinator.yml \
+            -f deploy/docker-compose.coordinator-lan.yml up -d --build --force-recreate coordinator; \
+        else docker compose -f deploy/docker-compose.coordinator.yml up -d --build --force-recreate coordinator; fi"
     for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
         [ "$(coordinator_version)" = "$VERSION" ] && break
         sleep 5
@@ -302,12 +360,28 @@ if [ "$MODE" != "sync" ]; then
     echo "  running $(coordinator_version || echo 'nothing yet')"
 fi
 
+# ---------------------------------------------------------------- fleet
+# Through the coordinator: rs-fleetd recreates one worker at a time, and the
+# next waits for the last to heartbeat on the new version (fleet.py). The
+# agent itself is rebuilt first, so the release meets this tree's agent.
+if fleet_mode; then
+    step "rebuild rs-fleetd"
+    ssh "$VM" "cd $REMOTE && docker compose --env-file configs/secrets.fleetd.env -f deploy/docker-compose.fleetd.yml up -d --build --force-recreate fleetd"
+    if [ "$MODE" != "sync" ]; then
+        RELEASE_IMAGE="aimm-recycle:$VERSION"
+        [ -z "$REGISTRY" ] || RELEASE_IMAGE="$REGISTRY/$RELEASE_IMAGE"
+        step "release $RELEASE_IMAGE"
+        ssh "$VM" "docker exec rs-coordinator rsc fleet release $VERSION --image $RELEASE_IMAGE"
+    fi
+fi
+
 # ---------------------------------------------------------------- restart
-# Every worker, one at a time. Only rs-monitor used to be recreated, so the
-# others kept whatever image they were last started from, for releases on end.
-# Staggered: each recreate starts a sweep at once, and ten logins in the same
-# minute from one host is a pattern worth not showing Facebook.
-homelab_workers | while read -r file service container _config; do
+# Every compose worker, one at a time. Only rs-monitor used to be recreated, so
+# the others kept whatever image they were last started from, for releases on
+# end. Staggered: each recreate starts a sweep at once, and ten logins in the
+# same minute from one host is a pattern worth not showing Facebook. Skipped
+# under rs-fleetd, which has taken them over (see `fleet_mode`).
+fleet_mode || homelab_workers | while read -r file service container _config; do
     step "restart $container"
     # `up -d` alone will not recreate the container when only the image
     # changed underneath a tag it already has by name, so force it. The old
