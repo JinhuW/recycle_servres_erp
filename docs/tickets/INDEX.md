@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-295](./RS-295-fit-the-worker-vnc-view-to-the-browser-window.md) | in-progress | bug | P2 | Fit the worker VNC view to the browser window | — |
+| [RS-295](./RS-295-fit-the-worker-vnc-view-to-the-browser-window.md) | in-review | bug | P2 | Fit the worker VNC view to the browser window | — |
 | [RS-293](./RS-293-every-facebook-login-records-its-device-retries-are.md) | in-review | story | P1 | Every Facebook login records its device, retries are capped, and a new account starts on its legacy device | facebook-tracker 0.12.2, v1.281.3 |
 | [RS-292](./RS-292-facebook-fleet-scales-itself-rolls-new-versions-and.md) | done | story | P2 | Facebook fleet scales itself, rolls new versions, and keeps every account's session and device | facebook-tracker 0.12.0 (ERP 1.281.2 for the uid) |
 | [RS-291](./RS-291-a-worker-s-saved-login-survives-any-restart-until-fa.md) | backlog | bug | P1 | A worker's saved login survives any restart until Facebook expires it | — |
