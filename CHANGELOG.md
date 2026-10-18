@@ -17,6 +17,23 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.284.0] - 2026-10-18
+
+Monitors ▸ Reddit shows its post counts and recent matches (RS-299).
+
+### Added
+
+- **The ERP proxy forwards the tracker's matches and stats.** v1.283.0 built
+  the Reddit page's **Recent matches** aside and the **From a post to an
+  alert** counts on the tracker's `/api/matches` and `/api/stats`, but the
+  proxy's allowlist didn't include them yet. The page showed "not counted",
+  dashes and an empty aside. `GET /api/tracker/matches` (with its `limit` and
+  `since` query passed through) and `GET /api/tracker/stats` are now
+  forwarded, managers only like the rest. The stage cards count posts
+  collected, matched and alerted. Evaluate shows how many posts are waiting
+  and rejected, and how long the oldest has waited. The aside lists the
+  newest matched posts.
+
 ## [1.283.1] - 2026-10-18
 
 The Facebook fleet's Status column shows when each worker last heartbeated

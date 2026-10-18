@@ -72,6 +72,25 @@ describe('Tracker proxy routes (/api/tracker)', () => {
     expect(url).toBe('http://tracker.internal:8080/api/workers?status=live&limit=15&offset=30');
   });
 
+  it('forwards the matches listing with its query and the stats read', async () => {
+    const { token } = await loginAs(ALEX);
+    const spy = stubTracker(200, { count: 1, matches: [{ redditId: 't3_abc', status: 'notified' }] });
+
+    const m = await api<{ matches: Array<{ redditId: string }> }>(
+      'GET', '/api/tracker/matches?limit=8&since=2026-10-01T00:00:00Z', { token, env: TRACKER_ENV },
+    );
+    expect(m.status).toBe(200);
+    expect(m.body.matches[0]?.redditId).toBe('t3_abc');
+    expect((spy.mock.calls[0] as [string])[0])
+      .toBe('http://tracker.internal:8080/api/matches?limit=8&since=2026-10-01T00:00:00Z');
+
+    const stats = { posts: { new: 2, rejected: 40, notified: 3 }, oldestPending: null, subreddits: [], failed: [] };
+    stubTracker(200, stats);
+    const s = await api<typeof stats>('GET', '/api/tracker/stats', { token, env: TRACKER_ENV });
+    expect(s.status).toBe(200);
+    expect(s.body).toEqual(stats);
+  });
+
   it('forwards a POST body and preserves the upstream status', async () => {
     const { token } = await loginAs(ALEX);
     const spy = stubTracker(201, { rule: { id: 1, name: 'EPYC lots' } });

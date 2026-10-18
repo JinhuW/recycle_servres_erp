@@ -2077,9 +2077,11 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   fleet page's layout: a Live / Stale / Dead legend whose counts filter the
   workers table, a **Recent matches** aside beside the table, and a **From a
   post to an alert** card with Poll, Evaluate and Notify stages. Subreddits
-  are edited under Poll and alert rules under Evaluate. The aside and the
-  stage counts need the proxy to forward `/matches` and `/stats`; until it
-  does, they show a dash or a note.
+  are edited under Poll and alert rules under Evaluate. Since v1.284.0 the
+  proxy forwards `/matches` and `/stats`, so the aside lists matched posts
+  and the stages show all-time counts (collected, matched, alerted; waiting,
+  rejected and oldest waiting under Evaluate). If either read fails, that
+  part shows a dash or a note.
 - **Coordinator** — the Facebook fleet, reached from **Monitors ▸ Facebook**
   in the sidebar (v1.207.0), managers only. Since v1.263.0 the Fleet tab
   shares the Account pool tab's chrome: a status legend (Live, Stale, Needs
