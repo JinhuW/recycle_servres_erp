@@ -225,7 +225,7 @@ async def worker_relogin(worker_id: str) -> Response:
 # proxy URL, a VNC address) is a decision here, not something the ERP can
 # reach by accident. Secrets are write-only end to end: the coordinator's
 # answer carries presence flags, never a value.
-ACCOUNT_WRITE_FIELDS = ("worker_id", "fb_username", "region", "allow_password_login")
+ACCOUNT_WRITE_FIELDS = ("worker_id", "fb_username", "fb_uid", "region", "allow_password_login")
 ACCOUNT_SECRET_FIELDS = (
     "password",
     "email",

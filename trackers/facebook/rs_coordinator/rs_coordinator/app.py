@@ -29,6 +29,7 @@ from .routers import (
     cities,
     escalation,
     health,
+    identity,
     incidents,
     listings,
     messages,
@@ -95,6 +96,7 @@ app.include_router(health.router, tags=["health"])
 app.include_router(auth.router, tags=["auth"])
 app.include_router(escalation.router, tags=["escalation"])
 app.include_router(session.router, tags=["session"])
+app.include_router(identity.router, tags=["identity"])
 app.include_router(messages.router, tags=["messages"])
 app.include_router(stats.router, tags=["stats"])
 app.include_router(alerts.router, tags=["alerts"])

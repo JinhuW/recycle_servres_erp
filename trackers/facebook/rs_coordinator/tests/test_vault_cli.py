@@ -345,3 +345,44 @@ def test_a_missing_token_secret_is_reported_not_raised(env, monkeypatch, capsys)
     monkeypatch.delenv("RS_WORKER_TOKEN_SECRET")
     assert main(["mint-token", "--worker", "denver-1"]) == 1
     assert "RS_WORKER_TOKEN_SECRET" in capsys.readouterr().err
+
+
+# -- identity ---------------------------------------------------------------
+
+
+def test_set_account_stores_the_facebook_uid(env, store):
+    assert main(["vault", "set-account", "--account-id", "va-1", "--worker", "va-1",
+                 "--fb-username", "a@example.test", "--fb-uid", "1000", "--no-prompt"]) == 0
+    assert store.db.get_account_row("va-1")["fb_uid"] == "1000"
+
+
+def _with_session(store, uid: str) -> None:
+    store.put_account("va-1", {"password": PASSWORD}, worker_id="va-1", fb_username="a@x.test")
+    state = {"cookies": [{"name": "c_user", "value": uid, "domain": ".facebook.com"}]}
+    store.db.upsert_snapshot("va-1", {"state_blob": store.vault.encrypt(state)})
+
+
+def test_learn_uids_prints_until_applied(env, store, capsys):
+    _with_session(store, "1000")
+
+    assert main(["identity", "learn-uids"]) == 0
+    assert "session uid 1000" in capsys.readouterr().out
+    assert store.db.get_account_row("va-1")["fb_uid"] is None
+
+    assert main(["identity", "learn-uids", "--apply"]) == 0
+    assert store.db.get_account_row("va-1")["fb_uid"] == "1000"
+    assert main(["identity", "learn-uids"]) == 0
+    assert "already has a uid" in capsys.readouterr().out
+
+
+def test_identity_list_never_prints_device_cookies(env, store, capsys):
+    store.db.insert_device_profile({
+        "identity_key": "uid:1000", "device_id": "dev-1", "fb_uid": "1000",
+        "viewport_w": 1280, "viewport_h": 720, "screen_w": 1280, "screen_h": 720,
+        "locale": "en-US", "timezone_id": "UTC", "source": "seeded",
+        "device_cookies_blob": store.vault.encrypt({"cookies": [{"name": "datr", "value": "d-secret"}]}),
+    })
+    assert main(["identity", "list"]) == 0
+    out = capsys.readouterr().out
+    assert "uid:1000" in out and "device cookies: SET" in out
+    assert "d-secret" not in out

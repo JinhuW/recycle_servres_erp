@@ -18,6 +18,57 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Added
+
+- **Every Facebook account keeps one device for good** (RS-292). The
+  coordinator now keeps a device profile per account (`device_profiles`, keyed
+  by the account's uid): the user agent or "the browser's own", screen,
+  viewport, scale, locale, timezone, and the account's `datr`/`sb` cookies,
+  sealed with the vault key. A worker asks for its account's device before
+  each login, caches it in `/data/identity.json`, and opens every browser
+  with it. A restart, a rebuilt VM or the account moving to another worker
+  now shows Facebook the same machine, and no two accounts ever share one. A
+  worker that is already logged in joins without anything visible changing:
+  its account's first profile copies what its browser presents. The poster
+  and messenger present the same cached device. `rsc identity list` prints the
+  profiles.
+- **A worker with a device restores a newer session, not only a missing
+  one.** 0.10.5 refills a session file that holds nothing. A worker whose
+  account has a device also replaces a file older than the coordinator's
+  snapshot, which is what a worker moved to another host, or back, finds.
+- **Vault accounts carry the Facebook uid** (`fb_uid`). The console passes it
+  through from the ERP, and `rsc vault set-account --fb-uid` sets it by hand.
+  A new login written without a uid clears it.
+
+### Changed
+
+- **A new login on a worker sets the previous session aside.** Before, a
+  re-login after the ERP swapped accounts kept the old login's `datr`/`sb`, so
+  the new account signed in from the old one's device. Now the old session is
+  moved to `fb_state.json.<time>.previous-login`, never deleted, and the new
+  account signs in carrying its own device cookies.
+- **The coordinator only hands back a snapshot of the account's own login.**
+  Once a worker's account has a uid, `GET /v1/session/{worker}/restore`
+  answers 409 for a snapshot taken under another account's device, or of
+  another uid's session. That is the snapshot a swapped worker still has on
+  file until the new login's first save. A worker whose account has no uid
+  restores as in 0.10.5.
+- **`scripts/deploy.sh` ships the whole fleet.** It rebuilds the coordinator
+  and recreates every `homelab*` worker one at a time, 20 s apart. Before, only
+  `rs-monitor` was recreated, and the other nine ran whatever image they were
+  last started from. `scripts/deploy.sh check` verifies every worker's code
+  and the coordinator's version.
+- **The worker's X display is 1920x1080**, so that any device profile's screen
+  fits. Each context still presents its own account's screen and viewport.
+
+### Upgrading
+
+- The first deploy changes nothing that Facebook can see. Devices exist only
+  for accounts with a uid. Accounts assigned from the ERP after its next
+  release get one with the login. For the accounts already on workers, run
+  `rsc identity learn-uids` on the VM, check each uid against the ERP's
+  pool, then run it again with `--apply`.
+
 ## [0.10.6] - 2026-10-18
 
 ### Fixed

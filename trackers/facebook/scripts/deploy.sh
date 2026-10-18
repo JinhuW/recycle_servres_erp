@@ -1,5 +1,6 @@
 #!/bin/sh
-# Push this tree to the homelab worker and PROVE the worker is running it.
+# Push this tree to the homelab VM and PROVE the coordinator and every worker
+# run it.
 #
 #   scripts/deploy.sh            # test, sync, rebuild, restart, verify
 #   scripts/deploy.sh check      # verify only — is the VM running this tree?
@@ -30,7 +31,6 @@ set -eu
 
 VM="${RS_MONITOR_HOST:-jinhu@10.10.10.73}"
 REMOTE="${RS_REMOTE_ROOT:-recycle_servers/facebook_tracker}"
-C="${RS_MONITOR_CONTAINER:-rs-monitor}"
 IMAGE="${RS_MONITOR_IMAGE:-aimm-recycle:latest}"
 PKG=/usr/local/lib/python3.12/site-packages/ai_marketplace_monitor
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -51,6 +51,18 @@ done
 
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 
+# Every worker on the VM, one per line: "<compose file> <service> <container>
+# <config>". Read from the compose files themselves, so a worker added by
+# copying one is restarted and verified without editing this script.
+homelab_workers() {
+    for f in deploy/docker-compose.homelab*.yml; do
+        service=$(sed -n '/^services:/{n;s/^ *\([a-z0-9-]*\):.*/\1/p;}' "$f")
+        container=$(sed -n 's/^ *container_name: *//p' "$f")
+        config=$(sed -n 's#^ *- \.\./configs/\([a-z0-9-]*\.toml\):.*#\1#p' "$f")
+        printf '%s %s %s %s\n' "$f" "$service" "$container" "$config"
+    done
+}
+
 # A worker config as the VM should hold it: this tree's copy with the settings
 # saved from the ERP written in (rs_console/settings.py). A console that
 # predates saved settings has none, so the tree's copy is then the answer.
@@ -66,7 +78,9 @@ render_config() {
 # Compares the container's installed modules with this tree, file by file.
 # A marker grep would only find the patches someone remembered to list; a
 # checksum finds everything, including a module that failed to copy.
-verify() {
+verify_worker() {
+    C=$1
+    config=$2
     step "verify: does $C run this tree?"
 
     local_sums=$(cd src_for_sums 2>/dev/null || cd "$ROOT/ai-marketplace-monitor/src/ai_marketplace_monitor"; \
@@ -87,16 +101,21 @@ verify() {
     fi
 
     # The config is bind-mounted, so it can drift independently of the image.
-    expected=$(mktemp)
-    render_config "$ROOT/configs/homelab.toml" > "$expected"
-    if ssh "$VM" "docker exec $C cat /root/.ai-marketplace-monitor/config.toml" \
-        | diff -q - "$expected" >/dev/null 2>&1; then
-        echo "  config: MATCH"
-    else
-        echo "  config: DRIFT — configs/homelab.toml (plus saved settings) differs from the mounted config"
-        DRIFT=1
+    # Only homelab.toml is generated from this tree; the regional configs are
+    # the VM's own, edited from the ERP, so there is nothing here to hold
+    # them against.
+    if [ "$config" = "homelab.toml" ]; then
+        expected=$(mktemp)
+        render_config "$ROOT/configs/homelab.toml" > "$expected"
+        if ssh "$VM" "docker exec $C cat /root/.ai-marketplace-monitor/config.toml" \
+            | diff -q - "$expected" >/dev/null 2>&1; then
+            echo "  config: MATCH"
+        else
+            echo "  config: DRIFT — configs/homelab.toml (plus saved settings) differs from the mounted config"
+            DRIFT=1
+        fi
+        rm -f "$expected"
     fi
-    rm -f "$expected"
 
     # A restart that half-failed still leaves the old process running.
     ssh "$VM" "docker inspect $C --format '  uptime: started {{.State.StartedAt}}, restarts {{.RestartCount}}, running {{.State.Running}}'"
@@ -110,9 +129,42 @@ verify() {
         echo "  boot:   $boot_err ERROR line(s) — showing them:"
         ssh "$VM" "docker exec $C sh -c 'head -60 /var/log/supervisor/aimm.log | grep -A3 ERROR'" | sed 's/^/    /'
     }
+}
 
-    [ "${DRIFT:-0}" = "0" ] || { echo; echo "VERIFY FAILED — the worker is not running this tree."; exit 1; }
-    echo; echo "verified: $C is running this tree."
+coordinator_version() {
+    ssh "$VM" "docker exec rs-coordinator python -c 'import json,urllib.request;print(json.load(urllib.request.urlopen(\"http://127.0.0.1:8500/healthz\"))[\"version\"])'" 2>/dev/null </dev/null
+}
+
+verify() {
+    # A for loop, not `homelab_workers | while read`: every ssh in
+    # verify_worker would read the rest of the list from that pipe as stdin.
+    FAILED=0
+    old_ifs=$IFS
+    IFS='
+'
+    for line in $(homelab_workers); do
+        IFS=$old_ifs
+        # shellcheck disable=SC2086 # split the line into its four fields
+        set -- $line
+        DRIFT=0
+        verify_worker "$3" "$4"
+        [ "$DRIFT" = "0" ] || FAILED=1
+    done
+    IFS=$old_ifs
+    DRIFT=$FAILED
+    # `sync` rebuilds no image, the coordinator's included.
+    if [ "$MODE" != "sync" ]; then
+        step "verify: rs-coordinator"
+        coordinator=$(coordinator_version || echo unreachable)
+        if [ "$coordinator" = "$(cat "$ROOT/VERSION")" ]; then
+            echo "  version: MATCH ($coordinator)"
+        else
+            echo "  version: DRIFT — running $coordinator, this tree is $(cat "$ROOT/VERSION")"
+            DRIFT=1
+        fi
+    fi
+    [ "${DRIFT:-0}" = "0" ] || { echo; echo "VERIFY FAILED — the fleet is not running this tree."; exit 1; }
+    echo; echo "verified: every worker and the coordinator run this tree."
 }
 
 if [ "$MODE" = "check" ]; then
@@ -236,15 +288,35 @@ if [ "$MODE" != "sync" ]; then
     fi
 fi
 
-# ---------------------------------------------------------------- restart
-step "restart $C"
-# `up -d` alone will not recreate the container when only the image changed
-# underneath a tag it already has by name, so force it.
-ssh "$VM" "cd $REMOTE && docker compose -f deploy/docker-compose.homelab.yml up -d --force-recreate monitor"
+# ---------------------------------------------------------------- coordinator
+# Before the workers, which ask it for their device as they boot. A worker that
+# finds it down boots the device it cached last time, so the gap costs nothing;
+# the old coordinator keeps answering until compose swaps it.
+if [ "$MODE" != "sync" ]; then
+    step "rebuild and restart rs-coordinator"
+    ssh "$VM" "cd $REMOTE && docker compose -f deploy/docker-compose.coordinator.yml up -d --build --force-recreate coordinator"
+    for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+        [ "$(coordinator_version)" = "$VERSION" ] && break
+        sleep 5
+    done
+    echo "  running $(coordinator_version || echo 'nothing yet')"
+fi
 
-# Give supervisord time to spawn aimm and write its first lines; verifying
-# before that reads the previous boot's log.
-ssh "$VM" "sleep 20"
+# ---------------------------------------------------------------- restart
+# Every worker, one at a time. Only rs-monitor used to be recreated, so the
+# others kept whatever image they were last started from, for releases on end.
+# Staggered: each recreate starts a sweep at once, and ten logins in the same
+# minute from one host is a pattern worth not showing Facebook.
+homelab_workers | while read -r file service container _config; do
+    step "restart $container"
+    # `up -d` alone will not recreate the container when only the image
+    # changed underneath a tag it already has by name, so force it. The old
+    # container gets stop_grace_period to save its session first.
+    ssh "$VM" "cd $REMOTE && docker compose -f $file up -d --force-recreate $service" </dev/null
+    # Give supervisord time to spawn aimm and write its first lines; verifying
+    # before that reads the previous boot's log.
+    ssh "$VM" "sleep 20" </dev/null
+done
 
 verify
 
@@ -262,7 +334,8 @@ echo "  $VERSION $SHA"
 # missed notification must never mark a verified deploy as failed.
 step "notify telegram"
 DEPLOY_DESC="v$VERSION ($SHA)$REDEPLOY_NOTE"
-if ssh "$VM" "docker exec -i rs-coordinator python - \"Deployed facebook_tracker $DEPLOY_DESC to rs-monitor - verified running this tree.\"" <<'PYEOF'
+WORKER_COUNT=$(homelab_workers | wc -l | tr -d ' ')
+if ssh "$VM" "docker exec -i rs-coordinator python - \"Deployed facebook_tracker $DEPLOY_DESC to the coordinator and $WORKER_COUNT workers - verified running this tree.\"" <<'PYEOF'
 import os, sys, urllib.parse, urllib.request
 
 params = {"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": sys.argv[1]}

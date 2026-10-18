@@ -194,6 +194,7 @@ def test_put_account_forwards_only_the_allowed_fields(client):
     body = {
         "worker_id": "ne-1",
         "fb_username": "lisa@example.com",
+        "fb_uid": "100000000000001",
         "allow_password_login": True,
         "proxy": "http://user:pass@proxy.example:10002",  # not settable from here
         "vnc_url": "vnc://x",
@@ -214,6 +215,7 @@ def test_put_account_forwards_only_the_allowed_fields(client):
     assert sent == {
         "worker_id": "ne-1",
         "fb_username": "lisa@example.com",
+        "fb_uid": "100000000000001",
         "allow_password_login": True,
         "secrets": {"password": "s3cret-pw", "totp_secret": "JBSWY3DP", "email": None},
     }

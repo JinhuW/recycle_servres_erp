@@ -81,7 +81,8 @@ in `db.py` (see `pg.postgres_schema()`), so the two backends cannot drift.
 
 Only three things are translated:
 
-* `BLOB` → `BYTEA` (`accounts.secret_blob`, `session_snapshots.state_blob`)
+* `BLOB` → `BYTEA` (`accounts.secret_blob`, `session_snapshots.state_blob`,
+  `device_profiles.device_cookies_blob`)
 * `INTEGER PRIMARY KEY AUTOINCREMENT` → `INTEGER GENERATED ALWAYS AS IDENTITY
   PRIMARY KEY` (there is no `lastrowid`, so `insert_challenge` uses
   `INSERT … RETURNING id`)
@@ -126,6 +127,10 @@ matter are:
   encrypted with it; the key is what makes the secrets portable, not the file.
 * **`session_snapshots`** — losing these just means the affected workers log in
   again and back up a fresh snapshot.
+* **`device_profiles`** — losing these is not free. Each row is a Facebook
+  account's device; a worker that asks again gets a new one, which reads as a
+  new machine. Move them with the same `RS_VAULT_KEY` (their device cookies
+  are sealed with it), and before any worker asks.
 
 If you do want the rows moved, dump the SQLite tables to CSV and `\copy` them
 in; the column names and types line up one-for-one. Mind that `secret_blob` and

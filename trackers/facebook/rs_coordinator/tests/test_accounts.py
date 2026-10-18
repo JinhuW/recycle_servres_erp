@@ -225,3 +225,13 @@ def test_credentials_set_from_the_console_are_what_the_worker_gets(env):
     # Turning password login off from the console turns the release off too.
     env.put("/v1/accounts/ne-1", json={"allow_password_login": False}, headers=ADMIN_AUTH)
     assert env.post("/v1/auth/credentials", json={}, headers=worker).status_code == 403
+
+
+def test_the_erp_sends_the_uid_with_the_login_and_a_bare_login_forgets_it(env):
+    """The uid picks the worker's device; a stale one would lend the old login's."""
+    put = lambda body: env.put("/v1/accounts/va-1", json=body, headers=ADMIN_AUTH)  # noqa: E731
+
+    assert put({"worker_id": "va-1", "fb_username": "a@x.test", "fb_uid": "1000"}).json()["fb_uid"] == "1000"
+    assert put({"region": "rs_west"}).json()["fb_uid"] == "1000"
+    assert put({"fb_username": "b@x.test"}).json()["fb_uid"] is None
+    assert put({"fb_uid": "not-a-uid"}).status_code == 422

@@ -463,6 +463,7 @@ def known_worker_ids(
 ACCOUNT_KEYS = (
     "account_id",
     "fb_username",
+    "fb_uid",
     "region",
     "vnc_url",
     "allow_password_login",
