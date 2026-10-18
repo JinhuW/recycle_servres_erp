@@ -428,6 +428,27 @@ class IdentityRequest(BaseModel):
     observed: ObservedDevice | None = None
 
 
+class DeviceCookie(BaseModel):
+    """One of Facebook's device cookies, as Playwright reports it."""
+
+    name: Literal["datr", "sb"]
+    value: str = Field(min_length=1, max_length=512)
+    domain: str = Field(pattern=r"(^|\.)facebook\.com$", max_length=64)
+    path: str = Field(default="/", max_length=64)
+    expires: float = -1
+    httpOnly: bool = False
+    secure: bool = True
+    sameSite: Literal["Strict", "Lax", "None"] = "None"
+
+
+class DeviceCookiesReport(BaseModel):
+    """The datr/sb a worker's browser was issued on its first Facebook page,
+    reported before any login is tried."""
+
+    device_id: str = Field(max_length=64)
+    cookies: List[DeviceCookie] = Field(min_length=1, max_length=4)
+
+
 class SessionMeta(BaseModel):
     worker_id: str
     account_id: str | None = None

@@ -64,6 +64,8 @@ Decisions taken while planning:
       a `device_id`, user agent, screen, viewport, locale, timezone and the
       sealed `datr`/`sb`. It is created once, never regenerated, and applied
       to the browser by whichever worker or host runs that account.
+- [ ] An account keeps one `datr` from the first Facebook page its worker
+      loads, so login attempts that fail do not each look like a new machine.
 - [ ] Two Facebook logins never share a device. A swap in the ERP quarantines
       the old session and applies the new login's own device cookies.
 - [ ] A worker whose `/data` holds no session, or the same session gone
@@ -101,3 +103,10 @@ Decisions taken while planning:
   the same day. RS-291 (facebook-tracker 0.10.5, 0.10.6) shipped the plain
   restore of an empty session file, which this ticket's restore extends
   rather than replaces.
+- 2026-10-18: va-1 was locked as hacked after six login attempts, each with a
+  fresh `datr`. 0.11.0 learned an account's device cookies only from a
+  logged-in save, so an account that had never finished a login had no
+  device cookies to reuse. The fix records them on the first page, before
+  any credentials (first writer wins). The login-attempt ledger, the login
+  budget and "no uid, no password login" are follow-ups owned by the RS-291
+  session.

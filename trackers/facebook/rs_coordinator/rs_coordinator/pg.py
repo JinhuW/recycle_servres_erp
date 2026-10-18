@@ -1056,6 +1056,15 @@ class PostgresDatabase:
                 (*record.values(), identity_key),
             )
 
+    def claim_device_cookies(self: "PostgresDatabase", identity_key: str, blob: bytes) -> bool:
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE device_profiles SET device_cookies_blob = %s, updated_at = %s "
+                "WHERE identity_key = %s AND device_cookies_blob IS NULL",
+                (blob, utcnow(), identity_key),
+            )
+            return cur.rowcount > 0
+
     def rekey_device_profile(self: "PostgresDatabase", old_key: str, new_key: str) -> bool:
         with self.cursor() as cur:
             cur.execute(

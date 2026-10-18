@@ -18,6 +18,20 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Fixed
+
+- **An account keeps one device from its first Facebook page, not from its
+  first successful login** (RS-292). A device's `datr`/`sb` used to be learned
+  only from a logged-in save, so an account that had not yet finished a login
+  met Facebook as a new machine on every attempt. On 2026-10-18 va-1 made six
+  attempts with six fresh `datr`, and Facebook locked the account as hacked.
+  Now, as soon as the first Facebook page loads and before any credentials
+  are typed, a worker whose device has no cookies yet keeps the ones
+  Facebook issued and reports them
+  (`POST /v1/workers/{id}/identity/device-cookies`). The coordinator keeps
+  the first worker's (first writer wins), and every later attempt, on any
+  worker, presents them. A logged-in session still keeps them current.
+
 ## [0.11.0] - 2026-10-18
 
 ### Added

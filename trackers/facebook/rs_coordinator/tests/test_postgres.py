@@ -364,6 +364,9 @@ def test_device_profiles_are_created_once_and_found_by_key_or_device(backend):
     assert backend.device_profile_by_device("dev-1")["identity_key"] == "uid:1"
     assert backend.get_device_profile("uid:2") is None
 
+    assert backend.claim_device_cookies("uid:1", b"first") is True
+    assert backend.claim_device_cookies("uid:1", b"second") is False
+    assert backend.get_device_profile("uid:1")["device_cookies_blob"] == b"first"
     backend.update_device_profile("uid:1", {"device_cookies_blob": b"sealed"})
     assert backend.get_device_profile("uid:1")["device_cookies_blob"] == b"sealed"
     listed = backend.list_device_profiles()
@@ -750,8 +753,9 @@ def test_no_sqlite_placeholders_survive_in_the_postgres_sql():
     handle.update_device_profile("uid:1", {"locale": "en-US"})
     handle.rekey_device_profile("uid:1", "uid:2")
     handle.list_device_profiles()
+    handle.claim_device_cookies("uid:1", b"x")
 
-    assert len(handle.log) == 30
+    assert len(handle.log) == 31
     for sql in handle.log:
         assert "?" not in sql, f"SQLite placeholder left in: {sql}"
         assert not re.search(r":\w", sql), f"named SQLite placeholder left in: {sql}"
