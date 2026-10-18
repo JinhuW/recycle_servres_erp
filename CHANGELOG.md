@@ -17,6 +17,20 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.284.0] - 2026-10-18
+
+The Fleet table shows each worker's last heartbeat under its status (RS-298).
+
+### Added
+
+- **Last heartbeat under the status chip.** Each row on Monitors ▸ Facebook ▸
+  Fleet now says "heartbeat 2m ago" beneath its status (and beneath the reason
+  note, when there is one), with the exact time on hover. Before, how recently
+  a worker had reported was only in a tooltip on the Today bar, so a Live chip
+  couldn't be told apart from one about to go Stale without hovering. A silent
+  worker keeps its "Silent since …" note instead of repeating the age, and a
+  worker that has never reported shows no heartbeat line.
+
 ## [1.283.0] - 2026-10-18
 
 Monitors ▸ Reddit takes the Facebook fleet page's layout (RS-297).

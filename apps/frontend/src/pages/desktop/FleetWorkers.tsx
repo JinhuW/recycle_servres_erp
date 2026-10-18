@@ -212,6 +212,9 @@ function WorkerRow({ account: w, hits, parked, terms, startAt, open, onToggle, l
   const who = whoIs(w);
   const status = fleetStatus(w, parked);
   const note = statusNote(t, w, parked, locale);
+  // A silent worker's note already carries its heartbeat age.
+  const silent = !parked.has(w.worker_id) && attentionReason(w).kind === 'dead';
+  const beat = silent ? null : h?.last_heartbeat_at ?? null;
   const days = h?.session_days_left ?? null;
   const path = fleetWorkerPath(w.worker_id);
   const strip = dayStrip(w, status, startAt);
@@ -239,11 +242,10 @@ function WorkerRow({ account: w, hits, parked, terms, startAt, open, onToggle, l
           <span className="fp-holder">
             <span><StatusChip status={status} /></span>
             {note && <small className={status === 'attention' || status === 'offline' ? 'fp-warn' : ''}>{note}</small>}
+            {beat && <small title={new Date(beat).toLocaleString(locale)}>{t('fbcHeartbeatAge', { age: relTime(beat, locale) })}</small>}
           </span>
         </td>
-        <td className="ff-wrap" title={h?.last_heartbeat_at
-          ? t('fbcHeartbeatAge', { age: relTime(h.last_heartbeat_at, locale) })
-          : undefined}>
+        <td className="ff-wrap">
           {strip
             ? <span className="fp-holder"><DayBar strip={strip} status={status} /><small>{todayLabel(t, strip)}</small></span>
             : <span className="fp-muted" title={t('fbcTodayUnknown')}>—</span>}

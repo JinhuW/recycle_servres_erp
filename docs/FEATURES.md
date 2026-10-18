@@ -2104,7 +2104,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   or stale worker). Since v1.281.0 the Worker, Status, Today, Searches,
   Session and Posts headers sort the table (click: descending, ascending,
   back to fleet order; Today sorts by last heartbeat, and unknowns stay at
-  the bottom either way); and a **From a search to an alert** card that walks the
+  the bottom either way); since v1.284.0 the status cell also shows the
+  worker's last heartbeat age (exact time on hover); and a **From a search to an alert** card that walks the
   pipeline as the code runs it — search, result cards, the title gate before
   any page is opened, the cached page visit, the keyword gate with the
   description, the already-notified skip, the AI rating with its unit and
