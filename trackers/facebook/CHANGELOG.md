@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-10-18
+
 ### Fixed
 
 - **An account keeps one device from its first Facebook page, not from its
