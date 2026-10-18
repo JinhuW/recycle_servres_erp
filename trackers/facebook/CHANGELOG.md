@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.12.3] - 2026-10-18
+
 ### Added
 
 - **wc-1 runs.** Its pool account sat in the vault with no container behind
