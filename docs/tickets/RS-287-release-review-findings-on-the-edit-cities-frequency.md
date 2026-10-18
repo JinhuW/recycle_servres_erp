@@ -2,7 +2,7 @@
 id: RS-287
 title: Release review findings on the Edit cities frequency form
 type: bug
-status: in-review
+status: done
 priority: P2
 created: 2026-10-17
 reporter: jinhu
