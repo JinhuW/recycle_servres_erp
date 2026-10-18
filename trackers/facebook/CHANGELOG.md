@@ -18,6 +18,15 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Added
+
+- **A deploy can hold workers back** (`RS_DEPLOY_HOLD`, container names). A
+  held compose worker is not recreated and keeps its current image, and the
+  deploy's verify and Telegram note name it as held. This is for the worker
+  whose restart would cost something: a login held only in memory until its
+  next sweep, or a locked account that would retry its password from a fresh
+  browser (va-1, 2026-10-18).
+
 ## [0.12.0] - 2026-10-18
 
 ### Added

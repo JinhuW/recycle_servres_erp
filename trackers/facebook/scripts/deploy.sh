@@ -6,6 +6,8 @@
 #   scripts/deploy.sh check      # verify only — is the VM running this tree?
 #   scripts/deploy.sh sync       # sync + restart, no image rebuild (config-only)
 #   scripts/deploy.sh --redeploy # ship a version the VM already runs (see below)
+#   RS_DEPLOY_HOLD="rs-monitor-va1 rs-monitor-va2" scripts/deploy.sh
+#                                # leave these compose workers running untouched
 #
 # Every deploy must carry a version no deploy has carried before. `check` is
 # exempt (it writes nothing); `sync` is not — a config change to the live fleet
@@ -35,6 +37,11 @@ IMAGE="${RS_MONITOR_IMAGE:-aimm-recycle:latest}"
 # A private registry other worker hosts pull from (deploy/docker-compose.registry.yml),
 # e.g. 10.10.10.73:5000. Unset: the image exists on this VM only.
 REGISTRY="${RS_REGISTRY:-}"
+# Compose workers this deploy must not recreate, by container name: one whose
+# restart would cost something, such as a login held only in memory until its
+# next sweep, or a locked account that would retry its password from a fresh
+# browser. They keep running their current image; verify names them as held.
+HOLD=" $(printf '%s' "${RS_DEPLOY_HOLD:-}" | tr ',' ' ') "
 PKG=/usr/local/lib/python3.12/site-packages/ai_marketplace_monitor
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 # What the VM says it is running. It lives at the root of $REMOTE, outside every
@@ -53,6 +60,10 @@ for arg in "$@"; do
 done
 
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
+
+held() {
+    case "$HOLD" in *" $1 "*) return 0 ;; *) return 1 ;; esac
+}
 
 # Whether the VM runs its workers through rs-fleetd. Then a deploy rolls the
 # new image out through the coordinator instead of recreating compose workers:
@@ -184,6 +195,11 @@ verify() {
         IFS=$old_ifs
         # shellcheck disable=SC2086 # split the line into its four fields
         set -- $line
+        if held "$3"; then
+            step "verify: $3"
+            echo "  held: left running its previous image, as RS_DEPLOY_HOLD asked"
+            continue
+        fi
         DRIFT=0
         verify_worker "$3" "$4"
         [ "$DRIFT" = "0" ] || FAILED=1
@@ -382,6 +398,11 @@ fi
 # same minute from one host is a pattern worth not showing Facebook. Skipped
 # under rs-fleetd, which has taken them over (see `fleet_mode`).
 fleet_mode || homelab_workers | while read -r file service container _config; do
+    if held "$container"; then
+        step "hold $container"
+        echo "  not recreated: RS_DEPLOY_HOLD"
+        continue
+    fi
     step "restart $container"
     # `up -d` alone will not recreate the container when only the image
     # changed underneath a tag it already has by name, so force it. The old
@@ -409,7 +430,9 @@ echo "  $VERSION $SHA"
 step "notify telegram"
 DEPLOY_DESC="v$VERSION ($SHA)$REDEPLOY_NOTE"
 WORKER_COUNT=$(homelab_workers | wc -l | tr -d ' ')
-if ssh "$VM" "docker exec -i rs-coordinator python - \"Deployed facebook_tracker $DEPLOY_DESC to the coordinator and $WORKER_COUNT workers - verified running this tree.\"" <<'PYEOF'
+HELD_NOTE=""
+[ -z "$(printf '%s' "$HOLD" | tr -d ' ')" ] || HELD_NOTE=" Held on their previous image:$HOLD"
+if ssh "$VM" "docker exec -i rs-coordinator python - \"Deployed facebook_tracker $DEPLOY_DESC to the coordinator and $WORKER_COUNT workers - verified running this tree.$HELD_NOTE\"" <<'PYEOF'
 import os, sys, urllib.parse, urllib.request
 
 params = {"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": sys.argv[1]}

@@ -286,6 +286,15 @@ notification:
 scripts/deploy.sh --redeploy   # ship a version the VM already runs
 ```
 
+A worker whose restart would cost something is held back by its container
+name. That covers a login held only in memory until its next sweep, or a
+locked account that would retry its password from a fresh browser. It keeps
+running its current image, and verify and the notification name it as held:
+
+```bash
+RS_DEPLOY_HOLD="rs-monitor-va1" scripts/deploy.sh
+```
+
 `check` is the one to reach for whenever you are about to explain live
 behaviour from local source. It md5s every module inside the container against
 this tree, diffs the mounted `config.toml` against `configs/homelab.toml`, and
