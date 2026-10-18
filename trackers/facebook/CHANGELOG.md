@@ -18,6 +18,21 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Added
+
+- **wc-1 runs.** Its pool account sat in the vault with no container behind
+  it, so the ERP showed it as "Never reported". It is now a compose worker,
+  `rs-monitor-wc` (`deploy/docker-compose.homelab-wc.yml`), on the Leesburg
+  exit at port 10009 (`PROXY_HOMELAB_WC`). It searches the same `rs_west`
+  cities as west-1, and the console lists it for cities and Watch.
+
+### Removed
+
+- **va-1 is retired from compose.** Facebook locked its account on
+  2026-10-18, and wc-1 takes its proxy port. Its compose file, config and
+  console entries are gone, so no deploy brings it back up on wc-1's IP. Its
+  vault account stays, locked.
+
 ## [0.12.2] - 2026-10-18
 
 ### Added
