@@ -2,12 +2,24 @@ import { describe, it, expect } from 'vitest';
 import { vncSocketUrl, type Challenge, type FleetAccount, type FleetDoc, type FleetWorker } from './coordinator';
 import {
   accountAlerts, accountHaystack, attentionReason, browserLabel, canWatch, dayStrip, fleetPostsToday,
-  externalVncUrl, fleetActivity, fleetStatus, flowCounts, hitsByCity, isUnstampedBuild, parkedWorkers, reloginIsAutomatic,
+  externalVncUrl, fleetActivity, fleetStatus, flowCounts, hitsByCity, isUnstampedBuild, parkedWorkers, reloginIsAutomatic, reloginProgress,
   matchesTerms, offersRelogin, queryTerms, reviewedToday, searchedToday,
-  splitHighlights, reloginWouldBeAutomatic, vaultAccountIdFor, whoIs,
+  sortFleet, splitHighlights, vaultAccountIdFor, whoIs,
   FLOW_STAGES, STAGE_FORMS, draftChanges, settingsDraft, settingsPatch,
   citiesDiffer, cityOwners, isCitySlug, marketplaceCityUrl, normalizeCitySlug,
+  applyPinEdits, pinEdits, searchesPerDay, tierSettingsEdits, tierSettingsValid, keysymsFor,
 } from './fleetView';
+
+describe('keysymsFor', () => {
+  it('maps Latin-1 to its code point and the rest to the Unicode keysym range', () => {
+    expect(keysymsFor('a1Z')).toEqual([0x61, 0x31, 0x5a]);
+    expect(keysymsFor('é')).toEqual([0xe9]);
+    expect(keysymsFor('€')).toEqual([0x010020ac]);
+  });
+  it('drops control characters so a pasted line break cannot submit a form', () => {
+    expect(keysymsFor('12\n34\t')).toEqual([0x31, 0x32, 0x33, 0x34]);
+  });
+});
 
 const account = (over: Partial<FleetAccount>): FleetAccount => ({
   worker_id: 'w',
@@ -100,6 +112,7 @@ describe('fleetView', () => {
       expect(attentionReason(account({ health: health({ session_days_left: 0 }) })).kind).toBe('expired');
       expect(attentionReason(account({ health: health({ session_days_left: 2 }) })))
         .toEqual({ kind: 'expiring', days: 2 });
+      expect(attentionReason(account({ health: health({ session_days_left: 40 }) })).kind).toBe('other');
     });
 
     it('offers a re-login only where the session is the problem', () => {
@@ -209,6 +222,46 @@ describe('fleetView', () => {
     expect(reloginIsAutomatic(account({}))).toBe(false);
     expect(reloginIsAutomatic(null)).toBe(false);
   });
+
+  it('follows a re-login from the queue to its outcome', () => {
+    const asked = '2026-10-17T20:32:48+00:00';
+    const t0 = Date.parse(asked);
+    const at = (seconds: number) => new Date(t0 + seconds * 1000).toISOString();
+    const w = (h: Partial<FleetWorker>) => account({ health: h as FleetWorker });
+
+    expect(reloginProgress(null)).toBeNull();
+    expect(reloginProgress(account({}))).toBeNull();
+    // A coordinator that predates re-login progress says nothing.
+    expect(reloginProgress(w({ state: 'HEALTHY' }), t0)).toBeNull();
+
+    const queued = reloginProgress(w({ relogin_requested_at: asked, relogin_last_requested_at: asked }), t0 + 5000);
+    expect(queued).toEqual({ phase: 'queued', since: asked, active: true });
+
+    // Picked up, no step reported yet: signing in from the request.
+    expect(reloginProgress(w({ relogin_last_requested_at: asked }), t0 + 9000)?.phase).toBe('signing_in');
+
+    const step = (login_step: string, seconds: number, now = seconds + 1) =>
+      reloginProgress(w({ relogin_last_requested_at: asked, login_step, login_step_at: at(seconds) }), t0 + now * 1000);
+    expect(step('typing', 11)?.phase).toBe('signing_in');
+    expect(step('challenge', 40)).toEqual({ phase: 'needs_you', since: at(40), active: true });
+    expect(step('waiting_for_human', 41)?.phase).toBe('needs_you');
+    expect(step('logged_in', 90)).toEqual({ phase: 'done', since: at(90), active: false });
+    expect(step('failed', 160)?.phase).toBe('failed');
+    expect(step('some_future_step', 20)?.phase).toBe('signing_in');
+
+    // A step from an earlier login is not this one's — but a worker clock a
+    // few seconds behind the coordinator's still counts.
+    expect(step('logged_in', -600, 5)?.phase).toBe('signing_in');
+    expect(step('typing', -20, 5)?.phase).toBe('signing_in');
+    expect(step('challenge', -20, 5)?.phase).toBe('needs_you');
+    // An outcome stamped before the request is the previous attempt's, even within the slack.
+    expect(step('failed', -20, 5)?.phase).toBe('signing_in');
+
+    // Each phase is shown for a bounded time.
+    expect(step('logged_in', 90, 90 + 61)).toBeNull();
+    expect(step('challenge', 40, 40 + 16 * 60)).toBeNull();
+    expect(reloginProgress(w({ relogin_requested_at: asked }), t0 + 31 * 60_000)).toBeNull();
+  });
 });
 
 
@@ -222,6 +275,41 @@ describe('vaultAccountIdFor', () => {
 
   it('names a new account after the worker otherwise', () => {
     expect(vaultAccountIdFor(account({ worker_id: 'ne-1', account: null }))).toBe('ne-1');
+  });
+});
+
+describe('how often a city is searched', () => {
+  const city = { slug: 'denver', name: 'Denver', radius_km: 100 };
+
+  it('is its count, capped by the start times, and unknown without both', () => {
+    expect(searchesPerDay({ ...city, per_day: 3 }, 3)).toBe(3);
+    expect(searchesPerDay({ ...city, per_day: 3 }, 2)).toBe(2);
+    expect(searchesPerDay({ ...city, per_day: 1 }, 3)).toBe(1);
+    expect(searchesPerDay(city, 3)).toBeNull();
+    expect(searchesPerDay({ ...city, per_day: 3 }, null)).toBeNull();
+  });
+
+  it('edits only the pins this form speaks for', () => {
+    const before = { denver: 3, boise: 1, seattle: 2 };
+    // denver unpinned, reno pinned, boise dropped (nobody else has it); seattle is another worker's.
+    const edits = pinEdits(before, { reno: 2 }, ['denver', 'reno', 'boise']);
+    expect(edits).toEqual({ denver: null, reno: 2, boise: null });
+    expect(pinEdits(before, { denver: 3 }, ['denver'])).toEqual({});
+    // Applied to a fresher map, another manager's pin made since survives.
+    expect(applyPinEdits({ ...before, tampa: 3 }, edits)).toEqual({ seattle: 2, tampa: 3, reno: 2 });
+  });
+
+  it('sends only the changed settings, and only ones the coordinator accepts', () => {
+    const s = { top_pct: 20, mid_pct: 20, per_day: [3, 2, 1] as [number, number, number], window_days: 30 };
+    expect(tierSettingsEdits(s, s)).toEqual({});
+    expect(tierSettingsEdits(s, { ...s, top_pct: 10, per_day: [4, 2, 1] })).toEqual({ top_pct: 10, per_day: [4, 2, 1] });
+    expect(tierSettingsValid(s)).toBe(true);
+    expect(tierSettingsValid({ ...s, per_day: [3, 2, 0] })).toBe(false);
+    expect(tierSettingsValid({ ...s, per_day: [2, 3, 1] })).toBe(false);
+    expect(tierSettingsValid({ ...s, top_pct: 60, mid_pct: 50 })).toBe(false);
+    expect(tierSettingsValid({ ...s, window_days: 0 })).toBe(false);
+    expect(tierSettingsValid({ ...s, per_day: [3, 2, NaN] })).toBe(false);
+    expect(tierSettingsValid({ ...s, top_pct: 0, mid_pct: 0 })).toBe(true);
   });
 });
 
@@ -254,14 +342,6 @@ describe('a worker\'s cities', () => {
     expect(citiesDiffer(a, [...a].reverse())).toBe(true);
     expect(citiesDiffer(a, [a[0], { ...a[1], radius: 60 }])).toBe(true);
     expect(citiesDiffer(a, [a[0]])).toBe(true);
-  });
-});
-
-describe('reloginWouldBeAutomatic', () => {
-  it('needs both a stored password and password login allowed', () => {
-    expect(reloginWouldBeAutomatic(true, true)).toBe(true);
-    expect(reloginWouldBeAutomatic(true, false)).toBe(false);
-    expect(reloginWouldBeAutomatic(false, true)).toBe(false);
   });
 });
 
@@ -390,5 +470,31 @@ describe('dayStrip', () => {
     expect(searchedToday(denver({ today: today({}) }), 'live')('denver')).toBe(true);
     expect(searchedToday(denver({ today: today({ cities: null }) }), 'stale')('denver')).toBe(true);
     expect(searchedToday(account({}), 'offline')('denver')).toBe(false);
+  });
+});
+
+describe('sortFleet', () => {
+  const posts = (worker_id: string, n: number | null) => account({
+    worker_id,
+    today: n === null ? null : { day: '2026-10-17', first_at: null, last_at: null, cycles: 0, searches: 0, posts: n, alerts: 0 },
+  });
+  const ids = (ws: FleetAccount[]) => ws.map(w => w.worker_id);
+  const none = new Set<string>();
+
+  it('keeps unknowns last in both directions', () => {
+    const ws = [posts('a', 3), posts('b', null), posts('c', 9), posts('d', 0)];
+    expect(ids(sortFleet(ws, 'posts', 'desc', none))).toEqual(['c', 'a', 'd', 'b']);
+    expect(ids(sortFleet(ws, 'posts', 'asc', none))).toEqual(['d', 'a', 'c', 'b']);
+  });
+
+  it('sorts workers by login, then id, case-insensitively', () => {
+    const ws = [account({ worker_id: 'Zed' }), account({ worker_id: 'alpha' }), account({ worker_id: 'Mid' })];
+    expect(ids(sortFleet(ws, 'worker', 'asc', none))).toEqual(['alpha', 'Mid', 'Zed']);
+  });
+
+  it('sorts status in legend order, a parked worker as attention', () => {
+    const live = { liveness: 'live', state: 'HEALTHY' } as never;
+    const ws = [account({ worker_id: 'off' }), account({ worker_id: 'parked', health: live }), account({ worker_id: 'ok', health: live })];
+    expect(ids(sortFleet(ws, 'status', 'asc', new Set(['parked'])))).toEqual(['ok', 'parked', 'off']);
   });
 });

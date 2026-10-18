@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
 import { Icon } from '../../components/Icon';
 import { SerialNumbers } from '../../components/SerialNumbers';
+import { SortTh, type SortState } from '../../components/SortTh';
 import { useT } from '../../lib/i18n';
 import { useEffectiveUser } from '../../lib/tweaks';
 import { usePreference } from '../../lib/preferences';
@@ -87,45 +87,6 @@ const SORT_KEYS: Record<string, (o: OrderSummary) => string | number> = {
   payment:    o => o.payment,
   status:     o => o.status,
 };
-
-type SortState = { col: string; dir: 'asc' | 'desc' | null };
-
-function SortCaret({ active, dir }: { active: boolean; dir: 'asc' | 'desc' | null }) {
-  return (
-    <svg
-      width="9" height="11" viewBox="0 0 9 11"
-      style={{ flexShrink: 0, opacity: active ? 1 : 0.32 }}
-      aria-hidden="true"
-    >
-      <path d="M4.5 1.5 L1.5 4.5 H7.5 Z" fill={active && dir === 'asc'  ? 'var(--accent-strong)' : 'currentColor'} />
-      <path d="M4.5 9.5 L7.5 6.5 H1.5 Z" fill={active && dir === 'desc' ? 'var(--accent-strong)' : 'currentColor'} />
-    </svg>
-  );
-}
-
-function SortTh({ col, sort, onSort, align, className, children }: {
-  col: string;
-  sort: SortState;
-  onSort: (col: string) => void;
-  align?: 'right';
-  className?: string;
-  children: ReactNode;
-}) {
-  const active = sort.col === col;
-  const cls = [align === 'right' ? 'num' : '', className ?? ''].filter(Boolean).join(' ');
-  return (
-    <th
-      onClick={() => onSort(col)}
-      className={cls || undefined}
-      style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}
-    >
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: active ? 'var(--fg)' : undefined }}>
-        {children}
-        <SortCaret active={active} dir={sort.dir} />
-      </span>
-    </th>
-  );
-}
 
 type Props = {
   onToast?: (msg: string, kind?: 'success' | 'error') => void;

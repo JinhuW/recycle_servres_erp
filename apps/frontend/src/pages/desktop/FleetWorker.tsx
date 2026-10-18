@@ -4,11 +4,11 @@ import { ImageLightbox } from '../../components/ImageLightbox';
 import { FormSkeleton } from '../../components/Skeleton';
 import { ApiError } from '../../lib/api';
 import {
-  challengeScreenshotUrl, coordinatorApi, type AlertHitRow, type Challenge, type FleetDoc,
+  challengeScreenshotUrl, coordinatorApi, type AlertHitRow, type Challenge, type FleetAccount, type FleetDoc,
 } from '../../lib/coordinator';
 import { handleFetchError, showSuccessToast } from '../../lib/errorToast';
 import {
-  accountAlerts, browserLabel, canWatch, externalVncUrl, fleetActivity, fleetStatus, hitsByCity, parkedWorkers, searchedToday, whoIs,
+  accountAlerts, browserLabel, canWatch, externalVncUrl, fleetActivity, fleetStatus, hitsByCity, parkedWorkers, searchedToday, SESSION_WARN_DAYS, whoIs,
 } from '../../lib/fleetView';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
@@ -100,13 +100,13 @@ export function FleetWorker({ workerId }: { workerId: string }) {
       : muted(t('fbcNoVaultAccount'))],
     [t('fbcDetailSecrets'), stored.length ? stored.map(k => <span key={k} className="chip muted mono" style={{ marginRight: 4 }}>{k}</span>) : muted(t('fbcNone'))],
     [t('fbcColSession'), h?.session_expiry
-      ? <span className={h.session_days_left !== null && h.session_days_left <= 7 ? 'fp-warn' : 'fp-ok'} title={h.session_expiry}>{fmtDays(t, h.session_days_left)}</span>
+      ? <span className={h.session_days_left !== null && h.session_days_left <= SESSION_WARN_DAYS ? 'fp-warn' : 'fp-ok'} title={h.session_expiry}>{fmtDays(t, h.session_days_left)}</span>
       : muted('—')],
     [t('fbcDetailUa'), browserLabel(sess?.user_agent) ? <span title={sess?.user_agent ?? undefined}>{browserLabel(sess?.user_agent)}</span> : muted('—')],
     [t('fbcDetailBackup'), sess?.backed_up_at ? <span title={sess.backed_up_at}>{relTime(sess.backed_up_at, locale)}</span> : muted(t('fbcNeverBackedUp'))],
-    [t('fbcDetailProxy'), w.proxy_env ? <span className="mono">${w.proxy_env}</span> : muted(t('fbcOwnIp'))],
+    [t('fbcDetailProxy'), <ProxyExit worker={w} />],
     [t('fbcColCities'), w.cities.length
-      ? <span className="fl-cities ff-wrap-cell">{w.cities.map(c => <CityChip key={c.slug} city={c} hits={byCity} terms={[]} tone={searched(c.slug) ? 'accent' : 'muted'} />)}</span>
+      ? <span className="fl-cities ff-wrap-cell">{w.cities.map(c => <CityChip key={c.slug} city={c} hits={byCity} terms={[]} tone={searched(c.slug) ? 'accent' : 'muted'} runsPerDay={w.plan?.runs_per_day} />)}</span>
       : muted(t('fbcNoCities'))],
     [t('fbcFoldPacing'), pace],
     [t('fbcDetailSessionFile'), w.session_file ? <span className="mono">{w.session_file}</span> : muted('—')],
@@ -155,7 +155,7 @@ export function FleetWorker({ workerId }: { workerId: string }) {
                 : configVnc
                   ? <a className="btn" href={configVnc} target="_blank" rel="noopener"><Icon name="eye" size={13} />{t('fbcOpenVnc')}</a>
                   : <span className="fp-muted" style={{ fontSize: 12 }}>{t('fbcNoVnc')}</span>}
-              {h && <ReloginButton workerId={w.worker_id} account={w} className="btn" onQueued={load} />}
+              {h && <ReloginButton workerId={w.worker_id} account={w} className="btn" onQueued={load} offerWatch={canWatch(w)} />}
               <EditCredentialsButton account={w} onSaved={load} className="btn" />
               {w.cities_editable && <EditCitiesButton worker={w} fleet={fleet} onSaved={load} />}
             </div>
@@ -212,6 +212,30 @@ export function FleetWorker({ workerId }: { workerId: string }) {
           onClose={() => setZoom(null)} />
       )}
     </div>
+  );
+}
+
+// The proxy as Facebook sees it: the URL dialled, then the address and city it
+// exits from. A facade that predates the lookup sends only the env var's name.
+export function ProxyExit({ worker }: { worker: FleetAccount }) {
+  const { t } = useT();
+  const p = worker.proxy;
+  if (!p) {
+    return worker.proxy_env ? <span className="mono">${worker.proxy_env}</span> : <span className="fp-muted">{t('fbcOwnIp')}</span>;
+  }
+  const where = [p.city, p.region, p.country].filter(Boolean).join(', ');
+  return (
+    <span>
+      {p.url
+        ? <span className="mono">{p.url}</span>
+        : <span className="fp-muted">{worker.proxy_env ? t('fbcProxyUnset', { env: `$${worker.proxy_env}` }) : t('fbcOwnIp')}</span>}
+      <br />
+      <small className={p.error ? 'fp-warn' : 'fp-muted'} title={p.org ?? undefined}>
+        {p.pending ? t('fbcProxyLookingUp')
+          : p.error ? t('fbcProxyLookupFailed')
+          : <><span className="mono">{p.ip ?? '—'}</span>{where && ` · ${where}`}</>}
+      </small>
+    </span>
   );
 }
 

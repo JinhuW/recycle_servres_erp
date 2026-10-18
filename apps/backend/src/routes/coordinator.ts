@@ -318,6 +318,35 @@ coordinator.put('/workers/:id/cities', async (c) => {
   });
 });
 
+// ── How often cities are searched ────────────────────────────────────────────
+// The tier settings and pins behind each city's searches a day. The
+// coordinator validates the values; this side only narrows the body to the
+// keys the Edit cities form sets. No config is rewritten: workers ask for
+// their plan before each sweep.
+const TIER_SETTING_FIELDS = ['top_pct', 'mid_pct', 'per_day', 'window_days'] as const;
+
+coordinator.get('/city-tiers', (c) => forward(c, 'GET', '/v1/city-tiers'));
+
+coordinator.put('/city-tiers', async (c) => {
+  const raw: unknown = await c.req.json().catch(() => null);
+  if (!isObject(raw)) return c.json({ error: 'Expected a JSON object' }, 400);
+  const body: Record<string, unknown> = {};
+  if (isObject(raw.settings)) {
+    const settings: Record<string, unknown> = {};
+    for (const key of TIER_SETTING_FIELDS) if (key in raw.settings) settings[key] = raw.settings[key];
+    body.settings = settings;
+  }
+  if (isObject(raw.pins)) body.pins = raw.pins;
+  if (!('settings' in body) && !('pins' in body)) return c.json({ error: 'Send settings, pins, or both' }, 400);
+  body.updated_by = c.var.user.name || c.var.user.email;
+  log.info('fleet city tiers saved', {
+    module: 'coordinator', by: c.var.user.email,
+    settings: Object.keys((body.settings as Record<string, unknown> | undefined) ?? {}),
+    pins: body.pins ? Object.keys(body.pins).length : null,
+  });
+  return forward(c, 'PUT', '/v1/city-tiers', body);
+});
+
 // ── Watching a worker's browser ──────────────────────────────────────────────
 // The bytes themselves are relayed by vncBridge.ts, which owns the HTTP
 // upgrade. Before it accepts a socket it replays the handshake through the

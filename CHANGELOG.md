@@ -17,6 +17,219 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.281.1] - 2026-10-18
+
+Release review fixes for the Edit cities dialog's search frequency and the
+worker page's Assign account (RS-287). As shipped in 1.274.0 the cities dialog
+could lose edits and erase pins it did not own.
+
+### Fixed
+
+- **Unsaved pins and rule edits survive the page's refresh.** The worker page
+  reloads the fleet every 30 seconds, and each reload reset the dialog's pins
+  and ranking rule to the saved values.
+- **Saving changes only what the form changed.** Pins are read again just
+  before the write and only this form's edits are applied, and the ranking
+  rule sends only the changed fields, so another manager's pins or rule edits
+  made meanwhile are kept. Removing a city another worker still searches no
+  longer erases its pin, and adding a city that is already pinned shows and
+  keeps the pin.
+- **A rule the coordinator would refuse disables Save.** An empty box, a
+  per-day count out of 1–6 or growing toward the rest, or percentages over 100
+  show a note instead of failing on save. Tiers are written before cities, so a
+  refused write no longer leaves the city list saved and the dialog stale.
+- **The Auto option shows what the worker actually does.** It is capped by the
+  worker's start times like the chips, and a worker paced by an interval is
+  told it searches every city each round, not "0 search times a day".
+- **The ranking rule reads as a table.** Each tier's share of cities and
+  searches a day sit in aligned columns with their units, the rest's share is
+  worked out for you, and an emptied box stays empty instead of turning into 0.
+- **Assigning a pool account to a worker refuses one someone took meanwhile.**
+  The worker page's Assign account picks from the pool as it was when the
+  dialog opened; an account a purchaser or another worker took since was
+  still sent, putting one login on two machines. It is now refused with a
+  note and the list refreshes, as it does after any refusal, so the question
+  about the worker's current account appears when that changed too. Every
+  account on the worker at the moment of the swap is moved, not only the one
+  read first. The picker names a mismatched or unreadable cookie instead of
+  "no cookie".
+- **A viewer that connects during a restart is cut too.** A VNC handshake
+  that finished after shutdown began was sent a close but left out of the
+  2-second terminate sweep, so a sleeping viewer could still hold the
+  shutdown past its deadline.
+- **A redeploy mid-check no longer skips accounts for a week.** The weekly
+  pool liveness check stamped its whole batch as checked before probing any
+  of them, so a restart during a pass left the unprobed ones marked checked
+  until next week. Each account is now claimed right before its probe.
+- **The re-login strip no longer shows the last attempt's outcome.** A
+  "failed" from a re-login a few seconds before the new one counted as the new
+  one's result, ending the strip and slowing Watch's refresh while the login
+  was still running.
+
+## [1.281.0] - 2026-10-17
+
+The Fleet workers table under **Monitors ▸ Facebook** sorts by column
+(RS-285). Worker, Status, Today, Searches, Session and Posts each cycle
+descending → ascending → the fleet's own order, and the choice holds while
+you move between tabs. Workers with no value for the column — undeployed, or
+on a monitor that does not count — stay at the bottom in both directions, so
+flipping the order never fills the top with dashes. Today sorts by last
+heartbeat, the time its tooltip shows. The sortable header Orders already
+used moved to a shared component.
+
+## [1.280.0] - 2026-10-17
+
+### Added
+
+- **The account pool checks itself on Facebook every week** (RS-284). Until
+  now a pool account changed status only when someone acted on it, so an
+  account Facebook had disabled sat as Available until a purchaser took it and
+  found out. A backend loop now looks up every Available, Taken and Fleet
+  account at Facebook's public profile-picture endpoint once a week. The lookup
+  is anonymous, no login and no token. A real account answers with a photo,
+  and a disabled or deleted one with a placeholder or "does not exist". A dead
+  account moves to Needs attention with a "Weekly check · disabled" line in the
+  ledger. A lookup that fails or can't be read changes nothing and is retried
+  on the next hourly tick. The week is kept per account in
+  `fb_pool_accounts.alive_checked_at` (migration 0184), not in a timer, so
+  deploys don't restart it. Each account is claimed before it is probed, so two
+  instances never probe the same one. A manager's edit made during a pass
+  wins. The account's detail panel shows when it was last checked.
+
+## [1.279.0] - 2026-10-17
+
+### Changed
+
+- **Click a value in the pool table to copy it** (RS-282). In the manager's
+  Facebook account pool, UID, password, 2FA code, e-mail, e-mail password,
+  recovery e-mail, cookie and notes now copy on click, with a "copied" toast.
+  Getting a login out used to mean opening the editor or selecting text by
+  hand. Passwords copy while still masked; the eye beside them reveals. The
+  2FA cell copies the current six-digit code, not the key. Copying a password,
+  2FA code or cookie is logged as before. Because a click now copies, a row
+  click no longer opens the editor: a pencil at the end of each row does.
+
+## [1.278.0] - 2026-10-17
+
+### Added
+
+- **A Facebook worker's page shows where its proxy comes out** (RS-281). The
+  Proxy row used to name only the env var holding the proxy
+  (`$PROXY_HOMELAB_NE`), which said nothing about where the account appears to
+  Facebook, and a region's account has to look like it is in that region. It
+  now shows the proxy URL (login removed), then the exit IP and city, region
+  and country, with the ISP on hover; a worker on the VM's own IP shows that
+  address instead. A proxy whose lookup failed says so. The Watch page's
+  Sign-in panel shows the same. Needs rs_console with
+  the matching change; an older console still shows the env var name.
+
+## [1.277.0] - 2026-10-17
+
+### Added
+
+- **Re-login starts within seconds, and Watch shows how it is going**
+  (RS-280). Pressing Re-login used to look like nothing happened. The worker
+  only learned of the request on its five-minute heartbeat, and the page said
+  nothing after a four-second "queued". On va-2 the login started 4½ minutes
+  later and stopped on a captcha nobody was watching for. With
+  facebook-tracker v0.9.0 the worker collects the request within about 10
+  seconds and reports each step. The Watch page shows those steps in a strip
+  above the viewer and the Sign-in panel (queued, signing in, needs you,
+  signed in, did not finish), re-reading the fleet every 3 seconds instead of
+  30 until the login settles. When Facebook asks for a captcha or a code, the
+  strip offers Take control. On the worker's page the Re-login dialog leads
+  with **Re-login & watch**. The copy now says "about 10 seconds" instead of
+  "about 5 minutes". Against an older coordinator the strip stays hidden, and
+  Re-login works as before.
+
+## [1.276.0] - 2026-10-17
+
+### Added
+
+- **The Watch page shows the worker's login and live 2FA code beside its
+  browser** (RS-279). Clearing a Facebook checkpoint used to mean leaving the
+  viewer, finding the login in the Account pool and reading the code there.
+  A Sign-in panel now sits next to the live browser. It shows the worker's
+  pool login, password and email password behind a reveal, the live 2FA code
+  with its countdown, and the worker's state, session, heartbeat, proxy and
+  build. The code band lights up when the worker is in a 2FA challenge.
+  Clipboard text doesn't reach the VNC session, so while Take control is on,
+  "Type into browser" types the code, login or password straight into the
+  focused field. Copies, reveals and typed secrets are logged to the pool's
+  activity ledger. The panel can be hidden, which is saved as a per-user
+  preference, and it stacks under the browser on narrow screens.
+
+## [1.275.2] - 2026-10-17
+
+### Fixed
+
+- **A linked payment's Owner is its PO's owner** (RS-278). The Owner column on
+  Payments showed a dash on every linked row. Linking clears the manual
+  assignee (the two are exclusive by constraint), and nothing took its place,
+  so the person whose money it was went unshown. The column now falls back to
+  the linked PO's owner, and the owner filter agrees with it: picking a member
+  also returns payments linked to their POs, and Unassigned leaves those out.
+  Manual assignment is unchanged.
+
+## [1.275.1] - 2026-10-17
+
+Hardening left over from the v1.209 release review (RS-176).
+
+### Fixed
+
+- **IMAP never logs in without TLS.** On any port but 993 the inbox poller now
+  requires STARTTLS. Before, `MAIL_IMAP_PORT=143` against a server that didn't
+  offer it (or a network that stripped it) sent the mailbox password in clear.
+- **Shutdown no longer hangs on a sleeping VNC viewer.** A viewer that never
+  answers the close frame is cut 2 seconds later, so `server.close()` returns
+  inside the drain window and the database pool is closed instead of the
+  process exiting on the hard deadline.
+- **One session-expiry threshold for the fleet.** A worker's attention reason
+  only reads "expiring" within 7 days of its session lapsing; the fleet table
+  and worker page take that limit from the same constant.
+
+## [1.275.0] - 2026-10-17
+
+A worker's Facebook login now comes from the account pool on the worker page
+too, so nobody types a password into the ERP any more (RS-276).
+
+### Changed
+
+- **Edit credentials is now Assign account.** The worker page's dialog lists
+  the pool's available accounts that have a password, searchable by #, UID,
+  e-mail or batch, and assigning one goes through the same
+  `POST /api/facebook-pool/:no/assign` the pool page uses: vault written,
+  Re-login queued, account marked Fleet. The typed login, password and 2FA
+  fields are gone, so the pool and the vault can no longer drift apart.
+- **Swapping a worker's account is one step.** `/assign` takes an optional
+  `previous` — `available`, `problem` or `retired` — and moves the account
+  the worker held there in the same transaction that marks the new one; a
+  Problem account keeps naming the worker it failed on. The dialog asks every
+  time, with no default, because a broken account and a routine rotation end
+  in different places. Without `previous` the route still refuses a worker
+  that holds another account, so the pool page behaves as before.
+
+## [1.274.0] - 2026-10-17
+
+Busy cities are searched more often (RS-277). Until now every city was
+searched once a day, however many alerts it produced. Needs facebook-tracker
+with city tiers; against an older console the cities dialog is unchanged.
+
+### Added
+
+- **How often each city is searched, on the Edit cities dialog.** The
+  coordinator ranks a worker's cities by alerts sent plus alerts reacted to
+  over a window: the top 20% are searched 3 times a day, the next 20% twice,
+  the rest once. A city with no alerts is never promoted, so a quiet fleet is
+  not split by list order. Each city row shows its alerts in the window and an
+  Auto / 3× / 2× / 1× pin, and a collapsible Ranking rule edits the
+  percentages, counts and window for every worker
+  (`GET/PUT /api/coordinator/city-tiers`). The dialog warns when the worker
+  has a single daily start time, which keeps every city at once a day.
+- **City chips show `3×` / `2×`** for a city searched more than once a day,
+  capped by the worker's start times, and the search budget on the fleet
+  table counts the extra searches.
+
 ## [1.272.0] - 2026-10-17
 
 A worker's cities and its Facebook login are now both set from the ERP, so

@@ -413,3 +413,62 @@ describe('Worker cities (PUT /api/coordinator/workers/:id/cities)', () => {
     expect(spy).not.toHaveBeenCalled();
   });
 });
+
+describe('City tiers (GET/PUT /api/coordinator/city-tiers)', () => {
+  beforeEach(async () => {
+    await resetDb();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const PATH = '/api/coordinator/city-tiers';
+
+  it('requires a manager', async () => {
+    expect((await api('GET', PATH)).status).toBe(401);
+    const { token } = await loginAs(MARCUS);
+    expect((await api('GET', PATH, { token })).status).toBe(403);
+    expect((await api('PUT', PATH, { token, body: { pins: {} } })).status).toBe(403);
+  });
+
+  it('reads through, and forwards only the tier keys and pins, signed by the session', async () => {
+    const { token } = await loginAs(ALEX);
+    const spy = stubFacade(200, { settings: { top_pct: 20 }, pins: {} });
+    expect((await api('GET', PATH, { token, env: ENV })).status).toBe(200);
+    expect((spy.mock.calls[0] as [string])[0]).toBe('http://facade.internal:8600/v1/city-tiers');
+
+    const r = await api('PUT', PATH, {
+      token, env: ENV,
+      body: {
+        settings: { top_pct: 10, per_day: [4, 2, 1], start_at: ['00:00'] },
+        pins: { denver: 3 },
+        workers: { 'se-1': ['x'] },
+        updated_by: 'someone else',
+      },
+    });
+    expect(r.status).toBe(200);
+    const [url, init] = spy.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe('http://facade.internal:8600/v1/city-tiers');
+    expect(init.method).toBe('PUT');
+    const sent = JSON.parse(init.body as string);
+    expect(sent.settings).toEqual({ top_pct: 10, per_day: [4, 2, 1] });
+    expect(sent.pins).toEqual({ denver: 3 });
+    expect(Object.keys(sent).sort()).toEqual(['pins', 'settings', 'updated_by']);
+    expect(sent.updated_by).not.toBe('someone else');
+  });
+
+  it('relays the coordinator’s validation message and refuses an empty body', async () => {
+    const { token } = await loginAs(ALEX);
+    stubFacade(422, { detail: 'per_day must not grow from the busiest tier to the rest' });
+    const r = await api<{ error: string }>('PUT', PATH, {
+      token, env: ENV, body: { settings: { per_day: [1, 2, 3] } },
+    });
+    expect(r.status).toBe(422);
+    expect(r.body.error).toMatch(/must not grow/);
+
+    const spy = stubFacade(200, {});
+    expect((await api('PUT', PATH, { token, env: ENV, body: { workers: {} } })).status).toBe(400);
+    expect(spy).not.toHaveBeenCalled();
+  });
+});

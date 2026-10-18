@@ -2,13 +2,13 @@
 id: RS-275
 title: Add 4 Facebook workers with ERP-editable cities and pool-assigned logins
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-17
 reporter: jinhu
 branch: feat/fleet-new-workers
-pr:
-version:
+pr: 695
+version: 1.272.0
 related: [RS-254, RS-261, RS-263, RS-268]
 ---
 
@@ -61,24 +61,24 @@ checkpoint.
 
 ## Acceptance criteria
 
-- [ ] Four new worker containers on the VM use Decodo ports 10007–10010, each
+- [x] Four new worker containers on the VM use Decodo ports 10007–10010, each
       with its own id, token, session dir, cache volume and VNC target; the six
       existing containers are not recreated.
-- [ ] The new workers appear on the Fleet tab and can be watched.
-- [ ] A new worker starts on the catalog city at its exit and searches
+- [x] The new workers appear on the Fleet tab and can be watched.
+- [x] A new worker starts on the catalog city at its exit and searches
       nothing until it has a login, so its cities can be set before an
       account is given to it.
-- [ ] The worker page has an Edit cities form: cities are picked from the
+- [x] The worker page has an Edit cities form: cities are picked from the
       127-city catalog, grouped by region, or added by Marketplace slug or
       numeric id with a name and radius. Cities show as chips, and a city
       another worker already searches is marked. Save writes that worker's
       config only, and the worker picks it up between jobs.
-- [ ] `/v1/fleet` shows each worker's cities from its own config.
-- [ ] Picking a fleet worker for a pool account and saving pushes the login
+- [x] `/v1/fleet` shows each worker's cities from its own config.
+- [x] Picking a fleet worker for a pool account and saving pushes the login
       (user, password, 2FA key, e-mail and e-mail password) into that worker's
       vault account with password login allowed, then queues Re-login.
       Secrets never reach the browser, and an `assigned` event is logged.
-- [ ] Setting the worker back to None does not touch the worker's vault.
+- [x] Setting the worker back to None does not touch the worker's vault.
 
 ## Out of scope
 
@@ -104,3 +104,11 @@ checkpoint.
 - New worker ids are named after their exit, since the proxy is fixed and the
   cities are not: `nyc-1` (10007), `phl-1` (10008), `va-1` (10009), `va-2`
   (10010).
+- On first start the new workers each made one logged-out search. With no
+  session file the monitor cannot record that it parked
+  ([debug note](../debug-notes/2026-10-17-new-worker-without-session-file-searches-logged-out.md)).
+  They were stopped, given an empty storage state, and restarted. There were
+  no listings or alerts. facebook-tracker 0.7.1 puts the step in the compose
+  headers.
+- Shipped as facebook-tracker 0.7.0 and 0.7.1 (deployed console-only; the six
+  existing workers were not restarted) and ERP v1.272.0.

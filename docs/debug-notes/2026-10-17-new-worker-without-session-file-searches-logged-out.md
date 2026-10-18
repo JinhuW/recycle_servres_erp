@@ -1,5 +1,9 @@
 # A new worker with no session file searches logged out
 
+**Fixed** in facebook-tracker 0.10.1 (RS-286): a missing file now has a
+fingerprint of its own, so the worker parks. The empty-file step below is no
+longer needed.
+
 **Seen:** 2026-10-17, starting the four RS-275 workers (`nyc-1`, `phl-1`,
 `va-1`, `va-2`) on the homelab VM.
 

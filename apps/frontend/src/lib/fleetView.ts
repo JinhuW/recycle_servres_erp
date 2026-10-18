@@ -3,7 +3,9 @@
 // city, the derived activity feed and the pipeline's stages.
 // Kept out of the components so they can be unit-tested without React.
 
-import type { AlertHitRow, Challenge, CityWrite, FleetAccount, FleetDoc, ReviewStatsDay, SearchSettingsWrite } from './coordinator';
+import type {
+  AlertHitRow, Challenge, CityTierSettings, CityWrite, FleetAccount, FleetCity, FleetDoc, ReviewStatsDay, SearchSettingsWrite,
+} from './coordinator';
 import { ruleLines } from './keywordRules';
 
 export type AccountLiveness = 'live' | 'stale' | 'dead' | 'unknown' | 'none';
@@ -130,6 +132,9 @@ export const canWatch = (w: FleetAccount | null | undefined): boolean => Boolean
 
 // Why a flagged worker is flagged, most urgent first — the order the
 // facade's own dashboard reads them in.
+// A session this close to lapsing is worth a note; one further out is not.
+export const SESSION_WARN_DAYS = 7;
+
 export type AttentionReason =
   | { kind: 'dead'; since: string | null }
   | { kind: 'state'; state: string }
@@ -143,7 +148,9 @@ export function attentionReason(w: FleetAccount): AttentionReason {
   if (h.liveness === 'dead') return { kind: 'dead', since: h.last_heartbeat_at };
   if (h.state && h.state !== 'HEALTHY') return { kind: 'state', state: h.state };
   if (h.session_days_left !== null && h.session_days_left <= 0) return { kind: 'expired' };
-  if (h.session_days_left !== null) return { kind: 'expiring', days: h.session_days_left };
+  if (h.session_days_left !== null && h.session_days_left <= SESSION_WARN_DAYS) {
+    return { kind: 'expiring', days: h.session_days_left };
+  }
   return { kind: 'other' };
 }
 
@@ -173,6 +180,41 @@ export function fleetStatus(w: FleetAccount, parked: ReadonlySet<string>): Fleet
 // Workers with an open checkpoint, by id.
 export const parkedWorkers = (challenges: readonly Challenge[] | null): Set<string> =>
   new Set((challenges ?? []).map(ch => ch.worker_id));
+
+// The Fleet table's sortable columns. Today has no single value of its own —
+// the day bar is a shape — so it sorts by the heartbeat its tooltip shows.
+export type FleetSortCol = 'worker' | 'status' | 'today' | 'searches' | 'session' | 'posts';
+
+export function fleetSortValue(col: FleetSortCol, w: FleetAccount, status: FleetStatus): string | number | null {
+  switch (col) {
+    case 'worker': {
+      const who = whoIs(w);
+      return (who.login ?? who.label ?? w.worker_id).toLowerCase();
+    }
+    case 'status': return FLEET_STATUSES.indexOf(status);
+    case 'today': {
+      const at = w.health?.last_heartbeat_at;
+      return at ? Date.parse(at) : null;
+    }
+    case 'searches': return w.today?.searches ?? null;
+    case 'session': return w.health?.session_days_left ?? null;
+    case 'posts': return w.today?.posts ?? null;
+  }
+}
+
+// Unknowns go last whichever way the column sorts, so flipping the order
+// never fills the top of the table with dashes.
+export function sortFleet(
+  workers: readonly FleetAccount[], col: FleetSortCol, dir: 'asc' | 'desc', parked: ReadonlySet<string>,
+): FleetAccount[] {
+  const sign = dir === 'asc' ? 1 : -1;
+  const keyed = workers.map(w => ({ w, v: fleetSortValue(col, w, fleetStatus(w, parked)) }));
+  keyed.sort((a, b) => {
+    if (a.v === null || b.v === null) return a.v === b.v ? 0 : a.v === null ? 1 : -1;
+    return a.v < b.v ? -sign : a.v > b.v ? sign : 0;
+  });
+  return keyed.map(k => k.w);
+}
 
 // The Recent activity feed. The coordinator keeps no event log the ERP can
 // read, so it is rebuilt from the timestamps it does serve: each worker's
@@ -514,17 +556,67 @@ export function reloginIsAutomatic(w: FleetAccount | null | undefined): boolean 
   return Boolean(acct?.allow_password_login && acct.secrets.password);
 }
 
+// Where an operator's re-login has got to, for the strip on the Watch page.
+// `relogin_requested_at` is set only while the request waits for the worker,
+// so "queued" needs no clock comparison. After the hand-off, a login step
+// counts only if it was stamped after the request; the worker stamps steps
+// with its own clock, so a minute's slack absorbs drift from the
+// coordinator's. Each phase is shown for a bounded time, so a strip never
+// outlives the re-login it describes.
+export type ReloginPhase = 'queued' | 'signing_in' | 'needs_you' | 'done' | 'failed';
+export type ReloginProgress = { phase: ReloginPhase; since: string; active: boolean };
+
+const RELOGIN_CLOCK_SLACK_MS = 60_000;
+const RELOGIN_SHOW_MS: Record<ReloginPhase, number> = {
+  queued: 30 * 60_000,
+  signing_in: 10 * 60_000,
+  needs_you: 15 * 60_000,
+  done: 60_000,
+  failed: 10 * 60_000,
+};
+const LOGIN_STEP_PHASE: Record<string, ReloginPhase> = {
+  picked_up: 'signing_in',
+  typing: 'signing_in',
+  submitted: 'signing_in',
+  challenge: 'needs_you',
+  waiting_for_human: 'needs_you',
+  logged_in: 'done',
+  failed: 'failed',
+};
+
+export function reloginProgress(
+  w: FleetAccount | null | undefined, now: number = Date.now(),
+): ReloginProgress | null {
+  const h = w?.health;
+  if (!h) return null;
+  const shown = (phase: ReloginPhase, since: string): ReloginProgress | null => {
+    const at = Date.parse(since);
+    if (!Number.isFinite(at) || now - at > RELOGIN_SHOW_MS[phase]) return null;
+    return { phase, since, active: phase !== 'done' && phase !== 'failed' };
+  };
+  if (h.relogin_requested_at) return shown('queued', h.relogin_requested_at);
+  const requested = h.relogin_last_requested_at;
+  if (!requested) return null;
+  const step = h.login_step;
+  const stepAt = h.login_step_at;
+  const stepMs = stepAt ? Date.parse(stepAt) : NaN;
+  const phase = LOGIN_STEP_PHASE[step ?? ''] ?? 'signing_in';
+  // The slack is for clock skew on a step that is under way. An outcome from
+  // just before this request is the previous attempt's: reading it as this
+  // one's would end the strip, and slow Watch's polling, mid-login.
+  const slack = phase === 'done' || phase === 'failed' ? 0 : RELOGIN_CLOCK_SLACK_MS;
+  if (!step || !stepAt || !(stepMs >= Date.parse(requested) - slack)) {
+    // Handed out, nothing reported yet — or a worker too old to report steps.
+    return shown('signing_in', requested);
+  }
+  return shown(phase, stepAt);
+}
+
 // The vault account a worker's credentials are filed under: its own account
 // when it has one, otherwise a new one named after the worker — the one id an
 // operator already knows it by (`rsc vault set-account --account-id <worker>`).
 export function vaultAccountIdFor(w: FleetAccount): string {
   return w.account?.account_id ?? w.worker_id;
-}
-
-// What the credentials form is about to make true: Re-login finishes by
-// itself only with a password stored AND password login allowed.
-export function reloginWouldBeAutomatic(allowPasswordLogin: boolean, passwordStored: boolean): boolean {
-  return allowPasswordLogin && passwordStored;
 }
 
 // ── A worker's cities ─────────────────────────────────────────────────────────
@@ -554,4 +646,83 @@ export function cityOwners(fleet: FleetDoc, workerId: string): Map<string, strin
 export function citiesDiffer(a: readonly CityWrite[], b: readonly CityWrite[]): boolean {
   return a.length !== b.length
     || a.some((c, i) => c.slug !== b[i].slug || c.name !== b[i].name || c.radius !== b[i].radius);
+}
+
+// ── How often a city is searched ──────────────────────────────────────────────
+
+/**
+ * How many times a day a city is actually searched: its ranked or pinned
+ * count, capped by the worker's `start_at` times, since a city is searched at
+ * most once per time. Null when the facade does not say.
+ */
+export function searchesPerDay(city: FleetCity, runsPerDay: number | null | undefined): number | null {
+  if (city.per_day === undefined || !runsPerDay) return null;
+  return Math.min(city.per_day, runsPerDay);
+}
+
+/**
+ * The pins one worker's form changed, slug -> searches a day or null for
+ * unpinned. `slugs` are the cities the form speaks for: the worker's current
+ * cities, plus dropped ones no other worker searches, whose pin goes with them.
+ * Pins are fleet-wide, so a city another worker still has keeps its pin.
+ */
+export function pinEdits(
+  before: Readonly<Record<string, number>>,
+  after: Readonly<Record<string, number>>,
+  slugs: readonly string[],
+): Record<string, number | null> {
+  const out: Record<string, number | null> = {};
+  for (const slug of slugs) if (before[slug] !== after[slug]) out[slug] = after[slug] ?? null;
+  return out;
+}
+
+/**
+ * The whole pin map the coordinator stores, with one form's edits applied to
+ * a copy read just before the write, so another manager's pins survive.
+ */
+export function applyPinEdits(
+  pins: Readonly<Record<string, number>>,
+  edits: Readonly<Record<string, number | null>>,
+): Record<string, number> {
+  const out = { ...pins };
+  for (const [slug, n] of Object.entries(edits)) {
+    if (n === null) delete out[slug];
+    else out[slug] = n;
+  }
+  return out;
+}
+
+/** The settings keys a form changed; the coordinator keeps the rest as stored. */
+export function tierSettingsEdits(before: CityTierSettings, after: CityTierSettings): Partial<CityTierSettings> {
+  const out: Partial<CityTierSettings> = {};
+  if (after.top_pct !== before.top_pct) out.top_pct = after.top_pct;
+  if (after.mid_pct !== before.mid_pct) out.mid_pct = after.mid_pct;
+  if (after.window_days !== before.window_days) out.window_days = after.window_days;
+  if (after.per_day.some((n, i) => n !== before.per_day[i])) out.per_day = after.per_day;
+  return out;
+}
+
+const MAX_PER_DAY = 6;
+const MAX_WINDOW_DAYS = 92;
+
+/** Whether the coordinator would accept these settings (city_tiers.validate_settings). */
+export function tierSettingsValid(s: CityTierSettings): boolean {
+  const whole = (n: number, lo: number, hi: number) => Number.isInteger(n) && n >= lo && n <= hi;
+  const [top, mid, rest] = s.per_day;
+  return whole(s.top_pct, 0, 100) && whole(s.mid_pct, 0, 100) && s.top_pct + s.mid_pct <= 100
+    && whole(s.window_days, 1, MAX_WINDOW_DAYS)
+    && s.per_day.every(n => whole(n, 1, MAX_PER_DAY)) && top >= mid && mid >= rest;
+}
+
+// Keysyms for typing text into a VNC session. Latin-1 keysyms equal their
+// code point; everything else is the Unicode range X11 reserves. Control
+// characters are dropped: a stray Return would submit Facebook's form.
+export function keysymsFor(text: string): number[] {
+  const out: number[] = [];
+  for (const ch of text) {
+    const cp = ch.codePointAt(0)!;
+    if (cp < 0x20 || cp === 0x7f) continue;
+    out.push(cp <= 0xff ? cp : 0x01000000 + cp);
+  }
+  return out;
 }

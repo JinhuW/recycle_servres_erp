@@ -16,7 +16,13 @@ from fastapi import APIRouter, Depends
 from .. import deps, health
 from ..db import as_utc_stamp
 from ..deps import require_admin, require_worker
-from ..schemas import HeartbeatRequest, HeartbeatResponse, WorkerList, WorkerOut
+from ..schemas import (
+    DirectivesResponse,
+    HeartbeatRequest,
+    HeartbeatResponse,
+    WorkerList,
+    WorkerOut,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +61,8 @@ def heartbeat(
         ("error_count", payload.error_count),
         ("vnc_url", payload.vnc_url),
         ("version", payload.version),
+        ("login_step", payload.login_step),
+        ("login_step_at", payload.login_step_at),
     ):
         if value is not None:
             health_fields[name] = value
@@ -96,20 +104,37 @@ def heartbeat(
             # costs an alert; failing it would make workers retry and thrash.
             logger.exception("Ops alert failed for worker %s", worker_id)
 
-    # Deliver any push-style directives the console has queued for this worker.
-    # `take_relogin` clears the flag as it reads it, so the worker re-logs in
-    # once per button press rather than on every heartbeat that follows it.
+    return HeartbeatResponse(directives=_take_directives(worker_id))
+
+
+def _take_directives(worker_id: str) -> list[str]:
+    """Hand out the push-style directives queued for this worker.
+
+    `take_relogin` clears the flag as it reads it, so the worker re-logs in
+    once per button press, whichever of the heartbeat or the poll asks first.
+    """
     directives: list[str] = []
-    if db.take_relogin(worker_id):
+    if deps.db.take_relogin(worker_id):
         directives.append("relogin")
         logger.info("Delivered re-login directive to worker %s", worker_id)
+    return directives
 
-    return HeartbeatResponse(directives=directives)
+
+@router.post("/v1/workers/{worker_id}/directives", response_model=DirectivesResponse)
+def poll_directives(
+    worker_id: str, worker: Optional[str] = Depends(require_worker)
+) -> DirectivesResponse:
+    """Directives without a heartbeat, polled every few seconds by workers.
+
+    Writes no health, so it can run far more often than the heartbeat. As
+    with the heartbeat, a per-worker token wins over the id in the path.
+    """
+    return DirectivesResponse(directives=_take_directives(worker or worker_id))
 
 
 @router.post("/v1/workers/{worker_id}/relogin", dependencies=[Depends(require_admin)])
 def request_relogin(worker_id: str) -> Dict[str, Any]:
-    """Queue a re-login for a worker; its next heartbeat picks it up.
+    """Queue a re-login for a worker; its next directive poll picks it up.
 
     Admin-only: the console facade forwards an operator's button press here.
     """

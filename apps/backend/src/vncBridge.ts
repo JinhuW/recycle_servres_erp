@@ -51,6 +51,8 @@ const MAX_FRAME_BYTES = 256 * 1024;
 // What may queue before the upstream socket is open.
 const MAX_PENDING_BYTES = 1024 * 1024;
 const REVALIDATE_MS = 60_000;
+// How long shutdown waits on a viewer's close reply before cutting the socket.
+const TERMINATE_GRACE_MS = 2_000;
 // Close code for "the handshake's session no longer admits this socket"; the
 // viewer (lib/coordinator.ts) reconnects on it with a refreshed cookie.
 export const VNC_SESSION_LAPSED = 4401;
@@ -294,7 +296,9 @@ export function attachVncBridge(
       }
       wss.handleUpgrade(req, socket, head, (client) => {
         if (closing) {
+          // Not in `open`, so closeVncBridges' terminate sweep never sees it.
           closeQuietly(client, 1001, RESTARTING);
+          setTimeout(() => client.terminate(), TERMINATE_GRACE_MS).unref();
           return;
         }
         open.add(client);
@@ -312,9 +316,13 @@ export function attachVncBridge(
 }
 
 /** Closes every relayed socket — for shutdown, so a viewer never pins the process. */
-export function closeVncBridges(): void {
+export function closeVncBridges({ graceMs = TERMINATE_GRACE_MS }: { graceMs?: number } = {}): void {
   closing = true;
   for (const ws of open) closeQuietly(ws, 1001, RESTARTING);
+  // A close is a handshake: a viewer whose laptop slept never answers it, and
+  // ws's own 30 s close timeout outlasts the shutdown's hard deadline, so
+  // server.close() would wait past it and the database never gets closed.
+  setTimeout(() => { for (const ws of open) ws.terminate(); }, graceMs).unref();
 }
 
 /** Open bridge count, for tests. */

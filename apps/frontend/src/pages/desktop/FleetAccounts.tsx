@@ -1,22 +1,27 @@
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Icon } from '../../components/Icon';
 import { Modal } from '../../components/Modal';
 import { coordinatorApi, type FleetAccount, type FleetCity, type WorkerState } from '../../lib/coordinator';
-import { handleFetchError, showSuccessToast } from '../../lib/errorToast';
+import { ApiError } from '../../lib/api';
+import { handleFetchError, showSuccessToast, showWarnToast } from '../../lib/errorToast';
 import {
-  isUnstampedBuild, reloginIsAutomatic, reloginWouldBeAutomatic, splitHighlights, vaultAccountIdFor,
+  PREVIOUS_FATES, cookieHealth, heldByWorker, installCandidates, poolApi,
+  type PoolAccount, type PreviousFate,
+} from '../../lib/facebookPool';
+import {
+  isUnstampedBuild, reloginIsAutomatic, searchesPerDay, splitHighlights, vaultAccountIdFor,
   type AccountLiveness, type CityHits,
 } from '../../lib/fleetView';
 import { useT } from '../../lib/i18n';
 import type { Translate } from '../../lib/orderPresentation';
-import { fleetWatchPath, hrefFor, onLinkClick } from '../../lib/route';
+import { fleetWatchPath, hrefFor, navigate, onLinkClick } from '../../lib/route';
 
 // ─── Fleet building blocks ────────────────────────────────────────────────────
 // The pieces the fleet list (FleetWorkers.tsx), the worker page
 // (FleetWorker.tsx) and the viewer share: highlighted text, state and
 // liveness chips, a city chip with its alert count, the build chip, and the
 // three actions the control plane can take today — watch the browser, queue a
-// re-login, and set the credentials Re-login signs in with.
+// re-login, and assign the pool account Re-login signs in with.
 
 export const HITS_DAYS = 7;
 
@@ -83,13 +88,16 @@ export function WatchButton({ workerId, className = 'btn sm' }: { workerId: stri
 
 // Queues a Facebook re-login for one worker, after a confirm that says what it
 // will do: the worker re-enters its username, password and 2FA code from the
-// vault on its next cycle.
-export function ReloginButton({ workerId, account, onQueued, className = 'btn sm' }: {
+// vault within seconds.
+export function ReloginButton({ workerId, account, onQueued, offerWatch = false, className = 'btn sm' }: {
   workerId: string;
   // The worker's fleet row, to say up front whether the login can finish by
   // itself. Unknown (undefined) reads as "not automatic", the safe claim.
   account?: FleetAccount | null;
   onQueued?: () => void;
+  // Off the Watch page, lead with opening Watch: the login is only worth
+  // following live, and a captcha mid-way needs someone looking.
+  offerWatch?: boolean;
   className?: string;
 }) {
   const { t } = useT();
@@ -97,11 +105,15 @@ export function ReloginButton({ workerId, account, onQueued, className = 'btn sm
   const [busy, setBusy] = useState(false);
   const [queued, setQueued] = useState(false);
 
-  const confirm = () => {
+  const confirm = (watch: boolean) => {
     setBusy(true);
     coordinatorApi.relogin(workerId)
       .then(() => {
         setAsking(false);
+        if (watch) {
+          navigate(fleetWatchPath(workerId));
+          return;
+        }
         setQueued(true);
         showSuccessToast(t('fbcReloginQueued', { id: workerId }));
         onQueued?.();
@@ -139,7 +151,12 @@ export function ReloginButton({ workerId, account, onQueued, className = 'btn sm
           </div>
           <div className="modal-foot" style={{ justifyContent: 'flex-end' }}>
             <button type="button" className="btn" disabled={busy} onClick={() => setAsking(false)}>{t('cancel')}</button>
-            <button type="button" className="btn primary" disabled={busy} onClick={confirm}>{t('fbcRelogin')}</button>
+            {offerWatch && (
+              <button type="button" className="btn" disabled={busy} onClick={() => confirm(false)}>{t('fbcReloginOnly')}</button>
+            )}
+            <button type="button" className="btn primary" disabled={busy} onClick={() => confirm(offerWatch)}>
+              {offerWatch ? t('fbcReloginWatch') : t('fbcRelogin')}
+            </button>
           </div>
         </Modal>
       )}
@@ -147,12 +164,13 @@ export function ReloginButton({ workerId, account, onQueued, className = 'btn sm
   );
 }
 
-// ─── Edit credentials ─────────────────────────────────────────────────────────
-// What a worker signs in with when Re-login runs, set from here instead of
-// `rsc vault set-account` on the VM. Secrets are write-only end to end: the
-// form shows whether one is stored and never its value; a box left blank keeps
-// what is stored; "clear" sends an explicit null. Saving refreshes the fleet
-// view, so the stored-secret badges and the Re-login dialog follow at once.
+// ─── Assign account ───────────────────────────────────────────────────────────
+// What a worker signs in with comes from the account pool: the manager picks a
+// spare and the backend writes its login into the worker's vault, marks it
+// Fleet and queues Re-login (`/api/facebook-pool/:no/assign`). Nothing is typed
+// here, so the pool and the vault can't drift. A worker that already holds a
+// pool account needs a decision about where that one goes — there is no
+// default, because "it broke" and "we're rotating" end in different places.
 
 export function EditCredentialsButton({ account, onSaved, className = 'btn sm' }: {
   account: FleetAccount;
@@ -176,76 +194,65 @@ export function EditCredentialsButton({ account, onSaved, className = 'btn sm' }
   );
 }
 
+const FATE_KEYS: Record<PreviousFate, string> = {
+  available: 'fbcCredFateAvailable',
+  problem: 'fbcCredFateProblem',
+  retired: 'fbcCredFateRetired',
+};
+
+const POOL_REFUSALS = new Set(['fpWorkerTaken', 'fpNoPassword', 'fpAssignRetired', 'fpAssignHeld']);
+const COOKIE_PROBLEM = { missing: 'fpCookieMissing', mismatch: 'fpCookieMismatch', unknown: 'fpCookieUnknown' } as const;
+
 function EditCredentialsModal({ account: w, onClose, onSaved }: {
   account: FleetAccount; onClose: () => void; onSaved: () => void;
 }) {
   const { t } = useT();
   const acct = w.account;
   const accountId = vaultAccountIdFor(w);
-  const passwordStored = Boolean(acct?.secrets.password);
-  const totpStored = Boolean(acct?.secrets.totp_secret);
-  const [login, setLogin] = useState(acct?.fb_username ?? '');
-  const [password, setPassword] = useState('');
-  const [clearPassword, setClearPassword] = useState(false);
-  const [totp, setTotp] = useState('');
-  const [clearTotp, setClearTotp] = useState(false);
-  const [allowPw, setAllowPw] = useState(acct?.allow_password_login ?? false);
+  const [pool, setPool] = useState<PoolAccount[] | null>(null);
+  const [query, setQuery] = useState('');
+  const [pick, setPick] = useState<number | null>(null);
+  const [fate, setFate] = useState<PreviousFate | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // What will be true once this form is saved, so the note below is a
-  // promise the worker can keep.
-  const passwordAfter = clearPassword ? false : (password.length > 0 || passwordStored);
-  const automatic = reloginWouldBeAutomatic(allowPw, passwordAfter);
+  const reload = () => poolApi.snapshot().then(s => setPool(s.accounts));
+  useEffect(() => {
+    reload().catch(e => { handleFetchError(e); setPool([]); });
+  }, []);
+
+  const held = pool ? heldByWorker(pool, w.worker_id) : undefined;
+  const candidates = pool ? installCandidates(pool, query) : [];
+  const picked = candidates.find(a => a.no === pick);
+  const ready = !!picked && (!held || fate !== null);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (busy) return;
-    const secrets: Partial<Record<'password' | 'totp_secret', string | null>> = {};
-    if (clearPassword) secrets.password = null;
-    else if (password) secrets.password = password;
-    if (clearTotp) secrets.totp_secret = null;
-    else if (totp.trim()) secrets.totp_secret = totp.trim();
+    if (busy || !ready || !picked) return;
     setBusy(true);
-    coordinatorApi.saveAccount(accountId, {
-      worker_id: w.worker_id,
-      fb_username: login.trim(),
-      allow_password_login: allowPw,
-      secrets,
-    })
+    poolApi.assign(picked.no, w.worker_id, acct ? accountId : undefined, held ? fate ?? undefined : undefined)
       .then(() => {
-        showSuccessToast(t('fbcCredSaved', { id: w.worker_id }));
+        showSuccessToast(t('fpAssignedToast', { n: picked.no, id: w.worker_id }));
         onSaved();
       })
-      .catch(handleFetchError)
+      .catch(err => {
+        // The pool moved under the dialog: say why and show it as it is now,
+        // so the question about the worker's current account can appear.
+        const code = err instanceof ApiError ? (err.body as { code?: string } | undefined)?.code : undefined;
+        if (err instanceof ApiError && err.status === 409 && code && POOL_REFUSALS.has(code)) {
+          showWarnToast(t(code));
+          setPick(null);
+          void reload().catch(() => undefined);
+        } else handleFetchError(err);
+      })
       .finally(() => setBusy(false));
   };
 
-  const field = (label: string, hint: string | undefined, control: ReactNode) => (
-    <label style={{ display: 'grid', gap: 4 }}>
-      <span style={{ fontSize: 12.5, color: 'var(--fg-muted)' }}>{label}</span>
-      {control}
-      {hint && <span className="muted" style={{ fontSize: 11.5 }}>{hint}</span>}
-    </label>
-  );
-  const secretBox = (
-    value: string, setValue: (v: string) => void, stored: boolean,
-    clear: boolean, setClear: (v: boolean) => void, autoComplete: string,
-  ) => (
-    <>
-      <input type="password" className="input" value={value} autoComplete={autoComplete}
-        placeholder={stored ? t('fbcCredStored') : t('fbcCredNotStored')}
-        disabled={clear} onChange={e => setValue(e.target.value)} />
-      {stored && (
-        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12.5 }}>
-          <input type="checkbox" checked={clear} onChange={e => setClear(e.target.checked)} />
-          {t('fbcCredClear')}
-        </label>
-      )}
-    </>
-  );
+  const current = held
+    ? `#${held.no} · ${held.email || held.uid}`
+    : acct?.fb_username ? t('fbcCredNotFromPool', { login: acct.fb_username }) : t('fbcCredNone');
 
   return (
-    <Modal onClose={() => { if (!busy) onClose(); }} shellStyle={{ maxWidth: 480 }}>
+    <Modal onClose={() => { if (!busy) onClose(); }} shellStyle={{ maxWidth: 640 }}>
       <form onSubmit={submit}>
         <div className="modal-head">
           <div>
@@ -254,53 +261,102 @@ function EditCredentialsModal({ account: w, onClose, onSaved }: {
         </div>
         <div className="modal-body" style={{ display: 'grid', gap: 14 }}>
           <p style={{ margin: 0, fontSize: 13.5, color: 'var(--fg-muted)' }}>{t('fbcCredIntro')}</p>
+          <div style={{ fontSize: 13.5 }}>
+            <span className="muted">{t('fbcCredCurrent')}</span> {current}
+          </div>
           {!acct && (
             <div className="card-note" style={{ padding: '10px 12px' }}>
               <Icon name="info" size={16} />
               <span>{t('fbcCredNewAccount', { id: accountId })}</span>
             </div>
           )}
-          {field(t('fbcCredLogin'), t('fbcCredLoginHint'),
-            <input type="text" className="input" value={login} autoComplete="off"
-              onChange={e => setLogin(e.target.value)} />)}
-          {field(t('fbcCredPassword'), undefined,
-            secretBox(password, setPassword, passwordStored, clearPassword, setClearPassword, 'new-password'))}
-          {field(t('fbcCredTotp'), t('fbcCredTotpHint'),
-            secretBox(totp, setTotp, totpStored, clearTotp, setClearTotp, 'off'))}
-          <label style={{ display: 'grid', gap: 4 }}>
-            <span style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13.5 }}>
-              <input type="checkbox" checked={allowPw} onChange={e => setAllowPw(e.target.checked)} />
-              {t('fbcCredAllowPw')}
-            </span>
-            <span className="muted" style={{ fontSize: 11.5 }}>{t('fbcCredAllowPwHint')}</span>
-          </label>
+          <input type="search" className="input" value={query} placeholder={t('fbcCredSearch')}
+            onChange={e => setQuery(e.target.value)} />
+          <div style={{ maxHeight: 280, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
+            {pool === null ? (
+              <div className="muted" style={{ padding: 12, fontSize: 13 }}>{t('fbcCredLoading')}</div>
+            ) : candidates.length === 0 ? (
+              <div className="muted" style={{ padding: 12, fontSize: 13 }}>{t('fbcCredNoSpares')}</div>
+            ) : (
+              <table className="table" style={{ width: '100%' }}>
+                <tbody>
+                  {candidates.map(a => {
+                    const cookie = cookieHealth(a);
+                    return (
+                      <tr key={a.no} onClick={() => setPick(a.no)} style={{ cursor: 'pointer' }}>
+                        <td style={{ width: 28 }}>
+                          <input type="radio" name="pool-account" checked={pick === a.no}
+                            onChange={() => setPick(a.no)} aria-label={`#${a.no}`} />
+                        </td>
+                        <td className="mono">#{a.no}</td>
+                        <td>
+                          <div>{a.email || a.uid}</div>
+                          {a.email && <div className="mono muted" style={{ fontSize: 11.5 }}>{a.uid}</div>}
+                        </td>
+                        <td>
+                          <span className={`chip ${a.totp ? 'pos' : 'muted'}`}>{a.totp ? '2FA' : t('fbcCredNo2fa')}</span>
+                        </td>
+                        <td className="muted" style={{ fontSize: 12 }}>
+                          {cookie.kind === 'fresh' || cookie.kind === 'stale'
+                            ? t('fbcCredCookieAge', { days: cookie.days })
+                            : cookie.kind === 'none' ? t('fbcCredNoCookie') : t(COOKIE_PROBLEM[cookie.kind])}
+                        </td>
+                        <td className="muted" style={{ fontSize: 12 }}>{a.batch}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+          {picked && held && (
+            <fieldset style={{ border: 0, padding: 0, margin: 0, display: 'grid', gap: 6 }}>
+              <legend style={{ fontSize: 13.5, marginBottom: 6 }}>
+                {t('fbcCredFateQuestion', { n: held.no })}
+              </legend>
+              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                {PREVIOUS_FATES.map(f => (
+                  <label key={f} style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13.5 }}>
+                    <input type="radio" name="previous-fate" checked={fate === f} onChange={() => setFate(f)} />
+                    {t(FATE_KEYS[f])}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          )}
           <div className="card-note" style={{ padding: '10px 12px' }}>
-            <Icon name={automatic ? 'check' : 'info'} size={16} />
-            <span>{automatic ? t('fbcCredWillBeAutomatic') : t('fbcCredWillBeManual')}</span>
+            <Icon name="info" size={16} />
+            <span>{t('fbcCredReloginNote')}</span>
           </div>
         </div>
         <div className="modal-foot" style={{ justifyContent: 'flex-end' }}>
           <button type="button" className="btn" disabled={busy} onClick={onClose}>{t('cancel')}</button>
-          <button type="submit" className="btn primary" disabled={busy}>{t('save')}</button>
+          <button type="submit" className="btn primary" disabled={busy || !ready}>{t('fbcCredAssign')}</button>
         </div>
       </form>
     </Modal>
   );
 }
 
-export function CityChip({ city, hits, terms, tone }: {
+// `runsPerDay` is the worker's `start_at` count: a busy city is marked with
+// how many of those times it is searched, a once-a-day city is left plain.
+export function CityChip({ city, hits, terms, tone, runsPerDay }: {
   city: FleetCity; hits: Map<string, CityHits>; terms: readonly string[]; tone: 'accent' | 'muted';
+  runsPerDay?: number | null;
 }) {
   const { t } = useT();
   const hit = hits.get(city.slug);
+  const times = searchesPerDay(city, runsPerDay);
   const title = [
     city.slug,
     city.radius_km ? `${city.radius_km} km` : null,
     hit ? t('fbcCityHint', { sent: hit.sent, days: HITS_DAYS }) : null,
+    times ? t(city.pin ? 'fbcCityTimesPinned' : 'fbcCityTimes', { n: times }) : null,
   ].filter(Boolean).join(' · ');
   return (
     <span className={`chip ${tone}`} title={title}>
       <span><Hi text={city.name} terms={terms} /></span>
+      {times !== null && times > 1 && <span className="mono" style={{ fontSize: 10.5, opacity: 0.8 }}>{times}×</span>}
       {hit && hit.sent > 0 && <span className="n">{hit.sent}</span>}
     </span>
   );

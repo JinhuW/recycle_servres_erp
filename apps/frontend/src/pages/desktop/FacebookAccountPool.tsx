@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import type { FbPoolSecretField, FbReportReason } from '@recycle-erp/shared';
+import { useMemo, useState, type ReactNode } from 'react';
+import { FB_POOL_SECRET_FIELDS, type FbPoolSecretField, type FbReportReason } from '@recycle-erp/shared';
 import { Icon } from '../../components/Icon';
 import { ApiError } from '../../lib/api';
 import type { Challenge, FleetDoc } from '../../lib/coordinator';
@@ -40,8 +40,10 @@ type Props = {
 // Refusals the API names with one of the page's own keys read as a warning,
 // not as the blocking error dialog: the pool moved under the user, that's all.
 const KNOWN_REFUSALS = new Set([
-  'fpAtLimit', 'fpDuplicate', 'fpTakenElsewhere', 'fpNotTaken', 'fpWorkerTaken', 'fpNoPassword', 'fpAssignRetired',
+  'fpAtLimit', 'fpDuplicate', 'fpTakenElsewhere', 'fpNotTaken', 'fpWorkerTaken', 'fpNoPassword', 'fpAssignRetired', 'fpAssignHeld',
 ]);
+const isSecretField = (field: string): field is FbPoolSecretField =>
+  (FB_POOL_SECRET_FIELDS as readonly string[]).includes(field);
 export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = null, challenges = null }: Props) {
   const { t, locale } = useT();
   const user = useEffectiveUser()!;
@@ -131,7 +133,7 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
     setRevealed((prev) => new Set([...prev].filter((key) => !key.startsWith(`${no}:`))));
   const copy = async (
     a: PoolAccount,
-    field: 'uid' | 'password' | 'email' | 'emailPassword' | 'recovery' | 'cookie' | 'totp',
+    field: 'uid' | 'password' | 'email' | 'emailPassword' | 'recovery' | 'cookie' | 'totp' | 'note',
     label: string,
   ) => {
     const value = field === 'totp' ? await poolTotp(a.totp) : a[field];
@@ -144,7 +146,7 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
     try {
       await navigator.clipboard.writeText(value);
       showToast?.(t('fpCopied', { field: t(label) }));
-      if (field !== 'uid' && field !== 'email' && field !== 'recovery') audit(a.no, 'copied', field);
+      if (isSecretField(field)) audit(a.no, 'copied', field);
     } catch {
       showToast?.(t('fpCopyFailed'), 'error');
     }
@@ -216,8 +218,29 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
       <Icon name="copy" size={13} />
     </button>
   );
-  // A fleet account's status is its worker's; the link and the reveal sit
-  // inside a clickable row, so their clicks and keys stop short of the editor.
+  // In the manager's table the value is the copy button; the editor opens from
+  // the row's pencil, so a click meant to copy never opens a dialog.
+  const copyCell = (
+    a: PoolAccount,
+    field: Parameters<typeof copy>[1],
+    label: string,
+    content: ReactNode = a[field],
+    className = '',
+  ) => {
+    if (!a[field]) return <span className="fp-muted">—</span>;
+    return (
+      <button
+        type="button"
+        className={`fp-copy-cell ${className}`}
+        aria-label={t('fpCopy', { field: t(label) })}
+        title={field === 'note' ? a.note : t('fpCopy', { field: t(label) })}
+        onClick={() => void copy(a, field, label)}
+      >
+        {content}
+      </button>
+    );
+  };
+  // A fleet account's status is its worker's.
   const statusCell = (a: PoolAccount) => {
     const w = workerOf(a);
     if (!w) return <StatusChip status={a.status} />;
@@ -240,7 +263,6 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
             className="mono"
             href={hrefFor(path)}
             onClick={onLinkClick(path)}
-            onKeyDown={(e) => e.stopPropagation()}
           >
             {w.worker_id}
           </a>
@@ -268,19 +290,18 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
     const shown = revealed.has(`${a.no}:${field}`);
     const name = t(shown ? 'fpHide' : 'fpShow', { field: t(label) });
     return (
-      <button
-        type="button"
-        className={`fp-reveal ${shown ? 'mono' : 'fp-masked'}`}
-        aria-label={name}
-        title={name}
-        onClick={(e) => {
-          e.stopPropagation();
-          toggleReveal(a.no, field);
-        }}
-        onKeyDown={(e) => e.stopPropagation()}
-      >
-        {shown ? a[field] : '••••••••'}
-      </button>
+      <span className="fp-row">
+        {copyCell(a, field, label, shown ? a[field] : '••••••••', shown ? 'mono' : 'fp-masked')}
+        <button
+          type="button"
+          className="btn ghost icon sm"
+          aria-label={name}
+          title={name}
+          onClick={() => toggleReveal(a.no, field)}
+        >
+          <Icon name={shown ? 'eyeOff' : 'eye'} size={13} />
+        </button>
+      </span>
     );
   };
   return (
@@ -345,44 +366,45 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
                       ].map((key) => (
                         <th key={key}>{key === '#' ? t('fpNo') : t(key)}</th>
                       ))}
+                      <th aria-label={t('edit')} />
                     </tr>
                   </thead>
                   <tbody>
                     {visible.map((a) => (
-                      <tr
-                        key={a.no}
-                        tabIndex={0}
-                        aria-label={`${t('edit')} #${a.no}`}
-                        onClick={() => setEditor(a)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            setEditor(a);
-                          }
-                        }}
-                      >
+                      <tr key={a.no}>
                         <td className="fp-row-number">{a.no}</td>
-                        <td className="mono">{a.uid}</td>
+                        <td>{copyCell(a, 'uid', 'fpUid', a.uid, 'mono')}</td>
                         <td>{statusCell(a)}</td>
                         <td>{holderCell(a)}</td>
                         <td>{secretCell(a, 'password', 'fpPassword')}</td>
-                        <td>
-                          <PoolCode secret={a.totp} />
-                        </td>
-                        <td>{a.email || '—'}</td>
+                        <td>{copyCell(a, 'totp', 'fpCode', <PoolCode secret={a.totp} />)}</td>
+                        <td>{copyCell(a, 'email', 'fpEmail')}</td>
                         <td>{secretCell(a, 'emailPassword', 'fpEmailPassword')}</td>
-                        <td className="fp-muted">{a.recovery || '—'}</td>
+                        <td>{copyCell(a, 'recovery', 'fpRecovery', a.recovery, 'fp-muted')}</td>
                         <td>
-                          <CookieLabel account={a} />
+                          {a.cookie ? (
+                            copyCell(a, 'cookie', 'fpCookie', <CookieLabel account={a} />)
+                          ) : (
+                            <CookieLabel account={a} />
+                          )}
                         </td>
-                        <td className="fp-note" title={a.note}>
-                          {a.note || '—'}
+                        <td className="fp-note">{copyCell(a, 'note', 'fpNotes')}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn ghost icon sm"
+                            aria-label={`${t('edit')} #${a.no}`}
+                            title={`${t('edit')} #${a.no}`}
+                            onClick={() => setEditor(a)}
+                          >
+                            <Icon name="edit" size={13} />
+                          </button>
                         </td>
                       </tr>
                     ))}
                     {!visible.length && (
                       <tr>
-                        <td colSpan={11} className="fp-empty">
+                        <td colSpan={12} className="fp-empty">
                           {t('fpNoMatch')}
                         </td>
                       </tr>
@@ -576,6 +598,13 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
                             </div>
                           );
                         })}
+                        <div>
+                          <dt>{t('fpAliveCheck')}</dt>
+                          <dd className="fp-muted">
+                            {a.aliveCheckedAt === null ? t('fpAliveNever') : ago(a.aliveCheckedAt)}
+                          </dd>
+                          <span className="fp-row" />
+                        </div>
                       </dl>
                       <div className="fp-credential-foot">
                         <button

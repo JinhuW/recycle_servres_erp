@@ -38,6 +38,7 @@ export type PoolAccount = {
   since: number | null;
   addedAt: number;
   cookieAt: number | null;
+  aliveCheckedAt: number | null;
   batch: string;
 };
 export type PoolActivity = {
@@ -191,11 +192,38 @@ export const poolApi = {
   create: (draft: PoolDraft, batch: string) => api.post<PoolSnapshot>(BASE, { draft, batch }),
   update: (no: number, draft: PoolDraft) => api.put<PoolSnapshot>(`${BASE}/${no}`, { draft }),
   // The login goes to the worker server-side; nothing secret comes back.
-  // `account` is the worker's existing vault account, when it has one.
-  assign: (no: number, worker: string, account?: string) =>
-    api.post<PoolSnapshot>(`${BASE}/${no}/assign`, { worker, account }),
+  // `account` is the worker's existing vault account, when it has one;
+  // `previous` is where the account the worker holds now goes, if it holds one.
+  assign: (no: number, worker: string, account?: string, previous?: PreviousFate) =>
+    api.post<PoolSnapshot>(`${BASE}/${no}/assign`, { worker, account, previous }),
   retire: (no: number) => api.post<PoolSnapshot>(`${BASE}/${no}/retire`, {}),
   remove: (no: number) => api.delete<PoolSnapshot>(`${BASE}/${no}`),
   importRows: (batch: string, rows: PoolDraft[]) =>
     api.post<PoolSnapshot>(`${BASE}/import`, { batch, rows }),
 };
+
+/** Where the account a worker held goes when another is sent to it. */
+export const PREVIOUS_FATES = ['available', 'problem', 'retired'] as const;
+export type PreviousFate = (typeof PREVIOUS_FATES)[number];
+
+/** The pool account a fleet worker holds now, if it came from the pool. */
+export function heldByWorker(accounts: readonly PoolAccount[], workerId: string): PoolAccount | undefined {
+  const id = workerId.toLowerCase();
+  return accounts.find((a) => a.status === 'fleet' && a.holder?.toLowerCase() === id);
+}
+
+/**
+ * The spares a worker can sign in with — available and holding a password —
+ * fresh cookies first, then oldest first, filtered by #, uid, e-mail or batch.
+ */
+export function installCandidates(accounts: readonly PoolAccount[], query: string): PoolAccount[] {
+  const q = query.trim().toLowerCase();
+  return accounts
+    .filter((a) => a.status === 'available' && a.password)
+    .filter((a) => !q || [a.uid, a.email, a.batch, `#${a.no}`].some((s) => s.toLowerCase().includes(q)))
+    .sort(
+      (a, b) =>
+        Number(cookieHealth(b).kind === 'fresh') - Number(cookieHealth(a).kind === 'fresh') ||
+        a.addedAt - b.addedAt,
+    );
+}

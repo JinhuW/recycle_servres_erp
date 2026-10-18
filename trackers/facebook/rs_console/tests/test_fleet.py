@@ -1,8 +1,8 @@
 """The fleet document: config joined to health, with nothing secret in it.
 
-What must stay true: proxies leave only as env-var *names*, never values;
-the phase-1 monitor's config row joins its heartbeat row by worker id; a
-coordinator outage degrades to `health.error` rather than a failed request;
+What must stay true: a proxy leaves as its env-var name and its URL with the
+login cut out, never a username or password; the phase-1 monitor's config
+row joins its heartbeat row by worker id; a coordinator outage degrades to `health.error` rather than a failed request;
 and the dashboard shell itself is public while every data route stays
 token-guarded.
 """
@@ -118,6 +118,9 @@ HOMELAB_ROW = {
     "liveness": "live",
     "needs_attention": False,
     "last_heartbeat_at": "2026-09-05T21:43:35+00:00",
+    "relogin_last_requested_at": "2026-09-05T21:40:00+00:00",
+    "login_step": "challenge",
+    "login_step_at": "2026-09-05T21:40:31+00:00",
 }
 
 
@@ -144,6 +147,7 @@ def client(monkeypatch, tmp_path):
         "cycles": httpx.Response(200, json={"rows": []}),
         "reviews": httpx.Response(200, json={"rows": []}),
         "cities": httpx.Response(200, json={"rows": []}),
+        "rank": httpx.Response(404, json={"detail": "Not Found"}),
     }
 
     async def fake_transport(request):
@@ -151,6 +155,8 @@ def client(monkeypatch, tmp_path):
         path = request.url.path
         if path == "/healthz":
             return httpx.Response(200, json={"status": "ok", "version": "0.5.6"})
+        if path == "/v1/city-tiers/rank":
+            return upstream["rank"]
         if path == "/v1/stats/search-cycles":
             return upstream["cycles"]
         if path == "/v1/stats/reviews/workers":
@@ -216,6 +222,10 @@ def test_fleet_joins_config_to_health(client):
     assert [c["slug"] for c in monitor["cities"]] == ["dc", "miami"]
     assert monitor["proxy_env"] == "PROXY_HOMELAB"
     assert monitor["health"]["liveness"] == "live"
+    # Re-login progress reaches the ERP's Watch page as the coordinator says it.
+    assert monitor["health"]["login_step"] == "challenge"
+    assert monitor["health"]["login_step_at"] == "2026-09-05T21:40:31+00:00"
+    assert monitor["health"]["relogin_last_requested_at"] == "2026-09-05T21:40:00+00:00"
     assert monitor["account"] == {
         "account_id": "personal",
         "fb_username": "someone@example.com",
@@ -374,6 +384,52 @@ def test_fleet_today_is_null_against_an_older_coordinator(client):
     assert all(w["today"] is None for w in doc["workers"])
 
 
+def test_fleet_marks_each_city_with_how_often_it_is_searched(client):
+    client.upstream["rank"] = httpx.Response(200, json={
+        "settings": {"top_pct": 20, "mid_pct": 20, "per_day": [3, 2, 1], "window_days": 30},
+        "workers": {"se-1": [
+            {"slug": "dc", "score": 4, "computed": 3, "pin": None, "per_day": 3},
+            {"slug": "miami", "score": 0, "computed": 1, "pin": 2, "per_day": 2},
+        ]},
+    })
+    doc = client.get("/v1/fleet", headers=AUTH).json()
+    rank_call = next(r for r in client.calls if r.url.path == "/v1/city-tiers/rank")
+    assert rank_call.method == "POST"
+    asked = __import__("json").loads(rank_call.content)["workers"]
+    assert asked["se-1"] == ["dc", "miami"]
+
+    se = next(w for w in doc["workers"] if w["worker_id"] == "se-1")
+    assert [(c["slug"], c["per_day"], c["pin"], c["score"]) for c in se["cities"]] == [
+        ("dc", 3, None, 4), ("miami", 2, 2, 0),
+    ]
+    assert doc["city_tiers"]["per_day"] == [3, 2, 1]
+    wc = next(w for w in doc["workers"] if w["worker_id"] == "wc-1")
+    assert all("per_day" not in c for c in wc["cities"])
+
+
+def test_fleet_leaves_cities_unmarked_against_an_older_coordinator(client):
+    doc = client.get("/v1/fleet", headers=AUTH).json()
+    assert doc["health"]["ok"] is True
+    assert "city_tiers" not in doc
+    assert all("per_day" not in c for w in doc["workers"] for c in w["cities"])
+
+
+def test_apply_tiers_recounts_the_budget_capped_at_the_slots():
+    doc = {"workers": [{
+        "worker_id": "se-1",
+        "cities": [{"slug": "dc"}, {"slug": "miami"}, {"slug": "tampa"}],
+        "plan": fleet.search_plan([{"search_phrases": ["a", "b"]}], 3, ["02:00", "10:00"]),
+    }]}
+    rows = [
+        {"slug": "dc", "score": 9, "pin": None, "per_day": 3},
+        {"slug": "miami", "score": 1, "pin": None, "per_day": 2},
+        {"slug": "tampa", "score": 0, "pin": None, "per_day": 1},
+    ]
+    fleet.apply_tiers(doc, {"settings": {}, "workers": {"se-1": rows}})
+    # Two phrases x (dc twice — two slots is the cap — + miami twice + tampa once).
+    assert doc["workers"][0]["plan"]["per_day"] == 2 * (2 + 2 + 1)
+
+
 def test_search_plan_counts_enabled_phrases_cities_and_runs():
     item_list = [
         {"name": "ram", "enabled": True, "search_phrases": ["a", "b"]},
@@ -434,3 +490,43 @@ def test_worker_today_buckets_by_the_regions_local_day():
     # Searches counted yesterday but none yet today: a real zero.
     early = datetime(2026, 10, 17, 7, 0, tzinfo=timezone.utc)  # 01:00 Denver
     assert fleet.worker_today("denver-1", "America/Denver", [], reviews[1:], early)["searches"] == 0
+
+
+def test_fleet_shows_proxy_url_and_exit_without_any_login(client, monkeypatch, tmp_path):
+    (tmp_path / "monitor.toml").write_text(MONITOR.replace(
+        'proxy_password = "hunter2-literal"',
+        'proxy_username = "${PROXY_HOMELAB_USER}"\nproxy_password = "${PROXY_HOMELAB_PASS}"',
+    ))
+    monkeypatch.setenv("PROXY_HOMELAB", "http://isp.example.com:10001")
+    monkeypatch.setenv("PROXY_HOMELAB_USER", "user-secret")
+    monkeypatch.setenv("PROXY_HOMELAB_PASS", "pass-secret")
+    monkeypatch.setenv("PROXY_SOUTHEAST", "http://inline:inline-secret@se.example.com:8080")
+    monkeypatch.delenv("PROXY_WEST", raising=False)
+
+    asked = []
+
+    async def resolve(keys):
+        keys = list(keys)
+        asked.extend(keys)
+        return {k: {"ip": "203.0.113.1", "city": "Ashburn", "region": "Virginia", "country": "US", "org": "AS1"}
+                for k in keys if k[0]}
+
+    monkeypatch.setattr(console.proxy_exit, "resolve", resolve)
+    res = client.get("/v1/fleet", headers=AUTH)
+    assert res.status_code == 200
+    by_id = {w["worker_id"]: w for w in res.json()["workers"]}
+
+    exit_ = {"ip": "203.0.113.1", "city": "Ashburn", "region": "Virginia", "country": "US", "org": "AS1"}
+    assert by_id["homelab-1"]["proxy"] == {"url": "http://isp.example.com:10001", **exit_}
+    assert by_id["se-1"]["proxy"] == {"url": "http://se.example.com:8080", **exit_}
+    # Named in fleet.toml but unset: the VM's own IP, still looked up (not
+    # answered by this stub, so it reads pending).
+    assert by_id["wc-1"]["proxy"] == {"url": None, "pending": True}
+    assert by_id["wc-1"]["proxy_env"] == "PROXY_WEST"
+
+    # The lookup dials with the login; the document never carries it.
+    assert ("http://isp.example.com:10001", "user-secret", "pass-secret") in asked
+    assert ("http://inline:inline-secret@se.example.com:8080", None, None) in asked
+    assert (None, None, None) in asked
+    for leak in ("user-secret", "pass-secret", "inline-secret", "proxy_user_env", "proxy_pass_env"):
+        assert leak not in res.text

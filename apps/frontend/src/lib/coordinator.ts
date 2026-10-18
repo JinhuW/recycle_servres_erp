@@ -34,6 +34,12 @@ export type FleetWorker = {
   // The build the worker reported ("0.5.6 (d3e9a30)"); null from images
   // that predate build reporting.
   version?: string | null;
+  // Re-login progress (see reloginProgress). Absent from a coordinator that
+  // predates it, which leaves the Watch page as it was.
+  relogin_requested_at?: string | null;
+  relogin_last_requested_at?: string | null;
+  login_step?: string | null;
+  login_step_at?: string | null;
   liveness: WorkerLiveness;
   needs_attention: boolean;
 };
@@ -79,7 +85,39 @@ export type FilterPrompt = {
 // config (what the phase-1 monitor actually searches) and the coordinator's
 // worker health. Field names are the facade's, verbatim.
 
-export type FleetCity = { slug: string; name: string; radius_km: number | null };
+// `per_day`, `pin` and `score` are how often the coordinator has a worker's
+// city searched, and why: its alerts over the tier window, or a manager's
+// pin. Absent from a facade or coordinator that predates city tiers, and from
+// the regions' own lists.
+export type FleetCity = {
+  slug: string;
+  name: string;
+  radius_km: number | null;
+  per_day?: number;
+  pin?: number | null;
+  score?: number;
+};
+
+// The rank behind each city's searches a day: the top `top_pct` percent of a
+// worker's cities by alerts over `window_days` get `per_day[0]`, the next
+// `mid_pct` percent `per_day[1]`, the rest `per_day[2]`.
+export type CityTierSettings = {
+  top_pct: number;
+  mid_pct: number;
+  per_day: [number, number, number];
+  window_days: number;
+};
+
+// GET /api/coordinator/city-tiers. `scores` is alerts sent + reacted to per
+// city slug over the window; `pins` maps a slug to a fixed searches a day.
+export type CityTiers = {
+  settings: CityTierSettings;
+  defaults: CityTierSettings;
+  pins: Record<string, number>;
+  scores: Record<string, number>;
+  updated_at: string | null;
+  updated_by: string | null;
+};
 
 export type FleetRegion = { key: string; name: string; cities: FleetCity[] };
 
@@ -135,19 +173,6 @@ export type VaultAccount = {
   secrets: Record<string, boolean>;
 };
 
-// What the "Edit credentials" form may set on a vault account (PUT
-// /api/coordinator/accounts/:id). A field left out keeps its stored value. In
-// `secrets`, a string is stored, null clears the field, and an empty string
-// keeps what is there — what a password box left blank means.
-export type VaultSecretField = 'password' | 'totp_secret' | 'email' | 'email_password' | 'imap_host' | 'imap_port';
-export type VaultAccountWrite = {
-  worker_id?: string;
-  fb_username?: string;
-  region?: string;
-  allow_password_login?: boolean;
-  secrets?: Partial<Record<VaultSecretField, string | null>>;
-};
-
 // Metadata of the worker's backed-up browser session. `fb_user_id` is the
 // session's `c_user` cookie — the public Facebook profile id, not a credential.
 export type SessionMeta = {
@@ -165,6 +190,7 @@ export type FleetAccount = {
   cities: FleetCity[];
   session_file: string | null;
   proxy_env: string | null;
+  proxy?: FleetProxy;
   pacing: { search_interval: string | null; max_search_interval: string | null; overridden: boolean };
   vnc_url: string | null;
   // True when the facade itself can bridge to this worker's browser (it is in
@@ -187,6 +213,21 @@ export type FleetAccount = {
   // Whether the console holds this worker's config and so can save its
   // cities; absent from a facade that predates per-worker cities.
   cities_editable?: boolean;
+};
+
+// Where the worker's traffic comes out, which rs_console asks an IP-geo
+// service through the proxy itself. `url` has any login cut out and is null on
+// the VM's own IP. The exit fields are absent while the lookup is `pending` or
+// after it failed (`error`).
+export type FleetProxy = {
+  url: string | null;
+  ip?: string | null;
+  city?: string | null;
+  region?: string | null;
+  country?: string | null;
+  org?: string | null;
+  error?: string;
+  pending?: boolean;
 };
 
 // One city as a worker config holds it. `radius` is in kilometres.
@@ -230,6 +271,8 @@ export type FleetDoc = {
   items: FleetItem[];
   regions: FleetRegion[];
   workers: FleetAccount[];
+  // The tier settings the cities' `per_day` came from; absent with them.
+  city_tiers?: CityTierSettings;
   // Absent from a facade that predates saved settings; the flow card then
   // stays read-only.
   settings?: {
@@ -296,16 +339,17 @@ export const coordinatorApi = {
   relogin: (workerId: string) =>
     api.post<unknown>(`/api/coordinator/workers/${encodeURIComponent(workerId)}/relogin`, {}),
 
-  // Set what a worker signs in with. Secrets are write-only end to end: the
-  // answer is the vault's presence-flag view, never a value.
-  saveAccount: (accountId: string, body: VaultAccountWrite) =>
-    api.put<VaultAccount>(`/api/coordinator/accounts/${encodeURIComponent(accountId)}`, body),
-
   // Replace the cities one worker searches; it picks them up between jobs.
   saveCities: (workerId: string, cities: CityWrite[]) =>
     api.put<{ cities: CityWrite[]; changed: string[] }>(
       `/api/coordinator/workers/${encodeURIComponent(workerId)}/cities`, { cities },
     ),
+
+  // How often cities are searched. Pins replace the whole map, so a caller
+  // re-reads it just before saving and applies only its own edits.
+  cityTiers: () => api.get<CityTiers>('/api/coordinator/city-tiers'),
+  saveCityTiers: (body: { settings?: Partial<CityTierSettings>; pins?: Record<string, number> }) =>
+    api.put<CityTiers>('/api/coordinator/city-tiers', body),
 };
 
 /**

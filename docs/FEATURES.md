@@ -1817,9 +1817,9 @@ to a PO's commission, or to sell orders (v1.257.0).
   existed only to escape the one-click path.
 - **Owner is a column** (v1.121.0), between Amount and Status — avatar and first
   name, full name on hover, a dash where nobody owns it. Owner and PO are
-  mutually exclusive by constraint, so the column is empty by design on the
-  Linked tab and behind the Refunds tile. Assigning still happens in the
-  expanded row.
+  mutually exclusive by constraint, so a linked payment shows its PO's owner
+  instead, and the owner filter counts it under that member (v1.275.2).
+  Assigning still happens in the expanded row, on unlinked payments only.
 - **A payment with no PO can be assigned to a member** (v1.119.0), and the queue
   filters by owner or by Unassigned. Assigning deliberately does *not* resolve
   the row: a payment that needs explaining still needs explaining, it just has
@@ -2095,7 +2095,10 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   and on the worker page is green only once the worker has searched that
   city today, in its region's time zone; the rest stay grey (v1.271.3: a
   facade that does not report searched cities falls back to green for a live
-  or stale worker); and a **From a search to an alert** card that walks the
+  or stale worker). Since v1.281.0 the Worker, Status, Today, Searches,
+  Session and Posts headers sort the table (click: descending, ascending,
+  back to fleet order; Today sorts by last heartbeat, and unknowns stay at
+  the bottom either way); and a **From a search to an alert** card that walks the
   pipeline as the code runs it — search, result cards, the title gate before
   any page is opened, the cached page visit, the keyword gate with the
   description, the already-notified skip, the AI rating with its unit and
@@ -2119,16 +2122,21 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   form asks first (v1.270.0). The eye
   on a row is the one way to a worker's page, `/fleet/worker/<worker>`: its
   Facebook login and user id, vault account and stored secrets by name,
-  session expiry, browser and backup, proxy, cities, pacing, session file and
-  build, its open checkpoints (capture, Watch, Mark resolved) and its recent
-  events, and the actions — **Watch browser**, **Re-login** and **Edit
-  credentials**. The credentials form sets the worker's Facebook login,
-  password, 2FA (TOTP) secret and whether password login is allowed, the
-  credentials Re-login then signs in with; secrets are write-only (the form
-  shows only whether one is stored; blank keeps it, "clear" removes it), a
-  worker without a vault account gets one named after it, and the form says
-  before saving whether Re-login will finish by itself or still needs the
-  login finished in Watch (v1.259.0). The data is the rs-console facade's
+  session expiry, browser and backup, proxy (since v1.278.0 its URL without
+  the login, and the exit IP and city a lookup through it finds — RS-281),
+  cities, pacing, session file and build, its open checkpoints (capture, Watch, Mark resolved) and its recent
+  events, and the actions — **Watch browser**, **Re-login** and **Assign
+  account**. Since v1.275.0 the worker's login comes only from the account
+  pool (RS-276): the dialog lists the available pool accounts that have a
+  password (search by #, UID, e-mail or batch; 2FA, cookie age and batch
+  shown) and assigning one sends its login to the worker the same way the
+  pool page does — vault written with password login allowed, Re-login
+  queued, account marked Fleet. If the worker already holds a pool account,
+  the dialog asks where that one goes — back to Available, to Problem (still
+  naming the worker) or Retired — with no default, and both moves land
+  together. A worker without a vault account gets one named after it. Until
+  then (v1.259.0) the login, password and 2FA secret were typed into a
+  credentials form. The data is the rs-console facade's
   `/v1/fleet` document, checkpoints, review stats, alert hits and prompt
   through the manager-only `/api/coordinator` proxy; without the proxy's
   credentials the tab says so and the rest of the ERP is unaffected
@@ -2141,7 +2149,20 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   links to its Marketplace page so a wrong slug can be caught, since Facebook
   otherwise searches the account's own area in silence. Saving writes that
   worker's config only, and it searches the new list from its next run
-  (RS-275). Pacing still lives in `fleet.toml`.
+  (RS-275). Since v1.274.0 the same dialog sets **how often each city is
+  searched** (RS-277). The coordinator ranks a worker's cities by alerts sent
+  plus alerts reacted to over a window (30 days by default). The top 20% are
+  searched 3 times a day, the next 20% twice and the rest once, and a city
+  with no alerts in the window is never promoted. Each city row shows its
+  alerts in the window and an Auto / 3× / 2× / 1× pin. A collapsible **Ranking
+  rule** sets the percentages, the counts and the window for every worker.
+  The worker's `start_at` times are its slots: a city is searched at most
+  once per time, so the tiers take effect only once the search settings list
+  two or more times (the dialog says so with one). A city's chip shows `3×`
+  or `2×` when it is searched more than once a day, and the hover names the
+  count and whether it is pinned. Saving restarts no sweep: workers ask the
+  coordinator for their plan before each one. Pacing still lives in
+  `fleet.toml`.
 - **Facebook account pool** — a second tab at **Monitors ▸ Facebook**,
   linked directly at `/#/fleet/pool` (v1.261.0). Managers see a status legend
   with counts that filters (the key-tag rail left the manager's view in
@@ -2167,8 +2188,10 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   picked from the fleet in the editor (picking one is what makes an account
   Fleet; None returns it to Available), the table links the holder to the
   worker's page and shows the worker's Live / Stale / Attention / Offline
-  status in place of Fleet, and a click on a masked password in the table
-  reveals it (logged). A cookie may be
+  status in place of Fleet. Since v1.279.0 a click on any value in the
+  table — UID, password, 2FA code, e-mail, e-mail password, recovery, cookie,
+  notes — copies it (secrets are logged), masked passwords reveal from the eye
+  beside them, and the editor opens from the pencil at the row's end. A cookie may be
   pasted as a header line or as the JSON a cookie extension exports, and a
   2FA key as the base32 key or an `otpauth://` link, on the Pool tab as on
   the Fleet tab (v1.262.1). Since v1.272.0 the pick does more than label the
@@ -2179,6 +2202,16 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   finished in Watch. The cookie is never sent, and nothing secret reaches the
   browser. The ledger records it as `assigned`. A worker that already holds
   another account, or an account with no password, is refused (RS-275).
+  Since v1.280.0 the backend checks every Available, Taken and Fleet account on
+  Facebook once a week, through the public profile-picture lookup (anonymous,
+  no login, so it says nothing about the account's sessions). An account
+  Facebook reports as disabled or gone moves to **Needs attention**, keeps its
+  holder, and logs "Weekly check reported #n · disabled". A lookup that fails
+  changes nothing and is retried within the hour. This is not a cron job: an
+  hourly backend loop picks the accounts whose last check is over 7 days old,
+  so deploys don't reset the week. The account's detail panel shows when it was
+  last checked. A checkpointed account still looks alive to this lookup
+  (RS-284).
 - **Watching a worker's browser** — `/fleet/watch/<worker>` shows the live
   Chromium a Facebook worker is driving, through noVNC, view-only until
   "Take control" is ticked (and handed back when the tab is hidden), with
@@ -2192,7 +2225,28 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   or demoted loses the view within a minute.  When the access token behind
   the socket runs out, the viewer reconnects on its own with a fresh one and
   keeps control if it had it (v1.209.1).  It is opened from the worker's page,
-  and its back link returns there (v1.263.0).
+  and its back link returns there (v1.263.0).  A **Sign-in** panel beside the
+  browser shows the worker's Account pool login (login, password and email
+  password behind a reveal, account UID, recovery email, Facebook profile),
+  its live 2FA code with a countdown, and the worker's state, region,
+  session, heartbeat, proxy and build.  The code band lights up while the
+  worker is in a 2FA challenge.  A click on the code copies it.  While
+  "Take control" is on, **Type into browser** sends the code, login or
+  password as keystrokes into the focused field of the remote browser,
+  because a copied value doesn't reach the VNC session.  Copies, reveals and
+  typed secrets go to the pool's activity ledger.  A worker whose login
+  isn't in the pool gets the vault summary and a link to the pool instead.
+  The panel can be hidden, which is saved per user, and it stacks under the
+  browser below 1100px (v1.276.0).  Since v1.277.0 a re-login can be
+  followed as it runs (RS-280). From the worker's page, **Re-login & watch**
+  queues it and opens this view (**Re-login only** keeps the old behaviour).
+  A strip above the viewer then says where the login is: queued, signing in,
+  needs you (a captcha, a code or a login form left open, with a Take control
+  button), signed in, or did not finish. While a login is in flight the page
+  re-reads the fleet every 3 seconds instead of every 30. The worker collects
+  the request within about 10 seconds between sweeps (facebook-tracker
+  v0.9.0); mid-sweep it starts at its next search. A coordinator older than
+  v0.9.0 reports no steps, and the strip stays hidden.
 
 - **Web submissions** — the manager inbox for the public website forms
   (v1.187.0). The ram4cash.com sell form (`POST /api/public/intake`) and the

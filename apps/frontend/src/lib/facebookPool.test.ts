@@ -7,6 +7,8 @@ import {
   cookieUid,
   DAY,
   emptyPoolDraft,
+  heldByWorker,
+  installCandidates,
   nextPoolAccount,
   parsePoolImport,
   poolTotp,
@@ -32,6 +34,7 @@ const fixture = (
     recovery: '',
     cookie: cookieDays === null ? '' : `c_user=${uid}; xs=s${i}`,
     cookieAt: cookieDays === null ? null : now - cookieDays * DAY,
+    aliveCheckedAt: null,
     note: '',
     status,
     holder: status === 'taken' ? 'Lina' : null,
@@ -174,5 +177,28 @@ describe('assignWorker', () => {
   it('leaves a purchaser-held account alone when no worker is picked', () => {
     const draft = { ...emptyPoolDraft(), status: 'taken' as const, holder: 'Ann' };
     expect(assignWorker(draft, null)).toBe(draft);
+  });
+});
+
+describe('sending a spare to a worker', () => {
+  it('offers only available accounts with a password, fresh cookies first, then oldest', () => {
+    expect(installCandidates(SAMPLE, '').map((a) => a.no)).toEqual([1, 2, 5, 3, 4]);
+    const noPassword = SAMPLE.map((a) => (a.no === 2 ? { ...a, password: '' } : a));
+    expect(installCandidates(noPassword, '').map((a) => a.no)).toEqual([1, 5, 3, 4]);
+  });
+
+  it('filters by number, uid, e-mail or batch', () => {
+    expect(installCandidates(SAMPLE, '#3').map((a) => a.no)).toEqual([3]);
+    expect(installCandidates(SAMPLE, '61560014').map((a) => a.no)).toEqual([5]);
+    expect(installCandidates(SAMPLE, 'A1@OUTLOOK').map((a) => a.no)).toEqual([2]);
+    expect(installCandidates(SAMPLE, 'nope')).toEqual([]);
+  });
+
+  it('finds the account a worker holds, ignoring case and other statuses', () => {
+    const pool = SAMPLE.map((a) =>
+      a.no === 2 ? { ...a, status: 'fleet' as const, holder: 'homelab-1' }
+      : a.no === 3 ? { ...a, status: 'problem' as const, holder: 'homelab-1' } : a);
+    expect(heldByWorker(pool, 'HOMELAB-1')?.no).toBe(2);
+    expect(heldByWorker(pool, 'ne-1')).toBeUndefined();
   });
 });

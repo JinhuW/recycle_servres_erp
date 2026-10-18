@@ -5,6 +5,18 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-287](./RS-287-release-review-findings-on-the-edit-cities-frequency.md) | in-review | bug | P2 | Release review findings on the Edit cities frequency form | 1.281.1 |
+| [RS-286](./RS-286-park-a-facebook-worker-whose-login-fails-instead-of.md) | done | bug | P1 | Park a Facebook worker whose login fails instead of searching logged out | facebook-tracker 0.10.1 |
+| [RS-285](./RS-285-sort-the-fleet-workers-table-by-column.md) | done | story | P2 | Sort the Fleet workers table by column | 1.281.0 |
+| [RS-284](./RS-284-weekly-liveness-check-for-the-facebook-account-pool.md) | done | story | P2 | Weekly liveness check for the Facebook account pool | 1.280.0 |
+| [RS-282](./RS-282-click-a-pool-table-cell-to-copy-it-edit-icon-opens-t.md) | done | story | P2 | Click a pool table cell to copy it; edit icon opens the editor | 1.279.0 |
+| [RS-281](./RS-281-fleet-worker-page-shows-the-proxy-url-exit-ip-and-ci.md) | done | story | P2 | Fleet worker page shows the proxy URL, exit IP and city | 1.278.0 |
+| [RS-280](./RS-280-re-login-starts-within-seconds-and-shows-its-progres.md) | in-progress | story | P2 | Re-login starts within seconds and shows its progress on Watch | 1.277.0 |
+| [RS-279](./RS-279-show-the-worker-s-account-and-live-2fa-code-beside-t.md) | done | story | P2 | Show the worker's account and live 2FA code beside the Watch browser | 1.276.0 |
+| [RS-278](./RS-278-linked-payments-show-the-po-owner-in-the-owner-colum.md) | done | bug | P2 | Linked payments show the PO owner in the Owner column | 1.275.2 |
+| [RS-277](./RS-277-busy-cities-searched-more-often-tiered-daily-city-fr.md) | done | story | P2 | Busy cities searched more often — tiered daily city frequency | 1.274.0 |
+| [RS-276](./RS-276-worker-page-assigns-a-pool-account-instead-of-typed.md) | done | story | P2 | Worker page assigns a pool account instead of typed credentials | 1.275.0 |
+| [RS-275](./RS-275-add-4-facebook-workers-with-erp-editable-cities-and.md) | done | story | P2 | Add 4 Facebook workers with ERP-editable cities and pool-assigned logins | 1.272.0 |
 | [RS-274](./RS-274-fix-the-release-review-findings-on-fleet-rules-city.md) | done | bug | P2 | Fix the release review findings on Fleet rules, city chips and the pool picker | 1.271.3 |
 | [RS-273](./RS-273-folded-sidebar-shows-one-green-on-submit-order.md) | done | bug | P3 | Folded sidebar shows one green + on Submit order | 1.271.2 |
 | [RS-272](./RS-272-size-the-flow-stage-detail-to-its-tallest-stage.md) | done | bug | P2 | Size the flow stage detail to its tallest stage | 1.271.1 |
@@ -94,7 +106,7 @@ See [README.md](./README.md) for what the fields mean.
 | [RS-183](./RS-183-review-mode-a-line-counted-to-0-is-not-in-the-box-an.md) | done | story | P2 | Review mode: a line counted to 0 is not in the box and is removed on Approve | 1.212.0 |
 | [RS-182](./RS-182-nightly-prod-to-dev-db-copy-fails-at-the-credential.md) | done | bug | P1 | Nightly prod-to-dev DB copy fails at the credential scrub | 1.211.1 |
 | [RS-178](./RS-178-ssd-capacity-offers-2tb-and-ram-class-offers-camm.md) | done | story | P2 | SSD capacity offers 2TB and RAM class offers CAMM | 1.211.0 |
-| [RS-176](./RS-176-vnc-bridge-and-mail-thread-hardening-from-the-v1-209.md) | backlog | task | P3 | VNC bridge and mail thread hardening from the v1.209 review | — |
+| [RS-176](./RS-176-vnc-bridge-and-mail-thread-hardening-from-the-v1-209.md) | done | task | P3 | VNC bridge and mail thread hardening from the v1.209 review | 1.275.1 |
 | [RS-175](./RS-175-pre-release-review-fixes-for-v1-204-0-v1-209-0.md) | done | bug | P1 | Pre-release review fixes for v1.204.0–v1.209.0 | 1.209.1 |
 | [RS-173](./RS-173-web-submission-email-can-run-on-dev-behind-a-test-re.md) | done | story | P2 | Web-submission email can run on dev behind a test-recipient list | 1.209.2 |
 | [RS-170](./RS-170-re-login-looks-broken-it-waits-for-the-next-sweep-an.md) | done | bug | P2 | Re-login looks broken: it waits for the next sweep and cannot sign in without a stored password | 1.208.2 |

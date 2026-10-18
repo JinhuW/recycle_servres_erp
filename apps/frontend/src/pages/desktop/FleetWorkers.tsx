@@ -1,13 +1,16 @@
 import { Fragment, useMemo, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { Skeleton } from '../../components/Skeleton';
+import { SortTh, type SortState } from '../../components/SortTh';
 import type { AlertHitRow, Challenge, FleetAccount, FleetDoc } from '../../lib/coordinator';
 import {
   accountAlerts, accountHaystack, attentionReason, dayStrip, FLEET_STATUSES, fleetActivity, fleetPostsToday, fleetStatus,
-  hitsByCity, isUnstampedBuild, matchesTerms, parkedWorkers, queryTerms, searchedToday, whoIs, type CityHits, type DayStrip, type FleetStatus,
+  hitsByCity, isUnstampedBuild, matchesTerms, parkedWorkers, queryTerms, searchedToday, sortFleet, whoIs,
+  type CityHits, type DayStrip, type FleetSortCol, type FleetStatus,
 } from '../../lib/fleetView';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
+import { usePersisted } from '../../lib/listMemory';
 import type { Translate } from '../../lib/orderPresentation';
 import { fleetWorkerPath, hrefFor, onLinkClick } from '../../lib/route';
 import { CityChip, fmtDays, Hi, HITS_DAYS, stateLabel } from './FleetAccounts';
@@ -39,7 +42,7 @@ export function statusNote(t: Translate, w: FleetAccount, parked: ReadonlySet<st
   if (r.kind === 'dead') return t('fbcNoteSilent', { age: r.since ? relTime(r.since, locale) : t('fbcNever') });
   if (r.kind === 'state') return stateLabel(t, r.state);
   if (r.kind === 'expired') return t('fbcSessionExpired');
-  if (h.session_days_left !== null && h.session_days_left <= 7) return t('fbcNoteExpiring', { days: fmtDays(t, h.session_days_left) });
+  if (r.kind === 'expiring') return t('fbcNoteExpiring', { days: fmtDays(t, r.days) });
   return null;
 }
 
@@ -83,8 +86,13 @@ export function WorkersCard({ fleet, unavailable, hits, challenges, filter, onCl
   const byCity = useMemo(() => hitsByCity(hits ?? []), [hits]);
   const parked = useMemo(() => parkedWorkers(challenges), [challenges]);
   const all = fleet?.workers ?? [];
-  const shown = all.filter(w =>
+  // Click cycles desc → asc → the fleet document's own order.
+  const [sort, setSort] = usePersisted<SortState>('desktop.fleet.sort', { col: '', dir: null });
+  const cycleSort = (col: string) => setSort(s =>
+    s.col !== col || s.dir === null ? { col, dir: 'desc' } : s.dir === 'desc' ? { col, dir: 'asc' } : { col: '', dir: null });
+  const filtered = all.filter(w =>
     (filter === 'all' || fleetStatus(w, parked) === filter) && matchesTerms(accountHaystack(w), terms));
+  const shown = sort.dir ? sortFleet(filtered, sort.col as FleetSortCol, sort.dir, parked) : filtered;
   const cities = new Set(all.flatMap(w => w.cities.map(c => c.slug))).size;
   const alerts = all.reduce((n, w) => n + accountAlerts(w, byCity), 0);
   const posts = fleetPostsToday(all);
@@ -135,12 +143,12 @@ export function WorkersCard({ fleet, unavailable, hits, challenges, filter, onCl
           <thead>
             <tr>
               <th aria-label={t('fbcColCities')} />
-              <th>{t('fbcColWorker')}</th>
-              <th>{t('fbcColStatus')}</th>
-              <th title={t('fbcColTodayHint')}>{t('fbcColToday')}</th>
-              <th title={t('fbcColSearchesHint')}>{t('fbcColSearches')}</th>
-              <th>{t('fbcColSession')}</th>
-              <th title={t('fbcColPostsHint', { days: HITS_DAYS })}>{t('fbcColPosts')}</th>
+              <SortTh col="worker" sort={sort} onSort={cycleSort}>{t('fbcColWorker')}</SortTh>
+              <SortTh col="status" sort={sort} onSort={cycleSort}>{t('fbcColStatus')}</SortTh>
+              <SortTh col="today" sort={sort} onSort={cycleSort} title={t('fbcColTodayHint')}>{t('fbcColToday')}</SortTh>
+              <SortTh col="searches" sort={sort} onSort={cycleSort} title={t('fbcColSearchesHint')}>{t('fbcColSearches')}</SortTh>
+              <SortTh col="session" sort={sort} onSort={cycleSort}>{t('fbcColSession')}</SortTh>
+              <SortTh col="posts" sort={sort} onSort={cycleSort} title={t('fbcColPostsHint', { days: HITS_DAYS })}>{t('fbcColPosts')}</SortTh>
               <th aria-label={t('fbcOpenWorker')} />
             </tr>
           </thead>
@@ -269,7 +277,7 @@ function WorkerRow({ account: w, hits, parked, terms, startAt, open, onToggle, l
             <div className="fl-cities">
               {w.cities.length
                 ? w.cities.map(c => <CityChip key={c.slug} city={c} hits={hits} terms={terms}
-                    tone={searched(c.slug) ? 'accent' : 'muted'} />)
+                    tone={searched(c.slug) ? 'accent' : 'muted'} runsPerDay={w.plan?.runs_per_day} />)
                 : <span className="fp-muted">{t('fbcNoCities')}</span>}
             </div>
           </td>
