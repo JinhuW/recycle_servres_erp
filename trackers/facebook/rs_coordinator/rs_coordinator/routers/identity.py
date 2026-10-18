@@ -20,7 +20,7 @@ from ..device_profiles import (
     seeded_profile,
 )
 from ..deps import require_worker
-from ..schemas import IdentityRequest
+from ..schemas import DeviceCookiesReport, IdentityRequest
 from ..vault import VaultError
 from .session import fb_user_id_of, require_own_worker, snapshot_restorable
 
@@ -108,3 +108,45 @@ def worker_identity(
         "device_cookies": device_cookies or None,
         "session": session,
     }
+
+
+@router.post("/v1/workers/{worker_id}/identity/device-cookies")
+def report_device_cookies(
+    worker_id: str, payload: DeviceCookiesReport, worker: Optional[str] = Depends(require_worker)
+) -> Dict[str, Any]:
+    """Record the device cookies of an account that has none yet; first writer wins.
+
+    Before this, an account's `datr` was only learned from a logged-in backup,
+    so an account that had not yet completed a login was handed a brand-new
+    device on every attempt. Six of those in a row read as six machines
+    trying one account, and Facebook locked it (va-1, 2026-10-18). Now the
+    first page Facebook serves fixes the device, and every later attempt, on
+    any worker, presents it. A logged-in backup still keeps it current.
+
+    The answer is the stored cookies either way, so a worker that lost the race
+    adopts the winner's for its next attempt. 409 when the worker's device is
+    no longer its account's: the slot has been given another login since.
+    """
+    require_own_worker(worker, worker_id, "record its device")
+    identity_key = identity_key_for(deps.db.account_row_for_worker(worker_id))
+    profile = deps.db.get_device_profile(identity_key) if identity_key else None
+    if profile is None or profile["device_id"] != payload.device_id:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Device {payload.device_id} is not the device of the account worker "
+            f"'{worker_id}' holds now; ask for its identity again.",
+        )
+    cookies = [c.model_dump() for c in payload.cookies]
+    try:
+        vault = deps.get_vault()
+        if not deps.db.claim_device_cookies(identity_key, vault.encrypt({"cookies": cookies})):
+            stored = deps.db.get_device_profile(identity_key) or {}
+            blob = stored.get("device_cookies_blob")
+            return {
+                "stored": False,
+                "device_cookies": vault.decrypt(blob).get("cookies") if blob is not None else None,
+            }
+    except VaultError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    logger.info("Recorded the device cookies of %s from worker %s", identity_key, worker_id)
+    return {"stored": True, "device_cookies": cookies}

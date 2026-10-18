@@ -283,3 +283,63 @@ def test_generated_devices_fit_the_workers_display():
         assert profile["screen_w"] <= 1920 and profile["screen_h"] <= 1080
         assert 0 < profile["viewport_h"] < profile["screen_h"]
         assert profile["timezone_id"] == "America/New_York"
+
+
+# -- the device is fixed on first contact, before any login ---------------------
+
+FIRST_CONTACT = [
+    {"name": "datr", "value": "issued-on-first-page", "domain": ".facebook.com", "path": "/",
+     "expires": 1893456000, "httpOnly": True, "secure": True, "sameSite": "None"},
+    {"name": "sb", "value": "sb-first", "domain": ".facebook.com", "path": "/"},
+]
+
+
+def report(client, device_id: str, cookies=None, worker_id: str = "va-1"):
+    return client.post(
+        f"/v1/workers/{worker_id}/identity/device-cookies",
+        json={"device_id": device_id, "cookies": cookies or FIRST_CONTACT},
+        headers=auth(worker_id),
+    )
+
+
+def test_an_account_that_never_logged_in_keeps_its_first_datr(env):
+    """va-1, 2026-10-18: six attempts, six fresh datr, one locked account."""
+    assign(env)
+    device_id = ask(env).json()["device"]["device_id"]
+
+    first = report(env, device_id).json()
+    assert first["stored"] is True
+    # A second attempt (another worker, a later boot) is handed the first datr.
+    later = report(env, device_id, [{**FIRST_CONTACT[0], "value": "a-newer-one"}]).json()
+    assert later["stored"] is False
+    assert later["device_cookies"][0]["value"] == "issued-on-first-page"
+    assert {c["value"] for c in ask(env).json()["device_cookies"]} == {"issued-on-first-page", "sb-first"}
+
+
+def test_a_logged_in_backup_still_keeps_the_device_current(env):
+    assign(env)
+    device_id = ask(env).json()["device"]["device_id"]
+    report(env, device_id)
+    backup(env, device_id=device_id, storage_state=state(datr="rotated-after-login"))
+
+    cookies = {c["name"]: c["value"] for c in ask(env).json()["device_cookies"]}
+    assert cookies["datr"] == "rotated-after-login"
+
+
+def test_a_device_that_is_no_longer_the_accounts_is_refused(env):
+    assign(env)
+    device_id = ask(env).json()["device"]["device_id"]
+    env.store.put_account("va-1", {}, fb_username="next@example.test", fb_uid=OTHER_UID)
+
+    assert report(env, device_id).status_code == 409
+    assert ask(env).json()["device_cookies"] is None
+
+
+def test_only_device_cookies_for_facebook_are_taken(env):
+    assign(env)
+    device_id = ask(env).json()["device"]["device_id"]
+    assert report(env, device_id, [{"name": "xs", "value": "session", "domain": ".facebook.com"}]).status_code == 422
+    assert report(env, device_id, [{**FIRST_CONTACT[0], "domain": ".evil.example"}]).status_code == 422
+    legacy = {"Authorization": f"Bearer {LEGACY_TOKEN}"}
+    body = {"device_id": device_id, "cookies": FIRST_CONTACT}
+    assert env.post("/v1/workers/va-1/identity/device-cookies", json=body, headers=legacy).status_code == 403

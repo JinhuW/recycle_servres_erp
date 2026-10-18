@@ -1511,6 +1511,16 @@ class Database:
                 (*record.values(), identity_key),
             )
 
+    def claim_device_cookies(self: "Database", identity_key: str, blob: bytes) -> bool:
+        """Store a profile's first device cookies; False if it already has some."""
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE device_profiles SET device_cookies_blob = ?, updated_at = ? "
+                "WHERE identity_key = ? AND device_cookies_blob IS NULL",
+                (blob, utcnow(), identity_key),
+            )
+            return cur.rowcount > 0
+
     def rekey_device_profile(self: "Database", old_key: str, new_key: str) -> bool:
         """Move a profile to a new identity key, unless that key is taken."""
         with self.cursor() as cur:
