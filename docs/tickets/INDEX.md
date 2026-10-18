@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-299](./RS-299-proxy-the-reddit-tracker-s-matches-and-stats-to-the.md) | in-review | story | P2 | Proxy the Reddit tracker's matches and stats to the ERP | 1.284.0 |
+| [RS-299](./RS-299-proxy-the-reddit-tracker-s-matches-and-stats-to-the.md) | done | story | P2 | Proxy the Reddit tracker's matches and stats to the ERP | 1.284.0 |
 | [RS-298](./RS-298-fleet-status-column-shows-the-last-heartbeat-time.md) | done | task | P2 | Fleet status column shows the last heartbeat time | 1.283.1 |
 | [RS-297](./RS-297-reddit-tracker-page-follows-the-facebook-fleet-layou.md) | in-review | story | P2 | Reddit tracker page follows the Facebook fleet layout | 1.283.0 |
 | [RS-296](./RS-296-full-screen-for-the-fleet-watch-view.md) | in-review | story | P2 | Full screen for the fleet watch view | 1.282.0 |
