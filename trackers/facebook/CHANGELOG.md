@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.10.6] - 2026-10-18
+
 ### Fixed
 
 - **The coordinator refuses a session backup that holds no session.** A
