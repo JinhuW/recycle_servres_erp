@@ -2,12 +2,12 @@
 id: RS-295
 title: Fit the worker VNC view to the browser window
 type: bug
-status: in-progress
+status: in-review
 priority: P2
 created: 2026-10-18
 reporter: jinhu
 branch: fix/vnc-fit-window
-pr:
+pr: "#734"
 version:
 related: [RS-292]
 ---
