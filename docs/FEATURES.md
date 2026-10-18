@@ -1962,17 +1962,29 @@ over MCP.
   manager drops an `.xlsx`, and only its Part Number and Unit Price columns
   are read. The preview shows current → new price and max buy for every part
   already on the Market list. It lists the rows it skips: unknown parts (no
-  row is created), blank or 0 prices, prices marked in yuan, and an earlier
-  row for a part listed again. One click records the rest, with the file name
-  as the event note, and each part's max buy follows its new price.
+  row is created), blank or 0 prices, prices in a currency other than dollars
+  or yuan, and an earlier row for a part listed again. One click records the
+  rest, with the file name as the event note, and each part's max buy follows
+  its new price.
+  - **Dollars or yuan** (v1.286.0). A **Prices in** USD / CNY (¥) switch,
+    USD by default, sets what an unmarked price is in. Flipping it on the
+    preview re-reads the same file. Yuan convert to US dollars at the FX
+    ledger's latest rate (Settings → FX), rounded to cents. The preview shows
+    the yuan under each converted price, plus the rate as `1 USD = N CNY
+    (source)`. A price that names its own currency keeps it whichever way
+    the switch is set, so a `Unit Price (USD)` column is never converted and
+    a `¥` cell in a dollar list is. A yuan price under half a cent counts as
+    no price. Apply writes the USD prices the preview showed.
   - **Reading the sheet** (v1.247.1, shared with the bid import): a Unit
     Price column wins over another price column (List, Last) and an Ext. or
     Total one is never read; 型号 wins over a row-number 编号; hidden tabs
     and a merged title row are passed over; a second header further down a
     tab starts a section read by its own columns; a decimal comma reads as
-    one (`12,50` is 12.50). A row marked in any currency but US dollars — by
-    its cell, the cell's format, the column header or the tab name — is
-    skipped, and 美元 reads as dollars.
+    one (`12,50` is 12.50). A row's currency comes from its cell, the cell's
+    format, the column header or the tab name, in that order. 美元 reads as
+    dollars, and so does a bare `$`, but not HK$ or a format's `[$€-407]`
+    (v1.286.0). The Market import skips a row marked in any currency but
+    dollars or yuan.
   - A list with more than 5,000 matched parts is refused at the preview, the
     same cap the apply holds, and the apply writes the whole list in two
     statements (v1.247.1).

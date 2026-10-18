@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { CurrencyPicker, type Currency } from '../../components/CurrencyPicker';
 import { Icon } from '../../components/Icon';
 import { Modal } from '../../components/Modal';
 import { api } from '../../lib/api';
@@ -8,8 +9,6 @@ import { fetchRateToUsd, type FxInfo } from '../../lib/fxRate';
 import { useT } from '../../lib/i18n';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { useManagerOptions } from '../../lib/useManagers';
-
-type Currency = 'USD' | 'CNY';
 
 // Draft-sell-order modal: manager picks items off Inventory, the modal lets
 // them pick a customer, tweak qty / unit price per line, and save a Draft sell
@@ -442,39 +441,6 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
         </div>
       </div>
     </Modal>
-  );
-}
-
-// ─── Currency picker ─────────────────────────────────────────────────────────
-// Segmented USD/CNY control, shared by the new-order builder and the edit
-// modal.
-export function CurrencyPicker({
-  value, onChange, t, disabled,
-}: {
-  value: Currency;
-  onChange: (c: Currency) => void;
-  t: (k: string) => string;
-  disabled?: boolean;
-}) {
-  const opts: { id: Currency; labelKey: string }[] = [
-    { id: 'USD', labelKey: 'currency.usd' },
-    { id: 'CNY', labelKey: 'currency.cny' },
-  ];
-  return (
-    <div className="seg" style={{ display: 'inline-flex', gap: 4 }}>
-      {opts.map(o => (
-        <button
-          key={o.id}
-          type="button"
-          className={'btn sm' + (value === o.id ? ' accent' : '')}
-          disabled={disabled}
-          onClick={() => onChange(o.id)}
-          aria-pressed={value === o.id}
-        >
-          {t(o.labelKey)}
-        </button>
-      ))}
-    </div>
   );
 }
 

@@ -17,6 +17,36 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.286.0] - 2026-10-18
+
+The Market page's price import reads a list priced in US dollars or yuan
+(RS-301).
+
+### Added
+
+- **A USD / CNY switch on Import market prices.** The import took every
+  price as US dollars and skipped any row marked in yuan, so a supplier's
+  RMB list had to be converted by hand before it could be dropped in. A
+  **Prices in** switch (USD by default) now sets what an unmarked price is
+  in, and yuan convert to dollars at the FX ledger's latest rate, the same
+  rate CNY sell orders use. The preview shows each converted price with its
+  yuan under it, plus the rate it used. Flipping the switch on the preview
+  re-reads the same file. A price that names its own currency (`$`, USD, 美元,
+  `¥`, 元, RMB, in the cell, its format, the header or the tab) keeps it
+  either way. A `Unit Price (USD)` column is never converted, and a `¥` row in
+  a dollar list is converted rather than skipped. Other currencies are still
+  skipped, now with their name. Apply writes the dollar prices the preview
+  showed, and each part's max buy follows.
+
+### Changed
+
+- **The shared sheet reader reports dollars explicitly.** It used to give a
+  dollar-marked row the same `null` currency as an unmarked one. A CNY import
+  would then have converted a dollar column. It now reports `USD`, and reads
+  a bare `$` as dollars, except after a letter (HK$) or a format's `[`. The
+  sell-order bid import doesn't read this field. The `USD` / `CNY` picker
+  moved to `components/CurrencyPicker.tsx` now that three pages use it.
+
 ## [1.285.0] - 2026-10-18
 
 The Facebook fleet's Recent activity records when a worker's status changes
