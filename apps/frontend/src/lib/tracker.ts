@@ -54,6 +54,30 @@ export function normalizeSubredditName(input: string): string | null {
 
 export type WorkerStatusFilter = 'all' | 'live' | 'stale' | 'dead';
 
+export type PostStatus = 'new' | 'rejected' | 'target' | 'notified' | 'failed';
+
+// A post the evaluator judged a target, as GET /api/matches returns it.
+export type TrackerMatch = {
+  redditId: string;
+  subreddit: string;
+  title: string;
+  summary: string | null;
+  price: string | null;
+  url: string;
+  postedAt: string;
+  discoveredAt: string;
+  notifiedAt: string | null;
+  status: PostStatus;
+};
+
+// All-time post counts by status (a status with no posts is absent), the
+// oldest post still waiting for the evaluator, and the newest failures.
+export type TrackerStats = {
+  posts: Partial<Record<PostStatus, number>>;
+  oldestPending: { reddit_id: string; discovered_at: string } | null;
+  failed: Array<{ reddit_id: string; title: string; attempts: number }>;
+};
+
 export const WORKERS_PAGE_SIZE = 15;
 
 export const trackerApi = {
@@ -61,6 +85,13 @@ export const trackerApi = {
     api.get<{ workers: TrackerWorker[]; total: number }>(
       `/api/tracker/workers?status=${params.status}&limit=${params.limit}&offset=${params.offset}`,
     ),
+  // One COUNT per status: the tracker judges liveness in SQL, and a limit=1
+  // page carries the total without shipping the rows.
+  workerCounts: () =>
+    Promise.all((['live', 'stale', 'dead'] as const).map(status =>
+      api.get<{ total: number }>(`/api/tracker/workers?status=${status}&limit=1&offset=0`)
+        .then(r => [status, r.total] as const),
+    )).then(entries => Object.fromEntries(entries) as Record<'live' | 'stale' | 'dead', number>),
   removeWorker: (workerId: string) =>
     api.delete(`/api/tracker/workers/${encodeURIComponent(workerId)}`),
 
@@ -71,6 +102,10 @@ export const trackerApi = {
   updateRule: (id: number, patch: { name?: string; prompt?: string; enabled?: boolean }) =>
     api.patch<{ rule: TrackerRule }>(`/api/tracker/rules/${id}`, patch).then(r => r.rule),
   deleteRule: (id: number) => api.delete(`/api/tracker/rules/${id}`),
+
+  listMatches: (limit: number) =>
+    api.get<{ matches: TrackerMatch[] }>(`/api/tracker/matches?limit=${limit}`).then(r => r.matches),
+  stats: () => api.get<TrackerStats>('/api/tracker/stats'),
 
   listSubreddits: () =>
     api.get<{ subreddits: TrackerSubreddit[] }>('/api/tracker/subreddits').then(r => r.subreddits),
