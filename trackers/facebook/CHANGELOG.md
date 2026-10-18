@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.10.4] - 2026-10-18
+
 ### Fixed
 
 - **A login finished over Watch is picked up between sweeps.** 0.10.3's
