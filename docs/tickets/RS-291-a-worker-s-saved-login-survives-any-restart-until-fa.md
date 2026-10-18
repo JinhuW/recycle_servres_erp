@@ -16,6 +16,8 @@ related: [RS-289, RS-290]
 
 > ultrathink now matter how we restart the VM. I hope we can keep the login information persist until expireed.
 
+> is there anyway we can keep the session information in the DB, then we can reuse it?
+
 ## Context
 
 A worker's Facebook login lives in its browser and in
@@ -42,6 +44,9 @@ workers were created on 2026-10-17 and have never held one.
 - [x] Each save fsyncs the file and its directory before it trusts the rename.
 - [x] Workers get 30 s to stop (`stop_grace_period`), and supervisord waits
       25 s for aimm's SIGTERM save (`stopwaitsecs`).
+- [x] At login, a worker whose session file is missing or holds no session
+      restores its own backup from the coordinator's database. A file that
+      holds a session is never replaced.
 - [ ] On the live fleet, a logged-in worker restarted with `docker restart`
       saves on the way out and comes back logged in, without a password login.
 
@@ -50,5 +55,6 @@ workers were created on 2026-10-17 and have never held one.
 - Raising dockerd's `shutdown-timeout` (default 15 s, which caps a VM reboot).
   It needs root and a Docker restart that would stop every container. The
   timed SIGTERM save decides whether it is worth doing.
-- Restoring a worker from its coordinator backup when the local file is gone.
-  The endpoint exists, but a VM restart never touches the file.
+- Restoring one worker's backup onto another worker or host. Facebook binds a
+  session to its IP and fingerprint, so the coordinator releases a snapshot
+  only to the worker that made it.

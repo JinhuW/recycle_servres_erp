@@ -26,6 +26,12 @@ deployed?" harder to answer.
   A worker gets 30 s to stop instead of Docker's 10 (`stop_grace_period`, and
   supervisord's `stopwaitsecs` 25), so the SIGTERM save that 0.10.3 added is
   not cut short by a slow browser.
+- **A worker whose session file is missing or empty restores its own backup.**
+  Every save was already backed up to the coordinator's database, encrypted
+  with the vault key, but nothing read it back. At login the worker now
+  fetches its snapshot (`GET /v1/session/{worker}/restore`, which releases it
+  only to that worker's own token) and starts from it. A file that holds a
+  session is never replaced, and a forced Re-login skips the restore.
 
 ## [0.10.4] - 2026-10-18
 
