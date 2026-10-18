@@ -1,5 +1,5 @@
 ---
-id: RS-294
+id: RS-295
 title: Fit the worker VNC view to the browser window
 type: bug
 status: in-progress

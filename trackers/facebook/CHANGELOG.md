@@ -20,7 +20,7 @@ deployed?" harder to answer.
 
 ### Fixed
 
-- **The worker's VNC view shows the browser, not the whole display** (RS-294).
+- **The worker's VNC view shows the browser, not the whole display** (RS-295).
   Since 0.11.0, the X display has been 1920x1080 so that any device profile's
   screen fits, but Chromium opens a window only as large as its context's
   viewport plus toolbars, which is about 1288x807 for a legacy device. VNC
