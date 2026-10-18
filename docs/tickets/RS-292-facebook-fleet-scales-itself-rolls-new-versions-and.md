@@ -2,13 +2,13 @@
 id: RS-292
 title: Facebook fleet scales itself, rolls new versions, and keeps every account's session and device
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-18
 reporter: jinhu
 branch: feat/fb-fleet-identity
-pr:
-version:
+pr: 724, 726, 727, 728
+version: facebook-tracker 0.12.0 (ERP 1.281.2 for the uid)
 related: [RS-289, RS-291, RS-275]
 ---
 
