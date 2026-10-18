@@ -17,6 +17,21 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.281.3] - 2026-10-18
+
+The fleet's *Assign account* gives the worker the login's own device (RS-293).
+
+### Fixed
+
+- **A pool login reaches its worker on the device it was made in.** Assign now
+  sends the `datr` and `sb` from the pool account's cookie: Facebook's device
+  id, without the session. The worker's first sign-in is then the account's
+  own machine on a new IP, instead of a browser Facebook has never seen. va-1
+  was locked as possibly hacked after four sign-ins from four new devices.
+  Only a cookie whose `c_user` is the account's UID lends its device, and
+  `c_user`, `xs` and `fr` never leave the ERP. The tracker stores the device
+  only for an account that has none yet (facebook-tracker 0.12.2).
+
 ## [1.281.2] - 2026-10-18
 
 The fleet's *Assign account* sends the account's Facebook UID with its login
