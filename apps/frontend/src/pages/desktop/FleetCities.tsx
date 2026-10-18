@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { Fragment, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { Icon } from '../../components/Icon';
 import { Modal } from '../../components/Modal';
 import {
@@ -6,7 +6,8 @@ import {
 } from '../../lib/coordinator';
 import { handleFetchError, showSuccessToast } from '../../lib/errorToast';
 import {
-  citiesDiffer, cityOwners, isCitySlug, marketplaceCityUrl, mergePins, normalizeCitySlug, pinsDiffer,
+  applyPinEdits, citiesDiffer, cityOwners, isCitySlug, marketplaceCityUrl, normalizeCitySlug, pinEdits,
+  searchesPerDay, tierSettingsEdits, tierSettingsValid,
 } from '../../lib/fleetView';
 import { useT } from '../../lib/i18n';
 
@@ -24,6 +25,10 @@ import { useT } from '../../lib/i18n';
 
 const DEFAULT_RADIUS_KM = 100;
 const PIN_CHOICES = [3, 2, 1] as const;
+
+// An emptied box stays empty (NaN) rather than turning into 0, and the rule
+// check refuses it.
+const boxValue = (v: string) => (v.trim() === '' ? NaN : Number(v));
 
 export function EditCitiesButton({ worker, fleet, onSaved, className = 'btn' }: {
   worker: FleetAccount;
@@ -67,16 +72,17 @@ function EditCitiesModal({ worker: w, fleet, onClose, onSaved }: {
   const [settings, setSettings] = useState<CityTierSettings | null>(null);
 
   // Without the tiers (an older console or coordinator) the form is the
-  // city list alone, as it was.
+  // city list alone, as it was. Read once per opening: the page's refresh
+  // hands this modal a new `w` and must not reset unsaved edits.
   useEffect(() => {
     coordinatorApi.cityTiers()
       .then(r => {
         setTiers(r);
         setSettings(r.settings);
-        setPins(Object.fromEntries(w.cities.filter(c => c.slug in r.pins).map(c => [c.slug, r.pins[c.slug]])));
+        setPins(r.pins);
       })
       .catch(() => setTiers(null));
-  }, [w.cities]);
+  }, [w.worker_id]);
 
   const has = (s: string) => cities.some(c => c.slug === s);
   const add = (city: CityWrite) => {
@@ -101,25 +107,30 @@ function EditCitiesModal({ worker: w, fleet, onClose, onSaved }: {
   };
 
   const citiesChanged = citiesDiffer(base, cities);
-  const keptPins = Object.fromEntries(Object.entries(pins).filter(([slug]) => has(slug)));
-  const nextPins = tiers
-    ? mergePins(tiers.pins, [...base.map(c => c.slug), ...cities.map(c => c.slug)], keptPins)
-    : null;
-  const pinsChanged = !!tiers && !!nextPins && pinsDiffer(tiers.pins, nextPins);
-  const settingsChanged = !!tiers && !!settings && JSON.stringify(settings) !== JSON.stringify(tiers.settings);
+  // A dropped city's pin goes with it only when no other worker searches it.
+  const dropped = base.filter(c => !has(c.slug) && !owners.has(c.slug)).map(c => c.slug);
+  const formPins = Object.fromEntries(Object.entries(pins).filter(([slug]) => has(slug)));
+  const edits = tiers ? pinEdits(tiers.pins, formPins, [...cities.map(c => c.slug), ...dropped]) : {};
+  const pinsChanged = Object.keys(edits).length > 0;
+  const settingsEdits = tiers && settings ? tierSettingsEdits(tiers.settings, settings) : {};
+  const settingsChanged = Object.keys(settingsEdits).length > 0;
+  const settingsOk = !settings || tierSettingsValid(settings);
   const changed = citiesChanged || pinsChanged || settingsChanged;
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (busy || !changed || cities.length === 0) return;
+    if (busy || !changed || !settingsOk || cities.length === 0) return;
     setBusy(true);
     try {
-      if (citiesChanged) await coordinatorApi.saveCities(w.worker_id, cities);
+      // Tiers first: a refused tier write then leaves nothing half-saved,
+      // and pins for a city not yet in the list are harmless.
       if (pinsChanged || settingsChanged) {
+        const pinMap = pinsChanged ? applyPinEdits((await coordinatorApi.cityTiers()).pins, edits) : null;
         await coordinatorApi.saveCityTiers({
-          ...(pinsChanged && nextPins ? { pins: nextPins } : {}),
-          ...(settingsChanged && settings ? { settings } : {}),
+          ...(pinMap ? { pins: pinMap } : {}),
+          ...(settingsChanged ? { settings: settingsEdits } : {}),
         });
       }
+      if (citiesChanged) await coordinatorApi.saveCities(w.worker_id, cities);
       showSuccessToast(citiesChanged
         ? t('fbcCitiesSaved', { n: cities.length, id: w.worker_id })
         : t('fbcTiersSaved'));
@@ -200,7 +211,7 @@ function EditCitiesModal({ worker: w, fleet, onClose, onSaved }: {
 
           {tiers && settings && (
             <CityFrequency cities={cities} ranked={ranked} tiers={tiers} pins={pins} setPins={setPins}
-              settings={settings} setSettings={setSettings} runs={runs} />
+              settings={settings} setSettings={setSettings} settingsOk={settingsOk} runs={runs} />
           )}
 
           {problem && (
@@ -212,14 +223,14 @@ function EditCitiesModal({ worker: w, fleet, onClose, onSaved }: {
         </div>
         <div className="modal-foot" style={{ justifyContent: 'flex-end' }}>
           <button type="button" className="btn" disabled={busy} onClick={onClose}>{t('cancel')}</button>
-          <button type="submit" className="btn primary" disabled={busy || !changed || cities.length === 0}>{t('save')}</button>
+          <button type="submit" className="btn primary" disabled={busy || !changed || !settingsOk || cities.length === 0}>{t('save')}</button>
         </div>
       </form>
     </Modal>
   );
 }
 
-function CityFrequency({ cities, ranked, tiers, pins, setPins, settings, setSettings, runs }: {
+function CityFrequency({ cities, ranked, tiers, pins, setPins, settings, setSettings, settingsOk, runs }: {
   cities: CityWrite[];
   ranked: Map<string, FleetAccount['cities'][number]>;
   tiers: CityTiers;
@@ -227,6 +238,7 @@ function CityFrequency({ cities, ranked, tiers, pins, setPins, settings, setSett
   setPins: (fn: (p: Record<string, number>) => Record<string, number>) => void;
   settings: CityTierSettings;
   setSettings: (s: CityTierSettings) => void;
+  settingsOk: boolean;
   runs: number | null;
 }) {
   const { t } = useT();
@@ -237,16 +249,26 @@ function CityFrequency({ cities, ranked, tiers, pins, setPins, settings, setSett
     return next;
   });
   const num = (key: 'top_pct' | 'mid_pct' | 'window_days', value: string) =>
-    setSettings({ ...settings, [key]: Number(value) });
+    setSettings({ ...settings, [key]: boxValue(value) });
   const perDay = (i: number, value: string) => {
     const next = [...settings.per_day] as CityTierSettings['per_day'];
-    next[i] = Number(value);
+    next[i] = boxValue(value);
     setSettings({ ...settings, per_day: next });
   };
-  const numberBox = (value: number, onChange: (v: string) => void, label: string, max: number) => (
-    <input className="input" type="number" min={0} max={max} style={{ width: 64 }} value={value}
-      aria-label={label} title={label} onChange={e => onChange(e.target.value)} />
+  // A box with its unit beside it, so every row's boxes line up in one column.
+  const numberBox = (value: number, onChange: (v: string) => void, label: string, max: number, unit: string) => (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+      <input className="input" type="number" min={0} max={max} style={{ width: 72, textAlign: 'right' }}
+        value={Number.isNaN(value) ? '' : value} aria-label={label} title={label} onChange={e => onChange(e.target.value)} />
+      <span className="muted" style={{ minWidth: 28 }}>{unit}</span>
+    </span>
   );
+  const restPct = Math.max(0, 100 - settings.top_pct - settings.mid_pct);
+  const tierRows: [string, ReactNode, number][] = [
+    [t('fbcTiersTop'), numberBox(settings.top_pct, v => num('top_pct', v), t('fbcTiersTop'), 100, '%'), 0],
+    [t('fbcTiersNext'), numberBox(settings.mid_pct, v => num('mid_pct', v), t('fbcTiersNext'), 100, '%'), 1],
+    [t('fbcTiersRest'), <span className="muted" style={{ paddingRight: 34, textAlign: 'right' }}>{restPct}%</span>, 2],
+  ];
 
   return (
     <div style={{ display: 'grid', gap: 8 }}>
@@ -254,7 +276,7 @@ function CityFrequency({ cities, ranked, tiers, pins, setPins, settings, setSett
       {(!runs || runs < 2) && (
         <div className="card-note" style={{ padding: '8px 10px' }}>
           <Icon name="info" size={14} />
-          <span style={{ fontSize: 12.5 }}>{t('fbcTiersNeedTimes', { n: runs ?? 0 })}</span>
+          <span style={{ fontSize: 12.5 }}>{runs ? t('fbcTiersNeedTimes', { n: runs }) : t('fbcTiersInterval')}</span>
         </div>
       )}
       <table className="table" style={{ width: '100%', fontSize: 12.5 }}>
@@ -262,12 +284,12 @@ function CityFrequency({ cities, ranked, tiers, pins, setPins, settings, setSett
           {cities.map(c => {
             const row = ranked.get(c.slug);
             const score = tiers.scores[c.slug] ?? 0;
-            const auto = row?.per_day !== undefined && !row.pin ? row.per_day : null;
+            const auto = row && !row.pin ? searchesPerDay(row, runs) : null;
             return (
               <tr key={c.slug}>
                 <td>{c.name}</td>
                 <td className="muted">{t('fbcTiersAlerts', { n: score, days: tiers.settings.window_days })}</td>
-                <td style={{ width: 130 }}>
+                <td style={{ width: 150 }}>
                   <select className="input" value={pins[c.slug] ?? ''} aria-label={t('fbcTiersPin', { name: c.name })}
                     onChange={e => pin(c.slug, e.target.value)}>
                     <option value="">{auto ? t('fbcTiersAutoN', { n: auto }) : t('fbcTiersAuto')}</option>
@@ -281,22 +303,29 @@ function CityFrequency({ cities, ranked, tiers, pins, setPins, settings, setSett
       </table>
       <details>
         <summary style={{ fontSize: 12.5, cursor: 'pointer' }}>{t('fbcTiersRule')}</summary>
-        <div style={{ display: 'grid', gap: 6, marginTop: 8, fontSize: 12.5 }}>
-          <div className="fp-row" style={{ gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-            {t('fbcTiersTop')} {numberBox(settings.top_pct, v => num('top_pct', v), t('fbcTiersTop'), 100)}%
-            → {numberBox(settings.per_day[0], v => perDay(0, v), t('fbcTiersPerDay'), 6)}×
+        <div style={{ display: 'grid', gap: 10, marginTop: 10, fontSize: 12.5 }}>
+          <div style={{
+            display: 'grid', gridTemplateColumns: 'minmax(80px, 1fr) auto auto', columnGap: 24, rowGap: 8,
+            alignItems: 'center', justifyItems: 'end', padding: '10px 12px',
+            border: '1px solid var(--border)', borderRadius: 8,
+          }}>
+            <span />
+            <span className="muted" style={{ fontSize: 11.5 }}>{t('fbcTiersShare')}</span>
+            <span className="muted" style={{ fontSize: 11.5 }}>{t('fbcTiersPerDay')}</span>
+            {tierRows.map(([label, share, i]) => (
+              <Fragment key={i}>
+                <span style={{ justifySelf: 'start' }}>{label}</span>
+                {share}
+                {numberBox(settings.per_day[i], v => perDay(i, v), `${label}: ${t('fbcTiersPerDay')}`, 6, '×')}
+              </Fragment>
+            ))}
           </div>
-          <div className="fp-row" style={{ gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-            {t('fbcTiersNext')} {numberBox(settings.mid_pct, v => num('mid_pct', v), t('fbcTiersNext'), 100)}%
-            → {numberBox(settings.per_day[1], v => perDay(1, v), t('fbcTiersPerDay'), 6)}×
-          </div>
-          <div className="fp-row" style={{ gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-            {t('fbcTiersRest')} → {numberBox(settings.per_day[2], v => perDay(2, v), t('fbcTiersPerDay'), 6)}×
-          </div>
-          <div className="fp-row" style={{ gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-            {t('fbcTiersWindow')} {numberBox(settings.window_days, v => num('window_days', v), t('fbcTiersWindow'), 92)}
+          <div className="fp-row" style={{ gap: 8, alignItems: 'center' }}>
+            <span>{t('fbcTiersWindow')}</span>
+            {numberBox(settings.window_days, v => num('window_days', v), t('fbcTiersWindow'), 92, t('fbcTiersDays'))}
           </div>
           <span className="muted" style={{ fontSize: 11.5 }}>{t('fbcTiersRuleHint')}</span>
+          {!settingsOk && <span role="alert" style={{ fontSize: 12, color: 'var(--neg)' }}>{t('fbcTiersInvalid')}</span>}
         </div>
       </details>
     </div>

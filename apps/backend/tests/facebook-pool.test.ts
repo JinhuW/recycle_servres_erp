@@ -345,6 +345,10 @@ describe('facebook account pool', () => {
       const taken = await api<{ code: string }>('POST', `${BASE}/1/assign`, { token, env: ENV, body: { worker: 'NYC-1' } });
       expect(taken.status).toBe(409);
       expect(taken.body.code).toBe('fpWorkerTaken');
+      // An account already on another worker is not handed out again.
+      const held = await api<{ code: string }>('POST', `${BASE}/2/assign`, { token, env: ENV, body: { worker: 'va-1' } });
+      expect(held.status).toBe(409);
+      expect(held.body.code).toBe('fpAssignHeld');
       expect((await api('POST', `${BASE}/1/assign`, { token, env: ENV, body: { worker: 'a.b' } })).status).toBe(400);
       expect((await api('POST', `${BASE}/9/assign`, { token, env: ENV, body: { worker: 'va-1' } })).status).toBe(404);
       const marcus = (await loginAs(MARCUS)).token;

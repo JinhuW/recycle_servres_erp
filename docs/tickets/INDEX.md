@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-286](./RS-286-park-a-facebook-worker-whose-login-fails-instead-of.md) | done | bug | P1 | Park a Facebook worker whose login fails instead of searching logged out | — |
+| [RS-287](./RS-287-release-review-findings-on-the-edit-cities-frequency.md) | in-review | bug | P2 | Release review findings on the Edit cities frequency form | 1.281.1 |
+| [RS-286](./RS-286-park-a-facebook-worker-whose-login-fails-instead-of.md) | done | bug | P1 | Park a Facebook worker whose login fails instead of searching logged out | facebook-tracker 0.10.1 |
 | [RS-285](./RS-285-sort-the-fleet-workers-table-by-column.md) | done | story | P2 | Sort the Fleet workers table by column | 1.281.0 |
 | [RS-284](./RS-284-weekly-liveness-check-for-the-facebook-account-pool.md) | done | story | P2 | Weekly liveness check for the Facebook account pool | 1.280.0 |
 | [RS-282](./RS-282-click-a-pool-table-cell-to-copy-it-edit-icon-opens-t.md) | done | story | P2 | Click a pool table cell to copy it; edit icon opens the editor | 1.279.0 |

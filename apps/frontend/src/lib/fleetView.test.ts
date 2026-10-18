@@ -7,7 +7,7 @@ import {
   sortFleet, splitHighlights, vaultAccountIdFor, whoIs,
   FLOW_STAGES, STAGE_FORMS, draftChanges, settingsDraft, settingsPatch,
   citiesDiffer, cityOwners, isCitySlug, marketplaceCityUrl, normalizeCitySlug,
-  mergePins, pinsDiffer, searchesPerDay, keysymsFor,
+  applyPinEdits, pinEdits, searchesPerDay, tierSettingsEdits, tierSettingsValid, keysymsFor,
 } from './fleetView';
 
 describe('keysymsFor', () => {
@@ -254,6 +254,8 @@ describe('fleetView', () => {
     expect(step('logged_in', -600, 5)?.phase).toBe('signing_in');
     expect(step('typing', -20, 5)?.phase).toBe('signing_in');
     expect(step('challenge', -20, 5)?.phase).toBe('needs_you');
+    // An outcome stamped before the request is the previous attempt's, even within the slack.
+    expect(step('failed', -20, 5)?.phase).toBe('signing_in');
 
     // Each phase is shown for a bounded time.
     expect(step('logged_in', 90, 90 + 61)).toBeNull();
@@ -287,17 +289,27 @@ describe('how often a city is searched', () => {
     expect(searchesPerDay({ ...city, per_day: 3 }, null)).toBeNull();
   });
 
-  it('replaces only this worker\'s pins, dropping removed cities', () => {
-    const all = { denver: 3, boise: 1, seattle: 2 };
-    expect(mergePins(all, ['denver', 'boise', 'reno'], { reno: 2 })).toEqual({ seattle: 2, reno: 2 });
-    expect(mergePins(all, ['denver'], { denver: 3 })).toEqual(all);
+  it('edits only the pins this form speaks for', () => {
+    const before = { denver: 3, boise: 1, seattle: 2 };
+    // denver unpinned, reno pinned, boise dropped (nobody else has it); seattle is another worker's.
+    const edits = pinEdits(before, { reno: 2 }, ['denver', 'reno', 'boise']);
+    expect(edits).toEqual({ denver: null, reno: 2, boise: null });
+    expect(pinEdits(before, { denver: 3 }, ['denver'])).toEqual({});
+    // Applied to a fresher map, another manager's pin made since survives.
+    expect(applyPinEdits({ ...before, tampa: 3 }, edits)).toEqual({ seattle: 2, tampa: 3, reno: 2 });
   });
 
-  it('notices any added, removed or changed pin', () => {
-    expect(pinsDiffer({ a: 1 }, { a: 1 })).toBe(false);
-    expect(pinsDiffer({ a: 1 }, { a: 2 })).toBe(true);
-    expect(pinsDiffer({ a: 1 }, {})).toBe(true);
-    expect(pinsDiffer({}, { b: 1 })).toBe(true);
+  it('sends only the changed settings, and only ones the coordinator accepts', () => {
+    const s = { top_pct: 20, mid_pct: 20, per_day: [3, 2, 1] as [number, number, number], window_days: 30 };
+    expect(tierSettingsEdits(s, s)).toEqual({});
+    expect(tierSettingsEdits(s, { ...s, top_pct: 10, per_day: [4, 2, 1] })).toEqual({ top_pct: 10, per_day: [4, 2, 1] });
+    expect(tierSettingsValid(s)).toBe(true);
+    expect(tierSettingsValid({ ...s, per_day: [3, 2, 0] })).toBe(false);
+    expect(tierSettingsValid({ ...s, per_day: [2, 3, 1] })).toBe(false);
+    expect(tierSettingsValid({ ...s, top_pct: 60, mid_pct: 50 })).toBe(false);
+    expect(tierSettingsValid({ ...s, window_days: 0 })).toBe(false);
+    expect(tierSettingsValid({ ...s, per_day: [3, 2, NaN] })).toBe(false);
+    expect(tierSettingsValid({ ...s, top_pct: 0, mid_pct: 0 })).toBe(true);
   });
 });
 

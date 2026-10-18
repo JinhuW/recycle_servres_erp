@@ -17,6 +17,55 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.281.1] - 2026-10-18
+
+Release review fixes for the Edit cities dialog's search frequency and the
+worker page's Assign account (RS-287). As shipped in 1.274.0 the cities dialog
+could lose edits and erase pins it did not own.
+
+### Fixed
+
+- **Unsaved pins and rule edits survive the page's refresh.** The worker page
+  reloads the fleet every 30 seconds, and each reload reset the dialog's pins
+  and ranking rule to the saved values.
+- **Saving changes only what the form changed.** Pins are read again just
+  before the write and only this form's edits are applied, and the ranking
+  rule sends only the changed fields, so another manager's pins or rule edits
+  made meanwhile are kept. Removing a city another worker still searches no
+  longer erases its pin, and adding a city that is already pinned shows and
+  keeps the pin.
+- **A rule the coordinator would refuse disables Save.** An empty box, a
+  per-day count out of 1–6 or growing toward the rest, or percentages over 100
+  show a note instead of failing on save. Tiers are written before cities, so a
+  refused write no longer leaves the city list saved and the dialog stale.
+- **The Auto option shows what the worker actually does.** It is capped by the
+  worker's start times like the chips, and a worker paced by an interval is
+  told it searches every city each round, not "0 search times a day".
+- **The ranking rule reads as a table.** Each tier's share of cities and
+  searches a day sit in aligned columns with their units, the rest's share is
+  worked out for you, and an emptied box stays empty instead of turning into 0.
+- **Assigning a pool account to a worker refuses one someone took meanwhile.**
+  The worker page's Assign account picks from the pool as it was when the
+  dialog opened; an account a purchaser or another worker took since was
+  still sent, putting one login on two machines. It is now refused with a
+  note and the list refreshes, as it does after any refusal, so the question
+  about the worker's current account appears when that changed too. Every
+  account on the worker at the moment of the swap is moved, not only the one
+  read first. The picker names a mismatched or unreadable cookie instead of
+  "no cookie".
+- **A viewer that connects during a restart is cut too.** A VNC handshake
+  that finished after shutdown began was sent a close but left out of the
+  2-second terminate sweep, so a sleeping viewer could still hold the
+  shutdown past its deadline.
+- **A redeploy mid-check no longer skips accounts for a week.** The weekly
+  pool liveness check stamped its whole batch as checked before probing any
+  of them, so a restart during a pass left the unprobed ones marked checked
+  until next week. Each account is now claimed right before its probe.
+- **The re-login strip no longer shows the last attempt's outcome.** A
+  "failed" from a re-login a few seconds before the new one counted as the new
+  one's result, ending the strip and slowing Watch's refresh while the login
+  was still running.
+
 ## [1.281.0] - 2026-10-17
 
 The Fleet workers table under **Monitors ▸ Facebook** sorts by column

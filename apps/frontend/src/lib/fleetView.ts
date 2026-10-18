@@ -4,7 +4,7 @@
 // Kept out of the components so they can be unit-tested without React.
 
 import type {
-  AlertHitRow, Challenge, CityWrite, FleetAccount, FleetCity, FleetDoc, ReviewStatsDay, SearchSettingsWrite,
+  AlertHitRow, Challenge, CityTierSettings, CityWrite, FleetAccount, FleetCity, FleetDoc, ReviewStatsDay, SearchSettingsWrite,
 } from './coordinator';
 import { ruleLines } from './keywordRules';
 
@@ -600,11 +600,16 @@ export function reloginProgress(
   const step = h.login_step;
   const stepAt = h.login_step_at;
   const stepMs = stepAt ? Date.parse(stepAt) : NaN;
-  if (!step || !stepAt || !(stepMs >= Date.parse(requested) - RELOGIN_CLOCK_SLACK_MS)) {
+  const phase = LOGIN_STEP_PHASE[step ?? ''] ?? 'signing_in';
+  // The slack is for clock skew on a step that is under way. An outcome from
+  // just before this request is the previous attempt's: reading it as this
+  // one's would end the strip, and slow Watch's polling, mid-login.
+  const slack = phase === 'done' || phase === 'failed' ? 0 : RELOGIN_CLOCK_SLACK_MS;
+  if (!step || !stepAt || !(stepMs >= Date.parse(requested) - slack)) {
     // Handed out, nothing reported yet — or a worker too old to report steps.
     return shown('signing_in', requested);
   }
-  return shown(LOGIN_STEP_PHASE[step] ?? 'signing_in', stepAt);
+  return shown(phase, stepAt);
 }
 
 // The vault account a worker's credentials are filed under: its own account
@@ -656,25 +661,57 @@ export function searchesPerDay(city: FleetCity, runsPerDay: number | null | unde
 }
 
 /**
- * The fleet-wide pin map after one worker's form: pins on `workerSlugs` (the
- * cities the worker had and has, so a dropped city loses its pin too) are
- * replaced by `chosen`; pins elsewhere are kept.
+ * The pins one worker's form changed, slug -> searches a day or null for
+ * unpinned. `slugs` are the cities the form speaks for: the worker's current
+ * cities, plus dropped ones no other worker searches, whose pin goes with them.
+ * Pins are fleet-wide, so a city another worker still has keeps its pin.
  */
-export function mergePins(
-  all: Readonly<Record<string, number>>,
-  workerSlugs: readonly string[],
-  chosen: Readonly<Record<string, number>>,
-): Record<string, number> {
-  const mine = new Set(workerSlugs);
-  const out: Record<string, number> = {};
-  for (const [slug, n] of Object.entries(all)) if (!mine.has(slug)) out[slug] = n;
-  for (const [slug, n] of Object.entries(chosen)) out[slug] = n;
+export function pinEdits(
+  before: Readonly<Record<string, number>>,
+  after: Readonly<Record<string, number>>,
+  slugs: readonly string[],
+): Record<string, number | null> {
+  const out: Record<string, number | null> = {};
+  for (const slug of slugs) if (before[slug] !== after[slug]) out[slug] = after[slug] ?? null;
   return out;
 }
 
-export function pinsDiffer(a: Readonly<Record<string, number>>, b: Readonly<Record<string, number>>): boolean {
-  const ka = Object.keys(a);
-  return ka.length !== Object.keys(b).length || ka.some(k => a[k] !== b[k]);
+/**
+ * The whole pin map the coordinator stores, with one form's edits applied to
+ * a copy read just before the write, so another manager's pins survive.
+ */
+export function applyPinEdits(
+  pins: Readonly<Record<string, number>>,
+  edits: Readonly<Record<string, number | null>>,
+): Record<string, number> {
+  const out = { ...pins };
+  for (const [slug, n] of Object.entries(edits)) {
+    if (n === null) delete out[slug];
+    else out[slug] = n;
+  }
+  return out;
+}
+
+/** The settings keys a form changed; the coordinator keeps the rest as stored. */
+export function tierSettingsEdits(before: CityTierSettings, after: CityTierSettings): Partial<CityTierSettings> {
+  const out: Partial<CityTierSettings> = {};
+  if (after.top_pct !== before.top_pct) out.top_pct = after.top_pct;
+  if (after.mid_pct !== before.mid_pct) out.mid_pct = after.mid_pct;
+  if (after.window_days !== before.window_days) out.window_days = after.window_days;
+  if (after.per_day.some((n, i) => n !== before.per_day[i])) out.per_day = after.per_day;
+  return out;
+}
+
+const MAX_PER_DAY = 6;
+const MAX_WINDOW_DAYS = 92;
+
+/** Whether the coordinator would accept these settings (city_tiers.validate_settings). */
+export function tierSettingsValid(s: CityTierSettings): boolean {
+  const whole = (n: number, lo: number, hi: number) => Number.isInteger(n) && n >= lo && n <= hi;
+  const [top, mid, rest] = s.per_day;
+  return whole(s.top_pct, 0, 100) && whole(s.mid_pct, 0, 100) && s.top_pct + s.mid_pct <= 100
+    && whole(s.window_days, 1, MAX_WINDOW_DAYS)
+    && s.per_day.every(n => whole(n, 1, MAX_PER_DAY)) && top >= mid && mid >= rest;
 }
 
 // Keysyms for typing text into a VNC session. Latin-1 keysyms equal their

@@ -446,6 +446,11 @@ pool.post('/:no/assign', async (c) => {
   const [row] = await sql<Row[]>`SELECT * FROM fb_pool_accounts WHERE no = ${no}`;
   if (!row) return c.json({ error: 'Not found' }, 404);
   if (row.status === 'retired') return c.json({ error: 'This account is retired', code: 'fpAssignRetired' }, 409);
+  // The fleet dialog picks from a snapshot; a purchaser or another worker may
+  // have taken the account since, and two workers on one login is the
+  // location churn that gets it revoked.
+  if (row.status === 'taken' || (row.status === 'fleet' && row.holder_name?.toLowerCase() !== worker.toLowerCase()))
+    return c.json({ error: `#${no} is held by ${row.holder_name ?? 'someone else'}`, code: 'fpAssignHeld' }, 409);
   const held = await sql<{ no: number }[]>`
     SELECT no FROM fb_pool_accounts
     WHERE status = 'fleet' AND lower(holder_name) = lower(${worker}) AND no <> ${no}`;
@@ -482,9 +487,10 @@ pool.post('/:no/assign', async (c) => {
         updated_at = NOW()
       WHERE no = ${no}`;
     await writeEvent(tx, user, 'assigned', 'fleet', no, worker);
-    if (!held.length) return;
+    if (previous === null) return;
     const fate = previous as PreviousFate;
-    // Re-checked under the lock: only what is still on this worker moves.
+    // Whatever is on this worker now moves, not only what was read before the
+    // vault write: an account put on it meanwhile would otherwise stay fleet.
     // A problem account keeps the worker as holder, naming where it failed.
     const moved = await tx<{ no: number }[]>`
       UPDATE fb_pool_accounts SET
@@ -492,7 +498,7 @@ pool.post('/:no/assign', async (c) => {
         holder_name = ${fate === 'problem' ? tx`holder_name` : null},
         held_since = ${fate === 'problem' ? tx`held_since` : null},
         updated_at = NOW()
-      WHERE no IN ${tx(held.map((h) => h.no))} AND status = 'fleet' AND lower(holder_name) = lower(${worker})
+      WHERE no <> ${no} AND status = 'fleet' AND lower(holder_name) = lower(${worker})
       RETURNING no`;
     for (const m of moved) {
       await writeEvent(tx, user, PREVIOUS_EVENT[fate], fate, m.no, `replaced by #${no} on ${worker}`);
