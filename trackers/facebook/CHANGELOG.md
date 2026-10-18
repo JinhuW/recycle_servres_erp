@@ -18,6 +18,16 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A login finished over Watch is picked up between sweeps.** 0.10.3's
+  minute-by-minute session check never saw it: the worker read the page's URL
+  before asking the browser anything, and Playwright only refreshes that URL
+  while a call is running. An idle worker therefore kept seeing the 2FA page its
+  password login had given up on, and read the session as logged out. The check
+  now asks for the cookies first, which brings the URL up to date (va-1,
+  2026-10-18).
+
 ## [0.10.3] - 2026-10-17
 
 ### Fixed

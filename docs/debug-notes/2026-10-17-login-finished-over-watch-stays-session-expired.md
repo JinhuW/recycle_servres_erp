@@ -55,3 +55,17 @@ The process that holds the unsaved login runs the *old* code, so the deploy
 that ships the SIGTERM save is itself the restart that loses the login. Let
 the worker's next sweep save the session first (`fb_state.json` well over 31
 bytes), then deploy.
+
+## Follow-up: 0.10.3 still missed it (RS-290, fixed in 0.10.4)
+
+On 2026-10-18 va-1, on 0.10.3, sat on Marketplace logged in for minutes while
+its row read "Session expired". The idle check ran every minute, the main
+thread was alive in `doze()`, and `is_logged_in()` still said no.
+
+Playwright's sync `page.url` is a cache that is refreshed only while some
+Playwright call is running. `is_logged_in()` read the URL first, saw the
+`two_step_verification` page the password login had stopped on, and returned
+before it reached `context.cookies()`, the one call that would have refreshed
+it. The unit tests' fake page sets `url` directly, so they could not catch it.
+Check it against real Playwright: navigate the page from JS, sleep, print
+`page.url`, call anything, and print it again.
