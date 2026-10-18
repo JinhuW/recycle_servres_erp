@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.12.4] - 2026-10-18
+
 ### Fixed
 
 - **The worker's VNC view shows the browser, not the whole display** (RS-295).
