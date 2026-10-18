@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-10-17
+
 ### Changed
 
 - **The console's fleet dashboard shows where each proxy comes out.** The
