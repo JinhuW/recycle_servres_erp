@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-10-17
+
 ### Fixed
 
 - **A worker's session status and saved session follow the browser between
