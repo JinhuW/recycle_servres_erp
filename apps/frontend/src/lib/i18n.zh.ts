@@ -2892,6 +2892,8 @@ const zh: Record<string, string> = {
   fbcWatchAcctOpenPool: '打开账号池',
   fbcWatchAcctHide: '隐藏账号',
   fbcWatchAcctShow: '显示账号',
+  fbcWatchFullscreen: '全屏',
+  fbcWatchExitFullscreen: '退出全屏',
 
   // ── 付款对账 ──
   nav_payments: '付款对账',
