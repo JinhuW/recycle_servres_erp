@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-10-18
+
 ### Added
 
 - **A deploy can hold workers back** (`RS_DEPLOY_HOLD`, container names). A
