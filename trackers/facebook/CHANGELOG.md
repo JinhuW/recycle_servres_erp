@@ -18,6 +18,14 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The coordinator refuses a session backup that holds no session.** A
+  worker that backed up a logged-out jar replaced its last good snapshot, the
+  copy 0.10.5 restores from. va-2 (0.8.0) did exactly that on 2026-10-17. The
+  backup endpoint now answers 422 when the storage_state has no `xs` cookie and
+  keeps the snapshot it has.
+
 ## [0.10.5] - 2026-10-18
 
 ### Fixed

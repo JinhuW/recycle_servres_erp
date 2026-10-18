@@ -93,6 +93,19 @@ def backup_session(
             "snapshot this large is not a session — check what the worker is sending.",
         )
 
+    # A logged-out jar is not a session. Stored, it replaced the last good
+    # snapshot, the one copy a worker that lost its file could restore from;
+    # workers predating the save guard still send one after a failed login.
+    if not any(
+        isinstance(cookie, dict) and cookie.get("name") == "xs"
+        for cookie in payload.storage_state.get("cookies") or []
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="storage_state holds no Facebook session (no xs cookie); the last "
+            "snapshot is kept.",
+        )
+
     try:
         # The whole document is sealed as one blob: cookies, localStorage, and
         # origins alike. Splitting out "just the cookies" would leave the login
