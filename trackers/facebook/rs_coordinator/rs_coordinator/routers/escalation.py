@@ -106,6 +106,11 @@ def escalate(
     if path:
         db.update_challenge(challenge_id, {"screenshot_path": path})
 
+    # The lock page is not cleared by a code or a puzzle, and each further
+    # password login deepens Facebook's suspicion: stop handing them out.
+    if payload.kind == "locked" and account_id:
+        db.lock_account(account_id, "Facebook lock page")
+
     # Exactly one page per challenge, and a Telegram outage must not turn into
     # a failed escalation the worker would have to retry.
     try:

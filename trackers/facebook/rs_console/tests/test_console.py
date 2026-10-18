@@ -224,6 +224,28 @@ def test_put_account_forwards_only_the_allowed_fields(client):
     assert "s3cret-pw" not in res.text
 
 
+def test_put_account_forwards_the_legacy_device_and_nothing_else_of_the_cookie(client):
+    datr = {"name": "datr", "value": "legacy", "domain": ".facebook.com", "extra": "dropped"}
+    res = client.put(
+        "/v1/accounts/ne-1",
+        json={"fb_uid": "100000000000001", "device_cookies": [datr]},
+        headers=AUTH,
+    )
+    assert res.status_code == 200
+    import json
+
+    (request,) = client.calls
+    assert json.loads(request.content)["device_cookies"] == [
+        {"name": "datr", "value": "legacy", "domain": ".facebook.com"}
+    ]
+
+    for name in ("xs", "c_user", "fr"):
+        bad = {"device_cookies": [{"name": name, "value": "v", "domain": ".facebook.com"}]}
+        assert client.put("/v1/accounts/ne-1", json=bad, headers=AUTH).status_code == 400
+    assert client.put("/v1/accounts/ne-1", json={"device_cookies": []}, headers=AUTH).status_code == 400
+    assert len(client.calls) == 1
+
+
 def test_put_account_refuses_a_bad_id_or_body_before_forwarding(client):
     assert client.put("/v1/accounts/bad%20id", json={}, headers=AUTH).status_code == 400
     assert client.put("/v1/accounts/ne-1", json=["not", "an", "object"], headers=AUTH).status_code == 400

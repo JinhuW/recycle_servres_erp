@@ -454,6 +454,29 @@ class DeviceCookiesReport(BaseModel):
     cookies: List[DeviceCookie] = Field(min_length=1, max_length=4)
 
 
+LOGIN_TRIGGERS = ("boot", "relogin", "forced", "swap")
+LOGIN_OUTCOMES = (
+    "restored", "password_ok", "watch_ok", "challenge", "locked", "failed", "timed_out",
+)
+
+
+class LoginEvent(BaseModel):
+    """A worker starting or finishing a login (POST /v1/workers/{id}/logins).
+
+    `datr_fp` is a fingerprint of the `datr` the browser presents, never the
+    cookie: the ledger records which device a login used, and the cookie
+    itself stays sealed in the device profile.
+    """
+
+    phase: Literal["start", "finish"]
+    attempt_id: int | None = None
+    trigger: Literal[LOGIN_TRIGGERS] | None = None  # type: ignore[valid-type]
+    device_id: str | None = Field(default=None, max_length=64)
+    datr_fp: str | None = Field(default=None, pattern=r"^[0-9a-f]{16}$")
+    outcome: Literal[LOGIN_OUTCOMES] | None = None  # type: ignore[valid-type]
+    detail: Dict[str, Any] | None = None
+
+
 class SessionMeta(BaseModel):
     worker_id: str
     account_id: str | None = None
@@ -518,6 +541,9 @@ class AccountUpsert(BaseModel):
     region: str | None = Field(default=None, max_length=64)
     allow_password_login: bool | None = None
     secrets: Dict[str, Optional[str]] = Field(default_factory=dict)
+    # The login's legacy device (the pool cookie's datr/sb), sent with
+    # `fb_uid`. Seeds the account's device profile when it has no cookies yet.
+    device_cookies: List[DeviceCookie] | None = Field(default=None, min_length=1, max_length=4)
 
 
 class StatusResponse(BaseModel):

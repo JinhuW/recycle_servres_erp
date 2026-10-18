@@ -797,8 +797,14 @@ def test_no_sqlite_placeholders_survive_in_the_postgres_sql():
     handle.get_worker_config("w")
     handle.list_worker_configs()
     handle.delete_worker_config("w")
+    handle.insert_login_attempt({"worker_id": "w", "trigger": "boot"})
+    handle.finish_login_attempt(1, "w", "failed", None)
+    handle.list_login_attempts("w", 5)
+    handle.lock_account("a", "lock page")
+    handle.unlock_account("a")
+    handle.count_code_audit("a", "password", "2026-01-01")
 
-    assert len(handle.log) == 45
+    assert len(handle.log) == 51
     for sql in handle.log:
         assert "?" not in sql, f"SQLite placeholder left in: {sql}"
         assert not re.search(r":\w", sql), f"named SQLite placeholder left in: {sql}"

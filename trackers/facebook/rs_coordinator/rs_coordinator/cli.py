@@ -437,6 +437,11 @@ def cmd_vault_list(args: argparse.Namespace) -> int:
             f"vnc: {account.get('vnc_url') or '-'}"
         )
         print(f"  secrets: {_secret_marks(store, account_id)}")
+        if account.get("locked_at"):
+            print(
+                f"  LOCKED by Facebook since {account['locked_at']} "
+                f"({account.get('locked_reason') or '-'}): no password logins"
+            )
     print("\nSET means a value is stored; secret values are never printed.")
     return 0
 
@@ -457,6 +462,38 @@ def cmd_vault_show_code(args: argparse.Namespace) -> int:
     print(f"{code}  ({remaining}s left)")
     if remaining <= 5:
         print("(about to roll over — compare against the next code)", file=sys.stderr)
+    return 0
+
+
+@_guarded
+def cmd_vault_unlock(args: argparse.Namespace) -> int:
+    """Lift a lock recorded from Facebook's lock page, once it is unlocked there."""
+    store = _account_store()
+    if store.get_account(args.account_id) is None:
+        print(f"error: no account '{args.account_id}' in the vault.", file=sys.stderr)
+        return 1
+    if store.db.unlock_account(args.account_id):
+        print(f"unlocked '{args.account_id}'; its workers may be handed its password again")
+    else:
+        print(f"'{args.account_id}' was not locked")
+    return 0
+
+
+@_guarded
+def cmd_vault_logins(args: argparse.Namespace) -> int:
+    """The login ledger: which device each login was started on, and how it ended."""
+    store = _account_store()
+    rows = store.db.list_login_attempts(args.worker, args.limit)
+    if not rows:
+        print("No logins recorded.")
+        return 0
+    for row in rows:
+        drift = "  NEW DEVICE" if row.get("device_drift") else ""
+        print(
+            f"{row['started_at']}  {row['worker_id']:<12} {row.get('trigger') or '-':<8} "
+            f"device {row.get('device_id') or '-'}  datr {row.get('datr_fp') or '-'}  "
+            f"-> {row.get('outcome') or 'open'}{drift}"
+        )
     return 0
 
 
@@ -944,6 +981,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     v_code.add_argument("--account-id", required=True)
     v_code.set_defaults(func=cmd_vault_show_code)
+
+    v_unlock = vault_sub.add_parser(
+        "unlock", help="Allow password logins again after Facebook lifted a lock"
+    )
+    v_unlock.add_argument("account_id")
+    v_unlock.set_defaults(func=cmd_vault_unlock)
+
+    v_logins = vault_sub.add_parser(
+        "logins", help="Recent logins: the device each was made on, and the outcome"
+    )
+    v_logins.add_argument("--worker", default=None)
+    v_logins.add_argument("--limit", type=int, default=30)
+    v_logins.set_defaults(func=cmd_vault_logins)
 
     v_rm = vault_sub.add_parser("rm", help="Delete an account and its secrets")
     v_rm.add_argument("--account-id", required=True)

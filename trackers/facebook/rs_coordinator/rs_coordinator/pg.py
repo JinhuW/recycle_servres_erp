@@ -34,6 +34,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from .db import (
     ACCOUNT_EXTRA_COLUMNS,
+    ACCOUNT_LOCK_COLUMNS,
     ALERT_HIT_SQL,
     LISTING_EXTRA_COLUMNS,
     OUTBOUND_EXTRA_COLUMNS,
@@ -200,6 +201,7 @@ class PostgresDatabase:
                 self._migrate_columns(conn, "session_snapshots", SNAPSHOT_EXTRA_COLUMNS)
                 self._migrate_columns(conn, "review_stats", REVIEW_STATS_EXTRA_COLUMNS)
                 self._migrate_columns(conn, "accounts", ACCOUNT_EXTRA_COLUMNS)
+                self._migrate_columns(conn, "accounts", ACCOUNT_LOCK_COLUMNS)
                 # Created after the migration adds the columns they index.
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_threads_room ON threads(matrix_room_id)"
@@ -924,7 +926,8 @@ class PostgresDatabase:
         with self.cursor() as cur:
             cur.execute(
                 "SELECT account_id, worker_id, fb_username, fb_uid, region, proxy, vnc_url, "
-                "allow_password_login, fleet_enabled, pin_host, created_at, updated_at "
+                "allow_password_login, fleet_enabled, pin_host, locked_at, locked_reason, "
+                "created_at, updated_at "
                 "FROM accounts ORDER BY account_id"
             )
             return _rows(cur.fetchall())
@@ -1216,6 +1219,80 @@ class PostgresDatabase:
             return cur.rowcount > 0
 
     # -- audit -------------------------------------------------------------
+
+    # -- login ledger ------------------------------------------------------
+
+    def insert_login_attempt(self: "PostgresDatabase", record: Dict[str, Any]) -> int:
+        record = {"started_at": utcnow(), **record}
+        columns = ", ".join(record)
+        placeholders = ", ".join(["%s"] * len(record))
+        with self.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO login_attempts ({columns}) VALUES ({placeholders}) RETURNING id",
+                tuple(record.values()),
+            )
+            return int(cur.fetchone()["id"])
+
+    def finish_login_attempt(
+        self: "PostgresDatabase",
+        attempt_id: int,
+        worker_id: str,
+        outcome: str,
+        detail_json: str | None,
+    ) -> bool:
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE login_attempts SET outcome = %s, detail_json = %s, finished_at = %s "
+                "WHERE id = %s AND worker_id = %s AND finished_at IS NULL",
+                (outcome, detail_json, utcnow(), attempt_id, worker_id),
+            )
+            return cur.rowcount > 0
+
+    def list_login_attempts(
+        self: "PostgresDatabase", worker_id: str | None = None, limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            if worker_id:
+                cur.execute(
+                    "SELECT * FROM login_attempts WHERE worker_id = %s "
+                    "ORDER BY started_at DESC, id DESC LIMIT %s",
+                    (worker_id, limit),
+                )
+            else:
+                cur.execute(
+                    "SELECT * FROM login_attempts ORDER BY started_at DESC, id DESC LIMIT %s",
+                    (limit,),
+                )
+            return _rows(cur.fetchall())
+
+    def lock_account(self: "PostgresDatabase", account_id: str, reason: str) -> bool:
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE accounts SET locked_at = %s, locked_reason = %s "
+                "WHERE account_id = %s AND locked_at IS NULL",
+                (utcnow(), reason, account_id),
+            )
+            return cur.rowcount > 0
+
+    def unlock_account(self: "PostgresDatabase", account_id: str) -> bool:
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE accounts SET locked_at = NULL, locked_reason = NULL "
+                "WHERE account_id = %s AND locked_at IS NOT NULL",
+                (account_id,),
+            )
+            return cur.rowcount > 0
+
+    def count_code_audit(
+        self: "PostgresDatabase", account_id: str, kind: str, since: str
+    ) -> int:
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM code_audit "
+                "WHERE account_id = %s AND kind = %s AND released_at >= %s",
+                (account_id, kind, since),
+            )
+            return int(cur.fetchone()["n"])
 
     def insert_code_audit(
         self: "PostgresDatabase",
