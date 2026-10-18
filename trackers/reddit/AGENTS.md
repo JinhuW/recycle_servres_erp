@@ -15,7 +15,8 @@ has the repo map and workflow.
 - **The ERP drives it over HTTP.** `apps/backend/src/routes/tracker.ts` proxies
   an allowlist (`GET /api/workers`, `DELETE /api/workers/:id`,
   `GET|POST /api/rules`, `PATCH|DELETE /api/rules/:id`,
-  `GET|POST /api/subreddits`, `PATCH|DELETE /api/subreddits/:name`) for the
+  `GET|POST /api/subreddits`, `PATCH|DELETE /api/subreddits/:name`,
+  `GET /api/matches`, `GET /api/stats`) for the
   ERP's Monitors ▸ Reddit page. Changing one of those response shapes, or adding
   a route the page needs, is a change to both sides; see the root AGENTS.md
   under *Contracts*. Keep the tracker backward-compatible until the ERP release
