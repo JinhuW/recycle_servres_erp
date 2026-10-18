@@ -17,6 +17,21 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.281.2] - 2026-10-18
+
+The fleet's *Assign account* sends the account's Facebook UID with its login
+(RS-292).
+
+### Fixed
+
+- **A login handed to a fleet worker no longer inherits the previous login's
+  device.** The worker's vault account now carries the UID of the login it was
+  given (`fb_uid`). Since facebook-tracker 0.11.0 the UID picks the device the
+  worker presents: its own user agent, screen, timezone and `datr`/`sb`
+  cookies, the same on whichever worker runs it. Before, a swapped-in login
+  signed in carrying the old login's device cookies, which links the two
+  accounts.
+
 ## [1.281.1] - 2026-10-18
 
 Release review fixes for the Edit cities dialog's search frequency and the
