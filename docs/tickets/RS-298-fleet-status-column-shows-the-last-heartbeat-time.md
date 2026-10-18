@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-18
 reporter: jinhu
 branch: feat/status-heartbeat-time
-pr:
+pr: 740
 version: 1.283.1
 related: []
 ---
