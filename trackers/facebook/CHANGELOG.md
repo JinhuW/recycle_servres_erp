@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.12.2] - 2026-10-18
+
 ### Added
 
 - **Every login records the device it was made on.** A worker opens a row in
