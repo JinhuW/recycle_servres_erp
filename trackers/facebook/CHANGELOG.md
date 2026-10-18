@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-18
+
 ### Added
 
 - **Every Facebook account keeps one device for good** (RS-292). The
