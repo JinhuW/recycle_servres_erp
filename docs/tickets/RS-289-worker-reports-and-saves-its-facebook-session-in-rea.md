@@ -2,13 +2,13 @@
 id: RS-289
 title: Worker reports and saves its Facebook session in real time, not at the next sweep
 type: bug
-status: in-progress
+status: done
 priority: P1
 created: 2026-10-17
 reporter: jinhu
 branch: fix/worker-session-realtime
-pr:
-version:
+pr: 720
+version: facebook-tracker 0.10.3
 related: [RS-279]
 ---
 
@@ -53,17 +53,17 @@ the coordinator stores each heartbeat as it lands.
 
 ## Acceptance criteria
 
-- [ ] Between sweeps, a worker whose browser becomes logged in, parked or
+- [x] Between sweeps, a worker whose browser becomes logged in, parked or
       not, saves the session, backs it up to the coordinator and reports
       HEALTHY within about a minute.
-- [ ] Between sweeps, a worker that reported HEALTHY and whose session lapses
+- [x] Between sweeps, a worker that reported HEALTHY and whose session lapses
       reports SESSION_EXPIRED within about a minute, without navigating the
       page.
-- [ ] While logged in and idle, the worker re-saves and backs up the session
+- [x] While logged in and idle, the worker re-saves and backs up the session
       at least every 30 minutes.
-- [ ] On SIGTERM the monitor saves the live session before it exits. It still
+- [x] On SIGTERM the monitor saves the live session before it exits. It still
       never overwrites a good file with a logged-out jar.
-- [ ] The vendored monitor's suite passes; the pin in `VENDOR.md` and the
+- [x] The vendored monitor's suite passes; the pin in `VENDOR.md` and the
       facebook-tracker release carry the change.
 
 ## Out of scope
