@@ -2,13 +2,13 @@
 id: RS-288
 title: Console fleet dashboard shows the proxy URL, exit IP and city
 type: story
-status: backlog
+status: done
 priority: P2
 created: 2026-10-17
 reporter: jinhu
 branch: feat/console-proxy-exit
-pr:
-version:
+pr: 719
+version: facebook-tracker 0.10.2
 related: [RS-281]
 ---
 
@@ -26,10 +26,10 @@ in the account table and in a worker's detail row.
 
 ## Acceptance criteria
 
-- [ ] The account table's Proxy column shows the proxy host:port and, under it, the exit city (exit IP and org on hover).
-- [ ] A worker's detail row shows the proxy URL and `IP · City, Region, Country`, or "looking up exit…" / "exit lookup failed".
-- [ ] A worker with no proxy shows "own IP" with the VM's exit city.
-- [ ] Search matches the proxy URL, exit IP and city.
+- [x] The account table's Proxy column shows the proxy host:port and, under it, the exit city (exit IP and org on hover).
+- [x] A worker's detail row shows the proxy URL and `IP · City, Region, Country`, or "looking up exit…" / "exit lookup failed".
+- [x] A worker with no proxy shows "own IP" with the VM's exit city.
+- [x] Search matches the proxy URL, exit IP and city.
 
 ## Out of scope
 
