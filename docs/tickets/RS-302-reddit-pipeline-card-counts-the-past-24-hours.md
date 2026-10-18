@@ -2,12 +2,12 @@
 id: RS-302
 title: Reddit pipeline card counts the past 24 hours
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-10-18
 reporter: jinhu
 branch: rs-tracker-stats-24h
-pr:
+pr: "#748"
 version: 1.287.0
 related: [RS-297, RS-299]
 ---
@@ -55,3 +55,6 @@ stuck evaluator, and a window would hide one.
 
 - Ship order: the tracker first. An old tracker ignores `since`, so the card
   would show all-time numbers under the new "past 24 hours" label.
+- Tracker `api` deployed to Railway `reddits-tracker` (deployment `abc42c14`)
+  before the ERP merge. Prod read on 2026-10-18: all time 21,154 posts; past
+  24 h 287 (251 rejected, 18 alerted, 17 failed, 1 waiting).
