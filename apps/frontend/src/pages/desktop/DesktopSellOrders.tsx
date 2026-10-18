@@ -1,5 +1,6 @@
 import { Fragment, lazy, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
+import { CurrencyPicker, type Currency } from '../../components/CurrencyPicker';
 import { Icon } from '../../components/Icon';
 import { Modal } from '../../components/Modal';
 import {
@@ -29,7 +30,7 @@ import { closeReasonLabelKey } from '../../lib/closeReasons';
 import { usePersisted } from '../../lib/listMemory';
 import { TableSkeleton, FormSkeleton } from '../../components/Skeleton';
 import { SellOrderHistory } from '../../components/SellOrderHistory';
-import { CustomerPicker, CurrencyPicker, type Customer } from './DesktopSellOrderDraft';
+import { CustomerPicker, type Customer } from './DesktopSellOrderDraft';
 import { useAuth } from '../../lib/auth';
 import { AddInventoryPicker, type SellableItem } from '../../components/AddInventoryPicker';
 import { AttachmentChip } from '../../components/AttachmentChip';
@@ -51,8 +52,6 @@ import { useFixedPopover } from './popoverPlacement';
 
 // Its own chunk: only a packer opens it.
 const DesktopSellOrderPack = lazy(() => import('./DesktopSellOrderPack'));
-
-type Currency = 'USD' | 'CNY';
 
 // Statuses that capture per-status evidence (text note + attachments). The
 // `needs_meta` flag lives on the sell_order_statuses row.

@@ -20,6 +20,8 @@ type PreviewRow = {
   rawPart: string;
   rawPrice: string;
   price: number | null;
+  currency: string;
+  listedPrice?: number;
   status: string;
   refPriceId?: string;
   partNumber?: string | null;
@@ -30,6 +32,7 @@ type PreviewRow = {
 };
 type Preview = {
   targetMargin: number;
+  fx: { oneUsdInQuote: number; source: string } | null;
   rows: PreviewRow[];
   summary: Record<string, number>;
 };
@@ -75,7 +78,7 @@ describe('readPriceSheetRows', () => {
       price: 1200.5,
       priceKind: 'ok',
       rawPrice: '$1,200.50',
-      currency: null,
+      currency: 'USD',
     }]);
   });
 
@@ -97,7 +100,7 @@ describe('readPriceSheetRows', () => {
       ['PN-1', '¥300'],
       ['PN-2', 45],
     ]));
-    expect(byCell.map(r => r.currency)).toEqual(['CNY', null]);
+    expect(byCell.map(r => r.currency)).toEqual(['CNY', 'USD']);
 
     const formatted = wbWith([
       ['Part Number', 'Unit Price'],
@@ -110,7 +113,10 @@ describe('readPriceSheetRows', () => {
 
   it('reads 美元 as dollars, and marks other currencies and a yuan tab', async () => {
     const usd = readPriceSheetRows(wbWith([['型号', '单价（美元）'], ['PN-1', 300]]));
-    expect(usd[0]).toMatchObject({ price: 300, currency: null });
+    expect(usd[0]).toMatchObject({ price: 300, currency: 'USD' });
+
+    const unmarked = readPriceSheetRows(wbWith([['Part Number', 'Unit Price'], ['PN-1', 300]]));
+    expect(unmarked[0]).toMatchObject({ price: 300, currency: null });
 
     const tab = readPriceSheetRows(wbWith([['Part Number', 'Unit Price'], ['PN-1', 280]], 'RMB'));
     expect(tab[0]).toMatchObject({ currency: 'CNY' });
@@ -123,6 +129,28 @@ describe('readPriceSheetRows', () => {
     expect((readPriceSheetRows(await reload(formatted)))[0]).toMatchObject({ currency: 'EUR' });
   });
 
+  it('reads a bare $ as dollars, but not HK$ or the [$…] of a number format', async () => {
+    const cells = readPriceSheetRows(wbWith([
+      ['Part Number', 'Unit Price'],
+      ['PN-1', '$45'],
+      ['PN-2', 'HK$45'],
+      ['PN-3', 'US$45'],
+    ]));
+    expect(cells.map(r => r.currency)).toEqual(['USD', 'HKD', 'USD']);
+
+    const header = readPriceSheetRows(wbWith([['Part Number', 'Price ($)'], ['PN-1', 45]]));
+    expect(header[0]).toMatchObject({ currency: 'USD' });
+
+    const formats = wbWith([['Part Number', 'Unit Price'], ['PN-1', 1], ['PN-2', 2], ['PN-3', 3], ['PN-4', 4]]);
+    const ws = formats.worksheets[0];
+    ws.getCell('B2').numFmt = '"$"#,##0.00';
+    ws.getCell('B3').numFmt = '[$$-409]#,##0.00';
+    ws.getCell('B4').numFmt = '[$HK$-C04]#,##0.00';
+    ws.getCell('B5').numFmt = '[$¥-804]#,##0.00';
+    expect((readPriceSheetRows(await reload(formats))).map(r => r.currency))
+      .toEqual(['USD', 'USD', 'HKD', 'CNY']);
+  });
+
   it('throws when no tab has both columns', () => {
     expect(() => readPriceSheetRows(wbWith([['Item', 'Qty'], ['x', 1]])))
       .toThrow(PriceColumnsNotFoundError);
@@ -132,6 +160,18 @@ describe('readPriceSheetRows', () => {
 // ---------------------------------------------------------------------------
 // HTTP: preview + apply
 // ---------------------------------------------------------------------------
+
+// The ledger's latest row, as a manager override would leave it: 1 USD in
+// yuan. ¥300 converts to $41.58 and ¥720 to $99.79 at this rate.
+const USD_CNY = 7.2154;
+
+async function seedRate(): Promise<void> {
+  const sql = getTestDb();
+  await sql`
+    INSERT INTO fx_rates (base_currency, quote_currency, rate, source, effective_date)
+    VALUES ('USD', 'CNY', ${USD_CNY}, 'manual', CURRENT_DATE)
+  `;
+}
 
 async function seedRef(
   id: string,
@@ -160,9 +200,11 @@ describe('POST /api/market/price-import/preview', () => {
     await seedRef('rp-d4', 'MKT-IMP-D4', { lastPrice: 10 });
     await seedRef('rp-e5', 'MKT-IMP-E5', { lastPrice: 10 });
     await seedRef('rp-f6', 'MKT-IMP-F6', { lastPrice: 10 });
+    await seedRef('rp-g7', 'MKT-IMP-G7', { lastPrice: 10 });
+    await seedRate();
     const { token } = await loginAs(ALEX);
 
-    const file = await blobOf(wbWith([
+    const wb = wbWith([
       ['Quote from a broker'],
       ['Item', 'Qty', 'Part Number', 'Unit Price (USD)', 'Total'],
       ['ram', 4, 'mkt imp a1', 80, 320],
@@ -174,14 +216,17 @@ describe('POST /api/market/price-import/preview', () => {
       ['x', 1, 'MKT-IMP-F6', '¥300', null],
       ['x', 1, 'MKT-IMP-A1', 85, 85],
       ['x', 1, '-', 5, 5],
-    ]));
+      ['x', 1, 'MKT-IMP-G7', 40, null],
+    ]);
+    wb.worksheets[0].getCell('D12').numFmt = '[$€-407]#,##0.00';
+    const file = await blobOf(wb);
     const res = await multipart(PREVIEW, { file }, { token });
     expect(res.status).toBe(200);
     const body = res.body as Preview;
     const m = body.targetMargin;
 
     expect(body.summary).toEqual({
-      matched: 2, notOnMarket: 2, noPrice: 2, invalid: 1, notUsd: 1, duplicate: 1,
+      matched: 3, notOnMarket: 2, noPrice: 2, invalid: 1, otherCurrency: 1, duplicate: 1,
     });
     const status = (rowNumber: number) => body.rows.find(r => r.rowNumber === rowNumber)?.status;
     expect(status(3)).toBe('duplicate');
@@ -189,12 +234,21 @@ describe('POST /api/market/price-import/preview', () => {
     expect(status(6)).toBe('no-price');
     expect(status(7)).toBe('no-price');
     expect(status(8)).toBe('invalid-price');
-    expect(status(9)).toBe('not-usd');
     expect(status(11)).toBe('not-on-market');
+    expect(body.rows.find(r => r.rowNumber === 12)).toMatchObject({
+      status: 'other-currency', currency: 'EUR', rawPrice: '40',
+    });
+    // The cell's ¥ outranks the column's (USD): converted, not skipped.
+    expect(body.rows.find(r => r.rowNumber === 9)).toMatchObject({
+      status: 'matched', refPriceId: 'rp-f6', currency: 'CNY', listedPrice: 300,
+      price: 41.58, newMaxBuy: maxBuy(41.58, m),
+    });
+    expect(body.fx?.oneUsdInQuote).toBeCloseTo(USD_CNY, 6);
+    expect(body.fx?.source).toBe('manual');
 
     expect(body.rows.find(r => r.rowNumber === 10)).toMatchObject({
       status: 'matched', refPriceId: 'rp-a1', partNumber: 'MKT-IMP-A1', label: 'label rp-a1',
-      price: 85, oldPrice: 100, oldMaxBuy: maxBuy(100, m), newMaxBuy: maxBuy(85, m),
+      currency: 'USD', price: 85, oldPrice: 100, oldMaxBuy: maxBuy(100, m), newMaxBuy: maxBuy(85, m),
     });
     // No recorded price yet: the current max buy comes off avg_sell, as on the table.
     expect(body.rows.find(r => r.rowNumber === 4)).toMatchObject({
@@ -207,6 +261,52 @@ describe('POST /api/market/price-import/preview', () => {
       SELECT COUNT(*)::int AS n FROM ref_price_events WHERE ref_price_id LIKE 'rp-%'
     `;
     expect(n).toBe(0);
+  });
+
+  it('reads an unmarked list in the currency it is given; a marked price keeps its own', async () => {
+    await seedRef('rp-a1', 'MKT-CNY-A1', { lastPrice: 100 });
+    await seedRef('rp-b2', 'MKT-CNY-B2', { lastPrice: 10 });
+    await seedRef('rp-c3', 'MKT-CNY-C3', { lastPrice: 10 });
+    await seedRef('rp-d4', 'MKT-CNY-D4', { lastPrice: 10 });
+    await seedRate();
+    const { token } = await loginAs(ALEX);
+    const wb = wbWith([
+      ['Part Number', 'Unit Price'],
+      ['MKT-CNY-A1', 720],
+      ['MKT-CNY-B2', '$15'],
+      // Under half a cent once converted — written, it would be $0.00.
+      ['MKT-CNY-C3', 0.03],
+      ['MKT-CNY-D4', 80],
+    ]);
+    wb.worksheets[0].getCell('B5').numFmt = '[$HK$-C04]#,##0.00';
+    const file = await blobOf(wb);
+
+    const yuan = await multipart(PREVIEW, { file, currency: 'CNY' }, { token });
+    expect(yuan.status).toBe(200);
+    const body = yuan.body as Preview;
+    const row = (rowNumber: number) => body.rows.find(r => r.rowNumber === rowNumber);
+    expect(row(2)).toMatchObject({
+      status: 'matched', currency: 'CNY', listedPrice: 720, price: 99.79,
+      oldMaxBuy: maxBuy(100, body.targetMargin), newMaxBuy: maxBuy(99.79, body.targetMargin),
+    });
+    expect(row(3)).toMatchObject({ status: 'matched', currency: 'USD', price: 15 });
+    expect(row(3)?.listedPrice).toBeUndefined();
+    expect(row(4)?.status).toBe('no-price');
+    expect(row(5)).toMatchObject({ status: 'other-currency', currency: 'HKD' });
+    expect(body.fx?.oneUsdInQuote).toBeCloseTo(USD_CNY, 6);
+
+    // The same file read as dollars: nothing converts, so no rate is looked up.
+    const dollars = (await multipart(PREVIEW, { file }, { token })).body as Preview;
+    expect(dollars.rows.find(r => r.rowNumber === 2)).toMatchObject({
+      status: 'matched', currency: 'USD', price: 720,
+    });
+    expect(dollars.rows.find(r => r.rowNumber === 4)).toMatchObject({ status: 'matched', price: 0.03 });
+    expect(dollars.fx).toBeNull();
+
+    // A column that names dollars is never converted, whatever the import was given.
+    const named = await blobOf(wbWith([['Part Number', 'Unit Price (USD)'], ['MKT-CNY-A1', 90]]));
+    const kept = (await multipart(PREVIEW, { file: named, currency: 'CNY' }, { token })).body as Preview;
+    expect(kept.rows[0]).toMatchObject({ status: 'matched', currency: 'USD', price: 90 });
   });
 
   it('writes to the most recently maintained of two rows sharing a part number', async () => {
@@ -240,6 +340,7 @@ describe('POST /api/market/price-import/preview', () => {
 
     expect((await multipart(PREVIEW, { file: good }, { token: purchaser })).status).toBe(403);
     expect((await multipart(PREVIEW, {}, { token })).status).toBe(400);
+    expect((await multipart(PREVIEW, { file: good, currency: 'EUR' }, { token })).status).toBe(400);
     const txt = await multipart(PREVIEW, {
       file: new Blob(['not a spreadsheet'], { type: 'text/plain' }),
     }, { token });
