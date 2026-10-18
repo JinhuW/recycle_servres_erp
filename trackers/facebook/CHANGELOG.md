@@ -18,6 +18,15 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A saved session survives a restart of any kind.** Each save is now
+  fsynced, with its directory, before the rename is trusted, so a power cut
+  cannot leave the session file pointing at data that never reached the disk.
+  A worker gets 30 s to stop instead of Docker's 10 (`stop_grace_period`, and
+  supervisord's `stopwaitsecs` 25), so the SIGTERM save that 0.10.3 added is
+  not cut short by a slow browser.
+
 ## [0.10.4] - 2026-10-18
 
 ### Fixed
