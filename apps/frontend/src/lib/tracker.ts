@@ -70,8 +70,9 @@ export type TrackerMatch = {
   status: PostStatus;
 };
 
-// All-time post counts by status (a status with no posts is absent), the
-// oldest post still waiting for the evaluator, and the newest failures.
+// Counts by status of the posts discovered since the `since` asked for (a
+// status with no posts is absent). The oldest post still waiting for the
+// evaluator and the newest failures ignore the window.
 export type TrackerStats = {
   posts: Partial<Record<PostStatus, number>>;
   oldestPending: { reddit_id: string; discovered_at: string } | null;
@@ -105,7 +106,8 @@ export const trackerApi = {
 
   listMatches: (limit: number) =>
     api.get<{ matches: TrackerMatch[] }>(`/api/tracker/matches?limit=${limit}`).then(r => r.matches),
-  stats: () => api.get<TrackerStats>('/api/tracker/stats'),
+  stats: (since: Date) =>
+    api.get<TrackerStats>(`/api/tracker/stats?since=${encodeURIComponent(since.toISOString())}`),
 
   listSubreddits: () =>
     api.get<{ subreddits: TrackerSubreddit[] }>('/api/tracker/subreddits').then(r => r.subreddits),

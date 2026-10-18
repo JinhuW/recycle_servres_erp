@@ -85,10 +85,14 @@ describe('Tracker proxy routes (/api/tracker)', () => {
       .toBe('http://tracker.internal:8080/api/matches?limit=8&since=2026-10-01T00:00:00Z');
 
     const stats = { posts: { new: 2, rejected: 40, notified: 3 }, oldestPending: null, subreddits: [], failed: [] };
-    stubTracker(200, stats);
-    const s = await api<typeof stats>('GET', '/api/tracker/stats', { token, env: TRACKER_ENV });
+    const statsSpy = stubTracker(200, stats);
+    const s = await api<typeof stats>(
+      'GET', '/api/tracker/stats?since=2026-10-17T00:00:00Z', { token, env: TRACKER_ENV },
+    );
     expect(s.status).toBe(200);
     expect(s.body).toEqual(stats);
+    expect((statsSpy.mock.calls[0] as [string])[0])
+      .toBe('http://tracker.internal:8080/api/stats?since=2026-10-17T00:00:00Z');
   });
 
   it('forwards a POST body and preserves the upstream status', async () => {

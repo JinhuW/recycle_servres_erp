@@ -17,6 +17,24 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.287.0] - 2026-10-18
+
+Monitors ▸ Reddit's pipeline card counts the past 24 hours (RS-302).
+
+### Changed
+
+- **"From a post to an alert" shows today, not all time.** The tracker
+  never deletes posts, so the Poll, Evaluate and Notify counts only ever
+  grew. In production they read 21,135 collected, 1,264 matched and 19,822
+  rejected, which says little about how the fleet is doing now. The card now
+  counts the posts discovered in the last 24 hours, and its header says so.
+  The three stages and the Waiting, Rejected, Queued and Failed chips all
+  count that same set of posts, so the stages read as a funnel. "Oldest
+  waiting" and the "Gave up after retries" list still look at every post,
+  because a window would hide an evaluator that has been stuck for a day.
+  The tracker's `GET /api/stats` takes a new `since` parameter for this, and
+  the ERP proxy passes it through.
+
 ## [1.286.0] - 2026-10-18
 
 The Market page's price import reads a list priced in US dollars or yuan

@@ -331,6 +331,25 @@ describe('stats and requeue', () => {
     expect(body.failed[0]?.reddit_id).toBe('t3_f');
   });
 
+  it('counts only posts discovered since the given time', async () => {
+    await seedTarget('t3_old', 'old item');
+    await db.sql`UPDATE posts SET discovered_at = NOW() - INTERVAL '2 days'`;
+    await seedTarget('t3_new', 'new item');
+
+    const allTime = await (await request('/api/stats')).json() as {posts: Record<string, number>};
+    expect(allTime.posts['notified']).toBe(2);
+
+    const since = new Date(Date.now() - 86_400_000).toISOString();
+    const windowed = await (await request(`/api/stats?since=${since}`)).json() as {
+      posts: Record<string, number>;
+    };
+    expect(windowed.posts['notified']).toBe(1);
+  });
+
+  it('rejects an unparseable since value on stats', async () => {
+    expect((await request('/api/stats?since=yesterday')).status).toBe(400);
+  });
+
   it('puts a failed post back in the queue', async () => {
     await db.sql`
       INSERT INTO posts (reddit_id, subreddit, title, url, posted_at, status, attempts)

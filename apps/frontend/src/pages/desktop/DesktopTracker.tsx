@@ -33,6 +33,7 @@ import '../../styles/facebookPool.css';
 
 const REFRESH_MS = 30_000;
 const MATCHES_SHOWN = 30;
+const STATS_WINDOW_MS = 24 * 3600_000;
 
 const LIVENESS: readonly Liveness[] = ['live', 'stale', 'dead'];
 const LIVENESS_KEY: Record<Liveness, string> = { live: 'trkLive', stale: 'trkStale', dead: 'trkDead' };
@@ -80,7 +81,7 @@ export function DesktopTracker({ showToast }: Props) {
   const loadLive = useCallback(() => {
     trackerApi.workerCounts().then(setCounts).catch(fail);
     trackerApi.listMatches(MATCHES_SHOWN).then(setMatches).catch(() => setMatches('unavailable'));
-    trackerApi.stats().then(setStats).catch(() => setStats('unavailable'));
+    trackerApi.stats(new Date(Date.now() - STATS_WINDOW_MS)).then(setStats).catch(() => setStats('unavailable'));
   }, [fail]);
 
   // Liveness, matches and the post counts all move on their own. A
@@ -454,9 +455,11 @@ function MatchesAside({ matches, locale }: { matches: TrackerMatch[] | Unavailab
 
 // ─── From a post to an alert ──────────────────────────────────────────────────
 // The three loops every worker runs (trackers/reddit/src/loops/), one stage
-// each. Counts are all-time post totals from /api/stats. Poll is where the
-// subreddits are edited and Evaluate where the alert rules are; Notify has no
-// settings this page may change.
+// each. Counts cover the posts discovered in the last STATS_WINDOW_MS, one
+// cohort, so the stages read as a funnel; the tracker never prunes posts, so
+// all-time totals only grow. Poll is where the subreddits are edited and
+// Evaluate where the alert rules are; Notify has no settings this page may
+// change.
 
 type Setting = { label: string; value: string; fixed?: boolean };
 

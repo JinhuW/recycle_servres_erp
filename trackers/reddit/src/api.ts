@@ -40,6 +40,14 @@ function parseLimit(raw: string | undefined, fallback: number): number {
   return Math.min(Math.floor(value), MAX_LIMIT);
 }
 
+function parseSince(raw: string | undefined): Date | null | 'invalid' {
+  if (!raw) return null;
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? 'invalid' : date;
+}
+
+const SINCE_INVALID = 'since must be an ISO 8601 timestamp';
+
 export function createApi(deps: ApiDeps): Hono {
   const app = new Hono();
 
@@ -74,11 +82,8 @@ export function createApi(deps: ApiDeps): Hono {
   // The deliverable: LLM summary plus the link, newest first.
   app.get('/api/matches', async (c) => {
     const limit = parseLimit(c.req.query('limit'), 50);
-    const since = c.req.query('since');
-    const sinceDate = since ? new Date(since) : null;
-    if (sinceDate && Number.isNaN(sinceDate.getTime())) {
-      return c.json({error: 'since must be an ISO 8601 timestamp'}, 400);
-    }
+    const sinceDate = parseSince(c.req.query('since'));
+    if (sinceDate === 'invalid') return c.json({error: SINCE_INVALID}, 400);
 
     const rows = await deps.sql<MatchRow[]>`
       SELECT reddit_id, subreddit, title, llm_summary, llm_price, url,
@@ -299,10 +304,17 @@ export function createApi(deps: ApiDeps): Hono {
     return c.json({key, value: body.value});
   });
 
+  // `since` windows the status counts only. The oldest pending post and the
+  // failed list stay current-state: they exist to show a stuck evaluator.
   app.get('/api/stats', async (c) => {
+    const sinceDate = parseSince(c.req.query('since'));
+    if (sinceDate === 'invalid') return c.json({error: SINCE_INVALID}, 400);
+
     const [byStatus, subreddits, oldest] = await Promise.all([
       deps.sql<Array<{status: string; count: string}>>`
-        SELECT status, COUNT(*)::text AS count FROM posts GROUP BY status`,
+        SELECT status, COUNT(*)::text AS count FROM posts
+         ${sinceDate ? deps.sql`WHERE discovered_at >= ${sinceDate}` : deps.sql``}
+         GROUP BY status`,
       deps.sql`
         SELECT name, enabled, last_status, consecutive_errors, last_polled_at, next_poll_at
           FROM subreddits ORDER BY name`,
