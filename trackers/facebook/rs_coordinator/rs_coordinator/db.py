@@ -346,6 +346,29 @@ CREATE TABLE IF NOT EXISTS code_audit (
     released_at TEXT NOT NULL
 );
 
+-- One browser identity per Facebook account, wherever that account runs. The
+-- key is the account ('uid:<facebook uid>'), not the worker: a worker is a slot
+-- that can be handed another login, and two logins on one device are linked.
+-- device_id is written once and never regenerated. A NULL user_agent means
+-- "the browser's own", which stays consistent with its client hints.
+CREATE TABLE IF NOT EXISTS device_profiles (
+    identity_key        TEXT PRIMARY KEY,
+    device_id           TEXT NOT NULL UNIQUE,
+    fb_uid              TEXT,
+    user_agent          TEXT,
+    viewport_w          INTEGER NOT NULL,
+    viewport_h          INTEGER NOT NULL,
+    screen_w            INTEGER NOT NULL,
+    screen_h            INTEGER NOT NULL,
+    device_scale_factor REAL NOT NULL DEFAULT 1,
+    locale              TEXT NOT NULL,
+    timezone_id         TEXT NOT NULL,
+    device_cookies_blob BLOB,
+    source              TEXT,
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_challenges_status ON challenges(status);
 CREATE INDEX IF NOT EXISTS idx_code_audit_time ON code_audit(released_at);
 """
@@ -394,6 +417,15 @@ LISTING_EXTRA_COLUMNS = (
 # against Facebook's own "account 1000…" wording in a checkpoint notice.
 SNAPSHOT_EXTRA_COLUMNS = (
     ("fb_user_id", "TEXT"),
+    # The device profile the backed-up session belongs to. A snapshot is only
+    # restored onto the identity it was taken from.
+    ("identity_key", "TEXT"),
+)
+
+# Columns added to `accounts`, same mechanism. `fb_uid` is the Facebook uid of
+# the login in `fb_username`, the key of its device profile.
+ACCOUNT_EXTRA_COLUMNS = (
+    ("fb_uid", "TEXT"),
 )
 
 # Funnel stages, in pipeline order. The first six and `reviewed` / `alerted`
@@ -596,6 +628,7 @@ class Database:
             self._migrate_columns("outbound_messages", OUTBOUND_EXTRA_COLUMNS)
             self._migrate_columns("session_snapshots", SNAPSHOT_EXTRA_COLUMNS)
             self._migrate_columns("review_stats", REVIEW_STATS_EXTRA_COLUMNS)
+            self._migrate_columns("accounts", ACCOUNT_EXTRA_COLUMNS)
             # Created after the migration adds the columns they index.
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_threads_room ON threads(matrix_room_id)"
@@ -1351,7 +1384,7 @@ class Database:
         """Non-secret account fields only — never returns secret_blob."""
         with self.cursor() as cur:
             cur.execute(
-                "SELECT account_id, worker_id, fb_username, region, proxy, vnc_url, "
+                "SELECT account_id, worker_id, fb_username, fb_uid, region, proxy, vnc_url, "
                 "allow_password_login, created_at, updated_at FROM accounts ORDER BY account_id"
             )
             return [dict(row) for row in cur.fetchall()]
@@ -1432,6 +1465,74 @@ class Database:
             cur.execute("SELECT * FROM session_snapshots WHERE worker_id = ?", (worker_id,))
             row = cur.fetchone()
         return dict(row) if row else None
+
+    # -- device profiles ---------------------------------------------------
+
+    def get_device_profile(self: "Database", identity_key: str) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM device_profiles WHERE identity_key = ?", (identity_key,))
+            row = cur.fetchone()
+        return dict(row) if row else None
+
+    def device_profile_by_device(self: "Database", device_id: str) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM device_profiles WHERE device_id = ?", (device_id,))
+            row = cur.fetchone()
+        return dict(row) if row else None
+
+    def insert_device_profile(self: "Database", record: Dict[str, Any]) -> bool:
+        """Create a profile unless the identity already has one; True if created.
+
+        Two workers can ask for a new identity's profile at once. The loser of
+        that race must read the winner's row, never write a second device.
+        """
+        now = utcnow()
+        record = {"created_at": now, "updated_at": now, **record}
+        columns = ", ".join(record)
+        placeholders = ", ".join(["?"] * len(record))
+        with self.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO device_profiles ({columns}) VALUES ({placeholders}) "
+                "ON CONFLICT(identity_key) DO NOTHING",
+                tuple(record.values()),
+            )
+            return cur.rowcount > 0
+
+    def update_device_profile(
+        self: "Database", identity_key: str, fields: Dict[str, Any]
+    ) -> None:
+        if not fields:
+            return
+        record = {**fields, "updated_at": utcnow()}
+        assignments = ", ".join(f"{name} = ?" for name in record)
+        with self.cursor() as cur:
+            cur.execute(
+                f"UPDATE device_profiles SET {assignments} WHERE identity_key = ?",
+                (*record.values(), identity_key),
+            )
+
+    def rekey_device_profile(self: "Database", old_key: str, new_key: str) -> bool:
+        """Move a profile to a new identity key, unless that key is taken."""
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE device_profiles SET identity_key = ?, updated_at = ? "
+                "WHERE identity_key = ? AND NOT EXISTS "
+                "(SELECT 1 FROM device_profiles WHERE identity_key = ?)",
+                (new_key, utcnow(), old_key, new_key),
+            )
+            return cur.rowcount > 0
+
+    def list_device_profiles(self: "Database") -> List[Dict[str, Any]]:
+        """Every profile without its sealed cookies."""
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT identity_key, device_id, fb_uid, user_agent, viewport_w, viewport_h, "
+                "screen_w, screen_h, device_scale_factor, locale, timezone_id, source, "
+                "CASE WHEN device_cookies_blob IS NULL THEN 0 ELSE 1 END AS has_device_cookies, "
+                "created_at, updated_at "
+                "FROM device_profiles ORDER BY identity_key"
+            )
+            return [dict(row) for row in cur.fetchall()]
 
     # -- audit -------------------------------------------------------------
 

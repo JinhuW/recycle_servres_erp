@@ -27,7 +27,7 @@ from contextlib import contextmanager
 import pytest
 
 from rs_coordinator import db as db_module
-from rs_coordinator.db import Database, open_database, postgres_url, utcnow
+from rs_coordinator.db import SCHEMA, Database, open_database, postgres_url, utcnow
 from rs_coordinator.pg import (
     ADVISORY_LOCK_KEY,
     PostgresDatabase,
@@ -41,18 +41,9 @@ requires_postgres = pytest.mark.skipif(
     not TEST_URL, reason="RS_TEST_DATABASE_URL is not set; no live Postgres to test against"
 )
 
-TABLES = (
-    "listings",
-    "sightings",
-    "workers",
-    "accounts",
-    "challenges",
-    "session_snapshots",
-    "code_audit",
-    "review_stats",
-    "search_cycles",
-    "search_cities",
-)
+# Every table the schema creates, so a case never inherits rows a previous
+# run left in a table nobody remembered to list.
+TABLES = tuple(re.findall(r"CREATE TABLE IF NOT EXISTS (\w+)", SCHEMA))
 
 
 def _drop_everything() -> None:
@@ -351,6 +342,49 @@ def test_city_tier_config_saves_settings_and_replaces_pins(backend):
     assert config["settings"] == {"top_pct": 10}
     assert config["pins"] == {"reno": 2}
     assert config["updated_by"] == "alex" and config["updated_at"]
+
+
+def _profile(key: str, device_id: str) -> dict:
+    return {
+        "identity_key": key, "device_id": device_id, "fb_uid": key.split(":")[1],
+        "user_agent": None, "viewport_w": 1440, "viewport_h": 777, "screen_w": 1440,
+        "screen_h": 900, "device_scale_factor": 1.25, "locale": "en-US",
+        "timezone_id": "America/Denver", "source": "generated",
+    }
+
+
+def test_device_profiles_are_created_once_and_found_by_key_or_device(backend):
+    assert backend.insert_device_profile(_profile("uid:1", "dev-1")) is True
+    # A racing second create for the same account loses and writes nothing.
+    assert backend.insert_device_profile(_profile("uid:1", "dev-2")) is False
+
+    by_key = backend.get_device_profile("uid:1")
+    assert by_key["device_id"] == "dev-1"
+    assert by_key["device_scale_factor"] == 1.25
+    assert backend.device_profile_by_device("dev-1")["identity_key"] == "uid:1"
+    assert backend.get_device_profile("uid:2") is None
+
+    backend.update_device_profile("uid:1", {"device_cookies_blob": b"sealed"})
+    assert backend.get_device_profile("uid:1")["device_cookies_blob"] == b"sealed"
+    listed = backend.list_device_profiles()
+    assert [(p["identity_key"], p["has_device_cookies"]) for p in listed] == [("uid:1", 1)]
+    assert "device_cookies_blob" not in listed[0]
+
+
+def test_rekeying_a_device_profile_never_overwrites_another(backend):
+    backend.insert_device_profile(_profile("uid:1", "dev-1"))
+    backend.insert_device_profile(_profile("uid:2", "dev-2"))
+
+    assert backend.rekey_device_profile("uid:1", "uid:2") is False
+    assert backend.rekey_device_profile("uid:1", "uid:3") is True
+    assert backend.get_device_profile("uid:3")["device_id"] == "dev-1"
+    assert backend.get_device_profile("uid:1") is None
+
+
+def test_accounts_carry_a_facebook_uid(backend):
+    backend.put_account("va-1", {"worker_id": "va-1", "fb_uid": "1000"})
+    assert backend.get_account_row("va-1")["fb_uid"] == "1000"
+    assert backend.list_accounts()[0]["fb_uid"] == "1000"
 
 
 # -- Postgres-specific -----------------------------------------------------
@@ -710,8 +744,14 @@ def test_no_sqlite_placeholders_survive_in_the_postgres_sql():
     handle.get_snapshot("w")
     handle.insert_code_audit("w", "a", "totp", "why")
     handle.list_code_audit(limit=5)
+    handle.get_device_profile("uid:1")
+    handle.device_profile_by_device("dev-1")
+    handle.insert_device_profile({"identity_key": "uid:1", "device_id": "dev-1"})
+    handle.update_device_profile("uid:1", {"locale": "en-US"})
+    handle.rekey_device_profile("uid:1", "uid:2")
+    handle.list_device_profiles()
 
-    assert len(handle.log) == 24
+    assert len(handle.log) == 30
     for sql in handle.log:
         assert "?" not in sql, f"SQLite placeholder left in: {sql}"
         assert not re.search(r":\w", sql), f"named SQLite placeholder left in: {sql}"

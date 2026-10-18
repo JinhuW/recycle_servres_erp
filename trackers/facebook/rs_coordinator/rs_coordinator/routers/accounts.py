@@ -46,6 +46,7 @@ def _account_out(store: AccountStore, row: Dict[str, Any]) -> AccountOut:
         account_id=account_id,
         worker_id=row.get("worker_id"),
         fb_username=row.get("fb_username"),
+        fb_uid=row.get("fb_uid"),
         region=row.get("region"),
         vnc_url=row.get("vnc_url"),
         allow_password_login=bool(row.get("allow_password_login")),
@@ -137,6 +138,7 @@ def put_account(account_id: str, payload: AccountUpsert) -> AccountOut:
             secrets or None,
             worker_id=payload.worker_id or None,
             fb_username=payload.fb_username or None,
+            fb_uid=payload.fb_uid or None,
             region=payload.region or None,
             allow_password_login=allow_password_login,
             merge_secrets=True,
@@ -154,6 +156,7 @@ def put_account(account_id: str, payload: AccountUpsert) -> AccountOut:
         for name, value in (
             ("worker_id", payload.worker_id),
             ("fb_username", payload.fb_username),
+            ("fb_uid", payload.fb_uid),
             ("region", payload.region),
             ("allow_password_login", payload.allow_password_login),
         )

@@ -229,6 +229,7 @@ def test_fleet_joins_config_to_health(client):
     assert monitor["account"] == {
         "account_id": "personal",
         "fb_username": "someone@example.com",
+        "fb_uid": None,
         "region": None,
         "vnc_url": None,
         "allow_password_login": False,

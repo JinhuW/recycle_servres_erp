@@ -33,6 +33,7 @@ from typing import Any, Dict, Iterator, List, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from .db import (
+    ACCOUNT_EXTRA_COLUMNS,
     ALERT_HIT_SQL,
     LISTING_EXTRA_COLUMNS,
     OUTBOUND_EXTRA_COLUMNS,
@@ -198,6 +199,7 @@ class PostgresDatabase:
                 self._migrate_columns(conn, "outbound_messages", OUTBOUND_EXTRA_COLUMNS)
                 self._migrate_columns(conn, "session_snapshots", SNAPSHOT_EXTRA_COLUMNS)
                 self._migrate_columns(conn, "review_stats", REVIEW_STATS_EXTRA_COLUMNS)
+                self._migrate_columns(conn, "accounts", ACCOUNT_EXTRA_COLUMNS)
                 # Created after the migration adds the columns they index.
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_threads_room ON threads(matrix_room_id)"
@@ -921,7 +923,7 @@ class PostgresDatabase:
         """Non-secret account fields only — never returns secret_blob."""
         with self.cursor() as cur:
             cur.execute(
-                "SELECT account_id, worker_id, fb_username, region, proxy, vnc_url, "
+                "SELECT account_id, worker_id, fb_username, fb_uid, region, proxy, vnc_url, "
                 "allow_password_login, created_at, updated_at FROM accounts ORDER BY account_id"
             )
             return _rows(cur.fetchall())
@@ -1009,6 +1011,71 @@ class PostgresDatabase:
             cur.execute("SELECT * FROM session_snapshots WHERE worker_id = %s", (worker_id,))
             row = cur.fetchone()
         return _row(row)
+
+    # -- device profiles ---------------------------------------------------
+
+    def get_device_profile(
+        self: "PostgresDatabase", identity_key: str
+    ) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM device_profiles WHERE identity_key = %s", (identity_key,))
+            row = cur.fetchone()
+        return _row(row)
+
+    def device_profile_by_device(
+        self: "PostgresDatabase", device_id: str
+    ) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM device_profiles WHERE device_id = %s", (device_id,))
+            row = cur.fetchone()
+        return _row(row)
+
+    def insert_device_profile(self: "PostgresDatabase", record: Dict[str, Any]) -> bool:
+        now = utcnow()
+        record = {"created_at": now, "updated_at": now, **record}
+        columns = ", ".join(record)
+        placeholders = ", ".join(["%s"] * len(record))
+        with self.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO device_profiles ({columns}) VALUES ({placeholders}) "
+                "ON CONFLICT(identity_key) DO NOTHING",
+                tuple(record.values()),
+            )
+            return cur.rowcount > 0
+
+    def update_device_profile(
+        self: "PostgresDatabase", identity_key: str, fields: Dict[str, Any]
+    ) -> None:
+        if not fields:
+            return
+        record = {**fields, "updated_at": utcnow()}
+        assignments = ", ".join(f"{name} = %s" for name in record)
+        with self.cursor() as cur:
+            cur.execute(
+                f"UPDATE device_profiles SET {assignments} WHERE identity_key = %s",
+                (*record.values(), identity_key),
+            )
+
+    def rekey_device_profile(self: "PostgresDatabase", old_key: str, new_key: str) -> bool:
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE device_profiles SET identity_key = %s, updated_at = %s "
+                "WHERE identity_key = %s AND NOT EXISTS "
+                "(SELECT 1 FROM device_profiles WHERE identity_key = %s)",
+                (new_key, utcnow(), old_key, new_key),
+            )
+            return cur.rowcount > 0
+
+    def list_device_profiles(self: "PostgresDatabase") -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT identity_key, device_id, fb_uid, user_agent, viewport_w, viewport_h, "
+                "screen_w, screen_h, device_scale_factor, locale, timezone_id, source, "
+                "CASE WHEN device_cookies_blob IS NULL THEN 0 ELSE 1 END AS has_device_cookies, "
+                "created_at, updated_at "
+                "FROM device_profiles ORDER BY identity_key"
+            )
+            return _rows(cur.fetchall())
 
     # -- audit -------------------------------------------------------------
 

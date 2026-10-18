@@ -167,19 +167,46 @@ writes in place, so the inode and the host file's ownership and 0600 mode are
 preserved). Drop the write path and every restart replays a stale `xs`, which
 ages the session out far faster than it needs to.
 
-## What does NOT persist: the browser profile
+## What persists, and where
 
-`aimm` calls `browser.new_context(storage_state=…)`, which builds a **fresh,
-throwaway Chromium profile** on every run and injects the cookies into it. So a
-restart keeps the session but presents a brand-new browser: no cache, no service
-workers, no IndexedDB, and only the pinned user agent for continuity.
+| What | Where | Survives |
+| --- | --- | --- |
+| The session (`fb_state.json` + sidecar) | the worker's `/data` on its host, and a sealed snapshot in the coordinator | a restart; a rebuilt or moved worker restores the snapshot |
+| The device (user agent, screen, viewport, locale, timezone, `datr`/`sb`) | `device_profiles` in the coordinator, cached as `/data/identity.json` | everything: it belongs to the Facebook account, not the host |
+| The browser profile (cache, service workers) | nowhere | nothing |
 
-Facebook binds a session to the browser it was created on, so a genuinely
-persistent profile (`launch_persistent_context` with a `user_data_dir` on a
-volume) would look more consistent to it than what we do today. That is a change
-to `marketplace.py:create_page`, not a compose setting — worth doing if
-checkpoints become frequent, and deliberately not done yet because it changes
-how every worker launches.
+**The device belongs to the account.** The coordinator keeps one device profile
+per Facebook account, keyed by its uid (`accounts.fb_uid`, which the ERP's
+*Assign to fleet* sets). Whichever worker runs the account presents it: a
+restart, a rebuilt VM, or the account moving to another worker shows Facebook
+the same browser. Two accounts never share one. `rsc identity list` prints
+them. A worker whose account has no uid keeps the browser it always had.
+
+**A session follows its slot.** A worker's session snapshot is restored onto
+that same worker id when its `/data` holds no session, or holds the same
+session gone stale (saved under the account's device before the snapshot was).
+A live session of any other provenance is never replaced, and once the
+account has a uid the coordinator only releases a snapshot of that login, so
+a swapped-in login never inherits the previous one's cookies. The IP
+Facebook sees is the slot's proxy, which goes wherever the slot runs. A worker
+with no proxy egresses through its host's own IP, so it must stay on that host.
+
+**A new login sets the old session aside.** When the ERP puts another account
+on a worker, the worker moves the previous session to
+`fb_state.json.<time>.previous-login` (never deleted) and signs in under the
+new account's own device.
+
+**Joining.** A worker that is logged in but has no device yet reports what its
+browser presents, and its account's first profile copies that, so Facebook sees
+nothing change. For the accounts that predate the uid, `rsc identity
+learn-uids` prints each slot's session uid; check them against the ERP's pool,
+then `--apply`.
+
+**The browser profile itself does not persist.** `aimm` builds a fresh Chromium
+profile per context and injects the session (cookies, localStorage and
+IndexedDB, `indexed_db=True`) and the device into it. A persistent
+`user_data_dir` would only survive on one host, which is what the device
+profile already replaces.
 
 ## Keeping sessions alive
 

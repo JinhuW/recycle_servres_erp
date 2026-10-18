@@ -389,6 +389,7 @@ def cmd_vault_set_account(args: argparse.Namespace) -> int:
         secrets or None,
         worker_id=args.worker,
         fb_username=args.fb_username,
+        fb_uid=args.fb_uid,
         region=args.region,
         proxy=args.proxy,
         vnc_url=args.vnc_url,
@@ -431,6 +432,7 @@ def cmd_vault_list(args: argparse.Namespace) -> int:
         )
         print(
             f"  fb user: {account.get('fb_username') or '-'}    "
+            f"fb uid: {account.get('fb_uid') or '-'}    "
             f"proxy: {account.get('proxy') or '-'}    "
             f"vnc: {account.get('vnc_url') or '-'}"
         )
@@ -473,6 +475,67 @@ def cmd_vault_rm(args: argparse.Namespace) -> int:
             return 1
     store.delete_account(args.account_id)
     print(f"deleted account '{args.account_id}'")
+    return 0
+
+
+def cmd_identity_list(args: argparse.Namespace) -> int:
+    profiles = open_database().list_device_profiles()
+    if not profiles:
+        print("No device profiles yet. A worker creates its account's on its first login.")
+        return 0
+    print(f"{len(profiles)} device profile(s):")
+    for p in profiles:
+        print(
+            f"\n{p['identity_key']}  device {p['device_id']}  ({p.get('source') or '-'}, "
+            f"since {p.get('created_at') or '-'})"
+        )
+        print(
+            f"  screen {p['screen_w']}x{p['screen_h']}  viewport {p['viewport_w']}x"
+            f"{p['viewport_h']}  scale {p['device_scale_factor']}  {p['locale']}  "
+            f"{p['timezone_id']}  device cookies: {'SET' if p['has_device_cookies'] else '-'}"
+        )
+        print(f"  user agent: {p.get('user_agent') or '(the browser’s own)'}")
+    return 0
+
+
+@_guarded
+def cmd_identity_learn_uids(args: argparse.Namespace) -> int:
+    """Fill in the uid of accounts that predate it, from their slot's session.
+
+    Only for the migration. The uid picks an account's device, so each row
+    printed here is a claim — "this slot's session is this account's login" —
+    for an operator to check against the ERP's pool before `--apply`.
+    """
+    from .routers.session import fb_user_id_of
+
+    store = _account_store()
+    candidates = []
+    for account in store.list_accounts():
+        if account.get("fb_uid") or not account.get("worker_id"):
+            continue
+        snapshot = store.db.get_snapshot(account["worker_id"])
+        if not snapshot or snapshot.get("state_blob") is None:
+            continue
+        uid = snapshot.get("fb_user_id") or fb_user_id_of(
+            store.vault.decrypt(snapshot["state_blob"])
+        )
+        if uid:
+            candidates.append((account, uid, snapshot.get("backed_up_at")))
+    if not candidates:
+        print("Every account with a backed-up session already has a uid.")
+        return 0
+    for account, uid, backed_up_at in candidates:
+        print(
+            f"{account['account_id']:<20} worker {account['worker_id']:<12} "
+            f"login {account.get('fb_username') or '-':<32} session uid {uid} "
+            f"(backed up {backed_up_at or '-'})"
+        )
+    if not args.apply:
+        print("\nNothing written. Check each uid against the ERP's pool, then rerun with --apply.")
+        return 0
+    for account, uid, _ in candidates:
+        store.db.put_account(account["account_id"], {"fb_uid": uid})
+    print(f"\nwrote the uid of {len(candidates)} account(s)")
     return 0
 
 
@@ -638,6 +701,10 @@ def build_parser() -> argparse.ArgumentParser:
     v_set.add_argument("--worker", help="Worker id that owns this account")
     v_set.add_argument("--region", help="Region key from master.toml")
     v_set.add_argument("--fb-username", help="Facebook login (stored unencrypted, for display)")
+    v_set.add_argument(
+        "--fb-uid",
+        help="Facebook uid of that login: picks the device profile its worker presents",
+    )
     v_set.add_argument("--proxy", help="Proxy URL this account browses through")
     v_set.add_argument("--vnc-url", help="Where a human can take over this worker's browser")
     login = v_set.add_mutually_exclusive_group()
@@ -687,6 +754,16 @@ def build_parser() -> argparse.ArgumentParser:
     v_rm.add_argument("--account-id", required=True)
     v_rm.add_argument("--yes", action="store_true", help="Skip the confirmation prompt")
     v_rm.set_defaults(func=cmd_vault_rm)
+
+    identity = sub.add_parser("identity", help="Device profiles: one browser per account")
+    identity_sub = identity.add_subparsers(dest="identity_command", required=True)
+    i_list = identity_sub.add_parser("list", help="List device profiles")
+    i_list.set_defaults(func=cmd_identity_list)
+    i_learn = identity_sub.add_parser(
+        "learn-uids", help="Fill in missing account uids from each slot's backed-up session"
+    )
+    i_learn.add_argument("--apply", action="store_true", help="Write them (default: print)")
+    i_learn.set_defaults(func=cmd_identity_learn_uids)
 
     token = sub.add_parser("mint-token", help="Print a worker's bearer token")
     token.add_argument("--worker", required=True, help="Worker id the token authenticates")

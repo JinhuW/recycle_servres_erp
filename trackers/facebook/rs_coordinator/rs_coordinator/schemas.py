@@ -405,6 +405,27 @@ class SessionBackupRequest(BaseModel):
     storage_state: Dict[str, Any]
     user_agent: str | None = None
     session_expiry: str | None = None
+    # The device profile the worker's browser presented this session under.
+    # Absent from monitors that predate profiles.
+    device_id: str | None = Field(default=None, max_length=64)
+
+
+class ObservedDevice(BaseModel):
+    """What a worker's browser presents today, sent once so the first profile
+    of an account that is already logged in copies it rather than replacing it."""
+
+    user_agent: str | None = Field(default=None, max_length=512)
+    viewport_w: int | None = Field(default=None, ge=320, le=4096)
+    viewport_h: int | None = Field(default=None, ge=240, le=4096)
+    screen_w: int | None = Field(default=None, ge=320, le=8192)
+    screen_h: int | None = Field(default=None, ge=240, le=8192)
+    device_scale_factor: float | None = Field(default=None, ge=0.5, le=4)
+    locale: str | None = Field(default=None, max_length=35)
+    timezone_id: str | None = Field(default=None, max_length=64)
+
+
+class IdentityRequest(BaseModel):
+    observed: ObservedDevice | None = None
 
 
 class SessionMeta(BaseModel):
@@ -428,6 +449,8 @@ class AccountOut(BaseModel):
     account_id: str
     worker_id: str | None = None
     fb_username: str | None = None
+    # The Facebook uid of that login: public, the key of its device profile.
+    fb_uid: str | None = None
     region: str | None = None
     vnc_url: str | None = None
     allow_password_login: bool = False
@@ -448,6 +471,7 @@ class AccountList(BaseModel):
 # the URL space and the audit log that could not be typed on a command line.
 ACCOUNT_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._@-]{0,63}$"
 WORKER_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+FB_UID_PATTERN = r"^[0-9]{1,32}$"
 
 
 class AccountUpsert(BaseModel):
@@ -462,6 +486,9 @@ class AccountUpsert(BaseModel):
 
     worker_id: str | None = Field(default=None, pattern=WORKER_ID_PATTERN)
     fb_username: str | None = Field(default=None, max_length=200)
+    # Sent with `fb_username` when the ERP knows it. A new username sent
+    # without one forgets the stored uid (see `AccountStore.put_account`).
+    fb_uid: str | None = Field(default=None, pattern=FB_UID_PATTERN)
     region: str | None = Field(default=None, max_length=64)
     allow_password_login: bool | None = None
     secrets: Dict[str, Optional[str]] = Field(default_factory=dict)

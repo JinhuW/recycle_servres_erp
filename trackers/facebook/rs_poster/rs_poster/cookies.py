@@ -326,6 +326,36 @@ def write_session_meta(
     return atomic_write_text(path, json.dumps(meta, indent=2))
 
 
+def device_context_options(state_path: str | Path) -> Dict[str, Any]:
+    """`new_context` options for the device the monitor cached beside the session.
+
+    The monitor keeps its account's device profile in `identity.json` next to
+    the session file. The poster and messenger open the same session, so they
+    present the same device; a different viewport per process would be one
+    account on two machines. Empty when there is no cached device.
+    """
+    path = Path(state_path).parent / "identity.json"
+    try:
+        device = json.loads(path.read_text()).get("device")
+    except (OSError, ValueError, AttributeError):
+        return {}
+    if not isinstance(device, dict):
+        return {}
+    options: Dict[str, Any] = {}
+    for key in ("viewport", "screen"):
+        size = device.get(key)
+        if isinstance(size, dict) and size.get("width") and size.get("height"):
+            options[key] = {"width": int(size["width"]), "height": int(size["height"])}
+    if "viewport" not in options:
+        options.pop("screen", None)
+    if device.get("device_scale_factor"):
+        options["device_scale_factor"] = float(device["device_scale_factor"])
+    for key in ("locale", "timezone_id", "user_agent"):
+        if device.get(key):
+            options[key] = str(device[key])
+    return options
+
+
 def read_session_meta(state_path: str | Path) -> Dict[str, Any]:
     path = meta_path_for(state_path)
     if not path.exists():

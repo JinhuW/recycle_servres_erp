@@ -276,9 +276,23 @@ def test_meta_requires_the_admin_token(env):
 
 # -- restore ---------------------------------------------------------------
 
+UID = "100000000000001"
+
+
+def own_device(client, worker_id: str = "denver-1", fb_uid: str = UID) -> str:
+    """Give the worker's account a uid and return the device it is told to be."""
+    client.deps.get_account_store().put_account(
+        "denver", {"password": "pw"}, worker_id=worker_id, fb_uid=fb_uid
+    )
+    response = client.post(
+        f"/v1/workers/{worker_id}/identity", json={}, headers=worker_auth(worker_id)
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["device"]["device_id"]
+
 
 def test_a_worker_restores_its_own_session(env):
-    backup(env)
+    backup(env, device_id=own_device(env))
     response = env.get("/v1/session/denver-1/restore", headers=worker_auth("denver-1"))
 
     assert response.status_code == 200
@@ -286,6 +300,58 @@ def test_a_worker_restores_its_own_session(env):
     assert body["storage_state"] == sample_state()
     assert body["user_agent"].startswith("Mozilla/5.0")
     assert body["backed_up_at"]
+    assert body["identity_key"] == f"uid:{UID}"
+    assert body["fb_user_id"] == UID
+
+
+def test_a_snapshot_from_before_device_profiles_is_restored_if_it_is_the_same_login(env):
+    own_device(env)
+    backup(env)  # no device named: an older worker
+    response = env.get("/v1/session/denver-1/restore", headers=worker_auth("denver-1"))
+
+    assert response.status_code == 200
+    assert response.json()["identity_key"] == f"uid:{UID}"
+
+
+def test_a_snapshot_of_another_uid_is_never_restored(env):
+    own_device(env, fb_uid="200000000000002")
+    backup(env)  # logged in as 100000000000001
+    response = env.get("/v1/session/denver-1/restore", headers=worker_auth("denver-1"))
+
+    assert response.status_code == 409
+    assert SESSION_COOKIE not in response.text
+
+
+def test_an_account_without_a_uid_restores_as_before_devices(env):
+    backup(env)
+    response = env.get("/v1/session/denver-1/restore", headers=worker_auth("denver-1"))
+    assert response.status_code == 200
+    assert response.json()["identity_key"] is None
+
+
+def test_the_previous_logins_session_is_not_restored_after_a_swap(env):
+    device = own_device(env)
+    backup(env, device_id=device)
+    # The ERP hands the slot another login; the old session is still on file.
+    env.deps.get_account_store().put_account(
+        "denver", {}, worker_id="denver-1", fb_username="next@example.test", fb_uid="200000000000002"
+    )
+    response = env.get("/v1/session/denver-1/restore", headers=worker_auth("denver-1"))
+
+    assert response.status_code == 409
+    assert SESSION_COOKIE not in response.text
+
+
+def test_a_session_saved_under_another_logins_device_is_not_filed_as_its_own(env):
+    """The browser still holds the old login while a swap's re-login is queued."""
+    device = own_device(env)
+    other = sample_state()
+    other["cookies"][1]["value"] = "300000000000003"
+    backup(env, device_id=device, storage_state=other)
+
+    assert env.db.get_snapshot("denver-1")["identity_key"] is None
+    response = env.get("/v1/session/denver-1/restore", headers=worker_auth("denver-1"))
+    assert response.status_code == 409
 
 
 def test_a_worker_cannot_restore_another_workers_session(env):
@@ -315,7 +381,7 @@ def test_restore_404s_without_a_snapshot(env):
 
 
 def test_restore_reports_a_rotated_vault_key_as_a_503(env, monkeypatch):
-    backup(env)
+    backup(env, device_id=own_device(env))
 
     # Simulate the key having been rotated since the snapshot was sealed.
     stale = Vault(generate_key())
