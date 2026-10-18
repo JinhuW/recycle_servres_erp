@@ -18,6 +18,17 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Changed
+
+- **The console's fleet dashboard shows where each proxy comes out.** The
+  account table's Proxy column and a worker's detail row showed only the env
+  var name (`$PROXY_HOMELAB_NE`). They now show what `/v1/fleet` has carried
+  since 0.10.0: the proxy's host and port without the login, and its exit
+  city, with the exit IP and ISP on hover. The detail row spells out
+  `IP · City, Region, Country`, or says the lookup is still running or
+  failed. A worker without a proxy shows "own IP" and the VM's own exit
+  city. Search matches the proxy host, exit IP and city too (RS-288).
+
 ## [0.10.1] - 2026-10-17
 
 ### Fixed
