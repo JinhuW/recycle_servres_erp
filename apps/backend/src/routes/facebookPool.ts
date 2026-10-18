@@ -460,11 +460,14 @@ pool.post('/:no/assign', async (c) => {
   if (!password) return c.json({ error: 'This account has no password to sign in with', code: 'fpNoPassword' }, 409);
 
   // Every secret is set, empty ones cleared: what the worker held before
-  // belongs to the previous account.
+  // belongs to the previous account. The uid travels with the login because
+  // it picks the browser identity the worker presents; a worker left with the
+  // previous login's uid would sign the new account in from that one's device.
   const orNull = (v: string) => v || null;
   const write = await callFacade(c.env, 'PUT', `/v1/accounts/${encodeURIComponent(account)}`, {
     worker_id: worker,
     fb_username: row.email || row.uid,
+    fb_uid: row.uid,
     allow_password_login: true,
     secrets: {
       password,

@@ -2131,7 +2131,10 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   password (search by #, UID, e-mail or batch; 2FA, cookie age and batch
   shown) and assigning one sends its login to the worker the same way the
   pool page does — vault written with password login allowed, Re-login
-  queued, account marked Fleet. If the worker already holds a pool account,
+  queued, account marked Fleet. Since v1.281.2 the account's UID goes with
+  the login, and it picks the device the worker presents: the same browser
+  identity on any worker, never the previous login's (facebook-tracker
+  0.11.0, RS-292). If the worker already holds a pool account,
   the dialog asks where that one goes — back to Available, to Problem (still
   naming the worker) or Retired — with no default, and both moves land
   together. A worker without a vault account gets one named after it. Until

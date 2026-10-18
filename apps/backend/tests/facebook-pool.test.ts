@@ -302,6 +302,7 @@ describe('facebook account pool', () => {
         body: {
           worker_id: 'nyc-1',
           fb_username: 'acct1@outlook.example',
+          fb_uid: uid(1),
           allow_password_login: true,
           secrets: { password: 'DemoOnly!1', totp_secret: 'JBSWY3DPEHPK3PXP', email: 'acct1@outlook.example', email_password: 'Mail!1' },
         },
