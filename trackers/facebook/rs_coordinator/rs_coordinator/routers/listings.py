@@ -15,6 +15,7 @@ from ..dedupe import Verdict, classify, dedupe_key
 from ..deps import require_worker
 from ..schemas import ListingsRequest
 from ..telegram_notify import format_listing
+from .health import log_beat
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +132,9 @@ def report_listings(
         else:
             accepted += 1
 
+    previous = db.get_worker(worker_id)
     db.upsert_worker(worker_id, status="ok", heartbeat=True, saw_listing=True)
+    log_beat(worker_id, previous)
     db.add_review_stats(worker_id, coordinated=queued)
     result = {"accepted": accepted, "duplicates": duplicates, "queued": queued}
     if failed:

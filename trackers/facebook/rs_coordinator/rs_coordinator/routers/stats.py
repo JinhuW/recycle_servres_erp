@@ -17,7 +17,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from .. import deps
-from ..db import SEARCH_CYCLE_DAYS
+from ..db import SEARCH_CYCLE_DAYS, STATUS_EVENT_DAYS
 from ..deps import require_admin, require_worker
 from ..schemas import (
     AlertHitList,
@@ -29,6 +29,8 @@ from ..schemas import (
     SearchCityRow,
     SearchCycleList,
     SearchCycleRow,
+    StatusEventList,
+    StatusEventRow,
     StatusResponse,
     WorkerReviewStatsDay,
     WorkerReviewStatsList,
@@ -94,6 +96,22 @@ def search_cycles(
     since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat(timespec="seconds")
     return SearchCycleList(
         rows=[SearchCycleRow(**row) for row in deps.db.search_cycles_since(since)]
+    )
+
+
+@router.get(
+    "/v1/stats/status-changes",
+    response_model=StatusEventList,
+    dependencies=[Depends(require_admin)],
+)
+def status_changes(
+    days: int = Query(default=7, ge=1, le=STATUS_EVENT_DAYS),
+    limit: int = Query(default=200, ge=1, le=1000),
+) -> StatusEventList:
+    """Newest first: the ERP's Recent activity lists them as they are."""
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="seconds")
+    return StatusEventList(
+        rows=[StatusEventRow(**row) for row in deps.db.status_events_since(since, limit)]
     )
 
 

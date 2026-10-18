@@ -147,6 +147,7 @@ def client(monkeypatch, tmp_path):
         "cycles": httpx.Response(200, json={"rows": []}),
         "reviews": httpx.Response(200, json={"rows": []}),
         "cities": httpx.Response(200, json={"rows": []}),
+        "changes": httpx.Response(200, json={"rows": []}),
         "rank": httpx.Response(404, json={"detail": "Not Found"}),
     }
 
@@ -163,6 +164,8 @@ def client(monkeypatch, tmp_path):
             return upstream["reviews"]
         if path == "/v1/stats/search-cities":
             return upstream["cities"]
+        if path == "/v1/stats/status-changes":
+            return upstream["changes"]
         if path == "/v1/accounts":
             return upstream["accounts"]
         if path.startswith("/v1/session/"):
@@ -383,6 +386,23 @@ def test_fleet_today_is_null_against_an_older_coordinator(client):
     doc = client.get("/v1/fleet", headers=AUTH).json()
     assert doc["health"]["ok"] is True
     assert all(w["today"] is None for w in doc["workers"])
+
+
+def test_fleet_carries_the_weeks_status_changes(client):
+    change = {"worker_id": "se-1", "at": "2026-09-05T20:00:00+00:00", "kind": "state",
+              "was": "HEALTHY", "became": "SESSION_EXPIRED"}
+    client.upstream["changes"] = httpx.Response(200, json={"rows": [change]})
+    doc = client.get("/v1/fleet", headers=AUTH).json()
+    asked = [r for r in client.calls if r.url.path == "/v1/stats/status-changes"]
+    assert asked and asked[0].url.params["days"] == "7"
+    assert doc["status_changes"] == [change]
+
+
+def test_fleet_status_changes_are_null_against_an_older_coordinator(client):
+    client.upstream["changes"] = httpx.Response(404, json={"detail": "Not Found"})
+    doc = client.get("/v1/fleet", headers=AUTH).json()
+    assert doc["health"]["ok"] is True
+    assert doc["status_changes"] is None
 
 
 def test_fleet_marks_each_city_with_how_often_it_is_searched(client):

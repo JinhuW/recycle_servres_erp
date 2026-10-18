@@ -325,6 +325,20 @@ class SearchCycleList(BaseModel):
     rows: List[SearchCycleRow]
 
 
+class StatusEventRow(BaseModel):
+    """A worker's status changing: its reported `state`, or its liveness."""
+
+    worker_id: str
+    at: str
+    kind: str
+    was: str | None = None
+    became: str
+
+
+class StatusEventList(BaseModel):
+    rows: List[StatusEventRow]
+
+
 class SearchCityRow(BaseModel):
     """When a worker last searched a city."""
 

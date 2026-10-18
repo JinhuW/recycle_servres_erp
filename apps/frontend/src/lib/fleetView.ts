@@ -4,7 +4,7 @@
 // Kept out of the components so they can be unit-tested without React.
 
 import type {
-  AlertHitRow, Challenge, CityTierSettings, CityWrite, FleetAccount, FleetCity, FleetDoc, ReviewStatsDay, SearchSettingsWrite,
+  AlertHitRow, Challenge, CityTierSettings, CityWrite, FleetAccount, FleetCity, FleetDoc, ReviewStatsDay, SearchSettingsWrite, StatusChange,
 } from './coordinator';
 import { ruleLines } from './keywordRules';
 
@@ -216,21 +216,47 @@ export function sortFleet(
   return keyed.map(k => k.w);
 }
 
-// The Recent activity feed. The coordinator keeps no event log the ERP can
-// read, so it is rebuilt from the timestamps it does serve: each worker's
-// latest search, listing and session backup, the moment a dead worker last
-// reported, and every open checkpoint.
-export type FleetEventKind = 'search' | 'listing' | 'backup' | 'silent' | 'checkpoint';
-export type FleetEvent = { at: string; workerId: string; kind: FleetEventKind; detail?: string };
+// The Recent activity feed. Status changes come from the coordinator's log
+// (`status_changes`); everything else is rebuilt from the timestamps it
+// serves: each worker's latest search, listing and session backup, and every
+// open checkpoint. Without the log, a dead worker's last heartbeat stands in
+// for the moment it went offline.
+export type FleetEventKind =
+  | 'search' | 'listing' | 'backup' | 'silent' | 'checkpoint'
+  | 'stale' | 'offline' | 'back' | 'first' | 'attention' | 'healthy';
+// `status` is the bucket a status change moved the worker into, which its dot
+// shows; the other events take the worker's current one.
+export type FleetEvent = { at: string; workerId: string; kind: FleetEventKind; detail?: string; status?: FleetStatus };
+
+// A reported DEAD reads as offline, the same as fleetStatus files it.
+function statusEvent(c: StatusChange): FleetEvent | null {
+  const base = { at: c.at, workerId: c.worker_id };
+  if (c.kind === 'state') {
+    if (c.became === 'HEALTHY') return { ...base, kind: 'healthy', status: 'live' };
+    if (c.became === 'DEAD') return { ...base, kind: 'offline', status: 'offline' };
+    return { ...base, kind: 'attention', detail: c.became, status: 'attention' };
+  }
+  switch (c.became) {
+    case 'stale': return { ...base, kind: 'stale', status: 'stale' };
+    case 'dead': return { ...base, kind: 'offline', status: 'offline' };
+    case 'live': return { ...base, kind: c.was ? 'back' : 'first', status: 'live' };
+    default: return null;
+  }
+}
 
 export function fleetActivity(fleet: FleetDoc | null, challenges: readonly Challenge[] | null): FleetEvent[] {
   const out: FleetEvent[] = [];
+  const logged = fleet?.status_changes;
   for (const w of fleet?.workers ?? []) {
     const h = w.health;
     if (h?.last_search_at) out.push({ at: h.last_search_at, workerId: w.worker_id, kind: 'search' });
     if (h?.last_listing_at) out.push({ at: h.last_listing_at, workerId: w.worker_id, kind: 'listing' });
     if (w.session?.backed_up_at) out.push({ at: w.session.backed_up_at, workerId: w.worker_id, kind: 'backup' });
-    if (h?.liveness === 'dead' && h.last_heartbeat_at) out.push({ at: h.last_heartbeat_at, workerId: w.worker_id, kind: 'silent' });
+    if (!logged && h?.liveness === 'dead' && h.last_heartbeat_at) out.push({ at: h.last_heartbeat_at, workerId: w.worker_id, kind: 'silent' });
+  }
+  for (const c of logged ?? []) {
+    const e = statusEvent(c);
+    if (e) out.push(e);
   }
   for (const ch of challenges ?? []) {
     out.push({ at: ch.created_at, workerId: ch.worker_id, kind: 'checkpoint', detail: ch.kind });

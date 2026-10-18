@@ -18,7 +18,7 @@ import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Sequence, Union
 
 if TYPE_CHECKING:  # pragma: no cover - import only for the type alias
     from .pg import PostgresDatabase
@@ -98,6 +98,23 @@ CREATE TABLE IF NOT EXISTS search_cycles (
     item       TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_search_cycles_at ON search_cycles(at);
+
+-- Worker status changes ------------------------------------------------------
+-- Every change in what a worker reports (`kind` 'state': HEALTHY ->
+-- SESSION_EXPIRED) or in how recently it reported (`kind` 'liveness': live ->
+-- stale -> dead -> live). The row on `workers` is overwritten by every
+-- heartbeat and liveness is derived on read, so this is the only memory of
+-- either; it is what the ERP's Recent activity lists. `at` is when the change
+-- happened, not when it was noticed. Pruned to STATUS_EVENT_DAYS.
+CREATE TABLE IF NOT EXISTS worker_status_events (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    worker_id  TEXT NOT NULL,
+    at         TEXT NOT NULL,
+    kind       TEXT NOT NULL,
+    was        TEXT,
+    became     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_worker_status_events_at ON worker_status_events(at);
 
 -- When each worker last searched each city: the funnel report that counts a
 -- search names its city. One row per worker x city, so it needs no pruning;
@@ -486,6 +503,10 @@ WORKER_HEALTH_COLUMNS = (
     # Set when the fleet stops a worker on purpose (its slot turned off), so
     # the liveness sweep does not page about a silence nobody needs to fix.
     ("retired_at", "TEXT"),
+    # The liveness worker_status_events last recorded (live, stale, dead), or
+    # NULL before anything was recorded. Separate from alerted_liveness, which
+    # only ever tracks the dead/back page.
+    ("logged_liveness", "TEXT"),
 )
 
 # Columns added to `listings` after the first release, same mechanism.
@@ -632,6 +653,10 @@ def utcnow() -> str:
 # How long search cycles are kept. The fleet table reads today's; a week
 # beyond that is room to answer "did it search on Tuesday".
 SEARCH_CYCLE_DAYS = 14
+
+# How long status changes are kept. The ERP shows a week; a month answers
+# "how often does this worker drop out".
+STATUS_EVENT_DAYS = 30
 
 
 def as_utc_stamp(value: Optional[str]) -> str:
@@ -1270,6 +1295,48 @@ class Database:
             cur.execute(
                 "SELECT worker_id, at, item FROM search_cycles WHERE at >= ? ORDER BY at",
                 (since,),
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+    # -- worker status events ----------------------------------------------
+
+    def log_status_changes(
+        self: "Database",
+        worker_id: str,
+        changes: Sequence[Sequence[Optional[str]]],
+        logged_liveness: Optional[str],
+    ) -> None:
+        """Append `(at, kind, was, became)` rows and move the row's marker.
+
+        One transaction, so a change is never recorded without the marker
+        that stops the next sweep recording it again.
+        """
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=STATUS_EVENT_DAYS)).isoformat(
+            timespec="seconds"
+        )
+        with self.cursor() as cur:
+            for at, kind, was, became in changes:
+                cur.execute(
+                    "INSERT INTO worker_status_events (worker_id, at, kind, was, became) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (worker_id, at, kind, was, became),
+                )
+            cur.execute(
+                "UPDATE workers SET logged_liveness = ? WHERE worker_id = ?",
+                (logged_liveness, worker_id),
+            )
+            if changes:
+                cur.execute("DELETE FROM worker_status_events WHERE at < ?", (cutoff,))
+
+    def status_events_since(
+        self: "Database", since: str, limit: int
+    ) -> List[Dict[str, Any]]:
+        """Newest first, so `limit` keeps the recent end."""
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT worker_id, at, kind, was, became FROM worker_status_events "
+                "WHERE at >= ? ORDER BY at DESC, id DESC LIMIT ?",
+                (since, limit),
             )
             return [dict(row) for row in cur.fetchall()]
 
