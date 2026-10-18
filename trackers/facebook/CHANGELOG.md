@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.10.5] - 2026-10-18
+
 ### Fixed
 
 - **A saved session survives a restart of any kind.** Each save is now
