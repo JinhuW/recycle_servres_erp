@@ -482,6 +482,7 @@ async def fleet() -> Dict[str, Any]:
     search_cycles: Optional[list] = None
     worker_reviews: Optional[list] = None
     search_cities: Optional[list] = None
+    status_changes: Optional[list] = None
     error: Optional[str] = None
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT_S, base_url=base, headers=headers) as client:
@@ -531,11 +532,13 @@ async def fleet() -> Dict[str, Any]:
 
                 # Each worker's "today". Two days of rows cover every US
                 # zone's local day; an older coordinator answers 404, which
-                # leaves `today` null rather than the page broken.
-                cycles, reviews, cities = await asyncio.gather(
+                # leaves `today` (and `status_changes`) null rather than the
+                # page broken.
+                cycles, reviews, cities, changes = await asyncio.gather(
                     client.get("/v1/stats/search-cycles", params={"hours": 48}),
                     client.get("/v1/stats/reviews/workers", params={"days": 2}),
                     client.get("/v1/stats/search-cities"),
+                    client.get("/v1/stats/status-changes", params={"days": 7}),
                     return_exceptions=True,
                 )
                 if isinstance(cycles, httpx.Response) and cycles.status_code == 200:
@@ -544,6 +547,8 @@ async def fleet() -> Dict[str, Any]:
                     worker_reviews = (reviews.json() or {}).get("rows") or []
                 if isinstance(cities, httpx.Response) and cities.status_code == 200:
                     search_cities = (cities.json() or {}).get("rows") or []
+                if isinstance(changes, httpx.Response) and changes.status_code == 200:
+                    status_changes = (changes.json() or {}).get("rows") or []
     except (httpx.HTTPError, ValueError):
         error = "Coordinator is unreachable"
 
@@ -563,6 +568,8 @@ async def fleet() -> Dict[str, Any]:
         worker_reviews=worker_reviews,
         search_cities=search_cities,
     )
+    # The week's status changes, newest first, for the ERP's Recent activity.
+    doc["status_changes"] = status_changes
     if rows is not None:
         # How often each city is searched. An older coordinator answers 404,
         # which leaves the cities unmarked rather than the page broken.

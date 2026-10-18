@@ -15,7 +15,7 @@ import { useT } from '../../lib/i18n';
 import { hrefFor, onLinkClick } from '../../lib/route';
 import { BuildChip, CityChip, EditCredentialsButton, fmtDays, HITS_DAYS, ReloginButton, WatchButton } from './FleetAccounts';
 import { EditCitiesButton } from './FleetCities';
-import { StatusChip, statusNote } from './FleetWorkers';
+import { eventDetail, StatusChip, statusNote } from './FleetWorkers';
 import '../../styles/facebookPool.css';
 
 // ─── One worker ───────────────────────────────────────────────────────────────
@@ -78,7 +78,9 @@ export function FleetWorker({ workerId }: { workerId: string }) {
   const note = statusNote(t, w, parked, locale);
   const searched = searchedToday(w, status);
   const mine = (challenges ?? []).filter(c => c.worker_id === w.worker_id);
-  const events = fleetActivity({ ...fleet, workers: [w] }, mine);
+  const events = fleetActivity({
+    ...fleet, workers: [w], status_changes: fleet.status_changes?.filter(c => c.worker_id === w.worker_id),
+  }, mine);
   const acct = w.account;
   const sess = w.session;
   const stored = acct ? Object.entries(acct.secrets).filter(([, on]) => on).map(([k]) => k) : [];
@@ -195,9 +197,9 @@ export function FleetWorker({ workerId }: { workerId: string }) {
           <ul className="fp-log">
             {events.map((e, i) => (
               <li key={i}>
-                <i className={`fp-dot ff-${e.kind === 'checkpoint' || e.kind === 'silent' ? 'attention' : 'live'}`} />
+                <i className={`fp-dot ff-${e.status ?? (e.kind === 'checkpoint' || e.kind === 'silent' ? 'attention' : 'live')}`} />
                 <div>
-                  {t(`fbcHist_${e.kind}`, { kind: e.detail ?? '' })}
+                  {t(`fbcHist_${e.kind}`, { kind: eventDetail(t, e) })}
                   <time title={e.at}>{relTime(e.at, locale)}</time>
                 </div>
               </li>

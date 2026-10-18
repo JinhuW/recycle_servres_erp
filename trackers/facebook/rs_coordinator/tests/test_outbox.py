@@ -210,6 +210,24 @@ def test_stale_and_never_seen_workers_do_not_page(tmp_path):
     assert [a for a in _all_outbox(db) if a["kind"] == "ops_liveness"] == []
 
 
+def test_the_sweep_logs_a_silent_worker_going_stale_then_dead(tmp_path):
+    db = Database(tmp_path / "sweep.db")
+    db.upsert_worker("denver-1", status="ok", heartbeat=True)
+    pump = make_pump(db)
+    pump.sweep_liveness(db)  # baseline: live, nothing logged
+    assert db.get_worker("denver-1")["logged_liveness"] == health.LIVE
+
+    db.update_worker_health("denver-1", {"last_heartbeat_at": past(hours=3)})
+    pump.sweep_liveness(db)
+    pump.sweep_liveness(db)  # the second sweep must not log it again
+    db.update_worker_health("denver-1", {"last_heartbeat_at": past(hours=7)})
+    pump.sweep_liveness(db)
+
+    rows = db.status_events_since(past(hours=24), 10)
+    assert [(r["was"], r["became"]) for r in rows] == [("stale", "dead"), ("live", "stale")]
+    assert db.get_worker("denver-1")["logged_liveness"] == health.DEAD
+
+
 def _all_outbox(db):
     with db.cursor() as cur:
         cur.execute("SELECT * FROM outbox ORDER BY id")

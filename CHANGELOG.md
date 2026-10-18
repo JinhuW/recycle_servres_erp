@@ -17,6 +17,30 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.285.0] - 2026-10-18
+
+The Facebook fleet's Recent activity records when a worker's status changes
+(RS-300).
+
+### Added
+
+- **Status changes in Recent activity.** The aside on Monitors ▸ Facebook ▸
+  Fleet was rebuilt from whatever timestamps the fleet doc carried (the latest
+  sweep, listing and session backup, open checkpoints). When three workers
+  turned *Needs attention · Session expired*, nothing in it said so, because
+  the coordinator overwrote each worker's state on every heartbeat and kept
+  no history. The coordinator now logs each change of reported state and
+  each live → stale → dead → live crossing, dated when it happened, and
+  rs_console serves the week's changes in `/v1/fleet` as `status_changes`.
+  The aside lists them as "went stale", "went offline", "is reporting
+  again", "reported for the first time", "needs attention: Session expired"
+  and "is healthy again". Each dot shows the status the worker moved into,
+  not the one it is in now, and the worker page's History lists the same
+  changes. A console without the log leaves the aside as it was, with its
+  derived "stopped reporting" line. The coordinator side ships with the next
+  facebook-tracker release, and the ERP shows the new entries once that
+  release is deployed.
+
 ## [1.284.0] - 2026-10-18
 
 Monitors ▸ Reddit shows its post counts and recent matches (RS-299).

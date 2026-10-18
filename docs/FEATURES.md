@@ -2107,7 +2107,14 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   Session and Posts headers sort the table (click: descending, ascending,
   back to fleet order; Today sorts by last heartbeat, and unknowns stay at
   the bottom either way). Since v1.283.1 the Status cell shows the worker's
-  last heartbeat age under its chip, the beat that status is judged from; and a **From a search to an alert** card that walks the
+  last heartbeat age under its chip, the beat that status is judged from.
+  Since v1.285.0 Recent activity also lists every status change the
+  coordinator logs: went stale, went offline, is reporting again, reported
+  for the first time, needs attention (with the reported state, such as
+  Session expired) and is healthy again. Each is dated when it happened and
+  its dot shows the status it moved into; the worker page's History lists the
+  same for one worker. Against a coordinator without the log, the aside falls
+  back to the old "stopped reporting" line. And a **From a search to an alert** card that walks the
   pipeline as the code runs it — search, result cards, the title gate before
   any page is opened, the cached page visit, the keyword gate with the
   description, the already-notified skip, the AI rating with its unit and

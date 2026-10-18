@@ -166,6 +166,19 @@ def test_same_listing_from_two_workers_alerts_once(client):
     assert client.db.count_sightings(key) == 2
 
 
+def test_a_listing_upload_counts_as_a_beat_in_the_status_log(client):
+    client.db.upsert_worker("denver-1", status="ok", heartbeat=True)
+    client.db.update_worker_health(
+        "denver-1", {"logged_liveness": "dead", "last_heartbeat_at": "2026-01-01T00:00:00+00:00"}
+    )
+    payload = {"worker_id": "denver-1", "listings": [sample_listing()]}
+    assert client.post("/api/v1/listings", json=payload, headers=AUTH).status_code == 200
+
+    rows = client.db.status_events_since("2026-01-01T00:00:00+00:00", 10)
+    assert [(r["was"], r["became"]) for r in rows] == [("dead", "live")]
+    assert client.db.get_worker("denver-1")["logged_liveness"] == "live"
+
+
 def test_price_drop_triggers_a_second_alert(client):
     client.post(
         "/api/v1/listings",

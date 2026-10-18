@@ -29,7 +29,7 @@ import os
 import re
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Sequence
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from .db import (
@@ -44,6 +44,7 @@ from .db import (
     SCHEMA,
     SEARCH_CYCLE_DAYS,
     SNAPSHOT_EXTRA_COLUMNS,
+    STATUS_EVENT_DAYS,
     THREAD_EXTRA_COLUMNS,
     UNMATCHED_REACTIONS_SQL,
     WORKER_HEALTH_COLUMNS,
@@ -719,6 +720,43 @@ class PostgresDatabase:
             cur.execute(
                 "SELECT worker_id, at, item FROM search_cycles WHERE at >= %s ORDER BY at",
                 (since,),
+            )
+            return _rows(cur.fetchall())
+
+    # -- worker status events ----------------------------------------------
+
+    def log_status_changes(
+        self: "PostgresDatabase",
+        worker_id: str,
+        changes: Sequence[Sequence[Optional[str]]],
+        logged_liveness: Optional[str],
+    ) -> None:
+        """See `Database.log_status_changes`."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=STATUS_EVENT_DAYS)).isoformat(
+            timespec="seconds"
+        )
+        with self.cursor() as cur:
+            for at, kind, was, became in changes:
+                cur.execute(
+                    "INSERT INTO worker_status_events (worker_id, at, kind, was, became) "
+                    "VALUES (%s, %s, %s, %s, %s)",
+                    (worker_id, at, kind, was, became),
+                )
+            cur.execute(
+                "UPDATE workers SET logged_liveness = %s WHERE worker_id = %s",
+                (logged_liveness, worker_id),
+            )
+            if changes:
+                cur.execute("DELETE FROM worker_status_events WHERE at < %s", (cutoff,))
+
+    def status_events_since(
+        self: "PostgresDatabase", since: str, limit: int
+    ) -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT worker_id, at, kind, was, became FROM worker_status_events "
+                "WHERE at >= %s ORDER BY at DESC, id DESC LIMIT %s",
+                (since, limit),
             )
             return _rows(cur.fetchall())
 

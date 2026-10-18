@@ -14,14 +14,22 @@ from fastapi.testclient import TestClient
 from rs_coordinator import health
 from rs_coordinator.health import (
     DEAD,
+    DEAD_AFTER,
     EXPIRY_WARN_DAYS,
     LIVE,
+    LIVENESS_CHANGE,
     STALE,
+    STALE_AFTER,
+    STATE_CHANGE,
     UNKNOWN,
+    StatusChange,
     enrich,
     liveness,
+    liveness_changes,
+    liveness_log_sweep,
     needs_attention,
     session_days_left,
+    state_change,
     transition_alert,
 )
 
@@ -249,6 +257,107 @@ def test_alert_text_is_markdownv2_escaped():
     assert alert.count("(") == alert.count(r"\(")
 
 
+# -- status log --------------------------------------------------------------
+
+
+def at(moment: datetime) -> str:
+    return moment.isoformat(timespec="seconds")
+
+
+def test_a_reported_state_moving_is_a_change():
+    assert state_change("HEALTHY", "SESSION_EXPIRED", NOW) == StatusChange(
+        at(NOW), STATE_CHANGE, "HEALTHY", "SESSION_EXPIRED"
+    )
+    assert state_change("SESSION_EXPIRED", "HEALTHY", NOW).became == "HEALTHY"
+    # A state from a newer worker is still a change.
+    assert state_change("HEALTHY", "SOMETHING_NEW", NOW).became == "SOMETHING_NEW"
+
+
+def test_restating_or_omitting_a_state_is_not_a_change():
+    assert state_change("HEALTHY", "HEALTHY", NOW) is None
+    assert state_change("CHECKPOINT", None, NOW) is None
+
+
+def test_a_first_healthy_report_is_not_a_change_but_a_first_bad_one_is():
+    assert state_change(None, "HEALTHY", NOW) is None
+    assert state_change(None, "CHECKPOINT", NOW) == StatusChange(
+        at(NOW), STATE_CHANGE, None, "CHECKPOINT"
+    )
+
+
+def test_a_steady_worker_logs_nothing():
+    assert liveness_changes(LIVE, ago(minutes=3), NOW, beat=True) == ([], LIVE)
+    assert liveness_changes(LIVE, ago(minutes=3), NOW) == ([], LIVE)
+
+
+def test_a_row_with_nothing_logged_takes_a_baseline_silently():
+    # The deploy that adds the log must not list every worker.
+    assert liveness_changes(None, ago(minutes=3), NOW, beat=True) == ([], LIVE)
+    assert liveness_changes(None, ago(hours=3), NOW) == ([], STALE)
+
+
+def test_a_first_ever_beat_is_logged():
+    assert liveness_changes(None, None, NOW, beat=True) == (
+        [StatusChange(at(NOW), LIVENESS_CHANGE, None, LIVE)],
+        LIVE,
+    )
+    # No beat, no report: nothing to have crossed.
+    assert liveness_changes(None, None, NOW) == ([], None)
+
+
+def test_the_sweep_logs_a_silent_worker_at_the_moments_it_crossed():
+    beat = NOW - timedelta(hours=3)
+    assert liveness_changes(LIVE, at(beat), NOW) == (
+        [StatusChange(at(beat + STALE_AFTER), LIVENESS_CHANGE, LIVE, STALE)],
+        STALE,
+    )
+    beat = NOW - timedelta(hours=7)
+    assert liveness_changes(STALE, at(beat), NOW) == (
+        [StatusChange(at(beat + DEAD_AFTER), LIVENESS_CHANGE, STALE, DEAD)],
+        DEAD,
+    )
+    assert liveness_changes(DEAD, at(beat), NOW) == ([], DEAD)
+
+
+def test_a_beat_fills_in_a_gap_no_sweep_saw():
+    beat = NOW - timedelta(hours=7)
+    assert liveness_changes(LIVE, at(beat), NOW, beat=True) == (
+        [
+            StatusChange(at(beat + STALE_AFTER), LIVENESS_CHANGE, LIVE, STALE),
+            StatusChange(at(beat + DEAD_AFTER), LIVENESS_CHANGE, STALE, DEAD),
+            StatusChange(at(NOW), LIVENESS_CHANGE, DEAD, LIVE),
+        ],
+        LIVE,
+    )
+
+
+def test_a_return_the_log_did_not_see_is_dated_by_the_stamp_that_made_it():
+    # A listing upload stamped the heartbeat a minute ago; the sweep finds
+    # the row live while the log still says dead.
+    assert liveness_changes(DEAD, ago(minutes=1), NOW) == (
+        [StatusChange(ago(minutes=1), LIVENESS_CHANGE, DEAD, LIVE)],
+        LIVE,
+    )
+
+
+def test_the_log_sweep_drops_a_retired_workers_baseline():
+    rows = [
+        worker_row(worker_id="se-1", retired_at=ago(hours=1), logged_liveness=LIVE,
+                   last_heartbeat_at=ago(hours=8)),
+        worker_row(worker_id="se-2", retired_at=ago(hours=1), logged_liveness=None),
+        worker_row(worker_id="ne-1", logged_liveness=LIVE),
+        worker_row(worker_id="mw-1", logged_liveness=LIVE, last_heartbeat_at=ago(hours=3)),
+    ]
+    assert liveness_log_sweep(rows, NOW) == [
+        ("se-1", [], None),
+        (
+            "mw-1",
+            [StatusChange(at(NOW - timedelta(hours=3) + STALE_AFTER), LIVENESS_CHANGE, LIVE, STALE)],
+            STALE,
+        ),
+    ]
+
+
 # -- API -------------------------------------------------------------------
 
 
@@ -426,3 +535,48 @@ def test_legacy_worker_listing_stays_raw(client):
     assert workers[0]["region"] == "rs_mountain"
     assert workers[0]["last_heartbeat_at"]
     assert "liveness" not in workers[0]
+
+
+def status_changes(client, **params):
+    response = client.get("/v1/stats/status-changes", params=params, headers=ADMIN)
+    assert response.status_code == 200
+    return [(r["kind"], r["was"], r["became"]) for r in response.json()["rows"]]
+
+
+def test_heartbeats_log_status_changes_newest_first(client):
+    heartbeat(client, state="HEALTHY")
+    heartbeat(client, state="HEALTHY")
+    heartbeat(client, state="SESSION_EXPIRED")
+    heartbeat(client, state="SESSION_EXPIRED")
+
+    assert status_changes(client) == [
+        ("state", "HEALTHY", "SESSION_EXPIRED"),
+        ("liveness", None, "live"),
+    ]
+    assert status_changes(client, limit=1) == [("state", "HEALTHY", "SESSION_EXPIRED")]
+
+
+def test_a_beat_after_a_long_silence_logs_the_whole_gap(client):
+    silent_since = datetime.now(timezone.utc) - timedelta(hours=7)
+    client.db.update_worker_health(
+        "denver-1",
+        {
+            "state": "HEALTHY",
+            "logged_liveness": LIVE,
+            "last_heartbeat_at": silent_since.isoformat(timespec="seconds"),
+        },
+    )
+    heartbeat(client, state="HEALTHY")
+
+    rows = client.get("/v1/stats/status-changes", headers=ADMIN).json()["rows"]
+    assert [(r["was"], r["became"]) for r in rows] == [
+        ("dead", "live"),
+        ("stale", "dead"),
+        ("live", "stale"),
+    ]
+    assert rows[2]["at"] == (silent_since + STALE_AFTER).isoformat(timespec="seconds")
+    assert client.db.get_worker("denver-1")["logged_liveness"] == LIVE
+
+
+def test_status_changes_need_the_admin_token(client):
+    assert client.get("/v1/stats/status-changes", headers=AUTH).status_code in (401, 403)

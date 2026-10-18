@@ -88,6 +88,8 @@ def heartbeat(
         except Exception:  # noqa: BLE001 - the strip is a nicety; the heartbeat is not
             logger.exception("Could not log a search cycle for worker %s", worker_id)
 
+    log_beat(worker_id, previous, payload.state.value if payload.state else None)
+
     # The stored row, not the payload: a partial heartbeat still carries the
     # account and VNC link an earlier one reported, and the alert needs them.
     current = db.get_worker(worker_id) or {}
@@ -106,6 +108,29 @@ def heartbeat(
             logger.exception("Ops alert failed for worker %s", worker_id)
 
     return HeartbeatResponse(directives=_take_directives(worker_id))
+
+
+def log_beat(
+    worker_id: str, previous: Optional[Dict[str, Any]], incoming_state: Optional[str] = None
+) -> None:
+    """Record what a beat changed in the worker's status log.
+
+    `previous` is the row before the beat stamped it. The listing upload calls
+    this too, because it stamps the heartbeat as well.
+    """
+    row = previous or {}
+    changes, logged = health.liveness_changes(
+        row.get("logged_liveness"), row.get("last_heartbeat_at"), beat=True
+    )
+    state = health.state_change(row.get("state"), incoming_state)
+    if state:
+        changes.append(state)
+    if not changes and logged == row.get("logged_liveness"):
+        return
+    try:
+        deps.db.log_status_changes(worker_id, changes, logged)
+    except Exception:  # noqa: BLE001 - the log is a record; the heartbeat is not
+        logger.exception("Could not log a status change for worker %s", worker_id)
 
 
 def _take_directives(worker_id: str) -> list[str]:

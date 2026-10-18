@@ -332,6 +332,36 @@ def test_search_cities_keep_one_row_per_worker_and_city(backend):
     assert rows[0]["last_at"] >= first
 
 
+def test_status_changes_append_and_move_the_marker(backend):
+    backend.upsert_worker("mw-1", status="ok", heartbeat=True)
+    backend.log_status_changes(
+        "mw-1",
+        [
+            ("2026-10-18T10:00:00+00:00", "liveness", "live", "stale"),
+            ("2026-10-18T14:00:00+00:00", "liveness", "stale", "dead"),
+        ],
+        "dead",
+    )
+    backend.log_status_changes("mw-1", [("2026-10-18T14:00:00+00:00", "state", None, "DEAD")], "dead")
+    assert backend.get_worker("mw-1")["logged_liveness"] == "dead"
+
+    rows = backend.status_events_since("2026-10-18T00:00:00+00:00", 10)
+    # Newest first; a tie on `at` goes to the later insert.
+    assert [(r["kind"], r["was"], r["became"]) for r in rows] == [
+        ("state", None, "DEAD"),
+        ("liveness", "stale", "dead"),
+        ("liveness", "live", "stale"),
+    ]
+    assert rows[0]["worker_id"] == "mw-1"
+    assert len(backend.status_events_since("2026-10-18T12:00:00+00:00", 10)) == 2
+    assert len(backend.status_events_since("2026-10-18T00:00:00+00:00", 1)) == 1
+
+    # A baseline alone moves the marker without a row.
+    backend.log_status_changes("mw-1", [], None)
+    assert backend.get_worker("mw-1")["logged_liveness"] is None
+    assert len(backend.status_events_since("2026-10-18T00:00:00+00:00", 10)) == 3
+
+
 def test_city_tier_config_saves_settings_and_replaces_pins(backend):
     assert backend.city_tier_config() == {
         "settings": {}, "pins": {}, "updated_at": None, "updated_by": None,

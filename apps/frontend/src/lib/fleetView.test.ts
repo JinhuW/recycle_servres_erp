@@ -152,6 +152,37 @@ describe('fleetView', () => {
         .toEqual(['c:checkpoint', 'a:listing', 'a:search', 'a:backup', 'b:silent']);
       expect(fleetActivity(null, null)).toEqual([]);
     });
+
+    it('lists each logged status change with the status it moved into', () => {
+      const b = account({ worker_id: 'b', health: health({ liveness: 'dead', last_heartbeat_at: '2026-10-02T00:00:00Z' }) });
+      const change = (at: string, kind: 'state' | 'liveness', was: string | null, became: string) =>
+        ({ worker_id: 'b', at, kind, was, became });
+      const fleet = {
+        workers: [b],
+        status_changes: [
+          change('2026-10-04T09:00:00Z', 'state', 'SESSION_EXPIRED', 'HEALTHY'),
+          change('2026-10-04T08:00:00Z', 'state', 'HEALTHY', 'SESSION_EXPIRED'),
+          change('2026-10-04T07:00:00Z', 'liveness', 'dead', 'live'),
+          change('2026-10-02T06:00:00Z', 'liveness', 'stale', 'dead'),
+          change('2026-10-02T02:00:00Z', 'liveness', 'live', 'stale'),
+          change('2026-10-01T00:00:00Z', 'liveness', null, 'live'),
+          change('2026-09-30T00:00:00Z', 'state', 'HEALTHY', 'DEAD'),
+          change('2026-09-29T00:00:00Z', 'liveness', 'live', 'someday'),
+        ],
+      } as unknown as FleetDoc;
+      expect(fleetActivity(fleet, null).map(e => [e.kind, e.status, e.detail ?? null])).toEqual([
+        ['healthy', 'live', null],
+        ['attention', 'attention', 'SESSION_EXPIRED'],
+        ['back', 'live', null],
+        // The log's "went offline" stands in for the derived "stopped reporting".
+        ['offline', 'offline', null],
+        ['stale', 'stale', null],
+        ['first', 'live', null],
+        ['offline', 'offline', null],
+      ]);
+      // A coordinator that predates the log still gets the derived event.
+      expect(fleetActivity({ ...fleet, status_changes: null }, null).map(e => e.kind)).toEqual(['silent']);
+    });
   });
 
   it('counts every stage from today’s funnel row', () => {

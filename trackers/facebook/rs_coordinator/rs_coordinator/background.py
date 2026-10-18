@@ -167,9 +167,14 @@ class Background(threading.Thread):
         Telegram returns. The marker is written at enqueue time — not
         delivery — so the sweep never queues the same crossing twice.
         """
-        for worker_id, text, marker in health.liveness_sweep(db.list_workers()):
+        rows = db.list_workers()
+        for worker_id, text, marker in health.liveness_sweep(rows):
             db.enqueue_alert("ops_liveness", text)
             db.update_worker_health(worker_id, {"alerted_liveness": marker})
+        # The status log needs this sweep too: a silent worker sends nothing
+        # that could record it going stale, then dead.
+        for worker_id, changes, logged in health.liveness_log_sweep(rows):
+            db.log_status_changes(worker_id, changes, logged)
 
 
 def _retry_stamp(delay: float) -> str:
