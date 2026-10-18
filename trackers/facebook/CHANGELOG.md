@@ -18,6 +18,23 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A worker's session status and saved session follow the browser between
+  sweeps, not at the next one** (RS-289). Before, a worker learned about its
+  Facebook login only at a sweep, at a login or on a parked page. On
+  2026-10-17 va-2's password login timed out without parking, and the
+  operator finished it over Watch. The fleet page then read "Session
+  expired", with an empty session file, for 13 hours. Now the idle worker
+  checks its login every minute. A logged-in browser is saved, backed up and
+  reported healthy within about a minute, and a session that lapses overnight
+  is reported expired just as fast instead of reading healthy until morning.
+- **A session is no longer lost to a restart.** An idle, logged-in worker
+  re-saves and backs up its session every 30 minutes. A redeploy or
+  `docker stop` now saves the live session before the monitor exits. Before,
+  SIGTERM killed the monitor outright, and everything since the last sweep
+  was lost. A logged-out browser still never overwrites a good session file.
+
 ## [0.10.2] - 2026-10-17
 
 ### Changed

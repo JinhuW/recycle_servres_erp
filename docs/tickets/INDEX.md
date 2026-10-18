@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-288](./RS-288-console-fleet-dashboard-shows-the-proxy-url-exit-ip.md) | done | story | P2 | Console fleet dashboard shows the proxy URL, exit IP and city | — |
+| [RS-289](./RS-289-worker-reports-and-saves-its-facebook-session-in-rea.md) | in-progress | bug | P1 | Worker reports and saves its Facebook session in real time, not at the next sweep | — |
+| [RS-288](./RS-288-console-fleet-dashboard-shows-the-proxy-url-exit-ip.md) | done | story | P2 | Console fleet dashboard shows the proxy URL, exit IP and city | facebook-tracker 0.10.2 |
 | [RS-287](./RS-287-release-review-findings-on-the-edit-cities-frequency.md) | done | bug | P2 | Release review findings on the Edit cities frequency form | 1.281.1 |
 | [RS-286](./RS-286-park-a-facebook-worker-whose-login-fails-instead-of.md) | done | bug | P1 | Park a Facebook worker whose login fails instead of searching logged out | facebook-tracker 0.10.1 |
 | [RS-285](./RS-285-sort-the-fleet-workers-table-by-column.md) | done | story | P2 | Sort the Fleet workers table by column | 1.281.0 |
