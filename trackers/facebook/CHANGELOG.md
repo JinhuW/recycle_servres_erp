@@ -18,6 +18,18 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The worker's VNC view shows the browser, not the whole display** (RS-295).
+  Since 0.11.0, the X display has been 1920x1080 so that any device profile's
+  screen fits, but Chromium opens a window only as large as its context's
+  viewport plus toolbars, which is about 1288x807 for a legacy device. VNC
+  served the whole display, so the ERP's watch page showed the browser in one
+  corner of a black frame and scaled both down, which left a CAPTCHA hard to
+  read. Each new browser context now crops x11vnc to its own window
+  (`x11vnc -R clip:…`), and viewers that are already connected resize live.
+  Xvfb itself cannot shrink: RandR on Xvfb 21 rejects a smaller screen.
+
 ## [0.12.3] - 2026-10-18
 
 ### Added
