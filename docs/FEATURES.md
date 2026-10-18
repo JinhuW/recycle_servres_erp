@@ -2073,7 +2073,13 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
 
 - **Tracker** — admin page and API proxy for the Reddit listing monitor, with a
   fleet status filter and infinite scroll (v1.64.0, v1.65.0).  In the sidebar
-  it is **Monitors ▸ Reddit** (v1.207.0).
+  it is **Monitors ▸ Reddit** (v1.207.0). Since v1.283.0 it has the Facebook
+  fleet page's layout: a Live / Stale / Dead legend whose counts filter the
+  workers table, a **Recent matches** aside beside the table, and a **From a
+  post to an alert** card with Poll, Evaluate and Notify stages. Subreddits
+  are edited under Poll and alert rules under Evaluate. The aside and the
+  stage counts need the proxy to forward `/matches` and `/stats`; until it
+  does, they show a dash or a note.
 - **Coordinator** — the Facebook fleet, reached from **Monitors ▸ Facebook**
   in the sidebar (v1.207.0), managers only. Since v1.263.0 the Fleet tab
   shares the Account pool tab's chrome: a status legend (Live, Stale, Needs

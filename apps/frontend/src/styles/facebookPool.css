@@ -1557,3 +1557,137 @@ button.ff-expr-text {
 .fp-copy-cell.fp-masked {
   color: var(--fg-subtle);
 }
+
+/* ── Reddit tracker (rt-*): DesktopTracker.tsx in the fleet's chrome ── */
+/* A note in the log has no dot; as a grid item it would take the dot's column. */
+.fp-log li.rt-note {
+  display: block;
+}
+.rt-match {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: var(--fg);
+  font-weight: 550;
+  text-decoration: none;
+}
+.rt-match:hover {
+  color: var(--accent-strong);
+  text-decoration: underline;
+}
+.rt-match-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.rt-match-meta b {
+  color: var(--accent-strong);
+  font-variant-numeric: tabular-nums;
+}
+.rt-panel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-elev);
+}
+.rt-panel > .fp-empty {
+  padding: 22px 16px !important;
+}
+.rt-rule {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+}
+.rt-rule:first-child {
+  border-top: 0;
+}
+.rt-rule-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+}
+.rt-rule-text p {
+  margin: 2px 0 0;
+  max-width: 75ch;
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.rt-off .rt-rule-text,
+tr.rt-off td:not(:nth-last-child(-n + 2)) {
+  opacity: 0.55;
+}
+.rt-help {
+  font-size: 11px;
+  line-height: 1.5;
+}
+.rt-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-soft);
+}
+.rt-add-name {
+  position: relative;
+  flex: 1 1 180px;
+  max-width: 260px;
+}
+.rt-add-name > .input {
+  width: 100%;
+  padding-left: 26px;
+}
+.rt-prefix {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--fg-subtle);
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px;
+  pointer-events: none;
+}
+.rt-add-interval {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.rt-add-interval > .input {
+  width: 64px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.rt-add-error {
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--neg-soft);
+  color: var(--neg);
+  font-size: 12px;
+}
+.rt-failed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 12px;
+}
+.rt-failed li {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}

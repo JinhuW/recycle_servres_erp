@@ -17,6 +17,25 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.283.0] - 2026-10-18
+
+Monitors ▸ Reddit takes the Facebook fleet page's layout (RS-297).
+
+### Changed
+
+- **The Reddit page reads like the Facebook one.** Before, it was three
+  stacked cards: rules, subreddits, then a fleet table at the bottom. Now it
+  has a Live / Stale / Dead legend whose counts filter the workers table. The
+  table sits beside a **Recent matches** aside, and below them is a **From a
+  post to an alert** card with one stage per worker loop: Poll, Evaluate,
+  Notify. The subreddits are edited in the Poll stage and the alert rules in
+  the Evaluate stage. Each stage says what the loop does and what it reads.
+  Notify lists the posts that gave up after their retries. The page reuses
+  the Facebook page's styles, so the two monitors look and behave the same.
+  The matches aside and the stage counts read the tracker's `/api/matches`
+  and `/api/stats`, which the ERP proxy doesn't forward yet. Until it does,
+  they show a dash or a short note, and the rest of the page works as before.
+
 ## [1.282.0] - 2026-10-18
 
 Watching a worker's browser can go full screen (RS-296).
