@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-18
 reporter: jinhu
 branch: feat/fleet-activity-status-changes
-pr:
+pr: 744
 version: 1.285.0
 related: []
 ---
