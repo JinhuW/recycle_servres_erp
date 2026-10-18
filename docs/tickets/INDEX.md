@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-290](./RS-290-idle-session-check-reads-a-stale-page-url-and-misses.md) | backlog | bug | P1 | Idle session check reads a stale page URL and misses a login finished over Watch | — |
 | [RS-289](./RS-289-worker-reports-and-saves-its-facebook-session-in-rea.md) | done | bug | P1 | Worker reports and saves its Facebook session in real time, not at the next sweep | facebook-tracker 0.10.3 |
 | [RS-288](./RS-288-console-fleet-dashboard-shows-the-proxy-url-exit-ip.md) | done | story | P2 | Console fleet dashboard shows the proxy URL, exit IP and city | facebook-tracker 0.10.2 |
 | [RS-287](./RS-287-release-review-findings-on-the-edit-cities-frequency.md) | done | bug | P2 | Release review findings on the Edit cities frequency form | 1.281.1 |
