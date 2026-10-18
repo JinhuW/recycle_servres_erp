@@ -18,6 +18,25 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Added
+
+- **The coordinator keeps a log of worker status changes** (RS-300). A
+  worker's row is overwritten by every heartbeat and its liveness is derived
+  on read, so nothing remembered that wc-1 went from HEALTHY to
+  SESSION_EXPIRED, or that ne-1 was silent for six hours and came back. The
+  new `worker_status_events` table records each change of reported `state`
+  and each live → stale → dead → live crossing. A crossing is stamped when
+  it happened (last heartbeat + 2 h or + 6 h, or the beat that revived it),
+  so a gap the ten-minute sweep never saw is still dated right once the next
+  beat fills it in. The heartbeat, the listing upload (which stamps the
+  heartbeat too) and the liveness sweep all write to it. Rows that predate
+  the log take a silent baseline, so the deploy does not list every worker,
+  and a retired worker's silence is never logged. `GET
+  /v1/stats/status-changes` serves the log, and rs_console puts the week's
+  changes in `/v1/fleet` as `status_changes`, which the ERP's Recent
+  activity lists. The log is pruned to 30 days. The new table and the
+  `workers.logged_liveness` column are added on start, as before.
+
 ### Fixed
 
 - **The worker's VNC view shows the browser, not the whole display** (RS-295).

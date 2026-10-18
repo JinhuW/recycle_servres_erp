@@ -2,13 +2,13 @@
 id: RS-300
 title: Fleet Recent activity records worker status changes
 type: story
-status: in-progress
+status: in-review
 priority: P2
 created: 2026-10-18
 reporter: jinhu
 branch: feat/fleet-activity-status-changes
 pr:
-version:
+version: 1.285.0
 related: []
 ---
 
@@ -39,21 +39,21 @@ to live in the coordinator and reach the ERP through `/v1/fleet`.
 
 ## Acceptance criteria
 
-- [ ] The coordinator appends a row when a worker's reported state changes,
+- [x] The coordinator appends a row when a worker's reported state changes,
   and when its liveness crosses live → stale → dead or comes back live,
   stamped at the real crossing time (last heartbeat + 2 h / + 6 h, the beat
   that revived it).
-- [ ] Existing workers produce no burst of entries on deploy; a retired
+- [x] Existing workers produce no burst of entries on deploy; a retired
   worker's silence is not logged.
-- [ ] `GET /v1/stats/status-changes` returns the last 7 days, newest first;
+- [x] `GET /v1/stats/status-changes` returns the last 7 days, newest first;
   rs_console puts them in `/v1/fleet` as `status_changes`.
-- [ ] Recent activity lists each change ("went stale", "went offline", "is
+- [x] Recent activity lists each change ("went stale", "went offline", "is
   reporting again", "needs attention: Session expired", "is healthy again")
   with the dot of the status it moved into.
-- [ ] The worker page's History shows the same changes for that worker.
-- [ ] Against a console without `status_changes`, the feed is unchanged (keeps
+- [x] The worker page's History shows the same changes for that worker.
+- [x] Against a console without `status_changes`, the feed is unchanged (keeps
   "stopped reporting").
-- [ ] Both database backends are covered by tests; the zh strings exist.
+- [x] Both database backends are covered by tests; the zh strings exist.
 
 ## Out of scope
 
@@ -66,6 +66,15 @@ to live in the coordinator and reach the ERP through `/v1/fleet`.
 
 ## Notes
 
+- The coordinator side is under `[Unreleased]` in `trackers/facebook/CHANGELOG.md`
+  and is not released here. The fleet runs 0.12.4, cut on the local branch
+  `release/facebook-tracker-0.12.4`, which had not reached `dev` (whose
+  `VERSION` still read 0.12.2). Releasing from this branch would have
+  collided with that branch's 0.12.3 and 0.12.4 tags. Until the tracker is
+  released and deployed, the ERP shows the feed as before.
+- Verified end to end against a local SQLite coordinator and rs_console, with
+  the local ERP pointed at them. Each change kind rendered with its dot, and
+  the worker page's History showed the same changes.
 - Facts, not chips, are logged: the coordinator records raw `state` and
   liveness changes, and the ERP phrases them. The chip itself is the ERP's
   `fleetStatus()`, which a Python copy would drift from.
