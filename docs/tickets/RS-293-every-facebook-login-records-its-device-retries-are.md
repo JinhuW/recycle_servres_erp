@@ -2,13 +2,13 @@
 id: RS-293
 title: Every Facebook login records its device, retries are capped, and a new account starts on its legacy device
 type: story
-status: backlog
+status: in-review
 priority: P1
 created: 2026-10-18
 reporter: jinhu
 branch: feat/fb-login-ledger
-pr:
-version:
+pr: 731, 732
+version: facebook-tracker 0.12.2, v1.281.3
 related: [RS-292, RS-291]
 ---
 
