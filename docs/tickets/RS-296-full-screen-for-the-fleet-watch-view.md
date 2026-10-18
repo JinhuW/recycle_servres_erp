@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-18
 reporter: jinhu
 branch: feat/fleet-watch-fullscreen
-pr:
+pr: "#736"
 version: 1.282.0
 related: [RS-295]
 ---
