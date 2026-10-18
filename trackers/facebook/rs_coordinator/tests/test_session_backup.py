@@ -132,6 +132,16 @@ def test_a_second_backup_replaces_the_first(env):
         assert cur.fetchone()["n"] == 1
 
 
+def test_a_logged_out_jar_never_replaces_a_session(env):
+    backup(env)
+
+    response = backup(env, storage_state={"cookies": [], "origins": []})
+
+    assert response.status_code == 422
+    snapshot = env.db.get_snapshot("denver-1")
+    assert env.vault.decrypt(snapshot["state_blob"]) == sample_state()
+
+
 def test_backup_requires_a_valid_token(env):
     payload = {"worker_id": "denver-1", "storage_state": sample_state()}
     assert env.post("/v1/session/backup", json=payload).status_code == 401

@@ -47,7 +47,9 @@ workers were created on 2026-10-17 and have never held one.
 - [x] At login, a worker whose session file is missing or holds no session
       restores its own backup from the coordinator's database. A file that
       holds a session is never replaced.
-- [ ] On the live fleet, a logged-in worker restarted with `docker restart`
+- [x] The coordinator refuses a backup with no session in it, so a logged-out
+      jar never replaces the snapshot a worker would restore from.
+- [x] On the live fleet, a logged-in worker restarted with `docker restart`
       saves on the way out and comes back logged in, without a password login.
 
 ## Out of scope
