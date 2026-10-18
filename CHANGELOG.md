@@ -17,6 +17,21 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.282.0] - 2026-10-18
+
+Watching a worker's browser can go full screen (RS-296).
+
+### Added
+
+- **Full screen for the fleet watch view.** A *Full screen* button on
+  `/fleet/watch/<worker>` gives the live browser, and the sign-in panel beside
+  it, the whole display. The remote browser scales up to fill it, so a CAPTCHA
+  is no longer a postage stamp. Ticking *Take control* enters full screen in the
+  same click, and handing control back leaves it. Esc or *Exit full screen*
+  shrinks the view without dropping control. A bar at the top carries the
+  status, *Take control*, Re-login, the account panel toggle and Exit, because
+  the page head isn't visible in full screen.
+
 ## [1.281.3] - 2026-10-18
 
 The fleet's *Assign account* gives the worker the login's own device (RS-293).

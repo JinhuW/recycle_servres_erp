@@ -3390,6 +3390,24 @@ html.desktop, body.desktop, .desktop #root {
 .fl-watch-toggle:has(input:checked) { background: var(--warn-soft); color: var(--warn-strong); border-color: transparent; }
 .fl-watch-toggle input { margin: 0; accent-color: var(--warn-strong); }
 
+/* Full screen: the card is the whole display, its bar stands in for the page
+   head, and the stage and sign-in panel share everything below it. */
+.fl-watch:fullscreen {
+  display: flex; flex-direction: column; border: 0; border-radius: 0;
+  background: oklch(0.24 0.01 250);
+}
+.fl-watch:fullscreen .fl-watch-body { flex: 1; min-height: 0; grid-template-rows: minmax(0, 1fr); }
+.fl-watch:fullscreen .fl-watch-stage,
+.fl-watch:fullscreen .fl-wa { height: auto; min-height: 0; }
+.fl-watch:fullscreen .fl-watch-note { display: none; }
+.fl-watch:fullscreen > .fl-relogin { border-radius: 0; border-width: 0 0 1px; }
+.fl-watch-fsbar {
+  display: flex; align-items: center; gap: 10px; padding: 8px 14px;
+  background: var(--bg-elev); border-bottom: 1px solid var(--border);
+}
+.fl-watch-fsbar-id { font-weight: 600; font-size: 14px; }
+.fl-watch-fsbar-gap { flex: 1; }
+
 /* The sign-in panel shares the stage's height and scrolls on its own, so the
    code stays beside the browser however long the field list runs. */
 .fl-watch-body { display: grid; grid-template-columns: minmax(0, 1fr); }

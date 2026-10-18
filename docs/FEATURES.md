@@ -2252,7 +2252,13 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   re-reads the fleet every 3 seconds instead of every 30. The worker collects
   the request within about 10 seconds between sweeps (facebook-tracker
   v0.9.0); mid-sweep it starts at its next search. A coordinator older than
-  v0.9.0 reports no steps, and the strip stays hidden.
+  v0.9.0 reports no steps, and the strip stays hidden.  **Full screen**
+  (v1.282.0, RS-296) gives the browser and the sign-in panel the whole
+  display, with the browser scaled to fill it. Taking control enters full
+  screen and handing control back leaves it. Esc only shrinks the view, and
+  control stays on. A bar at the top repeats the status, Take control,
+  Re-login, the panel toggle and Exit. Since facebook-tracker 0.12.4 (RS-295)
+  the view is cropped to the worker's browser window, not its whole X display.
 
 - **Web submissions** — the manager inbox for the public website forms
   (v1.187.0). The ram4cash.com sell form (`POST /api/public/intake`) and the

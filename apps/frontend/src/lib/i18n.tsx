@@ -3501,6 +3501,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     fbcWatchAcctOpenPool: 'Open Account pool',
     fbcWatchAcctHide: 'Hide account',
     fbcWatchAcctShow: 'Show account',
+    fbcWatchFullscreen: 'Full screen',
+    fbcWatchExitFullscreen: 'Exit full screen',
   },
 };
 
