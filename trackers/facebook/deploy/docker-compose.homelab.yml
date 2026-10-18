@@ -27,6 +27,8 @@ services:
     image: aimm-recycle:latest
     container_name: rs-monitor
     restart: unless-stopped
+    # SIGTERM saves the live Facebook session; supervisord allows it 25 s.
+    stop_grace_period: 30s
 
     # Raw VNC into the live Chromium, bound to localhost only: this is a
     # logged-in Facebook browser with no VNC password (x11vnc runs -nopw), so

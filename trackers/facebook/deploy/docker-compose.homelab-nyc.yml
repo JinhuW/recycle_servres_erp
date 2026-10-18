@@ -34,6 +34,8 @@ services:
     image: aimm-recycle:latest
     container_name: rs-monitor-nyc
     restart: unless-stopped
+    # SIGTERM saves the live Facebook session; supervisord allows it 25 s.
+    stop_grace_period: 30s
 
     # Own VNC port. Loopback-only, same as the others.
     #   ssh -L 5907:127.0.0.1:5907 jinhu@10.10.10.73

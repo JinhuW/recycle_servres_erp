@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-291](./RS-291-a-worker-s-saved-login-survives-any-restart-until-fa.md) | backlog | bug | P1 | A worker's saved login survives any restart until Facebook expires it | — |
 | [RS-290](./RS-290-idle-session-check-reads-a-stale-page-url-and-misses.md) | backlog | bug | P1 | Idle session check reads a stale page URL and misses a login finished over Watch | — |
 | [RS-289](./RS-289-worker-reports-and-saves-its-facebook-session-in-rea.md) | done | bug | P1 | Worker reports and saves its Facebook session in real time, not at the next sweep | facebook-tracker 0.10.3 |
 | [RS-288](./RS-288-console-fleet-dashboard-shows-the-proxy-url-exit-ip.md) | done | story | P2 | Console fleet dashboard shows the proxy URL, exit IP and city | facebook-tracker 0.10.2 |

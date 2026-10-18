@@ -35,6 +35,8 @@ services:
     image: aimm-recycle:latest
     container_name: rs-monitor-mw
     restart: unless-stopped
+    # SIGTERM saves the live Facebook session; supervisord allows it 25 s.
+    stop_grace_period: 30s
 
     # Own VNC port; 5900 belongs to rs-monitor. Loopback-only, same as the other.
     #   ssh -L 5901:127.0.0.1:5901 jinhu@10.10.10.73
