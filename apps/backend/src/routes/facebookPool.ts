@@ -5,6 +5,7 @@ import {
   FB_POOL_STATUSES,
   FB_REPORT_REASONS,
   cookieUid,
+  cookieValue,
   normalizeFbPoolDraft,
   totpKey,
   validateFbPoolDraft,
@@ -418,6 +419,24 @@ pool.put('/:no', async (c) => {
 // A worker that already holds another account keeps it unless the caller says
 // where it goes (`previous`); there is no default, because "it broke" and
 // "we're rotating" end in different places.
+// The device the login was made in, without the login: the pool cookie's
+// datr/sb, which the worker presents so its first sign-in is the account's own
+// machine on a new IP rather than a stranger's. Only for a cookie of this very
+// account; the session cookies (c_user, xs, fr) never leave here.
+const DEVICE_COOKIE_DAYS = 400;
+function legacyDevice(cookie: string, cookieUidValue: string | null, uid: string) {
+  if (!cookie || cookieUidValue !== uid) return {};
+  const expires = Math.floor(Date.now() / 1000) + DEVICE_COOKIE_DAYS * 86_400;
+  const device_cookies = (['datr', 'sb'] as const)
+    .map((name) => [name, cookieValue(cookie, name)] as const)
+    .filter((entry): entry is readonly [typeof entry[0], string] => entry[1] !== null)
+    .map(([name, value]) => ({
+      name, value, domain: '.facebook.com', path: '/', expires,
+      httpOnly: true, secure: true, sameSite: 'None' as const,
+    }));
+  return device_cookies.length ? { device_cookies } : {};
+}
+
 const PREVIOUS_FATES = ['available', 'problem', 'retired'] as const;
 type PreviousFate = (typeof PREVIOUS_FATES)[number];
 const PREVIOUS_EVENT: Record<PreviousFate, FbPoolEventKind> = {
@@ -475,6 +494,7 @@ pool.post('/:no/assign', async (c) => {
       email: orNull(row.email),
       email_password: orNull(unsealOrEmpty(row.email_password_enc, key)),
     },
+    ...legacyDevice(unsealOrEmpty(row.cookie_enc, key), row.cookie_uid, row.uid),
   });
   if (write.error) return c.json({ error: write.error }, write.status);
   const relogin = await callFacade(c.env, 'POST', `/v1/workers/${encodeURIComponent(worker)}/relogin`);

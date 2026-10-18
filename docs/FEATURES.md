@@ -2134,7 +2134,10 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   queued, account marked Fleet. Since v1.281.2 the account's UID goes with
   the login, and it picks the device the worker presents: the same browser
   identity on any worker, never the previous login's (facebook-tracker
-  0.11.0, RS-292). If the worker already holds a pool account,
+  0.11.0, RS-292). Since v1.281.3 it also sends the `datr`/`sb` from the
+  account's pool cookie (never its session), so a login with no device yet
+  starts on the one it was made in (facebook-tracker 0.12.2, RS-293). If the
+  worker already holds a pool account,
   the dialog asks where that one goes — back to Available, to Problem (still
   naming the worker) or Retired — with no default, and both moves land
   together. A worker without a vault account gets one named after it. Until

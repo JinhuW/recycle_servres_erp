@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { cookieValue } from '@recycle-erp/shared';
 import {
   activityKey,
   assignWorker,
@@ -100,6 +101,13 @@ describe('supplier formats', () => {
     expect(cookieUid(JSON.stringify({ xs: 'demo', c_user: uid }))).toBe(uid);
     expect(cookieUid('[not json')).toBeNull();
     expect(cookieUid(JSON.stringify([{ name: 'c_user', value: 'abc' }]))).toBeNull();
+  });
+  it('reads one named cookie, such as the device id, from the same formats', () => {
+    expect(cookieValue(`c_user=${uid}; xs=s; datr=7tOa=x`, 'datr')).toBe('7tOa=x');
+    expect(cookieValue(JSON.stringify([{ name: 'sb', value: 'b' }]), 'sb')).toBe('b');
+    expect(cookieValue(JSON.stringify({ datr: 'd' }), 'datr')).toBe('d');
+    expect(cookieValue('xs=s; mydatr=no', 'datr')).toBeNull();
+    expect(cookieValue('[not json', 'datr')).toBeNull();
   });
   it('accepts an otpauth:// link wherever a setup key goes', async () => {
     const uri = 'otpauth://totp/Facebook:person?secret=jbsw%20y3dp-ehpk3pxp&issuer=Facebook';

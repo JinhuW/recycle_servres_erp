@@ -305,9 +305,12 @@ describe('facebook account pool', () => {
           fb_uid: uid(1),
           allow_password_login: true,
           secrets: { password: 'DemoOnly!1', totp_secret: 'JBSWY3DPEHPK3PXP', email: 'acct1@outlook.example', email_password: 'Mail!1' },
+          // The pool cookie's device, never its session.
+          device_cookies: [expect.objectContaining({ name: 'datr', value: 'd', domain: '.facebook.com' })],
         },
       });
       expect(JSON.stringify(sent(spy, 0).body)).not.toContain('session-1');
+      expect(JSON.stringify(sent(spy, 0).body)).not.toContain('c_user');
       expect(sent(spy, 1)).toMatchObject({ url: 'http://facade.internal:8600/v1/workers/nyc-1/relogin', method: 'POST' });
       expect(r.body.accounts[0]).toMatchObject({ status: 'fleet', holder: 'nyc-1', holderId: null });
       expect(r.body.activity[0]).toMatchObject({ action: 'assigned', accountNo: 1, detail: 'nyc-1', status: 'fleet' });
@@ -355,6 +358,19 @@ describe('facebook account pool', () => {
       const marcus = (await loginAs(MARCUS)).token;
       expect((await api('POST', `${BASE}/1/assign`, { token: marcus, env: ENV, body: { worker: 'va-1' } })).status).toBe(403);
       expect(spy).not.toHaveBeenCalled();
+    });
+
+    it('sends no device when the pool cookie belongs to another account, or has none', async () => {
+      const token = await manager();
+      await seedPool(token, 2);
+      // A cookie pasted for the wrong account must not lend it a device.
+      await api('PUT', `${BASE}/1`, { token, body: { draft: draft(1, { cookie: `c_user=${uid(9)}; datr=other` }) } });
+      await api('PUT', `${BASE}/2`, { token, body: { draft: draft(2, { cookie: `c_user=${uid(2)}; xs=s` }) } });
+      const spy = stubFacade([200, {}], [202, {}], [200, {}], [202, {}]);
+      expect((await api('POST', `${BASE}/1/assign`, { token, env: ENV, body: { worker: 'nyc-1' } })).status).toBe(200);
+      expect((await api('POST', `${BASE}/2/assign`, { token, env: ENV, body: { worker: 'va-1' } })).status).toBe(200);
+      expect(sent(spy, 0).body).not.toHaveProperty('device_cookies');
+      expect(sent(spy, 2).body).not.toHaveProperty('device_cookies');
     });
 
     it('moves the account a worker held to the status the caller names', async () => {
