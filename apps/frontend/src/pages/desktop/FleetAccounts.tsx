@@ -14,7 +14,7 @@ import {
 } from '../../lib/fleetView';
 import { useT } from '../../lib/i18n';
 import type { Translate } from '../../lib/orderPresentation';
-import { fleetWatchPath, hrefFor, onLinkClick } from '../../lib/route';
+import { fleetWatchPath, hrefFor, navigate, onLinkClick } from '../../lib/route';
 
 // ─── Fleet building blocks ────────────────────────────────────────────────────
 // The pieces the fleet list (FleetWorkers.tsx), the worker page
@@ -88,13 +88,16 @@ export function WatchButton({ workerId, className = 'btn sm' }: { workerId: stri
 
 // Queues a Facebook re-login for one worker, after a confirm that says what it
 // will do: the worker re-enters its username, password and 2FA code from the
-// vault on its next cycle.
-export function ReloginButton({ workerId, account, onQueued, className = 'btn sm' }: {
+// vault within seconds.
+export function ReloginButton({ workerId, account, onQueued, offerWatch = false, className = 'btn sm' }: {
   workerId: string;
   // The worker's fleet row, to say up front whether the login can finish by
   // itself. Unknown (undefined) reads as "not automatic", the safe claim.
   account?: FleetAccount | null;
   onQueued?: () => void;
+  // Off the Watch page, lead with opening Watch: the login is only worth
+  // following live, and a captcha mid-way needs someone looking.
+  offerWatch?: boolean;
   className?: string;
 }) {
   const { t } = useT();
@@ -102,11 +105,15 @@ export function ReloginButton({ workerId, account, onQueued, className = 'btn sm
   const [busy, setBusy] = useState(false);
   const [queued, setQueued] = useState(false);
 
-  const confirm = () => {
+  const confirm = (watch: boolean) => {
     setBusy(true);
     coordinatorApi.relogin(workerId)
       .then(() => {
         setAsking(false);
+        if (watch) {
+          navigate(fleetWatchPath(workerId));
+          return;
+        }
         setQueued(true);
         showSuccessToast(t('fbcReloginQueued', { id: workerId }));
         onQueued?.();
@@ -144,7 +151,12 @@ export function ReloginButton({ workerId, account, onQueued, className = 'btn sm
           </div>
           <div className="modal-foot" style={{ justifyContent: 'flex-end' }}>
             <button type="button" className="btn" disabled={busy} onClick={() => setAsking(false)}>{t('cancel')}</button>
-            <button type="button" className="btn primary" disabled={busy} onClick={confirm}>{t('fbcRelogin')}</button>
+            {offerWatch && (
+              <button type="button" className="btn" disabled={busy} onClick={() => confirm(false)}>{t('fbcReloginOnly')}</button>
+            )}
+            <button type="button" className="btn primary" disabled={busy} onClick={() => confirm(offerWatch)}>
+              {offerWatch ? t('fbcReloginWatch') : t('fbcRelogin')}
+            </button>
           </div>
         </Modal>
       )}

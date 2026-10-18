@@ -1,5 +1,5 @@
 ---
-id: RS-279
+id: RS-287
 title: Release review findings on the Edit cities frequency form
 type: bug
 status: in-review
@@ -8,7 +8,7 @@ created: 2026-10-17
 reporter: jinhu
 branch: claude/project-thread-b1tn16
 pr: 704
-version: 1.275.3
+version: 1.281.1
 related: [RS-277]
 ---
 

@@ -534,8 +534,14 @@ region by city set, so the ramp reads as "Southeast" rather than "28
 cities"), and from the coordinator: worker health, the vault's account list
 (`GET /v1/accounts` — identity and which secrets are stored, never a value or
 a proxy URL) and each worker's session metadata (`fb_user_id` is the `c_user`
-cookie of the backed-up session, i.e. the public profile id). Proxies leave
-only as env-var *names*; a literal URL in a config is dropped, not exposed.
+cookie of the backed-up session, i.e. the public profile id). A proxy leaves
+as its env-var name and as `proxy`: the URL with any login cut out, plus the
+IP, city, region, country and ISP it exits from. The console asks
+`ipinfo.io` *through* the proxy (`rs_console/proxy_exit.py`), caches the
+answer 6 h (a failure 5 min), and waits at most 3 s for it, so a slow proxy
+reads `pending` instead of holding the page; a worker with no proxy shows the
+VM's own exit. A proxy's username and password never leave, and a literal URL
+in a config is still dropped, not exposed.
 The document degrades rather than fails: a coordinator outage sets
 `health.error` and the configured fleet still renders, which is when someone
 is most likely looking; an older coordinator without `/v1/accounts` simply
@@ -632,15 +638,24 @@ forwards (`/v1/challenges`, `/v1/stats/reviews`, `/v1/stats/alert-hits`).
 **Re-login, and where its credentials come from.** The **Re-login** button
 (on the console's viewer page and the ERP's fleet page) queues a one-shot
 `relogin` directive on the coordinator (`POST /v1/workers/<id>/relogin`,
-forwarded by the console); the worker picks it up on its next heartbeat,
-within about five minutes, drops its session cookies — keeping the browser's
+forwarded by the console); the worker collects it within about ten seconds,
+from a directive poll (`POST /v1/workers/<id>/directives`, worker token)
+that runs between its five-minute heartbeats, and starts once the browser
+is free — at once between sweeps, at the next search mid-sweep. It drops its
+session cookies — keeping the browser's
 device cookies, so Facebook sees the same browser signing in again rather
 than a new device — and runs the full login. Username and password come
 from the vault through `/v1/auth/credentials`, which releases them only
 when the account has a password stored **and** `allow_password_login` set;
 the 2FA code comes from the vault's TOTP secret. Without those, the login
 form is left open for a person to finish in Watch → Take control, and the
-worker adopts that session within about 15 seconds.
+worker adopts that session within about 15 seconds. Each step of the login
+(`picked_up`, `typing`, `submitted`, `challenge`, `waiting_for_human`,
+`logged_in`, `failed`) goes out as its own heartbeat (`login_step`,
+`login_step_at`). The coordinator keeps the latest step with the request time
+(`relogin_requested_at` while it waits, `relogin_last_requested_at` after),
+and the ERP's Watch page shows them as they land, flagging a captcha or code
+that needs the person watching.
 
 **Managing logins from the ERP.** The ERP's Account information table has
 an **Edit credentials** form per worker that writes to the vault through
@@ -804,7 +819,7 @@ full result page per phrase in Facebook traffic, so keep the phrase count small.
 
 | Change | Files |
 | --- | --- |
-| Session auth — restore `storage_state`, present the session's pinned user agent, and fail with an actionable error rather than searching logged out | `utils.py` (`MonitorConfig.storage_state_path`), `marketplace.py` (`create_page`, `save_storage_state`, `get_session_user_agent`), `facebook.py` (`login`, `is_logged_in`) |
+| Session auth — restore `storage_state`, present the session's pinned user agent, and fail with an actionable error rather than searching logged out. A worker that cannot log in — no session file, a lapsed one, or a password login stuck on a checkpoint — parks on that page until a session lands or an operator finishes it in Watch | `utils.py` (`MonitorConfig.storage_state_path`), `marketplace.py` (`create_page`, `save_storage_state`, `get_session_user_agent`), `facebook.py` (`login`, `is_logged_in`) |
 | TOTP 2FA auto-fill + "trust this device", for the optional password fallback | `facebook.py` (`handle_two_factor_auth`, `trust_this_device`) |
 | Coordinator notification channel | `coordinator_notify.py` (new), `user.py` (registered on `UserConfig`) |
 | Collect search results while scrolling. Marketplace unmounts cards that scroll out of view, so parsing after the scroll returned the tail of the ranking (ranks 56-115 of 115, none of the top 24) and dropped the best matches | `facebook.py` (`FacebookSearchResultPage._parse_visible_listings`, `get_listings`) |
@@ -819,6 +834,7 @@ full result page per phrase in Facebook traffic, so keep the phrase count small.
 | Priority-grouped alerts — the AI's `unit_count` buckets each alert (🔥 high 50+, ⚡ medium 10-49, 🐢 low 5-9), the emoji prefixes the title, and Telegram routes each bucket to its own forum topic (`telegram_topic_high/medium/low` = `message_thread_id`s, shown as the group's sidebar; create them with `scripts/setup-telegram-topics.py`). Unset topics and uncounted listings fall back to the General topic | `notification.py` (`alert_priority`, `PRIORITY_EMOJI`, `notify`), `telegram.py` (`telegram_topic_*`, `_topic_for_priority`), other backends accept and ignore `priority` |
 | The sweep counter stays out of the AI cache key — `ItemConfig.searched_count` increments every sweep and was hashed into `item_config.hash`, rotating the AI-verdict cache key so it never hit across sweeps and every lingering listing was re-billed each sweep (~10× spend, measured 43k evals / 4k unique listings over 3 days); the `ai_eval` event now also reports `cached` so spend is auditable | `marketplace.py` (`ItemConfig.hash`), `monitor.py` (`ai_eval` event) |
 | Alert delivery report — each successfully sent Telegram alert's `message_id` (captured from the Bot API response, previously discarded) is POSTed fail-open to the coordinator's `/v1/alerts/telegram` with the listing id, search city/phrase, priority topic and AI verdict, so partner emoji reactions can be joined back to listings for the alert hit rate. Off unless `alert_report_url`/`alert_report_token` are set; a timed-out send (delivered-unknown, no Message) reports nothing by design | `telegram.py` (`_sent_messages` capture, `_after_listing_alert`, `_post_alert_report`, `alert_report_*` fields), `notification.py` (`_after_listing_alert` hook in `notify`) |
+| Live re-login — a second daemon thread polls `/v1/workers/{id}/directives` every 10 s (`directive_poll_interval`), dropping to every 60 s after three failed polls so an older coordinator costs little, and each login step is reported at once as a heartbeat carrying `login_step`/`login_step_at`, so the ERP's Watch page can follow a re-login as it runs | `facebook.py` (`_on_directives`, `_directive_loop`, `_report_login_step`, `login`, `relogin_now`), `control_plane.py` (`poll_directives`) |
 | Heartbeat repeater — the first `report_state` starts a daemon thread that re-sends the last reported state to the coordinator every 5 minutes (`heartbeat_interval`). Before this a worker heartbeated once per search, at the top of `search()`, and one sweep over the city list runs for hours, so a healthy worker spent most of the day looking silent. The repeater only restates what the main thread last said (it never touches the Playwright page, which is not thread-safe); the login is still re-checked only at the top of each search | `facebook.py` (`heartbeat_interval`, `report_state`, `_send_heartbeat`, `_heartbeat_loop`, `stop`) |
 
 | System faults page once, fleet-wide — an AI outage is declared only after `RS_INCIDENT_DOWN_AFTER` (3) straight failed evaluations and cleared after `RS_INCIDENT_UP_AFTER` (3) straight successes, and the crossing is POSTed to the coordinator's `/v1/incidents`, which dedupes across every worker (one DOWN page per key per `RS_INCIDENT_COOLDOWN_HOURS`, one recovered note per paged DOWN). Without a control plane, or when it is unreachable, a local gate applies the same one-per-cooldown rule to this process. Replaces the per-process flag that sent a DOWN/recovered pair for every listing while OpenRouter flapped | `ops_incidents.py` (new: `OutageTracker`, `LocalIncidentGate`), `monitor.py` (`_report_incident`, `evaluate_by_ai`), `control_plane.py` (`report_incident`) |

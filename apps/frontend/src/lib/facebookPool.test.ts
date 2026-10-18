@@ -34,6 +34,7 @@ const fixture = (
     recovery: '',
     cookie: cookieDays === null ? '' : `c_user=${uid}; xs=s${i}`,
     cookieAt: cookieDays === null ? null : now - cookieDays * DAY,
+    aliveCheckedAt: null,
     note: '',
     status,
     holder: status === 'taken' ? 'Lina' : null,

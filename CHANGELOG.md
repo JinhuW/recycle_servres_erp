@@ -17,10 +17,10 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
-## [1.275.3] - 2026-10-17
+## [1.281.1] - 2026-10-18
 
 Release review fixes for the Edit cities dialog's search frequency and the
-worker page's Assign account (RS-279). As shipped in 1.274.0 the cities dialog
+worker page's Assign account (RS-287). As shipped in 1.274.0 the cities dialog
 could lose edits and erase pins it did not own.
 
 ### Fixed
@@ -57,6 +57,99 @@ could lose edits and erase pins it did not own.
   that finished after shutdown began was sent a close but left out of the
   2-second terminate sweep, so a sleeping viewer could still hold the
   shutdown past its deadline.
+
+## [1.281.0] - 2026-10-17
+
+The Fleet workers table under **Monitors ▸ Facebook** sorts by column
+(RS-285). Worker, Status, Today, Searches, Session and Posts each cycle
+descending → ascending → the fleet's own order, and the choice holds while
+you move between tabs. Workers with no value for the column — undeployed, or
+on a monitor that does not count — stay at the bottom in both directions, so
+flipping the order never fills the top with dashes. Today sorts by last
+heartbeat, the time its tooltip shows. The sortable header Orders already
+used moved to a shared component.
+
+## [1.280.0] - 2026-10-17
+
+### Added
+
+- **The account pool checks itself on Facebook every week** (RS-284). Until
+  now a pool account changed status only when someone acted on it, so an
+  account Facebook had disabled sat as Available until a purchaser took it and
+  found out. A backend loop now looks up every Available, Taken and Fleet
+  account at Facebook's public profile-picture endpoint once a week. The lookup
+  is anonymous, no login and no token. A real account answers with a photo,
+  and a disabled or deleted one with a placeholder or "does not exist". A dead
+  account moves to Needs attention with a "Weekly check · disabled" line in the
+  ledger. A lookup that fails or can't be read changes nothing and is retried
+  on the next hourly tick. The week is kept per account in
+  `fb_pool_accounts.alive_checked_at` (migration 0184), not in a timer, so
+  deploys don't restart it. Each account is claimed before it is probed, so two
+  instances never probe the same one. A manager's edit made during a pass
+  wins. The account's detail panel shows when it was last checked.
+
+## [1.279.0] - 2026-10-17
+
+### Changed
+
+- **Click a value in the pool table to copy it** (RS-282). In the manager's
+  Facebook account pool, UID, password, 2FA code, e-mail, e-mail password,
+  recovery e-mail, cookie and notes now copy on click, with a "copied" toast.
+  Getting a login out used to mean opening the editor or selecting text by
+  hand. Passwords copy while still masked; the eye beside them reveals. The
+  2FA cell copies the current six-digit code, not the key. Copying a password,
+  2FA code or cookie is logged as before. Because a click now copies, a row
+  click no longer opens the editor: a pencil at the end of each row does.
+
+## [1.278.0] - 2026-10-17
+
+### Added
+
+- **A Facebook worker's page shows where its proxy comes out** (RS-281). The
+  Proxy row used to name only the env var holding the proxy
+  (`$PROXY_HOMELAB_NE`), which said nothing about where the account appears to
+  Facebook, and a region's account has to look like it is in that region. It
+  now shows the proxy URL (login removed), then the exit IP and city, region
+  and country, with the ISP on hover; a worker on the VM's own IP shows that
+  address instead. A proxy whose lookup failed says so. The Watch page's
+  Sign-in panel shows the same. Needs rs_console with
+  the matching change; an older console still shows the env var name.
+
+## [1.277.0] - 2026-10-17
+
+### Added
+
+- **Re-login starts within seconds, and Watch shows how it is going**
+  (RS-280). Pressing Re-login used to look like nothing happened. The worker
+  only learned of the request on its five-minute heartbeat, and the page said
+  nothing after a four-second "queued". On va-2 the login started 4½ minutes
+  later and stopped on a captcha nobody was watching for. With
+  facebook-tracker v0.9.0 the worker collects the request within about 10
+  seconds and reports each step. The Watch page shows those steps in a strip
+  above the viewer and the Sign-in panel (queued, signing in, needs you,
+  signed in, did not finish), re-reading the fleet every 3 seconds instead of
+  30 until the login settles. When Facebook asks for a captcha or a code, the
+  strip offers Take control. On the worker's page the Re-login dialog leads
+  with **Re-login & watch**. The copy now says "about 10 seconds" instead of
+  "about 5 minutes". Against an older coordinator the strip stays hidden, and
+  Re-login works as before.
+
+## [1.276.0] - 2026-10-17
+
+### Added
+
+- **The Watch page shows the worker's login and live 2FA code beside its
+  browser** (RS-279). Clearing a Facebook checkpoint used to mean leaving the
+  viewer, finding the login in the Account pool and reading the code there.
+  A Sign-in panel now sits next to the live browser. It shows the worker's
+  pool login, password and email password behind a reveal, the live 2FA code
+  with its countdown, and the worker's state, session, heartbeat, proxy and
+  build. The code band lights up when the worker is in a 2FA challenge.
+  Clipboard text doesn't reach the VNC session, so while Take control is on,
+  "Type into browser" types the code, login or password straight into the
+  focused field. Copies, reveals and typed secrets are logged to the pool's
+  activity ledger. The panel can be hidden, which is saved as a per-user
+  preference, and it stacks under the browser on narrow screens.
 
 ## [1.275.2] - 2026-10-17
 

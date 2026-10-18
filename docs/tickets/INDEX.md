@@ -5,7 +5,14 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-279](./RS-279-release-review-findings-on-the-edit-cities-frequency.md) | in-review | bug | P2 | Release review findings on the Edit cities frequency form | 1.275.3 |
+| [RS-287](./RS-287-release-review-findings-on-the-edit-cities-frequency.md) | in-review | bug | P2 | Release review findings on the Edit cities frequency form | 1.281.1 |
+| [RS-286](./RS-286-park-a-facebook-worker-whose-login-fails-instead-of.md) | done | bug | P1 | Park a Facebook worker whose login fails instead of searching logged out | facebook-tracker 0.10.1 |
+| [RS-285](./RS-285-sort-the-fleet-workers-table-by-column.md) | done | story | P2 | Sort the Fleet workers table by column | 1.281.0 |
+| [RS-284](./RS-284-weekly-liveness-check-for-the-facebook-account-pool.md) | done | story | P2 | Weekly liveness check for the Facebook account pool | 1.280.0 |
+| [RS-282](./RS-282-click-a-pool-table-cell-to-copy-it-edit-icon-opens-t.md) | done | story | P2 | Click a pool table cell to copy it; edit icon opens the editor | 1.279.0 |
+| [RS-281](./RS-281-fleet-worker-page-shows-the-proxy-url-exit-ip-and-ci.md) | done | story | P2 | Fleet worker page shows the proxy URL, exit IP and city | 1.278.0 |
+| [RS-280](./RS-280-re-login-starts-within-seconds-and-shows-its-progres.md) | in-progress | story | P2 | Re-login starts within seconds and shows its progress on Watch | 1.277.0 |
+| [RS-279](./RS-279-show-the-worker-s-account-and-live-2fa-code-beside-t.md) | done | story | P2 | Show the worker's account and live 2FA code beside the Watch browser | 1.276.0 |
 | [RS-278](./RS-278-linked-payments-show-the-po-owner-in-the-owner-colum.md) | done | bug | P2 | Linked payments show the PO owner in the Owner column | 1.275.2 |
 | [RS-277](./RS-277-busy-cities-searched-more-often-tiered-daily-city-fr.md) | done | story | P2 | Busy cities searched more often — tiered daily city frequency | 1.274.0 |
 | [RS-276](./RS-276-worker-page-assigns-a-pool-account-instead-of-typed.md) | done | story | P2 | Worker page assigns a pool account instead of typed credentials | 1.275.0 |

@@ -53,6 +53,7 @@ type Row = {
   held_since: Date | null;
   added_at: Date;
   cookie_at: Date | null;
+  alive_checked_at: Date | null;
   batch: string;
 };
 
@@ -120,6 +121,7 @@ async function snapshot(sql: SqlLike, key: Buffer, user: User) {
       since: ms(r.held_since),
       addedAt: r.added_at.getTime(),
       cookieAt: ms(r.cookie_at),
+      aliveCheckedAt: ms(r.alive_checked_at),
       batch: r.batch,
     };
   });

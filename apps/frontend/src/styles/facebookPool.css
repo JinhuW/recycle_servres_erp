@@ -258,10 +258,7 @@
 .fp-table tbody tr:last-child td {
   border-bottom: 0;
 }
-.fp-accounts tbody tr[tabindex] {
-  cursor: pointer;
-}
-.fp-accounts tbody tr[tabindex]:hover td {
+.fp-accounts tbody tr:hover td {
   background: var(--bg-soft);
 }
 .fp-table .mono {
@@ -1534,9 +1531,9 @@ button.ff-expr-text {
 .ff-skel-lines .skeleton + .skeleton {
   margin-top: 5px;
 }
-/* A masked secret in the manager's table: the cell itself is the reveal. */
-.fp-reveal {
-  max-width: 180px;
+/* A value in the manager's table: the value itself is the copy button. */
+.fp-copy-cell {
+  max-width: 100%;
   padding: 0;
   overflow: hidden;
   border: 0;
@@ -1545,8 +1542,18 @@ button.ff-expr-text {
   font: inherit;
   text-overflow: ellipsis;
   white-space: nowrap;
-  cursor: pointer;
+  text-align: left;
+  cursor: copy;
 }
-.fp-reveal.fp-masked {
+.fp-copy-cell:hover,
+.fp-copy-cell.fp-masked:hover {
+  color: var(--accent);
+}
+.fp-copy-cell:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+.fp-copy-cell.fp-masked {
   color: var(--fg-subtle);
 }

@@ -92,7 +92,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from . import fleet as fleet_view
-from . import settings, vnc
+from . import proxy_exit, settings, vnc
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -494,6 +494,10 @@ async def fleet() -> Dict[str, Any]:
                 fleet_view.apply_tiers(doc, res.json() or {})
         except (httpx.HTTPError, ValueError):
             pass
+    # Where each worker comes out, asked through its own proxy. Never fails
+    # the page: a slow or dead proxy reads `pending` / `error` on its row.
+    targets = fleet_view.proxy_targets(doc, dict(os.environ))
+    fleet_view.apply_proxies(doc, targets, await proxy_exit.resolve(targets.values()))
     doc["settings"] = {
         "editable": master is not None and "error" not in saved and settings.writable(),
         "updated_at": saved.get("updated_at"),

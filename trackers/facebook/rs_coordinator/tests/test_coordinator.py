@@ -251,6 +251,58 @@ def test_relogin_request_rides_back_on_one_heartbeat(client):
     assert "relogin" not in second["directives"]
 
 
+def test_relogin_is_polled_between_heartbeats_once(client):
+    # Heartbeats are minutes apart; the poll is what makes Re-login start
+    # while the operator is still watching. Either path consumes the flag.
+    client.db.request_relogin("relogin-2")
+
+    first = client.post("/v1/workers/relogin-2/directives", json={}, headers=AUTH)
+    assert first.status_code == 200
+    assert first.json() == {"directives": ["relogin"]}
+    assert client.post(
+        "/v1/workers/relogin-2/directives", json={}, headers=AUTH
+    ).json() == {"directives": []}
+    beat = client.post(
+        "/api/v1/heartbeat", json={"worker_id": "relogin-2", "status": "ok"}, headers=AUTH
+    ).json()
+    assert beat["directives"] == []
+
+    # The request time outlives the hand-off: the ERP tells "queued" from
+    # "under way" by comparing it with the worker's login steps.
+    row = client.db.get_worker("relogin-2")
+    assert row["relogin_requested_at"] is None
+    assert row["relogin_last_requested_at"]
+
+
+def test_directive_poll_needs_a_worker_token(client):
+    client.db.request_relogin("relogin-3")
+    assert client.post("/v1/workers/relogin-3/directives", json={}).status_code == 401
+    # A refused poll consumed nothing.
+    assert client.db.get_worker("relogin-3")["relogin_requested_at"]
+
+
+def test_heartbeat_records_the_login_step(client):
+    client.post(
+        "/api/v1/heartbeat",
+        json={
+            "worker_id": "relogin-4",
+            "status": "ok",
+            "login_step": "challenge",
+            "login_step_at": "2026-10-17T20:37:59+00:00",
+        },
+        headers=AUTH,
+    )
+    row = client.db.get_worker("relogin-4")
+    assert row["login_step"] == "challenge"
+    assert row["login_step_at"] == "2026-10-17T20:37:59+00:00"
+
+    # A later heartbeat without a step leaves it alone.
+    client.post(
+        "/api/v1/heartbeat", json={"worker_id": "relogin-4", "status": "ok"}, headers=AUTH
+    )
+    assert client.db.get_worker("relogin-4")["login_step"] == "challenge"
+
+
 def test_unknown_payload_fields_are_ignored(client):
     listing = sample_listing()
     listing["some_future_aimm_field"] = "whatever"

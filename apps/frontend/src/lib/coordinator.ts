@@ -34,6 +34,12 @@ export type FleetWorker = {
   // The build the worker reported ("0.5.6 (d3e9a30)"); null from images
   // that predate build reporting.
   version?: string | null;
+  // Re-login progress (see reloginProgress). Absent from a coordinator that
+  // predates it, which leaves the Watch page as it was.
+  relogin_requested_at?: string | null;
+  relogin_last_requested_at?: string | null;
+  login_step?: string | null;
+  login_step_at?: string | null;
   liveness: WorkerLiveness;
   needs_attention: boolean;
 };
@@ -184,6 +190,7 @@ export type FleetAccount = {
   cities: FleetCity[];
   session_file: string | null;
   proxy_env: string | null;
+  proxy?: FleetProxy;
   pacing: { search_interval: string | null; max_search_interval: string | null; overridden: boolean };
   vnc_url: string | null;
   // True when the facade itself can bridge to this worker's browser (it is in
@@ -206,6 +213,21 @@ export type FleetAccount = {
   // Whether the console holds this worker's config and so can save its
   // cities; absent from a facade that predates per-worker cities.
   cities_editable?: boolean;
+};
+
+// Where the worker's traffic comes out, which rs_console asks an IP-geo
+// service through the proxy itself. `url` has any login cut out and is null on
+// the VM's own IP. The exit fields are absent while the lookup is `pending` or
+// after it failed (`error`).
+export type FleetProxy = {
+  url: string | null;
+  ip?: string | null;
+  city?: string | null;
+  region?: string | null;
+  country?: string | null;
+  org?: string | null;
+  error?: string;
+  pending?: boolean;
 };
 
 // One city as a worker config holds it. `radius` is in kilometres.

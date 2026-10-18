@@ -398,6 +398,22 @@ def test_a_silent_worker_reads_as_stale_then_dead(client):
     assert worker["needs_attention"] is True
 
 
+def test_admin_worker_view_carries_relogin_progress(client):
+    heartbeat(client, state="SESSION_EXPIRED")
+    client.post("/v1/workers/denver-1/relogin", headers=ADMIN)
+    queued = client.get("/v1/workers", headers=ADMIN).json()["workers"][0]
+    assert queued["relogin_requested_at"]
+    assert queued["relogin_last_requested_at"] == queued["relogin_requested_at"]
+    assert queued["login_step"] is None
+
+    heartbeat(client, login_step="typing", login_step_at="2099-01-01T00:00:00+00:00")
+    worker = client.get("/v1/workers", headers=ADMIN).json()["workers"][0]
+    assert worker["relogin_requested_at"] is None  # handed out with that heartbeat
+    assert worker["login_step"] == "typing"
+    assert worker["login_step_at"] == "2099-01-01T00:00:00+00:00"
+    assert worker["relogin_last_requested_at"] == queued["relogin_last_requested_at"]
+
+
 def test_admin_view_needs_the_admin_token(client):
     assert client.get("/v1/workers").status_code == 401
     assert client.get("/v1/workers", headers=AUTH).status_code == 401

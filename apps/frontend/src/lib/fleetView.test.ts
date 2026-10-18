@@ -2,13 +2,24 @@ import { describe, it, expect } from 'vitest';
 import { vncSocketUrl, type Challenge, type FleetAccount, type FleetDoc, type FleetWorker } from './coordinator';
 import {
   accountAlerts, accountHaystack, attentionReason, browserLabel, canWatch, dayStrip, fleetPostsToday,
-  externalVncUrl, fleetActivity, fleetStatus, flowCounts, hitsByCity, isUnstampedBuild, parkedWorkers, reloginIsAutomatic,
+  externalVncUrl, fleetActivity, fleetStatus, flowCounts, hitsByCity, isUnstampedBuild, parkedWorkers, reloginIsAutomatic, reloginProgress,
   matchesTerms, offersRelogin, queryTerms, reviewedToday, searchedToday,
-  splitHighlights, vaultAccountIdFor, whoIs,
+  sortFleet, splitHighlights, vaultAccountIdFor, whoIs,
   FLOW_STAGES, STAGE_FORMS, draftChanges, settingsDraft, settingsPatch,
   citiesDiffer, cityOwners, isCitySlug, marketplaceCityUrl, normalizeCitySlug,
-  applyPinEdits, pinEdits, searchesPerDay, tierSettingsEdits, tierSettingsValid,
+  applyPinEdits, pinEdits, searchesPerDay, tierSettingsEdits, tierSettingsValid, keysymsFor,
 } from './fleetView';
+
+describe('keysymsFor', () => {
+  it('maps Latin-1 to its code point and the rest to the Unicode keysym range', () => {
+    expect(keysymsFor('a1Z')).toEqual([0x61, 0x31, 0x5a]);
+    expect(keysymsFor('é')).toEqual([0xe9]);
+    expect(keysymsFor('€')).toEqual([0x010020ac]);
+  });
+  it('drops control characters so a pasted line break cannot submit a form', () => {
+    expect(keysymsFor('12\n34\t')).toEqual([0x31, 0x32, 0x33, 0x34]);
+  });
+});
 
 const account = (over: Partial<FleetAccount>): FleetAccount => ({
   worker_id: 'w',
@@ -210,6 +221,44 @@ describe('fleetView', () => {
     expect(reloginIsAutomatic(vault(true, { totp_secret: true }))).toBe(false);
     expect(reloginIsAutomatic(account({}))).toBe(false);
     expect(reloginIsAutomatic(null)).toBe(false);
+  });
+
+  it('follows a re-login from the queue to its outcome', () => {
+    const asked = '2026-10-17T20:32:48+00:00';
+    const t0 = Date.parse(asked);
+    const at = (seconds: number) => new Date(t0 + seconds * 1000).toISOString();
+    const w = (h: Partial<FleetWorker>) => account({ health: h as FleetWorker });
+
+    expect(reloginProgress(null)).toBeNull();
+    expect(reloginProgress(account({}))).toBeNull();
+    // A coordinator that predates re-login progress says nothing.
+    expect(reloginProgress(w({ state: 'HEALTHY' }), t0)).toBeNull();
+
+    const queued = reloginProgress(w({ relogin_requested_at: asked, relogin_last_requested_at: asked }), t0 + 5000);
+    expect(queued).toEqual({ phase: 'queued', since: asked, active: true });
+
+    // Picked up, no step reported yet: signing in from the request.
+    expect(reloginProgress(w({ relogin_last_requested_at: asked }), t0 + 9000)?.phase).toBe('signing_in');
+
+    const step = (login_step: string, seconds: number, now = seconds + 1) =>
+      reloginProgress(w({ relogin_last_requested_at: asked, login_step, login_step_at: at(seconds) }), t0 + now * 1000);
+    expect(step('typing', 11)?.phase).toBe('signing_in');
+    expect(step('challenge', 40)).toEqual({ phase: 'needs_you', since: at(40), active: true });
+    expect(step('waiting_for_human', 41)?.phase).toBe('needs_you');
+    expect(step('logged_in', 90)).toEqual({ phase: 'done', since: at(90), active: false });
+    expect(step('failed', 160)?.phase).toBe('failed');
+    expect(step('some_future_step', 20)?.phase).toBe('signing_in');
+
+    // A step from an earlier login is not this one's — but a worker clock a
+    // few seconds behind the coordinator's still counts.
+    expect(step('logged_in', -600, 5)?.phase).toBe('signing_in');
+    expect(step('typing', -20, 5)?.phase).toBe('signing_in');
+    expect(step('challenge', -20, 5)?.phase).toBe('needs_you');
+
+    // Each phase is shown for a bounded time.
+    expect(step('logged_in', 90, 90 + 61)).toBeNull();
+    expect(step('challenge', 40, 40 + 16 * 60)).toBeNull();
+    expect(reloginProgress(w({ relogin_requested_at: asked }), t0 + 31 * 60_000)).toBeNull();
   });
 });
 
@@ -419,5 +468,31 @@ describe('dayStrip', () => {
     expect(searchedToday(denver({ today: today({}) }), 'live')('denver')).toBe(true);
     expect(searchedToday(denver({ today: today({ cities: null }) }), 'stale')('denver')).toBe(true);
     expect(searchedToday(account({}), 'offline')('denver')).toBe(false);
+  });
+});
+
+describe('sortFleet', () => {
+  const posts = (worker_id: string, n: number | null) => account({
+    worker_id,
+    today: n === null ? null : { day: '2026-10-17', first_at: null, last_at: null, cycles: 0, searches: 0, posts: n, alerts: 0 },
+  });
+  const ids = (ws: FleetAccount[]) => ws.map(w => w.worker_id);
+  const none = new Set<string>();
+
+  it('keeps unknowns last in both directions', () => {
+    const ws = [posts('a', 3), posts('b', null), posts('c', 9), posts('d', 0)];
+    expect(ids(sortFleet(ws, 'posts', 'desc', none))).toEqual(['c', 'a', 'd', 'b']);
+    expect(ids(sortFleet(ws, 'posts', 'asc', none))).toEqual(['d', 'a', 'c', 'b']);
+  });
+
+  it('sorts workers by login, then id, case-insensitively', () => {
+    const ws = [account({ worker_id: 'Zed' }), account({ worker_id: 'alpha' }), account({ worker_id: 'Mid' })];
+    expect(ids(sortFleet(ws, 'worker', 'asc', none))).toEqual(['alpha', 'Mid', 'Zed']);
+  });
+
+  it('sorts status in legend order, a parked worker as attention', () => {
+    const live = { liveness: 'live', state: 'HEALTHY' } as never;
+    const ws = [account({ worker_id: 'off' }), account({ worker_id: 'parked', health: live }), account({ worker_id: 'ok', health: live })];
+    expect(ids(sortFleet(ws, 'status', 'asc', new Set(['parked'])))).toEqual(['ok', 'parked', 'off']);
   });
 });

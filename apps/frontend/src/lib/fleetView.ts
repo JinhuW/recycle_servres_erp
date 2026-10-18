@@ -181,6 +181,41 @@ export function fleetStatus(w: FleetAccount, parked: ReadonlySet<string>): Fleet
 export const parkedWorkers = (challenges: readonly Challenge[] | null): Set<string> =>
   new Set((challenges ?? []).map(ch => ch.worker_id));
 
+// The Fleet table's sortable columns. Today has no single value of its own —
+// the day bar is a shape — so it sorts by the heartbeat its tooltip shows.
+export type FleetSortCol = 'worker' | 'status' | 'today' | 'searches' | 'session' | 'posts';
+
+export function fleetSortValue(col: FleetSortCol, w: FleetAccount, status: FleetStatus): string | number | null {
+  switch (col) {
+    case 'worker': {
+      const who = whoIs(w);
+      return (who.login ?? who.label ?? w.worker_id).toLowerCase();
+    }
+    case 'status': return FLEET_STATUSES.indexOf(status);
+    case 'today': {
+      const at = w.health?.last_heartbeat_at;
+      return at ? Date.parse(at) : null;
+    }
+    case 'searches': return w.today?.searches ?? null;
+    case 'session': return w.health?.session_days_left ?? null;
+    case 'posts': return w.today?.posts ?? null;
+  }
+}
+
+// Unknowns go last whichever way the column sorts, so flipping the order
+// never fills the top of the table with dashes.
+export function sortFleet(
+  workers: readonly FleetAccount[], col: FleetSortCol, dir: 'asc' | 'desc', parked: ReadonlySet<string>,
+): FleetAccount[] {
+  const sign = dir === 'asc' ? 1 : -1;
+  const keyed = workers.map(w => ({ w, v: fleetSortValue(col, w, fleetStatus(w, parked)) }));
+  keyed.sort((a, b) => {
+    if (a.v === null || b.v === null) return a.v === b.v ? 0 : a.v === null ? 1 : -1;
+    return a.v < b.v ? -sign : a.v > b.v ? sign : 0;
+  });
+  return keyed.map(k => k.w);
+}
+
 // The Recent activity feed. The coordinator keeps no event log the ERP can
 // read, so it is rebuilt from the timestamps it does serve: each worker's
 // latest search, listing and session backup, the moment a dead worker last
@@ -521,6 +556,57 @@ export function reloginIsAutomatic(w: FleetAccount | null | undefined): boolean 
   return Boolean(acct?.allow_password_login && acct.secrets.password);
 }
 
+// Where an operator's re-login has got to, for the strip on the Watch page.
+// `relogin_requested_at` is set only while the request waits for the worker,
+// so "queued" needs no clock comparison. After the hand-off, a login step
+// counts only if it was stamped after the request; the worker stamps steps
+// with its own clock, so a minute's slack absorbs drift from the
+// coordinator's. Each phase is shown for a bounded time, so a strip never
+// outlives the re-login it describes.
+export type ReloginPhase = 'queued' | 'signing_in' | 'needs_you' | 'done' | 'failed';
+export type ReloginProgress = { phase: ReloginPhase; since: string; active: boolean };
+
+const RELOGIN_CLOCK_SLACK_MS = 60_000;
+const RELOGIN_SHOW_MS: Record<ReloginPhase, number> = {
+  queued: 30 * 60_000,
+  signing_in: 10 * 60_000,
+  needs_you: 15 * 60_000,
+  done: 60_000,
+  failed: 10 * 60_000,
+};
+const LOGIN_STEP_PHASE: Record<string, ReloginPhase> = {
+  picked_up: 'signing_in',
+  typing: 'signing_in',
+  submitted: 'signing_in',
+  challenge: 'needs_you',
+  waiting_for_human: 'needs_you',
+  logged_in: 'done',
+  failed: 'failed',
+};
+
+export function reloginProgress(
+  w: FleetAccount | null | undefined, now: number = Date.now(),
+): ReloginProgress | null {
+  const h = w?.health;
+  if (!h) return null;
+  const shown = (phase: ReloginPhase, since: string): ReloginProgress | null => {
+    const at = Date.parse(since);
+    if (!Number.isFinite(at) || now - at > RELOGIN_SHOW_MS[phase]) return null;
+    return { phase, since, active: phase !== 'done' && phase !== 'failed' };
+  };
+  if (h.relogin_requested_at) return shown('queued', h.relogin_requested_at);
+  const requested = h.relogin_last_requested_at;
+  if (!requested) return null;
+  const step = h.login_step;
+  const stepAt = h.login_step_at;
+  const stepMs = stepAt ? Date.parse(stepAt) : NaN;
+  if (!step || !stepAt || !(stepMs >= Date.parse(requested) - RELOGIN_CLOCK_SLACK_MS)) {
+    // Handed out, nothing reported yet — or a worker too old to report steps.
+    return shown('signing_in', requested);
+  }
+  return shown(LOGIN_STEP_PHASE[step] ?? 'signing_in', stepAt);
+}
+
 // The vault account a worker's credentials are filed under: its own account
 // when it has one, otherwise a new one named after the worker — the one id an
 // operator already knows it by (`rsc vault set-account --account-id <worker>`).
@@ -621,4 +707,17 @@ export function tierSettingsValid(s: CityTierSettings): boolean {
   return whole(s.top_pct, 0, 100) && whole(s.mid_pct, 0, 100) && s.top_pct + s.mid_pct <= 100
     && whole(s.window_days, 1, MAX_WINDOW_DAYS)
     && s.per_day.every(n => whole(n, 1, MAX_PER_DAY)) && top >= mid && mid >= rest;
+}
+
+// Keysyms for typing text into a VNC session. Latin-1 keysyms equal their
+// code point; everything else is the Unicode range X11 reserves. Control
+// characters are dropped: a stray Return would submit Facebook's form.
+export function keysymsFor(text: string): number[] {
+  const out: number[] = [];
+  for (const ch of text) {
+    const cp = ch.codePointAt(0)!;
+    if (cp < 0x20 || cp === 0x7f) continue;
+    out.push(cp <= 0xff ? cp : 0x01000000 + cp);
+  }
+  return out;
 }

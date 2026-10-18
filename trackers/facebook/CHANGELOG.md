@@ -18,6 +18,52 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-10-17
+
+### Fixed
+
+- **A worker that cannot log in parks instead of searching logged out**
+  (RS-286). A worker with no session file at all now parks like one with a
+  lapsed file, so a new worker no longer needs an empty storage state before
+  first start. A password login that stops on a checkpoint now parks too, and a
+  checkpoint finished by hand in Watch is adopted and saved within seconds;
+  before, the worker never noticed, kept reading "Session expired", and its
+  next job searched from wherever the login had stopped. A Re-login that works
+  reports healthy at once instead of at the next sweep.
+
+## [0.10.0] - 2026-10-17
+
+### Added
+
+- **The fleet document says where each worker exits** (RS-281). `/v1/fleet`
+  gives every worker a `proxy`: its proxy URL with the login cut out, and the
+  IP, city, region, country and ISP an IP-geo lookup made *through* that proxy
+  returns (the VM's own, for a worker without one). Only the env-var name used
+  to leave, which said nothing about whether a region's account looks like it
+  is in that region. Lookups are cached and never hold the page; credentials
+  still never leave the console. `proxy_env` stays for older ERPs.
+
+## [0.9.0] - 2026-10-17
+
+### Added
+
+- **Re-login starts within seconds, and says how it is going** (RS-280).
+  A re-login rode only on the five-minute heartbeat, so the button looked
+  dead: on 2026-10-17 va-2 took 4½ minutes to start, then stopped on a
+  captcha that nobody was watching for. Workers now poll the new
+  `POST /v1/workers/{id}/directives` (worker token; it hands out the same
+  one-shot flag as the heartbeat) every 10 seconds, and send a heartbeat per
+  login step with `login_step` and `login_step_at`. The coordinator stores the
+  step and keeps the time of the last request, in three new `workers` columns
+  (`relogin_last_requested_at`, `login_step`, `login_step_at`; added on start),
+  and `/v1/workers` and `/v1/fleet` carry them with `relogin_requested_at`.
+  Vendored monitor repinned to `9350dd7`.
+
+  Old and new mix safely. A new worker against an old coordinator gets a 404
+  from the poll, slows it to once a minute, and still receives its re-login on
+  the heartbeat. An old worker against a new coordinator never polls and
+  reports no steps.
+
 ## [0.8.0] - 2026-10-17
 
 ### Added

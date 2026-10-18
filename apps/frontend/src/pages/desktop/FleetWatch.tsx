@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import type RFB from '@novnc/novnc';
-import { Icon } from '../../components/Icon';
+import { Icon, type IconName } from '../../components/Icon';
 import { api } from '../../lib/api';
 import { coordinatorApi, VNC_SESSION_LAPSED, vncSocketUrl, type FleetAccount } from '../../lib/coordinator';
-import { liveness } from '../../lib/fleetView';
+import { heldByWorker, poolApi } from '../../lib/facebookPool';
+import { keysymsFor, liveness, reloginProgress, type ReloginPhase } from '../../lib/fleetView';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
+import { usePreference } from '../../lib/preferences';
 import { fleetWorkerPath, hrefFor, onLinkClick } from '../../lib/route';
 import { ReloginButton, stateLabel } from './FleetAccounts';
+import { FleetWatchAccount, type PoolLookup } from './FleetWatchAccount';
 
 // ─── Watch a worker's browser ─────────────────────────────────────────────────
 // The live Chromium a Facebook worker is driving, through noVNC. The socket is
@@ -22,6 +25,19 @@ import { ReloginButton, stateLabel } from './FleetAccounts';
 //
 // noVNC (~200 KB, with a top-level await) is imported here, on demand, so it
 // never weighs on the fleet page itself.
+
+const FLEET_REFRESH_MS = 30_000;
+// While a re-login is in flight the fleet is re-read this often, so the strip
+// above the viewer flags a captcha while the worker still waits for a human.
+const RELOGIN_REFRESH_MS = 3000;
+
+const RELOGIN_STRIP: Record<ReloginPhase, { tone: string; icon: IconName; key: string }> = {
+  queued: { tone: '', icon: 'clock', key: 'fbcReloginStripQueued' },
+  signing_in: { tone: '', icon: 'refresh', key: 'fbcReloginStripSigningIn' },
+  needs_you: { tone: 'warn', icon: 'alert', key: 'fbcReloginStripNeedsYou' },
+  done: { tone: 'pos', icon: 'check', key: 'fbcReloginStripDone' },
+  failed: { tone: 'neg', icon: 'alert', key: 'fbcReloginStripFailed' },
+};
 
 type Phase =
   | { kind: 'connecting' }
@@ -44,13 +60,41 @@ export function FleetWatch({ workerId }: { workerId: string }) {
   const [attempt, setAttempt] = useState(0);
   // undefined while loading; null when the fleet document has no such worker.
   const [account, setAccount] = useState<FleetAccount | null | undefined>(undefined);
+  const [coordinatorVersion, setCoordinatorVersion] = useState<string | null>(null);
+  const [pool, setPool] = useState<PoolLookup>({ kind: 'loading' });
+  const [accountHidden, setAccountHidden] = usePreference('fleetWatch.accountHidden', false);
+  // Bumped to re-read the fleet at once, after a re-login is queued.
+  const [fleetRead, setFleetRead] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
+  const relogin = reloginProgress(account, now);
+  const following = relogin?.active ?? false;
+
+  // Polled so the panel sees a worker drop into CHALLENGE_2FA while watched,
+  // and faster while a re-login is in flight.
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      if (document.hidden) return;
+      coordinatorApi.fleet()
+        .then(doc => {
+          if (cancelled) return;
+          setAccount(doc.workers.find(w => w.worker_id === workerId) ?? null);
+          setCoordinatorVersion(doc.versions.coordinator);
+          setNow(Date.now());
+        })
+        // The header and panel are help; the viewer works without them.
+        .catch(() => { if (!cancelled) setAccount(a => a ?? null); });
+    };
+    load();
+    const timer = setInterval(load, following ? RELOGIN_REFRESH_MS : FLEET_REFRESH_MS);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [workerId, following, fleetRead]);
 
   useEffect(() => {
     let cancelled = false;
-    coordinatorApi.fleet()
-      .then(doc => { if (!cancelled) setAccount(doc.workers.find(w => w.worker_id === workerId) ?? null); })
-      // The header is decoration; the viewer works without it.
-      .catch(() => { if (!cancelled) setAccount(null); });
+    poolApi.snapshot()
+      .then(snap => { if (!cancelled) setPool({ kind: 'ok', account: heldByWorker(snap.accounts, workerId) ?? null }); })
+      .catch(() => { if (!cancelled) setPool({ kind: 'unavailable' }); });
     return () => { cancelled = true; };
   }, [workerId]);
 
@@ -131,6 +175,16 @@ export function FleetWatch({ workerId }: { workerId: string }) {
     return () => document.removeEventListener('visibilitychange', onHide);
   }, []);
 
+  // Types into whichever field has focus in the remote browser, then hands
+  // the keyboard back to the viewer so Enter goes to Facebook too.
+  const typeText = (text: string): boolean => {
+    const rfb = rfbRef.current;
+    if (!rfb || rfb.viewOnly) return false;
+    for (const keysym of keysymsFor(text)) rfb.sendKey(keysym, null);
+    rfb.focus();
+    return true;
+  };
+
   const h = account?.health ?? null;
   const status = phase.kind === 'connected'
     ? { tone: 'pos', text: control ? t('fbcWatchInControl') : t('fbcWatchWatching') }
@@ -166,29 +220,50 @@ export function FleetWatch({ workerId }: { workerId: string }) {
             <input type="checkbox" checked={control} onChange={e => setControl(e.target.checked)} />
             <span>{t('fbcWatchControl')}</span>
           </label>
-          <ReloginButton workerId={workerId} account={account} />
+          <ReloginButton workerId={workerId} account={account} onQueued={() => setFleetRead(n => n + 1)} />
           {phase.kind === 'closed' && (
             <button type="button" className="btn sm" onClick={() => setAttempt(n => n + 1)}>
               <Icon name="rotate" size={13} />
               {t('fbcWatchReconnect')}
             </button>
           )}
+          <button type="button" className="btn sm" aria-pressed={!accountHidden}
+            onClick={() => setAccountHidden(!accountHidden)}>
+            <Icon name="panelRight" size={13} />
+            {t(accountHidden ? 'fbcWatchAcctShow' : 'fbcWatchAcctHide')}
+          </button>
         </div>
       </div>
 
-      <div className={`card fl-watch${control ? ' in-control' : ''}`}>
-        <div className="fl-watch-stage">
-          <div className="fl-watch-screen" ref={screenRef} />
-          {phase.kind === 'closed' && (
-            <div className="fl-watch-overlay">
-              <div className="fl-watch-overlay-card" role="alert">
-                <div className="fl-watch-overlay-title">{phase.title}</div>
-                <p>{phase.text}</p>
-                <button type="button" className="btn primary" onClick={() => setAttempt(n => n + 1)}>
-                  {t('fbcWatchReconnect')}
-                </button>
+      {relogin && (
+        <div className={`fl-relogin ${RELOGIN_STRIP[relogin.phase].tone}`} role="status" aria-live="polite">
+          <Icon name={RELOGIN_STRIP[relogin.phase].icon} size={15} />
+          <span>{t(RELOGIN_STRIP[relogin.phase].key, { age: relTime(relogin.since, locale) })}</span>
+          {relogin.phase === 'needs_you' && !control && phase.kind === 'connected' && (
+            <button type="button" className="btn sm" onClick={() => setControl(true)}>{t('fbcWatchControl')}</button>
+          )}
+        </div>
+      )}
+
+      <div className={`card fl-watch${control ? ' in-control' : ''}${accountHidden ? '' : ' with-account'}`}>
+        <div className="fl-watch-body">
+          <div className="fl-watch-stage">
+            <div className="fl-watch-screen" ref={screenRef} />
+            {phase.kind === 'closed' && (
+              <div className="fl-watch-overlay">
+                <div className="fl-watch-overlay-card" role="alert">
+                  <div className="fl-watch-overlay-title">{phase.title}</div>
+                  <p>{phase.text}</p>
+                  <button type="button" className="btn primary" onClick={() => setAttempt(n => n + 1)}>
+                    {t('fbcWatchReconnect')}
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
+          </div>
+          {!accountHidden && (
+            <FleetWatchAccount worker={account} coordinatorVersion={coordinatorVersion} pool={pool}
+              canType={phase.kind === 'connected' && control} onType={typeText} />
           )}
         </div>
         <div className="fl-watch-note">
