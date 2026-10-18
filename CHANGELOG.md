@@ -57,6 +57,14 @@ could lose edits and erase pins it did not own.
   that finished after shutdown began was sent a close but left out of the
   2-second terminate sweep, so a sleeping viewer could still hold the
   shutdown past its deadline.
+- **A redeploy mid-check no longer skips accounts for a week.** The weekly
+  pool liveness check stamped its whole batch as checked before probing any
+  of them, so a restart during a pass left the unprobed ones marked checked
+  until next week. Each account is now claimed right before its probe.
+- **The re-login strip no longer shows the last attempt's outcome.** A
+  "failed" from a re-login a few seconds before the new one counted as the new
+  one's result, ending the strip and slowing Watch's refresh while the login
+  was still running.
 
 ## [1.281.0] - 2026-10-17
 

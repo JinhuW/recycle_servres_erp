@@ -83,6 +83,17 @@ describe('weekly pool liveness check', () => {
     expect(seen).toEqual([uid(1), uid(1)]);
   });
 
+  it('stamps only what it probed when the pass is stopped', async () => {
+    await seed(1);
+    await seed(2);
+    let stop = false;
+    const probe = async () => { stop = true; return 'alive' as const; };
+    expect(await checkPoolLiveness(getTestDb(), { probe, gapMs: 0, stopping: () => stop })).toMatchObject({ checked: 1 });
+    const [a, b] = await rows();
+    expect(a.alive_checked_at).not.toBeNull();
+    expect(b.alive_checked_at).toBeNull();
+  });
+
   it("doesn't overwrite a status a manager changed during the pass", async () => {
     await seed(1);
     const probe = async () => {

@@ -254,6 +254,8 @@ describe('fleetView', () => {
     expect(step('logged_in', -600, 5)?.phase).toBe('signing_in');
     expect(step('typing', -20, 5)?.phase).toBe('signing_in');
     expect(step('challenge', -20, 5)?.phase).toBe('needs_you');
+    // An outcome stamped before the request is the previous attempt's, even within the slack.
+    expect(step('failed', -20, 5)?.phase).toBe('signing_in');
 
     // Each phase is shown for a bounded time.
     expect(step('logged_in', 90, 90 + 61)).toBeNull();

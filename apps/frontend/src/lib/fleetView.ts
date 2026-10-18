@@ -600,11 +600,16 @@ export function reloginProgress(
   const step = h.login_step;
   const stepAt = h.login_step_at;
   const stepMs = stepAt ? Date.parse(stepAt) : NaN;
-  if (!step || !stepAt || !(stepMs >= Date.parse(requested) - RELOGIN_CLOCK_SLACK_MS)) {
+  const phase = LOGIN_STEP_PHASE[step ?? ''] ?? 'signing_in';
+  // The slack is for clock skew on a step that is under way. An outcome from
+  // just before this request is the previous attempt's: reading it as this
+  // one's would end the strip, and slow Watch's polling, mid-login.
+  const slack = phase === 'done' || phase === 'failed' ? 0 : RELOGIN_CLOCK_SLACK_MS;
+  if (!step || !stepAt || !(stepMs >= Date.parse(requested) - slack)) {
     // Handed out, nothing reported yet — or a worker too old to report steps.
     return shown('signing_in', requested);
   }
-  return shown(LOGIN_STEP_PHASE[step] ?? 'signing_in', stepAt);
+  return shown(phase, stepAt);
 }
 
 // The vault account a worker's credentials are filed under: its own account

@@ -38,6 +38,7 @@ scope*.
 
 - [x] Assign account (RS-276, #698, also in this release) refuses an account that a purchaser or another worker holds (`fpAssignHeld`), refreshes the pool after any refusal, moves every account on the worker at swap time, and labels mismatched or unreadable cookies.
 - [x] A VNC handshake that completes after shutdown began is terminated after the grace period, like the open bridges (RS-176, #703, also in this release).
+- [x] The pool liveness check (RS-284, #711) claims each account right before its probe, so a shutdown mid-pass leaves no unprobed account stamped; a re-login's terminal step from before the request is not read as the new attempt's (RS-280, #708).
 
 ## Out of scope
 
@@ -49,4 +50,5 @@ deploy, left for a separate decision:
 - The console's fleet poll asks for the rank after its other stats calls rather than alongside them, so a slow coordinator doubles the poll's wait.
 - From the #698 review, not fixed: the vault write and Re-login still happen before the pool transaction, so a DB failure after them leaves the pool behind the vault (pre-existing in the assign route); `PUT /api/coordinator/accounts/:id` has no ERP caller left but is a tracker contract route; the "replaced by #N" audit detail is English; the previous-fate list and the candidate sort are duplicated between files.
 - From the #701 and #703 review, not fixed: a payment linked to a sell order still shows no owner and stays under Unassigned (RS-278 asked for PO links only); picking a member in the owner filter now also returns their PO-linked payments, as #701 intended; the owner filter's COALESCE cannot use the assignee index; the new VNC shutdown test waits on fixed sleeps.
+- From the #706–#716 review, not fixed: the liveness check reads any Graph "does not exist" error as dead, though Graph returns the same text for restricted objects (needs a real response to decide); an inconclusive probe is retried every hour with no backoff, as its test intends; `rs_console/proxy_exit.py` lets an unexpected exception fail the whole /v1/fleet page (tracker release and homelab deploy needed); Watch polls the whole fleet every 3 s during a re-login; the Watch sign-in panel hides an account the check moved to problem; copy/audit helpers are duplicated in FleetWatchAccount.
 - The console matches ranked rows to config slugs case-sensitively while the coordinator lowercases; every slug written by the ERP or in `master.toml` is lowercase today, so it is not reachable.

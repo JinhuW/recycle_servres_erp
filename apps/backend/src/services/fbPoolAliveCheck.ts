@@ -56,6 +56,9 @@ export const probeFbUid: Probe = async (uid) => {
   }
 };
 
+const dueFrag = (sql: Sql<{}>) => sql`(alive_checked_at IS NULL
+  OR alive_checked_at < NOW() - make_interval(days => ${RECHECK_AFTER_DAYS}))`;
+
 export type LivenessPass = { checked: number; dead: number[]; unknown: number };
 
 export async function checkPoolLiveness(
@@ -65,30 +68,31 @@ export async function checkPoolLiveness(
   const probe = opts.probe ?? probeFbUid;
   const gapMs = opts.gapMs ?? GAP_MS;
   const stopping = opts.stopping ?? (() => false);
-  // Claimed by stamping them up front, so another instance's pass skips them.
-  const due = await sql<{ no: number; uid: string; prev: Date | null }[]>`
-    WITH due AS (
-      SELECT no, uid, alive_checked_at AS prev FROM fb_pool_accounts
-      WHERE status = ANY(${CHECKED as string[]}::text[])
-        AND (alive_checked_at IS NULL
-             OR alive_checked_at < NOW() - make_interval(days => ${RECHECK_AFTER_DAYS}))
-      ORDER BY alive_checked_at NULLS FIRST, no
-      LIMIT ${BATCH}
-      FOR UPDATE SKIP LOCKED
-    )
-    UPDATE fb_pool_accounts a SET alive_checked_at = NOW()
-    FROM due WHERE a.no = due.no
-    RETURNING a.no, a.uid, due.prev
+  const due = await sql<{ no: number; uid: string }[]>`
+    SELECT no, uid FROM fb_pool_accounts
+    WHERE status = ANY(${CHECKED as string[]}::text[]) AND ${dueFrag(sql)}
+    ORDER BY alive_checked_at NULLS FIRST, no
+    LIMIT ${BATCH}
   `;
   const pass: LivenessPass = { checked: 0, dead: [], unknown: 0 };
-  for (const [i, account] of due.entries()) {
-    // An account claimed but never probed goes back to when it was last
-    // checked, so the next pass picks it up instead of a week from now.
-    if (stopping()) {
-      await sql`UPDATE fb_pool_accounts SET alive_checked_at = ${account.prev} WHERE no = ${account.no}`;
-      continue;
-    }
+  for (const [i, candidate] of due.entries()) {
+    if (stopping()) break;
     if (i > 0 && gapMs > 0) await new Promise((r) => setTimeout(r, gapMs));
+    // Claimed one at a time, right before its probe, so another instance's
+    // pass skips it, and a shutdown mid-pass (Railway redeploys often; the
+    // process exits without waiting for the pass) leaves at most this one
+    // stamped as checked without a probe.
+    const [account] = await sql<{ no: number; uid: string; prev: Date | null }[]>`
+      WITH c AS (
+        SELECT no, alive_checked_at AS prev FROM fb_pool_accounts
+        WHERE no = ${candidate.no} AND status = ANY(${CHECKED as string[]}::text[]) AND ${dueFrag(sql)}
+        FOR UPDATE SKIP LOCKED
+      )
+      UPDATE fb_pool_accounts a SET alive_checked_at = NOW()
+      FROM c WHERE a.no = c.no
+      RETURNING a.no, a.uid, c.prev
+    `;
+    if (!account) continue;
     const verdict = await probe(account.uid);
     pass.checked++;
     if (verdict === 'unknown') {
