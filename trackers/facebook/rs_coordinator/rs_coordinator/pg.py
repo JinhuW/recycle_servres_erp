@@ -924,7 +924,8 @@ class PostgresDatabase:
         with self.cursor() as cur:
             cur.execute(
                 "SELECT account_id, worker_id, fb_username, fb_uid, region, proxy, vnc_url, "
-                "allow_password_login, created_at, updated_at FROM accounts ORDER BY account_id"
+                "allow_password_login, fleet_enabled, pin_host, created_at, updated_at "
+                "FROM accounts ORDER BY account_id"
             )
             return _rows(cur.fetchall())
 
@@ -1085,6 +1086,134 @@ class PostgresDatabase:
                 "FROM device_profiles ORDER BY identity_key"
             )
             return _rows(cur.fetchall())
+
+    # -- fleet -------------------------------------------------------------
+
+    def upsert_fleet_host(
+        self: "PostgresDatabase", host_id: str, fields: Dict[str, Any]
+    ) -> None:
+        record = {"host_id": host_id, **fields}
+        columns = ", ".join([*record, "created_at"])
+        placeholders = ", ".join(["%s"] * (len(record) + 1))
+        assignments = ", ".join(f"{name} = excluded.{name}" for name in fields)
+        conflict = f"DO UPDATE SET {assignments}" if assignments else "DO NOTHING"
+        with self.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO fleet_hosts ({columns}) VALUES ({placeholders}) "
+                f"ON CONFLICT(host_id) {conflict}",
+                (*record.values(), utcnow()),
+            )
+
+    def get_fleet_host(self: "PostgresDatabase", host_id: str) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM fleet_hosts WHERE host_id = %s", (host_id,))
+            row = cur.fetchone()
+        return _row(row)
+
+    def list_fleet_hosts(self: "PostgresDatabase") -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM fleet_hosts ORDER BY host_id")
+            return _rows(cur.fetchall())
+
+    def put_assignment(
+        self: "PostgresDatabase", worker_id: str, fields: Dict[str, Any]
+    ) -> None:
+        now = utcnow()
+        record = {**fields, "updated_at": now}
+        assignments = ", ".join(f"{name} = %s" for name in record)
+        with self.cursor() as cur:
+            cur.execute(
+                f"UPDATE fleet_assignments SET {assignments} WHERE worker_id = %s",
+                (*record.values(), worker_id),
+            )
+            if cur.rowcount:
+                return
+            row = {"worker_id": worker_id, **record, "created_at": now}
+            cur.execute(
+                f"INSERT INTO fleet_assignments ({', '.join(row)}) "
+                f"VALUES ({', '.join(['%s'] * len(row))})",
+                tuple(row.values()),
+            )
+
+    def get_assignment(self: "PostgresDatabase", worker_id: str) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM fleet_assignments WHERE worker_id = %s", (worker_id,))
+            row = cur.fetchone()
+        return _row(row)
+
+    def list_assignments(self: "PostgresDatabase") -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM fleet_assignments ORDER BY worker_id")
+            return _rows(cur.fetchall())
+
+    def insert_release(self: "PostgresDatabase", record: Dict[str, Any]) -> int:
+        record = {"created_at": utcnow(), **record}
+        columns = ", ".join(record)
+        placeholders = ", ".join(["%s"] * len(record))
+        with self.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO fleet_releases ({columns}) VALUES ({placeholders}) RETURNING id",
+                tuple(record.values()),
+            )
+            return int(cur.fetchone()["id"])
+
+    def update_release(
+        self: "PostgresDatabase", release_id: int, fields: Dict[str, Any]
+    ) -> None:
+        if not fields:
+            return
+        assignments = ", ".join(f"{name} = %s" for name in fields)
+        with self.cursor() as cur:
+            cur.execute(
+                f"UPDATE fleet_releases SET {assignments} WHERE id = %s",
+                (*fields.values(), release_id),
+            )
+
+    def get_release(self: "PostgresDatabase", release_id: int) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM fleet_releases WHERE id = %s", (release_id,))
+            row = cur.fetchone()
+        return _row(row)
+
+    def list_releases(self: "PostgresDatabase", limit: int = 20) -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM fleet_releases ORDER BY id DESC LIMIT %s", (limit,))
+            return _rows(cur.fetchall())
+
+    def put_worker_config(
+        self: "PostgresDatabase",
+        worker_id: str,
+        toml: str,
+        sha256: str,
+        updated_by: str | None,
+    ) -> None:
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO worker_configs (worker_id, toml, sha256, updated_at, updated_by) "
+                "VALUES (%s, %s, %s, %s, %s) ON CONFLICT(worker_id) DO UPDATE SET "
+                "toml = excluded.toml, sha256 = excluded.sha256, "
+                "updated_at = excluded.updated_at, updated_by = excluded.updated_by",
+                (worker_id, toml, sha256, utcnow(), updated_by),
+            )
+
+    def get_worker_config(self: "PostgresDatabase", worker_id: str) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM worker_configs WHERE worker_id = %s", (worker_id,))
+            row = cur.fetchone()
+        return _row(row)
+
+    def list_worker_configs(self: "PostgresDatabase") -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT worker_id, sha256, updated_at, updated_by FROM worker_configs "
+                "ORDER BY worker_id"
+            )
+            return _rows(cur.fetchall())
+
+    def delete_worker_config(self: "PostgresDatabase", worker_id: str) -> bool:
+        with self.cursor() as cur:
+            cur.execute("DELETE FROM worker_configs WHERE worker_id = %s", (worker_id,))
+            return cur.rowcount > 0
 
     # -- audit -------------------------------------------------------------
 

@@ -262,3 +262,124 @@ do this — the working values are `sac` and the numeric id `112454482100538`.
   never costs a second alert.
 - Stagger worker startups by a few minutes; a fleet logging in simultaneously
   from related IPs is a pattern.
+
+## The fleet agent
+
+`rs-fleetd` runs a host's workers for the coordinator (README → *Fleet agent
+and rolling releases*). Everything below runs on the VM, from the tracker root
+`~/recycle_servers/facebook_tracker`; `rsc` is
+`docker exec rs-coordinator rsc`.
+
+### Moving the compose workers under the agent
+
+The agent takes each worker over on the same session directory and the same
+cache volume, so nothing Facebook can see changes. Until the last step it
+only reports what it would do.
+
+1. **Give the agent a home outside this tree.** `deploy.sh` rsyncs with
+   `--delete`, so `RS_FLEET_ROOT` must not sit under the tracker root. Write
+   `configs/secrets.fleetd.env`:
+   ```
+   RS_HOST_ID=homelab
+   RS_FLEET_ROOT=/home/jinhu/recycle_servers/fleet
+   RS_HOST_TOKEN=<rsc mint-host-token --host homelab>
+   ```
+2. **Start it.** The host registers itself, observe-only, with no capacity:
+   ```bash
+   docker compose --env-file configs/secrets.fleetd.env \
+       -f deploy/docker-compose.fleetd.yml up -d --build
+   rsc fleet hosts
+   ```
+3. **Hand each worker over.** Do this for every worker. `docker exec
+   <container> printenv RS_WORKER_ID` names it, and `docker volume ls` names
+   its cache volume, which compose prefixed with its project, `deploy_`. The
+   vault account must name the worker; `rsc vault list` shows it.
+   ```bash
+   docker exec rs-console python -m rs_console.settings publish va-1   # its config, as it runs
+   rsc fleet enable --worker va-1                     # denver-1: add --pin-host homelab (no proxy)
+   docker exec rs-fleetd rs-fleetd adopt --worker va-1 --container rs-monitor-va1 \
+       --data-dir /home/jinhu/recycle_servers/facebook_tracker/configs/sessions/homelab-va1 \
+       --cache-volume deploy_aimm-home-va1
+   ```
+4. **Name the image, give the host room, and read the plan.** Still
+   observe-only:
+   ```bash
+   rsc fleet host homelab --capacity 12
+   rsc fleet release "$(cat VERSION)" --image "aimm-recycle:$(cat VERSION)"
+   rsc fleet state
+   docker logs --tail 20 rs-fleetd     # every line: recreate <id>: adopt rs-monitor-<x>
+   ```
+   Anything else in that plan (a `run`, a missing config) is a step 3 to redo.
+5. **Trust it.** The agent then replaces one compose container per pass with
+   `rs-worker-<id>` on the same `/data` and cache volume:
+   ```bash
+   rsc fleet host homelab --authoritative
+   ```
+   Pick the moment. Each worker restarts once, and a worker holding a login
+   it has not saved yet loses it.
+6. From then on `scripts/deploy.sh` releases through the agent, and the
+   console watches each worker through the fleet. The `homelab*` compose files
+   are dead weight; drop them in a later release.
+
+### Adding a host (a new VM on the LAN)
+
+1. On the coordinator's VM: publish the coordinator and the registry on the LAN
+   (*The coordinator and the registry on the LAN* below), and run
+   `rsc mint-host-token --host <id>`.
+2. On the new VM: Docker, this tree, `configs/secrets.env` (the `PROXY_*` its
+   workers' configs name), `docker network create rs-fleet`, and
+   `configs/secrets.fleetd.env` with `RS_FLEET_URL=http://10.10.10.73:8500`.
+   Then start the agent as in step 2 above.
+3. `rsc fleet host <id> --capacity 4 --vnc-host <its LAN IP> --authoritative`.
+   New slots are now placed on it when it has the most room. Its workers
+   publish VNC on `<its LAN IP>:59xx`, and the console reaches them there.
+
+A proxy that authorises by source IP has to allow the new host first. A worker
+with no proxy egresses through its host's own IP, so pin it
+(`rsc fleet enable --worker <id> --pin-host <host>`); its session is bound to
+that IP.
+
+### A new slot
+
+The ERP's *Assign to fleet* creates the vault account and its uid. Then:
+
+```bash
+python3 deploy/make-region-config.py rs_northeast PROXY_HOMELAB_NE2 /tmp/ne-2.toml
+rsc fleet config put --worker ne-2 --file /tmp/ne-2.toml   # copy the file into rs-coordinator first
+rsc fleet enable --worker ne-2
+```
+
+The worker starts on the host with the most room within a minute. Its cities
+are edited from the ERP like any other worker's.
+
+### Releases, rollback, moves
+
+```bash
+rsc fleet release 0.12.0              # deploy.sh does this in fleet mode
+rsc fleet state                       # who is on what; the release's progress or failure
+rsc fleet pause | resume | abort
+rsc fleet release 0.11.1              # rolling back: the old image is still on the host
+rsc fleet move --worker va-1 --host lan-box          # waits for the old host to stop it
+rsc fleet move --worker va-1 --host lan-box --force  # only when the old host is dead
+rsc fleet restart --worker va-1       # recreate one container
+```
+
+A forced move restores the worker's session on the new host from the
+coordinator's snapshot. The device comes from its account's profile, and the
+IP is its proxy's, so Facebook sees the same browser.
+
+### The coordinator and the registry on the LAN
+
+Only needed once a second worker host exists. On the coordinator's VM:
+
+```bash
+echo RS_LAN_IP=10.10.10.73 > configs/secrets.coordinator-lan.env
+docker compose --env-file configs/secrets.coordinator-lan.env -f deploy/docker-compose.registry.yml up -d
+sudo ufw allow from <worker host> to any port 8500,5000 proto tcp
+```
+
+From then on `deploy.sh` also publishes the coordinator on that address.
+`RS_REGISTRY=10.10.10.73:5000 scripts/deploy.sh` pushes the release image
+there, and the agents pull it by tag. Each worker host's Docker daemon must list
+the registry under `insecure-registries`, because it serves plain HTTP on the
+LAN only. The image is AGPL-3 and must never reach a public registry.

@@ -151,6 +151,10 @@ run_suite() {
 run_suite rs_coordinator "$ROOT/.venv-coordinator/bin/python" -m pytest tests/ -q -p no:cacheprovider
 run_suite rs_poster "$ROOT/.venv-coordinator/bin/python" -m pytest tests/ -q -p no:cacheprovider
 run_suite rs_messenger "$ROOT/.venv-coordinator/bin/python" -m pytest tests/ -q -p no:cacheprovider
+# From inside the package, not this folder: see AGENTS.md on the rs_console
+# namespace-package trap.
+run_suite rs_console "$ROOT/.venv-coordinator/bin/python" -m pytest tests/ -q -p no:cacheprovider
+run_suite rs_fleetd "$ROOT/.venv-coordinator/bin/python" -m pytest tests/ -q -p no:cacheprovider
 # test_facebook.py needs pytest-playwright, which the runtime venv does not have.
 run_suite ai-marketplace-monitor "$AIMM_PYTHON" -m pytest tests/ -q \
     --ignore=tests/test_facebook.py -p no:cacheprovider
@@ -169,7 +173,7 @@ printf '%s\n' "$NEW" > VERSION
 # installed console script agree with the tag instead of reporting a number
 # frozen at whenever the pyproject was written.
 for f in rs_coordinator/pyproject.toml rs_poster/pyproject.toml rs_messenger/pyproject.toml \
-         rs_console/pyproject.toml; do
+         rs_console/pyproject.toml rs_fleetd/pyproject.toml; do
     python3 - "$f" "$NEW" <<'PY'
 import re, sys
 path, new = sys.argv[1], sys.argv[2]
@@ -184,7 +188,8 @@ PY
 done
 
 for f in rs_coordinator/rs_coordinator/__init__.py rs_poster/rs_poster/__init__.py \
-         rs_messenger/rs_messenger/__init__.py rs_console/rs_console/__init__.py; do
+         rs_messenger/rs_messenger/__init__.py rs_console/rs_console/__init__.py \
+         rs_fleetd/rs_fleetd/__init__.py; do
     python3 - "$f" "$NEW" <<'PY'
 import re, sys
 path, new = sys.argv[1], sys.argv[2]

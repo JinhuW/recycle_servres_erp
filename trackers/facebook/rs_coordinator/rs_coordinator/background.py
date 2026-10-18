@@ -28,7 +28,7 @@ import threading
 from datetime import timedelta
 from typing import Any, Callable
 
-from . import health
+from . import fleet, health
 from .db import AnyDatabase, utcnow
 from .health import _moment, _parse_ts  # shared clock helpers, tested there
 from .telegram_notify import TelegramNotifier
@@ -43,6 +43,10 @@ POLL_INTERVAL = 2.0
 # How often the fleet's liveness is swept. DEAD means six hours of silence, so
 # ten minutes of detection latency is noise on that scale.
 SWEEP_INTERVAL = 600.0
+
+# How often slots are placed and a release moved along. Agents poll every 30 s,
+# so a decision taken faster than that would only wait for them.
+FLEET_INTERVAL = 30.0
 
 # Retry backoff: 5 s, 10 s, 20 s ... capped at 15 minutes.
 BACKOFF_BASE = 5.0
@@ -81,6 +85,7 @@ class Background(threading.Thread):
         self._warroom_notifier = warroom_notifier
         self._stop = threading.Event()
         self._last_sweep = 0.0
+        self._last_fleet = 0.0
 
     def stop(self: "Background") -> None:
         self._stop.set()
@@ -102,6 +107,10 @@ class Background(threading.Thread):
         if now - self._last_sweep >= SWEEP_INTERVAL:
             self._last_sweep = now
             self.sweep_liveness(db)
+        if now - self._last_fleet >= FLEET_INTERVAL:
+            self._last_fleet = now
+            for text in fleet.tick(db):
+                db.enqueue_alert("ops_fleet", text)
 
     def drain_outbox(self: "Background", db: AnyDatabase) -> None:
         for alert in db.due_alerts():

@@ -369,6 +369,66 @@ CREATE TABLE IF NOT EXISTS device_profiles (
     updated_at          TEXT NOT NULL
 );
 
+-- Fleet --------------------------------------------------------------------
+-- A Docker host that runs workers through its rs-fleetd agent. The agent
+-- applies nothing until `authoritative` is set; until then it only reports.
+-- A NULL vnc_host means the console reaches workers over the rs-fleet network.
+CREATE TABLE IF NOT EXISTS fleet_hosts (
+    host_id        TEXT PRIMARY KEY,
+    capacity       INTEGER NOT NULL DEFAULT 4,
+    cordoned       INTEGER NOT NULL DEFAULT 0,
+    authoritative  INTEGER NOT NULL DEFAULT 0,
+    vnc_host       TEXT,
+    agent_version  TEXT,
+    last_seen_at   TEXT,
+    report_json    TEXT,
+    created_at     TEXT NOT NULL
+);
+
+-- Where each worker runs, on which image. A stopped row keeps its host, so a
+-- slot turned back on returns to the disk that holds its session.
+CREATE TABLE IF NOT EXISTS fleet_assignments (
+    worker_id          TEXT PRIMARY KEY,
+    host_id            TEXT NOT NULL,
+    state              TEXT NOT NULL DEFAULT 'run',
+    image              TEXT NOT NULL,
+    previous_image     TEXT,
+    generation         INTEGER NOT NULL DEFAULT 1,
+    move_to_host       TEXT,
+    move_requested_at  TEXT,
+    vnc_port           INTEGER,
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL
+);
+
+-- A version rolled out one worker at a time (see fleet.advance_rollout).
+CREATE TABLE IF NOT EXISTS fleet_releases (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    version             TEXT NOT NULL,
+    image               TEXT NOT NULL,
+    state               TEXT NOT NULL,
+    current_worker      TEXT,
+    current_started_at  TEXT,
+    current_pre_state   TEXT,
+    upgraded_json       TEXT,
+    skipped_json        TEXT,
+    failed_worker       TEXT,
+    failure             TEXT,
+    created_by          TEXT,
+    created_at          TEXT NOT NULL,
+    finished_at         TEXT
+);
+
+-- Each fleet worker's config as it runs. The console renders it (master
+-- values + what the ERP saved) and publishes it; agents fetch it by sha256.
+CREATE TABLE IF NOT EXISTS worker_configs (
+    worker_id   TEXT PRIMARY KEY,
+    toml        TEXT NOT NULL,
+    sha256      TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    updated_by  TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_challenges_status ON challenges(status);
 CREATE INDEX IF NOT EXISTS idx_code_audit_time ON code_audit(released_at);
 """
@@ -401,6 +461,11 @@ WORKER_HEALTH_COLUMNS = (
     # challenge, waiting_for_human, logged_in, failed) and when it got there.
     ("login_step", "TEXT"),
     ("login_step_at", "TEXT"),
+    # The Docker host the worker reported running on (RS_HOST_ID).
+    ("host_id", "TEXT"),
+    # Set when the fleet stops a worker on purpose (its slot turned off), so
+    # the liveness sweep does not page about a silence nobody needs to fix.
+    ("retired_at", "TEXT"),
 )
 
 # Columns added to `listings` after the first release, same mechanism.
@@ -426,6 +491,12 @@ SNAPSHOT_EXTRA_COLUMNS = (
 # the login in `fb_username`, the key of its device profile.
 ACCOUNT_EXTRA_COLUMNS = (
     ("fb_uid", "TEXT"),
+    # Whether the fleet runs a worker for this slot. Off by default, so the
+    # agents take over only the slots an operator hands them.
+    ("fleet_enabled", "INTEGER DEFAULT 0"),
+    # A host this slot must run on: one with no proxy egresses through its
+    # host's own IP, and its session is bound to that IP.
+    ("pin_host", "TEXT"),
 )
 
 # Funnel stages, in pipeline order. The first six and `reviewed` / `alerted`
@@ -1385,7 +1456,8 @@ class Database:
         with self.cursor() as cur:
             cur.execute(
                 "SELECT account_id, worker_id, fb_username, fb_uid, region, proxy, vnc_url, "
-                "allow_password_login, created_at, updated_at FROM accounts ORDER BY account_id"
+                "allow_password_login, fleet_enabled, pin_host, created_at, updated_at "
+                "FROM accounts ORDER BY account_id"
             )
             return [dict(row) for row in cur.fetchall()]
 
@@ -1543,6 +1615,131 @@ class Database:
                 "FROM device_profiles ORDER BY identity_key"
             )
             return [dict(row) for row in cur.fetchall()]
+
+    # -- fleet -------------------------------------------------------------
+
+    def upsert_fleet_host(self: "Database", host_id: str, fields: Dict[str, Any]) -> None:
+        record = {"host_id": host_id, **fields}
+        columns = ", ".join([*record, "created_at"])
+        placeholders = ", ".join(["?"] * (len(record) + 1))
+        assignments = ", ".join(f"{name} = excluded.{name}" for name in fields)
+        conflict = f"DO UPDATE SET {assignments}" if assignments else "DO NOTHING"
+        with self.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO fleet_hosts ({columns}) VALUES ({placeholders}) "
+                f"ON CONFLICT(host_id) {conflict}",
+                (*record.values(), utcnow()),
+            )
+
+    def get_fleet_host(self: "Database", host_id: str) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM fleet_hosts WHERE host_id = ?", (host_id,))
+            row = cur.fetchone()
+        return dict(row) if row else None
+
+    def list_fleet_hosts(self: "Database") -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM fleet_hosts ORDER BY host_id")
+            return [dict(row) for row in cur.fetchall()]
+
+    def put_assignment(self: "Database", worker_id: str, fields: Dict[str, Any]) -> None:
+        """Update the fields given; a new row needs at least host_id and image.
+
+        Update first, not an upsert: an INSERT naming only the changed fields
+        fails the NOT NULL columns before ON CONFLICT is ever consulted.
+        """
+        now = utcnow()
+        record = {**fields, "updated_at": now}
+        assignments = ", ".join(f"{name} = ?" for name in record)
+        with self.cursor() as cur:
+            cur.execute(
+                f"UPDATE fleet_assignments SET {assignments} WHERE worker_id = ?",
+                (*record.values(), worker_id),
+            )
+            if cur.rowcount:
+                return
+            row = {"worker_id": worker_id, **record, "created_at": now}
+            cur.execute(
+                f"INSERT INTO fleet_assignments ({', '.join(row)}) "
+                f"VALUES ({', '.join(['?'] * len(row))})",
+                tuple(row.values()),
+            )
+
+    def get_assignment(self: "Database", worker_id: str) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM fleet_assignments WHERE worker_id = ?", (worker_id,))
+            row = cur.fetchone()
+        return dict(row) if row else None
+
+    def list_assignments(self: "Database") -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM fleet_assignments ORDER BY worker_id")
+            return [dict(row) for row in cur.fetchall()]
+
+    def insert_release(self: "Database", record: Dict[str, Any]) -> int:
+        record = {"created_at": utcnow(), **record}
+        columns = ", ".join(record)
+        placeholders = ", ".join(["?"] * len(record))
+        with self.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO fleet_releases ({columns}) VALUES ({placeholders})",
+                tuple(record.values()),
+            )
+            return int(cur.lastrowid)
+
+    def update_release(self: "Database", release_id: int, fields: Dict[str, Any]) -> None:
+        if not fields:
+            return
+        assignments = ", ".join(f"{name} = ?" for name in fields)
+        with self.cursor() as cur:
+            cur.execute(
+                f"UPDATE fleet_releases SET {assignments} WHERE id = ?",
+                (*fields.values(), release_id),
+            )
+
+    def get_release(self: "Database", release_id: int) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM fleet_releases WHERE id = ?", (release_id,))
+            row = cur.fetchone()
+        return dict(row) if row else None
+
+    def list_releases(self: "Database", limit: int = 20) -> List[Dict[str, Any]]:
+        """Newest first."""
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM fleet_releases ORDER BY id DESC LIMIT ?", (limit,))
+            return [dict(row) for row in cur.fetchall()]
+
+    def put_worker_config(
+        self: "Database", worker_id: str, toml: str, sha256: str, updated_by: str | None
+    ) -> None:
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO worker_configs (worker_id, toml, sha256, updated_at, updated_by) "
+                "VALUES (?, ?, ?, ?, ?) ON CONFLICT(worker_id) DO UPDATE SET "
+                "toml = excluded.toml, sha256 = excluded.sha256, "
+                "updated_at = excluded.updated_at, updated_by = excluded.updated_by",
+                (worker_id, toml, sha256, utcnow(), updated_by),
+            )
+
+    def get_worker_config(self: "Database", worker_id: str) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM worker_configs WHERE worker_id = ?", (worker_id,))
+            row = cur.fetchone()
+        return dict(row) if row else None
+
+    def list_worker_configs(self: "Database") -> List[Dict[str, Any]]:
+        """Every fleet config without its text."""
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT worker_id, sha256, updated_at, updated_by FROM worker_configs "
+                "ORDER BY worker_id"
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+    def delete_worker_config(self: "Database", worker_id: str) -> bool:
+        with self.cursor() as cur:
+            cur.execute("DELETE FROM worker_configs WHERE worker_id = ?", (worker_id,))
+            return cur.rowcount > 0
 
     # -- audit -------------------------------------------------------------
 

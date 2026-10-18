@@ -209,6 +209,8 @@ class HeartbeatRequest(BaseModel):
     # worker that learns a new step must not have its whole heartbeat refused.
     login_step: str | None = Field(default=None, max_length=32)
     login_step_at: str | None = Field(default=None, max_length=40)
+    # The Docker host the worker runs on, as its fleet agent named it.
+    host_id: str | None = Field(default=None, max_length=64)
     detail: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -245,6 +247,9 @@ class WorkerOut(BaseModel):
     relogin_last_requested_at: str | None = None
     login_step: str | None = None
     login_step_at: str | None = None
+    host_id: str | None = None
+    # Set while the fleet has the worker stopped on purpose (slot turned off).
+    retired_at: str | None = None
     # Derived by the control plane, not reported: live / stale / dead.
     liveness: str | None = None
     needs_attention: bool = False
@@ -517,3 +522,27 @@ class AccountUpsert(BaseModel):
 
 class StatusResponse(BaseModel):
     status: str = "ok"
+
+
+# -- fleet --------------------------------------------------------------------
+
+
+class FleetHostUpdate(BaseModel):
+    capacity: int | None = Field(default=None, ge=0, le=100)
+    cordoned: bool | None = None
+    # Off until an operator has watched the agent's plan: it applies nothing.
+    authoritative: bool | None = None
+    # Where the console reaches VNC ports this host publishes; None for the
+    # console's own host, whose workers it reaches over the rs-fleet network.
+    vnc_host: str | None = Field(default=None, max_length=255)
+
+
+class FleetSlotUpdate(BaseModel):
+    enabled: bool | None = None
+    pin_host: str | None = Field(default=None, max_length=64)
+
+
+class FleetRelease(BaseModel):
+    version: str = Field(pattern=r"^[0-9]+\.[0-9]+\.[0-9]+$")
+    image: str = Field(min_length=1, max_length=255)
+    created_by: str | None = Field(default=None, max_length=120)

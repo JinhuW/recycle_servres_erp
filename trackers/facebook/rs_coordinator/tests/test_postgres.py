@@ -384,6 +384,33 @@ def test_rekeying_a_device_profile_never_overwrites_another(backend):
     assert backend.get_device_profile("uid:1") is None
 
 
+def test_fleet_tables_round_trip(backend):
+    backend.upsert_fleet_host("homelab", {})
+    backend.upsert_fleet_host("homelab", {"capacity": 9, "authoritative": 1})
+    assert backend.get_fleet_host("homelab")["capacity"] == 9
+    assert [h["host_id"] for h in backend.list_fleet_hosts()] == ["homelab"]
+
+    backend.put_assignment("va-1", {"host_id": "homelab", "image": "aimm:1", "state": "run"})
+    backend.put_assignment("va-1", {"state": "stopped"})  # a partial update
+    row = backend.get_assignment("va-1")
+    assert (row["host_id"], row["image"], row["state"], row["generation"]) == ("homelab", "aimm:1", "stopped", 1)
+    assert [a["worker_id"] for a in backend.list_assignments()] == ["va-1"]
+
+    first = backend.insert_release({"version": "0.1.0", "image": "aimm:1", "state": "done"})
+    second = backend.insert_release({"version": "0.2.0", "image": "aimm:2", "state": "rolling"})
+    backend.update_release(second, {"current_worker": "va-1"})
+    assert [r["id"] for r in backend.list_releases(limit=5)] == [second, first]
+    assert backend.get_release(second)["current_worker"] == "va-1"
+
+    backend.put_worker_config("va-1", "a = 1\n", "sha-1", "rsc")
+    backend.put_worker_config("va-1", "a = 2\n", "sha-2", None)
+    assert backend.get_worker_config("va-1")["toml"] == "a = 2\n"
+    assert backend.list_worker_configs() == [
+        {"worker_id": "va-1", "sha256": "sha-2", "updated_at": backend.get_worker_config("va-1")["updated_at"], "updated_by": None}
+    ]
+    assert backend.delete_worker_config("va-1") is True
+
+
 def test_accounts_carry_a_facebook_uid(backend):
     backend.put_account("va-1", {"worker_id": "va-1", "fb_uid": "1000"})
     assert backend.get_account_row("va-1")["fb_uid"] == "1000"
@@ -633,7 +660,9 @@ def test_schema_translation():
     # ...replaced by their Postgres equivalents.
     assert "secret_blob          BYTEA" in ddl
     assert "state_blob     BYTEA" in ddl
-    assert ddl.count("INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY") == 7
+    assert ddl.count("INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY") == SCHEMA.count(
+        "AUTOINCREMENT"
+    )
 
     # Table and column names are untouched — a dedicated database means there
     # is nothing to rename around.
@@ -754,8 +783,22 @@ def test_no_sqlite_placeholders_survive_in_the_postgres_sql():
     handle.rekey_device_profile("uid:1", "uid:2")
     handle.list_device_profiles()
     handle.claim_device_cookies("uid:1", b"x")
+    handle.upsert_fleet_host("h", {"capacity": 2})
+    handle.get_fleet_host("h")
+    handle.list_fleet_hosts()
+    handle.put_assignment("w", {"state": "run"})
+    handle.get_assignment("w")
+    handle.list_assignments()
+    handle.insert_release({"version": "1.0.0", "image": "i", "state": "rolling"})
+    handle.update_release(1, {"state": "done"})
+    handle.get_release(1)
+    handle.list_releases(limit=3)
+    handle.put_worker_config("w", "a = 1", "sha", None)
+    handle.get_worker_config("w")
+    handle.list_worker_configs()
+    handle.delete_worker_config("w")
 
-    assert len(handle.log) == 31
+    assert len(handle.log) == 45
     for sql in handle.log:
         assert "?" not in sql, f"SQLite placeholder left in: {sql}"
         assert not re.search(r":\w", sql), f"named SQLite placeholder left in: {sql}"

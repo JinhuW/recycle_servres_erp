@@ -18,6 +18,57 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Added
+
+- **The fleet scales itself and rolls new versions out one worker at a time**
+  (RS-292). A new host agent, `rs_fleetd/`, runs on each Docker host and
+  turns the coordinator's desired state into containers (`rs-worker-<id>`).
+  - **Scaling:** the coordinator (`fleet.py`) keeps one worker per ready slot:
+    a vault account the fleet is enabled for (`rsc fleet enable`), with a
+    published config. It places the slot on the live, uncordoned host with
+    the most room, and placement is sticky. `rsc fleet disable` stops a
+    worker and keeps its `/data`. Nothing ever moves on its own;
+    `rsc fleet move` is an operator's call, and it waits for the old host to
+    stop the container first.
+  - **Rolling releases:** `rsc fleet release <version>` recreates one worker at
+    a time. The next waits until the current one heartbeats on the new
+    version in a state no worse than before. A worker that has not come back
+    within 20 minutes goes back to its previous image and the release stops,
+    with an ops note; the rest keep running what they ran. Rolling back is
+    releasing the previous version.
+  - **Independence:** an agent that cannot reach the coordinator keeps the
+    workers it last knew about, starts nothing new and removes nothing. The
+    workers never depend on the agent.
+  - **Trust:** a new host registers itself observe-only. It reports its plan
+    (`rsc fleet hosts`, `rsc fleet state`) and applies nothing until it is
+    made authoritative. Agents authenticate with their own host tokens
+    (`rsc mint-host-token`), kept apart from the `secrets.env` every worker
+    reads. They mint each worker's control-plane token, so the hand-written
+    `secrets.homelab-*.env` files are no longer needed.
+- **Worker configs for fleet workers live in the coordinator**
+  (`/v1/fleet/configs`). The console renders and writes them exactly like a
+  mounted config, so the ERP's settings and city edits reach fleet workers.
+  `python -m rs_console.settings publish <worker>` hands a compose worker's
+  config to the fleet. The console's Watch reaches fleet workers through the
+  fleet's assignments.
+- **A second worker host on the LAN.** Two opt-in compose files:
+  `deploy/docker-compose.coordinator-lan.yml` publishes the coordinator on
+  the VM's LAN address, and `deploy/docker-compose.registry.yml` is a private
+  registry that `deploy.sh` pushes each release image to
+  (`RS_REGISTRY=10.10.10.73:5000`).
+
+### Changed
+
+- **`scripts/deploy.sh` releases through the agent once the VM runs one.** It
+  tags the worker image with its version, rebuilds `rs-fleetd`, starts
+  `rsc fleet release`, and never recreates a compose worker again: an adopted
+  worker would otherwise end up with its session in two browsers. Until
+  then it recreates the compose workers as before.
+- **`scripts/release.sh` runs the console's and the agent's suites too**, and
+  bumps `rs_fleetd`'s version with the others.
+- **Heartbeats name the worker's host** (`host_id`), and a worker the fleet
+  stopped on purpose is not paged as dead (`retired_at`).
+
 ## [0.11.1] - 2026-10-18
 
 ### Fixed

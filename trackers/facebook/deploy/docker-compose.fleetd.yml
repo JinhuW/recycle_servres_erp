@@ -1,0 +1,77 @@
+# rs-fleetd: the host agent that runs this host's Facebook workers.
+#
+# It asks the coordinator which workers this host should run, and on which
+# image, keeps a copy of the answer, and turns the difference into `docker`
+# commands through this host's Docker socket. One agent per Docker host: a new
+# VM joins the fleet by running this file with its own RS_HOST_ID and token.
+#
+# Before starting it, know that:
+#   * The socket mount is root on this host. The agent only creates, starts,
+#     stops and removes containers labelled rs.fleet.managed=1, and the compose
+#     containers adopt.toml hands it, but anything holding the socket could do
+#     more.
+#   * It never deletes a worker's /data (its Facebook session) or its cache
+#     volume, not even for a worker moved off this host.
+#   * Coordinator down: it keeps every worker it last knew about running and
+#     changes nothing else. Agent down: the workers keep running on Docker's
+#     restart policy; none of them depends on this process.
+#
+# Its own settings live in configs/secrets.fleetd.env, on the host only:
+#   RS_HOST_ID=homelab
+#   RS_FLEET_ROOT=/srv/rs-fleet
+#   RS_HOST_TOKEN=...           (rsc mint-host-token --host homelab)
+#   RS_FLEET_URL=...            (only on a host without the coordinator: its LAN address)
+# Not secrets.env: every worker gets that file, and the host token reads every
+# worker's token on this host. Start it from the tracker root:
+#   docker compose --env-file configs/secrets.fleetd.env \
+#     -f deploy/docker-compose.fleetd.yml up -d --build
+# RS_FLEET_ROOT is mounted at the same path inside, because the paths the agent
+# hands the daemon as bind-mount sources are resolved on the host. On a host
+# without the coordinator, create the network first (`docker network create
+# rs-fleet`).
+
+services:
+  fleetd:
+    build:
+      context: ../rs_fleetd
+      dockerfile: ../deploy/Dockerfile.fleetd
+    image: rs-fleetd:latest
+    container_name: rs-fleetd
+    restart: unless-stopped
+
+    # RS_HOST_TOKEN comes from here, and nowhere a worker can read it.
+    env_file:
+      - ../configs/secrets.fleetd.env
+
+    environment:
+      RS_FLEET_URL: ${RS_FLEET_URL:-http://coordinator:8500}
+      RS_HOST_ID: ${RS_HOST_ID:?set RS_HOST_ID}
+      RS_FLEET_ROOT: ${RS_FLEET_ROOT:?set RS_FLEET_ROOT}
+      # The docker CLI reads env files on this side, so these are this
+      # container's paths (mounted below), not the host's.
+      RS_FLEET_ENV_FILES: /etc/rs-fleet/secrets.env,/etc/rs-fleet/fleet-worker.env
+      # Copied under RS_FLEET_ROOT, where the workers can mount it.
+      RS_FLEET_HEALTHCHECK: /etc/rs-fleet/healthcheck.sh
+      # "1" to plan and report without touching a container.
+      RS_FLEET_OBSERVE_ONLY: ${RS_FLEET_OBSERVE_ONLY:-0}
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${RS_FLEET_ROOT}:${RS_FLEET_ROOT}
+      - ../configs/secrets.env:/etc/rs-fleet/secrets.env:ro
+      - ./fleet-worker.env:/etc/rs-fleet/fleet-worker.env:ro
+      - ./healthcheck.sh:/etc/rs-fleet/healthcheck.sh:ro
+
+    networks:
+      - rs-fleet
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+networks:
+  rs-fleet:
+    name: rs-fleet
+    external: true

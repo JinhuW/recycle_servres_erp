@@ -322,6 +322,51 @@ them would have `--delete` remove the VM's. The dev machine's Facebook logins
 and 2FA, read by `rs-session capture`, never leave it.
 `scripts/tests/test-deploy-filter.sh` checks both with a real rsync.
 
+### Fleet agent and rolling releases
+
+The compose files above are one hand-copied service per worker, and nothing
+scales or upgrades them except a person. `rs_fleetd/` replaces that. Each
+Docker host runs one agent (`deploy/docker-compose.fleetd.yml`), and the
+coordinator decides (`rs_coordinator/fleet.py`):
+
+- **Scaling.** A slot is a vault account with a worker id. It gets a worker
+  when the fleet is enabled for it (`rsc fleet enable --worker va-3`) and its
+  config is published (the console publishes every worker it renders, or
+  `rsc fleet config put`). The coordinator places it on the live, uncordoned
+  host with the most room, and its agent starts `rs-worker-<id>` within 30 s.
+  `rsc fleet disable` stops it again, keeping its `/data`. Placement is sticky:
+  a slot comes back to the host that holds its session. Nothing ever moves on
+  its own, because two hosts running one session is the one failure this must
+  never cause. `rsc fleet move` is how an operator moves one.
+- **Rolling releases.** `rsc fleet release 0.12.0` rolls `aimm-recycle:0.12.0`
+  out one worker at a time. The next worker waits until the current one
+  heartbeats on the new version in a state no worse than before: healthy stays
+  healthy, and a worker parked on a login may stay parked but must not die. A
+  worker that has not come back within 20 minutes goes back to its previous
+  image and the release stops there, with a Telegram ops note; every other
+  worker keeps running what it ran. `pause`, `resume` and `abort` do what they
+  say. Rolling back is releasing the previous version, whose image is still on
+  the host. Once the VM runs `rs-fleetd`, `scripts/deploy.sh` does exactly
+  this instead of recreating compose workers.
+- **Neither side can take the other down.**
+  - **Coordinator or Postgres down:** agents keep the desired state they last
+    cached, start nothing new and remove nothing, and workers keep searching.
+    A worker boots from its cached device and session.
+  - **Agent down:** workers keep running on Docker's restart policy.
+  - **A worker crash-looping:** that is only a worker.
+- **Trust is explicit.** A new host registers itself on its first request,
+  observe-only and with no capacity. It plans and reports (`rsc fleet hosts`,
+  `rsc fleet state`) and applies nothing until
+  `rsc fleet host <id> --capacity 4 --authoritative`.
+- **Tokens.** Each agent has its own host token (`rsc mint-host-token`), kept
+  in `configs/secrets.fleetd.env`, never in `secrets.env`, which every worker
+  reads. It mints each worker's control-plane token in the desired state, so
+  the hand-written `secrets.homelab-*.env` files are no longer needed.
+
+[deploy/README.md](deploy/README.md) → *The fleet agent* has the runbooks:
+moving the existing compose workers under the agent, adding a host, rolling
+back.
+
 ### Did it alert, and did the alert arrive?
 
 Every listing that clears the rating threshold logs one verdict line saying

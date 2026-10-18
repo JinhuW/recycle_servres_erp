@@ -60,9 +60,9 @@ Configuration (env):
 The one exception to "read-mostly" besides resolving a checkpoint is the VNC
 bridge (`/v1/vnc/...`): it moves bytes between the operator's browser and a
 worker's x11vnc, so the dashboard's "Watch" button shows the live Chromium.
-It reaches a worker only if that worker is listed in RS_VNC_TARGETS, only
-with a single-use ticket minted against the console token, and it never
-touches the coordinator.
+It reaches a worker only if that worker is listed in RS_VNC_TARGETS or run
+by a trusted fleet host (the coordinator's `/v1/fleet/state`), only with a
+single-use ticket minted against the console token.
 """
 
 import asyncio
@@ -71,6 +71,7 @@ import os
 import re
 import secrets as pysecrets
 import threading
+import time
 import tomllib
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -314,8 +315,55 @@ def dashboard() -> HTMLResponse:
 _tickets = vnc.TicketStore()
 
 
+# How long the fleet's VNC addresses are reused. A worker the fleet just
+# started is watchable within this, and a page of Watch clicks costs the
+# coordinator one request.
+FLEET_VNC_TTL_S = 30.0
+_fleet_vnc: Dict[str, Any] = {"at": 0.0, "targets": {}}
+_fleet_vnc_lock = threading.Lock()
+
+
+def _fleet_configs() -> Optional[settings.FleetConfigs]:
+    try:
+        base, headers = _upstream()
+    except HTTPException:
+        return None
+    return settings.FleetConfigs(base, headers)
+
+
+def _fleet_vnc_targets() -> Dict[str, vnc.Target]:
+    """Where to reach each worker a trusted fleet host runs.
+
+    On the console's own host (no vnc_host) the worker's container is on the
+    rs-fleet network by name; elsewhere it publishes its own port. A host that
+    only observes runs nothing yet, so its workers keep their RS_VNC_TARGETS
+    entry until it is trusted.
+    """
+    with _fleet_vnc_lock:
+        if time.monotonic() - _fleet_vnc["at"] < FLEET_VNC_TTL_S:
+            return dict(_fleet_vnc["targets"])
+        targets: Dict[str, vnc.Target] = {}
+        fleet = _fleet_configs()
+        try:
+            body = fleet.state() if fleet is not None else {}
+        except (settings.FleetError, ValueError):
+            body = {}
+        hosts = {h["host_id"]: h for h in body.get("hosts") or []}
+        for a in body.get("assignments") or []:
+            host = hosts.get(a.get("host_id")) or {}
+            if a.get("state") != "run" or not host.get("authoritative") or a.get("move_to_host"):
+                continue
+            if host.get("vnc_host"):
+                if a.get("vnc_port"):
+                    targets[a["worker_id"]] = (str(host["vnc_host"]), int(a["vnc_port"]))
+            else:
+                targets[a["worker_id"]] = (f"rs-worker-{a['worker_id']}", 5900)
+        _fleet_vnc.update(at=time.monotonic(), targets=targets)
+        return dict(targets)
+
+
 def _vnc_targets() -> Dict[str, vnc.Target]:
-    return vnc.parse_targets(_env("RS_VNC_TARGETS"))
+    return {**vnc.parse_targets(_env("RS_VNC_TARGETS")), **_fleet_vnc_targets()}
 
 
 def _vnc_pages() -> Dict[str, str]:
@@ -399,11 +447,13 @@ async def fleet() -> Dict[str, Any]:
     fleet_cfg = _read_toml(_env("RS_FLEET_CONFIG", "/config/fleet.toml"))
     monitor = _read_toml(_env("RS_MONITOR_CONFIG", "/config/monitor.toml"))
     monitor_worker_id = _env("RS_MONITOR_WORKER_ID") or _env("RS_WORKER_ID")
-    # What each named worker actually runs, cities included.
+    # What each named worker actually runs, cities included. A fleet worker's
+    # config comes from the coordinator below, and wins over a mounted copy.
     worker_cfgs = {
         wid: cfg for wid, path in settings.targets()
         if wid and (cfg := _read_toml(str(path))) is not None
     }
+    fleet_ids: list = []
 
     rows: Optional[list] = None
     accounts: Optional[list] = None
@@ -428,6 +478,21 @@ async def fleet() -> Dict[str, Any]:
                 rows = (res.json() or {}).get("workers") or []
             else:
                 error = f"coordinator returned {res.status_code}"
+
+            # An older coordinator answers 404: no fleet, mounted configs only.
+            listing = await client.get("/v1/fleet/configs") if rows is not None else None
+            if listing is not None and listing.status_code == 200:
+                fleet_ids = [c["worker_id"] for c in (listing.json() or {}).get("configs") or []]
+                texts = await asyncio.gather(
+                    *(client.get(f"/v1/fleet/configs/{wid}") for wid in fleet_ids),
+                    return_exceptions=True,
+                )
+                for wid, text in zip(fleet_ids, texts):
+                    if isinstance(text, httpx.Response) and text.status_code == 200:
+                        try:
+                            worker_cfgs[wid] = tomllib.loads((text.json() or {}).get("toml") or "")
+                        except (tomllib.TOMLDecodeError, ValueError):
+                            pass
 
             if rows is not None:
                 # Accounts are one list; session metadata is per worker, so ask
@@ -499,7 +564,7 @@ async def fleet() -> Dict[str, Any]:
     targets = fleet_view.proxy_targets(doc, dict(os.environ))
     fleet_view.apply_proxies(doc, targets, await proxy_exit.resolve(targets.values()))
     doc["settings"] = {
-        "editable": master is not None and "error" not in saved and settings.writable(),
+        "editable": master is not None and "error" not in saved and settings.writable(bool(fleet_ids)),
         "updated_at": saved.get("updated_at"),
         "updated_by": saved.get("updated_by"),
         "error": saved.get("error"),
@@ -524,7 +589,8 @@ def put_settings(body: Any = Body(default=None)) -> Dict[str, Any]:
     master = _read_toml(_env("RS_MASTER_CONFIG", "/config/master.toml"))
     if master is None:
         raise HTTPException(status_code=503, detail="master.toml is not mounted")
-    if not settings.writable():
+    fleet = _fleet_configs()
+    if not settings.writable(fleet is not None):
         raise HTTPException(
             status_code=409,
             detail="This console mounts the worker configs read-only; redeploy it to save settings",
@@ -536,7 +602,7 @@ def put_settings(body: Any = Body(default=None)) -> Dict[str, Any]:
             current = {"search": fleet_view.search_settings(effective)}
             patch = settings.validate(body, list((master.get("item") or {}).keys()), current)
             values = settings.merge(saved["values"], patch)
-            changed = settings.apply(values)
+            changed = settings.apply(values, fleet=fleet)
         except settings.SettingsError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
         except OSError:
@@ -552,9 +618,14 @@ def put_worker_cities(worker_id: str, body: Any = Body(default=None)) -> Dict[st
     """Save the cities one worker searches, and write them into its config
     only. The worker picks them up between jobs and sweeps straight away."""
     path = settings.config_for(worker_id)
-    if path is None:
+    fleet = _fleet_configs()
+    try:
+        in_fleet = fleet is not None and worker_id in fleet.ids()
+    except settings.FleetError:
+        in_fleet = False
+    if path is None and not in_fleet:
         raise HTTPException(status_code=404, detail=f"No config is mounted for worker {worker_id}")
-    if not settings.writable():
+    if not settings.writable(in_fleet):
         raise HTTPException(
             status_code=409,
             detail="This console mounts the worker configs read-only; redeploy it to save cities",
@@ -564,7 +635,12 @@ def put_worker_cities(worker_id: str, body: Any = Body(default=None)) -> Dict[st
             city_list = settings.validate_cities(body)
             saved = settings.load()
             values = settings.merge(saved["values"], {"workers": {worker_id: {"cities": city_list}}})
-            changed = settings.apply(values, [(worker_id, path)])
+            changed = settings.apply(
+                values,
+                [(worker_id, path)] if path is not None else [],
+                fleet if in_fleet else None,
+                [worker_id],
+            )
         except settings.SettingsError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
         except OSError:

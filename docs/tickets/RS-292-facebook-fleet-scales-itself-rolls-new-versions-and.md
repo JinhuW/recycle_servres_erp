@@ -60,30 +60,30 @@ Decisions taken while planning:
 
 ## Acceptance criteria
 
-- [ ] Every Facebook account has one `device_profiles` row:
+- [x] Every Facebook account has one `device_profiles` row:
       a `device_id`, user agent, screen, viewport, locale, timezone and the
       sealed `datr`/`sb`. It is created once, never regenerated, and applied
       to the browser by whichever worker or host runs that account.
-- [ ] An account keeps one `datr` from the first Facebook page its worker
+- [x] An account keeps one `datr` from the first Facebook page its worker
       loads, so login attempts that fail do not each look like a new machine.
-- [ ] Two Facebook logins never share a device. A swap in the ERP quarantines
+- [x] Two Facebook logins never share a device. A swap in the ERP quarantines
       the old session and applies the new login's own device cookies.
-- [ ] A worker whose `/data` holds no session, or the same session gone
+- [x] A worker whose `/data` holds no session, or the same session gone
       stale, restores the coordinator's snapshot — only one of the same
       account — and does not log in again. A live session of other
       provenance is never replaced.
-- [ ] Turning on a ready slot (`fleet_enabled`, region and proxy set) starts a
+- [x] Turning on a ready slot (`fleet_enabled`, region and proxy set) starts a
       worker on a host with capacity, with no compose file or hand-written
       env. Turning it off stops the container and keeps its `/data`.
-- [ ] `rsc fleet release <ver>` upgrades workers one at a time. The next
+- [x] `rsc fleet release <ver>` upgrades workers one at a time. The next
       worker waits until the current one heartbeats on the new version in a
       state no worse than before. On a timeout, that worker goes back to its
       previous image and the rollout halts; everyone else keeps running.
-- [ ] Either side can break without the other noticing:
+- [x] Either side can break without the other noticing:
       coordinator or Postgres down → workers keep searching and boot from
       their local cache, and the agent changes nothing; agent down → workers
       keep running; a worker crash-looping → the coordinator is unaffected.
-- [ ] A second VM on the LAN joins with the `rs-fleetd` compose file and a
+- [x] A second VM on the LAN joins with the `rs-fleetd` compose file and a
       host token.
 
 ## Out of scope
@@ -110,3 +110,18 @@ Decisions taken while planning:
   any credentials (first writer wins). The login-attempt ledger, the login
   budget and "no uid, no password login" are follow-ups owned by the RS-291
   session.
+- Shipped in four PRs: #724 (device profiles, session restore), #726 (ERP
+  sends the uid), #727 (device fixed on the first page) and the fleet agent
+  PR (rs-fleetd, scaling, rolling releases, LAN host).
+- Verified end to end against local Docker before release, with the
+  coordinator on SQLite, rs-fleetd, and stub worker images that heartbeat:
+  - two ready slots became two workers, one per agent pass;
+  - a release rolled them one at a time, each gated on its heartbeat;
+  - turning a slot off removed its container and kept its `/data`;
+  - with the coordinator down the agent changed nothing, and it restarted a
+    stopped worker from its cached desired state;
+  - turning the slot back on returned it to the same host and the same
+    `/data`.
+- Not deployed by these PRs. Moving the homelab's ten compose workers under
+  the agent is the runbook in `trackers/facebook/deploy/README.md` → *The
+  fleet agent*, and it waits for an operator to pick the moment.
