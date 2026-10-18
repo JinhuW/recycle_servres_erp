@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-18
 reporter: jinhu
 branch: fleet-heartbeat-status-time
-pr:
+pr: 739
 version: 1.284.0
 related: []
 ---
