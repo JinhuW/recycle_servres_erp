@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from .. import deps
 from ..deps import require_admin
+from ..device_profiles import generate_profile, identity_key_for
 from ..schemas import ACCOUNT_ID_PATTERN, AccountList, AccountOut, AccountUpsert
 from ..totp import normalize_totp_secret
 from ..vault import SECRET_FIELDS, AccountStore, VaultError
@@ -94,6 +95,29 @@ def _secret_changes(payload: AccountUpsert) -> Dict[str, Optional[str]]:
     return changes
 
 
+def _seed_device(row: Dict[str, Any], payload: AccountUpsert) -> bool:
+    """Give a login its legacy device: the datr/sb of the browser it was made in.
+
+    Without them the first worker to open the account is a brand-new machine to
+    Facebook. With them it is the account's own device on a new IP, the
+    everyday case of someone travelling. First writer wins: a device whose
+    cookies a worker already recorded, or a session refreshed, is never
+    replaced. Needs the uid, which keys the profile; True if the cookies were
+    stored.
+    """
+    identity_key = identity_key_for(row)
+    if identity_key is None:
+        raise HTTPException(
+            status_code=400,
+            detail="device_cookies need the account's fb_uid, which keys its device.",
+        )
+    db = deps.db
+    if db.get_device_profile(identity_key) is None:
+        db.insert_device_profile(generate_profile(identity_key.split(":", 1)[1], row.get("region")))
+    cookies = [cookie.model_dump() for cookie in payload.device_cookies or []]
+    return db.claim_device_cookies(identity_key, deps.get_vault().encrypt({"cookies": cookies}))
+
+
 @router.put(
     "/v1/accounts/{account_id}",
     response_model=AccountOut,
@@ -144,6 +168,8 @@ def put_account(account_id: str, payload: AccountUpsert) -> AccountOut:
             merge_secrets=True,
         )
         row = store.db.get_account_row(account_id)
+        if row is not None and payload.device_cookies:
+            seeded = _seed_device(row, payload)
     except VaultError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
     if row is None:  # pragma: no cover - the upsert just wrote it
@@ -162,6 +188,8 @@ def put_account(account_id: str, payload: AccountUpsert) -> AccountOut:
         )
         if value is not None and value != ""
     ]
+    if payload.device_cookies:
+        changed.append("device_cookies" if seeded else "device_cookies(kept)")
     logger.warning(
         "Console %s account %s: fields=%s secrets_set=%s secrets_cleared=%s",
         "updated" if existing else "created",

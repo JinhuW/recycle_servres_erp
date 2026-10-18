@@ -19,6 +19,8 @@ notification channel.
 """
 
 import logging
+import os
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -40,6 +42,53 @@ router = APIRouter()
 # The audit `kind` for a credentials release. Not a CodeKind: it is not a code,
 # but it belongs in the same log because it is the same class of disclosure.
 PASSWORD_KIND = "password"
+# A refused release is audited too, under its own kind so it never counts
+# against the budget it was refused by.
+PASSWORD_REFUSED_KIND = "password_refused"  # pragma: allowlist secret
+
+# Automated password logins per account per day. Each one is a fresh login
+# from a worker's IP; va-1 had four in 37 minutes and Facebook locked it. Past
+# the budget the worker parks on the login form and a human finishes over
+# Watch, which is the one login Facebook does not count against the account.
+PASSWORD_BUDGET_WINDOW = timedelta(hours=24)
+
+
+def password_budget() -> int:
+    try:
+        return max(0, int(os.environ.get("RS_PASSWORD_LOGINS_PER_DAY", "2")))
+    except ValueError:
+        return 2
+
+
+def require_fb_uid() -> bool:
+    # On only after every password-login account has its uid: an account
+    # without one has no device profile, so each login would be a new device.
+    return os.environ.get("RS_REQUIRE_FB_UID", "").lower() in ("1", "true", "yes")
+
+
+def _refusal(account: dict, account_id: str) -> Optional[str]:
+    """Why this account may not be handed its password now, or None."""
+    if account.get("locked_at"):
+        return (
+            f"Account '{account_id}' is locked by Facebook "
+            f"({account.get('locked_reason') or 'lock page'}). Unlock it on Facebook, "
+            f"then run `rsc vault unlock {account_id}`."
+        )
+    if require_fb_uid() and not account.get("fb_uid"):
+        return (
+            f"Account '{account_id}' has no Facebook uid, so it has no device profile and "
+            "every password login would be a new device. Set it with "
+            f"`rsc vault set-account {account_id} --fb-uid <uid>`."
+        )
+    budget = password_budget()
+    since = (datetime.now(timezone.utc) - PASSWORD_BUDGET_WINDOW).isoformat(timespec="seconds")
+    used = deps.db.count_code_audit(account_id, PASSWORD_KIND, since)
+    if used >= budget:
+        return (
+            f"Account '{account_id}' has had {used} automated password login(s) in the last "
+            f"24 h (budget {budget}). Finish the login over Watch instead."
+        )
+    return None
 
 
 def _resolve(worker: Optional[str], claimed_worker: Optional[str]) -> Tuple[str, str]:
@@ -126,6 +175,11 @@ def issue_credentials(
                 "session instead, or enable it deliberately with "
                 "`rsc vault set-account <account> --allow-password-login`.",
             )
+        refusal = _refusal(account, account_id)
+        if refusal:
+            deps.db.insert_code_audit(worker_id, account_id, PASSWORD_REFUSED_KIND, refusal)
+            logger.warning("Refused credentials to worker %s: %s", worker_id, refusal)
+            raise HTTPException(status_code=403, detail=refusal)
         secrets = store.get_secret(account_id)
     except VaultError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e

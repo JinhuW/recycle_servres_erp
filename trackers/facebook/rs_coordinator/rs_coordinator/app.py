@@ -33,6 +33,7 @@ from .routers import (
     identity,
     incidents,
     listings,
+    logins,
     messages,
     session,
     stats,
@@ -50,6 +51,19 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     Started here rather than at import so that importing this module (tests,
     tooling, `rsc` subcommands) never spawns a thread; only a served app does.
     """
+    missing_uid = [
+        row["account_id"]
+        for row in deps.get_db().list_accounts()
+        if row.get("allow_password_login") and not row.get("fb_uid")
+    ]
+    if missing_uid:
+        # Each of these logs in as a new device every time; with
+        # RS_REQUIRE_FB_UID on they get no password at all.
+        logger.warning(
+            "Password-login accounts without a Facebook uid (no device profile): %s",
+            ", ".join(missing_uid),
+        )
+
     loop = Background(
         deps.get_db,
         deps.get_notifier(),
@@ -98,6 +112,7 @@ app.include_router(auth.router, tags=["auth"])
 app.include_router(escalation.router, tags=["escalation"])
 app.include_router(session.router, tags=["session"])
 app.include_router(identity.router, tags=["identity"])
+app.include_router(logins.router, tags=["logins"])
 app.include_router(fleet.router, tags=["fleet"])
 app.include_router(messages.router, tags=["messages"])
 app.include_router(stats.router, tags=["stats"])

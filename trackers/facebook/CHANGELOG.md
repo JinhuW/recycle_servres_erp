@@ -18,6 +18,35 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Added
+
+- **Every login records the device it was made on.** A worker opens a row in
+  the coordinator's new `login_attempts` ledger when it starts a login, naming
+  the account's device and a fingerprint of the `datr` its browser presents
+  (never the cookie). It closes the row with the outcome: restored,
+  password_ok, watch_ok, challenge, locked or failed. A login that starts on a
+  `datr` the account's device profile does not hold pages ops before it goes
+  further. `rsc vault logins` and `GET /v1/logins` show the ledger.
+- **A new account starts on its legacy device.** The ERP's Assign now sends
+  the pool cookie's `datr`/`sb` (never `c_user`/`xs`/`fr`). The console passes
+  only those two cookies through, and `PUT /v1/accounts` seeds the account's
+  device profile with them when it has none. The worker's first sign-in is
+  then the account's own machine on a new IP, not a stranger.
+
+### Changed
+
+- **Automated password logins are capped and stop on a lock.**
+  `/v1/auth/credentials` refuses an account that has had 2 password releases
+  in 24 h (`RS_PASSWORD_LOGINS_PER_DAY`), or that Facebook has locked. The
+  worker then parks for Watch, as it does without credentials. Facebook's
+  "we locked your account" page is its own challenge kind (`locked`); a login
+  that ends there, or a `locked` escalation, marks the account locked and
+  pages ops until `rsc vault unlock <account>`. With `RS_REQUIRE_FB_UID=1` an
+  account without a Facebook uid, and so without a device profile, gets no
+  password at all; the coordinator warns at startup about any such account.
+  All of this follows va-1 on 2026-10-18: four password logins in 37
+  minutes, each from a new `datr`, locked as possibly hacked.
+
 ## [0.12.1] - 2026-10-18
 
 ### Added

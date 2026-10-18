@@ -74,7 +74,7 @@ import threading
 import time
 import tomllib
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import httpx
 from fastapi import (
@@ -236,6 +236,24 @@ ACCOUNT_SECRET_FIELDS = (
     "imap_port",
 )
 _ACCOUNT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@-]{0,63}$")
+# The login's legacy device. Only these two cookies may cross: the pool cookie
+# they come from also carries a live session (c_user, xs), and that must never
+# reach a worker.
+DEVICE_COOKIE_NAMES = ("datr", "sb")
+DEVICE_COOKIE_FIELDS = ("name", "value", "domain", "path", "expires", "httpOnly", "secure", "sameSite")
+
+
+def _device_cookies(raw: Any) -> List[Dict[str, Any]]:
+    if not isinstance(raw, list) or not 1 <= len(raw) <= 4:
+        raise HTTPException(status_code=400, detail="device_cookies must be 1 to 4 cookies")
+    cookies = []
+    for cookie in raw:
+        if not isinstance(cookie, dict) or cookie.get("name") not in DEVICE_COOKIE_NAMES:
+            raise HTTPException(
+                status_code=400, detail="device_cookies may hold only datr and sb"
+            )
+        cookies.append({k: cookie[k] for k in DEVICE_COOKIE_FIELDS if k in cookie})
+    return cookies
 
 
 @app.put("/v1/accounts/{account_id}", dependencies=[Depends(require_token)])
@@ -265,6 +283,8 @@ async def put_account(account_id: str, request: Request) -> Response:
             for k, v in secrets.items()
             if k in ACCOUNT_SECRET_FIELDS and (v is None or isinstance(v, str))
         }
+    if body.get("device_cookies") is not None:
+        upstream_body["device_cookies"] = _device_cookies(body["device_cookies"])
     return await _forward("PUT", f"/v1/accounts/{account_id}", json_body=upstream_body)
 
 

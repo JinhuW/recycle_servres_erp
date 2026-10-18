@@ -429,6 +429,26 @@ CREATE TABLE IF NOT EXISTS worker_configs (
     updated_by  TEXT
 );
 
+-- One row per login a worker starts, with the device it starts it on. The
+-- datr itself is sealed in device_profiles; this keeps a fingerprint, so the
+-- ledger shows which device each attempt presented without holding the
+-- cookie a second time.
+CREATE TABLE IF NOT EXISTS login_attempts (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    worker_id     TEXT NOT NULL,
+    account_id    TEXT,
+    identity_key  TEXT,
+    device_id     TEXT,
+    datr_fp       TEXT,
+    device_drift  INTEGER DEFAULT 0,
+    trigger       TEXT,
+    outcome       TEXT,
+    detail_json   TEXT,
+    started_at    TEXT NOT NULL,
+    finished_at   TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_login_attempts_worker ON login_attempts(worker_id, started_at);
 CREATE INDEX IF NOT EXISTS idx_challenges_status ON challenges(status);
 CREATE INDEX IF NOT EXISTS idx_code_audit_time ON code_audit(released_at);
 """
@@ -497,6 +517,14 @@ ACCOUNT_EXTRA_COLUMNS = (
     # A host this slot must run on: one with no proxy egresses through its
     # host's own IP, and its session is bound to that IP.
     ("pin_host", "TEXT"),
+)
+
+# Set when Facebook locks the account ("log in with another device to
+# unlock"). While set, no worker is handed its password: every automated
+# login on a locked account reads as one more stranger trying it.
+ACCOUNT_LOCK_COLUMNS = (
+    ("locked_at", "TEXT"),
+    ("locked_reason", "TEXT"),
 )
 
 # Funnel stages, in pipeline order. The first six and `reviewed` / `alerted`
@@ -700,6 +728,7 @@ class Database:
             self._migrate_columns("session_snapshots", SNAPSHOT_EXTRA_COLUMNS)
             self._migrate_columns("review_stats", REVIEW_STATS_EXTRA_COLUMNS)
             self._migrate_columns("accounts", ACCOUNT_EXTRA_COLUMNS)
+            self._migrate_columns("accounts", ACCOUNT_LOCK_COLUMNS)
             # Created after the migration adds the columns they index.
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_threads_room ON threads(matrix_room_id)"
@@ -1456,7 +1485,8 @@ class Database:
         with self.cursor() as cur:
             cur.execute(
                 "SELECT account_id, worker_id, fb_username, fb_uid, region, proxy, vnc_url, "
-                "allow_password_login, fleet_enabled, pin_host, created_at, updated_at "
+                "allow_password_login, fleet_enabled, pin_host, locked_at, locked_reason, "
+                "created_at, updated_at "
                 "FROM accounts ORDER BY account_id"
             )
             return [dict(row) for row in cur.fetchall()]
@@ -1741,7 +1771,79 @@ class Database:
             cur.execute("DELETE FROM worker_configs WHERE worker_id = ?", (worker_id,))
             return cur.rowcount > 0
 
+    # -- login ledger ------------------------------------------------------
+
+    def insert_login_attempt(self: "Database", record: Dict[str, Any]) -> int:
+        record = {"started_at": utcnow(), **record}
+        columns = ", ".join(record)
+        placeholders = ", ".join(["?"] * len(record))
+        with self.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO login_attempts ({columns}) VALUES ({placeholders})",
+                tuple(record.values()),
+            )
+            return int(cur.lastrowid)
+
+    def finish_login_attempt(
+        self: "Database", attempt_id: int, worker_id: str, outcome: str, detail_json: str | None
+    ) -> bool:
+        """Close a worker's own open attempt; False if it is not one."""
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE login_attempts SET outcome = ?, detail_json = ?, finished_at = ? "
+                "WHERE id = ? AND worker_id = ? AND finished_at IS NULL",
+                (outcome, detail_json, utcnow(), attempt_id, worker_id),
+            )
+            return cur.rowcount > 0
+
+    def list_login_attempts(
+        self: "Database", worker_id: str | None = None, limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            if worker_id:
+                cur.execute(
+                    "SELECT * FROM login_attempts WHERE worker_id = ? "
+                    "ORDER BY started_at DESC, id DESC LIMIT ?",
+                    (worker_id, limit),
+                )
+            else:
+                cur.execute(
+                    "SELECT * FROM login_attempts ORDER BY started_at DESC, id DESC LIMIT ?",
+                    (limit,),
+                )
+            return [dict(row) for row in cur.fetchall()]
+
+    def lock_account(self: "Database", account_id: str, reason: str) -> bool:
+        """Mark an account locked by Facebook; False if it already was."""
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE accounts SET locked_at = ?, locked_reason = ? "
+                "WHERE account_id = ? AND locked_at IS NULL",
+                (utcnow(), reason, account_id),
+            )
+            return cur.rowcount > 0
+
+    def unlock_account(self: "Database", account_id: str) -> bool:
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE accounts SET locked_at = NULL, locked_reason = NULL "
+                "WHERE account_id = ? AND locked_at IS NOT NULL",
+                (account_id,),
+            )
+            return cur.rowcount > 0
+
     # -- audit -------------------------------------------------------------
+
+    def count_code_audit(
+        self: "Database", account_id: str, kind: str, since: str
+    ) -> int:
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM code_audit "
+                "WHERE account_id = ? AND kind = ? AND released_at >= ?",
+                (account_id, kind, since),
+            )
+            return int(cur.fetchone()["n"])
 
     def insert_code_audit(
         self: "Database",

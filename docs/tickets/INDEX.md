@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-293](./RS-293-every-facebook-login-records-its-device-retries-are.md) | backlog | story | P1 | Every Facebook login records its device, retries are capped, and a new account starts on its legacy device | — |
 | [RS-292](./RS-292-facebook-fleet-scales-itself-rolls-new-versions-and.md) | done | story | P2 | Facebook fleet scales itself, rolls new versions, and keeps every account's session and device | facebook-tracker 0.12.0 (ERP 1.281.2 for the uid) |
 | [RS-291](./RS-291-a-worker-s-saved-login-survives-any-restart-until-fa.md) | backlog | bug | P1 | A worker's saved login survives any restart until Facebook expires it | — |
 | [RS-290](./RS-290-idle-session-check-reads-a-stale-page-url-and-misses.md) | backlog | bug | P1 | Idle session check reads a stale page URL and misses a login finished over Watch | — |
