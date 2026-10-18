@@ -2,12 +2,12 @@
 id: RS-299
 title: Proxy the Reddit tracker's matches and stats to the ERP
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-10-18
 reporter: jinhu
-branch: feature-backend-for-ui
-pr:
+branch: rs-299-tracker-matches-stats-proxy
+pr: "#742"
 version: 1.284.0
 related: [RS-297]
 ---

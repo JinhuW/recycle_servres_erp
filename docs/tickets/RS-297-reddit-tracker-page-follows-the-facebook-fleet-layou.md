@@ -41,7 +41,7 @@ until the proxy does.
 - [x] A "Recent matches" aside beside the table lists the newest matched posts (subreddit, title, price, age), each linking to the Reddit post.
 - [x] A "From a post to an alert" card shows Poll → Evaluate → Notify with post counts from `/api/stats`. Poll holds the subreddit table and the add form; Evaluate holds the alert rules (new, edit, toggle, delete); Notify shows delivery facts and the failed count.
 - [x] When matches or stats can't be fetched, those parts show "—" or an empty state and the rest of the page keeps working. The 501 "not configured" state is unchanged.
-- [ ] Follow-up (backend): the proxy allows `GET /api/tracker/matches` and `GET /api/tracker/stats`, with tests.
+- [x] Follow-up (backend, RS-299, v1.284.0): the proxy allows `GET /api/tracker/matches` and `GET /api/tracker/stats`, with tests.
 
 ## Out of scope
 
