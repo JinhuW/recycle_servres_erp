@@ -830,6 +830,78 @@ describe('prompt scoring', () => {
     expect(stats.versions.find((x) => x.id === v.live)?.role).toBe('retired');
   });
 
+  it('reports the configured prompts, so a trial shows before its first verdict', async () => {
+    await db.sql`INSERT INTO rules (name, prompt) VALUES ('Rule', 'Some wording.')`;
+
+    const before = await (await request('/api/prompt-stats')).json() as {
+      config: {
+        live: {model: string; systemPrompt: string; promptVersionId: number | null};
+        candidate: {model: string; systemPrompt: string; promptVersionId: number | null} | null;
+        enabledRules: number;
+      };
+    };
+    expect(before.config).toEqual({
+      live: {
+        model: 'openai/gpt-4o-mini',
+        systemPrompt: expect.stringContaining('Rule: Some wording.'),
+        promptVersionId: null,
+      },
+      candidate: {
+        model: 'openai/gpt-4o-mini',
+        systemPrompt: 'Candidate prompt: 7 or more units.',
+        promptVersionId: null,
+      },
+      enabledRules: 1,
+    });
+
+    await db.sql`DELETE FROM rules`;
+    const v = await seedScenario();
+    const after = await (await request('/api/prompt-stats')).json() as typeof before;
+    expect(after.config.live.promptVersionId).toBe(v.live);
+    expect(after.config.candidate?.promptVersionId).toBe(v.candidate);
+  });
+
+  it('starts a trial through its own route, validating the prompt and model', async () => {
+    await setSetting('candidate_eval_prompt', '');
+    const put = (body: unknown) => request('/api/prompt-candidate', {
+      method: 'PUT', body: JSON.stringify(body),
+    });
+
+    expect((await put({prompt: '   '})).status).toBe(400);
+    expect((await put({prompt: 'P', model: 'gpt-4o-mini'})).status).toBe(400);
+
+    const res = await put({prompt: '  Judge bulk lots only.  ', model: 'anthropic/claude-haiku-5.5'});
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({candidate: {
+      model: 'anthropic/claude-haiku-5.5',
+      systemPrompt: 'Judge bulk lots only.',
+      promptVersionId: null,
+    }});
+    expect(await new SettingsStore(db.sql, 0).get()).toMatchObject({
+      candidateEvalPrompt: 'Judge bulk lots only.',
+      candidateLlmModel: 'anthropic/claude-haiku-5.5',
+    });
+
+    // No model means the candidate runs on llm_model again.
+    await put({prompt: 'Judge bulk lots only.'});
+    expect((await new SettingsStore(db.sql, 0).get()).candidateLlmModel).toBe('');
+  });
+
+  it('ends a trial and keeps its numbers under a retired version', async () => {
+    const v = await seedScenario();
+
+    const res = await request('/api/prompt-candidate', {method: 'DELETE'});
+
+    expect(res.status).toBe(200);
+    const body = await (await request('/api/prompt-stats')).json() as Stats & {
+      config: {candidate: unknown};
+    };
+    expect(body.config.candidate).toBeNull();
+    expect(body.versions.find((x) => x.id === v.candidate)).toMatchObject({
+      role: 'retired', evaluated: 5, targets: 2,
+    });
+  });
+
   it('refuses to promote when no candidate is on trial', async () => {
     await setSetting('candidate_eval_prompt', '');
 

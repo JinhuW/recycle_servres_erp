@@ -17,6 +17,37 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.291.0] - 2026-10-18
+
+Monitors ▸ Reddit shows which prompt is better. It lists every prompt
+version's leads, and sets the candidate on trial against the live prompt on
+the same posts (RS-309).
+
+### Added
+
+- **A "Which prompt is better" card.** Since RS-305 the Reddit tracker scores
+  every prompt version by the leads its alerts draw. A lead is an alert
+  someone reacted to with anything but 👎.
+  - The card sits under *From a post to an alert*.
+  - For each version it shows posts judged and flagged, buyer leads as
+    "x of n" with the rate, and the dev chat's 👍 and 👎.
+  - It covers 7 days, 30 days or all time.
+  - A row opens to show the full prompt.
+  - A prompt that hasn't judged a post yet still gets a row marked *new*.
+    That way a prompt that was just started or just promoted is visible.
+- **The trial, in the terms the decision is made in.** While a candidate
+  prompt is on trial, a 2×2 grid sets its verdicts against the live prompt's
+  on the same posts. One sentence says how much junk promoting would drop,
+  how many leads it would lose and how many new ones it would find. Until 20
+  posts are labelled, the card warns that a handful of reactions isn't
+  proof.
+- **Trials run from the page.** A manager can start, edit and end a trial,
+  and can promote the candidate.
+  - Promoting asks for confirmation first, and the confirmation names the
+    rules it will switch off. The candidate was judged without them.
+  - The proxy forwards `prompt-stats` and the new, narrow `prompt-candidate`
+    routes. The tracker's settings stay outside its allowlist.
+
 ## [1.290.0] - 2026-10-18
 
 ### Changed

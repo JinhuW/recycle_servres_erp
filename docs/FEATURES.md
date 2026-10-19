@@ -2096,6 +2096,18 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   cover the posts discovered in the past 24 hours, not all time. Oldest
   waiting and the failed list still look at every post. If either read
   fails, that part shows a dash or a note.
+
+  Since v1.291.0, a **Which prompt is better** card scores every prompt
+  version by its leads. A lead is an alert someone reacted to with anything
+  but 👎.
+  - For each version it shows posts judged and flagged, buyer leads as
+    "x of n", and the dev chat's 👍 and 👎.
+  - It covers 7 days, 30 days or all time.
+  - While a candidate prompt is on trial, the card sets its verdicts against
+    the live prompt's on the same posts. It warns until 20 posts are
+    labelled.
+  - Managers start, edit, end and promote trials there. Promoting switches
+    the rules off, because the candidate was judged without them.
 - **Coordinator** — the Facebook fleet, reached from **Monitors ▸ Facebook**
   in the sidebar (v1.207.0), managers only. Since v1.263.0 the Fleet tab
   shares the Account pool tab's chrome: a status legend (Live, Stale, Needs

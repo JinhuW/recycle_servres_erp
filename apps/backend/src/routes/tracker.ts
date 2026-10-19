@@ -9,7 +9,8 @@ import type { Env, User } from '../types';
 // Manager-only pass-through to the `trackers/reddit` admin API, so its bearer
 // token never reaches the browser. Explicit allowlist rather than a catch-all:
 // the tracker also exposes settings and requeue endpoints this UI has no
-// business calling. Self-applies authMiddleware (oauthAdmin pattern), so
+// business calling. Prompt trials get their own narrow routes
+// (/prompt-candidate) for exactly that reason, instead of opening settings. Self-applies authMiddleware (oauthAdmin pattern), so
 // index.ts mounts it with a single app.route().
 
 const TIMEOUT_MS = 10_000;
@@ -35,7 +36,7 @@ async function forward(
     json: (body: unknown, status?: number) => Response;
     body: (data: null, status: StatusCode) => Response;
   },
-  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   path: string,
   withBody: boolean,
 ): Promise<Response> {
@@ -93,6 +94,13 @@ tracker.get('/matches', (c) =>
   forward(c, 'GET', `/api/matches${new URL(c.req.url).search}`, false));
 tracker.get('/stats', (c) =>
   forward(c, 'GET', `/api/stats${new URL(c.req.url).search}`, false));
+
+tracker.get('/prompt-stats', (c) =>
+  forward(c, 'GET', `/api/prompt-stats${new URL(c.req.url).search}`, false));
+tracker.put('/prompt-candidate', (c) => forward(c, 'PUT', '/api/prompt-candidate', true));
+tracker.delete('/prompt-candidate', (c) => forward(c, 'DELETE', '/api/prompt-candidate', false));
+tracker.post('/prompt-candidate/promote', (c) =>
+  forward(c, 'POST', '/api/prompt-candidate/promote', false));
 
 tracker.get('/subreddits', (c) => forward(c, 'GET', '/api/subreddits', false));
 tracker.post('/subreddits', (c) => forward(c, 'POST', '/api/subreddits', true));

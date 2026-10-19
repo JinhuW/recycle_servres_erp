@@ -146,10 +146,25 @@ export interface PromptVersionStats {
   vsLive?: {both: VsLiveCell; liveOnly: VsLiveCell; candidateOnly: VsLiveCell; neither: VsLiveCell};
 }
 
+/** A prompt as configured now; its version id is null until it has judged a post. */
+export interface ConfiguredPrompt extends PromptConfig {
+  promptVersionId: number | null;
+}
+
 export interface PromptStats {
   versions: PromptVersionStats[];
   /** Reactions on messages the ledger has no record of, e.g. alerts sent before it existed. */
   unmatchedReactions: number;
+  /**
+   * What is configured right now, so a trial shows up the moment it starts —
+   * before its version has any verdicts to appear in `versions`.
+   */
+  config: {
+    live: ConfiguredPrompt;
+    candidate: ConfiguredPrompt | null;
+    /** What promoting would disable. */
+    enabledRules: number;
+  };
 }
 
 const rate = (part: number, whole: number): number | null => (whole > 0 ? part / whole : null);
@@ -164,8 +179,16 @@ function score(sent: number, leads: number, notLeads: number): AudienceScore {
  */
 export async function promptStats(
   sql: Sql,
-  options: {since: Date | null; liveHash: string; candidateHash: string | null},
+  options: {
+    since: Date | null;
+    live: PromptConfig;
+    candidate: PromptConfig | null;
+    enabledRules: number;
+  },
 ): Promise<PromptStats> {
+  const liveHash = promptHash(options.live);
+  const candidateHash = options.candidate ? promptHash(options.candidate) : null;
+
   // Fragments are built per query rather than shared across the parallel ones.
   const since = () => (options.since ? sql`AND p.discovered_at >= ${options.since}` : sql``);
 
@@ -265,13 +288,21 @@ export async function promptStats(
     cellsById.set(cell.version_id, [...(cellsById.get(cell.version_id) ?? []), cell]);
   }
 
+  const idByHash = new Map(versions.map((v) => [v.hash, v.id]));
   return {
     unmatchedReactions: unmatched[0]?.n ?? 0,
+    config: {
+      live: {...options.live, promptVersionId: idByHash.get(liveHash) ?? null},
+      candidate: options.candidate
+        ? {...options.candidate, promptVersionId: idByHash.get(candidateHash!) ?? null}
+        : null,
+      enabledRules: options.enabledRules,
+    },
     versions: versions.map((v) => {
       const s = scoreById.get(v.id);
-      const role: PromptRole = v.hash === options.liveHash
+      const role: PromptRole = v.hash === liveHash
         ? 'live'
-        : v.hash === options.candidateHash ? 'candidate' : 'retired';
+        : v.hash === candidateHash ? 'candidate' : 'retired';
       const stats: PromptVersionStats = {
         id: v.id,
         role,

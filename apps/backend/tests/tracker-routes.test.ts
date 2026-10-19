@@ -95,6 +95,43 @@ describe('Tracker proxy routes (/api/tracker)', () => {
       .toBe('http://tracker.internal:8080/api/stats?since=2026-10-17T00:00:00Z');
   });
 
+  it('forwards the prompt trial routes: stats with their window, start, end and promote', async () => {
+    const { token } = await loginAs(ALEX);
+    const calls: Array<[string, string | undefined, string | undefined]> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+      calls.push([url, init.method, init.body as string | undefined]);
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }));
+
+    const opts = { token, env: TRACKER_ENV };
+    expect((await api('GET', '/api/tracker/prompt-stats?since=2026-10-12T00:00:00Z', opts)).status).toBe(200);
+    expect((await api('PUT', '/api/tracker/prompt-candidate', {
+      ...opts, body: { prompt: 'Judge bulk lots only.', model: '' },
+    })).status).toBe(200);
+    expect((await api('DELETE', '/api/tracker/prompt-candidate', opts)).status).toBe(200);
+    expect((await api('POST', '/api/tracker/prompt-candidate/promote', opts)).status).toBe(200);
+
+    expect(calls.map(([url, method]) => [url, method])).toEqual([
+      ['http://tracker.internal:8080/api/prompt-stats?since=2026-10-12T00:00:00Z', 'GET'],
+      ['http://tracker.internal:8080/api/prompt-candidate', 'PUT'],
+      ['http://tracker.internal:8080/api/prompt-candidate', 'DELETE'],
+      ['http://tracker.internal:8080/api/prompt-candidate/promote', 'POST'],
+    ]);
+    expect(JSON.parse(calls[1]![2]!)).toEqual({ prompt: 'Judge bulk lots only.', model: '' });
+  });
+
+  it('keeps prompt trials manager-only', async () => {
+    const { token } = await loginAs(MARCUS);
+    const spy = stubTracker(200, {});
+
+    const r = await api('PUT', '/api/tracker/prompt-candidate', {
+      token, env: TRACKER_ENV, body: { prompt: 'x' },
+    });
+
+    expect(r.status).toBe(403);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
   it('forwards a POST body and preserves the upstream status', async () => {
     const { token } = await loginAs(ALEX);
     const spy = stubTracker(201, { rule: { id: 1, name: 'EPYC lots' } });

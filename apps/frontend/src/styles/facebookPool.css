@@ -1836,3 +1836,100 @@ tr.rt-off td:not(:nth-last-child(-n + 2)) {
   flex-direction: column;
   gap: 1px;
 }
+
+/* Which prompt is better (TrackerPrompts.tsx) */
+.rt-prompts-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.rt-trial {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rt-trial-verdict {
+  margin: 0;
+  max-width: 80ch;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.rt-trial-warn {
+  margin: 0;
+  font-size: 12px;
+  color: var(--warn-strong);
+}
+/* Live's verdict down the side, the candidate's across the top. */
+.rt-trial-grid {
+  display: grid;
+  grid-template-columns: max-content repeat(2, minmax(0, 260px));
+  gap: 6px;
+  align-items: stretch;
+}
+.rt-trial-axis {
+  align-self: end;
+  font-size: 11px;
+  font-weight: 550;
+  color: var(--fg-muted);
+}
+.rt-trial-side {
+  align-self: center;
+  padding-right: 6px;
+}
+.rt-trial-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elev);
+}
+.rt-trial-cell b {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+/* The two cells where the prompts disagree are the ones a promotion changes. */
+.rt-trial-liveOnly {
+  background: var(--neg-soft);
+}
+.rt-trial-candidateOnly {
+  background: var(--pos-soft);
+}
+.rt-trial-what,
+.rt-trial-counts {
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.rt-trial-counts {
+  font-variant-numeric: tabular-nums;
+}
+.rt-version-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.rt-versions tr.rt-retired td {
+  opacity: 0.55;
+}
+.rt-version {
+  gap: 4px;
+  padding-left: 4px;
+}
+.rt-model {
+  font-size: 11px;
+}
+.rt-version-prompt pre {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--fg-muted);
+}
+.rt-prompts-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

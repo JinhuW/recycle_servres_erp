@@ -79,6 +79,80 @@ export type TrackerStats = {
   failed: Array<{ reddit_id: string; title: string; attempts: number }>;
 };
 
+// ─── Prompt versions and trials (GET /api/prompt-stats) ─────────────────────
+// A version is the exact model + system prompt a post was judged with. A lead
+// is an alert someone reacted to with anything but 👎; a 👎 alone makes it a
+// not-lead. Counts cover the posts discovered since the `since` asked for.
+
+export type PromptRole = 'live' | 'candidate' | 'retired';
+
+export type AudienceScore = { sent: number; leads: number; notLeads: number; leadRate: number | null };
+
+export type TrialCell = { posts: number; leads: number; notLeads: number };
+
+// The candidate's verdicts against the live prompt's on the same posts.
+export type VsLive = { both: TrialCell; liveOnly: TrialCell; candidateOnly: TrialCell; neither: TrialCell };
+
+export type PromptVersionStats = {
+  id: number;
+  role: PromptRole;
+  model: string;
+  systemPrompt: string;
+  firstUsedAt: string;
+  lastUsedAt: string;
+  evaluated: number;
+  targets: number;
+  targetRate: number | null;
+  buyers: AudienceScore;
+  dev: AudienceScore;
+  vsLive?: VsLive;
+};
+
+// A prompt as configured now; its version id is null until it has judged a post.
+export type ConfiguredPrompt = { model: string; systemPrompt: string; promptVersionId: number | null };
+
+export type PromptStats = {
+  versions: PromptVersionStats[];
+  unmatchedReactions: number;
+  config: { live: ConfiguredPrompt; candidate: ConfiguredPrompt | null; enabledRules: number };
+};
+
+/** Below this many labelled posts a trial's numbers are anecdotes, not evidence. */
+export const TRIAL_MIN_LABELLED = 20;
+
+export type TrialSummary = {
+  labelled: number;
+  unlabelled: number;
+  /** Leads only the candidate alerted on. */
+  leadsGained: number;
+  /** Leads only the live prompt alerted on: what promoting would lose. */
+  leadsLost: number;
+  /** 👎 alerts only the live prompt sent: junk promoting would drop. */
+  junkDropped: number;
+  /** 👎 alerts only the candidate sent: junk promoting would add. */
+  junkAdded: number;
+  enoughData: boolean;
+};
+
+/**
+ * The trial in the terms the decision is made in. Posts both prompts rejected
+ * were never sent anywhere, so they can't be labelled and don't count either way.
+ */
+export function summarizeTrial(vs: VsLive): TrialSummary {
+  const sent = [vs.both, vs.liveOnly, vs.candidateOnly];
+  const labelled = sent.reduce((sum, c) => sum + c.leads + c.notLeads, 0);
+  const posts = sent.reduce((sum, c) => sum + c.posts, 0);
+  return {
+    labelled,
+    unlabelled: posts - labelled,
+    leadsGained: vs.candidateOnly.leads,
+    leadsLost: vs.liveOnly.leads,
+    junkDropped: vs.liveOnly.notLeads,
+    junkAdded: vs.candidateOnly.notLeads,
+    enoughData: labelled >= TRIAL_MIN_LABELLED,
+  };
+}
+
 export const WORKERS_PAGE_SIZE = 15;
 
 export const trackerApi = {
@@ -108,6 +182,20 @@ export const trackerApi = {
     api.get<{ matches: TrackerMatch[] }>(`/api/tracker/matches?limit=${limit}`).then(r => r.matches),
   stats: (since: Date) =>
     api.get<TrackerStats>(`/api/tracker/stats?since=${encodeURIComponent(since.toISOString())}`),
+
+  // null asks for all time.
+  promptStats: (since: Date | null) =>
+    api.get<PromptStats>(
+      `/api/tracker/prompt-stats${since ? `?since=${encodeURIComponent(since.toISOString())}` : ''}`,
+    ),
+  // '' runs the candidate on the live model.
+  setCandidate: (input: { prompt: string; model: string }) =>
+    api.put<{ candidate: ConfiguredPrompt }>('/api/tracker/prompt-candidate', input).then(r => r.candidate),
+  clearCandidate: () => api.delete('/api/tracker/prompt-candidate'),
+  promoteCandidate: () =>
+    api.post<{ evalPrompt: string; llmModel: string; disabledRules: number[]; promptVersionId: number | null }>(
+      '/api/tracker/prompt-candidate/promote', {},
+    ),
 
   listSubreddits: () =>
     api.get<{ subreddits: TrackerSubreddit[] }>('/api/tracker/subreddits').then(r => r.subreddits),
