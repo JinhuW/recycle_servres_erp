@@ -1,10 +1,10 @@
-import { useState, type ClipboardEvent, type KeyboardEvent } from 'react';
+import { useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
 import { Icon } from '../../components/Icon';
 import type { FlowStage, ItemField } from '../../lib/fleetView';
 import { useT } from '../../lib/i18n';
 import {
-  MIN_TITLE_WORDS, addToGroup, checkListing, duplicateTerms, formatRule, ruleLines, ruleShape, splitEntry,
-  termKey, type ListingVerdict, type RuleHit,
+  MIN_TITLE_WORDS, checkListing, duplicateTerms, formatRule, foundTerms, keywordCount, markTerms, ruleLines, ruleShape,
+  shadowedTerms, splitEntry, termKey, type ListingVerdict,
 } from '../../lib/keywordRules';
 
 // ─── An item's phrases and keyword rules, as chips ────────────────────────────
@@ -16,9 +16,11 @@ import {
 export type ItemRules = Record<ItemField, string> & { name: string };
 export type Probe = { title: string; description: string };
 
+// The title gate reads Include too: with the title prefilter on, a card whose
+// title has none of them is dropped unopened.
 export const STAGE_LISTS: Partial<Record<FlowStage, readonly ItemField[]>> = {
   search: ['search_phrases'],
-  title: ['antikeywords'],
+  title: ['keywords', 'antikeywords'],
   keywords: ['keywords', 'antikeywords'],
 };
 
@@ -33,14 +35,31 @@ export function probeVerdicts(
   )]));
 }
 
-const verdictHit = (v: ListingVerdict | undefined, field: ItemField): RuleHit | null => {
-  if (!v) return null;
-  if (v.kind === 'anti' && field === 'antikeywords') return v.hit;
-  if (v.kind === 'pass' && field === 'keywords') return v.hit;
-  return null;
+type Found = ReturnType<typeof foundTerms>;
+
+const VERDICT_ICON: Record<ListingVerdict['kind'], { icon: 'check' | 'x' | 'arrow'; tone: string }> = {
+  pass: { icon: 'check', tone: 'inc' },
+  anti: { icon: 'x', tone: 'exc' },
+  missing: { icon: 'x', tone: 'exc' },
+  deferred: { icon: 'arrow', tone: 'open' },
 };
 
-export function RulesPanel({ stage, items, active, onActive, editing, onChange, verdicts }: {
+const LIST_TITLE: Record<ItemField, string> = {
+  search_phrases: 'fbcRulesPhrases', keywords: 'fbcRulesInclude', antikeywords: 'fbcRulesExclude',
+};
+
+// The two keyword lists pull in opposite directions, so each carries its sign
+// and colour everywhere it shows. Search phrases are neither.
+const POLARITY: Partial<Record<ItemField, { cls: string; sign: string }>> = {
+  keywords: { cls: 'inc', sign: '+' },
+  antikeywords: { cls: 'exc', sign: '−' },
+};
+
+/** What a list's count means to a reader: phrases by line, keywords by chip. */
+const listCount = (field: ItemField, value: string) =>
+  field === 'search_phrases' ? ruleLines(value).length : keywordCount(ruleLines(value));
+
+export function RulesPanel({ stage, items, active, onActive, editing, onChange, verdicts, probe, prefilter, onAdd, focus }: {
   stage: FlowStage;
   items: readonly ItemRules[];
   active: string;
@@ -48,57 +67,126 @@ export function RulesPanel({ stage, items, active, onActive, editing, onChange, 
   editing: boolean;
   onChange: (name: string, field: ItemField, value: string) => void;
   verdicts: Map<string, ListingVerdict> | null;
+  probe: Probe;
+  prefilter: boolean;
+  /** Opens the stage's Edit form on this list; absent when it cannot be edited. */
+  onAdd?: (field: ItemField) => void;
+  /** The list whose input takes focus when Edit opens. */
+  focus: ItemField | null;
 }) {
   const { t } = useT();
   const fields = STAGE_LISTS[stage] ?? [];
   const item = items.find(i => i.name === active) ?? items[0];
   if (!item) return <span className="fp-muted">{t('fbcNone')}</span>;
+  // With the prefilter off, the card's title is never checked for an include keyword.
+  const idle = (f: ItemField) => stage === 'title' && f === 'keywords' && !prefilter;
+  const rules = { keywords: ruleLines(item.keywords), antikeywords: ruleLines(item.antikeywords) };
+  const seen = { ...rules, keywords: idle('keywords') ? [] : rules.keywords };
+  // What the probe shows the gate: the card's title, or the whole page.
+  const text = verdicts && (stage === 'title' ? probe.title : `${probe.title} ${probe.description}`);
+  const found = (f: ItemField): Found | null =>
+    text && f !== 'search_phrases' ? foundTerms(seen[f], text) : null;
+  const shadowed = fields.includes('keywords') ? shadowedTerms(rules.keywords, rules.antikeywords) : null;
+
+  const say = (v: ListingVerdict) => {
+    switch (v.kind) {
+      case 'anti': return t('fbcTryAnti', { term: v.hit.term ?? '…' });
+      case 'missing': return t(stage === 'title' ? 'fbcTryMissingTitle' : 'fbcTryMissing');
+      case 'deferred': return v.reason === 'short' ? t('fbcTryShort', { n: String(MIN_TITLE_WORDS) }) : t('fbcTryNoPrefilter');
+      case 'pass': return v.hit?.term ? t('fbcTryPassOn', { term: v.hit.term }) : t('fbcTryPass');
+    }
+  };
+  const marks = (s: string) => markTerms(s, seen).map((run, i) => (run.kind ? (
+    <mark key={i} className={`ff-mark ${run.kind}`} title={t(run.kind === 'inc' ? 'fbcRulesInclude' : 'fbcRulesExclude')}>
+      {run.text}
+    </mark>
+  ) : run.text));
+
   return (
     <div className="ff-rules">
-      {items.length > 1 && (
-        <div className="seg ff-rules-items" role="tablist" aria-label={t('fbcRulesItems')}>
-          {items.map(i => (
-            <button key={i.name} type="button" role="tab" aria-selected={i.name === item.name}
-              className={i.name === item.name ? 'active' : ''} onClick={() => onActive(i.name)}>
-              {i.name}
-              <span className="ff-rules-count">{fields.map(f => ruleLines(i[f]).length).join(' · ')}</span>
-            </button>
-          ))}
+      {(items.length > 1 || verdicts) && (
+        <div className="ff-rules-items" role="tablist" aria-label={t('fbcRulesItems')}>
+          {items.map(i => {
+            const v = verdicts?.get(i.name);
+            return (
+              <button key={i.name} type="button" role="tab" aria-selected={i.name === item.name}
+                className="ff-item" onClick={() => onActive(i.name)}>
+                <span className="ff-item-head">
+                  <span className="mono">{i.name}</span>
+                  <span className="ff-rules-count">
+                    {fields.map(f => (
+                      <span key={f} className={`ff-n ${POLARITY[f]?.cls ?? ''}`} title={t(LIST_TITLE[f])}>
+                        {POLARITY[f]?.sign}{listCount(f, i[f])}
+                      </span>
+                    ))}
+                  </span>
+                </span>
+                {v && (
+                  <span className={`ff-verdict ${VERDICT_ICON[v.kind].tone}`}>
+                    <Icon name={VERDICT_ICON[v.kind].icon} size={11} />
+                    {say(v)}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {verdicts && (
+        <div className="ff-readout">
+          <p>{marks(probe.title)}</p>
+          {stage === 'keywords' && probe.description.trim() && <p className="ff-readout-desc">{marks(probe.description)}</p>}
         </div>
       )}
       <div className={`ff-rules-cols${fields.length > 1 ? ' two' : ''}`}>
         {fields.map(f => (
           <RuleList key={`${item.name}:${f}`} field={f} stage={stage} value={item[f]} editing={editing}
-            hit={verdictHit(verdicts?.get(item.name), f)} onChange={v => onChange(item.name, f, v)} />
+            found={found(f)} onChange={v => onChange(item.name, f, v)} idle={idle(f)}
+            shadowed={f === 'keywords' ? shadowed : null} focus={focus === f}
+            onAdd={onAdd && (() => onAdd(f))} />
         ))}
       </div>
     </div>
   );
 }
 
-const LIST_TITLE: Record<ItemField, string> = {
-  search_phrases: 'fbcRulesPhrases', keywords: 'fbcRulesMustMatch', antikeywords: 'fbcRulesDrops',
-};
-
-function RuleList({ field, stage, value, editing, hit, onChange }: {
+function RuleList({ field, stage, value, editing, found, onChange, idle, shadowed, focus, onAdd }: {
   field: ItemField;
   stage: FlowStage;
   value: string;
   editing: boolean;
-  hit: RuleHit | null;
+  /** What the probe listing holds of this list; null while nothing is typed. */
+  found: Found | null;
   onChange: (value: string) => void;
+  /** Shown, but not read at this stage. */
+  idle: boolean;
+  /** Include keywords an exclude keyword always catches, with the one that does. */
+  shadowed: Map<string, string> | null;
+  focus: boolean;
+  onAdd?: () => void;
 }) {
   const { t } = useT();
   const [asText, setAsText] = useState(false);
   const [pending, setPending] = useState('');
-  // Which entry has an inline input open: a group taking one more term, or an
-  // expression being rewritten.
-  const [open, setOpen] = useState<{ rule: number; mode: 'add' | 'expr' } | null>(null);
+  // The expression being rewritten in place, by entry.
+  const [openExpr, setOpenExpr] = useState<number | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const well = useRef<HTMLDivElement>(null);
+  // The field's height as text mode opened: the textarea takes exactly its
+  // place, so switching modes never moves the card.
+  const [textHeight, setTextHeight] = useState<number>();
+  const toggleText = () => {
+    if (!asText) setTextHeight(well.current?.offsetHeight);
+    setAsText(v => !v);
+  };
   // Search phrases are queries, not expressions: every line is one chip.
   const plain = field === 'search_phrases';
+  const pol = POLARITY[field];
   const rules = ruleLines(value);
   const dups = plain ? new Set<string>() : duplicateTerms(rules);
-  const hint = field === 'antikeywords' && stage === 'title' ? 'fbcRulesDropsTitleHint' : `fbcRulesHint_${field}`;
+  const hint = stage !== 'title' ? `fbcRulesHint_${field}`
+    : field === 'antikeywords' ? 'fbcRulesDropsTitleHint'
+      : idle ? 'fbcRulesKeywordsTitleOff' : 'fbcRulesKeywordsTitleHint';
 
   const write = (next: string[]) => onChange(next.join('\n'));
   const replace = (i: number, entry: string | null) =>
@@ -106,10 +194,6 @@ function RuleList({ field, stage, value, editing, hit, onChange }: {
   const removeTerm = (i: number, k: number) => {
     const shape = ruleShape(rules[i]);
     replace(i, shape.kind === 'terms' ? formatRule(shape.raw.filter((_, j) => j !== k)) || null : null);
-  };
-  const addTo = (i: number, raw: string) => {
-    const next = addToGroup(rules[i], raw);
-    if (next) replace(i, next);
   };
   const commit = (raw: string) => {
     const added = plain ? raw.split(/[\n,]/).map(s => s.trim()).filter(Boolean) : splitEntry(raw);
@@ -125,144 +209,116 @@ function RuleList({ field, stage, value, editing, hit, onChange }: {
     e.preventDefault();
     commit(`${pending}${text}`);
   };
+  const chip = (term: string, i: number, k: number) => {
+    const key = termKey(term);
+    const dup = !plain && dups.has(key);
+    const by = shadowed?.get(key);
+    return (
+      <span key={`${i}:${k}`}
+        className={`ff-chip${dup ? ' dup' : ''}${by !== undefined ? ' blocked' : ''}${found?.terms.has(key) ? ' hit' : ''}`}
+        title={by !== undefined ? t('fbcRulesBlocked', { term: by }) : dup ? t('fbcRulesDup') : undefined}>
+        {term}
+        {editing && (
+          <button type="button" className="ff-chip-x" aria-label={t('fbcRulesRemove', { term })}
+            onClick={() => removeTerm(i, k)}>
+            <Icon name="x" size={9} />
+          </button>
+        )}
+      </span>
+    );
+  };
 
-  const chip = (term: string, i: number, k: number, isHit: boolean) => (
-    <span key={`${i}:${k}`} className={`ff-chip${!plain && dups.has(termKey(term)) ? ' dup' : ''}${isHit ? ' hit' : ''}`}
-      title={!plain && dups.has(termKey(term)) ? t('fbcRulesDup') : undefined}>
-      {term}
-      {editing && (
-        <button type="button" className="ff-chip-x" aria-label={t('fbcRulesRemove', { term })}
-          onClick={() => removeTerm(i, k)}>
-          <Icon name="x" size={9} />
-        </button>
-      )}
+  const expr = (i: number) => (
+    <span key={i} className={`ff-chip ff-chip-expr${found?.exprs.has(i) ? ' hit' : ''}`}>
+      <span className="ff-expr-tag">{t('fbcRulesExpr')}</span>
+      {editing && openExpr === i ? (
+        <input className="input ff-chip-input" autoFocus spellCheck={false} defaultValue={rules[i]}
+          onKeyDown={e => {
+            if (e.key === 'Escape') { e.stopPropagation(); setOpenExpr(null); }
+            if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); }
+          }}
+          onBlur={e => {
+            const v = e.currentTarget.value.trim();
+            if (v !== rules[i]) replace(i, v || null);
+            setOpenExpr(null);
+          }} />
+      ) : editing ? (
+        <>
+          <button type="button" className="ff-expr-text" onClick={() => setOpenExpr(i)}>{rules[i]}</button>
+          <button type="button" className="ff-chip-x" aria-label={t('fbcRulesRemove', { term: rules[i] })}
+            onClick={() => replace(i, null)}>
+            <Icon name="x" size={9} />
+          </button>
+        </>
+      ) : <span className="ff-expr-text">{rules[i]}</span>}
     </span>
   );
 
-  const inline = (i: number, mode: 'add' | 'expr') => (
-    <input className="input ff-chip-input" autoFocus spellCheck={false}
-      defaultValue={mode === 'expr' ? rules[i] : ''}
-      placeholder={mode === 'add' ? t('fbcRulesAddTo') : undefined}
-      onKeyDown={e => {
-        if (e.key === 'Escape') { e.stopPropagation(); setOpen(null); }
-        if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); }
-      }}
-      onBlur={e => {
-        const v = e.currentTarget.value.trim();
-        if (mode === 'add') { if (v) addTo(i, v); } else if (v !== rules[i]) replace(i, v || null);
-        setOpen(null);
-      }} />
-  );
-
-  const singles: number[] = [];
-  const groups: number[] = [];
-  const exprs: number[] = [];
-  rules.forEach((r, i) => {
-    if (plain) { singles.push(i); return; }
-    const s = ruleShape(r);
-    (s.kind === 'expr' ? exprs : s.terms.length > 1 ? groups : singles).push(i);
+  // Every list is "any one of these", so a group of OR'd terms needs no box or
+  // "or" of its own: its terms sit among the rest, and only an AND/NOT entry
+  // keeps its shape.
+  const chips = rules.flatMap((r, i) => {
+    if (plain) return [chip(r, i, 0)];
+    const shape = ruleShape(r);
+    return shape.kind === 'terms' ? shape.terms.map((term, k) => chip(term, i, k)) : [expr(i)];
   });
-  const termsOf = (i: number) => {
-    if (plain) return [rules[i]];
-    const s = ruleShape(rules[i]);
-    return s.kind === 'terms' ? s.terms : [rules[i]];
-  };
-  const isHit = (i: number, term: string | null) =>
-    !!hit && hit.rule === i && (hit.term === null || term === null || termKey(hit.term) === termKey(term));
 
   return (
-    <div className="ff-rule-list">
+    <div className={`ff-rule-list${pol ? ` ${pol.cls}` : ''}${idle ? ' idle' : ''}`}>
       <div className="ff-rule-list-head">
-        <span className="fp-section-label">{t(LIST_TITLE[field])}</span>
-        <span className="ff-rules-count">{rules.length}</span>
+        {pol && <span className="ff-pol-badge" aria-hidden="true">{pol.sign}</span>}
+        <span className="ff-rule-title">{t(LIST_TITLE[field])}</span>
+        <span className="ff-rules-count">{listCount(field, value)}</span>
         {editing && (
-          <button type="button" className="ff-rule-mode" onClick={() => setAsText(v => !v)}>
+          <button type="button" className="ff-rule-mode" onClick={toggleText}>
             {t(asText ? 'fbcRulesAsChips' : 'fbcRulesAsText')}
           </button>
         )}
       </div>
-      <span className="ff-rule-hint">{t(hint)}</span>
+      <span className="ff-rule-hint">
+        {editing && asText ? t(plain ? 'fbcEditOnePerLine' : 'fbcRulesTextHint') : t(hint, { n: String(MIN_TITLE_WORDS) })}
+      </span>
       {editing && asText ? (
-        <>
-          <textarea className="input ff-edit-list" value={value} spellCheck={false}
-            rows={Math.min(14, Math.max(4, value.split('\n').length + 1))}
-            onChange={e => onChange(e.target.value)} />
-          <span className="fp-muted ff-edit-hint">{t(plain ? 'fbcEditOnePerLine' : 'fbcRulesTextHint')}</span>
-        </>
+        <textarea className="input ff-edit-list" value={value} spellCheck={false} style={{ height: textHeight }}
+          title={plain ? undefined : t('fbcRulesTextTip')} onChange={e => onChange(e.target.value)} />
       ) : (
-        <>
-          {rules.length === 0 && !editing && <span className="fp-muted">{t('fbcNone')}</span>}
-          {singles.length > 0 && (
-            <div className="ff-chips">{singles.map(i => chip(termsOf(i)[0], i, 0, isHit(i, null)))}</div>
-          )}
-          {groups.map(i => (
-            <div key={i} className={`ff-rule-group${isHit(i, null) ? ' hit' : ''}`}>
-              {termsOf(i).map((term, k) => (
-                <span key={k} className="ff-rule-or">
-                  {k > 0 && <span className="ff-or">{t('fbcRulesOr')}</span>}
-                  {chip(term, i, k, isHit(i, term))}
-                </span>
-              ))}
-              {editing && (open?.rule === i && open.mode === 'add' ? inline(i, 'add') : (
-                <button type="button" className="ff-chip-add" aria-label={t('fbcRulesAddTo')} title={t('fbcRulesAddTo')}
-                  onClick={() => setOpen({ rule: i, mode: 'add' })}>
-                  <Icon name="plus" size={10} />
-                </button>
-              ))}
-            </div>
-          ))}
-          {exprs.map(i => (
-            <div key={i} className={`ff-rule-expr${isHit(i, null) ? ' hit' : ''}`}>
-              <span className="ff-expr-tag">{t('fbcRulesExpr')}</span>
-              {editing && open?.rule === i && open.mode === 'expr' ? inline(i, 'expr') : editing ? (
-                <>
-                  <button type="button" className="ff-expr-text" onClick={() => setOpen({ rule: i, mode: 'expr' })}>
-                    {rules[i]}
-                  </button>
-                  <button type="button" className="ff-chip-x" aria-label={t('fbcRulesRemove', { term: rules[i] })}
-                    onClick={() => replace(i, null)}>
-                    <Icon name="x" size={9} />
-                  </button>
-                </>
-              ) : <span className="ff-expr-text">{rules[i]}</span>}
-            </div>
-          ))}
-          {editing && (
-            <input className="input ff-rule-add" value={pending} spellCheck={false}
-              placeholder={t(plain ? 'fbcRulesAddPhrase' : 'fbcRulesAdd')}
+        // A click on the field's empty space lands in its input, as in any tag field.
+        <div ref={well} className={`ff-rule-well${editing ? ' editing' : ''}`}
+          onClick={e => { if (e.target === e.currentTarget) input.current?.focus(); }}>
+          {chips}
+          {editing ? (
+            <input ref={input} className="ff-well-input" value={pending} spellCheck={false} autoFocus={focus}
+              placeholder={t(plain ? 'fbcRulesAddPhrase' : 'fbcRulesAddPh')}
+              aria-label={t(plain ? 'fbcRulesAddPhrase' : 'fbcRulesAddPh')}
+              title={plain ? undefined : t('fbcRulesAddTip')}
               onChange={e => setPending(e.target.value)} onKeyDown={onAddKey} onPaste={onPaste}
               onBlur={() => pending.trim() && commit(pending)} />
-          )}
-        </>
+          ) : onAdd ? (
+            <button type="button" className="ff-chip-new" onClick={onAdd}>
+              <Icon name="plus" size={10} />
+              {t(plain ? 'fbcRulesAddPhraseBtn' : 'fbcRulesAdd')}
+            </button>
+          ) : rules.length === 0 && <span className="fp-muted">{t('fbcNone')}</span>}
+        </div>
       )}
     </div>
   );
 }
 
-/** A listing title (and description) checked against every item, live. */
+/** A listing title (and description) to check against every item, live; RulesPanel shows what it does. */
 // The tester sits inside the stage's settings form: Enter in it must not
 // submit, which would save the draft to every worker and start a sweep.
 const keepForm = (e: KeyboardEvent<HTMLInputElement>) => {
   if (e.key === 'Enter') e.preventDefault();
 };
 
-export function ListingTester({ stage, probe, onProbe, verdicts, onPick, editing }: {
+export function ListingTester({ stage, probe, onProbe, editing }: {
   stage: FlowStage;
   probe: Probe;
   onProbe: (p: Probe) => void;
-  verdicts: Map<string, ListingVerdict> | null;
-  onPick: (name: string) => void;
   editing: boolean;
 }) {
   const { t } = useT();
-  const say = (v: ListingVerdict) => {
-    switch (v.kind) {
-      case 'anti': return t('fbcTryAnti', { term: v.hit.term ?? '…' });
-      case 'missing': return t('fbcTryMissing');
-      case 'deferred': return v.reason === 'short' ? t('fbcTryShort', { n: String(MIN_TITLE_WORDS) }) : t('fbcTryNoPrefilter');
-      case 'pass': return v.hit?.term ? t('fbcTryPassOn', { term: v.hit.term }) : t('fbcTryPass');
-    }
-  };
   return (
     <div className={`ff-try${stage === 'title' ? ' title-only' : ''}`}>
       <span className="fp-section-label">
@@ -274,18 +330,6 @@ export function ListingTester({ stage, probe, onProbe, verdicts, onPick, editing
       {stage === 'keywords' && (
         <input className="input" value={probe.description} spellCheck={false} placeholder={t('fbcTryDescPh')}
           aria-label={t('fbcTryDescPh')} onKeyDown={keepForm} onChange={e => onProbe({ ...probe, description: e.target.value })} />
-      )}
-      {verdicts && (
-        <ul className="ff-try-out">
-          {[...verdicts].map(([name, v]) => (
-            <li key={name}>
-              <button type="button" className={`ff-try-row ${v.kind}`} onClick={() => onPick(name)}>
-                <span className="mono">{name}</span>
-                <span>{say(v)}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
       )}
     </div>
   );

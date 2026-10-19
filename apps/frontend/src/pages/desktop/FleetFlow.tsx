@@ -3,11 +3,12 @@ import { Skeleton } from '../../components/Skeleton';
 import { coordinatorApi, type FilterPrompt, type FleetDoc, type ReviewStatsDay } from '../../lib/coordinator';
 import { handleFetchError, showSuccessToast } from '../../lib/errorToast';
 import {
-  FLOW_STAGES, STAGE_FORMS, draftChanges, flowCounts, settingsDraft, settingsPatch,
+  FLOW_STAGES, STAGE_FORMS, draftChanges, flowCounts, settingsDraft, settingsPatch, utcToEastern,
   type FlowStage, type ItemField, type SearchField, type SettingsDraft,
 } from '../../lib/fleetView';
 import { useT } from '../../lib/i18n';
 import type { Translate } from '../../lib/orderPresentation';
+import { keywordCount } from '../../lib/keywordRules';
 import { confirmDiscard, useUnsavedGuard } from '../../lib/unsavedGuard';
 import { ListingTester, RulesPanel, STAGE_LISTS, probeVerdicts, type ItemRules, type Probe } from './FleetRules';
 
@@ -37,7 +38,7 @@ function stageSettings(t: Translate, stage: FlowStage, fleet: FleetDoc | null): 
   switch (stage) {
     case 'search': return [
       { label: t('fbcSetPhrases'), value: String(sum(i => i.search_phrases.length)) },
-      { label: t('fbcSetStartAt'), value: s.start_at?.length ? s.start_at.join(', ') : '—' },
+      { label: t('fbcSetStartAt'), value: s.start_at?.length ? s.start_at.map(hm => utcToEastern(hm)).join(', ') : '—' },
       { label: t('fbcSetWindow'), value: v(window) },
       { label: t('fbcSetDelivery'), value: v(s.delivery_method?.replace(/_/g, ' ')) },
       { label: t('fbcSetMaxResults'), value: v(s.max_results) },
@@ -50,7 +51,8 @@ function stageSettings(t: Translate, stage: FlowStage, fleet: FleetDoc | null): 
     ];
     case 'title': return [
       { label: t('fbcSetPrefilter'), value: s.title_prefilter == null ? '—' : s.title_prefilter ? t('fbcOn') : t('fbcOff') },
-      { label: t('fbcSetAntikeywords'), value: String(sum(i => i.antikeywords.length)) },
+      { label: t('fbcSetKeywords'), value: String(sum(i => keywordCount(i.keywords))) },
+      { label: t('fbcSetAntikeywords'), value: String(sum(i => keywordCount(i.antikeywords))) },
     ];
     case 'open': return [
       { label: t('fbcFixedPause'), value: '5 s', fixed: true },
@@ -58,8 +60,8 @@ function stageSettings(t: Translate, stage: FlowStage, fleet: FleetDoc | null): 
       { label: t('fbcFixedAffiliate'), value: t('fbcFixedSkipped'), fixed: true },
     ];
     case 'keywords': return [
-      { label: t('fbcSetKeywords'), value: String(sum(i => i.keywords.length)) },
-      { label: t('fbcSetAntikeywords'), value: String(sum(i => i.antikeywords.length)) },
+      { label: t('fbcSetKeywords'), value: String(sum(i => keywordCount(i.keywords))) },
+      { label: t('fbcSetAntikeywords'), value: String(sum(i => keywordCount(i.antikeywords))) },
       { label: t('fbcSetSellerRating'), value: s.min_seller_rating == null ? '—' : `${s.min_seller_rating} / 5` },
       { label: t('fbcSetUnrated'), value: s.exclude_unrated_sellers == null ? '—' : s.exclude_unrated_sellers ? t('fbcSetDropped') : t('fbcSetAllowed') },
     ];
@@ -104,6 +106,8 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
   const [base, setBase] = useState<SettingsDraft | null>(null);
   const [busy, setBusy] = useState(false);
   const [activeItem, setActiveItem] = useState('');
+  // The list whose "Add keyword" opened Edit, so its input has the cursor.
+  const [addFocus, setAddFocus] = useState<ItemField | null>(null);
   const [probe, setProbe] = useState<Probe>({ title: '', description: '' });
   const counts = flowCounts(Array.isArray(stats) ? stats : null);
   const fmt = useMemo(() => new Intl.NumberFormat(locale), [locale]);
@@ -135,11 +139,12 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
     });
   };
   const pick = (k: FlowStage) => { if (k !== stage) leaveEdit(() => setStage(k)); };
-  const startEdit = () => {
+  const startEdit = (focus: ItemField | null = null) => {
     if (!fleet) return;
     const d = settingsDraft(fleet, loadedPrompt);
     setBase(d);
     setDraft(d);
+    setAddFocus(focus);
   };
   const set = <K extends keyof SettingsDraft>(key: K, value: SettingsDraft[K]) =>
     setDraft(d => (d ? { ...d, [key]: value } : d));
@@ -206,20 +211,21 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
     }
   };
 
-  const extraFor = (k: FlowStage): ReactNode => {
+  // `edit` is the draft when this stage is the one being edited.
+  const extraFor = (k: FlowStage, edit: SettingsDraft | null): ReactNode => {
     const form = STAGE_FORMS[k];
-    if (draft && form?.ai) {
+    if (edit && form?.ai) {
       if (!loadedPrompt) return <span className="fp-muted">{t('fbcEditPromptUnavailable')}</span>;
       return (
         <>
           <label className="ff-edit-field">
             <span className="fp-section-label">{t('fbcPromptMain')}</span>
-            <textarea className="input ff-edit-prompt" value={draft.prompt} rows={12}
+            <textarea className="input ff-edit-prompt" value={edit.prompt} rows={12}
               onChange={e => set('prompt', e.target.value)} />
           </label>
           <label className="ff-edit-field">
             <span className="fp-section-label">{t('fbcPromptRating')}</span>
-            <textarea className="input ff-edit-prompt" value={draft.rating_prompt} rows={10}
+            <textarea className="input ff-edit-prompt" value={edit.rating_prompt} rows={10}
               onChange={e => set('rating_prompt', e.target.value)} />
           </label>
         </>
@@ -230,11 +236,11 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
       return (
         <>
           {(k === 'title' || k === 'keywords') && (
-            <ListingTester stage={k} probe={probe} onProbe={setProbe} verdicts={verdicts}
-              onPick={setActiveItem} editing={!!draft} />
+            <ListingTester stage={k} probe={probe} onProbe={setProbe} editing={!!edit} />
           )}
           <RulesPanel stage={k} items={ruleItems} active={activeItem} onActive={setActiveItem}
-            editing={!!draft} onChange={setItem} verdicts={verdicts} />
+            editing={!!edit} onChange={setItem} verdicts={verdicts} probe={probe} prefilter={prefilter}
+            focus={addFocus} onAdd={editable && fleet && !draft ? startEdit : undefined} />
         </>
       );
     }
@@ -289,12 +295,14 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
       </div>
       {/* Every stage renders into the same cell and only the picked one shows,
           so the card is always as tall as its tallest stage: picking a stage
-          never moves the page and nothing scrolls. The Edit form renders alone. */}
+          never moves the page and nothing scrolls. The Edit form takes its
+          stage's place among the rest, so opening it doesn't move it either. */}
       <form className="ff-flow-stack" onSubmit={save}>
-        {(draft ? [stage] : FLOW_STAGES).map(k => {
+        {FLOW_STAGES.map(k => {
           const form = STAGE_FORMS[k];
-          const extra = extraFor(k);
           const shown = k === stage;
+          const editing = !!draft && shown;
+          const extra = extraFor(k, editing ? draft : null);
           return (
             <div key={k} className={`ff-flow-detail${STAGE_LISTS[k] ? ' ff-flow-detail-rules' : ''}${shown ? '' : ' ff-flow-ghost'}`}
               role={shown ? 'tabpanel' : undefined} aria-hidden={!shown || undefined} {...(shown ? {} : { inert: '' })}>
@@ -305,13 +313,13 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
                   {form && !draft && (
                     <button type="button" className="btn sm ff-edit-btn" disabled={!editable || !fleet}
                       title={editable ? undefined : t('fbcSettingsReadOnly')}
-                      onClick={startEdit}>
+                      onClick={() => startEdit()}>
                       {t('fbcEditStage')}
                     </button>
                   )}
                 </div>
                 <p className="ff-flow-what">{t(`fbcFlowWhat_${k}`)}</p>
-                {draft && form ? (
+                {editing && form ? (
                   <div className="ff-edit">
                     <div className="ff-edit-grid">
                       {form.search.map(key => (

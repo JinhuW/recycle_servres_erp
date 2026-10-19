@@ -19,7 +19,12 @@ from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
 
 from . import selectors as sel
 from . import totp
-from .cookies import atomic_write_text, read_session_meta, write_session_meta
+from .cookies import (
+    atomic_write_text,
+    device_context_options,
+    read_session_meta,
+    write_session_meta,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -185,13 +190,15 @@ class PosterSession:
         # Present the same browser identity and network the session was created
         # with; Facebook treats a session that moves between them as suspect.
         meta = read_session_meta(self.storage_state_path)
+        device = {"viewport": {"width": 1440, "height": 900}}
+        device.update(device_context_options(self.storage_state_path))
+        device.setdefault("user_agent", meta.get("user_agent"))
         self._context = self._browser.new_context(
             storage_state=self.storage_state_path if has_state else None,
             proxy={"server": self.proxy or meta.get("proxy")}
             if (self.proxy or meta.get("proxy"))
             else None,
-            user_agent=meta.get("user_agent"),
-            viewport={"width": 1440, "height": 900},
+            **device,
         )
         self.page = self._context.new_page()
         # Accept dialogs rather than Playwright's default dismissal: the one

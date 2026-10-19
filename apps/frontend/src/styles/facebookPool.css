@@ -1038,26 +1038,115 @@
   grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.7fr);
 }
 .ff-rules {
+  /* Include and exclude, one colour each: the badge, the field's tint, a hit
+     and the tab counts all take it. Both inks are dark enough to carry white. */
+  --ff-inc: var(--accent-strong);
+  --ff-inc-soft: var(--pos-soft);
+  --ff-exc: color-mix(in oklch, var(--neg) 82%, black);
+  --ff-exc-soft: var(--neg-soft);
   display: flex;
   flex-direction: column;
   gap: 10px;
   min-width: 0;
 }
+/* One tab per item, picked the way a stage is picked above it. While a
+   listing is being tried, each tab also says what that item does with it. */
 .ff-rules-items {
-  align-self: flex-start;
+  display: flex;
   flex-wrap: wrap;
-}
-.ff-rules-items button {
-  display: inline-flex;
   gap: 6px;
+}
+.ff-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elev);
+  font: inherit;
+  text-align: left;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.ff-item:hover {
+  border-color: var(--border-strong);
+}
+.ff-item[aria-selected='true'] {
+  border-color: var(--fg);
+  box-shadow: 0 0 0 1px var(--fg);
+  color: var(--fg);
+}
+.ff-item-head {
+  display: inline-flex;
   align-items: baseline;
-  font-family: var(--mono, ui-monospace, monospace);
+  gap: 8px;
   font-size: 11.5px;
 }
+.ff-verdict {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 500;
+}
+.ff-verdict.inc {
+  color: var(--ff-inc);
+}
+.ff-verdict.exc {
+  color: var(--ff-exc);
+}
+.ff-verdict.open {
+  color: var(--warn-strong);
+}
+/* The tried listing, each keyword marked where the selected item's lists find it. */
+.ff-readout {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--fg);
+}
+.ff-readout p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.ff-readout .ff-readout-desc {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.ff-mark {
+  padding: 1px 3px;
+  margin: 0 -1px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+.ff-mark.inc {
+  background: color-mix(in oklch, var(--ff-inc) 18%, transparent);
+  color: var(--ff-inc);
+}
+.ff-mark.exc {
+  background: color-mix(in oklch, var(--ff-exc) 15%, transparent);
+  color: var(--ff-exc);
+}
 .ff-rules-count {
+  display: inline-flex;
+  gap: 5px;
   font-size: 10.5px;
   font-variant-numeric: tabular-nums;
   color: var(--fg-subtle);
+}
+.ff-n.inc {
+  color: var(--ff-inc);
+}
+.ff-n.exc {
+  color: var(--ff-exc);
 }
 .ff-rules-cols {
   display: grid;
@@ -1070,13 +1159,43 @@
 .ff-rule-list {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 6px;
   min-width: 0;
+}
+.ff-rule-list.inc {
+  --ff-pol: var(--ff-inc);
+  --ff-pol-soft: var(--ff-inc-soft);
+}
+.ff-rule-list.exc {
+  --ff-pol: var(--ff-exc);
+  --ff-pol-soft: var(--ff-exc-soft);
+}
+/* A list this stage does not read right now: still there to edit. */
+.ff-rule-list.idle .ff-pol-badge,
+.ff-rule-list.idle .ff-rule-well:not(:focus-within) {
+  opacity: 0.5;
 }
 .ff-rule-list-head {
   display: flex;
-  align-items: baseline;
-  gap: 6px;
+  align-items: center;
+  gap: 7px;
+}
+.ff-pol-badge {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: var(--ff-pol);
+  color: var(--accent-fg);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+.ff-rule-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
 }
 .ff-rule-hint {
   font-size: 11px;
@@ -1095,6 +1214,41 @@
 .ff-rule-mode:hover {
   text-decoration: underline;
 }
+/* The list as one field: white chips on its colour's tint, and in edit mode
+   the input trails the last chip, as in any tag field. */
+.ff-rule-well {
+  --ff-chip-bg: var(--bg-elev);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  min-height: 38px;
+  padding: 7px;
+  border: 1px solid color-mix(in oklch, var(--ff-pol, var(--border-strong)) 22%, var(--border));
+  border-radius: 9px;
+  background: color-mix(in oklch, var(--ff-pol-soft, var(--bg-soft)) 60%, var(--bg-elev));
+}
+.ff-rule-well.editing {
+  cursor: text;
+}
+.ff-rule-well:has(> .ff-well-input:focus) {
+  border-color: var(--ff-pol, var(--accent-strong));
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--ff-pol, var(--accent-strong)) 16%, transparent);
+}
+.ff-well-input {
+  flex: 1 0 132px;
+  height: 24px;
+  padding: 0 4px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  color: var(--fg);
+}
+.ff-well-input::placeholder {
+  color: var(--fg-subtle);
+}
 .ff-chips {
   display: flex;
   flex-wrap: wrap;
@@ -1108,7 +1262,7 @@
   padding: 2px 8px;
   border: 1px solid var(--border);
   border-radius: 999px;
-  background: var(--bg-soft);
+  background: var(--ff-chip-bg, var(--bg-soft));
   font-size: 11.5px;
   color: var(--fg);
   overflow-wrap: anywhere;
@@ -1118,14 +1272,27 @@
   background: var(--warn-soft);
   color: var(--warn-strong);
 }
+/* An include keyword the exclude list also holds: the exclude always wins. */
+.ff-chip.blocked {
+  border-style: dashed;
+  color: var(--fg-subtle);
+  text-decoration: line-through;
+  text-decoration-color: var(--ff-exc);
+}
 .ff-chip.hit {
-  border-color: var(--accent-strong);
-  background: var(--accent-soft);
-  color: var(--accent-strong);
+  border-color: var(--ff-pol, var(--accent-strong));
+  background: var(--ff-pol, var(--accent-strong));
+  color: var(--accent-fg);
   font-weight: 600;
 }
-.ff-chip-x,
-.ff-chip-add {
+.ff-chip.hit .ff-expr-text {
+  color: inherit;
+}
+.ff-chip.hit .ff-expr-tag {
+  background: transparent;
+  color: inherit;
+}
+.ff-chip-x {
   display: inline-grid;
   place-items: center;
   width: 16px;
@@ -1142,13 +1309,58 @@
   background: var(--neg-soft);
   color: var(--neg);
 }
-.ff-chip-add {
-  margin: 0;
-  border: 1px dashed var(--border-strong, var(--border));
+/* In a list's field the × is a badge on the chip's corner, out of the flow:
+   opening Edit must not widen a chip, or the field rewraps, grows a row and
+   moves every chip after it. It shows on hover and on keyboard focus. */
+.ff-rule-well .ff-chip {
+  position: relative;
+  min-height: 24px;
 }
-.ff-chip-add:hover {
-  color: var(--fg);
+.ff-rule-well .ff-chip-x {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  z-index: 1;
+  margin: 0;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elev);
+  color: var(--fg-muted);
+  opacity: 0;
+  pointer-events: none;
+}
+.ff-rule-well .ff-chip:hover > .ff-chip-x,
+.ff-rule-well .ff-chip-x:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.ff-rule-well .ff-chip-x:hover {
+  border-color: var(--neg);
+  background: var(--neg-soft);
+  color: var(--neg);
+}
+.ff-rule-well.editing .ff-chip:hover {
+  border-color: color-mix(in srgb, var(--neg) 55%, var(--border));
+}
+/* "Add keyword" and the input that replaces it in Edit take the same slot, so
+   the last row wraps the same way in both. */
+.ff-chip-new {
+  flex: 0 0 132px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 9px 0 7px;
+  border: 1px dashed color-mix(in oklch, var(--ff-pol, var(--fg-subtle)) 50%, transparent);
+  border-radius: 999px;
+  background: transparent;
+  font-size: 11.5px;
+  color: var(--ff-pol, var(--fg-muted));
+  cursor: pointer;
+}
+.ff-chip-new:hover {
   border-style: solid;
+  background: var(--bg-elev);
 }
 .ff-chip-input {
   width: 160px;
@@ -1156,39 +1368,15 @@
   padding: 2px 8px;
   font-size: 11.5px;
 }
-.ff-rule-group,
-.ff-rule-expr {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 5px 4px;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-.ff-rule-group.hit,
-.ff-rule-expr.hit {
-  border-color: var(--accent-strong);
-}
-.ff-rule-or {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  max-width: 100%;
-}
-.ff-or {
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--fg-subtle);
+.ff-chip-expr {
+  gap: 6px;
+  border-radius: 7px;
 }
 .ff-expr-tag {
   padding: 0 5px;
   border-radius: 4px;
   background: var(--bg-soft);
   font-size: 10px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   color: var(--fg-subtle);
 }
 .ff-expr-text {
@@ -1205,11 +1393,6 @@
 }
 button.ff-expr-text {
   cursor: text;
-}
-.ff-rule-add {
-  min-height: 0;
-  padding: 5px 9px;
-  font-size: 12px;
 }
 /* Try a listing: on top of the lists it lights up */
 .ff-try {
@@ -1232,45 +1415,7 @@ button.ff-expr-text {
   font-size: 12px;
 }
 .ff-try-draft {
-  font-size: 11px;
   color: var(--warn-strong);
-}
-.ff-try-out {
-  grid-column: 1 / -1;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.ff-try-row {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-  padding: 4px 8px;
-  border: 0;
-  border-left: 3px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg-soft);
-  text-align: left;
-  font-size: 12px;
-  color: var(--fg);
-  cursor: pointer;
-}
-.ff-try-row .mono {
-  font-size: 11px;
-  color: var(--fg-muted);
-}
-.ff-try-row.pass {
-  border-left-color: var(--pos);
-}
-.ff-try-row.anti,
-.ff-try-row.missing {
-  border-left-color: var(--neg);
-}
-.ff-try-row.deferred {
-  border-left-color: var(--warn);
 }
 .ff-prompt {
   margin: 0;
@@ -1556,4 +1701,235 @@ button.ff-expr-text {
 }
 .fp-copy-cell.fp-masked {
   color: var(--fg-subtle);
+}
+
+/* ── Reddit tracker (rt-*): DesktopTracker.tsx in the fleet's chrome ── */
+/* A note in the log has no dot; as a grid item it would take the dot's column. */
+.fp-log li.rt-note {
+  display: block;
+}
+.rt-match {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: var(--fg);
+  font-weight: 550;
+  text-decoration: none;
+}
+.rt-match:hover {
+  color: var(--accent-strong);
+  text-decoration: underline;
+}
+.rt-match-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.rt-match-meta b {
+  color: var(--accent-strong);
+  font-variant-numeric: tabular-nums;
+}
+.rt-panel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-elev);
+}
+.rt-panel > .fp-empty {
+  padding: 22px 16px !important;
+}
+.rt-rule {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+}
+.rt-rule:first-child {
+  border-top: 0;
+}
+.rt-rule-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+}
+.rt-rule-text p {
+  margin: 2px 0 0;
+  max-width: 75ch;
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.rt-off .rt-rule-text,
+tr.rt-off td:not(:nth-last-child(-n + 2)) {
+  opacity: 0.55;
+}
+.rt-help {
+  font-size: 11px;
+  line-height: 1.5;
+}
+.rt-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-soft);
+}
+.rt-add-name {
+  position: relative;
+  flex: 1 1 180px;
+  max-width: 260px;
+}
+.rt-add-name > .input {
+  width: 100%;
+  padding-left: 26px;
+}
+.rt-prefix {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--fg-subtle);
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px;
+  pointer-events: none;
+}
+.rt-add-interval {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.rt-add-interval > .input {
+  width: 64px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.rt-add-error {
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--neg-soft);
+  color: var(--neg);
+  font-size: 12px;
+}
+.rt-failed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 12px;
+}
+.rt-failed li {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* Which prompt is better (TrackerPrompts.tsx) */
+.rt-prompts-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.rt-trial {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rt-trial-verdict {
+  margin: 0;
+  max-width: 80ch;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.rt-trial-warn {
+  margin: 0;
+  font-size: 12px;
+  color: var(--warn-strong);
+}
+/* Live's verdict down the side, the candidate's across the top. */
+.rt-trial-grid {
+  display: grid;
+  grid-template-columns: max-content repeat(2, minmax(0, 260px));
+  gap: 6px;
+  align-items: stretch;
+}
+.rt-trial-axis {
+  align-self: end;
+  font-size: 11px;
+  font-weight: 550;
+  color: var(--fg-muted);
+}
+.rt-trial-side {
+  align-self: center;
+  padding-right: 6px;
+}
+.rt-trial-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elev);
+}
+.rt-trial-cell b {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+/* The two cells where the prompts disagree are the ones a promotion changes. */
+.rt-trial-liveOnly {
+  background: var(--neg-soft);
+}
+.rt-trial-candidateOnly {
+  background: var(--pos-soft);
+}
+.rt-trial-what,
+.rt-trial-counts {
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.rt-trial-counts {
+  font-variant-numeric: tabular-nums;
+}
+.rt-version-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.rt-versions tr.rt-retired td {
+  opacity: 0.55;
+}
+.rt-version {
+  gap: 4px;
+  padding-left: 4px;
+}
+.rt-model {
+  font-size: 11px;
+}
+.rt-version-prompt pre {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--fg-muted);
+}
+.rt-prompts-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }

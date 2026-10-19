@@ -18,6 +18,295 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.12.5] - 2026-10-18
+
+### Added
+
+- **A worker can be logged in from a pool account's cookie, no password**
+  (RS-308). An account the business buys often comes with a live Facebook
+  cookie, and forcing a password login on assign — a fresh login and 2FA from
+  the worker's datacenter IP — is the harshest signal to Facebook there is.
+  The ERP's cookie-first Assign now seals that cookie as the slot's session
+  snapshot through the new admin route `PUT /v1/workers/{id}/session`: the
+  coordinator validates it (`cookies.py` reads a browser cookie header, a
+  cookie-extension JSON export, or a flat `{name: value}` object; `c_user` and
+  `xs` are required), refuses a cookie whose `c_user` is not the account's
+  `fb_uid`, and files it under that account's `identity_key` so only this login
+  can restore it. A new `restore` directive (queued by
+  `POST /v1/workers/{id}/restore-session`, the gentle counterpart to
+  `relogin`) tells the worker to run an ordinary, unforced login: it restores
+  the seeded session and reaches Marketplace with no password and no 2FA,
+  landing on the account's own device (RS-293). The password login stays as
+  the fallback when there is nothing to restore. The seed is audited as a
+  `session` disclosure, alongside code and credential releases. rs_console
+  forwards both routes, field-sanitised; a coordinator without them answers
+  404, which the console passes through, so the ERP degrades to the password
+  path rather than breaking.
+
+- **The coordinator keeps a log of worker status changes** (RS-300). A
+  worker's row is overwritten by every heartbeat and its liveness is derived
+  on read, so nothing remembered that wc-1 went from HEALTHY to
+  SESSION_EXPIRED, or that ne-1 was silent for six hours and came back. The
+  new `worker_status_events` table records each change of reported `state`
+  and each live → stale → dead → live crossing. A crossing is stamped when
+  it happened (last heartbeat + 2 h or + 6 h, or the beat that revived it),
+  so a gap the ten-minute sweep never saw is still dated right once the next
+  beat fills it in. The heartbeat, the listing upload (which stamps the
+  heartbeat too) and the liveness sweep all write to it. Rows that predate
+  the log take a silent baseline, so the deploy does not list every worker,
+  and a retired worker's silence is never logged. `GET
+  /v1/stats/status-changes` serves the log, and rs_console puts the week's
+  changes in `/v1/fleet` as `status_changes`, which the ERP's Recent
+  activity lists. The log is pruned to 30 days. The new table and the
+  `workers.logged_liveness` column are added on start, as before.
+
+### Fixed
+
+- **The worker's VNC view shows the browser, not the whole display** (RS-295).
+  Since 0.11.0, the X display has been 1920x1080 so that any device profile's
+  screen fits, but Chromium opens a window only as large as its context's
+  viewport plus toolbars, which is about 1288x807 for a legacy device. VNC
+  served the whole display, so the ERP's watch page showed the browser in one
+  corner of a black frame and scaled both down, which left a CAPTCHA hard to
+  read. Each new browser context now crops x11vnc to its own window
+  (`x11vnc -R clip:…`), and viewers that are already connected resize live.
+  Xvfb itself cannot shrink: RandR on Xvfb 21 rejects a smaller screen.
+
+## [0.12.2] - 2026-10-18
+
+### Added
+
+- **Every login records the device it was made on.** A worker opens a row in
+  the coordinator's new `login_attempts` ledger when it starts a login, naming
+  the account's device and a fingerprint of the `datr` its browser presents
+  (never the cookie). It closes the row with the outcome: restored,
+  password_ok, watch_ok, challenge, locked or failed. A login that starts on a
+  `datr` the account's device profile does not hold pages ops before it goes
+  further. `rsc vault logins` and `GET /v1/logins` show the ledger.
+- **A new account starts on its legacy device.** The ERP's Assign now sends
+  the pool cookie's `datr`/`sb` (never `c_user`/`xs`/`fr`). The console passes
+  only those two cookies through, and `PUT /v1/accounts` seeds the account's
+  device profile with them when it has none. The worker's first sign-in is
+  then the account's own machine on a new IP, not a stranger.
+
+### Changed
+
+- **Automated password logins are capped and stop on a lock.**
+  `/v1/auth/credentials` refuses an account that has had 2 password releases
+  in 24 h (`RS_PASSWORD_LOGINS_PER_DAY`), or that Facebook has locked. The
+  worker then parks for Watch, as it does without credentials. Facebook's
+  "we locked your account" page is its own challenge kind (`locked`); a login
+  that ends there, or a `locked` escalation, marks the account locked and
+  pages ops until `rsc vault unlock <account>`. With `RS_REQUIRE_FB_UID=1` an
+  account without a Facebook uid, and so without a device profile, gets no
+  password at all; the coordinator warns at startup about any such account.
+  All of this follows va-1 on 2026-10-18: four password logins in 37
+  minutes, each from a new `datr`, locked as possibly hacked.
+
+## [0.12.1] - 2026-10-18
+
+### Added
+
+- **A deploy can hold workers back** (`RS_DEPLOY_HOLD`, container names). A
+  held compose worker is not recreated and keeps its current image, and the
+  deploy's verify and Telegram note name it as held. This is for the worker
+  whose restart would cost something: a login held only in memory until its
+  next sweep, or a locked account that would retry its password from a fresh
+  browser (va-1, 2026-10-18).
+
+## [0.12.0] - 2026-10-18
+
+### Added
+
+- **The fleet scales itself and rolls new versions out one worker at a time**
+  (RS-292). A new host agent, `rs_fleetd/`, runs on each Docker host and
+  turns the coordinator's desired state into containers (`rs-worker-<id>`).
+  - **Scaling:** the coordinator (`fleet.py`) keeps one worker per ready slot:
+    a vault account the fleet is enabled for (`rsc fleet enable`), with a
+    published config. It places the slot on the live, uncordoned host with
+    the most room, and placement is sticky. `rsc fleet disable` stops a
+    worker and keeps its `/data`. Nothing ever moves on its own;
+    `rsc fleet move` is an operator's call, and it waits for the old host to
+    stop the container first.
+  - **Rolling releases:** `rsc fleet release <version>` recreates one worker at
+    a time. The next waits until the current one heartbeats on the new
+    version in a state no worse than before. A worker that has not come back
+    within 20 minutes goes back to its previous image and the release stops,
+    with an ops note; the rest keep running what they ran. Rolling back is
+    releasing the previous version.
+  - **Independence:** an agent that cannot reach the coordinator keeps the
+    workers it last knew about, starts nothing new and removes nothing. The
+    workers never depend on the agent.
+  - **Trust:** a new host registers itself observe-only. It reports its plan
+    (`rsc fleet hosts`, `rsc fleet state`) and applies nothing until it is
+    made authoritative. Agents authenticate with their own host tokens
+    (`rsc mint-host-token`), kept apart from the `secrets.env` every worker
+    reads. They mint each worker's control-plane token, so the hand-written
+    `secrets.homelab-*.env` files are no longer needed.
+- **Worker configs for fleet workers live in the coordinator**
+  (`/v1/fleet/configs`). The console renders and writes them exactly like a
+  mounted config, so the ERP's settings and city edits reach fleet workers.
+  `python -m rs_console.settings publish <worker>` hands a compose worker's
+  config to the fleet. The console's Watch reaches fleet workers through the
+  fleet's assignments.
+- **A second worker host on the LAN.** Two opt-in compose files:
+  `deploy/docker-compose.coordinator-lan.yml` publishes the coordinator on
+  the VM's LAN address, and `deploy/docker-compose.registry.yml` is a private
+  registry that `deploy.sh` pushes each release image to
+  (`RS_REGISTRY=10.10.10.73:5000`).
+
+### Changed
+
+- **`scripts/deploy.sh` releases through the agent once the VM runs one.** It
+  tags the worker image with its version, rebuilds `rs-fleetd`, starts
+  `rsc fleet release`, and never recreates a compose worker again: an adopted
+  worker would otherwise end up with its session in two browsers. Until
+  then it recreates the compose workers as before.
+- **`scripts/release.sh` runs the console's and the agent's suites too**, and
+  bumps `rs_fleetd`'s version with the others.
+- **Heartbeats name the worker's host** (`host_id`), and a worker the fleet
+  stopped on purpose is not paged as dead (`retired_at`).
+
+## [0.11.1] - 2026-10-18
+
+### Fixed
+
+- **An account keeps one device from its first Facebook page, not from its
+  first successful login** (RS-292). A device's `datr`/`sb` used to be learned
+  only from a logged-in save, so an account that had not yet finished a login
+  met Facebook as a new machine on every attempt. On 2026-10-18 va-1 made six
+  attempts with six fresh `datr`, and Facebook locked the account as hacked.
+  Now, as soon as the first Facebook page loads and before any credentials
+  are typed, a worker whose device has no cookies yet keeps the ones
+  Facebook issued and reports them
+  (`POST /v1/workers/{id}/identity/device-cookies`). The coordinator keeps
+  the first worker's (first writer wins), and every later attempt, on any
+  worker, presents them. A logged-in session still keeps them current.
+
+## [0.11.0] - 2026-10-18
+
+### Added
+
+- **Every Facebook account keeps one device for good** (RS-292). The
+  coordinator now keeps a device profile per account (`device_profiles`, keyed
+  by the account's uid): the user agent or "the browser's own", screen,
+  viewport, scale, locale, timezone, and the account's `datr`/`sb` cookies,
+  sealed with the vault key. A worker asks for its account's device before
+  each login, caches it in `/data/identity.json`, and opens every browser
+  with it. A restart, a rebuilt VM or the account moving to another worker
+  now shows Facebook the same machine, and no two accounts ever share one. A
+  worker that is already logged in joins without anything visible changing:
+  its account's first profile copies what its browser presents. The poster
+  and messenger present the same cached device. `rsc identity list` prints the
+  profiles.
+- **A worker with a device restores a newer session, not only a missing
+  one.** 0.10.5 refills a session file that holds nothing. A worker whose
+  account has a device also replaces a file older than the coordinator's
+  snapshot, which is what a worker moved to another host, or back, finds.
+- **Vault accounts carry the Facebook uid** (`fb_uid`). The console passes it
+  through from the ERP, and `rsc vault set-account --fb-uid` sets it by hand.
+  A new login written without a uid clears it.
+
+### Changed
+
+- **A new login on a worker sets the previous session aside.** Before, a
+  re-login after the ERP swapped accounts kept the old login's `datr`/`sb`, so
+  the new account signed in from the old one's device. Now the old session is
+  moved to `fb_state.json.<time>.previous-login`, never deleted, and the new
+  account signs in carrying its own device cookies.
+- **The coordinator only hands back a snapshot of the account's own login.**
+  Once a worker's account has a uid, `GET /v1/session/{worker}/restore`
+  answers 409 for a snapshot taken under another account's device, or of
+  another uid's session. That is the snapshot a swapped worker still has on
+  file until the new login's first save. A worker whose account has no uid
+  restores as in 0.10.5.
+- **`scripts/deploy.sh` ships the whole fleet.** It rebuilds the coordinator
+  and recreates every `homelab*` worker one at a time, 20 s apart. Before, only
+  `rs-monitor` was recreated, and the other nine ran whatever image they were
+  last started from. `scripts/deploy.sh check` verifies every worker's code
+  and the coordinator's version.
+- **The worker's X display is 1920x1080**, so that any device profile's screen
+  fits. Each context still presents its own account's screen and viewport.
+
+### Upgrading
+
+- The first deploy changes nothing that Facebook can see. Devices exist only
+  for accounts with a uid. Accounts assigned from the ERP after its next
+  release get one with the login. For the accounts already on workers, run
+  `rsc identity learn-uids` on the VM, check each uid against the ERP's
+  pool, then run it again with `--apply`.
+
+## [0.10.6] - 2026-10-18
+
+### Fixed
+
+- **The coordinator refuses a session backup that holds no session.** A
+  worker that backed up a logged-out jar replaced its last good snapshot, the
+  copy 0.10.5 restores from. va-2 (0.8.0) did exactly that on 2026-10-17. The
+  backup endpoint now answers 422 when the storage_state has no `xs` cookie and
+  keeps the snapshot it has.
+
+## [0.10.5] - 2026-10-18
+
+### Fixed
+
+- **A saved session survives a restart of any kind.** Each save is now
+  fsynced, with its directory, before the rename is trusted, so a power cut
+  cannot leave the session file pointing at data that never reached the disk.
+  A worker gets 30 s to stop instead of Docker's 10 (`stop_grace_period`, and
+  supervisord's `stopwaitsecs` 25), so the SIGTERM save that 0.10.3 added is
+  not cut short by a slow browser.
+- **A worker whose session file is missing or empty restores its own backup.**
+  Every save was already backed up to the coordinator's database, encrypted
+  with the vault key, but nothing read it back. At login the worker now
+  fetches its snapshot (`GET /v1/session/{worker}/restore`, which releases it
+  only to that worker's own token) and starts from it. A file that holds a
+  session is never replaced, and a forced Re-login skips the restore.
+
+## [0.10.4] - 2026-10-18
+
+### Fixed
+
+- **A login finished over Watch is picked up between sweeps.** 0.10.3's
+  minute-by-minute session check never saw it: the worker read the page's URL
+  before asking the browser anything, and Playwright only refreshes that URL
+  while a call is running. An idle worker therefore kept seeing the 2FA page its
+  password login had given up on, and read the session as logged out. The check
+  now asks for the cookies first, which brings the URL up to date (va-1,
+  2026-10-18).
+
+## [0.10.3] - 2026-10-17
+
+### Fixed
+
+- **A worker's session status and saved session follow the browser between
+  sweeps, not at the next one** (RS-289). Before, a worker learned about its
+  Facebook login only at a sweep, at a login or on a parked page. On
+  2026-10-17 va-2's password login timed out without parking, and the
+  operator finished it over Watch. The fleet page then read "Session
+  expired", with an empty session file, for 13 hours. Now the idle worker
+  checks its login every minute. A logged-in browser is saved, backed up and
+  reported healthy within about a minute, and a session that lapses overnight
+  is reported expired just as fast instead of reading healthy until morning.
+- **A session is no longer lost to a restart.** An idle, logged-in worker
+  re-saves and backs up its session every 30 minutes. A redeploy or
+  `docker stop` now saves the live session before the monitor exits. Before,
+  SIGTERM killed the monitor outright, and everything since the last sweep
+  was lost. A logged-out browser still never overwrites a good session file.
+
+## [0.10.2] - 2026-10-17
+
+### Changed
+
+- **The console's fleet dashboard shows where each proxy comes out.** The
+  account table's Proxy column and a worker's detail row showed only the env
+  var name (`$PROXY_HOMELAB_NE`). They now show what `/v1/fleet` has carried
+  since 0.10.0: the proxy's host and port without the login, and its exit
+  city, with the exit IP and ISP on hover. The detail row spells out
+  `IP · City, Region, Country`, or says the lookup is still running or
+  failed. A worker without a proxy shows "own IP" and the VM's own exit
+  city. Search matches the proxy host, exit IP and city too (RS-288).
+
 ## [0.10.1] - 2026-10-17
 
 ### Fixed

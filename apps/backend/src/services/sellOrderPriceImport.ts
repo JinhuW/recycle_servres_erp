@@ -213,10 +213,12 @@ function findHeaders(wb: ExcelJS.Workbook): HeaderHit[] {
 }
 
 // A currency a header, cell, number format or tab names — parsePrice strips
-// the yuan marks without a trace. Harmless on a bid sheet, whose order names
-// the currency; the USD-only Market board has to refuse anything but dollars.
-// Dollars named outright win, or 美元 (US dollar) would read as its 元.
-const USD_MARK = /(?<![a-z])usd(?![a-z])|us\$|美元|美金/i;
+// the marks without a trace. Harmless on a bid sheet, whose order names the
+// currency; the Market import reads dollars and yuan and refuses the rest.
+// Dollars named outright win, or 美元 (US dollar) would read as its 元. A bare
+// $ is dollars unless a letter (HK$, C$) or a [ — Excel's [$€-407] locale
+// syntax in a number format — sits before it.
+const USD_MARK = /(?<![a-z])usd(?![a-z])|us\$|美元|美金|(?<![a-z[])\$/i;
 const CURRENCY_MARKS: readonly (readonly [RegExp, string])[] = [
   [/(?<![a-z])hkd(?![a-z])|hk\$|港元|港币/i, 'HKD'],
   [/(?<![a-z])eur(?![a-z])|€|欧元/i, 'EUR'],
@@ -242,7 +244,7 @@ export type SheetPriceRow = {
   price: number | null;
   priceKind: ParsedPrice['kind'];
   rawPrice: string;
-  /** A currency other than US dollars the row is marked in, or null. */
+  /** The currency the row is marked in, or null when nothing names one. */
   currency: string | null;
   /** The row's Condition cell, read only when asked for and present. */
   condition?: string | null;
@@ -286,7 +288,7 @@ export function readPriceSheetRows(
         price: price.kind === 'ok' ? price.value : null,
         priceKind: price.kind,
         rawPrice,
-        currency: currency === 'USD' ? null : currency,
+        currency,
         ...(opts.condition
           ? { condition: cols.conditionCol ? cellText(row.getCell(cols.conditionCol).value).trim() || null : null }
           : {}),

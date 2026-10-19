@@ -54,6 +54,34 @@ def verify_worker_token(token: str | None, secret: str | None = None) -> Optiona
     return worker_id if hmac.compare_digest(provided, expected) else None
 
 
+# Host tokens are signed over this prefix, so no signature made for a worker id
+# can ever verify as a host's, or the reverse, though both use one secret.
+HOST_TOKEN_PREFIX = "host."
+_HOST_DOMAIN = b"rs-fleet-host\x00"
+
+
+def mint_host_token(host_id: str, secret: str | None = None) -> str:
+    """The bearer token of a Docker host's fleet agent (rs-fleetd)."""
+    if not host_id or "." in host_id:
+        raise TokenError("host_id must be non-empty and contain no '.'")
+    signature = hmac.new(_secret(secret), _HOST_DOMAIN + host_id.encode(), hashlib.sha256)
+    return f"{HOST_TOKEN_PREFIX}{host_id}.{signature.hexdigest()}"
+
+
+def verify_host_token(token: str | None, secret: str | None = None) -> Optional[str]:
+    """Return the host id a token authenticates, or None."""
+    if not token or not token.startswith(HOST_TOKEN_PREFIX):
+        return None
+    host_id, _, provided = token[len(HOST_TOKEN_PREFIX) :].rpartition(".")
+    if not host_id or "." in host_id:
+        return None
+    try:
+        expected = hmac.new(_secret(secret), _HOST_DOMAIN + host_id.encode(), hashlib.sha256)
+    except TokenError:
+        return None
+    return host_id if hmac.compare_digest(provided, expected.hexdigest()) else None
+
+
 def generate_secret() -> str:
     """A fresh HMAC secret, for first-time setup."""
     return secrets.token_hex(32)

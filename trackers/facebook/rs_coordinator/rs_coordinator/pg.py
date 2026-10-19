@@ -29,10 +29,12 @@ import os
 import re
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Sequence
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from .db import (
+    ACCOUNT_EXTRA_COLUMNS,
+    ACCOUNT_LOCK_COLUMNS,
     ALERT_HIT_SQL,
     LISTING_EXTRA_COLUMNS,
     OUTBOUND_EXTRA_COLUMNS,
@@ -42,6 +44,7 @@ from .db import (
     SCHEMA,
     SEARCH_CYCLE_DAYS,
     SNAPSHOT_EXTRA_COLUMNS,
+    STATUS_EVENT_DAYS,
     THREAD_EXTRA_COLUMNS,
     UNMATCHED_REACTIONS_SQL,
     WORKER_HEALTH_COLUMNS,
@@ -198,6 +201,8 @@ class PostgresDatabase:
                 self._migrate_columns(conn, "outbound_messages", OUTBOUND_EXTRA_COLUMNS)
                 self._migrate_columns(conn, "session_snapshots", SNAPSHOT_EXTRA_COLUMNS)
                 self._migrate_columns(conn, "review_stats", REVIEW_STATS_EXTRA_COLUMNS)
+                self._migrate_columns(conn, "accounts", ACCOUNT_EXTRA_COLUMNS)
+                self._migrate_columns(conn, "accounts", ACCOUNT_LOCK_COLUMNS)
                 # Created after the migration adds the columns they index.
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_threads_room ON threads(matrix_room_id)"
@@ -650,6 +655,26 @@ class PostgresDatabase:
             )
             return cur.rowcount > 0
 
+    def request_restore(self: "PostgresDatabase", worker_id: str) -> None:
+        """Flag a worker to restore its seeded session on its next directive poll."""
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO workers (worker_id, restore_requested_at) VALUES (%s, %s) "
+                "ON CONFLICT(worker_id) DO UPDATE "
+                "SET restore_requested_at = excluded.restore_requested_at",
+                (worker_id, utcnow()),
+            )
+
+    def take_restore(self: "PostgresDatabase", worker_id: str) -> bool:
+        """Consume a pending restore request, returning whether one was set."""
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE workers SET restore_requested_at = NULL "
+                "WHERE worker_id = %s AND restore_requested_at IS NOT NULL",
+                (worker_id,),
+            )
+            return cur.rowcount > 0
+
     # -- review stats ------------------------------------------------------
 
     def add_review_stats(
@@ -715,6 +740,43 @@ class PostgresDatabase:
             cur.execute(
                 "SELECT worker_id, at, item FROM search_cycles WHERE at >= %s ORDER BY at",
                 (since,),
+            )
+            return _rows(cur.fetchall())
+
+    # -- worker status events ----------------------------------------------
+
+    def log_status_changes(
+        self: "PostgresDatabase",
+        worker_id: str,
+        changes: Sequence[Sequence[Optional[str]]],
+        logged_liveness: Optional[str],
+    ) -> None:
+        """See `Database.log_status_changes`."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=STATUS_EVENT_DAYS)).isoformat(
+            timespec="seconds"
+        )
+        with self.cursor() as cur:
+            for at, kind, was, became in changes:
+                cur.execute(
+                    "INSERT INTO worker_status_events (worker_id, at, kind, was, became) "
+                    "VALUES (%s, %s, %s, %s, %s)",
+                    (worker_id, at, kind, was, became),
+                )
+            cur.execute(
+                "UPDATE workers SET logged_liveness = %s WHERE worker_id = %s",
+                (logged_liveness, worker_id),
+            )
+            if changes:
+                cur.execute("DELETE FROM worker_status_events WHERE at < %s", (cutoff,))
+
+    def status_events_since(
+        self: "PostgresDatabase", since: str, limit: int
+    ) -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT worker_id, at, kind, was, became FROM worker_status_events "
+                "WHERE at >= %s ORDER BY at DESC, id DESC LIMIT %s",
+                (since, limit),
             )
             return _rows(cur.fetchall())
 
@@ -921,8 +983,10 @@ class PostgresDatabase:
         """Non-secret account fields only — never returns secret_blob."""
         with self.cursor() as cur:
             cur.execute(
-                "SELECT account_id, worker_id, fb_username, region, proxy, vnc_url, "
-                "allow_password_login, created_at, updated_at FROM accounts ORDER BY account_id"
+                "SELECT account_id, worker_id, fb_username, fb_uid, region, proxy, vnc_url, "
+                "allow_password_login, fleet_enabled, pin_host, locked_at, locked_reason, "
+                "created_at, updated_at "
+                "FROM accounts ORDER BY account_id"
             )
             return _rows(cur.fetchall())
 
@@ -1010,7 +1074,283 @@ class PostgresDatabase:
             row = cur.fetchone()
         return _row(row)
 
+    # -- device profiles ---------------------------------------------------
+
+    def get_device_profile(
+        self: "PostgresDatabase", identity_key: str
+    ) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM device_profiles WHERE identity_key = %s", (identity_key,))
+            row = cur.fetchone()
+        return _row(row)
+
+    def device_profile_by_device(
+        self: "PostgresDatabase", device_id: str
+    ) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM device_profiles WHERE device_id = %s", (device_id,))
+            row = cur.fetchone()
+        return _row(row)
+
+    def insert_device_profile(self: "PostgresDatabase", record: Dict[str, Any]) -> bool:
+        now = utcnow()
+        record = {"created_at": now, "updated_at": now, **record}
+        columns = ", ".join(record)
+        placeholders = ", ".join(["%s"] * len(record))
+        with self.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO device_profiles ({columns}) VALUES ({placeholders}) "
+                "ON CONFLICT(identity_key) DO NOTHING",
+                tuple(record.values()),
+            )
+            return cur.rowcount > 0
+
+    def update_device_profile(
+        self: "PostgresDatabase", identity_key: str, fields: Dict[str, Any]
+    ) -> None:
+        if not fields:
+            return
+        record = {**fields, "updated_at": utcnow()}
+        assignments = ", ".join(f"{name} = %s" for name in record)
+        with self.cursor() as cur:
+            cur.execute(
+                f"UPDATE device_profiles SET {assignments} WHERE identity_key = %s",
+                (*record.values(), identity_key),
+            )
+
+    def claim_device_cookies(self: "PostgresDatabase", identity_key: str, blob: bytes) -> bool:
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE device_profiles SET device_cookies_blob = %s, updated_at = %s "
+                "WHERE identity_key = %s AND device_cookies_blob IS NULL",
+                (blob, utcnow(), identity_key),
+            )
+            return cur.rowcount > 0
+
+    def rekey_device_profile(self: "PostgresDatabase", old_key: str, new_key: str) -> bool:
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE device_profiles SET identity_key = %s, updated_at = %s "
+                "WHERE identity_key = %s AND NOT EXISTS "
+                "(SELECT 1 FROM device_profiles WHERE identity_key = %s)",
+                (new_key, utcnow(), old_key, new_key),
+            )
+            return cur.rowcount > 0
+
+    def list_device_profiles(self: "PostgresDatabase") -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT identity_key, device_id, fb_uid, user_agent, viewport_w, viewport_h, "
+                "screen_w, screen_h, device_scale_factor, locale, timezone_id, source, "
+                "CASE WHEN device_cookies_blob IS NULL THEN 0 ELSE 1 END AS has_device_cookies, "
+                "created_at, updated_at "
+                "FROM device_profiles ORDER BY identity_key"
+            )
+            return _rows(cur.fetchall())
+
+    # -- fleet -------------------------------------------------------------
+
+    def upsert_fleet_host(
+        self: "PostgresDatabase", host_id: str, fields: Dict[str, Any]
+    ) -> None:
+        record = {"host_id": host_id, **fields}
+        columns = ", ".join([*record, "created_at"])
+        placeholders = ", ".join(["%s"] * (len(record) + 1))
+        assignments = ", ".join(f"{name} = excluded.{name}" for name in fields)
+        conflict = f"DO UPDATE SET {assignments}" if assignments else "DO NOTHING"
+        with self.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO fleet_hosts ({columns}) VALUES ({placeholders}) "
+                f"ON CONFLICT(host_id) {conflict}",
+                (*record.values(), utcnow()),
+            )
+
+    def get_fleet_host(self: "PostgresDatabase", host_id: str) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM fleet_hosts WHERE host_id = %s", (host_id,))
+            row = cur.fetchone()
+        return _row(row)
+
+    def list_fleet_hosts(self: "PostgresDatabase") -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM fleet_hosts ORDER BY host_id")
+            return _rows(cur.fetchall())
+
+    def put_assignment(
+        self: "PostgresDatabase", worker_id: str, fields: Dict[str, Any]
+    ) -> None:
+        now = utcnow()
+        record = {**fields, "updated_at": now}
+        assignments = ", ".join(f"{name} = %s" for name in record)
+        with self.cursor() as cur:
+            cur.execute(
+                f"UPDATE fleet_assignments SET {assignments} WHERE worker_id = %s",
+                (*record.values(), worker_id),
+            )
+            if cur.rowcount:
+                return
+            row = {"worker_id": worker_id, **record, "created_at": now}
+            cur.execute(
+                f"INSERT INTO fleet_assignments ({', '.join(row)}) "
+                f"VALUES ({', '.join(['%s'] * len(row))})",
+                tuple(row.values()),
+            )
+
+    def get_assignment(self: "PostgresDatabase", worker_id: str) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM fleet_assignments WHERE worker_id = %s", (worker_id,))
+            row = cur.fetchone()
+        return _row(row)
+
+    def list_assignments(self: "PostgresDatabase") -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM fleet_assignments ORDER BY worker_id")
+            return _rows(cur.fetchall())
+
+    def insert_release(self: "PostgresDatabase", record: Dict[str, Any]) -> int:
+        record = {"created_at": utcnow(), **record}
+        columns = ", ".join(record)
+        placeholders = ", ".join(["%s"] * len(record))
+        with self.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO fleet_releases ({columns}) VALUES ({placeholders}) RETURNING id",
+                tuple(record.values()),
+            )
+            return int(cur.fetchone()["id"])
+
+    def update_release(
+        self: "PostgresDatabase", release_id: int, fields: Dict[str, Any]
+    ) -> None:
+        if not fields:
+            return
+        assignments = ", ".join(f"{name} = %s" for name in fields)
+        with self.cursor() as cur:
+            cur.execute(
+                f"UPDATE fleet_releases SET {assignments} WHERE id = %s",
+                (*fields.values(), release_id),
+            )
+
+    def get_release(self: "PostgresDatabase", release_id: int) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM fleet_releases WHERE id = %s", (release_id,))
+            row = cur.fetchone()
+        return _row(row)
+
+    def list_releases(self: "PostgresDatabase", limit: int = 20) -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM fleet_releases ORDER BY id DESC LIMIT %s", (limit,))
+            return _rows(cur.fetchall())
+
+    def put_worker_config(
+        self: "PostgresDatabase",
+        worker_id: str,
+        toml: str,
+        sha256: str,
+        updated_by: str | None,
+    ) -> None:
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO worker_configs (worker_id, toml, sha256, updated_at, updated_by) "
+                "VALUES (%s, %s, %s, %s, %s) ON CONFLICT(worker_id) DO UPDATE SET "
+                "toml = excluded.toml, sha256 = excluded.sha256, "
+                "updated_at = excluded.updated_at, updated_by = excluded.updated_by",
+                (worker_id, toml, sha256, utcnow(), updated_by),
+            )
+
+    def get_worker_config(self: "PostgresDatabase", worker_id: str) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM worker_configs WHERE worker_id = %s", (worker_id,))
+            row = cur.fetchone()
+        return _row(row)
+
+    def list_worker_configs(self: "PostgresDatabase") -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT worker_id, sha256, updated_at, updated_by FROM worker_configs "
+                "ORDER BY worker_id"
+            )
+            return _rows(cur.fetchall())
+
+    def delete_worker_config(self: "PostgresDatabase", worker_id: str) -> bool:
+        with self.cursor() as cur:
+            cur.execute("DELETE FROM worker_configs WHERE worker_id = %s", (worker_id,))
+            return cur.rowcount > 0
+
     # -- audit -------------------------------------------------------------
+
+    # -- login ledger ------------------------------------------------------
+
+    def insert_login_attempt(self: "PostgresDatabase", record: Dict[str, Any]) -> int:
+        record = {"started_at": utcnow(), **record}
+        columns = ", ".join(record)
+        placeholders = ", ".join(["%s"] * len(record))
+        with self.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO login_attempts ({columns}) VALUES ({placeholders}) RETURNING id",
+                tuple(record.values()),
+            )
+            return int(cur.fetchone()["id"])
+
+    def finish_login_attempt(
+        self: "PostgresDatabase",
+        attempt_id: int,
+        worker_id: str,
+        outcome: str,
+        detail_json: str | None,
+    ) -> bool:
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE login_attempts SET outcome = %s, detail_json = %s, finished_at = %s "
+                "WHERE id = %s AND worker_id = %s AND finished_at IS NULL",
+                (outcome, detail_json, utcnow(), attempt_id, worker_id),
+            )
+            return cur.rowcount > 0
+
+    def list_login_attempts(
+        self: "PostgresDatabase", worker_id: str | None = None, limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            if worker_id:
+                cur.execute(
+                    "SELECT * FROM login_attempts WHERE worker_id = %s "
+                    "ORDER BY started_at DESC, id DESC LIMIT %s",
+                    (worker_id, limit),
+                )
+            else:
+                cur.execute(
+                    "SELECT * FROM login_attempts ORDER BY started_at DESC, id DESC LIMIT %s",
+                    (limit,),
+                )
+            return _rows(cur.fetchall())
+
+    def lock_account(self: "PostgresDatabase", account_id: str, reason: str) -> bool:
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE accounts SET locked_at = %s, locked_reason = %s "
+                "WHERE account_id = %s AND locked_at IS NULL",
+                (utcnow(), reason, account_id),
+            )
+            return cur.rowcount > 0
+
+    def unlock_account(self: "PostgresDatabase", account_id: str) -> bool:
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE accounts SET locked_at = NULL, locked_reason = NULL "
+                "WHERE account_id = %s AND locked_at IS NOT NULL",
+                (account_id,),
+            )
+            return cur.rowcount > 0
+
+    def count_code_audit(
+        self: "PostgresDatabase", account_id: str, kind: str, since: str
+    ) -> int:
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM code_audit "
+                "WHERE account_id = %s AND kind = %s AND released_at >= %s",
+                (account_id, kind, since),
+            )
+            return int(cur.fetchone()["n"])
 
     def insert_code_audit(
         self: "PostgresDatabase",

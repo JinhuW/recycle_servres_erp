@@ -132,6 +132,16 @@ def test_a_second_backup_replaces_the_first(env):
         assert cur.fetchone()["n"] == 1
 
 
+def test_a_logged_out_jar_never_replaces_a_session(env):
+    backup(env)
+
+    response = backup(env, storage_state={"cookies": [], "origins": []})
+
+    assert response.status_code == 422
+    snapshot = env.db.get_snapshot("denver-1")
+    assert env.vault.decrypt(snapshot["state_blob"]) == sample_state()
+
+
 def test_backup_requires_a_valid_token(env):
     payload = {"worker_id": "denver-1", "storage_state": sample_state()}
     assert env.post("/v1/session/backup", json=payload).status_code == 401
@@ -266,9 +276,23 @@ def test_meta_requires_the_admin_token(env):
 
 # -- restore ---------------------------------------------------------------
 
+UID = "100000000000001"
+
+
+def own_device(client, worker_id: str = "denver-1", fb_uid: str = UID) -> str:
+    """Give the worker's account a uid and return the device it is told to be."""
+    client.deps.get_account_store().put_account(
+        "denver", {"password": "pw"}, worker_id=worker_id, fb_uid=fb_uid
+    )
+    response = client.post(
+        f"/v1/workers/{worker_id}/identity", json={}, headers=worker_auth(worker_id)
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["device"]["device_id"]
+
 
 def test_a_worker_restores_its_own_session(env):
-    backup(env)
+    backup(env, device_id=own_device(env))
     response = env.get("/v1/session/denver-1/restore", headers=worker_auth("denver-1"))
 
     assert response.status_code == 200
@@ -276,6 +300,58 @@ def test_a_worker_restores_its_own_session(env):
     assert body["storage_state"] == sample_state()
     assert body["user_agent"].startswith("Mozilla/5.0")
     assert body["backed_up_at"]
+    assert body["identity_key"] == f"uid:{UID}"
+    assert body["fb_user_id"] == UID
+
+
+def test_a_snapshot_from_before_device_profiles_is_restored_if_it_is_the_same_login(env):
+    own_device(env)
+    backup(env)  # no device named: an older worker
+    response = env.get("/v1/session/denver-1/restore", headers=worker_auth("denver-1"))
+
+    assert response.status_code == 200
+    assert response.json()["identity_key"] == f"uid:{UID}"
+
+
+def test_a_snapshot_of_another_uid_is_never_restored(env):
+    own_device(env, fb_uid="200000000000002")
+    backup(env)  # logged in as 100000000000001
+    response = env.get("/v1/session/denver-1/restore", headers=worker_auth("denver-1"))
+
+    assert response.status_code == 409
+    assert SESSION_COOKIE not in response.text
+
+
+def test_an_account_without_a_uid_restores_as_before_devices(env):
+    backup(env)
+    response = env.get("/v1/session/denver-1/restore", headers=worker_auth("denver-1"))
+    assert response.status_code == 200
+    assert response.json()["identity_key"] is None
+
+
+def test_the_previous_logins_session_is_not_restored_after_a_swap(env):
+    device = own_device(env)
+    backup(env, device_id=device)
+    # The ERP hands the slot another login; the old session is still on file.
+    env.deps.get_account_store().put_account(
+        "denver", {}, worker_id="denver-1", fb_username="next@example.test", fb_uid="200000000000002"
+    )
+    response = env.get("/v1/session/denver-1/restore", headers=worker_auth("denver-1"))
+
+    assert response.status_code == 409
+    assert SESSION_COOKIE not in response.text
+
+
+def test_a_session_saved_under_another_logins_device_is_not_filed_as_its_own(env):
+    """The browser still holds the old login while a swap's re-login is queued."""
+    device = own_device(env)
+    other = sample_state()
+    other["cookies"][1]["value"] = "300000000000003"
+    backup(env, device_id=device, storage_state=other)
+
+    assert env.db.get_snapshot("denver-1")["identity_key"] is None
+    response = env.get("/v1/session/denver-1/restore", headers=worker_auth("denver-1"))
+    assert response.status_code == 409
 
 
 def test_a_worker_cannot_restore_another_workers_session(env):
@@ -305,7 +381,7 @@ def test_restore_404s_without_a_snapshot(env):
 
 
 def test_restore_reports_a_rotated_vault_key_as_a_503(env, monkeypatch):
-    backup(env)
+    backup(env, device_id=own_device(env))
 
     # Simulate the key having been rotated since the snapshot was sealed.
     stale = Vault(generate_key())
@@ -328,3 +404,83 @@ def test_the_snapshot_survives_a_coordinator_restart(env, tmp_path):
     assert restored == json.loads(json.dumps(sample_state()))
     assert bytes(reopened.get_snapshot("denver-1")["state_blob"]) == bytes(blob)
     reopened.close()
+
+
+# -- seed from a pool cookie (RS-308) -----------------------------------------
+# The cookie-first assign: the ERP seals a pool account's own cookie as the
+# slot's snapshot, so the worker restores it instead of a password login.
+
+SEED_COOKIE = f"c_user={UID}; xs=seed-SuPeRsEcReT; datr=device-datr; sb=device-sb"
+
+
+def register_account(client, worker_id: str = "denver-1", account_id: str = "denver", **fields):
+    fields.setdefault("fb_uid", UID)
+    client.deps.get_account_store().put_account(
+        account_id, {"password": "pw"}, worker_id=worker_id, **fields
+    )
+
+
+def seed(client, worker_id: str = "denver-1", cookie: str = SEED_COOKIE, **body):
+    return client.put(
+        f"/v1/workers/{worker_id}/session", json={"cookie": cookie, **body}, headers=ADMIN_AUTH
+    )
+
+
+def test_seed_from_a_cookie_makes_a_restorable_snapshot(env):
+    register_account(env)
+    assert seed(env, reason="assign #2").json() == {"status": "ok"}
+
+    snapshot = env.db.get_snapshot("denver-1")
+    state = env.vault.decrypt(snapshot["state_blob"])
+    assert {"c_user", "xs", "datr", "sb"} <= {c["name"] for c in state["cookies"]}
+    assert snapshot["identity_key"] == f"uid:{UID}"
+    assert snapshot["fb_user_id"] == UID
+
+    # The worker can restore it: the snapshot's identity is the account it holds.
+    restored = env.get("/v1/session/denver-1/restore", headers=worker_auth("denver-1"))
+    assert restored.status_code == 200
+    assert restored.json()["storage_state"] == state
+
+
+def test_seed_cookie_is_sealed_not_plaintext(env):
+    register_account(env)
+    seed(env)
+    raw = bytes(env.db.get_snapshot("denver-1")["state_blob"])
+    assert b"seed-SuPeRsEcReT" not in raw
+    assert UID.encode() not in raw
+
+
+def test_seed_is_audited_as_a_disclosure(env):
+    register_account(env)
+    seed(env, reason="assign #2")
+    assert any(
+        a["kind"] == "session" and a["account_id"] == "denver" for a in env.db.list_code_audit()
+    )
+
+
+def test_seed_refuses_a_cookie_for_another_account(env):
+    register_account(env, fb_uid="222222222222222")
+    response = seed(env)  # the cookie's c_user is UID, not the account's uid
+    assert response.status_code == 409
+    assert env.db.get_snapshot("denver-1") is None
+
+
+def test_seed_refuses_a_slot_without_an_account_uid(env):
+    env.deps.get_account_store().put_account("denver", {"password": "pw"}, worker_id="denver-1")
+    assert seed(env).status_code == 409
+
+
+def test_seed_refuses_a_cookie_with_no_session(env):
+    register_account(env)
+    assert seed(env, cookie=f"c_user={UID}; datr=only-a-device").status_code == 422
+
+
+def test_seed_needs_an_admin_token(env):
+    register_account(env)
+    response = env.put(
+        "/v1/workers/denver-1/session",
+        json={"cookie": SEED_COOKIE},
+        headers=worker_auth("denver-1"),
+    )
+    assert response.status_code in (401, 403)
+    assert env.db.get_snapshot("denver-1") is None

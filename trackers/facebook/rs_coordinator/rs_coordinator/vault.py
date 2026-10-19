@@ -94,6 +94,7 @@ class AccountStore:
         *,
         worker_id: str | None = None,
         fb_username: str | None = None,
+        fb_uid: str | None = None,
         region: str | None = None,
         proxy: str | None = None,
         vnc_url: str | None = None,
@@ -105,12 +106,15 @@ class AccountStore:
         `merge_secrets` keeps any previously stored secret that this call does
         not mention, so updating just a proxy never silently drops the TOTP
         secret.
+
+        A new `fb_username` without an `fb_uid` forgets the stored uid. The uid
+        picks the device profile a worker presents, and a uid left over from
+        the previous login would dress the new account in the old one's device.
         """
         payload: Dict[str, Any] = {}
-        if merge_secrets:
-            existing = self.db.get_account_row(account_id)
-            if existing and existing.get("secret_blob"):
-                payload.update(self.vault.decrypt(existing["secret_blob"]))
+        existing = self.db.get_account_row(account_id)
+        if merge_secrets and existing and existing.get("secret_blob"):
+            payload.update(self.vault.decrypt(existing["secret_blob"]))
         for field, value in (secrets or {}).items():
             if field not in SECRET_FIELDS:
                 raise VaultError(
@@ -128,12 +132,20 @@ class AccountStore:
         for name, value in (
             ("worker_id", worker_id),
             ("fb_username", fb_username),
+            ("fb_uid", fb_uid),
             ("region", region),
             ("proxy", proxy),
             ("vnc_url", vnc_url),
         ):
             if value is not None:
                 fields[name] = value
+        if (
+            fb_uid is None
+            and fb_username is not None
+            and existing
+            and (existing.get("fb_username") or "").lower() != fb_username.lower()
+        ):
+            fields["fb_uid"] = None
         self.db.put_account(account_id, fields)
 
     def get_account(self: "AccountStore", account_id: str) -> Optional[Dict[str, Any]]:

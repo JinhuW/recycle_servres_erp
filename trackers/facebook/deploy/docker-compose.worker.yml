@@ -26,6 +26,8 @@ services:
     image: aimm-recycle:latest
     container_name: rs-worker-${WORKER_ID:?set WORKER_ID}
     restart: unless-stopped
+    # SIGTERM saves the live Facebook session; supervisord allows it 25 s.
+    stop_grace_period: 30s
     # Web UI + noVNC. Keep it on the tailnet — it exposes a logged-in browser.
     ports:
       - "127.0.0.1:8467:8467"

@@ -18,7 +18,7 @@ import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Sequence, Union
 
 if TYPE_CHECKING:  # pragma: no cover - import only for the type alias
     from .pg import PostgresDatabase
@@ -98,6 +98,23 @@ CREATE TABLE IF NOT EXISTS search_cycles (
     item       TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_search_cycles_at ON search_cycles(at);
+
+-- Worker status changes ------------------------------------------------------
+-- Every change in what a worker reports (`kind` 'state': HEALTHY ->
+-- SESSION_EXPIRED) or in how recently it reported (`kind` 'liveness': live ->
+-- stale -> dead -> live). The row on `workers` is overwritten by every
+-- heartbeat and liveness is derived on read, so this is the only memory of
+-- either; it is what the ERP's Recent activity lists. `at` is when the change
+-- happened, not when it was noticed. Pruned to STATUS_EVENT_DAYS.
+CREATE TABLE IF NOT EXISTS worker_status_events (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    worker_id  TEXT NOT NULL,
+    at         TEXT NOT NULL,
+    kind       TEXT NOT NULL,
+    was        TEXT,
+    became     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_worker_status_events_at ON worker_status_events(at);
 
 -- When each worker last searched each city: the funnel report that counts a
 -- search names its city. One row per worker x city, so it needs no pruning;
@@ -346,6 +363,109 @@ CREATE TABLE IF NOT EXISTS code_audit (
     released_at TEXT NOT NULL
 );
 
+-- One browser identity per Facebook account, wherever that account runs. The
+-- key is the account ('uid:<facebook uid>'), not the worker: a worker is a slot
+-- that can be handed another login, and two logins on one device are linked.
+-- device_id is written once and never regenerated. A NULL user_agent means
+-- "the browser's own", which stays consistent with its client hints.
+CREATE TABLE IF NOT EXISTS device_profiles (
+    identity_key        TEXT PRIMARY KEY,
+    device_id           TEXT NOT NULL UNIQUE,
+    fb_uid              TEXT,
+    user_agent          TEXT,
+    viewport_w          INTEGER NOT NULL,
+    viewport_h          INTEGER NOT NULL,
+    screen_w            INTEGER NOT NULL,
+    screen_h            INTEGER NOT NULL,
+    device_scale_factor REAL NOT NULL DEFAULT 1,
+    locale              TEXT NOT NULL,
+    timezone_id         TEXT NOT NULL,
+    device_cookies_blob BLOB,
+    source              TEXT,
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL
+);
+
+-- Fleet --------------------------------------------------------------------
+-- A Docker host that runs workers through its rs-fleetd agent. The agent
+-- applies nothing until `authoritative` is set; until then it only reports.
+-- A NULL vnc_host means the console reaches workers over the rs-fleet network.
+CREATE TABLE IF NOT EXISTS fleet_hosts (
+    host_id        TEXT PRIMARY KEY,
+    capacity       INTEGER NOT NULL DEFAULT 4,
+    cordoned       INTEGER NOT NULL DEFAULT 0,
+    authoritative  INTEGER NOT NULL DEFAULT 0,
+    vnc_host       TEXT,
+    agent_version  TEXT,
+    last_seen_at   TEXT,
+    report_json    TEXT,
+    created_at     TEXT NOT NULL
+);
+
+-- Where each worker runs, on which image. A stopped row keeps its host, so a
+-- slot turned back on returns to the disk that holds its session.
+CREATE TABLE IF NOT EXISTS fleet_assignments (
+    worker_id          TEXT PRIMARY KEY,
+    host_id            TEXT NOT NULL,
+    state              TEXT NOT NULL DEFAULT 'run',
+    image              TEXT NOT NULL,
+    previous_image     TEXT,
+    generation         INTEGER NOT NULL DEFAULT 1,
+    move_to_host       TEXT,
+    move_requested_at  TEXT,
+    vnc_port           INTEGER,
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL
+);
+
+-- A version rolled out one worker at a time (see fleet.advance_rollout).
+CREATE TABLE IF NOT EXISTS fleet_releases (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    version             TEXT NOT NULL,
+    image               TEXT NOT NULL,
+    state               TEXT NOT NULL,
+    current_worker      TEXT,
+    current_started_at  TEXT,
+    current_pre_state   TEXT,
+    upgraded_json       TEXT,
+    skipped_json        TEXT,
+    failed_worker       TEXT,
+    failure             TEXT,
+    created_by          TEXT,
+    created_at          TEXT NOT NULL,
+    finished_at         TEXT
+);
+
+-- Each fleet worker's config as it runs. The console renders it (master
+-- values + what the ERP saved) and publishes it; agents fetch it by sha256.
+CREATE TABLE IF NOT EXISTS worker_configs (
+    worker_id   TEXT PRIMARY KEY,
+    toml        TEXT NOT NULL,
+    sha256      TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    updated_by  TEXT
+);
+
+-- One row per login a worker starts, with the device it starts it on. The
+-- datr itself is sealed in device_profiles; this keeps a fingerprint, so the
+-- ledger shows which device each attempt presented without holding the
+-- cookie a second time.
+CREATE TABLE IF NOT EXISTS login_attempts (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    worker_id     TEXT NOT NULL,
+    account_id    TEXT,
+    identity_key  TEXT,
+    device_id     TEXT,
+    datr_fp       TEXT,
+    device_drift  INTEGER DEFAULT 0,
+    trigger       TEXT,
+    outcome       TEXT,
+    detail_json   TEXT,
+    started_at    TEXT NOT NULL,
+    finished_at   TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_login_attempts_worker ON login_attempts(worker_id, started_at);
 CREATE INDEX IF NOT EXISTS idx_challenges_status ON challenges(status);
 CREATE INDEX IF NOT EXISTS idx_code_audit_time ON code_audit(released_at);
 """
@@ -374,10 +494,24 @@ WORKER_HEALTH_COLUMNS = (
     # The same stamp, kept after the worker picks the request up: the ERP
     # compares it with `login_step_at` to tell "queued" from "under way".
     ("relogin_last_requested_at", "TEXT"),
+    # Set when the ERP's cookie-first Assign seeds the slot a session snapshot
+    # and wants it restored now rather than at the next sweep; cleared when the
+    # worker's next directive poll picks it up. Unlike relogin, this restores
+    # the seeded cookie session instead of forcing a password login.
+    ("restore_requested_at", "TEXT"),
     # Where the worker's latest login has got to (picked_up, typing, submitted,
     # challenge, waiting_for_human, logged_in, failed) and when it got there.
     ("login_step", "TEXT"),
     ("login_step_at", "TEXT"),
+    # The Docker host the worker reported running on (RS_HOST_ID).
+    ("host_id", "TEXT"),
+    # Set when the fleet stops a worker on purpose (its slot turned off), so
+    # the liveness sweep does not page about a silence nobody needs to fix.
+    ("retired_at", "TEXT"),
+    # The liveness worker_status_events last recorded (live, stale, dead), or
+    # NULL before anything was recorded. Separate from alerted_liveness, which
+    # only ever tracks the dead/back page.
+    ("logged_liveness", "TEXT"),
 )
 
 # Columns added to `listings` after the first release, same mechanism.
@@ -394,6 +528,29 @@ LISTING_EXTRA_COLUMNS = (
 # against Facebook's own "account 1000…" wording in a checkpoint notice.
 SNAPSHOT_EXTRA_COLUMNS = (
     ("fb_user_id", "TEXT"),
+    # The device profile the backed-up session belongs to. A snapshot is only
+    # restored onto the identity it was taken from.
+    ("identity_key", "TEXT"),
+)
+
+# Columns added to `accounts`, same mechanism. `fb_uid` is the Facebook uid of
+# the login in `fb_username`, the key of its device profile.
+ACCOUNT_EXTRA_COLUMNS = (
+    ("fb_uid", "TEXT"),
+    # Whether the fleet runs a worker for this slot. Off by default, so the
+    # agents take over only the slots an operator hands them.
+    ("fleet_enabled", "INTEGER DEFAULT 0"),
+    # A host this slot must run on: one with no proxy egresses through its
+    # host's own IP, and its session is bound to that IP.
+    ("pin_host", "TEXT"),
+)
+
+# Set when Facebook locks the account ("log in with another device to
+# unlock"). While set, no worker is handed its password: every automated
+# login on a locked account reads as one more stranger trying it.
+ACCOUNT_LOCK_COLUMNS = (
+    ("locked_at", "TEXT"),
+    ("locked_reason", "TEXT"),
 )
 
 # Funnel stages, in pipeline order. The first six and `reviewed` / `alerted`
@@ -502,6 +659,10 @@ def utcnow() -> str:
 # beyond that is room to answer "did it search on Tuesday".
 SEARCH_CYCLE_DAYS = 14
 
+# How long status changes are kept. The ERP shows a week; a month answers
+# "how often does this worker drop out".
+STATUS_EVENT_DAYS = 30
+
 
 def as_utc_stamp(value: Optional[str]) -> str:
     """A worker-sent ISO time in `utcnow()`'s form, or now if it does not parse.
@@ -596,6 +757,8 @@ class Database:
             self._migrate_columns("outbound_messages", OUTBOUND_EXTRA_COLUMNS)
             self._migrate_columns("session_snapshots", SNAPSHOT_EXTRA_COLUMNS)
             self._migrate_columns("review_stats", REVIEW_STATS_EXTRA_COLUMNS)
+            self._migrate_columns("accounts", ACCOUNT_EXTRA_COLUMNS)
+            self._migrate_columns("accounts", ACCOUNT_LOCK_COLUMNS)
             # Created after the migration adds the columns they index.
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_threads_room ON threads(matrix_room_id)"
@@ -1070,6 +1233,30 @@ class Database:
             )
             return cur.rowcount > 0
 
+    def request_restore(self: "Database", worker_id: str) -> None:
+        """Flag a worker to restore its seeded session on its next directive poll.
+
+        The cookie-first counterpart to `request_relogin`: the ERP has just
+        sealed the slot a session snapshot and wants it on disk now, not at the
+        next sweep. Upserts so it can be queued for a worker not yet heard from.
+        """
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO workers (worker_id, restore_requested_at) VALUES (?, ?) "
+                "ON CONFLICT(worker_id) DO UPDATE SET restore_requested_at = excluded.restore_requested_at",
+                (worker_id, utcnow()),
+            )
+
+    def take_restore(self: "Database", worker_id: str) -> bool:
+        """Consume a pending restore request, returning whether one was set."""
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE workers SET restore_requested_at = NULL "
+                "WHERE worker_id = ? AND restore_requested_at IS NOT NULL",
+                (worker_id,),
+            )
+            return cur.rowcount > 0
+
     # -- review stats ------------------------------------------------------
 
     def add_review_stats(
@@ -1137,6 +1324,48 @@ class Database:
             cur.execute(
                 "SELECT worker_id, at, item FROM search_cycles WHERE at >= ? ORDER BY at",
                 (since,),
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+    # -- worker status events ----------------------------------------------
+
+    def log_status_changes(
+        self: "Database",
+        worker_id: str,
+        changes: Sequence[Sequence[Optional[str]]],
+        logged_liveness: Optional[str],
+    ) -> None:
+        """Append `(at, kind, was, became)` rows and move the row's marker.
+
+        One transaction, so a change is never recorded without the marker
+        that stops the next sweep recording it again.
+        """
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=STATUS_EVENT_DAYS)).isoformat(
+            timespec="seconds"
+        )
+        with self.cursor() as cur:
+            for at, kind, was, became in changes:
+                cur.execute(
+                    "INSERT INTO worker_status_events (worker_id, at, kind, was, became) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (worker_id, at, kind, was, became),
+                )
+            cur.execute(
+                "UPDATE workers SET logged_liveness = ? WHERE worker_id = ?",
+                (logged_liveness, worker_id),
+            )
+            if changes:
+                cur.execute("DELETE FROM worker_status_events WHERE at < ?", (cutoff,))
+
+    def status_events_since(
+        self: "Database", since: str, limit: int
+    ) -> List[Dict[str, Any]]:
+        """Newest first, so `limit` keeps the recent end."""
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT worker_id, at, kind, was, became FROM worker_status_events "
+                "WHERE at >= ? ORDER BY at DESC, id DESC LIMIT ?",
+                (since, limit),
             )
             return [dict(row) for row in cur.fetchall()]
 
@@ -1351,8 +1580,10 @@ class Database:
         """Non-secret account fields only — never returns secret_blob."""
         with self.cursor() as cur:
             cur.execute(
-                "SELECT account_id, worker_id, fb_username, region, proxy, vnc_url, "
-                "allow_password_login, created_at, updated_at FROM accounts ORDER BY account_id"
+                "SELECT account_id, worker_id, fb_username, fb_uid, region, proxy, vnc_url, "
+                "allow_password_login, fleet_enabled, pin_host, locked_at, locked_reason, "
+                "created_at, updated_at "
+                "FROM accounts ORDER BY account_id"
             )
             return [dict(row) for row in cur.fetchall()]
 
@@ -1433,7 +1664,282 @@ class Database:
             row = cur.fetchone()
         return dict(row) if row else None
 
+    # -- device profiles ---------------------------------------------------
+
+    def get_device_profile(self: "Database", identity_key: str) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM device_profiles WHERE identity_key = ?", (identity_key,))
+            row = cur.fetchone()
+        return dict(row) if row else None
+
+    def device_profile_by_device(self: "Database", device_id: str) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM device_profiles WHERE device_id = ?", (device_id,))
+            row = cur.fetchone()
+        return dict(row) if row else None
+
+    def insert_device_profile(self: "Database", record: Dict[str, Any]) -> bool:
+        """Create a profile unless the identity already has one; True if created.
+
+        Two workers can ask for a new identity's profile at once. The loser of
+        that race must read the winner's row, never write a second device.
+        """
+        now = utcnow()
+        record = {"created_at": now, "updated_at": now, **record}
+        columns = ", ".join(record)
+        placeholders = ", ".join(["?"] * len(record))
+        with self.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO device_profiles ({columns}) VALUES ({placeholders}) "
+                "ON CONFLICT(identity_key) DO NOTHING",
+                tuple(record.values()),
+            )
+            return cur.rowcount > 0
+
+    def update_device_profile(
+        self: "Database", identity_key: str, fields: Dict[str, Any]
+    ) -> None:
+        if not fields:
+            return
+        record = {**fields, "updated_at": utcnow()}
+        assignments = ", ".join(f"{name} = ?" for name in record)
+        with self.cursor() as cur:
+            cur.execute(
+                f"UPDATE device_profiles SET {assignments} WHERE identity_key = ?",
+                (*record.values(), identity_key),
+            )
+
+    def claim_device_cookies(self: "Database", identity_key: str, blob: bytes) -> bool:
+        """Store a profile's first device cookies; False if it already has some."""
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE device_profiles SET device_cookies_blob = ?, updated_at = ? "
+                "WHERE identity_key = ? AND device_cookies_blob IS NULL",
+                (blob, utcnow(), identity_key),
+            )
+            return cur.rowcount > 0
+
+    def rekey_device_profile(self: "Database", old_key: str, new_key: str) -> bool:
+        """Move a profile to a new identity key, unless that key is taken."""
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE device_profiles SET identity_key = ?, updated_at = ? "
+                "WHERE identity_key = ? AND NOT EXISTS "
+                "(SELECT 1 FROM device_profiles WHERE identity_key = ?)",
+                (new_key, utcnow(), old_key, new_key),
+            )
+            return cur.rowcount > 0
+
+    def list_device_profiles(self: "Database") -> List[Dict[str, Any]]:
+        """Every profile without its sealed cookies."""
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT identity_key, device_id, fb_uid, user_agent, viewport_w, viewport_h, "
+                "screen_w, screen_h, device_scale_factor, locale, timezone_id, source, "
+                "CASE WHEN device_cookies_blob IS NULL THEN 0 ELSE 1 END AS has_device_cookies, "
+                "created_at, updated_at "
+                "FROM device_profiles ORDER BY identity_key"
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+    # -- fleet -------------------------------------------------------------
+
+    def upsert_fleet_host(self: "Database", host_id: str, fields: Dict[str, Any]) -> None:
+        record = {"host_id": host_id, **fields}
+        columns = ", ".join([*record, "created_at"])
+        placeholders = ", ".join(["?"] * (len(record) + 1))
+        assignments = ", ".join(f"{name} = excluded.{name}" for name in fields)
+        conflict = f"DO UPDATE SET {assignments}" if assignments else "DO NOTHING"
+        with self.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO fleet_hosts ({columns}) VALUES ({placeholders}) "
+                f"ON CONFLICT(host_id) {conflict}",
+                (*record.values(), utcnow()),
+            )
+
+    def get_fleet_host(self: "Database", host_id: str) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM fleet_hosts WHERE host_id = ?", (host_id,))
+            row = cur.fetchone()
+        return dict(row) if row else None
+
+    def list_fleet_hosts(self: "Database") -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM fleet_hosts ORDER BY host_id")
+            return [dict(row) for row in cur.fetchall()]
+
+    def put_assignment(self: "Database", worker_id: str, fields: Dict[str, Any]) -> None:
+        """Update the fields given; a new row needs at least host_id and image.
+
+        Update first, not an upsert: an INSERT naming only the changed fields
+        fails the NOT NULL columns before ON CONFLICT is ever consulted.
+        """
+        now = utcnow()
+        record = {**fields, "updated_at": now}
+        assignments = ", ".join(f"{name} = ?" for name in record)
+        with self.cursor() as cur:
+            cur.execute(
+                f"UPDATE fleet_assignments SET {assignments} WHERE worker_id = ?",
+                (*record.values(), worker_id),
+            )
+            if cur.rowcount:
+                return
+            row = {"worker_id": worker_id, **record, "created_at": now}
+            cur.execute(
+                f"INSERT INTO fleet_assignments ({', '.join(row)}) "
+                f"VALUES ({', '.join(['?'] * len(row))})",
+                tuple(row.values()),
+            )
+
+    def get_assignment(self: "Database", worker_id: str) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM fleet_assignments WHERE worker_id = ?", (worker_id,))
+            row = cur.fetchone()
+        return dict(row) if row else None
+
+    def list_assignments(self: "Database") -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM fleet_assignments ORDER BY worker_id")
+            return [dict(row) for row in cur.fetchall()]
+
+    def insert_release(self: "Database", record: Dict[str, Any]) -> int:
+        record = {"created_at": utcnow(), **record}
+        columns = ", ".join(record)
+        placeholders = ", ".join(["?"] * len(record))
+        with self.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO fleet_releases ({columns}) VALUES ({placeholders})",
+                tuple(record.values()),
+            )
+            return int(cur.lastrowid)
+
+    def update_release(self: "Database", release_id: int, fields: Dict[str, Any]) -> None:
+        if not fields:
+            return
+        assignments = ", ".join(f"{name} = ?" for name in fields)
+        with self.cursor() as cur:
+            cur.execute(
+                f"UPDATE fleet_releases SET {assignments} WHERE id = ?",
+                (*fields.values(), release_id),
+            )
+
+    def get_release(self: "Database", release_id: int) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM fleet_releases WHERE id = ?", (release_id,))
+            row = cur.fetchone()
+        return dict(row) if row else None
+
+    def list_releases(self: "Database", limit: int = 20) -> List[Dict[str, Any]]:
+        """Newest first."""
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM fleet_releases ORDER BY id DESC LIMIT ?", (limit,))
+            return [dict(row) for row in cur.fetchall()]
+
+    def put_worker_config(
+        self: "Database", worker_id: str, toml: str, sha256: str, updated_by: str | None
+    ) -> None:
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO worker_configs (worker_id, toml, sha256, updated_at, updated_by) "
+                "VALUES (?, ?, ?, ?, ?) ON CONFLICT(worker_id) DO UPDATE SET "
+                "toml = excluded.toml, sha256 = excluded.sha256, "
+                "updated_at = excluded.updated_at, updated_by = excluded.updated_by",
+                (worker_id, toml, sha256, utcnow(), updated_by),
+            )
+
+    def get_worker_config(self: "Database", worker_id: str) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM worker_configs WHERE worker_id = ?", (worker_id,))
+            row = cur.fetchone()
+        return dict(row) if row else None
+
+    def list_worker_configs(self: "Database") -> List[Dict[str, Any]]:
+        """Every fleet config without its text."""
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT worker_id, sha256, updated_at, updated_by FROM worker_configs "
+                "ORDER BY worker_id"
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+    def delete_worker_config(self: "Database", worker_id: str) -> bool:
+        with self.cursor() as cur:
+            cur.execute("DELETE FROM worker_configs WHERE worker_id = ?", (worker_id,))
+            return cur.rowcount > 0
+
+    # -- login ledger ------------------------------------------------------
+
+    def insert_login_attempt(self: "Database", record: Dict[str, Any]) -> int:
+        record = {"started_at": utcnow(), **record}
+        columns = ", ".join(record)
+        placeholders = ", ".join(["?"] * len(record))
+        with self.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO login_attempts ({columns}) VALUES ({placeholders})",
+                tuple(record.values()),
+            )
+            return int(cur.lastrowid)
+
+    def finish_login_attempt(
+        self: "Database", attempt_id: int, worker_id: str, outcome: str, detail_json: str | None
+    ) -> bool:
+        """Close a worker's own open attempt; False if it is not one."""
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE login_attempts SET outcome = ?, detail_json = ?, finished_at = ? "
+                "WHERE id = ? AND worker_id = ? AND finished_at IS NULL",
+                (outcome, detail_json, utcnow(), attempt_id, worker_id),
+            )
+            return cur.rowcount > 0
+
+    def list_login_attempts(
+        self: "Database", worker_id: str | None = None, limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            if worker_id:
+                cur.execute(
+                    "SELECT * FROM login_attempts WHERE worker_id = ? "
+                    "ORDER BY started_at DESC, id DESC LIMIT ?",
+                    (worker_id, limit),
+                )
+            else:
+                cur.execute(
+                    "SELECT * FROM login_attempts ORDER BY started_at DESC, id DESC LIMIT ?",
+                    (limit,),
+                )
+            return [dict(row) for row in cur.fetchall()]
+
+    def lock_account(self: "Database", account_id: str, reason: str) -> bool:
+        """Mark an account locked by Facebook; False if it already was."""
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE accounts SET locked_at = ?, locked_reason = ? "
+                "WHERE account_id = ? AND locked_at IS NULL",
+                (utcnow(), reason, account_id),
+            )
+            return cur.rowcount > 0
+
+    def unlock_account(self: "Database", account_id: str) -> bool:
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE accounts SET locked_at = NULL, locked_reason = NULL "
+                "WHERE account_id = ? AND locked_at IS NOT NULL",
+                (account_id,),
+            )
+            return cur.rowcount > 0
+
     # -- audit -------------------------------------------------------------
+
+    def count_code_audit(
+        self: "Database", account_id: str, kind: str, since: str
+    ) -> int:
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM code_audit "
+                "WHERE account_id = ? AND kind = ? AND released_at >= ?",
+                (account_id, kind, since),
+            )
+            return int(cur.fetchone()["n"])
 
     def insert_code_audit(
         self: "Database",

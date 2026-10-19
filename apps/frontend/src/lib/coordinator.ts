@@ -281,6 +281,20 @@ export type FleetDoc = {
     updated_by: string | null;
     error: string | null;
   };
+  // The week's status changes, newest first. null when the coordinator
+  // predates its status log; absent from a facade that predates the field.
+  status_changes?: StatusChange[] | null;
+};
+
+// One change the coordinator logged: the `state` a worker reported moving
+// (HEALTHY → SESSION_EXPIRED), or its liveness crossing live → stale → dead →
+// live. `was` is null on a worker's first report. `at` is when it happened.
+export type StatusChange = {
+  worker_id: string;
+  at: string;
+  kind: 'state' | 'liveness';
+  was: string | null;
+  became: string;
 };
 
 // What the flow card's Edit forms may save (PUT /api/coordinator/settings).

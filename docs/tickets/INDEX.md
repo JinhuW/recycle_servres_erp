@@ -5,7 +5,28 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-287](./RS-287-release-review-findings-on-the-edit-cities-frequency.md) | in-review | bug | P2 | Release review findings on the Edit cities frequency form | 1.281.1 |
+| [RS-309](./RS-309-reddit-page-shows-which-prompt-is-better-per-version.md) | in-review | story | P2 | Reddit page shows which prompt is better: per-version leads and the candidate trial | 1.291.0 |
+| [RS-308](./RS-308-assign-restores-a-pool-account-s-cookie-session-inst.md) | done | story | P2 | Assign restores a pool account's cookie session instead of a password login | facebook-tracker 0.12.5, v1.290.0 |
+| [RS-307](./RS-307-keep-the-keyword-gate-the-same-height-while-editing.md) | done | bug | P2 | Keep the keyword gate the same height while editing | 1.289.1 |
+| [RS-306](./RS-306-title-gate-shows-include-try-a-listing-marks-the-tit.md) | done | story | P2 | Title gate shows Include; Try a listing marks the title and puts verdicts on the item tabs | 1.289.0 |
+| [RS-305](./RS-305-reddit-alerts-go-to-a-dev-telegram-channel-reactions.md) | in-review | story | P2 | Reddit alerts go to a dev Telegram channel, reactions count as leads, and every prompt version is scored | n/a — trackers/reddit (no release process); deployed 2026-10-19 as image 04f5e24a |
+| [RS-304](./RS-304-show-the-keyword-gate-as-two-lists-include-and-exclu.md) | done | story | P2 | Show the keyword gate as two lists: Include and Exclude | 1.288.0 |
+| [RS-303](./RS-303-fleet-sweep-time-shows-us-eastern-not-utc.md) | done | story | P2 | Fleet sweep time shows US Eastern, not UTC | 1.287.1 |
+| [RS-302](./RS-302-reddit-pipeline-card-counts-the-past-24-hours.md) | done | story | P2 | Reddit pipeline card counts the past 24 hours | 1.287.0 |
+| [RS-301](./RS-301-market-price-import-reads-a-list-in-us-dollars-or-yu.md) | done | story | P2 | Market price import reads a list in US dollars or yuan | 1.286.0 |
+| [RS-300](./RS-300-fleet-recent-activity-records-worker-status-changes.md) | in-review | story | P2 | Fleet Recent activity records worker status changes | 1.285.0 |
+| [RS-299](./RS-299-proxy-the-reddit-tracker-s-matches-and-stats-to-the.md) | done | story | P2 | Proxy the Reddit tracker's matches and stats to the ERP | 1.284.0 |
+| [RS-298](./RS-298-fleet-status-column-shows-the-last-heartbeat-time.md) | done | task | P2 | Fleet status column shows the last heartbeat time | 1.283.1 |
+| [RS-297](./RS-297-reddit-tracker-page-follows-the-facebook-fleet-layou.md) | in-review | story | P2 | Reddit tracker page follows the Facebook fleet layout | 1.283.0 |
+| [RS-296](./RS-296-full-screen-for-the-fleet-watch-view.md) | in-review | story | P2 | Full screen for the fleet watch view | 1.282.0 |
+| [RS-295](./RS-295-fit-the-worker-vnc-view-to-the-browser-window.md) | in-review | bug | P2 | Fit the worker VNC view to the browser window | — |
+| [RS-293](./RS-293-every-facebook-login-records-its-device-retries-are.md) | in-review | story | P1 | Every Facebook login records its device, retries are capped, and a new account starts on its legacy device | facebook-tracker 0.12.2, v1.281.3 |
+| [RS-292](./RS-292-facebook-fleet-scales-itself-rolls-new-versions-and.md) | done | story | P2 | Facebook fleet scales itself, rolls new versions, and keeps every account's session and device | facebook-tracker 0.12.0 (ERP 1.281.2 for the uid) |
+| [RS-291](./RS-291-a-worker-s-saved-login-survives-any-restart-until-fa.md) | backlog | bug | P1 | A worker's saved login survives any restart until Facebook expires it | — |
+| [RS-290](./RS-290-idle-session-check-reads-a-stale-page-url-and-misses.md) | backlog | bug | P1 | Idle session check reads a stale page URL and misses a login finished over Watch | — |
+| [RS-289](./RS-289-worker-reports-and-saves-its-facebook-session-in-rea.md) | done | bug | P1 | Worker reports and saves its Facebook session in real time, not at the next sweep | facebook-tracker 0.10.3 |
+| [RS-288](./RS-288-console-fleet-dashboard-shows-the-proxy-url-exit-ip.md) | done | story | P2 | Console fleet dashboard shows the proxy URL, exit IP and city | facebook-tracker 0.10.2 |
+| [RS-287](./RS-287-release-review-findings-on-the-edit-cities-frequency.md) | done | bug | P2 | Release review findings on the Edit cities frequency form | 1.281.1 |
 | [RS-286](./RS-286-park-a-facebook-worker-whose-login-fails-instead-of.md) | done | bug | P1 | Park a Facebook worker whose login fails instead of searching logged out | facebook-tracker 0.10.1 |
 | [RS-285](./RS-285-sort-the-fleet-workers-table-by-column.md) | done | story | P2 | Sort the Fleet workers table by column | 1.281.0 |
 | [RS-284](./RS-284-weekly-liveness-check-for-the-facebook-account-pool.md) | done | story | P2 | Weekly liveness check for the Facebook account pool | 1.280.0 |

@@ -2,7 +2,9 @@
 
 Watches subreddits for people selling used server hardware, has an LLM decide
 whether each post is something Recycle Servers wants to buy, and alerts buyers
-on Telegram with a summary and the post link.
+on Telegram with a summary and the post link. Reactions on those alerts come
+back as **leads**, and every verdict records the prompt version that made it,
+so a prompt change is judged by the leads it earns.
 
 It lives at `trackers/reddit/` in the monorepo as a **standalone pnpm project**
 (own `pnpm-workspace.yaml`, lockfile and Dockerfile), so every command below
@@ -31,10 +33,41 @@ Each worker runs three independent loops:
    Reddit request, and records the posts it found.
 2. **evaluate** — sends unjudged posts to OpenRouter, storing a verdict, a
    one-line summary and the asking price.
-3. **notify** — sends each target to Telegram once, then marks it notified.
+3. **notify** — sends each target to Telegram once, records the message ids it
+   went out as, then marks it notified.
 
 They are separate loops so Reddit pacing (which can mean a minute of waiting)
 never holds up evaluation, and an LLM outage never stops post discovery.
+
+The **api** process runs one more loop, **reactions**, which long-polls the
+bot's updates for reactions on alert messages (see *Measuring the prompt*).
+
+### Measuring the prompt
+
+- **Prompt versions.** A version is the exact model and system prompt
+  (`eval_prompt` plus enabled rules) a post was judged with, stored once in
+  `prompt_versions` and referenced from every verdict. Editing a rule makes a
+  new version; editing it back reuses the old one.
+- **Leads.** Every alert's Telegram message id is recorded in
+  `alert_messages`. When someone reacts to the alert, the api's reactions loop
+  records it. Any reaction except 👎 makes the post a **lead**; a 👎 alone
+  marks it **not a lead**. This works in groups, where Telegram says who
+  reacted, and in channels, where it only sends totals.
+- **Dev chat.** With `telegram_dev_chat_ids` set, every alert also goes there
+  as a review: the alert plus the model's reasoning and prompt version. The
+  dev chat is where the team labels alerts without spamming buyers.
+- **Candidate prompt.** With `candidate_eval_prompt` set, every post is judged
+  a second time by the candidate. This doubles OpenRouter calls while a trial
+  runs.
+  - The candidate's verdicts go to `candidate_verdicts` and never change a
+    post's status.
+  - A post only the candidate flags is reviewed in the dev chat alone, never
+    sent to buyers.
+  - `GET /api/prompt-stats` scores every version and sets the candidate
+    against the live prompt on the same posts. `POST
+    /api/prompt-candidate/promote` makes it live.
+
+  `docs/prompt-evaluations/` records each trial and the numbers behind it.
 
 ### Why posts are never processed twice
 
@@ -79,7 +112,7 @@ ROLE=api API_TOKEN=devtoken pnpm dev # admin API on :8080
 ```
 
 ```bash
-pnpm test        # 171 tests; needs the compose Postgres running
+pnpm test        # 210 tests; needs the compose Postgres running
 pnpm typecheck
 ```
 
@@ -107,9 +140,11 @@ through the API — no redeploy, and changes reach every worker within 60 s.
 | `LOG_LEVEL` | no | `info` |
 
 Database-backed settings: `eval_prompt`, `llm_model`, `telegram_chat_ids`,
-`max_post_age_hours`. Watched subreddits live in the `subreddits` table. Named
-buying rules live in `rules`; the enabled ones are appended to `eval_prompt`
-at evaluation time, so each post is still one LLM call.
+`max_post_age_hours`, `telegram_dev_chat_ids`, `candidate_eval_prompt` and
+`candidate_llm_model`. The last three default to empty, which means off.
+Watched subreddits live in the `subreddits` table. Named buying rules live in
+`rules`; the enabled ones are appended to `eval_prompt` at evaluation time, so
+each post is still one LLM call (two while a candidate is on trial).
 
 ## HTTP API
 
@@ -131,12 +166,17 @@ Everything except `/health` needs `Authorization: Bearer $API_TOKEN`.
 | `DELETE` | `/api/rules/:id` | Remove one. |
 | `GET` | `/api/settings` | All runtime settings. |
 | `PUT` | `/api/settings/:key` | Change one. `{"value": …}` |
-| `GET` | `/api/stats` | Counts by status, per-subreddit health, failed posts. |
+| `GET` | `/api/stats?since` | Counts by status (only posts discovered since `since`, when given), per-subreddit health, the oldest pending post, failed posts. |
 | `POST` | `/api/posts/:id/requeue` | Retry a post that gave up. |
 | `POST` | `/api/telegram/test` | Send a test message to the configured chats. |
+| `GET` | `/api/prompt-stats?since` | Per prompt version: posts judged, targets, buyer and dev-chat leads; for a candidate, `vsLive`, its verdicts against live on the same posts. `config` has the live and candidate prompts as configured now. |
+| `PUT` | `/api/prompt-candidate` | Start or replace a trial. `{"prompt": "…", "model": ""}`; `model` is optional, and `""` means `llm_model`. |
+| `DELETE` | `/api/prompt-candidate` | End the trial. Its verdicts stay, so its version keeps its numbers. |
+| `POST` | `/api/prompt-candidate/promote` | Make the candidate the live prompt (and model). Disables the rules, which the candidate was judged without, and clears the candidate. |
 
-The ERP's Monitors ▸ Reddit page drives the workers, rules and subreddits
-routes through its backend proxy; see *Contracts* in the root `AGENTS.md`
+The ERP's Monitors ▸ Reddit page drives the workers, rules, subreddits,
+matches, stats, prompt-stats and prompt-candidate routes through its backend
+proxy; see *Contracts* in the root `AGENTS.md`
 before changing their shapes.
 
 ```bash
@@ -153,6 +193,28 @@ curl -X PUT localhost:8080/api/settings/telegram_chat_ids \
 # Read the item list
 curl localhost:8080/api/matches -H "Authorization: Bearer $API_TOKEN"
 ```
+
+### Prompt experiments
+
+1. **Create the dev chat.** It can be a group or a channel. Add
+   `@recycle_servers_alert_bot` as an **admin**: Telegram only sends reaction
+   updates to admins. The api logs a `telegram_chat_member` event with the
+   new chat's id as soon as the bot is added.
+2. **Point reviews at it:**
+   `PUT /api/settings/telegram_dev_chat_ids` with `{"value": ["-100…"]}`.
+3. **Start a trial:** `PUT /api/settings/candidate_eval_prompt` with the full
+   prompt text. Optionally set `candidate_llm_model` to trial a model too.
+4. **Label in the dev chat.** React 👍 to a review that is a real lead, and 👎
+   to one that should not have alerted. Buyers' reactions in the alert chat
+   count too.
+5. **Read `GET /api/prompt-stats`.** Compare the candidate's `vsLive` cells:
+   - leads in `candidateOnly` are deals it adds;
+   - leads in `liveOnly` are deals it would lose;
+   - notLeads in `liveOnly` are junk it drops.
+6. **Promote, or end the trial.** Promote with
+   `POST /api/prompt-candidate/promote`. To end it instead, set
+   `candidate_eval_prompt` to `""`.
+7. **Record the outcome** in `docs/prompt-evaluations/`.
 
 ## Deployment
 
@@ -171,6 +233,11 @@ railway up --service api --detach    # or --service worker
 
 Postgres has public networking on, because the OCI VMs connect over the
 internet.
+
+The `api` service must run with `ALERT_TRANSPORT=telegram`. That is what
+starts its reactions loop; in console mode the api never polls Telegram, which
+is what keeps a local api from taking production's updates. Telegram allows
+one `getUpdates` poller per bot, so nothing else may poll this bot's updates.
 
 **Worker fleet — Oracle Cloud Always Free.** VMs from `infra/terraform/`
 (see [infra/README.md](infra/README.md)), each with its own public IP and
@@ -215,6 +282,8 @@ a different provider.
 6. `PUT /api/settings/eval_prompt` changes behaviour within 60 s, no restart.
 7. Two workers running at once produce no duplicate alerts.
 8. Killing a worker mid-poll: its claims free up within 5 minutes.
+9. A reaction on a new alert shows up in `GET /api/prompt-stats` within a
+   minute, and the api log has no `another process is polling` warnings.
 
 ## Layout
 
@@ -234,14 +303,17 @@ src/
   pacing.ts        per-IP rate limiter and backoff
   llm.ts           OpenRouter evaluation
   rules.ts         named buying rules, composed into the eval prompt
+  prompts.ts       prompt versions, candidate verdicts, per-version lead stats
+  review.ts        dev-chat reviews of alerts and candidate-only posts
   alerts.ts        alert transport: Telegram or console
   telegram.ts      Telegram formatting + delivery
   heartbeat.ts     per-process row in `workers` for fleet visibility
   api.ts           admin/UI HTTP surface
   settings.ts      database-backed runtime config
   logger.ts        leveled logger tagged with the worker id
-  loops/           poll, evaluate, notify + the shared ticker
+  loops/           poll, evaluate, notify, reactions (api only) + the shared ticker
 tests/             vitest against real Postgres, one database per file
 infra/             OCI worker fleet (terraform) — see infra/README.md
 docs/debug-notes/  traps worth not re-hitting
+docs/prompt-evaluations/  each prompt trial: hypothesis, prompt text, the numbers
 ```

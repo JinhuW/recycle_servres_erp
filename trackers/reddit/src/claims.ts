@@ -13,6 +13,7 @@
 // after CLAIM_TTL with no reaper process involved.
 
 import type {Sql} from './db.ts';
+import type {SentMessage} from './telegram.ts';
 
 /** How long a claim stays valid before another worker may steal it. */
 export const CLAIM_TTL_SECONDS = 300;
@@ -54,6 +55,7 @@ export interface PostRow {
   llm_price: string | null;
   reject_reason: string | null;
   attempts: number;
+  prompt_version_id: number | null;
 }
 
 export interface NewPost {
@@ -196,6 +198,7 @@ export async function recordEvaluation(
     summary: string;
     price: string | null;
     raw: unknown;
+    promptVersionId: number;
   },
 ): Promise<void> {
   await sql`
@@ -205,6 +208,7 @@ export async function recordEvaluation(
            llm_summary = ${verdict.summary},
            llm_price = ${verdict.price},
            llm_raw = ${sql.json(verdict.raw as never)},
+           prompt_version_id = ${verdict.promptVersionId},
            reject_reason = ${verdict.isTarget ? null : 'not_target'},
            attempts = 0,
            claimed_by = NULL,
@@ -229,20 +233,53 @@ export async function rejectPost(
      WHERE reddit_id = ${redditId} AND claimed_by = ${workerId}`;
 }
 
-/** Marks a target post as alerted. */
+/**
+ * Marks a target post as alerted and records the buyer messages it went out
+ * as. One statement, so a post is never notified without the message ids its
+ * reactions will arrive under. The messages are recorded even if the claim was
+ * lost meanwhile: they were sent, and reactions on them are real.
+ */
 export async function markNotified(
   sql: Sql,
   workerId: string,
   redditId: string,
+  sent: ReadonlyArray<SentMessage> = [],
 ): Promise<void> {
   await sql`
-    UPDATE posts
-       SET status = 'notified',
-           notified_at = NOW(),
-           attempts = 0,
-           claimed_by = NULL,
-           claimed_at = NULL
-     WHERE reddit_id = ${redditId} AND claimed_by = ${workerId}`;
+    WITH notified AS (
+      UPDATE posts
+         SET status = 'notified',
+             notified_at = NOW(),
+             attempts = 0,
+             claimed_by = NULL,
+             claimed_at = NULL
+       WHERE reddit_id = ${redditId} AND claimed_by = ${workerId}
+    )
+    ${insertAlertMessages(sql, redditId, 'buyers', sent)}`;
+}
+
+/** Records the messages a dev-chat review of a post went out as. */
+export async function recordReviewMessages(
+  sql: Sql,
+  redditId: string,
+  sent: ReadonlyArray<SentMessage>,
+): Promise<void> {
+  if (sent.length === 0) return;
+  await sql`${insertAlertMessages(sql, redditId, 'dev', sent)}`;
+}
+
+function insertAlertMessages(
+  sql: Sql,
+  redditId: string,
+  audience: 'buyers' | 'dev',
+  sent: ReadonlyArray<SentMessage>,
+) {
+  return sql`
+    INSERT INTO alert_messages (chat_id, message_id, reddit_id, audience)
+    SELECT m.chat_id, m.message_id::bigint, ${redditId}, ${audience}
+      FROM unnest(${sent.map((m) => m.chatId)}::text[],
+                  ${sent.map((m) => String(m.messageId))}::text[]) AS m(chat_id, message_id)
+    ON CONFLICT (chat_id, message_id) DO NOTHING`;
 }
 
 /**

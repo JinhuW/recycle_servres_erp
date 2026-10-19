@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "rs-fleetd"
+version = "0.12.5"
+description = "Host agent that runs the coordinator's desired Facebook workers on one Docker host"
+requires-python = ">=3.11"
+# Deliberately dependency-free: it runs next to the Docker socket on every
+# worker host, speaks the coordinator's HTTP API over stdlib urllib and drives
+# Docker through its CLI. Nothing to pin, nothing to rebuild for a CVE.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+rs-fleetd = "rs_fleetd.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["rs_fleetd"]

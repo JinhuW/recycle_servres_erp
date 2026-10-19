@@ -6,6 +6,9 @@ import { applyMarketWrites } from '../lib/marketWrite';
 import { appendPriceEvent, appendPriceEvents } from '../lib/refPriceEvents';
 import { escapeLike } from '../lib/pagination';
 import { canonPartCol, canonPartNumberJs } from '../lib/part-number';
+import {
+  convertToUsd, getLatestRateToUsd, isSupportedCurrency, SUPPORTED_CURRENCIES,
+} from '../lib/fx';
 import { bearerGuard } from '../oauth/guard';
 import {
   readPriceSheetRows, PriceColumnsNotFoundError, type SheetPriceRow,
@@ -280,7 +283,8 @@ market.post('/chips', async (c) => {
 // Number and Unit Price columns — every other column is ignored — and report
 // what each row would do to the board. Writes nothing. The file is parsed and
 // dropped, never stored, so its cap is its own rather than the attachment
-// limits in getUploadLimits.
+// limits in getUploadLimits. The board is USD: a yuan price is converted at
+// the FX ledger's latest rate, and the preview's prices are what apply writes.
 const PRICE_IMPORT_MAX_BYTES = 8 * 1024 * 1024;
 // Prices one import writes, and so how many matches a preview may offer: a
 // preview the apply would refuse is one the manager can do nothing with.
@@ -288,14 +292,19 @@ const PRICE_IMPORT_MAX_ROWS = 5000;
 const PRICE_IMPORT_MAX_PRICE = 10_000_000;
 
 type ImportRowStatus =
-  | 'matched' | 'not-on-market' | 'no-price' | 'invalid-price' | 'not-usd' | 'duplicate';
+  | 'matched' | 'not-on-market' | 'no-price' | 'invalid-price' | 'other-currency' | 'duplicate';
 
 type ImportRow = {
   sheet: string;
   rowNumber: number;
   rawPart: string;
   rawPrice: string;
+  /** US dollars on a matched row; as the sheet lists it on any other. */
   price: number | null;
+  /** The currency the row names, or the one the import was given. */
+  currency: string;
+  /** The yuan a matched row's price was converted from. */
+  listedPrice?: number;
   status: ImportRowStatus;
   refPriceId?: string;
   partNumber?: string | null;
@@ -324,6 +333,11 @@ market.post('/price-import/preview', async (c) => {
   if (file.size > PRICE_IMPORT_MAX_BYTES) {
     return c.json({ error: `file too large (max ${PRICE_IMPORT_MAX_BYTES} bytes)` }, 413);
   }
+  // What an unmarked price is in; a price that names its currency keeps it.
+  const listCurrency = form.get('currency') ?? 'USD';
+  if (!isSupportedCurrency(listCurrency)) {
+    return c.json({ error: `currency must be one of ${SUPPORTED_CURRENCIES.join(', ')}` }, 400);
+  }
 
   const { default: ExcelJS } = await import('exceljs');
   const wb = new ExcelJS.Workbook();
@@ -347,9 +361,10 @@ market.post('/price-import/preview', async (c) => {
   // key would match every row that has none.
   const canons = [...new Set(sheetRows.map(r => r.canonPart).filter(Boolean))];
   const canonCol = canonPartCol(sql, sql`part_number`);
+  const currencyOf = (s: SheetPriceRow) => s.currency ?? listCurrency;
   // Two rows can share a canonical part number; the most recently maintained
   // one is the one written, as for the scraper push.
-  const [refs, targetMargin] = await Promise.all([
+  const [refs, targetMargin, cny] = await Promise.all([
     canons.length === 0 ? Promise.resolve([] as ImportRef[]) : sql<ImportRef[]>`
       SELECT DISTINCT ON (canon) ${canonCol} AS canon, id, part_number, label,
              last_price::float AS last_price, avg_sell::float AS avg_sell
@@ -358,6 +373,7 @@ market.post('/price-import/preview', async (c) => {
        ORDER BY canon, updated_at DESC, id
     `,
     getWorkspaceSetting(sql, 'target_margin', 0.30),
+    sheetRows.some(s => currencyOf(s) === 'CNY') ? getLatestRateToUsd(sql, 'CNY') : Promise.resolve(null),
   ]);
   const refByCanon = new Map(refs.map(r => [r.canon, r]));
 
@@ -366,29 +382,33 @@ market.post('/price-import/preview', async (c) => {
   // too — price lists get corrected by re-listing the part further down.
   const winnerByRef = new Map<string, ImportRow>();
   for (const s of sheetRows) {
+    const currency = currencyOf(s);
     const row: ImportRow = {
       sheet: s.sheet, rowNumber: s.rowNumber, rawPart: s.rawPart,
-      rawPrice: s.rawPrice, price: s.price, status: 'not-on-market',
+      rawPrice: s.rawPrice, price: s.price, currency, status: 'not-on-market',
     };
+    const usd = s.price !== null && currency === 'CNY' ? convertToUsd(s.price, cny!.rate) : s.price;
     const ref = refByCanon.get(s.canonPart);
     if (!ref) {
       row.status = 'not-on-market';
-    } else if (s.priceKind === 'empty' || s.price === 0) {
+    } else if (s.priceKind === 'empty' || usd === 0) {
       // A 0 on a price list means "not buying", and as a price it would zero
-      // the part's max buy.
+      // the part's max buy — as would yuan that convert to under a cent.
       row.status = 'no-price';
     } else if (s.priceKind === 'invalid') {
       row.status = 'invalid-price';
-    } else if (s.currency !== null) {
-      row.status = 'not-usd';
+    } else if (!isSupportedCurrency(currency)) {
+      row.status = 'other-currency';
     } else {
       row.status = 'matched';
+      row.price = usd;
+      if (currency === 'CNY') row.listedPrice = s.price!;
       row.refPriceId = ref.id;
       row.partNumber = ref.part_number;
       row.label = ref.label;
       row.oldPrice = ref.last_price;
       row.oldMaxBuy = maxBuyFor(ref.last_price ?? ref.avg_sell, targetMargin);
-      row.newMaxBuy = maxBuyFor(s.price, targetMargin);
+      row.newMaxBuy = maxBuyFor(usd, targetMargin);
       const prior = winnerByRef.get(ref.id);
       if (prior) prior.status = 'duplicate';
       winnerByRef.set(ref.id, row);
@@ -396,13 +416,13 @@ market.post('/price-import/preview', async (c) => {
     rows.push(row);
   }
 
-  const summary = { matched: 0, notOnMarket: 0, noPrice: 0, invalid: 0, notUsd: 0, duplicate: 0 };
+  const summary = { matched: 0, notOnMarket: 0, noPrice: 0, invalid: 0, otherCurrency: 0, duplicate: 0 };
   for (const r of rows) {
     if (r.status === 'matched') summary.matched++;
     else if (r.status === 'not-on-market') summary.notOnMarket++;
     else if (r.status === 'no-price') summary.noPrice++;
     else if (r.status === 'invalid-price') summary.invalid++;
-    else if (r.status === 'not-usd') summary.notUsd++;
+    else if (r.status === 'other-currency') summary.otherCurrency++;
     else summary.duplicate++;
   }
   if (summary.matched > PRICE_IMPORT_MAX_ROWS) {
@@ -410,7 +430,8 @@ market.post('/price-import/preview', async (c) => {
       error: `at most ${PRICE_IMPORT_MAX_ROWS} prices per import`, code: 'too-many-prices', max: PRICE_IMPORT_MAX_ROWS,
     }, 413);
   }
-  return c.json({ targetMargin, rows, summary });
+  const fx = cny && { oneUsdInQuote: 1 / cny.rate, source: cny.source };
+  return c.json({ targetMargin, fx, rows, summary });
 });
 
 // Step 2: write the prices the manager saw in the preview, each as a market

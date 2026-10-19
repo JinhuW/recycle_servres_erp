@@ -17,6 +17,314 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.291.0] - 2026-10-18
+
+Monitors ▸ Reddit shows which prompt is better. It lists every prompt
+version's leads, and sets the candidate on trial against the live prompt on
+the same posts (RS-309).
+
+### Added
+
+- **A "Which prompt is better" card.** Since RS-305 the Reddit tracker scores
+  every prompt version by the leads its alerts draw. A lead is an alert
+  someone reacted to with anything but 👎.
+  - The card sits under *From a post to an alert*.
+  - For each version it shows posts judged and flagged, buyer leads as
+    "x of n" with the rate, and the dev chat's 👍 and 👎.
+  - It covers 7 days, 30 days or all time.
+  - A row opens to show the full prompt.
+  - A prompt that hasn't judged a post yet still gets a row marked *new*.
+    That way a prompt that was just started or just promoted is visible.
+- **The trial, in the terms the decision is made in.** While a candidate
+  prompt is on trial, a 2×2 grid sets its verdicts against the live prompt's
+  on the same posts. One sentence says how much junk promoting would drop,
+  how many leads it would lose and how many new ones it would find. Until 20
+  posts are labelled, the card warns that a handful of reactions isn't
+  proof.
+- **Trials run from the page.** A manager can start, edit and end a trial,
+  and can promote the candidate.
+  - Promoting asks for confirmation first, and the confirmation names the
+    rules it will switch off. The candidate was judged without them.
+  - The proxy forwards `prompt-stats` and the new, narrow `prompt-candidate`
+    routes. The tracker's settings stay outside its allowlist.
+
+## [1.290.0] - 2026-10-18
+
+### Changed
+
+- **Assigning a Facebook pool account that has a live cookie now logs the
+  worker in from that cookie, not a password** (RS-308). *Assign to fleet* used
+  to always write the account's password into the worker's vault and force a
+  fresh password login with 2FA from the worker's proxy IP — the harshest
+  sign-in Facebook sees, and the one most likely to checkpoint an account. When
+  the account's stored cookie is its own (its `c_user` matches the account),
+  the ERP now seals that cookie as the worker's session on the coordinator and
+  has the worker restore it: logged in with no password and no 2FA, on the
+  account's own device (RS-293). The password stays in the vault as the
+  worker's own fallback, so a cookie Facebook has already expired still ends in
+  a password login rather than a dead worker; an account with no usable cookie
+  assigns exactly as before. Needs facebook-tracker ≥ 0.12.5 — against an older
+  fleet the Assign falls back to the password login on its own.
+## [1.289.1] - 2026-10-18
+
+The fleet's keyword lists keep their height while you edit them (RS-307).
+
+### Fixed
+
+- **Opening Edit no longer reshuffles the chips.** Each chip used to grow an
+  inline × when Edit opened, so the fields rewrapped. On `server_ram` the
+  Exclude field grew a whole row (147 → 178 px) and every chip after the
+  first wrap moved, including the one you were reaching for. The × is now a
+  small badge on the chip's corner. It shows on hover and on keyboard focus,
+  and takes no space, so chips stay where they were. "+ Add keyword" and the
+  input that replaces it share one slot and row height, so the last row wraps
+  the same way too.
+- **The card holds its height.** Edit used to render only the stage being
+  edited, so the card snapped to that form's height. It went from 617 to
+  533 px on the production rules. The Edit form now takes its stage's place
+  among the hidden stages, as reading already did, so the card stays as tall
+  as its tallest stage.
+- **Edit as text takes the field's exact place.** The textarea is as tall as
+  the chip field it replaces, and the syntax hint moved up into the list's
+  hint line, so switching to text and back no longer shrinks the list.
+
+## [1.289.0] - 2026-10-18
+
+The fleet's title gate shows the Include list it reads, and *Try a listing*
+shows where each keyword matched (RS-306).
+
+### Changed
+
+- **The title gate shows Include too.** With the title prefilter on, a card
+  whose title has no include keyword is dropped before its page is opened.
+  *Try a listing* said so ("No include keyword matched"), but the title gate
+  only showed Exclude, so the list that decided it was out of sight and
+  could not be edited there. Both lists now sit side by side, as on the
+  keyword gate, and the title gate's Edit form saves both. With the
+  prefilter off, Include is dimmed and says the keyword gate checks it after
+  the page is read.
+- **The verdicts are on the item tabs, and the listing is marked up.** Each
+  item's verdict used to sit in a separate row of grey pills above the item
+  tabs. It now sits on the item's own tab. Below the tabs, the typed title
+  (and on the keyword gate the description) is shown with every Include word
+  marked green and every Exclude word red for the selected item. Every chip
+  the listing holds fills in its list's colour, not just the first one, so
+  a listing that hits both lists shows both.
+- **The strike-through catches what the matcher catches.** Matching starts
+  at a word but stays open at the end, so `ram` in Exclude drops every
+  listing with an Include keyword `ram stick` or `rams`, and that keyword can
+  never let a listing through. The strike-through used to need the same
+  word in both lists. It now covers these cases as well, and its tooltip
+  names the exclude keyword responsible.
+
+## [1.288.0] - 2026-10-18
+
+The fleet's keyword gate shows its two lists as Include and Exclude (RS-304).
+
+### Changed
+
+- **Two lists that look like opposites.** The Keyword gate on Monitors ▸
+  Facebook used to show the keywords a listing must mention and the ones that
+  drop it as the same grey chips, told apart only by a small label. They are
+  now **Include**, a green field with a + badge, and **Exclude**, a red field
+  with a − badge. The Title gate shows Exclude alone. *Try a listing* fills
+  the chip that matched in its list's colour, so you can see at a glance which
+  side caught a listing.
+- **Flat lists, and counts you can check by eye.** Every list already means
+  "any one of these", so the "or" between chips and the boxes around OR
+  groups are gone. Each keyword is one chip, and an AND/NOT rule stays a
+  single expression chip. The list headers, the item tabs (`+11 −23`) and the
+  stage pills now count keywords instead of config lines; before, "Must match
+  one of 1" sat above twelve chips.
+- **Add a keyword where you're looking.** In read mode each list ends with
+  **+ Add keyword**, which opens the stage's Edit form with that list's input
+  focused. In edit mode the input trails the last chip, as in any tag field.
+  An include keyword that is also in Exclude is struck through, because the
+  exclude list is checked first and that keyword can never pass a listing.
+  Saved rules keep their shape: removing a chip rewrites only its own line,
+  and new keywords are added as new lines.
+
+## [1.287.1] - 2026-10-18
+
+Monitors ▸ Facebook shows the sweep time in US Eastern (RS-303).
+
+### Changed
+
+- **"Sweeps at" reads Eastern, not UTC.** The workers' `start_at` is a UTC
+  time because their clocks run on UTC, and the Search stage showed it raw:
+  `Sweeps at (UTC) 10:00` for a sweep that starts at 6 in the morning in New
+  York. The chip and the Edit form now show and take Eastern time, and a
+  save converts back to UTC, so the stored config and the console contract
+  are unchanged. The conversion uses the offset New York is on that day. The
+  stored time does not follow DST, so after the November change the same
+  config reads an hour earlier until it is edited.
+
+## [1.287.0] - 2026-10-18
+
+Monitors ▸ Reddit's pipeline card counts the past 24 hours (RS-302).
+
+### Changed
+
+- **"From a post to an alert" shows today, not all time.** The tracker
+  never deletes posts, so the Poll, Evaluate and Notify counts only ever
+  grew. In production they read 21,135 collected, 1,264 matched and 19,822
+  rejected, which says little about how the fleet is doing now. The card now
+  counts the posts discovered in the last 24 hours, and its header says so.
+  The three stages and the Waiting, Rejected, Queued and Failed chips all
+  count that same set of posts, so the stages read as a funnel. "Oldest
+  waiting" and the "Gave up after retries" list still look at every post,
+  because a window would hide an evaluator that has been stuck for a day.
+  The tracker's `GET /api/stats` takes a new `since` parameter for this, and
+  the ERP proxy passes it through.
+
+## [1.286.0] - 2026-10-18
+
+The Market page's price import reads a list priced in US dollars or yuan
+(RS-301).
+
+### Added
+
+- **A USD / CNY switch on Import market prices.** The import took every
+  price as US dollars and skipped any row marked in yuan, so a supplier's
+  RMB list had to be converted by hand before it could be dropped in. A
+  **Prices in** switch (USD by default) now sets what an unmarked price is
+  in, and yuan convert to dollars at the FX ledger's latest rate, the same
+  rate CNY sell orders use. The preview shows each converted price with its
+  yuan under it, plus the rate it used. Flipping the switch on the preview
+  re-reads the same file. A price that names its own currency (`$`, USD, 美元,
+  `¥`, 元, RMB, in the cell, its format, the header or the tab) keeps it
+  either way. A `Unit Price (USD)` column is never converted, and a `¥` row in
+  a dollar list is converted rather than skipped. Other currencies are still
+  skipped, now with their name. Apply writes the dollar prices the preview
+  showed, and each part's max buy follows.
+
+### Changed
+
+- **The shared sheet reader reports dollars explicitly.** It used to give a
+  dollar-marked row the same `null` currency as an unmarked one. A CNY import
+  would then have converted a dollar column. It now reports `USD`, and reads
+  a bare `$` as dollars, except after a letter (HK$) or a format's `[`. The
+  sell-order bid import doesn't read this field. The `USD` / `CNY` picker
+  moved to `components/CurrencyPicker.tsx` now that three pages use it.
+
+## [1.285.0] - 2026-10-18
+
+The Facebook fleet's Recent activity records when a worker's status changes
+(RS-300).
+
+### Added
+
+- **Status changes in Recent activity.** The aside on Monitors ▸ Facebook ▸
+  Fleet was rebuilt from whatever timestamps the fleet doc carried (the latest
+  sweep, listing and session backup, open checkpoints). When three workers
+  turned *Needs attention · Session expired*, nothing in it said so, because
+  the coordinator overwrote each worker's state on every heartbeat and kept
+  no history. The coordinator now logs each change of reported state and
+  each live → stale → dead → live crossing, dated when it happened, and
+  rs_console serves the week's changes in `/v1/fleet` as `status_changes`.
+  The aside lists them as "went stale", "went offline", "is reporting
+  again", "reported for the first time", "needs attention: Session expired"
+  and "is healthy again". Each dot shows the status the worker moved into,
+  not the one it is in now, and the worker page's History lists the same
+  changes. A console without the log leaves the aside as it was, with its
+  derived "stopped reporting" line. The coordinator side ships with the next
+  facebook-tracker release, and the ERP shows the new entries once that
+  release is deployed.
+
+## [1.284.0] - 2026-10-18
+
+Monitors ▸ Reddit shows its post counts and recent matches (RS-299).
+
+### Added
+
+- **The ERP proxy forwards the tracker's matches and stats.** v1.283.0 built
+  the Reddit page's **Recent matches** aside and the **From a post to an
+  alert** counts on the tracker's `/api/matches` and `/api/stats`, but the
+  proxy's allowlist didn't include them yet. The page showed "not counted",
+  dashes and an empty aside. `GET /api/tracker/matches` (with its `limit` and
+  `since` query passed through) and `GET /api/tracker/stats` are now
+  forwarded, managers only like the rest. The stage cards count posts
+  collected, matched and alerted. Evaluate shows how many posts are waiting
+  and rejected, and how long the oldest has waited. The aside lists the
+  newest matched posts.
+
+## [1.283.1] - 2026-10-18
+
+The Facebook fleet's Status column shows when each worker last heartbeated
+(RS-298).
+
+### Changed
+
+- **The status says where it comes from.** Live, Stale and Offline are judged
+  from heartbeat age, but that age was only a tooltip on the Today cell. Each
+  row's Status cell now carries a "heartbeat 3 min. ago" line under the chip,
+  with the exact time on hover. A silent worker keeps its "Silent since" note
+  instead, and an undeployed or never-reported worker shows no line.
+
+## [1.283.0] - 2026-10-18
+
+Monitors ▸ Reddit takes the Facebook fleet page's layout (RS-297).
+
+### Changed
+
+- **The Reddit page reads like the Facebook one.** Before, it was three
+  stacked cards: rules, subreddits, then a fleet table at the bottom. Now it
+  has a Live / Stale / Dead legend whose counts filter the workers table. The
+  table sits beside a **Recent matches** aside, and below them is a **From a
+  post to an alert** card with one stage per worker loop: Poll, Evaluate,
+  Notify. The subreddits are edited in the Poll stage and the alert rules in
+  the Evaluate stage. Each stage says what the loop does and what it reads.
+  Notify lists the posts that gave up after their retries. The page reuses
+  the Facebook page's styles, so the two monitors look and behave the same.
+  The matches aside and the stage counts read the tracker's `/api/matches`
+  and `/api/stats`, which the ERP proxy doesn't forward yet. Until it does,
+  they show a dash or a short note, and the rest of the page works as before.
+
+## [1.282.0] - 2026-10-18
+
+Watching a worker's browser can go full screen (RS-296).
+
+### Added
+
+- **Full screen for the fleet watch view.** A *Full screen* button on
+  `/fleet/watch/<worker>` gives the live browser, and the sign-in panel beside
+  it, the whole display. The remote browser scales up to fill it, so a CAPTCHA
+  is no longer a postage stamp. Ticking *Take control* enters full screen in the
+  same click, and handing control back leaves it. Esc or *Exit full screen*
+  shrinks the view without dropping control. A bar at the top carries the
+  status, *Take control*, Re-login, the account panel toggle and Exit, because
+  the page head isn't visible in full screen.
+
+## [1.281.3] - 2026-10-18
+
+The fleet's *Assign account* gives the worker the login's own device (RS-293).
+
+### Fixed
+
+- **A pool login reaches its worker on the device it was made in.** Assign now
+  sends the `datr` and `sb` from the pool account's cookie: Facebook's device
+  id, without the session. The worker's first sign-in is then the account's
+  own machine on a new IP, instead of a browser Facebook has never seen. va-1
+  was locked as possibly hacked after four sign-ins from four new devices.
+  Only a cookie whose `c_user` is the account's UID lends its device, and
+  `c_user`, `xs` and `fr` never leave the ERP. The tracker stores the device
+  only for an account that has none yet (facebook-tracker 0.12.2).
+
+## [1.281.2] - 2026-10-18
+
+The fleet's *Assign account* sends the account's Facebook UID with its login
+(RS-292).
+
+### Fixed
+
+- **A login handed to a fleet worker no longer inherits the previous login's
+  device.** The worker's vault account now carries the UID of the login it was
+  given (`fb_uid`). Since facebook-tracker 0.11.0 the UID picks the device the
+  worker presents: its own user agent, screen, timezone and `datr`/`sb`
+  cookies, the same on whichever worker runs it. Before, a swapped-in login
+  signed in carrying the old login's device cookies, which links the two
+  accounts.
+
 ## [1.281.1] - 2026-10-18
 
 Release review fixes for the Edit cities dialog's search frequency and the

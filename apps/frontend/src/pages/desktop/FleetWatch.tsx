@@ -47,7 +47,9 @@ type Phase =
 export function FleetWatch({ workerId }: { workerId: string }) {
   const { t, locale } = useT();
   const screenRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
   const rfbRef = useRef<RFB | null>(null);
+  const [fullscreen, setFullscreen] = useState(false);
   const [phase, setPhase] = useState<Phase>({ kind: 'connecting' });
   const [control, setControl] = useState(false);
   const controlRef = useRef(control);
@@ -175,6 +177,28 @@ export function FleetWatch({ workerId }: { workerId: string }) {
     return () => document.removeEventListener('visibilitychange', onHide);
   }, []);
 
+  // Esc leaves full screen without telling us, so follow the document.
+  useEffect(() => {
+    const onChange = () => setFullscreen(!!cardRef.current && document.fullscreenElement === cardRef.current);
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  const enterFullscreen = () => {
+    if (!document.fullscreenElement) cardRef.current?.requestFullscreen().catch(() => { /* denied: stay inline */ });
+  };
+  const exitFullscreen = () => {
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => { /* already out */ });
+  };
+
+  // Control is when a checkpoint needs every pixel, so taking it goes full
+  // screen in the same click (the gesture requestFullscreen insists on).
+  // Leaving full screen keeps control; handing control back leaves it.
+  const changeControl = (on: boolean) => {
+    setControl(on);
+    if (on) enterFullscreen(); else exitFullscreen();
+  };
+
   // Types into whichever field has focus in the remote browser, then hands
   // the keyboard back to the viewer so Enter goes to Facebook too.
   const typeText = (text: string): boolean => {
@@ -191,6 +215,45 @@ export function FleetWatch({ workerId }: { workerId: string }) {
     : phase.kind === 'connecting'
       ? { tone: '', text: t('fbcWatchConnecting') }
       : { tone: 'neg', text: t('fbcWatchDisconnected') };
+
+  // The page head sits outside the full-screen card, so the bar inside it
+  // repeats these.
+  const statusChip = (
+    <span className={`fl-watch-status ${status.tone}`} aria-live="polite">
+      <span className="dot" />{status.text}
+    </span>
+  );
+  const controlToggle = (
+    <label className="fl-watch-toggle" title={t('fbcWatchControlHint')}>
+      <input type="checkbox" checked={control} onChange={e => changeControl(e.target.checked)} />
+      <span>{t('fbcWatchControl')}</span>
+    </label>
+  );
+  const reloginButton = (
+    <ReloginButton workerId={workerId} account={account} onQueued={() => setFleetRead(n => n + 1)} />
+  );
+  const reconnectButton = phase.kind === 'closed' && (
+    <button type="button" className="btn sm" onClick={() => setAttempt(n => n + 1)}>
+      <Icon name="rotate" size={13} />
+      {t('fbcWatchReconnect')}
+    </button>
+  );
+  const accountToggle = (
+    <button type="button" className="btn sm" aria-pressed={!accountHidden}
+      onClick={() => setAccountHidden(!accountHidden)}>
+      <Icon name="panelRight" size={13} />
+      {t(accountHidden ? 'fbcWatchAcctShow' : 'fbcWatchAcctHide')}
+    </button>
+  );
+  const reloginStrip = relogin && (
+    <div className={`fl-relogin ${RELOGIN_STRIP[relogin.phase].tone}`} role="status" aria-live="polite">
+      <Icon name={RELOGIN_STRIP[relogin.phase].icon} size={15} />
+      <span>{t(RELOGIN_STRIP[relogin.phase].key, { age: relTime(relogin.since, locale) })}</span>
+      {relogin.phase === 'needs_you' && !control && phase.kind === 'connected' && (
+        <button type="button" className="btn sm" onClick={() => changeControl(true)}>{t('fbcWatchControl')}</button>
+      )}
+    </div>
+  );
 
   return (
     <>
@@ -213,39 +276,39 @@ export function FleetWatch({ workerId }: { workerId: string }) {
           </div>
         </div>
         <div className="page-actions">
-          <span className={`fl-watch-status ${status.tone}`} aria-live="polite">
-            <span className="dot" />{status.text}
-          </span>
-          <label className="fl-watch-toggle" title={t('fbcWatchControlHint')}>
-            <input type="checkbox" checked={control} onChange={e => setControl(e.target.checked)} />
-            <span>{t('fbcWatchControl')}</span>
-          </label>
-          <ReloginButton workerId={workerId} account={account} onQueued={() => setFleetRead(n => n + 1)} />
-          {phase.kind === 'closed' && (
-            <button type="button" className="btn sm" onClick={() => setAttempt(n => n + 1)}>
-              <Icon name="rotate" size={13} />
-              {t('fbcWatchReconnect')}
-            </button>
-          )}
-          <button type="button" className="btn sm" aria-pressed={!accountHidden}
-            onClick={() => setAccountHidden(!accountHidden)}>
-            <Icon name="panelRight" size={13} />
-            {t(accountHidden ? 'fbcWatchAcctShow' : 'fbcWatchAcctHide')}
+          {statusChip}
+          {controlToggle}
+          {reloginButton}
+          {reconnectButton}
+          {accountToggle}
+          <button type="button" className="btn sm" onClick={enterFullscreen}>
+            <Icon name="maximize" size={13} />
+            {t('fbcWatchFullscreen')}
           </button>
         </div>
       </div>
 
-      {relogin && (
-        <div className={`fl-relogin ${RELOGIN_STRIP[relogin.phase].tone}`} role="status" aria-live="polite">
-          <Icon name={RELOGIN_STRIP[relogin.phase].icon} size={15} />
-          <span>{t(RELOGIN_STRIP[relogin.phase].key, { age: relTime(relogin.since, locale) })}</span>
-          {relogin.phase === 'needs_you' && !control && phase.kind === 'connected' && (
-            <button type="button" className="btn sm" onClick={() => setControl(true)}>{t('fbcWatchControl')}</button>
-          )}
-        </div>
-      )}
+      {!fullscreen && reloginStrip}
 
-      <div className={`card fl-watch${control ? ' in-control' : ''}${accountHidden ? '' : ' with-account'}`}>
+      <div ref={cardRef} className={`card fl-watch${control ? ' in-control' : ''}${accountHidden ? '' : ' with-account'}`}>
+        {fullscreen && (
+          <>
+            <div className="fl-watch-fsbar">
+              <span className="fl-watch-fsbar-id mono">{workerId}</span>
+              {statusChip}
+              <span className="fl-watch-fsbar-gap" />
+              {controlToggle}
+              {reloginButton}
+              {reconnectButton}
+              {accountToggle}
+              <button type="button" className="btn sm" onClick={exitFullscreen}>
+                <Icon name="minimize" size={13} />
+                {t('fbcWatchExitFullscreen')}
+              </button>
+            </div>
+            {reloginStrip}
+          </>
+        )}
         <div className="fl-watch-body">
           <div className="fl-watch-stage">
             <div className="fl-watch-screen" ref={screenRef} />

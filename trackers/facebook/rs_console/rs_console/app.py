@@ -60,9 +60,9 @@ Configuration (env):
 The one exception to "read-mostly" besides resolving a checkpoint is the VNC
 bridge (`/v1/vnc/...`): it moves bytes between the operator's browser and a
 worker's x11vnc, so the dashboard's "Watch" button shows the live Chromium.
-It reaches a worker only if that worker is listed in RS_VNC_TARGETS, only
-with a single-use ticket minted against the console token, and it never
-touches the coordinator.
+It reaches a worker only if that worker is listed in RS_VNC_TARGETS or run
+by a trusted fleet host (the coordinator's `/v1/fleet/state`), only with a
+single-use ticket minted against the console token.
 """
 
 import asyncio
@@ -71,9 +71,10 @@ import os
 import re
 import secrets as pysecrets
 import threading
+import time
 import tomllib
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import httpx
 from fastapi import (
@@ -210,6 +211,9 @@ async def workers() -> Response:
     return await _forward("GET", "/v1/workers")
 
 
+_WORKER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
 @app.post("/v1/workers/{worker_id}/relogin", dependencies=[Depends(require_token)])
 async def worker_relogin(worker_id: str) -> Response:
     """Queue a Facebook re-login for one worker (console "Re-login" button).
@@ -220,12 +224,23 @@ async def worker_relogin(worker_id: str) -> Response:
     return await _forward("POST", f"/v1/workers/{worker_id}/relogin")
 
 
+@app.post("/v1/workers/{worker_id}/restore-session", dependencies=[Depends(require_token)])
+async def worker_restore(worker_id: str) -> Response:
+    """Queue a session restore for one worker (RS-308), the gentle counterpart
+    to Re-login: the worker restores the snapshot the cookie-first Assign just
+    sealed rather than forcing a password login. Moves no credentials itself.
+    """
+    if not _WORKER_ID.match(worker_id):
+        raise HTTPException(status_code=400, detail="Not a valid worker id")
+    return await _forward("POST", f"/v1/workers/{worker_id}/restore-session")
+
+
 # What the ERP's "Edit credentials" form may set on a vault account. Listed
 # rather than passed through so that a field the coordinator adds later (a
 # proxy URL, a VNC address) is a decision here, not something the ERP can
 # reach by accident. Secrets are write-only end to end: the coordinator's
 # answer carries presence flags, never a value.
-ACCOUNT_WRITE_FIELDS = ("worker_id", "fb_username", "region", "allow_password_login")
+ACCOUNT_WRITE_FIELDS = ("worker_id", "fb_username", "fb_uid", "region", "allow_password_login")
 ACCOUNT_SECRET_FIELDS = (
     "password",
     "email",
@@ -235,6 +250,24 @@ ACCOUNT_SECRET_FIELDS = (
     "imap_port",
 )
 _ACCOUNT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@-]{0,63}$")
+# The login's legacy device. Only these two cookies may cross: the pool cookie
+# they come from also carries a live session (c_user, xs), and that must never
+# reach a worker.
+DEVICE_COOKIE_NAMES = ("datr", "sb")
+DEVICE_COOKIE_FIELDS = ("name", "value", "domain", "path", "expires", "httpOnly", "secure", "sameSite")
+
+
+def _device_cookies(raw: Any) -> List[Dict[str, Any]]:
+    if not isinstance(raw, list) or not 1 <= len(raw) <= 4:
+        raise HTTPException(status_code=400, detail="device_cookies must be 1 to 4 cookies")
+    cookies = []
+    for cookie in raw:
+        if not isinstance(cookie, dict) or cookie.get("name") not in DEVICE_COOKIE_NAMES:
+            raise HTTPException(
+                status_code=400, detail="device_cookies may hold only datr and sb"
+            )
+        cookies.append({k: cookie[k] for k in DEVICE_COOKIE_FIELDS if k in cookie})
+    return cookies
 
 
 @app.put("/v1/accounts/{account_id}", dependencies=[Depends(require_token)])
@@ -264,7 +297,32 @@ async def put_account(account_id: str, request: Request) -> Response:
             for k, v in secrets.items()
             if k in ACCOUNT_SECRET_FIELDS and (v is None or isinstance(v, str))
         }
+    if body.get("device_cookies") is not None:
+        upstream_body["device_cookies"] = _device_cookies(body["device_cookies"])
     return await _forward("PUT", f"/v1/accounts/{account_id}", json_body=upstream_body)
+
+
+@app.put("/v1/workers/{worker_id}/session", dependencies=[Depends(require_token)])
+async def seed_worker_session(worker_id: str, request: Request) -> Response:
+    """Seal a pool account's cookie as this worker's restorable session (RS-308).
+
+    The cookie-first Assign: the worker restores this instead of a password
+    login. Only `cookie` and `reason` cross; the coordinator validates the
+    cookie and files it under the account the slot already holds, so the ERP
+    can seed a session but still cannot read one back.
+    """
+    if not _WORKER_ID.match(worker_id):
+        raise HTTPException(status_code=400, detail="Not a valid worker id")
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Expected a JSON object") from None
+    if not isinstance(body, dict) or not isinstance(body.get("cookie"), str):
+        raise HTTPException(status_code=400, detail="Expected a JSON object with a cookie")
+    upstream: Dict[str, Any] = {"cookie": body["cookie"]}
+    if isinstance(body.get("reason"), str):
+        upstream["reason"] = body["reason"]
+    return await _forward("PUT", f"/v1/workers/{worker_id}/session", json_body=upstream)
 
 
 @app.get("/v1/challenges", dependencies=[Depends(require_token)])
@@ -314,8 +372,55 @@ def dashboard() -> HTMLResponse:
 _tickets = vnc.TicketStore()
 
 
+# How long the fleet's VNC addresses are reused. A worker the fleet just
+# started is watchable within this, and a page of Watch clicks costs the
+# coordinator one request.
+FLEET_VNC_TTL_S = 30.0
+_fleet_vnc: Dict[str, Any] = {"at": 0.0, "targets": {}}
+_fleet_vnc_lock = threading.Lock()
+
+
+def _fleet_configs() -> Optional[settings.FleetConfigs]:
+    try:
+        base, headers = _upstream()
+    except HTTPException:
+        return None
+    return settings.FleetConfigs(base, headers)
+
+
+def _fleet_vnc_targets() -> Dict[str, vnc.Target]:
+    """Where to reach each worker a trusted fleet host runs.
+
+    On the console's own host (no vnc_host) the worker's container is on the
+    rs-fleet network by name; elsewhere it publishes its own port. A host that
+    only observes runs nothing yet, so its workers keep their RS_VNC_TARGETS
+    entry until it is trusted.
+    """
+    with _fleet_vnc_lock:
+        if time.monotonic() - _fleet_vnc["at"] < FLEET_VNC_TTL_S:
+            return dict(_fleet_vnc["targets"])
+        targets: Dict[str, vnc.Target] = {}
+        fleet = _fleet_configs()
+        try:
+            body = fleet.state() if fleet is not None else {}
+        except (settings.FleetError, ValueError):
+            body = {}
+        hosts = {h["host_id"]: h for h in body.get("hosts") or []}
+        for a in body.get("assignments") or []:
+            host = hosts.get(a.get("host_id")) or {}
+            if a.get("state") != "run" or not host.get("authoritative") or a.get("move_to_host"):
+                continue
+            if host.get("vnc_host"):
+                if a.get("vnc_port"):
+                    targets[a["worker_id"]] = (str(host["vnc_host"]), int(a["vnc_port"]))
+            else:
+                targets[a["worker_id"]] = (f"rs-worker-{a['worker_id']}", 5900)
+        _fleet_vnc.update(at=time.monotonic(), targets=targets)
+        return dict(targets)
+
+
 def _vnc_targets() -> Dict[str, vnc.Target]:
-    return vnc.parse_targets(_env("RS_VNC_TARGETS"))
+    return {**vnc.parse_targets(_env("RS_VNC_TARGETS")), **_fleet_vnc_targets()}
 
 
 def _vnc_pages() -> Dict[str, str]:
@@ -399,11 +504,13 @@ async def fleet() -> Dict[str, Any]:
     fleet_cfg = _read_toml(_env("RS_FLEET_CONFIG", "/config/fleet.toml"))
     monitor = _read_toml(_env("RS_MONITOR_CONFIG", "/config/monitor.toml"))
     monitor_worker_id = _env("RS_MONITOR_WORKER_ID") or _env("RS_WORKER_ID")
-    # What each named worker actually runs, cities included.
+    # What each named worker actually runs, cities included. A fleet worker's
+    # config comes from the coordinator below, and wins over a mounted copy.
     worker_cfgs = {
         wid: cfg for wid, path in settings.targets()
         if wid and (cfg := _read_toml(str(path))) is not None
     }
+    fleet_ids: list = []
 
     rows: Optional[list] = None
     accounts: Optional[list] = None
@@ -412,6 +519,7 @@ async def fleet() -> Dict[str, Any]:
     search_cycles: Optional[list] = None
     worker_reviews: Optional[list] = None
     search_cities: Optional[list] = None
+    status_changes: Optional[list] = None
     error: Optional[str] = None
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT_S, base_url=base, headers=headers) as client:
@@ -428,6 +536,21 @@ async def fleet() -> Dict[str, Any]:
                 rows = (res.json() or {}).get("workers") or []
             else:
                 error = f"coordinator returned {res.status_code}"
+
+            # An older coordinator answers 404: no fleet, mounted configs only.
+            listing = await client.get("/v1/fleet/configs") if rows is not None else None
+            if listing is not None and listing.status_code == 200:
+                fleet_ids = [c["worker_id"] for c in (listing.json() or {}).get("configs") or []]
+                texts = await asyncio.gather(
+                    *(client.get(f"/v1/fleet/configs/{wid}") for wid in fleet_ids),
+                    return_exceptions=True,
+                )
+                for wid, text in zip(fleet_ids, texts):
+                    if isinstance(text, httpx.Response) and text.status_code == 200:
+                        try:
+                            worker_cfgs[wid] = tomllib.loads((text.json() or {}).get("toml") or "")
+                        except (tomllib.TOMLDecodeError, ValueError):
+                            pass
 
             if rows is not None:
                 # Accounts are one list; session metadata is per worker, so ask
@@ -446,11 +569,13 @@ async def fleet() -> Dict[str, Any]:
 
                 # Each worker's "today". Two days of rows cover every US
                 # zone's local day; an older coordinator answers 404, which
-                # leaves `today` null rather than the page broken.
-                cycles, reviews, cities = await asyncio.gather(
+                # leaves `today` (and `status_changes`) null rather than the
+                # page broken.
+                cycles, reviews, cities, changes = await asyncio.gather(
                     client.get("/v1/stats/search-cycles", params={"hours": 48}),
                     client.get("/v1/stats/reviews/workers", params={"days": 2}),
                     client.get("/v1/stats/search-cities"),
+                    client.get("/v1/stats/status-changes", params={"days": 7}),
                     return_exceptions=True,
                 )
                 if isinstance(cycles, httpx.Response) and cycles.status_code == 200:
@@ -459,6 +584,8 @@ async def fleet() -> Dict[str, Any]:
                     worker_reviews = (reviews.json() or {}).get("rows") or []
                 if isinstance(cities, httpx.Response) and cities.status_code == 200:
                     search_cities = (cities.json() or {}).get("rows") or []
+                if isinstance(changes, httpx.Response) and changes.status_code == 200:
+                    status_changes = (changes.json() or {}).get("rows") or []
     except (httpx.HTTPError, ValueError):
         error = "Coordinator is unreachable"
 
@@ -478,6 +605,8 @@ async def fleet() -> Dict[str, Any]:
         worker_reviews=worker_reviews,
         search_cities=search_cities,
     )
+    # The week's status changes, newest first, for the ERP's Recent activity.
+    doc["status_changes"] = status_changes
     if rows is not None:
         # How often each city is searched. An older coordinator answers 404,
         # which leaves the cities unmarked rather than the page broken.
@@ -499,7 +628,7 @@ async def fleet() -> Dict[str, Any]:
     targets = fleet_view.proxy_targets(doc, dict(os.environ))
     fleet_view.apply_proxies(doc, targets, await proxy_exit.resolve(targets.values()))
     doc["settings"] = {
-        "editable": master is not None and "error" not in saved and settings.writable(),
+        "editable": master is not None and "error" not in saved and settings.writable(bool(fleet_ids)),
         "updated_at": saved.get("updated_at"),
         "updated_by": saved.get("updated_by"),
         "error": saved.get("error"),
@@ -524,7 +653,8 @@ def put_settings(body: Any = Body(default=None)) -> Dict[str, Any]:
     master = _read_toml(_env("RS_MASTER_CONFIG", "/config/master.toml"))
     if master is None:
         raise HTTPException(status_code=503, detail="master.toml is not mounted")
-    if not settings.writable():
+    fleet = _fleet_configs()
+    if not settings.writable(fleet is not None):
         raise HTTPException(
             status_code=409,
             detail="This console mounts the worker configs read-only; redeploy it to save settings",
@@ -536,7 +666,7 @@ def put_settings(body: Any = Body(default=None)) -> Dict[str, Any]:
             current = {"search": fleet_view.search_settings(effective)}
             patch = settings.validate(body, list((master.get("item") or {}).keys()), current)
             values = settings.merge(saved["values"], patch)
-            changed = settings.apply(values)
+            changed = settings.apply(values, fleet=fleet)
         except settings.SettingsError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
         except OSError:
@@ -552,9 +682,14 @@ def put_worker_cities(worker_id: str, body: Any = Body(default=None)) -> Dict[st
     """Save the cities one worker searches, and write them into its config
     only. The worker picks them up between jobs and sweeps straight away."""
     path = settings.config_for(worker_id)
-    if path is None:
+    fleet = _fleet_configs()
+    try:
+        in_fleet = fleet is not None and worker_id in fleet.ids()
+    except settings.FleetError:
+        in_fleet = False
+    if path is None and not in_fleet:
         raise HTTPException(status_code=404, detail=f"No config is mounted for worker {worker_id}")
-    if not settings.writable():
+    if not settings.writable(in_fleet):
         raise HTTPException(
             status_code=409,
             detail="This console mounts the worker configs read-only; redeploy it to save cities",
@@ -564,7 +699,12 @@ def put_worker_cities(worker_id: str, body: Any = Body(default=None)) -> Dict[st
             city_list = settings.validate_cities(body)
             saved = settings.load()
             values = settings.merge(saved["values"], {"workers": {worker_id: {"cities": city_list}}})
-            changed = settings.apply(values, [(worker_id, path)])
+            changed = settings.apply(
+                values,
+                [(worker_id, path)] if path is not None else [],
+                fleet if in_fleet else None,
+                [worker_id],
+            )
         except settings.SettingsError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
         except OSError:

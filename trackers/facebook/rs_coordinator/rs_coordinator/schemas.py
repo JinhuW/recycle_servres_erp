@@ -209,6 +209,8 @@ class HeartbeatRequest(BaseModel):
     # worker that learns a new step must not have its whole heartbeat refused.
     login_step: str | None = Field(default=None, max_length=32)
     login_step_at: str | None = Field(default=None, max_length=40)
+    # The Docker host the worker runs on, as its fleet agent named it.
+    host_id: str | None = Field(default=None, max_length=64)
     detail: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -245,6 +247,9 @@ class WorkerOut(BaseModel):
     relogin_last_requested_at: str | None = None
     login_step: str | None = None
     login_step_at: str | None = None
+    host_id: str | None = None
+    # Set while the fleet has the worker stopped on purpose (slot turned off).
+    retired_at: str | None = None
     # Derived by the control plane, not reported: live / stale / dead.
     liveness: str | None = None
     needs_attention: bool = False
@@ -318,6 +323,20 @@ class SearchCycleRow(BaseModel):
 
 class SearchCycleList(BaseModel):
     rows: List[SearchCycleRow]
+
+
+class StatusEventRow(BaseModel):
+    """A worker's status changing: its reported `state`, or its liveness."""
+
+    worker_id: str
+    at: str
+    kind: str
+    was: str | None = None
+    became: str
+
+
+class StatusEventList(BaseModel):
+    rows: List[StatusEventRow]
 
 
 class SearchCityRow(BaseModel):
@@ -405,6 +424,85 @@ class SessionBackupRequest(BaseModel):
     storage_state: Dict[str, Any]
     user_agent: str | None = None
     session_expiry: str | None = None
+    # The device profile the worker's browser presented this session under.
+    # Absent from monitors that predate profiles.
+    device_id: str | None = Field(default=None, max_length=64)
+
+
+class SessionSeedRequest(BaseModel):
+    """A pool account's stored cookie, to seal as a worker's session snapshot.
+
+    The cookie is the raw value the ERP holds (RS-308): a browser cookie
+    header, a cookie-extension JSON export, or a flat {name: value} object.
+    The coordinator validates and converts it (`cookies.py`); the slot's own
+    account decides whose identity it is filed under, so only the cookie
+    travels here.
+    """
+
+    cookie: str = Field(max_length=16384)
+    reason: str | None = None
+
+
+class ObservedDevice(BaseModel):
+    """What a worker's browser presents today, sent once so the first profile
+    of an account that is already logged in copies it rather than replacing it."""
+
+    user_agent: str | None = Field(default=None, max_length=512)
+    viewport_w: int | None = Field(default=None, ge=320, le=4096)
+    viewport_h: int | None = Field(default=None, ge=240, le=4096)
+    screen_w: int | None = Field(default=None, ge=320, le=8192)
+    screen_h: int | None = Field(default=None, ge=240, le=8192)
+    device_scale_factor: float | None = Field(default=None, ge=0.5, le=4)
+    locale: str | None = Field(default=None, max_length=35)
+    timezone_id: str | None = Field(default=None, max_length=64)
+
+
+class IdentityRequest(BaseModel):
+    observed: ObservedDevice | None = None
+
+
+class DeviceCookie(BaseModel):
+    """One of Facebook's device cookies, as Playwright reports it."""
+
+    name: Literal["datr", "sb"]
+    value: str = Field(min_length=1, max_length=512)
+    domain: str = Field(pattern=r"(^|\.)facebook\.com$", max_length=64)
+    path: str = Field(default="/", max_length=64)
+    expires: float = -1
+    httpOnly: bool = False
+    secure: bool = True
+    sameSite: Literal["Strict", "Lax", "None"] = "None"
+
+
+class DeviceCookiesReport(BaseModel):
+    """The datr/sb a worker's browser was issued on its first Facebook page,
+    reported before any login is tried."""
+
+    device_id: str = Field(max_length=64)
+    cookies: List[DeviceCookie] = Field(min_length=1, max_length=4)
+
+
+LOGIN_TRIGGERS = ("boot", "relogin", "forced", "swap")
+LOGIN_OUTCOMES = (
+    "restored", "password_ok", "watch_ok", "challenge", "locked", "failed", "timed_out",
+)
+
+
+class LoginEvent(BaseModel):
+    """A worker starting or finishing a login (POST /v1/workers/{id}/logins).
+
+    `datr_fp` is a fingerprint of the `datr` the browser presents, never the
+    cookie: the ledger records which device a login used, and the cookie
+    itself stays sealed in the device profile.
+    """
+
+    phase: Literal["start", "finish"]
+    attempt_id: int | None = None
+    trigger: Literal[LOGIN_TRIGGERS] | None = None  # type: ignore[valid-type]
+    device_id: str | None = Field(default=None, max_length=64)
+    datr_fp: str | None = Field(default=None, pattern=r"^[0-9a-f]{16}$")
+    outcome: Literal[LOGIN_OUTCOMES] | None = None  # type: ignore[valid-type]
+    detail: Dict[str, Any] | None = None
 
 
 class SessionMeta(BaseModel):
@@ -428,6 +526,8 @@ class AccountOut(BaseModel):
     account_id: str
     worker_id: str | None = None
     fb_username: str | None = None
+    # The Facebook uid of that login: public, the key of its device profile.
+    fb_uid: str | None = None
     region: str | None = None
     vnc_url: str | None = None
     allow_password_login: bool = False
@@ -448,6 +548,7 @@ class AccountList(BaseModel):
 # the URL space and the audit log that could not be typed on a command line.
 ACCOUNT_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._@-]{0,63}$"
 WORKER_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+FB_UID_PATTERN = r"^[0-9]{1,32}$"
 
 
 class AccountUpsert(BaseModel):
@@ -462,10 +563,40 @@ class AccountUpsert(BaseModel):
 
     worker_id: str | None = Field(default=None, pattern=WORKER_ID_PATTERN)
     fb_username: str | None = Field(default=None, max_length=200)
+    # Sent with `fb_username` when the ERP knows it. A new username sent
+    # without one forgets the stored uid (see `AccountStore.put_account`).
+    fb_uid: str | None = Field(default=None, pattern=FB_UID_PATTERN)
     region: str | None = Field(default=None, max_length=64)
     allow_password_login: bool | None = None
     secrets: Dict[str, Optional[str]] = Field(default_factory=dict)
+    # The login's legacy device (the pool cookie's datr/sb), sent with
+    # `fb_uid`. Seeds the account's device profile when it has no cookies yet.
+    device_cookies: List[DeviceCookie] | None = Field(default=None, min_length=1, max_length=4)
 
 
 class StatusResponse(BaseModel):
     status: str = "ok"
+
+
+# -- fleet --------------------------------------------------------------------
+
+
+class FleetHostUpdate(BaseModel):
+    capacity: int | None = Field(default=None, ge=0, le=100)
+    cordoned: bool | None = None
+    # Off until an operator has watched the agent's plan: it applies nothing.
+    authoritative: bool | None = None
+    # Where the console reaches VNC ports this host publishes; None for the
+    # console's own host, whose workers it reaches over the rs-fleet network.
+    vnc_host: str | None = Field(default=None, max_length=255)
+
+
+class FleetSlotUpdate(BaseModel):
+    enabled: bool | None = None
+    pin_host: str | None = Field(default=None, max_length=64)
+
+
+class FleetRelease(BaseModel):
+    version: str = Field(pattern=r"^[0-9]+\.[0-9]+\.[0-9]+$")
+    image: str = Field(min_length=1, max_length=255)
+    created_by: str | None = Field(default=None, max_length=120)

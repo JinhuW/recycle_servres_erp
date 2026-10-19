@@ -63,6 +63,7 @@ def heartbeat(
         ("version", payload.version),
         ("login_step", payload.login_step),
         ("login_step_at", payload.login_step_at),
+        ("host_id", payload.host_id),
     ):
         if value is not None:
             health_fields[name] = value
@@ -87,6 +88,8 @@ def heartbeat(
         except Exception:  # noqa: BLE001 - the strip is a nicety; the heartbeat is not
             logger.exception("Could not log a search cycle for worker %s", worker_id)
 
+    log_beat(worker_id, previous, payload.state.value if payload.state else None)
+
     # The stored row, not the payload: a partial heartbeat still carries the
     # account and VNC link an earlier one reported, and the alert needs them.
     current = db.get_worker(worker_id) or {}
@@ -107,6 +110,29 @@ def heartbeat(
     return HeartbeatResponse(directives=_take_directives(worker_id))
 
 
+def log_beat(
+    worker_id: str, previous: Optional[Dict[str, Any]], incoming_state: Optional[str] = None
+) -> None:
+    """Record what a beat changed in the worker's status log.
+
+    `previous` is the row before the beat stamped it. The listing upload calls
+    this too, because it stamps the heartbeat as well.
+    """
+    row = previous or {}
+    changes, logged = health.liveness_changes(
+        row.get("logged_liveness"), row.get("last_heartbeat_at"), beat=True
+    )
+    state = health.state_change(row.get("state"), incoming_state)
+    if state:
+        changes.append(state)
+    if not changes and logged == row.get("logged_liveness"):
+        return
+    try:
+        deps.db.log_status_changes(worker_id, changes, logged)
+    except Exception:  # noqa: BLE001 - the log is a record; the heartbeat is not
+        logger.exception("Could not log a status change for worker %s", worker_id)
+
+
 def _take_directives(worker_id: str) -> list[str]:
     """Hand out the push-style directives queued for this worker.
 
@@ -117,6 +143,9 @@ def _take_directives(worker_id: str) -> list[str]:
     if deps.db.take_relogin(worker_id):
         directives.append("relogin")
         logger.info("Delivered re-login directive to worker %s", worker_id)
+    if deps.db.take_restore(worker_id):
+        directives.append("restore")
+        logger.info("Delivered session-restore directive to worker %s", worker_id)
     return directives
 
 
@@ -140,6 +169,18 @@ def request_relogin(worker_id: str) -> Dict[str, Any]:
     """
     deps.db.request_relogin(worker_id)
     return {"status": "ok", "worker_id": worker_id, "relogin": "requested"}
+
+
+@router.post("/v1/workers/{worker_id}/restore-session", dependencies=[Depends(require_admin)])
+def request_restore(worker_id: str) -> Dict[str, Any]:
+    """Queue a session restore for a worker; its next directive poll picks it up.
+
+    Admin-only: the cookie-first Assign seeds the slot a snapshot through
+    `PUT /v1/workers/{id}/session`, then calls this so the worker restores it
+    at once rather than at its next sweep — the gentle counterpart to relogin.
+    """
+    deps.db.request_restore(worker_id)
+    return {"status": "ok", "worker_id": worker_id, "restore": "requested"}
 
 
 @router.get("/api/v1/workers")

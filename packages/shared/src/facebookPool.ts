@@ -92,6 +92,32 @@ export function cookieUid(cookie: string): string | null {
   return /(?:^|;)\s*c_user\s*=\s*(\d+)\s*(?=;|$)/.exec(text)?.[1] ?? null;
 }
 
+/** One named cookie's value from a pool cookie, in any of the forms `cookieUid` reads. */
+export function cookieValue(cookie: string, name: string): string | null {
+  const text = cookie.trim();
+  const plain = (value: unknown) => (typeof value === 'string' && value ? value : null);
+  if (text.startsWith('[') || text.startsWith('{')) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return null;
+    }
+    if (Array.isArray(parsed)) {
+      const entry = (parsed as { name?: unknown; value?: unknown }[]).find(
+        (c) => c && typeof c === 'object' && c.name === name,
+      );
+      return plain(entry?.value);
+    }
+    return plain((parsed as Record<string, unknown> | null)?.[name]);
+  }
+  for (const part of text.split(';')) {
+    const at = part.indexOf('=');
+    if (at > 0 && part.slice(0, at).trim() === name) return plain(part.slice(at + 1).trim());
+  }
+  return null;
+}
+
 /**
  * The base32 setup key behind what was pasted: the key itself without the
  * spaces and dashes authenticator apps print, or the `secret` of an

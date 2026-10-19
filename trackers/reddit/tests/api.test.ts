@@ -1,6 +1,7 @@
 import type {Hono} from 'hono';
 import {afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi} from 'vitest';
 import {createApi} from '../src/api.ts';
+import {candidateConfig, ensurePromptVersion, liveConfig} from '../src/prompts.ts';
 import {SettingsStore} from '../src/settings.ts';
 import {createTestDb, type TestDb} from './helpers/db.ts';
 
@@ -294,6 +295,47 @@ describe('settings', () => {
     expect(res.status).toBe(200);
   });
 
+  it('sets the dev chats and rejects anything but a list of chat ids', async () => {
+    const ok = await request('/api/settings/telegram_dev_chat_ids', {
+      method: 'PUT',
+      body: JSON.stringify({value: ['-1009000000001']}),
+    });
+    const bad = await request('/api/settings/telegram_dev_chat_ids', {
+      method: 'PUT',
+      body: JSON.stringify({value: '-1009000000001'}),
+    });
+
+    expect(ok.status).toBe(200);
+    expect(bad.status).toBe(400);
+    expect((await bad.json() as {error: string}).error).toContain('telegram_dev_chat_ids');
+  });
+
+  it('accepts an empty candidate prompt, which ends the trial', async () => {
+    for (const value of ['Judge bulk lots only.', '']) {
+      const res = await request('/api/settings/candidate_eval_prompt', {
+        method: 'PUT',
+        body: JSON.stringify({value}),
+      });
+      expect(res.status).toBe(200);
+    }
+    const bad = await request('/api/settings/candidate_eval_prompt', {
+      method: 'PUT',
+      body: JSON.stringify({value: 7}),
+    });
+    expect(bad.status).toBe(400);
+  });
+
+  it('takes "" or an OpenRouter id as the candidate model', async () => {
+    const statuses = [];
+    for (const value of ['', 'anthropic/claude-haiku-5.5', 'claude-haiku']) {
+      statuses.push((await request('/api/settings/candidate_llm_model', {
+        method: 'PUT',
+        body: JSON.stringify({value}),
+      })).status);
+    }
+    expect(statuses).toEqual([200, 200, 400]);
+  });
+
   it('rejects an out-of-range post age', async () => {
     const res = await request('/api/settings/max_post_age_hours', {
       method: 'PUT',
@@ -309,7 +351,8 @@ describe('settings', () => {
     };
 
     expect(Object.keys(body.settings).sort()).toEqual([
-      'eval_prompt', 'llm_model', 'max_post_age_hours', 'telegram_chat_ids',
+      'candidate_eval_prompt', 'candidate_llm_model', 'eval_prompt', 'llm_model',
+      'max_post_age_hours', 'telegram_chat_ids', 'telegram_dev_chat_ids',
     ]);
   });
 });
@@ -329,6 +372,25 @@ describe('stats and requeue', () => {
     expect(body.posts['notified']).toBe(1);
     expect(body.posts['failed']).toBe(1);
     expect(body.failed[0]?.reddit_id).toBe('t3_f');
+  });
+
+  it('counts only posts discovered since the given time', async () => {
+    await seedTarget('t3_old', 'old item');
+    await db.sql`UPDATE posts SET discovered_at = NOW() - INTERVAL '2 days'`;
+    await seedTarget('t3_new', 'new item');
+
+    const allTime = await (await request('/api/stats')).json() as {posts: Record<string, number>};
+    expect(allTime.posts['notified']).toBe(2);
+
+    const since = new Date(Date.now() - 86_400_000).toISOString();
+    const windowed = await (await request(`/api/stats?since=${since}`)).json() as {
+      posts: Record<string, number>;
+    };
+    expect(windowed.posts['notified']).toBe(1);
+  });
+
+  it('rejects an unparseable since value on stats', async () => {
+    expect((await request('/api/stats?since=yesterday')).status).toBe(400);
   });
 
   it('puts a failed post back in the queue', async () => {
@@ -555,5 +617,296 @@ describe('rules endpoints', () => {
 
     expect(res.status).toBe(200);
     expect(await (await request('/api/rules')).json()).toMatchObject({rules: []});
+  });
+});
+
+describe('prompt scoring', () => {
+  const BUYERS = '-1003943525487';
+  const DEV = '-1009000000001';
+
+  async function setSetting(key: string, value: unknown): Promise<void> {
+    await db.sql`UPDATE settings SET value = ${db.sql.json(value as never)} WHERE key = ${key}`;
+  }
+
+  beforeEach(async () => {
+    await db.sql`DELETE FROM prompt_versions`;
+    await db.sql`DELETE FROM message_reactions`;
+    await db.sql`DELETE FROM message_reaction_counts`;
+    await setSetting('eval_prompt', 'Live prompt: ECC RAM and SSDs.');
+    await setSetting('llm_model', 'openai/gpt-4o-mini');
+    await setSetting('candidate_eval_prompt', 'Candidate prompt: 7 or more units.');
+    await setSetting('candidate_llm_model', '');
+  });
+
+  afterAll(async () => {
+    await setSetting('candidate_eval_prompt', '');
+  });
+
+  async function versions(): Promise<{live: number; candidate: number; retired: number}> {
+    const store = new SettingsStore(db.sql, 0);
+    const current = await store.get();
+    return {
+      live: await ensurePromptVersion(db.sql, liveConfig(current, [])),
+      candidate: await ensurePromptVersion(db.sql, candidateConfig(current)!),
+      retired: await ensurePromptVersion(db.sql, {model: 'old/model', systemPrompt: 'Old.'}),
+    };
+  }
+
+  async function seedPost(
+    id: string,
+    versionId: number,
+    isTarget: boolean,
+    discoveredDaysAgo = 0,
+  ): Promise<void> {
+    await db.sql`
+      INSERT INTO posts (reddit_id, subreddit, title, url, posted_at, discovered_at, status,
+                         is_target, prompt_version_id)
+      VALUES (${id}, 'homelabsales', 'A listing', ${`https://reddit.com/${id}`}, NOW(),
+              NOW() - make_interval(days => ${discoveredDaysAgo}),
+              ${isTarget ? 'notified' : 'rejected'}, ${isTarget}, ${versionId})`;
+  }
+
+  async function seedCandidate(id: string, versionId: number, isTarget: boolean): Promise<void> {
+    await db.sql`
+      INSERT INTO candidate_verdicts (reddit_id, prompt_version_id, is_target, summary, reasoning)
+      VALUES (${id}, ${versionId}, ${isTarget}, 's', 'r')`;
+  }
+
+  async function sent(id: string, chatId: string, messageId: number, audience: string) {
+    await db.sql`
+      INSERT INTO alert_messages (chat_id, message_id, reddit_id, audience)
+      VALUES (${chatId}, ${messageId}, ${id}, ${audience})`;
+  }
+
+  async function react(chatId: string, messageId: number, emoji: string[], reactor = '7001') {
+    await db.sql`
+      INSERT INTO message_reactions (chat_id, message_id, reactor, emoji, updated_at)
+      VALUES (${chatId}, ${messageId}, ${reactor}, ${db.sql.json(emoji)}, NOW())`;
+  }
+
+  /**
+   * p1: both flag it, buyers 👍            → a lead both would send
+   * p2: live only, buyers 👎               → junk the candidate drops
+   * p3: live only, dev channel count 👍    → a lead the candidate would lose
+   * p4: candidate only, dev 👍             → a lead only the candidate finds
+   * p5: neither                            → never sent, unlabelled
+   * p6: a retired version, ten days ago, buyers 👍
+   */
+  async function seedScenario() {
+    const v = await versions();
+    await seedPost('p1', v.live, true);
+    await seedCandidate('p1', v.candidate, true);
+    await sent('p1', BUYERS, 1, 'buyers');
+    await react(BUYERS, 1, ['👍']);
+
+    await seedPost('p2', v.live, true);
+    await seedCandidate('p2', v.candidate, false);
+    await sent('p2', BUYERS, 2, 'buyers');
+    await react(BUYERS, 2, ['👎']);
+
+    await seedPost('p3', v.live, true);
+    await seedCandidate('p3', v.candidate, false);
+    await sent('p3', BUYERS, 3, 'buyers');
+    await sent('p3', DEV, 10, 'dev');
+    await db.sql`
+      INSERT INTO message_reaction_counts (chat_id, message_id, counts, updated_at)
+      VALUES (${DEV}, 10, ${db.sql.json({'👍': 1})}, NOW())`;
+
+    await seedPost('p4', v.live, false);
+    await seedCandidate('p4', v.candidate, true);
+    await sent('p4', DEV, 11, 'dev');
+    await react(DEV, 11, ['🔥']);
+
+    await seedPost('p5', v.live, false);
+    await seedCandidate('p5', v.candidate, false);
+
+    await seedPost('p6', v.retired, true, 10);
+    await sent('p6', BUYERS, 4, 'buyers');
+    await react(BUYERS, 4, ['👍']);
+
+    // A reaction on a message the ledger never saw, e.g. an alert from before it.
+    await react(BUYERS, 999, ['👍']);
+    return v;
+  }
+
+  type Stats = {
+    unmatchedReactions: number;
+    versions: Array<{
+      id: number;
+      role: string;
+      evaluated: number;
+      targets: number;
+      buyers: {sent: number; leads: number; notLeads: number; leadRate: number | null};
+      dev: {sent: number; leads: number; notLeads: number};
+      vsLive?: Record<string, {posts: number; leads: number; notLeads: number}>;
+    }>;
+  };
+
+  it('scores the live prompt by the leads its alerts drew', async () => {
+    const v = await seedScenario();
+
+    const body = await (await request('/api/prompt-stats')).json() as Stats;
+
+    const live = body.versions.find((x) => x.id === v.live)!;
+    expect(live).toMatchObject({
+      role: 'live',
+      evaluated: 5,
+      targets: 3,
+      buyers: {sent: 3, leads: 1, notLeads: 1, leadRate: 1 / 3},
+      dev: {sent: 1, leads: 1, notLeads: 0},
+    });
+    expect(live.vsLive).toBeUndefined();
+    expect(body.unmatchedReactions).toBe(1);
+  });
+
+  it('sets the candidate against the live verdicts on the same posts', async () => {
+    const v = await seedScenario();
+
+    const body = await (await request('/api/prompt-stats')).json() as Stats;
+
+    const candidate = body.versions.find((x) => x.id === v.candidate)!;
+    expect(candidate).toMatchObject({
+      role: 'candidate',
+      evaluated: 5,
+      targets: 2,
+      buyers: {sent: 1, leads: 1},
+      dev: {sent: 1, leads: 1},
+    });
+    expect(candidate.vsLive).toEqual({
+      both: {posts: 1, leads: 1, notLeads: 0},
+      liveOnly: {posts: 2, leads: 1, notLeads: 1},
+      candidateOnly: {posts: 1, leads: 1, notLeads: 0},
+      neither: {posts: 1, leads: 0, notLeads: 0},
+    });
+  });
+
+  it('counts only posts discovered since the given time', async () => {
+    const v = await seedScenario();
+
+    const all = await (await request('/api/prompt-stats')).json() as Stats;
+    const since = new Date(Date.now() - 2 * 86_400_000).toISOString();
+    const recent = await (await request(`/api/prompt-stats?since=${since}`)).json() as Stats;
+
+    expect(all.versions.find((x) => x.id === v.retired)).toMatchObject({
+      role: 'retired', evaluated: 1, buyers: {sent: 1, leads: 1},
+    });
+    expect(recent.versions.find((x) => x.id === v.retired)).toMatchObject({
+      evaluated: 0, buyers: {sent: 0, leads: 0, leadRate: null},
+    });
+    expect((await request('/api/prompt-stats?since=yesterday')).status).toBe(400);
+  });
+
+  it('promotes the candidate to live, disabling the rules, under the same version id', async () => {
+    const v = await versions();
+    await setSetting('candidate_llm_model', 'anthropic/claude-haiku-5.5');
+    const candidateId = await ensurePromptVersion(
+      db.sql, candidateConfig(await new SettingsStore(db.sql, 0).get())!,
+    );
+    const [rule] = await db.sql<Array<{id: number}>>`
+      INSERT INTO rules (name, prompt) VALUES ('Old rule', 'Old wording.') RETURNING id`;
+
+    const res = await request('/api/prompt-candidate/promote', {method: 'POST'});
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      evalPrompt: 'Candidate prompt: 7 or more units.',
+      llmModel: 'anthropic/claude-haiku-5.5',
+      disabledRules: [rule!.id],
+      promptVersionId: candidateId,
+    });
+    const now = await new SettingsStore(db.sql, 0).get();
+    expect(now).toMatchObject({
+      evalPrompt: 'Candidate prompt: 7 or more units.',
+      llmModel: 'anthropic/claude-haiku-5.5',
+      candidateEvalPrompt: '',
+      candidateLlmModel: '',
+    });
+    const [after] = await db.sql<Array<{enabled: boolean}>>`
+      SELECT enabled FROM rules WHERE id = ${rule!.id}`;
+    expect(after?.enabled).toBe(false);
+
+    const stats = await (await request('/api/prompt-stats')).json() as Stats;
+    expect(stats.versions.find((x) => x.id === candidateId)?.role).toBe('live');
+    expect(stats.versions.find((x) => x.id === v.live)?.role).toBe('retired');
+  });
+
+  it('reports the configured prompts, so a trial shows before its first verdict', async () => {
+    await db.sql`INSERT INTO rules (name, prompt) VALUES ('Rule', 'Some wording.')`;
+
+    const before = await (await request('/api/prompt-stats')).json() as {
+      config: {
+        live: {model: string; systemPrompt: string; promptVersionId: number | null};
+        candidate: {model: string; systemPrompt: string; promptVersionId: number | null} | null;
+        enabledRules: number;
+      };
+    };
+    expect(before.config).toEqual({
+      live: {
+        model: 'openai/gpt-4o-mini',
+        systemPrompt: expect.stringContaining('Rule: Some wording.'),
+        promptVersionId: null,
+      },
+      candidate: {
+        model: 'openai/gpt-4o-mini',
+        systemPrompt: 'Candidate prompt: 7 or more units.',
+        promptVersionId: null,
+      },
+      enabledRules: 1,
+    });
+
+    await db.sql`DELETE FROM rules`;
+    const v = await seedScenario();
+    const after = await (await request('/api/prompt-stats')).json() as typeof before;
+    expect(after.config.live.promptVersionId).toBe(v.live);
+    expect(after.config.candidate?.promptVersionId).toBe(v.candidate);
+  });
+
+  it('starts a trial through its own route, validating the prompt and model', async () => {
+    await setSetting('candidate_eval_prompt', '');
+    const put = (body: unknown) => request('/api/prompt-candidate', {
+      method: 'PUT', body: JSON.stringify(body),
+    });
+
+    expect((await put({prompt: '   '})).status).toBe(400);
+    expect((await put({prompt: 'P', model: 'gpt-4o-mini'})).status).toBe(400);
+
+    const res = await put({prompt: '  Judge bulk lots only.  ', model: 'anthropic/claude-haiku-5.5'});
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({candidate: {
+      model: 'anthropic/claude-haiku-5.5',
+      systemPrompt: 'Judge bulk lots only.',
+      promptVersionId: null,
+    }});
+    expect(await new SettingsStore(db.sql, 0).get()).toMatchObject({
+      candidateEvalPrompt: 'Judge bulk lots only.',
+      candidateLlmModel: 'anthropic/claude-haiku-5.5',
+    });
+
+    // No model means the candidate runs on llm_model again.
+    await put({prompt: 'Judge bulk lots only.'});
+    expect((await new SettingsStore(db.sql, 0).get()).candidateLlmModel).toBe('');
+  });
+
+  it('ends a trial and keeps its numbers under a retired version', async () => {
+    const v = await seedScenario();
+
+    const res = await request('/api/prompt-candidate', {method: 'DELETE'});
+
+    expect(res.status).toBe(200);
+    const body = await (await request('/api/prompt-stats')).json() as Stats & {
+      config: {candidate: unknown};
+    };
+    expect(body.config.candidate).toBeNull();
+    expect(body.versions.find((x) => x.id === v.candidate)).toMatchObject({
+      role: 'retired', evaluated: 5, targets: 2,
+    });
+  });
+
+  it('refuses to promote when no candidate is on trial', async () => {
+    await setSetting('candidate_eval_prompt', '');
+
+    const res = await request('/api/prompt-candidate/promote', {method: 'POST'});
+
+    expect(res.status).toBe(400);
   });
 });

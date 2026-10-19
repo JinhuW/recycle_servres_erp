@@ -1,3 +1,3 @@
 """Console facade: the only fleet surface the outside world may reach."""
 
-__version__ = "0.10.1"
+__version__ = "0.12.5"

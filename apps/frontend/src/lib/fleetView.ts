@@ -4,7 +4,7 @@
 // Kept out of the components so they can be unit-tested without React.
 
 import type {
-  AlertHitRow, Challenge, CityTierSettings, CityWrite, FleetAccount, FleetCity, FleetDoc, ReviewStatsDay, SearchSettingsWrite,
+  AlertHitRow, Challenge, CityTierSettings, CityWrite, FleetAccount, FleetCity, FleetDoc, ReviewStatsDay, SearchSettingsWrite, StatusChange,
 } from './coordinator';
 import { ruleLines } from './keywordRules';
 
@@ -216,21 +216,47 @@ export function sortFleet(
   return keyed.map(k => k.w);
 }
 
-// The Recent activity feed. The coordinator keeps no event log the ERP can
-// read, so it is rebuilt from the timestamps it does serve: each worker's
-// latest search, listing and session backup, the moment a dead worker last
-// reported, and every open checkpoint.
-export type FleetEventKind = 'search' | 'listing' | 'backup' | 'silent' | 'checkpoint';
-export type FleetEvent = { at: string; workerId: string; kind: FleetEventKind; detail?: string };
+// The Recent activity feed. Status changes come from the coordinator's log
+// (`status_changes`); everything else is rebuilt from the timestamps it
+// serves: each worker's latest search, listing and session backup, and every
+// open checkpoint. Without the log, a dead worker's last heartbeat stands in
+// for the moment it went offline.
+export type FleetEventKind =
+  | 'search' | 'listing' | 'backup' | 'silent' | 'checkpoint'
+  | 'stale' | 'offline' | 'back' | 'first' | 'attention' | 'healthy';
+// `status` is the bucket a status change moved the worker into, which its dot
+// shows; the other events take the worker's current one.
+export type FleetEvent = { at: string; workerId: string; kind: FleetEventKind; detail?: string; status?: FleetStatus };
+
+// A reported DEAD reads as offline, the same as fleetStatus files it.
+function statusEvent(c: StatusChange): FleetEvent | null {
+  const base = { at: c.at, workerId: c.worker_id };
+  if (c.kind === 'state') {
+    if (c.became === 'HEALTHY') return { ...base, kind: 'healthy', status: 'live' };
+    if (c.became === 'DEAD') return { ...base, kind: 'offline', status: 'offline' };
+    return { ...base, kind: 'attention', detail: c.became, status: 'attention' };
+  }
+  switch (c.became) {
+    case 'stale': return { ...base, kind: 'stale', status: 'stale' };
+    case 'dead': return { ...base, kind: 'offline', status: 'offline' };
+    case 'live': return { ...base, kind: c.was ? 'back' : 'first', status: 'live' };
+    default: return null;
+  }
+}
 
 export function fleetActivity(fleet: FleetDoc | null, challenges: readonly Challenge[] | null): FleetEvent[] {
   const out: FleetEvent[] = [];
+  const logged = fleet?.status_changes;
   for (const w of fleet?.workers ?? []) {
     const h = w.health;
     if (h?.last_search_at) out.push({ at: h.last_search_at, workerId: w.worker_id, kind: 'search' });
     if (h?.last_listing_at) out.push({ at: h.last_listing_at, workerId: w.worker_id, kind: 'listing' });
     if (w.session?.backed_up_at) out.push({ at: w.session.backed_up_at, workerId: w.worker_id, kind: 'backup' });
-    if (h?.liveness === 'dead' && h.last_heartbeat_at) out.push({ at: h.last_heartbeat_at, workerId: w.worker_id, kind: 'silent' });
+    if (!logged && h?.liveness === 'dead' && h.last_heartbeat_at) out.push({ at: h.last_heartbeat_at, workerId: w.worker_id, kind: 'silent' });
+  }
+  for (const c of logged ?? []) {
+    const e = statusEvent(c);
+    if (e) out.push(e);
   }
   for (const ch of challenges ?? []) {
     out.push({ at: ch.created_at, workerId: ch.worker_id, kind: 'checkpoint', detail: ch.kind });
@@ -263,13 +289,14 @@ export const STAGE_FORMS: Partial<Record<FlowStage, StageForm>> = {
     items: ['search_phrases'],
   },
   cards: { search: ['max_results'], items: [] },
-  title: { search: ['title_prefilter'], items: ['antikeywords'] },
+  title: { search: ['title_prefilter'], items: ['keywords', 'antikeywords'] },
   keywords: { search: ['min_seller_rating', 'exclude_unrated_sellers'], items: ['keywords', 'antikeywords'] },
   ai: { search: ['rating', 'min_unit_count'], items: [], ai: true },
 };
 
 // The form's state: text as typed, so a half-typed number is not coerced.
-// Lists are one entry per line; sweep times are comma- or space-separated.
+// Lists are one entry per line; sweep times are comma- or space-separated,
+// in Eastern.
 export type SettingsDraft = Record<Exclude<SearchField, 'title_prefilter' | 'exclude_unrated_sellers'>, string> & {
   title_prefilter: boolean;
   exclude_unrated_sellers: boolean;
@@ -284,11 +311,12 @@ const text = (v: unknown) => (v === undefined || v === null ? '' : String(v));
 export function settingsDraft(
   fleet: FleetDoc,
   prompt: { prompt: string | null; rating_prompt: string | null } | null,
+  now: number = Date.now(),
 ): SettingsDraft {
   const s = fleet.search;
   const window = Array.isArray(s.date_listed) ? s.date_listed[s.date_listed.length - 1] : s.date_listed;
   return {
-    start_at: (s.start_at ?? []).join(', '),
+    start_at: (s.start_at ?? []).map(hm => utcToEastern(hm, now)).join(', '),
     date_listed: text(window),
     delivery_method: text(s.delivery_method),
     max_results: text(s.max_results),
@@ -319,14 +347,16 @@ const num = (v: string): number | string => (v.trim() !== '' && Number.isFinite(
  * The prompts go only when they were loaded, so a save from a card that
  * could not read them never blanks them.
  */
-export function settingsPatch(stage: FlowStage, draft: SettingsDraft, promptLoaded: boolean): SearchSettingsWrite {
+export function settingsPatch(
+  stage: FlowStage, draft: SettingsDraft, promptLoaded: boolean, now: number = Date.now(),
+): SearchSettingsWrite {
   const form = STAGE_FORMS[stage];
   if (!form) return {};
   const search: Record<string, unknown> = {};
   for (const key of form.search) {
     const v = draft[key];
     if (typeof v === 'boolean') search[key] = v;
-    else if (key === 'start_at') search[key] = v.split(/[\s,]+/).filter(Boolean);
+    else if (key === 'start_at') search[key] = v.split(/[\s,]+/).filter(Boolean).map(hm => easternToUtc(hm, now));
     else if (key === 'date_listed' || key === 'delivery_method' || key === 'search_interval' || key === 'max_search_interval') search[key] = v.trim();
     else search[key] = num(v);
   }
@@ -434,6 +464,26 @@ function localClock(ms: number, zone: string): { date: string; minutes: number }
 
 const hhmm = (minutes: number): string =>
   `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+
+// `start_at` is UTC because the workers' clocks are. It is shown and typed in
+// Eastern at the offset New York is on now, which is when the sweep fires
+// today; the stored time does not follow DST, so its Eastern reading moves.
+function easternOffset(now: number): number {
+  const d = new Date(now);
+  const diff = localClock(now, DEFAULT_ZONE).minutes - (d.getUTCHours() * 60 + d.getUTCMinutes());
+  return ((diff + 720 + 1440) % 1440) - 720;
+}
+
+// Anything that is not a clock time goes as typed, so the console's 400
+// names the field.
+function shiftClock(hm: string, by: number): string {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hm.trim());
+  if (!m || Number(m[1]) > 23 || Number(m[2]) > 59) return hm.trim();
+  return hhmm((Number(m[1]) * 60 + Number(m[2]) + by + 1440) % 1440);
+}
+
+export const utcToEastern = (hm: string, now: number = Date.now()): string => shiftClock(hm, easternOffset(now));
+export const easternToUtc = (hm: string, now: number = Date.now()): string => shiftClock(hm, -easternOffset(now));
 
 export type StripSegment = { from: number; to: number; kind: 'done' | 'eta' | 'rest' };
 export type DayStrip = {

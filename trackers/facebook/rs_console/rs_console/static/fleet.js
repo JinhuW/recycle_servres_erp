@@ -203,9 +203,40 @@ function workerHaystack(w) {
   return [
     w.worker_id, w.health?.account_id, w.health?.state, liveness(w),
     w.region?.key, w.region?.name, w.source, w.proxy_env,
+    w.proxy?.url, w.proxy?.ip, w.proxy?.city,
     w.account?.account_id, w.account?.fb_username, w.session?.fb_user_id,
     ...(w.cities ?? []).flatMap(c => [c.name, c.slug]),
   ].filter(Boolean).join(' ');
+}
+
+// `proxy` is absent from consoles older than 0.10.0, which only named the env var.
+function proxyExit(p) {
+  if (p.pending) return '<span class="muted">looking up exit…</span>';
+  if (p.error) return '<span class="muted">exit lookup failed</span>';
+  const place = [p.city, p.region, p.country].filter(Boolean).join(', ');
+  return esc([p.ip, place].filter(Boolean).join(' · ') || '—');
+}
+
+function proxyHost(url) {
+  try { return new URL(url).host; } catch { return url; }
+}
+
+function proxyCell(w) {
+  const p = w.proxy;
+  if (!p) return w.proxy_env ? `<span class="mono" style="font-size:12px">$${esc(w.proxy_env)}</span>` : '<span class="muted">own IP</span>';
+  const label = p.url ? `<span class="mono" style="font-size:12px">${esc(proxyHost(p.url))}</span>`
+    : `<span class="muted">${w.proxy_env ? 'unset' : 'own IP'}</span>`;
+  const where = p.pending || p.error ? proxyExit(p) : esc(p.city ?? '');
+  const tip = [p.ip, p.org].filter(Boolean).join(' · ');
+  return `<div style="white-space:nowrap" title="${esc(tip)}">${label}${where ? `<div class="muted" style="font-size:11.5px">${where}</div>` : ''}</div>`;
+}
+
+function proxyDetail(w) {
+  const p = w.proxy;
+  if (!p) return w.proxy_env ? `<span class="mono">$${esc(w.proxy_env)}</span>` : '<span class="muted">none · own IP</span>';
+  const label = p.url ? `<span class="mono">${esc(p.url)}</span>`
+    : `<span class="muted">${w.proxy_env ? `$${esc(w.proxy_env)} is not set · own IP` : 'none · own IP'}</span>`;
+  return `${label}<div class="muted" style="font-size:12px" title="${esc(p.org ?? '')}">${proxyExit(p)}</div>`;
 }
 
 // ── Rendering ──────────────────────────────────────────────────────────────────
@@ -524,7 +555,7 @@ function renderAccountInfo() {
       <td class="mono" style="white-space:nowrap">${hi(esc(w.worker_id), ts)}</td>
       <td>${hi(esc(w.region?.name ?? '—'), ts)}</td>
       <td>${h?.state ? `<span class="${STATE_CHIP[h.state] ?? 'chip muted'}">${esc(stateLabel(h.state))}</span>` : none}</td>
-      <td>${w.proxy_env ? `<span class="mono" style="font-size:12px">$${esc(w.proxy_env)}</span>` : '<span class="muted">own IP</span>'}</td>
+      <td>${proxyCell(w)}</td>
       <td>${twoFa}${stored.length ? ` ${stored.map(k => `<span class="chip muted mono">${esc(k)}</span>`).join(' ')}` : ''}${acct?.allow_password_login ? ' <span class="chip warn">password login</span>' : ''}</td>
       <td style="white-space:nowrap">${sess?.user_agent ? `<span title="${esc(sess.user_agent)}">${esc(browserLabel(sess.user_agent))}</span>` : none}</td>
       <td title="${esc(sess?.backed_up_at ?? '')}">${sess?.backed_up_at ? esc(relTime(sess.backed_up_at)) : '<span class="muted">never</span>'}</td>
@@ -548,7 +579,7 @@ function renderAccountInfo() {
       <table class="data-table">
         <thead><tr>
           <th>Facebook login</th><th>Facebook user id</th><th>Worker</th><th>Region</th><th>State</th>
-          <th title="The env var holding this worker's proxy">Proxy</th>
+          <th title="The proxy this worker searches through, and the city Facebook sees it in">Proxy</th>
           <th title="Secrets stored in the coordinator vault">2FA · secrets</th>
           <th title="Browser identity the session was captured with">Browser</th>
           <th title="When the session was last backed up to the coordinator">Session backup</th>
@@ -627,7 +658,7 @@ function detailRow(w, hits, ts) {
       ? `${esc(relTime(sess.backed_up_at))} <span class="muted">(${esc(sess.backed_up_at)})</span>`
       : '<span class="muted">never backed up</span>'],
     ['Region key', w.region?.key ? `<span class="mono">${esc(w.region.key)}</span>` : '<span class="muted">—</span>'],
-    ['Proxy', w.proxy_env ? `<span class="mono">$${esc(w.proxy_env)}</span>` : '<span class="muted">none · own IP</span>'],
+    ['Proxy', proxyDetail(w)],
     ['Session file', w.session_file ? `<span class="mono">${esc(w.session_file)}</span>` : '<span class="muted">—</span>'],
     ['Pacing', esc(pace)],
     ['Session expires', h.session_expiry ? `${esc(fmtDays(h.session_days_left))} <span class="muted">(${esc(h.session_expiry)})</span>` : '<span class="muted">—</span>'],

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  addToGroup, checkListing, containsTerm, duplicateTerms, formatRule, formatTerm, parseExpr, ruleMatches, ruleShape, splitEntry,
+  checkListing, containsTerm, duplicateTerms, formatRule, formatTerm, foundTerms, keywordCount, markTerms, parseExpr, ruleMatches,
+  ruleShape, shadowedTerms, splitEntry,
 } from './keywordRules';
 
 // Live rules from the fleet's server_ram item.
@@ -102,16 +103,52 @@ describe('checkListing', () => {
   });
 });
 
-describe('addToGroup', () => {
-  it('keeps operands already quoted instead of quoting them again', () => {
-    expect(addToGroup('ssd OR nvme', '"solid state"')).toBe('ssd OR nvme OR "solid state"');
-    expect(addToGroup('ssd OR nvme', '"m.2"')).toBe('ssd OR nvme OR "m.2"');
-    expect(ruleMatches(addToGroup('ssd OR nvme', '"solid state"')!, 'solid state drive')).toBe(true);
+describe('keywordCount', () => {
+  it('counts a keyword per chip, not per line', () => {
+    expect(keywordCount(['single stick', EBAY, BRANDS, 'ram AND NOT laptop'])).toBe(1 + 6 + 16 + 1);
+    expect(keywordCount([])).toBe(0);
+  });
+});
+
+describe('shadowedTerms', () => {
+  it('names the exclude keyword that catches every listing an include keyword would pass', () => {
+    const s = shadowedTerms(['"ram stick" OR memory', 'Corsair', 'rams', 'ssd'], ['ram', BRANDS, 'sd card']);
+    expect(s.get('ram stick')).toBe('ram');
+    expect(s.get('rams')).toBe('ram');
+    expect(s.get('corsair')).toBe('corsair');
+    expect(s.has('memory')).toBe(false);
+    // "sd card" needs "card" too, and "ssd" does not start with "sd".
+    expect(s.has('ssd')).toBe(false);
   });
 
-  it('quotes a bare phrase, and leaves an expression alone', () => {
-    expect(addToGroup('ssd OR nvme', 'hard drive')).toBe('ssd OR nvme OR "hard drive"');
-    expect(addToGroup('ssd', 'sata, sas')).toBe('ssd OR sata OR sas');
-    expect(addToGroup('ssd AND NOT used', 'nvme')).toBeNull();
+  it('leaves expressions out on both sides', () => {
+    expect(shadowedTerms(['ram AND ecc'], ['ram']).size).toBe(0);
+    expect(shadowedTerms(['ram'], ['ram AND NOT ecc']).size).toBe(0);
+  });
+});
+
+describe('foundTerms', () => {
+  it('finds every term the text holds, and each expression that matches', () => {
+    const f = foundTerms(['single stick', BRANDS, 'ddr3 AND NOT ddr4'], 'Corsair Vengeance RGB single  stick DDR3');
+    expect([...f.terms].sort()).toEqual(['corsair', 'rgb', 'single stick', 'vengeance']);
+    expect([...f.exprs]).toEqual([2]);
+  });
+});
+
+describe('markTerms', () => {
+  const lists = { keywords: ['ram OR memory OR ddr4', SSD], antikeywords: [BRANDS] };
+  const marked = (text: string) => markTerms(text, lists).map(r => (r.kind ? `[${r.kind}:${r.text}]` : r.text)).join('');
+
+  it('marks include and exclude words where a word starts, as written', () => {
+    expect(marked('Corsair Vengeance 32GB DDR4 RAM lot'))
+      .toBe('[exc:Corsair] [exc:Vengeance] 32GB [inc:DDR4] [inc:RAM] lot');
+    expect(marked('Ceramic tile, 4 SSDs')).toBe('Ceramic tile, 4 [inc:SSD]s');
+  });
+
+  it('finds a phrase across a run of spaces, and lets exclude win an overlap', () => {
+    expect(marked('Solid   state drives')).toBe('[inc:Solid   state] drives');
+    expect(markTerms('rgb ram', { keywords: ['rgb ram'], antikeywords: ['rgb'] }))
+      .toEqual([{ text: 'rgb', kind: 'exc' }, { text: ' ram', kind: 'inc' }]);
+    expect(markTerms('', lists)).toEqual([]);
   });
 });

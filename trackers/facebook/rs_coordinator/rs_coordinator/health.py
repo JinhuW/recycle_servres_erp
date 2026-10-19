@@ -20,7 +20,7 @@ coordinator restart does not re-page ops about a worker it already reported.
 """
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 from .schemas import WorkerState
 from .telegram_notify import escape_markdown
@@ -166,6 +166,9 @@ def liveness_sweep(
     moment = _moment(now)
     alerts: List[Tuple[str, str, Optional[str]]] = []
     for row in rows:
+        if row.get("retired_at"):
+            # Stopped by the fleet on purpose: its silence needs nobody.
+            continue
         worker_id = str(row.get("worker_id") or "")
         state = liveness(row.get("last_heartbeat_at"), moment)
         alerted = row.get("alerted_liveness")
@@ -182,6 +185,123 @@ def liveness_sweep(
         elif state == LIVE and alerted == DEAD:
             alerts.append((worker_id, f"*Worker {name} is reporting again*", None))
     return alerts
+
+
+# -- status log ------------------------------------------------------------
+# Unlike the alerts, the log (worker_status_events) records every change,
+# STALE included: it is the ERP's account of what happened, not a pager.
+
+STATE_CHANGE = "state"
+LIVENESS_CHANGE = "liveness"
+
+_LIVENESS_RANK = {LIVE: 0, STALE: 1, DEAD: 2}
+
+
+class StatusChange(NamedTuple):
+    """One worker_status_events row: `at` is when it happened."""
+
+    at: str
+    kind: str
+    was: Optional[str]
+    became: str
+
+
+def _stamp(moment: datetime) -> str:
+    """`db.utcnow`'s format, so stamps compare as text against its cutoffs."""
+    return moment.astimezone(timezone.utc).isoformat(timespec="seconds")
+
+
+def state_change(
+    previous_state: str | None, incoming_state: str | None, now: datetime | None = None
+) -> Optional[StatusChange]:
+    """The reported state moving, or None.
+
+    Raw strings, not the enum: a state from a newer worker is still a change
+    worth listing. A worker's first HEALTHY report is not — every deployment
+    starts with one.
+    """
+    if not incoming_state or incoming_state == previous_state:
+        return None
+    if previous_state is None and incoming_state == WorkerState.HEALTHY.value:
+        return None
+    return StatusChange(_stamp(_moment(now)), STATE_CHANGE, previous_state, incoming_state)
+
+
+def liveness_changes(
+    logged: str | None,
+    last_heartbeat_at: str | None,
+    now: datetime | None = None,
+    beat: bool = False,
+) -> Tuple[List[StatusChange], Optional[str]]:
+    """The liveness crossings since the log last recorded `logged`.
+
+    `last_heartbeat_at` is the stamp before this call's beat, if it is one.
+    Returns the changes and the new `logged_liveness`.
+
+    Crossings are stamped when they happened — the last heartbeat plus
+    STALE_AFTER or DEAD_AFTER — so a gap the ten-minute sweep never saw (it
+    began and ended between two sweeps, or the coordinator was down) is
+    still logged right when the next beat fills it in.
+
+    A row with nothing logged yet (`logged` None: it predates the log, or the
+    fleet retired it) takes its current liveness as a baseline without a
+    change, so the deploy that adds the log does not list every worker.
+    """
+    moment = _moment(now)
+    current = liveness(last_heartbeat_at, moment)
+    if current == UNKNOWN:
+        # Never reported: there is nothing to have crossed until it does.
+        if beat:
+            return [StatusChange(_stamp(moment), LIVENESS_CHANGE, None, LIVE)], LIVE
+        return [], logged
+
+    changes: List[StatusChange] = []
+    marker = logged if logged in _LIVENESS_RANK else current
+    beat_at = _parse_ts(last_heartbeat_at)
+    assert beat_at is not None  # liveness() was not UNKNOWN
+    if _LIVENESS_RANK[current] < _LIVENESS_RANK[marker]:
+        # Brought back by a stamp this log did not see: a listing upload, or
+        # a beat while the coordinator was restarting.
+        changes.append(StatusChange(_stamp(beat_at), LIVENESS_CHANGE, marker, LIVE))
+        marker = LIVE
+    if _LIVENESS_RANK[current] > _LIVENESS_RANK[marker]:
+        if marker == LIVE:
+            changes.append(
+                StatusChange(_stamp(beat_at + STALE_AFTER), LIVENESS_CHANGE, LIVE, STALE)
+            )
+        if current == DEAD:
+            changes.append(
+                StatusChange(_stamp(beat_at + DEAD_AFTER), LIVENESS_CHANGE, STALE, DEAD)
+            )
+        marker = current
+    if beat and marker != LIVE:
+        changes.append(StatusChange(_stamp(moment), LIVENESS_CHANGE, marker, LIVE))
+        marker = LIVE
+    return changes, marker
+
+
+def liveness_log_sweep(
+    rows: List[Dict[str, Any]], now: datetime | None = None
+) -> List[Tuple[str, List[StatusChange], Optional[str]]]:
+    """`(worker_id, changes, logged_liveness)` for each row whose log moved.
+
+    A retired row loses its baseline instead: the fleet stopped it on purpose,
+    and when it comes back its first beat is a return, not a recovery from
+    hours of "stale" and "dead" nobody needed to hear about.
+    """
+    moment = _moment(now)
+    out: List[Tuple[str, List[StatusChange], Optional[str]]] = []
+    for row in rows:
+        worker_id = str(row.get("worker_id") or "")
+        logged = row.get("logged_liveness")
+        if row.get("retired_at"):
+            if logged is not None:
+                out.append((worker_id, [], None))
+            continue
+        changes, marker = liveness_changes(logged, row.get("last_heartbeat_at"), moment)
+        if changes or marker != logged:
+            out.append((worker_id, changes, marker))
+    return out
 
 
 def transition_alert(

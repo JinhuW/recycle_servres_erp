@@ -287,3 +287,23 @@ def test_the_http_only_flag_is_carried_not_dropped():
     by_name = {cookie["name"]: cookie for cookie in cookies}
     assert by_name["xs"]["httpOnly"] is True
     assert by_name["c_user"]["httpOnly"] is False
+
+
+def test_the_monitors_cached_device_shapes_the_posters_context(tmp_path):
+    from rs_poster.cookies import device_context_options
+
+    state = tmp_path / "fb_state.json"
+    assert device_context_options(state) == {}
+
+    (tmp_path / "identity.json").write_text(json.dumps({"device": {
+        "device_id": "dev-1", "user_agent": None,
+        "viewport": {"width": 1536, "height": 741}, "screen": {"width": 1536, "height": 864},
+        "device_scale_factor": 1.25, "locale": "en-US", "timezone_id": "America/Denver",
+    }}))
+    assert device_context_options(state) == {
+        "viewport": {"width": 1536, "height": 741},
+        "screen": {"width": 1536, "height": 864},
+        "device_scale_factor": 1.25,
+        "locale": "en-US",
+        "timezone_id": "America/Denver",
+    }

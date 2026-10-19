@@ -4,7 +4,7 @@ import {
   accountAlerts, accountHaystack, attentionReason, browserLabel, canWatch, dayStrip, fleetPostsToday,
   externalVncUrl, fleetActivity, fleetStatus, flowCounts, hitsByCity, isUnstampedBuild, parkedWorkers, reloginIsAutomatic, reloginProgress,
   matchesTerms, offersRelogin, queryTerms, reviewedToday, searchedToday,
-  sortFleet, splitHighlights, vaultAccountIdFor, whoIs,
+  sortFleet, splitHighlights, vaultAccountIdFor, whoIs, easternToUtc, utcToEastern,
   FLOW_STAGES, STAGE_FORMS, draftChanges, settingsDraft, settingsPatch,
   citiesDiffer, cityOwners, isCitySlug, marketplaceCityUrl, normalizeCitySlug,
   applyPinEdits, pinEdits, searchesPerDay, tierSettingsEdits, tierSettingsValid, keysymsFor,
@@ -151,6 +151,37 @@ describe('fleetView', () => {
       expect(fleetActivity(fleet, [ch]).map(e => `${e.workerId}:${e.kind}`))
         .toEqual(['c:checkpoint', 'a:listing', 'a:search', 'a:backup', 'b:silent']);
       expect(fleetActivity(null, null)).toEqual([]);
+    });
+
+    it('lists each logged status change with the status it moved into', () => {
+      const b = account({ worker_id: 'b', health: health({ liveness: 'dead', last_heartbeat_at: '2026-10-02T00:00:00Z' }) });
+      const change = (at: string, kind: 'state' | 'liveness', was: string | null, became: string) =>
+        ({ worker_id: 'b', at, kind, was, became });
+      const fleet = {
+        workers: [b],
+        status_changes: [
+          change('2026-10-04T09:00:00Z', 'state', 'SESSION_EXPIRED', 'HEALTHY'),
+          change('2026-10-04T08:00:00Z', 'state', 'HEALTHY', 'SESSION_EXPIRED'),
+          change('2026-10-04T07:00:00Z', 'liveness', 'dead', 'live'),
+          change('2026-10-02T06:00:00Z', 'liveness', 'stale', 'dead'),
+          change('2026-10-02T02:00:00Z', 'liveness', 'live', 'stale'),
+          change('2026-10-01T00:00:00Z', 'liveness', null, 'live'),
+          change('2026-09-30T00:00:00Z', 'state', 'HEALTHY', 'DEAD'),
+          change('2026-09-29T00:00:00Z', 'liveness', 'live', 'someday'),
+        ],
+      } as unknown as FleetDoc;
+      expect(fleetActivity(fleet, null).map(e => [e.kind, e.status, e.detail ?? null])).toEqual([
+        ['healthy', 'live', null],
+        ['attention', 'attention', 'SESSION_EXPIRED'],
+        ['back', 'live', null],
+        // The log's "went offline" stands in for the derived "stopped reporting".
+        ['offline', 'offline', null],
+        ['stale', 'stale', null],
+        ['first', 'live', null],
+        ['offline', 'offline', null],
+      ]);
+      // A coordinator that predates the log still gets the derived event.
+      expect(fleetActivity({ ...fleet, status_changes: null }, null).map(e => e.kind)).toEqual(['silent']);
     });
   });
 
@@ -359,10 +390,12 @@ describe('stage settings forms', () => {
     ],
   } as unknown as FleetDoc;
   const prompt = { prompt: 'judge it', rating_prompt: 'rate 1-5' };
+  const edt = Date.UTC(2026, 9, 17, 16, 0);
+  const est = Date.UTC(2026, 11, 1, 16, 0);
 
   it('drafts what the chips show, enabled items only', () => {
-    const d = settingsDraft(doc, prompt);
-    expect(d.start_at).toBe('10:00');
+    const d = settingsDraft(doc, prompt, edt);
+    expect(d.start_at).toBe('06:00');
     expect(d.date_listed).toBe('last 7 days');
     expect(d.rating).toBe('4');
     expect(Object.keys(d.items)).toEqual(['server_ram']);
@@ -370,18 +403,18 @@ describe('stage settings forms', () => {
   });
 
   it('sends only the settings the stage edits', () => {
-    const d = { ...settingsDraft(doc, prompt), start_at: '09:00, 21:00', max_results: '60' };
+    const d = { ...settingsDraft(doc, prompt), start_at: '06:00, 18:00', max_results: '60' };
     d.items = { server_ram: { search_phrases: 'server ram\n\n  ddr4 lot  ', keywords: 'x', antikeywords: '' } };
-    expect(settingsPatch('search', d, true)).toEqual({
+    expect(settingsPatch('search', d, true, edt)).toEqual({
       search: {
-        start_at: ['09:00', '21:00'], date_listed: 'last 7 days', delivery_method: 'local_pick_up',
+        start_at: ['10:00', '22:00'], date_listed: 'last 7 days', delivery_method: 'local_pick_up',
         max_results: 60, search_interval: '45m', max_search_interval: '75m',
       },
       items: { server_ram: { search_phrases: ['server ram', 'ddr4 lot'] } },
     });
     expect(settingsPatch('cards', d, true)).toEqual({ search: { max_results: 60 } });
     expect(settingsPatch('title', d, true)).toEqual({
-      search: { title_prefilter: true }, items: { server_ram: { antikeywords: [] } },
+      search: { title_prefilter: true }, items: { server_ram: { keywords: ['x'], antikeywords: [] } },
     });
     expect(settingsPatch('open', d, true)).toEqual({});
   });
@@ -404,6 +437,22 @@ describe('stage settings forms', () => {
     expect(draftChanges(base, swapped)).toBe(0);
     const reordered = { ...d, items: { server_ram: { ...d.items.server_ram, antikeywords: 'usb\nhdd' } } };
     expect(draftChanges(d, reordered)).toBe(1);
+  });
+
+  it('shows and takes sweep times in Eastern at the offset New York is on', () => {
+    expect(utcToEastern('10:00', edt)).toBe('06:00');
+    expect(utcToEastern('10:00', est)).toBe('05:00');
+    expect(utcToEastern('02:30', edt)).toBe('22:30');
+    expect(easternToUtc('22:00', edt)).toBe('02:00');
+    expect(easternToUtc('6:00', est)).toBe('11:00');
+    expect(settingsDraft(doc, prompt, est).start_at).toBe('05:00');
+  });
+
+  it('sends a sweep time that is not a clock time as typed', () => {
+    expect(easternToUtc(' 6am ', edt)).toBe('6am');
+    expect(easternToUtc('25:00', edt)).toBe('25:00');
+    const d = { ...settingsDraft(doc, prompt), start_at: '06:00 6pm' };
+    expect(settingsPatch('search', d, true, edt).search?.start_at).toEqual(['10:00', '6pm']);
   });
 
   it('offers a form exactly on the stages that read a setting', () => {

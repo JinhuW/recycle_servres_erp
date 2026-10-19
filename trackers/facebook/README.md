@@ -138,6 +138,39 @@ monitor and poster present that same identity. Capture through the worker's own
 proxy (`--proxy`) so the session's IP matches where it will be used — Facebook
 challenges sessions that move.
 
+### Device identity
+
+Every Facebook account has one device for good: a row in the coordinator's
+`device_profiles`, keyed by the account's uid. It holds the user agent (or "the
+browser's own"), screen, viewport, scale, locale, timezone and the account's
+`datr`/`sb` cookies, sealed with the vault key. A worker asks for its account's
+device before each login (`POST /v1/workers/{id}/identity`), caches it as
+`/data/identity.json`, and opens every browser context with it, so a restart, a
+rebuilt VM or a new worker all show Facebook the same machine. The poster and
+messenger read the same cache.
+
+- **The uid is the key.** The ERP's *Assign to fleet* sends it with the login
+  (`accounts.fb_uid`). A new login without a uid clears it, and a worker whose
+  account has no uid keeps the browser it always had.
+- **No two accounts share a device.** When a slot gets another login, the
+  worker sets the old session aside and signs in under the new account's
+  device, carrying that account's own `datr`.
+- **The device is fixed on first contact.** An account's `datr`/`sb` are
+  recorded from the first Facebook page its worker loads, before any login is
+  tried, so failed attempts do not each look like a new machine.
+- **Sessions are restored, not re-logged.** A worker whose session file is
+  missing or empty restores the coordinator's snapshot (as since 0.10.5), and
+  a worker with a device also replaces the same session gone stale: a file
+  saved under that device before the snapshot was. A live session of any
+  other provenance is never replaced. Once the account has a uid,
+  `GET /v1/session/{id}/restore` answers 409 for a snapshot of another login.
+- **The coordinator being down changes nothing.** The worker boots the device
+  it cached, and the session on its disk.
+
+`rsc identity list` prints the profiles; `rsc identity learn-uids [--apply]`
+fills in the uid of accounts that predate it. [deploy/README.md](deploy/README.md)
+→ *What persists, and where* has the operator's view.
+
 Sessions last on the order of weeks and are invalidated by a password change,
 "log out of all devices", or a security checkpoint. When one lapses, the worker
 stops with an error naming the exact command to run; it never searches while
@@ -253,6 +286,15 @@ notification:
 scripts/deploy.sh --redeploy   # ship a version the VM already runs
 ```
 
+A worker whose restart would cost something is held back by its container
+name. That covers a login held only in memory until its next sweep, or a
+locked account that would retry its password from a fresh browser. It keeps
+running its current image, and verify and the notification name it as held:
+
+```bash
+RS_DEPLOY_HOLD="rs-monitor-va1" scripts/deploy.sh
+```
+
 `check` is the one to reach for whenever you are about to explain live
 behaviour from local source. It md5s every module inside the container against
 this tree, diffs the mounted `config.toml` against `configs/homelab.toml`, and
@@ -288,6 +330,51 @@ checkout's copies belong to a different account and IP, and a checkout without
 them would have `--delete` remove the VM's. The dev machine's Facebook logins
 and 2FA, read by `rs-session capture`, never leave it.
 `scripts/tests/test-deploy-filter.sh` checks both with a real rsync.
+
+### Fleet agent and rolling releases
+
+The compose files above are one hand-copied service per worker, and nothing
+scales or upgrades them except a person. `rs_fleetd/` replaces that. Each
+Docker host runs one agent (`deploy/docker-compose.fleetd.yml`), and the
+coordinator decides (`rs_coordinator/fleet.py`):
+
+- **Scaling.** A slot is a vault account with a worker id. It gets a worker
+  when the fleet is enabled for it (`rsc fleet enable --worker va-3`) and its
+  config is published (the console publishes every worker it renders, or
+  `rsc fleet config put`). The coordinator places it on the live, uncordoned
+  host with the most room, and its agent starts `rs-worker-<id>` within 30 s.
+  `rsc fleet disable` stops it again, keeping its `/data`. Placement is sticky:
+  a slot comes back to the host that holds its session. Nothing ever moves on
+  its own, because two hosts running one session is the one failure this must
+  never cause. `rsc fleet move` is how an operator moves one.
+- **Rolling releases.** `rsc fleet release 0.12.0` rolls `aimm-recycle:0.12.0`
+  out one worker at a time. The next worker waits until the current one
+  heartbeats on the new version in a state no worse than before: healthy stays
+  healthy, and a worker parked on a login may stay parked but must not die. A
+  worker that has not come back within 20 minutes goes back to its previous
+  image and the release stops there, with a Telegram ops note; every other
+  worker keeps running what it ran. `pause`, `resume` and `abort` do what they
+  say. Rolling back is releasing the previous version, whose image is still on
+  the host. Once the VM runs `rs-fleetd`, `scripts/deploy.sh` does exactly
+  this instead of recreating compose workers.
+- **Neither side can take the other down.**
+  - **Coordinator or Postgres down:** agents keep the desired state they last
+    cached, start nothing new and remove nothing, and workers keep searching.
+    A worker boots from its cached device and session.
+  - **Agent down:** workers keep running on Docker's restart policy.
+  - **A worker crash-looping:** that is only a worker.
+- **Trust is explicit.** A new host registers itself on its first request,
+  observe-only and with no capacity. It plans and reports (`rsc fleet hosts`,
+  `rsc fleet state`) and applies nothing until
+  `rsc fleet host <id> --capacity 4 --authoritative`.
+- **Tokens.** Each agent has its own host token (`rsc mint-host-token`), kept
+  in `configs/secrets.fleetd.env`, never in `secrets.env`, which every worker
+  reads. It mints each worker's control-plane token in the desired state, so
+  the hand-written `secrets.homelab-*.env` files are no longer needed.
+
+[deploy/README.md](deploy/README.md) → *The fleet agent* has the runbooks:
+moving the existing compose workers under the agent, adding a host, rolling
+back.
 
 ### Did it alert, and did the alert arrive?
 
@@ -835,6 +922,9 @@ full result page per phrase in Facebook traffic, so keep the phrase count small.
 | The sweep counter stays out of the AI cache key — `ItemConfig.searched_count` increments every sweep and was hashed into `item_config.hash`, rotating the AI-verdict cache key so it never hit across sweeps and every lingering listing was re-billed each sweep (~10× spend, measured 43k evals / 4k unique listings over 3 days); the `ai_eval` event now also reports `cached` so spend is auditable | `marketplace.py` (`ItemConfig.hash`), `monitor.py` (`ai_eval` event) |
 | Alert delivery report — each successfully sent Telegram alert's `message_id` (captured from the Bot API response, previously discarded) is POSTed fail-open to the coordinator's `/v1/alerts/telegram` with the listing id, search city/phrase, priority topic and AI verdict, so partner emoji reactions can be joined back to listings for the alert hit rate. Off unless `alert_report_url`/`alert_report_token` are set; a timed-out send (delivered-unknown, no Message) reports nothing by design | `telegram.py` (`_sent_messages` capture, `_after_listing_alert`, `_post_alert_report`, `alert_report_*` fields), `notification.py` (`_after_listing_alert` hook in `notify`) |
 | Live re-login — a second daemon thread polls `/v1/workers/{id}/directives` every 10 s (`directive_poll_interval`), dropping to every 60 s after three failed polls so an older coordinator costs little, and each login step is reported at once as a heartbeat carrying `login_step`/`login_step_at`, so the ERP's Watch page can follow a re-login as it runs | `facebook.py` (`_on_directives`, `_directive_loop`, `_report_login_step`, `login`, `relogin_now`), `control_plane.py` (`poll_directives`) |
+| Session kept in step between sweeps — while idle, the worker checks its browser's login every minute (`session_check_s`). A logged-in browser the console thinks is expired, parked or not, is saved, backed up and reported HEALTHY; a HEALTHY session that lapses is reported SESSION_EXPIRED, without navigating the page. An idle, logged-in session is re-saved and backed up every 30 minutes (`session_save_s`), and SIGTERM (`docker stop`, a redeploy) saves the live session before exit. `save_storage_state` still refuses a logged-out jar. `is_logged_in` asks for the cookies before it reads `page.url`, a cache Playwright refreshes only while a call runs. Saves are fsynced before the rename, and a worker gets 30 s to stop (`stop_grace_period`, supervisord `stopwaitsecs`). At login, a session file with no session is refilled from this worker's coordinator backup (`restore_session_backup`) | `facebook.py` (`session_check_due`, `check_session`, `save_storage_state`, `stop`), `monitor.py` (`_relogin_pending`, `_check_sessions`), `cli.py` (SIGTERM handler) |
+| Device identity — before each login the worker asks the coordinator for its account's device (`/v1/workers/{id}/identity`), caches it in `/data/identity.json`, and opens every context with its viewport, screen, scale, locale, timezone and user agent (its Chrome version set to the running browser's), adding the account's own `datr`/`sb` to a context that has none; a device with none yet keeps the ones Facebook issues on its first page, before any login (`record_device_cookies`). A different device, a session file logged in as another uid, or a device the coordinator no longer vouches for sets the old session aside; a session file that is missing, empty, or the same session gone stale (saved under this device before the coordinator's snapshot) is restored, and a forced re-login restores nothing. Saves stamp `saved_at` and the device into the sidecar, and backups name the device. A coordinator that is down, or lacks the route, leaves the cached device in place | `identity.py` (new), `marketplace.py` (`create_page`, `device_context_options`, `add_device_cookies`, `save_storage_state`), `facebook.py` (`refresh_identity`, `adopt_identity`, `login`, `save_storage_state`, `backup_session`, `_send_heartbeat`), `control_plane.py` (`identity`, `restore_session`, `_request`) |
+| Login ledger — each login opens and closes a row in the coordinator's `login_attempts` (`/v1/workers/{id}/logins`): trigger, device, a fingerprint of the `datr` the browser presents, and the outcome. Facebook's lock page ("we locked your account", "log in with another device to unlock") is challenge kind `locked`, which the coordinator turns into an account lock that stops password logins | `facebook.py` (`_start_login_attempt`, `_finish_login_attempt`, `_unfinished_login_outcome`, `detect_login_challenge`), `control_plane.py` (`login_event`) |
 | Heartbeat repeater — the first `report_state` starts a daemon thread that re-sends the last reported state to the coordinator every 5 minutes (`heartbeat_interval`). Before this a worker heartbeated once per search, at the top of `search()`, and one sweep over the city list runs for hours, so a healthy worker spent most of the day looking silent. The repeater only restates what the main thread last said (it never touches the Playwright page, which is not thread-safe); the login is still re-checked only at the top of each search | `facebook.py` (`heartbeat_interval`, `report_state`, `_send_heartbeat`, `_heartbeat_loop`, `stop`) |
 
 | System faults page once, fleet-wide — an AI outage is declared only after `RS_INCIDENT_DOWN_AFTER` (3) straight failed evaluations and cleared after `RS_INCIDENT_UP_AFTER` (3) straight successes, and the crossing is POSTed to the coordinator's `/v1/incidents`, which dedupes across every worker (one DOWN page per key per `RS_INCIDENT_COOLDOWN_HOURS`, one recovered note per paged DOWN). Without a control plane, or when it is unreachable, a local gate applies the same one-per-cooldown rule to this process. Replaces the per-process flag that sent a DOWN/recovered pair for every listing while OpenRouter flapped | `ops_incidents.py` (new: `OutageTracker`, `LocalIncidentGate`), `monitor.py` (`_report_incident`, `evaluate_by_ai`), `control_plane.py` (`report_incident`) |

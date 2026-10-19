@@ -18,6 +18,10 @@ RS_WORKER_CONFIGS names each config `worker_id=path`, so a worker's cities go
 into its own file and nowhere else. A bare path still works, and takes the
 fleet-wide values only.
 
+A worker the fleet runs (rs-fleetd) has no file here: its agent fetches its
+config from the coordinator. Those configs are read and written there instead
+(`FleetConfigs`), rendered exactly like a mounted one.
+
 Worker configs are single-file bind mounts. Docker binds the inode, so a file
 replaced by rename stays invisible to a running container: they are rewritten
 in place. The vendored monitor hashes its config between jobs and restarts
@@ -27,6 +31,8 @@ them on a change, which also runs a sweep straight away.
     python -m rs_console.settings render [--config homelab-x.toml]
                                             stdin config -> stdout, saved values applied
                                             (and that file's worker's cities)
+    python -m rs_console.settings publish [worker_id ...]
+                                            hand mounted workers' configs to the fleet
 """
 
 import copy
@@ -39,6 +45,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+import httpx
 import tomlkit
 from tomlkit.items import Item
 
@@ -330,17 +337,73 @@ def config_for(worker_id: str) -> Optional[Path]:
     return next((path for wid, path in targets() if wid == worker_id), None)
 
 
-def writable() -> bool:
-    """Whether a save could land: the state directory and every worker config
-    are writable. An older compose mounts them read-only."""
+def writable(fleet: bool = False) -> bool:
+    """Whether a save could land: the state directory and every mounted worker
+    config are writable, and there is a config to write (a mounted one, or the
+    fleet's). An older compose mounts them read-only."""
     configs = worker_configs()
     state_dir = state_path().parent
     return (
-        bool(configs)
+        (bool(configs) or fleet)
         and state_dir.is_dir()
         and os.access(state_dir, os.W_OK)
         and all(p.is_file() and os.access(p, os.W_OK) for p in configs)
     )
+
+
+class FleetError(OSError):
+    """The coordinator could not be asked for, or did not take, a fleet config."""
+
+
+class FleetConfigs:
+    """The configs of the workers the fleet runs, kept by the coordinator."""
+
+    def __init__(self, base_url: str, headers: Dict[str, str], timeout: float = 10.0) -> None:
+        self._base_url = base_url
+        self._headers = headers
+        self._timeout = timeout
+
+    @classmethod
+    def from_env(cls) -> Optional["FleetConfigs"]:
+        url = os.environ.get("RS_COORDINATOR_URL", "").strip()
+        token = (os.environ.get("RS_COORDINATOR_ADMIN_TOKEN") or os.environ.get("RS_ADMIN_TOKEN") or "").strip()
+        if not url or not token:
+            return None
+        return cls(url, {"Authorization": f"Bearer {token}"})
+
+    def _call(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        try:
+            with httpx.Client(base_url=self._base_url, headers=self._headers, timeout=self._timeout) as client:
+                return client.request(method, path, **kwargs)
+        except httpx.HTTPError as e:
+            raise FleetError(f"coordinator unreachable: {e}") from None
+
+    def ids(self) -> List[str]:
+        res = self._call("GET", "/v1/fleet/configs")
+        if res.status_code == 404:
+            return []  # a coordinator from before the fleet
+        if res.status_code != 200:
+            raise FleetError(f"coordinator answered {res.status_code} for the fleet configs")
+        return [str(c["worker_id"]) for c in (res.json() or {}).get("configs") or []]
+
+    def read(self, worker_id: str) -> str:
+        res = self._call("GET", f"/v1/fleet/configs/{worker_id}")
+        if res.status_code != 200:
+            raise FleetError(f"coordinator answered {res.status_code} for {worker_id}'s config")
+        return str((res.json() or {})["toml"])
+
+    def state(self) -> Dict[str, Any]:
+        """The fleet's hosts and assignments; empty from a coordinator without one."""
+        res = self._call("GET", "/v1/fleet/state")
+        if res.status_code != 200:
+            return {}
+        return res.json() or {}
+
+    def write(self, worker_id: str, text: str, by: Optional[str] = None) -> bool:
+        res = self._call("PUT", f"/v1/fleet/configs/{worker_id}", json={"toml": text, "updated_by": by})
+        if res.status_code != 200:
+            raise FleetError(f"coordinator refused {worker_id}'s config ({res.status_code})")
+        return bool((res.json() or {}).get("changed"))
 
 
 # ── Applying the values ────────────────────────────────────────────────────────
@@ -446,13 +509,40 @@ def write_in_place(path: Path, text: str) -> bool:
     return True
 
 
-def apply(values: Dict[str, Any], only: Optional[List[Target]] = None) -> List[str]:
-    """Write the values into every worker config (or `only` these). Every file
-    is rendered before any is written, so a config that cannot take them
-    changes nothing."""
+def apply(
+    values: Dict[str, Any],
+    only: Optional[List[Target]] = None,
+    fleet: Optional[FleetConfigs] = None,
+    fleet_ids: Optional[List[str]] = None,
+) -> List[str]:
+    """Write the values into every worker config (or `only` these, and the
+    fleet's `fleet_ids`). Every config is rendered before any is written, so
+    one that cannot take them changes nothing."""
     chosen = targets() if only is None else only
     rendered = [(p, render(p.read_text(encoding="utf-8"), values, wid)) for wid, p in chosen]
-    return [p.name for p, text in rendered if write_in_place(p, text)]
+    remote: List[Tuple[str, str]] = []
+    if fleet is not None:
+        ids = fleet.ids() if fleet_ids is None else fleet_ids
+        remote = [(wid, render(fleet.read(wid), values, wid)) for wid in ids]
+    changed = [p.name for p, text in rendered if write_in_place(p, text)]
+    changed += [f"fleet:{wid}" for wid, text in remote if fleet is not None and fleet.write(wid, text)]
+    return changed
+
+
+def publish(values: Dict[str, Any], fleet: FleetConfigs, worker_ids: Optional[List[str]] = None) -> List[str]:
+    """Hand mounted workers' configs, saved values applied, to the fleet.
+
+    Naming a worker is how a compose-run worker moves under rs-fleetd: the
+    agent then runs it on exactly the config it ran on. Naming none refreshes
+    the ones the fleet already holds, which is how a deploy's regenerated
+    config (homelab.toml from master.toml) reaches a worker the fleet runs.
+    """
+    wanted = worker_ids or fleet.ids()
+    chosen = [(wid, p) for wid, p in targets() if wid and wid in wanted]
+    rendered = [(wid, render(p.read_text(encoding="utf-8"), values, wid)) for wid, p in chosen]
+    for wid, text in rendered:
+        fleet.write(wid, text, "rs_console.settings publish")
+    return [wid for wid, _ in rendered]
 
 
 def main(argv: List[str]) -> int:
@@ -464,8 +554,16 @@ def main(argv: List[str]) -> int:
         sys.stdout.write(render(sys.stdin.read(), load()["values"], worker_id))
         return 0
     if command == "apply":
-        changed = apply(load()["values"])
+        changed = apply(load()["values"], fleet=FleetConfigs.from_env())
         print(f"applied saved settings; changed: {', '.join(changed) or 'nothing'}")
+        return 0
+    if command == "publish":
+        fleet = FleetConfigs.from_env()
+        if fleet is None:
+            print("RS_COORDINATOR_URL and an admin token are needed to publish", file=sys.stderr)
+            return 2
+        published = publish(load()["values"], fleet, argv[2:] or None)
+        print(f"published to the fleet: {', '.join(published) or 'nothing'}")
         return 0
     print(__doc__, file=sys.stderr)
     return 2

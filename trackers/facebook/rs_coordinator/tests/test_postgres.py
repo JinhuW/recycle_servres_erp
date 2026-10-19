@@ -27,7 +27,7 @@ from contextlib import contextmanager
 import pytest
 
 from rs_coordinator import db as db_module
-from rs_coordinator.db import Database, open_database, postgres_url, utcnow
+from rs_coordinator.db import SCHEMA, Database, open_database, postgres_url, utcnow
 from rs_coordinator.pg import (
     ADVISORY_LOCK_KEY,
     PostgresDatabase,
@@ -41,18 +41,9 @@ requires_postgres = pytest.mark.skipif(
     not TEST_URL, reason="RS_TEST_DATABASE_URL is not set; no live Postgres to test against"
 )
 
-TABLES = (
-    "listings",
-    "sightings",
-    "workers",
-    "accounts",
-    "challenges",
-    "session_snapshots",
-    "code_audit",
-    "review_stats",
-    "search_cycles",
-    "search_cities",
-)
+# Every table the schema creates, so a case never inherits rows a previous
+# run left in a table nobody remembered to list.
+TABLES = tuple(re.findall(r"CREATE TABLE IF NOT EXISTS (\w+)", SCHEMA))
 
 
 def _drop_everything() -> None:
@@ -341,6 +332,36 @@ def test_search_cities_keep_one_row_per_worker_and_city(backend):
     assert rows[0]["last_at"] >= first
 
 
+def test_status_changes_append_and_move_the_marker(backend):
+    backend.upsert_worker("mw-1", status="ok", heartbeat=True)
+    backend.log_status_changes(
+        "mw-1",
+        [
+            ("2026-10-18T10:00:00+00:00", "liveness", "live", "stale"),
+            ("2026-10-18T14:00:00+00:00", "liveness", "stale", "dead"),
+        ],
+        "dead",
+    )
+    backend.log_status_changes("mw-1", [("2026-10-18T14:00:00+00:00", "state", None, "DEAD")], "dead")
+    assert backend.get_worker("mw-1")["logged_liveness"] == "dead"
+
+    rows = backend.status_events_since("2026-10-18T00:00:00+00:00", 10)
+    # Newest first; a tie on `at` goes to the later insert.
+    assert [(r["kind"], r["was"], r["became"]) for r in rows] == [
+        ("state", None, "DEAD"),
+        ("liveness", "stale", "dead"),
+        ("liveness", "live", "stale"),
+    ]
+    assert rows[0]["worker_id"] == "mw-1"
+    assert len(backend.status_events_since("2026-10-18T12:00:00+00:00", 10)) == 2
+    assert len(backend.status_events_since("2026-10-18T00:00:00+00:00", 1)) == 1
+
+    # A baseline alone moves the marker without a row.
+    backend.log_status_changes("mw-1", [], None)
+    assert backend.get_worker("mw-1")["logged_liveness"] is None
+    assert len(backend.status_events_since("2026-10-18T00:00:00+00:00", 10)) == 3
+
+
 def test_city_tier_config_saves_settings_and_replaces_pins(backend):
     assert backend.city_tier_config() == {
         "settings": {}, "pins": {}, "updated_at": None, "updated_by": None,
@@ -351,6 +372,79 @@ def test_city_tier_config_saves_settings_and_replaces_pins(backend):
     assert config["settings"] == {"top_pct": 10}
     assert config["pins"] == {"reno": 2}
     assert config["updated_by"] == "alex" and config["updated_at"]
+
+
+def _profile(key: str, device_id: str) -> dict:
+    return {
+        "identity_key": key, "device_id": device_id, "fb_uid": key.split(":")[1],
+        "user_agent": None, "viewport_w": 1440, "viewport_h": 777, "screen_w": 1440,
+        "screen_h": 900, "device_scale_factor": 1.25, "locale": "en-US",
+        "timezone_id": "America/Denver", "source": "generated",
+    }
+
+
+def test_device_profiles_are_created_once_and_found_by_key_or_device(backend):
+    assert backend.insert_device_profile(_profile("uid:1", "dev-1")) is True
+    # A racing second create for the same account loses and writes nothing.
+    assert backend.insert_device_profile(_profile("uid:1", "dev-2")) is False
+
+    by_key = backend.get_device_profile("uid:1")
+    assert by_key["device_id"] == "dev-1"
+    assert by_key["device_scale_factor"] == 1.25
+    assert backend.device_profile_by_device("dev-1")["identity_key"] == "uid:1"
+    assert backend.get_device_profile("uid:2") is None
+
+    assert backend.claim_device_cookies("uid:1", b"first") is True
+    assert backend.claim_device_cookies("uid:1", b"second") is False
+    assert backend.get_device_profile("uid:1")["device_cookies_blob"] == b"first"
+    backend.update_device_profile("uid:1", {"device_cookies_blob": b"sealed"})
+    assert backend.get_device_profile("uid:1")["device_cookies_blob"] == b"sealed"
+    listed = backend.list_device_profiles()
+    assert [(p["identity_key"], p["has_device_cookies"]) for p in listed] == [("uid:1", 1)]
+    assert "device_cookies_blob" not in listed[0]
+
+
+def test_rekeying_a_device_profile_never_overwrites_another(backend):
+    backend.insert_device_profile(_profile("uid:1", "dev-1"))
+    backend.insert_device_profile(_profile("uid:2", "dev-2"))
+
+    assert backend.rekey_device_profile("uid:1", "uid:2") is False
+    assert backend.rekey_device_profile("uid:1", "uid:3") is True
+    assert backend.get_device_profile("uid:3")["device_id"] == "dev-1"
+    assert backend.get_device_profile("uid:1") is None
+
+
+def test_fleet_tables_round_trip(backend):
+    backend.upsert_fleet_host("homelab", {})
+    backend.upsert_fleet_host("homelab", {"capacity": 9, "authoritative": 1})
+    assert backend.get_fleet_host("homelab")["capacity"] == 9
+    assert [h["host_id"] for h in backend.list_fleet_hosts()] == ["homelab"]
+
+    backend.put_assignment("va-1", {"host_id": "homelab", "image": "aimm:1", "state": "run"})
+    backend.put_assignment("va-1", {"state": "stopped"})  # a partial update
+    row = backend.get_assignment("va-1")
+    assert (row["host_id"], row["image"], row["state"], row["generation"]) == ("homelab", "aimm:1", "stopped", 1)
+    assert [a["worker_id"] for a in backend.list_assignments()] == ["va-1"]
+
+    first = backend.insert_release({"version": "0.1.0", "image": "aimm:1", "state": "done"})
+    second = backend.insert_release({"version": "0.2.0", "image": "aimm:2", "state": "rolling"})
+    backend.update_release(second, {"current_worker": "va-1"})
+    assert [r["id"] for r in backend.list_releases(limit=5)] == [second, first]
+    assert backend.get_release(second)["current_worker"] == "va-1"
+
+    backend.put_worker_config("va-1", "a = 1\n", "sha-1", "rsc")
+    backend.put_worker_config("va-1", "a = 2\n", "sha-2", None)
+    assert backend.get_worker_config("va-1")["toml"] == "a = 2\n"
+    assert backend.list_worker_configs() == [
+        {"worker_id": "va-1", "sha256": "sha-2", "updated_at": backend.get_worker_config("va-1")["updated_at"], "updated_by": None}
+    ]
+    assert backend.delete_worker_config("va-1") is True
+
+
+def test_accounts_carry_a_facebook_uid(backend):
+    backend.put_account("va-1", {"worker_id": "va-1", "fb_uid": "1000"})
+    assert backend.get_account_row("va-1")["fb_uid"] == "1000"
+    assert backend.list_accounts()[0]["fb_uid"] == "1000"
 
 
 # -- Postgres-specific -----------------------------------------------------
@@ -596,7 +690,9 @@ def test_schema_translation():
     # ...replaced by their Postgres equivalents.
     assert "secret_blob          BYTEA" in ddl
     assert "state_blob     BYTEA" in ddl
-    assert ddl.count("INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY") == 7
+    assert ddl.count("INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY") == SCHEMA.count(
+        "AUTOINCREMENT"
+    )
 
     # Table and column names are untouched — a dedicated database means there
     # is nothing to rename around.
@@ -710,8 +806,35 @@ def test_no_sqlite_placeholders_survive_in_the_postgres_sql():
     handle.get_snapshot("w")
     handle.insert_code_audit("w", "a", "totp", "why")
     handle.list_code_audit(limit=5)
+    handle.get_device_profile("uid:1")
+    handle.device_profile_by_device("dev-1")
+    handle.insert_device_profile({"identity_key": "uid:1", "device_id": "dev-1"})
+    handle.update_device_profile("uid:1", {"locale": "en-US"})
+    handle.rekey_device_profile("uid:1", "uid:2")
+    handle.list_device_profiles()
+    handle.claim_device_cookies("uid:1", b"x")
+    handle.upsert_fleet_host("h", {"capacity": 2})
+    handle.get_fleet_host("h")
+    handle.list_fleet_hosts()
+    handle.put_assignment("w", {"state": "run"})
+    handle.get_assignment("w")
+    handle.list_assignments()
+    handle.insert_release({"version": "1.0.0", "image": "i", "state": "rolling"})
+    handle.update_release(1, {"state": "done"})
+    handle.get_release(1)
+    handle.list_releases(limit=3)
+    handle.put_worker_config("w", "a = 1", "sha", None)
+    handle.get_worker_config("w")
+    handle.list_worker_configs()
+    handle.delete_worker_config("w")
+    handle.insert_login_attempt({"worker_id": "w", "trigger": "boot"})
+    handle.finish_login_attempt(1, "w", "failed", None)
+    handle.list_login_attempts("w", 5)
+    handle.lock_account("a", "lock page")
+    handle.unlock_account("a")
+    handle.count_code_audit("a", "password", "2026-01-01")
 
-    assert len(handle.log) == 24
+    assert len(handle.log) == 51
     for sql in handle.log:
         assert "?" not in sql, f"SQLite placeholder left in: {sql}"
         assert not re.search(r":\w", sql), f"named SQLite placeholder left in: {sql}"

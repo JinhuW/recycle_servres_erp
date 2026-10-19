@@ -194,6 +194,7 @@ def test_put_account_forwards_only_the_allowed_fields(client):
     body = {
         "worker_id": "ne-1",
         "fb_username": "lisa@example.com",
+        "fb_uid": "100000000000001",
         "allow_password_login": True,
         "proxy": "http://user:pass@proxy.example:10002",  # not settable from here
         "vnc_url": "vnc://x",
@@ -214,6 +215,7 @@ def test_put_account_forwards_only_the_allowed_fields(client):
     assert sent == {
         "worker_id": "ne-1",
         "fb_username": "lisa@example.com",
+        "fb_uid": "100000000000001",
         "allow_password_login": True,
         "secrets": {"password": "s3cret-pw", "totp_secret": "JBSWY3DP", "email": None},
     }
@@ -222,10 +224,80 @@ def test_put_account_forwards_only_the_allowed_fields(client):
     assert "s3cret-pw" not in res.text
 
 
+def test_put_account_forwards_the_legacy_device_and_nothing_else_of_the_cookie(client):
+    datr = {"name": "datr", "value": "legacy", "domain": ".facebook.com", "extra": "dropped"}
+    res = client.put(
+        "/v1/accounts/ne-1",
+        json={"fb_uid": "100000000000001", "device_cookies": [datr]},
+        headers=AUTH,
+    )
+    assert res.status_code == 200
+    import json
+
+    (request,) = client.calls
+    assert json.loads(request.content)["device_cookies"] == [
+        {"name": "datr", "value": "legacy", "domain": ".facebook.com"}
+    ]
+
+    for name in ("xs", "c_user", "fr"):
+        bad = {"device_cookies": [{"name": name, "value": "v", "domain": ".facebook.com"}]}
+        assert client.put("/v1/accounts/ne-1", json=bad, headers=AUTH).status_code == 400
+    assert client.put("/v1/accounts/ne-1", json={"device_cookies": []}, headers=AUTH).status_code == 400
+    assert len(client.calls) == 1
+
+
 def test_put_account_refuses_a_bad_id_or_body_before_forwarding(client):
     assert client.put("/v1/accounts/bad%20id", json={}, headers=AUTH).status_code == 400
     assert client.put("/v1/accounts/ne-1", json=["not", "an", "object"], headers=AUTH).status_code == 400
     assert client.put(
         "/v1/accounts/ne-1", content=b"not json", headers={**AUTH, "Content-Type": "application/json"}
+    ).status_code == 400
+    assert client.calls == []
+
+
+# -- cookie-first assign (RS-308) ---------------------------------------------
+
+
+def test_restore_session_forwards_to_coordinator(client):
+    assert client.post("/v1/workers/homelab-1/restore-session").status_code == 401
+
+    res = client.post("/v1/workers/homelab-1/restore-session", headers=AUTH)
+    assert res.status_code == 200
+
+    (request,) = client.calls
+    assert request.method == "POST"
+    assert request.url.path == "/v1/workers/homelab-1/restore-session"
+    assert request.headers["Authorization"] == "Bearer admin-secret"
+    assert "admin-secret" not in res.text
+
+
+def test_restore_session_refuses_a_bad_worker_id(client):
+    assert client.post("/v1/workers/bad%20id/restore-session", headers=AUTH).status_code == 400
+    assert client.calls == []
+
+
+def test_seed_session_forwards_only_cookie_and_reason(client):
+    import json
+
+    body = {"cookie": "c_user=1; xs=s", "reason": "assign #2", "worker_id": "evil", "extra": "x"}
+    assert client.put("/v1/workers/homelab-1/session", json=body).status_code == 401
+
+    res = client.put("/v1/workers/homelab-1/session", json=body, headers=AUTH)
+    assert res.status_code == 200
+
+    (request,) = client.calls
+    assert request.method == "PUT"
+    assert request.url.path == "/v1/workers/homelab-1/session"
+    assert request.headers["Authorization"] == "Bearer admin-secret"
+    # Only the cookie and the reason cross; nothing else the caller tried to set.
+    assert json.loads(request.content) == {"cookie": "c_user=1; xs=s", "reason": "assign #2"}
+
+
+def test_seed_session_needs_a_cookie_string_and_a_valid_worker(client):
+    assert client.put(
+        "/v1/workers/homelab-1/session", json={"reason": "x"}, headers=AUTH
+    ).status_code == 400
+    assert client.put(
+        "/v1/workers/bad%20id/session", json={"cookie": "x"}, headers=AUTH
     ).status_code == 400
     assert client.calls == []

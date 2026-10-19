@@ -6,7 +6,7 @@ import type { AlertHitRow, Challenge, FleetAccount, FleetDoc } from '../../lib/c
 import {
   accountAlerts, accountHaystack, attentionReason, dayStrip, FLEET_STATUSES, fleetActivity, fleetPostsToday, fleetStatus,
   hitsByCity, isUnstampedBuild, matchesTerms, parkedWorkers, queryTerms, searchedToday, sortFleet, whoIs,
-  type CityHits, type DayStrip, type FleetSortCol, type FleetStatus,
+  type CityHits, type DayStrip, type FleetEvent, type FleetSortCol, type FleetStatus,
 } from '../../lib/fleetView';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
@@ -212,6 +212,8 @@ function WorkerRow({ account: w, hits, parked, terms, startAt, open, onToggle, l
   const who = whoIs(w);
   const status = fleetStatus(w, parked);
   const note = statusNote(t, w, parked, locale);
+  // The status is judged from this beat; a silent worker's note already dates it.
+  const beat = h?.last_heartbeat_at && h.liveness !== 'dead' ? h.last_heartbeat_at : null;
   const days = h?.session_days_left ?? null;
   const path = fleetWorkerPath(w.worker_id);
   const strip = dayStrip(w, status, startAt);
@@ -239,6 +241,8 @@ function WorkerRow({ account: w, hits, parked, terms, startAt, open, onToggle, l
           <span className="fp-holder">
             <span><StatusChip status={status} /></span>
             {note && <small className={status === 'attention' || status === 'offline' ? 'fp-warn' : ''}>{note}</small>}
+            {beat && <small className="fp-muted" title={new Date(beat).toLocaleString(locale)}>
+              {t('fbcHeartbeatAge', { age: relTime(beat, locale) })}</small>}
           </span>
         </td>
         <td className="ff-wrap" title={h?.last_heartbeat_at
@@ -338,7 +342,16 @@ function SearchRing({ done, budget }: { done: number | null; budget: number | nu
 
 const EVENT_KEY = {
   search: 'fbcActSearch', listing: 'fbcActListing', backup: 'fbcActBackup', silent: 'fbcActSilent', checkpoint: 'fbcActCheckpoint',
+  stale: 'fbcActStale', offline: 'fbcActOffline', back: 'fbcActBack', first: 'fbcActFirst',
+  attention: 'fbcActAttention', healthy: 'fbcActHealthy',
 } as const;
+
+// The {kind} an event's text names: a checkpoint's kind as the coordinator
+// files it, or the label of the state a worker reported.
+export function eventDetail(t: Translate, e: FleetEvent): string {
+  if (!e.detail) return '';
+  return e.kind === 'attention' ? stateLabel(t, e.detail) : e.detail;
+}
 
 export function ActivityAside({ fleet, unavailable, challenges, locale }: {
   fleet: FleetDoc | null; unavailable: boolean; challenges: Challenge[] | null; locale: string;
@@ -358,9 +371,9 @@ export function ActivityAside({ fleet, unavailable, challenges, locale }: {
           const w = byId.get(e.workerId);
           return (
             <li key={i}>
-              <i className={`fp-dot ff-${w ? fleetStatus(w, parked) : 'offline'}`} />
+              <i className={`fp-dot ff-${e.status ?? (w ? fleetStatus(w, parked) : 'offline')}`} />
               <div>
-                <b className="mono">{e.workerId}</b> {t(EVENT_KEY[e.kind], { kind: e.detail ?? '' })}
+                <b className="mono">{e.workerId}</b> {t(EVENT_KEY[e.kind], { kind: eventDetail(t, e) })}
                 <time title={e.at}>{relTime(e.at, locale)}</time>
               </div>
             </li>

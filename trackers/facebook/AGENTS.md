@@ -21,6 +21,7 @@ This file covers the map, the gates and the traps. The root
 | `rs_poster/` | Buy-ad poster (Playwright). Owns the Facebook session and account lock. | `rs-poster`, `rs-session` |
 | `rs_messenger/` | Inbox scraper; sends the replies the coordinator queues. Depends on `rs-poster`. | `rs-messenger` |
 | `rs_router/` | Bridges mautrix-meta Matrix rooms to the coordinator's messages API (stdlib only). | `rs-router` |
+| `rs_fleetd/` | Host agent, one per Docker host: runs the workers the coordinator assigns to it (`fleet.py`), rolls releases one worker at a time, keeps everything running when the coordinator is down (stdlib + docker CLI). | `rs-fleetd` |
 | `configs/` | `master.toml` (what to search) + `fleet.toml` (who searches where) → `configs/generated/` via `rsc gen-configs`. | — |
 | `deploy/`, `scripts/`, `infra/` | Compose files for the homelab VM, the deploy/release/secret/vendor gates, and Terraform for the coordinator's Railway Postgres. | — |
 
@@ -39,7 +40,9 @@ rs_console's `RS_CONSOLE_TOKEN`, plus Cloudflare Access headers.
 Forwarded today:
 - `GET /v1/workers`, `/v1/fleet`, `/v1/stats/reviews`, `/v1/stats/alert-hits`,
   `/v1/config/filter-prompt`, `/v1/challenges`,
-  `/v1/challenges/{id}/screenshot`
+  `/v1/challenges/{id}/screenshot`. `/v1/fleet` is composed here, so a new
+  field in it is a contract change too: its `status_changes` (from the
+  coordinator's `/v1/stats/status-changes`) feed the ERP's Recent activity.
 - `POST /v1/workers/{id}/relogin`, `/v1/challenges/{id}/resolve`
 - `PUT /v1/accounts/{id}` (credentials write)
 - `PUT /v1/config/settings` (search settings; `rs_console/settings.py` lists
@@ -70,10 +73,14 @@ ERP release lands. `rs_console/rs_console/static/fleet.css` mirrors the ERP's
   never create a bare `v*` tag for this tracker.
 - **Deploy with `scripts/deploy.sh`.** It runs the release gate, then rsyncs
   this tree to `jinhu@10.10.10.73:~/recycle_servers/facebook_tracker`, rebuilds
-  and restarts the compose services, verifies the container runs this tree, and
-  stamps the VM. Use `scripts/deploy.sh sync` for config-only changes and
-  `scripts/deploy.sh check` to verify only. Details are in README → *Deploying
-  to the homelab worker* and `deploy/README.md`.
+  the coordinator, the console and the worker image, restarts the workers,
+  verifies they run this tree, and stamps the VM. Once the VM runs `rs-fleetd`,
+  "restarts the workers" becomes `rsc fleet release <version>`: the agent
+  recreates one worker at a time and the deploy never touches a compose worker
+  again (README → *Fleet agent and rolling releases*). Use
+  `scripts/deploy.sh sync` for config-only changes and `scripts/deploy.sh
+  check` to verify only. Details are in README → *Deploying to the homelab
+  worker* and `deploy/README.md`.
 - **The vendored monitor is gitignored and pinned.** `ai-marketplace-monitor/`
   (AGPL-3, our patches on its local `recycle-patches` branch) and
   `facebook-marketplace-bot/` (reference only) are cloned into this folder, not
@@ -121,8 +128,9 @@ suites above and the vendored monitor's.
   `rs_console/` (no `__init__.py`) imports as a namespace package and shadows
   the real one. Collection then fails with `No module named 'rs_console.app'`,
   or `cannot import name '__version__' from 'rs_console' (unknown location)` if
-  the package is installed. `release.sh` runs neither this suite nor
-  `rs_router/tests`, so run them by hand when you touch either.
+  the package is installed. `release.sh` runs it (and `rs_fleetd/tests`) from
+  inside the package; it does not run `rs_router/tests`, so run that by hand
+  when you touch it.
 - **Never point `RS_TEST_DATABASE_URL` at port 5432 or 55432.** Those are the
   ERP's local databases (its compose Postgres and the `recycle-erp-testdb`
   container), and `test_postgres.py` drops every table it touches.

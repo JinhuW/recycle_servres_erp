@@ -12,12 +12,15 @@ import {
   requeuePost,
   type NewPost,
 } from '../src/claims.ts';
+import {ensurePromptVersion} from '../src/prompts.ts';
 import {createTestDb, type TestDb} from './helpers/db.ts';
 
 let db: TestDb;
+let promptVersionId: number;
 
 beforeAll(async () => {
   db = await createTestDb('claims');
+  promptVersionId = await ensurePromptVersion(db.sql, {model: 'test/model', systemPrompt: 'test'});
 }, 60_000);
 
 afterAll(async () => {
@@ -204,6 +207,7 @@ describe('post claiming and lifecycle', () => {
       summary: 'Dell R730, $400 shipped.',
       price: '$400 shipped',
       raw: {is_target: true},
+      promptVersionId,
     });
 
     const pending = await claimPosts(db.sql, 'worker-1', 'target', 5);
@@ -216,6 +220,41 @@ describe('post claiming and lifecycle', () => {
     expect(row?.notified_at).not.toBeNull();
   });
 
+  it('records the buyer messages a post went out as, which reactions join on', async () => {
+    await insertNewPosts(db.sql, [samplePost({redditId: 't3_m'})]);
+    await db.sql`UPDATE posts SET status = 'target', is_target = TRUE WHERE reddit_id = 't3_m'`;
+    await claimPosts(db.sql, 'worker-1', 'target', 1);
+
+    await markNotified(db.sql, 'worker-1', 't3_m', [
+      {chatId: '-100111', messageId: 42},
+      {chatId: '-100222', messageId: 7},
+    ]);
+
+    const rows = await db.sql<Array<{chat_id: string; message_id: string; audience: string}>>`
+      SELECT chat_id, message_id::text, audience FROM alert_messages
+       WHERE reddit_id = 't3_m' ORDER BY chat_id`;
+    expect(rows.map((r) => [r.chat_id, r.message_id, r.audience])).toEqual([
+      ['-100111', '42', 'buyers'],
+      ['-100222', '7', 'buyers'],
+    ]);
+  });
+
+  it('keeps the message ids even when the claim was lost, since the alert did go out', async () => {
+    await insertNewPosts(db.sql, [samplePost({redditId: 't3_lost'})]);
+    await db.sql`UPDATE posts SET status = 'target', is_target = TRUE WHERE reddit_id = 't3_lost'`;
+    await claimPosts(db.sql, 'worker-1', 'target', 1);
+    await db.sql`UPDATE posts SET claimed_by = 'worker-2' WHERE reddit_id = 't3_lost'`;
+
+    await markNotified(db.sql, 'worker-1', 't3_lost', [{chatId: '-100111', messageId: 43}]);
+
+    const [post] = await db.sql<Array<{status: string}>>`
+      SELECT status FROM posts WHERE reddit_id = 't3_lost'`;
+    expect(post?.status).toBe('target');
+    const [message] = await db.sql<Array<{n: number}>>`
+      SELECT COUNT(*)::int AS n FROM alert_messages WHERE reddit_id = 't3_lost'`;
+    expect(message?.n).toBe(1);
+  });
+
   it('leaves a rejected post out of the notify queue', async () => {
     await insertNewPosts(db.sql, [samplePost({redditId: 't3_no'})]);
     await claimPosts(db.sql, 'worker-1', 'new', 1);
@@ -225,6 +264,7 @@ describe('post claiming and lifecycle', () => {
       summary: 'Someone asking for build advice.',
       price: null,
       raw: {is_target: false},
+      promptVersionId,
     });
 
     expect(await claimPosts(db.sql, 'worker-1', 'target', 5)).toEqual([]);
@@ -256,7 +296,7 @@ describe('post claiming and lifecycle', () => {
     await insertNewPosts(db.sql, [samplePost({redditId: 't3_t'})]);
     await claimPosts(db.sql, 'worker-1', 'new', 1);
     await recordEvaluation(db.sql, 'worker-1', 't3_t', {
-      isTarget: true, summary: 's', price: null, raw: {},
+      isTarget: true, summary: 's', price: null, raw: {}, promptVersionId,
     });
     await db.sql`UPDATE posts SET status = 'failed' WHERE reddit_id = 't3_t'`;
 

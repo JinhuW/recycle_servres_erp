@@ -1,0 +1,29 @@
+# A private image registry on the homelab LAN, so worker hosts other than this
+# VM can pull the worker image rs-fleetd runs. The monitor is AGPL-3 and is
+# never distributed: this listens on the LAN address only, never a public one.
+#
+#   docker compose --env-file configs/secrets.coordinator-lan.env \
+#     -f deploy/docker-compose.registry.yml up -d
+#
+# Plain HTTP on a private network, so each worker host's Docker daemon lists
+# it in /etc/docker/daemon.json: {"insecure-registries": ["10.10.10.73:5000"]}.
+# scripts/deploy.sh pushes each release's image to it when RS_REGISTRY is set
+# on the machine running the deploy (RS_REGISTRY=10.10.10.73:5000).
+
+services:
+  registry:
+    image: registry:2.8.3
+    container_name: rs-registry
+    restart: unless-stopped
+    ports:
+      - "${RS_LAN_IP:?set RS_LAN_IP}:5000:5000"
+    volumes:
+      - registry-data:/var/lib/registry
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+volumes:
+  registry-data:

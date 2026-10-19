@@ -15,9 +15,11 @@ has the repo map and workflow.
 - **The ERP drives it over HTTP.** `apps/backend/src/routes/tracker.ts` proxies
   an allowlist (`GET /api/workers`, `DELETE /api/workers/:id`,
   `GET|POST /api/rules`, `PATCH|DELETE /api/rules/:id`,
-  `GET|POST /api/subreddits`, `PATCH|DELETE /api/subreddits/:name`) for the
-  ERP's Monitors ▸ Reddit page. Changing one of those response shapes, or adding
-  a route the page needs, is a change to both sides; see the root AGENTS.md
+  `GET|POST /api/subreddits`, `PATCH|DELETE /api/subreddits/:name`,
+  `GET /api/matches`, `GET /api/stats`, `GET /api/prompt-stats`,
+  `PUT|DELETE /api/prompt-candidate`, `POST /api/prompt-candidate/promote`)
+  for the ERP's Monitors ▸ Reddit page. Changing one of those response shapes,
+  or adding a route the page needs, is a change to both sides; see the root AGENTS.md
   under *Contracts*. Keep the tracker backward-compatible until the ERP release
   ships, because the two deploy separately.
 - **Versioning.** There is no release process. OCI images are tagged with the
@@ -38,15 +40,28 @@ has the repo map and workflow.
   [docs/debug-notes/telegram-supergroup-migration.md](docs/debug-notes/telegram-supergroup-migration.md).
   A group upgraded to a supergroup gets a new `-100…` chat id, and every alert
   to the old id fails.
+- **The eval prompt, rules, `src/llm.ts` or the response schema** →
+  [docs/prompt-evaluations/](docs/prompt-evaluations/). Every verdict is
+  scored by prompt version, so a wording change belongs in a candidate trial
+  with its numbers written up, not straight in `eval_prompt`. The schema puts
+  `is_target` before `reasoning`, so the model commits before it reasons.
+  Reordering it changes every verdict at once, so run it as a measured
+  experiment.
 - **`scripts/deploy-workers.sh` or `GHCR_READ_TOKEN`** →
   [docs/debug-notes/ghcr-read-token-dead.md](docs/debug-notes/ghcr-read-token-dead.md).
   The pull token is a classic PAT that dies silently; check it with one
   `curl` before deploying.
+- **The multi-arch image build failing for `linux/amd64`** →
+  [docs/debug-notes/amd64-image-build-crashes-node.md](docs/debug-notes/amd64-image-build-crashes-node.md).
+  The emulator colima registers can crash node with an `uv__io_poll`
+  assertion. Re-register it with `tonistiigi/binfmt`, and don't drop amd64:
+  part of the fleet is E2.1.Micro.
 
 ## Design invariants
 
 Breaking any of these breaks the fleet. The tests that cover them are
-`tests/claims.test.ts`, `tests/poll.test.ts` and `tests/pipeline.test.ts`.
+`tests/claims.test.ts`, `tests/poll.test.ts`, `tests/pipeline.test.ts` and
+`tests/reactions.test.ts`.
 
 1. **One Reddit request per poll cycle, not one per subreddit.** The poll loop
    claims a batch and fetches it through the `r/a+b+c` multireddit path.
@@ -61,6 +76,14 @@ Breaking any of these breaks the fleet. The tests that cover them are
    `target` row.
 5. **Secrets in env, business config in the `settings` table.** If a change
    should reach a running fleet without a redeploy, it belongs in the database.
+6. **A candidate prompt never reaches buyers.** Its verdicts go to
+   `candidate_verdicts` and never touch `posts.status`. A post only the
+   candidate flags is reviewed in the dev chat from the evaluate loop, by the
+   worker that judged it; `rejected` is terminal, so that happens once.
+7. **Only the api process polls `getUpdates`.** Telegram allows one poller per
+   bot token, and a second one splits the reactions between them. The
+   reactions loop starts only in the api role with `ALERT_TRANSPORT=telegram`.
+   The Facebook tracker uses a different bot, so the two never collide.
 
 ## Conventions
 

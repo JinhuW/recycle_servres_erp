@@ -1962,17 +1962,29 @@ over MCP.
   manager drops an `.xlsx`, and only its Part Number and Unit Price columns
   are read. The preview shows current → new price and max buy for every part
   already on the Market list. It lists the rows it skips: unknown parts (no
-  row is created), blank or 0 prices, prices marked in yuan, and an earlier
-  row for a part listed again. One click records the rest, with the file name
-  as the event note, and each part's max buy follows its new price.
+  row is created), blank or 0 prices, prices in a currency other than dollars
+  or yuan, and an earlier row for a part listed again. One click records the
+  rest, with the file name as the event note, and each part's max buy follows
+  its new price.
+  - **Dollars or yuan** (v1.286.0). A **Prices in** USD / CNY (¥) switch,
+    USD by default, sets what an unmarked price is in. Flipping it on the
+    preview re-reads the same file. Yuan convert to US dollars at the FX
+    ledger's latest rate (Settings → FX), rounded to cents. The preview shows
+    the yuan under each converted price, plus the rate as `1 USD = N CNY
+    (source)`. A price that names its own currency keeps it whichever way
+    the switch is set, so a `Unit Price (USD)` column is never converted and
+    a `¥` cell in a dollar list is. A yuan price under half a cent counts as
+    no price. Apply writes the USD prices the preview showed.
   - **Reading the sheet** (v1.247.1, shared with the bid import): a Unit
     Price column wins over another price column (List, Last) and an Ext. or
     Total one is never read; 型号 wins over a row-number 编号; hidden tabs
     and a merged title row are passed over; a second header further down a
     tab starts a section read by its own columns; a decimal comma reads as
-    one (`12,50` is 12.50). A row marked in any currency but US dollars — by
-    its cell, the cell's format, the column header or the tab name — is
-    skipped, and 美元 reads as dollars.
+    one (`12,50` is 12.50). A row's currency comes from its cell, the cell's
+    format, the column header or the tab name, in that order. 美元 reads as
+    dollars, and so does a bare `$`, but not HK$ or a format's `[$€-407]`
+    (v1.286.0). The Market import skips a row marked in any currency but
+    dollars or yuan.
   - A list with more than 5,000 matched parts is refused at the preview, the
     same cap the apply holds, and the apply writes the whole list in two
     statements (v1.247.1).
@@ -2073,7 +2085,29 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
 
 - **Tracker** — admin page and API proxy for the Reddit listing monitor, with a
   fleet status filter and infinite scroll (v1.64.0, v1.65.0).  In the sidebar
-  it is **Monitors ▸ Reddit** (v1.207.0).
+  it is **Monitors ▸ Reddit** (v1.207.0). Since v1.283.0 it has the Facebook
+  fleet page's layout: a Live / Stale / Dead legend whose counts filter the
+  workers table, a **Recent matches** aside beside the table, and a **From a
+  post to an alert** card with Poll, Evaluate and Notify stages. Subreddits
+  are edited under Poll and alert rules under Evaluate. Since v1.284.0 the
+  proxy forwards `/matches` and `/stats`, so the aside lists matched posts
+  and the stages show post counts (collected, matched, alerted; waiting,
+  rejected and oldest waiting under Evaluate). Since v1.287.0 those counts
+  cover the posts discovered in the past 24 hours, not all time. Oldest
+  waiting and the failed list still look at every post. If either read
+  fails, that part shows a dash or a note.
+
+  Since v1.291.0, a **Which prompt is better** card scores every prompt
+  version by its leads. A lead is an alert someone reacted to with anything
+  but 👎.
+  - For each version it shows posts judged and flagged, buyer leads as
+    "x of n", and the dev chat's 👍 and 👎.
+  - It covers 7 days, 30 days or all time.
+  - While a candidate prompt is on trial, the card sets its verdicts against
+    the live prompt's on the same posts. It warns until 20 posts are
+    labelled.
+  - Managers start, edit, end and promote trials there. Promoting switches
+    the rules off, because the candidate was judged without them.
 - **Coordinator** — the Facebook fleet, reached from **Monitors ▸ Facebook**
   in the sidebar (v1.207.0), managers only. Since v1.263.0 the Fleet tab
   shares the Account pool tab's chrome: a status legend (Live, Stale, Needs
@@ -2098,7 +2132,15 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   or stale worker). Since v1.281.0 the Worker, Status, Today, Searches,
   Session and Posts headers sort the table (click: descending, ascending,
   back to fleet order; Today sorts by last heartbeat, and unknowns stay at
-  the bottom either way); and a **From a search to an alert** card that walks the
+  the bottom either way). Since v1.283.1 the Status cell shows the worker's
+  last heartbeat age under its chip, the beat that status is judged from.
+  Since v1.285.0 Recent activity also lists every status change the
+  coordinator logs: went stale, went offline, is reporting again, reported
+  for the first time, needs attention (with the reported state, such as
+  Session expired) and is healthy again. Each is dated when it happened and
+  its dot shows the status it moved into; the worker page's History lists the
+  same for one worker. Against a coordinator without the log, the aside falls
+  back to the old "stopped reporting" line. And a **From a search to an alert** card that walks the
   pipeline as the code runs it — search, result cards, the title gate before
   any page is opened, the cached page visit, the keyword gate with the
   description, the already-notified skip, the AI rating with its unit and
@@ -2112,14 +2154,31 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   cards, title gate, keyword gate, AI rating) has an **Edit** form for those
   settings, prompt and rubric included. A save goes through the fleet
   console into every worker's config. Workers pick it up between jobs and
-  start a sweep, and deploys keep the saved values (v1.265.0). The phrase and keyword lists show one item at a time, as chips: an OR rule
-  is a group of chips, an AND/NOT rule an expression, and a repeated term is
-  outlined. Editing is by chip (× to remove, Enter or paste to add, `+` to
-  grow a group), with a text fallback. A **Try a listing** box on the title
-  and keyword gates says per item whether a listing passes, which
-  anti-keyword drops it, or that no keyword matched, using the unsaved draft
-  while editing. Save stays off until something changed, and leaving a dirty
-  form asks first (v1.270.0). The eye
+  start a sweep, and deploys keep the saved values (v1.265.0). The sweep time is shown and typed in US Eastern and stored as the workers'
+  UTC (v1.287.1). The phrase and keyword lists show one item at a time, as chips. The
+  keyword gate shows two lists, a green **Include** (a listing must mention
+  one) and a red **Exclude** (any one drops it). Each list is one flat field
+  of keywords: no "or" between chips, an AND/NOT rule as one expression chip,
+  and every count counting keywords rather than config lines (v1.288.0). The
+  title gate shows both lists too, since with the title prefilter on a card
+  needs an include keyword in its title; with the prefilter off its Include
+  list is dimmed, and a save from the title gate sends both (v1.289.0). A
+  repeated term is outlined. An include keyword an exclude keyword always
+  catches is struck through, and its tooltip names the exclude keyword: an
+  exact copy, or a word that merely starts with it, since `ram` drops
+  `ram stick` too (v1.289.0). Editing is by chip (× to remove, Enter or paste
+  to add), with a text fallback. In read mode, **+ Add keyword** opens the
+  stage's Edit with that list's input focused. Opening Edit, either way, or
+  switching to text leaves the card and both fields the same height: the ×
+  is a corner badge on hover, so no chip moves (v1.289.1). A **Try a listing** box on the
+  title and keyword gates puts each item's verdict on its tab (passes, which
+  exclude keyword drops it, that no include keyword matched, or that the page
+  is opened anyway). Under the tabs, the typed title and description are
+  shown with every Include word marked green and every Exclude word red for
+  the selected item, and every chip the listing holds fills in its list's
+  colour (v1.289.0). It uses the unsaved draft while editing. Save stays off
+  until something changed, and leaving a dirty form asks first (v1.270.0).
+  The eye
   on a row is the one way to a worker's page, `/fleet/worker/<worker>`: its
   Facebook login and user id, vault account and stored secrets by name,
   session expiry, browser and backup, proxy (since v1.278.0 its URL without
@@ -2131,7 +2190,19 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   password (search by #, UID, e-mail or batch; 2FA, cookie age and batch
   shown) and assigning one sends its login to the worker the same way the
   pool page does — vault written with password login allowed, Re-login
-  queued, account marked Fleet. If the worker already holds a pool account,
+  queued, account marked Fleet. Since v1.281.2 the account's UID goes with
+  the login, and it picks the device the worker presents: the same browser
+  identity on any worker, never the previous login's (facebook-tracker
+  0.11.0, RS-292). Since v1.281.3 it also sends the `datr`/`sb` from the
+  account's pool cookie (never its session), so a login with no device yet
+  starts on the one it was made in (facebook-tracker 0.12.2, RS-293). Since
+  v1.290.0, when the account's cookie is its own (its `c_user` matches), the
+  Assign seals that whole cookie as the worker's session and has the worker
+  restore it — logged in with no password login and no 2FA, on the account's
+  own device — and queues a password Re-login only when there is no usable
+  cookie; a restored session that Facebook has since expired still falls back
+  to the password login on the worker's own (facebook-tracker 0.12.5, RS-308).
+  If the worker already holds a pool account,
   the dialog asks where that one goes — back to Available, to Problem (still
   naming the worker) or Retired — with no default, and both moves land
   together. A worker without a vault account gets one named after it. Until
@@ -2246,7 +2317,13 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   re-reads the fleet every 3 seconds instead of every 30. The worker collects
   the request within about 10 seconds between sweeps (facebook-tracker
   v0.9.0); mid-sweep it starts at its next search. A coordinator older than
-  v0.9.0 reports no steps, and the strip stays hidden.
+  v0.9.0 reports no steps, and the strip stays hidden.  **Full screen**
+  (v1.282.0, RS-296) gives the browser and the sign-in panel the whole
+  display, with the browser scaled to fill it. Taking control enters full
+  screen and handing control back leaves it. Esc only shrinks the view, and
+  control stays on. A bar at the top repeats the status, Take control,
+  Re-login, the panel toggle and Exit. Since facebook-tracker 0.12.4 (RS-295)
+  the view is cropped to the worker's browser window, not its whole X display.
 
 - **Web submissions** — the manager inbox for the public website forms
   (v1.187.0). The ram4cash.com sell form (`POST /api/public/intake`) and the

@@ -14,7 +14,7 @@ from fastapi import Header, HTTPException
 
 from .db import AnyDatabase, open_database
 from .telegram_notify import TelegramNotifier
-from .tokens import verify_worker_token
+from .tokens import verify_host_token, verify_worker_token
 from .vault import AccountStore, Vault, VaultError
 
 # Legacy fleet-wide token. Still accepted so workers deployed before per-worker
@@ -129,6 +129,14 @@ def require_worker(authorization: Optional[str] = Header(default=None)) -> Optio
         return None
 
     raise HTTPException(status_code=401, detail="Invalid bearer token")
+
+
+def require_host(authorization: Optional[str] = Header(default=None)) -> str:
+    """Authenticate a host's fleet agent and return its host id."""
+    host_id = verify_host_token(_bearer(authorization))
+    if not host_id:
+        raise HTTPException(status_code=401, detail="Invalid or missing host token")
+    return host_id
 
 
 def require_admin(authorization: Optional[str] = Header(default=None)) -> None:

@@ -6,6 +6,7 @@ import {Hono} from 'hono';
 import {requeuePost} from './claims.ts';
 import type {Sql} from './db.ts';
 import {DEAD_AFTER_S, STALE_AFTER_S, type LoopName, type LoopStatus} from './heartbeat.ts';
+import {candidateConfig, liveConfig, promptHash, promptStats} from './prompts.ts';
 import {createRule, deleteRule, listRules, updateRule} from './rules.ts';
 import {isSettingKey, SETTING_KEYS, type SettingsStore} from './settings.ts';
 import {sendMessage} from './telegram.ts';
@@ -39,6 +40,14 @@ function parseLimit(raw: string | undefined, fallback: number): number {
   if (!Number.isFinite(value) || value <= 0) return fallback;
   return Math.min(Math.floor(value), MAX_LIMIT);
 }
+
+function parseSince(raw: string | undefined): Date | null | 'invalid' {
+  if (!raw) return null;
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? 'invalid' : date;
+}
+
+const SINCE_INVALID = 'since must be an ISO 8601 timestamp';
 
 export function createApi(deps: ApiDeps): Hono {
   const app = new Hono();
@@ -74,11 +83,8 @@ export function createApi(deps: ApiDeps): Hono {
   // The deliverable: LLM summary plus the link, newest first.
   app.get('/api/matches', async (c) => {
     const limit = parseLimit(c.req.query('limit'), 50);
-    const since = c.req.query('since');
-    const sinceDate = since ? new Date(since) : null;
-    if (sinceDate && Number.isNaN(sinceDate.getTime())) {
-      return c.json({error: 'since must be an ISO 8601 timestamp'}, 400);
-    }
+    const sinceDate = parseSince(c.req.query('since'));
+    if (sinceDate === 'invalid') return c.json({error: SINCE_INVALID}, 400);
 
     const rows = await deps.sql<MatchRow[]>`
       SELECT reddit_id, subreddit, title, llm_summary, llm_price, url,
@@ -299,10 +305,17 @@ export function createApi(deps: ApiDeps): Hono {
     return c.json({key, value: body.value});
   });
 
+  // `since` windows the status counts only. The oldest pending post and the
+  // failed list stay current-state: they exist to show a stuck evaluator.
   app.get('/api/stats', async (c) => {
+    const sinceDate = parseSince(c.req.query('since'));
+    if (sinceDate === 'invalid') return c.json({error: SINCE_INVALID}, 400);
+
     const [byStatus, subreddits, oldest] = await Promise.all([
       deps.sql<Array<{status: string; count: string}>>`
-        SELECT status, COUNT(*)::text AS count FROM posts GROUP BY status`,
+        SELECT status, COUNT(*)::text AS count FROM posts
+         ${sinceDate ? deps.sql`WHERE discovered_at >= ${sinceDate}` : deps.sql``}
+         GROUP BY status`,
       deps.sql`
         SELECT name, enabled, last_status, consecutive_errors, last_polled_at, next_poll_at
           FROM subreddits ORDER BY name`,
@@ -329,6 +342,96 @@ export function createApi(deps: ApiDeps): Hono {
     return c.json({requeued: c.req.param('id')});
   });
 
+  // How each prompt version has done: what it flagged, and how many of its
+  // alerts drew a lead (any reaction but 👎) from buyers or the dev chat. A
+  // candidate also gets its verdicts set against the live ones, post by post.
+  app.get('/api/prompt-stats', async (c) => {
+    const sinceDate = parseSince(c.req.query('since'));
+    if (sinceDate === 'invalid') return c.json({error: SINCE_INVALID}, 400);
+
+    const settings = await deps.settings.get();
+    const enabledRules = (await listRules(deps.sql)).filter((r) => r.enabled);
+    return c.json(await promptStats(deps.sql, {
+      since: sinceDate,
+      live: liveConfig(settings, enabledRules),
+      candidate: candidateConfig(settings),
+      enabledRules: enabledRules.length,
+    }));
+  });
+
+  // Starts or replaces the trial. Its own route rather than two settings PUTs
+  // so the ERP can drive trials without being let at the rest of settings.
+  app.put('/api/prompt-candidate', async (c) => {
+    const body = await c.req.json().catch(() => null) as {prompt?: unknown; model?: unknown} | null;
+    const prompt = typeof body?.prompt === 'string' ? body.prompt.trim() : '';
+    if (!prompt) return c.json({error: 'prompt must be a non-empty string'}, 400);
+    const model = body?.model === undefined ? '' : body.model;
+    if (typeof model !== 'string' || (model !== '' && !MODEL_ID.test(model))) {
+      return c.json({error: 'model must be "" (use llm_model) or an OpenRouter model id'}, 400);
+    }
+
+    await deps.sql.begin(async (tx) => {
+      const values: Array<[string, string]> =
+        [['candidate_eval_prompt', prompt], ['candidate_llm_model', model]];
+      for (const [key, value] of values) {
+        await tx`
+          INSERT INTO settings (key, value, updated_at)
+          VALUES (${key}, ${tx.json(value)}, NOW())
+          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`;
+      }
+    });
+    deps.settings.invalidate();
+
+    const candidate = candidateConfig(await deps.settings.get())!;
+    const [version] = await deps.sql<Array<{id: number}>>`
+      SELECT id FROM prompt_versions WHERE hash = ${promptHash(candidate)}`;
+    return c.json({candidate: {...candidate, promptVersionId: version?.id ?? null}});
+  });
+
+  // Ends the trial. Its verdicts stay, so its version keeps its numbers.
+  app.delete('/api/prompt-candidate', async (c) => {
+    await deps.sql`
+      UPDATE settings SET value = '""'::jsonb, updated_at = NOW()
+       WHERE key IN ('candidate_eval_prompt', 'candidate_llm_model')`;
+    deps.settings.invalidate();
+    return c.json({cleared: true});
+  });
+
+  // Makes the candidate the live prompt. Rules are disabled, not deleted: the
+  // candidate was judged without them, and this keeps it judged the same way
+  // — which also means it keeps its version id, so its numbers carry on.
+  app.post('/api/prompt-candidate/promote', async (c) => {
+    // Straight from the database: a cached read could promote a candidate
+    // that was changed or cleared a moment ago.
+    deps.settings.invalidate();
+    const settings = await deps.settings.get();
+    const candidate = candidateConfig(settings);
+    if (!candidate) return c.json({error: 'no candidate_eval_prompt is set'}, 400);
+
+    const disabled = await deps.sql.begin(async (tx) => {
+      const put = (key: string, value: string) => tx`
+        INSERT INTO settings (key, value, updated_at)
+        VALUES (${key}, ${tx.json(value)}, NOW())
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`;
+      await put('eval_prompt', candidate.systemPrompt);
+      await put('llm_model', candidate.model);
+      await put('candidate_eval_prompt', '');
+      await put('candidate_llm_model', '');
+      return tx<Array<{id: number}>>`
+        UPDATE rules SET enabled = FALSE, updated_at = NOW() WHERE enabled RETURNING id`;
+    });
+    deps.settings.invalidate();
+
+    const [version] = await deps.sql<Array<{id: number}>>`
+      SELECT id FROM prompt_versions WHERE hash = ${promptHash(candidate)}`;
+    return c.json({
+      evalPrompt: candidate.systemPrompt,
+      llmModel: candidate.model,
+      disabledRules: disabled.map((r) => r.id),
+      promptVersionId: version?.id ?? null,
+    });
+  });
+
   app.post('/api/telegram/test', async (c) => {
     const body = await c.req.json().catch(() => ({})) as {message?: unknown};
     const message = typeof body.message === 'string' && body.message.trim() !== ''
@@ -347,6 +450,8 @@ export function createApi(deps: ApiDeps): Hono {
   return app;
 }
 
+const MODEL_ID = /^[\w.-]+\/[\w.:-]+$/;
+
 function validateSetting(key: string, value: unknown): string | null {
   switch (key) {
     case 'eval_prompt':
@@ -354,14 +459,23 @@ function validateSetting(key: string, value: unknown): string | null {
         ? null
         : 'eval_prompt must be a non-empty string';
     case 'llm_model':
-      return typeof value === 'string' && /^[\w.-]+\/[\w.:-]+$/.test(value)
+      return typeof value === 'string' && MODEL_ID.test(value)
         ? null
         : 'llm_model must be an OpenRouter model id, e.g. "openai/gpt-4o-mini"';
     case 'telegram_chat_ids':
+    case 'telegram_dev_chat_ids':
       return Array.isArray(value)
         && value.every((v) => typeof v === 'string' || typeof v === 'number')
         ? null
-        : 'telegram_chat_ids must be an array of chat ids';
+        : `${key} must be an array of chat ids`;
+    case 'candidate_eval_prompt':
+      return typeof value === 'string'
+        ? null
+        : 'candidate_eval_prompt must be a string ("" ends the trial)';
+    case 'candidate_llm_model':
+      return typeof value === 'string' && (value === '' || MODEL_ID.test(value))
+        ? null
+        : 'candidate_llm_model must be "" (use llm_model) or an OpenRouter model id';
     case 'max_post_age_hours':
       return typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= 720
         ? null
