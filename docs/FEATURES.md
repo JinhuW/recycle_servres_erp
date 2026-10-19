@@ -666,6 +666,12 @@ is not a stage but a flag beside one, set once every line has sold
   exist; sortable, in the Columns picker, on by default. A user who had
   pinned the picker before this release ticks it on once — the saved set
   lists what is shown, and a new column is not in it.
+- **The Actions column is pinned to the right edge** (v1.294.1). When the
+  desktop list is wider than its card and scrolls sideways, the Actions
+  header and cells stay put at the right while the other columns slide
+  underneath them, with a soft edge on the cell's left while anything is
+  hidden there. Sell orders and the inventory lot table pin theirs the same
+  way. A table that fits its card shows no edge and looks as before.
 - **One payment picker on every surface, and a cash payment needs a
   screenshot of the amount** (v1.153.0). The desktop Submit and Edit pages,
   the phone's Review and Detail screens, and the hand-off dialog and sheet

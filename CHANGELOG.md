@@ -17,6 +17,21 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.294.1] - 2026-10-19
+
+The Actions column stays in view while a wide table scrolls (RS-321).
+
+### Fixed
+
+- **Actions no longer fall off the edge of a wide list.** On Purchase orders,
+  Sell orders and the inventory lot table, the Actions column is pinned to
+  the right edge of the card: the other columns slide underneath it, so a
+  laptop-width window with most columns switched on no longer needs a trip to
+  the end of the horizontal scrollbar before a row can be opened, downloaded
+  or edited. A soft edge on the pinned cell says columns are hidden beneath
+  it and fades once the table is scrolled to the end; a table that fits its
+  card looks exactly as before.
+
 ## [1.294.0] - 2026-10-19
 
 An Attachments card on the sell order (RS-320).
