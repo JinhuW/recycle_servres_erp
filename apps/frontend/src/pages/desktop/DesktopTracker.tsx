@@ -8,6 +8,7 @@ import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import {
   MIN_POLL_INTERVAL_S,
+  MODEL_ID,
   normalizeSubredditName,
   trackerApi,
   WORKERS_PAGE_SIZE,
@@ -60,7 +61,10 @@ export function DesktopTracker({ showToast }: Props) {
   const [notConfigured, setNotConfigured] = useState(false);
   const [filter, setFilter] = useState<Liveness | 'all'>('all');
 
+  const [liveModel, setLiveModel] = useState<string | null>(null);
+
   const [ruleDialog, setRuleDialog] = useState<TrackerRule | 'new' | null>(null);
+  const [modelDialog, setModelDialog] = useState(false);
   const [deletingRule, setDeletingRule] = useState<TrackerRule | null>(null);
   const [deletingSub, setDeletingSub] = useState<TrackerSubreddit | null>(null);
 
@@ -72,12 +76,19 @@ export function DesktopTracker({ showToast }: Props) {
     handleFetchError(err);
   }, []);
 
+  // The live model only arrives inside prompt-stats; the window keeps that
+  // read cheap, and `config` does not depend on it.
+  const loadModel = useCallback(() =>
+    trackerApi.promptStats(new Date(Date.now() - STATS_WINDOW_MS)).then(s => setLiveModel(s.config.live.model)),
+  []);
+
   useEffect(() => {
     let alive = true;
     trackerApi.listRules().then(r => { if (alive) setRules(r); }).catch(err => { if (alive) fail(err); });
     trackerApi.listSubreddits().then(s => { if (alive) setSubs(s); }).catch(err => { if (alive) fail(err); });
+    loadModel().catch(err => { if (alive) fail(err); });
     return () => { alive = false; };
-  }, [fail]);
+  }, [fail, loadModel]);
 
   const loadLive = useCallback(() => {
     trackerApi.workerCounts().then(setCounts).catch(fail);
@@ -127,13 +138,31 @@ export function DesktopTracker({ showToast }: Props) {
             locale={locale} onError={fail} showToast={showToast} onRemoved={loadLive} />
           <MatchesAside matches={matches} locale={locale} />
         </div>
-        <FlowCard stats={stats} subs={subs} rules={rules} locale={locale}
+        <FlowCard stats={stats} subs={subs} rules={rules} liveModel={liveModel} locale={locale}
           onSubsChanged={setSubs} onDeleteSub={setDeletingSub}
           onRulesChanged={setRules} onEditRule={setRuleDialog} onDeleteRule={setDeletingRule}
+          onEditModel={() => setModelDialog(true)}
           onError={fail} showToast={showToast} />
         <PromptsCard locale={locale} onError={fail} showToast={showToast}
-          onPromoted={() => trackerApi.listRules().then(setRules).catch(fail)} />
+          onPromoted={() => {
+            // Promote rewrites the live model along with the prompt.
+            trackerApi.listRules().then(setRules).catch(fail);
+            loadModel().catch(fail);
+          }} />
       </div>
+
+      {modelDialog && liveModel !== null && (
+        <ModelModal
+          model={liveModel}
+          onClose={() => setModelDialog(false)}
+          onSaved={saved => {
+            setLiveModel(saved);
+            setModelDialog(false);
+            showToast?.(t('trkModelSaved'));
+          }}
+          onError={fail}
+        />
+      )}
 
       {ruleDialog && (
         <RuleModal
@@ -461,21 +490,23 @@ function MatchesAside({ matches, locale }: { matches: TrackerMatch[] | Unavailab
 // each. Counts cover the posts discovered in the last STATS_WINDOW_MS, one
 // cohort, so the stages read as a funnel; the tracker never prunes posts, so
 // all-time totals only grow. Poll is where the subreddits are edited and
-// Evaluate where the alert rules are; Notify has no settings this page may
-// change.
+// Evaluate where the model and the alert rules are; Notify has no settings
+// this page may change.
 
-type Setting = { label: string; value: string; fixed?: boolean };
+type Setting = { label: string; value: string; fixed?: boolean; onEdit?: () => void; editLabel?: string };
 
-function FlowCard({ stats, subs, rules, locale, onSubsChanged, onDeleteSub, onRulesChanged, onEditRule, onDeleteRule, onError, showToast }: {
+function FlowCard({ stats, subs, rules, liveModel, locale, onSubsChanged, onDeleteSub, onRulesChanged, onEditRule, onDeleteRule, onEditModel, onError, showToast }: {
   stats: TrackerStats | Unavailable | null;
   subs: TrackerSubreddit[] | null;
   rules: TrackerRule[] | null;
+  liveModel: string | null;
   locale: string;
   onSubsChanged: (update: (prev: TrackerSubreddit[] | null) => TrackerSubreddit[] | null) => void;
   onDeleteSub: (sub: TrackerSubreddit) => void;
   onRulesChanged: (update: (prev: TrackerRule[] | null) => TrackerRule[] | null) => void;
   onEditRule: (rule: TrackerRule | 'new') => void;
   onDeleteRule: (rule: TrackerRule) => void;
+  onEditModel: () => void;
   onError: (err: unknown) => void;
   showToast?: (msg: string, kind?: 'success' | 'error') => void;
 }) {
@@ -507,6 +538,8 @@ function FlowCard({ stats, subs, rules, locale, onSubsChanged, onDeleteSub, onRu
       case 'evaluate': {
         const oldest = stats && stats !== 'unavailable' ? stats.oldestPending : null;
         return [
+          { label: t('trkSetModel'), value: liveModel ?? '—',
+            onEdit: liveModel === null ? undefined : onEditModel, editLabel: t('trkEditModel') },
           { label: t('trkSetRules'), value: rules ? `${rules.filter(r => r.enabled).length} / ${rules.length}` : '—' },
           { label: t('trkSetPending'), value: v(n('new')) },
           { label: t('trkSetRejected'), value: v(n('rejected')) },
@@ -562,9 +595,14 @@ function FlowCard({ stats, subs, rules, locale, onSubsChanged, onDeleteSub, onRu
                 <p className="ff-flow-what">{t(`trkFlowWhat_${k}`)}</p>
                 <div className="ff-settings">
                   {settings(k).map(s => (
-                    <span key={s.label} className={`ff-setting${s.fixed ? ' ff-fixed' : ''}`}
+                    <span key={s.label} className={`ff-setting${s.fixed ? ' ff-fixed' : ''}${s.onEdit ? ' rt-editable' : ''}`}
                       title={s.fixed ? t('trkFixedHint') : undefined}>
                       {s.label} <b>{s.value}</b>
+                      {s.onEdit && (
+                        <button className="btn ghost icon sm" title={s.editLabel} aria-label={s.editLabel} onClick={s.onEdit}>
+                          <Icon name="edit" size={11} />
+                        </button>
+                      )}
                     </span>
                   ))}
                 </div>
@@ -794,6 +832,51 @@ function SubredditRow({ sub, locale, onChanged, onDelete, onError }: {
         </button>
       </td>
     </tr>
+  );
+}
+
+function ModelModal({ model, onClose, onSaved, onError }: {
+  model: string;
+  onClose: () => void;
+  onSaved: (model: string) => void;
+  onError: (err: unknown) => void;
+}) {
+  const { t } = useT();
+  const [value, setValue] = useState(model);
+  const [saving, setSaving] = useState(false);
+  const next = value.trim();
+  const valid = MODEL_ID.test(next);
+  const canSave = valid && next !== model;
+
+  function save() {
+    if (!canSave || saving) return;
+    setSaving(true);
+    trackerApi.setModel(next).then(onSaved).catch(onError).finally(() => setSaving(false));
+  }
+
+  return (
+    <Modal onClose={onClose} ariaLabel={t('trkEditModel')} shellStyle={{ width: 440 }}>
+      <div className="modal-head">
+        <div className="modal-title">{t('trkEditModel')}</div>
+      </div>
+      <div className="modal-body">
+        <div className="field">
+          <label className="label" htmlFor="trk-model">{t('trkSetModel')}</label>
+          <input id="trk-model" className="input mono" value={value} autoFocus spellCheck={false}
+            onChange={e => setValue(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') save(); }} />
+          <span className={`help${next !== '' && !valid ? ' rt-help-invalid' : ''}`}>
+            {next !== '' && !valid ? t('trkModelInvalid') : t('trkModelHelp')}
+          </span>
+        </div>
+      </div>
+      <div className="modal-foot">
+        <button className="btn" onClick={onClose}>{t('cancel')}</button>
+        <button className="btn primary" disabled={!canSave || saving} onClick={save}>
+          {t('save')}
+        </button>
+      </div>
+    </Modal>
   );
 }
 
