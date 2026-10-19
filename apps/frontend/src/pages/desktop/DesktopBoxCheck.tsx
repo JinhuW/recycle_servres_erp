@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { parseSerials, serialIssue } from '@recycle-erp/shared';
+import { isPricedSellPrice, parseSerials, serialIssue } from '@recycle-erp/shared';
 import { Icon } from '../../components/Icon';
 import { ImageLightbox } from '../../components/ImageLightbox';
 import { OrderCategoryChips } from '../../components/OrderCategoryChips';
@@ -26,7 +26,11 @@ import { lineRequirements, missingFieldNames } from '../../lib/lineRequirements'
 import { paymentGap, reviewApproveTotal } from '../../lib/paymentGap';
 import { poStageName } from '../../lib/orderPresentation';
 import { lineShippedOn } from '../../lib/poPermissions';
+import { rateEq } from '../../lib/poTotals';
+import { lineMargin, parsePriceInput, reviewMoney, suggestedSell, type SellSuggestion } from '../../lib/reviewPricing';
+import { staleness } from '../../lib/marketStaleness';
 import { statusTone } from '../../lib/status';
+import { useMarketLookup } from '../../lib/useMarketLookup';
 import type { Order, OrderLine } from '../../lib/types';
 import { AiReviewCard } from './AiReviewCard';
 import { LineDrawer } from './submit/LineDrawer';
@@ -38,7 +42,9 @@ import { brandConfirmPending, patchEditsLine } from './submit/line';
 // sinks to the bottom so what is left to find stays on top. A line that
 // arrived different from what the PO says is fixed in place with Edit.
 // Progress lives on the server, so a reload or a second manager picks up
-// where the count stands.
+// where the count stands. The same bench prices the PO: each line's sell
+// price, the projection the commission is paid on, is typed beside its
+// count, with the Market board's value offered where nobody has priced it.
 
 type Props = {
   order: Order;
@@ -72,6 +78,14 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   const mismatch = usePaymentMismatchConfirm();
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [photoIdx, setPhotoIdx] = useState(0);
+  // Prices saved from this page stand over the order's copy until the next
+  // reload, and the rate the same way.
+  const [prices, setPrices] = useState<Map<string, number | null>>(new Map());
+  const [rate, setRate] = useState<number | null>(order.commissionRate);
+  const [filling, setFilling] = useState(false);
+  const priceRefs = useRef(new Map<string, HTMLInputElement>());
+  const partNumbers = useMemo(() => lines.map(l => l.partNumber), [lines]);
+  const market = useMarketLookup(partNumbers);
 
   const scanRef = useRef<HTMLInputElement | null>(null);
   // Set when a scanner's first character landed on the page and was moved into
@@ -206,6 +220,61 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     save(undo.prev);
     setSelectedId(undo.lineId);
     setUndo(null);
+  };
+
+  // ── Pricing: the sell price the commission is paid on, typed beside the
+  // count. Each price goes straight to the line — the road the PO page takes
+  // at Ready to Pay — so a reload reads it back. The row shows it at once and
+  // puts the old one back if the server refuses.
+  const priceOf = (l: OrderLine): number | null => (prices.has(l.id) ? prices.get(l.id)! : l.sellPrice);
+  const suggestionFor = (l: OrderLine): SellSuggestion | null => suggestedSell(market(l.partNumber));
+  const savePrice = async (l: OrderLine, value: number | null): Promise<boolean> => {
+    if (!ready) return false;
+    const next = value != null && value > 0 ? value : null;
+    const before = priceOf(l);
+    if ((before ?? null) === next) return true;
+    setPrices(m => new Map(m).set(l.id, next));
+    try {
+      const r = await api.patch<{ ok: true; warnings?: string[] }>(`/api/inventory/${l.id}`, { sellPrice: next });
+      if (r.warnings?.includes('sub_cost_sell')) showToast(t('bcPriceBelowCost', { n: lineNo(l) }), 'warn');
+      return true;
+    } catch (e) {
+      setPrices(m => new Map(m).set(l.id, before));
+      handleFetchError(e);
+      return false;
+    }
+  };
+  // Every unpriced line the market has a value for, one write each, so one
+  // refusal leaves the rest priced.
+  const fillFromMarket = async () => {
+    if (!ready || filling) return;
+    const targets = lines
+      .filter(l => !isPricedSellPrice(priceOf(l)))
+      .map(l => ({ l, s: suggestionFor(l) }))
+      .filter((x): x is { l: OrderLine; s: SellSuggestion } => x.s !== null);
+    if (!targets.length) { showToast(t('bcFillMarketNone'), 'warn'); return; }
+    setFilling(true);
+    let n = 0;
+    try {
+      for (const { l, s } of targets) if (await savePrice(l, s.value)) n += 1;
+    } finally {
+      setFilling(false);
+    }
+    showToast(t('bcFilledFromMarket', { n }), 'success');
+  };
+  // The rate is the PO's: a manager's until the book closes at Ready to Pay,
+  // where the server refuses it.
+  const rateLocked = order.lifecycle === 'ready_to_pay' || order.lifecycle === 'done';
+  const saveRate = async (v: number | null) => {
+    if (!ready || rateLocked || rateEq(v ?? 0, rate ?? 0)) return;
+    const before = rate;
+    setRate(v);
+    try {
+      await api.patch(`/api/orders/${order.id}`, { commissionRate: v });
+    } catch (e) {
+      setRate(before);
+      handleFetchError(e);
+    }
   };
 
   const ordered = useMemo(() => orderLines(lines, checks), [lines, checks]);
@@ -407,6 +476,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
         case '-': if (selectedShown) setCount(selectedShown, countOf(selectedShown, checkOf(selectedShown.id)) - 1); break;
         // Lowercase only: scanners type labels in uppercase (F4-…, KVR…).
         case 'e': e.preventDefault(); if (selectedShown) openEdit(selectedShown); break;
+        case 'p': e.preventDefault(); if (selectedShown && ready) priceRefs.current.get(selectedShown.id)?.focus(); break;
         case '/': e.preventDefault(); scanRef.current?.focus(); break;
         default:
           // A scanner types into whatever has focus. Its first character
@@ -452,6 +522,19 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     </ul>
   );
 
+  // The commission as Approve will leave it: a line set to 0 brings no
+  // revenue and, when the goods total follows the lines, no cost — the rule
+  // the payment gap above reads by.
+  const money = reviewMoney({
+    lines: lines.map(l => ({ id: l.id, qty: l.qty, unitCost: l.unitCost, sellPrice: priceOf(l) })),
+    totalCost: order.totalCost, goodsFollowsLines: order.goodsFollowsLines, otherFees: order.otherFees,
+    commissionRate: rate, payment: order.payment,
+    zeroed: new Set(atReviewing ? toZero.map(l => l.id) : []),
+  });
+  const unpriced = lines.filter(l => !isPricedSellPrice(priceOf(l)));
+  const fillable = unpriced.filter(l => suggestionFor(l) !== null).length;
+  const earnsClass = 'mono' + (money.earns < 0 ? ' neg' : '');
+
   // The line PATCH any edit on this page sends, then the answer recorded; the
   // reload remounts the page on the edited line. The findings are read again
   // first: one loaded before somebody else edited the line no longer
@@ -485,6 +568,9 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     const pn = l.partNumber ?? lineLabel(l);
     const shippedOn = lineShippedOn(l);
     const held = shippedOn.length > 0;
+    const price = priceOf(l);
+    const sug = suggestionFor(l);
+    const margin = lineMargin(price, l.unitCost);
     return (
       <Fragment key={l.id}>
         <tr
@@ -557,6 +643,30 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
             </div>
             {countOf(l, c) === 0 && <div className="bc-absent-tag">{t('bcAbsentTag')}</div>}
           </td>
+          <td className="num bc-price-cell" onClick={e => e.stopPropagation()}>
+            <span className="bc-price">
+              <span className="bc-price-sign">$</span>
+              <PriceField
+                inputRef={el => { if (el) priceRefs.current.set(l.id, el); else priceRefs.current.delete(l.id); }}
+                value={price}
+                suggestion={sug?.value ?? null}
+                disabled={!ready}
+                label={t('bcPriceInput', { pn })}
+                onFocus={() => setSelectedId(l.id)}
+                onCommit={v => { void savePrice(l, v); }}
+                onScanKey={startScan}
+              />
+            </span>
+            {margin !== null ? (
+              <div className={'bc-price-sub' + (margin < 0 ? ' neg' : '')}>
+                {margin < 0 ? t('bcBelowCost') : t('bcMargin', { pct: Math.round(margin * 100) })}
+              </div>
+            ) : sug ? (
+              <button type="button" className="bc-price-use" disabled={!ready} onClick={() => { void savePrice(l, sug.value); }}>
+                {t('bcPriceUse', { price: fmtUSD(sug.value, locale) })}
+              </button>
+            ) : null}
+          </td>
           <td className="bc-edit-cell">
             <button
               type="button"
@@ -577,6 +687,10 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   const selCheck = selected ? checkOf(selected.id) : null;
   const selShots = selected ? linePhotos(selected) : [];
   const selSerials = selected ? parseSerials(selected.serialNumber) : [];
+  const selPrice = selected ? priceOf(selected) : null;
+  const selMarket = selected ? market(selected.partNumber) : null;
+  const selSug = suggestedSell(selMarket);
+  const selAge = selMarket ? staleness(selMarket.lastPriceAt) : null;
   const shot = selShots[Math.min(photoIdx, selShots.length - 1)];
 
   return (
@@ -605,6 +719,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
           <span><kbd>{t('bcKeySpace')}</kbd> {t('bcKeyCheck')}</span>
           <span><kbd>+</kbd><kbd>−</kbd> {t('bcKeyCount')}</span>
           <span><kbd>E</kbd> {t('bcKeyEdit')}</span>
+          <span><kbd>P</kbd> {t('bcKeyPrice')}</span>
           <span><kbd>/</kbd> {t('bcKeyScan')}</span>
         </div>
       </div>
@@ -615,34 +730,62 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
       {gap && <PaymentMismatchBanner orderId={order.id} gap={gap} className="bc-banner" />}
 
       <div className="card bc-tally">
-        <div className="bc-tally-num">
-          <span className="mono"><b>{sum.counted}</b><span className="muted"> / {sum.units}</span></span>
-          <span className="card-sub">{t('bcUnitsCounted', { n: sum.done, of: lines.length })}</span>
-        </div>
-        <div className="bc-tally-meter">
-          <div className="bc-meter" role="img" aria-label={t('bcUnitsCounted', { n: sum.done, of: lines.length })}>
-            <i className="bc-m-done" style={{ flexGrow: sum.done }} />
-            <i className="bc-m-part" style={{ flexGrow: sum.partial }} />
-            <i className="bc-m-absent" style={{ flexGrow: sum.absent }} />
-            <i className="bc-m-open" style={{ flexGrow: sum.open }} />
+        <div className="bc-tally-half">
+          <div className="bc-tally-num">
+            <span className="mono"><b>{sum.counted}</b><span className="muted"> / {sum.units}</span></span>
+            <span className="card-sub">{t('bcUnitsCounted', { n: sum.done, of: lines.length })}</span>
           </div>
-          <div className="bc-legend">
-            <span className="chip pos dot">{t('bcLegendDone', { n: sum.done })}</span>
-            <span className="chip warn dot">{t('bcLegendPartial', { n: sum.partial })}</span>
-            {sum.absent > 0 && <span className="chip neg dot">{t('bcLegendAbsent', { n: sum.absent })}</span>}
-            <span className="chip muted dot">{t('bcLegendOpen', { n: sum.open })}</span>
+          <div className="bc-tally-meter">
+            <div className="bc-meter" role="img" aria-label={t('bcUnitsCounted', { n: sum.done, of: lines.length })}>
+              <i className="bc-m-done" style={{ flexGrow: sum.done }} />
+              <i className="bc-m-part" style={{ flexGrow: sum.partial }} />
+              <i className="bc-m-absent" style={{ flexGrow: sum.absent }} />
+              <i className="bc-m-open" style={{ flexGrow: sum.open }} />
+            </div>
+            <div className="bc-legend">
+              <span className="chip pos dot">{t('bcLegendDone', { n: sum.done })}</span>
+              <span className="chip warn dot">{t('bcLegendPartial', { n: sum.partial })}</span>
+              {sum.absent > 0 && <span className="chip neg dot">{t('bcLegendAbsent', { n: sum.absent })}</span>}
+              <span className="chip muted dot">{t('bcLegendOpen', { n: sum.open })}</span>
+            </div>
           </div>
+          {/* It ticks the whole PO, which a filter would hide most of. */}
+          <button
+            type="button"
+            className="btn"
+            disabled={!ready || remaining === 0 || fit !== null}
+            title={fit ? t('bcCheckAllFiltered') : undefined}
+            onClick={checkAllRemaining}
+          >
+            <Icon name="check2" size={13} /> {t('bcCheckAll')}
+          </button>
         </div>
-        {/* It ticks the whole PO, which a filter would hide most of. */}
-        <button
-          type="button"
-          className="btn"
-          disabled={!ready || remaining === 0 || fit !== null}
-          title={fit ? t('bcCheckAllFiltered') : undefined}
-          onClick={checkAllRemaining}
-        >
-          <Icon name="check2" size={13} /> {t('bcCheckAll')}
-        </button>
+        <div className="bc-tally-half bc-tally-money">
+          <div className="bc-tally-num">
+            <span className="mono"><b>{money.priced}</b><span className="muted"> / {money.total}</span></span>
+            <span className="card-sub">{t('bcPricedCount', { n: money.priced, of: money.total })}</span>
+          </div>
+          <div className="bc-tally-meter">
+            <div className="bc-meter" role="img" aria-label={t('bcPricedCount', { n: money.priced, of: money.total })}>
+              <i className="bc-m-priced" style={{ flexGrow: money.priced }} />
+              <i className="bc-m-open" style={{ flexGrow: money.total - money.priced }} />
+            </div>
+            <div className="bc-earns">
+              <span className="bc-earns-k">{t('eoPurchaserEarns')}</span>
+              <b className={earnsClass}>{fmtUSD(money.earns, locale)}</b>
+              <span className="muted">{+(money.rate * 100).toFixed(2)}%</span>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="btn"
+            disabled={!ready || filling || fillable === 0}
+            title={t('bcFillMarketTip')}
+            onClick={() => { void fillFromMarket(); }}
+          >
+            <Icon name="tag" size={13} /> {filling ? '…' : t('bcFillMarket')}
+          </button>
+        </div>
       </div>
 
       <div className="bc-grid">
@@ -702,20 +845,21 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
                   <th>{t('bcColItem')}</th>
                   <th>{t('bcColCondition')}</th>
                   <th className="num">{t('bcColCounted')}</th>
+                  <th className="num bc-price-cell">{t('sellUnit')}</th>
                   <th className="bc-edit-cell" aria-label={t('bcEditTip')} />
                 </tr>
               </thead>
               <tbody>
                 {listed.open.map(row)}
                 {fit?.size === 0 && (
-                  <tr className="bc-group-empty"><td colSpan={7}>{t('bcFilterNone', { pn: filterText, id: order.id })}</td></tr>
+                  <tr className="bc-group-empty"><td colSpan={8}>{t('bcFilterNone', { pn: filterText, id: order.id })}</td></tr>
                 )}
                 {!fit && remaining === 0 && (
-                  <tr className="bc-group-empty"><td colSpan={7}>{t('bcAllResolved')}</td></tr>
+                  <tr className="bc-group-empty"><td colSpan={8}>{t('bcAllResolved')}</td></tr>
                 )}
                 {listed.done.length > 0 && (
                   <tr className="bc-group">
-                    <td colSpan={7}>
+                    <td colSpan={8}>
                       {t('bcGroupChecked')} <span className="mono muted">{listed.done.length}</span>
                       <button type="button" className="bc-link" onClick={() => setShowDone(s => !s)}>
                         {showDone ? t('bcHide') : t('bcShow')}
@@ -761,8 +905,33 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
                   <dt>{t('bcExpected')}</dt><dd className="mono">{selected.qty}</dd>
                   <dt>{t('bcColCounted')}</dt><dd className="mono">{countOf(selected, selCheck)}</dd>
                   <dt>{t('unitCost')}</dt><dd className="mono">{fmtUSD(selected.unitCost, locale)}</dd>
+                  <dt>{t('sellUnit')}</dt><dd className="mono">{isPricedSellPrice(selPrice) ? fmtUSD(selPrice!, locale) : '—'}</dd>
+                  {selected.finalSellPrice != null && (
+                    <>
+                      <dt>{t('finalSellPrice')}</dt>
+                      <dd className="mono">
+                        {fmtUSD(selected.finalSellPrice, locale)}
+                        {selected.finalSoldQty != null && <span className="muted"> · {t('bcFinalSold', { n: selected.finalSoldQty })}</span>}
+                      </dd>
+                    </>
+                  )}
                   {selected.chipNumber && (<><dt>{t('bcChip')}</dt><dd className="mono">{selected.chipNumber}</dd></>)}
                 </dl>
+                <div className="bc-compare-market">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                    <span className="card-sub">{t('bcMarketRef')}</span>
+                    {selSug ? <span className="mono">{fmtUSD(selSug.value, locale)}</span> : <span className="muted">{t('bcMarketNone')}</span>}
+                  </div>
+                  {selSug && selAge && (
+                    <div className="muted">
+                      {t(selSug.basis === 'last' ? 'bcMarketBasisLast' : selSug.basis === 'avg' ? 'bcMarketBasisAvg' : 'bcMarketBasisInternal')}
+                      {' · '}{selAge.days == null ? t('mktNeverPriced') : t('mktRecordedDaysAgo', { n: selAge.days })}
+                    </div>
+                  )}
+                  {selMarket && selSug?.basis !== 'internal' && selMarket.internalSales.samples > 0 && selMarket.internalSales.avgPrice != null && (
+                    <div className="muted">{t('mktInternal', { price: fmtUSD(selMarket.internalSales.avgPrice, locale), n: selMarket.internalSales.samples })}</div>
+                  )}
+                </div>
                 <div className="bc-serials">
                   <div className="card-sub">{selSerials.length ? t('bcSerialsOnFile', { n: selSerials.length }) : t('bcNoSerials')}</div>
                   {selSerials.length > 0 && (
@@ -772,6 +941,46 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
               </div>
             </div>
           )}
+
+          <div className="card bc-money">
+            <div className="card-head">
+              <span className="card-title">{t('bcMoneyTitle')}</span>
+              <span className="card-sub">{t('bcMoneyPriced', { n: money.priced, of: money.total })}</span>
+            </div>
+            <div className="card-body">
+              <div className="bc-money-earn">
+                <span>{t('eoPurchaserEarns')}</span>
+                <b className={earnsClass}>{fmtUSD(money.earns, locale)}</b>
+              </div>
+              <p className="bc-money-hint">{t('bcMoneyEarnsHint', { name: order.userName })}</p>
+              <div className="bc-money-rate">
+                <label htmlFor="bc-rate">{t('commissionRate')}</label>
+                <span className="bc-rate">
+                  <RateField id="bc-rate" value={rate} disabled={!ready || rateLocked} onCommit={v => { void saveRate(v); }} />
+                </span>
+              </div>
+              {rateLocked && !readOnly && <p className="bc-money-hint">{t('bcMoneyRateLocked')}</p>}
+              <dl className="bc-kv">
+                <dt>{t('revenue')}</dt><dd className="mono">{fmtUSD(money.revenue, locale)}</dd>
+                <dt>{t('eoCost')}</dt><dd className="mono">{fmtUSD(money.cost, locale)}</dd>
+                {money.fees > 0 && (
+                  <>
+                    <dt className="bc-kv-sub">{t('otherFees')}{order.otherFeesNote?.trim() ? ` · ${order.otherFeesNote.trim()}` : ''}</dt>
+                    <dd className="mono bc-kv-sub">{fmtUSD(money.fees, locale)}</dd>
+                  </>
+                )}
+                <dt>{t('eoProfitAllLines', { n: lines.length })}</dt>
+                <dd className={'mono' + (money.profit < 0 ? ' neg' : '')}>{fmtUSD(money.profit, locale)}</dd>
+                <dt>{t('eoRate')}</dt><dd className="mono">{(money.rate * 100).toFixed(2)}%</dd>
+                <dt>{t('eoCommissionOnProfit')}</dt><dd className="mono">{fmtUSD(money.commission, locale)}</dd>
+                {order.payment === 'self' && (<><dt>{t('eoSelfPay')}</dt><dd className="mono">{fmtUSD(money.cost, locale)}</dd></>)}
+                <dt className="bc-kv-total">{t('eoTotal')}</dt>
+                <dd className={'bc-kv-total ' + earnsClass}>{fmtUSD(money.earns, locale)}</dd>
+              </dl>
+              {money.lotPrice && <p className="bc-money-hint">{t('bcMoneyLotPrice')}</p>}
+              {unpriced.length > 0 && <p className="bc-money-hint">{t('eoUnpricedLinesHint', { n: unpriced.length })}</p>}
+            </div>
+          </div>
 
           <AiReviewCard
             data={ai.data}
@@ -826,6 +1035,23 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
               ) : (
                 <p className="card-sub">{t(atReviewing ? 'bcAllMatch' : 'bcAllMatchNotReviewing', { n: lines.length, s: order.status })}</p>
               )}
+              {unpriced.length > 0 && (
+                <>
+                  <p className="card-sub">{t('bcUnpricedIntro', { n: unpriced.length })}</p>
+                  <ul className="bc-problem-list">
+                    {unpriced.map(l => (
+                      <li key={l.id}>
+                        <span className="mono">#{lineNo(l)} {l.partNumber ?? lineLabel(l)}</span>
+                        {' · '}{t('bcUnpricedNote')}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+              <div className="bc-finish-earn">
+                <span>{t('eoPurchaserEarns')}</span>
+                <b className={earnsClass}>{fmtUSD(money.earns, locale)}</b>
+              </div>
               <div className="bc-finish-actions">
                 {atReviewing && (
                   <button type="button" className="btn accent" disabled={!ready || busy !== null || takeover.asking || mismatch.asking || remaining > 0 || allAbsent} onClick={() => void approve()}>
@@ -949,6 +1175,136 @@ function CountField({ value, max, disabled, label, onFocus, onCommit, onScanKey 
           const head = typed.current ? draft ?? '' : '';
           leave(e.currentTarget);
           onScanKey(head + e.key);
+        }
+      }}
+    />
+  );
+}
+
+// The sell price, typed beside the count. It lands on Enter or on leaving the
+// field, never per keystroke. Unpriced, the field shows the market's value as
+// a ghost, and Enter on the empty field takes it; a price typed back to blank
+// unprices the line.
+function PriceField({ value, suggestion, disabled, label, inputRef, onFocus, onCommit, onScanKey }: {
+  value: number | null;
+  suggestion: number | null;
+  disabled: boolean;
+  label: string;
+  inputRef: (el: HTMLInputElement | null) => void;
+  onFocus: () => void;
+  onCommit: (v: number | null) => void;
+  onScanKey: (text: string) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  // Set right before blur(), whose handler still sees the draft as it was.
+  const cancelled = useRef(false);
+  const takeSuggestion = useRef(false);
+  const shown = value != null ? value.toFixed(2) : '';
+  const leave = (el: HTMLInputElement) => {
+    cancelled.current = true;
+    el.blur();
+  };
+  return (
+    <input
+      ref={inputRef}
+      className="bc-price-in"
+      type="text"
+      inputMode="decimal"
+      autoComplete="off"
+      spellCheck={false}
+      aria-label={label}
+      disabled={disabled}
+      placeholder={suggestion != null ? suggestion.toFixed(2) : '—'}
+      value={draft ?? shown}
+      onFocus={e => {
+        // Back from another window, what was typed before is still the draft.
+        if (draft !== null) return;
+        setDraft(shown);
+        e.target.select();
+        onFocus();
+      }}
+      onChange={e => setDraft(e.target.value.replace(/[^\d.,]/g, ''))}
+      onBlur={e => {
+        // The window lost focus, not the field.
+        if (document.activeElement === e.currentTarget) return;
+        if (!cancelled.current) {
+          if (takeSuggestion.current && suggestion != null) onCommit(suggestion);
+          else {
+            const parsed = parsePriceInput(draft ?? '');
+            // What is not a price is dropped; the field reads the saved one again.
+            if (parsed !== undefined) onCommit(parsed);
+          }
+        }
+        cancelled.current = false;
+        takeSuggestion.current = false;
+        setDraft(null);
+      }}
+      onKeyDown={e => {
+        if (e.nativeEvent.isComposing || e.metaKey || e.ctrlKey || e.altKey) return;
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          // Only a line never priced takes the ghost: a price cleared and
+          // entered is the manager unpricing it.
+          takeSuggestion.current = value == null && (draft ?? '').trim() === '';
+          e.currentTarget.blur();
+        } else if (e.key === 'Escape') {
+          // Puts the price back; never leaves the page.
+          e.stopPropagation();
+          leave(e.currentTarget);
+        } else if (e.key.length === 1 && e.key.trim() && !/[\d.,]/.test(e.key)) {
+          // A scanner typing a label here: it goes to the scan box, and the
+          // price stays as it was.
+          e.preventDefault();
+          leave(e.currentTarget);
+          onScanKey(e.key);
+        }
+      }}
+    />
+  );
+}
+
+// The PO's commission rate as a percent, saved on Enter or on leaving the
+// field; Escape puts it back. Blank unsets it, which the maths reads as 0.
+function RateField({ id, value, disabled, onCommit }: {
+  id: string;
+  value: number | null;
+  disabled: boolean;
+  onCommit: (v: number | null) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const cancelled = useRef(false);
+  const shown = value != null ? String(+(value * 100).toFixed(2)) : '';
+  return (
+    <input
+      id={id}
+      className="input mono"
+      type="number"
+      min={0}
+      max={100}
+      step="0.1"
+      disabled={disabled}
+      placeholder="—"
+      value={draft ?? shown}
+      onFocus={() => { if (draft === null) setDraft(shown); }}
+      onChange={e => setDraft(e.target.value)}
+      onBlur={() => {
+        if (!cancelled.current && draft !== null) {
+          const s = draft.trim();
+          const n = s === '' ? null : Number(s);
+          if (n === null) onCommit(null);
+          else if (Number.isFinite(n) && n >= 0 && n <= 100) onCommit(n / 100);
+        }
+        cancelled.current = false;
+        setDraft(null);
+      }}
+      onKeyDown={e => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          e.currentTarget.blur();
+        } else if (e.key === 'Escape') {
+          e.stopPropagation();
+          cancelled.current = true;
+          e.currentTarget.blur();
         }
       }}
     />

@@ -526,6 +526,34 @@ is not a stage but a flag beside one, set once every line has sold
     not manager. The page and button are hidden from a manager previewing as
     purchaser, and the route bounces them without leaving a Back entry
     (v1.189.1).
+  - **Review mode prices the PO for the commission** (v1.296.0). Each row
+    has a *Sell / Unit* field beside the count: the line's sell price, the
+    projection the commission is paid on. Enter or leaving the field saves
+    it straight to the line (the inventory line PATCH, audited as `priced`),
+    Escape puts it back, and a blank unprices the line. Lowercase `p`
+    focuses the selected row's price; the key legend says so.
+    - An unpriced line whose part number is on the Market board shows the
+      board's value as a ghost in the field — the last recorded price, else
+      the average sell, else the team's own 30-day average, the same figure
+      the line drawer offers as *Suggested sell* — and Enter on the empty
+      field takes it, as does the *Use $n* link under it. **Fill from
+      market** in the tally bar prices every unpriced line that has a value
+      in one click and says how many it priced.
+    - A priced row shows its margin under the price; one priced below cost
+      reads *below cost* in red and the save toasts a warning.
+    - The tally bar's right half counts the priced products with its own
+      meter and shows **Purchaser earns** live, by the Commission tab's
+      formula (goods or negotiated lot price plus fees, revenue over priced
+      lines, the rate, the cost back on a self-paid PO) and over the qty
+      Approve will leave, so a line ticked at 0 earns nothing.
+    - A **Commission** card in the side panel carries the rate (editable at
+      Reviewing and earlier, read-only once the book closes at Ready to
+      Pay), revenue, cost with the fee broken out, profit, commission and
+      the total, with the unpriced count. The Compare card shows the
+      selected product's sell price, its market reference with the basis
+      and age, and the final sell price once it has sold. Finish review
+      lists the unpriced products, which count as $0 until priced; they
+      don't block Approve. The pure maths lives in `lib/reviewPricing.ts`.
 - **AI review checks every product of a PO in Review mode** (v1.245.0, desktop,
   managers). Off by default; **Settings → General → AI review of purchase
   orders** turns it on and sets a per-PO cost cap, the OpenRouter model, and
