@@ -2,13 +2,13 @@
 id: RS-324
 title: "Drop the sell-order vendor price import: a sell order takes the PO's sell price"
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-19
 reporter: jinhu
 branch: review-mode-selling-price
-pr:
-version:
+pr: 788
+version: v1.297.0
 related: [RS-323, RS-236, RS-238, RS-043]
 ---
 
