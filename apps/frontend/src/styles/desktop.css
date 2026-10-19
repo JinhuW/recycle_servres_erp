@@ -4050,8 +4050,11 @@ button.rsheet-box:hover { background: color-mix(in oklch, var(--accent) 10%, tra
 }
 .bc-banner { width: fit-content; }
 
-/* Tally: units counted, and where each line stands. */
-.bc-tally { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 20px; align-items: center; padding: 14px 18px; }
+/* Tally: the count on the left, the pricing on the right — the two halves of
+   the review, each with its own meter. */
+.bc-tally { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); padding: 0; }
+.bc-tally-half { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 20px; align-items: center; padding: 14px 18px; min-width: 0; }
+.bc-tally-money { border-left: 1px solid var(--border); }
 .bc-tally-num { display: grid; gap: 4px; }
 .bc-tally-num .mono { font-size: 26px; letter-spacing: -0.02em; line-height: 1; font-variant-numeric: tabular-nums; }
 .bc-tally-num .mono b { font-weight: 600; }
@@ -4062,6 +4065,13 @@ button.rsheet-box:hover { background: color-mix(in oklch, var(--accent) 10%, tra
 .bc-m-part { background: var(--warn); }
 .bc-m-absent { background: var(--neg); }
 .bc-m-open { background: transparent; }
+.bc-m-priced { background: var(--info); }
+/* What the purchaser is paid, as the prices land. */
+.bc-earns { display: flex; align-items: baseline; gap: 8px; margin-top: 8px; font-size: 12px; min-height: 26px; }
+.bc-earns-k { color: var(--fg-subtle); }
+.bc-earns b { font-size: 16px; font-weight: 600; color: var(--pos); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.bc-earns b.neg { color: var(--neg); }
+.bc-earns .muted { color: var(--fg-subtle); }
 .bc-legend { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 
 .bc-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
@@ -4158,6 +4168,32 @@ button.rsheet-box:hover { background: color-mix(in oklch, var(--accent) 10%, tra
 .bc-editbtn { color: var(--fg-subtle); }
 .bc-editbtn:hover:not(:disabled), .bc-editbtn.on { color: var(--accent-strong); background: var(--accent-soft); }
 
+/* Sell price: typed beside the count. Unpriced, the field shows the market's
+   suggestion as a ghost and Enter takes it. */
+.bc-price-cell { width: 132px; white-space: nowrap; }
+.bc-price { display: inline-flex; align-items: center; justify-content: flex-end; font-size: 13px; font-variant-numeric: tabular-nums; }
+.bc-price-sign { color: var(--fg-subtle); font-size: 12px; margin-right: 1px; }
+.bc-price-in {
+  width: 8.5ch; padding: 1px 4px; text-align: right;
+  font: inherit; font-weight: 600; color: inherit; background: transparent;
+  border: 1px solid transparent; border-radius: 4px; outline: none;
+  transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
+}
+.bc-price-in::placeholder { color: var(--fg-subtle); font-weight: 400; opacity: 1; }
+.bc-price-in:not(:disabled):hover { border-color: var(--border-strong); }
+.bc-price-in:focus { border-color: var(--accent); background: var(--bg-elev); box-shadow: 0 0 0 2px var(--accent-soft); }
+.bc-price-in:disabled { color: var(--fg-muted); }
+.bc-price-sub { margin-top: 2px; font-size: 11px; color: var(--fg-subtle); text-align: right; }
+.bc-price-sub.neg { color: var(--neg); font-weight: 500; }
+.bc-price-use {
+  margin-top: 2px; display: block; margin-left: auto; background: none; border: 0; padding: 0;
+  font-size: 11px; color: var(--accent-strong); cursor: pointer;
+  text-decoration: underline dotted; text-underline-offset: 2px;
+}
+.bc-price-use:hover:not(:disabled) { text-decoration-style: solid; }
+.bc-price-use:disabled { color: var(--fg-subtle); cursor: default; text-decoration: none; }
+.bc-price-use:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 3px; }
+
 
 .bc-load-error { display: flex; align-items: center; gap: 12px; color: var(--neg); font-size: 13px; }
 
@@ -4179,6 +4215,31 @@ button.rsheet-box:hover { background: color-mix(in oklch, var(--accent) 10%, tra
 .bc-serials { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); display: grid; gap: 6px; }
 .bc-serial-list { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 10px; font-size: 11px; color: var(--fg-muted); }
 
+/* Commission: the figure the spreadsheet used to hold, live as prices land. */
+.bc-money .card-body { display: grid; gap: 10px; }
+.bc-money-earn { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.bc-money-earn span { font-size: 12.5px; color: var(--fg-subtle); }
+.bc-money-earn b { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; line-height: 1; color: var(--pos); font-variant-numeric: tabular-nums; }
+.bc-money-earn b.neg { color: var(--neg); }
+.bc-money-hint { margin: 0; font-size: 11.5px; color: var(--fg-subtle); }
+.bc-money-rate { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12.5px; color: var(--fg-subtle); }
+.bc-rate { display: inline-flex; align-items: center; gap: 4px; color: var(--fg); }
+.bc-rate .input { width: 76px; text-align: right; padding-top: 4px; padding-bottom: 4px; }
+/* No column gap, so the total's dashed rule runs unbroken across both cells. */
+.bc-money .bc-kv { margin-top: 2px; column-gap: 0; }
+.bc-money .bc-kv dd { padding-left: 14px; }
+.bc-kv dd.neg { color: var(--neg); }
+.bc-kv .bc-kv-sub { margin-top: -3px; font-size: 11.5px; color: var(--fg-subtle); font-weight: 400; }
+.bc-kv dt.bc-kv-sub { padding-left: 10px; }
+.bc-kv .bc-kv-total { padding-top: 6px; border-top: 1px dashed var(--border); font-weight: 600; color: var(--fg); }
+.bc-compare-market { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); display: grid; gap: 3px; font-size: 12px; }
+.bc-compare-market .mono { font-weight: 600; }
+.bc-compare-market .muted { font-size: 11.5px; }
+.bc-finish-earn { display: flex; justify-content: space-between; align-items: baseline; padding-top: 8px; border-top: 1px dashed var(--border); font-size: 12.5px; }
+.bc-finish-earn span { color: var(--fg-subtle); }
+.bc-finish-earn b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.bc-finish-earn b.neg { color: var(--neg); }
+
 .bc-finish .card-body { display: grid; gap: 12px; }
 .bc-finish p { margin: 0; }
 .bc-problem-list { margin: 0; padding-left: 18px; display: grid; gap: 3px; font-size: 12.5px; }
@@ -4193,6 +4254,8 @@ button.rsheet-box:hover { background: color-mix(in oklch, var(--accent) 10%, tra
 
 @media (max-width: 1100px) {
   .bc-grid { grid-template-columns: minmax(0, 1fr); }
+  .bc-tally { grid-template-columns: minmax(0, 1fr); }
+  .bc-tally-money { border-left: 0; border-top: 1px solid var(--border); }
   .bc-side { position: static; max-height: none; overflow: visible; }
   .bc-keys { display: none; }
 }

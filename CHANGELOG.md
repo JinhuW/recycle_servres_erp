@@ -17,6 +17,26 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.296.0] - 2026-10-19
+
+Review mode now prices the PO for the commission, not just counts it
+(RS-323). The sell price the purchaser's commission is paid on used to be
+typed on the PO page after the count, line by line through the drawer, or
+kept in a separate sell-order spreadsheet and copied over; Review mode never
+showed it. Each row now has a *Sell / Unit* field beside the count, saved on
+Enter or on leaving it through the inventory line PATCH the PO page already
+used at Ready to Pay. An unpriced product whose part number is on the Market
+board shows the board's value as a ghost — last recorded price, else average
+sell, else the team's own 30-day average — and Enter takes it; **Fill from
+market** prices every such product in one click. A priced row shows its
+margin, red below cost. The tally bar gained a pricing half with its own
+meter and the live **Purchaser earns** figure, the side panel a
+**Commission** card with the rate (editable until the book closes), revenue,
+cost, profit and the total, and the Compare card the product's own price and
+market reference. The maths is the Commission tab's, over the qty Approve
+will leave. Finish review lists what is still unpriced; it does not block
+Approve. Lowercase `p` focuses the selected row's price.
+
 ## [1.295.0] - 2026-10-19
 
 The Reddit page's Evaluate stage now shows the live evaluation model and
