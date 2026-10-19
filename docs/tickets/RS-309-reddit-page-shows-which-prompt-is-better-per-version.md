@@ -2,13 +2,13 @@
 id: RS-309
 title: Reddit page shows which prompt is better: per-version leads and the candidate trial
 type: story
-status: in-progress
+status: in-review
 priority: P2
 created: 2026-10-18
 reporter: jinhu
 branch: reddit-prompt-card
-pr:
-version:
+pr: "#761"
+version: 1.291.0
 related: [RS-305]
 ---
 
@@ -42,35 +42,35 @@ This changes the contract between the ERP and the tracker (root `AGENTS.md`
 
 ## Acceptance criteria
 
-- [ ] The tracker's `GET /api/prompt-stats` also returns `config`:
+- [x] The tracker's `GET /api/prompt-stats` also returns `config`:
   - the live and candidate model and prompt text, with their version ids
     (`null` until a prompt has judged a post);
   - the number of enabled rules.
 
   Its existing fields are unchanged.
-- [ ] `PUT /api/prompt-candidate` starts or replaces a trial, and validates
+- [x] `PUT /api/prompt-candidate` starts or replaces a trial, and validates
   the prompt and the model. `DELETE /api/prompt-candidate` ends it and keeps
   its numbers.
-- [ ] The ERP proxy forwards `prompt-stats`, `prompt-candidate` and
+- [x] The ERP proxy forwards `prompt-stats`, `prompt-candidate` and
   `prompt-candidate/promote` to managers only. Generic `settings` stays
   outside the allowlist.
-- [ ] Monitors ▸ Reddit has a **Which prompt is better** card. When a trial is
+- [x] Monitors ▸ Reddit has a **Which prompt is better** card. When a trial is
   running, it shows the 2×2 of *both / only live / only candidate / neither*,
   with posts, leads and 👎 in each cell. Above that is one sentence saying
   how many leads the candidate would gain or lose and how much junk it would
   drop, and it warns when under 20 posts are labelled.
-- [ ] The card lists every prompt version with:
+- [x] The card lists every prompt version with:
   - its role (live, candidate or retired) and model;
   - posts judged and flagged;
   - buyer alerts and leads, as "x of n" plus a rate;
   - dev-chat leads and 👎.
 
   Each row expands to the full prompt.
-- [ ] A 7 days / 30 days / all time switch scopes the numbers.
-- [ ] A manager can start, edit and end a trial from the card, and promote
+- [x] A 7 days / 30 days / all time switch scopes the numbers.
+- [x] A manager can start, edit and end a trial from the card, and promote
   the candidate after a confirmation that names the rules promoting will
   disable.
-- [ ] English and Chinese strings, with the i18n parity and coverage tests
+- [x] English and Chinese strings, with the i18n parity and coverage tests
   passing.
 
 ## Out of scope
@@ -84,3 +84,15 @@ This changes the contract between the ERP and the tracker (root `AGENTS.md`
 
 - The tracker deploy for this also carries #758 (prompt version ids without
   gaps), which the user chose to ship with the next change.
+- The tracker side was deployed on 2026-10-19 as image `4282291f` (api,
+  worker and all five OCI VMs) before the ERP release. It also shipped #758.
+- The ticket moves to done when 1.291.0 reaches `main`. That needs the
+  user's yes.
+- Verified locally with Playwright against a seeded trial covering all four
+  cells, 17 checks:
+  - the verdict sentence;
+  - the cells and per-version numbers;
+  - the 7-day window;
+  - expanding a row;
+  - editing, ending and starting a trial;
+  - promoting, including its confirm text and the rules list switching off.
