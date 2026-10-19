@@ -108,6 +108,7 @@ def column(group: Dict[str, Any]) -> Dict[str, int]:
         "alerts": kind.get("listing_alert", 0),
         "units": reason.get("unit_count_below_minimum", 0),
         "threshold": reason.get("below_threshold", 0),
+        "prescreen": reason.get("prescreen", 0),
     }
 
 
@@ -123,6 +124,7 @@ def render(groups: Dict[str, Dict[str, Any]], hours: int) -> str:
         f"{'AI evals':<12}{old['evaluated']:>10}{new['evaluated']:>10}",
         f"{'<5 units':<12}{old['units']:>10}{new['units']:>10}",
         f"{'score <4':<12}{old['threshold']:>10}{new['threshold']:>10}",
+        f"{'prescreened':<12}{old['prescreen']:>10}{new['prescreen']:>10}",
         f"{'ALERTS':<12}{old['alerts']:>10}{new['alerts']:>10}",
     ]
 

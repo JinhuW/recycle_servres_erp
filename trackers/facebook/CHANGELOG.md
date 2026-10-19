@@ -18,6 +18,21 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Added
+
+- **A decision model pre-screens listings before the LLM reads them**
+  (RS-317). Every listing the LLM has no cached verdict for is first asked
+  reject / maybe / buy by `RS_PRESCREEN_MODEL` (the worker compose defaults it
+  to `typesafe/jev-1.14`, the model RS-316's shadow run preferred), with the
+  production prompt as the rules. The fleet runs it in shadow: the answer is
+  logged as a `prescreen` event beside the LLM's and nothing is skipped.
+  `RS_PRESCREEN_ENFORCE=1` makes a reject at or above `RS_PRESCREEN_THRESHOLD`
+  (0.99) skip the LLM, logged as `listing_skip reason=prescreen` and
+  remembered so a lingering listing is not re-asked. Any failure of the check
+  leaves the LLM running as before. `scripts/prescreen-shadow.py --live` reads
+  the live events back into the same gate table the shadow run printed, and
+  `sweep-report.py` counts enforced skips.
+
 ## [0.13.1] - 2026-10-19
 
 ### Added

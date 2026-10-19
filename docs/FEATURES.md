@@ -2217,7 +2217,11 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   until the page moves on; clearing it in Watch lifts it within a minute
   (RS-311). Since facebook-tracker 0.13.1 that screenshot sits on the
   coordinator's data volume and survives a redeploy, and a checkpoint whose
-  file is gone offers no thumbnail rather than a broken one (RS-315). If the
+  file is gone offers no thumbnail rather than a broken one (RS-315). Since
+  facebook-tracker 0.13.2 a decision model pre-screens every listing before
+  the LLM reads it, in shadow: its reject / maybe / buy verdict is logged
+  beside the LLM's and nothing is skipped until `RS_PRESCREEN_ENFORCE` is
+  turned on (RS-317). If the
   worker already holds a pool account,
   the dialog asks where that one goes — back to Available, to Problem (still
   naming the worker) or Retired — with no default, and both moves land
