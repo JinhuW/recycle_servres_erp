@@ -8,7 +8,7 @@ created: 2026-10-18
 reporter: jinhu
 branch: reddit-worker-results-flow
 pr: "#753"
-version: n/a — trackers/reddit (no release process); not yet deployed
+version: n/a — trackers/reddit (no release process); deployed 2026-10-19 as image 04f5e24a
 related: []
 ---
 
@@ -105,15 +105,23 @@ Reddit.
 - Candidate-only reviews go out from the evaluate loop while the post is
   still claimed. They never enter the buyers' queue, so a candidate can never
   message buyers.
-- Merged in #753 and not yet deployed: the tracker ships by `railway up` and
-  `deploy-workers.sh`. The rollout has four steps:
-  1. Top up OpenRouter.
-  2. Set the Railway `api` service's `ALERT_TRANSPORT` to `telegram`.
-  3. Deploy the api, then the workers, then the OCI fleet.
-  4. Create the dev chat with the bot as an admin, and set
-     `telegram_dev_chat_ids` and `candidate_eval_prompt`.
+- Deployed on 2026-10-19 at about 00:55 UTC:
+  - the Railway `api`, now with `ALERT_TRANSPORT=telegram`; its reactions loop
+    is running;
+  - the Railway `worker`;
+  - all five OCI VMs, on image `04f5e24a`.
 
-  It moves to done once a real reaction shows up in `GET /api/prompt-stats`.
+  Migration 0003 applied, and prompt version 1 is the live prompt.
+- The amd64 half of the image build first failed on the Mac's emulator; see
+  `trackers/reddit/docs/debug-notes/amd64-image-build-crashes-node.md`.
+- Still to do, on the user's side:
+  - top up OpenRouter, then requeue the outage's `failed` posts;
+  - create the dev chat with the bot as an admin, and set
+    `telegram_dev_chat_ids`;
+  - start candidate 1.
+
+  The ticket moves to done once a real reaction shows up in
+  `GET /api/prompt-stats`.
 - While verifying, a prod outage turned up: the OpenRouter key ran out of
   credit around 20:00 UTC on 2026-10-18. Every evaluation since then fails
   with HTTP 402, and the posts are being parked as `failed`. The 402 asks to
