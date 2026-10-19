@@ -8,6 +8,7 @@ import {
 } from '../../lib/fleetView';
 import { useT } from '../../lib/i18n';
 import type { Translate } from '../../lib/orderPresentation';
+import { keywordCount } from '../../lib/keywordRules';
 import { confirmDiscard, useUnsavedGuard } from '../../lib/unsavedGuard';
 import { ListingTester, RulesPanel, STAGE_LISTS, probeVerdicts, type ItemRules, type Probe } from './FleetRules';
 
@@ -50,7 +51,7 @@ function stageSettings(t: Translate, stage: FlowStage, fleet: FleetDoc | null): 
     ];
     case 'title': return [
       { label: t('fbcSetPrefilter'), value: s.title_prefilter == null ? '—' : s.title_prefilter ? t('fbcOn') : t('fbcOff') },
-      { label: t('fbcSetAntikeywords'), value: String(sum(i => i.antikeywords.length)) },
+      { label: t('fbcSetAntikeywords'), value: String(sum(i => keywordCount(i.antikeywords))) },
     ];
     case 'open': return [
       { label: t('fbcFixedPause'), value: '5 s', fixed: true },
@@ -58,8 +59,8 @@ function stageSettings(t: Translate, stage: FlowStage, fleet: FleetDoc | null): 
       { label: t('fbcFixedAffiliate'), value: t('fbcFixedSkipped'), fixed: true },
     ];
     case 'keywords': return [
-      { label: t('fbcSetKeywords'), value: String(sum(i => i.keywords.length)) },
-      { label: t('fbcSetAntikeywords'), value: String(sum(i => i.antikeywords.length)) },
+      { label: t('fbcSetKeywords'), value: String(sum(i => keywordCount(i.keywords))) },
+      { label: t('fbcSetAntikeywords'), value: String(sum(i => keywordCount(i.antikeywords))) },
       { label: t('fbcSetSellerRating'), value: s.min_seller_rating == null ? '—' : `${s.min_seller_rating} / 5` },
       { label: t('fbcSetUnrated'), value: s.exclude_unrated_sellers == null ? '—' : s.exclude_unrated_sellers ? t('fbcSetDropped') : t('fbcSetAllowed') },
     ];
@@ -104,6 +105,8 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
   const [base, setBase] = useState<SettingsDraft | null>(null);
   const [busy, setBusy] = useState(false);
   const [activeItem, setActiveItem] = useState('');
+  // The list whose "Add keyword" opened Edit, so its input has the cursor.
+  const [addFocus, setAddFocus] = useState<ItemField | null>(null);
   const [probe, setProbe] = useState<Probe>({ title: '', description: '' });
   const counts = flowCounts(Array.isArray(stats) ? stats : null);
   const fmt = useMemo(() => new Intl.NumberFormat(locale), [locale]);
@@ -135,11 +138,12 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
     });
   };
   const pick = (k: FlowStage) => { if (k !== stage) leaveEdit(() => setStage(k)); };
-  const startEdit = () => {
+  const startEdit = (focus: ItemField | null = null) => {
     if (!fleet) return;
     const d = settingsDraft(fleet, loadedPrompt);
     setBase(d);
     setDraft(d);
+    setAddFocus(focus);
   };
   const set = <K extends keyof SettingsDraft>(key: K, value: SettingsDraft[K]) =>
     setDraft(d => (d ? { ...d, [key]: value } : d));
@@ -234,7 +238,8 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
               onPick={setActiveItem} editing={!!draft} />
           )}
           <RulesPanel stage={k} items={ruleItems} active={activeItem} onActive={setActiveItem}
-            editing={!!draft} onChange={setItem} verdicts={verdicts} />
+            editing={!!draft} onChange={setItem} verdicts={verdicts} focus={addFocus}
+            onAdd={editable && fleet && !draft ? startEdit : undefined} />
         </>
       );
     }
@@ -305,7 +310,7 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
                   {form && !draft && (
                     <button type="button" className="btn sm ff-edit-btn" disabled={!editable || !fleet}
                       title={editable ? undefined : t('fbcSettingsReadOnly')}
-                      onClick={startEdit}>
+                      onClick={() => startEdit()}>
                       {t('fbcEditStage')}
                     </button>
                   )}

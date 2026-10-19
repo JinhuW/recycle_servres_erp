@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  addToGroup, checkListing, containsTerm, duplicateTerms, formatRule, formatTerm, parseExpr, ruleMatches, ruleShape, splitEntry,
+  checkListing, containsTerm, duplicateTerms, formatRule, formatTerm, keywordCount, listTermKeys, parseExpr, ruleMatches, ruleShape,
+  splitEntry,
 } from './keywordRules';
 
 // Live rules from the fleet's server_ram item.
@@ -102,16 +103,20 @@ describe('checkListing', () => {
   });
 });
 
-describe('addToGroup', () => {
-  it('keeps operands already quoted instead of quoting them again', () => {
-    expect(addToGroup('ssd OR nvme', '"solid state"')).toBe('ssd OR nvme OR "solid state"');
-    expect(addToGroup('ssd OR nvme', '"m.2"')).toBe('ssd OR nvme OR "m.2"');
-    expect(ruleMatches(addToGroup('ssd OR nvme', '"solid state"')!, 'solid state drive')).toBe(true);
+describe('keywordCount / listTermKeys', () => {
+  const anti = ['single stick', EBAY, BRANDS, 'ram AND NOT laptop'];
+
+  it('counts a keyword per chip, not per line', () => {
+    expect(keywordCount(anti)).toBe(1 + 6 + 16 + 1);
+    expect(keywordCount([])).toBe(0);
   });
 
-  it('quotes a bare phrase, and leaves an expression alone', () => {
-    expect(addToGroup('ssd OR nvme', 'hard drive')).toBe('ssd OR nvme OR "hard drive"');
-    expect(addToGroup('ssd', 'sata, sas')).toBe('ssd OR sata OR sas');
-    expect(addToGroup('ssd AND NOT used', 'nvme')).toBeNull();
+  it('keys the plain terms and leaves expressions out', () => {
+    const keys = listTermKeys(anti);
+    expect(keys.has('single stick')).toBe(true);
+    expect(keys.has('ebay store')).toBe(true);
+    expect(keys.has('g.skill')).toBe(true);
+    expect(keys.has('laptop')).toBe(false);
+    expect(listTermKeys(['Corsair']).has('corsair')).toBe(true);
   });
 });

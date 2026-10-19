@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-303](./RS-303-fleet-sweep-time-shows-us-eastern-not-utc.md) | done | story | P2 | Fleet sweep time shows US Eastern, not UTC | — |
+| [RS-304](./RS-304-show-the-keyword-gate-as-two-lists-include-and-exclu.md) | in-review | story | P2 | Show the keyword gate as two lists: Include and Exclude | 1.288.0 |
+| [RS-303](./RS-303-fleet-sweep-time-shows-us-eastern-not-utc.md) | done | story | P2 | Fleet sweep time shows US Eastern, not UTC | 1.287.1 |
 | [RS-302](./RS-302-reddit-pipeline-card-counts-the-past-24-hours.md) | done | story | P2 | Reddit pipeline card counts the past 24 hours | 1.287.0 |
 | [RS-301](./RS-301-market-price-import-reads-a-list-in-us-dollars-or-yu.md) | done | story | P2 | Market price import reads a list in US dollars or yuan | 1.286.0 |
 | [RS-300](./RS-300-fleet-recent-activity-records-worker-status-changes.md) | in-review | story | P2 | Fleet Recent activity records worker status changes | 1.285.0 |

@@ -2143,14 +2143,21 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   settings, prompt and rubric included. A save goes through the fleet
   console into every worker's config. Workers pick it up between jobs and
   start a sweep, and deploys keep the saved values (v1.265.0). The sweep time is shown and typed in US Eastern and stored as the workers'
-  UTC (v1.287.1). The phrase and keyword lists show one item at a time, as chips: an OR rule
-  is a group of chips, an AND/NOT rule an expression, and a repeated term is
-  outlined. Editing is by chip (× to remove, Enter or paste to add, `+` to
-  grow a group), with a text fallback. A **Try a listing** box on the title
-  and keyword gates says per item whether a listing passes, which
-  anti-keyword drops it, or that no keyword matched, using the unsaved draft
-  while editing. Save stays off until something changed, and leaving a dirty
-  form asks first (v1.270.0). The eye
+  UTC (v1.287.1). The phrase and keyword lists show one item at a time, as chips. The
+  keyword gate shows two lists, a green **Include** (a listing must mention
+  one) and a red **Exclude** (any one drops it), and the title gate shows the
+  Exclude list alone. Each list is one flat field of keywords: no "or"
+  between chips, an AND/NOT rule as one expression chip, and every count
+  counting keywords rather than config lines (v1.288.0). A repeated term is
+  outlined, and an include keyword also in Exclude is struck through, since
+  the exclude always wins. Editing is by chip (× to remove, Enter or paste
+  to add), with a text fallback. In read mode, **+ Add keyword** opens the
+  stage's Edit with that list's input focused. A **Try a listing** box on the
+  title and keyword gates says per item whether a listing passes, which
+  exclude keyword drops it, or that no include keyword matched. It fills the
+  matched chip in its list's colour and uses the unsaved draft while
+  editing. Save stays off until something changed, and leaving a dirty form
+  asks first (v1.270.0). The eye
   on a row is the one way to a worker's page, `/fleet/worker/<worker>`: its
   Facebook login and user id, vault account and stored secrets by name,
   session expiry, browser and backup, proxy (since v1.278.0 its URL without

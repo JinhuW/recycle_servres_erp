@@ -152,20 +152,6 @@ export function formatRule(operands: readonly string[]): string {
   return e === null || typeof e === 'string' ? ts[0] : formatTerm(ts[0]);
 }
 
-/**
- * A group with typed terms appended, or null when `rule` is not a group. A
- * chunk already written as operands (`"solid state"`, `a OR b`) keeps them;
- * quoting it again would search for the quote characters.
- */
-export function addToGroup(rule: string, raw: string): string | null {
-  const shape = ruleShape(rule);
-  const added = splitEntry(raw.replace(/\n/g, ',')).flatMap(term => {
-    const own = parseExpr(term) === null ? null : ruleShape(term);
-    return own?.kind === 'terms' ? own.raw : [formatTerm(term)];
-  });
-  return shape.kind === 'terms' && added.length ? formatRule([...shape.raw, ...added]) : null;
-}
-
 /** The draft's newline-joined list as its entries, as the save sends them. */
 export const ruleLines = (v: string): string[] => v.split('\n').map(l => l.trim()).filter(Boolean);
 
@@ -198,6 +184,24 @@ export function duplicateTerms(rules: readonly string[]): Set<string> {
     }
   }
   return dup;
+}
+
+/** How many keywords a list holds, as its chips show them: a term each, an expression as one. */
+export function keywordCount(rules: readonly string[]): number {
+  return rules.reduce((n, rule) => {
+    const shape = ruleShape(rule);
+    return n + (shape.kind === 'terms' ? shape.terms.length : 1);
+  }, 0);
+}
+
+/** A list's plain terms by lowercased term; expressions are left out, since no one term stands for them. */
+export function listTermKeys(rules: readonly string[]): Set<string> {
+  const keys = new Set<string>();
+  for (const rule of rules) {
+    const shape = ruleShape(rule);
+    if (shape.kind === 'terms') for (const t of shape.terms) keys.add(termKey(t));
+  }
+  return keys;
 }
 
 // ── What a listing would do ──
