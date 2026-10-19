@@ -45,9 +45,16 @@ export function candidateConfig(settings: Settings): PromptConfig | null {
 
 /** Returns the version id for a config, recording it the first time it runs. */
 export async function ensurePromptVersion(sql: Sql, config: PromptConfig): Promise<number> {
+  const hash = promptHash(config);
+  // Update first: an INSERT … ON CONFLICT draws an identity value on every
+  // call, so running it once per batch would number versions in the
+  // thousands. The insert below only runs the first time a prompt is seen.
+  const [known] = await sql<Array<{id: number}>>`
+    UPDATE prompt_versions SET last_used_at = NOW() WHERE hash = ${hash} RETURNING id`;
+  if (known) return known.id;
   const [row] = await sql<Array<{id: number}>>`
     INSERT INTO prompt_versions (hash, model, system_prompt)
-    VALUES (${promptHash(config)}, ${config.model}, ${config.systemPrompt})
+    VALUES (${hash}, ${config.model}, ${config.systemPrompt})
     ON CONFLICT (hash) DO UPDATE SET last_used_at = NOW()
     RETURNING id`;
   return row!.id;
