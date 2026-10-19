@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.13.5] - 2026-10-19
+
 ### Changed
 
 - **The daily sweep starts at 09:00 Eastern, not 06:00** (RS-318). `start_at`
