@@ -2226,7 +2226,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   (RS-311). Since facebook-tracker 0.13.1 that screenshot sits on the
   coordinator's data volume and survives a redeploy, and a checkpoint whose
   file is gone offers no thumbnail rather than a broken one (RS-315). Since
-  facebook-tracker 0.13.2 a decision model pre-screens every listing before
+  facebook-tracker 0.13.3 a decision model pre-screens every listing before
   the LLM reads it, in shadow: its reject / maybe / buy verdict is logged
   beside the LLM's and nothing is skipped until `RS_PRESCREEN_ENFORCE` is
   turned on (RS-317). If the

@@ -75,6 +75,12 @@ Plan: `docs/superpowers/plans/2026-10-19-facebook-listing-prescreen.md`.
   listing, storing the probabilities rather than the decision, so a changed
   threshold needs no cache flush. Shadow verdicts are not cached: the LLM
   verdict that follows is.
+- 0.13.2 put the model default in `deploy/docker-compose.worker.yml`, but the
+  homelab workers are the `docker-compose.homelab*.yml` files, which carry
+  their own `environment:` and read `configs/secrets.env` through `env_file`;
+  the default never reached them. 0.13.3 defaults the model in code (unset
+  = `typesafe/jev-1.14`, empty = off), and `RS_PRESCREEN_ENFORCE=1` in the
+  VM's `configs/secrets.env` plus a worker recreate is the enforce flip.
 - The coordinator's funnel stage list is fixed (`db.py`, `schemas.py`), so
   an enforced skip is counted through `listing_skip reason=prescreen` and
   the sweep report, not a new stage.

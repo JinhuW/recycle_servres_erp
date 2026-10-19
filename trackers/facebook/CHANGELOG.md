@@ -18,6 +18,15 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The pre-screen's default model lives in code**, as the page check's
+  does, so the homelab workers run it. They take their environment from
+  `configs/secrets.env` through `env_file`, not from the generic worker
+  compose file 0.13.2 put the default in, so on that release the pre-screen
+  would have stayed off fleet-wide. Unset means `typesafe/jev-1.14`; empty
+  turns it off; `RS_PRESCREEN_ENFORCE=1` in that same file is the flip (RS-317).
+
 ## [0.13.2] - 2026-10-19
 
 ### Added
