@@ -1188,6 +1188,15 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     box is live, and Save / Cancel appear once it differs from what is
     saved; leaving the page with it unsaved asks first (v1.255.1), as the
     edit form does. Edit mode still folds notes into the form's own Save.
+  - **The order keeps its own files in an Attachments card** (v1.294.0),
+    between Internal notes and History, in view and edit mode alike. A
+    manager drops or picks the marketplace sale record, the invoice sent or
+    a packing list there (PDF, images, XLSX, CSV, within the workspace upload
+    cap); each lands as a row with its name, size, and who uploaded it when,
+    with a remove control. Images open in the lightbox, other files in a new
+    tab. Uploads and removals save at once, so a file dropped mid-edit
+    survives a cancelled edit, and the History records each one. These are
+    the order's files; the per-status evidence stays with its transition.
   - **The order's History is the last card in the right-hand column, folded**
     (v1.248.0; in the side column since v1.248.2); a click on its heading
     opens it.

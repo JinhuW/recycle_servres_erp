@@ -1444,6 +1444,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     poRemoveProduct: 'Remove product',
     soTrackingRecorded: 'Tracking info recorded',
     soEvidenceSection: 'Tracking & evidence',
+    soAttachmentsSection: 'Attachments',
+    soAttachmentsBoxHint: 'Sale records, invoices, packing lists · PDF, images, XLSX, CSV',
     soSignoffSection: 'Sign-off',
     soSignoffCount: '{n} of {total} signed',
     soSignoffYou: 'you',

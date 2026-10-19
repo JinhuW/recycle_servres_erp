@@ -312,6 +312,8 @@ export type SellOrderEventKind =
   | 'meta_changed'
   | 'price_adjusted'
   | 'status_meta_changed'
+  | 'attachment_added'
+  | 'attachment_removed'
   | 'archived'
   | 'unarchived'
   | 'closed'

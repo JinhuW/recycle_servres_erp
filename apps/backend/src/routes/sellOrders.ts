@@ -347,7 +347,7 @@ sellOrders.get('/:id', async (c) => {
     WHERE sol.sell_order_id = ${id}
     ORDER BY ${sellLineOrder(sql, 'sol')}
   `;
-  const [listed, metaRows, attRows, metaStatusSet, signoff] = await allLimited([
+  const [listed, metaRows, attRows, metaStatusSet, signoff, orderAttRows] = await allLimited([
     linesQuery,
     // Per-status evidence (notes + attachments). The frontend expects a map
     // keyed by status with both fields flattened together.
@@ -363,6 +363,16 @@ sellOrders.get('/:id', async (c) => {
     `,
     () => loadMetaStatuses(sql),
     () => signoffState(sql, id),
+    // Order-level files (the sale record, the invoice sent), apart from the
+    // per-status evidence above.
+    () => sql<OrderAttachmentRow[]>`
+      SELECT a.id, a.filename, a.size_bytes, a.mime_type, a.delivery_url, a.uploaded_at,
+             u.name AS uploaded_by_name
+      FROM sell_order_attachments a
+      LEFT JOIN users u ON u.id = a.uploaded_by
+      WHERE a.sell_order_id = ${id}
+      ORDER BY a.uploaded_at, a.id
+    `,
   ] as const);
   // The lines in # order, each with its product's # — folded from this one
   // read, so a save landing mid-request can't split a product.
@@ -465,6 +475,7 @@ sellOrders.get('/:id', async (c) => {
       nativeSubtotal: +nativeSubtotal.toFixed(2),
       nativeTotal:    +nativeSubtotal.toFixed(2),
       statusMeta,
+      attachments: orderAttRows.map(orderAttachmentJson),
     },
   });
 });
@@ -1098,18 +1109,9 @@ sellOrders.put('/:id/status-meta/:status', async (c) => {
 // 'Shipped' evidence is packing/label photos; those keep their name.
 const RECEIPT_RENAME_STATUSES = new Set(['Awaiting payment', 'Done']);
 
-// Upload one attachment for (order, status). Multipart with field `file`.
-sellOrders.post('/:id/status-meta/:status/attachments', async (c) => {
-  const u = c.var.user;
-  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
-  const id = c.req.param('id');
-  const status = c.req.param('status');
-
-  const sql = getDb(c.env);
-  const [metaStatusSet, exists] = await metaStatusAndOrder(sql, id);
-  if (!metaStatusSet.has(status)) return c.json({ error: 'invalid status' }, 400);
-  if (!exists) return c.json({ error: 'Not found' }, 404);
-
+// The file out of a multipart upload, fitted to the workspace limits, or the
+// response that refuses it. Shared by the evidence and order-level uploads.
+async function readUploadedFile(c: Context, sql: SqlClient): Promise<File | Response> {
   const form = await c.req.formData().catch(() => null);
   if (!form) return c.json({ error: 'multipart/form-data required' }, 400);
   const file = form.get('file') as File | null;
@@ -1129,6 +1131,23 @@ sellOrders.post('/:id/status-meta/:status/attachments', async (c) => {
   if (fitted.size > maxBytes) {
     return c.json({ error: `file too large (max ${maxBytes} bytes)` }, 413);
   }
+  return fitted;
+}
+
+// Upload one attachment for (order, status). Multipart with field `file`.
+sellOrders.post('/:id/status-meta/:status/attachments', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const id = c.req.param('id');
+  const status = c.req.param('status');
+
+  const sql = getDb(c.env);
+  const [metaStatusSet, exists] = await metaStatusAndOrder(sql, id);
+  if (!metaStatusSet.has(status)) return c.json({ error: 'invalid status' }, 400);
+  if (!exists) return c.json({ error: 'Not found' }, 404);
+
+  const fitted = await readUploadedFile(c, sql);
+  if (fitted instanceof Response) return fitted;
 
   const stored = RECEIPT_RENAME_STATUSES.has(status)
     ? await maybeRenameReceipt(c.env, fitted)
@@ -1213,6 +1232,97 @@ sellOrders.delete('/:id/status-meta/:status/attachments/:attachmentId', async (c
   if (!removed) return c.json({ error: 'Not found' }, 404);
   // R2 delete happens outside the tx — same rationale as upload: slow side
   // effect, kept out of the lock window. Best-effort.
+  await deleteAttachment(c.env, removed.storage_key).catch(e => log.error('r2 delete', e));
+  return c.json({ ok: true });
+});
+
+// ─── Order-level attachments ───────────────────────────────────────────────
+// Files that belong to the order rather than to a status transition: the
+// marketplace sale record, the invoice sent, a packing list. The page saves
+// them live from its Attachments card, so they survive a cancelled edit.
+type OrderAttachmentRow = {
+  id: string; filename: string; size_bytes: number; mime_type: string;
+  delivery_url: string; uploaded_at: Date; uploaded_by_name: string | null;
+};
+const orderAttachmentJson = (r: OrderAttachmentRow) => ({
+  id: r.id,
+  filename: r.filename,
+  size: r.size_bytes,
+  mime: r.mime_type,
+  url: r.delivery_url,
+  uploadedAt: r.uploaded_at,
+  uploadedBy: r.uploaded_by_name,
+});
+
+// Upload one attachment. Multipart with field `file`.
+sellOrders.post('/:id/attachments', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const id = c.req.param('id');
+  const sql = getDb(c.env);
+  const exists = (await sql`SELECT 1 FROM sell_orders WHERE id = ${id} LIMIT 1`).length > 0;
+  if (!exists) return c.json({ error: 'Not found' }, 404);
+
+  const fitted = await readUploadedFile(c, sql);
+  if (fitted instanceof Response) return fitted;
+
+  // R2 first, outside any transaction, as the evidence upload does; the
+  // object is taken back down if the INSERT fails.
+  const uploaded = await uploadAttachment(c.env, fitted, `sell-orders/${id}/attachments`)
+    .catch(e => { log.error('attachment upload', e); return e instanceof StorageUnavailableError ? 'unavailable' as const : null; });
+  if (uploaded === 'unavailable') return c.json({ error: 'attachment storage is not configured on this server' }, 503);
+  if (!uploaded) return c.json({ error: 'upload failed' }, 502);
+
+  let row: OrderAttachmentRow;
+  try {
+    row = await sql.begin(async (tx) => {
+      const r = (await tx<OrderAttachmentRow[]>`
+        INSERT INTO sell_order_attachments
+          (sell_order_id, filename, size_bytes, mime_type, storage_key, delivery_url, uploaded_by)
+        VALUES
+          (${id}, ${fitted.name}, ${fitted.size},
+           ${fitted.type || 'application/octet-stream'},
+           ${uploaded.storageKey}, ${uploaded.deliveryUrl}, ${u.id})
+        RETURNING id, filename, size_bytes, mime_type, delivery_url, uploaded_at,
+                  ${u.name}::text AS uploaded_by_name
+      `)[0];
+      await writeSellOrderEvent(tx, id, u.id, 'attachment_added', {
+        attachmentId: r.id, filename: r.filename, size: r.size_bytes, mime: r.mime_type,
+      });
+      return r;
+    });
+  } catch (e) {
+    await deleteAttachment(c.env, uploaded.storageKey)
+      .catch((err) => log.warn('attachment cleanup after a failed insert', { storageKey: uploaded.storageKey, err }));
+    throw e;
+  }
+
+  return c.json({ attachment: orderAttachmentJson(row) });
+});
+
+sellOrders.delete('/:id/attachments/:attachmentId', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const id = c.req.param('id');
+  const attachmentId = c.req.param('attachmentId');
+  if (!UUID_RE.test(attachmentId)) return c.json({ error: 'Not found' }, 404);
+  const sql = getDb(c.env);
+
+  const removed = await sql.begin(async (tx) => {
+    const row = (await tx`
+      SELECT storage_key, filename FROM sell_order_attachments
+      WHERE id = ${attachmentId} AND sell_order_id = ${id}
+      LIMIT 1
+    `)[0] as { storage_key: string; filename: string } | undefined;
+    if (!row) return null;
+    await tx`DELETE FROM sell_order_attachments WHERE id = ${attachmentId}`;
+    await writeSellOrderEvent(tx, id, u.id, 'attachment_removed', {
+      attachmentId, filename: row.filename,
+    });
+    return row;
+  });
+
+  if (!removed) return c.json({ error: 'Not found' }, 404);
   await deleteAttachment(c.env, removed.storage_key).catch(e => log.error('r2 delete', e));
   return c.json({ ok: true });
 });
