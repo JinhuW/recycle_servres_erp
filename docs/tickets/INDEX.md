@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-307](./RS-307-keep-the-keyword-gate-the-same-height-while-editing.md) | in-review | bug | P2 | Keep the keyword gate the same height while editing | 1.289.1 |
 | [RS-306](./RS-306-title-gate-shows-include-try-a-listing-marks-the-tit.md) | done | story | P2 | Title gate shows Include; Try a listing marks the title and puts verdicts on the item tabs | 1.289.0 |
 | [RS-305](./RS-305-reddit-alerts-go-to-a-dev-telegram-channel-reactions.md) | in-review | story | P2 | Reddit alerts go to a dev Telegram channel, reactions count as leads, and every prompt version is scored | n/a — trackers/reddit (no release process); deployed 2026-10-19 as image 04f5e24a |
 | [RS-304](./RS-304-show-the-keyword-gate-as-two-lists-include-and-exclu.md) | done | story | P2 | Show the keyword gate as two lists: Include and Exclude | 1.288.0 |

@@ -2156,7 +2156,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   exact copy, or a word that merely starts with it, since `ram` drops
   `ram stick` too (v1.289.0). Editing is by chip (× to remove, Enter or paste
   to add), with a text fallback. In read mode, **+ Add keyword** opens the
-  stage's Edit with that list's input focused. A **Try a listing** box on the
+  stage's Edit with that list's input focused. Opening Edit, either way, or
+  switching to text leaves the card and both fields the same height: the ×
+  is a corner badge on hover, so no chip moves (v1.289.1). A **Try a listing** box on the
   title and keyword gates puts each item's verdict on its tab (passes, which
   exclude keyword drops it, that no include keyword matched, or that the page
   is opened anyway). Under the tabs, the typed title and description are

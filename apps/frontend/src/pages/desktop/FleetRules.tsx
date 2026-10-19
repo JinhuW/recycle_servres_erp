@@ -171,6 +171,14 @@ function RuleList({ field, stage, value, editing, found, onChange, idle, shadowe
   // The expression being rewritten in place, by entry.
   const [openExpr, setOpenExpr] = useState<number | null>(null);
   const input = useRef<HTMLInputElement>(null);
+  const well = useRef<HTMLDivElement>(null);
+  // The field's height as text mode opened: the textarea takes exactly its
+  // place, so switching modes never moves the card.
+  const [textHeight, setTextHeight] = useState<number>();
+  const toggleText = () => {
+    if (!asText) setTextHeight(well.current?.offsetHeight);
+    setAsText(v => !v);
+  };
   // Search phrases are queries, not expressions: every line is one chip.
   const plain = field === 'search_phrases';
   const pol = POLARITY[field];
@@ -262,22 +270,20 @@ function RuleList({ field, stage, value, editing, found, onChange, idle, shadowe
         <span className="ff-rule-title">{t(LIST_TITLE[field])}</span>
         <span className="ff-rules-count">{listCount(field, value)}</span>
         {editing && (
-          <button type="button" className="ff-rule-mode" onClick={() => setAsText(v => !v)}>
+          <button type="button" className="ff-rule-mode" onClick={toggleText}>
             {t(asText ? 'fbcRulesAsChips' : 'fbcRulesAsText')}
           </button>
         )}
       </div>
-      <span className="ff-rule-hint">{t(hint, { n: String(MIN_TITLE_WORDS) })}</span>
+      <span className="ff-rule-hint">
+        {editing && asText ? t(plain ? 'fbcEditOnePerLine' : 'fbcRulesTextHint') : t(hint, { n: String(MIN_TITLE_WORDS) })}
+      </span>
       {editing && asText ? (
-        <>
-          <textarea className="input ff-edit-list" value={value} spellCheck={false}
-            rows={Math.min(14, Math.max(4, value.split('\n').length + 1))}
-            onChange={e => onChange(e.target.value)} />
-          <span className="fp-muted ff-edit-hint">{t(plain ? 'fbcEditOnePerLine' : 'fbcRulesTextHint')}</span>
-        </>
+        <textarea className="input ff-edit-list" value={value} spellCheck={false} style={{ height: textHeight }}
+          title={plain ? undefined : t('fbcRulesTextTip')} onChange={e => onChange(e.target.value)} />
       ) : (
         // A click on the field's empty space lands in its input, as in any tag field.
-        <div className={`ff-rule-well${editing ? ' editing' : ''}`}
+        <div ref={well} className={`ff-rule-well${editing ? ' editing' : ''}`}
           onClick={e => { if (e.target === e.currentTarget) input.current?.focus(); }}>
           {chips}
           {editing ? (

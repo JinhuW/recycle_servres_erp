@@ -17,6 +17,29 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.289.1] - 2026-10-18
+
+The fleet's keyword lists keep their height while you edit them (RS-307).
+
+### Fixed
+
+- **Opening Edit no longer reshuffles the chips.** Each chip used to grow an
+  inline × when Edit opened, so the fields rewrapped. On `server_ram` the
+  Exclude field grew a whole row (147 → 178 px) and every chip after the
+  first wrap moved, including the one you were reaching for. The × is now a
+  small badge on the chip's corner. It shows on hover and on keyboard focus,
+  and takes no space, so chips stay where they were. "+ Add keyword" and the
+  input that replaces it share one slot and row height, so the last row wraps
+  the same way too.
+- **The card holds its height.** Edit used to render only the stage being
+  edited, so the card snapped to that form's height. It went from 617 to
+  533 px on the production rules. The Edit form now takes its stage's place
+  among the hidden stages, as reading already did, so the card stays as tall
+  as its tallest stage.
+- **Edit as text takes the field's exact place.** The textarea is as tall as
+  the chip field it replaces, and the syntax hint moved up into the list's
+  hint line, so switching to text and back no longer shrinks the list.
+
 ## [1.289.0] - 2026-10-18
 
 The fleet's title gate shows the Include list it reads, and *Try a listing*
