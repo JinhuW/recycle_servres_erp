@@ -18,8 +18,6 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
-## [0.13.3] - 2026-10-19
-
 ### Fixed
 
 - **The pre-screen's default model lives in code**, as the page check's
@@ -27,14 +25,14 @@ deployed?" harder to answer.
   `configs/secrets.env` through `env_file`, not from the generic worker
   compose file 0.13.2 put the default in, so on that release the pre-screen
   would have stayed off fleet-wide. Unset means `typesafe/jev-1.14`; empty
-  turns it off; `RS_PRESCREEN_ENFORCE=1` in that same file is the flip (RS-317).
+  turns it off; `RS_PRESCREEN_ENFORCE=1` in that same file is the flip (RS-319).
 
 ## [0.13.2] - 2026-10-19
 
 ### Added
 
 - **A decision model pre-screens listings before the LLM reads them**
-  (RS-317). Every listing the LLM has no cached verdict for is first asked
+  (RS-319). Every listing the LLM has no cached verdict for is first asked
   reject / maybe / buy by `RS_PRESCREEN_MODEL` (the worker compose defaults it
   to `typesafe/jev-1.14`, the model RS-316's shadow run preferred), with the
   production prompt as the rules. The fleet runs it in shadow: the answer is

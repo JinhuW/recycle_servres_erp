@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-317](./RS-317-fold-the-sell-order-downloads-into-one-download-drop.md) | done | story | P2 | Fold the sell order downloads into one Download dropdown | — |
+| [RS-319](./RS-319-pre-screen-facebook-listings-with-a-decision-model-b.md) | backlog | task | P2 | Pre-screen Facebook listings with a decision model before the LLM | — |
+| [RS-317](./RS-317-fold-the-sell-order-downloads-into-one-download-drop.md) | done | story | P2 | Fold the sell order downloads into one Download dropdown | 1.293.0 |
 | [RS-316](./RS-316-shadow-run-a-decision-model-pre-screen-for-facebook.md) | done | task | P2 | Shadow-run a decision-model pre-screen for Facebook listings | facebook-tracker 0.13.1 |
 | [RS-315](./RS-315-keep-challenge-screenshots-on-the-coordinator-volume.md) | done | bug | P2 | Keep challenge screenshots on the coordinator volume | facebook-tracker 0.13.1 |
 | [RS-314](./RS-314-only-ack-a-messenger-reply-the-pane-shows-as-sent.md) | done | bug | P2 | Only ack a Messenger reply the pane shows as sent | facebook-tracker 0.13.1 |

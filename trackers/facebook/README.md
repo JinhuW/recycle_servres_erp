@@ -484,7 +484,7 @@ not fix anything it found. `scripts/prescreen-shadow.py` replays recent billed
 front of the listing LLM would save and what it would drop (RS-316 has the
 first results); with `--live` it reads the fleet's own `prescreen` events
 instead of asking a model, which is the report that decides whether
-`RS_PRESCREEN_ENFORCE` gets turned on (RS-317). `scripts/sweep-report.py`
+`RS_PRESCREEN_ENFORCE` gets turned on (RS-319). `scripts/sweep-report.py`
 (the by-city funnel) is the same shape and can be added to the same crontab
 when wanted.
 

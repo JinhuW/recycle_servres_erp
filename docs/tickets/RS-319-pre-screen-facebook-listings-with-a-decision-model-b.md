@@ -1,12 +1,12 @@
 ---
-id: RS-317
+id: RS-319
 title: Pre-screen Facebook listings with a decision model before the LLM
 type: task
 status: backlog
 priority: P2
 created: 2026-10-19
 reporter: jinhu
-branch: feat/rs-317-listing-prescreen
+branch: feat/rs-317-listing-prescreen (PRs #780, #781)
 pr:
 version:
 related: [RS-311, RS-316]

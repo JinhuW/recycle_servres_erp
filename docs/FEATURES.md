@@ -2229,7 +2229,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   facebook-tracker 0.13.3 a decision model pre-screens every listing before
   the LLM reads it, in shadow: its reject / maybe / buy verdict is logged
   beside the LLM's and nothing is skipped until `RS_PRESCREEN_ENFORCE` is
-  turned on (RS-317). If the
+  turned on (RS-319). If the
   worker already holds a pool account,
   the dialog asks where that one goes — back to Available, to Problem (still
   naming the worker) or Retired — with no default, and both moves land

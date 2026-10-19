@@ -1,4 +1,4 @@
-# Facebook fleet: a decision-model pre-screen in front of the listing LLM (RS-317)
+# Facebook fleet: a decision-model pre-screen in front of the listing LLM (RS-319)
 
 ## Context
 
@@ -40,7 +40,7 @@ This ticket builds the gate the RS-316 ticket named as the follow-up: `RS_PRESCR
 - README: "Upstream patches" row; a paragraph under the wall-detection one explaining shadow vs enforce, the three variables, cost, and the `--live` report. `CHANGELOG.md` `[Unreleased]` Added entry. `docs/FEATURES.md`: one sentence after the RS-315 one.
 - `scripts/check-vendor.sh update` after the vendored commit; fast-forward the main checkout's clone afterwards (memory note).
 
-## Ticket (RS-317, type task, P2) — drafted, written on approval
+## Ticket (RS-319, type task, P2) — drafted, written on approval
 
 ```
 title: Pre-screen Facebook listings with a decision model before the LLM
@@ -84,7 +84,7 @@ Plan: docs/superpowers/plans/2026-10-19-facebook-listing-prescreen.md
 
 ## Steps
 
-1. Rebase the worktree branch on `origin/dev` (`f2cf298c`); `scripts/ticket.sh new … --type task --priority P2` → RS-317 (confirm the number is free); copy this plan to `docs/superpowers/plans/2026-10-19-facebook-listing-prescreen.md`.
+1. Rebase the worktree branch on `origin/dev` (`f2cf298c`); `scripts/ticket.sh new … --type task --priority P2` → RS-319 (confirm the number is free); copy this plan to `docs/superpowers/plans/2026-10-19-facebook-listing-prescreen.md`.
 2. Vendored commit on `recycle-patches` (clone at pin `72bfc76`): `prescreen.py`, `utils.py` CacheType, `monitor.py`, `tests/test_prescreen.py`. Ruff with `--no-fix`, diffed against HEAD to see only new findings. Suite: `.venv-aimm/bin/python -m pytest tests -q --ignore=tests/test_facebook.py`.
 3. Repo PR to `dev` (squash): compose, secrets example, sweep report, `--live` mode, README, CHANGELOG, FEATURES, `check-vendor.sh update`, ticket. Dry-run the full gate: `AIMM_PYTHON=$PWD/.venv-aimm/bin/python scripts/release.sh --dry-run patch`.
 4. One live decision call from the laptop (the shadow script's `decide` with the production prompt, one listing) to pin the request shape before relying on it; cost under a cent.
