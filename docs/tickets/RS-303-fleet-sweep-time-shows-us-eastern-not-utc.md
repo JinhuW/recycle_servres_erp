@@ -2,13 +2,13 @@
 id: RS-303
 title: Fleet sweep time shows US Eastern, not UTC
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-18
 reporter: jinhu
 branch: fix-us-east-timezone
-pr:
-version:
+pr: 751
+version: 1.287.1
 related: []
 ---
 
@@ -30,10 +30,10 @@ the sweep meant doing the Eastern conversion in your head.
 
 ## Acceptance criteria
 
-- [ ] The Search stage chip reads `Sweeps at (ET)`, and a stored `10:00` shows as `06:00` while New York is on EDT.
-- [ ] The Edit form shows and accepts Eastern times; saving `06:00` sends `start_at: ["10:00"]` while on EDT.
-- [ ] Text that isn't HH:MM is sent as typed, so the console's 400 still names the field.
-- [ ] The edit hint says US Eastern, in English and Chinese.
+- [x] The Search stage chip reads `Sweeps at (ET)`, and a stored `10:00` shows as `06:00` while New York is on EDT.
+- [x] The Edit form shows and accepts Eastern times; saving `06:00` sends `start_at: ["10:00"]` while on EDT.
+- [x] Text that isn't HH:MM is sent as typed, so the console's 400 still names the field.
+- [x] The edit hint says US Eastern, in English and Chinese.
 
 ## Out of scope
 
