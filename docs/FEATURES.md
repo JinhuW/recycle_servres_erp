@@ -1983,8 +1983,9 @@ over MCP.
     one (`12,50` is 12.50). A row's currency comes from its cell, the cell's
     format, the column header or the tab name, in that order. 美元 reads as
     dollars, and so does a bare `$`, but not HK$ or a format's `[$€-407]`
-    (v1.286.0). The Market import skips a row marked in any currency but
-    dollars or yuan.
+    (v1.286.0). 元 marks yuan only on its own (单价（元）, 300元), not inside a
+    word such as a 电子元器件 tab (v1.291.1). The Market import skips a row
+    marked in any currency but dollars or yuan.
   - A list with more than 5,000 matched parts is refused at the preview, the
     same cap the apply holds, and the apply writes the whole list in two
     statements (v1.247.1).
@@ -2202,6 +2203,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   own device — and queues a password Re-login only when there is no usable
   cookie; a restored session that Facebook has since expired still falls back
   to the password login on the worker's own (facebook-tracker 0.12.5, RS-308).
+  Since v1.291.1, a fleet that won't seed the cookie (a console older than
+  0.12.5 answers 404; a cookie without `xs` is refused with 422) gets the
+  password Re-login instead of a failed Assign.
   If the worker already holds a pool account,
   the dialog asks where that one goes — back to Available, to Problem (still
   naming the worker) or Retired — with no default, and both moves land
@@ -2319,7 +2323,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   v0.9.0); mid-sweep it starts at its next search. A coordinator older than
   v0.9.0 reports no steps, and the strip stays hidden.  **Full screen**
   (v1.282.0, RS-296) gives the browser and the sign-in panel the whole
-  display, with the browser scaled to fill it. Taking control enters full
+  display, with the browser scaled to fill it, the panel beside it at any
+  screen width (v1.291.1). Taking control enters full
   screen and handing control back leaves it. Esc only shrinks the view, and
   control stays on. A bar at the top repeats the status, Take control,
   Re-login, the panel toggle and Exit. Since facebook-tracker 0.12.4 (RS-295)
