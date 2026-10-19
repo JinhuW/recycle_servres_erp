@@ -18,6 +18,15 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Added
+
+- **`ai_eval` events name the model, unit count and quantity behind a
+  verdict**, and `scripts/prescreen-shadow.py` replays recent billed verdicts
+  through a decision model to measure what a pre-screen in front of the listing
+  LLM would save and what it would drop (RS-316). The first run says no model
+  yet meets the bar of keeping 99% of the listings we alert on; the ticket has
+  the tables.
+
 ### Fixed
 
 - **The poster's and monitor's "wait for this button" checks wait** (RS-313).

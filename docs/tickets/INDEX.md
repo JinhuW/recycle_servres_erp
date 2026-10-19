@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-316](./RS-316-shadow-run-a-decision-model-pre-screen-for-facebook.md) | backlog | task | P2 | Shadow-run a decision-model pre-screen for Facebook listings | — |
+| [RS-316](./RS-316-shadow-run-a-decision-model-pre-screen-for-facebook.md) | in-progress | task | P2 | Shadow-run a decision-model pre-screen for Facebook listings | — |
 | [RS-315](./RS-315-keep-challenge-screenshots-on-the-coordinator-volume.md) | in-progress | bug | P2 | Keep challenge screenshots on the coordinator volume | — |
 | [RS-314](./RS-314-only-ack-a-messenger-reply-the-pane-shows-as-sent.md) | in-progress | bug | P2 | Only ack a Messenger reply the pane shows as sent | — |
 | [RS-313](./RS-313-make-the-poster-and-monitor-playwright-waits-real.md) | in-progress | bug | P2 | Make the poster and monitor Playwright waits real | — |
