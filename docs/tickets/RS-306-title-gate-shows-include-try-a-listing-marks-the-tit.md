@@ -2,13 +2,13 @@
 id: RS-306
 title: Title gate shows Include; Try a listing marks the title and puts verdicts on the item tabs
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-10-18
 reporter: jinhu
 branch: feat/keyword-tester-marks
-pr:
-version:
+pr: "#756"
+version: 1.289.0
 related: [RS-269, RS-304]
 ---
 
