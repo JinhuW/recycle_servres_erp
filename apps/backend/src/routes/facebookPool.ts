@@ -410,19 +410,22 @@ pool.put('/:no', async (c) => {
   return c.json(await snapshot(sql, key, user));
 });
 
-// Sends an account's login to a fleet worker: written into the worker's vault
-// account with password login allowed, then a Re-login queued, so the worker
-// signs in inside its own browser, through its own proxy. The login goes
-// server to server; the answer is the pool, which a manager already reads.
-// The cookie stays behind: replayed from the worker's IP it would be a
-// location change on a live session, the signal that gets accounts revoked.
+// Sends an account's login to a fleet worker, server to server; the answer is
+// the pool, which a manager already reads. Cookie-first: when the account has
+// a cookie that is its own (its c_user matches), that cookie is sealed as the
+// worker's session and the worker restores it — logged in with no password and
+// no 2FA, which is the gentlest way onto a new IP. Only when there is no usable
+// cookie is the vault's password login queued instead; a worker restoring a
+// cookie falls back to it on its own if the session does not take.
 // A worker that already holds another account keeps it unless the caller says
 // where it goes (`previous`); there is no default, because "it broke" and
 // "we're rotating" end in different places.
 // The device the login was made in, without the login: the pool cookie's
 // datr/sb, which the worker presents so its first sign-in is the account's own
 // machine on a new IP rather than a stranger's. Only for a cookie of this very
-// account; the session cookies (c_user, xs, fr) never leave here.
+// account. The session cookies (c_user, xs, fr) never ride the account write;
+// the whole session travels only on the cookie-first path, sealed as the
+// slot's own snapshot through the coordinator's session route.
 const DEVICE_COOKIE_DAYS = 400;
 function legacyDevice(cookie: string, cookieUidValue: string | null, uid: string) {
   if (!cookie || cookieUidValue !== uid) return {};
@@ -477,6 +480,12 @@ pool.post('/:no/assign', async (c) => {
     return c.json({ error: `#${held[0].no} is already on ${worker}`, code: 'fpWorkerTaken' }, 409);
   const password = unsealOrEmpty(row.password_enc, key);
   if (!password) return c.json({ error: 'This account has no password to sign in with', code: 'fpNoPassword' }, 409);
+  const cookie = unsealOrEmpty(row.cookie_enc, key);
+  // Cookie-first: a cookie that is this account's own (its c_user matches) can
+  // be restored as the worker's session — logged in with no password login,
+  // which replayed from the worker's IP is what gets accounts checkpointed. The
+  // password stays in the vault as the worker's own fallback if it does not take.
+  const cookieFirst = Boolean(cookie) && cookieUid(cookie) === row.uid;
 
   // Every secret is set, empty ones cleared: what the worker held before
   // belongs to the previous account. The uid travels with the login because
@@ -494,12 +503,23 @@ pool.post('/:no/assign', async (c) => {
       email: orNull(row.email),
       email_password: orNull(unsealOrEmpty(row.email_password_enc, key)),
     },
-    ...legacyDevice(unsealOrEmpty(row.cookie_enc, key), row.cookie_uid, row.uid),
+    ...legacyDevice(cookie, row.cookie_uid, row.uid),
   });
   if (write.error) return c.json({ error: write.error }, write.status);
-  const relogin = await callFacade(c.env, 'POST', `/v1/workers/${encodeURIComponent(worker)}/relogin`);
-  if (relogin.error) return c.json({ error: `The login reached ${worker}, but Re-login was not queued: ${relogin.error}` }, relogin.status);
-  log.info('fleet worker given a pool login', { module: 'facebookPool', accountNo: no, workerId: worker, by: user.email });
+
+  if (cookieFirst) {
+    // Seal the cookie as the slot's session, then have the worker restore it:
+    // no password, no 2FA. The worker falls back to a password login on its
+    // own if the restored session does not take.
+    const seed = await callFacade(c.env, 'PUT', `/v1/workers/${encodeURIComponent(worker)}/session`, { cookie, reason: `assign #${no}` });
+    if (seed.error) return c.json({ error: `The login reached ${worker}, but its session was not seeded: ${seed.error}` }, seed.status);
+    const restore = await callFacade(c.env, 'POST', `/v1/workers/${encodeURIComponent(worker)}/restore-session`);
+    if (restore.error) return c.json({ error: `The session was seeded on ${worker}, but the restore was not queued: ${restore.error}` }, restore.status);
+  } else {
+    const relogin = await callFacade(c.env, 'POST', `/v1/workers/${encodeURIComponent(worker)}/relogin`);
+    if (relogin.error) return c.json({ error: `The login reached ${worker}, but Re-login was not queued: ${relogin.error}` }, relogin.status);
+  }
+  log.info('fleet worker given a pool login', { module: 'facebookPool', accountNo: no, workerId: worker, mode: cookieFirst ? 'cookie' : 'password', by: user.email });
 
   await sql.begin(async (tx) => {
     await tx`

@@ -17,6 +17,23 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.290.0] - 2026-10-18
+
+### Changed
+
+- **Assigning a Facebook pool account that has a live cookie now logs the
+  worker in from that cookie, not a password** (RS-308). *Assign to fleet* used
+  to always write the account's password into the worker's vault and force a
+  fresh password login with 2FA from the worker's proxy IP — the harshest
+  sign-in Facebook sees, and the one most likely to checkpoint an account. When
+  the account's stored cookie is its own (its `c_user` matches the account),
+  the ERP now seals that cookie as the worker's session on the coordinator and
+  has the worker restore it: logged in with no password and no 2FA, on the
+  account's own device (RS-293). The password stays in the vault as the
+  worker's own fallback, so a cookie Facebook has already expired still ends in
+  a password login rather than a dead worker; an account with no usable cookie
+  assigns exactly as before. Needs facebook-tracker ≥ 0.12.5 — against an older
+  fleet the Assign falls back to the password login on its own.
 ## [1.289.1] - 2026-10-18
 
 The fleet's keyword lists keep their height while you edit them (RS-307).
