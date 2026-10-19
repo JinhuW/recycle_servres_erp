@@ -2,12 +2,12 @@
 id: RS-304
 title: Show the keyword gate as two lists: Include and Exclude
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-10-18
 reporter: jinhu
 branch: feat/keyword-include-exclude
-pr:
+pr: "#750"
 version: 1.288.0
 related: [RS-269]
 ---
