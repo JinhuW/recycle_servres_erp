@@ -18,6 +18,15 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Changed
+
+- **The daily sweep starts at 09:00 Eastern, not 06:00** (RS-318). `start_at`
+  in `master.toml` and every `homelab-*.toml` is `["13:00"]` UTC (09:00 EDT);
+  when New York falls back to EST it needs `14:00` to stay at 09:00, as the
+  config's comment says. A sweep time saved from the ERP's search settings
+  still overrides this default. The VM's `fleet-verify.py` cron moves from
+  21:05 to 23:05 UTC so it keeps running after a long sweep has finished.
+
 ## [0.13.4] - 2026-10-19
 
 ### Fixed
