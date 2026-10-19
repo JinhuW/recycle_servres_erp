@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-305](./RS-305-reddit-alerts-go-to-a-dev-telegram-channel-reactions.md) | in-progress | story | P2 | Reddit alerts go to a dev Telegram channel, reactions count as leads, and every prompt version is scored | — |
 | [RS-304](./RS-304-show-the-keyword-gate-as-two-lists-include-and-exclu.md) | done | story | P2 | Show the keyword gate as two lists: Include and Exclude | 1.288.0 |
 | [RS-303](./RS-303-fleet-sweep-time-shows-us-eastern-not-utc.md) | done | story | P2 | Fleet sweep time shows US Eastern, not UTC | 1.287.1 |
 | [RS-302](./RS-302-reddit-pipeline-card-counts-the-past-24-hours.md) | done | story | P2 | Reddit pipeline card counts the past 24 hours | 1.287.0 |

@@ -5,7 +5,15 @@
 // Both transports report per-recipient results in the same shape, so the notify
 // loop's claim/mark-notified logic does not change between them.
 
-import {formatAlert, sendAlert, type AlertContent, type SendReport} from './telegram.ts';
+import {
+  formatAlert,
+  formatReview,
+  sendAlert,
+  sendReview,
+  type AlertContent,
+  type ReviewContent,
+  type SendReport,
+} from './telegram.ts';
 
 export type AlertTransport = 'telegram' | 'console';
 
@@ -18,6 +26,8 @@ export interface AlertSender {
    */
   readonly requiresRecipients: boolean;
   send(chatIds: string[], alert: AlertContent): Promise<SendReport>;
+  /** A dev-chat review: the alert plus each prompt's verdict and reasoning. */
+  sendReview(chatIds: string[], review: ReviewContent): Promise<SendReport>;
 }
 
 /** Undoes the HTML entities and tags formatAlert adds for Telegram. */
@@ -38,12 +48,20 @@ export function createConsoleAlertSender(
     transport: 'console',
     requiresRecipients: false,
     async send(chatIds: string[], alert: AlertContent): Promise<SendReport> {
-      print([RULE, 'BUY ALERT', '', toPlainText(formatAlert(alert)), RULE].join('\n'));
-      // Report the configured chats when there are any, so the log still shows
-      // who would have been messaged once a bot token is wired up.
-      return {delivered: chatIds.length > 0 ? [...chatIds] : ['console'], failed: []};
+      return printed('BUY ALERT', formatAlert(alert), chatIds);
+    },
+    async sendReview(chatIds: string[], review: ReviewContent): Promise<SendReport> {
+      return printed('REVIEW', formatReview(review), chatIds);
     },
   };
+
+  function printed(banner: string, html: string, chatIds: string[]): SendReport {
+    print([RULE, banner, '', toPlainText(html), RULE].join('\n'));
+    // Report the configured chats when there are any, so the log still shows
+    // who would have been messaged once a bot token is wired up. No message
+    // ids: nothing was sent that anyone could react to.
+    return {delivered: chatIds.length > 0 ? [...chatIds] : ['console'], sent: [], failed: []};
+  }
 }
 
 export function createTelegramAlertSender(botToken: string): AlertSender {
@@ -52,6 +70,9 @@ export function createTelegramAlertSender(botToken: string): AlertSender {
     requiresRecipients: true,
     async send(chatIds: string[], alert: AlertContent): Promise<SendReport> {
       return sendAlert(botToken, chatIds, alert);
+    },
+    async sendReview(chatIds: string[], review: ReviewContent): Promise<SendReport> {
+      return sendReview(botToken, chatIds, review);
     },
   };
 }

@@ -1,5 +1,5 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
-import {escapeHtml, formatAlert, sendMessage} from '../src/telegram.ts';
+import {escapeHtml, formatAlert, formatReview, sendMessage} from '../src/telegram.ts';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -124,13 +124,77 @@ describe('sendMessage', () => {
     expect(report.failed).toEqual([{chatId: '111', error: 'ECONNRESET'}]);
   });
 
+  it('reports the message id of each delivery, which is what reactions are keyed by', async () => {
+    const spy = vi.fn()
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ok: true, result: {message_id: 501}}), {status: 200},
+      ))
+      .mockResolvedValueOnce(failure('chat not found'));
+    vi.stubGlobal('fetch', spy);
+
+    const report = await sendMessage('token', ['111', 'bad'], 'hello', noSleep);
+
+    expect(report.sent).toEqual([{chatId: '111', messageId: 501}]);
+    expect(report.delivered).toEqual(['111']);
+  });
+
   it('makes no request when no chats are configured', async () => {
     const spy = vi.fn();
     vi.stubGlobal('fetch', spy);
 
     const report = await sendMessage('token', [], 'hello', noSleep);
 
-    expect(report).toEqual({delivered: [], failed: []});
+    expect(report).toEqual({delivered: [], sent: [], failed: []});
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe('formatReview', () => {
+  const alert = {
+    subreddit: 'homelabsales',
+    title: '[FS][US-CA] 21x Micron 1100 2TB SATA SSD',
+    summary: '21 Micron 1100 2TB SATA SSDs, $120 each for 10+.',
+    price: '$2300',
+    url: 'https://www.reddit.com/r/homelabsales/comments/x/fs/',
+  };
+
+  it('says which prompt flagged the post and shows both verdicts', () => {
+    const text = formatReview({
+      alert,
+      verdicts: [
+        {label: 'Live', promptVersionId: 3, model: 'openai/gpt-4o-mini', isTarget: false,
+          reasoning: 'Only 4 SSDs remain.'},
+        {label: 'Candidate', promptVersionId: 5, model: 'openai/gpt-4o-mini', isTarget: true,
+          reasoning: '21 SSDs available.'},
+      ],
+    });
+
+    expect(text).toContain('flagged by candidate');
+    expect(text).not.toContain('flagged by live');
+    expect(text).toContain('<b>Live</b> v3 · openai/gpt-4o-mini — ❌ no alert');
+    expect(text).toContain('<b>Candidate</b> v5 · openai/gpt-4o-mini — ✅ alert');
+    expect(text).toContain(alert.url);
+    expect(text).toContain('React 👍 if this is a lead');
+  });
+
+  it('names both prompts when they agree', () => {
+    const text = formatReview({
+      alert,
+      verdicts: [
+        {label: 'Live', promptVersionId: 3, model: 'm/a', isTarget: true, reasoning: 'x'},
+        {label: 'Candidate', promptVersionId: 5, model: 'm/b', isTarget: true, reasoning: 'y'},
+      ],
+    });
+    expect(text).toContain('flagged by live and candidate');
+  });
+
+  it('escapes reasoning and labels a verdict made before versioning', () => {
+    const text = formatReview({
+      alert,
+      verdicts: [{label: 'Live', promptVersionId: null, model: null, isTarget: true,
+        reasoning: 'Lot of <8 & more'}],
+    });
+    expect(text).toContain('Lot of &lt;8 &amp; more');
+    expect(text).toContain('<b>Live</b> unversioned · unknown model');
   });
 });

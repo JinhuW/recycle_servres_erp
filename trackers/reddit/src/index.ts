@@ -13,6 +13,7 @@ import {createLogger} from './logger.ts';
 import {evaluateOnce} from './loops/evaluate.ts';
 import {notifyOnce} from './loops/notify.ts';
 import {pollOnce} from './loops/poll.ts';
+import {reactionsOnce} from './loops/reactions.ts';
 import {startLoop, type LoopHandle} from './loops/runner.ts';
 import {RedditPacer} from './pacing.ts';
 import {SettingsStore} from './settings.ts';
@@ -74,12 +75,34 @@ async function runApi(): Promise<void> {
   logger.info('api listening', {port: config.apiPort});
   const heartbeat = startHeartbeat('api');
 
+  // The api is the one single-copy service, so it is the one that may poll
+  // the bot's updates (see loops/reactions.ts). Console mode means "not the
+  // real Telegram", which keeps a local api off production's updates. Not
+  // registered with the heartbeat: its loop names are part of the ERP's
+  // /api/workers contract.
+  const abort = new AbortController();
+  const reactions = config.alertTransport === 'telegram'
+    ? startLoop(
+      // The long poll is the wait; the idle pause only spaces out failures.
+      {name: 'reactions', logger: logger.child('reactions'), idleMs: 5_000},
+      () => reactionsOnce({
+        sql,
+        botToken: config.telegramBotToken,
+        settings,
+        logger: logger.child('reactions'),
+        signal: abort.signal,
+      }),
+    )
+    : null;
+
   await new Promise<void>((resolve) => {
     const shutdown = (signal: string) => {
       if (shuttingDown) return;
       shuttingDown = true;
       logger.info('shutting down', {signal});
       heartbeat.stop();
+      reactions?.stop();
+      abort.abort();
       server.close(() => resolve());
     };
     process.once('SIGTERM', () => shutdown('SIGTERM'));
@@ -87,12 +110,14 @@ async function runApi(): Promise<void> {
   });
 
   await heartbeat.stopped;
+  await reactions?.stopped;
   await deregister();
   await sql.end();
 }
 
 async function runWorker(): Promise<void> {
   const pacer = new RedditPacer({maxRpm: config.redditMaxRpm});
+  const alerts = createAlertSender(config.alertTransport, config.telegramBotToken);
 
   // Three tickers rather than one sequential pass: Reddit pacing (up to a
   // minute of waiting) must never hold up LLM evaluation or alerting, and a
@@ -116,6 +141,7 @@ async function runWorker(): Promise<void> {
         workerId: config.workerId,
         apiKey: config.openrouterApiKey,
         settings,
+        alerts,
         logger: logger.child('evaluate'),
       })),
     ),
@@ -124,7 +150,7 @@ async function runWorker(): Promise<void> {
       registry.wrap('notify', () => notifyOnce({
         sql,
         workerId: config.workerId,
-        alerts: createAlertSender(config.alertTransport, config.telegramBotToken),
+        alerts,
         settings,
         logger: logger.child('notify'),
       })),

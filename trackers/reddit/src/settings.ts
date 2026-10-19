@@ -9,14 +9,23 @@ export interface Settings {
   llmModel: string;
   telegramChatIds: string[];
   maxPostAgeHours: number;
+  /** Where reviews go: every alert plus the candidate's, with reasoning. */
+  telegramDevChatIds: string[];
+  /** The prompt on trial, judged as written with no rules appended; '' is off. */
+  candidateEvalPrompt: string;
+  /** '' runs the candidate on llmModel. */
+  candidateLlmModel: string;
 }
 
-/** Used only if a row is missing; migrations seed all four keys. */
+/** Used only if a row is missing; migrations seed every key. */
 const FALLBACKS: Settings = {
   evalPrompt: 'Decide whether this Reddit post is someone selling used server hardware.',
   llmModel: 'openai/gpt-4o-mini',
   telegramChatIds: [],
   maxPostAgeHours: 24,
+  telegramDevChatIds: [],
+  candidateEvalPrompt: '',
+  candidateLlmModel: '',
 };
 
 const CACHE_TTL_MS = 60_000;
@@ -26,6 +35,9 @@ export const SETTING_KEYS = [
   'llm_model',
   'telegram_chat_ids',
   'max_post_age_hours',
+  'telegram_dev_chat_ids',
+  'candidate_eval_prompt',
+  'candidate_llm_model',
 ] as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[number];
@@ -56,12 +68,16 @@ export class SettingsStore {
       SELECT key, value FROM settings`;
     const byKey = new Map(rows.map((r) => [r.key, r.value]));
 
-    const chatIds = byKey.get('telegram_chat_ids');
     this.cache = {
       evalPrompt: asString(byKey.get('eval_prompt')) ?? FALLBACKS.evalPrompt,
       llmModel: asString(byKey.get('llm_model')) ?? FALLBACKS.llmModel,
-      telegramChatIds: Array.isArray(chatIds) ? chatIds.map(String) : FALLBACKS.telegramChatIds,
+      telegramChatIds: asChatIds(byKey.get('telegram_chat_ids')) ?? FALLBACKS.telegramChatIds,
       maxPostAgeHours: asNumber(byKey.get('max_post_age_hours')) ?? FALLBACKS.maxPostAgeHours,
+      telegramDevChatIds:
+        asChatIds(byKey.get('telegram_dev_chat_ids')) ?? FALLBACKS.telegramDevChatIds,
+      candidateEvalPrompt:
+        asString(byKey.get('candidate_eval_prompt')) ?? FALLBACKS.candidateEvalPrompt,
+      candidateLlmModel: asString(byKey.get('candidate_llm_model')) ?? FALLBACKS.candidateLlmModel,
     };
     this.cachedAt = this.now();
     return this.cache;
@@ -90,6 +106,10 @@ export class SettingsStore {
 
 function asString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function asChatIds(value: unknown): string[] | null {
+  return Array.isArray(value) ? value.map(String) : null;
 }
 
 function asNumber(value: unknown): number | null {
