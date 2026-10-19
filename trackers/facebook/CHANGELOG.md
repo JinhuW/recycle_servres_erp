@@ -18,6 +18,15 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Changed
+
+- **0.12.3's wc-1 swap is on the mainline now** (RS-294). 0.12.3 and 0.12.4
+  were released from the side branch `release/facebook-tracker-0.12.4`, and
+  the VM runs 0.12.4. 0.12.5 was then released from `dev`, which did not have
+  RS-294, so the `v0.12.5` tree still starts va-1 under compose on wc-1's
+  proxy port and has no wc-1. **Never deploy `v0.12.5`.** The next release
+  carries both lines.
+
 ## [0.12.5] - 2026-10-18
 
 ### Added
@@ -71,6 +80,37 @@ deployed?" harder to answer.
   read. Each new browser context now crops x11vnc to its own window
   (`x11vnc -R clip:…`), and viewers that are already connected resize live.
   Xvfb itself cannot shrink: RandR on Xvfb 21 rejects a smaller screen.
+
+## [0.12.4] - 2026-10-18
+
+### Fixed
+
+- **The worker's VNC view shows the browser, not the whole display** (RS-295).
+  Since 0.11.0, the X display has been 1920x1080 so that any device profile's
+  screen fits, but Chromium opens a window only as large as its context's
+  viewport plus toolbars, which is about 1288x807 for a legacy device. VNC
+  served the whole display, so the ERP's watch page showed the browser in one
+  corner of a black frame and scaled both down, which left a CAPTCHA hard to
+  read. Each new browser context now crops x11vnc to its own window
+  (`x11vnc -R clip:…`), and viewers that are already connected resize live.
+  Xvfb itself cannot shrink: RandR on Xvfb 21 rejects a smaller screen.
+
+## [0.12.3] - 2026-10-18
+
+### Added
+
+- **wc-1 runs.** Its pool account sat in the vault with no container behind
+  it, so the ERP showed it as "Never reported". It is now a compose worker,
+  `rs-monitor-wc` (`deploy/docker-compose.homelab-wc.yml`), on the Leesburg
+  exit at port 10009 (`PROXY_HOMELAB_WC`). It searches the same `rs_west`
+  cities as west-1, and the console lists it for cities and Watch.
+
+### Removed
+
+- **va-1 is retired from compose.** Facebook locked its account on
+  2026-10-18, and wc-1 takes its proxy port. Its compose file, config and
+  console entries are gone, so no deploy brings it back up on wc-1's IP. Its
+  vault account stays, locked.
 
 ## [0.12.2] - 2026-10-18
 
