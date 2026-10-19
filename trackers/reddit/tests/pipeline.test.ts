@@ -385,6 +385,24 @@ describe('prompt versions', () => {
     await db.sql`DELETE FROM rules`;
   });
 
+  it('numbers versions in the order prompts first appear, however many batches run', async () => {
+    await db.sql`DELETE FROM rules`;
+    stubUpstreams({live: REJECT});
+    for (const id of ['t3_1', 't3_2', 't3_3']) {
+      await insertNewPosts(db.sql, [post({redditId: id})]);
+      await evaluateOnce(evaluateDeps());
+    }
+    // A prompt that first appears after many batches gets the next number.
+    await createRule(db.sql, {name: 'EPYC lots', prompt: 'Alert on bulk EPYC CPU lots.'});
+    await insertNewPosts(db.sql, [post({redditId: 't3_4'})]);
+    await evaluateOnce(evaluateDeps());
+
+    const versions = await db.sql<Array<{id: number}>>`SELECT id FROM prompt_versions ORDER BY id`;
+    expect(versions).toHaveLength(2);
+    expect(versions[1]!.id - versions[0]!.id).toBe(1);
+    await db.sql`DELETE FROM rules`;
+  });
+
   it('leaves a post rejected for age unversioned, since no prompt judged it', async () => {
     await insertNewPosts(db.sql, [post({postedAt: new Date(Date.now() - 72 * 3600_000)})]);
     stubUpstreams({live: TARGET});

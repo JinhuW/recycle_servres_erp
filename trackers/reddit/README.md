@@ -112,7 +112,7 @@ ROLE=api API_TOKEN=devtoken pnpm dev # admin API on :8080
 ```
 
 ```bash
-pnpm test        # 206 tests; needs the compose Postgres running
+pnpm test        # 207 tests; needs the compose Postgres running
 pnpm typecheck
 ```
 
