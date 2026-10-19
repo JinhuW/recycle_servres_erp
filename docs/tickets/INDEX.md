@@ -7,7 +7,7 @@ See [README.md](./README.md) for what the fields mean.
 |---|---|---|---|---|---|
 | [RS-320](./RS-320-attachments-on-a-sell-order-for-the-sell-records.md) | done | story | P2 | Attachments on a sell order for the sell records | v1.294.0 |
 | [RS-319](./RS-319-pre-screen-facebook-listings-with-a-decision-model-b.md) | backlog | task | P2 | Pre-screen Facebook listings with a decision model before the LLM | — |
-| [RS-318](./RS-318-start-the-facebook-fleet-s-daily-sweep-at-09-00-east.md) | in-review | task | P2 | Start the Facebook fleet's daily sweep at 09:00 Eastern | facebook-tracker 0.13.5 |
+| [RS-318](./RS-318-start-the-facebook-fleet-s-daily-sweep-at-09-00-east.md) | done | task | P2 | Start the Facebook fleet's daily sweep at 09:00 Eastern | facebook-tracker 0.13.5 |
 | [RS-317](./RS-317-fold-the-sell-order-downloads-into-one-download-drop.md) | done | story | P2 | Fold the sell order downloads into one Download dropdown | 1.293.0 |
 | [RS-316](./RS-316-shadow-run-a-decision-model-pre-screen-for-facebook.md) | done | task | P2 | Shadow-run a decision-model pre-screen for Facebook listings | facebook-tracker 0.13.1 |
 | [RS-315](./RS-315-keep-challenge-screenshots-on-the-coordinator-volume.md) | done | bug | P2 | Keep challenge screenshots on the coordinator volume | facebook-tracker 0.13.1 |

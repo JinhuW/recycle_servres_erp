@@ -2,7 +2,7 @@
 id: RS-318
 title: Start the Facebook fleet's daily sweep at 09:00 Eastern
 type: task
-status: in-review
+status: done
 priority: P2
 created: 2026-10-19
 reporter: jinhu
@@ -46,7 +46,7 @@ The owner wants the daily sweep at 09:00 Eastern. 09:00 EDT is 13:00 UTC.
       (13:00 → 14:00 when New York falls back).
 - [x] The change is written under `[Unreleased]` in the tracker's CHANGELOG
       and the README's fleet-verify note matches the new sweep time.
-- [ ] Released as facebook-tracker 0.13.5 and deployed with
+- [x] Released as facebook-tracker 0.13.5 and deployed with
       `scripts/deploy.sh sync`; the ERP's fleet page then shows the next sweep
       as 09:00 ET for every worker.
 
@@ -66,3 +66,10 @@ The owner wants the daily sweep at 09:00 Eastern. 09:00 EDT is 13:00 UTC.
 - The ERP's search settings card can change the sweep time at any time; a
   value saved there overrides this default until `/state/settings.json` is
   deleted.
+- Deployed 2026-10-19 15:45 UTC with `scripts/deploy.sh sync`. Every worker
+  config on the VM carries `13:00`, the workers restarted and the console's
+  `/v1/fleet` reports `search.start_at = ["13:00"]`; the cron was moved. The
+  deploy's verify step still reported code DRIFT: `sync` rebuilds no image,
+  and the VM's worker image is the 0.13.1 build because 0.13.2–0.13.4 (the
+  pre-screen releases) were never deployed. The next full `scripts/deploy.sh`
+  clears it by shipping that code.
