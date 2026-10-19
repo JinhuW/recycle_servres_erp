@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import ExcelJS from 'exceljs';
 import app from '../src/index';
 import { resetDb, getTestDb } from './helpers/db';
-import { api, multipart, testEnv } from './helpers/app';
+import { api, testEnv } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
 import { firstCustomerId, signOffAll } from './helpers/fixtures';
 
@@ -17,7 +17,6 @@ type DetailLine = {
   warehouseId: string | null; condition: string | null; position: number;
 };
 
-const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 async function detailLines(mgr: string, id: string): Promise<DetailLine[]> {
   const r = await api<{ order: { lines: DetailLine[] } }>('GET', `/api/sell-orders/${id}`, { token: mgr });
@@ -253,14 +252,5 @@ describe('sell order lines at qty 0', () => {
     bid.eachSheet(ws => ws.eachRow(row => row.eachCell(c => { bidCells.push(String(c.value ?? '')); })));
     expect(bidCells).toContain('ZQ-T1');
     expect(bidCells).not.toContain('ZQ-T2');
-
-    // The returned bid sheet can't price a line the sheet never offered, so
-    // the import doesn't report it as missing either.
-    const sheet = await getRaw(`/api/sell-orders/${id}/price-template`, mgr);
-    const file = new Blob([await sheet.arrayBuffer()], { type: XLSX_MIME });
-    const preview = await multipart(`/api/sell-orders/${id}/price-import/preview`, { file }, { token: mgr });
-    expect(preview.status).toBe(200);
-    const unmatched = (preview.body as { unmatchedProducts: { partNumber: string | null }[] }).unmatchedProducts;
-    expect(unmatched.map(p => p.partNumber)).not.toContain('ZQ-T2');
   });
 });

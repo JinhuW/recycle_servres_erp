@@ -1234,10 +1234,10 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   - **The order's History is the last card in the right-hand column, folded**
     (v1.248.0; in the side column since v1.248.2); a click on its heading
     opens it.
-  - **Editing puts Vendor price import at the top of the right-hand column**,
-    above the order summary (v1.248.3; first in the left card in v1.248.1,
-    under the products before that), so the bid sheet's round trip doesn't
-    need a scroll past every line.
+  - **The Vendor price import card is gone** (v1.297.0, RS-324). It sat at
+    the top of the right-hand column from v1.248.3 (first in the left card in
+    v1.248.1, under the products before that). A sell order's prices come
+    from its lots' sell prices now; see *Vendor bid sheet* below.
   - **A search box over the products narrows the list** (v1.248.0), in view
     and edit, like Pack mode's: a part #, serial or PO number matches with or
     without its dashes, and words match the item's name and spec chips
@@ -1418,27 +1418,32 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   on it only dismisses it (v1.239.1).
 - **Negotiated final-price adjustment** with an order-summary breakdown card
   (v1.22.0, v1.23.0).
-- **Vendor price round-trip**: export a bid-sheet XLSX, the vendor fills in
-  prices, import it back (v1.21.0). The sheet ships pre-sorted the way the desk
-  reads it, with an autofilter across the header row and no sheet protection
-  (v1.51.2). Its header text is load-bearing for the import parser — don't
-  move it. **Saving after a confirmed import records the accepted prices on
-  the Market value board** as `bid:<order>` data points, USD at the saved
-  rate, one per confirmed part (v1.138.3); hand-typed price edits record
-  nothing. **The sheet prices a part once, not per condition**: there is no
-  Condition column, a part held in two conditions is one row with its qty
-  summed, and the import applies its price to every line of the part
-  (v1.242.0), whatever label its lines were added under (v1.247.1). A 0 in
-  the price column is no bid, not a $0 price (v1.247.1). A sheet made before
-  v1.242.0 that priced a part's conditions apart leaves that part for the
-  manager to price, flagged as such, instead of taking its last row
-  (v1.247.1). **A DDR5 lot folds by spec, not part number** (v1.255.0): the
-  same Brand + Type + Capacity + Rank + Speed + Class key as Inventory's
-  grouped view, so lots of several part numbers are one row with their qty
-  summed. The row's Part Number cell lists each part number it folds,
-  comma-separated, and the import reads that cell as one price for every
-  part in it, one preview line each. The packing lists and the product `#`
-  keep folding by part number.
+- **Vendor bid sheet**: export a bid-sheet XLSX for the vendor (v1.21.0).
+  The sheet ships pre-sorted the way the desk reads it, with an autofilter
+  across the header row and no sheet protection (v1.51.2). **It prices a
+  part once, not per condition**: there is no Condition column, and a part
+  held in two conditions is one row with its qty summed (v1.242.0). **A DDR5
+  lot folds by spec, not part number** (v1.255.0): the same Brand + Type +
+  Capacity + Rank + Speed + Class key as Inventory's grouped view, so lots of
+  several part numbers are one row with their qty summed, and the row's Part
+  Number cell lists each part number it folds, comma-separated. The packing
+  lists and the product `#` keep folding by part number.
+  - **The import half of the round trip was removed in v1.297.0** (RS-324).
+    From v1.21.0 to v1.296.x the vendor filled the sheet's Unit Price column
+    and the manager dropped it back on the order's edit view: the preview
+    matched rows by canonical part number, confirming filled the form's
+    prices, and the save that followed recorded them on the Market board as
+    `bid:<order>` data points (v1.138.3). Since Review mode sets each PO
+    line's sell price (v1.296.0) and a sell order line starts at its lot's
+    sell price, the sheet is a quote the ERP never reads back. The
+    `price-import/preview` route, the `bidParts` save field (an old bundle
+    sending it is ignored) and the `bid:` feed are gone; `bid:` events
+    already on file still show on the Activity page. The Market page's own
+    price-list import stays and still reads these sheets. A lot added to an
+    existing order's edit view starts at its sell price too, in the order's
+    currency (a CNY order's prefilled lots still start at 0, since the rate
+    loads after them); before v1.297.0 it started at 0 unless the product was
+    already on the order.
 - The price template splits into one worksheet per category with per-attribute
   spec columns and image URLs (v1.25.0, v1.27.0). **The RAM tab groups its rows
   with merged label columns left of `#`** — "Desktop & laptop" / "Server", then
@@ -1456,8 +1461,7 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   sections repeat the bid tab's merged labels and colours on two reserved
   leading columns — reserved on every pack tab, so two warehouses on one order
   read alike. Both files come from one query and one sort, so a picker and a
-  bidder find a product in the same place; uploading this one to the price
-  import is rejected for having no price column (v1.130.0). **Every row names
+  bidder find a product in the same place. **Every row names
   its source in a `From PO` column after Part #** (v1.216.0): `PO-1442 #3`,
   the line's # on that PO's page; a row of hand-typed lines alone reads `—`.
   **A product is one row with one tick box** (v1.220.3): a product from
@@ -2002,12 +2006,13 @@ over MCP.
   as sources in its confidence note. It says "no cost data" and "no feed
   connected" instead, and counts only the team's own sales.
 - A line can be priced while the buy can still change (v1.54.0).
-- **Five feeds write `last_price`**, each tagged in the event's source: the
+- **Four feeds write `last_price`**, each tagged in the event's source: the
   scraper and MCP connectors (`scraper:`/`mcp:`), a manager's manual entry
   on the Market page (`manual:`), a sell order reaching Done (`sale:<order>`),
-  a sell-order save that follows a confirmed vendor price import
-  (`bid:<order>`, v1.138.3), and a price-list import on the Market page
-  (`import:<email>`, v1.247.0). The Activity page shows the source per row; the
+  and a price-list import on the Market page (`import:<email>`, v1.247.0).
+  A fifth, a sell-order save that followed a confirmed vendor price import
+  (`bid:<order>`, v1.138.3), was retired with that import in v1.297.0; its
+  events stay on file. The Activity page shows the source per row; the
   Market page shows only the price and its age.
 - **Import prices from a spreadsheet** (v1.247.0, managers, desktop). The
   manager drops an `.xlsx`, and only its Part Number and Unit Price columns

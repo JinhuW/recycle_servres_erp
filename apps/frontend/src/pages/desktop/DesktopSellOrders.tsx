@@ -35,8 +35,6 @@ import { useAuth } from '../../lib/auth';
 import { AddInventoryPicker, type SellableItem } from '../../components/AddInventoryPicker';
 import { AttachmentChip } from '../../components/AttachmentChip';
 import { SellOrderAttachments, type SellAttachment } from '../../components/SellOrderAttachments';
-import { PriceImportSection } from './SellOrderPriceImportDialog';
-import { applyPriceRows, type BidPart, mergeBidParts } from '../../lib/priceImport';
 import { usePreference } from '../../lib/preferences';
 import { LineSpecChips, lineHasSpecChips } from '../../components/LineSpecChips';
 import { filterLineGroups, groupSellOrderLines, type SellOrderLineGroup } from '../../lib/sellOrderLineGroups';
@@ -203,13 +201,20 @@ const productKey = (l: { partNumber: string | null; label: string; condition: st
 // line has no lot to cap it lower.
 const MAX_LINE_QTY = 100_000;
 
+// What a USD figure is in the order's currency; null while the rate for a
+// CNY order hasn't loaded, when a lot's sell price can't be seeded.
+type UsdToNative = ((usd: number) => number) | null;
+
 // Picked sellable lots merged into the draft. Price follows the per-product
 // rule: reuse the unit price the order already carries for that product, else
-// 0 for the user to fill in. A lot already on the draft is not added twice
-// (the server only excludes lots on *saved* open orders, not session-local
-// adds) — but one held there at 0 was picked to be sold again, so it takes
-// what is available. `changed` counts both.
-function mergeSellable(lines: EditLine[], picked: SellableItem[]): { lines: EditLine[]; changed: number } {
+// the lot's sell price — the PO line's, set in Review mode — in the order's
+// currency, else 0 for the user to fill in. A lot already on the draft is not
+// added twice (the server only excludes lots on *saved* open orders, not
+// session-local adds) — but one held there at 0 was picked to be sold again,
+// so it takes what is available. `changed` counts both.
+function mergeSellable(
+  lines: EditLine[], picked: SellableItem[], usdToNative: UsdToNative,
+): { lines: EditLine[]; changed: number } {
   const byLot = new Map(picked.map(it => [it.inventoryId, it]));
   let changed = 0;
   const merged = lines.map((l) => {
@@ -218,11 +223,11 @@ function mergeSellable(lines: EditLine[], picked: SellableItem[]): { lines: Edit
     changed++;
     return { ...l, qty: it.availableQty, maxQty: Math.max(l.maxQty, it.availableQty) };
   });
-  const fresh = appendSellable(lines, picked);
+  const fresh = appendSellable(lines, picked, usdToNative);
   return { lines: [...merged, ...fresh], changed: changed + fresh.length };
 }
 
-function appendSellable(lines: EditLine[], picked: SellableItem[]): EditLine[] {
+function appendSellable(lines: EditLine[], picked: SellableItem[], usdToNative: UsdToNative): EditLine[] {
   const have = new Set(lines.map(l => l.inventoryId).filter(Boolean));
   return picked
     .filter(it => !have.has(it.inventoryId))
@@ -238,7 +243,8 @@ function appendSellable(lines: EditLine[], picked: SellableItem[]): EditLine[] {
       partNumber:  it.partNumber,
       qty:         it.availableQty,
       maxQty:      it.availableQty,
-      unitPrice:   lines.find(l => productKey(l) === productKey(it))?.unitPrice ?? 0,
+      unitPrice:   lines.find(l => productKey(l) === productKey(it))?.unitPrice
+        ?? (it.sellPrice != null && usdToNative ? +usdToNative(it.sellPrice).toFixed(2) : 0),
       warehouseId: it.warehouseId,
       warehouse:   it.warehouseName,
       condition:   it.condition,
@@ -1067,11 +1073,6 @@ function SellOrderDetail({ id, mode, onToast }: {
     paymentReceivedBy: string;   // '' = not assigned
     currency: Currency;
     lines: EditLine[];
-    // Products — (canonical part, condition) — whose prices came from a
-    // confirmed vendor price import. Save sends them so the backend records
-    // the accepted prices on the Market value board, and clears them the
-    // moment that PATCH lands so a retry of a later step re-sends no bids.
-    bidParts: BidPart[];
   } | null>(null);
   // FX snapshot for the draft's currency (null for USD or until it loads).
   const [fx, setFx] = useState<FxInfo | null>(null);
@@ -1125,7 +1126,11 @@ function SellOrderDetail({ id, mode, onToast }: {
         // StrictMode's discarded first run would otherwise eat the prefill.
         const canPrefill = !!prefill && !prefilled.current && mode === 'edit'
           && r.order.status !== 'Done' && r.order.status !== 'Closed';
-        const merged = canPrefill ? mergeSellable(loaded, prefill) : { lines: loaded, changed: 0 };
+        // The rate for a CNY order loads after this, so its prefilled lots
+        // start at 0 as before; a USD order's start at their sell price.
+        const merged = canPrefill
+          ? mergeSellable(loaded, prefill, r.order.currency === 'USD' ? v => v : null)
+          : { lines: loaded, changed: 0 };
         if (canPrefill) {
           prefilled.current = true;
           setPrefillAllPresent(merged.changed === 0);
@@ -1137,7 +1142,6 @@ function SellOrderDetail({ id, mode, onToast }: {
           paymentReceivedBy: r.order.paymentReceivedBy?.id ?? '',
           currency: r.order.currency,
           lines: merged.lines,
-          bidParts: [],
         });
         setPendingAdjust(null);
       })
@@ -1200,7 +1204,6 @@ function SellOrderDetail({ id, mode, onToast }: {
     || receiverChanged
     || currencyChanged
     || linesChanged
-    || draft.bidParts.length > 0
     || pendingAdjust != null
   );
   // Done waits on every manager's sign-off of the order as saved. Edits that
@@ -1393,7 +1396,8 @@ function SellOrderDetail({ id, mode, onToast }: {
     if (!draft) return;
     setLineSearch('');
     setJustAdded(new Set(picked.filter(it => it.availableQty > 0).map(it => it.inventoryId)));
-    setDraft(d => d && { ...d, lines: mergeSellable(d.lines, picked).lines });
+    const usdToNative: UsdToNative = draft.currency === 'USD' ? v => v : fx ? v => v * fx.oneUsdInQuote : null;
+    setDraft(d => d && { ...d, lines: mergeSellable(d.lines, picked, usdToNative).lines });
   };
   useEffect(() => {
     if (justAdded.size === 0) return;
@@ -1424,9 +1428,7 @@ function SellOrderDetail({ id, mode, onToast }: {
       // requires the full line set alongside it — resend lines whenever either
       // the currency or the lines themselves changed.
       if (currencyChanged) patchBody.currency = draft.currency;
-      // A confirmed import is a bid even when the vendor re-quoted the current
-      // prices, so the line set goes with it regardless of a diff.
-      if (linesChanged || currencyChanged || draft.bidParts.length > 0) {
+      if (linesChanged || currencyChanged) {
         patchBody.lines = draft.lines.map(l => ({
           id:          l.id,
           inventoryId: l.inventoryId,
@@ -1439,15 +1441,11 @@ function SellOrderDetail({ id, mode, onToast }: {
           warehouseId: l.warehouseId,
           condition:   l.condition,
         }));
-        if (draft.bidParts.length > 0) patchBody.bidParts = draft.bidParts;
         if (linesBase.current) patchBody.linesVersion = linesBase.current;
       }
       if (Object.keys(patchBody).length > 0) {
         const saved = await api.patch<{ linesVersion?: string | null }>(`/api/sell-orders/${order.id}`, patchBody);
         if (saved.linesVersion) linesBase.current = saved.linesVersion;
-        // The bids are recorded with that PATCH; if the adjust or status step
-        // below fails, the retry must not record them again.
-        setDraft(d => d && { ...d, bidParts: [] });
         setHistoryKey(k => k + 1);
       }
       // A pending negotiated total applies AFTER the line rewrite (the server
@@ -1982,22 +1980,6 @@ function SellOrderDetail({ id, mode, onToast }: {
               </div>
             </div>
             <div className="so-page-side">
-              {/* Above the summary: on a long order, under the lines was a scroll past every one. */}
-              {editable && (
-                <div className="card so-page-card">
-                  <PriceImportSection
-                    orderId={order.id}
-                    currency={draft.currency}
-                    locale={locale}
-                    onApply={rows =>
-                      setDraft(d => d && {
-                        ...d,
-                        lines: applyPriceRows(d.lines, rows),
-                        bidParts: mergeBidParts(d.bidParts, rows),
-                      })}
-                  />
-                </div>
-              )}
               {summary && (
               <div className="so-summary">
                 <div

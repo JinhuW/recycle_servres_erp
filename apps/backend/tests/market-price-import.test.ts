@@ -4,7 +4,7 @@ import ExcelJS from 'exceljs';
 import {
   readPriceSheetRows,
   PriceColumnsNotFoundError,
-} from '../src/services/sellOrderPriceImport';
+} from '../src/services/priceSheet';
 import { resetDb, getTestDb } from './helpers/db';
 import { api, multipart } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
@@ -59,7 +59,7 @@ async function reload(wb: ExcelJS.Workbook): Promise<ExcelJS.Workbook> {
 const maxBuy = (basis: number, margin: number) => +(basis * (1 - margin)).toFixed(2);
 
 // ---------------------------------------------------------------------------
-// readPriceSheetRows — the reader shared with the sell-order bid import.
+// readPriceSheetRows — the reader, header and cell by cell.
 // ---------------------------------------------------------------------------
 
 describe('readPriceSheetRows', () => {
@@ -198,6 +198,127 @@ async function seedRef(
             NOW() - ${opts.ageDays ?? 0}::int * INTERVAL '1 day')
   `;
 }
+
+// Header and cell reading, which the retired sell-order bid import used to
+// test through its matcher. Suppliers' lists are hostile territory: columns
+// move, rows get added, prices arrive as strings with currency symbols.
+describe('readPriceSheetRows: headers and cells', () => {
+  const prices = (wb: ExcelJS.Workbook) => readPriceSheetRows(wb).map(r => [r.canonPart, r.price]);
+
+  it('survives shuffled columns and junk rows above the header', () => {
+    const wb = wbWith([
+      ['Quote from Vendor Co.'],
+      ['prepared by Bob', null, 'call me'],
+      ['Unit Price (USD)', 'Notes', 'Part Number', 'Qty'],
+      [100, 'good stock', 'ABC123', 4],
+    ]);
+    expect(prices(wb)).toEqual([['ABC123', 100]]);
+  });
+
+  it('skips header-less sheets and reads every tab with a header, each by its own columns', () => {
+    const wb = new ExcelJS.Workbook();
+    wb.addWorksheet('Cover').addRow(['Hello']);
+    const ram = wb.addWorksheet('RAM');
+    ram.addRow(['Part Number', 'Speed', 'Chip #', 'Unit Price (USD)']);
+    ram.addRow(['ABC123', 3200, 'K4A8G', 100]);
+    const ssd = wb.addWorksheet('SSD');
+    ssd.addRow(['Part Number', 'Interface', 'Unit Price (USD)']);
+    ssd.addRow(['XYZ-9', 'SATA', 55.5]);
+    const rows = readPriceSheetRows(wb);
+    expect(rows.map(r => [r.sheet, r.canonPart, r.price])).toEqual([['RAM', 'ABC123', 100], ['SSD', 'XYZ9', 55.5]]);
+  });
+
+  it('accepts Chinese headers', () => {
+    expect(prices(wbWith([['型号', '数量', '单价'], ['ABC123', 4, 100]]))).toEqual([['ABC123', 100]]);
+  });
+
+  it('never mistakes Line Total for the price column', () => {
+    expect(prices(wbWith([['Part Number', 'Line Total (USD)', 'Unit Price (USD)'], ['ABC123', 400, 100]])))
+      .toEqual([['ABC123', 100]]);
+  });
+
+  it('prefers Unit Price over another price column, and 型号 over a row-number 编号', () => {
+    expect(prices(wbWith([['Part Number', 'List Price', 'Ext. Price', 'Unit Price'], ['ABC123', 100, 400, 50]])))
+      .toEqual([['ABC123', 50]]);
+    const zh = readPriceSheetRows(wbWith([['编号', '品名', '型号', '数量', '单价'], [1, '内存', 'ABC123', 4, 40]]));
+    expect(zh).toMatchObject([{ rawPart: 'ABC123', price: 40 }]);
+  });
+
+  it('reads past a merged title that names both columns', () => {
+    const wb = wbWith([
+      ['Part Number Price List', null, null],
+      ['Item', 'Part Number', 'Unit Price'],
+      ['ram', 'ABC123', 10],
+    ]);
+    wb.worksheets[0]!.mergeCells('A1:C1');
+    expect(prices(wb)).toEqual([['ABC123', 10]]);
+  });
+
+  it('reads a second section of a sheet by its own header', () => {
+    const wb = wbWith([
+      ['Part Number', 'Unit Price'],
+      ['ABC123', 10],
+      ['Unit Price', 'Part Number'],
+      [20, 'XYZ-9'],
+    ]);
+    expect(prices(wb)).toEqual([['ABC123', 10], ['XYZ9', 20]]);
+  });
+
+  it('leaves out a hidden tab', () => {
+    const wb = wbWith([['Part Number', 'Unit Price'], ['ABC123', 40]], 'Current');
+    const old = wb.addWorksheet('old', { state: 'hidden' });
+    old.addRow(['Part Number', 'Unit Price']);
+    old.addRow(['ABC123', 95]);
+    expect(readPriceSheetRows(wb)).toMatchObject([{ sheet: 'Current', price: 40 }]);
+  });
+
+  it('reads only the rows a sheet has, however far down a stray cell sits', () => {
+    const wb = wbWith([['Part Number', 'Unit Price'], ['ABC123', 40]]);
+    wb.worksheets[0]!.getCell('C1048576').value = 'x';
+    expect(readPriceSheetRows(wb)).toHaveLength(1);
+  });
+
+  it('skips spacer rows and total rows with no part number', () => {
+    const wb = wbWith([
+      ['Part Number', 'Item', 'Unit Price (USD)'],
+      ['ABC123', 'RAM', 100],
+      [],
+      [null, 'TOTAL', 100],
+    ]);
+    expect(prices(wb)).toEqual([['ABC123', 100]]);
+  });
+
+  it('parses currency strings, formula cells, fullwidth digits and rich text', () => {
+    const wb = wbWith([
+      ['Part Number', 'Unit Price (USD)'],
+      ['A1', '¥1,234.50'],
+      ['A2', '$12'],
+      ['A3', { formula: 'G2*2', result: 55 }],
+      ['A4', '１２３４'],
+      [{ richText: [{ text: 'ABC' }, { text: '123' }] }, 100],
+    ]);
+    expect(prices(wb)).toEqual([['A1', 1234.5], ['A2', 12], ['A3', 55], ['A4', 1234], ['ABC123', 100]]);
+  });
+
+  it('reads a decimal comma as the decimal point, and refuses a malformed grouping', () => {
+    const rows = readPriceSheetRows(wbWith([
+      ['Part Number', 'Unit Price'],
+      ['A-1', '12,50'], ['A-2', '1.234,50'], ['A-3', '1,234'], ['A-4', '1,234.50'], ['A-5', '1,2345'],
+    ]));
+    expect(rows.map(r => r.price)).toEqual([12.5, 1234.5, 1234, 1234.5, null]);
+    expect(rows[4]!.priceKind).toBe('invalid');
+  });
+
+  it('keeps empty and invalid prices as rows, each saying which it is', () => {
+    const rows = readPriceSheetRows(wbWith([
+      ['Part Number', 'Unit Price (USD)'],
+      ['A1', null],
+      ['A2', 'call me'],
+      ['A3', -5],
+    ]));
+    expect(rows.map(r => r.priceKind)).toEqual(['empty', 'invalid', 'invalid']);
+  });
+});
 
 describe('POST /api/market/price-import/preview', () => {
   beforeEach(async () => {
