@@ -5,12 +5,12 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-324](./RS-324-drop-the-sell-order-vendor-price-import-a-sell-order.md) | done | story | P2 | Drop the sell-order vendor price import: a sell order takes the PO's sell price | — |
+| [RS-324](./RS-324-drop-the-sell-order-vendor-price-import-a-sell-order.md) | done | story | P2 | Drop the sell-order vendor price import: a sell order takes the PO's sell price | v1.297.0 |
 | [RS-323](./RS-323-review-mode-prices-the-po-for-the-commission.md) | done | story | P2 | Review mode prices the PO for the commission | v1.296.0 |
 | [RS-322](./RS-322-reddit-page-lets-a-manager-change-the-evaluation-mod.md) | done | story | P2 | Reddit page lets a manager change the evaluation model | 1.295.0 |
 | [RS-321](./RS-321-table-action-column-stays-visible-while-the-other-co.md) | done | bug | P2 | Table action column stays visible while the other columns scroll | — |
 | [RS-320](./RS-320-attachments-on-a-sell-order-for-the-sell-records.md) | done | story | P2 | Attachments on a sell order for the sell records | v1.294.0 |
-| [RS-319](./RS-319-pre-screen-facebook-listings-with-a-decision-model-b.md) | backlog | task | P2 | Pre-screen Facebook listings with a decision model before the LLM | — |
+| [RS-319](./RS-319-pre-screen-facebook-listings-with-a-decision-model-b.md) | done | task | P2 | Pre-screen Facebook listings with a decision model before the LLM | facebook-tracker 0.13.4 |
 | [RS-318](./RS-318-start-the-facebook-fleet-s-daily-sweep-at-09-00-east.md) | done | task | P2 | Start the Facebook fleet's daily sweep at 09:00 Eastern | facebook-tracker 0.13.5 |
 | [RS-317](./RS-317-fold-the-sell-order-downloads-into-one-download-drop.md) | done | story | P2 | Fold the sell order downloads into one Download dropdown | 1.293.0 |
 | [RS-316](./RS-316-shadow-run-a-decision-model-pre-screen-for-facebook.md) | done | task | P2 | Shadow-run a decision-model pre-screen for Facebook listings | facebook-tracker 0.13.1 |

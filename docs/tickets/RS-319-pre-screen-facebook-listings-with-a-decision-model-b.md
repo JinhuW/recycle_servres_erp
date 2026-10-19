@@ -2,13 +2,13 @@
 id: RS-319
 title: Pre-screen Facebook listings with a decision model before the LLM
 type: task
-status: backlog
+status: done
 priority: P2
 created: 2026-10-19
 reporter: jinhu
-branch: feat/rs-317-listing-prescreen (PRs #780, #781)
-pr:
-version:
+branch: feat/rs-317-listing-prescreen
+pr: 780, 781
+version: facebook-tracker 0.13.4
 related: [RS-311, RS-316]
 ---
 
@@ -43,18 +43,18 @@ Plan: `docs/superpowers/plans/2026-10-19-facebook-listing-prescreen.md`.
 
 ## Acceptance criteria
 
-- [ ] With `RS_PRESCREEN_MODEL` set, every LLM-cache-miss listing is asked one
+- [x] With `RS_PRESCREEN_MODEL` set, every LLM-cache-miss listing is asked one
       `choice` question (`reject` / `maybe` / `buy`, production prompt) and
       logs a `prescreen` event with choice, P(reject), model, cost and latency.
-- [ ] With `RS_PRESCREEN_ENFORCE` unset, nothing is skipped (shadow).
-- [ ] With `RS_PRESCREEN_ENFORCE=1`, a `reject` at or above
+- [x] With `RS_PRESCREEN_ENFORCE` unset, nothing is skipped (shadow).
+- [x] With `RS_PRESCREEN_ENFORCE=1`, a `reject` at or above
       `RS_PRESCREEN_THRESHOLD` (default 0.99) skips the LLM, logs
       `listing_skip reason=prescreen`, and is remembered so a lingering listing
       is not re-asked each sweep.
-- [ ] Any pre-screen failure leaves today's behaviour: the LLM runs.
-- [ ] `scripts/prescreen-shadow.py --live` prints the gate table from live
+- [x] Any pre-screen failure leaves today's behaviour: the LLM runs.
+- [x] `scripts/prescreen-shadow.py --live` prints the gate table from live
       `prescreen` events joined to `ai_eval`.
-- [ ] Deployed with shadow on, fleet-wide; the first sweep's `prescreen` events
+- [x] Deployed with shadow on, fleet-wide; the first sweep's `prescreen` events
       appear in OpenSearch with `prescreen_cached: false`.
 
 ## Out of scope
@@ -78,9 +78,22 @@ Plan: `docs/superpowers/plans/2026-10-19-facebook-listing-prescreen.md`.
 - 0.13.2 put the model default in `deploy/docker-compose.worker.yml`, but the
   homelab workers are the `docker-compose.homelab*.yml` files, which carry
   their own `environment:` and read `configs/secrets.env` through `env_file`;
-  the default never reached them. 0.13.3 defaults the model in code (unset
+  the default never reached them. 0.13.4 defaults the model in code (unset
   = `typesafe/jev-1.14`, empty = off), and `RS_PRESCREEN_ENFORCE=1` in the
   VM's `configs/secrets.env` plus a worker recreate is the enforce flip.
 - The coordinator's funnel stage list is fixed (`db.py`, `schemas.py`), so
   an enforced skip is counted through `listing_skip reason=prescreen` and
   the sweep report, not a new stage.
+- Deployed 2026-10-19 19:15 UTC as facebook-tracker 0.13.4 (0.13.3's tag was
+  taken by RS-318 on another branch, so the release was re-cut). All ten
+  workers and the coordinator verified on the tree; `rs-monitor` carries no
+  `RS_PRESCREEN_*` env, so the code defaults apply. Within the first ten
+  minutes OpenSearch held 42 `prescreen` events, all `prescreen_cached: false`,
+  `enforce: false`, `skipped: false`, from eight workers, 230 ms median and
+  $0.000064 each; `listing_skip reason=prescreen` was zero and no worker
+  logged a pre-screen warning. Every uncached `ai_eval` after a worker's
+  restart has a matching `prescreen` event; the only unmatched ones were
+  homelab-1's last evaluations on 0.13.1 before its own restart.
+  `scripts/prescreen-shadow.py --live --days 1` printed the gate table (38
+  joined, all LLM 1-3, so the 4+ recall column is empty until the week's
+  sweeps fill it). Enforcement stays off until `--live --days 7` is read.
