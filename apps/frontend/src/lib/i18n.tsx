@@ -1405,6 +1405,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     soArchiveFailed: 'Archive failed',
     soDiscardTooltip: 'Discard this sell order',
     soReopenTooltip: 'Reopen this sell order',
+    soDownload: 'Download',
     soDownloadPriceTemplate: 'Price template (bid sheet)',
     soDownloadPriceTemplateHint: 'Product specs + photo links + blank prices — send to the vendor to fill in',
     soDownloadPackingList: 'Packing list',

@@ -1404,8 +1404,9 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   (v1.129.0). Each label column carries its own light palette and each row a
   paler wash of its generation, so a group reads as a band; the yellow
   `Unit Price` column is untouched by it (v1.130.0).
-- **The packing checklist is a separate download** — `Packing list` beside the
-  bid-sheet button, `GET /api/sell-orders/:id/packing-list`, managers only. It
+- **The packing checklist is a separate download** — `Packing list` in the
+  Download menu (a button beside the bid sheet until v1.293.0),
+  `GET /api/sell-orders/:id/packing-list`, managers only. It
   carries per-warehouse `Pack - <warehouse>` tabs (v1.28.0) with tick boxes,
   quantities and subtotals but no prices, and it lived inside the bid-sheet
   workbook until v1.130.0, which meant the vendor's copy carried it. Its RAM
@@ -1455,14 +1456,21 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   `#3 × 12`, v1.220.3); the tab already names the PO, so it has no `From PO`
   column. A tab is cut from the numbered products, so its rows run in the
   plain list's order under the same device and generation labels, with
-  its own lots' details (v1.221.0). A warehouse picker beside the buttons
-  (shown when the order's lines above 0 span more than one — a warehouse
+  its own lots' details (v1.221.0). A warehouse picker at the foot of the
+  Download menu (beside the buttons until v1.293.0; shown when the order's
+  lines above 0 span more than one — a warehouse
   holding only 0 lines isn't offered, v1.220.2) narrows either packing list to
   one warehouse (`?warehouse=<short>`); the bid sheet always covers the whole
   order. Both packing lists place a line by where its lot is *now* — the lot's
   own warehouse, else its PO's — not the warehouse the line was saved with,
   so a lot transferred after it went on the order is picked where it sits
   (v1.189.1).
+- **The three exports share one `Download` button** (v1.293.0): a dropdown
+  in the page head with a row each for the bid sheet, the packing list and the
+  packing list by PO, each row carrying its explanation as a subline, and the
+  warehouse picker at the foot when there is one to make. The rows for the
+  packing lists are greyed when every line is at 0; the button is disabled
+  while a file is being prepared; Escape and an outside click close it.
 - **Pack mode: a manager ticks the order into the box** (v1.218.0, desktop
   shell, built for an iPad). **Pack mode** in the sell order's page head opens
   `#/sell-orders/<id>/pack`, a full-window page with no sidebar, top bar or

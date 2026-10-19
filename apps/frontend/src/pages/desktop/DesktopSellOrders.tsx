@@ -1,7 +1,7 @@
 import { Fragment, lazy, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { CurrencyPicker, type Currency } from '../../components/CurrencyPicker';
-import { Icon } from '../../components/Icon';
+import { Icon, type IconName } from '../../components/Icon';
 import { Modal } from '../../components/Modal';
 import {
   StatusChangeDialog, type MetaStatus, type StatusAttachment,
@@ -788,16 +788,20 @@ function ReceiverSelect({ value, current, members, disabled, onChange }: {
   );
 }
 
-// ─── Download buttons ────────────────────────────────────────────────────────
-// Two exports off one order, and they go to different people: the bid sheet is
-// emailed to a vendor, the packing list stays in the warehouse. Separate files
-// so the vendor's copy never carries the picking checklist.
+// ─── Download menu ───────────────────────────────────────────────────────────
+// Three exports off one order behind one button, and they go to different
+// people: the bid sheet is emailed to a vendor, the packing lists stay in the
+// warehouse. Separate files so the vendor's copy never carries the picking
+// checklist.
 //
 // The warehouse picker narrows both packing lists, never the bid sheet: a
 // vendor prices the whole order. 'Unassigned' is the backend's own tab name
 // for lines with no warehouse.
 function DownloadMenu({ orderId, lines }: { orderId: string; lines: SellOrderLine[] }) {
   const { t } = useT();
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
   const [warehouse, setWarehouse] = useState('');
   // A line held at 0 has no row on either packing list, so a warehouse holding
   // only those would download as a 400.
@@ -809,6 +813,22 @@ function DownloadMenu({ orderId, lines }: { orderId: string; lines: SellOrderLin
   // A second click while a file is being prepared would only download it twice.
   const [busy, setBusy] = useState(false);
 
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setOpen(false); trigger.current?.focus(); }
+    };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
   const download = (kind: 'price-template' | 'packing-list', byPo = false) => async () => {
     const params = new URLSearchParams();
     if (kind === 'packing-list') {
@@ -817,6 +837,7 @@ function DownloadMenu({ orderId, lines }: { orderId: string; lines: SellOrderLin
     }
     const qs = params.toString() ? `?${params}` : '';
     const name = `${orderId}-${kind}${byPo ? '-by-po' : ''}.xlsx`;
+    setOpen(false);
     setBusy(true);
     try {
       await api.download(`/api/sell-orders/${orderId}/${kind}${qs}`, name);
@@ -827,50 +848,50 @@ function DownloadMenu({ orderId, lines }: { orderId: string; lines: SellOrderLin
     }
   };
 
+  const row = (icon: IconName, label: string, hint: string, disabled: boolean, onClick: () => void) => (
+    <button type="button" role="menuitem" className="so-download-row" disabled={disabled} onClick={onClick}>
+      <Icon name={icon} size={15} />
+      <span>
+        <span className="so-download-label">{label}</span>
+        <span className="so-download-hint">{hint}</span>
+      </span>
+    </button>
+  );
+  const packHint = (key: string) => t(nothingToPack ? 'soNothingToPackHint' : key);
+
   return (
-    <>
+    <div className="so-download" ref={wrap}>
       <button
+        ref={trigger}
+        type="button"
         className="btn"
         style={{ whiteSpace: 'nowrap' }}
-        title={t('soDownloadPriceTemplateHint')}
+        aria-haspopup="menu"
+        aria-expanded={open}
         disabled={busy}
-        onClick={download('price-template')}
+        onClick={() => setOpen(o => !o)}
       >
-        <Icon name="dollar" size={14} /> {t('soDownloadPriceTemplate')}
+        <Icon name="download" size={14} /> {t('soDownload')} <Icon name="chevronDown" size={13} />
       </button>
-      {warehouses.length > 1 && (
-        <select
-          className="select"
-          style={{ width: 150, height: 32, fontSize: 12.5, padding: '0 12px' }}
-          value={picked}
-          onChange={e => setWarehouse(e.target.value)}
-          title={t('soPackWarehouseHint')}
-        >
-          <option value="">{t('soPackAllWarehouses')}</option>
-          {warehouses.map(w => (
-            <option key={w} value={w}>{w === UNASSIGNED ? t('sodNoWarehouse') : w}</option>
-          ))}
-        </select>
+      {open && (
+        <div className="so-download-pop" role="menu">
+          {row('dollar', t('soDownloadPriceTemplate'), t('soDownloadPriceTemplateHint'), false, download('price-template'))}
+          {row('box', t('soDownloadPackingList'), packHint('soDownloadPackingListHint'), nothingToPack, download('packing-list'))}
+          {row('box', t('soDownloadPackingListByPo'), packHint('soDownloadPackingListByPoHint'), nothingToPack, download('packing-list', true))}
+          {warehouses.length > 1 && (
+            <label className="so-download-warehouse" title={t('soPackWarehouseHint')}>
+              <span>{t('warehouse')}</span>
+              <select className="select" value={picked} onChange={e => setWarehouse(e.target.value)}>
+                <option value="">{t('soPackAllWarehouses')}</option>
+                {warehouses.map(w => (
+                  <option key={w} value={w}>{w === UNASSIGNED ? t('sodNoWarehouse') : w}</option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
       )}
-      <button
-        className="btn"
-        style={{ whiteSpace: 'nowrap' }}
-        title={t(nothingToPack ? 'soNothingToPackHint' : 'soDownloadPackingListHint')}
-        disabled={busy || nothingToPack}
-        onClick={download('packing-list')}
-      >
-        <Icon name="box" size={14} /> {t('soDownloadPackingList')}
-      </button>
-      <button
-        className="btn"
-        style={{ whiteSpace: 'nowrap' }}
-        title={t(nothingToPack ? 'soNothingToPackHint' : 'soDownloadPackingListByPoHint')}
-        disabled={busy || nothingToPack}
-        onClick={download('packing-list', true)}
-      >
-        <Icon name="box" size={14} /> {t('soDownloadPackingListByPo')}
-      </button>
-    </>
+    </div>
   );
 }
 

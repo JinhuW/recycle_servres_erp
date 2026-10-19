@@ -17,6 +17,20 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.293.0] - 2026-10-19
+
+The sell order's three download buttons became one **Download** menu (RS-317).
+
+### Changed
+
+- **One Download button in the sell order page head.** The bid sheet, the
+  packing list and the packing list by PO sat side by side with the warehouse
+  picker between them, and with Pack mode, Archive and Edit the head wrapped
+  on a laptop. They now live in a dropdown off a single `Download` button;
+  each row shows its explanation as a subline instead of only a hover title,
+  and the warehouse picker sits at the foot of the menu when the order spans
+  more than one warehouse. The files, routes and file names are unchanged.
+
 ## [1.292.0] - 2026-10-19
 
 The Reddit prompt card labels each version with its response schema, now
