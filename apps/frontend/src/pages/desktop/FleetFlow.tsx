@@ -211,20 +211,21 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
     }
   };
 
-  const extraFor = (k: FlowStage): ReactNode => {
+  // `edit` is the draft when this stage is the one being edited.
+  const extraFor = (k: FlowStage, edit: SettingsDraft | null): ReactNode => {
     const form = STAGE_FORMS[k];
-    if (draft && form?.ai) {
+    if (edit && form?.ai) {
       if (!loadedPrompt) return <span className="fp-muted">{t('fbcEditPromptUnavailable')}</span>;
       return (
         <>
           <label className="ff-edit-field">
             <span className="fp-section-label">{t('fbcPromptMain')}</span>
-            <textarea className="input ff-edit-prompt" value={draft.prompt} rows={12}
+            <textarea className="input ff-edit-prompt" value={edit.prompt} rows={12}
               onChange={e => set('prompt', e.target.value)} />
           </label>
           <label className="ff-edit-field">
             <span className="fp-section-label">{t('fbcPromptRating')}</span>
-            <textarea className="input ff-edit-prompt" value={draft.rating_prompt} rows={10}
+            <textarea className="input ff-edit-prompt" value={edit.rating_prompt} rows={10}
               onChange={e => set('rating_prompt', e.target.value)} />
           </label>
         </>
@@ -235,10 +236,10 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
       return (
         <>
           {(k === 'title' || k === 'keywords') && (
-            <ListingTester stage={k} probe={probe} onProbe={setProbe} editing={!!draft} />
+            <ListingTester stage={k} probe={probe} onProbe={setProbe} editing={!!edit} />
           )}
           <RulesPanel stage={k} items={ruleItems} active={activeItem} onActive={setActiveItem}
-            editing={!!draft} onChange={setItem} verdicts={verdicts} probe={probe} prefilter={prefilter}
+            editing={!!edit} onChange={setItem} verdicts={verdicts} probe={probe} prefilter={prefilter}
             focus={addFocus} onAdd={editable && fleet && !draft ? startEdit : undefined} />
         </>
       );
@@ -294,12 +295,14 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
       </div>
       {/* Every stage renders into the same cell and only the picked one shows,
           so the card is always as tall as its tallest stage: picking a stage
-          never moves the page and nothing scrolls. The Edit form renders alone. */}
+          never moves the page and nothing scrolls. The Edit form takes its
+          stage's place among the rest, so opening it doesn't move it either. */}
       <form className="ff-flow-stack" onSubmit={save}>
-        {(draft ? [stage] : FLOW_STAGES).map(k => {
+        {FLOW_STAGES.map(k => {
           const form = STAGE_FORMS[k];
-          const extra = extraFor(k);
           const shown = k === stage;
+          const editing = !!draft && shown;
+          const extra = extraFor(k, editing ? draft : null);
           return (
             <div key={k} className={`ff-flow-detail${STAGE_LISTS[k] ? ' ff-flow-detail-rules' : ''}${shown ? '' : ' ff-flow-ghost'}`}
               role={shown ? 'tabpanel' : undefined} aria-hidden={!shown || undefined} {...(shown ? {} : { inert: '' })}>
@@ -316,7 +319,7 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
                   )}
                 </div>
                 <p className="ff-flow-what">{t(`fbcFlowWhat_${k}`)}</p>
-                {draft && form ? (
+                {editing && form ? (
                   <div className="ff-edit">
                     <div className="ff-edit-grid">
                       {form.search.map(key => (

@@ -1236,9 +1236,9 @@
   box-shadow: 0 0 0 3px color-mix(in oklch, var(--ff-pol, var(--accent-strong)) 16%, transparent);
 }
 .ff-well-input {
-  flex: 1 1 150px;
-  min-width: 120px;
-  padding: 3px 4px;
+  flex: 1 0 132px;
+  height: 24px;
+  padding: 0 4px;
   border: 0;
   outline: 0;
   background: transparent;
@@ -1285,8 +1285,7 @@
   color: var(--accent-fg);
   font-weight: 600;
 }
-.ff-chip.hit .ff-expr-text,
-.ff-chip.hit .ff-chip-x {
+.ff-chip.hit .ff-expr-text {
   color: inherit;
 }
 .ff-chip.hit .ff-expr-tag {
@@ -1310,11 +1309,48 @@
   background: var(--neg-soft);
   color: var(--neg);
 }
+/* In a list's field the × is a badge on the chip's corner, out of the flow:
+   opening Edit must not widen a chip, or the field rewraps, grows a row and
+   moves every chip after it. It shows on hover and on keyboard focus. */
+.ff-rule-well .ff-chip {
+  position: relative;
+  min-height: 24px;
+}
+.ff-rule-well .ff-chip-x {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  z-index: 1;
+  margin: 0;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elev);
+  color: var(--fg-muted);
+  opacity: 0;
+  pointer-events: none;
+}
+.ff-rule-well .ff-chip:hover > .ff-chip-x,
+.ff-rule-well .ff-chip-x:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.ff-rule-well .ff-chip-x:hover {
+  border-color: var(--neg);
+  background: var(--neg-soft);
+  color: var(--neg);
+}
+.ff-rule-well.editing .ff-chip:hover {
+  border-color: color-mix(in srgb, var(--neg) 55%, var(--border));
+}
+/* "Add keyword" and the input that replaces it in Edit take the same slot, so
+   the last row wraps the same way in both. */
 .ff-chip-new {
+  flex: 0 0 132px;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
-  padding: 2px 9px 2px 7px;
+  height: 24px;
+  padding: 0 9px 0 7px;
   border: 1px dashed color-mix(in oklch, var(--ff-pol, var(--fg-subtle)) 50%, transparent);
   border-radius: 999px;
   background: transparent;
@@ -1379,7 +1415,6 @@ button.ff-expr-text {
   font-size: 12px;
 }
 .ff-try-draft {
-  font-size: 11px;
   color: var(--warn-strong);
 }
 .ff-prompt {
