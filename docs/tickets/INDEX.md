@@ -5,10 +5,10 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-312](./RS-312-buyer-alerts-ask-for-a-reaction-and-the-evaluator-re.md) | in-progress | story | P2 | Buyer alerts ask for a reaction, and the evaluator reasons before it decides | — |
+| [RS-312](./RS-312-buyer-alerts-ask-for-a-reaction-and-the-evaluator-re.md) | in-review | story | P2 | Buyer alerts ask for a reaction, and the evaluator reasons before it decides | 1.292.0 (tracker image f043f766) |
 | [RS-311](./RS-311-recognise-facebook-walls-mid-sweep-with-a-decision-m.md) | done | story | P2 | Recognise Facebook walls mid-sweep with a decision model | facebook-tracker 0.13.0 |
 | [RS-310](./RS-310-fix-the-price-import-s-false-positive-the-full-scree.md) | done | bug | P1 | Fix the price import's 元 false positive, the full-screen Watch overlap and the cookie Assign fallback | v1.291.1 |
-| [RS-309](./RS-309-reddit-page-shows-which-prompt-is-better-per-version.md) | in-review | story | P2 | Reddit page shows which prompt is better: per-version leads and the candidate trial | 1.291.0 |
+| [RS-309](./RS-309-reddit-page-shows-which-prompt-is-better-per-version.md) | done | story | P2 | Reddit page shows which prompt is better: per-version leads and the candidate trial | 1.291.0 |
 | [RS-308](./RS-308-assign-restores-a-pool-account-s-cookie-session-inst.md) | done | story | P2 | Assign restores a pool account's cookie session instead of a password login | facebook-tracker 0.12.5, v1.290.0 |
 | [RS-307](./RS-307-keep-the-keyword-gate-the-same-height-while-editing.md) | done | bug | P2 | Keep the keyword gate the same height while editing | 1.289.1 |
 | [RS-306](./RS-306-title-gate-shows-include-try-a-listing-marks-the-tit.md) | done | story | P2 | Title gate shows Include; Try a listing marks the title and puts verdicts on the item tabs | 1.289.0 |
