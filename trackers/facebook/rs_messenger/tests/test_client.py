@@ -86,6 +86,7 @@ def test_ack_posts_status_and_error():
     assert json.loads(request.data.decode()) == {
         "status": "failed",
         "error": "composer not found",
+        "permanent": False,
     }
 
 

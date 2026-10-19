@@ -175,6 +175,9 @@ class MessagesSyncRequest(BaseModel):
 class OutboundAck(BaseModel):
     status: str  # 'sent' or 'failed'
     error: str | None = None
+    # A failure that retrying will not fix (a selector that no longer matches,
+    # a forbidden Matrix room). Optional so older bridges keep acking.
+    permanent: bool = False
 
 
 class OperatorReply(BaseModel):

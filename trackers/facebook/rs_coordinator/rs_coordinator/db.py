@@ -578,6 +578,10 @@ OUTBOUND_EXTRA_COLUMNS = (
     ("transport", "TEXT NOT NULL DEFAULT 'playwright'"),
 )
 
+# Delivery attempts before a queued reply is given up as failed. Sends are
+# paced a minute apart, so three tries is a few minutes, not a retry storm.
+OUTBOUND_MAX_ATTEMPTS = 3
+
 
 # The hit-rate queries, shared verbatim by both backends ({p} is the
 # placeholder style, `?` or `%s`). An alert can span several Telegram messages
@@ -1113,15 +1117,37 @@ class Database:
         return dict(row) if row else None
 
     def mark_outbound(
-        self: "Database", outbound_id: int, status: str, error: str | None = None
-    ) -> None:
+        self: "Database",
+        outbound_id: int,
+        status: str,
+        error: str | None = None,
+        permanent: bool = False,
+    ) -> str:
+        """Record a delivery attempt; returns the row's resulting status.
+
+        A failure keeps the row queued until OUTBOUND_MAX_ATTEMPTS, so a reply
+        whose send was merely not confirmed gets another go, unless the client
+        says the failure is permanent (a selector that no longer matches will
+        not fix itself in three polls). A failure never demotes a row already
+        marked sent: that would re-send a reply the seller has.
+        """
         with self.cursor() as cur:
-            cur.execute(
-                "UPDATE outbound_messages SET status = ?, last_error = ?, "
-                "attempts = attempts + 1, sent_at = CASE WHEN ? = 'sent' THEN ? ELSE sent_at END "
-                "WHERE id = ?",
-                (status, error, status, utcnow(), outbound_id),
-            )
+            if status == "sent":
+                cur.execute(
+                    "UPDATE outbound_messages SET status = 'sent', last_error = ?, "
+                    "attempts = attempts + 1, sent_at = ? WHERE id = ?",
+                    (error, utcnow(), outbound_id),
+                )
+            else:
+                cur.execute(
+                    "UPDATE outbound_messages SET last_error = ?, attempts = attempts + 1, "
+                    "status = CASE WHEN ? OR attempts + 1 >= ? THEN 'failed' ELSE 'queued' END "
+                    "WHERE id = ? AND status <> 'sent'",
+                    (error, int(permanent), OUTBOUND_MAX_ATTEMPTS, outbound_id),
+                )
+            cur.execute("SELECT status FROM outbound_messages WHERE id = ?", (outbound_id,))
+            row = cur.fetchone()
+        return str(row["status"]) if row else status
 
     def count_autoreplies_since(self: "Database", since: str) -> int:
         """Auto-replies queued since `since` — the daily-cap denominator."""
