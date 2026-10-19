@@ -2167,7 +2167,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   settings, prompt and rubric included. A save goes through the fleet
   console into every worker's config. Workers pick it up between jobs and
   start a sweep, and deploys keep the saved values (v1.265.0). The sweep time is shown and typed in US Eastern and stored as the workers'
-  UTC (v1.287.1). The phrase and keyword lists show one item at a time, as chips. The
+  UTC (v1.287.1); the fleet's default is 09:00 Eastern (facebook-tracker
+  0.13.5, 06:00 before it). The phrase and keyword lists show one item at a time, as chips. The
   keyword gate shows two lists, a green **Include** (a listing must mention
   one) and a red **Exclude** (any one drops it). Each list is one flat field
   of keywords: no "or" between chips, an AND/NOT rule as one expression chip,
@@ -2226,7 +2227,7 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   (RS-311). Since facebook-tracker 0.13.1 that screenshot sits on the
   coordinator's data volume and survives a redeploy, and a checkpoint whose
   file is gone offers no thumbnail rather than a broken one (RS-315). Since
-  facebook-tracker 0.13.3 a decision model pre-screens every listing before
+  facebook-tracker 0.13.5 a decision model pre-screens every listing before
   the LLM reads it, in shadow: its reject / maybe / buy verdict is logged
   beside the LLM's and nothing is skipped until `RS_PRESCREEN_ENFORCE` is
   turned on (RS-319). If the

@@ -445,7 +445,7 @@ HEALTHY in `rsc status` only means the container is up and heartbeating. A
 checkpointed or freshly-flagged account heartbeats HEALTHY all day while every
 search comes back empty, so productivity has to be checked separately.
 `scripts/fleet-verify.py` does that once a day on the VM, from `jinhu`'s
-crontab at 21:05 UTC (after the 10:00 UTC sweep has had 6–9 h to finish), and
+crontab at 23:05 UTC (after the 13:00 UTC sweep has had 6–9 h to finish), and
 posts one table to the Telegram chat:
 
 ```
