@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.13.2] - 2026-10-19
+
 ### Added
 
 - **A decision model pre-screens listings before the LLM reads them**
