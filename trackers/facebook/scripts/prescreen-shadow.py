@@ -18,10 +18,17 @@ save). Shares of calls saved are weighted back to the full population.
     python3 scripts/prescreen-shadow.py --days 7 --sample 800
     python3 scripts/prescreen-shadow.py --save run.json     # keep the raw answers
     python3 scripts/prescreen-shadow.py --replay run.json   # re-analyse, no calls
+    python3 scripts/prescreen-shadow.py --live --days 7     # the fleet's own verdicts
 
-Needs Python 3.11+ (tomllib), `OPENROUTER_API_KEY` (as in configs/secrets.env)
-and the OpenSearch the workers ship to (`RS_OPENSEARCH_URL`, default the VM's
-local port; from a laptop, `ssh -L 19200:127.0.0.1:9200 jinhu@10.10.10.73`).
+`--live` asks no model: the workers already run the pre-screen in shadow
+(`RS_PRESCREEN_MODEL`, see the worker compose file) and log a `prescreen`
+event per billed listing, so the same gate table comes straight from the
+index. That is the report that decides whether `RS_PRESCREEN_ENFORCE` goes on.
+
+Needs Python 3.11+ (tomllib), `OPENROUTER_API_KEY` (as in configs/secrets.env;
+not for `--live`) and the OpenSearch the workers ship to (`RS_OPENSEARCH_URL`,
+default the VM's local port; from a laptop, `ssh -L 19200:127.0.0.1:9200
+jinhu@10.10.10.73`).
 """
 
 from __future__ import annotations
@@ -37,7 +44,7 @@ import tomllib
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parent.parent
 MASTER_TOML = ROOT / "configs" / "master.toml"
@@ -138,6 +145,64 @@ def pull(days: int, sample: int, seed: int) -> List[Dict[str, Any]]:
     return list(rows.values())
 
 
+LIVE_FIELDS = [
+    "listing_id", "title", "price", "url", "item", "prescreen_p_reject", "prescreen_choice",
+    "prescreen_cost", "prescreen_ms", "prescreen_model",
+]
+
+
+def pull_live(days: int) -> Tuple[List[Dict[str, Any]], Dict[int, int], int]:
+    """The fleet's own fresh `prescreen` events, each joined to the billed LLM
+    verdict for the same listing. Returns the joined rows, their score
+    population (no sampling, so every row weighs 1) and how many events found
+    no verdict (skipped under enforcement, or the LLM failed)."""
+    events = search({
+        "size": 10000,
+        "_source": LIVE_FIELDS,
+        "query": {"bool": {"filter": [
+            {"term": {"kind.keyword": "prescreen"}},
+            {"term": {"prescreen_cached": False}},
+            {"range": {"@timestamp": {"gte": f"now-{days}d"}}},
+        ]}},
+        "sort": [{"@timestamp": "desc"}],
+    })
+    rows: Dict[str, Dict[str, Any]] = {}
+    for hit in events["hits"]["hits"]:
+        src = hit["_source"]
+        key = str(src.get("listing_id") or hit["_id"])
+        rows.setdefault(key, {
+            "listing_id": key,
+            "title": src.get("title"),
+            "price": src.get("price"),
+            "url": src.get("url"),
+            "item": src.get("item"),
+            "p_reject": float(src.get("prescreen_p_reject") or 0.0),
+            "choice": src.get("prescreen_choice"),
+            "cost": float(src.get("prescreen_cost") or 0.0),
+            "latency_ms": int(src.get("prescreen_ms") or 0),
+            "model": src.get("prescreen_model"),
+        })
+    ids = list(rows)
+    for start in range(0, len(ids), 1000):
+        chunk = ids[start:start + 1000]
+        verdicts = search({
+            "size": 10000,
+            "_source": ["listing_id", "score", "unit_count"],
+            "query": {"bool": {"filter": billed_filter(days) + [{"terms": {"listing_id.keyword": chunk}}]}},
+        })
+        for hit in verdicts["hits"]["hits"]:
+            src = hit["_source"]
+            row = rows.get(str(src.get("listing_id")))
+            if row is not None and row.get("score") is None:
+                row["score"] = src.get("score")
+                row["unit_count"] = src.get("unit_count")
+    judged = [r for r in rows.values() if r.get("score") is not None]
+    pop: Dict[int, int] = {}
+    for r in judged:
+        pop[int(r["score"])] = pop.get(int(r["score"]), 0) + 1
+    return judged, pop, len(rows) - len(judged)
+
+
 # -- the question -----------------------------------------------------------
 
 
@@ -229,7 +294,8 @@ def weights(pop: Dict[int, int], results: Iterable[Dict[str, Any]]) -> Dict[str,
     return {"low": low_weight, "high": 1.0}
 
 
-def report(results: List[Dict[str, Any]], pop: Dict[int, int], days: int, model: str) -> int:
+def report(results: List[Dict[str, Any]], pop: Dict[int, int], days: int, model: str,
+           live: Optional[int] = None) -> int:
     answered = [r for r in results if "p_reject" in r]
     errors = [r for r in results if "error" in r]
     w = weights(pop, answered)
@@ -244,11 +310,19 @@ def report(results: List[Dict[str, Any]], pop: Dict[int, int], days: int, model:
     costs = [r["cost"] for r in answered]
     latencies = [r["latency_ms"] for r in answered]
 
-    print(f"# Pre-screen shadow run: `{model}`\n")
-    print(f"Window: last {days} days. Billed LLM verdicts: {total_billed} ({per_day:.0f}/day). "
-          f"Sampled: {len(answered)} listings ({len(alerts)} scored 4+, {len(maybes) - len(alerts)} scored 3, "
-          f"{len(answered) - len(maybes)} scored 1-2, each standing for {w['low']:.1f}). "
-          f"Decision calls failed: {len(errors)}.\n")
+    bands = (f"{len(alerts)} scored 4+, {len(maybes) - len(alerts)} scored 3, "
+             f"{len(answered) - len(maybes)} scored 1-2")
+    if live is None:
+        print(f"# Pre-screen shadow run: `{model}`\n")
+        print(f"Window: last {days} days. Billed LLM verdicts: {total_billed} ({per_day:.0f}/day). "
+              f"Sampled: {len(answered)} listings ({bands}, each standing for {w['low']:.1f}). "
+              f"Decision calls failed: {len(errors)}.\n")
+    else:
+        print(f"# Pre-screen live shadow: `{model}`\n")
+        print(f"Window: last {days} days of the fleet's own `prescreen` events, each joined to the "
+              f"billed LLM verdict for the same listing: {len(answered)} listings ({bands}; "
+              f"{per_day:.0f}/day). {live} pre-screened listings had no LLM verdict in the window "
+              f"(skipped under enforcement, or the LLM failed).\n")
     if costs:
         print(f"Per call: median {statistics.median(latencies):.0f} ms, "
               f"p95 {sorted(latencies)[int(len(latencies) * 0.95) - 1]:.0f} ms, "
@@ -317,7 +391,17 @@ def main() -> int:
     parser.add_argument("--concurrency", type=int, default=8)
     parser.add_argument("--save", type=Path, help="write the raw answers (JSON) here")
     parser.add_argument("--replay", type=Path, help="re-analyse a saved run instead of calling the model")
+    parser.add_argument("--live", action="store_true",
+                        help="read the fleet's own prescreen events instead of asking a model")
     args = parser.parse_args()
+
+    if args.live:
+        rows, pop, unjoined = pull_live(args.days)
+        seen = [r.get("model") for r in rows if r.get("model")]
+        model = max(set(seen), key=seen.count) if seen else "(none)"
+        print(f"Joined {len(rows)} live pre-screen verdicts to LLM verdicts "
+              f"({unjoined} without one)...", file=sys.stderr)
+        return report(rows, pop, args.days, str(model), live=unjoined)
 
     if args.replay:
         saved = json.loads(args.replay.read_text())

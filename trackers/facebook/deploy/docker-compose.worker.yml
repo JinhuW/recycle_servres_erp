@@ -42,6 +42,14 @@ services:
       PROXY_WEST: ${PROXY_WEST:-}
 
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY}
+      # Decision-model pre-screen in front of the listing LLM, same key. With
+      # ENFORCE off every listing the LLM has no verdict for is asked and the
+      # answer only logged (shadow); ENFORCE=1 lets a reject at or above
+      # THRESHOLD skip the LLM. Set MODEL empty to turn it off: the default
+      # applies only when the variable is unset.
+      RS_PRESCREEN_MODEL: ${RS_PRESCREEN_MODEL-typesafe/jev-1.14}
+      RS_PRESCREEN_ENFORCE: ${RS_PRESCREEN_ENFORCE:-0}
+      RS_PRESCREEN_THRESHOLD: ${RS_PRESCREEN_THRESHOLD:-0.99}
 
       # Listing alerts. These two feed the notification channel ONLY — they are
       # not what drives 2FA, escalation or session backup.
