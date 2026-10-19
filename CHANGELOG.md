@@ -17,6 +17,35 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.289.0] - 2026-10-18
+
+The fleet's title gate shows the Include list it reads, and *Try a listing*
+shows where each keyword matched (RS-306).
+
+### Changed
+
+- **The title gate shows Include too.** With the title prefilter on, a card
+  whose title has no include keyword is dropped before its page is opened.
+  *Try a listing* said so ("No include keyword matched"), but the title gate
+  only showed Exclude, so the list that decided it was out of sight and
+  could not be edited there. Both lists now sit side by side, as on the
+  keyword gate, and the title gate's Edit form saves both. With the
+  prefilter off, Include is dimmed and says the keyword gate checks it after
+  the page is read.
+- **The verdicts are on the item tabs, and the listing is marked up.** Each
+  item's verdict used to sit in a separate row of grey pills above the item
+  tabs. It now sits on the item's own tab. Below the tabs, the typed title
+  (and on the keyword gate the description) is shown with every Include word
+  marked green and every Exclude word red for the selected item. Every chip
+  the listing holds fills in its list's colour, not just the first one, so
+  a listing that hits both lists shows both.
+- **The strike-through catches what the matcher catches.** Matching starts
+  at a word but stays open at the end, so `ram` in Exclude drops every
+  listing with an Include keyword `ram stick` or `rams`, and that keyword can
+  never let a listing through. The strike-through used to need the same
+  word in both lists. It now covers these cases as well, and its tooltip
+  names the exclude keyword responsible.
+
 ## [1.288.0] - 2026-10-18
 
 The fleet's keyword gate shows its two lists as Include and Exclude (RS-304).

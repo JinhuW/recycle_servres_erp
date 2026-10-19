@@ -51,6 +51,7 @@ function stageSettings(t: Translate, stage: FlowStage, fleet: FleetDoc | null): 
     ];
     case 'title': return [
       { label: t('fbcSetPrefilter'), value: s.title_prefilter == null ? '—' : s.title_prefilter ? t('fbcOn') : t('fbcOff') },
+      { label: t('fbcSetKeywords'), value: String(sum(i => keywordCount(i.keywords))) },
       { label: t('fbcSetAntikeywords'), value: String(sum(i => keywordCount(i.antikeywords))) },
     ];
     case 'open': return [
@@ -234,12 +235,11 @@ export function FlowCard({ fleet, stats, prompt, onSaved }: {
       return (
         <>
           {(k === 'title' || k === 'keywords') && (
-            <ListingTester stage={k} probe={probe} onProbe={setProbe} verdicts={verdicts}
-              onPick={setActiveItem} editing={!!draft} />
+            <ListingTester stage={k} probe={probe} onProbe={setProbe} editing={!!draft} />
           )}
           <RulesPanel stage={k} items={ruleItems} active={activeItem} onActive={setActiveItem}
-            editing={!!draft} onChange={setItem} verdicts={verdicts} focus={addFocus}
-            onAdd={editable && fleet && !draft ? startEdit : undefined} />
+            editing={!!draft} onChange={setItem} verdicts={verdicts} probe={probe} prefilter={prefilter}
+            focus={addFocus} onAdd={editable && fleet && !draft ? startEdit : undefined} />
         </>
       );
     }

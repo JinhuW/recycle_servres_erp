@@ -414,7 +414,7 @@ describe('stage settings forms', () => {
     });
     expect(settingsPatch('cards', d, true)).toEqual({ search: { max_results: 60 } });
     expect(settingsPatch('title', d, true)).toEqual({
-      search: { title_prefilter: true }, items: { server_ram: { antikeywords: [] } },
+      search: { title_prefilter: true }, items: { server_ram: { keywords: ['x'], antikeywords: [] } },
     });
     expect(settingsPatch('open', d, true)).toEqual({});
   });
