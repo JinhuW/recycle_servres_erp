@@ -2,12 +2,12 @@
 id: RS-307
 title: Keep the keyword gate the same height while editing
 type: bug
-status: in-review
+status: done
 priority: P2
 created: 2026-10-18
 reporter: jinhu
 branch: fix/keyword-gate-steady-height
-pr:
+pr: "#759"
 version: 1.289.1
 related: [RS-304, RS-306]
 ---
