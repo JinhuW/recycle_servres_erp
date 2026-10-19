@@ -2,13 +2,13 @@
 id: RS-311
 title: Recognise Facebook walls mid-sweep with a decision model
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-19
 reporter: jinhu
 branch: judge-model-eval-trackers
-pr:
-version:
+pr: 771
+version: facebook-tracker 0.13.0
 related: [RS-286, RS-280]
 ---
 
