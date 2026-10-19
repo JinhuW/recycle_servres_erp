@@ -17,6 +17,20 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.292.0] - 2026-10-19
+
+The Reddit prompt card labels each version with its response schema, now
+that the tracker asks for the reasoning before the verdict (RS-312).
+
+### Changed
+
+- **Each version says *verdict first* or *reasoning first*.** The Reddit
+  tracker now asks the model for its reasoning before its verdict. On 100
+  prod posts that lifted precision against the written spec from 45% to 57%
+  for the live prompt, and from 75% to 85% for candidate 1. Verdicts from
+  the two schemas are kept in separate versions, so the same wording can
+  appear twice in the table. The label says which run is which.
+
 ## [1.291.1] - 2026-10-19
 
 Three fixes from the dev → main release review (RS-310).

@@ -62,6 +62,12 @@ describe('formatAlert', () => {
   it('leaves the URL unescaped so Telegram links it', () => {
     expect(formatAlert(alert)).toContain(alert.url);
   });
+
+  it('ends by asking for the reaction that scores the prompt', () => {
+    expect(formatAlert(alert).endsWith(
+      '<i>React 👍 if you act on this, 👎 if it\'s not useful.</i>',
+    )).toBe(true);
+  });
 });
 
 describe('sendMessage', () => {
@@ -175,6 +181,8 @@ describe('formatReview', () => {
     expect(text).toContain('<b>Candidate</b> v5 · openai/gpt-4o-mini — ✅ alert');
     expect(text).toContain(alert.url);
     expect(text).toContain('React 👍 if this is a lead');
+    // The buyers' line would be a second, different request in the same message.
+    expect(text).not.toContain('if you act on this');
   });
 
   it('names both prompts when they agree', () => {

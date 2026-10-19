@@ -113,6 +113,20 @@ describe('evaluatePost', () => {
     expect((init.headers as Record<string, string>)['Authorization']).toBe('Bearer test-key');
   });
 
+  it('asks for the reasoning before the verdict, so the model counts before it commits', async () => {
+    const spy = vi.fn().mockResolvedValue(modelSays(
+      '{"reasoning": "r", "is_target": false, "summary": "s", "price": null}',
+    ));
+    vi.stubGlobal('fetch', spy);
+
+    await evaluatePost(POST, OPTIONS);
+
+    const body = JSON.parse((spy.mock.calls[0]![1] as RequestInit).body as string);
+    const schema = body.response_format.json_schema.schema;
+    expect(Object.keys(schema.properties)).toEqual(['reasoning', 'is_target', 'summary', 'price']);
+    expect(schema.required).toEqual(['reasoning', 'is_target', 'summary', 'price']);
+  });
+
   it('returns the verdict on success', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(modelSays(
       '{"is_target": true, "summary": "Dell R730xd", "price": "$650", "reasoning": "r"}',

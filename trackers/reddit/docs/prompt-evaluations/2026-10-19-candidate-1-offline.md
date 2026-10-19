@@ -66,6 +66,15 @@ takes weeks at about 15 alerts a day.
    prod trial keeps running until buyers' reactions confirm it doesn't lose
    leads the spec misses; promote it then.
 
+**Shipped 2026-10-19 (RS-312).** Reasoning first is now the tracker's schema,
+for live and candidate alike, and a version's identity includes it. The live
+prompt and candidate 1 came back as new versions; the verdict-first ones are
+retired. Re-run through the shipped `evaluatePost`, candidate 1 keeps 16 of
+the 18 spec-OK alerts and drops 19 of the 22 that break the spec: 84%
+precision, in line with the scripted 85%. The two it drops are the `[PC]`
+price check and the ambiguous 6-unit cross-post. Candidate 1 stays on trial,
+not promoted.
+
 Spec precision is not lead rate: a listing can meet the spec and still be
 something the buyers never act on. Reactions decide that. This measurement
 is the reason to keep the trial running, not a substitute for it.

@@ -86,6 +86,8 @@ export type TrackerStats = {
 
 export type PromptRole = 'live' | 'candidate' | 'retired';
 
+export type ResponseSchema = 'verdict-first' | 'reasoning-first';
+
 export type AudienceScore = { sent: number; leads: number; notLeads: number; leadRate: number | null };
 
 export type TrialCell = { posts: number; leads: number; notLeads: number };
@@ -98,6 +100,9 @@ export type PromptVersionStats = {
   role: PromptRole;
   model: string;
   systemPrompt: string;
+  // The same wording under another response schema is another version; the
+  // tracker labels every version made before reasoning moved first as such.
+  responseSchema: ResponseSchema;
   firstUsedAt: string;
   lastUsedAt: string;
   evaluated: number;

@@ -734,6 +734,7 @@ describe('prompt scoring', () => {
     versions: Array<{
       id: number;
       role: string;
+      responseSchema: string;
       evaluated: number;
       targets: number;
       buyers: {sent: number; leads: number; notLeads: number; leadRate: number | null};
@@ -750,6 +751,7 @@ describe('prompt scoring', () => {
     const live = body.versions.find((x) => x.id === v.live)!;
     expect(live).toMatchObject({
       role: 'live',
+      responseSchema: 'reasoning-first',
       evaluated: 5,
       targets: 3,
       buyers: {sent: 3, leads: 1, notLeads: 1, leadRate: 1 / 3},

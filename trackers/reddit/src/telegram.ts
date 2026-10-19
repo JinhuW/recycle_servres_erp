@@ -42,8 +42,16 @@ export function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-/** Composes the alert body: what the item is, what it costs, where to find it. */
+/**
+ * A buyer alert: the body, then a request for the reaction that scores the
+ * prompt which sent it. Without it nobody knew reactions counted.
+ */
 export function formatAlert(alert: AlertContent): string {
+  return `${alertBody(alert)}\n\n<i>React 👍 if you act on this, 👎 if it's not useful.</i>`;
+}
+
+/** What the item is, what it costs, where to find it. */
+function alertBody(alert: AlertContent): string {
   return [
     `<b>r/${escapeHtml(alert.subreddit)}</b> — possible buy`,
     '',
@@ -84,7 +92,7 @@ export function formatReview(review: ReviewContent): string {
   return [
     header,
     '',
-    formatAlert(review.alert),
+    alertBody(review.alert),
     '',
     ...verdicts,
     '',

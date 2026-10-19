@@ -2590,6 +2590,8 @@ const zh: Record<string, string> = {
   trkPromptColUsed: '最近使用',
   trkPromptNew: '新',
   trkPromptNotYet: '尚未使用',
+  trkPromptSchemaVerdictFirst: '先判定',
+  trkPromptSchemaReasoningFirst: '先推理',
   trkPromptShow: '显示提示词',
   trkPromptHide: '隐藏提示词',
   trkPromptRole_live: '当前',
