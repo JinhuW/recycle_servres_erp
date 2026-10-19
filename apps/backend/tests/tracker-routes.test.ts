@@ -204,13 +204,49 @@ describe('Tracker proxy routes (/api/tracker)', () => {
     expect(r.body.error).toMatch(/unreachable/i);
   });
 
-  it('rejects paths outside the allowlist', async () => {
+  it('rejects paths outside the allowlist, settings keys other than the live model included', async () => {
     const { token } = await loginAs(ALEX);
     const spy = stubTracker(200, {});
+    const opts = { token, env: TRACKER_ENV };
 
-    const r = await api('GET', '/api/tracker/settings', { token, env: TRACKER_ENV });
+    expect((await api('GET', '/api/tracker/settings', opts)).status).toBe(404);
+    expect((await api('GET', '/api/tracker/settings/llm_model', opts)).status).toBe(404);
+    expect((await api('PUT', '/api/tracker/settings/eval_prompt', { ...opts, body: { value: 'x' } })).status)
+      .toBe(404);
+    expect((await api('PUT', '/api/tracker/settings/telegram_chat_ids', { ...opts, body: { value: [] } })).status)
+      .toBe(404);
+    expect(spy).not.toHaveBeenCalled();
+  });
 
-    expect(r.status).toBe(404);
+  it('forwards the live model setting by key and relays what the tracker stored', async () => {
+    const { token } = await loginAs(ALEX);
+    const calls: Array<[string, string | undefined, string | undefined]> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+      calls.push([url, init.method, init.body as string | undefined]);
+      return new Response(JSON.stringify({ key: 'llm_model', value: 'anthropic/claude-haiku-5.5' }), { status: 200 });
+    }));
+
+    const r = await api<{ key: string; value: string }>('PUT', '/api/tracker/settings/llm_model', {
+      token, env: TRACKER_ENV, body: { value: 'anthropic/claude-haiku-5.5' },
+    });
+
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ key: 'llm_model', value: 'anthropic/claude-haiku-5.5' });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]![0]).toBe('http://tracker.internal:8080/api/settings/llm_model');
+    expect(calls[0]![1]).toBe('PUT');
+    expect(JSON.parse(calls[0]![2]!)).toEqual({ value: 'anthropic/claude-haiku-5.5' });
+  });
+
+  it('keeps the live model setting manager-only', async () => {
+    const { token } = await loginAs(MARCUS);
+    const spy = stubTracker(200, {});
+
+    const r = await api('PUT', '/api/tracker/settings/llm_model', {
+      token, env: TRACKER_ENV, body: { value: 'openai/gpt-4o-mini' },
+    });
+
+    expect(r.status).toBe(403);
     expect(spy).not.toHaveBeenCalled();
   });
   it('never passes the tracker refusing our token through as a 401 the SPA reads as a lapsed session', async () => {

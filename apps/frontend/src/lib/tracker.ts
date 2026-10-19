@@ -160,6 +160,9 @@ export function summarizeTrial(vs: VsLive): TrialSummary {
 
 export const WORKERS_PAGE_SIZE = 15;
 
+/** An OpenRouter model id, `provider/model`; the tracker checks the same shape. */
+export const MODEL_ID = /^[\w.-]+\/[\w.:-]+$/;
+
 export const trackerApi = {
   listWorkers: (params: { status: WorkerStatusFilter; limit: number; offset: number }) =>
     api.get<{ workers: TrackerWorker[]; total: number }>(
@@ -201,6 +204,9 @@ export const trackerApi = {
     api.post<{ evalPrompt: string; llmModel: string; disabledRules: number[]; promptVersionId: number | null }>(
       '/api/tracker/prompt-candidate/promote', {},
     ),
+  // The one tracker setting the proxy opens; the rest stay behind it.
+  setModel: (model: string) =>
+    api.put<{ key: string; value: string }>('/api/tracker/settings/llm_model', { value: model }).then(r => r.value),
 
   listSubreddits: () =>
     api.get<{ subreddits: TrackerSubreddit[] }>('/api/tracker/subreddits').then(r => r.subreddits),

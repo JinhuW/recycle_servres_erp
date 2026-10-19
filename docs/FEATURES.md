@@ -2132,6 +2132,11 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     labelled.
   - Managers start, edit, end and promote trials there. Promoting switches
     the rules off, because the candidate was judged without them.
+
+  Since v1.295.0 the Evaluate stage shows the live model as a chip and a
+  manager can change it there, as a free-text OpenRouter id. The fleet
+  switches within a minute. The proxy opens only that one tracker setting;
+  the base prompt and the rest stay behind it.
   - Since v1.292.0, each version is labelled *verdict first* or *reasoning
     first*. That's its response schema. The tracker has asked for the
     reasoning first since RS-312.

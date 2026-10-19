@@ -17,6 +17,17 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.295.0] - 2026-10-19
+
+The Reddit page's Evaluate stage now shows the live evaluation model and
+lets a manager change it in place (RS-322). Until now the model was visible
+only inside the prompt card and could be changed from the ERP only by
+promoting a candidate trial, which also switched every rule off. The chip
+opens a dialog that takes an OpenRouter id, and the tracker's workers pick
+the new model up within a minute, like a rule edit. The backend proxy opens
+exactly one tracker setting, `PUT /settings/llm_model`; every other settings
+key still returns 404 without reaching the tracker, and the tests say so.
+
 ## [1.294.1] - 2026-10-19
 
 The Actions column stays in view while a wide table scrolls (RS-321).

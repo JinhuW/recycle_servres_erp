@@ -1815,6 +1815,25 @@ tr.rt-off td:not(:nth-last-child(-n + 2)) {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+/* A chip that is also a setting: the pencil sits inside it, on the chip's own height. */
+.ff-setting.rt-editable {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 3px;
+}
+.ff-setting.rt-editable b {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 500;
+}
+.ff-setting.rt-editable .btn {
+  padding: 2px;
+  margin-left: 2px;
+  color: var(--fg-muted);
+}
+.rt-help-invalid {
+  color: var(--neg);
+}
 .rt-add-error {
   padding: 7px 12px;
   border-bottom: 1px solid var(--border);
