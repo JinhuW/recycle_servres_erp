@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-10-19
+
 ### Added
 
 - **`ai_eval` events name the model, unit count and quantity behind a
