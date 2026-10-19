@@ -45,8 +45,10 @@ services:
       # Decision-model pre-screen in front of the listing LLM, same key. With
       # ENFORCE off every listing the LLM has no verdict for is asked and the
       # answer only logged (shadow); ENFORCE=1 lets a reject at or above
-      # THRESHOLD skip the LLM. Set MODEL empty to turn it off: the default
-      # applies only when the variable is unset.
+      # THRESHOLD skip the LLM. MODEL defaults in code (prescreen.py) to the
+      # same id as here; set it empty to turn the pre-screen off. The homelab
+      # compose files carry none of these: their workers read them from
+      # configs/secrets.env through env_file.
       RS_PRESCREEN_MODEL: ${RS_PRESCREEN_MODEL-typesafe/jev-1.14}
       RS_PRESCREEN_ENFORCE: ${RS_PRESCREEN_ENFORCE:-0}
       RS_PRESCREEN_THRESHOLD: ${RS_PRESCREEN_THRESHOLD:-0.99}
