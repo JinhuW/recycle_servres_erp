@@ -351,6 +351,38 @@ describe('facebook account pool', () => {
       expect(r.body.accounts[0]).toMatchObject({ status: 'fleet', holder: 'nyc-1' });
     });
 
+    it('falls back to a password Re-login when the fleet will not seed the cookie', async () => {
+      const token = await manager();
+      await seedPool(token, 2);
+      // A console older than the session route has no such path.
+      const old = stubFacade([200, {}], [404, { detail: 'Not Found' }], [202, { queued: true }]);
+      const r = await api<Snapshot>('POST', `${BASE}/1/assign`, { token, env: ENV, body: { worker: 'nyc-1' } });
+      expect(r.status).toBe(200);
+      expect(sent(old, 1)).toMatchObject({ url: 'http://facade.internal:8600/v1/workers/nyc-1/session', method: 'PUT' });
+      expect(sent(old, 2)).toMatchObject({ url: 'http://facade.internal:8600/v1/workers/nyc-1/relogin', method: 'POST' });
+      expect(old).toHaveBeenCalledTimes(3); // no restore
+      expect(r.body.accounts[0]).toMatchObject({ status: 'fleet', holder: 'nyc-1' });
+
+      // A cookie the coordinator refuses (no xs) goes the same way.
+      const refused = stubFacade([200, {}], [422, { detail: 'The cookie is missing xs' }], [202, { queued: true }]);
+      const r2 = await api<Snapshot>('POST', `${BASE}/2/assign`, { token, env: ENV, body: { worker: 'va-1' } });
+      expect(r2.status).toBe(200);
+      expect(sent(refused, 2).url).toBe('http://facade.internal:8600/v1/workers/va-1/relogin');
+      expect(r2.body.accounts.find((a) => a.no === 2)).toMatchObject({ status: 'fleet', holder: 'va-1' });
+    });
+
+    it('changes nothing when the Re-login after a refused seed fails', async () => {
+      const token = await manager();
+      await seedPool(token, 1);
+      stubFacade([200, {}], [404, { detail: 'Not Found' }], [404, { detail: "Unknown worker 'nyc-1'" }]);
+      const r = await api<{ error: string }>('POST', `${BASE}/1/assign`, { token, env: ENV, body: { worker: 'nyc-1' } });
+      expect(r.status).toBe(404);
+      expect(r.body.error).toMatch(/reached nyc-1, but Re-login was not queued: Unknown worker/);
+      const after = await api<Snapshot>('GET', BASE, { token });
+      expect(after.body.accounts[0].status).toBe('available');
+      expect(after.body.activity.some((e) => e.action === 'assigned')).toBe(false);
+    });
+
     it('changes nothing when the facade refuses, and says why', async () => {
       const token = await manager();
       await seedPool(token, 1);

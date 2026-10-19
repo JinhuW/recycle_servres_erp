@@ -507,19 +507,29 @@ pool.post('/:no/assign', async (c) => {
   });
   if (write.error) return c.json({ error: write.error }, write.status);
 
+  let mode: 'cookie' | 'password' = cookieFirst ? 'cookie' : 'password';
   if (cookieFirst) {
     // Seal the cookie as the slot's session, then have the worker restore it:
     // no password, no 2FA. The worker falls back to a password login on its
     // own if the restored session does not take.
     const seed = await callFacade(c.env, 'PUT', `/v1/workers/${encodeURIComponent(worker)}/session`, { cookie, reason: `assign #${no}` });
-    if (seed.error) return c.json({ error: `The login reached ${worker}, but its session was not seeded: ${seed.error}` }, seed.status);
-    const restore = await callFacade(c.env, 'POST', `/v1/workers/${encodeURIComponent(worker)}/restore-session`);
-    if (restore.error) return c.json({ error: `The session was seeded on ${worker}, but the restore was not queued: ${restore.error}` }, restore.status);
-  } else {
+    if (seed.error) {
+      // A 4xx is the fleet saying no to this cookie, not failing: a console
+      // older than the session route answers 404, and a cookie copied without
+      // its httpOnly xs is a 422. The vault already holds the new login, so a
+      // password login finishes the Assign; a 5xx may pass, so it is retried.
+      if (seed.status >= 500) return c.json({ error: `The login reached ${worker}, but its session was not seeded: ${seed.error}` }, seed.status);
+      mode = 'password';
+    } else {
+      const restore = await callFacade(c.env, 'POST', `/v1/workers/${encodeURIComponent(worker)}/restore-session`);
+      if (restore.error) return c.json({ error: `The session was seeded on ${worker}, but the restore was not queued: ${restore.error}` }, restore.status);
+    }
+  }
+  if (mode === 'password') {
     const relogin = await callFacade(c.env, 'POST', `/v1/workers/${encodeURIComponent(worker)}/relogin`);
     if (relogin.error) return c.json({ error: `The login reached ${worker}, but Re-login was not queued: ${relogin.error}` }, relogin.status);
   }
-  log.info('fleet worker given a pool login', { module: 'facebookPool', accountNo: no, workerId: worker, mode: cookieFirst ? 'cookie' : 'password', by: user.email });
+  log.info('fleet worker given a pool login', { module: 'facebookPool', accountNo: no, workerId: worker, mode, by: user.email });
 
   await sql.begin(async (tx) => {
     await tx`
