@@ -2142,7 +2142,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   cards, title gate, keyword gate, AI rating) has an **Edit** form for those
   settings, prompt and rubric included. A save goes through the fleet
   console into every worker's config. Workers pick it up between jobs and
-  start a sweep, and deploys keep the saved values (v1.265.0). The phrase and keyword lists show one item at a time, as chips: an OR rule
+  start a sweep, and deploys keep the saved values (v1.265.0). The sweep time is shown and typed in US Eastern and stored as the workers'
+  UTC (v1.287.1). The phrase and keyword lists show one item at a time, as chips: an OR rule
   is a group of chips, an AND/NOT rule an expression, and a repeated term is
   outlined. Editing is by chip (× to remove, Enter or paste to add, `+` to
   grow a group), with a text fallback. A **Try a listing** box on the title
