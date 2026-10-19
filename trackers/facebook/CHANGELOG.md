@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.13.4] - 2026-10-19
+
 ### Fixed
 
 - **The pre-screen's default model lives in code**, as the page check's
