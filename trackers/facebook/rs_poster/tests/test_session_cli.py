@@ -6,6 +6,7 @@ never re-submit a code Facebook has already consumed, and stay silent when the
 prompt is not on screen.
 """
 
+from playwright.sync_api import TimeoutError as PlaywrightTimeout
 import pytest
 
 from rs_poster import session_cli, totp
@@ -69,6 +70,10 @@ class FakeLocator:
 
     def is_visible(self, timeout=None):
         return self._visible
+
+    def wait_for(self, state=None, timeout=None):
+        if not self._visible:
+            raise PlaywrightTimeout(f"{self.name} not visible")
 
     def fill(self, value):
         self.log.append(("fill", value))

@@ -2,7 +2,7 @@
 id: RS-313
 title: Make the poster and monitor Playwright waits real
 type: bug
-status: backlog
+status: in-progress
 priority: P2
 created: 2026-10-19
 reporter: jinhu
@@ -40,10 +40,10 @@ Plan: `docs/superpowers/plans/2026-10-19-rs311-follow-ups.md`.
 
 ## Acceptance criteria
 
-- [ ] Every `is_visible(timeout=…)` in `rs_poster`, `rs_messenger` and the vendored monitor either waits for real (`wait_for(state="visible", timeout=…)`) where the element is expected to appear, or drops the argument where a snapshot is what was meant.
-- [ ] A test in each package fails if `is_visible(timeout`, `is_hidden(timeout`, `is_enabled(timeout` or `is_checked(timeout` reappears in the sources.
-- [ ] The existing test doubles that stub `is_visible` raise Playwright's `TimeoutError` from `wait_for` when not visible, and every suite stays green.
-- [ ] `detect_login_challenge` is not slowed: the three captcha selector checks stay snapshots (the decision-model fallback from RS-311 covers what they miss).
+- [x] Every `is_visible(timeout=…)` in `rs_poster`, `rs_messenger` and the vendored monitor either waits for real (`wait_for(state="visible", timeout=…)`) where the element is expected to appear, or drops the argument where a snapshot is what was meant.
+- [x] A test in each package fails if `is_visible(timeout`, `is_hidden(timeout`, `is_enabled(timeout` or `is_checked(timeout` reappears in the sources.
+- [x] The existing test doubles that stub `is_visible` raise Playwright's `TimeoutError` from `wait_for` when not visible, and every suite stays green.
+- [x] `detect_login_challenge` is not slowed: the three captcha selector checks stay snapshots (the decision-model fallback from RS-311 covers what they miss).
 
 ## Out of scope
 
