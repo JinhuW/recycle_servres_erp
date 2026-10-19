@@ -2,13 +2,13 @@
 id: RS-305
 title: Reddit alerts go to a dev Telegram channel, reactions count as leads, and every prompt version is scored
 type: story
-status: in-progress
+status: in-review
 priority: P2
 created: 2026-10-18
 reporter: jinhu
 branch: reddit-worker-results-flow
-pr:
-version:
+pr: "#753"
+version: n/a — trackers/reddit (no release process); not yet deployed
 related: []
 ---
 
@@ -54,29 +54,29 @@ Reddit.
 
 ## Acceptance criteria
 
-- [ ] Every live verdict records the prompt version (model + full composed
+- [x] Every live verdict records the prompt version (model + full composed
       prompt) that produced it.
-- [ ] Every buyer alert's Telegram message id is recorded against its post.
-- [ ] With `telegram_dev_chat_ids` set, every live alert is also sent to the
+- [x] Every buyer alert's Telegram message id is recorded against its post.
+- [x] With `telegram_dev_chat_ids` set, every live alert is also sent to the
       dev chat with the model's reasoning and prompt version.
-- [ ] With `candidate_eval_prompt` set:
+- [x] With `candidate_eval_prompt` set:
   - every post is also judged by the candidate;
   - posts only the candidate flags go to the dev chat alone, never to the
     buyers;
   - each dev message says which prompt flagged it.
-- [ ] The api role pulls reactions on alert messages in buyer and dev chats,
+- [x] The api role pulls reactions on alert messages in buyer and dev chats,
       from groups (per user) and channels (anonymous counts). It survives a
       restart without losing or replaying its cursor.
-- [ ] An alert with any reaction other than 👎 counts as a lead; 👎 counts as
+- [x] An alert with any reaction other than 👎 counts as a lead; 👎 counts as
       not a lead.
-- [ ] `GET /api/prompt-stats`:
+- [x] `GET /api/prompt-stats`:
   - shows per version: evaluated, targets, buyer leads and lead rate, dev
     leads and not-leads;
   - shows the candidate-versus-live comparison on the same posts;
   - counts reactions on messages it has no record of.
-- [ ] `POST /api/prompt-candidate/promote` makes the candidate live, disables
+- [x] `POST /api/prompt-candidate/promote` makes the candidate live, disables
       the rules, and keeps its version id, so its numbers carry on.
-- [ ] The baseline evaluation and the first candidate prompt are written up
+- [x] The baseline evaluation and the first candidate prompt are written up
       in `trackers/reddit/docs/prompt-evaluations/`.
 
 ## Out of scope
@@ -105,3 +105,18 @@ Reddit.
 - Candidate-only reviews go out from the evaluate loop while the post is
   still claimed. They never enter the buyers' queue, so a candidate can never
   message buyers.
+- Merged in #753 and not yet deployed: the tracker ships by `railway up` and
+  `deploy-workers.sh`. The rollout has four steps:
+  1. Top up OpenRouter.
+  2. Set the Railway `api` service's `ALERT_TRANSPORT` to `telegram`.
+  3. Deploy the api, then the workers, then the OCI fleet.
+  4. Create the dev chat with the bot as an admin, and set
+     `telegram_dev_chat_ids` and `candidate_eval_prompt`.
+
+  It moves to done once a real reaction shows up in `GET /api/prompt-stats`.
+- While verifying, a prod outage turned up: the OpenRouter key ran out of
+  credit around 20:00 UTC on 2026-10-18. Every evaluation since then fails
+  with HTTP 402, and the posts are being parked as `failed`. The 402 asks to
+  reserve 16384 output tokens, because `evaluatePost` sends no `max_tokens`.
+  A cap would let a low balance last a little longer, but would not fix an
+  empty one.
