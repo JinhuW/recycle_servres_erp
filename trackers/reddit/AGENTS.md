@@ -50,6 +50,11 @@ has the repo map and workflow.
   [docs/debug-notes/ghcr-read-token-dead.md](docs/debug-notes/ghcr-read-token-dead.md).
   The pull token is a classic PAT that dies silently; check it with one
   `curl` before deploying.
+- **The multi-arch image build failing for `linux/amd64`** →
+  [docs/debug-notes/amd64-image-build-crashes-node.md](docs/debug-notes/amd64-image-build-crashes-node.md).
+  The emulator colima registers can crash node with an `uv__io_poll`
+  assertion. Re-register it with `tonistiigi/binfmt`, and don't drop amd64:
+  part of the fleet is E2.1.Micro.
 
 ## Design invariants
 
