@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-322](./RS-322-reddit-page-lets-a-manager-change-the-evaluation-mod.md) | in-review | story | P2 | Reddit page lets a manager change the evaluation model | — |
+| [RS-322](./RS-322-reddit-page-lets-a-manager-change-the-evaluation-mod.md) | done | story | P2 | Reddit page lets a manager change the evaluation model | 1.295.0 |
 | [RS-321](./RS-321-table-action-column-stays-visible-while-the-other-co.md) | done | bug | P2 | Table action column stays visible while the other columns scroll | — |
 | [RS-320](./RS-320-attachments-on-a-sell-order-for-the-sell-records.md) | done | story | P2 | Attachments on a sell order for the sell records | v1.294.0 |
 | [RS-319](./RS-319-pre-screen-facebook-listings-with-a-decision-model-b.md) | backlog | task | P2 | Pre-screen Facebook listings with a decision model before the LLM | — |

@@ -2,13 +2,13 @@
 id: RS-322
 title: Reddit page lets a manager change the evaluation model
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-10-19
 reporter: jinhu
 branch: reddit-tracker-model-settings
-pr:
-version:
+pr: "#786"
+version: 1.295.0
 related: [RS-309, RS-299]
 ---
 
