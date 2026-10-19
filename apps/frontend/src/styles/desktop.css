@@ -318,6 +318,7 @@ html.desktop, body.desktop, .desktop #root {
      above, which this must out-rank); the pinned one sits above its later
      siblings where the two axes cross. */
   .page.page-history > .orders-card .table thead th.col-id { background: var(--bg-soft); z-index: 3; }
+  .page.page-history > .orders-card .table thead th.col-actions { z-index: 3; }
   .page.page-history .table tr.row-hover:hover td.col-id { background: var(--bg-soft); }
 }
 
@@ -603,6 +604,9 @@ html.desktop, body.desktop, .desktop #root {
   top: 0;
   z-index: 2;
 }
+/* The pinned Actions header slides over its sticky-top siblings, so it needs
+   the higher of the two. */
+.page.page-inventory > .card .table thead th.col-actions { z-index: 3; }
 
 .page-head {
   display: flex; align-items: flex-end; justify-content: space-between;
@@ -733,6 +737,39 @@ html.desktop, body.desktop, .desktop #root {
 .table .neg   { color: var(--neg); }
 .table .muted { color: var(--fg-subtle); }
 .col-hidden   { display: none; }
+
+/* A wide table scrolls sideways, but its Actions column rides pinned to the
+   right edge: a row can always be acted on without a trip to the end of the
+   scrollbar first. The cell is opaque and paints over whatever slid beneath
+   it. A soft edge on its left says something is hidden there, and fades out
+   once the table is scrolled to the end. The edge is a scroll-driven
+   animation on the nearest sideways scroller: a table that fits has no
+   scroll range, the timeline stays inactive, and the edge keeps its resting
+   opacity of 0 — as it does in a browser without scroll timelines. */
+.table-scroll .table .col-actions {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  background: var(--bg-elev);
+}
+.table-scroll .table thead th.col-actions { background: var(--bg-soft); }
+.table-scroll .table .col-actions::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 100%;
+  width: 12px;
+  pointer-events: none;
+  background: linear-gradient(to left, rgba(15, 23, 42, 0.08), transparent);
+  opacity: 0;
+  animation: col-actions-edge linear both;
+  animation-timeline: scroll(nearest inline);
+}
+@keyframes col-actions-edge {
+  0%, 94% { opacity: 1; }
+  100%    { opacity: 0; }
+}
 
 /* ===== Layout helpers ===== */
 .divider { height: 1px; background: var(--border); margin: 16px 0; }

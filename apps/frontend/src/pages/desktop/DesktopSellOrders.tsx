@@ -532,7 +532,7 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
                 <th className="num">{t('sodUnits')}</th>
                 <th className="num">{t('eoTotal')}</th>
                 <th>{t('status')}</th>
-                <th>{t('actions')}</th>
+                <th className="col-actions">{t('actions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -598,7 +598,7 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
                     {fmtUSD0(o.total, locale)}
                   </td>
                   <td><span className={'chip dot ' + toneFor(o.status)}>{o.status}</span></td>
-                  <td onClick={e => e.stopPropagation()}>
+                  <td className="col-actions" onClick={e => e.stopPropagation()}>
                     <div style={{ display: 'flex', gap: 4 }}>
                       <RouteLink to={'/sell-orders/' + o.id} className="btn icon sm" title={t('soViewTooltip')}>
                         <Icon name="eye" size={12} />

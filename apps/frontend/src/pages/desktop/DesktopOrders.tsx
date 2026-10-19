@@ -587,7 +587,7 @@ export function DesktopOrders({ onToast }: Props) {
                 {isVis('commission') && <SortTh col="commission" sort={sort} onSort={cycleSort} align="right">{t('commission')}</SortTh>}
                 {isVis('payment') && <SortTh col="payment" sort={sort} onSort={cycleSort}>{t('payment')}</SortTh>}
                 {isVis('status') && <SortTh col="status" sort={sort} onSort={cycleSort}>{t('status')}</SortTh>}
-                <th style={{ width: isManager ? 122 : 90 }}>{t('actions')}</th>
+                <th className="col-actions" style={{ width: isManager ? 122 : 90 }}>{t('actions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -757,7 +757,7 @@ export function DesktopOrders({ onToast }: Props) {
                           );
                         })()}
                       </td>
-                      <td>
+                      <td className="col-actions">
                         <div style={{ display: 'inline-flex', gap: 4 }}>
                           {isManager && (
                             <button
