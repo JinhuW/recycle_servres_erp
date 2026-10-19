@@ -288,14 +288,17 @@ describe('facebook account pool', () => {
       return { url, method: init.method, body: init.body ? JSON.parse(init.body as string) : undefined };
     };
 
-    it('writes the login into the worker’s vault account, queues Re-login and marks the account', async () => {
+    it('seals the pool cookie as the worker’s session and restores it, no password login', async () => {
       const token = await manager();
       await seedPool(token, 2);
       await api('PUT', `${BASE}/2`, { token, body: { draft: draft(2, { totp: '', emailPassword: '' }) } });
-      const spy = stubFacade([200, { account_id: 'nyc-1' }], [202, { queued: true }]);
+      // The vault write, the session seed, then the restore.
+      const spy = stubFacade([200, { account_id: 'nyc-1' }], [200, { status: 'ok' }], [200, { restore: 'requested' }]);
 
       const r = await api<Snapshot>('POST', `${BASE}/1/assign`, { token, env: ENV, body: { worker: 'nyc-1' } });
       expect(r.status).toBe(200);
+      // 1) the vault write still carries the device, and the password as the
+      // fallback — never the session cookies.
       expect(sent(spy, 0)).toEqual({
         url: 'http://facade.internal:8600/v1/accounts/nyc-1',
         method: 'PUT',
@@ -305,23 +308,47 @@ describe('facebook account pool', () => {
           fb_uid: uid(1),
           allow_password_login: true,
           secrets: { password: 'DemoOnly!1', totp_secret: 'JBSWY3DPEHPK3PXP', email: 'acct1@outlook.example', email_password: 'Mail!1' },
-          // The pool cookie's device, never its session.
           device_cookies: [expect.objectContaining({ name: 'datr', value: 'd', domain: '.facebook.com' })],
         },
       });
       expect(JSON.stringify(sent(spy, 0).body)).not.toContain('session-1');
-      expect(JSON.stringify(sent(spy, 0).body)).not.toContain('c_user');
-      expect(sent(spy, 1)).toMatchObject({ url: 'http://facade.internal:8600/v1/workers/nyc-1/relogin', method: 'POST' });
+      // 2) the whole cookie is sealed as the slot's session…
+      expect(sent(spy, 1)).toEqual({
+        url: 'http://facade.internal:8600/v1/workers/nyc-1/session',
+        method: 'PUT',
+        body: { cookie: `c_user=${uid(1)}; xs=session-1; datr=d`, reason: 'assign #1' },
+      });
+      // 3) …and restored at once, with no password Re-login.
+      expect(sent(spy, 2)).toMatchObject({ url: 'http://facade.internal:8600/v1/workers/nyc-1/restore-session', method: 'POST' });
+      expect(spy.mock.calls.some(([u]) => String(u).endsWith('/relogin'))).toBe(false);
       expect(r.body.accounts[0]).toMatchObject({ status: 'fleet', holder: 'nyc-1', holderId: null });
       expect(r.body.activity[0]).toMatchObject({ action: 'assigned', accountNo: 1, detail: 'nyc-1', status: 'fleet' });
 
       // A missing 2FA key or e-mail password clears the worker's old one; an
       // existing vault account is written under its own id.
-      const spy2 = stubFacade([200, {}], [202, {}]);
+      const spy2 = stubFacade([200, {}], [200, {}], [200, {}]);
       const r2 = await api('POST', `${BASE}/2/assign`, { token, env: ENV, body: { worker: 'va-1', account: 'personal' } });
       expect(r2.status).toBe(200);
       expect(sent(spy2, 0).url).toBe('http://facade.internal:8600/v1/accounts/personal');
       expect(sent(spy2, 0).body.secrets).toMatchObject({ totp_secret: null, email_password: null });
+    });
+
+    it('falls back to a password Re-login when the account has no usable cookie', async () => {
+      const token = await manager();
+      await seedPool(token, 1);
+      // No cookie to restore (a mismatched one is dropped the same way), so the
+      // worker signs in with the vault password instead.
+      await api('PUT', `${BASE}/1`, { token, body: { draft: draft(1, { cookie: '' }) } });
+      const spy = stubFacade([200, {}], [202, { queued: true }]);
+
+      const r = await api<Snapshot>('POST', `${BASE}/1/assign`, { token, env: ENV, body: { worker: 'nyc-1' } });
+      expect(r.status).toBe(200);
+      expect(sent(spy, 0)).toMatchObject({ url: 'http://facade.internal:8600/v1/accounts/nyc-1', method: 'PUT' });
+      expect(sent(spy, 0).body.allow_password_login).toBe(true);
+      expect(sent(spy, 0).body).not.toHaveProperty('device_cookies'); // no cookie, no device
+      expect(sent(spy, 1)).toMatchObject({ url: 'http://facade.internal:8600/v1/workers/nyc-1/relogin', method: 'POST' });
+      expect(spy).toHaveBeenCalledTimes(2); // no seed, no restore
+      expect(r.body.accounts[0]).toMatchObject({ status: 'fleet', holder: 'nyc-1' });
     });
 
     it('changes nothing when the facade refuses, and says why', async () => {
@@ -335,10 +362,16 @@ describe('facebook account pool', () => {
       expect(after.body.accounts[0].status).toBe('available');
       expect(after.body.activity.some((e) => e.action === 'assigned')).toBe(false);
 
+      // Cookie-first: the second call is the session seed, the third the restore.
       stubFacade([200, {}], [503, { detail: 'Coordinator upstream is not configured' }]);
       const half = await api<{ error: string }>('POST', `${BASE}/1/assign`, { token, env: ENV, body: { worker: 'nyc-1' } });
       expect(half.status).toBe(503);
-      expect(half.body.error).toMatch(/reached nyc-1, but Re-login was not queued/);
+      expect(half.body.error).toMatch(/reached nyc-1, but its session was not seeded/);
+
+      stubFacade([200, {}], [200, {}], [502, { detail: 'coordinator unreachable' }]);
+      const r3 = await api<{ error: string }>('POST', `${BASE}/1/assign`, { token, env: ENV, body: { worker: 'nyc-1' } });
+      expect(r3.status).toBe(502);
+      expect(r3.body.error).toMatch(/seeded on nyc-1, but the restore was not queued/);
     });
 
     it('refuses a worker that already holds another account, a bad id, and purchasers', async () => {

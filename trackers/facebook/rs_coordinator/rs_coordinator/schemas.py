@@ -429,6 +429,20 @@ class SessionBackupRequest(BaseModel):
     device_id: str | None = Field(default=None, max_length=64)
 
 
+class SessionSeedRequest(BaseModel):
+    """A pool account's stored cookie, to seal as a worker's session snapshot.
+
+    The cookie is the raw value the ERP holds (RS-308): a browser cookie
+    header, a cookie-extension JSON export, or a flat {name: value} object.
+    The coordinator validates and converts it (`cookies.py`); the slot's own
+    account decides whose identity it is filed under, so only the cookie
+    travels here.
+    """
+
+    cookie: str = Field(max_length=16384)
+    reason: str | None = None
+
+
 class ObservedDevice(BaseModel):
     """What a worker's browser presents today, sent once so the first profile
     of an account that is already logged in copies it rather than replacing it."""

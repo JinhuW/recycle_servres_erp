@@ -253,3 +253,51 @@ def test_put_account_refuses_a_bad_id_or_body_before_forwarding(client):
         "/v1/accounts/ne-1", content=b"not json", headers={**AUTH, "Content-Type": "application/json"}
     ).status_code == 400
     assert client.calls == []
+
+
+# -- cookie-first assign (RS-308) ---------------------------------------------
+
+
+def test_restore_session_forwards_to_coordinator(client):
+    assert client.post("/v1/workers/homelab-1/restore-session").status_code == 401
+
+    res = client.post("/v1/workers/homelab-1/restore-session", headers=AUTH)
+    assert res.status_code == 200
+
+    (request,) = client.calls
+    assert request.method == "POST"
+    assert request.url.path == "/v1/workers/homelab-1/restore-session"
+    assert request.headers["Authorization"] == "Bearer admin-secret"
+    assert "admin-secret" not in res.text
+
+
+def test_restore_session_refuses_a_bad_worker_id(client):
+    assert client.post("/v1/workers/bad%20id/restore-session", headers=AUTH).status_code == 400
+    assert client.calls == []
+
+
+def test_seed_session_forwards_only_cookie_and_reason(client):
+    import json
+
+    body = {"cookie": "c_user=1; xs=s", "reason": "assign #2", "worker_id": "evil", "extra": "x"}
+    assert client.put("/v1/workers/homelab-1/session", json=body).status_code == 401
+
+    res = client.put("/v1/workers/homelab-1/session", json=body, headers=AUTH)
+    assert res.status_code == 200
+
+    (request,) = client.calls
+    assert request.method == "PUT"
+    assert request.url.path == "/v1/workers/homelab-1/session"
+    assert request.headers["Authorization"] == "Bearer admin-secret"
+    # Only the cookie and the reason cross; nothing else the caller tried to set.
+    assert json.loads(request.content) == {"cookie": "c_user=1; xs=s", "reason": "assign #2"}
+
+
+def test_seed_session_needs_a_cookie_string_and_a_valid_worker(client):
+    assert client.put(
+        "/v1/workers/homelab-1/session", json={"reason": "x"}, headers=AUTH
+    ).status_code == 400
+    assert client.put(
+        "/v1/workers/bad%20id/session", json={"cookie": "x"}, headers=AUTH
+    ).status_code == 400
+    assert client.calls == []

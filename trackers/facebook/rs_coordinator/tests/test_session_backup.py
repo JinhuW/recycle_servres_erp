@@ -404,3 +404,83 @@ def test_the_snapshot_survives_a_coordinator_restart(env, tmp_path):
     assert restored == json.loads(json.dumps(sample_state()))
     assert bytes(reopened.get_snapshot("denver-1")["state_blob"]) == bytes(blob)
     reopened.close()
+
+
+# -- seed from a pool cookie (RS-308) -----------------------------------------
+# The cookie-first assign: the ERP seals a pool account's own cookie as the
+# slot's snapshot, so the worker restores it instead of a password login.
+
+SEED_COOKIE = f"c_user={UID}; xs=seed-SuPeRsEcReT; datr=device-datr; sb=device-sb"
+
+
+def register_account(client, worker_id: str = "denver-1", account_id: str = "denver", **fields):
+    fields.setdefault("fb_uid", UID)
+    client.deps.get_account_store().put_account(
+        account_id, {"password": "pw"}, worker_id=worker_id, **fields
+    )
+
+
+def seed(client, worker_id: str = "denver-1", cookie: str = SEED_COOKIE, **body):
+    return client.put(
+        f"/v1/workers/{worker_id}/session", json={"cookie": cookie, **body}, headers=ADMIN_AUTH
+    )
+
+
+def test_seed_from_a_cookie_makes_a_restorable_snapshot(env):
+    register_account(env)
+    assert seed(env, reason="assign #2").json() == {"status": "ok"}
+
+    snapshot = env.db.get_snapshot("denver-1")
+    state = env.vault.decrypt(snapshot["state_blob"])
+    assert {"c_user", "xs", "datr", "sb"} <= {c["name"] for c in state["cookies"]}
+    assert snapshot["identity_key"] == f"uid:{UID}"
+    assert snapshot["fb_user_id"] == UID
+
+    # The worker can restore it: the snapshot's identity is the account it holds.
+    restored = env.get("/v1/session/denver-1/restore", headers=worker_auth("denver-1"))
+    assert restored.status_code == 200
+    assert restored.json()["storage_state"] == state
+
+
+def test_seed_cookie_is_sealed_not_plaintext(env):
+    register_account(env)
+    seed(env)
+    raw = bytes(env.db.get_snapshot("denver-1")["state_blob"])
+    assert b"seed-SuPeRsEcReT" not in raw
+    assert UID.encode() not in raw
+
+
+def test_seed_is_audited_as_a_disclosure(env):
+    register_account(env)
+    seed(env, reason="assign #2")
+    assert any(
+        a["kind"] == "session" and a["account_id"] == "denver" for a in env.db.list_code_audit()
+    )
+
+
+def test_seed_refuses_a_cookie_for_another_account(env):
+    register_account(env, fb_uid="222222222222222")
+    response = seed(env)  # the cookie's c_user is UID, not the account's uid
+    assert response.status_code == 409
+    assert env.db.get_snapshot("denver-1") is None
+
+
+def test_seed_refuses_a_slot_without_an_account_uid(env):
+    env.deps.get_account_store().put_account("denver", {"password": "pw"}, worker_id="denver-1")
+    assert seed(env).status_code == 409
+
+
+def test_seed_refuses_a_cookie_with_no_session(env):
+    register_account(env)
+    assert seed(env, cookie=f"c_user={UID}; datr=only-a-device").status_code == 422
+
+
+def test_seed_needs_an_admin_token(env):
+    register_account(env)
+    response = env.put(
+        "/v1/workers/denver-1/session",
+        json={"cookie": SEED_COOKIE},
+        headers=worker_auth("denver-1"),
+    )
+    assert response.status_code in (401, 403)
+    assert env.db.get_snapshot("denver-1") is None

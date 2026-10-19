@@ -18,7 +18,30 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.12.5] - 2026-10-18
+
 ### Added
+
+- **A worker can be logged in from a pool account's cookie, no password**
+  (RS-308). An account the business buys often comes with a live Facebook
+  cookie, and forcing a password login on assign — a fresh login and 2FA from
+  the worker's datacenter IP — is the harshest signal to Facebook there is.
+  The ERP's cookie-first Assign now seals that cookie as the slot's session
+  snapshot through the new admin route `PUT /v1/workers/{id}/session`: the
+  coordinator validates it (`cookies.py` reads a browser cookie header, a
+  cookie-extension JSON export, or a flat `{name: value}` object; `c_user` and
+  `xs` are required), refuses a cookie whose `c_user` is not the account's
+  `fb_uid`, and files it under that account's `identity_key` so only this login
+  can restore it. A new `restore` directive (queued by
+  `POST /v1/workers/{id}/restore-session`, the gentle counterpart to
+  `relogin`) tells the worker to run an ordinary, unforced login: it restores
+  the seeded session and reaches Marketplace with no password and no 2FA,
+  landing on the account's own device (RS-293). The password login stays as
+  the fallback when there is nothing to restore. The seed is audited as a
+  `session` disclosure, alongside code and credential releases. rs_console
+  forwards both routes, field-sanitised; a coordinator without them answers
+  404, which the console passes through, so the ERP degrades to the password
+  path rather than breaking.
 
 - **The coordinator keeps a log of worker status changes** (RS-300). A
   worker's row is overwritten by every heartbeat and its liveness is derived

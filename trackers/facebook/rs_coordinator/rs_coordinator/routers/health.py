@@ -143,6 +143,9 @@ def _take_directives(worker_id: str) -> list[str]:
     if deps.db.take_relogin(worker_id):
         directives.append("relogin")
         logger.info("Delivered re-login directive to worker %s", worker_id)
+    if deps.db.take_restore(worker_id):
+        directives.append("restore")
+        logger.info("Delivered session-restore directive to worker %s", worker_id)
     return directives
 
 
@@ -166,6 +169,18 @@ def request_relogin(worker_id: str) -> Dict[str, Any]:
     """
     deps.db.request_relogin(worker_id)
     return {"status": "ok", "worker_id": worker_id, "relogin": "requested"}
+
+
+@router.post("/v1/workers/{worker_id}/restore-session", dependencies=[Depends(require_admin)])
+def request_restore(worker_id: str) -> Dict[str, Any]:
+    """Queue a session restore for a worker; its next directive poll picks it up.
+
+    Admin-only: the cookie-first Assign seeds the slot a snapshot through
+    `PUT /v1/workers/{id}/session`, then calls this so the worker restores it
+    at once rather than at its next sweep — the gentle counterpart to relogin.
+    """
+    deps.db.request_restore(worker_id)
+    return {"status": "ok", "worker_id": worker_id, "restore": "requested"}
 
 
 @router.get("/api/v1/workers")

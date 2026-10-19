@@ -655,6 +655,26 @@ class PostgresDatabase:
             )
             return cur.rowcount > 0
 
+    def request_restore(self: "PostgresDatabase", worker_id: str) -> None:
+        """Flag a worker to restore its seeded session on its next directive poll."""
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO workers (worker_id, restore_requested_at) VALUES (%s, %s) "
+                "ON CONFLICT(worker_id) DO UPDATE "
+                "SET restore_requested_at = excluded.restore_requested_at",
+                (worker_id, utcnow()),
+            )
+
+    def take_restore(self: "PostgresDatabase", worker_id: str) -> bool:
+        """Consume a pending restore request, returning whether one was set."""
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE workers SET restore_requested_at = NULL "
+                "WHERE worker_id = %s AND restore_requested_at IS NOT NULL",
+                (worker_id,),
+            )
+            return cur.rowcount > 0
+
     # -- review stats ------------------------------------------------------
 
     def add_review_stats(

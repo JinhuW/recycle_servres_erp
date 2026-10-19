@@ -580,3 +580,32 @@ def test_a_beat_after_a_long_silence_logs_the_whole_gap(client):
 
 def test_status_changes_need_the_admin_token(client):
     assert client.get("/v1/stats/status-changes", headers=AUTH).status_code in (401, 403)
+
+
+# -- restore directive (RS-308) -----------------------------------------------
+# The gentle counterpart to relogin: the cookie-first Assign seeds the slot a
+# snapshot and asks the worker to restore it now, not force a password login.
+
+
+def test_restore_session_queues_a_restore_directive(client):
+    heartbeat(client, state="SESSION_EXPIRED")
+    assert (
+        client.post("/v1/workers/denver-1/restore-session", headers=ADMIN).json()["restore"]
+        == "requested"
+    )
+    # Handed out once, then cleared — like relogin.
+    assert "restore" in heartbeat(client)["directives"]
+    assert "restore" not in heartbeat(client)["directives"]
+
+
+def test_restore_is_distinct_from_relogin(client):
+    heartbeat(client)
+    client.post("/v1/workers/denver-1/relogin", headers=ADMIN)
+    client.post("/v1/workers/denver-1/restore-session", headers=ADMIN)
+    assert set(heartbeat(client)["directives"]) == {"relogin", "restore"}
+
+
+def test_restore_session_needs_the_admin_token(client):
+    assert client.post(
+        "/v1/workers/denver-1/restore-session", headers=AUTH
+    ).status_code in (401, 403)

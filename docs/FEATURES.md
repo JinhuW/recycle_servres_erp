@@ -2183,8 +2183,14 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   identity on any worker, never the previous login's (facebook-tracker
   0.11.0, RS-292). Since v1.281.3 it also sends the `datr`/`sb` from the
   account's pool cookie (never its session), so a login with no device yet
-  starts on the one it was made in (facebook-tracker 0.12.2, RS-293). If the
-  worker already holds a pool account,
+  starts on the one it was made in (facebook-tracker 0.12.2, RS-293). Since
+  v1.290.0, when the account's cookie is its own (its `c_user` matches), the
+  Assign seals that whole cookie as the worker's session and has the worker
+  restore it — logged in with no password login and no 2FA, on the account's
+  own device — and queues a password Re-login only when there is no usable
+  cookie; a restored session that Facebook has since expired still falls back
+  to the password login on the worker's own (facebook-tracker 0.12.5, RS-308).
+  If the worker already holds a pool account,
   the dialog asks where that one goes — back to Available, to Problem (still
   naming the worker) or Retired — with no default, and both moves land
   together. A worker without a vault account gets one named after it. Until

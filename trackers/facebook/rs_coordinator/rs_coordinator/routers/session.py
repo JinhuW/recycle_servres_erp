@@ -32,9 +32,15 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException
 
 from .. import deps
+from ..cookies import CookieError, storage_state_from_text
 from ..deps import require_admin, require_worker
 from ..device_profiles import device_cookies_of, identity_key_for
-from ..schemas import SessionBackupRequest, SessionMeta, StatusResponse
+from ..schemas import (
+    SessionBackupRequest,
+    SessionMeta,
+    SessionSeedRequest,
+    StatusResponse,
+)
 from ..vault import Vault, VaultError
 
 logger = logging.getLogger(__name__)
@@ -206,6 +212,73 @@ def backup_session(
         size,
         worker_id,
         account_id or "unregistered",
+    )
+    return StatusResponse()
+
+
+@router.put(
+    "/v1/workers/{worker_id}/session",
+    response_model=StatusResponse,
+    dependencies=[Depends(require_admin)],
+)
+def seed_session(worker_id: str, payload: SessionSeedRequest) -> StatusResponse:
+    """Seal a pool account's cookie as this worker's restorable snapshot.
+
+    The cookie-first assign (RS-308): rather than force a password login, the
+    ERP hands the worker's account its own stored cookie here, and the worker
+    restores it on a `restore` directive — logged in with no password and no
+    2FA. This is the one route that accepts a live session from outside the
+    fleet, so it is admin-only and audited like a credential release.
+
+    The cookie must belong to the account the slot holds: its `c_user` has to
+    equal the account's `fb_uid`, and the snapshot is filed under that
+    account's `identity_key`, so a cookie can never be restored under another
+    login (the same guard `restore_session` enforces on the way out).
+    """
+    account = deps.db.account_row_for_worker(worker_id)
+    identity_key = identity_key_for(account)
+    if account is None or identity_key is None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Worker '{worker_id}' has no vault account with a Facebook uid; set one "
+            "before seeding its session (the ERP's Assign to fleet does).",
+        )
+    fb_uid = identity_key.split(":", 1)[1]
+    try:
+        storage_state, c_user = storage_state_from_text(payload.cookie)
+    except CookieError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    if c_user != fb_uid:
+        raise HTTPException(
+            status_code=409,
+            detail=f"The cookie is for Facebook user {c_user}, not the account's {fb_uid}; "
+            "it belongs to a different login.",
+        )
+
+    try:
+        state_blob = deps.get_vault().encrypt(storage_state)
+    except VaultError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+
+    deps.db.upsert_snapshot(
+        worker_id,
+        {
+            "account_id": account["account_id"],
+            "state_blob": state_blob,
+            "user_agent": None,
+            "session_expiry": None,
+            "fb_user_id": c_user,
+            "identity_key": identity_key,
+        },
+    )
+    # The same disclosure class as a code or credential release, and for the
+    # same reason: it is how a compromised console shows up in the audit log.
+    deps.db.insert_code_audit(worker_id, account["account_id"], "session", payload.reason)
+    logger.warning(
+        "Seeded a session snapshot for worker %s (account %s) from a pool cookie (%s)",
+        worker_id,
+        account["account_id"],
+        payload.reason or "no reason given",
     )
     return StatusResponse()
 
