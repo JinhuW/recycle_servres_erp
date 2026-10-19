@@ -289,7 +289,7 @@ export const STAGE_FORMS: Partial<Record<FlowStage, StageForm>> = {
     items: ['search_phrases'],
   },
   cards: { search: ['max_results'], items: [] },
-  title: { search: ['title_prefilter'], items: ['antikeywords'] },
+  title: { search: ['title_prefilter'], items: ['keywords', 'antikeywords'] },
   keywords: { search: ['min_seller_rating', 'exclude_unrated_sellers'], items: ['keywords', 'antikeywords'] },
   ai: { search: ['rating', 'min_unit_count'], items: [], ai: true },
 };

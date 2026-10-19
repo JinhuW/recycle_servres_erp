@@ -3,8 +3,8 @@ import { Icon } from '../../components/Icon';
 import type { FlowStage, ItemField } from '../../lib/fleetView';
 import { useT } from '../../lib/i18n';
 import {
-  MIN_TITLE_WORDS, checkListing, duplicateTerms, formatRule, keywordCount, listTermKeys, ruleLines, ruleShape,
-  splitEntry, termKey, type ListingVerdict, type RuleHit,
+  MIN_TITLE_WORDS, checkListing, duplicateTerms, formatRule, foundTerms, keywordCount, markTerms, ruleLines, ruleShape,
+  shadowedTerms, splitEntry, termKey, type ListingVerdict,
 } from '../../lib/keywordRules';
 
 // ─── An item's phrases and keyword rules, as chips ────────────────────────────
@@ -16,9 +16,11 @@ import {
 export type ItemRules = Record<ItemField, string> & { name: string };
 export type Probe = { title: string; description: string };
 
+// The title gate reads Include too: with the title prefilter on, a card whose
+// title has none of them is dropped unopened.
 export const STAGE_LISTS: Partial<Record<FlowStage, readonly ItemField[]>> = {
   search: ['search_phrases'],
-  title: ['antikeywords'],
+  title: ['keywords', 'antikeywords'],
   keywords: ['keywords', 'antikeywords'],
 };
 
@@ -33,11 +35,13 @@ export function probeVerdicts(
   )]));
 }
 
-const verdictHit = (v: ListingVerdict | undefined, field: ItemField): RuleHit | null => {
-  if (!v) return null;
-  if (v.kind === 'anti' && field === 'antikeywords') return v.hit;
-  if (v.kind === 'pass' && field === 'keywords') return v.hit;
-  return null;
+type Found = ReturnType<typeof foundTerms>;
+
+const VERDICT_ICON: Record<ListingVerdict['kind'], { icon: 'check' | 'x' | 'arrow'; tone: string }> = {
+  pass: { icon: 'check', tone: 'inc' },
+  anti: { icon: 'x', tone: 'exc' },
+  missing: { icon: 'x', tone: 'exc' },
+  deferred: { icon: 'arrow', tone: 'open' },
 };
 
 const LIST_TITLE: Record<ItemField, string> = {
@@ -55,7 +59,7 @@ const POLARITY: Partial<Record<ItemField, { cls: string; sign: string }>> = {
 const listCount = (field: ItemField, value: string) =>
   field === 'search_phrases' ? ruleLines(value).length : keywordCount(ruleLines(value));
 
-export function RulesPanel({ stage, items, active, onActive, editing, onChange, verdicts, onAdd, focus }: {
+export function RulesPanel({ stage, items, active, onActive, editing, onChange, verdicts, probe, prefilter, onAdd, focus }: {
   stage: FlowStage;
   items: readonly ItemRules[];
   active: string;
@@ -63,6 +67,8 @@ export function RulesPanel({ stage, items, active, onActive, editing, onChange, 
   editing: boolean;
   onChange: (name: string, field: ItemField, value: string) => void;
   verdicts: Map<string, ListingVerdict> | null;
+  probe: Probe;
+  prefilter: boolean;
   /** Opens the stage's Edit form on this list; absent when it cannot be edited. */
   onAdd?: (field: ItemField) => void;
   /** The list whose input takes focus when Edit opens. */
@@ -72,33 +78,71 @@ export function RulesPanel({ stage, items, active, onActive, editing, onChange, 
   const fields = STAGE_LISTS[stage] ?? [];
   const item = items.find(i => i.name === active) ?? items[0];
   if (!item) return <span className="fp-muted">{t('fbcNone')}</span>;
-  // The exclude list is checked first, so an include keyword it also holds can never pass a listing.
-  const excluded = fields.includes('keywords') && fields.includes('antikeywords')
-    ? listTermKeys(ruleLines(item.antikeywords)) : null;
+  // With the prefilter off, the card's title is never checked for an include keyword.
+  const idle = (f: ItemField) => stage === 'title' && f === 'keywords' && !prefilter;
+  const rules = { keywords: ruleLines(item.keywords), antikeywords: ruleLines(item.antikeywords) };
+  const seen = { ...rules, keywords: idle('keywords') ? [] : rules.keywords };
+  // What the probe shows the gate: the card's title, or the whole page.
+  const text = verdicts && (stage === 'title' ? probe.title : `${probe.title} ${probe.description}`);
+  const found = (f: ItemField): Found | null =>
+    text && f !== 'search_phrases' ? foundTerms(seen[f], text) : null;
+  const shadowed = fields.includes('keywords') ? shadowedTerms(rules.keywords, rules.antikeywords) : null;
+
+  const say = (v: ListingVerdict) => {
+    switch (v.kind) {
+      case 'anti': return t('fbcTryAnti', { term: v.hit.term ?? '…' });
+      case 'missing': return t(stage === 'title' ? 'fbcTryMissingTitle' : 'fbcTryMissing');
+      case 'deferred': return v.reason === 'short' ? t('fbcTryShort', { n: String(MIN_TITLE_WORDS) }) : t('fbcTryNoPrefilter');
+      case 'pass': return v.hit?.term ? t('fbcTryPassOn', { term: v.hit.term }) : t('fbcTryPass');
+    }
+  };
+  const marks = (s: string) => markTerms(s, seen).map((run, i) => (run.kind ? (
+    <mark key={i} className={`ff-mark ${run.kind}`} title={t(run.kind === 'inc' ? 'fbcRulesInclude' : 'fbcRulesExclude')}>
+      {run.text}
+    </mark>
+  ) : run.text));
+
   return (
     <div className="ff-rules">
-      {items.length > 1 && (
-        <div className="seg ff-rules-items" role="tablist" aria-label={t('fbcRulesItems')}>
-          {items.map(i => (
-            <button key={i.name} type="button" role="tab" aria-selected={i.name === item.name}
-              className={i.name === item.name ? 'active' : ''} onClick={() => onActive(i.name)}>
-              {i.name}
-              <span className="ff-rules-count">
-                {fields.map(f => (
-                  <span key={f} className={`ff-n ${POLARITY[f]?.cls ?? ''}`} title={t(LIST_TITLE[f])}>
-                    {POLARITY[f]?.sign}{listCount(f, i[f])}
+      {(items.length > 1 || verdicts) && (
+        <div className="ff-rules-items" role="tablist" aria-label={t('fbcRulesItems')}>
+          {items.map(i => {
+            const v = verdicts?.get(i.name);
+            return (
+              <button key={i.name} type="button" role="tab" aria-selected={i.name === item.name}
+                className="ff-item" onClick={() => onActive(i.name)}>
+                <span className="ff-item-head">
+                  <span className="mono">{i.name}</span>
+                  <span className="ff-rules-count">
+                    {fields.map(f => (
+                      <span key={f} className={`ff-n ${POLARITY[f]?.cls ?? ''}`} title={t(LIST_TITLE[f])}>
+                        {POLARITY[f]?.sign}{listCount(f, i[f])}
+                      </span>
+                    ))}
                   </span>
-                ))}
-              </span>
-            </button>
-          ))}
+                </span>
+                {v && (
+                  <span className={`ff-verdict ${VERDICT_ICON[v.kind].tone}`}>
+                    <Icon name={VERDICT_ICON[v.kind].icon} size={11} />
+                    {say(v)}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {verdicts && (
+        <div className="ff-readout">
+          <p>{marks(probe.title)}</p>
+          {stage === 'keywords' && probe.description.trim() && <p className="ff-readout-desc">{marks(probe.description)}</p>}
         </div>
       )}
       <div className={`ff-rules-cols${fields.length > 1 ? ' two' : ''}`}>
         {fields.map(f => (
           <RuleList key={`${item.name}:${f}`} field={f} stage={stage} value={item[f]} editing={editing}
-            hit={verdictHit(verdicts?.get(item.name), f)} onChange={v => onChange(item.name, f, v)}
-            blocked={f === 'keywords' ? excluded : null} focus={focus === f}
+            found={found(f)} onChange={v => onChange(item.name, f, v)} idle={idle(f)}
+            shadowed={f === 'keywords' ? shadowed : null} focus={focus === f}
             onAdd={onAdd && (() => onAdd(f))} />
         ))}
       </div>
@@ -106,14 +150,18 @@ export function RulesPanel({ stage, items, active, onActive, editing, onChange, 
   );
 }
 
-function RuleList({ field, stage, value, editing, hit, onChange, blocked, focus, onAdd }: {
+function RuleList({ field, stage, value, editing, found, onChange, idle, shadowed, focus, onAdd }: {
   field: ItemField;
   stage: FlowStage;
   value: string;
   editing: boolean;
-  hit: RuleHit | null;
+  /** What the probe listing holds of this list; null while nothing is typed. */
+  found: Found | null;
   onChange: (value: string) => void;
-  blocked: Set<string> | null;
+  /** Shown, but not read at this stage. */
+  idle: boolean;
+  /** Include keywords an exclude keyword always catches, with the one that does. */
+  shadowed: Map<string, string> | null;
   focus: boolean;
   onAdd?: () => void;
 }) {
@@ -128,7 +176,9 @@ function RuleList({ field, stage, value, editing, hit, onChange, blocked, focus,
   const pol = POLARITY[field];
   const rules = ruleLines(value);
   const dups = plain ? new Set<string>() : duplicateTerms(rules);
-  const hint = field === 'antikeywords' && stage === 'title' ? 'fbcRulesDropsTitleHint' : `fbcRulesHint_${field}`;
+  const hint = stage !== 'title' ? `fbcRulesHint_${field}`
+    : field === 'antikeywords' ? 'fbcRulesDropsTitleHint'
+      : idle ? 'fbcRulesKeywordsTitleOff' : 'fbcRulesKeywordsTitleHint';
 
   const write = (next: string[]) => onChange(next.join('\n'));
   const replace = (i: number, entry: string | null) =>
@@ -151,16 +201,14 @@ function RuleList({ field, stage, value, editing, hit, onChange, blocked, focus,
     e.preventDefault();
     commit(`${pending}${text}`);
   };
-  const isHit = (i: number, term: string | null) =>
-    !!hit && hit.rule === i && (hit.term === null || term === null || termKey(hit.term) === termKey(term));
-
   const chip = (term: string, i: number, k: number) => {
     const key = termKey(term);
     const dup = !plain && dups.has(key);
-    const dead = !!blocked?.has(key);
+    const by = shadowed?.get(key);
     return (
-      <span key={`${i}:${k}`} className={`ff-chip${dup ? ' dup' : ''}${dead ? ' blocked' : ''}${isHit(i, term) ? ' hit' : ''}`}
-        title={dead ? t('fbcRulesBlocked') : dup ? t('fbcRulesDup') : undefined}>
+      <span key={`${i}:${k}`}
+        className={`ff-chip${dup ? ' dup' : ''}${by !== undefined ? ' blocked' : ''}${found?.terms.has(key) ? ' hit' : ''}`}
+        title={by !== undefined ? t('fbcRulesBlocked', { term: by }) : dup ? t('fbcRulesDup') : undefined}>
         {term}
         {editing && (
           <button type="button" className="ff-chip-x" aria-label={t('fbcRulesRemove', { term })}
@@ -173,7 +221,7 @@ function RuleList({ field, stage, value, editing, hit, onChange, blocked, focus,
   };
 
   const expr = (i: number) => (
-    <span key={i} className={`ff-chip ff-chip-expr${isHit(i, null) ? ' hit' : ''}`}>
+    <span key={i} className={`ff-chip ff-chip-expr${found?.exprs.has(i) ? ' hit' : ''}`}>
       <span className="ff-expr-tag">{t('fbcRulesExpr')}</span>
       {editing && openExpr === i ? (
         <input className="input ff-chip-input" autoFocus spellCheck={false} defaultValue={rules[i]}
@@ -208,7 +256,7 @@ function RuleList({ field, stage, value, editing, hit, onChange, blocked, focus,
   });
 
   return (
-    <div className={`ff-rule-list${pol ? ` ${pol.cls}` : ''}`}>
+    <div className={`ff-rule-list${pol ? ` ${pol.cls}` : ''}${idle ? ' idle' : ''}`}>
       <div className="ff-rule-list-head">
         {pol && <span className="ff-pol-badge" aria-hidden="true">{pol.sign}</span>}
         <span className="ff-rule-title">{t(LIST_TITLE[field])}</span>
@@ -219,7 +267,7 @@ function RuleList({ field, stage, value, editing, hit, onChange, blocked, focus,
           </button>
         )}
       </div>
-      <span className="ff-rule-hint">{t(hint)}</span>
+      <span className="ff-rule-hint">{t(hint, { n: String(MIN_TITLE_WORDS) })}</span>
       {editing && asText ? (
         <>
           <textarea className="input ff-edit-list" value={value} spellCheck={false}
@@ -251,30 +299,20 @@ function RuleList({ field, stage, value, editing, hit, onChange, blocked, focus,
   );
 }
 
-/** A listing title (and description) checked against every item, live. */
+/** A listing title (and description) to check against every item, live; RulesPanel shows what it does. */
 // The tester sits inside the stage's settings form: Enter in it must not
 // submit, which would save the draft to every worker and start a sweep.
 const keepForm = (e: KeyboardEvent<HTMLInputElement>) => {
   if (e.key === 'Enter') e.preventDefault();
 };
 
-export function ListingTester({ stage, probe, onProbe, verdicts, onPick, editing }: {
+export function ListingTester({ stage, probe, onProbe, editing }: {
   stage: FlowStage;
   probe: Probe;
   onProbe: (p: Probe) => void;
-  verdicts: Map<string, ListingVerdict> | null;
-  onPick: (name: string) => void;
   editing: boolean;
 }) {
   const { t } = useT();
-  const say = (v: ListingVerdict) => {
-    switch (v.kind) {
-      case 'anti': return t('fbcTryAnti', { term: v.hit.term ?? '…' });
-      case 'missing': return t('fbcTryMissing');
-      case 'deferred': return v.reason === 'short' ? t('fbcTryShort', { n: String(MIN_TITLE_WORDS) }) : t('fbcTryNoPrefilter');
-      case 'pass': return v.hit?.term ? t('fbcTryPassOn', { term: v.hit.term }) : t('fbcTryPass');
-    }
-  };
   return (
     <div className={`ff-try${stage === 'title' ? ' title-only' : ''}`}>
       <span className="fp-section-label">
@@ -286,18 +324,6 @@ export function ListingTester({ stage, probe, onProbe, verdicts, onPick, editing
       {stage === 'keywords' && (
         <input className="input" value={probe.description} spellCheck={false} placeholder={t('fbcTryDescPh')}
           aria-label={t('fbcTryDescPh')} onKeyDown={keepForm} onChange={e => onProbe({ ...probe, description: e.target.value })} />
-      )}
-      {verdicts && (
-        <ul className="ff-try-out">
-          {[...verdicts].map(([name, v]) => (
-            <li key={name}>
-              <button type="button" className={`ff-try-row ${v.kind}`} onClick={() => onPick(name)}>
-                <span className="mono">{name}</span>
-                <span>{say(v)}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
       )}
     </div>
   );

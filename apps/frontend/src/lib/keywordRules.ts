@@ -73,6 +73,9 @@ export function parseExpr(src: string): Expr | null {
 
 const normalize = (s: string) => s.replace(/\s+/g, ' ').toLowerCase();
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// A normalized term where a word starts. A space takes any run of whitespace,
+// so the same pattern also finds the term in text that was not normalized.
+const termPattern = (t: string) => `(?<![\\p{L}\\p{N}_])${escape(t).replace(/ /g, '\\s+')}`;
 
 /**
  * True when `text` holds `term` where a word starts. The front is anchored so
@@ -81,7 +84,7 @@ const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 export function containsTerm(term: string, text: string): boolean {
   const t = normalize(term).trim();
   if (!t) return false;
-  return new RegExp(`(?<![\\p{L}\\p{N}_])${escape(t)}`, 'iu').test(normalize(text));
+  return new RegExp(termPattern(t), 'iu').test(normalize(text));
 }
 
 const evaluate = (e: Expr, text: string): boolean => {
@@ -194,14 +197,73 @@ export function keywordCount(rules: readonly string[]): number {
   }, 0);
 }
 
-/** A list's plain terms by lowercased term; expressions are left out, since no one term stands for them. */
-export function listTermKeys(rules: readonly string[]): Set<string> {
-  const keys = new Set<string>();
-  for (const rule of rules) {
+// A list's plain terms. Expressions are left out, since no one term stands for them.
+const plainTerms = (rules: readonly string[]): string[] =>
+  rules.flatMap(rule => {
     const shape = ruleShape(rule);
-    if (shape.kind === 'terms') for (const t of shape.terms) keys.add(termKey(t));
+    return shape.kind === 'terms' ? shape.terms : [];
+  });
+
+/**
+ * Include keywords an exclude keyword always catches, by key, each with the
+ * exclude keyword that does. A match stays open at the end, so `ram` drops
+ * every listing with `ram stick` or `rams` as well as `ram`; the exclude list
+ * is checked first, so such a keyword can never let a listing through.
+ */
+export function shadowedTerms(keywords: readonly string[], antikeywords: readonly string[]): Map<string, string> {
+  const anti = plainTerms(antikeywords);
+  const out = new Map<string, string>();
+  for (const k of plainTerms(keywords)) {
+    const by = anti.find(a => containsTerm(a, k));
+    if (by !== undefined) out.set(termKey(k), by);
   }
-  return keys;
+  return out;
+}
+
+/** The keys of a list's terms that `text` holds, and the entries of its expressions that match it. */
+export function foundTerms(rules: readonly string[], text: string): { terms: Set<string>; exprs: Set<number> } {
+  const terms = new Set<string>();
+  const exprs = new Set<number>();
+  rules.forEach((rule, i) => {
+    const shape = ruleShape(rule);
+    if (shape.kind === 'expr') {
+      if (ruleMatches(rule, text)) exprs.add(i);
+      return;
+    }
+    for (const t of shape.terms) if (containsTerm(t, text)) terms.add(termKey(t));
+  });
+  return { terms, exprs };
+}
+
+export type MarkedRun = { text: string; kind: 'inc' | 'exc' | null };
+
+/**
+ * `text` as runs, with every include and exclude keyword marked where the
+ * monitor would find it. Exclude wins an overlap: it is checked first.
+ */
+export function markTerms(
+  text: string, lists: { keywords: readonly string[]; antikeywords: readonly string[] },
+): MarkedRun[] {
+  const kinds: MarkedRun['kind'][] = new Array(text.length).fill(null);
+  const paint = (rules: readonly string[], kind: 'inc' | 'exc') => {
+    for (const term of plainTerms(rules)) {
+      const t = normalize(term).trim();
+      if (!t) continue;
+      for (const m of text.matchAll(new RegExp(termPattern(t), 'giu'))) {
+        const at = m.index ?? 0;
+        kinds.fill(kind, at, at + m[0].length);
+      }
+    }
+  };
+  paint(lists.keywords, 'inc');
+  paint(lists.antikeywords, 'exc');
+  const runs: MarkedRun[] = [];
+  for (let i = 0; i < text.length; i++) {
+    const last = runs[runs.length - 1];
+    if (last && last.kind === kinds[i]) last.text += text[i];
+    else runs.push({ text: text[i], kind: kinds[i] });
+  }
+  return runs;
 }
 
 // ── What a listing would do ──
