@@ -3,7 +3,7 @@ import { Skeleton } from '../../components/Skeleton';
 import { coordinatorApi, type FilterPrompt, type FleetDoc, type ReviewStatsDay } from '../../lib/coordinator';
 import { handleFetchError, showSuccessToast } from '../../lib/errorToast';
 import {
-  FLOW_STAGES, STAGE_FORMS, draftChanges, flowCounts, settingsDraft, settingsPatch,
+  FLOW_STAGES, STAGE_FORMS, draftChanges, flowCounts, settingsDraft, settingsPatch, utcToEastern,
   type FlowStage, type ItemField, type SearchField, type SettingsDraft,
 } from '../../lib/fleetView';
 import { useT } from '../../lib/i18n';
@@ -37,7 +37,7 @@ function stageSettings(t: Translate, stage: FlowStage, fleet: FleetDoc | null): 
   switch (stage) {
     case 'search': return [
       { label: t('fbcSetPhrases'), value: String(sum(i => i.search_phrases.length)) },
-      { label: t('fbcSetStartAt'), value: s.start_at?.length ? s.start_at.join(', ') : '—' },
+      { label: t('fbcSetStartAt'), value: s.start_at?.length ? s.start_at.map(hm => utcToEastern(hm)).join(', ') : '—' },
       { label: t('fbcSetWindow'), value: v(window) },
       { label: t('fbcSetDelivery'), value: v(s.delivery_method?.replace(/_/g, ' ')) },
       { label: t('fbcSetMaxResults'), value: v(s.max_results) },

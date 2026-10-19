@@ -17,6 +17,21 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.287.1] - 2026-10-18
+
+Monitors ▸ Facebook shows the sweep time in US Eastern (RS-303).
+
+### Changed
+
+- **"Sweeps at" reads Eastern, not UTC.** The workers' `start_at` is a UTC
+  time because their clocks run on UTC, and the Search stage showed it raw:
+  `Sweeps at (UTC) 10:00` for a sweep that starts at 6 in the morning in New
+  York. The chip and the Edit form now show and take Eastern time, and a
+  save converts back to UTC, so the stored config and the console contract
+  are unchanged. The conversion uses the offset New York is on that day. The
+  stored time does not follow DST, so after the November change the same
+  config reads an hour earlier until it is edited.
+
 ## [1.287.0] - 2026-10-18
 
 Monitors ▸ Reddit's pipeline card counts the past 24 hours (RS-302).
