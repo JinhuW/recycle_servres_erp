@@ -881,6 +881,7 @@ const zh: Record<string, string> = {
   soArchiveFailed: '归档失败',
   soDiscardTooltip: '弃单',
   soReopenTooltip: '重新打开此销售订单',
+  soDownload: '下载',
   soDownloadPriceTemplate: '报价模板（投标表）',
   soDownloadPriceTemplateHint: '含产品规格、图片链接和空白价格 — 发给供应商填写',
   soDownloadPackingList: '装箱清单',
