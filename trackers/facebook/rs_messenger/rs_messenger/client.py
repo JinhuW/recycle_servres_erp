@@ -83,12 +83,14 @@ class CoordinatorClient:
         outbound_id: int,
         status: str,
         error: Optional[str] = None,
-    ) -> None:
-        self._request(
+        permanent: bool = False,
+    ) -> Dict[str, Any]:
+        body = self._request(
             "POST",
             f"/v1/messages/outbound/{int(outbound_id)}/ack",
-            {"status": status, "error": error},
+            {"status": status, "error": error, "permanent": permanent},
         )
+        return body if isinstance(body, dict) else {}
 
     # -- transport ---------------------------------------------------------
 

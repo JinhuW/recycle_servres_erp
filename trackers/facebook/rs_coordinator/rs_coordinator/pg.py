@@ -34,6 +34,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from .db import (
     ACCOUNT_EXTRA_COLUMNS,
+    OUTBOUND_MAX_ATTEMPTS,
     ACCOUNT_LOCK_COLUMNS,
     ALERT_HIT_SQL,
     LISTING_EXTRA_COLUMNS,
@@ -544,16 +545,29 @@ class PostgresDatabase:
         return _row(row)
 
     def mark_outbound(
-        self: "PostgresDatabase", outbound_id: int, status: str, error: str | None = None
-    ) -> None:
+        self: "PostgresDatabase",
+        outbound_id: int,
+        status: str,
+        error: str | None = None,
+        permanent: bool = False,
+    ) -> str:
         with self.cursor() as cur:
-            cur.execute(
-                "UPDATE outbound_messages SET status = %s, last_error = %s, "
-                "attempts = attempts + 1, "
-                "sent_at = CASE WHEN %s = 'sent' THEN %s ELSE sent_at END "
-                "WHERE id = %s",
-                (status, error, status, utcnow(), outbound_id),
-            )
+            if status == "sent":
+                cur.execute(
+                    "UPDATE outbound_messages SET status = 'sent', last_error = %s, "
+                    "attempts = attempts + 1, sent_at = %s WHERE id = %s",
+                    (error, utcnow(), outbound_id),
+                )
+            else:
+                cur.execute(
+                    "UPDATE outbound_messages SET last_error = %s, attempts = attempts + 1, "
+                    "status = CASE WHEN %s OR attempts + 1 >= %s THEN 'failed' ELSE 'queued' END "
+                    "WHERE id = %s AND status <> 'sent'",
+                    (error, bool(permanent), OUTBOUND_MAX_ATTEMPTS, outbound_id),
+                )
+            cur.execute("SELECT status FROM outbound_messages WHERE id = %s", (outbound_id,))
+            row = cur.fetchone()
+        return str(row["status"]) if row else status
 
     def count_autoreplies_since(self: "PostgresDatabase", since: str) -> int:
         with self.cursor() as cur:

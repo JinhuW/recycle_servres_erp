@@ -327,9 +327,50 @@ def test_acking_a_failure_keeps_the_error(client):
         headers=AUTH,
     )
     row = client.db.get_outbound(outbound_id)
-    assert row["status"] == "failed"
+    # One failure is a retry, not a verdict: the row stays queued.
+    assert row["status"] == "queued"
+    assert row["attempts"] == 1
     assert row["last_error"] == "composer not found"
     assert row["sent_at"] is None
+
+
+def test_failed_acks_retry_until_the_cap(client):
+    sync(client, snapshot())
+    outbound_id = client.db.enqueue_outbound("t1", "denver-1", "hello", "operator")
+    url = f"/v1/messages/outbound/{outbound_id}/ack"
+    first = client.post(url, json={"status": "failed", "error": "not visible"}, headers=AUTH)
+    assert first.json() == {"status": "ok", "outcome": "queued", "attempts": 1}
+    assert [row["id"] for row in client.db.pending_outbound()] == [outbound_id]
+
+    client.post(url, json={"status": "failed", "error": "not visible"}, headers=AUTH)
+    third = client.post(url, json={"status": "failed", "error": "still not"}, headers=AUTH)
+    assert third.json() == {"status": "ok", "outcome": "failed", "attempts": 3}
+    assert client.db.pending_outbound() == []
+    assert client.db.get_outbound(outbound_id)["last_error"] == "still not"
+
+
+def test_a_permanent_failure_skips_the_retries(client):
+    sync(client, snapshot())
+    outbound_id = client.db.enqueue_outbound("t1", "denver-1", "hello", "operator")
+    ack = client.post(
+        f"/v1/messages/outbound/{outbound_id}/ack",
+        json={"status": "failed", "error": "composer not found", "permanent": True},
+        headers=AUTH,
+    )
+    assert ack.json()["outcome"] == "failed"
+    assert client.db.pending_outbound() == []
+
+
+def test_a_late_failure_never_demotes_a_sent_reply(client):
+    sync(client, snapshot())
+    outbound_id = client.db.enqueue_outbound("t1", "denver-1", "hello", "operator")
+    url = f"/v1/messages/outbound/{outbound_id}/ack"
+    client.post(url, json={"status": "sent"}, headers=AUTH)
+    late = client.post(url, json={"status": "failed", "error": "retry raced"}, headers=AUTH)
+    assert late.json()["outcome"] == "sent"
+    row = client.db.get_outbound(outbound_id)
+    assert row["status"] == "sent"
+    assert row["sent_at"] is not None
 
 
 def test_ack_rejects_unknown_ids_and_statuses(client):

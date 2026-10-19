@@ -20,6 +20,15 @@ deployed?" harder to answer.
 
 ### Fixed
 
+- **A Messenger reply is acked as sent only when the pane shows it as our
+  bubble** (RS-314). The old check looked for the reply's first 60 characters
+  anywhere on the page, so a draft that Enter never submitted, an older
+  identical bubble or the thread list's preview all passed and the seller never
+  got the reply. The sender now compares direction-tagged pane rows before and
+  after typing, clears a draft that did not submit, and skips a reply whose
+  bubble is already the latest message (a lost ack, not a new reply). On the
+  coordinator a failed ack keeps the row queued for up to three attempts unless
+  the bridge marks it permanent, and a late failure never demotes a sent row.
 - **Challenge screenshots survive a redeploy** (RS-315). The coordinator wrote
   them to `data/screenshots` relative to its working directory, which in the
   container is `/app`, outside the `/data` volume, so every `deploy.sh` deleted

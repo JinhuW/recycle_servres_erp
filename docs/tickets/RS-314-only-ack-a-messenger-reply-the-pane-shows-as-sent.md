@@ -2,7 +2,7 @@
 id: RS-314
 title: Only ack a Messenger reply the pane shows as sent
 type: bug
-status: backlog
+status: in-progress
 priority: P2
 created: 2026-10-19
 reporter: jinhu
@@ -58,3 +58,10 @@ Plan: `docs/superpowers/plans/2026-10-19-rs311-follow-ups.md`.
 
 ## Notes
 
+- The idempotency guard looks only at the pane's latest message. A lost ack is
+  retried within a minute, before the seller has usually answered; a repeat the
+  operator queues after the seller replied still goes out. The one case it
+  loses is the same text queued twice in a row with nothing in between, which
+  adds nothing the seller has not read.
+- Parity verified against a throwaway Postgres 16 (`test_postgres.py`, 64
+  passed) as well as SQLite.

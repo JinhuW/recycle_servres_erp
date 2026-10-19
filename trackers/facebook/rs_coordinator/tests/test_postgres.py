@@ -103,6 +103,26 @@ def _listing(key: str, seen: str, score: int) -> dict:
     }
 
 
+def test_outbound_retry_cap(backend):
+    first = backend.enqueue_outbound("t1", "denver-1", "hello", "operator")
+    second = backend.enqueue_outbound("t1", "denver-1", "again", "operator")
+
+    assert backend.mark_outbound(first, "failed", "not visible") == "queued"
+    assert backend.mark_outbound(first, "failed", "not visible") == "queued"
+    assert backend.mark_outbound(first, "failed", "not visible") == "failed"
+    row = backend.get_outbound(first)
+    assert (row["status"], row["attempts"], row["last_error"]) == ("failed", 3, "not visible")
+
+    assert backend.mark_outbound(second, "failed", "no composer", permanent=True) == "failed"
+    assert backend.get_outbound(second)["attempts"] == 1
+
+    third = backend.enqueue_outbound("t1", "denver-1", "sent one", "operator")
+    assert backend.mark_outbound(third, "sent") == "sent"
+    assert backend.mark_outbound(third, "failed", "late") == "sent"
+    assert backend.get_outbound(third)["sent_at"] is not None
+    assert [row["id"] for row in backend.pending_outbound()] == []
+
+
 def test_listing_insert_get_update(backend):
     backend.insert_listing(_listing("facebook:1", "2026-01-01T00:00:00+00:00", 7))
 
