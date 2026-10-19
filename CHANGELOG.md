@@ -17,6 +17,35 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.291.1] - 2026-10-19
+
+Three fixes from the dev → main release review (RS-310).
+
+### Fixed
+
+- **Assigning a pool account with a cookie works on a fleet that can't seed
+  it.** v1.290.0 said the cookie-first Assign fell back to the password login
+  on an older fleet, but it didn't. Against facebook-tracker 0.12.4, which prod
+  runs, every Assign of an account holding its own cookie failed with "its
+  session was not seeded: Not Found". By then the worker's vault already held
+  the new login, so the pool and the worker disagreed and retrying failed the
+  same way. The same thing happened on 0.12.5 for a cookie copied from the
+  browser without its httpOnly `xs`. Now a 4xx from the session seed queues
+  the password Re-login, which finishes the Assign. A 5xx still fails, so a
+  passing outage is retried rather than worked around.
+- **A dollar price list on a tab named 电子元器件 is no longer read as yuan.**
+  The Market import's yuan mark matched any 元, so a tab or header with 元器件
+  ("components"), 元件, 元旦 or 单元 was converted at the CNY rate. That made a
+  $100 part $13.86 and its max buy about 86% too low. 元 now marks yuan only
+  on its own, as in 单价（元） or 300元.
+- **Full screen on a screen 1100 px or narrower no longer covers the sign-in
+  panel.** The stacked layout for narrow pages set the stage to 56vh, and in
+  full screen that rule outranked the full-screen one. The stage then painted
+  over the 2FA code and the "Type into browser" button, and clicks meant for
+  them landed on the remote page. This hit a 1366×768 laptop at 125% scaling.
+  Full screen now keeps the panel beside the stage at every width; at
+  1093 px the stage is 753 px wide.
+
 ## [1.291.0] - 2026-10-18
 
 Monitors ▸ Reddit shows which prompt is better. It lists every prompt

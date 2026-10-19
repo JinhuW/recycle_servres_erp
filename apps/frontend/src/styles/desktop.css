@@ -3456,11 +3456,13 @@ html.desktop, body.desktop, .desktop #root {
 .fl-wa-empty p { margin: 0; line-height: 1.5; }
 .fl-wa-empty .fp-fields { justify-self: stretch; }
 .fl-wa-empty .fp-fields > div { padding-inline: 0; }
-/* Stacked, the stage gives up height so the code is still on screen. */
+/* Stacked, the stage gives up height so the code is still on screen. Full
+   screen keeps the panel beside the stage: the card has the whole display, and
+   a fixed stage height there would paint over the code below it. */
 @media (max-width: 1100px) {
-  .fl-watch.with-account .fl-watch-body { grid-template-columns: minmax(0, 1fr); }
-  .fl-watch.with-account .fl-watch-stage { height: 56vh; }
-  .fl-wa { height: auto; min-height: 0; border-left: 0; border-top: 1px solid var(--border); }
+  .fl-watch.with-account:not(:fullscreen) .fl-watch-body { grid-template-columns: minmax(0, 1fr); }
+  .fl-watch.with-account:not(:fullscreen) .fl-watch-stage { height: 56vh; }
+  .fl-watch:not(:fullscreen) .fl-wa { height: auto; min-height: 0; border-left: 0; border-top: 1px solid var(--border); }
 }
 @media (prefers-reduced-motion: reduce) {
   .fl-wa-code { transition: none; }

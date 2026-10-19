@@ -224,7 +224,9 @@ const CURRENCY_MARKS: readonly (readonly [RegExp, string])[] = [
   [/(?<![a-z])eur(?![a-z])|€|欧元/i, 'EUR'],
   [/(?<![a-z])gbp(?![a-z])|£|英镑/i, 'GBP'],
   [/(?<![a-z])jpy(?![a-z])|日元/i, 'JPY'],
-  [/[¥￥元]|(?<![a-z])(?:cny|rmb)(?![a-z])|人民币/i, 'CNY'],
+  // 元 is yuan on its own (单价（元）, 300元) but not inside a word: a parts
+  // supplier's dollar sheet is as likely as not on a tab named 电子元器件.
+  [/[¥￥]|(?<!单)元(?![一-鿿])|(?<![a-z])(?:cny|rmb)(?![a-z])|人民币/i, 'CNY'],
 ];
 
 function currencyIn(text: string): string | null {

@@ -129,6 +129,17 @@ describe('readPriceSheetRows', () => {
     expect((readPriceSheetRows(await reload(formatted)))[0]).toMatchObject({ currency: 'EUR' });
   });
 
+  it('reads 元 as yuan only on its own, not inside 元器件 or 单元', () => {
+    const parts = readPriceSheetRows(wbWith([['Part Number', 'Unit Price'], ['PN-1', 100]], '电子元器件'));
+    expect(parts[0]).toMatchObject({ price: 100, currency: null });
+    const header = readPriceSheetRows(wbWith([['型号', '元器件单价'], ['PN-1', 100]], '元旦特价'));
+    expect(header[0]).toMatchObject({ price: 100, currency: null });
+    expect(readPriceSheetRows(wbWith([['Part Number', 'Unit Price'], ['PN-1', 100]], '单元1'))[0].currency).toBeNull();
+
+    const own = readPriceSheetRows(wbWith([['型号', '单价/元'], ['PN-1', 100], ['PN-2', '300元']]));
+    expect(own.map(r => r.currency)).toEqual(['CNY', 'CNY']);
+  });
+
   it('reads a bare $ as dollars, but not HK$ or the [$…] of a number format', async () => {
     const cells = readPriceSheetRows(wbWith([
       ['Part Number', 'Unit Price'],
