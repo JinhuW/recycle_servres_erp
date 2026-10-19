@@ -18,12 +18,16 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from .db import default_db_path
 from .telegram_notify import escape_markdown
 
 logger = logging.getLogger(__name__)
 
 ENV_SCREENSHOT_DIR = "RS_SCREENSHOT_DIR"
-DEFAULT_SCREENSHOT_DIR = "data/screenshots"
+# Beside the database file, never relative to the working directory: a bare
+# `data/screenshots` once resolved to the image's /app, outside the /data
+# volume, and every redeploy threw the screenshots away.
+DEFAULT_SCREENSHOT_SUBDIR = "screenshots"
 
 # A full-page PNG from a 1080p headless browser is well under a megabyte; the
 # cap is generous but still small enough that a buggy (or hostile) worker
@@ -53,7 +57,11 @@ def screenshot_dir() -> Path:
     The environment is read on every call rather than at import time so tests
     (and a redeployed process) can point it somewhere else without a reimport.
     """
-    path = Path(os.environ.get(ENV_SCREENSHOT_DIR) or DEFAULT_SCREENSHOT_DIR)
+    env = os.environ.get(ENV_SCREENSHOT_DIR)
+    if env:
+        path = Path(env)
+    else:
+        path = Path(default_db_path()).resolve().parent / DEFAULT_SCREENSHOT_SUBDIR
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -117,9 +125,18 @@ def save_screenshot(challenge_id: int, screenshot_b64: str | bytes | None) -> Op
     blob = screenshot_b64 if isinstance(screenshot_b64, bytes) else decode_screenshot(screenshot_b64)
     if not blob:
         return None
-    path = screenshot_dir() / f"{int(challenge_id)}.png"
+    path = (screenshot_dir() / f"{int(challenge_id)}.png").resolve()
     path.write_bytes(blob)
     return str(path)
+
+
+def screenshot_on_disk(path: str | None) -> bool:
+    """Whether a stored screenshot path still points at a file.
+
+    A row can outlive its file (a redeploy before the directory sat on the
+    volume), and a link that 404s is worse for the operator than no link.
+    """
+    return bool(path) and Path(path).is_file()
 
 
 def resolve_vnc_url(
@@ -223,7 +240,7 @@ def screenshot_url(challenge_id: int) -> str:
 def to_challenge_out(row: Dict[str, Any]) -> Dict[str, Any]:
     """A `challenges` row in the `ChallengeOut` shape the console consumes.
 
-    `screenshot_url` is set only when a screenshot was actually stored, so the
+    `screenshot_url` is set only when the screenshot is actually on disk, so the
     console can decide whether to render a thumbnail without a probe request.
     """
     challenge_id = int(row["id"])
@@ -234,7 +251,9 @@ def to_challenge_out(row: Dict[str, Any]) -> Dict[str, Any]:
         "kind": row.get("kind"),
         "status": row.get("status") or "open",
         "vnc_url": row.get("vnc_url"),
-        "screenshot_url": screenshot_url(challenge_id) if row.get("screenshot_path") else None,
+        "screenshot_url": (
+            screenshot_url(challenge_id) if screenshot_on_disk(row.get("screenshot_path")) else None
+        ),
         "detail": parse_detail(row.get("detail_json")),
         "created_at": row.get("created_at"),
         "resolved_at": row.get("resolved_at"),
