@@ -211,6 +211,9 @@ async def workers() -> Response:
     return await _forward("GET", "/v1/workers")
 
 
+_WORKER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
 @app.post("/v1/workers/{worker_id}/relogin", dependencies=[Depends(require_token)])
 async def worker_relogin(worker_id: str) -> Response:
     """Queue a Facebook re-login for one worker (console "Re-login" button).
@@ -219,6 +222,17 @@ async def worker_relogin(worker_id: str) -> Response:
     login on its next heartbeat — it moves no credentials and names no account.
     """
     return await _forward("POST", f"/v1/workers/{worker_id}/relogin")
+
+
+@app.post("/v1/workers/{worker_id}/restore-session", dependencies=[Depends(require_token)])
+async def worker_restore(worker_id: str) -> Response:
+    """Queue a session restore for one worker (RS-308), the gentle counterpart
+    to Re-login: the worker restores the snapshot the cookie-first Assign just
+    sealed rather than forcing a password login. Moves no credentials itself.
+    """
+    if not _WORKER_ID.match(worker_id):
+        raise HTTPException(status_code=400, detail="Not a valid worker id")
+    return await _forward("POST", f"/v1/workers/{worker_id}/restore-session")
 
 
 # What the ERP's "Edit credentials" form may set on a vault account. Listed
@@ -286,6 +300,29 @@ async def put_account(account_id: str, request: Request) -> Response:
     if body.get("device_cookies") is not None:
         upstream_body["device_cookies"] = _device_cookies(body["device_cookies"])
     return await _forward("PUT", f"/v1/accounts/{account_id}", json_body=upstream_body)
+
+
+@app.put("/v1/workers/{worker_id}/session", dependencies=[Depends(require_token)])
+async def seed_worker_session(worker_id: str, request: Request) -> Response:
+    """Seal a pool account's cookie as this worker's restorable session (RS-308).
+
+    The cookie-first Assign: the worker restores this instead of a password
+    login. Only `cookie` and `reason` cross; the coordinator validates the
+    cookie and files it under the account the slot already holds, so the ERP
+    can seed a session but still cannot read one back.
+    """
+    if not _WORKER_ID.match(worker_id):
+        raise HTTPException(status_code=400, detail="Not a valid worker id")
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Expected a JSON object") from None
+    if not isinstance(body, dict) or not isinstance(body.get("cookie"), str):
+        raise HTTPException(status_code=400, detail="Expected a JSON object with a cookie")
+    upstream: Dict[str, Any] = {"cookie": body["cookie"]}
+    if isinstance(body.get("reason"), str):
+        upstream["reason"] = body["reason"]
+    return await _forward("PUT", f"/v1/workers/{worker_id}/session", json_body=upstream)
 
 
 @app.get("/v1/challenges", dependencies=[Depends(require_token)])

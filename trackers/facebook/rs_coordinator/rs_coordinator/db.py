@@ -494,6 +494,11 @@ WORKER_HEALTH_COLUMNS = (
     # The same stamp, kept after the worker picks the request up: the ERP
     # compares it with `login_step_at` to tell "queued" from "under way".
     ("relogin_last_requested_at", "TEXT"),
+    # Set when the ERP's cookie-first Assign seeds the slot a session snapshot
+    # and wants it restored now rather than at the next sweep; cleared when the
+    # worker's next directive poll picks it up. Unlike relogin, this restores
+    # the seeded cookie session instead of forcing a password login.
+    ("restore_requested_at", "TEXT"),
     # Where the worker's latest login has got to (picked_up, typing, submitted,
     # challenge, waiting_for_human, logged_in, failed) and when it got there.
     ("login_step", "TEXT"),
@@ -1224,6 +1229,30 @@ class Database:
             cur.execute(
                 "UPDATE workers SET relogin_requested_at = NULL "
                 "WHERE worker_id = ? AND relogin_requested_at IS NOT NULL",
+                (worker_id,),
+            )
+            return cur.rowcount > 0
+
+    def request_restore(self: "Database", worker_id: str) -> None:
+        """Flag a worker to restore its seeded session on its next directive poll.
+
+        The cookie-first counterpart to `request_relogin`: the ERP has just
+        sealed the slot a session snapshot and wants it on disk now, not at the
+        next sweep. Upserts so it can be queued for a worker not yet heard from.
+        """
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO workers (worker_id, restore_requested_at) VALUES (?, ?) "
+                "ON CONFLICT(worker_id) DO UPDATE SET restore_requested_at = excluded.restore_requested_at",
+                (worker_id, utcnow()),
+            )
+
+    def take_restore(self: "Database", worker_id: str) -> bool:
+        """Consume a pending restore request, returning whether one was set."""
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE workers SET restore_requested_at = NULL "
+                "WHERE worker_id = ? AND restore_requested_at IS NOT NULL",
                 (worker_id,),
             )
             return cur.rowcount > 0
