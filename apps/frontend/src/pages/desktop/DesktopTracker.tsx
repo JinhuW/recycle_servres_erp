@@ -21,13 +21,14 @@ import {
 import { liveness, type Liveness } from '../../lib/workerLiveness';
 import { ConfirmDialog } from './settings/dialogs';
 import { Toggle } from './settings/_shared';
+import { PromptsCard } from './TrackerPrompts';
 import '../../styles/facebookPool.css';
 
 // ─── Monitors ▸ Reddit ────────────────────────────────────────────────────────
 // The Facebook fleet page's chrome (DesktopCoordinator.tsx) with the Reddit
 // monitor's content: a status legend that filters, the workers table beside
-// the newest matches, and the pipeline from a poll to an alert, where the
-// subreddits and the alert rules are edited. Everything goes through the
+// the newest matches, the pipeline from a poll to an alert, where the
+// subreddits and the alert rules are edited, and the prompt scores below it. Everything goes through the
 // /api/tracker proxy; a 501 from it means the backend has no tracker
 // credentials, which gets its own quiet state instead of error toasts.
 
@@ -130,6 +131,8 @@ export function DesktopTracker({ showToast }: Props) {
           onSubsChanged={setSubs} onDeleteSub={setDeletingSub}
           onRulesChanged={setRules} onEditRule={setRuleDialog} onDeleteRule={setDeletingRule}
           onError={fail} showToast={showToast} />
+        <PromptsCard locale={locale} onError={fail} showToast={showToast}
+          onPromoted={() => trackerApi.listRules().then(setRules).catch(fail)} />
       </div>
 
       {ruleDialog && (

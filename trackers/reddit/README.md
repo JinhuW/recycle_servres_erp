@@ -112,7 +112,7 @@ ROLE=api API_TOKEN=devtoken pnpm dev # admin API on :8080
 ```
 
 ```bash
-pnpm test        # 207 tests; needs the compose Postgres running
+pnpm test        # 210 tests; needs the compose Postgres running
 pnpm typecheck
 ```
 
@@ -169,11 +169,14 @@ Everything except `/health` needs `Authorization: Bearer $API_TOKEN`.
 | `GET` | `/api/stats?since` | Counts by status (only posts discovered since `since`, when given), per-subreddit health, the oldest pending post, failed posts. |
 | `POST` | `/api/posts/:id/requeue` | Retry a post that gave up. |
 | `POST` | `/api/telegram/test` | Send a test message to the configured chats. |
-| `GET` | `/api/prompt-stats?since` | Per prompt version: posts judged, targets, buyer and dev-chat leads; for a candidate, `vsLive`, its verdicts against live on the same posts. |
+| `GET` | `/api/prompt-stats?since` | Per prompt version: posts judged, targets, buyer and dev-chat leads; for a candidate, `vsLive`, its verdicts against live on the same posts. `config` has the live and candidate prompts as configured now. |
+| `PUT` | `/api/prompt-candidate` | Start or replace a trial. `{"prompt": "…", "model": ""}`; `model` is optional, and `""` means `llm_model`. |
+| `DELETE` | `/api/prompt-candidate` | End the trial. Its verdicts stay, so its version keeps its numbers. |
 | `POST` | `/api/prompt-candidate/promote` | Make the candidate the live prompt (and model). Disables the rules, which the candidate was judged without, and clears the candidate. |
 
 The ERP's Monitors ▸ Reddit page drives the workers, rules, subreddits,
-matches and stats routes through its backend proxy; see *Contracts* in the root `AGENTS.md`
+matches, stats, prompt-stats and prompt-candidate routes through its backend
+proxy; see *Contracts* in the root `AGENTS.md`
 before changing their shapes.
 
 ```bash

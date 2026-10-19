@@ -351,12 +351,50 @@ export function createApi(deps: ApiDeps): Hono {
 
     const settings = await deps.settings.get();
     const enabledRules = (await listRules(deps.sql)).filter((r) => r.enabled);
-    const candidate = candidateConfig(settings);
     return c.json(await promptStats(deps.sql, {
       since: sinceDate,
-      liveHash: promptHash(liveConfig(settings, enabledRules)),
-      candidateHash: candidate ? promptHash(candidate) : null,
+      live: liveConfig(settings, enabledRules),
+      candidate: candidateConfig(settings),
+      enabledRules: enabledRules.length,
     }));
+  });
+
+  // Starts or replaces the trial. Its own route rather than two settings PUTs
+  // so the ERP can drive trials without being let at the rest of settings.
+  app.put('/api/prompt-candidate', async (c) => {
+    const body = await c.req.json().catch(() => null) as {prompt?: unknown; model?: unknown} | null;
+    const prompt = typeof body?.prompt === 'string' ? body.prompt.trim() : '';
+    if (!prompt) return c.json({error: 'prompt must be a non-empty string'}, 400);
+    const model = body?.model === undefined ? '' : body.model;
+    if (typeof model !== 'string' || (model !== '' && !MODEL_ID.test(model))) {
+      return c.json({error: 'model must be "" (use llm_model) or an OpenRouter model id'}, 400);
+    }
+
+    await deps.sql.begin(async (tx) => {
+      const values: Array<[string, string]> =
+        [['candidate_eval_prompt', prompt], ['candidate_llm_model', model]];
+      for (const [key, value] of values) {
+        await tx`
+          INSERT INTO settings (key, value, updated_at)
+          VALUES (${key}, ${tx.json(value)}, NOW())
+          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`;
+      }
+    });
+    deps.settings.invalidate();
+
+    const candidate = candidateConfig(await deps.settings.get())!;
+    const [version] = await deps.sql<Array<{id: number}>>`
+      SELECT id FROM prompt_versions WHERE hash = ${promptHash(candidate)}`;
+    return c.json({candidate: {...candidate, promptVersionId: version?.id ?? null}});
+  });
+
+  // Ends the trial. Its verdicts stay, so its version keeps its numbers.
+  app.delete('/api/prompt-candidate', async (c) => {
+    await deps.sql`
+      UPDATE settings SET value = '""'::jsonb, updated_at = NOW()
+       WHERE key IN ('candidate_eval_prompt', 'candidate_llm_model')`;
+    deps.settings.invalidate();
+    return c.json({cleared: true});
   });
 
   // Makes the candidate the live prompt. Rules are disabled, not deleted: the

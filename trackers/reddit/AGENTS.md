@@ -16,9 +16,10 @@ has the repo map and workflow.
   an allowlist (`GET /api/workers`, `DELETE /api/workers/:id`,
   `GET|POST /api/rules`, `PATCH|DELETE /api/rules/:id`,
   `GET|POST /api/subreddits`, `PATCH|DELETE /api/subreddits/:name`,
-  `GET /api/matches`, `GET /api/stats`) for the
-  ERP's Monitors ▸ Reddit page. Changing one of those response shapes, or adding
-  a route the page needs, is a change to both sides; see the root AGENTS.md
+  `GET /api/matches`, `GET /api/stats`, `GET /api/prompt-stats`,
+  `PUT|DELETE /api/prompt-candidate`, `POST /api/prompt-candidate/promote`)
+  for the ERP's Monitors ▸ Reddit page. Changing one of those response shapes,
+  or adding a route the page needs, is a change to both sides; see the root AGENTS.md
   under *Contracts*. Keep the tracker backward-compatible until the ERP release
   ships, because the two deploy separately.
 - **Versioning.** There is no release process. OCI images are tagged with the
