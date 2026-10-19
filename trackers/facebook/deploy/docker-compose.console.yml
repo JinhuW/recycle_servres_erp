@@ -48,8 +48,8 @@ services:
         west-1=/config/workers/homelab-west.toml,
         nyc-1=/config/workers/homelab-nyc.toml,
         phl-1=/config/workers/homelab-phl.toml,
-        va-1=/config/workers/homelab-va1.toml,
-        va-2=/config/workers/homelab-va2.toml
+        va-2=/config/workers/homelab-va2.toml,
+        wc-1=/config/workers/homelab-wc.toml
       # RS_WORKER_ID arrives from secrets.env above — the same value the
       # monitor reports under — so the dashboard can join the phase-1
       # monitor's heartbeat row to its config.
@@ -73,8 +73,8 @@ services:
         west-1=rs-monitor-west:5900,
         nyc-1=rs-monitor-nyc:5900,
         phl-1=rs-monitor-phl:5900,
-        va-1=rs-monitor-va1:5900,
-        va-2=rs-monitor-va2:5900
+        va-2=rs-monitor-va2:5900,
+        wc-1=rs-monitor-wc:5900
       # Optional: set to the tunnel hostname to make `vnc_url` in /v1/fleet
       # absolute for a page on another origin (the ERP). Left unset, links
       # are paths on this host, which is right for the standalone dashboard
@@ -95,8 +95,8 @@ services:
       - ../configs/homelab-west.toml:/config/workers/homelab-west.toml
       - ../configs/homelab-nyc.toml:/config/workers/homelab-nyc.toml
       - ../configs/homelab-phl.toml:/config/workers/homelab-phl.toml
-      - ../configs/homelab-va1.toml:/config/workers/homelab-va1.toml
       - ../configs/homelab-va2.toml:/config/workers/homelab-va2.toml
+      - ../configs/homelab-wc.toml:/config/workers/homelab-wc.toml
       # Regions, items and the default search settings; and which worker owns
       # which region. Read-only: saved settings overlay master, never edit it.
       - ../configs/master.toml:/config/master.toml:ro

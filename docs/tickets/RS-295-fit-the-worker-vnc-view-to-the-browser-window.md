@@ -2,13 +2,13 @@
 id: RS-295
 title: Fit the worker VNC view to the browser window
 type: bug
-status: in-review
+status: done
 priority: P2
 created: 2026-10-18
 reporter: jinhu
 branch: fix/vnc-fit-window
-pr: "#734"
-version:
+pr: 734
+version: facebook-tracker 0.12.4, 0.12.5
 related: [RS-292]
 ---
 
