@@ -2,13 +2,13 @@
 id: RS-314
 title: Only ack a Messenger reply the pane shows as sent
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-19
 reporter: jinhu
 branch: fix/rs-314-messenger-ack
-pr:
-version:
+pr: 775
+version: facebook-tracker 0.13.1
 related: [RS-311]
 ---
 
@@ -43,12 +43,12 @@ Plan: `docs/superpowers/plans/2026-10-19-rs311-follow-ups.md`.
 
 ## Acceptance criteria
 
-- [ ] A reply is acked `sent` only when the pane shows one more outgoing (`out`) row containing the probe than before typing, and the composer no longer holds the text.
-- [ ] A draft left in the composer is cleared, and the row is acked `failed` with a message that says the reply was not submitted; an older identical bubble alone never counts as sent.
-- [ ] Before typing, an outgoing row that already contains the probe is treated as sent without typing, so a lost ack does not produce a duplicate.
-- [ ] A `failed` ack keeps the row `queued` until the third failure (`OUTBOUND_MAX_ATTEMPTS`), unless the client marks it `permanent`; a late failure never demotes a `sent` row. SQLite and Postgres behave the same.
-- [ ] The ack response says what happened (`outcome`, `attempts`) and the sender logs it. Clients that omit `permanent` keep working.
-- [ ] `rs_messenger` gains tests for `send_message` with a fake page; the coordinator tests cover the retry cap, `permanent` and the no-demotion rule.
+- [x] A reply is acked `sent` only when the pane shows one more outgoing (`out`) row containing the probe than before typing, and the composer no longer holds the text.
+- [x] A draft left in the composer is cleared, and the row is acked `failed` with a message that says the reply was not submitted; an older identical bubble alone never counts as sent.
+- [x] Before typing, an outgoing row that already contains the probe is treated as sent without typing, so a lost ack does not produce a duplicate.
+- [x] A `failed` ack keeps the row `queued` until the third failure (`OUTBOUND_MAX_ATTEMPTS`), unless the client marks it `permanent`; a late failure never demotes a `sent` row. SQLite and Postgres behave the same.
+- [x] The ack response says what happened (`outcome`, `attempts`) and the sender logs it. Clients that omit `permanent` keep working.
+- [x] `rs_messenger` gains tests for `send_message` with a fake page; the coordinator tests cover the retry cap, `permanent` and the no-demotion rule.
 
 ## Out of scope
 
@@ -63,5 +63,7 @@ Plan: `docs/superpowers/plans/2026-10-19-rs311-follow-ups.md`.
   operator queues after the seller replied still goes out. The one case it
   loses is the same text queued twice in a row with nothing in between, which
   adds nothing the seller has not read.
+- Live check after the 0.13.1 deploy is still owed: `rsc msg reply` one line
+  into a thread we own and confirm the row ends `sent` with `attempts=1`.
 - Parity verified against a throwaway Postgres 16 (`test_postgres.py`, 64
   passed) as well as SQLite.

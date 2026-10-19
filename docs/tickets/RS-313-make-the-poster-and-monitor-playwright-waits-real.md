@@ -2,13 +2,13 @@
 id: RS-313
 title: Make the poster and monitor Playwright waits real
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-19
 reporter: jinhu
 branch: fix/rs-313-playwright-waits
-pr:
-version:
+pr: 776
+version: facebook-tracker 0.13.1
 related: [RS-311]
 ---
 
