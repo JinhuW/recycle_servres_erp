@@ -11,4 +11,4 @@ so a control-plane outage never stops a search. It never deletes a worker's
 `/data`, where the Facebook session lives.
 """
 
-__version__ = "0.12.5"
+__version__ = "0.13.0"

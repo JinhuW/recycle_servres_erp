@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-19
+
 ### Added
 
 - **A wall mid-sweep parks the worker instead of reading as an empty city**
