@@ -2206,7 +2206,13 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   Since v1.291.1, a fleet that won't seed the cookie (a console older than
   0.12.5 answers 404; a cookie without `xs` is refused with 422) gets the
   password Re-login instead of a failed Assign.
-  If the worker already holds a pool account,
+  Since facebook-tracker 0.13.0 a wall a worker hits mid-sweep — a checkpoint,
+  captcha, block or disabled notice on an ordinary Marketplace URL, which the
+  selectors read as an empty city — is named by a decision model
+  (`RS_PAGE_CHECK_MODEL`), filed here as an open checkpoint with a screenshot,
+  and parks the worker on CHECKPOINT or CHALLENGE_CAPTCHA, searching nothing,
+  until the page moves on; clearing it in Watch lifts it within a minute
+  (RS-311). If the worker already holds a pool account,
   the dialog asks where that one goes — back to Available, to Problem (still
   naming the worker) or Retired — with no default, and both moves land
   together. A worker without a vault account gets one named after it. Until
