@@ -2,13 +2,13 @@
 id: RS-315
 title: Keep challenge screenshots on the coordinator volume
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-19
 reporter: jinhu
 branch: fix/rs-315-screenshot-volume
-pr:
-version:
+pr: 774
+version: facebook-tracker 0.13.1
 related: [RS-311, RS-286]
 ---
 
@@ -41,11 +41,11 @@ Plan: `docs/superpowers/plans/2026-10-19-rs311-follow-ups.md`.
 
 ## Acceptance criteria
 
-- [ ] With `RS_SCREENSHOT_DIR` unset, screenshots go to a `screenshots/` directory beside the database file (`RS_COORDINATOR_DB`), so the container writes under `/data` and a local run under the checkout's `data/`.
-- [ ] The coordinator image and the compose file set `RS_SCREENSHOT_DIR=/data/screenshots` explicitly.
-- [ ] `screenshot_path` is stored absolute.
-- [ ] A challenge whose file is missing on disk lists `screenshot_url: null` instead of a URL that 404s.
-- [ ] After deploy, `docker exec rs-coordinator sh -c 'echo $RS_SCREENSHOT_DIR; ls -ld /data/screenshots'` shows the volume path, and the next challenge's screenshot survives a redeploy.
+- [x] With `RS_SCREENSHOT_DIR` unset, screenshots go to a `screenshots/` directory beside the database file (`RS_COORDINATOR_DB`), so the container writes under `/data` and a local run under the checkout's `data/`.
+- [x] The coordinator image and the compose file set `RS_SCREENSHOT_DIR=/data/screenshots` explicitly.
+- [x] `screenshot_path` is stored absolute.
+- [x] A challenge whose file is missing on disk lists `screenshot_url: null` instead of a URL that 404s.
+- [x] After deploy, `docker exec rs-coordinator sh -c 'echo $RS_SCREENSHOT_DIR; ls -ld /data/screenshots'` shows the volume path, and the next challenge's screenshot survives a redeploy.
 
 ## Out of scope
 
@@ -54,3 +54,8 @@ Plan: `docs/superpowers/plans/2026-10-19-rs311-follow-ups.md`.
 
 ## Notes
 
+- Verified on the VM after the 0.13.1 deploy: `RS_SCREENSHOT_DIR=/data/screenshots`
+  in the container, the directory is created on the `coordinator-data` volume
+  (`/data`) on first use. Whether a screenshot survives a redeploy is now a
+  property of the volume; the first real challenge after this release confirms
+  it end to end.

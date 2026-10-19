@@ -5,10 +5,10 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-316](./RS-316-shadow-run-a-decision-model-pre-screen-for-facebook.md) | in-progress | task | P2 | Shadow-run a decision-model pre-screen for Facebook listings | — |
-| [RS-315](./RS-315-keep-challenge-screenshots-on-the-coordinator-volume.md) | in-progress | bug | P2 | Keep challenge screenshots on the coordinator volume | — |
-| [RS-314](./RS-314-only-ack-a-messenger-reply-the-pane-shows-as-sent.md) | in-progress | bug | P2 | Only ack a Messenger reply the pane shows as sent | — |
-| [RS-313](./RS-313-make-the-poster-and-monitor-playwright-waits-real.md) | in-progress | bug | P2 | Make the poster and monitor Playwright waits real | — |
+| [RS-316](./RS-316-shadow-run-a-decision-model-pre-screen-for-facebook.md) | done | task | P2 | Shadow-run a decision-model pre-screen for Facebook listings | facebook-tracker 0.13.1 |
+| [RS-315](./RS-315-keep-challenge-screenshots-on-the-coordinator-volume.md) | done | bug | P2 | Keep challenge screenshots on the coordinator volume | facebook-tracker 0.13.1 |
+| [RS-314](./RS-314-only-ack-a-messenger-reply-the-pane-shows-as-sent.md) | done | bug | P2 | Only ack a Messenger reply the pane shows as sent | facebook-tracker 0.13.1 |
+| [RS-313](./RS-313-make-the-poster-and-monitor-playwright-waits-real.md) | done | bug | P2 | Make the poster and monitor Playwright waits real | facebook-tracker 0.13.1 |
 | [RS-312](./RS-312-buyer-alerts-ask-for-a-reaction-and-the-evaluator-re.md) | in-review | story | P2 | Buyer alerts ask for a reaction, and the evaluator reasons before it decides | 1.292.0 (tracker image f043f766) |
 | [RS-311](./RS-311-recognise-facebook-walls-mid-sweep-with-a-decision-m.md) | done | story | P2 | Recognise Facebook walls mid-sweep with a decision model | facebook-tracker 0.13.0 |
 | [RS-310](./RS-310-fix-the-price-import-s-false-positive-the-full-scree.md) | done | bug | P1 | Fix the price import's 元 false positive, the full-screen Watch overlap and the cookie Assign fallback | v1.291.1 |

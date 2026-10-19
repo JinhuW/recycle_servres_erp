@@ -2,13 +2,13 @@
 id: RS-316
 title: Shadow-run a decision-model pre-screen for Facebook listings
 type: task
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-19
 reporter: jinhu
 branch: fix/rs-316-prescreen-shadow
-pr:
-version:
+pr: 777
+version: facebook-tracker 0.13.1
 related: [RS-311]
 ---
 

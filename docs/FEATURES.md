@@ -2215,7 +2215,10 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   (`RS_PAGE_CHECK_MODEL`), filed here as an open checkpoint with a screenshot,
   and parks the worker on CHECKPOINT or CHALLENGE_CAPTCHA, searching nothing,
   until the page moves on; clearing it in Watch lifts it within a minute
-  (RS-311). If the worker already holds a pool account,
+  (RS-311). Since facebook-tracker 0.13.1 that screenshot sits on the
+  coordinator's data volume and survives a redeploy, and a checkpoint whose
+  file is gone offers no thumbnail rather than a broken one (RS-315). If the
+  worker already holds a pool account,
   the dialog asks where that one goes — back to Available, to Problem (still
   naming the worker) or Retired — with no default, and both moves land
   together. A worker without a vault account gets one named after it. Until
