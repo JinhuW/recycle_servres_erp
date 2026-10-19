@@ -2,13 +2,13 @@
 id: RS-323
 title: Review mode prices the PO for the commission
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-19
 reporter: jinhu
 branch: review-mode-selling-price
-pr:
-version:
+pr: 787
+version: v1.296.0
 related: [RS-124, RS-128, RS-191]
 ---
 

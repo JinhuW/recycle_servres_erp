@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-323](./RS-323-review-mode-prices-the-po-for-the-commission.md) | done | story | P2 | Review mode prices the PO for the commission | — |
 | [RS-322](./RS-322-reddit-page-lets-a-manager-change-the-evaluation-mod.md) | done | story | P2 | Reddit page lets a manager change the evaluation model | 1.295.0 |
 | [RS-321](./RS-321-table-action-column-stays-visible-while-the-other-co.md) | done | bug | P2 | Table action column stays visible while the other columns scroll | — |
 | [RS-320](./RS-320-attachments-on-a-sell-order-for-the-sell-records.md) | done | story | P2 | Attachments on a sell order for the sell records | v1.294.0 |
