@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-310](./RS-310-fix-the-price-import-s-false-positive-the-full-scree.md) | in-progress | bug | P1 | Fix the price import's 元 false positive, the full-screen Watch overlap and the cookie Assign fallback | — |
+| [RS-310](./RS-310-fix-the-price-import-s-false-positive-the-full-scree.md) | done | bug | P1 | Fix the price import's 元 false positive, the full-screen Watch overlap and the cookie Assign fallback | — |
 | [RS-309](./RS-309-reddit-page-shows-which-prompt-is-better-per-version.md) | in-review | story | P2 | Reddit page shows which prompt is better: per-version leads and the candidate trial | 1.291.0 |
 | [RS-308](./RS-308-assign-restores-a-pool-account-s-cookie-session-inst.md) | done | story | P2 | Assign restores a pool account's cookie session instead of a password login | facebook-tracker 0.12.5, v1.290.0 |
 | [RS-307](./RS-307-keep-the-keyword-gate-the-same-height-while-editing.md) | done | bug | P2 | Keep the keyword gate the same height while editing | 1.289.1 |
@@ -20,8 +20,8 @@ See [README.md](./README.md) for what the fields mean.
 | [RS-298](./RS-298-fleet-status-column-shows-the-last-heartbeat-time.md) | done | task | P2 | Fleet status column shows the last heartbeat time | 1.283.1 |
 | [RS-297](./RS-297-reddit-tracker-page-follows-the-facebook-fleet-layou.md) | in-review | story | P2 | Reddit tracker page follows the Facebook fleet layout | 1.283.0 |
 | [RS-296](./RS-296-full-screen-for-the-fleet-watch-view.md) | in-review | story | P2 | Full screen for the fleet watch view | 1.282.0 |
-| [RS-295](./RS-295-fit-the-worker-vnc-view-to-the-browser-window.md) | done | bug | P2 | Fit the worker VNC view to the browser window | — |
-| [RS-294](./RS-294-bring-wc-1-up-as-a-compose-worker-on-va-1-s-proxy.md) | done | task | P1 | Bring wc-1 up as a compose worker on va-1's proxy | — |
+| [RS-295](./RS-295-fit-the-worker-vnc-view-to-the-browser-window.md) | done | bug | P2 | Fit the worker VNC view to the browser window | facebook-tracker 0.12.4, 0.12.5 |
+| [RS-294](./RS-294-bring-wc-1-up-as-a-compose-worker-on-va-1-s-proxy.md) | done | task | P1 | Bring wc-1 up as a compose worker on va-1's proxy | facebook-tracker 0.12.3 |
 | [RS-293](./RS-293-every-facebook-login-records-its-device-retries-are.md) | in-review | story | P1 | Every Facebook login records its device, retries are capped, and a new account starts on its legacy device | facebook-tracker 0.12.2, v1.281.3 |
 | [RS-292](./RS-292-facebook-fleet-scales-itself-rolls-new-versions-and.md) | done | story | P2 | Facebook fleet scales itself, rolls new versions, and keeps every account's session and device | facebook-tracker 0.12.0 (ERP 1.281.2 for the uid) |
 | [RS-291](./RS-291-a-worker-s-saved-login-survives-any-restart-until-fa.md) | backlog | bug | P1 | A worker's saved login survives any restart until Facebook expires it | — |

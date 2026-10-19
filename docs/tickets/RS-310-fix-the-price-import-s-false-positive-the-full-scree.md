@@ -2,13 +2,13 @@
 id: RS-310
 title: Fix the price import's 元 false positive, the full-screen Watch overlap and the cookie Assign fallback
 type: bug
-status: in-progress
+status: done
 priority: P1
 created: 2026-10-19
 reporter: jinhu
 branch: fix/release-review-erp
-pr:
-version:
+pr: 767
+version: v1.291.1
 related: [RS-296, RS-301, RS-308]
 ---
 
