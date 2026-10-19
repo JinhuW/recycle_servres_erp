@@ -112,6 +112,9 @@ Reddit.
   - all five OCI VMs, on image `04f5e24a`.
 
   Migration 0003 applied, and prompt version 1 is the live prompt.
+- Redeployed on 2026-10-19 as image `4282291f`, with #758 (prompt version
+  ids without gaps) and RS-309's `config` and `prompt-candidate` routes.
+  Candidate 1 has been on trial since about 01:20 UTC.
 - The amd64 half of the image build first failed on the Mac's emulator; see
   `trackers/reddit/docs/debug-notes/amd64-image-build-crashes-node.md`.
 - Still to do, on the user's side:
