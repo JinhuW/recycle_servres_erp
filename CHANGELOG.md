@@ -17,6 +17,23 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.297.0] - 2026-10-19
+
+The sell-order vendor price import is gone (RS-324), the second half of the
+ask that put the sell price into Review mode in v1.296.0. The round trip —
+download the bid sheet, the vendor fills the Unit Price column, drop it back
+on the order's edit view — existed to get prices onto a sell order. A sell
+order line already starts at its lot's sell price, and Review mode now sets
+that price on the PO, so the sheet is a quote the ERP never reads back. The
+*Vendor price import* card, `POST /api/sell-orders/:id/price-import/preview`,
+the `bidParts` save field and the `bid:<order>` market feed are removed;
+events already on file stay. The bid sheet and packing-list downloads are
+unchanged, and so is the Market page's price-list import, whose sheet reader
+moved to `services/priceSheet.ts` with the header and cell tests that used to
+run through the sell-order matcher. A lot added to an existing order's edit
+view now also starts at its sell price, in the order's currency, instead of
+at 0.
+
 ## [1.296.0] - 2026-10-19
 
 Review mode now prices the PO for the commission, not just counts it

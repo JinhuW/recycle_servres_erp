@@ -3,7 +3,7 @@ import ExcelJS from 'exceljs';
 import app from '../src/index';
 import { resetDb, getTestDb } from './helpers/db';
 import { freeSellableLine } from './helpers/inventory';
-import { api, multipart, testEnv } from './helpers/app';
+import { api, testEnv } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import {
   buildPriceTemplateWorkbook, buildPackingListWorkbook, packSections, packTabName,
@@ -642,20 +642,97 @@ describe('GET /api/sell-orders/:id/packing-list', () => {
     expect(rowQty(nj2, 'Warehouse total')).toEqual([3]);
   });
 
-  it('is rejected outright when uploaded to the price import', async () => {
-    // The parser needs a part header AND a price header on the same row; this
-    // workbook has the first and never the second. Uploading the wrong file
-    // must say so, not quietly match nothing.
-    const { token } = await loginAs(ALEX);
-    const id = await createOrder(token);
-    const dl = await getRaw(`/api/sell-orders/${id}/packing-list`, token);
-    const file = new Blob([await dl.arrayBuffer()], { type: XLSX_MIME });
+  it('404s unknown orders and 403s non-managers', async () => {
+    const mgr = await loginAs(ALEX);
+    const missing = await getRaw('/api/sell-orders/SO-nope/price-template', mgr.token);
+    expect(missing.status).toBe(404);
 
-    const res = await multipart(
-      `/api/sell-orders/${id}/price-import/preview`, { file }, { token },
-    );
-    expect(res.status).toBe(400);
-    expect((res.body as { code?: string }).code).toBe('columns-not-found');
+    const id = await createOrder(mgr.token);
+    const pur = await loginAs(MARCUS);
+    const forbidden = await getRaw(`/api/sell-orders/${id}/price-template`, pur.token);
+    expect(forbidden.status).toBe(403);
+  });
+});
+
+describe('GET /api/sell-orders/:id/packing-list', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  // Every pack tab reserves the two RAM group-label columns, so the section
+  // grid starts here whether or not the warehouse holds RAM.
+  const PACK_OFFSET = 2;
+
+  const cellStrings = (ws: ExcelJS.Worksheet): string[] => {
+    const out: string[] = [];
+    ws.eachRow(row => row.eachCell({ includeEmpty: false }, cell => {
+      out.push(String(cell.value ?? ''));
+    }));
+    return out;
+  };
+  // Read a labelled row's numbers. The label sits at the first grid column,
+  // not column A — the label columns are to its left.
+  const rowQty = (ws: ExcelJS.Worksheet, firstCell: string): number[] => {
+    const out: number[] = [];
+    ws.eachRow(row => {
+      if (String(row.getCell(1 + PACK_OFFSET).value ?? '') === firstCell) {
+        row.eachCell({ includeEmpty: false }, cell => {
+          if (typeof cell.value === 'number') out.push(cell.value);
+        });
+      }
+    });
+    return out;
+  };
+
+  it('streams price-free packing-checklist tabs, one per warehouse', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await createOrder(token, {
+      lines: [
+        { category: 'RAM', label: 'DIMM A', partNumber: 'WH-R1', qty: 2, unitPrice: 40, warehouseId: 'WH-LA1' },
+        { category: 'RAM', label: 'DIMM A', partNumber: 'WH-R1', qty: 3, unitPrice: 40, warehouseId: 'WH-NJ2' },
+        { category: 'SSD', label: 'Drive B', partNumber: 'WH-S1', qty: 1, unitPrice: 90, warehouseId: 'WH-LA1' },
+      ],
+    });
+    const res = await getRaw(`/api/sell-orders/${id}/packing-list`, token);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain(XLSX_MIME);
+    expect(res.headers.get('content-disposition')).toContain('packing-list');
+
+    const wb = await loadWorkbook(res);
+    // Warehouse tabs only — the bid sheet is its own download.
+    expect(wb.worksheets.map(w => w.name)).toEqual(['Pack - LA1', 'Pack - NJ2']);
+
+    // LA1 holds both categories as stacked sections with qty subtotals and a
+    // warehouse total; the NJ2 split stays on its own tab.
+    const la1 = wb.worksheets.find(w => w.name === 'Pack - LA1')!;
+    const la1Cells = cellStrings(la1);
+    expect(la1Cells).toContain('RAM');
+    expect(la1Cells).toContain('SSD');
+    expect(la1Cells.filter(v => v === 'Packed ✓')).toHaveLength(2);
+    expect(la1Cells.filter(v => v === 'Subtotal')).toHaveLength(2);
+    expect(la1Cells).toContain('Warehouse total');
+    expect(la1Cells).toContain('WH-R1');
+    expect(la1Cells).toContain('WH-S1');
+    // A picker packs by part number and spec, so the columns that only help a
+    // bidder are off these tabs — headers and the values under them.
+    for (const dropped of ['Item', 'Class', 'Chip #', 'Condition', 'Image URL']) {
+      expect(la1Cells).not.toContain(dropped);
+    }
+    expect(la1Cells).not.toContain('DIMM A');
+    expect(la1Cells).not.toContain('Drive B');
+    // Price-free by design: nothing on a packing tab may look like a price —
+    // that's also what keeps the import parser away from this workbook.
+    expect(la1Cells.some(v => /price|单价|价格/i.test(v))).toBe(false);
+    // Packing tabs ship unprotected — a picker types into the tick boxes.
+    expect(la1.sheetProtection).toBeFalsy();
+
+    // LA1: RAM qty 2 + SSD qty 1 → subtotals [2, 1], total 3. NJ2: RAM 3.
+    expect(rowQty(la1, 'Subtotal')).toEqual([2, 1]);
+    expect(rowQty(la1, 'Warehouse total')).toEqual([3]);
+
+    const nj2 = wb.worksheets.find(w => w.name === 'Pack - NJ2')!;
+    const nj2Cells = cellStrings(nj2);
+    expect(nj2Cells).toContain('WH-R1');
+    expect(nj2Cells).not.toContain('WH-S1');
+    expect(rowQty(nj2, 'Warehouse total')).toEqual([3]);
   });
 
   it('404s unknown orders and 403s non-managers', async () => {

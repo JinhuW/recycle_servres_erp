@@ -1,61 +1,11 @@
-// Parses a vendor-filled price spreadsheet and matches its rows to a sell
-// order's products by canonical part number. The file is untrusted: columns
-// may be reordered, rows added or deleted, prices typed as strings with
-// currency symbols. Nothing here relies on cell positions — columns are
-// located by header text, rows are matched by part number. The Market page's
-// price import reads its sheets through the same readPriceSheetRows.
+// Reads a price spreadsheet's Part Number and Unit Price columns, wherever
+// they sit. The file is untrusted: columns may be reordered, rows added or
+// deleted, prices typed as strings with currency symbols. Nothing here relies
+// on cell positions — columns are located by header text. The Market page's
+// price import reads its lists through this.
 
 import type ExcelJS from 'exceljs';
 import { canonPartNumberJs } from '../lib/part-number';
-
-export type OrderProduct = {
-  partNumber: string | null;
-  label: string;
-  qty: number;
-  lineCount: number;
-  oldPrice: number | null;
-};
-
-export type ParsedRowStatus =
-  | 'matched'
-  | 'not-in-order'
-  | 'no-price'
-  | 'invalid-price'
-  | 'duplicate'
-  | 'ambiguous'
-  // A sheet from before v1.242.0 priced the part apart per condition.
-  | 'per-condition';
-
-export type ParsedPriceRow = {
-  // Worksheet the row came from — the template ships one tab per category, so
-  // (sheet, rowNumber) is a row's identity; rowNumber alone repeats per tab.
-  sheet: string;
-  rowNumber: number;
-  rawPart: string;
-  canonPart: string;
-  price: number | null;
-  rawPrice: string;
-  status: ParsedRowStatus;
-  partNumber?: string | null;
-  label?: string;
-  oldPrice?: number | null;
-  qty?: number;
-  lineCount?: number;
-};
-
-export type PriceImportPreview = {
-  rows: ParsedPriceRow[];
-  unmatchedProducts: OrderProduct[];
-  manualProducts: OrderProduct[];
-  summary: {
-    matched: number;
-    notInOrder: number;
-    noPrice: number;
-    invalid: number;
-    duplicate: number;
-    ambiguous: number;
-  };
-};
 
 export class PriceColumnsNotFoundError extends Error {
   constructor() {
@@ -155,17 +105,14 @@ type Header = {
   partCol: number;
   priceCol: number;
   priceHeader: string;
-  // A pre-v1.242.0 bid sheet's Condition column, if the sheet has one.
-  conditionCol: number | null;
 };
 
 type HeaderHit = Header & { ws: ExcelJS.Worksheet; headerRow: number };
 
-// Every sheet with a recognizable header participates — the bid template
-// ships one tab per category, and a vendor may fill prices on several tabs.
+// Every sheet with a recognizable header participates — our own bid sheet
+// ships one tab per category, and a supplier's list may span several.
 // Columns are located per sheet, so tabs with different spec-column counts
 // (and therefore different price-column positions) all parse correctly.
-const isConditionHeader = (h: string) => h === 'condition' || h.includes('成色');
 
 /** The columns a row names when it is a header row; null for any other row. */
 function headerIn(row: ExcelJS.Row): Header | null {
@@ -190,8 +137,7 @@ function headerIn(row: ExcelJS.Row): Header | null {
   const part = best(partScore);
   const price = part && best(priceScore, part.col);
   if (!part || !price) return null;
-  const condition = cells.find(c => c.col !== part.col && c.col !== price.col && isConditionHeader(c.h));
-  return { partCol: part.col, priceCol: price.col, priceHeader: price.text, conditionCol: condition?.col ?? null };
+  return { partCol: part.col, priceCol: price.col, priceHeader: price.text };
 }
 
 function findHeaders(wb: ExcelJS.Workbook): HeaderHit[] {
@@ -213,8 +159,8 @@ function findHeaders(wb: ExcelJS.Workbook): HeaderHit[] {
 }
 
 // A currency a header, cell, number format or tab names — parsePrice strips
-// the marks without a trace. Harmless on a bid sheet, whose order names the
-// currency; the Market import reads dollars and yuan and refuses the rest.
+// the marks without a trace. The Market import reads dollars and yuan and
+// refuses the rest.
 // Dollars named outright win, or 美元 (US dollar) would read as its 元. A bare
 // $ is dollars unless a letter (HK$, C$) or a [ — Excel's [$€-407] locale
 // syntax in a number format — sits before it.
@@ -248,13 +194,9 @@ export type SheetPriceRow = {
   rawPrice: string;
   /** The currency the row is marked in, or null when nothing names one. */
   currency: string | null;
-  /** The row's Condition cell, read only when asked for and present. */
-  condition?: string | null;
 };
 
-export function readPriceSheetRows(
-  wb: ExcelJS.Workbook, opts: { condition?: boolean } = {},
-): SheetPriceRow[] {
+export function readPriceSheetRows(wb: ExcelJS.Workbook): SheetPriceRow[] {
   const hits = findHeaders(wb);
   if (hits.length === 0) throw new PriceColumnsNotFoundError();
 
@@ -291,162 +233,8 @@ export function readPriceSheetRows(
         priceKind: price.kind,
         rawPrice,
         currency,
-        ...(opts.condition
-          ? { condition: cols.conditionCol ? cellText(row.getCell(cols.conditionCol).value).trim() || null : null }
-          : {}),
       });
     });
   }
   return rows;
-}
-
-export type SellOrderLineRow = {
-  label: string;
-  part_number: string | null;
-  qty: number;
-  unit_price: number | null;
-  source_unit_price: number | null;
-};
-
-// The bid sheet's product: one price covers every line of a part across
-// warehouses, conditions and the labels its lines were added under, since the
-// sheet prices a part once and the import applies a part's price to all of
-// its lines. A line with no part number is its own product by label. oldPrice
-// is native — what the vendor's new price will be compared against — and
-// none when the part's lines were priced differently.
-export function groupOrderProducts(rows: SellOrderLineRow[], isCny: boolean): OrderProduct[] {
-  const byKey = new Map<string, OrderProduct>();
-  for (const row of rows) {
-    const canon = row.part_number ? canonPartNumberJs(row.part_number) : '';
-    const key = canon ? `pn:${canon}` : `label:${row.label}`;
-    const native = isCny ? (row.source_unit_price ?? row.unit_price) : row.unit_price;
-    const existing = byKey.get(key);
-    if (existing) {
-      existing.qty += row.qty;
-      existing.lineCount++;
-      if (existing.oldPrice !== native) existing.oldPrice = null;
-    } else {
-      byKey.set(key, {
-        partNumber: row.part_number,
-        label: row.label,
-        qty: row.qty,
-        lineCount: 1,
-        oldPrice: native,
-      });
-    }
-  }
-  return [...byKey.values()];
-}
-
-export function parsePriceWorkbook(
-  wb: ExcelJS.Workbook,
-  orderProducts: OrderProduct[],
-): PriceImportPreview {
-  const sheetRows = readPriceSheetRows(wb, { condition: true });
-
-  const manualProducts: OrderProduct[] = [];
-  const byCanon = new Map<string, { product: OrderProduct; index: number }[]>();
-  orderProducts.forEach((product, index) => {
-    const canon = product.partNumber ? canonPartNumberJs(product.partNumber) : '';
-    if (canon === '') {
-      manualProducts.push(product);
-      return;
-    }
-    const list = byCanon.get(canon) ?? [];
-    list.push({ product, index });
-    byCanon.set(canon, list);
-  });
-
-  const rows: ParsedPriceRow[] = [];
-  // One winner per product: a later valid price for the same product demotes
-  // the earlier row to 'duplicate' (vendors often re-list corrected prices at
-  // the bottom of the sheet). The map spans sheets, so re-pricing a part on
-  // another tab demotes the first occurrence the same way.
-  const winnerByProduct = new Map<number, ParsedPriceRow>();
-  // A sheet made before v1.242.0 has a row per condition. Two of a part's
-  // conditions at two prices are not a correction further down: one price
-  // can't stand for both, so the part is left for the manager to price.
-  const winnerCondition = new Map<number, string>();
-  const perCondition = new Set<number>();
-  const condKey = (c: string | null | undefined) => (c ?? '').trim().toLowerCase();
-
-  // A bid row that folds several part numbers (a DDR5 spec row) lists them
-  // comma-separated in one cell; its one price is each part's price, so the
-  // cell reads as one row per part, all at the row's number.
-  const partCells = sheetRows.flatMap((sheetRow) => {
-    const parts = sheetRow.rawPart.split(/[,;\n]+/).map((s) => s.trim()).filter(Boolean);
-    return parts.length > 1
-      ? parts.map((rawPart) => ({ ...sheetRow, rawPart, canonPart: canonPartNumberJs(rawPart) }))
-      : [sheetRow];
-  });
-
-  for (const sheetRow of partCells) {
-    const parsed: ParsedPriceRow = {
-      sheet: sheetRow.sheet,
-      rowNumber: sheetRow.rowNumber,
-      rawPart: sheetRow.rawPart,
-      canonPart: sheetRow.canonPart,
-      price: sheetRow.price,
-      rawPrice: sheetRow.rawPrice,
-      status: 'no-price',
-    };
-
-    const candidates = byCanon.get(parsed.canonPart);
-    if (!candidates) {
-      parsed.status = 'not-in-order';
-    } else {
-      // A part under two labels (a typed line re-worded) can't be told
-      // apart by part number alone.
-      const target = candidates.length === 1 ? candidates[0] : null;
-      if (!target) {
-        parsed.status = 'ambiguous';
-      } else if (sheetRow.priceKind === 'empty' || sheetRow.price === 0) {
-        // A 0 on a bid is "not bidding"; as a price it would also be recorded
-        // as the part's market bid and zero its max buy.
-        parsed.status = 'no-price';
-      } else if (sheetRow.priceKind === 'invalid') {
-        parsed.status = 'invalid-price';
-      } else if (perCondition.has(target.index)) {
-        parsed.status = 'per-condition';
-      } else {
-        const prior = winnerByProduct.get(target.index);
-        const cond = condKey(sheetRow.condition);
-        const priorCond = winnerCondition.get(target.index) ?? '';
-        if (prior && cond && priorCond && cond !== priorCond && prior.price !== sheetRow.price) {
-          prior.status = 'per-condition';
-          parsed.status = 'per-condition';
-          perCondition.add(target.index);
-          winnerByProduct.delete(target.index);
-        } else {
-          parsed.status = 'matched';
-          parsed.partNumber = target.product.partNumber;
-          parsed.label = target.product.label;
-          parsed.oldPrice = target.product.oldPrice;
-          parsed.qty = target.product.qty;
-          parsed.lineCount = target.product.lineCount;
-          if (prior) prior.status = 'duplicate';
-          winnerByProduct.set(target.index, parsed);
-          winnerCondition.set(target.index, cond);
-        }
-      }
-    }
-    rows.push(parsed);
-  }
-
-  const unmatchedProducts = orderProducts.filter(
-    (p, i) => !winnerByProduct.has(i) && !manualProducts.includes(p),
-  );
-
-  const summary = { matched: 0, notInOrder: 0, noPrice: 0, invalid: 0, duplicate: 0, ambiguous: 0 };
-  for (const row of rows) {
-    if (row.status === 'matched') summary.matched++;
-    else if (row.status === 'not-in-order') summary.notInOrder++;
-    else if (row.status === 'no-price') summary.noPrice++;
-    else if (row.status === 'invalid-price') summary.invalid++;
-    else if (row.status === 'duplicate') summary.duplicate++;
-    // A part this file can't price on its own, like an ambiguous one.
-    else summary.ambiguous++;
-  }
-
-  return { rows, unmatchedProducts, manualProducts, summary };
 }
