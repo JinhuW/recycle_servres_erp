@@ -2,13 +2,13 @@
 id: RS-312
 title: Buyer alerts ask for a reaction, and the evaluator reasons before it decides
 type: story
-status: in-progress
+status: in-review
 priority: P2
 created: 2026-10-19
 reporter: jinhu
 branch: reddit-reasoning-first
-pr:
-version:
+pr: "#766"
+version: 1.292.0 (tracker image f043f766)
 related: [RS-305, RS-309]
 ---
 
@@ -37,17 +37,17 @@ count, and whether to build reasoning-first into the tracker.
 
 ## Acceptance criteria
 
-- [ ] Every buyer alert ends with "React 👍 if you act on this, 👎 if it's not
+- [x] Every buyer alert ends with "React 👍 if you act on this, 👎 if it's not
   useful." Dev-chat reviews keep their own reaction line and don't repeat it.
-- [ ] The evaluator's response schema asks for `reasoning` before `is_target`,
+- [x] The evaluator's response schema asks for `reasoning` before `is_target`,
   for live and candidate prompts alike.
-- [ ] A prompt version's identity includes the response schema:
+- [x] A prompt version's identity includes the response schema:
   - verdicts made under the old and new schema never share a version;
   - `prompt_versions.response_schema` labels each one;
   - `GET /api/prompt-stats` returns it.
-- [ ] The ERP's **Which prompt is better** card labels each version
+- [x] The ERP's **Which prompt is better** card labels each version
   *verdict first* or *reasoning first*.
-- [ ] Run through the shipped code path, candidate 1 lands near 85%
+- [x] Run through the shipped code path, candidate 1 lands near 85%
   precision on the evaluation's 100 posts.
 
 ## Out of scope
@@ -57,3 +57,15 @@ count, and whether to build reasoning-first into the tracker.
 - **Changing the model** (`openai/gpt-4o-mini`).
 
 ## Notes
+
+- **The `reasoning` field's description is unchanged** ("Brief justification
+  for the verdict."). The plan proposed a new wording, but the offline run
+  measured this one at 85%, and changing it would ship something untested.
+  Run through the shipped code, candidate 1 scored 84% on the same 100
+  posts.
+- **Deployed on 2026-10-19 at about 05:20 UTC.** Image `f043f766` runs on the
+  Railway api and worker and all five OCI VMs. Migration 0004 applied. The
+  verdict-first versions v1 (live) and v43 (candidate 1) are retired, and
+  the same wording continues as new reasoning-first versions.
+- **The ERP label reaches prod with the next `dev` → `main` release.** That
+  release needs the user's yes.
