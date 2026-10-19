@@ -22,6 +22,8 @@ const KIND_ICON: Record<SellOrderEvent['kind'], IconName> = {
   meta_changed:        'settings',
   price_adjusted:      'dollar',
   status_meta_changed: 'paperclip',
+  attachment_added:    'paperclip',
+  attachment_removed:  'paperclip',
   archived:            'box',
   unarchived:          'rotate',
   closed:              'x',
@@ -40,6 +42,8 @@ const KIND_TONE: Record<SellOrderEvent['kind'], Tone> = {
   meta_changed:        'muted',
   price_adjusted:      'warn',
   status_meta_changed: 'muted',
+  attachment_added:    'muted',
+  attachment_removed:  'muted',
   archived:            'muted',
   unarchived:          'info',
   closed:              'warn',
@@ -204,6 +208,8 @@ function summarize(event: SellOrderEvent, locale: string, t: TFn): React.ReactNo
       }
       return <>{label} {t('historyStatusMetaOn')} <b>{status}</b>: {String(d.filename ?? '')}</>;
     }
+    case 'attachment_added':   return <>{t('fieldAttachmentAdded')}: {String(d.filename ?? '')}</>;
+    case 'attachment_removed': return <>{t('fieldAttachmentRemoved')}: {String(d.filename ?? '')}</>;
     case 'archived':   return <>{t('historyArchived')}</>;
     case 'unarchived': return <>{t('historyUnarchived')}</>;
     case 'closed': {

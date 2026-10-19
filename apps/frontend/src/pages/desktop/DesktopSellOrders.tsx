@@ -34,6 +34,7 @@ import { CustomerPicker, type Customer } from './DesktopSellOrderDraft';
 import { useAuth } from '../../lib/auth';
 import { AddInventoryPicker, type SellableItem } from '../../components/AddInventoryPicker';
 import { AttachmentChip } from '../../components/AttachmentChip';
+import { SellOrderAttachments, type SellAttachment } from '../../components/SellOrderAttachments';
 import { PriceImportSection } from './SellOrderPriceImportDialog';
 import { applyPriceRows, type BidPart, mergeBidParts } from '../../lib/priceImport';
 import { usePreference } from '../../lib/preferences';
@@ -284,6 +285,9 @@ type SellOrderDetailType = {
   statusMeta: StatusMetaMap;
   // Absent from a backend older than this bundle; nothing waits on it then.
   signoff?: SellOrderSignoff;
+  // The order's own files, apart from the per-status evidence. Absent from a
+  // backend older than this bundle.
+  attachments?: SellAttachment[];
 };
 
 // Driven by sell_order_statuses; ids match sell_orders.status CHECK constraint.
@@ -2240,6 +2244,16 @@ function SellOrderDetail({ id, mode, onToast }: {
                   </div>
                 )}
               </div>
+              {/* The order's own files — the sale record, the invoice sent.
+                  Live-saved in both modes, so a drop mid-edit survives Cancel. */}
+              {order.attachments && (
+                <SellOrderAttachments
+                  key={order.id}
+                  orderId={order.id}
+                  initial={order.attachments}
+                  onChanged={() => setHistoryKey(k => k + 1)}
+                />
+              )}
               <div className="card so-page-card" style={{ paddingTop: 8, paddingBottom: 8 }}>
                 <details>
                   <summary style={{ cursor: 'pointer', fontWeight: 600, padding: '8px 0' }}>

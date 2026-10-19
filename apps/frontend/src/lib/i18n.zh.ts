@@ -920,6 +920,8 @@ const zh: Record<string, string> = {
   poRemoveProduct: '移除产品',
   soTrackingRecorded: '跟踪信息已记录',
   soEvidenceSection: '跟踪与凭证',
+  soAttachmentsSection: '附件',
+  soAttachmentsBoxHint: '销售记录、发票、装箱单 · PDF、图片、XLSX、CSV',
   soSignoffSection: '签核',
   soSignoffCount: '已签 {n}/{total}',
   soSignoffYou: '我',

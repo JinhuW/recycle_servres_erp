@@ -17,6 +17,31 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.294.0] - 2026-10-19
+
+An Attachments card on the sell order (RS-320).
+
+### Added
+
+- **A sell order keeps its own files.** The right-hand column of the
+  sell-order page has an Attachments card, between Internal notes and
+  History, in view and edit mode alike. A manager drops or picks the
+  marketplace sale record, the invoice sent or a packing list there (PDF,
+  images, XLSX, CSV, within the workspace upload cap); each lands as a row
+  with its name, size, and who uploaded it when, and each row has a remove
+  control. Images open in the lightbox, other files in a new tab. Until now
+  a file could only ride along with a status change, as evidence under
+  Shipped / Awaiting payment / Done / Closed, so a record that belonged to
+  the order as a whole had nowhere to go.
+- Uploads and removals save immediately, as the notes box does, so a file
+  dropped mid-edit survives a cancelled edit. The History records each file
+  added and removed.
+- `GET /api/sell-orders/:id` returns the list as `order.attachments`;
+  `POST /api/sell-orders/:id/attachments` (multipart `file`) and
+  `DELETE /api/sell-orders/:id/attachments/:attachmentId` are manager-only
+  and apply the same MIME and size rules as the evidence uploads. Migration
+  0185 adds `sell_order_attachments`.
+
 ## [1.293.0] - 2026-10-19
 
 The sell order's three download buttons became one **Download** menu (RS-317).

@@ -23,7 +23,9 @@ const ROW: React.CSSProperties = {
   textDecoration: 'none', color: 'var(--fg)', width: '100%', textAlign: 'left',
 };
 
-export function AttachmentChip({ a, onRemove }: { a: ChipAttachment; onRemove?: () => void }) {
+// `sub` replaces the size line when the caller has more to say about the file
+// (who uploaded it, when).
+export function AttachmentChip({ a, sub, onRemove }: { a: ChipAttachment; sub?: string; onRemove?: () => void }) {
   const { t } = useT();
   const [open, setOpen] = useState(false);
   const isImg = a.mime?.startsWith('image/');
@@ -41,7 +43,7 @@ export function AttachmentChip({ a, onRemove }: { a: ChipAttachment; onRemove?: 
         <div style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {a.filename}
         </div>
-        <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{fmtBytes(a.size)}</div>
+        <div style={{ fontSize: 11, color: 'var(--fg-subtle)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sub ?? fmtBytes(a.size)}</div>
       </div>
     </>
   );
