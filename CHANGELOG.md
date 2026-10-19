@@ -17,6 +17,33 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.288.0] - 2026-10-18
+
+The fleet's keyword gate shows its two lists as Include and Exclude (RS-304).
+
+### Changed
+
+- **Two lists that look like opposites.** The Keyword gate on Monitors ▸
+  Facebook used to show the keywords a listing must mention and the ones that
+  drop it as the same grey chips, told apart only by a small label. They are
+  now **Include**, a green field with a + badge, and **Exclude**, a red field
+  with a − badge. The Title gate shows Exclude alone. *Try a listing* fills
+  the chip that matched in its list's colour, so you can see at a glance which
+  side caught a listing.
+- **Flat lists, and counts you can check by eye.** Every list already means
+  "any one of these", so the "or" between chips and the boxes around OR
+  groups are gone. Each keyword is one chip, and an AND/NOT rule stays a
+  single expression chip. The list headers, the item tabs (`+11 −23`) and the
+  stage pills now count keywords instead of config lines; before, "Must match
+  one of 1" sat above twelve chips.
+- **Add a keyword where you're looking.** In read mode each list ends with
+  **+ Add keyword**, which opens the stage's Edit form with that list's input
+  focused. In edit mode the input trails the last chip, as in any tag field.
+  An include keyword that is also in Exclude is struck through, because the
+  exclude list is checked first and that keyword can never pass a listing.
+  Saved rules keep their shape: removing a chip rewrites only its own line,
+  and new keywords are added as new lines.
+
 ## [1.287.1] - 2026-10-18
 
 Monitors ▸ Facebook shows the sweep time in US Eastern (RS-303).

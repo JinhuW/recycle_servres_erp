@@ -1038,6 +1038,12 @@
   grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.7fr);
 }
 .ff-rules {
+  /* Include and exclude, one colour each: the badge, the field's tint, a hit
+     and the tab counts all take it. Both inks are dark enough to carry white. */
+  --ff-inc: var(--accent-strong);
+  --ff-inc-soft: var(--pos-soft);
+  --ff-exc: color-mix(in oklch, var(--neg) 82%, black);
+  --ff-exc-soft: var(--neg-soft);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -1055,9 +1061,17 @@
   font-size: 11.5px;
 }
 .ff-rules-count {
+  display: inline-flex;
+  gap: 5px;
   font-size: 10.5px;
   font-variant-numeric: tabular-nums;
   color: var(--fg-subtle);
+}
+.ff-n.inc {
+  color: var(--ff-inc);
+}
+.ff-n.exc {
+  color: var(--ff-exc);
 }
 .ff-rules-cols {
   display: grid;
@@ -1070,13 +1084,38 @@
 .ff-rule-list {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 6px;
   min-width: 0;
+}
+.ff-rule-list.inc {
+  --ff-pol: var(--ff-inc);
+  --ff-pol-soft: var(--ff-inc-soft);
+}
+.ff-rule-list.exc {
+  --ff-pol: var(--ff-exc);
+  --ff-pol-soft: var(--ff-exc-soft);
 }
 .ff-rule-list-head {
   display: flex;
-  align-items: baseline;
-  gap: 6px;
+  align-items: center;
+  gap: 7px;
+}
+.ff-pol-badge {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: var(--ff-pol);
+  color: var(--accent-fg);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+.ff-rule-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
 }
 .ff-rule-hint {
   font-size: 11px;
@@ -1095,6 +1134,41 @@
 .ff-rule-mode:hover {
   text-decoration: underline;
 }
+/* The list as one field: white chips on its colour's tint, and in edit mode
+   the input trails the last chip, as in any tag field. */
+.ff-rule-well {
+  --ff-chip-bg: var(--bg-elev);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  min-height: 38px;
+  padding: 7px;
+  border: 1px solid color-mix(in oklch, var(--ff-pol, var(--border-strong)) 22%, var(--border));
+  border-radius: 9px;
+  background: color-mix(in oklch, var(--ff-pol-soft, var(--bg-soft)) 60%, var(--bg-elev));
+}
+.ff-rule-well.editing {
+  cursor: text;
+}
+.ff-rule-well:has(> .ff-well-input:focus) {
+  border-color: var(--ff-pol, var(--accent-strong));
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--ff-pol, var(--accent-strong)) 16%, transparent);
+}
+.ff-well-input {
+  flex: 1 1 150px;
+  min-width: 120px;
+  padding: 3px 4px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  color: var(--fg);
+}
+.ff-well-input::placeholder {
+  color: var(--fg-subtle);
+}
 .ff-chips {
   display: flex;
   flex-wrap: wrap;
@@ -1108,7 +1182,7 @@
   padding: 2px 8px;
   border: 1px solid var(--border);
   border-radius: 999px;
-  background: var(--bg-soft);
+  background: var(--ff-chip-bg, var(--bg-soft));
   font-size: 11.5px;
   color: var(--fg);
   overflow-wrap: anywhere;
@@ -1118,14 +1192,28 @@
   background: var(--warn-soft);
   color: var(--warn-strong);
 }
+/* An include keyword the exclude list also holds: the exclude always wins. */
+.ff-chip.blocked {
+  border-style: dashed;
+  color: var(--fg-subtle);
+  text-decoration: line-through;
+  text-decoration-color: var(--ff-exc);
+}
 .ff-chip.hit {
-  border-color: var(--accent-strong);
-  background: var(--accent-soft);
-  color: var(--accent-strong);
+  border-color: var(--ff-pol, var(--accent-strong));
+  background: var(--ff-pol, var(--accent-strong));
+  color: var(--accent-fg);
   font-weight: 600;
 }
-.ff-chip-x,
-.ff-chip-add {
+.ff-chip.hit .ff-expr-text,
+.ff-chip.hit .ff-chip-x {
+  color: inherit;
+}
+.ff-chip.hit .ff-expr-tag {
+  background: transparent;
+  color: inherit;
+}
+.ff-chip-x {
   display: inline-grid;
   place-items: center;
   width: 16px;
@@ -1142,13 +1230,21 @@
   background: var(--neg-soft);
   color: var(--neg);
 }
-.ff-chip-add {
-  margin: 0;
-  border: 1px dashed var(--border-strong, var(--border));
+.ff-chip-new {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 9px 2px 7px;
+  border: 1px dashed color-mix(in oklch, var(--ff-pol, var(--fg-subtle)) 50%, transparent);
+  border-radius: 999px;
+  background: transparent;
+  font-size: 11.5px;
+  color: var(--ff-pol, var(--fg-muted));
+  cursor: pointer;
 }
-.ff-chip-add:hover {
-  color: var(--fg);
+.ff-chip-new:hover {
   border-style: solid;
+  background: var(--bg-elev);
 }
 .ff-chip-input {
   width: 160px;
@@ -1156,39 +1252,15 @@
   padding: 2px 8px;
   font-size: 11.5px;
 }
-.ff-rule-group,
-.ff-rule-expr {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 5px 4px;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-.ff-rule-group.hit,
-.ff-rule-expr.hit {
-  border-color: var(--accent-strong);
-}
-.ff-rule-or {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  max-width: 100%;
-}
-.ff-or {
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--fg-subtle);
+.ff-chip-expr {
+  gap: 6px;
+  border-radius: 7px;
 }
 .ff-expr-tag {
   padding: 0 5px;
   border-radius: 4px;
   background: var(--bg-soft);
   font-size: 10px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   color: var(--fg-subtle);
 }
 .ff-expr-text {
@@ -1205,11 +1277,6 @@
 }
 button.ff-expr-text {
   cursor: text;
-}
-.ff-rule-add {
-  min-height: 0;
-  padding: 5px 9px;
-  font-size: 12px;
 }
 /* Try a listing: on top of the lists it lights up */
 .ff-try {
