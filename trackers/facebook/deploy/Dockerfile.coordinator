@@ -7,7 +7,8 @@ COPY rs_coordinator ./rs_coordinator
 
 RUN pip install --no-cache-dir .
 
-ENV RS_COORDINATOR_DB=/data/coordinator.db
+ENV RS_COORDINATOR_DB=/data/coordinator.db \
+    RS_SCREENSHOT_DIR=/data/screenshots
 VOLUME ["/data"]
 EXPOSE 8500
 

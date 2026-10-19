@@ -18,6 +18,17 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Challenge screenshots survive a redeploy** (RS-315). The coordinator wrote
+  them to `data/screenshots` relative to its working directory, which in the
+  container is `/app`, outside the `/data` volume, so every `deploy.sh` deleted
+  them while the challenge rows kept pointing at the files. The default is now
+  a `screenshots/` directory beside the database file, the image and the
+  compose file set `RS_SCREENSHOT_DIR=/data/screenshots` outright, stored paths
+  are absolute, and a challenge whose file is gone lists no `screenshot_url`
+  instead of one that 404s.
+
 ## [0.13.0] - 2026-10-19
 
 ### Added
