@@ -18,6 +18,30 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Added
+
+- **A wall mid-sweep parks the worker instead of reading as an empty city**
+  (RS-311). Facebook walls a logged-in account without leaving the Marketplace
+  URL — "You're Temporarily Blocked" is an overlay, a silent flag answers every
+  search with nothing — and the `xs` cookie survives a checkpoint, so the worker
+  heartbeat HEALTHY and searched the account's remaining cities into a deeper
+  flag; the first sign was the next day's fleet-verify table. A search that
+  returns nothing on an ordinary URL now asks a decision model (OpenRouter's
+  Decisions API; `RS_PAGE_CHECK_MODEL`, default `openai/gpt-6-luna-decisions`)
+  which kind of page the tab shows. A checkpoint, captcha, block or disabled
+  notice files one challenge with a screenshot, reports CHECKPOINT or
+  CHALLENGE_CAPTCHA, and parks the worker until the idle loop sees the page
+  move on, whether an operator cleared it in Watch or Facebook lifted the block.
+  A login or 2FA page is left to the next cycle's login, which has the
+  credentials and the 2FA automation. The login flow asks the same question
+  when its selectors see nothing, so a captcha on `two_step_verification` (va-2,
+  2026-10-17) is now a challenge too. `search_empty` events carry
+  `page_state`, its probability and the model. Any failure of the check — no
+  key, timeout, odd answer — means the old behaviour. Probed on 27 page states:
+  every model on the API told walls from clear pages 54/54; the default and
+  `liquid/d1` led on the exact label, Jev 1.14 close behind; ~0.2 s and
+  $0.00003 a call.
+
 ### Changed
 
 - **0.12.3's wc-1 swap is on the mainline now** (RS-294). 0.12.3 and 0.12.4
