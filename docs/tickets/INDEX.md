@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-312](./RS-312-buyer-alerts-ask-for-a-reaction-and-the-evaluator-re.md) | in-progress | story | P2 | Buyer alerts ask for a reaction, and the evaluator reasons before it decides | — |
 | [RS-311](./RS-311-recognise-facebook-walls-mid-sweep-with-a-decision-m.md) | done | story | P2 | Recognise Facebook walls mid-sweep with a decision model | facebook-tracker 0.13.0 |
 | [RS-310](./RS-310-fix-the-price-import-s-false-positive-the-full-scree.md) | done | bug | P1 | Fix the price import's 元 false positive, the full-screen Watch overlap and the cookie Assign fallback | v1.291.1 |
 | [RS-309](./RS-309-reddit-page-shows-which-prompt-is-better-per-version.md) | in-review | story | P2 | Reddit page shows which prompt is better: per-version leads and the candidate trial | 1.291.0 |

@@ -2,6 +2,7 @@
 // and Telegram. These prove the properties the business depends on: every
 // target gets exactly one alert, and nothing is lost when a stage fails.
 
+import {createHash} from 'node:crypto';
 import {afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi} from 'vitest';
 import {createConsoleAlertSender, createTelegramAlertSender} from '../src/alerts.ts';
 import type {NewPost} from '../src/claims.ts';
@@ -401,6 +402,30 @@ describe('prompt versions', () => {
     expect(versions).toHaveLength(2);
     expect(versions[1]!.id - versions[0]!.id).toBe(1);
     await db.sql`DELETE FROM rules`;
+  });
+
+  it('records the response schema, and never reuses a version made under another one', async () => {
+    await db.sql`DELETE FROM rules`;
+    stubUpstreams({live: REJECT});
+    const settings = await new SettingsStore(db.sql, 0).get();
+    // The same wording as live, stored the way versions were before the
+    // schema joined their identity.
+    const old = createHash('sha256')
+      .update(`${settings.llmModel}\0${settings.evalPrompt}`).digest('hex');
+    await db.sql`
+      INSERT INTO prompt_versions (hash, model, system_prompt)
+      VALUES (${old}, ${settings.llmModel}, ${settings.evalPrompt})`;
+
+    await insertNewPosts(db.sql, [post()]);
+    await evaluateOnce(evaluateDeps());
+
+    const rows = await db.sql<Array<{response_schema: string; used: boolean}>>`
+      SELECT v.response_schema, EXISTS (SELECT 1 FROM posts p WHERE p.prompt_version_id = v.id) AS used
+        FROM prompt_versions v ORDER BY v.id`;
+    expect(rows).toEqual([
+      {response_schema: 'verdict-first', used: false},
+      {response_schema: 'reasoning-first', used: true},
+    ]);
   });
 
   it('leaves a post rejected for age unversioned, since no prompt judged it', async () => {

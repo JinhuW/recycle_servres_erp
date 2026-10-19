@@ -12,6 +12,7 @@ import {
   type PromptRole,
   type PromptStats,
   type PromptVersionStats,
+  type ResponseSchema,
   type TrialCell,
   type VsLive,
 } from '../../lib/tracker';
@@ -32,6 +33,11 @@ const WINDOWS: readonly Window[] = ['7d', '30d', 'all'];
 const WINDOW_MS: Record<Exclude<Window, 'all'>, number> = { '7d': 7 * 86_400_000, '30d': 30 * 86_400_000 };
 
 const ROLE_CLASS: Record<PromptRole, string> = { live: 'ff-live', candidate: 'ff-stale', retired: 'fp-retired' };
+
+const SCHEMA_KEY: Record<ResponseSchema, string> = {
+  'verdict-first': 'trkPromptSchemaVerdictFirst',
+  'reasoning-first': 'trkPromptSchemaReasoningFirst',
+};
 
 // Live's verdict down the side, the candidate's across the top.
 const CELLS: ReadonlyArray<{ key: keyof VsLive; live: boolean; candidate: boolean }> = [
@@ -295,6 +301,7 @@ function VersionsTable({ stats, loading, locale, open, onToggle }: {
                     </button>
                     <span className={`fp-chip ${ROLE_CLASS[role]}`}>{t(`trkPromptRole_${role}`)}</span>
                     <span className="mono fp-muted rt-model">{model}</span>
+                    {v && <span className="fp-muted rt-model">· {t(SCHEMA_KEY[v.responseSchema])}</span>}
                   </div>
                 </td>
                 <td className="mono">{v ? fmt.format(v.evaluated) : '—'}</td>

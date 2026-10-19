@@ -3199,6 +3199,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     trkPromptColUsed: 'Last used',
     trkPromptNew: 'new',
     trkPromptNotYet: 'Not yet',
+    trkPromptSchemaVerdictFirst: 'verdict first',
+    trkPromptSchemaReasoningFirst: 'reasoning first',
     trkPromptShow: 'Show prompt',
     trkPromptHide: 'Hide prompt',
     trkPromptRole_live: 'Live',

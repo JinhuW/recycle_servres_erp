@@ -2109,6 +2109,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     labelled.
   - Managers start, edit, end and promote trials there. Promoting switches
     the rules off, because the candidate was judged without them.
+  - Since v1.292.0, each version is labelled *verdict first* or *reasoning
+    first*. That's its response schema. The tracker has asked for the
+    reasoning first since RS-312.
 - **Coordinator** — the Facebook fleet, reached from **Monitors ▸ Facebook**
   in the sidebar (v1.207.0), managers only. Since v1.263.0 the Fleet tab
   shares the Account pool tab's chrome: a status legend (Live, Stale, Needs

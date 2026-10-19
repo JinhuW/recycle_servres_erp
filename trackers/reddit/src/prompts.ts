@@ -5,7 +5,7 @@
 
 import {createHash} from 'node:crypto';
 import type {Sql} from './db.ts';
-import type {Evaluation} from './llm.ts';
+import {RESPONSE_SCHEMA_ID, type Evaluation} from './llm.ts';
 import {composeEvalPrompt, type Rule} from './rules.ts';
 import type {Settings} from './settings.ts';
 import type {VerdictNote} from './telegram.ts';
@@ -15,8 +15,11 @@ export interface PromptConfig {
   systemPrompt: string;
 }
 
+/** Includes the response schema, so verdicts from two schemas never share a version. */
 export function promptHash(config: PromptConfig): string {
-  return createHash('sha256').update(`${config.model}\0${config.systemPrompt}`).digest('hex');
+  return createHash('sha256')
+    .update(`${RESPONSE_SCHEMA_ID}\0${config.model}\0${config.systemPrompt}`)
+    .digest('hex');
 }
 
 /** What the fleet judges with right now: the base prompt plus enabled rules. */
@@ -53,8 +56,8 @@ export async function ensurePromptVersion(sql: Sql, config: PromptConfig): Promi
     UPDATE prompt_versions SET last_used_at = NOW() WHERE hash = ${hash} RETURNING id`;
   if (known) return known.id;
   const [row] = await sql<Array<{id: number}>>`
-    INSERT INTO prompt_versions (hash, model, system_prompt)
-    VALUES (${hash}, ${config.model}, ${config.systemPrompt})
+    INSERT INTO prompt_versions (hash, model, system_prompt, response_schema)
+    VALUES (${hash}, ${config.model}, ${config.systemPrompt}, ${RESPONSE_SCHEMA_ID})
     ON CONFLICT (hash) DO UPDATE SET last_used_at = NOW()
     RETURNING id`;
   return row!.id;
@@ -131,6 +134,8 @@ export interface PromptVersionStats {
   role: PromptRole;
   model: string;
   systemPrompt: string;
+  /** 'verdict-first' for every version made before the reasoning moved ahead. */
+  responseSchema: string;
   firstUsedAt: Date;
   lastUsedAt: Date;
   evaluated: number;
@@ -208,10 +213,11 @@ export async function promptStats(
       hash: string;
       model: string;
       system_prompt: string;
+      response_schema: string;
       first_used_at: Date;
       last_used_at: Date;
     }>>`
-      SELECT id, hash, model, system_prompt, first_used_at, last_used_at
+      SELECT id, hash, model, system_prompt, response_schema, first_used_at, last_used_at
         FROM prompt_versions ORDER BY id DESC`,
     sql<Array<{
       version_id: number;
@@ -308,6 +314,7 @@ export async function promptStats(
         role,
         model: v.model,
         systemPrompt: v.system_prompt,
+        responseSchema: v.response_schema,
         firstUsedAt: v.first_used_at,
         lastUsedAt: v.last_used_at,
         evaluated: s?.evaluated ?? 0,

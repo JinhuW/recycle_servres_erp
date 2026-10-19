@@ -52,7 +52,13 @@ bot's updates for reactions on alert messages (see *Measuring the prompt*).
   `alert_messages`. When someone reacts to the alert, the api's reactions loop
   records it. Any reaction except 👎 makes the post a **lead**; a 👎 alone
   marks it **not a lead**. This works in groups, where Telegram says who
-  reacted, and in channels, where it only sends totals.
+  reacted, and in channels, where it only sends totals. Every buyer alert
+  ends by asking for that reaction ("React 👍 if you act on this, 👎 if it's
+  not useful").
+- **Response schema.** The model gives its reasoning before its verdict. A
+  version's identity includes the schema (`prompt_versions.response_schema`),
+  so the verdicts from the earlier verdict-first schema stay in their own
+  versions.
 - **Dev chat.** With `telegram_dev_chat_ids` set, every alert also goes there
   as a review: the alert plus the model's reasoning and prompt version. The
   dev chat is where the team labels alerts without spamming buyers.
@@ -112,7 +118,7 @@ ROLE=api API_TOKEN=devtoken pnpm dev # admin API on :8080
 ```
 
 ```bash
-pnpm test        # 210 tests; needs the compose Postgres running
+pnpm test        # 213 tests; needs the compose Postgres running
 pnpm typecheck
 ```
 
