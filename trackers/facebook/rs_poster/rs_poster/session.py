@@ -123,8 +123,10 @@ def raise_if_restricted(page: Page, doing: str) -> None:
             "re-run `rs-session capture`."
         )
     try:
+        # A snapshot on purpose: this runs on every navigation, the banner
+        # persists, so the next page catches a miss and no healthy page waits.
         blocked = page.get_by_text(sel.ACTION_BLOCKED_RE).first
-        if blocked.is_visible(timeout=1000):
+        if blocked.is_visible():
             raise AccountRestrictedError(
                 f"Facebook is showing '{blocked.inner_text().strip()[:80]}' while "
                 f"{doing}. The account is rate-limited or restricted; stop "
@@ -330,10 +332,12 @@ class PosterSession:
     def _accept_cookies(self: "PosterSession") -> None:
         assert self.page is not None
         try:
-            button = self.page.get_by_role("button", name=sel.COOKIE_ACCEPT_RE)
-            if button.is_visible(timeout=5000):
-                button.click()
-                self.page.wait_for_timeout(2000)
+            button = self.page.get_by_role("button", name=sel.COOKIE_ACCEPT_RE).first
+            # The banner renders after the page's JS; a visibility snapshot
+            # never waited (Playwright ignores the argument), this does.
+            button.wait_for(state="visible", timeout=5000)
+            button.click()
+            self.page.wait_for_timeout(2000)
         except Exception:
             pass
 
@@ -383,9 +387,9 @@ class PosterSession:
 
         try:
             trust = self.page.get_by_role("button", name=sel.TRUST_DEVICE_RE).first
-            if trust.is_visible(timeout=5000):
-                trust.click()
-                self.page.wait_for_timeout(5000)
+            trust.wait_for(state="visible", timeout=5000)
+            trust.click()
+            self.page.wait_for_timeout(5000)
         except Exception:
             pass
         return True

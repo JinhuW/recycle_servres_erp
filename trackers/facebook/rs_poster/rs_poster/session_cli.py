@@ -114,7 +114,7 @@ def _autofill_two_factor(page, config: totp_mod.TotpConfig, submitted: set) -> b
     """
     try:
         field = page.locator(sel.TWO_FACTOR_INPUT).first
-        if not field.is_visible(timeout=1000):
+        if not field.is_visible():
             return False
     except Exception:
         return False
@@ -140,8 +140,8 @@ def _autofill_two_factor(page, config: totp_mod.TotpConfig, submitted: set) -> b
     page.wait_for_timeout(5000)
     try:
         trust = page.get_by_role("button", name=sel.TRUST_DEVICE_RE).first
-        if trust.is_visible(timeout=3000):
-            trust.click()
+        trust.wait_for(state="visible", timeout=3000)
+        trust.click()
     except Exception:
         pass
     return True

@@ -243,9 +243,9 @@ class Poster:
         # Some cities route through a second "Next" step before Publish.
         try:
             next_button = self.page.get_by_role("button", name=sel.NEXT_BUTTON_RE).first
-            if next_button.is_visible(timeout=4000):
-                next_button.click()
-                self.page.wait_for_timeout(3000)
+            next_button.wait_for(state="visible", timeout=4000)
+            next_button.click()
+            self.page.wait_for_timeout(3000)
         except Exception:
             pass
 

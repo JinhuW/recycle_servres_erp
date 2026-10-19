@@ -20,6 +20,15 @@ deployed?" harder to answer.
 
 ### Fixed
 
+- **The poster's and monitor's "wait for this button" checks wait** (RS-313).
+  Playwright ignores the `timeout` argument to `is_visible`, so the
+  cookie-consent banner, the 2FA "Trust this device" button, the Publish form's
+  Next step and the locked-account text on a checkpoint were instant snapshots
+  that read like waits; the trust click in particular could miss and leave the
+  device untrusted for the next login. They use `wait_for` now. Checks that
+  meant a snapshot (the restriction banner on every navigation, the captcha
+  selectors, the 2FA field inside a polling loop) say so by passing nothing,
+  and a test in each package keeps the misleading form from coming back.
 - **A Messenger reply is acked as sent only when the pane shows it as our
   bubble** (RS-314). The old check looked for the reply's first 60 characters
   anywhere on the page, so a draft that Enter never submitted, an older
