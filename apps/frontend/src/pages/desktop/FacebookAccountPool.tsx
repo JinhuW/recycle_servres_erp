@@ -44,6 +44,38 @@ const KNOWN_REFUSALS = new Set([
 ]);
 const isSecretField = (field: string): field is FbPoolSecretField =>
   (FB_POOL_SECRET_FIELDS as readonly string[]).includes(field);
+// The manager table's columns: header label key and the value each one sorts
+// by. Cookie sorts by freshness (cookieAt), which is what its cell shows.
+const COLUMNS: { key: string; sort: (a: PoolAccount) => string | number }[] = [
+  { key: 'fpNo', sort: (a) => a.no },
+  { key: 'fpUid', sort: (a) => a.uid },
+  { key: 'fpStatus', sort: (a) => a.status },
+  { key: 'fpHolder', sort: (a) => a.holder ?? '' },
+  { key: 'fpPassword', sort: (a) => a.password },
+  { key: 'fpCode', sort: (a) => a.totp },
+  { key: 'fpEmail', sort: (a) => a.email },
+  { key: 'fpEmailPassword', sort: (a) => a.emailPassword },
+  { key: 'fpRecovery', sort: (a) => a.recovery },
+  { key: 'fpCookie', sort: (a) => a.cookieAt ?? 0 },
+  { key: 'fpNotes', sort: (a) => a.note },
+];
+// Empty values sink to the bottom in either direction, so blank holders and
+// notes never crowd the top.
+const compareBy = (sort: (a: PoolAccount) => string | number, dir: 'asc' | 'desc') => {
+  const sign = dir === 'asc' ? 1 : -1;
+  return (a: PoolAccount, b: PoolAccount) => {
+    const x = sort(a);
+    const y = sort(b);
+    const xBlank = x === '' || x === 0;
+    const yBlank = y === '' || y === 0;
+    if (xBlank !== yBlank) return xBlank ? 1 : -1;
+    const cmp =
+      typeof x === 'number' && typeof y === 'number'
+        ? x - y
+        : String(x).localeCompare(String(y), undefined, { numeric: true, sensitivity: 'base' });
+    return sign * cmp;
+  };
+};
 export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = null, challenges = null }: Props) {
   const { t, locale } = useT();
   const user = useEffectiveUser()!;
@@ -77,6 +109,9 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
     void poolApi.event(no, kind, field).catch(() => undefined);
   const [filter, setFilter] = useState<PoolStatus | 'all'>('all');
   const [query, setQuery] = useState('');
+  const [sort, setSort] = useState<{ col: number; dir: 'asc' | 'desc' }>({ col: 0, dir: 'asc' });
+  const sortBy = (col: number) =>
+    setSort((s) => (s.col === col ? { col, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' }));
   const [editor, setEditor] = useState<PoolAccount | 'new' | null>(null);
   const [importing, setImporting] = useState(false);
   const [picked, setPicked] = useState<number | null>(null);
@@ -199,14 +234,16 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
       </div>}
     </section>
   );
-  const visible = accounts.filter(
-    (a) =>
-      (filter === 'all' || a.status === filter) &&
-      [a.no, a.uid, a.email, a.recovery, a.note, a.holder, a.batch]
-        .join(' ')
-        .toLowerCase()
-        .includes(query.trim().toLowerCase()),
-  );
+  const visible = accounts
+    .filter(
+      (a) =>
+        (filter === 'all' || a.status === filter) &&
+        [a.no, a.uid, a.email, a.recovery, a.note, a.holder, a.batch]
+          .join(' ')
+          .toLowerCase()
+          .includes(query.trim().toLowerCase()),
+    )
+    .sort(compareBy(COLUMNS[sort.col].sort, sort.dir));
   const copyButton = (a: PoolAccount, field: Parameters<typeof copy>[1], label: string) => (
     <button
       type="button"
@@ -351,21 +388,25 @@ export function FacebookAccountPool({ snapshot, onSnapshot, showToast, fleet = n
                 <table className="fp-table">
                   <thead>
                     <tr>
-                      {[
-                        '#',
-                        'fpUid',
-                        'fpStatus',
-                        'fpHolder',
-                        'fpPassword',
-                        'fpCode',
-                        'fpEmail',
-                        'fpEmailPassword',
-                        'fpRecovery',
-                        'fpCookie',
-                        'fpNotes',
-                      ].map((key) => (
-                        <th key={key}>{key === '#' ? t('fpNo') : t(key)}</th>
-                      ))}
+                      {COLUMNS.map((col, i) => {
+                        const active = sort.col === i;
+                        return (
+                          <th
+                            key={col.key}
+                            className="fp-th-sort"
+                            aria-sort={!active ? undefined : sort.dir === 'asc' ? 'ascending' : 'descending'}
+                            title={t('fpSortBy')}
+                            onClick={() => sortBy(i)}
+                          >
+                            {t(col.key)}
+                            {active && (
+                              <span aria-hidden className="fp-sort-arrow">
+                                {sort.dir === 'asc' ? '▲' : '▼'}
+                              </span>
+                            )}
+                          </th>
+                        );
+                      })}
                       <th aria-label={t('edit')} />
                     </tr>
                   </thead>

@@ -17,6 +17,19 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.306.0] - 2026-10-20
+
+### Added
+
+- The manager's Facebook account-pool table (`/#/fleet/pool`) now caps its body
+  at about ten rows and scrolls for the rest, with the column header pinned, so
+  a growing pool no longer runs off the bottom of the card. Every column header
+  is also a sort control — a first click sorts ascending, a second descending,
+  and the active column shows a `▲`/`▼` marker — letting the pool be read by
+  UID, status, holder, cookie freshness, notes or any other field. The sort is
+  client-side over the snapshot the page already holds; nothing was added to the
+  backend (RS-336).
+
 ## [1.305.0] - 2026-10-20
 
 The Fleet tab groups its workers by proxy, not by city (RS-335). Every proxy
