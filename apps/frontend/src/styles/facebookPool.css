@@ -802,6 +802,22 @@
   padding-left: 8px;
   padding-right: 8px;
 }
+/* Fifteen workers, then the rows scroll under the pinned header: a two-line
+   row renders 55.3px and the header 34.4px. A row with a status note is
+   taller, so fewer of those fit. */
+.ff-table-cap {
+  max-height: calc(35px + 55.5px * 15);
+  overflow-y: auto;
+}
+/* A collapsed border stays with the table when the header sticks; the
+   shadow moves with the cell. */
+.ff-table-cap .fp-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  border-bottom: 0;
+  box-shadow: inset 0 -1px 0 var(--border);
+}
 .ff-table td.ff-wrap,
 .ff-table .fp-holder small {
   white-space: normal;

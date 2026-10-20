@@ -17,6 +17,20 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.300.0] - 2026-10-20
+
+The workers table on Monitors ▸ Facebook ▸ Fleet now shows at most fifteen
+workers (RS-327). Beyond that, the rows scroll inside the card under column
+headers that stay pinned and still sort. The "Fleet as of" line stays below
+the scroll area. Before this, the table grew one row taller with every
+worker, and the Recent activity aside, which matches the card's height, grew
+with it.
+
+The height limit is sized for fifteen standard two-line rows. A worker with a
+status note under its chip, such as "Session expired", needs a taller row, so
+fewer rows fit when some workers have notes. The Reddit tracker page uses the
+same table styles but keeps its full height.
+
 ## [1.299.0] - 2026-10-20
 
 New purchasers get a guided walkthrough the first time they sign in, on the
