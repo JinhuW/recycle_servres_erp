@@ -2,12 +2,12 @@
 id: RS-338
 title: Worker logs in with cookie then token, password last
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-10-20
 reporter: jinhu
 branch: facebook-worker-cookie-token
-pr:
+pr: "#808"
 version: facebook-tracker 0.13.10, v1.308.0
 related: [RS-308, RS-293, RS-292]
 ---
