@@ -273,6 +273,13 @@ do this — the working values are `sac` and the numeric id `112454482100538`.
 
   If either account of a pair is checkpointed or locked, stop its partner.
   A third account per IP waits until the pairs have run clean for 14 days.
+- **Past about 25 workers on one host, raise its inotify instance limit.**
+  Every worker runs as root, and all of them share the host root's
+  `fs.inotify.max_user_instances` (128 by default). At 40 workers the monitors
+  fail with `[Errno 24] inotify instance limit reached`, exit and re-sweep in a
+  loop. Run `echo fs.inotify.max_user_instances=1024 | sudo tee
+  /etc/sysctl.d/60-inotify.conf && sudo sysctl --system` first
+  ([debug note](../../../docs/debug-notes/2026-10-20-forty-workers-exhaust-the-vms-inotify-instances.md)).
 - Match proxy geography to the region. A Houston-centred search from a Denver IP
   looks wrong to Facebook's heuristics.
 - Region borders overlap on purpose. A 500-mile radius is not what Facebook

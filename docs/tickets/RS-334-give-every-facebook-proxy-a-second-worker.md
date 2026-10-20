@@ -73,3 +73,19 @@ Assignment order, so no IP sees two first logins in one day:
 3. The partners of the nine live accounts last, one or two a day, starting
    with the accounts that matter least. If a partner is checkpointed, stop
    it before its live neighbour is affected.
+
+Deploy, 2026-10-20 (facebook-tracker 0.13.9):
+
+- All 18 partners started, matched the tree and took `start-at 17:00`. Every
+  one of the 20 ports then showed two workers on one exit IP with 13:00 and
+  17:00. The 22 existing containers were held.
+- Then 40 workers exhausted the VM's `fs.inotify.max_user_instances` (128).
+  The partners' monitors looped through exit, restart and re-sweep, and the
+  load reached 37. Four existing workers hit it once, and phl-1 and va-2
+  swept off schedule. The 18 partners were stopped to protect the live
+  accounts.
+  ([debug note](../debug-notes/2026-10-20-forty-workers-exhaust-the-vms-inotify-instances.md))
+- To finish: raise the limit on the VM (needs sudo), then start the 18
+  partners a minute apart and check that no worker logs the error.
+- `deploy/README.md` gained the limit after the 0.13.9 tag, so the next
+  deploy needs a new release first.
