@@ -18,6 +18,27 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Added
+
+- **A worker logs in from the account's access token when its cookie lapses**
+  (RS-338). The login order is now cookie-restore → token-refresh → password:
+  when a restored or seeded session does not take and the account has an access
+  token, the worker exchanges it for fresh session cookies inside its own
+  proxied browser context — the account's own IP and `datr`/`sb` device — and
+  reaches Marketplace with no password and no 2FA. A dead, absent or
+  wrong-account token falls through to the existing password login unchanged,
+  so an account without a token behaves exactly as before.
+  - The coordinator hands a worker the token on demand
+    (`POST /v1/auth/session-token`, per-worker token only, audited under the
+    `token` kind), with no daily budget — a token refresh is a far softer
+    signal than a password login. `fb_token` is a new sealed vault secret, and
+    the console allows it on the account write, so the tracker ships before the
+    ERP release that sends it on Assign.
+  - The login ledger now accepts the `cookie-restore` and `token-refresh`
+    triggers. `cookie-restore` was already sent by the worker (RS-308) but not
+    listed, so the coordinator rejected it with 422 and those ledger rows were
+    silently dropped; they are recorded now.
+
 ## [0.13.9] - 2026-10-20
 
 ### Added

@@ -100,6 +100,12 @@ class CredentialsResponse(BaseModel):
     password: str
 
 
+class SessionTokenResponse(BaseModel):
+    """The account's access token, for the worker to exchange for a session."""
+
+    token: str
+
+
 # -- escalation -------------------------------------------------------------
 
 
@@ -513,7 +519,7 @@ class DeviceCookiesReport(BaseModel):
     cookies: List[DeviceCookie] = Field(min_length=1, max_length=4)
 
 
-LOGIN_TRIGGERS = ("boot", "relogin", "forced", "swap")
+LOGIN_TRIGGERS = ("boot", "relogin", "forced", "swap", "cookie-restore", "token-refresh")
 LOGIN_OUTCOMES = (
     "restored", "password_ok", "watch_ok", "challenge", "locked", "failed", "timed_out",
 )

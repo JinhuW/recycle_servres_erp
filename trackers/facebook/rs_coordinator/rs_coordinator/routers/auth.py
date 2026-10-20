@@ -32,6 +32,7 @@ from ..schemas import (
     CodeResponse,
     CredentialsRequest,
     CredentialsResponse,
+    SessionTokenResponse,
 )
 from ..vault import VaultError
 
@@ -45,6 +46,10 @@ PASSWORD_KIND = "password"
 # A refused release is audited too, under its own kind so it never counts
 # against the budget it was refused by.
 PASSWORD_REFUSED_KIND = "password_refused"  # pragma: allowlist secret
+# Handing a worker the account's access token to mint a session. Audited like a
+# password release — the same class of disclosure — but under its own kind, as
+# a token refresh carries no daily budget.
+TOKEN_KIND = "token"  # pragma: allowlist secret
 
 # Automated password logins per account per day. Each one is a fresh login
 # from a worker's IP; va-1 had four in 37 minutes and Facebook locked it. Past
@@ -204,3 +209,52 @@ def issue_credentials(
         payload.reason or "no reason given",
     )
     return CredentialsResponse(username=str(username), password=str(password))
+
+
+@router.post("/api/v1/auth/session-token", response_model=SessionTokenResponse)
+@router.post("/v1/auth/session-token", response_model=SessionTokenResponse)
+def issue_session_token(
+    payload: CredentialsRequest, worker: Optional[str] = Depends(require_worker)
+) -> SessionTokenResponse:
+    """Hand a worker the account's access token, to mint a fresh session.
+
+    A token mints a session with no password and no 2FA — a far softer signal
+    to Facebook than the password fallback — so unlike credentials it carries no
+    daily budget. It is still a secret disclosure, so it is gated on the token
+    existing, refused on a locked account, and audited like a code release.
+    """
+    worker_id, account_id = _resolve(worker, payload.worker_id)
+
+    store = deps.get_account_store()
+    try:
+        account = store.get_account(account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail=f"No account '{account_id}' in the vault.")
+        if account.get("locked_at"):
+            refusal = (
+                f"Account '{account_id}' is locked by Facebook "
+                f"({account.get('locked_reason') or 'lock page'}). Unlock it on Facebook, "
+                f"then run `rsc vault unlock {account_id}`."
+            )
+            deps.db.insert_code_audit(worker_id, account_id, PASSWORD_REFUSED_KIND, refusal)
+            logger.warning("Refused a session token to worker %s: %s", worker_id, refusal)
+            raise HTTPException(status_code=403, detail=refusal)
+        token = store.get_secret(account_id).get("fb_token")
+    except VaultError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+
+    if not token:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Account '{account_id}' has no access token stored. "
+            "Restore its session or fall back to the password login.",
+        )
+
+    deps.db.insert_code_audit(worker_id, account_id, TOKEN_KIND, payload.reason)
+    logger.warning(
+        "Released an access token for account %s to worker %s (%s)",
+        account_id,
+        worker_id,
+        payload.reason or "no reason given",
+    )
+    return SessionTokenResponse(token=str(token))
