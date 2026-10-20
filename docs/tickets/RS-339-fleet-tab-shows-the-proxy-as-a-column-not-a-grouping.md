@@ -2,7 +2,7 @@
 id: RS-339
 title: Fleet tab shows the proxy as a column, not a grouping
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-10-20
 reporter: jinhu
