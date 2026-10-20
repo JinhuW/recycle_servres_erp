@@ -2,13 +2,13 @@
 id: RS-335
 title: Fleet tab groups workers by proxy, not by city
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-20
 reporter: jinhu
 branch: fleet-group-by-proxy
-pr:
-version:
+pr: 802
+version: 1.305.0
 related: [RS-333, RS-334]
 ---
 
@@ -25,12 +25,12 @@ table taller.
 
 ## Acceptance criteria
 
-- [ ] The workers table has one group level, the proxy. Its row shows the
+- [x] The workers table has one group level, the proxy. Its row shows the
       port, the exit IP, the worker count, and *shared* when it carries more
       than one worker. Each proxy's workers sit under it.
-- [ ] The exit city is not on the proxy row. It is in the row's tooltip
+- [x] The exit city is not on the proxy row. It is in the row's tooltip
       beside the ISP, and the search box still matches it.
-- [ ] With no column sort, proxies run by port, then the VM's own IP last,
+- [x] With no column sort, proxies run by port, then the VM's own IP last,
       and each proxy's workers by id. A column sort orders the proxies by
       their highest-ranked worker.
 
@@ -39,3 +39,10 @@ table taller.
 - Collapsing a proxy.
 
 ## Notes
+
+- "The city can be not in the title of proxy" was read as: the city need not
+  show on the proxy row. It stays one hover away in the row's tooltip (the
+  HTML title), beside the ISP. Putting it on the row is a one-line change in
+  `ProxyRow`.
+- Checked against the live console through an SSH tunnel: 20 proxy rows in
+  port order, two workers each, then the VM's own IP.
