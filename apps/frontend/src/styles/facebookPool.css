@@ -804,7 +804,7 @@
 }
 /* Fifteen workers, then the rows scroll under the pinned header: a two-line
    row renders 55.3px and the header 34.4px. A row with a status note is
-   taller, so fewer of those fit. */
+   taller, and each location divider takes a slice, so fewer of those fit. */
 .ff-table-cap {
   max-height: calc(35px + 55.5px * 15);
   overflow-y: auto;
@@ -826,8 +826,25 @@
   width: 32px;
   padding-right: 0 !important;
 }
-.ff-table tbody tr:not(.ff-fold, .ff-skel):hover td {
+.ff-table tbody tr:not(.ff-fold, .ff-skel, .ff-group):hover td {
   background: var(--bg-soft);
+}
+/* A proxy location: the exit city, then its IP and worker counts. */
+.ff-group td {
+  background: var(--bg-soft);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding-top: 6px !important;
+  padding-bottom: 6px !important;
+}
+.ff-group .mono {
+  margin-left: 10px;
+  letter-spacing: 0;
+  font-weight: 500;
+  text-transform: none;
 }
 .ff-table tr.ff-open td {
   border-bottom-color: transparent;

@@ -6,7 +6,7 @@ import {
   matchesTerms, offersRelogin, queryTerms, reviewedToday, searchedToday,
   sortFleet, splitHighlights, vaultAccountIdFor, whoIs, easternToUtc, utcToEastern,
   FLOW_STAGES, STAGE_FORMS, draftChanges, settingsDraft, settingsPatch,
-  citiesDiffer, cityOwners, isCitySlug, marketplaceCityUrl, normalizeCitySlug,
+  citiesDiffer, cityOwners, ipPartners, isCitySlug, marketplaceCityUrl, normalizeCitySlug, proxyLocations,
   applyPinEdits, pinEdits, searchesPerDay, tierSettingsEdits, tierSettingsValid, keysymsFor,
 } from './fleetView';
 
@@ -365,6 +365,57 @@ describe('a worker\'s cities', () => {
     const owners = cityOwners(fleet, 'nyc-1');
     expect(owners.get('dc')).toEqual(['homelab-1', 'ne-1']);
     expect(owners.get('tampa')).toEqual(['homelab-1']);
+  });
+
+  it('pairs the workers that dial one proxy, and only those', () => {
+    const on = (id: string, url: string | null) => account({ worker_id: id, proxy: { url } });
+    const partners = ipPartners([
+      on('ca-1', 'http://isp.decodo.com:10014'),
+      on('ca-1b', 'http://isp.decodo.com:10014'),
+      on('ca-1c', 'http://isp.decodo.com:10014'),
+      on('ca-3', 'http://isp.decodo.com:10016'),
+      on('se-1', null),
+      on('va-1', null),
+      account({ worker_id: 'old-facade' }),
+    ]);
+    expect(partners.get('ca-1')).toEqual(['ca-1b', 'ca-1c']);
+    expect(partners.get('ca-1b')).toEqual(['ca-1', 'ca-1c']);
+    expect(partners.has('ca-3')).toBe(false);
+    // The VM's own address is not a proxy anyone chose to share.
+    expect(partners.has('se-1')).toBe(false);
+    expect(partners.has('old-facade')).toBe(false);
+  });
+
+  it('groups the workers by the city their proxy comes out in', () => {
+    const at = (id: string, port: number | null, city?: string, region?: string) =>
+      account({ worker_id: id, proxy: port === null ? { url: null, city: 'Framingham' } : { url: `http://isp.decodo.com:${port}`, city, region } });
+    const fleet = [
+      at('ca-3', 10016, 'Palo Alto', 'California'),
+      at('nj-1', 10018, 'Parsippany', 'New Jersey'),
+      at('ca-1b', 10014, 'Palo Alto', 'California'),
+      at('va-1', null),
+      at('ca-1', 10014, 'Palo Alto', 'California'),
+      at('new-1', 10021),
+      at('nj-2', 10019, 'Parsippany', 'New Jersey'),
+      at('ca-2', 10015, 'Palo Alto', 'California'),
+    ];
+    const groups = proxyLocations(fleet, true);
+    expect(groups.map(g => [g.key, g.ips, g.workers.map(w => w.worker_id)])).toEqual([
+      ['Palo Alto|California', 3, ['ca-1', 'ca-1b', 'ca-2', 'ca-3']],
+      ['Parsippany|New Jersey', 2, ['nj-1', 'nj-2']],
+      ['pending', 1, ['new-1']],
+      ['none', 0, ['va-1']],
+    ]);
+    expect(groups[0]).toMatchObject({ city: 'Palo Alto', region: 'California' });
+    // A column sort keeps its order inside each city.
+    expect(proxyLocations(fleet, false)[0].workers.map(w => w.worker_id)).toEqual(['ca-3', 'ca-1b', 'ca-1', 'ca-2']);
+  });
+
+  it('draws a worker that sweeps at its own time from that time', () => {
+    const w = account({ today: { first_at: null, last_at: null, searches: 0 } as never, start_at: ['17:00'] });
+    const NOON_UTC = Date.parse('2026-10-20T12:00:00Z');
+    expect(dayStrip(w, 'live', w.start_at ?? ['13:00'], NOON_UTC)!.next).toEqual({ time: '13:00', tomorrow: false });
+    expect(dayStrip(w, 'live', ['13:00'], NOON_UTC)!.next).toEqual({ time: '09:00', tomorrow: false });
   });
 
   it('sees a reorder, a rename or a new radius as a change', () => {

@@ -2,13 +2,13 @@
 id: RS-332
 title: Pilot two Facebook workers per proxy on two Palo Alto IPs
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-20
 reporter: jinhu
 branch: fb-shared-proxy-pilot
-pr:
-version:
+pr: 798, 799
+version: facebook-tracker 0.13.8, v1.303.0
 related: [RS-331, RS-275]
 ---
 
@@ -25,6 +25,8 @@ Asked what "group them by the proxy" should do, the requester picked
 "Workers share a proxy". Then:
 
 > I menat it may make snese, one ip have 2-3 facebooks account is that right?
+
+> The proxy should also group by the location.
 
 ## Context
 
@@ -48,19 +50,22 @@ worker's `PROXY_*` var is all it takes.
 
 ## Acceptance criteria
 
-- [ ] ca-1b runs on port 10014 beside ca-1, and ca-2b on 10015 beside ca-2.
+- [x] ca-1b runs on port 10014 beside ca-1, and ca-2b on 10015 beside ca-2.
       In `/v1/fleet`, each one's exit IP equals its partner's.
-- [ ] A worker can have its own sweep times
+- [x] A worker can have its own sweep times
       (`python -m rs_console.settings start-at <worker> HH:MM`). They survive
       a deploy and a fleet-wide settings save. ca-1b and ca-2b sweep at 17:00
       UTC; their partners keep 13:00 UTC.
-- [ ] `/v1/fleet` gives each worker its own `start_at`, and its plan counts
+- [x] `/v1/fleet` gives each worker its own `start_at`, and its plan counts
       those times.
-- [ ] The six Palo Alto vault slots carry region `rs_west`, so a device
+- [x] The six Palo Alto vault slots carry region `rs_west`, so a device
       generated for them reports `America/Los_Angeles`.
-- [ ] The ERP Fleet tab marks workers that share an IP and draws each
+- [x] The ERP Fleet tab marks workers that share an IP and draws each
       worker's day from its own sweep times.
-- [ ] No existing worker container is recreated by the deploy.
+- [x] The Fleet tab's workers table is grouped by proxy location: a divider
+      per exit city with its IP and worker counts, and each city's workers
+      ordered by proxy, so the workers on one IP sit together.
+- [x] No existing worker container is recreated by the deploy.
 
 ## Out of scope
 
@@ -94,3 +99,12 @@ Found while building it:
   timezone, or UTC when it reports none. Check `rsc identity list` after each
   Palo Alto account's first login. A UTC or Eastern device on a Palo Alto IP
   is a mismatch, and the next fix belongs in `seeded_profile`.
+- Deployed 2026-10-20 as facebook-tracker 0.13.8 with all 20 existing
+  containers held. ca-1b and ca-2b started 17:34 UTC, parked at
+  `SESSION_EXPIRED`. `/v1/fleet` shows each on its partner's exit (ca-1b
+  138.226.192.110, ca-2b 135.132.73.70) with `start_at` 17:00 against the
+  partners' 13:00. The six Palo Alto vault slots carry region `rs_west`.
+- Grouping the Fleet tab by exit city also shows the old geography
+  mismatches at a glance. sc-1 (South Central) exits in New York, denver-1
+  in Seattle, and west-1 and wc-1 (Pacific Northwest cities) in Virginia and
+  DC.

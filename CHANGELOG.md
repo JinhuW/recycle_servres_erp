@@ -17,6 +17,30 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.303.0] - 2026-10-20
+
+The Fleet tab groups the workers by where their proxies come out, and shows
+which ones share an IP (RS-332). The fleet's twenty proxies exit in nine
+cities. That city is where Facebook sees an account, but until now it showed
+only on each worker's page. The workers table now has a divider per exit city:
+Palo Alto, California · 4 IPs · 6 workers. Each worker sits under its city,
+ordered by proxy so the workers on one IP are adjacent, and its subtitle names
+its proxy port (the exit IP is in the tooltip). A column sort still sorts
+inside each city. Workers whose exit is still being looked up come next, then
+workers on the VM's own IP. The search box also matches the exit city.
+
+The Facebook fleet also runs a pilot of two accounts on one proxy: ca-1b
+beside ca-1 on port 10014, and ca-2b beside ca-2 on 10015. What keeps a shared
+IP safe is that its accounts never look like one operator. So a worker's
+subtitle names the other workers on the same proxy ("shares IP with ca-1b"),
+and the tooltip says to keep their cities and sweep times apart.
+
+Each worker's Today strip now draws from its own sweep times. The tracker
+reports them per worker since facebook-tracker 0.13.8, read from the config
+the worker runs, and a partner on a shared IP sweeps four hours after the
+fleet. Against an older facade the strip falls back to the fleet's times, as
+before.
+
 ## [1.302.0] - 2026-10-20
 
 Paid by now follows the commission screenshot, and every other change to it
