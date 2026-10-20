@@ -48,6 +48,9 @@ export type PrefMap = {
   'sidebar.folded': boolean;
   // The account panel beside a worker's live browser, folded away.
   'fleetWatch.accountHidden': boolean;
+  // Finished or skipped the purchaser walkthrough; it opens by itself until
+  // this is set.
+  'onboarding.done': boolean;
 };
 
 export type PrefKey = keyof PrefMap;

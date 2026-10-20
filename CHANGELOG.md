@@ -17,6 +17,29 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.299.0] - 2026-10-20
+
+New purchasers get a guided walkthrough the first time they sign in, on the
+desktop and on the phone (RS-326). A manager used to create a purchaser with a
+temporary password and nothing else, and the rules that matter before a first
+buy only surfaced as refusals: Submit order saves a Draft, the real hand-off
+is Mark as In Transit, and that refuses without a warehouse, a source, a
+pickup or tracking number and the payment proof that matches who paid.
+Commission had no explanation anywhere a purchaser could see it.
+
+The walkthrough is nine short steps: home numbers, adding products, the
+hand-off, the three payment proofs, the manager review and edit window, how
+commission is computed and paid, the buying tools, and a finish that opens
+Submit (desktop) or the capture flow (phone). Each step that has a place in
+the app spotlights it in the sidebar or the tab bar, and the card switches
+between English and 中文 in place. Finishing or skipping stores
+`onboarding.done` in the user's server-side preferences, so it never comes
+back on another device. Migration 0186 sets that flag for everyone who had
+already signed in, so only members who never have (pending invites) get it
+automatically, and managers never do. Anyone can replay it from the new Guide
+button in the desktop top bar or Profile › Getting started on the phone. The
+phone's install card waits while it is open.
+
 ## [1.298.0] - 2026-10-20
 
 The Reddit page's model fields are now pickers fed by OpenRouter's catalogue

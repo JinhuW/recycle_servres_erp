@@ -19,9 +19,10 @@ type Props = {
   onOpenNotifications: () => void;
   onOpenAbout: () => void;
   onOpenSecurity: () => void;
+  onOpenGuide: () => void;
 };
 
-export function Profile({ onOpenLanguage, onOpenNotifications, onOpenAbout, onOpenSecurity }: Props) {
+export function Profile({ onOpenLanguage, onOpenNotifications, onOpenAbout, onOpenSecurity, onOpenGuide }: Props) {
   const { t, lang, locale } = useT();
   const { user, logout, setDefaultWarehouse } = useAuth();
   const { rolePreview, setRolePreview } = useTweaks();
@@ -70,6 +71,7 @@ export function Profile({ onOpenLanguage, onOpenNotifications, onOpenAbout, onOp
         </select>
       ),
     },
+    { id: 'guide', icon: 'book', label: t('onbGuidePhone'), sub: t('onbGuidePhoneSub'), onClick: onOpenGuide },
     { id: 'about', icon: 'info', label: t('about'),         sub: t('aboutSub'),         onClick: onOpenAbout },
   ];
   // Managers only: the RolePicker gate shows on login, but a restored session

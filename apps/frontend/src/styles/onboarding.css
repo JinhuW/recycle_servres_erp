@@ -1,0 +1,435 @@
+/* Purchaser walkthrough. Above dialogs and sheets (100 / 36), below the error
+   dialog (200) so a failure raised underneath it can still be read. */
+
+.onb-root {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  /* Catches every click: the spotlight shows where a thing is, it isn't a way
+     to use it mid-walkthrough. */
+  pointer-events: auto;
+}
+
+/* The dim is the spotlight's own shadow, so the hole and the shade move as
+   one; at width 0 it covers the whole screen. */
+.onb-spot {
+  position: fixed;
+  border-radius: 12px;
+  box-shadow: 0 0 0 200vmax oklch(0.2 0.02 250 / 0.58);
+  transition: top .38s cubic-bezier(.3,.7,.2,1), left .38s cubic-bezier(.3,.7,.2,1),
+              width .38s cubic-bezier(.3,.7,.2,1), height .38s cubic-bezier(.3,.7,.2,1);
+  pointer-events: none;
+}
+.onb-spot.on {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  animation: onb-pulse 1.8s ease-out .4s infinite;
+}
+@keyframes onb-pulse {
+  0%   { outline-offset: 2px;  outline-color: var(--accent); }
+  70%  { outline-offset: 9px;  outline-color: oklch(0.62 0.13 165 / 0); }
+  100% { outline-offset: 9px;  outline-color: oklch(0.62 0.13 165 / 0); }
+}
+
+.onb-card {
+  position: fixed;
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 24px 60px -18px oklch(0.2 0.03 250 / 0.45), 0 2px 6px oklch(0.2 0.03 250 / 0.08);
+  outline: none;
+  transition: top .38s cubic-bezier(.3,.7,.2,1), left .38s cubic-bezier(.3,.7,.2,1),
+              right .38s cubic-bezier(.3,.7,.2,1), bottom .38s cubic-bezier(.3,.7,.2,1);
+  animation: onb-in .32s cubic-bezier(.3,.7,.2,1);
+}
+.onb-card.onb-at-center { transition: none; }
+@keyframes onb-in {
+  from { opacity: 0; translate: 0 8px; }
+  to   { opacity: 1; translate: 0 0; }
+}
+
+.onb-arrow {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  rotate: 45deg;
+}
+.onb-arrow-right { left: -8px; border-top-color: transparent; border-right-color: transparent; }
+.onb-arrow-below { top: -8px; border-bottom-color: transparent; border-right-color: transparent; }
+.onb-arrow-above { bottom: -8px; border-top-color: transparent; border-left-color: transparent; }
+
+.onb-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 14px 0 20px;
+}
+.onb-step {
+  font-size: 11px;
+  color: var(--fg-subtle);
+  letter-spacing: .04em;
+  margin-right: auto;
+}
+.onb-lang button { padding: 3px 9px; font-size: 11.5px; }
+.onb-skip { color: var(--fg-muted); }
+
+.onb-scroll {
+  overflow-y: auto;
+  padding: 14px 20px 4px;
+  min-height: 0;
+}
+
+.onb-title {
+  font-size: 19px;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+  margin: 16px 0 6px;
+  font-weight: 650;
+}
+.onb-body {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--fg-muted);
+}
+.onb-points {
+  list-style: none;
+  margin: 12px 0 4px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.onb-points li {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.onb-points li > svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--accent-strong);
+}
+
+.onb-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 20px 18px;
+}
+.onb-foot .btn { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+/* The last step's two buttons both carry a sentence; the dots give up their
+   place beside them. */
+.onb-foot.last { flex-wrap: wrap; }
+.onb-foot.last .onb-dots { flex-basis: 100%; margin: 0 0 6px; justify-content: center; }
+.onb-foot.last .btn { flex: 1; justify-content: center; }
+.onb-dots { display: flex; gap: 5px; margin-right: auto; }
+.onb-dots span {
+  width: 6px; height: 6px;
+  border-radius: 99px;
+  background: var(--border-strong);
+  transition: width .25s, background .25s;
+}
+.onb-dots span.seen { background: color-mix(in oklch, var(--accent) 45%, var(--border-strong)); }
+.onb-dots span.on { width: 18px; background: var(--accent); }
+
+/* ── Step pictures ─────────────────────────────────────────────────────── */
+
+.onb-vis {
+  position: relative;
+  border-radius: var(--radius);
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  padding: 14px;
+}
+.onb-example { position: absolute; top: 8px; right: 8px; font-size: 10.5px; }
+
+.onb-journey {
+  list-style: none;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  padding: 16px 10px 12px;
+}
+.onb-journey li {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+/* The line runs between the dots, behind them. */
+.onb-journey li + li::before {
+  content: '';
+  position: absolute;
+  top: 17px;
+  right: calc(50% + 20px);
+  width: calc(100% - 34px);
+  border-top: 1.5px dashed var(--border-strong);
+}
+.onb-journey-dot {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+}
+.onb-journey li:last-child .onb-journey-dot {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+.onb-journey-label { font-size: 11.5px; font-weight: 500; line-height: 1.3; }
+.onb-journey-label .mono { display: block; font-size: 10px; color: var(--fg-subtle); }
+
+.onb-numbers {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.onb-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 11px;
+}
+.onb-tile.wide { grid-column: 1 / -1; position: relative; }
+.onb-tile-label { font-size: 11px; color: var(--fg-subtle); }
+.onb-tile-value { font-size: 17px; font-weight: 650; letter-spacing: -0.02em; }
+.onb-tile-value.pos { color: var(--pos); }
+.onb-spark {
+  position: absolute;
+  right: 12px; bottom: 10px;
+  width: 110px; height: 26px;
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.onb-cats { display: flex; flex-direction: column; gap: 10px; }
+.onb-cat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.onb-cat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 10px 4px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+}
+.onb-cat.info svg { color: var(--info); }
+.onb-cat.pos  svg { color: var(--pos); }
+.onb-cat.cool svg { color: var(--cool); }
+.onb-cat.warn svg { color: var(--warn-strong); }
+.onb-scanline {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  border-radius: 7px;
+  padding: 7px 10px;
+}
+
+.onb-handoff {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 18px 12px;
+}
+.onb-pill {
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 99px;
+}
+.onb-pill.draft { background: var(--bg-elev); border: 1px solid var(--border-strong); color: var(--fg-muted); }
+.onb-pill.transit { background: var(--info-soft); color: oklch(0.45 0.13 250); }
+.onb-handoff-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 12px;
+  border-radius: 8px;
+  background: var(--fg);
+  color: white;
+}
+.onb-handoff-to { color: var(--fg-subtle); }
+
+.onb-pay { display: flex; flex-direction: column; gap: 6px; padding: 10px; }
+.onb-pay-opt, .onb-tool {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 11px;
+}
+.onb-pay-icon, .onb-tool-icon {
+  flex: none;
+  width: 28px; height: 28px;
+  border-radius: 7px;
+  display: grid; place-items: center;
+  background: var(--bg-soft);
+  color: var(--fg-muted);
+}
+.onb-pay-text, .onb-tool-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.onb-pay-title, .onb-tool-title { font-size: 12.5px; font-weight: 600; }
+.onb-pay-need, .onb-tool-sub { font-size: 12px; color: var(--fg-muted); line-height: 1.4; }
+
+.onb-tools { display: flex; flex-direction: column; gap: 6px; padding: 10px; }
+
+.onb-stages { padding: 16px 10px 12px; }
+.onb-stages ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+}
+.onb-stages li {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  text-align: center;
+}
+.onb-stages li + li::before {
+  content: '';
+  position: absolute;
+  top: 5px;
+  right: calc(50% + 8px);
+  width: calc(100% - 16px);
+  border-top: 2px solid var(--border-strong);
+}
+.onb-stage-dot {
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: var(--bg-elev);
+  border: 2px solid var(--fg-subtle);
+}
+.onb-stages li.you .onb-stage-dot { border-color: var(--accent); background: var(--accent); }
+.onb-stages li:last-child .onb-stage-dot { border-color: var(--pos); }
+.onb-stage-name { font-size: 11px; font-weight: 600; line-height: 1.25; margin-top: 2px; }
+.onb-stage-who { font-size: 10px; color: var(--fg-subtle); }
+.onb-stages li.you .onb-stage-who { color: var(--accent-strong); }
+/* Draft, In Transit and Reviewing: three of the five columns. */
+.onb-stage-window {
+  margin: 10px 0 0;
+  width: 60%;
+  border-top: 2px solid var(--accent);
+  position: relative;
+}
+.onb-stage-window span {
+  display: block;
+  font-size: 10.5px;
+  color: var(--accent-strong);
+  text-align: center;
+  padding-top: 4px;
+}
+
+.onb-comm { display: flex; flex-direction: column; gap: 5px; padding: 14px 14px 12px; }
+.onb-comm-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12.5px;
+  color: var(--fg-muted);
+  max-width: 260px;
+}
+.onb-comm-row .mono { color: var(--fg); }
+.onb-comm-row.sub { border-top: 1px solid var(--border-strong); padding-top: 5px; }
+.onb-comm-row.total {
+  border-top: 1px solid var(--border-strong);
+  padding-top: 6px;
+  color: var(--fg);
+  font-weight: 600;
+  font-size: 13.5px;
+}
+.onb-comm-row.total .mono { color: var(--accent-strong); font-weight: 600; }
+.onb-comm-self {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  line-height: 1.4;
+}
+.onb-comm-self svg { flex: none; margin-top: 1px; }
+
+.onb-ready {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 22px 14px;
+  background: var(--accent-soft);
+  border-color: transparent;
+}
+.onb-ready-mark {
+  width: 56px; height: 56px;
+  border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--accent);
+  color: var(--accent-fg);
+  box-shadow: 0 0 0 8px oklch(0.62 0.13 165 / 0.15);
+}
+.onb-ready-tip {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: 300px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--accent-strong);
+}
+.onb-ready-tip svg { flex: none; margin-top: 2px; }
+
+/* ── Phone ─────────────────────────────────────────────────────────────── */
+
+.onb-phone .onb-card {
+  width: auto;
+  max-width: none;
+  /* Docked above the tab bar; the body scrolls when a step runs long. */
+  max-height: calc(100dvh - 120px);
+  border-radius: 18px;
+}
+.onb-phone .onb-top { padding: 12px 10px 0 16px; }
+.onb-phone .onb-scroll { padding: 12px 16px 2px; }
+.onb-phone .onb-title { font-size: 18px; margin-top: 14px; }
+.onb-phone .onb-foot { padding: 12px 16px 14px; }
+.onb-phone .onb-foot .btn { padding: 10px 14px; font-size: 13.5px; }
+.onb-phone .onb-journey-label { font-size: 11px; }
+.onb-phone .onb-stage-name { font-size: 10px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .onb-spot, .onb-card { transition: none; }
+  .onb-spot.on, .onb-card { animation: none; }
+}
