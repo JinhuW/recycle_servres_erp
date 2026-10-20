@@ -1,14 +1,14 @@
-import { useId } from 'react';
+import { useId, type CSSProperties } from 'react';
 import { AttachmentChip } from './AttachmentChip';
 import { AttachmentDropzone } from './AttachmentDropzone';
 import { Icon } from './Icon';
 import { useT } from '../lib/i18n';
-import type { CommissionPaidBy } from '../lib/useCommissionPaidBy';
+import { PAID_BY_COMPANY, paidByLabel, paidByLocked, paidByValue, type CommissionPaidBy } from '../lib/useCommissionPaidBy';
 import type { ProofAttachment } from '../lib/usePaymentProof';
 
-// The commission payment — which manager paid the purchaser, and the
-// screenshot that shows it — on the desktop Commission tab and in the phone
-// fold, one component so the two cannot drift. Both write through as they are
+// The commission payment — who paid the purchaser, and the screenshot that
+// shows it — on the desktop Commission tab and in the phone fold, one
+// component so the two cannot drift. Both write through as they are
 // used: the pick saves at once and files go straight to the order's
 // Commission bucket; there is no Save. The Done dialog offers the same drop box
 // on the way to Done when nothing is here yet. No panel around it.
@@ -44,7 +44,7 @@ function PaidByField({ paidBy, editable }: { paidBy: CommissionPaidBy; editable:
       <div className="field" style={{ marginBottom: 0, display: 'grid', gap: 8 }}>
         <span className="label">{t('cpPaidByLabel')}</span>
         <div className={paidBy.paidBy ? '' : 'pay-proof-title muted'}>
-          {paidBy.paidBy?.name ?? t('cpPaidByNone')}
+          {paidByLabel(paidBy.paidBy, t)}
         </div>
       </div>
     );
@@ -52,18 +52,38 @@ function PaidByField({ paidBy, editable }: { paidBy: CommissionPaidBy; editable:
   return (
     <div className="field" style={{ marginBottom: 0, display: 'grid', gap: 8 }}>
       <label className="label" htmlFor={id}>{t('cpPaidByLabel')}</label>
-      <select
-        id={id}
-        className="select"
-        value={paidBy.paidBy?.id ?? ''}
-        onChange={e => void paidBy.setPaidBy(e.target.value || null)}
-        disabled={paidBy.saving}
-        style={{ width: '100%' }}
-      >
-        <option value="">{t('cpPaidByNone')}</option>
-        {paidBy.options.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-      </select>
+      <PaidBySelect id={id} paidBy={paidBy} style={{ width: '100%' }} />
+      {paidByLocked(paidBy.paidBy) && (
+        <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>{t('cpPaidByLinkedHint')}</div>
+      )}
     </div>
+  );
+}
+
+// The picker itself, here and in the PO list's Paid by cell. The company is a
+// fixed option, not a member; the managers come from the members list.
+export function PaidBySelect({ paidBy, id, className = 'select', style }: {
+  paidBy: CommissionPaidBy;
+  id?: string;
+  className?: string;
+  style?: CSSProperties;
+}) {
+  const { t } = useT();
+  const locked = paidByLocked(paidBy.paidBy);
+  return (
+    <select
+      id={id}
+      className={className}
+      value={paidByValue(paidBy.paidBy)}
+      onChange={e => void paidBy.setPaidBy(e.target.value)}
+      disabled={paidBy.saving || locked}
+      title={locked ? t('cpPaidByLinkedHint') : undefined}
+      style={style}
+    >
+      <option value="">{t('cpPaidByNone')}</option>
+      <option value={PAID_BY_COMPANY}>{t('cpPaidByCompany')}</option>
+      {paidBy.options.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+    </select>
   );
 }
 

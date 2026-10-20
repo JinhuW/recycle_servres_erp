@@ -17,6 +17,33 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.301.0] - 2026-10-20
+
+The desktop PO list has a **Paid by** column after Commission (RS-328). It
+shows who paid the purchaser their commission. Until now that was recorded
+only on the PO's Commission tab, so finding unpaid commissions meant opening
+POs one by one. A manager picks the payer in the cell, and the pick saves on
+the spot as it does on the PO page. Purchasers read the column. It is on by
+default. Migration 0188 also adds it to every saved column list, which
+otherwise would have left it hidden for anyone who had ever toggled a column.
+
+The picker, here and on the PO page for desktop and phone, now offers
+**Company paid** beside *Not recorded* and the active managers. The managers
+come from the members list. The company is a fixed option, stored as
+`orders.commission_paid_by_company` (migration 0187), and a CHECK keeps it
+from being set together with a manager.
+
+A live bank payment linked as the PO's commission on the Payments page now
+makes Paid by read Company paid everywhere. The link is read live, not
+copied, so unlinking it, or the payment being reversed, brings back whatever
+was recorded by hand. While the link stands the select is locked with a note
+saying why, the list cell opens the payment, and
+`PUT /api/orders/:id/commission-paid-by` refuses a hand pick with a 409. The
+endpoint takes `{ company: true }` alongside `{ userId }`. `commissionPaidBy`
+in the API is now `{ kind: 'manager', id, name }`, `{ kind: 'company',
+linked }` or `null`. Managers keep their `id` and `name` fields, so an older
+page still shows them.
+
 ## [1.300.0] - 2026-10-20
 
 The workers table on Monitors ▸ Facebook ▸ Fleet now shows at most fifteen

@@ -2239,6 +2239,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     cpHint: 'How {name} is paid their commission. If no screenshot is here when the order is marked Done, the Done dialog asks for one.',
     cpPaidByLabel: 'Paid by',
     cpPaidByNone: 'Not recorded',
+    cpPaidByCompany: 'Company paid',
+    cpPaidByLinkedHint: 'A bank payment is linked as this commission, so the company paid it. Unlink it on the Payments page to pick by hand.',
     cpShotLabel: 'Payment screenshot',
     cpShotHint: 'PNG or JPG — the PayPal or cash screenshot showing the commission paid.',
     cpPaid: 'Paid',

@@ -206,6 +206,17 @@ export function linkedPaidFrag(sql: SqlClient, orderAlias = 'o') {
   )`;
 }
 
+// Whether the company's own money paid the purchaser: a live bank row linked
+// as this PO's commission. Failed and reversed rows paid nothing.
+export function commissionLinkedFrag(sql: SqlClient | TransactionSql, orderAlias = 'o') {
+  const o = sql(orderAlias);
+  return sql`EXISTS (
+    SELECT 1 FROM bank_transactions bt
+    WHERE bt.order_id = ${o}.id AND bt.link_kind = 'commission'
+      AND bt.settle_status <> 'failed' AND bt.settle_status <> 'reversed'
+  )`;
+}
+
 // A row links to one target — a purchase order (cost or commission) or a sell
 // order — so "not linked" is both columns empty. One fragment and one
 // predicate, so a guard that reads `order_id` alone cannot creep back in.

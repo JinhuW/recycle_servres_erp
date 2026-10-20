@@ -25,6 +25,9 @@ import { TableSkeleton } from '../../components/Skeleton';
 import { OrderCategoryChips } from '../../components/OrderCategoryChips';
 import { SoldBadge } from '../../components/SoldBadge';
 import { PaymentGapMark } from '../../components/PaymentMismatch';
+import { PaidBySelect } from '../../components/CommissionPaymentFields';
+import { paidByLabel, paidByLocked, useCommissionPaidBy, type PaidBy } from '../../lib/useCommissionPaidBy';
+import { useManagerOptions, type MemberOption } from '../../lib/useManagers';
 import { useReviewModeEntry } from './ReviewModeEntry';
 
 // Map a stage tone keyword to a usable CSS variable. Same lookup as the
@@ -61,6 +64,7 @@ const TOGGLEABLE_COLS = [
   { id: 'profit',     tKey: 'profit' },
   { id: 'realized',   tKey: 'realizedProfit' },
   { id: 'commission', tKey: 'commission' },
+  { id: 'paidBy',     tKey: 'cpPaidByLabel' },
   { id: 'payment',    tKey: 'payment' },
   { id: 'status',     tKey: 'status' },
 ] as const;
@@ -84,6 +88,7 @@ const SORT_KEYS: Record<string, (o: OrderSummary) => string | number> = {
   // Unsold POs sort below every realized figure, loss or gain.
   realized:   o => o.realized?.profit ?? Number.NEGATIVE_INFINITY,
   commission: o => commissionFor(o),
+  paidBy:     o => !o.commissionPaidBy ? '' : o.commissionPaidBy.kind === 'company' ? 'Company' : o.commissionPaidBy.name,
   payment:    o => o.payment,
   status:     o => o.status,
 };
@@ -91,6 +96,44 @@ const SORT_KEYS: Record<string, (o: OrderSummary) => string | number> = {
 type Props = {
   onToast?: (msg: string, kind?: 'success' | 'error') => void;
 };
+
+// Who paid the purchaser their commission, picked in place by a manager. The
+// row's own click toggles the line drawer, hence the stop. A linked bank
+// payment settles it as the company's, so the cell opens that payment instead,
+// as the Payment chip beside it does.
+function PaidByCell({ order, managers, editable, onSaved }: {
+  order: OrderSummary;
+  managers: MemberOption[];
+  editable: boolean;
+  onSaved: (id: string, paidBy: PaidBy) => void;
+}) {
+  const { t } = useT();
+  const paidBy = useCommissionPaidBy({
+    orderId: order.id,
+    paidBy: order.commissionPaidBy ?? null,
+    managers,
+    onMutated: p => onSaved(order.id, p),
+  });
+  const label = paidByLabel(paidBy.paidBy, t);
+  if (editable && paidByLocked(paidBy.paidBy)) {
+    return (
+      <RouteLink to={paymentsForOrderPath(order.id)} className="chip chip-link" title={t('cpPaidByLinkedHint')}>
+        {label}
+      </RouteLink>
+    );
+  }
+  if (!editable) {
+    return <span className={paidBy.paidBy ? undefined : 'muted'} style={{ whiteSpace: 'nowrap' }}>{label}</span>;
+  }
+  return (
+    <span onClick={e => e.stopPropagation()}>
+      <PaidBySelect
+        paidBy={paidBy}
+        className={'select sm po-paid-by' + (paidBy.paidBy ? '' : ' muted')}
+      />
+    </span>
+  );
+}
 
 export function DesktopOrders({ onToast }: Props) {
   const { t, locale } = useT();
@@ -119,6 +162,11 @@ export function DesktopOrders({ onToast }: Props) {
   const [warehousePick, setWarehousePick] = usePersisted<WarehousePick>('desktop.orders.warehouse', 'all');
   const [paymentPick, setPaymentPick] = usePersisted<PaymentPick>('desktop.orders.payment', 'all');
   const [orders, setOrders] = useState<OrderSummary[]>([]);
+  // The Paid by cell's picker; a purchaser reads the record and never fetches.
+  const managers = useManagerOptions(isManager);
+  // The sort and a later re-render read the row, not the cell's own state.
+  const onPaidBySaved = (id: string, commissionPaidBy: PaidBy) =>
+    setOrders(os => os.map(o => (o.id === id ? { ...o, commissionPaidBy } : o)));
   // A move that finds the PO elsewhere asks again from there; the row takes
   // that stage too, or the next click would ask about the old one again.
   const { enter: enterReview, prompt: reviewPrompt } = useReviewModeEntry({
@@ -585,6 +633,7 @@ export function DesktopOrders({ onToast }: Props) {
                 {isVis('profit') && <SortTh col="profit" sort={sort} onSort={cycleSort} align="right">{isManager ? t('unrealizedShort') : t('profit')}</SortTh>}
                 {isManager && isVis('realized') && <SortTh col="realized" sort={sort} onSort={cycleSort} align="right">{t('realizedShort')}</SortTh>}
                 {isVis('commission') && <SortTh col="commission" sort={sort} onSort={cycleSort} align="right">{t('commission')}</SortTh>}
+                {isVis('paidBy') && <SortTh col="paidBy" sort={sort} onSort={cycleSort}>{t('cpPaidByLabel')}</SortTh>}
                 {isVis('payment') && <SortTh col="payment" sort={sort} onSort={cycleSort}>{t('payment')}</SortTh>}
                 {isVis('status') && <SortTh col="status" sort={sort} onSort={cycleSort}>{t('status')}</SortTh>}
                 <th className="col-actions" style={{ width: isManager ? 122 : 90 }}>{t('actions')}</th>
@@ -711,6 +760,9 @@ export function DesktopOrders({ onToast }: Props) {
                         </td>
                       )}
                       <td className="num mono" style={{ display: isVis('commission') ? undefined : 'none' }}>{fmtUSD(commission, locale)}</td>
+                      <td style={{ display: isVis('paidBy') ? undefined : 'none' }}>
+                        <PaidByCell order={o} managers={managers} editable={isManager} onSaved={onPaidBySaved} />
+                      </td>
                       <td style={{ display: isVis('payment') ? undefined : 'none' }}>
                         {/* A PO the bank has paid says so and opens its payment
                             group; a manager only, since that page is. The row's

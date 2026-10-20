@@ -109,6 +109,10 @@ export type OrderRealized = {
   profit: number;
 };
 
+export type CommissionPayer =
+  | { kind: 'manager'; id: string; name: string }
+  | { kind: 'company'; linked: boolean };
+
 export type OrderSummary = {
   id: string;
   userId: string;
@@ -175,9 +179,11 @@ export type OrderSummary = {
   // over only when another manager moving it says so. Optional for deploy
   // skew; null until a manager has moved it that far.
   manager?: { id: string; name: string } | null;
-  // Which manager paid the purchaser their commission. Optional for deploy
-  // skew; null until a manager records it.
-  commissionPaidBy?: { id: string; name: string } | null;
+  // Who paid the purchaser their commission: a manager, or the company — by
+  // hand, or because a bank payment is linked as the commission (`linked`),
+  // which outranks the hand pick. Optional for deploy skew; null until a
+  // manager records it. An older backend sends a manager without `kind`.
+  commissionPaidBy?: CommissionPayer | null;
   // The hand-off's package — what the In Transit chip links. Only the list
   // endpoint reports it; null on a pickup or a pre-hand-off order.
   tracking?: PackageTracking | null;

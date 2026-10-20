@@ -237,7 +237,11 @@ is not a stage but a flag beside one, set once every line has sold
   Above the drop box, **Paid by** names the manager who paid the purchaser
   (v1.217.0): a select of the active managers, or *Not recorded*, which every
   order starts at — the screenshot's uploader need not be the payer, so
-  nothing is guessed. Files write through as they are dropped and the pick
+  nothing is guessed. Since v1.301.0 it also offers **Company paid**, a fixed
+  option rather than a member, for a commission paid from the company's
+  account. A live bank payment linked as the PO's commission makes it read
+  Company paid on its own: the select locks with a note saying why, and an
+  unlink or a reversal gives back the pick made by hand. Files write through as they are dropped and the pick
   as it is made — managers at any stage, closed book included — and
   purchasers see both read-only. Under the drop box, managers also see the
   **bank payments linked as this PO's commission** on the Payments page,
@@ -714,6 +718,15 @@ is not a stage but a flag beside one, set once every line has sold
   exist; sortable, in the Columns picker, on by default. A user who had
   pinned the picker before this release ticks it on once — the saved set
   lists what is shown, and a new column is not in it.
+- **The desktop list has a Paid by column** (v1.301.0), after Commission:
+  who paid the purchaser their commission, the same record as the Commission
+  tab's *Paid by*. A manager picks it in the cell (*Not recorded*, *Company
+  paid* or an active manager), and the pick saves at once. The picker looks
+  like the cell's text until the pointer is on it. A PO with a bank payment
+  linked as its commission shows a *Company paid* chip that opens that
+  payment. Purchasers read it. It is sortable, in the Columns picker and on
+  by default. Unlike Total cost above, migration 0188 added it to every saved
+  column list, so nobody has to tick it on.
 - **The Actions column is pinned to the right edge** (v1.294.1). When the
   desktop list is wider than its card and scrolls sideways, the Actions
   header and cells stay put at the right while the other columns slide
