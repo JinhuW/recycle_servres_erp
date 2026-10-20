@@ -94,6 +94,58 @@ describe('supplier account import', () => {
       parsePoolImport(row.replace(`c_user=${uid}`, 'c_user=61550000000000'), [])[0].warnings,
     ).toContain('fpCookieMismatch');
   });
+  it('warns when a token is not an EAA… access token', () => {
+    const bad = `${uid}|password|JBSWY3DPEHPK3PXP|a@b.example|mp||c_user=${uid}; xs=demo|not-a-token`;
+    expect(parsePoolImport(bad, [])[0].warnings).toContain('fpTokenMalformed');
+    const good = `${uid}|password|JBSWY3DPEHPK3PXP|a@b.example|mp||c_user=${uid}; xs=demo|EAAgood`;
+    expect(parsePoolImport(good, [])[0].warnings).not.toContain('fpTokenMalformed');
+  });
+});
+describe('supplier order sheet with a header row', () => {
+  // The vendor layout: comma CSV, cookie and token before the e-mail, no
+  // recovery column, Chinese headers — none of which the positional reader
+  // could take.
+  const sheet = [
+    '序号,账号（UID）,密码,2FA/验证码,Cookie,令牌,邮箱,邮箱密码',
+    `1,${uid},DemoOnly!13,JBSWY3DPEHPK3PXP,"c_user=${uid}; xs=demo",EAADemoToken,nora@outlook.example,MailPw!1`,
+  ].join('\n');
+
+  it('maps columns by name and skips the header row', () => {
+    const result = parsePoolImport(sheet, []);
+    expect(result).toHaveLength(1);
+    expect(result[0].line).toBe(2); // the header is line 1
+    expect(result[0].errors).toEqual([]);
+    expect(result[0].draft).toMatchObject({
+      uid,
+      password: 'DemoOnly!13',
+      totp: 'JBSWY3DPEHPK3PXP',
+      email: 'nora@outlook.example',
+      emailPassword: 'MailPw!1',
+      recovery: '',
+      cookie: `c_user=${uid}; xs=demo`,
+      token: 'EAADemoToken',
+    });
+    expect(result[0].warnings).toEqual([]);
+  });
+
+  it('reads English headers in any order, comma-quoted', () => {
+    const csv = [
+      'Token,UID,Password,Cookie,2FA,Email,Notes',
+      `EAAx,${uid},pw,"c_user=${uid}; xs=s",JBSWY3DPEHPK3PXP,x@y.example,"aged, trusted"`,
+    ].join('\n');
+    const [r] = parsePoolImport(csv, []);
+    expect(r.draft).toMatchObject({ uid, token: 'EAAx', note: 'aged, trusted' });
+    expect(r.errors).toEqual([]);
+  });
+
+  it('still warns on a bad token and a mismatched cookie under a header', () => {
+    const csv = [
+      'UID,Password,Cookie,Token',
+      `${uid},pw,"c_user=61550000000000; xs=s",nope`,
+    ].join('\n');
+    const [r] = parsePoolImport(csv, []);
+    expect(r.warnings).toEqual(expect.arrayContaining(['fpCookieMismatch', 'fpTokenMalformed']));
+  });
 });
 describe('supplier formats', () => {
   it('reads c_user from a header line with loose spacing and from exported JSON', () => {

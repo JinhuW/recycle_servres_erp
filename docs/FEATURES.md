@@ -2331,6 +2331,13 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   Since v1.291.1, a fleet that won't seed the cookie (a console older than
   0.12.5 answers 404; a cookie without `xs` is refused with 422) gets the
   password Re-login instead of a failed Assign.
+  Since v1.308.0 the account's access token (the `EAA…` the pool stores from
+  v1.307.0) travels to the worker too, so when a restored or seeded cookie
+  session lapses the worker mints a fresh one from the token — inside its own
+  proxied browser, with no password and no 2FA — and only then falls back to
+  the password login. The token is handed over on demand and audited, never
+  counted against the password budget, and the login ledger records the
+  attempt as `token-refresh` (facebook-tracker 0.13.10, RS-338).
   Since facebook-tracker 0.13.0 a wall a worker hits mid-sweep — a checkpoint,
   captcha, block or disabled notice on an ordinary Marketplace URL, which the
   selectors read as an empty city — is named by a decision model
@@ -2417,8 +2424,11 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   the account's login, password, 2FA key and e-mail into that worker's vault
   account with password login allowed, and queues Re-login. The worker then
   signs in inside its own browser, through its own proxy; any checkpoint is
-  finished in Watch. The cookie is never sent, and nothing secret reaches the
-  browser. The ledger records it as `assigned`. A worker that already holds
+  finished in Watch. Since v1.290.0 the account's own cookie is seeded as the
+  worker's session (RS-308) and, since v1.308.0, its access token travels so
+  the worker can mint a fresh session when the cookie lapses (RS-338); either
+  way the secrets stay server-side and nothing secret reaches the browser. The
+  ledger records it as `assigned`. A worker that already holds
   another account, or an account with no password, is refused (RS-275).
   Since v1.280.0 the backend checks every Available, Taken and Fleet account on
   Facebook once a week, through the public profile-picture lookup (anonymous,

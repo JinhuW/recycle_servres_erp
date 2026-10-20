@@ -508,6 +508,10 @@ pool.post('/:no/assign', async (c) => {
       totp_secret: orNull(totpKey(unsealOrEmpty(row.totp_enc, key))),
       email: orNull(row.email),
       email_password: orNull(unsealOrEmpty(row.email_password_enc, key)),
+      // The access token lets the worker mint a fresh session when its cookie
+      // lapses — a softer signal than a password login — so it travels even in
+      // password mode, as the worker's own refresh before the password.
+      fb_token: orNull(unsealOrEmpty(row.token_enc, key)),
     },
     ...legacyDevice(cookie, row.cookie_uid, row.uid),
   });

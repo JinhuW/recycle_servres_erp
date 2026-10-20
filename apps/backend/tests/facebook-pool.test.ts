@@ -314,7 +314,7 @@ describe('facebook account pool', () => {
           fb_username: 'acct1@outlook.example',
           fb_uid: uid(1),
           allow_password_login: true,
-          secrets: { password: 'DemoOnly!1', totp_secret: 'JBSWY3DPEHPK3PXP', email: 'acct1@outlook.example', email_password: 'Mail!1' },
+          secrets: { password: 'DemoOnly!1', totp_secret: 'JBSWY3DPEHPK3PXP', email: 'acct1@outlook.example', email_password: 'Mail!1', fb_token: 'EAAtoken1' },
           device_cookies: [expect.objectContaining({ name: 'datr', value: 'd', domain: '.facebook.com' })],
         },
       });
@@ -352,6 +352,9 @@ describe('facebook account pool', () => {
       expect(r.status).toBe(200);
       expect(sent(spy, 0)).toMatchObject({ url: 'http://facade.internal:8600/v1/accounts/nyc-1', method: 'PUT' });
       expect(sent(spy, 0).body.allow_password_login).toBe(true);
+      // The token travels even in password mode — the worker's own refresh
+      // before it ever types the password.
+      expect(sent(spy, 0).body.secrets.fb_token).toBe('EAAtoken1');
       expect(sent(spy, 0).body).not.toHaveProperty('device_cookies'); // no cookie, no device
       expect(sent(spy, 1)).toMatchObject({ url: 'http://facade.internal:8600/v1/workers/nyc-1/relogin', method: 'POST' });
       expect(spy).toHaveBeenCalledTimes(2); // no seed, no restore

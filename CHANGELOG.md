@@ -17,6 +17,20 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.308.0] - 2026-10-20
+
+The pool's access token (v1.307.0) now reaches the fleet, and the importer reads
+a supplier's order sheet whole (RS-338). On **Assign**, the account's token is
+written into the worker's vault alongside its password, so when a restored or
+seeded cookie session lapses the worker mints a fresh one from the token — on
+the account's own IP and device, with no password and no 2FA — before it ever
+falls back to the password login (the worker side ships in facebook-tracker
+0.13.10). The paste importer now reads a sheet pasted with its header row,
+matching columns by name in English or Chinese (UID, 密码, 2FA, Cookie, 令牌,
+邮箱…) in any order, and accepts comma-quoted CSV — so a vendor order whose
+columns run cookie and token before the e-mail, with no recovery column,
+imports as-is. A token that is not an `EAA…` is flagged but still imports.
+
 ## [1.307.0] - 2026-10-20
 
 The Facebook account pool grows an **access-token** field (RS-337). A purchased
