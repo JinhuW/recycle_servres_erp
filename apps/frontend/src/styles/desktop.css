@@ -687,20 +687,6 @@ html.desktop, body.desktop, .desktop #root {
 @media (prefers-reduced-motion: reduce) {
   .facet-swap { animation: none; }
 }
-/* The PO list's Paid by picker reads as the cell's text until it is pointed
-   at, so a column of selects doesn't outweigh the figures beside it. */
-.select.sm.po-paid-by {
-  width: auto; max-width: 150px;
-  padding: 4px 24px 4px 8px; font-size: 12.5px;
-  border-color: transparent; background-color: transparent;
-  background-position: right 7px center;
-  cursor: pointer;
-}
-.select.sm.po-paid-by.muted { color: var(--fg-subtle); }
-.select.sm.po-paid-by:hover:not(:disabled) { border-color: var(--border-strong); background-color: var(--bg-elev); }
-.select.sm.po-paid-by:focus { border-color: var(--accent); background-color: var(--bg-elev); }
-.select.sm.po-paid-by:disabled { cursor: progress; opacity: 0.6; }
-.select.sm.po-paid-by option { color: var(--fg); }
 
 /* ===== KPIs ===== */
 .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--gap, 16px); }

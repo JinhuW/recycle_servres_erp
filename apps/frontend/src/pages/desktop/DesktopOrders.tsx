@@ -25,9 +25,7 @@ import { TableSkeleton } from '../../components/Skeleton';
 import { OrderCategoryChips } from '../../components/OrderCategoryChips';
 import { SoldBadge } from '../../components/SoldBadge';
 import { PaymentGapMark } from '../../components/PaymentMismatch';
-import { PaidBySelect } from '../../components/CommissionPaymentFields';
-import { paidByLabel, paidByLocked, useCommissionPaidBy, type PaidBy } from '../../lib/useCommissionPaidBy';
-import { useManagerOptions, type MemberOption } from '../../lib/useManagers';
+import { paidByLabel, paidByLocked } from '../../lib/useCommissionPaidBy';
 import { useReviewModeEntry } from './ReviewModeEntry';
 
 // Map a stage tone keyword to a usable CSS variable. Same lookup as the
@@ -97,42 +95,22 @@ type Props = {
   onToast?: (msg: string, kind?: 'success' | 'error') => void;
 };
 
-// Who paid the purchaser their commission, picked in place by a manager. The
-// row's own click toggles the line drawer, hence the stop. A linked bank
-// payment settles it as the company's, so the cell opens that payment instead,
+// Who paid the purchaser their commission, read-only: the PO page records it,
+// from the commission screenshot's upload or a confirmed pick. A linked bank
+// payment settles it as the company's, so a manager's cell opens that payment,
 // as the Payment chip beside it does.
-function PaidByCell({ order, managers, editable, onSaved }: {
-  order: OrderSummary;
-  managers: MemberOption[];
-  editable: boolean;
-  onSaved: (id: string, paidBy: PaidBy) => void;
-}) {
+function PaidByCell({ order, isManager }: { order: OrderSummary; isManager: boolean }) {
   const { t } = useT();
-  const paidBy = useCommissionPaidBy({
-    orderId: order.id,
-    paidBy: order.commissionPaidBy ?? null,
-    managers,
-    onMutated: p => onSaved(order.id, p),
-  });
-  const label = paidByLabel(paidBy.paidBy, t);
-  if (editable && paidByLocked(paidBy.paidBy)) {
+  const paidBy = order.commissionPaidBy ?? null;
+  const label = paidByLabel(paidBy, t);
+  if (isManager && paidByLocked(paidBy)) {
     return (
       <RouteLink to={paymentsForOrderPath(order.id)} className="chip chip-link" title={t('cpPaidByLinkedHint')}>
         {label}
       </RouteLink>
     );
   }
-  if (!editable) {
-    return <span className={paidBy.paidBy ? undefined : 'muted'} style={{ whiteSpace: 'nowrap' }}>{label}</span>;
-  }
-  return (
-    <span onClick={e => e.stopPropagation()}>
-      <PaidBySelect
-        paidBy={paidBy}
-        className={'select sm po-paid-by' + (paidBy.paidBy ? '' : ' muted')}
-      />
-    </span>
-  );
+  return <span className={paidBy ? undefined : 'muted'} style={{ whiteSpace: 'nowrap' }}>{label}</span>;
 }
 
 export function DesktopOrders({ onToast }: Props) {
@@ -162,11 +140,6 @@ export function DesktopOrders({ onToast }: Props) {
   const [warehousePick, setWarehousePick] = usePersisted<WarehousePick>('desktop.orders.warehouse', 'all');
   const [paymentPick, setPaymentPick] = usePersisted<PaymentPick>('desktop.orders.payment', 'all');
   const [orders, setOrders] = useState<OrderSummary[]>([]);
-  // The Paid by cell's picker; a purchaser reads the record and never fetches.
-  const managers = useManagerOptions(isManager);
-  // The sort and a later re-render read the row, not the cell's own state.
-  const onPaidBySaved = (id: string, commissionPaidBy: PaidBy) =>
-    setOrders(os => os.map(o => (o.id === id ? { ...o, commissionPaidBy } : o)));
   // A move that finds the PO elsewhere asks again from there; the row takes
   // that stage too, or the next click would ask about the old one again.
   const { enter: enterReview, prompt: reviewPrompt } = useReviewModeEntry({
@@ -761,7 +734,7 @@ export function DesktopOrders({ onToast }: Props) {
                       )}
                       <td className="num mono" style={{ display: isVis('commission') ? undefined : 'none' }}>{fmtUSD(commission, locale)}</td>
                       <td style={{ display: isVis('paidBy') ? undefined : 'none' }}>
-                        <PaidByCell order={o} managers={managers} editable={isManager} onSaved={onPaidBySaved} />
+                        <PaidByCell order={o} isManager={isManager} />
                       </td>
                       <td style={{ display: isVis('payment') ? undefined : 'none' }}>
                         {/* A PO the bank has paid says so and opens its payment

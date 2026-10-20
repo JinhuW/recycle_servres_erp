@@ -17,6 +17,33 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.302.0] - 2026-10-20
+
+Paid by now follows the commission screenshot, and every other change to it
+needs a confirmation (RS-330). Until now a manager could set it in the PO
+list's cell or on the PO page, and any pick saved on the spot. Nothing tied it
+to the screenshot, so Paid by often went unrecorded even when the commission
+had been paid and shown.
+
+A manager who uploads a commission screenshot while Paid by reads *Not
+recorded* is recorded as the payer, with one Activity line. If Paid by already
+names another manager, or reads Company paid, the upload asks *Set Paid by to
+you?* and changes it only on a yes. The Done dialog's drop box asks the same
+way, above the dialog. A pick in the PO page's Paid by select, desktop or
+phone, opens *Change who paid the commission?* with both names, and Cancel
+leaves the record as it was. A bank payment linked as the commission still
+locks the field, and an upload then neither writes nor asks. The PO list's
+Paid by column is read-only again.
+
+Migration 0189 fills Paid by on POs that already had a commission screenshot
+but nobody recorded. It uses the uploader of the latest screenshot, when that
+uploader is a manager, and writes the same Activity line, marked as a
+backfill. The upload response for the Commission bucket now carries
+`commissionPaidBy`.
+
+`ConfirmDialog` and `Modal` take an optional `zIndex`. Without it the
+confirmation rendered behind the Done dialog, which sits at 110.
+
 ## [1.301.1] - 2026-10-20
 
 The **From a search to an alert** card on Monitors ▸ Facebook describes the

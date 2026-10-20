@@ -66,7 +66,7 @@ import { StageLookback } from './order/StageLookback';
 import { OrderFooter } from './order/OrderFooter';
 import { PoPaymentsLedger } from './order/PoPaymentsLedger';
 import { StatusChangeDialog, type StatusAttachment } from '../../components/StatusChangeDialog';
-import type { CommissionShots } from '../../components/CommissionPaymentFields';
+import { CommissionPaidByConfirm, type CommissionShots } from '../../components/CommissionPaymentFields';
 import { AttachmentChip } from '../../components/AttachmentChip';
 import { AttachmentDropzone } from '../../components/AttachmentDropzone';
 import { loadWarehouses } from '../../lib/warehouses';
@@ -199,7 +199,12 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   const commissionShots: CommissionShots = {
     atts: proof.commissionAtts,
     uploading: proof.commissionUploading,
-    add: files => void proof.addCommissionFiles(files).then(() => setActivityKey(k => k + 1)),
+    // The server names the uploader when nobody is on file; anyone else on
+    // file is offered to them through the confirm.
+    add: files => void proof.addCommissionFiles(files).then((p) => {
+      if (p !== undefined) commissionPaidBy.adopt(p);
+      setActivityKey(k => k + 1);
+    }),
     remove: att => void proof.removeCommissionAtt(att).then(() => setActivityKey(k => k + 1)),
   };
 
@@ -441,6 +446,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     orderId: order.id,
     paidBy: order.commissionPaidBy ?? null,
     managers,
+    me: user ? { id: user.id, name: user.name } : null,
     onMutated: () => setActivityKey(k => k + 1),
   });
 
@@ -2164,6 +2170,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
           onMutated={() => setActivityKey(k => k + 1)}
         />
       )}
+      <CommissionPaidByConfirm paidBy={commissionPaidBy} />
     </>
   );
 }
