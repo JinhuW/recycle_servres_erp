@@ -138,7 +138,7 @@ export function WorkersCard({ fleet, unavailable, hits, challenges, filter, onCl
         <div className="card-note"><Icon name="info" size={16} /><span>{t('fbcAccConfigMissing', { files: missing.join(' + ') })}</span></div>
       )}
 
-      <div className="fp-table-wrap">
+      <div className="fp-table-wrap ff-table-cap">
         <table className="fp-table ff-table" aria-busy={loading}>
           <thead>
             <tr>
