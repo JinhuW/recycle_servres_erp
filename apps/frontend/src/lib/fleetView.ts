@@ -693,64 +693,48 @@ export function cityOwners(fleet: FleetDoc, workerId: string): Map<string, strin
   return out;
 }
 
-// One proxy and the workers that dial it. A port is one exit IP, so Facebook
-// sees these accounts side by side. `url` is null for the workers on the VM's
-// own address, which share that address the same way.
+// One proxy and the workers that dial it: the unit the fleet tab groups by.
+// A port is one exit IP, so Facebook sees these accounts side by side.
+// `url` is null for the workers on the VM's own address, which share that
+// address the same way. `city` and `region` are where the exit is, null
+// while it is still being looked up.
 export type ProxyGroup = {
   url: string | null;
   port: string | null;
   ip: string | null;
   org: string | null;
+  city: string | null;
+  region: string | null;
   workers: FleetAccount[];
 };
 
-// The fleet in three layers: the city a proxy comes out in (where Facebook
-// sees its accounts), each proxy there, and the workers on each. A worker
-// whose exit is still being looked up has no city yet ('pending'); one
-// without a proxy is on the VM's own address ('none'). Both sort last.
-export type ProxyLocation = {
-  key: string;
-  city: string | null;
-  region: string | null;
-  workers: number;
-  proxies: ProxyGroup[];
-};
-
-// `byPort` runs each city's proxies by port and each proxy's workers by id.
-// Otherwise the order they came in (a column sort) decides both, and a proxy
-// ranks where its first worker does.
-export function proxyLocations(workers: readonly FleetAccount[], byPort: boolean): ProxyLocation[] {
-  const locations = new Map<string, ProxyLocation>();
+// `byPort` runs the proxies by port, the VM's own address last, and each
+// proxy's workers by id. Otherwise the order they came in (a column sort)
+// decides both, and a proxy ranks where its first worker does.
+export function proxyGroups(workers: readonly FleetAccount[], byPort: boolean): ProxyGroup[] {
+  const groups = new Map<string | null, ProxyGroup>();
   for (const w of workers) {
     const p = w.proxy;
     const url = p?.url ?? null;
-    const city = url ? p?.city ?? null : null;
-    const key = !url ? 'none' : city ? `${city}|${p?.region ?? ''}` : 'pending';
-    let loc = locations.get(key);
-    if (!loc) {
-      loc = { key, city, region: city ? p?.region ?? null : null, workers: 0, proxies: [] };
-      locations.set(key, loc);
+    let g = groups.get(url);
+    if (!g) {
+      g = { url, port: /:(\d+)$/.exec(url ?? '')?.[1] ?? null, ip: null, org: null, city: null, region: null, workers: [] };
+      groups.set(url, g);
     }
-    let proxy = loc.proxies.find(g => g.url === url);
-    if (!proxy) {
-      proxy = { url, port: /:(\d+)$/.exec(url ?? '')?.[1] ?? null, ip: null, org: null, workers: [] };
-      loc.proxies.push(proxy);
-    }
-    proxy.ip ??= p?.ip ?? null;
-    proxy.org ??= p?.org ?? null;
-    proxy.workers.push(w);
-    loc.workers += 1;
+    g.ip ??= p?.ip ?? null;
+    g.org ??= p?.org ?? null;
+    g.city ??= p?.city ?? null;
+    g.region ??= p?.region ?? null;
+    g.workers.push(w);
   }
-  const out = [...locations.values()];
+  const out = [...groups.values()];
   if (byPort) {
     const byId = (a: FleetAccount, b: FleetAccount) => a.worker_id.localeCompare(b.worker_id, undefined, { numeric: true });
-    for (const loc of out) {
-      loc.proxies.sort((a, b) => (a.url ?? '').localeCompare(b.url ?? '', undefined, { numeric: true }));
-      for (const g of loc.proxies) g.workers.sort(byId);
-    }
+    for (const g of out) g.workers.sort(byId);
+    out.sort((a, b) => Number(a.url === null) - Number(b.url === null)
+      || (a.url ?? '').localeCompare(b.url ?? '', undefined, { numeric: true }));
   }
-  const rank = (l: ProxyLocation) => (l.key === 'none' ? 2 : l.key === 'pending' ? 1 : 0);
-  return out.sort((a, b) => rank(a) - rank(b) || b.workers - a.workers || (a.city ?? '').localeCompare(b.city ?? ''));
+  return out;
 }
 
 export function citiesDiffer(a: readonly CityWrite[], b: readonly CityWrite[]): boolean {

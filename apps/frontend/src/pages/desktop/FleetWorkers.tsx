@@ -5,7 +5,7 @@ import { SortTh, type SortState } from '../../components/SortTh';
 import type { AlertHitRow, Challenge, FleetAccount, FleetDoc } from '../../lib/coordinator';
 import {
   accountAlerts, accountHaystack, attentionReason, dayStrip, FLEET_STATUSES, fleetActivity, fleetPostsToday, fleetStatus,
-  hitsByCity, isUnstampedBuild, matchesTerms, parkedWorkers, proxyLocations, queryTerms, searchedToday,
+  hitsByCity, isUnstampedBuild, matchesTerms, parkedWorkers, proxyGroups, queryTerms, searchedToday,
   sortFleet, whoIs,
   type CityHits, type DayStrip, type FleetEvent, type FleetSortCol, type FleetStatus, type ProxyGroup,
 } from '../../lib/fleetView';
@@ -154,25 +154,12 @@ export function WorkersCard({ fleet, unavailable, hits, challenges, filter, onCl
             </tr>
           </thead>
           <tbody>
-            {proxyLocations(shown, !sort.dir).map(loc => (
-              <Fragment key={loc.key}>
-                <tr className="ff-group">
-                  <td colSpan={8} title={t('fbcLocHint')}>
-                    {loc.city ? [loc.city, loc.region].filter(Boolean).join(', ') : t(loc.key === 'none' ? 'fbcLocNone' : 'fbcLocPending')}
-                    {loc.key !== 'none' && (
-                      <span className="mono">{t(loc.proxies.length === 1 ? 'fbcLocIpsOne' : 'fbcLocIps', { n: loc.proxies.length })}</span>
-                    )}
-                    <span className="mono">{t(loc.workers === 1 ? 'fbcLocWorkersOne' : 'fbcLocWorkers', { n: loc.workers })}</span>
-                  </td>
-                </tr>
-                {loc.proxies.map(proxy => (
-                  <Fragment key={proxy.url ?? 'none'}>
-                    <ProxyRow proxy={proxy} />
-                    {proxy.workers.map(w => (
-                      <WorkerRow key={w.worker_id} account={w} hits={byCity} parked={parked} terms={terms} startAt={startAt}
-                        open={open.has(w.worker_id)} onToggle={() => toggle(w.worker_id)} locale={locale} />
-                    ))}
-                  </Fragment>
+            {proxyGroups(shown, !sort.dir).map(proxy => (
+              <Fragment key={proxy.url ?? 'none'}>
+                <ProxyRow proxy={proxy} />
+                {proxy.workers.map(w => (
+                  <WorkerRow key={w.worker_id} account={w} hits={byCity} parked={parked} terms={terms} startAt={startAt}
+                    open={open.has(w.worker_id)} onToggle={() => toggle(w.worker_id)} locale={locale} />
                 ))}
               </Fragment>
             ))}
@@ -216,18 +203,21 @@ function WorkerRowSkeleton() {
   );
 }
 
-// The middle layer: one exit IP, the workers under it share it. More than one
-// is the two-per-IP pilot, which only holds while they look like two people.
+// The group row: one exit IP, and the workers under it share it. More than
+// one is a pair, which only holds while they look like two people. Where the
+// exit is goes in the tooltip, with its ISP.
 function ProxyRow({ proxy }: { proxy: ProxyGroup }) {
   const { t } = useT();
   const n = proxy.workers.length;
   const shared = n > 1;
+  const where = proxy.city ? [proxy.city, proxy.region].filter(Boolean).join(', ')
+    : proxy.url ? t('fbcProxyLookingUp') : null;
   return (
     <tr className="ff-proxy">
-      <td colSpan={8} title={[proxy.org, shared && t('fbcSharesIpHint')].filter(Boolean).join(' · ') || undefined}>
+      <td colSpan={8} title={[where, proxy.org, shared && t('fbcSharesIpHint')].filter(Boolean).join(' · ') || undefined}>
         <span className="mono">{proxy.port ? `:${proxy.port}` : t('fbcProxyNone')}</span>
         {proxy.ip && <span className="mono">{proxy.ip}</span>}
-        <span>{t(n === 1 ? 'fbcLocWorkersOne' : 'fbcLocWorkers', { n })}</span>
+        <span>{t(n === 1 ? 'fbcProxyWorkersOne' : 'fbcProxyWorkers', { n })}</span>
         {shared && <span className="fp-warn">{t('fbcProxyShared')}</span>}
       </td>
     </tr>

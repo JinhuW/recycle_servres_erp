@@ -17,6 +17,17 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.305.0] - 2026-10-20
+
+The Fleet tab groups its workers by proxy, not by city (RS-335). Every proxy
+now carries two workers (facebook-tracker 0.13.9), so the IP is what is
+managed: whose accounts share it, and what a checkpoint on one puts at risk.
+The city layer above it only made the table taller. So the only divider is
+the proxy's row, with its port, exit IP, worker count and *shared* tag, and
+the IP's workers sit under it. The exit city moves into that row's tooltip,
+beside the ISP, and the search box still finds a worker by city. With no
+column sort the proxies run by port, with the VM's own IP last.
+
 ## [1.304.0] - 2026-10-20
 
 The Fleet tab's workers table now has three layers: location, proxy IP,

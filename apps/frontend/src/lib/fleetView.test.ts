@@ -6,7 +6,7 @@ import {
   matchesTerms, offersRelogin, queryTerms, reviewedToday, searchedToday,
   sortFleet, splitHighlights, vaultAccountIdFor, whoIs, easternToUtc, utcToEastern,
   FLOW_STAGES, STAGE_FORMS, draftChanges, settingsDraft, settingsPatch,
-  citiesDiffer, cityOwners, isCitySlug, marketplaceCityUrl, normalizeCitySlug, proxyLocations,
+  citiesDiffer, cityOwners, isCitySlug, marketplaceCityUrl, normalizeCitySlug, proxyGroups,
   applyPinEdits, pinEdits, searchesPerDay, tierSettingsEdits, tierSettingsValid, keysymsFor,
 } from './fleetView';
 
@@ -367,43 +367,47 @@ describe('a worker\'s cities', () => {
     expect(owners.get('tampa')).toEqual(['homelab-1']);
   });
 
-  it('groups the fleet by location, then proxy, then worker', () => {
+  it('groups the fleet by proxy, with the exit city kept on the group', () => {
     const at = (id: string, port: number | null, city?: string, region?: string) => account({
       worker_id: id,
       proxy: port === null
-        ? { url: null, ip: '74.104.122.134', city: 'Framingham' }
+        ? { url: null, ip: '74.104.122.134', city: 'Framingham', region: 'Massachusetts' }
         : { url: `http://isp.decodo.com:${port}`, ip: city ? `10.0.0.${port % 100}` : undefined, city, region, org: 'AS33651 Comcast' },
     });
     const fleet = [
       at('ca-3', 10016, 'Palo Alto', 'California'),
+      at('va-1', null),
       at('nj-1', 10018, 'Parsippany', 'New Jersey'),
       at('ca-1b', 10014, 'Palo Alto', 'California'),
-      at('va-1', null),
       at('ca-1', 10014, 'Palo Alto', 'California'),
       at('new-1', 10021),
-      at('nj-2', 10019, 'Parsippany', 'New Jersey'),
-      at('ca-2', 10015, 'Palo Alto', 'California'),
       at('se-1', null),
     ];
-    const shape = (locs: ReturnType<typeof proxyLocations>) =>
-      locs.map(l => [l.key, l.workers, l.proxies.map(p => [p.port, p.workers.map(w => w.worker_id)])]);
+    const shape = (groups: ReturnType<typeof proxyGroups>) => groups.map(g => [g.port, g.workers.map(w => w.worker_id)]);
 
-    const locs = proxyLocations(fleet, true);
-    expect(shape(locs)).toEqual([
-      ['Palo Alto|California', 4, [['10014', ['ca-1', 'ca-1b']], ['10015', ['ca-2']], ['10016', ['ca-3']]]],
-      ['Parsippany|New Jersey', 2, [['10018', ['nj-1']], ['10019', ['nj-2']]]],
-      ['pending', 1, [['10021', ['new-1']]]],
-      // The VM's own address is one IP too, so its workers share a row.
-      ['none', 2, [[null, ['se-1', 'va-1']]]],
+    const groups = proxyGroups(fleet, true);
+    expect(shape(groups)).toEqual([
+      ['10014', ['ca-1', 'ca-1b']],
+      ['10016', ['ca-3']],
+      ['10018', ['nj-1']],
+      ['10021', ['new-1']],
+      // The VM's own address is one IP too, and sorts last.
+      [null, ['se-1', 'va-1']],
     ]);
-    expect(locs[0]).toMatchObject({ city: 'Palo Alto', region: 'California' });
-    expect(locs[0].proxies[0]).toMatchObject({ url: 'http://isp.decodo.com:10014', ip: '10.0.0.14', org: 'AS33651 Comcast' });
-    expect(locs[3].proxies[0].ip).toBe('74.104.122.134');
+    expect(groups[0]).toMatchObject({
+      url: 'http://isp.decodo.com:10014', ip: '10.0.0.14', org: 'AS33651 Comcast', city: 'Palo Alto', region: 'California',
+    });
+    expect(groups[3]).toMatchObject({ city: null, ip: null });
+    expect(groups[4]).toMatchObject({ ip: '74.104.122.134', city: 'Framingham' });
 
     // A column sort keeps its order: a proxy ranks where its first worker does.
-    expect(shape(proxyLocations(fleet, false))[0]).toEqual(
-      ['Palo Alto|California', 4, [['10016', ['ca-3']], ['10014', ['ca-1b', 'ca-1']], ['10015', ['ca-2']]]],
-    );
+    expect(shape(proxyGroups(fleet, false))).toEqual([
+      ['10016', ['ca-3']],
+      [null, ['va-1', 'se-1']],
+      ['10018', ['nj-1']],
+      ['10014', ['ca-1b', 'ca-1']],
+      ['10021', ['new-1']],
+    ]);
   });
 
   it('draws a worker that sweeps at its own time from that time', () => {
