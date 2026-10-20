@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-335](./RS-335-fleet-tab-groups-workers-by-proxy-not-by-city.md) | done | story | P2 | Fleet tab groups workers by proxy, not by city | 1.305.0 |
 | [RS-334](./RS-334-give-every-facebook-proxy-a-second-worker.md) | in-progress | task | P2 | Give every Facebook proxy a second worker | — |
 | [RS-333](./RS-333-fleet-tab-in-three-layers-location-proxy-ip-workers.md) | done | story | P2 | Fleet tab in three layers: location, proxy IP, workers | 1.304.0 |
 | [RS-332](./RS-332-pilot-two-facebook-workers-per-proxy-on-two-palo-alt.md) | done | story | P2 | Pilot two Facebook workers per proxy on two Palo Alto IPs | facebook-tracker 0.13.8, v1.303.0 |
