@@ -18,6 +18,27 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.13.7] - 2026-10-20
+
+### Added
+
+- **Ten more workers, one per new Decodo port** (RS-331). The plan grew from
+  ten ports to twenty. Every port up to 10010 already had a worker, so ports
+  10011–10020 each get a new compose worker named after its exit: `bos-1`
+  (Boston), `nyc-2` and `nyc-3` (New York), `ca-1`–`ca-4` (Palo Alto, the
+  pool's first West Coast exits), and `nj-1`–`nj-3` (Parsippany, NJ). Each
+  seeds one city, the catalog city nearest its exit: Boston, New York, Newark,
+  or Reno for the Palo Alto workers, since `master.toml` keeps California out.
+  The console lists them, so the ERP shows them, edits their cities and
+  watches their browsers on VNC 5912–5921. Each starts parked on an empty
+  storage state and searches nothing until it gets an account from the pool.
+
+  Before deploying, the VM needs each worker's `PROXY_HOMELAB_<X>` in
+  `configs/secrets.env`, its `configs/secrets.homelab-<x>.env` (id and
+  `rsc mint-token`) and an empty `configs/sessions/homelab-<x>/fb_state.json`.
+  The compose headers spell it out. Deploy with every existing worker in
+  `RS_DEPLOY_HOLD`, so only the new containers start.
+
 ## [0.13.6] - 2026-10-20
 
 ### Fixed
