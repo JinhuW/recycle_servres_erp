@@ -39,7 +39,7 @@ export function matchesTerms(haystack: string, terms: readonly string[]): boolea
 export function accountHaystack(w: FleetAccount): string {
   return [
     w.worker_id, w.health?.account_id, w.health?.state, liveness(w),
-    w.region.key, w.region.name, w.source, w.proxy_env,
+    w.region.key, w.region.name, w.source, w.proxy_env, w.proxy?.city, w.proxy?.url,
     w.account?.account_id, w.account?.fb_username, w.session?.fb_user_id,
     ...w.cities.flatMap(c => [c.name, c.slug]),
   ].filter(Boolean).join(' ');
@@ -691,6 +691,62 @@ export function cityOwners(fleet: FleetDoc, workerId: string): Map<string, strin
     for (const c of w.cities) out.set(c.slug, [...(out.get(c.slug) ?? []), w.worker_id]);
   }
   return out;
+}
+
+// The other workers that dial each worker's proxy. One port is one exit IP,
+// so Facebook sees their accounts side by side. A worker on the VM's own
+// address has no proxy URL and is never counted.
+export function ipPartners(workers: readonly FleetAccount[]): Map<string, string[]> {
+  const byUrl = new Map<string, string[]>();
+  for (const w of workers) {
+    const url = w.proxy?.url;
+    if (url) byUrl.set(url, [...(byUrl.get(url) ?? []), w.worker_id]);
+  }
+  const out = new Map<string, string[]>();
+  for (const ids of byUrl.values()) {
+    if (ids.length > 1) for (const id of ids) out.set(id, ids.filter(other => other !== id));
+  }
+  return out;
+}
+
+// The workers grouped where their proxies come out, the city Facebook sees
+// them in. `ips` counts the proxies in a city. A worker whose exit is still
+// being looked up has no city yet ('pending'); one without a proxy is on the
+// VM's own address ('none'). Both groups sort last.
+export type ProxyLocation = {
+  key: string;
+  city: string | null;
+  region: string | null;
+  ips: number;
+  workers: FleetAccount[];
+};
+
+// `byProxy` orders each city's workers by proxy, so a shared IP's workers sit
+// together; otherwise they keep the order they came in (a column sort).
+export function proxyLocations(workers: readonly FleetAccount[], byProxy: boolean): ProxyLocation[] {
+  const groups = new Map<string, ProxyLocation>();
+  for (const w of workers) {
+    const p = w.proxy;
+    const city = p?.url ? p.city ?? null : null;
+    const key = !p?.url ? 'none' : city ? `${city}|${p.region ?? ''}` : 'pending';
+    let g = groups.get(key);
+    if (!g) {
+      g = { key, city, region: city ? p?.region ?? null : null, ips: 0, workers: [] };
+      groups.set(key, g);
+    }
+    g.workers.push(w);
+  }
+  const rank = (g: ProxyLocation) => (g.key === 'none' ? 2 : g.key === 'pending' ? 1 : 0);
+  const out = [...groups.values()];
+  for (const g of out) {
+    g.ips = new Set(g.workers.map(w => w.proxy?.url).filter(Boolean)).size;
+    if (byProxy) {
+      g.workers.sort((a, b) => (a.proxy?.url ?? '').localeCompare(b.proxy?.url ?? '', undefined, { numeric: true })
+        || a.worker_id.localeCompare(b.worker_id, undefined, { numeric: true }));
+    }
+  }
+  return out.sort((a, b) => rank(a) - rank(b) || b.workers.length - a.workers.length
+    || (a.city ?? '').localeCompare(b.city ?? ''));
 }
 
 export function citiesDiffer(a: readonly CityWrite[], b: readonly CityWrite[]): boolean {

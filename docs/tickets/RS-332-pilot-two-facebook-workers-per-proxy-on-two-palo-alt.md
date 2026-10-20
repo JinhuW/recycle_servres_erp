@@ -26,6 +26,8 @@ Asked what "group them by the proxy" should do, the requester picked
 
 > I menat it may make snese, one ip have 2-3 facebooks account is that right?
 
+> The proxy should also group by the location.
+
 ## Context
 
 Every worker has had its own Decodo IP since accounts died on the shared house
@@ -60,6 +62,9 @@ worker's `PROXY_*` var is all it takes.
       generated for them reports `America/Los_Angeles`.
 - [ ] The ERP Fleet tab marks workers that share an IP and draws each
       worker's day from its own sweep times.
+- [ ] The Fleet tab's workers table is grouped by proxy location: a divider
+      per exit city with its IP and worker counts, and each city's workers
+      ordered by proxy, so the workers on one IP sit together.
 - [ ] No existing worker container is recreated by the deploy.
 
 ## Out of scope

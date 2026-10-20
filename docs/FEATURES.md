@@ -2253,7 +2253,15 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   same for one worker. Against a coordinator without the log, the aside falls
   back to the old "stopped reporting" line. Since v1.300.0 the table shows
   at most 15 workers. The rest scroll under its pinned headers, so neither
-  the table nor the aside grows past that. And a **From a search to an alert** card that walks the
+  the table nor the aside grows past that. Since v1.303.0 the table is
+  grouped by proxy location. A divider names each exit city with its IP and
+  worker counts (Palo Alto, California · 4 IPs · 6 workers). Each worker sits
+  under its city, ordered by proxy, with its port in the subtitle and the exit
+  IP in the tooltip. Unresolved exits and workers on the VM's own IP come
+  last, and the search box matches the exit city. A worker that dials the same
+  proxy as another says "shares IP with ca-1b". Its Today strip uses its own
+  sweep times, from the config it runs, so a worker that shares an IP and
+  sweeps at its own hour shows that hour (facebook-tracker 0.13.8). And a **From a search to an alert** card that walks the
   pipeline as the code runs it — search, result cards, the title gate before
   any page is opened, the cached page visit, the keyword gate with the
   description, the already-notified skip, the AI rating with its unit and

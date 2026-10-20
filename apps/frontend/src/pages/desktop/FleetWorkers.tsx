@@ -5,7 +5,8 @@ import { SortTh, type SortState } from '../../components/SortTh';
 import type { AlertHitRow, Challenge, FleetAccount, FleetDoc } from '../../lib/coordinator';
 import {
   accountAlerts, accountHaystack, attentionReason, dayStrip, FLEET_STATUSES, fleetActivity, fleetPostsToday, fleetStatus,
-  hitsByCity, isUnstampedBuild, matchesTerms, parkedWorkers, queryTerms, searchedToday, sortFleet, whoIs,
+  hitsByCity, ipPartners, isUnstampedBuild, matchesTerms, parkedWorkers, proxyLocations, queryTerms, searchedToday,
+  sortFleet, whoIs,
   type CityHits, type DayStrip, type FleetEvent, type FleetSortCol, type FleetStatus,
 } from '../../lib/fleetView';
 import { relTime } from '../../lib/format';
@@ -85,6 +86,7 @@ export function WorkersCard({ fleet, unavailable, hits, challenges, filter, onCl
   const terms = queryTerms(query);
   const byCity = useMemo(() => hitsByCity(hits ?? []), [hits]);
   const parked = useMemo(() => parkedWorkers(challenges), [challenges]);
+  const partners = useMemo(() => ipPartners(fleet?.workers ?? []), [fleet]);
   const all = fleet?.workers ?? [];
   // Click cycles desc → asc → the fleet document's own order.
   const [sort, setSort] = usePersisted<SortState>('desktop.fleet.sort', { col: '', dir: null });
@@ -153,9 +155,21 @@ export function WorkersCard({ fleet, unavailable, hits, challenges, filter, onCl
             </tr>
           </thead>
           <tbody>
-            {shown.map(w => (
-              <WorkerRow key={w.worker_id} account={w} hits={byCity} parked={parked} terms={terms} startAt={startAt}
-                open={open.has(w.worker_id)} onToggle={() => toggle(w.worker_id)} locale={locale} />
+            {proxyLocations(shown, !sort.dir).map(g => (
+              <Fragment key={g.key}>
+                <tr className="ff-group">
+                  <td colSpan={8} title={t('fbcLocHint')}>
+                    {g.city ? [g.city, g.region].filter(Boolean).join(', ') : t(g.key === 'none' ? 'fbcLocNone' : 'fbcLocPending')}
+                    {g.ips > 0 && <span className="mono">{t(g.ips === 1 ? 'fbcLocIpsOne' : 'fbcLocIps', { n: g.ips })}</span>}
+                    <span className="mono">{t(g.workers.length === 1 ? 'fbcLocWorkersOne' : 'fbcLocWorkers', { n: g.workers.length })}</span>
+                  </td>
+                </tr>
+                {g.workers.map(w => (
+                  <WorkerRow key={w.worker_id} account={w} hits={byCity} parked={parked} terms={terms} startAt={startAt}
+                    partners={partners.get(w.worker_id)}
+                    open={open.has(w.worker_id)} onToggle={() => toggle(w.worker_id)} locale={locale} />
+                ))}
+              </Fragment>
             ))}
             {loading && SKELETON_ROWS.map(i => <WorkerRowSkeleton key={i} />)}
             {fleet && shown.length === 0 && (
@@ -197,12 +211,14 @@ function WorkerRowSkeleton() {
   );
 }
 
-function WorkerRow({ account: w, hits, parked, terms, startAt, open, onToggle, locale }: {
+function WorkerRow({ account: w, hits, parked, terms, startAt, partners, open, onToggle, locale }: {
   account: FleetAccount;
   hits: Map<string, CityHits>;
   parked: ReadonlySet<string>;
   terms: readonly string[];
   startAt: readonly string[] | undefined;
+  // The other workers on this worker's proxy, when it shares one.
+  partners: readonly string[] | undefined;
   open: boolean;
   onToggle: () => void;
   locale: string;
@@ -216,10 +232,11 @@ function WorkerRow({ account: w, hits, parked, terms, startAt, open, onToggle, l
   const beat = h?.last_heartbeat_at && h.liveness !== 'dead' ? h.last_heartbeat_at : null;
   const days = h?.session_days_left ?? null;
   const path = fleetWorkerPath(w.worker_id);
-  const strip = dayStrip(w, status, startAt);
+  const strip = dayStrip(w, status, w.start_at ?? startAt);
   const plan = w.plan;
   const build = h?.version && !isUnstampedBuild(h.version) ? h.version : null;
   const searched = searchedToday(w, status);
+  const port = /:(\d+)$/.exec(w.proxy?.url ?? '')?.[1] ?? null;
 
   return (
     <Fragment>
@@ -234,7 +251,9 @@ function WorkerRow({ account: w, hits, parked, terms, startAt, open, onToggle, l
           <span className="fp-holder">
             <span><Hi text={who.login ?? who.label ?? w.worker_id} terms={terms} /></span>
             <small><span className="mono"><Hi text={w.worker_id} terms={terms} /></span> · <Hi text={w.region.name} terms={terms} />
-              {build && <> · <span className="mono" title={build}>v{build.split(' ')[0]}</span></>}</small>
+              {build && <> · <span className="mono" title={build}>v{build.split(' ')[0]}</span></>}
+              {port && <> · <span className="mono" title={w.proxy?.ip ?? undefined}>:{port}</span></>}
+              {partners &&<> · <span title={t('fbcSharesIpHint')}>{t('fbcSharesIp', { who: partners.join(', ') })}</span></>}</small>
           </span>
         </td>
         <td className="ff-wrap">

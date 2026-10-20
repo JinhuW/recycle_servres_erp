@@ -213,6 +213,9 @@ export type FleetAccount = {
   // Whether the console holds this worker's config and so can save its
   // cities; absent from a facade that predates per-worker cities.
   cities_editable?: boolean;
+  // The sweep times (UTC) the worker's own config runs. They differ from the
+  // fleet's for an account that shares an IP. Absent from an older facade.
+  start_at?: string[] | null;
 };
 
 // Where the worker's traffic comes out, which rs_console asks an IP-geo
