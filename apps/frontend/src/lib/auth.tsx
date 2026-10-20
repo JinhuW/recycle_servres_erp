@@ -4,6 +4,7 @@ import { takeBoot } from './boot';
 import { loadLookups, resetLookups } from './lookups';
 import { loadWorkspaceSettings, resetWorkspaceSettings } from './workspace';
 import { resetWarehouses } from './warehouses';
+import { resetAiModels } from './aiModels';
 import type { User, Lang } from './types';
 
 // Drop all client-side auth state. Shared by the user-initiated logout() and
@@ -13,6 +14,7 @@ function clearLocalAuthState(setUser: (u: User | null) => void) {
   resetLookups();
   resetWorkspaceSettings();
   resetWarehouses();
+  resetAiModels();
 }
 
 // The counterpart of `auth:unauthorized`: a session now exists. lib/beacon.ts

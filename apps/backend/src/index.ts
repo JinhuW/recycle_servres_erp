@@ -32,6 +32,7 @@ import marketRoutes from './routes/market';
 import scanRoutes from './routes/scan';
 import notificationsRoutes from './routes/notifications';
 import trackerRoutes from './routes/tracker';
+import aiModelsRoutes from './routes/aiModels';
 import coordinatorRoutes from './routes/coordinator';
 import facebookPoolRoutes from './routes/facebookPool';
 import bankTxRoutes from './routes/bankTx';
@@ -305,7 +306,7 @@ app.use('*', (c, next) => {
 // address look like it had never persisted.
 // Safe methods only: these prefixes also carry POST/PATCH endpoints, whose
 // responses have no business advertising a cache lifetime.
-const CACHEABLE_PREFIXES = ['/api/lookups', '/api/categories', '/api/workspace'];
+const CACHEABLE_PREFIXES = ['/api/lookups', '/api/categories', '/api/workspace', '/api/ai/models'];
 // Same trap as /api/warehouses, under a cached prefix: the FX panel re-reads
 // the rates straight after a manual save or a refresh.
 const UNCACHED_PATHS = new Set(['/api/workspace/fx-rates']);
@@ -409,6 +410,8 @@ app.route('/api/client-timings', clientTimingRoutes);
 app.route('/api/oauth/clients', oauthAdmin);
 // Self-applies authMiddleware + manager gate (oauthAdmin pattern).
 app.route('/api/tracker', trackerRoutes);
+// Same shape: self-applied authMiddleware + manager gate.
+app.route('/api/ai', aiModelsRoutes);
 app.route('/api/web-submissions', webSubmissionsRoutes);
 // Same shape: self-applied authMiddleware + manager gate.
 app.route('/api/coordinator', coordinatorRoutes);

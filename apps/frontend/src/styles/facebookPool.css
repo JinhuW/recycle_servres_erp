@@ -1831,6 +1831,15 @@ tr.rt-off td:not(:nth-last-child(-n + 2)) {
   margin-left: 2px;
   color: var(--fg-muted);
 }
+/* The model dialog holds one field, so its picker's menu hangs past the footer
+   rather than scrolling inside a body barely taller than the input. */
+.modal-shell.rt-model-modal,
+.rt-model-modal .modal-body {
+  overflow: visible;
+}
+.rt-model-modal .modal-foot {
+  border-radius: 0 0 15px 15px;
+}
 .rt-help-invalid {
   color: var(--neg);
 }
