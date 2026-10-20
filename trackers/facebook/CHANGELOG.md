@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.13.10] - 2026-10-20
+
 ### Added
 
 - **A worker logs in from the account's access token when its cookie lapses**
