@@ -1,23 +1,21 @@
 # ca-2b, the second account on ca-2's Decodo exit in Palo Alto, CA
-# (PROXY_HOMELAB_CA2, port 10015). The IP is shared ON PURPOSE: a pilot of two
-# accounts per IP, with ca-3 and ca-4 as the one-account control. The rules
-# are in deploy/README.md → Scaling notes: partners never search the same
-# cities, and their first logins are a day or more apart.
+# (PROXY_HOMELAB_CA2, port 10015).
 #
-# It keeps the two accounts looking like two people, not one operator:
-#   - its own device profile (README → Device identity);
+# Every IP carries two workers. What keeps two accounts on one IP looking
+# like two people, not one operator, is in deploy/README.md → Scaling notes.
+# This worker has:
+#   - its own device profile (README → Device identity), on Pacific time:
+#     its vault slot is in region rs_west;
 #   - its own sweep time, 17:00 UTC against ca-2's 13:00. Set it once
 #     after the first start:
 #       docker exec rs-console python -m rs_console.settings start-at ca-2b 17:00
-#     A fleet-wide sweep time saved from the ERP does not override it.
+#     A fleet-wide sweep time saved from the ERP does not override it;
+#   - its own cities, set on the ERP's worker page (Edit cities), never ones
+#     ca-2 searches. configs/homelab-ca2b.toml only seeds Las Vegas, NV.
 #
-# Its cities are its own, set on the ERP's worker page (Edit cities);
-# configs/homelab-ca2b.toml only seeds Las Vegas, NV, which ca-2 does not
-# search. Its Facebook account comes from the ERP's account pool, like any
-# worker's.
-#
-# Order: start it, set its cities, then give it an account. Until it has a
-# login it parks on Facebook's login page and searches nothing.
+# Its Facebook account comes from the ERP's account pool, like any worker's,
+# a day or more after ca-2's first login. Until it has one it parks on
+# Facebook's login page and searches nothing.
 #
 # A CLONE of docker-compose.homelab-ne.yml. Only the per-worker fields differ:
 #   container_name  rs-monitor-ca2b
@@ -38,7 +36,8 @@
 #   configs/secrets.homelab-ca2b.env  — RS_WORKER_ID=ca-2b and its own
 #       RS_CONTROL_PLANE_TOKEN (rsc mint-token --worker ca-2b)
 #   the vault slot, so its device reports Pacific time:
-#       rsc vault set-account --account-id ca-2b --worker ca-2b --region rs_west #           --no-prompt
+#       rsc vault set-account --account-id ca-2b --worker ca-2b --region rs_west \
+#           --no-prompt
 #
 #   docker compose -f deploy/docker-compose.homelab-ca2b.yml up -d
 services:
