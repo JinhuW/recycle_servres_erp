@@ -10,15 +10,25 @@ back to. The monitor now reports every delivered alert message here.
 The report is fail-open by design: it happens after the Telegram send has
 already succeeded, so a coordinator outage costs only a hit-rate data point,
 never an alert.
+
+The fleet outgrew "a single worker". Before sending, each worker now claims
+the listing here, and only the first claim sends (alert_claims.py), because
+every worker's own cache knew only its own alerts.
 """
 
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from .. import deps
+from .. import alert_claims, deps
 from ..deps import require_worker
-from ..schemas import AlertMessageReport, StatusResponse
+from ..schemas import (
+    AlertClaim,
+    AlertClaimResult,
+    AlertDelivered,
+    AlertMessageReport,
+    StatusResponse,
+)
 
 router = APIRouter()
 
@@ -42,3 +52,29 @@ def report_alert_message(
     if deps.db.add_alert_message(record) and payload.part == 1:
         deps.db.add_review_stats(worker_id, coordinated=1, sent=1)
     return StatusResponse()
+
+
+@router.post("/v1/alerts/claim", response_model=AlertClaimResult)
+def claim_alert(
+    payload: AlertClaim, worker: Optional[str] = Depends(require_worker)
+) -> AlertClaimResult:
+    """May this worker alert this listing? See alert_claims.py."""
+    worker_id = worker or payload.worker_id
+    if not worker_id:
+        raise HTTPException(status_code=422, detail="worker_id is required")
+    return AlertClaimResult(
+        **alert_claims.claim(
+            deps.db, payload.marketplace, payload.listing_id, worker_id, payload.price
+        )
+    )
+
+
+@router.post("/v1/alerts/claim/delivered")
+def alert_delivered(
+    payload: AlertDelivered, worker: Optional[str] = Depends(require_worker)
+) -> dict:
+    worker_id = worker or payload.worker_id
+    if not worker_id:
+        raise HTTPException(status_code=422, detail="worker_id is required")
+    closed = alert_claims.delivered(deps.db, payload.marketplace, payload.listing_id, worker_id)
+    return {"delivered": closed}

@@ -18,6 +18,29 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.13.6] - 2026-10-20
+
+### Fixed
+
+- **A listing alerts once across the fleet, not once per worker that sees it**
+  (RS-329). From 10-12 to 10-20, 50 of 122 Telegram alerts repeated a listing
+  already sent:
+  - 38 came from a second worker. Every homelab worker sends its own alerts and
+    its notified cache knows only its own; dc, nyc and philly are each searched
+    by two workers, and neighbouring cities return the same listings.
+  - 7 came from one worker. `Listing.hash` includes the item name, so a
+    listing found by both `server_ram` and `enterprise_ssd` read as "changed"
+    each time.
+
+  Before sending, a worker now claims the listing from the coordinator
+  (`POST /v1/alerts/claim`), and only the first claim sends. A delivered
+  listing alerts again only when its price falls below the alerted price. A
+  claim whose holder never reports delivery passes on after 15 minutes. A
+  worker that gets no answer sends as before. The claims are seeded from
+  `alert_messages` on boot, so the deploy does not re-alert yesterday's
+  listings from another worker. The coordinator also reads a reduced price
+  ("$20 | $25") as 20, not 2025.
+
 ## [0.13.5] - 2026-10-19
 
 ### Changed

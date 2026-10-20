@@ -49,9 +49,13 @@ master.toml + fleet.toml  --rsc gen-configs-->  configs/generated/worker-<id>.to
 
 Each worker is **statically pinned to one region**. There is no runtime
 dispatch and no random city selection: a worker's scope changes only when
-`fleet.toml` is edited and configs are regenerated. Workers never message
-Telegram directly, so a listing visible from two adjacent regions still
-produces exactly one alert.
+`fleet.toml` is edited and configs are regenerated.
+
+The diagram is the sharded path. The homelab workers (`configs/homelab-*.toml`)
+send their alerts straight to Telegram instead, so they can route by topic.
+Each one first claims the listing from the coordinator, so a listing visible
+to several workers still alerts once (*One alert per listing, fleet-wide*
+below).
 
 ## Fleet coverage
 
@@ -404,6 +408,40 @@ and the listing stays un-cached so the next sweep retries it.
 The same verdict is emitted as a `listing_alert` structured event
 (`delivered`, `score`, `threshold`, `listing_id`, `url`), so it is queryable in
 the OpenSearch dashboards alongside the skip reasons.
+
+### One alert per listing, fleet-wide
+
+A homelab worker sends its own alerts and keeps its own record of what it sent,
+in its diskcache volume. That record cannot see the other workers, and their
+cities overlap: some search the same city, and neighbouring cities return the
+same listings. On 10-18, the day four workers joined, alerts went from about 5
+a day to 40, and 50 of the 122 alerts sent from 10-12 to 10-20 repeated a
+listing already in the chat.
+
+So before sending, a worker claims the listing from the coordinator
+(`POST /v1/alerts/claim`, `rs_coordinator/alert_claims.py`), and only the first
+claim sends:
+
+| Answer | Meaning | The worker |
+| --- | --- | --- |
+| `new` | Nobody has claimed it, or the claim is this worker's own undelivered one, or it was abandoned for 15 min | sends, then reports `POST /v1/alerts/claim/delivered` |
+| `discounted` | Delivered before, now below the price it was alerted at | sends (once fleet-wide) |
+| `pending` | Another worker holds it and has not reported delivery | skips (`listing_skip`, reason `fleet_pending`) and asks again next sweep |
+| `duplicate` | Delivered already | skips (reason `fleet_duplicate`) and marks it notified locally |
+| no answer | No control plane, coordinator down, or a coordinator without claims | sends, as before claims |
+
+An edit that leaves the price alone does not alert again. The workers' own
+"listing changed" check fires whenever a second search finds the same listing,
+because the item name is part of `Listing.hash`; one listing was sent eight
+times on 10-19 that way. The claims table is seeded on every coordinator boot
+from `alert_messages`, so listings alerted before claims existed count as
+delivered.
+
+```bash
+# Who got a listing, and when (coordinator container on the VM):
+docker exec rs-coordinator python3 -c "from rs_coordinator import deps; \
+  print(deps.db.get_alert_claim('facebook', '<listing id>'))"
+```
 
 ### System faults page once
 
@@ -938,6 +976,7 @@ full result page per phrase in Facebook traffic, so keep the phrase count small.
 | Heartbeat repeater — the first `report_state` starts a daemon thread that re-sends the last reported state to the coordinator every 5 minutes (`heartbeat_interval`). Before this a worker heartbeated once per search, at the top of `search()`, and one sweep over the city list runs for hours, so a healthy worker spent most of the day looking silent. The repeater only restates what the main thread last said (it never touches the Playwright page, which is not thread-safe); the login is still re-checked only at the top of each search | `facebook.py` (`heartbeat_interval`, `report_state`, `_send_heartbeat`, `_heartbeat_loop`, `stop`) |
 
 | System faults page once, fleet-wide — an AI outage is declared only after `RS_INCIDENT_DOWN_AFTER` (3) straight failed evaluations and cleared after `RS_INCIDENT_UP_AFTER` (3) straight successes, and the crossing is POSTed to the coordinator's `/v1/incidents`, which dedupes across every worker (one DOWN page per key per `RS_INCIDENT_COOLDOWN_HOURS`, one recovered note per paged DOWN). Without a control plane, or when it is unreachable, a local gate applies the same one-per-cooldown rule to this process. Replaces the per-process flag that sent a DOWN/recovered pair for every listing while OpenRouter flapped | `ops_incidents.py` (new: `OutageTracker`, `LocalIncidentGate`), `monitor.py` (`_report_incident`, `evaluate_by_ai`), `control_plane.py` (`report_incident`) |
+| One alert per listing, fleet-wide — after the rating gates and before any send, the worker claims the listing from the coordinator's `/v1/alerts/claim`; only a granted claim sends, and its delivery is reported to `/v1/alerts/claim/delivered`. A `duplicate` (the fleet already alerted it) is skipped and cached as notified; a `pending` one (another worker is sending it) is skipped and asked again next sweep. No answer sends as before | `monitor.py` (`_search_item`, `listing_alert.fleet_claim`), `control_plane.py` (`claim_alert`, `alert_delivered`) |
 | Funnel counts — each search page, card, title-gate pass, real page visit, keyword-gate pass, not-yet-alerted listing, fresh AI verdict and delivered alert is counted into a buffer and POSTed to `/v1/stats/reviews` once per search page (previously one POST per verdict and one per alert), feeding the ERP's search-to-alert card; the report that counts a search names its `search_city`, which colors the cities searched today on the ERP's fleet fold | `facebook.py` (`count_stage`, `flush_stage_counts`, `_examine_listings`), `monitor.py` (`_count_stage`), `marketplace.py` (`count_stage`), `control_plane.py` (`report_review_stats`) |
 
 Before pulling upstream, rebase that branch rather than merging into it, then

@@ -378,6 +378,34 @@ class AlertMessageReport(BaseModel):
     prompt_hash: str | None = None
 
 
+class AlertClaim(BaseModel):
+    """A worker asking to alert one listing (see alert_claims.py).
+
+    `price` is the listing's price as the worker read it, so a drop below
+    the alerted price can earn one more alert.
+    """
+
+    worker_id: str | None = None
+    marketplace: str = Field(default="facebook", min_length=1)
+    listing_id: str = Field(min_length=1)
+    price: str | None = None
+
+
+class AlertClaimResult(BaseModel):
+    send: bool
+    # new | discounted | pending | duplicate
+    verdict: str
+    # Who holds the claim, or sent the alert, when it is not the caller.
+    worker_id: str | None = None
+    delivered_at: str | None = None
+
+
+class AlertDelivered(BaseModel):
+    worker_id: str | None = None
+    marketplace: str = Field(default="facebook", min_length=1)
+    listing_id: str = Field(min_length=1)
+
+
 class IncidentReport(BaseModel):
     """A worker's view of one system fault: it is down, or working again.
 

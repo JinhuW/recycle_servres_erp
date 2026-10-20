@@ -2323,7 +2323,12 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   facebook-tracker 0.13.4 a decision model pre-screens every listing before
   the LLM reads it, in shadow: its reject / maybe / buy verdict is logged
   beside the LLM's and nothing is skipped until `RS_PRESCREEN_ENFORCE` is
-  turned on (RS-319). If the
+  turned on (RS-319). Since facebook-tracker 0.13.6 a listing alerts once
+  across the fleet. Before, every worker that saw it alerted it: 50 of 122
+  alerts from 10-12 to 10-20 were repeats. Now a worker claims the listing
+  from the coordinator before sending, and only the first claim sends. A
+  delivered listing alerts again only below the price it was alerted at. The
+  card's coordinator stage says so since v1.301.1 (RS-329). If the
   worker already holds a pool account,
   the dialog asks where that one goes — back to Available, to Problem (still
   naming the worker) or Retired — with no default, and both moves land
