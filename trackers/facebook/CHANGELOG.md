@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.13.8] - 2026-10-20
+
 ### Added
 
 - **Two accounts on one IP, as a pilot** (RS-332). Ports 10014 and 10015
