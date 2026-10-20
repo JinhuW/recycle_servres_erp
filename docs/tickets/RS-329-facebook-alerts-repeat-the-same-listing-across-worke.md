@@ -2,13 +2,13 @@
 id: RS-329
 title: Facebook alerts repeat the same listing across workers
 type: bug
-status: in-progress
+status: done
 priority: P1
 created: 2026-10-20
 reporter: jinhu
 branch: fix/facebook-fleet-alert-claim
-pr:
-version:
+pr: 794
+version: facebook-tracker 0.13.6, v1.301.1
 related: []
 ---
 
@@ -56,16 +56,16 @@ includes `name`, the item config. A listing that both `server_ram` and
 
 ## Acceptance criteria
 
-- [ ] Two workers seeing the same listing produce one Telegram alert. The
+- [x] Two workers seeing the same listing produce one Telegram alert. The
       second worker logs `fleet_duplicate` and caches the listing as notified.
-- [ ] A listing found by two searches on one worker alerts once.
-- [ ] A price drop below the last alerted price alerts once fleet-wide. An edit
+- [x] A listing found by two searches on one worker alerts once.
+- [x] A price drop below the last alerted price alerts once fleet-wide. An edit
       at the same or a higher price does not alert.
-- [ ] A claimer whose send fails retries on its next sweep. If it dies, another
+- [x] A claimer whose send fails retries on its next sweep. If it dies, another
       worker takes over after 15 minutes.
-- [ ] If the coordinator is unreachable, or too old to know the claim, the
+- [x] If the coordinator is unreachable, or too old to know the claim, the
       worker sends as before.
-- [ ] A listing alerted before the deploy is not alerted again by a different
+- [x] A listing alerted before the deploy is not alerted again by a different
       worker after it (the claim table is seeded from `alert_messages`).
 
 ## Out of scope
