@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.13.7] - 2026-10-20
+
 ### Added
 
 - **Ten more workers, one per new Decodo port** (RS-331). The plan grew from
