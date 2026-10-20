@@ -5,6 +5,7 @@ import { useT } from './i18n';
 import { compressForUpload } from './image-compress';
 import { readPaypalScan } from './paypalTxn';
 import { scanErrorBanner, type ScanErrorBanner } from './scanError';
+import type { PaidBy } from './useCommissionPaidBy';
 
 // The proof half of a PO's payments: the chat with the seller (Submission
 // attachments), the PayPal or cash screenshot (Payment attachments) and the
@@ -42,9 +43,12 @@ export function usePaymentProof(init: PaymentProofInit) {
   const setterFor = (bucket: ProofBucket) =>
     bucket === 'Submission' ? setChatAtts : bucket === 'Payment' ? setProofAtts : setCommissionAtts;
 
-  const addFiles = async (bucket: ProofBucket, fl: FileList | File[] | null) => {
+  // Resolves with who paid the commission as the last upload left it — only
+  // the Commission bucket reports that, and an older backend never does.
+  const addFiles = async (bucket: ProofBucket, fl: FileList | File[] | null): Promise<PaidBy | undefined> => {
     const files = Array.from(fl ?? []);
-    if (!files.length || !orderId) return;
+    if (!files.length || !orderId) return undefined;
+    let paidBy: PaidBy | undefined;
     setUploading(bucket);
     try {
       for (const f of files) {
@@ -52,15 +56,17 @@ export function usePaymentProof(init: PaymentProofInit) {
         if (f.size > MAX_UPLOAD_BYTES) { showErrorDialog(t('fileTooLarge', { name: f.name })); continue; }
         const form = new FormData();
         form.append('file', f);
-        const r = await api.upload<{ attachment: ProofAttachment }>(
+        const r = await api.upload<{ attachment: ProofAttachment; commissionPaidBy?: PaidBy }>(
           `/api/orders/${orderId}/status-meta/${bucket}/attachments`, form);
         setterFor(bucket)(prev => [...prev, r.attachment]);
+        if (r.commissionPaidBy !== undefined) paidBy = r.commissionPaidBy;
       }
     } catch (e) {
       handleFetchError(e);
     } finally {
       setUploading(null);
     }
+    return paidBy;
   };
   const removeAtt = async (bucket: ProofBucket, att: ProofAttachment) => {
     if (!orderId) return;

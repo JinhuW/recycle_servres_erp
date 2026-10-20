@@ -45,7 +45,7 @@ import { useOrderEvents } from '../lib/useOrderEvents';
 import { ApiError } from '../lib/api';
 import { usePaymentProof, type ProofAttachment } from '../lib/usePaymentProof';
 import { PaymentFields } from '../components/PaymentFields';
-import { CommissionPaymentFields, type CommissionShots } from '../components/CommissionPaymentFields';
+import { CommissionPaidByConfirm, CommissionPaymentFields, type CommissionShots } from '../components/CommissionPaymentFields';
 import { useCommissionPaidBy } from '../lib/useCommissionPaidBy';
 import {
   ORDER_STATUSES, statusTone,
@@ -259,7 +259,12 @@ export function OrderDetail({
   const commissionShots: CommissionShots = {
     atts: proof.commissionAtts,
     uploading: proof.commissionUploading,
-    add: files => void proof.addCommissionFiles(files).then(() => setActivityRefreshKey(k => k + 1)),
+    // The server names the uploader when nobody is on file; anyone else on
+    // file is offered to them through the confirm.
+    add: files => void proof.addCommissionFiles(files).then((p) => {
+      if (p !== undefined) commissionPaidBy.adopt(p);
+      setActivityRefreshKey(k => k + 1);
+    }),
     remove: att => void proof.removeCommissionAtt(att).then(() => setActivityRefreshKey(k => k + 1)),
   };
 
@@ -310,6 +315,7 @@ export function OrderDetail({
     orderId: order.id,
     paidBy: order.commissionPaidBy ?? null,
     managers: managers ?? NO_MANAGERS,
+    me: user ? { id: user.id, name: user.name } : null,
     onMutated: () => setActivityRefreshKey(k => k + 1),
   });
 
@@ -1873,6 +1879,7 @@ export function OrderDetail({
           onMutated={() => setActivityRefreshKey(k => k + 1)}
         />
       )}
+      <CommissionPaidByConfirm paidBy={commissionPaidBy} />
       {takeover.dialog}
     </div>
   );

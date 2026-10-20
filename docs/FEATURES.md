@@ -236,14 +236,22 @@ is not a stage but a flag beside one, set once every line has sold
   and an OCR-filled transaction ID; v1.165.0 cut it to the screenshot alone).
   Above the drop box, **Paid by** names the manager who paid the purchaser
   (v1.217.0): a select of the active managers, or *Not recorded*, which every
-  order starts at — the screenshot's uploader need not be the payer, so
-  nothing is guessed. Since v1.301.0 it also offers **Company paid**, a fixed
+  order starts at. Since v1.301.0 it also offers **Company paid**, a fixed
   option rather than a member, for a commission paid from the company's
   account. A live bank payment linked as the PO's commission makes it read
   Company paid on its own: the select locks with a note saying why, and an
-  unlink or a reversal gives back the pick made by hand. Files write through as they are dropped and the pick
-  as it is made — managers at any stage, closed book included — and
-  purchasers see both read-only. Under the drop box, managers also see the
+  unlink or a reversal gives back the pick made by hand. **The screenshot's
+  upload records the payer** (v1.302.0): a manager who uploads one while
+  Paid by reads *Not recorded* is recorded as the payer. If Paid by names
+  someone else, or reads Company paid, the upload asks *Set Paid by to you?*
+  and changes it only on a yes. The Done dialog's drop box does the same,
+  with the question opening above it. A pick in the select asks
+  *Change who paid the commission?*, naming both values, and nothing is
+  saved until it is confirmed. Migration 0189 filled Paid by once on every PO
+  that had a commission screenshot and nobody recorded, from the uploader of
+  its latest screenshot. Files write through as they are dropped and a
+  confirmed pick as it is made — managers at any stage, closed book included
+  — and purchasers see both read-only. Under the drop box, managers also see the
   **bank payments linked as this PO's commission** on the Payments page,
   with their net, the same ledger the Cost Payment tab shows for the cost
   (v1.257.0). Each pick is one *Commission paid by:
@@ -720,11 +728,11 @@ is not a stage but a flag beside one, set once every line has sold
   lists what is shown, and a new column is not in it.
 - **The desktop list has a Paid by column** (v1.301.0), after Commission:
   who paid the purchaser their commission, the same record as the Commission
-  tab's *Paid by*. A manager picks it in the cell (*Not recorded*, *Company
-  paid* or an active manager), and the pick saves at once. The picker looks
-  like the cell's text until the pointer is on it. A PO with a bank payment
-  linked as its commission shows a *Company paid* chip that opens that
-  payment. Purchasers read it. It is sortable, in the Columns picker and on
+  tab's *Paid by*. Since v1.302.0 it is read-only for every role; v1.301.0
+  had a picker in the cell. The record is made on the PO page, by the
+  commission screenshot's upload or a confirmed pick. A manager sees a PO
+  with a bank payment linked as its commission as a *Company paid* chip that
+  opens that payment. It is sortable, in the Columns picker and on
   by default. Unlike Total cost above, migration 0188 added it to every saved
   column list, so nobody has to tick it on.
 - **The Actions column is pinned to the right edge** (v1.294.1). When the

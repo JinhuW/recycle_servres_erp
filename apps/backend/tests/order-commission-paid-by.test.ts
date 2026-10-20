@@ -1,6 +1,8 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
-import { api, testEnv } from './helpers/app';
+import { api, multipart, testEnv } from './helpers/app';
 import { loginAs, ALEX, SOFIA, MARCUS } from './helpers/auth';
 import { NOW, DAY, fakeProvider } from './helpers/bankProvider';
 import { syncBankTransactions } from '../src/banktx/sync';
@@ -8,7 +10,8 @@ import { syncBankTransactions } from '../src/banktx/sync';
 // Who paid the purchaser their commission: PUT /commission-paid-by,
 // manager-only, open on a closed book (that is when the commission is paid),
 // an active manager, the company or null, and one name-carrying meta_changed
-// per change. A bank payment linked as the commission reads as the company.
+// per change. A commission screenshot upload records its uploader when nobody
+// is on file. A bank payment linked as the commission reads as the company.
 
 const BODY = {
   paypalTxnId: 'TESTPAYTXN0000001', category: 'RAM', warehouseId: 'WH-LA1',
@@ -66,6 +69,14 @@ async function linkCommission(token: string, id: string): Promise<string> {
   const r = await api('POST', `/api/bank-transactions/${row.id}/link`, { token, body: { orderId: id, kind: 'commission' } });
   expect(r.status).toBe(200);
   return row.id;
+}
+
+const PNG = () => new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'paid.png', { type: 'image/png' });
+
+async function uploadShot(token: string, id: string): Promise<PaidBy | undefined> {
+  const r = await multipart(`/api/orders/${id}/status-meta/Commission/attachments`, { file: PNG() }, { token });
+  expect(r.status).toBe(200);
+  return (r.body as { commissionPaidBy?: PaidBy }).commissionPaidBy;
 }
 
 async function nameOf(userId: string): Promise<string> {
@@ -219,9 +230,114 @@ describe('Commission paid by', () => {
     expect(await paidByChanges(alex.token, id)).toHaveLength(1);
   });
 
+  it('a commission screenshot upload records its uploader while nobody is on file', async () => {
+    const { id, marcus, alex } = await doneOrder();
+    const alexName = await nameOf(alex.user.id);
+    const mine = { kind: 'manager', id: alex.user.id, name: alexName };
+
+    expect(await uploadShot(alex.token, id)).toEqual(mine);
+    expect(await paidByOf(marcus.token, id)).toEqual(mine);
+    // A second screenshot from the same manager changes nothing.
+    expect(await uploadShot(alex.token, id)).toEqual(mine);
+    expect(await paidByChanges(alex.token, id)).toEqual([
+      { field: 'commission_paid_by', from: null, to: alexName },
+    ]);
+
+    // Another bucket's upload never touches it.
+    const sofia = await loginAs(SOFIA);
+    const pay = await multipart(`/api/orders/${id}/status-meta/Payment/attachments`, { file: PNG() }, { token: sofia.token });
+    expect(pay.status).toBe(200);
+    expect('commissionPaidBy' in (pay.body as object)).toBe(false);
+  });
+
+  it('an upload over another payer, or the company, writes nothing and reports what is on file', async () => {
+    const { id, alex } = await doneOrder();
+    const sofia = await loginAs(SOFIA);
+    const sofiaName = await nameOf(sofia.user.id);
+
+    expect((await setPaidBy(sofia.token, id, { userId: sofia.user.id })).status).toBe(200);
+    expect(await uploadShot(alex.token, id)).toEqual({ kind: 'manager', id: sofia.user.id, name: sofiaName });
+
+    expect((await setPaidBy(sofia.token, id, { company: true })).status).toBe(200);
+    expect(await uploadShot(alex.token, id)).toEqual({ kind: 'company', linked: false });
+
+    // Taking it over is the page's confirmed PUT.
+    expect((await setPaidBy(alex.token, id, { userId: alex.user.id })).status).toBe(200);
+    expect(await paidByChanges(alex.token, id)).toEqual([
+      { field: 'commission_paid_by', from: null, to: sofiaName },
+      { field: 'commission_paid_by', from: sofiaName, to: 'Company' },
+      { field: 'commission_paid_by', from: 'Company', to: await nameOf(alex.user.id) },
+    ]);
+  });
+
+  it('an upload while a bank payment is linked as the commission writes nothing', async () => {
+    const { id, alex } = await doneOrder();
+    await linkCommission(alex.token, id);
+    expect(await uploadShot(alex.token, id)).toEqual({ kind: 'company', linked: true });
+    const [row] = await getTestDb()<{ commission_paid_by: string | null }[]>`
+      SELECT commission_paid_by FROM orders WHERE id = ${id}`;
+    expect(row.commission_paid_by).toBeNull();
+    expect(await paidByChanges(alex.token, id)).toEqual([]);
+  });
+
   it('404s an unknown order', async () => {
     const { token } = await loginAs(ALEX);
     const sofia = await loginAs(SOFIA);
     expect((await setPaidBy(token, 'PO-999999', { userId: sofia.user.id })).status).toBe(404);
+  });
+});
+
+// Paid by now follows the screenshot, so orders that already carried one were
+// filled in once from its uploader.
+describe('migration 0189 backfills Paid by from the commission screenshot', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  const replay = async () => {
+    const sqlText = readFileSync(
+      fileURLToPath(new URL('../migrations/0189_backfill_commission_paid_by.sql', import.meta.url)), 'utf8');
+    await getTestDb().unsafe(sqlText);
+  };
+  // A screenshot as an older release stored it: no payer written beside it.
+  const oldShot = async (id: string, by: string, minutesAgo: number) => {
+    await getTestDb()`
+      INSERT INTO order_status_attachments
+        (order_id, status, filename, size_bytes, mime_type, storage_key, delivery_url, uploaded_by, uploaded_at)
+      VALUES (${id}, 'Commission', 'paid.png', 4, 'image/png', ${'k-' + id + minutesAgo}, 'https://x/paid.png', ${by},
+              NOW() - make_interval(mins => ${minutesAgo}))`;
+  };
+
+  it('fills the latest uploader where nobody is on file, and leaves every record alone', async () => {
+    const empty = await doneOrder();
+    const picked = await doneOrder();
+    const company = await doneOrder();
+    const bare = await doneOrder();
+    const { alex, marcus } = empty;
+    const sofia = await loginAs(SOFIA);
+
+    await oldShot(empty.id, alex.user.id, 30);
+    await oldShot(empty.id, sofia.user.id, 10);
+    await oldShot(picked.id, sofia.user.id, 10);
+    expect((await setPaidBy(alex.token, picked.id, { userId: alex.user.id })).status).toBe(200);
+    await oldShot(company.id, sofia.user.id, 10);
+    expect((await setPaidBy(alex.token, company.id, { company: true })).status).toBe(200);
+    // A purchaser never wrote this bucket; a row naming one is not a payer.
+    await oldShot(bare.id, marcus.user.id, 10);
+
+    await replay();
+    await replay();
+
+    const sofiaName = await nameOf(sofia.user.id);
+    expect(await paidByOf(alex.token, empty.id)).toEqual({ kind: 'manager', id: sofia.user.id, name: sofiaName });
+    expect(await paidByOf(alex.token, picked.id)).toMatchObject({ kind: 'manager', id: alex.user.id });
+    expect(await paidByOf(alex.token, company.id)).toEqual({ kind: 'company', linked: false });
+    expect(await paidByOf(alex.token, bare.id)).toBeNull();
+
+    expect(await paidByChanges(alex.token, empty.id)).toEqual([
+      { field: 'commission_paid_by', from: null, to: sofiaName },
+    ]);
+    const [ev] = await getTestDb()<{ actor_id: string; detail: { backfilled?: boolean } }[]>`
+      SELECT actor_id, detail FROM order_events
+      WHERE order_id = ${empty.id} AND kind = 'meta_changed'`;
+    expect(ev).toMatchObject({ actor_id: sofia.user.id, detail: { backfilled: true } });
   });
 });

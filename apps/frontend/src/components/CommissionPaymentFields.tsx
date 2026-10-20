@@ -1,17 +1,19 @@
-import { useId, type CSSProperties } from 'react';
+import { useId } from 'react';
 import { AttachmentChip } from './AttachmentChip';
 import { AttachmentDropzone } from './AttachmentDropzone';
 import { Icon } from './Icon';
 import { useT } from '../lib/i18n';
 import { PAID_BY_COMPANY, paidByLabel, paidByLocked, paidByValue, type CommissionPaidBy } from '../lib/useCommissionPaidBy';
 import type { ProofAttachment } from '../lib/usePaymentProof';
+import { ConfirmDialog } from '../pages/desktop/settings/dialogs';
 
 // The commission payment — who paid the purchaser, and the screenshot that
 // shows it — on the desktop Commission tab and in the phone fold, one
-// component so the two cannot drift. Both write through as they are
-// used: the pick saves at once and files go straight to the order's
-// Commission bucket; there is no Save. The Done dialog offers the same drop box
-// on the way to Done when nothing is here yet. No panel around it.
+// component so the two cannot drift. Both write through, with no Save: files
+// go straight to the order's Commission bucket, and the payer follows the
+// upload or a pick the manager confirms (CommissionPaidByConfirm, which the
+// page renders). The Done dialog offers the same drop box on the way to Done
+// when nothing is here yet. No panel around it.
 
 export type CommissionShots = {
   atts: ProofAttachment[];
@@ -39,6 +41,7 @@ export function CommissionPaymentFields({ paidBy, shots, editable }: Props) {
 function PaidByField({ paidBy, editable }: { paidBy: CommissionPaidBy; editable: boolean }) {
   const { t } = useT();
   const id = useId();
+  const locked = paidByLocked(paidBy.paidBy);
   if (!editable) {
     return (
       <div className="field" style={{ marginBottom: 0, display: 'grid', gap: 8 }}>
@@ -52,38 +55,65 @@ function PaidByField({ paidBy, editable }: { paidBy: CommissionPaidBy; editable:
   return (
     <div className="field" style={{ marginBottom: 0, display: 'grid', gap: 8 }}>
       <label className="label" htmlFor={id}>{t('cpPaidByLabel')}</label>
-      <PaidBySelect id={id} paidBy={paidBy} style={{ width: '100%' }} />
-      {paidByLocked(paidBy.paidBy) && (
+      {/* A pick asks first; the select stays on the record until it is confirmed.
+          The company is a fixed option, not a member. */}
+      <select
+        id={id}
+        className="select"
+        value={paidByValue(paidBy.paidBy)}
+        onChange={e => paidBy.request(e.target.value)}
+        disabled={paidBy.saving || locked}
+        title={locked ? t('cpPaidByLinkedHint') : undefined}
+        style={{ width: '100%' }}
+      >
+        <option value="">{t('cpPaidByNone')}</option>
+        <option value={PAID_BY_COMPANY}>{t('cpPaidByCompany')}</option>
+        {paidBy.options.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+      </select>
+      {locked && (
         <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>{t('cpPaidByLinkedHint')}</div>
       )}
     </div>
   );
 }
 
-// The picker itself, here and in the PO list's Paid by cell. The company is a
-// fixed option, not a member; the managers come from the members list.
-export function PaidBySelect({ paidBy, id, className = 'select', style }: {
-  paidBy: CommissionPaidBy;
-  id?: string;
-  className?: string;
-  style?: CSSProperties;
-}) {
+// The yes behind every change to Paid by except an upload's first record: a
+// pick in the select, or an upload by a manager other than the one on file.
+// The page renders it once, beside its other dialogs, so an upload in the
+// Done dialog asks too.
+// Above the Done dialog (110), whose drop box can be what opened it.
+const DIALOG_ABOVE_DONE = 120;
+
+export function CommissionPaidByConfirm({ paidBy }: { paidBy: CommissionPaidBy }) {
   const { t } = useT();
-  const locked = paidByLocked(paidBy.paidBy);
+  const change = paidBy.pending;
+  if (!change) return null;
+  const from = paidByLabel(paidBy.paidBy, t);
+  const onConfirm = () => void paidBy.confirm();
+  if (change.reason === 'upload') {
+    return (
+      <ConfirmDialog
+        title={t('cpPaidByTakeTitle')}
+        message={t('cpPaidByTakeMsg', { from })}
+        confirmLabel={t('cpPaidByTakeConfirm')}
+        zIndex={DIALOG_ABOVE_DONE}
+        onCancel={paidBy.cancel}
+        onConfirm={onConfirm}
+      />
+    );
+  }
+  const to = change.value === '' ? t('cpPaidByNone')
+    : change.value === PAID_BY_COMPANY ? t('cpPaidByCompany')
+    : paidBy.nameFor(change.value) ?? '';
   return (
-    <select
-      id={id}
-      className={className}
-      value={paidByValue(paidBy.paidBy)}
-      onChange={e => void paidBy.setPaidBy(e.target.value)}
-      disabled={paidBy.saving || locked}
-      title={locked ? t('cpPaidByLinkedHint') : undefined}
-      style={style}
-    >
-      <option value="">{t('cpPaidByNone')}</option>
-      <option value={PAID_BY_COMPANY}>{t('cpPaidByCompany')}</option>
-      {paidBy.options.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-    </select>
+    <ConfirmDialog
+      title={t('cpPaidByChangeTitle')}
+      message={t('cpPaidByChangeMsg', { from, to })}
+      confirmLabel={t('cpPaidByChangeConfirm')}
+      zIndex={DIALOG_ABOVE_DONE}
+      onCancel={paidBy.cancel}
+      onConfirm={onConfirm}
+    />
   );
 }
 

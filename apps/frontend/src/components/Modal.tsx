@@ -9,6 +9,9 @@ type ModalProps = {
   // callers keep their existing sizing without new CSS.
   shellStyle?: CSSProperties;
   shellClassName?: string;
+  // The layer, for a dialog that can open over another: the Done dialog sits
+  // at 110, and what opens above it at 120, as SerialCheckDialog does.
+  zIndex?: number;
   // Optional aria-label for the dialog when there is no visible labelled title.
   ariaLabel?: string;
   // Off only while the dialog should ignore Escape entirely. A busy dialog
@@ -22,7 +25,7 @@ type ModalProps = {
 // Adds role="dialog" aria-modal, moves initial focus to the panel unless a
 // child already took it, returns focus to the opener on unmount, closes on
 // Escape (via the shared useEscapeKey stack) and on backdrop click.
-export function Modal({ onClose, children, shellStyle, shellClassName, ariaLabel, closeOnEscape = true }: ModalProps) {
+export function Modal({ onClose, children, shellStyle, shellClassName, zIndex, ariaLabel, closeOnEscape = true }: ModalProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   // Where the press began. A drag that starts inside the panel (selecting text
   // in a field) and is released over the backdrop fires its click on the
@@ -51,6 +54,7 @@ export function Modal({ onClose, children, shellStyle, shellClassName, ariaLabel
   return (
     <div
       className="modal-backdrop"
+      style={zIndex === undefined ? undefined : { zIndex }}
       onMouseDown={e => { pressedBackdrop.current = e.target === e.currentTarget; }}
       onClick={e => {
         if (e.target === e.currentTarget && pressedBackdrop.current) onClose();
