@@ -49,6 +49,7 @@ const zh: Record<string, string> = {
     fpSince: "始于 {time}",
     fpNoMatch: "没有匹配的账号，请清除搜索或选择其他状态。",
     fpResults: "{n} / {total} 个账号",
+    fpSortBy: "按此列排序",
     fpFree: "{n} 个账号可领用",
     fpTakeHelp: "优先领用 Cookie 有效且入池最早的账号。点击绿色标签选择其他账号，领用后即可查看登录信息。",
     fpNext: "下一个可领用",

@@ -64,6 +64,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     fpSince: "Since {time}",
     fpNoMatch: "No accounts match. Clear the search or pick another status.",
     fpResults: "{n} of {total} accounts",
+    fpSortBy: "Sort by this column",
     fpFree: "{n} accounts are free to take",
     fpTakeHelp: "The oldest account with a fresh cookie is next in line. Pick a green tag to choose another. Its login stays hidden until it is yours.",
     fpNext: "Next in line",

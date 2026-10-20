@@ -2427,7 +2427,10 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   hourly backend loop picks the accounts whose last check is over 7 days old,
   so deploys don't reset the week. The account's detail panel shows when it was
   last checked. A checkpointed account still looks alive to this lookup
-  (RS-284).
+  (RS-284). Since v1.306.0 the manager's table shows about ten rows and scrolls
+  for the rest with the header pinned, and every column header sorts the rows —
+  a first click ascending, a second descending — so the pool can be read by
+  UID, status, holder, cookie freshness or any other field (RS-336).
 - **Watching a worker's browser** — `/fleet/watch/<worker>` shows the live
   Chromium a Facebook worker is driving, through noVNC, view-only until
   "Take control" is ticked (and handed back when the tab is hidden), with
