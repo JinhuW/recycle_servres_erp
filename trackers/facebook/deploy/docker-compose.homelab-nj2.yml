@@ -1,0 +1,95 @@
+# nj-2, a worker added on the Decodo exit in Parsippany, NJ
+# (PROXY_HOMELAB_NJ2, port 10019). No other worker uses this IP.
+#
+# Its cities are its own, set on the ERP's worker page (Edit cities);
+# configs/homelab-nj2.toml only seeds Newark, NJ, the catalog city nearest
+# its exit.
+# Its Facebook account comes from the ERP's account pool: assigning it writes
+# the login into this worker's vault account and queues Re-login, which signs
+# in inside this container's browser, through its own proxy, so the session is
+# born on the IP it keeps.
+#
+# Order: start it, set its cities, then give it an account. Until it has a
+# login it parks on Facebook's login page and searches nothing.
+#
+# A CLONE of docker-compose.homelab-ne.yml. Only the per-worker fields differ:
+#   container_name  rs-monitor-nj2
+#   config mount    configs/homelab-nj2.toml
+#   session dir     configs/sessions/homelab-nj2
+#   diskcache vol   aimm-home-nj2
+#   RS_WORKER_ID    nj-2  (in configs/secrets.homelab-nj2.env)
+#   VNC             5920 on the host
+# and the console (docker-compose.console.yml) lists it in RS_WORKER_CONFIGS
+# and RS_VNC_TARGETS.
+#
+# Before first start, on the VM:
+#   configs/sessions/homelab-nj2/fb_state.json  — an EMPTY storage state,
+#       {"cookies": [], "origins": []}. Without any session file the monitor
+#       cannot record that it is parked and searches logged out (debug note
+#       docs/debug-notes/2026-10-17-new-worker-without-session-file-searches-logged-out.md).
+#   configs/secrets.env              — PROXY_HOMELAB_NJ2=http://isp.decodo.com:10019
+#   configs/secrets.homelab-nj2.env  — RS_WORKER_ID=nj-2 and its own
+#       RS_CONTROL_PLANE_TOKEN (rsc mint-token --worker nj-2)
+#
+#   docker compose -f deploy/docker-compose.homelab-nj2.yml up -d
+services:
+  monitor-nj2:
+    image: aimm-recycle:latest
+    container_name: rs-monitor-nj2
+    restart: unless-stopped
+    # SIGTERM saves the live Facebook session; supervisord allows it 25 s.
+    stop_grace_period: 30s
+
+    # Own VNC port. Loopback-only, same as the others.
+    #   ssh -L 5920:127.0.0.1:5920 jinhu@10.10.10.73
+    ports:
+      - "127.0.0.1:5920:5900"
+
+    # Shared secrets first, then this worker's overrides (later file wins):
+    # RS_WORKER_ID and its own RS_CONTROL_PLANE_TOKEN live in the second file so
+    # they do not collide with rs-monitor's identity in the shared one.
+    env_file:
+      - ../configs/secrets.env
+      - ../configs/secrets.homelab-nj2.env
+
+    environment:
+      AIMM_ENABLE_VNC: "1"
+      AIMM_WEBUI_HOST: 127.0.0.1
+      AIMM_WEBUI_PORT: "8467"
+      AIMM_OPENSEARCH_URL: "http://host.docker.internal:9200"
+      AIMM_OPENSEARCH_INDEX: "fb-tracker"
+
+    volumes:
+      - ../configs/homelab-nj2.toml:/root/.ai-marketplace-monitor/config.toml:ro
+      - aimm-home-nj2:/root/.ai-marketplace-monitor
+      - ../configs/sessions/homelab-nj2:/data
+      - ./healthcheck.sh:/usr/local/bin/rs-healthcheck:ro
+
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/rs-healthcheck"]
+      interval: 5m
+      timeout: 1m
+      retries: 1
+      start_period: 10m
+
+    shm_size: 1gb
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    networks:
+      - rs-fleet
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+volumes:
+  aimm-home-nj2:
+
+networks:
+  rs-fleet:
+    name: rs-fleet
+    external: true

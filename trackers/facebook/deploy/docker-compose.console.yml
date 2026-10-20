@@ -49,7 +49,17 @@ services:
         nyc-1=/config/workers/homelab-nyc.toml,
         phl-1=/config/workers/homelab-phl.toml,
         va-2=/config/workers/homelab-va2.toml,
-        wc-1=/config/workers/homelab-wc.toml
+        wc-1=/config/workers/homelab-wc.toml,
+        bos-1=/config/workers/homelab-bos.toml,
+        nyc-2=/config/workers/homelab-nyc2.toml,
+        nyc-3=/config/workers/homelab-nyc3.toml,
+        ca-1=/config/workers/homelab-ca1.toml,
+        ca-2=/config/workers/homelab-ca2.toml,
+        ca-3=/config/workers/homelab-ca3.toml,
+        ca-4=/config/workers/homelab-ca4.toml,
+        nj-1=/config/workers/homelab-nj1.toml,
+        nj-2=/config/workers/homelab-nj2.toml,
+        nj-3=/config/workers/homelab-nj3.toml
       # RS_WORKER_ID arrives from secrets.env above — the same value the
       # monitor reports under — so the dashboard can join the phase-1
       # monitor's heartbeat row to its config.
@@ -74,7 +84,17 @@ services:
         nyc-1=rs-monitor-nyc:5900,
         phl-1=rs-monitor-phl:5900,
         va-2=rs-monitor-va2:5900,
-        wc-1=rs-monitor-wc:5900
+        wc-1=rs-monitor-wc:5900,
+        bos-1=rs-monitor-bos:5900,
+        nyc-2=rs-monitor-nyc2:5900,
+        nyc-3=rs-monitor-nyc3:5900,
+        ca-1=rs-monitor-ca1:5900,
+        ca-2=rs-monitor-ca2:5900,
+        ca-3=rs-monitor-ca3:5900,
+        ca-4=rs-monitor-ca4:5900,
+        nj-1=rs-monitor-nj1:5900,
+        nj-2=rs-monitor-nj2:5900,
+        nj-3=rs-monitor-nj3:5900
       # Optional: set to the tunnel hostname to make `vnc_url` in /v1/fleet
       # absolute for a page on another origin (the ERP). Left unset, links
       # are paths on this host, which is right for the standalone dashboard
@@ -97,6 +117,16 @@ services:
       - ../configs/homelab-phl.toml:/config/workers/homelab-phl.toml
       - ../configs/homelab-va2.toml:/config/workers/homelab-va2.toml
       - ../configs/homelab-wc.toml:/config/workers/homelab-wc.toml
+      - ../configs/homelab-bos.toml:/config/workers/homelab-bos.toml
+      - ../configs/homelab-nyc2.toml:/config/workers/homelab-nyc2.toml
+      - ../configs/homelab-nyc3.toml:/config/workers/homelab-nyc3.toml
+      - ../configs/homelab-ca1.toml:/config/workers/homelab-ca1.toml
+      - ../configs/homelab-ca2.toml:/config/workers/homelab-ca2.toml
+      - ../configs/homelab-ca3.toml:/config/workers/homelab-ca3.toml
+      - ../configs/homelab-ca4.toml:/config/workers/homelab-ca4.toml
+      - ../configs/homelab-nj1.toml:/config/workers/homelab-nj1.toml
+      - ../configs/homelab-nj2.toml:/config/workers/homelab-nj2.toml
+      - ../configs/homelab-nj3.toml:/config/workers/homelab-nj3.toml
       # Regions, items and the default search settings; and which worker owns
       # which region. Read-only: saved settings overlay master, never edit it.
       - ../configs/master.toml:/config/master.toml:ro
