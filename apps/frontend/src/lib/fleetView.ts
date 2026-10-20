@@ -693,60 +693,64 @@ export function cityOwners(fleet: FleetDoc, workerId: string): Map<string, strin
   return out;
 }
 
-// The other workers that dial each worker's proxy. One port is one exit IP,
-// so Facebook sees their accounts side by side. A worker on the VM's own
-// address has no proxy URL and is never counted.
-export function ipPartners(workers: readonly FleetAccount[]): Map<string, string[]> {
-  const byUrl = new Map<string, string[]>();
-  for (const w of workers) {
-    const url = w.proxy?.url;
-    if (url) byUrl.set(url, [...(byUrl.get(url) ?? []), w.worker_id]);
-  }
-  const out = new Map<string, string[]>();
-  for (const ids of byUrl.values()) {
-    if (ids.length > 1) for (const id of ids) out.set(id, ids.filter(other => other !== id));
-  }
-  return out;
-}
+// One proxy and the workers that dial it. A port is one exit IP, so Facebook
+// sees these accounts side by side. `url` is null for the workers on the VM's
+// own address, which share that address the same way.
+export type ProxyGroup = {
+  url: string | null;
+  port: string | null;
+  ip: string | null;
+  org: string | null;
+  workers: FleetAccount[];
+};
 
-// The workers grouped where their proxies come out, the city Facebook sees
-// them in. `ips` counts the proxies in a city. A worker whose exit is still
-// being looked up has no city yet ('pending'); one without a proxy is on the
-// VM's own address ('none'). Both groups sort last.
+// The fleet in three layers: the city a proxy comes out in (where Facebook
+// sees its accounts), each proxy there, and the workers on each. A worker
+// whose exit is still being looked up has no city yet ('pending'); one
+// without a proxy is on the VM's own address ('none'). Both sort last.
 export type ProxyLocation = {
   key: string;
   city: string | null;
   region: string | null;
-  ips: number;
-  workers: FleetAccount[];
+  workers: number;
+  proxies: ProxyGroup[];
 };
 
-// `byProxy` orders each city's workers by proxy, so a shared IP's workers sit
-// together; otherwise they keep the order they came in (a column sort).
-export function proxyLocations(workers: readonly FleetAccount[], byProxy: boolean): ProxyLocation[] {
-  const groups = new Map<string, ProxyLocation>();
+// `byPort` runs each city's proxies by port and each proxy's workers by id.
+// Otherwise the order they came in (a column sort) decides both, and a proxy
+// ranks where its first worker does.
+export function proxyLocations(workers: readonly FleetAccount[], byPort: boolean): ProxyLocation[] {
+  const locations = new Map<string, ProxyLocation>();
   for (const w of workers) {
     const p = w.proxy;
-    const city = p?.url ? p.city ?? null : null;
-    const key = !p?.url ? 'none' : city ? `${city}|${p.region ?? ''}` : 'pending';
-    let g = groups.get(key);
-    if (!g) {
-      g = { key, city, region: city ? p?.region ?? null : null, ips: 0, workers: [] };
-      groups.set(key, g);
+    const url = p?.url ?? null;
+    const city = url ? p?.city ?? null : null;
+    const key = !url ? 'none' : city ? `${city}|${p?.region ?? ''}` : 'pending';
+    let loc = locations.get(key);
+    if (!loc) {
+      loc = { key, city, region: city ? p?.region ?? null : null, workers: 0, proxies: [] };
+      locations.set(key, loc);
     }
-    g.workers.push(w);
+    let proxy = loc.proxies.find(g => g.url === url);
+    if (!proxy) {
+      proxy = { url, port: /:(\d+)$/.exec(url ?? '')?.[1] ?? null, ip: null, org: null, workers: [] };
+      loc.proxies.push(proxy);
+    }
+    proxy.ip ??= p?.ip ?? null;
+    proxy.org ??= p?.org ?? null;
+    proxy.workers.push(w);
+    loc.workers += 1;
   }
-  const rank = (g: ProxyLocation) => (g.key === 'none' ? 2 : g.key === 'pending' ? 1 : 0);
-  const out = [...groups.values()];
-  for (const g of out) {
-    g.ips = new Set(g.workers.map(w => w.proxy?.url).filter(Boolean)).size;
-    if (byProxy) {
-      g.workers.sort((a, b) => (a.proxy?.url ?? '').localeCompare(b.proxy?.url ?? '', undefined, { numeric: true })
-        || a.worker_id.localeCompare(b.worker_id, undefined, { numeric: true }));
+  const out = [...locations.values()];
+  if (byPort) {
+    const byId = (a: FleetAccount, b: FleetAccount) => a.worker_id.localeCompare(b.worker_id, undefined, { numeric: true });
+    for (const loc of out) {
+      loc.proxies.sort((a, b) => (a.url ?? '').localeCompare(b.url ?? '', undefined, { numeric: true }));
+      for (const g of loc.proxies) g.workers.sort(byId);
     }
   }
-  return out.sort((a, b) => rank(a) - rank(b) || b.workers.length - a.workers.length
-    || (a.city ?? '').localeCompare(b.city ?? ''));
+  const rank = (l: ProxyLocation) => (l.key === 'none' ? 2 : l.key === 'pending' ? 1 : 0);
+  return out.sort((a, b) => rank(a) - rank(b) || b.workers - a.workers || (a.city ?? '').localeCompare(b.city ?? ''));
 }
 
 export function citiesDiffer(a: readonly CityWrite[], b: readonly CityWrite[]): boolean {

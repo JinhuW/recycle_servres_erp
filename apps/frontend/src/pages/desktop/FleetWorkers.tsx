@@ -5,9 +5,9 @@ import { SortTh, type SortState } from '../../components/SortTh';
 import type { AlertHitRow, Challenge, FleetAccount, FleetDoc } from '../../lib/coordinator';
 import {
   accountAlerts, accountHaystack, attentionReason, dayStrip, FLEET_STATUSES, fleetActivity, fleetPostsToday, fleetStatus,
-  hitsByCity, ipPartners, isUnstampedBuild, matchesTerms, parkedWorkers, proxyLocations, queryTerms, searchedToday,
+  hitsByCity, isUnstampedBuild, matchesTerms, parkedWorkers, proxyLocations, queryTerms, searchedToday,
   sortFleet, whoIs,
-  type CityHits, type DayStrip, type FleetEvent, type FleetSortCol, type FleetStatus,
+  type CityHits, type DayStrip, type FleetEvent, type FleetSortCol, type FleetStatus, type ProxyGroup,
 } from '../../lib/fleetView';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
@@ -86,7 +86,6 @@ export function WorkersCard({ fleet, unavailable, hits, challenges, filter, onCl
   const terms = queryTerms(query);
   const byCity = useMemo(() => hitsByCity(hits ?? []), [hits]);
   const parked = useMemo(() => parkedWorkers(challenges), [challenges]);
-  const partners = useMemo(() => ipPartners(fleet?.workers ?? []), [fleet]);
   const all = fleet?.workers ?? [];
   // Click cycles desc → asc → the fleet document's own order.
   const [sort, setSort] = usePersisted<SortState>('desktop.fleet.sort', { col: '', dir: null });
@@ -155,19 +154,25 @@ export function WorkersCard({ fleet, unavailable, hits, challenges, filter, onCl
             </tr>
           </thead>
           <tbody>
-            {proxyLocations(shown, !sort.dir).map(g => (
-              <Fragment key={g.key}>
+            {proxyLocations(shown, !sort.dir).map(loc => (
+              <Fragment key={loc.key}>
                 <tr className="ff-group">
                   <td colSpan={8} title={t('fbcLocHint')}>
-                    {g.city ? [g.city, g.region].filter(Boolean).join(', ') : t(g.key === 'none' ? 'fbcLocNone' : 'fbcLocPending')}
-                    {g.ips > 0 && <span className="mono">{t(g.ips === 1 ? 'fbcLocIpsOne' : 'fbcLocIps', { n: g.ips })}</span>}
-                    <span className="mono">{t(g.workers.length === 1 ? 'fbcLocWorkersOne' : 'fbcLocWorkers', { n: g.workers.length })}</span>
+                    {loc.city ? [loc.city, loc.region].filter(Boolean).join(', ') : t(loc.key === 'none' ? 'fbcLocNone' : 'fbcLocPending')}
+                    {loc.key !== 'none' && (
+                      <span className="mono">{t(loc.proxies.length === 1 ? 'fbcLocIpsOne' : 'fbcLocIps', { n: loc.proxies.length })}</span>
+                    )}
+                    <span className="mono">{t(loc.workers === 1 ? 'fbcLocWorkersOne' : 'fbcLocWorkers', { n: loc.workers })}</span>
                   </td>
                 </tr>
-                {g.workers.map(w => (
-                  <WorkerRow key={w.worker_id} account={w} hits={byCity} parked={parked} terms={terms} startAt={startAt}
-                    partners={partners.get(w.worker_id)}
-                    open={open.has(w.worker_id)} onToggle={() => toggle(w.worker_id)} locale={locale} />
+                {loc.proxies.map(proxy => (
+                  <Fragment key={proxy.url ?? 'none'}>
+                    <ProxyRow proxy={proxy} />
+                    {proxy.workers.map(w => (
+                      <WorkerRow key={w.worker_id} account={w} hits={byCity} parked={parked} terms={terms} startAt={startAt}
+                        open={open.has(w.worker_id)} onToggle={() => toggle(w.worker_id)} locale={locale} />
+                    ))}
+                  </Fragment>
                 ))}
               </Fragment>
             ))}
@@ -211,14 +216,30 @@ function WorkerRowSkeleton() {
   );
 }
 
-function WorkerRow({ account: w, hits, parked, terms, startAt, partners, open, onToggle, locale }: {
+// The middle layer: one exit IP, the workers under it share it. More than one
+// is the two-per-IP pilot, which only holds while they look like two people.
+function ProxyRow({ proxy }: { proxy: ProxyGroup }) {
+  const { t } = useT();
+  const n = proxy.workers.length;
+  const shared = n > 1;
+  return (
+    <tr className="ff-proxy">
+      <td colSpan={8} title={[proxy.org, shared && t('fbcSharesIpHint')].filter(Boolean).join(' · ') || undefined}>
+        <span className="mono">{proxy.port ? `:${proxy.port}` : t('fbcProxyNone')}</span>
+        {proxy.ip && <span className="mono">{proxy.ip}</span>}
+        <span>{t(n === 1 ? 'fbcLocWorkersOne' : 'fbcLocWorkers', { n })}</span>
+        {shared && <span className="fp-warn">{t('fbcProxyShared')}</span>}
+      </td>
+    </tr>
+  );
+}
+
+function WorkerRow({ account: w, hits, parked, terms, startAt, open, onToggle, locale }: {
   account: FleetAccount;
   hits: Map<string, CityHits>;
   parked: ReadonlySet<string>;
   terms: readonly string[];
   startAt: readonly string[] | undefined;
-  // The other workers on this worker's proxy, when it shares one.
-  partners: readonly string[] | undefined;
   open: boolean;
   onToggle: () => void;
   locale: string;
@@ -236,7 +257,6 @@ function WorkerRow({ account: w, hits, parked, terms, startAt, partners, open, o
   const plan = w.plan;
   const build = h?.version && !isUnstampedBuild(h.version) ? h.version : null;
   const searched = searchedToday(w, status);
-  const port = /:(\d+)$/.exec(w.proxy?.url ?? '')?.[1] ?? null;
 
   return (
     <Fragment>
@@ -251,9 +271,7 @@ function WorkerRow({ account: w, hits, parked, terms, startAt, partners, open, o
           <span className="fp-holder">
             <span><Hi text={who.login ?? who.label ?? w.worker_id} terms={terms} /></span>
             <small><span className="mono"><Hi text={w.worker_id} terms={terms} /></span> · <Hi text={w.region.name} terms={terms} />
-              {build && <> · <span className="mono" title={build}>v{build.split(' ')[0]}</span></>}
-              {port && <> · <span className="mono" title={w.proxy?.ip ?? undefined}>:{port}</span></>}
-              {partners &&<> · <span title={t('fbcSharesIpHint')}>{t('fbcSharesIp', { who: partners.join(', ') })}</span></>}</small>
+              {build && <> · <span className="mono" title={build}>v{build.split(' ')[0]}</span></>}</small>
           </span>
         </td>
         <td className="ff-wrap">

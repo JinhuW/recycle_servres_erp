@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-333](./RS-333-fleet-tab-in-three-layers-location-proxy-ip-workers.md) | done | story | P2 | Fleet tab in three layers: location, proxy IP, workers | 1.304.0 |
 | [RS-332](./RS-332-pilot-two-facebook-workers-per-proxy-on-two-palo-alt.md) | done | story | P2 | Pilot two Facebook workers per proxy on two Palo Alto IPs | facebook-tracker 0.13.8, v1.303.0 |
 | [RS-331](./RS-331-add-ten-facebook-workers-on-the-new-decodo-ports-100.md) | done | task | P2 | Add ten Facebook workers on the new Decodo ports 10011-10020 | facebook-tracker 0.13.7 |
 | [RS-330](./RS-330-paid-by-follows-the-commission-screenshot-upload-and.md) | done | story | P2 | Paid by follows the commission screenshot upload and asks before it changes | 1.302.0 |
