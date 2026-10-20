@@ -18,6 +18,27 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.13.9] - 2026-10-20
+
+### Added
+
+- **Every proxy carries two workers** (RS-334). The two-per-IP pilot on 10014
+  and 10015 is widened to all 20 Decodo ports: the 18 other IPs each get a
+  partner `<id>b` on the same proxy var. That makes 40 compose workers:
+  `homelab-1b`, `ne-1b`, `mw-1b`, `west-1b`, `sc-1b`, `denver-1b`, `nyc-1b`,
+  `phl-1b`, `wc-1b`, `va-2b`, `bos-1b`, `nyc-2b`, `nyc-3b`, `ca-3b`,
+  `ca-4b`, `nj-1b`, `nj-2b` and `nj-3b`, on VNC 5924–5941.
+  - Each seeds a catalog city near its exit that its IP-mate does not search.
+  - Each sweeps at 17:00 UTC against its IP-mate's 13:00 (`settings
+    start-at`).
+  - The West Coast exits (Palo Alto, and denver-1's Seattle exit) get
+    vault slots in `rs_west`, for Pacific-time devices.
+
+  Every partner starts parked and searches nothing until it gets an account.
+  `deploy/README.md` → *Scaling notes* has the rules for each pair and the
+  order in which to assign accounts. Nine of these IPs carry live accounts,
+  so pair those last.
+
 ## [0.13.8] - 2026-10-20
 
 ### Added
