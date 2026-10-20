@@ -9,6 +9,13 @@ const EXAMPLES = [
   '15|61560410055872|DemoOnly!15|GEZDGNBVGY3TQOJQ|p.salgado@gmx.example|DemoMail!15|||',
   '16|61556203481174|DemoDuplicate!|JBSWY3DPEHPK3PXP|duplicate@outlook.example|||||Duplicate of #1',
 ].join('\n');
+// A supplier order sheet, pasted with its header row: comma-separated, any
+// column order, cookie and token before the e-mail.
+const CSV_EXAMPLE = [
+  '序号,账号（UID）,密码,2FA/验证码,Cookie,令牌,邮箱,邮箱密码',
+  '1,61560221947310,DemoOnly!13,JBSWY3DPEHPK3PXP,"c_user=61560221947310; xs=demo",EAADemoToken13,nora.vance@outlook.example,DemoMail!13',
+  '2,61560388120456,DemoOnly!14,KRSXG5CTMVRXEZLU,"c_user=61560388120456; xs=demo",EAADemoToken14,d.ferris@hotmail.example,DemoMail!14',
+].join('\n');
 export function AccountImport({
   accounts,
   onClose,
@@ -57,9 +64,14 @@ export function AccountImport({
         <div className="fp-field">
           <span className="fp-row fp-between">
             <label htmlFor="fp-import-rows">{t('fpRows')}</label>
-            <button type="button" className="btn ghost sm" onClick={() => setText(EXAMPLES)}>
-              {t('fpExamples')}
-            </button>
+            <span className="fp-row">
+              <button type="button" className="btn ghost sm" onClick={() => setText(EXAMPLES)}>
+                {t('fpExamples')}
+              </button>
+              <button type="button" className="btn ghost sm" onClick={() => setText(CSV_EXAMPLE)}>
+                {t('fpExamplesCsv')}
+              </button>
+            </span>
           </span>
           <textarea
             id="fp-import-rows"

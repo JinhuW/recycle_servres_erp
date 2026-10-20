@@ -260,3 +260,83 @@ def test_the_seeded_device_is_what_the_worker_presents_on_its_next_login(env):
     ).json()
     assert report["stored"] is False
     assert report["device_cookies"][0]["value"] == LEGACY_DATR
+
+
+# -- restore triggers (RS-338) -------------------------------------------------
+
+
+def token_account(client, token: str | None = "EAAtoken", uid: str | None = UID) -> None:
+    secrets = {"password": "pw"}
+    if token is not None:
+        secrets["fb_token"] = token
+    client.store.put_account(
+        "va-1",
+        secrets,
+        worker_id="va-1",
+        fb_username="someone@example.test",
+        fb_uid=uid,
+        allow_password_login=True,
+    )
+
+
+def session_token(client, reason: str = "saved session invalid"):
+    return client.post("/v1/auth/session-token", json={"reason": reason}, headers=auth())
+
+
+@pytest.mark.parametrize("trigger", ["cookie-restore", "token-refresh"])
+def test_a_restore_triggers_login_row_is_recorded(env, trigger):
+    # Before RS-338 these triggers 422'd and the ledger row silently dropped.
+    account(env)
+    body = {"phase": "start", "trigger": trigger, "device_id": "dev-1"}
+    response = env.post("/v1/workers/va-1/logins", json=body, headers=auth())
+    assert response.status_code == 200, response.text
+    assert response.json().get("attempt_id")
+
+
+# -- the access token release (RS-338) ----------------------------------------
+
+
+def test_the_token_is_released_and_audited(env):
+    token_account(env)
+    response = session_token(env)
+    assert response.status_code == 200, response.text
+    assert response.json() == {"token": "EAAtoken"}
+    kinds = [row["kind"] for row in env.db.list_code_audit()]
+    assert kinds.count("token") == 1
+
+
+def test_the_token_release_has_no_daily_budget(env):
+    # A password login is capped at 2/day; a token refresh is a far softer
+    # signal, so it is released as often as the worker needs it.
+    token_account(env)
+    for _ in range(5):
+        assert session_token(env).status_code == 200
+
+
+def test_an_account_without_a_token_gets_404(env):
+    token_account(env, token=None)
+    response = session_token(env)
+    assert response.status_code == 404
+    assert "no access token" in response.json()["detail"].lower()
+
+
+def test_a_locked_account_is_refused_a_token(env):
+    token_account(env)
+    attempt = start(env).json()["attempt_id"]
+    assert finish(env, attempt, "locked").status_code == 200
+
+    refused = session_token(env)
+    assert refused.status_code == 403
+    assert "locked" in refused.json()["detail"]
+    kinds = [row["kind"] for row in env.db.list_code_audit()]
+    assert "token" not in kinds
+    assert kinds.count("password_refused") == 1
+
+
+def test_the_fleet_token_cannot_fetch_a_token(env):
+    token_account(env)
+    # The shared fleet-wide token proves no worker identity, like credentials.
+    response = env.post(
+        "/v1/auth/session-token", json={"reason": "x"}, headers={"Authorization": "Bearer test-token"}
+    )
+    assert response.status_code == 403

@@ -132,45 +132,139 @@ export function validatePoolDraft(
     new Set(accounts.filter((a) => a.no !== no).map((a) => a.uid)),
   );
 }
+type ImportField =
+  | 'uid'
+  | 'password'
+  | 'totp'
+  | 'email'
+  | 'emailPassword'
+  | 'recovery'
+  | 'cookie'
+  | 'token'
+  | 'note'
+  | 'seq';
+
+// Column headers a supplier sheet carries, English or Chinese, mapped to the
+// draft field each fills. Matched after normalising a cell: lower-cased, any
+// parenthetical (账号（UID）) and anything after a slash (2FA/验证码) dropped,
+// spacing removed — so only the stem is listed.
+const IMPORT_HEADERS: Record<string, ImportField> = {
+  '#': 'seq', no: 'seq', num: 'seq', index: 'seq', 序号: 'seq', 序號: 'seq',
+  uid: 'uid', account: 'uid', username: 'uid', user: 'uid', 账号: 'uid', 帐号: 'uid', 用户名: 'uid', 用户: 'uid',
+  password: 'password', pass: 'password', pwd: 'password', 密码: 'password', 密碼: 'password',
+  totp: 'totp', '2fa': 'totp', otp: 'totp', key: 'totp', secret: 'totp', 验证码: 'totp', 驗證碼: 'totp', 密钥: 'totp', 二次验证: 'totp',
+  emailpassword: 'emailPassword', mailpassword: 'emailPassword', 邮箱密码: 'emailPassword', 郵箱密碼: 'emailPassword',
+  email: 'email', mail: 'email', 邮箱: 'email', 郵箱: 'email', 邮件: 'email',
+  recovery: 'recovery', recoveryemail: 'recovery', 辅助邮箱: 'recovery', 恢复邮箱: 'recovery', 备用邮箱: 'recovery',
+  cookie: 'cookie', cookies: 'cookie',
+  token: 'token', accesstoken: 'token', 令牌: 'token', 访问令牌: 'token', 訪問令牌: 'token',
+  note: 'note', notes: 'note', remark: 'note', 备注: 'note', 備註: 'note', 说明: 'note',
+};
+
+function importHeaderField(cell: string): ImportField | null {
+  const key = cell
+    .trim()
+    .toLowerCase()
+    .replace(/[（(][^)）]*[)）]/g, '')
+    .split(/[/／]/)[0]
+    .replace(/[\s_-]/g, '');
+  return IMPORT_HEADERS[key] ?? null;
+}
+
+// A comma row with double-quoted fields — what a spreadsheet exports, and the
+// one format whose values (a cookie, a note) routinely contain the delimiter.
+function splitCsvRow(line: string): string[] {
+  const out: string[] = [];
+  let cur = '';
+  let quoted = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (quoted) {
+      if (ch === '"' && line[i + 1] === '"') {
+        cur += '"';
+        i += 1;
+      } else if (ch === '"') quoted = false;
+      else cur += ch;
+    } else if (ch === '"') quoted = true;
+    else if (ch === ',') {
+      out.push(cur);
+      cur = '';
+    } else cur += ch;
+  }
+  out.push(cur);
+  return out.map((c) => c.trim());
+}
+
+function splitImportRow(line: string): string[] {
+  if (line.includes('\t')) return line.split('\t').map((c) => c.trim());
+  if (line.includes('----')) return line.split('----').map((c) => c.trim());
+  if (line.includes('|')) return line.split('|').map((c) => c.trim());
+  if (line.includes(',')) return splitCsvRow(line);
+  return [line.trim()];
+}
+
 export function parsePoolImport(text: string, accounts: readonly PoolAccount[]) {
   const seen = new Set<string>();
-  return text.split(/\r?\n/).flatMap((line, index) => {
+  const lines = text.split(/\r?\n/);
+  // A sheet pasted with its header row (any column order, including the
+  // 令牌/token and cookie-before-email layouts) maps columns by name; anything
+  // else is read positionally, as before.
+  const headerLine = lines.findIndex((l) => l.trim());
+  const header = headerLine >= 0 ? splitImportRow(lines[headerLine]).map(importHeaderField) : [];
+  const byHeader = header.filter(Boolean).length >= 2 ? header : null;
+
+  return lines.flatMap((line, index) => {
     if (!line.trim()) return [];
-    let cols = line
-      .split(line.includes('\t') ? '\t' : line.includes('----') ? '----' : '|')
-      .map((c) => c.trim());
-    if (/^\d{1,6}$/.test(cols[0]) && /^\d{10,20}$/.test(cols[1] ?? '')) cols = cols.slice(1);
-    const [
-      uid = '',
-      password = '',
-      totp = '',
-      email = '',
-      emailPassword = '',
-      recovery = '',
-      cookie = '',
-      token = '',
-      ...notes
-    ] = cols;
-    const draft: PoolDraft = {
-      ...emptyPoolDraft(),
-      uid,
-      password,
-      totp: totpKey(totp),
-      email,
-      emailPassword,
-      recovery,
-      cookie,
-      token,
-      note: notes.join(' '),
-    };
+    if (byHeader && index === headerLine) return [];
+    const cols = splitImportRow(line);
+
+    let draft: PoolDraft;
+    if (byHeader) {
+      draft = { ...emptyPoolDraft() };
+      byHeader.forEach((field, i) => {
+        if (!field || field === 'seq') return;
+        const value = (cols[i] ?? '').trim();
+        if (field === 'note') draft.note = draft.note ? `${draft.note} ${value}` : value;
+        else if (field === 'totp') draft.totp = totpKey(value);
+        else draft[field] = value;
+      });
+    } else {
+      let c = cols;
+      if (/^\d{1,6}$/.test(c[0]) && /^\d{10,20}$/.test(c[1] ?? '')) c = c.slice(1);
+      const [
+        uid = '',
+        password = '',
+        totp = '',
+        email = '',
+        emailPassword = '',
+        recovery = '',
+        cookie = '',
+        token = '',
+        ...notes
+      ] = c;
+      draft = {
+        ...emptyPoolDraft(),
+        uid,
+        password,
+        totp: totpKey(totp),
+        email,
+        emailPassword,
+        recovery,
+        cookie,
+        token,
+        note: notes.join(' '),
+      };
+    }
+
     const errors = validatePoolDraft(draft, accounts);
-    if (seen.has(uid)) errors.push('fpRepeated');
-    seen.add(uid);
+    if (seen.has(draft.uid)) errors.push('fpRepeated');
+    seen.add(draft.uid);
     const warnings: string[] = [];
-    if (!totp) warnings.push('fpNoKey');
-    if (!cookie) warnings.push('fpNoCookie');
-    else if (!cookieUid(cookie)) warnings.push('fpCookieMissing');
-    else if (cookieUid(cookie) !== uid) warnings.push('fpCookieMismatch');
+    if (!draft.totp) warnings.push('fpNoKey');
+    if (!draft.cookie) warnings.push('fpNoCookie');
+    else if (!cookieUid(draft.cookie)) warnings.push('fpCookieMissing');
+    else if (cookieUid(draft.cookie) !== draft.uid) warnings.push('fpCookieMismatch');
+    if (draft.token && !/^EAA/i.test(draft.token)) warnings.push('fpTokenMalformed');
     return [{ line: index + 1, draft, errors, warnings }];
   });
 }

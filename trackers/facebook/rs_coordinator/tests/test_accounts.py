@@ -67,6 +67,7 @@ def test_accounts_list_identity_and_presence_only(env):
         "totp_secret": True,
         "imap_host": False,
         "imap_port": False,
+        "fb_token": False,
     }
     assert accounts["spare"]["secrets"]["totp_secret"] is False
     assert accounts["spare"]["proxy_configured"] is False
@@ -152,6 +153,7 @@ def test_put_merges_blank_keeps_and_null_clears(env):
         "totp_secret": True,
         "imap_host": False,
         "imap_port": False,
+        "fb_token": False,
     }
     assert "password" not in store.get_secret("personal")
 
