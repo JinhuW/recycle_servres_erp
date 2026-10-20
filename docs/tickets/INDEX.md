@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-330](./RS-330-paid-by-follows-the-commission-screenshot-upload-and.md) | done | story | P2 | Paid by follows the commission screenshot upload and asks before it changes | — |
+| [RS-330](./RS-330-paid-by-follows-the-commission-screenshot-upload-and.md) | done | story | P2 | Paid by follows the commission screenshot upload and asks before it changes | 1.302.0 |
 | [RS-329](./RS-329-facebook-alerts-repeat-the-same-listing-across-worke.md) | done | bug | P1 | Facebook alerts repeat the same listing across workers | facebook-tracker 0.13.6, v1.301.1 |
 | [RS-328](./RS-328-po-list-shows-who-paid-the-commission-with-a-company.md) | done | story | P2 | PO list shows who paid the commission, with a Company paid option | 1.301.0 |
 | [RS-327](./RS-327-cap-the-fleet-workers-table-at-15-rows-and-scroll-th.md) | done | story | P2 | Cap the Fleet workers table at 15 rows and scroll the rest | 1.300.0 |

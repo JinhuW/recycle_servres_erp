@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-20
 reporter: jinhu
 branch: paid-by-follows-upload
-pr:
+pr: "#796"
 version: 1.302.0
 related: [RS-328]
 ---
