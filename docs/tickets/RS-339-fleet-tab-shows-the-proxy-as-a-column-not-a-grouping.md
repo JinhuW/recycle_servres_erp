@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-20
 reporter: jinhu
 branch: fleet-proxy-column
-pr:
+pr: 807
 version: 1.309.0
 related: [RS-335, RS-333, RS-332]
 ---
