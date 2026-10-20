@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-327](./RS-327-cap-the-fleet-workers-table-at-15-rows-and-scroll-th.md) | done | story | P2 | Cap the Fleet workers table at 15 rows and scroll the rest | 1.300.0 |
 | [RS-326](./RS-326-new-purchasers-get-a-guided-walkthrough-on-first-sig.md) | done | story | P2 | New purchasers get a guided walkthrough on first sign-in | 1.299.0 |
 | [RS-325](./RS-325-reddit-page-picks-the-evaluation-model-from-openrout.md) | done | story | P2 | Reddit page picks the evaluation model from OpenRouter's catalogue | 1.298.0 |
 | [RS-324](./RS-324-drop-the-sell-order-vendor-price-import-a-sell-order.md) | done | story | P2 | Drop the sell-order vendor price import: a sell order takes the PO's sell price | v1.297.0 |

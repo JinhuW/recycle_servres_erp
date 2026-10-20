@@ -2,13 +2,13 @@
 id: RS-327
 title: Cap the Fleet workers table at 15 rows and scroll the rest
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-20
 reporter: jinhu
 branch: feat/fleet-table-cap
-pr:
-version:
+pr: "#792"
+version: 1.300.0
 related: []
 ---
 
