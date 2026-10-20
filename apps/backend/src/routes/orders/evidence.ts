@@ -1,5 +1,6 @@
 // Per-status evidence (notes, attachments) and line photos.
 import { Hono } from 'hono';
+import { commissionLinkedFrag } from '../../banktx/match';
 import { getDb } from '../../db';
 import { uploadAttachment, deleteAttachment, StorageUnavailableError } from '../../r2';
 import { UUID_RE } from '../../lib/pagination';
@@ -14,7 +15,7 @@ import { extractPaypalTxn } from '../../ai/paypal';
 import { maybeRenameReceipt, suffixFilename } from '../../ai/receipt';
 import { shrinkImageToFit } from '../../lib/image-shrink';
 import { log } from '../../lib/log';
-import { type OrdersEnv } from './shared';
+import { type OrdersEnv, commissionPaidByOf } from './shared';
 import { OrderRefusal, refusalResponse } from './refusal';
 
 const evidenceRoutes = new Hono<OrdersEnv>();
@@ -291,47 +292,72 @@ evidenceRoutes.delete('/:id/status-meta/:status/attachments/:attachmentId', asyn
 });
 
 // ─── Commission paid by ────────────────────────────────────────────────────
-// Which manager paid the purchaser their commission — the screenshot above
-// shows that it was paid, and its uploader need not be the payer. Its own
-// endpoint, open at every stage like the Commission bucket: the commission is
-// paid once the PO is a closed book, where PATCH refuses and the pages turn
-// Save off. `userId: null` clears it.
+// Who paid the purchaser their commission — a manager in person or the
+// company's account. The screenshot above shows that it was paid, and its
+// uploader need not be the payer. Its own endpoint, open at every stage like
+// the Commission bucket: the commission is paid once the PO is a closed book,
+// where PATCH refuses and the pages turn Save off. `{ userId }` names a
+// manager, or clears it as null; `{ company: true }` records the company.
+// A bank payment linked as the commission already says the company paid, so a
+// pick by hand is refused while one stands.
 evidenceRoutes.put('/:id/commission-paid-by', async (c) => {
   const u = c.var.user;
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const id = c.req.param('id');
-  const body = (await c.req.json().catch(() => null)) as { userId?: unknown } | null;
-  if (!body || (body.userId !== null && typeof body.userId !== 'string')) {
-    return c.json({ error: 'userId must be a manager id or null' }, 400);
+  const body = (await c.req.json().catch(() => null)) as { userId?: unknown; company?: unknown } | null;
+  const company = body?.company !== undefined;
+  if (!body || (company
+    ? body.company !== true || body.userId !== undefined
+    : body.userId !== null && typeof body.userId !== 'string')) {
+    return c.json({ error: 'Send userId (a manager id or null) or company: true' }, 400);
   }
-  const to = body.userId;
+  const to = company ? null : body.userId as string | null;
   const sql = getDb(c.env);
   if (to !== null && !(await isActiveManager(sql, to))) {
     return c.json({ error: 'Paid by must be an active manager' }, 400);
   }
 
   const saved = await sql.begin(async (tx) => {
-    const row = (await tx<{ commission_paid_by: string | null }[]>`
-      SELECT commission_paid_by FROM orders WHERE id = ${id} LIMIT 1 FOR NO KEY UPDATE
+    const row = (await tx<{ commission_paid_by: string | null; commission_paid_by_company: boolean; commission_linked: boolean }[]>`
+      SELECT o.commission_paid_by, o.commission_paid_by_company, ${commissionLinkedFrag(tx)} AS commission_linked
+      FROM orders o WHERE o.id = ${id} LIMIT 1 FOR NO KEY UPDATE
     `)[0];
-    if (!row) return null;
+    if (!row) return { kind: 'notFound' as const };
+    if (row.commission_linked) return { kind: 'linked' as const };
     const from = row.commission_paid_by;
     const ids = [from, to].filter((v): v is string => v !== null);
     const names = ids.length
       ? await tx<{ id: string; name: string }[]>`SELECT id, name FROM users WHERE id = ANY(${ids}::uuid[])`
       : [];
     const nameOf = (v: string | null) => (v === null ? null : names.find(n => n.id === v)?.name ?? null);
-    if (from !== to) {
-      await tx`UPDATE orders SET commission_paid_by = ${to} WHERE id = ${id}`;
+    if (from !== to || row.commission_paid_by_company !== company) {
+      await tx`
+        UPDATE orders SET commission_paid_by = ${to}, commission_paid_by_company = ${company}
+        WHERE id = ${id}`;
       // Names, not ids, as owner_changed and the handoff's handoff_by do: the
       // timeline reads the manager as they were when it was recorded.
       await writeOrderEvent(tx, id, u.id, 'meta_changed', {
-        changes: [{ field: 'commission_paid_by', from: nameOf(from), to: nameOf(to) }],
+        changes: [{
+          field: 'commission_paid_by',
+          from: row.commission_paid_by_company ? 'Company' : nameOf(from),
+          to: company ? 'Company' : nameOf(to),
+        }],
       });
     }
-    return { paidBy: to === null ? null : { id: to, name: nameOf(to) ?? '' } };
+    return {
+      kind: 'ok' as const,
+      paidBy: commissionPaidByOf({
+        commission_paid_by: to, commission_paid_by_name: nameOf(to),
+        commission_paid_by_company: company, commission_linked: false,
+      }),
+    };
   });
-  if (!saved) return c.json({ error: 'Not found' }, 404);
+  if (saved.kind === 'notFound') return c.json({ error: 'Not found' }, 404);
+  if (saved.kind === 'linked') {
+    return c.json({
+      error: "A bank payment is linked as this order's commission, so the company paid it. Unlink it on the Payments page to record a payer by hand.",
+    }, 409);
+  }
   return c.json({ commissionPaidBy: saved.paidBy });
 });
 

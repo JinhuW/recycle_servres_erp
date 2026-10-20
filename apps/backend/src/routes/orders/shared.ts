@@ -25,6 +25,29 @@ export function stageMovedBody(lifecycle: string) {
   };
 }
 
+// Who paid the purchaser their commission, as the list, the detail and the
+// PUT all report it. A bank payment linked as the commission is the company's
+// money, so while it stands it outranks a pick by hand; the pick stays on file
+// for when the link goes. A manager keeps `id` and `name` where a stale SPA
+// reads them.
+export type CommissionPaidBy =
+  | { kind: 'manager'; id: string; name: string }
+  | { kind: 'company'; linked: boolean }
+  | null;
+
+export function commissionPaidByOf(r: {
+  commission_paid_by: string | null;
+  commission_paid_by_name: string | null;
+  commission_paid_by_company: boolean;
+  commission_linked: boolean;
+}): CommissionPaidBy {
+  if (r.commission_linked) return { kind: 'company', linked: true };
+  if (r.commission_paid_by_company) return { kind: 'company', linked: false };
+  return r.commission_paid_by
+    ? { kind: 'manager', id: r.commission_paid_by, name: r.commission_paid_by_name ?? '' }
+    : null;
+}
+
 // A typed/OCR part number always wins; otherwise fall back to a synthetic one
 // (e.g. Mixed-brand SSDs the user left blank) so grouping/pricing has a stable
 // key. Applied only at line creation — edits never rewrite an existing part

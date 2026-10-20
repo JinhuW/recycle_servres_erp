@@ -139,3 +139,33 @@ describe('migration 0186 marks existing users as onboarded', () => {
     expect(await prefsOf(PRIYA)).not.toHaveProperty('onboarding.done');
   });
 });
+
+// A saved column list names what was shown, so a new column starts hidden for
+// anyone who ever toggled one — unless the release adds it to their list.
+describe('migration 0188 shows the PO list Paid by column', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  const replay = async () => {
+    const sqlText = readFileSync(
+      fileURLToPath(new URL('../migrations/0188_orders_cols_paid_by.sql', import.meta.url)), 'utf8');
+    await getTestDb().unsafe(sqlText);
+  };
+  const prefsOf = async (email: string) => {
+    const [row] = await getTestDb()<{ preferences: Record<string, unknown> }[]>`
+      SELECT preferences FROM users WHERE email = ${email}`;
+    return row.preferences;
+  };
+
+  it('appends it to every saved list once and leaves the defaults alone', async () => {
+    const db = getTestDb();
+    await db`UPDATE users SET preferences = '{}'::jsonb`;
+    await db`UPDATE users SET preferences = '{"orders.cols": ["id", "commission"], "sidebar.folded": true}'::jsonb WHERE email = ${MARCUS}`;
+    await db`UPDATE users SET preferences = '{"orders.cols": []}'::jsonb WHERE email = ${SOFIA}`;
+    await replay();
+    await replay();
+
+    expect(await prefsOf(MARCUS)).toEqual({ 'orders.cols': ['id', 'commission', 'paidBy'], 'sidebar.folded': true });
+    expect(await prefsOf(SOFIA)).toEqual({ 'orders.cols': ['paidBy'] });
+    expect(await prefsOf(PRIYA)).toEqual({});
+  });
+});

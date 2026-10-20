@@ -1673,6 +1673,8 @@ const zh: Record<string, string> = {
   cpHint: '{name} 的提成如何支付。标记完成时若此处没有截图，完成对话框会要求上传。',
   cpPaidByLabel: '付款人',
   cpPaidByNone: '未记录',
+  cpPaidByCompany: '公司支付',
+  cpPaidByLinkedHint: '已有银行付款关联为此提成，即由公司支付。如需手动选择，请先在付款页面取消关联。',
   cpShotLabel: '付款截图',
   cpShotHint: 'PNG 或 JPG —— 显示已支付提成的 PayPal 或现金截图。',
   cpPaid: '已付',

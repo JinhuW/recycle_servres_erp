@@ -1,18 +1,24 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
-import { api } from './helpers/app';
+import { api, testEnv } from './helpers/app';
 import { loginAs, ALEX, SOFIA, MARCUS } from './helpers/auth';
+import { NOW, DAY, fakeProvider } from './helpers/bankProvider';
+import { syncBankTransactions } from '../src/banktx/sync';
 
-// Which manager paid the purchaser their commission: PUT /commission-paid-by,
+// Who paid the purchaser their commission: PUT /commission-paid-by,
 // manager-only, open on a closed book (that is when the commission is paid),
-// an active manager or null, and one name-carrying meta_changed per change.
+// an active manager, the company or null, and one name-carrying meta_changed
+// per change. A bank payment linked as the commission reads as the company.
 
 const BODY = {
   paypalTxnId: 'TESTPAYTXN0000001', category: 'RAM', warehouseId: 'WH-LA1',
   lines: [{ category: 'RAM', qty: 2, unitCost: 10, condition: 'New', sellPrice: 40 }],
 };
 
-type PaidBy = { id: string; name: string } | null;
+type PaidBy =
+  | { kind: 'manager'; id: string; name: string }
+  | { kind: 'company'; linked: boolean }
+  | null;
 type Change = { field: string; from: unknown; to: unknown };
 type OrderEvent = { kind: string; detail: { changes?: Change[] } };
 
@@ -43,6 +49,25 @@ async function paidByOf(token: string, id: string): Promise<PaidBy | undefined> 
   return r.body.order.commissionPaidBy;
 }
 
+async function listPaidByOf(token: string, id: string): Promise<PaidBy | undefined> {
+  const r = await api<{ orders: { id: string; commissionPaidBy?: PaidBy }[] }>('GET', '/api/orders?limit=200', { token });
+  expect(r.status).toBe(200);
+  return r.body.orders.find(o => o.id === id)?.commissionPaidBy;
+}
+
+// One outgoing Mercury row, linked on the Payments page as the PO's commission.
+async function linkCommission(token: string, id: string): Promise<string> {
+  await syncBankTransactions(testEnv, [
+    fakeProvider('mercury', [
+      { externalId: 'm-commission', amount: -50, counterparty: 'Marcus', postedAt: new Date(NOW - DAY) },
+    ]),
+  ]);
+  const [row] = await getTestDb()<{ id: string }[]>`SELECT id FROM bank_transactions WHERE external_id = 'm-commission'`;
+  const r = await api('POST', `/api/bank-transactions/${row.id}/link`, { token, body: { orderId: id, kind: 'commission' } });
+  expect(r.status).toBe(200);
+  return row.id;
+}
+
 async function nameOf(userId: string): Promise<string> {
   const [row] = await getTestDb()<{ name: string }[]>`SELECT name FROM users WHERE id = ${userId}`;
   return row.name;
@@ -68,8 +93,8 @@ describe('Commission paid by', () => {
 
     const set = await setPaidBy(alex.token, id, { userId: sofia.user.id });
     expect(set.status).toBe(200);
-    expect(set.body.commissionPaidBy).toEqual({ id: sofia.user.id, name: sofiaName });
-    expect(await paidByOf(marcus.token, id)).toEqual({ id: sofia.user.id, name: sofiaName });
+    expect(set.body.commissionPaidBy).toEqual({ kind: 'manager', id: sofia.user.id, name: sofiaName });
+    expect(await paidByOf(marcus.token, id)).toEqual({ kind: 'manager', id: sofia.user.id, name: sofiaName });
 
     // The same manager again changes nothing and logs nothing.
     expect((await setPaidBy(alex.token, id, { userId: sofia.user.id })).status).toBe(200);
@@ -99,6 +124,9 @@ describe('Commission paid by', () => {
     expect((await setPaidBy(alex.token, id, {})).status).toBe(400);
     expect((await setPaidBy(alex.token, id, { userId: 42 })).status).toBe(400);
     expect((await setPaidBy(alex.token, id, { userId: 'not-a-uuid' })).status).toBe(400);
+    expect((await setPaidBy(alex.token, id, { company: false })).status).toBe(400);
+    // One payer at a time.
+    expect((await setPaidBy(alex.token, id, { company: true, userId: sofia.user.id })).status).toBe(400);
     // A purchaser never handles the money.
     expect((await setPaidBy(alex.token, id, { userId: marcus.user.id })).status).toBe(400);
 
@@ -114,7 +142,81 @@ describe('Commission paid by', () => {
     const sofia = await loginAs(SOFIA);
     expect((await setPaidBy(alex.token, id, { userId: sofia.user.id })).status).toBe(200);
     await getTestDb()`UPDATE users SET active = FALSE WHERE id = ${sofia.user.id}`;
-    expect(await paidByOf(alex.token, id)).toEqual({ id: sofia.user.id, name: await nameOf(sofia.user.id) });
+    expect(await paidByOf(alex.token, id)).toEqual({ kind: 'manager', id: sofia.user.id, name: await nameOf(sofia.user.id) });
+  });
+
+  it('records the company, a fixed option the managers do not include, and swaps it for a manager', async () => {
+    const { id, marcus, alex } = await doneOrder();
+    const sofia = await loginAs(SOFIA);
+    const sofiaName = await nameOf(sofia.user.id);
+
+    const set = await setPaidBy(alex.token, id, { company: true });
+    expect(set.status).toBe(200);
+    expect(set.body.commissionPaidBy).toEqual({ kind: 'company', linked: false });
+    expect(await paidByOf(marcus.token, id)).toEqual({ kind: 'company', linked: false });
+    expect(await listPaidByOf(marcus.token, id)).toEqual({ kind: 'company', linked: false });
+    // The same pick again changes nothing and logs nothing.
+    expect((await setPaidBy(alex.token, id, { company: true })).status).toBe(200);
+
+    expect((await setPaidBy(alex.token, id, { userId: sofia.user.id })).status).toBe(200);
+    const [row] = await getTestDb()<{ commission_paid_by: string | null; commission_paid_by_company: boolean }[]>`
+      SELECT commission_paid_by, commission_paid_by_company FROM orders WHERE id = ${id}`;
+    expect(row).toEqual({ commission_paid_by: sofia.user.id, commission_paid_by_company: false });
+
+    expect(await paidByChanges(alex.token, id)).toEqual([
+      { field: 'commission_paid_by', from: null, to: 'Company' },
+      { field: 'commission_paid_by', from: 'Company', to: sofiaName },
+    ]);
+  });
+
+  it('never stores the company and a manager together', async () => {
+    const { id } = await doneOrder();
+    const sofia = await loginAs(SOFIA);
+    await expect(getTestDb()`
+      UPDATE orders SET commission_paid_by = ${sofia.user.id}, commission_paid_by_company = TRUE WHERE id = ${id}
+    `).rejects.toThrow(/orders_commission_paid_by_one/);
+  });
+
+  it('the PO list carries it beside the detail, for the owner too', async () => {
+    const { id, marcus, alex } = await doneOrder();
+    const sofia = await loginAs(SOFIA);
+    expect(await listPaidByOf(alex.token, id)).toBeNull();
+    expect((await setPaidBy(alex.token, id, { userId: sofia.user.id })).status).toBe(200);
+    const expected = { kind: 'manager', id: sofia.user.id, name: await nameOf(sofia.user.id) };
+    expect(await listPaidByOf(alex.token, id)).toEqual(expected);
+    expect(await listPaidByOf(marcus.token, id)).toEqual(expected);
+  });
+
+  it('reads as the company while a live bank payment is linked as the commission', async () => {
+    const { id, marcus, alex } = await doneOrder();
+    const sofia = await loginAs(SOFIA);
+    expect((await setPaidBy(alex.token, id, { userId: sofia.user.id })).status).toBe(200);
+
+    const txn = await linkCommission(alex.token, id);
+    const linked = { kind: 'company', linked: true };
+    expect(await paidByOf(alex.token, id)).toEqual(linked);
+    expect(await paidByOf(marcus.token, id)).toEqual(linked);
+    expect(await listPaidByOf(alex.token, id)).toEqual(linked);
+
+    // The bank says who paid, so a pick by hand waits for the unlink.
+    const refused = await setPaidBy(alex.token, id, { userId: null });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toMatch(/Payments page/);
+
+    // A reversed payment paid nothing: the hand pick shows again.
+    const db = getTestDb();
+    await db`UPDATE bank_transactions SET settle_status = 'reversed' WHERE id = ${txn}`;
+    expect(await paidByOf(alex.token, id)).toMatchObject({ kind: 'manager', id: sofia.user.id });
+    await db`UPDATE bank_transactions SET settle_status = 'settled' WHERE id = ${txn}`;
+
+    // A cost link is the supplier's money, not the commission.
+    await db`UPDATE bank_transactions SET link_kind = 'payment' WHERE id = ${txn}`;
+    expect(await paidByOf(alex.token, id)).toMatchObject({ kind: 'manager', id: sofia.user.id });
+    await db`UPDATE bank_transactions SET link_kind = 'commission' WHERE id = ${txn}`;
+
+    expect((await api('POST', `/api/bank-transactions/${txn}/unlink`, { token: alex.token, body: {} })).status).toBe(200);
+    expect(await paidByOf(alex.token, id)).toMatchObject({ kind: 'manager', id: sofia.user.id });
+    expect(await paidByChanges(alex.token, id)).toHaveLength(1);
   });
 
   it('404s an unknown order', async () => {
