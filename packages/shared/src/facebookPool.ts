@@ -31,7 +31,7 @@ export const FB_POOL_EVENT_KINDS = [
 export type FbPoolEventKind = (typeof FB_POOL_EVENT_KINDS)[number];
 
 /** Fields whose copy or reveal is worth an audit line. */
-export const FB_POOL_SECRET_FIELDS = ['password', 'totp', 'emailPassword', 'cookie'] as const;
+export const FB_POOL_SECRET_FIELDS = ['password', 'totp', 'emailPassword', 'cookie', 'token'] as const;
 export type FbPoolSecretField = (typeof FB_POOL_SECRET_FIELDS)[number];
 
 export type FbPoolDraft = {
@@ -42,6 +42,7 @@ export type FbPoolDraft = {
   emailPassword: string;
   recovery: string;
   cookie: string;
+  token: string;
   note: string;
   status: FbPoolStatus;
   holder: string | null;
@@ -55,6 +56,7 @@ export const FB_POOL_FIELD_MAX: Record<Exclude<keyof FbPoolDraft, 'status'>, num
   emailPassword: 500,
   recovery: 320,
   cookie: 8000,
+  token: 1000,
   note: 2000,
   holder: 120,
 };
@@ -167,6 +169,7 @@ export function normalizeFbPoolDraft(draft: FbPoolDraft): FbPoolDraft {
     emailPassword: draft.emailPassword,
     recovery: draft.recovery.trim(),
     cookie: draft.cookie.trim(),
+    token: draft.token.trim(),
     note: draft.note.trim(),
     status: draft.status,
     holder: FB_POOL_HOLDER_STATUSES.includes(draft.status) ? holder : null,

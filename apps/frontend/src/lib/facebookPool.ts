@@ -31,6 +31,7 @@ export type PoolAccount = {
   emailPassword: string;
   recovery: string;
   cookie: string;
+  token: string;
   note: string;
   status: PoolStatus;
   holder: string | null;
@@ -66,6 +67,7 @@ export const emptyPoolDraft = (): PoolDraft => ({
   emailPassword: '',
   recovery: '',
   cookie: '',
+  token: '',
   note: '',
   status: 'available',
   holder: null,
@@ -146,6 +148,7 @@ export function parsePoolImport(text: string, accounts: readonly PoolAccount[]) 
       emailPassword = '',
       recovery = '',
       cookie = '',
+      token = '',
       ...notes
     ] = cols;
     const draft: PoolDraft = {
@@ -157,6 +160,7 @@ export function parsePoolImport(text: string, accounts: readonly PoolAccount[]) 
       emailPassword,
       recovery,
       cookie,
+      token,
       note: notes.join(' '),
     };
     const errors = validatePoolDraft(draft, accounts);

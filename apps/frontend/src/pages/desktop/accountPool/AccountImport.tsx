@@ -4,10 +4,10 @@ import { parsePoolImport, type PoolAccount, type PoolDraft } from '../../../lib/
 import { useT } from '../../../lib/i18n';
 import { CloseButton } from './shared';
 const EXAMPLES = [
-  '13\t61560221947310\tDemoOnly!13\tJBSWY3DPEHPK3PXP\tnora.vance@outlook.example\tDemoMail!13\tnora.rec@mail.example\tc_user=61560221947310; xs=demo\tAged 2y, Marketplace on',
-  '14----61560388120456----DemoOnly!14----KRSXG5CTMVRXEZLU----d.ferris@hotmail.example----DemoMail!14----dferris.rec@mail.example----c_user=61560388120456; xs=demo----Profile photo set',
+  '13\t61560221947310\tDemoOnly!13\tJBSWY3DPEHPK3PXP\tnora.vance@outlook.example\tDemoMail!13\tnora.rec@mail.example\tc_user=61560221947310; xs=demo\tEAADemoToken13\tAged 2y, Marketplace on',
+  '14----61560388120456----DemoOnly!14----KRSXG5CTMVRXEZLU----d.ferris@hotmail.example----DemoMail!14----dferris.rec@mail.example----c_user=61560388120456; xs=demo----EAADemoToken14----Profile photo set',
   '15|61560410055872|DemoOnly!15|GEZDGNBVGY3TQOJQ|p.salgado@gmx.example|DemoMail!15|||',
-  '16|61556203481174|DemoDuplicate!|JBSWY3DPEHPK3PXP|duplicate@outlook.example||||Duplicate of #1',
+  '16|61556203481174|DemoDuplicate!|JBSWY3DPEHPK3PXP|duplicate@outlook.example|||||Duplicate of #1',
 ].join('\n');
 export function AccountImport({
   accounts,
@@ -48,6 +48,7 @@ export function AccountImport({
             'fpEmailPassword',
             'fpRecovery',
             'fpCookie',
+            'fpToken',
             'fpNotes',
           ].map((k) => (
             <span key={k}>{k === '#' ? '#' : t(k)}</span>

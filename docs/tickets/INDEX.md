@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-337](./RS-337-add-an-access-token-field-to-the-facebook-account-po.md) | backlog | story | P2 | Add an access-token field to the Facebook account pool | — |
 | [RS-336](./RS-336-account-pool-table-10-row-scroll-and-sortable-column.md) | done | story | P2 | Account pool table: 10-row scroll and sortable columns | 1.306.0 |
 | [RS-335](./RS-335-fleet-tab-groups-workers-by-proxy-not-by-city.md) | done | story | P2 | Fleet tab groups workers by proxy, not by city | 1.305.0 |
 | [RS-334](./RS-334-give-every-facebook-proxy-a-second-worker.md) | done | task | P2 | Give every Facebook proxy a second worker | facebook-tracker 0.13.9 |

@@ -17,6 +17,17 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.307.0] - 2026-10-20
+
+The Facebook account pool grows an **access-token** field (RS-337). A purchased
+account often ships with a Facebook Graph token (`EAA…`) alongside its
+password, 2FA key and cookie; until now there was nowhere to keep it but the
+plaintext note, where a live credential does not belong. The token is now a
+first-class pool field, sealed at rest under `FB_POOL_KEY` like the other
+secrets, revealed only to a manager or the purchaser holding the account, and
+audited on copy or reveal. A manager can set it in the account editor, and the
+paste importer reads it as a column after the cookie.
+
 ## [1.306.0] - 2026-10-20
 
 ### Added

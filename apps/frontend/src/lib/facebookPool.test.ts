@@ -36,6 +36,7 @@ const fixture = (
     cookie: cookieDays === null ? '' : `c_user=${uid}; xs=s${i}`,
     cookieAt: cookieDays === null ? null : now - cookieDays * DAY,
     aliveCheckedAt: null,
+    token: '',
     note: '',
     status,
     holder: status === 'taken' ? 'Lina' : null,
@@ -52,7 +53,7 @@ const SAMPLE = fixture([
   ['61560014557821', 'available', 21, 4],
   ['61556678013442', 'taken', 44, 6],
 ]);
-const row = `${uid}|demo-password|JBSWY3DPEHPK3PXP|person@outlook.example|mail-password||c_user=${uid}; xs=demo|Aged 2y`;
+const row = `${uid}|demo-password|JBSWY3DPEHPK3PXP|person@outlook.example|mail-password||c_user=${uid}; xs=demo|EAAtoken|Aged 2y`;
 describe('supplier account import', () => {
   it.each(['|', '\t', '----'])(
     'accepts %s columns with an optional supplier number',
@@ -63,6 +64,7 @@ describe('supplier account import', () => {
       expect(result[0].draft).toMatchObject({
         uid,
         recovery: '',
+        token: 'EAAtoken',
         note: 'Aged 2y',
         status: 'available',
       });
