@@ -727,7 +727,12 @@ config named by worker in the console's `RS_WORKER_CONFIGS`
 (`ne-1=/config/workers/homelab-ne.toml`); a bare path takes the fleet-wide
 values only. Any Marketplace location is accepted, not just master.toml's
 regions, and a wrong slug fails silently, so check a new one on Marketplace.
-Saved values are kept in `/state/settings.json` on the
+One worker's sweep times can also differ from the fleet's, from the CLI only:
+`docker exec rs-console python -m rs_console.settings start-at <id> 17:00`
+(`--clear` hands it the fleet's again). They are written after the
+fleet-wide values, so a sweep time saved from the ERP does not move that
+worker. This is for accounts that share an IP (`deploy/README.md` → *Scaling
+notes*). Saved values are kept in `/state/settings.json` on the
 `rs-console-state` volume, not in `master.toml`, which stays the default for
 anything never saved. The console writes them into every worker config in
 place, and the monitor reloads its config between jobs. That reload restarts

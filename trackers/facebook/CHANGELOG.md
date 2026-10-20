@@ -18,6 +18,32 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.13.8] - 2026-10-20
+
+### Added
+
+- **Two accounts on one IP, as a pilot** (RS-332). Ports 10014 and 10015
+  (Palo Alto) each get a second worker, `ca-1b` beside `ca-1` and `ca-2b`
+  beside `ca-2`, while `ca-3` and `ca-4` stay single as the control. Several
+  accounts on one residential IP is ordinary, since a household shares a
+  router. What got accounts killed on the shared house IP in 2026-08 was
+  looking like one operator. So each pair differs in every way the fleet
+  controls:
+  - its own device profile, on Pacific time through its vault slot's region;
+  - its own cities (the partners seed Las Vegas against Reno);
+  - its own sweep time.
+
+  `deploy/README.md` → *Scaling notes* has the rules and the stop and widen
+  criteria.
+- **A worker can have its own sweep times.**
+  `python -m rs_console.settings start-at <id> HH:MM [...]` saves them in the
+  console's state as `workers.<id>.start_at`, and `--clear` hands the worker
+  the fleet's again. They are written after the fleet-wide values, so a sweep
+  time saved from the ERP no longer lines up two accounts on one IP.
+  `/v1/fleet` now gives every worker its own `start_at`, read from the config
+  it runs, and counts those times in its `plan`. That is an additive field,
+  so an older ERP ignores it.
+
 ## [0.13.7] - 2026-10-20
 
 ### Added
