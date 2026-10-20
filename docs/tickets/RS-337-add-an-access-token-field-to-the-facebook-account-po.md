@@ -2,13 +2,13 @@
 id: RS-337
 title: Add an access-token field to the Facebook account pool
 type: story
-status: backlog
+status: done
 priority: P2
 created: 2026-10-20
 reporter: jinhu
 branch: import-fb-account-pool
-pr:
-version:
+pr: 804
+version: 1.307.0
 related: []
 ---
 
