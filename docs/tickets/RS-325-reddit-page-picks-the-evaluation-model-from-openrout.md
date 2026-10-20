@@ -2,13 +2,13 @@
 id: RS-325
 title: Reddit page picks the evaluation model from OpenRouter's catalogue
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-10-19
 reporter: jinhu
 branch: reddit-model-picker
-pr:
-version:
+pr: "#790"
+version: 1.298.0
 related: [RS-322, RS-309]
 ---
 

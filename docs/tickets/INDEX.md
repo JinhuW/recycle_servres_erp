@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-325](./RS-325-reddit-page-picks-the-evaluation-model-from-openrout.md) | in-review | story | P2 | Reddit page picks the evaluation model from OpenRouter's catalogue | — |
+| [RS-325](./RS-325-reddit-page-picks-the-evaluation-model-from-openrout.md) | done | story | P2 | Reddit page picks the evaluation model from OpenRouter's catalogue | 1.298.0 |
 | [RS-324](./RS-324-drop-the-sell-order-vendor-price-import-a-sell-order.md) | done | story | P2 | Drop the sell-order vendor price import: a sell order takes the PO's sell price | v1.297.0 |
 | [RS-323](./RS-323-review-mode-prices-the-po-for-the-commission.md) | done | story | P2 | Review mode prices the PO for the commission | v1.296.0 |
 | [RS-322](./RS-322-reddit-page-lets-a-manager-change-the-evaluation-mod.md) | done | story | P2 | Reddit page lets a manager change the evaluation model | 1.295.0 |
