@@ -7,7 +7,7 @@ See [README.md](./README.md) for what the fields mean.
 |---|---|---|---|---|---|
 | [RS-336](./RS-336-account-pool-table-10-row-scroll-and-sortable-column.md) | done | story | P2 | Account pool table: 10-row scroll and sortable columns | 1.306.0 |
 | [RS-335](./RS-335-fleet-tab-groups-workers-by-proxy-not-by-city.md) | done | story | P2 | Fleet tab groups workers by proxy, not by city | 1.305.0 |
-| [RS-334](./RS-334-give-every-facebook-proxy-a-second-worker.md) | in-progress | task | P2 | Give every Facebook proxy a second worker | — |
+| [RS-334](./RS-334-give-every-facebook-proxy-a-second-worker.md) | done | task | P2 | Give every Facebook proxy a second worker | facebook-tracker 0.13.9 |
 | [RS-333](./RS-333-fleet-tab-in-three-layers-location-proxy-ip-workers.md) | done | story | P2 | Fleet tab in three layers: location, proxy IP, workers | 1.304.0 |
 | [RS-332](./RS-332-pilot-two-facebook-workers-per-proxy-on-two-palo-alt.md) | done | story | P2 | Pilot two Facebook workers per proxy on two Palo Alto IPs | facebook-tracker 0.13.8, v1.303.0 |
 | [RS-331](./RS-331-add-ten-facebook-workers-on-the-new-decodo-ports-100.md) | done | task | P2 | Add ten Facebook workers on the new Decodo ports 10011-10020 | facebook-tracker 0.13.7 |

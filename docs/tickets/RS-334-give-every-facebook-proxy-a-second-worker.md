@@ -2,13 +2,13 @@
 id: RS-334
 title: Give every Facebook proxy a second worker
 type: task
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-20
 reporter: jinhu
 branch: fb-pair-every-proxy
-pr:
-version:
+pr: 801
+version: facebook-tracker 0.13.9
 related: [RS-332, RS-333, RS-331]
 ---
 
@@ -38,21 +38,21 @@ Partners sweep at 17:00 UTC and the fleet at 13:00, so each sweep window runs
 
 ## Acceptance criteria
 
-- [ ] Each of the 18 single-worker IPs gets a partner `<id>b` (homelab-1b,
+- [x] Each of the 18 single-worker IPs gets a partner `<id>b` (homelab-1b,
       ne-1b, mw-1b, west-1b, sc-1b, denver-1b, nyc-1b, phl-1b, wc-1b,
       va-2b, bos-1b, nyc-2b, nyc-3b, ca-3b, ca-4b, nj-1b, nj-2b, nj-3b) on
       its IP-mate's proxy var, with its own token, session dir, cache volume
       and VNC port (5924–5941).
-- [ ] Each partner seeds a catalog city near its exit that its IP-mate does
+- [x] Each partner seeds a catalog city near its exit that its IP-mate does
       not search.
-- [ ] Each partner sweeps at 17:00 UTC (`settings start-at`), while its
+- [x] Each partner sweeps at 17:00 UTC (`settings start-at`), while its
       IP-mate keeps the fleet's 13:00.
-- [ ] The partners on West Coast exits (ca-3b, ca-4b, denver-1b, whose exit
+- [x] The partners on West Coast exits (ca-3b, ca-4b, denver-1b, whose exit
       is Seattle) have vault slots in region `rs_west`, for Pacific-time
       devices.
-- [ ] The console lists all 18, so the Fleet tab shows every IP with two
+- [x] The console lists all 18, so the Fleet tab shows every IP with two
       workers.
-- [ ] No existing worker container is recreated.
+- [x] No existing worker container is recreated.
 
 ## Out of scope
 
@@ -85,7 +85,14 @@ Deploy, 2026-10-20 (facebook-tracker 0.13.9):
   swept off schedule. The 18 partners were stopped to protect the live
   accounts.
   ([debug note](../debug-notes/2026-10-20-forty-workers-exhaust-the-vms-inotify-instances.md))
-- To finish: raise the limit on the VM (needs sudo), then start the 18
-  partners a minute apart and check that no worker logs the error.
+- Finished the same day. The requester raised the limit to 1024
+  (`/etc/sysctl.d/60-inotify.conf`), and the 18 partners were `docker
+  start`ed a minute apart, 18:59–19:16 UTC. The load stayed under 2.3
+  throughout. At 19:18, all 20 ports carried two workers on one exit IP at
+  13:00 and 17:00. The nine live accounts were HEALTHY, the 31 others parked
+  at `SESSION_EXPIRED`, and every partner had heartbeated since its start.
+  No worker logged the inotify error after 18:14:55. `docker start` keeps
+  the container's log, so the old errors stay in it: filter by timestamp,
+  not by count.
 - `deploy/README.md` gained the limit after the 0.13.9 tag, so the next
   deploy needs a new release first.
