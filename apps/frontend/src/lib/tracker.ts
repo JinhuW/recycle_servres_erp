@@ -3,6 +3,7 @@
 // with its bearer token; a 501 from any of them means the proxy env vars are
 // unset.
 
+import { TEXT_JSON_MODEL, type AiModel } from './aiModels';
 import { api } from './api';
 
 export type TrackerWorkerRole = 'worker' | 'api';
@@ -162,6 +163,13 @@ export const WORKERS_PAGE_SIZE = 15;
 
 /** An OpenRouter model id, `provider/model`; the tracker checks the same shape. */
 export const MODEL_ID = /^[\w.-]+\/[\w.:-]+$/;
+
+/**
+ * The catalogue entries the evaluator can run on. MODEL_ID also drops
+ * OpenRouter's `~…-latest` aliases: they float to whatever is newest, which
+ * would swap the model under an unchanged prompt version and blur its score.
+ */
+export const EVALUATOR_MODEL = (m: AiModel): boolean => TEXT_JSON_MODEL(m) && MODEL_ID.test(m.id);
 
 export const trackerApi = {
   listWorkers: (params: { status: WorkerStatusFilter; limit: number; offset: number }) =>

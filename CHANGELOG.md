@@ -17,6 +17,19 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.298.0] - 2026-10-20
+
+The Reddit page's model fields are now pickers fed by OpenRouter's catalogue
+(RS-325). Both the live-model dialog and the trial dialog list the models
+that can return the strict JSON the evaluator asks for, with price per
+million tokens and context size beside each id, and filter as you type. A
+typed id the list lacks still works, so a model OpenRouter added this morning
+needs no ERP release. Floating `~…-latest` aliases are left out, because they
+would swap the model under an unchanged prompt version and blur its score.
+The browser can't reach openrouter.ai, so a new manager-only route,
+`GET /api/ai/models`, fetches the public catalogue, trims it and keeps it for
+an hour, serving the last copy when OpenRouter is down.
+
 ## [1.297.0] - 2026-10-19
 
 The sell-order vendor price import is gone (RS-324), the second half of the

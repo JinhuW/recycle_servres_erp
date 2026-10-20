@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { Modal } from '../../components/Modal';
+import { ModelPicker } from '../../components/ModelPicker';
 import { Skeleton } from '../../components/Skeleton';
 import { ApiError } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import {
+  EVALUATOR_MODEL,
   MIN_POLL_INTERVAL_S,
   MODEL_ID,
   normalizeSubredditName,
@@ -855,16 +857,15 @@ function ModelModal({ model, onClose, onSaved, onError }: {
   }
 
   return (
-    <Modal onClose={onClose} ariaLabel={t('trkEditModel')} shellStyle={{ width: 440 }}>
+    <Modal onClose={onClose} ariaLabel={t('trkEditModel')} shellStyle={{ width: 560 }} shellClassName="rt-model-modal">
       <div className="modal-head">
         <div className="modal-title">{t('trkEditModel')}</div>
       </div>
       <div className="modal-body">
         <div className="field">
           <label className="label" htmlFor="trk-model">{t('trkSetModel')}</label>
-          <input id="trk-model" className="input mono" value={value} autoFocus spellCheck={false}
-            onChange={e => setValue(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') save(); }} />
+          <ModelPicker id="trk-model" value={value} onChange={setValue} filter={EVALUATOR_MODEL}
+            invalid={next !== '' && !valid} />
           <span className={`help${next !== '' && !valid ? ' rt-help-invalid' : ''}`}>
             {next !== '' && !valid ? t('trkModelInvalid') : t('trkModelHelp')}
           </span>

@@ -225,6 +225,10 @@ half of the tracker contracts — change them together with the tracker side
   (as `static.recycleservers.com` does).
 - **Don't reintroduce Cloudflare Images** — it's paywalled (error 5453); we
   migrated everything to R2 attachments.  See [the AI-scan image design][2].
+- **Model pickers read OpenRouter's public catalogue through
+  `routes/aiModels.ts`** (`GET /api/ai/models`, manager-only): no key, trimmed
+  to what a picker shows, cached in-process for an hour and served stale for
+  five minutes at a time while OpenRouter is down.
 - **OCR provider selection** lives in `apps/backend/src/ai/`.  OpenRouter
   (`openai/gpt-6-luna`, overridable with `OPENROUTER_OCR_MODEL`) when
   `OPENROUTER_API_KEY` is present; otherwise a deterministic stub that
