@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-20
 reporter: jinhu
 branch: po-paid-by-column
-pr:
+pr: "#793"
 version: 1.301.0
 related: []
 ---
