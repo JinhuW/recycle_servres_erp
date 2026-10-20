@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Icon } from './Icon';
 import type { IconName } from './Icon';
 import { useT } from '../lib/i18n';
+import { useWalkthroughOpen } from '../lib/onboarding';
 
 import '../styles/pwa.css';
 
@@ -42,6 +43,7 @@ export function PwaInstallPrompt() {
   const [phase, setPhase] = useState<Phase>('hidden');
   const [evt, setEvt] = useState<BeforeInstallPromptEvent | null>(null);
   const ios = isIos();
+  const walkthroughOpen = useWalkthroughOpen();
 
   useEffect(() => {
     if (isStandalone() || recentlyDismissed()) return;
@@ -77,7 +79,8 @@ export function PwaInstallPrompt() {
     else dismiss();
   };
 
-  if (phase === 'hidden') return null;
+  // The walkthrough owns the screen while it is open; the card waits.
+  if (phase === 'hidden' || walkthroughOpen) return null;
 
   return (
     <>

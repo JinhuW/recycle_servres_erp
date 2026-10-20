@@ -1,7 +1,9 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
-import { loginAs, MARCUS } from './helpers/auth';
+import { loginAs, MARCUS, PRIYA, SOFIA } from './helpers/auth';
 
 type PrefsBody = { user: { preferences: Record<string, unknown> } };
 
@@ -29,6 +31,7 @@ describe('PATCH /api/me/preferences allowlist', () => {
         'scan.cameraLabel': "Jinhu's iPhone Camera",
         'sellOrders.lineGroup': 'po',
         'sidebar.folded': true,
+        'onboarding.done': true,
       },
     });
     expect(res.status).toBe(200);
@@ -104,5 +107,35 @@ describe('PATCH /api/me/preferences merges against the live row', () => {
       token, body: { 'sidebar.folded': true },
     });
     expect(res.body.user.language).toBe('zh');
+  });
+});
+
+// The walkthrough opens for whoever lacks the flag, so the release must not
+// greet every existing purchaser with it — only members who never signed in.
+describe('migration 0186 marks existing users as onboarded', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  const replay = async () => {
+    const sqlText = readFileSync(
+      fileURLToPath(new URL('../migrations/0186_onboarding_done_for_existing_users.sql', import.meta.url)), 'utf8');
+    await getTestDb().unsafe(sqlText);
+  };
+  const prefsOf = async (email: string) => {
+    const [row] = await getTestDb()<{ preferences: Record<string, unknown> }[]>`
+      SELECT preferences FROM users WHERE email = ${email}`;
+    return row.preferences;
+  };
+
+  it('sets the flag for signed-in users and leaves pending invites without it', async () => {
+    const db = getTestDb();
+    await db`UPDATE users SET last_seen_at = NULL`;
+    await db`UPDATE users SET last_seen_at = NOW(), preferences = '{"sidebar.folded": true}'::jsonb WHERE email = ${MARCUS}`;
+    // An explicit choice already on the row is kept.
+    await db`UPDATE users SET last_seen_at = NOW(), preferences = '{"onboarding.done": false}'::jsonb WHERE email = ${SOFIA}`;
+    await replay();
+
+    expect(await prefsOf(MARCUS)).toEqual({ 'sidebar.folded': true, 'onboarding.done': true });
+    expect(await prefsOf(SOFIA)).toEqual({ 'onboarding.done': false });
+    expect(await prefsOf(PRIYA)).not.toHaveProperty('onboarding.done');
   });
 });

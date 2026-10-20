@@ -15,6 +15,8 @@ import {
 import { api, ApiError } from './lib/api';
 import { showErrorDialog } from './lib/errorToast';
 import { ErrorDialog, useErrorDialogQueue } from './components/ErrorDialog';
+import { useWalkthroughAutoStart, useWalkthroughOpen } from './lib/onboarding';
+import { confirmDiscard } from './lib/unsavedGuard';
 
 // Eager: the landing view, and the two gates a logged-out or freshly-logged-in
 // user hits before anything else. Making these lazy would only buy a spinner.
@@ -46,6 +48,8 @@ const DesktopShipping = lazy(() => import('./pages/desktop/DesktopShipping').the
 const DesktopClients = lazy(() => import('./pages/desktop/DesktopClients').then(m => ({ default: m.DesktopClients })));
 const DesktopBoxCheck = lazy(() => import('./pages/desktop/DesktopBoxCheck').then(m => ({ default: m.DesktopBoxCheck })));
 const Authorize = lazy(() => import('./pages/Authorize').then(m => ({ default: m.Authorize })));
+// Most sessions never open it: only a new purchaser, or a replay from Guide.
+const Walkthrough = lazy(() => import('./components/Walkthrough').then(m => ({ default: m.Walkthrough })));
 
 import type { Order } from './lib/types';
 
@@ -75,6 +79,8 @@ export function DesktopApp() {
   // Box check takes over the whole window — no sidebar, no top bar — and
   // shares the loaded order with the PO page it opens from.
   const boxCheck = matchPoCheck(path);
+  const walkthroughOpen = useWalkthroughOpen();
+  useWalkthroughAutoStart(!loading && !!realUser && !pendingRoleChoice && !boxCheck && !isAuthorizePath(path));
 
   // Sync editingOrder with the URL hash. Loading the app at
   // `#/purchase-orders/<id>` opens that order's edit page; clearing the hash
@@ -327,6 +333,15 @@ export function DesktopApp() {
       )}
 
       <TweaksPanel />
+
+      {walkthroughOpen && !focus && (
+        <Suspense fallback={null}>
+          <Walkthrough
+            shell="desktop"
+            onStartOrder={() => { void confirmDiscard('/submit').then(ok => { if (ok) navigate('/submit'); }); }}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

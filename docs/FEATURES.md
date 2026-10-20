@@ -100,6 +100,26 @@ portal was removed in v1.191.0; no bid had ever been placed through it.
   managers included — the picker lists purchasers first, then managers
   (v1.131.0).
 
+## Getting started (purchasers)
+
+- **A new purchaser gets a walkthrough on first sign-in** (v1.299.0), on both
+  shells. Nine steps cover the home numbers, adding products (Submit order on
+  desktop, the camera button on the phone), Mark as In Transit and what it
+  asks for, the payment proof for Company card PayPal, Company card cash and
+  Self-paid, the manager review and the edit window until Ready to Pay, the
+  commission formula with a worked example, and the buying tools. A step with
+  a place in the app spotlights it: the sidebar item on desktop, the tab-bar
+  item on the phone. The card switches between English and 中文 in place, and
+  the last step opens Submit or the capture flow.
+- **Who gets it automatically.** A purchaser (the real role, so never a
+  manager previewing as one) whose preferences lack `onboarding.done`.
+  Finishing or skipping sets it, server-side, so it doesn't reappear on
+  another device. Migration 0186 set it for everyone who had already signed
+  in, so only members who never had get it.
+- **Replay.** The Guide button in the desktop top bar, for every role, and
+  Profile › Getting started on the phone. The phone's install card stays
+  hidden while the walkthrough is open.
+
 ## Purchase orders
 
 The core object. A PO is a purchase from a vendor, built line by line, that

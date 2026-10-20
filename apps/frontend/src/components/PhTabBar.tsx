@@ -42,7 +42,7 @@ export function PhTabBar({ view, onCenterPress }: Props) {
         const cls = 'ph-tab ' + (view === tab.id ? 'active' : '');
         if (tab.center) {
           return (
-            <button key={tab.id} className={cls + ' center'} onClick={onCenterPress} aria-label={tab.label}>
+            <button key={tab.id} className={cls + ' center'} onClick={onCenterPress} aria-label={tab.label} data-tour="submit">
               <div className="center-fab"><Icon name={tab.icon} size={22} /></div>
             </button>
           );
@@ -55,6 +55,7 @@ export function PhTabBar({ view, onCenterPress }: Props) {
             href={hrefFor(path)}
             onClick={onLinkClick(path)}
             aria-current={view === tab.id ? 'page' : undefined}
+            data-tour={tab.id}
           >
             <Icon name={tab.icon} size={20} />
             <span>{tab.label}</span>
