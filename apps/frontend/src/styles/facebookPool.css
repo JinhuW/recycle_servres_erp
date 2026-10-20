@@ -828,7 +828,7 @@
 }
 /* Fifteen workers, then the rows scroll under the pinned header: a two-line
    row renders 55.3px and the header 34.4px. A row with a status note is
-   taller, and each proxy divider takes a slice, so fewer of those fit. */
+   taller, so fewer of those fit. */
 .ff-table-cap {
   max-height: calc(35px + 55.5px * 15);
   overflow-y: auto;
@@ -850,23 +850,14 @@
   width: 32px;
   padding-right: 0 !important;
 }
-.ff-table tbody tr:not(.ff-fold, .ff-skel, .ff-proxy):hover td {
+.ff-table tbody tr:not(.ff-fold, .ff-skel):hover td {
   background: var(--bg-soft);
 }
-/* A proxy divider: port, exit IP and workers, with its workers under it. */
-.ff-proxy td {
-  background: var(--bg-soft);
-  font-size: 11.5px;
-  color: var(--fg-muted);
-  padding-top: 6px !important;
-  padding-bottom: 6px !important;
-}
-.ff-proxy td > * + * {
-  margin-left: 10px;
-}
-.ff-proxy .mono:first-child {
-  color: var(--fg);
-  font-weight: 600;
+/* Port and IP on one line, the exit city on the next: two lines like the
+   rows around it, so the fifteen-row cap still holds. */
+.ff-table td.ff-exit,
+.ff-table td.ff-exit small {
+  white-space: nowrap;
 }
 .ff-table tr.ff-open td {
   border-bottom-color: transparent;

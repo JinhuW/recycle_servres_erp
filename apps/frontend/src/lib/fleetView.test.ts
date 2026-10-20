@@ -6,7 +6,7 @@ import {
   matchesTerms, offersRelogin, queryTerms, reviewedToday, searchedToday,
   sortFleet, splitHighlights, vaultAccountIdFor, whoIs, easternToUtc, utcToEastern,
   FLOW_STAGES, STAGE_FORMS, draftChanges, settingsDraft, settingsPatch,
-  citiesDiffer, cityOwners, isCitySlug, marketplaceCityUrl, normalizeCitySlug, proxyGroups,
+  citiesDiffer, cityOwners, isCitySlug, marketplaceCityUrl, normalizeCitySlug, proxyPort, sharedExits,
   applyPinEdits, pinEdits, searchesPerDay, tierSettingsEdits, tierSettingsValid, keysymsFor,
 } from './fleetView';
 
@@ -367,7 +367,7 @@ describe('a worker\'s cities', () => {
     expect(owners.get('tampa')).toEqual(['homelab-1']);
   });
 
-  it('groups the fleet by proxy, with the exit city kept on the group', () => {
+  it('sorts by proxy port, counts the workers on each exit, and searches its city', () => {
     const at = (id: string, port: number | null, city?: string, region?: string) => account({
       worker_id: id,
       proxy: port === null
@@ -382,32 +382,27 @@ describe('a worker\'s cities', () => {
       at('ca-1', 10014, 'Palo Alto', 'California'),
       at('new-1', 10021),
       at('se-1', null),
+      account({ worker_id: 'old', proxy_env: 'PROXY_OLD' }),
     ];
-    const shape = (groups: ReturnType<typeof proxyGroups>) => groups.map(g => [g.port, g.workers.map(w => w.worker_id)]);
+    const ids = (ws: FleetAccount[]) => ws.map(w => w.worker_id);
+    const none = new Set<string>();
 
-    const groups = proxyGroups(fleet, true);
-    expect(shape(groups)).toEqual([
-      ['10014', ['ca-1', 'ca-1b']],
-      ['10016', ['ca-3']],
-      ['10018', ['nj-1']],
-      ['10021', ['new-1']],
-      // The VM's own address is one IP too, and sorts last.
-      [null, ['se-1', 'va-1']],
-    ]);
-    expect(groups[0]).toMatchObject({
-      url: 'http://isp.decodo.com:10014', ip: '10.0.0.14', org: 'AS33651 Comcast', city: 'Palo Alto', region: 'California',
-    });
-    expect(groups[3]).toMatchObject({ city: null, ip: null });
-    expect(groups[4]).toMatchObject({ ip: '74.104.122.134', city: 'Framingham' });
+    expect(proxyPort(fleet[0])).toBe('10016');
+    expect(proxyPort(fleet[1])).toBeNull();
+    // Numeric by port, and the VM's own IP (no port) last whichever way.
+    expect(ids(sortFleet(fleet, 'proxy', 'asc', none))).toEqual(['ca-1b', 'ca-1', 'ca-3', 'nj-1', 'new-1', 'va-1', 'se-1', 'old']);
+    expect(ids(sortFleet(fleet, 'proxy', 'desc', none))).toEqual(['new-1', 'nj-1', 'ca-3', 'ca-1b', 'ca-1', 'va-1', 'se-1', 'old']);
 
-    // A column sort keeps its order: a proxy ranks where its first worker does.
-    expect(shape(proxyGroups(fleet, false))).toEqual([
-      ['10016', ['ca-3']],
-      [null, ['va-1', 'se-1']],
-      ['10018', ['nj-1']],
-      ['10014', ['ca-1b', 'ca-1']],
-      ['10021', ['new-1']],
-    ]);
+    // The VM's own address is one IP too; a facade without the lookup counts nothing.
+    expect(sharedExits(fleet)).toEqual(new Map([
+      ['http://isp.decodo.com:10016', 1], ['', 2], ['http://isp.decodo.com:10018', 1],
+      ['http://isp.decodo.com:10014', 2], ['http://isp.decodo.com:10021', 1],
+    ]));
+
+    const hay = accountHaystack(fleet[2]);
+    for (const term of ['10018', '10.0.0.18', 'parsippany', 'new jersey']) {
+      expect(matchesTerms(hay, [term])).toBe(true);
+    }
   });
 
   it('draws a worker that sweeps at its own time from that time', () => {

@@ -2255,15 +2255,15 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   same for one worker. Against a coordinator without the log, the aside falls
   back to the old "stopped reporting" line. Since v1.300.0 the table shows
   at most 15 workers. The rest scroll under its pinned headers, so neither
-  the table nor the aside grows past that. Since v1.305.0 the table is
-  grouped by proxy: a divider per proxy IP gives the port, the exit IP and the
-  worker count, with its workers under it. An IP with more than one worker is
-  marked *shared*, and its tooltip says to keep their cities and sweep times
-  apart. The exit city and the ISP are in the divider's tooltip, not on the
-  row (v1.303.0 grouped by city, and v1.304.0 had city, proxy and worker
-  layers). With no column sort, proxies run by port, the VM's own IP last,
-  and workers by id. A column sort orders the proxies by their highest-ranked
-  worker. The search box matches the exit city. A worker's Today strip uses
+  the table nor the aside grows past that. Since v1.309.0 the table has one
+  row per worker and no dividers. A **Proxy** column after Worker shows the
+  port and exit IP (or *VM's own IP*), and under them the exit city and state.
+  The ISP is in its tooltip. A worker whose exit IP another worker also uses
+  is marked *shared*, and that tooltip says to keep their cities and sweep
+  times apart. The column sorts by port, with the VM's own IP last, so each
+  pair sits side by side. With no sort, rows keep the fleet document's order.
+  The search box matches the port, exit IP, city and state. (v1.303.0 to
+  v1.305.0 grouped the table by city, then by city and proxy, then by proxy.) A worker's Today strip uses
   its own sweep times, from the config it runs, so a worker that shares an IP
   and sweeps at its own hour shows that hour (facebook-tracker 0.13.8). And a **From a search to an alert** card that walks the
   pipeline as the code runs it — search, result cards, the title gate before
