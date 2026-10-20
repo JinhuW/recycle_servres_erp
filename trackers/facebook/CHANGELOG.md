@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.13.9] - 2026-10-20
+
 ### Added
 
 - **Every proxy carries two workers** (RS-334). The two-per-IP pilot on 10014
