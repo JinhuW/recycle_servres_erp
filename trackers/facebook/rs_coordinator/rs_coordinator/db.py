@@ -168,6 +168,23 @@ CREATE TABLE IF NOT EXISTS alert_messages (
 
 CREATE INDEX IF NOT EXISTS idx_alert_messages_sent ON alert_messages(sent_at);
 
+-- Which worker may alert a listing (see alert_claims.py). Every worker sends
+-- its own alerts and keeps its own notified cache, so this row is the only
+-- place the fleet agrees that a listing has been alerted. `delivered_at` is
+-- NULL while the holder is still sending; `price_value` is the price the last
+-- alert announced (DOUBLE PRECISION because Postgres REAL would make $1234.56
+-- compare as a drop against itself).
+CREATE TABLE IF NOT EXISTS alert_claims (
+    marketplace   TEXT NOT NULL,
+    listing_id    TEXT NOT NULL,
+    worker_id     TEXT NOT NULL,
+    price         TEXT,
+    price_value   DOUBLE PRECISION,
+    claimed_at    TEXT NOT NULL,
+    delivered_at  TEXT,
+    PRIMARY KEY (marketplace, listing_id)
+);
+
 -- Fleet-wide incident ledger (see incidents.py). One row per incident key
 -- ("ai_unavailable"); `reporters` is a JSON map of worker id -> when it last
 -- voted `down`. `last_alerted_at` outlives the incident so a relapse inside
@@ -623,6 +640,65 @@ UNMATCHED_REACTIONS_SQL = """
           WHERE am.chat_id = ar.chat_id AND am.message_id = ar.message_id)
 """
 
+# The fleet-wide alert claim's statements (alert_claims.py), shared verbatim by
+# both backends with named parameters; pg.py rewrites `:name` as `%(name)s`.
+# Each write is one conditional statement and its rowcount is the answer, so
+# two workers asking about one listing at the same moment cannot both win.
+ALERT_CLAIM_SQL = {
+    "insert": """
+        INSERT INTO alert_claims
+            (marketplace, listing_id, worker_id, price, price_value, claimed_at)
+        VALUES (:marketplace, :listing_id, :worker_id, :price, :price_value, :claimed_at)
+        ON CONFLICT (marketplace, listing_id) DO NOTHING
+    """,
+    # Back to its own holder (a failed send, retried), or to anyone once the
+    # holder has been silent past the lease.
+    "retake": """
+        UPDATE alert_claims
+        SET worker_id = :worker_id, price = :price, price_value = :price_value,
+            claimed_at = :claimed_at
+        WHERE marketplace = :marketplace AND listing_id = :listing_id
+          AND delivered_at IS NULL
+          AND (worker_id = :worker_id OR claimed_at < :stale_before)
+    """,
+    "drop": """
+        UPDATE alert_claims
+        SET worker_id = :worker_id, price = :price, price_value = :price_value,
+            claimed_at = :claimed_at, delivered_at = NULL
+        WHERE marketplace = :marketplace AND listing_id = :listing_id
+          AND delivered_at IS NOT NULL AND price_value > :price_value
+    """,
+    # A row seeded from alert_messages carries no price; the first one seen
+    # afterwards is what a later drop is measured against.
+    "baseline": """
+        UPDATE alert_claims SET price = :price, price_value = :price_value
+        WHERE marketplace = :marketplace AND listing_id = :listing_id
+          AND price_value IS NULL
+    """,
+    "delivered": """
+        UPDATE alert_claims SET delivered_at = :delivered_at
+        WHERE marketplace = :marketplace AND listing_id = :listing_id
+          AND worker_id = :worker_id AND delivered_at IS NULL
+    """,
+    "get": """
+        SELECT * FROM alert_claims
+        WHERE marketplace = :marketplace AND listing_id = :listing_id
+    """,
+}
+
+# Alerts sent before claims existed, run on every boot. Without it the first
+# sighting after the deploy of a listing another worker alerted yesterday is a
+# first claim, and alerts again. Idempotent: it adds only what alert_messages
+# knows and alert_claims does not.
+SEED_ALERT_CLAIMS_SQL = """
+    INSERT INTO alert_claims (marketplace, listing_id, worker_id, claimed_at, delivered_at)
+    SELECT 'facebook', listing_id, MIN(worker_id), MIN(sent_at), MIN(sent_at)
+    FROM alert_messages
+    WHERE listing_id IS NOT NULL
+    GROUP BY listing_id
+    ON CONFLICT (marketplace, listing_id) DO NOTHING
+"""
+
 
 def stats_cutoff(days: int) -> str:
     """The first UTC day inside a `days`-long window ending today."""
@@ -770,6 +846,7 @@ class Database:
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_threads_topic ON threads(telegram_topic_id)"
             )
+            self._conn.execute(SEED_ALERT_CLAIMS_SQL)
             self._conn.commit()
 
     def _migrate_workers(self: "Database") -> None:
@@ -1494,6 +1571,22 @@ class Database:
                 record,
             )
             return cur.rowcount > 0
+
+    def write_alert_claim(self: "Database", statement: str, params: Dict[str, Any]) -> bool:
+        """Run one `ALERT_CLAIM_SQL` write; True if it changed a row."""
+        with self.cursor() as cur:
+            cur.execute(ALERT_CLAIM_SQL[statement], params)
+            return cur.rowcount > 0
+
+    def get_alert_claim(
+        self: "Database", marketplace: str, listing_id: str
+    ) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute(
+                ALERT_CLAIM_SQL["get"], {"marketplace": marketplace, "listing_id": listing_id}
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
 
     def record_alert_reaction(
         self: "Database",

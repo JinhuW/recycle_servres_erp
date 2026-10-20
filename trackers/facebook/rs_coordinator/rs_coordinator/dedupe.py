@@ -7,6 +7,7 @@ price detect edits and price drops that are worth a second alert.
 """
 
 import hashlib
+import re
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, Optional
@@ -55,16 +56,19 @@ def dedupe_key(marketplace: str, listing_id: str) -> str:
     return hashlib.sha1(f"{marketplace}:{listing_id}".encode()).hexdigest()
 
 
+_PRICE = re.compile(r"\d[\d,]*(?:\.\d+)?")
+
+
 def parse_price(price: str | None) -> Optional[float]:
-    """Pull a number out of a price string like '$1,200' or '1200 USD'."""
+    """The first number in a price string like '$1,200' or '1200 USD'.
+
+    The first, not all of them: a discounted listing's price reads
+    '$20 | $25' (now, then), and joining every digit made that 2025.
+    """
     if not price:
         return None
-    digits = "".join(ch for ch in price if ch.isdigit() or ch == ".")
-    # A stray trailing dot or several dots ('1.200.00') is not worth guessing at.
-    try:
-        return float(digits)
-    except ValueError:
-        return None
+    match = _PRICE.search(price)
+    return float(match.group().replace(",", "")) if match else None
 
 
 def classify(incoming: Dict[str, Any], existing: Optional[Dict[str, Any]]) -> Verdict:

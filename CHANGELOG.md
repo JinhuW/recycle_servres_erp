@@ -17,6 +17,18 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.301.1] - 2026-10-20
+
+The **From a search to an alert** card on Monitors ▸ Facebook describes the
+coordinator stage as it now runs (RS-329). Facebook alerts were repeating:
+50 of the 122 sent from 10-12 to 10-20 were for a listing already in the chat,
+38 of them because a second worker saw it too. From facebook-tracker 0.13.6 a
+worker claims each listing from the coordinator before alerting it, and only
+the first claim sends. A delivered listing alerts again only when its price
+drops. The card used to say an edited listing alerts again on purpose, which
+is no longer true, and named the sharded path (`POST /api/v1/listings`) that
+no worker uses. It now names `POST /v1/alerts/claim`.
+
 ## [1.301.0] - 2026-10-20
 
 The desktop PO list has a **Paid by** column after Commission (RS-328). It

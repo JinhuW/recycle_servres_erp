@@ -79,6 +79,31 @@ def backend(request):
 # Every test below runs against both backends and asserts identical results.
 
 
+def test_alert_claims_decide_the_same_in_both_dialects(backend):
+    from datetime import datetime, timedelta, timezone
+
+    from rs_coordinator import alert_claims
+
+    t0 = datetime(2026, 10, 19, 15, 38, tzinfo=timezone.utc)
+
+    def ask(worker, price="$60", at=t0):
+        return alert_claims.claim(backend, "facebook", "L1", worker, price, now=at)
+
+    assert ask("va-2")["verdict"] == "new"
+    assert ask("homelab-1")["verdict"] == "pending"
+    assert ask("va-2")["send"] is True
+    assert alert_claims.delivered(backend, "facebook", "L1", "va-2", now=t0)
+    assert ask("nyc-1")["verdict"] == "duplicate"
+    assert ask("nyc-1", price="$59.99 | $60", at=t0 + timedelta(days=1))["verdict"] == "discounted"
+    assert ask("ne-1", at=t0 + timedelta(days=1))["verdict"] == "pending"
+    stale = t0 + timedelta(days=1) + alert_claims.CLAIM_LEASE + timedelta(seconds=1)
+    assert ask("ne-1", price="$59.99 | $60", at=stale)["verdict"] == "new"
+    # Exact, not float4-rounded: a REAL column would read back 59.9900016…
+    # and the same price would count as a drop below itself.
+    assert backend.get_alert_claim("facebook", "L1")["price_value"] == 59.99
+
+
+
 def _listing(key: str, seen: str, score: int) -> dict:
     return {
         "dedupe_key": key,
@@ -853,8 +878,11 @@ def test_no_sqlite_placeholders_survive_in_the_postgres_sql():
     handle.lock_account("a", "lock page")
     handle.unlock_account("a")
     handle.count_code_audit("a", "password", "2026-01-01")
+    for statement in ("insert", "retake", "drop", "baseline", "delivered"):
+        handle.write_alert_claim(statement, {})
+    handle.get_alert_claim("facebook", "1")
 
-    assert len(handle.log) == 51
+    assert len(handle.log) == 57
     for sql in handle.log:
         assert "?" not in sql, f"SQLite placeholder left in: {sql}"
         assert not re.search(r":\w", sql), f"named SQLite placeholder left in: {sql}"
