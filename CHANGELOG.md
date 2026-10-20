@@ -17,6 +17,19 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.309.0] - 2026-10-20
+
+The Fleet tab's workers table is one row per worker again, and the proxy is a
+column on that row instead of a divider above it (RS-339). Three layouts in a
+day (by city, then city → proxy → worker, then by proxy) each added divider
+rows to read past. The **Proxy** column shows the port and exit IP, and under
+them the city Facebook sees the account in, which before was only in a
+tooltip. The ISP is on hover. A worker that shares its exit IP with another is
+still marked *shared*, with the same advice to keep the pair's cities and
+sweep times apart. The column sorts by port, which puts each pair side by
+side, with the VM's own IP last. Searching by port, IP, city or state finds a
+worker.
+
 ## [1.308.0] - 2026-10-20
 
 The pool's access token (v1.307.0) now reaches the fleet, and the importer reads

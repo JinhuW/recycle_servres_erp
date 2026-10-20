@@ -39,7 +39,8 @@ export function matchesTerms(haystack: string, terms: readonly string[]): boolea
 export function accountHaystack(w: FleetAccount): string {
   return [
     w.worker_id, w.health?.account_id, w.health?.state, liveness(w),
-    w.region.key, w.region.name, w.source, w.proxy_env, w.proxy?.city, w.proxy?.url,
+    w.region.key, w.region.name, w.source, w.proxy_env,
+    w.proxy?.url, w.proxy?.ip, w.proxy?.city, w.proxy?.region,
     w.account?.account_id, w.account?.fb_username, w.session?.fb_user_id,
     ...w.cities.flatMap(c => [c.name, c.slug]),
   ].filter(Boolean).join(' ');
@@ -183,13 +184,18 @@ export const parkedWorkers = (challenges: readonly Challenge[] | null): Set<stri
 
 // The Fleet table's sortable columns. Today has no single value of its own —
 // the day bar is a shape — so it sorts by the heartbeat its tooltip shows.
-export type FleetSortCol = 'worker' | 'status' | 'today' | 'searches' | 'session' | 'posts';
+// Proxy sorts by port; the VM's own IP has none, so it goes last.
+export type FleetSortCol = 'worker' | 'proxy' | 'status' | 'today' | 'searches' | 'session' | 'posts';
 
 export function fleetSortValue(col: FleetSortCol, w: FleetAccount, status: FleetStatus): string | number | null {
   switch (col) {
     case 'worker': {
       const who = whoIs(w);
       return (who.login ?? who.label ?? w.worker_id).toLowerCase();
+    }
+    case 'proxy': {
+      const port = proxyPort(w);
+      return port ? Number(port) : null;
     }
     case 'status': return FLEET_STATUSES.indexOf(status);
     case 'today': {
@@ -693,46 +699,19 @@ export function cityOwners(fleet: FleetDoc, workerId: string): Map<string, strin
   return out;
 }
 
-// One proxy and the workers that dial it: the unit the fleet tab groups by.
-// A port is one exit IP, so Facebook sees these accounts side by side.
-// `url` is null for the workers on the VM's own address, which share that
-// address the same way. `city` and `region` are where the exit is, null
-// while it is still being looked up.
-export type ProxyGroup = {
-  url: string | null;
-  port: string | null;
-  ip: string | null;
-  org: string | null;
-  city: string | null;
-  region: string | null;
-  workers: FleetAccount[];
-};
+export function proxyPort(w: FleetAccount): string | null {
+  return /:(\d+)$/.exec(w.proxy?.url ?? '')?.[1] ?? null;
+}
 
-// `byPort` runs the proxies by port, the VM's own address last, and each
-// proxy's workers by id. Otherwise the order they came in (a column sort)
-// decides both, and a proxy ranks where its first worker does.
-export function proxyGroups(workers: readonly FleetAccount[], byPort: boolean): ProxyGroup[] {
-  const groups = new Map<string | null, ProxyGroup>();
+// Workers per exit, keyed by proxy URL. A port is one exit IP, so Facebook
+// sees the accounts on it side by side; the VM's own address ('') is one IP
+// the same way. A facade that predates the proxy lookup counts nothing.
+export function sharedExits(workers: readonly FleetAccount[]): Map<string, number> {
+  const out = new Map<string, number>();
   for (const w of workers) {
-    const p = w.proxy;
-    const url = p?.url ?? null;
-    let g = groups.get(url);
-    if (!g) {
-      g = { url, port: /:(\d+)$/.exec(url ?? '')?.[1] ?? null, ip: null, org: null, city: null, region: null, workers: [] };
-      groups.set(url, g);
-    }
-    g.ip ??= p?.ip ?? null;
-    g.org ??= p?.org ?? null;
-    g.city ??= p?.city ?? null;
-    g.region ??= p?.region ?? null;
-    g.workers.push(w);
-  }
-  const out = [...groups.values()];
-  if (byPort) {
-    const byId = (a: FleetAccount, b: FleetAccount) => a.worker_id.localeCompare(b.worker_id, undefined, { numeric: true });
-    for (const g of out) g.workers.sort(byId);
-    out.sort((a, b) => Number(a.url === null) - Number(b.url === null)
-      || (a.url ?? '').localeCompare(b.url ?? '', undefined, { numeric: true }));
+    if (!w.proxy) continue;
+    const key = w.proxy.url ?? '';
+    out.set(key, (out.get(key) ?? 0) + 1);
   }
   return out;
 }
