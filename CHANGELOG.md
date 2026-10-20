@@ -17,6 +17,20 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.304.0] - 2026-10-20
+
+The Fleet tab's workers table now has three layers: location, proxy IP,
+workers (RS-333). v1.303.0 grouped the workers by exit city. The proxy showed
+only as a port in each worker's subtitle, and a pair on one IP was told apart
+by a "shares IP with …" note. With two accounts on one IP in the pilot, the
+IP is the unit that matters: it is what Facebook links, and what a checkpoint
+on one account puts at risk for the others. So each IP gets a row under its
+city: port, exit IP, worker count, and the ISP in the tooltip. An IP with more
+than one worker is marked *shared*, and its tooltip says to keep their cities
+and sweep times apart. The workers sit under their IP, so the subtitle drops
+the port and the note again. With no column sort, IPs run by port. A sort
+orders them by their highest-ranked worker.
+
 ## [1.303.0] - 2026-10-20
 
 The Fleet tab groups the workers by where their proxies come out, and shows
