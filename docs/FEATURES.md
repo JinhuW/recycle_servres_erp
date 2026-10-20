@@ -53,8 +53,10 @@ portal was removed in v1.191.0; no bid had ever been placed through it.
   Facebook account pool (`/api/facebook-pool`, v1.262.0) is the exception
   under Monitors: every role reads the rack and may take, return and report,
   while add, import, edit, retire and remove answer 403 to a purchaser;
-  shared reads are scoped to the caller's own rows and leave the manager-only
-  fields out: the PO figures `finalSellPrice`, `finalSoldQty`, `realized` and
+  each account's sealed secrets — password, 2FA key, email password, session
+  cookie and, from v1.307.0, the Facebook access token — are revealed only to a
+  manager or the purchaser currently holding it; shared reads are scoped to the
+  caller's own rows and leave the manager-only fields out: the PO figures `finalSellPrice`, `finalSoldQty`, `realized` and
   `sellOrders` (v1.177.1), and the linked-payment total, the pending
   change-review, the leaderboard peers' money and email, the warehouse
   manager's contact, and the sell-order ids in an edit refusal and the

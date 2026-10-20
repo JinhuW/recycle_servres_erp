@@ -5,7 +5,7 @@ import { loginAs, ALEX, MARCUS, PRIYA } from './helpers/auth';
 
 type Account = {
   no: number; uid: string; password: string; totp: string; email: string; emailPassword: string;
-  recovery: string; cookie: string; note: string; status: string; holder: string | null;
+  recovery: string; cookie: string; token: string; note: string; status: string; holder: string | null;
   holderId: string | null; since: number | null; addedAt: number; cookieAt: number | null; batch: string;
 };
 type Activity = { at: number; who: string; action: string; accountNo?: number; detail?: string; status: string };
@@ -21,6 +21,7 @@ const draft = (n: number, over: Record<string, unknown> = {}) => ({
   emailPassword: `Mail!${n}`,
   recovery: `rec${n}@mail.example`,
   cookie: `c_user=${uid(n)}; xs=session-${n}; datr=d`,
+  token: `EAAtoken${n}`,
   note: `note ${n}`,
   status: 'available',
   holder: null,
@@ -45,18 +46,21 @@ describe('facebook account pool', () => {
     expect(r.status).toBe(201);
     const [a] = r.body.accounts;
     expect(a).toMatchObject({ no: 1, uid: uid(1), password: 'DemoOnly!1', totp: 'JBSWY3DPEHPK3PXP',
-      emailPassword: 'Mail!1', recovery: 'rec1@mail.example', status: 'available', holder: null, batch: 'By hand' });
+      emailPassword: 'Mail!1', recovery: 'rec1@mail.example', token: 'EAAtoken1',
+      status: 'available', holder: null, batch: 'By hand' });
     expect(a.cookie).toContain('xs=session-1');
     expect(a.cookieAt).not.toBeNull();
     expect(r.body.activity[0]).toMatchObject({ who: 'Alex Chen', action: 'added', accountNo: 1, status: 'available' });
 
     const db = getTestDb();
-    const [row] = await db<{ password_enc: string; cookie_enc: string; cookie_uid: string }[]>`
-      SELECT password_enc, cookie_enc, cookie_uid FROM fb_pool_accounts WHERE no = 1`;
+    const [row] = await db<{ password_enc: string; cookie_enc: string; cookie_uid: string; token_enc: string }[]>`
+      SELECT password_enc, cookie_enc, cookie_uid, token_enc FROM fb_pool_accounts WHERE no = 1`;
     expect(row.password_enc.startsWith('v1.')).toBe(true);
     expect(row.password_enc).not.toContain('DemoOnly');
     expect(row.cookie_enc).not.toContain('session-1');
     expect(row.cookie_uid).toBe(uid(1));
+    expect(row.token_enc.startsWith('v1.')).toBe(true);
+    expect(row.token_enc).not.toContain('EAAtoken1');
 
     // Removing #1 and adding another never reuses the number.
     expect((await api('DELETE', `${BASE}/1`, { token })).status).toBe(200);
@@ -155,6 +159,7 @@ describe('facebook account pool', () => {
       expect(a.totp).toBe('');
       expect(a.emailPassword).toBe('');
       expect(a.recovery).toBe('');
+      expect(a.token).toBe('');
       expect(a.cookie).not.toContain('xs=session');
     }
     expect(before.body.accounts[0].cookie).toBe(`c_user=${uid(1)}`);
@@ -166,7 +171,8 @@ describe('facebook account pool', () => {
     expect(took.status).toBe(200);
     const mine = took.body.accounts.find((a) => a.no === 2)!;
     expect(mine).toMatchObject({ status: 'taken', holder: 'Marcus Wright', holderId: marcus.user.id,
-      password: 'DemoOnly!2', totp: 'JBSWY3DPEHPK3PXP', emailPassword: 'Mail!2', recovery: 'rec2@mail.example' });
+      password: 'DemoOnly!2', totp: 'JBSWY3DPEHPK3PXP', emailPassword: 'Mail!2', recovery: 'rec2@mail.example',
+      token: 'EAAtoken2' });
     expect(mine.cookie).toContain('xs=session-2');
     expect(mine.since).not.toBeNull();
     expect(took.body.accounts.find((a) => a.no === 1)!.password).toBe('');
@@ -256,14 +262,15 @@ describe('facebook account pool', () => {
     await api('POST', `${BASE}/1/take`, { token: marcus });
     expect((await api('POST', `${BASE}/1/events`, { token: marcus, body: { kind: 'copied', field: 'password' } })).status).toBe(200);
     expect((await api('POST', `${BASE}/1/events`, { token: marcus, body: { kind: 'revealed', field: 'emailPassword' } })).status).toBe(200);
+    expect((await api('POST', `${BASE}/1/events`, { token: marcus, body: { kind: 'copied', field: 'token' } })).status).toBe(200);
     expect((await api('POST', `${BASE}/1/events`, { token: priya, body: { kind: 'copied', field: 'totp' } })).status).toBe(403);
     expect((await api('POST', `${BASE}/1/events`, { token: marcus, body: { kind: 'edited', field: 'totp' } })).status).toBe(400);
     expect((await api('POST', `${BASE}/1/events`, { token: marcus, body: { kind: 'copied', field: 'uid' } })).status).toBe(400);
     expect((await api('POST', `${BASE}/9/events`, { token: marcus, body: { kind: 'copied', field: 'totp' } })).status).toBe(404);
 
     const log = await api<Snapshot>('GET', BASE, { token });
-    expect(log.body.activity.slice(0, 2).map((e) => [e.action, e.detail])).toEqual([
-      ['revealed', 'emailPassword'], ['copied', 'password'],
+    expect(log.body.activity.slice(0, 3).map((e) => [e.action, e.detail])).toEqual([
+      ['copied', 'token'], ['revealed', 'emailPassword'], ['copied', 'password'],
     ]);
 
     const db = getTestDb();

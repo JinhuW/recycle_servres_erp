@@ -177,6 +177,7 @@ export function AccountEditor({
                 )}
               </small>
             </label>
+            {field('token', 'fpToken', { secret: true, full: true, help: 'fpTokenHelp' })}
             {field('note', 'fpNotes', { full: true })}
             {workers && (
               <label className="fp-field fp-full">
