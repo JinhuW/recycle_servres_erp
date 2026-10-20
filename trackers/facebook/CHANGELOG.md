@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.13.6] - 2026-10-20
+
 ### Fixed
 
 - **A listing alerts once across the fleet, not once per worker that sees it**
