@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-339](./RS-339-fleet-tab-shows-the-proxy-as-a-column-not-a-grouping.md) | in-review | story | P2 | Fleet tab shows the proxy as a column, not a grouping | 1.309.0 |
+| [RS-339](./RS-339-fleet-tab-shows-the-proxy-as-a-column-not-a-grouping.md) | done | story | P2 | Fleet tab shows the proxy as a column, not a grouping | 1.309.0 |
 | [RS-338](./RS-338-worker-logs-in-with-cookie-then-token-password-last.md) | done | story | P2 | Worker logs in with cookie then token, password last | facebook-tracker 0.13.10, v1.308.0 |
 | [RS-337](./RS-337-add-an-access-token-field-to-the-facebook-account-po.md) | done | story | P2 | Add an access-token field to the Facebook account pool | 1.307.0 |
 | [RS-336](./RS-336-account-pool-table-10-row-scroll-and-sortable-column.md) | done | story | P2 | Account pool table: 10-row scroll and sortable columns | 1.306.0 |
