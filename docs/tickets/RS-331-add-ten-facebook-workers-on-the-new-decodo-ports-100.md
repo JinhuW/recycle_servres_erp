@@ -2,13 +2,13 @@
 id: RS-331
 title: Add ten Facebook workers on the new Decodo ports 10011-10020
 type: task
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-20
 reporter: jinhu
 branch: add-new-proxy-workers
-pr:
-version:
+pr: 797
+version: facebook-tracker 0.13.7
 related: [RS-275, RS-294, RS-329]
 ---
 
@@ -54,19 +54,19 @@ every one of them, so the existing ten must be held to stay untouched.
 
 ## Acceptance criteria
 
-- [ ] Ten new compose workers run on the VM, one per new port, each with its
+- [x] Ten new compose workers run on the VM, one per new port, each with its
       own id, token, session dir, cache volume and VNC port (5912–5921):
       `bos-1` (10011), `nyc-2` (10012), `nyc-3` (10013), `ca-1`–`ca-4`
       (10014–10017), `nj-1`–`nj-3` (10018–10020).
-- [ ] Each starts parked with an empty storage state and searches nothing
+- [x] Each starts parked with an empty storage state and searches nothing
       until it has a login. Its seed city is the catalog city nearest its exit
       outside California: Boston, New York, Newark, or Reno for the Palo Alto
       exits.
-- [ ] The console lists all ten in `RS_WORKER_CONFIGS` and `RS_VNC_TARGETS`,
+- [x] The console lists all ten in `RS_WORKER_CONFIGS` and `RS_VNC_TARGETS`,
       so the ERP's Fleet tab shows them, their cities can be edited, and Watch
       reaches their browsers.
-- [ ] The ten existing worker containers are not recreated by the deploy.
-- [ ] After the deploy each new worker heartbeats under its id.
+- [x] The ten existing worker containers are not recreated by the deploy.
+- [x] After the deploy each new worker heartbeats under its id.
 
 ## Out of scope
 
@@ -84,3 +84,16 @@ every one of them, so the existing ten must be held to stay untouched.
   are not. `ca-*` and `nj-*` follow `va-*`, which named the exit's state.
 - Since RS-329 a listing alerts once across the fleet, so a city shared by two
   workers no longer means a second alert.
+- Deployed 2026-10-20 as `RS_DEPLOY_HOLD="<the ten existing containers>"
+  scripts/deploy.sh sync`. The ten new containers started 16:30–16:34 UTC on
+  the unchanged 0.13.6 image, and code verify matched. The existing ten kept
+  their 15:53–15:57 start times, and their re-rendered configs were
+  byte-identical, so none of their jobs restarted. Each new worker heartbeats
+  `SESSION_EXPIRED` at login step `waiting_for_human`, with no search and no
+  listing: parked until it gets an account.
+- The VM-only files were written by hand: ten `PROXY_HOMELAB_<X>` lines in
+  `configs/secrets.env` (backup `secrets.env.bak-20261020-rs331`), ten
+  `configs/secrets.homelab-<x>.env`, ten empty `fb_state.json`, and the new
+  rows in `configs/proxies.decodo.txt`.
+- Seen while checking the fleet: wc-1 still parks on `SESSION_EXPIRED` with no
+  account linked and an empty session file, two days after RS-294.
