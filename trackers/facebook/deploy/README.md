@@ -251,8 +251,27 @@ do this — the working values are `sac` and the numeric id `112454482100538`.
 
 ## Scaling notes
 
-- One account per IP. Two workers behind the same residential IP is the fastest
-  way to lose both accounts.
+- One account per IP, except the pilot below. The accounts lost on the shared
+  house IP in 2026-08 were identical automated accounts behind one address,
+  and one checkpoint takes every account on an IP down with it.
+- **The two-per-IP pilot.** Ports 10014 and 10015 (Palo Alto) each carry two
+  accounts: ca-1 with ca-1b, and ca-2 with ca-2b. ca-3 and ca-4 stay single on
+  the same location as the control. A household shares a router, so a few
+  accounts on one residential IP is ordinary, as long as they look like
+  different people:
+  - Each account has its own device profile (README → *Device identity*).
+    Its vault slot carries the exit's region, so the device's clock matches
+    the IP: `rsc vault set-account --account-id <id> --worker <id> --region
+    rs_west --no-prompt` before the account is assigned.
+  - Partners sweep at different times:
+    `python -m rs_console.settings start-at ca-1b 17:00` in rs-console. A
+    fleet-wide sweep time saved from the ERP does not override it.
+  - Partners never search the same cities.
+  - Partners' first logins are at least 24 hours apart.
+
+  If either account of a pair is checkpointed or locked, stop its partner.
+  Add pairs, or a third account per IP, only after 14 days with all six
+  accounts live and no more checkpoints on the pairs than on ca-3 and ca-4.
 - Match proxy geography to the region. A Houston-centred search from a Denver IP
   looks wrong to Facebook's heuristics.
 - Region borders overlap on purpose. A 500-mile radius is not what Facebook

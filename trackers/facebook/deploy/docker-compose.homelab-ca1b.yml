@@ -1,0 +1,104 @@
+# ca-1b, the second account on ca-1's Decodo exit in Palo Alto, CA
+# (PROXY_HOMELAB_CA1, port 10014). The IP is shared ON PURPOSE: a pilot of two
+# accounts per IP, with ca-3 and ca-4 as the one-account control. The rules
+# are in deploy/README.md → Scaling notes: partners never search the same
+# cities, and their first logins are a day or more apart.
+#
+# It keeps the two accounts looking like two people, not one operator:
+#   - its own device profile (README → Device identity);
+#   - its own sweep time, 17:00 UTC against ca-1's 13:00. Set it once
+#     after the first start:
+#       docker exec rs-console python -m rs_console.settings start-at ca-1b 17:00
+#     A fleet-wide sweep time saved from the ERP does not override it.
+#
+# Its cities are its own, set on the ERP's worker page (Edit cities);
+# configs/homelab-ca1b.toml only seeds Las Vegas, NV, which ca-1 does not
+# search. Its Facebook account comes from the ERP's account pool, like any
+# worker's.
+#
+# Order: start it, set its cities, then give it an account. Until it has a
+# login it parks on Facebook's login page and searches nothing.
+#
+# A CLONE of docker-compose.homelab-ne.yml. Only the per-worker fields differ:
+#   container_name  rs-monitor-ca1b
+#   config mount    configs/homelab-ca1b.toml
+#   session dir     configs/sessions/homelab-ca1b
+#   diskcache vol   aimm-home-ca1b
+#   RS_WORKER_ID    ca-1b  (in configs/secrets.homelab-ca1b.env)
+#   VNC             5922 on the host
+# and the console (docker-compose.console.yml) lists it in RS_WORKER_CONFIGS
+# and RS_VNC_TARGETS.
+#
+# Before first start, on the VM:
+#   configs/sessions/homelab-ca1b/fb_state.json  — an EMPTY storage state,
+#       {"cookies": [], "origins": []}. Without any session file the monitor
+#       cannot record that it is parked and searches logged out (debug note
+#       docs/debug-notes/2026-10-17-new-worker-without-session-file-searches-logged-out.md).
+#   configs/secrets.env              — PROXY_HOMELAB_CA1 is ca-1's; nothing to add
+#   configs/secrets.homelab-ca1b.env  — RS_WORKER_ID=ca-1b and its own
+#       RS_CONTROL_PLANE_TOKEN (rsc mint-token --worker ca-1b)
+#   the vault slot, so its device reports Pacific time:
+#       rsc vault set-account --account-id ca-1b --worker ca-1b --region rs_west #           --no-prompt
+#
+#   docker compose -f deploy/docker-compose.homelab-ca1b.yml up -d
+services:
+  monitor-ca1b:
+    image: aimm-recycle:latest
+    container_name: rs-monitor-ca1b
+    restart: unless-stopped
+    # SIGTERM saves the live Facebook session; supervisord allows it 25 s.
+    stop_grace_period: 30s
+
+    # Own VNC port. Loopback-only, same as the others.
+    #   ssh -L 5922:127.0.0.1:5922 jinhu@10.10.10.73
+    ports:
+      - "127.0.0.1:5922:5900"
+
+    # Shared secrets first, then this worker's overrides (later file wins):
+    # RS_WORKER_ID and its own RS_CONTROL_PLANE_TOKEN live in the second file so
+    # they do not collide with rs-monitor's identity in the shared one.
+    env_file:
+      - ../configs/secrets.env
+      - ../configs/secrets.homelab-ca1b.env
+
+    environment:
+      AIMM_ENABLE_VNC: "1"
+      AIMM_WEBUI_HOST: 127.0.0.1
+      AIMM_WEBUI_PORT: "8467"
+      AIMM_OPENSEARCH_URL: "http://host.docker.internal:9200"
+      AIMM_OPENSEARCH_INDEX: "fb-tracker"
+
+    volumes:
+      - ../configs/homelab-ca1b.toml:/root/.ai-marketplace-monitor/config.toml:ro
+      - aimm-home-ca1b:/root/.ai-marketplace-monitor
+      - ../configs/sessions/homelab-ca1b:/data
+      - ./healthcheck.sh:/usr/local/bin/rs-healthcheck:ro
+
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/rs-healthcheck"]
+      interval: 5m
+      timeout: 1m
+      retries: 1
+      start_period: 10m
+
+    shm_size: 1gb
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    networks:
+      - rs-fleet
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+volumes:
+  aimm-home-ca1b:
+
+networks:
+  rs-fleet:
+    name: rs-fleet
+    external: true

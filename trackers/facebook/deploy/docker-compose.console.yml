@@ -59,7 +59,9 @@ services:
         ca-4=/config/workers/homelab-ca4.toml,
         nj-1=/config/workers/homelab-nj1.toml,
         nj-2=/config/workers/homelab-nj2.toml,
-        nj-3=/config/workers/homelab-nj3.toml
+        nj-3=/config/workers/homelab-nj3.toml,
+        ca-1b=/config/workers/homelab-ca1b.toml,
+        ca-2b=/config/workers/homelab-ca2b.toml
       # RS_WORKER_ID arrives from secrets.env above — the same value the
       # monitor reports under — so the dashboard can join the phase-1
       # monitor's heartbeat row to its config.
@@ -94,7 +96,9 @@ services:
         ca-4=rs-monitor-ca4:5900,
         nj-1=rs-monitor-nj1:5900,
         nj-2=rs-monitor-nj2:5900,
-        nj-3=rs-monitor-nj3:5900
+        nj-3=rs-monitor-nj3:5900,
+        ca-1b=rs-monitor-ca1b:5900,
+        ca-2b=rs-monitor-ca2b:5900
       # Optional: set to the tunnel hostname to make `vnc_url` in /v1/fleet
       # absolute for a page on another origin (the ERP). Left unset, links
       # are paths on this host, which is right for the standalone dashboard
@@ -127,6 +131,8 @@ services:
       - ../configs/homelab-nj1.toml:/config/workers/homelab-nj1.toml
       - ../configs/homelab-nj2.toml:/config/workers/homelab-nj2.toml
       - ../configs/homelab-nj3.toml:/config/workers/homelab-nj3.toml
+      - ../configs/homelab-ca1b.toml:/config/workers/homelab-ca1b.toml
+      - ../configs/homelab-ca2b.toml:/config/workers/homelab-ca2b.toml
       # Regions, items and the default search settings; and which worker owns
       # which region. Read-only: saved settings overlay master, never edit it.
       - ../configs/master.toml:/config/master.toml:ro

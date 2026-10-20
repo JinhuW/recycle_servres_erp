@@ -1,5 +1,6 @@
 # ca-2, a worker added on the Decodo exit in Palo Alto, CA
-# (PROXY_HOMELAB_CA2, port 10015). No other worker uses this IP.
+# (PROXY_HOMELAB_CA2, port 10015). ca-2b shares this IP on purpose, a pilot of
+# two accounts per IP (deploy/README.md → Scaling notes).
 #
 # Its cities are its own, set on the ERP's worker page (Edit cities);
 # configs/homelab-ca2.toml only seeds Reno, NV. The exit is in California,

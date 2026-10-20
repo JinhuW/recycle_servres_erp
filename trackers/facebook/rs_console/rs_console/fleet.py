@@ -294,6 +294,7 @@ def monitor_worker(
             "max_search_interval": facebook.get("max_search_interval"),
             "overridden": False,
         },
+        "start_at": facebook.get("start_at"),
         "vnc_url": facebook.get("vnc_url") or None,
         "health": None,
         "account": None,
@@ -307,7 +308,7 @@ def describe_from_config(
     """Describe `worker` from the config it actually runs, which is the only
     place its cities live once they are edited per worker."""
     described = monitor_worker(config, worker["worker_id"], region_list)
-    for key in ("region", "cities", "proxy_env", *_NO_PROXY_LOGIN, "pacing"):
+    for key in ("region", "cities", "proxy_env", *_NO_PROXY_LOGIN, "pacing", "start_at"):
         worker[key] = described[key]
     worker["cities_editable"] = True
 
@@ -581,7 +582,11 @@ def compose(
     for worker in workers:
         zone = region_timezone(worker["region"].get("key"))
         worker["timezone"] = zone
-        worker["plan"] = search_plan(item_list, len(worker["cities"]), settings.get("start_at"))
+        # Its own config's times, which differ from the fleet's for a worker
+        # that shares an IP; a fleet.toml row has no config to read.
+        start_at = worker.get("start_at") or settings.get("start_at")
+        worker["start_at"] = [start_at] if isinstance(start_at, str) else start_at
+        worker["plan"] = search_plan(item_list, len(worker["cities"]), worker["start_at"])
         worker["today"] = worker_today(
             worker["worker_id"], zone, search_cycles, worker_reviews, moment, search_cities
         )

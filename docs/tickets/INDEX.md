@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-332](./RS-332-pilot-two-facebook-workers-per-proxy-on-two-palo-alt.md) | in-progress | story | P2 | Pilot two Facebook workers per proxy on two Palo Alto IPs | — |
 | [RS-331](./RS-331-add-ten-facebook-workers-on-the-new-decodo-ports-100.md) | done | task | P2 | Add ten Facebook workers on the new Decodo ports 10011-10020 | facebook-tracker 0.13.7 |
 | [RS-330](./RS-330-paid-by-follows-the-commission-screenshot-upload-and.md) | done | story | P2 | Paid by follows the commission screenshot upload and asks before it changes | 1.302.0 |
 | [RS-329](./RS-329-facebook-alerts-repeat-the-same-listing-across-worke.md) | done | bug | P1 | Facebook alerts repeat the same listing across workers | facebook-tracker 0.13.6, v1.301.1 |

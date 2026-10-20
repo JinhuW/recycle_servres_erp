@@ -305,3 +305,70 @@ def test_render_cli_writes_the_named_workers_cities(named, monkeypatch, capsys):
     monkeypatch.setattr("sys.stdin", __import__("io").StringIO(MASTER))
     assert settings.main(["settings", "render"]) == 0
     assert capsys.readouterr().out == MASTER
+
+
+# ── One worker's sweep times ───────────────────────────────────────────────────
+
+
+def _start_at(path):
+    return tomllib.loads(path.read_text())["marketplace"]["facebook"]["start_at"]
+
+
+def test_a_workers_own_start_at_outlives_a_fleet_wide_save(named, monkeypatch, capsys):
+    home, ne = named["workers"]
+    inode = os.stat(ne).st_ino
+    assert settings.main(["settings", "start-at", "nyc-1", "17:00"]) == 0
+    assert "homelab-ne.toml" in capsys.readouterr().out
+    assert (_start_at(home), _start_at(ne)) == (["10:00"], ["17:00"])
+    assert os.stat(ne).st_ino == inode, "a replaced file is invisible to a bind mount"
+
+    res = named["client"].put("/v1/config/settings", json={"search": {"start_at": ["09:30"]}}, headers=AUTH)
+    assert res.status_code == 200, res.text
+    assert (_start_at(home), _start_at(ne)) == (["09:30"], ["17:00"])
+
+    # The deploy renders the tree's copy, which still says master's time.
+    monkeypatch.setattr("sys.stdin", __import__("io").StringIO(MASTER))
+    assert settings.main(["settings", "render", "--config", "homelab-ne.toml"]) == 0
+    assert tomllib.loads(capsys.readouterr().out)["marketplace"]["facebook"]["start_at"] == ["17:00"]
+
+
+def test_clearing_a_workers_start_at_hands_it_the_fleets(named):
+    ne = named["workers"][1]
+    settings.main(["settings", "start-at", "nyc-1", "17:00", "21:00"])
+    assert _start_at(ne) == ["17:00", "21:00"]
+    assert settings.main(["settings", "start-at", "nyc-1", "--clear"]) == 0
+    assert _start_at(ne) == ["10:00"]
+    assert "start_at" not in json.loads(named["state"].read_text())["values"]["workers"]["nyc-1"]
+
+    named["client"].put("/v1/config/settings", json={"search": {"start_at": ["09:30"]}}, headers=AUTH)
+    settings.main(["settings", "start-at", "nyc-1", "17:00"])
+    settings.main(["settings", "start-at", "nyc-1", "--clear"])
+    assert _start_at(ne) == ["09:30"]
+
+
+@pytest.mark.parametrize(
+    "argv, code",
+    [
+        (["nyc-1", "25:00"], 1),
+        (["nyc-1", "noon"], 1),
+        (["no-such-worker", "17:00"], 1),
+        (["nyc-1"], 2),
+        (["../etc", "17:00"], 2),
+    ],
+)
+def test_a_bad_start_at_writes_nothing(named, monkeypatch, argv, code):
+    # No coordinator to ask: an unmounted worker is simply unknown.
+    monkeypatch.delenv("RS_COORDINATOR_ADMIN_TOKEN")
+    before = [w.read_text() for w in named["workers"]]
+    assert settings.main(["settings", "start-at", *argv]) == code
+    assert [w.read_text() for w in named["workers"]] == before
+    assert not named["state"].exists()
+
+
+def test_fleet_gives_each_worker_its_own_start_at(named):
+    settings.main(["settings", "start-at", "nyc-1", "17:00", "21:00"])
+    workers = {w["worker_id"]: w for w in named["client"].get("/v1/fleet", headers=AUTH).json()["workers"]}
+    assert workers["nyc-1"]["start_at"] == ["17:00", "21:00"]
+    assert workers["nyc-1"]["plan"]["runs_per_day"] == 2
+    assert workers["homelab-1"]["start_at"] == ["10:00"]
+    assert workers["homelab-1"]["plan"]["runs_per_day"] == 1
