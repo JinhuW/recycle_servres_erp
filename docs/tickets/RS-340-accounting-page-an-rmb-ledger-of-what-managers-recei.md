@@ -2,13 +2,13 @@
 id: RS-340
 title: Accounting page: an RMB ledger of what managers receive and pay
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-21
 reporter: jinhu
 branch: feature-accounting-page-ledger
-pr:
-version:
+pr: 812
+version: 1.310.0
 related: []
 ---
 
@@ -47,46 +47,46 @@ bank transfer, Alipay, WeChat Pay or cash. None of that has a home today:
 
 The ledger
 
-- [ ] Manager-only: purchasers get 403 from `/api/accounting/*` and never see
+- [x] Manager-only: purchasers get 403 from `/api/accounting/*` and never see
       the page or its nav entry; anonymous callers get 401.
-- [ ] An entry records direction (Received / Paid), kind (Purchase,
+- [x] An entry records direction (Received / Paid), kind (Purchase,
       Commission, Sale, After-sales, Other), amount and currency (¥ by
       default, $ allowed), the CNY-per-USD rate frozen when it was recorded,
       method, date, the manager whose money moved, and an optional
       counterparty, reference and note. Entries are numbered `AC-1001`…
-- [ ] Purchase and Commission link a PO, Sale a sell order, After-sales a case,
+- [x] Purchase and Commission link a PO, Sale a sell order, After-sales a case,
       Other nothing; the API refuses any other pairing.
-- [ ] The kind sets the default direction (Sale received, the rest paid); it
+- [x] The kind sets the default direction (Sale received, the rest paid); it
       can be flipped for a refund.
-- [ ] Every total is RMB; a dollar entry counts at its frozen rate and shows
+- [x] Every total is RMB; a dollar entry counts at its frozen rate and shows
       its dollars beside it.
-- [ ] Entries can be edited, voided with a reason and restored; a voided entry
+- [x] Entries can be edited, voided with a reason and restored; a voided entry
       leaves every total and balance. Each keeps a history.
-- [ ] A Paid Commission entry fills the PO's *Commission paid by* with its
+- [x] A Paid Commission entry fills the PO's *Commission paid by* with its
       manager when nobody, not the company and no linked bank row is on file,
       with the same Activity line a pick by hand writes.
 
 Desktop
 
-- [ ] `#/accounting` shows the period (default this month) and manager scope,
+- [x] `#/accounting` shows the period (default this month) and manager scope,
       the identity Opening + Received − Paid = Closing with a by-kind
       breakdown, and each manager's balance.
-- [ ] The ledger lists Date, Entry, For, Manager, Method, Received, Paid and a
+- [x] The ledger lists Date, Entry, For, Manager, Method, Received, Paid and a
       running Balance; kind / method / direction / search filters never change
       a balance.
-- [ ] A row (or `#/accounting/AC-…`) opens the entry with its history, Edit,
+- [x] A row (or `#/accounting/AC-…`) opens the entry with its history, Edit,
       Void and Restore.
-- [ ] The PO's Cost Payment and Commission tabs, the sell order and the
+- [x] The PO's Cost Payment and Commission tabs, the sell order and the
       after-sales case each show an Accounting card with their entries, the
       net, the record's own figure and a Record button pre-filled for it. The
       sell order's card includes its cases' refunds.
 
 Phone
 
-- [ ] Home links managers to an Accounting screen with the period sum, each
+- [x] Home links managers to an Accounting screen with the period sum, each
       manager's balance and the entries by day; `+` records an entry, and an
       entry opens on its own screen with Edit / Void / Restore.
-- [ ] The phone PO page's Cost Payment and Commission folds show the order's
+- [x] The phone PO page's Cost Payment and Commission folds show the order's
       entries and a Record payment button.
 
 ## Out of scope
