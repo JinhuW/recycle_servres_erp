@@ -18,6 +18,20 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The token→session exchange uses the endpoint Facebook actually recognises**
+  (RS-338 follow-up). 0.13.10 shipped a guessed `b-graph…/auth/getSessionForApp`
+  path that 404s; the recognised legacy REST method is
+  `api.facebook.com/method/auth.getSessionForApp` with
+  `generate_session_cookies=1`. A live check also established the limit of this
+  path: Facebook mints web-session cookies only for a **first-party /
+  SSO-capable** app's token (`OAuthException` 100 otherwise). The purchased-pool
+  `EAA…` tokens are valid Graph tokens but are refused here, so for those the
+  worker's token-refresh step always falls back to the cookie restore and the
+  password login — the cookie remains the real browser-login path. The step is
+  kept because it works for a first-party token.
+
 ## [0.13.10] - 2026-10-20
 
 ### Added
