@@ -2332,12 +2332,18 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   0.12.5 answers 404; a cookie without `xs` is refused with 422) gets the
   password Re-login instead of a failed Assign.
   Since v1.308.0 the account's access token (the `EAA…` the pool stores from
-  v1.307.0) travels to the worker too, so when a restored or seeded cookie
-  session lapses the worker mints a fresh one from the token — inside its own
-  proxied browser, with no password and no 2FA — and only then falls back to
-  the password login. The token is handed over on demand and audited, never
-  counted against the password budget, and the login ledger records the
-  attempt as `token-refresh` (facebook-tracker 0.13.10, RS-338).
+  v1.307.0) travels to the worker too: when a restored or seeded cookie session
+  lapses, the worker tries to mint a fresh one from the token — inside its own
+  proxied browser, with no password and no 2FA — before falling back to the
+  password login. The token is handed over on demand and audited, never counted
+  against the password budget, and a successful mint is recorded as a
+  `token-refresh` login (facebook-tracker 0.13.10/0.13.11, RS-338). **A caveat
+  found in live testing:** Facebook only mints web-session cookies from a
+  *first-party / SSO-capable* app's token (it refuses others with
+  `OAuthException` 100). The purchased-pool tokens are valid Graph tokens but
+  are not first-party, so for them this step always falls back — the **cookie**
+  remains the real browser-login path, and the token is kept for its Graph-API
+  value. The step is in place for a first-party token.
   Since facebook-tracker 0.13.0 a wall a worker hits mid-sweep — a checkpoint,
   captcha, block or disabled notice on an ordinary Marketplace URL, which the
   selectors read as an empty city — is named by a decision model
@@ -2425,9 +2431,11 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   account with password login allowed, and queues Re-login. The worker then
   signs in inside its own browser, through its own proxy; any checkpoint is
   finished in Watch. Since v1.290.0 the account's own cookie is seeded as the
-  worker's session (RS-308) and, since v1.308.0, its access token travels so
-  the worker can mint a fresh session when the cookie lapses (RS-338); either
-  way the secrets stay server-side and nothing secret reaches the browser. The
+  worker's session (RS-308) and, since v1.308.0, its access token travels too
+  (RS-338) — for a first-party token the worker can mint a fresh session from it
+  when the cookie lapses; the purchased-pool tokens are not first-party, so they
+  fall back to the cookie path (see the Fleet-accounts note above). Either way
+  the secrets stay server-side and nothing secret reaches the browser. The
   ledger records it as `assigned`. A worker that already holds
   another account, or an account with no password, is refused (RS-275).
   Since v1.280.0 the backend checks every Available, Taken and Fleet account on
