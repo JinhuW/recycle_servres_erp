@@ -29,6 +29,14 @@ describe('FK / join column indexes', () => {
       'fb_pool_accounts_holder_user_id_idx',
       'fb_pool_accounts_created_by_idx',
       'fb_pool_events_actor_id_idx',
+      'accounting_entries_manager_book_idx',
+      'accounting_entries_order_id_idx',
+      'accounting_entries_sell_order_id_idx',
+      'accounting_entries_after_sales_id_idx',
+      'accounting_entries_created_by_idx',
+      'accounting_entries_voided_by_idx',
+      'accounting_entry_events_entry_idx',
+      'accounting_entry_events_actor_id_idx',
     ]) {
       expect(have.has(idx), `missing index ${idx}`).toBe(true);
     }

@@ -106,6 +106,11 @@ export function useCommissionPaidBy({ orderId, paidBy: initial, managers, me, on
     if (me && !paidByLocked(next) && paidByValue(next) !== me.id) setPending({ value: me.id, reason: 'upload' });
   };
 
+  /** A payer the server recorded on its own — an Accounting commission entry
+   *  names the manager it was for, who need not be the one signed in, so
+   *  nobody is offered a takeover. */
+  const sync = (next: PaidBy) => setPaidByState(next);
+
   /** The name a select value stands for, for the confirm. */
   const nameFor = (value: string): string | null => {
     if (value === '' || value === PAID_BY_COMPANY) return null;
@@ -113,7 +118,7 @@ export function useCommissionPaidBy({ orderId, paidBy: initial, managers, me, on
     return options.find(m => m.id === value)?.name ?? null;
   };
 
-  return { paidBy, options, saving, pending, request, confirm, cancel, adopt, nameFor };
+  return { paidBy, options, saving, pending, request, confirm, cancel, adopt, sync, nameFor };
 }
 
 export type CommissionPaidBy = ReturnType<typeof useCommissionPaidBy>;

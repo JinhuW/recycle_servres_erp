@@ -14,6 +14,7 @@ import {
 } from '../../lib/route';
 import { Icon } from '../../components/Icon';
 import { Modal } from '../../components/Modal';
+import { AccountingCard } from './accounting/AccountingCard';
 import { sellOrderStatusShort } from '../../lib/lookups';
 import { useManagerOptions } from '../../lib/useManagers';
 import {
@@ -432,6 +433,9 @@ function CaseDetail({ id, onToast }: { id: string } & Props) {
               )}
             </div>
           </div>
+
+          {/* Refunds paid on the case, from the managers' RMB book. */}
+          <AccountingCard scope={{ afterSalesId: c.id }} className="card so-page-card" />
 
           <div className="card so-page-card">
             <div className="so-section-head"><Icon name="clock" size={14} /> {t('asTimeline')}</div>

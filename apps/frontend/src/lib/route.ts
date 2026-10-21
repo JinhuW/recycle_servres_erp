@@ -366,6 +366,7 @@ export const DESKTOP_VIEW_TO_PATH = {
   activity:   '/activity',
   payments:   '/payments',
   internaltx: '/payments/internal',
+  accounting: '/accounting',
   tracker:    '/tracker',
   coordinator: '/fleet',
   settings:   '/settings',
@@ -393,6 +394,7 @@ export function pathToDesktopView(path: string): DesktopViewId {
   // A tab under Payments, like Analysis under Inventory.
   if (path === '/payments/internal') return 'internaltx';
   if (path === '/payments' || match('/payments/po/:id', path) || match('/payments/so/:id', path)) return 'payments';
+  if (path === '/accounting' || match('/accounting/:id', path)) return 'accounting';
   if (path === '/tracker') return 'tracker';
   if (path === '/fleet' || path === '/fleet/pool' || matchFleetWatch(path) || matchFleetWorker(path)) return 'coordinator';
   if (path === '/settings') return 'settings';
@@ -407,6 +409,12 @@ export function afterSalesCasePath(id: string): string {
 
 export function afterSalesNewPath(sellOrderId?: string): string {
   return '/after-sales/new' + (sellOrderId ? `?order=${encodeURIComponent(sellOrderId)}` : '');
+}
+
+// An Accounting entry: the ledger with that entry open (a drawer on desktop,
+// its own screen on the phone).
+export function accountingEntryPath(id: string): string {
+  return `/accounting/${encodeURIComponent(id)}`;
 }
 
 // The fleet page's live-browser viewer for one Facebook worker. A sub-route of
@@ -547,6 +555,7 @@ export const MOBILE_VIEW_TO_PATH = {
   shipping:  '/shipping',
   market:    '/market',
   inventory: '/inventory',
+  accounting: '/accounting',
   me:        '/profile',
 } as const;
 
@@ -560,6 +569,7 @@ export function pathToMobileView(path: string): MobileViewId {
   if (parseShippingRoute(path)) return 'shipping';
   if (path === '/market') return 'market';
   if (path === '/inventory') return 'inventory';
+  if (path === '/accounting' || match('/accounting/:id', path)) return 'accounting';
   if (path === '/profile') return 'me';
   return 'dashboard';
 }

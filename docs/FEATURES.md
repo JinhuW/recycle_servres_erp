@@ -48,8 +48,9 @@ portal was removed in v1.191.0; no bid had ever been placed through it.
   non-manager's JSON never carries a manager-only key — not even as `null`,
   since the name alone would advertise the feature. Whole-endpoint manager
   features (sell orders, customers, transfers, activity, members,
-  bank and internal transactions, tracker, coordinator, connectors, FX rates,
-  inventory export and analysis, a line's linked sell orders) answer 403. The
+  bank and internal transactions, the Accounting book (v1.310.0), tracker,
+  coordinator, connectors, FX rates, inventory export and analysis, a line's
+  linked sell orders) answer 403. The
   Facebook account pool (`/api/facebook-pool`, v1.262.0) is the exception
   under Monitors: every role reads the rack and may take, return and report,
   while add, import, edit, retire and remove answer 403 to a purchaser;
@@ -251,7 +252,12 @@ is not a stage but a flag beside one, set once every line has sold
   *Change who paid the commission?*, naming both values, and nothing is
   saved until it is confirmed. Migration 0189 filled Paid by once on every PO
   that had a commission screenshot and nobody recorded, from the uploader of
-  its latest screenshot. Files write through as they are dropped and a
+  its latest screenshot. **A commission booked in Accounting records its
+  manager the same way** (v1.310.0): a Paid commission entry on the PO fills
+  Paid by with the entry's manager while nobody is on file, the company isn't
+  recorded and no bank row is linked as the commission. A payer already on
+  file stays, and voiding or moving the entry never clears it. The tab shows
+  the new payer at once. Files write through as they are dropped and a
   confirmed pick as it is made — managers at any stage, closed book included
   — and purchasers see both read-only. Under the drop box, managers also see the
   **bank payments linked as this PO's commission** on the Payments page,
@@ -1452,6 +1458,10 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   (v1.257.0), under the payment receiver: each row a link back to the
   Payments page pinned to this order, with the net received. Nothing shows
   until a manager links a payment there.
+- **The managers' RMB receipts sit under them** (v1.310.0): an *Accounting*
+  card with the order's Sale entries and its cases' refunds, the net received
+  against the order total, and *Record receipt*, which starts on the payment
+  receiver. See [Accounting](#accounting).
 - **The desktop list flags an order with internal notes** (v1.239.0): a note
   icon beside the customer on each row whose note isn't blank.  Hovering or
   tabbing to it shows the note in a card (line breaks kept, clamped at 14
@@ -1739,6 +1749,10 @@ lower price (**Discount**). Purchasers never see the page or the API.
   tiles; nothing moves stock back to a PO, changes the sell order's revenue
   or the dashboard's realized profit. Restocking a return is an inventory
   edit.
+- **The money a case pays out is booked in Accounting** (v1.310.0). The case
+  page's *Accounting* card lists its refunds with their net and *Record
+  refund*; the refunds also show on the sell order's card. See
+  [Accounting](#accounting).
 
 ## Shipping
 
@@ -2014,6 +2028,78 @@ to a PO's commission, or to sell orders (v1.257.0).
 > freshest, so a healthy checking account no longer hides a stale card. Each
 > account is also re-read 60 days back once a week so a late reversal is seen,
 > and a row pending for over 120 days stops holding the fetch window open.
+
+## Accounting
+
+Manager-only, both shells (v1.310.0). The managers' own book of money they
+received and paid, kept in **RMB**. Payments reconciles the company's USD bank
+accounts; this records what moves through the managers' hands — a supplier
+paid by Alipay, a purchaser's commission by WeChat, a customer's bank
+transfer, a refund on a case. Entries are a record only: they change no PO
+cost, sell-order revenue or case amount (the one exception is the commission
+payer, below).
+
+- **An entry** says received or paid, what it was for, how much, how
+  (bank transfer, Alipay, WeChat Pay, cash, other), on what date and through
+  which manager, with an optional counterparty, reference and note. Entries
+  are numbered `AC-1001`, `AC-1002`… from their own counter.
+  - **What it was for is the record it names.** Purchase and Commission name
+    a PO, Sale a sell order, After-sales a case; Other names nothing. The API
+    refuses any other pairing. The kind sets the direction — a sale is
+    received, the rest paid — and the manager can flip it for a supplier's or
+    a customer's refund.
+  - **RMB is the book's currency.** An entry may be in dollars: it carries the
+    CNY-per-USD rate it was booked at (the FX ledger's latest unless one is
+    typed), every total counts it at that rate, and the dollars show beside
+    it. An RMB entry needs no rate, so it never waits on the rate service.
+  - **Dates are calendar dates as typed.** The page's "today" is the viewer's
+    own, not the dashboard's Denver clock: the managers keeping RMB books are
+    most of a day ahead of Denver. Any date up to UTC's tomorrow is accepted.
+  - **Edits keep a history** — recorded, changed (which fields), voided,
+    restored, with who and when. **Void** needs a reason and takes the entry
+    out of every total and balance; **Restore** puts it back. Nothing is
+    deleted. A draft PO deleted after money was booked against it leaves the
+    entry on the book without its link, and its history names the PO.
+  - **A paid commission fills the PO's Paid by** when nobody is on file — the
+    screenshot upload's rule (see *Purchase orders*).
+- **The page** (`#/accounting`, under Oversight after Payments).
+  - The period (the dashboard's chip, *This month* by default) and the manager
+    (all, or one) are the book's scope.
+  - **The band** states the period as an identity: *Opening + Received − Paid
+    = Closing*, with Received and Paid broken down by kind, the closing figure
+    double-ruled. Under it, *Held by* gives each manager's balance on the
+    closing date — received minus paid; below zero the company owes them. A
+    name there scopes the page to that manager.
+  - **The book** has Date (printed once per day), Entry, For (kind, the record
+    as a link, counterparty, note), Manager, Method, then **Received, Paid and
+    Balance** columns: direction is the column a figure sits in. Balance is
+    what the manager scope held after that entry, from the first entry on, so
+    the direction, kind, method and search filters hide rows without changing
+    any balance. *Show voided* lists voided entries struck through.
+  - A row, or `#/accounting/AC-1008`, opens the entry in a drawer: the record
+    it is for (with that record's own figure and what the book has against
+    it), every field, the history, Edit, Void and Restore. *Record entry*
+    opens the form: direction, kind, a record picker searched by id or name,
+    amount in ¥ or $ with the RMB it books as, date, method, manager,
+    counterparty, reference and note.
+- **On the records** (managers only), an *Accounting* card shows what the book
+  has against the record, what that comes to, the record's own figure and a
+  Record button with the record already chosen:
+  - the PO's **Cost Payment** tab (Purchase entries, net paid, the PO's cost ≈
+    ¥ at the latest rate) and **Commission** tab (Commission entries, net
+    paid, the projected commission);
+  - the **sell order**, beside the bank payments (Sale entries plus its cases'
+    refunds, net received, the order total in its own currency); a receipt
+    starts on the order's payment receiver, and on a CNY order with the
+    amount still owed;
+  - the **after-sales case** (its refunds, net refunded, the case amount).
+- **On the phone**, Home links managers to the Accounting screen: period chips
+  (this month, last month, last 30 days, this year), a manager chip row, the
+  period as a vertical sum with each manager's balance, an All / Received /
+  Paid switch and the entries by day. `+` records an entry in a sheet; an
+  entry opens on its own screen with Edit, Void and Restore. The phone PO
+  page's Cost Payment and Commission folds carry the order's entries and a
+  Record payment button.
 
 ## Transfers
 
@@ -2796,6 +2882,9 @@ inventory search, sell-order draft creation.
   phone can zoom. Dialogs and phone sheets keep Tab inside them; proof
   uploads and item-type picks work from the keyboard; the phone's capture
   button and every hardware field have accessible names.
+- **Accounting is on the phone too** (v1.310.0): a Home link for managers, the
+  book as a screen of its own, and the order's entries inside the PO page's
+  Cost Payment and Commission folds. See [Accounting](#accounting).
 
 One bundle, two lazy-loaded shells chosen in `App.tsx`: viewport under 720px →
 `MobileApp`; else `DesktopApp`. The third, the `/v/<token>` vendor portal, was

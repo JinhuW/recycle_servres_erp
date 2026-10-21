@@ -44,6 +44,7 @@ import { missingSigners, signoffSig } from '../../lib/sellOrderSignoff';
 import type { SellOrderSignoff } from '../../lib/types';
 import { SellOrderSignoffCard } from './SellOrderSignoff';
 import { PoPaymentsLedger } from './order/PoPaymentsLedger';
+import { AccountingCard } from './accounting/AccountingCard';
 import { productCount } from '../../lib/productNo';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { useScanFilterText } from '../../lib/useScanFilter';
@@ -2169,6 +2170,16 @@ function SellOrderDetail({ id, mode, onToast }: {
                   page. Renders nothing until something is linked. */}
               {!editable && (
                 <PoPaymentsLedger scope={{ sellOrderId: order.id }} locale={locale} className="card so-page-card" />
+              )}
+
+              {/* The managers' RMB book for this order: receipts, and its cases'
+                  refunds. The payment receiver is who usually holds it. */}
+              {!editable && (
+                <AccountingCard
+                  scope={{ sellOrderId: order.id }}
+                  className="card so-page-card"
+                  managerId={order.paymentReceivedBy?.id ?? null}
+                />
               )}
 
               {/* After-sales cases — view mode only; a sold order can take a

@@ -1,7 +1,8 @@
 // Helpers and types more than one orders route module uses.
 import { getDb } from '../../db';
 import { UUID_RE } from '../../lib/pagination';
-import { LINE_FIELDS, type SqlLike } from '../../services/orderAudit';
+import { LINE_FIELDS, writeOrderEvent, type SqlLike } from '../../services/orderAudit';
+import { commissionLinkedFrag } from '../../banktx/match';
 import { type TrackablePart } from '../../lib/marketAutoTrack';
 import { effectiveRole } from '../../lib/role';
 import { specVal } from '../../lib/orderInput';
@@ -46,6 +47,51 @@ export function commissionPaidByOf(r: {
   return r.commission_paid_by
     ? { kind: 'manager', id: r.commission_paid_by, name: r.commission_paid_by_name ?? '' }
     : null;
+}
+
+export type PayerRow = {
+  commission_paid_by: string | null;
+  commission_paid_by_name: string | null;
+  commission_paid_by_company: boolean;
+  commission_linked: boolean;
+};
+
+// The order's payer, locked for the caller's write.
+export async function lockPayerTx(tx: SqlLike, id: string): Promise<PayerRow | undefined> {
+  return (await tx`
+    SELECT o.commission_paid_by, cpb.name AS commission_paid_by_name, o.commission_paid_by_company,
+           ${commissionLinkedFrag(tx)} AS commission_linked
+    FROM orders o LEFT JOIN users cpb ON cpb.id = o.commission_paid_by
+    WHERE o.id = ${id} LIMIT 1 FOR NO KEY UPDATE OF o
+  `)[0] as PayerRow | undefined;
+}
+
+// Records a payer that the caller has already ruled allowed (no link standing).
+// Names, not ids, in the event, as owner_changed and the handoff's handoff_by
+// do: the timeline reads the manager as they were when it was recorded.
+export async function recordPayerTx(
+  tx: SqlLike, id: string, actorId: string, from: PayerRow,
+  to: { userId: string | null; company: boolean },
+): Promise<CommissionPaidBy> {
+  const toName = to.userId === null ? null
+    : to.userId === from.commission_paid_by ? from.commission_paid_by_name
+    : ((await tx`SELECT name FROM users WHERE id = ${to.userId}`)[0]?.name as string | undefined) ?? null;
+  if (from.commission_paid_by !== to.userId || from.commission_paid_by_company !== to.company) {
+    await tx`
+      UPDATE orders SET commission_paid_by = ${to.userId}, commission_paid_by_company = ${to.company}
+      WHERE id = ${id}`;
+    await writeOrderEvent(tx, id, actorId, 'meta_changed', {
+      changes: [{
+        field: 'commission_paid_by',
+        from: from.commission_paid_by_company ? 'Company' : from.commission_paid_by_name,
+        to: to.company ? 'Company' : toName,
+      }],
+    });
+  }
+  return commissionPaidByOf({
+    commission_paid_by: to.userId, commission_paid_by_name: toName,
+    commission_paid_by_company: to.company, commission_linked: false,
+  });
 }
 
 // A typed/OCR part number always wins; otherwise fall back to a synthetic one
