@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { EVALUATOR_MODEL, summarizeTrial, TRIAL_MIN_LABELLED, type VsLive } from './tracker';
+import { EVALUATOR_MODEL, evaluatorModelProblem, summarizeTrial, TRIAL_MIN_LABELLED, type VsLive } from './tracker';
 
 const cell = (posts: number, leads = 0, notLeads = 0) => ({ posts, leads, notLeads });
 
@@ -50,5 +50,14 @@ describe('EVALUATOR_MODEL', () => {
     expect(EVALUATOR_MODEL(entry('openai/gpt-4o-mini:batch'))).toBe(true);
     expect(EVALUATOR_MODEL(entry('~anthropic/claude-haiku-latest'))).toBe(false);
     expect(EVALUATOR_MODEL(entry('openrouter/auto', false))).toBe(false);
+  });
+
+  it('accepts only an id the catalogue lists as an evaluator model', () => {
+    const catalogue = [entry('openai/gpt-4o-mini'), entry('meta-llama/llama-3-8b-instruct', false)];
+    expect(evaluatorModelProblem('openai/gpt-4o-mini', catalogue)).toBeNull();
+    expect(evaluatorModelProblem('meta-llama/llama-3-8b-instruct', catalogue)).toBe('unlisted');
+    expect(evaluatorModelProblem('vendor/not-in-catalogue', catalogue)).toBe('unlisted');
+    expect(evaluatorModelProblem('openai/gpt-4o-mini', null)).toBe('loading');
+    expect(evaluatorModelProblem('gpt-4o-mini', catalogue)).toBe('shape');
   });
 });

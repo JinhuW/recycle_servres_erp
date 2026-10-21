@@ -3,21 +3,8 @@ import { Combobox } from './Combobox';
 import { loadAiModels, modelMeta, type AiModel } from '../lib/aiModels';
 import { useT } from '../lib/i18n';
 
-/**
- * An OpenRouter model id field: pick from the catalogue, or type an id it
- * doesn't list yet (OpenRouter adds models before anyone touches the ERP).
- * The value is the text as typed; callers check its shape.
- */
-export function ModelPicker({ value, onChange, id, placeholder, invalid = false, filter }: {
-  value: string;
-  onChange: (v: string) => void;
-  id?: string;
-  placeholder?: string;
-  invalid?: boolean;
-  /** Narrows the catalogue to the models the caller can actually use. Keep it stable. */
-  filter?: (m: AiModel) => boolean;
-}) {
-  const { t, locale } = useT();
+/** OpenRouter's catalogue: null while it loads, and for good once `failed`. */
+export function useAiModels(): { models: AiModel[] | null; failed: boolean } {
   const [models, setModels] = useState<AiModel[] | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -28,6 +15,27 @@ export function ModelPicker({ value, onChange, id, placeholder, invalid = false,
       .catch(() => { if (alive) setFailed(true); });
     return () => { alive = false; };
   }, []);
+  return { models, failed };
+}
+
+/**
+ * An OpenRouter model id field: pick from the catalogue, or type an id it
+ * doesn't list yet (OpenRouter adds models before anyone touches the ERP).
+ * The value is the text as typed; callers check it.
+ */
+export function ModelPicker({ value, onChange, id, placeholder, invalid = false, filter, unavailableText }: {
+  value: string;
+  onChange: (v: string) => void;
+  id?: string;
+  placeholder?: string;
+  invalid?: boolean;
+  /** Narrows the catalogue to the models the caller can actually use. Keep it stable. */
+  filter?: (m: AiModel) => boolean;
+  /** What to say when the catalogue can't be loaded, for a caller that won't take a typed id. */
+  unavailableText?: string;
+}) {
+  const { t, locale } = useT();
+  const { models, failed } = useAiModels();
 
   const shown = useMemo(() => (models ?? []).filter(m => !filter || filter(m)), [models, filter]);
   const byId = useMemo(() => new Map(shown.map(m => [m.id, m])), [shown]);
@@ -47,7 +55,7 @@ export function ModelPicker({ value, onChange, id, placeholder, invalid = false,
         meta={o => { const m = byId.get(o); return m ? modelMeta(m, locale, t) : undefined; }}
         emptyText={t('aiModelsUnavailable')}
       />
-      {failed && <span className="help">{t('aiModelsUnavailable')}</span>}
+      {failed && <span className="help">{unavailableText ?? t('aiModelsUnavailable')}</span>}
     </>
   );
 }

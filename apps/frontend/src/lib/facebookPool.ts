@@ -195,12 +195,40 @@ function splitCsvRow(line: string): string[] {
   return out.map((c) => c.trim());
 }
 
-function splitImportRow(line: string): string[] {
-  if (line.includes('\t')) return line.split('\t').map((c) => c.trim());
-  if (line.includes('----')) return line.split('----').map((c) => c.trim());
-  if (line.includes('|')) return line.split('|').map((c) => c.trim());
-  if (line.includes(',')) return splitCsvRow(line);
-  return [line.trim()];
+type ImportDelimiter = '\t' | '----' | '|' | ',' | '';
+
+function importDelimiter(line: string): ImportDelimiter {
+  for (const d of ['\t', '----', '|', ','] as const) if (line.includes(d)) return d;
+  return '';
+}
+
+function splitImportRow(line: string, delimiter = importDelimiter(line)): string[] {
+  if (delimiter === ',') return splitCsvRow(line);
+  if (!delimiter) return [line.trim()];
+  return line.split(delimiter).map((c) => c.trim());
+}
+
+// Two headers can name one field. A second password column after the e-mail
+// is the mailbox's (账号,密码,邮箱,密码); any other repeat is ambiguous, so the
+// column maps to nothing and its rows are refused rather than letting the
+// later column overwrite the earlier one.
+function resolveImportHeader(cells: (ImportField | null)[]): (ImportField | 'repeat' | null)[] {
+  const taken = new Set<ImportField>();
+  return cells.map((cell) => {
+    let field = cell;
+    if (!field || field === 'note' || field === 'seq') return field;
+    if (
+      field === 'password' &&
+      taken.has('password') &&
+      taken.has('email') &&
+      !cells.includes('emailPassword')
+    ) {
+      field = 'emailPassword';
+    }
+    if (taken.has(field)) return 'repeat';
+    taken.add(field);
+    return field;
+  });
 }
 
 export function parsePoolImport(text: string, accounts: readonly PoolAccount[]) {
@@ -211,19 +239,27 @@ export function parsePoolImport(text: string, accounts: readonly PoolAccount[]) 
   // else is read positionally, as before.
   const headerLine = lines.findIndex((l) => l.trim());
   const header = headerLine >= 0 ? splitImportRow(lines[headerLine]).map(importHeaderField) : [];
-  const byHeader = header.filter(Boolean).length >= 2 ? header : null;
+  const byHeader = header.filter(Boolean).length >= 2 ? resolveImportHeader(header) : null;
+  // A header fixes the delimiter for the whole sheet: judged per row, a quoted
+  // CSV cell holding a | or ---- would split its row on that instead.
+  const sheetDelimiter = byHeader ? importDelimiter(lines[headerLine]) : undefined;
 
   return lines.flatMap((line, index) => {
     if (!line.trim()) return [];
     if (byHeader && index === headerLine) return [];
-    const cols = splitImportRow(line);
+    const cols = splitImportRow(line, sheetDelimiter);
 
     let draft: PoolDraft;
+    let repeatedColumn = false;
     if (byHeader) {
       draft = { ...emptyPoolDraft() };
       byHeader.forEach((field, i) => {
         if (!field || field === 'seq') return;
         const value = (cols[i] ?? '').trim();
+        if (field === 'repeat') {
+          if (value) repeatedColumn = true;
+          return;
+        }
         if (field === 'note') draft.note = draft.note ? `${draft.note} ${value}` : value;
         else if (field === 'totp') draft.totp = totpKey(value);
         else draft[field] = value;
@@ -239,9 +275,12 @@ export function parsePoolImport(text: string, accounts: readonly PoolAccount[]) 
         emailPassword = '',
         recovery = '',
         cookie = '',
-        token = '',
-        ...notes
+        ...rest
       ] = c;
+      // The token column took the place the note used to have, so rows in
+      // that older layout still arrive; anything there that is not a token is
+      // their note.
+      const token = rest[0] === '' || /^EAA/i.test(rest[0] ?? '') ? (rest.shift() ?? '') : '';
       draft = {
         ...emptyPoolDraft(),
         uid,
@@ -252,11 +291,12 @@ export function parsePoolImport(text: string, accounts: readonly PoolAccount[]) 
         recovery,
         cookie,
         token,
-        note: notes.join(' '),
+        note: rest.join(' ').trim(),
       };
     }
 
     const errors = validatePoolDraft(draft, accounts);
+    if (repeatedColumn) errors.push('fpRepeatedColumn');
     if (seen.has(draft.uid)) errors.push('fpRepeated');
     seen.add(draft.uid);
     const warnings: string[] = [];

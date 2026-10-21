@@ -171,6 +171,22 @@ export const MODEL_ID = /^[\w.-]+\/[\w.:-]+$/;
  */
 export const EVALUATOR_MODEL = (m: AiModel): boolean => TEXT_JSON_MODEL(m) && MODEL_ID.test(m.id);
 
+/**
+ * Why the evaluator cannot run on `id`, or null when it can. The shape is all
+ * the tracker checks, but a model without strict JSON output answers in prose,
+ * every verdict then fails to parse and the tracker stops judging posts, so
+ * the id must be one the catalogue lists as an evaluator model. 'loading'
+ * while the catalogue is null.
+ */
+export function evaluatorModelProblem(
+  id: string,
+  catalogue: readonly AiModel[] | null,
+): 'shape' | 'loading' | 'unlisted' | null {
+  if (!MODEL_ID.test(id)) return 'shape';
+  if (!catalogue) return 'loading';
+  return catalogue.some(m => m.id === id && EVALUATOR_MODEL(m)) ? null : 'unlisted';
+}
+
 export const trackerApi = {
   listWorkers: (params: { status: WorkerStatusFilter; limit: number; offset: number }) =>
     api.get<{ workers: TrackerWorker[]; total: number }>(

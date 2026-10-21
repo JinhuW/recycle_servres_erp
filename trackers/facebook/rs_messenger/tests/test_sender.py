@@ -7,8 +7,10 @@ import pytest
 from rs_messenger import sender
 from rs_messenger.sender import (
     ERR_COMPOSER_MISSING,
+    ERR_DRAFT_STUCK,
     ERR_NOT_SUBMITTED,
     ERR_NOT_VISIBLE,
+    ERR_PANE_UNREAD,
     PERMANENT_ERRORS,
     already_sent,
     count_out_rows,
@@ -70,8 +72,10 @@ def test_already_sent_looks_only_at_the_latest_message():
     assert not already_sent([], PROBE)
 
 
-def test_composer_missing_is_the_only_permanent_error():
-    assert PERMANENT_ERRORS == {ERR_COMPOSER_MISSING}
+def test_a_reply_that_may_have_posted_is_never_retried():
+    # A missing composer will not come back in three polls, and a reply whose
+    # bubble went unrecognised is probably on the seller's screen already.
+    assert PERMANENT_ERRORS == {ERR_COMPOSER_MISSING, ERR_NOT_VISIBLE}
 
 
 # -- send_message against a fake page -----------------------------------------
@@ -164,6 +168,7 @@ def instant(monkeypatch):
     monkeypatch.setattr(sender, "raise_if_restricted", lambda *a, **k: None)
     monkeypatch.setattr(sender.time, "sleep", lambda s: None)
     monkeypatch.setattr(sender, "VERIFY_TIMEOUT_S", 0.0)
+    monkeypatch.setattr(sender, "PANE_TIMEOUT_S", 0.0)
     monkeypatch.setattr(sender, "_last_send_at", 0.0)
 
 
@@ -207,3 +212,38 @@ def test_a_missing_composer_is_a_permanent_failure():
     sent, error = send_message(page, "1", REPLY)
     assert (sent, error) == (False, ERR_COMPOSER_MISSING)
     assert error in PERMANENT_ERRORS
+
+
+def test_a_leftover_draft_is_cleared_before_the_reply_is_typed():
+    page = FakePage([inc("Is it still for sale?")])
+    page.composer_text = "Hello, is this available?"
+    assert send_message(page, "1", REPLY) == (True, None)
+    assert page.rows[-1] == out(REPLY)
+
+
+def test_a_draft_that_will_not_clear_is_never_typed_onto():
+    page = FakePage([inc("Is it still for sale?")])
+    page.composer_text = "Hello, is this available?"
+    page.keyboard.press = lambda key: None
+    assert send_message(page, "1", REPLY) == (False, ERR_DRAFT_STUCK)
+    assert page.composer.typed == []
+    assert ERR_DRAFT_STUCK not in PERMANENT_ERRORS
+
+
+def test_an_unreadable_pane_sends_nothing():
+    # Without a baseline an older identical bubble would vouch for the reply.
+    page = FakePage([out(REPLY), inc("Yes, come by")], submits=False)
+
+    def broken(js: str) -> None:
+        raise RuntimeError("Execution context was destroyed")
+
+    page.evaluate = broken
+    assert send_message(page, "1", REPLY) == (False, ERR_PANE_UNREAD)
+    assert page.composer.typed == []
+    assert ERR_PANE_UNREAD not in PERMANENT_ERRORS
+
+
+def test_a_pane_still_loading_sends_nothing():
+    page = FakePage([inc("Seen")])
+    assert send_message(page, "1", REPLY) == (False, ERR_PANE_UNREAD)
+    assert page.composer.typed == []

@@ -686,15 +686,16 @@ ALERT_CLAIM_SQL = {
     """,
 }
 
-# Alerts sent before claims existed, run on every boot. Without it the first
-# sighting after the deploy of a listing another worker alerted yesterday is a
-# first claim, and alerts again. Idempotent: it adds only what alert_messages
-# knows and alert_claims does not.
+# Alerts sent before claims existed. Without it the first sighting after the
+# deploy of a listing another worker alerted yesterday is a first claim, and
+# alerts again. It runs on boot but does its work only while alert_claims is
+# empty: once claims are in use every alert makes one, and alert_messages is
+# never pruned, so re-aggregating it on each boot would only grow.
 SEED_ALERT_CLAIMS_SQL = """
     INSERT INTO alert_claims (marketplace, listing_id, worker_id, claimed_at, delivered_at)
     SELECT 'facebook', listing_id, MIN(worker_id), MIN(sent_at), MIN(sent_at)
     FROM alert_messages
-    WHERE listing_id IS NOT NULL
+    WHERE listing_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM alert_claims)
     GROUP BY listing_id
     ON CONFLICT (marketplace, listing_id) DO NOTHING
 """

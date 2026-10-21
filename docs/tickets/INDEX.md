@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-341](./RS-341-fix-the-dev-to-main-review-findings-before-the-v1-31.md) | backlog | bug | P1 | Fix the dev-to-main review findings before the v1.310 release | — |
 | [RS-340](./RS-340-accounting-page-an-rmb-ledger-of-what-managers-recei.md) | done | story | P2 | Accounting page: an RMB ledger of what managers receive and pay | 1.310.0 |
 | [RS-339](./RS-339-fleet-tab-shows-the-proxy-as-a-column-not-a-grouping.md) | done | story | P2 | Fleet tab shows the proxy as a column, not a grouping | 1.309.0 |
 | [RS-338](./RS-338-worker-logs-in-with-cookie-then-token-password-last.md) | done | story | P2 | Worker logs in with cookie then token, password last | facebook-tracker 0.13.10, v1.308.0 |

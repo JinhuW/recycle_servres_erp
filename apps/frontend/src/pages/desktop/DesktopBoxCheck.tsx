@@ -1182,9 +1182,9 @@ function CountField({ value, max, disabled, label, onFocus, onCommit, onScanKey 
 }
 
 // The sell price, typed beside the count. It lands on Enter or on leaving the
-// field, never per keystroke. Unpriced, the field shows the market's value as
-// a ghost, and Enter on the empty field takes it; a price typed back to blank
-// unprices the line.
+// field, never per keystroke. Unpriced (no price, or the 0 that also means
+// none), the field shows the market's value as a ghost, and Enter on the empty
+// field takes it; a price typed back to blank unprices the line.
 function PriceField({ value, suggestion, disabled, label, inputRef, onFocus, onCommit, onScanKey }: {
   value: number | null;
   suggestion: number | null;
@@ -1199,7 +1199,8 @@ function PriceField({ value, suggestion, disabled, label, inputRef, onFocus, onC
   // Set right before blur(), whose handler still sees the draft as it was.
   const cancelled = useRef(false);
   const takeSuggestion = useRef(false);
-  const shown = value != null ? value.toFixed(2) : '';
+  const priced = isPricedSellPrice(value);
+  const shown = priced ? value!.toFixed(2) : '';
   const leave = (el: HTMLInputElement) => {
     cancelled.current = true;
     el.blur();
@@ -1245,7 +1246,7 @@ function PriceField({ value, suggestion, disabled, label, inputRef, onFocus, onC
           e.preventDefault();
           // Only a line never priced takes the ghost: a price cleared and
           // entered is the manager unpricing it.
-          takeSuggestion.current = value == null && (draft ?? '').trim() === '';
+          takeSuggestion.current = !priced && (draft ?? '').trim() === '';
           e.currentTarget.blur();
         } else if (e.key === 'Escape') {
           // Puts the price back; never leaves the page.

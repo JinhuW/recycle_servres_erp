@@ -138,19 +138,26 @@ def test_listings_alerted_before_claims_existed_are_already_claimed(tmp_path):
     assert claim(db, "va-2", price="$180", listing="960689159823847")["verdict"] == "discounted"
 
 
-def test_seeding_twice_changes_nothing(tmp_path):
+def test_seeding_stops_once_claims_are_in_use(tmp_path):
     path = tmp_path / "reboot.db"
     first = Database(path)
     first.add_alert_message(
         {"chat_id": "-100", "message_id": 7, "worker_id": "w", "listing_id": "L1"}
     )
-    claim(first, "va-2", listing="L2")
     first.close()
+    seeded = Database(path)
+    claim(seeded, "va-2", listing="L2")
+    seeded.add_alert_message(
+        {"chat_id": "-100", "message_id": 8, "worker_id": "w", "listing_id": "L3"}
+    )
+    seeded.close()
 
     db = Database(path)
-    Database(path)
     assert db.get_alert_claim("facebook", "L1")["delivered_at"] is not None
     assert db.get_alert_claim("facebook", "L2")["worker_id"] == "va-2"
+    # Every alert sent since claims existed made its own; the boot re-reads
+    # nothing.
+    assert db.get_alert_claim("facebook", "L3") is None
 
 
 def test_the_routes_use_the_token_s_worker(client):

@@ -306,7 +306,8 @@ app.use('*', (c, next) => {
 // the browser serving its 60s-old copy back to Settings made a saved shipping
 // address look like it had never persisted.
 // Safe methods only: these prefixes also carry POST/PATCH endpoints, whose
-// responses have no business advertising a cache lifetime.
+// responses have no business advertising a cache lifetime. Successes only: a
+// cached 502 would keep answering the user's retry for the next minute.
 const CACHEABLE_PREFIXES = ['/api/lookups', '/api/categories', '/api/workspace', '/api/ai/models'];
 // Same trap as /api/warehouses, under a cached prefix: the FX panel re-reads
 // the rates straight after a manual save or a refresh.
@@ -314,6 +315,7 @@ const UNCACHED_PATHS = new Set(['/api/workspace/fx-rates']);
 app.use('*', async (c, next) => {
   await next();
   if (c.req.method !== 'GET' && c.req.method !== 'HEAD') return;
+  if (!c.res.ok) return;
   const path = c.req.path;
   if (UNCACHED_PATHS.has(path)) return;
   if (CACHEABLE_PREFIXES.some((p) => path === p || path.startsWith(p + '/'))) {

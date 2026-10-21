@@ -145,6 +145,19 @@ describe('facebook account pool', () => {
     expect(retired.body.activity[0]).toMatchObject({ action: 'retired', accountNo: 1 });
   });
 
+  it('an edit without a token field keeps the stored token; an empty one clears it', async () => {
+    const token = await manager();
+    await seedPool(token, 1);
+    const older: Record<string, unknown> = draft(1, { note: 'from an older bundle' });
+    delete older.token;
+    const kept = await api<Snapshot>('PUT', `${BASE}/1`, { token, body: { draft: older } });
+    expect(kept.status).toBe(200);
+    expect(kept.body.accounts[0]).toMatchObject({ note: 'from an older bundle', token: 'EAAtoken1' });
+
+    const cleared = await api<Snapshot>('PUT', `${BASE}/1`, { token, body: { draft: draft(1, { token: '' }) } });
+    expect(cleared.body.accounts[0].token).toBe('');
+  });
+
   it('shows a purchaser the rack but only the logins they hold', async () => {
     const token = await manager();
     await seedPool(token, 3);

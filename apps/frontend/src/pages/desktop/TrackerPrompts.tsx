@@ -1,13 +1,13 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { Modal } from '../../components/Modal';
-import { ModelPicker } from '../../components/ModelPicker';
+import { ModelPicker, useAiModels } from '../../components/ModelPicker';
 import { Skeleton } from '../../components/Skeleton';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import {
   EVALUATOR_MODEL,
-  MODEL_ID,
+  evaluatorModelProblem,
   summarizeTrial,
   trackerApi,
   TRIAL_MIN_LABELLED,
@@ -340,8 +340,12 @@ function CandidateModal({ prompt: initialPrompt, model: initialModel, liveModel,
   const [prompt, setPrompt] = useState(initialPrompt);
   const [model, setModel] = useState(initialModel);
   const [saving, setSaving] = useState(false);
-  const modelOk = model.trim() === '' || MODEL_ID.test(model.trim());
-  const canSave = prompt.trim() !== '' && modelOk;
+  const { models } = useAiModels();
+  const problem = model.trim() === '' ? null : evaluatorModelProblem(model.trim(), models);
+  const hint = problem === 'shape' ? t('trkModelInvalid')
+    : problem === 'unlisted' ? t('trkModelUnlisted')
+    : null;
+  const canSave = prompt.trim() !== '' && problem === null;
 
   function save() {
     if (!canSave || saving) return;
@@ -362,9 +366,9 @@ function CandidateModal({ prompt: initialPrompt, model: initialModel, liveModel,
         <div className="field">
           <label className="label" htmlFor="trk-trial-model">{t('trkTrialModel')}</label>
           <ModelPicker id="trk-trial-model" value={model} onChange={setModel} placeholder={liveModel}
-            filter={EVALUATOR_MODEL} invalid={!modelOk} />
-          <span className={`help${modelOk ? '' : ' rt-help-invalid'}`}>
-            {modelOk ? t('trkTrialModelHelp', { model: liveModel }) : t('trkModelInvalid')}
+            filter={EVALUATOR_MODEL} invalid={hint !== null} unavailableText={t('trkModelsUnavailable')} />
+          <span className={`help${hint !== null ? ' rt-help-invalid' : ''}`}>
+            {hint ?? t('trkTrialModelHelp', { model: liveModel })}
           </span>
         </div>
         <div className="field">

@@ -94,6 +94,10 @@ describe('parsePriceInput', () => {
     expect(parsePriceInput('')).toBeNull();
     expect(parsePriceInput('  ')).toBeNull();
     expect(parsePriceInput('abc')).toBeUndefined();
+    // A decimal comma is refused rather than read as thousands.
+    expect(parsePriceInput('12,50')).toBeUndefined();
+    expect(parsePriceInput('1,25')).toBeUndefined();
+    expect(parsePriceInput('12,500')).toBe(12500);
     expect(parsePriceInput('-3')).toBeUndefined();
   });
 });

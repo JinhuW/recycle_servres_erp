@@ -18,6 +18,30 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The messenger no longer sends a seller the same reply twice** (RS-341).
+  The coordinator retries a failed send up to three times. A reply that posted
+  without being recognised as our bubble (Messenger rewrote an emoji or a
+  link, or the "You sent" label moved) was one of those retries, and the next
+  poll's duplicate check reads the pane the same way, so the seller could get
+  three copies. That failure is now permanent: the row goes to `failed` for
+  the operator, who can see whether it landed.
+- **A retry never types onto a leftover draft.** Messenger keeps an unsent
+  draft per thread, so after a send whose draft couldn't be cleared, the retry
+  sent both texts as one. The composer is now cleared before typing, and a
+  draft that won't clear stops the send (`ERR_DRAFT_STUCK`).
+- **A send waits for the thread to load before taking its baseline.** On an
+  evaluate error or a pane still rendering, the "before" snapshot came back
+  empty, and an older identical bubble then counted as the new reply. The
+  row was acked `sent` although nothing was sent. The messenger now waits up
+  to 10 s for a message to render, and sends nothing if none does
+  (`ERR_PANE_UNREAD`, retried next poll).
+- **The alert-claims seed runs once.** It re-aggregated every alert ever sent
+  (`alert_messages` is never pruned) on every coordinator boot, under the
+  advisory lock, to insert nothing after the first time. Now it does its work
+  only while `alert_claims` is empty.
+
 ## [0.13.11] - 2026-10-20
 
 ### Fixed

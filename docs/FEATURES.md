@@ -570,7 +570,9 @@ is not a stage but a flag beside one, set once every line has sold
     has a *Sell / Unit* field beside the count: the line's sell price, the
     projection the commission is paid on. Enter or leaving the field saves
     it straight to the line (the inventory line PATCH, audited as `priced`),
-    Escape puts it back, and a blank unprices the line. Lowercase `p`
+    Escape puts it back, and a blank unprices the line. A comma counts only
+    as a thousands separator (v1.310.1), so `12,50` is refused rather than
+    saved as 1250. Lowercase `p`
     focuses the selected row's price; the key legend says so.
     - An unpriced line whose part number is on the Market board shows the
       board's value as a ghost in the field — the last recorded price, else
@@ -2301,8 +2303,10 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   the base prompt and the rest stay behind it. Since v1.298.0 that field and
   the trial dialog's model field pick from OpenRouter's catalogue, with each
   model's price per million tokens and context size. The list holds only
-  pinned models that can return the strict JSON the evaluator asks for, and a
-  typed id the list lacks is still accepted. The ERP backend fetches the
+  pinned models that can return the strict JSON the evaluator asks for. Since
+  v1.310.1 both fields save only a model the list holds. A typed id it lacks,
+  or a model without strict JSON output, is refused, because the evaluator
+  can't read a prose answer. The ERP backend fetches the
   catalogue (`GET /api/ai/models`) and keeps it for an hour.
   - Since v1.292.0, each version is labelled *verdict first* or *reasoning
     first*. That's its response schema. The tracker has asked for the
@@ -2511,7 +2515,12 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   beside them, and the editor opens from the pencil at the row's end. A cookie may be
   pasted as a header line or as the JSON a cookie extension exports, and a
   2FA key as the base32 key or an `otpauth://` link, on the Pool tab as on
-  the Fleet tab (v1.262.1). Since v1.272.0 the pick does more than label the
+  the Fleet tab (v1.262.1). The import maps a pasted header row by column
+  name. Since v1.310.1 a second Password column after the e-mail is the
+  mailbox's, and any other repeated column refuses the rows that fill it.
+  Every row splits on the header's delimiter. Without a header, columns are
+  read by position, and a note in the older place right after the cookie
+  still arrives as a note. Since v1.272.0 the pick does more than label the
   account. Saving a newly picked worker, or **Send the login again**, writes
   the account's login, password, 2FA key and e-mail into that worker's vault
   account with password login allowed, and queues Re-login. The worker then

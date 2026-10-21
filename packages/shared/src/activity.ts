@@ -59,6 +59,9 @@ export const ACTIVITY_KIND_MAP: Record<
     meta_changed:        'edited',
     price_adjusted:      'priced',
     status_meta_changed: 'note',
+    // Files on the order itself, which way they went, as the PO's line photos.
+    attachment_added:    'added',
+    attachment_removed:  'removed',
     archived:            'archived',
     unarchived:          'archived',
   },
