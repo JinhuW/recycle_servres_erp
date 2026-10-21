@@ -25,6 +25,18 @@ const REQUEST_TIMEOUT_MS = 60_000;
 /** Keeps the prompt cheap; sale posts put the essentials up top. */
 const MAX_BODY_CHARS = 4000;
 
+/**
+ * Names the response schema below; part of every prompt version's identity
+ * (prompts.ts), because the same wording judges differently under another
+ * schema.
+ */
+export const RESPONSE_SCHEMA_ID = 'reasoning-first';
+
+// Reasoning comes first on purpose. Structured output writes the fields in
+// schema order, and with the verdict first the model committed before it
+// counted: "4 target items … does not meet the minimum of 7", is_target true.
+// Measured on 100 prod posts in
+// docs/prompt-evaluations/2026-10-19-candidate-1-offline.md.
 const RESPONSE_SCHEMA = {
   type: 'json_schema',
   json_schema: {
@@ -33,8 +45,9 @@ const RESPONSE_SCHEMA = {
     schema: {
       type: 'object',
       additionalProperties: false,
-      required: ['is_target', 'summary', 'price', 'reasoning'],
+      required: ['reasoning', 'is_target', 'summary', 'price'],
       properties: {
+        reasoning: {type: 'string', description: 'Brief justification for the verdict.'},
         is_target: {
           type: 'boolean',
           description: 'True only if this is a for-sale listing of hardware we buy.',
@@ -47,7 +60,6 @@ const RESPONSE_SCHEMA = {
           type: ['string', 'null'],
           description: 'Asking price exactly as written, or null if not stated.',
         },
-        reasoning: {type: 'string', description: 'Brief justification for the verdict.'},
       },
     },
   },

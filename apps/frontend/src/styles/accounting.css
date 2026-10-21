@@ -1,0 +1,234 @@
+/* Accounting — the managers' RMB cash book. House tokens only; the page's own
+   voice is the ledger's: one identity band (opening + received − paid =
+   closing, the total double-ruled the way a book closes a period), and a
+   three-column book where direction is the column a figure sits in. Every
+   selector is scoped under .acct-, since this sheet stays loaded once its
+   chunk has been. */
+
+.acct-fig {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+  white-space: nowrap;
+}
+.acct-fig .acct-cur { font-size: 0.62em; font-weight: 500; color: var(--fg-muted); margin-right: 0.08em; }
+.acct-fig .acct-fen { color: var(--fg-subtle); font-weight: inherit; }
+.acct-in { color: var(--pos); }
+.acct-in .acct-cur, .acct-in .acct-fen { color: inherit; opacity: 0.75; }
+.acct-neg { color: var(--neg); }
+
+/* ── Scope: what the band and the book are about ── */
+.acct-scope {
+  flex: none;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.acct-scope .select { width: 190px; height: 32px; font-size: 12.5px; padding: 0 12px; }
+.acct-rate { margin-left: auto; font-size: 12px; color: var(--fg-subtle); }
+
+/* ── The identity band ── */
+.acct-band {
+  /* .page is a flex column: without this the band's overflow lets it shrink
+     under its own figures once the page outgrows the window. */
+  flex: none;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+.acct-sum {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1.1fr);
+  grid-template-rows: auto auto auto;
+  column-gap: 18px;
+  padding: 20px 24px 18px;
+}
+.acct-term { display: contents; }
+.acct-term-label { grid-row: 1; grid-column: var(--col); font-size: 12.5px; font-weight: 500; color: var(--fg-muted); margin-bottom: 6px; }
+.acct-term-fig {
+  grid-row: 2; grid-column: var(--col);
+  font-size: 28px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.15;
+  align-self: end; justify-self: start;
+  /* Every figure carries the closing's rule, unseen, so all four share a baseline. */
+  border-bottom: 3px double transparent; padding-bottom: 2px;
+}
+.acct-op {
+  grid-row: 2; align-self: end; padding-bottom: 5px;
+  font-size: 22px; font-weight: 300; line-height: 1.3; color: var(--fg-subtle);
+}
+/* The period closes the way a book does: the total, double-ruled. */
+.acct-term-fig.acct-closing { border-bottom-color: var(--fg); }
+.acct-term-fig.acct-closing.acct-neg { border-bottom-color: var(--neg); }
+.acct-term-of {
+  grid-row: 3; grid-column: var(--col); margin-top: 10px;
+  display: grid; gap: 3px; align-content: start;
+  font-size: 12px; color: var(--fg-muted);
+}
+.acct-term-of div { display: flex; justify-content: space-between; gap: 12px; max-width: 220px; }
+.acct-term-of .acct-fig { color: var(--fg); }
+
+.acct-held {
+  display: flex; align-items: center; gap: 6px 4px; flex-wrap: wrap;
+  padding: 10px 18px;
+  background: var(--bg-soft);
+  border-top: 1px solid var(--border);
+  font-size: 12.5px;
+}
+.acct-held-label { color: var(--fg-muted); margin-right: 8px; cursor: help; }
+.acct-held button {
+  display: inline-flex; align-items: baseline; gap: 8px;
+  border: 1px solid transparent; background: transparent; border-radius: 999px;
+  padding: 4px 10px; font: inherit; color: var(--fg-muted);
+}
+.acct-held button:hover { background: var(--bg-elev); border-color: var(--border); }
+.acct-held button[aria-pressed='true'] { background: var(--bg-elev); border-color: var(--border-strong); color: var(--fg); }
+.acct-held button .acct-fig { font-weight: 600; color: var(--fg); }
+.acct-held button .acct-fig.acct-neg { color: var(--neg); }
+.acct-held button:focus-visible,
+.acct-book tbody tr:focus-visible,
+.acct-pick-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* ── The book ── */
+.acct-filters { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.acct-filters .select { width: 150px; height: 32px; font-size: 12.5px; padding: 0 12px; }
+.acct-filters .seg button { padding: 5px 12px; font-size: 12px; }
+.acct-search { position: relative; flex: 1; min-width: 200px; max-width: 360px; }
+.acct-search .input { padding-left: 30px; height: 32px; font-size: 12.5px; }
+.acct-search svg { position: absolute; left: 10px; top: 10px; color: var(--fg-subtle); }
+.acct-voided-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--fg-muted); margin-left: auto; }
+
+.acct-book-wrap { overflow-x: auto; }
+.acct-book { min-width: 780px; }
+.acct-book td { vertical-align: top; }
+.acct-for .rec-link { white-space: nowrap; }
+.acct-book tbody tr { cursor: pointer; }
+/* A day begins on a firmer rule; its later rows leave the date blank. */
+.acct-book tbody tr.acct-day-start td { border-top: 1px solid var(--border-strong); }
+.acct-book tbody tr:first-child td { border-top: 0; }
+.acct-book .acct-date { white-space: nowrap; color: var(--fg-muted); font-weight: 500; width: 72px; }
+.acct-book .acct-num { text-align: right; width: 112px; }
+.acct-book .acct-bal { color: var(--fg-muted); }
+.acct-for { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.acct-for-kind { font-weight: 500; white-space: nowrap; }
+.acct-for-party { color: var(--fg-subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
+.acct-sub { display: block; font-size: 11.5px; color: var(--fg-subtle); margin-top: 2px; white-space: nowrap; }
+.acct-book tr.acct-voided td { color: var(--fg-subtle); }
+.acct-book tr.acct-voided .acct-num .acct-fig { text-decoration: line-through; color: var(--fg-subtle); }
+.acct-empty { padding: 28px 24px; font-size: 13px; color: var(--fg-subtle); }
+.acct-empty .btn { margin-top: 12px; }
+
+/* ── Entry drawer: the Modal, docked to the right ── */
+.modal-backdrop:has(.acct-drawer) { padding: 0; place-items: stretch end; }
+.acct-drawer {
+  width: min(100%, 520px); height: 100dvh; max-height: none;
+  border-radius: 0; display: flex; flex-direction: column;
+}
+.acct-drawer .modal-body { flex: 1; max-height: none; overflow: auto; }
+.acct-hero { padding: 6px 0 16px; border-bottom: 1px solid var(--border); margin-bottom: 14px; }
+.acct-hero-dir { font-size: 12.5px; color: var(--fg-muted); font-weight: 500; }
+.acct-hero .acct-fig { font-size: 30px; font-weight: 600; letter-spacing: -0.02em; }
+.acct-facts { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 9px 14px; font-size: 13px; margin: 0; }
+.acct-facts dt { color: var(--fg-muted); }
+.acct-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.acct-banner {
+  border-radius: var(--radius-sm); padding: 9px 12px; font-size: 12.5px; margin-bottom: 14px;
+  background: var(--warn-soft); color: var(--warn-strong);
+}
+.acct-history { display: grid; gap: 8px; font-size: 12.5px; margin-top: 8px; }
+.acct-history-when { color: var(--fg-subtle); margin-left: 6px; }
+.acct-void-box { display: grid; gap: 8px; margin-top: 10px; }
+
+/* ── Entry form ── */
+.acct-form { display: grid; gap: 14px; }
+.acct-form .field { margin-bottom: 0; }
+.acct-kinds { display: flex; flex-wrap: wrap; gap: 6px; }
+.acct-kinds button {
+  border: 1px solid var(--border); background: var(--bg-elev); color: var(--fg-muted);
+  border-radius: 999px; padding: 5px 12px; font: inherit; font-size: 12.5px;
+}
+.acct-kinds button[aria-pressed='true'] { border-color: var(--fg); color: var(--fg); font-weight: 500; }
+.acct-kinds button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.acct-picked {
+  display: flex; align-items: center; gap: 10px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 9px 12px;
+  background: var(--bg-soft); font-size: 13px;
+}
+.acct-picked .acct-sub { margin-top: 1px; }
+.acct-pick-list {
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  max-height: 220px; overflow: auto; margin-top: 6px;
+}
+.acct-pick-row {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: baseline;
+  width: 100%; text-align: left; font: inherit; font-size: 12.5px;
+  border: 0; border-bottom: 1px solid var(--border); background: transparent; padding: 8px 12px;
+}
+.acct-pick-row:last-child { border-bottom: 0; }
+.acct-pick-row:hover { background: var(--bg-soft); }
+.acct-pick-party { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-muted); }
+.acct-amount-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.acct-hint { font-size: 11.5px; color: var(--fg-subtle); margin-top: 4px; }
+.acct-error { font-size: 12.5px; color: var(--neg); }
+
+/* ── Card on a PO, sell order or case ── */
+.acct-card-head { display: flex; align-items: baseline; gap: 8px; }
+.acct-card-title { font-size: 13px; font-weight: 600; }
+.acct-card-head .btn { margin-left: auto; }
+.acct-card-rows { margin-top: 10px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; font-size: 12.5px; }
+.acct-card-row { display: flex; gap: 8px; align-items: baseline; color: inherit; text-decoration: none; }
+.acct-card-row:hover .acct-card-what { text-decoration: underline; }
+.acct-card-day { flex: none; white-space: nowrap; color: var(--fg-subtle); font-variant-numeric: tabular-nums; }
+.acct-card-what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-muted); }
+.acct-card-row .acct-fig { flex: none; }
+.acct-card-net {
+  display: flex; justify-content: space-between; gap: 8px; align-items: baseline;
+  padding-top: 6px; border-top: 1px dashed var(--border); font-weight: 600;
+}
+.acct-card-ref { font-size: 11.5px; color: var(--fg-subtle); font-weight: 400; margin-top: 4px; }
+.acct-card-empty { font-size: 12.5px; color: var(--fg-subtle); margin-top: 6px; }
+
+/* ── Phone ── */
+.acct-ph-tape {
+  margin-top: 12px; padding: 14px 16px 12px;
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: 14px;
+}
+.acct-ph-tape-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 3px 0; font-size: 13px; }
+.acct-ph-tape-row .acct-op { font-size: 15px; width: 14px; display: inline-block; }
+.acct-ph-tape-row .acct-fig { font-size: 15px; font-weight: 600; }
+.acct-ph-tape-total { border-top: 1px solid var(--fg); margin-top: 6px; padding-top: 7px; }
+.acct-ph-tape-total .acct-fig { font-size: 22px; border-bottom: 3px double var(--fg); }
+.acct-ph-tape-total .acct-fig.acct-neg { border-bottom-color: var(--neg); }
+.acct-ph-held { margin-top: 10px; padding-top: 9px; border-top: 1px dashed var(--border); display: grid; gap: 4px; font-size: 12.5px; }
+.acct-ph-held div { display: flex; justify-content: space-between; color: var(--fg-muted); }
+.acct-ph-held .acct-fig { color: var(--fg); font-weight: 600; }
+.acct-ph-held .acct-fig.acct-neg { color: var(--neg); }
+.acct-ph-day { margin-top: 16px; }
+.acct-ph-list { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+.acct-ph-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; align-items: baseline;
+  padding: 11px 14px; border-bottom: 1px solid var(--border); color: inherit; text-decoration: none;
+}
+.acct-ph-row:last-child { border-bottom: 0; }
+.acct-ph-row-what { grid-column: 1; grid-row: 1; font-size: 13.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct-ph-row-sub { grid-column: 1; grid-row: 2; font-size: 12px; color: var(--fg-subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct-ph-row .acct-fig { font-size: 14px; font-weight: 600; grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+.acct-ph-row.acct-voided { opacity: 0.55; }
+.acct-ph-row.acct-voided .acct-fig { text-decoration: line-through; }
+.acct-ph-section { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.acct-ph-record { flex: none; height: 34px; padding: 0 12px; border-radius: 999px; font-size: 13px; margin-left: auto;
+  display: inline-flex; align-items: center; gap: 6px; }
+/* The sheet's form spaces its own fields. */
+.acct-form .ph-field { margin-top: 0; }
+.acct-ph-section .acct-card-rows { font-size: 13px; }
+.acct-ph-hero { padding: 16px 2px 14px; }
+.acct-ph-hero .acct-fig { font-size: 30px; font-weight: 600; letter-spacing: -0.02em; }
+.acct-ph-actions { display: flex; gap: 8px; margin-top: 16px; }
+.acct-ph-actions .ph-btn { flex: 1; height: 44px; }
+
+@media (max-width: 1180px) {
+  .acct-term-fig { font-size: 23px; }
+  .acct-op { font-size: 18px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .modal-backdrop:has(.acct-drawer) .acct-drawer { animation: none; }
+}

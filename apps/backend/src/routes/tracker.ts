@@ -8,9 +8,11 @@ import type { Env, User } from '../types';
 // ─── Reddit tracker proxy ─────────────────────────────────────────────────────
 // Manager-only pass-through to the `trackers/reddit` admin API, so its bearer
 // token never reaches the browser. Explicit allowlist rather than a catch-all:
-// the tracker also exposes settings and requeue endpoints this UI has no
-// business calling. Prompt trials get their own narrow routes
-// (/prompt-candidate) for exactly that reason, instead of opening settings. Self-applies authMiddleware (oauthAdmin pattern), so
+// the tracker also exposes generic settings and requeue endpoints this UI has
+// no business calling. Prompt trials get their own narrow routes
+// (/prompt-candidate) for exactly that reason, and the one setting the
+// Evaluate stage edits, the live model, is opened by key rather than through
+// a `:key` param. Self-applies authMiddleware (oauthAdmin pattern), so
 // index.ts mounts it with a single app.route().
 
 const TIMEOUT_MS = 10_000;
@@ -101,6 +103,7 @@ tracker.put('/prompt-candidate', (c) => forward(c, 'PUT', '/api/prompt-candidate
 tracker.delete('/prompt-candidate', (c) => forward(c, 'DELETE', '/api/prompt-candidate', false));
 tracker.post('/prompt-candidate/promote', (c) =>
   forward(c, 'POST', '/api/prompt-candidate/promote', false));
+tracker.put('/settings/llm_model', (c) => forward(c, 'PUT', '/api/settings/llm_model', true));
 
 tracker.get('/subreddits', (c) => forward(c, 'GET', '/api/subreddits', false));
 tracker.post('/subreddits', (c) => forward(c, 'POST', '/api/subreddits', true));

@@ -85,11 +85,12 @@ max_tokens = 4096
 login_wait_time = 120
 
 # --------------------------------------------------------------------------
-# WHEN TO SEARCH — ONCE a day at 06:00 US EASTERN (owner call, 2026-09-06).
+# WHEN TO SEARCH — ONCE a day at 09:00 US EASTERN (owner call, 2026-10-19;
+# it was 06:00 Eastern from 2026-09-06 until then).
 # Twice a day was tried and dropped: a full region sweep MEASURED at 6-9h
 # through the residential proxy (it ~triples every page load), so two sweeps
 # overlapped, ran past the 23:00 window, and meant 12-18h of Facebook traffic
-# a day — more exposure, not less. One 07:00 sweep runs ~7am-4pm, well inside
+# a day — more exposure, not less. One 09:00 sweep runs ~9am-6pm, well inside
 # the window, and idles the rest of the day. A long idle after a sweep is the
 # rate-limit WORKING, not the worker stopping.
 #
@@ -100,16 +101,17 @@ login_wait_time = 120
 # 15:00->~20:00 both finish well inside the window.
 #
 # THE TIME IS UTC, because the container's clock is UTC (Etc/UTC on the VM).
-# 06:00 America/New_York (EDT, UTC-4) = 10:00 UTC. Sweep runs 6am ->
-# early afternoon (the 6-9h duration is why it does not finish by noon).
+# 09:00 America/New_York (EDT, UTC-4) = 13:00 UTC. Sweep runs 9am -> early
+# evening (the 6-9h duration is why it does not finish by mid-afternoon).
 # NOTE ON DST: fixed UTC offset tracks EASTERN DAYLIGHT time. When New York
-# falls back to EST (UTC-5, ~early Nov), change 10:00 -> 11:00 to keep it at
-# 07:00 Eastern.
+# falls back to EST (UTC-5, ~early Nov), change 13:00 -> 14:00 to keep it at
+# 09:00 Eastern. A sweep time saved from the ERP's search settings overrides
+# this value (rs_console/settings.py), so check /state/settings.json first.
 #
 # One wrinkle worth knowing: the monitor runs one sweep immediately on startup
 # (monitor.py "run all jobs at the first time"), so a deploy/restart triggers
 # an off-schedule sweep. Deploy DURING the window and it stays inside it.
-start_at = ["10:00"]
+start_at = ["13:00"]
 
 # Nationwide single-machine run — every mainland state except California.
 # Sharded workers ignore this and use search_region = "<their region>" instead.

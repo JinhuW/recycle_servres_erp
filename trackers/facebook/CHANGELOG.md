@@ -18,6 +18,267 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.13.12] - 2026-10-21
+
+### Fixed
+
+- **The messenger no longer sends a seller the same reply twice** (RS-341).
+  The coordinator retries a failed send up to three times. A reply that posted
+  without being recognised as our bubble (Messenger rewrote an emoji or a
+  link, or the "You sent" label moved) was one of those retries, and the next
+  poll's duplicate check reads the pane the same way, so the seller could get
+  three copies. That failure is now permanent: the row goes to `failed` for
+  the operator, who can see whether it landed.
+- **A retry never types onto a leftover draft.** Messenger keeps an unsent
+  draft per thread, so after a send whose draft couldn't be cleared, the retry
+  sent both texts as one. The composer is now cleared before typing, and a
+  draft that won't clear stops the send (`ERR_DRAFT_STUCK`).
+- **A send waits for the thread to load before taking its baseline.** On an
+  evaluate error or a pane still rendering, the "before" snapshot came back
+  empty, and an older identical bubble then counted as the new reply. The
+  row was acked `sent` although nothing was sent. The messenger now waits up
+  to 10 s for a message to render, and sends nothing if none does
+  (`ERR_PANE_UNREAD`, retried next poll).
+- **The alert-claims seed runs once.** It re-aggregated every alert ever sent
+  (`alert_messages` is never pruned) on every coordinator boot, under the
+  advisory lock, to insert nothing after the first time. Now it does its work
+  only while `alert_claims` is empty.
+
+## [0.13.11] - 2026-10-20
+
+### Fixed
+
+- **The token→session exchange uses the endpoint Facebook actually recognises**
+  (RS-338 follow-up). 0.13.10 shipped a guessed `b-graph…/auth/getSessionForApp`
+  path that 404s; the recognised legacy REST method is
+  `api.facebook.com/method/auth.getSessionForApp` with
+  `generate_session_cookies=1`. A live check also established the limit of this
+  path: Facebook mints web-session cookies only for a **first-party /
+  SSO-capable** app's token (`OAuthException` 100 otherwise). The purchased-pool
+  `EAA…` tokens are valid Graph tokens but are refused here, so for those the
+  worker's token-refresh step always falls back to the cookie restore and the
+  password login — the cookie remains the real browser-login path. The step is
+  kept because it works for a first-party token.
+
+## [0.13.10] - 2026-10-20
+
+### Added
+
+- **A worker logs in from the account's access token when its cookie lapses**
+  (RS-338). The login order is now cookie-restore → token-refresh → password:
+  when a restored or seeded session does not take and the account has an access
+  token, the worker exchanges it for fresh session cookies inside its own
+  proxied browser context — the account's own IP and `datr`/`sb` device — and
+  reaches Marketplace with no password and no 2FA. A dead, absent or
+  wrong-account token falls through to the existing password login unchanged,
+  so an account without a token behaves exactly as before.
+  - The coordinator hands a worker the token on demand
+    (`POST /v1/auth/session-token`, per-worker token only, audited under the
+    `token` kind), with no daily budget — a token refresh is a far softer
+    signal than a password login. `fb_token` is a new sealed vault secret, and
+    the console allows it on the account write, so the tracker ships before the
+    ERP release that sends it on Assign.
+  - The login ledger now accepts the `cookie-restore` and `token-refresh`
+    triggers. `cookie-restore` was already sent by the worker (RS-308) but not
+    listed, so the coordinator rejected it with 422 and those ledger rows were
+    silently dropped; they are recorded now.
+
+## [0.13.9] - 2026-10-20
+
+### Added
+
+- **Every proxy carries two workers** (RS-334). The two-per-IP pilot on 10014
+  and 10015 is widened to all 20 Decodo ports: the 18 other IPs each get a
+  partner `<id>b` on the same proxy var. That makes 40 compose workers:
+  `homelab-1b`, `ne-1b`, `mw-1b`, `west-1b`, `sc-1b`, `denver-1b`, `nyc-1b`,
+  `phl-1b`, `wc-1b`, `va-2b`, `bos-1b`, `nyc-2b`, `nyc-3b`, `ca-3b`,
+  `ca-4b`, `nj-1b`, `nj-2b` and `nj-3b`, on VNC 5924–5941.
+  - Each seeds a catalog city near its exit that its IP-mate does not search.
+  - Each sweeps at 17:00 UTC against its IP-mate's 13:00 (`settings
+    start-at`).
+  - The West Coast exits (Palo Alto, and denver-1's Seattle exit) get
+    vault slots in `rs_west`, for Pacific-time devices.
+
+  Every partner starts parked and searches nothing until it gets an account.
+  `deploy/README.md` → *Scaling notes* has the rules for each pair and the
+  order in which to assign accounts. Nine of these IPs carry live accounts,
+  so pair those last.
+
+## [0.13.8] - 2026-10-20
+
+### Added
+
+- **Two accounts on one IP, as a pilot** (RS-332). Ports 10014 and 10015
+  (Palo Alto) each get a second worker, `ca-1b` beside `ca-1` and `ca-2b`
+  beside `ca-2`, while `ca-3` and `ca-4` stay single as the control. Several
+  accounts on one residential IP is ordinary, since a household shares a
+  router. What got accounts killed on the shared house IP in 2026-08 was
+  looking like one operator. So each pair differs in every way the fleet
+  controls:
+  - its own device profile, on Pacific time through its vault slot's region;
+  - its own cities (the partners seed Las Vegas against Reno);
+  - its own sweep time.
+
+  `deploy/README.md` → *Scaling notes* has the rules and the stop and widen
+  criteria.
+- **A worker can have its own sweep times.**
+  `python -m rs_console.settings start-at <id> HH:MM [...]` saves them in the
+  console's state as `workers.<id>.start_at`, and `--clear` hands the worker
+  the fleet's again. They are written after the fleet-wide values, so a sweep
+  time saved from the ERP no longer lines up two accounts on one IP.
+  `/v1/fleet` now gives every worker its own `start_at`, read from the config
+  it runs, and counts those times in its `plan`. That is an additive field,
+  so an older ERP ignores it.
+
+## [0.13.7] - 2026-10-20
+
+### Added
+
+- **Ten more workers, one per new Decodo port** (RS-331). The plan grew from
+  ten ports to twenty. Every port up to 10010 already had a worker, so ports
+  10011–10020 each get a new compose worker named after its exit: `bos-1`
+  (Boston), `nyc-2` and `nyc-3` (New York), `ca-1`–`ca-4` (Palo Alto, the
+  pool's first West Coast exits), and `nj-1`–`nj-3` (Parsippany, NJ). Each
+  seeds one city, the catalog city nearest its exit: Boston, New York, Newark,
+  or Reno for the Palo Alto workers, since `master.toml` keeps California out.
+  The console lists them, so the ERP shows them, edits their cities and
+  watches their browsers on VNC 5912–5921. Each starts parked on an empty
+  storage state and searches nothing until it gets an account from the pool.
+
+  Before deploying, the VM needs each worker's `PROXY_HOMELAB_<X>` in
+  `configs/secrets.env`, its `configs/secrets.homelab-<x>.env` (id and
+  `rsc mint-token`) and an empty `configs/sessions/homelab-<x>/fb_state.json`.
+  The compose headers spell it out. Deploy with every existing worker in
+  `RS_DEPLOY_HOLD`, so only the new containers start.
+
+## [0.13.6] - 2026-10-20
+
+### Fixed
+
+- **A listing alerts once across the fleet, not once per worker that sees it**
+  (RS-329). From 10-12 to 10-20, 50 of 122 Telegram alerts repeated a listing
+  already sent:
+  - 38 came from a second worker. Every homelab worker sends its own alerts and
+    its notified cache knows only its own; dc, nyc and philly are each searched
+    by two workers, and neighbouring cities return the same listings.
+  - 7 came from one worker. `Listing.hash` includes the item name, so a
+    listing found by both `server_ram` and `enterprise_ssd` read as "changed"
+    each time.
+
+  Before sending, a worker now claims the listing from the coordinator
+  (`POST /v1/alerts/claim`), and only the first claim sends. A delivered
+  listing alerts again only when its price falls below the alerted price. A
+  claim whose holder never reports delivery passes on after 15 minutes. A
+  worker that gets no answer sends as before. The claims are seeded from
+  `alert_messages` on boot, so the deploy does not re-alert yesterday's
+  listings from another worker. The coordinator also reads a reduced price
+  ("$20 | $25") as 20, not 2025.
+
+## [0.13.5] - 2026-10-19
+
+### Changed
+
+- **The daily sweep starts at 09:00 Eastern, not 06:00** (RS-318). `start_at`
+  in `master.toml` and every `homelab-*.toml` is `["13:00"]` UTC (09:00 EDT);
+  when New York falls back to EST it needs `14:00` to stay at 09:00, as the
+  config's comment says. A sweep time saved from the ERP's search settings
+  still overrides this default. The VM's `fleet-verify.py` cron moves from
+  21:05 to 23:05 UTC so it keeps running after a long sweep has finished.
+
+## [0.13.4] - 2026-10-19
+
+### Fixed
+
+- **The pre-screen's default model lives in code**, as the page check's
+  does, so the homelab workers run it. They take their environment from
+  `configs/secrets.env` through `env_file`, not from the generic worker
+  compose file 0.13.2 put the default in, so on that release the pre-screen
+  would have stayed off fleet-wide. Unset means `typesafe/jev-1.14`; empty
+  turns it off; `RS_PRESCREEN_ENFORCE=1` in that same file is the flip (RS-319).
+
+## [0.13.2] - 2026-10-19
+
+### Added
+
+- **A decision model pre-screens listings before the LLM reads them**
+  (RS-319). Every listing the LLM has no cached verdict for is first asked
+  reject / maybe / buy by `RS_PRESCREEN_MODEL` (the worker compose defaults it
+  to `typesafe/jev-1.14`, the model RS-316's shadow run preferred), with the
+  production prompt as the rules. The fleet runs it in shadow: the answer is
+  logged as a `prescreen` event beside the LLM's and nothing is skipped.
+  `RS_PRESCREEN_ENFORCE=1` makes a reject at or above `RS_PRESCREEN_THRESHOLD`
+  (0.99) skip the LLM, logged as `listing_skip reason=prescreen` and
+  remembered so a lingering listing is not re-asked. Any failure of the check
+  leaves the LLM running as before. `scripts/prescreen-shadow.py --live` reads
+  the live events back into the same gate table the shadow run printed, and
+  `sweep-report.py` counts enforced skips.
+
+## [0.13.1] - 2026-10-19
+
+### Added
+
+- **`ai_eval` events name the model, unit count and quantity behind a
+  verdict**, and `scripts/prescreen-shadow.py` replays recent billed verdicts
+  through a decision model to measure what a pre-screen in front of the listing
+  LLM would save and what it would drop (RS-316). The first run says no model
+  yet meets the bar of keeping 99% of the listings we alert on; the ticket has
+  the tables.
+
+### Fixed
+
+- **The poster's and monitor's "wait for this button" checks wait** (RS-313).
+  Playwright ignores the `timeout` argument to `is_visible`, so the
+  cookie-consent banner, the 2FA "Trust this device" button, the Publish form's
+  Next step and the locked-account text on a checkpoint were instant snapshots
+  that read like waits; the trust click in particular could miss and leave the
+  device untrusted for the next login. They use `wait_for` now. Checks that
+  meant a snapshot (the restriction banner on every navigation, the captcha
+  selectors, the 2FA field inside a polling loop) say so by passing nothing,
+  and a test in each package keeps the misleading form from coming back.
+- **A Messenger reply is acked as sent only when the pane shows it as our
+  bubble** (RS-314). The old check looked for the reply's first 60 characters
+  anywhere on the page, so a draft that Enter never submitted, an older
+  identical bubble or the thread list's preview all passed and the seller never
+  got the reply. The sender now compares direction-tagged pane rows before and
+  after typing, clears a draft that did not submit, and skips a reply whose
+  bubble is already the latest message (a lost ack, not a new reply). On the
+  coordinator a failed ack keeps the row queued for up to three attempts unless
+  the bridge marks it permanent, and a late failure never demotes a sent row.
+- **Challenge screenshots survive a redeploy** (RS-315). The coordinator wrote
+  them to `data/screenshots` relative to its working directory, which in the
+  container is `/app`, outside the `/data` volume, so every `deploy.sh` deleted
+  them while the challenge rows kept pointing at the files. The default is now
+  a `screenshots/` directory beside the database file, the image and the
+  compose file set `RS_SCREENSHOT_DIR=/data/screenshots` outright, stored paths
+  are absolute, and a challenge whose file is gone lists no `screenshot_url`
+  instead of one that 404s.
+
+## [0.13.0] - 2026-10-19
+
+### Added
+
+- **A wall mid-sweep parks the worker instead of reading as an empty city**
+  (RS-311). Facebook walls a logged-in account without leaving the Marketplace
+  URL — "You're Temporarily Blocked" is an overlay, a silent flag answers every
+  search with nothing — and the `xs` cookie survives a checkpoint, so the worker
+  heartbeat HEALTHY and searched the account's remaining cities into a deeper
+  flag; the first sign was the next day's fleet-verify table. A search that
+  returns nothing on an ordinary URL now asks a decision model (OpenRouter's
+  Decisions API; `RS_PAGE_CHECK_MODEL`, default `openai/gpt-6-luna-decisions`)
+  which kind of page the tab shows. A checkpoint, captcha, block or disabled
+  notice files one challenge with a screenshot, reports CHECKPOINT or
+  CHALLENGE_CAPTCHA, and parks the worker until the idle loop sees the page
+  move on, whether an operator cleared it in Watch or Facebook lifted the block.
+  A login or 2FA page is left to the next cycle's login, which has the
+  credentials and the 2FA automation. The login flow asks the same question
+  when its selectors see nothing, so a captcha on `two_step_verification` (va-2,
+  2026-10-17) is now a challenge too. `search_empty` events carry
+  `page_state`, its probability and the model. Any failure of the check — no
+  key, timeout, odd answer — means the old behaviour. Probed on 27 page states:
+  every model on the API told walls from clear pages 54/54; the default and
+  `liquid/d1` led on the exact label, Jev 1.14 close behind; ~0.2 s and
+  $0.00003 a call.
+
 ### Changed
 
 - **0.12.3's wc-1 swap is on the mainline now** (RS-294). 0.12.3 and 0.12.4

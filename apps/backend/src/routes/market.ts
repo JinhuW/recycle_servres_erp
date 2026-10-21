@@ -12,7 +12,7 @@ import {
 import { bearerGuard } from '../oauth/guard';
 import {
   readPriceSheetRows, PriceColumnsNotFoundError, type SheetPriceRow,
-} from '../services/sellOrderPriceImport';
+} from '../services/priceSheet';
 import type { Env, User } from '../types';
 
 const market = new Hono<{ Bindings: Env; Variables: { user: User } }>();

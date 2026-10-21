@@ -1,7 +1,7 @@
 import { Fragment, lazy, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { CurrencyPicker, type Currency } from '../../components/CurrencyPicker';
-import { Icon } from '../../components/Icon';
+import { Icon, type IconName } from '../../components/Icon';
 import { Modal } from '../../components/Modal';
 import {
   StatusChangeDialog, type MetaStatus, type StatusAttachment,
@@ -34,8 +34,7 @@ import { CustomerPicker, type Customer } from './DesktopSellOrderDraft';
 import { useAuth } from '../../lib/auth';
 import { AddInventoryPicker, type SellableItem } from '../../components/AddInventoryPicker';
 import { AttachmentChip } from '../../components/AttachmentChip';
-import { PriceImportSection } from './SellOrderPriceImportDialog';
-import { applyPriceRows, type BidPart, mergeBidParts } from '../../lib/priceImport';
+import { SellOrderAttachments, type SellAttachment } from '../../components/SellOrderAttachments';
 import { usePreference } from '../../lib/preferences';
 import { LineSpecChips, lineHasSpecChips } from '../../components/LineSpecChips';
 import { filterLineGroups, groupSellOrderLines, type SellOrderLineGroup } from '../../lib/sellOrderLineGroups';
@@ -45,6 +44,7 @@ import { missingSigners, signoffSig } from '../../lib/sellOrderSignoff';
 import type { SellOrderSignoff } from '../../lib/types';
 import { SellOrderSignoffCard } from './SellOrderSignoff';
 import { PoPaymentsLedger } from './order/PoPaymentsLedger';
+import { AccountingCard } from './accounting/AccountingCard';
 import { productCount } from '../../lib/productNo';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { useScanFilterText } from '../../lib/useScanFilter';
@@ -202,13 +202,20 @@ const productKey = (l: { partNumber: string | null; label: string; condition: st
 // line has no lot to cap it lower.
 const MAX_LINE_QTY = 100_000;
 
+// What a USD figure is in the order's currency; null while the rate for a
+// CNY order hasn't loaded, when a lot's sell price can't be seeded.
+type UsdToNative = ((usd: number) => number) | null;
+
 // Picked sellable lots merged into the draft. Price follows the per-product
 // rule: reuse the unit price the order already carries for that product, else
-// 0 for the user to fill in. A lot already on the draft is not added twice
-// (the server only excludes lots on *saved* open orders, not session-local
-// adds) — but one held there at 0 was picked to be sold again, so it takes
-// what is available. `changed` counts both.
-function mergeSellable(lines: EditLine[], picked: SellableItem[]): { lines: EditLine[]; changed: number } {
+// the lot's sell price — the PO line's, set in Review mode — in the order's
+// currency, else 0 for the user to fill in. A lot already on the draft is not
+// added twice (the server only excludes lots on *saved* open orders, not
+// session-local adds) — but one held there at 0 was picked to be sold again,
+// so it takes what is available. `changed` counts both.
+function mergeSellable(
+  lines: EditLine[], picked: SellableItem[], usdToNative: UsdToNative,
+): { lines: EditLine[]; changed: number } {
   const byLot = new Map(picked.map(it => [it.inventoryId, it]));
   let changed = 0;
   const merged = lines.map((l) => {
@@ -217,11 +224,11 @@ function mergeSellable(lines: EditLine[], picked: SellableItem[]): { lines: Edit
     changed++;
     return { ...l, qty: it.availableQty, maxQty: Math.max(l.maxQty, it.availableQty) };
   });
-  const fresh = appendSellable(lines, picked);
+  const fresh = appendSellable(lines, picked, usdToNative);
   return { lines: [...merged, ...fresh], changed: changed + fresh.length };
 }
 
-function appendSellable(lines: EditLine[], picked: SellableItem[]): EditLine[] {
+function appendSellable(lines: EditLine[], picked: SellableItem[], usdToNative: UsdToNative): EditLine[] {
   const have = new Set(lines.map(l => l.inventoryId).filter(Boolean));
   return picked
     .filter(it => !have.has(it.inventoryId))
@@ -237,7 +244,8 @@ function appendSellable(lines: EditLine[], picked: SellableItem[]): EditLine[] {
       partNumber:  it.partNumber,
       qty:         it.availableQty,
       maxQty:      it.availableQty,
-      unitPrice:   lines.find(l => productKey(l) === productKey(it))?.unitPrice ?? 0,
+      unitPrice:   lines.find(l => productKey(l) === productKey(it))?.unitPrice
+        ?? (it.sellPrice != null && usdToNative ? +usdToNative(it.sellPrice).toFixed(2) : 0),
       warehouseId: it.warehouseId,
       warehouse:   it.warehouseName,
       condition:   it.condition,
@@ -284,6 +292,9 @@ type SellOrderDetailType = {
   statusMeta: StatusMetaMap;
   // Absent from a backend older than this bundle; nothing waits on it then.
   signoff?: SellOrderSignoff;
+  // The order's own files, apart from the per-status evidence. Absent from a
+  // backend older than this bundle.
+  attachments?: SellAttachment[];
 };
 
 // Driven by sell_order_statuses; ids match sell_orders.status CHECK constraint.
@@ -528,7 +539,7 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
                 <th className="num">{t('sodUnits')}</th>
                 <th className="num">{t('eoTotal')}</th>
                 <th>{t('status')}</th>
-                <th>{t('actions')}</th>
+                <th className="col-actions">{t('actions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -594,7 +605,7 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
                     {fmtUSD0(o.total, locale)}
                   </td>
                   <td><span className={'chip dot ' + toneFor(o.status)}>{o.status}</span></td>
-                  <td onClick={e => e.stopPropagation()}>
+                  <td className="col-actions" onClick={e => e.stopPropagation()}>
                     <div style={{ display: 'flex', gap: 4 }}>
                       <RouteLink to={'/sell-orders/' + o.id} className="btn icon sm" title={t('soViewTooltip')}>
                         <Icon name="eye" size={12} />
@@ -788,16 +799,20 @@ function ReceiverSelect({ value, current, members, disabled, onChange }: {
   );
 }
 
-// ─── Download buttons ────────────────────────────────────────────────────────
-// Two exports off one order, and they go to different people: the bid sheet is
-// emailed to a vendor, the packing list stays in the warehouse. Separate files
-// so the vendor's copy never carries the picking checklist.
+// ─── Download menu ───────────────────────────────────────────────────────────
+// Three exports off one order behind one button, and they go to different
+// people: the bid sheet is emailed to a vendor, the packing lists stay in the
+// warehouse. Separate files so the vendor's copy never carries the picking
+// checklist.
 //
 // The warehouse picker narrows both packing lists, never the bid sheet: a
 // vendor prices the whole order. 'Unassigned' is the backend's own tab name
 // for lines with no warehouse.
 function DownloadMenu({ orderId, lines }: { orderId: string; lines: SellOrderLine[] }) {
   const { t } = useT();
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
   const [warehouse, setWarehouse] = useState('');
   // A line held at 0 has no row on either packing list, so a warehouse holding
   // only those would download as a 400.
@@ -809,6 +824,22 @@ function DownloadMenu({ orderId, lines }: { orderId: string; lines: SellOrderLin
   // A second click while a file is being prepared would only download it twice.
   const [busy, setBusy] = useState(false);
 
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setOpen(false); trigger.current?.focus(); }
+    };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
   const download = (kind: 'price-template' | 'packing-list', byPo = false) => async () => {
     const params = new URLSearchParams();
     if (kind === 'packing-list') {
@@ -817,6 +848,7 @@ function DownloadMenu({ orderId, lines }: { orderId: string; lines: SellOrderLin
     }
     const qs = params.toString() ? `?${params}` : '';
     const name = `${orderId}-${kind}${byPo ? '-by-po' : ''}.xlsx`;
+    setOpen(false);
     setBusy(true);
     try {
       await api.download(`/api/sell-orders/${orderId}/${kind}${qs}`, name);
@@ -827,50 +859,50 @@ function DownloadMenu({ orderId, lines }: { orderId: string; lines: SellOrderLin
     }
   };
 
+  const row = (icon: IconName, label: string, hint: string, disabled: boolean, onClick: () => void) => (
+    <button type="button" role="menuitem" className="so-download-row" disabled={disabled} onClick={onClick}>
+      <Icon name={icon} size={15} />
+      <span>
+        <span className="so-download-label">{label}</span>
+        <span className="so-download-hint">{hint}</span>
+      </span>
+    </button>
+  );
+  const packHint = (key: string) => t(nothingToPack ? 'soNothingToPackHint' : key);
+
   return (
-    <>
+    <div className="so-download" ref={wrap}>
       <button
+        ref={trigger}
+        type="button"
         className="btn"
         style={{ whiteSpace: 'nowrap' }}
-        title={t('soDownloadPriceTemplateHint')}
+        aria-haspopup="menu"
+        aria-expanded={open}
         disabled={busy}
-        onClick={download('price-template')}
+        onClick={() => setOpen(o => !o)}
       >
-        <Icon name="dollar" size={14} /> {t('soDownloadPriceTemplate')}
+        <Icon name="download" size={14} /> {t('soDownload')} <Icon name="chevronDown" size={13} />
       </button>
-      {warehouses.length > 1 && (
-        <select
-          className="select"
-          style={{ width: 150, height: 32, fontSize: 12.5, padding: '0 12px' }}
-          value={picked}
-          onChange={e => setWarehouse(e.target.value)}
-          title={t('soPackWarehouseHint')}
-        >
-          <option value="">{t('soPackAllWarehouses')}</option>
-          {warehouses.map(w => (
-            <option key={w} value={w}>{w === UNASSIGNED ? t('sodNoWarehouse') : w}</option>
-          ))}
-        </select>
+      {open && (
+        <div className="so-download-pop" role="menu">
+          {row('dollar', t('soDownloadPriceTemplate'), t('soDownloadPriceTemplateHint'), false, download('price-template'))}
+          {row('box', t('soDownloadPackingList'), packHint('soDownloadPackingListHint'), nothingToPack, download('packing-list'))}
+          {row('box', t('soDownloadPackingListByPo'), packHint('soDownloadPackingListByPoHint'), nothingToPack, download('packing-list', true))}
+          {warehouses.length > 1 && (
+            <label className="so-download-warehouse" title={t('soPackWarehouseHint')}>
+              <span>{t('warehouse')}</span>
+              <select className="select" value={picked} onChange={e => setWarehouse(e.target.value)}>
+                <option value="">{t('soPackAllWarehouses')}</option>
+                {warehouses.map(w => (
+                  <option key={w} value={w}>{w === UNASSIGNED ? t('sodNoWarehouse') : w}</option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
       )}
-      <button
-        className="btn"
-        style={{ whiteSpace: 'nowrap' }}
-        title={t(nothingToPack ? 'soNothingToPackHint' : 'soDownloadPackingListHint')}
-        disabled={busy || nothingToPack}
-        onClick={download('packing-list')}
-      >
-        <Icon name="box" size={14} /> {t('soDownloadPackingList')}
-      </button>
-      <button
-        className="btn"
-        style={{ whiteSpace: 'nowrap' }}
-        title={t(nothingToPack ? 'soNothingToPackHint' : 'soDownloadPackingListByPoHint')}
-        disabled={busy || nothingToPack}
-        onClick={download('packing-list', true)}
-      >
-        <Icon name="box" size={14} /> {t('soDownloadPackingListByPo')}
-      </button>
-    </>
+    </div>
   );
 }
 
@@ -1042,11 +1074,6 @@ function SellOrderDetail({ id, mode, onToast }: {
     paymentReceivedBy: string;   // '' = not assigned
     currency: Currency;
     lines: EditLine[];
-    // Products — (canonical part, condition) — whose prices came from a
-    // confirmed vendor price import. Save sends them so the backend records
-    // the accepted prices on the Market value board, and clears them the
-    // moment that PATCH lands so a retry of a later step re-sends no bids.
-    bidParts: BidPart[];
   } | null>(null);
   // FX snapshot for the draft's currency (null for USD or until it loads).
   const [fx, setFx] = useState<FxInfo | null>(null);
@@ -1100,7 +1127,11 @@ function SellOrderDetail({ id, mode, onToast }: {
         // StrictMode's discarded first run would otherwise eat the prefill.
         const canPrefill = !!prefill && !prefilled.current && mode === 'edit'
           && r.order.status !== 'Done' && r.order.status !== 'Closed';
-        const merged = canPrefill ? mergeSellable(loaded, prefill) : { lines: loaded, changed: 0 };
+        // The rate for a CNY order loads after this, so its prefilled lots
+        // start at 0 as before; a USD order's start at their sell price.
+        const merged = canPrefill
+          ? mergeSellable(loaded, prefill, r.order.currency === 'USD' ? v => v : null)
+          : { lines: loaded, changed: 0 };
         if (canPrefill) {
           prefilled.current = true;
           setPrefillAllPresent(merged.changed === 0);
@@ -1112,7 +1143,6 @@ function SellOrderDetail({ id, mode, onToast }: {
           paymentReceivedBy: r.order.paymentReceivedBy?.id ?? '',
           currency: r.order.currency,
           lines: merged.lines,
-          bidParts: [],
         });
         setPendingAdjust(null);
       })
@@ -1175,7 +1205,6 @@ function SellOrderDetail({ id, mode, onToast }: {
     || receiverChanged
     || currencyChanged
     || linesChanged
-    || draft.bidParts.length > 0
     || pendingAdjust != null
   );
   // Done waits on every manager's sign-off of the order as saved. Edits that
@@ -1368,7 +1397,8 @@ function SellOrderDetail({ id, mode, onToast }: {
     if (!draft) return;
     setLineSearch('');
     setJustAdded(new Set(picked.filter(it => it.availableQty > 0).map(it => it.inventoryId)));
-    setDraft(d => d && { ...d, lines: mergeSellable(d.lines, picked).lines });
+    const usdToNative: UsdToNative = draft.currency === 'USD' ? v => v : fx ? v => v * fx.oneUsdInQuote : null;
+    setDraft(d => d && { ...d, lines: mergeSellable(d.lines, picked, usdToNative).lines });
   };
   useEffect(() => {
     if (justAdded.size === 0) return;
@@ -1399,9 +1429,7 @@ function SellOrderDetail({ id, mode, onToast }: {
       // requires the full line set alongside it — resend lines whenever either
       // the currency or the lines themselves changed.
       if (currencyChanged) patchBody.currency = draft.currency;
-      // A confirmed import is a bid even when the vendor re-quoted the current
-      // prices, so the line set goes with it regardless of a diff.
-      if (linesChanged || currencyChanged || draft.bidParts.length > 0) {
+      if (linesChanged || currencyChanged) {
         patchBody.lines = draft.lines.map(l => ({
           id:          l.id,
           inventoryId: l.inventoryId,
@@ -1414,15 +1442,11 @@ function SellOrderDetail({ id, mode, onToast }: {
           warehouseId: l.warehouseId,
           condition:   l.condition,
         }));
-        if (draft.bidParts.length > 0) patchBody.bidParts = draft.bidParts;
         if (linesBase.current) patchBody.linesVersion = linesBase.current;
       }
       if (Object.keys(patchBody).length > 0) {
         const saved = await api.patch<{ linesVersion?: string | null }>(`/api/sell-orders/${order.id}`, patchBody);
         if (saved.linesVersion) linesBase.current = saved.linesVersion;
-        // The bids are recorded with that PATCH; if the adjust or status step
-        // below fails, the retry must not record them again.
-        setDraft(d => d && { ...d, bidParts: [] });
         setHistoryKey(k => k + 1);
       }
       // A pending negotiated total applies AFTER the line rewrite (the server
@@ -1957,22 +1981,6 @@ function SellOrderDetail({ id, mode, onToast }: {
               </div>
             </div>
             <div className="so-page-side">
-              {/* Above the summary: on a long order, under the lines was a scroll past every one. */}
-              {editable && (
-                <div className="card so-page-card">
-                  <PriceImportSection
-                    orderId={order.id}
-                    currency={draft.currency}
-                    locale={locale}
-                    onApply={rows =>
-                      setDraft(d => d && {
-                        ...d,
-                        lines: applyPriceRows(d.lines, rows),
-                        bidParts: mergeBidParts(d.bidParts, rows),
-                      })}
-                  />
-                </div>
-              )}
               {summary && (
               <div className="so-summary">
                 <div
@@ -2164,6 +2172,16 @@ function SellOrderDetail({ id, mode, onToast }: {
                 <PoPaymentsLedger scope={{ sellOrderId: order.id }} locale={locale} className="card so-page-card" />
               )}
 
+              {/* The managers' RMB book for this order: receipts, and its cases'
+                  refunds. The payment receiver is who usually holds it. */}
+              {!editable && (
+                <AccountingCard
+                  scope={{ sellOrderId: order.id }}
+                  className="card so-page-card"
+                  managerId={order.paymentReceivedBy?.id ?? null}
+                />
+              )}
+
               {/* After-sales cases — view mode only; a sold order can take a
                   new one, an older order shows what it already has. */}
               {!editable && (asEligible || asCases.length > 0) && (
@@ -2219,6 +2237,16 @@ function SellOrderDetail({ id, mode, onToast }: {
                   </div>
                 )}
               </div>
+              {/* The order's own files — the sale record, the invoice sent.
+                  Live-saved in both modes, so a drop mid-edit survives Cancel. */}
+              {order.attachments && (
+                <SellOrderAttachments
+                  key={order.id}
+                  orderId={order.id}
+                  initial={order.attachments}
+                  onChanged={() => setHistoryKey(k => k + 1)}
+                />
+              )}
               <div className="card so-page-card" style={{ paddingTop: 8, paddingBottom: 8 }}>
                 <details>
                   <summary style={{ cursor: 'pointer', fontWeight: 600, padding: '8px 0' }}>

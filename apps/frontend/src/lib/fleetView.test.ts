@@ -6,7 +6,7 @@ import {
   matchesTerms, offersRelogin, queryTerms, reviewedToday, searchedToday,
   sortFleet, splitHighlights, vaultAccountIdFor, whoIs, easternToUtc, utcToEastern,
   FLOW_STAGES, STAGE_FORMS, draftChanges, settingsDraft, settingsPatch,
-  citiesDiffer, cityOwners, isCitySlug, marketplaceCityUrl, normalizeCitySlug,
+  citiesDiffer, cityOwners, isCitySlug, marketplaceCityUrl, normalizeCitySlug, proxyPort, sharedExits,
   applyPinEdits, pinEdits, searchesPerDay, tierSettingsEdits, tierSettingsValid, keysymsFor,
 } from './fleetView';
 
@@ -365,6 +365,51 @@ describe('a worker\'s cities', () => {
     const owners = cityOwners(fleet, 'nyc-1');
     expect(owners.get('dc')).toEqual(['homelab-1', 'ne-1']);
     expect(owners.get('tampa')).toEqual(['homelab-1']);
+  });
+
+  it('sorts by proxy port, counts the workers on each exit, and searches its city', () => {
+    const at = (id: string, port: number | null, city?: string, region?: string) => account({
+      worker_id: id,
+      proxy: port === null
+        ? { url: null, ip: '74.104.122.134', city: 'Framingham', region: 'Massachusetts' }
+        : { url: `http://isp.decodo.com:${port}`, ip: city ? `10.0.0.${port % 100}` : undefined, city, region, org: 'AS33651 Comcast' },
+    });
+    const fleet = [
+      at('ca-3', 10016, 'Palo Alto', 'California'),
+      at('va-1', null),
+      at('nj-1', 10018, 'Parsippany', 'New Jersey'),
+      at('ca-1b', 10014, 'Palo Alto', 'California'),
+      at('ca-1', 10014, 'Palo Alto', 'California'),
+      at('new-1', 10021),
+      at('se-1', null),
+      account({ worker_id: 'old', proxy_env: 'PROXY_OLD' }),
+    ];
+    const ids = (ws: FleetAccount[]) => ws.map(w => w.worker_id);
+    const none = new Set<string>();
+
+    expect(proxyPort(fleet[0])).toBe('10016');
+    expect(proxyPort(fleet[1])).toBeNull();
+    // Numeric by port, and the VM's own IP (no port) last whichever way.
+    expect(ids(sortFleet(fleet, 'proxy', 'asc', none))).toEqual(['ca-1b', 'ca-1', 'ca-3', 'nj-1', 'new-1', 'va-1', 'se-1', 'old']);
+    expect(ids(sortFleet(fleet, 'proxy', 'desc', none))).toEqual(['new-1', 'nj-1', 'ca-3', 'ca-1b', 'ca-1', 'va-1', 'se-1', 'old']);
+
+    // The VM's own address is one IP too; a facade without the lookup counts nothing.
+    expect(sharedExits(fleet)).toEqual(new Map([
+      ['http://isp.decodo.com:10016', 1], ['', 2], ['http://isp.decodo.com:10018', 1],
+      ['http://isp.decodo.com:10014', 2], ['http://isp.decodo.com:10021', 1],
+    ]));
+
+    const hay = accountHaystack(fleet[2]);
+    for (const term of ['10018', '10.0.0.18', 'parsippany', 'new jersey']) {
+      expect(matchesTerms(hay, [term])).toBe(true);
+    }
+  });
+
+  it('draws a worker that sweeps at its own time from that time', () => {
+    const w = account({ today: { first_at: null, last_at: null, searches: 0 } as never, start_at: ['17:00'] });
+    const NOON_UTC = Date.parse('2026-10-20T12:00:00Z');
+    expect(dayStrip(w, 'live', w.start_at ?? ['13:00'], NOON_UTC)!.next).toEqual({ time: '13:00', tomorrow: false });
+    expect(dayStrip(w, 'live', ['13:00'], NOON_UTC)!.next).toEqual({ time: '09:00', tomorrow: false });
   });
 
   it('sees a reorder, a rename or a new radius as a change', () => {

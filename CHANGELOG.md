@@ -17,6 +17,412 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.310.2] - 2026-10-21
+
+Fixes from the review of the new Accounting page (RS-342), which reached
+`dev` after the release review had run. A commission entry fills the PO's
+Paid by once, when it comes to pay that commission. Before, every later save
+re-filled it, so a payer a manager had cleared on purpose came back with a
+fix to the entry's note. Correcting the entry's manager now moves Paid by
+along with it, while Paid by still names the old manager. A preset naming a
+manager no longer active (a sale's receiver since deactivated) opens the
+form on the manager recording it, instead of a select showing someone else
+and a save refused. The sale card's suggested receipt no longer counts a
+case's refund as money the buyer still owes.
+
+## [1.310.1] - 2026-10-21
+
+Fixes from the xhigh review of the dev → main release (RS-341), so the
+release carries none of what it found.
+
+- **Facebook account pool.** A supplier row in the older positional layout,
+  with the note right after the cookie, now imports that note as a note.
+  Before, it landed in the new token column, was sealed and travelled with
+  every Assign. In a header-mapped sheet, a second Password column after the
+  e-mail is the mailbox's, and any other repeated column refuses its rows.
+  Before, the later column overwrote the earlier one without a word, and a
+  sheet headed 账号,密码,邮箱,密码 stored the mailbox password as the
+  Facebook one. Every row splits on the header's delimiter, so a quoted cell
+  holding `|` no longer splits the row. An edit from a tab still running the
+  pre-release bundle, which sends no token field, keeps the stored access
+  token instead of erasing it.
+- **Reddit tracker model.** The live-model and trial-model dialogs save only
+  a model OpenRouter's catalogue lists with strict JSON output. Before, any
+  id of the right shape went through, and a model that answers in prose makes
+  every evaluation fail.
+- **Commission Paid by.** Migration 0192 takes back 0189's guess where a live
+  bank row is linked as the commission, which the upload route deliberately
+  leaves empty, unless someone has set Paid by since. Without it, unlinking
+  that row later would have shown a manager who never paid.
+- **Smaller fixes.** Sell-order file uploads and removals filter as Added /
+  Removed on the Activity page instead of Edited. A price typed as `12,50` is
+  refused instead of saved as 1250. A Box Check line priced 0 shows the
+  market ghost, and Enter takes it. A failed `/api/ai/models` load is no
+  longer cached by the browser for a minute.
+
+The same review's tracker findings ship as facebook-tracker 0.13.12: the
+messenger can no longer send a seller the same reply more than once, or two
+texts run together.
+
+## [1.310.0] - 2026-10-21
+
+A new **Accounting** page keeps the managers' own book of money received and
+paid, in RMB (RS-340). Payments only reconciles the company's USD bank
+accounts, so a supplier paid by Alipay, a purchaser's commission sent over
+WeChat or a customer's bank transfer in yuan had nowhere to be written down.
+Each entry says received or paid, how much (¥, or $ at the rate it was booked
+at), how, when, through which manager, and what it was for — a PO's goods or
+its commission, a sell order, an after-sales case, or nothing in particular.
+
+The page states the period the way a book carries a page forward — opening +
+received − paid = closing — with the breakdown by kind and each manager's
+balance under it, so it answers both "what moved this month" and "who is
+holding the company's money". The book lists received, paid and a running
+balance in their own columns; its filters hide rows but never change a
+balance. Entries are edited with a history and voided with a reason rather
+than deleted.
+
+The PO's Cost Payment and Commission tabs, the sell order and the after-sales
+case each gain an Accounting card listing what the book has against them,
+with a Record button that already names the record; the sell order's card
+includes its cases' refunds. A commission booked there fills the PO's *Paid
+by* when nobody is on file, by the same rule the commission screenshot
+follows. The phone has the book too — a Home link, the period as a vertical
+sum, the entries by day — and the phone PO page's folds carry the order's
+entries.
+
+## [1.309.0] - 2026-10-20
+
+The Fleet tab's workers table is one row per worker again, and the proxy is a
+column on that row instead of a divider above it (RS-339). Three layouts in a
+day (by city, then city → proxy → worker, then by proxy) each added divider
+rows to read past. The **Proxy** column shows the port and exit IP, and under
+them the city Facebook sees the account in, which before was only in a
+tooltip. The ISP is on hover. A worker that shares its exit IP with another is
+still marked *shared*, with the same advice to keep the pair's cities and
+sweep times apart. The column sorts by port, which puts each pair side by
+side, with the VM's own IP last. Searching by port, IP, city or state finds a
+worker.
+
+## [1.308.0] - 2026-10-20
+
+The pool's access token (v1.307.0) now reaches the fleet, and the importer reads
+a supplier's order sheet whole (RS-338). On **Assign**, the account's token is
+written into the worker's vault alongside its password, so when a restored or
+seeded cookie session lapses the worker mints a fresh one from the token — on
+the account's own IP and device, with no password and no 2FA — before it ever
+falls back to the password login (the worker side ships in facebook-tracker
+0.13.10). The paste importer now reads a sheet pasted with its header row,
+matching columns by name in English or Chinese (UID, 密码, 2FA, Cookie, 令牌,
+邮箱…) in any order, and accepts comma-quoted CSV — so a vendor order whose
+columns run cookie and token before the e-mail, with no recovery column,
+imports as-is. A token that is not an `EAA…` is flagged but still imports.
+
+## [1.307.0] - 2026-10-20
+
+The Facebook account pool grows an **access-token** field (RS-337). A purchased
+account often ships with a Facebook Graph token (`EAA…`) alongside its
+password, 2FA key and cookie; until now there was nowhere to keep it but the
+plaintext note, where a live credential does not belong. The token is now a
+first-class pool field, sealed at rest under `FB_POOL_KEY` like the other
+secrets, revealed only to a manager or the purchaser holding the account, and
+audited on copy or reveal. A manager can set it in the account editor, and the
+paste importer reads it as a column after the cookie.
+
+## [1.306.0] - 2026-10-20
+
+### Added
+
+- The manager's Facebook account-pool table (`/#/fleet/pool`) now caps its body
+  at about ten rows and scrolls for the rest, with the column header pinned, so
+  a growing pool no longer runs off the bottom of the card. Every column header
+  is also a sort control — a first click sorts ascending, a second descending,
+  and the active column shows a `▲`/`▼` marker — letting the pool be read by
+  UID, status, holder, cookie freshness, notes or any other field. The sort is
+  client-side over the snapshot the page already holds; nothing was added to the
+  backend (RS-336).
+
+## [1.305.0] - 2026-10-20
+
+The Fleet tab groups its workers by proxy, not by city (RS-335). Every proxy
+now carries two workers (facebook-tracker 0.13.9), so the IP is what is
+managed: whose accounts share it, and what a checkpoint on one puts at risk.
+The city layer above it only made the table taller. So the only divider is
+the proxy's row, with its port, exit IP, worker count and *shared* tag, and
+the IP's workers sit under it. The exit city moves into that row's tooltip,
+beside the ISP, and the search box still finds a worker by city. With no
+column sort the proxies run by port, with the VM's own IP last.
+
+## [1.304.0] - 2026-10-20
+
+The Fleet tab's workers table now has three layers: location, proxy IP,
+workers (RS-333). v1.303.0 grouped the workers by exit city. The proxy showed
+only as a port in each worker's subtitle, and a pair on one IP was told apart
+by a "shares IP with …" note. With two accounts on one IP in the pilot, the
+IP is the unit that matters: it is what Facebook links, and what a checkpoint
+on one account puts at risk for the others. So each IP gets a row under its
+city: port, exit IP, worker count, and the ISP in the tooltip. An IP with more
+than one worker is marked *shared*, and its tooltip says to keep their cities
+and sweep times apart. The workers sit under their IP, so the subtitle drops
+the port and the note again. With no column sort, IPs run by port. A sort
+orders them by their highest-ranked worker.
+
+## [1.303.0] - 2026-10-20
+
+The Fleet tab groups the workers by where their proxies come out, and shows
+which ones share an IP (RS-332). The fleet's twenty proxies exit in nine
+cities. That city is where Facebook sees an account, but until now it showed
+only on each worker's page. The workers table now has a divider per exit city:
+Palo Alto, California · 4 IPs · 6 workers. Each worker sits under its city,
+ordered by proxy so the workers on one IP are adjacent, and its subtitle names
+its proxy port (the exit IP is in the tooltip). A column sort still sorts
+inside each city. Workers whose exit is still being looked up come next, then
+workers on the VM's own IP. The search box also matches the exit city.
+
+The Facebook fleet also runs a pilot of two accounts on one proxy: ca-1b
+beside ca-1 on port 10014, and ca-2b beside ca-2 on 10015. What keeps a shared
+IP safe is that its accounts never look like one operator. So a worker's
+subtitle names the other workers on the same proxy ("shares IP with ca-1b"),
+and the tooltip says to keep their cities and sweep times apart.
+
+Each worker's Today strip now draws from its own sweep times. The tracker
+reports them per worker since facebook-tracker 0.13.8, read from the config
+the worker runs, and a partner on a shared IP sweeps four hours after the
+fleet. Against an older facade the strip falls back to the fleet's times, as
+before.
+
+## [1.302.0] - 2026-10-20
+
+Paid by now follows the commission screenshot, and every other change to it
+needs a confirmation (RS-330). Until now a manager could set it in the PO
+list's cell or on the PO page, and any pick saved on the spot. Nothing tied it
+to the screenshot, so Paid by often went unrecorded even when the commission
+had been paid and shown.
+
+A manager who uploads a commission screenshot while Paid by reads *Not
+recorded* is recorded as the payer, with one Activity line. If Paid by already
+names another manager, or reads Company paid, the upload asks *Set Paid by to
+you?* and changes it only on a yes. The Done dialog's drop box asks the same
+way, above the dialog. A pick in the PO page's Paid by select, desktop or
+phone, opens *Change who paid the commission?* with both names, and Cancel
+leaves the record as it was. A bank payment linked as the commission still
+locks the field, and an upload then neither writes nor asks. The PO list's
+Paid by column is read-only again.
+
+Migration 0189 fills Paid by on POs that already had a commission screenshot
+but nobody recorded. It uses the uploader of the latest screenshot, when that
+uploader is a manager, and writes the same Activity line, marked as a
+backfill. The upload response for the Commission bucket now carries
+`commissionPaidBy`.
+
+`ConfirmDialog` and `Modal` take an optional `zIndex`. Without it the
+confirmation rendered behind the Done dialog, which sits at 110.
+
+## [1.301.1] - 2026-10-20
+
+The **From a search to an alert** card on Monitors ▸ Facebook describes the
+coordinator stage as it now runs (RS-329). Facebook alerts were repeating:
+50 of the 122 sent from 10-12 to 10-20 were for a listing already in the chat,
+38 of them because a second worker saw it too. From facebook-tracker 0.13.6 a
+worker claims each listing from the coordinator before alerting it, and only
+the first claim sends. A delivered listing alerts again only when its price
+drops. The card used to say an edited listing alerts again on purpose, which
+is no longer true, and named the sharded path (`POST /api/v1/listings`) that
+no worker uses. It now names `POST /v1/alerts/claim`.
+
+## [1.301.0] - 2026-10-20
+
+The desktop PO list has a **Paid by** column after Commission (RS-328). It
+shows who paid the purchaser their commission. Until now that was recorded
+only on the PO's Commission tab, so finding unpaid commissions meant opening
+POs one by one. A manager picks the payer in the cell, and the pick saves on
+the spot as it does on the PO page. Purchasers read the column. It is on by
+default. Migration 0188 also adds it to every saved column list, which
+otherwise would have left it hidden for anyone who had ever toggled a column.
+
+The picker, here and on the PO page for desktop and phone, now offers
+**Company paid** beside *Not recorded* and the active managers. The managers
+come from the members list. The company is a fixed option, stored as
+`orders.commission_paid_by_company` (migration 0187), and a CHECK keeps it
+from being set together with a manager.
+
+A live bank payment linked as the PO's commission on the Payments page now
+makes Paid by read Company paid everywhere. The link is read live, not
+copied, so unlinking it, or the payment being reversed, brings back whatever
+was recorded by hand. While the link stands the select is locked with a note
+saying why, the list cell opens the payment, and
+`PUT /api/orders/:id/commission-paid-by` refuses a hand pick with a 409. The
+endpoint takes `{ company: true }` alongside `{ userId }`. `commissionPaidBy`
+in the API is now `{ kind: 'manager', id, name }`, `{ kind: 'company',
+linked }` or `null`. Managers keep their `id` and `name` fields, so an older
+page still shows them.
+
+## [1.300.0] - 2026-10-20
+
+The workers table on Monitors ▸ Facebook ▸ Fleet now shows at most fifteen
+workers (RS-327). Beyond that, the rows scroll inside the card under column
+headers that stay pinned and still sort. The "Fleet as of" line stays below
+the scroll area. Before this, the table grew one row taller with every
+worker, and the Recent activity aside, which matches the card's height, grew
+with it.
+
+The height limit is sized for fifteen standard two-line rows. A worker with a
+status note under its chip, such as "Session expired", needs a taller row, so
+fewer rows fit when some workers have notes. The Reddit tracker page uses the
+same table styles but keeps its full height.
+
+## [1.299.0] - 2026-10-20
+
+New purchasers get a guided walkthrough the first time they sign in, on the
+desktop and on the phone (RS-326). A manager used to create a purchaser with a
+temporary password and nothing else, and the rules that matter before a first
+buy only surfaced as refusals: Submit order saves a Draft, the real hand-off
+is Mark as In Transit, and that refuses without a warehouse, a source, a
+pickup or tracking number and the payment proof that matches who paid.
+Commission had no explanation anywhere a purchaser could see it.
+
+The walkthrough is nine short steps: home numbers, adding products, the
+hand-off, the three payment proofs, the manager review and edit window, how
+commission is computed and paid, the buying tools, and a finish that opens
+Submit (desktop) or the capture flow (phone). Each step that has a place in
+the app spotlights it in the sidebar or the tab bar, and the card switches
+between English and 中文 in place. Finishing or skipping stores
+`onboarding.done` in the user's server-side preferences, so it never comes
+back on another device. Migration 0186 sets that flag for everyone who had
+already signed in, so only members who never have (pending invites) get it
+automatically, and managers never do. Anyone can replay it from the new Guide
+button in the desktop top bar or Profile › Getting started on the phone. The
+phone's install card waits while it is open.
+
+## [1.298.0] - 2026-10-20
+
+The Reddit page's model fields are now pickers fed by OpenRouter's catalogue
+(RS-325). Both the live-model dialog and the trial dialog list the models
+that can return the strict JSON the evaluator asks for, with price per
+million tokens and context size beside each id, and filter as you type. A
+typed id the list lacks still works, so a model OpenRouter added this morning
+needs no ERP release. Floating `~…-latest` aliases are left out, because they
+would swap the model under an unchanged prompt version and blur its score.
+The browser can't reach openrouter.ai, so a new manager-only route,
+`GET /api/ai/models`, fetches the public catalogue, trims it and keeps it for
+an hour, serving the last copy when OpenRouter is down.
+
+## [1.297.0] - 2026-10-19
+
+The sell-order vendor price import is gone (RS-324), the second half of the
+ask that put the sell price into Review mode in v1.296.0. The round trip —
+download the bid sheet, the vendor fills the Unit Price column, drop it back
+on the order's edit view — existed to get prices onto a sell order. A sell
+order line already starts at its lot's sell price, and Review mode now sets
+that price on the PO, so the sheet is a quote the ERP never reads back. The
+*Vendor price import* card, `POST /api/sell-orders/:id/price-import/preview`,
+the `bidParts` save field and the `bid:<order>` market feed are removed;
+events already on file stay. The bid sheet and packing-list downloads are
+unchanged, and so is the Market page's price-list import, whose sheet reader
+moved to `services/priceSheet.ts` with the header and cell tests that used to
+run through the sell-order matcher. A lot added to an existing order's edit
+view now also starts at its sell price, in the order's currency, instead of
+at 0.
+
+## [1.296.0] - 2026-10-19
+
+Review mode now prices the PO for the commission, not just counts it
+(RS-323). The sell price the purchaser's commission is paid on used to be
+typed on the PO page after the count, line by line through the drawer, or
+kept in a separate sell-order spreadsheet and copied over; Review mode never
+showed it. Each row now has a *Sell / Unit* field beside the count, saved on
+Enter or on leaving it through the inventory line PATCH the PO page already
+used at Ready to Pay. An unpriced product whose part number is on the Market
+board shows the board's value as a ghost — last recorded price, else average
+sell, else the team's own 30-day average — and Enter takes it; **Fill from
+market** prices every such product in one click. A priced row shows its
+margin, red below cost. The tally bar gained a pricing half with its own
+meter and the live **Purchaser earns** figure, the side panel a
+**Commission** card with the rate (editable until the book closes), revenue,
+cost, profit and the total, and the Compare card the product's own price and
+market reference. The maths is the Commission tab's, over the qty Approve
+will leave. Finish review lists what is still unpriced; it does not block
+Approve. Lowercase `p` focuses the selected row's price.
+
+## [1.295.0] - 2026-10-19
+
+The Reddit page's Evaluate stage now shows the live evaluation model and
+lets a manager change it in place (RS-322). Until now the model was visible
+only inside the prompt card and could be changed from the ERP only by
+promoting a candidate trial, which also switched every rule off. The chip
+opens a dialog that takes an OpenRouter id, and the tracker's workers pick
+the new model up within a minute, like a rule edit. The backend proxy opens
+exactly one tracker setting, `PUT /settings/llm_model`; every other settings
+key still returns 404 without reaching the tracker, and the tests say so.
+
+## [1.294.1] - 2026-10-19
+
+The Actions column stays in view while a wide table scrolls (RS-321).
+
+### Fixed
+
+- **Actions no longer fall off the edge of a wide list.** On Purchase orders,
+  Sell orders and the inventory lot table, the Actions column is pinned to
+  the right edge of the card: the other columns slide underneath it, so a
+  laptop-width window with most columns switched on no longer needs a trip to
+  the end of the horizontal scrollbar before a row can be opened, downloaded
+  or edited. A soft edge on the pinned cell says columns are hidden beneath
+  it and fades once the table is scrolled to the end; a table that fits its
+  card looks exactly as before.
+
+## [1.294.0] - 2026-10-19
+
+An Attachments card on the sell order (RS-320).
+
+### Added
+
+- **A sell order keeps its own files.** The right-hand column of the
+  sell-order page has an Attachments card, between Internal notes and
+  History, in view and edit mode alike. A manager drops or picks the
+  marketplace sale record, the invoice sent or a packing list there (PDF,
+  images, XLSX, CSV, within the workspace upload cap); each lands as a row
+  with its name, size, and who uploaded it when, and each row has a remove
+  control. Images open in the lightbox, other files in a new tab. Until now
+  a file could only ride along with a status change, as evidence under
+  Shipped / Awaiting payment / Done / Closed, so a record that belonged to
+  the order as a whole had nowhere to go.
+- Uploads and removals save immediately, as the notes box does, so a file
+  dropped mid-edit survives a cancelled edit. The History records each file
+  added and removed.
+- `GET /api/sell-orders/:id` returns the list as `order.attachments`;
+  `POST /api/sell-orders/:id/attachments` (multipart `file`) and
+  `DELETE /api/sell-orders/:id/attachments/:attachmentId` are manager-only
+  and apply the same MIME and size rules as the evidence uploads. Migration
+  0185 adds `sell_order_attachments`.
+
+## [1.293.0] - 2026-10-19
+
+The sell order's three download buttons became one **Download** menu (RS-317).
+
+### Changed
+
+- **One Download button in the sell order page head.** The bid sheet, the
+  packing list and the packing list by PO sat side by side with the warehouse
+  picker between them, and with Pack mode, Archive and Edit the head wrapped
+  on a laptop. They now live in a dropdown off a single `Download` button;
+  each row shows its explanation as a subline instead of only a hover title,
+  and the warehouse picker sits at the foot of the menu when the order spans
+  more than one warehouse. The files, routes and file names are unchanged.
+
+## [1.292.0] - 2026-10-19
+
+The Reddit prompt card labels each version with its response schema, now
+that the tracker asks for the reasoning before the verdict (RS-312).
+
+### Changed
+
+- **Each version says *verdict first* or *reasoning first*.** The Reddit
+  tracker now asks the model for its reasoning before its verdict. On 100
+  prod posts that lifted precision against the written spec from 45% to 57%
+  for the live prompt, and from 75% to 85% for candidate 1. Verdicts from
+  the two schemas are kept in separate versions, so the same wording can
+  appear twice in the table. The label says which run is which.
+
 ## [1.291.1] - 2026-10-19
 
 Three fixes from the dev → main release review (RS-310).

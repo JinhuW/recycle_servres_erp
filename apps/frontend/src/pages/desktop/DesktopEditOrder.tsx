@@ -65,8 +65,10 @@ import { StagePanel, type RefreshState } from './order/StagePanel';
 import { StageLookback } from './order/StageLookback';
 import { OrderFooter } from './order/OrderFooter';
 import { PoPaymentsLedger } from './order/PoPaymentsLedger';
+import { AccountingCard } from './accounting/AccountingCard';
+import type { SavedEntry } from '../../lib/useAccountingEntryForm';
 import { StatusChangeDialog, type StatusAttachment } from '../../components/StatusChangeDialog';
-import type { CommissionShots } from '../../components/CommissionPaymentFields';
+import { CommissionPaidByConfirm, type CommissionShots } from '../../components/CommissionPaymentFields';
 import { AttachmentChip } from '../../components/AttachmentChip';
 import { AttachmentDropzone } from '../../components/AttachmentDropzone';
 import { loadWarehouses } from '../../lib/warehouses';
@@ -199,7 +201,12 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
   const commissionShots: CommissionShots = {
     atts: proof.commissionAtts,
     uploading: proof.commissionUploading,
-    add: files => void proof.addCommissionFiles(files).then(() => setActivityKey(k => k + 1)),
+    // The server names the uploader when nobody is on file; anyone else on
+    // file is offered to them through the confirm.
+    add: files => void proof.addCommissionFiles(files).then((p) => {
+      if (p !== undefined) commissionPaidBy.adopt(p);
+      setActivityKey(k => k + 1);
+    }),
     remove: att => void proof.removeCommissionAtt(att).then(() => setActivityKey(k => k + 1)),
   };
 
@@ -441,8 +448,16 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     orderId: order.id,
     paidBy: order.commissionPaidBy ?? null,
     managers,
+    me: user ? { id: user.id, name: user.name } : null,
     onMutated: () => setActivityKey(k => k + 1),
   });
+  // A commission booked in Accounting names its manager as the payer when
+  // nobody was on file; the server says so, and the tab takes it as is.
+  const onAccountingRecorded = (r: SavedEntry) => {
+    if (r.commissionPaidBy === undefined) return;
+    commissionPaidBy.sync(r.commissionPaidBy);
+    setActivityKey(k => k + 1);
+  };
 
   // A patch of `_` bookkeeping alone (the part # question's answer) changes
   // nothing Save would write, so it must not count as an edit: on a
@@ -1780,6 +1795,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
               {/* Bank payments linked to this PO on the Payments page. Manager-only
                   (the API 403s everyone else) and invisible until something links. */}
               {user?.role === 'manager' && <PoPaymentsLedger scope={{ orderId: order.id, kind: 'cost' }} locale={locale} />}
+              {isManager && <AccountingCard scope={{ orderId: order.id, kind: 'purchase' }} />}
             </div>
           ),
           commission: (
@@ -1804,7 +1820,12 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
               commissionPaidBy={commissionPaidBy}
               canEditCommissionPayment={!isPurchaser}
               ledger={user?.role === 'manager' && (
-                <PoPaymentsLedger scope={{ orderId: order.id, kind: 'commission' }} locale={locale} />
+                <>
+                  <PoPaymentsLedger scope={{ orderId: order.id, kind: 'commission' }} locale={locale} />
+                  {isManager && (
+                    <AccountingCard scope={{ orderId: order.id, kind: 'commission' }} onRecorded={onAccountingRecorded} />
+                  )}
+                </>
               )}
             />
           ),
@@ -2164,6 +2185,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
           onMutated={() => setActivityKey(k => k + 1)}
         />
       )}
+      <CommissionPaidByConfirm paidBy={commissionPaidBy} />
     </>
   );
 }

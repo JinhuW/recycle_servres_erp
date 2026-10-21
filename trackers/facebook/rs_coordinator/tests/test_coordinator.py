@@ -56,7 +56,16 @@ def test_dedupe_key_is_stable_and_distinct():
 
 @pytest.mark.parametrize(
     "raw,expected",
-    [("$1,200", 1200.0), ("1200 USD", 1200.0), ("Free", None), (None, None), ("", None)],
+    [
+        ("$1,200", 1200.0),
+        ("1200 USD", 1200.0),
+        ("$1,500.50", 1500.5),
+        # A reduced price reads "now | was"; joining every digit made it 2025.
+        ("$20 | $25", 20.0),
+        ("Free", None),
+        (None, None),
+        ("", None),
+    ],
 )
 def test_parse_price(raw, expected):
     assert parse_price(raw) == expected

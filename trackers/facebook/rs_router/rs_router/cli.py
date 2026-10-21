@@ -150,7 +150,8 @@ class Router:
             try:
                 self.matrix.send_text(room_id, row["text"])
             except MatrixError as e:
-                self.coordinator.ack_outbound(row["id"], "failed", str(e))
+                # A room we cannot post to stays that way; do not burn retries.
+                self.coordinator.ack_outbound(row["id"], "failed", str(e), permanent=True)
                 logger.warning("Reply %s to %s failed: %s", row["id"], thread_id, e)
                 continue
             self.coordinator.ack_outbound(row["id"], "sent")

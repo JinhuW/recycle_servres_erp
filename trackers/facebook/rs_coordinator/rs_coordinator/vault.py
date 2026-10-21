@@ -28,6 +28,10 @@ SECRET_FIELDS = (
     "totp_secret",
     "imap_host",
     "imap_port",
+    # A long-lived access token some accounts carry. The worker exchanges it for
+    # a fresh session when its cookie lapses, a cheaper signal than a password
+    # login, so it is a credential released on demand, not a plain column.
+    "fb_token",
 )
 
 

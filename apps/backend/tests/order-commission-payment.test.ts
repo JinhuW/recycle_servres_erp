@@ -35,7 +35,7 @@ const PNG = () => new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'paid.png
 describe('Commission screenshots', () => {
   beforeEach(async () => { await resetDb(); });
 
-  it('a manager uploads one; it is listed under the Commission bucket and the response is a plain attachment', async () => {
+  it('a manager uploads one; it is listed under the Commission bucket and the response carries no scan', async () => {
     const { token: mgr } = await loginAs(ALEX);
     const id = await createOrder(mgr);
 

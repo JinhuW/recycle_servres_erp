@@ -34,7 +34,9 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from .db import (
     ACCOUNT_EXTRA_COLUMNS,
+    OUTBOUND_MAX_ATTEMPTS,
     ACCOUNT_LOCK_COLUMNS,
+    ALERT_CLAIM_SQL,
     ALERT_HIT_SQL,
     LISTING_EXTRA_COLUMNS,
     OUTBOUND_EXTRA_COLUMNS,
@@ -43,6 +45,7 @@ from .db import (
     REVIEW_STATS_SUMS,
     SCHEMA,
     SEARCH_CYCLE_DAYS,
+    SEED_ALERT_CLAIMS_SQL,
     SNAPSHOT_EXTRA_COLUMNS,
     STATUS_EVENT_DAYS,
     THREAD_EXTRA_COLUMNS,
@@ -117,6 +120,12 @@ def postgres_schema() -> str:
     )
     ddl = re.sub(r"\bBLOB\b", "BYTEA", ddl, flags=re.IGNORECASE)
     return ddl
+
+
+# psycopg names its parameters %(name)s; the shared statements use :name.
+_ALERT_CLAIM_SQL = {
+    name: re.sub(r":(\w+)", r"%(\1)s", sql) for name, sql in ALERT_CLAIM_SQL.items()
+}
 
 
 def _value(value: Any) -> Any:
@@ -210,6 +219,7 @@ class PostgresDatabase:
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_threads_topic ON threads(telegram_topic_id)"
                 )
+                conn.execute(SEED_ALERT_CLAIMS_SQL)
                 conn.commit()
             finally:
                 conn.execute("SELECT pg_advisory_unlock(%s)", (ADVISORY_LOCK_KEY,))
@@ -544,16 +554,29 @@ class PostgresDatabase:
         return _row(row)
 
     def mark_outbound(
-        self: "PostgresDatabase", outbound_id: int, status: str, error: str | None = None
-    ) -> None:
+        self: "PostgresDatabase",
+        outbound_id: int,
+        status: str,
+        error: str | None = None,
+        permanent: bool = False,
+    ) -> str:
         with self.cursor() as cur:
-            cur.execute(
-                "UPDATE outbound_messages SET status = %s, last_error = %s, "
-                "attempts = attempts + 1, "
-                "sent_at = CASE WHEN %s = 'sent' THEN %s ELSE sent_at END "
-                "WHERE id = %s",
-                (status, error, status, utcnow(), outbound_id),
-            )
+            if status == "sent":
+                cur.execute(
+                    "UPDATE outbound_messages SET status = 'sent', last_error = %s, "
+                    "attempts = attempts + 1, sent_at = %s WHERE id = %s",
+                    (error, utcnow(), outbound_id),
+                )
+            else:
+                cur.execute(
+                    "UPDATE outbound_messages SET last_error = %s, attempts = attempts + 1, "
+                    "status = CASE WHEN %s OR attempts + 1 >= %s THEN 'failed' ELSE 'queued' END "
+                    "WHERE id = %s AND status <> 'sent'",
+                    (error, bool(permanent), OUTBOUND_MAX_ATTEMPTS, outbound_id),
+                )
+            cur.execute("SELECT status FROM outbound_messages WHERE id = %s", (outbound_id,))
+            row = cur.fetchone()
+        return str(row["status"]) if row else status
 
     def count_autoreplies_since(self: "PostgresDatabase", since: str) -> int:
         with self.cursor() as cur:
@@ -873,6 +896,23 @@ class PostgresDatabase:
                 record,
             )
             return cur.rowcount > 0
+
+    def write_alert_claim(
+        self: "PostgresDatabase", statement: str, params: Dict[str, Any]
+    ) -> bool:
+        """See `Database.write_alert_claim`."""
+        with self.cursor() as cur:
+            cur.execute(_ALERT_CLAIM_SQL[statement], params)
+            return cur.rowcount > 0
+
+    def get_alert_claim(
+        self: "PostgresDatabase", marketplace: str, listing_id: str
+    ) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute(
+                _ALERT_CLAIM_SQL["get"], {"marketplace": marketplace, "listing_id": listing_id}
+            )
+            return _row(cur.fetchone())
 
     def record_alert_reaction(
         self: "PostgresDatabase",

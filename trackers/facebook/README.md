@@ -49,9 +49,13 @@ master.toml + fleet.toml  --rsc gen-configs-->  configs/generated/worker-<id>.to
 
 Each worker is **statically pinned to one region**. There is no runtime
 dispatch and no random city selection: a worker's scope changes only when
-`fleet.toml` is edited and configs are regenerated. Workers never message
-Telegram directly, so a listing visible from two adjacent regions still
-produces exactly one alert.
+`fleet.toml` is edited and configs are regenerated.
+
+The diagram is the sharded path. The homelab workers (`configs/homelab-*.toml`)
+send their alerts straight to Telegram instead, so they can route by topic.
+Each one first claims the listing from the coordinator, so a listing visible
+to several workers still alerts once (*One alert per listing, fleet-wide*
+below).
 
 ## Fleet coverage
 
@@ -405,6 +409,40 @@ The same verdict is emitted as a `listing_alert` structured event
 (`delivered`, `score`, `threshold`, `listing_id`, `url`), so it is queryable in
 the OpenSearch dashboards alongside the skip reasons.
 
+### One alert per listing, fleet-wide
+
+A homelab worker sends its own alerts and keeps its own record of what it sent,
+in its diskcache volume. That record cannot see the other workers, and their
+cities overlap: some search the same city, and neighbouring cities return the
+same listings. On 10-18, the day four workers joined, alerts went from about 5
+a day to 40, and 50 of the 122 alerts sent from 10-12 to 10-20 repeated a
+listing already in the chat.
+
+So before sending, a worker claims the listing from the coordinator
+(`POST /v1/alerts/claim`, `rs_coordinator/alert_claims.py`), and only the first
+claim sends:
+
+| Answer | Meaning | The worker |
+| --- | --- | --- |
+| `new` | Nobody has claimed it, or the claim is this worker's own undelivered one, or it was abandoned for 15 min | sends, then reports `POST /v1/alerts/claim/delivered` |
+| `discounted` | Delivered before, now below the price it was alerted at | sends (once fleet-wide) |
+| `pending` | Another worker holds it and has not reported delivery | skips (`listing_skip`, reason `fleet_pending`) and asks again next sweep |
+| `duplicate` | Delivered already | skips (reason `fleet_duplicate`) and marks it notified locally |
+| no answer | No control plane, coordinator down, or a coordinator without claims | sends, as before claims |
+
+An edit that leaves the price alone does not alert again. The workers' own
+"listing changed" check fires whenever a second search finds the same listing,
+because the item name is part of `Listing.hash`; one listing was sent eight
+times on 10-19 that way. The claims table is seeded on every coordinator boot
+from `alert_messages`, so listings alerted before claims existed count as
+delivered.
+
+```bash
+# Who got a listing, and when (coordinator container on the VM):
+docker exec rs-coordinator python3 -c "from rs_coordinator import deps; \
+  print(deps.db.get_alert_claim('facebook', '<listing id>'))"
+```
+
 ### System faults page once
 
 When something the whole fleet depends on breaks — OpenRouter out of credits is
@@ -445,7 +483,7 @@ HEALTHY in `rsc status` only means the container is up and heartbeating. A
 checkpointed or freshly-flagged account heartbeats HEALTHY all day while every
 search comes back empty, so productivity has to be checked separately.
 `scripts/fleet-verify.py` does that once a day on the VM, from `jinhu`'s
-crontab at 21:05 UTC (after the 10:00 UTC sweep has had 6–9 h to finish), and
+crontab at 23:05 UTC (after the 13:00 UTC sweep has had 6–9 h to finish), and
 posts one table to the Telegram chat:
 
 ```
@@ -479,8 +517,14 @@ Exit 0 is all clear, 2 is "something needs attention", 1 is "the check itself
 could not run" — so a silent day in the chat is never a broken check. This is
 an on-VM cron rather than a `/schedule` cloud routine because a cloud agent can
 reach neither the coordinator (loopback-only) nor docker on the VM, and could
-not fix anything it found. `scripts/sweep-report.py` (the by-city funnel) is
-the same shape and can be added to the same crontab when wanted.
+not fix anything it found. `scripts/prescreen-shadow.py` replays recent billed
+`ai_eval` verdicts through a decision model and reports what a pre-screen in
+front of the listing LLM would save and what it would drop (RS-316 has the
+first results); with `--live` it reads the fleet's own `prescreen` events
+instead of asking a model, which is the report that decides whether
+`RS_PRESCREEN_ENFORCE` gets turned on (RS-319). `scripts/sweep-report.py`
+(the by-city funnel) is the same shape and can be added to the same crontab
+when wanted.
 
 ### Watching the browser
 
@@ -683,7 +727,12 @@ config named by worker in the console's `RS_WORKER_CONFIGS`
 (`ne-1=/config/workers/homelab-ne.toml`); a bare path takes the fleet-wide
 values only. Any Marketplace location is accepted, not just master.toml's
 regions, and a wrong slug fails silently, so check a new one on Marketplace.
-Saved values are kept in `/state/settings.json` on the
+One worker's sweep times can also differ from the fleet's, from the CLI only:
+`docker exec rs-console python -m rs_console.settings start-at <id> 17:00`
+(`--clear` hands it the fleet's again). They are written after the
+fleet-wide values, so a sweep time saved from the ERP does not move that
+worker. This is for accounts that share an IP (`deploy/README.md` → *Scaling
+notes*). Saved values are kept in `/state/settings.json` on the
 `rs-console-state` volume, not in `master.toml`, which stays the default for
 anything never saved. The console writes them into every worker config in
 place, and the monitor reloads its config between jobs. That reload restarts
@@ -915,6 +964,10 @@ full result page per phrase in Facebook traffic, so keep the phrase count small.
 | Per-listing alert verdict, so a Telegram inbox can be reconciled against the scraper. `User.notify` returns whether the send succeeded instead of `None`, and the notify log line reports the outcome rather than announcing success before checking it | `monitor.py` (`[Alert]` line, `listing_alert` event), `user.py` (`notify`), `notification.py` (`_execute_with_retry`) |
 | A 30-result floor on the scroll loop: below it, insist on more quiet rounds before believing a short result list, since a stalled loader and a finished search look identical | `facebook.py` (`MIN_RESULTS_BEFORE_STOP`, `get_listings`) |
 | `Failed to get search results` fires only on an actually empty result set | `facebook.py` (`search`) |
+| Walls mid-sweep — a search that returns nothing on an ordinary URL asks a decision model (OpenRouter Decisions API, `RS_PAGE_CHECK_MODEL`, default `openai/gpt-6-luna-decisions`; empty disables) which kind of page the tab shows. A checkpoint, captcha, block or disabled notice files one challenge with a screenshot, reports its state and parks the worker: no more cities, no HEALTHY, until the idle loop sees the page move on; a login or 2FA page is left to the next `login`. `detect_login_challenge` falls back to the same question when its selectors see nothing. Every failure of the check means the old behaviour | `page_state.py` (new), `facebook.py` (`_check_empty_search`, `_wall_cleared`, `check_session`, `detect_login_challenge`) |
+| Listing pre-screen — before the LLM is paid to read a listing it has no cached verdict for, a decision model (`RS_PRESCREEN_MODEL`, default `typesafe/jev-1.14`, empty disables; the homelab workers read it and the two knobs below from `configs/secrets.env`) answers reject / maybe / buy with the production prompt as its rules. Shadow unless `RS_PRESCREEN_ENFORCE=1`: the answer is logged as a `prescreen` event and nothing is skipped. Enforced, a reject at or above `RS_PRESCREEN_THRESHOLD` (0.99) skips the LLM (`listing_skip reason=prescreen`) and is remembered across sweeps. Any failure of the check means the LLM runs as before | `prescreen.py` (new), `monitor.py` (`prescreen_rejects`, `_search_item`), `utils.py` (`CacheType.PRESCREEN`) |
+| Waits that wait — Playwright ignores the `timeout` argument to `is_visible`, so the cookie-consent, Trust-this-device and locked-account checks were instant snapshots that read like waits. They `wait_for` the element now; the captcha selector checks stay snapshots on purpose (three real waits would add six seconds to every failed-login check, and the page-state fallback reads what they miss). `tests/test_no_dead_timeouts.py` keeps the misleading form out | `facebook.py` (`login`, `trust_this_device`, `detect_login_challenge`) |
+| `ai_eval` names its model — the event carries `unit_count`, `quantity` and the model id behind the verdict, so `scripts/prescreen-shadow.py` (or any replay of the index) can judge the unit-count gate and tell one model's history from another's | `monitor.py` (`_ai_model_name`, `_search_item`) |
 | Structured AI verdict — the single evaluation call answers with one JSON object (rating, numeric `unit_count`, `count_phrase`, summary) parsed by a shared tolerant parser with a legacy two-line fallback; the AI cache key is versioned; a confident single-unit listing is suppressed in code whatever its score; exhausted retries raise instead of crashing unbound; an AI outage fails closed — unevaluated listings are withheld and re-scanned, with a one-time "AI evaluation DOWN" / "recovered" Telegram ops note per incident; the coordinator payload carries `ai_count`; completions are capped at a configurable `max_tokens` (default 8192) so OpenRouter prices the request at the cap, not the model's 65k output ceiling | `ai.py` (`AIResponse`, `parse_ai_answer`, both backends), `monitor.py` (unit-count gate, loud fail-open), `coordinator_notify.py` (`ai_count`) |
 | Rich Telegram listing alert (price, location, Count, AI rating, summary) and a configurable `min_unit_count` (default 2, i.e. only a confident single unit is suppressed; `master.toml` sets 5) | `notification.py` (`_listing_alert`), `marketplace.py` (`min_unit_count`), `monitor.py` (gate) |
 | Listing details moved to the END of the AI prompt, after all static instruction text, so every call for the same item shares an identical prefix and provider-side prompt caching (OpenAI engages at 1024+ prefix tokens) discounts the instruction block on every call after the first | `ai.py` (`get_prompt`) |
@@ -928,6 +981,7 @@ full result page per phrase in Facebook traffic, so keep the phrase count small.
 | Heartbeat repeater — the first `report_state` starts a daemon thread that re-sends the last reported state to the coordinator every 5 minutes (`heartbeat_interval`). Before this a worker heartbeated once per search, at the top of `search()`, and one sweep over the city list runs for hours, so a healthy worker spent most of the day looking silent. The repeater only restates what the main thread last said (it never touches the Playwright page, which is not thread-safe); the login is still re-checked only at the top of each search | `facebook.py` (`heartbeat_interval`, `report_state`, `_send_heartbeat`, `_heartbeat_loop`, `stop`) |
 
 | System faults page once, fleet-wide — an AI outage is declared only after `RS_INCIDENT_DOWN_AFTER` (3) straight failed evaluations and cleared after `RS_INCIDENT_UP_AFTER` (3) straight successes, and the crossing is POSTed to the coordinator's `/v1/incidents`, which dedupes across every worker (one DOWN page per key per `RS_INCIDENT_COOLDOWN_HOURS`, one recovered note per paged DOWN). Without a control plane, or when it is unreachable, a local gate applies the same one-per-cooldown rule to this process. Replaces the per-process flag that sent a DOWN/recovered pair for every listing while OpenRouter flapped | `ops_incidents.py` (new: `OutageTracker`, `LocalIncidentGate`), `monitor.py` (`_report_incident`, `evaluate_by_ai`), `control_plane.py` (`report_incident`) |
+| One alert per listing, fleet-wide — after the rating gates and before any send, the worker claims the listing from the coordinator's `/v1/alerts/claim`; only a granted claim sends, and its delivery is reported to `/v1/alerts/claim/delivered`. A `duplicate` (the fleet already alerted it) is skipped and cached as notified; a `pending` one (another worker is sending it) is skipped and asked again next sweep. No answer sends as before | `monitor.py` (`_search_item`, `listing_alert.fleet_claim`), `control_plane.py` (`claim_alert`, `alert_delivered`) |
 | Funnel counts — each search page, card, title-gate pass, real page visit, keyword-gate pass, not-yet-alerted listing, fresh AI verdict and delivered alert is counted into a buffer and POSTed to `/v1/stats/reviews` once per search page (previously one POST per verdict and one per alert), feeding the ERP's search-to-alert card; the report that counts a search names its `search_city`, which colors the cities searched today on the ERP's fleet fold | `facebook.py` (`count_stage`, `flush_stage_counts`, `_examine_listings`), `monitor.py` (`_count_stage`), `marketplace.py` (`count_stage`), `control_plane.py` (`report_review_stats`) |
 
 Before pulling upstream, rebase that branch rather than merging into it, then

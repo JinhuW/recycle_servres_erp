@@ -100,6 +100,12 @@ class CredentialsResponse(BaseModel):
     password: str
 
 
+class SessionTokenResponse(BaseModel):
+    """The account's access token, for the worker to exchange for a session."""
+
+    token: str
+
+
 # -- escalation -------------------------------------------------------------
 
 
@@ -175,6 +181,9 @@ class MessagesSyncRequest(BaseModel):
 class OutboundAck(BaseModel):
     status: str  # 'sent' or 'failed'
     error: str | None = None
+    # A failure that retrying will not fix (a selector that no longer matches,
+    # a forbidden Matrix room). Optional so older bridges keep acking.
+    permanent: bool = False
 
 
 class OperatorReply(BaseModel):
@@ -375,6 +384,34 @@ class AlertMessageReport(BaseModel):
     prompt_hash: str | None = None
 
 
+class AlertClaim(BaseModel):
+    """A worker asking to alert one listing (see alert_claims.py).
+
+    `price` is the listing's price as the worker read it, so a drop below
+    the alerted price can earn one more alert.
+    """
+
+    worker_id: str | None = None
+    marketplace: str = Field(default="facebook", min_length=1)
+    listing_id: str = Field(min_length=1)
+    price: str | None = None
+
+
+class AlertClaimResult(BaseModel):
+    send: bool
+    # new | discounted | pending | duplicate
+    verdict: str
+    # Who holds the claim, or sent the alert, when it is not the caller.
+    worker_id: str | None = None
+    delivered_at: str | None = None
+
+
+class AlertDelivered(BaseModel):
+    worker_id: str | None = None
+    marketplace: str = Field(default="facebook", min_length=1)
+    listing_id: str = Field(min_length=1)
+
+
 class IncidentReport(BaseModel):
     """A worker's view of one system fault: it is down, or working again.
 
@@ -482,7 +519,7 @@ class DeviceCookiesReport(BaseModel):
     cookies: List[DeviceCookie] = Field(min_length=1, max_length=4)
 
 
-LOGIN_TRIGGERS = ("boot", "relogin", "forced", "swap")
+LOGIN_TRIGGERS = ("boot", "relogin", "forced", "swap", "cookie-restore", "token-refresh")
 LOGIN_OUTCOMES = (
     "restored", "password_ok", "watch_ok", "challenge", "locked", "failed", "timed_out",
 )

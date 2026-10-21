@@ -1,6 +1,6 @@
 // GET /api/orders/:id and its audit timeline — what the PO page loads.
 import { Hono } from 'hono';
-import { linkedPaidFrag } from '../../banktx/match';
+import { commissionLinkedFrag, linkedPaidFrag } from '../../banktx/match';
 import { getDb } from '../../db';
 import { wasEverSubmitted } from '../../services/orderAudit';
 import { effectiveRole } from '../../lib/role';
@@ -14,7 +14,7 @@ import { poRealizedLateral } from '../../lib/po-cost';
 import { realizedFromRow } from '../../services/poRealized';
 import { linePhotos, type LinePhoto } from '../../lib/linePhotos';
 import { poLineOrder } from '../../lib/poLineNo';
-import { type OrdersEnv, newestPackageJson, packageFromJson, unackedRevertFrag } from './shared';
+import { type OrdersEnv, commissionPaidByOf, newestPackageJson, packageFromJson, unackedRevertFrag } from './shared';
 
 const detailRoutes = new Hono<OrdersEnv>();
 
@@ -38,6 +38,8 @@ detailRoutes.get('/:id', async (c) => {
            hb.name AS handoff_by_name,
            mg.id AS manager_id, mg.name AS manager_name,
            o.commission_paid_by, cpb.name AS commission_paid_by_name,
+           o.commission_paid_by_company,
+           ${commissionLinkedFrag(sql)} AS commission_linked,
            o.supplier_id, sup.name AS supplier_name,
            o.commission_rate::float AS commission_rate,
            u.name AS user_name, u.initials AS user_initials,
@@ -258,9 +260,10 @@ detailRoutes.get('/:id', async (c) => {
         : null,
       commissionRate: order.commission_rate,
       // Every role, as `manager` is: the purchaser may see who paid them.
-      commissionPaidBy: order.commission_paid_by
-        ? { id: order.commission_paid_by, name: order.commission_paid_by_name ?? '' }
-        : null,
+      commissionPaidBy: commissionPaidByOf({
+        commission_paid_by: order.commission_paid_by, commission_paid_by_name: order.commission_paid_by_name,
+        commission_paid_by_company: order.commission_paid_by_company, commission_linked: order.commission_linked,
+      }),
       // Whether total_cost tracks the lines or is a pinned lot price. The
       // client can't judge it: the lines it gets carry what is left, and the
       // verdict is on what was bought (orderGoodsTotal.ts), so a partly sold

@@ -48,13 +48,16 @@ portal was removed in v1.191.0; no bid had ever been placed through it.
   non-manager's JSON never carries a manager-only key — not even as `null`,
   since the name alone would advertise the feature. Whole-endpoint manager
   features (sell orders, customers, transfers, activity, members,
-  bank and internal transactions, tracker, coordinator, connectors, FX rates,
-  inventory export and analysis, a line's linked sell orders) answer 403. The
+  bank and internal transactions, the Accounting book (v1.310.0), tracker,
+  coordinator, connectors, FX rates, inventory export and analysis, a line's
+  linked sell orders) answer 403. The
   Facebook account pool (`/api/facebook-pool`, v1.262.0) is the exception
   under Monitors: every role reads the rack and may take, return and report,
   while add, import, edit, retire and remove answer 403 to a purchaser;
-  shared reads are scoped to the caller's own rows and leave the manager-only
-  fields out: the PO figures `finalSellPrice`, `finalSoldQty`, `realized` and
+  each account's sealed secrets — password, 2FA key, email password, session
+  cookie and, from v1.307.0, the Facebook access token — are revealed only to a
+  manager or the purchaser currently holding it; shared reads are scoped to the
+  caller's own rows and leave the manager-only fields out: the PO figures `finalSellPrice`, `finalSoldQty`, `realized` and
   `sellOrders` (v1.177.1), and the linked-payment total, the pending
   change-review, the leaderboard peers' money and email, the warehouse
   manager's contact, and the sell-order ids in an edit refusal and the
@@ -99,6 +102,26 @@ portal was removed in v1.191.0; no bid had ever been placed through it.
   a PO on behalf of one (v1.82.0). The owner can be any active member,
   managers included — the picker lists purchasers first, then managers
   (v1.131.0).
+
+## Getting started (purchasers)
+
+- **A new purchaser gets a walkthrough on first sign-in** (v1.299.0), on both
+  shells. Nine steps cover the home numbers, adding products (Submit order on
+  desktop, the camera button on the phone), Mark as In Transit and what it
+  asks for, the payment proof for Company card PayPal, Company card cash and
+  Self-paid, the manager review and the edit window until Ready to Pay, the
+  commission formula with a worked example, and the buying tools. A step with
+  a place in the app spotlights it: the sidebar item on desktop, the tab-bar
+  item on the phone. The card switches between English and 中文 in place, and
+  the last step opens Submit or the capture flow.
+- **Who gets it automatically.** A purchaser (the real role, so never a
+  manager previewing as one) whose preferences lack `onboarding.done`.
+  Finishing or skipping sets it, server-side, so it doesn't reappear on
+  another device. Migration 0186 set it for everyone who had already signed
+  in, so only members who never had get it.
+- **Replay.** The Guide button in the desktop top bar, for every role, and
+  Profile › Getting started on the phone. The phone's install card stays
+  hidden while the walkthrough is open.
 
 ## Purchase orders
 
@@ -216,10 +239,31 @@ is not a stage but a flag beside one, set once every line has sold
   and an OCR-filled transaction ID; v1.165.0 cut it to the screenshot alone).
   Above the drop box, **Paid by** names the manager who paid the purchaser
   (v1.217.0): a select of the active managers, or *Not recorded*, which every
-  order starts at — the screenshot's uploader need not be the payer, so
-  nothing is guessed. Files write through as they are dropped and the pick
-  as it is made — managers at any stage, closed book included — and
-  purchasers see both read-only. Under the drop box, managers also see the
+  order starts at. Since v1.301.0 it also offers **Company paid**, a fixed
+  option rather than a member, for a commission paid from the company's
+  account. A live bank payment linked as the PO's commission makes it read
+  Company paid on its own: the select locks with a note saying why, and an
+  unlink or a reversal gives back the pick made by hand. **The screenshot's
+  upload records the payer** (v1.302.0): a manager who uploads one while
+  Paid by reads *Not recorded* is recorded as the payer. If Paid by names
+  someone else, or reads Company paid, the upload asks *Set Paid by to you?*
+  and changes it only on a yes. The Done dialog's drop box does the same,
+  with the question opening above it. A pick in the select asks
+  *Change who paid the commission?*, naming both values, and nothing is
+  saved until it is confirmed. Migration 0189 filled Paid by once on every PO
+  that had a commission screenshot and nobody recorded, from the uploader of
+  its latest screenshot. **A commission booked in Accounting records its
+  manager the same way** (v1.310.0): a Paid commission entry on the PO fills
+  Paid by with the entry's manager while nobody is on file, the company isn't
+  recorded and no bank row is linked as the commission. A payer already on
+  file stays, and voiding or moving the entry never clears it. Since v1.310.2
+  the fill happens once, when the entry comes to pay this PO's commission.
+  Later edits leave a payer cleared on purpose alone. Correcting the entry's
+  manager moves Paid by with it, but only while Paid by still names the old
+  manager. The tab shows
+  the new payer at once. Files write through as they are dropped and a
+  confirmed pick as it is made — managers at any stage, closed book included
+  — and purchasers see both read-only. Under the drop box, managers also see the
   **bank payments linked as this PO's commission** on the Payments page,
   with their net, the same ledger the Cost Payment tab shows for the cost
   (v1.257.0). Each pick is one *Commission paid by:
@@ -526,6 +570,36 @@ is not a stage but a flag beside one, set once every line has sold
     not manager. The page and button are hidden from a manager previewing as
     purchaser, and the route bounces them without leaving a Back entry
     (v1.189.1).
+  - **Review mode prices the PO for the commission** (v1.296.0). Each row
+    has a *Sell / Unit* field beside the count: the line's sell price, the
+    projection the commission is paid on. Enter or leaving the field saves
+    it straight to the line (the inventory line PATCH, audited as `priced`),
+    Escape puts it back, and a blank unprices the line. A comma counts only
+    as a thousands separator (v1.310.1), so `12,50` is refused rather than
+    saved as 1250. Lowercase `p`
+    focuses the selected row's price; the key legend says so.
+    - An unpriced line whose part number is on the Market board shows the
+      board's value as a ghost in the field — the last recorded price, else
+      the average sell, else the team's own 30-day average, the same figure
+      the line drawer offers as *Suggested sell* — and Enter on the empty
+      field takes it, as does the *Use $n* link under it. **Fill from
+      market** in the tally bar prices every unpriced line that has a value
+      in one click and says how many it priced.
+    - A priced row shows its margin under the price; one priced below cost
+      reads *below cost* in red and the save toasts a warning.
+    - The tally bar's right half counts the priced products with its own
+      meter and shows **Purchaser earns** live, by the Commission tab's
+      formula (goods or negotiated lot price plus fees, revenue over priced
+      lines, the rate, the cost back on a self-paid PO) and over the qty
+      Approve will leave, so a line ticked at 0 earns nothing.
+    - A **Commission** card in the side panel carries the rate (editable at
+      Reviewing and earlier, read-only once the book closes at Ready to
+      Pay), revenue, cost with the fee broken out, profit, commission and
+      the total, with the unpriced count. The Compare card shows the
+      selected product's sell price, its market reference with the basis
+      and age, and the final sell price once it has sold. Finish review
+      lists the unpriced products, which count as $0 until priced; they
+      don't block Approve. The pure maths lives in `lib/reviewPricing.ts`.
 - **AI review checks every product of a PO in Review mode** (v1.245.0, desktop,
   managers). Off by default; **Settings → General → AI review of purchase
   orders** turns it on and sets a per-PO cost cap, the OpenRouter model, and
@@ -666,6 +740,21 @@ is not a stage but a flag beside one, set once every line has sold
   exist; sortable, in the Columns picker, on by default. A user who had
   pinned the picker before this release ticks it on once — the saved set
   lists what is shown, and a new column is not in it.
+- **The desktop list has a Paid by column** (v1.301.0), after Commission:
+  who paid the purchaser their commission, the same record as the Commission
+  tab's *Paid by*. Since v1.302.0 it is read-only for every role; v1.301.0
+  had a picker in the cell. The record is made on the PO page, by the
+  commission screenshot's upload or a confirmed pick. A manager sees a PO
+  with a bank payment linked as its commission as a *Company paid* chip that
+  opens that payment. It is sortable, in the Columns picker and on
+  by default. Unlike Total cost above, migration 0188 added it to every saved
+  column list, so nobody has to tick it on.
+- **The Actions column is pinned to the right edge** (v1.294.1). When the
+  desktop list is wider than its card and scrolls sideways, the Actions
+  header and cells stay put at the right while the other columns slide
+  underneath them, with a soft edge on the cell's left while anything is
+  hidden there. Sell orders and the inventory lot table pin theirs the same
+  way. A table that fits its card shows no edge and looks as before.
 - **One payment picker on every surface, and a cash payment needs a
   screenshot of the amount** (v1.153.0). The desktop Submit and Edit pages,
   the phone's Review and Detail screens, and the hand-off dialog and sheet
@@ -1188,13 +1277,22 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     box is live, and Save / Cancel appear once it differs from what is
     saved; leaving the page with it unsaved asks first (v1.255.1), as the
     edit form does. Edit mode still folds notes into the form's own Save.
+  - **The order keeps its own files in an Attachments card** (v1.294.0),
+    between Internal notes and History, in view and edit mode alike. A
+    manager drops or picks the marketplace sale record, the invoice sent or
+    a packing list there (PDF, images, XLSX, CSV, within the workspace upload
+    cap); each lands as a row with its name, size, and who uploaded it when,
+    with a remove control. Images open in the lightbox, other files in a new
+    tab. Uploads and removals save at once, so a file dropped mid-edit
+    survives a cancelled edit, and the History records each one. These are
+    the order's files; the per-status evidence stays with its transition.
   - **The order's History is the last card in the right-hand column, folded**
     (v1.248.0; in the side column since v1.248.2); a click on its heading
     opens it.
-  - **Editing puts Vendor price import at the top of the right-hand column**,
-    above the order summary (v1.248.3; first in the left card in v1.248.1,
-    under the products before that), so the bid sheet's round trip doesn't
-    need a scroll past every line.
+  - **The Vendor price import card is gone** (v1.297.0, RS-324). It sat at
+    the top of the right-hand column from v1.248.3 (first in the left card in
+    v1.248.1, under the products before that). A sell order's prices come
+    from its lots' sell prices now; see *Vendor bid sheet* below.
   - **A search box over the products narrows the list** (v1.248.0), in view
     and edit, like Pack mode's: a part #, serial or PO number matches with or
     without its dashes, and words match the item's name and spec chips
@@ -1366,6 +1464,12 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   (v1.257.0), under the payment receiver: each row a link back to the
   Payments page pinned to this order, with the net received. Nothing shows
   until a manager links a payment there.
+- **The managers' RMB receipts sit under them** (v1.310.0): an *Accounting*
+  card with the order's Sale entries and its cases' refunds, the net received
+  against the order total, and *Record receipt*, which starts on the payment
+  receiver. A receiver no longer active falls back to the manager recording
+  it (v1.310.2). Its suggested amount is what the order itself still lacks,
+  so a case's refund no longer reads as owed. See [Accounting](#accounting).
 - **The desktop list flags an order with internal notes** (v1.239.0): a note
   icon beside the customer on each row whose note isn't blank.  Hovering or
   tabbing to it shows the note in a card (line breaks kept, clamped at 14
@@ -1375,27 +1479,32 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   on it only dismisses it (v1.239.1).
 - **Negotiated final-price adjustment** with an order-summary breakdown card
   (v1.22.0, v1.23.0).
-- **Vendor price round-trip**: export a bid-sheet XLSX, the vendor fills in
-  prices, import it back (v1.21.0). The sheet ships pre-sorted the way the desk
-  reads it, with an autofilter across the header row and no sheet protection
-  (v1.51.2). Its header text is load-bearing for the import parser — don't
-  move it. **Saving after a confirmed import records the accepted prices on
-  the Market value board** as `bid:<order>` data points, USD at the saved
-  rate, one per confirmed part (v1.138.3); hand-typed price edits record
-  nothing. **The sheet prices a part once, not per condition**: there is no
-  Condition column, a part held in two conditions is one row with its qty
-  summed, and the import applies its price to every line of the part
-  (v1.242.0), whatever label its lines were added under (v1.247.1). A 0 in
-  the price column is no bid, not a $0 price (v1.247.1). A sheet made before
-  v1.242.0 that priced a part's conditions apart leaves that part for the
-  manager to price, flagged as such, instead of taking its last row
-  (v1.247.1). **A DDR5 lot folds by spec, not part number** (v1.255.0): the
-  same Brand + Type + Capacity + Rank + Speed + Class key as Inventory's
-  grouped view, so lots of several part numbers are one row with their qty
-  summed. The row's Part Number cell lists each part number it folds,
-  comma-separated, and the import reads that cell as one price for every
-  part in it, one preview line each. The packing lists and the product `#`
-  keep folding by part number.
+- **Vendor bid sheet**: export a bid-sheet XLSX for the vendor (v1.21.0).
+  The sheet ships pre-sorted the way the desk reads it, with an autofilter
+  across the header row and no sheet protection (v1.51.2). **It prices a
+  part once, not per condition**: there is no Condition column, and a part
+  held in two conditions is one row with its qty summed (v1.242.0). **A DDR5
+  lot folds by spec, not part number** (v1.255.0): the same Brand + Type +
+  Capacity + Rank + Speed + Class key as Inventory's grouped view, so lots of
+  several part numbers are one row with their qty summed, and the row's Part
+  Number cell lists each part number it folds, comma-separated. The packing
+  lists and the product `#` keep folding by part number.
+  - **The import half of the round trip was removed in v1.297.0** (RS-324).
+    From v1.21.0 to v1.296.x the vendor filled the sheet's Unit Price column
+    and the manager dropped it back on the order's edit view: the preview
+    matched rows by canonical part number, confirming filled the form's
+    prices, and the save that followed recorded them on the Market board as
+    `bid:<order>` data points (v1.138.3). Since Review mode sets each PO
+    line's sell price (v1.296.0) and a sell order line starts at its lot's
+    sell price, the sheet is a quote the ERP never reads back. The
+    `price-import/preview` route, the `bidParts` save field (an old bundle
+    sending it is ignored) and the `bid:` feed are gone; `bid:` events
+    already on file still show on the Activity page. The Market page's own
+    price-list import stays and still reads these sheets. A lot added to an
+    existing order's edit view starts at its sell price too, in the order's
+    currency (a CNY order's prefilled lots still start at 0, since the rate
+    loads after them); before v1.297.0 it started at 0 unless the product was
+    already on the order.
 - The price template splits into one worksheet per category with per-attribute
   spec columns and image URLs (v1.25.0, v1.27.0). **The RAM tab groups its rows
   with merged label columns left of `#`** — "Desktop & laptop" / "Server", then
@@ -1404,16 +1513,16 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   (v1.129.0). Each label column carries its own light palette and each row a
   paler wash of its generation, so a group reads as a band; the yellow
   `Unit Price` column is untouched by it (v1.130.0).
-- **The packing checklist is a separate download** — `Packing list` beside the
-  bid-sheet button, `GET /api/sell-orders/:id/packing-list`, managers only. It
+- **The packing checklist is a separate download** — `Packing list` in the
+  Download menu (a button beside the bid sheet until v1.293.0),
+  `GET /api/sell-orders/:id/packing-list`, managers only. It
   carries per-warehouse `Pack - <warehouse>` tabs (v1.28.0) with tick boxes,
   quantities and subtotals but no prices, and it lived inside the bid-sheet
   workbook until v1.130.0, which meant the vendor's copy carried it. Its RAM
   sections repeat the bid tab's merged labels and colours on two reserved
   leading columns — reserved on every pack tab, so two warehouses on one order
   read alike. Both files come from one query and one sort, so a picker and a
-  bidder find a product in the same place; uploading this one to the price
-  import is rejected for having no price column (v1.130.0). **Every row names
+  bidder find a product in the same place. **Every row names
   its source in a `From PO` column after Part #** (v1.216.0): `PO-1442 #3`,
   the line's # on that PO's page; a row of hand-typed lines alone reads `—`.
   **A product is one row with one tick box** (v1.220.3): a product from
@@ -1455,14 +1564,21 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   `#3 × 12`, v1.220.3); the tab already names the PO, so it has no `From PO`
   column. A tab is cut from the numbered products, so its rows run in the
   plain list's order under the same device and generation labels, with
-  its own lots' details (v1.221.0). A warehouse picker beside the buttons
-  (shown when the order's lines above 0 span more than one — a warehouse
+  its own lots' details (v1.221.0). A warehouse picker at the foot of the
+  Download menu (beside the buttons until v1.293.0; shown when the order's
+  lines above 0 span more than one — a warehouse
   holding only 0 lines isn't offered, v1.220.2) narrows either packing list to
   one warehouse (`?warehouse=<short>`); the bid sheet always covers the whole
   order. Both packing lists place a line by where its lot is *now* — the lot's
   own warehouse, else its PO's — not the warehouse the line was saved with,
   so a lot transferred after it went on the order is picked where it sits
   (v1.189.1).
+- **The three exports share one `Download` button** (v1.293.0): a dropdown
+  in the page head with a row each for the bid sheet, the packing list and the
+  packing list by PO, each row carrying its explanation as a subline, and the
+  warehouse picker at the foot when there is one to make. The rows for the
+  packing lists are greyed when every line is at 0; the button is disabled
+  while a file is being prepared; Escape and an outside click close it.
 - **Pack mode: a manager ticks the order into the box** (v1.218.0, desktop
   shell, built for an iPad). **Pack mode** in the sell order's page head opens
   `#/sell-orders/<id>/pack`, a full-window page with no sidebar, top bar or
@@ -1641,6 +1757,10 @@ lower price (**Discount**). Purchasers never see the page or the API.
   tiles; nothing moves stock back to a PO, changes the sell order's revenue
   or the dashboard's realized profit. Restocking a return is an inventory
   edit.
+- **The money a case pays out is booked in Accounting** (v1.310.0). The case
+  page's *Accounting* card lists its refunds with their net and *Record
+  refund*; the refunds also show on the sell order's card. See
+  [Accounting](#accounting).
 
 ## Shipping
 
@@ -1917,6 +2037,78 @@ to a PO's commission, or to sell orders (v1.257.0).
 > account is also re-read 60 days back once a week so a late reversal is seen,
 > and a row pending for over 120 days stops holding the fetch window open.
 
+## Accounting
+
+Manager-only, both shells (v1.310.0). The managers' own book of money they
+received and paid, kept in **RMB**. Payments reconciles the company's USD bank
+accounts; this records what moves through the managers' hands — a supplier
+paid by Alipay, a purchaser's commission by WeChat, a customer's bank
+transfer, a refund on a case. Entries are a record only: they change no PO
+cost, sell-order revenue or case amount (the one exception is the commission
+payer, below).
+
+- **An entry** says received or paid, what it was for, how much, how
+  (bank transfer, Alipay, WeChat Pay, cash, other), on what date and through
+  which manager, with an optional counterparty, reference and note. Entries
+  are numbered `AC-1001`, `AC-1002`… from their own counter.
+  - **What it was for is the record it names.** Purchase and Commission name
+    a PO, Sale a sell order, After-sales a case; Other names nothing. The API
+    refuses any other pairing. The kind sets the direction — a sale is
+    received, the rest paid — and the manager can flip it for a supplier's or
+    a customer's refund.
+  - **RMB is the book's currency.** An entry may be in dollars: it carries the
+    CNY-per-USD rate it was booked at (the FX ledger's latest unless one is
+    typed), every total counts it at that rate, and the dollars show beside
+    it. An RMB entry needs no rate, so it never waits on the rate service.
+  - **Dates are calendar dates as typed.** The page's "today" is the viewer's
+    own, not the dashboard's Denver clock: the managers keeping RMB books are
+    most of a day ahead of Denver. Any date up to UTC's tomorrow is accepted.
+  - **Edits keep a history** — recorded, changed (which fields), voided,
+    restored, with who and when. **Void** needs a reason and takes the entry
+    out of every total and balance; **Restore** puts it back. Nothing is
+    deleted. A draft PO deleted after money was booked against it leaves the
+    entry on the book without its link, and its history names the PO.
+  - **A paid commission fills the PO's Paid by** when nobody is on file — the
+    screenshot upload's rule (see *Purchase orders*).
+- **The page** (`#/accounting`, under Oversight after Payments).
+  - The period (the dashboard's chip, *This month* by default) and the manager
+    (all, or one) are the book's scope.
+  - **The band** states the period as an identity: *Opening + Received − Paid
+    = Closing*, with Received and Paid broken down by kind, the closing figure
+    double-ruled. Under it, *Held by* gives each manager's balance on the
+    closing date — received minus paid; below zero the company owes them. A
+    name there scopes the page to that manager.
+  - **The book** has Date (printed once per day), Entry, For (kind, the record
+    as a link, counterparty, note), Manager, Method, then **Received, Paid and
+    Balance** columns: direction is the column a figure sits in. Balance is
+    what the manager scope held after that entry, from the first entry on, so
+    the direction, kind, method and search filters hide rows without changing
+    any balance. *Show voided* lists voided entries struck through.
+  - A row, or `#/accounting/AC-1008`, opens the entry in a drawer: the record
+    it is for (with that record's own figure and what the book has against
+    it), every field, the history, Edit, Void and Restore. *Record entry*
+    opens the form: direction, kind, a record picker searched by id or name,
+    amount in ¥ or $ with the RMB it books as, date, method, manager,
+    counterparty, reference and note.
+- **On the records** (managers only), an *Accounting* card shows what the book
+  has against the record, what that comes to, the record's own figure and a
+  Record button with the record already chosen:
+  - the PO's **Cost Payment** tab (Purchase entries, net paid, the PO's cost ≈
+    ¥ at the latest rate) and **Commission** tab (Commission entries, net
+    paid, the projected commission);
+  - the **sell order**, beside the bank payments (Sale entries plus its cases'
+    refunds, net received, the order total in its own currency); a receipt
+    starts on the order's payment receiver, and on a CNY order with the
+    amount still owed;
+  - the **after-sales case** (its refunds, net refunded, the case amount).
+- **On the phone**, Home links managers to the Accounting screen: period chips
+  (this month, last month, last 30 days, this year), a manager chip row, the
+  period as a vertical sum with each manager's balance, an All / Received /
+  Paid switch and the entries by day. `+` records an entry in a sheet; an
+  entry opens on its own screen with Edit, Void and Restore. The phone PO
+  page's Cost Payment and Commission folds carry the order's entries and a
+  Record payment button.
+
 ## Transfers
 
 Internal stock movement between warehouses, with a manifest view and its own
@@ -1951,12 +2143,13 @@ over MCP.
   as sources in its confidence note. It says "no cost data" and "no feed
   connected" instead, and counts only the team's own sales.
 - A line can be priced while the buy can still change (v1.54.0).
-- **Five feeds write `last_price`**, each tagged in the event's source: the
+- **Four feeds write `last_price`**, each tagged in the event's source: the
   scraper and MCP connectors (`scraper:`/`mcp:`), a manager's manual entry
   on the Market page (`manual:`), a sell order reaching Done (`sale:<order>`),
-  a sell-order save that follows a confirmed vendor price import
-  (`bid:<order>`, v1.138.3), and a price-list import on the Market page
-  (`import:<email>`, v1.247.0). The Activity page shows the source per row; the
+  and a price-list import on the Market page (`import:<email>`, v1.247.0).
+  A fifth, a sell-order save that followed a confirmed vendor price import
+  (`bid:<order>`, v1.138.3), was retired with that import in v1.297.0; its
+  events stay on file. The Activity page shows the source per row; the
   Market page shows only the price and its age.
 - **Import prices from a spreadsheet** (v1.247.0, managers, desktop). The
   manager drops an `.xlsx`, and only its Part Number and Unit Price columns
@@ -2109,6 +2302,21 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     labelled.
   - Managers start, edit, end and promote trials there. Promoting switches
     the rules off, because the candidate was judged without them.
+
+  Since v1.295.0 the Evaluate stage shows the live model as a chip and a
+  manager can change it there, as a free-text OpenRouter id. The fleet
+  switches within a minute. The proxy opens only that one tracker setting;
+  the base prompt and the rest stay behind it. Since v1.298.0 that field and
+  the trial dialog's model field pick from OpenRouter's catalogue, with each
+  model's price per million tokens and context size. The list holds only
+  pinned models that can return the strict JSON the evaluator asks for. Since
+  v1.310.1 both fields save only a model the list holds. A typed id it lacks,
+  or a model without strict JSON output, is refused, because the evaluator
+  can't read a prose answer. The ERP backend fetches the
+  catalogue (`GET /api/ai/models`) and keeps it for an hour.
+  - Since v1.292.0, each version is labelled *verdict first* or *reasoning
+    first*. That's its response schema. The tracker has asked for the
+    reasoning first since RS-312.
 - **Coordinator** — the Facebook fleet, reached from **Monitors ▸ Facebook**
   in the sidebar (v1.207.0), managers only. Since v1.263.0 the Fleet tab
   shares the Account pool tab's chrome: a status legend (Live, Stale, Needs
@@ -2141,7 +2349,19 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   Session expired) and is healthy again. Each is dated when it happened and
   its dot shows the status it moved into; the worker page's History lists the
   same for one worker. Against a coordinator without the log, the aside falls
-  back to the old "stopped reporting" line. And a **From a search to an alert** card that walks the
+  back to the old "stopped reporting" line. Since v1.300.0 the table shows
+  at most 15 workers. The rest scroll under its pinned headers, so neither
+  the table nor the aside grows past that. Since v1.309.0 the table has one
+  row per worker and no dividers. A **Proxy** column after Worker shows the
+  port and exit IP (or *VM's own IP*), and under them the exit city and state.
+  The ISP is in its tooltip. A worker whose exit IP another worker also uses
+  is marked *shared*, and that tooltip says to keep their cities and sweep
+  times apart. The column sorts by port, with the VM's own IP last, so each
+  pair sits side by side. With no sort, rows keep the fleet document's order.
+  The search box matches the port, exit IP, city and state. (v1.303.0 to
+  v1.305.0 grouped the table by city, then by city and proxy, then by proxy.) A worker's Today strip uses
+  its own sweep times, from the config it runs, so a worker that shares an IP
+  and sweeps at its own hour shows that hour (facebook-tracker 0.13.8). And a **From a search to an alert** card that walks the
   pipeline as the code runs it — search, result cards, the title gate before
   any page is opened, the cached page visit, the keyword gate with the
   description, the already-notified skip, the AI rating with its unit and
@@ -2156,7 +2376,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   settings, prompt and rubric included. A save goes through the fleet
   console into every worker's config. Workers pick it up between jobs and
   start a sweep, and deploys keep the saved values (v1.265.0). The sweep time is shown and typed in US Eastern and stored as the workers'
-  UTC (v1.287.1). The phrase and keyword lists show one item at a time, as chips. The
+  UTC (v1.287.1); the fleet's default is 09:00 Eastern (facebook-tracker
+  0.13.5, 06:00 before it). The phrase and keyword lists show one item at a time, as chips. The
   keyword gate shows two lists, a green **Include** (a listing must mention
   one) and a red **Exclude** (any one drops it). Each list is one flat field
   of keywords: no "or" between chips, an AND/NOT rule as one expression chip,
@@ -2206,7 +2427,38 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   Since v1.291.1, a fleet that won't seed the cookie (a console older than
   0.12.5 answers 404; a cookie without `xs` is refused with 422) gets the
   password Re-login instead of a failed Assign.
-  If the worker already holds a pool account,
+  Since v1.308.0 the account's access token (the `EAA…` the pool stores from
+  v1.307.0) travels to the worker too: when a restored or seeded cookie session
+  lapses, the worker tries to mint a fresh one from the token — inside its own
+  proxied browser, with no password and no 2FA — before falling back to the
+  password login. The token is handed over on demand and audited, never counted
+  against the password budget, and a successful mint is recorded as a
+  `token-refresh` login (facebook-tracker 0.13.10/0.13.11, RS-338). **A caveat
+  found in live testing:** Facebook only mints web-session cookies from a
+  *first-party / SSO-capable* app's token (it refuses others with
+  `OAuthException` 100). The purchased-pool tokens are valid Graph tokens but
+  are not first-party, so for them this step always falls back — the **cookie**
+  remains the real browser-login path, and the token is kept for its Graph-API
+  value. The step is in place for a first-party token.
+  Since facebook-tracker 0.13.0 a wall a worker hits mid-sweep — a checkpoint,
+  captcha, block or disabled notice on an ordinary Marketplace URL, which the
+  selectors read as an empty city — is named by a decision model
+  (`RS_PAGE_CHECK_MODEL`), filed here as an open checkpoint with a screenshot,
+  and parks the worker on CHECKPOINT or CHALLENGE_CAPTCHA, searching nothing,
+  until the page moves on; clearing it in Watch lifts it within a minute
+  (RS-311). Since facebook-tracker 0.13.1 that screenshot sits on the
+  coordinator's data volume and survives a redeploy, and a checkpoint whose
+  file is gone offers no thumbnail rather than a broken one (RS-315). Since
+  facebook-tracker 0.13.4 a decision model pre-screens every listing before
+  the LLM reads it, in shadow: its reject / maybe / buy verdict is logged
+  beside the LLM's and nothing is skipped until `RS_PRESCREEN_ENFORCE` is
+  turned on (RS-319). Since facebook-tracker 0.13.6 a listing alerts once
+  across the fleet. Before, every worker that saw it alerted it: 50 of 122
+  alerts from 10-12 to 10-20 were repeats. Now a worker claims the listing
+  from the coordinator before sending, and only the first claim sends. A
+  delivered listing alerts again only below the price it was alerted at. The
+  card's coordinator stage says so since v1.301.1 (RS-329). If the
+  worker already holds a pool account,
   the dialog asks where that one goes — back to Available, to Problem (still
   naming the worker) or Retired — with no default, and both moves land
   together. A worker without a vault account gets one named after it. Until
@@ -2269,13 +2521,23 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   beside them, and the editor opens from the pencil at the row's end. A cookie may be
   pasted as a header line or as the JSON a cookie extension exports, and a
   2FA key as the base32 key or an `otpauth://` link, on the Pool tab as on
-  the Fleet tab (v1.262.1). Since v1.272.0 the pick does more than label the
+  the Fleet tab (v1.262.1). The import maps a pasted header row by column
+  name. Since v1.310.1 a second Password column after the e-mail is the
+  mailbox's, and any other repeated column refuses the rows that fill it.
+  Every row splits on the header's delimiter. Without a header, columns are
+  read by position, and a note in the older place right after the cookie
+  still arrives as a note. Since v1.272.0 the pick does more than label the
   account. Saving a newly picked worker, or **Send the login again**, writes
   the account's login, password, 2FA key and e-mail into that worker's vault
   account with password login allowed, and queues Re-login. The worker then
   signs in inside its own browser, through its own proxy; any checkpoint is
-  finished in Watch. The cookie is never sent, and nothing secret reaches the
-  browser. The ledger records it as `assigned`. A worker that already holds
+  finished in Watch. Since v1.290.0 the account's own cookie is seeded as the
+  worker's session (RS-308) and, since v1.308.0, its access token travels too
+  (RS-338) — for a first-party token the worker can mint a fresh session from it
+  when the cookie lapses; the purchased-pool tokens are not first-party, so they
+  fall back to the cookie path (see the Fleet-accounts note above). Either way
+  the secrets stay server-side and nothing secret reaches the browser. The
+  ledger records it as `assigned`. A worker that already holds
   another account, or an account with no password, is refused (RS-275).
   Since v1.280.0 the backend checks every Available, Taken and Fleet account on
   Facebook once a week, through the public profile-picture lookup (anonymous,
@@ -2286,7 +2548,10 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   hourly backend loop picks the accounts whose last check is over 7 days old,
   so deploys don't reset the week. The account's detail panel shows when it was
   last checked. A checkpointed account still looks alive to this lookup
-  (RS-284).
+  (RS-284). Since v1.306.0 the manager's table shows about ten rows and scrolls
+  for the rest with the header pinned, and every column header sorts the rows —
+  a first click ascending, a second descending — so the pool can be read by
+  UID, status, holder, cookie freshness or any other field (RS-336).
 - **Watching a worker's browser** — `/fleet/watch/<worker>` shows the live
   Chromium a Facebook worker is driving, through noVNC, view-only until
   "Take control" is ticked (and handed back when the tab is hidden), with
@@ -2632,6 +2897,9 @@ inventory search, sell-order draft creation.
   phone can zoom. Dialogs and phone sheets keep Tab inside them; proof
   uploads and item-type picks work from the keyboard; the phone's capture
   button and every hardware field have accessible names.
+- **Accounting is on the phone too** (v1.310.0): a Home link for managers, the
+  book as a screen of its own, and the order's entries inside the PO page's
+  Cost Payment and Commission folds. See [Accounting](#accounting).
 
 One bundle, two lazy-loaded shells chosen in `App.tsx`: viewport under 720px →
 `MobileApp`; else `DesktopApp`. The third, the `/v/<token>` vendor portal, was

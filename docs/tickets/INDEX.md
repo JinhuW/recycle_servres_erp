@@ -5,8 +5,40 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-310](./RS-310-fix-the-price-import-s-false-positive-the-full-scree.md) | done | bug | P1 | Fix the price import's 元 false positive, the full-screen Watch overlap and the cookie Assign fallback | — |
-| [RS-309](./RS-309-reddit-page-shows-which-prompt-is-better-per-version.md) | in-review | story | P2 | Reddit page shows which prompt is better: per-version leads and the candidate trial | 1.291.0 |
+| [RS-342](./RS-342-fix-the-accounting-review-findings-before-the-v1-310.md) | done | bug | P1 | Fix the Accounting review findings before the v1.310 release | v1.310.2 |
+| [RS-341](./RS-341-fix-the-dev-to-main-review-findings-before-the-v1-31.md) | done | bug | P1 | Fix the dev-to-main review findings before the v1.310 release | v1.310.1 |
+| [RS-340](./RS-340-accounting-page-an-rmb-ledger-of-what-managers-recei.md) | done | story | P2 | Accounting page: an RMB ledger of what managers receive and pay | 1.310.0 |
+| [RS-339](./RS-339-fleet-tab-shows-the-proxy-as-a-column-not-a-grouping.md) | done | story | P2 | Fleet tab shows the proxy as a column, not a grouping | 1.309.0 |
+| [RS-338](./RS-338-worker-logs-in-with-cookie-then-token-password-last.md) | done | story | P2 | Worker logs in with cookie then token, password last | facebook-tracker 0.13.10, v1.308.0 |
+| [RS-337](./RS-337-add-an-access-token-field-to-the-facebook-account-po.md) | done | story | P2 | Add an access-token field to the Facebook account pool | 1.307.0 |
+| [RS-336](./RS-336-account-pool-table-10-row-scroll-and-sortable-column.md) | done | story | P2 | Account pool table: 10-row scroll and sortable columns | 1.306.0 |
+| [RS-335](./RS-335-fleet-tab-groups-workers-by-proxy-not-by-city.md) | done | story | P2 | Fleet tab groups workers by proxy, not by city | 1.305.0 |
+| [RS-334](./RS-334-give-every-facebook-proxy-a-second-worker.md) | done | task | P2 | Give every Facebook proxy a second worker | facebook-tracker 0.13.9 |
+| [RS-333](./RS-333-fleet-tab-in-three-layers-location-proxy-ip-workers.md) | done | story | P2 | Fleet tab in three layers: location, proxy IP, workers | 1.304.0 |
+| [RS-332](./RS-332-pilot-two-facebook-workers-per-proxy-on-two-palo-alt.md) | done | story | P2 | Pilot two Facebook workers per proxy on two Palo Alto IPs | facebook-tracker 0.13.8, v1.303.0 |
+| [RS-331](./RS-331-add-ten-facebook-workers-on-the-new-decodo-ports-100.md) | done | task | P2 | Add ten Facebook workers on the new Decodo ports 10011-10020 | facebook-tracker 0.13.7 |
+| [RS-330](./RS-330-paid-by-follows-the-commission-screenshot-upload-and.md) | done | story | P2 | Paid by follows the commission screenshot upload and asks before it changes | 1.302.0 |
+| [RS-329](./RS-329-facebook-alerts-repeat-the-same-listing-across-worke.md) | done | bug | P1 | Facebook alerts repeat the same listing across workers | facebook-tracker 0.13.6, v1.301.1 |
+| [RS-328](./RS-328-po-list-shows-who-paid-the-commission-with-a-company.md) | done | story | P2 | PO list shows who paid the commission, with a Company paid option | 1.301.0 |
+| [RS-327](./RS-327-cap-the-fleet-workers-table-at-15-rows-and-scroll-th.md) | done | story | P2 | Cap the Fleet workers table at 15 rows and scroll the rest | 1.300.0 |
+| [RS-326](./RS-326-new-purchasers-get-a-guided-walkthrough-on-first-sig.md) | done | story | P2 | New purchasers get a guided walkthrough on first sign-in | 1.299.0 |
+| [RS-325](./RS-325-reddit-page-picks-the-evaluation-model-from-openrout.md) | done | story | P2 | Reddit page picks the evaluation model from OpenRouter's catalogue | 1.298.0 |
+| [RS-324](./RS-324-drop-the-sell-order-vendor-price-import-a-sell-order.md) | done | story | P2 | Drop the sell-order vendor price import: a sell order takes the PO's sell price | v1.297.0 |
+| [RS-323](./RS-323-review-mode-prices-the-po-for-the-commission.md) | done | story | P2 | Review mode prices the PO for the commission | v1.296.0 |
+| [RS-322](./RS-322-reddit-page-lets-a-manager-change-the-evaluation-mod.md) | done | story | P2 | Reddit page lets a manager change the evaluation model | 1.295.0 |
+| [RS-321](./RS-321-table-action-column-stays-visible-while-the-other-co.md) | done | bug | P2 | Table action column stays visible while the other columns scroll | — |
+| [RS-320](./RS-320-attachments-on-a-sell-order-for-the-sell-records.md) | done | story | P2 | Attachments on a sell order for the sell records | v1.294.0 |
+| [RS-319](./RS-319-pre-screen-facebook-listings-with-a-decision-model-b.md) | done | task | P2 | Pre-screen Facebook listings with a decision model before the LLM | facebook-tracker 0.13.4 |
+| [RS-318](./RS-318-start-the-facebook-fleet-s-daily-sweep-at-09-00-east.md) | done | task | P2 | Start the Facebook fleet's daily sweep at 09:00 Eastern | facebook-tracker 0.13.5 |
+| [RS-317](./RS-317-fold-the-sell-order-downloads-into-one-download-drop.md) | done | story | P2 | Fold the sell order downloads into one Download dropdown | 1.293.0 |
+| [RS-316](./RS-316-shadow-run-a-decision-model-pre-screen-for-facebook.md) | done | task | P2 | Shadow-run a decision-model pre-screen for Facebook listings | facebook-tracker 0.13.1 |
+| [RS-315](./RS-315-keep-challenge-screenshots-on-the-coordinator-volume.md) | done | bug | P2 | Keep challenge screenshots on the coordinator volume | facebook-tracker 0.13.1 |
+| [RS-314](./RS-314-only-ack-a-messenger-reply-the-pane-shows-as-sent.md) | done | bug | P2 | Only ack a Messenger reply the pane shows as sent | facebook-tracker 0.13.1 |
+| [RS-313](./RS-313-make-the-poster-and-monitor-playwright-waits-real.md) | done | bug | P2 | Make the poster and monitor Playwright waits real | facebook-tracker 0.13.1 |
+| [RS-312](./RS-312-buyer-alerts-ask-for-a-reaction-and-the-evaluator-re.md) | in-review | story | P2 | Buyer alerts ask for a reaction, and the evaluator reasons before it decides | 1.292.0 (tracker image f043f766) |
+| [RS-311](./RS-311-recognise-facebook-walls-mid-sweep-with-a-decision-m.md) | done | story | P2 | Recognise Facebook walls mid-sweep with a decision model | facebook-tracker 0.13.0 |
+| [RS-310](./RS-310-fix-the-price-import-s-false-positive-the-full-scree.md) | done | bug | P1 | Fix the price import's 元 false positive, the full-screen Watch overlap and the cookie Assign fallback | v1.291.1 |
+| [RS-309](./RS-309-reddit-page-shows-which-prompt-is-better-per-version.md) | done | story | P2 | Reddit page shows which prompt is better: per-version leads and the candidate trial | 1.291.0 |
 | [RS-308](./RS-308-assign-restores-a-pool-account-s-cookie-session-inst.md) | done | story | P2 | Assign restores a pool account's cookie session instead of a password login | facebook-tracker 0.12.5, v1.290.0 |
 | [RS-307](./RS-307-keep-the-keyword-gate-the-same-height-while-editing.md) | done | bug | P2 | Keep the keyword gate the same height while editing | 1.289.1 |
 | [RS-306](./RS-306-title-gate-shows-include-try-a-listing-marks-the-tit.md) | done | story | P2 | Title gate shows Include; Try a listing marks the title and puts verdicts on the item tabs | 1.289.0 |

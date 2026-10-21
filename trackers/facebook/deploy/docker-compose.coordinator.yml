@@ -37,6 +37,9 @@ services:
       # misconfigured deploy degrades to a local file rather than crashing, but
       # note the vault would then be empty: the accounts live in Postgres.
       RS_COORDINATOR_DB: /data/coordinator.db
+      # Challenge screenshots. Must sit on the volume below: the container is
+      # recreated on every deploy and anything outside it goes with it.
+      RS_SCREENSHOT_DIR: /data/screenshots
 
     volumes:
       # Screenshots from escalated challenges, plus the SQLite fallback file.

@@ -85,6 +85,15 @@ def test_screenshot_dir_follows_the_env_and_is_created(tmp_path, monkeypatch):
     assert target.is_dir()
 
 
+def test_screenshot_dir_defaults_to_a_directory_beside_the_database(tmp_path, monkeypatch):
+    monkeypatch.delenv("RS_SCREENSHOT_DIR", raising=False)
+    monkeypatch.setenv("RS_COORDINATOR_DB", str(tmp_path / "state" / "coordinator.db"))
+    path = screenshot_dir()
+    assert path == (tmp_path / "state" / "screenshots").resolve()
+    assert path.is_absolute()
+    assert path.is_dir()
+
+
 def test_data_url_prefix_is_tolerated():
     assert decode_screenshot(f"data:image/png;base64,{PNG_B64}") == PNG_BYTES
     # Clients that wrap long base64 must not be rejected over newlines.
@@ -120,7 +129,9 @@ def test_alert_says_so_when_no_vnc_url_is_known():
     assert "No VNC URL" in alert
 
 
-def test_to_challenge_out_parses_detail_and_links_only_stored_screenshots():
+def test_to_challenge_out_parses_detail_and_links_only_stored_screenshots(tmp_path):
+    stored = tmp_path / "3.png"
+    stored.write_bytes(PNG_BYTES)
     row = {
         "id": 3,
         "worker_id": "denver-1",
@@ -128,7 +139,7 @@ def test_to_challenge_out_parses_detail_and_links_only_stored_screenshots():
         "kind": "captcha",
         "status": "open",
         "vnc_url": VNC_URL,
-        "screenshot_path": "/data/screenshots/3.png",
+        "screenshot_path": str(stored),
         "detail_json": '{"url": "https://facebook.com/checkpoint"}',
         "created_at": "2026-08-19T00:00:00+00:00",
         "resolved_at": None,
@@ -142,6 +153,11 @@ def test_to_challenge_out_parses_detail_and_links_only_stored_screenshots():
     out = to_challenge_out({**row, "screenshot_path": None, "detail_json": "not json"})
     assert out["screenshot_url"] is None
     assert out["detail"] == {"raw": "not json"}
+
+    # A path whose file is gone (a redeploy before the directory sat on the
+    # volume) is a dead link, so it is not offered either.
+    stored.unlink()
+    assert to_challenge_out(row)["screenshot_url"] is None
 
 
 # -- escalate --------------------------------------------------------------
@@ -159,7 +175,8 @@ def test_escalate_stores_the_challenge_screenshot_and_pages_ops_once(client):
     assert row["status"] == "open"
 
     stored = client.shots / f"{body['challenge_id']}.png"
-    assert row["screenshot_path"] == str(stored)
+    # Stored absolute, so a later process in another working directory finds it.
+    assert row["screenshot_path"] == str(stored.resolve())
     assert stored.read_bytes() == PNG_BYTES
 
     # Exactly one page, carrying the link the operator needs.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { summarizeTrial, TRIAL_MIN_LABELLED, type VsLive } from './tracker';
+import { EVALUATOR_MODEL, evaluatorModelProblem, summarizeTrial, TRIAL_MIN_LABELLED, type VsLive } from './tracker';
 
 const cell = (posts: number, leads = 0, notLeads = 0) => ({ posts, leads, notLeads });
 
@@ -36,5 +36,28 @@ describe('summarizeTrial', () => {
 
     expect(summarizeTrial(at(TRIAL_MIN_LABELLED - 1)).enoughData).toBe(false);
     expect(summarizeTrial(at(TRIAL_MIN_LABELLED)).enoughData).toBe(true);
+  });
+});
+
+describe('EVALUATOR_MODEL', () => {
+  const entry = (id: string, structuredOutputs = true) => ({
+    id, name: id, contextLength: 128000, promptPerM: 0.15, completionPerM: 0.6,
+    structuredOutputs, inputModalities: ['text'], outputModalities: ['text'],
+  });
+
+  it('offers pinned structured-output models and drops floating aliases', () => {
+    expect(EVALUATOR_MODEL(entry('anthropic/claude-haiku-5.5'))).toBe(true);
+    expect(EVALUATOR_MODEL(entry('openai/gpt-4o-mini:batch'))).toBe(true);
+    expect(EVALUATOR_MODEL(entry('~anthropic/claude-haiku-latest'))).toBe(false);
+    expect(EVALUATOR_MODEL(entry('openrouter/auto', false))).toBe(false);
+  });
+
+  it('accepts only an id the catalogue lists as an evaluator model', () => {
+    const catalogue = [entry('openai/gpt-4o-mini'), entry('meta-llama/llama-3-8b-instruct', false)];
+    expect(evaluatorModelProblem('openai/gpt-4o-mini', catalogue)).toBeNull();
+    expect(evaluatorModelProblem('meta-llama/llama-3-8b-instruct', catalogue)).toBe('unlisted');
+    expect(evaluatorModelProblem('vendor/not-in-catalogue', catalogue)).toBe('unlisted');
+    expect(evaluatorModelProblem('openai/gpt-4o-mini', null)).toBe('loading');
+    expect(evaluatorModelProblem('gpt-4o-mini', catalogue)).toBe('shape');
   });
 });

@@ -1,10 +1,13 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { Modal } from '../../components/Modal';
+import { ModelPicker, useAiModels } from '../../components/ModelPicker';
 import { Skeleton } from '../../components/Skeleton';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import {
+  EVALUATOR_MODEL,
+  evaluatorModelProblem,
   summarizeTrial,
   trackerApi,
   TRIAL_MIN_LABELLED,
@@ -12,6 +15,7 @@ import {
   type PromptRole,
   type PromptStats,
   type PromptVersionStats,
+  type ResponseSchema,
   type TrialCell,
   type VsLive,
 } from '../../lib/tracker';
@@ -32,6 +36,11 @@ const WINDOWS: readonly Window[] = ['7d', '30d', 'all'];
 const WINDOW_MS: Record<Exclude<Window, 'all'>, number> = { '7d': 7 * 86_400_000, '30d': 30 * 86_400_000 };
 
 const ROLE_CLASS: Record<PromptRole, string> = { live: 'ff-live', candidate: 'ff-stale', retired: 'fp-retired' };
+
+const SCHEMA_KEY: Record<ResponseSchema, string> = {
+  'verdict-first': 'trkPromptSchemaVerdictFirst',
+  'reasoning-first': 'trkPromptSchemaReasoningFirst',
+};
 
 // Live's verdict down the side, the candidate's across the top.
 const CELLS: ReadonlyArray<{ key: keyof VsLive; live: boolean; candidate: boolean }> = [
@@ -295,6 +304,7 @@ function VersionsTable({ stats, loading, locale, open, onToggle }: {
                     </button>
                     <span className={`fp-chip ${ROLE_CLASS[role]}`}>{t(`trkPromptRole_${role}`)}</span>
                     <span className="mono fp-muted rt-model">{model}</span>
+                    {v && <span className="fp-muted rt-model">· {t(SCHEMA_KEY[v.responseSchema])}</span>}
                   </div>
                 </td>
                 <td className="mono">{v ? fmt.format(v.evaluated) : '—'}</td>
@@ -330,7 +340,12 @@ function CandidateModal({ prompt: initialPrompt, model: initialModel, liveModel,
   const [prompt, setPrompt] = useState(initialPrompt);
   const [model, setModel] = useState(initialModel);
   const [saving, setSaving] = useState(false);
-  const canSave = prompt.trim() !== '';
+  const { models } = useAiModels();
+  const problem = model.trim() === '' ? null : evaluatorModelProblem(model.trim(), models);
+  const hint = problem === 'shape' ? t('trkModelInvalid')
+    : problem === 'unlisted' ? t('trkModelUnlisted')
+    : null;
+  const canSave = prompt.trim() !== '' && problem === null;
 
   function save() {
     if (!canSave || saving) return;
@@ -346,17 +361,21 @@ function CandidateModal({ prompt: initialPrompt, model: initialModel, liveModel,
         <div className="modal-title">{title}</div>
       </div>
       <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {/* Model first: its menu then opens over the prompt, inside the body,
+            instead of past the body's scroll edge. */}
+        <div className="field">
+          <label className="label" htmlFor="trk-trial-model">{t('trkTrialModel')}</label>
+          <ModelPicker id="trk-trial-model" value={model} onChange={setModel} placeholder={liveModel}
+            filter={EVALUATOR_MODEL} invalid={hint !== null} unavailableText={t('trkModelsUnavailable')} />
+          <span className={`help${hint !== null ? ' rt-help-invalid' : ''}`}>
+            {hint ?? t('trkTrialModelHelp', { model: liveModel })}
+          </span>
+        </div>
         <div className="field">
           <label className="label" htmlFor="trk-trial-prompt">{t('trkTrialPrompt')}</label>
           <textarea id="trk-trial-prompt" className="textarea mono" rows={14} value={prompt}
             onChange={e => setPrompt(e.target.value)} />
           <span className="help">{t('trkTrialPromptHelp')}</span>
-        </div>
-        <div className="field">
-          <label className="label" htmlFor="trk-trial-model">{t('trkTrialModel')}</label>
-          <input id="trk-trial-model" className="input mono" value={model} placeholder={liveModel}
-            onChange={e => setModel(e.target.value)} />
-          <span className="help">{t('trkTrialModelHelp', { model: liveModel })}</span>
         </div>
       </div>
       <div className="modal-foot">

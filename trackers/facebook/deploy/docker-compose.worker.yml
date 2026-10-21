@@ -42,6 +42,16 @@ services:
       PROXY_WEST: ${PROXY_WEST:-}
 
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY}
+      # Decision-model pre-screen in front of the listing LLM, same key. With
+      # ENFORCE off every listing the LLM has no verdict for is asked and the
+      # answer only logged (shadow); ENFORCE=1 lets a reject at or above
+      # THRESHOLD skip the LLM. MODEL defaults in code (prescreen.py) to the
+      # same id as here; set it empty to turn the pre-screen off. The homelab
+      # compose files carry none of these: their workers read them from
+      # configs/secrets.env through env_file.
+      RS_PRESCREEN_MODEL: ${RS_PRESCREEN_MODEL-typesafe/jev-1.14}
+      RS_PRESCREEN_ENFORCE: ${RS_PRESCREEN_ENFORCE:-0}
+      RS_PRESCREEN_THRESHOLD: ${RS_PRESCREEN_THRESHOLD:-0.99}
 
       # Listing alerts. These two feed the notification channel ONLY — they are
       # not what drives 2FA, escalation or session backup.

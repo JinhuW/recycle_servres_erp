@@ -168,8 +168,12 @@ def ack_outbound(
         raise HTTPException(status_code=422, detail="status must be 'sent' or 'failed'")
     if deps.db.get_outbound(outbound_id) is None:
         raise HTTPException(status_code=404, detail=f"No outbound message {outbound_id}")
-    deps.db.mark_outbound(outbound_id, payload.status, payload.error)
-    return {"status": "ok"}
+    outcome = deps.db.mark_outbound(
+        outbound_id, payload.status, payload.error, permanent=payload.permanent
+    )
+    row = deps.db.get_outbound(outbound_id) or {}
+    # The bridge logs whether a failure was re-queued or given up on.
+    return {"status": "ok", "outcome": outcome, "attempts": int(row.get("attempts") or 0)}
 
 
 # -- operator console --------------------------------------------------------

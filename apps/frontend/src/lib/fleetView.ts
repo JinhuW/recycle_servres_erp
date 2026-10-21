@@ -40,6 +40,7 @@ export function accountHaystack(w: FleetAccount): string {
   return [
     w.worker_id, w.health?.account_id, w.health?.state, liveness(w),
     w.region.key, w.region.name, w.source, w.proxy_env,
+    w.proxy?.url, w.proxy?.ip, w.proxy?.city, w.proxy?.region,
     w.account?.account_id, w.account?.fb_username, w.session?.fb_user_id,
     ...w.cities.flatMap(c => [c.name, c.slug]),
   ].filter(Boolean).join(' ');
@@ -183,13 +184,18 @@ export const parkedWorkers = (challenges: readonly Challenge[] | null): Set<stri
 
 // The Fleet table's sortable columns. Today has no single value of its own —
 // the day bar is a shape — so it sorts by the heartbeat its tooltip shows.
-export type FleetSortCol = 'worker' | 'status' | 'today' | 'searches' | 'session' | 'posts';
+// Proxy sorts by port; the VM's own IP has none, so it goes last.
+export type FleetSortCol = 'worker' | 'proxy' | 'status' | 'today' | 'searches' | 'session' | 'posts';
 
 export function fleetSortValue(col: FleetSortCol, w: FleetAccount, status: FleetStatus): string | number | null {
   switch (col) {
     case 'worker': {
       const who = whoIs(w);
       return (who.login ?? who.label ?? w.worker_id).toLowerCase();
+    }
+    case 'proxy': {
+      const port = proxyPort(w);
+      return port ? Number(port) : null;
     }
     case 'status': return FLEET_STATUSES.indexOf(status);
     case 'today': {
@@ -689,6 +695,23 @@ export function cityOwners(fleet: FleetDoc, workerId: string): Map<string, strin
   for (const w of fleet.workers) {
     if (w.worker_id === workerId || w.source === 'unconfigured') continue;
     for (const c of w.cities) out.set(c.slug, [...(out.get(c.slug) ?? []), w.worker_id]);
+  }
+  return out;
+}
+
+export function proxyPort(w: FleetAccount): string | null {
+  return /:(\d+)$/.exec(w.proxy?.url ?? '')?.[1] ?? null;
+}
+
+// Workers per exit, keyed by proxy URL. A port is one exit IP, so Facebook
+// sees the accounts on it side by side; the VM's own address ('') is one IP
+// the same way. A facade that predates the proxy lookup counts nothing.
+export function sharedExits(workers: readonly FleetAccount[]): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const w of workers) {
+    if (!w.proxy) continue;
+    const key = w.proxy.url ?? '';
+    out.set(key, (out.get(key) ?? 0) + 1);
   }
   return out;
 }

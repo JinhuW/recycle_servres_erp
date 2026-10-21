@@ -6,7 +6,8 @@
 // a zip; the header texts are readable with a ~zero-dependency zip walk).
 //
 // Header aliases are kept in lockstep with the backend parser
-// (backend/src/services/sellOrderPriceImport.ts).
+// (apps/backend/src/services/priceSheet.ts); a header it scores at all passes
+// here.
 
 export type PriceFilePrecheck =
   | { ok: true }
@@ -24,7 +25,7 @@ const isPartHeader = (h: string) =>
   PART_EXACT.has(h) || PART_CONTAINS.some(k => h.includes(k));
 
 const isPriceHeader = (h: string) => {
-  if (h.includes('total') || h.includes('总')) return false;
+  if (h.includes('total') || h.includes('总') || h.startsWith('ext')) return false;
   return h.includes('unitprice') || h.includes('单价') || h.includes('price') || h.includes('价格');
 };
 

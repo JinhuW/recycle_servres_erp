@@ -25,6 +25,7 @@ import { TableSkeleton } from '../../components/Skeleton';
 import { OrderCategoryChips } from '../../components/OrderCategoryChips';
 import { SoldBadge } from '../../components/SoldBadge';
 import { PaymentGapMark } from '../../components/PaymentMismatch';
+import { paidByLabel, paidByLocked } from '../../lib/useCommissionPaidBy';
 import { useReviewModeEntry } from './ReviewModeEntry';
 
 // Map a stage tone keyword to a usable CSS variable. Same lookup as the
@@ -61,6 +62,7 @@ const TOGGLEABLE_COLS = [
   { id: 'profit',     tKey: 'profit' },
   { id: 'realized',   tKey: 'realizedProfit' },
   { id: 'commission', tKey: 'commission' },
+  { id: 'paidBy',     tKey: 'cpPaidByLabel' },
   { id: 'payment',    tKey: 'payment' },
   { id: 'status',     tKey: 'status' },
 ] as const;
@@ -84,6 +86,7 @@ const SORT_KEYS: Record<string, (o: OrderSummary) => string | number> = {
   // Unsold POs sort below every realized figure, loss or gain.
   realized:   o => o.realized?.profit ?? Number.NEGATIVE_INFINITY,
   commission: o => commissionFor(o),
+  paidBy:     o => !o.commissionPaidBy ? '' : o.commissionPaidBy.kind === 'company' ? 'Company' : o.commissionPaidBy.name,
   payment:    o => o.payment,
   status:     o => o.status,
 };
@@ -91,6 +94,24 @@ const SORT_KEYS: Record<string, (o: OrderSummary) => string | number> = {
 type Props = {
   onToast?: (msg: string, kind?: 'success' | 'error') => void;
 };
+
+// Who paid the purchaser their commission, read-only: the PO page records it,
+// from the commission screenshot's upload or a confirmed pick. A linked bank
+// payment settles it as the company's, so a manager's cell opens that payment,
+// as the Payment chip beside it does.
+function PaidByCell({ order, isManager }: { order: OrderSummary; isManager: boolean }) {
+  const { t } = useT();
+  const paidBy = order.commissionPaidBy ?? null;
+  const label = paidByLabel(paidBy, t);
+  if (isManager && paidByLocked(paidBy)) {
+    return (
+      <RouteLink to={paymentsForOrderPath(order.id)} className="chip chip-link" title={t('cpPaidByLinkedHint')}>
+        {label}
+      </RouteLink>
+    );
+  }
+  return <span className={paidBy ? undefined : 'muted'} style={{ whiteSpace: 'nowrap' }}>{label}</span>;
+}
 
 export function DesktopOrders({ onToast }: Props) {
   const { t, locale } = useT();
@@ -585,9 +606,10 @@ export function DesktopOrders({ onToast }: Props) {
                 {isVis('profit') && <SortTh col="profit" sort={sort} onSort={cycleSort} align="right">{isManager ? t('unrealizedShort') : t('profit')}</SortTh>}
                 {isManager && isVis('realized') && <SortTh col="realized" sort={sort} onSort={cycleSort} align="right">{t('realizedShort')}</SortTh>}
                 {isVis('commission') && <SortTh col="commission" sort={sort} onSort={cycleSort} align="right">{t('commission')}</SortTh>}
+                {isVis('paidBy') && <SortTh col="paidBy" sort={sort} onSort={cycleSort}>{t('cpPaidByLabel')}</SortTh>}
                 {isVis('payment') && <SortTh col="payment" sort={sort} onSort={cycleSort}>{t('payment')}</SortTh>}
                 {isVis('status') && <SortTh col="status" sort={sort} onSort={cycleSort}>{t('status')}</SortTh>}
-                <th style={{ width: isManager ? 122 : 90 }}>{t('actions')}</th>
+                <th className="col-actions" style={{ width: isManager ? 122 : 90 }}>{t('actions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -711,6 +733,9 @@ export function DesktopOrders({ onToast }: Props) {
                         </td>
                       )}
                       <td className="num mono" style={{ display: isVis('commission') ? undefined : 'none' }}>{fmtUSD(commission, locale)}</td>
+                      <td style={{ display: isVis('paidBy') ? undefined : 'none' }}>
+                        <PaidByCell order={o} isManager={isManager} />
+                      </td>
                       <td style={{ display: isVis('payment') ? undefined : 'none' }}>
                         {/* A PO the bank has paid says so and opens its payment
                             group; a manager only, since that page is. The row's
@@ -757,7 +782,7 @@ export function DesktopOrders({ onToast }: Props) {
                           );
                         })()}
                       </td>
-                      <td>
+                      <td className="col-actions">
                         <div style={{ display: 'inline-flex', gap: 4 }}>
                           {isManager && (
                             <button

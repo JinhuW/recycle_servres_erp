@@ -18,12 +18,15 @@ type Props = {
 
 // Nav items are real anchors so ⌘-click / middle-click open a tab; a plain
 // click still routes through navigate() (see onLinkClick).
-function NavLink({ view, className, label, icon, current, children }: {
+function NavLink({ view, className, label, icon, current, tour, children }: {
   view: DesktopViewId;
   className: string;
   label: string;
   icon: IconName;
   current?: boolean;
+  // The walkthrough's anchor; a parent row targets its child's view, so only
+  // the leaf carries it.
+  tour?: boolean;
   children?: ReactNode;
 }) {
   const path = DESKTOP_VIEW_TO_PATH[view];
@@ -37,6 +40,7 @@ function NavLink({ view, className, label, icon, current, children }: {
       // the accessibility tree too.
       aria-label={label}
       title={label}
+      data-tour={tour ? view : undefined}
     >
       <Icon name={icon} size={15} className="nav-icon" />
       <span>{label}</span>
@@ -55,6 +59,7 @@ function LeafLink({ item, sub }: { item: ShownLeaf; sub?: boolean }) {
       label={t(leaf.tKey)}
       icon={leaf.icon}
       current={active}
+      tour
     >
       {leaf.badge && <span className="badge">{leaf.badge}</span>}
     </NavLink>

@@ -248,6 +248,7 @@ ACCOUNT_SECRET_FIELDS = (
     "totp_secret",
     "imap_host",
     "imap_port",
+    "fb_token",
 )
 _ACCOUNT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@-]{0,63}$")
 # The login's legacy device. Only these two cookies may cross: the pool cookie

@@ -9,9 +9,11 @@ saved.
 
 Only the keys listed here can change. One worker's cities can change too
 (`workers.<id>.cities`), because a worker with its own proxy and account
-searches its own cities. Proxies, credentials, notification targets and the
-session path are not reachable from this module, which is what keeps the
-console's token from being a way to point a worker at another account or
+searches its own cities. So can its sweep times (`workers.<id>.start_at`,
+from the CLI only): two accounts on one IP that start in the same minute
+every day read as one operator. Proxies, credentials, notification targets
+and the session path are not reachable from this module, which is what keeps
+the console's token from being a way to point a worker at another account or
 another chat.
 
 RS_WORKER_CONFIGS names each config `worker_id=path`, so a worker's cities go
@@ -33,6 +35,9 @@ them on a change, which also runs a sweep straight away.
                                             (and that file's worker's cities)
     python -m rs_console.settings publish [worker_id ...]
                                             hand mounted workers' configs to the fleet
+    python -m rs_console.settings start-at <worker_id> HH:MM [...] | --clear
+                                            one worker's own sweep times (UTC), or
+                                            back to the fleet's
 """
 
 import copy
@@ -459,7 +464,7 @@ CITY_KEYS = (("search_city", "slug"), ("city_name", "name"), ("radius", "radius"
 
 def render(text: str, values: Dict[str, Any], worker_id: Optional[str] = None) -> str:
     """A worker config's text with the saved values written in, and
-    `worker_id`'s own cities when it has saved some.
+    `worker_id`'s own cities and sweep times when it has saved some.
 
     Untouched keys keep their bytes, comments included, so a config with no
     saved values renders to itself — which is what lets the deploy's verify
@@ -477,13 +482,18 @@ def render(text: str, values: Dict[str, Any], worker_id: Optional[str] = None) -
             elif _same(current, value):
                 continue
             facebook[key] = _toml_value(key, value)
-        city_list = (((values.get("workers") or {}).get(worker_id or "") or {}).get("cities")) or []
+        own = (values.get("workers") or {}).get(worker_id or "") or {}
+        city_list = own.get("cities") or []
         if city_list:
             # The three arrays are index-aligned, so they are written together.
             for key, field in CITY_KEYS:
                 value = [c[field] for c in city_list]
                 if not _same(facebook.get(key), value):
                     facebook[key] = _toml_value(key, value)
+        # After the fleet-wide values, so a save from the ERP never lines two
+        # workers on one IP back up to the same minute.
+        if own.get("start_at") and not _same(facebook.get("start_at"), own["start_at"]):
+            facebook["start_at"] = _toml_value("start_at", own["start_at"])
     if values.get("ai_model"):
         for table in (doc.get("ai") or {}).values():
             if "model" in table and not _same(table["model"], values["ai_model"]):
@@ -545,8 +555,57 @@ def publish(values: Dict[str, Any], fleet: FleetConfigs, worker_ids: Optional[Li
     return [wid for wid, _ in rendered]
 
 
+def fleet_start_at(values: Dict[str, Any]) -> List[str]:
+    """The sweep times every worker without its own runs: saved, else master's."""
+    saved = (values.get("search") or {}).get("start_at")
+    if saved:
+        return saved
+    master = os.environ.get("RS_MASTER_CONFIG", "").strip()
+    try:
+        facebook = tomlkit.parse(Path(master).read_text(encoding="utf-8"))["marketplace"]["facebook"]
+        return _start_at("start_at", [str(t) for t in facebook["start_at"]])
+    except (OSError, KeyError, tomlkit.exceptions.ParseError):
+        raise SettingsError(f"master.toml ({master or 'RS_MASTER_CONFIG unset'}) names no start_at") from None
+
+
+def set_start_at(worker_id: str, times: Optional[List[str]]) -> List[str]:
+    """Give one worker its own sweep times, or with None the fleet's again.
+    Returns the configs that changed."""
+    path = config_for(worker_id)
+    fleet = FleetConfigs.from_env()
+    in_fleet = path is None and fleet is not None and worker_id in fleet.ids()
+    if path is None and not in_fleet:
+        raise SettingsError(f"No config is mounted for worker {worker_id}")
+    values = copy.deepcopy(load()["values"])
+    own = values.setdefault("workers", {}).setdefault(worker_id, {})
+    if times is None:
+        own.pop("start_at", None)
+        # The config still says the old times, and render only writes saved
+        # ones, so the fleet's are written in once here.
+        written = merge(values, {"workers": {worker_id: {"start_at": fleet_start_at(values)}}})
+    else:
+        own["start_at"] = _start_at("start_at", times)
+        written = values
+    changed = apply(written, [(worker_id, path)] if path is not None else [],
+                    fleet if in_fleet else None, [worker_id])
+    save(stamp(values, "rs_console.settings start-at"))
+    return changed
+
+
 def main(argv: List[str]) -> int:
     command = argv[1] if len(argv) > 1 else ""
+    if command == "start-at":
+        worker_id, times = (argv[2], argv[3:]) if len(argv) > 3 else (None, [])
+        if not worker_id or not _WORKER_ID.match(worker_id):
+            print(__doc__, file=sys.stderr)
+            return 2
+        try:
+            changed = set_start_at(worker_id, None if times == ["--clear"] else times)
+        except (SettingsError, FleetError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        print(f"{worker_id} start_at saved; changed: {', '.join(changed) or 'nothing'}")
+        return 0
     if command == "render":
         # Named by file, so the deploy needs no copy of the id map.
         name = argv[3] if len(argv) > 3 and argv[2] == "--config" else None

@@ -1,7 +1,7 @@
 // GET /api/orders — the PO list: filters, sort, keyset paging, and the
 // manager-only figures each row carries.
 import { Hono } from 'hono';
-import { linkedPaidFrag } from '../../banktx/match';
+import { commissionLinkedFrag, linkedPaidFrag } from '../../banktx/match';
 import { getDb } from '../../db';
 import { clampLimit, cursorTs, cursorTsSelect, decodeCursor, encodeCursor, parseSort } from '../../lib/pagination';
 import { effectiveRole } from '../../lib/role';
@@ -10,7 +10,7 @@ import { soldFlagSql } from '../../services/orderSold';
 import { sortCategories } from '../../services/orderCategory';
 import { poRealizedLateral } from '../../lib/po-cost';
 import { realizedFromRow } from '../../services/poRealized';
-import { type OrdersEnv, newestPackageJson, packageFromJson } from './shared';
+import { type OrdersEnv, commissionPaidByOf, newestPackageJson, packageFromJson } from './shared';
 
 const listRoutes = new Hono<OrdersEnv>();
 
@@ -137,6 +137,8 @@ listRoutes.get('/', async (c) => {
       o.supplier_id, sup.name AS supplier_name,
       u.name AS user_name, u.initials AS user_initials,
       o.commission_rate::float AS commission_rate,
+      o.commission_paid_by, cpb.name AS commission_paid_by_name, o.commission_paid_by_company,
+      ${commissionLinkedFrag(sql)} AS commission_linked,
       w.id AS warehouse_id, w.short AS warehouse_short, w.region AS warehouse_region,
       rz.sold_qty, rz.bought_qty, rz.revenue AS rz_revenue, rz.cost AS rz_cost,
       rz.projected_profit,
@@ -172,13 +174,15 @@ listRoutes.get('/', async (c) => {
     JOIN users u      ON u.id = o.user_id
     -- Only while still an active manager, as the advance reads it.
     LEFT JOIN users mg ON mg.id = o.manager_id AND mg.role = 'manager' AND mg.active
+    -- Unfiltered, unlike mg: a record of who paid, kept after they leave.
+    LEFT JOIN users cpb ON cpb.id = o.commission_paid_by
     LEFT JOIN warehouses w ON w.id = o.warehouse_id
     LEFT JOIN suppliers sup ON sup.id = o.supplier_id
                           AND (${isManager} OR sup.owner_id IS NULL OR sup.owner_id = ${u.id})
     ${poRealizedLateral(sql, isManager)}
     LEFT JOIN order_lines l ON l.order_id = o.id
     WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${excludeFrag} AND ${archivedFrag} ${cursorFrag}
-    GROUP BY o.id, u.name, u.initials, mg.id, w.id, w.short, w.region, sup.name,
+    GROUP BY o.id, u.name, u.initials, mg.id, cpb.name, w.id, w.short, w.region, sup.name,
              rz.sold_qty, rz.bought_qty, rz.revenue, rz.cost, rz.projected_profit
     ORDER BY ${sortExpr} ${dirSql}, o.id ${dirSql}
     LIMIT ${limit + 1}
@@ -202,6 +206,11 @@ listRoutes.get('/', async (c) => {
       userName: r.user_name,
       userInitials: r.user_initials,
       commissionRate: r.commission_rate,
+      // Every role, as on the detail: the purchaser may see who paid them.
+      commissionPaidBy: commissionPaidByOf({
+        commission_paid_by: r.commission_paid_by, commission_paid_by_name: r.commission_paid_by_name,
+        commission_paid_by_company: r.commission_paid_by_company, commission_linked: r.commission_linked,
+      }),
       category: r.category,
       categories: sortCategories((r.categories as string[] | null) ?? []),
       payment: r.payment,

@@ -3,19 +3,21 @@ import { Modal } from '../../../components/Modal';
 import { useT } from '../../../lib/i18n';
 
 export function ConfirmDialog({
-  title, message, confirmLabel, danger, onCancel, onConfirm,
+  title, message, confirmLabel, danger, zIndex, onCancel, onConfirm,
 }: {
   title: string;
   message: string;
   confirmLabel: string;
   danger?: boolean;
+  /** See Modal: raised for a confirm that can open over another dialog. */
+  zIndex?: number;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
   const { t } = useT();
 
   return (
-    <Modal onClose={onCancel} shellStyle={{ maxWidth: 420 }}>
+    <Modal onClose={onCancel} shellStyle={{ maxWidth: 420 }} zIndex={zIndex}>
       <div className="modal-head">
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
           <div style={{

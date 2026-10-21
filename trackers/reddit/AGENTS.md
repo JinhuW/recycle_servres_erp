@@ -17,7 +17,8 @@ has the repo map and workflow.
   `GET|POST /api/rules`, `PATCH|DELETE /api/rules/:id`,
   `GET|POST /api/subreddits`, `PATCH|DELETE /api/subreddits/:name`,
   `GET /api/matches`, `GET /api/stats`, `GET /api/prompt-stats`,
-  `PUT|DELETE /api/prompt-candidate`, `POST /api/prompt-candidate/promote`)
+  `PUT|DELETE /api/prompt-candidate`, `POST /api/prompt-candidate/promote`,
+  `PUT /api/settings/llm_model` and no other settings key)
   for the ERP's Monitors ▸ Reddit page. Changing one of those response shapes,
   or adding a route the page needs, is a change to both sides; see the root AGENTS.md
   under *Contracts*. Keep the tracker backward-compatible until the ERP release
@@ -43,10 +44,13 @@ has the repo map and workflow.
 - **The eval prompt, rules, `src/llm.ts` or the response schema** →
   [docs/prompt-evaluations/](docs/prompt-evaluations/). Every verdict is
   scored by prompt version, so a wording change belongs in a candidate trial
-  with its numbers written up, not straight in `eval_prompt`. The schema puts
-  `is_target` before `reasoning`, so the model commits before it reasons.
-  Reordering it changes every verdict at once, so run it as a measured
-  experiment.
+  with its numbers written up, not straight in `eval_prompt`.
+- **The response schema** (`RESPONSE_SCHEMA` in `src/llm.ts`) is part of
+  every prompt version's identity, through `RESPONSE_SCHEMA_ID` in the hash.
+  Changing the schema starts every version afresh, so give the new shape a
+  new id, and measure it first. `reasoning` comes before `is_target` because
+  structured output writes fields in order: with the verdict first, the model
+  committed before it counted.
 - **`scripts/deploy-workers.sh` or `GHCR_READ_TOKEN`** →
   [docs/debug-notes/ghcr-read-token-dead.md](docs/debug-notes/ghcr-read-token-dead.md).
   The pull token is a classic PAT that dies silently; check it with one

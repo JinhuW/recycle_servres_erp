@@ -2,7 +2,7 @@
 id: RS-309
 title: Reddit page shows which prompt is better: per-version leads and the candidate trial
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-10-18
 reporter: jinhu
@@ -86,8 +86,8 @@ This changes the contract between the ERP and the tracker (root `AGENTS.md`
   gaps), which the user chose to ship with the next change.
 - The tracker side was deployed on 2026-10-19 as image `4282291f` (api,
   worker and all five OCI VMs) before the ERP release. It also shipped #758.
-- The ticket moves to done when 1.291.0 reaches `main`. That needs the
-  user's yes.
+- Released to `main` in v1.291.0 (#765) on 2026-10-19. Prod health reports
+  1.291.0 at `962a95ef`.
 - Verified locally with Playwright against a seeded trial covering all four
   cells, 17 checks:
   - the verdict sentence;

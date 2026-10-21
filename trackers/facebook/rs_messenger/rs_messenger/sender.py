@@ -10,13 +10,13 @@ import logging
 import os
 import random
 import time
-from typing import Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from playwright.sync_api import Page
 from rs_poster.session import NAV_TIMEOUT_MS, human_pause, raise_if_restricted
 
 from . import selectors as sel
-from .inbox import looks_like_message  # noqa: F401 - re-exported for callers
+from .inbox import looks_like_message
 
 logger = logging.getLogger(__name__)
 
@@ -44,9 +44,136 @@ class SendError(RuntimeError):
     """The reply could not be confirmed as sent."""
 
 
+# How long to wait for the thread's messages to render before typing.
+PANE_TIMEOUT_S = 10.0
+# How long to watch the pane for our own bubble after Enter, and how often.
+VERIFY_TIMEOUT_S = 15.0
+VERIFY_POLL_S = 0.5
+# Enough of the reply to recognise our bubble; Facebook may rewrap the rest.
+PROBE_CHARS = 60
+
+ERR_COMPOSER_MISSING = "composer not found (selectors.py may need updating)"
+ERR_PANE_UNREAD = "thread messages could not be read before sending"
+ERR_DRAFT_STUCK = "composer holds an earlier draft that could not be cleared"
+ERR_NOT_SUBMITTED = "reply not submitted; composer cleared"
+ERR_NOT_SUBMITTED_UNCLEARED = "reply not submitted; composer could not be cleared"
+ERR_NOT_VISIBLE = "sent text did not appear as an outgoing bubble"
+# Failures the coordinator stops retrying: one another poll will not fix, and
+# one where the reply may well have posted (Messenger rewrote the text, or the
+# "You sent" label moved) — the next poll's already_sent() reads the pane the
+# same way, so a retry would send the seller a duplicate.
+PERMANENT_ERRORS = frozenset({ERR_COMPOSER_MISSING, ERR_NOT_VISIBLE})
+
+
 # Module state rather than a ledger file: replies are queued and acked on the
 # coordinator, which is the durable record — this only paces one process.
 _last_send_at = 0.0
+
+
+def _norm(text: Optional[str]) -> str:
+    return " ".join((text or "").split()).casefold()
+
+
+def make_probe(text: str) -> str:
+    """The fragment of the reply we look for in the pane afterwards."""
+    return " ".join(text.split())[:PROBE_CHARS]
+
+
+def count_out_rows(rows: List[Dict[str, Any]], probe: str) -> int:
+    """Outgoing rows ("You sent" ancestors) whose text carries the probe.
+
+    The composer draft and the thread list's preview never carry that marker,
+    so neither can pass for a sent bubble.
+    """
+    needle = _norm(probe)
+    if not needle:
+        return 0
+    return sum(
+        1
+        for row in rows
+        if row.get("direction") == "out" and needle in _norm(row.get("text"))
+    )
+
+
+def already_sent(rows: List[Dict[str, Any]], probe: str) -> bool:
+    """Whether the pane's most recent message is ours and carries the probe.
+
+    This is the retry of a reply whose ack never reached the coordinator: the
+    bubble is on the page, so typing it again would send the seller a
+    duplicate. Only the latest message counts, so a repeat the operator
+    queues on purpose after the seller answered still goes out.
+    """
+    needle = _norm(probe)
+    if not needle:
+        return False
+    for row in reversed(rows):
+        text = row.get("text") or ""
+        if not looks_like_message(text):
+            continue
+        return row.get("direction") == "out" and needle in _norm(text)
+    return False
+
+
+def reply_landed(
+    before: List[Dict[str, Any]],
+    after: List[Dict[str, Any]],
+    probe: str,
+    composer_text: str,
+) -> bool:
+    """One more outgoing bubble with the probe than before, and no draft left.
+
+    Counting against the snapshot taken before typing is what rules out an
+    older identical bubble; the composer check is what rules out an Enter
+    that never submitted.
+    """
+    return count_out_rows(after, probe) > count_out_rows(before, probe) and (
+        _norm(probe) not in _norm(composer_text)
+    )
+
+
+def _snapshot(page: Page) -> Optional[List[Dict[str, Any]]]:
+    """The pane's rows, or None when they could not be read."""
+    try:
+        rows = page.evaluate(sel.EXTRACT_MESSAGES_JS)
+    except Exception:
+        return None
+    return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else None
+
+
+def _baseline(page: Page) -> Optional[List[Dict[str, Any]]]:
+    """The pane once it shows a message, or None if it never does in time.
+
+    Every Marketplace thread holds the message that opened it, so a pane
+    without one is still loading; a baseline taken then would let an older
+    identical bubble that renders later pass for the new reply, and would
+    blind already_sent().
+    """
+    deadline = time.monotonic() + PANE_TIMEOUT_S
+    while True:
+        rows = _snapshot(page)
+        if rows and any(looks_like_message(str(row.get("text") or "")) for row in rows):
+            return rows
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(VERIFY_POLL_S)
+
+
+def _composer_text(composer: Any) -> str:
+    try:
+        return composer.inner_text() or ""
+    except Exception:
+        return ""
+
+
+def _clear_composer(page: Page, composer: Any) -> bool:
+    """Empty a draft that did not submit, so a retry does not type it twice."""
+    try:
+        composer.click()
+        page.keyboard.press("Control+A")
+        page.keyboard.press("Backspace")
+    except Exception:
+        return False
+    return not _composer_text(composer).strip()
 
 
 def send_message(
@@ -54,9 +181,10 @@ def send_message(
 ) -> Tuple[bool, Optional[str]]:
     """Send `text` into the thread. Returns (sent, error).
 
-    "Sent" means the text was typed, submitted, and then *seen in the pane* —
-    a composer that swallowed the keystrokes without posting reports False, so
-    the coordinator can re-queue rather than believing a phantom reply.
+    "Sent" means the text was typed, submitted, and then *seen in the pane as
+    our own bubble*. A composer that swallowed the keystrokes without posting
+    reports False, so the coordinator re-queues rather than believing a
+    phantom reply.
     """
     global _last_send_at
 
@@ -76,11 +204,24 @@ def send_message(
             composer = page.locator(sel.COMPOSER_FALLBACK).first
         composer.wait_for(timeout=15_000)
     except Exception:
-        return False, "composer not found (selectors.py may need updating)"
+        return False, ERR_COMPOSER_MISSING
 
     if dry_run:
         logger.info("[dry-run] Would send to thread %s: %r", thread_id, text)
         return True, None
+
+    probe = make_probe(text)
+    before = _baseline(page)
+    if before is None:
+        return False, ERR_PANE_UNREAD
+    if already_sent(before, probe):
+        logger.info("Thread %s already shows this reply; not sending it twice.", thread_id)
+        return True, None
+
+    # Messenger keeps an unsent draft per thread, so typing into a leftover
+    # one (a retry after a failed clear) would send both texts as one.
+    if _composer_text(composer).strip() and not _clear_composer(page, composer):
+        return False, ERR_DRAFT_STUCK
 
     composer.click()
     human_pause(0.5, 1.5)
@@ -89,14 +230,20 @@ def send_message(
     page.keyboard.press("Enter")
     _last_send_at = time.time()
 
-    # Confirm the message actually landed in the conversation. Best-effort but
-    # bounded: the first ~60 chars are enough to find our own bubble.
-    probe = text.strip()[:60]
-    try:
-        page.get_by_text(probe, exact=False).last.wait_for(timeout=15_000)
-    except Exception:
-        logger.warning("Reply to thread %s not visible after send.", thread_id)
-        return False, "sent text did not appear in the conversation"
+    deadline = time.monotonic() + VERIFY_TIMEOUT_S
+    while True:
+        if reply_landed(before, _snapshot(page) or [], probe, _composer_text(composer)):
+            logger.info("Replied in thread %s (%d chars).", thread_id, len(text))
+            return True, None
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(VERIFY_POLL_S)
 
-    logger.info("Replied in thread %s (%d chars).", thread_id, len(text))
-    return True, None
+    if _norm(probe) in _norm(_composer_text(composer)):
+        logger.warning("Reply to thread %s stayed in the composer; clearing it.", thread_id)
+        if _clear_composer(page, composer):
+            return False, ERR_NOT_SUBMITTED
+        return False, ERR_NOT_SUBMITTED_UNCLEARED
+
+    logger.warning("Reply to thread %s not visible as an outgoing bubble.", thread_id)
+    return False, ERR_NOT_VISIBLE

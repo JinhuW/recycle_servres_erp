@@ -47,6 +47,7 @@ type Row = {
   recovery_email: string;
   cookie_enc: string | null;
   cookie_uid: string | null;
+  token_enc: string | null;
   note: string;
   status: FbPoolStatus;
   holder_user_id: string | null;
@@ -115,6 +116,7 @@ async function snapshot(sql: SqlLike, key: Buffer, user: User) {
       emailPassword: full ? unsealOrEmpty(r.email_password_enc, key) : '',
       recovery: full ? r.recovery_email : '',
       cookie,
+      token: full ? unsealOrEmpty(r.token_enc, key) : '',
       note: r.note,
       status: r.status,
       holder: r.holder_name,
@@ -163,6 +165,7 @@ function readDraft(input: unknown): FbPoolDraft | null {
     emailPassword: str(b.emailPassword),
     recovery: str(b.recovery),
     cookie: str(b.cookie),
+    token: str(b.token),
     note: str(b.note),
     status: status as FbPoolStatus,
     holder: (b.holder as string | null | undefined) ?? null,
@@ -322,6 +325,7 @@ type Sealed = {
   email_password_enc: string | null;
   cookie_enc: string | null;
   cookie_uid: string | null;
+  token_enc: string | null;
 };
 
 function sealDraft(d: FbPoolDraft, key: Buffer): Sealed {
@@ -331,6 +335,7 @@ function sealDraft(d: FbPoolDraft, key: Buffer): Sealed {
     email_password_enc: sealOrNull(d.emailPassword, key),
     cookie_enc: sealOrNull(d.cookie, key),
     cookie_uid: d.cookie ? cookieUid(d.cookie) : null,
+    token_enc: sealOrNull(d.token, key),
   };
 }
 
@@ -340,11 +345,11 @@ async function insertAccount(tx: Tx, d: FbPoolDraft, key: Buffer, batch: string,
   const [row] = await tx<{ no: number }[]>`
     INSERT INTO fb_pool_accounts (
       uid, password_enc, totp_enc, email, email_password_enc, recovery_email,
-      cookie_enc, cookie_uid, note, status, holder_user_id, holder_name, held_since,
+      cookie_enc, cookie_uid, token_enc, note, status, holder_user_id, holder_name, held_since,
       cookie_at, batch, created_by
     ) VALUES (
       ${d.uid}, ${s.password_enc}, ${s.totp_enc}, ${d.email}, ${s.email_password_enc}, ${d.recovery},
-      ${s.cookie_enc}, ${s.cookie_uid}, ${d.note}, ${d.status}, ${holderId}, ${d.holder},
+      ${s.cookie_enc}, ${s.cookie_uid}, ${s.token_enc}, ${d.note}, ${d.status}, ${holderId}, ${d.holder},
       ${d.holder ? tx`NOW()` : null}, ${d.cookie ? tx`NOW()` : null}, ${batch}, ${user.id}
     ) RETURNING no`;
   return row.no;
@@ -378,6 +383,9 @@ pool.put('/:no', async (c) => {
   const body = (await c.req.json().catch(() => null)) as { draft?: unknown } | null;
   const draft = readDraft(body?.draft);
   if (!draft) return c.json({ error: 'Invalid account' }, 400);
+  // A bundle built before the token field sends none; that keeps the stored
+  // token instead of erasing it. An empty string still clears it.
+  const tokenSent = typeof (body?.draft as Record<string, unknown>).token === 'string';
   const sql = getDb(c.env);
   const user = c.var.user;
   const key = c.var.key;
@@ -397,6 +405,7 @@ pool.put('/:no', async (c) => {
         uid = ${draft.uid}, password_enc = ${s.password_enc}, totp_enc = ${s.totp_enc},
         email = ${draft.email}, email_password_enc = ${s.email_password_enc},
         recovery_email = ${draft.recovery}, cookie_enc = ${s.cookie_enc}, cookie_uid = ${s.cookie_uid},
+        token_enc = ${tokenSent ? s.token_enc : cur.token_enc},
         cookie_at = ${cookieUnchanged ? cur.cookie_at : draft.cookie ? tx`NOW()` : null},
         note = ${draft.note}, status = ${draft.status},
         holder_user_id = ${holderId}, holder_name = ${draft.holder},
@@ -502,6 +511,10 @@ pool.post('/:no/assign', async (c) => {
       totp_secret: orNull(totpKey(unsealOrEmpty(row.totp_enc, key))),
       email: orNull(row.email),
       email_password: orNull(unsealOrEmpty(row.email_password_enc, key)),
+      // The access token lets the worker mint a fresh session when its cookie
+      // lapses — a softer signal than a password login — so it travels even in
+      // password mode, as the worker's own refresh before the password.
+      fb_token: orNull(unsealOrEmpty(row.token_enc, key)),
     },
     ...legacyDevice(cookie, row.cookie_uid, row.uid),
   });

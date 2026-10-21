@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import {
-  afterSalesCasePath, afterSalesNewPath, fleetWorkerPath, hrefFor, matchFleetWorker, matchPoCheck, matchPurchaseOrder, matchSellOrderPack, navigate, navigateBack, onLinkClick,
+  accountingEntryPath, afterSalesCasePath, afterSalesNewPath, fleetWorkerPath, hrefFor, matchFleetWorker, matchPoCheck, matchPurchaseOrder, matchSellOrderPack, navigate, navigateBack, onLinkClick,
   parseShippingRoute, pathToDesktopView, pathToMobileView, poCheckPath, poLinePath, readPath, readPoLineQuery, readSafeNext,
   replaceRoute, sellOrderPackPath, splitHash,
   type LinkClick,
@@ -79,6 +79,16 @@ describe('after-sales routes', () => {
     expect(pathToDesktopView('/after-sales')).toBe('aftersales');
     expect(pathToDesktopView('/after-sales/AS-1001')).toBe('aftersales');
     expect(pathToDesktopView('/after-sales/new')).toBe('aftersales');
+  });
+});
+
+describe('accounting routes', () => {
+  it('are one view in each shell for the book and an entry', () => {
+    expect(accountingEntryPath('AC-1001')).toBe('/accounting/AC-1001');
+    expect(pathToDesktopView('/accounting')).toBe('accounting');
+    expect(pathToDesktopView('/accounting/AC-1001')).toBe('accounting');
+    expect(pathToMobileView('/accounting')).toBe('accounting');
+    expect(pathToMobileView('/accounting/AC-1001')).toBe('accounting');
   });
 });
 

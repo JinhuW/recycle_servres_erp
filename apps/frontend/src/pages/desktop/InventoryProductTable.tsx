@@ -287,7 +287,7 @@ export function InventoryProductTable({
                           {cols.warehouse && <th>{t('warehouse')}</th>}
                           {cols.qty && <th className="num">{t('qty')}</th>}
                           <th>{t('status')}</th>
-                          <th style={{ width: 90 }}>{t('actions')}</th>
+                          <th className="col-actions" style={{ width: 90 }}>{t('actions')}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -376,7 +376,7 @@ export function InventoryProductTable({
                                 <td className="num mono" style={{ fontWeight: 600 }}>{l.qty}</td>
                               )}
                               <td><span className={'chip dot ' + statusTone(l.status)}>{l.status}</span></td>
-                              <td>
+                              <td className="col-actions">
                                 <div style={{ display: 'inline-flex', gap: 4 }}>
                                   <button
                                     className="btn icon sm"

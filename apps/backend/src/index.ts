@@ -32,6 +32,7 @@ import marketRoutes from './routes/market';
 import scanRoutes from './routes/scan';
 import notificationsRoutes from './routes/notifications';
 import trackerRoutes from './routes/tracker';
+import aiModelsRoutes from './routes/aiModels';
 import coordinatorRoutes from './routes/coordinator';
 import facebookPoolRoutes from './routes/facebookPool';
 import bankTxRoutes from './routes/bankTx';
@@ -42,6 +43,7 @@ import customersRoutes from './routes/customers';
 import sellOrdersRoutes from './routes/sellOrders';
 import sellOrderPackRoutes from './routes/sellOrderPack';
 import afterSalesRoutes from './routes/afterSales';
+import accountingRoutes from './routes/accounting';
 import inventoryRoutes from './routes/inventory';
 import membersRoutes from './routes/members';
 import lookupsRoutes from './routes/lookups';
@@ -279,10 +281,9 @@ const isUploadPath = (path: string): boolean =>
   // Left under the JSON cap it 413s before the handler that would have checked
   // it against the upload limits ever runs.
   /^\/api\/orders\/[^/]+\/lines\/[^/]+\/photos$/.test(path) ||
-  // Vendor bid sheets round-trip our own template, which embeds item photos —
-  // they routinely exceed the JSON cap. The route enforces its own 8 MB limit.
-  /^\/api\/sell-orders\/[^/]+\/price-import\/preview$/.test(path) ||
-  // A price list dropped on the Market page — the same sheets, same 8 MB limit.
+  // A price list dropped on the Market page is often our own bid sheet, which
+  // embeds item photos and routinely exceeds the JSON cap. The route enforces
+  // its own 8 MB limit.
   path === '/api/market/price-import/preview';
 
 // All other routes: apply the 1 MiB JSON cap.
@@ -305,14 +306,16 @@ app.use('*', (c, next) => {
 // the browser serving its 60s-old copy back to Settings made a saved shipping
 // address look like it had never persisted.
 // Safe methods only: these prefixes also carry POST/PATCH endpoints, whose
-// responses have no business advertising a cache lifetime.
-const CACHEABLE_PREFIXES = ['/api/lookups', '/api/categories', '/api/workspace'];
+// responses have no business advertising a cache lifetime. Successes only: a
+// cached 502 would keep answering the user's retry for the next minute.
+const CACHEABLE_PREFIXES = ['/api/lookups', '/api/categories', '/api/workspace', '/api/ai/models'];
 // Same trap as /api/warehouses, under a cached prefix: the FX panel re-reads
 // the rates straight after a manual save or a refresh.
 const UNCACHED_PATHS = new Set(['/api/workspace/fx-rates']);
 app.use('*', async (c, next) => {
   await next();
   if (c.req.method !== 'GET' && c.req.method !== 'HEAD') return;
+  if (!c.res.ok) return;
   const path = c.req.path;
   if (UNCACHED_PATHS.has(path)) return;
   if (CACHEABLE_PREFIXES.some((p) => path === p || path.startsWith(p + '/'))) {
@@ -410,6 +413,8 @@ app.route('/api/client-timings', clientTimingRoutes);
 app.route('/api/oauth/clients', oauthAdmin);
 // Self-applies authMiddleware + manager gate (oauthAdmin pattern).
 app.route('/api/tracker', trackerRoutes);
+// Same shape: self-applied authMiddleware + manager gate.
+app.route('/api/ai', aiModelsRoutes);
 app.route('/api/web-submissions', webSubmissionsRoutes);
 // Same shape: self-applied authMiddleware + manager gate.
 app.route('/api/coordinator', coordinatorRoutes);
@@ -419,6 +424,8 @@ app.route('/api/facebook-pool', facebookPoolRoutes);
 // Same shape: self-applied authMiddleware + manager gate.
 app.route('/api/bank-transactions', bankTxRoutes);
 app.route('/api/internal-transactions', internalTxRoutes);
+// Same shape: self-applied authMiddleware + manager gate.
+app.route('/api/accounting', accountingRoutes);
 // Clients (buy-side counterparties). Deliberately NOT in CACHEABLE_PREFIXES:
 // like /api/warehouses this list is edited and re-read inside one user action,
 // and a 60s browser copy is what made a saved warehouse address look unsaved.

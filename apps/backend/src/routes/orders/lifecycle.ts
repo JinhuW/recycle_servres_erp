@@ -113,6 +113,13 @@ lifecycleRoutes.delete('/:id', async (c) => {
              linked_by = NULL, linked_at = NULL
        WHERE order_id = ${id}
     `;
+    // Money a manager booked against the draft stays on their book; the FK
+    // only drops the link, so the entry's history says which PO it was.
+    await tx`
+      INSERT INTO accounting_entry_events (entry_id, kind, detail, actor_id)
+      SELECT e.id, 'unlinked', jsonb_build_object('orderId', ${id}::text), ${u.id}
+      FROM accounting_entries e WHERE e.order_id = ${id}
+    `;
     await tx`DELETE FROM orders WHERE id = ${id}`; // order_lines cascade via FK
     return { kind: 'ok', scanned };
   });

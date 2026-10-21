@@ -38,6 +38,7 @@ const SCHEMA: Record<string, Validator> = {
   'sellOrders.lineGroup':     isOneOf('warehouse', 'po'),
   'sidebar.folded':           isBoolean,
   'fleetWatch.accountHidden': isBoolean,
+  'onboarding.done':          isBoolean,
 };
 
 export type PreferencePatchResult =

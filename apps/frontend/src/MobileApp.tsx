@@ -18,6 +18,7 @@ import { Orders } from './pages/Orders';
 import { OrderDetail, type OrderMetaDraft, type ProductsLanding } from './pages/OrderDetail';
 import { Market } from './pages/Market';
 import { Inventory } from './pages/Inventory';
+import { Accounting } from './pages/Accounting';
 import { Profile } from './pages/Profile';
 import { ShareTarget } from './pages/ShareTarget';
 import { MobileShipping } from './pages/Shipping';
@@ -40,6 +41,7 @@ import {
   replaceRoute,
 } from './lib/route';
 import { confirmDiscard } from './lib/unsavedGuard';
+import { openWalkthrough, useWalkthroughAutoStart, useWalkthroughOpen } from './lib/onboarding';
 import type { Category, DraftLine, Notification, Order, OrderLine, OrderSummary, ScanResponse } from './lib/types';
 import { buildOrderSubmit, toAddLine } from './lib/orderSubmit';
 import { findDuplicateLine } from './lib/dupParts';
@@ -49,6 +51,8 @@ import { lineSpecLabel } from './lib/lineGroups';
 // Same consent page the desktop shell shows; a connector's popup on a phone
 // lands here too.
 const Authorize = lazy(() => import('./pages/Authorize').then(m => ({ default: m.Authorize })));
+// Most sessions never open it: only a new purchaser, or a replay from Profile.
+const Walkthrough = lazy(() => import('./components/Walkthrough').then(m => ({ default: m.Walkthrough })));
 
 // Where a line form goes when it closes. 'detail' is an existing order: the
 // form was opened from its detail screen, which owns the order, so the trip
@@ -228,6 +232,21 @@ function Shell() {
   // here for the same reason: the form unmounts that screen.
   const [productsLanding, setProductsLanding] = useState<ProductsLanding | null>(null);
   const orderDetailMatch = matchPurchaseOrder(path);
+  const orderDetailOpen = view === 'history' && !!orderDetailMatch && !!detailOrder;
+  const shippingRoute = parseShippingRoute(path);
+  // Add / focus / wizard-handoff are focused task screens like the order
+  // detail: the header's back button is the way out, not the tab bar.
+  const shippingTaskOpen = !!shippingRoute && shippingRoute.kind !== 'dashboard';
+  // One Accounting entry is a focused screen too.
+  const accountingEntryOpen = view === 'accounting' && !!match('/accounting/:id', path);
+
+  // The walkthrough points at the tab bar, so it waits for a screen that has
+  // one: not the capture flow, an order, or a shipping task.
+  const walkthroughOpen = useWalkthroughOpen();
+  useWalkthroughAutoStart(
+    !loading && !!user && !pendingRoleChoice && capture.phase === 'idle'
+    && !orderDetailOpen && !shippingTaskOpen && !accountingEntryOpen && !isAuthorizePath(path) && !path.startsWith('/share-target'),
+  );
 
   // The PWA's Submit shortcut and the share-target landing both arrive at
   // `/submit`, which is no screen: it opens the capture flow and lands on the
@@ -906,11 +925,6 @@ function Shell() {
   }
 
   const unreadCount = serverUnread ?? notifs.filter(n => n.unread).length;
-  const orderDetailOpen = view === 'history' && !!orderDetailMatch && !!detailOrder;
-  const shippingRoute = parseShippingRoute(path);
-  // Add / focus / wizard-handoff are focused task screens like the order
-  // detail: the header's back button is the way out, not the tab bar.
-  const shippingTaskOpen = !!shippingRoute && shippingRoute.kind !== 'dashboard';
 
   return (
     <div className="phone-app">
@@ -953,12 +967,14 @@ function Shell() {
       )}
       {view === 'market' && <Market />}
       {view === 'inventory' && <Inventory onNewEntry={startSubmit} />}
+      {view === 'accounting' && <Accounting showToast={showToast} />}
       {view === 'me' && (
         <Profile
           onOpenLanguage={() => setLangSheet(true)}
           onOpenNotifications={() => setNotifSheet(true)}
           onOpenAbout={() => setAboutSheet(true)}
           onOpenSecurity={() => setPwSheet(true)}
+          onOpenGuide={openWalkthrough}
         />
       )}
 
@@ -1008,8 +1024,14 @@ function Shell() {
           download, archive, delete — was covered by the nav and untappable.
           It is a focused task screen like the capture flow, and the header's
           back button is the way out of it. */}
-      {!orderDetailOpen && !shippingTaskOpen && (
+      {!orderDetailOpen && !shippingTaskOpen && !accountingEntryOpen && (
         <PhTabBar view={view} onCenterPress={startSubmit} />
+      )}
+
+      {walkthroughOpen && !orderDetailOpen && !shippingTaskOpen && !accountingEntryOpen && (
+        <Suspense fallback={null}>
+          <Walkthrough shell="phone" onStartOrder={() => { void startSubmit(); }} />
+        </Suspense>
       )}
 
       {overlayEl}

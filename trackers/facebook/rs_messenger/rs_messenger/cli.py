@@ -21,7 +21,7 @@ from rs_poster.session import (
 
 from .client import CoordinatorClient, CoordinatorError
 from .inbox import read_threads
-from .sender import send_message
+from .sender import PERMANENT_ERRORS, send_message
 
 logger = logging.getLogger("rs_messenger")
 
@@ -76,14 +76,17 @@ def cmd_poll(args: argparse.Namespace) -> int:
                 sent, error = send_message(
                     session.page, str(item.get("thread_id")), str(item.get("text", ""))
                 )
-                client.ack_outbound(
-                    int(item["id"]), "sent" if sent else "failed", error
+                ack = client.ack_outbound(
+                    int(item["id"]),
+                    "sent" if sent else "failed",
+                    error,
+                    permanent=error in PERMANENT_ERRORS,
                 )
                 logger.info(
                     "Outbound %s (%s): %s",
                     item.get("id"),
                     item.get("origin", "?"),
-                    "sent" if sent else f"failed: {error}",
+                    "sent" if sent else f"{ack.get('outcome', 'failed')}: {error}",
                 )
     return 0
 

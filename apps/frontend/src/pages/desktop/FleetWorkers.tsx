@@ -5,7 +5,8 @@ import { SortTh, type SortState } from '../../components/SortTh';
 import type { AlertHitRow, Challenge, FleetAccount, FleetDoc } from '../../lib/coordinator';
 import {
   accountAlerts, accountHaystack, attentionReason, dayStrip, FLEET_STATUSES, fleetActivity, fleetPostsToday, fleetStatus,
-  hitsByCity, isUnstampedBuild, matchesTerms, parkedWorkers, queryTerms, searchedToday, sortFleet, whoIs,
+  hitsByCity, isUnstampedBuild, matchesTerms, parkedWorkers, proxyPort, queryTerms, searchedToday,
+  sharedExits, sortFleet, whoIs,
   type CityHits, type DayStrip, type FleetEvent, type FleetSortCol, type FleetStatus,
 } from '../../lib/fleetView';
 import { relTime } from '../../lib/format';
@@ -93,6 +94,7 @@ export function WorkersCard({ fleet, unavailable, hits, challenges, filter, onCl
   const filtered = all.filter(w =>
     (filter === 'all' || fleetStatus(w, parked) === filter) && matchesTerms(accountHaystack(w), terms));
   const shown = sort.dir ? sortFleet(filtered, sort.col as FleetSortCol, sort.dir, parked) : filtered;
+  const exits = sharedExits(all);
   const cities = new Set(all.flatMap(w => w.cities.map(c => c.slug))).size;
   const alerts = all.reduce((n, w) => n + accountAlerts(w, byCity), 0);
   const posts = fleetPostsToday(all);
@@ -138,12 +140,13 @@ export function WorkersCard({ fleet, unavailable, hits, challenges, filter, onCl
         <div className="card-note"><Icon name="info" size={16} /><span>{t('fbcAccConfigMissing', { files: missing.join(' + ') })}</span></div>
       )}
 
-      <div className="fp-table-wrap">
+      <div className="fp-table-wrap ff-table-cap">
         <table className="fp-table ff-table" aria-busy={loading}>
           <thead>
             <tr>
               <th aria-label={t('fbcColCities')} />
               <SortTh col="worker" sort={sort} onSort={cycleSort}>{t('fbcColWorker')}</SortTh>
+              <SortTh col="proxy" sort={sort} onSort={cycleSort} title={t('fbcColProxyHint')}>{t('fbcColProxy')}</SortTh>
               <SortTh col="status" sort={sort} onSort={cycleSort}>{t('fbcColStatus')}</SortTh>
               <SortTh col="today" sort={sort} onSort={cycleSort} title={t('fbcColTodayHint')}>{t('fbcColToday')}</SortTh>
               <SortTh col="searches" sort={sort} onSort={cycleSort} title={t('fbcColSearchesHint')}>{t('fbcColSearches')}</SortTh>
@@ -155,11 +158,12 @@ export function WorkersCard({ fleet, unavailable, hits, challenges, filter, onCl
           <tbody>
             {shown.map(w => (
               <WorkerRow key={w.worker_id} account={w} hits={byCity} parked={parked} terms={terms} startAt={startAt}
+                shared={!!w.proxy && (exits.get(w.proxy.url ?? '') ?? 0) > 1}
                 open={open.has(w.worker_id)} onToggle={() => toggle(w.worker_id)} locale={locale} />
             ))}
             {loading && SKELETON_ROWS.map(i => <WorkerRowSkeleton key={i} />)}
             {fleet && shown.length === 0 && (
-              <tr><td colSpan={8} className="fp-empty">{terms.length || filter !== 'all' ? t('fbcAccEmptySearch') : t('fbcAccEmptyAll')}</td></tr>
+              <tr><td colSpan={9} className="fp-empty">{terms.length || filter !== 'all' ? t('fbcAccEmptySearch') : t('fbcAccEmptyAll')}</td></tr>
             )}
           </tbody>
         </table>
@@ -187,6 +191,7 @@ function WorkerRowSkeleton() {
     <tr className="ff-skel" aria-hidden>
       <td className="ff-chev"><Skeleton width={13} height={13} radius={4} /></td>
       <td>{pair(150, 170)}</td>
+      <td>{pair(150, 110)}</td>
       <td>{pair(86, 90, 20)}</td>
       <td>{pair(178, 140, 8)}</td>
       <td><span className="ff-searches"><Skeleton width={20} height={20} radius={999} /><Skeleton width={34} height={12} /></span></td>
@@ -197,12 +202,41 @@ function WorkerRowSkeleton() {
   );
 }
 
-function WorkerRow({ account: w, hits, parked, terms, startAt, open, onToggle, locale }: {
+// The port and exit IP, then the city Facebook sees the account in, with the
+// ISP on hover. `shared` is an IP another worker also exits from, which only
+// holds while the two look like two people. A facade that predates the
+// lookup sends only the env var's name.
+function ProxyCell({ worker: w, shared, terms }: { worker: FleetAccount; shared: boolean; terms: readonly string[] }) {
+  const { t } = useT();
+  const p = w.proxy;
+  if (!p) {
+    return w.proxy_env ? <span className="mono">${w.proxy_env}</span> : <span className="fp-muted">{t('fbcProxyNone')}</span>;
+  }
+  const port = proxyPort(w);
+  const where = [p.city, p.region].filter(Boolean).join(', ');
+  return (
+    <span className="fp-holder" title={p.org ?? undefined}>
+      <span>
+        {port ? <span className="mono"><Hi text={`:${port}`} terms={terms} /></span> : t('fbcProxyNone')}
+        {p.ip && <span className="mono fp-muted"> · <Hi text={p.ip} terms={terms} /></span>}
+      </span>
+      <small className={p.error ? 'fp-warn' : undefined}>
+        {p.pending ? t('fbcProxyLookingUp')
+          : p.error ? t('fbcProxyLookupFailed')
+          : <Hi text={where || '—'} terms={terms} />}
+        {shared && <> · <span className="fp-warn" title={t('fbcSharesIpHint')}>{t('fbcProxyShared')}</span></>}
+      </small>
+    </span>
+  );
+}
+
+function WorkerRow({ account: w, hits, parked, terms, startAt, shared, open, onToggle, locale }: {
   account: FleetAccount;
   hits: Map<string, CityHits>;
   parked: ReadonlySet<string>;
   terms: readonly string[];
   startAt: readonly string[] | undefined;
+  shared: boolean;
   open: boolean;
   onToggle: () => void;
   locale: string;
@@ -216,7 +250,7 @@ function WorkerRow({ account: w, hits, parked, terms, startAt, open, onToggle, l
   const beat = h?.last_heartbeat_at && h.liveness !== 'dead' ? h.last_heartbeat_at : null;
   const days = h?.session_days_left ?? null;
   const path = fleetWorkerPath(w.worker_id);
-  const strip = dayStrip(w, status, startAt);
+  const strip = dayStrip(w, status, w.start_at ?? startAt);
   const plan = w.plan;
   const build = h?.version && !isUnstampedBuild(h.version) ? h.version : null;
   const searched = searchedToday(w, status);
@@ -237,6 +271,7 @@ function WorkerRow({ account: w, hits, parked, terms, startAt, open, onToggle, l
               {build && <> · <span className="mono" title={build}>v{build.split(' ')[0]}</span></>}</small>
           </span>
         </td>
+        <td className="ff-exit"><ProxyCell worker={w} shared={shared} terms={terms} /></td>
         <td className="ff-wrap">
           <span className="fp-holder">
             <span><StatusChip status={status} /></span>
@@ -276,7 +311,7 @@ function WorkerRow({ account: w, hits, parked, terms, startAt, open, onToggle, l
       </tr>
       {open && (
         <tr className="ff-fold">
-          <td colSpan={8}>
+          <td colSpan={9}>
             <div className="fp-section-label">{t('fbcFoldCities', { n: w.cities.length })}</div>
             <div className="fl-cities">
               {w.cities.length

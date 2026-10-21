@@ -3,6 +3,7 @@
 // with its bearer token; a 501 from any of them means the proxy env vars are
 // unset.
 
+import { TEXT_JSON_MODEL, type AiModel } from './aiModels';
 import { api } from './api';
 
 export type TrackerWorkerRole = 'worker' | 'api';
@@ -86,6 +87,8 @@ export type TrackerStats = {
 
 export type PromptRole = 'live' | 'candidate' | 'retired';
 
+export type ResponseSchema = 'verdict-first' | 'reasoning-first';
+
 export type AudienceScore = { sent: number; leads: number; notLeads: number; leadRate: number | null };
 
 export type TrialCell = { posts: number; leads: number; notLeads: number };
@@ -98,6 +101,9 @@ export type PromptVersionStats = {
   role: PromptRole;
   model: string;
   systemPrompt: string;
+  // The same wording under another response schema is another version; the
+  // tracker labels every version made before reasoning moved first as such.
+  responseSchema: ResponseSchema;
   firstUsedAt: string;
   lastUsedAt: string;
   evaluated: number;
@@ -155,6 +161,32 @@ export function summarizeTrial(vs: VsLive): TrialSummary {
 
 export const WORKERS_PAGE_SIZE = 15;
 
+/** An OpenRouter model id, `provider/model`; the tracker checks the same shape. */
+export const MODEL_ID = /^[\w.-]+\/[\w.:-]+$/;
+
+/**
+ * The catalogue entries the evaluator can run on. MODEL_ID also drops
+ * OpenRouter's `~…-latest` aliases: they float to whatever is newest, which
+ * would swap the model under an unchanged prompt version and blur its score.
+ */
+export const EVALUATOR_MODEL = (m: AiModel): boolean => TEXT_JSON_MODEL(m) && MODEL_ID.test(m.id);
+
+/**
+ * Why the evaluator cannot run on `id`, or null when it can. The shape is all
+ * the tracker checks, but a model without strict JSON output answers in prose,
+ * every verdict then fails to parse and the tracker stops judging posts, so
+ * the id must be one the catalogue lists as an evaluator model. 'loading'
+ * while the catalogue is null.
+ */
+export function evaluatorModelProblem(
+  id: string,
+  catalogue: readonly AiModel[] | null,
+): 'shape' | 'loading' | 'unlisted' | null {
+  if (!MODEL_ID.test(id)) return 'shape';
+  if (!catalogue) return 'loading';
+  return catalogue.some(m => m.id === id && EVALUATOR_MODEL(m)) ? null : 'unlisted';
+}
+
 export const trackerApi = {
   listWorkers: (params: { status: WorkerStatusFilter; limit: number; offset: number }) =>
     api.get<{ workers: TrackerWorker[]; total: number }>(
@@ -196,6 +228,9 @@ export const trackerApi = {
     api.post<{ evalPrompt: string; llmModel: string; disabledRules: number[]; promptVersionId: number | null }>(
       '/api/tracker/prompt-candidate/promote', {},
     ),
+  // The one tracker setting the proxy opens; the rest stay behind it.
+  setModel: (model: string) =>
+    api.put<{ key: string; value: string }>('/api/tracker/settings/llm_model', { value: model }).then(r => r.value),
 
   listSubreddits: () =>
     api.get<{ subreddits: TrackerSubreddit[] }>('/api/tracker/subreddits').then(r => r.subreddits),

@@ -168,6 +168,23 @@ CREATE TABLE IF NOT EXISTS alert_messages (
 
 CREATE INDEX IF NOT EXISTS idx_alert_messages_sent ON alert_messages(sent_at);
 
+-- Which worker may alert a listing (see alert_claims.py). Every worker sends
+-- its own alerts and keeps its own notified cache, so this row is the only
+-- place the fleet agrees that a listing has been alerted. `delivered_at` is
+-- NULL while the holder is still sending; `price_value` is the price the last
+-- alert announced (DOUBLE PRECISION because Postgres REAL would make $1234.56
+-- compare as a drop against itself).
+CREATE TABLE IF NOT EXISTS alert_claims (
+    marketplace   TEXT NOT NULL,
+    listing_id    TEXT NOT NULL,
+    worker_id     TEXT NOT NULL,
+    price         TEXT,
+    price_value   DOUBLE PRECISION,
+    claimed_at    TEXT NOT NULL,
+    delivered_at  TEXT,
+    PRIMARY KEY (marketplace, listing_id)
+);
+
 -- Fleet-wide incident ledger (see incidents.py). One row per incident key
 -- ("ai_unavailable"); `reporters` is a JSON map of worker id -> when it last
 -- voted `down`. `last_alerted_at` outlives the incident so a relapse inside
@@ -578,6 +595,10 @@ OUTBOUND_EXTRA_COLUMNS = (
     ("transport", "TEXT NOT NULL DEFAULT 'playwright'"),
 )
 
+# Delivery attempts before a queued reply is given up as failed. Sends are
+# paced a minute apart, so three tries is a few minutes, not a retry storm.
+OUTBOUND_MAX_ATTEMPTS = 3
+
 
 # The hit-rate queries, shared verbatim by both backends ({p} is the
 # placeholder style, `?` or `%s`). An alert can span several Telegram messages
@@ -617,6 +638,66 @@ UNMATCHED_REACTIONS_SQL = """
       AND NOT EXISTS (
           SELECT 1 FROM alert_messages am
           WHERE am.chat_id = ar.chat_id AND am.message_id = ar.message_id)
+"""
+
+# The fleet-wide alert claim's statements (alert_claims.py), shared verbatim by
+# both backends with named parameters; pg.py rewrites `:name` as `%(name)s`.
+# Each write is one conditional statement and its rowcount is the answer, so
+# two workers asking about one listing at the same moment cannot both win.
+ALERT_CLAIM_SQL = {
+    "insert": """
+        INSERT INTO alert_claims
+            (marketplace, listing_id, worker_id, price, price_value, claimed_at)
+        VALUES (:marketplace, :listing_id, :worker_id, :price, :price_value, :claimed_at)
+        ON CONFLICT (marketplace, listing_id) DO NOTHING
+    """,
+    # Back to its own holder (a failed send, retried), or to anyone once the
+    # holder has been silent past the lease.
+    "retake": """
+        UPDATE alert_claims
+        SET worker_id = :worker_id, price = :price, price_value = :price_value,
+            claimed_at = :claimed_at
+        WHERE marketplace = :marketplace AND listing_id = :listing_id
+          AND delivered_at IS NULL
+          AND (worker_id = :worker_id OR claimed_at < :stale_before)
+    """,
+    "drop": """
+        UPDATE alert_claims
+        SET worker_id = :worker_id, price = :price, price_value = :price_value,
+            claimed_at = :claimed_at, delivered_at = NULL
+        WHERE marketplace = :marketplace AND listing_id = :listing_id
+          AND delivered_at IS NOT NULL AND price_value > :price_value
+    """,
+    # A row seeded from alert_messages carries no price; the first one seen
+    # afterwards is what a later drop is measured against.
+    "baseline": """
+        UPDATE alert_claims SET price = :price, price_value = :price_value
+        WHERE marketplace = :marketplace AND listing_id = :listing_id
+          AND price_value IS NULL
+    """,
+    "delivered": """
+        UPDATE alert_claims SET delivered_at = :delivered_at
+        WHERE marketplace = :marketplace AND listing_id = :listing_id
+          AND worker_id = :worker_id AND delivered_at IS NULL
+    """,
+    "get": """
+        SELECT * FROM alert_claims
+        WHERE marketplace = :marketplace AND listing_id = :listing_id
+    """,
+}
+
+# Alerts sent before claims existed. Without it the first sighting after the
+# deploy of a listing another worker alerted yesterday is a first claim, and
+# alerts again. It runs on boot but does its work only while alert_claims is
+# empty: once claims are in use every alert makes one, and alert_messages is
+# never pruned, so re-aggregating it on each boot would only grow.
+SEED_ALERT_CLAIMS_SQL = """
+    INSERT INTO alert_claims (marketplace, listing_id, worker_id, claimed_at, delivered_at)
+    SELECT 'facebook', listing_id, MIN(worker_id), MIN(sent_at), MIN(sent_at)
+    FROM alert_messages
+    WHERE listing_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM alert_claims)
+    GROUP BY listing_id
+    ON CONFLICT (marketplace, listing_id) DO NOTHING
 """
 
 
@@ -766,6 +847,7 @@ class Database:
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_threads_topic ON threads(telegram_topic_id)"
             )
+            self._conn.execute(SEED_ALERT_CLAIMS_SQL)
             self._conn.commit()
 
     def _migrate_workers(self: "Database") -> None:
@@ -1113,15 +1195,37 @@ class Database:
         return dict(row) if row else None
 
     def mark_outbound(
-        self: "Database", outbound_id: int, status: str, error: str | None = None
-    ) -> None:
+        self: "Database",
+        outbound_id: int,
+        status: str,
+        error: str | None = None,
+        permanent: bool = False,
+    ) -> str:
+        """Record a delivery attempt; returns the row's resulting status.
+
+        A failure keeps the row queued until OUTBOUND_MAX_ATTEMPTS, so a reply
+        whose send was merely not confirmed gets another go, unless the client
+        says the failure is permanent (a selector that no longer matches will
+        not fix itself in three polls). A failure never demotes a row already
+        marked sent: that would re-send a reply the seller has.
+        """
         with self.cursor() as cur:
-            cur.execute(
-                "UPDATE outbound_messages SET status = ?, last_error = ?, "
-                "attempts = attempts + 1, sent_at = CASE WHEN ? = 'sent' THEN ? ELSE sent_at END "
-                "WHERE id = ?",
-                (status, error, status, utcnow(), outbound_id),
-            )
+            if status == "sent":
+                cur.execute(
+                    "UPDATE outbound_messages SET status = 'sent', last_error = ?, "
+                    "attempts = attempts + 1, sent_at = ? WHERE id = ?",
+                    (error, utcnow(), outbound_id),
+                )
+            else:
+                cur.execute(
+                    "UPDATE outbound_messages SET last_error = ?, attempts = attempts + 1, "
+                    "status = CASE WHEN ? OR attempts + 1 >= ? THEN 'failed' ELSE 'queued' END "
+                    "WHERE id = ? AND status <> 'sent'",
+                    (error, int(permanent), OUTBOUND_MAX_ATTEMPTS, outbound_id),
+                )
+            cur.execute("SELECT status FROM outbound_messages WHERE id = ?", (outbound_id,))
+            row = cur.fetchone()
+        return str(row["status"]) if row else status
 
     def count_autoreplies_since(self: "Database", since: str) -> int:
         """Auto-replies queued since `since` — the daily-cap denominator."""
@@ -1468,6 +1572,22 @@ class Database:
                 record,
             )
             return cur.rowcount > 0
+
+    def write_alert_claim(self: "Database", statement: str, params: Dict[str, Any]) -> bool:
+        """Run one `ALERT_CLAIM_SQL` write; True if it changed a row."""
+        with self.cursor() as cur:
+            cur.execute(ALERT_CLAIM_SQL[statement], params)
+            return cur.rowcount > 0
+
+    def get_alert_claim(
+        self: "Database", marketplace: str, listing_id: str
+    ) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute(
+                ALERT_CLAIM_SQL["get"], {"marketplace": marketplace, "listing_id": listing_id}
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
 
     def record_alert_reaction(
         self: "Database",
