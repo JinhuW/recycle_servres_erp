@@ -2,13 +2,13 @@
 id: RS-341
 title: Fix the dev-to-main review findings before the v1.310 release
 type: bug
-status: backlog
+status: done
 priority: P1
 created: 2026-10-21
 reporter: jinhu
 branch: code-review-dev-to
-pr:
-version:
+pr: 813
+version: v1.310.1
 related: []
 ---
 
