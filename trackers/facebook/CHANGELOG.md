@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.13.12] - 2026-10-21
+
 ### Fixed
 
 - **The messenger no longer sends a seller the same reply twice** (RS-341).
