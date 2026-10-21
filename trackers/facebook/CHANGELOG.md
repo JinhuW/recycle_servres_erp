@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.13.11] - 2026-10-20
+
 ### Fixed
 
 - **The token→session exchange uses the endpoint Facebook actually recognises**
