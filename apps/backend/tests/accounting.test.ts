@@ -260,6 +260,28 @@ describe('accounting', () => {
       && e.detail.changes?.some(ch => ch.field === 'commission_paid_by'))).toHaveLength(1);
   });
 
+  it('fills the payer once, and moves it with a corrected manager while it is still theirs', async () => {
+    const sofia = await loginAs(SOFIA);
+    const po = await donePO();
+    const payerOf = async () =>
+      (await api<{ order: { commissionPaidBy: PaidBy } }>('GET', `/api/orders/${po}`, { token: alex.token })).body.order.commissionPaidBy;
+    const patch = (id: string, body: Record<string, unknown>) =>
+      api<{ commissionPaidBy?: PaidBy }>('PATCH', `/api/accounting/entries/${id}`, { token: alex.token, body });
+    const id = await recorded(alex.token, base({ kind: 'commission', targetId: po }));
+    expect(await payerOf()).toMatchObject({ kind: 'manager', id: alex.user.id });
+
+    // Booked under the wrong manager: the correction carries the payer along.
+    expect((await patch(id, { managerId: sofia.user.id })).body.commissionPaidBy)
+      .toMatchObject({ kind: 'manager', id: sofia.user.id });
+    expect(await payerOf()).toMatchObject({ kind: 'manager', id: sofia.user.id });
+
+    // Cleared by hand on purpose, a later edit of the note leaves it cleared.
+    expect((await api('PUT', `/api/orders/${po}/commission-paid-by`, { token: alex.token, body: { userId: null } })).status).toBe(200);
+    expect((await patch(id, { note: 'typo fixed' })).body.commissionPaidBy).toBeUndefined();
+    expect((await patch(id, { managerId: alex.user.id })).body.commissionPaidBy).toBeUndefined();
+    expect(await payerOf()).toBeNull();
+  });
+
   it('leaves the payer alone when the company paid, or a bank row says so', async () => {
     const company = await donePO();
     expect((await api('PUT', `/api/orders/${company}/commission-paid-by`, { token: alex.token, body: { company: true } })).status).toBe(200);

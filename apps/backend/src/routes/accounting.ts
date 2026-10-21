@@ -494,6 +494,17 @@ async function fillPayerTx(
   return recordPayerTx(tx, f.targetId, actorId, payer, { userId: f.managerId, company: false });
 }
 
+// A corrected manager carries the payer along only while the PO still names
+// the entry's old manager — the payer that entry filled. One set by hand,
+// cleared on purpose, the company or a bank row stays as it is.
+async function movePayerTx(
+  tx: SqlLike, f: EntryFields, fromManagerId: string, actorId: string, payer: PayerRow | null,
+): Promise<CommissionPaidBy | undefined> {
+  if (!payer || !f.targetId) return undefined;
+  if (payer.commission_paid_by !== fromManagerId || payer.commission_paid_by_company || payer.commission_linked) return undefined;
+  return recordPayerTx(tx, f.targetId, actorId, payer, { userId: f.managerId, company: false });
+}
+
 const MISSING: Record<AccountingTargetType, string> = {
   po: 'purchase order not found', so: 'sell order not found', as: 'after-sales case not found',
 };
@@ -602,8 +613,11 @@ accounting.patch('/entries/:id', async (c) => {
     for (const k of EDITABLE) if (next[k] !== was[k]) changes[k] = { from: was[k], to: next[k] };
     if (Object.keys(changes).length === 0) return { kind: 'ok', paidBy: undefined };
 
+    // The payer is filled as the screenshot's is, once: when the entry comes
+    // to pay this PO's commission, not on every later edit of its note.
     const linkChanged = 'kind' in changes || 'targetId' in changes || 'direction' in changes;
-    const prepared = linkChanged || f.kind === 'commission'
+    const managerChanged = 'managerId' in changes && f.kind === 'commission';
+    const prepared = linkChanged || managerChanged
       ? await prepareTargetTx(tx, f) : { kind: 'ok' as const, payer: null };
     if (prepared.kind === 'missing') return prepared;
     await tx`
@@ -615,7 +629,10 @@ accounting.patch('/entries/:id', async (c) => {
       })}, updated_at = NOW()
       WHERE id = ${id}`;
     await writeEvent(tx, id, u.id, 'edited', { changes });
-    return { kind: 'ok', paidBy: await fillPayerTx(tx, f, u.id, prepared.payer) };
+    const paidBy = linkChanged ? await fillPayerTx(tx, f, u.id, prepared.payer)
+      : managerChanged ? await movePayerTx(tx, f, cur.manager.id, u.id, prepared.payer)
+      : undefined;
+    return { kind: 'ok', paidBy };
   });
 
   switch (outcome.kind) {

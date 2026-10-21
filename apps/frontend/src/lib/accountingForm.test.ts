@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { applyKind, initialForm, pickTarget, previewCny, toRequestBody } from './accountingForm';
-import { markDayStarts, phonePeriod, splitYuan, fmtCny, fmtSignedCny } from './accounting';
+import { markDayStarts, owedOnSale, phonePeriod, splitYuan, fmtCny, fmtSignedCny } from './accounting';
 
 const ME = '11111111-1111-1111-1111-111111111111';
 const TODAY = '2026-10-21';
@@ -96,5 +96,15 @@ describe('the book\'s built labels', () => {
     ];
     expect(keys.filter(k => !(k in I18N.en!))).toEqual([]);
     expect(keys.filter(k => !(k in zh))).toEqual([]);
+  });
+});
+
+describe('owedOnSale', () => {
+  it('counts what was booked on the order, not its cases\' refunds', () => {
+    const received = { kind: 'sale' as const, direction: 'in' as const, amountCny: 10_000 };
+    const refund = { kind: 'after_sales' as const, direction: 'out' as const, amountCny: 1_000 };
+    expect(owedOnSale(10_000, [received, refund])).toBe(0);
+    expect(owedOnSale(10_000, [{ ...received, amountCny: 6_000 }, refund])).toBe(4_000);
+    expect(owedOnSale(10_000, [])).toBe(10_000);
   });
 });

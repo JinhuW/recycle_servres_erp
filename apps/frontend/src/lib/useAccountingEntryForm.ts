@@ -62,6 +62,16 @@ export function useAccountingEntryForm(opts: {
     return [...managerOptions, entry.manager];
   }, [managerOptions, entry]);
 
+  // A preset can name a manager who is no longer active (one still holding a
+  // balance, a sale's receiver since deactivated). The select can't show them
+  // and the save would be refused, so a new entry falls back to whoever is
+  // recording it.
+  const meId = user?.id ?? '';
+  useEffect(() => {
+    if (entry || managerOptions.length === 0 || form.managerId === meId) return;
+    if (!managerOptions.some(m => m.id === form.managerId)) setForm(f => ({ ...f, managerId: meId }));
+  }, [entry, managerOptions, form.managerId, meId]);
+
   const edit = (next: (f: EntryForm) => EntryForm) => { setForm(next); setError(null); };
   // An entry whose record was deleted keeps its kind with no link.
   const orphan = !!entry && !entry.target && form.kind === entry.kind;
