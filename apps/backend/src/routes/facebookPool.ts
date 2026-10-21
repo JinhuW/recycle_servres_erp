@@ -383,6 +383,9 @@ pool.put('/:no', async (c) => {
   const body = (await c.req.json().catch(() => null)) as { draft?: unknown } | null;
   const draft = readDraft(body?.draft);
   if (!draft) return c.json({ error: 'Invalid account' }, 400);
+  // A bundle built before the token field sends none; that keeps the stored
+  // token instead of erasing it. An empty string still clears it.
+  const tokenSent = typeof (body?.draft as Record<string, unknown>).token === 'string';
   const sql = getDb(c.env);
   const user = c.var.user;
   const key = c.var.key;
@@ -402,7 +405,7 @@ pool.put('/:no', async (c) => {
         uid = ${draft.uid}, password_enc = ${s.password_enc}, totp_enc = ${s.totp_enc},
         email = ${draft.email}, email_password_enc = ${s.email_password_enc},
         recovery_email = ${draft.recovery}, cookie_enc = ${s.cookie_enc}, cookie_uid = ${s.cookie_uid},
-        token_enc = ${s.token_enc},
+        token_enc = ${tokenSent ? s.token_enc : cur.token_enc},
         cookie_at = ${cookieUnchanged ? cur.cookie_at : draft.cookie ? tx`NOW()` : null},
         note = ${draft.note}, status = ${draft.status},
         holder_user_id = ${holderId}, holder_name = ${draft.holder},

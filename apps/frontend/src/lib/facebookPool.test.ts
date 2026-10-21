@@ -94,11 +94,13 @@ describe('supplier account import', () => {
       parsePoolImport(row.replace(`c_user=${uid}`, 'c_user=61550000000000'), [])[0].warnings,
     ).toContain('fpCookieMismatch');
   });
-  it('warns when a token is not an EAA… access token', () => {
-    const bad = `${uid}|password|JBSWY3DPEHPK3PXP|a@b.example|mp||c_user=${uid}; xs=demo|not-a-token`;
-    expect(parsePoolImport(bad, [])[0].warnings).toContain('fpTokenMalformed');
-    const good = `${uid}|password|JBSWY3DPEHPK3PXP|a@b.example|mp||c_user=${uid}; xs=demo|EAAgood`;
-    expect(parsePoolImport(good, [])[0].warnings).not.toContain('fpTokenMalformed');
+  it('reads the older layout, with the note right after the cookie, as a note', () => {
+    const older = `${uid}|password|JBSWY3DPEHPK3PXP|a@b.example|mp||c_user=${uid}; xs=demo|Aged 2y, Marketplace on`;
+    const [r] = parsePoolImport(older, []);
+    expect(r.draft).toMatchObject({ token: '', note: 'Aged 2y, Marketplace on' });
+    expect(r.warnings).not.toContain('fpTokenMalformed');
+    const blank = `${uid}|password|JBSWY3DPEHPK3PXP|a@b.example|mp||c_user=${uid}; xs=demo||Aged 2y`;
+    expect(parsePoolImport(blank, [])[0].draft).toMatchObject({ token: '', note: 'Aged 2y' });
   });
 });
 describe('supplier order sheet with a header row', () => {
@@ -135,6 +137,31 @@ describe('supplier order sheet with a header row', () => {
     ].join('\n');
     const [r] = parsePoolImport(csv, []);
     expect(r.draft).toMatchObject({ uid, token: 'EAAx', note: 'aged, trusted' });
+    expect(r.errors).toEqual([]);
+  });
+
+  it('reads a second password column after the e-mail as the mailbox password', () => {
+    const csv = ['账号,密码,邮箱,密码', `${uid},FbPw,nora@outlook.example,MailPw`].join('\n');
+    const [r] = parsePoolImport(csv, []);
+    expect(r.draft).toMatchObject({ password: 'FbPw', email: 'nora@outlook.example', emailPassword: 'MailPw' });
+    expect(r.errors).toEqual([]);
+  });
+
+  it('refuses rows when two columns name one field instead of keeping either', () => {
+    const csv = ['UID,Password,Pass', `${uid},first,second`, `61556203481174,only,`].join('\n');
+    const [twice, once] = parsePoolImport(csv, []);
+    expect(twice.errors).toContain('fpRepeatedColumn');
+    expect(twice.draft.password).toBe('first');
+    expect(once.errors).toEqual([]);
+  });
+
+  it('splits every row on the header\'s delimiter, whatever its cells hold', () => {
+    const csv = [
+      'UID,Password,Cookie,Notes',
+      `${uid},pw,"c_user=${uid}; xs=s","aged | trusted ---- old"`,
+    ].join('\n');
+    const [r] = parsePoolImport(csv, []);
+    expect(r.draft).toMatchObject({ uid, password: 'pw', note: 'aged | trusted ---- old' });
     expect(r.errors).toEqual([]);
   });
 

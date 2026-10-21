@@ -118,6 +118,8 @@ describe('OpenRouter model catalogue (/api/ai/models)', () => {
       const r = await api<{ error: string }>('GET', '/api/ai/models', { token });
       expect(r.status, JSON.stringify(answer)).toBe(502);
       expect(r.body.error).toMatch(/OpenRouter/);
+      // The browser must not answer the user's retry from a cached failure.
+      expect(r.headers.get('cache-control')).toBeNull();
     }
   });
 

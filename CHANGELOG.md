@@ -17,6 +17,40 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.310.1] - 2026-10-21
+
+Fixes from the xhigh review of the dev → main release (RS-341), so the
+release carries none of what it found.
+
+- **Facebook account pool.** A supplier row in the older positional layout,
+  with the note right after the cookie, now imports that note as a note.
+  Before, it landed in the new token column, was sealed and travelled with
+  every Assign. In a header-mapped sheet, a second Password column after the
+  e-mail is the mailbox's, and any other repeated column refuses its rows.
+  Before, the later column overwrote the earlier one without a word, and a
+  sheet headed 账号,密码,邮箱,密码 stored the mailbox password as the
+  Facebook one. Every row splits on the header's delimiter, so a quoted cell
+  holding `|` no longer splits the row. An edit from a tab still running the
+  pre-release bundle, which sends no token field, keeps the stored access
+  token instead of erasing it.
+- **Reddit tracker model.** The live-model and trial-model dialogs save only
+  a model OpenRouter's catalogue lists with strict JSON output. Before, any
+  id of the right shape went through, and a model that answers in prose makes
+  every evaluation fail.
+- **Commission Paid by.** Migration 0192 takes back 0189's guess where a live
+  bank row is linked as the commission, which the upload route deliberately
+  leaves empty, unless someone has set Paid by since. Without it, unlinking
+  that row later would have shown a manager who never paid.
+- **Smaller fixes.** Sell-order file uploads and removals filter as Added /
+  Removed on the Activity page instead of Edited. A price typed as `12,50` is
+  refused instead of saved as 1250. A Box Check line priced 0 shows the
+  market ghost, and Enter takes it. A failed `/api/ai/models` load is no
+  longer cached by the browser for a minute.
+
+The same review's tracker findings ship as facebook-tracker 0.13.12: the
+messenger can no longer send a seller the same reply more than once, or two
+texts run together.
+
 ## [1.310.0] - 2026-10-21
 
 A new **Accounting** page keeps the managers' own book of money received and

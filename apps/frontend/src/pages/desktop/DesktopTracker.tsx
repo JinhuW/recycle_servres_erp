@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { Modal } from '../../components/Modal';
-import { ModelPicker } from '../../components/ModelPicker';
+import { ModelPicker, useAiModels } from '../../components/ModelPicker';
 import { Skeleton } from '../../components/Skeleton';
 import { ApiError } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
@@ -9,8 +9,8 @@ import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import {
   EVALUATOR_MODEL,
+  evaluatorModelProblem,
   MIN_POLL_INTERVAL_S,
-  MODEL_ID,
   normalizeSubredditName,
   trackerApi,
   WORKERS_PAGE_SIZE,
@@ -846,9 +846,14 @@ function ModelModal({ model, onClose, onSaved, onError }: {
   const { t } = useT();
   const [value, setValue] = useState(model);
   const [saving, setSaving] = useState(false);
+  const { models } = useAiModels();
   const next = value.trim();
-  const valid = MODEL_ID.test(next);
-  const canSave = valid && next !== model;
+  const problem = evaluatorModelProblem(next, models);
+  const hint = next === '' ? null
+    : problem === 'shape' ? t('trkModelInvalid')
+    : problem === 'unlisted' ? t('trkModelUnlisted')
+    : null;
+  const canSave = problem === null && next !== model;
 
   function save() {
     if (!canSave || saving) return;
@@ -865,9 +870,9 @@ function ModelModal({ model, onClose, onSaved, onError }: {
         <div className="field">
           <label className="label" htmlFor="trk-model">{t('trkSetModel')}</label>
           <ModelPicker id="trk-model" value={value} onChange={setValue} filter={EVALUATOR_MODEL}
-            invalid={next !== '' && !valid} />
-          <span className={`help${next !== '' && !valid ? ' rt-help-invalid' : ''}`}>
-            {next !== '' && !valid ? t('trkModelInvalid') : t('trkModelHelp')}
+            invalid={hint !== null} unavailableText={t('trkModelsUnavailable')} />
+          <span className={`help${hint !== null ? ' rt-help-invalid' : ''}`}>
+            {hint ?? t('trkModelHelp')}
           </span>
         </div>
       </div>

@@ -44,6 +44,8 @@ class SendError(RuntimeError):
     """The reply could not be confirmed as sent."""
 
 
+# How long to wait for the thread's messages to render before typing.
+PANE_TIMEOUT_S = 10.0
 # How long to watch the pane for our own bubble after Enter, and how often.
 VERIFY_TIMEOUT_S = 15.0
 VERIFY_POLL_S = 0.5
@@ -51,11 +53,16 @@ VERIFY_POLL_S = 0.5
 PROBE_CHARS = 60
 
 ERR_COMPOSER_MISSING = "composer not found (selectors.py may need updating)"
+ERR_PANE_UNREAD = "thread messages could not be read before sending"
+ERR_DRAFT_STUCK = "composer holds an earlier draft that could not be cleared"
 ERR_NOT_SUBMITTED = "reply not submitted; composer cleared"
 ERR_NOT_SUBMITTED_UNCLEARED = "reply not submitted; composer could not be cleared"
 ERR_NOT_VISIBLE = "sent text did not appear as an outgoing bubble"
-# Failures another poll will not fix; the coordinator stops retrying these.
-PERMANENT_ERRORS = frozenset({ERR_COMPOSER_MISSING})
+# Failures the coordinator stops retrying: one another poll will not fix, and
+# one where the reply may well have posted (Messenger rewrote the text, or the
+# "You sent" label moved) — the next poll's already_sent() reads the pane the
+# same way, so a retry would send the seller a duplicate.
+PERMANENT_ERRORS = frozenset({ERR_COMPOSER_MISSING, ERR_NOT_VISIBLE})
 
 
 # Module state rather than a ledger file: replies are queued and acked on the
@@ -124,12 +131,31 @@ def reply_landed(
     )
 
 
-def _snapshot(page: Page) -> List[Dict[str, Any]]:
+def _snapshot(page: Page) -> Optional[List[Dict[str, Any]]]:
+    """The pane's rows, or None when they could not be read."""
     try:
         rows = page.evaluate(sel.EXTRACT_MESSAGES_JS)
     except Exception:
-        return []
-    return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+        return None
+    return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else None
+
+
+def _baseline(page: Page) -> Optional[List[Dict[str, Any]]]:
+    """The pane once it shows a message, or None if it never does in time.
+
+    Every Marketplace thread holds the message that opened it, so a pane
+    without one is still loading; a baseline taken then would let an older
+    identical bubble that renders later pass for the new reply, and would
+    blind already_sent().
+    """
+    deadline = time.monotonic() + PANE_TIMEOUT_S
+    while True:
+        rows = _snapshot(page)
+        if rows and any(looks_like_message(str(row.get("text") or "")) for row in rows):
+            return rows
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(VERIFY_POLL_S)
 
 
 def _composer_text(composer: Any) -> str:
@@ -185,10 +211,17 @@ def send_message(
         return True, None
 
     probe = make_probe(text)
-    before = _snapshot(page)
+    before = _baseline(page)
+    if before is None:
+        return False, ERR_PANE_UNREAD
     if already_sent(before, probe):
         logger.info("Thread %s already shows this reply; not sending it twice.", thread_id)
         return True, None
+
+    # Messenger keeps an unsent draft per thread, so typing into a leftover
+    # one (a retry after a failed clear) would send both texts as one.
+    if _composer_text(composer).strip() and not _clear_composer(page, composer):
+        return False, ERR_DRAFT_STUCK
 
     composer.click()
     human_pause(0.5, 1.5)
@@ -199,7 +232,7 @@ def send_message(
 
     deadline = time.monotonic() + VERIFY_TIMEOUT_S
     while True:
-        if reply_landed(before, _snapshot(page), probe, _composer_text(composer)):
+        if reply_landed(before, _snapshot(page) or [], probe, _composer_text(composer)):
             logger.info("Replied in thread %s (%d chars).", thread_id, len(text))
             return True, None
         if time.monotonic() >= deadline:

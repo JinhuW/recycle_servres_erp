@@ -292,11 +292,11 @@ describe('Commission paid by', () => {
 describe('migration 0189 backfills Paid by from the commission screenshot', () => {
   beforeEach(async () => { await resetDb(); });
 
-  const replay = async () => {
-    const sqlText = readFileSync(
-      fileURLToPath(new URL('../migrations/0189_backfill_commission_paid_by.sql', import.meta.url)), 'utf8');
+  const run = async (file: string) => {
+    const sqlText = readFileSync(fileURLToPath(new URL(`../migrations/${file}`, import.meta.url)), 'utf8');
     await getTestDb().unsafe(sqlText);
   };
+  const replay = () => run('0189_backfill_commission_paid_by.sql');
   // A screenshot as an older release stored it: no payer written beside it.
   const oldShot = async (id: string, by: string, minutesAgo: number) => {
     await getTestDb()`
@@ -339,5 +339,48 @@ describe('migration 0189 backfills Paid by from the commission screenshot', () =
       SELECT actor_id, detail FROM order_events
       WHERE order_id = ${empty.id} AND kind = 'meta_changed'`;
     expect(ev).toMatchObject({ actor_id: sofia.user.id, detail: { backfilled: true } });
+  });
+
+  it('0192 takes the guess back where a bank row pays the commission', async () => {
+    const linked = await doneOrder();
+    const unlinked = await doneOrder();
+    const { alex } = linked;
+    const sofia = await loginAs(SOFIA);
+    await oldShot(linked.id, sofia.user.id, 10);
+    await oldShot(unlinked.id, sofia.user.id, 10);
+    await replay();
+    await linkCommission(alex.token, linked.id);
+
+    await run('0192_unbackfill_linked_commission_payer.sql');
+    await run('0192_unbackfill_linked_commission_payer.sql');
+
+    const [row] = await getTestDb()<{ commission_paid_by: string | null }[]>`
+      SELECT commission_paid_by FROM orders WHERE id = ${linked.id}`;
+    expect(row.commission_paid_by).toBeNull();
+    const sofiaName = await nameOf(sofia.user.id);
+    const changes = await paidByChanges(alex.token, linked.id);
+    expect(changes).toHaveLength(2);
+    expect(changes).toEqual(expect.arrayContaining([
+      { field: 'commission_paid_by', from: null, to: sofiaName },
+      { field: 'commission_paid_by', from: sofiaName, to: null },
+    ]));
+    expect(await paidByOf(alex.token, unlinked.id)).toMatchObject({ kind: 'manager', id: sofia.user.id });
+  });
+
+  it('0192 keeps a payer someone has set by hand since the backfill', async () => {
+    const order = await doneOrder();
+    const { alex } = order;
+    const sofia = await loginAs(SOFIA);
+    await oldShot(order.id, sofia.user.id, 10);
+    await replay();
+    expect((await setPaidBy(alex.token, order.id, { userId: alex.user.id })).status).toBe(200);
+    expect((await setPaidBy(alex.token, order.id, { userId: sofia.user.id })).status).toBe(200);
+    await linkCommission(alex.token, order.id);
+
+    await run('0192_unbackfill_linked_commission_payer.sql');
+
+    const [row] = await getTestDb()<{ commission_paid_by: string | null }[]>`
+      SELECT commission_paid_by FROM orders WHERE id = ${order.id}`;
+    expect(row.commission_paid_by).toBe(sofia.user.id);
   });
 });

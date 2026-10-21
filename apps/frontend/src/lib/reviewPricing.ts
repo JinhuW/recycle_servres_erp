@@ -99,11 +99,14 @@ export function lineMargin(sellPrice: number | null | undefined, unitCost: numbe
 
 // What a typed price means: blank clears, anything else must be a number of
 // 0 or more (0 is how a line is unpriced, shared/sellPrice). Undefined is a
-// value the field refuses to save.
+// value the field refuses to save. A comma counts only as a thousands
+// separator (1,250.00): anywhere else it may be a decimal comma, and reading
+// 12,50 as 1250 would price the line a hundred times over.
 export function parsePriceInput(raw: string): number | null | undefined {
-  const s = raw.trim().replace(/^\$/, '').replace(/,/g, '');
+  const s = raw.trim().replace(/^\$/, '');
   if (s === '') return null;
-  const n = Number(s);
+  if (s.includes(',') && !/^\d{1,3}(,\d{3})+(\.\d*)?$/.test(s)) return undefined;
+  const n = Number(s.replace(/,/g, ''));
   if (!Number.isFinite(n) || n < 0) return undefined;
   return Math.round(n * 100) / 100;
 }
