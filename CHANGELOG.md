@@ -17,6 +17,19 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.310.2] - 2026-10-21
+
+Fixes from the review of the new Accounting page (RS-342), which reached
+`dev` after the release review had run. A commission entry fills the PO's
+Paid by once, when it comes to pay that commission. Before, every later save
+re-filled it, so a payer a manager had cleared on purpose came back with a
+fix to the entry's note. Correcting the entry's manager now moves Paid by
+along with it, while Paid by still names the old manager. A preset naming a
+manager no longer active (a sale's receiver since deactivated) opens the
+form on the manager recording it, instead of a select showing someone else
+and a save refused. The sale card's suggested receipt no longer counts a
+case's refund as money the buyer still owes.
+
 ## [1.310.1] - 2026-10-21
 
 Fixes from the xhigh review of the dev → main release (RS-341), so the

@@ -256,7 +256,11 @@ is not a stage but a flag beside one, set once every line has sold
   manager the same way** (v1.310.0): a Paid commission entry on the PO fills
   Paid by with the entry's manager while nobody is on file, the company isn't
   recorded and no bank row is linked as the commission. A payer already on
-  file stays, and voiding or moving the entry never clears it. The tab shows
+  file stays, and voiding or moving the entry never clears it. Since v1.310.2
+  the fill happens once, when the entry comes to pay this PO's commission.
+  Later edits leave a payer cleared on purpose alone. Correcting the entry's
+  manager moves Paid by with it, but only while Paid by still names the old
+  manager. The tab shows
   the new payer at once. Files write through as they are dropped and a
   confirmed pick as it is made — managers at any stage, closed book included
   — and purchasers see both read-only. Under the drop box, managers also see the
@@ -1463,7 +1467,9 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
 - **The managers' RMB receipts sit under them** (v1.310.0): an *Accounting*
   card with the order's Sale entries and its cases' refunds, the net received
   against the order total, and *Record receipt*, which starts on the payment
-  receiver. See [Accounting](#accounting).
+  receiver. A receiver no longer active falls back to the manager recording
+  it (v1.310.2). Its suggested amount is what the order itself still lacks,
+  so a case's refund no longer reads as owed. See [Accounting](#accounting).
 - **The desktop list flags an order with internal notes** (v1.239.0): a note
   icon beside the customer on each row whose note isn't blank.  Hovering or
   tabbing to it shows the note in a card (line breaks kept, clamped at 14

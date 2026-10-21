@@ -138,6 +138,18 @@ export function markDayStarts(rows: readonly { occurredOn: string }[]): boolean[
 export const signedCny = (e: Pick<AcctEntry, 'direction' | 'amountCny'>) =>
   e.direction === 'in' ? e.amountCny : -e.amountCny;
 
+/**
+ * What a CNY sell order still has to bring in: its total less what was booked
+ * on the order itself. A case's refund settles the case; it doesn't reopen
+ * what the buyer owes.
+ */
+export function owedOnSale(
+  amount: number, entries: readonly Pick<AcctEntry, 'kind' | 'direction' | 'amountCny'>[],
+): number {
+  const paid = entries.filter(e => e.kind === 'sale').reduce((sum, e) => sum + signedCny(e), 0);
+  return Math.round((amount - paid) * 100) / 100;
+}
+
 // ── Dates ───────────────────────────────────────────────────────────────────
 
 // The book's dates are calendar dates as the manager typed them, so "today"

@@ -7,7 +7,7 @@ import { useT } from '../../../lib/i18n';
 import { showSuccessToast } from '../../../lib/errorToast';
 import { fmtMoney } from '../../../lib/format';
 import { accountingEntryPath } from '../../../lib/route';
-import { fmtBookDay, signedCny, type AcctScope } from '../../../lib/accounting';
+import { fmtBookDay, owedOnSale, signedCny, type AcctScope } from '../../../lib/accounting';
 import { useAccountingTarget } from '../../../lib/useAccountingTarget';
 import type { SavedEntry } from '../../../lib/useAccountingEntryForm';
 import type { EntryPreset } from '../../../lib/accountingForm';
@@ -43,7 +43,7 @@ export function AccountingCard({ scope, className, managerId, onRecorded }: {
   const { target } = ledger;
   // Money a CNY order still has to bring in is the obvious amount to book.
   const owed = target.currency === 'CNY' && target.amount != null && kind === 'sale'
-    ? Math.round((target.amount - ledger.net) * 100) / 100 : 0;
+    ? owedOnSale(target.amount, ledger.entries) : 0;
   const preset: EntryPreset = {
     kind, target, managerId: managerId ?? undefined, ...(owed > 0 ? { amount: owed } : {}),
   };
