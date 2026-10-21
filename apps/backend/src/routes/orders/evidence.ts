@@ -1,6 +1,5 @@
 // Per-status evidence (notes, attachments) and line photos.
 import { Hono } from 'hono';
-import { commissionLinkedFrag } from '../../banktx/match';
 import { getDb } from '../../db';
 import { uploadAttachment, deleteAttachment, StorageUnavailableError } from '../../r2';
 import { UUID_RE } from '../../lib/pagination';
@@ -15,7 +14,7 @@ import { extractPaypalTxn } from '../../ai/paypal';
 import { maybeRenameReceipt, suffixFilename } from '../../ai/receipt';
 import { shrinkImageToFit } from '../../lib/image-shrink';
 import { log } from '../../lib/log';
-import { type CommissionPaidBy, type OrdersEnv, commissionPaidByOf } from './shared';
+import { type CommissionPaidBy, type OrdersEnv, commissionPaidByOf, lockPayerTx, recordPayerTx } from './shared';
 import { OrderRefusal, refusalResponse } from './refusal';
 
 const evidenceRoutes = new Hono<OrdersEnv>();
@@ -307,56 +306,12 @@ evidenceRoutes.delete('/:id/status-meta/:status/attachments/:attachmentId', asyn
 // ─── Commission paid by ────────────────────────────────────────────────────
 // Who paid the purchaser their commission — a manager in person or the
 // company's account. The manager who uploads the commission screenshot is
-// taken to have paid it when nobody is on file yet (the upload route above);
+// taken to have paid it when nobody is on file yet (the upload route above),
+// as is the manager an Accounting commission entry names (routes/accounting.ts);
 // otherwise the pages ask that manager whether to take it over, and a pick
 // by hand goes through the PUT below. A bank payment linked as the
 // commission already says the company paid, so neither writes while one
 // stands.
-
-type PayerRow = {
-  commission_paid_by: string | null;
-  commission_paid_by_name: string | null;
-  commission_paid_by_company: boolean;
-  commission_linked: boolean;
-};
-
-// The order's payer, locked for the caller's write.
-async function lockPayerTx(tx: SqlLike, id: string): Promise<PayerRow | undefined> {
-  return (await tx`
-    SELECT o.commission_paid_by, cpb.name AS commission_paid_by_name, o.commission_paid_by_company,
-           ${commissionLinkedFrag(tx)} AS commission_linked
-    FROM orders o LEFT JOIN users cpb ON cpb.id = o.commission_paid_by
-    WHERE o.id = ${id} LIMIT 1 FOR NO KEY UPDATE OF o
-  `)[0] as PayerRow | undefined;
-}
-
-// Records a payer that the caller has already ruled allowed (no link standing).
-// Names, not ids, in the event, as owner_changed and the handoff's handoff_by
-// do: the timeline reads the manager as they were when it was recorded.
-async function recordPayerTx(
-  tx: SqlLike, id: string, actorId: string, from: PayerRow,
-  to: { userId: string | null; company: boolean },
-): Promise<CommissionPaidBy> {
-  const toName = to.userId === null ? null
-    : to.userId === from.commission_paid_by ? from.commission_paid_by_name
-    : ((await tx`SELECT name FROM users WHERE id = ${to.userId}`)[0]?.name as string | undefined) ?? null;
-  if (from.commission_paid_by !== to.userId || from.commission_paid_by_company !== to.company) {
-    await tx`
-      UPDATE orders SET commission_paid_by = ${to.userId}, commission_paid_by_company = ${to.company}
-      WHERE id = ${id}`;
-    await writeOrderEvent(tx, id, actorId, 'meta_changed', {
-      changes: [{
-        field: 'commission_paid_by',
-        from: from.commission_paid_by_company ? 'Company' : from.commission_paid_by_name,
-        to: to.company ? 'Company' : toName,
-      }],
-    });
-  }
-  return commissionPaidByOf({
-    commission_paid_by: to.userId, commission_paid_by_name: toName,
-    commission_paid_by_company: to.company, commission_linked: false,
-  });
-}
 
 // A pick by hand: `{ userId }` names a manager, or clears it as null;
 // `{ company: true }` records the company. Its own endpoint, open at every

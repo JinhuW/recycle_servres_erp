@@ -17,6 +17,33 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.310.0] - 2026-10-21
+
+A new **Accounting** page keeps the managers' own book of money received and
+paid, in RMB (RS-340). Payments only reconciles the company's USD bank
+accounts, so a supplier paid by Alipay, a purchaser's commission sent over
+WeChat or a customer's bank transfer in yuan had nowhere to be written down.
+Each entry says received or paid, how much (¥, or $ at the rate it was booked
+at), how, when, through which manager, and what it was for — a PO's goods or
+its commission, a sell order, an after-sales case, or nothing in particular.
+
+The page states the period the way a book carries a page forward — opening +
+received − paid = closing — with the breakdown by kind and each manager's
+balance under it, so it answers both "what moved this month" and "who is
+holding the company's money". The book lists received, paid and a running
+balance in their own columns; its filters hide rows but never change a
+balance. Entries are edited with a history and voided with a reason rather
+than deleted.
+
+The PO's Cost Payment and Commission tabs, the sell order and the after-sales
+case each gain an Accounting card listing what the book has against them,
+with a Record button that already names the record; the sell order's card
+includes its cases' refunds. A commission booked there fills the PO's *Paid
+by* when nobody is on file, by the same rule the commission screenshot
+follows. The phone has the book too — a Home link, the period as a vertical
+sum, the entries by day — and the phone PO page's folds carry the order's
+entries.
+
 ## [1.309.0] - 2026-10-20
 
 The Fleet tab's workers table is one row per worker again, and the proxy is a

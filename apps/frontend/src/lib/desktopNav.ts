@@ -50,6 +50,7 @@ export const DESKTOP_NAV: readonly NavGroup[] = [
     items: [
       { id: 'activity',   tKey: 'nav_activity',   icon: 'clock',      roles: ['manager'] },
       { id: 'payments',   tKey: 'nav_payments',   icon: 'dollar',     roles: ['manager'], alsoActiveOn: ['internaltx'] },
+      { id: 'accounting', tKey: 'nav_accounting', icon: 'cash',       roles: ['manager'] },
       {
         tKey: 'nav_monitors',
         icon: 'eye',

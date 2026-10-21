@@ -40,6 +40,9 @@ import { lookbackFacts, type StageId } from '../lib/orderLookback';
 import { LIFECYCLE_LABEL, poStageName } from '../lib/orderPresentation';
 import { readStageMoved } from '../lib/boxCheck';
 import { PackageJourney } from './desktop/PackageJourney';
+import { PhAccountingSection } from '../components/PhAccountingSection';
+import { PhAccountingSheet } from '../components/PhAccountingSheet';
+import type { EntryPreset } from '../lib/accountingForm';
 import { fmtDate } from '../lib/format';
 import { useOrderEvents } from '../lib/useOrderEvents';
 import { ApiError } from '../lib/api';
@@ -129,6 +132,11 @@ export function OrderDetail({
   const isPurchaser = user?.role !== 'manager';
   // The final-sell row follows the role-preview tweak, like the API does.
   const showFinalSell = useEffectiveUser()?.role === 'manager';
+  // The managers' RMB book shows on the same terms as the final sell price.
+  const showAccounting = showFinalSell;
+  // Opened from a fold; the sheet itself sits at the screen's root.
+  const [acctPreset, setAcctPreset] = useState<EntryPreset | null>(null);
+  const [acctVersion, setAcctVersion] = useState(0);
   // Edit rights, the same rule the desktop editor uses (lib/poPermissions.ts).
   const {
     effectiveStatus, isArchived, orderLocked, canEditOrder, revertOnSave,
@@ -1442,6 +1450,9 @@ export function OrderDetail({
             canEditProof={canAnnotate}
             idPrefix="ph"
           />
+          {showAccounting && (
+            <PhAccountingSection orderId={order.id} kind="purchase" version={acctVersion} onRecord={setAcctPreset} />
+          )}
         </PhFold>
 
         <PhFold
@@ -1467,6 +1478,9 @@ export function OrderDetail({
           <div className="ph-pay">
             <CommissionPaymentFields paidBy={commissionPaidBy} shots={commissionShots} editable={!isPurchaser} />
           </div>
+          {showAccounting && (
+            <PhAccountingSection orderId={order.id} kind="commission" version={acctVersion} onRecord={setAcctPreset} />
+          )}
         </PhFold>
 
         <PhFold
@@ -1877,6 +1891,22 @@ export function OrderDetail({
             if (takeoverAnswer) await doAdvance(takeoverAnswer);
           }}
           onMutated={() => setActivityRefreshKey(k => k + 1)}
+        />
+      )}
+      {acctPreset && (
+        <PhAccountingSheet
+          preset={acctPreset}
+          onClose={() => setAcctPreset(null)}
+          onSaved={r => {
+            setAcctPreset(null);
+            setAcctVersion(v => v + 1);
+            onSaved(t('acctRecordedToast', { id: r.id }));
+            // A commission entry names its manager as the payer when nobody was on file.
+            if (r.commissionPaidBy !== undefined) {
+              commissionPaidBy.sync(r.commissionPaidBy);
+              setActivityRefreshKey(k => k + 1);
+            }
+          }}
         />
       )}
       <CommissionPaidByConfirm paidBy={commissionPaidBy} />

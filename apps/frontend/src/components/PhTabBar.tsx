@@ -3,7 +3,7 @@ import { useT } from '../lib/i18n';
 import { useEffectiveUser } from '../lib/tweaks';
 import { MOBILE_VIEW_TO_PATH, hrefFor, onLinkClick, type MobileViewId } from '../lib/route';
 
-export type View = 'dashboard' | 'history' | 'submit' | 'shipping' | 'market' | 'inventory' | 'me';
+export type View = 'dashboard' | 'history' | 'submit' | 'shipping' | 'market' | 'inventory' | 'accounting' | 'me';
 
 type Props = {
   view: View;

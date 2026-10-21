@@ -18,6 +18,7 @@ import { Orders } from './pages/Orders';
 import { OrderDetail, type OrderMetaDraft, type ProductsLanding } from './pages/OrderDetail';
 import { Market } from './pages/Market';
 import { Inventory } from './pages/Inventory';
+import { Accounting } from './pages/Accounting';
 import { Profile } from './pages/Profile';
 import { ShareTarget } from './pages/ShareTarget';
 import { MobileShipping } from './pages/Shipping';
@@ -236,13 +237,15 @@ function Shell() {
   // Add / focus / wizard-handoff are focused task screens like the order
   // detail: the header's back button is the way out, not the tab bar.
   const shippingTaskOpen = !!shippingRoute && shippingRoute.kind !== 'dashboard';
+  // One Accounting entry is a focused screen too.
+  const accountingEntryOpen = view === 'accounting' && !!match('/accounting/:id', path);
 
   // The walkthrough points at the tab bar, so it waits for a screen that has
   // one: not the capture flow, an order, or a shipping task.
   const walkthroughOpen = useWalkthroughOpen();
   useWalkthroughAutoStart(
     !loading && !!user && !pendingRoleChoice && capture.phase === 'idle'
-    && !orderDetailOpen && !shippingTaskOpen && !isAuthorizePath(path) && !path.startsWith('/share-target'),
+    && !orderDetailOpen && !shippingTaskOpen && !accountingEntryOpen && !isAuthorizePath(path) && !path.startsWith('/share-target'),
   );
 
   // The PWA's Submit shortcut and the share-target landing both arrive at
@@ -964,6 +967,7 @@ function Shell() {
       )}
       {view === 'market' && <Market />}
       {view === 'inventory' && <Inventory onNewEntry={startSubmit} />}
+      {view === 'accounting' && <Accounting showToast={showToast} />}
       {view === 'me' && (
         <Profile
           onOpenLanguage={() => setLangSheet(true)}
@@ -1020,11 +1024,11 @@ function Shell() {
           download, archive, delete — was covered by the nav and untappable.
           It is a focused task screen like the capture flow, and the header's
           back button is the way out of it. */}
-      {!orderDetailOpen && !shippingTaskOpen && (
+      {!orderDetailOpen && !shippingTaskOpen && !accountingEntryOpen && (
         <PhTabBar view={view} onCenterPress={startSubmit} />
       )}
 
-      {walkthroughOpen && !orderDetailOpen && !shippingTaskOpen && (
+      {walkthroughOpen && !orderDetailOpen && !shippingTaskOpen && !accountingEntryOpen && (
         <Suspense fallback={null}>
           <Walkthrough shell="phone" onStartOrder={() => { void startSubmit(); }} />
         </Suspense>

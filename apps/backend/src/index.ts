@@ -43,6 +43,7 @@ import customersRoutes from './routes/customers';
 import sellOrdersRoutes from './routes/sellOrders';
 import sellOrderPackRoutes from './routes/sellOrderPack';
 import afterSalesRoutes from './routes/afterSales';
+import accountingRoutes from './routes/accounting';
 import inventoryRoutes from './routes/inventory';
 import membersRoutes from './routes/members';
 import lookupsRoutes from './routes/lookups';
@@ -421,6 +422,8 @@ app.route('/api/facebook-pool', facebookPoolRoutes);
 // Same shape: self-applied authMiddleware + manager gate.
 app.route('/api/bank-transactions', bankTxRoutes);
 app.route('/api/internal-transactions', internalTxRoutes);
+// Same shape: self-applied authMiddleware + manager gate.
+app.route('/api/accounting', accountingRoutes);
 // Clients (buy-side counterparties). Deliberately NOT in CACHEABLE_PREFIXES:
 // like /api/warehouses this list is edited and re-read inside one user action,
 // and a 60s browser copy is what made a saved warehouse address look unsaved.

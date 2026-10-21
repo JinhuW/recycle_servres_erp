@@ -245,6 +245,19 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
             <Icon name="chevronRight" size={15} className="arrow" />
           </RouteLink>
         )}
+        {isManager && (
+          <RouteLink
+            to="/accounting"
+            className="ph-row"
+            style={{ width: '100%', marginTop: 8, fontFamily: 'inherit', textAlign: 'left', cursor: 'pointer' }}
+          >
+            <div className="ph-inv-thumb" style={{ width: 36, height: 36 }}>
+              <Icon name="cash" size={16} />
+            </div>
+            <div style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{t('homeAccountingLink')}</div>
+            <Icon name="chevronRight" size={15} className="arrow" />
+          </RouteLink>
+        )}
 
         {!isManager && myRank >= 0 && (
           <>
