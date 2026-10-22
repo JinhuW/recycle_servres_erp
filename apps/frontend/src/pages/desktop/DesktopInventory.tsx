@@ -1355,6 +1355,7 @@ const QV_KIND_ICON: Record<string, IconName> = {
   received: 'warehouse',
   reopened: 'history',
   sold: 'tag',
+  unsold: 'history',
 };
 
 function summarizeQvEvent(e: QvEvent, locale = 'en-US'): string {
@@ -1368,6 +1369,7 @@ function summarizeQvEvent(e: QvEvent, locale = 'en-US'): string {
     case 'received':    return `Received at ${String(d.at ?? '?')}`;
     case 'reopened':    return 'Transfer re-opened';
     case 'sold':        return `Sold${d.qty != null ? ` ${String(d.qty)}` : ''}`;
+    case 'unsold':      return `Sale reopened +${String(d.returnedQty ?? '?')}`;
     default:            return e.kind;
   }
 }

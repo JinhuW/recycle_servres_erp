@@ -145,16 +145,20 @@ export function CloseSellOrderDialog({ orderId, currentStatus, onCancel, onClose
 }
 
 // Mirrors CloseSellOrderDialog minus the structured reason picker. Reopen
-// (Closed → Draft) only needs a freeform note — the backend hard-requires
-// it inside the transaction. On success the parent re-fetches.
+// only needs a freeform note — the backend hard-requires it inside the
+// transaction. A Closed order goes back to Draft; a Done one to Awaiting
+// payment, holding the stock its sale hands back. On success the parent
+// re-fetches.
 type ReopenProps = {
   orderId: string;
+  from: 'Closed' | 'Done';
   onCancel: () => void;
   onReopened: () => void;
 };
 
-export function ReopenSellOrderDialog({ orderId, onCancel, onReopened }: ReopenProps) {
+export function ReopenSellOrderDialog({ orderId, from, onCancel, onReopened }: ReopenProps) {
   const { t } = useT();
+  const to = from === 'Done' ? 'Awaiting payment' : 'Draft';
   const [note, setNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -171,7 +175,7 @@ export function ReopenSellOrderDialog({ orderId, onCancel, onReopened }: ReopenP
     setError(null);
     try {
       await api.post(`/api/sell-orders/${orderId}/status`, {
-        to: 'Draft',
+        to,
         note: note.trim(),
       });
       onReopened();
@@ -204,12 +208,16 @@ export function ReopenSellOrderDialog({ orderId, onCancel, onReopened }: ReopenP
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--fg)' }}>{t('reopenSoTitle')}</div>
             <div style={{ fontSize: 13, color: 'var(--fg-subtle)', marginTop: 2 }}>
-              {t('reopenSoSub')}
+              {from === 'Done' ? t('reopenSoSubDone') : t('reopenSoSub')}
             </div>
             <div style={{ marginTop: 8, fontSize: 12, color: 'var(--fg-subtle)', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span className="chip muted" style={{ fontSize: 11 }}>{t('discardSoStatusClosed')}</span>
+              <span className="chip muted" style={{ fontSize: 11 }}>
+                {from === 'Done' ? t('lifecycleDone') : t('discardSoStatusClosed')}
+              </span>
               <Icon name="arrow" size={10} />
-              <span className="chip" style={{ fontSize: 11 }}>{t('reopenSoStatusDraft')}</span>
+              <span className="chip" style={{ fontSize: 11 }}>
+                {from === 'Done' ? t('lifecycleAwaiting') : t('reopenSoStatusDraft')}
+              </span>
             </div>
           </div>
           <button className="btn icon sm" onClick={onCancel} title={t('cancel')}>
@@ -225,7 +233,7 @@ export function ReopenSellOrderDialog({ orderId, onCancel, onReopened }: ReopenP
               rows={3}
               value={note}
               onChange={e => setNote(e.target.value)}
-              placeholder={t('reopenSoNotePlaceholder')}
+              placeholder={from === 'Done' ? t('reopenSoNotePlaceholderDone') : t('reopenSoNotePlaceholder')}
               style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
               autoFocus
             />

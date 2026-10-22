@@ -1597,10 +1597,13 @@ function SellOrderDetail({ id, mode, onToast }: {
                 <Icon name="box" size={14} /> {unarchiving ? t('soUnarchiving') : t('soUnarchive')}
               </button>
             )}
-            {/* Reopen is creator-only (backend 403s anyone else). Orders with
-                no creator (MCP-created) stay reopenable by any manager. */}
-            {order.status === 'Closed'
-              && (order.createdBy === null || order.createdBy === user?.id) && (
+            {/* Reopening a Closed order is creator-only (backend 403s anyone
+                else). Orders with no creator (MCP-created) stay reopenable by
+                any manager. A Done one is any manager's to reopen, but an
+                archived one is unarchived first (the backend 409s it). */}
+            {((order.status === 'Closed'
+                && (order.createdBy === null || order.createdBy === user?.id))
+              || (order.status === 'Done' && order.archivedAt === null)) && (
               <button
                 className="btn accent"
                 onClick={() => setShowReopenDialog(true)}
@@ -2345,11 +2348,13 @@ function SellOrderDetail({ id, mode, onToast }: {
       {showReopenDialog && order && (
         <ReopenSellOrderDialog
           orderId={order.id}
+          from={order.status === 'Done' ? 'Done' : 'Closed'}
           onCancel={() => setShowReopenDialog(false)}
           onReopened={() => {
             setShowReopenDialog(false);
-            // Stay on the order so the user can continue editing the now-Draft
-            // SO. refreshKey re-runs the GET so status/locked/header-strip flip.
+            // Stay on the order so the user can continue editing it, now Draft
+            // or Awaiting payment. refreshKey re-runs the GET so
+            // status/locked/header-strip flip.
             setRefreshKey(k => k + 1);
             setHistoryKey(k => k + 1);
           }}
