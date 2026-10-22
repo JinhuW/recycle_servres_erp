@@ -16,7 +16,10 @@ import { oauthGrantsTotal } from '../metrics';
 
 const CODE_TTL_SEC = 600;
 
-const KNOWN_SCOPES = new Set<string>(OAUTH_SCOPES);
+// wechat:write is memtrade's daily push, held by one service client a manager
+// mints. A self-registered connector has no use for it, so registration never
+// hands it out, even to a client that names no scope.
+const DCR_SCOPES = new Set<string>(OAUTH_SCOPES.filter(s => s !== 'wechat:write'));
 // The interactive code flow is role-ceilinged: a manager's consent can grant
 // any scope; a non-manager's yields market:read only (price lookup — their MCP
 // use case; sell-order data stays manager-only). Service clients still get any
@@ -210,9 +213,9 @@ oauth.post('/register', async (c) => {
   // silently hid the sell-order and write tools from every connector that
   // registered without asking, which reads as "the server only has two tools"
   // rather than as a permissions issue.
-  const requested = scopeIn?.split(' ').filter(Boolean) ?? [...KNOWN_SCOPES];
-  const scopes = requested.filter(s => KNOWN_SCOPES.has(s));
-  if (scopes.length === 0) scopes.push(...KNOWN_SCOPES);
+  const requested = scopeIn?.split(' ').filter(Boolean) ?? [...DCR_SCOPES];
+  const scopes = requested.filter(s => DCR_SCOPES.has(s));
+  if (scopes.length === 0) scopes.push(...DCR_SCOPES);
   // token_endpoint_auth_method: "none" = public client (PKCE only, no secret).
   // Honour it so the SDK that asked for it isn't handed a secret it'll discard.
   const authMethod = body.token_endpoint_auth_method === 'none' ? 'none'

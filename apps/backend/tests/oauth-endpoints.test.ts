@@ -205,6 +205,16 @@ describe('DCR /oauth/register', () => {
     );
   });
 
+  it('never registers a connector for wechat:write, asked for or not', async () => {
+    for (const scope of [undefined, 'market:read wechat:write']) {
+      const r = await api('POST', '/oauth/register', {
+        body: { client_name: 'wechat', redirect_uris: ['https://example.com/cb'], ...(scope ? { scope } : {}) },
+      });
+      expect(r.status).toBe(201);
+      expect(((r.body as Record<string, unknown>).scope as string).split(' ')).not.toContain('wechat:write');
+    }
+  });
+
   it('rejects DCR when OAUTH_DCR_OPEN=false', async () => {
     const prev = process.env.OAUTH_DCR_OPEN;
     process.env.OAUTH_DCR_OPEN = 'false';

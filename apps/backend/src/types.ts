@@ -117,6 +117,7 @@ export const OAUTH_SCOPES = [
   'market:write',
   'sellorder:read',
   'sellorder:write',
+  'wechat:write',
 ] as const;
 
 export type OAuthScope = typeof OAUTH_SCOPES[number];

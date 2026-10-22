@@ -43,6 +43,14 @@ contract, and both sides change together.
 | `/api/tracker/*` → `apps/backend/src/routes/tracker.ts` (allowlist: workers, rules, subreddits, matches, stats, prompt-stats, prompt-candidate, and the single setting `settings/llm_model`); UI `pages/desktop/DesktopTracker.tsx` + `lib/tracker.ts` | `trackers/reddit/src/api.ts`, Bearer `API_TOKEN` | `TRACKER_API_URL`, `TRACKER_API_TOKEN` | `apps/backend/tests/tracker-routes.test.ts` |
 | `/api/coordinator/*` → `routes/coordinator.ts`, noVNC relay `src/vncBridge.ts`; UI `DesktopCoordinator.tsx`, `FleetAccounts.tsx`, `FleetWatch.tsx` + `lib/coordinator.ts` | rs_console, `trackers/facebook/rs_console/`, at `fbc-api.recycleservers.com`, Bearer `RS_CONSOLE_TOKEN` + Cloudflare Access | `COORDINATOR_API_URL`, `COORDINATOR_API_TOKEN`, `COORDINATOR_ACCESS_CLIENT_ID` / `_SECRET` | `apps/backend/tests/coordinator-routes.test.ts` |
 
+One contract runs the other way. **memtrade** (on the office Mac, outside
+this repo, at `~/Projects/wehat_ai/memtrade`) pushes its daily WeChat market
+report to `/api/wechat-market/push/*` (`routes/wechatMarket.ts`) with a
+`wechat:write` service-client token. The payload is
+`packages/shared/src/wechatMarket.ts` on this side and memtrade's `src/erp.ts`
+on that one; test `apps/backend/tests/wechat-market.test.ts`. The ERP side has
+to keep accepting what the deployed memtrade sends.
+
 Some changes touch both sides of a contract: a new or reshaped tracker endpoint
 a page needs, or one the ERP allowlist proxies. Make those in one PR: the
 tracker, the ERP route's allowlist, the frontend client, and the ticket. Each

@@ -17,6 +17,26 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.312.0] - 2026-10-22
+
+A new **Monitors ▸ WeChat** page shows the memory-module market in the team's
+WeChat trading groups, one report day at a time (RS-344). memtrade, the tool
+on the office Mac that reads those groups, already wrote a daily report to
+its own disk; it now pushes each day to the ERP after its 08:00 ET run, so
+managers can read it where they work.
+
+The page leads with the day's buyers and sellers against the day before,
+Claude's market notes and the most wanted and most offered specs. Below them
+the price board lists every module by brand and part code, by spec or by
+part code alone: what buyers bid and sellers ask, how many quoted, the
+spread, and each price's move since the day before, always within one tax
+basis. Opening a line shows the posts behind it and its last 30 days.
+
+memtrade signs in with a new `wechat:write` scope that only a
+manager-minted service client can hold; connector self-registration never
+grants it. A push replaces the whole day, so a day memtrade redoes (after
+Claude was unavailable, say) simply arrives again.
+
 ## [1.311.0] - 2026-10-22
 
 A Done sell order can be reopened to Awaiting payment (RS-343). Until now Done

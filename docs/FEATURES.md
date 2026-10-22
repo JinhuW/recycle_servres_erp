@@ -49,7 +49,7 @@ portal was removed in v1.191.0; no bid had ever been placed through it.
   since the name alone would advertise the feature. Whole-endpoint manager
   features (sell orders, customers, transfers, activity, members,
   bank and internal transactions, the Accounting book (v1.310.0), tracker,
-  coordinator, connectors, FX rates, inventory export and analysis, a line's
+  the WeChat market (v1.312.0), coordinator, connectors, FX rates, inventory export and analysis, a line's
   linked sell orders) answer 403. The
   Facebook account pool (`/api/facebook-pool`, v1.262.0) is the exception
   under Monitors: every role reads the rack and may take, return and report,
@@ -2338,6 +2338,40 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   - Since v1.292.0, each version is labelled *verdict first* or *reasoning
     first*. That's its response schema. The tracker has asked for the
     reasoning first since RS-312.
+- **WeChat market** — **Monitors ▸ WeChat** (`/wechat`, v1.312.0), managers
+  only. memtrade, a tool on the office Mac, reads the team's WeChat trading
+  groups and builds a daily memory-module report for each 08:00 → 08:00 ET
+  window. It pushes each day here after its 08:00 run and again whenever it
+  redoes a day; a push replaces the whole day. The ERP only stores and shows
+  it: nothing feeds Market values or any order.
+  - One report day at a time, picked from a dropdown or with the arrows.
+    The newest is `/wechat`; `/wechat/<date>` links to one day. Cards show
+    buyers, sellers, trade posts and group messages, with the change in
+    buyers and sellers against the report day before.
+  - Claude's market notes sit beside **Most wanted** and **Most offered**,
+    the specs with the most buyers and sellers. Clicking one shows it on
+    the board.
+  - The **price board** lists every line by brand & code (三星 64G 5600 DM0,
+    grouped under brand headers), by spec (64G 5600) or by part code
+    (32G DM0). Each line shows the bid (buyers) and ask (sellers) median
+    with its tax basis, how many traders quoted and their range, a bar of
+    both sides' ranges with the spread or a crossed market, buyers and
+    sellers, memtrade's supply read (short to glut), and each median's
+    change against the day before. Changes and spreads compare one tax
+    basis only: a 含税 and a 未税 price are never set against each other.
+    Search and *Priced lines only* filter it.
+  - Opening a line lists its posts, newest first and up to 100: who, what
+    price and quantity, the raw line, which groups and how many copies.
+    Beside them are the bid and ask medians over the last 30 report days
+    and every price by tax basis.
+  - A banner says when memtrade fell back to its rules for a day (Claude
+    was unavailable), when only part of a day's posts arrived, and repeats
+    memtrade's own warnings. **Groups read** lists each group's messages
+    that day and marks the ones joined in it.
+  - The push (`/api/wechat-market/push/*`) takes a Bearer token with the
+    `wechat:write` scope from a service client a manager creates under
+    Settings → Connectors. The day comes first, then its posts in batches
+    of 500.
 - **Coordinator** — the Facebook fleet, reached from **Monitors ▸ Facebook**
   in the sidebar (v1.207.0), managers only. Since v1.263.0 the Fleet tab
   shares the Account pool tab's chrome: a status legend (Live, Stale, Needs
@@ -2702,6 +2736,9 @@ inventory search, sell-order draft creation.
   else keeps `market:read` only (v1.67.x). Manager-minted service clients are
   exempt. The phone shell shows the same consent screen (v1.239.2).
 - Purchasers can reach the connect page (v1.66.0).
+- `wechat:write` (v1.312.0) is for memtrade's service client, which pushes the
+  WeChat market report. Self-registration never grants it, even to a client
+  that names no scope; a manager mints it under Settings → Connectors.
 - Per-tool gating lives in `TOOL_SCOPES` and filters both `tools/list` and
   `tools/call` — a connector missing tools has a scope problem, not a missing
   tool.
@@ -2954,7 +2991,8 @@ removed in v1.191.0.
 - **The sidebar has a second level** (v1.207.0). A parent entry opens while
   you are on one of its pages and is one row with a › caret everywhere else;
   clicking it opens its first child. The one parent today is **Oversight ▸
-  Monitors**, holding **Facebook** (`/fleet`) and **Reddit** (`/tracker`). In
+  Monitors**, holding **Facebook** (`/fleet`), **Reddit** (`/tracker`) and, since
+  v1.312.0, **WeChat** (`/wechat`). In
   the icon rail the caret hides and the open children show as icons.
 - **Menus and record references are real links** (v1.144.0). The sidebar,
   the Inventory ▸ Analysis strip, the phone tab bar and Home quick links, and
