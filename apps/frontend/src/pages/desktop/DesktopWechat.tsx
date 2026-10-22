@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   headlinePrice,
   priceChange,
@@ -8,6 +8,7 @@ import {
   type WechatEvidence,
   type WechatHistoryDay,
   type WechatPrice,
+  type WechatPriceBucket,
   type WechatRow,
   type WechatRowKind,
   type WechatSide,
@@ -66,6 +67,21 @@ export function DesktopWechat() {
 
   const date = routed ?? days?.[0]?.date ?? null;
 
+  // One request per day and family while the page is open: the board and the
+  // side panel both read a day's spec lines. A failed one is dropped so the
+  // next look asks again.
+  const dayCache = useRef(new Map<string, Promise<Loaded>>());
+  const loadDay = useCallback((d: string, k: WechatRowKind) => {
+    const key = `${d}:${k}`;
+    let p = dayCache.current.get(key);
+    if (!p) {
+      p = wechatApi.day(d, k);
+      dayCache.current.set(key, p);
+      p.catch(() => dayCache.current.delete(key));
+    }
+    return p;
+  }, []);
+
   useEffect(() => {
     let alive = true;
     wechatApi.days().then(d => { if (alive) setDays(d); }).catch(handleFetchError);
@@ -76,26 +92,35 @@ export function DesktopWechat() {
     if (!date) return;
     let alive = true;
     setLoaded(null);
-    wechatApi.day(date, kind)
+    loadDay(date, kind)
       .then(r => { if (alive) setLoaded(r); })
       .catch(err => {
         if (!alive) return;
-        if (err instanceof ApiError && err.status === 404) setLoaded('missing');
+        // A 400 is a date that can't be one (2026-02-30): no report either.
+        if (err instanceof ApiError && (err.status === 404 || err.status === 400)) setLoaded('missing');
         else handleFetchError(err);
       });
     return () => { alive = false; };
-  }, [date, kind]);
+  }, [date, kind, loadDay]);
 
   // The side panel ranks specs whichever family the board shows.
   useEffect(() => {
     if (!date) return;
     let alive = true;
     setSpecRows(null);
-    wechatApi.day(date, 'spec')
+    loadDay(date, 'spec')
       .then(r => { if (alive) setSpecRows(r.rows); })
       .catch(() => { if (alive) setSpecRows([]); });
     return () => { alive = false; };
-  }, [date]);
+  }, [date, loadDay]);
+
+  // The top cards rank by traders, priced or not, so a pick the priced-only
+  // filter would hide turns the filter off.
+  const pickSpec = (row: WechatRow) => {
+    setKind('spec');
+    setSearch(row.key);
+    if (!hasPrice(row)) setPricedOnly(false);
+  };
 
   const day = loaded && loaded !== 'missing' ? loaded.day : null;
   const summary = days?.find(d => d.date === date) ?? null;
@@ -168,9 +193,9 @@ export function DesktopWechat() {
           <div className="wx-overview">
             <NotesCard day={day} />
             <TopCard title={t('wxMostWanted')} sub={t('wxMostWantedSub')} rows={specRows} side="buy" locale={locale}
-              onPick={key => { setKind('spec'); setSearch(key); }} />
+              onPick={pickSpec} />
             <TopCard title={t('wxMostOffered')} sub={t('wxMostOfferedSub')} rows={specRows} side="sell" locale={locale}
-              onPick={key => { setKind('spec'); setSearch(key); }} />
+              onPick={pickSpec} />
           </div>
         )}
 
@@ -525,18 +550,25 @@ function LineDetail({ date, row, locale }: { date: string; row: WechatRow; local
   const [history, setHistory] = useState<WechatHistoryDay[] | null>(null);
   const [side, setSide] = useState<WechatSide | 'all'>('all');
 
+  // Each side is its own request: the newest posts of both sides are mostly
+  // one side's on a busy line, so filtering them here would hide the other.
   useEffect(() => {
     let alive = true;
-    wechatApi.evidence(date, row.kind, row.key)
+    setPoints(null);
+    wechatApi.evidence(date, row.kind, row.key, side === 'all' ? undefined : side)
       .then(r => { if (alive) { setPoints(r.points); setLimit(r.limit); } })
       .catch(err => { if (alive) { setPoints([]); handleFetchError(err); } });
+    return () => { alive = false; };
+  }, [date, row.kind, row.key, side]);
+
+  useEffect(() => {
+    let alive = true;
     wechatApi.history(row.kind, row.key, date, HISTORY_DAYS)
       .then(h => { if (alive) setHistory(h); })
       .catch(() => { if (alive) setHistory([]); });
     return () => { alive = false; };
   }, [date, row.kind, row.key]);
 
-  const shown = points?.filter(p => side === 'all' || p.direction === side) ?? null;
 
   return (
     <div className="wx-detail">
@@ -552,11 +584,11 @@ function LineDetail({ date, row, locale }: { date: string; row: WechatRow; local
           </div>
         </div>
         <ul className="wx-evidence">
-          {!shown && [0, 1, 2].map(i => (
+          {!points && [0, 1, 2].map(i => (
             <li key={i} aria-hidden><Skeleton width={180} height={12} /><Skeleton width={260} height={10} /></li>
           ))}
-          {shown?.map(p => <EvidenceItem key={`${p.postKey}#${p.itemIndex}`} p={p} locale={locale} />)}
-          {shown?.length === 0 && <li className="fp-muted">{t('wxNoPosts')}</li>}
+          {points?.map(p => <EvidenceItem key={`${p.postKey}#${p.itemIndex}`} p={p} locale={locale} />)}
+          {points?.length === 0 && <li className="fp-muted">{t('wxNoPosts')}</li>}
         </ul>
         {points && points.length >= limit && limit > 0 && <span className="fp-muted rt-help">{t('wxPostsCapped', { n: limit })}</span>}
       </div>
@@ -603,7 +635,7 @@ function EvidenceItem({ p, locale }: { p: WechatEvidence; locale: string }) {
       <span className={`wx-dot wx-${p.direction}`} title={t(p.direction === 'buy' ? 'wxBid' : 'wxAsk')} />
       <div>
         <div className="wx-ev-head">
-          <b>{p.senderName}</b>
+          <b>{p.senderName || p.senderId}</b>
           {p.price !== null && p.currency && (
             <span className={`mono wx-${p.direction}`}>
               {fmtPrice(p.price, p.currency === 'USD' ? 'USD' : 'RMB', locale)}
@@ -623,22 +655,36 @@ function EvidenceItem({ p, locale }: { p: WechatEvidence; locale: string }) {
   );
 }
 
-// Both sides' headline medians across report days, each in the tax basis it
-// quoted last, on one scale. A day nobody quoted the line is a gap.
+// Both sides' headline medians across report days, on one scale and so in one
+// tax basis: the one most of them were quoted in, the latest on a tie. Prices
+// in another basis, like a day nobody quoted the line, are a gap.
+function chartBasis(history: WechatHistoryDay[]): WechatPriceBucket | null {
+  const n = new Map<WechatPriceBucket, number>();
+  for (const h of history) {
+    for (const s of ['buy', 'sell'] as const) {
+      const b = h[s].price?.bucket;
+      if (b) n.set(b, (n.get(b) ?? 0) + 1);
+    }
+  }
+  let best: WechatPriceBucket | null = null;
+  for (const h of history) {
+    for (const s of ['buy', 'sell'] as const) {
+      const b = h[s].price?.bucket;
+      if (b && (best === null || n.get(b)! >= n.get(best)!)) best = b;
+    }
+  }
+  return best;
+}
+
 function HistoryChart({ history, locale }: { history: WechatHistoryDay[] | null; locale: string }) {
   const { t } = useT();
   if (!history) return <Skeleton width="100%" height={96} />;
-  const basis = (s: WechatSide) => history.map(h => h[s].price?.bucket).filter(b => b !== undefined).at(-1) ?? null;
-  const series = (s: WechatSide) => {
-    const b = basis(s);
-    return history.map(h => (h[s].price && h[s].price.bucket === b ? h[s].price.median : null));
-  };
+  const shown = chartBasis(history);
+  const series = (s: WechatSide) =>
+    history.map(h => (h[s].price && h[s].price.bucket === shown ? h[s].price.median : null));
   const bid = series('buy');
   const ask = series('sell');
   const values = [...bid, ...ask].filter((v): v is number => v !== null);
-  const bidBasis = basis('buy');
-  const askBasis = basis('sell');
-  const shown = askBasis ?? bidBasis;
   if (values.length < 2 || !shown) return <p className="fp-muted wx-chart-empty">{t('wxHistoryThin')}</p>;
   const W = 320;
   const H = 96;
@@ -657,14 +703,11 @@ function HistoryChart({ history, locale }: { history: WechatHistoryDay[] | null;
     });
     return d;
   };
-  const dots = (vals: (number | null)[], s: WechatSide) => {
-    const b = s === 'buy' ? bidBasis : askBasis;
-    return vals.map((v, i) => v === null || !b ? null : (
-      <circle key={`${s}${i}`} className={`wx-pt-${s}`} cx={x(i)} cy={y(v)} r={2.2}>
-        <title>{`${history[i]!.date} · ${t(s === 'buy' ? 'wxBid' : 'wxAsk')} ${fmtPrice(v, b, locale)} ${t(BUCKET_LABEL_KEY[b])}`}</title>
-      </circle>
-    ));
-  };
+  const dots = (vals: (number | null)[], s: WechatSide) => vals.map((v, i) => v === null ? null : (
+    <circle key={`${s}${i}`} className={`wx-pt-${s}`} cx={x(i)} cy={y(v)} r={2.2}>
+      <title>{`${history[i]!.date} · ${t(s === 'buy' ? 'wxBid' : 'wxAsk')} ${fmtPrice(v, shown, locale)} ${t(BUCKET_LABEL_KEY[shown])}`}</title>
+    </circle>
+  ));
   return (
     <div className="wx-chart">
       <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img"
@@ -677,8 +720,7 @@ function HistoryChart({ history, locale }: { history: WechatHistoryDay[] | null;
       <div className="wx-chart-axis">
         <span>{history[0]!.date.slice(5)}</span>
         <span className="mono">
-          {fmtPrice(lo, shown, locale)}–{fmtPrice(hi, shown, locale)}
-          {bidBasis === askBasis || !bidBasis || !askBasis ? ` ${t(BUCKET_LABEL_KEY[shown])}` : ''}
+          {fmtPrice(lo, shown, locale)}–{fmtPrice(hi, shown, locale)} {t(BUCKET_LABEL_KEY[shown])}
         </span>
         <span>{history.at(-1)!.date.slice(5)}</span>
       </div>
@@ -714,7 +756,7 @@ function TopCard({ title, sub, rows, side, locale, onPick }: {
   rows: WechatRow[] | null;
   side: WechatSide;
   locale: string;
-  onPick: (key: string) => void;
+  onPick: (row: WechatRow) => void;
 }) {
   const { t } = useT();
   const top = useMemo(
@@ -736,7 +778,7 @@ function TopCard({ title, sub, rows, side, locale, onPick }: {
           const p = headlinePrice(r[side]);
           return (
             <li key={r.key}>
-              <button type="button" onClick={() => onPick(r.key)} title={t('wxShowOnBoard')}>
+              <button type="button" onClick={() => onPick(r)} title={t('wxShowOnBoard')}>
                 <span className="wx-top-key">{lineKey(r.key, t)}</span>
                 <span className="wx-top-n mono">{t(side === 'buy' ? 'wxBuyersN' : 'wxSellersN', { n: r[side].senders })}</span>
                 <span className="wx-top-p mono">{p ? fmtPrice(p.median, p.bucket, locale) : '—'}</span>
@@ -784,7 +826,7 @@ function GroupsCard({ day, locale }: { day: WechatDay; locale: string }) {
                 const joined = g.firstSeen !== null && Date.parse(g.firstSeen) >= windowStart;
                 return (
                   <tr key={g.id} className={g.messages ? undefined : 'wx-quiet'}>
-                    <td>{g.name}</td>
+                    <td>{g.name || <span className="mono fp-muted">{g.id}</span>}</td>
                     <td className="wx-num mono">{fmt.format(g.messages)}</td>
                     <td className="wx-num mono">{fmt.format(g.candidates)}</td>
                     <td>

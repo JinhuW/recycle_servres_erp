@@ -33,6 +33,19 @@ describe('WeChat market board', () => {
     ]);
   });
 
+  it('keeps one unbranded group whether a quote says 未注明 or nothing', () => {
+    const groups = groupByBrand([
+      row({ key: 'a', brand: UNBRANDED, capacityGb: 32 }),
+      row({ key: 'b', brand: null, capacityGb: 64 }),
+      row({ key: 'c', brand: '三星' }),
+      row({ key: 'd', brand: null, capacityGb: 16 }),
+    ]);
+    expect(groups.map(g => [g.brand, g.rows.map(r => r.key)])).toEqual([
+      ['三星', ['c']],
+      [UNBRANDED, ['b', 'a', 'd']],
+    ]);
+  });
+
   it('searches the key, brand, ranks and part numbers', () => {
     const r = row({ key: '三星 64G 5600 DM0', partNumbers: ['M321R8GA0BB0-CQK'], ranks: ['2R4'] });
     expect(matchesSearch(r, 'm321r8')).toBe(true);

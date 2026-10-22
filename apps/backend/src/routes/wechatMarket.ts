@@ -63,11 +63,11 @@ wechat.put('/push/days/:date', async (c) => {
   }
   const sql = getDb(c.env);
   const t = day.totals;
-  await sql.begin(async (tx) => {
+  const pushId = await sql.begin(async (tx) => {
     // The cascade takes the old rows, groups and points with it: a redone day
     // can drop a line the first run had.
     await tx`DELETE FROM wechat_market_days WHERE report_date = ${date}`;
-    await tx`
+    const [{ push_id }] = await tx<{ push_id: string }[]>`
       INSERT INTO wechat_market_days (
         report_date, window_start, window_end, degraded, summary, warnings,
         messages, groups_total, groups_active, candidates, posts,
@@ -77,6 +77,7 @@ wechat.put('/push/days/:date', async (c) => {
         ${t.messages}, ${t.groupsTotal}, ${t.groupsActive}, ${t.candidates}, ${t.posts},
         ${t.buyPosts}, ${t.sellPosts}, ${t.buyers}, ${t.sellers}, ${day.pointCount}
       )
+      RETURNING push_id
     `;
     if (day.rows.length) {
       // One JSON parameter, not one per value: a day runs to a thousand rows
@@ -113,12 +114,13 @@ wechat.put('/push/days/:date', async (c) => {
             AS g(id text, name text, messages int, candidates int, first_seen timestamptz)
       `;
     }
+    return push_id;
   });
   log.info('wechat market day pushed', {
     module: 'wechatMarket', date, rows: day.rows.length, groups: day.groups.length,
     pointCount: day.pointCount, degraded: day.degraded, clientId: c.var.oauthCtx.clientId,
   });
-  return c.json({ date, rows: day.rows.length, groups: day.groups.length });
+  return c.json({ date, rows: day.rows.length, groups: day.groups.length, pushId });
 });
 
 wechat.post('/push/days/:date/points', async (c) => {
@@ -126,18 +128,25 @@ wechat.post('/push/days/:date/points', async (c) => {
   const bad = badDate(date);
   if (bad) return c.json(bad, 400);
   let points: WechatPoint[];
+  let pushId: string | null;
   try {
-    points = parsePointsPush(await c.req.json().catch(() => null));
+    ({ points, pushId } = parsePointsPush(await c.req.json().catch(() => null)));
   } catch (err) {
     if (err instanceof PushError) return c.json({ error: 'invalid_request', detail: err.message }, 400);
     throw err;
   }
   const sql = getDb(c.env);
-  const stored = await sql.begin(async (tx) => {
-    // FOR SHARE: a re-push of the day deleting it under this batch would
-    // otherwise surface as an FK violation instead of the 404 below.
-    const [day] = await tx`SELECT 1 FROM wechat_market_days WHERE report_date = ${date} FOR SHARE`;
-    if (!day) return null;
+  const stored = await sql.begin(async (tx): Promise<number | 'missing' | 'replaced'> => {
+    // Locked so a re-push of the day can't delete it under this batch (an FK
+    // violation instead of the 404 below), and so batches of one day keep its
+    // stored count one at a time.
+    const [day] = await tx<{ push_id: string }[]>`
+      SELECT push_id FROM wechat_market_days WHERE report_date = ${date} FOR NO KEY UPDATE
+    `;
+    if (!day) return 'missing';
+    // A batch naming an earlier push of the day belongs to a run the day has
+    // since replaced. Without a pushId it is taken as the current run's.
+    if (pushId !== null && pushId !== day.push_id) return 'replaced';
     if (points.length) {
       // A retried batch carries the same points; the first copy stands.
       await tx`
@@ -169,11 +178,17 @@ wechat.post('/push/days/:date/points', async (c) => {
       `;
     }
     const [{ n }] = await tx<{ n: number }[]>`
-      SELECT COUNT(*)::int AS n FROM wechat_market_points WHERE report_date = ${date}
+      UPDATE wechat_market_days
+         SET stored_points = (SELECT COUNT(*) FROM wechat_market_points WHERE report_date = ${date})
+       WHERE report_date = ${date}
+      RETURNING stored_points AS n
     `;
     return n;
   });
-  if (stored === null) return c.json({ error: 'day_not_found', detail: 'push the day before its points' }, 404);
+  if (stored === 'missing') return c.json({ error: 'day_not_found', detail: 'push the day before its points' }, 404);
+  if (stored === 'replaced') {
+    return c.json({ error: 'day_replaced', detail: 'the day was pushed again since; push it again from the start' }, 409);
+  }
   return c.json({ date, stored });
 });
 
@@ -203,8 +218,7 @@ type DayRow = {
 const DAY_COLUMNS = (sql: ReturnType<typeof getDb>) => sql`
   to_char(d.report_date, 'YYYY-MM-DD') AS date, d.window_start, d.window_end, d.degraded, d.pushed_at,
   d.summary, d.warnings, d.messages, d.groups_total, d.groups_active, d.candidates, d.posts,
-  d.buy_posts, d.sell_posts, d.buyers, d.sellers, d.point_count,
-  (SELECT COUNT(*) FROM wechat_market_points p WHERE p.report_date = d.report_date)::int AS stored_points
+  d.buy_posts, d.sell_posts, d.buyers, d.sellers, d.point_count, d.stored_points
 `;
 
 function daySummary(d: DayRow): WechatDaySummary {
@@ -339,7 +353,7 @@ wechat.get('/days/:date/points', async (c) => {
            p.date_code AS "dateCode", p.condition, p.price, p.price_approx AS "priceApprox",
            p.currency, p.tax, p.qty, p.location, p.raw_line AS "rawLine",
            ARRAY(
-             SELECT COALESCE(g.name, gid)
+             SELECT COALESCE(NULLIF(g.name, ''), gid)
                FROM unnest(p.group_ids) WITH ORDINALITY AS u(gid, ord)
                LEFT JOIN wechat_market_groups g ON g.report_date = p.report_date AND g.group_id = u.gid
               ORDER BY u.ord

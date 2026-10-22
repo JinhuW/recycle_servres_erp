@@ -2362,7 +2362,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     buyers and sellers against the report day before.
   - Claude's market notes sit beside **Most wanted** and **Most offered**,
     the specs with the most buyers and sellers. Clicking one shows it on
-    the board.
+    the board, turning *Priced lines only* off when the spec has no price
+    (v1.312.2).
   - The **price board** lists every line by brand & code (三星 64G 5600 DM0,
     grouped under brand headers), by spec (64G 5600) or by part code
     (32G DM0). Each line shows the bid (buyers) and ask (sellers) median
@@ -2371,11 +2372,18 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
     sellers, memtrade's supply read (short to glut), and each median's
     change against the day before. Changes and spreads compare one tax
     basis only: a 含税 and a 未税 price are never set against each other.
-    Search and *Priced lines only* filter it.
+    Search and *Priced lines only* filter it. A quote with no brand sits
+    under one *Unbranded* header whether memtrade wrote 未注明 or nothing
+    (v1.312.2).
   - Opening a line lists its posts, newest first and up to 100: who, what
     price and quantity, the raw line, which groups and how many copies.
-    Beside them are the bid and ask medians over the last 30 report days
-    and every price by tax basis.
+    *Bids* and *Asks* ask for each side's own newest 100 (v1.312.2).
+    Beside them are the bid and ask medians over the last 30 report days,
+    drawn in the one tax basis most of them were quoted in (v1.312.2), and
+    every price by tax basis.
+  - A group with no name shows its id, and a sender with no display name
+    their WeChat id (v1.312.2). A link to a date that can't exist reads as
+    no report for that day.
   - A banner says when memtrade fell back to its rules for a day (Claude
     was unavailable), when only part of a day's posts arrived, and repeats
     memtrade's own warnings. **Groups read** lists each group's messages
@@ -2383,7 +2391,11 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   - The push (`/api/wechat-market/push/*`) takes a Bearer token with the
     `wechat:write` scope from a service client a manager creates under
     Settings → Connectors. The day comes first, then its posts in batches
-    of 500.
+    of 500. Since v1.312.2 the day's push answers with a `pushId`. A batch
+    that names an earlier one is refused (409 `day_replaced`), so a batch
+    left over from a run the day has since replaced can't land in the new
+    one. Timestamps must be ISO 8601 with a zone, as `toISOString()` writes
+    them.
 - **Coordinator** — the Facebook fleet, reached from **Monitors ▸ Facebook**
   in the sidebar (v1.207.0), managers only. Since v1.263.0 the Fleet tab
   shares the Account pool tab's chrome: a status legend (Live, Stale, Needs

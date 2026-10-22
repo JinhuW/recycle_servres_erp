@@ -77,7 +77,8 @@ export type WechatLine = {
 
 // ── Push (memtrade → ERP) ─────────────────────────────────────────────────────
 
-// PUT /api/wechat-market/push/days/:date replaces the day with this.
+// PUT /api/wechat-market/push/days/:date replaces the day with this, and
+// answers with the push's `pushId`.
 export type WechatDayPush = {
   windowStart: string;
   windowEnd: string;
@@ -91,7 +92,10 @@ export type WechatDayPush = {
   pointCount: number;
 };
 
-// POST /api/wechat-market/push/days/:date/points, in batches.
+// POST /api/wechat-market/push/days/:date/points, in batches of
+// `{ points: WechatPoint[], pushId? }`. A batch naming a pushId the day has
+// since been replaced under is refused (409 day_replaced); one without is
+// taken as the current push's.
 export type WechatPoint = {
   postKey: string;
   itemIndex: number;
