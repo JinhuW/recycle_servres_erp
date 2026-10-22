@@ -218,7 +218,11 @@ function summarize(event: SellOrderEvent, locale: string, t: TFn): React.ReactNo
     }
     case 'reopened': {
       const note = d.note ? <> · "{String(d.note)}"</> : null;
-      return <>{t('historyReopened')}{note}</>;
+      // A reopened sale lands in Awaiting payment, not Draft, so it names the move.
+      const move = d.fromStatus === 'Done'
+        ? <>: <b>{lifecycleLabel(t, 'Done')}</b> → <b>{lifecycleLabel(t, 'Awaiting payment')}</b></>
+        : null;
+      return <>{t('historyReopened')}{move}{note}</>;
     }
     case 'signed_off':        return <>{t('historySignedOff')}</>;
     case 'signoff_withdrawn': return <>{t('historySignoffWithdrawn')}</>;

@@ -17,6 +17,23 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.311.0] - 2026-10-22
+
+A Done sell order can be reopened to Awaiting payment (RS-343). Until now Done
+was terminal, so a sale marked Done by mistake, or one with a wrong line or
+price, stayed that way. *Reopen* on a Done order's page takes a note, and any
+manager may use it.
+
+Reopening undoes what Done did. Every unit the sale consumed goes back to its
+lot, and the order reserves it again, so nothing else can take it while the
+sale is corrected. A sold-out lot leaves Sold holding exactly what this order
+took. The sale's market data points are withdrawn, and a part priced by them
+falls back to its previous reading. The order drops off the dashboard and
+contributions until it is Done again. Sign-offs are kept, so an order put back
+unchanged can go straight to Done; an edit asks for them again as it always
+has. The reopen is refused when the order is archived, or when a lot it would
+hand units back to is no longer sellable.
+
 ## [1.310.2] - 2026-10-21
 
 Fixes from the review of the new Accounting page (RS-342), which reached

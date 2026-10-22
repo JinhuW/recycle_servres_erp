@@ -1436,7 +1436,8 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     between, `POST /api/sell-orders/:id/signoff` answers 409 and the card
     re-reads the order.
   - Who is required is worked out live: every active manager. Reopening a
-    Closed order clears its sign-offs. History logs each sign-off and
+    Closed order clears its sign-offs; reopening a Done one keeps them
+    (v1.311.0), so an order put back unchanged goes straight to Done again. History logs each sign-off and
     withdrawal, and a sign-off notifies the managers still to sign. Orders
     Done before v1.226.0 carry none.
 - A **draft sell order is a proposal**; inventory is claimed only on promotion
@@ -1456,6 +1457,26 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   - **What it doesn't do.** It asks for no evidence, and it can't be archived.
   - **Numbering.** Being past Draft, inventory added to it appends its #
     (above).
+- **A Done order can be reopened to Awaiting payment** (v1.311.0, RS-343), to
+  correct a sale marked Done by mistake or with a wrong line or price. Any
+  manager can do it from *Reopen* on the order page with a note; the note
+  lands in History and is appended to the order's notes, as a Closed reopen's
+  does.
+  - **The stock comes back.** Every unit the sale consumed returns to its lot,
+    and the order holds it again as any Awaiting-payment order does, so no
+    other order can take it meanwhile. A sold-out lot leaves Sold for its PO's
+    line status with exactly what this order took, since another sale may
+    have taken the rest. Each lot's history reads "Sale reopened +N". The
+    PO's goods total doesn't move.
+  - **So does the rest of Done.** The sale's market data points are
+    withdrawn, and a part whose last price came from them falls back to its
+    previous one. The order leaves the dashboard and contributions until it
+    is Done again, which dates it afresh.
+  - **Refused, changing nothing,** for an archived order (unarchive it first)
+    and when a lot can't take its units back: its PO is archived or no longer
+    at Reviewing or Done, or the lot was archived. The refusal names the lot.
+  - Done reopens to Awaiting payment only. Draft would drop the reservation,
+    and an after-sales case can't be opened on a Draft.
 - Orders carry a payment receiver, creator-only reopen (v1.15.0) and a receiver
   column with a managers-only receiver rule (v1.16.0). The receiver can be
   reassigned from the detail view in any status, Done and Closed included —

@@ -26,8 +26,9 @@ import {
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { searchSellableInventory } from '../services/sellableInventory';
 import {
-  committedQtySql, committedSellStatuses, openSellStatuses, proposalSellStatuses,
+  committedQtySql, committedSellStatuses, isSellableLineStatus, openSellStatuses, proposalSellStatuses,
 } from '../lib/sellCommitment';
+import { LINE_STATUS_FOR_LIFECYCLE } from '../services/orderAdvance';
 import { lockOrdersTx } from '../services/orderLocks';
 import {
   buildXlsxBuffer, xlsxResponse, datedFilename, type XlsxColumn,
@@ -36,7 +37,7 @@ import {
   convertToUsd, getLatestRateToUsd, isSupportedCurrency,
   type SupportedCurrency, type FxLookup,
 } from '../lib/fx';
-import { recordSaleDataPoints } from '../lib/sellOrderMarket';
+import { recordSaleDataPoints, retractSaleDataPoints } from '../lib/sellOrderMarket';
 import { maybeRenameReceipt } from '../ai/receipt';
 import { shrinkImageToFit } from '../lib/image-shrink';
 import { poLineNo, sellLineOrder } from '../lib/poLineNo';
@@ -1253,10 +1254,12 @@ sellOrders.delete('/:id/attachments/:attachmentId', async (c) => {
 // via the status-meta attachments endpoints above.
 // Transition map is the single source of truth for what status changes
 // are legal. Any open stage can jump straight to Awaiting payment, to Done
-// (the deal can be marked paid at any point), or to Closed. Done has no outgoing edges
-// (terminal happy path). Closed has exactly one outgoing edge (reopen →
-// Draft) and cannot go to Done. Packing can step back to Draft — Pack mode
-// moves a Draft there on opening, and a mistaken open must be undoable.
+// (the deal can be marked paid at any point), or to Closed. Done has exactly
+// one outgoing edge, a reopen to Awaiting payment: the order hands back the
+// stock it consumed and reserves it again, so nobody else takes it while the
+// sale is corrected. Closed has exactly one outgoing edge (reopen → Draft) and
+// cannot go to Done. Packing can step back to Draft — Pack mode moves a Draft
+// there on opening, and a mistaken open must be undoable.
 // Adding a new status means editing this map + the CHECK constraint + the
 // seed — no parallel guards elsewhere ("Status guards" in
 // apps/backend/AGENTS.md).
@@ -1265,7 +1268,7 @@ const ALLOWED_TRANSITIONS: Record<string, Set<string>> = {
   Packing:             new Set(['Draft', 'Shipped', 'Awaiting payment', 'Done', 'Closed']),
   Shipped:             new Set(['Awaiting payment', 'Done', 'Closed']),
   'Awaiting payment':  new Set(['Done', 'Closed']),
-  Done:                new Set([]),
+  Done:                new Set(['Awaiting payment']),
   Closed:              new Set(['Draft']),
 };
 const KNOWN_STATUSES = new Set<string>([
@@ -1393,6 +1396,23 @@ sellOrders.post('/:id/adjust-price', async (c) => {
   }
 });
 
+// Each PO the order's sold lines come from, with whether its goods total still
+// mirrors its lines. Selling or un-selling moves qty, an input to that total,
+// so the verdict has to be taken before the write — afterwards a stale mirror
+// reads as a negotiated lot price and that PO's total_cost pins itself
+// against its lines for good.
+async function soldSourceGoodsVerdicts(tx: SqlLike, sellOrderId: string): Promise<Map<string, boolean>> {
+  const sources = await tx<{ order_id: string }[]>`
+    SELECT DISTINCT l.order_id
+    FROM sell_order_lines sol
+    JOIN order_lines l ON l.id = sol.inventory_id
+    WHERE sol.sell_order_id = ${sellOrderId} AND sol.inventory_id IS NOT NULL AND sol.qty > 0
+  `;
+  const verdicts = new Map<string, boolean>();
+  for (const o of sources) verdicts.set(o.order_id, await goodsTotalIsMirror(tx, o.order_id));
+  return verdicts;
+}
+
 sellOrders.post('/:id/status', async (c) => {
   const u = c.var.user;
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
@@ -1438,9 +1458,11 @@ sellOrders.post('/:id/status', async (c) => {
     // orders are locked before this header: orders, then sell orders, then
     // lines is the one order every writer takes (services/orderLocks.ts).
     // Archive holds its PO and then locks the sell orders on it; taking the
-    // header first here deadlocked against it (40P01 → 500).
+    // header first here deadlocked against it (40P01 → 500). Reopening a sale
+    // rewrites them too, and only the header says a move to Awaiting payment
+    // is that reopen, so every move there takes them.
     let lockedSources: string[] = [];
-    if (body.to === 'Done') {
+    if (body.to === 'Done' || body.to === 'Awaiting payment') {
       const owners = await tx<{ order_id: string }[]>`
         SELECT DISTINCT ol.order_id FROM sell_order_lines sol
         JOIN order_lines ol ON ol.id = sol.inventory_id
@@ -1475,11 +1497,15 @@ sellOrders.post('/:id/status', async (c) => {
       return { kind: 'notCreator' };
     }
 
-    // Reopen (Closed → Draft) needs a note. This is the one remaining
-    // required-note rule: a fresh Draft creation doesn't need a note, so the
-    // rule is "transitions *into* Draft from Closed need a note", not "Draft
+    // Reopening a sale (Done → Awaiting payment) hands back the stock Done
+    // consumed. Any manager may: every one of them signed the Done.
+    const reopeningSale = cur.status === 'Done' && body.to === 'Awaiting payment';
+
+    // A reopen needs a note, from Closed or from Done. These are the remaining
+    // required-note rules: a fresh Draft creation doesn't need a note, so the
+    // rule is "a transition *out of* Closed or Done needs a note", not "Draft
     // is a meta status".
-    if (reopening && !hasNote) {
+    if ((reopening || reopeningSale) && !hasNote) {
       return { kind: 'reopenNeedsNote' };
     }
 
@@ -1497,7 +1523,7 @@ sellOrders.post('/:id/status', async (c) => {
     // to another PO in between would need a lock this transaction can no
     // longer take in order, so it starts over rather than take it out of
     // order.
-    if (body.to === 'Done') {
+    if (body.to === 'Done' || reopeningSale) {
       const owners = await tx<{ order_id: string }[]>`
         SELECT DISTINCT ol.order_id FROM sell_order_lines sol
         JOIN order_lines ol ON ol.id = sol.inventory_id
@@ -1505,6 +1531,37 @@ sellOrders.post('/:id/status', async (c) => {
       `;
       if (owners.some((r) => !lockedSources.includes(r.order_id))) {
         return { kind: 'conflict', msg: 'products on this order moved between purchase orders — try again' };
+      }
+    }
+
+    // The units go back to the lots they came from, and the order holds them
+    // again, so each lot must be one a committed order may hold — the rule
+    // validateSellLines enforces on promotion, applied to the status the lot
+    // will have. A sold-out lot takes its PO's line status back. Checked
+    // before anything is written: a refusal returned here still commits.
+    const restored: { id: string; status: string }[] = [];
+    if (reopeningSale) {
+      const lots = await tx<{
+        id: string; order_id: string; product_no: number; status: string;
+        lifecycle: string; archived_at: string | null;
+      }[]>`
+        SELECT l.id, l.order_id, l.product_no, l.status, o.lifecycle, o.archived_at
+        FROM order_lines l JOIN orders o ON o.id = l.order_id
+        WHERE l.id IN (SELECT inventory_id FROM sell_order_lines
+                        WHERE sell_order_id = ${id} AND inventory_id IS NOT NULL AND qty > 0)
+        ORDER BY l.id
+        FOR UPDATE OF l
+      `;
+      for (const l of lots) {
+        const ref = `${l.order_id} #${l.product_no}`;
+        const status = l.status === 'Sold' ? LINE_STATUS_FOR_LIFECYCLE[l.lifecycle] : l.status;
+        if (l.archived_at !== null) {
+          return { kind: 'conflict', msg: `${ref} is on an archived order — unarchive it to reopen this sale` };
+        }
+        if (!isSellableLineStatus(status)) {
+          return { kind: 'conflict', msg: `${ref} is not sellable (status=${status}), so its units can't go back to it` };
+        }
+        restored.push({ id: l.id, status });
       }
     }
 
@@ -1536,6 +1593,14 @@ sellOrders.post('/:id/status', async (c) => {
       if (missing.length > 0) return { kind: 'needsSignoff', missing: missing.map(m => m.name) };
     }
 
+    // A reopen's reason also lands on the order itself as an appended notes
+    // line — the events timeline alone is too easy to miss. Prior notes are
+    // preserved; each reopen cycle appends its own line.
+    const withReopenLine = () => {
+      const line = `Reopened: ${body.note!.trim()}`;
+      return tx`CASE WHEN notes IS NULL OR notes = '' THEN ${line} ELSE notes || ${'\n\n' + line} END`;
+    };
+
     // Apply the status update + (for close) the denormalized reason; (for
     // reopen) clear the reason.
     if (body.to === 'Closed') {
@@ -1547,17 +1612,11 @@ sellOrders.post('/:id/status', async (c) => {
          WHERE id = ${id}
       `;
     } else if (reopening) {
-      // The reopen reason also lands on the order itself as an appended notes
-      // line — the events timeline alone is too easy to miss. Prior notes are
-      // preserved; each reopen cycle appends its own line.
-      const reopenLine = `Reopened: ${body.note!.trim()}`;
       await tx`
         UPDATE sell_orders
            SET status = 'Draft',
                close_reason_id = NULL,
-               notes = CASE WHEN notes IS NULL OR notes = ''
-                            THEN ${reopenLine}
-                            ELSE notes || ${'\n\n' + reopenLine} END,
+               notes = ${withReopenLine()},
                updated_at = NOW()
          WHERE id = ${id}
       `;
@@ -1566,9 +1625,21 @@ sellOrders.post('/:id/status', async (c) => {
       // re-counted.
       await tx`DELETE FROM sell_order_signoffs WHERE sell_order_id = ${id}`;
       await tx`DELETE FROM sell_order_packs WHERE sell_order_id = ${id}`;
+    } else if (reopeningSale) {
+      // Not a sale until it is Done again, which dates it afresh. Sign-offs
+      // stay: they approved the order as it stood, and an edit while it is
+      // reopened asks for them again.
+      await tx`
+        UPDATE sell_orders
+           SET status = 'Awaiting payment',
+               done_at = NULL,
+               notes = ${withReopenLine()},
+               updated_at = NOW()
+         WHERE id = ${id}
+      `;
     } else {
-      // done_at is the date the sale belongs to (dashboard, contributions).
-      // Done is terminal, so it is set here once and never cleared.
+      // done_at is the date the sale belongs to (dashboard, contributions),
+      // stamped each time the order becomes Done.
       await tx`
         UPDATE sell_orders
            SET status = ${body.to}, updated_at = NOW(),
@@ -1582,7 +1653,9 @@ sellOrders.post('/:id/status', async (c) => {
     // Draft is intentionally excluded: reopen-to-Draft notes live in
     // sell_order_events so successive reopen cycles don't overwrite each
     // other (status_meta PK is sell_order_id + status, single row per pair).
-    if (META_STATUSES.has(body.to)) {
+    // A reopened sale is excluded for the same reason: the evidence it took
+    // into Awaiting payment stays, and the reopen note lives in its event.
+    if (META_STATUSES.has(body.to) && !reopeningSale) {
       await tx`
         INSERT INTO sell_order_status_meta (sell_order_id, status, note, set_at, set_by)
         VALUES (${id}, ${body.to}, ${body.note ?? null}, NOW(), ${u.id})
@@ -1601,16 +1674,51 @@ sellOrders.post('/:id/status', async (c) => {
         note: body.note ?? null,
         fromStatus: cur.status,
       });
-    } else if (reopening) {
+    } else if (reopening || reopeningSale) {
       await writeSellOrderEvent(tx, id, u.id, 'reopened', {
         note: body.note ?? null,
-        fromStatus: 'Closed',
+        fromStatus: cur.status,
       });
     } else {
       await writeSellOrderEvent(tx, id, u.id, 'status_changed', {
         from: cur.status,
         to: body.to,
       });
+    }
+
+    if (reopeningSale) {
+      // The reverse of Done's consumption below. A lot the sale only dented
+      // gets its units added back; a sold-out lot kept its qty when it went
+      // Sold, and other sales may have taken some of it first, so it holds
+      // exactly what this order took. qty_purchased already holds what was
+      // bought, so it is left alone.
+      const goodsFollowsLines = await soldSourceGoodsVerdicts(tx, id);
+      await tx`
+        WITH back AS (
+          UPDATE order_lines ol
+             SET qty    = CASE WHEN ol.status = 'Sold' THEN s.q ELSE ol.qty + s.q END,
+                 status = r.status
+            FROM (
+              SELECT inventory_id, SUM(qty)::int AS q
+              FROM sell_order_lines
+              WHERE sell_order_id = ${id} AND inventory_id IS NOT NULL AND qty > 0
+              GROUP BY inventory_id
+            ) s
+            JOIN unnest(${restored.map(r => r.id)}::uuid[], ${restored.map(r => r.status)}::text[])
+                 AS r(id, status) ON r.id = s.inventory_id
+           WHERE s.inventory_id = ol.id
+          RETURNING ol.id AS line_id, ol.qty AS remaining, s.q AS returned
+        )
+        INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
+        SELECT b.line_id, ${u.id}::uuid, 'unsold',
+               jsonb_build_object('returnedQty', b.returned, 'remainingQty', b.remaining,
+                                  'sellOrder', ${id}::text)
+        FROM back b
+      `;
+      for (const [orderId, isMirror] of goodsFollowsLines) {
+        await syncOrderGoodsTotal(tx, orderId, isMirror);
+      }
+      await retractSaleDataPoints(tx, id);
     }
 
     if (body.to === 'Done') {
@@ -1621,21 +1729,8 @@ sellOrders.post('/:id/status', async (c) => {
       // stay sellable. Aggregated by inventory_id so multiple lines hitting
       // the same source net out.
       //
-      // Consuming stock moves qty, which is an input to each source PO's
-      // derived goods total. The mirror verdict has to be taken before the
-      // decrement — afterwards a stale mirror reads as a negotiated lot price
-      // and that PO's total_cost pins itself against its lines for good.
       // Lines held at 0 sold nothing: they move no stock and owe no commission.
-      const sourceOrders = await tx<{ order_id: string }[]>`
-        SELECT DISTINCT l.order_id
-        FROM sell_order_lines sol
-        JOIN order_lines l ON l.id = sol.inventory_id
-        WHERE sol.sell_order_id = ${id} AND sol.inventory_id IS NOT NULL AND sol.qty > 0
-      `;
-      const goodsFollowsLines = new Map<string, boolean>();
-      for (const o of sourceOrders) {
-        goodsFollowsLines.set(o.order_id, await goodsTotalIsMirror(tx, o.order_id));
-      }
+      const goodsFollowsLines = await soldSourceGoodsVerdicts(tx, id);
 
       // The decrement and its audit rows are one statement: `sold` feeds the
       // inserts directly, with the same detail keys each row used to be
