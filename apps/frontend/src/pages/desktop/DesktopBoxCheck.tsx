@@ -67,7 +67,7 @@ type Props = {
 type Undo =
   | { kind: 'check'; lineId: string; prev: LineCheck; msg: string }
   // The prices a sheet replaced, put back one write each.
-  | { kind: 'prices'; prev: { lineId: string; price: number | null }[]; msg: string };
+  | { kind: 'prices'; prev: { lineId: string; price: number | null; applied: number }[]; msg: string };
 // A sell order sheet read but not applied: its matches stand on the rows
 // until Apply or Cancel.
 type Sheet = { file: File; currency: Currency; data: SheetPreview };
@@ -242,19 +242,30 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
 
   const applyUndo = () => {
     if (!undo || !ready) return;
+    // Not over another batch of price writes; the toast stays for a retry.
+    if (undo.kind === 'prices' && (sheetBusy || filling)) return;
     setUndo(null);
     if (undo.kind === 'prices') {
       void (async () => {
-        for (const p of undo.prev) {
-          const l = lineById.get(p.lineId);
-          if (l) await savePrice(l, p.price);
+        setSheetBusy(true);
+        try {
+          for (const p of undo.prev) {
+            const l = lineById.get(p.lineId);
+            // A price typed since the sheet's went in is the newer word.
+            const now = l ? priceOf(l) : null;
+            if (!l || now == null || Math.round(now * 100) !== Math.round(p.applied * 100)) continue;
+            if (await savePrice(l, p.price)) {
+              setSources(m => {
+                const next = new Map(m);
+                next.delete(p.lineId);
+                return next;
+              });
+            }
+          }
+        } finally {
+          setSheetBusy(false);
         }
       })();
-      setSources(m => {
-        const next = new Map(m);
-        for (const p of undo.prev) next.delete(p.lineId);
-        return next;
-      });
       return;
     }
     save(undo.prev);
@@ -343,12 +354,21 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     if (!next.delete(lineId)) next.add(lineId);
     return next;
   });
+  // A price typed over the sheet's on a row is the manager's: it is saved and
+  // held against the sheet, as Keep holds one. A blank leaves the line unpriced.
+  const typeOverSheet = (l: OrderLine, v: number | null, sheetPrice: number) => {
+    if (v !== null && Math.round(v * 100) === Math.round(sheetPrice * 100)) return;
+    setKept(s => new Set(s).add(l.id));
+    void savePrice(l, v).then(ok => {
+      if (!ok) setKept(s => { const next = new Set(s); next.delete(l.id); return next; });
+    });
+  };
   // One write each, as Fill from market does, so one refusal leaves the rest
   // priced and Undo knows exactly which prices to put back.
   const applySheet = async () => {
     if (!ready || !sheet || !plan || sheetBusy || plan.writes.length === 0) return;
     setSheetBusy(true);
-    const prev: { lineId: string; price: number | null }[] = [];
+    const prev: { lineId: string; price: number | null; applied: number }[] = [];
     let repriced = 0;
     try {
       for (const w of plan.writes) {
@@ -356,7 +376,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
         if (!l) continue;
         const was = priceOf(l);
         if (await savePrice(l, w.price)) {
-          prev.push({ lineId: l.id, price: was });
+          prev.push({ lineId: l.id, price: was, applied: w.price });
           if (isPricedSellPrice(was)) repriced += 1;
         }
       }
@@ -790,24 +810,18 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
               {sp?.kind === 'diff' && <span className="bc-price-was mono">{fmtUSD(sp.was, locale)}</span>}
               <span className="bc-price-sign">$</span>
               {incoming ? (
-                // The sheet's figure, not written yet: Apply or Cancel decides it.
-                <input
-                  ref={el => { if (el) priceRefs.current.set(l.id, el); else priceRefs.current.delete(l.id); }}
-                  className="bc-price-in incoming"
-                  type="text"
-                  readOnly
-                  aria-label={t('bcPriceInput', { pn })}
-                  value={incoming.price.toFixed(2)}
+                // The sheet's figure, not written yet: Apply writes it, and a
+                // price typed over it is the manager's own.
+                <PriceField
+                  inputRef={el => { if (el) priceRefs.current.set(l.id, el); else priceRefs.current.delete(l.id); }}
+                  value={incoming.price}
+                  suggestion={null}
+                  incoming
+                  disabled={!ready || sheetBusy}
+                  label={t('bcPriceInput', { pn })}
                   onFocus={() => setSelectedId(l.id)}
-                  onKeyDown={e => {
-                    if (e.nativeEvent.isComposing || e.metaKey || e.ctrlKey || e.altKey) return;
-                    // A scanner typing a label here: it goes to the scan box.
-                    if (e.key.length === 1 && e.key.trim()) {
-                      e.preventDefault();
-                      e.currentTarget.blur();
-                      startScan(e.key);
-                    }
-                  }}
+                  onCommit={v => typeOverSheet(l, v, incoming.price)}
+                  onScanKey={startScan}
                 />
               ) : (
                 <PriceField
@@ -1006,19 +1020,29 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
         <div
           className="card bc-list-card"
           onDragEnter={e => {
-            if (!ready || sheetBusy || !hasFiles(e)) return;
+            // A sheet waiting to be applied is replaced only through Cancel.
+            if (!ready || sheetBusy || sheet || !hasFiles(e)) return;
             e.preventDefault();
             dragDepth.current += 1;
             setDragging(true);
           }}
-          onDragOver={e => { if (dragging) e.preventDefault(); }}
+          onDragOver={e => {
+            if (!hasFiles(e)) return;
+            // A file the list won't take must not fall through to the
+            // browser, which would open it in place of the page.
+            e.preventDefault();
+            if (!dragging) e.dataTransfer.dropEffect = 'none';
+          }}
           onDragLeave={() => {
             if (!dragging) return;
             dragDepth.current -= 1;
             if (dragDepth.current <= 0) { dragDepth.current = 0; setDragging(false); }
           }}
           onDrop={e => {
-            if (!dragging) return;
+            if (!dragging) {
+              if (hasFiles(e)) e.preventDefault();
+              return;
+            }
             dragDepth.current = 0;
             setDragging(false);
             if (e.isDefaultPrevented()) return;
@@ -1506,9 +1530,11 @@ function CountField({ value, max, disabled, label, onFocus, onCommit, onScanKey 
 // field, never per keystroke. Unpriced (no price, or the 0 that also means
 // none), the field shows the market's value as a ghost, and Enter on the empty
 // field takes it; a price typed back to blank unprices the line.
-function PriceField({ value, suggestion, disabled, label, inputRef, onFocus, onCommit, onScanKey }: {
+function PriceField({ value, suggestion, incoming = false, disabled, label, inputRef, onFocus, onCommit, onScanKey }: {
   value: number | null;
   suggestion: number | null;
+  // Shows a sheet's price waiting to be applied.
+  incoming?: boolean;
   disabled: boolean;
   label: string;
   inputRef: (el: HTMLInputElement | null) => void;
@@ -1529,7 +1555,7 @@ function PriceField({ value, suggestion, disabled, label, inputRef, onFocus, onC
   return (
     <input
       ref={inputRef}
-      className="bc-price-in"
+      className={'bc-price-in' + (incoming ? ' incoming' : '')}
       type="text"
       inputMode="decimal"
       autoComplete="off"
@@ -1619,7 +1645,9 @@ function SheetNote({ plan, figure, reason, disabled, onKeep }: {
           disabled={disabled}
           onClick={onKeep}
         >
-          {t(kept ? 'bcSheetKeeping' : 'bcSheetKeep', { price: fmtUSD(plan.was, locale) })}
+          {plan.was === null
+            ? t('bcSheetKeptBlank')
+            : t(kept ? 'bcSheetKeeping' : 'bcSheetKeep', { price: fmtUSD(plan.was, locale) })}
         </button>
       )}
     </>

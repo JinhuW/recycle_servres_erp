@@ -17,6 +17,23 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.313.1] - 2026-10-22
+
+Fixes from the review of the Review mode sell order sheet (RS-348), made
+before it goes to production. Undo after Apply no longer overwrites a price
+typed after the Apply: it restores only the lines still at the sheet's price,
+and waits out any other batch of price writes. A sheet's incoming price can
+now be typed over. Before, `p` focused a read-only field and the digits went
+on to filter the list. A typed price, or a blank, is saved and held out of
+Apply the way *Keep* holds one. A file dropped on the list while a sheet waits
+is refused rather than silently replacing it and its *Keep* choices, and a
+file the list won't take no longer opens in the browser in place of the page.
+The *skipped* count names parts the sheet prices that the PO lacks, not every
+row: a repeated or blank row added to it before. A part priced on one row and
+listed at 0 on another, a withdrawn bid, is now a conflict the manager
+decides, not the price. The Market import and the sell order sheet now read
+their upload through one function, `readPriceSheetUpload`.
+
 ## [1.313.0] - 2026-10-22
 
 Review mode now prices a PO from the buyer's filled sell order sheet
