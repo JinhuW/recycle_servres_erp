@@ -2,13 +2,13 @@
 id: RS-348
 title: Fix the sell order sheet review findings before the v1.313 release
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-22
 reporter: jinhu
 branch: JinhuW/coney
-pr:
-version:
+pr: 822
+version: v1.313.1
 related: [RS-347]
 ---
 
