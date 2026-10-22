@@ -2,13 +2,13 @@
 id: RS-350
 title: Accounting review mode: another manager signs off each entry
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-22
 reporter: jinhu
 branch: JinhuW/capricorn
-pr:
-version:
+pr: 827
+version: 1.315.0
 related: [RS-340, RS-349]
 ---
 
