@@ -49,7 +49,7 @@ portal was removed in v1.191.0; no bid had ever been placed through it.
   since the name alone would advertise the feature. Whole-endpoint manager
   features (sell orders, customers, transfers, activity, members,
   bank and internal transactions, the Accounting book (v1.310.0), tracker,
-  coordinator, connectors, FX rates, inventory export and analysis, a line's
+  the WeChat market (v1.312.0), coordinator, connectors, FX rates, inventory export and analysis, a line's
   linked sell orders) answer 403. The
   Facebook account pool (`/api/facebook-pool`, v1.262.0) is the exception
   under Monitors: every role reads the rack and may take, return and report,
@@ -1436,7 +1436,8 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
     between, `POST /api/sell-orders/:id/signoff` answers 409 and the card
     re-reads the order.
   - Who is required is worked out live: every active manager. Reopening a
-    Closed order clears its sign-offs. History logs each sign-off and
+    Closed order clears its sign-offs; reopening a Done one keeps them
+    (v1.311.0), so an order put back unchanged goes straight to Done again. History logs each sign-off and
     withdrawal, and a sign-off notifies the managers still to sign. Orders
     Done before v1.226.0 carry none.
 - A **draft sell order is a proposal**; inventory is claimed only on promotion
@@ -1456,6 +1457,37 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   - **What it doesn't do.** It asks for no evidence, and it can't be archived.
   - **Numbering.** Being past Draft, inventory added to it appends its #
     (above).
+- **A Done order can be reopened to Awaiting payment** (v1.311.0, RS-343), to
+  correct a sale marked Done by mistake or with a wrong line or price. Any
+  manager can do it from *Reopen* on the order page with a note; the note
+  lands in History and is appended to the order's notes, as a Closed reopen's
+  does. The request has to name the order as Done (`from: 'Done'`), so a save
+  from an editor opened before the order went Done can't reopen it
+  (v1.312.1). The editor's own saves name the status they were opened on too,
+  and a move someone else made since is refused.
+  - **The stock comes back.** Every unit the sale consumed returns to its lot,
+    and the order holds it again as any Awaiting-payment order does, so no
+    other order can take it meanwhile. A lot gets back what the sale actually
+    took, never more than it had before the sale (v1.312.1). A sold-out lot
+    leaves Sold for the status it was sold from, read off its `sold` event's
+    `priorStatus` (v1.312.1; a sale recorded earlier falls back to its PO's
+    line status), holding what this order took, since another sale may have
+    taken the rest. Each lot's history reads "Sale reopened +N". The PO's
+    goods total doesn't move.
+  - **So does the rest of Done.** The sale's market data points are
+    withdrawn, and a part whose last price came from them falls back to its
+    previous one. History lists the withdrawn prices on the reopen (v1.312.1).
+    The order leaves the dashboard and contributions until it is Done again.
+    It keeps its sale date throughout, so a corrected sale stays in the
+    period it was made in (v1.312.1).
+  - **Refused, changing nothing,** for an archived order (unarchive it first),
+    while an after-sales case on it is open (v1.312.1), and when a lot can't
+    take its units back: its PO is archived or no longer at Reviewing or
+    Done, or the lot was archived. The refusal names the lot or the case.
+  - Done reopens to Awaiting payment only. Draft would drop the reservation,
+    and an after-sales case can't be opened on a Draft. A reopened sale goes
+    back to Done: it can't be Closed, and its page offers no Discard
+    (v1.312.1). Taking its goods back is an after-sales return.
 - Orders carry a payment receiver, creator-only reopen (v1.15.0) and a receiver
   column with a managers-only receiver rule (v1.16.0). The receiver can be
   reassigned from the detail view in any status, Done and Closed included —
@@ -2215,7 +2247,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   - A sale belongs to the day its sell order became Done
     (`sell_orders.done_at`), for the tiles, the chart and the contribution
     cards. Until then it was dated by `updated_at`, which a later note,
-    attachment or archive moved.
+    attachment or archive moved. A reopen and a second Done keep the first
+    date (v1.312.1).
   - A manager's realized cost and profit count a negotiated lot price: a
     $950 lot sold for $150 is a $800 loss, the same figure the PO page's
     Realized column shows. Commission stays on the line costs, because the
@@ -2317,6 +2350,52 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   - Since v1.292.0, each version is labelled *verdict first* or *reasoning
     first*. That's its response schema. The tracker has asked for the
     reasoning first since RS-312.
+- **WeChat market** — **Monitors ▸ WeChat** (`/wechat`, v1.312.0), managers
+  only. memtrade, a tool on the office Mac, reads the team's WeChat trading
+  groups and builds a daily memory-module report for each 08:00 → 08:00 ET
+  window. It pushes each day here after its 08:00 run and again whenever it
+  redoes a day; a push replaces the whole day. The ERP only stores and shows
+  it: nothing feeds Market values or any order.
+  - One report day at a time, picked from a dropdown or with the arrows.
+    The newest is `/wechat`; `/wechat/<date>` links to one day. Cards show
+    buyers, sellers, trade posts and group messages, with the change in
+    buyers and sellers against the report day before.
+  - Claude's market notes sit beside **Most wanted** and **Most offered**,
+    the specs with the most buyers and sellers. Clicking one shows it on
+    the board, turning *Priced lines only* off when the spec has no price
+    (v1.312.2).
+  - The **price board** lists every line by brand & code (三星 64G 5600 DM0,
+    grouped under brand headers), by spec (64G 5600) or by part code
+    (32G DM0). Each line shows the bid (buyers) and ask (sellers) median
+    with its tax basis, how many traders quoted and their range, a bar of
+    both sides' ranges with the spread or a crossed market, buyers and
+    sellers, memtrade's supply read (short to glut), and each median's
+    change against the day before. Changes and spreads compare one tax
+    basis only: a 含税 and a 未税 price are never set against each other.
+    Search and *Priced lines only* filter it. A quote with no brand sits
+    under one *Unbranded* header whether memtrade wrote 未注明 or nothing
+    (v1.312.2).
+  - Opening a line lists its posts, newest first and up to 100: who, what
+    price and quantity, the raw line, which groups and how many copies.
+    *Bids* and *Asks* ask for each side's own newest 100 (v1.312.2).
+    Beside them are the bid and ask medians over the last 30 report days,
+    drawn in the one tax basis most of them were quoted in (v1.312.2), and
+    every price by tax basis.
+  - A group with no name shows its id, and a sender with no display name
+    their WeChat id (v1.312.2). A link to a date that can't exist reads as
+    no report for that day.
+  - A banner says when memtrade fell back to its rules for a day (Claude
+    was unavailable), when only part of a day's posts arrived, and repeats
+    memtrade's own warnings. **Groups read** lists each group's messages
+    that day and marks the ones joined in it.
+  - The push (`/api/wechat-market/push/*`) takes a Bearer token with the
+    `wechat:write` scope from a service client a manager creates under
+    Settings → Connectors. The day comes first, then its posts in batches
+    of 500. Since v1.312.2 the day's push answers with a `pushId`. A batch
+    that names an earlier one is refused (409 `day_replaced`), so a batch
+    left over from a run the day has since replaced can't land in the new
+    one. Timestamps must be ISO 8601 with a zone, as `toISOString()` writes
+    them.
 - **Coordinator** — the Facebook fleet, reached from **Monitors ▸ Facebook**
   in the sidebar (v1.207.0), managers only. Since v1.263.0 the Fleet tab
   shares the Account pool tab's chrome: a status legend (Live, Stale, Needs
@@ -2681,6 +2760,9 @@ inventory search, sell-order draft creation.
   else keeps `market:read` only (v1.67.x). Manager-minted service clients are
   exempt. The phone shell shows the same consent screen (v1.239.2).
 - Purchasers can reach the connect page (v1.66.0).
+- `wechat:write` (v1.312.0) is for memtrade's service client, which pushes the
+  WeChat market report. Self-registration never grants it, even to a client
+  that names no scope; a manager mints it under Settings → Connectors.
 - Per-tool gating lives in `TOOL_SCOPES` and filters both `tools/list` and
   `tools/call` — a connector missing tools has a scope problem, not a missing
   tool.
@@ -2933,7 +3015,8 @@ removed in v1.191.0.
 - **The sidebar has a second level** (v1.207.0). A parent entry opens while
   you are on one of its pages and is one row with a › caret everywhere else;
   clicking it opens its first child. The one parent today is **Oversight ▸
-  Monitors**, holding **Facebook** (`/fleet`) and **Reddit** (`/tracker`). In
+  Monitors**, holding **Facebook** (`/fleet`), **Reddit** (`/tracker`) and, since
+  v1.312.0, **WeChat** (`/wechat`). In
   the icon rail the caret hides and the open children show as icons.
 - **Menus and record references are real links** (v1.144.0). The sidebar,
   the Inventory ▸ Analysis strip, the phone tab bar and Home quick links, and

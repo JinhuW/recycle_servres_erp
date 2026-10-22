@@ -36,4 +36,5 @@ relative to the repo root.
   *Cloudflare Worker deploys*.
 - The Monitors pages (`DesktopTracker.tsx`, `DesktopCoordinator.tsx`,
   `FleetAccounts.tsx`, `FleetWatch.tsx`) render tracker data through the
-  backend proxies — root AGENTS.md → *Contracts*.
+  backend proxies — root AGENTS.md → *Contracts*. `DesktopWechat.tsx` is the
+  exception: it reads the ERP's own tables, which memtrade pushes into.

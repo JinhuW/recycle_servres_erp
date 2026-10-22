@@ -48,6 +48,45 @@ export async function appendPriceEvent(
   };
 }
 
+export type WithdrawnPrice = { partNumber: string; price: number };
+
+/**
+ * Withdraw every event recorded under `source`. A part whose current reading
+ * came from one falls back to its newest remaining event, or to no reading.
+ * Returns the points it removed.
+ */
+export async function retractPriceEvents(
+  tx: postgres.TransactionSql,
+  source: string,
+): Promise<WithdrawnPrice[]> {
+  // One statement: the DELETE and the fallback read see the same snapshot, in
+  // which the withdrawn rows still exist — hence the explicit source filter.
+  const rows = await tx<{ part_number: string; price: number }[]>`
+    WITH gone AS (
+      DELETE FROM ref_price_events WHERE source = ${source}
+      RETURNING ref_price_id, price
+    ),
+    reset AS (
+      UPDATE ref_prices rp
+         SET last_price        = prev.price,
+             last_price_at     = prev.created_at,
+             last_price_source = prev.source,
+             updated_at        = NOW()
+        FROM (SELECT DISTINCT ref_price_id FROM gone) g
+        LEFT JOIN LATERAL (
+          SELECT e.price, e.created_at, e.source FROM ref_price_events e
+          WHERE e.ref_price_id = g.ref_price_id AND e.source <> ${source}
+          ORDER BY e.created_at DESC LIMIT 1
+        ) prev ON TRUE
+       WHERE rp.id = g.ref_price_id AND rp.last_price_source = ${source}
+    )
+    SELECT rp.part_number, g.price::float AS price
+    FROM gone g JOIN ref_prices rp ON rp.id = g.ref_price_id
+    ORDER BY rp.part_number
+  `;
+  return rows.map(r => ({ partNumber: r.part_number, price: r.price }));
+}
+
 /**
  * The same write for a whole price list: one INSERT and one UPDATE, so the
  * caller's row locks are held for two statements rather than two per price.

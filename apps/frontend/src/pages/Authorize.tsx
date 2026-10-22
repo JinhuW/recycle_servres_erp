@@ -24,6 +24,7 @@ const SCOPE_LABEL_KEYS: Record<string, string> = {
   'market:write': 'connectorsScopeMarketWrite',
   'sellorder:read': 'connectorsScopeSellOrderRead',
   'sellorder:write': 'connectorsScopeSellOrderWrite',
+  'wechat:write': 'connectorsScopeWechatWrite',
 };
 
 type Pending = {

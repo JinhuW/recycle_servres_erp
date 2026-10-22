@@ -2007,3 +2007,505 @@ tr.rt-off td:not(:nth-last-child(-n + 2)) {
   justify-content: flex-end;
   gap: 8px;
 }
+
+/* ─── Monitors ▸ WeChat ─────────────────────────────────────────────────────
+   One colour per side of the market, everywhere on the page: blue is what
+   buyers bid, green what sellers ask. Text gets the deeper mix of each. */
+.wx-page {
+  --wx-bid: var(--info);
+  --wx-ask: var(--pos);
+  --wx-bid-text: color-mix(in oklch, var(--info) 70%, var(--fg));
+  --wx-ask-text: var(--accent-strong);
+}
+/* The notes and the two rankings sit above the board, which needs the full
+   width for its seven columns. The rankings set the height; like the Fleet
+   aside, the notes never do, and scroll inside it when Claude wrote a lot. */
+.wx-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  gap: 16px;
+}
+.wx-overview > .wx-notes {
+  grid-row: 1 / 3;
+  contain: size;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.wx-notes ul {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.wx-banner {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 11px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  color: var(--fg-muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.wx-banner > svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.wx-banner.wx-warn {
+  background: var(--warn-soft);
+  border-color: transparent;
+  color: var(--warn-strong);
+}
+.wx-banner ul {
+  margin: 0;
+  padding-left: 16px;
+}
+.wx-empty {
+  display: flex;
+  gap: 12px;
+  color: var(--fg-muted);
+}
+.wx-empty b {
+  color: var(--fg);
+}
+.wx-empty p {
+  margin: 4px 0 0;
+  max-width: 65ch;
+  line-height: 1.55;
+}
+.wx-daynav {
+  align-items: center;
+}
+.wx-daynav .select {
+  width: auto;
+  min-width: 168px;
+  height: 32px;
+  font-size: 12.5px;
+  padding: 0 28px 0 12px;
+}
+.kpi .wx-dot {
+  margin: 0 6px 1px 0;
+}
+
+/* The board */
+.wx-board .fp-toolbar h2 {
+  margin-right: 4px;
+}
+.wx-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.wx-search {
+  position: relative;
+  flex: 0 1 220px;
+}
+.wx-search > svg {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--fg-subtle);
+}
+.wx-search > .input {
+  height: 30px;
+  padding-left: 29px;
+  font-size: 12.5px;
+}
+.wx-table .wx-num,
+.wx-table th.wx-num {
+  text-align: right;
+}
+.wx-num .fp-holder {
+  align-items: flex-end;
+}
+.wx-row {
+  cursor: pointer;
+}
+.wx-row:hover td,
+.wx-row.wx-open td {
+  background: var(--bg-soft);
+}
+.wx-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.wx-brand td {
+  padding: 13px 12px 7px;
+  font-size: 12.5px;
+  font-weight: 600;
+  background: var(--bg-elev);
+}
+.wx-brand span {
+  margin-left: 8px;
+  font-weight: 400;
+  color: var(--fg-subtle);
+  font-size: 11px;
+}
+.wx-line {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12.5px;
+}
+.wx-line b {
+  font-size: 13px;
+  font-weight: 600;
+}
+.wx-code {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--bg-soft);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.wx-price {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+.wx-price b {
+  font-size: 13px;
+  font-weight: 600;
+}
+.wx-price em,
+.wx-buckets em {
+  font-style: normal;
+  font-size: 10.5px;
+  color: var(--fg-subtle);
+}
+.wx-price.wx-buy b,
+.wx-bid-n,
+.wx-ev-head .wx-buy {
+  color: var(--wx-bid-text);
+}
+.wx-price.wx-sell b,
+.wx-ask-n,
+.wx-ev-head .wx-sell {
+  color: var(--wx-ask-text);
+}
+.wx-up,
+.wx-down {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.wx-up {
+  color: var(--pos);
+}
+.wx-down {
+  color: var(--neg);
+}
+.wx-changes {
+  font-size: 11.5px;
+  gap: 2px;
+}
+.wx-changes > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.wx-changes .wx-dot {
+  width: 5px;
+  height: 5px;
+}
+
+/* A two-lane range bar: each side's lowest to highest quote, its median as a
+   tick. Lanes overlapping is buyers and sellers already agreeing. */
+.wx-ladder {
+  position: relative;
+  display: block;
+  width: 128px;
+  height: 12px;
+  margin: 2px 0 3px;
+  border-radius: 3px;
+  background: var(--bg-soft);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.wx-range {
+  position: absolute;
+  height: 3px;
+  border-radius: 2px;
+  opacity: 0.5;
+}
+.wx-range.wx-buy {
+  top: 2px;
+  background: var(--wx-bid);
+}
+.wx-range.wx-sell {
+  top: 7px;
+  background: var(--wx-ask);
+}
+.wx-tick {
+  position: absolute;
+  width: 2px;
+  height: 6px;
+  margin-left: -1px;
+  border-radius: 1px;
+}
+.wx-tick.wx-buy {
+  top: 0;
+  background: var(--wx-bid);
+}
+.wx-tick.wx-sell {
+  top: 6px;
+  background: var(--wx-ask);
+}
+.wx-dot {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+}
+.wx-dot.wx-buy {
+  background: var(--info);
+}
+.wx-dot.wx-sell {
+  background: var(--pos);
+}
+
+/* One line, opened */
+.wx-detail-row > td {
+  padding: 0;
+  white-space: normal;
+  background: var(--bg-soft);
+  cursor: default;
+}
+.wx-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 22px;
+  padding: 12px 16px 18px;
+}
+.wx-seg-sm button {
+  padding: 3px 9px;
+  font-size: 11.5px;
+}
+.wx-evidence {
+  list-style: none;
+  margin: 8px 0 6px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 380px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.wx-evidence li {
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr);
+  gap: 10px;
+  padding: 8px 11px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+}
+.wx-evidence li > .wx-dot {
+  margin-top: 5px;
+}
+.wx-ev-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+.wx-ev-head time {
+  margin-left: auto;
+  color: var(--fg-subtle);
+  font-size: 11px;
+}
+.wx-raw {
+  margin: 3px 0 2px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.wx-side-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.wx-chart {
+  padding: 10px 12px 6px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.wx-chart svg {
+  display: block;
+  width: 100%;
+  height: 96px;
+  overflow: visible;
+}
+.wx-chart path {
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+.wx-line-buy {
+  stroke: var(--wx-bid);
+}
+.wx-line-sell {
+  stroke: var(--wx-ask);
+}
+.wx-pt-buy,
+.wx-pt-sell {
+  fill: var(--bg-elev);
+  stroke-width: 1.4;
+  vector-effect: non-scaling-stroke;
+}
+.wx-pt-buy {
+  stroke: var(--wx-bid);
+}
+.wx-pt-sell {
+  stroke: var(--wx-ask);
+}
+.wx-chart-axis {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 10.5px;
+  color: var(--fg-subtle);
+}
+.wx-chart-empty {
+  margin: 0;
+  font-size: 12px;
+}
+.wx-buckets {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  border-collapse: separate;
+  overflow: hidden;
+}
+.wx-buckets td {
+  padding: 6px 10px;
+}
+.wx-buckets td:first-child {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.wx-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+.wx-facts > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+/* Side panel */
+.wx-notes ul {
+  margin: 0;
+  padding: 12px 18px 16px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--fg-muted);
+}
+.wx-notes b {
+  color: var(--fg);
+  font-weight: 600;
+}
+.wx-notes .card-head,
+.wx-top .card-head {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.wx-top ol {
+  list-style: none;
+  margin: 0;
+  padding: 6px 8px 10px;
+}
+.wx-top button {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 64px;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 8px 9px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.wx-top button:hover {
+  background: var(--bg-soft);
+}
+.wx-top-key {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wx-top-n {
+  font-size: 11px;
+  color: var(--fg-subtle);
+}
+.wx-top-p {
+  font-size: 12px;
+  text-align: right;
+}
+.wx-bar {
+  position: absolute;
+  left: 8px;
+  bottom: 3px;
+  max-width: calc(100% - 16px);
+  height: 2px;
+  border-radius: 2px;
+  opacity: 0.6;
+}
+.wx-bar.wx-buy {
+  background: var(--info);
+}
+.wx-bar.wx-sell {
+  background: var(--pos);
+}
+tr.wx-quiet td {
+  color: var(--fg-subtle);
+}
+
+@media (max-width: 1180px) {
+  .wx-overview {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .wx-overview > .wx-notes {
+    grid-row: auto;
+    grid-column: 1 / -1;
+    contain: none;
+  }
+  .wx-detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

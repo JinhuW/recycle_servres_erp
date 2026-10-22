@@ -218,7 +218,21 @@ function summarize(event: SellOrderEvent, locale: string, t: TFn): React.ReactNo
     }
     case 'reopened': {
       const note = d.note ? <> · "{String(d.note)}"</> : null;
-      return <>{t('historyReopened')}{note}</>;
+      // A reopened sale lands in Awaiting payment, not Draft, so it names the move.
+      const move = d.fromStatus === 'Done'
+        ? <>: <b>{lifecycleLabel(t, 'Done')}</b> → <b>{lifecycleLabel(t, 'Awaiting payment')}</b></>
+        : null;
+      // The sale's market prices, withdrawn with it; their events are gone, so
+      // this is where they are still listed.
+      const prices = Array.isArray(d.withdrawnPrices)
+        ? d.withdrawnPrices as { partNumber: string; price: number }[]
+        : [];
+      const withdrawn = prices.length > 0
+        ? <> · <span title={prices.map(p => `${p.partNumber} ${fmtUSD(p.price, locale)}`).join('\n')}>
+            {t(prices.length === 1 ? 'historyWithdrewPricesOne' : 'historyWithdrewPricesMany', { n: prices.length })}
+          </span></>
+        : null;
+      return <>{t('historyReopened')}{move}{note}{withdrawn}</>;
     }
     case 'signed_off':        return <>{t('historySignedOff')}</>;
     case 'signoff_withdrawn': return <>{t('historySignoffWithdrawn')}</>;

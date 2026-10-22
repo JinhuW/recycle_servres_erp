@@ -43,6 +43,7 @@ const DesktopInternalTxns = lazy(() => import('./pages/desktop/DesktopInternalTx
 const DesktopAccounting = lazy(() => import('./pages/desktop/DesktopAccounting').then(m => ({ default: m.DesktopAccounting })));
 const DesktopSettings = lazy(() => import('./pages/desktop/DesktopSettings').then(m => ({ default: m.DesktopSettings })));
 const DesktopTracker = lazy(() => import('./pages/desktop/DesktopTracker').then(m => ({ default: m.DesktopTracker })));
+const DesktopWechat = lazy(() => import('./pages/desktop/DesktopWechat').then(m => ({ default: m.DesktopWechat })));
 const DesktopCoordinator = lazy(() => import('./pages/desktop/DesktopCoordinator').then(m => ({ default: m.DesktopCoordinator })));
 const DesktopSubmit = lazy(() => import('./pages/desktop/DesktopSubmit').then(m => ({ default: m.DesktopSubmit })));
 const DesktopShipping = lazy(() => import('./pages/desktop/DesktopShipping').then(m => ({ default: m.DesktopShipping })));
@@ -198,7 +199,7 @@ export function DesktopApp() {
   }
 
   // Default to dashboard if a purchaser tried to navigate to a manager-only view.
-  const view2: DesktopView = user.role === 'purchaser' && (view === 'inventory' || view === 'analysis' || view === 'sellorders' || view === 'aftersales' || view === 'transfers' || view === 'websubmissions' || view === 'activity' || view === 'payments' || view === 'internaltx' || view === 'accounting' || view === 'tracker')
+  const view2: DesktopView = user.role === 'purchaser' && (view === 'inventory' || view === 'analysis' || view === 'sellorders' || view === 'aftersales' || view === 'transfers' || view === 'websubmissions' || view === 'activity' || view === 'payments' || view === 'internaltx' || view === 'accounting' || view === 'tracker' || view === 'wechat')
     ? 'dashboard'
     : view;
   // Review mode and Pack mode take over the whole window — no sidebar, no top
@@ -313,6 +314,7 @@ export function DesktopApp() {
             {view2 === 'internaltx' && <DesktopInternalTxns onToast={showToast} />}
             {view2 === 'accounting' && <DesktopAccounting onToast={showToast} />}
             {view2 === 'tracker'   && <DesktopTracker showToast={showToast} />}
+            {view2 === 'wechat'    && <DesktopWechat />}
             {view2 === 'coordinator' && <DesktopCoordinator showToast={showToast} />}
             {view2 === 'settings'   && <DesktopSettings showToast={showToast} />}
           </Suspense>

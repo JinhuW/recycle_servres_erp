@@ -368,6 +368,7 @@ export const DESKTOP_VIEW_TO_PATH = {
   internaltx: '/payments/internal',
   accounting: '/accounting',
   tracker:    '/tracker',
+  wechat:     '/wechat',
   coordinator: '/fleet',
   settings:   '/settings',
 } as const;
@@ -396,6 +397,7 @@ export function pathToDesktopView(path: string): DesktopViewId {
   if (path === '/payments' || match('/payments/po/:id', path) || match('/payments/so/:id', path)) return 'payments';
   if (path === '/accounting' || match('/accounting/:id', path)) return 'accounting';
   if (path === '/tracker') return 'tracker';
+  if (path === '/wechat' || matchWechatDay(path)) return 'wechat';
   if (path === '/fleet' || path === '/fleet/pool' || matchFleetWatch(path) || matchFleetWorker(path)) return 'coordinator';
   if (path === '/settings') return 'settings';
   return 'dashboard';
@@ -415,6 +417,16 @@ export function afterSalesNewPath(sellOrderId?: string): string {
 // its own screen on the phone).
 export function accountingEntryPath(id: string): string {
   return `/accounting/${encodeURIComponent(id)}`;
+}
+
+// One report day on Monitors ▸ WeChat; bare /wechat is the newest one.
+export function wechatDayPath(date: string): string {
+  return `/wechat/${encodeURIComponent(date)}`;
+}
+
+export function matchWechatDay(path: string): { date: string } | null {
+  const m = match('/wechat/:date', path);
+  return m && /^\d{4}-\d{2}-\d{2}$/.test(m.date) ? { date: m.date } : null;
 }
 
 // The fleet page's live-browser viewer for one Facebook worker. A sub-route of

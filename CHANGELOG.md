@@ -17,6 +17,90 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.312.2] - 2026-10-22
+
+Fixes from the review of the WeChat market page (RS-346), which reached `dev`
+after the release review had run. memtrade's push no longer fails on a WeChat
+group with no topic set or a sender with no display name: before, one such
+name rejected the whole day, and every day after it. The page shows the
+group's or sender's id in its place. A timestamp the database can't read is
+now a 400 naming the field, not a 500. The day's push answers with a
+`pushId`, and a point batch naming an earlier one is refused, so a batch left
+over from a run the day has since replaced can't land in the new one.
+memtrade can send it when it is next changed, and batches without it are
+taken as before. The day keeps its stored point count (migration 0195), so
+the day list no longer counts every day's points on each visit.
+
+On the page, *Bids* and *Asks* fetch each side's own newest posts. Before,
+they filtered the newest 100 of both, so a busy line's other side nearly
+vanished. The 30-day chart draws both sides in one tax basis. A spec picked
+from Most wanted or Most offered shows on the board even when nobody priced
+it. Unbranded quotes sit under one header, a mistyped date shows the
+no-report banner, and a day's spec lines are fetched once.
+
+## [1.312.1] - 2026-10-22
+
+Fixes from the release review of the Done-sale reopen (RS-345), before it
+reaches prod. The reopen now has to be asked for: the Reopen dialog says the
+order was Done, and a move to Awaiting payment that doesn't is refused. Before
+this, an editor opened while the order was Shipped could save after someone
+else marked it Done and reopen the sale without meaning to. The editor now
+names the status it was opened on as well, so any move someone else made in
+the meantime is refused instead of overridden.
+
+A reopen gives each lot back what the sale actually took from it. Done now
+records the lot's prior status and qty on its `sold` event. A lot the sale
+oversold no longer comes back with units it never had, and a sold-out lot
+returns to the status it was sold from, not to its PO's current stage, so
+confirmed stock can't read as unconfirmed. A reopen waits for an open
+after-sales case on the order to close. A reopened sale can only go back to
+Done; closing it would have left its payments and cases on an order that sold
+nothing. It also keeps its sale date, so correcting a September sale in
+November no longer moves its revenue and contribution into November.
+
+The sale's withdrawn market prices are listed on the reopen in History, since
+their events are deleted. The delete is indexed by source (migration 0194),
+so it no longer scans every price event while holding the order's locks. Only
+a reopen locks the source POs; ordinary moves to Awaiting payment don't. The
+lot change log shows the sold qty, which it had been reading from the wrong
+key, and is translated into Chinese.
+## [1.312.0] - 2026-10-22
+
+A new **Monitors ▸ WeChat** page shows the memory-module market in the team's
+WeChat trading groups, one report day at a time (RS-344). memtrade, the tool
+on the office Mac that reads those groups, already wrote a daily report to
+its own disk; it now pushes each day to the ERP after its 08:00 ET run, so
+managers can read it where they work.
+
+The page leads with the day's buyers and sellers against the day before,
+Claude's market notes and the most wanted and most offered specs. Below them
+the price board lists every module by brand and part code, by spec or by
+part code alone: what buyers bid and sellers ask, how many quoted, the
+spread, and each price's move since the day before, always within one tax
+basis. Opening a line shows the posts behind it and its last 30 days.
+
+memtrade signs in with a new `wechat:write` scope that only a
+manager-minted service client can hold; connector self-registration never
+grants it. A push replaces the whole day, so a day memtrade redoes (after
+Claude was unavailable, say) simply arrives again.
+
+## [1.311.0] - 2026-10-22
+
+A Done sell order can be reopened to Awaiting payment (RS-343). Until now Done
+was terminal, so a sale marked Done by mistake, or one with a wrong line or
+price, stayed that way. *Reopen* on a Done order's page takes a note, and any
+manager may use it.
+
+Reopening undoes what Done did. Every unit the sale consumed goes back to its
+lot, and the order reserves it again, so nothing else can take it while the
+sale is corrected. A sold-out lot leaves Sold holding exactly what this order
+took. The sale's market data points are withdrawn, and a part priced by them
+falls back to its previous reading. The order drops off the dashboard and
+contributions until it is Done again. Sign-offs are kept, so an order put back
+unchanged can go straight to Done; an edit asks for them again as it always
+has. The reopen is refused when the order is archived, or when a lot it would
+hand units back to is no longer sellable.
+
 ## [1.310.2] - 2026-10-21
 
 Fixes from the review of the new Accounting page (RS-342), which reached

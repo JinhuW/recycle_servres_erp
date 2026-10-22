@@ -40,19 +40,25 @@ describe('shownNav', () => {
     const m = monitors('dashboard');
     expect(m?.open).toBe(false);
     expect(m?.target).toBe('coordinator');
-    expect(m?.children.map(c => c.leaf.id)).toEqual(['coordinator', 'tracker']);
+    expect(m?.children.map(c => c.leaf.id)).toEqual(['coordinator', 'tracker', 'wechat']);
   });
 
   it('opens Monitors on the Facebook tracker and lights only Facebook', () => {
     const m = monitors('coordinator');
     expect(m?.open).toBe(true);
-    expect(m?.children.map(c => [c.leaf.id, c.active])).toEqual([['coordinator', true], ['tracker', false]]);
+    expect(m?.children.map(c => [c.leaf.id, c.active])).toEqual([['coordinator', true], ['tracker', false], ['wechat', false]]);
   });
 
   it('opens Monitors on the Reddit tracker and lights only Reddit', () => {
     const m = monitors('tracker');
     expect(m?.open).toBe(true);
-    expect(m?.children.map(c => [c.leaf.id, c.active])).toEqual([['coordinator', false], ['tracker', true]]);
+    expect(m?.children.map(c => [c.leaf.id, c.active])).toEqual([['coordinator', false], ['tracker', true], ['wechat', false]]);
+  });
+
+  it('opens Monitors on the WeChat market and lights only WeChat', () => {
+    const m = monitors('wechat');
+    expect(m?.open).toBe(true);
+    expect(m?.children.map(c => [c.leaf.id, c.active])).toEqual([['coordinator', false], ['tracker', false], ['wechat', true]]);
   });
 
   it('keeps Inventory and Payments lit on their tabs', () => {

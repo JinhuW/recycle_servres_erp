@@ -1,7 +1,7 @@
 import type { TransactionSql } from 'postgres';
 import { canonPartCol, canonPartNumberJs } from './part-number';
 import { autoTrackParts, type TrackablePart } from './marketAutoTrack';
-import { appendPriceEvent } from './refPriceEvents';
+import { appendPriceEvent, retractPriceEvents, type WithdrawnPrice } from './refPriceEvents';
 
 type LineRow = {
   part_number: string | null;
@@ -106,4 +106,13 @@ export async function recordSaleDataPoints(
   return recordSellOrderDataPoints(tx, sellOrderId, actorUserId, {
     source: `sale:${sellOrderId}`,
   });
+}
+
+// A sale reopened from Done was not a sale after all, so its data points go
+// with it; Done again records them afresh.
+export async function retractSaleDataPoints(
+  tx: TransactionSql,
+  sellOrderId: string,
+): Promise<WithdrawnPrice[]> {
+  return retractPriceEvents(tx, `sale:${sellOrderId}`);
 }
