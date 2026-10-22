@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { priceChange, priceSpread, type WechatPrice, type WechatRow } from '@recycle-erp/shared';
-import { fmtPrice, groupByBrand, ladder, matchesSearch, parseNotes, UNBRANDED } from './wechatMarket';
+import {
+  boardRows, fmtPrice, groupByBrand, ladder, matchesSearch, parseNotes, signalCounts, SIGNALS, UNBRANDED,
+} from './wechatMarket';
 import { matchWechatDay, pathToDesktopView, wechatDayPath } from './route';
 
 const price = (median: number, over: Partial<WechatPrice> = {}): WechatPrice =>
@@ -98,5 +100,31 @@ describe('WeChat market board', () => {
     expect(matchWechatDay('/wechat/2026-10-21')).toEqual({ date: '2026-10-21' });
     expect(matchWechatDay('/wechat/latest')).toBeNull();
     expect(pathToDesktopView('/wechat/latest')).toBe('dashboard');
+  });
+});
+
+describe('WeChat signal legend', () => {
+  const rows = [
+    row({ key: 'a', signal: '紧缺', buy: side([price(16000)]) }),
+    row({ key: 'b', signal: '紧缺' }),
+    row({ key: 'c', signal: '过剩', sell: side([price(15000)]) }),
+    row({ key: 'd', signal: null, buy: side([price(9000)]) }),
+    row({ key: 'e', signal: '看涨', buy: side([price(9000)]) }),
+  ];
+
+  it('lists the five signals from short to glut', () => {
+    expect(SIGNALS).toEqual(['紧缺', '偏紧', '均衡', '偏松', '过剩']);
+  });
+
+  it('counts known signals only, every one present even at zero', () => {
+    expect(signalCounts(rows)).toEqual({ 紧缺: 2, 偏紧: 0, 均衡: 0, 偏松: 0, 过剩: 1 });
+  });
+
+  it('filters the board by priced lines, search and signal together', () => {
+    const keys = (f: Parameters<typeof boardRows>[1]) => boardRows(rows, f).map(r => r.key);
+    expect(keys({ pricedOnly: false, search: '', signal: null })).toEqual(['a', 'b', 'c', 'd', 'e']);
+    expect(keys({ pricedOnly: true, search: '', signal: null })).toEqual(['a', 'c', 'd', 'e']);
+    expect(keys({ pricedOnly: true, search: '', signal: '紧缺' })).toEqual(['a']);
+    expect(keys({ pricedOnly: false, search: 'c', signal: null })).toEqual(['c']);
   });
 });

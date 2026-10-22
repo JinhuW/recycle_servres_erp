@@ -396,7 +396,7 @@ export function pathToDesktopView(path: string): DesktopViewId {
   if (path === '/payments/internal') return 'internaltx';
   if (path === '/payments' || match('/payments/po/:id', path) || match('/payments/so/:id', path)) return 'payments';
   if (path === '/accounting' || match('/accounting/:id', path)) return 'accounting';
-  if (path === '/tracker') return 'tracker';
+  if (path === '/tracker' || path === '/tracker/prompts') return 'tracker';
   if (path === '/wechat' || matchWechatDay(path)) return 'wechat';
   if (path === '/fleet' || path === '/fleet/pool' || matchFleetWatch(path) || matchFleetWorker(path)) return 'coordinator';
   if (path === '/settings') return 'settings';
