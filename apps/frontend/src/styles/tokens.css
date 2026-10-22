@@ -159,6 +159,7 @@
   --warn-loud-shadow: oklch(0.42 0.11 70 / 0.42);
   --info: oklch(0.62 0.13 250);
   --info-soft: oklch(0.96 0.035 250);
+  --info-strong: oklch(0.45 0.13 250);
   /* Fourth category tone (HDD). The other three ride on info / pos / warn. */
   --cool: oklch(0.62 0.13 295);
   --cool-soft: oklch(0.96 0.04 295);

@@ -600,6 +600,36 @@ is not a stage but a flag beside one, set once every line has sold
       and age, and the final sell price once it has sold. Finish review
       lists the unpriced products, which count as $0 until priced; they
       don't block Approve. The pure maths lives in `lib/reviewPricing.ts`.
+  - **A sell order sheet prices the PO** (v1.313.0, RS-347). Drop the
+    buyer's filled sheet (`.xlsx`) anywhere on the product list, or pick it
+    with **From sheet** beside *Fill from market*; while a file is dragged
+    over the list the shared dropzone shows. Only the Part Number and Unit
+    Price columns are read, by the Market import's reader, and each PO line
+    is matched by canonical part number — every line with that part gets
+    the price. Nothing is written until **Apply**.
+    - While the sheet waits, one strip in the list's head (where the scan
+      hint was) holds the file, a **USD / CNY** switch that re-reads the same
+      file (a price that names its own currency keeps it), the FX ledger's
+      rate when yuan were converted, the counts — to apply, repriced,
+      unchanged, kept, skipped (hover for not in the sheet / can't be matched
+      / sheet rows not on this PO) — and **Cancel** / **Apply n prices**.
+      Escape cancels it; counting keeps working.
+    - Each row says what the sheet would do: the incoming price in blue,
+      with the yuan and the sheet row under it; a typed price it would
+      replace struck through beside it, with **Keep $x** to hold that one
+      out of Apply; *Already at the sheet price*; *Not in sheet*; or why it
+      can't be matched — no part number on the line, no price or an
+      unreadable one on the row, another currency, or the part listed at two
+      prices (both shown; the manager types it).
+    - The tally's **Purchaser earns** reads current → with the sheet, its
+      meter shows the incoming prices striped, and the Commission card shows
+      the figures with the sheet applied.
+    - Apply writes each price through the inventory line PATCH, as a typed
+      one goes, so each is audited as `priced`; the toast says how many were
+      priced and repriced and **Undo** puts every previous price back. The
+      Compare card names the file and figure a price came from, until the
+      page reloads. Sheet prices are not market data points; the Market
+      page's import is for that.
 - **AI review checks every product of a PO in Review mode** (v1.245.0, desktop,
   managers). Off by default; **Settings → General → AI review of purchase
   orders** turns it on and sets a per-PO cost cap, the OpenRouter model, and
@@ -1292,7 +1322,9 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   - **The Vendor price import card is gone** (v1.297.0, RS-324). It sat at
     the top of the right-hand column from v1.248.3 (first in the left card in
     v1.248.1, under the products before that). A sell order's prices come
-    from its lots' sell prices now; see *Vendor bid sheet* below.
+    from its lots' sell prices now; see *Vendor bid sheet* below. The filled
+    sheet is dropped on the PO's Review mode instead (v1.313.0), which sets
+    those sell prices.
   - **A search box over the products narrows the list** (v1.248.0), in view
     and edit, like Pack mode's: a part #, serial or PO number matches with or
     without its dashes, and words match the item's name and spec chips

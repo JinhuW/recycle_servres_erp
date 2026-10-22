@@ -1,5 +1,7 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { isPricedSellPrice, parseSerials, serialIssue } from '@recycle-erp/shared';
+import { AttachmentDropzone } from '../../components/AttachmentDropzone';
+import { CurrencyPicker, type Currency } from '../../components/CurrencyPicker';
 import { Icon } from '../../components/Icon';
 import { ImageLightbox } from '../../components/ImageLightbox';
 import { OrderCategoryChips } from '../../components/OrderCategoryChips';
@@ -7,7 +9,7 @@ import { LineSpecChips } from '../../components/LineSpecChips';
 import { useManagerTakeover } from '../../components/ManagerTakeoverDialog';
 import { PaymentMismatchBanner, usePaymentMismatchConfirm } from '../../components/PaymentMismatch';
 import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
-import { api, rawFetch } from '../../lib/api';
+import { api, ApiError, rawFetch } from '../../lib/api';
 import { applyPatch, canApply, openIssuesByLine, settledBy, useAiReview, type AiFinding } from '../../lib/aiReview';
 import {
   checkBody, countOf, emptyCheck, entryAnswerFor, filterScan, isAbsentChecked, isShortChecked, lineState, matchScan, nextOpenAfter,
@@ -15,7 +17,7 @@ import {
   type ChecksResponse, type LineCheck,
 } from '../../lib/boxCheck';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
-import { fmtUSD } from '../../lib/format';
+import { fmtMoney, fmtUSD } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { useLineSaveQueue } from '../../lib/useLineSaveQueue';
@@ -27,7 +29,11 @@ import { paymentGap, reviewApproveTotal } from '../../lib/paymentGap';
 import { poStageName } from '../../lib/orderPresentation';
 import { lineShippedOn } from '../../lib/poPermissions';
 import { rateEq } from '../../lib/poTotals';
-import { lineMargin, parsePriceInput, reviewMoney, suggestedSell, type SellSuggestion } from '../../lib/reviewPricing';
+import { precheckMessageKey, precheckPriceFile } from '../../lib/priceFilePrecheck';
+import {
+  lineMargin, parsePriceInput, planSheet, reviewMoney, suggestedSell,
+  type SellSuggestion, type SheetCell, type SheetPreview, type SheetRowPlan, type SheetSkip,
+} from '../../lib/reviewPricing';
 import { staleness } from '../../lib/marketStaleness';
 import { statusTone } from '../../lib/status';
 import { useMarketLookup } from '../../lib/useMarketLookup';
@@ -44,7 +50,10 @@ import { brandConfirmPending, patchEditsLine } from './submit/line';
 // Progress lives on the server, so a reload or a second manager picks up
 // where the count stands. The same bench prices the PO: each line's sell
 // price, the projection the commission is paid on, is typed beside its
-// count, with the Market board's value offered where nobody has priced it.
+// count, with the Market board's value offered where nobody has priced it,
+// or read off a sell order sheet dropped on the list.
+
+const XLSX_ACCEPT = '.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 type Props = {
   order: Order;
@@ -55,7 +64,13 @@ type Props = {
   showToast: (msg: string, kind?: 'success' | 'error' | 'warn') => void;
 };
 
-type Undo = { lineId: string; prev: LineCheck; msg: string };
+type Undo =
+  | { kind: 'check'; lineId: string; prev: LineCheck; msg: string }
+  // The prices a sheet replaced, put back one write each.
+  | { kind: 'prices'; prev: { lineId: string; price: number | null }[]; msg: string };
+// A sell order sheet read but not applied: its matches stand on the rows
+// until Apply or Cancel.
+type Sheet = { file: File; currency: Currency; data: SheetPreview };
 type ScanMsg = { tone: 'muted' | 'pos' | 'neg'; text: string };
 // The line open in the drawer, and the server's copy it is compared against.
 type Editing = { line: EditLine; original: EditLine };
@@ -83,6 +98,16 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   const [prices, setPrices] = useState<Map<string, number | null>>(new Map());
   const [rate, setRate] = useState<number | null>(order.commissionRate);
   const [filling, setFilling] = useState(false);
+  const [sheet, setSheet] = useState<Sheet | null>(null);
+  const [sheetBusy, setSheetBusy] = useState(false);
+  // Rows whose typed price stands against the sheet's.
+  const [kept, setKept] = useState<ReadonlySet<string>>(new Set());
+  // Where a price applied from a sheet came from, until the next reload.
+  const [sources, setSources] = useState<Map<string, { file: string; cell: SheetCell }>>(new Map());
+  const [dragging, setDragging] = useState(false);
+  // dragenter/dragleave fire for every child the file passes over.
+  const dragDepth = useRef(0);
+  const sheetInput = useRef<HTMLInputElement | null>(null);
   const priceRefs = useRef(new Map<string, HTMLInputElement>());
   const partNumbers = useMemo(() => lines.map(l => l.partNumber), [lines]);
   const market = useMarketLookup(partNumbers);
@@ -153,7 +178,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     const prev = checkOf(l.id);
     const next: LineCheck = { ...prev, checkedAt: new Date().toISOString() };
     save(next);
-    flashUndo({ lineId: l.id, prev, msg: t('bcCheckedToast', { pn: l.partNumber ?? lineLabel(l), n: countOf(l, prev), of: l.qty }) });
+    flashUndo({ kind: 'check', lineId: l.id, prev, msg: t('bcCheckedToast', { pn: l.partNumber ?? lineLabel(l), n: countOf(l, prev), of: l.qty }) });
     setSelectedId(nextOpenAfter(lines, new Map(checks).set(l.id, next), l.id)?.id ?? l.id);
   };
 
@@ -162,7 +187,7 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     const c = checkOf(l.id);
     if (lineState(l, c) === 'done') {
       save({ ...c, checkedAt: null });
-      flashUndo({ lineId: l.id, prev: c, msg: t('bcUncheckedToast', { pn: l.partNumber ?? lineLabel(l) }) });
+      flashUndo({ kind: 'check', lineId: l.id, prev: c, msg: t('bcUncheckedToast', { pn: l.partNumber ?? lineLabel(l) }) });
       return;
     }
     check(l);
@@ -217,9 +242,23 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
 
   const applyUndo = () => {
     if (!undo || !ready) return;
+    setUndo(null);
+    if (undo.kind === 'prices') {
+      void (async () => {
+        for (const p of undo.prev) {
+          const l = lineById.get(p.lineId);
+          if (l) await savePrice(l, p.price);
+        }
+      })();
+      setSources(m => {
+        const next = new Map(m);
+        for (const p of undo.prev) next.delete(p.lineId);
+        return next;
+      });
+      return;
+    }
     save(undo.prev);
     setSelectedId(undo.lineId);
-    setUndo(null);
   };
 
   // ── Pricing: the sell price the commission is paid on, typed beside the
@@ -262,6 +301,98 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     }
     showToast(t('bcFilledFromMarket', { n }), 'success');
   };
+
+  // ── A sell order sheet: the server matches it to the lines by part number
+  // and writes nothing; Apply writes each price the way a typed one goes.
+  // A currency switch sends the same file again, since which rows convert
+  // turns on each row's own currency mark, and only the server reads those.
+  const readSheet = async (file: File, currency: Currency, fresh: boolean) => {
+    if (!ready || sheetBusy) return;
+    setSheetBusy(true);
+    try {
+      const check = fresh ? await precheckPriceFile(file) : null;
+      if (check && !check.ok) {
+        showErrorDialog(t(precheckMessageKey(check)));
+        return;
+      }
+      const form = new FormData();
+      form.append('file', file);
+      form.append('currency', currency);
+      const data = await api.upload<SheetPreview>(`/api/orders/${order.id}/price-sheet/preview`, form);
+      setSheet({ file, currency, data });
+      if (fresh) setKept(new Set());
+    } catch (e) {
+      const code = e instanceof ApiError ? (e.body as { code?: string } | undefined)?.code : undefined;
+      if (code === 'columns-not-found') showErrorDialog(t('soPriceImportColumnsNotFound'));
+      else handleFetchError(e);
+    } finally {
+      setSheetBusy(false);
+    }
+  };
+  const onSheetFiles = (files: FileList | null) => {
+    const file = files?.[0];
+    if (file) void readSheet(file, sheet?.currency ?? 'USD', true);
+  };
+  const closeSheet = () => {
+    setSheet(null);
+    setKept(new Set());
+  };
+  const plan = sheet ? planSheet(lines.map(l => ({ id: l.id, sellPrice: priceOf(l) })), sheet.data, kept) : null;
+  const toggleKeep = (lineId: string) => setKept(s => {
+    const next = new Set(s);
+    if (!next.delete(lineId)) next.add(lineId);
+    return next;
+  });
+  // One write each, as Fill from market does, so one refusal leaves the rest
+  // priced and Undo knows exactly which prices to put back.
+  const applySheet = async () => {
+    if (!ready || !sheet || !plan || sheetBusy || plan.writes.length === 0) return;
+    setSheetBusy(true);
+    const prev: { lineId: string; price: number | null }[] = [];
+    let repriced = 0;
+    try {
+      for (const w of plan.writes) {
+        const l = lineById.get(w.lineId);
+        if (!l) continue;
+        const was = priceOf(l);
+        if (await savePrice(l, w.price)) {
+          prev.push({ lineId: l.id, price: was });
+          if (isPricedSellPrice(was)) repriced += 1;
+        }
+      }
+    } finally {
+      setSheetBusy(false);
+    }
+    setSources(m => {
+      const next = new Map(m);
+      for (const p of prev) {
+        const row = plan.rows.get(p.lineId);
+        if (row && 'cell' in row) next.set(p.lineId, { file: sheet.file.name, cell: row.cell });
+      }
+      return next;
+    });
+    closeSheet();
+    if (prev.length) {
+      flashUndo({
+        kind: 'prices', prev,
+        msg: repriced
+          ? t('bcSheetAppliedRepriced', { n: prev.length, m: repriced })
+          : t('bcSheetApplied', { n: prev.length }),
+      });
+    }
+  };
+  // What a sheet row says, in the currency it says it in.
+  const sheetFigure = (c: SheetCell) => (c.listedPrice != null ? fmtMoney(c.listedPrice, 'CNY', locale) : fmtUSD(c.price, locale));
+  const skipReason = (m: SheetSkip): string => {
+    switch (m.status) {
+      case 'no-part': return t('bcSheetNoPart');
+      case 'no-price': return t('bcSheetNoPrice', { row: m.cell.rowNumber });
+      case 'invalid-price': return t('bcSheetInvalid', { row: m.cell.rowNumber, raw: m.cell.rawPrice });
+      case 'other-currency': return t('bcSheetOtherCurrency', { row: m.cell.rowNumber, currency: m.cell.currency });
+      case 'conflict': return t('bcSheetConflict', { n: m.cells.length, prices: m.cells.map(sheetFigure).join(' / ') });
+    }
+  };
+  const hasFiles = (e: { dataTransfer: DataTransfer }) => Array.from(e.dataTransfer.types).includes('Files');
   // The rate is the PO's: a manager's until the book closes at Ready to Pay,
   // where the server refuses it.
   const rateLocked = order.lifecycle === 'ready_to_pay' || order.lifecycle === 'done';
@@ -438,10 +569,12 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   // Escape joins the app's layer stack, so a dialog or the photo on top of
   // the page closes first and the page only leaves when it is the top layer.
   // Text left in the scan box goes before the page does: an ambiguous scan
-  // leaves its filter up with the box blurred.
+  // leaves its filter up with the box blurred, and a sheet waiting to be
+  // applied goes before the page too.
   useEscapeKey(() => {
     if (editing) setEditing(null);
     else if (scan) setScan('');
+    else if (sheet) { if (!sheetBusy) closeSheet(); }
     else onExit();
   });
 
@@ -525,15 +658,21 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   // The commission as Approve will leave it: a line set to 0 brings no
   // revenue and, when the goods total follows the lines, no cost — the rule
   // the payment gap above reads by.
-  const money = reviewMoney({
-    lines: lines.map(l => ({ id: l.id, qty: l.qty, unitCost: l.unitCost, sellPrice: priceOf(l) })),
+  const moneyAt = (sellPrice: (l: OrderLine) => number | null) => reviewMoney({
+    lines: lines.map(l => ({ id: l.id, qty: l.qty, unitCost: l.unitCost, sellPrice: sellPrice(l) })),
     totalCost: order.totalCost, goodsFollowsLines: order.goodsFollowsLines, otherFees: order.otherFees,
     commissionRate: rate, payment: order.payment,
     zeroed: new Set(atReviewing ? toZero.map(l => l.id) : []),
   });
+  const money = moneyAt(priceOf);
+  // The same figures with the sheet applied, shown beside them before the click.
+  const sheetPrices = new Map(plan?.writes.map(w => [w.lineId, w.price]) ?? []);
+  const projected = sheetPrices.size ? moneyAt(l => sheetPrices.get(l.id) ?? priceOf(l)) : null;
+  const shown = projected ?? money;
   const unpriced = lines.filter(l => !isPricedSellPrice(priceOf(l)));
   const fillable = unpriced.filter(l => suggestionFor(l) !== null).length;
   const earnsClass = 'mono' + (money.earns < 0 ? ' neg' : '');
+  const shownEarnsClass = 'mono' + (shown.earns < 0 ? ' neg' : '');
 
   // The line PATCH any edit on this page sends, then the answer recorded; the
   // reload remounts the page on the edited line. The findings are read again
@@ -571,12 +710,15 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
     const price = priceOf(l);
     const sug = suggestionFor(l);
     const margin = lineMargin(price, l.unitCost);
+    const sp = plan?.rows.get(l.id);
+    const incoming = sp?.kind === 'in' || sp?.kind === 'diff' ? sp : null;
     return (
       <Fragment key={l.id}>
         <tr
           id={'bc-row-' + l.id}
           ref={el => { if (el) rowRefs.current.set(l.id, el); else rowRefs.current.delete(l.id); }}
-          className={'bc-row bc-' + state + (isAbsentChecked(l, c) ? ' bc-done-absent' : '') + (isSel ? ' row-selected' : '')}
+          className={'bc-row bc-' + state + (isAbsentChecked(l, c) ? ' bc-done-absent' : '') + (isSel ? ' row-selected' : '')
+            + (sp?.kind === 'off' || sp?.kind === 'skip' ? ' bc-sheet-off' : '')}
           onClick={() => setSelectedId(l.id)}
         >
           <td className="bc-cb-cell">
@@ -645,19 +787,59 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
           </td>
           <td className="num bc-price-cell" onClick={e => e.stopPropagation()}>
             <span className="bc-price">
+              {sp?.kind === 'diff' && <span className="bc-price-was mono">{fmtUSD(sp.was, locale)}</span>}
               <span className="bc-price-sign">$</span>
-              <PriceField
-                inputRef={el => { if (el) priceRefs.current.set(l.id, el); else priceRefs.current.delete(l.id); }}
-                value={price}
-                suggestion={sug?.value ?? null}
-                disabled={!ready}
-                label={t('bcPriceInput', { pn })}
-                onFocus={() => setSelectedId(l.id)}
-                onCommit={v => { void savePrice(l, v); }}
-                onScanKey={startScan}
-              />
+              {incoming ? (
+                // The sheet's figure, not written yet: Apply or Cancel decides it.
+                <input
+                  ref={el => { if (el) priceRefs.current.set(l.id, el); else priceRefs.current.delete(l.id); }}
+                  className="bc-price-in incoming"
+                  type="text"
+                  readOnly
+                  aria-label={t('bcPriceInput', { pn })}
+                  value={incoming.price.toFixed(2)}
+                  onFocus={() => setSelectedId(l.id)}
+                  onKeyDown={e => {
+                    if (e.nativeEvent.isComposing || e.metaKey || e.ctrlKey || e.altKey) return;
+                    // A scanner typing a label here: it goes to the scan box.
+                    if (e.key.length === 1 && e.key.trim()) {
+                      e.preventDefault();
+                      e.currentTarget.blur();
+                      startScan(e.key);
+                    }
+                  }}
+                />
+              ) : (
+                <PriceField
+                  inputRef={el => { if (el) priceRefs.current.set(l.id, el); else priceRefs.current.delete(l.id); }}
+                  value={price}
+                  suggestion={sug?.value ?? null}
+                  disabled={!ready}
+                  label={t('bcPriceInput', { pn })}
+                  onFocus={() => setSelectedId(l.id)}
+                  onCommit={v => { void savePrice(l, v); }}
+                  onScanKey={startScan}
+                />
+              )}
             </span>
-            {margin !== null ? (
+            {sp && sp.kind !== 'off' ? (
+              <SheetNote
+                plan={sp}
+                figure={sheetFigure}
+                reason={skipReason}
+                disabled={!ready || sheetBusy}
+                onKeep={() => toggleKeep(l.id)}
+              />
+            ) : sp?.kind === 'off' ? (
+              <>
+                <div className="bc-price-sub">{t('bcSheetNotIn')}</div>
+                {!isPricedSellPrice(price) && sug && (
+                  <button type="button" className="bc-price-use" disabled={!ready} onClick={() => { void savePrice(l, sug.value); }}>
+                    {t('bcPriceUse', { price: fmtUSD(sug.value, locale) })}
+                  </button>
+                )}
+              </>
+            ) : margin !== null ? (
               <div className={'bc-price-sub' + (margin < 0 ? ' neg' : '')}>
                 {margin < 0 ? t('bcBelowCost') : t('bcMargin', { pct: Math.round(margin * 100) })}
               </div>
@@ -691,6 +873,8 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
   const selMarket = selected ? market(selected.partNumber) : null;
   const selSug = suggestedSell(selMarket);
   const selAge = selMarket ? staleness(selMarket.lastPriceAt) : null;
+  const selPlan = selected ? plan?.rows.get(selected.id) : undefined;
+  const selSource = selected ? sources.get(selected.id) : undefined;
   const shot = selShots[Math.min(photoIdx, selShots.length - 1)];
 
   return (
@@ -764,32 +948,94 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
           <div className="bc-tally-num">
             <span className="mono"><b>{money.priced}</b><span className="muted"> / {money.total}</span></span>
             <span className="card-sub">{t('bcPricedCount', { n: money.priced, of: money.total })}</span>
+            {plan && plan.incoming > 0 && <span className="card-sub bc-incoming">{t('bcSheetMore', { n: plan.incoming })}</span>}
           </div>
           <div className="bc-tally-meter">
             <div className="bc-meter" role="img" aria-label={t('bcPricedCount', { n: money.priced, of: money.total })}>
               <i className="bc-m-priced" style={{ flexGrow: money.priced }} />
-              <i className="bc-m-open" style={{ flexGrow: money.total - money.priced }} />
+              <i className="bc-m-incoming" style={{ flexGrow: plan?.incoming ?? 0 }} />
+              <i className="bc-m-open" style={{ flexGrow: money.total - money.priced - (plan?.incoming ?? 0) }} />
             </div>
             <div className="bc-earns">
               <span className="bc-earns-k">{t('eoPurchaserEarns')}</span>
               <b className={earnsClass}>{fmtUSD(money.earns, locale)}</b>
+              {projected && (
+                <>
+                  <span className="bc-earns-arrow" aria-hidden="true">→</span>
+                  <b className={'bc-earns-next ' + shownEarnsClass} title={t('bcSheetProjected', { n: plan!.writes.length })}>
+                    {fmtUSD(projected.earns, locale)}
+                  </b>
+                </>
+              )}
               <span className="muted">{+(money.rate * 100).toFixed(2)}%</span>
             </div>
           </div>
-          <button
-            type="button"
-            className="btn"
-            disabled={!ready || filling || fillable === 0}
-            title={t('bcFillMarketTip')}
-            onClick={() => { void fillFromMarket(); }}
-          >
-            <Icon name="tag" size={13} /> {filling ? '…' : t('bcFillMarket')}
-          </button>
+          <div className="bc-tally-actions">
+            <button
+              type="button"
+              className="btn"
+              disabled={!ready || filling || fillable === 0 || sheet !== null || sheetBusy}
+              title={t('bcFillMarketTip')}
+              onClick={() => { void fillFromMarket(); }}
+            >
+              <Icon name="tag" size={13} /> {filling ? '…' : t('bcFillMarket')}
+            </button>
+            <button
+              type="button"
+              className="btn"
+              disabled={!ready || filling || sheet !== null || sheetBusy}
+              title={t('bcSheetFromTip')}
+              onClick={() => sheetInput.current?.click()}
+            >
+              <Icon name="upload" size={13} /> {sheetBusy && !sheet ? '…' : t('bcSheetFrom')}
+            </button>
+            <input
+              ref={sheetInput}
+              type="file"
+              accept={XLSX_ACCEPT}
+              hidden
+              onChange={e => { onSheetFiles(e.target.files); e.target.value = ''; }}
+            />
+          </div>
         </div>
       </div>
 
       <div className="bc-grid">
-        <div className="card bc-list-card">
+        {/* The whole list is the drop target for a sell order sheet. The
+            dropzone handles a drop on itself; one beside it lands here. */}
+        <div
+          className="card bc-list-card"
+          onDragEnter={e => {
+            if (!ready || sheetBusy || !hasFiles(e)) return;
+            e.preventDefault();
+            dragDepth.current += 1;
+            setDragging(true);
+          }}
+          onDragOver={e => { if (dragging) e.preventDefault(); }}
+          onDragLeave={() => {
+            if (!dragging) return;
+            dragDepth.current -= 1;
+            if (dragDepth.current <= 0) { dragDepth.current = 0; setDragging(false); }
+          }}
+          onDrop={e => {
+            if (!dragging) return;
+            dragDepth.current = 0;
+            setDragging(false);
+            if (e.isDefaultPrevented()) return;
+            e.preventDefault();
+            onSheetFiles(e.dataTransfer.files);
+          }}
+        >
+          {dragging && (
+            <div className="bc-drop-veil">
+              <AttachmentDropzone
+                onFiles={onSheetFiles}
+                multiple={false}
+                accept={XLSX_ACCEPT}
+                boxHint={t('bcSheetDropHint')}
+              />
+            </div>
+          )}
           <div className="card-head bc-scan-head">
             <div className="bc-scan-field">
               <label className="bc-scan" htmlFor="bc-scan">
@@ -824,9 +1070,61 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
                 </button>
               )}
             </div>
-            <div className={'bc-scan-msg ' + (scanMsg?.tone ?? 'muted')} aria-live="polite">
-              {scanMsg ? scanMsg.text : t('bcScanHint')}
-            </div>
+            {/* A sheet waiting to be applied takes the hint's place; a scan's
+                own message still shows above it. */}
+            {(!sheet || scanMsg) && (
+              <div className={'bc-scan-msg ' + (scanMsg?.tone ?? 'muted')} aria-live="polite">
+                {scanMsg ? scanMsg.text : t('bcScanHint')}
+              </div>
+            )}
+            {sheet && plan && (
+              <div className="bc-sheet-strip" role="region" aria-label={t('bcSheetRegion')}>
+                <span className="bc-sheet-file" title={sheet.file.name}>
+                  <Icon name="file" size={13} /><span className="mono">{sheet.file.name}</span>
+                </span>
+                <span role="group" aria-label={t('bcSheetCurrency')}>
+                  <CurrencyPicker
+                    value={sheet.currency}
+                    onChange={cur => { if (cur !== sheet.currency) void readSheet(sheet.file, cur, false); }}
+                    t={t}
+                    disabled={!ready || sheetBusy}
+                  />
+                </span>
+                {sheet.data.fx && sheet.data.lines.some(m => m.status === 'matched' && m.cell.listedPrice != null) && (
+                  <span className="bc-sheet-fx mono">
+                    {t('soFxRateNote', { rate: sheet.data.fx.oneUsdInQuote.toFixed(4), currency: 'CNY', source: sheet.data.fx.source })}
+                  </span>
+                )}
+                <span className="bc-sheet-counts">
+                  <b>{t('bcSheetToApply', { n: plan.writes.length })}</b>
+                  {plan.repriced > 0 && <><span className="sep">·</span>{t('bcSheetRepriced', { n: plan.repriced })}</>}
+                  {plan.unchanged > 0 && <><span className="sep">·</span>{t('bcSheetUnchanged', { n: plan.unchanged })}</>}
+                  {plan.kept > 0 && <><span className="sep">·</span>{t('bcSheetKeptCount', { n: plan.kept })}</>}
+                  {plan.notInSheet + plan.unmatched + plan.notOnPo > 0 && (
+                    <>
+                      <span className="sep">·</span>
+                      <span
+                        className="bc-sheet-skipped"
+                        title={t('bcSheetSkippedTip', { a: plan.notInSheet, b: plan.unmatched, c: plan.notOnPo })}
+                      >
+                        {t('bcSheetSkipped', { n: plan.notInSheet + plan.unmatched + plan.notOnPo })}
+                      </span>
+                    </>
+                  )}
+                </span>
+                <span className="bc-sheet-actions">
+                  <button type="button" className="btn sm" disabled={sheetBusy} onClick={closeSheet}>{t('cancel')}</button>
+                  <button
+                    type="button"
+                    className="btn sm accent"
+                    disabled={!ready || sheetBusy || plan.writes.length === 0}
+                    onClick={() => { void applySheet(); }}
+                  >
+                    <Icon name="check" size={12} /> {sheetBusy ? '…' : t('bcSheetApply', { n: plan.writes.length })}
+                  </button>
+                </span>
+              </div>
+            )}
           </div>
           {loadState === 'loading' ? (
             <div className="card-body muted">{t('loadingApp')}</div>
@@ -905,7 +1203,29 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
                   <dt>{t('bcExpected')}</dt><dd className="mono">{selected.qty}</dd>
                   <dt>{t('bcColCounted')}</dt><dd className="mono">{countOf(selected, selCheck)}</dd>
                   <dt>{t('unitCost')}</dt><dd className="mono">{fmtUSD(selected.unitCost, locale)}</dd>
-                  <dt>{t('sellUnit')}</dt><dd className="mono">{isPricedSellPrice(selPrice) ? fmtUSD(selPrice!, locale) : '—'}</dd>
+                  <dt>{t('sellUnit')}</dt>
+                  <dd className="mono">
+                    {selPlan?.kind === 'in' || selPlan?.kind === 'diff' ? (
+                      <>
+                        {selPlan.kind === 'diff' && <span className="bc-price-was">{fmtUSD(selPlan.was, locale)}</span>}
+                        <span className="bc-incoming">{fmtUSD(selPlan.price, locale)}</span>
+                      </>
+                    ) : isPricedSellPrice(selPrice) ? fmtUSD(selPrice!, locale) : '—'}
+                  </dd>
+                  {selPlan && 'cell' in selPlan && (
+                    <>
+                      <dt>{t('bcSheetCol')}</dt>
+                      <dd className="mono muted" title={selPlan.cell.sheet}>
+                        {sheetFigure(selPlan.cell)} · {t('bcSheetRow', { row: selPlan.cell.rowNumber })}
+                      </dd>
+                    </>
+                  )}
+                  {!selPlan && selSource && (
+                    <>
+                      <dt>{t('bcSheetPricedFrom')}</dt>
+                      <dd className="mono muted bc-source">{selSource.file} · {sheetFigure(selSource.cell)}</dd>
+                    </>
+                  )}
                   {selected.finalSellPrice != null && (
                     <>
                       <dt>{t('finalSellPrice')}</dt>
@@ -948,9 +1268,10 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
               <span className="card-sub">{t('bcMoneyPriced', { n: money.priced, of: money.total })}</span>
             </div>
             <div className="card-body">
+              {projected && <p className="bc-money-hint bc-money-projected">{t('bcSheetProjected', { n: plan!.writes.length })}</p>}
               <div className="bc-money-earn">
                 <span>{t('eoPurchaserEarns')}</span>
-                <b className={earnsClass}>{fmtUSD(money.earns, locale)}</b>
+                <b className={shownEarnsClass}>{fmtUSD(shown.earns, locale)}</b>
               </div>
               <p className="bc-money-hint">{t('bcMoneyEarnsHint', { name: order.userName })}</p>
               <div className="bc-money-rate">
@@ -961,24 +1282,24 @@ export function DesktopBoxCheck({ order, onExit, onApproved, onReload, showToast
               </div>
               {rateLocked && !readOnly && <p className="bc-money-hint">{t('bcMoneyRateLocked')}</p>}
               <dl className="bc-kv">
-                <dt>{t('revenue')}</dt><dd className="mono">{fmtUSD(money.revenue, locale)}</dd>
-                <dt>{t('eoCost')}</dt><dd className="mono">{fmtUSD(money.cost, locale)}</dd>
-                {money.fees > 0 && (
+                <dt>{t('revenue')}</dt><dd className="mono">{fmtUSD(shown.revenue, locale)}</dd>
+                <dt>{t('eoCost')}</dt><dd className="mono">{fmtUSD(shown.cost, locale)}</dd>
+                {shown.fees > 0 && (
                   <>
                     <dt className="bc-kv-sub">{t('otherFees')}{order.otherFeesNote?.trim() ? ` · ${order.otherFeesNote.trim()}` : ''}</dt>
-                    <dd className="mono bc-kv-sub">{fmtUSD(money.fees, locale)}</dd>
+                    <dd className="mono bc-kv-sub">{fmtUSD(shown.fees, locale)}</dd>
                   </>
                 )}
                 <dt>{t('eoProfitAllLines', { n: lines.length })}</dt>
-                <dd className={'mono' + (money.profit < 0 ? ' neg' : '')}>{fmtUSD(money.profit, locale)}</dd>
-                <dt>{t('eoRate')}</dt><dd className="mono">{(money.rate * 100).toFixed(2)}%</dd>
-                <dt>{t('eoCommissionOnProfit')}</dt><dd className="mono">{fmtUSD(money.commission, locale)}</dd>
-                {order.payment === 'self' && (<><dt>{t('eoSelfPay')}</dt><dd className="mono">{fmtUSD(money.cost, locale)}</dd></>)}
+                <dd className={'mono' + (shown.profit < 0 ? ' neg' : '')}>{fmtUSD(shown.profit, locale)}</dd>
+                <dt>{t('eoRate')}</dt><dd className="mono">{(shown.rate * 100).toFixed(2)}%</dd>
+                <dt>{t('eoCommissionOnProfit')}</dt><dd className="mono">{fmtUSD(shown.commission, locale)}</dd>
+                {order.payment === 'self' && (<><dt>{t('eoSelfPay')}</dt><dd className="mono">{fmtUSD(shown.cost, locale)}</dd></>)}
                 <dt className="bc-kv-total">{t('eoTotal')}</dt>
-                <dd className={'bc-kv-total ' + earnsClass}>{fmtUSD(money.earns, locale)}</dd>
+                <dd className={'bc-kv-total ' + shownEarnsClass}>{fmtUSD(shown.earns, locale)}</dd>
               </dl>
-              {money.lotPrice && <p className="bc-money-hint">{t('bcMoneyLotPrice')}</p>}
-              {unpriced.length > 0 && <p className="bc-money-hint">{t('eoUnpricedLinesHint', { n: unpriced.length })}</p>}
+              {shown.lotPrice && <p className="bc-money-hint">{t('bcMoneyLotPrice')}</p>}
+              {shown.total > shown.priced && <p className="bc-money-hint">{t('eoUnpricedLinesHint', { n: shown.total - shown.priced })}</p>}
             </div>
           </div>
 
@@ -1261,6 +1582,47 @@ function PriceField({ value, suggestion, disabled, label, inputRef, onFocus, onC
         }
       }}
     />
+  );
+}
+
+// What a sell order sheet says about one row while it waits to be applied:
+// where an incoming price was read, why the row can't be matched, or that it
+// already stands at the sheet's price.
+function SheetNote({ plan, figure, reason, disabled, onKeep }: {
+  plan: Exclude<SheetRowPlan, { kind: 'off' }>;
+  figure: (c: SheetCell) => string;
+  reason: (m: SheetSkip) => string;
+  disabled: boolean;
+  onKeep: () => void;
+}) {
+  const { t, locale } = useT();
+  if (plan.kind === 'same') {
+    return <div className="bc-price-sub" title={plan.cell.sheet}>{t('bcSheetSame', { row: plan.cell.rowNumber })}</div>;
+  }
+  if (plan.kind === 'skip') return <div className="bc-price-sub warn">{reason(plan.match)}</div>;
+  const kept = plan.kind === 'kept';
+  // A dollar figure is the one in the field already. Yuan are shown as the
+  // sheet has them, so a wrong match or a wrong rate is caught by eye; a kept
+  // row shows what it turned down.
+  const withFigure = kept || plan.cell.listedPrice != null;
+  return (
+    <>
+      <div className={'bc-price-src mono' + (kept ? ' kept' : '')} title={plan.cell.sheet}>
+        {withFigure && <><span className="fig">{figure(plan.cell)}</span><span>·</span></>}
+        <span>{t('bcSheetRow', { row: plan.cell.rowNumber })}</span>
+      </div>
+      {plan.kind !== 'in' && (
+        <button
+          type="button"
+          className={'bc-keep' + (kept ? ' on' : '')}
+          aria-pressed={kept}
+          disabled={disabled}
+          onClick={onKeep}
+        >
+          {t(kept ? 'bcSheetKeeping' : 'bcSheetKeep', { price: fmtUSD(plan.was, locale) })}
+        </button>
+      )}
+    </>
   );
 }
 
