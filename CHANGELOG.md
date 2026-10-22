@@ -17,6 +17,32 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.312.1] - 2026-10-22
+
+Fixes from the release review of the Done-sale reopen (RS-345), before it
+reaches prod. The reopen now has to be asked for: the Reopen dialog says the
+order was Done, and a move to Awaiting payment that doesn't is refused. Before
+this, an editor opened while the order was Shipped could save after someone
+else marked it Done and reopen the sale without meaning to. The editor now
+names the status it was opened on as well, so any move someone else made in
+the meantime is refused instead of overridden.
+
+A reopen gives each lot back what the sale actually took from it. Done now
+records the lot's prior status and qty on its `sold` event. A lot the sale
+oversold no longer comes back with units it never had, and a sold-out lot
+returns to the status it was sold from, not to its PO's current stage, so
+confirmed stock can't read as unconfirmed. A reopen waits for an open
+after-sales case on the order to close. A reopened sale can only go back to
+Done; closing it would have left its payments and cases on an order that sold
+nothing. It also keeps its sale date, so correcting a September sale in
+November no longer moves its revenue and contribution into November.
+
+The sale's withdrawn market prices are listed on the reopen in History, since
+their events are deleted. The delete is indexed by source (migration 0194),
+so it no longer scans every price event while holding the order's locks. Only
+a reopen locks the source POs; ordinary moves to Awaiting payment don't. The
+lot change log shows the sold qty, which it had been reading from the wrong
+key, and is translated into Chinese.
 ## [1.312.0] - 2026-10-22
 
 A new **Monitors ▸ WeChat** page shows the memory-module market in the team's

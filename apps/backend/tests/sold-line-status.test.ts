@@ -112,9 +112,14 @@ describe('sold inventory events', () => {
       WHERE kind = 'sold' AND order_line_id IN (${full.id}, ${partial.id})`;
     expect(rows).toHaveLength(2);
     const byLine = new Map(rows.map((r) => [r.order_line_id, r]));
-    expect(byLine.get(full.id)?.detail).toEqual({ soldQty: full.qty, remainingQty: 0, sellOrder: soId });
+    // priorStatus and priorQty are the lot as it was before the sale, which a
+    // reopen restores from.
+    expect(byLine.get(full.id)?.detail).toEqual({
+      soldQty: full.qty, remainingQty: 0, sellOrder: soId, priorStatus: 'Reviewing', priorQty: full.qty,
+    });
     expect(byLine.get(partial.id)?.detail).toEqual({
       soldQty: partial.qty - 1, remainingQty: 1, sellOrder: soId,
+      priorStatus: 'Reviewing', priorQty: partial.qty,
     });
     for (const r of rows) expect(r.actor_id).toBe(user.id);
   });

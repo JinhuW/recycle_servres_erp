@@ -174,8 +174,11 @@ export function ReopenSellOrderDialog({ orderId, from, onCancel, onReopened }: R
     setSubmitting(true);
     setError(null);
     try {
+      // `from` is what makes Done → Awaiting payment a reopen; a save from a
+      // stale editor posts the same move without it.
       await api.post(`/api/sell-orders/${orderId}/status`, {
         to,
+        from,
         note: note.trim(),
       });
       onReopened();

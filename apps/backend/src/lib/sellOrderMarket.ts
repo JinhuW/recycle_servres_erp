@@ -1,7 +1,7 @@
 import type { TransactionSql } from 'postgres';
 import { canonPartCol, canonPartNumberJs } from './part-number';
 import { autoTrackParts, type TrackablePart } from './marketAutoTrack';
-import { appendPriceEvent, retractPriceEvents } from './refPriceEvents';
+import { appendPriceEvent, retractPriceEvents, type WithdrawnPrice } from './refPriceEvents';
 
 type LineRow = {
   part_number: string | null;
@@ -113,6 +113,6 @@ export async function recordSaleDataPoints(
 export async function retractSaleDataPoints(
   tx: TransactionSql,
   sellOrderId: string,
-): Promise<number> {
+): Promise<WithdrawnPrice[]> {
   return retractPriceEvents(tx, `sale:${sellOrderId}`);
 }
