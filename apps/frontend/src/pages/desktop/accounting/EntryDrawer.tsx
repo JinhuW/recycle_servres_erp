@@ -2,10 +2,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { Modal } from '../../../components/Modal';
 import { Icon } from '../../../components/Icon';
 import { RouteLink } from '../../../components/RouteLink';
-import { Yuan, eventLine, recordPath } from '../../../components/AccountingBits';
+import { HistoryLine, Yuan, recordPath } from '../../../components/AccountingBits';
 import { useT } from '../../../lib/i18n';
 import { handleFetchError } from '../../../lib/errorToast';
-import { fmtDate, fmtMoney } from '../../../lib/format';
+import { fmtMoney } from '../../../lib/format';
 import { acctEntry, acctRestore, acctVoid, fmtBookDay, type AcctEntryDetail } from '../../../lib/accounting';
 import { EntryDialog, TargetLine } from './EntryDialog';
 
@@ -110,12 +110,7 @@ export function EntryDrawer({ id, onClose, onChanged, onToast }: Props) {
 
               <div className="so-section-head" style={{ marginTop: 22 }}><Icon name="clock" size={14} /> {t('acctHistory')}</div>
               <div className="acct-history">
-                {entry.events.map(e => (
-                  <div key={e.id}>
-                    <span style={{ fontWeight: 600 }}>{e.actor?.name ?? '—'}</span> {eventLine(e, t)}
-                    <span className="acct-history-when">{fmtDate(e.at, locale)}</span>
-                  </div>
-                ))}
+                {entry.events.map(e => <HistoryLine key={e.id} e={e} t={t} locale={locale} />)}
               </div>
 
               {voiding && (

@@ -3531,6 +3531,8 @@ const zh: Record<string, string> = {
   acctEvVoided: '作废：{reason}',
   acctEvRestored: '恢复',
   acctEvUnlinked: '删除了对应的 {id}',
+  acctEvBackfilledPaidBy: '根据采购单的付款人补录',
+  acctEvBackfilledReceiver: '根据销售单的收款人补录',
   acctEdit: '编辑',
   acctVoid: '作废',
   acctVoidReason: '作废原因',

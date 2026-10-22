@@ -551,6 +551,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     acctEvVoided: 'voided it: {reason}',
     acctEvRestored: 'restored it',
     acctEvUnlinked: 'deleted {id}, which this was for',
+    acctEvBackfilledPaidBy: "Backfilled from the PO's Paid by",
+    acctEvBackfilledReceiver: "Backfilled from the sell order's payment receiver",
     acctEdit: 'Edit',
     acctVoid: 'Void',
     acctVoidReason: 'Why is this entry void?',

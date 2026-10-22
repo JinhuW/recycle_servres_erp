@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-349](./RS-349-accounting-fix-the-period-picker-and-backfill-entrie.md) | done | bug | P2 | Accounting: fix the period picker and backfill entries from Paid by and the payment receiver | 1.314.0 |
 | [RS-348](./RS-348-fix-the-sell-order-sheet-review-findings-before-the.md) | done | bug | P2 | Fix the sell order sheet review findings before the v1.313 release | v1.313.1 |
 | [RS-347](./RS-347-review-mode-prices-the-po-from-a-dropped-sell-order.md) | done | story | P2 | Review mode prices the PO from a dropped sell order sheet | v1.313.0 |
 | [RS-346](./RS-346-fix-the-wechat-market-review-findings-before-the-v1.md) | done | bug | P1 | Fix the WeChat market review findings before the v1.312 release | v1.312.2 |

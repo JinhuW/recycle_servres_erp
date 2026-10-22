@@ -23,6 +23,9 @@
   margin-bottom: 12px;
 }
 .acct-scope .select { width: 190px; height: 32px; font-size: 12.5px; padding: 0 12px; }
+/* The dashboard's chip sits at the right of its page head and opens leftwards;
+   here it leads the row, where leftwards is under the sidebar. */
+.acct-scope .dash-range-pop { left: 0; right: auto; }
 .acct-rate { margin-left: auto; font-size: 12px; color: var(--fg-subtle); }
 
 /* ── The identity band ── */

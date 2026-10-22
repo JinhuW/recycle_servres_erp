@@ -3,6 +3,7 @@ import { splitYuan, type AcctEntry, type AcctEvent } from '../lib/accounting';
 import { afterSalesCasePath } from '../lib/route';
 import { poStageName, type Translate } from '../lib/orderPresentation';
 import { sellOrderStatusShort } from '../lib/lookups';
+import { fmtDate } from '../lib/format';
 
 // The few pieces of the RMB book both shells draw the same way.
 
@@ -65,8 +66,25 @@ const FIELD_KEY: Record<string, string> = {
   targetId: 'acctFieldRecord', counterparty: 'acctFieldCounterparty', reference: 'acctFieldReference', note: 'acctFieldNote',
 };
 
-/** One line of an entry's history, after the actor's name. */
-export function eventLine(e: AcctEvent, t: Translate): string {
+const BACKFILL_KEY: Record<NonNullable<AcctEvent['detail']['backfilled']>, string> = {
+  commission_paid_by: 'acctEvBackfilledPaidBy', payment_received_by: 'acctEvBackfilledReceiver',
+};
+
+/** One line of an entry's history. An entry filled in from a record's own
+ *  payer was recorded by nobody, so it names that field instead. */
+export function HistoryLine({ e, t, locale }: { e: AcctEvent; t: Translate; locale: string }) {
+  const from = e.kind === 'created' ? e.detail.backfilled : undefined;
+  return (
+    <div>
+      {from ? t(BACKFILL_KEY[from]) : (
+        <><span style={{ fontWeight: 600 }}>{e.actor?.name ?? '—'}</span> {eventLine(e, t)}</>
+      )}
+      <span className="acct-history-when">{fmtDate(e.at, locale)}</span>
+    </div>
+  );
+}
+
+function eventLine(e: AcctEvent, t: Translate): string {
   switch (e.kind) {
     case 'created': return t('acctEvCreated');
     case 'edited': return t('acctEvEdited', {

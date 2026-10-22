@@ -32,7 +32,10 @@ export type AcctTarget = {
 
 export type AcctEvent = {
   id: string; kind: 'created' | 'edited' | 'voided' | 'restored' | 'unlinked';
-  detail: { changes?: Record<string, { from: unknown; to: unknown }>; reason?: string; orderId?: string };
+  detail: {
+    changes?: Record<string, { from: unknown; to: unknown }>; reason?: string; orderId?: string;
+    backfilled?: 'commission_paid_by' | 'payment_received_by';
+  };
   at: string; actor: { id: string; name: string } | null;
 };
 
