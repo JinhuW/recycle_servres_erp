@@ -612,21 +612,27 @@ is not a stage but a flag beside one, set once every line has sold
       file (a price that names its own currency keeps it), the FX ledger's
       rate when yuan were converted, the counts — to apply, repriced,
       unchanged, kept, skipped (hover for not in the sheet / can't be matched
-      / sheet rows not on this PO) — and **Cancel** / **Apply n prices**.
-      Escape cancels it; counting keeps working.
+      / parts the sheet prices that this PO lacks) — and **Cancel** /
+      **Apply n prices**. Escape cancels it; counting keeps working. Another
+      file dropped meanwhile is refused; Cancel first (v1.313.1).
     - Each row says what the sheet would do: the incoming price in blue,
       with the yuan and the sheet row under it; a typed price it would
       replace struck through beside it, with **Keep $x** to hold that one
       out of Apply; *Already at the sheet price*; *Not in sheet*; or why it
       can't be matched — no part number on the line, no price or an
       unreadable one on the row, another currency, or the part listed at two
-      prices (both shown; the manager types it).
+      prices, or at a price and at 0 (all shown; the manager types it;
+      v1.313.1).
+    - The incoming price is a field like any other (v1.313.1): a price typed
+      over it, or a blank, is saved at once and held out of Apply as *Keep*
+      holds one; a line held unpriced reads *Left unpriced*.
     - The tally's **Purchaser earns** reads current → with the sheet, its
       meter shows the incoming prices striped, and the Commission card shows
       the figures with the sheet applied.
     - Apply writes each price through the inventory line PATCH, as a typed
       one goes, so each is audited as `priced`; the toast says how many were
-      priced and repriced and **Undo** puts every previous price back. The
+      priced and repriced and **Undo** puts every previous price back,
+      except on a line retyped since (v1.313.1). The
       Compare card names the file and figure a price came from, until the
       page reloads. Sheet prices are not market data points; the Market
       page's import is for that.

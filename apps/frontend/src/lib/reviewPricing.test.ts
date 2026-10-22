@@ -161,6 +161,12 @@ describe('planSheet', () => {
     expect(p.rows.get('diff')).toMatchObject({ kind: 'kept', was: 52 });
     expect(p).toMatchObject({ repriced: 0, kept: 1 });
 
+    // An unpriced line can be held too: it stays unpriced.
+    const blank = planSheet(lines, preview, new Set(['new']));
+    expect(blank.rows.get('new')).toMatchObject({ kind: 'kept', was: null });
+    expect(blank.writes.map(w => w.lineId)).toEqual(['zero', 'diff']);
+    expect(blank.incoming).toBe(1);
+
     // Typed to the sheet's figure after it was read: nothing left to write.
     const typed = planSheet(lines.map(l => (l.id === 'diff' ? { ...l, sellPrice: 54.55 } : l)), preview, new Set());
     expect(typed.rows.get('diff')?.kind).toBe('same');

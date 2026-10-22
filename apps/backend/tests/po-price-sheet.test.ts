@@ -74,9 +74,9 @@ describe('POST /api/orders/:id/price-sheet/preview', () => {
 
   it('matches each line by canonical part number and writes nothing', async () => {
     const { id, lineIds } = await createReviewing(pur, mgr, [
-      'SHEET-A1', 'SHEET-B2', 'SHEET-C3', 'SHEET-D4', 'SHEET-E5', 'SHEET-F6', 'SHEET-G7',
+      'SHEET-A1', 'SHEET-B2', 'SHEET-C3', 'SHEET-D4', 'SHEET-E5', 'SHEET-F6', 'SHEET-G7', 'SHEET-H8',
     ]);
-    const [a, b, cLine, d, e, f, g] = lineIds as [string, string, string, string, string, string, string];
+    const [a, b, cLine, d, e, f, g, h] = lineIds as [string, string, string, string, string, string, string, string];
     // A line with nothing to match on, as a mixed lot has.
     await getTestDb()`UPDATE order_lines SET part_number = NULL WHERE id = ${g}`;
 
@@ -92,6 +92,10 @@ describe('POST /api/orders/:id/price-sheet/preview', () => {
       [7, 'NOT-ON-PO', 1, 99, 99],
       [8, 'SHEET-F6', 1, 'call', null],
       [9, '-', 1, 5, 5],
+      [10, 'SHEET-H8', 1, 50, 50],
+      [11, 'SHEET-H8', 1, 0, 0],
+      [12, 'NOT-ON-PO', 1, 99, 99],
+      [13, 'BLANK-ONLY', 1, null, null],
     ]);
     const res = await preview(id, { file }, mgr);
     expect(res.status).toBe(200);
@@ -109,6 +113,11 @@ describe('POST /api/orders/:id/price-sheet/preview', () => {
     expect(of(e)).toMatchObject({ status: 'matched', cell: { rowNumber: 8, price: 12 } });
     expect(of(f)).toMatchObject({ status: 'invalid-price', cell: { rowNumber: 10, rawPrice: 'call' } });
     expect(of(g).status).toBe('no-part');
+    // A later 0 is "not buying": against a price, it is the manager's call.
+    expect(of(h).status).toBe('conflict');
+    expect(of(h).cells!.map(x => x.price)).toEqual([50, 0]);
+    // Parts the sheet prices that the PO lacks: a repeat or a blank row is
+    // not another part.
     expect(body.notOnPo).toBe(1);
     expect(body.fx).toBeNull();
 

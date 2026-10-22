@@ -6,13 +6,9 @@ import { applyMarketWrites } from '../lib/marketWrite';
 import { appendPriceEvent, appendPriceEvents } from '../lib/refPriceEvents';
 import { escapeLike } from '../lib/pagination';
 import { canonPartCol, canonPartNumberJs } from '../lib/part-number';
-import {
-  convertToUsd, getLatestRateToUsd, isSupportedCurrency, SUPPORTED_CURRENCIES,
-} from '../lib/fx';
+import { convertToUsd, getLatestRateToUsd, isSupportedCurrency } from '../lib/fx';
 import { bearerGuard } from '../oauth/guard';
-import {
-  readPriceSheetRows, PriceColumnsNotFoundError, type SheetPriceRow,
-} from '../services/priceSheet';
+import { readPriceSheetUpload, type SheetPriceRow } from '../services/priceSheet';
 import type { Env, User } from '../types';
 
 const market = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -281,11 +277,9 @@ market.post('/chips', async (c) => {
 
 // Price-list import from the Market page, step 1 of 2: read a sheet's Part
 // Number and Unit Price columns — every other column is ignored — and report
-// what each row would do to the board. Writes nothing. The file is parsed and
-// dropped, never stored, so its cap is its own rather than the attachment
-// limits in getUploadLimits. The board is USD: a yuan price is converted at
-// the FX ledger's latest rate, and the preview's prices are what apply writes.
-const PRICE_IMPORT_MAX_BYTES = 8 * 1024 * 1024;
+// what each row would do to the board. Writes nothing. The board is USD: a
+// yuan price is converted at the FX ledger's latest rate, and the preview's
+// prices are what apply writes.
 // Prices one import writes, and so how many matches a preview may offer: a
 // preview the apply would refuse is one the manager can do nothing with.
 const PRICE_IMPORT_MAX_ROWS = 5000;
@@ -326,35 +320,9 @@ type ImportRef = {
 market.post('/price-import/preview', async (c) => {
   if (c.var.user.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
 
-  const form = await c.req.formData().catch(() => null);
-  if (!form) return c.json({ error: 'multipart/form-data required' }, 400);
-  const file = form.get('file');
-  if (!(file instanceof File)) return c.json({ error: 'file is required' }, 400);
-  if (file.size > PRICE_IMPORT_MAX_BYTES) {
-    return c.json({ error: `file too large (max ${PRICE_IMPORT_MAX_BYTES} bytes)` }, 413);
-  }
-  // What an unmarked price is in; a price that names its currency keeps it.
-  const listCurrency = form.get('currency') ?? 'USD';
-  if (!isSupportedCurrency(listCurrency)) {
-    return c.json({ error: `currency must be one of ${SUPPORTED_CURRENCIES.join(', ')}` }, 400);
-  }
-
-  const { default: ExcelJS } = await import('exceljs');
-  const wb = new ExcelJS.Workbook();
-  try {
-    await wb.xlsx.load(await file.arrayBuffer());
-  } catch {
-    return c.json({ error: 'not a valid .xlsx file' }, 400);
-  }
-  let sheetRows: SheetPriceRow[];
-  try {
-    sheetRows = readPriceSheetRows(wb);
-  } catch (e) {
-    if (e instanceof PriceColumnsNotFoundError) {
-      return c.json({ error: e.message, code: 'columns-not-found' }, 400);
-    }
-    throw e;
-  }
+  const upload = await readPriceSheetUpload(await c.req.formData().catch(() => null));
+  if (!upload.ok) return c.json(upload.body, upload.status);
+  const { rows: sheetRows, listCurrency } = upload;
 
   const sql = getDb(c.env);
   // Junk like '-' canonicalises to '', and part_number is nullable — an empty

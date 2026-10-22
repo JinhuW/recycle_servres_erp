@@ -134,7 +134,8 @@ export type SheetRowPlan =
   | { kind: 'in'; price: number; cell: SheetCell }
   // Replaces a different price: the sheet wins unless the row is kept.
   | { kind: 'diff'; price: number; was: number; cell: SheetCell }
-  | { kind: 'kept'; price: number; was: number; cell: SheetCell }
+  // Held out of Apply: a typed price, or a line left unpriced (null).
+  | { kind: 'kept'; price: number; was: number | null; cell: SheetCell }
   | { kind: 'same'; cell: SheetCell }
   | { kind: 'off' }
   | { kind: 'skip'; match: SheetSkip };
@@ -179,16 +180,16 @@ export function planSheet(
     } else {
       const price = m.cell.price as number;
       const was = isPricedSellPrice(l.sellPrice) ? l.sellPrice as number : null;
-      if (was === null) {
-        row = { kind: 'in', price, cell: m.cell };
-        plan.writes.push({ lineId: l.id, price });
-        plan.incoming += 1;
-      } else if (toCents(was) === toCents(price)) {
+      if (was !== null && toCents(was) === toCents(price)) {
         row = { kind: 'same', cell: m.cell };
         plan.unchanged += 1;
       } else if (kept.has(l.id)) {
         row = { kind: 'kept', price, was, cell: m.cell };
         plan.kept += 1;
+      } else if (was === null) {
+        row = { kind: 'in', price, cell: m.cell };
+        plan.writes.push({ lineId: l.id, price });
+        plan.incoming += 1;
       } else {
         row = { kind: 'diff', price, was, cell: m.cell };
         plan.writes.push({ lineId: l.id, price });

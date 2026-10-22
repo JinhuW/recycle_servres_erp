@@ -7,12 +7,9 @@ import { writeOrderEvent, type SqlLike } from '../../services/orderAudit';
 import { notify } from '../../lib/notify';
 import { poLineOrder } from '../../lib/poLineNo';
 import { canonPartNumberJs } from '../../lib/part-number';
-import {
-  convertToUsd, getLatestRateToUsd, isSupportedCurrency, SUPPORTED_CURRENCIES,
-} from '../../lib/fx';
-import {
-  readPriceSheetRows, PriceColumnsNotFoundError, type SheetPriceRow,
-} from '../../services/priceSheet';
+import { allLimited } from '../../lib/concurrency';
+import { convertToUsd, getLatestRateToUsd, isSupportedCurrency } from '../../lib/fx';
+import { readPriceSheetUpload, type SheetPriceRow } from '../../services/priceSheet';
 import { type OrdersEnv } from './shared';
 
 const checksRoutes = new Hono<OrdersEnv>();
@@ -229,28 +226,26 @@ checksRoutes.post('/:id/checks/send', async (c) => {
 // part number against this PO's lines. Writes nothing. Review mode writes
 // each price the manager applies through the inventory line PATCH, the road
 // a typed price takes, so every one is audited as `priced` the same way.
-// The parsed file is dropped, never stored, so its cap is its own.
-const PRICE_SHEET_MAX_BYTES = 8 * 1024 * 1024;
-
 type SheetCell = {
   sheet: string;
   rowNumber: number;
   rawPrice: string;
   /** The currency the row names, or the one the sheet was read in. */
   currency: string;
-  /** US dollars; null when the row has no usable price. */
+  /** US dollars; null when the row has no usable price, 0 on a "not buying" row. */
   price: number | null;
   /** The yuan a converted price came from. */
   listedPrice?: number;
 };
-type SheetCellStatus = 'ok' | 'no-price' | 'invalid-price' | 'other-currency';
+type SheetCellStatus = 'ok' | 'zero' | 'no-price' | 'invalid-price' | 'other-currency';
+type SheetSkipStatus = 'no-price' | 'invalid-price' | 'other-currency';
 
 type SheetLineMatch =
   | { lineId: string; status: 'matched'; cell: SheetCell }
   | { lineId: string; status: 'no-part' | 'not-in-sheet' }
-  | { lineId: string; status: Exclude<SheetCellStatus, 'ok'>; cell: SheetCell }
-  // The sheet prices the part more than once, differently: which price is
-  // meant for which line is not something the file says.
+  | { lineId: string; status: SheetSkipStatus; cell: SheetCell }
+  // The sheet prices the part more than once, differently, or prices it and
+  // also lists it at 0: which is meant is not something the file says.
   | { lineId: string; status: 'conflict'; cells: SheetCell[] };
 
 checksRoutes.post('/:id/price-sheet/preview', async (c) => {
@@ -261,41 +256,15 @@ checksRoutes.post('/:id/price-sheet/preview', async (c) => {
   if (!order) return c.json({ error: 'Not found' }, 404);
   if (order.archived_at) return c.json({ error: 'Order is archived — unarchive it first' }, 409);
 
-  const form = await c.req.formData().catch(() => null);
-  if (!form) return c.json({ error: 'multipart/form-data required' }, 400);
-  const file = form.get('file');
-  if (!(file instanceof File)) return c.json({ error: 'file is required' }, 400);
-  if (file.size > PRICE_SHEET_MAX_BYTES) {
-    return c.json({ error: `file too large (max ${PRICE_SHEET_MAX_BYTES} bytes)` }, 413);
-  }
-  // What an unmarked price is in; a price that names its currency keeps it.
-  const listCurrency = form.get('currency') ?? 'USD';
-  if (!isSupportedCurrency(listCurrency)) {
-    return c.json({ error: `currency must be one of ${SUPPORTED_CURRENCIES.join(', ')}` }, 400);
-  }
-
-  const { default: ExcelJS } = await import('exceljs');
-  const wb = new ExcelJS.Workbook();
-  try {
-    await wb.xlsx.load(await file.arrayBuffer());
-  } catch {
-    return c.json({ error: 'not a valid .xlsx file' }, 400);
-  }
-  let sheetRows: SheetPriceRow[];
-  try {
-    sheetRows = readPriceSheetRows(wb);
-  } catch (e) {
-    if (e instanceof PriceColumnsNotFoundError) {
-      return c.json({ error: e.message, code: 'columns-not-found' }, 400);
-    }
-    throw e;
-  }
+  const upload = await readPriceSheetUpload(await c.req.formData().catch(() => null));
+  if (!upload.ok) return c.json(upload.body, upload.status);
+  const { rows: sheetRows, listCurrency } = upload;
 
   const currencyOf = (s: SheetPriceRow) => s.currency ?? listCurrency;
-  const [lines, cny] = await Promise.all([
-    sql<{ id: string; part_number: string | null }[]>`
+  const [lines, cny] = await allLimited([
+    () => sql<{ id: string; part_number: string | null }[]>`
       SELECT id, part_number FROM order_lines WHERE order_id = ${id}`,
-    sheetRows.some(s => currencyOf(s) === 'CNY') ? getLatestRateToUsd(sql, 'CNY') : Promise.resolve(null),
+    () => (sheetRows.some(s => currencyOf(s) === 'CNY') ? getLatestRateToUsd(sql, 'CNY') : Promise.resolve(null)),
   ]);
 
   // Every sheet row read once, into dollars or the reason it has none, under
@@ -310,12 +279,13 @@ checksRoutes.post('/:id/price-sheet/preview', async (c) => {
       sheet: s.sheet, rowNumber: s.rowNumber, rawPrice: s.rawPrice, currency, price: null,
     };
     // A 0 on a quote means "not buying", as on the Market import — and so do
-    // yuan that convert to under a cent.
-    const status: SheetCellStatus = s.priceKind === 'empty' || usd === 0 ? 'no-price'
+    // yuan that convert to under a cent. Unlike a blank, it says something.
+    const status: SheetCellStatus = s.priceKind === 'empty' ? 'no-price'
       : s.priceKind === 'invalid' ? 'invalid-price'
         : !isSupportedCurrency(currency) ? 'other-currency'
-          : 'ok';
-    if (status === 'ok') {
+          : usd === 0 ? 'zero'
+            : 'ok';
+    if (status === 'ok' || status === 'zero') {
       cell.price = usd;
       if (currency === 'CNY') cell.listedPrice = s.price!;
     }
@@ -332,19 +302,30 @@ checksRoutes.post('/:id/price-sheet/preview', async (c) => {
     const reads = byPart.get(canon);
     if (!reads) return { lineId: l.id, status: 'not-in-sheet' };
     const priced = reads.filter(r => r.status === 'ok').map(r => r.cell);
+    const zeros = reads.filter(r => r.status === 'zero').map(r => r.cell);
     if (priced.length === 0) {
       const last = reads[reads.length - 1]!;
-      return { lineId: l.id, status: last.status as Exclude<SheetCellStatus, 'ok'>, cell: last.cell };
+      // A part listed only at 0 has no price to take.
+      const status = last.status === 'zero' ? 'no-price' : last.status as SheetSkipStatus;
+      return { lineId: l.id, status, cell: last.cell };
     }
     // The same price listed twice is one price; the last row is the one cited.
     const cents = new Set(priced.map(p => Math.round(p.price! * 100)));
-    if (cents.size > 1) return { lineId: l.id, status: 'conflict', cells: priced };
+    if (cents.size > 1 || zeros.length > 0) {
+      const cells = reads.filter(r => r.status === 'ok' || r.status === 'zero').map(r => r.cell);
+      return { lineId: l.id, status: 'conflict', cells };
+    }
     return { lineId: l.id, status: 'matched', cell: priced[priced.length - 1]! };
   });
-  const notOnPo = sheetRows.filter(s => s.canonPart && !onPo.has(s.canonPart)).length;
+  // Parts the sheet prices that no line of this PO carries; a blank or a
+  // repeat is not another part.
+  const notOnPo = new Set<string>();
+  for (const [canon, reads] of byPart) {
+    if (!onPo.has(canon) && reads.some(r => r.status === 'ok')) notOnPo.add(canon);
+  }
 
   const fx = cny && { oneUsdInQuote: 1 / cny.rate, source: cny.source };
-  return c.json({ fx, lines: matches, notOnPo });
+  return c.json({ fx, lines: matches, notOnPo: notOnPo.size });
 });
 
 export default checksRoutes;
