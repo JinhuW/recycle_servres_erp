@@ -32,6 +32,21 @@ describe('the entry form', () => {
     expect(pickTarget(f, { id: 'PO-2', party: 'Other' }).counterparty).toBe('Typed');
   });
 
+  it("opens on the record's payer, unless a manager was picked by hand", () => {
+    const TIM = '22222222-2222-2222-2222-222222222222';
+    const fromCard = initialForm({ meId: ME, today: TODAY, preset: { kind: 'purchase', target: { id: 'PO-1', payerId: TIM } } });
+    expect(fromCard).toMatchObject({ managerId: TIM, managerTouched: false });
+    // A record naming nobody is the recorder's.
+    expect(initialForm({ meId: ME, today: TODAY, preset: { kind: 'purchase', target: { id: 'PO-1', payerId: null } } }).managerId).toBe(ME);
+    // The opener's own manager outranks the record's.
+    expect(initialForm({ meId: ME, today: TODAY, preset: { kind: 'purchase', target: { id: 'PO-1', payerId: TIM }, managerId: ME } })).toMatchObject({ managerId: ME, managerTouched: true });
+
+    const f = initialForm({ meId: ME, today: TODAY, preset: { kind: 'purchase' } });
+    expect(pickTarget(f, { id: 'PO-1', payerId: TIM }).managerId).toBe(TIM);
+    expect(pickTarget(f, { id: 'PO-1' }).managerId).toBe(ME);
+    expect(pickTarget({ ...f, managerTouched: true }, { id: 'PO-1', payerId: TIM }).managerId).toBe(ME);
+  });
+
   it('turns into a request, or names what is missing', () => {
     const f = initialForm({ meId: ME, today: TODAY, preset: { kind: 'purchase' } });
     expect(toRequestBody(f)).toEqual({ error: 'acctErrAmount' });

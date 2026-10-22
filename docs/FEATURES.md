@@ -230,19 +230,21 @@ is not a stage but a flag beside one, set once every line has sold
   shape, or who collected it, plus a one-line live tracking state — laid out
   one fact per row since v1.172.1: source, then warehouse, then the delivery
   switch beside what that choice needs, a hairline between them), *Cost
-  Payment* (paid by, method, transaction ID, proof files, and the manager's
-  bank-payments ledger — named *Payment* until v1.163.0, when the second
-  payment below got a home), *Commission* (purchaser, rate, and what the
+  Payment* (paid by — the Business Account, or the person who paid, since
+  v1.315.0 — method, transaction ID, proof files, the manager's
+  bank-payments ledger and the Accounting card — named *Payment* until
+  v1.163.0, when the second payment below got a home), *Commission* (purchaser, rate, and what the
   purchaser earns — the maths that used to sit in an aside titled "Payment
   detail" — and a **Commission payment** drop box for the screenshot that
   shows the purchaser was paid (v1.163.0 shipped it with a PayPal/Cash picker
   and an OCR-filled transaction ID; v1.165.0 cut it to the screenshot alone).
   Above the drop box, **Paid by** names the manager who paid the purchaser
   (v1.217.0): a select of the active managers, or *Not recorded*, which every
-  order starts at. Since v1.301.0 it also offers **Company paid**, a fixed
-  option rather than a member, for a commission paid from the company's
-  account. A live bank payment linked as the PO's commission makes it read
-  Company paid on its own: the select locks with a note saying why, and an
+  order starts at. Since v1.301.0 it also offers **Business Account** (named
+  *Company paid* until v1.315.0), a fixed option rather than a member, for a
+  commission paid from the company's account. A live bank payment linked as
+  the PO's commission makes it read Business Account on its own: the select
+  locks with a note saying why, and an
   unlink or a reversal gives back the pick made by hand. **The screenshot's
   upload records the payer** (v1.302.0): a manager who uploads one while
   Paid by reads *Not recorded* is recorded as the payer. If Paid by names
@@ -716,12 +718,14 @@ is not a stage but a flag beside one, set once every line has sold
   (Facebook / Local / Reddit / Other, the same set tracked packages use), and
   how the goods get here: **Local pickup** (who collected it, from a member
   picker) or **Shipping label** (paste the tracking number; the carrier is
-  recognised from its shape, as on Add-package). Then who paid. **Company
-  card** names a method, PayPal or Cash: PayPal keeps the transaction-ID rule
-  and offers the optional screenshot that reads the ID; Cash lifts that rule
-  but needs its own proof (v1.153.0, below). **Self-paid** asks for no method
-  and no ID — it is reimbursed from commission, not matched against the bank
-  — but **requires the chat with the seller** as a Submission attachment (any
+  recognised from its shape, as on Add-package). Then who paid. The
+  **Business Account** (*Company card* until v1.315.0) names a method, PayPal
+  or Cash: PayPal keeps the transaction-ID rule and offers the optional
+  screenshot that reads the ID; Cash lifts that rule but needs its own proof
+  (v1.153.0, below). **A person** — any active manager by name, or the
+  purchaser (*Self-paid* until v1.315.0) — asks for no method and no ID — it
+  is reimbursed, not matched against the bank — but **requires the chat with
+  the seller** as a Submission attachment (any
   Submission file on the order counts). The dialog asks for nothing else —
   the purchaser and commission rate left it in v1.162.0 for the Commission
   tab / fold and the phone's Ready-to-Pay sheet.
@@ -781,10 +785,25 @@ is not a stage but a flag beside one, set once every line has sold
   tab's *Paid by*. Since v1.302.0 it is read-only for every role; v1.301.0
   had a picker in the cell. The record is made on the PO page, by the
   commission screenshot's upload or a confirmed pick. A manager sees a PO
-  with a bank payment linked as its commission as a *Company paid* chip that
-  opens that payment. It is sortable, in the Columns picker and on
-  by default. Unlike Total cost above, migration 0188 added it to every saved
-  column list, so nobody has to tick it on.
+  with a bank payment linked as its commission as a *Business Account* chip
+  (*Company paid* until v1.315.0) that opens that payment. It is sortable,
+  in the Columns picker and on by default. Unlike Total cost above,
+  migration 0188 added it to every saved column list, so nobody has to tick
+  it on.
+- **The cost's Paid by names who paid the supplier** (v1.315.0): the
+  **Business Account** — the company's Mercury and PayPal money, the only
+  kind the Payments page links to a PO — or **a person**, any active manager
+  by name, or the purchaser when they are not one. The picker is a select on
+  every surface the payment picker already had (below); picking a person
+  keeps the chat-screenshot rule, the Business Account keeps Method and the
+  transaction-ID and auto-link rules. Stored as the same `payment`
+  (`company` / `self`) plus `orders.paid_by` (migration 0197), which named
+  the purchaser on every self-paid PO that existed. The list's Payment cell
+  and its filter chips read *Business* or the person's name; a change is one
+  *Paid by: ‹from› → ‹to›* Activity line. **The cost comes back to whoever
+  paid it**: the Commission tab adds it to the purchaser's earnings only when
+  the purchaser paid, and reads *Cost reimbursed to ‹name›* when a manager
+  did. The spreadsheet export's *Payment method* row names the payer too.
 - **The Actions column is pinned to the right edge** (v1.294.1). When the
   desktop list is wider than its card and scrolls sideways, the Actions
   header and cells stay put at the right while the other columns slide
@@ -794,8 +813,9 @@ is not a stage but a flag beside one, set once every line has sold
 - **One payment picker on every surface, and a cash payment needs a
   screenshot of the amount** (v1.153.0). The desktop Submit and Edit pages,
   the phone's Review and Detail screens, and the hand-off dialog and sheet
-  all share one component: *Paid by* (Company card / Self-paid), then, under
-  Company card, *Method* (PayPal / Cash), then a proof panel whose heading
+  all share one component: *Paid by* (the Business Account or a person since
+  v1.315.0; Company card / Self-paid before), then, under the Business
+  Account, *Method* (PayPal / Cash), then a proof panel whose heading
   states what the chosen path needs before anything is typed — the
   transaction ID plus the optional screenshot that reads it (since v1.167.0
   that screenshot is itself a `Payment` attachment on the PO — listed as a
@@ -884,8 +904,8 @@ is not a stage but a flag beside one, set once every line has sold
     - Cancel has the focus, because a label scanner ends each read with
       Enter.
   - **What it leaves alone.**
-    - Self-paid POs: their bank money is the purchaser's reimbursement plus
-      commission.
+    - Person-paid POs (self-paid): their bank money is the payer's
+      reimbursement plus commission.
     - POs with nothing linked.
     - Moves between Ready to Pay and Done.
     - The phone.
@@ -1062,7 +1082,8 @@ is not a stage but a flag beside one, set once every line has sold
 - **Warehouse and payment chips** under the desktop list's stage rail
   (v1.252.0): a Warehouse group (All, one chip per warehouse the loaded POs
   use, No warehouse when some PO has none) and a Payment group (All,
-  Company, Self-paid), for every role. Each chip's count is what its click
+  Business, one chip per person who paid a loaded PO — since v1.315.0; All,
+  Company, Self-paid before), for every role. Each chip's count is what its click
   would show given every other filter — search, Done, stage, Sold and the
   other group; the active chip clicked again clears its group. The filter is
   client-side, so the table swaps in place with no refetch, and the picks
@@ -2140,6 +2161,14 @@ payer, below).
     entry on the book without its link, and its history names the PO.
   - **A paid commission fills the PO's Paid by** when nobody is on file — the
     screenshot upload's rule (see *Purchase orders*).
+  - **A PO's payer is the entry's manager to begin with** (v1.315.0). A PO
+    picked for a Purchase entry carries its cost payer, and for a Commission
+    entry its commission payer: the Cost Payment and Commission cards' Record
+    buttons, on both shells, and the entry dialog's PO pick open on that
+    manager. A payer who is not an active manager (a purchaser who paid
+    themselves, the Business Account) leaves the recorder as the manager. A
+    manager picked by hand, or an entry being edited, is never moved by the
+    record.
 - **The book starts from the payers already on file** (v1.314.0, migration
   0196). A PO with a manager in Paid by is booked as a Paid commission
   through that manager, against the purchaser. It is the PO's projected

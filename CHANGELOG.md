@@ -17,6 +17,37 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.315.0] - 2026-10-22
+
+A PO's cost *Paid by* now names who paid the supplier (RS-350): the
+**Business Account** — the company's Mercury and PayPal money, the only kind
+the Payments page links to a PO — or **a person**, any active manager by
+name, or the purchaser when they are not one. It used to be a two-way switch,
+*Company card* or *Self-paid*, which said whose kind of money it was but not
+whose; RS-349 had to leave the cost out of the Accounting book for that
+reason. The stored value and every rule on it stay as they were: the Business
+Account keeps Method, the transaction-ID rule and auto-link, a person keeps
+the chat-screenshot rule. Migration 0197 adds `orders.paid_by` and names the
+purchaser on every self-paid PO, which is who the commission maths was
+reimbursing all along.
+
+The picker is a select on the create pages, both PO pages, the hand-off
+dialog and the phone sheet. The list's Payment cell and its filter chips read
+*Business* or the person's name, one chip per person who paid a loaded PO. A
+change is a *Paid by* line in Activity. The cost comes back to whoever paid
+it: the Commission tab adds it to the purchaser's earnings only when the
+purchaser paid, and reads *Cost reimbursed to ‹name›* when a manager did. The
+commission *Paid by*'s *Company paid* reads *Business Account* too, so the two
+fields share one vocabulary. The spreadsheet export names the payer.
+
+Accounting opens on the PO's payer: a PO picked for a Purchase entry carries
+its cost payer, and for a Commission entry its commission payer, so the
+Cost Payment and Commission cards' Record buttons and the entry dialog's PO
+pick start on that manager when they are an active one. A manager picked by
+hand, or an entry being edited, is never moved by the record.
+`/api/members/names` now carries each member's role, so a purchaser's
+picker can tell the managers apart.
+
 ## [1.314.0] - 2026-10-22
 
 The Accounting book now starts from the money the ERP already knew had gone

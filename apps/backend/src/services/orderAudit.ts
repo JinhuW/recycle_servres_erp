@@ -53,6 +53,7 @@ export const META_FIELDS = [
   'warehouse_id',
   'payment',
   'payment_method',
+  'paid_by',
   'total_cost',
   'commission_rate',
   'other_fees',

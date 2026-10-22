@@ -5,6 +5,7 @@ import { AttachmentChip } from '../../components/AttachmentChip';
 import { AttachmentDropzone } from '../../components/AttachmentDropzone';
 import { ImageLightbox } from '../../components/ImageLightbox';
 import { PaymentFields } from '../../components/PaymentFields';
+import { payerChoices } from '../../lib/poFacets';
 import type { HandoffMethod } from '../../lib/handoff';
 import { useT } from '../../lib/i18n';
 import { api, createOrder, deleteOrder, MAX_UPLOAD_BYTES } from '../../lib/api';
@@ -85,6 +86,8 @@ const SUBMIT_ATTACH_ACCEPT = [
 type OrderMeta = {
   warehouseId: string;
   payment: 'Company' | 'Self';
+  // The person on a self-paid PO; null lets the server name the owner.
+  paidByUserId: string | null;
   paymentMethod: HandoffMethod | null;
   notes: string;
   // Charged on top of the goods total, so it is its own field rather than
@@ -123,6 +126,17 @@ function OrderForm({
       .then(r => setMembers(r.items.filter(m => m.id !== user?.id)))
       .catch(handleFetchError);
   }, [isManager, user?.id]);
+  // Every role: the Paid by select offers the managers by name.
+  const [memberNames, setMemberNames] = useState<{ id: string; name: string; role?: string }[]>([]);
+  useEffect(() => {
+    api.get<{ items: { id: string; name: string; role?: string }[] }>('/api/members/names')
+      .then(r => setMemberNames(r.items))
+      .catch(handleFetchError);
+  }, []);
+  const owner = onBehalfOfUserId
+    ? (members.find(m => m.id === onBehalfOfUserId) ?? null)
+    : user ? { id: user.id, name: user.name } : null;
+  const payers = payerChoices(memberNames, owner, null);
 
   // Which category the next line defaults to. Persisted so a purchaser who
   // works through a pallet of drives doesn't re-pick on every session; the
@@ -138,6 +152,7 @@ function OrderForm({
   const [meta, setMeta] = useState<OrderMeta>({
     warehouseId: '',
     payment: 'Company',
+    paidByUserId: null,
     paymentMethod: null,
     notes: '',
     otherFees: '',
@@ -554,6 +569,7 @@ function OrderForm({
   type WireMeta = {
     warehouseId?: string;
     payment: 'company' | 'self';
+    paidByUserId: string | null;
     paymentMethod: HandoffMethod | null;
     notes: string | null;
     otherFees: number;
@@ -603,6 +619,7 @@ function OrderForm({
   const wireMeta = (): WireMeta => ({
     ...(meta.warehouseId ? { warehouseId: meta.warehouseId } : {}),
     payment: meta.payment === 'Company' ? 'company' : 'self',
+    paidByUserId: meta.payment === 'Company' ? null : meta.paidByUserId,
     paymentMethod: meta.payment === 'Company' ? meta.paymentMethod : null,
     notes: meta.notes || null,
     otherFees: parseFeeInput(meta.otherFees),
@@ -1135,7 +1152,9 @@ function OrderForm({
           <div className="field" style={{ marginBottom: 0 }}>
             <PaymentFields
               paidBy={meta.payment === 'Company' ? 'company' : 'self'}
-              onPaidBy={v => setMeta(m => ({ ...m, payment: v === 'company' ? 'Company' : 'Self' }))}
+              paidByUserId={meta.paidByUserId}
+              payers={payers}
+              onPaidBy={(v, userId) => setMeta(m => ({ ...m, payment: v === 'company' ? 'Company' : 'Self', paidByUserId: userId }))}
               method={meta.paymentMethod}
               onMethod={v => setMeta(m => ({ ...m, paymentMethod: v }))}
               txnId="" onTxnId={() => {}}

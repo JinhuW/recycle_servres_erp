@@ -9,7 +9,10 @@ import { PhSheet } from './PhSheet';
 // stage that fixes them. One component so the two can't drift.
 
 export type CommissionMath = {
-  payment: 'company' | 'self';
+  /** The purchaser paid the cost themselves, so it comes back in their earnings. */
+  selfReimbursed: boolean;
+  /** Someone else paid it in person — named here, reimbursed apart. */
+  reimbursedTo: string | null;
   revenue: number;
   totalCost: number;
   pricedCount: number;
@@ -36,7 +39,7 @@ function commissionPreview(pct: string, m: CommissionMath) {
   const rate = parsed !== null && Number.isFinite(parsed) ? parsed / 100 : 0;
   const profit = m.revenue - m.totalCost;
   const onProfit = profit * rate;
-  return { rate, profit, onProfit, earns: (m.payment === 'self' ? m.totalCost : 0) + onProfit };
+  return { rate, profit, onProfit, earns: (m.selfReimbursed ? m.totalCost : 0) + onProfit };
 }
 
 export function PhCommissionFields(p: FieldsProps) {
@@ -86,7 +89,8 @@ export function PhCommissionFields(p: FieldsProps) {
         {row(t('revenue'), fmtUSD(p.math.revenue, p.locale))}
         {row(t('eoCost'), fmtUSD(p.math.totalCost, p.locale))}
         {row(t('eoCommissionOnProfit'), fmtUSD(pv.onProfit, p.locale))}
-        {p.math.payment === 'self' && row(t('eoSelfPay'), fmtUSD(p.math.totalCost, p.locale))}
+        {p.math.selfReimbursed && row(t('eoSelfPay'), fmtUSD(p.math.totalCost, p.locale))}
+        {p.math.reimbursedTo && row(t('eoReimbursedTo', { name: p.math.reimbursedTo }), fmtUSD(p.math.totalCost, p.locale))}
         {row(t('eoPurchaserEarns'), fmtUSD(pv.earns, p.locale), true)}
         {p.math.pricedCount < p.math.lineCount && (
           <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)' }}>

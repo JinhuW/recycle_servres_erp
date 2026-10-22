@@ -28,6 +28,10 @@ export type AcctRow = AcctEntry & { balance: number | null };
 export type AcctTarget = {
   id: string; status: string; party: string | null;
   amount: number | null; currency: AccountingCurrency; recordedCny: number;
+  // Whose hands the record says the money went through — a PO's cost payer
+  // or commission payer. The form offers them as the manager; one who is not
+  // an active manager falls back to the recorder. Optional for deploy skew.
+  payerId?: string | null;
 };
 
 export type AcctEvent = {

@@ -29,6 +29,8 @@ export type HandoffInput = {
   payment?: 'company' | 'self';
   /** Company card only; a self-paid order carries none. */
   paymentMethod?: 'paypal' | 'cash' | null;
+  /** Self-paid only, validated by the route. Absent keeps the record. */
+  paidByUserId?: string | null;
   /** Already normalised (no whitespace, upper-case) by the route. */
   paypalTxnId?: string | null;
   paymentScreenshotKey?: string | null;
@@ -61,16 +63,27 @@ export type HandoffPackage = { id: string; tracking_number: string; carrier: str
 
 const HANDOFF_FIELDS = [
   'warehouse_id', 'source', 'handoff_method', 'handoff_by', 'payment', 'payment_method',
-  'paypal_txn_id', 'commission_rate',
+  'paid_by', 'paypal_txn_id', 'commission_rate',
 ] as const;
 
 type OrderRow = {
   id: string; user_id: string; lifecycle: string; archived_at: Date | null;
   warehouse_id: string | null; source: string | null; handoff_method: string | null;
   handoff_by: string | null; payment: string; payment_method: string | null;
+  paid_by: string | null;
   paypal_txn_id: string | null; commission_rate: number | null;
   supplier_name: string | null;
 };
+
+/** The payer after a write. The Business Account has none; a self-paid
+ *  order keeps the person named, else the one on file, else the purchaser —
+ *  so a client that never heard of the field still writes a valid row. */
+export function paidByAfter(
+  payment: string, sent: string | null | undefined, before: string | null, ownerId: string,
+): string | null {
+  if (payment !== 'self') return null;
+  return sent ?? before ?? ownerId;
+}
 
 /** An active member by id, for the "Picked up by" picker. Null when unknown
  *  or deactivated. The caller has already checked the id is uuid-shaped. */
@@ -83,18 +96,20 @@ export async function activeMember(
   return rows[0] ?? null;
 }
 
-/** The timeline names people, not uuids: a handoff_by change is rewritten
- *  with names the way owner_changed does it. Shared with PATCH. */
+/** The timeline names people, not uuids: a handoff_by or paid_by change is
+ *  rewritten with names the way owner_changed does it. Shared with PATCH. */
 export async function nameHandoffByChange(tx: SqlLike, changes: AuditChange[]): Promise<void> {
-  const byChange = changes.find(ch => ch.field === 'handoff_by');
-  if (!byChange) return;
-  const ids = [byChange.from, byChange.to].filter((v): v is string => typeof v === 'string');
+  const people = changes.filter(ch => ch.field === 'handoff_by' || ch.field === 'paid_by');
+  if (people.length === 0) return;
+  const ids = people.flatMap(ch => [ch.from, ch.to]).filter((v): v is string => typeof v === 'string');
   const names = ids.length
     ? await tx<{ id: string; name: string }[]>`SELECT id, name FROM users WHERE id = ANY(${ids}::uuid[])`
     : [];
   const nameOf = (v: unknown) => names.find(n => n.id === v)?.name ?? v;
-  byChange.from = nameOf(byChange.from);
-  byChange.to = nameOf(byChange.to);
+  for (const ch of people) {
+    ch.from = nameOf(ch.from);
+    ch.to = nameOf(ch.to);
+  }
 }
 
 export type PackageSet =
@@ -306,7 +321,7 @@ export async function handoffOrderTx(
 ): Promise<{ package: HandoffPackage | null; needsRegister: boolean; paymentsLinked: number }> {
   const before = (await tx`
     SELECT o.id, o.user_id, o.lifecycle, o.archived_at, o.warehouse_id, o.source,
-           o.handoff_method, o.handoff_by, o.payment, o.payment_method, o.paypal_txn_id,
+           o.handoff_method, o.handoff_by, o.payment, o.payment_method, o.paid_by, o.paypal_txn_id,
            o.commission_rate::float AS commission_rate,
            sup.name AS supplier_name
     FROM orders o
@@ -343,6 +358,7 @@ export async function handoffOrderTx(
   const paymentMethod = payment === 'self'
     ? null
     : (input.paymentMethod !== undefined ? input.paymentMethod : before.payment_method);
+  const paidBy = paidByAfter(payment, input.paidByUserId, before.paid_by, before.user_id);
   // The id follows the method the way the method follows the payment: only a
   // PayPal payment has one. A Draft saved as PayPal and handed off as Self or
   // Cash must not keep the id — the link below would file a company payment
@@ -359,12 +375,13 @@ export async function handoffOrderTx(
       handoff_by      = ${handoffBy},
       payment         = ${payment},
       payment_method  = ${paymentMethod},
+      paid_by         = ${paidBy},
       paypal_txn_id   = ${paypalTxnId},
       commission_rate = CASE WHEN ${setCommission}::int = 1 THEN ${input.commissionRate ?? null} ELSE commission_rate END
     WHERE id = ${id}
   `;
   const after = (await tx`
-    SELECT warehouse_id, source, handoff_method, handoff_by, payment, payment_method,
+    SELECT warehouse_id, source, handoff_method, handoff_by, payment, payment_method, paid_by,
            paypal_txn_id, commission_rate::float AS commission_rate
     FROM orders WHERE id = ${id}
   `)[0] as Record<string, unknown>;

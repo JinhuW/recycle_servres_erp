@@ -13,7 +13,7 @@ import { syncOrderGoodsTotal } from '../../services/orderGoodsTotal';
 import { serialIssue } from '@recycle-erp/shared';
 import { type LineCategory } from '../../types';
 import { normPaypalTxnId } from '../../ai/paypal';
-import { type OrdersEnv, assertCategoriesEnabled, badFees, identityErr, isOrderPayment, isPaymentMethod, type LineInput, newLineRow, normFeeNote, resolveOrderOwner, serialErr, supplierErr, trackInput, warehouseErr } from './shared';
+import { type OrdersEnv, assertCategoriesEnabled, badFees, identityErr, isOrderPayment, isPaymentMethod, paidByAfter, paidByErr, type LineInput, newLineRow, normFeeNote, resolveOrderOwner, serialErr, supplierErr, trackInput, warehouseErr } from './shared';
 
 const createRoutes = new Hono<OrdersEnv>();
 
@@ -32,6 +32,9 @@ createRoutes.post('/', async (c) => {
         /** How the company card paid. Meaningless — and dropped — for a
          *  self-paid PO. */
         paymentMethod?: 'paypal' | 'cash' | null;
+        /** Who paid a self-paid PO: an active manager or the owner. Absent
+         *  names the owner. Dropped for the Business Account. */
+        paidByUserId?: string | null;
         notes?: string;
         totalCost?: number;
         otherFees?: number;
@@ -64,6 +67,9 @@ createRoutes.post('/', async (c) => {
     return c.json({ error: 'paymentMethod must be paypal or cash' }, 400);
   }
   const newPaymentMethod = (body.payment ?? 'company') === 'company' ? (body.paymentMethod ?? null) : null;
+  const pbErr = await paidByErr(sql, owner.ownerId, body.paidByUserId);
+  if (pbErr) return c.json({ error: pbErr }, 400);
+  const newPaidBy = paidByAfter(body.payment ?? 'company', body.paidByUserId, null, owner.ownerId);
   const supErr = await supplierErr(sql, u, body.supplierId ?? null);
   if (supErr) return c.json({ error: supErr }, 400);
   // No warehouse named → the owner's home warehouse (FK-valid by construction).
@@ -122,12 +128,12 @@ createRoutes.post('/', async (c) => {
     newId = await nextHumanId(tx, 'PO', 'PO');
     await tx`
       INSERT INTO orders (
-        id, user_id, category, warehouse_id, payment, payment_method, notes, total_cost,
+        id, user_id, category, warehouse_id, payment, payment_method, paid_by, notes, total_cost,
         other_fees, other_fees_note, lifecycle, supplier_id, paypal_txn_id
       )
       VALUES (
         ${newId}, ${owner.ownerId}, ${deriveCategory(lineCats) ?? lineCats[0]},
-        ${warehouseId}, ${body.payment ?? 'company'}, ${newPaymentMethod}, ${body.notes ?? null},
+        ${warehouseId}, ${body.payment ?? 'company'}, ${newPaymentMethod}, ${newPaidBy}::uuid, ${body.notes ?? null},
         ${body.totalCost ?? null},
         ${body.otherFees ?? 0}, ${normFeeNote(body.otherFeesNote)}, 'draft',
         ${body.supplierId ?? null}, ${newPaypalTxnId}

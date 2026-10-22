@@ -100,7 +100,8 @@ export function useAccountingEntryForm(opts: {
     form, error, busy, managers, rate, targetType, query, candidates, orphan,
     preview: previewCny(form, rate),
     editing: !!entry,
-    set: (patch: Partial<EntryForm>) => edit(f => ({ ...f, ...patch })),
+    // A manager picked by hand stays put when the record changes.
+    set: (patch: Partial<EntryForm>) => edit(f => ({ ...f, ...patch, ...(patch.managerId !== undefined ? { managerTouched: true } : {}) })),
     setKind: (k: AccountingKind) => edit(f => applyKind(f, k)),
     setDirection: (d: AccountingDirection) => edit(f => ({ ...f, direction: d, directionTouched: true })),
     setCounterparty: (v: string) => edit(f => ({ ...f, counterparty: v, counterpartyTouched: true })),

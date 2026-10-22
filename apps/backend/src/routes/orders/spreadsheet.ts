@@ -62,10 +62,11 @@ spreadsheetRoutes.get('/:id/spreadsheet', async (c) => {
            o.id, o.user_id, o.category, o.payment, o.notes, o.lifecycle, o.created_at,
            o.total_cost::float AS total_cost, o.commission_rate::float AS commission_rate,
            o.other_fees::float AS other_fees, o.other_fees_note, o.paypal_txn_id,
-           u.name AS user_name,
+           u.name AS user_name, pb.name AS paid_by_name,
            w.short AS warehouse_short, w.region AS warehouse_region
     FROM orders o
     JOIN users u ON u.id = o.user_id
+    LEFT JOIN users pb ON pb.id = o.paid_by
     LEFT JOIN warehouses w ON w.id = o.warehouse_id
     WHERE o.id = ${id}
     LIMIT 1
@@ -155,7 +156,9 @@ spreadsheetRoutes.get('/:id/spreadsheet', async (c) => {
     { field: 'Buyer',                 value: String(order.user_name ?? '') },
     { field: 'Category',              value: lineCats.length > 1 ? lineCats.join(' · ') : String(order.category ?? '') },
     { field: 'Warehouse',             value: warehouse },
-    { field: 'Payment method',        value: order.payment === 'self' ? 'Self pay' : 'Company pay' },
+    // The field keeps its name; the value names who paid: the Business
+    // Account, or the person.
+    { field: 'Payment method',        value: order.payment === 'self' ? String(order.paid_by_name ?? 'Self pay') : 'Business Account' },
     { field: 'Total quantity',        value: totalQty },
     // Subtotal -> Other fees -> Total cost reads as an arithmetic column, which
     // is why the fee rows sit here rather than at the bottom.

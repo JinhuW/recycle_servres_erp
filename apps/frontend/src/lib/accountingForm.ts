@@ -25,6 +25,8 @@ export type EntryForm = {
   method: AccountingMethod;
   occurredOn: IsoDate;
   managerId: string;
+  // Once the manager picks a person, a record's payer no longer moves it.
+  managerTouched: boolean;
   counterparty: string;
   counterpartyTouched: boolean;
   reference: string;
@@ -47,7 +49,7 @@ export function initialForm(opts: { meId: string; today: IsoDate; preset?: Entry
       target: entry.target ? { id: entry.target.id } : null, targetLocked: false,
       amount: String(entry.amount), currency: entry.currency,
       fxRate: entry.fxRate === null ? '' : String(entry.fxRate),
-      method: entry.method, occurredOn: entry.occurredOn, managerId: entry.manager.id,
+      method: entry.method, occurredOn: entry.occurredOn, managerId: entry.manager.id, managerTouched: true,
       counterparty: entry.counterparty ?? '', counterpartyTouched: true,
       reference: entry.reference ?? '', note: entry.note ?? '',
     };
@@ -64,7 +66,11 @@ export function initialForm(opts: { meId: string; today: IsoDate; preset?: Entry
     fxRate: '',
     method: 'bank',
     occurredOn: opts.today,
-    managerId: preset?.managerId ?? opts.meId,
+    // The record's own payer when it names one (a PO's cost or commission
+    // payer), else the recorder. A pre-filled payer the picker does not list
+    // (not an active manager) is swapped for the recorder by the hook.
+    managerId: preset?.managerId ?? preset?.target?.payerId ?? opts.meId,
+    managerTouched: preset?.managerId !== undefined,
     counterparty: preset?.target?.party ?? '',
     counterpartyTouched: false,
     reference: '',
@@ -89,6 +95,9 @@ export function pickTarget(f: EntryForm, t: FormTarget | null): EntryForm {
     ...f,
     target: t,
     counterparty: f.counterpartyTouched ? f.counterparty : t?.party ?? '',
+    // The record's payer, unless a person was picked by hand (or the entry
+    // is being edited, which counts as picked).
+    managerId: f.managerTouched ? f.managerId : t?.payerId ?? f.managerId,
   };
 }
 

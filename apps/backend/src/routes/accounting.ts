@@ -103,6 +103,10 @@ const signedCny = (sql: SqlLike) =>
 type TargetFacts = {
   id: string; status: string; party: string | null; amount: number | null; currency: AccountingCurrency;
   recordedCny: number;
+  // Whose hands the money went through, when the record says: a PO's cost
+  // payer or commission payer. The form offers it as the manager; a payer
+  // who is not an active manager falls back to the recorder there.
+  payerId?: string | null;
 };
 
 type TargetLens = 'purchase' | 'commission' | 'so' | 'as';
@@ -148,10 +152,12 @@ async function findTargets(
       : sql`(COALESCE(o.total_cost, 0) + o.other_fees)::float`;
     const rows = await sql<{
       id: string; status: string; party: string | null; amount: number | null; recorded: number;
+      payer_id: string | null;
     }[]>`
       SELECT o.id, o.lifecycle AS status,
              ${lens === 'commission' ? sql`u.name` : sql`COALESCE(sup.name, u.name)`} AS party,
-             ${amount} AS amount, ${recordedFrag(sql, lens, sql`o.id`)} AS recorded
+             ${amount} AS amount, ${recordedFrag(sql, lens, sql`o.id`)} AS recorded,
+             ${lens === 'commission' ? sql`o.commission_paid_by` : sql`o.paid_by`} AS payer_id
       FROM orders o
       JOIN users u ON u.id = o.user_id
       LEFT JOIN suppliers sup ON sup.id = o.supplier_id
@@ -159,7 +165,9 @@ async function findTargets(
       WHERE ${scope}
       ORDER BY o.created_at DESC
       LIMIT 10`;
-    return rows.map(r => ({ ...r, currency: 'USD' as const, recordedCny: r.recorded }));
+    return rows.map(({ payer_id, ...r }) => ({
+      ...r, currency: 'USD' as const, recordedCny: r.recorded, payerId: payer_id,
+    }));
   }
   if (lens === 'so') {
     const scope = opts.id ? sql`so.id = ${opts.id}`

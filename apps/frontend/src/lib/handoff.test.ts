@@ -107,20 +107,23 @@ describe('handoffBlockerKeys', () => {
 describe('buildHandoffBody', () => {
   const draft = {
     warehouseId: 'WH-LA1', source: 'reddit' as const, delivery: 'pickup' as const, byUserId: 'u1',
-    trackingNumber: '', carrier: null, paidBy: 'self' as const, method: 'paypal' as const,
+    trackingNumber: '', carrier: null, paidBy: 'self' as const, paidByUserId: 'u-tim', method: 'paypal' as const,
     txnId: '8XY12345AB678901C',
   };
 
-  it('sends no method or id for a self-paid order', () => {
+  it('sends the payer, and no method or id, for a self-paid order', () => {
     expect(buildHandoffBody(draft)).toEqual({
       warehouseId: 'WH-LA1', source: 'reddit', handoff: { method: 'pickup', byUserId: 'u1' }, payment: 'self',
+      paidByUserId: 'u-tim',
     });
+    expect(buildHandoffBody({ ...draft, paidByUserId: null })).not.toHaveProperty('paidByUserId');
   });
 
-  it('sends the method, and the id only for PayPal', () => {
+  it('sends the method, and the id only for PayPal; the Business Account names no payer', () => {
     expect(buildHandoffBody({ ...draft, paidBy: 'company' })).toMatchObject({
       payment: 'company', paymentMethod: 'paypal', paypalTxnId: '8XY12345AB678901C',
     });
+    expect(buildHandoffBody({ ...draft, paidBy: 'company' })).not.toHaveProperty('paidByUserId');
     const cash = buildHandoffBody({ ...draft, paidBy: 'company', method: 'cash' });
     expect(cash.paymentMethod).toBe('cash');
     expect(cash).not.toHaveProperty('paypalTxnId');
