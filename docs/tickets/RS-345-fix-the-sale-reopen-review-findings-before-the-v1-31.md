@@ -2,13 +2,13 @@
 id: RS-345
 title: Fix the sale-reopen review findings before the v1.311 release
 type: bug
-status: in-progress
+status: done
 priority: P1
 created: 2026-10-22
 reporter: jinhu
 branch: JinhuW/glassfish
-pr:
-version:
+pr: 818
+version: v1.312.1
 related: [RS-343]
 ---
 
