@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { applyKind, initialForm, pickTarget, previewCny, toRequestBody } from './accountingForm';
-import { markDayStarts, owedOnSale, phonePeriod, splitYuan, fmtCny, fmtSignedCny } from './accounting';
+import { markDayStarts, owedOnSale, phonePeriod, reviewActions, splitYuan, fmtCny, fmtSignedCny, type AcctReview } from './accounting';
 
 const ME = '11111111-1111-1111-1111-111111111111';
 const TODAY = '2026-10-21';
@@ -86,13 +86,17 @@ describe('the book\'s built labels', () => {
   it('names every kind, method, direction and phone period in both languages', async () => {
     const { I18N } = await import('./i18n');
     const zh = (await import('./i18n.zh')).default;
-    const { ACCOUNTING_KINDS, ACCOUNTING_METHODS, ACCOUNTING_DIRECTIONS } = await import('@recycle-erp/shared');
+    const {
+      ACCOUNTING_KINDS, ACCOUNTING_METHODS, ACCOUNTING_DIRECTIONS, ACCOUNTING_REVIEW_STATES, ACCOUNTING_REVIEW_TABS,
+    } = await import('@recycle-erp/shared');
     const { PHONE_PERIODS } = await import('./accounting');
     const keys = [
       ...ACCOUNTING_KINDS.map(k => 'acctKind_' + k),
       ...ACCOUNTING_METHODS.map(m => 'acctMethod_' + m),
       ...ACCOUNTING_DIRECTIONS.map(d => 'acctDir_' + d),
       ...PHONE_PERIODS.map(p => 'acctPhPeriod_' + p),
+      ...ACCOUNTING_REVIEW_STATES.map(s => 'acctReviewState_' + s),
+      ...ACCOUNTING_REVIEW_TABS.flatMap(tab => ['acctRmTab_' + tab, 'acctRmEmpty_' + tab, 'acctRmEmptyHint_' + tab]),
     ];
     expect(keys.filter(k => !(k in I18N.en!))).toEqual([]);
     expect(keys.filter(k => !(k in zh))).toEqual([]);
@@ -106,5 +110,37 @@ describe('owedOnSale', () => {
     expect(owedOnSale(10_000, [received, refund])).toBe(0);
     expect(owedOnSale(10_000, [{ ...received, amountCny: 6_000 }, refund])).toBe(4_000);
     expect(owedOnSale(10_000, [])).toBe(10_000);
+  });
+});
+
+describe('reviewActions', () => {
+  const ALEX = 'alex', SOFIA = 'sofia';
+  const review = (over: Partial<AcctReview>): AcctReview => ({
+    state: 'open', version: 'v', author: { id: ALEX, name: 'Alex' }, by: null, at: null, clearedAt: null, query: null, ...over,
+  });
+  const entry = (r: AcctReview | null, manager = ALEX) => ({ review: r, manager: { id: manager, name: '' } });
+
+  it('never lets the author sign off their own version', () => {
+    expect(reviewActions(entry(review({})), ALEX)).toMatchObject({ review: false, query: false, own: true });
+    expect(reviewActions(entry(review({})), SOFIA)).toMatchObject({ review: true, query: true, own: false });
+    expect(reviewActions(entry(review({ state: 'changed' })), SOFIA)).toMatchObject({ review: true });
+  });
+
+  it('lets only the reviewer withdraw, and offers nothing on a voided entry', () => {
+    const done = review({ state: 'reviewed', by: { id: SOFIA, name: 'Sofia' } });
+    expect(reviewActions(entry(done), SOFIA)).toMatchObject({ withdraw: true, review: false, own: false });
+    expect(reviewActions(entry(done), ALEX)).toMatchObject({ withdraw: false, own: false });
+    expect(Object.values(reviewActions(entry(null), SOFIA)).some(Boolean)).toBe(false);
+  });
+
+  it('sends a question to the author, or with none to the manager whose money it was', () => {
+    const asked = review({
+      state: 'queried',
+      query: { by: { id: SOFIA, name: 'Sofia' }, text: '?', at: '', to: { id: ALEX, name: 'Alex' }, answer: null },
+    });
+    expect(reviewActions(entry(asked), ALEX)).toMatchObject({ answer: true, withdrawQuery: false });
+    expect(reviewActions(entry(asked), SOFIA)).toMatchObject({ answer: false, withdrawQuery: true, review: true });
+    // A backfilled entry of Sofia's own money: she reviews it, but has nobody to ask.
+    expect(reviewActions(entry(review({ author: null }), SOFIA), SOFIA)).toMatchObject({ review: true, query: false });
   });
 });

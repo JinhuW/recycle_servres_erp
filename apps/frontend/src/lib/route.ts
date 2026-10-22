@@ -419,6 +419,16 @@ export function accountingEntryPath(id: string): string {
   return `/accounting/${encodeURIComponent(id)}`;
 }
 
+// Review mode for the book: a desktop page of its own, no sidebar.
+export const ACCOUNTING_REVIEW_PATH = '/accounting/review';
+
+/** The entry an Accounting path opens. Review mode's path is not an entry —
+ *  on the phone, which has no Review mode, it is just the book. */
+export function matchAccountingEntry(path: string): string | null {
+  if (path === ACCOUNTING_REVIEW_PATH) return null;
+  return match('/accounting/:id', path)?.id ?? null;
+}
+
 // One report day on Monitors ▸ WeChat; bare /wechat is the newest one.
 export function wechatDayPath(date: string): string {
   return `/wechat/${encodeURIComponent(date)}`;
@@ -519,6 +529,7 @@ export function activityRecordHref(area: ActivityArea, targetRef: string | null)
   if (!targetRef) return null;
   const base = area === 'po' ? '/purchase-orders/'
     : area === 'so' ? '/sell-orders/'
+    : area === 'acct' ? '/accounting/'
     : '/inventory/';
   return hrefFor(base + encodeURIComponent(targetRef));
 }
