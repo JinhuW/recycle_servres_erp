@@ -17,6 +17,46 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.313.1] - 2026-10-22
+
+Fixes from the review of the Review mode sell order sheet (RS-348), made
+before it goes to production. Undo after Apply no longer overwrites a price
+typed after the Apply: it restores only the lines still at the sheet's price,
+and waits out any other batch of price writes. A sheet's incoming price can
+now be typed over. Before, `p` focused a read-only field and the digits went
+on to filter the list. A typed price, or a blank, is saved and held out of
+Apply the way *Keep* holds one. A file dropped on the list while a sheet waits
+is refused rather than silently replacing it and its *Keep* choices, and a
+file the list won't take no longer opens in the browser in place of the page.
+The *skipped* count names parts the sheet prices that the PO lacks, not every
+row: a repeated or blank row added to it before. A part priced on one row and
+listed at 0 on another, a withdrawn bid, is now a conflict the manager
+decides, not the price. The Market import and the sell order sheet now read
+their upload through one function, `readPriceSheetUpload`.
+
+## [1.313.0] - 2026-10-22
+
+Review mode now prices a PO from the buyer's filled sell order sheet
+(RS-347). Drop the `.xlsx` on the product list, or pick it with *From sheet*
+beside *Fill from market*. Its Part Number and Unit Price columns are read by
+the reader the Market import uses, and every PO line is matched by part
+number. The matches stand on the rows before anything is written: the
+incoming price in blue, with the sheet row and, for a yuan sheet, the yuan it
+was converted from at the FX ledger's rate. A typed price the sheet would
+replace is struck through and can be kept, and a row that can't be matched
+says why: not in the sheet, no part number, no price, or the part listed at
+two prices. One strip in the list's head carries the file, a USD / CNY
+switch, the counts and *Apply*; the tally shows *Purchaser earns* before and
+after. Apply writes each price the way a typed one goes, audited as
+`priced`, and the toast offers Undo. The preview is
+`POST /api/orders/:id/price-sheet/preview`, which writes nothing.
+
+This is what the RS-323 ask meant by "drop our sell order spreadsheet and it
+will auto fill the sell price". RS-324 (v1.297.0) read *drop* as *remove*
+and took out the sell order's vendor price import. The design was approved
+on 10-20, but the session building it stopped during planning, so it never
+shipped until now.
+
 ## [1.312.2] - 2026-10-22
 
 Fixes from the review of the WeChat market page (RS-346), which reached `dev`

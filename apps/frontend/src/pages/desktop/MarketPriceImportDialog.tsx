@@ -3,7 +3,7 @@ import { api, ApiError } from '../../lib/api';
 import { useT } from '../../lib/i18n';
 import { fmtMoney, fmtUSD } from '../../lib/format';
 import { handleFetchError, showErrorDialog, showSuccessToast } from '../../lib/errorToast';
-import { precheckPriceFile } from '../../lib/priceFilePrecheck';
+import { precheckMessageKey, precheckPriceFile } from '../../lib/priceFilePrecheck';
 import { AttachmentDropzone } from '../../components/AttachmentDropzone';
 import { CurrencyPicker, type Currency } from '../../components/CurrencyPicker';
 import { Icon } from '../../components/Icon';
@@ -75,15 +75,7 @@ export function MarketPriceImportDialog({
     try {
       const check = fresh ? await precheckPriceFile(file) : null;
       if (check && !check.ok) {
-        showErrorDialog(t(
-          check.reason === 'columns-missing'
-            ? check.missing.length === 1
-              ? check.missing[0] === 'part' ? 'mktImportMissingPart' : 'mktImportMissingPrice'
-              : 'soPriceImportColumnsNotFound'
-            : check.reason === 'too-large' ? 'soPriceImportTooLarge'
-              : check.reason === 'no-rows' ? 'soPriceImportNoRows'
-                : 'soPriceImportNotXlsx',
-        ));
+        showErrorDialog(t(precheckMessageKey(check)));
         return;
       }
       const form = new FormData();

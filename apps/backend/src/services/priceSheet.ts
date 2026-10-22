@@ -2,10 +2,12 @@
 // they sit. The file is untrusted: columns may be reordered, rows added or
 // deleted, prices typed as strings with currency symbols. Nothing here relies
 // on cell positions — columns are located by header text. The Market page's
-// price import reads its lists through this.
+// price import and Review mode's sell order sheet read their files through
+// this.
 
 import type ExcelJS from 'exceljs';
 import { canonPartNumberJs } from '../lib/part-number';
+import { isSupportedCurrency, SUPPORTED_CURRENCIES, type SupportedCurrency } from '../lib/fx';
 
 export class PriceColumnsNotFoundError extends Error {
   constructor() {
@@ -237,4 +239,42 @@ export function readPriceSheetRows(wb: ExcelJS.Workbook): SheetPriceRow[] {
     });
   }
   return rows;
+}
+
+// A price sheet as a route receives it: a multipart `file` and the `currency`
+// an unmarked price is in. The file is parsed and dropped, never stored, so
+// its cap is its own rather than the attachment limits in getUploadLimits. A
+// refusal comes back as the status and body the route answers with.
+export const PRICE_SHEET_MAX_BYTES = 8 * 1024 * 1024;
+
+export type PriceSheetUpload =
+  | { ok: true; rows: SheetPriceRow[]; listCurrency: SupportedCurrency }
+  | { ok: false; status: 400 | 413; body: { error: string; code?: string } };
+
+export async function readPriceSheetUpload(form: FormData | null): Promise<PriceSheetUpload> {
+  const refuse = (status: 400 | 413, error: string, code?: string): PriceSheetUpload =>
+    ({ ok: false, status, body: code ? { error, code } : { error } });
+  if (!form) return refuse(400, 'multipart/form-data required');
+  const file = form.get('file');
+  if (!(file instanceof File)) return refuse(400, 'file is required');
+  if (file.size > PRICE_SHEET_MAX_BYTES) return refuse(413, `file too large (max ${PRICE_SHEET_MAX_BYTES} bytes)`);
+  // A price that names its own currency keeps it.
+  const listCurrency = form.get('currency') ?? 'USD';
+  if (!isSupportedCurrency(listCurrency)) {
+    return refuse(400, `currency must be one of ${SUPPORTED_CURRENCIES.join(', ')}`);
+  }
+
+  const { default: ExcelJSLib } = await import('exceljs');
+  const wb = new ExcelJSLib.Workbook();
+  try {
+    await wb.xlsx.load(await file.arrayBuffer());
+  } catch {
+    return refuse(400, 'not a valid .xlsx file');
+  }
+  try {
+    return { ok: true, rows: readPriceSheetRows(wb), listCurrency };
+  } catch (e) {
+    if (e instanceof PriceColumnsNotFoundError) return refuse(400, e.message, 'columns-not-found');
+    throw e;
+  }
 }

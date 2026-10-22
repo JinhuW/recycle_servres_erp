@@ -285,7 +285,9 @@ const isUploadPath = (path: string): boolean =>
   // A price list dropped on the Market page is often our own bid sheet, which
   // embeds item photos and routinely exceeds the JSON cap. The route enforces
   // its own 8 MB limit.
-  path === '/api/market/price-import/preview';
+  path === '/api/market/price-import/preview' ||
+  // The sell order sheet dropped on Review mode is the same kind of file.
+  /^\/api\/orders\/[^/]+\/price-sheet\/preview$/.test(path);
 
 // All other routes: apply the 1 MiB JSON cap.
 const jsonBodyLimit = bodyLimit({

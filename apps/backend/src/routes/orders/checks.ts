@@ -1,10 +1,15 @@
-// Review mode: a manager's count of a PO against the box that arrived.
+// Review mode: a manager's count of a PO against the box that arrived, and
+// the sell order sheet that prices it.
 import { Hono } from 'hono';
 import { getDb } from '../../db';
 import { UUID_RE } from '../../lib/pagination';
 import { writeOrderEvent, type SqlLike } from '../../services/orderAudit';
 import { notify } from '../../lib/notify';
 import { poLineOrder } from '../../lib/poLineNo';
+import { canonPartNumberJs } from '../../lib/part-number';
+import { allLimited } from '../../lib/concurrency';
+import { convertToUsd, getLatestRateToUsd, isSupportedCurrency } from '../../lib/fx';
+import { readPriceSheetUpload, type SheetPriceRow } from '../../services/priceSheet';
 import { type OrdersEnv } from './shared';
 
 const checksRoutes = new Hono<OrdersEnv>();
@@ -215,6 +220,112 @@ checksRoutes.post('/:id/checks/send', async (c) => {
     ...await readChecks(sql, id),
     ok: true, sentFlags: sent.flags.length, sentExtras: sent.extras.length, notified: order.user_id !== u.id,
   });
+});
+
+// ── Pricing from a sell order sheet: the quote a buyer sent back, read by
+// part number against this PO's lines. Writes nothing. Review mode writes
+// each price the manager applies through the inventory line PATCH, the road
+// a typed price takes, so every one is audited as `priced` the same way.
+type SheetCell = {
+  sheet: string;
+  rowNumber: number;
+  rawPrice: string;
+  /** The currency the row names, or the one the sheet was read in. */
+  currency: string;
+  /** US dollars; null when the row has no usable price, 0 on a "not buying" row. */
+  price: number | null;
+  /** The yuan a converted price came from. */
+  listedPrice?: number;
+};
+type SheetCellStatus = 'ok' | 'zero' | 'no-price' | 'invalid-price' | 'other-currency';
+type SheetSkipStatus = 'no-price' | 'invalid-price' | 'other-currency';
+
+type SheetLineMatch =
+  | { lineId: string; status: 'matched'; cell: SheetCell }
+  | { lineId: string; status: 'no-part' | 'not-in-sheet' }
+  | { lineId: string; status: SheetSkipStatus; cell: SheetCell }
+  // The sheet prices the part more than once, differently, or prices it and
+  // also lists it at 0: which is meant is not something the file says.
+  | { lineId: string; status: 'conflict'; cells: SheetCell[] };
+
+checksRoutes.post('/:id/price-sheet/preview', async (c) => {
+  if (c.var.user.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const sql = getDb(c.env);
+  const id = c.req.param('id');
+  const order = await checkOrder(sql, id);
+  if (!order) return c.json({ error: 'Not found' }, 404);
+  if (order.archived_at) return c.json({ error: 'Order is archived — unarchive it first' }, 409);
+
+  const upload = await readPriceSheetUpload(await c.req.formData().catch(() => null));
+  if (!upload.ok) return c.json(upload.body, upload.status);
+  const { rows: sheetRows, listCurrency } = upload;
+
+  const currencyOf = (s: SheetPriceRow) => s.currency ?? listCurrency;
+  const [lines, cny] = await allLimited([
+    () => sql<{ id: string; part_number: string | null }[]>`
+      SELECT id, part_number FROM order_lines WHERE order_id = ${id}`,
+    () => (sheetRows.some(s => currencyOf(s) === 'CNY') ? getLatestRateToUsd(sql, 'CNY') : Promise.resolve(null)),
+  ]);
+
+  // Every sheet row read once, into dollars or the reason it has none, under
+  // its canonical part number. Junk like '-' canonicalises to '' and is no
+  // part at all.
+  const byPart = new Map<string, { cell: SheetCell; status: SheetCellStatus }[]>();
+  for (const s of sheetRows) {
+    if (!s.canonPart) continue;
+    const currency = currencyOf(s);
+    const usd = s.price !== null && currency === 'CNY' ? convertToUsd(s.price, cny!.rate) : s.price;
+    const cell: SheetCell = {
+      sheet: s.sheet, rowNumber: s.rowNumber, rawPrice: s.rawPrice, currency, price: null,
+    };
+    // A 0 on a quote means "not buying", as on the Market import — and so do
+    // yuan that convert to under a cent. Unlike a blank, it says something.
+    const status: SheetCellStatus = s.priceKind === 'empty' ? 'no-price'
+      : s.priceKind === 'invalid' ? 'invalid-price'
+        : !isSupportedCurrency(currency) ? 'other-currency'
+          : usd === 0 ? 'zero'
+            : 'ok';
+    if (status === 'ok' || status === 'zero') {
+      cell.price = usd;
+      if (currency === 'CNY') cell.listedPrice = s.price!;
+    }
+    const at = byPart.get(s.canonPart);
+    if (at) at.push({ cell, status });
+    else byPart.set(s.canonPart, [{ cell, status }]);
+  }
+
+  const onPo = new Set<string>();
+  const matches: SheetLineMatch[] = lines.map((l) => {
+    const canon = canonPartNumberJs(l.part_number);
+    if (!canon) return { lineId: l.id, status: 'no-part' };
+    onPo.add(canon);
+    const reads = byPart.get(canon);
+    if (!reads) return { lineId: l.id, status: 'not-in-sheet' };
+    const priced = reads.filter(r => r.status === 'ok').map(r => r.cell);
+    const zeros = reads.filter(r => r.status === 'zero').map(r => r.cell);
+    if (priced.length === 0) {
+      const last = reads[reads.length - 1]!;
+      // A part listed only at 0 has no price to take.
+      const status = last.status === 'zero' ? 'no-price' : last.status as SheetSkipStatus;
+      return { lineId: l.id, status, cell: last.cell };
+    }
+    // The same price listed twice is one price; the last row is the one cited.
+    const cents = new Set(priced.map(p => Math.round(p.price! * 100)));
+    if (cents.size > 1 || zeros.length > 0) {
+      const cells = reads.filter(r => r.status === 'ok' || r.status === 'zero').map(r => r.cell);
+      return { lineId: l.id, status: 'conflict', cells };
+    }
+    return { lineId: l.id, status: 'matched', cell: priced[priced.length - 1]! };
+  });
+  // Parts the sheet prices that no line of this PO carries; a blank or a
+  // repeat is not another part.
+  const notOnPo = new Set<string>();
+  for (const [canon, reads] of byPart) {
+    if (!onPo.has(canon) && reads.some(r => r.status === 'ok')) notOnPo.add(canon);
+  }
+
+  const fx = cny && { oneUsdInQuote: 1 / cny.rate, source: cny.source };
+  return c.json({ fx, lines: matches, notOnPo: notOnPo.size });
 });
 
 export default checksRoutes;

@@ -5,7 +5,9 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-346](./RS-346-fix-the-wechat-market-review-findings-before-the-v1.md) | done | bug | P1 | Fix the WeChat market review findings before the v1.312 release | — |
+| [RS-348](./RS-348-fix-the-sell-order-sheet-review-findings-before-the.md) | done | bug | P2 | Fix the sell order sheet review findings before the v1.313 release | v1.313.1 |
+| [RS-347](./RS-347-review-mode-prices-the-po-from-a-dropped-sell-order.md) | done | story | P2 | Review mode prices the PO from a dropped sell order sheet | v1.313.0 |
+| [RS-346](./RS-346-fix-the-wechat-market-review-findings-before-the-v1.md) | done | bug | P1 | Fix the WeChat market review findings before the v1.312 release | v1.312.2 |
 | [RS-345](./RS-345-fix-the-sale-reopen-review-findings-before-the-v1-31.md) | done | bug | P1 | Fix the sale-reopen review findings before the v1.311 release | v1.312.1 |
 | [RS-344](./RS-344-wechat-market-page-under-monitors-fed-by-memtrade-s.md) | in-review | story | P2 | WeChat market page under Monitors, fed by memtrade's daily push | v1.312.0 |
 | [RS-343](./RS-343-reopen-a-done-sell-order-to-awaiting-payment.md) | done | story | P2 | Reopen a Done sell order to Awaiting payment | v1.311.0 |

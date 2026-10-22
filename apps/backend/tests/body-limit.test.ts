@@ -62,6 +62,22 @@ describe('global JSON body-size limit', () => {
     expect(apply.status).toBe(413);
   });
 
+  it('exempts the Review mode sell order sheet, not the PO routes beside it', async () => {
+    const big = 'x'.repeat(OVER_1MIB_SIZE);
+    const post = (path: string, body: string, contentType: string) => app.fetch(
+      new Request(`http://test${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': contentType, 'X-Requested-By': 'recycle-erp' },
+        body,
+      }),
+      testEnv,
+    );
+    const sheet = await post('/api/orders/PO-1/price-sheet/preview', big, 'application/octet-stream');
+    expect(sheet.status).toBe(401);
+    const beside = await post('/api/orders/PO-1/price-sheet', big, 'application/octet-stream');
+    expect(beside.status).toBe(413);
+  });
+
   it('accepts a POST body under 1 MiB on a JSON route (passes through to route logic)', async () => {
     // A normal-sized login attempt — wrong credentials, but NOT a 413.
     const payload = JSON.stringify({ email: 'nobody@example.com', password: 'wrong' });

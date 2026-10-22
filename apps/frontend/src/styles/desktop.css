@@ -4135,7 +4135,7 @@ button.rsheet-box:hover { background: color-mix(in oklch, var(--accent) 10%, tra
 .bc-pn { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
 .bc-spec { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 2px; font-size: 11.5px; color: var(--fg-subtle); }
 .bc-count { display: inline-flex; align-items: center; gap: 2px; }
-.bc-count-n { min-width: 58px; text-align: center; font-size: 13px; font-variant-numeric: tabular-nums; }
+.bc-count-n { min-width: 58px; text-align: center; font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .bc-count-n b { font-weight: 600; }
 /* Reads as the plain number until pointed at; it takes the row's colour from
    the <b> around it. */
@@ -4198,6 +4198,63 @@ button.rsheet-box:hover { background: color-mix(in oklch, var(--accent) 10%, tra
 .bc-price-use:hover:not(:disabled) { text-decoration-style: solid; }
 .bc-price-use:disabled { color: var(--fg-subtle); cursor: default; text-decoration: none; }
 .bc-price-use:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 3px; }
+
+/* A sell order sheet waiting to be applied. Blue on a price means "from the
+   sheet, not written yet"; nothing else on the page uses it there. */
+/* Stacked, so the meter and the earns line keep their width beside them. */
+.bc-tally-actions { display: grid; gap: 6px; }
+.bc-tally-money .bc-earns { flex-wrap: wrap; row-gap: 2px; }
+.bc-m-incoming { background: repeating-linear-gradient(135deg, var(--info) 0 4px, var(--info-soft) 4px 8px); }
+.bc-earns-arrow { color: var(--fg-subtle); }
+.bc-earns b.bc-earns-next { color: var(--info-strong); }
+.bc-earns b.bc-earns-next.neg { color: var(--neg); }
+.bc-incoming { color: var(--info-strong); }
+.bc-price-in.incoming { color: var(--info-strong); background: var(--info-soft); cursor: default; }
+.bc-price-in.incoming:focus { border-color: var(--info); box-shadow: 0 0 0 2px var(--info-soft); }
+.bc-price-was { font-size: 11px; font-weight: 400; color: var(--fg-subtle); text-decoration: line-through; margin-right: 4px; }
+.bc-price-src { margin-top: 2px; display: flex; justify-content: flex-end; gap: 4px; font-size: 11px; color: var(--fg-subtle); }
+.bc-price-src .fig { color: var(--fg-muted); }
+.bc-price-src.kept .fig { color: var(--fg-subtle); }
+/* A reason can run long ("listed 3 times: …"); it wraps under the price. */
+.bc-price-sub.warn { color: var(--warn-strong); white-space: normal; max-width: 200px; margin-left: auto; }
+.bc-keep {
+  display: block; margin: 3px 0 0 auto; padding: 1px 7px; border-radius: 999px;
+  border: 1px solid var(--border-strong); background: var(--bg-elev);
+  font-size: 11px; font-weight: 500; color: var(--fg-muted); cursor: pointer;
+}
+.bc-keep:hover:not(:disabled) { color: var(--fg); border-color: var(--fg-subtle); }
+.bc-keep.on { background: var(--warn-soft); border-color: transparent; color: var(--warn-strong); }
+.bc-keep:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.bc-row.bc-sheet-off:not(.bc-done) .bc-pn, .bc-row.bc-sheet-off:not(.bc-done) .bc-spec { opacity: 0.7; }
+/* One strip in the list card's head, in place of the scan hint: the sheet is
+   part of the review, not the whole of it. */
+.bc-sheet-strip {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-height: 38px;
+  margin: 2px -18px -14px; padding: 7px 18px;
+  background: var(--info-soft); border-top: 1px solid var(--border);
+  font-size: 12px; color: var(--fg-muted);
+}
+.bc-sheet-file { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 260px; color: var(--fg); }
+.bc-sheet-file .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bc-sheet-strip .seg { padding: 1px; background: var(--bg-elev); }
+.bc-sheet-strip .seg button { padding: 2px 8px; font-size: 11.5px; }
+.bc-sheet-fx { font-size: 11.5px; }
+.bc-sheet-counts { display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }
+.bc-sheet-counts b { font-weight: 600; color: var(--info-strong); }
+.bc-sheet-counts .sep { color: var(--fg-subtle); }
+.bc-sheet-skipped { cursor: help; text-decoration: underline dotted; text-underline-offset: 2px; }
+.bc-sheet-actions { margin-left: auto; display: flex; gap: 6px; }
+.bc-money-projected { color: var(--info-strong); margin-bottom: 6px; }
+.bc-source { font-weight: 400; overflow-wrap: anywhere; }
+/* The whole list takes the drop. The box sits near the top of the screen
+   however long the list is. */
+.bc-list-card { position: relative; }
+.bc-drop-veil {
+  position: absolute; inset: 0; z-index: 3; border-radius: inherit;
+  display: grid; justify-items: center; align-items: start; padding: 20px;
+  background: color-mix(in oklch, var(--bg) 88%, transparent);
+}
+.bc-drop-veil > .field { position: sticky; top: 30vh; width: min(440px, 100%); margin-top: 48px; }
 
 
 .bc-load-error { display: flex; align-items: center; gap: 12px; color: var(--neg); font-size: 13px; }
