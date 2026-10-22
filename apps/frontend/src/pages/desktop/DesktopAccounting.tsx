@@ -1,24 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ACCOUNTING_KINDS, ACCOUNTING_METHODS, resolvePreset,
-  type AccountingDirection, type AccountingKind, type AccountingMethod,
+  ACCOUNTING_KINDS, ACCOUNTING_METHODS, ACCOUNTING_REVIEW_STATES, resolvePreset,
+  type AccountingDirection, type AccountingKind, type AccountingMethod, type AccountingReviewState,
 } from '@recycle-erp/shared';
 import { Icon } from '../../components/Icon';
 import { RouteLink } from '../../components/RouteLink';
 import { Yuan, recordPath } from '../../components/AccountingBits';
 import { useT } from '../../lib/i18n';
+import { useAuth } from '../../lib/auth';
 import { handleFetchError } from '../../lib/errorToast';
 import { fmtMoney } from '../../lib/format';
 import { forEachKeysetPage } from '../../lib/keysetPages';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
-import { accountingEntryPath, match, navigate, useRoute } from '../../lib/route';
+import { accountingEntryPath, matchAccountingEntry, navigate, useRoute } from '../../lib/route';
 import {
-  acctEntries, acctSummary, fmtBookDay, localToday, markDayStarts,
+  acctEntries, acctSummary, fmtBookDay, fmtCny, localToday, markDayStarts, useAcctReviewCount,
   type AcctRow, type AcctSummary,
 } from '../../lib/accounting';
 import { RangeChip, type RangeValue } from './DashboardRange';
 import { EntryDialog } from './accounting/EntryDialog';
 import { EntryDrawer } from './accounting/EntryDrawer';
+import { ReviewTick } from './accounting/reviewBits';
 import '../../styles/accounting.css';
 
 type Props = { onToast?: (msg: string, kind?: 'success' | 'error') => void };
@@ -30,13 +32,17 @@ type Props = { onToast?: (msg: string, kind?: 'success' | 'error') => void };
 export function DesktopAccounting({ onToast }: Props) {
   const { t, locale } = useT();
   const { path } = useRoute();
-  const openId = match('/accounting/:id', path)?.id ?? null;
+  const { user } = useAuth();
+  const me = user?.id ?? '';
+  const waiting = useAcctReviewCount(true);
+  const openId = matchAccountingEntry(path);
   const today = useMemo(() => localToday(), []);
   const [range, setRange] = useState<RangeValue>(() => ({ ...resolvePreset('mtd', today, null), preset: 'mtd' }));
   const [managerId, setManagerId] = useState('');
   const [direction, setDirection] = useState<'' | AccountingDirection>('');
   const [kind, setKind] = useState<'' | AccountingKind>('');
   const [method, setMethod] = useState<'' | AccountingMethod>('');
+  const [review, setReview] = useState<'' | AccountingReviewState>('');
   const [search, setSearch] = useState('');
   const q = useDebouncedValue(search.trim(), 250);
   const [showVoided, setShowVoided] = useState(false);
@@ -61,10 +67,11 @@ export function DesktopAccounting({ onToast }: Props) {
     if (direction) p.set('direction', direction);
     if (kind) p.set('kind', kind);
     if (method) p.set('method', method);
+    if (review) p.set('review', review);
     if (q) p.set('q', q);
     if (showVoided) p.set('voided', '1');
     return p.toString();
-  }, [range.from, range.to, managerId, direction, kind, method, q, showVoided]);
+  }, [range.from, range.to, managerId, direction, kind, method, review, q, showVoided]);
 
   // Bumped per load, so a superseded walk's pages never land on the new list.
   const loadGen = useRef(0);
@@ -82,7 +89,7 @@ export function DesktopAccounting({ onToast }: Props) {
   }, [query, gen]);
 
   const changed = () => setGen(g => g + 1);
-  const filtered = !!(direction || kind || method || q);
+  const filtered = !!(direction || kind || method || review || q);
   const dayStarts = markDayStarts(rows);
   const managerName = summary?.managers.find(m => m.id === managerId)?.name;
 
@@ -94,6 +101,14 @@ export function DesktopAccounting({ onToast }: Props) {
           <div className="page-sub">{t('acctSub')}</div>
         </div>
         <div className="page-actions">
+          <RouteLink to="/activity?area=acct" className="btn" title={t('acctLogHint')}>
+            <Icon name="note" size={14} /> {t('acctLog')}
+          </RouteLink>
+          <RouteLink to="/accounting/review" className="btn"
+                     title={waiting ? t('acctReviewModeHint', { n: waiting }) : undefined}>
+            <Icon name="shield" size={14} /> {t('acctReviewMode')}
+            {waiting > 0 && <span className="acct-count">{waiting}</span>}
+          </RouteLink>
           <button className="btn accent" onClick={() => setRecording(true)}>
             <Icon name="plus" size={14} /> {t('acctRecord')}
           </button>
@@ -132,6 +147,11 @@ export function DesktopAccounting({ onToast }: Props) {
             <option value="">{t('acctAnyMethod')}</option>
             {ACCOUNTING_METHODS.map(m => <option key={m} value={m}>{t('acctMethod_' + m)}</option>)}
           </select>
+          <select className="select" value={review} aria-label={t('acctColReview')}
+                  onChange={e => setReview(e.target.value as '' | AccountingReviewState)}>
+            <option value="">{t('acctAnyReview')}</option>
+            {ACCOUNTING_REVIEW_STATES.map(s => <option key={s} value={s}>{t('acctReviewState_' + s)}</option>)}
+          </select>
           <div className="acct-search">
             <Icon name="search" size={13} />
             <input className="input" placeholder={t('acctSearchPh')} value={search} aria-label={t('acctSearchPh')}
@@ -165,6 +185,7 @@ export function DesktopAccounting({ onToast }: Props) {
                   <th className="acct-num">{t('acctReceived')}</th>
                   <th className="acct-num">{t('acctPaid')}</th>
                   <th className="acct-num" title={t('acctBalanceHint')}>{t('acctBalance')}</th>
+                  <th className="acct-tick-col">{t('acctColReview')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -210,6 +231,7 @@ export function DesktopAccounting({ onToast }: Props) {
                           <Yuan value={r.balance} locale={locale} className={r.balance < 0 ? 'acct-neg' : undefined} />
                         )}
                       </td>
+                      <td className="acct-tick-col"><ReviewTick e={r} me={me} t={t} locale={locale} /></td>
                     </tr>
                   );
                 })}
@@ -298,6 +320,44 @@ function IdentityBand({ summary, managerId, onManager }: {
           ))}
         </div>
       )}
+      <ReviewStrip review={summary.review} />
     </section>
+  );
+}
+
+// The period's sign-off: a period whose every entry is reviewed is a period
+// reviewed, so there is nothing else to sign.
+function ReviewStrip({ review: r }: { review: AcctSummary['review'] }) {
+  const { t, locale } = useT();
+  if (r.entries === 0) return null;
+  const done = r.reviewed === r.entries;
+  const open = r.entries - r.reviewed - r.changed - r.queried;
+  return (
+    <div className="acct-rstrip">
+      <span className="acct-held-label">{t('acctStripLabel')}</span>
+      {r.activeManagers < 2 ? (
+        <span className="acct-rstrip-warn">{t('acctStripNeedsSecond')}</span>
+      ) : done ? (
+        <span className="acct-rstrip-done"><Icon name="check" size={13} /> {t('acctStripAllDone')}</span>
+      ) : (
+        <>
+          <span className="acct-rmeter" role="img" aria-label={t('acctStripEntries', { n: r.reviewed, total: r.entries })}>
+            <i className="acct-m-done" style={{ flexGrow: r.reviewed }} />
+            <i className="acct-m-changed" style={{ flexGrow: r.changed }} />
+            <i className="acct-m-query" style={{ flexGrow: r.queried }} />
+            <i style={{ flexGrow: open }} />
+          </span>
+          <span>{t('acctStripEntries', { n: r.reviewed, total: r.entries })}</span>
+          <span className="acct-rstrip-sep" aria-hidden="true">·</span>
+          <span>{t('acctStripMoney', { reviewed: fmtCny(r.reviewedCny, locale), moved: fmtCny(r.movedCny, locale) })}</span>
+          {r.forMe > 0 && <><span className="acct-rstrip-sep" aria-hidden="true">·</span><b>{t('acctStripForMe', { n: r.forMe })}</b></>}
+          {r.queried > 0 && <span>{t('acctStripQueried', { n: r.queried })}</span>}
+          {r.waitingOnOthers > 0 && <span>{t('acctStripWaiting', { n: r.waitingOnOthers })}</span>}
+        </>
+      )}
+      <RouteLink to="/accounting/review" className="acct-rstrip-link">
+        {t('acctStripOpen')} <Icon name="arrow" size={12} />
+      </RouteLink>
+    </div>
   );
 }

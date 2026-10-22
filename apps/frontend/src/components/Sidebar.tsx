@@ -4,6 +4,7 @@ import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
 import { useEffectiveUser } from '../lib/tweaks';
 import { shownNav, type ShownLeaf } from '../lib/desktopNav';
+import { useAcctReviewCount } from '../lib/accounting';
 import { DESKTOP_VIEW_TO_PATH, hrefFor, onLinkClick, type DesktopViewId } from '../lib/route';
 
 export type DesktopView = DesktopViewId;
@@ -49,7 +50,9 @@ function NavLink({ view, className, label, icon, current, tour, children }: {
   );
 }
 
-function LeafLink({ item, sub }: { item: ShownLeaf; sub?: boolean }) {
+// `count` is live work waiting on the viewer, where the leaf's static badge
+// is a mark.
+function LeafLink({ item, sub, count }: { item: ShownLeaf; sub?: boolean; count?: number }) {
   const { t } = useT();
   const { leaf, active } = item;
   return (
@@ -62,6 +65,9 @@ function LeafLink({ item, sub }: { item: ShownLeaf; sub?: boolean }) {
       tour
     >
       {leaf.badge && <span className="badge">{leaf.badge}</span>}
+      {!leaf.badge && !!count && (
+        <span className="badge due" title={t('acctReviewModeHint', { n: count })}>{count}</span>
+      )}
     </NavLink>
   );
 }
@@ -70,6 +76,8 @@ export function Sidebar({ view, folded, onToggleFold }: Props) {
   const { t } = useT();
   const { logout } = useAuth();
   const user = useEffectiveUser();
+  // The Accounting entries and questions waiting on this manager.
+  const reviewCount = useAcctReviewCount(user?.role === 'manager');
   if (!user) return null;
   const foldLabel = folded ? t('sidebarExpand') : t('sidebarCollapse');
   return (
@@ -96,7 +104,9 @@ export function Sidebar({ view, folded, onToggleFold }: Props) {
         <div key={group.tKey} className="nav-group">
           <div className="nav-section">{t(group.tKey)}</div>
           {group.items.map(item => {
-            if (item.kind === 'leaf') return <LeafLink key={item.leaf.id} item={item} />;
+            if (item.kind === 'leaf') {
+              return <LeafLink key={item.leaf.id} item={item} count={item.leaf.id === 'accounting' ? reviewCount : undefined} />;
+            }
             const label = t(item.parent.tKey);
             return (
               <Fragment key={item.parent.tKey}>

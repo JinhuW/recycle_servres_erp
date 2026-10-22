@@ -2194,6 +2194,65 @@ payer, below).
   entry opens on its own screen with Edit, Void and Restore. The phone PO
   page's Cost Payment and Commission folds carry the order's entries and a
   Record payment button.
+- **Every entry is signed off by a manager who didn't write it** (v1.315.0,
+  RS-350; desktop).
+  - **Who writes, who signs.** The author is whoever recorded the entry, or
+    later changed a field the sign-off covers. The author can't sign off
+    their own version; any other active manager can, the entry's own manager
+    included. Entries the 0196 backfill wrote have no author, so any manager
+    reviews them. With one active manager, nobody can, and the strip says a
+    second manager is needed.
+  - **What a sign-off covers.** Every field but the note. An edit to any of
+    them clears the sign-off. The entry then reads *Changed since review*,
+    with the old and new value of each field, until someone other than the
+    editor signs it again. A note-only edit keeps the review. A sign-off
+    names the version the page showed, so an out-of-date page gets a 409 and
+    re-reads. A void takes the entry out of review, and a restore brings it
+    back To review. The reviewer can withdraw their own sign-off.
+  - **Query.** A reviewer who can't sign asks the author a question (up to
+    280 characters). Where an entry has no author, the question goes to the
+    manager whose money it was. That person is notified, and the entry waits
+    under *Queried* until they answer or edit it. An edit counts as the
+    answer. The exchange stays on the entry until the next sign-off, and a
+    sign-off closes an open question.
+  - **Review mode** (`#/accounting/review`) is the PO's Review mode for the
+    book: full width, no sidebar.
+    - Tabs: *For you*, *Queried*, *Waiting on others* (your own entries) and
+      *Reviewed* (the last 30 days). The queue runs oldest first and is not
+      limited to the book's period.
+    - A tally counts entries and yuan reviewed in the visit.
+    - Each row's mark signs it off, as does Space. A row signed off here
+      sinks under *Reviewed in this visit* with an Undo. ↑↓ / j k move,
+      `q` queries, `e` opens the entry's drawer, `u` undoes the last action,
+      Esc leaves.
+    - The side panel shows the entry, then its checks:
+      - the record's own figure against what the book has on it, at the FX
+        ledger's rate for the entry's day: matches within 1% or ¥10; over
+        warns, short only informs;
+      - a dollar entry's rate more than 2% from the ledger's that day;
+      - a look-alike live entry within 7 days (same direction, kind, amount,
+        currency, method and record, or counterparty on an Other entry).
+    - Checks are hints, never gates. *Mark n reviewed* signs off in bulk only
+      To review entries with no warning, after a confirm that lists them, and
+      the server checks each one again.
+  - **On the book:**
+    - *Log* · *Review mode* (with what waits on you) · *Record entry* in the
+      head.
+    - A Review filter.
+    - A Review column past Balance: the reviewer's first name on a tick, a
+      dashed ring on your own entry, an amber loop when changed, a blue `?`
+      when queried.
+    - A *Reviewed* strip in the band, over the band's scope: entries and yuan
+      reviewed, what is for you, queried and waiting on others. A period with
+      every entry reviewed says so; there is no separate period sign-off.
+  - **Elsewhere:**
+    - The sidebar's Accounting item counts the entries and questions waiting
+      on you.
+    - The entry drawer carries a Review card with the viewer's own actions.
+    - Editing a reviewed entry warns that saving clears the review.
+    - The history logs every sign-off, withdrawal, question, answer and
+      clear. The phone shows those lines too, but has no Review mode;
+      `#/accounting/review` opens the book there.
 
 ## Transfers
 
@@ -2276,6 +2335,13 @@ over MCP.
   reverse-chronological register (v1.37.0), filterable by area, action, person,
   date range and free text. Raw kinds normalise to one vocabulary so query and
   labels can't drift.
+- **The Accounting book is the fifth ledger** (v1.315.0, RS-350).
+  `accounting_entry_events` joins the union as the *Accounting* area, with a
+  darker ink stripe. A row names its entry and opens it, and reads the change
+  in the book's own words: fields, yuan, the question's text. The action
+  filter gains *Reviewed* and *Query*. The area travels in the address
+  (`#/activity?area=acct`), so the book's *Log* button lands filtered. The
+  table is append-only by trigger from 0197, like the other four.
 - Loads as you scroll, with a pinned column head (v1.38.0), and "Open record"
   opens the record (v1.51.x).
 - Member/permission changes are **absent** — they write no audit rows

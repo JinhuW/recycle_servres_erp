@@ -10,7 +10,7 @@ import { fmtMoney } from '../lib/format';
 import { forEachKeysetPage } from '../lib/keysetPages';
 import { usePhScrolled } from '../lib/usePhScrolled';
 import { useEffectiveUser } from '../lib/tweaks';
-import { accountingEntryPath, match, navigateBack, replaceRoute, useRoute } from '../lib/route';
+import { accountingEntryPath, matchAccountingEntry, navigateBack, replaceRoute, useRoute } from '../lib/route';
 import {
   PHONE_PERIODS, acctEntries, acctEntry, acctRestore, acctSummary, acctVoid, fmtBookDay, localToday,
   phonePeriod, signedCny,
@@ -25,7 +25,7 @@ type Props = { showToast: (msg: string) => void };
 export function Accounting({ showToast }: Props) {
   const { path } = useRoute();
   const user = useEffectiveUser();
-  const entryId = match('/accounting/:id', path)?.id ?? null;
+  const entryId = matchAccountingEntry(path);
   const allowed = user?.role === 'manager';
   // Manager-only, like the API: anyone else is sent home.
   useEffect(() => { if (user && !allowed) replaceRoute('/dashboard'); }, [user, allowed]);

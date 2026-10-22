@@ -1,4 +1,5 @@
-import type { AccountingDirection, AccountingKind, AccountingTargetType } from '@recycle-erp/shared';
+import type { AccountingDirection, AccountingKind, AccountingReviewState, AccountingTargetType } from '@recycle-erp/shared';
+import { Icon } from './Icon';
 import { splitYuan, type AcctEntry, type AcctEvent } from '../lib/accounting';
 import { afterSalesCasePath } from '../lib/route';
 import { poStageName, type Translate } from '../lib/orderPresentation';
@@ -60,7 +61,7 @@ export function targetStatusLabel(type: AccountingTargetType, status: string, t:
   return t('asStatus_' + status.replace(/ /g, '_'));
 }
 
-const FIELD_KEY: Record<string, string> = {
+export const FIELD_KEY: Record<string, string> = {
   direction: 'acctFieldDirection', kind: 'acctFieldKind', amount: 'acctFieldAmount', currency: 'acctFieldCurrency',
   fxRate: 'acctFieldRate', method: 'acctFieldMethod', occurredOn: 'acctFieldDate', managerId: 'acctFieldManager',
   targetId: 'acctFieldRecord', counterparty: 'acctFieldCounterparty', reference: 'acctFieldReference', note: 'acctFieldNote',
@@ -87,12 +88,34 @@ export function HistoryLine({ e, t, locale }: { e: AcctEvent; t: Translate; loca
 function eventLine(e: AcctEvent, t: Translate): string {
   switch (e.kind) {
     case 'created': return t('acctEvCreated');
-    case 'edited': return t('acctEvEdited', {
+    case 'edited': return t(e.detail.clearedReview ? 'acctEvEditedCleared' : 'acctEvEdited', {
       fields: Object.keys(e.detail.changes ?? {}).map(k => FIELD_KEY[k] ? t(FIELD_KEY[k]) : k).join(', '),
     });
     case 'voided': return t('acctEvVoided', { reason: e.detail.reason ?? '' });
     case 'restored': return t('acctEvRestored');
     case 'unlinked': return t('acctEvUnlinked', { id: e.detail.orderId ?? '' });
+    case 'reviewed': return t('acctEvReviewed');
+    case 'unreviewed': return t('acctEvUnreviewed');
+    case 'queried': return t('acctEvQueried', { text: e.detail.text ?? '' });
+    case 'answered': return t('acctEvAnswered', { text: e.detail.text ?? '' });
+    case 'query_withdrawn': return t('acctEvQueryWithdrawn');
   }
+}
+
+/** The reviewer's tick, in each of its states. `own` is To review as the
+ *  entry's author sees it: someone else has to sign it. */
+export function ReviewMark({ state, own, size = 22, label }: {
+  state: AccountingReviewState; own?: boolean; size?: number; label?: string;
+}) {
+  const glyph = Math.round(size * 0.55);
+  const cls = state === 'reviewed' ? 'done' : state === 'changed' ? 'changed' : state === 'queried' ? 'query' : own ? 'own' : 'open';
+  return (
+    <span className={'acct-mark ' + cls} style={{ width: size, height: size }}
+          role={label ? 'img' : undefined} aria-label={label} aria-hidden={label ? undefined : true}>
+      {state === 'reviewed' && <Icon name="check" size={glyph} />}
+      {state === 'changed' && <Icon name="rotate" size={glyph} />}
+      {state === 'queried' && <span className="acct-mark-q">?</span>}
+    </span>
+  );
 }
 

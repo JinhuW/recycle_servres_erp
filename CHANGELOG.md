@@ -17,6 +17,63 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.315.0] - 2026-10-22
+
+The Accounting book now has a second pair of eyes (RS-350). Until this
+release, one manager wrote each RMB entry and nobody else had to look at it.
+Payments has a bank feed to check against; this book has none, so another
+person is the only check it can have. Every live entry now needs one manager's
+sign-off, and that manager can't be the one who wrote it. *Writing it* means
+recording the entry, or later changing anything the sign-off covers: every
+field but the note. The entries the RS-349 backfill wrote have no author, so
+any manager can review them. The entry's own manager may review an entry
+someone else typed in their name, which is them confirming their own money.
+
+**Review mode** (`#/accounting/review`, desktop) is the PO's Review mode
+pointed at the book:
+
+- A queue, oldest first and not limited to the book's period, so a backlog
+  can't hide behind *This month*.
+- Tabs for *For you*, *Queried*, *Waiting on others* and *Reviewed*.
+- A side panel that weighs each entry against:
+  - the record it names (over the record's figure warns; short only informs,
+    since sales arrive in part-payments);
+  - the FX ledger's rate for its day (a dollar entry more than 2% off warns);
+  - a look-alike entry within a week (warns).
+- **Space** signs off the selected entry. The row sinks under *Reviewed in
+  this visit* with an Undo.
+- *Mark n reviewed* signs off in bulk, after a confirm that lists the
+  entries. It only takes entries still To review that carry no warning, and
+  the server checks each one again.
+
+A reviewer who can't sign an entry off can **query** it instead. The author
+is notified, and the entry waits until they answer or fix it. Fixing it
+counts as the answer.
+
+A sign-off names the version the page showed, so a page that is out of date
+can't sign off an entry that changed after it loaded. An edit to a covered
+field clears the sign-off and shows *Changed since review* with the old and
+new values. Restoring a voided entry brings it back To review.
+
+On the book:
+
+- A *Log* button and a *Review mode* button with the count waiting on you.
+- A Review filter.
+- The reviewer's tick in the margin past the balance.
+- A *Reviewed* strip in the band. A period whose strip reads all reviewed is
+  signed off; there is nothing else to sign.
+
+The entry drawer has a Review card with the viewer's own actions, and its
+history logs every sign-off, withdrawal, question and answer. The sidebar
+counts what waits on you. The phone keeps the book as it was.
+
+The book's history is also in **Activity** now, as a fifth ledger. *Log*
+opens Activity with the Accounting area picked, and its action filter gains
+Reviewed and Query. Migration 0197 makes `accounting_entry_events`
+append-only by trigger, like the other four ledgers. Until then a sign-off
+could have been edited after the fact, under a page that calls every row
+immutable.
+
 ## [1.314.0] - 2026-10-22
 
 The Accounting book now starts from the money the ERP already knew had gone

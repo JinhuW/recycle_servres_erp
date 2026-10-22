@@ -10,7 +10,7 @@ import { usePreference } from './lib/preferences';
 import { useEffectiveUser } from './lib/tweaks';
 import {
   useRoute, match, matchPurchaseOrder, matchPoCheck, matchSellOrderPack, navigate, parseShippingRoute,
-  pathToDesktopView, isAuthorizePath, readSafeNext, hrefFor, onLinkClick, replaceRoute,
+  pathToDesktopView, isAuthorizePath, readSafeNext, hrefFor, onLinkClick, replaceRoute, ACCOUNTING_REVIEW_PATH,
 } from './lib/route';
 import { api, ApiError } from './lib/api';
 import { showErrorDialog } from './lib/errorToast';
@@ -41,6 +41,7 @@ const DesktopActivity = lazy(() => import('./pages/desktop/DesktopActivity').the
 const DesktopPayments = lazy(() => import('./pages/desktop/DesktopPayments').then(m => ({ default: m.DesktopPayments })));
 const DesktopInternalTxns = lazy(() => import('./pages/desktop/DesktopInternalTxns').then(m => ({ default: m.DesktopInternalTxns })));
 const DesktopAccounting = lazy(() => import('./pages/desktop/DesktopAccounting').then(m => ({ default: m.DesktopAccounting })));
+const DesktopAccountingReview = lazy(() => import('./pages/desktop/DesktopAccountingReview').then(m => ({ default: m.DesktopAccountingReview })));
 const DesktopSettings = lazy(() => import('./pages/desktop/DesktopSettings').then(m => ({ default: m.DesktopSettings })));
 const DesktopTracker = lazy(() => import('./pages/desktop/DesktopTracker').then(m => ({ default: m.DesktopTracker })));
 const DesktopWechat = lazy(() => import('./pages/desktop/DesktopWechat').then(m => ({ default: m.DesktopWechat })));
@@ -205,7 +206,8 @@ export function DesktopApp() {
   // Review mode and Pack mode take over the whole window — no sidebar, no top
   // bar. Pack mode only once the view stands: a bounced purchaser lands on the
   // dashboard, which keeps its chrome.
-  const focus = !!boxCheck || (view2 === 'sellorders' && matchSellOrderPack(path) !== null);
+  const accountingReview = view2 === 'accounting' && path === ACCOUNTING_REVIEW_PATH;
+  const focus = !!boxCheck || (view2 === 'sellorders' && matchSellOrderPack(path) !== null) || accountingReview;
 
   // Edit page is rendered in place of the inventory list when an item is open.
   const inventoryOrEdit = editingItemId
@@ -312,7 +314,9 @@ export function DesktopApp() {
             {view2 === 'activity'  && <DesktopActivity />}
             {view2 === 'payments'  && <DesktopPayments onToast={showToast} />}
             {view2 === 'internaltx' && <DesktopInternalTxns onToast={showToast} />}
-            {view2 === 'accounting' && <DesktopAccounting onToast={showToast} />}
+            {view2 === 'accounting' && (accountingReview
+              ? <DesktopAccountingReview onToast={showToast} />
+              : <DesktopAccounting onToast={showToast} />)}
             {view2 === 'tracker'   && <DesktopTracker showToast={showToast} />}
             {view2 === 'wechat'    && <DesktopWechat />}
             {view2 === 'coordinator' && <DesktopCoordinator showToast={showToast} />}
