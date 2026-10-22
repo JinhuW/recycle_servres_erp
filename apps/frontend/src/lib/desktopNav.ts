@@ -57,6 +57,7 @@ export const DESKTOP_NAV: readonly NavGroup[] = [
         children: [
           { id: 'coordinator', tKey: 'nav_coordinator', icon: 'shield', roles: ['manager', 'purchaser'] },
           { id: 'tracker',     tKey: 'nav_tracker',     icon: 'globe',  roles: ['manager'] },
+          { id: 'wechat',      tKey: 'nav_wechat',      icon: 'chats',  roles: ['manager'] },
         ],
       },
       // Purchasers get Settings too (Account + Connectors — the MCP connect

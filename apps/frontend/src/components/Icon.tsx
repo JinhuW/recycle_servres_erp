@@ -18,7 +18,7 @@ export type IconName =
   | 'truck' | 'cash' | 'refresh' | 'label' | 'package'
   | 'paperclip' | 'file' | 'image' | 'invoice' | 'analytics' | 'calendar'
   | 'note' | 'copy' | 'key' | 'eyeOff' | 'users' | 'keyboard' | 'panelRight'
-  | 'maximize' | 'minimize';
+  | 'maximize' | 'minimize' | 'chats';
 
 type Props = {
   name: IconName;
@@ -91,6 +91,8 @@ const PATHS: Record<IconName, JSX.Element> = {
   zap:   <><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></>,
   globe: <><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18"/></>,
   mail:  <><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></>,
+  // Two overlapping bubbles: a group chat (Monitors ▸ WeChat).
+  chats: <><path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z"/><path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1"/></>,
   grip:  <><circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/></>,
   truck: <><path d="M2 17V6h11v11"/><path d="M13 9h5l3 4v4h-8"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></>,
   // Shipping label with a barcode — distinct from `truck`, which Transfers owns.
