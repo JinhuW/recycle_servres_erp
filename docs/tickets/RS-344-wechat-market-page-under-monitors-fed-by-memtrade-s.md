@@ -2,12 +2,12 @@
 id: RS-344
 title: WeChat market page under Monitors, fed by memtrade's daily push
 type: story
-status: in-progress
+status: in-review
 priority: P2
 created: 2026-10-22
 reporter: jinhu
 branch: feat/wechat-market-report
-pr:
+pr: 817
 version: v1.312.0
 related: []
 ---
