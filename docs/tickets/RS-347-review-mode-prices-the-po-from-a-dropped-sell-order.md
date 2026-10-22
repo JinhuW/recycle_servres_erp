@@ -2,13 +2,13 @@
 id: RS-347
 title: Review mode prices the PO from a dropped sell order sheet
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-22
 reporter: jinhu
 branch: JinhuW/coney
-pr:
-version:
+pr: 821
+version: v1.313.0
 related: [RS-323, RS-324, RS-232, RS-301]
 ---
 

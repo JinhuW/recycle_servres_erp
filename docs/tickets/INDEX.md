@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-347](./RS-347-review-mode-prices-the-po-from-a-dropped-sell-order.md) | in-progress | story | P2 | Review mode prices the PO from a dropped sell order sheet | — |
+| [RS-347](./RS-347-review-mode-prices-the-po-from-a-dropped-sell-order.md) | done | story | P2 | Review mode prices the PO from a dropped sell order sheet | v1.313.0 |
 | [RS-346](./RS-346-fix-the-wechat-market-review-findings-before-the-v1.md) | done | bug | P1 | Fix the WeChat market review findings before the v1.312 release | v1.312.2 |
 | [RS-345](./RS-345-fix-the-sale-reopen-review-findings-before-the-v1-31.md) | done | bug | P1 | Fix the sale-reopen review findings before the v1.311 release | v1.312.1 |
 | [RS-344](./RS-344-wechat-market-page-under-monitors-fed-by-memtrade-s.md) | in-review | story | P2 | WeChat market page under Monitors, fed by memtrade's daily push | v1.312.0 |
