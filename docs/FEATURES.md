@@ -1461,22 +1461,33 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   correct a sale marked Done by mistake or with a wrong line or price. Any
   manager can do it from *Reopen* on the order page with a note; the note
   lands in History and is appended to the order's notes, as a Closed reopen's
-  does.
+  does. The request has to name the order as Done (`from: 'Done'`), so a save
+  from an editor opened before the order went Done can't reopen it
+  (v1.311.1). The editor's own saves name the status they were opened on too,
+  and a move someone else made since is refused.
   - **The stock comes back.** Every unit the sale consumed returns to its lot,
     and the order holds it again as any Awaiting-payment order does, so no
-    other order can take it meanwhile. A sold-out lot leaves Sold for its PO's
-    line status with exactly what this order took, since another sale may
-    have taken the rest. Each lot's history reads "Sale reopened +N". The
-    PO's goods total doesn't move.
+    other order can take it meanwhile. A lot gets back what the sale actually
+    took, never more than it had before the sale (v1.311.1). A sold-out lot
+    leaves Sold for the status it was sold from, read off its `sold` event's
+    `priorStatus` (v1.311.1; a sale recorded earlier falls back to its PO's
+    line status), holding what this order took, since another sale may have
+    taken the rest. Each lot's history reads "Sale reopened +N". The PO's
+    goods total doesn't move.
   - **So does the rest of Done.** The sale's market data points are
     withdrawn, and a part whose last price came from them falls back to its
-    previous one. The order leaves the dashboard and contributions until it
-    is Done again, which dates it afresh.
-  - **Refused, changing nothing,** for an archived order (unarchive it first)
-    and when a lot can't take its units back: its PO is archived or no longer
-    at Reviewing or Done, or the lot was archived. The refusal names the lot.
+    previous one. History lists the withdrawn prices on the reopen (v1.311.1).
+    The order leaves the dashboard and contributions until it is Done again.
+    It keeps its sale date throughout, so a corrected sale stays in the
+    period it was made in (v1.311.1).
+  - **Refused, changing nothing,** for an archived order (unarchive it first),
+    while an after-sales case on it is open (v1.311.1), and when a lot can't
+    take its units back: its PO is archived or no longer at Reviewing or
+    Done, or the lot was archived. The refusal names the lot or the case.
   - Done reopens to Awaiting payment only. Draft would drop the reservation,
-    and an after-sales case can't be opened on a Draft.
+    and an after-sales case can't be opened on a Draft. A reopened sale goes
+    back to Done: it can't be Closed, and its page offers no Discard
+    (v1.311.1). Taking its goods back is an after-sales return.
 - Orders carry a payment receiver, creator-only reopen (v1.15.0) and a receiver
   column with a managers-only receiver rule (v1.16.0). The receiver can be
   reassigned from the detail view in any status, Done and Closed included —
@@ -2236,7 +2247,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   - A sale belongs to the day its sell order became Done
     (`sell_orders.done_at`), for the tiles, the chart and the contribution
     cards. Until then it was dated by `updated_at`, which a later note,
-    attachment or archive moved.
+    attachment or archive moved. A reopen and a second Done keep the first
+    date (v1.311.1).
   - A manager's realized cost and profit count a negotiated lot price: a
     $950 lot sold for $150 is a $800 loss, the same figure the PO page's
     Realized column shows. Commission stays on the line costs, because the

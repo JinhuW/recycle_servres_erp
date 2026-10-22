@@ -1288,19 +1288,19 @@ function InventoryQuickView({
           <div>
             <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 }}>
               <div style={{ fontSize: 11, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600 }}>
-                Change log
+                {t('invLogTitle')}
               </div>
-              <span style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>across part number</span>
+              <span style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{t('invLogScope')}</span>
             </div>
             <div style={{
               border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden',
               maxHeight: 220, overflowY: 'auto',
             }}>
               {log == null && (
-                <div style={{ padding: 14, fontSize: 12, color: 'var(--fg-subtle)' }}>Loading…</div>
+                <div style={{ padding: 14, fontSize: 12, color: 'var(--fg-subtle)' }}>{t('invLogLoading')}</div>
               )}
               {log != null && log.length === 0 && (
-                <div style={{ padding: 14, fontSize: 12, color: 'var(--fg-subtle)' }}>No changes logged yet.</div>
+                <div style={{ padding: 14, fontSize: 12, color: 'var(--fg-subtle)' }}>{t('invLogEmpty')}</div>
               )}
               {log != null && log.map((e, i) => (
                 <div key={e.id} style={{
@@ -1311,9 +1311,9 @@ function InventoryQuickView({
                     <Icon name={QV_KIND_ICON[e.kind] ?? 'info'} size={12} />
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 500 }}>{summarizeQvEvent(e, locale)}</div>
+                    <div style={{ fontSize: 12.5, fontWeight: 500 }}>{summarizeQvEvent(e, t, locale)}</div>
                     <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2 }}>
-                      {e.actor_name ?? 'system'} · {relTime(e.created_at, locale)}
+                      {e.actor_name ?? t('invLogSystem')} · {relTime(e.created_at, locale)}
                     </div>
                   </div>
                 </div>
@@ -1358,18 +1358,20 @@ const QV_KIND_ICON: Record<string, IconName> = {
   unsold: 'history',
 };
 
-function summarizeQvEvent(e: QvEvent, locale = 'en-US'): string {
+type TFn = (key: string, vars?: Record<string, string | number>) => string;
+
+function summarizeQvEvent(e: QvEvent, t: TFn, locale = 'en-US'): string {
   const d = e.detail ?? {};
   switch (e.kind) {
-    case 'created':     return 'Item created';
-    case 'status':      return `Status → ${String(d.to ?? '?')}`;
-    case 'priced':      return `Sell price → ${fmtUSD0(Number(d.to ?? 0), locale)}`;
-    case 'edited':      return `${String(d.field ?? 'field')}: ${String(d.from ?? '?')} → ${String(d.to ?? '?')}`;
-    case 'transferred': return `Transferred ${String(d.qty ?? '')} → ${String(d.to ?? '?')}`.replace('  ', ' ');
-    case 'received':    return `Received at ${String(d.at ?? '?')}`;
-    case 'reopened':    return 'Transfer re-opened';
-    case 'sold':        return `Sold${d.qty != null ? ` ${String(d.qty)}` : ''}`;
-    case 'unsold':      return `Sale reopened +${String(d.returnedQty ?? '?')}`;
+    case 'created':     return t('invLogCreated');
+    case 'status':      return t('invLogStatus', { to: String(d.to ?? '?') });
+    case 'priced':      return t('invLogPriced', { price: fmtUSD0(Number(d.to ?? 0), locale) });
+    case 'edited':      return `${String(d.field ?? '?')}: ${String(d.from ?? '?')} → ${String(d.to ?? '?')}`;
+    case 'transferred': return t('invLogTransferred', { qty: String(d.qty ?? ''), to: String(d.to ?? '?') }).replace('  ', ' ');
+    case 'received':    return t('invLogReceived', { at: String(d.at ?? '?') });
+    case 'reopened':    return t('invLogTransferReopened');
+    case 'sold':        return t('invLogSold', { n: String(d.soldQty ?? '?') });
+    case 'unsold':      return t('invLogUnsold', { n: String(d.returnedQty ?? '?') });
     default:            return e.kind;
   }
 }

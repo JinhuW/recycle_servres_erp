@@ -271,6 +271,9 @@ type SellOrderDetailType = {
   linesVersion?: string;
   archivedAt: string | null;
   closeReasonId: string | null;
+  // Set once the order has been Done, and kept through a reopen. Absent from
+  // a backend older than this bundle.
+  doneAt?: string | null;
   createdBy: string | null;
   paymentReceivedBy: { id: string; name: string } | null;
   currency: Currency;
@@ -1467,6 +1470,9 @@ function SellOrderDetail({ id, mode, onToast }: {
       if (draft.status !== order.status) {
         await api.post(`/api/sell-orders/${order.id}/status`, {
           to: draft.status,
+          // The status this editor was opened on: a move someone else made
+          // since is refused rather than overridden.
+          from: order.status,
           // Evidence (note + attachments) is uploaded live by
           // StatusChangeDialog into status-meta tables, so we just announce
           // the transition here. Re-send the note so the /status upsert
@@ -2269,11 +2275,12 @@ function SellOrderDetail({ id, mode, onToast }: {
                 {dirty ? t('sodUnsavedChanges') : t('sodNoChanges')}
               </span>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                {/* Close as off-ramp: everywhere except Done (terminal) and
-                    Closed (locked, so never editable — Reopen instead).
-                    Manager-only surface is enforced at the page level so no
-                    extra role check. */}
-                {!prefill && order.status !== 'Done' && (
+                {/* Close as off-ramp: everywhere except Done (terminal),
+                    Closed (locked, so never editable — Reopen instead) and a
+                    reopened sale, which only goes back to Done (the backend
+                    409s it). Manager-only surface is enforced at the page
+                    level so no extra role check. */}
+                {!prefill && order.status !== 'Done' && !order.doneAt && (
                   <button
                     className="btn"
                     onClick={() => setShowCloseDialog(true)}
