@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-22
 reporter: jinhu
 branch: feat/po-paid-by-payer
-pr:
+pr: 826
 version: 1.315.0
 related: [RS-328, RS-349]
 ---
