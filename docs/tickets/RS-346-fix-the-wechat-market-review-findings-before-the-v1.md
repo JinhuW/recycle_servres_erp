@@ -2,13 +2,13 @@
 id: RS-346
 title: Fix the WeChat market review findings before the v1.312 release
 type: bug
-status: in-progress
+status: done
 priority: P1
 created: 2026-10-22
 reporter: jinhu
 branch: JinhuW/glassfish-wechat
-pr:
-version:
+pr: 819
+version: v1.312.2
 related: [RS-344, RS-345]
 ---
 
