@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-351](./RS-351-wechat-and-reddit-pages-follow-the-facebook-fleet-pa.md) | in-review | story | P2 | WeChat and Reddit pages follow the Facebook fleet pattern | 1.316.0 |
+| [RS-351](./RS-351-wechat-and-reddit-pages-follow-the-facebook-fleet-pa.md) | done | story | P2 | WeChat and Reddit pages follow the Facebook fleet pattern | 1.316.0 |
 | [RS-350](./RS-350-accounting-review-mode-another-manager-signs-off-eac.md) | done | story | P2 | Accounting review mode: another manager signs off each entry | 1.315.0 |
 | [RS-349](./RS-349-accounting-fix-the-period-picker-and-backfill-entrie.md) | done | bug | P2 | Accounting: fix the period picker and backfill entries from Paid by and the payment receiver | 1.314.0 |
 | [RS-348](./RS-348-fix-the-sell-order-sheet-review-findings-before-the.md) | done | bug | P2 | Fix the sell order sheet review findings before the v1.313 release | v1.313.1 |

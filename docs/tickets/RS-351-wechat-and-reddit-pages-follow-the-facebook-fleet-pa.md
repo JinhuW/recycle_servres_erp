@@ -2,12 +2,12 @@
 id: RS-351
 title: WeChat and Reddit pages follow the Facebook fleet pattern
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-10-22
 reporter: jinhu
 branch: feat/monitors-fleet-pattern
-pr:
+pr: 828
 version: 1.316.0
 related: [RS-297, RS-344]
 ---
@@ -69,3 +69,6 @@ Fleet table's 8px cells, a 104px bid/ask bar and a wrapping spec line, and the
 line-family control and *Priced lines only* moved to a second toolbar row so
 the first stays Facebook's search + summary. The Groups tab's chip counts all
 groups read (the rows that tab lists), as the Pool tab's counts accounts.
+
+Drafted as RS-350 / v1.315.0. Accounting review mode (#827) reached `dev`
+with both numbers first, so this ticket took the next free ones on rebase.
