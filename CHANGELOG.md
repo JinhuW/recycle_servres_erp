@@ -17,6 +17,35 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.314.0] - 2026-10-22
+
+The Accounting book now starts from the money the ERP already knew had gone
+through a manager's hands (RS-349). Migration 0196 books every PO with a
+manager in *Paid by* as a Paid commission through that manager, and every
+Done sell order with a payment receiver as a Received sale through that
+receiver. The figure is the record's own: the PO's projected commission in
+dollars at the FX ledger's rate for its day, or the sale's total in the
+order's currency. The receipts' AI-read amounts can't stand in for it: one
+transfer is often uploaded on two POs, a sale arrives in part-payments, and a
+commission transfer can carry the cost reimbursement too. Where a single
+receipt covers a single PO, the booked yuan lands within a few yuan of it.
+Only the receipts' method is read back, and only where an order's receipts
+agree on one. A commission is dated by its first screenshot or its move to
+Done, whichever came first, a sale by the day it went Done, both on China's
+calendar, where the RMB book is kept. Company-paid commissions (on file, or a
+bank row linked as the commission) are left out, and so is any record the
+book already has an entry for, so the migration adds nothing a second time.
+The prod copy of 10-22 gives 19 commissions and 22 sales. An entry booked
+this way has no person in its history: it reads *Backfilled from the PO's
+Paid by*, or *from the sell order's payment receiver*.
+
+The page's period picker also opened under the sidebar. The chip is the
+dashboard's, whose popover was pinned to the chip's right edge for a chip at
+the right of the page. On Accounting the chip leads its row, so the popover
+now opens rightwards there. On both pages the popover is wide enough for the
+two custom dates side by side. Before, the dates and *Apply* spilled past its
+right edge.
+
 ## [1.313.1] - 2026-10-22
 
 Fixes from the review of the Review mode sell order sheet (RS-348), made

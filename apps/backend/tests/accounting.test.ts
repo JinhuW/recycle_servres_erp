@@ -1,9 +1,11 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api, testEnv } from './helpers/app';
 import { loginAs, ALEX, SOFIA, MARCUS } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
-import { createSellOrderOn } from './helpers/fixtures';
+import { createSellOrderOn, signOffAll } from './helpers/fixtures';
 import { mockFrankfurter } from './helpers/fx';
 import { NOW, DAY, fakeProvider } from './helpers/bankProvider';
 import { syncBankTransactions } from '../src/banktx/sync';
@@ -15,7 +17,8 @@ import { syncBankTransactions } from '../src/banktx/sync';
 
 type Entry = {
   id: string; direction: string; kind: string; amount: number; currency: string; fxRate: number | null;
-  amountCny: number; occurredOn: string; manager: { id: string; name: string };
+  amountCny: number; occurredOn: string; method: string; counterparty: string | null;
+  manager: { id: string; name: string };
   target: { type: string; id: string } | null; balance?: number | null;
   voided: { reason: string } | null;
 };
@@ -312,5 +315,146 @@ describe('accounting', () => {
     expect((await api('PATCH', `/api/accounting/entries/${id}`, { token: alex.token, body: { note: 'supplier kept it' } })).status).toBe(200);
     const summary = (await api<Summary>('GET', '/api/accounting/summary?from=2026-10-01&to=2026-10-31', { token: alex.token })).body;
     expect(summary.paid).toBe(200);
+  });
+});
+
+// The book started empty, so the payers already on file were booked once: a
+// PO's Paid by as the commission, a Done sell order's receiver as the sale.
+describe('migration 0196 books the payers already on file', () => {
+  let alex: Awaited<ReturnType<typeof loginAs>>;
+  let sofia: Awaited<ReturnType<typeof loginAs>>;
+
+  beforeEach(async () => {
+    await resetDb();
+    alex = await loginAs(ALEX);
+    sofia = await loginAs(SOFIA);
+    await getTestDb()`
+      INSERT INTO fx_rates (base_currency, quote_currency, rate, source, effective_date)
+      VALUES ('USD', 'CNY', 7.1, 'manual', '2026-09-01'), ('USD', 'CNY', 7.3, 'manual', '2026-10-01')`;
+  });
+
+  const replay = async () => {
+    const file = new URL('../migrations/0196_backfill_accounting_from_payers.sql', import.meta.url);
+    await getTestDb().unsafe(readFileSync(fileURLToPath(file), 'utf8'));
+  };
+  const setPaidBy = async (id: string, body: Record<string, unknown>) =>
+    expect((await api('PUT', `/api/orders/${id}/commission-paid-by`, { token: alex.token, body })).status).toBe(200);
+  // A receipt as the AI rename names it, uploaded at the given instant.
+  const poReceipt = (id: string, filename: string, at: string) => getTestDb()`
+    INSERT INTO order_status_attachments
+      (order_id, status, filename, size_bytes, mime_type, storage_key, delivery_url, uploaded_by, uploaded_at)
+    VALUES (${id}, 'Commission', ${filename}, 4, 'image/jpeg', ${`k-${id}-${filename}`}, 'https://x/r.jpg',
+            ${alex.user.id}, ${at})`;
+  const soReceipt = (id: string, filename: string) => getTestDb()`
+    INSERT INTO sell_order_status_attachments
+      (sell_order_id, status, filename, size_bytes, mime_type, storage_key, delivery_url, uploaded_by)
+    VALUES (${id}, 'Done', ${filename}, 4, 'image/jpeg', ${`k-${id}-${filename}`}, 'https://x/r.jpg', ${alex.user.id})`;
+  const doneSO = async (): Promise<string> => {
+    const { id } = await shippedSO(alex.token);
+    expect((await api('POST', `/api/sell-orders/${id}/status`, {
+      token: alex.token, body: { to: 'Awaiting payment', note: 'a' },
+    })).status).toBe(200);
+    await signOffAll(id);
+    expect((await api('POST', `/api/sell-orders/${id}/status`, { token: alex.token, body: { to: 'Done', note: 'paid' } })).status).toBe(200);
+    return id;
+  };
+  const booked = async () => (await listOf(alex.token, 'limit=200')).rows;
+  const chinaToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
+
+  it('books each commission a manager paid, at its day\'s rate, once', async () => {
+    const paid = await donePO();
+    await setPaidBy(paid, { userId: alex.user.id });
+    // 18:00 UTC is the next morning in China, where the book is kept.
+    await poReceipt(paid, '2026-09-24-alipay-150.00.jpg', '2026-09-24T18:00:00Z');
+    const unshot = await donePO();
+    await setPaidBy(unshot, { userId: sofia.user.id });
+    const mixed = await donePO();
+    await setPaidBy(mixed, { userId: alex.user.id });
+    await poReceipt(mixed, '2026-09-24-alipay-50.00.jpg', '2026-09-24T01:00:00Z');
+    await poReceipt(mixed, '2026-09-24-weixinpay-50.00-2.jpg', '2026-09-24T02:00:00Z');
+    const company = await donePO();
+    await setPaidBy(company, { company: true });
+    const banked = await donePO();
+    await setPaidBy(banked, { userId: alex.user.id });
+    await syncBankTransactions(testEnv, [
+      fakeProvider('mercury', [{ externalId: 'm-commission', amount: -50, counterparty: 'Marcus', postedAt: new Date(NOW - DAY) }]),
+    ]);
+    const [bank] = await getTestDb()<{ id: string }[]>`SELECT id FROM bank_transactions WHERE external_id = 'm-commission'`;
+    expect((await api('POST', `/api/bank-transactions/${bank.id}/link`, {
+      token: alex.token, body: { orderId: banked, kind: 'commission' },
+    })).status).toBe(200);
+    const recordedAlready = await donePO();
+    await setPaidBy(recordedAlready, { userId: alex.user.id });
+    await recorded(alex.token, {
+      direction: 'out', kind: 'commission', amount: 100, currency: 'CNY', method: 'cash',
+      occurredOn: '2026-10-05', managerId: alex.user.id, targetId: recordedAlready,
+    });
+    await donePO();
+
+    await replay();
+    await replay();
+
+    const rows = await booked();
+    const of = (po: string) => rows.filter(r => r.target?.id === po);
+    expect(of(company)).toHaveLength(0);
+    expect(of(banked)).toHaveLength(0);
+    expect(of(recordedAlready)).toHaveLength(1);
+    expect(rows).toHaveLength(4);
+
+    const [{ name: marcusName }] = await getTestDb()<{ name: string }[]>`
+      SELECT name FROM users WHERE email = ${MARCUS}`;
+    const [first] = of(paid);
+    const e = (await api<{ entry: Entry & {
+      targetFacts: { amount: number }; events: { kind: string; actor: unknown; detail: Record<string, unknown> }[];
+    } }>('GET', `/api/accounting/entries/${first.id}`, { token: alex.token })).body.entry;
+    expect(e.targetFacts.amount).toBeGreaterThan(0);
+    expect(e).toMatchObject({
+      direction: 'out', kind: 'commission', currency: 'USD', amount: e.targetFacts.amount, fxRate: 7.1,
+      amountCny: Math.round(e.targetFacts.amount * 7.1 * 100) / 100, method: 'alipay', occurredOn: '2026-09-25',
+      manager: { id: alex.user.id }, counterparty: marcusName,
+    });
+    expect(e.events).toEqual([expect.objectContaining({
+      kind: 'created', actor: null, detail: expect.objectContaining({ backfilled: 'commission_paid_by' }),
+    })]);
+
+    expect(of(unshot)[0]).toMatchObject({ manager: { id: sofia.user.id }, occurredOn: chinaToday(), fxRate: 7.3, method: 'other' });
+    expect(of(mixed)[0]).toMatchObject({ method: 'other', occurredOn: '2026-09-24' });
+
+    // Numbered in book order.
+    const ids = [of(mixed)[0].id, first.id, of(unshot)[0].id].map(id => Number(id.slice(3)));
+    expect(ids).toEqual([ids[0], ids[0] + 1, ids[0] + 2]);
+  });
+
+  it('books each Done sale through its receiver, in the order\'s own currency', async () => {
+    const usd = await doneSO();
+    await getTestDb()`
+      UPDATE sell_orders SET payment_received_by = ${sofia.user.id}, done_at = '2026-10-02T20:00:00Z'
+      WHERE id = ${usd}`;
+    await soReceipt(usd, '2026-10-02-weixinpay-657.00.jpg');
+    const cny = await doneSO();
+    await getTestDb()`
+      UPDATE sell_orders SET payment_received_by = ${alex.user.id}, currency_code = 'CNY', fx_rate_to_usd = 0.137
+      WHERE id = ${cny}`;
+    await getTestDb()`UPDATE sell_order_lines SET source_currency = 'CNY', source_unit_price = 650 WHERE sell_order_id = ${cny}`;
+    const awaiting = (await shippedSO(alex.token)).id;
+    expect((await api('POST', `/api/sell-orders/${awaiting}/status`, {
+      token: alex.token, body: { to: 'Awaiting payment', note: 'a' },
+    })).status).toBe(200);
+    await getTestDb()`UPDATE sell_orders SET payment_received_by = ${alex.user.id} WHERE id = ${awaiting}`;
+
+    await replay();
+    await replay();
+
+    const rows = await booked();
+    expect(rows).toHaveLength(2);
+    const of = (so: string) => rows.find(r => r.target?.id === so);
+    expect(of(usd)).toMatchObject({
+      direction: 'in', kind: 'sale', currency: 'USD', amount: 90, fxRate: 7.3, amountCny: 657,
+      occurredOn: '2026-10-03', method: 'wechat', manager: { id: sofia.user.id }, target: { type: 'so', id: usd },
+    });
+    expect(of(cny)).toMatchObject({ currency: 'CNY', amount: 650, fxRate: null, amountCny: 650, manager: { id: alex.user.id } });
+    expect((await entryOf(alex.token, of(cny)!.id)).events).toEqual([expect.objectContaining({
+      kind: 'created', detail: expect.objectContaining({ backfilled: 'payment_received_by' }),
+    })]);
   });
 });

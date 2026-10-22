@@ -2140,6 +2140,22 @@ payer, below).
     entry on the book without its link, and its history names the PO.
   - **A paid commission fills the PO's Paid by** when nobody is on file — the
     screenshot upload's rule (see *Purchase orders*).
+- **The book starts from the payers already on file** (v1.314.0, migration
+  0196). A PO with a manager in Paid by is booked as a Paid commission
+  through that manager, against the purchaser. It is the PO's projected
+  commission in dollars at the FX ledger's rate for its day. A Done sell
+  order with a payment receiver is booked as a Received sale through the
+  receiver, against the customer, at the order's total in its own currency.
+  - A commission is dated by its first screenshot or its move to Done,
+    whichever came first. A sale is dated by the day it went Done. Both
+    use China's calendar.
+  - The method is the one the order's receipts agree on, read from the
+    receipt rename's names, and Other otherwise. The receipts' amounts are
+    not used: one transfer can cover two POs or carry the cost too.
+  - Left out: a commission the company paid (on file, or a bank row linked
+    as the commission), and any record that already had an entry.
+  - Such an entry's history names no one: *Backfilled from the PO's Paid by*
+    or *from the sell order's payment receiver*.
 - **The page** (`#/accounting`, under Oversight after Payments).
   - The period (the dashboard's chip, *This month* by default) and the manager
     (all, or one) are the book's scope.

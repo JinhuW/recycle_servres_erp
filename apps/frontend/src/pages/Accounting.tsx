@@ -2,11 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { PhHeader } from '../components/PhHeader';
 import { Icon } from '../components/Icon';
 import { RouteLink } from '../components/RouteLink';
-import { Yuan, eventLine, recordPath } from '../components/AccountingBits';
+import { HistoryLine, Yuan, recordPath } from '../components/AccountingBits';
 import { PhAccountingSheet, PhVoidSheet } from '../components/PhAccountingSheet';
 import { useT } from '../lib/i18n';
 import { handleFetchError } from '../lib/errorToast';
-import { fmtDate, fmtMoney } from '../lib/format';
+import { fmtMoney } from '../lib/format';
 import { forEachKeysetPage } from '../lib/keysetPages';
 import { usePhScrolled } from '../lib/usePhScrolled';
 import { useEffectiveUser } from '../lib/tweaks';
@@ -287,12 +287,7 @@ function EntryScreen({ id, showToast }: { id: string } & Props) {
 
             <div className="ph-section-h"><span>{t('acctHistory')}</span></div>
             <div className="ph-card acct-history" style={{ padding: 14, marginTop: 0 }}>
-              {entry.events.map(e => (
-                <div key={e.id}>
-                  <span style={{ fontWeight: 600 }}>{e.actor?.name ?? '—'}</span> {eventLine(e, t)}
-                  <span className="acct-history-when">{fmtDate(e.at, locale)}</span>
-                </div>
-              ))}
+              {entry.events.map(e => <HistoryLine key={e.id} e={e} t={t} locale={locale} />)}
             </div>
 
             <div className="acct-ph-actions">
