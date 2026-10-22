@@ -2,7 +2,7 @@
 id: RS-344
 title: WeChat market page under Monitors, fed by memtrade's daily push
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-10-22
 reporter: jinhu
@@ -90,3 +90,7 @@ unavailable), so the ERP has to take the same day again and replace it.
 - memtrade rebuilds a day's lines from its stored trade points rather than
   storing them twice. Checked on 2026-10-18…22: the rebuilt per-line stats
   and prices match what each run saved, row for row.
+- Reached production in the v1.313.1 release (#824), with the review fixes
+  of RS-346. On 2026-10-22 memtrade got its `wechat:write` service client
+  ("memtrade (WeChat market push)") and pushed 2026-10-18…22; from then on
+  its 08:00 ET run pushes each new day.
