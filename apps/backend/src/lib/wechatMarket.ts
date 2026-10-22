@@ -75,9 +75,13 @@ function bool(v: unknown, at: string): boolean {
   return v;
 }
 
+// What toISOString() writes, or the same with an offset. Date.parse alone takes
+// formats Postgres's timestamptz cast doesn't, which would surface as a 500.
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:\d{2})$/;
+
 function instant(v: unknown, at: string): string {
   const s = str(v, at, 40);
-  if (Number.isNaN(Date.parse(s))) throw new PushError(`${at}: expected an ISO timestamp`);
+  if (!ISO_INSTANT.test(s) || Number.isNaN(Date.parse(s))) throw new PushError(`${at}: expected an ISO timestamp`);
   return s;
 }
 
@@ -155,7 +159,8 @@ function group(v: unknown, at: string): WechatGroupCoverage {
   const g = obj(v, at);
   return {
     id: str(g.id, `${at}.id`),
-    name: str(g.name, `${at}.name`),
+    // A WeChat group can have no topic set; the page shows its id instead.
+    name: text(g.name, `${at}.name`, SHORT_MAX),
     messages: count(g.messages, `${at}.messages`),
     candidates: count(g.candidates, `${at}.candidates`),
     firstSeen: g.firstSeen === null || g.firstSeen === undefined ? null : instant(g.firstSeen, `${at}.firstSeen`),
@@ -195,7 +200,8 @@ function point(v: unknown, at: string): WechatPoint {
     postKey: str(p.postKey, `${at}.postKey`),
     itemIndex: count(p.itemIndex, `${at}.itemIndex`),
     senderId: str(p.senderId, `${at}.senderId`),
-    senderName: str(p.senderName, `${at}.senderName`),
+    // As can a sender's display name.
+    senderName: text(p.senderName, `${at}.senderName`, SHORT_MAX),
     groupIds: strings(p.groupIds, `${at}.groupIds`, WECHAT_MAX_GROUPS),
     firstAt: instant(p.firstAt, `${at}.firstAt`),
     lastAt: instant(p.lastAt, `${at}.lastAt`),
@@ -222,7 +228,15 @@ function point(v: unknown, at: string): WechatPoint {
   };
 }
 
-export function parsePointsPush(body: unknown): WechatPoint[] {
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function parsePointsPush(body: unknown): { points: WechatPoint[]; pushId: string | null } {
   const b = obj(body, 'body');
-  return arr(b.points, 'points', WECHAT_POINTS_BATCH).map((p, i) => point(p, `points[${i}]`));
+  if (b.pushId !== undefined && (typeof b.pushId !== 'string' || !UUID_RE.test(b.pushId))) {
+    throw new PushError('pushId: expected the id the day\'s push returned');
+  }
+  return {
+    points: arr(b.points, 'points', WECHAT_POINTS_BATCH).map((p, i) => point(p, `points[${i}]`)),
+    pushId: b.pushId ?? null,
+  };
 }

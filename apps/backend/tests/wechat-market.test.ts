@@ -99,7 +99,7 @@ describe('WeChat market (/api/wechat-market)', () => {
     expect((await push('2026-10-21', dayPush(), marketBearer)).status).toBe(403);
     const r = await push('2026-10-21', dayPush());
     expect(r.status).toBe(200);
-    expect(r.body).toEqual({ date: '2026-10-21', rows: 2, groups: 2 });
+    expect(r.body).toEqual({ date: '2026-10-21', rows: 2, groups: 2, pushId: expect.any(String) });
   });
 
   it('refuses a malformed day, naming the field, and stores nothing', async () => {
@@ -111,6 +111,10 @@ describe('WeChat market (/api/wechat-market)', () => {
     expect((await push('2026-02-30', dayPush())).status).toBe(400);
     const dup = dayPush({ rows: [dayPush().rows[0]!, dayPush().rows[0]!] });
     expect((await push('2026-10-21', dup)).status).toBe(400);
+    // Date.parse reads this; Postgres's timestamptz cast doesn't.
+    const local = await push('2026-10-21', dayPush({ windowEnd: '10/21/2026 12:00 PM' }));
+    expect(local.status).toBe(400);
+    expect((local.body as { detail: string }).detail).toContain('windowEnd');
     const [{ n }] = await getTestDb()<{ n: number }[]>`SELECT COUNT(*)::int AS n FROM wechat_market_days`;
     expect(n).toBe(0);
   });
@@ -122,6 +126,39 @@ describe('WeChat market (/api/wechat-market)', () => {
     const again = await pushPoints('2026-10-21', [point(), point({ itemIndex: 1, direction: 'buy', price: 14500 })]);
     expect(again.body.stored).toBe(2);
     expect((await pushPoints('2026-10-21', [point({ source: 'guess' as never })])).status).toBe(400);
+  });
+
+  it('takes a group with no name and a sender with no display name', async () => {
+    const day = dayPush();
+    day.groups[1]!.name = '';
+    expect((await push('2026-10-21', day)).status).toBe(200);
+    expect((await pushPoints('2026-10-21', [point({ senderName: '' })])).body.stored).toBe(1);
+    const { token } = await loginAs(ALEX);
+    const r = await api<{ points: WechatEvidence[] }>(
+      'GET', `/api/wechat-market/days/2026-10-21/points?kind=spec&key=${encodeURIComponent('64G 5600')}`, { token },
+    );
+    expect(r.body.points[0]).toMatchObject({ senderName: '', groups: ['g2@chatroom', '深圳内存群'] });
+  });
+
+  it('refuses a batch left over from a push the day has since replaced', async () => {
+    const first = await push('2026-10-21', dayPush());
+    const stale = (first.body as { pushId: string }).pushId;
+    const second = await push('2026-10-21', dayPush());
+    const current = (second.body as { pushId: string }).pushId;
+    expect(current).not.toBe(stale);
+
+    const batch = (pushId: string) => api<{ stored?: number; error?: string }>(
+      'POST', '/api/wechat-market/push/days/2026-10-21/points', {
+        body: { points: [point()], pushId }, headers: { authorization: `Bearer ${pushBearer}`, 'X-Requested-By': '' },
+      });
+    const refused = await batch(stale);
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toBe('day_replaced');
+    expect((await batch(current)).body.stored).toBe(1);
+    const [{ stored_points }] = await getTestDb()<{ stored_points: number }[]>`
+      SELECT stored_points FROM wechat_market_days WHERE report_date = '2026-10-21'
+    `;
+    expect(stored_points).toBe(1);
   });
 
   it('replaces the whole day on a re-push', async () => {

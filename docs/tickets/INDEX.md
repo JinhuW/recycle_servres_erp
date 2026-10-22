@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-346](./RS-346-fix-the-wechat-market-review-findings-before-the-v1.md) | done | bug | P1 | Fix the WeChat market review findings before the v1.312 release | — |
 | [RS-345](./RS-345-fix-the-sale-reopen-review-findings-before-the-v1-31.md) | done | bug | P1 | Fix the sale-reopen review findings before the v1.311 release | v1.312.1 |
 | [RS-344](./RS-344-wechat-market-page-under-monitors-fed-by-memtrade-s.md) | in-review | story | P2 | WeChat market page under Monitors, fed by memtrade's daily push | v1.312.0 |
 | [RS-343](./RS-343-reopen-a-done-sell-order-to-awaiting-payment.md) | done | story | P2 | Reopen a Done sell order to Awaiting payment | v1.311.0 |

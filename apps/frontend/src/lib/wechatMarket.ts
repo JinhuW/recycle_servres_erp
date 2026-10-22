@@ -36,6 +36,9 @@ export const wechatApi = {
 export const UNBRANDED = '未注明';
 const BRAND_ORDER = ['三星', '海力士', '镁光', '长鑫'];
 
+// A quote can be unbranded as null or as 未注明; both are the same group.
+const brandOf = (r: WechatRow): string => r.brand ?? UNBRANDED;
+
 export function brandRank(brand: string | null): number {
   if (!brand || brand === UNBRANDED) return 99;
   const i = BRAND_ORDER.indexOf(brand);
@@ -47,7 +50,7 @@ export const hasPrice = (r: WechatRow) => r.buy.prices.length > 0 || r.sell.pric
 /** Brand, then bigger and faster modules first, a code-less line ahead of its coded ones. */
 export function boardOrder(a: WechatRow, b: WechatRow): number {
   return brandRank(a.brand) - brandRank(b.brand)
-    || (a.brand ?? '').localeCompare(b.brand ?? '')
+    || brandOf(a).localeCompare(brandOf(b))
     || (b.capacityGb ?? 0) - (a.capacityGb ?? 0)
     || (b.speed ?? 0) - (a.speed ?? 0)
     || (a.code ?? '').localeCompare(b.code ?? '');
@@ -69,8 +72,8 @@ export function groupByBrand(rows: WechatRow[]): BoardGroup[] {
   const groups: BoardGroup[] = [];
   for (const r of [...rows].sort(boardOrder)) {
     const last = groups[groups.length - 1];
-    if (last && last.brand === r.brand) last.rows.push(r);
-    else groups.push({ brand: r.brand, rows: [r] });
+    if (last && last.brand === brandOf(r)) last.rows.push(r);
+    else groups.push({ brand: brandOf(r), rows: [r] });
   }
   return groups;
 }
