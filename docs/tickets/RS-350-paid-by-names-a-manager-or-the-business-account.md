@@ -47,24 +47,28 @@ payer.
 
 ## Acceptance criteria
 
-- [ ] Cost Paid by offers Business Account and each active manager by name,
+- [x] Cost Paid by offers Business Account and each active manager by name,
       on the create pages, both PO pages, the hand-off dialog and sheet. The
       PO's purchaser is also offered when they are not a manager.
-- [ ] Business Account keeps Method (PayPal / Cash), the transaction-id and
+- [x] Business Account keeps Method (PayPal / Cash), the transaction-id and
       auto-link rules; a person-paid PO keeps the chat rule.
-- [ ] The reimbursement line goes to the payer: the purchaser's earnings
+- [x] The reimbursement line goes to the payer: the purchaser's earnings
       include the cost only when the purchaser paid it; when another manager
       paid, the Commission tab says who is reimbursed.
-- [ ] PO list: the Payment cell and the filter chips read Business / the
+- [x] PO list: the Payment cell and the filter chips read Business / the
       payer's name.
-- [ ] The commission Paid by's "Company paid" reads "Business Account".
-- [ ] Accounting: the Cost Payment card's Record (desktop and phone) and the
+- [x] The commission Paid by's "Company paid" reads "Business Account".
+- [x] Accounting: the Cost Payment card's Record (desktop and phone) and the
       entry dialog's PO pick default Manager to the PO's payer when the payer
       is an active manager (cost: `paid_by`; commission:
       `commission_paid_by`); otherwise the recorder, as today. A manager
       already picked by hand, or an entry being edited, is left alone.
-- [ ] Changing the payer is an Activity line.
-- [ ] Existing self-paid POs read as paid by their purchaser.
+- [x] Accounting: a PO in the picker and on the cards names its payer, and
+      reads Business Account when the cost was paid from the company's
+      account or the commission was (on file, or a live Mercury/PayPal row
+      linked as it).
+- [x] Changing the payer is an Activity line.
+- [x] Existing self-paid POs read as paid by their purchaser.
 
 ## Out of scope
 

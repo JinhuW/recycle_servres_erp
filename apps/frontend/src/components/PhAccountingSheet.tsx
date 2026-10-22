@@ -15,7 +15,11 @@ function PhTarget({ kind, target }: { kind: Exclude<AccountingKind, 'other'>; ta
   const { t, locale } = useT();
   return (
     <div style={{ minWidth: 0, flex: 1 }}>
-      <div><span className="mono" style={{ fontWeight: 600 }}>{target.id}</span>{target.party ? ' · ' + target.party : ''}</div>
+      <div>
+        <span className="mono" style={{ fontWeight: 600 }}>{target.id}</span>
+        {target.party ? ' · ' + target.party : ''}
+        {target.payerBusiness ? ' · ' + t('acctPickBusiness') : target.payerName ? ' · ' + t('acctPickPaidBy', { name: target.payerName }) : ''}
+      </div>
       <div className="acct-sub" style={{ whiteSpace: 'normal' }}>
         {[
           target.status ? targetStatusLabel(KIND_TARGET[kind]!, target.status, t) : null,

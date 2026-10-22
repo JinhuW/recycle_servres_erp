@@ -2168,7 +2168,11 @@ payer, below).
     manager. A payer who is not an active manager (a purchaser who paid
     themselves, the Business Account) leaves the recorder as the manager. A
     manager picked by hand, or an entry being edited, is never moved by the
-    record.
+    record. The picker's PO line names the payer — *paid by Tim Wu*, or
+    **Business Account** when the cost was paid from the company's account
+    or the commission was (on file, or a live Mercury/PayPal row linked as
+    it) — so a manager sees before booking that the business, not a person,
+    paid.
 - **The book starts from the payers already on file** (v1.314.0, migration
   0196). A PO with a manager in Paid by is booked as a Paid commission
   through that manager, against the purchaser. It is the PO's projected

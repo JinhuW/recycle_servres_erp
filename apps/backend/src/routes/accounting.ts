@@ -9,6 +9,7 @@ import {
   clampLimit, cursorTs, cursorTsParam, cursorTsSelect, decodeCursor, encodeCursor, escapeLike, UUID_RE,
 } from '../lib/pagination';
 import { isActiveManager } from '../services/members';
+import { commissionLinkedFrag } from '../banktx/match';
 import { authMiddleware } from '../auth';
 import { requireManager } from '../lib/role';
 import { lockPayerTx, recordPayerTx, type CommissionPaidBy, type PayerRow } from './orders/shared';
@@ -107,6 +108,11 @@ type TargetFacts = {
   // payer or commission payer. The form offers it as the manager; a payer
   // who is not an active manager falls back to the recorder there.
   payerId?: string | null;
+  // The payer as the picker reads it: the person's name, or the Business
+  // Account — a cost paid from the company's account, or a commission the
+  // company paid (on file, or a live Mercury/PayPal row linked as it).
+  payerName?: string | null;
+  payerBusiness?: boolean;
 };
 
 type TargetLens = 'purchase' | 'commission' | 'so' | 'as';
@@ -150,23 +156,34 @@ async function findTargets(
     const amount = lens === 'commission'
       ? sql`(GREATEST(rz.projected_profit, 0) * o.commission_rate)::float`
       : sql`(COALESCE(o.total_cost, 0) + o.other_fees)::float`;
+    const payerCol = lens === 'commission' ? sql`o.commission_paid_by` : sql`o.paid_by`;
+    // The Business Account: a cost paid as 'company', or a commission the
+    // company paid — by hand, or because a live bank row is linked as it
+    // (the same read the PO's own Paid by makes, routes/orders/shared.ts).
+    const business = lens === 'commission'
+      ? sql`(o.commission_paid_by_company OR ${commissionLinkedFrag(sql)})`
+      : sql`(o.payment = 'company')`;
     const rows = await sql<{
       id: string; status: string; party: string | null; amount: number | null; recorded: number;
-      payer_id: string | null;
+      payer_id: string | null; payer_name: string | null; payer_business: boolean;
     }[]>`
       SELECT o.id, o.lifecycle AS status,
              ${lens === 'commission' ? sql`u.name` : sql`COALESCE(sup.name, u.name)`} AS party,
              ${amount} AS amount, ${recordedFrag(sql, lens, sql`o.id`)} AS recorded,
-             ${lens === 'commission' ? sql`o.commission_paid_by` : sql`o.paid_by`} AS payer_id
+             ${payerCol} AS payer_id, pb.name AS payer_name, ${business} AS payer_business
       FROM orders o
       JOIN users u ON u.id = o.user_id
+      LEFT JOIN users pb ON pb.id = ${payerCol}
       LEFT JOIN suppliers sup ON sup.id = o.supplier_id
       ${poRealizedLateral(sql, lens === 'commission')}
       WHERE ${scope}
       ORDER BY o.created_at DESC
       LIMIT 10`;
-    return rows.map(({ payer_id, ...r }) => ({
-      ...r, currency: 'USD' as const, recordedCny: r.recorded, payerId: payer_id,
+    return rows.map(({ payer_id, payer_name, payer_business, ...r }) => ({
+      ...r, currency: 'USD' as const, recordedCny: r.recorded,
+      payerId: payer_business ? null : payer_id,
+      payerName: payer_business ? null : payer_name,
+      payerBusiness: payer_business,
     }));
   }
   if (lens === 'so') {

@@ -530,6 +530,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     acctPickNone: 'No matching records.',
     acctPickChange: 'Change',
     acctPickRecorded: 'in the book',
+    acctPickPaidBy: 'paid by {name}',
+    acctPickBusiness: 'Business Account',
     acctRatePh: 'Latest: {rate}',
     acctPreview: 'Books as {amount}',
     acctCounterpartyPh: 'Supplier, customer or purchaser',

@@ -3511,6 +3511,8 @@ const zh: Record<string, string> = {
   acctPickNone: '没有匹配的单据。',
   acctPickChange: '更换',
   acctPickRecorded: '已记账',
+  acctPickPaidBy: '{name} 付款',
+  acctPickBusiness: '公司账户',
   acctRatePh: '最新：{rate}',
   acctPreview: '入账 {amount}',
   acctCounterpartyPh: '供应商、客户或采购员',

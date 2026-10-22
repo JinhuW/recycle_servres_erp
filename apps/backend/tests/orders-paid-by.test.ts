@@ -146,13 +146,22 @@ describe('a self-paid PO names who paid', () => {
     const list = await api<{ orders: { id: string; paidBy: Payer }[] }>('GET', '/api/orders', { token: marcus.token });
     expect(list.body.orders.find(o => o.id === id)?.paidBy).toMatchObject({ id: alex.user.id });
 
-    const cost = await api<{ target: { payerId: string | null } }>(
-      'GET', `/api/accounting/by-order/${id}?kind=purchase`, { token: alex.token });
+    type Target = { target: { payerId: string | null; payerName: string | null; payerBusiness: boolean } };
+    const cost = await api<Target>('GET', `/api/accounting/by-order/${id}?kind=purchase`, { token: alex.token });
     expect(cost.status).toBe(200);
-    expect(cost.body.target.payerId).toBe(alex.user.id);
-    const commission = await api<{ target: { payerId: string | null } }>(
-      'GET', `/api/accounting/by-order/${id}?kind=commission`, { token: alex.token });
-    expect(commission.body.target.payerId).toBeNull();
+    expect(cost.body.target).toMatchObject({ payerId: alex.user.id, payerName: 'Alex Chen', payerBusiness: false });
+    const commission = await api<Target>('GET', `/api/accounting/by-order/${id}?kind=commission`, { token: alex.token });
+    expect(commission.body.target).toMatchObject({ payerId: null, payerName: null, payerBusiness: false });
+
+    // The Business Account reads as such on both lenses: a cost paid as
+    // 'company', and a commission the company paid.
+    expect((await api('PATCH', `/api/orders/${id}`, { token: marcus.token, body: { payment: 'company', paymentMethod: 'cash' } })).status).toBe(200);
+    expect((await api('PUT', `/api/orders/${id}/commission-paid-by`, { token: alex.token, body: { company: true } })).status).toBe(200);
+    const costNow = await api<Target>('GET', `/api/accounting/by-order/${id}?kind=purchase`, { token: alex.token });
+    expect(costNow.body.target).toMatchObject({ payerId: null, payerName: null, payerBusiness: true });
+    const commissionNow = await api<Target>('GET', `/api/accounting/by-order/${id}?kind=commission`, { token: alex.token });
+    expect(commissionNow.body.target).toMatchObject({ payerId: null, payerBusiness: true });
+    expect((await api('PATCH', `/api/orders/${id}`, { token: marcus.token, body: { payment: 'self', paidByUserId: alex.user.id } })).status).toBe(200);
     const picked = await api<{ candidates: { id: string; payerId: string | null }[] }>(
       'GET', `/api/accounting/targets?kind=purchase&q=${id}`, { token: alex.token });
     expect(picked.body.candidates).toEqual([expect.objectContaining({ id, payerId: alex.user.id })]);

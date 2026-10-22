@@ -32,6 +32,11 @@ export type AcctTarget = {
   // or commission payer. The form offers them as the manager; one who is not
   // an active manager falls back to the recorder. Optional for deploy skew.
   payerId?: string | null;
+  // The payer as the picker reads it: the person's name, or the Business
+  // Account — a PO's cost paid from the company's account, or a commission
+  // the company paid (on file, or a Mercury/PayPal row linked as it).
+  payerName?: string | null;
+  payerBusiness?: boolean;
 };
 
 export type AcctEvent = {
