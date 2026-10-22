@@ -99,6 +99,17 @@ function extractTexts(xml: string): string[] {
   return out;
 }
 
+// The message a refused file is named by, wherever a price sheet is dropped.
+export function precheckMessageKey(c: Exclude<PriceFilePrecheck, { ok: true }>): string {
+  if (c.reason === 'columns-missing') {
+    if (c.missing.length > 1) return 'soPriceImportColumnsNotFound';
+    return c.missing[0] === 'part' ? 'mktImportMissingPart' : 'mktImportMissingPrice';
+  }
+  return c.reason === 'too-large' ? 'soPriceImportTooLarge'
+    : c.reason === 'no-rows' ? 'soPriceImportNoRows'
+      : 'soPriceImportNotXlsx';
+}
+
 export async function precheckPriceFile(
   file: File,
   maxBytes = PRICE_FILE_MAX_BYTES,
