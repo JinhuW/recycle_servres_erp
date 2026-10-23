@@ -63,6 +63,27 @@ export type FbProxyMark = {
   revivedBy: string | null;
 };
 
+/** Login outcomes, as the coordinator's ledger records them, that leave the
+ *  worker signed in. Every other finished outcome is a failure; a null one is
+ *  an attempt that never reported back. */
+export const FB_LOGIN_OK_OUTCOMES = ['restored', 'password_ok', 'watch_ok'] as const;
+
+/** One line of an account's timeline: a login attempt from the coordinator's
+ *  ledger, an action from the pool's own ledger, or the account entering the
+ *  pool. `detail` on a login is what Facebook showed (checkpoint, 2fa…). */
+export type FbTimelineEvent =
+  | { kind: 'login'; at: number; worker: string; trigger: string | null; outcome: string | null;
+      detail: string | null; url: string | null }
+  | { kind: 'pool'; at: number; action: FbPoolEventKind; status: FbPoolStatus; detail: string | null; by: string }
+  | { kind: 'added'; at: number; batch: string };
+
+/** `logins` says whether the fleet answered: `not_served` is a console that
+ *  predates the login route, `unreachable` one that did not answer. */
+export type FbAccountTimeline = {
+  events: FbTimelineEvent[];
+  logins: 'ok' | 'not_served' | 'unreachable';
+};
+
 /** Fields whose copy or reveal is worth an audit line. */
 export const FB_POOL_SECRET_FIELDS = ['password', 'totp', 'emailPassword', 'cookie', 'token'] as const;
 export type FbPoolSecretField = (typeof FB_POOL_SECRET_FIELDS)[number];

@@ -17,6 +17,27 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.320.0] - 2026-10-23
+
+Each account on a worker's page now unfolds into its timeline (RS-366). The
+Accounts used card from v1.319.0 said which accounts a worker had and how each
+ended, but not how it fared along the way. A row now opens the account's
+whole life, newest first and across every worker it was on: every login the
+workers attempted for it, with the outcome (login success by restored
+session, password or Watch; login failed; checkpoint; locked by Facebook;
+timed out), the trigger, the worker and the time to the second, interleaved
+with what the pool did (added, assigned and by whom, moved to Problem and
+why, returned, retired, removed). A worker that fails at every restart reads
+as one line with a count, not hundreds, and the head sums the successes and
+failures.
+
+The logins come from the coordinator's login ledger, which the fleet console
+now serves at `GET /v1/logins` without the device fingerprints
+(facebook-tracker, unreleased until it is deployed). A ledger row names the
+account by uid on newer rows; an older row belongs to the account that was on
+that worker when it started, from the v1.319.0 stints. Until the console is
+deployed, the timeline shows the pool's events and says so.
+
 ## [1.319.0] - 2026-10-23
 
 A fleet proxy that keeps burning Facebook accounts is now called out and

@@ -2743,7 +2743,21 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   signed in with, newest first, with the proxy it went out through, from and
   until, and how it ended (on now, returned, Problem, Retired, moved to
   another worker, removed). Stints from before v1.319.0 come from the pool
-  ledger and say "proxy not recorded", so they do not count toward DEAD. A worker's Today strip uses
+  ledger and say "proxy not recorded", so they do not count toward DEAD.
+  Since v1.320.0 (RS-366) a row there unfolds into the account's
+  **timeline**, newest first, across every worker it was on: each login the
+  workers attempted for it (Login success — session restored / password /
+  finished in Watch, Login failed, Checkpoint, Locked by Facebook, timed out,
+  no result), with its trigger (at start-up, Re-login, cookie restore, token
+  refresh…), the worker and the time to the second, plus what the pool did
+  with it (added, assigned and by whom, taken, returned, moved to Problem and
+  why, retired, removed). A run of identical logins, such as a worker failing
+  at every restart, is one line with its count and time range, and the head
+  sums the logins that succeeded and failed. Logins come from the
+  coordinator's login ledger through the fleet console's `/v1/logins`
+  (the facebook-tracker release after 0.13.12); a row names the account by uid, or else belongs
+  to the account that was on that worker when it started. Against an older
+  console the timeline shows the pool's events and says logins will follow. A worker's Today strip uses
   its own sweep times, from the config it runs, so a worker that shares an IP
   and sweeps at its own hour shows that hour (facebook-tracker 0.13.8). And a **From a search to an alert** card that walks the
   pipeline as the code runs it — search, result cards, the title gate before

@@ -14,13 +14,16 @@ import {
   validateFbPoolDraft,
   type FbPoolDraft,
   type FbPoolEventKind,
+  type FbAccountTimeline,
   type FbPoolStatus,
   type FbProxyMark,
   type FbStintOutcome,
+  type FbTimelineEvent,
   type FbWorkerStint,
 } from '@recycle-erp/shared';
 import { authMiddleware } from '../auth';
 import { getDb, type SqlLike } from '../db';
+import { allLimited } from '../lib/concurrency';
 import { log } from '../lib/log';
 import { effectiveRole, requireManager } from '../lib/role';
 import { poolKey, sealOrNull, unsealOrEmpty } from '../lib/sealed';
@@ -701,6 +704,70 @@ pool.get('/workers/:worker/accounts', async (c) => {
     outcome: r.outcome,
   }));
   return c.json({ stints });
+});
+
+// One account's life on the fleet, newest first: the pool's own ledger, and
+// every login the workers it was on attempted for it. The coordinator's ledger
+// names the account (`uid:<uid>`) only on newer rows; an older row is this
+// account's when it started on a worker while the account was on it.
+type LedgerRow = {
+  worker_id: string;
+  identity_key: string | null;
+  trigger: string | null;
+  outcome: string | null;
+  started_at: string;
+  detail: { kind?: unknown; url?: unknown } | null;
+};
+const LEDGER_ROWS = 500;
+const TIMELINE_POOL_EVENTS = 500;
+
+pool.get('/:no/timeline', async (c) => {
+  const no = parseNo(c.req.param('no'));
+  if (no === null) return c.json({ error: 'Not found' }, 404);
+  const sql = getDb(c.env);
+  const [[account], stints, ledger] = await allLimited([
+    () => sql<{ uid: string; added_at: Date; batch: string }[]>`
+      SELECT uid, added_at, batch FROM fb_pool_accounts WHERE no = ${no}`,
+    () => sql<{ worker_id: string; uid: string; started_at: Date; ended_at: Date | null }[]>`
+      SELECT worker_id, uid, started_at, ended_at FROM fb_worker_accounts WHERE account_no = ${no}`,
+    () => sql<EventRow[]>`
+      SELECT created_at, actor_name, kind, account_no, detail, status FROM fb_pool_events
+      WHERE account_no = ${no} AND kind NOT IN ('added', 'copied', 'revealed', 'edited')
+      ORDER BY created_at DESC LIMIT ${TIMELINE_POOL_EVENTS}`,
+  ] as const);
+  const uid = account?.uid ?? stints[0]?.uid;
+  if (!uid) return c.json({ error: 'Not found' }, 404);
+
+  const events: FbTimelineEvent[] = ledger.map((e) => ({
+    kind: 'pool', at: e.created_at.getTime(), action: e.kind, status: e.status, detail: e.detail, by: e.actor_name,
+  }));
+  if (account) events.push({ kind: 'added', at: account.added_at.getTime(), batch: account.batch });
+
+  const workers = [...new Map(stints.map((s) => [s.worker_id.toLowerCase(), s.worker_id])).values()];
+  const reads = await allLimited(workers.map((w) => () =>
+    callFacade(c.env, 'GET', `/v1/logins?worker_id=${encodeURIComponent(w)}&limit=${LEDGER_ROWS}`)));
+  let logins: FbAccountTimeline['logins'] = 'ok';
+  if (reads.some((r) => r.status === 404)) logins = 'not_served';
+  else if (reads.some((r) => r.error)) logins = 'unreachable';
+  const key = `uid:${uid}`;
+  const onIt = (worker: string, at: number) => stints.some((s) =>
+    s.worker_id.toLowerCase() === worker.toLowerCase()
+    && at >= s.started_at.getTime() && (s.ended_at === null || at <= s.ended_at.getTime()));
+  for (const read of reads) {
+    if (read.error) continue;
+    for (const row of ((read.payload as { logins?: LedgerRow[] } | null)?.logins ?? [])) {
+      const at = Date.parse(row.started_at);
+      if (row.identity_key ? row.identity_key !== key : !onIt(row.worker_id, at)) continue;
+      const str = (v: unknown) => (typeof v === 'string' && v ? v : null);
+      events.push({
+        kind: 'login', at, worker: row.worker_id, trigger: row.trigger, outcome: row.outcome,
+        detail: str(row.detail?.kind), url: str(row.detail?.url),
+      });
+    }
+  }
+  events.sort((a, b) => b.at - a.at);
+  const body: FbAccountTimeline = { events, logins };
+  return c.json(body);
 });
 
 pool.post('/:no/retire', async (c) => {

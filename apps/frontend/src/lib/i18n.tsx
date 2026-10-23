@@ -12,8 +12,9 @@ import type { Lang } from './types';
 // Some key families are looked up with BUILT key names and never appear as
 // full literals anywhere: dim_<key> (DesktopAnalysis), soCloseReason_<id>
 // (lib/closeReasons.ts), fbcState_<state> (FleetAccounts), fbcFlow_<stage>,
-// fbcFlowUnit_/fbcFlowWhere_/fbcFlowWhat_<stage> (FleetFlow) and
-// fbcHist_<event> (FleetWorker). A whole-word
+// fbcFlowUnit_/fbcFlowWhere_/fbcFlowWhat_<stage> (FleetFlow), and
+// fbcHist_<event>, fbcStint_<outcome>, fbcTlLogin_<outcome> and
+// fbcTlTrigger_<trigger> (FleetWorker). A whole-word
 // search for those keys finds nothing — don't delete them as "unused".
 export const I18N: Partial<Record<Lang, Record<string, string>>> = {
   en: {
@@ -3786,6 +3787,37 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     fbcStint_problem: "Problem",
     fbcStint_retired: "Retired",
     fbcStint_removed: "Removed",
+    fbcTlTitle: "Timeline",
+    fbcTlShow: "Show #{n}'s timeline",
+    fbcTlHide: "Hide #{n}'s timeline",
+    fbcTlLoading: "Loading the timeline…",
+    fbcTlFailed: "The timeline could not be loaded.",
+    fbcTlSum: "Logins: {ok} succeeded · {failed} failed",
+    fbcTlNotServed: "Logins appear once the fleet console is updated; until then this shows the pool's events only.",
+    fbcTlUnreachable: "The fleet console did not answer, so logins are missing.",
+    fbcTlEmpty: "Nothing recorded for this account yet.",
+    fbcTlRange: "{from} – {to}",
+    fbcTlAdded: "Added to the pool · batch {batch}",
+    fbcTlAssigned: "Assigned to {worker} by {by}",
+    fbcTlReported: "Moved to Problem: {reason} · {by}",
+    fbcTlTook: "Taken by {by}",
+    fbcTlReturned: "Returned to Available · {by}",
+    fbcTlRetired: "Retired · {by}",
+    fbcTlRemoved: "Removed from the pool · {by}",
+    fbcTlLogin_restored: "Login success — session restored",
+    fbcTlLogin_password_ok: "Login success — password",
+    fbcTlLogin_watch_ok: "Login success — finished in Watch",
+    fbcTlLogin_challenge: "Checkpoint",
+    fbcTlLogin_locked: "Locked by Facebook",
+    fbcTlLogin_failed: "Login failed",
+    fbcTlLogin_timed_out: "Login timed out",
+    fbcTlLogin_none: "Login started, no result",
+    fbcTlTrigger_boot: "at start-up",
+    fbcTlTrigger_relogin: "Re-login",
+    fbcTlTrigger_forced: "forced",
+    fbcTlTrigger_swap: "account swap",
+    "fbcTlTrigger_cookie-restore": "cookie restore",
+    "fbcTlTrigger_token-refresh": "token refresh",
     fbcColWorker: "Worker",
     fbcColProxy: "Proxy",
     fbcColProxyHint: "The port this worker dials, its exit IP, and the city Facebook sees it in",

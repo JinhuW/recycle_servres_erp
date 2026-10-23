@@ -299,7 +299,10 @@ describe('facebook account pool', () => {
     // is answered here, outside the spy, so `sent(spy, i)` counts only the
     // calls that act on the worker.
     let fleetAnswer: [number, unknown] = [200, { workers: [] }];
-    beforeEach(() => { fleetAnswer = [200, { workers: [] }]; });
+    // Each worker's login ledger as the console serves it; null is a console
+    // from before the route.
+    let ledger: Record<string, unknown[]> | null = {};
+    beforeEach(() => { fleetAnswer = [200, { workers: [] }]; ledger = {}; });
     const PROXY = 'http://gw.proxy.example:10001';
     const onProxy = (...workers: [string, string | null][]) => {
       fleetAnswer = [200, { workers: workers.map(([worker_id, url]) => ({ worker_id, proxy: { url, ip: '203.0.113.7' } })) }];
@@ -311,7 +314,13 @@ describe('facebook account pool', () => {
         return new Response(JSON.stringify(body), { status });
       });
       vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
-        if (!String(url).endsWith('/v1/fleet')) return spy(url, init);
+        const u = new URL(String(url));
+        if (u.pathname === '/v1/logins') {
+          return ledger === null
+            ? new Response(JSON.stringify({ detail: 'Not Found' }), { status: 404 })
+            : new Response(JSON.stringify({ logins: ledger[u.searchParams.get('worker_id') ?? ''] ?? [] }), { status: 200 });
+        }
+        if (u.pathname !== '/v1/fleet') return spy(url, init);
         const [status, body] = fleetAnswer;
         return new Response(JSON.stringify(body), { status });
       });
@@ -549,6 +558,83 @@ describe('facebook account pool', () => {
       expect(revived.body.proxies).toEqual([]);
       expect((await assign(token, 8, 'nyc-1', 'problem')).status).toBe(200);
       expect(await marks(token)).toMatchObject([{ url: PROXY, failed: 1, dead: false, revivedBy: 'Alex Chen' }]);
+    });
+
+    type TimelineEvent = { kind: string; at: number; worker?: string; trigger?: string | null; outcome?: string | null;
+      detail?: string | null; url?: string | null; action?: string; by?: string; batch?: string };
+    const timeline = (token: string, no: number) =>
+      api<{ events: TimelineEvent[]; logins: string }>('GET', `${BASE}/${no}/timeline`, { token, env: ENV });
+    const iso = (ms: number) => new Date(ms).toISOString().replace('Z', '+00:00');
+    const attempt = (worker: string, at: number, over: Record<string, unknown> = {}) => ({
+      id: at, worker_id: worker, account_id: worker, identity_key: null, trigger: 'boot', outcome: 'restored',
+      started_at: iso(at), finished_at: iso(at + 5000), detail: null, ...over,
+    });
+
+    it('traces an account across workers: its logins and the pool events, newest first', async () => {
+      const token = await manager();
+      await seedPool(token, 2);
+      onProxy(['ne-1', PROXY], ['va-1', null]);
+      stubFacade([200, {}]);
+      expect((await assign(token, 1, 'ne-1')).status).toBe(200);
+      expect((await assign(token, 2, 'ne-1', 'problem')).status).toBe(200);
+      expect((await assign(token, 1, 'va-1')).status).toBe(200);
+      const [on2, on1] = await stints(token, 'ne-1');
+      const [onVa] = await stints(token, 'va-1');
+
+      ledger = {
+        'ne-1': [
+          attempt('ne-1', on1.startedAt, { trigger: 'cookie-restore' }), // unnamed, inside #1's stint
+          attempt('ne-1', on1.startedAt - 86_400_000, { identity_key: `uid:${uid(1)}`, trigger: 'relogin', outcome: 'password_ok' }),
+          attempt('ne-1', on2.startedAt + 60_000, { outcome: 'failed' }), // unnamed, #2's time
+          attempt('ne-1', on2.startedAt + 120_000, { identity_key: `uid:${uid(2)}` }), // named #2
+        ],
+        'va-1': [attempt('va-1', onVa.startedAt + 1000, {
+          trigger: 'relogin', outcome: 'challenge',
+          detail: { kind: 'checkpoint', url: 'https://www.facebook.com/checkpoint/1/' },
+        })],
+      };
+      const r = await timeline(token, 1);
+      expect(r.status).toBe(200);
+      expect(r.body.logins).toBe('ok');
+      const logins = r.body.events.filter((e) => e.kind === 'login');
+      expect(logins.map((e) => [e.worker, e.trigger, e.outcome, e.detail])).toEqual([
+        ['va-1', 'relogin', 'challenge', 'checkpoint'],
+        ['ne-1', 'cookie-restore', 'restored', null],
+        ['ne-1', 'relogin', 'password_ok', null],
+      ]);
+      expect(logins[0].url).toBe('https://www.facebook.com/checkpoint/1/');
+      const pool = r.body.events.filter((e) => e.kind !== 'login');
+      expect(pool.map((e) => [e.kind, e.action ?? null, e.detail ?? null])).toEqual([
+        ['pool', 'assigned', 'va-1'],
+        ['pool', 'reported', 'replaced by #2 on ne-1'],
+        ['pool', 'assigned', 'ne-1'],
+        ['added', null, null],
+      ]);
+      expect(pool[0].by).toBe('Alex Chen');
+      expect(pool[3].batch).toBe('Batch T');
+      const ats = r.body.events.map((e) => e.at);
+      expect(ats).toEqual([...ats].sort((a, b) => b - a));
+
+      // #2 gets its own rows and none of #1's.
+      const two = await timeline(token, 2);
+      expect(two.body.events.filter((e) => e.kind === 'login').map((e) => e.outcome)).toEqual(['restored', 'failed']);
+
+      const marcus = (await loginAs(MARCUS)).token;
+      expect((await timeline(marcus, 1)).status).toBe(403);
+      expect((await timeline(token, 99)).status).toBe(404);
+    });
+
+    it('still shows the pool events when the console does not serve logins', async () => {
+      const token = await manager();
+      await seedPool(token, 1);
+      onProxy(['ne-1', PROXY]);
+      stubFacade([200, {}]);
+      expect((await assign(token, 1, 'ne-1')).status).toBe(200);
+      ledger = null;
+      const r = await timeline(token, 1);
+      expect(r.status).toBe(200);
+      expect(r.body.logins).toBe('not_served');
+      expect(r.body.events.map((e) => e.kind)).toEqual(['pool', 'added']);
     });
 
     it('sends nothing when the fleet document cannot be read', async () => {

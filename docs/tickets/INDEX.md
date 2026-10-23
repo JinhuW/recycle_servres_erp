@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-366](./RS-366-timeline-of-each-account-s-logins-on-the-worker-page.md) | in-progress | story | P2 | Timeline of each account's logins on the worker page | — |
 | [RS-365](./RS-365-mark-a-proxy-dead-after-its-5th-failed-account-and-k.md) | done | story | P2 | Mark a proxy DEAD after its 5th failed account, and keep each worker's account history | 1.319.0 |
 | [RS-364](./RS-364-describe-every-database-in-one-markdown-file.md) | done | task | P2 | Describe every database in one Markdown file | n/a — docs only, no release |
 | [RS-363](./RS-363-a-booked-po-s-payment-and-paid-by-are-manager-only.md) | done | bug | P1 | A booked PO's payment and Paid by are manager-only | 1.318.2 |
