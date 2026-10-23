@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-362](./RS-362-wechat-board-brand-and-generation-columns-and-a-refi.md) | in-progress | story | P2 | WeChat board: brand and generation columns, and a refine filter | 1.318.0 |
 | [RS-361](./RS-361-refine-the-pack-page-layout.md) | done | bug | P2 | Refine the Pack page layout | 1.317.5 |
 | [RS-359](./RS-359-fix-the-v1-317-prod-release-review-findings.md) | done | bug | P2 | Fix the v1.317 prod release review findings | 1.317.4 |
 | [RS-358](./RS-358-fix-the-dev-main-review-findings-before-the-v1-317-r.md) | done | bug | P2 | Fix the dev→main review findings before the v1.317 release | 1.317.3 |

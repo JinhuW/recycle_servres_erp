@@ -22,6 +22,7 @@ import { stashSellOrderPrefill } from '../../lib/sellOrderPrefill';
 import { navigate } from '../../lib/route';
 import { TableSkeleton } from '../../components/Skeleton';
 import { SerialNumbers } from '../../components/SerialNumbers';
+import { RefinePanel } from '../../components/RefinePanel';
 import { InventoryProductTable } from './InventoryProductTable';
 import type { ProductGroup } from './InventoryProductTable';
 import { loadWarehouses } from '../../lib/warehouses';
@@ -212,9 +213,6 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
       ? ATTR_SCHEMA[filter as 'RAM' | 'SSD' | 'HDD']
       : [];
   }, [filter, t]);
-  const activeAttrCount = Object.values(attrFilters).reduce(
-    (n, vs) => n + (vs?.length ?? 0), 0,
-  );
   const toggleAttrValue = (key: string, value: string) => {
     const cur = attrFilters[key] ?? [];
     const next = cur.includes(value)
@@ -255,21 +253,6 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
   }, [colsMenuOpen]);
-
-  // Auto-collapse the refine panel when the user clicks anywhere outside it.
-  // Mirrors the cols-menu behaviour above so the panel doesn't linger over the
-  // table after the user has dialed in their chips.
-  const subfilterRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (!attrPanelOpen) return;
-    const onDoc = (e: MouseEvent) => {
-      if (subfilterRef.current && !subfilterRef.current.contains(e.target as Node)) {
-        setAttrPanelOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
-  }, [attrPanelOpen, setAttrPanelOpen]);
 
   // Shared query string for the flat list and the grouped product fetch, so
   // the two views always filter identically (was duplicated in both effects).
@@ -862,87 +845,22 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
         </div>
 
         {attrSchema.length > 0 && (
-          <div ref={subfilterRef} className="inv-subfilter" data-open={attrPanelOpen ? 'true' : 'false'}>
-            <button
-              type="button"
-              className="inv-subfilter__head"
-              onClick={() => setAttrPanelOpen(!attrPanelOpen)}
-              aria-expanded={attrPanelOpen}
-              aria-controls="inv-subfilter-body"
-            >
-              <span className="inv-subfilter__chevron">
-                <Icon name="chevronDown" size={13} />
-              </span>
-              <span className="inv-subfilter__title">
-                {t('invRefinePre')} <strong>{filter}</strong>
-              </span>
-              {activeAttrCount > 0 && (
-                <span className="inv-subfilter__badge">
-                  {t('invFiltersActive', { n: activeAttrCount })}
-                </span>
-              )}
-              <span className="inv-subfilter__spacer" />
-              {activeAttrCount > 0 && (
-                <span
-                  className="inv-subfilter__clear"
-                  role="button"
-                  tabIndex={0}
-                  onClick={(e) => { e.stopPropagation(); clearAttrFilters(); }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      clearAttrFilters();
-                    }
-                  }}
-                >
-                  {t('invClearAll')}
-                </span>
-              )}
-              <span className="inv-subfilter__hint">
-                {attrPanelOpen ? t('memSecHide') : t('memSecShow')}
-              </span>
-            </button>
-            <div
-              id="inv-subfilter-body"
-              className="inv-subfilter__body"
-            >
-              {attrSchema.map((spec) => {
-                const counts = facets[spec.key] ?? {};
-                const selected = attrFilters[spec.key] ?? [];
-                const values = sortAttrValues(spec.key, Object.keys(counts));
-                // Also surface selected values that no longer have any matches
-                // (count 0) so they remain visible & removable.
-                for (const s of selected) if (!values.includes(s)) values.push(s);
-                if (values.length === 0) return null;
-                return (
-                  <div className="inv-subfilter__row" key={spec.key}>
-                    <div className="inv-subfilter__label">{spec.label}</div>
-                    <div className="inv-subfilter__chips">
-                      {values.map((v) => {
-                        const isOn = selected.includes(v);
-                        const count = counts[v] ?? 0;
-                        return (
-                          <button
-                            key={v}
-                            type="button"
-                            className={'inv-chip' + (isOn ? ' on' : '') + (count === 0 && !isOn ? ' empty' : '')}
-                            onClick={() => toggleAttrValue(spec.key, v)}
-                            disabled={count === 0 && !isOn}
-                          >
-                            <span className="inv-chip__label">
-                              {spec.format ? spec.format(v) : v}
-                            </span>
-                            <span className="inv-chip__count">{count}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          <RefinePanel
+            id="inv-subfilter-body"
+            title={<>{t('invRefinePre')} <strong>{filter}</strong></>}
+            open={attrPanelOpen}
+            onOpen={setAttrPanelOpen}
+            rows={attrSchema.map(spec => ({
+              key: spec.key,
+              label: spec.label,
+              values: sortAttrValues(spec.key, Object.keys(facets[spec.key] ?? {})),
+              counts: facets[spec.key] ?? {},
+              format: spec.format,
+            }))}
+            selected={attrFilters}
+            onToggle={toggleAttrValue}
+            onClear={clearAttrFilters}
+          />
         )}
 
         <div className="table-scroll" ref={tableScrollRef}>
