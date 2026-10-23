@@ -70,6 +70,11 @@ the company's single book rather than one per manager.
 
 ## Notes
 
+- **Superseded in part by RS-353 (same release):** the Business Account is
+  not a payer in the RMB book after all. `manager_id` stays NOT NULL, the
+  form, filter and Held by offer people only, and a PO the Business Account
+  paid voids its entries instead of carrying them. The person-to-person
+  link and the one company-wide balance stand as written here.
 - PO → entry runs in the database (migration 0198: `accounting_sync_payer`
   and two triggers), so every writer is covered — the PO page, the
   commission screenshot fill, bank link / unlink / pair, the bank sync's

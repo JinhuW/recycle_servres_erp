@@ -6,16 +6,16 @@ import {
   type AccountingTargetType, type IsoDate,
 } from '@recycle-erp/shared';
 
-// The RMB book: the API client both shells use, and the small pure helpers
+// The RMB Flow: the API client both shells use, and the small pure helpers
 // its pages share.
 
 export type AcctEntry = {
   id: string; direction: AccountingDirection; kind: AccountingKind;
   amount: number; currency: AccountingCurrency; fxRate: number | null; amountCny: number;
   method: AccountingMethod; occurredOn: IsoDate;
-  // Who paid, or null for the Business Account. On a PO's entry it is the
-  // PO's own payer, kept in step both ways.
-  manager: { id: string; name: string } | null;
+  // Who paid. On a PO's entry it is the PO's own payer, kept in step both
+  // ways; a PO the Business Account paid voids its entries instead.
+  manager: { id: string; name: string };
   target: { type: AccountingTargetType; id: string } | null;
   counterparty: string | null; reference: string | null; note: string | null;
   createdAt: string; updatedAt: string;
@@ -38,11 +38,10 @@ export type AcctTarget = {
   // Account — a PO's cost paid from the company's account, or a commission
   // the company paid (on file, or a Mercury/PayPal row linked as it).
   payerName?: string | null;
+  // The PO the Business Account paid takes no RMB entry: the form and the
+  // card say so and point to Payments.
   payerBusiness?: boolean;
-  // What the PO settles itself, so the form knows when Paid by is the PO's
-  // to set; the purchaser may be a self-paid cost's payer.
-  payment?: 'company' | 'self';
-  commissionLinked?: boolean;
+  // The purchaser may be a self-paid cost's payer.
   owner?: { id: string; name: string };
 };
 
@@ -66,8 +65,6 @@ export type AcctSummary = {
   opening: number; received: number; paid: number; closing: number;
   byKind: Record<AccountingKind, { received: number; paid: number; count: number }>;
   managers: { id: string; name: string; balance: number }[];
-  // The company's own account as a payer.
-  business: { balance: number };
   first: IsoDate | null;
   fx: AcctFx;
 };
@@ -81,17 +78,9 @@ export type AcctLedger = {
 
 export type AcctEntryBody = {
   direction: AccountingDirection; kind: AccountingKind; amount: number; currency: AccountingCurrency;
-  fxRate: number | null; method: AccountingMethod; occurredOn: IsoDate; managerId: string | null;
+  fxRate: number | null; method: AccountingMethod; occurredOn: IsoDate; managerId: string;
   targetId: string | null; counterparty: string | null; reference: string | null; note: string | null;
 };
-
-// The Paid by filter's value for the Business Account; a person is their id.
-export const BUSINESS_PAYER = 'business';
-
-/** An entry's Paid by as the pages print it. */
-export function acctPayerName(manager: { name: string } | null, t: (key: string) => string): string {
-  return manager ? manager.name : t('payBusiness');
-}
 
 // Which record's side of the book a card shows.
 export type AcctScope =

@@ -66,6 +66,20 @@ describe('shownNav', () => {
     expect(leaf('manager', 'internaltx', 'payments')?.active).toBe(true);
     expect(leaf('manager', 'dashboard', 'inventory')?.active).toBe(false);
   });
+
+  it('groups Payments and the RMB Flow under Accounting, pointing at Payments', () => {
+    const accounting = (view: DesktopViewId) => oversight('manager', view)?.items
+      .find((i): i is ShownParent => i.kind === 'parent' && i.parent.tKey === 'nav_accounting');
+    const closed = accounting('dashboard');
+    expect(closed?.open).toBe(false);
+    expect(closed?.target).toBe('payments');
+    expect(closed?.children.map(c => [c.leaf.id, c.leaf.tKey])).toEqual([['payments', 'nav_payments'], ['accounting', 'nav_rmbFlow']]);
+    expect(accounting('payments')?.children.map(c => c.active)).toEqual([true, false]);
+    // Internal transactions is a Payments tab: the parent opens for it too.
+    expect(accounting('internaltx')?.open).toBe(true);
+    expect(accounting('accounting')?.children.map(c => c.active)).toEqual([false, true]);
+    expect(oversight('purchaser', 'dashboard')?.items.some(i => i.kind === 'parent' && i.parent.tKey === 'nav_accounting')).toBe(false);
+  });
 });
 
 describe('DESKTOP_NAV', () => {

@@ -48,7 +48,7 @@ portal was removed in v1.191.0; no bid had ever been placed through it.
   non-manager's JSON never carries a manager-only key — not even as `null`,
   since the name alone would advertise the feature. Whole-endpoint manager
   features (sell orders, customers, transfers, activity, members,
-  bank and internal transactions, the Accounting book (v1.310.0), tracker,
+  bank and internal transactions, the RMB Flow (v1.310.0, named Accounting until v1.315.0), tracker,
   the WeChat market (v1.312.0), coordinator, connectors, FX rates, inventory export and analysis, a line's
   linked sell orders) answer 403. The
   Facebook account pool (`/api/facebook-pool`, v1.262.0) is the exception
@@ -246,7 +246,7 @@ is not a stage but a flag beside one, set once every line has sold
   the PO's commission makes it read Business Account on its own: the select
   locks with a note saying why, and an
   unlink or a reversal gives back the pick made by hand. Whatever this field
-  reads, the PO's Commission entries in the Accounting book read too, and a
+  reads, the PO's Commission entries in the RMB Flow read too, and a
   Commission entry's Paid by writes back here (v1.315.0, see *Accounting*).
   **The screenshot's upload records the payer** (v1.302.0): a manager who uploads one while
   Paid by reads *Not recorded* is recorded as the payer. If Paid by names
@@ -1562,7 +1562,7 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
   against the order total, and *Record receipt*, which starts on the payment
   receiver. A receiver no longer active falls back to the manager recording
   it (v1.310.2). Its suggested amount is what the order itself still lacks,
-  so a case's refund no longer reads as owed. See [Accounting](#accounting).
+  so a case's refund no longer reads as owed. See [RMB Flow](#rmb-flow).
 - **The desktop list flags an order with internal notes** (v1.239.0): a note
   icon beside the customer on each row whose note isn't blank.  Hovering or
   tabbing to it shows the note in a card (line breaks kept, clamped at 14
@@ -1853,7 +1853,7 @@ lower price (**Discount**). Purchasers never see the page or the API.
 - **The money a case pays out is booked in Accounting** (v1.310.0). The case
   page's *Accounting* card lists its refunds with their net and *Record
   refund*; the refunds also show on the sell order's card. See
-  [Accounting](#accounting).
+  [RMB Flow](#rmb-flow).
 
 ## Shipping
 
@@ -1906,8 +1906,11 @@ when it arrives.  The system never buys a label.
 
 ## Payments and reconciliation
 
-Manager-only. Links **Mercury and PayPal transactions to purchase orders**,
-to a PO's commission, or to sell orders (v1.257.0).
+Manager-only; the sidebar's **Accounting ▸ Payments** (v1.315.0), beside the
+RMB Flow. Links **Mercury and PayPal transactions to purchase orders**, to a
+PO's commission, or to sell orders (v1.257.0). Everything the Business
+Account paid lives here; the RMB Flow is for money that did not go through
+it.
 
 - Transaction ingest with auto-pair and auto-link (v1.90.0), a background sync
   loop behind a manager-only API (v1.91.0), and a Payments page (v1.92.0).
@@ -2130,16 +2133,17 @@ to a PO's commission, or to sell orders (v1.257.0).
 > account is also re-read 60 days back once a week so a late reversal is seen,
 > and a row pending for over 120 days stops holding the fetch window open.
 
-## Accounting
+## RMB Flow
 
-Manager-only, both shells (v1.310.0). The book of money received and paid,
-kept in **RMB**, by the managers or from the company's own account (the
-**Business Account**, since v1.315.0). Payments reconciles the company's USD
-bank accounts; this records what moves through the managers' hands — a
-supplier paid by Alipay, a purchaser's commission by WeChat, a customer's
-bank transfer, a refund on a case. Entries are a record only: they change no
-PO cost, sell-order revenue or case amount (the one exception is who paid,
-below).
+Manager-only, both shells (v1.310.0; named *Accounting* until v1.315.0).
+The managers' book of money received and paid **outside the Business
+Account**, kept in **RMB**. The company's own money is Payments' — the USD
+bank, reconciled there — and both pages sit under the sidebar's
+**Accounting** parent. This one records what moves through the managers'
+hands — a supplier paid by Alipay, a purchaser's commission by WeChat, a
+customer's bank transfer, a refund on a case. Entries are a record only:
+they change no PO cost, sell-order revenue or case amount (the one exception
+is who paid, below).
 
 - **An entry** says received or paid, what it was for, how much, how
   (bank transfer, Alipay, WeChat Pay, cash, other), on what date and through
@@ -2163,26 +2167,30 @@ below).
     deleted. A draft PO deleted after money was booked against it leaves the
     entry on the book without its link, and its history names the PO.
   - **An entry's Paid by and its PO's payer are one value** (v1.315.0,
-    migration 0198), kept in step both ways. *Paid by* is a person — an
-    active manager, or the PO's own purchaser on a self-paid cost — or the
-    **Business Account**, the company's own money.
+    migration 0198), kept in step both ways. *Paid by* is a person: an
+    active manager, or the PO's own purchaser on a self-paid cost. The
+    Business Account is never a payer here — its money is Payments'.
     - *PO → entry.* Whatever moves a PO's payer moves its live entries of
-      that kind: the PO page's Paid by, a commission screenshot, a
-      Mercury/PayPal row linked or unlinked as the commission (a linked row
-      reads Business Account), a cost payer edited or handed off, a
-      settlement that flips. The entry gets a *Paid by followed the PO*
-      history line. Nobody on file leaves an entry as recorded; a restored
-      entry catches up with its PO. The sync is a database trigger, so no
-      writer is missed.
+      that kind: the PO page's Paid by, a commission screenshot, a cost
+      payer edited or handed off. The entry gets a *Paid by followed the
+      PO* history line. Nobody on file leaves an entry as recorded. The
+      sync is a database trigger, so no writer is missed.
+    - *The Business Account paid, so the entry goes.* When a PO's commission
+      becomes company-paid (flagged on the PO, or a Mercury/PayPal row linked
+      as the commission), or its cost flips to the company's account, its
+      live paid-out entries of that kind are **voided** with the reason
+      *Paid from the Business Account* and a *Voided: paid from the Business
+      Account* history line; totals drop them. Unlinking the row or clearing
+      the flag does not bring them back; **Restore** does, and a restored
+      entry is never voided by the PO again.
     - *Entry → PO.* Saving a Commission entry with Paid by X sets the PO's
-      commission Paid by to X (Business Account = company paid), with the
-      PO's Activity line. Saving a Purchase entry with Paid by a person sets
-      a self-paid PO's cost payer. Two entries on one PO carry one payer.
-    - *The PO decides* when a bank row stands as the commission, or the
-      cost was paid from the Business Account: the form shows Paid by locked
-      on Business Account with the reason, and a save naming a person is
-      refused. Both are undone on the PO (unlink the row; change the PO's
-      Paid by). A self-paid cost does not offer the Business Account.
+      commission Paid by to X, with the PO's Activity line. Saving a Purchase
+      entry with Paid by a person sets a self-paid PO's cost payer. Two
+      entries on one PO carry one payer.
+    - *No entry for a PO the Business Account paid.* The form says so, with
+      Paid by greyed and Save off; the PO's Cost Payment or Commission card
+      says so in place of its Record button, with *Open Payments*; the API
+      refuses. The flag or the link is undone on the PO.
     - A PO picked for a Purchase entry carries its cost payer, and for a
       Commission entry its commission payer: the Cost Payment and Commission
       cards' Record buttons, on both shells, and the entry dialog's PO pick
@@ -2190,7 +2198,8 @@ below).
       is never moved by the record. The picker's PO line names the payer —
       *paid by Tim Wu*, or **Business Account**.
     - Entries written before the link were brought in line with their PO
-      once, with a *Paid by brought in line with the PO* history line.
+      once: moved to the PO's person (*Paid by brought in line with the PO*)
+      or voided when the Business Account had paid.
 - **The book starts from the payers already on file** (v1.314.0, migration
   0196). A PO with a manager in Paid by is booked as a Paid commission
   through that manager, against the purchaser. It is the PO's projected
@@ -2207,14 +2216,15 @@ below).
     as the commission), and any record that already had an entry.
   - Such an entry's history names no one: *Backfilled from the PO's Paid by*
     or *from the sell order's payment receiver*.
-- **The page** (`#/accounting`, under Oversight after Payments).
-  - The period (the dashboard's chip, *This month* by default) and the payer
-    (everyone, the Business Account, or one person) are the band's scope.
+- **The page** (`#/accounting`, the sidebar's **Accounting ▸ RMB Flow**,
+  beside Accounting ▸ Payments; the page-sub prints the breadcrumb).
+  - The period (the dashboard's chip, *This month* by default) and the
+    manager (all, or one) are the band's scope.
   - **The band** states the period as an identity: *Opening + Received − Paid
     = Closing*, with Received and Paid broken down by kind, the closing figure
-    double-ruled. Under it, *Held by* gives the Business Account's and each
-    person's balance on the closing date — received minus paid; below zero
-    the company owes that person. A name there scopes the page to that payer.
+    double-ruled. Under it, *Held by* gives each manager's balance on the
+    closing date — received minus paid; below zero the company owes them. A
+    name there scopes the page to that manager.
   - **The book** has Date (printed once per day), Entry, For (kind, the record
     as a link, counterparty, note), Paid by, Method, then **Received, Paid and
     Balance** columns: direction is the column a figure sits in. Balance is
@@ -2239,11 +2249,10 @@ below).
     starts on the order's payment receiver, and on a CNY order with the
     amount still owed;
   - the **after-sales case** (its refunds, net refunded, the case amount).
-- **On the phone**, Home links managers to the Accounting screen: period chips
-  (this month, last month, last 30 days, this year), a Paid by chip row
-  (everyone, Business, each manager), the period as a vertical sum with the
-  Business Account's and each manager's balance, an All / Received / Paid
-  switch and the entries by day. `+` records an entry in a sheet; an
+- **On the phone**, Home links managers to the RMB Flow screen: period chips
+  (this month, last month, last 30 days, this year), a manager chip row, the
+  period as a vertical sum with each manager's balance, an All / Received /
+  Paid switch and the entries by day. `+` records an entry in a sheet; an
   entry opens on its own screen with Edit, Void and Restore. The phone PO
   page's Cost Payment and Commission folds carry the order's entries and a
   Record payment button.
@@ -3086,9 +3095,9 @@ inventory search, sell-order draft creation.
   phone can zoom. Dialogs and phone sheets keep Tab inside them; proof
   uploads and item-type picks work from the keyboard; the phone's capture
   button and every hardware field have accessible names.
-- **Accounting is on the phone too** (v1.310.0): a Home link for managers, the
+- **The RMB Flow is on the phone too** (v1.310.0): a Home link for managers, the
   book as a screen of its own, and the order's entries inside the PO page's
-  Cost Payment and Commission folds. See [Accounting](#accounting).
+  Cost Payment and Commission folds. See [RMB Flow](#rmb-flow).
 
 One bundle, two lazy-loaded shells chosen in `App.tsx`: viewport under 720px →
 `MobileApp`; else `DesktopApp`. The third, the `/v/<token>` vendor portal, was
@@ -3121,10 +3130,13 @@ removed in v1.191.0.
   screen readers, and Submit order shows only its green `+` badge (v1.271.2).
 - **The sidebar has a second level** (v1.207.0). A parent entry opens while
   you are on one of its pages and is one row with a › caret everywhere else;
-  clicking it opens its first child. The one parent today is **Oversight ▸
+  clicking it opens its first child. Two parents today: **Oversight ▸
+  Accounting** (v1.315.0), holding **Payments** (`/payments`, lit on Internal
+  transactions too) and **RMB Flow** (`/accounting`); and **Oversight ▸
   Monitors**, holding **Facebook** (`/fleet`), **Reddit** (`/tracker`) and, since
-  v1.312.0, **WeChat** (`/wechat`). In
-  the icon rail the caret hides and the open children show as icons.
+  v1.312.0, **WeChat** (`/wechat`). A parent's pages print its breadcrumb as
+  the page-sub. In the icon rail the caret hides and the open children show
+  as icons.
 - **Menus and record references are real links** (v1.144.0). The sidebar,
   the Inventory ▸ Analysis strip, the phone tab bar and Home quick links, and
   every PO, sell-order or payment id shown on another page — the inventory

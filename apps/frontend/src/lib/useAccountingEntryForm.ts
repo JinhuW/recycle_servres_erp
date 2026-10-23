@@ -6,11 +6,11 @@ import { fetchRateToUsd } from './fxRate';
 import { useDebouncedValue } from './useDebouncedValue';
 import { useManagerOptions } from './useManagers';
 import {
-  BUSINESS_PAYER, acctCreate, acctPatch, acctTargets, localToday,
+  acctCreate, acctPatch, acctTargets, localToday,
   type AcctEntryDetail, type AcctTarget,
 } from './accounting';
 import {
-  applyKind, businessOffered, initialForm, payerLock, pickTarget, previewCny, toRequestBody,
+  applyKind, initialForm, payerLock, pickTarget, previewCny, toRequestBody,
   type EntryForm, type EntryPreset, type FormError, type FormTarget,
 } from './accountingForm';
 import type { PaidBy } from './useCommissionPaidBy';
@@ -57,9 +57,9 @@ export function useAccountingEntryForm(opts: {
   }, [form.currency, rate]);
 
   // The people Paid by may name: the active managers; a manager no longer
-  // active still has to show on an entry booked to them; and a self-paid
-  // cost may name the PO's own purchaser.
-  const owner = form.kind === 'purchase' && form.target?.payment === 'self' ? form.target.owner ?? null : null;
+  // active still has to show on an entry booked to them; and a cost may
+  // name the PO's own purchaser, who paid it out of pocket.
+  const owner = form.kind === 'purchase' ? form.target?.owner ?? null : null;
   const managers = useMemo(() => {
     const extra = [entry?.manager ?? null, owner].filter((m): m is { id: string; name: string } =>
       !!m && !managerOptions.some(o => o.id === m.id));
@@ -72,7 +72,7 @@ export function useAccountingEntryForm(opts: {
   // recording it.
   const meId = user?.id ?? '';
   useEffect(() => {
-    if (entry || managerOptions.length === 0 || form.managerId === meId || form.managerId === BUSINESS_PAYER) return;
+    if (entry || managerOptions.length === 0 || form.managerId === meId) return;
     if (!managers.some(m => m.id === form.managerId)) setForm(f => ({ ...f, managerId: meId }));
   }, [entry, managerOptions, managers, form.managerId, meId]);
 
@@ -104,10 +104,8 @@ export function useAccountingEntryForm(opts: {
     form, error, busy, managers, rate, targetType, query, candidates, orphan,
     preview: previewCny(form, rate),
     editing: !!entry,
-    // Paid by as the PO settles it: locked when a bank row or the company's
-    // account decides, and the Business Account only where it can pay.
-    payerLocked: payerLock(form.kind, form.target),
-    businessOffered: businessOffered(form.kind, form.target),
+    // A PO the Business Account paid takes no RMB entry: the form says so.
+    payerLocked: payerLock(form.target),
     // A manager picked by hand stays put when the record changes.
     set: (patch: Partial<EntryForm>) => edit(f => ({ ...f, ...patch, ...(patch.managerId !== undefined ? { managerTouched: true } : {}) })),
     setKind: (k: AccountingKind) => edit(f => applyKind(f, k)),

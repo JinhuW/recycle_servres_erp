@@ -1,25 +1,29 @@
--- An entry's Paid by and its PO's payer are one value. The book (0191) named a
--- manager on every entry and never looked at the PO again, so an entry booked
--- under a manager kept reading so after a PayPal row was linked as the
--- commission and the PO flipped to the company. From here on the PO's payer
--- flows to its live entries of that kind, and the company's own account is a
--- payer the book can name: manager_id NULL is the Business Account.
+-- The RMB Flow records what the managers paid and received outside the
+-- company's own account; the Business Account's money is the USD bank's,
+-- reconciled on Payments. So an entry's Paid by and its PO's payer are one
+-- value: a PO's person payer flows to its live entries, and a PO the
+-- Business Account paid — the commission flagged company-paid or a live
+-- Mercury/PayPal row linked as it, the cost paid from the company's account
+-- — has no RMB entry: its live ones are voided, with the reason, restorable.
 --
 -- The write-back runs here, as triggers, because the PO's payer is written
 -- from many places — the PO page, the commission screenshot, bank link /
 -- unlink / pair, the bank sync's settle-status flips, a PO delete — and one
 -- rule in the database covers them all. The other direction, an entry's Paid
 -- by moving the PO, is the route's (routes/accounting.ts), which also
--- refuses what the PO cannot take.
-ALTER TABLE accounting_entries ALTER COLUMN manager_id DROP NOT NULL;
+-- refuses an entry on a PO the Business Account paid.
 
--- Whose account the PO says paid, written to its live entries of that kind.
--- Commission: the company when the flag is set or a live bank row is linked as
--- the commission (the rule banktx/match.ts commissionLinkedFrag reads), else
--- the manager on file. Purchase: the company when the cost was paid from its
--- account, else the cost payer. Nobody on file leaves the entry as recorded.
--- A write that changes nothing writes nothing, so the route's own write-back
--- (entry → PO → this function → the same entry) is a no-op there.
+-- Whose account the PO says paid, applied to its live paid-out entries of
+-- that kind. Commission: the company when the flag is set or a live bank row
+-- is linked as the commission (the rule banktx/match.ts commissionLinkedFrag
+-- reads), else the manager on file. Purchase: the company when the cost was
+-- paid from its account, else the cost payer. Nobody on file leaves the
+-- entry as recorded. A write that changes nothing writes nothing, so the
+-- route's own write-back (entry → PO → this function → the same entry) is a
+-- no-op there.
+--
+-- An entry a manager has restored is never voided here again: the triggers
+-- run on every PO save and settlement flip, and the restore is the last word.
 CREATE OR REPLACE FUNCTION accounting_sync_payer(p_order_id TEXT, p_detail JSONB) RETURNS void
 LANGUAGE plpgsql AS $$
 BEGIN
@@ -39,18 +43,25 @@ BEGIN
                        WHEN 'purchase' THEN po.paid_by END AS person
     FROM accounting_entries e
     JOIN po ON po.id = e.order_id
-    WHERE e.voided_at IS NULL AND e.kind IN ('commission', 'purchase')
-  ), moved AS (
+    WHERE e.voided_at IS NULL AND e.direction = 'out' AND e.kind IN ('commission', 'purchase')
+  ), gone AS (
     UPDATE accounting_entries e
-       SET manager_id = CASE WHEN w.business THEN NULL ELSE w.person END,
+       SET voided_at = NOW(), voided_by = NULL, void_reason = 'Paid from the Business Account',
            updated_at = NOW()
       FROM want w
-     WHERE w.id = e.id
-       AND (w.business OR w.person IS NOT NULL)
-       AND (CASE WHEN w.business THEN NULL ELSE w.person END) IS DISTINCT FROM w.prev
-    RETURNING e.id, w.prev, e.manager_id AS next
+     WHERE w.id = e.id AND w.business
+       AND NOT EXISTS (SELECT 1 FROM accounting_entry_events r WHERE r.entry_id = e.id AND r.kind = 'restored')
+    RETURNING e.id
+  ), moved AS (
+    UPDATE accounting_entries e
+       SET manager_id = w.person, updated_at = NOW()
+      FROM want w
+     WHERE w.id = e.id AND NOT w.business AND w.person IS NOT NULL AND w.person IS DISTINCT FROM w.prev
+    RETURNING e.id, w.prev, w.person AS next
   )
   INSERT INTO accounting_entry_events (entry_id, kind, detail)
+  SELECT id, 'voided', p_detail || jsonb_build_object('reason', 'Paid from the Business Account') FROM gone
+  UNION ALL
   SELECT id, 'edited',
          p_detail || jsonb_build_object('changes', jsonb_build_object('managerId',
            jsonb_build_object('from', prev, 'to', next)))

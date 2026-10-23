@@ -47,27 +47,34 @@ pick start on that payer. A payer picked by hand, or an entry being edited,
 is never moved by the record. `/api/members/names` now carries each
 member's role, so a purchaser's picker can tell the managers apart.
 
-An entry's *Paid by* and its PO's payer are now one value, kept in step both
-ways (RS-351). The book's *Manager* column is *Paid by*, and the **Business
-Account** is a payer the book can name: `accounting_entries.manager_id` is
-nullable, null being the company's account. Migration 0198 adds
-`accounting_sync_payer` and two triggers — on the PO's payer columns and on
-bank-row links — so whatever moves a PO's payer (the PO page, a commission
-screenshot, a Mercury/PayPal row linked or unlinked as the commission, a
-cost payer edited or handed off, a settlement that flips) moves its live
-entries of that kind, with a *Paid by followed the PO* history line; nobody
-on file leaves an entry as recorded, and a restored entry catches up. The
-other way, saving an entry with *Paid by* X sets the PO's commission payer
-to X (Business Account = company paid) with its Activity line, or a
-self-paid PO's cost payer; it is refused while a bank row stands as the
-commission, or while the cost was paid from the Business Account — those
-are undone on the PO, and the form shows the field locked with the reason.
-A self-paid cost may name the PO's own purchaser. Every live PO-linked
-entry was brought in line with its PO once, with a history line.
+The Accounting page is the **RMB Flow**, and it sits with Payments under one
+sidebar parent, **Accounting** (RS-353): Payments is where everything the
+Business Account paid lives; the RMB Flow records what the managers paid and
+received outside it. Both pages print the breadcrumb. The PO, sell order and
+case cards, the phone Home link and screen say RMB Flow; the URLs are
+unchanged.
 
-The running *Balance* is one company-wide book: the *Paid by* filter and
-*Held by* hide rows, never move the balance. *Held by* and the filter gain
-the Business Account.
+An entry's *Paid by* and its PO's payer are one value, kept in step both
+ways (RS-351, RS-353). The book's *Manager* column is *Paid by*, and it
+names a person: an active manager, or the PO's own purchaser on a self-paid
+cost. Migration 0198 adds `accounting_sync_payer` and two triggers — on the
+PO's payer columns and on bank-row links — so whatever moves a PO's person
+payer (the PO page, a commission screenshot, a cost payer edited or handed
+off) moves its live entries of that kind, with a *Paid by followed the PO*
+history line; nobody on file leaves an entry as recorded. When the Business
+Account paid instead — the commission flagged company-paid or a
+Mercury/PayPal row linked as it, the cost flipped to the company's account,
+a settlement that flips — the PO's live paid-out entries of that kind are
+**voided** with the reason, restorable; unlinking does not bring them back,
+Restore does, and the PO never voids a restored entry again. The other way,
+saving an entry with *Paid by* X sets the PO's commission payer to X with
+its Activity line, or a self-paid PO's cost payer; an entry on a PO the
+Business Account paid is refused, and the form and the PO card say so and
+point to Payments. Every live PO-linked entry was brought in line with its
+PO once, moved or voided, with a history line.
+
+The running *Balance* is one company-wide book: the manager filter and
+*Held by* hide rows, never move the balance.
 
 ## [1.314.0] - 2026-10-22
 

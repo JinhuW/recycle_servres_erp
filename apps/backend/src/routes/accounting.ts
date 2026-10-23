@@ -23,13 +23,14 @@ import {
   type AccountingTargetType,
 } from '@recycle-erp/shared';
 
-// Accounting: the book of money received and paid, in RMB, by a manager or
-// from the company's own account (manager_id NULL, the Business Account).
-// An entry is a record of money that moved — it changes nothing on the PO,
-// sell order or case it names, with one exception: who paid. An entry's Paid
-// by and its PO's payer are one value, kept in step both ways: this file
-// writes the entry's side to the PO, and migration 0198's triggers write the
-// PO's side to its entries.
+// The RMB Flow: the managers' book of money received and paid outside the
+// company's own account, in RMB. The Business Account's money is the USD
+// bank's, reconciled on Payments. An entry is a record of money that moved —
+// it changes nothing on the PO, sell order or case it names, with one
+// exception: who paid. An entry's Paid by and its PO's payer are one value,
+// kept in step both ways: this file writes the entry's side to the PO, and
+// migration 0198's triggers write the PO's side to its entries — a PO the
+// Business Account paid voids them, and this file refuses a new one there.
 const accounting = new Hono<{ Bindings: Env; Variables: { user: User } }>()
   .use('*', authMiddleware)
   .use('*', requireManager);
@@ -50,8 +51,7 @@ type EntryRow = {
   id: string; direction: AccountingDirection; kind: AccountingKind;
   amount: number; currency: AccountingCurrency; fx_rate: number | null; amount_cny: number;
   method: AccountingMethod; occurred_on: string;
-  // NULL: the Business Account paid (0198).
-  manager_id: string | null; manager_name: string | null;
+  manager_id: string; manager_name: string;
   order_id: string | null; sell_order_id: string | null; after_sales_id: string | null;
   counterparty: string | null; reference: string | null; note: string | null;
   created_at: string; updated_at: string; created_by: string | null; created_by_name: string | null;
@@ -70,7 +70,7 @@ function entryCols(sql: SqlLike) {
 
 function entryJoins(sql: SqlLike) {
   return sql`
-    LEFT JOIN users m ON m.id = e.manager_id
+    JOIN users m ON m.id = e.manager_id
     LEFT JOIN users cb ON cb.id = e.created_by
     LEFT JOIN users vb ON vb.id = e.voided_by
   `;
@@ -88,7 +88,7 @@ function shapeEntry(r: EntryRow) {
     id: r.id, direction: r.direction, kind: r.kind,
     amount: r.amount, currency: r.currency, fxRate: r.fx_rate, amountCny: r.amount_cny,
     method: r.method, occurredOn: r.occurred_on,
-    manager: r.manager_id ? { id: r.manager_id, name: r.manager_name ?? '' } : null,
+    manager: { id: r.manager_id, name: r.manager_name },
     target: targetOf(r),
     counterparty: r.counterparty, reference: r.reference, note: r.note,
     createdAt: r.created_at, updatedAt: r.updated_at,
@@ -118,11 +118,7 @@ type TargetFacts = {
   // company paid (on file, or a live Mercury/PayPal row linked as it).
   payerName?: string | null;
   payerBusiness?: boolean;
-  // What the PO itself settles, so the form knows when Paid by is its to
-  // set: a cost paid from the company's account, a commission a bank row
-  // stands for. The purchaser may be a self-paid cost's payer.
-  payment?: 'company' | 'self';
-  commissionLinked?: boolean;
+  // The purchaser may be a self-paid cost's payer.
   owner?: { id: string; name: string };
 };
 
@@ -177,13 +173,12 @@ async function findTargets(
     const rows = await sql<{
       id: string; status: string; party: string | null; amount: number | null; recorded: number;
       payer_id: string | null; payer_name: string | null; payer_business: boolean;
-      payment: 'company' | 'self'; commission_linked: boolean; owner_id: string; owner_name: string;
+      owner_id: string; owner_name: string;
     }[]>`
       SELECT o.id, o.lifecycle AS status,
              ${lens === 'commission' ? sql`u.name` : sql`COALESCE(sup.name, u.name)`} AS party,
              ${amount} AS amount, ${recordedFrag(sql, lens, sql`o.id`)} AS recorded,
              ${payerCol} AS payer_id, pb.name AS payer_name, ${business} AS payer_business,
-             o.payment, ${lens === 'commission' ? commissionLinkedFrag(sql) : sql`FALSE`} AS commission_linked,
              u.id AS owner_id, u.name AS owner_name
       FROM orders o
       JOIN users u ON u.id = o.user_id
@@ -193,12 +188,12 @@ async function findTargets(
       WHERE ${scope}
       ORDER BY o.created_at DESC
       LIMIT 10`;
-    return rows.map(({ payer_id, payer_name, payer_business, payment, commission_linked, owner_id, owner_name, ...r }) => ({
+    return rows.map(({ payer_id, payer_name, payer_business, owner_id, owner_name, ...r }) => ({
       ...r, currency: 'USD' as const, recordedCny: r.recorded,
       payerId: payer_business ? null : payer_id,
       payerName: payer_business ? null : payer_name,
       payerBusiness: payer_business,
-      payment, commissionLinked: commission_linked, owner: { id: owner_id, name: owner_name },
+      owner: { id: owner_id, name: owner_name },
     }));
   }
   if (lens === 'so') {
@@ -254,16 +249,12 @@ function parseWindow(from: string | undefined, to: string | undefined) {
   return { from, to };
 }
 
-// A payer to scope by: a person's id, or `business` for the Business Account.
-const BUSINESS = 'business';
-
 function parseManager(raw: string | undefined): string | null | undefined {
   if (!raw) return null;
-  return raw === BUSINESS || UUID_RE.test(raw) ? raw : undefined;
+  return UUID_RE.test(raw) ? raw : undefined;
 }
 
-const payerFrag = (sql: SqlLike, managerId: string) =>
-  managerId === BUSINESS ? sql`e.manager_id IS NULL` : sql`e.manager_id = ${managerId}`;
+const payerFrag = (sql: SqlLike, managerId: string) => sql`e.manager_id = ${managerId}`;
 
 // The period as the book states it: what was brought in, what came and went,
 // and what was carried out — opening + received − paid = closing — plus each
@@ -278,7 +269,7 @@ accounting.get('/summary', async (c) => {
   const live = sql`e.voided_at IS NULL AND e.occurred_on <= ${win.to}::date ${mgr}`;
   const inWindow = sql`e.occurred_on >= ${win.from}::date`;
 
-  const [totals, byKind, managers, business, first, fx] = await allLimited([
+  const [totals, byKind, managers, first, fx] = await allLimited([
     () => sql<{ opening: number; received: number; paid: number; closing: number }[]>`
       SELECT
         COALESCE(SUM(${signedCny(sql)}) FILTER (WHERE e.occurred_on < ${win.from}::date), 0)::float AS opening,
@@ -305,11 +296,6 @@ accounting.get('/summary', async (c) => {
       ) b ON b.manager_id = u.id
       WHERE (u.role = 'manager' AND u.active) OR b.manager_id IS NOT NULL
       ORDER BY u.name`,
-    // The company's own account, a payer the book names since 0198.
-    () => sql<{ balance: number }[]>`
-      SELECT COALESCE(SUM(${signedCny(sql)}), 0)::float AS balance
-      FROM accounting_entries e
-      WHERE e.voided_at IS NULL AND e.occurred_on <= ${win.to}::date AND e.manager_id IS NULL`,
     () => sql<{ first: string | null }[]>`
       SELECT to_char(MIN(occurred_on), 'YYYY-MM-DD') AS first
       FROM accounting_entries WHERE voided_at IS NULL`,
@@ -323,7 +309,6 @@ accounting.get('/summary', async (c) => {
     ...totals[0],
     byKind: kinds,
     managers,
-    business: { balance: business[0]?.balance ?? 0 },
     first: first[0]?.first ?? null,
     fx,
   });
@@ -440,8 +425,7 @@ accounting.get('/entries/:id', async (c) => {
 
 type EntryFields = {
   direction: AccountingDirection; kind: AccountingKind; amount: number; currency: AccountingCurrency;
-  // managerId null: the Business Account paid.
-  fxRate: number | null; method: AccountingMethod; occurredOn: string; managerId: string | null;
+  fxRate: number | null; method: AccountingMethod; occurredOn: string; managerId: string;
   targetId: string | null; counterparty: string | null; reference: string | null; note: string | null;
 };
 
@@ -481,9 +465,7 @@ function validateFields(
   if (!isIsoDate(b.occurredOn) || b.occurredOn < EARLIEST || b.occurredOn > latest) {
     return { error: 'occurredOn must be a date no later than today' };
   }
-  if (b.managerId !== null && (typeof b.managerId !== 'string' || !UUID_RE.test(b.managerId))) {
-    return { error: 'managerId is required: a user id, or null for the Business Account' };
-  }
+  if (typeof b.managerId !== 'string' || !UUID_RE.test(b.managerId)) return { error: 'managerId is required' };
   const wants = KIND_TARGET[b.kind];
   const targetId = b.targetId === undefined || b.targetId === null || b.targetId === '' ? null : b.targetId;
   if (targetId !== null && typeof targetId !== 'string') return { error: 'invalid targetId' };
@@ -552,26 +534,27 @@ async function prepareTargetTx(tx: SqlLike, f: EntryFields): Promise<Prepared> {
 // ── The two-way link with the PO (0198) ─────────────────────────────────────
 // An entry's Paid by and its PO's payer are one value. The PO's side flows
 // to the entry in the database (accounting_sync_payer and its triggers);
-// this is the entry's side flowing to the PO, which also refuses what the PO
-// cannot take: a person while a bank row stands as the commission, or while
-// the cost was paid from the company's account — both are undone on the PO.
+// this is the entry's side flowing to the PO. A PO the Business Account paid
+// — the commission flagged company-paid or a bank row standing as it, the
+// cost paid from the company's account — takes no RMB entry: that money is
+// Payments', and the flag or the link is undone on the PO.
 
 type Refused = { status: 400 | 409; error: string };
 
-const LINKED_MSG = 'a Mercury/PayPal row is linked as the commission — it was paid from the Business Account';
+const LINKED_MSG = 'a Mercury/PayPal row is linked as the commission — it was paid from the Business Account, see Payments';
+const COMPANY_COMMISSION_MSG = 'the commission was paid from the Business Account — change that on the PO';
 const COMPANY_COST_MSG = 'the cost was paid from the Business Account — change that on the PO';
-const SELF_COST_MSG = 'a self-paid cost names who paid — the Business Account is set on the PO';
 
 // Who may be the payer: an active manager, or — for a self-paid cost — the
 // PO's own purchaser (routes/orders/shared.ts paidByErr).
 async function payerAllowedTx(tx: SqlLike, f: EntryFields, prepared: Prepared & { kind: 'ok' }): Promise<Refused | null> {
-  if (f.managerId === null) return prepared.cost?.payment === 'self' ? { status: 400, error: SELF_COST_MSG } : null;
   if (prepared.cost) {
     if (prepared.cost.payment === 'company') return { status: 409, error: COMPANY_COST_MSG };
     const err = await paidByErr(tx, prepared.cost.user_id, f.managerId);
     return err ? { status: 400, error: err } : null;
   }
   if (prepared.payer?.commission_linked) return { status: 409, error: LINKED_MSG };
+  if (prepared.payer?.commission_paid_by_company) return { status: 409, error: COMPANY_COMMISSION_MSG };
   return (await isActiveManager(tx, f.managerId)) ? null : { status: 400, error: 'managerId must be an active manager' };
 }
 
@@ -582,10 +565,9 @@ async function syncPayerToPoTx(
 ): Promise<CommissionPaidBy | undefined> {
   if (!f.targetId) return undefined;
   if (prepared.payer) {
-    if (prepared.payer.commission_linked) return undefined;
-    return recordPayerTx(tx, f.targetId, actorId, prepared.payer, { userId: f.managerId, company: f.managerId === null });
+    return recordPayerTx(tx, f.targetId, actorId, prepared.payer, { userId: f.managerId, company: false });
   }
-  if (prepared.cost && prepared.cost.payment === 'self' && f.managerId !== null && prepared.cost.paid_by !== f.managerId) {
+  if (prepared.cost && prepared.cost.payment === 'self' && prepared.cost.paid_by !== f.managerId) {
     await tx`UPDATE orders SET paid_by = ${f.managerId}::uuid WHERE id = ${f.targetId}`;
     const changes: AuditChange[] = [{ field: 'paid_by', from: prepared.cost.paid_by, to: f.managerId }];
     await nameHandoffByChange(tx, changes);
@@ -682,7 +664,7 @@ accounting.patch('/entries/:id', async (c) => {
     const cur = shapeEntry(row);
     const was: Record<string, unknown> = {
       direction: cur.direction, kind: cur.kind, amount: cur.amount, currency: cur.currency, fxRate: cur.fxRate,
-      method: cur.method, occurredOn: cur.occurredOn, managerId: cur.manager?.id ?? null,
+      method: cur.method, occurredOn: cur.occurredOn, managerId: cur.manager.id,
       targetId: cur.target?.id ?? null, counterparty: cur.counterparty, reference: cur.reference, note: cur.note,
     };
     const merged = { ...was };
@@ -768,17 +750,17 @@ accounting.post('/entries/:id/restore', async (c) => {
   const id = c.req.param('id');
   const sql = getDb(c.env);
   const outcome = await sql.begin(async (tx) => {
-    const cur = (await tx<{ voided_at: string | null; void_reason: string | null; order_id: string | null }[]>`
-      SELECT voided_at, void_reason, order_id FROM accounting_entries WHERE id = ${id} LIMIT 1 FOR UPDATE`)[0];
+    const cur = (await tx<{ voided_at: string | null; void_reason: string | null }[]>`
+      SELECT voided_at, void_reason FROM accounting_entries WHERE id = ${id} LIMIT 1 FOR UPDATE`)[0];
     if (!cur) return 'notFound' as const;
     if (!cur.voided_at) return 'live' as const;
     await tx`
       UPDATE accounting_entries
       SET voided_at = NULL, voided_by = NULL, void_reason = NULL, updated_at = NOW()
       WHERE id = ${id}`;
+    // The last word: a PO the Business Account paid voids its entries, and
+    // this event is what keeps it from voiding this one again (0198).
     await writeEvent(tx, id, u.id, 'restored', { reason: cur.void_reason });
-    // The PO was the live record while this was voided; the entry catches up.
-    if (cur.order_id) await tx`SELECT accounting_sync_payer(${cur.order_id}, '{"synced": "po"}'::jsonb)`;
     return 'ok' as const;
   });
   if (outcome === 'notFound') return c.json({ error: 'Not found' }, 404);

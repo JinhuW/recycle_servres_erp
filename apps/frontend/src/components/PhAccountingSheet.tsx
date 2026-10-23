@@ -4,7 +4,7 @@ import { PhSheet } from './PhSheet';
 import { FIGURE_KEY, Yuan, recordActionKey, targetStatusLabel } from './AccountingBits';
 import { useT } from '../lib/i18n';
 import { fmtMoney } from '../lib/format';
-import { BUSINESS_PAYER, type AcctEntryDetail, type AcctTarget } from '../lib/accounting';
+import type { AcctEntryDetail, AcctTarget } from '../lib/accounting';
 import type { EntryPreset, FormTarget } from '../lib/accountingForm';
 import { useAccountingEntryForm, type SavedEntry } from '../lib/useAccountingEntryForm';
 import '../styles/accounting.css';
@@ -143,16 +143,11 @@ export function PhAccountingSheet({ preset, entry, onClose, onSaved }: {
         </div>
         <div className="ph-field">
           <label htmlFor={id('manager')}>{t('acctFieldPaidBy')}</label>
-          <select id={id('manager')} className="select" value={form.managerId} disabled={!!f.payerLocked}
+          <select id={id('manager')} className="select" value={form.managerId} disabled={f.payerLocked}
                   onChange={e => f.set({ managerId: e.target.value })}>
-            {f.businessOffered && <option value={BUSINESS_PAYER}>{t('payBusiness')}</option>}
             {f.managers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>
-          {f.payerLocked && (
-            <div className="acct-sub" style={{ whiteSpace: 'normal' }}>
-              {t(f.payerLocked === 'linked' ? 'acctPaidByLockedLinked' : 'acctPaidByLockedCompany')}
-            </div>
-          )}
+          {f.payerLocked && <div className="acct-sub" style={{ whiteSpace: 'normal' }}>{t('acctPaidFromBusiness')}</div>}
         </div>
         <div className="ph-field">
           <label htmlFor={id('party')}>{t('acctFieldCounterparty')}</label>
@@ -170,7 +165,7 @@ export function PhAccountingSheet({ preset, entry, onClose, onSaved }: {
                     onChange={e => f.set({ note: e.target.value })} style={{ resize: 'vertical', fontFamily: 'inherit' }} />
         </div>
         {f.error && <div className="acct-error" role="alert">{t(f.error)}</div>}
-        <button type="submit" className="ph-btn dark" style={{ width: '100%', height: 46 }} disabled={f.busy}>
+        <button type="submit" className="ph-btn dark" style={{ width: '100%', height: 46 }} disabled={f.busy || f.payerLocked}>
           {f.busy ? '…' : entry ? t('acctSaveEdit') : action}
         </button>
       </form>

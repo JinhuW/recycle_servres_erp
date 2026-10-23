@@ -71,10 +71,12 @@ const BACKFILL_KEY: Record<NonNullable<AcctEvent['detail']['backfilled']>, strin
 };
 
 /** One line of an entry's history. An entry filled in from a record's own
- *  payer, or moved by its PO's side of the link, was written by nobody, so
- *  the line says what did it instead. */
+ *  payer, or moved or voided by its PO's side of the link, was written by
+ *  nobody, so the line says what did it instead. */
 export function HistoryLine({ e, t, locale }: { e: AcctEvent; t: Translate; locale: string }) {
-  const by = e.detail.backfilled ? t(BACKFILL_KEY[e.detail.backfilled])
+  const byPo = !!e.detail.synced || !!e.detail.backfilled;
+  const by = e.kind === 'voided' && byPo ? t('acctEvVoidedPo')
+    : e.detail.backfilled ? t(BACKFILL_KEY[e.detail.backfilled])
     : e.detail.synced === 'po' ? t('acctEvSyncedPo')
     : null;
   return (

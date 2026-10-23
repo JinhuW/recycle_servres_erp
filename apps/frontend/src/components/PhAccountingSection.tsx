@@ -6,7 +6,7 @@ import { FIGURE_KEY, NET_KEY, Yuan, recordActionKey } from './AccountingBits';
 import { useT } from '../lib/i18n';
 import { fmtMoney } from '../lib/format';
 import { accountingEntryPath } from '../lib/route';
-import { acctPayerName, fmtBookDay, signedCny } from '../lib/accounting';
+import { fmtBookDay, signedCny } from '../lib/accounting';
 import { useAccountingTarget } from '../lib/useAccountingTarget';
 import type { EntryPreset } from '../lib/accountingForm';
 import '../styles/accounting.css';
@@ -29,10 +29,14 @@ export function PhAccountingSection({ orderId, kind, version, onRecord }: {
     <div className="acct-ph-section">
       <div className="acct-card-head">
         <div className="acct-card-title">{t('acctCardTitle')}</div>
-        <button type="button" className="ph-btn acct-ph-record" onClick={() => onRecord({ kind, target })}>
-          <Icon name="plus" size={12} /> {t(recordActionKey(kind, KIND_DEFAULT_DIRECTION[kind]))}
-        </button>
+        {!target.payerBusiness && (
+          <button type="button" className="ph-btn acct-ph-record" onClick={() => onRecord({ kind, target })}>
+            <Icon name="plus" size={12} /> {t(recordActionKey(kind, KIND_DEFAULT_DIRECTION[kind]))}
+          </button>
+        )}
       </div>
+      {/* The Business Account's money is Payments', which the phone does not have. */}
+      {target.payerBusiness && <div className="acct-card-empty">{t('acctPaidFromBusiness')}</div>}
       {ledger.entries.length === 0 ? (
         <div className="acct-card-empty">
           {t(kind === 'purchase' ? 'acctCardEmptyPurchase' : 'acctCardEmptyCommission')}
@@ -42,7 +46,7 @@ export function PhAccountingSection({ orderId, kind, version, onRecord }: {
           {ledger.entries.map(e => (
             <RouteLink key={e.id} to={accountingEntryPath(e.id)} className="acct-card-row">
               <span className="acct-card-day">{fmtBookDay(e.occurredOn, locale)}</span>
-              <span className="acct-card-what">{acctPayerName(e.manager, t)} · {t('acctMethod_' + e.method)}</span>
+              <span className="acct-card-what">{e.manager.name} · {t('acctMethod_' + e.method)}</span>
               <Yuan value={signedCny(e)} locale={locale} signed className={e.direction === 'in' ? 'acct-in' : undefined} />
             </RouteLink>
           ))}
