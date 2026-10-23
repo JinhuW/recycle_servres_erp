@@ -2107,15 +2107,19 @@ tr.rt-off td:not(:nth-last-child(-n + 2)) {
   padding-top: 8px;
   padding-bottom: 8px;
 }
-/* Seven columns beside the aside: the Fleet table's tighter cells, and a
-   line's spec under its name may wrap rather than widen the column. */
+/* Up to nine columns beside the aside: the Fleet table's tighter cells, and
+   a line's spec under its name may wrap rather than widen the column. */
 .wx-table th,
 .wx-table td {
   padding-left: 8px;
   padding-right: 8px;
 }
-.wx-table td:first-child small {
+.wx-line-cell small {
   white-space: normal;
+}
+.wx-tag {
+  white-space: nowrap;
+  font-size: 12.5px;
 }
 .wx-table .wx-num,
 .wx-table th.wx-num {
@@ -2134,18 +2138,6 @@ tr.rt-off td:not(:nth-last-child(-n + 2)) {
 .wx-row:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
-}
-.wx-brand td {
-  padding: 13px 12px 7px;
-  font-size: 12.5px;
-  font-weight: 600;
-  background: var(--bg-elev);
-}
-.wx-brand span {
-  margin-left: 8px;
-  font-weight: 400;
-  color: var(--fg-subtle);
-  font-size: 11px;
 }
 .wx-line {
   display: inline-flex;

@@ -2072,7 +2072,8 @@ html.desktop, body.desktop, .desktop #root {
               color 0.12s ease, transform 0.08s ease;
   font-variant-numeric: tabular-nums;
 }
-.inv-chip:hover:not(:disabled) {
+/* Not a picked chip: this outranks .on, and would ink its label in its fill. */
+.inv-chip:not(.on):hover:not(:disabled) {
   border-color: var(--border-strong);
   color: var(--fg);
 }

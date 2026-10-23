@@ -17,6 +17,38 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.318.0] - 2026-10-23
+
+Monitors ▸ WeChat: brand and generation get columns of their own, and the
+board gets the inventory page's Refine panel (RS-362).
+
+**Brand and generation are columns.** The *Brand & code* board used to put
+each brand in a header row ("三星 · 53 lines") over its lines, and tuck the
+DDR generation into the grey text under the module. Both are now columns, so a
+line reads across in one row. Lines still sort brand-first, unbranded last.
+The spec and part-code boards show *Generation* but no *Brand*, because
+memtrade gives those lines no brand.
+
+**A Refine panel filters the board.** It is the same collapsible panel of
+chips as the inventory page's **Refine RAM**: Generation, Speed, Brand
+(*Brand & code* only), Capacity, Device (Server/PC) and Rank, each chip with
+the number of lines it would show. Chips are OR within a row and AND across
+rows. Each row counts under the other rows' picks, *Priced lines only* and the
+supply legend, but not the search, as the legend does. The legend's own
+counts now follow the picks. Picks hold across a change of day and of board.
+Picking a spec from Most wanted or Most offered clears them, and so does the
+toolbar's *Clear*.
+
+The panel is now one component the two pages share. Two fixes came with it,
+so the inventory panel gets them too:
+
+- It collapses on a click outside it rather than on mousedown. The mousedown
+  collapse moved everything below the panel before the mouse came up, so the
+  click that closed the panel could miss the row it was aimed at, or a Most
+  wanted spec once the page was scrolled.
+- A picked chip's label no longer vanishes under the mouse. The hover style
+  outranked the picked one and inked the label in the chip's own fill.
+
 ## [1.317.5] - 2026-10-23
 
 Pack mode's progress card, selection and side panel, refined (RS-361).

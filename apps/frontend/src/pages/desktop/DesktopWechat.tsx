@@ -14,6 +14,7 @@ import {
   type WechatSide,
 } from '@recycle-erp/shared';
 import { Icon } from '../../components/Icon';
+import { RefinePanel } from '../../components/RefinePanel';
 import { Skeleton, TableSkeleton } from '../../components/Skeleton';
 import { ApiError } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
@@ -23,28 +24,33 @@ import { matchWechatDay, navigate, useRoute, wechatDayPath } from '../../lib/rou
 import {
   BUCKET_LABEL_KEY,
   BUCKET_TAX_KEY,
+  FACETS,
   SIGNAL_KEY,
   SIGNAL_TONE,
   SIGNALS,
   UNBRANDED,
+  boardOrder,
   boardRows,
+  facetCounts,
+  facetOrder,
   fmtPrice,
   fmtRange,
-  groupByBrand,
   hasPrice,
   ladder,
   parseNotes,
   signalCounts,
   traders,
   wechatApi,
+  type Facet,
+  type FacetPicks,
 } from '../../lib/wechatMarket';
 import '../../styles/facebookPool.css';
 
 // ─── Monitors ▸ WeChat ────────────────────────────────────────────────────────
 // The daily memory-module market memtrade reads out of the team's WeChat
 // trading groups and pushes here after its 08:00 ET run. One report day at a
-// time, in the Facebook fleet page's chrome: a signal legend that filters the
-// price board — what buyers bid and sellers ask for each module, how many
+// time, in the Facebook fleet page's chrome: a signal legend and the
+// inventory page's refine chips that filter the price board — what buyers bid and sellers ask for each module, how many
 // traders stand behind each price, against the day before, and the posts
 // themselves — beside the day's notes and rankings; the groups on a tab of
 // their own.
@@ -76,6 +82,8 @@ export function DesktopWechat() {
   const [search, setSearch] = useState('');
   const [pricedOnly, setPricedOnly] = useState(true);
   const [signal, setSignal] = useState<string | null>(null);
+  // Held across families and days; a family applies the facets it has.
+  const [picks, setPicks] = useState<FacetPicks>({});
   // Not in the URL, which carries the day: a day change keeps the tab.
   const [tab, setTab] = useState<Tab>('board');
 
@@ -129,13 +137,22 @@ export function DesktopWechat() {
   }, [date, loadDay]);
 
   // The rankings rank by traders, priced or not, so a pick the priced-only
-  // filter or the signal would hide clears them.
+  // filter, the signal or a refine chip would hide clears them.
   const pickSpec = (row: WechatRow) => {
     setKind('spec');
     setSearch(row.key);
     setSignal(null);
+    setPicks({});
     if (!hasPrice(row)) setPricedOnly(false);
   };
+  const active = useMemo(
+    () => Object.fromEntries(FACETS[kind].filter(f => picks[f]?.length).map(f => [f, picks[f]])) as FacetPicks,
+    [kind, picks],
+  );
+  const togglePick = (f: Facet, v: string) => setPicks(p => {
+    const cur = p[f] ?? [];
+    return { ...p, [f]: cur.includes(v) ? cur.filter(x => x !== v) : [...cur, v] };
+  });
 
   const day = loaded && loaded !== 'missing' ? loaded.day : null;
   const rows = loaded && loaded !== 'missing' ? loaded.rows : null;
@@ -144,8 +161,8 @@ export function DesktopWechat() {
   // As the Facebook legend ignores its search box, the counts ignore this
   // one: they are the lines each pill would show.
   const legend = useMemo(
-    () => (rows ? signalCounts(boardRows(rows, { pricedOnly, search: '', signal: null })) : null),
-    [rows, pricedOnly],
+    () => (rows ? signalCounts(boardRows(rows, { pricedOnly, search: '', signal: null, picks: active })) : null),
+    [rows, pricedOnly, active],
   );
 
   const head = (
@@ -224,7 +241,10 @@ export function DesktopWechat() {
               pricedOnly={pricedOnly}
               onPricedOnly={setPricedOnly}
               signal={signal}
-              onClear={() => { setSearch(''); setSignal(null); }}
+              picks={active}
+              onPick={togglePick}
+              onClearPicks={() => setPicks({})}
+              onClear={() => { setSearch(''); setSignal(null); setPicks({}); }}
               summary={summary}
               prev={prevSummary}
               locale={locale}
@@ -322,10 +342,14 @@ function trend(cur: number, before: number): string | null {
 
 // ── The board ─────────────────────────────────────────────────────────────────
 
-const COLS = 7;
+const FACET_KEY: Record<Facet, string> = {
+  ddr: 'wxFacetGeneration', speed: 'wxFacetSpeed', brand: 'wxFacetBrand',
+  capacity: 'wxFacetCapacity', form: 'wxFacetDevice', rank: 'wxFacetRank',
+};
 
 function BoardCard({
-  kind, onKind, loaded, search, onSearch, pricedOnly, onPricedOnly, signal, onClear, summary, prev, locale,
+  kind, onKind, loaded, search, onSearch, pricedOnly, onPricedOnly, signal, picks, onPick, onClearPicks, onClear,
+  summary, prev, locale,
 }: {
   kind: WechatRowKind;
   onKind: (k: WechatRowKind) => void;
@@ -335,6 +359,9 @@ function BoardCard({
   pricedOnly: boolean;
   onPricedOnly: (v: boolean) => void;
   signal: string | null;
+  picks: FacetPicks;
+  onPick: (f: Facet, v: string) => void;
+  onClearPicks: () => void;
   onClear: () => void;
   summary: WechatDaySummary | null;
   prev: WechatDaySummary | null;
@@ -342,19 +369,33 @@ function BoardCard({
 }) {
   const { t } = useT();
   const [open, setOpen] = useState<string | null>(null);
+  const [refineOpen, setRefineOpen] = useState(false);
   const data = loaded && loaded !== 'missing' ? loaded : null;
   const fmt = new Intl.NumberFormat(locale);
+  // Spec and part-code lines have no brand to show.
+  const branded = kind === 'quote';
+  const cols = branded ? 9 : 8;
 
   useEffect(() => { setOpen(null); }, [kind, data?.day.date]);
 
-  const rows = useMemo(
-    () => boardRows(data?.rows ?? [], { pricedOnly, search, signal }),
-    [data, pricedOnly, search, signal],
+  const rows = useMemo(() => {
+    const shown = boardRows(data?.rows ?? [], { pricedOnly, search, signal, picks });
+    return branded ? shown.sort(boardOrder) : shown;
+  }, [data, pricedOnly, search, signal, picks, branded]);
+  // As the legend's, the chip counts ignore the search.
+  const counts = useMemo(
+    () => facetCounts(boardRows(data?.rows ?? [], { pricedOnly, search: '', signal, picks: {} }), FACETS[kind], picks),
+    [data, pricedOnly, signal, kind, picks],
   );
-  const groups = useMemo(
-    () => (kind === 'quote' ? groupByBrand(rows) : [{ brand: null, rows }]),
-    [kind, rows],
-  );
+  const facetLabel = (f: Facet) => (v: string): string => {
+    switch (f) {
+      case 'speed': return `${v} MHz`;
+      case 'capacity': return `${v}GB`;
+      case 'brand': return v === UNBRANDED ? t('wxUnbranded') : v;
+      case 'form': return t(v === 'server' ? 'wxFormServer' : 'wxFormPc');
+      default: return v;
+    }
+  };
   // A key per count, so a count of one can read singular.
   const tot = summary?.totals;
   const summaryLine = tot && [
@@ -375,7 +416,7 @@ function BoardCard({
             placeholder={t('wxSearch')} aria-label={t('wxSearch')}
             onChange={e => onSearch(e.target.value)} />
         </label>
-        {(search || signal) && (
+        {(search || signal || Object.keys(picks).length > 0) && (
           <button type="button" className="btn ghost sm" onClick={onClear}>
             <Icon name="x" size={12} />
             {t('fpClear')}
@@ -404,6 +445,22 @@ function BoardCard({
           {t('wxPricedOnly')}
         </label>
       </div>
+      <RefinePanel
+        id="wx-refine-body"
+        title={<>{t('invRefinePre')} <strong>RAM</strong></>}
+        open={refineOpen}
+        onOpen={setRefineOpen}
+        rows={FACETS[kind].map(f => ({
+          key: f,
+          label: t(FACET_KEY[f]),
+          values: facetOrder(f, Object.keys(counts[f])),
+          counts: counts[f],
+          format: facetLabel(f),
+        }))}
+        selected={picks}
+        onToggle={(f, v) => onPick(f as Facet, v)}
+        onClear={onClearPicks}
+      />
 
       {!data ? (
         <TableSkeleton rows={10} cols={6} />
@@ -412,7 +469,9 @@ function BoardCard({
           <table className="fp-table wx-table">
             <thead>
               <tr>
+                {branded && <th>{t('wxColBrand')}</th>}
                 <th>{t(kind === 'quote' ? 'wxColModule' : kind === 'spec' ? 'wxColSpec' : 'wxColCode')}</th>
+                <th>{t('wxColGeneration')}</th>
                 <th className="wx-num" title={t('wxColBidHint')}>{t('wxColBid')}</th>
                 <th className="wx-num" title={t('wxColAskHint')}>{t('wxColAsk')}</th>
                 <th title={t('wxColSpreadHint')}>{t('wxColSpread')}</th>
@@ -422,33 +481,22 @@ function BoardCard({
               </tr>
             </thead>
             <tbody>
-              {groups.map(g => (
-                <Fragment key={g.brand ?? '·'}>
-                  {kind === 'quote' && (
-                    <tr className="wx-brand">
-                      <td colSpan={COLS}>
-                        {g.brand === UNBRANDED || !g.brand ? t('wxUnbranded') : g.brand}
-                        <span>{t('wxLines', { n: g.rows.length })}</span>
-                      </td>
-                    </tr>
-                  )}
-                  {g.rows.map(r => {
-                    const isOpen = open === r.key;
-                    return (
-                      <Fragment key={r.key}>
-                        <BoardRow row={r} open={isOpen} locale={locale} onToggle={() => setOpen(isOpen ? null : r.key)} />
-                        {isOpen && (
-                          <tr className="wx-detail-row">
-                            <td colSpan={COLS}><LineDetail date={data.day.date} row={r} locale={locale} /></td>
-                          </tr>
-                        )}
-                      </Fragment>
-                    );
-                  })}
-                </Fragment>
-              ))}
+              {rows.map(r => {
+                const isOpen = open === r.key;
+                return (
+                  <Fragment key={r.key}>
+                    <BoardRow row={r} branded={branded} open={isOpen} locale={locale}
+                      onToggle={() => setOpen(isOpen ? null : r.key)} />
+                    {isOpen && (
+                      <tr className="wx-detail-row">
+                        <td colSpan={cols}><LineDetail date={data.day.date} row={r} locale={locale} /></td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
               {rows.length === 0 && (
-                <tr><td colSpan={COLS} className="fp-empty">{data.rows.length ? t('wxNoMatch') : t('wxNoLines')}</td></tr>
+                <tr><td colSpan={cols} className="fp-empty">{data.rows.length ? t('wxNoMatch') : t('wxNoLines')}</td></tr>
               )}
             </tbody>
           </table>
@@ -471,7 +519,7 @@ function BoardCard({
 
 function LineName({ row }: { row: WechatRow }) {
   const { t } = useT();
-  const spec = [row.ddr, row.ranks[0], row.formFactor === 'pc' ? t('wxFormPc') : null, row.partNumbers[0]].filter(Boolean);
+  const spec = [row.ranks[0], row.formFactor === 'pc' ? t('wxFormPc') : null, row.partNumbers[0]].filter(Boolean);
   return (
     <span className="fp-holder">
       {row.kind === 'quote' ? (
@@ -549,13 +597,25 @@ function Change({ cur, prev }: { cur: WechatPrice | null; prev: WechatPrice | nu
   );
 }
 
-function BoardRow({ row, open, locale, onToggle }: { row: WechatRow; open: boolean; locale: string; onToggle: () => void }) {
+function BoardRow({ row, branded, open, locale, onToggle }: {
+  row: WechatRow;
+  branded: boolean;
+  open: boolean;
+  locale: string;
+  onToggle: () => void;
+}) {
   const { t } = useT();
   const signal = row.signal ? SIGNAL_KEY[row.signal] : undefined;
   return (
     <tr className={`wx-row${open ? ' wx-open' : ''}`} onClick={onToggle} aria-expanded={open}
       tabIndex={0} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); } }}>
-      <td><LineName row={row} /></td>
+      {branded && (
+        <td className="wx-tag">
+          {row.brand && row.brand !== UNBRANDED ? row.brand : <span className="fp-muted">{t('wxUnbranded')}</span>}
+        </td>
+      )}
+      <td className="wx-line-cell"><LineName row={row} /></td>
+      <td className="wx-tag mono">{row.ddr ?? <span className="fp-muted">—</span>}</td>
       <PriceCell stats={row.buy} side="buy" locale={locale} />
       <PriceCell stats={row.sell} side="sell" locale={locale} />
       <Ladder row={row} locale={locale} />
