@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-23
 reporter: jinhu
 branch: docs/database-reference
-pr:
+pr: 841
 version: n/a — docs only, no release
 related: [RS-255]
 ---
