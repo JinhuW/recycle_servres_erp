@@ -59,10 +59,14 @@ notifier = TelegramNotifier(
 
 # Operational alerts (worker down, session expiring, challenge raised) go to a
 # separate chat from listing alerts, so ops noise never buries a find. Falls
-# back to the listings chat when no ops chat is configured.
+# back to the listings chat when no ops chat is configured. TELEGRAM_TOPIC_OPS
+# is a forum topic in whichever chat that is; in production, the ops group's
+# "Facebook · Fleet ops".
+_ops_topic = os.environ.get("TELEGRAM_TOPIC_OPS")
 ops_notifier = TelegramNotifier(
     token=os.environ.get("TELEGRAM_TOKEN"),
     chat_id=os.environ.get("TELEGRAM_OPS_CHAT_ID") or os.environ.get("TELEGRAM_CHAT_ID"),
+    thread_id=int(_ops_topic) if _ops_topic else None,
 )
 
 # Per-buyer Messenger alerts go to the war-room supergroup, which must have

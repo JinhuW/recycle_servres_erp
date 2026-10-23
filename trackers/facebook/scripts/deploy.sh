@@ -435,9 +435,12 @@ HELD_NOTE=""
 if ssh "$VM" "docker exec -i rs-coordinator python - \"Deployed facebook_tracker $DEPLOY_DESC to the coordinator and $WORKER_COUNT workers - verified running this tree.$HELD_NOTE\"" <<'PYEOF'
 import os, sys, urllib.parse, urllib.request
 
-params = {"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": sys.argv[1]}
-# Post into the 📦 Releases forum topic when configured (secrets.env,
-# created by scripts/setup-telegram-topics.py); General topic otherwise.
+# Deploy notices are ops, not listings: the ops chat when one is set, and its
+# Releases topic (TELEGRAM_TOPIC_RELEASES names a topic in that chat). Without
+# an ops chat they stay in the listings chat, as before.
+chat = os.environ.get("TELEGRAM_OPS_CHAT_ID") or os.environ["TELEGRAM_CHAT_ID"]
+params = {"chat_id": chat, "text": sys.argv[1]}
+# General topic when no Releases topic is configured.
 if os.environ.get("TELEGRAM_TOPIC_RELEASES"):
     params["message_thread_id"] = os.environ["TELEGRAM_TOPIC_RELEASES"]
 data = urllib.parse.urlencode(params).encode()

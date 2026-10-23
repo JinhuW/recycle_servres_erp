@@ -31,10 +31,13 @@ class TelegramNotifier:
         token: str | None,
         chat_id: str | None,
         min_interval: float = 1.1,
+        thread_id: int | None = None,
     ) -> None:
         self.token = token
         self.chat_id = chat_id
         self.min_interval = min_interval
+        # The forum topic a send lands in when the caller names none.
+        self.thread_id = thread_id
         self._lock = threading.Lock()
         self._last_send = 0.0
 
@@ -48,7 +51,7 @@ class TelegramNotifier:
         """Send `text`, optionally into a forum topic (`message_thread_id`).
 
         A topic id targets one thread of a Topics-enabled supergroup; without
-        it the message lands in General. An id for a topic that no longer
+        one (and no `thread_id` default) the message lands in General. An id for a topic that no longer
         exists makes Telegram reject the send, which the caller treats as a
         normal delivery failure and retries.
         """
@@ -67,8 +70,9 @@ class TelegramNotifier:
                 "parse_mode": "MarkdownV2",
                 "disable_web_page_preview": "false",
             }
-            if message_thread_id is not None:
-                fields["message_thread_id"] = message_thread_id
+            thread = message_thread_id if message_thread_id is not None else self.thread_id
+            if thread is not None:
+                fields["message_thread_id"] = thread
             payload = parse.urlencode(fields).encode()
             url = f"{API_BASE}/bot{self.token}/sendMessage"
             try:
