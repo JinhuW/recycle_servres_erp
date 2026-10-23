@@ -208,23 +208,30 @@ export type ProductTally = {
   units: number; counted: number;
 };
 
+export type ProductBucket = 'done' | 'absent' | 'partial' | 'open';
+
 // The progress card, one bucket per product — the rows the packer sees. A
 // product is short while any lot is lowered and not yet ticked, at 0 first.
-// Units are the lots' (`tally`). A product with nothing to pack isn't counted.
+// A product with nothing to pack has none, and isn't counted.
+export function productBucket(lots: readonly CheckableLine[], checks: ReadonlyMap<string, LineCheck>): ProductBucket | null {
+  if (!lots.length) return null;
+  const t = tally(lots, checks);
+  return t.done === lots.length ? 'done' : t.absent > 0 ? 'absent' : t.partial > 0 ? 'partial' : 'open';
+}
+
+// Units are the lots' (`tally`).
 export function productTally<L extends CheckableLine>(
   products: readonly PackProduct<L>[], checks: ReadonlyMap<string, LineCheck>,
 ): ProductTally {
   const out: ProductTally = { products: 0, done: 0, partial: 0, absent: 0, open: 0, units: 0, counted: 0 };
   for (const p of products) {
-    if (!p.lots.length) continue;
+    const bucket = productBucket(p.lots, checks);
+    if (!bucket) continue;
     const units = tally(p.lots, checks);
     out.products += 1;
     out.units += units.units;
     out.counted += units.counted;
-    if (units.done === p.lots.length) out.done += 1;
-    else if (units.absent > 0) out.absent += 1;
-    else if (units.partial > 0) out.partial += 1;
-    else out.open += 1;
+    out[bucket] += 1;
   }
   return out;
 }

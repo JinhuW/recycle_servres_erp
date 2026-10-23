@@ -17,6 +17,40 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.317.5] - 2026-10-23
+
+Pack mode's progress card, selection and side panel, refined (RS-361).
+
+**The progress card lays out again.** It borrowed Review mode's two-half
+grid but held three bare pieces. The count sat flush in the card's corner,
+the meter was glued to its top edge, and *Packing from* floated mid-card on
+a second row. The card now has its own grid: the count, the progress, and
+the warehouse switch on one padded row, with the switch on its own row
+below 900px.
+
+**The progress bar maps the order.** One cell per product, in # order and
+labelled with the # the packer writes on the item. A cell is green once the
+product is packed, amber while it is short, red at 0, and a dashed empty slot
+while it waits. What is left now reads as which products, not how many.
+Cells too narrow for a label drop it. The cells and the legend chips count
+from one helper, so they can't disagree.
+
+**The count says what it counts.** It is captioned *products packed*, or
+*products packed, AMS only* under a picked warehouse. Before, a picked
+warehouse showed "1 / 1" under a head that said "6 products", with nothing
+to explain the gap. The units moved to the end of the legend.
+
+**Selection is an ink frame.** The selected row used the green wash, and in
+Pack mode green means packed: an unpacked selected row read as done, and a
+packed one became a solid mint slab. The row Space and the scanner act on is
+now framed in ink on a neutral wash. A scan's "tap the one you packed" row
+keeps its amber rail.
+
+**Less empty space.** A product with no photo gives the Selected card one
+line in place of an empty 4:3 frame, which brings Finish and Mark shipped
+back on screen on a laptop or iPad. Rows with no photo keep the photo's
+width but no longer draw a grey tile each.
+
 ## [1.317.4] - 2026-10-23
 
 Fixes from a second review of the v1.317 release (RS-359), which reached
