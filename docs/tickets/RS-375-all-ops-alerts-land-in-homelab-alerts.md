@@ -7,7 +7,7 @@ priority: P2
 created: 2026-10-23
 reporter: jinhu
 branch: JinhuW/telescopefish-alerts
-pr:
+pr: 849
 version:
 related: [RS-368, RS-376]
 ---
@@ -42,10 +42,10 @@ keep their own bots and get the group's chat id plus a topic.
 
 ## Acceptance criteria
 
-- [ ] The relay's `POST /alert` takes `{topic, status, title, lines, link}`
+- [x] The relay's `POST /alert` takes `{topic, status, title, lines, link}`
       with its own bearer (`ALERT_TOKEN`). It answers 401 without that bearer
       and maps the topic key to a thread; an unknown key goes to General
-- [ ] A failing uptime run posts to "ERP · Uptime", says which layer broke,
+- [x] A failing uptime run posts to "ERP · Uptime", says which layer broke,
       and still exits 1
 - [ ] Facebook coordinator ops alerts go to "Facebook · Fleet ops", and
       deploy notices to "Facebook · Releases", once `TELEGRAM_OPS_CHAT_ID` is
@@ -58,3 +58,14 @@ keep their own bots and get the group's chat id plus a topic.
 - Lead alerts: the reddit leads group and the Facebook High/Medium/Low
   topics. Buyers read those.
 - The eBay tracker, which has been offline since 2026-09-18.
+
+## Notes
+
+- Topics in Homelab Alerts (`-1004378564833`): Homelab · Prometheus 12,
+  Facebook · Fleet ops 13, Facebook · Releases 14, ERP · Uptime 15,
+  Reddit · Workers 16, Reddit · Errors 17.
+- v1.325.0 (PR 849) ships the relay route and the uptime cron. The uptime
+  service builds from `dev` on changes under `deploy/railway-uptime/`, so it
+  goes live with the merge.
+- The Facebook part ships as its own facebook-tracker release. Alertmanager
+  is a config change on `10.10.60.5`, outside the repo.
