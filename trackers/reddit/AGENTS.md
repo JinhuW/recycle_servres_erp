@@ -37,6 +37,10 @@ has the repo map and workflow.
 - **The Dockerfile CMD or shutdown path** →
   [docs/debug-notes/signals-must-reach-node.md](docs/debug-notes/signals-must-reach-node.md).
   node must be PID 1 or SIGTERM never reaches the shutdown handler.
+- **A `logger.warn`/`error` call, or a loop's error handling** → README
+  *Ops alerts*. Every warn/error line reaches the ops Telegram group. One
+  logged in a loop's scope also counts that iteration as failed, and three in
+  a row page. Something routine belongs at `info`.
 - **Telegram delivery or `telegram_chat_ids`** →
   [docs/debug-notes/telegram-supergroup-migration.md](docs/debug-notes/telegram-supergroup-migration.md).
   A group upgraded to a supergroup gets a new `-100…` chat id, and every alert

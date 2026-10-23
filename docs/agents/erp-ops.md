@@ -95,16 +95,41 @@ The release flow itself (`dev` → `main` is a full release) is in the root
   addresses must skip itself while `X-Client-IP` is absent, as the per-IP
   login budget does.
 
-## Railway alerts → Telegram
+## Ops alerts → Telegram
 
-- All seven Railway projects in the workspace send one webhook each to the
-  `railway-alerts` Worker (`deploy/railway-alerts/`,
-  `https://railway-alerts.jinhuwang1127.workers.dev/`). The Worker posts each
-  event to the "Homelab Alerts" Telegram forum group (`-1004378564833`) as
-  `@Jinhu_homelab_bot`. Events: deploy failed, crashed, OOM-killed,
-  CPU/RAM monitor and volume alert, triggered and resolved. PR environments are
-  left out. Each kind goes to its own topic (`TOPICS` in `wrangler.toml`); a
-  kind without a topic, or whose topic was deleted, goes to General.
+Every ops alert goes to the "Homelab Alerts" Telegram forum group
+(`-1004378564833`), one topic per source:
+
+| Topic (thread id) | Source | Sends as |
+| --- | --- | --- |
+| Railway · Deploy failed (2), · Crashed (3), · CPU/RAM (4), · Volumes (5) | Railway webhooks → relay `POST /` | `@Jinhu_homelab_bot` |
+| ERP · Uptime (15) | `deploy/railway-uptime/check.sh` → relay `POST /alert` | `@Jinhu_homelab_bot` |
+| Reddit · Workers (16), · Errors (17) | the reddit api's watch → relay `POST /alert` | `@Jinhu_homelab_bot` |
+| WeChat · Daily report (28) | memtrade's daily run on the Mac (`src/alert.ts`, `scripts/daily-report.sh`) → relay `POST /alert` | `@Jinhu_homelab_bot` |
+| Homelab · Prometheus (12) | Alertmanager on `10.10.60.5`, its own `telegram_configs` | `@Jinhu_homelab_bot` |
+| Facebook · Fleet ops (13), · Releases (14) | the facebook coordinator and `scripts/deploy.sh` (`TELEGRAM_OPS_CHAT_ID`, `TELEGRAM_TOPIC_OPS`, `TELEGRAM_TOPIC_RELEASES`) | `@recycle_facebook_alerts_bot` |
+
+The buyers' lead alerts (the reddit leads group, Facebook's
+High/Medium/Low topics) are not ops alerts and stay where the buyers read
+them.
+
+- **The relay** is the `railway-alerts` Worker (`deploy/railway-alerts/`,
+  `https://railway-alerts.jinhuwang1127.workers.dev`). All seven Railway
+  projects in the workspace send it one webhook each. Events: deploy failed,
+  crashed, OOM-killed, and CPU/RAM monitor and volume alerts, triggered and
+  resolved. PR environments are left out.
+- **Our own senders use `/alert`.** They post
+  `{topic, status, title, lines, link}` with the `ALERT_TOKEN` bearer, and
+  only `TOPICS` in `wrangler.toml` maps a topic key to a thread. A key or
+  event without a topic, or whose topic was deleted, goes to General.
+- **One bearer per route.** `WEBHOOK_SECRET` belongs to the Railway webhooks.
+  `ALERT_TOKEN` has three holders:
+  - `uptime-monitor`, as `ALERT_TOKEN`;
+  - the reddit `api`, as `OPS_ALERT_TOKEN`;
+  - memtrade, as `~/Projects/wehat_ai/memtrade/.ops-alert-token` (0600,
+    gitignored).
+
+  Rotating it means `wrangler secret put ALERT_TOKEN` and updating all three.
 - It runs on Cloudflare so an alert still gets out while Railway is down.
   Deploy with `npx wrangler@4.146.0 deploy` from that directory, with
   `CLOUDFLARE_API_TOKEN` unset.

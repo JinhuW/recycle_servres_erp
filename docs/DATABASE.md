@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-10-23:** ERP migration `0204`, Reddit tracker migration `0004`,
+**As of 2026-10-23:** ERP migration `0204`, Reddit tracker migration `0005`,
 Facebook tracker `0.13.14`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -37,7 +37,7 @@ refresh a section.
 | Database | Owner | Engine | Where it runs | Connection | Schema source | Tables |
 | --- | --- | --- | --- | --- | --- | --- |
 | **ERP** | `apps/backend` | Postgres 18 | Railway project `recycle-erp-experiment`, with one Postgres per environment (production, dev) | `DATABASE_URL` | `apps/backend/migrations/*.sql`, applied by `scripts/migrate.mjs` | 69 |
-| **Reddit tracker** | `trackers/reddit` (`api`, `worker` and the OCI worker VMs) | Postgres | Railway project `reddits-tracker`, with public networking on so the OCI VMs can reach it | `DATABASE_URL` | `trackers/reddit/migrations/*.sql`, applied by `scripts/migrate.ts` | 13 + 1 view |
+| **Reddit tracker** | `trackers/reddit` (`api`, `worker` and the OCI worker VMs) | Postgres | Railway project `reddits-tracker`, with public networking on so the OCI VMs can reach it | `DATABASE_URL` | `trackers/reddit/migrations/*.sql`, applied by `scripts/migrate.ts` | 15 + 1 view |
 | **Facebook coordinator** | `trackers/facebook/rs_coordinator` | Postgres 16 in prod; SQLite locally and in tests | Railway project `facebook-tracker` (Terraform in `trackers/facebook/infra/`), reached by the coordinator on the homelab VM through Railway's TCP proxy | `RS_DATABASE_URL`, else `DATABASE_URL`; with neither set, SQLite at `RS_COORDINATOR_DB` | `SCHEMA` plus the `*_EXTRA_COLUMNS` lists in `rs_coordinator/db.py`, applied at boot | 32 |
 
 **The three share no database and no rows.** The ERP reaches each tracker only
@@ -2556,9 +2556,9 @@ Single-row `getUpdates` cursor for the tracker's bot, so a restarted api resumes
 
 ### Operations
 
-Fleet visibility and the migration ledger. Nothing in the pipeline reads either.
+Fleet visibility, the ops watch's state and the migration ledger. Nothing in the pipeline reads any of them. The api's watch (`src/loops/watch.ts`, migration 0005) reads `workers` and `worker_errors` and sends down workers, failing loops and every warn/error line to the ops Telegram group through the alert relay.
 
-Tables: [`workers`](#reddit-workers), [`schema_migrations`](#reddit-schema-migrations)
+Tables: [`workers`](#reddit-workers), [`worker_errors`](#reddit-worker-errors), [`watch_alerts`](#reddit-watch-alerts), [`schema_migrations`](#reddit-schema-migrations)
 
 <a id="reddit-workers"></a>
 
@@ -2572,12 +2572,48 @@ One running process, upserted by its 30-second heartbeat and deleted on clean sh
 | `role` | `text` | ✓ |  | worker = polls Reddit, judges and alerts; api = serves the admin API and polls Telegram for reactions. |
 | `started_at` | `timestamptz` | ✓ |  | When the process started. |
 | `last_heartbeat_at` | `timestamptz` | ✓ | `now()` |  |
-| `loops` | `jsonb` | ✓ | `'{}'::jsonb` | JSON per loop (poll, evaluate, notify) with lastSuccessAt and lastWorkAt, rewritten whole on each beat. |
+| `loops` | `jsonb` | ✓ | `'{}'::jsonb` | JSON per loop (poll, evaluate, notify) with lastSuccessAt and lastWorkAt, rewritten whole on each beat. Part of the ERP's `/api/workers` contract. |
+| `loop_failures` | `jsonb` | ✓ | `'{}'::jsonb` | JSON per loop with consecutiveFailures (iterations in a row that threw or logged a warn/error), lastError and lastErrorAt. Kept out of `loops` so that contract stays as it was. |
 
 - **Primary key:** `worker_id`
 - **Checks:** `role IN ('worker', 'api')`
 
 Liveness is computed on read: stale after 90 s without a beat, dead after 600 s. There is no reaper; `DELETE /api/workers/:id` clears a dead row.
+
+<a id="reddit-worker-errors"></a>
+
+#### `worker_errors`
+
+Every warn/error line any process logged, buffered in memory and inserted after the heartbeat that follows it. The watch sends unsent rows as a digest each minute and deletes rows older than seven days.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `id` | `bigint` | ✓ | identity |  |
+| `worker_id` | `text` | ✓ |  | The process that logged it (not a foreign key: the line outlives the worker row). |
+| `scope` | `text` | ✓ |  | Logger scope, e.g. evaluate, poll, reactions, heartbeat, watch. Empty for the top level. |
+| `level` | `text` | ✓ |  | warn or error. |
+| `message` | `text` | ✓ |  | The log message, NUL bytes stripped. |
+| `fields` | `jsonb` | ✓ | `'{}'::jsonb` | The line's fields, as the log printed them. |
+| `at` | `timestamptz` | ✓ |  | When it was logged, not when it was stored. |
+| `sent_at` | `timestamptz` |  |  | When a digest carrying it was accepted by the relay. NULL = not yet sent. |
+
+- **Primary key:** `id`
+- **Checks:** `level IN ('warn', 'error')`
+- **Indexes:** `worker_errors_unsent` on `id` where `sent_at IS NULL`; `worker_errors_at` on `at`
+
+<a id="reddit-watch-alerts"></a>
+
+#### `watch_alerts`
+
+Alerts the watch has raised and not yet resolved, so a restarted api neither pages twice nor forgets to say an alert cleared. A row is written only after the relay accepted the alert, and deleted only after it accepted the resolution.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `key` | `text` | ✓ |  | `down:<worker_id>` or `failing:<worker_id>:<loop>`. |
+| `worker_id` | `text` | ✓ |  | The worker it is about. |
+| `raised_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `key`
 
 <a id="reddit-schema-migrations"></a>
 

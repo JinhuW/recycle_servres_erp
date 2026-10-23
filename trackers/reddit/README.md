@@ -144,6 +144,7 @@ through the API — no redeploy, and changes reach every worker within 60 s.
 | `REDDIT_USER_AGENT` | no | `recycle-servers-tracker/1.0 (contact: …)` |
 | `REDDIT_MAX_RPM` | no | `1` |
 | `LOG_LEVEL` | no | `info` |
+| `OPS_ALERT_URL` / `OPS_ALERT_TOKEN` | api role, both or neither | — (the ops watch is off) |
 
 Database-backed settings: `eval_prompt`, `llm_model`, `telegram_chat_ids`,
 `max_post_age_hours`, `telegram_dev_chat_ids`, `candidate_eval_prompt` and
@@ -221,6 +222,31 @@ curl localhost:8080/api/matches -H "Authorization: Bearer $API_TOKEN"
    `POST /api/prompt-candidate/promote`. To end it instead, set
    `candidate_eval_prompt` to `""`.
 7. **Record the outcome** in `docs/prompt-evaluations/`.
+
+## Ops alerts
+
+The api runs a watch every minute (`src/loops/watch.ts`). It reports the
+fleet to the "Homelab Alerts" Telegram group through the ops alert relay
+(`deploy/railway-alerts/` at the repo root, `POST /alert`):
+
+- **Reddit · Workers**:
+  - a process with no heartbeat for 10 minutes, then "back" or "gone";
+  - a loop (poll, evaluate, notify) that failed 3 iterations in a row, with
+    its last error, then "recovered".
+
+  An iteration fails when it throws or logs a warn/error, so a dead
+  OpenRouter key or a Reddit block counts, not just a crash.
+- **Reddit · Errors**: every warn/error line from every process, as one
+  digest per minute grouped by message, with a count and the workers it came
+  from.
+
+Each process collects its warn/error lines through the logger's problem hook
+and writes them with its heartbeat (`loop_failures`, `worker_errors`). So the
+OCI workers need nothing beyond `DATABASE_URL`, and only the api holds the
+relay's `OPS_ALERT_URL` and `OPS_ALERT_TOKEN`. The token is the relay's
+`ALERT_TOKEN` secret. Nothing counts as sent until the relay accepts it, so a
+relay or Telegram outage delays alerts but doesn't lose them. The api's own
+crash is reported by Railway's webhook, not by this watch.
 
 ## Deployment
 

@@ -9,6 +9,9 @@
 #   WEBHOOK_SECRET      the bearer each project's webhook sends as its
 #                       Authorization header. Rotating it means updating all
 #                       seven webhooks (docs/agents/erp-ops.md).
+#   ALERT_TOKEN         the bearer for POST /alert: the uptime monitor's
+#                       ALERT_TOKEN, the reddit api's OPS_ALERT_TOKEN and
+#                       memtrade's .ops-alert-token on the office Mac.
 name = "railway-alerts"
 main = "worker.js"
 compatibility_date = "2026-06-18"
@@ -24,5 +27,7 @@ enabled = true
 # The "Homelab Alerts" forum group.
 TELEGRAM_CHAT_ID = "-1004378564833"
 # message_thread_id of each topic in that group, from createForumTopic. An
-# event with no topic here, or whose topic was deleted, goes to General.
-TOPICS = { deploy_failed = 2, crashed = 3, monitor = 4, volume = 5 }
+# event with no topic here, or whose topic was deleted, goes to General. The
+# group's other topics (Homelab · Prometheus 12, Facebook · Fleet ops 13,
+# Facebook · Releases 14) belong to senders that post with their own bots.
+TOPICS = { deploy_failed = 2, crashed = 3, monitor = 4, volume = 5, erp_uptime = 15, reddit_workers = 16, reddit_errors = 17, wechat_report = 28 }

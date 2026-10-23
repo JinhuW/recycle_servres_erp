@@ -1,8 +1,11 @@
-// Railway project webhooks → a Telegram forum group, one topic per kind of
-// alert. Railway formats its payload only for Discord and Slack; any other URL
-// gets raw JSON, which Telegram's sendMessage can't take. This runs on
-// Cloudflare rather than Railway so an alert still gets out while Railway is
-// the thing failing.
+// Ops alerts → a Telegram forum group, one topic per kind of alert.
+//
+// `POST /` takes Railway project webhooks. Railway formats its payload only
+// for Discord and Slack; any other URL gets raw JSON, which Telegram's
+// sendMessage can't take. `POST /alert` takes our own senders (uptime monitor,
+// reddit watchdog), which name a topic key and leave the group and thread ids
+// to this file's config. This runs on Cloudflare rather than Railway so an
+// alert still gets out while Railway is the thing failing.
 
 const TOPIC_BY_TYPE = {
   'Deployment.failed': 'deploy_failed',
@@ -23,15 +26,27 @@ const LABEL_BY_TYPE = {
 // Railway also puts these in `details` for a deployment; the commit line
 // already says what matters about them.
 const COMMIT_KEYS = new Set(['id', 'source', 'status', 'branch', 'commitHash', 'commitAuthor', 'commitMessage']);
-// Telegram caps a message at 4096 characters.
+// Telegram caps a message at 4096 characters, and refusing an over-long one
+// would leave a sender retrying it forever.
 const MAX_DETAIL_LINES = 10;
+const MAX_ALERT_CHARS = 3800;
+
+const ICON_BY_STATUS = { firing: '🔴', resolved: '✅', info: 'ℹ️' };
+
+// Each route has its own bearer, so the Railway webhooks and our own senders
+// rotate independently.
+const ROUTES = {
+  '/': { secret: (env) => env.WEBHOOK_SECRET, render: railwayMessage },
+  '/alert': { secret: (env) => env.ALERT_TOKEN, render: alertMessage },
+};
 
 export default {
   async fetch(request, env) {
-    if (request.method !== 'POST' || new URL(request.url).pathname !== '/') {
+    const route = ROUTES[new URL(request.url).pathname];
+    if (request.method !== 'POST' || !route) {
       return new Response('Not found', { status: 404 });
     }
-    if (!(await authorized(request, env.WEBHOOK_SECRET))) {
+    if (!(await authorized(request, route.secret(env)))) {
       return new Response('Unauthorized', { status: 401 });
     }
     let payload;
@@ -42,8 +57,8 @@ export default {
     }
     console.log(JSON.stringify(payload));
 
-    const text = format(payload);
-    const thread = env.TOPICS?.[topicKey(String(payload.type ?? ''))];
+    const { text, topic } = route.render(payload);
+    const thread = env.TOPICS && Object.hasOwn(env.TOPICS, topic) ? env.TOPICS[topic] : undefined;
     let sent = await send(env, text, thread);
     // A topic deleted in Telegram must not swallow the alert: General still
     // reaches the same people.
@@ -52,12 +67,37 @@ export default {
     }
     if (!sent.ok) {
       console.error(`telegram rejected the alert: ${sent.description}`);
-      // Railway retries a non-2xx delivery up to three times.
+      // Railway retries a non-2xx delivery up to three times; our senders
+      // retry on their next tick.
       return new Response('Telegram rejected the alert', { status: 502 });
     }
     return new Response(null, { status: 204 });
   },
 };
+
+function railwayMessage(payload) {
+  return { text: format(payload), topic: topicKey(String(payload.type ?? '')) };
+}
+
+// `{topic, status, title, lines?, link?}` from our own senders.
+export function alertMessage(payload) {
+  const status = String(payload.status ?? 'info');
+  const lines = [`<b>${ICON_BY_STATUS[status] ?? ICON_BY_STATUS.info} ${escapeHtml(clip(String(payload.title ?? 'Alert')))}</b>`];
+  const extra = Array.isArray(payload.lines) ? payload.lines : [];
+  const link = payload.link ? `<a href="${escapeHtml(String(payload.link))}">Open</a>` : '';
+  let length = lines[0].length + link.length;
+  let shown = 0;
+  for (const line of extra) {
+    const html = escapeHtml(clip(String(line)));
+    if (length + html.length + 1 > MAX_ALERT_CHARS) break;
+    lines.push(html);
+    length += html.length + 1;
+    shown++;
+  }
+  if (shown < extra.length) lines.push(`… ${extra.length - shown} more`);
+  if (link) lines.push(link);
+  return { text: lines.join('\n'), topic: String(payload.topic ?? '') };
+}
 
 // Railway doesn't sign its webhooks; every project's webhook carries this
 // bearer as a custom header instead. Digests are compared, not the strings, so
