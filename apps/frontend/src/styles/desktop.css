@@ -983,7 +983,13 @@ html.desktop, body.desktop, .desktop #root {
   .sidebar .nav-item { justify-content: center; padding: 10px 0; }
   .sidebar .nav-item .badge { margin-left: 0; }
   /* Submit order's icon is a plus too; two pluses in a 64px column read as a glitch. */
-  .sidebar .nav-item:has(.badge) .nav-icon { display: none; }
+  .sidebar .nav-item:has(.badge:not(.due)) .nav-icon { display: none; }
+  /* A live count rides the icon's corner, so the rail still says what it counts. */
+  .sidebar .nav-item:has(.badge.due) { position: relative; }
+  .sidebar .nav-item .badge.due {
+    position: absolute; top: 1px; right: 4px;
+    min-width: 16px; padding: 0 4px; font-size: 10px; line-height: 16px; text-align: center;
+  }
   .sidebar .nav-item .nav-icon { width: 18px; height: 18px; }
   .sidebar .nav-group + .nav-group { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
   .sidebar .sidebar-foot { flex-direction: column; gap: 8px; padding: 12px 0; }

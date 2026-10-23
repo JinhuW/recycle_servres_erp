@@ -139,9 +139,56 @@ describe('a self-paid PO names who paid', () => {
     expect((await api('PATCH', `/api/orders/${id}`, { token: alex.token, body: { paidByUserId: alex.user.id } })).status).toBe(200);
     expect((await reassign(marcus.user.id)).status).toBe(200);
     expect(await storedPayer(id)).toBe(alex.user.id);
-    // So does an old owner the same request picks as the payer.
-    expect((await reassign(priya.user.id, { paidByUserId: marcus.user.id })).status).toBe(200);
+    // The payer on file echoed back with the move is no pick: it stays.
+    expect((await reassign(priya.user.id, { paidByUserId: alex.user.id })).status).toBe(200);
+    expect(await storedPayer(id)).toBe(alex.user.id);
+    // A purchaser pays only for their own PO, so the old owner can't be picked
+    // by the request that hands it over; the new one can.
+    const old = await reassign(marcus.user.id, { paidByUserId: priya.user.id });
+    expect(old.status).toBe(400);
+    expect((old.body as { error: string }).error).toMatch(/active manager or the purchaser/);
+    expect(await storedPayer(id)).toBe(alex.user.id);
+    expect((await reassign(marcus.user.id, { paidByUserId: marcus.user.id })).status).toBe(200);
     expect(await storedPayer(id)).toBe(marcus.user.id);
+  });
+
+  it('a move and another change log the payer once', async () => {
+    const marcus = await loginAs(MARCUS);
+    const priya = await loginAs(PRIYA);
+    const alex = await loginAs(ALEX);
+    const { body: { id } } = await createOrder(marcus.token, { payment: 'self' });
+    const moved = await api('PATCH', `/api/orders/${id}`, {
+      token: alex.token, body: { onBehalfOfUserId: priya.user.id, notes: 'moved to Priya' },
+    });
+    expect(moved.status).toBe(200);
+    const events = await getTestDb()<{ detail: { changes?: { field: string; from: unknown; to: unknown }[] } }[]>`
+      SELECT detail FROM order_events WHERE order_id = ${id} AND kind = 'meta_changed' ORDER BY created_at, id`;
+    expect(events.flatMap(e => e.detail.changes ?? []).filter(ch => ch.field === 'paid_by'))
+      .toEqual([{ field: 'paid_by', from: 'Marcus Wright', to: 'Priya Shah' }]);
+  });
+
+  it('only a payer the request picks is judged: one deactivated since still paid', async () => {
+    const marcus = await loginAs(MARCUS);
+    const sofia = await loginAs(SOFIA);
+    const { body: { id } } = await createOrder(marcus.token, { payment: 'self', paidByUserId: sofia.user.id });
+    await getTestDb()`UPDATE users SET active = FALSE WHERE id = ${sofia.user.id}`;
+
+    // The editors send the payer on file back with every save.
+    const echo = await api('PATCH', `/api/orders/${id}`, { token: marcus.token, body: { paidByUserId: sofia.user.id, notes: 'x' } });
+    expect(echo.status).toBe(200);
+    const up = await multipart(`/api/orders/${id}/status-meta/Submission/attachments`, { file: PNG() }, { token: marcus.token });
+    expect(up.status).toBe(200);
+    const ho = await api('POST', `/api/orders/${id}/handoff`, {
+      token: marcus.token,
+      body: { source: 'local', handoff: { method: 'pickup', byUserId: marcus.user.id }, payment: 'self', paidByUserId: sofia.user.id },
+    });
+    expect(ho.status).toBe(200);
+    expect(await storedPayer(id)).toBe(sofia.user.id);
+
+    // Picked anew, she is judged as she stands.
+    const { body: { id: other } } = await createOrder(marcus.token, { payment: 'self' });
+    const picked = await api('PATCH', `/api/orders/${other}`, { token: marcus.token, body: { paidByUserId: sofia.user.id } });
+    expect(picked.status).toBe(400);
   });
 
   it('closed book: a manager cannot move the payer without reopening', async () => {

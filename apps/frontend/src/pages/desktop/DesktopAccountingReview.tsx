@@ -14,7 +14,7 @@ import { useEscapeKey } from '../../lib/useEscapeKey';
 import { useManagerOptions, useMemberNames } from '../../lib/useManagers';
 import { navigate } from '../../lib/route';
 import {
-  acctAnswer, acctAsk, acctBulkReview, acctMarkReviewed, acctReviewQueue, acctWithdrawQuery, acctWithdrawReview,
+  ACCT_BULK_MAX, acctAnswer, acctAsk, acctBulkReview, acctMarkReviewed, acctReviewQueue, acctWithdrawQuery, acctWithdrawReview,
   fmtBookDay, fmtCny, markDayStarts, reviewActions, type AcctReviewQueue, type AcctReviewRow,
 } from '../../lib/accounting';
 import { checkLines, fieldValue, rowChip } from './accounting/reviewBits';
@@ -69,6 +69,11 @@ export function DesktopAccountingReview({ onToast }: Props) {
   }, [tab, managerId]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => () => { if (undoTimer.current) clearTimeout(undoTimer.current); }, []);
+  // The Undo toast outlives the render that made it: its action re-reads the
+  // lists the page shows now, and a second press while one runs does nothing.
+  const loadRef = useRef(load);
+  loadRef.current = load;
+  const busyRef = useRef(false);
 
   const queue = tab === 'mine' ? mine : other;
   const rows = useMemo(() => queue?.rows ?? [], [queue]);
@@ -76,6 +81,10 @@ export function DesktopAccountingReview({ onToast }: Props) {
   const doneRows = tab === 'mine' ? done.filter(d => !rows.some(r => r.id === d.id)) : [];
   const visible = useMemo(() => [...rows, ...doneRows], [rows, doneRows]);
   const sel = visible.find(r => r.id === selId) ?? rows[0] ?? doneRows[0] ?? null;
+  // A question or an answer is about the entry it was opened on: moving off
+  // it, by click or key, drops what was typed rather than sending it elsewhere.
+  const selKey = sel?.id ?? null;
+  useEffect(() => { setForm(null); setText(''); }, [selKey]);
 
   const flash = (u: Undo) => {
     setUndo(u);
@@ -92,7 +101,8 @@ export function DesktopAccountingReview({ onToast }: Props) {
   // Every write re-reads the lists: a refusal usually means the entry moved
   // under the reviewer, and they should see what it is now.
   const run = async (fn: () => Promise<unknown>, after?: () => void) => {
-    if (busy) return false;
+    if (busyRef.current) return false;
+    busyRef.current = true;
     setBusy(true);
     try {
       await fn();
@@ -104,8 +114,9 @@ export function DesktopAccountingReview({ onToast }: Props) {
       handleFetchError(e);
       return false;
     } finally {
+      busyRef.current = false;
       setBusy(false);
-      load();
+      loadRef.current();
     }
   };
 
@@ -170,15 +181,25 @@ export function DesktopAccountingReview({ onToast }: Props) {
   const held = pending.filter(r => !bulk.includes(r));
   const confirmBulk = () => {
     const ids = new Set(bulk.map(r => r.id));
-    void run(() => acctBulkReview(bulk.map(r => ({ id: r.id, version: r.review!.version }))).then(res => {
+    void run(async () => {
+      let reviewedN = 0;
+      let skippedN = 0;
+      // Each batch lands on the page as it goes, so a refusal part-way keeps
+      // what was already signed off.
+      for (let i = 0; i < bulk.length; i += ACCT_BULK_MAX) {
+        const part = bulk.slice(i, i + ACCT_BULK_MAX);
+        const res = await acctBulkReview(part.map(r => ({ id: r.id, version: r.review!.version })));
+        const reviewed = new Set(res.reviewed);
+        setDone(d => [...part.filter(r => reviewed.has(r.id)).map(signed), ...d]);
+        reviewedN += res.reviewed.length;
+        skippedN += res.skipped.length;
+      }
       setTab('mine');
-      const reviewed = new Set(res.reviewed);
-      setDone(d => [...bulk.filter(r => reviewed.has(r.id)).map(signed), ...d]);
       setBulkOpen(false);
-      onToast?.(res.skipped.length
-        ? t('acctBulkSkippedToast', { n: res.reviewed.length, skipped: res.skipped.length })
-        : t('acctBulkToast', { n: res.reviewed.length }));
-    }), () => setSelId(rows.find(r => !ids.has(r.id))?.id ?? null));
+      onToast?.(skippedN
+        ? t(reviewedN === 1 ? 'acctBulkSkippedToastOne' : 'acctBulkSkippedToast', { n: reviewedN, skipped: skippedN })
+        : t(reviewedN === 1 ? 'acctBulkToastOne' : 'acctBulkToast', { n: reviewedN }));
+    }, () => setSelId(rows.find(r => !ids.has(r.id))?.id ?? null));
   };
 
   const exit = () => navigate('/accounting');
@@ -224,6 +245,7 @@ export function DesktopAccountingReview({ onToast }: Props) {
   const addressee = sel ? (sel.review?.query?.to?.name ?? sel.review?.author?.name ?? sel.manager.name) : '';
   const counts = (other ?? mine)?.counts;
   const tabCount = (k: AccountingReviewTab) => counts?.[k] ?? 0;
+  const bulkTitle = t(bulk.length === 1 ? 'acctRmBulkTitleOne' : 'acctRmBulkTitle', { n: bulk.length });
 
   return (
     <div className="bc-page arv-page">
@@ -258,7 +280,7 @@ export function DesktopAccountingReview({ onToast }: Props) {
         <div className="bc-tally-half">
           <div className="bc-tally-num">
             <span className="mono"><b>{sum.done}</b><span className="muted"> / {tallied.length}</span></span>
-            <span className="card-sub">{t('acctRmReviewedCount')}</span>
+            <span className="card-sub">{t(tallied.length === 1 ? 'acctRmReviewedCountOne' : 'acctRmReviewedCount')}</span>
           </div>
           <div className="bc-tally-meter">
             <div className="bc-meter" role="img" aria-label={`${sum.done} / ${tallied.length}`}>
@@ -555,8 +577,8 @@ export function DesktopAccountingReview({ onToast }: Props) {
 
       {bulkOpen && (
         <Modal onClose={() => { if (!busy) setBulkOpen(false); }} shellStyle={{ maxWidth: 480 }}
-               ariaLabel={t('acctRmBulkTitle', { n: bulk.length })}>
-          <div className="modal-head"><div className="modal-title">{t('acctRmBulkTitle', { n: bulk.length })}</div></div>
+               ariaLabel={bulkTitle}>
+          <div className="modal-head"><div className="modal-title">{bulkTitle}</div></div>
           <div className="modal-body arv-bulk-body">
             <p>{t('acctRmBulkBody')}</p>
             <div className="arv-bulk-list">
@@ -567,7 +589,7 @@ export function DesktopAccountingReview({ onToast }: Props) {
                 </div>
               ))}
               <div className="arv-bulk-total">
-                <span>{t('acctRmBulkTotal', { n: bulk.length })}</span>
+                <span>{t(bulk.length === 1 ? 'acctRmBulkTotalOne' : 'acctRmBulkTotal', { n: bulk.length })}</span>
                 <Yuan value={bulk.reduce((a, r) => a + r.amountCny, 0)} locale={locale} />
               </div>
             </div>

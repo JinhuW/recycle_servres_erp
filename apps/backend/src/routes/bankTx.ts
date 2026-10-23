@@ -19,7 +19,7 @@ import {
 import { applyIgnoreRules, ignoreRuleMatchFrag, revertIgnoreRule } from '../banktx/ignoreRules';
 import { syncBankTransactions } from '../banktx/sync';
 import { SETTLE_DEAD, isDead } from '../banktx/types';
-import { getDb, type SqlLike } from '../db';
+import { actAsTx, getDb, type SqlLike } from '../db';
 import { poRealizedLateral } from '../lib/po-cost';
 import { lockBankGroupTx } from '../services/bankTxLocks';
 import { writeOrderEvent } from '../services/orderAudit';
@@ -487,6 +487,8 @@ bankTx.post('/:id/link', async (c) => {
   let done: { kind: string; orderTxnFilled: boolean };
   try {
     done = await sql.begin(async (tx) => {
+      // A link can void or move the PO's RMB entries (0199), on this manager's behalf.
+      await actAsTx(tx, c.var.user.id);
       await lockBankGroupTx(tx, [c.req.param('id')]);
       const group = await groupOf(tx, c.req.param('id'));
       if (group.length === 0) throw new BankRefusal(404, 'Not found');
@@ -568,6 +570,7 @@ bankTx.post('/:id/unlink', async (c) => {
   const sql = getDb(c.env);
   try {
     await sql.begin(async (tx) => {
+      await actAsTx(tx, c.var.user.id);
       await lockBankGroupTx(tx, [c.req.param('id')]);
       const group = await groupOf(tx, c.req.param('id'));
       if (group.length === 0) throw new BankRefusal(404, 'Not found');
@@ -626,6 +629,7 @@ bankTx.post('/:id/pair', async (c) => {
 
   try {
     await sql.begin(async (tx) => {
+      await actAsTx(tx, c.var.user.id);
       // Both legs and whatever either is already grouped with, before any of
       // the rules below read them: two pairs of one leg used to both pass
       // and leave the loser's partner alone under its own pair_id.
@@ -723,6 +727,7 @@ bankTx.post('/:id/unpair', async (c) => {
   const sql = getDb(c.env);
   try {
     await sql.begin(async (tx) => {
+      await actAsTx(tx, c.var.user.id);
       await lockBankGroupTx(tx, [c.req.param('id')]);
       const group = await groupOf(tx, c.req.param('id'));
       if (group.length === 0) throw new BankRefusal(404, 'Not found');

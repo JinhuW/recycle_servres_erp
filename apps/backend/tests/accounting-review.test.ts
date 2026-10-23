@@ -126,7 +126,10 @@ describe('accounting review', () => {
     expect((await review(sofia.token, id, await versionOf(id))).status).toBe(200);
     expect((await entry(alex.token, id)).review).toMatchObject({ state: 'reviewed', query: null });
     expect((await api('DELETE', `/api/accounting/entries/${id}/review`, { token: sofia.token })).status).toBe(200);
-    expect((await entry(alex.token, id)).review).toMatchObject({ state: 'queried', query: { text: 'amount?', answer: null } });
+    expect((await entry(alex.token, id)).review).toMatchObject({
+      state: 'queried', query: { text: 'amount?', to: { id: alex.user.id }, answer: null },
+    });
+    expect((await api('POST', `/api/accounting/entries/${id}/answer`, { token: alex.token, body: { text: '¥100' } })).status).toBe(200);
 
     // Changed since its last sign-off: back to Changed, with what changed.
     const changed = await record(alex.token, base({ amount: 1800 }));
@@ -183,6 +186,12 @@ describe('accounting review', () => {
     expect((await entry(alex.token, id)).review).toMatchObject({
       state: 'open', query: { text: 'amount?', answer: { by: { id: alex.user.id }, text: null } },
     });
+
+    // A voided entry is out of review, its question with it.
+    const gone = await record(alex.token, base({}));
+    expect((await api('POST', `/api/accounting/entries/${gone}/query`, { token: sofia.token, body: { text: '?' } })).status).toBe(200);
+    expect((await api('POST', `/api/accounting/entries/${gone}/void`, { token: alex.token, body: { reason: 'dup' } })).status).toBe(200);
+    expect((await api('DELETE', `/api/accounting/entries/${gone}/query`, { token: sofia.token })).status).toBe(409);
   });
 
   it('a restored entry comes back To review', async () => {

@@ -48,6 +48,14 @@ export function getDb(env: Env): Sql {
   return pool;
 }
 
+// Who the transaction acts for, for the triggers that write on someone's
+// behalf: the payer sync (0202) makes this manager the author of an entry it
+// moves. Local to the transaction, so a pooled connection never carries it
+// into another request.
+export async function actAsTx(tx: SqlLike, userId: string): Promise<void> {
+  await tx`SELECT set_config('app.actor_id', ${userId}, true)`;
+}
+
 // Close every shared pool. Intended for test teardown / graceful shutdown so
 // the process can exit without dangling sockets. Safe to call when none
 // have been created.

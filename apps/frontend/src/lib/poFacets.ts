@@ -86,17 +86,26 @@ export function payerOptions(orders: readonly Facetable[]): Array<{ id: string; 
  * name, then the PO's purchaser when they are not one, then whoever is on
  * file when no longer listed (deactivated) — the select must still show the
  * record. Members come from /api/members/names, which every role may read.
+ *
+ * `prevOwner` is the owner a page is moving the PO away from: on save they
+ * stop being its purchaser, and the server refuses them as one.
  */
 export function payerChoices(
   members: readonly { id: string; name: string; role?: string }[],
   owner: { id: string; name: string } | null,
   current: { id: string; name: string } | null,
+  prevOwner?: string,
 ): Array<{ id: string; name: string }> {
   const out = members.filter(m => m.role === 'manager').map(m => ({ id: m.id, name: m.name }));
   if (owner && !out.some(m => m.id === owner.id)) out.push(owner);
-  if (current && !out.some(m => m.id === current.id)) out.unshift(current);
+  if (current && current.id !== prevOwner && !out.some(m => m.id === current.id)) out.unshift(current);
   return out;
 }
+
+/** Paid by once the PO moves from one owner to another: a payer that named
+ *  the old owner follows it to the new one, as the server moves it. */
+export const payerAfterOwnerChange = (paidById: string | null, from: string, to: string): string | null =>
+  paidById === from ? to : paidById;
 
 export type FacetCounts = {
   warehouse: Record<string, number>;
