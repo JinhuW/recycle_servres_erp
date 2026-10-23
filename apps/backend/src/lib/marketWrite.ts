@@ -100,7 +100,7 @@ export async function applyMarketWrites(
       // one the row written is chosen rather than whichever the planner
       // reaches first: the most recently maintained, then a stable tiebreak.
       const idRow = (await tx<{ id: string; prev_avg: number | null }[]>`
-        SELECT id, avg_sell AS prev_avg
+        SELECT id, avg_sell::float8 AS prev_avg
         FROM ref_prices
         WHERE (${v.selector.id ?? null}::text IS NOT NULL AND id::text = ${v.selector.id ?? null})
            OR (${v.selector.partNumber ?? null}::text IS NOT NULL
@@ -113,7 +113,11 @@ export async function applyMarketWrites(
         marketWritesTotal.inc({ outcome: 'notfound' });
         continue;
       }
-      const trend = idRow.prev_avg === null ? null : +(avg - idRow.prev_avg).toFixed(2);
+      // A fraction of the previous average, which is how the Market page reads
+      // it. A part's first price (auto-tracked rows start with none) has
+      // nothing to compare against, and the column is NOT NULL, so it reads 0.
+      const prev = idRow.prev_avg;
+      const trend = prev === null || prev === 0 ? 0 : +((avg - prev) / prev).toFixed(3);
       // Keep the legacy columns (low_price/high_price/avg_sell/samples/source/trend)
       // in sync — MCP + market.ts read them. last_price* + events are handled by
       // appendPriceEvent below.

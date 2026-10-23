@@ -1839,7 +1839,7 @@ One row per tracked part on Market values: identifying specs, the scraper's pric
 | `low_price` | `numeric(12,2)` |  |  | Scraper's low price, USD. |
 | `high_price` | `numeric(12,2)` |  |  | Scraper's high price, USD. |
 | `avg_sell` | `numeric(12,2)` |  |  | Scraper's average sell price, USD. The max-buy basis while last_price is NULL; MCP and older readers still show it. |
-| `trend` | `real` | ✓ | `0` | Change in avg_sell at the last scraper write, USD (new minus previous). |
+| `trend` | `real` | ✓ | `0` | Change in avg_sell at the last scraper write, as a fraction of the previous avg_sell (0.05 = +5%); 0 when there was none. The Market page shows it as a percent. |
 | `samples` | `integer` | ✓ | `0` | Sales behind avg_sell, as the scraper reports; drives the confidence label (over 20 high, over 10 medium). |
 | `source` | `text` |  |  | Legacy source label: the scraper's source name, or auto-intake for a row auto-tracked from a PO or a sale. |
 | `stock` | `integer` | ✓ | `0` | Units in stock as shown on the Market page; only the seed writes it. |
