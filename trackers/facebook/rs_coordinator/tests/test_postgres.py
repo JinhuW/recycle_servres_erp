@@ -377,6 +377,18 @@ def test_search_cities_keep_one_row_per_worker_and_city(backend):
     assert rows[0]["last_at"] >= first
 
 
+def test_city_searches_append_in_order(backend):
+    backend.log_city_search("mw-1", "chicago", cards=120, opened=9, reviewed=3, alerted=1)
+    backend.log_city_search("nj-2b", "nyc")
+
+    rows = backend.city_searches_since("0")
+    assert [(r["worker_id"], r["city"], r["cards"], r["alerted"]) for r in rows] == [
+        ("mw-1", "chicago", 120, 1),
+        ("nj-2b", "nyc", 0, 0),
+    ]
+    assert backend.city_searches_since("9999") == []
+
+
 def test_status_changes_append_and_move_the_marker(backend):
     backend.upsert_worker("mw-1", status="ok", heartbeat=True)
     backend.log_status_changes(

@@ -58,6 +58,14 @@ def report_reviews(
     )
     if payload.search_city and payload.searches:
         deps.db.touch_search_city(worker_id, payload.search_city)
+        deps.db.log_city_search(
+            worker_id,
+            payload.search_city,
+            cards=payload.cards,
+            opened=payload.opened,
+            reviewed=payload.reviewed,
+            alerted=payload.alerted,
+        )
     return StatusResponse()
 
 

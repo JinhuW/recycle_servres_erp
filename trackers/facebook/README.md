@@ -762,6 +762,47 @@ The rule and the pins live in the coordinator's `city_tier_settings` and
 `GET/PUT /v1/city-tiers`, and `/v1/fleet` marks each city with its `per_day`,
 `pin` and `score`.
 
+**Shadow city queue.** The fleet is moving from fixed city lists to a queue
+workers pull from. Until workers ask it, the coordinator only replays what it
+would have done. Every search that names its city is logged in
+`city_searches`, with its cards, opened, reviewed and alerted counts.
+`POST /v1/queue/shadow` wakes each worker at its `start_at` times, but only
+while its status history says it was up. Each wake hands the worker cities
+through `city_queue.pick`. The report puts the result next to what the workers
+actually did: searches and browser minutes a day per account, redundant
+searches, cities unsearched for over 26 h, and overdue city-hours.
+
+The queue's rules, with their defaults:
+
+- **Due.** Only due cities are handed out. A city is due 0.85 of the way
+  through its tier interval, and the tiers are ranked over the whole catalog.
+- **Budget.** Each account gets 180 browser minutes per UTC day, and keeps
+  asking for 8 h after each `start_at`.
+- **Region.** A worker searches only regions where it or its IP partner (same
+  `proxy_env`) has home cities.
+- **Partners.**
+  - A worker never takes its partner's home cities or the cities its partner
+    searched in the last 7 days.
+  - It never starts while its partner is searching or finished less than
+    30 minutes ago.
+- **Order.** Home cities first, then cities the worker searched in the last
+  7 days, then the rest.
+- **Quarantine.** An account whose searches all return 0 cards, on cities
+  others get cards from, gets nothing.
+
+To read it on the VM:
+
+```bash
+docker exec rs-console python -m rs_console.queue_shadow             # last 3 days
+docker exec rs-console python -m rs_console.queue_shadow --days 7 --budget 240 --window 10
+docker exec rs-console python -m rs_console.queue_shadow --per-day 3,2,1 --json
+```
+
+What-if values change only that replay, never the stored settings. The log
+starts at the deploy that added it, and a window that reaches further back is
+marked partial. The design and the phases after this one are in
+[docs/superpowers/specs/2026-10-23-fleet-city-queue-design.md](../../docs/superpowers/specs/2026-10-23-fleet-city-queue-design.md).
+
 **It is built to be absorbed by the ERP.** The page is plain HTML/JS with no
 build step, and its markup uses the ERP's own tokens and classes (`card`,
 `kpi`, `chip`, `data-table`, `seg`), so moving it means adding a
