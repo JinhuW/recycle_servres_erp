@@ -431,6 +431,64 @@ describe('Worker cities (PUT /api/coordinator/workers/:id/cities)', () => {
   });
 });
 
+describe('City queue (PUT /api/coordinator/workers/:id/queue, /queue/everyone)', () => {
+  beforeEach(async () => {
+    await resetDb();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const PATH = '/api/coordinator/workers/nyc-1/queue';
+
+  it('requires a manager', async () => {
+    expect((await api('PUT', PATH, { body: { enrolled: true } })).status).toBe(401);
+    const { token } = await loginAs(MARCUS);
+    expect((await api('PUT', PATH, { token, body: { enrolled: true } })).status).toBe(403);
+    expect((await api('PUT', '/api/coordinator/queue/everyone', { token, body: { enrolled: true } })).status).toBe(403);
+  });
+
+  it('forwards only the switch, signed by the session', async () => {
+    const { token } = await loginAs(ALEX);
+    const spy = stubFacade(200, { worker_id: 'nyc-1', enrolled: true, everyone: false });
+    const r = await api<{ enrolled: boolean }>('PUT', PATH, {
+      token, env: ENV, body: { enrolled: true, updated_by: 'someone else', worker_id: 'ne-1' },
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.enrolled).toBe(true);
+    const [url, init] = spy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://facade.internal:8600/v1/workers/nyc-1/queue');
+    expect(init.method).toBe('PUT');
+    const sent = JSON.parse(init.body as string);
+    expect(Object.keys(sent).sort()).toEqual(['enrolled', 'updated_by']);
+    expect(sent.enrolled).toBe(true);
+    expect(sent.updated_by).not.toBe('someone else');
+
+    const everyone = stubFacade(200, { settings: { enrolled: ['*'] } });
+    expect((await api('PUT', '/api/coordinator/queue/everyone', { token, env: ENV, body: { enrolled: false } })).status).toBe(200);
+    const [everyoneUrl, everyoneInit] = everyone.mock.calls[0] as [string, RequestInit];
+    expect(everyoneUrl).toBe('http://facade.internal:8600/v1/queue/everyone');
+    expect(JSON.parse(everyoneInit.body as string).enrolled).toBe(false);
+  });
+
+  it('relays the coordinator refusing an older worker, and refuses a bad id or body', async () => {
+    const { token } = await loginAs(ALEX);
+    stubFacade(409, { detail: 'ne-1 runs 0.13.12 (96d9204); the queue needs 0.13.14 or later. Redeploy this worker first.' });
+    const r = await api<{ error: string }>('PUT', '/api/coordinator/workers/ne-1/queue', {
+      token, env: ENV, body: { enrolled: true },
+    });
+    expect(r.status).toBe(409);
+    expect(r.body.error).toMatch(/Redeploy this worker first/);
+
+    const spy = stubFacade(200, {});
+    expect((await api('PUT', '/api/coordinator/workers/a.b/queue', { token, env: ENV, body: { enrolled: true } })).status).toBe(400);
+    expect((await api('PUT', PATH, { token, env: ENV, body: { enrolled: 'yes' } })).status).toBe(400);
+    expect((await api('PUT', '/api/coordinator/queue/everyone', { token, env: ENV, body: {} })).status).toBe(400);
+    expect(spy).not.toHaveBeenCalled();
+  });
+});
+
 describe('City tiers (GET/PUT /api/coordinator/city-tiers)', () => {
   beforeEach(async () => {
     await resetDb();

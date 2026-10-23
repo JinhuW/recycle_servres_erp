@@ -18,6 +18,29 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Added
+
+- **The city queue is visible, and run, from the ERP** (RS-379).
+  - `/v1/fleet` now carries today's round (`queue`), with every catalog
+    city's state for each item: searched today, being searched, due, not due
+    yet, or held by a worker outside the queue. It also gives each worker's
+    part in it (`queue`): enrolled, able to pull, minutes used, cities handed
+    out, open leases, quarantined.
+  - Two console routes move workers in or out: `PUT /v1/workers/<id>/queue`
+    for one, and `PUT /v1/queue/everyone` for all.
+  - The ERP draws these on its Fleet tab and worker page.
+
+### Changed
+
+- **Only a worker that asks the queue counts as in it.** One enrolled on a
+  monitor older than 0.13.14 keeps its cities held, so enrolling everyone
+  while old images run never makes the pilots repeat their sweeps. The
+  coordinator refuses (409) to enroll such a worker by itself.
+- **The roster names the enabled items**, so a round shows before anyone has
+  searched today.
+- **`rsc queue status` counts the round by state** and flags enrolled
+  workers that never ask.
+
 ## [0.13.15] - 2026-10-23
 
 ### Changed

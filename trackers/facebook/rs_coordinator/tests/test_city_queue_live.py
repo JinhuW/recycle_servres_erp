@@ -271,13 +271,9 @@ ROSTER = {
 }
 
 
-def beat(client, wid, state="HEALTHY"):
-    assert (
-        client.post(
-            "/v1/heartbeat", json={"worker_id": wid, "state": state}, headers=LEGACY
-        ).status_code
-        == 200
-    )
+def beat(client, wid, state="HEALTHY", version="0.13.16 (test)"):
+    body = {"worker_id": wid, "state": state, "version": version}
+    assert client.post("/v1/heartbeat", json=body, headers=LEGACY).status_code == 200
 
 
 def ask(client, wid, item="server_ram", done=None, home=()):
@@ -333,9 +329,27 @@ def test_each_city_is_handed_out_once_and_a_held_one_never(client):
     assert ask(client, "nyc-1", item="enterprise_ssd", home=["nyc"])["city"]["slug"] == "nyc"
 
     status = client.get("/v1/queue/status", headers=ADMIN).json()
-    assert status["items"]["server_ram"]["searched_today"] == 3
-    assert status["items"]["server_ram"]["held"] == 1 and status["items"]["server_ram"]["due"] == 0
-    assert {w["worker_id"] for w in status["workers"]} >= {"homelab-1", "nyc-1"}
+    ram = status["items"]["server_ram"]
+    assert (ram["searched"], ram["held"], ram["due"], ram["leased"], ram["queue"]) == (
+        3,
+        1,
+        0,
+        0,
+        3,
+    )
+    by_city = {c["slug"]: c for c in status["cities"]}
+    assert by_city["boston"]["held_by"] == "ne-1"
+    assert by_city["boston"]["items"]["server_ram"]["state"] == "held"
+    assert by_city["reno"]["items"]["server_ram"]["state"] == "searched"
+    assert by_city["nyc"]["items"]["enterprise_ssd"] == {
+        "state": "leased",
+        "at": by_city["nyc"]["items"]["enterprise_ssd"]["at"],
+        "by": "nyc-1",
+    }
+    workers = {w["worker_id"]: w for w in status["workers"]}
+    assert workers["nyc-1"]["enrolled"] and workers["nyc-1"]["capable"]
+    assert workers["nyc-1"]["handed"][0] == "nyc" and workers["nyc-1"]["open"][0]["city"] == "nyc"
+    assert not workers["ne-1"]["enrolled"] and workers["ne-1"]["handed_today"] == 0
 
 
 def test_a_parked_worker_gives_its_city_back(client):
@@ -419,3 +433,97 @@ def test_an_existing_city_search_log_gains_its_item_column(tmp_path):
     db.log_city_search("ne-1", "nyc", cards=5, item="server_ram")
     rows = db.city_searches_since("0")
     assert [(r["city"], r["item"]) for r in rows] == [("boston", None), ("nyc", "server_ram")]
+
+
+# -- who can pull, and enrolling one worker ------------------------------------------
+
+
+def test_only_a_monitor_from_the_queue_on_can_pull():
+    assert city_queue.capable({"version": "0.13.14 (93e2566)"})
+    assert city_queue.capable({"version": "0.14.0"}) and city_queue.capable({"version": "1.0.0"})
+    assert not city_queue.capable({"version": "0.13.12 (96d9204)"})
+    assert not city_queue.capable({"version": "unknown (unknown)"})
+    assert not city_queue.capable({"version": None}) and not city_queue.capable(None)
+
+
+def test_an_enrolled_worker_on_an_old_monitor_keeps_its_cities():
+    now = T0 + 13 * HOUR
+    everyone = city_queue.validate_settings({"enrolled": ["*"]}, {})
+    rows = [
+        {
+            "worker_id": "ne-1",
+            "state": "HEALTHY",
+            "last_heartbeat_at": iso(now),
+            "version": "0.13.12",
+        },
+        {
+            "worker_id": "homelab-1",
+            "state": "HEALTHY",
+            "last_heartbeat_at": iso(now),
+            "version": "0.13.16",
+        },
+    ]
+    r = roster({"ne-1": {"home": ["boston", "nyc"]}, "homelab-1": {"home": ["miami"]}})
+    assert city_queue.held_by(r, everyone, rows, (), now) == {"boston": "ne-1", "nyc": "ne-1"}
+
+
+def test_the_round_names_each_city_state_before_anyone_searched():
+    now = T0 + 12 * HOUR
+    r = city_queue.validate_roster(
+        {"catalog": CATALOG, "items": ["server_ram"], "workers": {"ne-1": {"home": ["boston"]}}}
+    )
+    data = live(
+        r=r,
+        workers=[],
+        seeded=[{"worker_id": "x", "city": "reno", "last_at": iso(now - 20 * HOUR)}],
+    )
+    status = city_queue.queue_status(now, DEFAULTS, data)
+    assert list(status["items"]) == ["server_ram"]
+    states = {c["slug"]: c["items"]["server_ram"]["state"] for c in status["cities"]}
+    # ne-1 has no heartbeat, so boston is not held; reno was searched 20 h ago.
+    assert states == {"boston": "due", "nyc": "due", "miami": "due", "reno": "later"}
+    reno = next(c for c in status["cities"] if c["slug"] == "reno")["items"]["server_ram"]
+    assert reno["at"] == iso(now - 20 * HOUR + 0.85 * DAY) and reno["by"] == "x"
+    assert status["items"]["server_ram"]["queue"] == 4 and not status["everyone"]
+
+
+def test_a_roster_names_its_items():
+    r = city_queue.validate_roster({"catalog": [], "items": ["a", "b", "a"], "workers": {"w": {}}})
+    assert r.items == ["a", "b"] and r.dump()["items"] == ["a", "b"]
+    with pytest.raises(city_queue.QueueError):
+        city_queue.validate_roster({"catalog": [], "items": "a", "workers": {"w": {}}})
+
+
+def test_one_worker_goes_in_and_out_of_the_queue(client):
+    assert client.put("/v1/queue/roster", json=ROSTER, headers=ADMIN).status_code == 200
+    beat(client, "nyc-1")
+    beat(client, "ne-1", version="0.13.12 (96d9204)")
+    url = "/v1/workers/{}/queue"
+    assert (
+        client.put(url.format("nyc-1"), json={"enrolled": True}, headers=LEGACY).status_code == 401
+    )
+    assert (
+        client.put(url.format("nyc-1"), json={"enrolled": "yes"}, headers=ADMIN).status_code == 422
+    )
+
+    old = client.put(url.format("ne-1"), json={"enrolled": True}, headers=ADMIN)
+    assert (
+        old.status_code == 409
+        and "0.13.12" in old.json()["detail"]
+        and "Redeploy" in old.json()["detail"]
+    )
+    never = client.put(url.format("ghost"), json={"enrolled": True}, headers=ADMIN)
+    assert never.status_code == 409 and "an unknown version" in never.json()["detail"]
+
+    res = client.put(
+        url.format("nyc-1"), json={"enrolled": True, "updated_by": "Alex"}, headers=ADMIN
+    )
+    assert res.json() == {"worker_id": "nyc-1", "enrolled": True, "everyone": False}
+    stored = client.deps.db.queue_config("settings")
+    assert stored["body"] == {"enrolled": ["nyc-1"]} and stored["updated_by"] == "Alex"
+
+    # Out of "every worker": the others are named instead.
+    client.put("/v1/queue/settings", json={"enrolled": ["*"]}, headers=ADMIN)
+    out = client.put(url.format("nyc-1"), json={"enrolled": False}, headers=ADMIN).json()
+    assert out == {"worker_id": "nyc-1", "enrolled": False, "everyone": False}
+    assert client.deps.db.queue_config("settings")["body"]["enrolled"] == ["homelab-1", "ne-1"]

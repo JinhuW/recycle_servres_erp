@@ -327,6 +327,38 @@ coordinator.put('/workers/:id/cities', async (c) => {
   });
 });
 
+// ── The city queue ───────────────────────────────────────────────────────────
+// Whether a worker takes its cities from the coordinator's queue or searches
+// its own list. The coordinator refuses (409) a worker whose monitor never
+// asks the queue, and that message is what the manager reads.
+coordinator.put('/workers/:id/queue', async (c) => {
+  const id = c.req.param('id');
+  if (!WORKER_ID.test(id)) return c.json({ error: 'Not a valid worker id' }, 400);
+  const raw: unknown = await c.req.json().catch(() => null);
+  if (!isObject(raw) || typeof raw.enrolled !== 'boolean') {
+    return c.json({ error: 'Expected {enrolled: true|false}' }, 400);
+  }
+  log.info('fleet worker queue set', {
+    module: 'coordinator', workerId: id, enrolled: raw.enrolled, by: c.var.user.email,
+  });
+  return forward(c, 'PUT', `/v1/workers/${encodeURIComponent(id)}/queue`, {
+    enrolled: raw.enrolled, updated_by: c.var.user.name || c.var.user.email,
+  });
+});
+
+coordinator.put('/queue/everyone', async (c) => {
+  const raw: unknown = await c.req.json().catch(() => null);
+  if (!isObject(raw) || typeof raw.enrolled !== 'boolean') {
+    return c.json({ error: 'Expected {enrolled: true|false}' }, 400);
+  }
+  log.info('fleet queue set for every worker', {
+    module: 'coordinator', enrolled: raw.enrolled, by: c.var.user.email,
+  });
+  return forward(c, 'PUT', '/v1/queue/everyone', {
+    enrolled: raw.enrolled, updated_by: c.var.user.name || c.var.user.email,
+  });
+});
+
 // ── How often cities are searched ────────────────────────────────────────────
 // The tier settings and pins behind each city's searches a day. The
 // coordinator validates the values; this side only narrows the body to the

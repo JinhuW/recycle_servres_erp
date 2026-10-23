@@ -266,3 +266,32 @@ def test_the_console_pushes_at_startup_and_again_after_a_cities_save(monkeypatch
     assert len(pushes) == 2 and console._roster_wake is None
     # Without the loop (no lifespan), a save has nobody to wake.
     console._push_roster_soon()
+
+
+def test_the_roster_names_the_enabled_items():
+    doc = {**DOC, "items": [{"name": "server_ram", "enabled": True}, {"name": "gpu", "enabled": False},
+                            {"name": "enterprise_ssd"}]}
+    assert queue_shadow.roster(doc)["items"] == ["server_ram", "enterprise_ssd"]
+
+
+def test_one_worker_and_everyone_go_in_and_out_of_the_queue(client):
+    assert client.put("/v1/workers/nyc-1/queue", json={"enrolled": True}).status_code == 401
+    assert client.put("/v1/workers/nyc-1/queue", json={"enrolled": "yes"}, headers=AUTH).status_code == 400
+    res = client.put(
+        "/v1/workers/nyc-1/queue",
+        json={"enrolled": True, "updated_by": " Alex ", "worker_id": "evil"},
+        headers=AUTH,
+    )
+    assert res.status_code == 200
+    (call,) = client.calls
+    assert (call.method, call.url.path) == ("PUT", "/v1/workers/nyc-1/queue")
+    assert json.loads(call.content) == {"enrolled": True, "updated_by": "Alex"}
+
+    client.calls.clear()
+    assert client.put("/v1/queue/everyone", json={"enrolled": True}, headers=AUTH).status_code == 200
+    client.put("/v1/queue/everyone", json={"enrolled": False, "updated_by": "Alex"}, headers=AUTH)
+    first, second = client.calls
+    assert (first.method, first.url.path) == ("PUT", "/v1/queue/settings")
+    assert json.loads(first.content) == {"enrolled": ["*"], "updated_by": None}
+    assert json.loads(second.content) == {"enrolled": [], "updated_by": "Alex"}
+    assert client.put("/v1/queue/everyone", json=[1], headers=AUTH).status_code == 400

@@ -4,8 +4,8 @@
 // Kept out of the components so they can be unit-tested without React.
 
 import type {
-  AlertHitRow, Challenge, CityTierSettings, CityWrite, FleetAccount, FleetCity, FleetDoc, LedgerLogin, ReviewStatsDay,
-  SearchSettingsWrite, StatusChange,
+  AlertHitRow, Challenge, CityTierSettings, CityWrite, FleetAccount, FleetCity, FleetDoc, FleetQueue, LedgerLogin,
+  QueueCityState, QueueItemCounts, ReviewStatsDay, SearchSettingsWrite, StatusChange,
 } from './coordinator';
 import type { FbWorkerStint } from './facebookPool';
 import { ruleLines } from './keywordRules';
@@ -850,4 +850,74 @@ export function keysymsFor(text: string): number[] {
     out.push(cp <= 0xff ? cp : 0x01000000 + cp);
   }
   return out;
+}
+
+// ── The city queue ───────────────────────────────────────────────────────────
+
+export type RoundCell = {
+  slug: string;
+  name: string;
+  state: QueueCityState;
+  at: string | null;
+  by: string | null;
+};
+
+// The board reads left to right as the round does: done, under way, left to
+// do, not due yet, then the cities workers outside the queue keep.
+const ROUND_ORDER: Record<QueueCityState, number> = { searched: 0, leased: 1, due: 2, later: 3, held: 4 };
+
+/** One item's round: every city in board order, and the counts. */
+export function queueRound(queue: FleetQueue, item: string): { cells: RoundCell[]; counts: QueueItemCounts } {
+  const cells: RoundCell[] = queue.cities.map(c => {
+    const at = c.items[item] ?? { state: 'due' as const, at: null, by: null };
+    return { slug: c.slug, name: c.name ?? c.slug, state: at.state, at: at.at, by: at.by };
+  });
+  cells.sort((a, b) => ROUND_ORDER[a.state] - ROUND_ORDER[b.state] || a.name.localeCompare(b.name));
+  const tally = (state: QueueCityState) => cells.filter(c => c.state === state).length;
+  const counts = queue.items[item] ?? {
+    cities: cells.length,
+    queue: cells.length - tally('held'),
+    searched: tally('searched'),
+    leased: tally('leased'),
+    due: tally('due'),
+    later: tally('later'),
+    held: tally('held'),
+  };
+  return { cells, counts };
+}
+
+export type QueueSummary = {
+  workers: number;
+  // Enrolled and on a monitor that asks the queue.
+  pulling: number;
+  // Enrolled but on an older monitor, so still searching its own list.
+  waiting: number;
+  // Workers on an older monitor, enrolled or not.
+  older: number;
+  everyone: boolean;
+};
+
+/** Who takes their cities from the queue; null without a queue. */
+export function queueSummary(fleet: FleetDoc): QueueSummary | null {
+  if (!fleet.queue) return null;
+  let pulling = 0, waiting = 0, older = 0;
+  for (const w of fleet.workers) {
+    const q = w.queue;
+    if (!q) continue;
+    if (!q.capable) older += 1;
+    if (q.enrolled && q.capable) pulling += 1;
+    else if (q.enrolled) waiting += 1;
+  }
+  return { workers: fleet.workers.length, pulling, waiting, older, everyone: fleet.queue.everyone };
+}
+
+/** An enrolled worker's cities today: its own list, and what the queue handed it on top. */
+export function queueCitiesToday(w: FleetAccount): { home: FleetCity[]; fromQueue: string[] } {
+  const own = new Set(w.cities.map(c => c.slug));
+  return { home: w.cities, fromQueue: (w.queue?.handed ?? []).filter(slug => !own.has(slug)) };
+}
+
+/** The city name the queue knows for a slug, else the slug. */
+export function queueCityName(fleet: FleetDoc | null, slug: string): string {
+  return fleet?.queue?.cities.find(c => c.slug === slug)?.name ?? slug;
 }

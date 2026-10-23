@@ -213,6 +213,9 @@ export type FleetAccount = {
   // Whether the console holds this worker's config and so can save its
   // cities; absent from a facade that predates per-worker cities.
   cities_editable?: boolean;
+  // Its part in the city queue: null against a coordinator that predates the
+  // queue, absent from a facade that does.
+  queue?: FleetQueueWorker | null;
   // The sweep times (UTC) the worker's own config runs. They differ from the
   // fleet's for an account that shares an IP. Absent from an older facade.
   start_at?: string[] | null;
@@ -287,6 +290,63 @@ export type FleetDoc = {
   // The week's status changes, newest first. null when the coordinator
   // predates its status log; absent from a facade that predates the field.
   status_changes?: StatusChange[] | null;
+  // Today's city round. null against a coordinator that predates the queue,
+  // absent from a facade that does.
+  queue?: FleetQueue | null;
+};
+
+// Where a city stands in today's round, for one item: being searched now
+// (`leased`), on the own list of a live worker outside the queue (`held`),
+// searched today, not due again until `at` (`later`), or due.
+export type QueueCityState = 'leased' | 'held' | 'searched' | 'later' | 'due';
+
+export type FleetQueueCity = {
+  slug: string;
+  name: string | null;
+  region: string | null;
+  // The workers whose own lists hold this city.
+  home: string[];
+  held_by: string | null;
+  // Per item. `at` is the search (or the lease) for searched/leased/held and
+  // due, and when it falls due for later; `by` is the worker.
+  items: Record<string, { state: QueueCityState; at: string | null; by: string | null }>;
+};
+
+export type QueueItemCounts = {
+  cities: number;
+  queue: number;
+  searched: number;
+  leased: number;
+  due: number;
+  later: number;
+  held: number;
+};
+
+export type FleetQueue = {
+  at: string;
+  // Every worker is enrolled ("*").
+  everyone: boolean;
+  settings: { enrolled: string[]; per_day: number | null; budget_minutes: number; window_hours: number };
+  items: Record<string, QueueItemCounts>;
+  cities: FleetQueueCity[];
+  quarantined: string[];
+  roster_updated_at: string | null;
+};
+
+// One worker's part in the queue. `capable` is whether its monitor asks the
+// queue at all (0.13.14 or later); an enrolled worker that is not still
+// searches its own list.
+export type FleetQueueWorker = {
+  worker_id: string;
+  enrolled: boolean;
+  capable: boolean;
+  version: string | null;
+  quarantined: boolean;
+  minutes_today: number;
+  budget_minutes: number;
+  handed_today: number;
+  handed: string[];
+  open: { item: string; city: string; leased_at: string }[];
 };
 
 // One change the coordinator logged: the `state` a worker reported moving
@@ -381,6 +441,17 @@ export const coordinatorApi = {
     api.put<{ cities: CityWrite[]; changed: string[] }>(
       `/api/coordinator/workers/${encodeURIComponent(workerId)}/cities`, { cities },
     ),
+
+  // Put one worker in the city queue or take it out. The coordinator refuses
+  // (409) a worker whose monitor never asks the queue.
+  setWorkerQueue: (workerId: string, enrolled: boolean) =>
+    api.put<{ worker_id: string; enrolled: boolean; everyone: boolean }>(
+      `/api/coordinator/workers/${encodeURIComponent(workerId)}/queue`, { enrolled },
+    ),
+
+  // Every worker takes its cities from the queue, or none does.
+  setEveryoneQueue: (enrolled: boolean) =>
+    api.put<unknown>('/api/coordinator/queue/everyone', { enrolled }),
 
   // How often cities are searched. Pins replace the whole map, so a caller
   // re-reads it just before saving and applies only its own edits.

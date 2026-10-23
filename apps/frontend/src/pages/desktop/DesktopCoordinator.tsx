@@ -19,6 +19,7 @@ import { FacebookAccountPool } from './FacebookAccountPool';
 import { FormSkeleton } from '../../components/Skeleton';
 import { HITS_DAYS } from './FleetAccounts';
 import { FlowCard } from './FleetFlow';
+import { RoundCard } from './FleetQueue';
 import { ActivityAside, FleetLegend, WorkersCard } from './FleetWorkers';
 
 // The viewer carries noVNC; it is its own chunk, fetched only when a manager
@@ -186,6 +187,7 @@ function FleetPage({ head, tabs }: { head: React.ReactNode; tabs: React.ReactNod
         </div>
       ) : (
         <>
+          <RoundCard fleet={fleet} onSaved={load} />
           <FleetLegend counts={counts} loading={!fleet && !fleetUnavailable} filter={filter} onFilter={setFilter} />
           <div className="fp-split ff-split">
             <WorkersCard fleet={fleet} unavailable={fleetUnavailable} hits={hits} challenges={challenges} marks={marks}

@@ -951,11 +951,15 @@ def cmd_queue_status(args: argparse.Namespace) -> int:
         print("no item searched or handed out in the last two days")
     for item, row in status["items"].items():
         print(
-            f"  {item:<16} {row['searched_today']:>3}/{row['cities']} searched today, "
-            f"{row['leased']} leased now, {row['due']} due, {row['held']} held by workers outside"
+            f"  {item:<16} {row['searched']:>3}/{row['queue']} queue cities searched today, "
+            f"{row['leased']} leased now, {row['due']} due, {row['later']} due later; "
+            f"{row['held']} held by workers outside"
         )
     for w in status["workers"]:
+        if not w["enrolled"] and not w["handed_today"]:
+            continue
         flags = "" if w["enrolled"] else " (not enrolled)"
+        flags += "" if w["capable"] else f" (runs {w['version'] or 'no version'}, never asks)"
         flags += " QUARANTINED" if w["quarantined"] else ""
         leases = ", ".join(f"{o['item']}:{o['city']}" for o in w["open"]) or "-"
         print(

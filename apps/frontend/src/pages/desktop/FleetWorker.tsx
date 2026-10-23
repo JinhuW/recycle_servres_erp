@@ -21,6 +21,7 @@ import { useT } from '../../lib/i18n';
 import { hrefFor, onLinkClick } from '../../lib/route';
 import { BuildChip, CityChip, EditCredentialsButton, fmtDays, HITS_DAYS, ReloginButton, WatchButton } from './FleetAccounts';
 import { EditCitiesButton } from './FleetCities';
+import { QueueButton, QueueField } from './FleetQueue';
 import { eventDetail, ProxyDeadChip, StatusChip, statusNote } from './FleetWorkers';
 import '../../styles/facebookPool.css';
 
@@ -109,6 +110,7 @@ export function FleetWorker({ workerId }: { workerId: string }) {
   const muted = (text: string) => <span className="fp-muted">{text}</span>;
   const initials = name.replace(/[^a-z0-9]/gi, ' ').trim().split(/\s+/).map(p => p[0]).join('').slice(0, 2).toUpperCase() || '?';
 
+  const citiesLabel = w.queue?.enrolled && w.queue.capable ? t('fbcQueueHomeLabel') : t('fbcColCities');
   const fields: Array<[string, ReactNode]> = [
     [t('fbcDetailFbLogin'), who.login ?? muted(t('fbcNotInVault'))],
     [t('fbcDetailFbUser'), who.userId
@@ -127,7 +129,9 @@ export function FleetWorker({ workerId }: { workerId: string }) {
       <ProxyExit worker={w} />
       {mark && <ProxyMarkNote mark={mark} onRevived={setMarks} />}
     </>],
-    [t('fbcColCities'), w.cities.length
+    ...(w.queue ? [[t('fbcQueueField'), <QueueField worker={w} fleet={fleet} />] as [string, ReactNode]] : []),
+    // An enrolled worker's own list is only where the queue starts it.
+    [citiesLabel, w.cities.length
       ? <span className="fl-cities ff-wrap-cell">{w.cities.map(c => <CityChip key={c.slug} city={c} hits={byCity} terms={[]} tone={searched(c.slug) ? 'accent' : 'muted'} runsPerDay={w.plan?.runs_per_day} />)}</span>
       : muted(t('fbcNoCities'))],
     [t('fbcFoldPacing'), pace],
@@ -169,7 +173,7 @@ export function FleetWorker({ workerId }: { workerId: string }) {
               </div>
               <dl className="fp-fields">
                 {fields.map(([k, v]) => (
-                  <div key={k}><dt>{k}</dt><dd className={k === t('fbcColCities') ? 'ff-wrap-cell' : undefined}>{v}</dd></div>
+                  <div key={k}><dt>{k}</dt><dd className={k === citiesLabel || k === t('fbcQueueField') ? 'ff-wrap-cell' : undefined}>{v}</dd></div>
                 ))}
               </dl>
               <div className="fp-credential-foot">
@@ -182,6 +186,7 @@ export function FleetWorker({ workerId }: { workerId: string }) {
                   {h && <ReloginButton workerId={w.worker_id} account={w} className="btn" onQueued={load} offerWatch={canWatch(w)} />}
                   <EditCredentialsButton account={w} onSaved={load} className="btn" />
                   {w.cities_editable && <EditCitiesButton worker={w} fleet={fleet} onSaved={load} />}
+                  <QueueButton worker={w} onSaved={load} />
                 </div>
               </div>
             </div>

@@ -6,8 +6,8 @@ import { SortTh, type SortState } from '../../components/SortTh';
 import type { AlertHitRow, Challenge, FleetAccount, FleetDoc } from '../../lib/coordinator';
 import {
   accountAlerts, accountHaystack, attentionReason, dayStrip, FLEET_STATUSES, fleetActivity, fleetPostsToday, fleetStatus,
-  hitsByCity, isUnstampedBuild, matchesTerms, parkedWorkers, proxyPort, queryTerms, searchedToday,
-  sharedExits, sortFleet, whoIs,
+  hitsByCity, isUnstampedBuild, matchesTerms, parkedWorkers, proxyPort, queueCitiesToday, queryTerms, queueCityName,
+  searchedToday, sharedExits, sortFleet, whoIs,
   type CityHits, type DayStrip, type FleetEvent, type FleetSortCol, type FleetStatus,
 } from '../../lib/fleetView';
 import { relTime } from '../../lib/format';
@@ -17,6 +17,7 @@ import type { Translate } from '../../lib/orderPresentation';
 import { proxyMarkFor, type FbProxyMark } from '../../lib/facebookPool';
 import { fleetWorkerPath, hrefFor, onLinkClick } from '../../lib/route';
 import { CityChip, fmtDays, Hi, HITS_DAYS, stateLabel } from './FleetAccounts';
+import { QueueChip } from './FleetQueue';
 import '../../styles/facebookPool.css';
 
 // ─── Fleet list ───────────────────────────────────────────────────────────────
@@ -166,7 +167,7 @@ export function WorkersCard({ fleet, unavailable, hits, challenges, marks, filte
           </thead>
           <tbody>
             {shown.map(w => (
-              <WorkerRow key={w.worker_id} account={w} hits={byCity} parked={parked} terms={terms} startAt={startAt}
+              <WorkerRow key={w.worker_id} account={w} fleet={fleet} hits={byCity} parked={parked} terms={terms} startAt={startAt}
                 shared={!!w.proxy && (exits.get(w.proxy.url ?? '') ?? 0) > 1} mark={proxyMarkFor(marks, w)}
                 open={open.has(w.worker_id)} onToggle={() => toggle(w.worker_id)} locale={locale} />
             ))}
@@ -251,8 +252,9 @@ export function ProxyDeadChip({ mark }: { mark: FbProxyMark }) {
   return <span className="chip neg" title={t('fbcProxyDeadHint', { n: mark.failed, since })}>{t('fbcProxyDead')}</span>;
 }
 
-function WorkerRow({ account: w, hits, parked, terms, startAt, shared, mark, open, onToggle, locale }: {
+function WorkerRow({ account: w, fleet, hits, parked, terms, startAt, shared, mark, open, onToggle, locale }: {
   account: FleetAccount;
+  fleet: FleetDoc | null;
   hits: Map<string, CityHits>;
   parked: ReadonlySet<string>;
   terms: readonly string[];
@@ -276,6 +278,9 @@ function WorkerRow({ account: w, hits, parked, terms, startAt, shared, mark, ope
   const plan = w.plan;
   const build = h?.version && !isUnstampedBuild(h.version) ? h.version : null;
   const searched = searchedToday(w, status);
+  // Bounded by its budget, not its list: a worker the queue hands cities to.
+  const pulling = Boolean(w.queue?.enrolled && w.queue.capable);
+  const fromQueue = pulling ? queueCitiesToday(w).fromQueue : [];
 
   return (
     <Fragment>
@@ -296,7 +301,7 @@ function WorkerRow({ account: w, hits, parked, terms, startAt, shared, mark, ope
         <td className="ff-exit"><ProxyCell worker={w} shared={shared} mark={mark} terms={terms} /></td>
         <td className="ff-wrap">
           <span className="fp-holder">
-            <span><StatusChip status={status} /></span>
+            <span className="ff-status-chips"><StatusChip status={status} /><QueueChip worker={w} /></span>
             {note && <small className={status === 'attention' || status === 'offline' ? 'fp-warn' : ''}>{note}</small>}
             {beat && <small className="fp-muted" title={new Date(beat).toLocaleString(locale)}>
               {t('fbcHeartbeatAge', { age: relTime(beat, locale) })}</small>}
@@ -310,7 +315,9 @@ function WorkerRow({ account: w, hits, parked, terms, startAt, shared, mark, ope
             : <span className="fp-muted" title={t('fbcTodayUnknown')}>—</span>}
         </td>
         <td>
-          <SearchRing done={strip?.searches ?? null} budget={strip?.budget ?? plan?.per_day ?? null} />
+          {pulling && w.queue
+            ? <SearchRing done={w.queue.minutes_today} budget={w.queue.budget_minutes} minutes />
+            : <SearchRing done={strip?.searches ?? null} budget={strip?.budget ?? plan?.per_day ?? null} />}
         </td>
         <td title={h?.session_expiry ?? undefined}
           className={days === null ? 'fp-muted' : days <= 7 ? 'fp-warn' : 'fp-ok'}>
@@ -334,13 +341,22 @@ function WorkerRow({ account: w, hits, parked, terms, startAt, shared, mark, ope
       {open && (
         <tr className="ff-fold">
           <td colSpan={9}>
-            <div className="fp-section-label">{t('fbcFoldCities', { n: w.cities.length })}</div>
+            <div className="fp-section-label">
+              {t(pulling ? 'fbcQueueHomeCities' : 'fbcFoldCities', { n: w.cities.length })}
+            </div>
             <div className="fl-cities">
               {w.cities.length
                 ? w.cities.map(c => <CityChip key={c.slug} city={c} hits={hits} terms={terms}
                     tone={searched(c.slug) ? 'accent' : 'muted'} runsPerDay={w.plan?.runs_per_day} />)
                 : <span className="fp-muted">{t('fbcNoCities')}</span>}
             </div>
+            {fromQueue.length > 0 && <>
+              <div className="fp-section-label">{t('fbcQueueFromQueue', { n: fromQueue.length })}</div>
+              <div className="fl-cities">
+                {fromQueue.map(slug => <CityChip key={slug} hits={hits} terms={terms} tone="accent"
+                  city={{ slug, name: queueCityName(fleet, slug), radius_km: null }} />)}
+              </div>
+            </>}
           </td>
         </tr>
       )}
@@ -374,7 +390,9 @@ function DayBar({ strip, status }: { strip: DayStrip; status: FleetStatus }) {
 
 // Done against the day's budget. Amber once the budget is met — the sweep is
 // over for the day — and a dash when the monitor does not report searches.
-function SearchRing({ done, budget }: { done: number | null; budget: number | null }) {
+// With `minutes`, the same ring counts browser minutes against a queue
+// worker's daily budget instead.
+function SearchRing({ done, budget, minutes = false }: { done: number | null; budget: number | null; minutes?: boolean }) {
   const { t } = useT();
   const r = 8;
   const c = 2 * Math.PI * r;
@@ -382,7 +400,7 @@ function SearchRing({ done, budget }: { done: number | null; budget: number | nu
   const tone = done === null || done === 0 ? 'idle' : budget !== null && done >= budget ? 'full' : 'part';
   const title = done === null
     ? t('fbcSearchesUnknown')
-    : budget !== null ? t('fbcSearchesOf', { done, budget }) : undefined;
+    : budget !== null ? t(minutes ? 'fbcQueueMinutesOf' : 'fbcSearchesOf', { done, budget }) : undefined;
   return (
     <span className={`ff-searches ff-ring-${tone}`} title={title}>
       <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden>
@@ -392,7 +410,8 @@ function SearchRing({ done, budget }: { done: number | null; budget: number | nu
             strokeDasharray={`${frac * c} ${c}`} transform="rotate(-90 11 11)" />
         )}
       </svg>
-      <span className="mono"><b>{done ?? '—'}</b>{budget !== null && <span className="ff-ring-of">/{budget}</span>}</span>
+      <span className="mono"><b>{done ?? '—'}</b>{budget !== null && <span className="ff-ring-of">/{budget}</span>}
+        {minutes && <span className="ff-ring-of"> {t('fbcQueueMin')}</span>}</span>
     </span>
   );
 }

@@ -149,6 +149,7 @@ def client(monkeypatch, tmp_path):
         "cities": httpx.Response(200, json={"rows": []}),
         "changes": httpx.Response(200, json={"rows": []}),
         "rank": httpx.Response(404, json={"detail": "Not Found"}),
+        "queue": httpx.Response(404, json={"detail": "Not Found"}),
     }
 
     async def fake_transport(request):
@@ -158,6 +159,8 @@ def client(monkeypatch, tmp_path):
             return httpx.Response(200, json={"status": "ok", "version": "0.5.6"})
         if path == "/v1/city-tiers/rank":
             return upstream["rank"]
+        if path == "/v1/queue/status":
+            return upstream["queue"]
         if path == "/v1/stats/search-cycles":
             return upstream["cycles"]
         if path == "/v1/stats/reviews/workers":
@@ -426,6 +429,44 @@ def test_fleet_marks_each_city_with_how_often_it_is_searched(client):
     assert doc["city_tiers"]["per_day"] == [3, 2, 1]
     wc = next(w for w in doc["workers"] if w["worker_id"] == "wc-1")
     assert all("per_day" not in c for c in wc["cities"])
+
+
+QUEUE_STATUS = {
+    "at": "2026-10-24T14:00:00+00:00",
+    "everyone": False,
+    "settings": {"enrolled": ["se-1"], "per_day": 1, "budget_minutes": 360, "window_hours": 8,
+                 "lease_minutes": 30, "regions": "any"},
+    "items": {"server_ram": {"cities": 2, "queue": 2, "searched": 1, "leased": 1, "due": 0,
+                             "later": 0, "held": 0}},
+    "cities": [{"slug": "dc", "name": "Washington, DC", "region": "rs_southeast", "home": ["se-1"],
+                "held_by": None, "items": {"server_ram": {"state": "searched",
+                                                          "at": "2026-10-24T13:10:00+00:00", "by": "se-1"}}}],
+    "workers": [{"worker_id": "se-1", "enrolled": True, "capable": True, "version": "0.13.16",
+                 "quarantined": False, "minutes_today": 42, "budget_minutes": 360, "handed_today": 2,
+                 "handed": ["dc", "miami"], "open": [{"item": "server_ram", "city": "miami",
+                                                       "leased_at": "2026-10-24T13:55:00+00:00"}]}],
+    "quarantined": [],
+    "roster_updated_at": "2026-10-24T13:50:00+00:00",
+}
+
+
+def test_fleet_carries_todays_round_and_each_workers_part(client):
+    client.upstream["queue"] = httpx.Response(200, json=QUEUE_STATUS)
+    doc = client.get("/v1/fleet", headers=AUTH).json()
+    queue = doc["queue"]
+    assert queue["settings"] == {"enrolled": ["se-1"], "per_day": 1, "budget_minutes": 360,
+                                 "window_hours": 8}
+    assert queue["items"]["server_ram"]["searched"] == 1 and queue["cities"][0]["slug"] == "dc"
+    assert queue["everyone"] is False and queue["roster_updated_at"] == "2026-10-24T13:50:00+00:00"
+    se = next(w for w in doc["workers"] if w["worker_id"] == "se-1")
+    assert se["queue"]["minutes_today"] == 42 and se["queue"]["open"][0]["city"] == "miami"
+    wc = next(w for w in doc["workers"] if w["worker_id"] == "wc-1")
+    assert wc["queue"] is None
+
+
+def test_fleet_queue_is_null_against_an_older_coordinator(client):
+    doc = client.get("/v1/fleet", headers=AUTH).json()
+    assert doc["queue"] is None and all(w["queue"] is None for w in doc["workers"])
 
 
 def test_fleet_leaves_cities_unmarked_against_an_older_coordinator(client):

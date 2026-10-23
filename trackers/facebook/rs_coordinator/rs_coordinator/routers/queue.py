@@ -92,6 +92,27 @@ def next_city(
     return answer
 
 
+@router.put("/v1/workers/{worker_id}/queue", dependencies=[Depends(require_admin)])
+def put_worker_queue(worker_id: str, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """Put one worker in the queue or take it out. 409 for a worker whose
+    monitor never asks the queue, because enrolling it would only free its
+    cities to the others."""
+    on = body.get("enrolled")
+    if not isinstance(on, bool):
+        raise HTTPException(status_code=422, detail="enrolled is true or false")
+    by = body.get("updated_by") if isinstance(body.get("updated_by"), str) else None
+    with _handout:
+        try:
+            settings = city_queue.enroll(deps.db, worker_id, on, by)
+        except city_queue.NotCapable as e:
+            raise HTTPException(status_code=409, detail=str(e)) from e
+    return {
+        "worker_id": worker_id,
+        "enrolled": city_queue.enrolled(worker_id, settings),
+        "everyone": city_queue.EVERY_WORKER in settings["enrolled"],
+    }
+
+
 @router.put("/v1/queue/roster", dependencies=[Depends(require_admin)])
 def put_roster(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     """The console's roster: the catalog and each worker's home cities."""

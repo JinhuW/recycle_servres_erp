@@ -2967,6 +2967,34 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   count and whether it is pinned. Saving restarts no sweep: workers ask the
   coordinator for their plan before each one. Pacing still lives in
   `fleet.toml`.
+
+  **The city queue.** Since v1.328.0 (RS-379) the Fleet tab opens with
+  **Today's round**: the city queue workers can pull their cities from
+  (facebook-tracker 0.13.14, RS-372) instead of walking their own lists.
+  - **The board.** It has one mark per city for each search item, in the
+    order the round runs: searched today, being searched now, still due, not
+    due yet, and one hatched count for the cities still on a worker's own
+    list. Under each item a sentence gives the counts, or says the round is
+    done. A **Cities** table names each queue city's state, time and worker.
+  - **The lede.** It says how many workers pull, how many are enrolled but
+    still run a monitor older than 0.13.14 (they keep their lists until
+    redeployed), and how many search their own lists. It also states the
+    stored rules: once a day per item, up to 6 h of searching per account,
+    within 8 h of each start time.
+  - **Everyone at once.** **Move every worker to the queue**, or **Send every
+    worker back to its own list**, asks for confirmation first and says how
+    many still run an older worker.
+  - **The workers table.** An enrolled worker carries a **Queue** chip by its
+    status (amber "needs update" when its monitor never asks). Its Searches
+    ring counts minutes of searching against its budget, and its fold adds
+    the cities the queue handed it today.
+  - **The worker page.** It has a **City queue** row: in the queue or not,
+    minutes used, cities handed out, the city being searched now, or
+    quarantined when its searches find nothing where other accounts find
+    listings. Its cities row reads **Home cities** when it is enrolled.
+    **Move to the queue** / **Back to its own list** moves one worker, and is
+    disabled, with the reason, for a worker on an older monitor.
+  - **Older consoles.** Against an older console none of this shows.
 - **Facebook account pool** — a second tab at **Monitors ▸ Facebook**,
   linked directly at `/#/fleet/pool` (v1.261.0). Managers see a status legend
   with counts that filters (the key-tag rail left the manager's view in
