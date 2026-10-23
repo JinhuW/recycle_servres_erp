@@ -2,12 +2,12 @@
 id: RS-365
 title: Mark a proxy DEAD after its 5th failed account, and keep each worker's account history
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-10-23
 reporter: jinhu
 branch: JinhuW/rasbora
-pr:
+pr: 842
 version: 1.319.0
 related: []
 ---
