@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.13.16] - 2026-10-23
+
 ### Added
 
 - **The city queue is visible, and run, from the ERP** (RS-379).
